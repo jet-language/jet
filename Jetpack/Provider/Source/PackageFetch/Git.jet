@@ -59,8 +59,8 @@ pkg_fetch_git_transport: fn(root: String, url: String) -[FS, Env, Net, Time.Wait
         }
         return Ok(PackageFetchGitTransport{network: None, local: Val(source), remote: remote})
     }
-    scheme := ""
-    authority := ""
+    ^scheme: ""
+    ^authority: ""
     if url.split_once("://") == .Val(pair) {
         scheme = pair.before.to_ascii_lower()
         authority = pair.after
@@ -109,7 +109,7 @@ pkg_fetch_git_transport: fn(root: String, url: String) -[FS, Env, Net, Time.Wait
 }
 
 pkg_fetch_git_command: fn(transport: PackageFetchGitTransport) -[FS, Env, Exec]> ProcessSpec PackageFetchError! {
-    spec := if transport.network == .Val(network) -> network.command() else -> foundation_hardened_git_command()
+    ^spec: if transport.network == .Val(network) -> network.command() else -> foundation_hardened_git_command()
     if transport.local == .Val(source) {
         spec = source.process_directory(spec, 199, false) ?? return Err(pkg_fetch_git_bad("could not retain local Git descriptor: {err}"))
     }
@@ -188,7 +188,7 @@ pkg_fetch_git_node: fn(verification: StoreVerification, roots: HangarRoots, cont
     if !provider_git_available() {
         return Err(pkg_fetch_git_bad("git is not installed or is not on PATH"))
     }
-    revision := String?{None}
+    ^revision: String?{None}
     if selector == .Rev(value) {
         pkg_fetch_git_revision(value, true)
         revision = Val(value)

@@ -109,7 +109,7 @@ ssl_tls13_psa_ecp_error: fn(e: ecp.EcpError) -> ssldefs.SSLError Never! {
 /// (ssl_tls13_hkdf_encode_label).
 ssl_tls13_hkdf_encode_label: fn(desired_length: Int, label: [U8], ctx: [U8]) -> [U8] Never! {
     prefix: "tls13 ".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     ssldefs.ssl_push_u16(out, desired_length)
     out.push(ssldefs.ssl_byte(prefix.len() + label.len()))
     out.extend(prefix)
@@ -136,7 +136,7 @@ ssl_tls13_expand_label_check: fn(md: hashes.Md, secret_len: Int, label: [U8], ct
 /// HKDF-Expand-Label's output, once ssl_tls13_expand_label_check passed for
 /// these lengths.
 ssl_tls13_expand_label_bytes: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], ctx: [U8], buf_len: Int) -> [U8] Never! {
-    hkdf_label := ssl_tls13_hkdf_encode_label(buf_len, label, ctx)
+    ^hkdf_label: ssl_tls13_hkdf_encode_label(buf_len, label, ctx)
     out: hashes.hkdf_expand_bytes(md, secret, hkdf_label, buf_len)
     ssldefs.ssl_wipe(hkdf_label)
     out
@@ -166,7 +166,7 @@ ssl_tls13_make_traffic_key: fn(md: hashes.Md, secret: [#Secret U8], key_len: Int
 /// Both sides' write keys and IVs from their traffic secrets
 /// (mbedtls_ssl_tls13_make_traffic_keys).
 ssl_tls13_make_traffic_keys: fn(md: hashes.Md, client_secret: [U8], server_secret: [U8], key_len: Int, iv_len: Int) -> SSLKeySet ssldefs.SSLError! {
-    client := ssl_tls13_make_traffic_key(md, client_secret, key_len, iv_len)
+    ^client: ssl_tls13_make_traffic_key(md, client_secret, key_len, iv_len)
     if ssl_tls13_make_traffic_key(md, server_secret, key_len, iv_len) == {
         .Ok(server) -> Ok(
             SSLKeySet{
@@ -207,14 +207,14 @@ ssl_tls13_derive_secret: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], ct
 /// when empty (mbedtls_ssl_tls13_evolve_secret).
 ssl_tls13_evolve_secret: fn(md: hashes.Md, secret_old: [U8]?, input: [#Secret U8]) -> [U8] ssldefs.SSLError! {
     hlen: hashes.md_size(md)
-    tmp_secret := ssldefs.ssl_zeros(hlen)
+    ^tmp_secret: ssldefs.ssl_zeros(hlen)
     if secret_old == {
         .Val(old) -> {
             tmp_secret = ssl_tls13_derive_secret(md, old, "derived".bytes(), [U8]{}, SSL_TLS1_3_CONTEXT_UNHASHED, hlen) ?? return Err(err)
         }
         None -> {}
     }
-    l_input := if input.len() != 0 -> input.copy() else -> ssldefs.ssl_zeros(hlen)
+    ^l_input: if input.len() != 0 -> input.copy() else -> ssldefs.ssl_zeros(hlen)
     secret_new: hashes.hkdf_extract(md, tmp_secret, l_input)
     ssldefs.ssl_wipe(tmp_secret)
     ssldefs.ssl_wipe(l_input)
@@ -228,7 +228,7 @@ ssl_tls13_evolve_secret: fn(md: hashes.Md, secret_old: [U8]?, input: [#Secret U8
 /// (mbedtls_ssl_tls13_derive_early_secrets).
 ssl_tls13_derive_early_secrets: fn(md: hashes.Md, early_secret: [U8], transcript: [U8]) -> SSLTLS13EarlySecrets ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
-    c_e := ssl_tls13_derive_secret(md, early_secret, "c e traffic".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len)
+    ^c_e: ssl_tls13_derive_secret(md, early_secret, "c e traffic".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len)
     if ssl_tls13_derive_secret(md, early_secret, "e exp master".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len) == {
         .Ok(e_exp) -> Ok(SSLTLS13EarlySecrets{client_early_traffic_secret: c_e, early_exporter_master_secret: e_exp})
         .Err(e) -> {
@@ -242,7 +242,7 @@ ssl_tls13_derive_early_secrets: fn(md: hashes.Md, early_secret: [U8], transcript
 /// transcript hash (mbedtls_ssl_tls13_derive_handshake_secrets).
 ssl_tls13_derive_handshake_secrets: fn(md: hashes.Md, handshake_secret: [U8], transcript: [U8]) -> SSLTLS13HandshakeSecrets ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
-    c_hs := ssl_tls13_derive_secret(md, handshake_secret, "c hs traffic".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len)
+    ^c_hs: ssl_tls13_derive_secret(md, handshake_secret, "c hs traffic".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len)
     if ssl_tls13_derive_secret(md, handshake_secret, "s hs traffic".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len) == {
         .Ok(s_hs) -> Ok(SSLTLS13HandshakeSecrets{client_handshake_traffic_secret: c_hs, server_handshake_traffic_secret: s_hs})
         .Err(e) -> {
@@ -276,7 +276,7 @@ ssl_tls13_calc_finished_core: fn(md: hashes.Md, base_key: [#Secret U8], transcri
     hash_len: hashes.md_size(md)
     finished_label: "finished".bytes()
     ssl_tls13_expand_label_check(md, base_key.len(), finished_label, [U8]{}, hash_len) ?? return Err(err)
-    finished_key := ssl_tls13_expand_label_bytes(md, base_key, finished_label, [U8]{}, hash_len)
+    ^finished_key: ssl_tls13_expand_label_bytes(md, base_key, finished_label, [U8]{}, hash_len)
     mac: hashes.hmac(md, finished_key, ssldefs.ssl_bytes_of(transcript, 0, hash_len))
     ssldefs.ssl_wipe(finished_key)
     Ok(mac)
@@ -289,7 +289,7 @@ ssl_tls13_calculate_verify_data: fn(ssl: ^ssldefs.SSLContext, dst_len: Int, from
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     md: cs.mac
     hash_len: hashes.md_size(md)
-    base_key := if from == ssldefs.SSL_IS_CLIENT -> ssl.handshake.client_handshake_traffic_secret.copy() else -> ssl.handshake.server_handshake_traffic_secret.copy()
+    ^base_key: if from == ssldefs.SSL_IS_CLIENT -> ssl.handshake.client_handshake_traffic_secret.copy() else -> ssl.handshake.server_handshake_traffic_secret.copy()
     if from == ssldefs.SSL_IS_CLIENT {
         ssldefs.ssl_wipe(ssl.handshake.client_handshake_traffic_secret)
     } else { ssldefs.ssl_wipe(ssl.handshake.server_handshake_traffic_secret) }
@@ -309,7 +309,7 @@ ssl_tls13_calculate_verify_data: fn(ssl: ^ssldefs.SSLContext, dst_len: Int, from
 // (mbedtls_ssl_tls13_calculate_verify_data's body).
 ssl_tls13_verify_data_of: fn(ssl: ssldefs.SSLContext, md: hashes.Md, base_key: [U8], dst_len: Int, hash_len: Int) -> [U8] ssldefs.SSLError! {
     if dst_len < hash_len -> return Err(.BufferTooSmall)
-    transcript := ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
+    ^transcript: ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
     if ssl_tls13_calc_finished_core(md, base_key, transcript) == {
         .Ok(out) -> {
             ssldefs.ssl_wipe(transcript)
@@ -327,9 +327,9 @@ ssl_tls13_verify_data_of: fn(ssl: ssldefs.SSLContext, md: hashes.Md, base_key: [
 /// RFC 8446 4.2.11.2).
 ssl_tls13_create_psk_binder: fn(md: hashes.Md, psk: [U8], psk_type: Int, transcript: [U8]) -> [U8] ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
-    early_secret := ssl_tls13_evolve_secret(md, None, psk) ?? return Err(err)
+    ^early_secret: ssl_tls13_evolve_secret(md, None, psk) ?? return Err(err)
     lbl: if psk_type == ssldefs.SSL_TLS1_3_PSK_RESUMPTION -> "res binder".bytes() else -> "ext binder".bytes()
-    binder_key := if ssl_tls13_derive_secret(md, early_secret, lbl, [U8]{}, SSL_TLS1_3_CONTEXT_UNHASHED, hash_len) == {
+    ^binder_key: if ssl_tls13_derive_secret(md, early_secret, lbl, [U8]{}, SSL_TLS1_3_CONTEXT_UNHASHED, hash_len) == {
         .Ok(k) -> k
         .Err(e) -> {
             ssldefs.ssl_wipe(early_secret)
@@ -357,12 +357,12 @@ ssl_tls13_create_psk_binder: fn(md: hashes.Md, psk: [U8], psk_type: Int, transcr
 ssl_tls13_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, endpoint: Int, ciphersuite: Int, traffic_keys: SSLKeySet) ssldefs.SSLError! {
     cs: suites.ssl_ciphersuite_from_id(ciphersuite) ?? return Err(.BadInputData)
     info: suites.ssl_ciphersuite_cipher_info(cs) ?? return Err(.BadInputData)
-    enc := layer.cipher_setup(info)
-    dec := layer.cipher_setup(info)
-    key_enc := [U8]{}
-    key_dec := [U8]{}
-    iv_enc := [U8]{}
-    iv_dec := [U8]{}
+    ^enc: layer.cipher_setup(info)
+    ^dec: layer.cipher_setup(info)
+    ^key_enc: [U8]{}
+    ^key_dec: [U8]{}
+    ^iv_enc: [U8]{}
+    ^iv_dec: [U8]{}
     if endpoint == ssldefs.SSL_IS_SERVER {
         key_enc = traffic_keys.server_write_key
         key_dec = traffic_keys.client_write_key
@@ -380,9 +380,9 @@ ssl_tls13_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, endpoint: I
     ssldefs.ssl_copy_into(ssl.tpool[tix].iv_enc, 0, iv_enc, 0, traffic_keys.iv_len)
     ssldefs.ssl_copy_into(ssl.tpool[tix].iv_dec, 0, iv_dec, 0, traffic_keys.iv_len)
     keybytes: info.key_bits /% 8
-    k_enc := ssldefs.ssl_bytes_of(key_enc, 0, keybytes)
-    k_dec := ssldefs.ssl_bytes_of(key_dec, 0, keybytes)
-    failure := ssl_tls13_key_cipher(enc, k_enc, .Encrypt)
+    ^k_enc: ssldefs.ssl_bytes_of(key_enc, 0, keybytes)
+    ^k_dec: ssldefs.ssl_bytes_of(key_dec, 0, keybytes)
+    ^failure: ssl_tls13_key_cipher(enc, k_enc, .Encrypt)
     if failure == None -> failure = ssl_tls13_key_cipher(dec, k_dec, .Decrypt)
     ssldefs.ssl_wipe(k_enc)
     ssldefs.ssl_wipe(k_dec)
@@ -426,7 +426,7 @@ ssl_tls13_export_secret: fn(ssl: ssldefs.SSLContext, ktype: Int, secret: [U8]) N
     if ssl.f_export_keys == {
         .Val(cb) -> {
             call: cb.call
-            _ := call(
+            ^_: call(
                 ssldefs.SSLExportedKey{
                     ktype: ktype,
                     secret: secret.copy(),
@@ -455,7 +455,7 @@ ssl_tls13_export_handshake_psk: fn(ssl: ssldefs.SSLContext) -> [U8] ssldefs.SSLE
 /// one (mbedtls_ssl_tls13_key_schedule_stage_early).
 ssl_tls13_key_schedule_stage_early: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
-    psk := [U8]{}
+    ^psk: [U8]{}
     if ssltls.ssl_tls13_key_exchange_mode_with_psk(ssl) {
         psk = ssl_tls13_export_handshake_psk(ssl) ?? return Err(err)
     }
@@ -472,9 +472,9 @@ ssl_tls13_key_schedule_stage_early: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLErro
 /// Our private key is dropped once it has served, as C destroys it.
 ssl_tls13_xxdh_agree: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) -> [U8] ssldefs.SSLError! {
     group: ssl.handshake.offered_group_id
-    peer := ssl.handshake.xxdh_peerkey.copy()
+    ^peer: ssl.handshake.xxdh_peerkey.copy()
     if ssltls.ssl_tls13_named_group_is_ecdhe(group) {
-        shared := if ^ssl.handshake.ecdh_ctx == {
+        ^shared: if ^ssl.handshake.ecdh_ctx == {
             .Val(ctx) -> ssl_tls13_ecdh_agree(ctx, peer, rng) ?? return Err(err)
             None -> {
                 return Err(.GenericError)
@@ -484,7 +484,7 @@ ssl_tls13_xxdh_agree: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) -> [U8] ssld
         return Ok(shared)
     }
     if ssltls.ssl_tls13_named_group_is_ffdh(group) {
-        shared := if ^ssl.handshake.dhm_ctx == {
+        ^shared: if ^ssl.handshake.dhm_ctx == {
             .Val(ctx) -> ssl_tls13_ffdh_agree(ctx, peer) ?? return Err(err)
             None -> {
                 return Err(.GenericError)
@@ -502,7 +502,7 @@ ssl_tls13_ecdh_agree: fn<R: RNG>(ctx: ^ecdh.ECDHContext, peer: [U8], rng: ^R) ->
     plen: (ctx.grp.pbits + 7) /% 8
     // PSA's public key forms: 0x04 || X || Y on short Weierstrass curves,
     // X alone on Montgomery ones.
-    curve_bytes := peer.len()
+    ^curve_bytes: peer.len()
     if ecp.group_type(ctx.grp) != .Montgomery {
         if peer.len() & 1 == 0 -> return Err(.BadInputData)
         curve_bytes = peer.len() /% 2
@@ -525,7 +525,7 @@ ssl_tls13_ffdh_agree: fn(ctx: dhm.DHMContext, peer: [U8]) -> [U8] ssldefs.SSLErr
     // elements of low order.
     pm1: bn.sub_int(ctx.p, 1) ?? return Err(ssl_tls13_psa_mpi_error(err))
     if bn.cmp_mpi(gy, pm1) >= 0 || bn.cmp_int(gy, 1) <= 0 -> return Err(.BadInputData)
-    rr := bn.mpi()
+    ^rr: bn.mpi()
     k: bn.exp_mod(gy, ctx.x, ctx.p, rr) ?? return Err(ssl_tls13_psa_mpi_error(err))
     out: bn.write_binary(k, plen) ?? return Err(ssl_tls13_psa_mpi_error(err))
     Ok(out)
@@ -535,7 +535,7 @@ ssl_tls13_ffdh_agree: fn(ctx: dhm.DHMContext, peer: [U8]) -> [U8] ssldefs.SSLErr
 /// and the (EC)DHE shared secret (ssl_tls13_key_schedule_stage_handshake).
 ssl_tls13_key_schedule_stage_handshake: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
-    shared_secret := [U8]{}
+    ^shared_secret: [U8]{}
     if ssltls.ssl_tls13_key_exchange_mode_with_ephemeral(ssl) {
         g: ssl.handshake.offered_group_id
         if !ssltls.ssl_tls13_named_group_is_ecdhe(g) && !ssltls.ssl_tls13_named_group_is_ffdh(g) {
@@ -557,8 +557,8 @@ ssl_tls13_generate_handshake_keys: fn(ssl: ^ssldefs.SSLContext) -> SSLKeySet ssl
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     lens: ssl_tls13_get_cipher_key_info(cs)
     md: cs.mac
-    transcript := ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
-    secrets := ssl_tls13_derive_handshake_secrets(md, ssl.handshake.tls13_handshake_secret, transcript)
+    ^transcript: ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
+    ^secrets: ssl_tls13_derive_handshake_secrets(md, ssl.handshake.tls13_handshake_secret, transcript)
     ssldefs.ssl_wipe(transcript)
     ssl.handshake.client_handshake_traffic_secret = secrets.client_handshake_traffic_secret
     ssl.handshake.server_handshake_traffic_secret = secrets.server_handshake_traffic_secret
@@ -596,7 +596,7 @@ ssl_tls13_application_keys_of: fn(ssl: ^ssldefs.SSLContext) -> SSLKeySet ssldefs
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     lens: ssl_tls13_get_cipher_key_info(cs)
     md: cs.mac
-    transcript := ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
+    ^transcript: ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
     sn: ssl.session_negotiate
     if ssl_tls13_derive_application_secrets(md, ssl.handshake.tls13_app_secret, transcript, ssl.spool[sn].app_secrets) == {
         .Err(e) -> {
@@ -615,7 +615,7 @@ ssl_tls13_application_keys_of: fn(ssl: ^ssldefs.SSLContext) -> SSLKeySet ssldefs
 /// transform they key (mbedtls_ssl_tls13_compute_handshake_transform).
 ssl_tls13_compute_handshake_transform: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl_tls13_key_schedule_stage_handshake(ssl, rng) ?? return Err(err)
-    traffic_keys := ssl_tls13_generate_handshake_keys(ssl) ?? return Err(err)
+    ^traffic_keys: ssl_tls13_generate_handshake_keys(ssl) ?? return Err(err)
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     tix: ssldefs.ssl_transform_alloc(ssl)
     if ssl_tls13_populate_transform(ssl, tix, ssl.conf.endpoint, cs.id, traffic_keys) == {
@@ -634,7 +634,7 @@ ssl_tls13_compute_handshake_transform: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng:
 ssl_tls13_compute_resumption_master_secret: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     md: cs.mac
-    transcript := ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
+    ^transcript: ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
     sn: ssl.session_negotiate
     if ssl_tls13_derive_resumption_master_secret(md, ssl.handshake.tls13_app_secret, transcript, ssl.spool[sn].app_secrets) == {
         .Err(e) -> {
@@ -652,7 +652,7 @@ ssl_tls13_compute_resumption_master_secret: fn(ssl: ^ssldefs.SSLContext) ssldefs
 /// transform they key (mbedtls_ssl_tls13_compute_application_transform).
 ssl_tls13_compute_application_transform: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     ssl_tls13_key_schedule_stage_application(ssl) ?? return Err(err)
-    traffic_keys := ssl_tls13_generate_application_keys(ssl) ?? return Err(err)
+    ^traffic_keys: ssl_tls13_generate_application_keys(ssl) ?? return Err(err)
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     tix: ssldefs.ssl_transform_alloc(ssl)
     if ssl_tls13_populate_transform(ssl, tix, ssl.conf.endpoint, cs.id, traffic_keys) == {
@@ -677,7 +677,7 @@ ssl_tls13_exporter: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], context
     context_hash: ssl_tls13_derive_context(md, context_value, SSL_TLS1_3_CONTEXT_UNHASHED) ?? return Err(err)
     ssl_tls13_expand_label_check(md, secret.len(), label, empty_hash, hash_len) ?? return Err(err)
     ssl_tls13_expand_label_check(md, hash_len, exporter_label, context_hash, out_len) ?? return Err(err)
-    hkdf_secret := ssl_tls13_expand_label_bytes(md, secret, label, empty_hash, hash_len)
+    ^hkdf_secret: ssl_tls13_expand_label_bytes(md, secret, label, empty_hash, hash_len)
     out: ssl_tls13_expand_label_bytes(md, hkdf_secret, exporter_label, context_hash, out_len)
     ssldefs.ssl_wipe(hkdf_secret)
     Ok(out)

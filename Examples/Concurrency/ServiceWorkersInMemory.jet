@@ -33,7 +33,7 @@ run_all: fn(tasks: [Task]) {
 }
 
 run: fn() {
-    tree := service.tree("in-memory")
+    ^tree: service.tree("in-memory")
     plain: tree.worker("apply", apply, capacity: 8) ?? return
     counted: tree.worker("tally", tally, state: 0, capacity: 8) ?? return
     batched: tree.worker("run_all", run_all, batch: 2, wait: 20ms, capacity: 8) ?? return

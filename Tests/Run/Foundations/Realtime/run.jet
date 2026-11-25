@@ -15,12 +15,12 @@ ControlStats: struct {
 
 control_loop: fn() -> ControlStats {
     started: time.instant()
-    next_due := started + 1ms
-    ticks := 0
-    missed := 0
-    min_jitter := 0
-    max_jitter := 0
-    sum_jitter := 0
+    ^next_due: started + 1ms
+    ^ticks: 0
+    ^missed: 0
+    ^min_jitter: 0
+    ^max_jitter: 0
+    ^sum_jitter: 0
 
     // Absolute deadlines avoid accumulating sleep drift. A miss is a host
     // observation (the loop began after its due time), not a hard deadline.
@@ -56,11 +56,11 @@ run: fn() {
     // `core.rt` owns scheduling, the reusable 256-sample block, and stream
     // cancellation. The callback does bounded work only: one pass over its
     // fixed-size input, with no allocation, wait, or I/O.
-    stream := rt.callback(
+    ^stream: rt.callback(
         48000,
         256,
         fn(samples) {
-            total := Float{0.0}
+            ^total: Float{0.0}
             loop sample in samples -> total += sample
         },
     )

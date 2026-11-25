@@ -23,10 +23,10 @@ disp_slice: fn(text: String, start: Int, end: Int) -> String {
 
 // markdownCells: strip one leading and one trailing pipe, then split.
 disp_cells: fn(raw: String) -> [String] {
-    line := raw.trim()
+    ^line: raw.trim()
     if line.starts_with("|") -> line = disp_slice(line, 1, line.bytes().len())
     if line.ends_with("|") -> line = disp_slice(line, 0, line.bytes().len() - 1)
-    cells := [String]{}
+    ^cells: [String]{}
     loop cell in disp_parse.split(line, "|") -> cells.push(cell.trim())
     cells
 }
@@ -40,12 +40,12 @@ disp_is_upper_or_digit: fn(byte: U8) -> Bool {
 // `#\d+` card references, in order.
 disp_card_refs: fn(text: String) -> [Int] {
     bytes: text.bytes()
-    refs := [Int]{}
-    index := 0
+    ^refs: [Int]{}
+    ^index: 0
     loop index < bytes.len() {
         if bytes[index] == (U8{35}) {
             start: index + 1
-            end := start
+            ^end: start
             loop end < bytes.len() && disp_is_digit(bytes[end]) -> end += 1
             if end > start {
                 refs.push(Int.parse(disp_slice(text, start, end)) ?? panic("audit card reference must be a number"))
@@ -61,14 +61,14 @@ disp_card_refs: fn(text: String) -> [Int] {
 // `D-[A-Z0-9]+(-[A-Z0-9]+)*` decision IDs, without any `=OUTCOME`.
 disp_decision_refs: fn(text: String) -> [String] {
     bytes: text.bytes()
-    refs := [String]{}
-    index := 0
+    ^refs: [String]{}
+    ^index: 0
     loop index + 2 < bytes.len() {
         if bytes[index] != (U8{68}) || bytes[index + 1] != (U8{45}) || !disp_is_upper_or_digit(bytes[index + 2]) {
             index += 1
             next
         }
-        end := index + 2
+        ^end: index + 2
         loop end < bytes.len() && disp_is_upper_or_digit(bytes[end]) -> end += 1
         loop end + 1 < bytes.len() && bytes[end] == (U8{45}) && disp_is_upper_or_digit(bytes[end + 1]) {
             end += 1
@@ -107,9 +107,9 @@ disp_ingest: fn(board: Dyn, cards: ^[Int:Bool], decisions: ^[String:String]) {
     if board.field("decisions") == .Ok(field) {
         if field == .Array(entries) {
             loop decision in entries {
-                id := ""
+                ^id: ""
                 if decision.field("id") == .Ok(value) -> id = value.text() ?? ""
-                status := ""
+                ^status: ""
                 if decision.field("status") == .Ok(value) -> status = value.text() ?? ""
                 if id != "" && !decisions.has_key(id) -> decisions[id] = status
             }
@@ -123,8 +123,8 @@ DispBoard: struct {
 }
 
 disp_board: fn(path: String) -> DispBoard {
-    cards := [Int:Bool]{}
-    decisions := [String:String]{}
+    ^cards: [Int:Bool]{}
+    ^decisions: [String:String]{}
     raw: disp_files.read(path) ?? panic("read board {path}")
     board: disp_json.parse(raw) ?? panic("parse board {path}: {err.reason}")
     disp_ingest(board, cards, decisions)
@@ -144,7 +144,7 @@ disp_report: fn(relative: String, text: String, board: DispBoard, problems: ^[St
         problems.push("{relative}: audit-dispositions:v1 table is not closed")
         return -1
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop raw in closed[0].lines() {
         line: raw.trim()
         if line.starts_with("|") -> lines.push(line)
@@ -153,18 +153,18 @@ disp_report: fn(relative: String, text: String, board: DispBoard, problems: ^[St
         problems.push("{relative}: disposition table has no header")
         return 0
     }
-    header := [String]{}
+    ^header: [String]{}
     loop cell in disp_cells(lines[0]) -> header.push(disp_parse.lower(cell))
     expected: [String]{"finding", "disposition", "target or reason"}
     if header != expected {
         problems.push("{relative}: disposition header must be | finding | disposition | target or reason |")
     }
-    rows := 0
-    ids := [String]{}
+    ^rows: 0
+    ^ids: [String]{}
     loop index in 1..<lines.len() {
         line: lines[index]
         cells: disp_cells(line)
-        dashes := true
+        ^dashes: true
         loop cell in cells {
             if !disp_dashes(cell) -> dashes = false
         }
@@ -225,17 +225,17 @@ run: fn() {
     root: disp_process.args()[0]
     board: disp_board(disp_process.args()[1])
     audits: disp_files.join(root, "Docs/Audits")
-    names := disp_files.listdir(audits) ?? panic("list Docs/Audits")
+    ^names: disp_files.listdir(audits) ?? panic("list Docs/Audits")
     names.sort()
-    reports := [String]{}
+    ^reports: [String]{}
     loop name in names {
         if name.ends_with(".md") && name != "README.md" && disp_files.is_file(disp_files.join(audits, name)) {
             reports.push(name)
         }
     }
-    problems := [String]{}
-    tabled := 0
-    rows := 0
+    ^problems: [String]{}
+    ^tabled: 0
+    ^rows: 0
     loop name in reports {
         relative: "Docs/Audits/{name}"
         text: disp_files.read(disp_files.join(audits, name)) ?? panic("read {relative}")

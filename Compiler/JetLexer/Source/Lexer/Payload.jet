@@ -89,7 +89,7 @@ add_unknown_escape: fn(diagnostics: ^[Diagnostic], start: Int, end: Int, escape_
 // Python and JavaScript quote text. When the text needs no escaping its
 // edit writes it as a String.
 add_long_char: fn(diagnostics: ^[Diagnostic], raw: [U8], source_start: Int, span_end: Int) {
-    diagnostic := diagnostic_from_registry("E0002", Val(Span{start: source_start, end: span_end}), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+    ^diagnostic: diagnostic_from_registry("E0002", Val(Span{start: source_start, end: span_end}), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
     if raw.len() > 3 && byte_at(raw, raw.len() - 1) == 39 {
         text: foundation_byte_text(raw, 1, raw.len() - 1)
         plain: !text.contains("\"") && !text.contains("\\") && !text.contains("{{") && !text.contains("}}") && !text.contains("'") && !text.contains("\n")
@@ -103,7 +103,7 @@ add_long_char: fn(diagnostics: ^[Diagnostic], raw: [U8], source_start: Int, span
 // `source[start..<end]` (one scalar's UTF-8 bytes) packed into one Int, first
 // byte highest (TextEscape.bytes).
 packed_bytes: fn(source: [U8], start: Int, end: Int) -> Int Never! {
-    packed := 0
+    ^packed: 0
     loop index in start..<end -> packed = packed * 256 + byte_at(source, index)
     packed
 }
@@ -111,8 +111,8 @@ packed_bytes: fn(source: [U8], start: Int, end: Int) -> Int Never! {
 // The scalar a TextEscape escapes, as its diagnostic spells it.
 text_escape_text: fn(escape: TextEscape) -> String Never! {
     width: escape.span.end - escape.span.start - 1
-    scale := if width > 1 -> 1 << (8 * (width - 1)) else -> 1
-    out := [U8]{}
+    ^scale: if width > 1 -> 1 << (8 * (width - 1)) else -> 1
+    ^out: [U8]{}
     loop _ in 0..<width {
         out.push(U8{(escape.bytes /% scale) & 255})
         scale /%= 256
@@ -124,8 +124,8 @@ text_escape_text: fn(escape: TextEscape) -> String Never! {
 // (TokenLiteral): those it kept (`deferred`), with an E0001 for each escape
 // it doesn't know (`escapes`), in the order the lexer met them.
 text_reading_diagnostics: fn(deferred: [Diagnostic], escapes: [TextEscape]) -> [Diagnostic] {
-    out := [Diagnostic]{}
-    escape := 0
+    ^out: [Diagnostic]{}
+    ^escape: 0
     loop index in 0..<deferred.len() + 1 {
         loop escape < escapes.len() && escapes[escape].before <= index {
             found: escapes[escape]
@@ -138,7 +138,7 @@ text_reading_diagnostics: fn(deferred: [Diagnostic], escapes: [TextEscape]) -> [
 }
 
 strip_underscores: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         if (Int{byte}) != 95 -> out.push(byte)
     }
@@ -148,7 +148,7 @@ strip_underscores: fn(text: String) -> String Never! {
 // A decimal or unit-number spelling drops its `_` separators and writes its
 // exponent marker as `e`.
 decimal_number_spelling: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         code: Int{byte}
         if code == 95 -> next
@@ -173,10 +173,10 @@ parse_integer_literal: fn(text: String) -> Int? {
     // its remainder. Spelled out per radix: max itself is past the runtime's
     // inline Int range, so computing them per literal costs a big Int
     // division; every limit below is inline.
-    radix := 10
-    limit := 922337203685477580
-    rest := 7
-    i := 0
+    ^radix: 10
+    ^limit: 922337203685477580
+    ^rest: 7
+    ^i: 0
     if raw.len() > 1 && (Int{raw[0]}) == 48 {
         marker: Int{raw[1]}
         if marker == {
@@ -202,7 +202,7 @@ parse_integer_literal: fn(text: String) -> Int? {
         }
     }
     if i >= raw.len() -> return None
-    value := 0
+    ^value: 0
     loop i < raw.len() {
         digit: digit_value(Int{raw[i]})
         if digit < 0 || digit >= radix -> return None
@@ -247,8 +247,8 @@ read_scalar_escape: fn(source: [U8], at: Int, limit: Int, origin: Int, diagnosti
         add_diagnostic(diagnostics, "E0001", origin + at, origin + at + 2, "`\\u` needs a scalar in braces", why, fix)
         return {scalar: -1, end: at + 2}
     }
-    cursor := at + 3
-    value := 0
+    ^cursor: at + 3
+    ^value: 0
     loop cursor < limit && hex_value(byte_at(source, cursor)) >= 0 {
         // Seven digits are already too many; the value stops growing there.
         if cursor - at - 3 < 7 -> value = value * 16 + hex_value(byte_at(source, cursor))
@@ -298,7 +298,7 @@ push_scalar: fn(out: ^[U8], scalar: Int) Never! {
 }
 
 previous_code_index: fn(facts: [Int], index: Int) -> Int Never! {
-    cursor := index - 1
+    ^cursor: index - 1
     loop cursor >= 0 {
         kind: kind_at(facts, cursor)
         if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT -> return cursor
@@ -320,14 +320,16 @@ fact_text: fn(source: [U8], facts: [Int], index: Int) -> String Never! {
 // body after a return type.
 string_head_modes: fn(source: [U8], facts: [Int], index: Int) -> {raw_head: Bool, byte_head: Bool} Never! {
     open: previous_code_index(facts, index)
-    if open < 0 || kind_at(facts, open) != TOKEN_LBRACE -> return {byte_head: false, raw_head: false}
+    if open < 0 || kind_at(facts, open) != TOKEN_LBRACE {
+        return {byte_head: false, raw_head: false}
+    }
     before_open: previous_code_index(facts, open)
-    raw := before_open >= 0 && kind_at(facts, before_open) == TOKEN_DOT
+    ^raw: before_open >= 0 && kind_at(facts, before_open) == TOKEN_DOT
     if before_open >= 0 && kind_at(facts, before_open) == TOKEN_IDENT {
         first: byte_at(source, facts[before_open * 4 + 1])
         if first >= 65 && first <= 90 -> raw = true
     }
-    byte := false
+    ^byte: false
     if before_open >= 0 && kind_at(facts, before_open) == TOKEN_RBRACKET {
         before_close: previous_code_index(facts, before_open)
         if {
@@ -355,9 +357,9 @@ string_head_modes: fn(source: [U8], facts: [Int], index: Int) -> {raw_head: Bool
 group_has_ffi_marker: fn(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool Never! {
     open: previous_code_index(facts, hash_index + 2)
     if open < 0 || kind_at(facts, open) != TOKEN_LBRACKET -> return false
-    cursor := open + 1
-    depth := 0
-    segment_head := true
+    ^cursor: open + 1
+    ^depth: 0
+    ^segment_head: true
     loop cursor < limit {
         kind: kind_at(facts, cursor)
         // The prelude scan drops comments before reading marker names.
@@ -397,8 +399,8 @@ group_has_ffi_marker: fn(source: [U8], facts: [Int], hash_index: Int, limit: Int
 }
 
 matching_open: fn(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> Int Never! {
-    cursor := index
-    depth := 0
+    ^cursor: index
+    ^depth: 0
     loop cursor >= 0 {
         kind: kind_at(facts, cursor)
         if kind == close_kind -> depth += 1
@@ -412,7 +414,7 @@ matching_open: fn(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> 
 }
 
 has_ffi_marker: fn(source: [U8], facts: [Int], function_index: Int) -> Bool Never! {
-    cursor := previous_code_index(facts, function_index)
+    ^cursor: previous_code_index(facts, function_index)
     // `add: fn(…)`: the name path and its `:` sit between the markers and `fn`.
     if kind_at(facts, cursor) == TOKEN_COLON {
         cursor = previous_code_index(facts, cursor)
@@ -473,7 +475,7 @@ has_ffi_marker: fn(source: [U8], facts: [Int], function_index: Int) -> Bool Neve
 raw_foreign_body_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never! {
     open: previous_code_index(facts, index)
     if open < 0 || kind_at(facts, open) != TOKEN_LBRACE -> return false
-    cursor := open - 1
+    ^cursor: open - 1
     loop cursor >= 0 {
         if kind_at(facts, cursor) == TOKEN_KW_FN -> return has_ffi_marker(source, facts, cursor)
         cursor -= 1
@@ -490,7 +492,7 @@ shifted_diagnostic: fn(diagnostic: ^Diagnostic, offset: Int) Never! {
         .Val(span) -> Val(shifted_span(span, offset))
         .None -> None
     }
-    if ^diagnostic.edit == .Val(edit) -> edit.span = shifted_span(edit.span, offset)
+    if diagnostic.edit.in_place() == .Val(edit) -> edit.span = shifted_span(edit.span, offset)
     shifted_labels: loop label in diagnostic.labels -> DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message}
     diagnostic.labels = shifted_labels
 }
@@ -502,10 +504,10 @@ shifted_diagnostic: fn(diagnostic: ^Diagnostic, offset: Int) Never! {
 // lands before its fact's token, and its diagnostics go to
 // `terminator_diagnostics`.
 lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: ^TokenTables, terminator_diagnostics: ^[Diagnostic]) -> LexedTokens {
-    bidi_diagnostics := [Diagnostic]{}
+    ^bidi_diagnostics: [Diagnostic]{}
     lexed: lex_payload_from_facts_range(source, facts, events, config_surface, allow_reserved_identifiers, depth, from, to, false, tables, terminator_diagnostics, bidi_diagnostics)
     if bidi_diagnostics.len() > 0 {
-        diagnostics := lexed.diagnostics.move()
+        ^diagnostics: lexed.diagnostics.move()
         diagnostics.extend(bidi_diagnostics)
         return LexedTokens{tokens: lexed.tokens.move(), diagnostics: diagnostics.move()}
     }
@@ -520,20 +522,20 @@ lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_sur
 lex_payload_from_facts_range: fn(source: [U8], facts: [Int], events: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, skip_first: Bool, tables: ^TokenTables, terminator_diagnostics: ^[Diagnostic], bidi_diagnostics: ^[Diagnostic]) -> LexedTokens {
     fact_count: facts.len() /% 4
     event_count: events.len() /% 3
-    tokens := [Token]{}
+    ^tokens: [Token]{}
     tokens.try_reserve(fact_count + event_count) ?? ()
-    diagnostics := [Diagnostic]{}
-    cursor := from
-    index := 0
+    ^diagnostics: [Diagnostic]{}
+    ^cursor: from
+    ^index: 0
     if skip_first && fact_count > 0 {
         cursor = facts[2]
         index = 1
     }
-    event_index := 0
+    ^event_index: 0
     source_len: source.len()
     loop index < fact_count {
         // An authored `;` lands as its terminator event, never as itself.
-        taken := false
+        ^taken: false
         if event_index < event_count && events[event_index * 3 + 1] == index {
             taken = terminator_events_take_fact(events, event_index, index)
             event_index = terminator_events_apply(facts, events, event_index, index, tokens, terminator_diagnostics)
@@ -566,7 +568,7 @@ lex_payload_from_facts_range: fn(source: [U8], facts: [Int], events: [Int], conf
             kind == TOKEN_IDENT -> {
                 text: intern_source(tables, source, start, end)
                 if !allow_reserved_identifiers && end - start >= 2 && source[start] == (U8{95}) && source[start + 1] == (U8{95}) {
-                    _ := identifier_respelling(source, start, end, allow_reserved_identifiers, diagnostics)
+                    ^_: identifier_respelling(source, start, end, allow_reserved_identifiers, diagnostics)
                 }
                 tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})
             }
@@ -617,7 +619,7 @@ lexer_bidi_control_at: fn(source: [U8], at: Int) -> Bool Never! {
 // (high bit set), so 8-byte ASCII blocks skip in one check.
 lexer_report_bidi_controls: fn(source: [U8], from: Int, to: Int, diagnostics: ^[Diagnostic]) {
     limit: if to < source.len() -> to else -> source.len()
-    at := from
+    ^at: from
     loop at < limit {
         if at + 8 <= limit && ((source[at] | source[at + 1] | source[at + 2] | source[at + 3] | source[at + 4] | source[at + 5] | source[at + 6] | source[at + 7]) & (U8{128})) == (U8{0}) {
             at += 8
@@ -635,11 +637,11 @@ lexer_report_bidi_controls: fn(source: [U8], from: Int, to: Int, diagnostics: ^[
 
 // An interpolation's nested source: payload only, no terminator pass.
 lex_payload_at_depth: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: ^TokenTables) -> LexedTokens {
-    facts := [Int]{}
+    ^facts: [Int]{}
     if source.len() > 16 -> facts.try_reserve(source.len()) ?? ()
     scanned: raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
     if scanned.has_paste -> tables.has_paste = true
-    unused := [Diagnostic]{}
+    ^unused: [Diagnostic]{}
     lex_payload_from_facts(source, facts, [Int]{}, config_surface, allow_reserved_identifiers, depth, 0, source.len(), tables, unused)
 }
 
@@ -649,14 +651,14 @@ lex_expression: fn(source: [U8], start: Int, end: Int, _config_surface: Bool, al
         return [Token]{}
     }
     nested_source: source.slice(start, end)
-    nested := lex_payload_at_depth(nested_source, false, allow_reserved_identifiers, depth + 1, tables)
+    ^nested: lex_payload_at_depth(nested_source, false, allow_reserved_identifiers, depth + 1, tables)
     nested_diagnostics: nested.diagnostics.move()
     loop source_diagnostic in nested_diagnostics.move() {
-        diagnostic := source_diagnostic.move()
+        ^diagnostic: source_diagnostic.move()
         shifted_diagnostic(diagnostic, start)
         diagnostics.push(diagnostic)
     }
-    index := 0
+    ^index: 0
     loop index < nested.tokens.len() {
         token_shift_spans(nested.tokens[index], start, tables.literals)
         index += 1
@@ -665,7 +667,7 @@ lex_expression: fn(source: [U8], start: Int, end: Int, _config_surface: Bool, al
 }
 
 only_whitespace: fn(source: [U8], start: Int, end: Int) -> Bool {
-    cursor := start
+    ^cursor: start
     loop cursor < end {
         if !is_whitespace_at(source, cursor) -> return false
         cursor += utf8_width(source, cursor)
@@ -674,8 +676,8 @@ only_whitespace: fn(source: [U8], start: Int, end: Int) -> Bool {
 }
 
 interpolation_end: fn(source: [U8], start: Int, limit: Int) -> Int Never! {
-    cursor := start + 1
-    depth := 1
+    ^cursor: start + 1
+    ^depth: 1
     loop cursor < limit {
         value: byte_at(source, cursor)
         if value == LINE_COMMENT_FIRST && byte_at(source, cursor + 1) == LINE_COMMENT_SECOND {
@@ -687,7 +689,7 @@ interpolation_end: fn(source: [U8], start: Int, limit: Int) -> Int Never! {
         }
         if value == BLOCK_OPEN_FIRST && byte_at(source, cursor + 1) == BLOCK_OPEN_SECOND {
             cursor += 2
-            comment_depth := 1
+            ^comment_depth: 1
             loop cursor < limit && comment_depth > 0 {
                 if {
                     byte_at(source, cursor) == BLOCK_OPEN_FIRST && byte_at(source, cursor + 1) == BLOCK_OPEN_SECOND -> {
@@ -718,10 +720,10 @@ interpolation_end: fn(source: [U8], start: Int, limit: Int) -> Int Never! {
             next
         }
         if value == 96 {
-            fence := 0
+            ^fence: 0
             loop cursor + fence < limit && byte_at(source, cursor + fence) == 96 -> fence += 1
-            fence_end := cursor + fence
-            closed := false
+            ^fence_end: cursor + fence
+            ^closed: false
             loop fence_end < limit {
                 if byte_at(source, fence_end) != 96 {
                     fence_end += 1
@@ -774,17 +776,17 @@ append_text_part: fn(parts: ^[StringPart], start: Int, end: Int, text: Name) Nev
 }
 
 decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, indent: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: ^TokenTables, diagnostics: ^[Diagnostic], defer_escapes: Bool, escapes: ^[TextEscape]) -> {decoded: String, interpolations: Int, parts: [StringPart], valid: Bool} {
-    decoded := [U8]{}
-    literal := [U8]{}
-    parts := [StringPart]{}
-    interpolations := 0
-    valid := true
-    cursor := start
-    literal_start := start
-    at_line_start := triple
+    ^decoded: [U8]{}
+    ^literal: [U8]{}
+    ^parts: [StringPart]{}
+    ^interpolations: 0
+    ^valid: true
+    ^cursor: start
+    ^literal_start: start
+    ^at_line_start: triple
     loop cursor < end {
         if at_line_start {
-            stripped := 0
+            ^stripped: 0
             loop stripped < indent && cursor < end && (byte_at(source, cursor) == 32 || byte_at(source, cursor) == 9) {
                 cursor += 1
                 stripped += 1
@@ -854,7 +856,7 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
                 // A byte literal holds bytes, so a scalar escape has no place
                 // in one; it still spans its braces, which open no hole.
                 if byte_head {
-                    skipped := [Diagnostic]{}
+                    ^skipped: [Diagnostic]{}
                     escape: read_scalar_escape(source, cursor, end, 0, skipped)
                     add_diagnostic(diagnostics, "E0001", cursor, escape.end, "a byte literal has no `\\u{{…}}` escape", "a byte literal holds bytes, and `\\u{{H}}` names a Unicode scalar, which can take several bytes", "write each byte as `\\xNN`, or use a String")
                     cursor = escape.end
@@ -904,7 +906,7 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
             literal.push(U8{123})
             decoded.push(U8{123})
             cursor += 1
-            nesting := 1
+            ^nesting: 1
             loop cursor < end && nesting > 0 {
                 next_byte: byte_at(source, cursor)
                 literal.push(U8{(next_byte) & 255})
@@ -976,14 +978,14 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
 decode_raw_string: fn(text: String, source_start: Int, tables: ^TokenTables) -> {decoded: String, parts: [StringPart]} Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return {decoded: "", parts: [StringPart]{}}
-    fence := 0
+    ^fence: 0
     loop fence < raw.len() && (Int{raw[fence]}) == 96 -> fence += 1
     if fence == 0 || raw.len() < fence * 2 -> return {decoded: "", parts: [StringPart]{}}
-    begin := fence
-    finish := raw.len() - fence
-    padded := false
+    ^begin: fence
+    ^finish: raw.len() - fence
+    ^padded: false
     if finish > begin + 1 && (Int{raw[begin]}) == 32 && (Int{raw[finish - 1]}) == 32 {
-        cursor := begin
+        ^cursor: begin
         loop cursor < finish {
             if (Int{raw[cursor]}) != 32 {
                 padded = true
@@ -997,25 +999,25 @@ decode_raw_string: fn(text: String, source_start: Int, tables: ^TokenTables) -> 
         finish -= 1
     }
     decoded: foundation_byte_text(raw, begin, finish)
-    parts := [StringPart]{}
+    ^parts: [StringPart]{}
     append_text_part(parts, source_start + begin, source_start + finish, name_intern(tables.names, decoded))
     {decoded: decoded, parts: parts}
 }
 
 // Use the same first offending run and byte span as Native.
 check_triple_delimiter_text: fn(source: [U8], begin: Int, end: Int, position: String, diagnostics: ^[Diagnostic]) {
-    finish := end
+    ^finish: end
     if byte_at(source, end) == 10 && finish > begin && byte_at(source, finish - 1) == 13 {
         finish -= 1
     }
-    first := begin
+    ^first: begin
     loop first < finish && (byte_at(source, first) == 32 || byte_at(source, first) == 9) {
         first += 1
     }
     if first == finish {
         return
     }
-    last := first
+    ^last: first
     loop last < finish && byte_at(source, last) != 32 && byte_at(source, last) != 9 {
         last += utf8_width(source, last)
     }
@@ -1030,23 +1032,23 @@ check_triple_delimiter_text: fn(source: [U8], begin: Int, end: Int, position: St
 // doesn't know in `escapes` instead of reporting them (TextEscape).
 decode_string: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: ^TokenTables, diagnostics: ^[Diagnostic], defer_escapes: Bool, escapes: ^[TextEscape]) -> {decoded: String, interpolations: Int, parts: [StringPart], valid: Bool} {
     triple: byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
-    content_start := start + 1
-    content_end := end - 1
-    indent := 0
+    ^content_start: start + 1
+    ^content_end: end - 1
+    ^indent: 0
     if triple {
         open_end: start + 3
         close: end - 3
-        close_line_start := close
+        ^close_line_start: close
         loop close_line_start > open_end && byte_at(source, close_line_start - 1) != 10 {
             close_line_start -= 1
         }
-        only_indent := true
+        ^only_indent: true
         loop cursor in close_line_start..<close {
             if byte_at(source, cursor) != 32 && byte_at(source, cursor) != 9 -> only_indent = false
         }
         if only_indent -> indent = close - close_line_start
         content_start = open_end
-        cursor := open_end
+        ^cursor: open_end
         loop cursor < close && byte_at(source, cursor) != 10 -> cursor += utf8_width(source, cursor)
         check_triple_delimiter_text(source, open_end, cursor, "after the opening", diagnostics)
         check_triple_delimiter_text(source, close_line_start, close, "before the closing", diagnostics)
@@ -1064,16 +1066,16 @@ decode_char: fn(text: String, source_start: Int, diagnostics: ^[Diagnostic]) -> 
     if (Int{raw[1]}) != 92 {
         width: utf8_width(raw, 1)
         if byte_at(raw, 1 + width) != 39 {
-            span_end := source_start + 1 + width
+            ^span_end: source_start + 1 + width
             if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
             add_long_char(diagnostics, raw, source_start, span_end)
         }
         return foundation_byte_text(raw, 1, 1 + width)
     }
-    escape_width := 0
+    ^escape_width: 0
     if raw.len() > 2 -> escape_width = utf8_width(raw, 2)
-    escape_end := 2 + escape_width
-    scalar := -1
+    ^escape_end: 2 + escape_width
+    ^scalar: -1
     if {
         escape_width > 0 && (Int{raw[2]}) == 117 -> {
             escape: read_scalar_escape(raw, 1, raw.len(), source_start, diagnostics)
@@ -1093,12 +1095,12 @@ decode_char: fn(text: String, source_start: Int, diagnostics: ^[Diagnostic]) -> 
         }
     }
     if byte_at(raw, escape_end) != 39 {
-        span_end := source_start + escape_end
+        ^span_end: source_start + escape_end
         if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
         add_diagnostic(diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
     }
     if scalar < 0 -> return "?"
-    out := [U8]{}
+    ^out: [U8]{}
     push_scalar(out, scalar)
     String.from_bytes(out) ?? ""
 }
@@ -1107,10 +1109,10 @@ decode_char: fn(text: String, source_start: Int, diagnostics: ^[Diagnostic]) -> 
 // temporary Strings or underscore-stripped byte buffers.
 parse_integer_bytes: fn(source: [U8], start: Int, end: Int) -> Int? {
     if start >= end -> return None
-    radix := 10
-    limit := 922337203685477580
-    rest := 7
-    i := start
+    ^radix: 10
+    ^limit: 922337203685477580
+    ^rest: 7
+    ^i: start
     if end - start > 1 && source[start] == (U8{48}) {
         marker: Int{source[start + 1]}
         if marker == {
@@ -1135,8 +1137,8 @@ parse_integer_bytes: fn(source: [U8], start: Int, end: Int) -> Int? {
             else -> {}
         }
     }
-    saw_digit := false
-    value := 0
+    ^saw_digit: false
+    ^value: 0
     loop i < end {
         b: Int{source[i]}
         if b == 95 {
@@ -1156,9 +1158,9 @@ parse_integer_bytes: fn(source: [U8], start: Int, end: Int) -> Int? {
 
 numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: ^TokenTables, diagnostics: ^[Diagnostic]) -> {decoded: Name, literal: Int} {
     numeric_end: scan_numeric_end(source, start)
-    bounded_end := numeric_end
+    ^bounded_end: numeric_end
     if bounded_end < start || bounded_end > end -> bounded_end = end
-    suffix := name_empty()
+    ^suffix: name_empty()
     if kind == TOKEN_UNIT_NUMBER -> suffix = intern_source(tables, source, bounded_end, end)
     marker: byte_at(source, start + 1)
     radix: if marker == {
@@ -1168,9 +1170,9 @@ numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: ^Toke
         else -> 0
     }
     base_prefix: byte_at(source, start) == 48 && radix > 0
-    has_base_digit := false
+    ^has_base_digit: false
     if base_prefix {
-        cursor := start + 2
+        ^cursor: start + 2
         loop cursor < bounded_end {
             if base_digit(byte_at(source, cursor), radix) -> has_base_digit = true
             cursor += 1
@@ -1222,19 +1224,19 @@ scalar_codepoint: fn(source: [U8], start: Int, width: Int) -> Int Never! {
 }
 
 codepoint_hex: fn(value: Int) -> String Never! {
-    digits := [Int]{}
-    remaining := value
+    ^digits: [Int]{}
+    ^remaining: value
     loop remaining > 0 {
         digit: remaining - remaining /% 16 * 16
         digits.push(digit)
         remaining = remaining /% 16
     }
     loop digits.len() < 4 -> digits.push(0)
-    out := [U8]{}
-    cursor := digits.len() - 1
+    ^out: [U8]{}
+    ^cursor: digits.len() - 1
     loop cursor >= 0 {
         digit: digits[cursor]
-        byte := 48 + digit
+        ^byte: 48 + digit
         if digit >= 10 -> byte = 55 + digit
         out.push(U8{byte})
         cursor -= 1
@@ -1255,13 +1257,13 @@ printable_character: fn(source: [U8], start: Int, width: Int) -> String {
 }
 
 fact_index_at: fn(facts: [Int], start: Int) -> Int Never! {
-    index := 0
+    ^index: 0
     loop index < facts.len() /% 4 && facts[index * 4 + 1] < start -> index += 1
     index
 }
 
 gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: ^TokenTables, diagnostics: ^[Diagnostic]) {
-    cursor := start
+    ^cursor: start
     loop cursor < end {
         // ASCII whitespace (every ordinary gap byte) advances inline.
         gap_byte: byte_at(source, cursor)
@@ -1306,7 +1308,7 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
             modes: string_head_modes(source, facts, index)
             scanned: scan_plain_string_end(source, cursor, modes.raw_head)
             stop: if scanned < 0 -> -scanned - 1 else -> scanned
-            unreported := [TextEscape]{}
+            ^unreported: [TextEscape]{}
             body: decode_string_content(source, cursor + 1, stop, false, 0, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics, false, unreported)
             if body.valid {
                 add_diagnostic(diagnostics, "E0002", cursor, stop, "this text never gets a closing quote", "a piece of text must start and end with a `\"` on the same line", "add a closing `\"` before the end of the line")
@@ -1315,7 +1317,7 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
             next
         }
         if value == 96 {
-            fence := 0
+            ^fence: 0
             loop byte_at(source, cursor + fence) == 96 -> fence += 1
             plural: if fence == 1 -> "" else -> "s"
             add_diagnostic(diagnostics, "E0002", cursor, source.len(), "this raw text never gets a closing backtick fence", "a raw string closes with a backtick run that has the same length as its opening run", "add a closing fence of {fence} backtick{plural}")
@@ -1367,7 +1369,7 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
         triple: end - start >= 6 && source[start] == (U8{34}) && source[start + 1] == (U8{34}) && source[start + 2] == (U8{34})
         if triple && raw_foreign_body_at(source, facts, index) {
             body: foundation_byte_text(source, start + 3, end - 3)
-            parts := [StringPart]{}
+            ^parts: [StringPart]{}
             append_text_part(parts, start + 3, end - 3, name_intern(tables.names, body))
             return {decoded: name_intern(tables.names, body), keep: true, literal: literal_row(tables, text_literal(0, parts))}
         }
@@ -1378,8 +1380,8 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
         if !triple && end >= start + 2 {
             c_start: start + 1
             c_end: end - 1
-            plain_fast := true
-            scan_at := c_start
+            ^plain_fast: true
+            ^scan_at: c_start
             loop scan_at < c_end {
                 b: source[scan_at]
                 if b == (U8{92}) || b == (U8{123}) || b == (U8{125}) || b == (U8{10}) {
@@ -1390,12 +1392,12 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
             }
             if plain_fast {
                 decoded_name: if c_end > c_start -> name_intern_bytes(tables.names, source, c_start, c_end) else -> name_empty()
-                parts := [StringPart]{}
+                ^parts: [StringPart]{}
                 append_text_part(parts, c_start, c_end, decoded_name)
                 return {decoded: decoded_name, keep: true, literal: literal_row(tables, text_literal(0, parts))}
             }
         }
-        unreported := [TextEscape]{}
+        ^unreported: [TextEscape]{}
         decoded: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, diagnostics, false, unreported)
         if !decoded.valid -> return {decoded: name_empty(), keep: false, literal: -1}
         return {decoded: name_intern(tables.names, decoded.decoded), keep: true, literal: literal_row(tables, text_literal(decoded.interpolations, decoded.parts))}
@@ -1420,11 +1422,11 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
 // the other reading closes, as `\{{` does in a typed head's body; text that
 // closes neither way fails as any string does.
 string_readings_payload: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: ^TokenTables, diagnostics: ^[Diagnostic]) -> {decoded: Name, literal: Int, keep: Bool} {
-    plain_diagnostics := [Diagnostic]{}
-    plain_escapes := [TextEscape]{}
+    ^plain_diagnostics: [Diagnostic]{}
+    ^plain_escapes: [TextEscape]{}
     plain: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, plain_diagnostics, true, plain_escapes)
-    head_diagnostics := [Diagnostic]{}
-    head_escapes := [TextEscape]{}
+    ^head_diagnostics: [Diagnostic]{}
+    ^head_escapes: [TextEscape]{}
     head: decode_string(source, start, end, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, head_diagnostics, true, head_escapes)
     if !plain.valid && !head.valid {
         loop diagnostic in text_reading_diagnostics(plain_diagnostics, plain_escapes) {
@@ -1432,10 +1434,10 @@ string_readings_payload: fn(source: [U8], start: Int, end: Int, raw_head: Bool, 
         }
         return {decoded: name_empty(), keep: false, literal: -1}
     }
-    head_literal := text_literal(head.interpolations, head.parts)
+    ^head_literal: text_literal(head.interpolations, head.parts)
     head_literal.deferred = head_diagnostics.move()
     head_literal.escapes = head_escapes.move()
-    literal := text_literal(plain.interpolations, plain.parts)
+    ^literal: text_literal(plain.interpolations, plain.parts)
     literal.head = literal_row(tables, head_literal)
     literal.head_decoded = name_intern(tables.names, head.decoded)
     literal.deferred = plain_diagnostics.move()
@@ -1444,7 +1446,7 @@ string_readings_payload: fn(source: [U8], start: Int, end: Int, raw_head: Bool, 
 }
 
 lexed_from: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
-    tables := token_tables()
+    ^tables: token_tables()
     raw: lex_payload_at_depth(source, config_surface, allow_reserved_identifiers, 0, tables)
     Lexed{tokens: raw.tokens, tables: tables, diagnostics: raw.diagnostics}
 }

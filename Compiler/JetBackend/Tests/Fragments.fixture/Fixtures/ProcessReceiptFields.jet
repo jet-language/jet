@@ -3,7 +3,7 @@
 use process: core.process
 
 receipt_fields: fn(receipt: ProcessReceipt) -> Int Never! {
-    total := receipt.code + receipt.pid + receipt.argv.len() + receipt.authority.len() + receipt.limits.len() + receipt.outputs.len()
+    ^total: receipt.code + receipt.pid + receipt.argv.len() + receipt.authority.len() + receipt.limits.len() + receipt.outputs.len()
     if receipt.signal == .Val(signal) -> total += signal
     if receipt.limit_hit == .Val(_) -> total += 1
     if (receipt.peak_memory_bytes ?? 0) > 0 -> total += 1

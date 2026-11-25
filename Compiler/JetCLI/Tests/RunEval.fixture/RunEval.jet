@@ -28,9 +28,9 @@ Ran: struct {
 
 // `jet <args>` run in `work` with the cache `cache`.
 jet_run: fn(jet: String, repo: String, work: String, cache: String, args: [String]) -> Ran {
-    argv := [String]{jet.copy()}
+    ^argv: [String]{jet.copy()}
     loop arg in args -> argv.push(arg.copy())
-    receipt := process.cmd(argv).cwd(work.copy()).env("JET_TOOLCHAIN_ROOT", repo.copy()).env("XDG_CACHE_HOME", cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet {args.join(" ")} failed to start: {err}")
+    ^receipt: process.cmd(argv).cwd(work.copy()).env("JET_TOOLCHAIN_ROOT", repo.copy()).env("XDG_CACHE_HOME", cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet {args.join(" ")} failed to start: {err}")
     Ran{code: receipt.code, signal: receipt.signal ?? 0, output: receipt.output.move(), errors: receipt.errors.move()}
 }
 
@@ -42,7 +42,7 @@ eval: fn(jet: String, repo: String, work: String, cache: String, code: String) -
 // Every entry name of `directory`, sorted.
 names_in: fn(directory: String) -> [String] {
     entries: files.list_dir(directory.copy()) ?? fail("cannot list {directory}: {err}")
-    names := [String]{}
+    ^names: [String]{}
     loop entry in entries -> names.push(entry.name.copy())
     names.sort()
     names

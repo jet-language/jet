@@ -7,20 +7,20 @@ use {
 }
 
 filled: fn(value: Int, count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<count -> out.push((U8{value}))
     out
 }
 
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
 
 hex: fn(text: String) -> [U8] {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<(raw.len() /% 2) {
         a: Int{raw[2 * i]}
         b: Int{raw[2 * i + 1]}
@@ -32,7 +32,7 @@ hex: fn(text: String) -> [U8] {
 }
 
 little: fn(bytes: [U8], at: Int, width: Int) -> Int {
-    out := 0
+    ^out: 0
     loop i in 0..<width -> out |= Int{bytes[at + i]} << (8 * i)
     out
 }
@@ -42,7 +42,7 @@ store_little: fn(bytes: ^[U8], at: Int, width: Int, value: Int) {
 }
 
 #Test("jetc_v2_streams_authenticated_chunks_and_publishes_without_overwrite") {
-    plain := filled(90, 1048576 + 17)
+    ^plain: filled(90, 1048576 + 17)
     plain[0] = (U8{1})
     plain[1048576] = (U8{2})
     files.write_bytes("source.bin", plain) ?? panic("source")

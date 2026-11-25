@@ -162,8 +162,8 @@ JET_CLI_RESERVED_SIGILS: [JetCLIReservedEntry]{
 
 // `value` padded with spaces to `width` characters.
 jet_cli_inspect_pad: fn(value: String, width: Int) -> String Never! {
-    out := value
-    count := 0
+    ^out: value
+    ^count: 0
     loop byte in value.bytes() {
         code: Int{byte}
         if code < 128 || code >= 192 -> count += 1
@@ -181,7 +181,7 @@ jet_cli_contextual_keyword: fn(word: String) -> Bool Never! {
 }
 
 jet_cli_reserved_text: fn() -> String Never! {
-    out := "Keywords (not valid identifiers):\n"
+    ^out: "Keywords (not valid identifiers):\n"
     loop word in LEXER_KEYWORD_SPELLINGS -> out = "{out}  {word}\n"
     out = "{out}\nTeaching-reserved words (not valid identifiers):\n"
     loop entry in JET_CLI_TEACHING_RESERVED {
@@ -211,7 +211,7 @@ jet_cli_reserved_entries: fn(entries: [JetCLIReservedEntry]) -> JetCLIStatusValu
 
 jet_cli_reserved: fn(json: Bool) -> JetCLIPlan Never! {
     if !json -> return jet_cli_done(jet_cli_reserved_text(), "", JET_DRIVER_EXIT_OK)
-    contextual := [JetCLIStatusValue]{}
+    ^contextual: [JetCLIStatusValue]{}
     loop word in KEYWORD_NAMES {
         if jet_cli_contextual_keyword(word) -> contextual.push(jet_cli_status_text(word))
     }
@@ -261,7 +261,7 @@ jet_cli_digest_section: fn(title: String, body: String) -> String Never! {
 }
 
 jet_cli_digest_list: fn(values: [String]) -> String Never! {
-    unique := [String]{}
+    ^unique: [String]{}
     loop value in values {
         if !unique.contains(value) -> unique.push(value.copy())
     }
@@ -270,9 +270,9 @@ jet_cli_digest_list: fn(values: [String]) -> String Never! {
 }
 
 jet_cli_digest_one_line: fn(value: String) -> String Never! {
-    words := [String]{}
+    ^words: [String]{}
     bytes: value.bytes()
-    start := -1
+    ^start: -1
     loop (index, byte) in bytes {
         code: Int{byte}
         space: code == 32 || (code >= 9 && code <= 13)
@@ -292,7 +292,7 @@ jet_cli_digest_one_line: fn(value: String) -> String Never! {
 // One registered rule as its marker type on one line: the fields, then the
 // `impl Marker` settings.
 jet_cli_digest_marker_declaration: fn(rule: TAppliedRule) -> String Never! {
-    fields := [String]{}
+    ^fields: [String]{}
     loop param in rule.signature.params {
         default: if param.default_source == .Val(value) -> "{{{value}}}" else -> ""
         fields.push("{param.name}: {param.source_type}{default}")
@@ -302,7 +302,7 @@ jet_cli_digest_marker_declaration: fn(rule: TAppliedRule) -> String Never! {
         fields.push("{variadic_name}: [{source_type}]")
     }
     sites: loop site in rule.sites -> ".{site}"
-    settings := [String]{"sites: [{sites.join(", ")}]"}
+    ^settings: [String]{"sites: [{sites.join(", ")}]"}
     if rule.repeatable -> settings.push("repeatable: true")
     if rule.owns_menu -> settings.push("owns_menu: true")
     if rule.inherits -> settings.push("inherits: true")
@@ -319,7 +319,7 @@ jet_cli_digest_marker_declaration: fn(rule: TAppliedRule) -> String Never! {
 }
 
 jet_cli_digest_marker_text: fn(rules: [TAppliedRule]) -> String Never! {
-    out := "name\tregistered declaration"
+    ^out: "name\tregistered declaration"
     loop rule in rules -> out = "{out}\n{rule.name}\t{jet_cli_digest_marker_declaration(rule)}"
     out
 }
@@ -342,7 +342,7 @@ jet_cli_digest_structured_fix: fn(fix: DiagnosticRegistryFix?) -> String Never! 
 // The current registry meaning: retired rows are never reported, so the
 // digest leaves them out.
 jet_cli_digest_diagnostic_text: fn() -> String Never! {
-    out := "name\tstatus\tstage\tseverity\tmoment\tmeaning\twhat\twhy\tfix\tdetail\tstructured-fix"
+    ^out: "name\tstatus\tstage\tseverity\tmoment\tmeaning\twhat\twhy\tfix\tdetail\tstructured-fix"
     loop row in diagnostic_registry_rows() {
         if row.status == .Retired -> next
         status: if row.status == .Active -> "active" else -> "reserved"
@@ -360,9 +360,9 @@ jet_cli_digest_diagnostic_text: fn() -> String Never! {
 }
 
 jet_cli_digest_core_module_text: fn() -> String Never! {
-    out := "module\titems"
+    ^out: "module\titems"
     loop module_row in CORE_MODULE_EXPORTS {
-        unique := [String]{}
+        ^unique: [String]{}
         loop item in module_row.members {
             if !unique.contains(item) -> unique.push(item)
         }
@@ -437,7 +437,7 @@ jet_cli_llm_digest: fn() -> String Never! {
 // `text` without trailing ASCII whitespace.
 jet_cli_inspect_trim_end: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop end > 0 {
         code: Int{bytes[end - 1]}
         if code != 32 && (code < 9 || code > 13) -> break
@@ -464,7 +464,7 @@ jet_cli_inspect_find: fn(haystack: String, needle: String, from: Int) -> Int? Ne
     if pattern.len() == 0 -> return Val(from)
     loop start in from..<bytes.len() {
         if start + pattern.len() > bytes.len() -> return None
-        matched := true
+        ^matched: true
         loop offset in 0..<pattern.len() {
             if bytes[start + offset] != pattern[offset] {
                 matched = false
@@ -488,7 +488,7 @@ jet_cli_digest_slices: fn(digest: String) -> [JetCLIDigestSlice] Never! {
     topics: [String]{"first-program", "core.source-rules", "idioms", "syntax.keywords", "syntax.types", "syntax.reserved", "markers", "core", "diagnostics"}
     headings: [String]{"## First program", "## Core source rules", "## Canonical idiom suites", "## Keywords", "## Built-in type names", "## Reserved first-party names", "## Markers", "## Core module index", "## Diagnostics"}
     starts: loop heading in headings -> jet_cli_inspect_find(digest, heading, 0) ?? panic("digest heading disappeared")
-    slices := [JetCLIDigestSlice]{}
+    ^slices: [JetCLIDigestSlice]{}
     loop (index, topic) in topics {
         start: if index == 0 -> 0 else -> starts[index]
         end: if index + 1 < starts.len() -> starts[index + 1] else -> digest.count_bytes()
@@ -499,8 +499,8 @@ jet_cli_digest_slices: fn(digest: String) -> [JetCLIDigestSlice] Never! {
         header: "module\titems\n"
         header_at: jet_cli_inspect_find(digest, header, start) ?? panic("core digest header disappeared")
         header_end: header_at + header.len()
-        rows := [Int]{}
-        offset := header_end
+        ^rows: [Int]{}
+        ^offset: header_end
         loop line in jet_cli_inspect_slice(digest, header_end, end).split("\n") {
             if offset >= end -> break
             if line.starts_with("core.") -> rows.push(offset)
@@ -522,12 +522,12 @@ jet_cli_inspect_edit_distance: fn(left: String, right: String) -> Int Never! {
     a: left.bytes()
     b: right.bytes()
     first_row: loop index in 0..b.len() -> index
-    previous := first_row
+    ^previous: first_row
     loop i in 0..<a.len() {
-        current := [Int]{i + 1}
+        ^current: [Int]{i + 1}
         loop j in 0..<b.len() {
             cost: if a[i] == b[j] -> 0 else -> 1
-            best := previous[j] + cost
+            ^best: previous[j] + cost
             if previous[j + 1] + 1 < best -> best = previous[j + 1] + 1
             if current[j] + 1 < best -> best = current[j] + 1
             current.push(best)
@@ -545,9 +545,9 @@ jet_cli_digest_emit: fn(digest: String, json: Bool) -> JetCLIPlan Never! {
 
 // `options` are the words after `digest`.
 jet_cli_digest: fn(options: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    topic := String?{None}
-    list_topics := false
-    index := 0
+    ^topic: String?{None}
+    ^list_topics: false
+    ^index: 0
     loop index < options.len() {
         argument: options[index]
         if {
@@ -583,8 +583,8 @@ jet_cli_digest: fn(options: [String], color: Bool, json: Bool) -[FS, Env]> JetCL
     loop slice in slices {
         if slice.topic == wanted -> return jet_cli_digest_emit(slice.bytes, json)
     }
-    closest := "first-program"
-    best := -1
+    ^closest: "first-program"
+    ^best: -1
     loop slice in slices {
         distance: jet_cli_inspect_edit_distance(wanted, slice.topic)
         if best < 0 || distance < best || (distance == best && jet_cli_inspect_less(slice.topic, closest)) {
@@ -627,7 +627,7 @@ jet_cli_find_engine_binary_for: fn(name: String, jet: String) -[FS, Env]> String
     if name == JET_CLI_JETPACK_BINARY {
         if jet_cli_named_engine() == .Val(named) -> return jet_cli_engine_candidate(named)
     }
-    dirs := [String]{}
+    ^dirs: [String]{}
     if jet_cli_parent(jet) == .Val(directory) -> dirs.push(directory)
     if cli_sys.get("PATH") == .Val(path) {
         loop directory in path.split(":") -> dirs.push(if directory == "" -> "." else -> directory)
@@ -675,8 +675,8 @@ jet_cli_missing_engine: fn(engine: String, verb: String, named: String?) -> JetD
 jet_cli_version_skew: fn(engine: String, jet_version: String, engine_version: String?) -> JetDriverVerbOutput Never! {
     bin: JET_CLI_BINARY
     fix: "Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release"
-    what := "`{bin}` {jet_version} and `{engine}` disagree (no protocol reply)"
-    why := "`{bin}` and `{engine}` ship as one toolchain and must match exactly; this `{engine}` didn't answer the version handshake, so it predates this protocol"
+    ^what: "`{bin}` {jet_version} and `{engine}` disagree (no protocol reply)"
+    ^why: "`{bin}` and `{engine}` ship as one toolchain and must match exactly; this `{engine}` didn't answer the version handshake, so it predates this protocol"
     if engine_version == .Val(version) {
         what = "`{bin}` {jet_version} and `{engine}` {version} disagree"
         why = "`{bin}` and `{engine}` ship as one toolchain and must match exactly, or the engine may not understand what `{bin}` sends it"
@@ -700,11 +700,11 @@ jet_cli_engine_dispatch: fn(engine: String, verb: String, argv: [String]) -[Env,
     bin: jet_cli_find_engine_binary(engine) ?? return jet_cli_missing_engine(engine, verb, if engine == JET_CLI_JETPACK_BINARY -> jet_cli_named_engine() else -> None)
     reply: jet_cli_query_engine_protocol(bin)
     if reply != Val(JET_VERSION) -> return jet_cli_version_skew(engine, JET_VERSION, reply)
-    command := [String]{bin}
+    ^command: [String]{bin}
     loop argument in argv -> command.push(argument.copy())
     spec: cli_process.cmd(command).env(JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV, "{cli_process.current_pid()}").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     receipt: spec.run() ?? return jet_cli_report_output("", "E2105", "couldn't run `{bin}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
-    exit_code := receipt.code
+    ^exit_code: receipt.code
     if receipt.signal != None -> exit_code = JET_DRIVER_EXIT_USER_ERROR
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
 }
@@ -731,7 +731,7 @@ jet_cli_find_external: fn(name: String) -[FS, Env]> String? Never! {
 // The external command runs with the words after its name on inherited
 // stdio; its exit code is this run's (a signal-ended one exits 0).
 jet_cli_external_run: fn(bin: String, args: [String]) -[Exec, Time.Wait]> JetDriverVerbOutput Never! {
-    command := [String]{bin}
+    ^command: [String]{bin}
     loop argument in args -> command.push(argument.copy())
     receipt: cli_process.cmd(command).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_report_output("", "E2105", "couldn't run `{bin}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
     exit_code: if receipt.signal != None -> 0 else -> receipt.code
@@ -773,7 +773,7 @@ jet_cli_inspect_first_positional: fn(args: [String]) -> String? Never! {
 }
 
 jet_cli_inspect_positionals: fn(args: [String]) -> [String] Never! {
-    found := [String]{}
+    ^found: [String]{}
     loop argument in args {
         if !argument.starts_with("-") -> found.push(argument.copy())
     }
@@ -799,7 +799,7 @@ JetCLIInspectRoot: enum {
 // compilation. A missing root keeps the command hint; stale-name teaching is a
 // direct, uncolored user error even in machine output mode.
 jet_cli_require_inspect_root: fn(start: String, hint: String, color: Bool) -[FS, Env]> JetCLIInspectRoot Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if jet_cli_find_package_root_checked(cache, start) == {
         .Ok(found) -> {
             if found == .Val(root) -> return JetCLIInspectRoot.Root{path: root}
@@ -813,8 +813,8 @@ jet_cli_require_inspect_root: fn(start: String, hint: String, color: Bool) -[FS,
 // (jet-env-model `ModuleEval.evaluate_env`) and project its typed `$NAME`
 // reads without exposing their values.
 jet_cli_inspect_env: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    file := ""
-    skip_value := false
+    ^file: ""
+    ^skip_value: false
     loop argument in args {
         if skip_value {
             skip_value = false
@@ -866,7 +866,7 @@ jet_cli_inspect_env_host: fn(file: String, source: String, base_dir: String, col
         )
         return jet_cli_inspect_env_output("{jet_cli_status_render("inspect.env", true, [JetCLIStatusField]{jet_cli_status_field("env", payload)})}\n", "", JET_DRIVER_EXIT_OK)
     }
-    out := "Environment\nFile: {file}\n"
+    ^out: "Environment\nFile: {file}\n"
     if plan.environment_reads.len() == 0 -> out = "{out}Reads: none\n" else {
         out = "{out}Reads:\n"
         loop read in plan.environment_reads -> out = "{out}  {read.name}: {read.ty}\n"
@@ -881,10 +881,10 @@ jet_cli_inspect_env_host: fn(file: String, source: String, base_dir: String, col
 // semantic blame of the entry's definitions (`semindex-blame`, Host.jet
 // jet_cli_semindex_blame).
 jet_cli_semindex: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    audit := String?{None}
-    blame := false
-    file := String?{None}
-    index := 0
+    ^audit: String?{None}
+    ^blame: false
+    ^file: String?{None}
+    ^index: 0
     loop index < args.len() {
         argument: args[index]
         if {
@@ -896,7 +896,9 @@ jet_cli_semindex: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLI
                 audit = Val(jet_cli_inspect_absolutize(args[index]))
             }
             argument == "--blame" -> blame = true
-            !argument.starts_with("-") && file == .None -> file = Val(jet_cli_inspect_absolutize(argument))
+            !argument.starts_with("-") && file == .None -> {
+                file = Val(jet_cli_inspect_absolutize(argument))
+            }
             else -> {}
         }
         index += 1
@@ -1045,7 +1047,7 @@ jet_cli_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIPlan Never
                 if job.output != None -> return jet_cli_data_bind_finish(job, "")
                 cwd: cli_files.cwd() ?? "."
                 absolute: if job.input_path.starts_with("/") -> job.input_path else -> jet_cli_entry_join(cwd, job.input_path)
-                cache := WorkspaceDeclarationCache.new()
+                ^cache: WorkspaceDeclarationCache.new()
                 root: jet_cli_selected_project_root(cache, jet_cli_parent(absolute) ?? ".") ?? return jet_cli_done("", diagnostic_render_all(job.input_path, job.input, [Diagnostic]{err.diagnostic}, false), JET_DRIVER_EXIT_USER_ERROR)
                 return jet_cli_data_bind_finish(job, root)
             }

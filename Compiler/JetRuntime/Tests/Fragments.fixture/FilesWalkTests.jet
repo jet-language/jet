@@ -11,7 +11,7 @@ files_walk_fixture_path: fn(root: I64, suffix: I64) -> I64 {
 files_walk_fixture_write: fn(path: I64, content: I64, error: I64) -> Bool {
     length: rt_text_len(content)
     bytes: jet_rt_alloc(length * RT_HOST_U8_STRIDE + I64{1}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         host_u8_put(bytes, at, rt_text_byte(rt_text_data(content) + at))
         at += I64{1}
@@ -100,7 +100,7 @@ files_walk_fixture_ignored: fn(rules: I64, relative: I64, is_dir: Bool) -> Bool 
 files_walk_fixture_live: fn(key: I64) -> Bool {
     root: walk_root
     sync_mutex_lock(root)
-    node := rt_text_word(root + I64{16})
+    ^node: rt_text_word(root + I64{16})
     loop node != (I64{0}) && rt_text_word(node + I64{8}) != key -> node = rt_text_word(node)
     sync_mutex_unlock(root)
     node != I64{0}
@@ -133,7 +133,7 @@ files_walk_fixture_live: fn(key: I64) -> Bool {
     if !jet_rt_record_get_dir_entry_is_dir(rt_text_word(listed + I64{8})) || jet_rt_record_get_dir_entry_is_dir(rt_text_word(listed + I64{16})) {
         return I64{7}
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{3}) {
         jet_rt_handle_drop_dir_entry(rt_text_word(listed + at * I64{8}))
         at += I64{1}
@@ -153,8 +153,8 @@ files_walk_fixture_live: fn(key: I64) -> Bool {
     if (rt_text_word(out + I64{24}) != I64{0}) { return I64{10} }
     jet_walk8_read_dir(key, I64{0}, out, out + I64{8}, out + I64{16}, out + I64{24}, out + I64{32})
     if (rt_text_word(out + I64{24}) != I64{0}) { return I64{11} }
-    seen := I64{0}
-    child := I64{-1}
+    ^seen: I64{0}
+    ^child: I64{-1}
     loop {
         thread_zero(out, I64{96})
         jet_walk8_next(key, I64{0}, out, out + I64{8}, out + I64{16}, out + I64{24}, out + I64{32}, out + I64{40}, out + I64{48}, out + I64{56}, out + I64{64}, out + I64{72}, out + I64{80}, out + I64{88})

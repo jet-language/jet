@@ -409,8 +409,8 @@ FAMILIES: [Family]{
 
 // One C name of a family, or its pattern.
 family_names: fn(family: Family) -> [String] Never! {
-    out := [String]{}
-    suffixes := [String]{}
+    ^out: [String]{}
+    ^suffixes: [String]{}
     if family.variants != "" {
         loop suffix in family.variants.split(" ") -> suffixes.push(suffix.copy())
     }
@@ -453,9 +453,9 @@ json_text: fn(value: Dyn, key: String) -> String Never! {
 
 // Core.rows's exported members, keyed by module.
 core_exports: fn(core: Dyn) -> [String:[String]] CensusError! {
-    out := [String:[String]]{}
+    ^out: [String:[String]]{}
     loop entry in json_items(core, "modules") {
-        members := [String]{}
+        ^members: [String]{}
         loop member in json_items(entry, "members") {
             if member == .Text(name) -> members.push(name.copy())
         }
@@ -468,7 +468,7 @@ core_exports: fn(core: Dyn) -> [String:[String]] CensusError! {
 // The first source file of each Core module, keyed by module; runtime units
 // are no module's source.
 core_sources: fn(core: Dyn) -> [String:String] Never! {
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop source in json_items(core, "sources") {
         module_name: json_text(source, "module")
         if (source.get("runtime") ?? Dyn.Null) == .Bool(true) || out.get(module_name) != None {
@@ -483,7 +483,7 @@ core_sources: fn(core: Dyn) -> [String:String] Never! {
 // line (after any markers) inside the type's `Type: struct {` body or one of
 // its `impl Type` blocks.
 declares_method: fn(source: String, type_name: String, method: String) -> Bool Never! {
-    inside := false
+    ^inside: false
     loop line in source.split("\n") {
         if line == "}}" {
             inside = false
@@ -532,7 +532,7 @@ unresolved: fn(exports: [String:[String]], sources: [String:String]) -[FS]> [Str
     statics: files.read(BUILTIN_STATICS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_STATICS_PATH}: {err}"))
     collections: files.read(COLLECTIONS_PATH) ?? return Err(census_fail("cannot read {COLLECTIONS_PATH}: {err}"))
     shared: files.read(SHARED_OWNER_PATH) ?? return Err(census_fail("cannot read {SHARED_OWNER_PATH}: {err}"))
-    problems := [String]{}
+    ^problems: [String]{}
     loop family in FAMILIES {
         if family.coverage == .NotNeeded && !family.note.contains(OWNER_RULING) {
             problems.push("{family.names}: a not-needed family's note does not cite the {OWNER_RULING}")
@@ -588,7 +588,7 @@ unresolved: fn(exports: [String:[String]], sources: [String:String]) -[FS]> [Str
             }
         }
     }
-    seen := [String:String]{}
+    ^seen: [String:String]{}
     loop family in FAMILIES {
         loop name in family_names(family) {
             if seen.has_key(name) -> problems.push("{name} is listed twice")
@@ -600,7 +600,7 @@ unresolved: fn(exports: [String:[String]], sources: [String:String]) -[FS]> [Str
 
 // The order areas first appear in FAMILIES.
 areas: fn() -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop family in FAMILIES {
         if !out.contains(family.area) -> out.push(family.area.copy())
     }
@@ -608,7 +608,7 @@ areas: fn() -> [String] Never! {
 }
 
 function_count: fn(family: Family) -> Int Never! {
-    count := 0
+    ^count: 0
     loop name in family_names(family) {
         if !is_pattern(name) -> count += 1
     }
@@ -619,7 +619,7 @@ cell: fn(text: String) -> String Never! { if text == "" -> "" else -> text.repla
 
 code_list: fn(text: String) -> String Never! {
     if text == "" -> return ""
-    parts := [String]{}
+    ^parts: [String]{}
     loop word in text.split(" ") -> parts.push("`{word}`")
     parts.join(" ")
 }
@@ -631,7 +631,7 @@ c_names: fn(family: Family) -> String Never! {
 }
 
 report: fn() -> String Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     lines.push("# libc census")
     lines.push("")
     lines.push("Printed by `jet Tools/Agent/LibcCensus.jet`, which first checks that every Jet API a row names exists.")
@@ -650,9 +650,9 @@ report: fn() -> String Never! {
     lines.push("")
     lines.push("| Area | Families | Functions | Covered | Partial | Language | Not needed | GAP |")
     lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-    totals := [Int]{0, 0, 0, 0, 0, 0, 0}
+    ^totals: [Int]{0, 0, 0, 0, 0, 0, 0}
     loop area in areas() {
-        counts := [Int]{0, 0, 0, 0, 0, 0, 0}
+        ^counts: [Int]{0, 0, 0, 0, 0, 0, 0}
         loop family in FAMILIES {
             if family.area != area -> next
             counts[0] = counts[0] + 1
@@ -675,7 +675,7 @@ report: fn() -> String Never! {
     lines.push("")
     lines.push("Every GAP and partial family, grouped by area.")
     loop area in areas() {
-        rows := [String]{}
+        ^rows: [String]{}
         loop family in FAMILIES {
             if family.area != area -> next
             if family.coverage == {

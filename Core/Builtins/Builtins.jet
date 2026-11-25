@@ -112,10 +112,10 @@
 // TypedDecodeRead, and reads a Dyn tree through the constructor filling
 // TypedDecodeTree. The compiler reads their names from those markers in
 // Core/Encoding/Encoding.jet while it builds.
-// The core.mem and
-// core.math operations the compiler builds inline at each call, never as a
-// call (a raw List's capacity, a pointer step, a block copy, a bit copy and
-// the rest), fill the roles that start with `Inline`. A role's name ends
+// The Core operations the compiler builds inline at each call, never as a
+// call (a raw List's capacity, a pointer step, a block copy, a bit copy, a
+// plugin load, a vault's current key, a value's reflection and the rest),
+// fill the roles that start with `Inline`. A role's name ends
 // in `Point` exactly when it is a point constructor's, starts with `Decode`
 // exactly when it is a decode helper's, starts with `Inline` exactly when it
 // is a builder intrinsic's, starts with `Measurement` exactly when it is a
@@ -190,6 +190,7 @@ RoleKind: enum {
     TapeTangent,
     VaultUnlockRecipient,
     VaultUnlockPassphrase,
+    InlineVaultCurrent,
     ListQuery,
     QueryStream,
     StreamWithEventTime,
@@ -227,7 +228,6 @@ RoleKind: enum {
     DecodeBytes,
     DecodeOption,
     DecodeMap,
-    TypedDecodeSource,
     TypedDecodeRead,
     TypedDecodeTree,
     JSONTypedDecode,
@@ -381,6 +381,7 @@ RoleKind: enum {
     TLSClientStream,
     TLSClientDeadline,
     TLSClientConfigDeadline,
+    InlinePluginLoad,
     ProcessSpecAbilities,
     ProcessSpecCwd,
     ProcessSpecArg,
@@ -418,6 +419,7 @@ RoleKind: enum {
     ProcessStderrLine,
     ProcessStdoutChunks,
     ProcessStderrChunks,
+    InlineReflectOf,
     StringMatches,
     StringMatch,
     StringHasLine,
@@ -507,8 +509,12 @@ FloatWord: struct<exponent: Int, fraction: Int> {}
 // compiler's type and never this declaration. Its facts are the markers
 // written here, which the compiler reads while it builds
 // (Compiler/JetFoundation/Source/Registry/BuiltinCarriers.jet): a
-// `#MoveOnly` value moves and never copies, and a `#Local` one stays on the
-// thread that made it. Each marker goes on the line right above its type.
+// `#MoveOnly` value moves and never copies, a `#Local` one stays on the
+// thread that made it, and a `#SingleUse` one owes one of the methods that
+// consume it (`^^self`) on every path. Each marker goes on the line right
+// above its type. A consuming method is declared for its name only: the
+// compiler types each call itself (a task's `join` returns its `T` or its
+// `TaskFailure`).
 #MoveOnly
 priv Atomic: struct<T> {}
 
@@ -526,6 +532,19 @@ priv CellReadGuard: struct<T> {}
 
 #[MoveOnly, Local]
 priv CellEditGuard: struct<T> {}
+
+#[MoveOnly, SingleUse]
+priv Task: struct<T> {
+    join: fn(^^self) {}
+
+    detach: fn(^^self) {}
+}
+
+priv Receiver: struct<T> {}
+
+priv Sender: struct<T> {}
+
+priv ProcessChild: struct {}
 
 // The test harness's evidence and temporary-directory operations
 // (jet.runtime.testing's, behind `core.testing`'s snap, golden, fixture and

@@ -63,7 +63,7 @@ OVERHEAD_UNSET: [String]{"JET_OBSERVE", "JET_PERF_SAMPLES", "JET_PERF_LENSES"}
 
 // The program: `tasks` tasks burn `cpu_ms` of the process's CPU time.
 overhead_program: fn(tasks: Int, cpu_ms: Int) -> String Never! {
-    lines := [String]{
+    ^lines: [String]{
         "// {tasks} tasks call fib(25) at once until the process has used {cpu_ms} ms",
         "// of CPU time; the sum of the results is the work done in it.",
         "use os: core.sys",
@@ -106,7 +106,7 @@ overhead_work: fn(output: String) -> Int? Never! {
 // The middle of `values` in order.
 overhead_median: fn(values: [Int]) -> Int Never! {
     if values.len() == 0 -> return 0
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort()
     sorted[sorted.len() /% 2]
 }
@@ -128,7 +128,7 @@ overhead_profiled_argv: fn(jet: String) -> [String] Never! {
 // The work `argv` did, run in `work_dir` without OVERHEAD_UNSET, or the
 // reason it failed.
 overhead_run: fn(argv: [String], work_dir: String) -[Exec, Time.Wait]> Int Err! {
-    spec := process.cmd(argv).cwd(work_dir).stdout(.Capture).stderr(.Capture)
+    ^spec: process.cmd(argv).cwd(work_dir).stdout(.Capture).stderr(.Capture)
     loop name in OVERHEAD_UNSET -> spec = spec.env_remove(name)
     receipt: spec.run() ?? return Err("{argv[0]} did not run: {err}")
     if !receipt.success {
@@ -146,7 +146,7 @@ overhead_profiled: fn(jet: String, work_dir: String) -[Exec, FS, Time.Wait]> Ove
     text: files.read(trace_path) ?? return Err("couldn't read {trace_path}: {err}")
     trace: json.parse(text) ?? return Err("{trace_path} is not JSON: {err}")
     status: json.at<String>(trace, "content/profile/overhead_status") ?? return Err("{trace_path} has no content/profile/overhead_status text")
-    overhead_ns := Int?{None}
+    ^overhead_ns: Int?{None}
     if status == "measured" {
         overhead_ns = Val(json.at<Int>(trace, "content/profile/overhead_ns") ?? return Err("{trace_path} says measured but has no content/profile/overhead_ns integer"))
     }
@@ -168,8 +168,8 @@ overhead_measure: fn(options: OverheadOptions, work_dir: String) -[Exec, FS, Tim
     // timed run pays for a build.
     _: overhead_run(overhead_unprofiled_argv(options.jet), work_dir) ?? return Err(err)
     _: overhead_profiled(options.jet, work_dir) ?? return Err(err)
-    unprofiled := [Int]{}
-    profiled := [OverheadProfiled]{}
+    ^unprofiled: [Int]{}
+    ^profiled: [OverheadProfiled]{}
     loop _ in 0..<options.runs {
         unprofiled.push(overhead_run(overhead_unprofiled_argv(options.jet), work_dir) ?? return Err(err))
         profiled.push(overhead_profiled(options.jet, work_dir) ?? return Err(err))
@@ -187,7 +187,7 @@ overhead_matched_bp: fn(runs: OverheadRuns) -> Int Never! {
 
 // The profiled runs whose receipt does not say `measured`.
 overhead_unmeasured: fn(runs: OverheadRuns) -> Int Never! {
-    count := 0
+    ^count: 0
     loop run in runs.profiled {
         if run.status != "measured" -> count += 1
     }
@@ -206,12 +206,12 @@ overhead_bar_missed: fn(options: OverheadOptions, runs: OverheadRuns) -> Bool Ne
 // The report: the tool, the commands, the rows, then the bar's verdict when
 // there is one. The receipt's row is `-` when no receipt was measured.
 overhead_rows: fn(options: OverheadOptions, runs: OverheadRuns) -> [String] Never! {
-    measured := [Int]{}
+    ^measured: [Int]{}
     loop run in runs.profiled {
         if run.overhead_ns == .Val(ns) -> measured.push(ns)
     }
     receipt: if measured.len() == 0 -> "-" else -> "{overhead_basis_points(overhead_median(measured), options.cpu_ms * 1000000)}"
-    rows := [String]{
+    ^rows: [String]{
         "# {runs.jet_version}",
         "# program: {options.tasks} tasks call fib(25) until the process has used {options.cpu_ms} ms of CPU time",
         "# unprofiled: {overhead_unprofiled_argv(options.jet).join(" ")}",
@@ -233,8 +233,8 @@ overhead_rows: fn(options: OverheadOptions, runs: OverheadRuns) -> [String] Neve
 
 sampler_overhead: fn() -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
     args: process.args()
-    options := OverheadOptions{jet: process.which("jet") ?? "jet", tasks: 4, cpu_ms: 2000, runs: 5, bar: None}
-    at := 0
+    ^options: OverheadOptions{jet: process.which("jet") ?? "jet", tasks: 4, cpu_ms: 2000, runs: 5, bar: None}
+    ^at: 0
     loop at < args.len() {
         if at + 1 >= args.len() -> return usage()
         value: args[at + 1]

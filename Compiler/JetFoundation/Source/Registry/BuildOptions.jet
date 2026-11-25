@@ -299,7 +299,7 @@ DeepChecksRead: enum {
 // selects every deep check and each `--deep-checks=<scope>` adds its scope.
 // An empty or malformed scope is refused (deep_checks_malformed).
 deep_checks_read: fn(argv: [String]) -> DeepChecksRead Never! {
-    request := DeepChecks{}
+    ^request: DeepChecks{}
     prefix: "{DEEP_CHECKS_FLAG}="
     loop argument in argv {
         if argument == "--" -> break
@@ -322,7 +322,7 @@ deep_checks_read: fn(argv: [String]) -> DeepChecksRead Never! {
 // `tree.balance.Tree.fix`). A package name is ASCII letters, digits, `_`
 // and `-`; every later name is letters, digits and `_`.
 deep_checks_scope_valid: fn(scope: String) -> Bool Never! {
-    package := true
+    ^package: true
     loop name in scope.split(".") {
         if !deep_checks_name_valid(name, package) -> return false
         package = false
@@ -353,7 +353,7 @@ deep_checks_off: fn(request: DeepChecks) -> Bool Never! {
 // scopes in sorted order, so one selection written in any order has one key.
 deep_checks_key: fn(request: DeepChecks) -> String Never! {
     if deep_checks_off(request) -> return ""
-    words := [String]{}
+    ^words: [String]{}
     loop scope in request.scopes -> words.push(scope.copy())  // copy: sorted for the key; the request keeps argv order.
     words.sort()
     if request.all -> words.insert(0, "all")
@@ -362,7 +362,7 @@ deep_checks_key: fn(request: DeepChecks) -> String Never! {
 
 // The flags that write the request again, as deep_checks_read reads them.
 deep_checks_flags: fn(request: DeepChecks) -> [String] Never! {
-    words := [String]{}
+    ^words: [String]{}
     if request.all -> words.push(DEEP_CHECKS_FLAG)
     loop scope in request.scopes -> words.push("{DEEP_CHECKS_FLAG}={scope}")
     words
@@ -393,13 +393,13 @@ DeepChecksUnselected: struct {
 // longest prefix that names one module. A bare flag beside a scope excuses
 // none.
 deep_checks_unselected: fn(request: DeepChecks, modules: [NameModule], paths: [String], holders: [String]) -> [DeepChecksUnselected] Never! {
-    found := [DeepChecksUnselected]{}
+    ^found: [DeepChecksUnselected]{}
     loop scope in request.scopes {
         split: dotted_path_split(scope, modules)
         unresolved: if split.named == 1 -> DottedPathSplit?{None} else -> Val(split)
-        selected := [String]{}
+        ^selected: [String]{}
         if unresolved == None {
-            kept := false
+            ^kept: false
             loop path in holders {
                 if deep_checks_selects(scope, path) -> kept = true
             }
@@ -441,7 +441,7 @@ deep_checks_unselected_report: fn(row: DeepChecksUnselected, modules: [NameModul
 // The first DEEP_CHECKS_SHOWN of `paths`, each after `prefix` in backticks,
 // then `and N more`.
 deep_checks_names: fn(paths: [String], prefix: String) -> String Never! {
-    shown := [String]{}
+    ^shown: [String]{}
     loop path in paths {
         if shown.len() == DEEP_CHECKS_SHOWN -> break
         shown.push("`{prefix}{path}`")
@@ -524,7 +524,7 @@ build_option_flag: fn(name: String) -> String Never! { "--{name.replace("_", "-"
 build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
     head: argument.split("=").to_list()[0]
     loop row in JET_BUILD_OPTIONS {
-        named := row.kind != BuildOptionKind.Level && build_option_flag(row.name) == head
+        ^named: row.kind != BuildOptionKind.Level && build_option_flag(row.name) == head
         if row.kind == BuildOptionKind.Level {
             loop value in row.values {
                 if build_option_level_flag(value) == argument -> named = true
@@ -565,7 +565,7 @@ build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
         .Bool | .Duration | .Hook -> value.copy()
         .Text -> "\"{value}\""
         .List -> {
-            items := [String]{}
+            ^items: [String]{}
             loop item in build_option_items(value) -> items.push("\"{item}\"")
             "[{items.join(", ")}]"
         }
@@ -686,7 +686,7 @@ build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Hooks {
         return "a list literal of hook functions such as `[tools.sign]`"
     }
-    words := [String]{}
+    ^words: [String]{}
     loop value in build_option_method_values(row) -> words.push(build_option_argument(row, value))
     "one of {build_option_join(words)}"
 }
@@ -696,7 +696,7 @@ build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
 // flag's value only.
 build_option_method_values: fn(row: BuildOptionRow) -> [String] Never! {
     if row.kind != BuildOptionKind.Bool -> return row.values.copy()
-    out := [String]{}
+    ^out: [String]{}
     loop value in row.values {
         if value == "true" || value == "false" -> out.push(value.copy())
     }
@@ -704,9 +704,9 @@ build_option_method_values: fn(row: BuildOptionRow) -> [String] Never! {
 }
 
 build_option_join: fn(words: [String]) -> String Never! {
-    out := ""
+    ^out: ""
     loop i in 0..<words.len() {
-        joint := ", "
+        ^joint: ", "
         if i == 0 -> joint = ""
         if i > 0 && i == words.len() - 1 -> joint = " or "
         out = "{out}{joint}{words[i]}"
@@ -724,7 +724,7 @@ JET_BUILD_DEFAULT_PROFILE: "dev"
 // (a `record` links the same observation start; its NAME shapes no image),
 // `log` and the deep checks a flag selects.
 build_options_key: fn(options: BuildOptions) -> String Never! {
-    out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
+    ^out: if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
     loop choice in options.values {
         if JET_BUILD_OPTIONS[build_option_index(choice.name)].shapes_image {
             out = "{out};{choice.name}={choice.value}"
@@ -746,7 +746,7 @@ build_options_key: fn(options: BuildOptions) -> String Never! {
 // image's.
 build_options_identity: fn(options: BuildOptions) -> String Never! {
     stock: build_options_stock(options.command)
-    parts := [String]{}
+    ^parts: [String]{}
     loop choice in options.values {
         if !JET_BUILD_OPTIONS[build_option_index(choice.name)].shapes_image -> next
         if build_options_value(stock, choice.name) == choice.value -> next
@@ -801,7 +801,7 @@ build_option_removes_check: fn(choice: BuildOptionChoice) -> Bool Never! {
 
 // The resolved values that remove a runtime check, in table order.
 build_options_check_removals: fn(options: BuildOptions) -> [BuildOptionChoice] Never! {
-    out := [BuildOptionChoice]{}
+    ^out: [BuildOptionChoice]{}
     loop choice in options.values {
         if build_option_removes_check(choice) -> out.push(choice.copy())
     }
@@ -818,7 +818,7 @@ build_option_check_removal_note: fn(choice: BuildOptionChoice) -> String Never! 
 // The jet flags of `argv` that name a row, as Flag-layer choices, or the
 // refusal of a value outside its row. A level flag (`-O2`) is its value.
 build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
-    flags := [BuildOptionChoice]{}
+    ^flags: [BuildOptionChoice]{}
     loop argument in argv {
         if argument == "--" -> break
         row: build_option_flag_row(argument) ?? next
@@ -838,7 +838,7 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
         }
         // Each flag of a List or Hooks row is one more item.
         if build_option_listed(row) {
-            merged := false
+            ^merged: false
             loop at in 0..<flags.len() {
                 if flags[at].name != row.name -> next
                 earlier: flags[at].copy()
@@ -861,11 +861,11 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
 // stock values of `command`. A flag that replaces a profile or code value
 // leaves a note; a flag against a pin with another value is E2113.
 build_options_resolve: fn(command: String, profile: String, written: [BuildOptionChoice]) -> BuildOptionsResolved Never! {
-    values := [BuildOptionChoice]{}
-    notes := [String]{}
+    ^values: [BuildOptionChoice]{}
+    ^notes: [String]{}
     loop row in JET_BUILD_OPTIONS {
         stock: if command == "build" -> row.stock_build else -> row.stock_run
-        current := BuildOptionChoice{name: row.name, value: stock, layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false}
+        ^current: BuildOptionChoice{name: row.name, value: stock, layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false}
         loop choice in written {
             if choice.name != row.name -> next
             if choice.layer == BuildOptionLayer.Flag {
@@ -957,13 +957,13 @@ build_option_index: fn(name: String) -> Int Never! {
     loop at in 0..<JET_BUILD_OPTIONS.len() {
         if JET_BUILD_OPTIONS[at].name == name -> return at
     }
-    panic("build option `{name}` is not a row of JET_BUILD_OPTIONS")
+    panic("build option `{name}` has no position in JET_BUILD_OPTIONS")
 }
 
 // `options` with the `build: fn` layer `code` placed between its profile
 // values and its flags, resolved again.
 build_options_with_code: fn(options: BuildOptions, code: [BuildOptionChoice]) -> BuildOptionsResolved Never! {
-    written := [BuildOptionChoice]{}
+    ^written: [BuildOptionChoice]{}
     loop choice in options.written {
         if choice.layer == BuildOptionLayer.Profile -> written.push(choice.copy())
     }

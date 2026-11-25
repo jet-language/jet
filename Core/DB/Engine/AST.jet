@@ -676,7 +676,7 @@ AST: struct {
 }
 
 new_ctx: fn(sql: [U8]) -> SQLStmtCtx Never! {
-    n := 0
+    ^n: 0
     loop n < sql.len() && sql[n] != (U8{0}) -> n += 1
     SQLStmtCtx{sql: sql[0..<n].copy(), nested: 0, parse_mode: PARSE_MODE_NORMAL, nerr: 0, rc: base.OK, errmsg: None, nvar: 0, vlist: [SQLVar]{}, nselect: 0, cur_with: -1, explain: 0, reprepare: false, constraint_name: SQLTok{z: -1, n: 0}, has_compound: false, last_token: SQLTok{z: -1, n: 0}, tail: 0}
 }
@@ -750,9 +750,9 @@ name_from: fn(raw: [U8]?) -> [U8]? Never! {
 // The bytes from `start` to `end` of the statement text with surrounding
 // whitespace trimmed (malloc.c sqlite3DbSpanDup).
 span_dup: fn(a: AST, start: Int, end: Int) -> [U8] Never! {
-    s := start
+    ^s: start
     loop s < end && is_space(sql_byte(a.ctx.sql, s)) -> s += 1
-    e := end
+    ^e: end
     loop e > s && is_space(sql_byte(a.ctx.sql, e - 1)) -> e -= 1
     a.ctx.sql[s..<e].copy()
 }
@@ -779,7 +779,7 @@ error: fn(a: ^AST, msg: String) Never! { error_at(a, msg, -1) }
 // expression, -1 when none: the first of it and its left descendants that
 // is not part of an ON clause and has a positive offset.
 expr_offset: fn(a: AST, e0: Int) -> Int Never! {
-    e := e0
+    ^e: e0
     loop e >= 0 && (has(a, e, EP_OUTER_ON | EP_INNER_ON) || a.exprs[e].w <= 0) {
         e = a.exprs[e].left
     }
@@ -836,7 +836,7 @@ list_expr: fn(a: AST, l: Int, i: Int) -> Int Never! { a.lists[l].items[i].expr }
 // EP_INT_VALUE node, any other token is copied and, when `dequote`, a quoted
 // one is dequoted (sqlite3DequoteExpr).
 expr_alloc: fn(a: ^AST, op: Int, tok: [U8]?, dequote_it: Bool) -> Int Never! {
-    e := zero_expr(op)
+    ^e: zero_expr(op)
     if tok == .Val(t) {
         iv: if op == tk.TK_INTEGER -> get_int32(t) else -> None
         if iv == .Val(v) {
@@ -893,14 +893,14 @@ height_of_expr: fn(a: AST, e: Int, h: Int) -> Int Never! {
 }
 
 height_of_list: fn(a: AST, l: Int, h0: Int) -> Int Never! {
-    h := h0
+    ^h: h0
     loop i in 0..<list_len(a, l) -> h = height_of_expr(a, list_expr(a, l, i), h)
     h
 }
 
 height_of_select: fn(a: AST, s0: Int, h0: Int) -> Int Never! {
-    h := h0
-    s := s0
+    ^h: h0
+    ^s: s0
     loop s >= 0 {
         h = height_of_expr(a, a.selects[s].where_expr, h)
         h = height_of_expr(a, a.selects[s].having, h)
@@ -915,7 +915,7 @@ height_of_select: fn(a: AST, s0: Int, h0: Int) -> Int Never! {
 
 // exprSetHeight.
 expr_set_height: fn(a: ^AST, e: Int) Never! {
-    h := if a.exprs[e].left >= 0 -> a.exprs[a.exprs[e].left].height else -> 0
+    ^h: if a.exprs[e].left >= 0 -> a.exprs[a.exprs[e].left].height else -> 0
     r: a.exprs[e].right
     if r >= 0 && a.exprs[r].height > h -> h = a.exprs[r].height
     if has(a, e, EP_X_IS_SELECT) -> h = height_of_select(a, a.exprs[e].x, h) else if a.exprs[e].x >= 0 {
@@ -932,14 +932,14 @@ set_height_and_flags: fn(a: ^AST, e: Int) Never! {
         return
     }
     expr_set_height(a, e)
-    _ := check_height(a, a.exprs[e].height)
+    ^_: check_height(a, a.exprs[e].height)
 }
 
 // sqlite3PExpr: an interior node over two subtrees.
 pexpr: fn(a: ^AST, op: Int, left: Int, right: Int) -> Int Never! {
     e: push_expr(a, zero_expr(op & 255))
     attach_subtrees(a, e, left, right)
-    _ := check_height(a, a.exprs[e].height)
+    ^_: check_height(a, a.exprs[e].height)
     e
 }
 
@@ -957,7 +957,7 @@ pexpr_add_select: fn(a: ^AST, e: Int, sel: Int) Never! {
 // sqlite3ExprListToValues: the VALUES compound a list of vectors stands for
 // on the right of IN.
 expr_list_to_values: fn(a: ^AST, nelem: Int, list: Int) -> Int Never! {
-    ret := -1
+    ^ret: -1
     loop ii in 0..<list_len(a, list) {
         e: list_expr(a, list, ii)
         n: if a.exprs[e].op == tk.TK_VECTOR -> list_len(a, a.exprs[e].x) else -> 1
@@ -1072,12 +1072,12 @@ expr_assign_var_number: fn(a: ^AST, e: Int, n: Int) Never! {
         return
     }
     z: a.exprs[e].token ?? [U8]{}
-    x := 0
+    ^x: 0
     if z.len() == 1 {
         a.ctx.nvar += 1
         x = to_i16(a.ctx.nvar)
     } else {
-        add := false
+        ^add: false
         if z[0] == (U8{63}) {
             iv: if n == 2 -> Val(Int{z[1]} - 48) else -> util.atoi64_ok(z[1..<n].copy(), base.UTF8)
             mx: a.limits[LIMIT_VARIABLE_NUMBER]
@@ -1155,7 +1155,7 @@ expr_list_append: fn(a: ^AST, list: Int, e: Int) -> Int Never! {
 
 // sqlite3ExprVectorSize.
 vector_size: fn(a: AST, e: Int) -> Int Never! {
-    op := a.exprs[e].op
+    ^op: a.exprs[e].op
     if op == tk.TK_REGISTER -> op = a.exprs[e].op2
     if op == tk.TK_VECTOR -> return list_len(a, a.exprs[e].x)
     if op == tk.TK_SELECT -> return list_len(a, a.selects[a.exprs[e].x].elist)
@@ -1186,7 +1186,7 @@ expr_for_vector_field: fn(a: ^AST, v: Int, i: Int, n: Int) -> Int Never! {
         a.exprs[r].left = v
         return r
     }
-    src := v
+    ^src: v
     if a.exprs[v].op == tk.TK_VECTOR {
         l: a.exprs[v].x
         src = a.lists[l].items[i].expr
@@ -1201,10 +1201,10 @@ expr_for_vector_field: fn(a: ^AST, v: Int, i: Int, n: Int) -> Int Never! {
 // sqlite3ExprListAppendVector: the terms of "(a,b,c) = vector" in an UPDATE
 // SET clause.
 expr_list_append_vector: fn(a: ^AST, list0: Int, cols: Int, e0: Int) -> Int Never! {
-    list := list0
-    e := e0
+    ^list: list0
+    ^e: e0
     first: if list >= 0 -> list_len(a, list) else -> 0
-    ok := cols >= 0 && e >= 0
+    ^ok: cols >= 0 && e >= 0
     if ok && a.exprs[e].op != tk.TK_SELECT {
         ncols: a.idlists[cols].items.len()
         n: vector_size(a, e)
@@ -1289,7 +1289,7 @@ expr_list_delete: fn(a: ^AST, list: Int) Never! {
 
 // sqlite3ExprListFlags.
 expr_list_flags: fn(a: AST, list: Int) -> Int Never! {
-    m := 0
+    ^m: 0
     loop i in 0..<list_len(a, list) -> m |= a.exprs[list_expr(a, list, i)].flags
     m
 }
@@ -1311,14 +1311,14 @@ expr_add_collate_string: fn(a: ^AST, e: Int, name: [U8]) -> Int Never! {
 
 // sqlite3ExprSkipCollate.
 skip_collate: fn(a: AST, e0: Int) -> Int Never! {
-    e := e0
+    ^e: e0
     loop e >= 0 && has(a, e, EP_SKIP) -> e = a.exprs[e].left
     e
 }
 
 // sqlite3ExprSkipCollateAndLikely.
 skip_collate_and_likely: fn(a: AST, e0: Int) -> Int Never! {
-    e := e0
+    ^e: e0
     loop e >= 0 && has(a, e, EP_SKIP | EP_UNLIKELY) {
         if has(a, e, EP_UNLIKELY) -> e = list_expr(a, a.exprs[e].x, 0) else -> e = a.exprs[e].left
     }
@@ -1425,9 +1425,9 @@ cut_to_size: fn(n: ^SQLExpr, size: Int) Never! {
 expr_dup_node: fn(a: ^AST, p: Int, flags: Int, in_buf: Bool) -> Int Never! {
     src: a.exprs[p].copy()
     size: duped_struct_size(a, p, flags)
-    n := src.copy()
+    ^n: src.copy()
     cut_to_size(n, if flags != 0 -> size else -> expr_struct_size(a, p))
-    fl := clear_bits(n.flags, EP_REDUCED | EP_TOKEN_ONLY | EP_STATIC)
+    ^fl: clear_bits(n.flags, EP_REDUCED | EP_TOKEN_ONLY | EP_STATIC)
     if size == SIZE_REDUCED -> fl |= EP_REDUCED
     if size == SIZE_TOKEN_ONLY -> fl |= EP_TOKEN_ONLY
     if in_buf -> fl |= EP_STATIC
@@ -1462,7 +1462,7 @@ expr_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
 // sqlite3WithDup.
 with_dup: fn(a: ^AST, w: Int) -> Int Never! {
     if w < 0 -> return -1
-    ids := [Int]{}
+    ^ids: [Int]{}
     loop c in a.withs[w].ctes.copy() {
         sel: select_dup(a, a.ctes[c].select, 0)
         cols: expr_list_dup(a, a.ctes[c].cols, 0)
@@ -1501,8 +1501,8 @@ SQLWindowGatherer: struct {
 }
 
 gather_select_windows: fn(a: ^AST, s: Int) Never! {
-    g := SQLWindowGatherer{sel: s}
-    _ := walk_select<SQLWindowGatherer>(g, a, s)
+    ^g: SQLWindowGatherer{sel: s}
+    ^_: walk_select<SQLWindowGatherer>(g, a, s)
 }
 
 // sqlite3ExprListDup. A run of TK_SELECT_COLUMN items over one vector keeps
@@ -1510,9 +1510,9 @@ gather_select_windows: fn(a: ^AST, s: Int) Never! {
 expr_list_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
     if p < 0 -> return -1
     old: a.lists[p].items.copy()
-    items := [SQLExprItem]{}
-    prior_old := -1
-    prior_new := -1
+    ^items: [SQLExprItem]{}
+    ^prior_old: -1
+    ^prior_new: -1
     loop old_item in old {
         oe: old_item.expr
         ne: expr_dup(a, oe, flags)
@@ -1530,7 +1530,7 @@ expr_list_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
                 a.exprs[ne].left = prior_new
             }
         }
-        item := old_item.copy()
+        ^item: old_item.copy()
         item.expr = ne
         item.done = false
         items.push(item)
@@ -1542,10 +1542,10 @@ expr_list_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
 // sqlite3SrcListDup.
 src_list_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
     if p < 0 -> return -1
-    ids := [Int]{}
+    ^ids: [Int]{}
     loop old in a.srclists[p].items.copy() {
         o: a.items[old].copy()
-        n := o.copy()
+        ^n: o.copy()
         n.reg_result = 0
         if !o.is_indexed_by -> n.indexed_by = None
         if o.is_cte -> a.cte_uses[o.u2].nuse += 1
@@ -1572,9 +1572,9 @@ id_list_dup: fn(a: ^AST, p: Int) -> Int Never! {
 
 // sqlite3SelectDup: a copy of a SELECT and the compound chain before it.
 select_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
-    ret := -1
-    last := -1
-    cur := p
+    ^ret: -1
+    ^last: -1
+    ^cur: p
     loop cur >= 0 {
         s: a.selects[cur].copy()
         ns: new_select(a)
@@ -1606,7 +1606,7 @@ select_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
 window_dup: fn(a: ^AST, owner: Int, p: Int) -> Int Never! {
     if p < 0 -> return -1
     w: a.windows[p].copy()
-    n := new_window()
+    ^n: new_window()
     n.name = w.name
     n.base = w.base
     n.wfunc = w.wfunc
@@ -1633,9 +1633,9 @@ window_dup: fn(a: ^AST, owner: Int, p: Int) -> Int Never! {
 
 // sqlite3WindowListDup.
 window_list_dup: fn(a: ^AST, p: Int) -> Int Never! {
-    ret := -1
-    last := -1
-    w := p
+    ^ret: -1
+    ^last: -1
+    ^w: p
     loop w >= 0 {
         n: window_dup(a, -1, w)
         if ret < 0 -> ret = n else -> a.windows[last].next_win = n
@@ -1741,7 +1741,7 @@ expr_compare_with: fn<M: SQLVarMatch>(m: ^M, a: ^AST, pa: Int, pb: Int, itab: In
 
 // sqlite3ExprCompare with a NULL Parse.
 expr_compare: fn(a: ^AST, pa: Int, pb: Int, itab: Int) -> Int Never! {
-    np := SQLNoParse{}
+    ^np: SQLNoParse{}
     expr_compare_with<SQLNoParse>(np, a, pa, pb, itab)
 }
 
@@ -1793,7 +1793,7 @@ window_compare_with: fn<M: SQLVarMatch>(m: ^M, a: ^AST, w1: Int, w2: Int, filter
 }
 
 window_compare: fn(a: ^AST, w1: Int, w2: Int, filter: Bool) -> Int Never! {
-    np := SQLNoParse{}
+    ^np: SQLNoParse{}
     window_compare_with<SQLNoParse>(np, a, w1, w2, filter)
 }
 
@@ -1815,7 +1815,7 @@ SQLWalker: trait {
 
 // walkWindowList.
 walk_window_list: fn<W: SQLWalker>(w: ^W, a: ^AST, list: Int, one_only: Bool) -> Int Never! {
-    win := list
+    ^win: list
     loop win >= 0 {
         if walk_expr_list<W>(w, a, a.windows[win].order_by) != 0 -> return WRC_ABORT
         if walk_expr_list<W>(w, a, a.windows[win].partition) != 0 -> return WRC_ABORT
@@ -1832,7 +1832,7 @@ walk_window_list: fn<W: SQLWalker>(w: ^W, a: ^AST, list: Int, one_only: Bool) ->
 // before children.
 walk_expr: fn<W: SQLWalker>(w: ^W, a: ^AST, e0: Int) -> Int Never! {
     if e0 < 0 -> return WRC_CONTINUE
-    e := e0
+    ^e: e0
     loop {
         rc: w.walk_expr_cb(a, e)
         if rc != 0 -> return rc & WRC_ABORT
@@ -1902,7 +1902,7 @@ walk_select_from: fn<W: SQLWalker>(w: ^W, a: ^AST, s: Int) -> Int Never! {
 walk_select: fn<W: SQLWalker>(w: ^W, a: ^AST, s0: Int) -> Int Never! {
     if s0 < 0 -> return WRC_CONTINUE
     if !w.walk_has_select_cb() -> return WRC_CONTINUE
-    s := s0
+    ^s: s0
     loop s >= 0 {
         rc: w.walk_select_cb(a, s)
         if rc != 0 -> return rc & WRC_ABORT
@@ -1976,8 +1976,8 @@ SQLConstWalker: struct {
 }
 
 expr_is_const: fn(a: ^AST, e: Int, init: Int, cur: Int) -> Int Never! {
-    w := SQLConstWalker{code: init, cur: cur}
-    _ := walk_expr<SQLConstWalker>(w, a, e)
+    ^w: SQLConstWalker{code: init, cur: cur}
+    ^_: walk_expr<SQLConstWalker>(w, a, e)
     w.code
 }
 
@@ -2008,12 +2008,12 @@ new_select: fn(a: ^AST) -> Int Never! {
 // sqlite3SelectNew: a SELECT; no result list means "*", no FROM clause an
 // empty one.
 select_new: fn(a: ^AST, elist0: Int, src0: Int, where_expr: Int, group_by: Int, having: Int, order_by: Int, flags: Int, limit: Int) -> Int Never! {
-    elist := elist0
+    ^elist: elist0
     if elist < 0 {
         star: expr(a, tk.TK_ASTERISK, [U8]{})
         elist = expr_list_append(a, -1, star)
     }
-    src := src0
+    ^src: src0
     if src < 0 -> src = new_src_list(a)
     s: new_select(a)
     a.ctx.nselect += 1
@@ -2031,7 +2031,7 @@ select_new: fn(a: ^AST, elist0: Int, src0: Int, where_expr: Int, group_by: Int, 
 
 // clearSelect: the side effects of deleting a SELECT and its compound chain.
 select_delete: fn(a: ^AST, s0: Int) Never! {
-    s := s0
+    ^s: s0
     loop s >= 0 {
         expr_list_delete(a, a.selects[s].elist)
         src_list_delete(a, a.selects[s].src)
@@ -2070,10 +2070,10 @@ join_type: fn(a: ^AST, pa: SQLTok, pb: SQLTok, pc: SQLTok) -> Int Never! {
     words: [String]{"natural", "left", "outer", "right", "full", "inner", "cross"}
     codes: [Int]{JT_NATURAL, JT_LEFT | JT_OUTER, JT_OUTER, JT_RIGHT | JT_OUTER, JT_LEFT | JT_RIGHT | JT_OUTER, JT_INNER, JT_INNER | JT_CROSS}
     all: [SQLTok]{pa, pb, pc}
-    jt := 0
+    ^jt: 0
     loop i in 0..<3 {
         if all[i].z < 0 -> break
-        j := 0
+        ^j: 0
         loop j < 7 {
             if tok_is(a, all[i], words[j].bytes()) {
                 jt |= codes[j]
@@ -2092,7 +2092,7 @@ join_type: fn(a: ^AST, pa: SQLTok, pb: SQLTok, pc: SQLTok) -> Int Never! {
         ta: tok_text(a, pa)
         tb: tok_text(a, pb)
         tc: tok_text(a, pc)
-        off := tok_offset(a, pa)
+        ^off: tok_offset(a, pa)
         if off < 0 -> off = tok_offset(a, pb)
         if off < 0 -> off = tok_offset(a, pc)
         error_at(a, "unknown join type: {ta}{sp1}{tb}{sp2}{tc}", off)
@@ -2129,12 +2129,12 @@ src_list_enlarge: fn(a: ^AST, s: Int, nextra: Int, istart: Int) -> Bool Never! {
             error(a, "too many FROM clause terms, max: {MAX_SRCLIST}")
             return false
         }
-        nalloc := 2 * n + nextra
+        ^nalloc: 2 * n + nextra
         if nalloc > MAX_SRCLIST -> nalloc = MAX_SRCLIST
         a.srclists[s].nalloc = nalloc
     }
     old: a.srclists[s].items.copy()
-    items := [Int]{}
+    ^items: [Int]{}
     loop i in 0..<istart -> items.push(old[i])
     loop _k in 0..<nextra {
         a.items.push(new_src_item())
@@ -2149,7 +2149,7 @@ src_list_enlarge: fn(a: ^AST, s: Int, nextra: Int, istart: Int) -> Bool Never! {
 // `database` (C token pointers; a database with a NULL z counts as none).
 // -1 when the list cannot grow.
 src_list_append: fn(a: ^AST, list: Int, table: [U8]?, database: [U8]?) -> Int Never! {
-    s := list
+    ^s: list
     if s < 0 {
         s = new_src_list(a)
         a.srclists[s].nalloc = 1
@@ -2173,7 +2173,7 @@ src_list_append: fn(a: ^AST, list: Int, table: [U8]?, database: [U8]?) -> Int Ne
 // sqlite3SrcListAssignCursors: number the cursors of a FROM clause and of
 // its subqueries' (`ntab` is Parse.nTab; returns the new value).
 src_list_assign_cursors: fn(a: ^AST, s: Int, ntab0: Int) -> Int Never! {
-    ntab := ntab0
+    ^ntab: ntab0
     loop i in 0..<src_len(a, s) {
         si: src_item(a, s, i)
         if a.items[si].cursor >= 0 -> next
@@ -2275,8 +2275,8 @@ src_list_shift_join_type: fn(a: ^AST, s: Int) Never! {
     if n <= 1 {
         return
     }
-    all := 0
-    i := n - 1
+    ^all: 0
+    ^i: n - 1
     loop i > 0 {
         jt: a.items[src_item(a, s, i - 1)].jointype
         a.items[src_item(a, s, i)].jointype = jt
@@ -2303,7 +2303,7 @@ new_id_list: fn(a: ^AST) -> Int Never! {
 
 // sqlite3IdListAppend: append the name a token (a C token pointer) spells.
 id_list_append: fn(a: ^AST, list: Int, name: [U8]?) -> Int Never! {
-    l := list
+    ^l: list
     if l < 0 -> l = new_id_list(a)
     a.idlists[l].items.push(SQLIDItem{name: name_from(name), u4: 0})
     l
@@ -2422,7 +2422,7 @@ window_delete: fn(a: ^AST, w: Int) Never! {
 
 // sqlite3WindowListDelete.
 window_list_delete: fn(a: ^AST, w0: Int) Never! {
-    w := w0
+    ^w: w0
     loop w >= 0 {
         nxt: a.windows[w].next_win
         window_delete(a, w)
@@ -2449,11 +2449,11 @@ window_alloc: fn(a: ^AST, frm_type: Int, start_type: Int, start_expr: Int, end_t
         expr_delete(a, start_expr)
         return -1
     }
-    w := new_window()
+    ^w: new_window()
     w.frm_type = ft
     w.start_type = start_type
     w.end_type = end_type
-    exclude := exclude0
+    ^exclude: exclude0
     if exclude == 0 && a.opt_flags & OPT_WINDOW_FUNC != 0 -> exclude = tk.TK_NO
     w.exclude = exclude
     w.implicit_frame = implicit
@@ -2480,7 +2480,7 @@ window_assemble: fn(a: ^AST, w: Int, partition: Int, order_by: Int, base_name: [
 
 // windowFind: the window named `name` in a WINDOW list, else an error and -1.
 window_find: fn(a: ^AST, list: Int, name: [U8]) -> Int Never! {
-    w := list
+    ^w: list
     loop w >= 0 {
         if str_icmp(a.windows[w].name ?? [U8]{}, name) == 0 -> return w
         w = a.windows[w].next_win
@@ -2498,7 +2498,7 @@ window_chain: fn(a: ^AST, w: Int, list: Int) Never! {
     if ex < 0 {
         return
     }
-    err := ""
+    ^err: ""
     if a.windows[w].partition >= 0 -> err = "PARTITION clause" else if a.windows[ex].order_by >= 0 && a.windows[w].order_by >= 0 {
         err = "ORDER BY clause"
     } else if !a.windows[ex].implicit_frame { err = "frame specification" }
@@ -2561,7 +2561,7 @@ upsert_new: fn(a: ^AST, target: Int, target_where: Int, set: Int, where_expr: In
 
 // sqlite3UpsertDelete.
 upsert_delete: fn(a: ^AST, u0: Int) Never! {
-    u := u0
+    ^u: u0
     loop u >= 0 {
         expr_list_delete(a, a.upserts[u].target)
         expr_delete(a, a.upserts[u].target_where)
@@ -2573,7 +2573,7 @@ upsert_delete: fn(a: ^AST, u0: Int) Never! {
 
 // triggerSpanDup: the step's text with every whitespace byte a space.
 trigger_span_dup: fn(a: AST, start: Int, end: Int) -> [U8] Never! {
-    z := span_dup(a, start, end)
+    ^z: span_dup(a, start, end)
     loop i in 0..<z.len() {
         if is_space(Int{z[i]}) -> z[i] = (U8{32})
     }
@@ -2586,7 +2586,7 @@ new_step: fn(op: Int) -> SQLTriggerStep Never! {
 
 // sqlite3TriggerSelectStep.
 trigger_select_step: fn(a: ^AST, sel: Int, start: Int, end: Int) -> Int Never! {
-    s := new_step(tk.TK_SELECT)
+    ^s: new_step(tk.TK_SELECT)
     s.select = sel
     s.orconf = OE_DEFAULT
     s.span = Val(trigger_span_dup(a, start, end))
@@ -2597,7 +2597,7 @@ trigger_select_step: fn(a: ^AST, sel: Int, start: Int, end: Int) -> Int Never! {
 // triggerStepAllocate: -1 once the statement has an error.
 trigger_step_allocate: fn(a: ^AST, op: Int, name: [U8], start: Int, end: Int) -> Int Never! {
     if a.ctx.nerr > 0 -> return -1
-    s := new_step(op)
+    ^s: new_step(op)
     s.target = Val(dequote(name))
     s.span = Val(trigger_span_dup(a, start, end))
     a.steps.push(s)
@@ -2606,7 +2606,7 @@ trigger_step_allocate: fn(a: ^AST, op: Int, name: [U8], start: Int, end: Int) ->
 
 // sqlite3TriggerInsertStep.
 trigger_insert_step: fn(a: ^AST, name: [U8], cols: Int, sel0: Int, orconf: Int, upsert: Int, start: Int, end: Int) -> Int Never! {
-    sel := sel0
+    ^sel: sel0
     s: trigger_step_allocate(a, tk.TK_INSERT, name, start, end)
     if s >= 0 {
         if in_rename(a) {
@@ -2616,7 +2616,7 @@ trigger_insert_step: fn(a: ^AST, name: [U8], cols: Int, sel0: Int, orconf: Int, 
         a.steps[s].idlist = cols
         a.steps[s].upsert = upsert
         a.steps[s].orconf = orconf
-        if upsert >= 0 -> _ := has_explicit_nulls(a, a.upserts[upsert].target)
+        if upsert >= 0 -> ^_: has_explicit_nulls(a, a.upserts[upsert].target)
     } else { upsert_delete(a, upsert) }
     select_delete(a, sel)
     s
@@ -2624,9 +2624,9 @@ trigger_insert_step: fn(a: ^AST, name: [U8], cols: Int, sel0: Int, orconf: Int, 
 
 // sqlite3TriggerUpdateStep.
 trigger_update_step: fn(a: ^AST, name: [U8], from0: Int, elist0: Int, where0: Int, orconf: Int, start: Int, end: Int) -> Int Never! {
-    from := from0
-    elist := elist0
-    where_expr := where0
+    ^from: from0
+    ^elist: elist0
+    ^where_expr: where0
     s: trigger_step_allocate(a, tk.TK_UPDATE, name, start, end)
     if s >= 0 {
         if in_rename(a) {
@@ -2651,7 +2651,7 @@ trigger_update_step: fn(a: ^AST, name: [U8], from0: Int, elist0: Int, where0: In
 
 // sqlite3TriggerDeleteStep.
 trigger_delete_step: fn(a: ^AST, name: [U8], where0: Int, start: Int, end: Int) -> Int Never! {
-    where_expr := where0
+    ^where_expr: where0
     s: trigger_step_allocate(a, tk.TK_DELETE, name, start, end)
     if s >= 0 {
         if in_rename(a) {
@@ -2667,7 +2667,7 @@ trigger_delete_step: fn(a: ^AST, name: [U8], where0: Int, start: Int, end: Int) 
 // ---------------------------------------------------------------------------
 
 stmt_ast: fn(sql: String) -> AST Never! {
-    a := new_ast()
+    ^a: new_ast()
     begin_statement(a, sql.bytes())
     a
 }
@@ -2681,7 +2681,7 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("integer tokens become int-value leaves") {
-    a := stmt_ast("")
+    ^a: stmt_ast("")
     one: expr(a, tk.TK_INTEGER, "1".bytes())
     assert(has(a, one, EP_INT_VALUE) && has(a, one, EP_IS_TRUE) && has(a, one, EP_LEAF))
     zero: expr(a, tk.TK_INTEGER, "0".bytes())
@@ -2695,22 +2695,22 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("expression heights and the depth limit") {
-    a := stmt_ast("")
+    ^a: stmt_ast("")
     a.limits[LIMIT_EXPR_DEPTH] = 3
-    e := expr(a, tk.TK_INTEGER, "1".bytes())
+    ^e: expr(a, tk.TK_INTEGER, "1".bytes())
     loop _i in 0..<2 {
         one: expr(a, tk.TK_INTEGER, "1".bytes())
         e = pexpr(a, tk.TK_PLUS, e, one)
     }
     assert(a.exprs[e].height == 3)
     assert(a.ctx.nerr == 0)
-    _ := pexpr(a, tk.TK_PLUS, e, -1)
+    ^_: pexpr(a, tk.TK_PLUS, e, -1)
     assert(a.ctx.nerr == 1)
     assert(a.ctx.errmsg == Val("Expression tree is too large (maximum depth 3)"))
 }
 
 #Test("a reduced copy keeps only what the schema needs") {
-    a := stmt_ast("")
+    ^a: stmt_ast("")
     l: expr(a, tk.TK_ID, "x".bytes())
     r: expr(a, tk.TK_INTEGER, "5".bytes())
     e: pexpr(a, tk.TK_LT, l, r)
@@ -2726,7 +2726,7 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("bound parameters are numbered as SQLite numbers them") {
-    a := stmt_ast("")
+    ^a: stmt_ast("")
     p1: expr(a, tk.TK_VARIABLE, "?".bytes())
     expr_assign_var_number(a, p1, 1)
     n: expr(a, tk.TK_VARIABLE, ":n".bytes())
@@ -2745,7 +2745,7 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("join types and their errors") {
-    a := stmt_ast("natural left outer join inner outer bogus")
+    ^a: stmt_ast("natural left outer join inner outer bogus")
     none: SQLTok{z: -1, n: 0}
     t_natural: tok_of(a, "natural")
     t_left: tok_of(a, "left")
@@ -2762,8 +2762,8 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("a FROM clause stops at 200 terms") {
-    a := stmt_ast("")
-    s := -1
+    ^a: stmt_ast("")
+    ^s: -1
     loop _i in 0..<200 -> s = src_list_append(a, s, Val("t".bytes()), None)
     assert(src_len(a, s) == 200)
     assert(a.ctx.nerr == 0)
@@ -2772,8 +2772,8 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("join operators move to their right operand") {
-    a := stmt_ast("")
-    s := src_list_append(a, -1, Val("a".bytes()), None)
+    ^a: stmt_ast("")
+    ^s: src_list_append(a, -1, Val("a".bytes()), None)
     a.items[src_item(a, s, 0)].jointype = JT_LEFT | JT_OUTER
     s = src_list_append(a, s, Val("b".bytes()), None)
     a.items[src_item(a, s, 1)].jointype = JT_RIGHT | JT_OUTER
@@ -2785,7 +2785,7 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("windows link into and out of their SELECT") {
-    a := stmt_ast("")
+    ^a: stmt_ast("")
     sel: select_new(a, -1, -1, -1, -1, -1, -1, 0, -1)
     w1: window_alloc(a, tk.TK_ROWS, tk.TK_UNBOUNDED, -1, tk.TK_CURRENT, -1, 0)
     w2: window_alloc(a, tk.TK_ROWS, tk.TK_UNBOUNDED, -1, tk.TK_CURRENT, -1, 0)
@@ -2804,7 +2804,7 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("constant expressions") {
-    a := stmt_ast("")
+    ^a: stmt_ast("")
     c1: expr(a, tk.TK_INTEGER, "1".bytes())
     cx: expr(a, tk.TK_STRING, "x".bytes())
     c: pexpr(a, tk.TK_PLUS, c1, cx)
@@ -2824,9 +2824,9 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 }
 
 #Test("WITH rejects a repeated name") {
-    a := stmt_ast("")
+    ^a: stmt_ast("")
     c1: cte_new(a, Val("x".bytes()), -1, -1, M10D_ANY)
-    w := with_add(a, -1, c1)
+    ^w: with_add(a, -1, c1)
     c2: cte_new(a, Val("\"X\"".bytes()), -1, -1, M10D_ANY)
     w = with_add(a, w, c2)
     assert(a.withs[w].ctes.len() == 2)

@@ -5,7 +5,7 @@
 // past U+10FFFF and sequences cut short at the end and in the middle. Each
 // result prints as its bytes in hex, so U+FFFD shows as EF BF BD.
 hex_bytes: fn(text: String) -> String {
-    words := [String]{}
+    ^words: [String]{}
     loop byte in text.bytes() {
         code: Int{byte}
         words.push("{code:Hex(2)}")
@@ -24,7 +24,7 @@ run: fn() {
     show("empty", [U8]{})
     show("ascii", ascii)
     show("mixed valid", "aébc€d😀e".bytes())
-    stray := ascii.copy()
+    ^stray: ascii.copy()
     stray.push(0x80)
     loop byte in ascii -> stray.push(byte)
     show("stray continuation", stray)
@@ -35,12 +35,12 @@ run: fn() {
     show("lead F5", [U8]{0xF5, 0x46})
     show("cut three", [U8]{0xE2, 0x82, 0x47})
     show("cut four", [U8]{0xF0, 0x9F, 0x98, 0x48})
-    tail := ascii.copy()
+    ^tail: ascii.copy()
     tail.push(0xF0)
     tail.push(0x9F)
     show("cut at end", tail)
     show("all bad", [U8]{0xFF, 0xFE, 0x80, 0xBF})
-    long := [U8]{}
+    ^long: [U8]{}
     loop index in 0..<200 {
         loop byte in ascii -> long.push(byte)
         if index % 7 == 0 -> long.push(0xC8)

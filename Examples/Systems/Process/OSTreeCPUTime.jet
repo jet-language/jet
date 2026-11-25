@@ -28,7 +28,7 @@ kind: fn(error: IOError) -> String {
 
 run: fn() {
     script: "sh -c 'i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done'; echo done; read line"
-    child := process.cmd(["sh", "-c", script]).stdin(.Stream).stdout(.Stream).spawn() ?? panic("sh did not start: {err}")
+    ^child: process.cmd(["sh", "-c", script]).stdin(.Stream).stdout(.Stream).spawn() ?? panic("sh did not start: {err}")
     // The shell prints only once it has waited for the busy grandchild.
     said: child.stdout.read_bytes(64) ?? panic("read: {err}")
     // A bound fallible call would pass its failure up; matching the call keeps
@@ -47,5 +47,5 @@ run: fn() {
     // No Linux pid is above 4194304, so nothing is read.
     print("tree_cpu_time(4194305): {if os.tree_cpu_time(4194305) == { .Ok(_) -> "accepted", .Err(error) -> kind(error) }}")
     child.stdin.close()
-    _ := child.wait()
+    ^_: child.wait()
 }

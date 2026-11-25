@@ -16,7 +16,7 @@ Query: struct {
         Hole: String,
 
         check: fn(text: String) -[]> QueryError! {
-            depth := 0
+            ^depth: 0
             loop byte in text.bytes() {
                 if byte == (U8{40}) -> depth += 1
                 if byte == (U8{41}) -> depth -= 1
@@ -34,7 +34,7 @@ Query: struct {
 }
 
 run: fn() {
-    close := ")"
+    ^close: ")"
     query: Query{"MATCH (p WHERE p.name = {close}"}
     print(query.text)
 }

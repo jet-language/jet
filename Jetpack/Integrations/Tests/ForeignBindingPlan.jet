@@ -19,7 +19,7 @@ pkg_test_plan_count: fn(text: String, needle: String) -> Int Never! {
 // Names of `<name>: fn(...)` extern lines whose trimmed text contains every
 // `markers` entry.
 pkg_test_plan_externs: fn(source: String, markers: [String], view_only: Bool) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     lines: source.split("\n").to_list()
     loop raw in lines {
         line: raw.trim()
@@ -27,7 +27,7 @@ pkg_test_plan_externs: fn(source: String, markers: [String], view_only: Bool) ->
         if parts.len() < 2 -> next
         name: parts[0]
         if name == "" || name.contains(" ") || name.contains("(") -> next
-        matches := true
+        ^matches: true
         loop marker in markers {
             if !line.contains(marker) -> matches = false
         }
@@ -42,7 +42,7 @@ pkg_test_plan_externs: fn(source: String, markers: [String], view_only: Bool) ->
 // line holding only `}`.
 pkg_test_plan_wrapper_body: fn(source: String, name: String, generic: Bool) -> String Never! {
     bytes: source.bytes()
-    start := pkg_cbind_find(bytes, "\n{name}: fn(", 0)
+    ^start: pkg_cbind_find(bytes, "\n{name}: fn(", 0)
     if start < 0 && generic -> start = pkg_cbind_find(bytes, "\n{name}: fn<", 0)
     if start < 0 -> panic("every response extern has a generated wrapper")
     tail: pkg_bytes_text(bytes, start + 1, bytes.len())
@@ -65,27 +65,27 @@ pkg_test_plan_source_parses: fn(source: String) -> Bool Never! {
 
 #Test("binding plan registry covers each message renderer once") {
     registry: pkg_generator_registry()
-    registered := 0
+    ^registered: 0
     loop renderer in registry {
         if pkg_renderer_canonical_for(renderer) != None -> registered += 1
     }
     // Every generator registry entry matches exactly one canonical active binder.
     assert_eq(registered, registry.len())
     binders: pkg_foreign_binders()
-    matched := 0
+    ^matched: 0
     loop descriptor in binders {
         if pkg_renderer_for(descriptor) == .Val(_) -> matched += 1
     }
     // The canonical active binder registry and the generator registry agree.
     assert_eq(matched, registry.len())
-    languages := [String]{}
+    ^languages: [String]{}
     loop renderer in registry {
         assert(!languages.contains(renderer.language))
         languages.push(renderer.language)
     }
 
     loop renderer in registry {
-        found := BinderDescriptor?{None}
+        ^found: BinderDescriptor?{None}
         loop descriptor in binders {
             if descriptor.root == renderer.language {
                 found = Val(descriptor)

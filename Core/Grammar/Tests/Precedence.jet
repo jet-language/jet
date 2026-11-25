@@ -1,0 +1,70 @@
+// Empty repeats, and the levels operator rules parse their operands at:
+// precedence by order, `<assoc=right>`, prefix operands, the middle-operand
+// rule, and an operator literal shared by two alternatives.
+use {
+    core.grammar.[analyze]
+    core.grammar.error.[GrammarFault, GrammarFaultKind]
+    core.grammar.plan.[GrammarPlan, GrammarSource]
+}
+
+plan_of: fn(text: String) -> GrammarPlan Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+faults_of: fn(text: String) -> [GrammarFault] Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(_) -> [GrammarFault]{}
+        .Err(error) -> error.faults
+    }
+}
+
+#Test("earlier alternatives bind tighter, and right association stays on its level") {
+    plan: plan_of("e : <assoc=right> left=e '^' right=e # Pow | left=e '*' right=e # Mul | '-' e # Neg | value=NUM # Num ;\nNUM : [0-9]+ ;")
+    ops: plan.operators[0].operators
+    assert_eq(ops.len(), 3)
+    assert_eq(ops[0].level, 4)
+    assert(ops[0].right)
+    assert_eq(ops[0].operands, [Int]{-1, -1, 4})
+    assert_eq(ops[1].level, 3)
+    assert_eq(ops[1].operands, [Int]{-1, -1, 4})
+    assert_eq(ops[2].level, 2)
+    assert_eq(ops[2].operands, [Int]{-1, 2})
+}
+
+#Test("a middle operand stops before the binary operator that follows it") {
+    plan: plan_of("e : subject=e 'BETWEEN'i low=e 'AND'i high=e # Between | left=e 'AND'i right=e # And | left=e '+' right=e # Add | value=NUM # Num ;\nNUM : [0-9]+ ;\nWS : ' '+ -> skip ;")
+    ops: plan.operators[0].operators
+    assert_eq(ops[0].operands, [Int]{-1, -1, 4, -1, 5})
+    assert_eq(ops[1].operands, [Int]{-1, -1, 4})
+}
+
+#Test("a middle operand with no matching operator parses the whole rule") {
+    plan: plan_of("e : cond=e '?' yes=e ':' no=e # Cond | e '(' args+=e ')' # Call | value=NUM # Num ;\nNUM : [0-9]+ ;")
+    ops: plan.operators[0].operators
+    assert_eq(ops[0].operands, [Int]{-1, -1, 0, -1, 4})
+    assert_eq(ops[1].operands, [Int]{-1, -1, 0, -1})
+}
+
+#Test("one literal may not be the operator of two alternatives") {
+    faults: faults_of("e : e '+' e # Add | e op=('-' | '+') e # Sub | NUM # Num ;\nNUM : [0-9]+ ;")
+    ^found: false
+    loop fault in faults {
+        if fault.message == "`+` is the operator of two alternatives of `e`" {
+            found = true
+            assert_eq(fault.kind, GrammarFaultKind.Ambiguous)
+        }
+    }
+    assert(found)
+}
+
+#Test("a repeat of what can match nothing is refused") {
+    faults: faults_of("a : ('x'?)* 'y' ;\nb : ('x' | 'z'*)+ 'y' ;")
+    assert_eq(faults.len(), 2)
+    assert_eq(faults[0].kind, GrammarFaultKind.EmptyRepeat)
+    assert_eq(faults[0].message, "this repeat's item can match nothing, so the repeat would never stop")
+    assert_eq(faults[0].at.offset, 10)
+    assert_eq(faults[1].kind, GrammarFaultKind.EmptyRepeat)
+}

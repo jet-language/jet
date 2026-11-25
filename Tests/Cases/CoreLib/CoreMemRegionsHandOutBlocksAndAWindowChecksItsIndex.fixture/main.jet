@@ -19,10 +19,10 @@ adopt_over: fn(address: Int, bytes: Int) -> mem.Region {
 }
 
 run: fn() {
-    shelf := Shelf{blocks: [mem.Block]{}}
-    region := mem.Region.reserve(4096) ?? panic("reserve")
+    ^shelf: Shelf{blocks: [mem.Block]{}}
+    ^region: mem.Region.reserve(4096) ?? panic("reserve")
     before: region.remaining()
-    first := region.claim(24, 8) ?? panic("first claim")
+    ^first: region.claim(24, 8) ?? panic("first claim")
     second: region.claim(40, 8) ?? panic("second claim")
     refused: region.claim(1, 3) == None
     start: first.address() - region.address()
@@ -31,7 +31,7 @@ run: fn() {
     shelf.blocks.push(first)
 
     host: region.claim(256, 16) ?? panic("host claim")
-    inner := adopt_over(host.address(), host.size())
+    ^inner: adopt_over(host.address(), host.size())
     piece: inner.claim(16, 16) ?? panic("adopted claim")
     print("adopted {inner.size()} bytes, {inner.remaining()} left, piece at the host's start {piece.address() == host.address()}")
     shelf.blocks.push(piece)

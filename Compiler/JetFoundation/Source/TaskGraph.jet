@@ -57,7 +57,7 @@ CompilerTaskGraph: struct {
 
 // A graph of `count` independent nodes of weight 1.
 compiler_task_graph: fn(count: Int) -> CompilerTaskGraph Never! {
-    graph := CompilerTaskGraph{waits: [Int]{}, dependents: [[Int]]{}, weights: [Int]{}}
+    ^graph: CompilerTaskGraph{waits: [Int]{}, dependents: [[Int]]{}, weights: [Int]{}}
     loop _ in 0..<count {
         graph.waits.push(0)
         graph.dependents.push([Int]{})
@@ -101,10 +101,10 @@ CompilerTaskStart: struct {
 // and never more slots than nodes.
 compiler_task_schedule: fn(graph: ^^CompilerTaskGraph, threads: CompilerThreads) -> CompilerTaskSchedule Never! {
     count: graph.waits.len()
-    workers := compiler_threads_limit(threads)
+    ^workers: compiler_threads_limit(threads)
     if workers > count -> workers = count
     if workers < 1 -> workers = 1
-    schedule := CompilerTaskSchedule{graph: graph.move(), ready: [Int]{}, idle: [Int]{}, workers: workers, finished: 0}
+    ^schedule: CompilerTaskSchedule{graph: graph.move(), ready: [Int]{}, idle: [Int]{}, workers: workers, finished: 0}
     loop node in 0..<count {
         if schedule.graph.waits[node] == 0 {
             compiler_task_heap_push(schedule.ready, schedule.graph.weights, node)
@@ -202,7 +202,7 @@ compiler_task_before: fn(weights: [Int], a: Int, b: Int) -> Bool Never! {
 // Adds `node` to the binary heap `heap`, ordered by compiler_task_before.
 compiler_task_heap_push: fn(heap: ^[Int], weights: [Int], node: Int) Never! {
     heap.push(node)
-    at := heap.len() - 1
+    ^at: heap.len() - 1
     loop at > 0 {
         parent: (at - 1) /% 2
         if !compiler_task_before(weights, heap[at], heap[parent]) -> break
@@ -219,11 +219,11 @@ compiler_task_heap_pop: fn(heap: ^[Int], weights: [Int]) -> Int Never! {
     last: heap.pop() ?? return first
     if heap.len() == 0 -> return first
     heap[0] = last
-    at := 0
+    ^at: 0
     loop {
         left: at * 2 + 1
         if left >= heap.len() -> break
-        child := left
+        ^child: left
         if left + 1 < heap.len() && compiler_task_before(weights, heap[left + 1], heap[left]) {
             child = left + 1
         }

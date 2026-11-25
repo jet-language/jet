@@ -37,7 +37,7 @@ DriverHost: struct {
 
     impl MemoryAxisHost {
         stage_files: fn(self, dir: String, declared: Dyn) -> Dyn Err! {
-            staged := [Dyn]{}
+            ^staged: [Dyn]{}
             loop item in items_at(declared, "") {
                 source: text_or_empty(item, "source")
                 target: text_or_empty(item, "target")
@@ -46,7 +46,7 @@ DriverHost: struct {
                 to: files.join(dir, target)
                 files.create_dir_all(files.dirname(to))
                 files.copy(from, to)
-                entry := Dyn.object()
+                ^entry: Dyn.object()
                 entry["source"] = source
                 entry["target"] = target
                 staged.push(entry)
@@ -59,9 +59,9 @@ DriverHost: struct {
         }
 
         probe_tools: fn(self, _dir: String, tools: Dyn, _jet_bin: String) -> [Dyn] Err! {
-            probes := [Dyn]{}
+            ^probes: [Dyn]{}
             loop tool in texts_at(tools, "") {
-                probe := Dyn.object()
+                ^probe: Dyn.object()
                 probe["tool"] = tool.copy()
                 if {
                     files.exists(files.join(self.repo, tool)) -> probe["status"] = "available"

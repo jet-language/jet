@@ -68,7 +68,7 @@ Strategy: enum {
 spawn: fn<S, M>(state: ^^S, handler: ^^fn(S, M) -> S) -> Actor<M> {
     { sender: inbox, receiver: mailbox }: channel<Envelope<M>>()
     worker: task ^^mailbox {
-        current := state
+        ^current: state
         loop envelope in mailbox {
             if !turn(current, handler, envelope) -> break
         }
@@ -87,8 +87,8 @@ spawn: fn<S, M>(state: ^^S, handler: ^^fn(S, M) -> S) -> Actor<M> {
 supervise: fn<S, M>(start: ^^fn() -> S, handler: ^^fn(S, M) -> S, strategy: Strategy) -> Actor<M> {
     { sender: inbox, receiver: mailbox }: channel<Envelope<M>>()
     worker: task ^^mailbox {
-        current := start()
-        restarts := 0
+        ^current: start()
+        ^restarts: 0
         loop envelope in mailbox {
             if !supervised_turn(current, handler, envelope) {
                 retry: if strategy == .Restart(limit) -> restarts < limit else -> false
@@ -133,7 +133,7 @@ priv turn: fn<S, M>(current: ^S, handler: fn(S, M) -> S, envelope: Envelope<M>) 
 // handler finished, the state replaced when it did. The child borrows the
 // state, the handler and the envelope until its join.
 priv supervised_turn: fn<S, M>(current: ^S, handler: fn(S, M) -> S, envelope: Envelope<M>) -> Bool {
-    outcome := S?{None}
+    ^outcome: S?{None}
     task.group group {
         attempt: task handler(current, envelope.message)
         if attempt.join() == {

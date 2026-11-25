@@ -19,7 +19,7 @@ Marker: struct {
 // Counts with no call and no wait point: only the check each iteration
 // starts with can stop it.
 spin: fn(counter: Atomic<Int>) -> Int {
-    n := 0
+    ^n: 0
     loop n >= 0 {
         n += 1
         if n % 4096 == 0 -> counter.store(n)
@@ -38,7 +38,7 @@ run: fn() {
             defer close(marker)
             spin(counter)
         }
-        tries := 0
+        ^tries: 0
         loop counter.load() == 0 && tries < 2000 {
             time.sleep(1ms)
             tries += 1
@@ -46,7 +46,7 @@ run: fn() {
         print("ready")
         // A pipe stdout is written when its buffer fills; flush so the parent
         // sees ready before it signals.
-        ready_out := term.stdout()
+        ^ready_out: term.stdout()
         ready_out.flush() ?? process.fail(1, "flush: {err}")
         if busy.join() == {
             .Ok(_) -> { print("busy handler: finished") }

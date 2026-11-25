@@ -9,10 +9,10 @@ use sys: core.sys
 ROUNDS: 20000
 
 run: fn() {
-    memory := sys.shared_memory(4096) ?? panic("shared memory: {err}")
+    ^memory: sys.shared_memory(4096) ?? panic("shared memory: {err}")
     misaligned: memory.load(4) ?? -1
     outside: memory.load(4096) ?? -2
-    wide := "stored"
+    ^wide: "stored"
     if memory.store(16, 9223372036854775808) == {
         .Err(_) -> { wide = "refused" }
         .Ok(_) -> {}
@@ -21,7 +21,7 @@ run: fn() {
     least: memory.load(16) ?? panic("load the least word: {err}")
     swapped: memory.compare_exchange(16, 0, 1) ?? panic("exchange: {err}")
 
-    region := ""
+    ^region: ""
     #Unsafe("fork a peer that shares the mapping, and reap it") {
         child: sys.fork() ?? panic("fork: {err}")
         if child == 0 {

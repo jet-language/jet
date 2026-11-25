@@ -60,7 +60,7 @@ jet_cli_structure_report: fn(facts: [StructureFact], ledger: GateLedger, json: B
     if json {
         return "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("structure", jet_cli_structure_value(facts, gates))})}\n"
     }
-    output := "Structure\n"
+    ^output: "Structure\n"
     loop row in jet_cli_structure_rows() {
         output = "{output}  {row.name}  safe={row.safe_direction}  gates={row.gates.join(", ")}\n"
     }
@@ -86,7 +86,7 @@ jet_cli_structure_core_type: fn(entry: CoreModuleTypeExport) -> JetCLIStatusValu
         .Generic(_) -> "generic"
         .Enum(_) -> "enum"
     }
-    fields := [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(entry.name)), jet_cli_status_field("kind", jet_cli_status_text(kind))}
+    ^fields: [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(entry.name)), jet_cli_status_field("kind", jet_cli_status_text(kind))}
     if entry.kind == {
         .Enum(variants) -> {
             fields.push(jet_cli_status_field("variants", jet_cli_status_texts(variants)))
@@ -109,8 +109,8 @@ jet_cli_structure_core_source_key: fn(record: CoreCallRecord) -> String? Never! 
 // `module.function`, read from the Core built into this jet (the Core its
 // CORE_CALLS were built from): only those rows' modules are parsed, each once.
 jet_cli_structure_core_declared: fn() -> [String:[String]] Never! {
-    declared := [String:[String]]{}
-    modules := [String]{}
+    ^declared: [String:[String]]{}
+    ^modules: [String]{}
     loop record in CORE_CALLS {
         if record.module_name == "" -> next
         key: jet_cli_structure_core_source_key(record) ?? next
@@ -122,7 +122,7 @@ jet_cli_structure_core_declared: fn() -> [String:[String]] Never! {
         parsed: parse_source(source.source().bytes())
         loop item in parsed.program.items {
             if item == .Func(function) {
-                effects := [String]{}
+                ^effects: [String]{}
                 if function.declared_effects == .Val(row) {
                     loop entry in row -> effects.push(entry.name)
                 }
@@ -155,7 +155,7 @@ jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
         core: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("bootstrap", jet_cli_status_array(bootstrap)), jet_cli_status_field("root_types", jet_cli_status_texts(CORE_ROOT_TYPES)), jet_cli_status_field("modules", jet_cli_status_array(modules)), jet_cli_status_field("sources", jet_cli_status_array(sources)), jet_cli_status_field("calls", jet_cli_status_array(calls))})
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("core", core)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    output := "Core\nBootstrap:\n"
+    ^output: "Core\nBootstrap:\n"
     loop (index, step) in CORE_BOOTSTRAP_STEPS {
         output = "{output}  {index + 1}. {step.name}  depends_on [{if step.dependencies.len() == 0 -> "none" else -> step.dependencies.join(", ")}]\n"
     }
@@ -181,12 +181,12 @@ jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
 // Compilation and ledger failures use inspect.structure, with no human summary.
 // A checked result ends the process behind `notice` (jet_cli_finish).
 jet_cli_structure_host: fn(file: String, color: Bool, json: Bool, threads: Int?, notice: String) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Doc)
     compiled: if prepared.move() == {
         .Refused(refusal) -> JetCLICompiled.Refused{output: refusal}
         .Prepared(request, snapshot) -> {
-            gated := request.move()
+            ^gated: request.move()
             gated.capture_gate_ledger = true
             jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: gated.move(), snapshot: snapshot.move()}, None, None)
         }
@@ -204,7 +204,7 @@ jet_cli_structure_result: fn(file: String, color: Bool, json: Bool, result: JetD
     diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
     errors: jet_cli_errors(diagnostics)
     facts: jet_cli_structure_facts(result)
-    ledger := GateLedger{}
+    ^ledger: GateLedger{}
     if jet_cli_gate_ledger(result) == .Val(storage) {
         permit: storage.guard_read()
         // copy: the compile result's shared gate ledger (owner: its storage cell, still
@@ -221,7 +221,7 @@ jet_cli_structure_result: fn(file: String, color: Bool, json: Bool, result: JetD
         // envelope carries them in its `structure` field.
         if json {
             source: jet_cli_inspection_source(result, snapshot, file)
-            fields := [JetCLIStatusField]{}
+            ^fields: [JetCLIStatusField]{}
             if facts.len() > 0 {
                 gates: loop entry in ledger.rows if entry.kind == GateKind.Structure -> entry
                 fields.push(jet_cli_status_field("structure", jet_cli_structure_value(facts, gates)))
@@ -229,7 +229,7 @@ jet_cli_structure_result: fn(file: String, color: Bool, json: Bool, result: JetD
             return JetDriverVerbOutput{stdout: jet_cli_status_render_with_reports("inspect.structure", false, jet_cli_reports_json(jet_cli_report_base(file), file, source, diagnostics), fields), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
         stdout: if facts.len() > 0 -> jet_cli_structure_report(facts, ledger, false) else -> ""
-        stderr := ""
+        ^stderr: ""
         loop error in diagnostics {
             origin: if error.origin == .Val(value) -> value.display else -> file
             source: if error.origin == .Val(value) -> value.source else -> jet_cli_inspection_source(result, snapshot, origin)
@@ -239,8 +239,8 @@ jet_cli_structure_result: fn(file: String, color: Bool, json: Bool, result: JetD
     }
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if ledger.diagnostic_rows.len() > 0 {
-        reports := [String]{}
-        stderr := ""
+        ^reports: [String]{}
+        ^stderr: ""
         loop row in ledger.diagnostic_rows {
             source: jet_cli_inspection_source(result, snapshot, row.source)
             if {

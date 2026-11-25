@@ -2,7 +2,7 @@ use files: core.files
 
 // Lock descriptors this process holds open (fds whose target ends `.lk`).
 held: fn() -[FS]> Int {
-    count := 0
+    ^count: 0
     names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
     loop entry in names {
         target: files.read_link(entry.path) ?? ""
@@ -18,7 +18,7 @@ consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 // `n ?? return …` moves the lock only where `n` is absent: where it is
 // present the parameter still owns the lock, which closes as this returns.
 return_fallback: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
-    value := n ?? return consume_lock(l.move())
+    ^value: n ?? return consume_lock(l.move())
     value + held()
 }
 
@@ -31,7 +31,7 @@ none_guard: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
 // A value fallback moves the lock on one path only: the other path's owner
 // still ends it at the scope end.
 value_fallback: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
-    value := n ?? consume_lock(l.move())
+    ^value: n ?? consume_lock(l.move())
     value
 }
 

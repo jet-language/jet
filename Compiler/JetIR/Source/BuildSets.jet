@@ -23,7 +23,7 @@ use jet_foundation.[Span, Type, jet_layout_one_bit_shift, type_carrier_identity]
 // The entry layout of the Set type row `set_row`: the key at offset 0 of a
 // key-sized entry; None when its keys have no order the builder knows.
 ir_set_shape: fn(m: ^IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never! {
-    elem := ir_set_element(ir_untag(ir_row_ty(m, p, set_row))) ?? return None
+    ^elem: ir_set_element(ir_untag(ir_row_ty(m, p, set_row))) ?? return None
     if ir_bit_set_def(p, ir_row_ty(m, p, set_row)) != None -> return None
     key_row: ir_value_type(m, p, elem) ?? return None
     kind: ir_map_key_kind(m, p, key_row)
@@ -185,7 +185,7 @@ ir_set_helper: fn(m: ^IRModule, p: IRProgram, set_row: Int, name: String) -> Int
     symbol: if name == "set.find" -> "find" else if name == "set.insert" -> "insert" else if name == "set.take" -> "take" else if name == "set.remove" -> "remove" else -> "equal"
     m.functions.push(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
     ir_function_bind(m, key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     set: ir_new_slot(a, set_row, IRSlotKind.Param, ir_intern_name(m, "set"))
     if name == "set.equal" {
         other: ir_new_slot(a, set_row, IRSlotKind.Param, ir_intern_name(m, "other"))
@@ -302,12 +302,12 @@ ir_set_take_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShap
     ir_end(a.f, a.line)
     data: ir_load_word(m, a, set, 16)
     entry: ir_element_address(m, a, data, index, shape.stride)
-    hash := -1
+    ^hash: -1
     if ir_map_hashed(shape) {
         stored: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
         hash = ir_map_tag(m, a, shape, stored)
     }
-    boxed := -1
+    ^boxed: -1
     if discard {
         if m.types[shape.key.ty].drop != "" {
             removed_key: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
@@ -481,7 +481,7 @@ ir_set_end: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, shape: IRMap
     present: ir_bool_op(m, b, IROp.Gt, length, zero)
     ir_open_if(b.f, present, b.line)
     data: ir_load_word(m, b, ordered, 16)
-    index := zero
+    ^index: zero
     if last {
         one: ir_word_const(m, b, 1)
         word_row: ir_word_row(m)
@@ -525,8 +525,8 @@ ir_set_from: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, source: Int
     shape: ir_set_shape(m, p, set_row) ?? return ir_fail_slot(b, span, "Set construction of {ir_type_name(ty)}")
     elem: shape.entry_ty
     source_ty: ir_lazy_slot_type(m, p, b, source)
-    list := source
-    moved := b.fresh[source]
+    ^list: source
+    ^moved: b.fresh[source]
     if ir_iter_element(source_ty) != None {
         list_row: ir_value_type(m, p, Type.List{element: elem}) ?? return ir_fail_slot(b, span, "type [{ir_type_name(elem)}]")
         list = ir_list_empty(m, p, b, list_row)
@@ -646,7 +646,7 @@ ir_set_builtin: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, route: S
         }
         other: ir_adapt(m, p, b, operands[1], set_row, span)
         if ir_failed(b) -> return Val(-1)
-        target := -1
+        ^target: -1
         if symbol == "jet_set_union" {
             target = ir_copy_value(m, p, b, subject, span)
             // The copy shares the receiver's buffer until it is its own.
@@ -857,7 +857,7 @@ ir_bit_set_cases: fn(p: IRProgram, definition: Int) -> Int Never! {
 // The bit each case of the `#Specified` enum `definition` crosses as, by
 // case index; None when a case value is not one bit (sema refuses it).
 ir_bit_set_shifts: fn(p: IRProgram, definition: Int) -> [Int]? Never! {
-    shifts := [Int]{}
+    ^shifts: [Int]{}
     if p.types[definition].kind == .Enum(variants, _) {
         loop variant in variants {
             value: variant.discriminant ?? return None
@@ -932,7 +932,7 @@ ir_bit_set_from: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, set_row
     elem: ir_set_element(ir_untag(ty)) ?? return ir_type_fail(b, span, ty)
     elem_row: ir_value_type(m, p, elem) ?? return ir_type_fail(b, span, elem)
     source_ty: ir_lazy_slot_type(m, p, b, source)
-    list := source
+    ^list: source
     if ir_iter_element(source_ty) != None {
         list_row: ir_value_type(m, p, Type.List{element: elem.copy()}) ?? return ir_fail_slot(b, span, "type [{ir_type_name(elem)}]")
         list = ir_list_empty(m, p, b, list_row)
@@ -1041,7 +1041,7 @@ ir_bit_set_from_bits: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, inputs: [Int
 
 // A Set builtin on a Set stored as bits (ir_set_builtin's symbols).
 ir_bit_set_builtin: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, route: String, symbol: String, set_row: Int, definition: Int, subject: Int, operands: [Int], span: Span) -> Int? Never! {
-    elem := ir_set_element(ir_untag(ir_row_ty(m, p, set_row))) ?? return None
+    ^elem: ir_set_element(ir_untag(ir_row_ty(m, p, set_row))) ?? return None
     elem_row: ir_value_type(m, p, elem) ?? return Val(ir_type_fail(b, span, elem))
     cases: ir_bit_set_cases(p, definition)
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -1085,7 +1085,7 @@ ir_bit_set_builtin: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rout
     if symbol == "jet_set_shuffle" || symbol == "jet_set_to_list" || symbol == "jet_set_sort" || symbol == "jet_set_values" {
         if operands.len() != 1 -> return None
         result_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
-        list_row := result_row
+        ^list_row: result_row
         if symbol == "jet_set_values" {
             list_row = ir_value_type(m, p, Type.List{element: elem.copy()}) ?? return Val(ir_fail_slot(b, span, "type [{ir_type_name(elem)}]"))
         }

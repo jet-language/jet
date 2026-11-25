@@ -50,7 +50,7 @@ methods_fail: fn(message: String) -> CompilerValueMethodsError Never! {
 // per owner (matching `core_record_field`).
 compiler_value_records: fn(source: String) -> [CompilerValueRecord] CompilerValueMethodsError! {
     table: RECORD_TABLE.match("\n{LINE_COMMENT.replace(source, "")}") ?? return Err(methods_fail("unrecognized CORE_RECORD_FIELD_ROWS table"))
-    records := [CompilerValueRecord]{}
+    ^records: [CompilerValueRecord]{}
     loop raw in table.groups[0].split("\n") {
         line: raw.trim()
         if line == "" -> next
@@ -59,7 +59,7 @@ compiler_value_records: fn(source: String) -> [CompilerValueRecord] CompilerValu
         field: "{row.groups[1]}"
         if !owner.starts_with("Compiler") -> next
         if CORE_ONLY_TRUE.match(line) != None -> next
-        found := -1
+        ^found: -1
         loop (index, entry) in records {
             if entry.owner == owner {
                 found = index
@@ -73,7 +73,7 @@ compiler_value_records: fn(source: String) -> [CompilerValueRecord] CompilerValu
     if records.len() == 0 {
         return Err(methods_fail("CORE_RECORD_FIELD_ROWS contains no Compiler* records"))
     }
-    has_checked := false
+    ^has_checked: false
     loop entry in records {
         if entry.owner == "CompilerChecked" -> has_checked = true
     }
@@ -84,7 +84,7 @@ compiler_value_records: fn(source: String) -> [CompilerValueRecord] CompilerValu
 // One `if owner == "..."` arm in `jet_eval_compiler_value_method_record`,
 // formatted as `jet fmt` keeps it (inline `->` up to 100 columns, else a block).
 render_record_arm: fn(record: CompilerValueRecord) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop field in record.fields -> parts.push("method == \"{field}\"")
     checks: parts.join(" || ")
     inline: "    if owner == \"{record.owner}\" -> return {checks}"
@@ -94,7 +94,7 @@ render_record_arm: fn(record: CompilerValueRecord) -> String Never! {
 
 // JetEval/Source/CompilerValueMethods.jet, whole.
 render_compiler_value_methods: fn(records: [CompilerValueRecord]) -> String Never! {
-    arms := ""
+    ^arms: ""
     loop record in records -> arms = "{arms}{render_record_arm(record)}"
     prefix: ```use jet_foundation.[
     TComptimeField,
@@ -200,7 +200,7 @@ jet_eval_compiler_value_answer: fn(owner: String, method: String, args: [TCompti
 
 compiler_value_methods_main: fn(args: [String]) -[FS]> String CompilerValueMethodsError! {
     usage: "usage: jet Toolchain/CompilerValueMethods.jet [--check|--write]"
-    mode := "--check"
+    ^mode: "--check"
     loop (index, arg) in args {
         if index == 0 && (arg == "--check" || arg == "--write") -> mode = arg else {
             return Err(methods_fail(usage))

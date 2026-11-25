@@ -1,8 +1,8 @@
 // Outcome execution journey: ONE dynamic TLS key, with the real Closure24
 // destructor. No private TCB offset or second report renderer.
-journey_tls_key := I64{0}
+^journey_tls_key: I64{0}
 
-journey_report_wire_word := I64{0}
+^journey_report_wire_word: I64{0}
 
 // Reviewed RuntimeIntrinsicSpec shape (5604a28ad): this reference body is
 // never lowered; the runtime-only checked-ID table binds the actual export.
@@ -31,7 +31,7 @@ rt_journey_destructor_address: fn() -> I64 {
 }
 
 journey_tls_value: fn() -> I64 {
-    held := jet_rt_tls_get(journey_tls_key)
+    ^held: jet_rt_tls_get(journey_tls_key)
     if (held == I64{0}) {
         held = jet_rt_native_journey_new()
         jet_rt_tls_set(journey_tls_key, held)
@@ -109,9 +109,9 @@ journey_stderr_columns: fn(tty: Bool) -> I64 {
     jet_rt_string_drop(value)
     data: rt_text_data(trimmed)
     length: rt_text_len(trimmed)
-    at := I64{0}
-    columns := I64{0}
-    valid := length != I64{0}
+    ^at: I64{0}
+    ^columns: I64{0}
+    ^valid: length != I64{0}
     if (length != I64{0} && rt_text_byte(data) == I64{43}) { at = I64{1} }
     if (at == length) { valid = false }
     loop at < length {
@@ -132,7 +132,7 @@ journey_stderr_columns: fn(tty: Bool) -> I64 {
 
 journey_trim_newlines: fn(text: I64) -> I64 {
     data: rt_text_data(text)
-    length := rt_text_len(text)
+    ^length: rt_text_len(text)
     loop {
         if (length == I64{0}) { break }
         if (rt_text_byte(wrapping(wrapping(data + length) - I64{1})) != I64{10}) { break }
@@ -146,7 +146,7 @@ journey_trim_newlines: fn(text: I64) -> I64 {
 // `jet run --json`), else the human report and its trail.
 #Export(c) jet_error_report: fn(error: I64) -> I64 {
     journey: jet_journey_take_hops()
-    report := I64{0}
+    ^report: I64{0}
     if (sync_load(journey_report_wire_word) != I64{0} || host_startup_environment_value(env_name_jet_run_json()) != I64{0}) {
         report = jet_error_report_json(error, journey)
         rt_text_push_scalar(report, I64{10})
@@ -172,11 +172,11 @@ journey_trim_newlines: fn(text: I64) -> I64 {
 // caller claims the process exit first, as Trap.jet trap_root_prepare does.
 journey_entry_write_take: fn(report: I64) {
     if (jet_rt_stop_domain() == I64{1}) {
-        _ := scheduler_root_publish_owned(report, I64{1})
+        ^_: scheduler_root_publish_owned(report, I64{1})
         return
     }
     jet_rt_process_exit_begin(I64{1})
-    _ := host_stderr_write(rt_text_data(report), rt_text_len(report))
+    ^_: host_stderr_write(rt_text_data(report), rt_text_len(report))
     jet_rt_string_drop(report)
     jet_rt_process_exit_finish()
 }

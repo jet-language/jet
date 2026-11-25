@@ -49,7 +49,7 @@ fail: fn(message: String) -> Never { process.fail(1, message) }
 // path.resolve against the working directory.
 resolve: fn(cwd: String, path: String) -> String {
     full: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in full.split("/").to_list() {
         if part == ".." {
             if parts.len() > 0 -> _: parts.pop()
@@ -81,7 +81,7 @@ power: fn(base: Int, exponent: Int) -> Int {
 }
 
 bit_length: fn(value: Int) -> Int {
-    length := 0
+    ^length: 0
     loop value >> length != 0 -> length += 1
     length
 }
@@ -97,8 +97,8 @@ float_bits: fn(value: Int) -> Int {
         mantissa: (magnitude << (53 - length)) & pow2(52) - 1
         return sign + ((length - 1 + 1023) << 52) + mantissa
     }
-    shift := length - 53
-    quotient := magnitude >> shift
+    ^shift: length - 53
+    ^quotient: magnitude >> shift
     rest: magnitude - (quotient << shift)
     half: pow2(shift - 1)
     if rest > half || (rest == half && quotient & 1 == 1) -> quotient += 1
@@ -113,8 +113,8 @@ float_bits: fn(value: Int) -> Int {
 
 hex16: fn(value: Int) -> String {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
-    rest := value
+    ^out: [U8]{}
+    ^rest: value
     loop _ in 0..<16 {
         out.push(digits[rest & 15])
         rest = rest >> 4
@@ -131,12 +131,12 @@ value_row: fn(label: String, expression: String, expected: Int) -> String {
 // The int-corpus.inc statements, in the order and spelling the BigInt
 // oracle wrote them, and how many of them witness a value.
 corpus: fn() -> Corpus {
-    statements := [String]{}
-    count := 0
-    values := [Int]{0, 1, -1, pow2(62) - 1, 0 - pow2(62), pow2(62), 0 - pow2(62) - 1, pow2(63) - 1, 0 - pow2(63), pow2(64), 0 - pow2(64), Int.parse("123456789012345678901234567890123456789") ?? 0}
+    ^statements: [String]{}
+    ^count: 0
+    ^values: [Int]{0, 1, -1, pow2(62) - 1, 0 - pow2(62), pow2(62), 0 - pow2(62) - 1, pow2(63) - 1, 0 - pow2(63), pow2(64), 0 - pow2(64), Int.parse("123456789012345678901234567890123456789") ?? 0}
     loop i in 0..<values.len() {
         a: values[i]
-        rows := [String]{value_row("parse-{i}", raw(a), a), value_row("clone-{i}", "jet_rt_int_clone({raw(a)})", a)}
+        ^rows: [String]{value_row("parse-{i}", raw(a), a), value_row("clone-{i}", "jet_rt_int_clone({raw(a)})", a)}
         if a >= 0 - pow2(63) && a < pow2(63) {
             constant: i64_constant(a)
             rows.push(value_row("from-i64-{i}", "jet_int_owned_from_i64({constant})", a))
@@ -189,7 +189,7 @@ corpus: fn() -> Corpus {
     // The Float inputs: the values, then the edges, then every rounding
     // position (both parity ties, just below and above ties), both signs;
     // each text once, at its first place.
-    candidates := values.move()
+    ^candidates: values.move()
     loop a in
         ([Int]{pow2(53) - 1, pow2(53), pow2(53) + 1, pow2(63), (pow2(53) - 1) << 971, pow2(1024), power(10, 450)}) {
         candidates.push(a)
@@ -204,8 +204,8 @@ corpus: fn() -> Corpus {
             candidates.push(0 - a)
         }
     }
-    seen := [String:Bool]{}
-    index := 0
+    ^seen: [String:Bool]{}
+    ^index: 0
     loop value in candidates {
         text: "{value}"
         if seen.has_key(text) -> next
@@ -220,13 +220,13 @@ corpus: fn() -> Corpus {
 }
 
 le: fn(bytes: [U8], at: Int, width: Int) -> Int {
-    value := 0
+    ^value: 0
     loop k in 0..<width -> value = value * 256 + (Int{bytes[at + width - 1 - k]})
     value
 }
 
 c_string: fn(bytes: [U8], at: Int) -> String {
-    end := at
+    ^end: at
     loop end < bytes.len() {
         if (Int{bytes[end]}) == 0 -> break
         end += 1
@@ -244,7 +244,7 @@ elf_symbols: fn(bytes: [U8]) -> Symbols? {
     entry: le(bytes, 0x3a, 2)
     count: le(bytes, 0x3c, 2)
     if sections + entry * count > bytes.len() -> return None
-    found := Symbols{defined: [String]{}, undefined: [String]{}}
+    ^found: Symbols{defined: [String]{}, undefined: [String]{}}
     loop index in 0..<count {
         header: sections + entry * index
         if le(bytes, header + 4, 4) != 2 -> next
@@ -267,7 +267,7 @@ elf_symbols: fn(bytes: [U8]) -> Symbols? {
 
 // The exact Int symbols an object imports and the Rust symbols it defines.
 foreign: fn(symbols: Symbols) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     loop name in symbols.undefined {
         if name.starts_with("jet_int_") || name.starts_with("jet_rt_int_") {
             found.push("imports {name}")
@@ -283,8 +283,8 @@ foreign: fn(symbols: Symbols) -> [String] {
 
 load_policy: fn(root: String) -> Policy {
     text: files.read("{root}/{POLICY}") ?? fail("cannot read {POLICY}: {err}")
-    flags := [String]{}
-    removed := [String]{}
+    ^flags: [String]{}
+    ^removed: [String]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         line: lines[index]
@@ -304,7 +304,7 @@ load_policy: fn(root: String) -> Policy {
 // Tools/Packaging/NativeCCompiler.jet runs it.
 native_cc: fn(policy: Policy, args: [String]) -> ProcessSpec {
     removed: policy.removed
-    spec := process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
+    ^spec: process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
     if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
         words: re.split(Regex{"\s+"}, enabled)
         kept: loop word in words if word != "" && !removed.contains(word) -> word
@@ -332,9 +332,9 @@ run: fn() {
         fail("int-corpus.inc differs from the frozen BigInt-oracle corpus")
     }
     object: resolve(root, args[1])
-    failures := [String]{}
+    ^failures: [String]{}
     binary: "{out}/jet-int-cabi"
-    cc_args := [String]{"-std=c11", "-O1", "-I", out.copy(), "{root}/Compiler/JetRuntime/Tests/int-cabi.c", object.copy()}
+    ^cc_args: [String]{"-std=c11", "-O1", "-I", out.copy(), "{root}/Compiler/JetRuntime/Tests/int-cabi.c", object.copy()}
     loop input in args[2..<args.len()] {
         cc_args.push(if input.starts_with("-") -> input.copy() else -> resolve(root, input))
     }
@@ -342,7 +342,7 @@ run: fn() {
     built: native_cc(load_policy(root), cc_args).run() ?? fail("jet: link: {err}")
     write("{out}/jet-build.log", "{built.output}{built.errors}")
     if built.signal != None || built.code != 0 -> failures.push("jet: link") else {
-        runs := [String]{"values"}
+        ^runs: [String]{"values"}
         runs.extend(STOPS)
         loop name in runs {
             spec: if name == "values" -> process.cmd([String]{binary.copy()}) else -> process.cmd([String]{binary.copy(), name.copy()})

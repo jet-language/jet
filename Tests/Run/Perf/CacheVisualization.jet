@@ -16,13 +16,13 @@ fill: fn(count: Int) -> [Int] Never! {
 }
 
 sequential: fn(data: [Int]) -> Int Never! {
-    total := 0
+    ^total: 0
     loop index in 0..<data.len() -> total += data[index]
     total
 }
 
 strided: fn(data: [Int], rows: Int) -> Int Never! {
-    total := 0
+    ^total: 0
     loop index in 0..<data.len() -> total += data[(index % rows) * 520 + index /% rows]
     total
 }
@@ -31,8 +31,8 @@ run: fn() {
     args: process.args()
     rows: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 8192 else -> 8192
     data: fill(rows * 520)
-    in_order := 0
-    across := 0
+    ^in_order: 0
+    ^across: 0
     loop _ in 0..<4 {
         in_order += sequential(data)
         across += strided(data, rows)

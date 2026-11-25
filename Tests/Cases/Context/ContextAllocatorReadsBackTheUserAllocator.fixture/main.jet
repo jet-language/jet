@@ -35,7 +35,7 @@ Counter: struct {
 current: fn() -[]> mem.Allocator { context.allocator }
 
 take_and_give: fn(size: Int) -> Bool {
-    allocator := current()
+    ^allocator: current()
     block: allocator.allocate(size, 16) ?? return false
     fits: block.address() & 15 == 0 && block.size() == size
     allocator.release(block)
@@ -44,7 +44,7 @@ take_and_give: fn(size: Int) -> Bool {
 
 run: fn() {
     region: mem.Region.reserve(1 << 20) ?? panic("reserve")
-    counter := Counter{region: region, kept: [mem.Block]{}, asked: 0, returned: 0, taken: 0, given: 0}
+    ^counter: Counter{region: region, kept: [mem.Block]{}, asked: 0, returned: 0, taken: 0, given: 0}
     print("from the heap: {take_and_give(777)}")
     #Context(allocator: counter) { print("from the counter: {take_and_give(777)}") }
     print("asked the counter: {counter.asked}, given back to it: {counter.returned}")

@@ -171,8 +171,8 @@ walk_into: fn(root: String, dir: String, out: ^[String]) -[Exec, FS, IO]> {
         out.push(dir.copy())
         return
     }
-    pending := [String]{dir.copy()}
-    at := 0
+    ^pending: [String]{dir.copy()}
+    ^at: 0
     loop at < pending.len() {
         rel: pending[at].copy()
         at += 1
@@ -186,9 +186,9 @@ walk_into: fn(root: String, dir: String, out: ^[String]) -[Exec, FS, IO]> {
 
 // `paths` sorted in byte order without repeats.
 unique: fn(paths: [String]) -> [String] Never! {
-    sorted := paths.copy()
+    ^sorted: paths.copy()
     sorted.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop path in sorted {
         if out.len() > 0 && out[out.len() - 1] == path -> next
         out.push(path.copy())
@@ -197,9 +197,9 @@ unique: fn(paths: [String]) -> [String] Never! {
 }
 
 be64: fn(value: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<8 -> out.push(U8{0})
-    rest := value
+    ^rest: value
     loop k in 0..<8 {
         out[7 - k] = checked(U8{rest % 256}) ?? U8{0}
         rest = rest /% 256
@@ -219,8 +219,8 @@ entry_bytes: fn(path: String, link_prefix: String) -[Exec, FS, IO]> [U8] Never! 
 // SHA-256 over `domain`, a NUL, then per path (sorted, unique): u64 path
 // length, path, u64 length, bytes.
 content_hash: fn(root: String, paths: [String], domain: String) -[Exec, FS, IO]> String Never! {
-    hasher := crypto.new()
-    head := domain.bytes()
+    ^hasher: crypto.new()
+    ^head: domain.bytes()
     head.push(U8{0})
     hasher.update(head)
     loop path in unique(paths) {
@@ -235,9 +235,9 @@ content_hash: fn(root: String, paths: [String], domain: String) -[Exec, FS, IO]>
 
 // Every file under `dir` (relative to it), dot names included.
 all_files: fn(dir: String) -[Exec, FS, IO]> [String] Never! {
-    found := [String]{}
-    pending := [String]{""}
-    at := 0
+    ^found: [String]{}
+    ^pending: [String]{""}
+    ^at: 0
     loop at < pending.len() {
         rel: pending[at].copy()
         at += 1
@@ -273,7 +273,7 @@ provenance_path: fn(path: String) -> Bool Never! { path == "provenance.json" }
 comparable_provenance: fn(bytes: [U8]) -> [U8]? Never! {
     tree: json.parse(String.from_bytes_lossy(bytes)) ?? return None
     if tree == .Object(entries) {
-        kept := [String:Dyn]{}
+        ^kept: [String:Dyn]{}
         loop entry in entries {
             if !BUILDER_FIELDS.contains(entry.key) -> kept[entry.key.copy()] = entry.value.copy()
         }
@@ -287,14 +287,14 @@ comparable_provenance: fn(bytes: [U8]) -> [U8]? Never! {
 // it, each provenance.json as `comparable_provenance`; None when one is not a
 // JSON object.
 pack_digest: fn(pack: [PackFile]) -> String? Never! {
-    sorted := pack.copy()
+    ^sorted: pack.copy()
     sorted.sort_by(fn(left: PackFile, right: PackFile) {
         if left.path < right.path -> return Ordering.Less
         if left.path > right.path -> return Ordering.Greater
         Ordering.Equal
     })
-    hasher := crypto.new()
-    head := "chain-pack-compare-v1".bytes()
+    ^hasher: crypto.new()
+    ^head: "chain-pack-compare-v1".bytes()
     head.push(U8{0})
     hasher.update(head)
     loop file in sorted {
@@ -314,7 +314,7 @@ packhash: fn(dir: String) -[Exec, FS, IO]> String Never! {
 
 // `packhash` of DIR, None when a provenance.json of it is not a JSON object.
 pack_compare: fn(dir: String) -[Exec, FS, IO]> String? Never! {
-    pack := [PackFile]{}
+    ^pack: [PackFile]{}
     loop path in all_files(dir) {
         pack.push(PackFile{path: path.copy(), bytes: entry_bytes(files.join(dir, path), "symlink:")})
     }
@@ -328,14 +328,14 @@ tool_jet: fn() -[Env, FS]> String Never! { dev_roots.value("JET_BIN") }
 
 // The output rows of Tools/Agent/CompilerPackages.jet of `tree`.
 compiler_packages: fn(tree: String, args: [String]) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! {
-    argv := [String]{tool_jet(), files.join(tree, "Tools/Agent/CompilerPackages.jet"), "--root", tree.copy()}
+    ^argv: [String]{tool_jet(), files.join(tree, "Tools/Agent/CompilerPackages.jet"), "--root", tree.copy()}
     argv.extend(args.copy())
     receipt: process.cmd(argv).output_limit(268435456).run() ?? fail("{argv[0]}: {err}")
     if receipt.errors.trim() != "" -> term.eprint(receipt.errors.trim())
     if !receipt.success {
         fail("Tools/Agent/CompilerPackages.jet {args[0]} failed (exit {receipt.code})")
     }
-    rows := [String]{}
+    ^rows: [String]{}
     loop row in receipt.output.split("\n") {
         if row != "" -> rows.push(row.copy())
     }
@@ -349,7 +349,7 @@ compiler_packages: fn(tree: String, args: [String]) -[Env, Exec, FS, IO, Time.Wa
 // sources.list names, and the dev-shell definition the stage runs in.
 // Sorted and unique.
 stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! {
-    read := compiler_packages(tree, [String]{"inputs"})
+    ^read: compiler_packages(tree, [String]{"inputs"})
     loop extra in
         ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "Compiler/Toolchain", "env.jet", "flake.nix", "flake.lock"}) {
         walk_into(tree, extra, read)
@@ -383,7 +383,7 @@ Diff: struct {
 
 // Git's blob id: sha1 of `blob <length>\0<bytes>`.
 blob_hash: fn(bytes: [U8]) -> String Never! {
-    framed := "blob {bytes.len()}".bytes()
+    ^framed: "blob {bytes.len()}".bytes()
     framed.push(U8{0})
     framed.extend(bytes.copy())
     crypto.sha1(framed)
@@ -391,8 +391,8 @@ blob_hash: fn(bytes: [U8]) -> String Never! {
 
 // The NUL-separated fields of `bytes`, empty ones dropped.
 nul_fields: fn(bytes: [U8]) -> [String] Never! {
-    out := [String]{}
-    start := 0
+    ^out: [String]{}
+    ^start: 0
     loop at in 0..<bytes.len() {
         if (Int{bytes[at]}) != 0 -> next
         if at > start -> out.push(String.from_bytes_lossy(bytes.slice(start, at)))
@@ -410,9 +410,9 @@ nul_fields: fn(bytes: [U8]) -> [String] Never! {
 diff: fn(tree: String, base: String, repo: String) -[Env, Exec, FS, IO, Time.Wait]> Diff Never! {
     listed: process.cmd([String]{"git", "-C", repo.copy(), "ls-tree", "-r", "-z", "--full-tree", base.copy()}).output_limit(268435456).run() ?? fail("git: {err}")
     if !listed.success -> fail("git ls-tree {base} in {repo} failed: {listed.errors.trim()}")
-    base_sha := [String:String]{}
-    base_paths := [String]{}
-    prefixes := [String:Bool]{}
+    ^base_sha: [String:String]{}
+    ^base_paths: [String]{}
+    ^prefixes: [String:Bool]{}
     loop row in nul_fields(listed.output.bytes()) {
         split: row.partition("\t")
         meta: split.head.split(" ").to_list()
@@ -420,16 +420,16 @@ diff: fn(tree: String, base: String, repo: String) -[Env, Exec, FS, IO, Time.Wai
         path: split.tail.copy()
         base_sha[path.copy()] = meta[2].copy()
         base_paths.push(path.copy())
-        prefix := path.copy()
+        ^prefix: path.copy()
         loop prefix.contains("/") {
             prefix = prefix.rpartition("/").head.copy()
             prefixes[prefix.copy()] = true
         }
     }
-    seen := [String:Bool]{}
-    changed := [Change]{}
-    pending := [String]{""}
-    at := 0
+    ^seen: [String:Bool]{}
+    ^changed: [Change]{}
+    ^pending: [String]{""}
+    ^at: 0
     loop at < pending.len() {
         rel: pending[at].copy()
         at += 1
@@ -459,8 +459,8 @@ diff: fn(tree: String, base: String, repo: String) -[Env, Exec, FS, IO, Time.Wai
         if left.path > right.path -> return Ordering.Greater
         Ordering.Equal
     })
-    hasher := crypto.new()
-    head := "chain-diff-v1".bytes()
+    ^hasher: crypto.new()
+    ^head: "chain-diff-v1".bytes()
     head.push(U8{0})
     head.extend(base.bytes())
     head.push(U8{0})
@@ -470,7 +470,7 @@ diff: fn(tree: String, base: String, repo: String) -[Env, Exec, FS, IO, Time.Wai
 }
 
 render_diff: fn(diff: Diff) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop change in diff.changed {
         rows.push("{{\"path\":{json_text(change.path)},\"status\":{json_text(change.status)},\"sha\":{json_text(change.sha)}}}")
     }
@@ -479,7 +479,7 @@ render_diff: fn(diff: Diff) -> String Never! {
 
 // `text` as a JSON string, escaped as JavaScript's JSON.stringify does.
 json_text: fn(text: String) -> String Never! {
-    out := [U8]{U8{34}}
+    ^out: [U8]{U8{34}}
     loop letter in text.bytes() {
         code: Int{letter}
         if code == 34 || code == 92 {
@@ -570,7 +570,7 @@ classify: fn(path: String, read: [String:Bool]) -> Class Never! {
 // The package a changed file belongs to: its nearest directory with a
 // package.jet, "" when none has one.
 owner_package: fn(tree: String, path: String) -[FS]> String Never! {
-    dir := path.copy()
+    ^dir: path.copy()
     loop dir.contains("/") {
         dir = dir.rpartition("/").head.copy()
         if files.exists(files.join(tree, "{dir}/package.jet")) -> return dir.copy()
@@ -583,27 +583,27 @@ owner_package: fn(tree: String, path: String) -[FS]> String Never! {
 plan: fn(tree: String, diff_path: String) -[Env, Exec, FS, IO, Time.Wait]> Plan Never! {
     text: files.read(diff_path) ?? fail("cannot read `{diff_path}`: {err}")
     parsed: json.parse(text) ?? fail("`{diff_path}` is not JSON: {err}")
-    paths := [String]{}
+    ^paths: [String]{}
     loop change in array_field(parsed, "changed") -> paths.push(text_field(change, "path"))
-    read := [String:Bool]{}
+    ^read: [String:Bool]{}
     loop path in stage_inputs(tree) -> read[path.copy()] = true
-    selector := [String]{"select"}
+    ^selector: [String]{"select"}
     selector.extend(paths.copy())
     loop path in compiler_packages(tree, selector) -> read[path.copy()] = true
-    compiler_dirs := [String:Bool]{}
+    ^compiler_dirs: [String:Bool]{}
     loop row in compiler_packages(tree, [String]{"packages"}) {
         fields: row.split("\t").to_list()
         if fields.len() > 1 -> compiler_dirs[fields[1].copy()] = true
     }
-    level := "check"
-    keys := [String]{}
-    grouped := [[String]]{}
-    members := [String]{}
+    ^level: "check"
+    ^keys: [String]{}
+    ^grouped: [[String]]{}
+    ^members: [String]{}
     loop path in paths {
         class: classify(path, read)
         if rank(class.level) > rank(level) -> level = class.level.copy()
         key: "{class.level}: {class.reason}"
-        slot := keys.len()
+        ^slot: keys.len()
         loop index in 0..<keys.len() {
             if keys[index] == key {
                 slot = index
@@ -619,17 +619,17 @@ plan: fn(tree: String, diff_path: String) -[Env, Exec, FS, IO, Time.Wait]> Plan 
         // A compiler package (or Core, which every compiler package reads) is
         // checked through Compiler/JetCLI, whose check covers every package it
         // depends on; other packages are checked themselves.
-        owner := if path.starts_with("Core/") -> "Compiler/JetCLI" else -> owner_package(tree, path)
+        ^owner: if path.starts_with("Core/") -> "Compiler/JetCLI" else -> owner_package(tree, path)
         if compiler_dirs.has_key(owner) -> owner = "Compiler/JetCLI"
         if owner != "" && !members.contains(owner) -> members.push(owner.copy())
     }
-    reasons := [String]{}
+    ^reasons: [String]{}
     loop wanted in ([Int]{2, 1, 0}) {
         loop index in 0..<keys.len() {
             key: keys[index]
             if rank(key.partition(":").head) != wanted -> next
             named: grouped[index]
-            shown := [String]{}
+            ^shown: [String]{}
             loop place in 0..<named.len() {
                 if place < 4 -> shown.push(named[place].copy())
             }
@@ -644,9 +644,9 @@ plan: fn(tree: String, diff_path: String) -[Env, Exec, FS, IO, Time.Wait]> Plan 
 }
 
 render_plan: fn(plan: Plan) -> String Never! {
-    reasons := [String]{}
+    ^reasons: [String]{}
     loop reason in plan.reasons -> reasons.push(json_text(reason))
-    members := [String]{}
+    ^members: [String]{}
     loop member in plan.members -> members.push(json_text(member))
     "{{\"level\":{json_text(plan.level)},\"reasons\":[{reasons.join(",")}],\"members\":[{members.join(",")}]}}"
 }
@@ -717,7 +717,7 @@ evict: fn(store: String, cap_text: String) -[Exec, FS, IO]> Int Never! {
 // `evict` of STORE to `cap_gb` (shown as `cap_text`); the line it reports.
 evict_store: fn(store: String, cap_text: String, cap_gb: Float) -[Exec, FS, IO]> String Never! {
     cap: cap_gb * Float.from_int(GIB)
-    entries := [StoreEntry]{}
+    ^entries: [StoreEntry]{}
     loop item in list(store) {
         if !stage_key(item.name) -> next
         dir: files.join(store, item.name)
@@ -725,14 +725,14 @@ evict_store: fn(store: String, cap_text: String, cap_gb: Float) -[Exec, FS, IO]>
         used: files.getmtime(files.join(dir, ".used")) ?? files.getmtime(dir) ?? 0
         entries.push(StoreEntry{name: item.name.copy(), dir: dir, bytes: meta_bytes(meta), used: used})
     }
-    total := 0
+    ^total: 0
     loop entry in entries -> total += entry.bytes
     entries.sort_by(fn(left: StoreEntry, right: StoreEntry) {
         if left.used < right.used -> return Ordering.Less
         if left.used > right.used -> return Ordering.Greater
         Ordering.Equal
     })
-    gone := [String]{}
+    ^gone: [String]{}
     loop entry in entries {
         if Float.from_int(total) <= cap -> break
         files.remove_all(entry.dir) ?? ()
@@ -795,7 +795,7 @@ prefix: fn(text: String, count: Int) -> String Never! {
 }
 
 pad: fn(text: String, width: Int) -> String Never! {
-    out := text.copy()
+    ^out: text.copy()
     loop out.count_bytes() < width -> out = "{out} "
     out
 }
@@ -829,7 +829,7 @@ stamp: fn() -[Time]> String Never! { now_text(.Val(" ")) }
 say: fn(text: String) -[IO, Time]> { print("{now_text(None)} {text}") }
 
 sha_file: fn(path: String) -[Exec, FS, IO]> String Never! {
-    hasher := crypto.new()
+    ^hasher: crypto.new()
     hasher.update(files.read_bytes(path) ?? fail("cannot read `{path}`: {err}"))
     hasher.digest()
 }
@@ -847,7 +847,7 @@ memory_bytes: fn(text: String) -> Int Never! {
 
 // `4-9,20-25` as the CPUs it names.
 parse_cpus: fn(text: String) -> [Int] Never! {
-    cpus := [Int]{}
+    ^cpus: [Int]{}
     loop part in text.split(",") {
         span: part.trim().partition("-")
         first: Int.parse(span.head) ?? next
@@ -863,7 +863,7 @@ lane_of: fn(text: String) -> String Never! {
     loop marker in markers {
         rest: text.partition(marker)
         if rest.sep == "" -> next
-        count := 0
+        ^count: 0
         loop letter in rest.tail.bytes() {
             code: Int{letter}
             if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
@@ -881,9 +881,9 @@ lane_of: fn(text: String) -> String Never! {
 RUST_TOOLS: ["cargo", "rustc", "rustup"]
 
 norust_path: fn() -[Env, FS]> String Never! {
-    kept := [String]{}
+    ^kept: [String]{}
     loop dir in (process.env_nonempty("PATH") ?? "").split(":") {
-        holds := false
+        ^holds: false
         loop name in RUST_TOOLS {
             if files.is_file(files.join(dir, name)) -> holds = true
         }
@@ -893,7 +893,7 @@ norust_path: fn() -[Env, FS]> String Never! {
 }
 
 git_line: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time.Wait]> String? Never! {
-    argv := [String]{"git", "-C", repo.copy()}
+    ^argv: [String]{"git", "-C", repo.copy()}
     argv.extend(args.copy())
     receipt: process.cmd(argv).output_limit(268435456).run() ?? return None
     if !receipt.success -> return None
@@ -904,7 +904,7 @@ git_line: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Stri
 keep_going_rows: fn(path: String) -[FS]> Int Never! {
     text: files.read(path) ?? return 0
     lines: text.split("\n").to_list()
-    count := 0
+    ^count: 0
     loop at in 1..<lines.len() {
         if lines[at] != "" -> count += 1
     }
@@ -914,7 +914,7 @@ keep_going_rows: fn(path: String) -[FS]> Int Never! {
 // The first two lines of a stage's error log, on one line.
 err_head: fn(path: String) -[FS]> String Never! {
     text: files.read(path) ?? return ""
-    kept := [String]{}
+    ^kept: [String]{}
     loop line in text.split("\n") {
         if line.starts_with("norust: ") -> next
         kept.push(line.replace("\t", " "))
@@ -953,7 +953,7 @@ same_file: fn(left: String, right: String) -[FS]> Bool Never! {
 
 // `mode` without its write bits.
 without_write: fn(mode: Int) -> Int Never! {
-    out := mode % 4096
+    ^out: mode % 4096
     bits: [Int]{128, 16, 2}
     loop bit in bits {
         if (out /% bit) % 2 == 1 -> out -= bit
@@ -979,7 +979,7 @@ export_tree: fn(r: Roots, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]>
     files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
     archive: "{dir}.export-{sys.pid()}.tar"
     archived: process.cmd([String]{"git", "-C", r.repo.copy(), "archive", "--format=tar", "-o", archive, sha.copy()}).run() ?? fail("git archive: {err}")
-    ok := archived.success
+    ^ok: archived.success
     if ok {
         unpacked: process.cmd([String]{"tar", "-x", "-f", archive, "-C", dir.copy()}).run() ?? fail("tar: {err}")
         ok = unpacked.success
@@ -989,7 +989,7 @@ export_tree: fn(r: Roots, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]>
         print("EXPORT FAILED")
         return 1
     }
-    patches := 0
+    ^patches: 0
     loop at in 2..<args.len() {
         applied: process.cmd([String]{"git", "apply", absolute(args[at])}).cwd(dir).run() ?? fail("git apply: {err}")
         if !applied.success {
@@ -1018,8 +1018,8 @@ ChainOptions: struct {
 }
 
 parse_chain: fn(args: [String]) -[Env, Exec, FS, IO]> ChainOptions Never! {
-    options := ChainOptions{tree: absolute(args[0]), level: "", auto: false, out: "", base: "", dry: false, gate: false}
-    at := 1
+    ^options: ChainOptions{tree: absolute(args[0]), level: "", auto: false, out: "", base: "", dry: false, gate: false}
+    ^at: 1
     loop at < args.len() {
         arg: args[at].copy()
         at += 1
@@ -1111,8 +1111,8 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
         print("Chain.jet: refuse a tree under {r.r14} (the canonical root)")
         return 2
     }
-    base := options.base.copy()
-    base_src := "--base"
+    ^base: options.base.copy()
+    ^base_src: "--base"
     if base == "" {
         recorded: first_line(files.join(tree, ".chain-base"))
         if recorded != "" {
@@ -1134,8 +1134,8 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
     seed: files.canonicalize(named_seed) ?? fail("no seed at `{named_seed}`: {err}")
     cid: first_line(files.join(seed, "IDENTITY"))
     if cid == "" -> fail("`{seed}/IDENTITY` names no identity")
-    store := process.env_nonempty("CHAIN_STORE") ?? ""
-    cap := "20"
+    ^store: process.env_nonempty("CHAIN_STORE") ?? ""
+    ^cap: "20"
     if store == "" {
         if free_gb(r.scratch) >= 40 -> store = "{r.scratch}/stagestore" else {
             store = "{r.run}/stagestore"
@@ -1153,7 +1153,7 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
     sys.set_core_file_limit(Val(0), Val(0)) ?? ()
     sys.set_stack_limit(Val(1073741824), Val(1073741824)) ?? ()
     nsdir: "{r.run}/chain-ns/{sys.pid()}"
-    c := Chain{r: r, tree: tree, level: options.level.copy(), auto: options.auto, out: out.copy(), logs: "{out}/logs", base: base_sha, base_src: base_src, seed: seed.copy(), cid: cid.copy(), ver: cid.partition("#").head.copy(), mem: memory_bytes(process.env_nonempty("CHAIN_MEMMAX") ?? "24G"), store: store, cap: cap, work: work.copy(), nsdir: nsdir.copy(), mode: "", rows: [String]{}, sha: [String:String]{}, pk: [String:String]{}, miss: "", cpus: [Int]{}, seed_sha: "", seed_pk: "", bin: "-", digest: "-", members: [String]{}, reasons: [String]{}, nchanged: "not computed (explicit level)", started: time.unix_ns()}
+    ^c: Chain{r: r, tree: tree, level: options.level.copy(), auto: options.auto, out: out.copy(), logs: "{out}/logs", base: base_sha, base_src: base_src, seed: seed.copy(), cid: cid.copy(), ver: cid.partition("#").head.copy(), mem: memory_bytes(process.env_nonempty("CHAIN_MEMMAX") ?? "24G"), store: store, cap: cap, work: work.copy(), nsdir: nsdir.copy(), mode: "", rows: [String]{}, sha: [String:String]{}, pk: [String:String]{}, miss: "", cpus: [Int]{}, seed_sha: "", seed_pk: "", bin: "-", digest: "-", members: [String]{}, reasons: [String]{}, nchanged: "not computed (explicit level)", started: time.unix_ns()}
     code: chain_run(c, options, seedpub)
     files.remove_all(work) ?? ()
     files.remove_all(nsdir) ?? ()
@@ -1229,8 +1229,8 @@ chain_run: fn(c: ^Chain, options: ChainOptions, seedpub: String) -[Env, Exec, FS
     probed: chain(c)
     if probed == 0 -> return finish(c, "none (every stage REUSED)")
     if probed != 3 -> return finish(c, "none (a stage failed while reusing)")
-    small := true
-    seen := false
+    ^small: true
+    ^seen: false
     loop stage in stage_order(c.level) {
         if stage == c.miss -> seen = true
         if seen && (stage.starts_with("s") || stage == "t1") -> small = false
@@ -1256,7 +1256,7 @@ stage_order: fn(level: String) -> [String] Never! {
 
 changed_summary: fn(changed: [Change]) -> String Never! {
     if changed.len() == 0 -> return "0 file(s)"
-    shown := [String]{}
+    ^shown: [String]{}
     loop at in 0..<changed.len() {
         if at == 6 -> break
         shown.push("{changed[at].status} {changed[at].path}")
@@ -1271,7 +1271,7 @@ chain: fn(c: ^Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     c.rows = [String]{}
     c.miss = ""
     if c.level == "check" -> return check_stage(c)
-    got := build_stage(c, "s1", c.seed.copy(), c.seed_sha.copy(), c.seed_pk.copy(), c.cid.copy(), 12)
+    ^got: build_stage(c, "s1", c.seed.copy(), c.seed_sha.copy(), c.seed_pk.copy(), c.cid.copy(), 12)
     if got != 0 || c.level == "s1" -> return got
     s1_dir: files.join(c.out, "s1")
     s2_dir: files.join(c.out, "s2")
@@ -1292,9 +1292,9 @@ since: fn(t0: Int) -[Time]> String Never! { tenths(time.unix_ns() - t0) }
 
 // A stage's key: SHA-256 over its material lines and the canonical root.
 key_of: fn(c: Chain, mat: [String]) -> String Never! {
-    text := "chain-stage-v1\n"
+    ^text: "chain-stage-v1\n"
     loop line in mat -> text = "{text}{line}\n"
-    hasher := crypto.new()
+    ^hasher: crypto.new()
     hasher.update("{text}root={c.r.root}\n".bytes())
     hasher.digest()
 }
@@ -1351,9 +1351,9 @@ store_put: fn(c: Chain, k: String, kind: String, src: String, lines: [String]) -
             copy_plain(files.join(src, entry.name), files.join(tmp, entry.name))
         }
     }
-    bytes := 0
+    ^bytes: 0
     loop rel in all_files(tmp) -> bytes += lstat(files.join(tmp, rel)).size
-    meta := lines.copy()
+    ^meta: lines.copy()
     meta.push("created={stamp()}")
     meta.push("bytes={bytes}")
     files.write(files.join(tmp, "meta"), "{meta.join("\n")}\n") ?? fail("cannot write `{tmp}/meta`: {err}")
@@ -1385,10 +1385,10 @@ StageRun: struct {
 // its NAME=VALUE settings. A `canonical` stage runs with the tree mounted at
 // the canonical root in a private mount namespace (`inroot`), from there.
 stage_run: fn(c: Chain, name: String, argv: [String], vars: [String], seconds: Int, canonical: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> StageRun Never! {
-    spec := process.cmd(argv).cwd(c.tree)
+    ^spec: process.cmd(argv).cwd(c.tree)
     if canonical {
         files.create_dir_all(files.join(c.nsdir, "snap")) ?? fail("cannot create `{c.nsdir}/snap`: {err}")
-        inner := [String]{"unshare", "-r", "-m", "--propagation", "private", files.join(c.seed, "jet"), files.join(c.r.tools, "Tools/Agent/Chain.jet"), "inroot", c.nsdir.copy(), c.tree.copy(), c.r.r14.copy(), c.r.root.copy(), "{sys.getuid()}", "{sys.getgid()}"}
+        ^inner: [String]{"unshare", "-r", "-m", "--propagation", "private", files.join(c.seed, "jet"), files.join(c.r.tools, "Tools/Agent/Chain.jet"), "inroot", c.nsdir.copy(), c.tree.copy(), c.r.r14.copy(), c.r.root.copy(), "{sys.getuid()}", "{sys.getgid()}"}
         inner.extend(vars.copy())
         inner.push("--")
         inner.extend(argv.copy())
@@ -1408,7 +1408,7 @@ stage_run: fn(c: Chain, name: String, argv: [String], vars: [String], seconds: I
     }
     files.write(files.join(c.logs, "{name}.out"), receipt.output) ?? ()
     files.write(files.join(c.logs, "{name}.err"), receipt.errors) ?? ()
-    rc := receipt.code
+    ^rc: receipt.code
     if receipt.signal == .Val(number) -> rc = 128 + number
     if receipt.timed_out -> rc = 124
     StageRun{rc: rc, ns: time.unix_ns() - t0, rss: (receipt.peak_memory_bytes ?? 0) /% 1048576}
@@ -1420,8 +1420,8 @@ stage_run: fn(c: Chain, name: String, argv: [String], vars: [String], seconds: I
 // ROOT as UID:GID with the settings.
 inroot: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     if args.len() < 8 -> usage()
-    at := 6
-    vars := [String]{}
+    ^at: 6
+    ^vars: [String]{}
     loop at < args.len() && args[at] != "--" {
         vars.push(args[at].copy())
         at += 1
@@ -1436,9 +1436,9 @@ inroot: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
         term.eprint("chain: canonical root bind failed")
         return 97
     }
-    argv := [String]{"unshare", "--user", "--map-user={args[4]}", "--map-group={args[5]}"}
+    ^argv: [String]{"unshare", "--user", "--map-user={args[4]}", "--map-group={args[5]}"}
     loop rest in (at + 1)..<args.len() -> argv.push(args[rest].copy())
-    spec := process.cmd(argv).cwd(args[3]).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    ^spec: process.cmd(argv).cwd(args[3]).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     loop setting in vars {
         parts: setting.partition("=")
         spec = spec.env(parts.head, parts.tail)
@@ -1470,7 +1470,7 @@ build_stage: fn(c: ^Chain, n: String, builder_dir: String, builder: String, buil
     t0: time.unix_ns()
     dir: files.join(c.out, n)
     jet: files.join(dir, "jet")
-    found := find_entry(c, k)
+    ^found: find_entry(c, k)
     if found != "" {
         c.sha[n.copy()] = meta_of(found, "sha256")
         c.pk[n.copy()] = meta_of(found, "packhash")
@@ -1540,7 +1540,7 @@ build_stage: fn(c: ^Chain, n: String, builder_dir: String, builder: String, buil
     native_key: first_line(files.join(pack, "native.key"))
     // #5662: a seed without the census fix installs keep-going `todo` traps
     // with no row; the binary tells.
-    traps := "scan-failed"
+    ^traps: "scan-failed"
     scanned: trap_owners(files.read_bytes(jet) ?? [U8]{})
     if scanned == .Val(owners) {
         files.write(files.join(c.logs, "{n}-traps.txt"), owners.join("\n")) ?? ()
@@ -1548,7 +1548,7 @@ build_stage: fn(c: ^Chain, n: String, builder_dir: String, builder: String, buil
     }
     wall: tenths(ran.ns)
     if ran.rc == 0 && rows == 0 && traps == "0" {
-        lines := [String]{"stage={n}", "kind=build", "sha256={sha}", "packhash={hash}", "native_key={native_key}", "wall_s={wall}", "rss_mb={ran.rss}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
+        ^lines: [String]{"stage={n}", "kind=build", "sha256={sha}", "packhash={hash}", "native_key={native_key}", "wall_s={wall}", "rss_mb={ran.rss}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
         lines.extend(mat)
         store_put(c, k, "build", dir, lines)
         rec(c, [String]{n.copy(), "BUILT", "0", wall, "{ran.rss}", sha.copy(), k.copy(), "pack {prefix(hash, 16)}, native.key {prefix(native_key, 16)}; stored"})
@@ -1592,11 +1592,11 @@ check_stage: fn(c: ^Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
         say("check needs a run (key {prefix(k, 16)})")
         return 3
     }
-    worst := 0
-    peak := 0
-    wall := 0
-    transient := false
-    sums := [String]{}
+    ^worst: 0
+    ^peak: 0
+    ^wall: 0
+    ^transient: false
+    ^sums: [String]{}
     loop member in c.members {
         n: "check-{member.replace("/", "_")}"
         say("check {member} with {basename(c.seed)}")
@@ -1621,7 +1621,7 @@ check_stage: fn(c: ^Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
                 copy_plain(files.join(c.logs, entry.name), files.join(kept, entry.name))
             }
         }
-        lines := [String]{"stage=check", "kind=check", "rc={worst}", "summary={summary}", "wall_s={tenths(wall)}", "rss_mb={peak}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
+        ^lines: [String]{"stage=check", "kind=check", "rc={worst}", "summary={summary}", "wall_s={tenths(wall)}", "rss_mb={peak}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
         lines.extend(mat)
         store_put(c, k, "check", kept, lines)
     }
@@ -1639,7 +1639,7 @@ same_build: fn(c: Chain, left: String, right: String) -[FS]> Bool Never! {
 
 // The largest peak of the stages this run built, in MB.
 peak_mb: fn(c: Chain) -> Int Never! {
-    peak := 0
+    ^peak: 0
     loop row in c.rows {
         cells: row.split("\t").to_list()
         if cells[1] == "REUSED" -> next
@@ -1651,11 +1651,11 @@ peak_mb: fn(c: Chain) -> Int Never! {
 
 // The verdict of the run, RESULT and REPORT.md; the exit code.
 finish: fn(c: ^Chain, slot_note: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
-    verdict := "OK"
-    code := 0
-    note := ""
-    failed := [String]{}
-    check_rc := ""
+    ^verdict: "OK"
+    ^code: 0
+    ^note: ""
+    ^failed: [String]{}
+    ^check_rc: ""
     loop row in c.rows {
         cells: row.split("\t").to_list()
         if cells[1] == "FAILED" -> failed.push(cells[0].copy())
@@ -1711,13 +1711,13 @@ finish: fn(c: ^Chain, slot_note: String) -[Env, Exec, FS, IO, Time, Time.Wait]> 
 
 write_report: fn(c: Chain, verdict: String, code: Int, note: String, slot_note: String) -[Env, Exec, FS, IO, Time]> {
     total: since(c.started)
-    rows := [String]{"stage\tstatus\trc\twall_s\tpeak_rss_mb\tsha256\tkey\tnote"}
+    ^rows: [String]{"stage\tstatus\trc\twall_s\tpeak_rss_mb\tsha256\tkey\tnote"}
     rows.extend(c.rows.copy())
     rows.push("verdict\t{verdict}\t{code}\t{total}\t{peak_mb(c)}\t{c.sha.get("s3") ?? c.sha.get("s1") ?? "-"}\t-\tlevel={c.level} {note}")
     staged: files.join(c.out, "RESULT.new")
     files.write(staged, "{rows.join("\n")}\n") ?? fail("cannot write `{staged}`: {err}")
     files.rename(staged, files.join(c.out, "RESULT")) ?? fail("cannot rename `{staged}`: {err}")
-    md := [String]{"# Chain.jet {c.level}: {c.tree}", "", "- base: {prefix(c.base, 10)} ({c.base_src}); changes: {c.nchanged}"}
+    ^md: [String]{"# Chain.jet {c.level}: {c.tree}", "", "- base: {prefix(c.base, 10)} ({c.base_src}); changes: {c.nchanged}"}
     if c.reasons.len() > 0 {
         md.push("- why this level:{if c.auto -> " (--auto)" else -> ""}")
         loop reason in c.reasons -> md.push("  - {reason}")
@@ -1798,7 +1798,7 @@ seed_published: fn(c: ^Chain, install: String) -[Env, Exec, FS, IO, Time, Time.W
     }
     copy_tree(pack, files.join(s1, "jet-runtime"))
     hash: dirhash(files.join(s1, "jet-runtime"))
-    lines := [String]{"stage=s1", "kind=build", "sha256={published}", "packhash={hash}", "native_key={first_line(files.join(s1, "jet-runtime/native.key"))}", "wall_s=-", "rss_mb=-", "lane=lander census", "tree={c.r.root} ({first_line(files.join(seedpub, "COMMIT"))})"}
+    ^lines: [String]{"stage=s1", "kind=build", "sha256={published}", "packhash={hash}", "native_key={first_line(files.join(s1, "jet-runtime/native.key"))}", "wall_s=-", "rss_mb=-", "lane=lander census", "tree={c.r.root} ({first_line(files.join(seedpub, "COMMIT"))})"}
     lines.extend(mat)
     store_put(c, k, "build", s1, lines)
     files.remove_all(c.out) ?? ()
@@ -1855,9 +1855,9 @@ io_pressure: fn() -[FS]> Int Never! {
 // Milliseconds the NVMe disks spent doing I/O, summed.
 disk_ms: fn() -[FS]> Int Never! {
     text: files.read("/proc/diskstats") ?? return 0
-    total := 0
+    ^total: 0
     loop line in text.split("\n") {
-        cells := [String]{}
+        ^cells: [String]{}
         loop cell in line.split(" ") {
             if cell != "" -> cells.push(cell.copy())
         }
@@ -1880,7 +1880,7 @@ scratch_used_percent: fn(r: Roots) -[FS]> Float Never! {
 
 // The first ticket of a live waiter; a dead waiter's ticket is removed.
 head_ticket: fn(queue: String) -[FS]> String Never! {
-    names := [String]{}
+    ^names: [String]{}
     listed: files.list_dir(queue) ?? [files.DirEntry]{}
     loop entry in listed -> names.push(entry.name.copy())
     names.sort()
@@ -1905,7 +1905,7 @@ head_ticket: fn(queue: String) -[FS]> String Never! {
 take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken Never! {
     queue: files.join(r.run, "slot-queue")
     files.create_dir_all(queue) ?? fail("cannot create `{queue}`: {err}")
-    class := if small -> 1 else -> 2
+    ^class: if small -> 1 else -> 2
     if (process.env_nonempty("SLOT_PRIORITY") ?? "0") == "1" {
         key: first_line(files.join(r.state, "scratch/Main/.slot-key"))
         offered: process.env_nonempty("SLOT_PRIORITY_KEY") ?? ""
@@ -1917,13 +1917,13 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
     queued: time.unix_ns()
     ticket: files.join(queue, "{class}-{queued}-{sys.pid()}")
     files.write(ticket, "") ?? fail("cannot write `{ticket}`: {err}")
-    busy_then := disk_ms()
-    then := time.unix_ns()
+    ^busy_then: disk_ms()
+    ^then: time.unix_ns()
     time.sleep(time.duration_seconds(2))
-    told_full := false
+    ^told_full: false
     loop {
         mem: mem_available_gb()
-        io := io_pressure()
+        ^io: io_pressure()
         busy_now: disk_ms()
         now: time.unix_ns()
         // Percent of the elapsed wall time the disks (summed) were busy.
@@ -1949,7 +1949,7 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
                 }
                 lock: files.try_lock(files.join(r.run, "build-slot-{name}.lock")) ?? next
                 files.remove(ticket) ?? ()
-                locks := [files.FileLock]{}
+                ^locks: [files.FileLock]{}
                 locks.push(lock)
                 return SlotTaken{name: name.copy(), cpus: slot_cpus(name), queued: queued, _locks: locks}
             }
@@ -1983,8 +1983,8 @@ take_release_slot: fn(r: Roots) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken
         }
         time.sleep(time.duration_seconds(10))
     }
-    locks := [files.FileLock]{}
-    held := [String]{}
+    ^locks: [files.FileLock]{}
+    ^held: [String]{}
     loop {
         loop name in SLOT_NAMES {
             if held.contains(name) -> next
@@ -2019,9 +2019,9 @@ ledger: fn(r: Roots, slot: String, queued: Int, lane: String, started: Int, code
 // CAP_CPUS to it; SLOT_SMALL=1 is --small. --release takes the release slot
 // (take_release_slot).
 slot_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
-    small := (process.env_nonempty("SLOT_SMALL") ?? "0") == "1"
-    release := false
-    at := 0
+    ^small: (process.env_nonempty("SLOT_SMALL") ?? "0") == "1"
+    ^release: false
+    ^at: 0
     if args.len() > 0 && args[0] == "--small" {
         small = true
         at = 1
@@ -2030,7 +2030,7 @@ slot_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! 
         at = 1
     }
     if args.len() <= at + 1 || args[at] != "--" -> usage()
-    command := [String]{}
+    ^command: [String]{}
     loop rest in (at + 1)..<args.len() -> command.push(args[rest].copy())
     r: roots()
     slot: if release -> take_release_slot(r) else -> take_slot(r, small, false)
@@ -2038,7 +2038,7 @@ slot_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! 
     memory: process.env_nonempty("SLOT_MEMORY_MAX") ?? (if release -> "24G" else -> "16G")
     if release -> sys.set("SLOT_MEMORY_MAX", memory)
     sys.set_core_file_limit(Val(0), Val(0)) ?? ()
-    argv := [String]{"nice", "-n", "19"}
+    ^argv: [String]{"nice", "-n", "19"}
     argv.extend(command.copy())
     shown: command.join(" ")
     lane: lane_of("{files.cwd() ?? ""} {shown}")
@@ -2049,7 +2049,7 @@ slot_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! 
         ledger(r, slot.name, slot.queued, lane, started, 127, 0, shown)
         return 127
     }
-    code := receipt.code
+    ^code: receipt.code
     if receipt.signal == .Val(number) -> code = 128 + number
     if release -> files.remove(release_claim(r)) ?? ()
     ledger(r, slot.name, slot.queued, lane, started, code, (receipt.peak_memory_bytes ?? 0) /% 1048576, shown)
@@ -2096,14 +2096,14 @@ trap_owners: fn(b: [U8]) -> [String]? Never! {
     shoff: le(b, 40, 8)
     shentsize: le(b, 58, 2)
     shnum: le(b, 60, 2)
-    loads := [Load]{}
+    ^loads: [Load]{}
     loop i in 0..<phnum {
         p: phoff + i * phentsize
         if le(b, p, 4) != 1 -> next
         loads.push(Load{executable: le(b, p + 4, 4) % 2 == 1, off: le(b, p + 8, 8), vaddr: le(b, p + 16, 8), filesz: le(b, p + 32, 8)})
     }
-    symbols := [Symbol]{}
-    unreachable := -1
+    ^symbols: [Symbol]{}
+    ^unreachable: -1
     loop i in 0..<shnum {
         s: shoff + i * shentsize
         // SHT_SYMTAB
@@ -2114,7 +2114,7 @@ trap_owners: fn(b: [U8]) -> [String]? Never! {
         ent: le(b, s + 56, 8)
         if ent <= 0 -> next
         strings: le(b, shoff + link * shentsize + 24, 8)
-        at := off
+        ^at: off
         loop at + ent <= off + size {
             // STT_FUNC
             if (Int{b[at + 4]}) % 16 == 2 {
@@ -2135,19 +2135,19 @@ trap_owners: fn(b: [U8]) -> [String]? Never! {
         if left.order > right.order -> return Ordering.Greater
         Ordering.Equal
     })
-    found := [String]{}
+    ^found: [String]{}
     loop load in loads {
         if !load.executable -> next
         end: load.off + load.filesz
-        at := load.off
+        ^at: load.off
         loop at + 12 <= end {
             // mov $0x4,%rsi ; call rel32
             if byte(b, at) == 72 && byte(b, at + 1) == 199 && byte(b, at + 2) == 198 && le(b, at + 3, 4) == 4 && byte(b, at + 7) == 232 {
                 call: load.vaddr + (at + 7 - load.off)
                 if call + 5 + signed32(le(b, at + 8, 4)) == unreachable {
-                    floor := at - 24
+                    ^floor: at - 24
                     if floor < load.off -> floor = load.off
-                    back := at - 7
+                    ^back: at - 7
                     loop back >= floor {
                         // lea rel32(%rip),%rax
                         if byte(b, back) == 72 && byte(b, back + 1) == 141 && byte(b, back + 2) == 5 {
@@ -2173,7 +2173,7 @@ byte: fn(b: [U8], at: Int) -> Int Never! { Int{b[at]} }
 
 // The `width`-byte little-endian unsigned value at `at`.
 le: fn(b: [U8], at: Int, width: Int) -> Int Never! {
-    value := 0
+    ^value: 0
     loop k in 0..<width -> value = value * 256 + (Int{b[at + width - 1 - k]})
     value
 }
@@ -2184,7 +2184,7 @@ signed32: fn(value: Int) -> Int Never! {
 
 // The NUL-terminated name at `at`.
 c_string: fn(b: [U8], at: Int) -> String Never! {
-    end := at
+    ^end: at
     loop end < b.len() && (Int{b[end]}) != 0 -> end += 1
     String.from_bytes_lossy(b.slice(at, end))
 }
@@ -2199,9 +2199,9 @@ file_offset: fn(loads: [Load], va: Int) -> Int Never! {
 
 // The function whose start is the last at or before `va`.
 owner: fn(symbols: [Symbol], va: Int) -> String Never! {
-    lo := 0
-    hi := symbols.len() - 1
-    best := "?"
+    ^lo: 0
+    ^hi: symbols.len() - 1
+    ^best: "?"
     loop lo <= hi {
         mid: (lo + hi) /% 2
         if symbols[mid].value <= va {
@@ -2213,7 +2213,7 @@ owner: fn(symbols: [Symbol], va: Int) -> String Never! {
 }
 
 put: fn(b: ^[U8], at: Int, width: Int, value: Int) {
-    rest := value
+    ^rest: value
     loop k in 0..<width {
         b[at + k] = checked(U8{rest % 256}) ?? U8{0}
         rest = rest /% 256
@@ -2221,7 +2221,7 @@ put: fn(b: ^[U8], at: Int, width: Int, value: Int) {
 }
 
 put_text: fn(b: ^[U8], at: Int, text: String) {
-    place := at
+    ^place: at
     loop letter in text.bytes() {
         b[place] = letter
         place += 1
@@ -2229,7 +2229,7 @@ put_text: fn(b: ^[U8], at: Int, text: String) {
 }
 
 #Test("a todo trap is listed under the function that holds it") {
-    image := [U8]{}
+    ^image: [U8]{}
     loop _ in 0..<544 -> image.push(U8{0})
     // ELF header: one program header at 64, three section headers at 256.
     put(image, 32, 8, 64)
@@ -2279,7 +2279,7 @@ put_text: fn(b: ^[U8], at: Int, text: String) {
 }
 
 #Test("the --auto class of a changed path") {
-    read := [String:Bool]{}
+    ^read: [String:Bool]{}
     read["Compiler/JetSema/Source/Check.jet"] = true
     read["Compiler/JetSema/Source/Lowering.jet"] = true
     assert_eq(classify("Compiler/JetIR/Source/Ir.jet", read).level, "full")
@@ -2314,7 +2314,7 @@ sample_pack: fn(compiler: String, recipe: String, object: String, byte: Int) -> 
     assert_eq(pack_digest(sample_pack("s2", "r2", "o", 7)), pack1)
     assert(pack_digest(sample_pack("s1", "r1", "o", 8)) != pack1)
     assert(pack_digest(sample_pack("s1", "r1", "other", 7)) != pack1)
-    broken := sample_pack("s1", "r1", "o", 7)
+    ^broken: sample_pack("s1", "r1", "o", 7)
     broken[0] = PackFile{path: "provenance.json", bytes: "[1]".bytes()}
     assert_eq(pack_digest(broken), None)
 }

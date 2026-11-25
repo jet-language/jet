@@ -123,21 +123,21 @@ cli_write_tool_manifest: fn(manifest: ToolManifest) -[FS, Env]> CLIError! {
 // reference and tier unless this install overrides its policy.
 cli_record_tool_manifest_locked: fn(tools: [InstalledUserTool], declared_sources: SourceTable, override_ref: String?, override_policy: ChannelPolicy) -[FS, Env]> CLIError! {
     old: cli_read_tool_manifest()
-    source_map := [String:ToolManifestSource]{}
+    ^source_map: [String:ToolManifestSource]{}
     loop source in old.sources -> source_map[source.name] = source
     loop source in cli_tool_manifest_sources_from_table(declared_sources) {
         source_map[source.name] = source
     }
-    entries := [ToolManifestEntry]{}
+    ^entries: [ToolManifestEntry]{}
     loop tool in tools {
-        previous := ToolManifestEntry?{None}
+        ^previous: ToolManifestEntry?{None}
         loop entry in old.tools {
             if previous == None && entry.name == tool.name && (entry.resolved == tool.reference || entry.reference == tool.reference) {
                 previous = Val(entry)
             }
         }
-        reference := tool.reference
-        tier := ChannelPolicy.Pinned
+        ^reference: tool.reference
+        ^tier: ChannelPolicy.Pinned
         if (override_ref ?? "") == tool.reference && override_ref != None {
             reference = cli_tool_manifest_ref(tool.reference, override_policy)
             tier = override_policy
@@ -148,8 +148,8 @@ cli_record_tool_manifest_locked: fn(tools: [InstalledUserTool], declared_sources
         entries.push(ToolManifestEntry{name: tool.name, reference: reference, resolved: tool.reference, tier: tier, bins: tool.bins, members: tool.members})
     }
     entries.sort_by(fn(left: ToolManifestEntry, right: ToolManifestEntry) { (left.name <=> right.name).then(left.resolved <=> right.resolved) })
-    sources := [ToolManifestSource]{}
-    names := source_map.keys().to_list()
+    ^sources: [ToolManifestSource]{}
+    ^names: source_map.keys().to_list()
     names.sort()
     loop name in names -> sources.push(source_map[name])
     cli_write_tool_manifest(ToolManifest{sources: sources, tools: entries})
@@ -158,7 +158,7 @@ cli_record_tool_manifest_locked: fn(tools: [InstalledUserTool], declared_sources
 // ── Generation records ──
 
 cli_format_tool_generation_meta: fn(generation: Int, tools: [InstalledUserTool]) -[Time]> String CLIError! {
-    rows := [ToolGenerationTool]{}
+    ^rows: [ToolGenerationTool]{}
     loop tool in tools {
         rows.push(
             ToolGenerationTool{
@@ -179,7 +179,7 @@ cli_format_tool_generation_meta: fn(generation: Int, tools: [InstalledUserTool])
 
 cli_parse_tool_generation_meta: fn(text: String, expected_generation: Int) -> [InstalledUserTool] CLIError! {
     metadata: ToolGenerationMetadata.parse(text, expected_generation)
-    tools := [InstalledUserTool]{}
+    ^tools: [InstalledUserTool]{}
     loop tool in metadata.tools {
         tools.push(
             InstalledUserTool{
@@ -244,7 +244,7 @@ cli_tool_current_generation_locked: fn() -[FS, Env]> Int? CLIError! {
 // directory name is an error.
 cli_tool_generation_numbers: fn() -[FS, Env]> [Int] CLIError! {
     if !files.is_dir(cli_tool_generations_dir()) -> return Ok([Int]{})
-    generations := [Int]{}
+    ^generations: [Int]{}
     loop entry in files.list_dir(cli_tool_generations_dir()) {
         info: files.stat(entry.path)
         if !info.is_dir || info.is_symlink -> next
@@ -258,7 +258,7 @@ cli_tool_generation_numbers: fn() -[FS, Env]> [Int] CLIError! {
 
 cli_tool_next_generation: fn() -[FS, Env]> Int CLIError! {
     files.create_dir_all(cli_tool_generations_dir())
-    maximum := 0
+    ^maximum: 0
     loop entry in files.list_dir(cli_tool_generations_dir()) {
         generation: cli_parse_u64(entry.name) ?? return Err(CLIError.Other("invalid tool generation `{entry.name}`"))
         info: files.stat(entry.path)
@@ -292,7 +292,7 @@ cli_disk_file_bytes: fn(path: String, excluded: String?) -[FS]> Int CLIError! {
     if info.is_symlink -> return Ok(0)
     if info.is_file -> return Ok(info.size)
     if !info.is_dir -> return Ok(0)
-    total := 0
+    ^total: 0
     loop entry in files.list_dir(path) {
         if (excluded ?? "") == entry.name && excluded != None -> next
         total += cli_disk_file_bytes(entry.path, None)
@@ -321,7 +321,7 @@ cli_write_tool_generation_locked: fn(verification: StoreVerification, tools: [In
 }
 
 cli_tool_write_generation_body: fn(verification: StoreVerification, generation: Int, generation_dir: String, tools: [InstalledUserTool], live: ^^ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
-    generation_tools := tools
+    ^generation_tools: tools
     cli_materialize_generation_bins(verification, generation_dir, generation_tools, live)
     meta: cli_format_tool_generation_meta(generation, generation_tools)
     cli_write_synced(files.join(generation_dir, TOOL_PROFILE_META_FILE), meta.bytes())
@@ -354,16 +354,16 @@ cli_activate_tool_generation_locked: fn(verification: StoreVerification, generat
 // Prepare, then commit, one Store root per store authority so no target of
 // this generation can be collected while it is reachable.
 cli_ensure_tool_generation_roots: fn(verification: StoreVerification, generation: Int, tools: [InstalledUserTool], witness: String) -[FS, Env, Time]> CLIError! {
-    authorities := [String:[String]]{}
+    ^authorities: [String:[String]]{}
     loop tool in tools {
         cli_profile_validate_digest(tool.output_hash)
-        targets := authorities.get(tool.store_root) ?? [String]{}
+        ^targets: authorities.get(tool.store_root) ?? [String]{}
         targets.push(tool.output_hash)
         authorities[tool.store_root] = targets
     }
-    store_roots := authorities.keys().to_list()
+    ^store_roots: authorities.keys().to_list()
     store_roots.sort()
-    prepared := [{roots: HangarRoots, receipt: PreparedProfileGenerationRoot}]{}
+    ^prepared: [{roots: HangarRoots, receipt: PreparedProfileGenerationRoot}]{}
     loop root in store_roots {
         roots: HangarRoots{root: root, dev_mode: true}
         if store_reconcile_profile_generation_root(verification, roots, TOOL_PROFILE_OWNER, TOOL_PROFILE_NAME, generation, witness, authorities[root], cli_now_secs()) == {
@@ -390,7 +390,7 @@ cli_publish_tool_generation: fn(generation: Int, witness: String, tools: [Instal
         return Err(CLIError.Other("legacy profile bin symlink requires explicit migration"))
     }
     previous: cli_read_current_tools() ?? [InstalledUserTool]{}
-    active := [String]{}
+    ^active: [String]{}
     loop tool in tools {
         loop bin in tool.bins -> active.push(cli_physical_bin_name(bin))
     }
@@ -447,9 +447,9 @@ cli_recover_tool_profile_state: fn(verification: StoreVerification) -[FS, Env, E
         .None -> None
         .Err(_) -> None
     }
-    publish := 0
+    ^publish: 0
     if files.is_dir(cli_tool_generations_dir()) {
-        generations := [Int]{}
+        ^generations: [Int]{}
         loop entry in files.list_dir(cli_tool_generations_dir()) {
             generation: cli_parse_u64(entry.name) ?? return Err(CLIError.Other("invalid tool generation name"))
             generations.push(generation)
@@ -472,7 +472,7 @@ cli_recover_tool_profile_state: fn(verification: StoreVerification) -[FS, Env, E
         }
     }
     if publish != 0 {
-        selected := publish
+        ^selected: publish
         if requested_current == .Val(requested) {
             known: cli_tool_generation_numbers() ?? [Int]{}
             if known.contains(requested) -> selected = requested
@@ -496,7 +496,7 @@ cli_migrate_legacy_tool_generations_locked: fn(verification: StoreVerification) 
     if !files.is_dir(cli_tool_generations_dir()) {
         return
     }
-    legacy := [LegacyToolGeneration]{}
+    ^legacy: [LegacyToolGeneration]{}
     loop entry in files.list_dir(cli_tool_generations_dir()) {
         info: files.stat(entry.path)
         if !info.is_dir || info.is_symlink {
@@ -516,7 +516,7 @@ cli_migrate_legacy_tool_generations_locked: fn(verification: StoreVerification) 
     legacy.sort_by(fn(left: LegacyToolGeneration, right: LegacyToolGeneration) { left.generation <=> right.generation })
     loop old in legacy {
         tools: cli_parse_legacy_tool_generation_meta(verification, old.metadata, old.generation)
-        digests := [String]{}
+        ^digests: [String]{}
         loop tool in tools -> digests.push(tool.output_hash)
         witness: cli_profile_generation_witness(old.metadata, digests)
         marker: cli_read_bounded(files.join(old.path, TOOL_PROFILE_COMPLETE_FILE))
@@ -544,7 +544,7 @@ cli_canonical_tool_generation_matches: fn(verification: StoreVerification, legac
         generation: cli_parse_u64(entry.name) ?? next
         record: cli_read_tool_generation_record(generation) ?? next
         if record.tools.len() != legacy.len() -> next
-        equal := true
+        ^equal: true
         loop index in 0..<legacy.len() {
             if !record.tools[index].same_authority(legacy[index]) -> equal = false
         }
@@ -577,8 +577,8 @@ cli_parse_legacy_tool_generation_meta: fn(verification: StoreVerification, text:
         return Err(CLIError.Other("profile Store authority is not an absolute normalized path"))
     }
     store: store_list_checked(verification, roots) ?? return Err(CLIError.Store(err))
-    tools := [InstalledUserTool]{}
-    seen_bins := [String]{}
+    ^tools: [InstalledUserTool]{}
+    ^seen_bins: [String]{}
     loop entry in entries {
         tool: pkg_json_object(entry) ?? return Err(CLIError.Other("legacy profile tool entry is not an object"))
         cli_json_expect_exact_keys(tool, [String]{"bins", "name", "output_hash", "reference", "source", "targets", "version"}, "legacy profile tool")
@@ -593,14 +593,14 @@ cli_parse_legacy_tool_generation_meta: fn(verification: StoreVerification, text:
         if bins.len() == 0 || bins.len() != targets.len() {
             return Err(CLIError.Other("legacy profile tool has mismatched bin/target pairs"))
         }
-        authority := StoreEntry?{None}
+        ^authority: StoreEntry?{None}
         loop candidate in store {
             if authority == None && candidate.reference == reference && candidate.envelope.output_hash == output_hash {
                 authority = Val(candidate)
             }
         }
         verified: authority ?? return Err(CLIError.Other("legacy profile Store authority is unavailable"))
-        members := [String]{}
+        ^members: [String]{}
         loop index in 0..<bins.len() {
             bin: bins[index]
             cli_validate_bin_name(bin)

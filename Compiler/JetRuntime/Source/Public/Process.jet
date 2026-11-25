@@ -77,26 +77,47 @@ process: module {
     // stream; `spec_timeout` and `spec_cpu_time_limit` take a Duration's ns
     // and keep its whole milliseconds, a negative one as 0.
     #Import(c) priv spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec = "jet_process_spec_cwd"
+
     #Import(c) priv spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec = "jet_process_spec_arg"
+
     #Import(c) priv spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec = "jet_process_spec_args_extend"
+
     #Import(c) priv spec_env: fn(spec: ^^ProcessSpec, name: String, value: String) -> ProcessSpec = "jet_process_spec_env"
+
     #Import(c) priv spec_env_remove: fn(spec: ^^ProcessSpec, name: String) -> ProcessSpec = "jet_process_spec_env_remove"
+
     #Import(c) priv spec_env_clear: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_env_clear"
+
     #Import(c) priv spec_output_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec = "jet_process_spec_output_limit"
+
     #Import(c) priv spec_memory_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec = "jet_process_spec_memory_limit"
+
     #Import(c) priv spec_memory_scope: fn(spec: ^^ProcessSpec, bytes: Int) -> ProcessSpec = "jet_process_spec_memory_scope"
+
     #Import(c) priv spec_open_file_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec = "jet_process_spec_open_file_limit"
+
     #Import(c) priv spec_cpu_affinity: fn(spec: ^^ProcessSpec, cpus: [Int]) -> ProcessSpec = "jet_process_spec_cpu_affinity"
+
     #Import(c) priv spec_io_priority: fn(spec: ^^ProcessSpec, level: Int) -> ProcessSpec = "jet_process_spec_io_priority"
+
     #Import(c) priv spec_io_idle: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_io_idle"
+
     #Import(c) priv spec_detached: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_detached"
+
     #Import(c) priv spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_terminal"
+
     #Import(c) priv spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec = "jet_process_spec_terminal_with_policy"
+
     #Import(c) priv spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec = "jet_std_process_spec_under"
+
     #Import(c) priv spec_stdin: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec = "jet_process_spec_stdin"
+
     #Import(c) priv spec_stdout: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec = "jet_process_spec_stdout"
+
     #Import(c) priv spec_stderr: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec = "jet_process_spec_stderr"
+
     #Import(c) priv spec_timeout: fn(spec: ^^ProcessSpec, nanos: Int) -> ProcessSpec = "jet_process_spec_timeout"
+
     #Import(c) priv spec_cpu_time_limit: fn(spec: ^^ProcessSpec, nanos: Int) -> ProcessSpec = "jet_process_spec_cpu_time_limit"
 
     // The launch steps of a spec (ProcessExecutionRoutes.jet). `spec_plan`
@@ -104,8 +125,11 @@ process: module {
     // receipt, and `spec_run_checked` also fails on a nonzero exit;
     // `spec_spawn` starts it and answers the running child.
     #Import(c) priv spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! = "jet_process_spec_plan"
+
     #Import(c) priv spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! = "jet_process_spec_run"
+
     #Import(c) priv spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! = "jet_process_spec_run_checked"
+
     #Import(c) priv spec_spawn: fn(spec: ProcessSpec) -[Exec]> ProcessChild IOError! = "jet_process_spec_spawn"
 
     // A spawned child's steps (ProcessExecutionRoutes.jet,
@@ -113,15 +137,21 @@ process: module {
     // whether it has exited, without waiting; and the SIGKILL, SIGTERM and
     // SIGINT its process group gets (a finished child takes them as done).
     #Import(c) priv child_id: fn(child: ProcessChild) -> Int = "jet_process_child_id"
+
     #Import(c) priv child_wait: fn(child: ProcessChild) -[Exec]> ProcessReceipt IOError! = "jet_process_child_wait"
+
     #Import(c) priv child_exited: fn(child: ProcessChild) -[Exec]> Bool IOError! = "jet_process_child_exited"
+
     #Import(c) priv child_kill: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_kill"
+
     #Import(c) priv child_terminate: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_terminate"
+
     #Import(c) priv child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_interrupt"
 
     // One line of a child's output or error output as its raw bytes, the
     // newline kept; empty at the end of input (HostPipe.jet). Core's line
     // readers decode it.
     #Import(c) priv stdout_line_bytes: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> [U8] IOError! = "jet_process_stream_line_bytes_raw"
+
     #Import(c) priv stderr_line_bytes: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> [U8] IOError! = "jet_process_stream_line_bytes_raw"
 }

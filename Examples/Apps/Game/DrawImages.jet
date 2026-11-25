@@ -26,7 +26,7 @@ letter: fn(color: Color) -> String {
 show: fn(step: String, image: ui.Image) {
     print("{step} {image.width()}x{image.height()}")
     loop y in 0..<image.height() {
-        row := ""
+        ^row: ""
         loop x in 0..<image.width() -> row = "{row}{letter(ui.get_image_color(image, x, y))}"
         print("  {row}")
     }
@@ -40,7 +40,7 @@ run: fn() {
     white: Color{r: 255, g: 255, b: 255, a: 255}
     black: Color{r: 0, g: 0, b: 0, a: 255}
     green: Color{r: 40, g: 200, b: 40, a: 255}
-    image := ui.gen_image_checked(6, 4, 2, 2, red, blue)
+    ^image: ui.gen_image_checked(6, 4, 2, 2, red, blue)
     show("checked", image)
     ui.image_draw_rectangle(image, 1, 1, 3, 2, white)
     show("rectangle", image)
@@ -62,7 +62,7 @@ run: fn() {
     ui.image_rotate_ccw(image)
     show("flip_vertical_rotate_ccw", image)
     print("outside={channels(ui.get_image_color(image, 6, 0))}")
-    tone := ui.gen_image_color(2, 1, Color{r: 200, g: 100, b: 50, a: 255})
+    ^tone: ui.gen_image_color(2, 1, Color{r: 200, g: 100, b: 50, a: 255})
     ui.image_draw_pixel(tone, 1, 0, Color{r: 10, g: 20, b: 30, a: 128})
     ui.image_color_tint(tone, Color{r: 128, g: 255, b: 0, a: 200})
     print("tint={channels(ui.get_image_color(tone, 0, 0))} {channels(ui.get_image_color(tone, 1, 0))}")

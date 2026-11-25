@@ -57,12 +57,12 @@ COMPASS: [String]{
 run: fn() -[FS, Net, Time]> {
     listener: net.unix_listen("bus.sock") ?? panic("listen on bus.sock: {err}")
     files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
-    heard := ""
+    ^heard: ""
     loop conversation in ([[String]]{LOCATION, ACCELEROMETER, COMPASS}) {
-        stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
-        members := [String]{}
-        said := [U8]{}
-        authenticated := false
+        ^stream: net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+        ^members: [String]{}
+        ^said: [U8]{}
+        ^authenticated: false
         loop {
             got: net.unix_receive(stream, 4096) ?? break
             if got.bytes.len() == 0 -> break
@@ -110,7 +110,7 @@ message_length: fn(m: [U8]) -> Int { 16 + aligned(word(m, 12), 8) + word(m, 4) }
 // The member the header of the message `m` names (field 3), or "".
 member_of: fn(m: [U8]) -> String {
     end: 16 + word(m, 12)
-    at := 16
+    ^at: 16
     loop at < end {
         code: Int{m[at]}
         kind: Int{m[at + 2]}
@@ -140,7 +140,7 @@ word: fn(bytes: [U8], at: Int) -> Int {
 // The bytes the lowercase hex text `hex` spells.
 bytes_of: fn(hex: String) -> [U8] {
     digits: hex.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<(digits.len() /% 2) {
         out.push(U8{nibble(Int{digits[2 * i]}) * 16 + nibble(Int{digits[2 * i + 1]})})
     }

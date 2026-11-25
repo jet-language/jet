@@ -19,7 +19,7 @@ use {
 crlf: fn() -> String { "\r\n" }
 
 status_of: fn(stream: TCPStream) -> String {
-    parts := [String]{}
+    ^parts: [String]{}
     loop {
         part: stream.read(8192) ?? panic("response read")
         if part == "" -> break
@@ -52,7 +52,7 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
     limit: sys.open_file_limit()
     held: (files.listdir("/proc/self/fd") ?? panic("listing descriptors")).len()
     sys.set_open_file_limit(Val(held + 32), limit.hard)
-    fillers := [FileReader]{}
+    ^fillers: [FileReader]{}
     loop {
         if files.open("/dev/null") == {
             .Ok(reader) -> fillers.push(reader)

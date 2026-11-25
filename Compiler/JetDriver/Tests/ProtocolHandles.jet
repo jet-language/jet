@@ -21,15 +21,15 @@ PROTOCOL_HANDLES_HEAD: [String]{
 
 // The codes of the errors `run` gets when its steps after `Hello` are `steps`.
 protocol_handles_codes: fn(steps: [String]) -> [String] {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in PROTOCOL_HANDLES_HEAD -> lines.push("{line}")
     loop line in steps -> lines.push("{line}")
     lines.push("}}")
     lines.push("")
-    request := seams_request(lines.join("\n"), JetDriverCompileMode.Check)
+    ^request: seams_request(lines.join("\n"), JetDriverCompileMode.Check)
     request.core_sources = idiom_core_rows()
     result: jet_driver_compile(request)
-    codes := [String]{}
+    ^codes: [String]{}
     loop diagnostic in result.diagnostics {
         if diagnostic.severity == 1 -> codes.push("{diagnostic.code} {diagnostic.what}")
     }
@@ -48,8 +48,8 @@ protocol_handles_codes: fn(steps: [String]) -> [String] {
 // The step's result is thrown away (L0508) as well, as in the UI lesson.
 #Test("a protocol step out of order is the typestate error") {
     codes: protocol_handles_codes([String]{"    h1.Charge(500) ?? panic(\"charge failed\")"})
-    typestate := 0
-    others := 0
+    ^typestate: 0
+    ^others: 0
     loop code in codes {
         if code.starts_with("E0150 ") -> typestate += 1
         if !code.starts_with("E0150 ") && !code.starts_with("L0508 ") -> others += 1

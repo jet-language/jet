@@ -10,7 +10,7 @@ atomic_field_test_source: fn(name: String, source: String, accepted: Bool, atomi
     parsed: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("{name}: parity source must parse")
     checked: check_program(parsed.program, "atomic_field_parity", "{name}.jet", [SemaSourceSegment]{})
-    errors := 0
+    ^errors: 0
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> errors += 1
     }
@@ -22,7 +22,7 @@ atomic_field_test_source: fn(name: String, source: String, accepted: Bool, atomi
     // check_program's standalone declaration-registration mode marks structs
     // incomplete independently; require the whole function's checked tree.
     if checked.functions.len() != 1 -> panic("{name}: field function was not checked")
-    found := false
+    ^found: false
     function: checked.functions[0]
     loop statement in function.body {
         if body_stmt(function.tree, statement) == .Return(.Val(value), _) {

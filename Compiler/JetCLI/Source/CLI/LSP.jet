@@ -24,10 +24,10 @@ JetCLILSPChecker: struct {
             producer: jet_cli_lsp_producer(entry)
             alone: jet_cli_lsp_unsaved_loose(entry)
             entry_path: jet_cli_overlay_path(entry)
-            given := [JetDriverSourceDocument]{}
+            ^given: [JetDriverSourceDocument]{}
             // The entry's slot in `given`: its open text is what a report with
             // no origin of its own names.
-            entry_slot := -1
+            ^entry_slot: -1
             loop overlay in overlays {
                 same: jet_cli_overlay_path(overlay.path) == entry_path
                 if !alone || same {
@@ -43,7 +43,7 @@ JetCLILSPChecker: struct {
                     return LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
                 }
                 .Prepared(request, snapshot) -> {
-                    demanded := request.move()
+                    ^demanded: request.move()
                     demanded.doc_core_on_demand = true
                     demanded.doc_generated_modules = true
                     // The modules the package's `build: fn` generates load
@@ -55,7 +55,7 @@ JetCLILSPChecker: struct {
                         lsp_write_log("internal compiler error checking `{entry}`: {err.message}").drop("standard error is the log; a failed log write has nowhere to go")
                         return LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
                     }
-                    result := jet_driver_compile_keep_going(generated.request.move(), JetDriverKeepGoing{skip: [String]{}}) ?? {
+                    ^result: jet_driver_compile_keep_going(generated.request.move(), JetDriverKeepGoing{skip: [String]{}}) ?? {
                         lsp_write_log("internal compiler error checking `{entry}`: {err}").drop("standard error is the log; a failed log write has nowhere to go")
                         return LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
                     }
@@ -70,8 +70,8 @@ JetCLILSPChecker: struct {
                     }
                     index: jet_cli_checked_semindex(result)
                     symbols: semindex_build_symbols(index, result.doc_modules)
-                    declared := [SemDeclared]{}
-                    declared_files := [LSPDeclaredFile]{}
+                    ^declared: [SemDeclared]{}
+                    ^declared_files: [LSPDeclaredFile]{}
                     jet_cli_lsp_declared(entry, result.doc_modules, declared, declared_files)
                     return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer, choices: jet_cli_lsp_choices(result.doc_modules), reports: reports, declared: declared, declared_files: declared_files}
                 }
@@ -94,22 +94,24 @@ JetCLILSPChecker: struct {
             alone: jet_cli_lsp_unsaved_loose(entry)
             entry_path: jet_cli_overlay_path(entry)
             shift: JET_CLI_FMT_EXPLICIT_FAILURES_POLICY.count_bytes()
-            given := [JetDriverSourceDocument]{}
-            length := -1
+            ^given: [JetDriverSourceDocument]{}
+            ^length: -1
             loop overlay in overlays.move() {
                 if jet_cli_overlay_path(overlay.path) == entry_path {
                     length = overlay.source.count_bytes()
                     given.push(JetDriverSourceDocument{path: overlay.path, source: "{JET_CLI_FMT_EXPLICIT_FAILURES_POLICY}{overlay.source}"})
                     next
                 }
-                if !alone -> given.push(JetDriverSourceDocument{path: overlay.path, source: overlay.source})
+                if !alone {
+                    given.push(JetDriverSourceDocument{path: overlay.path, source: overlay.source})
+                }
             }
-            sites := [Int]{}
+            ^sites: [Int]{}
             if length < 0 -> return sites
             if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone) == {
                 .Refused(_) -> return sites
                 .Prepared(request, snapshot) -> {
-                    demanded := request.move()
+                    ^demanded: request.move()
                     demanded.doc_core_on_demand = true
                     result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}}) ?? return sites
                     loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
@@ -117,8 +119,12 @@ JetCLILSPChecker: struct {
                         if diagnostic.code != "E0434" || owner.path != snapshot.entry_path -> next
                         // A call read as a receiver is written `(call()?)`: its
                         // `?)` is the mark.
-                        loop edit in diagnostic.fix_edits -> jet_cli_failure_mark(sites, edit, shift, length)
-                        if diagnostic.edit == .Val(first) -> jet_cli_failure_mark(sites, first, shift, length)
+                        loop edit in diagnostic.fix_edits {
+                            jet_cli_failure_mark(sites, edit, shift, length)
+                        }
+                        if diagnostic.edit == .Val(first) {
+                            jet_cli_failure_mark(sites, first, shift, length)
+                        }
                     }
                 }
             }
@@ -128,7 +134,7 @@ JetCLILSPChecker: struct {
         // The `.git` and `.jet` trees hold no workspace source; an
         // unreadable file is left out.
         sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
-            saved := [JetDriverSourceDocument]{}
+            ^saved: [JetDriverSourceDocument]{}
             loop item in cli_files.walk_files(root, skip: [String]{".git", ".jet"}) {
                 entry: item ?? return saved
                 if !entry.path.ends_with(".jet") -> next
@@ -143,7 +149,9 @@ JetCLILSPChecker: struct {
 // The source offset of a failure mark the policy's `?`/`?)` insertion
 // `edit` writes, shifted back past the prepended policy; each site once.
 jet_cli_failure_mark: fn(sites: ^[Int], edit: TextEdit, shift: Int, length: Int) Never! {
-    if edit.span.start != edit.span.end || (edit.new_text != "?" && edit.new_text != "?)") -> return
+    if edit.span.start != edit.span.end || (edit.new_text != "?" && edit.new_text != "?)") {
+        return
+    }
     site: edit.span.start - shift
     if site >= 0 && site <= length && !sites.contains(site) -> sites.push(site)
 }
@@ -161,7 +169,9 @@ jet_cli_lsp_reports: fn(entry: String, given: [JetDriverSourceDocument], slot: I
 // without its private parts. Core read from a toolchain tree also gives each
 // such source's file, where a definition of one of its functions goes.
 jet_cli_lsp_declared: fn(entry: String, modules: [JetDriverDocModule], declared: ^[SemDeclared], files: ^[LSPDeclaredFile]) {
-    if !semindex_imports(modules, "core.") -> return
+    if !semindex_imports(modules, "core.") {
+        return
+    }
     toolchain: jet_cli_named_toolchain(entry)
     if jet_cli_core_sources(entry) == .Loaded(rows) {
         loop row in rows {
@@ -180,9 +190,9 @@ jet_cli_lsp_declared: fn(entry: String, modules: [JetDriverDocModule], declared:
 // a check does not make, and live reads name their filter by the run's
 // declaration table, which a checked module does not carry.
 jet_cli_lsp_choices: fn(modules: [JetDriverDocModule]) -> [LSPChoice] Never! {
-    out := [LSPChoice]{}
+    ^out: [LSPChoice]{}
     loop module_ref in modules {
-        rows := jet_cli_storage_choices(module_ref.functions)
+        ^rows: jet_cli_storage_choices(module_ref.functions)
         jet_cli_collection_choices(module_ref.functions, rows)
         jet_cli_copy_choices(module_ref.functions, rows)
         jet_cli_placement_choices(module_ref.functions, rows)
@@ -210,7 +220,7 @@ jet_cli_lsp_producer: fn(entry: String) -[FS]> LSPProducer? Never! {
     rows: jet_cli_status_list(jet_cli_status_get(receipt, "generated")) ?? return None
     loop row in rows {
         if jet_cli_status_string(jet_cli_status_get(row, "path")) != .Val(relative) -> next
-        handoffs := [String]{}
+        ^handoffs: [String]{}
         steps: jet_cli_status_list(jet_cli_status_get(row, "handoffs")) ?? [JetCLIStatusValue]{}
         loop step in steps {
             if jet_cli_status_string(Val(step)) == .Val(said) -> handoffs.push(said.copy())

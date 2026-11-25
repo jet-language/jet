@@ -68,7 +68,7 @@ hex_digit: fn(byte: U8) -> Int {
 
 hex_value: fn(text: String) -> Int TableError! {
     if text.len() == 0 -> return Err(fail("empty hex field"))
-    value := 0
+    ^value: 0
     loop byte in text.bytes() {
         digit: hex_digit(byte)
         if digit < 0 -> return Err(fail("bad hex field '{text}'"))
@@ -89,8 +89,8 @@ comment_scalar: fn(comment: String) -> Int {
     at: comment.find("U+")
     if at < 0 -> return -1
     raw: comment.bytes()
-    value := 0
-    digits := 0
+    ^value: 0
+    ^digits: 0
     loop i in (at + 2)..<raw.len() {
         digit: hex_digit(raw[i])
         if digit < 0 || digits == 6 -> break
@@ -103,7 +103,7 @@ comment_scalar: fn(comment: String) -> Int {
 
 // `#define XKB_KEY_<name> 0x<value> /* comment */` rows, in header order.
 parse_keysyms: fn(source: String) -> [Keysym] TableError! {
-    rows := [Keysym]{}
+    ^rows: [Keysym]{}
     loop raw in source.split("\n") {
         if !raw.starts_with(DEFINE_PREFIX) -> next
         rest: raw.remove_prefix(DEFINE_PREFIX).replace("\t", " ")
@@ -138,8 +138,8 @@ quoted: fn(text: String) -> String TableError! {
     raw: text.bytes()
     start: text.find("\"")
     if start < 0 -> return Err(fail("Compose result without text: '{text}'"))
-    out := [U8]{}
-    i := start + 1
+    ^out: [U8]{}
+    ^i: start + 1
     loop i < raw.len() {
         b: raw[i]
         if b == (U8{34}) {
@@ -156,7 +156,7 @@ quoted: fn(text: String) -> String TableError! {
 
 // The UTF-8 text of one scalar.
 utf8_text: fn(scalar: Int) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
         out.push(U8{192 + (scalar >> 6)})
         out.push(U8{128 + (scalar & 63)})
@@ -187,13 +187,13 @@ child_of: fn(nodes: [Node], parent: Int, keysym: Int) -> Int {
 // one is skipped; a repeated sequence replaces the earlier result. A result
 // without text types its keysym's text.
 parse_compose: fn(source: String, names: [String:Int], scalars: [Int:Int]) -> [Node] TableError! {
-    nodes := [Node]{Node{keysym: 0, leaf: false, text: "", children: [Int]{}}}
+    ^nodes: [Node]{Node{keysym: 0, leaf: false, text: "", children: [Int]{}}}
     loop raw in source.split("\n") {
         if !raw.starts_with("<") -> next
         sides: raw.partition(":")
         if sides.sep == "" -> return Err(fail("Compose line without ':': '{raw}'"))
-        keys := [Int]{}
-        known := true
+        ^keys: [Int]{}
+        ^known: true
         loop part in sides.head.replace("\t", " ").split(" ") {
             if part == "" -> next
             if !part.starts_with("<") || !part.ends_with(">") {
@@ -204,10 +204,10 @@ parse_compose: fn(source: String, names: [String:Int], scalars: [Int:Int]) -> [N
             } else { known = false }
         }
         if !known || keys.len() == 0 -> next
-        text := quoted(sides.tail)
+        ^text: quoted(sides.tail)
         rest: sides.tail.partition("\"").tail
         after: rest.bytes()
-        close := 0
+        ^close: 0
         loop close < after.len() && after[close] != (U8{34}) {
             if after[close] == (U8{92}) -> close += 1
             close += 1
@@ -222,7 +222,7 @@ parse_compose: fn(source: String, names: [String:Int], scalars: [Int:Int]) -> [N
             }
         }
         if text == "" -> next
-        at := 0
+        ^at: 0
         loop (position, keysym) in keys {
             found: child_of(nodes, at, keysym)
             next_at: if found >= 0 -> found else -> nodes.len()
@@ -253,10 +253,10 @@ embed_line: fn(constant: String, builtin: String, name: String) -> String {
 }
 
 render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: String) -> [TableFile] TableError! {
-    names := [String]{}
-    values := [U8]{}
-    scalars := [Int:Int]{}
-    text_keys := [Int]{}
+    ^names: [String]{}
+    ^values: [U8]{}
+    ^scalars: [Int:Int]{}
+    ^text_keys: [Int]{}
     loop row in keysyms {
         names.push(row.name.copy())
         push_be(values, row.value, 4)
@@ -266,20 +266,20 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
         }
     }
     text_keys.sort_by(fn(value: Int) { value })
-    text_rows := [U8]{}
+    ^text_rows: [U8]{}
     loop value in text_keys {
         push_be(text_rows, value, 4)
         push_be(text_rows, scalars.get(value) ?? 0, 3)
     }
     name_text: names.join("\n")
     // Breadth-first, each node's children contiguous and sorted by keysym.
-    order := nodes[0].children.copy()
+    ^order: nodes[0].children.copy()
     order.sort_by(fn(at: Int) { nodes[at].keysym })
     roots: order.len()
-    compose_rows := [U8]{}
-    pool := [U8]{}
-    pooled := [String:Int]{}
-    position := 0
+    ^compose_rows: [U8]{}
+    ^pool: [U8]{}
+    ^pooled: [String:Int]{}
+    ^position: 0
     loop position < order.len() {
         node: nodes[order[position]]
         push_be(compose_rows, node.keysym, 4)
@@ -294,7 +294,7 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
             push_be(compose_rows, offset, 3)
             push_be(compose_rows, 32768 + bytes.len(), 2)
         } else {
-            children := node.children.copy()
+            ^children: node.children.copy()
             children.sort_by(fn(at: Int) { nodes[at].keysym })
             push_be(compose_rows, order.len(), 3)
             push_be(compose_rows, children.len(), 2)
@@ -305,7 +305,7 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
     if pool.len() > 16777215 || order.len() > 16777215 {
         return Err(fail("Compose table overflows its rows"))
     }
-    lines := [String]{
+    ^lines: [String]{
         "// GENERATED FILE — do not hand-edit.",
         "// It stays committed: the compiler and every program build read it from the",
         "// checkout, and no build step runs this generator.",
@@ -373,8 +373,8 @@ read_pinned: fn(path: String, sums: String) -[FS]> String TableError! {
 generated_files: fn() -[FS]> [TableFile] TableError! {
     sums: files.read(SUMS_PATH) ?? return Err(fail("cannot read {SUMS_PATH}: {err}"))
     keysyms: parse_keysyms(read_pinned(KEYSYMS_PATH, sums))
-    names := [String:Int]{}
-    scalars := [Int:Int]{}
+    ^names: [String:Int]{}
+    ^scalars: [Int:Int]{}
     loop row in keysyms {
         if names.get(row.name) == None -> _: names.add(row.name.copy(), row.value)
         if row.scalar > 0 && scalars.get(row.value) == None -> _: scalars.add(row.value, row.scalar)
@@ -413,7 +413,7 @@ run: fn() { print(table_main(process.args()) ?? process.fail(1, err.message)) }
     assert_eq(rows[0].value, 228)
     assert_eq(rows[0].scalar, 228)
     assert_eq(rows[1].scalar, -1)
-    names := [String:Int]{}
+    ^names: [String:Int]{}
     loop row in rows -> _: names.add(row.name.copy(), row.value)
     _: names.add("e", 101)
     // Line 1 names an unknown result keysym and line 6 an unknown key, so

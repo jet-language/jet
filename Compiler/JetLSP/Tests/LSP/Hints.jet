@@ -66,7 +66,7 @@ run: fn() -> Int {
 // Each hint as `line:character label`.
 lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
     range: "\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":{end_line},\"character\":0}}}}"
-    hints := [String]{}
+    ^hints: [String]{}
     loop row in lsp_test_rows(lsp_test_result(server, "textDocument/inlayHint", "{{{lsp_test_text_document(uri)},{range}}}")) {
         position: lsp_test_field(row, "position")
         hints.push("{lsp_test_int(position, "line")}:{lsp_test_int(position, "character")} {lsp_test_text(row, "label")}")
@@ -75,7 +75,7 @@ lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
 }
 
 #Test("inlay hints name the parameter each positional argument binds") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_HINTS_URI, LSP_TEST_HINTS)
     // The range runs past the document's last line and stops at its end.
     assert_eq(lsp_test_hints(server, LSP_TEST_HINTS_URI, 40), [String]{"5:10 value: ", "5:37 value: ", "5:40 low: ", "5:43 high: "})
@@ -84,22 +84,22 @@ lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
 }
 
 #Test("inlay hints show a type's methods declared in an impl apart from it") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_BREADCRUMB_URI, LSP_TEST_BREADCRUMB)
     assert_eq(lsp_test_hints(server, LSP_TEST_BREADCRUMB_URI, 9), [String]{"0:6 + size: fn() -> Int"})
 }
 
 #Test("calls show the marks their signatures decide and a written name is a modification") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_MARKS_URI, LSP_TEST_MARKS)
     assert_eq(lsp_test_hints(server, LSP_TEST_MARKS_URI, 13), [String]{"10:9 count: ^", "10:16 by: ", "11:9 title: ^^"})
     data: lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(LSP_TEST_MARKS_URI)}}}"))
     // Each token on line 10 as `line:character:modifiers`; `modification` is
     // bit 4.
-    tokens := [String]{}
-    line := 0
-    character := 0
-    at := 0
+    ^tokens: [String]{}
+    ^line: 0
+    ^character: 0
+    ^at: 0
     loop at + 4 < data.len() {
         if data[at] > 0 -> character = 0
         line += data[at]
@@ -111,7 +111,7 @@ lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
 }
 
 #Test("inlay hints show a `?` after each call that passes a failure up") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_FAILURES_URI, LSP_TEST_FAILURES)
     assert_eq(lsp_test_hints(server, LSP_TEST_FAILURES_URI, 9), [String]{"5:17 ?", "6:18 ?", "6:27 ?", "7:27 ?"})
     // The range keeps those inside it.

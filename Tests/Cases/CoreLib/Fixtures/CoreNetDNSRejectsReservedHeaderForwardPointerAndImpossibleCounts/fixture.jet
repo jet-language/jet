@@ -28,13 +28,13 @@ fixture_u16: fn(out: ^[U8], n: Int) {
 }
 
 fixture_question_end: fn(query: [U8]) -> Int {
-    pos := 12
+    ^pos: 12
     loop pos < query.len() && query[pos] != (U8{0}) -> pos += Int{query[pos]} + 1
     pos + 5
 }
 
 fixture_name: fn(name: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop label in name.split(".") {
         out.push(U8{label.bytes().len()})
         fixture_copy(out, label.bytes(), 0, label.bytes().len())
@@ -44,7 +44,7 @@ fixture_name: fn(name: String) -> [U8] {
 }
 
 fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, additional: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     fixture_copy(out, query, 0, 2)
     fixture_u16(out, flags)
     fixture_u16(out, 1)
@@ -57,7 +57,7 @@ fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, addi
 
 fixture_cname: fn(query: [U8]) -> [U8] {
     alias: fixture_name("alias.example.test")
-    out := fixture_header(query, 0x8180, 1, 0, 1)
+    ^out: fixture_header(query, 0x8180, 1, 0, 1)
     out.push(U8{0xc0})
     out.push(U8{0x0c})
     fixture_u16(out, 5)
@@ -76,7 +76,7 @@ fixture_cname: fn(query: [U8]) -> [U8] {
 
 fixture_pointer: fn(query: [U8], delta: Int) -> [U8] {
     pointer: fixture_question_end(query) + delta
-    out := fixture_header(query, 0x8180, 1, 0, 0)
+    ^out: fixture_header(query, 0x8180, 1, 0, 0)
     out.push(U8{(pointer /% 256) & 0x3f | 0xc0})
     out.push(U8{pointer %% 256})
     fixture_u16(out, 1)
@@ -98,7 +98,7 @@ fixture_send: fn(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     server: task {
         loop i in 0..<3 {
             packet: net.udp_recv_from(socket, 512) ?? panic("receive query")
-            response := [U8]{}
+            ^response: [U8]{}
             if i == 0 {
                 response = fixture_cname(packet.data)
                 response[3] = U8{Int{response[3]} | 0x40}

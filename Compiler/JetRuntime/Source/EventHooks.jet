@@ -45,7 +45,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_jet_hook: fn(hook: I64) -> I64 {
-    _ := sync_add(hook, I64{1})
+    ^_: sync_add(hook, I64{1})
     hook
 }
 
@@ -91,7 +91,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
 // count on the box: a handler that drops the last Hook handle leaves it
 // alive until the run releases it.
 #Export(c) jet_hook_run: fn(hook: I64, payload: I64, fallback: I64, out: I64) {
-    _ := sync_add(hook, I64{1})
+    ^_: sync_add(hook, I64{1})
     core: event_word(wrapping(hook + I64{8}))
     meta: event_word(wrapping(hook + I64{24}))
     size: coll_payload(meta)
@@ -102,8 +102,8 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
         coll_slot_drop(fallback, meta)
     }
     scratch: coll_slot_new(meta)
-    stopped := false
-    at := I64{0}
+    ^stopped: false
+    ^at: I64{0}
     loop at < count {
         listener: event_snapshot_get(snapshot, at)
         if !stopped && event_listener_take_turn(listener) {
@@ -164,7 +164,7 @@ OUTCOME_FAIL_AT: I64{104}
 // (HandlerContinue, HandlerTransform, HandlerCancel, HandlerFail), then the
 // Terminal Continue, Cancel or Fail.
 #Export(c) jet_decision_hook_run: fn(hook: I64, payload: I64, layout: I64) -> I64 {
-    _ := sync_add(hook, I64{1})
+    ^_: sync_add(hook, I64{1})
     core: event_word(wrapping(hook + I64{8}))
     t_meta: event_word(wrapping(layout + DECISION_T_META))
     e_meta: event_word(wrapping(layout + DECISION_E_META))
@@ -172,15 +172,15 @@ OUTCOME_FAIL_AT: I64{104}
     current: coll_slot_new(t_meta)
     hook_value_clone(payload, current, t_meta)
     decision: coll_slot_new(d_meta)
-    failure := I64{0}
-    outcome := event_word(wrapping(layout + OUTCOME_CONTINUE))
-    stopped := false
+    ^failure: I64{0}
+    ^outcome: event_word(wrapping(layout + OUTCOME_CONTINUE))
+    ^stopped: false
     none: rt_static_text("None")
     dispatch: event_core_dispatch(core)
     event_core_observe(core, dispatch, rt_static_text("DispatchStarted"), none, none)
     snapshot: event_snapshot(core)
     count: event_snapshot_count(snapshot)
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         listener: event_snapshot_get(snapshot, at)
         due: !stopped && outcome == event_word(wrapping(layout + OUTCOME_CONTINUE))
@@ -220,7 +220,7 @@ OUTCOME_FAIL_AT: I64{104}
         event_core_observe(core, dispatch, rt_static_text("Terminal"), none, rt_static_text("Continue"))
     }
     jet_rt_free(decision, coll_size(d_meta), I64{8})
-    result := I64{0}
+    ^result: I64{0}
     if stopped {
         coll_slot_free(current, t_meta)
         if (failure != I64{0}) { coll_slot_free(failure, e_meta) }

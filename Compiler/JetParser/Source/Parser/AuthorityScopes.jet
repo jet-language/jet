@@ -67,9 +67,9 @@ parser_authority_scoped_entry: fn(state: ^JetParserState, base: String, args: [C
     if parser_memory_bounded(base) {
         return parser_authority_memory_denial(state, base, args, span, prefix)
     }
-    scope := ""
-    plain := false
-    scope_span := span
+    ^scope: ""
+    ^plain: false
+    ^scope_span: span
     if args.len() == 1 -> scope_span = expr_span(args[0].expr)
     if args.len() == 1 && args[0].label == None && !args[0].spread {
         if args[0].expr == .Str(parts, _, _) {
@@ -102,7 +102,7 @@ parser_authority_effect_unprefixed: fn(path: ^^String) -> String {
 // the row parser reads it: one `above:` argument, a positive integer byte
 // ceiling, and only under the `!` prefix.
 parser_authority_memory_denial: fn(state: ^JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
-    labeled := false
+    ^labeled: false
     if args.len() == 1 && !args[0].spread && args[0].label == .Val(label) {
         labeled = label.name == "above"
     }
@@ -110,7 +110,7 @@ parser_authority_memory_denial: fn(state: ^JetParserState, base: String, args: [
         parser_add_error_code(state, "E0119", span, "`{base}(…)` takes one argument, `above: Bytes`", "the bounded memory denial has one closed argument: `above: Bytes`", "write `{base}(above: 65536)`")
         return None
     }
-    bytes := 0
+    ^bytes: 0
     if args[0].expr == .Int(value, _, _, _, _) -> bytes = value
     if bytes <= 0 {
         parser_add_error_code(state, "E0119", span, "`{base}(above: …)` needs a positive integer byte ceiling", "the bounded denial is checked at compile time and accepts a positive byte count", "write a positive byte count, such as `{base}(above: 65536)`")
@@ -135,14 +135,14 @@ parser_authority_path_span: fn(expr: Expr) -> Span {
 }
 
 parser_authority_scope_stmt: fn(state: ^JetParserState, marker: Marker, args: [CallArg], body: [Stmt], span: Span) -> Stmt? {
-    caps := [NamedSpan]{}
+    ^caps: [NamedSpan]{}
     loop argument in args {
         name: parser_authority_effect_entry(state, marker, argument.expr, "") ?? return None
         cap_span: if argument.label == None -> expr_span(argument.expr) else -> parser_authority_path_span(argument.expr)
         caps.push(NamedSpan{name: name, span: cap_span})
     }
-    binding := NamedSpan?{None}
-    caps_span := Span{start: marker.name_span.end, end: marker.span.end}
+    ^binding: NamedSpan?{None}
+    ^caps_span: Span{start: marker.name_span.end, end: marker.span.end}
     if args.len() > 0 && args[0].label == .Val(label) {
         binding = Val(NamedSpan{name: label.name, span: label.span})
         if caps.len() > 0 -> caps_span = Span{start: caps[0].span.start, end: marker.span.end}

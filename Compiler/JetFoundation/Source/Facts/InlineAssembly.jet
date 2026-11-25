@@ -7,13 +7,13 @@ inline_assembly_target_supported: fn(target: String) -> Bool Never! {
 }
 
 inline_assembly_normalize_register: fn(register: String) -> String Never! {
-    raw := register
+    ^raw: register
     if raw.starts_with("%") {
         bytes: raw.bytes()
         raw = String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
     }
-    bytes := raw.bytes()
-    index := 0
+    ^bytes: raw.bytes()
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
@@ -27,7 +27,7 @@ inline_assembly_register_number: fn(register: String, prefix: String, lo: Int, h
     bytes: register.bytes()
     prefix_len: prefix.bytes().len()
     if bytes.len() <= prefix_len -> return false
-    index := prefix_len
+    ^index: prefix_len
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if code < 48 || code > 57 -> return false
@@ -78,16 +78,16 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
     if inline.lang != "asm" -> return InlineAsmContractCheck.NotAssembly
 
     params: function.params
-    used := [String]{}
-    clobbers := [String]{}
-    seen_clobbers := [String]{}
-    return_anchors := 0
-    return_destination := InlineAsmOutput?{None}
-    bad := String?{None}
+    ^used: [String]{}
+    ^clobbers: [String]{}
+    ^seen_clobbers: [String]{}
+    ^return_anchors: 0
+    ^return_destination: InlineAsmOutput?{None}
+    ^bad: String?{None}
     target_supported: inline_assembly_target_supported(target)
 
     loop raw_line in inline.source.split("\n") {
-        line := raw_line.trim()
+        ^line: raw_line.trim()
         if line.starts_with("; clobbers ") {
             prefix_len: "; clobbers ".bytes().len()
             bytes: line.bytes()
@@ -114,7 +114,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
             return_anchors += 1
             parts: line.split("; -> return").to_list()
             operand: if parts.len() > 0 -> inline_assembly_first_operand(parts[0].trim()) else -> None
-            checked_destination := if operand == {
+            ^checked_destination: if operand == {
                 None -> None
                 Val(value) -> inline_assembly_return_destination(value, params, target, target_supported)
             }
@@ -129,11 +129,11 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
             }
         }
 
-        rest := line
+        ^rest: line
         loop {
             bytes: rest.bytes()
-            open := -1
-            index := 0
+            ^open: -1
+            ^index: 0
             loop index < bytes.len() {
                 if (Int{bytes[index]}) == 123 {
                     open = index
@@ -142,7 +142,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
                 index += 1
             }
             if open < 0 -> break
-            close := -1
+            ^close: -1
             index = open + 1
             loop index < bytes.len() {
                 if (Int{bytes[index]}) == 125 {
@@ -156,7 +156,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
                 break
             }
             name: String.from_bytes(bytes.slice(open + 1, close)) ?? ""
-            parameter_index := -1
+            ^parameter_index: -1
             index = 0
             loop index < params.len() {
                 if params[index].name == name {
@@ -173,7 +173,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
         }
     }
 
-    unused_name := String?{None}
+    ^unused_name: String?{None}
     loop parameter in params {
         if !used.contains(parameter.name) {
             unused_name = Val(parameter.name)
@@ -185,7 +185,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
         None -> {}
     }
 
-    returns_value := false
+    ^returns_value: false
     if function.return_type == {
         None -> {}
         Val(return_type) -> returns_value = return_type != Type.Named{name: "Unit"}
@@ -220,10 +220,10 @@ inline_assembly_ascii_whitespace: fn(byte: U8) -> Bool Never! {
 }
 
 inline_assembly_clobber_tokens: fn(text: String) -> [String] Never! {
-    tokens := [String]{}
+    ^tokens: [String]{}
     bytes: text.bytes()
-    start := 0
-    index := 0
+    ^start: 0
+    ^index: 0
     loop index < bytes.len() {
         if (Int{bytes[index]}) == 44 || inline_assembly_ascii_whitespace(bytes[index]) {
             if index > start -> tokens.push(String.from_bytes(bytes.slice(start, index)) ?? "")
@@ -237,8 +237,8 @@ inline_assembly_clobber_tokens: fn(text: String) -> [String] Never! {
 
 inline_assembly_first_operand: fn(line: String) -> String? {
     bytes: line.bytes()
-    separator := -1
-    index := 0
+    ^separator: -1
+    ^index: 0
     loop index < bytes.len() {
         if inline_assembly_ascii_whitespace(bytes[index]) {
             separator = index
@@ -258,7 +258,7 @@ inline_assembly_return_destination: fn(operand: String, params: [Param], target:
     bytes: operand.bytes()
     if operand.starts_with("{{") && operand.ends_with("}}") {
         name: String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? ""
-        index := 0
+        ^index: 0
         loop index < params.len() {
             if params[index].name == name -> return Val(InlineAsmOutput.Parameter{index: index})
             index += 1
@@ -355,9 +355,9 @@ InlineAsmUnencoded: struct {
 // the template assembler encodes, in body order. A blank or comment-only
 // line and a numeric label such as `1:` hold no instruction.
 inline_assembly_x64_unencoded: fn(body: String) -> [InlineAsmUnencoded] Never! {
-    found := [InlineAsmUnencoded]{}
+    ^found: [InlineAsmUnencoded]{}
     bytes: body.bytes()
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
         if inline_assembly_ascii_whitespace(bytes[index]) {
             index += 1
@@ -386,7 +386,7 @@ inline_assembly_x64_unencoded: fn(body: String) -> [InlineAsmUnencoded] Never! {
 // Whether `bytes[start..<end]` is a numeric label: digits, then one `:`.
 inline_assembly_x64_label: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     if end - start < 2 || (Int{bytes[end - 1]}) != 58 -> return false
-    index := start
+    ^index: start
     loop index < end - 1 {
         code: Int{bytes[index]}
         if code < 48 || code > 57 -> return false

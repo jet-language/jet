@@ -45,7 +45,7 @@ jet_cli_rust_foreign_archive: fn(artifact: JetCLIRustForeignArtifact) -> String 
 }
 
 jet_cli_rust_foreign_diagnostic: fn(error: JetDriverRustForeignError) -> Diagnostic Never! {
-    result := diagnostic_from_registry(error.code, None, error.what, error.why, error.fix)
+    ^result: diagnostic_from_registry(error.code, None, error.what, error.why, error.fix)
     result.detail = error.detail
     result
 }
@@ -78,8 +78,8 @@ jet_cli_rust_foreign_hex: fn(value: String) -> Bool Never! {
 
 // Held, no-follow reads prevent a cache or child from substituting a symlink.
 jet_cli_rust_foreign_read: fn(directory: cli_files.Directory, name: String) -[FS]> [U8] JetDriverRustForeignError! {
-    reader := directory.open(name) ?? return Err(jet_cli_rust_foreign_io("couldn't read FFI input `{directory.path}/{name}`: {err}"))
-    bytes := [U8]{}
+    ^reader: directory.open(name) ?? return Err(jet_cli_rust_foreign_io("couldn't read FFI input `{directory.path}/{name}`: {err}"))
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(65536) ?? return Err(jet_cli_rust_foreign_io("couldn't read FFI input `{directory.path}/{name}`: {err}"))
         if chunk.len() == 0 -> break
@@ -97,7 +97,7 @@ jet_cli_rust_foreign_text: fn(directory: cli_files.Directory, name: String) -[FS
 // files are deleted with the workspace, so they are never flushed: an fsync
 // waits for every dirty page on the filesystem.
 jet_cli_rust_foreign_write: fn(directory: cli_files.Directory, name: String, bytes: [U8], durable: Bool, mode: Int{384}) -[FS]> JetDriverRustForeignError! {
-    writer := directory.create(name, .Replace, Val(384)) ?? return Err(jet_cli_rust_foreign_io("couldn't stage FFI input `{name}`: {err}"))
+    ^writer: directory.create(name, .Replace, Val(384)) ?? return Err(jet_cli_rust_foreign_io("couldn't stage FFI input `{name}`: {err}"))
     writer.write_bytes(bytes) ?? return Err(jet_cli_rust_foreign_io("couldn't write FFI input `{name}`: {err}"))
     writer.set_mode(mode) ?? return Err(jet_cli_rust_foreign_io("couldn't preserve FFI output permissions: {err}"))
     if durable {
@@ -177,7 +177,7 @@ jet_cli_rust_foreign_require_std: fn() -[FS, Env]> JetDriverRustForeignError! {
 // one row per checked C provider link unit (which carries no artifact and no
 // dependency directory), then the direct and transitive links.
 jet_cli_rust_foreign_link_identity: fn(facts: JetDriverForeignLinkFacts) -[FS, Env]> String JetDriverRustForeignError! {
-    rows := [String]{}
+    ^rows: [String]{}
     cache_identity: jet_driver_foreign_link_cache_identity(facts)
     loop library in facts.libraries {
         id: stable_id("link", "c::{library}")
@@ -195,7 +195,7 @@ jet_cli_rust_foreign_link_identity: fn(facts: JetDriverForeignLinkFacts) -[FS, E
         }
     }
     rows.sort()
-    encoded := [String]{}
+    ^encoded: [String]{}
     loop row in rows -> encoded.push("{row.len()}:{row}")
     Ok(jet_cli_rust_foreign_digest(encoded.join("").bytes()))
 }
@@ -210,7 +210,7 @@ jet_cli_rust_foreign_find: fn(text: String, needle: String) -> Int Never! {
 
 // Original stable Cargo detail: remove resolver/build chatter and machine keys.
 jet_cli_rust_foreign_cargo_detail: fn(stderr: String, plan: JetDriverRustForeignPlan, cache: String) -> String Never! {
-    kept := [String]{}
+    ^kept: [String]{}
     loop line in stderr.lines() {
         text: line.trim()
         if text == "" || text.starts_with("Updating crates.io") || text.starts_with("Locking ") || text.starts_with("Adding ") || text.contains("waiting for other jobs") {
@@ -219,7 +219,7 @@ jet_cli_rust_foreign_cargo_detail: fn(stderr: String, plan: JetDriverRustForeign
         if (text.starts_with("Compiling ") || text.starts_with("Checking ")) && !text.contains("jet_ffi_") {
             next
         }
-        normalized := line.replace("{cache}/deps/{plan.shared_key}", "~/.cache/jet/ffi/deps/<hash>").replace("{cache}/{plan.key}", "~/.cache/jet/ffi/<hash>").replace(plan.crate_name, "jet_ffi_<hash>")
+        ^normalized: line.replace("{cache}/deps/{plan.shared_key}", "~/.cache/jet/ffi/deps/<hash>").replace("{cache}/{plan.key}", "~/.cache/jet/ffi/<hash>").replace(plan.crate_name, "jet_ffi_<hash>")
         loop marker in ([String]{"match std::panic::catch_unwind(", "match ffi_catch_unwind("}) {
             at: jet_cli_rust_foreign_find(normalized, marker)
             if at >= 0 -> normalized = "{normalized.slice(0, at)}{marker}<generated wrapper>)"
@@ -258,7 +258,7 @@ jet_cli_rust_foreign_metadata: fn(text: String, crate_name: String) -> Bool JetD
             return Err(jet_cli_rust_foreign_io("Cargo metadata packages must be an array"))
         }
     }
-    present := false
+    ^present: false
     loop package in packages {
         name_value: jet_cli_rust_foreign_json_field(package, "name") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata package has no name"))
         name: if name_value == {
@@ -328,7 +328,7 @@ jet_cli_rust_foreign_overlay: fn(args: ^[String], registry: String, destination:
 }
 
 jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, registry: String, share_network: Bool, metadata: Bool) -[FS, Env]> [String] JetDriverRustForeignError! {
-    args := [String]{bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled", "--cap-drop", "ALL", "--ro-bind-try", "/nix/store", "/nix/store", "--proc", "/proc", "--dev", "/dev", "--size", "67108864", "--tmpfs", "/tmp", "--dir", "/homeless-shelter", "--clearenv", "--setenv", "PATH", "/nix/store", "--setenv", "HOME", "/homeless-shelter"}
+    ^args: [String]{bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled", "--cap-drop", "ALL", "--ro-bind-try", "/nix/store", "/nix/store", "--proc", "/proc", "--dev", "/dev", "--size", "67108864", "--tmpfs", "/tmp", "--dir", "/homeless-shelter", "--clearenv", "--setenv", "PATH", "/nix/store", "--setenv", "HOME", "/homeless-shelter"}
     loop directory in ([String]{"/usr", "/bin", "/lib", "/lib64"}) {
         if !cli_files.exists(directory) -> next
         resolved: cli_files.canonicalize(directory) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve immutable system directory `{directory}`: {err}"))
@@ -381,7 +381,9 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
             if cli_sys.get(ENV_JET_RUST_MUSL_LINKER) == .Val(linker) {
                 loop name in
                     ([String]{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "CC_x86_64_unknown_linux_musl"}) {
-                    loop argument in ([String]{"--setenv", name, linker.copy()}) -> args.push(argument)
+                    loop argument in ([String]{"--setenv", name, linker.copy()}) {
+                        args.push(argument)
+                    }
                 }
             }
             if cli_sys.get(ENV_JET_RUST_MUSL_AR) == .Val(archiver) {
@@ -399,7 +401,9 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
                 loop argument in ([String]{"--setenv", "PATH", path}) -> args.push(argument)
             }
             if cli_sys.get("CARGO_BUILD_JOBS") == .Val(jobs) {
-                loop argument in ([String]{"--setenv", "CARGO_BUILD_JOBS", jobs}) -> args.push(argument)
+                loop argument in ([String]{"--setenv", "CARGO_BUILD_JOBS", jobs}) {
+                    args.push(argument)
+                }
             }
             // The host's metadata preflight inherits offline resolution control;
             // its isolated build forwards only the explicit Cargo worker bound.
@@ -434,7 +438,7 @@ jet_cli_rust_foreign_sandbox: fn(registry: String) -[FS, Env, Exec, Time.Wait]> 
     // PATH can reach the shell through a host link the sandbox does not mount
     // (NixOS's /run/current-system/sw/bin), so the probe runs its target.
     shell: cli_files.canonicalize(found) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve the shell probe `{found}`: {err}"))
-    probe := jet_cli_rust_foreign_bwrap(bwrap, "", "", "", false, false)
+    ^probe: jet_cli_rust_foreign_bwrap(bwrap, "", "", "", false, false)
     // A registry overlay needs bubblewrap 0.11 or newer; probe the exact mount
     // the build will use so an older bubblewrap reports here, not as a Cargo
     // failure.
@@ -448,7 +452,7 @@ jet_cli_rust_foreign_sandbox: fn(registry: String) -[FS, Env, Exec, Time.Wait]> 
 }
 
 jet_cli_rust_foreign_run: fn(bwrap: String, cargo: String, source: String, output: String, registry: String, command: [String]) -[FS, Env, Exec, Time.Wait]> ProcessReceipt JetDriverRustForeignError! {
-    args := jet_cli_rust_foreign_bwrap(bwrap, source, output, registry, true, command.len() > 0 && command[0] == "metadata")
+    ^args: jet_cli_rust_foreign_bwrap(bwrap, source, output, registry, true, command.len() > 0 && command[0] == "metadata")
     // PATH-selected wrappers are declared helper tools. Bind the exact Cargo
     // executable read-only when it lies outside immutable system mounts.
     if !cargo.starts_with("/nix/store/") && !cargo.starts_with("/usr/") && !cargo.starts_with("/bin/") {
@@ -487,8 +491,8 @@ jet_cli_rust_foreign_output_rows: fn(directory: cli_files.Directory, counts: ^[S
 }
 
 jet_cli_rust_foreign_validate_output: fn(directory: cli_files.Directory) -[FS]> JetDriverRustForeignError! {
-    counts := [String:Int]{}
-    links := [String:Int]{}
+    ^counts: [String:Int]{}
+    ^links: [String:Int]{}
     jet_cli_rust_foreign_output_rows(directory, counts, links)
     loop (key, count) in counts {
         if (links.get(key) ?? 0) != count {
@@ -608,7 +612,7 @@ jet_cli_rust_foreign_provenance: fn(plan: JetDriverRustForeignPlan, source: Stri
         "artifact.lib{plan.crate_name}.a={digest}",
     }
     // ForeignBridge's scalar sidecar law: a field cannot inject another row.
-    text := ""
+    ^text: ""
     loop field in fields {
         loop byte in field.bytes() {
             if byte == (U8{10}) || byte == (U8{13}) || byte == (U8{0}) {

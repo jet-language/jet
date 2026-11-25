@@ -44,16 +44,16 @@ canvas_javascript_test_syntax: fn(node: String, label: String, path: String, inp
         "debug-profile.js",
         "bootstrap.js",
     }
-    discovered := [String]{}
+    ^discovered: [String]{}
     entries: canvas_javascript_test_files.list_dir(CANVAS_JAVASCRIPT_TEST_ASSETS) ?? panic("Canvas JavaScript assets are missing: {err}")
     loop entry in entries {
         if entry.name.ends_with(".js") -> discovered.push(entry.name.copy())
     }
     discovered.sort()
-    retained := order.copy()
+    ^retained: order.copy()
     retained.sort()
     assert(discovered == retained, "retained Canvas asset set drifted: {discovered.join(", ")}")
-    expected := "(function () {{\n"
+    ^expected: "(function () {{\n"
     loop name in order {
         path: "{CANVAS_JAVASCRIPT_TEST_ASSETS}/{name}"
         canvas_javascript_test_syntax(node, name, path, "")

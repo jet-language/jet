@@ -6,8 +6,8 @@ kit_expect_verdict: fn(status: String, detail: String) -> KitVerdict {
 
 // A bounded whole-file unified hunk: exact comparison never trims stream bytes.
 kit_expect_unified: fn(path: String, expected: String, actual: String) -> String {
-    out := "--- expected/{path}\n+++ actual\n@@ -1,{expected.split("\n").len()} +1,{actual.split("\n").len()} @@\n"
-    count := 0
+    ^out: "--- expected/{path}\n+++ actual\n@@ -1,{expected.split("\n").len()} +1,{actual.split("\n").len()} @@\n"
+    ^count: 0
     loop line in expected.split("\n") {
         if count >= 37 -> break
         out = "{out}-{line}\n"
@@ -26,7 +26,7 @@ kit_expect_unified: fn(path: String, expected: String, actual: String) -> String
 KIT_EXPECT_OPENERS: #run kit_expect_openers()
 
 kit_expect_openers: fn() -> [String] {
-    openers := [String]{}
+    ^openers: [String]{}
     loop severity in Severity.reflect().values -> openers.push("{severity}: ")
     openers.push("Stop: ")
     openers
@@ -50,7 +50,7 @@ kit_expect_heading_name: fn(line: String) -[]> String? Never! {
 
 // The error, warning and stop reports `text` holds, one per heading.
 kit_expect_diagnostics: fn(text: String) -[]> Int Never! {
-    count := 0
+    ^count: 0
     loop line in text.split("\n") {
         if !line.starts_with("{Severity.Lint}: ") && kit_expect_heading_name(line) != None {
             count += 1
@@ -73,8 +73,8 @@ kit_expect_bless_error: fn(bless: KitBless, sharded: Bool) -> String {
 }
 
 kit_expect_exact_with_count: fn(id: String, path: String, expected: String?, actual: String, bless: KitBless, count: fn(String) -[]> Int Never!) -> KitVerdict {
-    present := false
-    old := ""
+    ^present: false
+    ^old: ""
     if expected == {
         .Val(value) -> {
             old = value

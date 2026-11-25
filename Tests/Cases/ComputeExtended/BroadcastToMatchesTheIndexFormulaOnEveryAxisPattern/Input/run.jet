@@ -7,11 +7,11 @@ by_formula: fn(data: [Float], shape: [Int], target: [Int]) -> [Float] {
     rank: target.len()
     lead: rank - shape.len()
     n: target.product()
-    out := [Float]{}
+    ^out: [Float]{}
     loop flat in 0..<n {
-        remainder := flat
-        at := 0
-        stride := 1
+        ^remainder: flat
+        ^at: 0
+        ^stride: 1
         #Allow(Jet.HiddenCopyInLoop, "a stride stays within the source's size") loop k in 0..<rank {
             axis: rank - 1 - k
             coordinate: remainder % target[axis]
@@ -29,7 +29,7 @@ by_formula: fn(data: [Float], shape: [Int], target: [Int]) -> [Float] {
 
 check: fn(shape: [Int], target: [Int]) {
     n: shape.product()
-    data := [Float]{}
+    ^data: [Float]{}
     loop i in 0..<n -> data.push(Float{i} + 1.0)
     flat: compute.from_list(data) ?? panic("from_list")
     tensor: compute.reshape(flat, shape) ?? panic("reshape")

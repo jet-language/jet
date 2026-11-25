@@ -68,7 +68,7 @@ TComptimeValue: enum {
 // The UTF-8 text of a comptime Char's Unicode scalar value, as
 // `core.text.fmt.display` renders it.
 comptime_char_text: fn(code: Int) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if {
         code < 128 -> bytes.push(U8{code})
         code < 2048 -> {
@@ -109,8 +109,8 @@ comptime_type_id: fn(id: TypeID) -> TComptimeValue Never! {
 // The type row a compile-time TypeId (comptime_type_id) names; None for any
 // other value and for a TypeId another table issued.
 comptime_type_id_row: fn(value: TComptimeValue) -> TypeID? Never! {
-    row := 0
-    table := -1
+    ^row: 0
+    ^table: -1
     if value == .Struct(type_name, fields) && type_name == "TypeId" {
         loop field in fields {
             if field.name == "handle" && field.value == .Int(number) -> row = number
@@ -125,22 +125,34 @@ comptime_type_id_row: fn(value: TComptimeValue) -> TypeID? Never! {
 // worker's own row through `remap` (interner_merge_delta): a worker made it
 // while checking, and its row moved into the compilation's interner.
 comptime_value_remap_types: fn(value: ^TComptimeValue, remap: InternerRemap) Never! {
-    if ^value == {
+    if value.in_place() == {
         .Struct(type_name, fields) -> {
             loop index in 0..<fields.len() {
                 if {
-                    type_name != "TypeId" || fields[index].name != "handle" -> comptime_value_remap_types(fields[index].value, remap)
-                    fields[index].value == .Int(row) && row >= remap.marks.types -> fields[index].value = TComptimeValue.Int{value: Int{remap.types[row - remap.marks.types].id}}
+                    type_name != "TypeId" || fields[index].name != "handle" -> {
+                        comptime_value_remap_types(fields[index].value, remap)
+                    }
+                    fields[index].value == .Int(row) && row >= remap.marks.types -> {
+                        fields[index].value = TComptimeValue.Int{value: Int{remap.types[row - remap.marks.types].id}}
+                    }
                     else -> {}
                 }
             }
         }
-        .List(values) -> loop index in 0..<values.len() -> comptime_value_remap_types(values[index], remap)
-        .Map(entries) -> loop index in 0..<entries.len() -> comptime_value_remap_types(entries[index].value, remap)
-        .Enum(_, _, args) -> loop index in 0..<args.len() -> comptime_value_remap_types(args[index].value, remap)
-        .Present(inner) -> comptime_value_remap_types(inner, remap)
+        .List(values) -> {
+            loop index in 0..<values.len() -> comptime_value_remap_types(values[index], remap)
+        }
+        .Map(entries) -> {
+            loop index in 0..<entries.len() {
+                comptime_value_remap_types(entries[index].value, remap)
+            }
+        }
+        .Enum(_, _, args) -> {
+            loop index in 0..<args.len() -> comptime_value_remap_types(args[index].value, remap)
+        }
+        .Present(inner) -> { comptime_value_remap_types(inner, remap) }
         .Failed(report) -> {
-            if ^report == .Told(told) -> comptime_value_remap_types(told, remap)
+            if report.in_place() == .Told(told) -> comptime_value_remap_types(told, remap)
         }
         .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Unit | .Function(_) -> {}
     }
@@ -152,7 +164,9 @@ comptime_value_holds_types_from: fn(value: TComptimeValue, mark: Int) -> Bool Ne
     if value == {
         .Struct(type_name, fields) -> {
             loop field in fields {
-                if type_name == "TypeId" && field.name == "handle" && field.value == .Int(row) && row >= mark -> return true
+                if type_name == "TypeId" && field.name == "handle" && field.value == .Int(row) && row >= mark {
+                    return true
+                }
                 if comptime_value_holds_types_from(field.value, mark) -> return true
             }
         }
@@ -182,7 +196,7 @@ comptime_value_holds_types_from: fn(value: TComptimeValue, mark: Int) -> Bool Ne
 
 #Test("a merge renumbers a worker's TypeId handles at any depth in a compile-time value") {
     remap: InternerRemap{marks: InternerMarks{types: 100}, names: [Name]{}, types: [TypeID]{TypeID{id: U32{40}}, TypeID{id: U32{41}}}}
-    value := TComptimeValue.Struct{
+    ^value: TComptimeValue.Struct{
         type_name: "TypeInfo",
         fields: [TComptimeField]{
             TComptimeField{name: "identity", value: comptime_type_id(TypeID{id: U32{101}})},

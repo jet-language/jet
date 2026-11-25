@@ -1,0 +1,118 @@
+// The printer table: the text a token prints as, where a separator keeps
+// two tokens apart, the grouping alternative, and the refusals: a token
+// that prints nothing, and two tokens nothing can keep apart.
+use {
+    core.grammar.[analyze]
+    core.grammar.error.[GrammarFault, GrammarFaultKind]
+    core.grammar.plan.[GrammarPlan, GrammarSource]
+}
+
+plan_of: fn(text: String) -> GrammarPlan Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+only_fault: fn(text: String) -> GrammarFault Never! {
+    ^faults: [GrammarFault]{}
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(_) -> {}
+        .Err(error) -> faults = error.faults
+    }
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.Unprintable)
+    faults[0]
+}
+
+kind_of: fn(plan: GrammarPlan, name: String) -> Int Never! {
+    loop (k, token) in plan.tokens {
+        if token.name == name -> return k
+    }
+    panic("no token {name}")
+}
+
+/// Whether a token named `b` right after one named `a` takes a separator.
+glued: fn(plan: GrammarPlan, a: String, b: String) -> Bool Never! {
+    bit: kind_of(plan, a) * plan.tokens.len() + kind_of(plan, b)
+    ((plan.printer.glue[bit /% 32] >> (bit % 32)) & 1) == 1
+}
+
+#Test("a token no field keeps prints as its literal or its rule's first fixed text") {
+    grammar: [String]{
+        "entry : name=KEY SEP value=VALUE? EOL ;",
+        "KEY   : [a-z]+ ;",
+        "SEP   : '=' | ':' ;",
+        "VALUE : [0-9]+ ;",
+        "EOL   : '\\r'? '\\n' ;",
+        "WS    : [ \\t]+ -> skip ;",
+    }
+    plan: plan_of(grammar.join("\n"))
+    texts: plan.printer.texts
+    assert_eq(texts[kind_of(plan, "SEP")], "=")
+    assert_eq(texts[kind_of(plan, "EOL")], "\n")
+    assert_eq(texts[kind_of(plan, "KEY")], "")
+    assert_eq(plan.printer.separator, " ")
+    assert(!glued(plan, "KEY", "SEP"))
+    assert(!glued(plan, "SEP", "VALUE"))
+}
+
+#Test("an `i` literal prints as the grammar spells it") {
+    plan: plan_of("s : 'Select'i name=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    assert_eq(plan.printer.texts[kind_of(plan, "\"Select\"")], "Select")
+}
+
+#Test("tokens that could lex as one are separated") {
+    plan: plan_of("words : items+=WORD+ ;\nWORD : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    assert(glued(plan, "WORD", "WORD"))
+    keyword: plan_of("s : name=NAME 'is'i value=NAME ';' ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    assert(glued(keyword, "NAME", "\"is\""))
+    assert(glued(keyword, "\"is\"", "NAME"))
+    assert(!glued(keyword, "NAME", "\";\""))
+}
+
+#Test("a longer literal makes the two it starts with glue") {
+    plan: plan_of("s : '-' '>' # Split | '->' # Arrow | '-' '-' # Twice ;\nWS : ' '+ -> skip ;")
+    assert(glued(plan, "\"-\"", "\">\""))
+    assert(!glued(plan, "\"-\"", "\"-\""))
+}
+
+#Test("two tokens that glue with no skip token to keep them apart are refused") {
+    fault: only_fault("s : '-' '>' # Split | '->' # Arrow ;")
+    assert_eq(fault.message, "the tokens \"-\" and \">\" can come one after the other and lex as one, and no `skip` token matches a space to keep them apart")
+}
+
+#Test("a keyword runs on into any word character, since it matches only a whole word") {
+    fault: only_fault("s : 'limit' count=NUM ;\nNUM : [0-9]+ ;")
+    assert_eq(fault.message, "the tokens \"limit\" and NUM can come one after the other and lex as one, and no `skip` token matches a space to keep them apart")
+    plan: plan_of("s : 'limit' count=NUM ;\nNUM : [0-9]+ ;\nWS : ' '+ -> skip ;")
+    assert(glued(plan, "\"limit\"", "NUM"))
+}
+
+#Test("a separator that would run on into the token before is refused") {
+    fault: only_fault("s : a=TEXT b=TEXT ;\nTEXT : [a-z] [a-z ]* ;\nWS : ' '+ -> skip ;")
+    assert_eq(fault.message, "the tokens TEXT and TEXT can come one after the other and lex as one, and the separator between them would run on into them too")
+}
+
+#Test("a token no field keeps and with no fixed text is refused") {
+    fault: only_fault("v : NUM ;\nNUM : [0-9]+ ;")
+    assert_eq(fault.message, "the token `NUM` is kept in no field and has no fixed text, so a value cannot print it")
+    assert_eq(fault.at.offset, 4)
+}
+
+#Test("an operator rule's grouping alternative parenthesizes its operands") {
+    grammar: [String]{
+        "calc : body=expr ;",
+        "expr : left=expr op=('*' | '/') right=expr # Mul",
+        "     | left=expr op=('+' | '-') right=expr # Add",
+        "     | value=NUM # Num",
+        "     | '(' inner=expr ')' # Group",
+        "     ;",
+        "NUM : [0-9]+ ;",
+        "WS  : ' '+ -> skip ;",
+    }
+    plan: plan_of(grammar.join("\n"))
+    alts: plan.operators[0].alts
+    assert_eq(plan.printer.groups[1], alts[3])
+    assert_eq(plan.printer.groups[0], -1)
+}

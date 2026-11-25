@@ -100,11 +100,11 @@ compound_exact_problems: fn(source: String) -> [String] {
         entry_root_identity: "compound-exact-root",
         entry_path: "/compound-exact/main.jet",
     }
-    core_rows := jet_cli_builtin_core_rows()
+    ^core_rows: jet_cli_builtin_core_rows()
     core_rows.extend(jet_driver_runtime_interface_sources())
     compiled: jet_driver_compile(jet_cli_driver_request(snapshot, core_rows, Val(1), JetDriverCompileMode.Check))
     assert(compiled.internal_problem == None, "the check met an internal problem: {compiled.internal_problem:Debug}")
-    problems := [String]{}
+    ^problems: [String]{}
     loop diagnostic in compiled.diagnostics { problems.push("{diagnostic.code} {diagnostic.what}") }
     if !jet_driver_has_errors(compiled.diagnostics) -> problems.push("no errors")
     problems

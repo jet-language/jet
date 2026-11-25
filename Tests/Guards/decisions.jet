@@ -10,7 +10,7 @@ s3_decision_expand: fn(token: String) -> [String] {
     segments: token.split("/").to_list()
     first: segments[0]
     first_bytes: first.bytes()
-    prefix_end := first_bytes.len()
+    ^prefix_end: first_bytes.len()
     loop (index, byte) in first_bytes {
         if s3_decision_is_digit(byte) {
             prefix_end = index
@@ -20,7 +20,7 @@ s3_decision_expand: fn(token: String) -> [String] {
     prefix: s5_grammar_slice_bytes(first, 0, prefix_end)
     last: segments[segments.len() - 1]
     last_bytes: last.bytes()
-    suffix_start := last_bytes.len()
+    ^suffix_start: last_bytes.len()
     loop (index, byte) in last_bytes {
         if !s3_decision_is_digit(byte) {
             suffix_start = index
@@ -28,10 +28,10 @@ s3_decision_expand: fn(token: String) -> [String] {
         }
     }
     suffix: s5_grammar_slice_bytes(last, suffix_start, last_bytes.len())
-    result := [String]{}
+    ^result: [String]{}
     loop segment in segments {
-        digits := [U8]{}
-        started := false
+        ^digits: [U8]{}
+        ^started: false
         loop byte in segment.bytes() {
             if !started && !s3_decision_is_digit(byte) -> next
             if !s3_decision_is_digit(byte) -> break
@@ -53,8 +53,8 @@ s3_guard_tombstone_provenance: fn() {
     end: s5_grammar_find(docs, "## Enforcement", begin)
     assert(end >= begin, "syntax decisions missing enforcement after tombstones")
     section: s5_grammar_slice_bytes(docs, begin, end).replace("\n", " ")
-    ids := [String]{}
-    at := 0
+    ^ids: [String]{}
+    ^at: 0
     loop {
         start: s5_grammar_find(section, "**", at)
         if start < 0 -> break
@@ -110,14 +110,14 @@ decision_id_at: fn(bytes: [U8], start: Int) -> Bool {
     if (Int{bytes[start]}) != 68 || (Int{bytes[start + 1]}) != 45 -> return false
     if start > 0 && decision_id_word(bytes[start - 1]) -> return false
     if !decision_id_upper(bytes[start + 2]) -> return false
-    end := start + 3
+    ^end: start + 3
     loop {
         if end >= bytes.len() -> break
         byte: bytes[end]
         if !decision_id_upper(byte) && !s3_decision_is_digit(byte) && (Int{byte}) != 45 -> break
         end += 1
     }
-    last := end - 1
+    ^last: end - 1
     loop {
         if (Int{bytes[last]}) != 45 -> break
         last -= 1
@@ -162,7 +162,7 @@ decision_id_lines: fn(path: String, out: ^[String]) {
 
 #Test("compiler_core_and_jetpack_cite_no_decision_ids") {
     guards_enter_root()
-    found := [String]{}
+    ^found: [String]{}
     loop root in DECISION_ID_FREE_ROOTS {
         assert(decision_files.is_dir(root), "the decision-free root {root} must exist")
         decision_id_lines(root, found)
@@ -178,7 +178,7 @@ decision_id_lines: fn(path: String, out: ^[String]) {
 
 #Test("decision_id_citation_backlog_only_shrinks") {
     guards_enter_root()
-    found := [String]{}
+    ^found: [String]{}
     loop root in DECISION_ID_BACKLOG_ROOTS -> decision_id_lines(root, found)
     print("decision-ID citation backlog: {found.len()} lines (baseline {DECISION_ID_BACKLOG})")
     assert(found.len() <= DECISION_ID_BACKLOG, "decision-ID citations grew past the backlog baseline {DECISION_ID_BACKLOG}:\n{found.join("\n")}")

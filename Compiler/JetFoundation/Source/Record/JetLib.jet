@@ -71,7 +71,7 @@ JetLibExport: struct {
     conventions: [AccessConvention],
 
     new: fn(name: String, scalar: JetLibScalar, params: Int) -> JetLibExport Never! {
-        conventions := [AccessConvention]{}
+        ^conventions: [AccessConvention]{}
         loop _ in 0..<params -> conventions.push(AccessConvention.Read)
         JetLibExport.with_conventions(name, scalar, conventions)
     }
@@ -151,7 +151,7 @@ JetLibStamp: struct {
     // The header bytes: magic, identities, the checked export table, the
     // count of length-prefixed effect names (sorted), and the payload digest.
     encode_bytes: fn(self) -> [U8] Never! {
-        out := JetLibWriter.new()
+        ^out: JetLibWriter.new()
         loop byte in JETLIB_MAGIC.bytes() -> out.bytes.push(byte)
         out.bytes.push(U8{0})
         out.push_text(self.compiler_version)
@@ -188,8 +188,8 @@ JetLibStamp: struct {
     // Decode, or decode a prefix. Ordered wire effects stay intact in prefix
     // decode; only package entrypoints project the canonical set.
     decode_bytes: fn(bytes: View<U8>) -> JetLibStamp Err! {
-        reader := JetLibReader{bytes: bytes, at: 0, loader: false}
-        stamp := JetLibStamp.decode_prefix(reader) ?? return Err(err)
+        ^reader: JetLibReader{bytes: bytes, at: 0, loader: false}
+        ^stamp: JetLibStamp.decode_prefix(reader) ?? return Err(err)
         if reader.at != bytes.len() -> return Err("unexpected payload after .jetlib stamp")
         stamp.declared_effects = jetlib_effects_canonical(stamp.declared_effects)
         Ok(stamp)
@@ -219,7 +219,7 @@ JetLibStamp: struct {
         abi_identity: reader.take_string("ABI identity") ?? return Err(err)
         abi_version: reader.take_u32("ABI version") ?? return Err(err)
         export_count: reader.take_count("export") ?? return Err(err)
-        exports := [JetLibExport]{}
+        ^exports: [JetLibExport]{}
         loop _ in 0..<export_count {
             name: reader.take_string("export name") ?? return Err(err)
             symbol: reader.take_string("export symbol") ?? return Err(err)
@@ -229,7 +229,7 @@ JetLibStamp: struct {
             if params > JETLIB_MAX_EXPORT_PARAMS {
                 return Err(".jetlib export has too many parameters")
             }
-            conventions := [AccessConvention]{}
+            ^conventions: [AccessConvention]{}
             loop _ in 0..<params {
                 convention: reader.take_byte() ?? return Err("truncated .jetlib header (access convention)")
                 conventions.push(AccessConvention.from_int(convention) ?? return Err("unknown .jetlib access-convention tag {convention}"))
@@ -237,7 +237,7 @@ JetLibStamp: struct {
             exports.push(JetLibExport{name: name, symbol: symbol, scalar: scalar, params: U32{params}, conventions: conventions})
         }
         effect_count: reader.take_count("effect") ?? return Err(err)
-        effects := [String]{}
+        ^effects: [String]{}
         loop _ in 0..<effect_count {
             effect_name: reader.take_string("effect") ?? return Err(err)
             effects.push(effect_name)
@@ -270,7 +270,7 @@ JetLibArtifact: struct {
     payload: View<U8>,
 
     encode_bytes: fn(self) -> [U8] Never! {
-        out := JetLibWriter{bytes: self.stamp.encode_bytes()}
+        ^out: JetLibWriter{bytes: self.stamp.encode_bytes()}
         loop i in 0..<8 -> out.bytes.push(U8{(self.payload.len() >> ((7 - i) * 8)) & 255})
         out.push_raw(self.payload)
         out.bytes
@@ -278,10 +278,10 @@ JetLibArtifact: struct {
 
     decode_bytes: fn(bytes: [U8], host_max: Int, loader: Bool) -> JetLibArtifact Err! from bytes {
         input: bytes[0..<bytes.len()]
-        reader := JetLibReader{bytes: input, at: 0, loader: loader}
-        stamp := JetLibStamp.decode_prefix(reader) ?? return Err(err)
+        ^reader: JetLibReader{bytes: input, at: 0, loader: loader}
+        ^stamp: JetLibStamp.decode_prefix(reader) ?? return Err(err)
         if bytes.len() - reader.at < 8 -> return Err("truncated .jetlib artifact (payload length)")
-        declared := 0
+        ^declared: 0
         loop index in 0..<8 -> declared = (declared << 8) | Int{bytes[reader.at + index]}
         if declared > host_max -> return Err("the .jetlib payload is too large for this host")
         payload: bytes[reader.at + 8..<bytes.len()]
@@ -334,7 +334,7 @@ JetLibReader: struct {
 
     take_u32: fn(^self, what: String) -> Int Err! {
         if self.bytes.len() - self.at < 4 -> return Err("truncated .jetlib header ({what})")
-        value := 0
+        ^value: 0
         loop index in 0..<4 -> value = (value << 8) | Int{self.bytes[self.at + index]}
         self.at += 4
         Ok(value)
@@ -353,7 +353,7 @@ JetLibReader: struct {
         if self.bytes.len() - self.at < length {
             return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.Field, field: what}, self.loader))
         }
-        field := [U8]{}
+        ^field: [U8]{}
         loop index in self.at..<self.at + length -> field.push(self.bytes[index])
         self.at += length
         Ok(field)
@@ -412,9 +412,9 @@ pkg_jetlib_payload_digest: fn(payload: View<U8>) -> String Never! {
 }
 
 jetlib_effects_canonical: fn(effects: [String]) -> [String] Never! {
-    set := [String:Bool]{}
+    ^set: [String:Bool]{}
     loop effect_name in effects -> set[effect_name] = true
-    result := [String]{}
+    ^result: [String]{}
     loop (effect_name, _) in set -> result.push(effect_name)
     result
 }
@@ -422,7 +422,7 @@ jetlib_effects_canonical: fn(effects: [String]) -> [String] Never! {
 // The emitted C symbol of an export name: ASCII alphanumerics and `_` kept,
 // everything else `_`, with a leading `_` before an empty or digit start.
 pkg_jetlib_c_symbol: fn(name: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     raw: name.bytes()
     if raw.len() == 0 -> out.push(U8{95}) else {
         first: Int{raw[0]}
@@ -529,8 +529,8 @@ pkg_jetlib_validate_load_metadata: fn(stamp: JetLibStamp, target: String, loader
     if stamp.exports.len() == 0 {
         return jetlib_metadata_failure("Jet.InvalidLibraryOutput: library `{stamp.library_name}` has no exported functions", false)
     }
-    names := [String:Bool]{}
-    symbols := [String:Bool]{}
+    ^names: [String:Bool]{}
+    ^symbols: [String:Bool]{}
     loop export in stamp.exports {
         if export.name == "" || export.name.contains(JETLIB_NUL) {
             return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata has an invalid export name", false)
@@ -586,9 +586,9 @@ pkg_jetlib_check_compiler_identity: fn(stamp: JetLibStamp, version: String) -> D
 }
 
 pkg_jetlib_check_effect_grant: fn(library: String, stamp: JetLibStamp, grant: [String]) -> JetLibRefusal Never! {
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop effect_name in jetlib_effects_canonical(stamp.declared_effects) {
-        covered := false
+        ^covered: false
         loop bound in grant {
             if sema_effect_covers(bound, effect_name) {
                 covered = true

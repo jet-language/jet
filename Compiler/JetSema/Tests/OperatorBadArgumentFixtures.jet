@@ -13,7 +13,7 @@ use {
         .Refused(refusal) -> { panic("{file}: refused before checking: {refusal.stderr}") }
         .Compiled(result, snapshot) -> {
             if result.internal_problem != None -> panic("{file}: internal compiler failure")
-            codes := [String]{}
+            ^codes: [String]{}
             loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
                 if diagnostic.severity == DIAGNOSTIC_ERROR -> codes.push(diagnostic.code.copy())
             }

@@ -72,17 +72,17 @@ store_cache_test_root: fn(label: String) -> String Never! {
 }
 
 #Test("cache artifact byte validation preserves exact size and hash refusals") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_ingest_fixture(verification, roots, "cache-artifact-bytes", [String:String]{"out": "trusted"}, [String]{})
     written: store_write_nar(ingested.entry.out) ?? panic("real NAR producer")
     info: NarInfo{store_path: "/jet/hangar/{ingested.entry.envelope.output_hash}", url: "nar/object.nar", compression: "none", file_size: written.stats.bytes, nar_size: written.stats.bytes, nar_hash: written.stats.digest, references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
     store_cache_verify_artifact_bytes(info, written.bytes) ?? panic("valid produced NAR")
-    file_bad := info.copy()
+    ^file_bad: info.copy()
     file_bad.file_size += 1
-    nar_bad := info.copy()
+    ^nar_bad: info.copy()
     nar_bad.nar_size += 1
-    hash_bad := info.copy()
+    ^hash_bad: info.copy()
     zero_digest: "0".repeat(64)
     hash_bad.nar_hash = "sha256:{zero_digest}"
     rejected: [NarInfo]{file_bad, nar_bad, hash_bad}
@@ -98,7 +98,7 @@ store_cache_test_root: fn(label: String) -> String Never! {
 }
 
 #Test("cache Hangar endpoint uses the original verification context") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_ingest_fixture(verification, roots, "cache-hangar-endpoint", [String:String]{"out": "trusted"}, [String]{})
     produced: store_write_nar(ingested.entry.out) ?? panic("real NAR")

@@ -37,7 +37,9 @@ FQ_GUARD: "Tests/Guards/fact_query_one_reader.jet"
 // `path:line: reader`. Symbolic links, hidden entries and build output are
 // skipped, and so are files that are not Jet.
 fq_calls: fn(path: String, readers: [String], homes: [String], out: ^[String]) -[FS]> {
-    if fq_files.is_symlink(path) -> return
+    if fq_files.is_symlink(path) {
+        return
+    }
     if fq_files.is_dir(path) {
         loop child in (fq_files.list_dir(path) ?? panic("list {path}: {err}")) {
             if child.name.starts_with(".") || FQ_SKIPPED.contains(child.name) -> next
@@ -45,7 +47,9 @@ fq_calls: fn(path: String, readers: [String], homes: [String], out: ^[String]) -
         }
         return
     }
-    if !path.ends_with(".jet") || path == FQ_GUARD || homes.contains(path) -> return
+    if !path.ends_with(".jet") || path == FQ_GUARD || homes.contains(path) {
+        return
+    }
     text: fq_files.read(path) ?? return
     loop (index, line) in text.lines() {
         loop reader in readers {
@@ -63,7 +67,9 @@ fq_called: fn(line: String, reader: String) -[]> Bool {
         before: parts[index].bytes()
         if before.len() == 0 -> return true
         last: Int{before[before.len() - 1]}
-        if !(last == 95 || (last >= 48 && last <= 57) || (last >= 65 && last <= 90) || (last >= 97 && last <= 122)) -> return true
+        if !(last == 95 || (last >= 48 && last <= 57) || (last >= 65 && last <= 90) || (last >= 97 && last <= 122)) {
+            return true
+        }
     }
     false
 }
@@ -71,8 +77,8 @@ fq_called: fn(line: String, reader: String) -[]> Bool {
 // The variants of the enum `name` in `text`, in order: the words that open
 // its body's lines up to the closing brace.
 fq_variants: fn(text: String, name: String) -[]> [String] {
-    variants := [String]{}
-    inside := false
+    ^variants: [String]{}
+    ^inside: false
     loop line in text.lines() {
         if !inside {
             if line == ("{name}: enum {{") -> inside = true
@@ -88,7 +94,7 @@ fq_variants: fn(text: String, name: String) -[]> [String] {
 
 #Test("fact_query_one_reader") {
     guards_enter_root()
-    found := [String]{}
+    ^found: [String]{}
     loop root in FQ_ROOTS {
         assert(fq_files.exists(root), "the root {root} must exist")
         fq_calls(root, FQ_SCHEMA_READERS, FQ_SCHEMA_HOMES, found)

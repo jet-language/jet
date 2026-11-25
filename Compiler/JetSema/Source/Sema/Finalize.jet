@@ -88,12 +88,12 @@ sema_finalize_check_modules: fn(graph: ^^SemaRegistrationGraph, values: [SemaCom
         graph.derive_wave_rows.len() > 0 -> SemaWaveKind.Derive
         else -> SemaWaveKind.Modules
     }
-    pass_graph := graph.move()
+    ^pass_graph: graph.move()
     shared_state: sema_finalize_pass_open(pass_graph, values, checked_types, threads, trace_sink, carried)
-    comptime_rows := sema_comptime_checked_function_rows(comptime_functions)
+    ^comptime_rows: sema_comptime_checked_function_rows(comptime_functions)
     checked_functions: sema_finalize_pass_modules(shared_state, values, comptime_functions, comptime_rows, selected, kind, pending_obligations, host_hooks, threads, phase, trace_sink, modules)
     if trace_sink == .Val(sink) -> sink.end(phase, checked_functions)
-    out_graph := sema_finalize_pass_close(shared_state, phase, trace_sink, carried)
+    ^out_graph: sema_finalize_pass_close(shared_state, phase, trace_sink, carried)
     sema_merge_module_type_deltas(out_graph, modules)
     out_graph.move()
 }
@@ -107,7 +107,7 @@ sema_merge_module_type_deltas: fn(graph: ^SemaRegistrationGraph, modules: ^[Sema
             panic("internal compiler error: module {i} carried {modules[i].type_delta.len()} interner deltas")
         }
         if modules[i].type_delta.pop() == .Val(delta) {
-            mut_delta := delta
+            ^mut_delta: delta
             if delta_has_rows(mut_delta) {
                 remap: interner_merge_delta(graph.interner, mut_delta)
                 sema_remap_module_types(modules[i], remap)
@@ -117,9 +117,11 @@ sema_merge_module_type_deltas: fn(graph: ^SemaRegistrationGraph, modules: ^[Sema
 }
 
 sema_remap_comptime_requests_from: fn(requests: ^[SemaComptimeRequest], from: Int, remap: InternerRemap) Never! {
-    if remap.types.len() == 0 -> return
+    if remap.types.len() == 0 {
+        return
+    }
     loop i in from..<requests.len() {
-        if ^requests[i].checked_text == .Val(eval) {
+        if requests[i].checked_text.in_place() == .Val(eval) {
             body_tree_remap_types(eval.expression.tree, remap)
         }
     }
@@ -138,7 +140,7 @@ sema_interner_remap_empty: fn() -> InternerRemap Never! {
 }
 
 sema_merge_delta_into: fn(program: SemaProgramTables, target: ^[InternerDelta], incoming: ^^InternerDelta) -> InternerRemap Never! {
-    delta := incoming.move()
+    ^delta: incoming.move()
     if !delta_has_rows(delta) -> return sema_interner_remap_empty()
     if target.len() == 0 {
         target.push(delta.move())
@@ -149,20 +151,24 @@ sema_merge_delta_into: fn(program: SemaProgramTables, target: ^[InternerDelta], 
 }
 
 sema_drain_scope_delta: fn(program: SemaProgramTables, target: ^[InternerDelta], scopes: ^SemaScopeTable, fn_body: ^FnBody?, requests: ^[SemaComptimeRequest], req_from: Int) Never! {
-    if scopes.type_delta.len() == 0 -> return
+    if scopes.type_delta.len() == 0 {
+        return
+    }
     if scopes.type_delta.len() > 1 {
         panic("internal compiler error: scope carried {scopes.type_delta.len()} interner deltas")
     }
-    delta := scopes.type_delta.pop() ?? return
+    ^delta: scopes.type_delta.pop() ?? return
     remap: sema_merge_delta_into(program, target, delta.move())
     if remap.types.len() > 0 {
-        if ^fn_body == .Val(body) -> body_tree_remap_types(body.tree, remap)
+        if fn_body.in_place() == .Val(body) -> body_tree_remap_types(body.tree, remap)
         sema_remap_comptime_requests_from(requests, req_from, remap)
     }
 }
 
 sema_remap_module_types: fn(module_result: ^SemaGraphModuleResult, remap: InternerRemap) Never! {
-    if remap.types.len() == 0 -> return
+    if remap.types.len() == 0 {
+        return
+    }
     loop i in 0..<module_result.functions.len() {
         body_tree_remap_types(module_result.functions[i].tree, remap)
     }
@@ -177,15 +183,15 @@ sema_remap_module_types: fn(module_result: ^SemaGraphModuleResult, remap: Intern
 sema_finalize_pass_open: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptimeItemValue], checked_types: [TTypeDef], threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: ^[SemaPassFacts]) -> Shared<SemaCheckShared> {
     if trace_sink == .Val(sink) -> sink.begin("sema.pass_open", "", -1, -1)
     fresh: carried.len() == 0
-    facts := carried.pop() ?? sema_pass_facts_new()
+    ^facts: carried.pop() ?? sema_pass_facts_new()
     if fresh && trace_sink == .Val(sink) -> sink.begin("sema.pass_facts", "", -1, -1)
-    owned := if fresh -> sema_pass_facts(graph, threads, SEMA_PASS_FACT_JOBS, facts) else -> graph.move()
+    ^owned: if fresh -> sema_pass_facts(graph, threads, SEMA_PASS_FACT_JOBS, facts) else -> graph.move()
     if fresh && trace_sink == .Val(sink) -> sink.end("sema.pass_facts", 1)
-    memory_plan := facts.memory_plan.move()
-    work := sema_comptime_body_work_new(trace_sink)
+    ^memory_plan: facts.memory_plan.move()
+    ^work: sema_comptime_body_work_new(trace_sink)
     count_key_bytes: if work == .Val(_) -> true else -> false
-    body_values := sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
-    program := sema_program_tables_with(owned, checked_types, facts.boxed_edges.move(), facts.copy_facts.move())
+    ^body_values: sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
+    ^program: sema_program_tables_with(owned, checked_types, facts.boxed_edges.move(), facts.copy_facts.move())
     environment: sema_check_pass_environment(program, facts.fixed_length_write_params.move(), body_values)
     shared_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     sema_check_shared_fill(shared_state, environment, program, memory_plan)
@@ -197,15 +203,15 @@ sema_finalize_pass_open: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptim
 // (sema_finalize_pass_open); returns how many functions they checked.
 sema_finalize_pass_modules: fn(shared_state: Shared<SemaCheckShared>, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, selected: [Int], kind: SemaWaveKind, pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?, modules: ^[SemaGraphModuleResult]) -> Int {
     // A per-function trace times each check where it runs, in item order.
-    trace_functions := false
+    ^trace_functions: false
     if trace_sink == .Val(sink) -> trace_functions = sink.functions()
-    checked_functions := 0
+    ^checked_functions: 0
     // A per-function trace keeps one body pass per module; otherwise the
     // selected modules flow through one body stream.
     // The body stream takes every selected module's declaration and program
     // checks made up front on the threads (sema_check_declaration_modules),
     // last first; a module's foreign rows stay after its bodies.
-    starts := [SemaDeclarationCheck]{}
+    ^starts: [SemaDeclarationCheck]{}
     if kind == SemaWaveKind.Modules && !trace_functions {
         starts = sema_check_declaration_modules(shared_state, selected, values, false, threads)
     }
@@ -216,7 +222,7 @@ sema_finalize_pass_modules: fn(shared_state: Shared<SemaCheckShared>, values: [S
     if !trace_functions {
         return sema_check_body_stream(shared_state, host_hooks, selected, values, comptime_functions, comptime_rows, pending_obligations, threads, phase, trace_sink, kind, starts, modules)
     }
-    start := 0
+    ^start: 0
     loop start < selected.len() {
         module_index: selected[start]
         if kind != SemaWaveKind.Modules {
@@ -224,18 +230,18 @@ sema_finalize_pass_modules: fn(shared_state: Shared<SemaCheckShared>, values: [S
             start += 1
             next
         }
-        weights := [Int]{}
+        ^weights: [Int]{}
         jobs: sema_check_parallel_jobs_in_shared(shared_state, module_index, comptime_rows, weights, phase, trace_sink)
-        core_held := false
+        ^core_held: false
         scope_rows: sema_check_module_scope_rows_in_shared(shared_state, module_index, core_held)
-        body_work := 0
+        ^body_work: 0
         loop weight in weights -> body_work += weight
-        workers := 1
+        ^workers: 1
         if !trace_functions {
             workers = compiler_threads_admit(threads, jobs.len(), body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
         }
-        prepared := sema_check_prepare_module(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers, phase, trace_sink)
-        checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, prepared, threads, phase, trace_sink)
+        ^prepared: sema_check_prepare_module(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers, phase, trace_sink)
+        ^checked: sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, prepared, threads, phase, trace_sink)
         if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
         checked_functions += checked.functions.len()
         modules.push(checked)
@@ -247,9 +253,9 @@ sema_finalize_pass_modules: fn(shared_state: Shared<SemaCheckShared>, values: [S
 // Ends an open pass: its facts go to `carried` for the next pass, and the
 // pass graph moves back out of its program tables.
 sema_finalize_pass_close: fn(shared_state: Shared<SemaCheckShared>, phase: String, trace_sink: CompilerTraceSink?, carried: ^[SemaPassFacts]) -> SemaRegistrationGraph {
-    environment_out := sema_check_shared_take_environment(shared_state)
-    program_out := sema_check_shared_take_program(shared_state)
-    memory_plan_out := sema_check_shared_take_memory_plan(shared_state)
+    ^environment_out: sema_check_shared_take_environment(shared_state)
+    ^program_out: sema_check_shared_take_program(shared_state)
+    ^memory_plan_out: sema_check_shared_take_memory_plan(shared_state)
     sema_comptime_body_work_flush(environment_out.comptime_body_publication, trace_sink, phase)
     carried.push(
         SemaPassFacts{
@@ -273,9 +279,9 @@ sema_finalize_pass_close: fn(shared_state: Shared<SemaCheckShared>, phase: Strin
 // comptime run's graph, JetDriverComptimeRunResult.graph); None applies the
 // values to the consumed baseline graph without copying it.
 sema_finalize_registration_graph: fn(graph: ^^SemaRegistrationGraph, resolved: ^^SemaRegistrationGraph?, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
-    owned := resolved.move()
-    resolved_graph := owned.move() ?? sema_comptime_graph_with_values(graph, values)
-    trail := sema_graph_trail_init()
+    ^owned: resolved.move()
+    ^resolved_graph: owned.move() ?? sema_comptime_graph_with_values(graph, values)
+    ^trail: sema_graph_trail_init()
     finalized: sema_finalize_graph(resolved_graph, trail, stage, values, comptime_functions, host_hooks, threads, true, trace_sink)
     finalized.result.move()
 }
@@ -287,12 +293,12 @@ sema_finalize_registration_graph: fn(graph: ^^SemaRegistrationGraph, resolved: ^
 // no generated codec runs none. The counters compare the generated codec
 // impls registered (candidates) with those that got a body.
 sema_codec_wave_needs_memory_plan: fn(graph: SemaRegistrationGraph, affected: [Int]) -> Bool Never! {
-    packages := name_table()
+    ^packages: name_table()
     loop module_index in affected {
         loop decl in graph.modules[module_index].program.policy_declarations {
             if decl.key == PolicyKey.ScopedGC -> return true
         }
-        _ := name_intern(packages, graph.modules[module_index].package_identity)
+        ^_: name_intern(packages, graph.modules[module_index].package_identity)
     }
     loop graph_module in graph.modules {
         if name_find(packages, graph_module.package_identity) == None -> next
@@ -304,10 +310,10 @@ sema_codec_wave_needs_memory_plan: fn(graph: SemaRegistrationGraph, affected: [I
 }
 
 sema_codec_waves: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: ^[SemaPassFacts], modules: ^[SemaGraphModuleResult]) -> SemaRegistrationGraph {
-    graph := owned.move()
+    ^graph: owned.move()
     candidates: graph.codec_method_rows.len()
-    generated := 0
-    waves := 0
+    ^generated: 0
+    ^waves: 0
     loop {
         affected: sema_codec_fill_demanded(graph, trail)
         if affected.len() == 0 -> break
@@ -315,10 +321,8 @@ sema_codec_waves: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, val
         waves += 1
         // Generated codec bodies never change boxed edges, copy facts, or
         // fixed-length write params; only ScopedGC policies inspect method bodies.
-        if sema_codec_wave_needs_memory_plan(graph, affected) {
-            carried = [SemaPassFacts]{}
-        }
-        checked := sema_finalize_check_modules(graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, "sema.codecs", trace_sink, carried, modules)
+        if sema_codec_wave_needs_memory_plan(graph, affected) -> carried = [SemaPassFacts]{}
+        ^checked: sema_finalize_check_modules(graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, "sema.codecs", trace_sink, carried, modules)
         graph = checked.move()
         graph.codec_wave_rows = [Int:Bool]{}
     }
@@ -337,12 +341,12 @@ sema_codec_waves: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, val
 // none is new. Derived `equal`/`compare` bodies call no codec, so no codec
 // wave follows. A program that compares no compiler-owned type runs none.
 sema_derive_waves: fn(owned: ^^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: ^[SemaPassFacts], modules: ^[SemaGraphModuleResult]) -> SemaRegistrationGraph {
-    graph := owned.move()
-    checked := 0
-    waves := 0
+    ^graph: owned.move()
+    ^checked: 0
+    ^waves: 0
     loop {
-        wave := [U32:Bool]{}
-        affected := [Int]{}
+        ^wave: [U32:Bool]{}
+        ^affected: [Int]{}
         loop key in sema_derive_demand_keys(graph.derive_demand) {
             id: symbol_find(graph.symbols, key) ?? next
             if graph.derive_checked.get(id.id) != None -> next
@@ -356,7 +360,7 @@ sema_derive_waves: fn(owned: ^^SemaRegistrationGraph, values: [SemaComptimeItemV
         checked += wave.len()
         waves += 1
         graph.derive_wave_rows = wave.move()
-        result := sema_finalize_check_modules(graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, "sema.derives", trace_sink, carried, modules)
+        ^result: sema_finalize_check_modules(graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, "sema.derives", trace_sink, carried, modules)
         graph = result.move()
         graph.derive_wave_rows = [U32:Bool]{}
     }
@@ -378,10 +382,10 @@ sema_derive_waves: fn(owned: ^^SemaRegistrationGraph, values: [SemaComptimeItemV
 // structure facts, for a caller that builds the names itself once it has
 // changed the modules (the driver's checked-text merge).
 sema_finalize_graph: fn(resolved: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, build_names: Bool, trace_sink: CompilerTraceSink?) -> SemaFinalized {
-    bodies := sema_finalize_bodies_empty()
+    ^bodies: sema_finalize_bodies_empty()
     bodies.build_names = build_names
-    body_graph := sema_finalize_bodies(resolved, trail, stage, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
-    demand_graph := sema_finalize_demand(body_graph, trail, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
+    ^body_graph: sema_finalize_bodies(resolved, trail, stage, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
+    ^demand_graph: sema_finalize_demand(body_graph, trail, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
     sema_finalize_program(demand_graph, trail, stage, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
 }
 
@@ -411,7 +415,7 @@ sema_finalize_bodies_empty: fn() -> SemaFinalizeBodies {
 // codec and derive waves it demands, into `bodies`. The graph moves in and
 // comes back with its edits on `trail`.
 sema_finalize_bodies: fn(resolved: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: ^SemaFinalizeBodies) -> SemaRegistrationGraph {
-    resolved_graph := resolved.move()
+    ^resolved_graph: resolved.move()
     // #4319 lookup counters are traced through `sema.check` only; counting
     // here would serialize the body-check threads on the shared counters.
     trail.entries.push(SemaGraphUndo.Counting{old: resolved_graph.counting})
@@ -437,17 +441,17 @@ sema_finalize_bodies: fn(resolved: ^^SemaRegistrationGraph, trail: ^SemaGraphTra
     // The Core bodies this pass checks up front are read ahead on compiler
     // threads, as a demand wave's are (sema_core_demand_pass), unless a
     // per-function trace times each load at its turn.
-    timed := false
+    ^timed: false
     if trace_sink == .Val(sink) -> timed = sink.functions()
     if !timed -> sema_core_bodies_ahead(resolved_graph, upfront.move(), hook_access, threads)
     // The body pass's facts serve the codec and derive waves after it while
     // the graph rows they read stay unchanged (sema_finalize_check_modules).
-    body_graph := sema_finalize_check_modules(resolved_graph, values, comptime_functions, bodies.checked_types, checked_modules, true, hook_access, threads, "sema.bodies", trace_sink, bodies.carried, bodies.modules)
+    ^body_graph: sema_finalize_check_modules(resolved_graph, values, comptime_functions, bodies.checked_types, checked_modules, true, hook_access, threads, "sema.bodies", trace_sink, bodies.carried, bodies.modules)
     sema_core_bodies_ahead_drop(hook_access)
     // Demand: only the generated codecs a requirement reached
     // get bodies, checked into their modules' results before the failure solve,
     // and only the derived methods of compiler-owned modules a check reached.
-    after_codec_graph := sema_codec_waves(body_graph, trail, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
+    ^after_codec_graph: sema_codec_waves(body_graph, trail, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
     sema_derive_waves(after_codec_graph, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
 }
 
@@ -462,7 +466,7 @@ sema_finalize_bodies: fn(resolved: ^^SemaRegistrationGraph, trail: ^SemaGraphTra
 // functions it adds the next round, which the next call runs. The graph
 // moves in and comes back with its edits on `trail`.
 sema_finalize_demand: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: ^SemaFinalizeBodies) -> SemaRegistrationGraph {
-    graph := owned.move()
+    ^graph: owned.move()
     hook_access: sema_host_hook_access(host_hooks)
     last: sema_core_demand_last_round(comptime_functions)
     loop bodies.core_tally.rounds <= last {
@@ -478,8 +482,8 @@ sema_finalize_demand: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail,
 // the result (SemaFinalized.graph), with its edits on `trail`. `values` and
 // `comptime_functions` are the ones the bodies were checked against.
 sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: ^^SemaFinalizeBodies) -> SemaFinalized {
-    after_body_graph := owned.move()
-    held := bodies.move()
+    ^after_body_graph: owned.move()
+    ^held: bodies.move()
     sema_core_demand_counters(after_body_graph, held.core_tally, trace_sink)
     sema_core_text_counters(after_body_graph, held.modules, sema_host_hook_access(host_hooks), trace_sink)
     // A run bound to the Core image checked `stood_in` Core functions as
@@ -487,12 +491,12 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // again without them, else "": its demand named one where a stand-in
     // will not do, or a pass below read what a stand-in leaves out.
     stood_in: held.core_tally.names.stood_in.len()
-    rerun := held.core_tally.names.rerun.move()
-    modules := held.modules.move()
+    ^rerun: held.core_tally.names.rerun.move()
+    ^modules: held.modules.move()
     checked_types: held.checked_types.move()
-    complete := held.complete
+    ^complete: held.complete
     hook_access: sema_host_hook_access(host_hooks)
-    diagnostics := stage.diagnostics
+    ^diagnostics: stage.diagnostics
     if !sema_comptime_function_diagnostics(comptime_functions, diagnostics) -> complete = false
     // Every body the program reaches is checked (a Core body no check
     // demanded stays unchecked and has no caller), so the failure solve finds
@@ -501,7 +505,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // the modules each.
     if trace_sink == .Val(sink) -> sink.begin("sema.failure", "", -1, -1)
     failure_bounds: sema_failure_module_bounds(modules, threads)
-    inferred_infallible := sema_failure_solve(after_body_graph, modules, failure_bounds)
+    ^inferred_infallible: sema_failure_solve(after_body_graph, modules, failure_bounds)
     // The Core library's check summarizes Core's failure rows before the
     // projections below change any declaration they read.
     seal_failure: if after_body_graph.core_seal -> sema_core_seal_failure(after_body_graph, modules) else -> sema_core_seal_failure_none()
@@ -525,22 +529,22 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // failure obligations name a callee the solve left fallible, are checked
     // again; the `T Never!` projections are reconciled onto the checked bodies.
     recheck: sema_failure_recheck_modules(after_body_graph, modules, unions, infallible)
-    final_graph := if {
+    ^final_graph: if {
         recheck.len() > 0 -> {
-            rechecked := [SemaGraphModuleResult]{}
+            ^rechecked: [SemaGraphModuleResult]{}
             // The projected contracts change the rows the pass facts read.
-            recheck_facts := [SemaPassFacts]{}
+            ^recheck_facts: [SemaPassFacts]{}
             // A body checked for compile-time execution was checked against
             // the contract its function had before the solve: one whose
             // contract a union projection changed is checked again with its
             // callers, which read the projected one.
             recheck_functions: if unions.keys.len() == 0 -> comptime_functions else -> sema_comptime_functions_without(comptime_functions, unions.keys)
-            after_recheck_graph := sema_finalize_check_modules(after_body_graph, values, recheck_functions, checked_types, recheck, false, hook_access, threads, "sema.recheck", trace_sink, recheck_facts, rechecked)
+            ^after_recheck_graph: sema_finalize_check_modules(after_body_graph, values, recheck_functions, checked_types, recheck, false, hook_access, threads, "sema.recheck", trace_sink, recheck_facts, rechecked)
             // One rechecked result per `recheck` row, in order: each moves
             // into its module's slot, last row first.
             loop rechecked.len() > 0 {
                 row: rechecked.len() - 1
-                checked := rechecked.pop() ?? break
+                ^checked: rechecked.pop() ?? break
                 modules[recheck[row]] = checked.move()
             }
             after_recheck_graph.move()
@@ -570,8 +574,8 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     }
     // The failure-domain obligations recorded against unannotated callees
     // are discharged or emitted.
-    infallible_keys := name_table_sized(inferred_infallible.len() + 1)
-    loop key in inferred_infallible -> _ := name_intern(infallible_keys, key)
+    ^infallible_keys: name_table_sized(inferred_infallible.len() + 1)
+    loop key in inferred_infallible -> ^_: name_intern(infallible_keys, key)
     if sema_failure_settle_obligations(diagnostics, infallible_keys) -> complete = false
     loop settle_index in 0..<modules.len() {
         if sema_failure_settle_obligations(modules[settle_index].diagnostics, infallible_keys) {
@@ -584,9 +588,9 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     }
     // The bundle list and the per-module lists each keep one report per
     // failure domain.
-    bundle_domains := name_table_sized(4)
+    ^bundle_domains: name_table_sized(4)
     sema_failure_domain_dedupe(diagnostics, bundle_domains)
-    module_domains := name_table_sized(4)
+    ^module_domains: name_table_sized(4)
     loop dedupe_index in 0..<modules.len() {
         sema_failure_domain_dedupe(modules[dedupe_index].diagnostics, module_domains)
     }
@@ -600,13 +604,13 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // run side by side, with the typestate flow and the Core usage walk,
     // which read nothing the effect pass solves.
     if trace_sink == .Val(sink) -> sink.begin("sema.side", "", -1, -1)
-    effect_inputs := [SemaEffectModuleInput]{}
-    effect_prepared := sema_effect_prepared_empty()
-    liveness := sema_finalize_side_liveness_empty()
-    taint_prepared := [SemaTaintPrepared]{}
-    typestate_found := [Diagnostic]{}
-    core_modules := [SemaCoreModuleUsageResult]{}
-    field_caps := [U32:SemaEffectTypeCap]{}
+    ^effect_inputs: [SemaEffectModuleInput]{}
+    ^effect_prepared: sema_effect_prepared_empty()
+    ^liveness: sema_finalize_side_liveness_empty()
+    ^taint_prepared: [SemaTaintPrepared]{}
+    ^typestate_found: [Diagnostic]{}
+    ^core_modules: [SemaCoreModuleUsageResult]{}
+    ^field_caps: [U32:SemaEffectTypeCap]{}
     final_graph = sema_finalize_side_checks(final_graph, modules, threads, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint_prepared, typestate_found, core_modules, field_caps)
     if trace_sink == .Val(sink) -> sink.end("sema.side", liveness.facts.len())
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
@@ -620,9 +624,9 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // Each graph module's package row in `stage.package_policies` (-1 for
     // Core and a module no package owns), whose expert effects the module's
     // functions may use.
-    expert_modules := [Int]{}
+    ^expert_modules: [Int]{}
     loop graph_module in final_graph.modules {
-        at := -1
+        ^at: -1
         if !module_is_core(graph_module.module_identity) {
             loop (index, policy) in stage.package_policies {
                 if policy.package_identity == graph_module.package_identity -> at = index
@@ -636,7 +640,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // type's function-typed fields fit its cap where they are declared.
     loop module_index in 0..<final_graph.modules.len() {
         graph_module: final_graph.modules[module_index]
-        cap_diagnostics := [Diagnostic]{}
+        ^cap_diagnostics: [Diagnostic]{}
         if graph_module.program.file_cap == .Val(head) {
             sema_effect_cap_entry_names(head, cap_diagnostics)
         }
@@ -649,12 +653,12 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     trait_caps: sema_effect_trait_caps(final_graph)
     // The functions the build checked to run while compiling are prep code,
     // never a runtime entry (sema_effect_runtime_input_paths).
-    prep_functions := name_table_sized(comptime_functions.len() + 1)
-    loop result in comptime_functions -> _ := name_intern(prep_functions, result.function_key)
+    ^prep_functions: name_table_sized(comptime_functions.len() + 1)
+    loop result in comptime_functions -> ^_: name_intern(prep_functions, result.function_key)
     // An executable build (its entry module's `run`, or a function an Output
     // links) makes every function value it calls; a library's callers may
     // pass any.
-    closed := final_graph.output_name_references.len() > 0
+    ^closed: final_graph.output_name_references.len() > 0
     loop module_row in modules {
         loop function in module_row.functions {
             if function.name == "run" && function.module_identity == final_graph.entry_module_identity {
@@ -672,11 +676,11 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // one after it on this thread; either way its reports join after the late
     // checks, where they always read. Beside the pass the two share the
     // threads: the effect pass takes what the walk leaves.
-    taint_reports := [Diagnostic]{}
+    ^taint_reports: [Diagnostic]{}
     taint_catalog: compiler_threads_taken(taint_prepared)
     walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, threads, taint_reports)
     effect_threads: if walk_inputs.beside -> compiler_threads_beside(threads, walk_inputs.workers) else -> threads
-    walked := SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}
+    ^walked: SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}
     // On a machine with no heap, nothing the entries of a program whose
     // bodies check reach may allocate (sema_effect_check_heap_free); their
     // keys are read before the effect pass borrows the symbol table.
@@ -685,7 +689,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`. It borrows the run's symbol table and hands
     // it back; the walk's graph holds an empty one meanwhile.
-    effects := SemaEffectGraphResult{diagnostics: [Diagnostic]{}, complete: true, symbols: final_graph.symbols.move(), interner: final_graph.interner.move()}
+    ^effects: SemaEffectGraphResult{diagnostics: [Diagnostic]{}, complete: true, symbols: final_graph.symbols.move(), interner: final_graph.interner.move()}
     final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
     final_graph.interner = interner_empty()
     if {
@@ -731,15 +735,15 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // The typestate flow's findings (each body's checked receiver types,
     // walked beside the side checks) report here.
     diagnostics.extend(typestate_found.move())
-    outputs := sema_output_publish_solved_effects(final_graph, modules)
-    compute_work := SemaComputeValidationWork{}
-    compute_diagnostics := sema_compute_validate_autodiff_purity(modules, compute_work)
+    ^outputs: sema_output_publish_solved_effects(final_graph, modules)
+    ^compute_work: SemaComputeValidationWork{}
+    ^compute_diagnostics: sema_compute_validate_autodiff_purity(modules, compute_work)
     loop diagnostic in compute_diagnostics {
         if diagnostic.span == {
             .Val(span) -> {
-                owner_index := Int?{None}
-                ambiguous := false
-                index := 0
+                ^owner_index: Int?{None}
+                ^ambiguous: false
+                ^index: 0
                 loop index < modules.len() {
                     if sema_compute_module_owns_site(modules[index], span) {
                         if owner_index != None -> ambiguous = true
@@ -753,7 +757,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
                         if registration_index == {
                             .Val(found_index) -> {
                                 registration: final_graph.modules[found_index]
-                                located := [Diagnostic]{diagnostic}
+                                ^located: [Diagnostic]{diagnostic}
                                 sema_attach_diagnostic_source_locations(located, 0, registration.source_segments)
                                 diagnostics.push(located[0])
                             }
@@ -778,7 +782,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // A generic call whose type argument can't cross threads where its
     // callee, or a generic it passes the argument on to, moves it.
     loop report in sema_generic_crossings_validate(modules) {
-        located := [Diagnostic]{report.diagnostic}
+        ^located: [Diagnostic]{report.diagnostic}
         if sema_registration_module_index(final_graph, modules[report.module_index].module_identity) == .Val(found_index) {
             sema_attach_diagnostic_source_locations(located, 0, final_graph.modules[found_index].source_segments)
         }
@@ -812,12 +816,12 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     if !sema_target_capability_check(final_graph, core_usage, diagnostics) -> complete = false
     // A Core import above the package's runtime ceiling is reported on the
     // the helpers those imports reach.
-    import_blocked := [U32:Bool]{}
+    ^import_blocked: [U32:Bool]{}
     loop module_index in 0..<final_graph.modules.len() {
         source_module: final_graph.modules[module_index]
         policy: sema_comptime_policy_for_package(stage.package_policies, source_module.package_identity) ?? next
         ceiling: policy.runtime_ceiling ?? next
-        diagnostic_start := diagnostics.len()
+        ^diagnostic_start: diagnostics.len()
         loop declaration in source_module.program.imports {
             loop module_name in sema_runtime_ceiling_import_modules(declaration) {
                 needed: jet_ring_core_module_layer(module_name)
@@ -836,7 +840,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         ceiling: policy.runtime_ceiling ?? next
         if import_blocked.get(source_module.module_identity.id) != None -> next
         if !sema_comptime_layer_exceeds(module_usage.inferred_layer, ceiling) -> next
-        diagnostic_start := diagnostics.len()
+        ^diagnostic_start: diagnostics.len()
         loop row in module_usage.usage_spans {
             needed: jet_ring_prelude_closure_layer([String]{row.usage})
             if !sema_comptime_layer_exceeds(needed, ceiling) -> next
@@ -856,7 +860,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
             usage_index: sema_registration_module_index(final_graph, modules[module_index].module_identity) ?? next
             source_module: final_graph.modules[usage_index]
             policy: sema_comptime_policy_for_package(stage.package_policies, source_module.package_identity) ?? next
-            diagnostic_start := diagnostics.len()
+            ^diagnostic_start: diagnostics.len()
             sema_core_check_ui_capabilities_indexed(modules[module_index].call_facts, ui_index, core_usage.modules, source_module.module_identity, policy.authority_needs, diagnostics)
             if diagnostics.len() == diagnostic_start -> next
             sema_attach_diagnostic_source_locations(diagnostics, diagnostic_start, source_module.source_segments)
@@ -866,11 +870,11 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
 
     if trace_sink == .Val(sink) -> sink.begin("sema.facts", "", -1, -1)
     keep_flat_calls: final_graph.retain_programs || held.build_names
-    call_facts := [SemaCallSiteFact]{}
-    hardware_use := sema_hardware_empty_use()
-    comptime_requests := [SemaComptimeRequest]{}
-    comptime_body_sources := [SemaComptimeBodySource]{}
-    compute_facts := [SemaComputeFunctionFacts]{}
+    ^call_facts: [SemaCallSiteFact]{}
+    ^hardware_use: sema_hardware_empty_use()
+    ^comptime_requests: [SemaComptimeRequest]{}
+    ^comptime_body_sources: [SemaComptimeBodySource]{}
+    ^compute_facts: [SemaComputeFunctionFacts]{}
     loop module_index in 0..<modules.len() {
         module_result: modules[module_index]
         if keep_flat_calls {
@@ -930,10 +934,10 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         diagnostics.push(diagnostic)
     }
     if trace_sink == .Val(sink) -> sink.begin("sema.names", "", -1, -1)
-    structure_facts := sema_name_structure_facts(final_graph)
+    ^structure_facts: sema_name_structure_facts(final_graph)
     loop fact in lifecycle.facts -> structure_facts.push(fact)
     loop fact in liveness.facts -> structure_facts.push(fact)
-    names := sema_name_facts_empty()
+    ^names: sema_name_facts_empty()
     if {
         held.build_names -> {
             final_graph = sema_name_build_facts_threads(final_graph, modules, structure_facts, threads, names)
@@ -945,7 +949,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // program honest, but Core is library source: its lints are not the
     // user's to act on and never reach user output. A lint inside a site
     // `#Allow` for it is the author's recorded decision (LintAllowances.jet).
-    allowances := [SemaLintAllowance]{}
+    ^allowances: [SemaLintAllowance]{}
     loop module_index in 0..<final_graph.modules.len() {
         sema_lint_allowances(final_graph.modules[module_index].program, final_graph.modules[module_index].source_segments, allowances)
     }
@@ -956,7 +960,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         sink.progress("counters.sema.core_seal.stand_ins", stood_in, -1)
         if rerun != "" -> sink.progress("counters.sema.core_seal.reruns.{rerun}", 1, -1)
     }
-    reported := [Diagnostic]{}
+    ^reported: [Diagnostic]{}
     loop diagnostic in diagnostics {
         if !sema_core_lint_dropped(diagnostic, own_check: final_graph.core_own_check) && !sema_lint_allowed(diagnostic, allowances) {
             reported.push(diagnostic)
@@ -965,11 +969,11 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     diagnostics = reported
     sema_crypto_misuse_precedence(diagnostics)
     sema_name_display_diagnostics(final_graph, diagnostics)
-    programs := [Program]{}
+    ^programs: [Program]{}
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> programs.push(source_module.program)
     }
-    core_bodies := [SemaCoreBody]{}
+    ^core_bodies: [SemaCoreBody]{}
     loop position in 0..<modules.len() {
         compiler_transfer_rows<SemaCoreBody>(core_bodies, modules[position].core_bodies)
     }
@@ -1015,7 +1019,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
 // they are its own.
 sema_core_lint_dropped: fn(diagnostic: Diagnostic, own_check: Bool{false}) -> Bool Never! {
     if own_check || diagnostic.severity != DIAGNOSTIC_LINT -> return false
-    path := diagnostic.source_path ?? ""
+    ^path: diagnostic.source_path ?? ""
     if path == "" && diagnostic.origin == .Val(origin) -> path = origin.path
     path == "<corelib>" || path.starts_with("<corelib>/")
 }
@@ -1055,7 +1059,7 @@ sema_finalize_walk_inputs: fn(prepared: ^^SemaTaintPrepared, existing_diagnostic
     taken: prepared.move()
     reports.extend(taken.reports.move())
     taint_weights: taken.weights.move()
-    work := 0
+    ^work: 0
     loop weight in taint_weights -> work += weight
     quarter: compiler_threads_capped(threads, (compiler_threads_limit(threads) + 3) /% 4)
     workers: compiler_threads_admit(quarter, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
@@ -1080,9 +1084,9 @@ sema_finalize_effect_pass: fn(modules: ^[SemaGraphModuleResult], graph: SemaRegi
 // read exactly as one thread's walk of every module in order. Reads the
 // graph and the inputs in place and writes neither.
 sema_finalize_walk_all: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalkInputs) -> SemaFinalizeWalked {
-    found := [[Diagnostic]]{}
-    masked := [[Span]]{}
-    fixed := [[String]]{}
+    ^found: [[Diagnostic]]{}
+    ^masked: [[Span]]{}
+    ^fixed: [[String]]{}
     loop _ in 0..<inputs.taint_order.len() {
         found.push([Diagnostic]{})
         masked.push([Span]{})
@@ -1114,7 +1118,9 @@ sema_mark_masked_branches: fn(interner: Interner, functions: ^[FnBody], masked: 
             }
         }
     }
-    if fixed_tags.len() == 0 -> return
+    if fixed_tags.len() == 0 {
+        return
+    }
     loop index in 0..<functions.len() {
         if sema_fixed_types(interner, functions[index], fixed_tags) {
             functions[index].fixed_tags = fixed_tags.copy()
@@ -1131,7 +1137,7 @@ sema_fixed_types: fn(interner: Interner, function: FnBody, fixed_tags: [String])
     if function.ret == .Val(ret) {
         if sema_fixed_type(ret, fixed_tags) -> return true
     }
-    seen := [U32:Bool]{}
+    ^seen: [U32:Bool]{}
     loop row in function.tree.expr_types {
         tid: row.ty
         if seen.has_key(tid.id) -> next
@@ -1170,18 +1176,18 @@ SemaFinalizeCoreJob: struct {
 // each part cut again at its module boundaries, so a job never spans two
 // modules and the jobs stay in module and item order.
 sema_finalize_core_jobs: fn(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJob] Never! {
-    jobs := [SemaFinalizeCoreJob]{}
-    starts := [Int]{}
+    ^jobs: [SemaFinalizeCoreJob]{}
+    ^starts: [Int]{}
     loop position in 0..<owners.len() {
         loop starts.len() <= owners[position] -> starts.push(position)
     }
     parts: bounds.len() - 1
     loop part in 0..<parts {
-        position := bounds[part]
+        ^position: bounds[part]
         loop position < bounds[part + 1] {
             module_index: owners[position]
             start: starts[module_index]
-            end := bounds[part + 1]
+            ^end: bounds[part + 1]
             if module_index + 1 < starts.len() && starts[module_index + 1] < end {
                 end = starts[module_index + 1]
             }
@@ -1244,7 +1250,7 @@ sema_finalize_walkers: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalk
 // Moves each module's walk that one thread `claimed` into the module's slot
 // of `walked`, `masked` and `fixed`.
 sema_finalize_walk_keep: fn(claimed: ^^[SemaTaintWalked], walked: ^[[Diagnostic]], masked: ^[[Span]], fixed: ^[[String]]) {
-    taken := claimed.move()
+    ^taken: claimed.move()
     loop taken.len() > 0 {
         done: taken.pop() ?? break
         walked[done.module_index] = done.found.move()
@@ -1258,13 +1264,13 @@ sema_finalize_walk_keep: fn(claimed: ^^[SemaTaintWalked], walked: ^[[Diagnostic]
 // reports, made once it has claimed a module: a thread that claims none
 // builds no state.
 sema_finalize_walk_claimed: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalkInputs, queue: SemaFinalizeCoreQueue) -> [SemaTaintWalked] {
-    claimed := [SemaTaintWalked]{}
-    rank := sema_finalize_core_claim(queue)
+    ^claimed: [SemaTaintWalked]{}
+    ^rank: sema_finalize_core_claim(queue)
     if rank >= inputs.taint_order.len() -> return claimed
-    state := SemaTaintFlowState{catalog: inputs.catalog.copy(), module_identity: module_none(), flow: sema_taint_flow_start(), diagnostics: [Diagnostic]{}, open_switches: inputs.open_switches.copy(), fixed_tags: [String]{}}
+    ^state: SemaTaintFlowState{catalog: inputs.catalog.copy(), module_identity: module_none(), flow: sema_taint_flow_start(), diagnostics: [Diagnostic]{}, open_switches: inputs.open_switches.copy(), fixed_tags: [String]{}}
     loop rank < inputs.taint_order.len() {
         module_index: inputs.taint_order[rank]
-        found := [Diagnostic]{}
+        ^found: [Diagnostic]{}
         sema_taint_check_module(graph, state, module_index, found)
         claimed.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked, fixed_tags: state.fixed_tags})
         rank = sema_finalize_core_claim(queue)
@@ -1304,7 +1310,7 @@ SEMA_FINALIZE_SIDE_EFFECT_MIN_PARTS: 16
 // module (and at least one). The parts' rows join in part order, so the
 // inputs and graph rows are the same for any part count.
 sema_finalize_side_effect_parts: fn(workers: Int, modules: Int) -> Int {
-    parts := if workers > SEMA_FINALIZE_SIDE_EFFECT_MIN_PARTS -> workers else -> SEMA_FINALIZE_SIDE_EFFECT_MIN_PARTS
+    ^parts: if workers > SEMA_FINALIZE_SIDE_EFFECT_MIN_PARTS -> workers else -> SEMA_FINALIZE_SIDE_EFFECT_MIN_PARTS
     if parts > modules -> parts = modules
     if parts < 1 -> parts = 1
     parts
@@ -1399,12 +1405,12 @@ SemaFinalizeSideClaimed: struct {
 sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads, diagnostics: ^[Diagnostic], complete: ^Bool, effect_inputs: ^[SemaEffectModuleInput], effect_prepared: ^SemaEffectPrepared, liveness: ^SemaLivenessResult, taint: ^[SemaTaintPrepared], typestate_found: ^[Diagnostic], cores: ^[SemaCoreModuleUsageResult], out_type_caps: ^[U32:SemaEffectTypeCap]) -> SemaRegistrationGraph {
     owned: graph.move()
     table: sema_state_table_of(owned)
-    type_caps := sema_effect_type_caps(owned.modules)
+    ^type_caps: sema_effect_type_caps(owned.modules)
     library: sema_library_effects(owned)
     // Each item's source bytes and its module, over every registered module.
-    weights := [Int]{}
-    owners := [Int]{}
-    work := 0
+    ^weights: [Int]{}
+    ^owners: [Int]{}
+    ^work: 0
     loop module_index in 0..<owned.modules.len() {
         loop item_index in 0..<owned.modules[module_index].program.items.len() {
             span: sema_compiler_index_item_span(owned.modules[module_index].program.items[item_index])
@@ -1428,23 +1434,23 @@ sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: [SemaGrap
         }
         loop module_index in 0..<owned.modules.len() {
             context: sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
-            collected := sema_core_collected_empty()
+            ^collected: sema_core_collected_empty()
             sema_core_collect_item_range(owned.modules[module_index].program.items, 0, owned.modules[module_index].program.items.len(), context, collected)
             cores.push(sema_core_module_usage_assemble(owned.modules[module_index], context, modules[module_index].exact_int_reachable, collected))
         }
         out_type_caps = type_caps.move()
         return owned
     }
-    count := workers * SEMA_CORE_JOBS_PER_THREAD
+    ^count: workers * SEMA_CORE_JOBS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     function_counts: loop module_row in modules -> module_row.functions.len()
     effect_weights: loop module_row in modules -> module_row.functions.len() + 1
     parts: sema_finalize_side_effect_parts(workers, modules.len())
     effect_bounds: compiler_threads_partition(effect_weights, parts)
-    inputs := SemaFinalizeSideInputs{table: table.move(), type_caps: type_caps.move(), library: library.move(), typestate_order: compiler_threads_heaviest_first(function_counts), jobs: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners), threads: threads, effect_bounds: effect_bounds.move()}
-    sides := loop job in 0..<sema_finalize_side_jobs(parts) -> sema_finalize_side_new(job)
-    found := loop _ in modules -> [Diagnostic]{}
-    core_rows := loop job in 0..<inputs.jobs.len() -> SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: None, context: None}
+    ^inputs: SemaFinalizeSideInputs{table: table.move(), type_caps: type_caps.move(), library: library.move(), typestate_order: compiler_threads_heaviest_first(function_counts), jobs: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners), threads: threads, effect_bounds: effect_bounds.move()}
+    ^sides: loop job in 0..<sema_finalize_side_jobs(parts) -> sema_finalize_side_new(job)
+    ^found: loop _ in modules -> [Diagnostic]{}
+    ^core_rows: loop job in 0..<inputs.jobs.len() -> SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: None, context: None}
     queue: SemaFinalizeCoreQueue{next: 0}
     sema_finalize_side_claimers(owned, modules, inputs, queue, 0, workers, sides, found, core_rows)
     out_type_caps = inputs.type_caps.move()
@@ -1460,11 +1466,11 @@ sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: [SemaGrap
     // consecutive) and assembled here, with the context its first job built
     // (or, for a module without items, built here).
     core_rows.reverse()
-    job := 0
+    ^job: 0
     loop module_index in 0..<owned.modules.len() {
-        collected := sema_core_collected_empty()
-        whole := SemaCoreModuleUsageResult?{None}
-        context := SemaCoreModuleContext?{None}
+        ^collected: sema_core_collected_empty()
+        ^whole: SemaCoreModuleUsageResult?{None}
+        ^context: SemaCoreModuleContext?{None}
         loop job < inputs.jobs.len() && inputs.jobs[job].module_index == module_index {
             // One row per job: none left past the last job.
             row: core_rows.pop() ?? break
@@ -1485,7 +1491,7 @@ sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: [SemaGrap
 // One side check over the graph and the checked modules; `effect_bounds`
 // holds the effect parts' module ranges (compiler_threads_partition).
 sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], type_caps: [U32:SemaEffectTypeCap], library: [SemaLibraryEffect], threads: CompilerThreads, effect_bounds: [Int]) -> SemaFinalizeSide {
-    side := sema_finalize_side_new(job)
+    ^side: sema_finalize_side_new(job)
     parts: effect_bounds.len() - 1
     if {
         job == SEMA_FINALIZE_SIDE_INLINE_ALWAYS -> {
@@ -1510,7 +1516,7 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
             last: effect_bounds[part + 1]
             loop module_index in first..<last {
                 source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
-                input := sema_effect_module_input(graph, source_index, module_index, type_caps, library)
+                ^input: sema_effect_module_input(graph, source_index, module_index, type_caps, library)
                 // Input positions count from the part's first input; the join shifts them.
                 sema_effect_prepare_module(side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls, graph.symbols)
                 side.effect_inputs.push(input)
@@ -1526,22 +1532,22 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
 sema_finalize_core_job: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], jobs: [SemaFinalizeCoreJob], job: Int) -> SemaFinalizeCoreCollected {
     module_index: jobs[job].module_index
     context: sema_core_module_context(graph, graph.modules[module_index], modules[module_index].call_facts)
-    collected := sema_core_collected_empty()
+    ^collected: sema_core_collected_empty()
     sema_core_collect_item_range(graph.modules[module_index].program.items, jobs[job].first, jobs[job].last, context, collected)
     if jobs[job].first == 0 && jobs[job].last == graph.modules[module_index].program.items.len() {
         return SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: Val(sema_core_module_usage_assemble(graph.modules[module_index], context, modules[module_index].exact_int_reachable, collected)), context: None}
     }
-    handed := SemaCoreModuleContext?{None}
+    ^handed: SemaCoreModuleContext?{None}
     if jobs[job].first == 0 -> handed = Val(context.move())
     SemaFinalizeCoreCollected{job: job, collected: collected.move(), assembled: None, context: handed.move()}
 }
 
 // Joins the side checks, with `parts` effect parts, in job order.
 sema_finalize_side_join: fn(sides: ^^[SemaFinalizeSide], parts: Int, diagnostics: ^[Diagnostic], complete: ^Bool, effect_inputs: ^[SemaEffectModuleInput], effect_prepared: ^SemaEffectPrepared, liveness: ^SemaLivenessResult, taint: ^[SemaTaintPrepared]) {
-    owned := sides.move()
+    ^owned: sides.move()
     owned.reverse()
     loop owned.len() > 0 {
-        side := owned.pop() ?? break
+        ^side: owned.pop() ?? break
         if side.found -> complete = false
         diagnostics.extend(side.diagnostics.move())
         sema_effect_prepared_join(effect_prepared, side.effect_prepared.move(), effect_inputs.len())
@@ -1564,7 +1570,7 @@ sema_finalize_side_claimers: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     task.group sema_finalize_side_threads {
         head: task sema_finalize_side_claimed(graph, modules, inputs, queue)
         sema_finalize_side_claimers(graph, modules, inputs, queue, from + 1, workers, sides, found, core_rows)
-        claimed := compiler_threads_joined(head)
+        ^claimed: compiler_threads_joined(head)
         loop claimed.sides.len() > 0 {
             done: claimed.sides.pop() ?? break
             job: done.job
@@ -1585,7 +1591,7 @@ sema_finalize_side_claimers: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
 // One thread: runs the side checks it claims, heaviest (last job) first,
 // then the typestate modules, then the Core jobs.
 sema_finalize_side_claimed: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], inputs: SemaFinalizeSideInputs, queue: SemaFinalizeCoreQueue) -> SemaFinalizeSideClaimed {
-    claimed := SemaFinalizeSideClaimed{sides: [SemaFinalizeSide]{}, typestate: [SemaFinalizeTypestate]{}, core: [SemaFinalizeCoreCollected]{}}
+    ^claimed: SemaFinalizeSideClaimed{sides: [SemaFinalizeSide]{}, typestate: [SemaFinalizeTypestate]{}, core: [SemaFinalizeCoreCollected]{}}
     typestate_count: inputs.typestate_order.len()
     side_jobs: sema_finalize_side_jobs(inputs.effect_bounds.len() - 1)
     loop {

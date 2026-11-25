@@ -47,10 +47,10 @@ OverlayPolicy: struct {
     // set, patches append in overlay order, and every contender remains in
     // `provenance`.
     resolve_package_override_checked: fn(self, package: String) -> ResolvedPackageOverride? OverlayError! {
-        resolved := ResolvedPackageOverride{package: package, source: None, version: None, flags: [String]{}, priority: 0, env: [OverrideEnv]{}, patches: [String]{}, allow_unfree: false, field_priorities: [String:Int]{}, provenance: [OverrideProvenance]{}}
-        winners := [String:OverrideWinner]{}
-        flags := [String]{}
-        found := false
+        ^resolved: ResolvedPackageOverride{package: package, source: None, version: None, flags: [String]{}, priority: 0, env: [OverrideEnv]{}, patches: [String]{}, allow_unfree: false, field_priorities: [String:Int]{}, provenance: [OverrideProvenance]{}}
+        ^winners: [String:OverrideWinner]{}
+        ^flags: [String]{}
+        ^found: false
         scalar_fields: [OverrideScalarField]{OverrideScalarField.Source, OverrideScalarField.Version}
         loop order in 0..<self.overlays.len() {
             overlay: self.overlays[order]
@@ -139,13 +139,13 @@ OverlaySet: struct {
     merge_package: fn(^self, incoming: PackageOverride) OverlayError! {
         loop position in 0..<self.packages.len() {
             if self.packages[position].package == incoming.package {
-                existing := self.packages[position]
+                ^existing: self.packages[position]
                 existing.absorb(incoming)
                 self.packages[position] = existing
                 return
             }
         }
-        added := incoming
+        ^added: incoming
         added.flags = pkg_overlay_sorted_unique(added.flags)
         added.env = pkg_overlay_sorted_env(added.env)
         self.packages.push(added)
@@ -361,7 +361,7 @@ ResolvedPackageOverride: struct {
     // Stable identity for the complete resolved overlay fact. The semantic
     // lock uses this instead of re-projecting raw overlay declarations.
     policy_fingerprint: fn(self) -> String Never! {
-        provenance := [String]{}
+        ^provenance: [String]{}
         loop fact in self.provenance {
             provenance.push("{fact.overlay}#{fact.order}:{fact.field}={fact.value}@{fact.priority}")
         }
@@ -454,7 +454,7 @@ pkg_overlay_keyed_wins: fn(winners: [String:OverrideWinner], field: String, prio
 
 // Environment facts ordered by key, then value (stable).
 pkg_overlay_sorted_env: fn(env: [OverrideEnv]) -> [OverrideEnv] Never! {
-    sorted := env
+    ^sorted: env
     // Two stable passes order by (key, value).
     sorted = loop fresh_item in sorted -> fresh_item
     sorted.sort_by(fn(fact) { fact.value })
@@ -465,9 +465,9 @@ pkg_overlay_sorted_env: fn(env: [OverrideEnv]) -> [OverrideEnv] Never! {
 
 // Sorted with duplicates removed.
 pkg_overlay_sorted_unique: fn(values: [String]) -> [String] Never! {
-    sorted := values
+    ^sorted: values
     sorted.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop value in sorted {
         if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
     }
@@ -476,14 +476,14 @@ pkg_overlay_sorted_unique: fn(values: [String]) -> [String] Never! {
 
 // `KEY=value` facts joined with `+`.
 pkg_overlay_env_text: fn(env: [OverrideEnv]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop fact in env -> parts.push("{fact.key}={fact.value}")
     parts.join("+")
 }
 
 // A string list in derived `Debug` form: `["a", "b"]`.
 pkg_overlay_debug_list: fn(values: [String]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop value in values -> parts.push(pkg_overlay_debug_text(value))
     "[{parts.join(", ")}]"
 }
@@ -491,9 +491,9 @@ pkg_overlay_debug_list: fn(values: [String]) -> String Never! {
 // A string-keyed priority map in derived `Debug` form, keys in order:
 // `{"env.CC": 0, "version": 10}`.
 pkg_overlay_debug_priorities: fn(priorities: [String:Int]) -> String Never! {
-    keys := priorities.keys().to_list()
+    ^keys: priorities.keys().to_list()
     keys.sort()
-    parts := [String]{}
+    ^parts: [String]{}
     loop key in keys -> parts.push("{pkg_overlay_debug_text(key)}: {priorities[key]}")
     "{{{parts.join(", ")}}}"
 }
@@ -501,7 +501,7 @@ pkg_overlay_debug_priorities: fn(priorities: [String:Int]) -> String Never! {
 // A string in derived `Debug` form: quoted, with `\0 \t \n \r \" \\` escaped
 // and other ASCII controls written as `\u{…}`.
 pkg_overlay_debug_text: fn(value: String) -> String Never! {
-    out := [U8]{U8{34}}
+    ^out: [U8]{U8{34}}
     loop byte in value.bytes() {
         code: Int{byte}
         escape: if code == {
@@ -526,8 +526,8 @@ pkg_overlay_debug_text: fn(value: String) -> String Never! {
 // Lowercase hexadecimal without leading zeros.
 pkg_overlay_hex: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{digits[value % 16]}
-    rest := value /% 16
+    ^out: [U8]{digits[value % 16]}
+    ^rest: value /% 16
     loop rest > 0 {
         out.insert(0, digits[rest % 16])
         rest /%= 16

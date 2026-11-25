@@ -92,11 +92,11 @@ fail: fn(message: String) -[IO]> Int Never! {
 // An absolute path with `.`, `..` and empty segments folded, as path.resolve gives.
 resolve: fn(cwd: String, path: String) -> String Never! {
     full: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in full.split("/").to_list() {
         if part == ".." {
             if parts.len() > 0 {
-                kept := [String]{}
+                ^kept: [String]{}
                 loop index in 0..<parts.len() - 1 { kept.push(parts[index].copy()) }
                 parts = kept
             }
@@ -114,7 +114,7 @@ same_bytes: fn(left: [U8], right: [U8]) -> Bool Never! {
 }
 
 json_text: fn(text: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop byte in text.bytes() {
         code: Int{byte}
         if code == 34 -> out = "{out}\\\"" else if code == 92 -> out = "{out}\\\\" else {
@@ -134,11 +134,11 @@ signal_name: fn(number: Int) -> String Never! {
 // spawnSync does: no status after a signal, a timeout or a spawn failure, and
 // spawn failures and timeouts as an error message.
 run_binary: fn(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
-    none := [U8]{}
+    ^none: [U8]{}
     if !files.exists(binary) {
         return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
     }
-    argv := [String]{binary.copy()}
+    ^argv: [String]{binary.copy()}
     loop arg in args { argv.push(arg.copy()) }
     if process.cmd(argv).timeout(timeout).run() == {
         .Ok(receipt) -> {
@@ -171,7 +171,7 @@ save_bytes: fn(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
 byte: fn(value: Int) -> U8 Never! { checked(U8{value}) ?? U8{0} }
 
 hex_value: fn(text: String) -> Int Never! {
-    value := 0
+    ^value: 0
     loop digit in text.bytes() {
         code: Int{digit}
         value = value * 16 + (if code >= 97 -> code - 87 else if code >= 65 -> code - 55 else -> code - 48)
@@ -181,13 +181,13 @@ hex_value: fn(text: String) -> Int Never! {
 
 lower_hex: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    reversed := [U8]{digits[value % 16]}
-    rest := value /% 16
+    ^reversed: [U8]{digits[value % 16]}
+    ^rest: value /% 16
     loop rest > 0 {
         reversed.push(digits[rest % 16])
         rest = rest /% 16
     }
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<reversed.len() -> out.push(reversed[reversed.len() - 1 - index])
     String.from_bytes_lossy(out)
 }
@@ -215,7 +215,7 @@ char_debug: fn(scalar: Int, listed: Bool) -> [U8] Never! {
     }
     if short != "" -> return "'\\{short}'".bytes()
     if !listed -> return "'\\u{{{lower_hex(scalar)}}}'".bytes()
-    text := [U8]{byte(39)}
+    ^text: [U8]{byte(39)}
     loop part in utf8(scalar) -> text.push(part)
     text.push(byte(39))
     text
@@ -225,15 +225,15 @@ char_debug: fn(scalar: Int, listed: Bool) -> [U8] Never! {
 // CharDebugPlain.ranges (`hex` or `hex..hex`): each record is the u32le scalar,
 // a u8 length, then the Debug bytes.
 char_goldens: fn(ranges: String) -> [U8] Never! {
-    starts := [Int]{}
-    ends := [Int]{}
+    ^starts: [Int]{}
+    ^ends: [Int]{}
     loop row in ranges.trim().split("\n").to_list() {
         bounds: row.split("..").to_list()
         starts.push(hex_value(bounds[0]))
         ends.push(hex_value(bounds[bounds.len() - 1]))
     }
-    goldens := [U8]{}
-    range := 0
+    ^goldens: [U8]{}
+    ^range: 0
     loop scalar in 0..<1114112 {
         if scalar >= 55296 && scalar <= 57343 -> next
         loop range < starts.len() && ends[range] < scalar -> range += 1
@@ -275,7 +275,7 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         if !save_bytes(oracle, goldens) -> return 1
     }
     loop item in spec.cases {
-        run_args := item.args.copy()
+        ^run_args: item.args.copy()
         if spec.oracle && item.status == 0 -> run_args = [String]{oracle.copy()}
         outcome: run_binary(binary, run_args, spec.timeout)
         status: if outcome.exited -> "{outcome.status}" else -> "null"
@@ -291,7 +291,7 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
             return fail("{item.name}: expected exit{spec.exit_gap}{item.status}, got {status}/{shown_signal}/{outcome.error}")
         }
         golden_path: "{cwd}/{GOLDENS}/{item.golden}"
-        expected := if files.read_bytes(golden_path) == {
+        ^expected: if files.read_bytes(golden_path) == {
             .Ok(value) -> value
             .Err(_) -> {
                 return fail("ENOENT: no such file or directory, open '{golden_path}'")

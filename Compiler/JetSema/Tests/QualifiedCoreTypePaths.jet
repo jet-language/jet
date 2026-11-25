@@ -35,14 +35,14 @@ QUALIFIED_CORE_PACKAGE: "source-root:user"
 // `imports`, each landing on the Core module `target` (`core`, `core.mem`):
 // `known` or `unknown`, joined with `; `.
 qualified_core_written: fn(imports: ^^String, target: String, names: [String]) -> String {
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, "user/main")
     target_id: module_intern(table, "<corelib>/{target}")
-    main_parsed := parse_generated_source(imports.bytes())
+    ^main_parsed: parse_generated_source(imports.bytes())
     // Each import edge owns its declaration, as the loader's do; a second
     // parse gives them.
-    imports_parsed := parse_generated_source(imports.bytes())
-    target_parsed := parse_generated_source("".bytes())
+    ^imports_parsed: parse_generated_source(imports.bytes())
+    ^target_parsed: parse_generated_source("".bytes())
     if main_parsed.diagnostics.len() != 0 || imports_parsed.diagnostics.len() != 0 || target_parsed.diagnostics.len() != 0 {
         panic("fixture did not parse")
     }
@@ -54,7 +54,7 @@ qualified_core_written: fn(imports: ^^String, target: String, names: [String]) -
     effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
     effects_id: effects.module_identity
     facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main_input, target_input, effects}, edges, QUALIFIED_CORE_PACKAGE, main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}")
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{main_input, target_input, effects}, edges, QUALIFIED_CORE_PACKAGE, main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}")
     if !graph.complete {
         reports: loop diagnostic in graph.diagnostics -> "{diagnostic.code}: {diagnostic.what}"
         return "incomplete graph: {reports.join("; ")}"

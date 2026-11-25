@@ -48,7 +48,7 @@ store_record_locked_nix: fn(verification: StoreVerification, roots: HangarRoots,
     }
     hangar: roots.hangar_dir()
     object_root: files.join(hangar, STORE_OBJECTS_DIR)
-    digests := [String]{}
+    ^digests: [String]{}
     loop digest in object_digests {
         if digest == "" || digest.contains("/") || digest.contains("\\") {
             return Err(StoreError.Other("locked Nix replay contains an unsafe CAS digest"))
@@ -61,7 +61,7 @@ store_record_locked_nix: fn(verification: StoreVerification, roots: HangarRoots,
         }
     }
     digests = store_sorted_unique(digests)
-    complete := digests.contains(closure.output)
+    ^complete: digests.contains(closure.output)
     loop member in closure.references {
         if !digests.contains(member) -> complete = false
     }
@@ -78,10 +78,10 @@ store_record_locked_nix: fn(verification: StoreVerification, roots: HangarRoots,
 
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     _: AdmissionTransaction.recover_unlocked(roots)
-    entries := [StoreEntry]{}
+    ^entries: [StoreEntry]{}
     loop digest in digests {
         producer: store_locked_nix_producer(reference, lock_envelope, closure, lock_digest, cache_identity, digest, [String]{})
-        identity := cache_identity.copy()
+        ^identity: cache_identity.copy()
         identity.source_fingerprint = digest.copy()
         entries.push(
             StoreEntry{
@@ -129,7 +129,7 @@ store_record_locked_nix: fn(verification: StoreVerification, roots: HangarRoots,
         },
     )
     primary_index: entries.len() - 1
-    transaction := AdmissionTransaction.new(verification, roots)
+    ^transaction: AdmissionTransaction.new(verification, roots)
     _: transaction.commit(entries, [AdmissionReceipt]{}, None, RegistrationMode.AdmittedNix, None)
     Ok(entries[primary_index])
 }
@@ -137,9 +137,9 @@ store_record_locked_nix: fn(verification: StoreVerification, roots: HangarRoots,
 // The producer record of one locked Nix CAS object.
 store_locked_nix_producer: fn(reference: String, lock_envelope: LockEnvelope, closure: NixClosureRecord, lock_digest: String, cache_identity: CacheIdentity, output: String, refs: [String]) -> ProducerRecord StoreError! {
     logical: store_locked_nix_logical_path(output, "out")
-    logical_refs := [String]{}
+    ^logical_refs: [String]{}
     loop member in refs -> logical_refs.push(store_locked_nix_logical_path(member, "out"))
-    facts := provider_nix_build_facts_record()
+    ^facts: provider_nix_build_facts_record()
     facts["nix.drv_path"] = "locked-derivation:{closure.derivation}"
     facts["nix.reference"] = reference
     facts["nix.store-path"] = logical
@@ -168,8 +168,8 @@ store_locked_nix_producer: fn(reference: String, lock_envelope: LockEnvelope, cl
     facts["nix.cache.platform"] = lock_envelope.platform
     plan: ProviderPlanFacts.from_facts(facts)
     drv_path: facts.get("nix.drv_path") ?? return Err(StoreError.Other("locked Nix producer lost derivation identity"))
-    producer := ProducerRecord.new("nix", "locked-nix:{closure.derivation}", closure.derivation, plan, "nix-derivation:{drv_path}", "policy={closure.cache_key}\nplatform={lock_envelope.platform}", facts)
-    identity := cache_identity
+    ^producer: ProducerRecord.new("nix", "locked-nix:{closure.derivation}", closure.derivation, plan, "nix-derivation:{drv_path}", "policy={closure.cache_key}\nplatform={lock_envelope.platform}", facts)
+    ^identity: cache_identity
     identity.source_fingerprint = output
     producer.bind_cache_provenance(reference, output, identity, refs)
     Ok(producer)
@@ -179,8 +179,8 @@ store_locked_nix_producer: fn(reference: String, lock_envelope: LockEnvelope, cl
 // The original `/nix/store` spelling is retained in the producer facts for
 // runtime namespace projection; it is never the durable output root.
 store_project_nix_outputs_unlocked: fn(roots: HangarRoots, realized: Realized, graph: ClosureGraph, transaction: ^AdmissionTransaction) -> {out: String, bin: String, rlib: String} StoreError! {
-    projected := [String:String]{}
-    seen_sources := [String:String]{}
+    ^projected: [String:String]{}
+    ^seen_sources: [String:String]{}
     loop name in store_sorted_keys(realized.named_outputs) {
         source: realized.named_outputs[name]
         trusted_digest: store_canonical_graph_digest(roots, graph, source)
@@ -188,7 +188,7 @@ store_project_nix_outputs_unlocked: fn(roots: HangarRoots, realized: Realized, g
         if name == "out" && digest != realized.envelope.output_hash {
             return Err(StoreError.Other("Nix primary output changed during Store projection: expected {realized.envelope.output_hash}, got {digest}"))
         }
-        canonical := source.copy()
+        ^canonical: source.copy()
         if trusted_digest == None {
             if seen_sources.get(source) == {
                 .Val(existing) -> { canonical = existing }
@@ -233,7 +233,7 @@ store_project_nix_output_unlocked: fn(roots: HangarRoots, source: String, digest
 // the same Hangar transaction used by realized registration.
 store_project_external_output_unlocked: fn(verification: StoreVerification, roots: HangarRoots, source: String, digest: String) -> String StoreError! {
     _: AdmissionTransaction.recover_unlocked(roots)
-    transaction := AdmissionTransaction.new(verification, roots)
+    ^transaction: AdmissionTransaction.new(verification, roots)
     bytes: store_admission_size(source)
     destination: transaction.stage_object(AdmissionObject{source: source, digest: digest, bytes: bytes, allow_semantic_xattrs: false, repair_corrupt: false})
     _: transaction.commit_objects(None)
@@ -273,7 +273,7 @@ store_remap_local_member: fn(source: String, destination: String, member: String
 store_canonicalize_local_output_unlocked: fn(verification: StoreVerification, roots: HangarRoots, out: String, bin: String, rlib: String, digest: String) -> {out: String, bin: String, rlib: String} StoreError! {
     if digest == "" || out.starts_with("/nix/store") -> return Ok({out: out, bin: bin, rlib: rlib})
     _: AdmissionTransaction.recover_unlocked(roots)
-    transaction := AdmissionTransaction.new(verification, roots)
+    ^transaction: AdmissionTransaction.new(verification, roots)
     projected: store_stage_local_output_unlocked(roots, out, bin, rlib, digest, transaction)
     _: transaction.commit_objects(Val(out))
     Ok(projected)
@@ -331,7 +331,7 @@ store_replay_recorded_nix: fn(verification: StoreVerification, roots: HangarRoot
     if producer.provider != "nix" || candidate.name != found.name || candidate.version != found.version || candidate.reference != spec.raw || candidate.cache_identity.source_fingerprint != found.closure.output || candidate.cache_identity.policy_fingerprint != found.closure.cache_key || admitted != found.closure || admitted_envelope != found.envelope {
         return Err(store_locked_nix_error("locked Nix identity or catalog trust disagrees with recorded Hangar admission"))
     }
-    checked := if store_find_verified_user_profile_by_reference(verification, roots, spec.raw) == {
+    ^checked: if store_find_verified_user_profile_by_reference(verification, roots, spec.raw) == {
         .Ok(value) -> value
         .Err(error) -> {
             return Err(RealizeError.Store(error))
@@ -347,7 +347,7 @@ store_replay_recorded_nix: fn(verification: StoreVerification, roots: HangarRoot
             if receipt == "" {
                 return Err(store_locked_nix_error("locked Nix admission lacks its original signed-cache closure receipt"))
             }
-            requests := [NixOutputRequest]{}
+            ^requests: [NixOutputRequest]{}
             loop name in store_sorted_keys(candidate.named_outputs) {
                 digest: candidate.named_outputs[name]
                 store_path: producer.facts.get("nix.output.{name}") ?? return Err(store_locked_nix_error("locked Nix named output disagrees with its original admission"))
@@ -367,7 +367,7 @@ store_replay_recorded_nix: fn(verification: StoreVerification, roots: HangarRoot
             }
         }
     }
-    hit := checked ?? {
+    ^hit: checked ?? {
         missing: store_locked_nix_missing_members(roots, candidate)
         if ctx.offline && missing.len() > 0 {
             return Err(store_locked_nix_error("--offline cannot repair the locked Nix closure; missing {missing.join(", ")}"))
@@ -386,18 +386,18 @@ store_replay_recorded_nix: fn(verification: StoreVerification, roots: HangarRoot
 // The closure members of `candidate` whose Hangar objects are gone, named by
 // their Nix store path when the admission recorded one.
 store_locked_nix_missing_members: fn(roots: HangarRoots, candidate: StoreEntry) -> [String] Never! {
-    by_hash := [String:StoreEntry]{}
+    ^by_hash: [String:StoreEntry]{}
     loop entry in store_list_read_only(roots) -> by_hash[entry.envelope.output_hash] = entry
-    queue := [String]{}
+    ^queue: [String]{}
     loop reference in candidate.references -> queue.push(reference.copy())
-    missing := [String]{}
-    index := 0
+    ^missing: [String]{}
+    ^index: 0
     loop index < queue.len() {
         digest: queue[index]
         index += 1
         member: by_hash.get(digest)
         if !store_reuse_lexists(store_reuse_object_path(roots, digest)) {
-            label := digest.copy()
+            ^label: digest.copy()
             if member == .Val(found) {
                 if ProducerRecord.decode(found.producer_record) == .Ok(producer) {
                     label = producer.facts.get("nix.store-path") ?? digest

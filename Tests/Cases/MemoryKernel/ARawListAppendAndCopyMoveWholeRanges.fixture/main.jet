@@ -1,8 +1,8 @@
 use core.mem
 
 run: fn() {
-    values := {a: 1, b: 2, c: 3, d: 4, e: 5}
-    list := [Int]{9}
+    ^values: {a: 1, b: 2, c: 3, d: 4, e: 5}
+    ^list: [Int]{9}
     #Unsafe("every raw range stays inside the `values` tuple, which outlives each access") {
         first: mem.Ptr<Int>.from_addr(mem.address_of(values))
         grew: mem.list_append<Int>(list, first, 5)
@@ -13,7 +13,7 @@ run: fn() {
         mem.list_copy<Int>(first, list, 6, 0)
         print("{values.a} {values.b} {values.c} {values.d} {values.e}")
     }
-    many := [Int]{1, 2, 3}
+    ^many: [Int]{1, 2, 3}
     #Unsafe("each append reads the Ints `many` holds, which move before their old buffer goes") {
         loop _ in 0..<4 {
             count: many.len()
@@ -22,8 +22,8 @@ run: fn() {
         }
     }
     print("{many.len()} {many[0]} {many[22]} {many[47]}")
-    names := {a: "left", b: "right"}
-    words := [String]{"start"}
+    ^names: {a: "left", b: "right"}
+    ^words: [String]{"start"}
     #Unsafe("both ranges stay inside `names`; every String is a static text, which needs no single owner") {
         name: mem.Ptr<String>.from_addr(mem.address_of(names))
         _: mem.list_append<String>(words, name, 2)

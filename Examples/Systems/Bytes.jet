@@ -1,7 +1,7 @@
 // Bytes: builder + one read cursor + string-like decode (I9 / #1467).
 // Cursor EOF is position == len. Reader/Writer stay on core.encoding / core.term.
 run: fn() {
-    b := Bytes.with_capacity(16)
+    ^b: Bytes.with_capacity(16)
     print("capacity_ok: {b.capacity() >= 16}")
     one: U8{65}
     b.write_byte(one)
@@ -27,7 +27,7 @@ run: fn() {
     print("read_rest: {b.read()}")
     print("eof1: {b.eof()}")
 
-    spaced := Bytes.from([32, 104, 105, 32])
+    ^spaced: Bytes.from([32, 104, 105, 32])
     print("trim: {spaced.trim().string()}")
     print("lower: {Bytes.from([72, 73]).to_lower().string()}")
     print("title: {Bytes.from([104, 105]).to_title().string()}")
@@ -37,10 +37,10 @@ run: fn() {
     sep_comma: ","
     print("split: {Bytes.from([97, 44, 98]).split(sep_comma)}")
     print("lines: {Bytes.from([97, 10, 98]).lines()}")
-    sep := Bytes.from([45])
+    ^sep: Bytes.from([45])
     print("join: {sep.join(["x", "y"]).string()}")
 
-    c := b.copy()
+    ^c: b.copy()
     print("equal_copy: {b.equal(c)}")
     print("compare: {b.compare(c)}")
     print("buffer: {b.buffer()}")

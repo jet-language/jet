@@ -8,8 +8,8 @@ run: fn() {
         .Err(error) -> print(net.error_operation(error))
     }
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
-    client := net.tcp_connect(address) ?? panic("connect")
-    server := listener.accept() ?? panic("accept")
+    ^client: net.tcp_connect(address) ?? panic("connect")
+    ^server: listener.accept() ?? panic("accept")
     if server.read_bytes(1, deadline: expired) == {
         .Ok(_) -> { panic("expired read succeeded") }
         .Err(error) -> print(net.error_operation(error))

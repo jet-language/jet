@@ -13,15 +13,15 @@ read_text: fn(stream: ^net.TCPStream) -> String {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     peer: task {
-        stream := net.tcp_accept(listener) ?? panic("accept")
+        ^stream: net.tcp_accept(listener) ?? panic("accept")
         loop at in 0..<5 {
             time.sleep(2ms)
             net.tcp_write_all_bytes(stream, "{at};".bytes()) ?? panic("write")
         }
         net.tcp_close(stream) ?? panic("close peer")
     }
-    stream := net.tcp_connect(address) ?? panic("connect")
-    seen := ""
+    ^stream: net.tcp_connect(address) ?? panic("connect")
+    ^seen: ""
     loop seen.len() < "0;1;2;3;4;".len() -> seen = "{seen}{read_text(stream)}"
     assert(seen == "0;1;2;3;4;", "every chunk arrives through a fresh wait")
     net.tcp_close(stream) ?? panic("close")
@@ -76,14 +76,14 @@ read_text: fn(stream: ^net.TCPStream) -> String {
     rounds: 64
     peer: task {
         loop at in 0..<rounds {
-            stream := net.tcp_accept(listener) ?? panic("accept")
+            ^stream: net.tcp_accept(listener) ?? panic("accept")
             time.sleep(1ms)
             net.tcp_write_all_bytes(stream, "{at}".bytes()) ?? panic("write")
             net.tcp_close(stream) ?? panic("close peer")
         }
     }
     loop at in 0..<rounds {
-        stream := net.tcp_connect(address) ?? panic("connect")
+        ^stream: net.tcp_connect(address) ?? panic("connect")
         assert(read_text(stream) == ("{at}"), "round {at} reads its own peer")
         if at % 2 == 0 -> net.tcp_close(stream) ?? panic("close")
     }

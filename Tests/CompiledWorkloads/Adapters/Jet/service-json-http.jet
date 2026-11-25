@@ -39,7 +39,7 @@ json_error: fn(status: Int, message: String) -> HTTPResponse HTTPError! {
 handle_sum: fn(req: HTTPRequest, limit: Int) -> HTTPResponse HTTPError! {
     if !req.under_limit(limit) -> return json_error(413, "body-too-large")
     request: req.json<SumRequest>() ?? return json_error(400, "malformed-json")
-    total := 0
+    ^total: 0
     loop value in request.numbers -> total += value
     return Ok(http_server.json(200, SumResponse{sum: total}))
 }
@@ -86,7 +86,7 @@ unknown_status: fn(url: String, body: String) -> Int HTTPError! {
 slow_client: fn(address: String, timeout_ms: Int) {
     stream: net.tcp_connect(address) ?? panic("slow client connect failed")
     wait: Duration.milliseconds(timeout_ms) ?? panic("slow client duration failed")
-    headers := "".bytes()
+    ^headers: "".bytes()
     loop line in
         ["POST /sum HTTP/1.1", "Host: loopback", "Content-Type: application/json", "Content-Length: 20", "Connection: close", ""] {
         loop byte in line.bytes() -> headers.push(byte)
@@ -124,13 +124,13 @@ run_concurrent: fn(url: String, body: String, count: Int, workers: Int) {
 run: fn(args: WorkloadArgs) {
     raw: fs.read(args.input) ?? panic("read input")
     lines: raw.lines()
-    mode := "beginner"
-    bind := "127.0.0.1:0"
-    workers := 4
-    timeout_ms := 200
-    shutdown_ms := 100
-    body_limit := 64
-    ready_after_ms := 200
+    ^mode: "beginner"
+    ^bind: "127.0.0.1:0"
+    ^workers: 4
+    ^timeout_ms: 200
+    ^shutdown_ms: 100
+    ^body_limit: 64
+    ^ready_after_ms: 200
 
     // Parse the frozen CONFIG record before binding. Beginner values remain
     // bounded and loopback-only; expert values expose the same controls.
@@ -168,8 +168,8 @@ run: fn(args: WorkloadArgs) {
         server.serve() ?? panic("serve failed")
     }
     base: "http://{address}"
-    requests := 0
-    stopped := false
+    ^requests: 0
+    ^stopped: false
 
     loop line in lines {
         if line == "" || line.starts_with("#") -> next

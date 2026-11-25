@@ -132,14 +132,14 @@ field_int: fn(tree: Dyn, name: String) -> Int? Never! {
 }
 
 text_list: fn(values: [String]) -> Dyn Never! {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop value in values -> out.push(Dyn.Text(value.copy()))
     Dyn.Array(out)
 }
 
 // The SHA-256 of the canonical JSON of a bundle without its content_digest.
 repro_digest: fn(tree: Dyn) -> String Err! {
-    kept := [String:Dyn]{}
+    ^kept: [String:Dyn]{}
     if shape(tree) != "object" -> return Err("repro bundle is not an object")
     if tree == .Object(entries) {
         loop entry in entries {
@@ -151,13 +151,13 @@ repro_digest: fn(tree: Dyn) -> String Err! {
 }
 
 sorted_commands: fn(commands: [TierCommand]) -> [TierCommand] Never! {
-    out := commands.copy()
+    ^out: commands.copy()
     out.sort_by(fn(left: TierCommand, right: TierCommand) { left.tier <=> right.tier })
     out
 }
 
 commands_dyn: fn(commands: [TierCommand]) -> Dyn Never! {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop row in sorted_commands(commands) {
         out.push(Dyn.Object([String:Dyn]{"command": Dyn.Text(row.command.copy()), "tier": Dyn.Text(row.tier.copy())}))
     }
@@ -233,7 +233,7 @@ channel_bytes: fn(tree: Dyn, name: String, errors: ^[String]) -> [U8] Never! {
 }
 
 read_commands: fn(tree: Dyn, errors: ^[String]) -> [TierCommand] Never! {
-    out := [TierCommand]{}
+    ^out: [TierCommand]{}
     value: field(tree, "tier_commands") ?? Dyn.Null
     if shape(value) != "array" -> errors.push("repro tier_commands must be an array")
     if value == .Array(items) {
@@ -282,7 +282,7 @@ read_oracle: fn(tree: Dyn, errors: ^[String]) -> Oracle Never! {
 // Check a bundle. `current_snapshot` is the tree's source snapshot hash, or
 // "" to skip the staleness check.
 validate_repro: fn(tree: Dyn, current_snapshot: String) -> ReproCheck Never! {
-    errors := [String]{}
+    ^errors: [String]{}
     if shape(tree) != "object" {
         return ReproCheck{errors: [String]{"repro bundle is not an object"}, stale: false}
     }
@@ -354,9 +354,9 @@ validate_repro: fn(tree: Dyn, current_snapshot: String) -> ReproCheck Never! {
 reconstruct_repro: fn(tree: Dyn, tier: String) -> Reconstructed Err! {
     check: validate_repro(tree, "")
     if check.errors.len() > 0 -> return Err(check.errors.join("\n"))
-    errors := [String]{}
+    ^errors: [String]{}
     commands: read_commands(tree, errors)
-    selected := [TierCommand]{}
+    ^selected: [TierCommand]{}
     loop row in commands {
         if tier == "" || row.tier == tier -> selected.push(row.copy())
     }

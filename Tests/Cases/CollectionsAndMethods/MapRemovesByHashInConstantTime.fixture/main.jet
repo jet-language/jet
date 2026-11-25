@@ -7,14 +7,14 @@
 // keeps its order.
 run: fn() {
     count: 300000
-    numbers := [Int:Int]{}
+    ^numbers: [Int:Int]{}
     loop i in 0..<count {
         key: (i * 7919) % count
         numbers[key] = key * 2
     }
-    settled := 0
+    ^settled: 0
     loop (key, value) in numbers -> settled += value - key
-    removed := 0
+    ^removed: 0
     loop i in 0..<count {
         key: (i * 7919) % count
         if key % 2 == 1 {
@@ -22,7 +22,7 @@ run: fn() {
             if gone == key * 2 -> removed += 1
         }
     }
-    hits := 0
+    ^hits: 0
     loop key in 0..<count {
         if (numbers.get(key) ?? -1) == key * 2 -> hits += 1
     }
@@ -41,7 +41,7 @@ run: fn() {
         if key == 1 || key == count + 1 -> print("entry {key} {value}")
     }
 
-    words := [String:Int]{}
+    ^words: [String:Int]{}
     loop i in 0..<100000 -> words["w{i}"] = i
     loop i in 0..<100000 {
         if i % 3 == 0 {
@@ -49,9 +49,9 @@ run: fn() {
             if gone != i -> print("lost w{i}")
         }
     }
-    total := 0
-    in_order := true
-    previous := ""
+    ^total: 0
+    ^in_order: true
+    ^previous: ""
     loop (key, value) in words {
         if key <= previous -> in_order = false
         previous = key
@@ -59,14 +59,14 @@ run: fn() {
     }
     print("words: {words.len()} {total} {in_order} {words.get("w1") ?? -1} {words.has_key("w3")} {words.get("w99998") ?? -1}")
 
-    members := Set<String>.new()
+    ^members: Set<String>.new()
     loop i in 0..<100000 { members.add("m{i}") }
     loop i in 0..<100000 {
         if i % 3 == 0 -> members.remove("m{i}")
     }
     print("members: {members.len()} {members.has("m1")} {members.has("m3")} {members.has("m99998")}")
 
-    ranked := Rank.from([5, 1, 4, 2, 3])
+    ^ranked: Rank.from([5, 1, 4, 2, 3])
     ranked.remove(1)
     ranked.add(0)
     print("rank: {ranked.to_list()}")
@@ -80,7 +80,7 @@ ascending: fn(keys: [Int]) -> Bool {
 }
 
 key_sum: fn(numbers: [Int:Int]) -> Int {
-    total := 0
+    ^total: 0
     loop (key, _) in numbers -> total += key
     total
 }

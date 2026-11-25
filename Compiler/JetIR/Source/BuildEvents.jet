@@ -125,7 +125,7 @@ ir_event_query: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver
     if args.len() != 0 -> return ir_fail_slot(b, span, "{export} with {args.len()} arguments")
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
-    result := -1
+    ^result: -1
     if ir_unit_type(ty) -> _: ir_runtime(m, b, export, [Int]{handle}, -1) else {
         row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
         result = ir_runtime(m, b, export, [Int]{handle}, row)
@@ -146,7 +146,7 @@ ir_event_listen: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receive
     }
     handler_ty: ir_ty(m, p, b, args[args.len() - 1])
     closure_ty: handler_ty
-    carried := false
+    ^carried: false
     if ir_untag(closure_ty) == .Fn(params, fn_ret, _, _, _, _) {
         if params.len() != 1 {
             return ir_fail_slot(b, span, "Event handler taking {params.len()} parameters")
@@ -160,7 +160,7 @@ ir_event_listen: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receive
     if ir_failed(b) || event < 0 -> return -1
     scope: ir_expr(m, p, b, args[0])
     if ir_failed(b) || scope < 0 -> return -1
-    priority := ir_word_const(m, b, 0)
+    ^priority: ir_word_const(m, b, 0)
     if prioritized {
         value: ir_expr(m, p, b, args[1])
         if ir_failed(b) || value < 0 -> return -1
@@ -195,8 +195,8 @@ ir_event_emit: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver:
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     event: ir_expr(m, p, b, receiver)
     if ir_failed(b) || event < 0 -> return -1
-    payload := -1
-    slot := ir_word_const(m, b, 0)
+    ^payload: -1
+    ^slot: ir_word_const(m, b, 0)
     if !ir_unit_type(ir_ty(m, p, b, args[0])) {
         payload = ir_expr(m, p, b, args[0])
         if ir_failed(b) || payload < 0 -> return -1
@@ -242,7 +242,7 @@ ir_hook_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args
 ir_hook_make: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, fallback: Int, span: Span) -[]> Int {
     row: ir_event_family_row(m, p, result_ty) ?? return ir_fail_slot(b, span, "Hook.new producing {ir_type_name(result_ty)}")
     fallback_ty: ir_type_args(ir_untag(result_ty))[1].copy()
-    slot := ir_word_const(m, b, 0)
+    ^slot: ir_word_const(m, b, 0)
     if !ir_unit_type(fallback_ty) {
         if fallback < 0 -> return -1
         slot = ir_reactive_moved_slot(m, p, b, fallback, span)
@@ -318,7 +318,7 @@ ir_point_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition: TConstan
 ir_async_event_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, event_ty: Type, args: [Int], span: Span) -> Int Never! {
     row: ir_event_family_row(m, p, event_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(event_ty)}")
     if args.len() != 2 -> return ir_fail_slot(b, span, "AsyncEvent.new with {args.len()} arguments")
-    failure_ty := ir_type_args(ir_untag(event_ty))[1].copy()
+    ^failure_ty: ir_type_args(ir_untag(event_ty))[1].copy()
     e_meta: ir_lazy_meta(m, p, b, failure_ty, span)
     if e_meta < 0 -> return -1
     handled_ty: Type.Result{ok: Type.Named{name: "Unit"}, err: failure_ty.move()}
@@ -375,7 +375,7 @@ ir_dispatch_report_failures: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: T
 
 // A value the runtime writes to frame storage through `export(args, out)`.
 ir_event_out_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, export: String, args: [Int], span: Span) -> Int Never! {
-    call_args := args.copy()
+    ^call_args: args.copy()
     if ir_unit_type(ty) {
         call_args.push(ir_word_const(m, b, 0))
         _: ir_runtime(m, b, export, call_args, -1)
@@ -404,7 +404,7 @@ ir_event_out_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, expo
 // payload value to release after the call (-1 for none).
 ir_event_lent_payload: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, arg: Int) -> {slot: Int, value: Int} Never! {
     if ir_unit_type(ir_ty(m, p, b, arg)) {
-        _ := ir_expr(m, p, b, arg)
+        ^_: ir_expr(m, p, b, arg)
         return {slot: ir_word_const(m, b, 0), value: -1}
     }
     value: ir_expr(m, p, b, arg)
@@ -423,7 +423,7 @@ ir_hook_run: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: I
     if ir_failed(b) || hook < 0 -> return -1
     payload: ir_event_lent_payload(m, p, b, args[0])
     if ir_failed(b) || payload.slot < 0 -> return -1
-    fallback_slot := ir_word_const(m, b, 0)
+    ^fallback_slot: ir_word_const(m, b, 0)
     fallback: ir_expr(m, p, b, args[1])
     if ir_failed(b) -> return -1
     if !ir_unit_type(ty) {
@@ -559,7 +559,7 @@ ir_async_emit: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver:
     payload_ty: ir_ty(m, p, b, args[0])
     event: ir_expr(m, p, b, receiver)
     if ir_failed(b) || event < 0 -> return -1
-    slot := ir_word_const(m, b, 0)
+    ^slot: ir_word_const(m, b, 0)
     payload: ir_expr(m, p, b, args[0])
     if ir_failed(b) -> return -1
     if !ir_unit_type(payload_ty) {

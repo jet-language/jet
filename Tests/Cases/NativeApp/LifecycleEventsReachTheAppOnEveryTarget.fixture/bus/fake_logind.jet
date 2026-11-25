@@ -20,14 +20,14 @@ LOGIND: ":1.2"
 run: fn() -[FS, Net, Time]> {
     listener: net.unix_listen("system.sock") ?? panic("listen on system.sock: {err}")
     files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
-    stream := net.unix_accept(listener) ?? panic("accept on system.sock: {err}")
-    said := [U8]{}
-    authenticated := false
-    sent := 0
-    members := [String]{}
-    rules := [String]{}
-    slept := false
-    idle := 0
+    ^stream: net.unix_accept(listener) ?? panic("accept on system.sock: {err}")
+    ^said: [U8]{}
+    ^authenticated: false
+    ^sent: 0
+    ^members: [String]{}
+    ^rules: [String]{}
+    ^slept: false
+    ^idle: 0
     loop idle < 6000 {
         if !slept && rules.len() > 0 && files.exists("sleep.go") {
             slept = true
@@ -65,8 +65,8 @@ run: fn() -[FS, Net, Time]> {
             sent += 1
             member: text_field(m, 3)
             members.push(member.copy())
-            body := [U8]{}
-            signature := ""
+            ^body: [U8]{}
+            ^signature: ""
             if member == "Hello" {
                 put_text(body, APP)
                 signature = "s"
@@ -83,7 +83,7 @@ run: fn() -[FS, Net, Time]> {
 
 // The bus's answer `serial` to the app's call `to`.
 reply: fn(serial: Int, to: Int, signature: String, body: [U8]) -> [U8] {
-    out := start(2, serial)
+    ^out: start(2, serial)
     field_word(out, 5, to)
     field_text(out, 6, 115, APP)
     field_text(out, 7, 115, "org.freedesktop.DBus")
@@ -95,13 +95,13 @@ reply: fn(serial: Int, to: Int, signature: String, body: [U8]) -> [U8] {
 // logind's signal `serial` that the machine goes to sleep (`sleeping`) or
 // woke.
 prepare_for_sleep: fn(serial: Int, sleeping: Bool) -> [U8] {
-    out := start(4, serial)
+    ^out: start(4, serial)
     field_text(out, 1, 111, "/org/freedesktop/login1")
     field_text(out, 2, 115, "org.freedesktop.login1.Manager")
     field_text(out, 3, 115, "PrepareForSleep")
     field_text(out, 7, 115, LOGIND)
     field_signature(out, 8, "b")
-    body := [U8]{}
+    ^body: [U8]{}
     put_word(body, if sleeping -> 1 else -> 0)
     finish(out, body)
     out
@@ -110,7 +110,7 @@ prepare_for_sleep: fn(serial: Int, sleeping: Bool) -> [U8] {
 // A message's fixed header: little-endian, `kind`, no flags, version 1;
 // `finish` fills in the lengths.
 start: fn(kind: Int, serial: Int) -> [U8] {
-    out := [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
+    ^out: [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
     put_word(out, 0)
     put_word(out, serial)
     put_word(out, 0)
@@ -173,8 +173,8 @@ set_word: fn(out: ^[U8], at: Int, n: Int) {
 }
 
 word_bytes: fn(n: Int) -> [U8] {
-    v := n
-    bytes := [U8]{}
+    ^v: n
+    ^bytes: [U8]{}
     loop _ in 0..<4 {
         bytes.push(U8{v % 256})
         v = v /% 256
@@ -201,7 +201,7 @@ text_field: fn(m: [U8], code: Int) -> String {
 // -1.
 field_at: fn(m: [U8], code: Int) -> Int {
     end: 16 + word(m, 12)
-    at := 16
+    ^at: 16
     loop at < end {
         found: Int{m[at]}
         kind: Int{m[at + 2]}

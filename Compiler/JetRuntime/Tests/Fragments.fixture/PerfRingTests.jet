@@ -121,7 +121,7 @@ perf_ring_tests: fn() {
     // throttles at; that sample; 3 samples lost; the unthrottle; the next
     // sample, its count past the throttled time; 2 more lost; a throttle
     // with no unthrottle after it, and its sample.
-    at := PERF_RING_START
+    ^at: PERF_RING_START
     at = wrapping(at + perf_ring_sample(data, at, wrapping(epoch + I64{1000}), I64{125000}))
     at = wrapping(at + perf_ring_throttle(data, at, PERF_RING_THROTTLE, wrapping(epoch + I64{1500})))
     at = wrapping(at + perf_ring_sample(data, at, wrapping(epoch + I64{1600}), I64{250000}))
@@ -162,9 +162,9 @@ perf_ring_tests: fn() {
     rt_text_store(throttled, I64{1500})
     rt_text_store(wrapping(throttled + I64{8}), I64{9000})
     rt_text_store(wrapping(throttled + I64{16}), I64{9500})
-    samples := I64{0}
-    throttles := I64{0}
-    cursor := I64{16}
+    ^samples: I64{0}
+    ^throttles: I64{0}
+    ^cursor: I64{16}
     loop cursor < length {
         head: rt_text_word(wrapping(bytes + cursor))
         words: (head >> PERF_SAMPLES_ADDRESS_BITS) & I64{2047}
@@ -200,7 +200,7 @@ perf_ring_tests: fn() {
         perf_precise_rings = I64{0}
         perf_zone_clock = I64{0}
     }
-    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+    ^_: observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
     jet_rt_free(bytes, length, I64{8})
     jet_rt_free(times, I64{32}, I64{8})
     jet_rt_free(counts, I64{32}, I64{8})

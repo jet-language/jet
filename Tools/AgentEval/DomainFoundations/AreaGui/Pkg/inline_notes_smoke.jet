@@ -12,16 +12,16 @@ use {
 run: fn() {
     meeting_title: "Meeting"
     ideas_title: "Ideas"
-    body := reactive.signal("old")
-    selected := reactive.signal(0)
-    dark := reactive.signal(true)
-    settings_open := reactive.signal(false)
-    backend := ui.tui_backend()
+    ^body: reactive.signal("old")
+    ^selected: reactive.signal(0)
+    ^dark: reactive.signal(true)
+    ^settings_open: reactive.signal(false)
+    ^backend: ui.tui_backend()
     render_backend: backend.copy()
     ui.reactive_render(fn() {
         marker: if selected.get() == 0 -> "* " else -> "  "
         mode: if dark.get() -> "dark" else -> "light"
-        rows := [UINode]{
+        ^rows: [UINode]{
             ui.node_color("JET NOTES — {mode} mode", 72.0, 1.0, Color{r: 22, g: 22, b: 22, a: 255}),
             ui.node_role("{marker}{meeting_title}", 28.0, 1.0, ui.aria_role_button()),
             ui.node_role("  {ideas_title}", 28.0, 1.0, ui.aria_role_button()),

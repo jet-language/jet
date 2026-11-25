@@ -43,7 +43,7 @@ derivation_identity: fn(source: String, build: String, run: String, target: Stri
 
 derivation_record: fn(subject: String, claim: String, producer: String, method: DerivationMethod, rule: String, premises: [String], identity: DerivationIdentity) -> DerivationRecord Never! {
     sorted_premises: derivation_strings_sorted_unique(premises)
-    record := DerivationRecord{
+    ^record: DerivationRecord{
         id: "",
         subject: subject,
         claim: claim,
@@ -62,7 +62,7 @@ derivation_record: fn(subject: String, claim: String, producer: String, method: 
 }
 
 derivation_record_with_payload: fn(record: ^^DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
-    updated := record
+    ^updated: record
     updated.payload = Val(payload)
     updated.id = derivation_record_id(updated)
     updated
@@ -94,7 +94,7 @@ derivation_payload_kind: fn(payload: DerivationPayload) -> String Never! {
 derivation_record_json: fn(record: DerivationRecord) -> String Never! {
     premises: derivation_json_strings(record.premises)
     assumptions: derivation_json_strings(record.assumptions)
-    observation := "null"
+    ^observation: "null"
     if record.observation != None {
         item: record.observation ?? DerivationObservation{event_id: None, counterexample_id: None}
         counterexample: if item.counterexample_id == None -> "null" else -> derivation_record_quote(item.counterexample_id ?? "")
@@ -111,17 +111,17 @@ derivation_optional_payload_json: fn(payload: DerivationPayload?, absent: String
 }
 
 derivation_strings_sorted_unique: fn(values: [String]) -> [String] Never! {
-    sorted := values
+    ^sorted: values
     loop i in 1..<sorted.len() {
         value: sorted[i]
-        j := i
+        ^j: i
         loop j > 0 && sorted[j - 1] > value {
             sorted[j] = sorted[j - 1]
             j -= 1
         }
         sorted[j] = value
     }
-    result := [String]{}
+    ^result: [String]{}
     loop value in sorted {
         if result.len() == 0 || result[result.len() - 1] != value -> result.push(value)
     }
@@ -150,7 +150,7 @@ derivation_disposition_raw: fn(disposition: DerivationDisposition) -> String Nev
 }
 
 derivation_json_strings: fn(values: [String]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop value in values -> rows.push(derivation_record_quote(value))
     rows.join(",")
 }
@@ -165,7 +165,7 @@ derivation_record_id: fn(record: DerivationRecord) -> String Never! {
     payload: derivation_optional_payload_json(record.payload, "")
     separator: String.from_bytes([U8]{0}) ?? ""
     premises: record.premises.join(separator)
-    state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
+    ^state: DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
     derivation_hash_frame(state, record.subject)
     derivation_hash_frame(state, record.claim)
     derivation_hash_frame(state, record.producer)
@@ -212,7 +212,7 @@ derivation_hash_hex: fn(state: DerivationHashState) -> String Never! {
     digits: "0123456789abcdef".bytes()
     first: Int{state.first}
     second: Int{state.second}
-    output := [U8]{}
+    ^output: [U8]{}
     loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) {
         output.push(digits[((first >> shift)) & 15])
     }
@@ -224,8 +224,8 @@ derivation_hash_hex: fn(state: DerivationHashState) -> String Never! {
 
 derivation_json_quote: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    output := "\""
-    index := 0
+    ^output: "\""
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         if byte == 34 {
@@ -289,12 +289,12 @@ derivation_hex_byte: fn(value: Int) -> String Never! {
 }
 
 frame_schedule_json: fn(schedule: FrameSchedule) -> String Never! {
-    operations := [String]{}
-    dependencies := [String]{}
-    transfers := [String]{}
-    reuse := [String]{}
-    retentions := [String]{}
-    conservative := [String]{}
+    ^operations: [String]{}
+    ^dependencies: [String]{}
+    ^transfers: [String]{}
+    ^reuse: [String]{}
+    ^retentions: [String]{}
+    ^conservative: [String]{}
     loop operation in schedule.operations -> operations.push(frame_operation_json(operation))
     loop dependency in schedule.dependencies -> dependencies.push(frame_dependency_json(dependency))
     loop transfer in schedule.transfers -> transfers.push(frame_transfer_json(transfer))
@@ -311,7 +311,7 @@ frame_schedule_json: fn(schedule: FrameSchedule) -> String Never! {
 }
 
 frame_operation_json: fn(operation: FrameOperation) -> String Never! {
-    accesses := [String]{}
+    ^accesses: [String]{}
     loop access in operation.accesses -> accesses.push(resource_access_json(access))
     provider: if operation.completion_provider == None -> "" else -> ",\"completion_provider\":{derivation_json_quote(operation.completion_provider ?? "")}"
     accesses_json: accesses.join(",")

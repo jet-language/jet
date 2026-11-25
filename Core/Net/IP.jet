@@ -38,7 +38,7 @@ ipv4: fn(a: Int, b: Int, c: Int, d: Int) -> IPv4 IOError! {
 }
 
 parse_ipv4: fn(text: String) -> IPv4 IOError! {
-    parts := split_dot(text)
+    ^parts: split_dot(text)
     if parts.len() != 4 -> return Err(net_err("IPv4 needs four dotted octets"))
     a: parse_oct(parts[0]) ?? return Err(net_err("bad IPv4 octet"))
     b: parse_oct(parts[1]) ?? return Err(net_err("bad IPv4 octet"))
@@ -118,7 +118,7 @@ is_public_destination: fn(addr: IPv4) -> Bool Never! {
 }
 
 network: fn(cidr: String) -> Network IOError! {
-    slash := -1
+    ^slash: -1
     raw: cidr.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{47}) {
@@ -156,16 +156,16 @@ network_hosts: fn(net: Network) -> Int Never! {
 parse_ipv6: fn(text: String) -> IPv6 IOError! {
     raw: text.bytes()
     if raw.len() == 0 -> return Err(net_err("empty IPv6"))
-    dbl := find_dcolon(text)
+    ^dbl: find_dcolon(text)
     if dbl >= 0 {
         tail: slice_u(raw, dbl + 2, raw.len())
         if find_dcolon(String.from_bytes(tail) ?? "") >= 0 {
             return Err(net_err("IPv6 may contain only one: "))
         }
     }
-    left := String.from_bytes(raw) ?? ""
-    right := ""
-    compressed := dbl >= 0
+    ^left: String.from_bytes(raw) ?? ""
+    ^right: ""
+    ^compressed: dbl >= 0
     if compressed {
         left = String.from_bytes(slice_u(raw, 0, dbl)) ?? ""
         right = String.from_bytes(slice_u(raw, dbl + 2, raw.len())) ?? ""
@@ -176,12 +176,12 @@ parse_ipv6: fn(text: String) -> IPv6 IOError! {
     if compressed {
         if total >= 8 -> return Err(net_err("IPv6: must replace at least one group"))
     } else if total != 8 { return Err(net_err("IPv6 needs 8 groups or a: ")) }
-    words := [Int]{}
+    ^words: [Int]{}
     loop w in lw {
         n: parse_hex4(w) ?? return Err(net_err("bad IPv6 group"))
         words.push(n)
     }
-    pad := 0
+    ^pad: 0
     if compressed -> pad = 8 - total
     loop pad > 0 {
         words.push(0)
@@ -196,8 +196,8 @@ parse_ipv6: fn(text: String) -> IPv6 IOError! {
 }
 
 ipv6_to_string: fn(addr: IPv6) -> String Never! {
-    s := ""
-    i := 0
+    ^s: ""
+    ^i: 0
     loop i < addr.words.len() {
         piece: hex4(addr.words[i])
         if i == 0 -> s = piece else -> s = "{s}:{piece}"
@@ -208,7 +208,7 @@ ipv6_to_string: fn(addr: IPv6) -> String Never! {
 
 ipv6_is_loopback: fn(addr: IPv6) -> Bool Never! {
     if addr.words.len() != 8 -> return false
-    i := 0
+    ^i: 0
     loop i < 7 {
         if addr.words[i] != 0 -> return false
         i += 1
@@ -235,8 +235,8 @@ prefix_mask: fn(prefix: Int) -> Int Never! {
 }
 
 int_pow2: fn(n: Int) -> Int Never! {
-    acc := 1
-    i := 0
+    ^acc: 1
+    ^i: 0
     loop i < n {
         acc *= 2
         i += 1
@@ -254,11 +254,11 @@ split_colon: fn(text: String) -> [String] Never! {
 
 split_byte: fn(text: String, code: Int) -> [String] Never! {
     raw: text.bytes()
-    out := [String]{}
-    start := 0
-    i := 0
+    ^out: [String]{}
+    ^start: 0
+    ^i: 0
     loop i <= raw.len() {
-        n := 0
+        ^n: 0
         if i < raw.len() -> n = (Int{raw[i]})
         if i == raw.len() || n == code {
             out.push(String.from_bytes(slice_u(raw, start, i)) ?? "")
@@ -273,7 +273,7 @@ parse_oct: fn(text: String) -> Int? {
     raw: text.bytes()
     if raw.len() == 0 || raw.len() > 3 -> return None
     if raw.len() > 1 && raw[0] == (U8{48}) -> return None
-    n := 0
+    ^n: 0
     loop b in raw {
         d: Int{b}
         if d < 48 || d > 57 -> return None
@@ -286,7 +286,7 @@ parse_oct: fn(text: String) -> Int? {
 parse_int: fn(text: String) -> Int? {
     raw: text.bytes()
     if raw.len() == 0 -> return None
-    n := 0
+    ^n: 0
     loop b in raw {
         d: Int{b}
         if d < 48 || d > 57 -> return None
@@ -300,7 +300,7 @@ parse_int: fn(text: String) -> Int? {
 parse_hex4: fn(text: String) -> Int? {
     raw: text.bytes()
     if raw.len() == 0 || raw.len() > 4 -> return None
-    n := 0
+    ^n: 0
     loop b in raw {
         d: hex_val(b)
         if d < 0 -> return None
@@ -318,10 +318,10 @@ hex_val: fn(b: U8) -> Int Never! {
 }
 
 hex4: fn(n: Int) -> String {
-    v := n
+    ^v: n
     if v < 0 -> v = 0
-    out := [U8]{}
-    shift := 12
+    ^out: [U8]{}
+    ^shift: 12
     loop shift >= 0 {
         d: (v /% int_pow2(shift)) %% 16
         if d < 10 -> out.push(U8{48 + d}) else -> out.push(U8{97 + (d - 10)})
@@ -333,7 +333,7 @@ hex4: fn(n: Int) -> String {
 find_dcolon: fn(text: String) -> Int Never! {
     raw: text.bytes()
     if raw.len() < 2 -> return -1
-    i := 0
+    ^i: 0
     loop i + 1 < raw.len() {
         if raw[i] == (U8{58}) && raw[i + 1] == (U8{58}) -> return i
         i += 1
@@ -342,8 +342,8 @@ find_dcolon: fn(text: String) -> Int Never! {
 }
 
 slice_u: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    limit := if end < raw.len() -> end else -> raw.len()
+    ^out: [U8]{}
+    ^limit: if end < raw.len() -> end else -> raw.len()
     if start < 0 || start >= limit -> return out
     loop i in start..<limit -> out.push(raw[i])
     out
@@ -417,21 +417,21 @@ subnet_of: fn(inner: Network, outer: Network) -> Bool Never! {
 supernet_of: fn(outer: Network, inner: Network) -> Bool Never! { subnet_of(inner, outer) }
 
 supernet: fn(net: Network) -> Network Never! {
-    p := net.prefix - 1
+    ^p: net.prefix - 1
     if p < 0 -> p = 0
     masked: ipv4_from_int((ipv4_int(net.addr)) & prefix_mask(p)) ?? net.addr
     {addr: masked, prefix: p}
 }
 
 subnets: fn(net: Network, new_prefix: Int) -> [Network] Never! {
-    out := [Network]{}
+    ^out: [Network]{}
     if net.prefix < 0 || net.prefix > 32 || new_prefix <= net.prefix || new_prefix > 32 {
         return out
     }
     step: int_pow2(32 - new_prefix)
     start: ipv4_int(net.addr)
     end: start + int_pow2(32 - net.prefix)
-    n := start
+    ^n: start
     loop n < end {
         addr: ipv4_from_int(n) ?? net.addr
         out.push(Network{addr: addr, prefix: new_prefix})
@@ -441,7 +441,7 @@ subnets: fn(net: Network, new_prefix: Int) -> [Network] Never! {
 }
 
 hosts: fn(net: Network) -> [IPv4] Never! {
-    out := [IPv4]{}
+    ^out: [IPv4]{}
     if net.prefix < 0 || net.prefix > 32 -> return out
     if net.prefix >= 31 {
         out.push(net.addr)
@@ -450,7 +450,7 @@ hosts: fn(net: Network) -> [IPv4] Never! {
     }
     start: ipv4_int(net.addr) + 1
     stop: ipv4_int(network_broadcast(net))
-    n := start
+    ^n: start
     loop n < stop {
         out.push(ipv4_from_int(n) ?? net.addr)
         n += 1
@@ -460,7 +460,7 @@ hosts: fn(net: Network) -> [IPv4] Never! {
 
 interface: fn(text: String) -> IPv4Interface IOError! {
     network_value: network(text) ?? return Err(net_err("invalid interface network"))
-    slash := -1
+    ^slash: -1
     raw: text.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{47}) {
@@ -468,7 +468,7 @@ interface: fn(text: String) -> IPv4Interface IOError! {
             break
         }
     }
-    host := text
+    ^host: text
     if slash >= 0 -> host = slice_str(text, 0, slash)
     addr: parse_ipv4(host) ?? return Err(net_err("invalid interface address"))
     Ok(IPv4Interface{addr: addr, network: network_value})
@@ -548,7 +548,7 @@ ipv6_is_public_destination: fn(addr: IPv6) -> Bool Never! {
 
 ipv6_packed: fn(addr: IPv6) -> [U8] Never! {
     if addr.words.len() != 8 -> return [U8]{}
-    out := [U8]{}
+    ^out: [U8]{}
     loop w in addr.words {
         out.push(wrapping(U8{(w /% 256) %% 256}))
         out.push(wrapping(U8{w %% 256}))
@@ -558,12 +558,12 @@ ipv6_packed: fn(addr: IPv6) -> [U8] Never! {
 
 ipv6_compressed: fn(addr: IPv6) -> String Never! {
     if addr.words.len() != 8 -> return ipv6_to_string(addr)
-    best_i := -1
-    best_n := 0
-    i := 0
+    ^best_i: -1
+    ^best_n: 0
+    ^i: 0
     loop i < 8 {
         if addr.words[i] == 0 {
-            j := i
+            ^j: i
             loop j < 8 && addr.words[j] == 0 -> j += 1
             n: j - i
             if n > best_n {
@@ -574,7 +574,7 @@ ipv6_compressed: fn(addr: IPv6) -> String Never! {
         } else { i += 1 }
     }
     if best_n < 2 -> best_i = -1
-    s := ""
+    ^s: ""
     i = 0
     loop i < 8 {
         if i == best_i {
@@ -600,12 +600,12 @@ compare_ipv4: fn(a: IPv4, b: IPv4) -> Int Never! {
 ipv4_equals: fn(a: IPv4, b: IPv4) -> Bool Never! { ipv4_int(a) == ipv4_int(b) }
 
 hex_trim: fn(n: Int) -> String {
-    v := n
+    ^v: n
     if v < 0 -> v = 0
     if v == 0 -> return "0"
-    out := [U8]{}
-    started := false
-    shift := 12
+    ^out: [U8]{}
+    ^started: false
+    ^shift: 12
     loop shift >= 0 {
         d: (v /% int_pow2(shift)) %% 16
         if d != 0 || started || shift == 0 {
@@ -619,7 +619,7 @@ hex_trim: fn(n: Int) -> String {
 }
 
 ends_colon_str: fn(text: String) -> Bool {
-    found := false
+    ^found: false
     loop b in text.bytes() -> found = Int{b} == 58
     return found
 }

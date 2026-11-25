@@ -59,7 +59,7 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
     // `unsafe:` is a package-only field: `.Deny` is an empty path list beside
     // the source policy declarations, never one of them.
     assert_eq(facts.policy.unsafe_paths, Val([String]{}))
-    keys := [String]{}
+    ^keys: [String]{}
     loop declaration in facts.policy.declarations -> keys.push(policy_key_name(declaration.key))
     assert_eq(keys, [String]{"gc", "explicit_units", "copies", "sentries"})
     assert_eq(facts.authority.deny, Val([String]{"Mem.Alloc"}))
@@ -102,7 +102,7 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
     facts: PackageFacts.parse("\nname: \"authority_tiers\"\nversion: \"0.1.0\"\nauthority: {{\n    allow: [IO], deny: [Exec],\n    grants: {{ \"image-codec\": [FS.Read] }},\n    trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ stripe: allow }}, require: none }},\n    providers: {{ nix: {{ registry: \"nixpkgs\", deny: [\"openssl-1.0\"] }} }},\n}}\n", "package.jet") ?? panic("authority")
     assert_eq(facts.authority.allow, Val([String]{"IO"}))
     assert_eq(facts.authority.grants.len(), 1)
-    requirement := ProvenanceRequirement?{None}
+    ^requirement: ProvenanceRequirement?{None}
     if facts.authority.trust == {
         .Val(trust) -> { requirement = trust.require }
         .None -> {}
@@ -113,9 +113,9 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
 }
 
 #Test("package_guarantees_are_tighten_only") {
-    weak := PackagePolicy.default()
+    ^weak: PackagePolicy.default()
     weak.contain.push("libxml")
-    strong := weak.copy()
+    ^strong: weak.copy()
     strong.contain.push("libz")
     strong.harden = true
     if weak.guarantees_tighten(strong) == {
@@ -129,12 +129,12 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
 }
 
 #Test("a member inherits or raises its root's claims floor and never lowers it") {
-    root := PackagePolicy.default()
+    ^root: PackagePolicy.default()
     root.claims_min = Val(ClaimsGrade.Examples(2))
     unset: PackagePolicy.default()
-    raised := PackagePolicy.default()
+    ^raised: PackagePolicy.default()
     raised.claims_min = Val(ClaimsGrade.Proved)
-    lowered := PackagePolicy.default()
+    ^lowered: PackagePolicy.default()
     lowered.claims_min = Val(ClaimsGrade.Examples(1))
     inherited: if root.member_claims_floor(unset) == {
         .Ok(found) -> found

@@ -45,7 +45,7 @@ publication_checkout_cleanup_diagnostic: fn(checkout: PublicationPublishCheckout
 }
 
 publication_attach_checkout_cleanup: fn(primary: PublicationDiagnosticError, checkout: PublicationPublishCheckout, error: IOError) -> PublicationDiagnosticError Never! {
-    diagnostic := primary.diagnostic
+    ^diagnostic: primary.diagnostic
     existing: diagnostic.detail ?? ""
     separator: if existing != "" && !existing.ends_with("\n") -> "\n" else -> ""
     diagnostic.detail = Val("{existing}{separator}cleanup failed: {publication_checkout_cleanup_problem(checkout, error)}")
@@ -142,7 +142,7 @@ publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: Stri
     if paths.len() == 0 {
         return Err(publication_registry_cache_error(registry, "publication has no explicit paths"))
     }
-    stage := paths.copy()
+    ^stage: paths.copy()
     if expected == .Val(entry) {
         if !entry.yanked {
             referrers: publication_existing_oci_referrer_root(repo, entry.content_hash) ?? return Err(publication_registry_cache_error(registry, "{err}"))
@@ -152,8 +152,8 @@ publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: Stri
             stage.push(referrers)
         }
     }
-    allowed := [String]{}
-    add := [String]{"add", "--"}
+    ^allowed: [String]{}
+    ^add: [String]{"add", "--"}
     loop path in stage {
         relative: publication_checkout_relative(repo, path) ?? return Err(publication_registry_cache_error(registry, "publication path escapes its checkout"))
         allowed.push(relative.copy())
@@ -207,8 +207,8 @@ publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: Stri
 
 publication_verify_remote_winner: fn(registry: PublicationRegistryConfig, expected: PublicationIndexEntry) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool PublicationDiagnosticError! {
     checkout: publication_prepare_publish_checkout(registry)
-    verdict := false
-    failure := PublicationDiagnosticError?{None}
+    ^verdict: false
+    ^failure: PublicationDiagnosticError?{None}
     if publication_verify_remote_winner_in(registry, checkout.path, expected) == {
         .Ok(matched) -> { verdict = matched }
         .Err(error) -> failure = Val(error)
@@ -231,7 +231,7 @@ publication_verify_remote_winner_in: fn(registry: PublicationRegistryConfig, rep
 publication_rebuild_publication_after_race: fn(registry: PublicationRegistryConfig, stale_repo: String, message: String, expected: PublicationIndexEntry?) -[FS, Env, Exec, Net, Time, Time.Wait]> PublicationDiagnosticError! {
     entry: expected ?? return Err(publication_registry_cache_error(registry, "concurrent publication cannot be rebuilt without an immutable entry"))
     checkout: publication_prepare_publish_checkout(registry)
-    failure := PublicationDiagnosticError?{None}
+    ^failure: PublicationDiagnosticError?{None}
     if publication_rebuild_publication_in(registry, checkout.path, stale_repo, message, entry) == .Err(error) {
         failure = Val(error)
     }
@@ -240,7 +240,7 @@ publication_rebuild_publication_after_race: fn(registry: PublicationRegistryConf
 
 publication_rebuild_publication_in: fn(registry: PublicationRegistryConfig, repo: String, stale_repo: String, message: String, expected: PublicationIndexEntry) -[FS, Env, Exec, Net, Time, Time.Wait]> PublicationDiagnosticError! {
     index: publication_index_entry_path(repo, expected.name) ?? return Err(publication_registry_cache_error(registry, "{err}"))
-    paths := [String]{index}
+    ^paths: [String]{index}
     if expected.yanked {
         flipped: publication_mark_yanked(repo, expected.name, expected.version) ?? return Err(publication_registry_cache_error(registry, "{err}"))
         if !flipped {
@@ -297,7 +297,7 @@ publication_remote_contains_entry: fn(registry: PublicationRegistryConfig, trans
         }
     }
     if !shown.success -> return false
-    matched := false
+    ^matched: false
     loop line in shown.output.lines() {
         if publication_index_parse_line(line) == .Val(entry) {
             if entry == expected -> matched = true

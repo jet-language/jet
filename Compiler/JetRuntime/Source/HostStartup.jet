@@ -8,30 +8,30 @@
 // The native logical cell alone owns environment writes; this index is startup.
 // All storage uses the one IR .Global mechanism, never foreign data imports.
 
-host_argc := I64{-1}
+^host_argc: I64{-1}
 
-host_argv := I64{0}
+^host_argv: I64{0}
 
-host_envp := I64{0}
+^host_envp: I64{0}
 
 // 1 when host_envp is a main's startup stack, whose pointer array and strings
 // live as long as the process; an entryless host only lends its envp.
-host_envp_lives := I64{0}
+^host_envp_lives: I64{0}
 
-host_env_rows := I64{0}
+^host_env_rows: I64{0}
 
-host_env_length := I64{0}
+^host_env_length: I64{0}
 
 // A main's startup environment until it is indexed: once state @0, entry
 // count @8, the copied envp pointers @16 (host_environment_require). 0 when
 // capture indexed it at registration, or nothing captured it.
-host_env_pending := I64{0}
+^host_env_pending: I64{0}
 
 // jet_rt_host_env_capture, installed by jet_rt_host_env_init: the
 // before-user-code environment snapshot is taken
 // exactly when the program links a reader of it; a program with none cannot
 // tell the copy was never made.
-host_env_capture_code := I64{0}
+^host_env_capture_code: I64{0}
 
 // runtime-init: 4 when host_env_rows,host_env_length,logical_env_root
 #Export(c) jet_rt_host_env_init: fn() {
@@ -50,7 +50,7 @@ rt_host_env_capture_address: fn() -> I64 {
 host_environment_split: fn(bytes: I64) -> I64 {
     // `bytes` borrows one live NUL-terminated startup string.
     if (rt_text_byte(bytes) == I64{0}) { return I64{-1} }
-    index := I64{1}
+    ^index: I64{1}
     loop {
         byte: rt_text_byte(wrapping(bytes + index))
         if (byte == I64{0}) { return I64{-1} }
@@ -105,7 +105,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
     capture: host_env_capture_code
     if (capture != I64{0}) {
         // The envp array is word aligned: bit 0 tells capture it is a main's.
-        _ := coll_call1(capture, if main -> envp | I64{1} else -> envp)
+        ^_: coll_call1(capture, if main -> envp | I64{1} else -> envp)
     }
     rt_test_reads_arm(envp, main)
     #Unsafe("host argument registration is single-threaded and precedes user code") {
@@ -121,7 +121,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
 #Export(c) jet_rt_host_env_capture: fn(startup: I64) -> I64 {
     envp: startup & I64{-2}
     logical_environment_startup()
-    raw_count := I64{0}
+    ^raw_count: I64{0}
     // `startup` lends the immutable, null-terminated envp pointer array and its
     // NUL-terminated entries.
     if (envp != I64{0}) {
@@ -149,10 +149,10 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
 host_environment_index: fn(envp: I64, raw_count: I64) {
     // One process-lifetime index, not an environment map. The capacity is the
     // raw row count; valid rows are [entry pointer, name length, value offset].
-    rows := I64{0}
-    valid := I64{0}
-    index := I64{0}
-    total_bytes := I64{0}
+    ^rows: I64{0}
+    ^valid: I64{0}
+    ^index: I64{0}
+    ^total_bytes: I64{0}
     // `rows` exclusively owns raw_count index records; startup lends every
     // pointed-to NUL string.
     loop index < raw_count {
@@ -172,7 +172,7 @@ host_environment_index: fn(envp: I64, raw_count: I64) {
         index = wrapping(index + I64{1})
     }
     storage: if (total_bytes == I64{0}) -> I64{0} else -> jet_rt_alloc(total_bytes, I64{1})
-    cursor := storage
+    ^cursor: storage
     index = I64{0}
     // `storage` exclusively owns total_bytes; each source row lends its NUL
     // string for this capture call, and published rows point only into the
@@ -218,7 +218,7 @@ host_environment_row: fn(index: I64) -> I64 {
 }
 
 host_startup_byte_length: fn(bytes: I64) -> I64 {
-    count := I64{0}
+    ^count: I64{0}
     // `bytes` lends one live NUL-terminated startup string.
     loop rt_text_byte(wrapping(bytes + count)) != (I64{0}) -> count = wrapping(count + I64{1})
     count
@@ -229,9 +229,9 @@ host_startup_byte_length: fn(bytes: I64) -> I64 {
 host_startup_bytes: fn(bytes: I64, length: I64) -> I64 {
     if (length == I64{0}) { return I64{0} }
     data: jet_rt_alloc(length, I64{8})
-    source := bytes
-    destination := data
-    remaining := length
+    ^source: bytes
+    ^destination: data
+    ^remaining: length
     // Startup lends `length` bytes; `data` exclusively owns `length`
     // initialized packed bytes.
     loop remaining > (I64{0}) {
@@ -314,7 +314,7 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     if (host_startup_byte_length(bytes) != length) { return I64{0} }
     // argv[1] is an immutable startup string of `length` bytes; `data` lends
     // the job name's static bytes.
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(bytes + at)) != rt_text_byte(wrapping(data + at))) {
             return I64{0}
@@ -336,7 +336,7 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     }
     bytes: host_argument_bytes(I64{1})
     length: host_startup_byte_length(bytes)
-    first := I64{0}
+    ^first: I64{0}
     if (length > I64{0}) {
         // argv[1] is an immutable startup string of `length` bytes.
         first = rt_text_byte(bytes)
@@ -357,11 +357,11 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
 #Export(c) jet_std_io_args: fn(output: I64) -> I64 {
     host_arguments_require()
     count: host_argc
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         bytes: host_argument_bytes(index)
         length: host_startup_byte_length(bytes)
-        at := I64{0}
+        ^at: I64{0}
         loop at < length {
             width: rt_text_valid_width(wrapping(bytes + at), wrapping(length - at), I64{1})
             if (width < I64{0}) {
@@ -404,14 +404,14 @@ host_environment_value: fn(key: I64) -> I64 {
 
 host_environment_value_bytes: fn(key_data: I64, key_length: I64) -> I64 {
     host_environment_require()
-    index := I64{0}
+    ^index: I64{0}
     // The startup index and key bytes are immutable borrowed data.
     loop index < host_env_length {
         row: wrapping(host_env_rows + index * I64{24})
         if (rt_text_word(wrapping(row + I64{8})) == key_length) {
             bytes: rt_text_word(row)
-            matched := true
-            at := I64{0}
+            ^matched: true
+            ^at: I64{0}
             loop at < key_length {
                 if (rt_text_byte(wrapping(bytes + at)) != rt_text_byte(wrapping(key_data + at))) {
                     matched = false
@@ -436,7 +436,7 @@ host_startup_environment_value: fn(key: I64) -> I64 {
     value: host_envp_value(host_envp, rt_text_data(key), rt_text_len(key))
     if (value == I64{0}) { return I64{0} }
     length: host_startup_byte_length(value)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
         if (width < I64{0}) { return I64{0} }
@@ -452,13 +452,13 @@ host_startup_environment_value: fn(key: I64) -> I64 {
 // stops at the row's NUL, so it never reads past a row.
 host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
     if (envp == I64{0} || key_length == I64{0}) { return I64{0} }
-    at := I64{1}
+    ^at: I64{1}
     loop at < key_length {
         if (rt_text_byte(wrapping(key_data + at)) == I64{61}) { return I64{0} }
         at = wrapping(at + I64{1})
     }
     first: rt_text_byte(key_data)
-    cursor := envp
+    ^cursor: envp
     // `envp` is a live null-terminated pointer array of NUL-terminated rows.
     loop {
         entry: rt_text_word(cursor)
@@ -481,7 +481,7 @@ rt_env_get: fn(key: I64) -> I64 {
     value: host_environment_value(key)
     if (value == I64{0}) { return I64{0} }
     length: host_startup_byte_length(value)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
         if (width < I64{0}) { return I64{0} }

@@ -24,11 +24,11 @@ waiter: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
 
 round: fn() -> Int {
     { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
-    parked := [Task<Int>]{}
+    ^parked: [Task<Int>]{}
     loop _ in 0..<TASKS -> parked.push(task waiter(rx))
     time.sleep(50ms)
     loop i in 0..<parked.len() -> parked[i].cancel()
-    canceled := 0
+    ^canceled: 0
     loop handle in parked {
         if handle.join() == {
             .Ok(_) -> {}
@@ -56,7 +56,7 @@ BOUND_KB: 160 * 1024
 // apart, or the first reading within BOUND_KB of `base` (-1: no base).
 settled_kb: fn(base: Int) -[FS, Time.Wait]> Int {
     time.sleep(100ms)
-    size := census("/proc/self/status", "VmSize:")
+    ^size: census("/proc/self/status", "VmSize:")
     loop _ in 0..<50 {
         if base >= 0 && size - base <= BOUND_KB -> return size
         time.sleep(100ms)
@@ -72,7 +72,7 @@ run: fn() {
     size_first: settled_kb(-1)
     threads_first: census("/proc/self/status", "Threads:")
     second: round()
-    _ := settled_kb(-1)
+    ^_: settled_kb(-1)
     third: round()
     size_last: settled_kb(size_first)
     threads_last: census("/proc/self/status", "Threads:")

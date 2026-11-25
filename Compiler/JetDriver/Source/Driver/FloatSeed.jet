@@ -41,10 +41,10 @@ jet_driver_float_seed_function_hits: fn(pos: Int, function: FnBody, symbols: Sym
 
 // Deduplicates and formats L0306 diagnostics from collected `hits`.
 jet_driver_float_seed_hits_to_lints: fn(load: JetDriverLoadResult, functions: [FnBody], hits: [JetDriverFloatSeedHit]) -> [Diagnostic] {
-    lints := [Diagnostic]{}
+    ^lints: [Diagnostic]{}
     if hits.len() == 0 -> return lints
-    files := name_table()
-    seen := [Int:Bool]{}
+    ^files: name_table()
+    ^seen: [Int:Bool]{}
     loop hit in hits {
         function: functions[hit.pos]
         if function.tree.stmts[hit.stmt_index] == .Let(local, _, _, _, _, _) {
@@ -63,7 +63,7 @@ jet_driver_float_seed_hits_to_lints: fn(load: JetDriverLoadResult, functions: [F
 // holds: one per seeded binding, at its name, once however many
 // specializations share its source.
 jet_driver_float_seed_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable) -> [Diagnostic] {
-    hits := [JetDriverFloatSeedHit]{}
+    ^hits: [JetDriverFloatSeedHit]{}
     loop (pos, function) in functions {
         jet_driver_float_seed_function_hits(pos, function, symbols, hits)
     }
@@ -95,7 +95,7 @@ jet_driver_float_seed_sign: fn(tree: BodyTree, symbols: SymbolTable, id: Int) ->
 // plain `=` of an Int widened to Float, and never borrows it or takes its
 // address, through which some other write could reach it.
 jet_driver_float_seed_int_only: fn(tree: BodyTree, symbol: SymbolID) -> Bool Never! {
-    assigned := false
+    ^assigned: false
     loop statement in tree.stmts {
         if statement == .Assign(place, op, value, _, _) && jet_driver_float_seed_place(tree, place, symbol) {
             if op != None -> return false

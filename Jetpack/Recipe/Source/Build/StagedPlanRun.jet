@@ -54,7 +54,7 @@ PlanSandbox: struct {
     priv observed_inputs: [String],
 
     new: fn(source_dir: String, inputs: [PlanInput]) -> PlanSandbox Never! {
-        declared := [String:String]{}
+        ^declared: [String:String]{}
         loop input in inputs -> declared[input.path] = input.digest
         PlanSandbox{source_dir: source_dir, declared_inputs: declared, observed_inputs: [String]{}}
     }
@@ -102,7 +102,7 @@ PlanSandbox: struct {
     // Every declared input is read and digest-checked, even ones the
     // callback did not open.
     verify_declared_inputs: fn(^self) -[FS, Env]> StagedPlanActionError! {
-        paths := self.declared_inputs.keys().to_list()
+        ^paths: self.declared_inputs.keys().to_list()
         paths.sort()
         loop path in paths -> self.read_input(path)
     }
@@ -115,7 +115,7 @@ recipe_run_staged_plan_action: fn(action: StagedPlanAction, ctx: StagedPlanConte
         .Ok(_) -> {}
         .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
     }
-    sandbox := PlanSandbox.new(ctx.source_dir, action.inputs)
+    ^sandbox: PlanSandbox.new(ctx.source_dir, action.inputs)
     fragment: if emitter.emit(sandbox) == {
         .Ok(emitted) -> emitted
         .Err(error) -> {
@@ -176,16 +176,16 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
     namespace: recipe_staged_plan_namespace(action.name, identity)
     plan_output: ".jet/staged-plan/{namespace}/fragment.plan"
 
-    ordered := fragment.actions
+    ^ordered: fragment.actions
     ordered.sort_by(fn(emitted) { emitted.name })
-    marker_paths := [String:String]{}
+    ^marker_paths: [String:String]{}
     loop index in 0..<ordered.len() {
         marker_paths[ordered[index].name] = ".jet/staged-plan/{namespace}/actions/{index}.stamp"
     }
     markers: marker_paths.values().to_list()
     loop emitted in ordered {
         loop output in emitted.outputs {
-            reserved := recipe_output_paths_overlap(output, plan_output)
+            ^reserved: recipe_output_paths_overlap(output, plan_output)
             loop marker in markers {
                 if recipe_output_paths_overlap(output, marker) -> reserved = true
             }
@@ -197,8 +197,8 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
 
     stage_text: "{action.stage}"
     bound_text: "{action.stage_bound}"
-    plan_ctx := HermeticBuildContext.new()
-    planner_spec := ActionSpec.new([String]{"jet-staged-plan", action.name, identity})
+    ^plan_ctx: HermeticBuildContext.new()
+    ^planner_spec: ActionSpec.new([String]{"jet-staged-plan", action.name, identity})
         .with_kind(.Generic)
         .with_outputs([String]{plan_output})
         .with_env("STAGED_PLAN_STAGE", stage_text)
@@ -232,14 +232,14 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
         }
     }
 
-    action_handles := [HermeticActionHandle]{planner_handle}
+    ^action_handles: [HermeticActionHandle]{planner_handle}
     loop index in 0..<ordered.len() {
         emitted: ordered[index]
         tool_path: recipe_realized_tool(tools, emitted.tool)
-        argv := [String]{tool_path}
+        ^argv: [String]{tool_path}
         loop arg in emitted.args -> argv.push(arg.copy())
         marker: marker_paths[emitted.name]
-        input_set := [String]{plan_output.copy()}
+        ^input_set: [String]{plan_output.copy()}
         loop input in emitted.inputs {
             if !input_set.contains(input) -> input_set.push(input.copy())
         }
@@ -248,10 +248,10 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
             if !input_set.contains(dependency_marker) -> input_set.push(dependency_marker.copy())
         }
         input_set.sort()
-        outputs := emitted.outputs
+        ^outputs: emitted.outputs
         outputs.sort()
         outputs.push(marker.copy())
-        spec := ActionSpec.new(argv)
+        ^spec: ActionSpec.new(argv)
             .with_kind(.Compile)
             .with_inputs(input_set)
             .with_outputs(outputs)
@@ -265,12 +265,12 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
             .with_label("staged.platform", emitted.platform)
             .with_label("staged.stage", stage_text)
             .with_label("staged.stage-bound", bound_text)
-        env_keys := emitted.env.keys().to_list()
+        ^env_keys: emitted.env.keys().to_list()
         env_keys.sort()
         loop key in env_keys -> spec = spec.with_env(key, emitted.env[key])
         spec = spec.with_env_allowlist(env_keys)
         loop build_effect in emitted.effects -> spec = spec.with_cap(build_effect)
-        emitted_input_facts := [PlanInput]{}
+        ^emitted_input_facts: [PlanInput]{}
         loop input in action.inputs {
             if emitted.inputs.contains(input.path) -> emitted_input_facts.push(input.copy())
         }
@@ -292,7 +292,7 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
         action_handles.push(handle)
     }
 
-    target_spec := TargetSpec.new()
+    ^target_spec: TargetSpec.new()
         .with_metadata("staged.action", action.name)
         .with_metadata("staged.identity", identity)
         .with_metadata("staged.fragment-digest", fragment_digest)
@@ -314,9 +314,9 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
 
 // `authority.tool.<index>.path` labels for the sorted authority tools.
 recipe_add_authority_tool_paths: fn(spec: ActionSpec, authority_tools: [String], tools: [String:String]) -[FS, Env]> ActionSpec RecipeDiagnostic! {
-    sorted := authority_tools
+    ^sorted: authority_tools
     sorted.sort()
-    out := spec
+    ^out: spec
     loop index in 0..<sorted.len() {
         path: recipe_realized_tool(tools, sorted[index])
         out = out.with_label("authority.tool.{index}.path", path)
@@ -327,9 +327,9 @@ recipe_add_authority_tool_paths: fn(spec: ActionSpec, authority_tools: [String],
 // `authority.tool.<index>` and `authority.effect.<index>` labels in sorted
 // order, so declaration order never changes the plan fingerprint.
 recipe_add_authority_labels: fn(spec: ActionSpec, tools: [String], effects: [BuildEffect]) -> ActionSpec Never! {
-    sorted_tools := tools
+    ^sorted_tools: tools
     sorted_tools.sort()
-    out := spec
+    ^out: spec
     loop index in 0..<sorted_tools.len() {
         out = out.with_label("authority.tool.{index}", sorted_tools[index])
     }
@@ -358,8 +358,8 @@ recipe_staged_plan_namespace: fn(name: String, identity: String) -> String Never
         .Val(parts) -> parts.after
         .None -> identity
     }
-    digest := ""
-    count := 0
+    ^digest: ""
+    ^count: 0
     loop scalar in digest_source.chars() {
         if count == 16 -> break
         digest = "{digest}{scalar}"
@@ -370,7 +370,7 @@ recipe_staged_plan_namespace: fn(name: String, identity: String) -> String Never
 
 // ASCII alphanumerics, `-` and `_` kept; every other scalar becomes `_`.
 recipe_safe_plan_component: fn(value: String) -> String Never! {
-    output := ""
+    ^output: ""
     loop scalar in value.chars() {
         text: "{scalar}"
         code: if text.bytes().len() == 1 -> (Int{text.bytes()[0]}) else -> 0

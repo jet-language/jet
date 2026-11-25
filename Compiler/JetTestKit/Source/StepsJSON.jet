@@ -5,9 +5,9 @@ use json: core.encoding.json
 // Filter values and quoted strings are validated by the standard JSON codec.
 kit_steps_json_path: fn(path: String) -> [String]? {
     if !path.starts_with("$") -> return None
-    parts := [String]{}
+    ^parts: [String]{}
     bytes: path.bytes()
-    i := 1
+    ^i: 1
     loop i < bytes.len() {
         if bytes[i] == (U8{46}) {
             start: i
@@ -35,9 +35,9 @@ kit_steps_json_path: fn(path: String) -> [String]? {
         } else if bytes[i] == (U8{91}) {
             i += 1
             start: i
-            depth := 1
-            quoted := false
-            escape := false
+            ^depth: 1
+            ^quoted: false
+            ^escape: false
             loop i < bytes.len() {
                 byte: Int{bytes[i]}
                 if quoted {
@@ -213,7 +213,7 @@ kit_steps_json_has: fn(value: Dyn, expected: Dyn) -> String? {
                     loop item in items {
                         if item == {
                             .Object(fields) -> {
-                                matches := true
+                                ^matches: true
                                 loop pair in wanted {
                                     actual: item.get(pair.key)
                                     if actual == {
@@ -291,7 +291,7 @@ kit_steps_json_leaf: fn(value: Dyn, path: String, op: String, expected: Dyn, exp
     if op == "keys" {
         if value == {
             .Object(fields) -> {
-                keys := [String]{}
+                ^keys: [String]{}
                 loop pair in fields -> keys.push(pair.key)
                 keys.sort()
                 wanted: if expected == {
@@ -300,7 +300,7 @@ kit_steps_json_leaf: fn(value: Dyn, path: String, op: String, expected: Dyn, exp
                         return Val("JSON keys needs an array")
                     }
                 }
-                names := [String]{}
+                ^names: [String]{}
                 loop item in wanted {
                     name: if item == {
                         .Text(text) -> text
@@ -375,9 +375,9 @@ kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, li
         return Val("JSON filter selected no values")
     }
     if op == "valid" -> return None
-    expected := Dyn.Null
-    expected_type := ""
-    count := 0
+    ^expected: Dyn.Null
+    ^expected_type: ""
+    ^count: 0
     if kit_expect_named(["=", "!=", "has", "!has", "in", "keys", ">", ">=", "<", "<="], op) {
         evaluated: if kit_steps_json_numeric_op(op) -> kit_steps_arithmetic(literal) ?? literal else -> literal
         expected = json.parse(evaluated) ?? return Val("expected JSON literal: {err}")
@@ -394,7 +394,7 @@ kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, li
         if count < 0 -> return Val("JSON count must be a nonnegative integer")
     } else { return Val("unknown JSON operator: {op}") }
     if op == "#distinct=" {
-        values := [Dyn]{}
+        ^values: [Dyn]{}
         loop value in selected {
             if value == {
                 .Array(items) -> {
@@ -485,7 +485,7 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: "", json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
     }
     if tokens.len() == needed -> return None
-    literal := kit_steps_byte_slice(body, tokens[needed].start, body.count_bytes()).trim().copy()
+    ^literal: kit_steps_byte_slice(body, tokens[needed].start, body.count_bytes()).trim().copy()
     if op == "any" {
         if tokens.len() != needed + 2 || tokens[needed].text != "~" || !kit_steps_reason(value) {
             return None

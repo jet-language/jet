@@ -54,8 +54,8 @@ pkg_test_extension_error: fn(result: ExtensionProtocolError) -> String { result.
 
 // `[` repeated past the protocol depth, then `0`, then the closers.
 pkg_test_extension_too_deep: fn() -> String {
-    opens := [String]{}
-    closes := [String]{}
+    ^opens: [String]{}
+    ^closes: [String]{}
     loop _ in 0..<(PKG_JSON_MAX_DEPTH + 1) {
         opens.push("[")
         closes.push("]")
@@ -135,7 +135,7 @@ pkg_test_extension_too_deep: fn() -> String {
     snapshot: pkg_test_extension_snapshot()
     valid: snapshot.encode_bytes() ?? panic("sample snapshot encodes")
     assert_eq(TypedSnapshot.decode_bytes(valid) ?? panic("valid snapshot decodes"), snapshot)
-    oversized := valid
+    ^oversized: valid
     loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> oversized.push(U8{32})
     if TypedSnapshot.decode_bytes(oversized) == {
         .Ok(_) -> { panic("oversized snapshot JSON must hit the size cap") }
@@ -161,7 +161,7 @@ pkg_test_extension_too_deep: fn() -> String {
     }
     valid: response.encode_bytes() ?? panic("sample response encodes")
     assert_eq(AnalyzeResponse.decode_bytes(valid) ?? panic("valid response decodes"), response)
-    oversized := valid
+    ^oversized: valid
     loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> oversized.push(U8{32})
     if AnalyzeResponse.decode_bytes(oversized) == {
         .Ok(_) -> { panic("oversized response JSON must hit the size cap") }
@@ -187,7 +187,7 @@ pkg_test_extension_too_deep: fn() -> String {
 
 #Test("validate rejects bad spans artifacts abilities and limits") {
     snapshot: pkg_test_extension_snapshot()
-    bad_span := pkg_test_extension_response("error")
+    ^bad_span: pkg_test_extension_response("error")
     bad_span.findings[0].span_id = "missing"
     if bad_span.validate(snapshot, 8) == {
         .Ok(_) -> { panic("an unknown span must be rejected") }
@@ -198,8 +198,8 @@ pkg_test_extension_too_deep: fn() -> String {
         .Ok(_) -> { panic("v1 responses carry no artifacts") }
         .Err(_) -> {}
     }
-    no_emit := pkg_test_extension_snapshot()
-    kept := [ExtensionAbility]{}
+    ^no_emit: pkg_test_extension_snapshot()
+    ^kept: [ExtensionAbility]{}
     loop ability in no_emit.abilities {
         if ability != ExtensionAbility.EmitFinding -> kept.push(ability)
     }
@@ -209,7 +209,7 @@ pkg_test_extension_too_deep: fn() -> String {
         .Ok(_) -> { panic("findings need emit_finding") }
         .Err(_) -> {}
     }
-    tiny := pkg_test_extension_snapshot()
+    ^tiny: pkg_test_extension_snapshot()
     tiny.limits.max_response_bytes = 4
     if finding.validate(tiny, 99) == {
         .Ok(_) -> { panic("the response exceeds max_response_bytes") }
@@ -220,7 +220,7 @@ pkg_test_extension_too_deep: fn() -> String {
 #Test("session lifecycle stages rolls back and closes") {
     snapshot: pkg_test_extension_snapshot()
     raw: pkg_test_extension_response("warning").encode_bytes() ?? panic("encode")
-    session := ExtensionSession.new()
+    ^session: ExtensionSession.new()
     assert_eq(session.phase(), ExtensionSessionPhase.Idle)
     session.on_loaded(7) ?? panic("load")
     assert_eq(session.phase(), ExtensionSessionPhase.Loaded)
@@ -246,7 +246,7 @@ pkg_test_extension_too_deep: fn() -> String {
 #Test("accept then rollback refuses restage") {
     snapshot: pkg_test_extension_snapshot()
     raw: pkg_test_extension_response("warning").encode_bytes() ?? panic("encode")
-    session := ExtensionSession.new()
+    ^session: ExtensionSession.new()
     session.on_loaded(3) ?? panic("load")
     _: session.stage_response(snapshot, raw) ?? panic("stage")
     _: session.accept_staged() ?? panic("accept")
@@ -261,7 +261,7 @@ pkg_test_extension_too_deep: fn() -> String {
 }
 
 #Test("close invokes the guest closer with the live handle") {
-    session := ExtensionSession.new()
+    ^session: ExtensionSession.new()
     session.on_loaded(42) ?? panic("load")
     assert(session.close(fn(handle) { handle == 42 }))
     assert_eq(session.phase(), ExtensionSessionPhase.Closed)

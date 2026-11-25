@@ -1,0 +1,103 @@
+// The notation read into a rule tree: rules, alternatives, elements,
+// suffixes, labels, classes and imports.
+use {
+    core.grammar.[analyze]
+    core.grammar.plan.[GrammarSource, RuleTree]
+}
+
+tree_of: fn(text: String) -> RuleTree Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan.tree
+        .Err(error) -> panic("{error}")
+    }
+}
+
+#Test("a rule reads as a choice of alternatives of elements") {
+    tree: tree_of("pair : key=NAME '=' value=NAME ;\nNAME : [a-z]+ ;")
+    assert_eq(tree.rules.len(), 2)
+    pair: tree.rules[0]
+    assert_eq(pair.name, "pair")
+    assert(pair.kind == .Parser)
+    body: tree.nodes[pair.body]
+    assert(body.kind == .Choice)
+    assert_eq(body.children.len(), 1)
+    alt: tree.nodes[body.children[0]]
+    assert(alt.kind == .Alt)
+    assert_eq(alt.children.len(), 3)
+    key: tree.nodes[alt.children[0]]
+    assert(key.kind == .Ref)
+    assert_eq(key.text, "NAME")
+    assert_eq(key.label, "key")
+    eq: tree.nodes[alt.children[1]]
+    assert(eq.kind == .Literal)
+    assert_eq(eq.text, "=")
+    assert(tree.rules[1].kind == .Token)
+}
+
+#Test("suffixes wrap the element they follow") {
+    tree: tree_of("list : item* tail? nums+=NUM+ ;\nitem : text=NAME ;\ntail : ';' ;\nNAME : [a-z]+ ;\nNUM : [0-9]+ ;\nWS : ' '+ -> skip ;")
+    alt: tree.nodes[tree.nodes[tree.rules[0].body].children[0]]
+    star: tree.nodes[alt.children[0]]
+    assert(star.kind == .Star)
+    assert_eq(tree.nodes[star.children[0]].text, "item")
+    assert(tree.nodes[alt.children[1]].kind == .Optional)
+    assert(tree.nodes[alt.children[2]].kind == .Plus)
+}
+
+#Test("both quote styles, escapes and the case-folding suffix") {
+    tree: tree_of("kw : 'select'i \"a\\tb\" '\\u{{41}}' '\\'' ;\nWS : ' '+ -> skip ;")
+    alt: tree.nodes[tree.nodes[tree.rules[0].body].children[0]]
+    select: tree.nodes[alt.children[0]]
+    assert_eq(select.text, "select")
+    assert(select.fold)
+    assert_eq(tree.nodes[alt.children[1]].text, "a\tb")
+    assert(!tree.nodes[alt.children[1]].fold)
+    assert_eq(tree.nodes[alt.children[2]].text, "A")
+    assert_eq(tree.nodes[alt.children[3]].text, "'")
+}
+
+#Test("classes read as sorted, merged ranges") {
+    tree: tree_of("WORD : [a-zA-Z_0-9b] [^\\]\\n] \\p{{L}} ;")
+    assert_eq(tree.classes.len(), 3)
+    assert_eq(tree.classes[0].ranges, [48, 57, 65, 90, 95, 95, 97, 122])
+    assert(!tree.classes[0].negated)
+    assert_eq(tree.classes[1].ranges, [10, 10, 93, 93])
+    assert(tree.classes[1].negated)
+    assert_eq(tree.classes[2].properties, [0])
+    assert_eq(tree.classes[2].ranges.len(), 0)
+}
+
+#Test("groups, named alternatives, associativity, holes and EOF") {
+    tree: tree_of("expr : <assoc=right> '^' expr # Power\n | '(' expr ')' # Group\n | HOLE<slot=Value> # Hole\n ;\nfile : expr EOF ;")
+    body: tree.nodes[tree.rules[0].body]
+    assert_eq(body.children.len(), 3)
+    power: tree.nodes[body.children[0]]
+    assert(power.right)
+    assert_eq(power.text, "Power")
+    hole: tree.nodes[tree.nodes[body.children[2]].children[0]]
+    assert(hole.kind == .Hole)
+    assert_eq(hole.text, "Value")
+    file: tree.nodes[tree.nodes[tree.rules[1].body].children[0]]
+    assert(tree.nodes[file.children[1]].kind == .End)
+}
+
+#Test("fragments, skip rules, comments and lazy token repeats") {
+    tree: tree_of("// a line comment\nfragment DIGIT : [0-9] ; /* a block\n comment */\nNUM : DIGIT+ ;\nCOMMENT : '/*' .*? '*/' -> skip ;\nWS : [ \\t]+ -> skip ;")
+    assert_eq(tree.rules.len(), 4)
+    assert(tree.rules[0].kind == .Fragment)
+    assert(!tree.rules[1].skip)
+    assert(tree.rules[2].skip)
+    lazy: tree.nodes[tree.nodes[tree.nodes[tree.rules[2].body].children[0]].children[1]]
+    assert(lazy.kind == .Star)
+    assert(lazy.lazy)
+}
+
+#Test("append labels and labeled groups") {
+    tree: tree_of("args : items+=NAME (',' items+=NAME)* ;\nNAME : [a-z]+ ;")
+    alt: tree.nodes[tree.nodes[tree.rules[0].body].children[0]]
+    first: tree.nodes[alt.children[0]]
+    assert_eq(first.label, "items")
+    assert(first.append)
+    group: tree.nodes[tree.nodes[alt.children[1]].children[0]]
+    assert(group.kind == .Choice)
+}

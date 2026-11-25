@@ -1,5 +1,5 @@
 rt_age_fixture_zero: fn(bytes: I64, length: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop i < length {
         if (rt_text_byte(bytes + i) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
         i += I64{1}
@@ -17,8 +17,8 @@ rt_age_fixture_rebuild: fn(identity: I64, cipher: I64, cipher_len: I64, plain: I
     wrapped: scratch + I64{1776}
     rt_crypto_x25519_public(identity, own_public, scratch)
     rt_text_bytes_copy(rebuilt, cipher, footer + I64{64})
-    at := I64{22}
-    found := false
+    ^at: I64{22}
+    ^found: false
     loop at < footer {
         end: rt_age_line_end(cipher, cipher_len, at)
         body_end: rt_age_body_end(cipher, cipher_len, end + I64{1})
@@ -40,10 +40,10 @@ rt_age_fixture_rebuild: fn(identity: I64, cipher: I64, cipher_len: I64, plain: I
     payload_key: scratch + I64{1856}
     rt_age_derive(file_key, I64{16}, cipher + footer + I64{48}, I64{16}, I64{1}, payload_key, scratch)
     at = footer + I64{64}
-    position := I64{0}
-    counter := I64{0}
+    ^position: I64{0}
+    ^counter: I64{0}
     loop {
-        count := I64{65536}
+        ^count: I64{65536}
         if (plain_len - position < count) { count = plain_len - position }
         last: position + count == plain_len
         rt_age_stream_nonce(counter, last, nonce)
@@ -84,7 +84,7 @@ rt_age_fixture_rebuild: fn(identity: I64, cipher: I64, cipher_len: I64, plain: I
         rt_age_fixture_zero(scratch, I64{2048})
         // A final-tag mismatch must not expose any preceding authenticated chunk.
         rt_text_put(rebuilt + cipher_len - I64{1}, rt_text_byte(rebuilt + cipher_len - I64{1}) ~ I64{1})
-        i := I64{0}
+        ^i: I64{0}
         loop i < cipher_len {
             rt_text_put(plain + i, I64{165})
             i += I64{1}
@@ -130,12 +130,12 @@ rt_age_fixture_rebuild: fn(identity: I64, cipher: I64, cipher_len: I64, plain: I
         jet_rt_unreachable(I64{0}, I64{0})
     }
     rt_crypto_x25519_public(identity, recipients, scratch)
-    r := I64{1}
+    ^r: I64{1}
     loop r < count {
         rt_text_bytes_copy(recipients + r * I64{32}, recipients, I64{32})
         r += I64{1}
     }
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= count * I64{32}) { break }
         rt_text_put(scalars + i, (i * I64{7} + I64{3}) & I64{255})

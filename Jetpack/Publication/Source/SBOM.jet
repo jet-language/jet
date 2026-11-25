@@ -6,12 +6,12 @@ use jet_pkg_model.[LockFile, pkg_json_render_pretty, pkg_lock_write, pkg_sha256_
 
 publication_emit_spdx: fn(lock: LockFile, root_name: String, root_version: String) -> String Never! {
     digest: publication_lock_digest(lock)
-    root_checksum := "NOASSERTION"
+    ^root_checksum: "NOASSERTION"
     // First matching record, even when its content hash is not SHA-256.
     if lock.find_package(root_name) == .Val(package) {
         root_checksum = publication_spdx_checksum(package.content_hash ?? package.fingerprint) ?? "NOASSERTION"
     }
-    out := [String]{
+    ^out: [String]{
         "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\n",
         "DocumentNamespace: https://jet-lang.dev/spdx/{root_name}-{root_version}-{digest}\n",
         "DocumentName: {root_name}-{root_version}\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\n",
@@ -28,7 +28,7 @@ publication_emit_spdx: fn(lock: LockFile, root_name: String, root_version: Strin
 
 publication_emit_cyclonedx: fn(lock: LockFile, root_name: String, root_version: String) -> String Never! {
     digest: publication_lock_digest(lock)
-    components := [Dyn]{}
+    ^components: [Dyn]{}
     loop index in 0..<lock.packages.len() {
         package: lock.packages[index]
         value: package.content_hash ?? package.fingerprint

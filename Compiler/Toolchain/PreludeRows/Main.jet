@@ -115,8 +115,8 @@ RowsConstant: struct {
 
 // The struct and enum declarations of every file under SHAPES_ROOT.
 read_shapes: fn(out: ^RowsOut) -[FS]> PreludeRowsError! {
-    entries := files.walk_files(SHAPES_ROOT).list() ?? return Err(rows_fail("cannot list {SHAPES_ROOT}: {err}"))
-    paths := [String]{}
+    ^entries: files.walk_files(SHAPES_ROOT).list() ?? return Err(rows_fail("cannot list {SHAPES_ROOT}: {err}"))
+    ^paths: [String]{}
     loop entry in entries.move() {
         if entry.relative.ends_with(".jet") -> paths.push(entry.relative.move())
     }
@@ -124,7 +124,7 @@ read_shapes: fn(out: ^RowsOut) -[FS]> PreludeRowsError! {
     loop relative in paths {
         path: files.join(SHAPES_ROOT, relative)
         text: files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
-        parsed := parse_source(text.bytes())
+        ^parsed: parse_source(text.bytes())
         loop diagnostic in parsed.diagnostics {
             if diagnostic.severity == DIAGNOSTIC_ERROR {
                 return Err(rows_fail("{path} does not parse: {diagnostic.what}"))
@@ -144,7 +144,7 @@ add_item: fn(out: ^RowsOut, item: ^^Item) Never! {
 }
 
 add_struct: fn(out: ^RowsOut, def: ^^StructDef) Never! {
-    fields := [RowField]{}
+    ^fields: [RowField]{}
     loop field in def.fields.move() {
         if field.computed != None -> next
         defaulted: field.default != None
@@ -154,9 +154,9 @@ add_struct: fn(out: ^RowsOut, def: ^^StructDef) Never! {
 }
 
 add_enum: fn(out: ^RowsOut, def: ^^EnumDef) Never! {
-    variants := [RowVariant]{}
+    ^variants: [RowVariant]{}
     loop variant in def.variants.move() {
-        row := RowVariant{name: variant.name.move(), unit: false, single: None, fields: [RowField]{}}
+        ^row: RowVariant{name: variant.name.move(), unit: false, single: None, fields: [RowField]{}}
         if variant.payload.move() == {
             .Unit -> { row.unit = true }
             .Single(ty, _) -> { row.single = Val(ty.move()) }
@@ -217,8 +217,8 @@ literal: fn(out: ^RowsOut, ty: Type, value: Dyn, top: Bool, at: String, prefix: 
         return Ok("Val({text})")
     }
     if ty == .List(element) {
-        parts := [String]{}
-        height := 0
+        ^parts: [String]{}
+        ^height: 0
         if value == .Array(items) {
             loop (index, item) in items {
                 parts.push(literal(out, element, item, false, "{at}[{index}]", prefix) ?? return Err(err))
@@ -286,7 +286,7 @@ named_literal: fn(out: ^RowsOut, name: String, value: Dyn, top: Bool, at: String
                 return Ok(node(out, "{name}.{variant.name}({text})", top, prefix))
             }
             // A variant with one named field may encode as that field's value.
-            fields := ""
+            ^fields: ""
             if !is_object(payload) && variant.fields.len() == 1 {
                 field: variant.fields[0]
                 fields = "{field.name}: {literal(out, field.ty, payload, false, "{where}.{field.name}", prefix) ?? return Err(err)}"
@@ -307,16 +307,16 @@ named_literal: fn(out: ^RowsOut, name: String, value: Dyn, top: Bool, at: String
 fields_literal: fn(out: ^RowsOut, name: String, fields: [RowField], value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
     if value == .Object(entries) {
         loop entry in entries {
-            known := false
+            ^known: false
             loop field in fields {
                 if field.name == entry.key -> known = true
             }
             if !known -> return Err(rows_fail("{at}: {name} declares no field {entry.key}"))
         }
-        parts := [String]{}
-        height := 0
+        ^parts: [String]{}
+        ^height: 0
         loop field in fields {
-            found := false
+            ^found: false
             loop entry in entries {
                 if entry.key != field.name -> next
                 found = true
@@ -370,33 +370,35 @@ rows_constants: fn() -> [RowsConstant] PreludeRowsError! {
     catalog: sema_units_catalog_read() ?? return Err(rows_text_fail(err))
     batch_loop: sema_call_rule_batch_read(paired: false) ?? return Err(rows_text_fail(err))
     paired_loop: sema_call_rule_batch_read(paired: true) ?? return Err(rows_text_fail(err))
-    Ok([RowsConstant]{
-        RowsConstant{name: "SEMA_PRELUDE_MARKER_DECLS", ty: list_type("MarkerDecl"), value: marker_decls.encode()},
-        RowsConstant{name: "SEMA_PRELUDE_TAGS", ty: list_type("TagDef"), value: tags.encode()},
-        RowsConstant{name: "SEMA_PRELUDE_DERIVE_PROVIDERS", ty: list_type("MarkerDecl"), value: providers.encode()},
-        RowsConstant{name: "SEMA_PRELUDE_DERIVE_WORDS", ty: Type.List{element: Type.String}, value: sema_registration_derive_words().encode()},
-        RowsConstant{name: "SEMA_PRELUDE_ERROR_PROGRAM", ty: named_type("Program"), value: errors.encode()},
-        RowsConstant{name: "SEMA_PRELUDE_RULE_PROGRAM", ty: named_type("Program"), value: rules.encode()},
-        RowsConstant{name: "SEMA_UNITS_CATALOG", ty: list_type("UnitFamilyDef"), value: catalog.encode()},
-        RowsConstant{name: "SEMA_CALL_RULE_BATCH_LOOP", ty: named_type("Expr"), value: batch_loop.encode()},
-        RowsConstant{name: "SEMA_CALL_RULE_BATCH_PAIRED_LOOP", ty: named_type("Expr"), value: paired_loop.encode()},
-    })
+    Ok(
+        [RowsConstant]{
+            RowsConstant{name: "SEMA_PRELUDE_MARKER_DECLS", ty: list_type("MarkerDecl"), value: marker_decls.encode()},
+            RowsConstant{name: "SEMA_PRELUDE_TAGS", ty: list_type("TagDef"), value: tags.encode()},
+            RowsConstant{name: "SEMA_PRELUDE_DERIVE_PROVIDERS", ty: list_type("MarkerDecl"), value: providers.encode()},
+            RowsConstant{name: "SEMA_PRELUDE_DERIVE_WORDS", ty: Type.List{element: Type.String}, value: sema_registration_derive_words().encode()},
+            RowsConstant{name: "SEMA_PRELUDE_ERROR_PROGRAM", ty: named_type("Program"), value: errors.encode()},
+            RowsConstant{name: "SEMA_PRELUDE_RULE_PROGRAM", ty: named_type("Program"), value: rules.encode()},
+            RowsConstant{name: "SEMA_UNITS_CATALOG", ty: list_type("UnitFamilyDef"), value: catalog.encode()},
+            RowsConstant{name: "SEMA_CALL_RULE_BATCH_LOOP", ty: named_type("Expr"), value: batch_loop.encode()},
+            RowsConstant{name: "SEMA_CALL_RULE_BATCH_PAIRED_LOOP", ty: named_type("Expr"), value: paired_loop.encode()},
+        },
+    )
 }
 
 HEADER: "// The parsed rows of the Prelude texts the compiler carries and of the loop\n// a rule batch runs, generated by Compiler/Toolchain/PreludeRows; do not\n// edit. Regenerate them from the checkout root with\n// `{WRITE_COMMAND}`.\n// It stays committed: the seed builds the compiler from the checkout, and\n// `jet check` reads it before any build step runs.\n// Each constant is what its reader returns for its text (JetParser\n// Tests/PreludeBuildRows.jet and JetSema Tests/RuleBatchText.jet hold them\n// to it). A constructor nested deep is a `_NODE_` constant of its own, which\n// its parent names."
 
 render_rows: fn() -[FS]> String PreludeRowsError! {
-    out := RowsOut{shapes: [RowShape]{}, index: [String:Int]{}, nodes: [String]{}, height: 0}
+    ^out: RowsOut{shapes: [RowShape]{}, index: [String:Int]{}, nodes: [String]{}, height: 0}
     read_shapes(out) ?? return Err(err)
-    blocks := [String]{}
+    ^blocks: [String]{}
     constants: rows_constants() ?? return Err(err)
     loop constant in constants {
         text: literal(out, constant.ty, constant.value, true, constant.name, constant.name) ?? return Err(err)
-        lines := [String]{"{constant.name}: {text}"}
+        ^lines: [String]{"{constant.name}: {text}"}
         loop line in compiler_take_rows<String>(out.nodes) -> lines.push(line)
         blocks.push(lines.join("\n\n"))
     }
-    names := loop (name, position) in out.index if out.shapes[position].used -> "{name}"
+    ^names: loop (name, position) in out.index if out.shapes[position].used -> "{name}"
     names.sort()
     Ok("{HEADER}\nuse jet_foundation.[{names.join(", ")}]\n\n{blocks.join("\n\n")}\n")
 }

@@ -7,7 +7,7 @@
 impl ProviderFactReport {
     // A CRAN `DESCRIPTION` file, or one paragraph of a `PACKAGES` index.
     cran_document: fn(document: String) -> ProviderFactReport Never! {
-        paragraphs := [String]{}
+        ^paragraphs: [String]{}
         loop paragraph in provider_registry_crlf_to_lf(document).split("\n\n").to_list() {
             if paragraph.trim() != "" -> paragraphs.push(paragraph)
         }
@@ -15,11 +15,11 @@ impl ProviderFactReport {
             return ProviderFactReport.unreadable(ProviderFamily.Cran, REF_SOURCE_CRAN, "CRAN DESCRIPTION has no fields")
         }
         fields: provider_cran_dcf_fields(paragraphs[0])
-        losses := [String]{}
+        ^losses: [String]{}
         if paragraphs.len() > 1 {
             losses.push("CRAN document holds {paragraphs.len()} package paragraphs; exactly one is needed")
         }
-        facts := MetadataFacts.empty(ProviderFamily.Cran, fields.get("Package") ?? "")
+        ^facts: MetadataFacts.empty(ProviderFamily.Cran, fields.get("Package") ?? "")
         facts.version = fields.get("Version") ?? ""
         if facts.name != "" && !provider_cran_valid_component(facts.name) {
             losses.push("CRAN package name `{facts.name}` is unsafe")
@@ -41,7 +41,7 @@ impl ProviderFactReport {
             }
         }
         facts.source_identity = "{REF_SOURCE_CRAN}:{facts.name}@{facts.version}"
-        report := provider_graph_finish(facts, losses, [String]{})
+        ^report: provider_graph_finish(facts, losses, [String]{})
         if report.facts.version != "" && !provider_exact_version(report.facts.version) {
             report.losses.push("CRAN package version is not an exact identity")
         }
@@ -52,8 +52,8 @@ impl ProviderFactReport {
     // Lua code runs.
     luarocks_document: fn(document: String) -> ProviderFactReport Never! {
         name: provider_luarocks_assignment_string(document, "package") ?? return ProviderFactReport.unreadable(ProviderFamily.LuaRocks, REF_SOURCE_LUAROCKS, "rockspec `package`: {err.message()}")
-        losses := [String]{}
-        facts := MetadataFacts.empty(ProviderFamily.LuaRocks, name)
+        ^losses: [String]{}
+        ^facts: MetadataFacts.empty(ProviderFamily.LuaRocks, name)
         if !provider_luarocks_valid_component(name) {
             losses.push("LuaRocks package name `{name}` is unsafe")
         }
@@ -91,7 +91,7 @@ impl ProviderFactReport {
                     .Ok(dependencies) -> {
                         loop dependency in dependencies {
                             facts.dependencies.push(dependency.name)
-                            constraints := [String]{}
+                            ^constraints: [String]{}
                             loop requirement in dependency.requirements {
                                 constraints.push("{requirement.operator} {requirement.wanted}")
                             }
@@ -143,8 +143,8 @@ impl ProviderFactReport {
     // `/api/v2/rubygems/<name>/versions/<version>.json`).
     rubygems_document: fn(document: String) -> ProviderFactReport Never! {
         object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.RubyGems, REF_SOURCE_RUBY, "gem metadata is not a JSON object")
-        losses := [String]{}
-        facts := MetadataFacts.empty(ProviderFamily.RubyGems, provider_graph_json_string(object, "name") ?? "")
+        ^losses: [String]{}
+        ^facts: MetadataFacts.empty(ProviderFamily.RubyGems, provider_graph_json_string(object, "name") ?? "")
         facts.add_json_projection("provider.ruby.native", object)
         if facts.name != "" && !provider_script_registry(ProviderFamily.RubyGems).valid_name(facts.name) {
             losses.push("gem name `{facts.name}` is unsafe")
@@ -220,8 +220,8 @@ impl ProviderFactReport {
         release: object.get("_source") ?? Dyn.Object(object)
         fields: pkg_json_object(release) ?? return ProviderFactReport.unreadable(ProviderFamily.Cpan, REF_SOURCE_PERL, "MetaCPAN `_source` is not a JSON object")
         package: provider_cpan_parse_release(provider_script_registry(ProviderFamily.Cpan).repository, release) ?? return ProviderFactReport.unreadable(ProviderFamily.Cpan, provider_graph_json_string(fields, "distribution") ?? REF_SOURCE_PERL, err.message())
-        losses := [String]{}
-        facts := provider_registry_package_facts(ProviderFamily.Cpan, package)
+        ^losses: [String]{}
+        ^facts: provider_registry_package_facts(ProviderFamily.Cpan, package)
         facts.add_json_projection("provider.perl.native", fields)
         if fields.get("license") == {
             .Val(licenses) -> {
@@ -245,13 +245,13 @@ impl ProviderFactReport {
         name: names[0]
         releases: provider_packagist_parse_metadata(provider_script_registry(ProviderFamily.Packagist).repository, name, document) ?? return ProviderFactReport.unreadable(ProviderFamily.Packagist, name, err.message())
         if releases.len() != 1 {
-            versions := [String]{}
+            ^versions: [String]{}
             loop release in releases -> versions.push(release.version)
             return ProviderFactReport.unreadable(ProviderFamily.Packagist, name, "Packagist metadata lists {releases.len()} releases of `{name}` ({versions.join(", ")}); exactly one is needed for an exact identity")
         }
-        losses := [String]{}
-        facts := provider_registry_package_facts(ProviderFamily.Packagist, releases[0])
-        prefixes := releases[0].psr4.keys().to_list()
+        ^losses: [String]{}
+        ^facts: provider_registry_package_facts(ProviderFamily.Packagist, releases[0])
+        ^prefixes: releases[0].psr4.keys().to_list()
         prefixes.sort()
         loop prefix in prefixes {
             facts.typed["provider.php.psr4.{prefix}"] = releases[0].psr4[prefix]
@@ -284,7 +284,7 @@ impl ProviderFactReport {
 // immutable reference, and dependencies with their registry requirements.
 provider_registry_package_facts: fn(family: ProviderFamily, package: RegistryPackage) -> MetadataFacts Never! {
     label: family.label()
-    facts := MetadataFacts.empty(family, package.name)
+    ^facts: MetadataFacts.empty(family, package.name)
     facts.version = package.version
     facts.integrity_hash = if package.integrity == {
         .SHA256(hash) -> hash

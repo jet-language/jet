@@ -88,7 +88,7 @@ verdict: fn(receipt: Receipt, counts: [Count]) -> String? Never! {
 run: fn() {
     args: process.args()
     // The arguments in pairs, the last of a name winning, as the original pairs them.
-    flags := [String:String]{}
+    ^flags: [String:String]{}
     loop at in 0..<args.len() /% 2 -> flags[args[2 * at].copy()] = args[2 * at + 1].copy()
     compiler_flag: flags.get("--compiler") ?? ""
     root_flag: flags.get("--root") ?? ""
@@ -104,8 +104,8 @@ run: fn() {
     gate: ["--compiler", "candidate=bootstrap:{compiler}", "--shape", "comptime", "--ladder", "comptime={SIZES.map(fn(n) { "{n}" }).join(",")}", "--mode", "counters", "--jobs", "1", "--layout", "files", "--seed", "1", "--memory-max", "8G", "--timeout", "60", "--work-dir", root, "--build-root", files.join(files.join(scratch, "scaling-module-lookups"), files.basename(root))]
     config: options(gate, repo) ?? process.fail(1, err.message)
     receipt: run_gate(config) ?? process.fail(1, err.message)
-    counts := [Count]{}
-    baseline := Float?{None}
+    ^counts: [Count]{}
+    ^baseline: Float?{None}
     if receipt.series.len() > 0 {
         loop point in receipt.series[0].points {
             counts.push(Count{n: point.n, ok: point.ok, lookups: point.metrics.get(METRIC)})

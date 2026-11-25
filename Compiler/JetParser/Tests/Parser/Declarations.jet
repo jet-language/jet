@@ -107,10 +107,10 @@ run: fn() {}
     )
     program.items[0] == .Tag(audited) ?? panic("a type-use marker struct is a value tag")
     assert_eq(audited.name, "Audited")
-    denied := [String]{}
+    ^denied: [String]{}
     loop entry in audited.deny -> denied.push(entry.name)
     assert_eq(denied, [String]{"Net", "Log"})
-    sources := [String]{}
+    ^sources: [String]{}
     loop entry in audited.from -> sources.push(entry.name)
     assert_eq(sources, [String]{"Net", "store.read"})
     timing: audited.timing ?? panic("the tag writes its timing")
@@ -155,7 +155,7 @@ run: fn() {}
     )
     program.items[0] == .FactDecl(decl) ?? panic("fact plane")
     assert_eq(decl.name, "Exactness")
-    names := [String]{}
+    ^names: [String]{}
     loop param in decl.params {
         names.push(param.name)
         assert(param.ty == None && param.value != None)
@@ -294,7 +294,7 @@ run: fn() {}
 run: fn() {}
 `,
     )
-    names := [String]{}
+    ^names: [String]{}
     loop param in decl.params -> names.push(param.name)
     assert_eq(names, [String]{"condition", "message", "tags", "$sites", "$repeatable"})
     loop param in decl.params {
@@ -345,7 +345,7 @@ run: fn() {}
 run: fn() {}
 `,
     )
-    codes := [String]{}
+    ^codes: [String]{}
     loop diagnostic in diagnostics -> codes.push(diagnostic.code)
     assert_eq(codes, [String]{"E0907"})
 }
@@ -370,7 +370,7 @@ run: fn() {}
     block: definition.trait_impls[0]
     assert_eq(block.trait_name, "Marker")
     assert(block.compiler_generated)
-    names := [String]{}
+    ^names: [String]{}
     loop constant in block.constants -> names.push(constant.name)
     assert_eq(names, [String]{"sites", "sites", "color"})
 }
@@ -400,7 +400,7 @@ run: fn() {}
     )
     program.items[0] == .Struct(definition) ?? panic("struct")
     state: definition.state ?? panic("struct-owned state set")
-    names := [String]{}
+    ^names: [String]{}
     loop name in state.states -> names.push(name.name)
     assert_eq(names, [String]{"Open", "Closed"})
 }
@@ -421,17 +421,17 @@ run: fn() {}
     program: parser_test_program(source)
     program.items[0] == .Struct(definition) ?? panic("struct")
     state: definition.state ?? panic("struct-owned state list")
-    names := [String]{}
+    ^names: [String]{}
     loop name in state.states -> names.push(name.name)
     assert_eq(names, [String]{"Draft", "Confirmed", "Shipped", "Canceled"})
     assert_eq(state.arrows.len(), 4)
-    moves := [String]{}
+    ^moves: [String]{}
     loop target in state.arrows[0].to -> moves.push(target.name)
     assert_eq(moves, [String]{"Confirmed", "Canceled"})
     assert(state.arrows[2].to.is_empty())
     assert_eq(state.groups.len(), 1)
     assert_eq(state.groups[0].name.name, "Open")
-    members := [String]{}
+    ^members: [String]{}
     loop member in state.groups[0].members -> members.push(member.name)
     assert_eq(members, [String]{"Draft", "Confirmed"})
     assert_eq(definition.fields.len(), 1)
@@ -700,9 +700,9 @@ either: fn<S: [Holds<String, Int>, Printable]>(store: S) -> String { store.first
 
 // Each marker as `name(args)`, its arguments as written in `source`.
 inbody_test_markers: fn(source: String, markers: [Marker]) -> String {
-    rows := [String]{}
+    ^rows: [String]{}
     loop marker in markers {
-        args := [String]{}
+        ^args: [String]{}
         loop arg in marker.args {
             if arg == .Expr(value) {
                 span: expr_span(value)
@@ -716,7 +716,7 @@ inbody_test_markers: fn(source: String, markers: [Marker]) -> String {
 
 // `edits` are in source order and do not overlap, so they apply from the last.
 inbody_test_apply: fn(source: String, edits: [TextEdit]) -> String {
-    text := source
+    ^text: source
     loop index in 0..<edits.len() {
         edit: edits[edits.len() - 1 - index]
         bytes: text.bytes()
@@ -884,7 +884,7 @@ impl Ledger.Effect {
 }
 `
     program: parser_test_program(source)
-    names := [String]{}
+    ^names: [String]{}
     loop item in program.items {
         if item == {
             .Struct(definition) -> { names.push("struct {definition.name}") }

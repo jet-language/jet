@@ -12,11 +12,11 @@ use {
 }
 
 repaint: fn(old: [UINode], updated: [UINode]) -> Int {
-    backend := ui.null_backend()
-    n := 0
-    i := 0
+    ^backend: ui.null_backend()
+    ^n: 0
+    ^i: 0
     loop leaf in updated {
-        same := false
+        ^same: false
         if i < old.len() {
             if leaf.label == old[i].label -> same = true
         }
@@ -33,9 +33,9 @@ repaint: fn(old: [UINode], updated: [UINode]) -> Int {
 
 run: fn() {
     initial: [UINode]{ui.text("a"), ui.text("b")}
-    leaves := reactive.signal(initial)
-    backend := ui.tui_backend()
-    render_backend := backend.copy()
+    ^leaves: reactive.signal(initial)
+    ^backend: ui.tui_backend()
+    ^render_backend: backend.copy()
     ui.reactive_render(
         fn() {
             tree: ui.box(leaves.get())

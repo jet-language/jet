@@ -16,7 +16,7 @@ impl ProviderFactReport {
         }
         entries: pkg_json_array(tree) ?? return ProviderFactReport.unreadable(ProviderFamily.Nix, "nix", "Nix provider metadata must be a JSON object or realization array")
         first: pkg_json_object(entries.get(0) ?? Dyn.Null) ?? return ProviderFactReport.unreadable(ProviderFamily.Nix, "nix", "Nix provider metadata entries must be JSON objects")
-        report := ProviderFactReport.nix_object(first)
+        ^report: ProviderFactReport.nix_object(first)
         first_key: provider_nix_identity_key(first)
         loop index in 1..<entries.len() {
             other: pkg_json_object(entries[index]) ?? {
@@ -40,9 +40,9 @@ impl ProviderFactReport {
     nix_object: fn(object: [String:Dyn]) -> ProviderFactReport Never! {
         meta: pkg_json_object(object.get("meta") ?? Dyn.Null)
         locked: pkg_json_object(object.get("locked") ?? Dyn.Null)
-        losses := [String]{}
-        conflicts := [String]{}
-        facts := MetadataFacts.empty(ProviderFamily.Nix, "")
+        ^losses: [String]{}
+        ^conflicts: [String]{}
+        ^facts: MetadataFacts.empty(ProviderFamily.Nix, "")
         facts.add_json_projection("provider.nix.native", object)
         if meta == {
             .Val(fields) -> { facts.add_json_projection("provider.nix.native.meta", fields) }
@@ -79,7 +79,7 @@ impl ProviderFactReport {
         top_version: provider_nix_string_field(object, "version", "version", losses)
         meta_version: if meta == None -> None else -> provider_nix_string_field(meta_fields, "version", "meta.version", losses)
         provider_nix_conflicting_values(conflicts, "Nix metadata declares conflicting package versions", [{label: String, value: String?}]{{label: "version", value: top_version}, {label: "meta.version", value: meta_version}})
-        drv_path := provider_nix_string_field(object, "drvPath", "drvPath", losses)
+        ^drv_path: provider_nix_string_field(object, "drvPath", "drvPath", losses)
         if drv_path == None {
             drv_path = provider_nix_string_field(object, "derivationPath", "derivationPath", losses)
         }
@@ -99,16 +99,16 @@ impl ProviderFactReport {
             .None -> None
         }
         selected_name: if pname == None && meta_name == None && package == None -> provider_graph_either(path_name, raw_name) else -> provider_graph_either(raw_name, path_name)
-        name := selected_name ?? ""
+        ^name: selected_name ?? ""
         loop name.ends_with(".drv") -> name = name.removesuffix(".drv")
         facts.name = name
-        version := provider_graph_either(provider_graph_either(top_version, meta_version), path_version)
+        ^version: provider_graph_either(provider_graph_either(top_version, meta_version), path_version)
         if version == None && top_name != None {
             version = provider_nix_version_suffix(top_name, facts.name)
         }
         facts.version = version ?? ""
         top_hash: provider_nix_hash_field(object, losses)
-        output_hash := String?{None}
+        ^output_hash: String?{None}
         outputs: pkg_json_object(object.get("outputs") ?? Dyn.Null) ?? [String:Dyn]{}
         if pkg_json_object(provider_graph_either(outputs.get("out"), outputs.get("bin")) ?? Dyn.Null) == {
             .Val(output) -> {
@@ -248,9 +248,9 @@ provider_nix_string_field: fn(object: [String:Dyn], key: String, label: String, 
 
 // Every present value that disagrees with the first present one.
 provider_nix_conflicting_values: fn(conflicts: ^[String], message: String, values: [{label: String, value: String?}]) Never! {
-    selected_label := ""
-    selected_value := ""
-    has_selected := false
+    ^selected_label: ""
+    ^selected_value: ""
+    ^has_selected: false
     loop entry in values {
         value: entry.value ?? next
         if !has_selected {
@@ -296,7 +296,7 @@ provider_nix_hash_field: fn(object: [String:Dyn], losses: ^[String]) -> String? 
 }
 
 provider_nix_path_identity: fn(path: String) -> NixPathIdentity? Never! {
-    base := path.cut_last("/")?.after ?? path
+    ^base: path.cut_last("/")?.after ?? path
     loop base.ends_with(".drv") -> base = base.removesuffix(".drv")
     halves: base.split_once("-") ?? return None
     payload: halves.after.removesuffix("-bin")
@@ -329,7 +329,7 @@ provider_nix_dependency_values: fn(value: Dyn, losses: ^[String], label: String)
     }
     if pkg_json_array(value) == {
         .Val(items) -> {
-            out := [String]{}
+            ^out: [String]{}
             loop item in items {
                 if pkg_json_text(item) == {
                     .Val(text) -> {
@@ -436,7 +436,7 @@ provider_nix_string_list_value: fn(value: Dyn, label: String, losses: ^[String])
     }
     if pkg_json_array(value) == {
         .Val(items) -> {
-            out := [String]{}
+            ^out: [String]{}
             loop item in items {
                 if pkg_json_text(item) == {
                     .Val(text) -> { out.push(text) }
@@ -574,7 +574,7 @@ provider_nix_locked_source_identity: fn(locked: [String:Dyn]) -> String? Never! 
     kind: provider_graph_json_string(locked, "type") ?? "flake"
     owner: provider_graph_json_string(locked, "owner")
     repo: provider_graph_json_string(locked, "repo")
-    revision := String?{None}
+    ^revision: String?{None}
     if provider_graph_json_string(locked, "rev") == {
         .Val(rev) -> {
             if ProviderSelector.parse("#revision={rev}").is_exact() -> revision = Val(rev)

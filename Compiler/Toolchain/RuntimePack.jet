@@ -135,10 +135,10 @@ sha256_file: fn(path: String) -> String {
 // `<path byte count>:<path>:<size>:<bytes>` per file. `where` gives the file a
 // path names.
 inventory: fn(paths: [String], where: fn(String) -> String) -> Inventory {
-    sorted := paths.copy()
+    ^sorted: paths.copy()
     sorted.sort()
-    total := crypto.new()
-    rows := [InventoryFile]{}
+    ^total: crypto.new()
+    ^rows: [InventoryFile]{}
     loop path in sorted {
         if rows.len() > 0 && rows[rows.len() - 1].path == path -> next
         bytes: files.read_bytes(where(path)) ?? fail("cannot read `{path}`: {err}")
@@ -151,7 +151,7 @@ inventory: fn(paths: [String], where: fn(String) -> String) -> Inventory {
 
 // Every file under `directory` that `keep` accepts, relative to it, sorted.
 tree_files: fn(directory: String, keep: fn(String) -> Bool) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     entries: files.walk_files(directory).list() ?? fail("cannot list `{directory}`: {err}")
     loop entry in entries {
         if keep(files.basename(entry.relative)) -> found.push(entry.relative.copy())
@@ -164,14 +164,14 @@ tree_files: fn(directory: String, keep: fn(String) -> Bool) -> [String] {
 // runs past the end.
 le: fn(b: [U8], at: Int, width: Int) -> Int {
     if at < 0 || at + width > b.len() -> return -1
-    value := 0
+    ^value: 0
     loop k in 0..<width -> value = value * 256 + (Int{b[at + width - 1 - k]})
     value
 }
 
 // The NUL-terminated name at `at`, ending at `end` at the latest.
 c_string: fn(b: [U8], at: Int, end: Int) -> String {
-    stop := at
+    ^stop: at
     loop stop < end && (Int{b[stop]}) != 0 -> stop += 1
     String.from_bytes_lossy(b.slice(at, stop))
 }
@@ -186,7 +186,7 @@ elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: ^[String
     }
     shoff: le(b, base + 40, 8)
     shentsize: le(b, base + 58, 2)
-    shnum := le(b, base + 60, 2)
+    ^shnum: le(b, base + 60, 2)
     if shoff == 0 -> return ""
     if shentsize < 64 || shoff < 0 || shoff + shentsize > size {
         return "{what} has a malformed section header table"
@@ -212,7 +212,7 @@ elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: ^[String
         if strings < 0 || strings_size < 0 || strings + strings_size > size {
             return "{what} has a malformed string table"
         }
-        at := base + table
+        ^at: base + table
         loop at + entry <= base + table + table_size {
             name: le(b, at, 4)
             if name >= strings_size -> return "{what} has a symbol name outside its string table"
@@ -260,7 +260,7 @@ rust_symbols: fn(bytes: [U8], what: String) -> String {
     }
     shoff: le(bytes, 40, 8)
     shentsize: le(bytes, 58, 2)
-    shnum := le(bytes, 60, 2)
+    ^shnum: le(bytes, 60, 2)
     if shoff == 0 -> return ""
     if shentsize < 64 || shoff < 0 || shoff + shentsize > size {
         return "{what} has a malformed section header table"
@@ -269,7 +269,7 @@ rust_symbols: fn(bytes: [U8], what: String) -> String {
     if shnum < 0 || shoff + shnum * shentsize > size {
         return "{what} has a malformed section header table"
     }
-    forbidden := [String]{}
+    ^forbidden: [String]{}
     loop i in 0..<shnum {
         header: shoff + i * shentsize
         kind: le(bytes, header + 4, 4)
@@ -288,7 +288,7 @@ rust_symbols: fn(bytes: [U8], what: String) -> String {
         }
         strings_end: strings + strings_size
         table_end: table + table_size
-        at := table
+        ^at: table
         loop at + entry <= table_end {
             name: Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
             if name >= strings_size -> return "{what} has a symbol name outside its string table"
@@ -328,7 +328,7 @@ built_object_digest: fn(path: String) -> FileDigest {
 // together they are hundreds of megabytes. Nothing fails here; digest_of
 // reports a problem where the step reads that digest.
 digests: fn(objects: [String], others: [String]) -> [FileDigest] {
-    found := [FileDigest]{}
+    ^found: [FileDigest]{}
     task.group hashing {
         built: loop path in objects -> task built_object_digest(path)
         plain: loop path in others -> task file_digest(path)
@@ -423,13 +423,13 @@ items_of: fn(value: Dyn) -> [Dyn] {
 // non-empty array.
 abi_symbols: fn(text: String) -> [String] {
     abi: json.parse(text) ?? return [String]{}
-    symbols := loop row in items_of(abi) -> text_of(field(row, "symbol"))
+    ^symbols: loop row in items_of(abi) -> text_of(field(row, "symbol"))
     symbols.sort()
     symbols
 }
 
 export_names: fn(text: String) -> [String] {
-    names := text.trim().split("\n").to_list()
+    ^names: text.trim().split("\n").to_list()
     names.sort()
     names
 }
@@ -455,8 +455,8 @@ Flags: struct {
 }
 
 parse_flags: fn(args: [String]) -> Flags {
-    values := [String:String]{}
-    trees := [String]{}
+    ^values: [String:String]{}
+    ^trees: [String]{}
     loop arg in args {
         if !arg.starts_with("--") || !arg.contains("=") -> fail(USAGE)
         pair: arg.removeprefix("--").partition("=")
@@ -502,12 +502,12 @@ pack: fn(args: [String]) {
     files.remove_all(work) ?? ()
     files.create_dir_all(work) ?? fail("cannot create `{work}`: {err}")
     library: files.join(work, "library")
-    compiler_digests := [FileDigest]{}
-    versions := [String]{}
+    ^compiler_digests: [FileDigest]{}
+    ^versions: [String]{}
     task.group prep {
         t_hash: task file_digest(jet)
         t_ver: task built_version(jet)
-        _ := compose_unit(root, library, [String]{})
+        ^_: compose_unit(root, library, [String]{})
         compiler_digests.push(t_hash.join() ?? FileDigest{sha256: "", problem: "hashing `{jet}` stopped"})
         versions.push(t_ver.join() ?? fail("reading version of `{jet}` stopped"))
     }
@@ -529,15 +529,15 @@ PackInventories: struct {
 
 pack_inventories: fn(root: String, flags: Flags) -> PackInventories {
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
-    sources := runtime_sources(manifest)
+    ^sources: runtime_sources(manifest)
     // Each source's package.jet names its memory kernel, which the unit's
     // check reads (unit_kernel), so it is part of the pack's source.
-    source_paths := [String]{RUNTIME_SOURCES, RUNTIME_PACKAGE}
+    ^source_paths: [String]{RUNTIME_SOURCES, RUNTIME_PACKAGE}
     loop directory in unit_packages(root, sources) -> source_paths.push("{directory}/package.jet")
     source_paths.extend(sources.move())
     in_package: fn(path: String) -> String { at(root, path) }
     source: inventory(source_paths, in_package)
-    backend_paths := [String]{}
+    ^backend_paths: [String]{}
     loop tree in flags.trees {
         if tree == RUNTIME_TREE -> next
         directory: "{PACKAGE}/{tree}"
@@ -631,7 +631,7 @@ build: fn(tool: Toolchain, work: String, library: String, flags: Flags, compiler
         .env("JET_FRONT_RUNTIME_IMAGE_OUTPUT", image)
         .env("JET_FRONT_RUNTIME_WEB_OUTPUT", web)
         .env("JET_FRONT_CORE_OBJECT_OUTPUT", core)
-    inventories := [PackInventories]{}
+    ^inventories: [PackInventories]{}
     task.group run_doc {
         t_inv: task pack_inventories(tool.root, flags)
         if doc.run() == {
@@ -654,10 +654,10 @@ build: fn(tool: Toolchain, work: String, library: String, flags: Flags, compiler
     // Every output the provenance names is read once and hashed on tasks while
     // the text receipts and interface are checked on the main thread; each
     // built object is read once for its Rust check and its digest too.
-    hashed := [FileDigest]{}
-    abi_sha256 := ""
-    threads_sha256 := ""
-    stops_sha256 := ""
+    ^hashed: [FileDigest]{}
+    ^abi_sha256: ""
+    ^threads_sha256: ""
+    ^stops_sha256: ""
     task.group verify_and_hash {
         t_hash: task digests([String]{"{prefix}.o", pack, image, "{core}.o"}, [String]{"{core}.exports", "{core}.facts", "{core}.seal", "{core}.threads", "{core}.interface", "{core}.bodies", "{web}.wasm"})
         abi_text: files.read("{prefix}.abi.json") ?? fail("cannot read the runtime ABI inventory: {err}")
@@ -798,7 +798,7 @@ check_core_library: fn(core: String, out: String) {
 // export symbols are read once into a set, so each name is one lookup.
 core_threads_unexported: fn(exports: String, threads: String) -> Bool {
     if threads.trim() == "*" -> return false
-    symbols := [String:Bool]{}
+    ^symbols: [String:Bool]{}
     loop row in exports.split("\n") {
         cut: row.partition("\t")
         if cut.sep != "" -> symbols[cut.head] = true
@@ -808,7 +808,7 @@ core_threads_unexported: fn(exports: String, threads: String) -> Bool {
 
 // The sources sources.list lists, in order.
 runtime_sources: fn(listed: String) -> [String] {
-    paths := [String]{}
+    ^paths: [String]{}
     loop row in listed.split("\n") {
         trimmed: row.trim()
         if trimmed == "" || trimmed.starts_with("#") -> next
@@ -835,9 +835,9 @@ core_import: fn(spec: String) -> Bool {
 // Core import (a `use` line, or a row of a top-level `use { … }` block) not
 // yet in `uses` is added to it.
 unit_body: fn(text: String, uses: ^[String]) -> String {
-    kept := [String]{}
-    block := false
-    depth := 0
+    ^kept: [String]{}
+    ^block: false
+    ^depth: 0
     loop line in text.split("\n") {
         if block {
             kept.push("")
@@ -883,9 +883,9 @@ unit_body: fn(text: String, uses: ^[String]) -> String {
 // with none fails, so a step that cannot see a source's package.jet never
 // drops that package's memory kernel.
 unit_packages: fn(root: String, paths: [String]) -> [String] {
-    packages := [String]{}
+    ^packages: [String]{}
     loop path in paths {
-        directory := path.rpartition("/").head
+        ^directory: path.rpartition("/").head
         loop directory != "" && directory != PACKAGE && !files.exists(at(root, "{directory}/package.jet")) {
             directory = directory.rpartition("/").head
         }
@@ -902,7 +902,7 @@ unit_packages: fn(root: String, paths: [String]) -> [String] {
 // file, so its kernel rule reads each raw operation's own source from the
 // unit source marks against this list.
 unit_kernel: fn(root: String, paths: [String]) -> [String] {
-    kernel := [String]{}
+    ^kernel: [String]{}
     loop directory in unit_packages(root, paths) {
         manifest: files.read(at(root, "{directory}/package.jet")) ?? fail("`{directory}/package.jet` cannot be read: {err}")
         field: MEMORY_KERNEL_FIELD.match(manifest) ?? next
@@ -919,8 +919,8 @@ unit_kernel: fn(root: String, paths: [String]) -> [String] {
 unit_manifest: fn(manifest: String, kernel: [String]) -> String {
     quoted: loop path in kernel -> "\"{path}\""
     memory: "memory: .Kernel([{quoted.join(", ")}])"
-    lines := manifest.split("\n").to_list()
-    replaced := false
+    ^lines: manifest.split("\n").to_list()
+    ^replaced: false
     loop at in 0..<lines.len() {
         field: lines[at].partition("memory:")
         if field.sep == "" || !field.tail.contains(".Kernel(") -> next
@@ -947,10 +947,10 @@ test_package: fn(root: String) -> String {
 // order, written to OUT/unit.jet beside its package.jet; returns OUT/unit.jet.
 compose_unit: fn(root: String, out: String, fragments: [String]) -> String {
     listed: files.read(at(root, RUNTIME_SOURCES)) ?? fail("`{RUNTIME_SOURCES}` cannot be read: {err}")
-    paths := runtime_sources(listed)
+    ^paths: runtime_sources(listed)
     paths.extend(fragments.copy())
-    uses := [String]{}
-    bodies := [String]{}
+    ^uses: [String]{}
+    ^bodies: [String]{}
     loop path in paths {
         text: files.read(at(root, path)) ?? fail("`{path}` cannot be read: {err}")
         bodies.push("{UNIT_SOURCE_MARK}{path}]\n{unit_body(text, uses)}")
@@ -960,7 +960,7 @@ compose_unit: fn(root: String, out: String, fragments: [String]) -> String {
     manifest: if fragments.len() > 0 -> test_package(root) else -> files.read(at(root, RUNTIME_PACKAGE)) ?? fail("`{RUNTIME_PACKAGE}` cannot be read: {err}")
     package: unit_manifest(manifest, unit_kernel(root, paths))
     files.create_dir_all(out) ?? fail("`{out}` cannot be created: {err}")
-    unit := uses.move()
+    ^unit: uses.move()
     unit.push("")
     unit.extend(bodies)
     unit_path: files.join(out, "unit.jet")
@@ -976,8 +976,8 @@ is_type_name: fn(text: String) -> Bool { re.full_match(Regex{"[A-Z][A-Za-z0-9]*"
 // arguments are not that shape or name a fragment twice.
 unit_tests: fn(args: [String]) -> [String]? {
     if args.len() % 2 != 1 -> return None
-    tests := [String]{}
-    at := 1
+    ^tests: [String]{}
+    ^at: 1
     loop at < args.len() {
         if args[at] != "--test" || !is_type_name(args[at + 1]) || tests.contains(args[at + 1]) {
             return None
@@ -994,7 +994,7 @@ unit_tests: fn(args: [String]) -> [String]? {
 unit_check: fn(root: String, out: String) -> Int {
     dir: at(root, RUNTIME_FRAGMENTS)
     listed: files.list_dir(dir) ?? fail("`{RUNTIME_FRAGMENTS}` cannot be listed: {err}")
-    fragments := [String]{}
+    ^fragments: [String]{}
     loop entry in listed {
         if entry.name.ends_with(".jet") && entry.name != "package.jet" {
             fragments.push("{RUNTIME_FRAGMENTS}/{entry.name}")
@@ -1002,13 +1002,13 @@ unit_check: fn(root: String, out: String) -> Int {
     }
     fragments.sort()
     if fragments.len() == 0 -> fail("`{RUNTIME_FRAGMENTS}` holds no fragment")
-    unit_path := compose_unit(root, out, fragments)
+    ^unit_path: compose_unit(root, out, fragments)
     unit: files.read(unit_path) ?? fail("`{unit_path}` cannot be read: {err}")
     jet: process.env_get("JET") ?? "jet"
     receipt: process.cmd([String]{jet.copy(), "check", unit_path.move()}).cwd(out).env("JET_KEEP_GOING", "1").output_limit(1073741824).run() ?? fail("{jet} check cannot run: {err}")
-    sources := [String]{}
-    owners := [String]{}
-    current := ""
+    ^sources: [String]{}
+    ^owners: [String]{}
+    ^current: ""
     loop line in unit.split("\n") {
         if line.starts_with(UNIT_SOURCE_MARK) {
             current = line.removeprefix(UNIT_SOURCE_MARK).removesuffix("]").copy()
@@ -1016,9 +1016,9 @@ unit_check: fn(root: String, out: String) -> Int {
         }
         owners.push(current.copy())
     }
-    counts := [String:Int]{}
-    total := 0
-    error := false
+    ^counts: [String:Int]{}
+    ^total: 0
+    ^error: false
     loop line in "{receipt.output}{receipt.errors}".split("\n") {
         trimmed: line.trim_start()
         if trimmed.len() == line.len() && line != "" -> error = line.starts_with("Error")
@@ -1042,8 +1042,8 @@ unit_check: fn(root: String, out: String) -> Int {
 }
 
 run: fn() {
-    args := process.args()
-    root := "."
+    ^args: process.args()
+    ^root: "."
     if args.len() >= 2 && args[0] == "--root" {
         root = args[1].copy()
         args = args.slice(2, args.len())
@@ -1100,7 +1100,7 @@ run: fn() {
 }
 
 #Test("a unit gathers each Core import once and blanks every import line") {
-    uses := [String]{"use core.files"}
+    ^uses: [String]{"use core.files"}
     body: unit_body("use core.files\nuse m: core.math\nuse jet_lexer.[\n    lex,\n]\nuse {{\n    core.sys\n    fs: core.files\n    jet_ir.[\n        Block,\n    ]\n}}\nmain: fn() {{}}\n", uses)
     assert_eq(uses, [String]{"use core.files", "use m: core.math", "use core.sys", "use fs: core.files"})
     assert_eq(body, "\n\n\n\n\n\n\n\n\n\n\n\nmain: fn() {{}}\n")
@@ -1111,7 +1111,7 @@ run: fn() {
 
 // Test input: `value` as `width` little-endian bytes at `at` of `b`.
 put: fn(b: ^[U8], at: Int, width: Int, value: Int) {
-    rest := value
+    ^rest: value
     loop k in 0..<width {
         b[at + k] = checked(U8{rest % 256}) ?? U8{0}
         rest /%= 256
@@ -1121,8 +1121,8 @@ put: fn(b: ^[U8], at: Int, width: Int, value: Int) {
 // Test input: a 64-bit little-endian ELF relocatable whose .symtab names
 // `names` after the null symbol, its .strtab first.
 elf_with_symbols: fn(names: [String]) -> [U8] {
-    strings := [U8]{U8{0}}
-    offsets := [Int]{}
+    ^strings: [U8]{U8{0}}
+    ^offsets: [Int]{}
     loop name in names {
         offsets.push(strings.len())
         strings.extend(name.bytes())
@@ -1131,7 +1131,7 @@ elf_with_symbols: fn(names: [String]) -> [U8] {
     symtab: (64 + strings.len() + 7) /% 8 * 8
     symtab_size: (names.len() + 1) * 24
     shoff: symtab + symtab_size
-    b := [U8]{}
+    ^b: [U8]{}
     loop _ in 0..<(shoff + 3 * 64) -> b.push(U8{0})
     put(b, 0, 4, 1179403647)
     // ELFCLASS64, ELFDATA2LSB, EV_CURRENT; ET_REL; EM_X86_64.
@@ -1180,7 +1180,7 @@ elf_with_symbols: fn(names: [String]) -> [U8] {
     assert_eq(rust_symbols(rusty, "r.o"), "Rust symbols in r.o:\n_ZN3foo3barE\n__rust_alloc")
     clean: elf_with_symbols([String]{"jet_main", "memcpy", "x_ZN1a"})
     assert_eq(rust_symbols(clean, "c.o"), "")
-    names := [String]{}
+    ^names: [String]{}
     assert_eq(symbol_names(clean, "c.o", names), "")
     assert_eq(names, [String]{"jet_main", "memcpy", "x_ZN1a"})
     assert_eq(rust_symbols("not an object".bytes(), "x"), "x is not a 64-bit little-endian ELF object")

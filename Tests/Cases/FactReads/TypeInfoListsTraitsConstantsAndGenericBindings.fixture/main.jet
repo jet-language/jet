@@ -59,16 +59,18 @@ PREPARED: #run { Square.reflect() }
 PAIR: #run { Pair<Int, String>.reflect() }
 
 describe: fn(info: TypeInfo) -> String {
-    traits := [String]{}
+    ^traits: [String]{}
     loop implemented in info.traits {
         traits.push("{implemented.name} ({implemented.methods.len()} methods)")
     }
-    constants := [String]{}
+    ^constants: [String]{}
     loop constant in info.constants {
         constants.push("{constant.trait_name}.{constant.name}: {constant.type.name} = {constant.value ?? "unknown"}")
     }
-    bindings := [String]{}
-    loop binding in info.identity.generic_bindings -> bindings.push("{binding.name} = {binding.type.name}")
+    ^bindings: [String]{}
+    loop binding in info.identity.generic_bindings {
+        bindings.push("{binding.name} = {binding.type.name}")
+    }
     "{info.name}: traits [{traits.join(", ")}]; constants [{constants.join("; ")}]; bindings [{bindings.join(", ")}]"
 }
 

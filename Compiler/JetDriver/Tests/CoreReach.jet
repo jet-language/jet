@@ -62,7 +62,7 @@ reach_test_request: fn(source: String) -> JetDriverCompileRequest {
 // The load of `source` beside the Core module `core.devtools`, whose text is
 // `owner`, and its cataloged part `__core_devtools_table`.
 reach_test_load_owner: fn(source: String, owner: String) -> JetDriverLoadResult {
-    request := reach_test_request(source)
+    ^request: reach_test_request(source)
     request.core_sources = [JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools", path: "Core/devtools-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(owner)},
         {module_name: "__core_devtools_table", alias: "__core_devtools_table", path: "Core/devtools-reach-table.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("value: fn() -> Int Never! {{ 7 }}\n")},
@@ -87,7 +87,7 @@ reach_test_has_module: fn(load: JetDriverLoadResult, module_name: String) -> Boo
 }
 
 reach_test_functions: fn(load: JetDriverLoadResult, module_name: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop module_row in load.modules {
         if module_row.module_name != module_name -> next
         loop item in module_row.program.items {
@@ -132,7 +132,7 @@ reach_test_functions: fn(load: JetDriverLoadResult, module_name: String) -> [Str
 // `core.devtools.runtime.kernel`; the kernel's `lookup` alone reads the
 // runtime unit `core.devtools.runtime.table`.
 reach_test_load_runtime: fn(source: String) -> JetDriverLoadResult {
-    request := reach_test_request(source)
+    ^request: reach_test_request(source)
     owner: "use {{\n    kernel: core.devtools.runtime.kernel\n}}\n\nplain: fn() -> Int Never! {{ kernel.plain() }}\n\nlookup: fn() -> Int Never! {{ kernel.lookup() }}\n"
     kernel: "use {{\n    table: core.devtools.runtime.table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\nlookup: fn() -> Int Never! {{ table.value() }}\n"
     request.core_sources = [JetDriverCoreSource]{
@@ -155,7 +155,7 @@ reach_test_load_runtime: fn(source: String) -> JetDriverLoadResult {
 }
 
 reach_test_constants: fn(load: JetDriverLoadResult, module_name: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop module_row in load.modules {
         if module_row.module_name != module_name -> next
         loop item in module_row.program.items {
@@ -187,7 +187,7 @@ reach_test_constants: fn(load: JetDriverLoadResult, module_name: String) -> [Str
 // The load of `source` beside `core.devtools`, whose `magnitude` alone calls
 // `.abs` (a core.math receiver demand), and `core.math`.
 reach_test_load_demand: fn(source: String) -> JetDriverLoadResult {
-    request := reach_test_request(source)
+    ^request: reach_test_request(source)
     owner: "plain: fn() -> Int Never! {{ 1 }}\n\nmagnitude: fn(x: Int) -> Int Never! {{ x.abs() }}\n"
     request.core_sources = [JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools", path: "Core/devtools-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(owner)},
@@ -210,7 +210,7 @@ reach_test_load_demand: fn(source: String) -> JetDriverLoadResult {
 // The load of `source` beside the one Core module `module_name`, whose text
 // is `text` and whose cutover members are `owned`.
 reach_test_load_module: fn(source: String, module_name: String, owned: [String], text: String) -> JetDriverLoadResult {
-    request := reach_test_request(source)
+    ^request: reach_test_request(source)
     request.core_sources = [JetDriverCoreSource]{
         {module_name: module_name, alias: module_name.replace(".", "_"), path: "Core/reach-module.jet", owner: "", owned_members: owned, runtime: false, text: jet_driver_core_text(text)},
     }
@@ -260,10 +260,10 @@ reach_test_read: fn(path: String) -> String {
 // fills a role (an F32-width source, a precise family member) is reached by
 // its role marker, so the compiler spells no name for it.
 #Test("each `__` literal the compiler spells after a routed module's name is one of its routes") {
-    files := [String]{}
+    ^files: [String]{}
     reach_test_sources("Compiler", files)
-    failures := [String]{}
-    checked := 0
+    ^failures: [String]{}
+    ^checked: 0
     loop module_name in JET_DRIVER_ROUTED_MODULES {
         routes: jet_driver_core_routes(module_name)
         loop path in files {
@@ -305,7 +305,7 @@ reach_test_read: fn(path: String) -> String {
     assert_eq(words.spells.len(), 4)
     assert_eq(words.spells[2], words.spells[1])
     assert_eq(words.spells[3].len(), 0)
-    spelled := [String]{}
+    ^spelled: [String]{}
     loop row in 0..<2 {
         loop key in words.spells[row] -> spelled.push("{words.words[key >> 2]}/{key & 3}")
     }
@@ -318,11 +318,11 @@ reach_test_read: fn(path: String) -> String {
 // and the reach strips the module.
 reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     owner: "use {{\n    table: __core_devtools_table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\nlookup: fn() -> Int Never! {{ table.value() }}\n"
-    parsed := jet_driver_parse_one(JetDriverParseJob.Core{text: owner, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
-    words := parsed.words.move() ?? panic("a Core unit has words")
-    reach := jet_driver_reach(true)
+    ^parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: owner, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    ^words: parsed.words.move() ?? panic("a Core unit has words")
+    ^reach: jet_driver_reach(true)
     unit: jet_driver_reach_admit(reach, 0, "core.devtools", words.move(), parsed.parsed.program.imports, false)
-    scoped := [JetDriverScopedImport]{}
+    ^scoped: [JetDriverScopedImport]{}
     jet_driver_scoped_imports(parsed.parsed.program.imports, parsed.parsed.program.items, "", true, scoped)
     loop row in scoped -> jet_driver_reach_defer(reach, unit, row)
     word: jet_driver_reach_word(reach, reached)
@@ -332,7 +332,7 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     // As the load does (Loader.jet): a wanted import's module loads, and
     // the import is followed.
     if jet_driver_reach_wants(reach, 0) -> reach.edges[0].followed = true
-    modules := [JetDriverLoadedModule]{JetDriverLoadedModule{source_unit_index: 0, source_identity: "reach:core.devtools", package_identity: "core", module_identity: ModuleID{id: 0}, module_name: "core.devtools", program: parsed.parsed.program.move()}}
+    ^modules: [JetDriverLoadedModule]{JetDriverLoadedModule{source_unit_index: 0, source_identity: "reach:core.devtools", package_identity: "core", module_identity: ModuleID{id: 0}, module_name: "core.devtools", program: parsed.parsed.program.move()}}
     jet_driver_reach_strip(reach, modules)
     modules.pop() ?? panic("the reach strips the one module")
 }
@@ -350,11 +350,11 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
 
 #Test("a Core unit follows its import once a reached marker spells the import's library part") {
     owner: "use {{\n    table: __core_devtools_table\n}}\n\n#Table.Probe marked: fn() -> Int Never! {{ 1 }}\n"
-    parsed := jet_driver_parse_one(JetDriverParseJob.Core{text: owner, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
-    words := parsed.words.move() ?? panic("a Core unit has words")
-    reach := jet_driver_reach(true)
+    ^parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: owner, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    ^words: parsed.words.move() ?? panic("a Core unit has words")
+    ^reach: jet_driver_reach(true)
     unit: jet_driver_reach_admit(reach, 0, "core.devtools", words.move(), parsed.parsed.program.imports, false)
-    scoped := [JetDriverScopedImport]{}
+    ^scoped: [JetDriverScopedImport]{}
     jet_driver_scoped_imports(parsed.parsed.program.imports, parsed.parsed.program.items, "", true, scoped)
     loop row in scoped -> jet_driver_reach_defer(reach, unit, row)
     jet_driver_reach_drain(reach)
@@ -374,7 +374,7 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
     assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
     words: parsed.words ?? panic("a Core unit has words")
-    held := [String]{}
+    ^held: [String]{}
     loop declaration in words.held -> held.push(declaration.name)
     assert_eq(held, [String]{"plain", "__TABLE", "scaled", "unused"})
     // Each held declaration's place holds an empty stub until it is reached.
@@ -403,7 +403,7 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: spelled, module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
     assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
     words: parsed.words ?? panic("a Core unit has words")
-    held := [String]{}
+    ^held: [String]{}
     loop declaration in words.held -> held.push(declaration.name)
     assert_eq(held, [String]{"plain", "unused"})
     ruled: jet_driver_parse_one(JetDriverParseJob.Core{text: "#Target(Web)\n\n{spelled}", module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
@@ -416,7 +416,7 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
     assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
     words: parsed.words ?? panic("a Core unit has words")
-    held := [String]{}
+    ^held: [String]{}
     loop declaration in words.held -> held.push(declaration.name)
     assert_eq(held, [String]{"plain", "helper", "unused"})
     loop item in parsed.parsed.program.items {
@@ -437,7 +437,7 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
 }
 
 reach_test_types: fn(load: JetDriverLoadResult, module_name: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop module_row in load.modules {
         if module_row.module_name != module_name -> next
         loop item in module_row.program.items {
@@ -451,7 +451,7 @@ reach_test_types: fn(load: JetDriverLoadResult, module_name: String) -> [String]
 // The inherent methods of `type_name`, then each trait impl method as
 // `Trait.method`.
 reach_test_methods: fn(load: JetDriverLoadResult, module_name: String, type_name: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop module_row in load.modules {
         if module_row.module_name != module_name -> next
         loop item in module_row.program.items {
@@ -507,7 +507,7 @@ reach_test_methods: fn(load: JetDriverLoadResult, module_name: String, type_name
 // The load of `source` beside `core.math`, whose text is `math`, and
 // `core.text`, whose text is `text`.
 reach_test_load_pair: fn(source: String, math: String, text: String) -> JetDriverLoadResult {
-    request := reach_test_request(source)
+    ^request: reach_test_request(source)
     request.core_sources = [JetDriverCoreSource]{
         {module_name: "core.math", alias: "core_math", path: "Core/math-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(math)},
         {module_name: "core.text", alias: "core_text", path: "Core/text-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(text)},
@@ -593,9 +593,9 @@ reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: 
 // handle route's `"cross"`), so a routed module's type keeps each such
 // method; JET_DRIVER_MEMBER_ROUTES holds exactly those names.
 #Test("each inherent method of a routed module's types that the compiler spells as a literal stays with its type") {
-    files := [String]{}
+    ^files: [String]{}
     reach_test_sources("Compiler", files)
-    literals := [String:Bool]{}
+    ^literals: [String:Bool]{}
     loop path in files {
         if !path.contains("/Source/") -> next
         text: reach_test_read(path)
@@ -606,8 +606,8 @@ reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: 
             }
         }
     }
-    found := [String]{}
-    missing := [String]{}
+    ^found: [String]{}
+    ^missing: [String]{}
     loop module_name in JET_DRIVER_ROUTED_MODULES {
         loop row in CORE_SOURCE_OWNED_ROWS {
             if row.module_name != module_name || row.owner != "" -> next
@@ -624,7 +624,7 @@ reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: 
         }
     }
     assert_eq(missing, [String]{})
-    stale := [String]{}
+    ^stale: [String]{}
     loop name in JET_DRIVER_MEMBER_ROUTES {
         if !found.contains(name) -> stale.push(name)
     }
@@ -635,7 +635,7 @@ reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: 
 // module's name (`"core.compute", "matmul"`, `name: "…"`, `member: "…"`),
 // as `module.name`.
 reach_test_spelled_pairs: fn(files: [String]) -> [String] {
-    pairs := [String]{}
+    ^pairs: [String]{}
     loop path in files {
         if !path.contains("/Source/") -> next
         text: reach_test_read(path)
@@ -670,8 +670,10 @@ reach_test_registry_member: fn(module_name: String, name: String) -> Bool {
 // role reaches that call though neither the program nor the compiler spells
 // it, so it is a source route as a call by a literal name is.
 reach_test_role_self_call: fn(value: Func, text: String, pair: String) -> Bool {
-    role := false
-    loop marker in value.markers -> role = role || marker.name == "Role" || marker.name.ends_with(".Role")
+    ^role: false
+    loop marker in value.markers {
+        role = role || marker.name == "Role" || marker.name.ends_with(".Role")
+    }
     role && (text.contains("{pair}(") || text.contains("{pair}<"))
 }
 
@@ -680,16 +682,16 @@ reach_test_role_self_call: fn(value: Func, text: String, pair: String) -> Bool {
 // by its qualified name, must be a route: JET_DRIVER_SOURCE_ROUTES holds
 // exactly those that aren't registry members.
 #Test("each top-level Core function the compiler calls by a literal name right after its module's, or its role reaches by its qualified name, is a source route") {
-    files := [String]{}
+    ^files: [String]{}
     reach_test_sources("Compiler", files)
     pairs: reach_test_spelled_pairs(files)
-    found := [String]{}
-    missing := [String]{}
+    ^found: [String]{}
+    ^missing: [String]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         if JET_DRIVER_ROUTED_MODULES.contains(row.module_name) -> next
         prefix: "{row.module_name}."
         text: reach_test_read(row.path)
-        spelled := text.contains(prefix)
+        ^spelled: text.contains(prefix)
         loop pair in pairs -> spelled = spelled || pair.starts_with(prefix)
         if !spelled -> next
         parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: false}, compiler_threads_single())
@@ -707,7 +709,7 @@ reach_test_role_self_call: fn(value: Func, text: String, pair: String) -> Bool {
         }
     }
     assert_eq(missing, [String]{})
-    stale := [String]{}
+    ^stale: [String]{}
     loop route in JET_DRIVER_SOURCE_ROUTES {
         if !found.contains(route) -> stale.push(route)
     }
@@ -723,7 +725,7 @@ reach_test_role_self_call: fn(value: Func, text: String, pair: String) -> Bool {
     held: loop declaration in words.held -> declaration.name
     assert_eq(held, [String]{"plain"})
     load: reach_test_load_module("use d: core.devtools\nrun: fn() {{ print(d.shape(1) + d.wrapped(2) + d.plain()) }}\n", "core.devtools", [String]{}, text)
-    marked := [String]{}
+    ^marked: [String]{}
     loop module_row in load.modules {
         if module_row.module_name != "core.devtools" -> next
         loop item in module_row.program.items {
@@ -737,20 +739,20 @@ reach_test_role_self_call: fn(value: Func, text: String, pair: String) -> Bool {
 // (jet_driver_reach_parse_held), so nothing outside its own tokens may
 // decide its parse: it must parse as it does in its whole unit.
 #Test("each held declaration of every built-in Core unit parses alone as it parses in its whole unit") {
-    differ := [String]{}
+    ^differ: [String]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         text: reach_test_read(row.path)
         lazy: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: false}, compiler_threads_single())
         words: lazy.words ?? next
         if words.held.len() == 0 -> next
         whole: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: true}, compiler_threads_single())
-        parsed := [String:String]{}
+        ^parsed: [String:String]{}
         loop item in whole.parsed.program.items {
             name: jet_driver_reach_item_name(item)
             if parsed.get(name) == None -> parsed[name] = "{item:Debug}"
         }
-        source := text.bytes()
-        cursor := 0
+        ^source: text.bytes()
+        ^cursor: 0
         loop declaration in words.held {
             jet_driver_blank_bytes(source, cursor, declaration.span.start)
             cursor = declaration.span.end

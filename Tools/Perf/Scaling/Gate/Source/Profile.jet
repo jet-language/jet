@@ -84,9 +84,9 @@ items: fn(value: Dyn, key: String) -> [Dyn] Never! {
 // first-opened order, running to infinity.
 phase_intervals: fn(events: [Dyn]) -> [Interval] Never! {
     origin: if events.find(fn(event) { shown(event, "name") == "trace.start" }) == .Val(start) -> number(start.get("args") ?? Dyn.Null, "unix_ms") / Float{1000.0} else -> Float{0.0}
-    slots := [String:Int]{}
-    open := [{phase: String, starts: [Float]}]{}
-    intervals := [Interval]{}
+    ^slots: [String:Int]{}
+    ^open: [{phase: String, starts: [Float]}]{}
+    ^intervals: [Interval]{}
     loop event in events {
         ph: shown(event, "ph")
         if (ph != "B" && ph != "E") || (event.get("name") ?? UNDEFINED) != (event.get("cat") ?? UNDEFINED) {
@@ -122,10 +122,10 @@ phase_intervals: fn(events: [Dyn]) -> [Interval] Never! {
 // `nodes` gives its frames. Nothing when the trace is missing or has no
 // timeline.
 timeline: fn(file: String) -> Timeline {
-    sampled := Timeline{functions: [Function]{}, samples: []}
+    ^sampled: Timeline{functions: [Function]{}, samples: []}
     text: files.read(file) ?? return sampled
     trace: json.parse(text) ?? return sampled
-    found := Dyn.Null
+    ^found: Dyn.Null
     loop section in items(trace.get("content") ?? Dyn.Null, "receipt_sections") {
         if shown(section, "name") == "timeline" -> found = section.get("value") ?? Dyn.Null
     }
@@ -139,10 +139,10 @@ timeline: fn(file: String) -> Timeline {
     }
     nodes: loop node in items(found, "nodes") -> node.int() ?? -1
     flat: loop word in items(found, "samples") -> word.int() ?? -1
-    at := 0
+    ^at: 0
     loop at + 1 < flat.len() {
-        frames := [Int]{}
-        node := flat[at + 1]
+        ^frames: [Int]{}
+        ^node: flat[at + 1]
         loop node >= 0 && 2 * node + 1 < nodes.len() && nodes[2 * node] < sampled.functions.len() {
             frames.push(nodes[2 * node])
             node = nodes[2 * node + 1]
@@ -156,7 +156,7 @@ timeline: fn(file: String) -> Timeline {
 // The phase at unix second `t`: the latest-starting interval holding it, a
 // later one winning a tie.
 phase_at: fn(intervals: [Interval], t: Float) -> String? Never! {
-    best := -1
+    ^best: -1
     loop i in 0..<intervals.len() {
         if t < intervals[i].start || t >= intervals[i].end -> next
         if best < 0 || intervals[i].start >= intervals[best].start -> best = i
@@ -176,9 +176,9 @@ count: fn(counts: ^Counts, symbol: String) {
 // The TOP most counted symbols under `below`, by count (a tie keeps the
 // first seen first), with their share of `total` and their source.
 ranked: fn(counts: Counts, total: Int, below: Float, sources: [String:String]) -> [Row] Never! {
-    rows := counts.rows.filter(fn(row) { Float{row.count} < below })
+    ^rows: counts.rows.filter(fn(row) { Float{row.count} < below })
     rows.sort_by(fn(a, b) { b.count <=> a.count })
-    out := [Row]{}
+    ^out: [Row]{}
     loop row in rows.take(TOP) {
         source: if sources.get(row.symbol) == .Val(found) -> Val("{found}") else -> String?{None}
         out.push(Row{share: Float{row.count} / Float{max(1, total)}, symbol: row.symbol.copy(), source: source})
@@ -205,21 +205,21 @@ wrap: fn(dir: String) -[Env]> [String] Never! {
 // phase driver itself. A function's source is that of the first function of
 // its name in the trace that has one.
 profile: fn(dir: String, trace_file: String, wanted: [String]) -> [PhaseProfile] Err! {
-    events := [Dyn]{}
+    ^events: [Dyn]{}
     loop raw in files.read(trace_file).split("\n") {
         line: raw.trim().removesuffix(",")
         if !line.starts_with("{{") -> next
         event: json.parse(line) ?? next
         events.push(event)
     }
-    slots := [String:Int]{}
-    tallies := [PhaseCounts]{}
+    ^slots: [String:Int]{}
+    ^tallies: [PhaseCounts]{}
     loop phase in wanted {
         if slots.has_key(phase) -> next
         slots[phase.copy()] = tallies.len()
         tallies.push(PhaseCounts{phase: phase.copy(), samples: 0, own: Counts{at: [String:Int]{}, rows: []}, inclusive: Counts{at: [String:Int]{}, rows: []}})
     }
-    intervals := [Interval]{}
+    ^intervals: [Interval]{}
     loop interval in phase_intervals(events) {
         if slots.has_key(interval.phase) -> intervals.push(interval)
     }
@@ -228,7 +228,7 @@ profile: fn(dir: String, trace_file: String, wanted: [String]) -> [PhaseProfile]
         at: slots[phase_at(intervals, sample.t) ?? next]
         tallies[at].samples += 1
         count(tallies[at].own, if sample.frames.len() > 0 -> sampled.functions[sample.frames[0]].name else -> "?")
-        seen := [String]{}
+        ^seen: [String]{}
         loop frame in sample.frames {
             function: sampled.functions[frame]
             if seen.contains(function.name) || !function.owned -> next
@@ -236,13 +236,13 @@ profile: fn(dir: String, trace_file: String, wanted: [String]) -> [PhaseProfile]
             count(tallies[at].inclusive, function.name)
         }
     }
-    sources := [String:String]{}
+    ^sources: [String:String]{}
     loop function in sampled.functions {
         if sources.has_key(function.name) -> next
         if function.source == .Val(source) -> sources[function.name.copy()] = source.copy()
     }
     tallies.sort_by(fn(a, b) { key_rank(a.phase) <=> key_rank(b.phase) })
-    phases := [PhaseProfile]{}
+    ^phases: [PhaseProfile]{}
     loop tally in tallies {
         phases.push(PhaseProfile{phase: tally.phase.copy(), samples: tally.samples, own: ranked(tally.own, tally.samples, math.INFINITY, sources), inclusive: ranked(tally.inclusive, tally.samples, Float{0.95} * Float{tally.samples}, sources)})
     }

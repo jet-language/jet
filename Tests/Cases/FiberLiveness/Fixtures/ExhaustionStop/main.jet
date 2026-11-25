@@ -47,11 +47,11 @@ cap: fn(room: Int) {
 
 contended: fn() {
     first: task work(1)
-    _ := first.join() ?? 0
+    ^_: first.join() ?? 0
     cap(ROOM)
-    total := 0
+    ^total: 0
     loop _ in 0..<ROUNDS {
-        handles := [Task<Int>]{}
+        ^handles: [Task<Int>]{}
         loop i in 0..<TASKS -> handles.push(task work(i))
         loop handle in handles -> total += handle.join() ?? 0
     }
@@ -59,7 +59,7 @@ contended: fn() {
 }
 
 grow: fn() -> Int {
-    values := [Int]{}
+    ^values: [Int]{}
     loop { values.push(values.len()) }
     values.len()
 }

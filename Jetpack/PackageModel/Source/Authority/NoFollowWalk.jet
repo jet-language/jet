@@ -64,7 +64,7 @@ AuthorityWalkBudget: struct {
 // each observed with a no-follow Stat and counted against `budget`.
 pkg_authority_read_sorted_entries: fn(directory: Directory, path: String, budget: ^AuthorityWalkBudget) -[FS]> [AuthorityEntry] AuthorityError! {
     listed: directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
-    entries := [AuthorityEntry]{}
+    ^entries: [AuthorityEntry]{}
     loop entry in listed {
         info: directory.entry_stat(entry.name) ?? return Err(AuthorityError.IO{path: path, operation: "inspect", detail: "{err}"})
         budget.note_entry(path)
@@ -79,7 +79,7 @@ pkg_authority_read_sorted_entries: fn(directory: Directory, path: String, budget
 // the caller opens every returned name with its own checked no-follow read.
 pkg_authority_sorted_source_names: fn(directory: Directory, path: String, budget: ^AuthorityWalkBudget) -[FS]> [String] AuthorityError! {
     listed: directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
-    names := [String]{}
+    ^names: [String]{}
     loop entry in listed {
         budget.note_entry(path)
         if pkg_authority_extension(entry.name) == Val(FILE_EXT) -> names.push(entry.name)

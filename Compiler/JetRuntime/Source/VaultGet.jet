@@ -32,7 +32,7 @@ VAULT_GET_COMMAS: I64{48}
 // char.is_control over valid UTF-8: C0 controls, DEL and the C1 controls
 // U+0080..U+009F (encoded 0xC2 0x80..0x9F).
 vault_get_has_control: fn(data: I64, length: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         if (byte < I64{32} || byte == I64{127}) { return true }
@@ -84,18 +84,18 @@ vault_get_plan_text: fn() -> I64 {
 }
 
 vault_get_find: fn(data: I64, from: I64, end: I64, byte: I64) -> I64 {
-    at := from
+    ^at: from
     loop at < end && rt_text_byte(wrapping(data + at)) != byte -> at += I64{1}
     at
 }
 
 // Sorts and deduplicates `count` input rows at `rows`; the distinct count.
 vault_get_sort_inputs: fn(rows: I64, count: I64) -> I64 {
-    at := I64{1}
+    ^at: I64{1}
     loop at < count {
         data: rt_text_word(wrapping(rows + at * VAULT_GET_NAME_BYTES))
         length: rt_text_word(wrapping(wrapping(rows + at * VAULT_GET_NAME_BYTES) + I64{8}))
-        to := at
+        ^to: at
         loop to > (I64{0}) && vault_get_less(data, length, rt_text_word(wrapping(rows + (to - I64{1}) * VAULT_GET_NAME_BYTES)), rt_text_word(wrapping(wrapping(rows + (to - I64{1}) * VAULT_GET_NAME_BYTES) + I64{8}))) {
             rt_text_store(wrapping(rows + to * VAULT_GET_NAME_BYTES), rt_text_word(wrapping(rows + (to - I64{1}) * VAULT_GET_NAME_BYTES)))
             rt_text_store(wrapping(wrapping(rows + to * VAULT_GET_NAME_BYTES) + I64{8}), rt_text_word(wrapping(wrapping(rows + (to - I64{1}) * VAULT_GET_NAME_BYTES) + I64{8})))
@@ -106,7 +106,7 @@ vault_get_sort_inputs: fn(rows: I64, count: I64) -> I64 {
         at += I64{1}
     }
     if (count == I64{0}) { return I64{0} }
-    kept := I64{1}
+    ^kept: I64{1}
     at = I64{1}
     loop at < count {
         row: wrapping(rows + at * VAULT_GET_NAME_BYTES)
@@ -133,8 +133,8 @@ vault_get_plan_line: fn(context: I64, data: I64, start: I64, end: I64, input_cou
         return input_count
     }
     inputs: rt_text_word(wrapping(context + VAULT_GET_INPUTS))
-    count := I64{0}
-    at := first_tab + I64{1}
+    ^count: I64{0}
+    ^at: first_tab + I64{1}
     loop at <= second_tab {
         comma: vault_get_find(data, at, second_tab, I64{44})
         if (comma > at) {
@@ -166,9 +166,9 @@ vault_get_plan_line: fn(context: I64, data: I64, start: I64, end: I64, input_cou
 vault_get_plans: fn(context: I64, text: I64) {
     data: if (text == I64{0}) -> I64{0} else -> rt_text_word(wrapping(text + DATA_SEQUENCE_DATA))
     length: if (text == I64{0}) -> I64{0} else -> rt_text_word(wrapping(text + DATA_SEQUENCE_LENGTH))
-    lines := I64{1}
-    commas := I64{0}
-    at := I64{0}
+    ^lines: I64{1}
+    ^commas: I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         if (byte == I64{10}) { lines += I64{1} }
@@ -181,12 +181,12 @@ vault_get_plans: fn(context: I64, text: I64) {
     rt_text_store(wrapping(context + VAULT_GET_PLAN_COUNT), I64{0})
     rt_text_store(wrapping(context + VAULT_GET_INPUTS), jet_rt_alloc((lines + commas) * VAULT_GET_NAME_BYTES, I64{8}))
     rt_text_store(wrapping(context + VAULT_GET_VISITING), jet_rt_alloc(lines * VAULT_GET_NAME_BYTES, I64{8}))
-    input_count := I64{0}
-    start := I64{0}
-    header := true
+    ^input_count: I64{0}
+    ^start: I64{0}
+    ^header: true
     loop start < length {
         newline: vault_get_find(data, start, length, I64{10})
-        end := newline
+        ^end: newline
         if (newline < length && end > start && rt_text_byte(wrapping(wrapping(data + end) - I64{1})) == I64{13}) {
             end -= I64{1}
         }
@@ -212,7 +212,7 @@ vault_get_context_drop: fn(context: I64) {
 vault_get_plan_of: fn(context: I64, data: I64, length: I64) -> I64 {
     plans: rt_text_word(wrapping(context + VAULT_GET_PLANS))
     count: rt_text_word(wrapping(context + VAULT_GET_PLAN_COUNT))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         plan: wrapping(plans + at * VAULT_GET_PLAN_BYTES)
         if vault_get_equal(rt_text_word(plan), rt_text_word(wrapping(plan + I64{8})), data, length) {
@@ -233,7 +233,7 @@ vault_get_substitute: fn(context: I64, plan: I64, values: I64) -> I64 {
     inputs: wrapping(rt_text_word(wrapping(context + VAULT_GET_INPUTS)) + rt_text_word(wrapping(plan + I64{32})) * VAULT_GET_NAME_BYTES)
     count: rt_text_word(wrapping(plan + I64{40}))
     result: jet_rt_string_builder_new()
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         open: vault_get_find(data, at, length, I64{123})
         if (vault_get_find(data, at, open, I64{125}) < open) {
@@ -247,7 +247,7 @@ vault_get_substitute: fn(context: I64, plan: I64, values: I64) -> I64 {
             jet_rt_string_drop(result)
             return I64{0}
         }
-        input := I64{0}
+        ^input: I64{0}
         loop input < count && !vault_get_equal(rt_text_word(wrapping(inputs + input * VAULT_GET_NAME_BYTES)), rt_text_word(wrapping(wrapping(inputs + input * VAULT_GET_NAME_BYTES) + I64{8})), wrapping(wrapping(data + open) + I64{1}), close - open - I64{1}) {
             input += I64{1}
         }
@@ -267,7 +267,7 @@ vault_get_substitute: fn(context: I64, plan: I64, values: I64) -> I64 {
 // name the store lacks. A later pair wins, as the BTreeMap collect.
 vault_get_resolve: fn(context: I64, data: I64, length: I64, depth: I64) -> I64 {
     visiting: rt_text_word(wrapping(context + VAULT_GET_VISITING))
-    at := I64{0}
+    ^at: I64{0}
     loop at < depth {
         if vault_get_equal(rt_text_word(wrapping(visiting + at * VAULT_GET_NAME_BYTES)), rt_text_word(wrapping(wrapping(visiting + at * VAULT_GET_NAME_BYTES) + I64{8})), data, length) {
             return I64{0}
@@ -278,7 +278,7 @@ vault_get_resolve: fn(context: I64, data: I64, length: I64, depth: I64) -> I64 {
     if (index < I64{0}) {
         pairs: rt_text_word(wrapping(context + VAULT_GET_PAIRS))
         pair_data: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
-        pair := rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
+        ^pair: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
         loop pair > (I64{0}) {
             pair -= I64{1}
             key: rt_text_word(wrapping(pair_data + pair * VAULT_PAIR_BYTES))
@@ -294,7 +294,7 @@ vault_get_resolve: fn(context: I64, data: I64, length: I64, depth: I64) -> I64 {
     inputs: wrapping(rt_text_word(wrapping(context + VAULT_GET_INPUTS)) + rt_text_word(wrapping(plan + I64{32})) * VAULT_GET_NAME_BYTES)
     count: rt_text_word(wrapping(plan + I64{40}))
     values: jet_rt_alloc(count * I64{8}, I64{8})
-    resolved := I64{0}
+    ^resolved: I64{0}
     loop resolved < count {
         value: vault_get_resolve(context, rt_text_word(wrapping(inputs + resolved * VAULT_GET_NAME_BYTES)), rt_text_word(wrapping(wrapping(inputs + resolved * VAULT_GET_NAME_BYTES) + I64{8})), depth + I64{1})
         if (value == I64{0}) { break }
@@ -314,7 +314,7 @@ vault_get_resolve: fn(context: I64, data: I64, length: I64, depth: I64) -> I64 {
 // The first non-empty of JET_TEST_SCRATCH_DIR and JET_STORE_DIR, else
 // env.temp_dir (TMPDIR, else /tmp), appended to `line` as raw bytes.
 vault_get_audit_root: fn(line: I64) {
-    value := host_environment_value(env_name_jet_test_scratch_dir())
+    ^value: host_environment_value(env_name_jet_test_scratch_dir())
     if (value == I64{0} || host_startup_byte_length(value) == I64{0}) {
         value = host_environment_value(env_name_jet_store_dir())
     }
@@ -350,11 +350,11 @@ vault_get_audit: fn(context: I64, name: I64, plan: I64) {
     }
     // Each directory prefix in turn, up to `.jet` (before `/secrets-audit`).
     directory: length - I64{14}
-    at := I64{1}
+    ^at: I64{1}
     loop at <= directory {
         if (rt_text_byte(wrapping(data + at)) == I64{47}) {
             rt_text_put(wrapping(data + at), I64{0})
-            _ := trap_syscall(I64{83}, data, I64{511}, I64{0}, I64{0}, I64{0}, I64{0})
+            ^_: trap_syscall(I64{83}, data, I64{511}, I64{0}, I64{0}, I64{0}, I64{0})
             rt_text_put(wrapping(data + at), I64{47})
         }
         at += I64{1}
@@ -373,7 +373,7 @@ vault_get_audit: fn(context: I64, name: I64, plan: I64) {
         row: wrapping(rt_text_word(wrapping(context + VAULT_GET_PLANS)) + plan * VAULT_GET_PLAN_BYTES)
         inputs: wrapping(rt_text_word(wrapping(context + VAULT_GET_INPUTS)) + rt_text_word(wrapping(row + I64{32})) * VAULT_GET_NAME_BYTES)
         count: rt_text_word(wrapping(row + I64{40}))
-        input := I64{0}
+        ^input: I64{0}
         loop input < count {
             if (input > I64{0}) { rt_text_append(line, rt_text_data(rt_static_text(",")), I64{1}) }
             rt_text_append(line, rt_text_word(wrapping(inputs + input * VAULT_GET_NAME_BYTES)), rt_text_word(wrapping(wrapping(inputs + input * VAULT_GET_NAME_BYTES) + I64{8})))
@@ -381,7 +381,7 @@ vault_get_audit: fn(context: I64, name: I64, plan: I64) {
         }
     }
     rt_text_append(line, rt_text_data(rt_static_text("]\n")), I64{2})
-    _ := vault_linux_write_all(file, rt_text_data(line), rt_text_len(line))
+    ^_: vault_linux_write_all(file, rt_text_data(line), rt_text_len(line))
     vault_linux_close(file)
     jet_rt_string_drop(line)
 }
@@ -393,7 +393,7 @@ vault_get_audit: fn(context: I64, name: I64, plan: I64) {
     plan: vault_get_plan_of(context, rt_text_data(name), rt_text_len(name))
     scratch: jet_rt_alloc(I64{80}, I64{8})
     error: vault_read_at_root(rt_static_text("."), scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{40}), wrapping(scratch + I64{72}))
-    value := I64{0}
+    ^value: I64{0}
     if (error != I64{0}) { vault_error_drop(error) } else {
         store: rt_text_word(scratch)
         rt_text_store(wrapping(context + VAULT_GET_PAIRS), rt_text_word(wrapping(store + VAULT_STORE_STRINGS)))

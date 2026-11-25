@@ -27,12 +27,12 @@ ProviderFactValue: enum {
             .Number(text) -> pkg_provider_number_tree(text)
             .Text(text) -> Dyn.Text(text)
             .List(values) -> {
-                items := [Dyn]{}
+                ^items: [Dyn]{}
                 loop value in values -> items.push(value.to_json_tree())
                 Dyn.Array(items)
             }
             .Map(values) -> {
-                object := [{key: String, value: Dyn}]{}
+                ^object: [{key: String, value: Dyn}]{}
                 loop key in pkg_provider_sorted_keys(values.keys().to_list()) {
                     object.push({key: key, value: values[key].to_json_tree()})
                 }
@@ -53,12 +53,12 @@ ProviderFactValue: enum {
             .Float(number) -> ProviderFactValue.Number("{number}")
             .Text(text) -> ProviderFactValue.Text(text)
             .Array(items) -> {
-                values := [ProviderFactValue]{}
+                ^values: [ProviderFactValue]{}
                 loop item in items -> values.push(ProviderFactValue.from_json_tree(item))
                 ProviderFactValue.List(values)
             }
             .Object(fields) -> {
-                values := [String:ProviderFactValue]{}
+                ^values: [String:ProviderFactValue]{}
                 loop pair in fields {
                     values[pair.key] = ProviderFactValue.from_json_tree(pair.value)
                 }
@@ -78,7 +78,7 @@ ProviderLoss: struct {
     source: String,
 
     to_json_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["key"] = Dyn.Text(self.key.copy())
         object["reason"] = Dyn.Text(self.reason.copy())
         object["source"] = Dyn.Text(self.source.copy())
@@ -104,7 +104,7 @@ ProviderConflict: struct {
     source: String,
 
     to_json_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["key"] = Dyn.Text(self.key.copy())
         object["left"] = Dyn.Text(self.left.copy())
         object["right"] = Dyn.Text(self.right.copy())
@@ -164,7 +164,7 @@ ProviderFacts: struct {
             .None -> ""
         }
         details: ProviderSelectorDetails.parse(selector_raw)
-        facts := ProviderFacts{
+        ^facts: ProviderFacts{
             provider: provider,
             reference: reference,
             target: authority.target,
@@ -290,7 +290,7 @@ ProviderFacts: struct {
             self.add_conflict("provider.selector", self.selector.canonical(), resolved.canonical(), source)
             return
         }
-        kept := [ProviderLoss]{}
+        ^kept: [ProviderLoss]{}
         loop loss in self.losses {
             if loss.source == "reference.selector" && loss.key == "provider.selector" && loss.reason == PROVIDER_EXACT_SELECTOR_LOSS {
                 next
@@ -451,19 +451,19 @@ ProviderFacts: struct {
     // The carrier as a tree: fields in schema order, facts and provenance
     // keyed in byte order.
     to_json_tree: fn(self) -> Dyn Never! {
-        facts := [String:Dyn]{}
+        ^facts: [String:Dyn]{}
         loop key in pkg_provider_sorted_keys(self.facts.keys().to_list()) {
             facts[key] = self.facts[key].to_json_tree()
         }
-        provenance := [String:Dyn]{}
+        ^provenance: [String:Dyn]{}
         loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) {
             provenance[key] = Dyn.Text(self.provenance[key].copy())
         }
-        losses := [Dyn]{}
+        ^losses: [Dyn]{}
         loop loss in self.losses -> losses.push(loss.to_json_tree())
-        conflicts := [Dyn]{}
+        ^conflicts: [Dyn]{}
         loop conflict in self.conflicts -> conflicts.push(conflict.to_json_tree())
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["schema"] = Dyn.Text(PROVIDER_FACTS_SCHEMA)
         object["provider"] = Dyn.Text(self.provider.copy())
         object["reference"] = Dyn.Text(self.reference.copy())
@@ -491,20 +491,20 @@ ProviderFacts: struct {
         }
         selector: ProviderSelector.from_json_tree(root.get("selector"))
         fact_fields: pkg_json_object(root.get("facts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `facts` is not an object"})
-        facts := [String:ProviderFactValue]{}
+        ^facts: [String:ProviderFactValue]{}
         loop key in pkg_provider_sorted_keys(fact_fields.keys().to_list()) {
             facts[key] = ProviderFactValue.from_json_tree(fact_fields[key])
         }
         provenance_fields: pkg_json_object(root.get("provenance") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `provenance` is not an object"})
-        provenance := [String:String]{}
+        ^provenance: [String:String]{}
         loop key in pkg_provider_sorted_keys(provenance_fields.keys().to_list()) {
             provenance[key] = pkg_json_text(provenance_fields[key]) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING})
         }
         loss_values: pkg_json_array(root.get("losses") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `losses` is not an array"})
-        losses := [ProviderLoss]{}
+        ^losses: [ProviderLoss]{}
         loop item in loss_values -> losses.push(ProviderLoss.from_json_tree(item))
         conflict_values: pkg_json_array(root.get("conflicts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `conflicts` is not an array"})
-        conflicts := [ProviderConflict]{}
+        ^conflicts: [ProviderConflict]{}
         loop item in conflict_values -> conflicts.push(ProviderConflict.from_json_tree(item))
         Ok(
             ProviderFacts{
@@ -526,7 +526,7 @@ ProviderFacts: struct {
     }
 
     explain_lines: fn(self) -> [String] Never! {
-        lines := [String]{"provider: {self.provider}", "reference: {self.reference}", "target: {self.target}"}
+        ^lines: [String]{"provider: {self.provider}", "reference: {self.reference}", "target: {self.target}"}
         if self.resolved_source != "" -> lines.push("resolved-source: {self.resolved_source}")
         if self.profile != "" {
             lines.push("profile: {self.profile}")
@@ -589,7 +589,7 @@ pkg_provider_number_tree: fn(text: String) -> Dyn Never! {
 }
 
 pkg_provider_sorted_keys: fn(keys: [String]) -> [String] Never! {
-    out := keys
+    ^out: keys
     out.sort()
     out
 }

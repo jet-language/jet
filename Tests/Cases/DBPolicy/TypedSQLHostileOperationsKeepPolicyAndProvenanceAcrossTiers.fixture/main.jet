@@ -11,7 +11,7 @@ TaskError: enum {
 
 task_bodies: fn(scope: db.DBScope) -[DB.Read]> String TaskError! {
     rows: scope.query(SQL{"SELECT body FROM tasks"}) ?? return Err(TaskError.Read)
-    bodies := [String]{}
+    ^bodies: [String]{}
     loop row in rows {
         body: db.row_text(row, "body") ?? return Err(TaskError.Read)
         bodies.push(body)
@@ -27,9 +27,9 @@ live_text: fn(binding: Live<String, TaskError>) -> String {
 }
 
 run: fn() {
-    conn := db.open_memory()
+    ^conn: db.open_memory()
     policy: db.policy("tasks", "true") ?? panic("policy")
-    scoped := conn.with_policy(policy, "attacker")
+    ^scoped: conn.with_policy(policy, "attacker")
     _created: db.migrate(
         scoped,
         "tasks-v1",

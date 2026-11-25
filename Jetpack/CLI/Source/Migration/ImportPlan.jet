@@ -42,7 +42,7 @@ ImportPlan: struct {
     retain_provider_facts_with_source: fn(^self, facts: ProviderFacts, source_path: String) Never! {
         self.record_fact_findings(facts, source_path)
         reference: facts.reference
-        existing := self.provider_facts.get(reference) ?? {
+        ^existing: self.provider_facts.get(reference) ?? {
             self.provider_facts[reference] = facts
             return
         }
@@ -58,7 +58,7 @@ ImportPlan: struct {
         if facts.native_format != "" {
             existing.set_native_document(facts.native_format, facts.native_document)
         }
-        keys := facts.facts.keys().to_list()
+        ^keys: facts.facts.keys().to_list()
         keys.sort()
         loop key in keys {
             source: facts.provenance.get(key) ?? "provider.import"
@@ -97,19 +97,19 @@ ImportPlan: struct {
         first: self.packages.get(0)
         name: first?.name ?? "imported-app"
         version: first?.version ?? "0.1.0"
-        out := "payload: {{\n    name: \"{name}\",\n    version: \"{version}\",\n    jet: \">={JET_VERSION}\",\n    description: \"Imported from {self.source_kind}\",\n    license: \"\",\n    repository: \"\",\n}}\n"
+        ^out: "payload: {{\n    name: \"{name}\",\n    version: \"{version}\",\n    jet: \">={JET_VERSION}\",\n    description: \"Imported from {self.source_kind}\",\n    license: \"\",\n    repository: \"\",\n}}\n"
         out = "{out}\ndeps: {{\n"
-        unresolved_root := false
+        ^unresolved_root: false
         loop entry in self.provider_facts {
             if entry.value.is_lossless() -> next
-            declared := false
+            ^declared: false
             loop dependency in self.deps {
                 if dependency.provider_ref == entry.key -> declared = true
             }
             if !declared -> unresolved_root = true
         }
         if unresolved_root -> return "{out}}}\n"
-        deps := self.deps
+        ^deps: self.deps
         deps.sort_by(fn(left: ImportedDep, right: ImportedDep) { left.name <=> right.name })
         loop dep in deps {
             facts: self.provider_facts.get(dep.provider_ref) ?? next

@@ -36,7 +36,7 @@ channel_fixture_check: fn(ok: Bool) {
 #Export(c) jet_rt_channel_fixture_stop: fn(_env: I64, _input: I64, _output: I64) -> I64 {
     reason: channel_text(I64{4})
     record: scheduler_stop_new(I64{5}, reason)
-    _ := scheduler_native_publish(record)
+    ^_: scheduler_native_publish(record)
     I64{0}
 }
 
@@ -104,7 +104,7 @@ channel_fixture_check: fn(ok: Bool) {
     jet_rt_native_shared_edit_guard_drop(guard)
     channel_fixture_check(sync_load(shared + I64{48}) == I64{1})
     stopped: jet_rt_native_shared_guard_edit(shared)
-    _ := jet_rt_channel_fixture_stop(I64{0}, I64{0}, I64{0})
+    ^_: jet_rt_channel_fixture_stop(I64{0}, I64{0}, I64{0})
     jet_rt_native_shared_edit_guard_drop(stopped)
     channel_fixture_check(sync_load(shared + I64{48}) == I64{2})
     channel_fixture_check(jet_scheduler_native_status() == I64{5})

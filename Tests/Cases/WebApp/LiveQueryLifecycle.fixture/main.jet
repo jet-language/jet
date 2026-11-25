@@ -15,7 +15,7 @@ RUNS: Shared{0}
 
 open_tasks: fn(board: String) -[DB.Read]> Int CountError! {
     if board == "" -> return Err(CountError.NoBoard)
-    runs := RUNS.guard_edit()
+    ^runs: RUNS.guard_edit()
     runs.value += 1
     board.len()
 }
@@ -33,7 +33,7 @@ count: fn(state: Loadable<Int, CountError>) -> String {
 titles: fn(state: Loadable<[[String:db.DBValue]], db.DBError>) -> String {
     if state == {
         .Loaded(rows) -> {
-            out := [String]{}
+            ^out: [String]{}
             loop row in rows -> out.push(db.row_text(row, "title") ?? "?")
             "[{out.join(",")}]"
         }

@@ -33,9 +33,9 @@ EmbeddedBatteryFunction: struct {
 
 // Every column-zero `name: fn(...) { ... }` in `source`, in source order.
 embedded_battery_functions: fn(source: String) -> [EmbeddedBatteryFunction] {
-    found := [EmbeddedBatteryFunction]{}
-    name := ""
-    body := ""
+    ^found: [EmbeddedBatteryFunction]{}
+    ^name: ""
+    ^body: ""
     loop line in source.lines() {
         if name == "" {
             if line.starts_with(" ") || line.starts_with("/") || line.starts_with("#") -> next
@@ -57,7 +57,7 @@ embedded_battery_functions: fn(source: String) -> [EmbeddedBatteryFunction] {
 
 // Whether `text` calls `name`: `name(` that does not end a longer identifier.
 embedded_battery_calls: fn(text: String, name: String) -> Bool {
-    rest := text
+    ^rest: text
     loop {
         parts: rest.split_once("{name}(") ?? return false
         bytes: parts.before.bytes()
@@ -72,11 +72,11 @@ embedded_battery_calls: fn(text: String, name: String) -> Bool {
 // The battery functions `example` never reaches, directly as
 // `embedded.<name>(` or through the body of a function it reaches.
 embedded_battery_unreached: fn(functions: [EmbeddedBatteryFunction], example: String) -> [String] {
-    reached := [String]{}
+    ^reached: [String]{}
     loop function in functions {
         if example.contains("embedded.{function.name}(") -> reached.push(function.name)
     }
-    index := 0
+    ^index: 0
     loop index < reached.len() {
         caller: reached[index]
         index += 1
@@ -89,7 +89,7 @@ embedded_battery_unreached: fn(functions: [EmbeddedBatteryFunction], example: St
             }
         }
     }
-    missing := [String]{}
+    ^missing: [String]{}
     loop function in functions {
         if !reached.contains(function.name) -> missing.push(function.name)
     }
@@ -98,7 +98,7 @@ embedded_battery_unreached: fn(functions: [EmbeddedBatteryFunction], example: St
 
 // The gate texts listed in the body of the battery's `open_core_gates`.
 embedded_battery_gates: fn(functions: [EmbeddedBatteryFunction]) -> [String] {
-    gates := [String]{}
+    ^gates: [String]{}
     loop function in functions {
         if function.name != "open_core_gates" -> next
         loop line in function.body.lines() {
@@ -126,7 +126,7 @@ embedded_battery_gates: fn(functions: [EmbeddedBatteryFunction]) -> [String] {
     golden: embedded_battery_files.read(EMBEDDED_BATTERY_GOLDEN) ?? panic("read {EMBEDDED_BATTERY_GOLDEN}: {err}")
     gates: embedded_battery_gates(embedded_battery_functions(source))
     assert(gates.len() > 0, "{EMBEDDED_BATTERY_SOURCE} names no open gate")
-    printed := [String]{}
+    ^printed: [String]{}
     loop line in golden.lines() {
         if line.split_once("gate ") == .Val(parts) && parts.before == "" {
             printed.push(parts.after)

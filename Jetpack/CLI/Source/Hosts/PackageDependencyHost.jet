@@ -57,7 +57,7 @@ cli_run_package_dependency_host: fn(args: [String]) -[IO, FS, Env, Exec, Net, Ti
     }
     output: cli_package_dependency(args[0], args[1], cli_tail(args, 4), args[2] == "1", args[3] == "1")
     if output.stdout.len() > 0 {
-        stdout_handle := term.stdout()
+        ^stdout_handle: term.stdout()
         stdout_handle.write(output.stdout).drop("package output is best-effort")
     }
     if output.stderr.len() > 0 -> terminal_write_output(output.stderr)
@@ -83,8 +83,8 @@ cli_package_dependency_source_error: fn(path: String, raw: String, report: Diagn
 // value flag owns the next token verbatim, even a flag.
 cli_package_dependency_words: fn(raw: [String], color: Bool, json: Bool) -[FS, Env]> [String] PackageDependencyError! {
     command: raw[0]
-    words := [String]{command}
-    index := 1
+    ^words: [String]{command}
+    ^index: 1
     loop index < raw.len() {
         word: raw[index]
         index += 1
@@ -145,7 +145,7 @@ cli_package_dependency_add_spec: fn(raw: [String], name: String?, color: Bool, j
         return Ok({name: dependency, spec: DepSpec.Path{path: path}})
     }
     if cli_package_dependency_flag(raw, "--git") == .Val(url) {
-        selector := GitSelector?{None}
+        ^selector: GitSelector?{None}
         if {
             cli_package_dependency_flag(raw, "--tag") == .Val(selected_tag) -> {
                 selector = Val(GitSelector.Tag(selected_tag))
@@ -165,7 +165,7 @@ cli_package_dependency_add_spec: fn(raw: [String], name: String?, color: Bool, j
 }
 
 cli_package_dependency_read: fn(path: String, color: Bool, json: Bool) -[FS, Env]> {raw: String, authority: FoundationFileAuthority} PackageDependencyError! {
-    authority := foundation_open_file_authority(files.dirname(path), files.basename(path)) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: {err}", None, color, json))
+    ^authority: foundation_open_file_authority(files.dirname(path), files.basename(path)) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: {err}", None, color, json))
     bytes: authority.read_bounded(MAX_TREE_FILE_BYTES) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: {err}", None, color, json))
     raw: String.from_bytes(bytes) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: stream did not contain valid UTF-8", None, color, json))
     Ok({raw: raw, authority: authority})
@@ -175,7 +175,7 @@ cli_package_dependency_read: fn(path: String, color: Bool, json: Bool) -[FS, Env
 // the root's `package.jet`. A project with no entry file yet (a package that
 // only declares dependencies) has the root's `package.jet` alone.
 cli_package_dependency_input: fn(root: String, entry: String, color: Bool, json: Bool) -[FS, Env]> PackageDependencyInput PackageDependencyError! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if !files.exists(entry) {
         rooted: if pkg_package_facts_for_root(cache, root) == {
             .Ok(value) -> value
@@ -258,7 +258,7 @@ cli_package_dependency_publication_error: fn(path: String, failure: FoundationPu
 }
 
 cli_package_dependency_success: fn(fetched: PackageFetchResult, options: PackageFetchOptions) -> String Never! {
-    output := ""
+    ^output: ""
     loop package in fetched.lock.packages {
         if package.source == .Registry(registry, _, _, _, _, _, tier, gate_status) {
             output = "{output}Resolved `{package.name}` {package.version} from registry `{registry}` (tier: {tier}; gate status: {gate_status})\n"
@@ -300,7 +300,7 @@ cli_package_dependency_script_lock: fn(root: String, script: String, offline: Bo
         }
     }
     script_dir: files.dirname(path)
-    deps := [LockedInlineDep]{}
+    ^deps: [LockedInlineDep]{}
     batteries: pkg_fetch_batteries_dir(script_dir)
     loop dep in pkg_inline_deps_collect(parsed.program) {
         resolved: if pkg_inline_deps_resolve(dep, script_dir, batteries) == {
@@ -334,13 +334,13 @@ cli_package_dependency_script_lock: fn(root: String, script: String, offline: Bo
 cli_package_dependency_inline_fetch: fn(script: String, script_dir: String, dep: InlineDep) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchError! {
     root: files.canonicalize(script_dir) ?? return Err(pkg_fetch_error("E1224", "couldn't open the script directory", "{err}", "restore the script's directory"))
     parts: pkg_inline_deps_numeric_version(dep.selector) ?? return Err(pkg_fetch_registry_error(dep.name, "invalid inline selector `{dep.selector}`"))
-    words := [String]{}
+    ^words: [String]{}
     loop part in parts -> words.push("{part}")
     requirement: if words.len() == 3 -> "={words.join(".")}" else -> "{words.join(".")}.*"
     roots: pkg_resolve_roots()
     context: ProviderCtx{fixtures: provider_fixtures_from_env(None), store_dir: roots.hangar_dir(), offline: false, project_dir: Val(root), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
-    resolver := PackageFetchResolver{root: root, previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String:PackageFetchNode]{}, versions: [String:PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String:PublicationIndexEntry]{}, update_scope: pkg_fetch_update_scope(None, PackageFetchOptions{}), foreign: [String:ForeignRealization]{}, advisory_loaded: false, advisory: None}
-    verification := StoreVerification.new()
+    ^resolver: PackageFetchResolver{root: root, previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String:PackageFetchNode]{}, versions: [String:PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String:PublicationIndexEntry]{}, update_scope: pkg_fetch_update_scope(None, PackageFetchOptions{}), foreign: [String:ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    ^verification: StoreVerification.new()
     pkg_fetch_resolve(verification, roots, context, resolver, dep.name, DepSpec.Registry(requirement), root, [String]{"{script} (script)", dep.name})
     node: resolver.nodes[dep.name]
     cli_package_dependency_inline_copy(root, dep.name, node.package.version, node.directory) ?? return Err(pkg_fetch_error("E1224", "couldn't copy `{dep.name}` into .jet/inline-deps", "{err}", "make the script directory writable, then run the script again"))
@@ -375,10 +375,10 @@ cli_package_dependency: fn(root: String, entry: String, raw: [String], color: Bo
     if command == "fetch" && cli_package_dependency_flag(raw, "--lock") == .Val(script) {
         return cli_package_dependency_script_lock(root, script, raw.contains("--offline"), quiet, color, json)
     }
-    prefix := ""
+    ^prefix: ""
     if command == "add" || command == "remove" {
-        name := ""
-        spec := DepSpec?{None}
+        ^name: ""
+        ^spec: DepSpec?{None}
         if command == "add" {
             selected: cli_package_dependency_add_spec(raw, words.get(1), color, json) ?? return err.output
             name = selected.name
@@ -398,7 +398,7 @@ cli_package_dependency: fn(root: String, entry: String, raw: [String], color: Bo
         failed: err.output
         return PackageDependencyOutput{stdout: "{prefix}{failed.stdout}", stderr: failed.stderr, exit_code: failed.exit_code}
     }
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fetched: pkg_fetch(verification, root, input.manifest, pkg_lock_load(root), options) ?? {
         failed: cli_package_dependency_source_error(input.path, input.raw, err.diagnostic).output
         return PackageDependencyOutput{stdout: prefix, stderr: failed.stderr, exit_code: failed.exit_code}
@@ -419,9 +419,9 @@ cli_package_dependency_vendor: fn(root: String, raw: [String], fetched: PackageF
     chosen: cli_package_dependency_flag(raw, "--vendor-dir") ?? "vendor"
     target: if chosen.starts_with("/") -> chosen else -> files.join(root, chosen)
     files.create_dir_all(target) ?? return cli_package_dependency_cli_error("E2105", "couldn't create the vendor directory {target}: {err}", None, color, json).output
-    names := fetched.directories.keys().to_list()
+    ^names: fetched.directories.keys().to_list()
     names.sort()
-    entries := [Dyn]{}
+    ^entries: [Dyn]{}
     loop name in names {
         source: fetched.directories.get(name) ?? next
         cli_package_dependency_vendor_copy(target, name, source) ?? return cli_package_dependency_cli_error("E2105", "couldn't copy `{name}` into {target}: {err}", Val("vendored dependency trees hold only regular files and directories; fix `{name}`'s source, then run `jet registry vendor` again"), color, json).output
@@ -438,7 +438,7 @@ cli_package_dependency_vendor: fn(root: String, raw: [String], fetched: PackageF
         return PackageDependencyOutput{stdout: "Vendor: no dependencies to copy\n"}
     }
     shown: if target != root && cli_path_starts_with(target, root) -> files.relative(target, root) else -> target
-    out := ""
+    ^out: ""
     loop name in names -> out = "{out}Vendored: {name}\n"
     noun: if names.len() == 1 -> "dependency" else -> "dependencies"
     PackageDependencyOutput{stdout: "{out}OK: {names.len()} {noun} copied to {shown}/\nTip: commit {shown}/ and use `jet fetch --locked` for reproducible offline builds.\n"}

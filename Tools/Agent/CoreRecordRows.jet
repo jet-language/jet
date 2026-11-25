@@ -66,6 +66,7 @@ LAYOUT_CARRIERS: #run { [LayoutCarrier]{
     {core: "EncodingCause", prefix: "ENCODING_CAUSE"},
     {core: "EncodingError", prefix: "ENCODING_ERROR"},
     {core: "EncodingLimits", prefix: "ENCODING_LIMITS"},
+    {core: "LogField", prefix: "LOG_FIELD"},
     {core: "LogSpan", prefix: "LOG_SPAN"},
     {core: "NetErrorDetail", prefix: "NET_DETAIL"},
     {core: "NetReady", prefix: "NET_READY"},
@@ -167,14 +168,14 @@ byte_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 code_at: fn(bytes: [U8], at: Int) -> Int Never! { Int{bytes[at]} }
 
 skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
-    at := start
+    ^at: start
     loop at < bytes.len() && space_byte(code_at(bytes, at)) -> at += 1
     at
 }
 
 // The byte after white space and `//` comments from `start`.
 skip_trivia: fn(bytes: [U8], start: Int) -> Int Never! {
-    at := skip_space(bytes, start)
+    ^at: skip_space(bytes, start)
     loop at + 1 < bytes.len() && code_at(bytes, at) == 47 && code_at(bytes, at + 1) == 47 {
         loop at < bytes.len() && code_at(bytes, at) != 10 -> at += 1
         at = skip_space(bytes, at)
@@ -185,8 +186,8 @@ skip_trivia: fn(bytes: [U8], start: Int) -> Int Never! {
 // The byte after the bracket that closes the one at `open` (`{`, `(` or
 // `[`), string literals passed over.
 balanced_end: fn(bytes: [U8], open: Int) -> Int Never! {
-    depth := 0
-    at := open
+    ^depth: 0
+    ^at: open
     loop at < bytes.len() {
         code: code_at(bytes, at)
         if code == {
@@ -213,7 +214,7 @@ balanced_end: fn(bytes: [U8], open: Int) -> Int Never! {
 // (`source_module <module> path <path> …`), then each part CoreSourceParts.tsv
 // attaches to it (columns: module, owner, path, …).
 module_sources: fn(rows: String, parts: String) -> [String:[String]] Never! {
-    sources := [String:[String]]{}
+    ^sources: [String:[String]]{}
     loop line in rows.lines() {
         if !line.starts_with("source_module ") -> next
         words: line.split(" ").to_list()
@@ -259,8 +260,8 @@ applied_type: fn(leaf: String, args: [String]) -> String Never! {
 // each optionally followed by `?`s), or None when the rows cannot spell it.
 parse_type: fn(bytes: [U8], start: Int) -> ParsedType? {
     atom: parse_atom(bytes, skip_space(bytes, start)) ?? return None
-    text := atom.text
-    at := atom.next
+    ^text: atom.text
+    ^at: atom.next
     loop at < bytes.len() && code_at(bytes, at) == 63 {
         text = "Type.Option{{inner: {text}}}"
         at += 1
@@ -285,7 +286,7 @@ parse_atom: fn(bytes: [U8], at: Int) -> ParsedType? {
     }
     if code == 40 -> return parse_tuple(bytes, at + 1)
     if !upper_byte(code) && !lower_byte(code) -> return None
-    end := at
+    ^end: at
     loop end < bytes.len() && (word_byte(code_at(bytes, end)) || code_at(bytes, end) == 46) {
         end += 1
     }
@@ -295,8 +296,8 @@ parse_atom: fn(bytes: [U8], at: Int) -> ParsedType? {
     if end >= bytes.len() || code_at(bytes, end) != 60 {
         return Val(ParsedType{text: named_type(leaf), next: end})
     }
-    args := [String]{}
-    next_arg := end + 1
+    ^args: [String]{}
+    ^next_arg: end + 1
     loop {
         arg: parse_type(bytes, next_arg) ?? return None
         args.push(arg.text)
@@ -312,10 +313,10 @@ parse_atom: fn(bytes: [U8], at: Int) -> ParsedType? {
 
 // The labeled tuple whose fields start at `start`, after its `(`.
 parse_tuple: fn(bytes: [U8], start: Int) -> ParsedType? {
-    fields := [String]{}
-    at := skip_space(bytes, start)
+    ^fields: [String]{}
+    ^at: skip_space(bytes, start)
     loop at >= bytes.len() || code_at(bytes, at) != 41 {
-        name_end := at
+        ^name_end: at
         loop name_end < bytes.len() && word_byte(code_at(bytes, name_end)) -> name_end += 1
         if name_end == at -> return None
         colon: skip_space(bytes, name_end)
@@ -337,10 +338,10 @@ unsupported: fn(reason: String) -> DeclaredStruct Never! {
 // order: its `name: Type` members, markers, comments, defaults, methods and
 // impl blocks passed over.
 struct_fields: fn(bytes: [U8], open: Int) -> DeclaredStruct Never! {
-    fields := [DeclaredField]{}
-    sealed := false
-    private := false
-    at := open + 1
+    ^fields: [DeclaredField]{}
+    ^sealed: false
+    ^private: false
+    ^at: open + 1
     loop {
         at = skip_trivia(bytes, at)
         if at >= bytes.len() -> return unsupported("its body is not closed")
@@ -364,7 +365,7 @@ struct_fields: fn(bytes: [U8], open: Int) -> DeclaredStruct Never! {
         if !word_byte(code) {
             return unsupported("its body holds `{byte_text(bytes, at, at + 1)}` where a member starts")
         }
-        word_end := at
+        ^word_end: at
         loop word_end < bytes.len() && word_byte(code_at(bytes, word_end)) -> word_end += 1
         word: byte_text(bytes, at, word_end)
         if word == "pub" || word == "priv" {
@@ -373,7 +374,7 @@ struct_fields: fn(bytes: [U8], open: Int) -> DeclaredStruct Never! {
             next
         }
         if word == "impl" {
-            brace := word_end
+            ^brace: word_end
             loop brace < bytes.len() && code_at(bytes, brace) != 123 -> brace += 1
             at = balanced_end(bytes, brace)
             private = false
@@ -406,7 +407,7 @@ struct_fields: fn(bytes: [U8], open: Int) -> DeclaredStruct Never! {
 // The byte after the method member whose value starts at `start` (`fn(…) …
 // { … }`): the end of its line once a brace group closes there.
 member_end: fn(bytes: [U8], start: Int) -> Int Never! {
-    at := start
+    ^at: start
     loop at < bytes.len() {
         code: code_at(bytes, at)
         if code != 123 && code != 40 && code != 91 {
@@ -415,7 +416,7 @@ member_end: fn(bytes: [U8], start: Int) -> Int Never! {
         }
         at = balanced_end(bytes, at)
         if code != 123 -> next
-        after := at
+        ^after: at
         loop after < bytes.len() && (code_at(bytes, after) == 32 || code_at(bytes, after) == 9) {
             after += 1
         }
@@ -429,22 +430,28 @@ member_end: fn(bytes: [U8], start: Int) -> Int Never! {
 }
 
 // Each struct the Core sources declare at a line start (`X: struct`, after
-// indentation and an optional `pub` or `priv`), by name, in source order.
+// indentation and an optional `pub` or `priv`), by name, in source order. A
+// `priv` struct of Core's builtins door is a compiler carrier
+// (BuiltinCarriers.jet), which no record name reaches, so it is no site.
 struct_sites: fn(paths: [String], texts: [String:String]) -> [String:[StructSite]] Never! {
-    sites := [String:[StructSite]]{}
+    ^sites: [String:[StructSite]]{}
     loop path in paths {
         bytes: (texts.get(path) ?? "").bytes()
-        line := 0
+        ^line: 0
         loop line < bytes.len() {
-            at := line
+            ^at: line
             loop at < bytes.len() && (code_at(bytes, at) == 32 || code_at(bytes, at) == 9) {
                 at += 1
             }
             if at + 4 <= bytes.len() && byte_text(bytes, at, at + 4) == "pub " -> at += 4
-            if at + 5 <= bytes.len() && byte_text(bytes, at, at + 5) == "priv " -> at += 5
-            end := at
+            ^carrier: false
+            if at + 5 <= bytes.len() && byte_text(bytes, at, at + 5) == "priv " {
+                at += 5
+                carrier = path == "Core/Builtins/Builtins.jet"
+            }
+            ^end: at
             loop end < bytes.len() && word_byte(code_at(bytes, end)) -> end += 1
-            if end > at && upper_byte(code_at(bytes, at)) && end + 8 <= bytes.len() && byte_text(bytes, end, end + 8) == ": struct" {
+            if !carrier && end > at && upper_byte(code_at(bytes, at)) && end + 8 <= bytes.len() && byte_text(bytes, end, end + 8) == ": struct" {
                 brace: skip_space(bytes, end + 8)
                 open: if brace < bytes.len() && code_at(bytes, brace) == 123 -> brace else -> -1
                 name: byte_text(bytes, at, end)
@@ -462,9 +469,9 @@ struct_sites: fn(paths: [String], texts: [String:String]) -> [String:[StructSite
 // the source that declares them, or why its rows stay as written.
 owner_declaration: fn(owner: String, sites: [String:[StructSite]], texts: [String:String]) -> {fields: [DeclaredField], sealed: Bool, path: String, reason: String} {
     found: sites.get(owner) ?? return {fields: [DeclaredField]{}, sealed: false, path: "", reason: "no Core source declares it"}
-    chosen := [DeclaredField]{}
-    sealed := false
-    path := ""
+    ^chosen: [DeclaredField]{}
+    ^sealed: false
+    ^path: ""
     loop site in found {
         if site.open < 0 {
             return {fields: [DeclaredField]{}, sealed: false, path: "", reason: "{site.path} declares it generic"}
@@ -511,8 +518,8 @@ scalar_option: fn(ty: String) -> Bool Never! {
 // The constants of a carrier with `prefix` holding `fields`: its size, then
 // each field's word offset.
 carrier_constants: fn(prefix: String, fields: [DeclaredField]) -> [String] Never! {
-    words := [String]{}
-    offset := 0
+    ^words: [String]{}
+    ^offset: 0
     loop field in fields {
         name: "{prefix}_{field.name.to_upper()}"
         if scalar_option(field.ty) {
@@ -522,7 +529,7 @@ carrier_constants: fn(prefix: String, fields: [DeclaredField]) -> [String] Never
         words.push("{name}: I64{{{offset}}}")
         offset += 8
     }
-    constants := [String]{"{prefix}_BYTES: I64{{{offset}}}"}
+    ^constants: [String]{"{prefix}_BYTES: I64{{{offset}}}"}
     loop word in words -> constants.push(word)
     constants
 }
@@ -530,8 +537,8 @@ carrier_constants: fn(prefix: String, fields: [DeclaredField]) -> [String] Never
 // CoreLayoutABI.jet as the declarations of LAYOUT_CARRIERS lay it out, and
 // each listed carrier they cannot lay out, with why.
 layout_text: fn(sites: [String:[StructSite]], texts: [String:String]) -> {text: String, problems: [String]} {
-    blocks := [String]{LAYOUT_HEADER}
-    problems := [String]{}
+    ^blocks: [String]{LAYOUT_HEADER}
+    ^problems: [String]{}
     loop carrier in LAYOUT_CARRIERS {
         found: owner_declaration(carrier.core, sites, texts)
         if found.reason != "" {
@@ -557,10 +564,10 @@ row_owner: fn(line: String, open: String) -> String Never! {
 // literal row in place unless the record holds `priv` storage.
 record_rows: fn(records: String, sites: [String:[StructSite]], texts: [String:String]) -> RecordRows {
     lines: records.split("\n").to_list()
-    left := [String:Bool]{}
-    declared := [String:{fields: [DeclaredField], sealed: Bool, path: String}]{}
-    order := [String]{}
-    residue := [ResidueRecord]{}
+    ^left: [String:Bool]{}
+    ^declared: [String:{fields: [DeclaredField], sealed: Bool, path: String}]{}
+    ^order: [String]{}
+    ^residue: [ResidueRecord]{}
     loop line in lines {
         owner: if {
             line.starts_with(FIELD_OPEN) -> row_owner(line, FIELD_OPEN)
@@ -577,9 +584,9 @@ record_rows: fn(records: String, sites: [String:[StructSite]], texts: [String:St
         declared[owner] = {fields: found.fields, sealed: found.sealed, path: found.path}
         order.push(owner)
     }
-    old := [String:[String]]{}
-    out := [String]{}
-    emitted := [String:Bool]{}
+    ^old: [String:[String]]{}
+    ^out: [String]{}
+    ^emitted: [String:Bool]{}
     loop line in lines {
         is_field: line.starts_with(FIELD_OPEN)
         is_literal: line.starts_with(LITERAL_OPEN)
@@ -602,11 +609,11 @@ record_rows: fn(records: String, sites: [String:[StructSite]], texts: [String:St
         emitted[owner] = true
         loop row in field_rows(owner, record.fields) -> out.push(row)
     }
-    stale := [StaleRecord]{}
+    ^stale: [StaleRecord]{}
     loop owner in order {
         record: declared.get(owner) ?? next
         written_rows: old.get(owner) ?? [String]{}
-        fresh := field_rows(owner, record.fields)
+        ^fresh: field_rows(owner, record.fields)
         loop line in written_rows {
             if line.starts_with(LITERAL_OPEN) && !record.sealed {
                 fresh.push(literal_row(owner, record.fields))
@@ -626,9 +633,9 @@ core_record_rows_main: fn(args: [String]) -[FS]> String CoreRecordRowsError! {
     rows: files.read(ROWS_PATH) ?? return Err(records_fail("cannot read {ROWS_PATH}: {err}"))
     parts: files.read(PARTS_PATH) ?? return Err(records_fail("cannot read {PARTS_PATH}: {err}"))
     sources: module_sources(rows, parts)
-    paths := [String]{}
-    texts := [String:String]{}
-    module_names := sources.keys().to_list()
+    ^paths: [String]{}
+    ^texts: [String:String]{}
+    ^module_names: sources.keys().to_list()
     module_names.sort()
     loop module_name in module_names {
         module_paths: sources.get(module_name) ?? [String]{}
@@ -650,7 +657,7 @@ core_record_rows_main: fn(args: [String]) -[FS]> String CoreRecordRowsError! {
     }
     layout_stale: (files.read(LAYOUT_PATH) ?? "") != layout.text
     if mode == "--check" && (result.stale.len() > 0 || layout_stale) {
-        problems := loop stale in result.stale -> "{RECORDS_PATH}: the rows of {stale.owner} differ from its declaration in {stale.path}"
+        ^problems: loop stale in result.stale -> "{RECORDS_PATH}: the rows of {stale.owner} differ from its declaration in {stale.path}"
         if layout_stale {
             problems.push("{LAYOUT_PATH}: a carrier's layout differs from its declaration")
         }
@@ -672,7 +679,7 @@ run: fn() { print(core_record_rows_main(process.args()) ?? process.fail(1, err.m
 
 #Test("a struct's fields are its typed members in declaration order") {
     text: "// Box: struct {{ wrong: Int }}\npub Box: struct {{\n    /// the count\n    count: Int{{0}},\n    #Skip\n    name: core.text.Name?,\n    priv cache: [String:[U8]],\n    label: String -> cache,\n    pair: (index: Int, size: I32),\n    span: fn(self) -> {{start: Int}} Never! {{ {{start: 0}} }}\n    items: Bag<Item>,\n\n    impl Show {{ show: fn(self) -> String {{ \"}}\" }} }}\n    width: fn(self) -> Int {{ self.count }}\n}}\n"
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     texts["a.jet"] = text
     sites: struct_sites([String]{"a.jet"}, texts)
     site: (sites.get("Box") ?? panic("no Box"))[0]
@@ -690,7 +697,7 @@ run: fn() { print(core_record_rows_main(process.args()) ?? process.fail(1, err.m
 }
 
 #Test("a record's rows follow its declaration; an undeclared or generic one stays as written") {
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     texts["Core/Demo/Demo.jet"] = "Pair: struct {{\n    left: Int,\n    right: String,\n}}\nBox: struct<T> {{\n    value: T,\n}}\n"
     sites: struct_sites([String]{"Core/Demo/Demo.jet"}, texts)
     records: "ROWS: [CoreRecordFieldRow]{{\n{FIELD_OPEN}Pair\", field: \"right\", ty: Type.Int}},\n{FIELD_OPEN}Gone\", field: \"x\", ty: Type.Int}},\n{FIELD_OPEN}Box\", field: \"value\", ty: Type.Int}},\n}}\nLITERALS: [CoreRecordLiteralRow]{{\n{LITERAL_OPEN}Pair\", fields: [TypeTupleField]{{}}}},\n}}"
@@ -705,7 +712,7 @@ run: fn() { print(core_record_rows_main(process.args()) ?? process.fail(1, err.m
 }
 
 #Test("a record with priv storage keeps field rows for its other fields and loses its literal row") {
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     texts["Core/Demo/Demo.jet"] = "Device: struct {{\n    priv name: String,\n    label: String,\n}}\n"
     sites: struct_sites([String]{"Core/Demo/Demo.jet"}, texts)
     records: "ROWS: [CoreRecordFieldRow]{{\n{FIELD_OPEN}Device\", field: \"name\", ty: Type.String, core_only: true}},\n}}\nLITERALS: [CoreRecordLiteralRow]{{\n{LITERAL_OPEN}Device\", fields: [TypeTupleField]{{TypeTupleField{{name: \"name\", ty: Type.String}}}}, core_only: true}},\n}}"
@@ -716,9 +723,18 @@ run: fn() { print(core_record_rows_main(process.args()) ?? process.fail(1, err.m
     assert_eq(again.stale.len(), 0)
 }
 
+#Test("a priv struct of Core's builtins door is a carrier, not a record's site") {
+    ^texts: [String:String]{}
+    texts["Core/Builtins/Builtins.jet"] = "priv ProcessChild: struct {{}}\nPlain: struct {{\n    v: Int,\n}}\n"
+    texts["Core/Demo/Demo.jet"] = "priv Kept: struct {{\n    v: Int,\n}}\n"
+    sites: struct_sites([String]{"Core/Builtins/Builtins.jet", "Core/Demo/Demo.jet"}, texts)
+    assert(!sites.has_key("ProcessChild"))
+    assert(sites.has_key("Plain") && sites.has_key("Kept"))
+}
+
 #Test("a carrier holds a word per field, a scalar option as a presence word and its value") {
     text: "Probe: struct {{\n    name: String,\n    code: Int?,\n    width: I32?,\n    label: String?,\n    items: [Int],\n}}\n"
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     texts["a.jet"] = text
     sites: struct_sites([String]{"a.jet"}, texts)
     declared: struct_fields(text.bytes(), (sites.get("Probe") ?? panic("no Probe"))[0].open)

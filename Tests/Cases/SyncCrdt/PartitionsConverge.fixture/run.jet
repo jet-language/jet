@@ -71,7 +71,7 @@ edit: fn(replica: Replica, index: Int, step: Int, rng: ^RNG, written: ^Written) 
 
 // Every message but the one at `skip`.
 without: fn(messages: [Message], skip: Int) -> [Message] {
-    kept := [Message]{}
+    ^kept: [Message]{}
     loop index in 0..<messages.len() {
         if index != skip -> kept.push(messages[index].copy())
     }
@@ -86,16 +86,16 @@ without: fn(messages: [Message], skip: Int) -> [Message] {
 // The answer is the replicas' shown states, or "" when they differ or a
 // write is lost.
 schedule: fn(count: Int, seed: Int) -> String {
-    rng := random.rng(seed)
+    ^rng: random.rng(seed)
     base: sync.text_new("r0", "seed")
-    replicas := [Replica]{}
+    ^replicas: [Replica]{}
     loop index in 0..<count {
         replicas.push(Replica{text: base.copy(), map: sync.map_new(), counter: sync.counter_new(name(index), 0), list: sync.list_new()})
     }
-    cut := [Bool]{}
+    ^cut: [Bool]{}
     loop _ in 0..<(count * count) -> cut.push(false)
-    flight := [Message]{}
-    written := Written{total: 0, pushes: 0}
+    ^flight: [Message]{}
+    ^written: Written{total: 0, pushes: 0}
     loop step in 0..<STEPS {
         action: rng.int(0, 9)
         if {
@@ -166,8 +166,8 @@ schedule: fn(count: Int, seed: Int) -> String {
 run: fn() {
     counts: [Int]{2, 3}
     loop count in counts {
-        converged := 0
-        first := ""
+        ^converged: 0
+        ^first: ""
         loop seed in 1..<(SCHEDULES + 1) {
             shown: schedule(count, seed)
             if shown != "" -> converged += 1

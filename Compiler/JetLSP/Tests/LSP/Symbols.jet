@@ -25,7 +25,7 @@ origin: fn() -> Int {
 `
 
 lsp_test_symbol_rows: fn(rows: [Dyn]) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop row in rows {
         container: if lsp_member(row, "containerName") == .Val(_) -> "{lsp_test_text(row, "containerName")}." else -> ""
         names.push("{container}{lsp_test_text(row, "name")}={lsp_test_int(row, "kind")}")
@@ -34,7 +34,7 @@ lsp_test_symbol_rows: fn(rows: [Dyn]) -> [String] Never! {
 }
 
 #Test("document symbols are the declarations in source order") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_SHAPES_URI, LSP_TEST_SHAPES)
     rows: lsp_test_rows(lsp_test_result(server, "textDocument/documentSymbol", "{{{lsp_test_text_document(LSP_TEST_SHAPES_URI)}}}"))
     assert_eq(lsp_test_symbol_rows(rows), [String]{"Point=23", "Point.x=8", "Point.y=8", "Shape=10", "Shape.Dot=22", "Shape.Line=22", "origin=12"})
@@ -44,7 +44,7 @@ lsp_test_symbol_rows: fn(rows: [Dyn]) -> [String] Never! {
 }
 
 #Test("workspace symbols search the published checks by fuzzy name") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     lsp_test_open(server, LSP_TEST_SHAPES_URI, LSP_TEST_SHAPES)
     assert_eq(lsp_test_rows(lsp_test_result(server, "workspace/symbol", "{{\"query\":\"pt\"}}")).len(), 0)
     lsp_test_publish(server, LSP_TEST_SHAPES_URI)
@@ -66,8 +66,8 @@ lsp_test_change_folders: fn(server: ^LSPServer, added: String, removed: String) 
 }
 
 #Test("workspace symbols follow the workspace folders, open text over saved text") {
-    server := lsp_test_server()
-    _ := lsp_test_result(server, "initialize", "{{\"workspaceFolders\":[{{\"uri\":\"file:///w/first\",\"name\":\"first\"}},{{\"uri\":\"file:///w/second/\",\"name\":\"second\"}}]}}")
+    ^server: lsp_test_server()
+    ^_: lsp_test_result(server, "initialize", "{{\"workspaceFolders\":[{{\"uri\":\"file:///w/first\",\"name\":\"first\"}},{{\"uri\":\"file:///w/second/\",\"name\":\"second\"}}]}}")
     lsp_test_open(server, "file:///w/second/open.jet", "OpenSecond: fn() {{}}\n")
     rows: lsp_test_workspace_rows(server)
     assert_eq(lsp_test_symbol_rows(rows), [String]{"ClosedFirst=12", "OpenSecond=12"})
@@ -81,19 +81,19 @@ lsp_test_change_folders: fn(server: ^LSPServer, added: String, removed: String) 
 }
 
 #Test("workspace symbols read the root URI as the one workspace folder") {
-    server := lsp_test_server()
-    _ := lsp_test_result(server, "initialize", "{{\"rootUri\":\"file:///w/third\"}}")
+    ^server: lsp_test_server()
+    ^_: lsp_test_result(server, "initialize", "{{\"rootUri\":\"file:///w/third\"}}")
     assert_eq(lsp_test_symbol_rows(lsp_test_workspace_rows(server)), [String]{"AddedThird=12"})
 }
 
 #Test("selection ranges grow from the name to the whole document") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     params: "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"positions\":[{{\"line\":1,\"character\":5}}]}}"
     rows: lsp_test_rows(lsp_test_result(server, "textDocument/selectionRange", params))
     assert_eq(rows.len(), 1)
-    current := rows[0]
+    ^current: rows[0]
     assert_eq(lsp_test_range(lsp_test_field(current, "range")), "1:4-1:8")
-    depth := 1
+    ^depth: 1
     loop lsp_member(current, "parent") == .Val(parent) {
         current = parent
         depth += 1
@@ -105,7 +105,7 @@ lsp_test_change_folders: fn(server: ^LSPServer, added: String, removed: String) 
 }
 
 #Test("a file import links to the imported document") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/app.jet"
     lsp_test_open(
         server,
@@ -125,7 +125,7 @@ run: fn() -> Int {
 }
 
 lsp_test_token_data: fn(result: Dyn) -> [Int] Never! {
-    data := [Int]{}
+    ^data: [Int]{}
     loop value in lsp_test_rows(lsp_test_field(result, "data")) {
         data.push(foundation_json_integer(value) ?? -1)
     }
@@ -133,7 +133,7 @@ lsp_test_token_data: fn(result: Dyn) -> [Int] Never! {
 }
 
 #Test("semantic tokens classify declarations, keywords and calls") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     full: lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)}}}"))
     assert_eq(full.len() % 5, 0)
     // `add` declares a function, `fn` is a keyword, `left` declares a parameter.
@@ -147,7 +147,7 @@ lsp_test_token_data: fn(result: Dyn) -> [Int] Never! {
 }
 
 #Test("semantic tokens class the names a written type holds, and a retired word is no keyword") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_SHAPES_URI, LSP_TEST_SHAPES)
     uri: "file:///w/views.jet"
     lsp_test_open(
@@ -172,7 +172,7 @@ archive: fn(names: [String]) -> [String] {
 }
 
 #Test("a semantic tokens delta answers the edit from its kept result, and the full tokens for any other id") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     doc: lsp_test_text_document(LSP_TEST_MAIN_URI)
     first: lsp_test_result(server, "textDocument/semanticTokens/full", "{{{doc}}}")
     assert_eq(lsp_test_text(first, "resultId"), "1")
@@ -181,16 +181,20 @@ archive: fn(names: [String]) -> [String] {
     assert_eq(lsp_test_text(same, "resultId"), "2")
     assert_eq(lsp_test_rows(lsp_test_field(same, "edits")).len(), 0)
     // `add(1, add(2, 3))` on line 5 becomes `add(10, add(2, 3))`.
-    _ := lsp_test_change(server.diagnostic_state, LSP_TEST_MAIN_URI, 2, "[{{\"range\":{{\"start\":{{\"line\":5,\"character\":9}},\"end\":{{\"line\":5,\"character\":9}}}},\"text\":\"0\"}}]")
+    ^_: lsp_test_change(server.diagnostic_state, LSP_TEST_MAIN_URI, 2, "[{{\"range\":{{\"start\":{{\"line\":5,\"character\":9}},\"end\":{{\"line\":5,\"character\":9}}}},\"text\":\"0\"}}]")
     changed: lsp_test_result(server, "textDocument/semanticTokens/full/delta", "{{{doc},\"previousResultId\":\"2\"}}")
     assert_eq(lsp_test_text(changed, "resultId"), "3")
     assert(lsp_member(changed, "data") == None, "a delta on the kept result sends no full tokens")
     edits: lsp_test_rows(lsp_test_field(changed, "edits"))
     assert_eq(edits.len(), 1)
     start: lsp_test_int(edits[0], "start")
-    applied := before.slice(0, start)
-    loop value in lsp_test_rows(lsp_test_field(edits[0], "data")) -> applied.push(foundation_json_integer(value) ?? -1)
-    loop value in before.slice(start + lsp_test_int(edits[0], "deleteCount"), before.len()) -> applied.push(value)
+    ^applied: before.slice(0, start)
+    loop value in lsp_test_rows(lsp_test_field(edits[0], "data")) {
+        applied.push(foundation_json_integer(value) ?? -1)
+    }
+    loop value in before.slice(start + lsp_test_int(edits[0], "deleteCount"), before.len()) {
+        applied.push(value)
+    }
     assert_eq(applied, lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{doc}}}")))
     // An id the server no longer keeps answers the full tokens.
     stale: lsp_test_result(server, "textDocument/semanticTokens/full/delta", "{{{doc},\"previousResultId\":\"1\"}}")
@@ -204,7 +208,7 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
 }
 
 #Test("completion offers the names in scope that match the prefix") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     // `    ad` on line 5.
     call: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 6)))
     assert(call.contains("add=3"), "`add` completes as a function")
@@ -219,7 +223,7 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
 }
 
 #Test("completion after a dot with no receiver is empty") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/dot.jet"
     lsp_test_open(
         server,
@@ -234,7 +238,7 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
 }
 
 #Test("completion reads the word being written from the lexer's tokens") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     // Inside `add` on line 5, the word's start narrows the names.
     inside: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 6)))
     assert(inside.contains("add=3") && !inside.contains("run=3"), "the start of `add` is the prefix")
@@ -249,13 +253,15 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
 }
 
 #Test("a completion item gets its doc comment through completionItem/resolve") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/docs.jet"
     lsp_test_open(server, uri, "/// Adds two numbers.\nadd: fn(left: Int, right: Int) -> Int {{ left + right }}\n\nrun: fn() -> Int {{\n    ad\n}}\n")
     items: lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 4, 6)), "items"))
-    at := -1
+    ^at: -1
     loop (index, offered) in items {
-        if lsp_test_text(offered, "label") == "add" && lsp_test_int(offered, "kind") == 3 -> at = index
+        if lsp_test_text(offered, "label") == "add" && lsp_test_int(offered, "kind") == 3 {
+            at = index
+        }
     }
     if at < 0 -> panic("`add` is offered")
     item: items[at]
@@ -271,10 +277,10 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
 }
 
 #Test("completion offers the binding snippets at a statement's start in a block") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/bind.jet"
     lsp_test_open(server, uri, "run: fn() {{\n    \n}}\n\n")
-    snippets := [String]{}
+    ^snippets: [String]{}
     loop item in lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 1, 4)), "items")) {
         if lsp_test_int(item, "kind") == 15 {
             snippets.push("{lsp_test_text(item, "label")}|{lsp_test_text(item, "insertText")}|{lsp_test_int(item, "insertTextFormat")}")
@@ -286,11 +292,11 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
 }
 
 #Test("completion offers a saved file's declarations with the `use` line they need") {
-    server := lsp_test_server()
-    _ := lsp_test_result(server, "initialize", "{{\"rootUri\":\"file:///w\"}}")
+    ^server: lsp_test_server()
+    ^_: lsp_test_result(server, "initialize", "{{\"rootUri\":\"file:///w\"}}")
     uri: "file:///w/second/open.jet"
     lsp_test_open(server, uri, "run: fn() {{\n    \n}}\n")
-    imports := [String]{}
+    ^imports: [String]{}
     loop item in lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 1, 4)), "items")) {
         edits: lsp_member(item, "additionalTextEdits") ?? next
         edit: lsp_test_rows(edits)[0]
@@ -317,11 +323,11 @@ lsp_test_action_rows: fn(server: ^LSPServer, uri: String, line: Int) -> [Dyn] {
 }
 
 #Test("code actions offer a diagnostic's fixes and marker moves") {
-    server := lsp_test_server()
-    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"workspace\":{{\"workspaceEdit\":{{\"documentChanges\":true}}}}}}}}")
+    ^server: lsp_test_server()
+    ^_: lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"workspace\":{{\"workspaceEdit\":{{\"documentChanges\":true}}}}}}}}")
     uri: "file:///w/markers.jet"
     lsp_test_open(server, uri, LSP_TEST_MARKERS)
-    kinds := [String]{}
+    ^kinds: [String]{}
     loop action in lsp_test_action_rows(server, uri, 3) {
         kinds.push(lsp_test_text(action, "kind"))
         change: lsp_test_rows(lsp_test_field(lsp_test_field(action, "edit"), "documentChanges"))[0]
@@ -352,7 +358,7 @@ Pixel: struct {
 }
 
 #Test("a code action's edit is a plain changes map unless documentChanges is negotiated") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/markers.jet"
     lsp_test_open(server, uri, LSP_TEST_MARKERS)
     actions: lsp_test_action_rows(server, uri, 3)
@@ -365,17 +371,19 @@ Pixel: struct {
 }
 
 #Test("a client that resolves code actions gets each one's edit from codeAction/resolve") {
-    plain := lsp_test_server()
+    ^plain: lsp_test_server()
     uri: "file:///w/markers.jet"
     lsp_test_open(plain, uri, LSP_TEST_MARKERS)
-    expected := [String]{}
-    loop action in lsp_test_action_rows(plain, uri, 3) -> expected.push(jet_error_json_encode_value(action))
-    server := lsp_test_server()
-    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"codeAction\":{{\"resolveSupport\":{{\"properties\":[\"edit\"]}}}}}}}}}}")
+    ^expected: [String]{}
+    loop action in lsp_test_action_rows(plain, uri, 3) {
+        expected.push(jet_error_json_encode_value(action))
+    }
+    ^server: lsp_test_server()
+    ^_: lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"codeAction\":{{\"resolveSupport\":{{\"properties\":[\"edit\"]}}}}}}}}}}")
     lsp_test_open(server, uri, LSP_TEST_MARKERS)
     offered: lsp_test_action_rows(server, uri, 3)
     assert(offered.len() > 0, "the markers line offers actions")
-    resolved := [String]{}
+    ^resolved: [String]{}
     loop action in offered {
         assert(lsp_member(action, "edit") == None, "the list leaves each edit out")
         resolved.push(jet_error_json_encode_value(lsp_test_result(server, "codeAction/resolve", jet_error_json_encode_value(action))))
@@ -383,15 +391,15 @@ Pixel: struct {
     // Each resolved action is the one a client that does not resolve gets.
     assert_eq(resolved, expected)
     // Once the document moves on, an action offered before is refused.
-    _ := lsp_update_document(server.diagnostic_state, Val(lsp_test_json("{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[]}}")), is_open: false)
+    ^_: lsp_update_document(server.diagnostic_state, Val(lsp_test_json("{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[]}}")), is_open: false)
     assert_eq(lsp_test_error_code(server, "codeAction/resolve", jet_error_json_encode_value(offered[0])), -32801)
 }
 
 // The byte offset of an LSP position in ASCII `text`.
 lsp_test_offset: fn(text: String, position: Dyn) -> Int Never! {
     wanted: lsp_test_int(position, "line")
-    offset := 0
-    row := 0
+    ^offset: 0
+    ^row: 0
     loop line in text.split("\n") {
         if row == wanted -> break
         offset += line.count_bytes() + 1
@@ -402,7 +410,7 @@ lsp_test_offset: fn(text: String, position: Dyn) -> Int Never! {
 
 // `text` after `edits`, which are in source order and do not overlap.
 lsp_test_apply_edits: fn(text: String, edits: [TextEdit]) -> String Never! {
-    result := text
+    ^result: text
     loop index in 0..<edits.len() {
         edit: edits[edits.len() - 1 - index]
         bytes: result.bytes()
@@ -414,7 +422,7 @@ lsp_test_apply_edits: fn(text: String, edits: [TextEdit]) -> String Never! {
 }
 
 #Test("marker_move_code_actions on a struct and a function write what jet fix --markers writes") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     sources: [String]{
         `#Codable
 Pixel: struct {
@@ -433,7 +441,7 @@ area: fn() -> Int {
         source: sources[index]
         uri: "file:///w/split{index}.jet"
         lsp_test_open(server, uri, source)
-        moves := [String:String]{}
+        ^moves: [String:String]{}
         loop action in lsp_test_action_rows(server, uri, 1) {
             if lsp_test_text(action, "kind") != "refactor.rewrite" -> next
             edits: lsp_test_rows(lsp_test_field(lsp_test_field(lsp_test_field(action, "edit"), "changes"), uri))

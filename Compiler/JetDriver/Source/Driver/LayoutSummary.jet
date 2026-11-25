@@ -69,8 +69,8 @@ jet_driver_layout_summary: fn(layout: TComptimeValue) -> JetDriverLayoutSummary?
     size: jet_driver_layout_record_int(layout, "size") ?? return None
     alignment: jet_driver_layout_record_int(layout, "alignment") ?? return None
     stride: jet_driver_layout_record_int(layout, "stride") ?? return None
-    members := [JetDriverLayoutMember]{}
-    boxed := false
+    ^members: [JetDriverLayoutMember]{}
+    ^boxed: false
     if jet_driver_layout_record_field(layout, "fields") == .Val(.List(values)) {
         loop field in values {
             name: jet_driver_layout_record_text(field, "name") ?? return None
@@ -95,7 +95,7 @@ jet_driver_layout_line: fn(summary: JetDriverLayoutSummary) -> String Never! {
             names: loop member in summary.members -> member.name
             return "{head}: the tag; cases: {names.join(", ")}"
         }
-        cases := [String]{}
+        ^cases: [String]{}
         loop member in summary.members {
             if member.offset == 0 -> cases.push("{member.name} (tag only)") else {
                 cases.push("{member.name} at {member.offset} ({jet_driver_layout_bytes(member.size)})")
@@ -115,8 +115,8 @@ jet_driver_layout_line: fn(summary: JetDriverLayoutSummary) -> String Never! {
 // compare and no note.
 jet_driver_layout_dominant: fn(summary: JetDriverLayoutSummary) -> JetDriverLayoutDominant? Never! {
     if !summary.enumeration -> return None
-    widest := -1
-    runner := -1
+    ^widest: -1
+    ^runner: -1
     loop (index, member) in summary.members {
         if member.offset == 0 -> next
         if widest < 0 || member.size > summary.members[widest].size {

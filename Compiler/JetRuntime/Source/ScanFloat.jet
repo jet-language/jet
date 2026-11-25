@@ -13,9 +13,9 @@ ScanDecimal: struct {
 }
 
 scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
-    result := ScanDecimal{valid: false, negative: false, first: I64{0}, last: I64{0}, digits: I64{0}, fraction: I64{0}, exponent: I64{0}, special: I64{0}}
+    ^result: ScanDecimal{valid: false, negative: false, first: I64{0}, last: I64{0}, digits: I64{0}, fraction: I64{0}, exponent: I64{0}, special: I64{0}}
     if (len == I64{0}) { return result }
-    at := I64{0}
+    ^at: I64{0}
     first: scan_byte(data, stride, at)
     if (first == I64{43} || first == I64{45}) {
         result.negative = first == I64{45}
@@ -31,10 +31,10 @@ scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
         result.special = I64{2}
         return result
     }
-    seen := false
-    point := false
-    leading := true
-    trailing := I64{0}
+    ^seen: false
+    ^point: false
+    ^leading: true
+    ^trailing: I64{0}
     loop at < len {
         byte: scan_byte(data, stride, at)
         if (byte == I64{101} || byte == I64{69}) { break }
@@ -58,7 +58,7 @@ scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
     if !seen -> return result
     if (at < len) {
         at += I64{1}
-        minus := false
+        ^minus: false
         if (at < len) {
             byte: scan_byte(data, stride, at)
             if (byte == I64{43} || byte == I64{45}) {
@@ -70,7 +70,7 @@ scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
         // Saturate beyond every possible cancellation by this input's decimal
         // point. Arbitrarily long exponent spellings still get fully validated.
         bound: len + I64{1024}
-        exp := I64{0}
+        ^exp: I64{0}
         loop at < len {
             digit: scan_byte(data, stride, at) - I64{48}
             if (digit < I64{0} || digit > I64{9}) { return result }
@@ -88,12 +88,12 @@ scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
 }
 
 scan_pow10: fn(node: I64, count: I64) {
-    remaining := count
+    ^remaining: count
     loop remaining >= (I64{9}) {
         int_scale(node, I64{1000000000}, I64{0})
         remaining -= I64{9}
     }
-    factor := I64{1}
+    ^factor: I64{1}
     loop remaining > (I64{0}) {
         factor *= I64{10}
         remaining -= I64{1}
@@ -123,8 +123,8 @@ scan_float_bits: fn(data: I64, len: I64, stride: I64) -> I64 {
     numerator: int_new(capacity)
     denominator: int_new(capacity)
     int_set(denominator, I64{0}, I64{1})
-    at := decimal.first
-    fed := I64{0}
+    ^at: decimal.first
+    ^fed: I64{0}
     loop fed < retained {
         byte: scan_byte(data, stride, at)
         if (byte != I64{46}) {
@@ -134,7 +134,7 @@ scan_float_bits: fn(data: I64, len: I64, stride: I64) -> I64 {
         at += I64{1}
     }
     if (scale >= I64{0}) { scan_pow10(numerator, scale) } else { scan_pow10(denominator, -scale) }
-    exponent := I64{0}
+    ^exponent: I64{0}
     loop int_compare_abs(int_tag(numerator), int_tag(denominator)) < (I64{0}) {
         int_scale(numerator, I64{2}, I64{0})
         exponent -= I64{1}
@@ -150,7 +150,7 @@ scan_float_bits: fn(data: I64, len: I64, stride: I64) -> I64 {
         int_free_node(denominator)
         return sign | (if (exponent > I64{1023}) -> I64{9218868437227405312} else -> I64{0})
     }
-    shift := if (exponent >= I64{-1022}) -> I64{52} else -> exponent + I64{1074}
+    ^shift: if (exponent >= I64{-1022}) -> I64{52} else -> exponent + I64{1074}
     if (shift < I64{0}) { int_scale(denominator, I64{2}, I64{0}) }
     loop shift > (I64{0}) {
         int_scale(numerator, I64{2}, I64{0})
@@ -160,7 +160,7 @@ scan_float_bits: fn(data: I64, len: I64, stride: I64) -> I64 {
     remainder: int_division(int_tag(numerator), int_tag(denominator), I64{0}, I64{0}, I64{0}, I64{1})
     twice: jet_int_add(remainder, remainder)
     comparison: int_compare_abs(twice, int_tag(denominator))
-    mantissa := int_word(quotient)
+    ^mantissa: int_word(quotient)
     if (comparison > I64{0} || (comparison == I64{0} && (sticky || (mantissa & I64{1}) != I64{0}))) {
         mantissa += I64{1}
     }

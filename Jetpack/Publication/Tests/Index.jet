@@ -68,10 +68,10 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("publication index pin_is_first_nonempty_public_key") {
-    a := publication_index_test_entry("textkit", "1.0.0", false)
+    ^a: publication_index_test_entry("textkit", "1.0.0", false)
     a.public_key = " aa "
     b: publication_index_test_entry("textkit", "1.1.0", false)
-    c := publication_index_test_entry("textkit", "1.2.0", false)
+    ^c: publication_index_test_entry("textkit", "1.2.0", false)
     c.public_key = "bb"
     assert_eq(publication_pinned_public_key([PublicationIndexEntry]{a, b, c}), Val("aa"))
     assert_eq(publication_pinned_public_key([PublicationIndexEntry]{publication_index_test_entry("x", "1.0.0", false)}), None)
@@ -96,7 +96,7 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("publication index protocol quote is byte exact, not CanonicalJSON") {
-    entry := publication_index_test_entry("é\"\\\n\r\t\u{8}\u{c}\u{7f}\u{80}", "1.2.0", true)
+    ^entry: publication_index_test_entry("é\"\\\n\r\t\u{8}\u{c}\u{7f}\u{80}", "1.2.0", true)
     entry.public_key = "aa"
     entry.signature = "x=y"
     line: publication_index_to_jsonl(entry)
@@ -157,9 +157,9 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("publication index one MiB protocol limit is exact") {
-    entry := publication_index_test_entry("x", "1.0.0", false)
+    ^entry: publication_index_test_entry("x", "1.0.0", false)
     overhead: publication_index_to_jsonl(entry).bytes().len() - 1
-    name_bytes := [U8]{}
+    ^name_bytes: [U8]{}
     loop _ in 0..<(1048576 - overhead) -> name_bytes.push(U8{97})
     entry.name = String.from_bytes(name_bytes) ?? panic("ASCII fixture")
     at_limit: publication_index_to_jsonl(entry)
@@ -321,7 +321,7 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     publication_write_index_entry(repo, entry) ?? panic("write")
     publication_write_index_entry(repo, entry) ?? panic("identical retry")
     assert_eq((publication_read_entries(repo, "textkit") ?? panic("read")).len(), 1)
-    changed := entry.copy()
+    ^changed: entry.copy()
     changed.fingerprint = "different"
     if publication_write_index_entry(repo, changed) == {
         .Err(error) -> { assert(error == .AlreadyExists(_)) }
@@ -429,9 +429,9 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
 
 #Test("publication index takeover requires receipt and re-signing") {
     repo: publication_index_test_root("takeover")
-    original := publication_index_test_entry("textkit", "1.0.0", false)
+    ^original: publication_index_test_entry("textkit", "1.0.0", false)
     original.public_key = "aa"
-    candidate := publication_index_test_entry("textkit", "1.1.0", false)
+    ^candidate: publication_index_test_entry("textkit", "1.1.0", false)
     candidate.public_key = "bb"
     entries: [PublicationIndexEntry]{original}
     assert(publication_validate_takeover(repo, entries, candidate) == .Err(_))
@@ -453,18 +453,18 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.create_dir_all(repo) ?? panic("repo")
     files.create_dir_all(files.join(source, ".jet")) ?? panic("source")
     files.write(files.join(source, "package.jet"), "package bytes\n") ?? panic("package")
-    lock := LockFile.empty()
+    ^lock: LockFile.empty()
     lock.packages.push(LockedPackage{name: "helpers", version: "1.0.0", fingerprint: "sha256-abcd1234", source: LockSource.Path("/tmp/placeholder")})
     files.write(files.join(source, ".jet/lock"), pkg_lock_write(lock)) ?? panic("lock")
     content_hash: foundation_tree_hash(source)
     _: publication_publish_artifact(repo, source, "ref-kit", "1.0.0", content_hash) ?? panic("artifact")
-    entry := publication_index_test_entry("ref-kit", "1.0.0", false)
+    ^entry: publication_index_test_entry("ref-kit", "1.0.0", false)
     entry.content_hash = content_hash
     entry.fingerprint = "sha256-fingerprint"
     publication_write_index_entry(repo, entry) ?? panic("index")
     publication_verify_oci_referrers(repo, entry) ?? panic("verify")
     blobs: files.list_dir(files.join(repo, "referrers/{content_hash}/blobs")) ?? panic("blobs")
-    bytes := files.read_bytes(blobs[0].path) ?? panic("blob")
+    ^bytes: files.read_bytes(blobs[0].path) ?? panic("blob")
     bytes.push(U8{10})
     files.write_bytes(blobs[0].path, bytes) ?? panic("tamper")
     if publication_verify_oci_referrers(repo, entry) == {
@@ -484,7 +484,7 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     content_hash: foundation_tree_hash(source)
     _: publication_publish_artifact(repo, source, "ref-kit", "1.0.0", content_hash) ?? panic("artifact")
     files.remove(files.join(repo, "referrers/{content_hash}/.sbom.pending")) ?? panic("remove staged SBOM")
-    entry := publication_index_test_entry("ref-kit", "1.0.0", false)
+    ^entry: publication_index_test_entry("ref-kit", "1.0.0", false)
     entry.content_hash = content_hash
     entry.fingerprint = "sha256-fingerprint"
     if publication_write_index_entry(repo, entry) == {

@@ -99,7 +99,7 @@ prefix_byte: fn(path: OSPath, at: Int) -> U8 Never! {
 }
 
 prefix_component_end: fn(path: OSPath, start: Int, limit: Int, verbatim: Bool) -> Int Never! {
-    at := start
+    ^at: start
     loop at < limit && !is_separator(path.platform, path.encoded[at], verbatim) -> at += 1
     at
 }
@@ -109,9 +109,9 @@ parse_prefix_span: fn(path: OSPath, extent: PathSpan) -> PathPrefix Never! {
     start: extent.start
     limit: extent.end
     size: limit - start
-    out := no_prefix()
+    ^out: no_prefix()
     if size >= 2 && prefix_byte(path, start) == (U8{92}) && prefix_byte(path, start + 1) == (U8{92}) {
-        exact := size >= 4
+        ^exact: size >= 4
         if exact {
             loop i in start..<start + 4 {
                 if path.encoded[i] == (U8{47}) -> exact = false
@@ -120,7 +120,7 @@ parse_prefix_span: fn(path: OSPath, extent: PathSpan) -> PathPrefix Never! {
         if exact && path.encoded[start + 2] == (U8{63}) && path.encoded[start + 3] == (U8{92}) {
             if size >= 8 && prefix_byte(path, start + 4) == (U8{85}) && prefix_byte(path, start + 5) == (U8{78}) && prefix_byte(path, start + 6) == (U8{67}) && prefix_byte(path, start + 7) == (U8{92}) {
                 first_end: prefix_component_end(path, start + 8, limit, true)
-                second_start := first_end
+                ^second_start: first_end
                 if second_start < limit -> second_start += 1
                 second_end: prefix_component_end(path, second_start, limit, true)
                 out.kind = .VerbatimUNC
@@ -154,7 +154,7 @@ parse_prefix_span: fn(path: OSPath, extent: PathSpan) -> PathPrefix Never! {
             return out
         }
         first_end: prefix_component_end(path, start + 2, limit, false)
-        second_start := first_end
+        ^second_start: first_end
         if second_start < limit -> second_start += 1
         second_end: prefix_component_end(path, second_start, limit, false)
         if first_end > start + 2 && second_end > second_start {
@@ -210,7 +210,7 @@ include_cur_dir: fn(path: OSPath, cursor: Components) -> Bool Never! {
 }
 
 before_body: fn(path: OSPath, cursor: Components) -> Int Never! {
-    extra := 0
+    ^extra: 0
     if cursor.front <= 1 && cursor.physical_root -> extra += 1
     if cursor.front <= 1 && include_cur_dir(path, cursor) -> extra += 1
     prefix_remaining(cursor) + extra
@@ -256,7 +256,7 @@ next: fn(path: OSPath, cursor: ^Components) -> PathComponent? Never! {
             }
         } else if cursor.start < cursor.end {
             at: cursor.start
-            end := at
+            ^end: at
             loop end < cursor.end && !is_separator(path.platform, path.encoded[end], prefix_verbatim(cursor.prefix)) {
                 end += 1
             }
@@ -275,7 +275,7 @@ next_back: fn(path: OSPath, cursor: ^Components) -> PathComponent? Never! {
             body: cursor.start + before_body(path, cursor)
             if cursor.end > body {
                 end: cursor.end
-                at := end
+                ^at: end
                 loop at > body && !is_separator(path.platform, path.encoded[at - 1], prefix_verbatim(cursor.prefix)) {
                     at -= 1
                 }
@@ -306,11 +306,11 @@ next_back: fn(path: OSPath, cursor: ^Components) -> PathComponent? Never! {
 }
 
 remaining_span: fn(path: OSPath, original: Components) -> PathSpan Never! {
-    cursor := original
+    ^cursor: original
     if cursor.front == 2 {
         loop cursor.start < cursor.end {
             at: cursor.start
-            end := at
+            ^end: at
             loop end < cursor.end && !is_separator(path.platform, path.encoded[end], prefix_verbatim(cursor.prefix)) {
                 end += 1
             }
@@ -323,7 +323,7 @@ remaining_span: fn(path: OSPath, original: Components) -> PathSpan Never! {
         body: cursor.start + before_body(path, cursor)
         loop cursor.end > body {
             end: cursor.end
-            at := end
+            ^at: end
             loop at > body && !is_separator(path.platform, path.encoded[at - 1], prefix_verbatim(cursor.prefix)) {
                 at -= 1
             }
@@ -336,7 +336,7 @@ remaining_span: fn(path: OSPath, original: Components) -> PathSpan Never! {
 }
 
 parent_span: fn(path: OSPath) -> PathSpan? Never! {
-    cursor := components(path)
+    ^cursor: components(path)
     last: next_back(path, cursor) ?? return None
     if last.kind == .Prefix || last.kind == .RootDir -> return None
     Val(remaining_span(path, cursor))
@@ -361,8 +361,8 @@ component_equal: fn(left: OSPath, a: PathComponent, right: OSPath, b: PathCompon
 
 strip_prefix_span: fn(path: OSPath, root: OSPath) -> PathSpan? Never! {
     if path.platform != root.platform -> return None
-    cursor := components(path)
-    base := components(root)
+    ^cursor: components(path)
+    ^base: components(root)
     loop {
         b: next(root, base) ?? return Val(remaining_span(path, cursor))
         a: next(path, cursor) ?? return None
@@ -371,7 +371,7 @@ strip_prefix_span: fn(path: OSPath, root: OSPath) -> PathSpan? Never! {
 }
 
 owned_span: fn(path: OSPath, extent: PathSpan) -> OSPath Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in extent.start..<extent.end -> out.push(path.encoded[i])
     OSPath{encoded: out, platform: path.platform}
 }
@@ -391,9 +391,9 @@ append_component: fn(out: ^[U8], path: OSPath, value: PathComponent) Never! {
 }
 
 push_verbatim: fn(base: ^OSPath, path: OSPath, extent: PathSpan) Never! {
-    values := [PathComponent]{}
-    owners := [Bool]{}
-    cursor := components(base)
+    ^values: [PathComponent]{}
+    ^owners: [Bool]{}
+    ^cursor: components(base)
     loop {
         value: next(base, cursor) ?? break
         values.push(value)
@@ -419,8 +419,8 @@ push_verbatim: fn(base: ^OSPath, path: OSPath, extent: PathSpan) Never! {
             owners.push(true)
         }
     }
-    out := [U8]{}
-    need_sep := false
+    ^out: [U8]{}
+    ^need_sep: false
     prefix: parse_prefix(base)
     loop i in 0..<values.len() {
         value: values[i]

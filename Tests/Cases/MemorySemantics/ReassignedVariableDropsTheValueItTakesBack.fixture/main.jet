@@ -36,7 +36,7 @@ status_kb: fn(field: String) -> Int {
 }
 
 make_table: fn(n: Int) -> Table {
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop i in 0..<n -> rows.push(Row{_name: "row {i}", _items: [String]{"a {i}", "b {i}"}})
     Table{rows: rows, count: n}
 }
@@ -45,16 +45,16 @@ pass_through: fn(table: ^^Table) -> Table { table.move() }
 
 // The value moves out, and the next statement moves it back in.
 back_from_a_local: fn() -> Int {
-    table := make_table(16)
-    returned := pass_through(table)
+    ^table: make_table(16)
+    ^returned: pass_through(table)
     table = returned.move()
     table.rows.len()
 }
 
 // A fresh value assigned after the move is the variable's to drop.
 fresh_after_a_move: fn() -> Int {
-    table := make_table(16)
-    moved := pass_through(table)
+    ^table: make_table(16)
+    ^moved: pass_through(table)
     table = make_table(16)
     moved.rows.len() + table.rows.len()
 }
@@ -62,10 +62,10 @@ fresh_after_a_move: fn() -> Int {
 // Each pass moves the value out and back: the variable owns it at the loop's
 // end and drops it once the loop is done.
 back_in_a_loop: fn() -> Int {
-    table := make_table(16)
-    total := 0
+    ^table: make_table(16)
+    ^total: 0
     loop _ in 0..<2 {
-        returned := pass_through(table)
+        ^returned: pass_through(table)
         total += returned.rows.len()
         table = returned.move()
         table.count += 1
@@ -74,7 +74,7 @@ back_in_a_loop: fn() -> Int {
 }
 
 measure: fn(name: String, scenario: fn() -> Int) {
-    total := scenario()
+    ^total: scenario()
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
     grown: status_kb("VmRSS:") - start

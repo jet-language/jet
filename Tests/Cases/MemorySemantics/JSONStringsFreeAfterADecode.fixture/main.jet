@@ -47,7 +47,7 @@ skipped: fn(text: String) -> Int {
 
 held: fn(text: String) -> Int {
     people: json.decode<[Person]>(text) ?? panic("typed decode reading strings")
-    count := 0
+    ^count: 0
     loop person in people -> count += person.name.count_bytes() + person.tags.len()
     count
 }
@@ -59,7 +59,7 @@ parsed: fn(text: String) -> Int {
 }
 
 measure: fn(name: String, text: String, scenario: fn(String) -> Int) {
-    total := scenario(text)
+    ^total: scenario(text)
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario(text)
     grown: status_kb("VmRSS:") - start
@@ -70,7 +70,7 @@ measure: fn(name: String, text: String, scenario: fn(String) -> Int) {
 }
 
 run: fn() {
-    parts := ["["]
+    ^parts: ["["]
     loop i in 0..<RECORDS {
         comma: if i == 0 -> "" else -> ","
         parts.push("{comma}{{\"id\":{i},\"name\":\"user{i}\",\"tags\":[\"t{i %% 5}\",\"t{i %% 7}\"]}}")

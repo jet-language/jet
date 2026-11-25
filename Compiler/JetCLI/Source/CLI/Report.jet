@@ -53,19 +53,19 @@ jet_cli_report_path: fn(cwd: String?, value: String) -> String Never! {
     if value.len() == 0 || value.starts_with("<") -> return value.copy()
     // copy: `value` stays with the caller (`value` is a read parameter: no move out of it, E0201)
     // and the binding `absolute` owns its own.
-    absolute := value.copy()
+    ^absolute: value.copy()
     if !value.starts_with("/") {
         // copy: `value` stays with the caller (`value` is a read parameter: no move out of it,
         // E0201) and the new value owns its own.
         base: cwd ?? return value.copy()
         absolute = "{base}/{value}"
     }
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in absolute.split("/") {
         if {
             part == "" || part == "." -> {}
             part == ".." -> {
-                if parts.len() > 0 -> _ := parts.pop()
+                if parts.len() > 0 -> ^_: parts.pop()
             }
             else -> parts.push(part)
         }
@@ -88,7 +88,7 @@ JetCLIReportBase: struct {
 jet_cli_report_base: fn(file: String) -[FS, Env]> JetCLIReportBase? Never! {
     cwd: jet_cli_report_cwd()
     absolute: jet_cli_report_path(cwd, file)
-    start := cwd ?? ""
+    ^start: cwd ?? ""
     if absolute.starts_with("/") {
         start = if cli_files.is_dir(absolute) -> absolute.move() else -> jet_cli_parent(absolute) ?? absolute.move()
     }
@@ -99,7 +99,7 @@ jet_cli_report_base: fn(file: String) -[FS, Env]> JetCLIReportBase? Never! {
 // The project root that encloses `start`, in jet_cli_selected_project_root
 // order (workspace, repository, package), or None for a standalone source.
 jet_cli_report_root: fn(start: String) -[FS, Env]> String? Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if jet_cli_find_workspace_root_checked(cache, start) == .Ok(found) {
         if found != None -> return found
     }
@@ -142,17 +142,17 @@ jet_cli_report_within: fn(root: String, path: String) -> Bool Never! {
 // The normalized absolute `path` named from the directory `from`: a `..` for
 // each of `from`'s folders past their shared prefix, then the rest of `path`.
 jet_cli_report_relative: fn(from: String, path: String) -> String Never! {
-    left := [String]{}
+    ^left: [String]{}
     loop part in from.split("/") {
         if part != "" -> left.push(part)
     }
-    right := [String]{}
+    ^right: [String]{}
     loop part in path.split("/") {
         if part != "" -> right.push(part)
     }
-    shared := 0
+    ^shared: 0
     loop shared < left.len() && shared < right.len() && left[shared] == right[shared] -> shared += 1
-    steps := [String]{}
+    ^steps: [String]{}
     loop _ in shared..<left.len() -> steps.push("..")
     loop index in shared..<right.len() -> steps.push(right[index].copy())
     if steps.len() == 0 -> return "."
@@ -196,11 +196,11 @@ jet_cli_report_hex_digit: fn(value: Int) -> String Never! {
 // other byte run is copied verbatim.
 jet_cli_json_control_quote: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    out := [U8]{U8{34}}
-    index := 0
+    ^out: [U8]{U8{34}}
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
-        escape := if byte == {
+        ^escape: if byte == {
             34 -> "\\\""
             92 -> "\\\\"
             10 -> "\\n"
@@ -208,7 +208,7 @@ jet_cli_json_control_quote: fn(value: String) -> String Never! {
             9 -> "\\t"
             else -> ""
         }
-        width := 1
+        ^width: 1
         if escape.len() == 0 {
             if byte < 32 || byte == 127 {
                 escape = "\\u00{jet_cli_report_hex_digit((byte >> 4) & 15)}{jet_cli_report_hex_digit(byte & 15)}"
@@ -251,7 +251,7 @@ jet_cli_report_span: fn(start: Int, end: Int) -> String Never! {
 // Jet error frame records no column and the report no separate origin frame
 // (the host codec's projection), so `column` is 0 and `origin` is absent.
 jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
-    fields := [String]{
+    ^fields: [String]{
         "\"schema\":\"jet.err/v1\"",
         "\"message\":{jet_cli_json_control_quote(report.message)}",
     }
@@ -316,9 +316,9 @@ jet_cli_report_clear_counts: fn(diagnostics: [Diagnostic]) -> [Int] Never! {
             break true
         }
     } ?? false
-    counts := [Int]{}
+    ^counts: [Int]{}
     loop (index, diagnostic) in diagnostics {
-        count := 0
+        ^count: 0
         if any_cause {
             loop (dependent_index, dependent) in diagnostics {
                 if dependent_index == index -> next
@@ -340,7 +340,7 @@ jet_cli_report_clear_counts: fn(diagnostics: [Diagnostic]) -> [Int] Never! {
 // diagnostic's own origin replaces both, and origin paths are named under
 // `base` the same way.
 jet_cli_report_json: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, file: String, source: String, clears: Int) -> String Never! {
-    sources := diagnostic_source_texts()
+    ^sources: diagnostic_source_texts()
     digest: if jet_cli_report_names_batch(diagnostic) -> sha256_hex(source) else -> ""
     jet_cli_report_json_with(diagnostic, base, file, source, digest, clears, sources)
 }
@@ -396,7 +396,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
     if record.fix_edits.len() > 0 && diagnostic.no_fix_reason != None {
         panic("internal compiler error: a report cannot carry fix_edits and no_fix_reason (diagnostic `{diagnostic.code}`)")
     }
-    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},{jet_cli_report_record_members(record)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"name\":{jet_cli_json_string(diagnostic_display_name(diagnostic.code))}"
+    ^out: "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},{jet_cli_report_record_members(record)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"name\":{jet_cli_json_string(diagnostic_display_name(diagnostic.code))}"
     if diagnostic_tier_word(diagnostic) == .Val(tier) {
         out = "{out},\"tier\":{jet_cli_json_string(tier)}"
     }
@@ -421,10 +421,10 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
     // A cause names its own file and text, as the record does: its origin,
     // else the batch's when it has a span; one with no location names none.
     causes: loop cause in diagnostic.cause -> {
-        cause_span := "null"
-        cause_origin := "null"
-        cause_line := "null"
-        cause_col := "null"
+        ^cause_span: "null"
+        ^cause_origin: "null"
+        ^cause_line: "null"
+        ^cause_col: "null"
         if cause.span == .Val(found) {
             placed: jet_cli_report_origin(cause.origin, base, file, digest)
             cause_span = jet_cli_status_json(jet_cli_compiler_checked_value(jet_eval_compiler_services_record_span(DiagnosticRecordSpan{file: "{placed.path ?? ""}", start: found.start, end: found.end})))
@@ -467,7 +467,7 @@ jet_cli_reports_json: fn(base: JetCLIReportBase?, file: String, source: String, 
     report_file: jet_cli_report_file(base, file)
     clears: jet_cli_report_clear_counts(diagnostics)
     digest: jet_cli_report_batch_digest(diagnostics, source)
-    sources := diagnostic_source_texts()
+    ^sources: diagnostic_source_texts()
     reports: loop (index, diagnostic) in diagnostics -> jet_cli_report_json_with(diagnostic, base, report_file, source, digest, clears[index], sources)
     reports
 }

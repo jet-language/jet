@@ -94,7 +94,7 @@ SealRecord: struct {
 
 store_seal_census_note: fn(verification: StoreVerification, path: String) Never! {
     state: verification.state
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if !permit.value.seal_census_enabled {
         return
     }
@@ -108,13 +108,13 @@ store_seal_census_report: fn(verification: StoreVerification) -> String? Never! 
     permit: state.guard_read()
     if !permit.value.seal_census_enabled -> return None
     counts: permit.value.seal_census
-    total := 0
+    ^total: 0
     loop count in counts.values() -> total += count
-    rows := [{path: String, count: Int}]{}
+    ^rows: [{path: String, count: Int}]{}
     loop path in store_sorted_keys_int(counts) -> rows.push({path: path, count: counts[path]})
     rows.sort_by(fn(left: {path: String, count: Int}, right: {path: String, count: Int}) { right.count <=> left.count })
-    out := "seal census: {total} checks across {counts.len()} objects\n"
-    shown := 0
+    ^out: "seal census: {total} checks across {counts.len()} objects\n"
+    ^shown: 0
     loop row in rows {
         if shown == 15 -> break
         out = "{out}  {store_seal_pad_left("{row.count}", 6)}  {row.path}\n"
@@ -124,13 +124,13 @@ store_seal_census_report: fn(verification: StoreVerification) -> String? Never! 
 }
 
 store_sorted_keys_int: fn(map: [String:Int]) -> [String] Never! {
-    keys := map.keys().to_list()
+    ^keys: map.keys().to_list()
     keys.sort()
     keys
 }
 
 store_seal_pad_left: fn(text: String, width: Int) -> String Never! {
-    out := text
+    ^out: text
     loop out.len() < width -> out = " {out}"
     out
 }
@@ -139,7 +139,7 @@ store_seal_pad_left: fn(text: String, width: Int) -> String Never! {
 // strictly disarmed.
 store_arm_command_memo: fn(verification: StoreVerification) Never! {
     state: verification.state
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.seal_memo_armed = true
 }
 
@@ -152,7 +152,7 @@ store_seal_memo_get: fn(verification: StoreVerification, path: String) -> String
 
 store_seal_memo_put: fn(verification: StoreVerification, path: String, digest: String) Never! {
     state: verification.state
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if !permit.value.seal_memo_armed {
         return
     }
@@ -161,7 +161,7 @@ store_seal_memo_put: fn(verification: StoreVerification, path: String, digest: S
 
 store_seal_memo_forget: fn(verification: StoreVerification, path: String) Never! {
     state: verification.state
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if !permit.value.seal_memo_armed {
         return
     }
@@ -216,7 +216,7 @@ store_write_seal: fn(verification: StoreVerification, path: String, hangar: Stri
 }
 
 store_seal_publish: fn(temporary: String, target: String, bytes: [U8]) StoreError! {
-    file := files.create(temporary, if_exists: .Refuse)
+    ^file: files.create(temporary, if_exists: .Refuse)
     file.write_bytes(bytes)
     file.fsync()
     files.rename(temporary, target)
@@ -256,7 +256,7 @@ store_recover_seals: fn(hangar: String) -> Int StoreError! {
     if metadata.is_symlink || !metadata.is_dir {
         return Err(StoreError.InvalidData("Hangar seal directory is not a real directory; repair the path before recovery"))
     }
-    swept := 0
+    ^swept: 0
     loop entry in files.list_dir(seals) {
         if !entry.name.starts_with(".") || !entry.name.ends_with(STORE_SEAL_PARTIAL_SUFFIX) -> next
         node: files.stat(entry.path)
@@ -363,7 +363,7 @@ store_seal_ensure_real_directory: fn(path: String, label: String) StoreError! {
 // models by disarming and clearing the memo.
 store_disarm_command_memo: fn(verification: StoreVerification) Never! {
     state: verification.state
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.seal_memo_armed = false
     permit.value.seal_memo.clear()
 }

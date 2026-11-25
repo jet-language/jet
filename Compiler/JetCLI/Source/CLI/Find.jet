@@ -59,14 +59,14 @@ jet_cli_find_text: fn(text: String, start: Int, end: Int) -> String Never! {
 jet_cli_find_split_once: fn(text: String, separator: String) -> [String]? Never! {
     if !text.contains(separator) -> return None
     parts: text.split(separator).to_list()
-    rest := [String]{}
+    ^rest: [String]{}
     loop index in 1..<parts.len() -> rest.push(parts[index])
     Val([String]{parts[0], rest.join(separator)})
 }
 
 // The first (or last) byte offset of `byte` in `text`, or -1.
 jet_cli_find_byte: fn(text: String, byte: Int, last: Bool) -> Int Never! {
-    found := -1
+    ^found: -1
     loop (index, value) in text.bytes() {
         if (Int{value}) != byte -> next
         found = index
@@ -83,7 +83,7 @@ jet_cli_find_words: fn(text: String) -> [String] Never! {
 
 // `compact_type`: every whitespace byte dropped.
 jet_cli_find_compact: fn(ty: String) -> String Never! {
-    kept := [U8]{}
+    ^kept: [U8]{}
     loop byte in ty.bytes() {
         if !jet_cli_doc_is_space(byte) -> kept.push(byte)
     }
@@ -93,11 +93,11 @@ jet_cli_find_compact: fn(ty: String) -> String Never! {
 // `split_top_level`: split on `separator` outside, [], <>.
 jet_cli_find_split_top: fn(input: String, separator: Int) -> [String] Never! {
     bytes: input.bytes()
-    parts := [String]{}
-    start := 0
-    depth := 0
-    square := 0
-    angle := 0
+    ^parts: [String]{}
+    ^start: 0
+    ^depth: 0
+    ^square: 0
+    ^angle: 0
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if {
@@ -120,7 +120,7 @@ jet_cli_find_split_top: fn(input: String, separator: Int) -> [String] Never! {
 
 jet_cli_find_parse_shape: fn(query: String) -> JetCLIFindShape? Never! {
     halves: jet_cli_find_split_once(query, "->") ?? return None
-    inputs := [String]{}
+    ^inputs: [String]{}
     if halves[0].trim() != "" && halves[0].trim() != "()" {
         loop part in jet_cli_find_split_top(halves[0], 44) {
             ty: jet_cli_find_compact(part)
@@ -133,13 +133,13 @@ jet_cli_find_parse_shape: fn(query: String) -> JetCLIFindShape? Never! {
 }
 
 jet_cli_find_parameter_type: fn(part: String) -> String? Never! {
-    text := part.trim()
+    ^text: part.trim()
     if text.starts_with("...") -> text = jet_cli_find_text(text, 3, text.bytes().len())
     loop text.starts_with("~") || text.starts_with("^") {
         text = jet_cli_find_text(text, 1, text.bytes().len())
     }
     halves: jet_cli_find_split_once(text, ":") ?? return None
-    ty := halves[1]
+    ^ty: halves[1]
     if jet_cli_find_split_once(ty, " {{") == .Val(head) -> ty = head[0]
     ty = ty.trim()
     if ty == "" -> return None
@@ -151,19 +151,19 @@ jet_cli_find_parameter_type: fn(part: String) -> String? Never! {
 // signature carries its trait contracts' method lines after it, whose own
 // parentheses are not part of the call shape.
 jet_cli_find_signature_shape: fn(rendered: String) -> JetCLIFindShape? Never! {
-    signature := rendered
+    ^signature: rendered
     if jet_cli_find_split_once(rendered, "\n") == .Val(lines) -> signature = lines[0]
     open: jet_cli_find_byte(signature, 40, false)
     close: jet_cli_find_byte(signature, 41, true)
     if open < 0 || close < 0 || close < open -> return None
-    inputs := [String]{}
+    ^inputs: [String]{}
     loop part in jet_cli_find_split_top(jet_cli_find_text(signature, open + 1, close), 44) {
         trimmed: part.trim()
         if trimmed == "" || trimmed == "/" || trimmed == "*" -> next
         ty: jet_cli_find_parameter_type(part) ?? return None
         inputs.push(ty)
     }
-    tail := jet_cli_find_text(signature, close + 1, signature.bytes().len()).trim()
+    ^tail: jet_cli_find_text(signature, close + 1, signature.bytes().len()).trim()
     if {
         tail.starts_with("-[") -> tail = ""
         tail.starts_with("->") -> tail = jet_cli_find_text(tail, 2, tail.bytes().len()).trim()
@@ -197,7 +197,7 @@ jet_cli_find_literal_type: fn(raw: String) -> String? Never! {
     if value.starts_with("[") && value.ends_with("]") {
         inner: jet_cli_find_text(value, 1, value.bytes().len() - 1)
         if inner.trim() == "" -> return Val("[T]")
-        types := [String]{}
+        ^types: [String]{}
         loop item in jet_cli_find_split_top(inner, 44) {
             ty: jet_cli_find_literal_type(item) ?? return None
             types.push(ty)
@@ -218,7 +218,7 @@ jet_cli_find_literal_type: fn(raw: String) -> String? Never! {
 
 jet_cli_find_example_shape: fn(example: String) -> JetCLIFindShape? Never! {
     halves: jet_cli_find_split_once(example, "->") ?? return None
-    inputs := [String]{}
+    ^inputs: [String]{}
     if halves[0].trim() != "" && halves[0].trim() != "()" {
         loop value in jet_cli_find_split_top(halves[0], 44) {
             ty: jet_cli_find_literal_type(value) ?? return None
@@ -233,7 +233,7 @@ jet_cli_find_example_shape: fn(example: String) -> JetCLIFindShape? Never! {
 jet_cli_find_generic_parts: fn(ty: String) -> [String]? Never! {
     open: jet_cli_find_byte(ty, 60, false)
     if open < 0 || !ty.ends_with(">") -> return None
-    parts := [String]{jet_cli_find_text(ty, 0, open)}
+    ^parts: [String]{jet_cli_find_text(ty, 0, open)}
     loop part in jet_cli_find_split_top(jet_cli_find_text(ty, open + 1, ty.bytes().len() - 1), 44) {
         parts.push(jet_cli_find_compact(part))
     }
@@ -249,7 +249,7 @@ jet_cli_find_is_type_variable: fn(ty: String) -> Bool Never! {
 // The last `.`- or `:`-separated segment of a type name.
 jet_cli_find_type_leaf: fn(ty: String) -> String Never! {
     bytes: ty.bytes()
-    start := 0
+    ^start: 0
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code == 46 || code == 58 -> start = index + 1
@@ -310,7 +310,7 @@ jet_cli_find_type_matches: fn(wanted_raw: String, candidate_raw: String, binding
 
 jet_cli_find_shape_matches: fn(wanted: JetCLIFindShape, candidate: JetCLIFindShape) -> Bool Never! {
     if wanted.inputs.len() != candidate.inputs.len() -> return false
-    bindings := [String:String]{}
+    ^bindings: [String:String]{}
     loop index in 0..<wanted.inputs.len() {
         if !jet_cli_find_type_matches(wanted.inputs[index], candidate.inputs[index], bindings) {
             return false
@@ -383,10 +383,10 @@ jet_cli_find_text_matches: fn(symbol: SemSymbol, query: String) -> Bool Never! {
 
 // `find_matches`: function and member symbols, sorted by name, then signature.
 jet_cli_find_matches: fn(symbols: [SemSymbol], effects: [SemEffect], mode: JetCLIFindMode) -> [JetCLIFindMatch] Never! {
-    matches := [JetCLIFindMatch]{}
+    ^matches: [JetCLIFindMatch]{}
     loop symbol in symbols {
         if symbol.kind != SemSymbolKind.Function && symbol.kind != SemSymbolKind.Member -> next
-        why := ""
+        ^why: ""
         if mode == {
             .Signature(shape) -> {
                 candidate: jet_cli_find_signature_shape(symbol.signature) ?? next
@@ -402,13 +402,13 @@ jet_cli_find_matches: fn(symbols: [SemSymbol], effects: [SemEffect], mode: JetCL
             }
             .Example(raw, shape) -> {
                 if jet_cli_find_is_pure(symbol, effects) {
-                    shape_match := false
+                    ^shape_match: false
                     if shape == .Val(wanted) {
                         if jet_cli_find_signature_shape(symbol.signature) == .Val(candidate) {
                             shape_match = jet_cli_find_shape_matches(wanted, candidate)
                         }
                     }
-                    documented := false
+                    ^documented: false
                     loop example in symbol.examples {
                         if jet_cli_doc_collapse_whitespace(example) == jet_cli_doc_collapse_whitespace(raw) {
                             documented = true
@@ -451,7 +451,7 @@ jet_cli_find_render: fn(mode: JetCLIFindMode, query: String, matches: [JetCLIFin
         .Example(raw, _) -> "example {raw}"
         .Text(text) -> "text {text}"
     }
-    out := "Find: {heading}\n"
+    ^out: "Find: {heading}\n"
     if matches.len() == 0 -> return "{out}  No matches\n"
     loop (index, item) in matches {
         out = "{out}  {index + 1}. {item.signature}\n     Why: {item.why}\n"
@@ -462,11 +462,11 @@ jet_cli_find_render: fn(mode: JetCLIFindMode, query: String, matches: [JetCLIFin
 // `jet find …` (`run_find` up to the check): the query mode and the entry to
 // search.
 jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    effect_name := String?{None}
-    example_raw := String?{None}
-    member := String?{None}
-    positionals := [String]{}
-    index := 0
+    ^effect_name: String?{None}
+    ^example_raw: String?{None}
+    ^member: String?{None}
+    ^positionals: [String]{}
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         if arg == "--effect" || arg == "--example" {
@@ -509,12 +509,12 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
     if effect_name != None && example_raw != None {
         return jet_cli_find_usage("`--effect` and `--example` cannot be combined", "use one find mode per command", color)
     }
-    target := String?{None}
-    target_index := -1
+    ^target: String?{None}
+    ^target_index: -1
     loop (position, value) in positionals {
         if jet_cli_looks_like_source(value) -> target_index = position
     }
-    words := [String]{}
+    ^words: [String]{}
     loop (position, value) in positionals {
         if position == target_index -> target = Val(value)
         if position != target_index -> words.push(value)
@@ -523,7 +523,7 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
     if effect_name == None && example_raw == None && text == "" {
         return jet_cli_find_usage("`jet find` needs a query or an effect filter", "use `jet find \"String -> Path\"` or `jet find --effect IO`", color)
     }
-    mode := JetCLIFindMode.Text{query: text}
+    ^mode: JetCLIFindMode.Text{query: text}
     if effect_name == .Val(name) -> mode = JetCLIFindMode.Effect{name: name, text: text}
     if example_raw == .Val(raw) {
         if raw.contains("=>") {
@@ -540,8 +540,8 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
             mode = JetCLIFindMode.Signature{shape: shape}
         }
     }
-    entry := String?{None}
-    directory := String?{None}
+    ^entry: String?{None}
+    ^directory: String?{None}
     if {
         target == .Val(raw) -> {
             if cli_files.is_dir(raw) -> directory = Val(raw) else -> entry = Val(raw)
@@ -549,7 +549,7 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
         else -> { directory = Val(cli_files.cwd() ?? ".") }
     }
     if directory == .Val(root) {
-        notices := [String]{}
+        ^notices: [String]{}
         resolved: jet_cli_resolve_bare_entry("find", root, member, false, color, notices)
         if resolved == {
             .Entry(found) -> entry = Val(found.path)
@@ -565,7 +565,7 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
 // errors are `render_check_failure`'s.
 jet_cli_compile_find: fn(file: String?, query: String, mode: JetCLIFindMode, json: Bool) -> JetDriverVerbOutput {
     path: file ?? return JetDriverVerbOutput{stdout: jet_cli_find_render(mode, query, jet_cli_find_matches(semindex_symbol_index(semindex_language_symbols()), [SemEffect]{}, mode), json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> { output = refusal.move() }

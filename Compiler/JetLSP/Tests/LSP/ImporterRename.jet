@@ -11,6 +11,7 @@ use {
 }
 
 LSP_IMPORTER_SHAPES_URI: "file:///w/shapes.jet"
+
 LSP_IMPORTER_MAIN_URI: "file:///w/main.jet"
 
 // `make` is declared at bytes 0-4.
@@ -28,9 +29,9 @@ run: fn() -> Int {
 LSPImporterChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
-            checked := LSPFixtureChecker{}.check(entry, overlays)
+            ^checked: LSPFixtureChecker{}.check(entry, overlays)
             if entry != "/w/main.jet" -> return checked
-            index := semindex_build(checked.modules, interner_empty(), SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
+            ^index: semindex_build(checked.modules, interner_empty(), SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
             made: SemAnchor{module_path: "/w/shapes.jet", kind: "function", def_span: Span{start: 0, end: 4}, semantic_identity: None}
             index.references.push(SemRef{name: "make", span: Span{start: 44, end: 48}, module_path: "/w/main.jet", scope_identity: None, target: Val(made), fact: None})
             checked.index = Val(index)
@@ -52,7 +53,7 @@ LSPImporterChecker: struct {
 }
 
 #Test("rename and references from a declaration reach the open documents that import it") {
-    server := lsp_server(LSPImporterChecker{})
+    ^server: lsp_server(LSPImporterChecker{})
     lsp_test_open(server, LSP_IMPORTER_SHAPES_URI, LSP_IMPORTER_SHAPES)
     lsp_test_open(server, LSP_IMPORTER_MAIN_URI, LSP_IMPORTER_MAIN)
     lsp_test_publish(server, LSP_IMPORTER_SHAPES_URI)
@@ -62,7 +63,7 @@ LSPImporterChecker: struct {
     assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_field(changes, LSP_IMPORTER_SHAPES_URI))), [String]{"0:0-0:4"})
     assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_field(changes, LSP_IMPORTER_MAIN_URI))), [String]{"3:11-3:15"})
     with: "{{{lsp_test_text_document(LSP_IMPORTER_SHAPES_URI)},\"position\":{{\"line\":0,\"character\":1}},\"context\":{{\"includeDeclaration\":true}}}}"
-    places := [String]{}
+    ^places: [String]{}
     loop row in lsp_test_rows(lsp_test_result(server, "textDocument/references", with)) {
         places.push("{lsp_test_text(row, "uri")} {lsp_test_range(lsp_test_field(row, "range"))}")
     }
@@ -71,7 +72,7 @@ LSPImporterChecker: struct {
 }
 
 #Test("rename from a declaration refuses when an importing document's check has errors") {
-    server := lsp_server(LSPImporterChecker{})
+    ^server: lsp_server(LSPImporterChecker{})
     lsp_test_open(server, LSP_IMPORTER_SHAPES_URI, LSP_IMPORTER_SHAPES)
     lsp_test_open(server, LSP_IMPORTER_MAIN_URI, "{LSP_IMPORTER_MAIN}broken: fn() {{ make( }}\n")
     lsp_test_publish(server, LSP_IMPORTER_SHAPES_URI)

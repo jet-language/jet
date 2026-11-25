@@ -55,7 +55,7 @@ use {
         .None -> panic("multiple verified signing fact is present")
         .Err(error) -> panic("multiple verified signing failed: {error.message()}")
     }
-    bytes := "a".bytes()
+    ^bytes: "a".bytes()
     bytes.push(U8{0})
     bytes.push(U8{98})
     assert_eq(many.tool, Val("multiple"))
@@ -64,7 +64,7 @@ use {
 
 #Test("native macOS bundle publishes real files and refuses an occupied output") {
     root: files.tmpdir("jet-native-bundle") ?? panic("scratch")
-    plan := pkg_bundle_wire_test_plan()
+    ^plan: pkg_bundle_wire_test_plan()
     plan.target = BundleTarget.MacOSApp
     plan.artifact_name = "demo.app"
     plan.files = [BundleFile]{BundleFile.new("demo.app/Contents/MacOS/demo", BundleFileKind.Executable, 493, "native payload".bytes())}
@@ -82,7 +82,7 @@ use {
 
 #Test("native bundle failure cleans partially written stage") {
     root: files.tmpdir("jet-native-bundle-duplicate") ?? panic("scratch")
-    plan := pkg_bundle_wire_test_plan()
+    ^plan: pkg_bundle_wire_test_plan()
     plan.target = BundleTarget.MacOSApp
     file: BundleFile.new("demo.app/payload", BundleFileKind.Metadata, 420, "payload".bytes())
     plan.files = [BundleFile]{file, file}

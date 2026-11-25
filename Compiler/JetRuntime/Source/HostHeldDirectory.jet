@@ -5,7 +5,7 @@
 // key8, the table's FD72 reference16, owned shown path24. Lookups retain the
 // FD72, so a concurrent close can never recycle a descriptor number still in
 // use. Core/Files/Files.jet owns name validation, defaults and public policy.
-fs_held_root := I64{0}
+^fs_held_root: I64{0}
 
 // runtime-init: 4 when fs_held_root
 #Export(c) jet_rt_fs_held_init: fn() {
@@ -20,7 +20,7 @@ fs_held_root := I64{0}
 
 // Only the root lock reads the list.
 fs_held_find: fn(key: I64) -> I64 {
-    node := rt_text_word(wrapping(fs_held_root + I64{16}))
+    ^node: rt_text_word(wrapping(fs_held_root + I64{16}))
     loop node != (I64{0}) {
         if (rt_text_word(wrapping(node + I64{8})) == key) { return node }
         node = rt_text_word(node)
@@ -35,7 +35,7 @@ fs_held_lookup: fn(key: I64, path_out: I64) -> I64 {
     root: fs_held_root
     sync_mutex_lock(root)
     node: fs_held_find(key)
-    state := I64{0}
+    ^state: I64{0}
     if (node != I64{0}) {
         state = jet_fd_retain_raw(rt_text_word(wrapping(node + I64{16})))
         if (path_out != I64{0}) {
@@ -68,7 +68,7 @@ fs_held_shown: fn(key: I64) -> I64 {
 fs_name_display: fn(name: I64) -> I64 {
     data: rt_text_data(name)
     length: rt_text_len(name)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
         if (width < I64{0}) { break }
@@ -151,17 +151,17 @@ fs_held_closed: fn(operation: I64, error: I64) -> I64 {
 }
 
 fs_held_release: fn(fd: I64) {
-    if (fd >= I64{0}) { _ := host_call(I64{3}, fd, I64{0}, I64{0}) }
+    if (fd >= I64{0}) { ^_: host_call(I64{3}, fd, I64{0}, I64{0}) }
 }
 
 // jet_fs_cstring for name[start..end]: a terminated copy, or 0 after writing
 // InvalidInput when the part contains NUL. Free with fs_held_cpart_drop.
 fs_held_cpart: fn(name: I64, start: I64, end: I64, operation: I64, shown: I64, error: I64) -> I64 {
     data: rt_text_data(name)
-    at := start
+    ^at: start
     loop at < end {
         if (rt_text_byte(wrapping(data + at)) == I64{0}) {
-            _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("the name contains a NUL byte")), error)
+            ^_: compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("the name contains a NUL byte")), error)
             return I64{0}
         }
         at += I64{1}
@@ -190,19 +190,19 @@ fs_held_parent: fn(key: I64, name: I64, operation: I64, shown: I64, out: I64, er
     }
     state: fs_held_state(key)
     if (state == I64{0}) {
-        _ := fs_held_closed(operation, error)
+        ^_: fs_held_closed(operation, error)
         return false
     }
-    current := fd_dup_number(state)
+    ^current: fd_dup_number(state)
     jet_fd_drop_raw(state)
     if (current < I64{0}) {
-        _ := compiler_fs_errno(operation, shown, -current, error)
+        ^_: compiler_fs_errno(operation, shown, -current, error)
         return false
     }
     data: rt_text_data(name)
     length: rt_text_len(name)
-    start := I64{0}
-    at := I64{0}
+    ^start: I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(data + at)) == I64{47}) {
             part: fs_held_cpart(name, start, at, operation, shown, error)
@@ -210,7 +210,7 @@ fs_held_parent: fn(key: I64, name: I64, operation: I64, shown: I64, out: I64, er
                 fs_held_release(current)
                 return false
             }
-            next := I64{0}
+            ^next: I64{0}
             rt_test_reads_path(I64{83}, current, part)
             #Unsafe("the owned walk descriptor and terminated part live through openat") {
                 next = host_syscall(I64{257}, current, part, I64{720896}, I64{0}, I64{0}, I64{0})
@@ -223,8 +223,8 @@ fs_held_parent: fn(key: I64, name: I64, operation: I64, shown: I64, out: I64, er
                     jet_rt_string_builder_push(cause, rt_static_text("the part `"))
                     rt_text_append(cause, data + start, at - start)
                     jet_rt_string_builder_push(cause, rt_static_text("` is a symbolic link, and a held directory never follows links; name a real directory"))
-                    _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{40}, jet_rt_string_builder_finish(cause), error)
-                } else { _ := compiler_fs_errno(operation, shown, -next, error) }
+                    ^_: compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{40}, jet_rt_string_builder_finish(cause), error)
+                } else { ^_: compiler_fs_errno(operation, shown, -next, error) }
                 return false
             }
             current = next
@@ -245,7 +245,7 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
     operation: if (access == I64{0} || access == I64{3}) -> HOST_IO_OP_READ else -> HOST_IO_OP_WRITE
     shown: fs_held_shown_name(key, name)
     if (shown == I64{0}) {
-        _ := fs_held_closed(operation, error)
+        ^_: fs_held_closed(operation, error)
         return I64{-1}
     }
     // A path open (no held directory) is the path publishers' leaf: the
@@ -255,7 +255,7 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
         return I64{-1}
     }
     scratch: jet_rt_alloc(I64{16}, I64{8})
-    result := I64{-1}
+    ^result: I64{-1}
     if fs_held_parent(key, name, operation, shown, scratch, error) {
         directory: rt_text_word(scratch)
         start: rt_text_word(wrapping(scratch + I64{8}))
@@ -264,7 +264,7 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
         if (part != I64{0}) {
             // O_CLOEXEC with O_RDONLY, O_WRONLY|O_CREAT|O_TRUNC,
             // O_WRONLY|O_CREAT|O_APPEND, or O_RDONLY|O_DIRECTORY.
-            flags := if {
+            ^flags: if {
                 (access == I64{0}) -> I64{524288}
                 (access == I64{1}) -> I64{524865}
                 (access == I64{2}) -> I64{525377}
@@ -275,17 +275,17 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
             }
             if (links == I64{1}) { flags |= I64{131072} }
             bits: if (mode >= I64{0}) -> mode & I64{4095} else -> I64{438}
-            opened := I64{0}
+            ^opened: I64{0}
             rt_test_reads_open(directory, part, flags)
             #Unsafe("the walk directory and terminated final part live through openat") {
                 opened = host_syscall(I64{257}, directory, part, flags, bits, I64{0}, I64{0})
             }
             fs_held_cpart_drop(part, start, end)
             if (opened >= I64{0}) { result = opened } else if (links == I64{1} && opened == I64{-40}) {
-                _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{40}, jet_rt_string_clone(rt_static_text("the path ends in a symbolic link, and this call never follows one; name the link's target instead")), error)
+                ^_: compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{40}, jet_rt_string_clone(rt_static_text("the path ends in a symbolic link, and this call never follows one; name the link's target instead")), error)
             } else if (if_exists == I64{1} && opened == I64{-17}) {
-                _ := compiler_fs_error(HOST_IO_KIND_ALREADY_EXISTS, operation, shown, I64{17}, jet_rt_string_clone(rt_static_text("this call refuses to replace it; choose a new name or pass if_exists: .Replace")), error)
-            } else { _ := compiler_fs_errno(operation, shown, -opened, error) }
+                ^_: compiler_fs_error(HOST_IO_KIND_ALREADY_EXISTS, operation, shown, I64{17}, jet_rt_string_clone(rt_static_text("this call refuses to replace it; choose a new name or pass if_exists: .Replace")), error)
+            } else { ^_: compiler_fs_errno(operation, shown, -opened, error) }
         }
         fs_held_release(directory)
     }
@@ -317,8 +317,8 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
     }
     root: fs_held_root
     sync_mutex_lock(root)
-    link := root + I64{16}
-    node := I64{0}
+    ^link: root + I64{16}
+    ^node: I64{0}
     loop rt_text_word(link) != (I64{0}) {
         candidate: rt_text_word(link)
         if (rt_text_word(wrapping(candidate + I64{8})) == key) {
@@ -367,7 +367,7 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
     shown: fs_held_shown_name(key, name)
     if (shown == I64{0}) { return fs_held_closed(HOST_IO_OP_WRITE, error) }
     scratch: jet_rt_alloc(I64{16}, I64{8})
-    result := I64{0}
+    ^result: I64{0}
     if fs_held_parent(key, name, HOST_IO_OP_WRITE, shown, scratch, error) {
         directory: rt_text_word(scratch)
         start: rt_text_word(wrapping(scratch + I64{8}))
@@ -378,8 +378,8 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
             made: host_call(I64{258}, directory, part, bits)
             fs_held_cpart_drop(part, start, end)
             if (made == I64{0}) { result = I64{1} } else if (made == I64{-17}) {
-                _ := compiler_fs_error(HOST_IO_KIND_ALREADY_EXISTS, HOST_IO_OP_WRITE, shown, I64{17}, jet_rt_string_clone(rt_static_text("a directory entry with this name already exists; choose a new name or open the existing directory")), error)
-            } else { _ := compiler_fs_errno(HOST_IO_OP_WRITE, shown, -made, error) }
+                ^_: compiler_fs_error(HOST_IO_KIND_ALREADY_EXISTS, HOST_IO_OP_WRITE, shown, I64{17}, jet_rt_string_clone(rt_static_text("a directory entry with this name already exists; choose a new name or open the existing directory")), error)
+            } else { ^_: compiler_fs_errno(HOST_IO_OP_WRITE, shown, -made, error) }
         }
         fs_held_release(directory)
     }
@@ -399,7 +399,7 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
         locked: host_call(I64{73}, I64{-100}, operation, I64{0})
         if (locked == I64{0}) { return I64{1} }
         empty: jet_rt_string_builder_new()
-        _ := compiler_fs_errno(HOST_IO_OP_WRITE, empty, -locked, error)
+        ^_: compiler_fs_errno(HOST_IO_OP_WRITE, empty, -locked, error)
         jet_rt_string_drop(empty)
         return I64{0}
     }
@@ -441,7 +441,7 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
 fs_statx_facts: fn(path: I64, follow: Bool, facts: I64, birth: I64, errno: I64) -> I64 {
     buffer: jet_rt_alloc(I64{256}, I64{8})
     name: fd_c_path(path)
-    result := I64{0}
+    ^result: I64{0}
     rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated borrowed path and the 256-byte statx buffer are live for the syscall") {
         // statx(AT_FDCWD, name, follow ? 0 : AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS | STATX_BTIME, buffer)
@@ -456,7 +456,7 @@ fs_statx_facts: fn(path: I64, follow: Bool, facts: I64, birth: I64, errno: I64) 
     }
     if (result < I64{0}) {
         jet_rt_free(buffer, I64{256}, I64{8})
-        _ := fd_error(result, errno)
+        ^_: fd_error(result, errno)
         return I64{-1}
     }
     // struct statx: mask u32 0, blksize u32 4, nlink u32 16, uid u32 20,
@@ -482,7 +482,7 @@ fs_statx_facts: fn(path: I64, follow: Bool, facts: I64, birth: I64, errno: I64) 
     rt_text_store(birth, if (mask & I64{2048} != I64{0}) -> I64{1} else -> I64{0})
     rt_text_store(wrapping(birth + I64{8}), rt_text_word(wrapping(buffer + I64{80})))
     rt_text_store(wrapping(birth + I64{16}), rt_text_word(wrapping(buffer + I64{88})) & low)
-    _ := fd_error(I64{0}, errno)
+    ^_: fd_error(I64{0}, errno)
     jet_rt_free(buffer, I64{256}, I64{8})
     I64{1}
 }
@@ -509,7 +509,7 @@ fs_stat_facts_at: fn(key: I64, name: I64, follow: Bool, scratch: I64, error: I64
         if (statx > I64{0}) { return true }
         if (statx == I64{0}) { jet_fs_stat_raw(name, follow, facts, errno) }
         if (rt_text_word(errno) != I64{0}) {
-            _ := compiler_fs_errno(HOST_IO_OP_READ, name, rt_text_word(wrapping(errno + I64{8})), error)
+            ^_: compiler_fs_errno(HOST_IO_OP_READ, name, rt_text_word(wrapping(errno + I64{8})), error)
             return false
         }
         if (statx == I64{0}) { jet_fs_created_raw(name, follow, birth, errno) }
@@ -521,13 +521,13 @@ fs_stat_facts_at: fn(key: I64, name: I64, follow: Bool, scratch: I64, error: I64
         path: rt_text_word(path_out)
         jet_rt_free(path_out, I64{8}, I64{8})
         if (state == I64{0}) {
-            _ := fs_held_closed(HOST_IO_OP_READ, error)
+            ^_: fs_held_closed(HOST_IO_OP_READ, error)
             return false
         }
         jet_fd_stat_raw(state, facts, errno)
         failed: rt_text_word(errno) != I64{0}
         if failed {
-            _ := compiler_fs_errno(HOST_IO_OP_READ, path, rt_text_word(wrapping(errno + I64{8})), error)
+            ^_: compiler_fs_errno(HOST_IO_OP_READ, path, rt_text_word(wrapping(errno + I64{8})), error)
         } else { jet_fd_created_raw(state, birth, errno) }
         jet_fd_drop_raw(state)
         jet_rt_string_drop(path)
@@ -535,29 +535,29 @@ fs_stat_facts_at: fn(key: I64, name: I64, follow: Bool, scratch: I64, error: I64
     }
     shown: fs_held_shown_name(key, name)
     if (shown == I64{0}) {
-        _ := fs_held_closed(HOST_IO_OP_READ, error)
+        ^_: fs_held_closed(HOST_IO_OP_READ, error)
         return false
     }
-    ok := false
+    ^ok: false
     if fs_held_parent(key, name, HOST_IO_OP_READ, shown, errno, error) {
         directory: rt_text_word(errno)
         start: rt_text_word(wrapping(errno + I64{8}))
         end: rt_text_len(name)
         part: fs_held_cpart(name, start, end, HOST_IO_OP_READ, shown, error)
         if (part != I64{0}) {
-            opened := I64{0}
+            ^opened: I64{0}
             rt_test_reads_path(I64{83}, directory, part)
             #Unsafe("the walk directory and terminated final part live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat") {
                 opened = host_syscall(I64{257}, directory, part, I64{2752512}, I64{0}, I64{0}, I64{0})
             }
             fs_held_cpart_drop(part, start, end)
-            if (opened < I64{0}) { _ := compiler_fs_errno(HOST_IO_OP_READ, shown, -opened, error) } else {
-                result := I64{0}
+            if (opened < I64{0}) { ^_: compiler_fs_errno(HOST_IO_OP_READ, shown, -opened, error) } else {
+                ^result: I64{0}
                 #Unsafe("the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat") {
                     result = os_stat_facts_i64(I64{5}, opened, facts)
                 }
                 if (result < I64{0}) {
-                    _ := compiler_fs_errno(HOST_IO_OP_READ, shown, -result, error)
+                    ^_: compiler_fs_errno(HOST_IO_OP_READ, shown, -result, error)
                 } else {
                     rt_text_store(birth, I64{0})
                     #Unsafe("the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx") {
@@ -592,7 +592,7 @@ fs_stat_facts_at: fn(key: I64, name: I64, follow: Bool, scratch: I64, error: I64
     shown: fs_held_shown_name(key, name)
     if (shown == I64{0}) { return fs_held_closed(HOST_IO_OP_WRITE, error) }
     scratch: jet_rt_alloc(I64{16}, I64{8})
-    result := I64{0}
+    ^result: I64{0}
     if fs_held_parent(key, name, HOST_IO_OP_WRITE, shown, scratch, error) {
         parent: rt_text_word(scratch)
         start: rt_text_word(wrapping(scratch + I64{8}))
@@ -602,7 +602,7 @@ fs_stat_facts_at: fn(key: I64, name: I64, follow: Bool, scratch: I64, error: I64
             removed: host_call(I64{263}, parent, part, if directory -> I64{512} else -> I64{0})
             fs_held_cpart_drop(part, start, end)
             if (removed == I64{0}) { result = I64{1} } else {
-                _ := compiler_fs_errno(HOST_IO_OP_WRITE, shown, -removed, error)
+                ^_: compiler_fs_errno(HOST_IO_OP_WRITE, shown, -removed, error)
             }
         }
         fs_held_release(parent)
@@ -638,7 +638,7 @@ fs_rename_source_is_directory: fn(key: I64, name: I64) -> Bool {
 
 // The renameat/renameat2 call and the seed's no-replace link+unlink fallback.
 fs_rename_parts: fn(from_key: I64, from: I64, from_dir: I64, from_part: I64, from_shown: I64, to_dir: I64, to_part: I64, to_shown: I64, if_exists: I64, error: I64) -> I64 {
-    renamed := I64{0}
+    ^renamed: I64{0}
     #Unsafe("both walk directories and terminated final parts live through renameat/renameat2") {
         renamed = if (if_exists == I64{0}) -> host_syscall(I64{264}, from_dir, from_part, to_dir, to_part, I64{0}, I64{0}) else -> host_syscall(I64{316}, from_dir, from_part, to_dir, to_part, if (if_exists == I64{1}) -> I64{1} else -> I64{2}, I64{0})
     }
@@ -652,7 +652,7 @@ fs_rename_parts: fn(from_key: I64, from: I64, from_dir: I64, from_part: I64, fro
         if fs_rename_source_is_directory(from_key, from) {
             return compiler_fs_error(HOST_IO_KIND_UNSUPPORTED, HOST_IO_OP_WRITE, from_shown, code, jet_rt_string_clone(rt_static_text("this file system cannot rename a directory without replacing the target; pass if_exists: .Replace after checking the target yourself")), error)
         }
-        linked := I64{0}
+        ^linked: I64{0}
         #Unsafe("both walk directories and terminated final parts live through linkat") {
             linked = host_syscall(I64{265}, from_dir, from_part, to_dir, to_part, I64{0}, I64{0})
         }
@@ -686,13 +686,13 @@ fs_rename_parts: fn(from_key: I64, from: I64, from_dir: I64, from_part: I64, fro
     // Walk32: from directory0, from start8, to directory16, to start24.
     scratch: jet_rt_alloc(I64{32}, I64{8})
     rt_text_store(wrapping(scratch + I64{16}), I64{-1})
-    to_shown := I64{0}
-    result := I64{0}
-    walked := fs_held_parent(from_key, from, HOST_IO_OP_WRITE, from_shown, scratch, error)
+    ^to_shown: I64{0}
+    ^result: I64{0}
+    ^walked: fs_held_parent(from_key, from, HOST_IO_OP_WRITE, from_shown, scratch, error)
     if walked {
         to_shown = fs_held_shown_name(to_key, to)
         if (to_shown == I64{0}) {
-            _ := fs_held_closed(HOST_IO_OP_WRITE, error)
+            ^_: fs_held_closed(HOST_IO_OP_WRITE, error)
             walked = false
         }
     }

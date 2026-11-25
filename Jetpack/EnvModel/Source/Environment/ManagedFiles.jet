@@ -104,7 +104,7 @@ ManagedFileEntry: struct {
 // managed-file records, ordered by destination; a repeated destination is
 // rejected.
 envmodel_files_from_value: fn(value: CtValue) -> [ManagedFile] ManagedFileError! {
-    entries := [ManagedFileEntry]{}
+    ^entries: [ManagedFileEntry]{}
     if value == {
         .Map(map_entries) -> {
             loop entry in map_entries {
@@ -135,7 +135,7 @@ envmodel_files_from_value: fn(value: CtValue) -> [ManagedFile] ManagedFileError!
             return Err(ManagedFileError.InvalidEntry("files must be a map or a list of managed file records"))
         }
     }
-    managed := [ManagedFile]{}
+    ^managed: [ManagedFile]{}
     loop entry in entries {
         managed.push(envmodel_managed_file_from_value(entry.destination, entry.value))
     }
@@ -152,7 +152,7 @@ envmodel_managed_file_from_value: fn(destination: String, value: CtValue) -> Man
     if !envmodel_relative_path_is_valid(destination, false) {
         return Err(ManagedFileError.InvalidDestination(destination))
     }
-    file := ManagedFile{destination: destination}
+    ^file: ManagedFile{destination: destination}
     if value == {
         .Str(text) -> { file.content = Val(text.bytes()) }
         .Bytes(bytes) -> file.content = Val(bytes)

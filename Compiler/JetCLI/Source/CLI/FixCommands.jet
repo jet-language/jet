@@ -45,21 +45,19 @@ jet_cli_fix_round: fn(fixes: [JetCLIFix], repairs: [JetCLIFix], all: Bool) -> Je
 // unchanged is read from disk. It is checked as a shipped artifact is, so
 // each `debug` trace a build would refuse (E3405) brings its unwrap edit.
 jet_cli_fix_compile: fn(file: String, source: String, files: [JetCLIFixFile], texts: [String?]) -> JetCLICompiled {
-    overlays := [JetDriverSourceDocument]{JetDriverSourceDocument{path: file, source: source}}
+    ^overlays: [JetDriverSourceDocument]{JetDriverSourceDocument{path: file, source: source}}
     loop (row, other) in files {
         if {
             row < texts.len() && texts[row] != None -> {
                 if texts[row] == .Val(text) -> overlays.push(jet_cli_fix_overlay(other.path, text))
             }
-            other.source == .Val(text) -> {
-                overlays.push(jet_cli_fix_overlay(other.path, text))
-            }
+            other.source == .Val(text) -> { overlays.push(jet_cli_fix_overlay(other.path, text)) }
         }
     }
     if jet_cli_prepare_overlays(file, file, overlays, false, None, JetDriverCompileMode.Doc) == {
         .Refused(output) -> JetCLICompiled.Refused{output: output.move()}
         .Prepared(request, snapshot) -> {
-            demanded := request.move()
+            ^demanded: request.move()
             demanded.doc_core_on_demand = true
             demanded.artifact_build = true
             jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: demanded.move(), snapshot: snapshot.move()}, None, None)
@@ -84,10 +82,10 @@ jet_cli_fix_overlay: fn(path: String, text: String) -> JetDriverSourceDocument N
 // the errors `fresh_against`, the errors before the fixes, does not hold
 // (jet_cli_fix_new_errors); every error's when it is empty.
 jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], texts: [String?], all: Bool, scope: String, facts: Bool{false}, fresh_against: [String]{[String]{}}) -> JetCLIFixQuery {
-    diagnostics := [Diagnostic]{}
-    swept := [Diagnostic]{}
-    errors := [String]{}
-    definitions := [SemDefinitionFact]?{None}
+    ^diagnostics: [Diagnostic]{}
+    ^swept: [Diagnostic]{}
+    ^errors: [String]{}
+    ^definitions: [SemDefinitionFact]?{None}
     canonical: jet_cli_overlay_path(file)
     if jet_cli_fix_compile(file, source, files, texts) == {
         .Refused(output) -> return JetCLIFixQuery.Refused{output: output}
@@ -97,7 +95,7 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
             }
             if facts -> definitions = jet_cli_fix_result_facts(result)
             // The advice (JetDriverCompileResult.advice) carries fixes too.
-            found := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            ^found: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             loop diagnostic in jet_driver_present_diagnostics(result.advice, snapshot, result.generated_source_files) {
                 found.push(diagnostic)
             }
@@ -123,7 +121,7 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
     }
     migrations: jet_cli_fix_migration_sites(diagnostics, source)
     diagnostics.extend(swept.move())
-    failed := [Diagnostic]{}
+    ^failed: [Diagnostic]{}
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR {
             errors.push(jet_cli_fix_error(diagnostic, canonical))
@@ -131,8 +129,8 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
         }
     }
     offset: errors.len() - failed.len()
-    repairs := jet_cli_fixes_from_diagnostics(jet_cli_fix_fresh(failed.move(), jet_cli_fix_new_errors(errors, fresh_against), offset))
-    fixes := jet_cli_fixes_from_diagnostics(diagnostics.move())
+    ^repairs: jet_cli_fixes_from_diagnostics(jet_cli_fix_fresh(failed.move(), jet_cli_fix_new_errors(errors, fresh_against), offset))
+    ^fixes: jet_cli_fixes_from_diagnostics(diagnostics.move())
     // A migration repairs the error at the retired word, so it is both.
     loop site in migrations {
         fixes.push(jet_cli_fix_retired_run(site))
@@ -144,8 +142,8 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
 // The diagnostics of `failed` whose errors are new: by `fresh`, which marks
 // each error of the query's list, the errors of `failed` starting at `offset`.
 jet_cli_fix_fresh: fn(failed: ^^[Diagnostic], fresh: [Bool], offset: Int) -> [Diagnostic] Never! {
-    kept := [Diagnostic]{}
-    at := offset
+    ^kept: [Diagnostic]{}
+    ^at: offset
     loop diagnostic in failed.move() {
         if fresh[at] -> kept.push(diagnostic.move())
         at += 1
@@ -162,7 +160,7 @@ jet_cli_fix_fresh: fn(failed: ^^[Diagnostic], fresh: [Bool], offset: Int) -> [Di
 // Returns the words to rewrite (jet_cli_fix_retired_run).
 jet_cli_fix_migration_sites: fn(diagnostics: [Diagnostic], source: String) -> [Span] {
     sites: jet_cli_fix_retired_run_words(source)
-    reported := false
+    ^reported: false
     loop diagnostic in diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
         if diagnostic.span == .Val(span) {
@@ -185,8 +183,8 @@ jet_cli_fix_retired_run: fn(site: Span) -> JetCLIFix {
 jet_cli_fix_retired_run_words: fn(source: String) -> [Span] {
     bytes: source.bytes()
     lexed: lex(bytes)
-    sites := [Span]{}
-    previous := -1
+    ^sites: [Span]{}
+    ^previous: -1
     loop index in 0..<lexed.tokens.len() {
         token: lexed.tokens[index]
         if !jet_cli_fix_meaningful(token) -> next
@@ -226,7 +224,9 @@ jet_cli_fix_starts_value: fn(bytes: [U8], tokens: [Token], previous: Int, start:
 // Whether `diagnostic` reports in a file other than `canonical`, the fixed
 // file, or in an older text of it than `source`.
 jet_cli_fix_elsewhere: fn(diagnostic: Diagnostic, canonical: String, source: String) -> Bool Never! {
-    if diagnostic.origin == .Val(origin) -> return origin.path != canonical || origin.source != source
+    if diagnostic.origin == .Val(origin) {
+        return origin.path != canonical || origin.source != source
+    }
     false
 }
 
@@ -275,7 +275,7 @@ jet_cli_fix_build_findings: fn(file: String, source: String) -> [Diagnostic] {
         .Prepared(request, _) -> {
             owned: request.move()
             if !jet_driver_entry_package_has_build(owned) -> return [Diagnostic]{}
-            scope := JetDriverBuildQueryScope{next_session_id: 1}
+            ^scope: JetDriverBuildQueryScope{next_session_id: 1}
             response: jet_driver_query_build_plan(owned, scope)
             query: response.query.move()
             if !query.complete || query.internal_problem != None -> return [Diagnostic]{}
@@ -351,13 +351,13 @@ jet_cli_fix_touched: fn(files: [JetCLIFixFile]) -> Bool Never! {
 // gives each edit its row: the file its TextEdit.path names, else the fix's
 // home (JetCLIFix.home); `canonical`, the fixed file, is row -1.
 jet_cli_fix_resolve: fn(files: ^[JetCLIFixFile], canonical: String, fixes: ^^[JetCLIFix]) -> [JetCLIFix] {
-    resolved := [JetCLIFix]{}
+    ^resolved: [JetCLIFix]{}
     loop fix in fixes.move() {
-        home := -1
+        ^home: -1
         if fix.home.move() == .Val(path) -> home = jet_cli_fix_row(files, canonical, path.move())
         first: jet_cli_fix_place(files, canonical, home, fix.edit.move())
-        edits := [TextEdit]{}
-        rows := [Int]{}
+        ^edits: [TextEdit]{}
+        ^rows: [Int]{}
         loop other in fix.edits.move() {
             placed: jet_cli_fix_place(files, canonical, home, other.move())
             rows.push(placed.row)
@@ -402,7 +402,7 @@ jet_cli_fix_read: fn(path: String) -> String? {
 // Sets each file of the table `files` that `texts` (by row) gives a text to
 // that text.
 jet_cli_fix_settle: fn(files: ^[JetCLIFixFile], texts: ^^[String?]) Never! {
-    row := 0
+    ^row: 0
     loop text in texts.move() {
         if text != None -> files[row].source = text
         row += 1
@@ -430,13 +430,15 @@ jet_cli_fix_checked: fn(file: String, source: String, files: [JetCLIFixFile], fi
     if !jet_cli_fix_changes(whole, source, files) || jet_cli_fix_added(jet_cli_fix_errors(file, whole.source, files, whole.texts, scope), baseline) == None {
         return whole
     }
-    trial := JetCLIFixTrial{file: file, source: source, scope: scope, kept: [Int]{}, result: JetCLIFixApply{source: source, applied: 0, deferred: whole.deferred}}
+    ^trial: JetCLIFixTrial{file: file, source: source, scope: scope, kept: [Int]{}, result: JetCLIFixApply{source: source, applied: 0, deferred: whole.deferred}}
     groups: jet_cli_fix_groups(fixes)
     loop group in groups {
         // The whole set is the one group's, and it adds errors.
-        if groups.len() == 1 -> jet_cli_fix_halves(trial, files, fixes, baseline, group) else -> jet_cli_fix_bisect(trial, files, fixes, baseline, group)
+        if groups.len() == 1 -> jet_cli_fix_halves(trial, files, fixes, baseline, group) else {
+            jet_cli_fix_bisect(trial, files, fixes, baseline, group)
+        }
     }
-    chained := false
+    ^chained: false
     failures: trial.failed.move()
     trial.failed = [JetCLIFixRefusal]{}
     loop failure in failures {
@@ -467,16 +469,16 @@ JET_CLI_FIX_CHAIN_ROUNDS: 4
 // the files then report no error `baseline` does not (jet_cli_fix_added)
 // and differ from the ones `trial` kept; else the whole chain is rolled back.
 jet_cli_fix_chain: fn(trial: ^JetCLIFixTrial, files: [JetCLIFixFile], fixes: [JetCLIFix], baseline: [String], index: Int) -> Bool {
-    chosen := [Int]{}
+    ^chosen: [Int]{}
     loop earlier in trial.kept -> chosen.push(earlier)
     chosen.push(index)
     first: jet_cli_fix_apply_non_overlapping(trial.source, files, fixes, chosen)
     if !first.fixes.contains(index) -> return false
     canonical: jet_cli_overlay_path(trial.file)
-    source := first.source.move()
-    applied := first.applied
-    written := jet_cli_fix_written(fixes, first.fixes, index)
-    round := 0
+    ^source: first.source.move()
+    ^applied: first.applied
+    ^written: jet_cli_fix_written(fixes, first.fixes, index)
+    ^round: 0
     loop round <= JET_CLI_FIX_CHAIN_ROUNDS {
         if jet_cli_fix_collect(trial.file, source, files, first.texts, false, trial.scope, fresh_against: baseline) == {
             .Refused(_) -> return false
@@ -489,9 +491,11 @@ jet_cli_fix_chain: fn(trial: ^JetCLIFixTrial, files: [JetCLIFixFile], fixes: [Je
                     return true
                 }
                 if round == JET_CLI_FIX_CHAIN_ROUNDS -> return false
-                usable := [Int]{}
+                ^usable: [Int]{}
                 loop (at, repair) in repairs {
-                    if jet_cli_fix_in_file(repair, canonical) && !jet_cli_fix_rewrites(repairs, at, written) -> usable.push(at)
+                    if jet_cli_fix_in_file(repair, canonical) && !jet_cli_fix_rewrites(repairs, at, written) {
+                        usable.push(at)
+                    }
                 }
                 step: jet_cli_fix_apply_non_overlapping(source, files, repairs, usable)
                 if step.applied == 0 || step.source == source -> return false
@@ -525,7 +529,7 @@ jet_cli_fix_in_file: fn(fix: JetCLIFix, canonical: String) -> Bool Never! {
 // The spans of the fixed file that the edits of fix `index` wrote, in its
 // text with the fixes at `applied`, which hold `index`, applied.
 jet_cli_fix_written: fn(fixes: [JetCLIFix], applied: [Int], index: Int) -> [Span] Never! {
-    written := [Span]{}
+    ^written: [Span]{}
     loop part in -1..<fixes[index].edits.len() {
         edit: JetCLIFixEditRef{fix: index, at: part}
         if jet_cli_fix_edit_row(fixes, edit) != -1 -> next
@@ -539,7 +543,7 @@ jet_cli_fix_written: fn(fixes: [JetCLIFix], applied: [Int], index: Int) -> [Span
 // The spans `written` after the fixes at `applied`, none of which edits
 // inside them, apply to the fixed file.
 jet_cli_fix_moved: fn(fixes: [JetCLIFix], applied: [Int], written: [Span]) -> [Span] Never! {
-    moved := [Span]{}
+    ^moved: [Span]{}
     loop span in written {
         shift: jet_cli_fix_shift(fixes, applied, span.start)
         moved.push(Span{start: span.start + shift, end: span.end + shift})
@@ -550,7 +554,7 @@ jet_cli_fix_moved: fn(fixes: [JetCLIFix], applied: [Int], written: [Span]) -> [S
 // How far the edits of the fixes at `applied` that change the fixed file
 // and end before `at` (an insertion at `at` aside) move the text at `at`.
 jet_cli_fix_shift: fn(fixes: [JetCLIFix], applied: [Int], at: Int) -> Int Never! {
-    shift := 0
+    ^shift: 0
     loop index in applied {
         loop part in -1..<fixes[index].edits.len() {
             edit: JetCLIFixEditRef{fix: index, at: part}
@@ -599,11 +603,13 @@ JetCLIFixTrial: struct {
 // error it adds, or tried again by halves (jet_cli_fix_halves). A set that
 // changes nothing more is left out.
 jet_cli_fix_bisect: fn(trial: ^JetCLIFixTrial, files: [JetCLIFixFile], fixes: [JetCLIFix], baseline: [String], part: [Int]) {
-    chosen := [Int]{}
+    ^chosen: [Int]{}
     loop earlier in trial.kept -> chosen.push(earlier)
     loop index in part -> chosen.push(index)
     applied: jet_cli_fix_apply_non_overlapping(trial.source, files, fixes, chosen)
-    if !jet_cli_fix_differs(applied, trial.result) -> return
+    if !jet_cli_fix_differs(applied, trial.result) {
+        return
+    }
     errors: jet_cli_fix_errors(trial.file, applied.source, files, applied.texts, trial.scope)
     added: jet_cli_fix_added(errors, baseline) ?? {
         loop index in part -> trial.kept.push(index)
@@ -632,11 +638,11 @@ jet_cli_fix_added: fn(errors: [String], baseline: [String]) -> Int? Never! {
 // Whether each of `errors` is one `baseline` does not hold, each baseline
 // error matching one error at most, in order (jet_cli_fix_added).
 jet_cli_fix_new_errors: fn(errors: [String], baseline: [String]) -> [Bool] Never! {
-    used := [Bool]{}
+    ^used: [Bool]{}
     loop _ in 0..<baseline.len() -> used.push(false)
-    fresh := [Bool]{}
+    ^fresh: [Bool]{}
     loop error in errors {
-        matched := false
+        ^matched: false
         loop (row, known) in baseline {
             if used[row] || known != error -> next
             used[row] = true
@@ -664,8 +670,8 @@ jet_cli_fix_halves: fn(trial: ^JetCLIFixTrial, files: [JetCLIFixFile], fixes: [J
 // The indices of `fixes` by the file their first edit changes (its row),
 // each file's in order, the files in the order of their first fix.
 jet_cli_fix_groups: fn(fixes: [JetCLIFix]) -> [[Int]] Never! {
-    groups := [[Int]]{}
-    slots := [Int:Int]{}
+    ^groups: [[Int]]{}
+    ^slots: [Int:Int]{}
     loop (index, fix) in fixes {
         if slots.get(fix.file) == .Val(slot) {
             groups[slot].push(index)
@@ -691,9 +697,9 @@ jet_cli_fix_skip: fn(skips: ^[JetCLIFixSkip], fix: JetCLIFix, reason: String) Ne
 // set in one place. Nested declarations overlap their parent's edit, so the
 // moves apply in rounds.
 jet_cli_fix_markers: fn(before: String, inside: Bool) -> JetCLIFixApply {
-    source := before
-    count := 0
-    round := 0
+    ^source: before
+    ^count: 0
+    ^round: 0
     loop round < 16 {
         fixes: loop edit in parser_marker_placement_edits(source.bytes(), inside) -> JetCLIFix{title: "move the markers", edit: edit, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving}
         if fixes.len() == 0 -> break
@@ -721,11 +727,11 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
     file: jet_cli_fix_entry(target) ?? return jet_cli_report_output("", "E2105", "can't find the package entry of `{target}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     scope: if cli_files.is_dir(target) -> jet_cli_overlay_path(target) else -> ""
     before: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-    all_fixes := [JetCLIFix]{}
-    all_repairs := [JetCLIFix]{}
-    baseline := [String]{}
+    ^all_fixes: [JetCLIFix]{}
+    ^all_repairs: [JetCLIFix]{}
+    ^baseline: [String]{}
     // The definition facts the write's rename receipt starts from.
-    before_facts := [SemDefinitionFact]?{None}
+    ^before_facts: [SemDefinitionFact]?{None}
     if jet_cli_fix_collect(file, before, [JetCLIFixFile]{}, [String?]{}, true, scope, facts: !dry_run) == {
         .Fixes(found, errors, repairs, definitions) -> {
             all_fixes = found
@@ -738,8 +744,8 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
     // `--markers`, `--style` and `--pin-failures` apply their own edits, not
     // the suggestions; a style move left for a hand edit is counted as skipped.
     suggestions: markers == "" && mode == JetCLIFixMode.Suggestions
-    skipped := if suggestions -> all_fixes.len() - jet_cli_safe_fixes(all_fixes).len() else -> 0
-    skips := [JetCLIFixSkip]{}
+    ^skipped: if suggestions -> all_fixes.len() - jet_cli_safe_fixes(all_fixes).len() else -> 0
+    ^skips: [JetCLIFixSkip]{}
     if !all && suggestions {
         loop fix in all_fixes {
             if jet_cli_safe_fixes([JetCLIFix]{fix.copy()}).len() == 0 {
@@ -747,14 +753,14 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
             }
         }
     }
-    rejected := [JetCLIFixSkip]{}
-    refused := [JetCLIFixSkip]{}
-    applied := JetCLIFixApply{source: before, applied: 0, deferred: 0}
-    count := 0
-    files := [JetCLIFixFile]{}
+    ^rejected: [JetCLIFixSkip]{}
+    ^refused: [JetCLIFixSkip]{}
+    ^applied: JetCLIFixApply{source: before, applied: 0, deferred: 0}
+    ^count: 0
+    ^files: [JetCLIFixFile]{}
     canonical: jet_cli_overlay_path(file)
     // The fixes applied in each file, by row of `files` + 1 (0: `file`).
-    tally := [Int]{}
+    ^tally: [Int]{}
     if {
         markers != "" -> {
             // The moved file must check no worse than the input.
@@ -788,15 +794,15 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
         }
         else -> {
             first: jet_cli_fix_round(all_fixes, all_repairs, all)
-            held := first.held
+            ^held: first.held
             fixes: jet_cli_fix_resolve(files, canonical, first.fixes.move())
             applied = jet_cli_fix_checked(file, before, files, fixes, baseline, rejected, refused, scope)
             count = applied.applied
             jet_cli_fix_tally(tally, fixes, applied.fixes)
             // Repairs that change nothing release the held fixes next round.
-            stalled := held && !jet_cli_fix_changes(applied, before, files)
+            ^stalled: held && !jet_cli_fix_changes(applied, before, files)
             jet_cli_fix_settle(files, applied.texts.move())
-            round := 1
+            ^round: 1
             loop round < 16 && (applied.deferred > 0 || held) {
                 next: if jet_cli_fix_collect(file, applied.source, files, [String?]{}, all, scope) == {
                     .Fixes(found, _, repairs, _) -> jet_cli_fix_round(found, if stalled -> [JetCLIFix]{} else -> repairs, true)
@@ -828,14 +834,14 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
     loop skip in refused -> skips.push(skip)
     // Each rolled-back fix, with the error its edit adds, and each fix
     // refused whole, with why, each named by the file it edits.
-    rolled := ""
+    ^rolled: ""
     loop skip in rejected {
         rolled = "{rolled}{jet_cli_fix_named(target, scope, file, canonical, files, skip.file)}: rolled back the fix at {skip.edit.span.start}..{skip.edit.span.end} -> `{skip.edit.new_text}`: {skip.reason}\n"
     }
     loop skip in refused {
         rolled = "{rolled}{jet_cli_fix_named(target, scope, file, canonical, files, skip.file)}: refused the fix at {skip.edit.span.start}..{skip.edit.span.end} -> `{skip.edit.new_text}`: {skip.reason}\n"
     }
-    status := ""
+    ^status: ""
     if applied.source == before && !jet_cli_fix_touched(files) {
         if json {
             return JetDriverVerbOutput{stdout: jet_cli_fix_status(target, dry_run, 0, skips, None), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -846,9 +852,9 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
     }
     verb: if dry_run -> "would apply" else -> "applied"
     // A folder's line per file it fixes, then its total.
-    total := "{target}: {verb} {count} fix{if count == 1 -> "" else -> "es"}"
+    ^total: "{target}: {verb} {count} fix{if count == 1 -> "" else -> "es"}"
     if scope != "" {
-        fixed := 0
+        ^fixed: 0
         loop (slot, applied_here) in tally {
             if applied_here == 0 -> next
             fixed += 1
@@ -856,7 +862,7 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
         }
         total = "{total} in {fixed} file{if fixed == 1 -> "" else -> "s"}"
     }
-    diff := ""
+    ^diff: ""
     if {
         dry_run -> {
             if json {
@@ -880,13 +886,15 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
         else -> {
             // The receipt's renames: the first check's definition facts against
             // one check of the fixed files.
-            renames := [JetCLISemOp]{}
+            ^renames: [JetCLISemOp]{}
             if before_facts == .Val(old_facts) {
                 if jet_cli_fix_compile(file, applied.source, files, [String?]{}) == .Compiled(result, _) {
-                    if jet_cli_fix_result_facts(result) == .Val(new_facts) -> renames = jet_cli_semantic_rename_ops(old_facts, new_facts)
+                    if jet_cli_fix_result_facts(result) == .Val(new_facts) {
+                        renames = jet_cli_semantic_rename_ops(old_facts, new_facts)
+                    }
                 }
             }
-            others := [JetCLISourceChange]{}
+            ^others: [JetCLISourceChange]{}
             loop changed in files.move() {
                 if changed.source == .Val(edited) {
                     if changed.before == .Val(original) {

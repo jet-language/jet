@@ -39,7 +39,7 @@ JetCLICheckReceiptStep: enum {
 // the jet-owned words read as the front door reads them (jet_cli_positionals),
 // so the receipt claims the target the check compiles.
 jet_cli_check_receipt_target: fn(owned: [String]) -> String? Never! {
-    verb_seen := false
+    ^verb_seen: false
     loop word in jet_cli_positionals(owned) {
         if verb_seen -> return Val(word.copy())
         if word == "check" -> verb_seen = true
@@ -88,7 +88,7 @@ jet_cli_check_tree_inputs: fn(path: String, out: ^[String]) -[FS]> Never! {
 // The compiled sources a file check reads beyond these join at publication from
 // its snapshot.
 jet_cli_check_receipt_paths: fn(cache: ^WorkspaceDeclarationCache, cwd: String, target: String?, file: String) -[FS, Env]> [String] Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     raw: target ?? {
         loop root in jet_cli_receipt_authority_roots(cache, cwd) {
             jet_cli_check_tree_inputs(root, paths)
@@ -157,7 +157,7 @@ jet_cli_check_context_identity: fn(cache: ^WorkspaceDeclarationCache, cwd: Strin
         generated: jet_cli_rooted_join(root, ".jet/generated")
         jet_driver_run_receipt_frame(identity, "generated-inputs".bytes())
         jet_cli_check_context_path(identity, "root", generated)
-        files := [String]{}
+        ^files: [String]{}
         jet_cli_check_tree_inputs(generated, files)
         loop file in jet_cli_lock_canonical(files) {
             jet_cli_check_context_path(identity, "file", file)
@@ -167,7 +167,7 @@ jet_cli_check_context_identity: fn(cache: ^WorkspaceDeclarationCache, cwd: Strin
 
 // The canonical, observed inputs at `paths`.
 jet_cli_check_receipt_inputs: fn(paths: [String]) -[FS, Time.Wait]> [JetDriverRunReceiptInput] JetCLIReadError! {
-    inputs := [JetDriverRunReceiptInput]{}
+    ^inputs: [JetDriverRunReceiptInput]{}
     loop path in paths {
         canonical: cli_files.realpath(path) ?? return Err(jet_cli_read_error("could not canonicalize input {path}: {jet_cli_io_error_text(err)}"))
         inputs.push(jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: canonical, digest: ""}))
@@ -211,9 +211,9 @@ jet_cli_check_receipt_stored: fn(project_root: String, context_key: String) -[FS
 
 // Paths whose digest changed, vanished or newly appeared, sorted and unique.
 jet_cli_check_receipt_changes: fn(old: [JetDriverRunReceiptInput], new: [JetDriverRunReceiptInput]) -> [String] Never! {
-    changed := [String]{}
+    ^changed: [String]{}
     loop input in old {
-        same := false
+        ^same: false
         loop candidate in new {
             if candidate.path == input.path {
                 same = candidate.digest == input.digest
@@ -223,7 +223,7 @@ jet_cli_check_receipt_changes: fn(old: [JetDriverRunReceiptInput], new: [JetDriv
         if !same -> changed.push(input.path)
     }
     loop input in new {
-        known := false
+        ^known: false
         loop candidate in old {
             if candidate.path == input.path {
                 known = true
@@ -251,7 +251,7 @@ jet_cli_check_receipt_replay: fn(receipt: JetDriverRunReceipt, argv: [String], n
 // rediscovered so a new entry candidate cannot hide behind it. A mismatch says
 // why under `--verbose`.
 jet_cli_check_receipt_current: fn(receipt: JetDriverRunReceipt, identity: [U8], paths: [String], args: [String], notice: String, verbose: Bool) -> JetDriverVerbOutput? {
-    current_paths := paths
+    ^current_paths: paths
     loop input in receipt.claim.inputs {
         if jet_cli_receipt_regular(input.path) -> current_paths.push(input.path)
     }
@@ -285,8 +285,8 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
     if !BUILD_REUSE_SAVED_WORK || cli_sys.get(ENV_JET_RECEIPT_BYPASS) != None {
         return JetCLICheckReceiptStep.Run{recording: None}
     }
-    file := ""
-    notice := ""
+    ^file: ""
+    ^notice: ""
     if plan == {
         .Check(found, _, _, _, _, _, written, _, _, _, _, _, _) -> {
             file = found
@@ -301,7 +301,7 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
         jet_cli_write_notice(jet_cli_history_notice("resolving receipt working directory", jet_cli_io_error_text(err)))
         return JetCLICheckReceiptStep.Run{recording: None}
     }
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     target: jet_cli_check_receipt_target(owned)
     project_root: jet_cli_receipt_project_root(cache, jet_cli_parent(file) ?? cwd)
     context: jet_cli_receipt_context_identity("check", args, jet_cli_terminal_bits()) ?? {
@@ -309,7 +309,7 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
         return JetCLICheckReceiptStep.Run{recording: None}
     }
     context_key: receipt_crypto.sha256(context).hex()
-    identity := context
+    ^identity: context
     jet_cli_check_context_identity(cache, cwd, identity)
     paths: jet_cli_check_receipt_paths(cache, cwd, target, file)
     if jet_cli_check_receipt_stored(project_root, context_key) == {
@@ -335,7 +335,7 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
 // Each source a compile read, at the digest of the bytes it read; None when
 // one of them is gone, so the outcome is not recorded.
 jet_cli_check_snapshot_inputs: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> [JetDriverRunReceiptInput]? Never! {
-    inputs := [JetDriverRunReceiptInput]{}
+    ^inputs: [JetDriverRunReceiptInput]{}
     loop root in snapshot.roots {
         loop file in root.files {
             path: cli_files.realpath(file.path) ?? return None
@@ -349,8 +349,8 @@ jet_cli_check_snapshot_inputs: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -
 // plus each `compiled` source outside them; publication refuses a closure that
 // changed meanwhile.
 jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriverVerbOutput, compiled: [JetDriverRunReceiptInput]) -[FS, Env, Time]> JetCLIReadError! {
-    inputs := recording.inputs
-    known := [String]{}
+    ^inputs: recording.inputs
+    ^known: [String]{}
     loop input in inputs -> known.push(input.path)
     loop input in compiled {
         if known.contains(input.path) -> next
@@ -363,9 +363,9 @@ jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriv
     current: jet_cli_receipt_lookup(recording.project_root, claim) ?? return
     pointers: JetCLIRootedDirectory.open(recording.project_root, [String]{".jet", "receipts", "contexts"}, true)
     pointers.replace(recording.context_key, claim.key.bytes(), None)
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     target: jet_cli_receipt_target_identity(cache, recording.target, claim.inputs)
-    index := jet_cli_record_index_load(recording.project_root)
+    ^index: jet_cli_record_index_load(recording.project_root)
     identity: JetCLIRecordIdentity{target_inputs_sha256: target.input_sha256, tool_version: JET_VERSION, engine: "jet-receipt-v2"}
     entry: jet_cli_comparison_index_entry(index, identity, "receipt", claim.key, ".jet/receipts/objects/{claim.key}", jet_driver_run_receipt_encode(current).len(), current.consumed, current.produced, false)
     jet_cli_record_index_upsert_many_and_store(index, recording.project_root, [JetCLIRecordIndexEntry]{entry})

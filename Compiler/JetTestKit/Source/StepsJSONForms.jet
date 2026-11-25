@@ -18,7 +18,7 @@ kit_steps_json_canonical: fn(text: String) -> String? {
 
 kit_steps_json_files: fn(directory: String, canonical: Bool) -> String Err! {
     entries: files.list_dir(directory) ?? return Err("JSON files directory: {err}")
-    documents := [Dyn]{}
+    ^documents: [Dyn]{}
     loop entry in entries {
         text: files.read(entry.path) ?? return Err("JSON files read: {err}")
         if canonical {
@@ -37,14 +37,14 @@ kit_steps_json_files: fn(directory: String, canonical: Bool) -> String Err! {
 kit_steps_json_zero: fn(tree: Dyn, key: String) -> Dyn {
     if tree == {
         .Object(fields) -> {
-            result := [String:Dyn]{}
+            ^result: [String:Dyn]{}
             loop pair in fields {
                 _: result.add(pair.key, if pair.key == key -> Dyn.Int(0) else -> kit_steps_json_zero(pair.value, key))
             }
             return Dyn.Object(result)
         }
         .Array(items) -> {
-            result := [Dyn]{}
+            ^result: [Dyn]{}
             loop item in items -> result.push(kit_steps_json_zero(item, key))
             return Dyn.Array(result)
         }
@@ -53,9 +53,9 @@ kit_steps_json_zero: fn(tree: Dyn, key: String) -> Dyn {
 }
 
 kit_steps_json_distinct: fn(values: [Dyn]) -> Int {
-    unique := [Dyn]{}
+    ^unique: [Dyn]{}
     loop value in values {
-        present := false
+        ^present: false
         loop other in unique {
             if kit_steps_json_equal(value, other) -> present = true
         }

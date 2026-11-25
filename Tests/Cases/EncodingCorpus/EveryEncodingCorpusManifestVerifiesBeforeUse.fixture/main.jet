@@ -7,7 +7,7 @@ use {
 
 verify: fn(root: String) -> Int {
     manifest: files.read(files.join(root, "MANIFEST.tsv")) ?? panic("manifest missing")
-    count := 0
+    ^count: 0
     loop line in manifest.lines() {
         if line.starts_with("#") || line == "" -> next
         fields: line.split("\t").to_list()
@@ -23,7 +23,7 @@ verify: fn(root: String) -> Int {
 
 run: fn() {
     root: sys.get("JET_ENCODING_ROOT") ?? panic("root required")
-    manifests := 0
+    ^manifests: 0
     entries: files.list_dir(root) ?? panic("list corpus")
     loop entry in entries {
         if files.is_file(files.join(entry.path, "MANIFEST.tsv")) {

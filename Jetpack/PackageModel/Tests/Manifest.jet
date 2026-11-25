@@ -119,8 +119,8 @@ use {
     hardened: PackageFacts.parse("name: \"demo\"\nstrictness: .Hardened\nauthority: {{ allow: [IO] }}\n", "package.jet") ?? panic("hardened parses")
     assert_eq(hardened.strictness, Val(PackageStrictness.hardened_level()))
     assert(hardened.policy.harden)
-    saw_sentries := false
-    saw_unsafe := false
+    ^saw_sentries: false
+    ^saw_unsafe: false
     loop declaration in hardened.policy.declarations {
         if declaration.key == PolicyKey.Sentries && declaration.value == PolicyValue.On {
             saw_sentries = true

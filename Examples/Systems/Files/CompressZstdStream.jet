@@ -24,7 +24,7 @@ C_SMALL: "The quick brown fox jumps over the lazy dog. The quick brown fox jumps
 
 expected_bytes: fn() -> [U8] {
     words: [String]{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike"}
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<6000 {
         first: words[i * 7 % 13]
         second: words[i * 3 % 13]
@@ -46,10 +46,10 @@ run: fn() {
     doubled: "{small}{small}"
     print("frames: {multi == doubled}")
 
-    decoder := zstd.decoder()
-    streamed := [U8]{}
-    largest := 0
-    at := 0
+    ^decoder: zstd.decoder()
+    ^streamed: [U8]{}
+    ^largest: 0
+    ^at: 0
     loop at < big.len() {
         stop: if at + 1000 < big.len() -> at + 1000 else -> big.len()
         decoder.feed(big[at..<stop])
@@ -68,8 +68,8 @@ run: fn() {
     path: files.join(scratch.path, "big.zst")
     files.write_bytes(path, big)
     file: files.open(path)
-    reader := zstd.reader(file)
-    from_file := [U8]{}
+    ^reader: zstd.reader(file)
+    ^from_file: [U8]{}
     loop {
         piece: reader.read_bytes(65536) ?? panic("reader")
         if piece.len() == 0 -> break
@@ -77,13 +77,13 @@ run: fn() {
     }
     print("reader: equal {from_file == expected}")
 
-    corrupt := big.copy()
+    ^corrupt: big.copy()
     corrupt[corrupt.len() - 2] = U8{(Int{corrupt[corrupt.len() - 2]} + 1) % 256}
     if zstd.decompress(corrupt) == {
         .Ok(_) -> { print("corrupt checksum: accepted") }
         .Err(error) -> print("corrupt checksum: {error == .Checksum}")
     }
-    truncated := zstd.decoder()
+    ^truncated: zstd.decoder()
     truncated.feed(big[0..<big.len() - 100])
     loop {
         piece: truncated.read_bytes(65536) ?? panic("truncated read")

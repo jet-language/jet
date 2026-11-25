@@ -16,7 +16,7 @@ main_write_report: fn(text: I64, scratch: I64) {
 // Process32: atomic winning Linux tid@0, winning signed32 code@8, distinct
 // borrowed report/flush output words@16/@24. Initialized before any user body;
 // only the winning thread accesses the outputs. This is not a second Env/TLS.
-main_exit_root := I64{0}
+^main_exit_root: I64{0}
 
 // runtime-init: 5 when main_exit_root
 #Export(c) jet_rt_process_exit_init: fn() {
@@ -39,17 +39,17 @@ main_exit_root := I64{0}
 // (closes, guards, defers, exit handlers, rollback hooks) still runs. A
 // stop or exit ends the process; only jet_rt_main's normal return clears
 // it, for a loaded-image host that runs another entry.
-main_process_ending := I64{0}
+^main_process_ending: I64{0}
 
-main_root_control := I64{0}
+^main_root_control: I64{0}
 
 // jet_rt_main's 40-byte save area for main_root_control while it is set.
-main_root_save := I64{0}
+^main_root_save: I64{0}
 
 // jet_rt_main_stopped once a stop is published to main_root_control
 // (Scheduler.jet scheduler_control_publish), else 0: an entry nothing
 // stopped has nothing to take.
-main_stopped_code := I64{0}
+^main_stopped_code: I64{0}
 
 main_stopped_install: fn(code: I64) {
     #Unsafe("an idempotent install: every writer stores the same code address") {
@@ -61,7 +61,7 @@ main_stopped_install: fn(code: I64) {
 // runs (main_root_control set), a stop outside the process root's capture
 // claims the process exit through it (Trap.jet trap_root_prepare). A program
 // without jet_rt_main links no claim there.
-main_process_stop_code := I64{0}
+^main_process_stop_code: I64{0}
 
 rt_process_stop_claim_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
@@ -74,7 +74,7 @@ main_process_end: fn() {
 // core.perf's raw fidelity word, zero until written
 // (Core/Perf reads zero as the default). A loaded-image host's next entry
 // starts from zero again, as a fresh process would.
-main_perf_bits := I64{0}
+^main_perf_bits: I64{0}
 
 #Export(c) jet_perf_read_bits: fn() -> I64 { jet_int_owned_from_i64(main_perf_bits) }
 
@@ -110,7 +110,7 @@ main_exit_claim: fn(code: I64) {
     // A concurrent loser must not race exit_group or emit a second report.
     // pause parks independently of the normal-return claim's later reset;
     // retry every signal interruption without allocating another wait slot.
-    loop -> _ := trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    loop -> ^_: trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
 }
 
 // The process exit's three optional steps, zero until a program needs them:
@@ -119,11 +119,11 @@ main_exit_claim: fn(code: I64) {
 // writer (Observe.jet observe_exit_install) the writer's exit publication,
 // and the first task (Task.jet task_live_link) the cancel of every task
 // still live when run returns. A program with none links none.
-main_exit_handlers_code := I64{0}
+^main_exit_handlers_code: I64{0}
 
-main_observe_exit_code := I64{0}
+^main_observe_exit_code: I64{0}
 
-main_exit_tasks_code := I64{0}
+^main_exit_tasks_code: I64{0}
 
 main_exit_handlers_install: fn(code: I64) {
     #Unsafe("an idempotent install: every writer stores the same code address") {
@@ -152,13 +152,13 @@ main_exit_tasks_install: fn(code: I64) {
 // written just before it, so `jet perf run` counts that last write too.
 main_exit_cleanup: fn() {
     handlers: main_exit_handlers_code
-    if (handlers != I64{0}) { _ := coll_call1(handlers, I64{0}) }
+    if (handlers != I64{0}) { ^_: coll_call1(handlers, I64{0}) }
     log: log_start_code
-    if (log != I64{0}) { _ := coll_call1(log, I64{1}) }
+    if (log != I64{0}) { ^_: coll_call1(log, I64{1}) }
     observe: main_observe_exit_code
     if (observe != I64{0}) {
         main_flush(wrapping(main_exit_root + I64{16}))
-        _ := coll_call1(observe, I64{0})
+        ^_: coll_call1(observe, I64{0})
     }
 }
 
@@ -200,7 +200,7 @@ rt_main_stopped_address: fn() -> I64 {
 // traps jet_rt_debug_root_stop (JetDebug Native.jet
 // NATIVE_ROOT_STOP_SYMBOL) to pause there, the stack that stopped whole.
 // The call goes through the routine's address, so no inlining drops it.
-main_root_stop: fn(code: I64) { _ := coll_call1(rt_debug_root_stop_address(), code) }
+main_root_stop: fn(code: I64) { ^_: coll_call1(rt_debug_root_stop_address(), code) }
 
 // main_root_stop's routine, which a debugger traps; it does nothing.
 #Export(c) jet_rt_debug_root_stop: fn(code: I64) -> I64 { code }
@@ -243,7 +243,7 @@ rt_debug_root_stop_address: fn() -> I64 {
 main_call_stopped: fn() {
     stopped: main_stopped_code
     root: main_root_control
-    if (stopped != I64{0} && root != I64{0}) { _ := coll_call2(stopped, root, main_root_save) }
+    if (stopped != I64{0} && root != I64{0}) { ^_: coll_call2(stopped, root, main_root_save) }
 }
 
 // The start of a program that owns its main (JetIR EntryOwned.jet,
@@ -258,7 +258,7 @@ main_call_stopped: fn() {
     // Fatal signals print the fault report (Fault.jet), stack overflow too.
     fault_start()
     observe: observe_start_code
-    if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
+    if (observe != I64{0}) { ^_: coll_call1(observe, I64{0}) }
 }
 
 // The end of an observed program that owns its main, in place of its main's
@@ -268,7 +268,7 @@ main_call_stopped: fn() {
 #Export(c) jet_rt_main_owned_end: fn() {
     jet_rt_stdout_flush()
     observe: main_observe_exit_code
-    if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
+    if (observe != I64{0}) { ^_: coll_call1(observe, I64{0}) }
 }
 
 // SysV int32 callers observe eax only: Image/Object.jet:70-80 returns it to
@@ -296,11 +296,11 @@ main_call_stopped: fn() {
     // jet_rt_observe_start_init); any other program links no observation
     // writer, and JET_OBSERVE=1 has nothing to publish there.
     observe: observe_start_code
-    if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
+    if (observe != I64{0}) { ^_: coll_call1(observe, I64{0}) }
     // The log start (RouteALog.jet jet_rt_log_state_init) is installed only
     // in a program that links the log cells: it checks JET_LOG.
     log_start: log_start_code
-    if (log_start != I64{0}) { _ := coll_call1(log_start, I64{0}) }
+    if (log_start != I64{0}) { ^_: coll_call1(log_start, I64{0}) }
     // The entry runs under the process root control: a stop (a panic, a
     // numeric stop, process.exit, os.stop) is published there and every
     // generated frame leaves by its stop edge, running its closes, drops
@@ -323,7 +323,7 @@ main_call_stopped: fn() {
     // address, not a closure header.
     coll_call0_unit(entry)
     stopped: main_stopped_code
-    if (stopped != I64{0}) { _ := coll_call2(stopped, root, save) }
+    if (stopped != I64{0}) { ^_: coll_call2(stopped, root, save) }
     jet_rt_root_leave(root, save)
     #Unsafe("only the main thread running jet_rt_main writes its root control") {
         main_root_control = I64{0}
@@ -337,7 +337,7 @@ main_call_stopped: fn() {
     // jet_rt_task_exit_settle); the process then exits with run's status
     // around any task left, rather than returning to a loaded-image host.
     tasks: main_exit_tasks_code
-    abandoned := I64{0}
+    ^abandoned: I64{0}
     if (tasks != I64{0}) { abandoned = coll_call1(tasks, I64{0}) }
     if (abandoned != I64{0}) {
         main_flush(wrapping(main_exit_root + I64{16}))

@@ -30,7 +30,7 @@ fix_require: fn(ok: Bool, detail: String) Never! {
     fix_require(replaced == "hell!", "original UTF-8 byte spans, source order")
     clamped: jet_driver_apply_edits("abc", [TextEdit]{TextEdit{span: Span{start: 10, end: 20}, new_text: "!"}}) ?? panic("clamped edit")
     fix_require(clamped == "abc!", "out-of-bounds insertion clamps once")
-    overlap := false
+    ^overlap: false
     if jet_driver_apply_edits(
         "abc",
         [TextEdit]{
@@ -41,7 +41,7 @@ fix_require: fn(ok: Bool, detail: String) Never! {
         overlap = first == Span{start: 10, end: 20} && second == Span{start: 15, end: 25}
     }
     fix_require(overlap, "overlap rejected before bounds clamping")
-    boundary := false
+    ^boundary: false
     if jet_driver_apply_edits("héllo", [TextEdit]{TextEdit{span: Span{start: 2, end: 3}, new_text: "e"}}) == .Err(.Boundary(span)) {
         boundary = span == Span{start: 2, end: 3}
     }

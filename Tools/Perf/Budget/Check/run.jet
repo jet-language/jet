@@ -75,7 +75,7 @@ CheckError: struct {
 }
 
 usage: fn(message: String) -> CheckError Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     if message != "" -> lines.push("check: {message}")
     lines.push(USAGE)
     CheckError{lines: lines, code: 64}
@@ -111,7 +111,7 @@ grouped: fn(value: Float) -> String Never! {
     whole: integral(rounded)
     magnitude: if whole < 0 -> -whole else -> whole
     digits: "{magnitude}".bytes()
-    out := ""
+    ^out: ""
     loop index in 0..<digits.len() {
         if index > 0 && (digits.len() - index) % 3 == 0 -> out = "{out},"
         out = "{out}{String.from_bytes_lossy(digits[index..<index + 1])}"
@@ -129,13 +129,13 @@ number_or_nan: fn(value: Dyn, key: String) -> Float Never! { number_field(value,
 // ---- Arguments --------------------------------------------------------------
 
 parse_args: fn(args: [String]) -> Options CheckError! {
-    options := Options{column: "225K", clock: "auto", lines: ZERO, lines_given: false, budget: DEFAULT_BUDGET, strict: false, trace: "", trace_given: false}
-    index := 0
+    ^options: Options{column: "225K", clock: "auto", lines: ZERO, lines_given: false, budget: DEFAULT_BUDGET, strict: false, trace: "", trace_given: false}
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         takes: arg.starts_with("--column") || arg.starts_with("--clock") || arg.starts_with("--lines") || arg.starts_with("--budget")
         if takes {
-            value := ""
+            ^value: ""
             equals: arg.find("=")
             if equals >= 0 {
                 value = String.from_bytes_lossy(arg.bytes()[equals + 1..<arg.bytes().len()])
@@ -200,7 +200,7 @@ Trace: struct {
 // One event per line; the array may be unterminated and its last line half
 // written by a running compiler.
 read_events: fn(text: String) -> [Dyn] Never! {
-    events := [Dyn]{}
+    ^events: [Dyn]{}
     loop raw in text.split("\n") {
         trimmed: js_trim(raw)
         line: if trimmed.ends_with(",") -> String.from_bytes_lossy(trimmed.bytes()[0..<trimmed.bytes().len() - 1]) else -> trimmed
@@ -233,11 +233,11 @@ stack_index: fn(keys: [String], key: String) -> Int Never! {
 // Spans with their ancestors (indices of the spans open around them on their
 // thread), and the counter events summed by name.
 collect: fn(events: [Dyn]) -> Trace Never! {
-    spans := [Span]{}
-    stack_keys := [String]{}
-    stacks := [[Int]]{}
-    counters := [Counter]{}
-    last_ts := ZERO
+    ^spans: [Span]{}
+    ^stack_keys: [String]{}
+    ^stacks: [[Int]]{}
+    ^counters: [Counter]{}
+    ^last_ts: ZERO
     loop position in 0..<events.len() {
         event: events[position]
         ts: number_field(event, "ts")
@@ -247,7 +247,7 @@ collect: fn(events: [Dyn]) -> Trace Never! {
         phase: text_of(field(event, "ph")) ?? ""
         if phase == "B" || phase == "E" {
             key: map_key(field(event, "tid"), position)
-            at := stack_index(stack_keys, key)
+            ^at: stack_index(stack_keys, key)
             if at < 0 {
                 stack_keys.push(key)
                 stacks.push([Int]{})
@@ -278,7 +278,7 @@ collect: fn(events: [Dyn]) -> Trace Never! {
             } else {
                 if stacks[at].len() == 0 -> next
                 index: stacks[at][stacks[at].len() - 1]
-                _ := stacks[at].pop()
+                ^_: stacks[at].pop()
                 spans[index].end = ts ?? math.NAN
                 spans[index].closed = true
                 spans[index].args = field(event, "args") ?? Dyn.Null
@@ -335,16 +335,16 @@ any_in: fn(indices: [Int], set: [Bool]) -> Bool Never! {
 }
 
 measure_row: fn(kinds: [String], excluded: [String], spans: [Span], clock: String, notes: ^[String]) -> Measure Never! {
-    included := [Bool]{}
+    ^included: [Bool]{}
     loop span in spans -> included.push(span.kind_is_text && kinds.contains(span.kind))
-    ns := ZERO
-    count := 0
+    ^ns: ZERO
+    ^count: 0
     loop index in 0..<spans.len() {
         if !included[index] || any_in(spans[index].ancestors, included) -> next
         ns += span_ns(spans[index], clock, notes)
         count += 1
     }
-    removed := [Bool]{}
+    ^removed: [Bool]{}
     loop span in spans {
         removed.push(span.kind_is_text && excluded.contains(span.kind) && any_in(span.ancestors, included))
     }
@@ -359,7 +359,7 @@ measure_row: fn(kinds: [String], excluded: [String], spans: [Span], clock: Strin
 
 // String.length: UTF-16 code units.
 utf16_len: fn(text: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop byte in text.bytes() {
         code: Int{byte}
         if code < 128 || code >= 192 -> count += 1
@@ -370,8 +370,8 @@ utf16_len: fn(text: String) -> Int Never! {
 
 pad: fn(text: String, width: Int, end: Bool) -> String Never! {
     fill: ""
-    gap := width - utf16_len(text)
-    spaces := fill
+    ^gap: width - utf16_len(text)
+    ^spaces: fill
     loop gap > 0 {
         spaces = "{spaces} "
         gap -= 1
@@ -380,22 +380,22 @@ pad: fn(text: String, width: Int, end: Bool) -> String Never! {
 }
 
 align: fn(cells: [String], widths: [Int]) -> String Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop column in 0..<cells.len() -> words.push(pad(cells[column], widths[column], column <= 1))
     words.join("  ")
 }
 
 table: fn(header: [String], rows: [[String]]) -> String Never! {
-    widths := [Int]{}
+    ^widths: [Int]{}
     loop column in 0..<header.len() {
-        width := utf16_len(header[column])
+        ^width: utf16_len(header[column])
         loop row in rows {
             if utf16_len(row[column]) > width -> width = utf16_len(row[column])
         }
         widths.push(width)
     }
-    lines := [String]{align(header, widths)}
-    dashes := [String]{}
+    ^lines: [String]{align(header, widths)}
+    ^dashes: [String]{}
     loop width in widths -> dashes.push(pad("", width, true).replace(" ", "-"))
     lines.push(dashes.join("  "))
     loop row in rows -> lines.push(align(row, widths))
@@ -417,13 +417,13 @@ LabelEntry: struct {
 }
 
 detail: fn(spans: [Span], kind: String, clock: String, notes: ^[String]) -> [LabelEntry] Never! {
-    entries := [LabelEntry]{}
+    ^entries: [LabelEntry]{}
     loop span in spans {
         if !span.kind_is_text || span.kind != kind -> next
         same: span.label_is_text && span.label == span.kind
         label: if same -> "" else -> span.label
         sort: if same -> "" else -> span.label_sort
-        at := -1
+        ^at: -1
         loop index in 0..<entries.len() {
             if entries[index].label == label -> at = index
         }
@@ -461,7 +461,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     if spans.len() == 0 {
         return Outcome{out: [String]{}, err: [String]{"check: {options.trace} has no spans"}, code: 65}
     }
-    clock := options.clock
+    ^clock: options.clock
     if clock == "auto" {
         clock = "wall"
         loop span in spans {
@@ -471,8 +471,8 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
             }
         }
     }
-    lines := options.lines
-    lines_source := "--lines"
+    ^lines: options.lines
+    ^lines_source: "--lines"
     lines_counter: js_string(field(budget, "lines_counter"))
     lines_counter_is_text: text_of(field(budget, "lines_counter")) != None
     if !options.lines_given && lines_counter_is_text && counter_value(trace, lines_counter) != None {
@@ -483,11 +483,11 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
         lines_source = "budget.json default_lines (the trace has no line counter)"
     }
 
-    notes := [String]{}
+    ^notes: [String]{}
     column: options.column
-    measured := [Measured]{}
-    accounted := ZERO
-    rows := [Dyn]{}
+    ^measured: [Measured]{}
+    ^accounted: ZERO
+    ^rows: [Dyn]{}
     if field(budget, "rows") == .Val(inner) {
         if inner == .Array(items) -> rows = items
     }
@@ -501,7 +501,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     // them up to the last event) less every measured row.
     loop row in rows {
         if !truthy(field(row, "residual")) -> next
-        total := ZERO
+        ^total: ZERO
         if clock == "wall" -> total = trace.last_ts * THOUSAND else {
             loop span in spans {
                 if span.ancestors.len() == 0 -> total += span_ns(span, clock, notes)
@@ -513,17 +513,17 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
         break
     }
 
-    failed := false
-    budget_sum := ZERO
-    total_ns := ZERO
-    cells := [[String]]{}
+    ^failed: false
+    ^budget_sum: ZERO
+    ^total_ns: ZERO
+    ^cells: [[String]]{}
     loop entry in measured {
         limit: number_or_nan(field(entry.row, "budget") ?? Dyn.Null, column)
         budget_sum += limit
         if entry.present -> total_ns += entry.ns
         per_line: entry.ns / lines
-        status := ""
-        ratio := "-"
+        ^status: ""
+        ^ratio: "-"
         if !entry.present {
             status = "absent"
             if options.strict -> failed = true
@@ -550,7 +550,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     cells.push([String]{"total", "work sum", fixed(total_ns / BILLION, 2), grouped(total_ns / lines), grouped(budget_sum), "{fixed(ratio_total, 1)}x", if total_over -> "OVER" else -> "ok"})
     if total_over -> failed = true
 
-    out := [String]{}
+    ^out: [String]{}
     out.push("trace:   {options.trace}")
     out.push("clock:   {clock}{if clock == "wall" -> " (the trace has no CPU clocks)" else -> ""}")
     out.push("lines:   {grouped(lines)} ({lines_source})")
@@ -567,8 +567,8 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     // #5479 c2: a phase over its budget names its root, the cards of its
     // budget.json `owners` (the work that brings it inside); a phase over
     // budget with no owner card fails.
-    roots := [String]{}
-    unowned := false
+    ^roots: [String]{}
+    ^unowned: false
     loop at in 0..<measured.len() {
         if cells[at][6] != "OVER" -> next
         owners: texts(field(measured[at].row, "owners"))
@@ -586,11 +586,11 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     // ships its measured number. Print their subtotal. A full-unit trace (the
     // compile reached code generation: it has a `lower` span) must carry every
     // always-on span, or a check left the build.
-    missing_check := false
-    always_ids := [String]{}
-    always_ns := ZERO
-    always_budget := ZERO
-    missing := [String]{}
+    ^missing_check: false
+    ^always_ids: [String]{}
+    ^always_ns: ZERO
+    ^always_budget: ZERO
+    ^missing: [String]{}
     full_unit: has_span(spans, "lower")
     loop entry in measured {
         if field(entry.row, "always_on") == .Val(always) {
@@ -616,9 +616,9 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     }
 
     // Work counters per natural unit (budgets at the 1M column only).
-    unit_rows := [[String]]{}
+    ^unit_rows: [[String]]{}
     loop entry in measured {
-        units := [Dyn]{}
+        ^units: [Dyn]{}
         if field(entry.row, "units") == .Val(inner) {
             if inner == .Array(items) -> units = items
         }
@@ -629,7 +629,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
             value: if has_value -> trace.counters[counter_at].value else -> math.NAN
             limit_value: number_field(field(unit, "budget") ?? Dyn.Null, column)
             per_unit: if has_value && value != ZERO && !math.is_nan(value) && entry.present -> entry.ns / value else -> math.NAN
-            status := "-"
+            ^status: "-"
             if !has_value -> status = "no counter" else if entry.present && limit_value != None {
                 over: per_unit > limit_value
                 status = if over -> "OVER" else -> "ok"
@@ -652,14 +652,14 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     out.push(table([String]{"row", "counter", "count", "ns/unit", "unit", "budget", "status"}, unit_rows))
 
     // The four measurements the plan names as unmeasured until S0.
-    census := [[String]]{}
+    ^census: [[String]]{}
     census_items: [CensusItem]{
         CensusItem{name: "D10b marker groups", kind: "load.marker_groups.relex", labeled: false},
         CensusItem{name: "D10b marker groups", kind: "load.marker_groups.reparse", labeled: false},
         CensusItem{name: "D12 comptime build", kind: "comptime.build", labeled: true},
     }
     loop item in census_items {
-        entries := detail(spans, item.kind, clock, notes)
+        ^entries: detail(spans, item.kind, clock, notes)
         if entries.len() == 0 {
             census.push([String]{item.name, item.kind, "-", "-", "-", "not in trace"})
             next
@@ -670,9 +670,9 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
                 census.push([String]{item.name, js_trim("{item.kind} {entry.label}"), "{entry.count}", fixed(entry.ns / BILLION, 3), grouped(entry.ns / lines), grouped(entry.items)})
             }
         } else {
-            count := 0
-            ns := ZERO
-            items := ZERO
+            ^count: 0
+            ^ns: ZERO
+            ^items: ZERO
             loop entry in entries {
                 count += entry.count
                 ns += entry.ns
@@ -686,12 +686,12 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
 
     if notes.len() > 0 {
         out.push("")
-        sorted := notes
+        ^sorted: notes
         sorted.sort()
         loop note in sorted -> out.push("note: {note}")
     }
     out.push("")
-    reasons := [String]{}
+    ^reasons: [String]{}
     if failed -> reasons.push("over the {column} budget")
     if unowned -> reasons.push("a phase over budget names no owner card")
     if missing_check -> reasons.push("an always-on check did not run")
@@ -795,8 +795,8 @@ hello_usage: fn(message: String) -> CheckError Never! {
 }
 
 parse_hello_args: fn(args: [String]) -> HelloOptions CheckError! {
-    options := HelloOptions{jet: sys.get("JET") ?? "jet", runs: HELLO_RUNS, doc: DEFAULT_SIZE_DOC}
-    index := 1
+    ^options: HelloOptions{jet: sys.get("JET") ?? "jet", runs: HELLO_RUNS, doc: DEFAULT_SIZE_DOC}
+    ^index: 1
     loop index < args.len() {
         arg: args[index]
         if arg != "--jet" && arg != "--runs" && arg != "--doc" {
@@ -827,7 +827,7 @@ parse_limit: fn(measure: String, text: String) -> GateLimit? Never! {
     number: number_from_text(text.slice(0, space).replace(",", ""))
     if !finite(number) || !(number > ZERO) -> return None
     unit: text.slice(space + 1, text.len()).trim()
-    scale := ZERO
+    ^scale: ZERO
     if {
         unit == "B" || unit == "bytes" -> scale = ONE
         unit == "KB" -> scale = Float{1024.0}
@@ -845,9 +845,9 @@ parse_limit: fn(measure: String, text: String) -> GateLimit? Never! {
 // The size limit and the start limit of the doc's `| Measure | Limit |`
 // table: exactly one row in bytes and one in time.
 gate_limits: fn(doc: String, path: String) -> GateLimits CheckError! {
-    sizes := [GateLimit]{}
-    starts := [GateLimit]{}
-    inside := false
+    ^sizes: [GateLimit]{}
+    ^starts: [GateLimit]{}
+    ^inside: false
     loop raw in doc.split("\n") {
         line: raw.trim()
         if !inside {
@@ -855,7 +855,7 @@ gate_limits: fn(doc: String, path: String) -> GateLimits CheckError! {
             next
         }
         if !line.starts_with("|") -> break
-        cells := [String]{}
+        ^cells: [String]{}
         loop cell in line.copy().split("|") -> cells.push(cell.trim())
         if cells.len() != 4 {
             return Err(gate_error("{path}: the limit table row `{line}` is not `| measure | limit |`"))
@@ -885,7 +885,7 @@ measure_hello_in: fn(options: HelloOptions, folder: String) -> HelloMeasure Chec
     }
     executable: files.join(folder, HELLO_EXECUTABLE)
     stat: files.stat(executable) ?? return Err(gate_error("the build wrote no {executable}: {err}"))
-    starts := [Int]{}
+    ^starts: [Int]{}
     loop starts.len() < options.runs {
         started: time.instant()
         receipt: process.cmd([String]{executable.copy()}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {executable}: {err}"))
@@ -913,7 +913,7 @@ hello_verdict: fn(limits: GateLimits, measured: HelloMeasure, doc: String) -> Ou
         [String]{limits.size.measure, "{grouped(bytes)} B", "{limits.size.text} ({grouped(limits.size.value)} B)", if size_over -> "OVER" else -> "ok"},
         [String]{limits.start.measure, "{ms(median)} (median of {runs} runs)", limits.start.text, if start_over -> "OVER" else -> "ok"},
     }
-    out := [String]{
+    ^out: [String]{
         "hello:   {HELLO_SOURCE}, jet build --small",
         "limits:  {doc}",
         "",
@@ -958,7 +958,7 @@ test_budget: fn() -> Dyn Never! {
 
 // A trace in the native host's shape: `[`, one event per line.
 test_trace: fn(events: [String]) -> String Never! {
-    lines := [String]{"["}
+    ^lines: [String]{"["}
     loop event in events -> lines.push("{event},")
     "{lines.join("\n")}\n"
 }
@@ -985,7 +985,7 @@ test_event: fn(kind: String, phase: String, ts: Int, proc_cpu_ns: Int) -> String
 test_row: fn(out: [String], id: String) -> [String] Never! {
     loop line in out.join("\n").split("\n") {
         if !line.starts_with("{id} ") -> next
-        cells := [String]{}
+        ^cells: [String]{}
         loop cell in line.trim().split("  ") {
             if cell.trim() != "" -> cells.push(cell.trim())
         }
@@ -995,13 +995,13 @@ test_row: fn(out: [String], id: String) -> [String] Never! {
 }
 
 tail: fn(cells: [String], from: Int, to: Int) -> String Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop index in from..<to -> words.push(cells[index])
     words.join("|")
 }
 
 #Test("process CPU per line, nested phases subtracted from their parent") {
-    events := [String]{test_counter("parse.user_lines", 1000), test_counter("parse.tokens", 9000)}
+    ^events: [String]{test_counter("parse.user_lines", 1000), test_counter("parse.tokens", 9000)}
     loop event in test_span("sources", 0, 1000, 1000000, "sources") -> events.push(event)
     events.push(test_event("load", "B", 1000, 0))
     loop event in test_span("parse", 1000, 5000, 3000000, "selfhost.jet") -> events.push(event)
@@ -1042,7 +1042,7 @@ tail: fn(cells: [String], from: Int, to: Int) -> String Never! {
 
 #Test("a phase over budget with no owner card fails and says so") {
     budget: json.parse("{{\"columns\":[\"1M\"],\"rows\":[{{\"id\":\"P3\",\"phase\":\"register\",\"spans\":[\"register\"],\"budget\":{{\"1M\":1}}}},{{\"id\":\"P8\",\"phase\":\"IR build\",\"owners\":[\"#5479 c8\"],\"spans\":[\"ir.build\"],\"budget\":{{\"1M\":1}}}}]}}") ?? panic("test budget")
-    events := [String]{}
+    ^events: [String]{}
     loop event in test_span("register", 0, 1000, 2000000, "register") -> events.push(event)
     loop event in test_span("ir.build", 1000, 2000, 2000000, "ir.build") -> events.push(event)
     outcome: report(test_options([String]{"t", "--column", "1M", "--lines", "1000"}), budget, test_trace(events))
@@ -1053,7 +1053,7 @@ tail: fn(cells: [String], from: Int, to: Int) -> String Never! {
 }
 
 #Test("a trace within budget passes; absent rows fail only with --strict") {
-    events := [String]{test_counter("parse.user_lines", 1000000)}
+    ^events: [String]{test_counter("parse.user_lines", 1000000)}
     loop event in test_span("register", 0, 1000, 100000000, "register") -> events.push(event)
     relaxed: report(test_options([String]{"t", "--column", "225K"}), test_budget(), test_trace(events))
     assert_eq(relaxed.code, 0)
@@ -1076,7 +1076,7 @@ tail: fn(cells: [String], from: Int, to: Int) -> String Never! {
 }
 
 test_always_on_trace: fn(kinds: [String]) -> String Never! {
-    events := [String]{test_counter("parse.user_lines", 1000000)}
+    ^events: [String]{test_counter("parse.user_lines", 1000000)}
     loop index in 0..<kinds.len() {
         loop event in test_span(kinds[index], index * 1000, index * 1000 + 500, 1000000, kinds[index]) {
             events.push(event)

@@ -20,14 +20,14 @@ package: {
 // not user labels. The public field/value check still runs before lowering.
 json_escape: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    escaped := [U8]{}
+    ^escaped: [U8]{}
     hex: "0123456789abcdef".bytes()
-    index := 0
+    ^index: 0
     loop {
         if index == bytes.len() -> break
         byte: Int{bytes[index]}
-        control := byte < 32 || byte == 127
-        scalar := byte
+        ^control: byte < 32 || byte == 127
+        ^scalar: byte
         if byte == 194 && index + 1 < bytes.len() {
             next: Int{bytes[index + 1]}
             if next >= 128 && next <= 159 {
@@ -60,8 +60,7 @@ envelope_fields: fn(package: String, module_name: String, panel: String, field: 
 // A publication reaches only installed devtools event sinks, and the native
 // runtime installs none (RouteACore.jet jet_job_queue_publish_parts): a
 // published value has no observer, so the checked call ends here.
-#Allow(Jet.UnusedParameter, "the native runtime installs no devtools event sink to hand a publication to")
-publish: fn<T>(package: String, module_name: String, panel: String, field: String, value: T) Never! {}
+#Allow(Jet.UnusedParameter, "the native runtime installs no devtools event sink to hand a publication to") publish: fn<T>(package: String, module_name: String, panel: String, field: String, value: T) Never! {}
 
 #Test("devtools identity field envelope has canonical order and exact escapes") {
     assert_eq(

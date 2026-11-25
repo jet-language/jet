@@ -14,7 +14,7 @@ definite_and_indefinite_containers: fn() {
     path: "{dir.path}/events.cbor"
     files.write_bytes(path, [U8]{159, 130, 1, 2, 191, 97, 107, 127, 97, 97, 97, 98, 255, 255, 255}) ?? panic("fixture")
     input: files.open(path) ?? panic("open")
-    source := cbor.reader(input) ?? panic("reader")
+    ^source: cbor.reader(input) ?? panic("reader")
     expected: [DataEvent]{.ArrayStart, .ArrayStart, .Int(1), .Int(2), .ArrayEnd, .ObjectStart, .Key("k"), .Text("ab"), .ObjectEnd, .ArrayEnd}
     loop event in expected {
         if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("event reads")
@@ -29,7 +29,7 @@ float_widths_and_sticky_item_limit: fn() {
     path: "{dir.path}/floats.cbor"
     files.write_bytes(path, [U8]{131, 249, 62, 0, 250, 71, 195, 80, 0, 251, 63, 241, 153, 153, 153, 153, 153, 154}) ?? panic("fixture")
     input: files.open(path) ?? panic("open")
-    source := cbor.reader(input) ?? panic("reader")
+    ^source: cbor.reader(input) ?? panic("reader")
     expected: [DataEvent]{.ArrayStart, .Float(Float{1.5}), .Float(Float{100000.0}), .Float(Float{1.1}), .ArrayEnd}
     loop event in expected {
         if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else {
@@ -39,10 +39,10 @@ float_widths_and_sticky_item_limit: fn() {
     if source.next() == .Ok(end) -> assert_eq(end, None) else -> panic("end reads")
     files.write_bytes(path, [U8]{98, 97, 98}) ?? panic("fixture")
     limited_input: files.open(path) ?? panic("open")
-    limits := EncodingLimits.safe()
+    ^limits: EncodingLimits.safe()
     limits.max_item_bytes = 1
-    limited := cbor.reader(limited_input, limits) ?? panic("reader")
-    first := EncodingError?{None}
+    ^limited: cbor.reader(limited_input, limits) ?? panic("reader")
+    ^first: EncodingError?{None}
     if limited.next() == {
         .Err(failure) -> {
             assert_eq(failure.reason, "max_item_bytes 1 exceeded")
@@ -61,7 +61,7 @@ sorted_keys_and_flush_before_the_root_ends: fn() {
     dir: files.temp_dir("jet-cbor-write") ?? panic("temp")
     path: "{dir.path}/sorted.cbor"
     output: files.create(path) ?? panic("create")
-    sink := cbor.writer(output) ?? panic("writer")
+    ^sink: cbor.writer(output) ?? panic("writer")
     sink.write(DataEvent.ObjectStart) ?? panic("object")
     sink.write(DataEvent.Key("aa")) ?? panic("key")
     sink.write(DataEvent.Int(1)) ?? panic("value")
@@ -83,7 +83,7 @@ incomplete_finish_and_root_total_limit: fn() {
     dir: files.temp_dir("jet-cbor-finish") ?? panic("temp")
     path: "{dir.path}/partial.cbor"
     output: files.create(path) ?? panic("create")
-    sink := cbor.writer(output) ?? panic("writer")
+    ^sink: cbor.writer(output) ?? panic("writer")
     sink.write(DataEvent.ArrayStart) ?? panic("start")
     sink.flush() ?? panic("flush incomplete")
     if sink.finish() == .Err(failure) {
@@ -93,9 +93,9 @@ incomplete_finish_and_root_total_limit: fn() {
         assert_eq(failure.reason, "finish requires one complete CBOR root")
     } else { panic("flush must retain first failure") }
     limited_output: files.create("{dir.path}/limit.cbor") ?? panic("create")
-    limits := EncodingLimits.safe()
+    ^limits: EncodingLimits.safe()
     limits.max_total_bytes = Val(1)
-    limited := cbor.writer(limited_output, limits) ?? panic("writer")
+    ^limited: cbor.writer(limited_output, limits) ?? panic("writer")
     limited.write(DataEvent.ArrayStart) ?? panic("start")
     limited.write(DataEvent.Int(1)) ?? panic("item")
     if limited.write(DataEvent.ArrayEnd) == .Err(failure) {
@@ -109,13 +109,13 @@ full_width_integers: fn() {
     path: "{dir.path}/wide.cbor"
     files.write_bytes(path, [U8]{130, 27, 255, 255, 255, 255, 255, 255, 255, 255, 59, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("fixture")
     input: files.open(path) ?? panic("open")
-    source := cbor.reader(input) ?? panic("reader")
+    ^source: cbor.reader(input) ?? panic("reader")
     expected: [DataEvent]{.ArrayStart, .Int(18446744073709551615), .Int(-18446744073709551616), .ArrayEnd}
     loop event in expected {
         if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("event reads")
     }
     output: files.create("{dir.path}/out.cbor") ?? panic("create")
-    sink := cbor.writer(output) ?? panic("writer")
+    ^sink: cbor.writer(output) ?? panic("writer")
     if sink.write(DataEvent.Int(18446744073709551616)) == .Err(failure) {
         assert_eq(failure.kind, .Unsupported)
     } else { panic("2^64 written") }

@@ -243,8 +243,8 @@ loader_u64: fn(bytes: [U8], at: Int) -> Int Never! {
 
 loader_hex: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    text := ""
-    rest := value
+    ^text: ""
+    ^rest: value
     loop {
         text = "{String.from_bytes([U8]{digits[rest & 15]}) ?? ""}{text}"
         rest = rest >> 4
@@ -259,8 +259,8 @@ loader_failed: fn(failure: String) -> X64LoadedImage Never! {
 
 // Unmap whatever of `image` is mapped.
 x64_image_unload: fn(image: X64LoadedImage) {
-    if image.high > image.low -> _ := os_unmap(image.low, image.high - image.low)
-    if image.file != 0 -> _ := os_unmap(image.file, image.file_size)
+    if image.high > image.low -> ^_: os_unmap(image.low, image.high - image.low)
+    if image.file != 0 -> ^_: os_unmap(image.file, image.file_size)
 }
 
 // A NUL-terminated copy of `text` in a fresh private page run, or 0.
@@ -280,9 +280,9 @@ loader_c_string: fn(text: String) -> Int {
 loader_memfd: fn(exec: Bool) -> Int {
     name: loader_c_string("jet-image")
     if name == 0 -> return -12
-    fd := Int{os_memfd_create_i64(I64{name}, I64{if exec -> 17 else -> 9})}
+    ^fd: Int{os_memfd_create_i64(I64{name}, I64{if exec -> 17 else -> 9})}
     if fd == -22 -> fd = Int{os_memfd_create_i64(I64{name}, I64{1})}
-    _ := os_unmap(name, 16)
+    ^_: os_unmap(name, 16)
     fd
 }
 
@@ -291,11 +291,11 @@ loader_fill: fn(fd: Int, bytes: [U8]) -> String {
     ""
 }
 
-loader_close: fn(fd: Int) { _ := os_close_i64(I64{fd}) }
+loader_close: fn(fd: Int) { ^_: os_close_i64(I64{fd}) }
 
 // Read `count` bytes at `offset` of `fd` to `address`; "" or why not.
 loader_pread: fn(fd: Int, address: Int, count: Int, offset: Int) -> String {
-    done := 0
+    ^done: 0
     loop done < count {
         got: Int{os_pread64_i64(I64{fd}, I64{address + done}, I64{count - done}, I64{offset + done})}
         if got == -OS_EINTR -> next
@@ -359,11 +359,11 @@ loader_segments: fn(header: [U8], table: [U8], table_at: Int, size: Int) -> X64S
     if loader_u16(header, 54) != 56 || phoff + phnum * 56 > size || phoff < table_at || phoff - table_at + phnum * 56 > table.len() {
         return loader_segments_failed("the image's program headers are malformed")
     }
-    low := -1
-    high := 0
-    phdr := 0
-    phdr_known := false
-    segments := [X64Segment]{}
+    ^low: -1
+    ^high: 0
+    ^phdr: 0
+    ^phdr_known: false
+    ^segments: [X64Segment]{}
     loop k in 0..<phnum {
         at: phoff - table_at + k * 56
         kind: loader_u32(table, at)
@@ -397,7 +397,7 @@ loader_segments: fn(header: [U8], table: [U8], table_at: Int, size: Int) -> X64S
 // Append `value` in hex (no prefix) to `out`.
 loader_hex_push: fn(out: ^[U8], value: Int) Never! {
     digits: "0123456789abcdef".bytes()
-    shift := 60
+    ^shift: 60
     loop shift > 0 && (value >> shift) & 15 == 0 -> shift -= 4
     loop shift >= 0 {
         out.push(digits[(value >> shift) & 15])
@@ -423,7 +423,7 @@ X64ImageFunctions: struct {
 // The sized functions of the ELF image `bytes`, from its .symtab: the
 // names `perf`, `nm` and `jet perf` show for its code.
 x64_image_functions: fn(bytes: [U8]) -> X64ImageFunctions Never! {
-    read := X64ImageFunctions{functions: [X64ImageFunction]{}, failure: ""}
+    ^read: X64ImageFunctions{functions: [X64ImageFunction]{}, failure: ""}
     size: bytes.len()
     if size < 64 {
         read.failure = "the image is not an ELF file"
@@ -477,8 +477,8 @@ x64_image_functions: fn(bytes: [U8]) -> X64ImageFunctions Never! {
 // The index of the function of `functions`, sorted by start, whose code
 // holds link address `pc`, else -1.
 x64_image_function_find: fn(functions: [X64ImageFunction], pc: Int) -> Int Never! {
-    low := 0
-    high := functions.len()
+    ^low: 0
+    ^high: functions.len()
     loop low < high {
         middle: (low + high) /% 2
         if functions[middle].start <= pc -> low = middle + 1 else -> high = middle
@@ -497,7 +497,7 @@ x64_image_perf_map: fn(bytes: [U8], pid: Int) -> String {
     read: x64_image_functions(bytes)
     if read.failure != "" -> return read.failure
     separators: " \n".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop function in read.functions {
         loader_hex_push(out, function.start)
         out.push(separators[0])
@@ -518,19 +518,19 @@ x64_image_load: fn(bytes: [U8]) -> X64LoadedImage {
     reserved: loader_reserve(plan)
     if reserved != "" -> return loader_failed(reserved)
     size: bytes.len()
-    image := X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: size, failure: ""}
+    ^image: X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: size, failure: ""}
     fd: loader_memfd(false)
     if fd < 0 {
         x64_image_unload(image)
         return loader_failed("memfd_create failed (errno {-fd})")
     }
-    failure := loader_fill(fd, bytes)
+    ^failure: loader_fill(fd, bytes)
     loop segment in plan.segments {
         if failure != "" -> break
         failure = loader_pread(fd, segment.vaddr, segment.file_size, segment.offset)
     }
     if failure == "" {
-        file := 0
+        ^file: 0
         #Unsafe("a private read-only view of the memfd aliases nothing writable") {
             file = os_map_with(0, size, OS_PROT_READ, OS_MAP_PRIVATE, fd, 0)
         }
@@ -564,7 +564,7 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
     // is the descriptor the process holds (loader_self_fd), never closed
     // here.
     held: exe.image_path == X64_SELF_EXECUTABLE
-    file := -1
+    ^file: -1
     if exe.image_at % OS_PAGE_SIZE == 0 && loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
         file = if held -> loader_self_fd() else -> loader_open(exe.image_path)
         if file >= 0 && !loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
@@ -574,20 +574,20 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
     }
     if file < 0 {
         // copy: x64_executable_complete reads the whole image part into its own copy.
-        whole := exe.copy()
+        ^whole: exe.copy()
         failure: x64_executable_complete(whole)
         if failure != "" -> return loader_failed(failure)
         return x64_image_load(x64_executable_bytes(whole))
     }
     // The ELF header as patched: the image's own names the image's program headers.
     plan: x64_executable_segments(exe)
-    failure := plan.failure
+    ^failure: plan.failure
     if failure == "" -> failure = loader_reserve(plan)
     if failure != "" {
         if !held -> loader_close(file)
         return loader_failed(failure)
     }
-    image := X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: exe.tail_at + exe.tail.len(), failure: ""}
+    ^image: X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: exe.tail_at + exe.tail.len(), failure: ""}
     memfd: loader_memfd(false)
     failure = if memfd < 0 -> "memfd_create failed (errno {-memfd})" else -> loader_fill(memfd, exe.tail)
     loop segment in plan.segments {
@@ -622,7 +622,7 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
 loader_reserve: fn(plan: X64Segments) -> String {
     low: plan.low
     high: plan.high
-    mapped := 0
+    ^mapped: 0
     #Unsafe("MAP_FIXED_NOREPLACE never replaces an existing mapping") {
         mapped = os_map_with(low, high - low, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE_ANONYMOUS + OS_MAP_FIXED_NOREPLACE, -1, 0)
     }
@@ -632,7 +632,7 @@ loader_reserve: fn(plan: X64Segments) -> String {
     if os_failed(mapped) -> return "mapping the image failed (errno {-mapped})"
     if mapped != low {
         // Kernels before 4.17 take the address as a hint only.
-        _ := os_unmap(mapped, high - low)
+        ^_: os_unmap(mapped, high - low)
         return "the image's address range {loader_hex(low)}..{loader_hex(high)} is taken"
     }
     ""
@@ -643,7 +643,7 @@ loader_protect: fn(plan: X64Segments) -> String {
     loop segment in plan.segments {
         start: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
         end: os_page_round(segment.vaddr + segment.memory_size)
-        protection := 0
+        ^protection: 0
         if segment.flags & 4 != 0 -> protection += OS_PROT_READ
         if segment.flags & 2 != 0 -> protection += OS_PROT_WRITE
         if segment.flags & 1 != 0 -> protection += OS_PROT_EXEC
@@ -665,7 +665,7 @@ loader_map_file: fn(fd: Int, image_at: Int, segment: X64Segment) -> String {
     start: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
     end: os_page_round(segment.vaddr + segment.file_size)
     if end == start -> return ""
-    mapped := 0
+    ^mapped: 0
     #Unsafe("MAP_FIXED replaces only the image's own reserved pages") {
         mapped = os_map_with(start, end - start, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE + OS_MAP_FIXED, fd, image_at + segment.offset - segment.vaddr % OS_PAGE_SIZE)
     }
@@ -705,14 +705,14 @@ loader_patch: fn(exe: X64Executable, delta: Int, from: Int, to: Int) {
 // Alloc.jet alloc_check_symbol) reads both tables, and nothing is copied
 // but the headers.
 loader_view: fn(image: ^X64LoadedImage, exe: X64Executable, file: Int, memfd: Int) -> String {
-    header := x64_executable_header(exe)
+    ^header: x64_executable_header(exe)
     count: loader_u16(header, 60)
     sections: loader_u64(header, 40) - exe.tail_at
-    symbols_from := 0
-    symbols_size := 0
-    symbols_at := 0
-    table_at := 0
-    table := [U8]{}
+    ^symbols_from: 0
+    ^symbols_size: 0
+    ^symbols_at: 0
+    ^table_at: 0
+    ^table: [U8]{}
     if loader_image_symbols(exe, file) == .Val(own) && count > 0 && count + 2 < 0xff00 && sections >= 0 && sections + 64 * count <= exe.tail.len() {
         symbols_from = own.from
         symbols_size = own.to - own.from
@@ -720,7 +720,7 @@ loader_view: fn(image: ^X64LoadedImage, exe: X64Executable, file: Int, memfd: In
         table_at = symbols_at + os_page_round(symbols_size)
         table = exe.tail[sections..<sections + 64 * count]
         // The image's tables take the names of the program's.
-        names := [Int]{0, 0}
+        ^names: [Int]{0, 0}
         loop k in 0..<count {
             if loader_u32(table, 64 * k + 4) != 2 -> next
             names[0] = loader_u32(table, 64 * k)
@@ -742,7 +742,7 @@ loader_view: fn(image: ^X64LoadedImage, exe: X64Executable, file: Int, memfd: In
     if os_failed(view) -> return "mapping the image file view failed (errno {-view})"
     image.file = view
     head: os_page_round(exe.image_end)
-    mapped := 0
+    ^mapped: 0
     #Unsafe("MAP_FIXED replaces only the view's own fresh pages") {
         mapped = os_map_with(view, head, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE + OS_MAP_FIXED, file, exe.image_at)
     }
@@ -811,7 +811,7 @@ loader_image_symbols: fn(exe: X64Executable, file: Int) -> LoaderImageSymbols? {
         low: if symbols < names -> symbols else -> names
         high: if symbols_end > names_end -> symbols_end else -> names_end
         if low < 64 || high > size -> return None
-        headers := table[64 * k..<64 * k + 64]
+        ^headers: table[64 * k..<64 * k + 64]
         headers.extend(table[64 * link..<64 * link + 64])
         return Val(LoaderImageSymbols{from: low - low % OS_PAGE_SIZE, to: high, headers: headers})
     }
@@ -845,9 +845,9 @@ x64_image_file_read: fn(path: String) -> X64ImageFile {
     before: loader_file_stamp(path)
     if before.len() > 0 {
         size: before[2]
-        head := loader_files.read_at(path, 0, OS_PAGE_SIZE) ?? return loader_image_file_failed("{err}")
+        ^head: loader_files.read_at(path, 0, OS_PAGE_SIZE) ?? return loader_image_file_failed("{err}")
         plan: loader_segments(head, head, 0, size)
-        load_end := 0
+        ^load_end: 0
         loop segment in plan.segments {
             if segment.offset + segment.file_size > load_end {
                 load_end = segment.offset + segment.file_size
@@ -891,9 +891,9 @@ x64_image_part_file: fn(name: String) -> X64ImagePart? {
         phoff: loader_u64(header, 32)
         phnum: loader_u16(header, 56)
         table: x64_self_read(phoff, phnum * 56) ?? return None
-        labels := [[U8]]{}
-        ats := [Int]{}
-        sizes := [Int]{}
+        ^labels: [[U8]]{}
+        ^ats: [Int]{}
+        ^sizes: [Int]{}
         loop k in 0..<phnum {
             if loader_u32(table, k * 56) != 4 -> next
             at: loader_u64(table, k * 56 + 8)
@@ -907,7 +907,7 @@ x64_image_part_file: fn(name: String) -> X64ImagePart? {
             length: loader_u32(note, 4)
             if 16 + length > size -> next
             limit: if 16 + length < note.len() -> 16 + length else -> note.len()
-            nul := -1
+            ^nul: -1
             loop p in 16..<limit {
                 if note[p] == 0 {
                     nul = p
@@ -982,7 +982,7 @@ loader_self_part_lookup: fn(label: [U8], stamp: [Int]) -> LoaderPartLookup {
     }
     loop i in 0..<guard.value.part_labels.len() {
         if guard.value.part_labels[i].len() != label.len() -> next
-        same := true
+        ^same: true
         loop k in 0..<label.len() {
             if guard.value.part_labels[i][k] != label[k] {
                 same = false
@@ -997,7 +997,7 @@ loader_self_part_lookup: fn(label: [U8], stamp: [Int]) -> LoaderPartLookup {
 }
 
 loader_self_parts_store: fn(stamp: [Int], labels: ^^[[U8]], ats: ^^[Int], sizes: ^^[Int]) {
-    guard := LOADER_SELF.guard_edit()
+    ^guard: LOADER_SELF.guard_edit()
     guard.value.part_stamp = stamp
     guard.value.part_labels = labels.move()
     guard.value.part_ats = ats.move()
@@ -1010,7 +1010,7 @@ loader_self_parts_store: fn(stamp: [Int], labels: ^^[[U8]], ats: ^^[Int], sizes:
 // opened. The loader's plan closes it with every close-on-exec descriptor
 // when a program replaces this process (loader_plan).
 loader_self_fd: fn() -> Int {
-    guard := LOADER_SELF.guard_edit()
+    ^guard: LOADER_SELF.guard_edit()
     if !guard.value.opened {
         guard.value.fd = loader_open(X64_SELF_EXECUTABLE)
         guard.value.opened = true
@@ -1026,7 +1026,7 @@ x64_self_read: fn(at: Int, size: Int) -> [U8]? {
     if at < 0 || size < 0 -> return None
     fd: loader_self_fd()
     if fd < 0 -> return None
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if size == 0 -> return Val(bytes)
     link_pad_to(bytes, size, 0)
     if loader_pread(fd, mem.address_of(bytes[0]), size, at) != "" -> return None
@@ -1063,12 +1063,12 @@ LOADER_KEPT_MAGIC: 0x335045454b54454a
 x64_executable_keep: fn(exe: X64Executable, path: String) -> String {
     if exe.image_end > 0 && exe.image_stamp.len() == 0 {
         // copy: the caller's executable stays whole to run.
-        whole := exe.copy()
+        ^whole: exe.copy()
         complete: x64_executable_complete(whole)
         if complete != "" -> return complete
         return x64_executable_keep(x64_executable_whole(x64_executable_bytes(whole)), path)
     }
-    out := [U8]{}
+    ^out: [U8]{}
     image_path: if exe.image_end > 0 -> exe.image_path.bytes() else -> [U8]{}
     stamp: if exe.image_end > 0 -> exe.image_stamp.copy() else -> [Int]{}
     image_size: if exe.image_end > 0 -> exe.image.len() + exe.image_gap else -> 0
@@ -1107,7 +1107,7 @@ loader_kept_run: fn(out: ^[U8], bytes: [U8]) Never! {
 // kept form, or the image's file changed since.
 x64_executable_kept: fn(path: String) -> X64Executable? {
     bytes: loader_files.read_bytes(path) ?? return None
-    reader := LoaderKeptReader{bytes: bytes, at: 0, failed: false}
+    ^reader: LoaderKeptReader{bytes: bytes, at: 0, failed: false}
     if loader_kept_next(reader) != LOADER_KEPT_MAGIC -> return None
     image_end: loader_kept_next(reader)
     tail_at: loader_kept_next(reader)
@@ -1119,11 +1119,11 @@ x64_executable_kept: fn(path: String) -> X64Executable? {
     image_size: loader_kept_next(reader)
     left: loader_kept_next(reader)
     if reader.failed || patches > reader.bytes.len() || stamp_len > 8 || left > 1 -> return None
-    stamp := [Int]{}
+    ^stamp: [Int]{}
     loop _ in 0..<stamp_len -> stamp.push(loader_kept_next(reader))
     image_path: String.from_bytes(loader_kept_take(reader, path_len)) ?? return None
-    patch_at := [Int]{}
-    patch_bytes := [[U8]]{}
+    ^patch_at: [Int]{}
+    ^patch_bytes: [[U8]]{}
     loop _ in 0..<patches {
         patch_at.push(loader_kept_next(reader))
         size: loader_kept_next(reader)
@@ -1190,7 +1190,7 @@ loader_kept_take: fn(reader: ^LoaderKeptReader, size: Int) -> [U8] Never! {
 // file `path`, or the whole file when `size` is negative.
 loader_image_file_whole: fn(path: String, at: Int, size: Int) -> X64ImageFile {
     before: loader_file_stamp(path)
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if size < 0 -> bytes = loader_files.read_bytes(path) ?? return loader_image_file_failed("{err}") else {
         bytes = loader_files.read_at(path, at, size) ?? return loader_image_file_failed("{err}")
     }
@@ -1247,13 +1247,13 @@ x64_executable_write: fn(exe: X64Executable, path: String) -> String {
     }
     if exe.image_stamp.len() == 0 || exe.image_at != 0 || exe.image_stamp[2] != exe.image.len() + exe.image_gap || exe.image_stamp[2] > exe.tail_at + exe.tail.len() {
         // copy: the caller's executable stays whole to run.
-        whole := exe.copy()
+        ^whole: exe.copy()
         complete: x64_executable_complete(whole)
         if complete != "" -> return complete
         loader_files.write_bytes(path, x64_executable_bytes(whole)) ?? return "{err}"
         return ""
     }
-    named := [U8]{}
+    ^named: [U8]{}
     if exe.image_symbols_left {
         no_symbols: "the runtime image {exe.image_path} or the program part has no symbol table"
         if {
@@ -1278,7 +1278,7 @@ x64_executable_write: fn(exe: X64Executable, path: String) -> String {
     }
     // The image file's bytes past its loaded segments read as zeros up to
     // the program part; the program part overwrites the rest.
-    zeros := [U8]{}
+    ^zeros: [U8]{}
     link_pad_to(zeros, exe.tail_at - exe.image_end, 0)
     if zeros.len() > 0 -> loader_files.write_at(path, exe.image_end, zeros) ?? return "{err}"
     if exe.image_symbols_left {
@@ -1315,7 +1315,7 @@ loader_open_as: fn(path: String, flags: Int) -> Int {
     name: loader_c_string(path)
     if name == 0 -> return -12
     fd: Int{os_openat_i64(I64{OS_AT_FDCWD}, I64{name}, I64{flags}, I64{0})}
-    _ := os_unmap(name, path.len() + 1)
+    ^_: os_unmap(name, path.len() + 1)
     fd
 }
 
@@ -1342,9 +1342,9 @@ x64_process_nap: fn(microseconds: Int) {
     }
     #Unsafe("the timespec lies in the fresh zeroed page; nanosleep only reads it") {
         os_store_word(nap + 8, microseconds * 1000)
-        _ := os_syscall(OS_SYS_NANOSLEEP, nap, 0, 0, 0, 0, 0)
+        ^_: os_syscall(OS_SYS_NANOSLEEP, nap, 0, 0, 0, 0, 0)
     }
-    _ := os_unmap(nap, 16)
+    ^_: os_unmap(nap, 16)
 }
 
 // Store `text` and a NUL below `at`; returns its address.
@@ -1379,8 +1379,8 @@ LoaderEnviron: struct {
 // instead. `None` when this process's environment can't be read.
 loader_environ: fn(env: [String]?) -> LoaderEnviron? {
     if env == .Val(rows) {
-        environ := LoaderEnviron{block: [U8]{}, starts: [Int]{}}
-        split := false
+        ^environ: LoaderEnviron{block: [U8]{}, starts: [Int]{}}
+        ^split: false
         loop row in rows {
             bytes: row.bytes()
             if bytes.len() > 0 -> environ.starts.push(environ.block.len())
@@ -1397,15 +1397,15 @@ loader_environ: fn(env: [String]?) -> LoaderEnviron? {
 
 // This process's environment block, its last string NUL-terminated.
 loader_process_environ: fn() -> [U8]? {
-    block := loader_files.read_bytes("/proc/self/environ") ?? return None
+    ^block: loader_files.read_bytes("/proc/self/environ") ?? return None
     if block.len() > 0 && block[block.len() - 1] != (U8{0}) -> block.push(U8{0})
     Val(block)
 }
 
 // Where the strings of an environment block start, in order.
 loader_environ_starts: fn(block: [U8]) -> [Int] {
-    starts := [Int]{}
-    start := 0
+    ^starts: [Int]{}
+    ^start: 0
     loop (k, byte) in block {
         if byte != (U8{0}) -> next
         if k > start -> starts.push(start)
@@ -1418,7 +1418,7 @@ loader_environ_starts: fn(block: [U8]) -> [Int] {
 // isn't UTF-8 is left out. For a launch that changes the environment.
 // A block that is UTF-8 throughout, the usual one, splits as one text.
 x64_process_env: fn() -> [String] {
-    rows := [String]{}
+    ^rows: [String]{}
     block: loader_process_environ() ?? return rows
     if String.from_bytes(block) == .Ok(text) {
         loop row in text.split("\u{0}") {
@@ -1427,7 +1427,7 @@ x64_process_env: fn() -> [String] {
         return rows
     }
     loop start in loader_environ_starts(block) {
-        end := start
+        ^end: start
         loop block[end] != (U8{0}) -> end += 1
         row: String.from_bytes(block[start..<end]) ?? next
         rows.push(row)
@@ -1436,10 +1436,10 @@ x64_process_env: fn() -> [String] {
 }
 
 loader_free: fn(plan: LoaderPlan) {
-    if plan.plan != 0 -> _ := os_unmap(plan.plan, plan.plan_size)
-    if plan.executor != 0 -> _ := os_unmap(plan.executor, OS_PAGE_SIZE)
-    if plan.data != 0 -> _ := os_unmap(plan.data, OS_PAGE_SIZE)
-    if plan.stack_low != 0 -> _ := os_unmap(plan.stack_low, plan.stack_size)
+    if plan.plan != 0 -> ^_: os_unmap(plan.plan, plan.plan_size)
+    if plan.executor != 0 -> ^_: os_unmap(plan.executor, OS_PAGE_SIZE)
+    if plan.data != 0 -> ^_: os_unmap(plan.data, OS_PAGE_SIZE)
+    if plan.stack_low != 0 -> ^_: os_unmap(plan.stack_low, plan.stack_size)
 }
 
 loader_plan_failed: fn(plan: LoaderPlan, failure: String) -> LoaderPlan {
@@ -1519,10 +1519,10 @@ loader_stack_size: fn() -> Int {
 LOADER_TASK_END: 0x7ffffffff000
 
 loader_hex_parse: fn(text: String) -> Int Never! {
-    value := 0
+    ^value: 0
     loop byte in text.bytes() {
         digit: Int{byte}
-        nibble := digit - 48
+        ^nibble: digit - 48
         if digit >= 97 -> nibble = digit - 87
         value = value * 16 + nibble
     }
@@ -1532,7 +1532,7 @@ loader_hex_parse: fn(text: String) -> Int Never! {
 // The [vdso] and [vvar] mappings, as [start, end) pairs: the program's libc
 // finds the vDSO through AT_SYSINFO_EHDR.
 loader_kernel_ranges: fn() -> [Int] {
-    ranges := [Int]{}
+    ^ranges: [Int]{}
     maps: loader_files.read("/proc/self/maps") ?? return ranges
     loop line in maps.split("\n").to_list() {
         if !line.contains("[vdso]") && !line.contains("[vvar") -> next
@@ -1548,11 +1548,11 @@ loader_kernel_ranges: fn() -> [Int] {
 // `kept`, from 0 to LOADER_TASK_END.
 // Raw munmap rows: the executor runs them before the runtime and its sentry exist.
 loader_unmap_records: fn(rows: ^[Int], kept: [Int]) Never! {
-    at := 0
-    last := -1
+    ^at: 0
+    ^last: -1
     loop {
-        soonest := -1
-        soonest_end := 0
+        ^soonest: -1
+        ^soonest_end: 0
         loop k in 0..<(kept.len() /% 2) {
             start: kept[2 * k]
             if start > last && (soonest < 0 || start < soonest) {
@@ -1595,7 +1595,7 @@ loader_fork_records: fn(rows: ^[Int], launch: X64Launch) Never! {
 // descriptors above every source, so no move overwrites a source a later
 // move reads.
 loader_fd_records: fn(rows: ^[Int], fds: [Int]) Never! {
-    spare := fds.len()
+    ^spare: fds.len()
     loop fd in fds {
         if fd >= spare -> spare = fd + 1
     }
@@ -1613,7 +1613,7 @@ loader_fd_records: fn(rows: ^[Int], fds: [Int]) Never! {
 // else child descriptor i becomes this process's fds[i] (-1: stays i) and every
 // descriptor from fds.len() up is closed. `fork`: the first record forks.
 loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool) -> LoaderPlan {
-    plan := LoaderPlan{plan: 0, plan_size: 0, executor: 0, data: 0, stack_low: 0, stack_size: 0, failure: ""}
+    ^plan: LoaderPlan{plan: 0, plan_size: 0, executor: 0, data: 0, stack_low: 0, stack_size: 0, failure: ""}
     if image.failure != "" -> return loader_plan_failed(plan, image.failure)
     data: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(data) {
@@ -1632,7 +1632,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
         return loader_plan_failed(plan, "mapping the executor failed (errno {-executor})")
     }
     plan.executor = executor
-    protected := 0
+    ^protected: 0
     #Unsafe("`executor` is the one-page read+write mapping just made for it") {
         protected = loader_executor_fill(executor)
     }
@@ -1640,7 +1640,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
         return loader_plan_failed(plan, "executable memory was refused (errno {-protected})")
     }
 
-    rows := [Int]{}
+    ^rows: [Int]{}
     if fork -> loader_fork_records(rows, launch)
     if fds.len() > 0 -> loader_fd_records(rows, fds) else {
         listed: loader_files.list_dir("/proc/self/fd") ?? return loader_plan_failed(plan, "couldn't list /proc/self/fd: {err}")
@@ -1655,7 +1655,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     // Handled signals go back to the default; ignored ones stay ignored.
     loop signal in 1..<65 {
         if signal == 9 || signal == 19 -> next
-        handler := 0
+        ^handler: 0
         #Unsafe("rt_sigaction with no new action writes the old one (32 bytes) to the scratch") {
             if os_syscall(OS_SYS_RT_SIGACTION, signal, 0, data + LOADER_DATA_SCRATCH, 8, 0, 0) == 0 {
                 handler = os_load_word(data + LOADER_DATA_SCRATCH)
@@ -1673,7 +1673,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
 
     // The main stack, with a guard page below it.
     stack_size: loader_stack_size()
-    stack := 0
+    ^stack: 0
     #Unsafe("a fresh anonymous reservation aliases nothing") {
         stack = os_map_with(0, stack_size + OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE_ANONYMOUS + OS_MAP_NORESERVE, -1, 0)
     }
@@ -1682,22 +1682,22 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     }
     plan.stack_low = stack
     plan.stack_size = stack_size + OS_PAGE_SIZE
-    _ := os_protect(stack, OS_PAGE_SIZE, 0)
-    at := stack + plan.stack_size
+    ^_: os_protect(stack, OS_PAGE_SIZE, 0)
+    ^at: stack + plan.stack_size
     at -= 16
     random: at
     // The environment's strings, the arguments' below them, each in order
     // (as execve lays them out), so [arg_start, arg_end) and
     // [env_start, env_end) are what /proc/<pid>/cmdline and environ read.
     environ: loader_environ(launch.env) ?? return loader_plan_failed(plan, "couldn't read /proc/self/environ")
-    platform := 0
-    executable := 0
-    relaunch := 0
-    env_end := 0
-    env_start := 0
-    argv := [Int]{}
+    ^platform: 0
+    ^executable: 0
+    ^relaunch: 0
+    ^env_end: 0
+    ^env_start: 0
+    ^argv: [Int]{}
     #Unsafe("getrandom fills the 16 stack bytes at `random`, and each string goes below them, in the fresh main stack this plan owns") {
-        _ := os_syscall(OS_SYS_GETRANDOM, random, 16, 0, 0, 0, 0)
+        ^_: os_syscall(OS_SYS_GETRANDOM, random, 16, 0, 0, 0, 0)
         at = loader_put_text(at, "x86_64")
         platform = at
         at = loader_put_text(at, launch.executable)
@@ -1718,18 +1718,18 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
             argv.push(at)
         }
     }
-    env := [Int]{}
+    ^env: [Int]{}
     loop start in environ.starts -> env.push(env_start + start)
     arg_start: at
     at -= at % 16
-    words := [Int]{launch.argv.len()}
+    ^words: [Int]{launch.argv.len()}
     loop k in 0..<argv.len() -> words.push(argv[argv.len() - 1 - k])
     words.push(0)
     loop address in env -> words.push(address)
     words.push(0)
     // This process's auxiliary vector, less what describes the image.
     auxv: loader_files.read_bytes("/proc/self/auxv") ?? return loader_plan_failed(plan, "couldn't read /proc/self/auxv: {err}")
-    pair := 0
+    ^pair: 0
     loop pair + 16 <= auxv.len() {
         kind: x64_comptime_word(auxv, pair)
         value: x64_comptime_word(auxv, pair + 8)
@@ -1743,7 +1743,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
         words.push(kind)
         words.push(value)
     }
-    own := [Int]{3, image.phdr, 4, 56, 5, image.phnum, 7, 0, 9, image.entry, 15, platform, 25, random, 31, executable, LOADER_AT_IMAGE, image.file, LOADER_AT_IMAGE_SIZE, image.file_size}
+    ^own: [Int]{3, image.phdr, 4, 56, 5, image.phnum, 7, 0, 9, image.entry, 15, platform, 25, random, 31, executable, LOADER_AT_IMAGE, image.file, LOADER_AT_IMAGE_SIZE, image.file_size}
     if launch.executable != "" {
         own.push(LOADER_AT_EXECUTABLE)
         own.push(executable)
@@ -1771,7 +1771,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     // the image, its file view, this plan's pages, the new stack and the
     // kernel's [vdso]/[vvar]; and the old thread pointer goes (ARCH_SET_FS
     // 0; the program's libc sets its own). Only the executor runs then.
-    kept := [Int]{image.low, image.high, image.file, image.file + os_page_round(image.file_size), executor, executor + OS_PAGE_SIZE, data, data + OS_PAGE_SIZE, stack, stack + plan.stack_size}
+    ^kept: [Int]{image.low, image.high, image.file, image.file + os_page_round(image.file_size), executor, executor + OS_PAGE_SIZE, data, data + OS_PAGE_SIZE, stack, stack + plan.stack_size}
     loop word in loader_kernel_ranges() -> kept.push(word)
     // The record block: count, records, stack, entry. Room for the unmaps
     // (one more than the kept ranges, the block's own included) and the
@@ -1809,7 +1809,7 @@ x64_image_exec: fn(image: X64LoadedImage, launch: X64Launch) -> String {
         return confined
     }
     #Unsafe("the executor's records only reset process state; it then enters the loaded image on its own stack") {
-        _ := os_call_address(plan.executor, plan.plan)
+        ^_: os_call_address(plan.executor, plan.plan)
     }
     "the image returned to the loader"
 }
@@ -1857,13 +1857,13 @@ loader_spawn_memfd: fn(exe: X64Executable, launch: X64Launch, fds: [Int], memfd:
     if written != "" {
         return X64Spawned{pid: -1, failure: "couldn't write the image to its memfd: {written}"}
     }
-    moved := [Int]{}
+    ^moved: [Int]{}
     loop fd in fds -> moved.push(fd)
     moved.push(memfd)
     image_fd: fds.len()
     exec: loader_exec_block("/proc/self/fd/{image_fd}", launch.argv, launch.env)
     if exec.failure != "" -> return X64Spawned{pid: -1, failure: exec.failure}
-    rows := [Int]{}
+    ^rows: [Int]{}
     loader_fork_records(rows, launch)
     loader_fd_records(rows, moved)
     // F_SETFD FD_CLOEXEC: execve opens the image through the link, and the
@@ -1874,20 +1874,20 @@ loader_spawn_memfd: fn(exe: X64Executable, launch: X64Launch, fds: [Int], memfd:
     loader_record(rows, OS_SYS_EXECVE, exec.path, exec.argv, exec.envp, 0, 0, 0, 0)
     loader_record(rows, OS_SYS_EXIT_GROUP, 127, 0, 0, 0, 0, 0, 0)
     started: loader_spawn_records(rows, launch)
-    _ := os_unmap(exec.block, exec.size)
+    ^_: os_unmap(exec.block, exec.size)
     started
 }
 
 // Fork and run `rows`, records that end in execve and exit_group, from an
 // executor and record block of their own, freed once the fork returns.
 loader_spawn_records: fn(rows: [Int], launch: X64Launch) -> X64Spawned {
-    plan := LoaderPlan{plan: 0, plan_size: 0, executor: 0, data: 0, stack_low: 0, stack_size: 0, failure: ""}
+    ^plan: LoaderPlan{plan: 0, plan_size: 0, executor: 0, data: 0, stack_low: 0, stack_size: 0, failure: ""}
     executor: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(executor) {
         return X64Spawned{pid: -1, failure: "mapping the executor failed (errno {-executor})"}
     }
     plan.executor = executor
-    protected := 0
+    ^protected: 0
     #Unsafe("`executor` is the one-page read+write mapping just made for it") {
         protected = loader_executor_fill(executor)
     }
@@ -1933,22 +1933,22 @@ LOADER_FORKS: Shared{0}
 // a range with holes marks every mapping there and reports ENOMEM, which is
 // no failure here. The executor's result: the child's pid, or -errno.
 loader_fork: fn(plan: LoaderPlan) -> Int {
-    guard := LOADER_FORKS.guard_edit()
+    ^guard: LOADER_FORKS.guard_edit()
     guard.value += 1
-    pid := 0
+    ^pid: 0
     #Unsafe("the record block holds its count, then that many records of eight words; madvise only marks whether a fork copies the mappings the child unmaps; the executor's first record forks, and the child runs only the executor and enters the image, whose pages and the plan's it keeps") {
         count: os_load_word(plan.plan)
         loop k in 0..<count {
             record: plan.plan + 8 + k * 64
             if os_load_word(record) == OS_SYS_MUNMAP {
-                _ := os_syscall(OS_SYS_MADVISE, os_load_word(record + 8), os_load_word(record + 16), OS_MADV_DONTFORK, 0, 0, 0)
+                ^_: os_syscall(OS_SYS_MADVISE, os_load_word(record + 8), os_load_word(record + 16), OS_MADV_DONTFORK, 0, 0, 0)
             }
         }
         pid = os_call_address(plan.executor, plan.plan)
         loop k in 0..<count {
             record: plan.plan + 8 + k * 64
             if os_load_word(record) == OS_SYS_MUNMAP {
-                _ := os_syscall(OS_SYS_MADVISE, os_load_word(record + 8), os_load_word(record + 16), OS_MADV_DOFORK, 0, 0, 0)
+                ^_: os_syscall(OS_SYS_MADVISE, os_load_word(record + 8), os_load_word(record + 16), OS_MADV_DOFORK, 0, 0, 0)
             }
         }
     }
@@ -1974,16 +1974,16 @@ x64_confine_reads: fn(paths: [String]) -> String {
     if paths.len() == 0 -> return ""
     page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(page) -> return "mapping the read confinement failed (errno {-page})"
-    ruleset := 0
+    ^ruleset: 0
     #Unsafe("landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page") {
         os_store_word(page, LOADER_LANDLOCK_READ_FILE + LOADER_LANDLOCK_READ_DIR)
         ruleset = os_syscall(OS_SYS_LANDLOCK_CREATE_RULESET, page, 8, 0, 0, 0, 0)
     }
     if os_failed(ruleset) {
-        _ := os_unmap(page, OS_PAGE_SIZE)
+        ^_: os_unmap(page, OS_PAGE_SIZE)
         return "this kernel can't confine a program's reads (Landlock, errno {-ruleset})"
     }
-    failure := ""
+    ^failure: ""
     loop path in paths {
         #Unsafe("`page` is this function's fresh scratch page") {
             failure = loader_landlock_allow(ruleset, page, path)
@@ -1992,7 +1992,7 @@ x64_confine_reads: fn(paths: [String]) -> String {
     }
     #Unsafe("no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's") {
         if failure == "" {
-            result := os_syscall(OS_SYS_PRCTL, OS_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0, 0)
+            ^result: os_syscall(OS_SYS_PRCTL, OS_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0, 0)
             if !os_failed(result) {
                 result = os_syscall(OS_SYS_LANDLOCK_RESTRICT_SELF, ruleset, 0, 0, 0, 0, 0)
             }
@@ -2000,9 +2000,9 @@ x64_confine_reads: fn(paths: [String]) -> String {
                 failure = "the kernel refused the read confinement (errno {-result})"
             }
         }
-        _ := os_syscall(OS_SYS_CLOSE, ruleset, 0, 0, 0, 0, 0)
+        ^_: os_syscall(OS_SYS_CLOSE, ruleset, 0, 0, 0, 0, 0)
     }
-    _ := os_unmap(page, OS_PAGE_SIZE)
+    ^_: os_unmap(page, OS_PAGE_SIZE)
     failure
 }
 
@@ -2013,18 +2013,18 @@ x64_confine_reads: fn(paths: [String]) -> String {
 loader_landlock_allow: fn(ruleset: Int, page: Int, path: String) -> String {
     name: loader_c_string(path)
     if name == 0 -> return "mapping the granted path `{path}` failed"
-    access := LOADER_LANDLOCK_READ_FILE + LOADER_LANDLOCK_READ_DIR
-    fd := os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, name, OS_O_PATH_CLOEXEC + OS_O_DIRECTORY, 0, 0, 0)
+    ^access: LOADER_LANDLOCK_READ_FILE + LOADER_LANDLOCK_READ_DIR
+    ^fd: os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, name, OS_O_PATH_CLOEXEC + OS_O_DIRECTORY, 0, 0, 0)
     if fd == -OS_ENOTDIR {
         access = LOADER_LANDLOCK_READ_FILE
         fd = os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, name, OS_O_PATH_CLOEXEC, 0, 0, 0)
     }
-    _ := os_unmap(name, path.len() + 1)
+    ^_: os_unmap(name, path.len() + 1)
     if os_failed(fd) -> return "the granted path `{path}` can't be opened (errno {-fd})"
     os_store_word(page, access)
     os_store_word(page + 8, fd)
     result: os_syscall(OS_SYS_LANDLOCK_ADD_RULE, ruleset, LOADER_LANDLOCK_RULE_PATH_BENEATH, page, 0, 0, 0)
-    _ := os_syscall(OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0)
+    ^_: os_syscall(OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0)
     if os_failed(result) {
         return "the kernel refused to let the program read `{path}` (errno {-result})"
     }
@@ -2035,19 +2035,19 @@ loader_landlock_allow: fn(ruleset: Int, page: Int, path: String) -> String {
 x64_process_wait: fn(pid: Int) -> Int {
     word: os_map(8, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(word) -> return word
-    result := -OS_EINTR
+    ^result: -OS_EINTR
     #Unsafe("wait4 writes one int status to the fresh page") {
         loop result == -OS_EINTR -> result = os_syscall(OS_SYS_WAIT4, pid, word, 0, 0, 0, 0)
         if result == pid -> result = os_load_word(word) & 0xffffffff
     }
-    _ := os_unmap(word, 8)
+    ^_: os_unmap(word, 8)
     result
 }
 
 // Stop and wait for the child `pid` (a dev run being replaced).
 x64_process_stop: fn(pid: Int) {
-    _ := os_kill_i64(I64{pid}, I64{9})
-    _ := x64_process_wait(pid)
+    ^_: os_kill_i64(I64{pid}, I64{9})
+    ^_: x64_process_wait(pid)
 }
 
 // Ignore SIGINT and SIGQUIT while a child runs in the foreground, as
@@ -2066,10 +2066,10 @@ loader_foreground: fn() {
     }
     #Unsafe("a kernel sigaction with handler SIG_IGN on a fresh page") {
         os_store_word(action, 1)
-        _ := os_syscall(OS_SYS_RT_SIGACTION, 2, action, 0, 8, 0, 0)
-        _ := os_syscall(OS_SYS_RT_SIGACTION, 3, action, 0, 8, 0, 0)
+        ^_: os_syscall(OS_SYS_RT_SIGACTION, 2, action, 0, 8, 0, 0)
+        ^_: os_syscall(OS_SYS_RT_SIGACTION, 3, action, 0, 8, 0, 0)
     }
-    _ := os_unmap(action, 32)
+    ^_: os_unmap(action, 32)
 }
 
 // End this process the way wait status `status` says its child ended: the
@@ -2081,10 +2081,10 @@ x64_process_mirror: fn(status: Int) -> Int {
     page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if !os_failed(page) {
         #Unsafe("a zeroed kernel sigaction (SIG_DFL) on a fresh page") {
-            _ := os_syscall_forwarded_i64(I64{OS_SYS_RT_SIGACTION}, I64{signal}, I64{page}, I64{0}, I64{8}, I64{0}, I64{0})
+            ^_: os_syscall_forwarded_i64(I64{OS_SYS_RT_SIGACTION}, I64{signal}, I64{page}, I64{0}, I64{8}, I64{0}, I64{0})
         }
-        _ := os_rt_sigprocmask_i64(I64{2}, I64{page + 64}, I64{0}, I64{8})
-        _ := os_kill_i64(os_getpid_i64(), I64{signal})
+        ^_: os_rt_sigprocmask_i64(I64{2}, I64{page + 64}, I64{0}, I64{8})
+        ^_: os_kill_i64(os_getpid_i64(), I64{signal})
     }
     128 + signal
 }
@@ -2097,13 +2097,13 @@ x64_file_exec: fn(path: String, launch: X64Launch) -> String {
     if exec.failure != "" -> return exec.failure
     confined: x64_confine_reads(launch.read_scope)
     if confined != "" {
-        _ := os_unmap(exec.block, exec.size)
+        ^_: os_unmap(exec.block, exec.size)
         return confined
     }
     // execve keeps the signal mask; the program starts with none blocked.
-    _ := os_rt_sigprocmask_i64(I64{2}, I64{exec.block}, I64{0}, I64{8})
+    ^_: os_rt_sigprocmask_i64(I64{2}, I64{exec.block}, I64{0}, I64{8})
     result: Int{os_execve_i64(I64{exec.path}, I64{exec.argv}, I64{exec.envp})}
-    _ := os_unmap(exec.block, exec.size)
+    ^_: os_unmap(exec.block, exec.size)
     "execve of {path} failed (errno {-result})"
 }
 
@@ -2124,18 +2124,18 @@ LoaderExecBlock: struct {
 // included) and the environment `env` (as X64Launch.env).
 loader_exec_block: fn(path: String, argv: [String], env: [String]?) -> LoaderExecBlock {
     environ: loader_environ(env) ?? return loader_exec_failed("couldn't read /proc/self/environ")
-    texts := [String]{path}
+    ^texts: [String]{path}
     loop argument in argv -> texts.push(argument.copy())
-    bytes := 8 * (argv.len() + environ.starts.len() + 2) + 16 + environ.block.len()
+    ^bytes: 8 * (argv.len() + environ.starts.len() + 2) + 16 + environ.block.len()
     loop text in texts -> bytes += text.bytes().len() + 1
     size: os_page_round(bytes)
     block: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(block) {
         return loader_exec_failed("mapping execve's arguments failed (errno {-block})")
     }
-    at := block + size
-    env_start := 0
-    addresses := [Int]{}
+    ^at: block + size
+    ^env_start: 0
+    ^addresses: [Int]{}
     words: block + 16
     envp: words + 8 * (argv.len() + 1)
     #Unsafe("the bytes below `at` and the two arrays lie in the fresh block mapped above, sized for every string and word") {
@@ -2512,7 +2512,7 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
     loader_close(source)
     if trace.pid > 0 {
         #Unsafe("PTRACE_SETOPTIONS on the helper's own stopped tracee") {
-            _ := x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, trace.pid, 0, LOADER_PTRACE_O_EXITKILL | LOADER_PTRACE_O_TRACECLONE, 0, 0)
+            ^_: x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, trace.pid, 0, LOADER_PTRACE_O_EXITKILL | LOADER_PTRACE_O_TRACECLONE, 0, 0)
         }
     }
     trace
@@ -2530,10 +2530,10 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
 // SIGINT and SIGQUIT from here on, as x64_counted_run does, so the
 // terminal's Ctrl-C reaches the command, which decides.
 x64_trace_command: fn(path: String, argv: [String], env: [String]?) -> X64Trace {
-    trace := loader_trace_start(path, argv, env, 0, 1, 2, false)
+    ^trace: loader_trace_start(path, argv, env, 0, 1, 2, false)
     if trace.pid <= 0 -> return trace
     options: LOADER_PTRACE_O_EXITKILL | LOADER_PTRACE_O_TRACESYSGOOD | LOADER_PTRACE_O_TRACEFORK | LOADER_PTRACE_O_TRACEVFORK | LOADER_PTRACE_O_TRACECLONE | LOADER_PTRACE_O_TRACEEXEC
-    set := 0
+    ^set: 0
     #Unsafe("PTRACE_SETOPTIONS on the helper's own stopped tracee") {
         set = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, trace.pid, 0, options, 0, 0)
     }
@@ -2553,7 +2553,7 @@ x64_trace_command: fn(path: String, argv: [String], env: [String]?) -> X64Trace 
 // `errors`, its SIGPIPE is the default again (a Jet process ignores it),
 // and `fixed` turns its address randomization off.
 loader_trace_start: fn(path: String, argv: [String], env: [String]?, input: Int, output: Int, errors: Int, fixed: Bool) -> X64Trace {
-    trace := X64Trace{pid: -1, scratch: 0, failure: ""}
+    ^trace: X64Trace{pid: -1, scratch: 0, failure: ""}
     scratch: os_map_with(0, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED_ANONYMOUS, -1, 0)
     if os_failed(scratch) {
         trace.failure = "mapping the tracer's scratch page failed (errno {-scratch})"
@@ -2568,7 +2568,7 @@ loader_trace_start: fn(path: String, argv: [String], env: [String]?, input: Int,
     ends: loader_trace_ends(trace)
     theirs: ends.channel
     life: ends.lifeline
-    helper := -1
+    ^helper: -1
     if !os_failed(theirs) && !os_failed(life) {
         // The words the helper and the program use, made before the fork.
         call: I64{scratch + LOADER_TRACE_CALL}
@@ -2595,18 +2595,18 @@ loader_trace_start: fn(path: String, argv: [String], env: [String]?, input: Int,
                     traced: os_ptrace_i64(I64{LOADER_PTRACE_TRACEME}, I64{0}, I64{0}, I64{0})
                     if traced < 0 {
                         os_store_i64(refused, traced)
-                        _ := os_exit_group_i64(I64{127})
+                        ^_: os_exit_group_i64(I64{127})
                     }
                     if unrandomized {
                         persona: os_personality_i64(I64{0xffffffff})
                         if persona >= 0 {
-                            _ := os_personality_i64(persona | I64{LOADER_ADDR_NO_RANDOMIZE})
+                            ^_: os_personality_i64(persona | I64{LOADER_ADDR_NO_RANDOMIZE})
                         }
                     }
-                    _ := os_syscall_forwarded_i64(I64{OS_SYS_RT_SIGACTION}, I64{13}, default_action, I64{0}, I64{8}, I64{0}, I64{0})
-                    _ := os_rt_sigprocmask_i64(I64{2}, program_mask, I64{0}, I64{8})
-                    _ := os_execve_i64(program_path, program_argv, program_envp)
-                    _ := os_exit_group_i64(I64{127})
+                    ^_: os_syscall_forwarded_i64(I64{OS_SYS_RT_SIGACTION}, I64{13}, default_action, I64{0}, I64{8}, I64{0}, I64{0})
+                    ^_: os_rt_sigprocmask_i64(I64{2}, program_mask, I64{0}, I64{8})
+                    ^_: os_execve_i64(program_path, program_argv, program_envp)
+                    ^_: os_exit_group_i64(I64{127})
                 }
                 loader_trace_serve(call, program)
             }
@@ -2614,7 +2614,7 @@ loader_trace_start: fn(path: String, argv: [String], env: [String]?, input: Int,
     }
     if !os_failed(theirs) -> loader_close(theirs)
     if !os_failed(life) -> loader_close(life)
-    _ := os_unmap(exec.block, exec.size)
+    ^_: os_unmap(exec.block, exec.size)
     if os_failed(theirs) {
         trace.failure = "making the tracer's channel failed (errno {-theirs})"
         return trace
@@ -2639,7 +2639,7 @@ loader_trace_start: fn(path: String, argv: [String], env: [String]?, input: Int,
     status: x64_trace_wait(trace).status
     if status & 0xff != 0x7f || (status >> 8) & 0xff != 5 {
         trace.pid = -1
-        refusal := 0
+        ^refusal: 0
         #Unsafe("the program stored its refused PTRACE_TRACEME's result in the shared scratch page before it exited") {
             refusal = Int{os_load_i64(I64{scratch + LOADER_TRACE_REFUSED})}
         }
@@ -2662,7 +2662,7 @@ loader_trace_start: fn(path: String, argv: [String], env: [String]?, input: Int,
 #Unsafe("`call` is the call words of the trace's scratch page, which the helper shares with this process; the helper makes the system calls the words name")
 loader_trace_serve: fn(call: I64, program: I64) {
     os_store_i64(call + I64{LOADER_TRACE_RESULT}, program)
-    served := os_write_i64(I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}) == I64{1}
+    ^served: os_write_i64(I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}) == I64{1}
     loop served {
         got: os_read_i64(I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1})
         if got == (I64{-OS_EINTR}) -> next
@@ -2671,7 +2671,7 @@ loader_trace_serve: fn(call: I64, program: I64) {
         os_store_i64(call + I64{LOADER_TRACE_RESULT}, result)
         served = os_write_i64(I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}) == I64{1}
     }
-    _ := os_exit_group_i64(I64{0})
+    ^_: os_exit_group_i64(I64{0})
 }
 
 // One step of a command's trace, made by its helper in one round trip
@@ -2686,15 +2686,15 @@ loader_trace_step: fn(call: I64) -> I64 {
     page: call - I64{LOADER_TRACE_CALL}
     thread: os_load_i64(call + I64{8})
     if thread > (I64{0}) {
-        _ := os_ptrace_i64(I64{LOADER_PTRACE_SYSCALL}, thread, I64{0}, os_load_i64(call + I64{16}))
+        ^_: os_ptrace_i64(I64{LOADER_PTRACE_SYSCALL}, thread, I64{0}, os_load_i64(call + I64{16}))
     }
-    waited := I64{-OS_EINTR}
+    ^waited: I64{-OS_EINTR}
     loop waited == (I64{-OS_EINTR}) {
         waited = os_wait4_i64(I64{-1}, page + I64{LOADER_TRACE_WORD}, I64{LOADER_WAIT_ALL}, page + I64{LOADER_TRACE_RUSAGE})
     }
     stopped: (os_load_i64(page + I64{LOADER_TRACE_WORD}) & (I64{0xff})) == (I64{0x7f})
     if waited > (I64{0}) && stopped {
-        _ := os_ptrace_i64(I64{LOADER_PTRACE_GETREGS}, waited, I64{0}, page)
+        ^_: os_ptrace_i64(I64{LOADER_PTRACE_GETREGS}, waited, I64{0}, page)
     }
     waited
 }
@@ -2705,7 +2705,7 @@ loader_trace_step: fn(call: I64) -> I64 {
 // trip to the helper (loader_trace_step). The step's thread is -errno when
 // the wait failed (-ECHILD once nothing traced is left).
 x64_trace_syscall_step: fn(trace: X64Trace, thread: Int, signal: Int) -> X64TraceStep {
-    step := X64TraceStep{thread: 0, status: 0, registers: [Int]{}, cpu_ns: 0, peak_rss_bytes: 0}
+    ^step: X64TraceStep{thread: 0, status: 0, registers: [Int]{}, cpu_ns: 0, peak_rss_bytes: 0}
     #Unsafe("the helper's step writes the status word, the rusage and the register block of the trace's scratch page, which are read once it answers") {
         step.thread = x64_trace_call(trace, LOADER_TRACE_STEP, thread, signal, 0, 0, 0, 0)
         if step.thread > 0 {
@@ -2737,7 +2737,7 @@ LoaderTraceEnds: struct {
 // keeps one end of each (X64Trace.channel, and the lifeline's write end as
 // X64Trace.lifeline).
 loader_trace_ends: fn(trace: ^X64Trace) -> LoaderTraceEnds {
-    ends := LoaderTraceEnds{channel: 0, lifeline: 0}
+    ^ends: LoaderTraceEnds{channel: 0, lifeline: 0}
     #Unsafe("socketpair and pipe2 each write their two int descriptors to the trace's scratch word, which is read before the next call") {
         pair: os_syscall(OS_SYS_SOCKETPAIR, LOADER_SOCKET_UNIX, LOADER_SOCKET_STREAM_CLOEXEC, 0, trace.scratch + LOADER_TRACE_WORD, 0, 0)
         ends.channel = if os_failed(pair) -> pair else -> Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})}
@@ -2783,21 +2783,21 @@ loader_trace_hold: fn(lifeline: I64, channel: I64, input: I64, output: I64, erro
     killing: os_fcntl_i64(held, I64{LOADER_F_SETSIG}, I64{LOADER_SIGKILL})
     flagged: os_fcntl_i64(held, I64{LOADER_F_SETFL}, I64{LOADER_O_ASYNC})
     if held <= (I64{LOADER_TRACE_LIFELINE_FD}) || owned != (I64{0}) || killing != (I64{0}) || flagged != (I64{0}) {
-        _ := os_exit_group_i64(I64{0})
+        ^_: os_exit_group_i64(I64{0})
     }
     moved: os_fcntl_i64(channel, I64{LOADER_F_DUPFD_CLOEXEC}, I64{LOADER_TRACE_FD})
-    _ := os_dup2_i64(input, I64{0})
-    _ := os_dup2_i64(output, I64{1})
-    _ := os_dup2_i64(errors, I64{2})
+    ^_: os_dup2_i64(input, I64{0})
+    ^_: os_dup2_i64(output, I64{1})
+    ^_: os_dup2_i64(errors, I64{2})
     if moved != (I64{LOADER_TRACE_FD}) {
-        _ := os_dup3_i64(moved, I64{LOADER_TRACE_FD}, I64{LOADER_O_CLOEXEC})
+        ^_: os_dup3_i64(moved, I64{LOADER_TRACE_FD}, I64{LOADER_O_CLOEXEC})
     }
     if os_dup3_i64(held, I64{LOADER_TRACE_LIFELINE_FD}, I64{LOADER_O_CLOEXEC}) != (I64{LOADER_TRACE_LIFELINE_FD}) {
-        _ := os_exit_group_i64(I64{0})
+        ^_: os_exit_group_i64(I64{0})
     }
-    _ := os_close_range_i64(I64{LOADER_TRACE_LIFELINE_FD + 1}, I64{0xffffffff}, I64{0})
+    ^_: os_close_range_i64(I64{LOADER_TRACE_LIFELINE_FD + 1}, I64{0xffffffff}, I64{0})
     os_store_i64(call + I64{LOADER_TRACE_MASK}, I64{-1})
-    _ := os_rt_sigprocmask_i64(I64{2}, call + I64{LOADER_TRACE_MASK}, I64{0}, I64{8})
+    ^_: os_rt_sigprocmask_i64(I64{2}, call + I64{LOADER_TRACE_MASK}, I64{0}, I64{8})
 }
 
 // A trace of the program `pid`, already running, by a new helper that
@@ -2806,7 +2806,7 @@ loader_trace_hold: fn(lifeline: I64, channel: I64, input: I64, output: I64, erro
 // helper ends (no LOADER_PTRACE_O_EXITKILL), so a trace whose threads
 // x64_trace_detach let go closes without ending it once its pid is -1.
 x64_trace_attach: fn(pid: Int) -> X64Trace {
-    trace := X64Trace{pid: -1, scratch: 0, failure: ""}
+    ^trace: X64Trace{pid: -1, scratch: 0, failure: ""}
     scratch: os_map_with(0, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED_ANONYMOUS, -1, 0)
     if os_failed(scratch) {
         trace.failure = "mapping the tracer's scratch page failed (errno {-scratch})"
@@ -2817,7 +2817,7 @@ x64_trace_attach: fn(pid: Int) -> X64Trace {
     theirs: ends.channel
     life: ends.lifeline
     null: loader_open("/dev/null")
-    helper := -1
+    ^helper: -1
     if !os_failed(theirs) && !os_failed(life) && !os_failed(null) {
         call: I64{scratch + LOADER_TRACE_CALL}
         channel: I64{theirs}
@@ -2868,7 +2868,7 @@ x64_trace_attach: fn(pid: Int) -> X64Trace {
 // stopped, or -errno: -EPERM when the system won't let this user trace it,
 // -ESRCH when it has ended.
 x64_trace_seize: fn(trace: X64Trace, thread: Int) -> Int {
-    seized := 0
+    ^seized: 0
     #Unsafe("the helper's PTRACE_SEIZE and PTRACE_INTERRUPT of a thread of the program it is to trace") {
         seized = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SEIZE, thread, 0, LOADER_PTRACE_O_TRACECLONE, 0, 0)
         if !os_failed(seized) {
@@ -2882,7 +2882,7 @@ x64_trace_seize: fn(trace: X64Trace, thread: Int) -> Int {
 // Let the trace's stopped thread go untraced, delivering `signal` (0:
 // none). False when the kernel refused.
 x64_trace_detach: fn(trace: X64Trace, signal: Int) -> Bool {
-    result := 0
+    ^result: 0
     #Unsafe("the helper's PTRACE_DETACH of its own stopped tracee") {
         result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_DETACH, trace.thread, 0, signal, 0, 0)
     }
@@ -2896,7 +2896,7 @@ x64_trace_detach: fn(trace: X64Trace, signal: Int) -> Bool {
 x64_trace_call: fn(trace: X64Trace, number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int {
     if trace.channel < 0 -> return -LOADER_ESRCH
     call: I64{trace.scratch + LOADER_TRACE_CALL}
-    sent := -OS_EINTR
+    ^sent: -OS_EINTR
     #Unsafe("the call's number and arguments fill the first seven words of the trace's call; sendto reads its signal byte") {
         os_store_i64(call, I64{number})
         os_store_i64(call + I64{8}, I64{a1})
@@ -2917,8 +2917,8 @@ x64_trace_call: fn(trace: X64Trace, number: Int, a1: Int, a2: Int, a3: Int, a4: 
 // ended.
 x64_trace_reply: fn(trace: X64Trace) -> Int {
     if trace.channel < 0 -> return -LOADER_ESRCH
-    got := -OS_EINTR
-    result := -LOADER_ESRCH
+    ^got: -OS_EINTR
+    ^result: -LOADER_ESRCH
     #Unsafe("read writes one byte to the trace's call signal byte; the helper stored the result before it answered") {
         loop got == -OS_EINTR {
             got = os_syscall(OS_SYS_READ, trace.channel, trace.scratch + LOADER_TRACE_CALL + LOADER_TRACE_SIGNAL, 1, 0, 0, 0)
@@ -2933,8 +2933,8 @@ x64_trace_reply: fn(trace: X64Trace) -> Int {
 // Wait for any thread of the traced program to stop or end: which thread,
 // and its wait status.
 x64_trace_wait: fn(trace: X64Trace) -> X64TraceStop {
-    result := -OS_EINTR
-    status := 0
+    ^result: -OS_EINTR
+    ^status: 0
     #Unsafe("the helper's wait4 writes one int status to the trace's scratch word") {
         loop result == -OS_EINTR {
             result = x64_trace_call(trace, OS_SYS_WAIT4, -1, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL, 0, 0, 0)
@@ -2951,8 +2951,8 @@ x64_trace_wait: fn(trace: X64Trace) -> X64TraceStop {
 // every thread runs. `thread` is -errno when the wait failed (-ECHILD once
 // the helper traces nothing).
 x64_trace_wait_now: fn(trace: X64Trace) -> X64TraceStop? {
-    result := -OS_EINTR
-    status := 0
+    ^result: -OS_EINTR
+    ^status: 0
     #Unsafe("the helper's wait4 writes one int status to the trace's scratch word") {
         loop result == -OS_EINTR {
             result = x64_trace_call(trace, OS_SYS_WAIT4, -1, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL | LOADER_WAIT_NOHANG, 0, 0, 0)
@@ -2972,9 +2972,9 @@ x64_trace_wait_now: fn(trace: X64Trace) -> X64TraceStop? {
 // in turn.
 x64_trace_wait_or_input: fn(trace: X64Trace, input: Int) -> X64TraceStop? {
     loop {
-        result := -OS_EINTR
-        status := 0
-        ready := 0
+        ^result: -OS_EINTR
+        ^status: 0
+        ^ready: 0
         #Unsafe("the helper's wait4 writes one int status to the trace's scratch word; poll reads and writes the one pollfd at LOADER_TRACE_POLL, in the scratch page") {
             loop result == -OS_EINTR {
                 result = x64_trace_call(trace, OS_SYS_WAIT4, -1, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL | LOADER_WAIT_NOHANG, 0, 0, 0)
@@ -3006,7 +3006,7 @@ x64_trace_stop: fn(trace: X64Trace, thread: Int) -> Bool {
 // False when the kernel refused.
 x64_trace_follow_exits: fn(trace: X64Trace, thread: Int, kill: Bool) -> Bool {
     options: LOADER_PTRACE_O_TRACECLONE | LOADER_PTRACE_O_TRACEEXIT | if kill -> LOADER_PTRACE_O_EXITKILL else -> 0
-    result := 0
+    ^result: 0
     #Unsafe("PTRACE_SETOPTIONS on a stopped thread of the helper's own tracee") {
         result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, thread, 0, options, 0, 0)
     }
@@ -3039,7 +3039,7 @@ x64_trace_resume_to_syscall: fn(trace: X64Trace, signal: Int) -> Bool {
 
 // The PTRACE_CONT-like `request` on the trace's stopped thread.
 x64_trace_go: fn(trace: X64Trace, request: Int, signal: Int) -> Bool {
-    result := 0
+    ^result: 0
     #Unsafe("the helper's PTRACE_CONT, PTRACE_SINGLESTEP or PTRACE_SYSCALL on its own stopped tracee") {
         result = x64_trace_call(trace, OS_SYS_PTRACE, request, trace.thread, 0, signal, 0, 0)
     }
@@ -3048,7 +3048,7 @@ x64_trace_go: fn(trace: X64Trace, request: Int, signal: Int) -> Bool {
 
 // The stopped program's word at `address`; None when it isn't mapped.
 x64_trace_peek: fn(trace: X64Trace, address: Int) -> I64? {
-    word := I64?{None}
+    ^word: I64?{None}
     #Unsafe("the helper's PTRACE_PEEKDATA stores the tracee's word to the trace's scratch word") {
         if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_PEEKDATA, trace.thread, address, trace.scratch + LOADER_TRACE_WORD, 0, 0)) {
             word = Val(os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD}))
@@ -3059,7 +3059,7 @@ x64_trace_peek: fn(trace: X64Trace, address: Int) -> I64? {
 
 // Write `word` at `address` of the stopped program, its code included.
 x64_trace_poke: fn(trace: X64Trace, address: Int, word: I64) -> Bool {
-    result := 0
+    ^result: 0
     #Unsafe("the helper's PTRACE_POKEDATA writes one word of its own stopped tracee") {
         result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_POKEDATA, trace.thread, address, Int{word}, 0, 0)
     }
@@ -3071,11 +3071,11 @@ x64_trace_poke: fn(trace: X64Trace, address: Int, word: I64) -> Bool {
 // trace's thread, stopped and so still there: a main thread that ended
 // before the others has no memory left to read through.
 x64_trace_read: fn(trace: X64Trace, address: Int, count: Int, chunk: Int{OS_PAGE_SIZE - LOADER_TRACE_BYTES}) -> [U8]? {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if count > 64 -> bytes.try_reserve(count) ?? return None
     loop bytes.len() < count {
         want: if count - bytes.len() < chunk -> count - bytes.len() else -> chunk
-        got := 0
+        ^got: 0
         #Unsafe("process_vm_readv reads the two iovecs at LOADER_TRACE_IOV and writes at most `want` bytes from LOADER_TRACE_BYTES, inside the trace's scratch page") {
             iov: trace.scratch + LOADER_TRACE_IOV
             os_store_word(iov, trace.scratch + LOADER_TRACE_BYTES)
@@ -3105,8 +3105,8 @@ x64_trace_write: fn(trace: X64Trace, address: Int, bytes: [U8]) -> Bool {
     if trace.thread <= 0 || trace.scratch == 0 -> return false
     path: "/proc/{trace.thread}/mem".bytes()
     chunk: OS_PAGE_SIZE - LOADER_TRACE_BYTES
-    fd := -1
-    done := 0
+    ^fd: -1
+    ^done: 0
     #Unsafe("the mem file's NUL-terminated path, then each piece of `bytes`, at most `chunk` long, are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and openat and pwrite64 read them there") {
         loop (k, byte) in path { os_store_byte(trace.scratch + LOADER_TRACE_BYTES + k, Int{byte}) }
         os_store_byte(trace.scratch + LOADER_TRACE_BYTES + path.len(), 0)
@@ -3141,7 +3141,7 @@ x64_trace_permitted: fn(pid: Int) -> Int {
 // The trace's stopped thread's registers, X64_TRACE_REGISTERS words in the
 // kernel's order; None when the kernel refused.
 x64_trace_registers: fn(trace: X64Trace) -> [Int]? {
-    registers := [Int]?{None}
+    ^registers: [Int]?{None}
     #Unsafe("the helper's PTRACE_GETREGS writes the register block at the start of the trace's scratch page") {
         if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_GETREGS, trace.thread, 0, trace.scratch, 0, 0)) {
             registers = Val(loop k in 0..<X64_TRACE_REGISTERS -> Int{os_load_i64(I64{trace.scratch + 8 * k})})
@@ -3153,7 +3153,7 @@ x64_trace_registers: fn(trace: X64Trace) -> [Int]? {
 // The trace's stopped thread's floating-point block, X64_TRACE_FP_BYTES
 // bytes in the kernel's layout; None when the kernel refused.
 x64_trace_fp_registers: fn(trace: X64Trace) -> [U8]? {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     #Unsafe("the helper's PTRACE_GETFPREGS writes the 512-byte block at LOADER_TRACE_BYTES of the trace's scratch page, inside it, and the block is copied from there") {
         if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_GETFPREGS, trace.thread, 0, trace.scratch + LOADER_TRACE_BYTES, 0, 0)) {
             if !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(trace.scratch + LOADER_TRACE_BYTES), X64_TRACE_FP_BYTES) {
@@ -3169,7 +3169,7 @@ x64_trace_fp_registers: fn(trace: X64Trace) -> [U8]? {
 // x64_trace_registers gave them).
 x64_trace_set_registers: fn(trace: X64Trace, registers: [Int]) -> Bool {
     if registers.len() != X64_TRACE_REGISTERS -> return false
-    result := 0
+    ^result: 0
     #Unsafe("the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page") {
         loop (k, value) in registers -> os_store_i64(I64{trace.scratch + 8 * k}, I64{value})
         result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETREGS, trace.thread, 0, trace.scratch, 0, 0)
@@ -3181,7 +3181,7 @@ x64_trace_set_registers: fn(trace: X64Trace, registers: [Int]) -> Bool {
 // watched addresses, DR6 the status, DR7 the control); None when the
 // kernel refused. Each thread has its own.
 x64_trace_debug_register: fn(trace: X64Trace, index: Int) -> Int? {
-    word := Int?{None}
+    ^word: Int?{None}
     #Unsafe("the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word") {
         if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_PEEKUSER, trace.thread, LOADER_TRACE_DEBUG_REGISTERS + 8 * index, trace.scratch + LOADER_TRACE_WORD, 0, 0)) {
             word = Val(Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})})
@@ -3194,7 +3194,7 @@ x64_trace_debug_register: fn(trace: X64Trace, index: Int) -> Int? {
 // false when the kernel refused (an address outside the program, or a
 // control word that enables a register holding none).
 x64_trace_set_debug_register: fn(trace: X64Trace, index: Int, value: Int) -> Bool {
-    result := 0
+    ^result: 0
     #Unsafe("the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee") {
         result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_POKEUSER, trace.thread, LOADER_TRACE_DEBUG_REGISTERS + 8 * index, value, 0, 0)
     }
@@ -3212,7 +3212,7 @@ x64_trace_of: fn(trace: X64Trace, pid: Int) -> X64Trace {
 // The message of the trace's thread's last ptrace event: at a clone event,
 // the new thread's or process's pid. None when the kernel refused.
 x64_trace_event_message: fn(trace: X64Trace) -> Int? {
-    message := Int?{None}
+    ^message: Int?{None}
     #Unsafe("the helper's PTRACE_GETEVENTMSG stores the message to the trace's scratch word") {
         if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_GETEVENTMSG, trace.thread, 0, trace.scratch + LOADER_TRACE_WORD, 0, 0)) {
             message = Val(Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})})
@@ -3228,7 +3228,7 @@ x64_trace_event_message: fn(trace: X64Trace) -> Int? {
 // signal is one a process sent (si_code 0 or below), which names no
 // address.
 x64_trace_fault_address: fn(trace: X64Trace) -> Int? {
-    address := Int?{None}
+    ^address: Int?{None}
     #Unsafe("the helper's PTRACE_GETSIGINFO writes the 128-byte siginfo at the start of the trace's scratch page") {
         if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_GETSIGINFO, trace.thread, 0, trace.scratch, 0, 0)) {
             // si_code is a 32-bit int: one a process sent reads negative.
@@ -3244,8 +3244,8 @@ x64_trace_fault_address: fn(trace: X64Trace) -> Int? {
 // Wait for the traced thread `thread` alone to stop or end: its wait status,
 // or -errno.
 x64_trace_wait_for: fn(trace: X64Trace, thread: Int) -> Int {
-    result := -OS_EINTR
-    status := 0
+    ^result: -OS_EINTR
+    ^status: 0
     #Unsafe("the helper's wait4 writes one int status to the trace's scratch word") {
         loop result == -OS_EINTR {
             result = x64_trace_call(trace, OS_SYS_WAIT4, thread, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL, 0, 0, 0)
@@ -3264,11 +3264,11 @@ x64_trace_wait_for: fn(trace: X64Trace, thread: Int) -> Int {
 // comes in microseconds is seen in microseconds.
 x64_trace_wait_within: fn(trace: X64Trace, thread: Int, milliseconds: Int) -> Int? {
     budget: milliseconds * 1000000
-    slept := 0
-    nap := LOADER_TRACE_NAP_FIRST_NS
+    ^slept: 0
+    ^nap: LOADER_TRACE_NAP_FIRST_NS
     loop {
-        result := -OS_EINTR
-        status := 0
+        ^result: -OS_EINTR
+        ^status: 0
         #Unsafe("the helper's wait4 writes one int status to the trace's scratch word; nanosleep reads the timespec at LOADER_TRACE_SLEEP, in the scratch page") {
             loop result == -OS_EINTR {
                 result = x64_trace_call(trace, OS_SYS_WAIT4, thread, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL | LOADER_WAIT_NOHANG, 0, 0, 0)
@@ -3279,7 +3279,7 @@ x64_trace_wait_within: fn(trace: X64Trace, thread: Int, milliseconds: Int) -> In
             if result == 0 && slept < budget {
                 os_store_i64(I64{trace.scratch + LOADER_TRACE_SLEEP}, I64{0})
                 os_store_i64(I64{trace.scratch + LOADER_TRACE_SLEEP + 8}, I64{nap})
-                _ := os_syscall(OS_SYS_NANOSLEEP, trace.scratch + LOADER_TRACE_SLEEP, 0, 0, 0, 0, 0)
+                ^_: os_syscall(OS_SYS_NANOSLEEP, trace.scratch + LOADER_TRACE_SLEEP, 0, 0, 0, 0, 0)
             }
         }
         if result == thread -> return Val(status)
@@ -3299,7 +3299,7 @@ x64_trace_signal: fn(trace: X64Trace, signal: Int) -> Bool {
 // page.
 x64_trace_close: fn(trace: ^X64Trace) {
     if trace.pid > 0 {
-        _ := os_kill_i64(I64{trace.pid}, I64{9})
+        ^_: os_kill_i64(I64{trace.pid}, I64{9})
         // The kill ends a stopped tracee too; the helper reaps each thread,
         // the first last. A thread that stops on its way out (the exit
         // event of x64_trace_follow_exits, or a stop already under way)
@@ -3309,7 +3309,7 @@ x64_trace_close: fn(trace: ^X64Trace) {
             if stop.thread < 0 || (stop.thread == trace.pid && stop.status & 0xff != 0x7f) -> break
             if stop.status & 0xff == 0x7f {
                 #Unsafe("the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends") {
-                    _ := x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_CONT, stop.thread, 0, 0, 0, 0)
+                    ^_: x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_CONT, stop.thread, 0, 0, 0, 0)
                 }
             }
         }
@@ -3326,14 +3326,14 @@ x64_trace_close: fn(trace: ^X64Trace) {
         trace.lifeline = -1
     }
     if trace.helper > 0 {
-        reaped := -OS_EINTR
+        ^reaped: -OS_EINTR
         loop reaped == -OS_EINTR {
             reaped = Int{os_wait4_i64(I64{trace.helper}, I64{0}, I64{0}, I64{0})}
         }
         trace.helper = -1
     }
     if trace.scratch != 0 {
-        _ := os_unmap(trace.scratch, OS_PAGE_SIZE)
+        ^_: os_unmap(trace.scratch, OS_PAGE_SIZE)
         trace.scratch = 0
     }
 }
@@ -3461,7 +3461,7 @@ X64SampleMapping: struct {
 // of its CPU time until x64_sampler_close. A thread that ended since it was
 // listed is left out; one the kernel refuses names the sampler's failure.
 x64_sampler_open: fn(threads: [Int], period_ns: Int) -> X64Sampler {
-    sampler := X64Sampler{rings: [X64SampleRing]{}, origin_ns: 0, origin_unix_ns: 0, failure: ""}
+    ^sampler: X64Sampler{rings: [X64SampleRing]{}, origin_ns: 0, origin_unix_ns: 0, failure: ""}
     attr: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(attr) {
         sampler.failure = "mapping the sampling event's attributes failed (errno {-attr})"
@@ -3472,7 +3472,7 @@ x64_sampler_open: fn(threads: [Int], period_ns: Int) -> X64Sampler {
         loader_sampler_attr(attr, period_ns, LOADER_PERF_ATTR_FLAGS)
         loop thread in threads { loader_sampler_add(sampler, attr, thread, -1) }
     }
-    _ := os_unmap(attr, OS_PAGE_SIZE)
+    ^_: os_unmap(attr, OS_PAGE_SIZE)
     sampler
 }
 
@@ -3521,9 +3521,9 @@ loader_sampler_add: fn(sampler: ^X64Sampler, attr: Int, pid: Int, cpu: Int) {
 // samples' clock) and on the wall clock (CLOCK_REALTIME), in nanoseconds.
 #Unsafe("clock_gettime writes two words at the caller's `scratch`, read before the next")
 loader_sampler_origin: fn(sampler: ^X64Sampler, scratch: Int) {
-    _ := os_clock_gettime_i64(I64{LOADER_CLOCK_MONOTONIC}, I64{scratch})
+    ^_: os_clock_gettime_i64(I64{LOADER_CLOCK_MONOTONIC}, I64{scratch})
     sampler.origin_ns = os_load_word(scratch) * 1000000000 + os_load_word(scratch + 8)
-    _ := os_clock_gettime_i64(I64{LOADER_CLOCK_REALTIME}, I64{scratch})
+    ^_: os_clock_gettime_i64(I64{LOADER_CLOCK_REALTIME}, I64{scratch})
     sampler.origin_unix_ns = os_load_word(scratch) * 1000000000 + os_load_word(scratch + 8)
 }
 
@@ -3535,7 +3535,7 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: ^X64Samples) {
         data: sampled.ring + OS_PAGE_SIZE
         #Unsafe("the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again") {
             head: os_load_word(sampled.ring + LOADER_PERF_DATA_HEAD)
-            at := os_load_word(sampled.ring + LOADER_PERF_DATA_TAIL)
+            ^at: os_load_word(sampled.ring + LOADER_PERF_DATA_TAIL)
             loop at < head {
                 header: os_load_word(data + at % size)
                 kind: header & 0xffffffff
@@ -3555,7 +3555,7 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: ^X64Samples) {
                         into.words.push(time)
                         counted: into.words.len()
                         into.words.push(0)
-                        frames := 0
+                        ^frames: 0
                         loop k in 0..<count {
                             // Kernel addresses and the kernel's context markers
                             // (PERF_CONTEXT_USER and its kin) are negative.
@@ -3583,7 +3583,7 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: ^X64Samples) {
                         // Its pid and thread, address, length and file offset,
                         // the file's NUL-ended name, then its sample_id: the
                         // pid and thread, and the time, the record's last word.
-                        name := [U8]{}
+                        ^name: [U8]{}
                         loop k in 40..<length - 16 {
                             byte: os_load_byte(data + (at + k) % size)
                             if byte == 0 -> break
@@ -3623,7 +3623,7 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: ^X64Samples) {
 x64_sampler_close: fn(sampler: ^X64Sampler) {
     ring_size: (1 + LOADER_PERF_RING_PAGES) * OS_PAGE_SIZE
     loop sampled in sampler.rings {
-        _ := os_unmap(sampled.ring, ring_size)
+        ^_: os_unmap(sampled.ring, ring_size)
         loader_close(sampled.fd)
     }
     sampler.rings = [X64SampleRing]{}
@@ -3653,7 +3653,7 @@ X64SampledRun: struct {
 // x64_sampled_reaped, then x64_sampled_close. When the kernel samples no
 // CPU, the command never runs.
 x64_sampled_start: fn(path: String, argv: [String], env: [String]?, cpus: [Int], period_ns: Int) -> X64SampledRun {
-    run := X64SampledRun{command: loader_command_fork(path, argv, env), sampler: X64Sampler{rings: [X64SampleRing]{}, origin_ns: 0, origin_unix_ns: 0, failure: ""}, status: -1, failure: "", cpu_ns: 0, peak_rss_bytes: 0}
+    ^run: X64SampledRun{command: loader_command_fork(path, argv, env), sampler: X64Sampler{rings: [X64SampleRing]{}, origin_ns: 0, origin_unix_ns: 0, failure: ""}, status: -1, failure: "", cpu_ns: 0, peak_rss_bytes: 0}
     if run.command.failure != "" {
         run.failure = run.command.failure
         return run
@@ -3667,7 +3667,7 @@ x64_sampled_start: fn(path: String, argv: [String], env: [String]?, cpus: [Int],
         // The child reads its go pipe's end and exits unrun.
         loader_close(run.command.go)
         loader_close(run.command.report)
-        _ := loader_command_reap(run.command, 0)
+        ^_: loader_command_reap(run.command, 0)
         run.command.child = -1
         run.failure = if run.sampler.failure != "" -> "the kernel won't sample it: {run.sampler.failure}" else -> "no CPU is online to sample it on"
         return run
@@ -3704,7 +3704,7 @@ x64_sampled_reaped: fn(run: ^X64SampledRun) -> Bool {
 x64_sampled_close: fn(run: ^X64SampledRun) {
     x64_sampler_close(run.sampler)
     if run.command.page != 0 {
-        _ := os_unmap(run.command.page, OS_PAGE_SIZE)
+        ^_: os_unmap(run.command.page, OS_PAGE_SIZE)
         run.command.page = 0
     }
 }
@@ -3799,7 +3799,7 @@ LoaderReaped: struct {
 // loader_command_go sends it the go byte, and until then waits on a pipe,
 // so this process can open events on its pid before its first instruction.
 loader_command_fork: fn(path: String, argv: [String], env: [String]?) -> LoaderCommand {
-    command := LoaderCommand{child: -1, page: 0, go: -1, report: -1, failure: ""}
+    ^command: LoaderCommand{child: -1, page: 0, go: -1, report: -1, failure: ""}
     exec: loader_exec_block(path, argv, env)
     if exec.failure != "" {
         command.failure = exec.failure
@@ -3807,17 +3807,17 @@ loader_command_fork: fn(path: String, argv: [String], env: [String]?) -> LoaderC
     }
     page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(page) {
-        _ := os_unmap(exec.block, exec.size)
+        ^_: os_unmap(exec.block, exec.size)
         command.failure = "mapping the command's page failed (errno {-page})"
         return command
     }
-    go := 0
-    report := 0
+    ^go: 0
+    ^report: 0
     #Unsafe("each pipe2 writes its two descriptors to the fresh page's status word, which is read before the next") {
         go = loader_pipe(page + LOADER_COUNTED_STATUS)
         report = loader_pipe(page + LOADER_COUNTED_STATUS)
     }
-    child := -1
+    ^child: -1
     if !os_failed(go) && !os_failed(report) {
         // The words the child uses, made before the fork.
         go_read: I64{go & 0xffffffff}
@@ -3836,13 +3836,13 @@ loader_command_fork: fn(path: String, argv: [String], env: [String]?) -> LoaderC
             }
         }
     }
-    _ := os_unmap(exec.block, exec.size)
+    ^_: os_unmap(exec.block, exec.size)
     if !os_failed(go) -> loader_close(go & 0xffffffff)
     if !os_failed(report) -> loader_close((report >> 32) & 0xffffffff)
     if os_failed(go) || os_failed(report) || os_failed(child) {
         if !os_failed(go) -> loader_close((go >> 32) & 0xffffffff)
         if !os_failed(report) -> loader_close(report & 0xffffffff)
-        _ := os_unmap(page, OS_PAGE_SIZE)
+        ^_: os_unmap(page, OS_PAGE_SIZE)
         command.failure = "fork failed (errno {-child})"
         if os_failed(report) {
             command.failure = "making the command's pipe failed (errno {-report})"
@@ -3863,13 +3863,13 @@ loader_command_fork: fn(path: String, argv: [String], env: [String]?) -> LoaderC
 // ignores SIGINT and SIGQUIT from here on, as x64_process_wait_foreground
 // does while a child runs.
 loader_command_go: fn(command: LoaderCommand, path: String) -> String {
-    failure := ""
+    ^failure: ""
     sent: Int{os_write_i64(I64{command.go}, I64{command.page + LOADER_COUNTED_GO}, I64{1})}
     loader_close(command.go)
     if sent != 1 -> failure = "starting the command failed (errno {-sent})"
     // The report pipe closes at the child's execve; a failed execve sends
     // its result first.
-    got := -OS_EINTR
+    ^got: -OS_EINTR
     #Unsafe("read fills the failed execve's word of the command's page") {
         loop got == -OS_EINTR {
             got = os_syscall(OS_SYS_READ, command.report, command.page + LOADER_COUNTED_ERRNO, 8, 0, 0, 0)
@@ -3888,7 +3888,7 @@ loader_command_go: fn(command: LoaderCommand, path: String) -> String {
 // then in its page (loader_command_reaped), 0 while it runs, or the failed
 // call's result.
 loader_command_reap: fn(command: LoaderCommand, options: Int) -> Int {
-    reaped := -OS_EINTR
+    ^reaped: -OS_EINTR
     loop reaped == -OS_EINTR {
         reaped = Int{os_wait4_i64(I64{command.child}, I64{command.page + LOADER_COUNTED_STATUS}, I64{options}, I64{command.page + LOADER_COUNTED_RUSAGE})}
     }
@@ -3897,7 +3897,7 @@ loader_command_reap: fn(command: LoaderCommand, options: Int) -> Int {
 
 // What the reap of the command (loader_command_reap) wrote to its page.
 loader_command_reaped: fn(command: LoaderCommand) -> LoaderReaped {
-    reaped := LoaderReaped{status: -1, cpu_ns: 0, peak_rss_bytes: 0}
+    ^reaped: LoaderReaped{status: -1, cpu_ns: 0, peak_rss_bytes: 0}
     #Unsafe("the command's page holds the wait status and rusage its reap wrote") {
         rusage: command.page + LOADER_COUNTED_RUSAGE
         reaped.status = os_load_word(command.page + LOADER_COUNTED_STATUS) & 0xffffffff
@@ -3918,24 +3918,22 @@ LOADER_WNOHANG: 1
 // SIGQUIT while it runs, as x64_process_wait_foreground does. The counters
 // are read once the command is reaped.
 x64_counted_run: fn(path: String, argv: [String], env: [String]?) -> X64Counted {
-    counted := X64Counted{status: -1, failure: "", instructions: None, cycles: None, errno: 0, scaled: false, cpu_ns: 0, peak_rss_bytes: 0}
+    ^counted: X64Counted{status: -1, failure: "", instructions: None, cycles: None, errno: 0, scaled: false, cpu_ns: 0, peak_rss_bytes: 0}
     command: loader_command_fork(path, argv, env)
     if command.failure != "" {
         counted.failure = command.failure
         return counted
     }
     page: command.page
-    instructions_fd := 0
-    cycles_fd := 0
+    ^instructions_fd: 0
+    ^cycles_fd: 0
     #Unsafe("the attributes go to the command's fresh page's attribute words") {
         instructions_fd = loader_counter_open(page, command.child, LOADER_PERF_COUNT_HW_INSTRUCTIONS, LOADER_PERF_COUNT_FLAGS)
         cycles_fd = loader_counter_open(page, command.child, LOADER_PERF_COUNT_HW_CPU_CYCLES, LOADER_PERF_COUNT_FLAGS)
     }
     if {
         os_failed(instructions_fd) -> counted.errno = -instructions_fd
-        os_failed(cycles_fd) -> {
-            counted.errno = -cycles_fd
-        }
+        os_failed(cycles_fd) -> { counted.errno = -cycles_fd }
     }
     counted.failure = loader_command_go(command, path)
     reaped: loader_command_reap(command, 0)
@@ -3951,8 +3949,8 @@ x64_counted_run: fn(path: String, argv: [String], env: [String]?) -> X64Counted 
         }
     }
     if counted.failure != "" -> counted.status = -1
-    instructions := LoaderCount{value: None, scaled: false}
-    cycles := LoaderCount{value: None, scaled: false}
+    ^instructions: LoaderCount{value: None, scaled: false}
+    ^cycles: LoaderCount{value: None, scaled: false}
     #Unsafe("each read goes to the command's page's read words") {
         instructions = loader_counter_read(page, instructions_fd)
         cycles = loader_counter_read(page, cycles_fd)
@@ -3960,7 +3958,7 @@ x64_counted_run: fn(path: String, argv: [String], env: [String]?) -> X64Counted 
     counted.instructions = instructions.value
     counted.cycles = cycles.value
     counted.scaled = instructions.scaled || cycles.scaled
-    _ := os_unmap(page, OS_PAGE_SIZE)
+    ^_: os_unmap(page, OS_PAGE_SIZE)
     counted
 }
 
@@ -3983,20 +3981,20 @@ loader_pipe: fn(word: Int) -> Int {
 // so it may run in a fork.
 #Unsafe("close, read, rt_sigaction, rt_sigprocmask, execve, write and exit_group of the child's own descriptors and itself; `page` is its copy of the counted run's page, whose start is a zeroed sigaction, and execve reads the argument block")
 loader_counted_child: fn(go_read: I64, go_write: I64, report_read: I64, report_write: I64, page: I64, path: I64, argv: I64, envp: I64, mask: I64) {
-    _ := os_close_i64(go_write)
-    _ := os_close_i64(report_read)
-    got := I64{-OS_EINTR}
+    ^_: os_close_i64(go_write)
+    ^_: os_close_i64(report_read)
+    ^got: I64{-OS_EINTR}
     loop got == (I64{-OS_EINTR}) {
         got = os_read_i64(go_read, page + I64{LOADER_COUNTED_GO}, I64{1})
     }
-    if got != 1 -> _ := os_exit_group_i64(I64{127})
-    _ := os_close_i64(go_read)
-    _ := os_syscall_forwarded_i64(I64{OS_SYS_RT_SIGACTION}, I64{13}, page, I64{0}, I64{8}, I64{0}, I64{0})
-    _ := os_rt_sigprocmask_i64(I64{2}, mask, I64{0}, I64{8})
+    if got != 1 -> ^_: os_exit_group_i64(I64{127})
+    ^_: os_close_i64(go_read)
+    ^_: os_syscall_forwarded_i64(I64{OS_SYS_RT_SIGACTION}, I64{13}, page, I64{0}, I64{8}, I64{0}, I64{0})
+    ^_: os_rt_sigprocmask_i64(I64{2}, mask, I64{0}, I64{8})
     result: os_execve_i64(path, argv, envp)
     os_store_i64(page + I64{LOADER_COUNTED_ERRNO}, result)
-    _ := os_write_i64(report_write, page + I64{LOADER_COUNTED_ERRNO}, I64{8})
-    _ := os_exit_group_i64(I64{127})
+    ^_: os_write_i64(report_write, page + I64{LOADER_COUNTED_ERRNO}, I64{8})
+    ^_: os_exit_group_i64(I64{127})
 }
 
 // Open the counter `config` (PERF_TYPE_HARDWARE) with the attribute flags
@@ -4029,7 +4027,7 @@ X64Counters: struct {
 // x64_counted_run's.
 x64_counters_open: fn(pid: Int) -> X64Counters {
     page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
-    counters := X64Counters{page: page, instructions: -1, cycles: -1, errno: 0}
+    ^counters: X64Counters{page: page, instructions: -1, cycles: -1, errno: 0}
     if os_failed(page) {
         counters.errno = -page
         return counters
@@ -4040,9 +4038,7 @@ x64_counters_open: fn(pid: Int) -> X64Counters {
     }
     if {
         os_failed(counters.instructions) -> counters.errno = -counters.instructions
-        os_failed(counters.cycles) -> {
-            counters.errno = -counters.cycles
-        }
+        os_failed(counters.cycles) -> { counters.errno = -counters.cycles }
     }
     counters
 }
@@ -4054,8 +4050,8 @@ x64_counters_close: fn(counters: X64Counters, counted: ^X64Counted) {
     if os_failed(counters.page) {
         return
     }
-    instructions := LoaderCount{value: None, scaled: false}
-    cycles := LoaderCount{value: None, scaled: false}
+    ^instructions: LoaderCount{value: None, scaled: false}
+    ^cycles: LoaderCount{value: None, scaled: false}
     #Unsafe("each read goes to the counters' own page's read words") {
         instructions = loader_counter_read(counters.page, counters.instructions)
         cycles = loader_counter_read(counters.page, counters.cycles)
@@ -4063,7 +4059,7 @@ x64_counters_close: fn(counters: X64Counters, counted: ^X64Counted) {
     counted.instructions = instructions.value
     counted.cycles = cycles.value
     counted.scaled = instructions.scaled || cycles.scaled
-    _ := os_unmap(counters.page, OS_PAGE_SIZE)
+    ^_: os_unmap(counters.page, OS_PAGE_SIZE)
 }
 
 // The total of the counter `fd` (loader_counter_open), which closes: its
@@ -4071,7 +4067,7 @@ x64_counters_close: fn(counters: X64Counters, counted: ^X64Counted) {
 // only part of it, and None when it never ran or never opened.
 #Unsafe("read fills three words of the caller's counted-run page `page`")
 loader_counter_read: fn(page: Int, fd: Int) -> LoaderCount {
-    count := LoaderCount{value: None, scaled: false}
+    ^count: LoaderCount{value: None, scaled: false}
     if os_failed(fd) -> return count
     words: page + LOADER_COUNTED_READ
     got: os_syscall(OS_SYS_READ, fd, words, 24, 0, 0, 0)

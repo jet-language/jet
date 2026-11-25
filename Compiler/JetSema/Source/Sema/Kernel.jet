@@ -110,8 +110,8 @@ sema_kernel_check_declaration: fn(func: Func, kernel: KernelMarker, method: Bool
 sema_kernel_pending: fn(func: Func, body: [Stmt], compute_aliases: [String]) -> SemaKernelPending? Never! {
     kernel: func.kernel ?? return None
     if sema_kernel_declaration_failure(func, kernel, false) != None -> return None
-    names := (loop param in func.params -> param.name)
-    body_failure := SemaKernelFailure?{None}
+    ^names: (loop param in func.params -> param.name)
+    ^body_failure: SemaKernelFailure?{None}
     loop statement in body {
         body_failure = sema_kernel_prove_statement(statement, names, compute_aliases)
         if body_failure != None -> break
@@ -196,7 +196,7 @@ sema_kernel_prove_expr: fn(expression: Expr, names: [String], compute_aliases: [
 // comes with a body failure at its own site ("statically proved bounds", a
 // call), so that failure is the report rather than the effect row.
 sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call_edges: [String], maximal: Bool, diagnostics: ^[Diagnostic]) -> Bool {
-    effect_edges := call_edges.len()
+    ^effect_edges: call_edges.len()
     if pending.body_failure != None {
         effect_edges = 0
         loop edge in call_edges {
@@ -222,7 +222,7 @@ sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call
 
 // The module's local aliases of `core.compute`.
 sema_kernel_compute_aliases: fn(module_row: SemaRegistrationModule, table: ModuleTable) -> [String] Never! {
-    aliases := [String]{}
+    ^aliases: [String]{}
     loop row in sema_core_registration_imports(module_row, table) {
         if row.module_name == "core.compute" && row.item == None -> aliases.push(row.alias)
     }

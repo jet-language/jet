@@ -31,7 +31,7 @@ migration Task {
 stored: fn(store: db.Store) -[DB]> String {
     policy: db.policy("tasks", "true") ?? panic("policy")
     rows: store.with_policy(policy, "system").query(SQL{"SELECT jet_row FROM tasks ORDER BY key"}) ?? panic("raw read")
-    out := [String]{}
+    ^out: [String]{}
     loop row in rows {
         cell: row.get("jet_row") ?? panic("no jet_row column")
         out.push(cell.text() ?? panic("jet_row is not text"))

@@ -75,12 +75,12 @@ rows: fn(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: 
 // Each record streams into its row through the scanner's `__DecodeSource`:
 // no record tree is built, and its cells are read from the input's bytes.
 decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
-    csv := TypedCSV.new(text)
+    ^csv: TypedCSV.new(text)
     if csv.next() -> csv.header = csv.fields()
-    values := [T]{}
-    errors := [FieldError]{}
+    ^values: [T]{}
+    ^errors: [FieldError]{}
     previous: rt.text_cells_enter()
-    index := 0
+    ^index: 0
     loop csv.next() {
         index += 1
         if csv.count() != csv.header.len() {
@@ -91,7 +91,7 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
         // `??` hands the decoded row over; a match would copy it out.
         value: __Decoding.read<T, TypedCSV>(csv) ?? {
             loop failure in err {
-                out := failure
+                ^out: failure
                 out.path = if out.path == "" -> "row {index}" else if out.path.starts_with("[") -> "row {index}{out.path}" else -> "row {index}.{out.path}"
                 errors.push(out)
             }
@@ -111,7 +111,7 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
 // decoded as `decode<Row>` decodes text. Every failed row is listed in the
 // one `Err` it fails with (encoding.__input_failure).
 #Builtin.Role(.InputCSV) priv __input_csv: fn<Row: Decode>(lines: ^^Iter<String>) -> [Row] Err! {
-    text := ""
+    ^text: ""
     loop line in lines {
         text += line
         text += "\n"
@@ -175,7 +175,7 @@ priv TypedCSV: struct {
     // Fails the scan at byte `at` of the current line: the column counts
     // scalars.
     fail: fn(^self, at: Int, reason: String) Never! {
-        column := 1
+        ^column: 1
         loop index in self.line_start..<at {
             byte: Int{self.raw[index]}
             if byte < 128 || byte >= 192 -> column += 1
@@ -220,7 +220,7 @@ priv TypedCSV: struct {
             if quoted {
                 self.at += 1
                 start: self.at
-                escaped := false
+                ^escaped: false
                 loop {
                     if self.at >= length {
                         self.fail(length, "quoted field ended before its closing quote")
@@ -245,7 +245,7 @@ priv TypedCSV: struct {
                 self.at += 1
             } else {
                 start: self.at
-                at := start
+                ^at: start
                 loop at < length {
                     byte: self.raw[at]
                     if byte == (U8{34}) || byte == (U8{44}) || byte == (U8{13}) || byte == (U8{10}) {
@@ -270,13 +270,13 @@ priv TypedCSV: struct {
     text: fn(self, column: Int) -> String Never! {
         start: self.spans[2 * column]
         end: self.spans[2 * column + 1]
-        escaped := false
+        ^escaped: false
         loop index in self.escapes {
             if index == column -> escaped = true
         }
         if !escaped -> return field_text(self.raw.slice(start, end))
-        bytes := [U8]{}
-        at := start
+        ^bytes: [U8]{}
+        ^at: start
         loop at < end {
             bytes.push(self.raw[at])
             at += if self.raw[at] == (U8{34}) -> 2 else -> 1
@@ -293,12 +293,12 @@ priv TypedCSV: struct {
     // The plain decimal Int of field `column`: an optional minus and 1 to 18
     // digits. None for any other text, which decodes as its cell.
     plain_int: fn(self, column: Int) -> Int? Never! {
-        at := self.spans[2 * column]
+        ^at: self.spans[2 * column]
         end: self.spans[2 * column + 1]
         negative: at < end && self.raw[at] == (U8{45})
         if negative -> at += 1
         if at == end || end - at > 18 -> return None
-        value := 0
+        ^value: 0
         loop at < end {
             digit: Int{self.raw[at]} - 48
             if digit < 0 || digit > 9 -> return None
@@ -314,13 +314,13 @@ priv TypedCSV: struct {
     // is the correctly rounded value the cell's parse gives. None for any
     // other text, which decodes as its cell.
     plain_float: fn(self, column: Int) -> Float? Never! {
-        at := self.spans[2 * column]
+        ^at: self.spans[2 * column]
         end: self.spans[2 * column + 1]
         negative: at < end && self.raw[at] == (U8{45})
         if negative -> at += 1
-        whole := 0
-        digits := 0
-        fraction := -1
+        ^whole: 0
+        ^digits: 0
+        ^fraction: -1
         loop at < end {
             byte: Int{self.raw[at]}
             at += 1
@@ -334,8 +334,8 @@ priv TypedCSV: struct {
             if fraction >= 0 -> fraction += 1
         }
         if digits == 0 || fraction == 0 -> return None
-        scale := 1.0
-        places := fraction
+        ^scale: 1.0
+        ^places: fraction
         loop places > 0 {
             scale *= 10.0
             places -= 1
@@ -381,7 +381,7 @@ priv TypedCSV: struct {
         capture: fn(^self) -> Dyn Never! {
             if self.member() -> return self.cell()
             if self.cursor != TYPED_CSV_RECORD -> return Dyn.Null
-            entries := [{key: String, value: Dyn}]{}
+            ^entries: [{key: String, value: Dyn}]{}
             loop column in 0..<self.header.len() {
                 entries.push({key: self.header[column].copy(), value: Dyn.Text(self.text(column))})
             }
@@ -430,8 +430,8 @@ priv TypedCSV: struct {
 
 // Every record of `text` as its fields' text.
 typed_records: fn(text: String) -> [[String]] TypedCSVError! {
-    csv := TypedCSV.new(text)
-    records := [[String]]{}
+    ^csv: TypedCSV.new(text)
+    ^records: [[String]]{}
     loop csv.next() -> records.push(csv.fields())
     if csv.failure == .Val(error) -> return Err(error)
     Ok(records)
@@ -441,9 +441,9 @@ typed_records: fn(text: String) -> [[String]] TypedCSVError! {
 /// same delimiter, header and blank-record options.
 parse: fn(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{true}) -> Dyn EncodingError! {
     physical: rows(text, delimiter, header, skip_blank) ?? return Err(err)
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop row in physical {
-        fields := [Dyn]{}
+        ^fields: [Dyn]{}
         loop field in row.fields -> fields.push(Dyn.Text(field))
         items.push(Dyn.Array(fields))
     }
@@ -498,16 +498,16 @@ to_string: fn<T: Encode>(rows: T, formulas: CSVFormulas{CSVFormulas.Escape}) -> 
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("csv.to_string needs rows or records")
     }
     if items.len() == 0 -> return ""
-    out := ""
+    ^out: ""
     if items[0] == .Object(_) {
-        header := [String]{}
+        ^header: [String]{}
         loop entry in stream.object_entries(items[0]) -> header.push(entry.key)
         out = encode_row(header, formulas)
         loop tree in items {
             if !(tree == .Object(_)) -> panic("csv.to_string needs rows or records")
-            fields := [String]{}
+            ^fields: [String]{}
             loop key in header {
-                cell := ""
+                ^cell: ""
                 loop entry in stream.object_entries(tree) {
                     if entry.key == key {
                         cell = formula_cell(entry.value, formulas)
@@ -522,7 +522,7 @@ to_string: fn<T: Encode>(rows: T, formulas: CSVFormulas{CSVFormulas.Escape}) -> 
         loop i in 0..<items.len() {
             if items[i] == {
                 .Array(cells) -> {
-                    fields := [String]{}
+                    ^fields: [String]{}
                     loop cell in cells -> fields.push(formula_cell(cell, formulas))
                     if i > 0 -> out = "{out}\n"
                     out = "{out}{encode_row(fields, CSVFormulas.Keep)}"
@@ -568,7 +568,7 @@ priv formula_escaped: fn(cell: String, formulas: CSVFormulas) -> Bool Never! {
     lead: stream.byte_at(cell, 0)
     if lead == (U8{61}) || lead == (U8{64}) || lead == (U8{9}) || lead == (U8{13}) -> return true
     if lead != (U8{43}) && lead != (U8{45}) -> return false
-    _ := Float.parse(cell) ?? return true
+    ^_: Float.parse(cell) ?? return true
     false
 }
 
@@ -611,17 +611,17 @@ parse_rows_with: fn(text: String, delimiter: [U8], header: Bool, skip_blank: Boo
     first: delimiter[0]
     width: delimiter.len()
     name: if width == 1 && first == 44 -> "comma" else -> "delimiter"
-    rows := [CSVRow]{}
-    fields := [String]{}
-    field := [U8]{}
-    start := 0
-    line := 1
-    row_line := 1
-    column := 1
-    record := 0
-    i := 0
-    quoted := false
-    closed := false
+    ^rows: [CSVRow]{}
+    ^fields: [String]{}
+    ^field: [U8]{}
+    ^start: 0
+    ^line: 1
+    ^row_line: 1
+    ^column: 1
+    ^record: 0
+    ^i: 0
+    ^quoted: false
+    ^closed: false
     loop i < raw.len() {
         b: raw[i]
         n: b
@@ -732,7 +732,7 @@ kept_record: fn(fields: [String], record: Int, header: Bool, skip_blank: Bool) -
 }
 
 priv encode_row: fn(fields: [String], formulas: CSVFormulas) -> String {
-    out := ""
+    ^out: ""
     loop i in 0..<fields.len() {
         if i > 0 -> out = "{out},"
         out = "{out}{encode_field(fields[i], formulas)}"
@@ -742,13 +742,13 @@ priv encode_row: fn(fields: [String], formulas: CSVFormulas) -> String {
 
 priv encode_field: fn(field: String, formulas: CSVFormulas) -> String {
     if formula_escaped(field, formulas) -> return encode_field("'{field}", CSVFormulas.Keep)
-    needs := false
+    ^needs: false
     loop b in field.bytes() {
         n: b
         if n == 44 || n == 34 || n == 10 || n == 13 -> needs = true
     }
     if !needs -> return field.copy()
-    out := [U8]{34}
+    ^out: [U8]{34}
     loop b in field.bytes() {
         if b == (U8{34}) {
             out.push(U8{34})
@@ -768,7 +768,7 @@ dict_rows: fn(text: String) -> [DictRow] EncodingError! {
     physical: parse_rows_with(text, [U8]{44}, false, true)
     if physical.len() == 0 -> return Ok([DictRow]{})
     header: physical[0].fields
-    out := [DictRow]{}
+    ^out: [DictRow]{}
     loop i in 1..<physical.len() {
         record: physical[i]
         if record.fields.len() != header.len() {
@@ -780,7 +780,7 @@ dict_rows: fn(text: String) -> [DictRow] EncodingError! {
 }
 
 dict_get: fn(row: DictRow, key: String) -> String? Never! {
-    i := 0
+    ^i: 0
     loop i < row.fields.len() {
         if row.fields[i] == key -> return Val(row.values[i])
         i += 1
@@ -794,7 +794,7 @@ dict_get_or: fn(row: DictRow, key: String, fallback: String) -> String Never! {
 
 write_dict: fn(rows: [DictRow], formulas: CSVFormulas{CSVFormulas.Escape}) -> String Never! {
     if rows.len() == 0 -> return ""
-    out := "{encode_row(rows[0].fields, formulas)}\n"
+    ^out: "{encode_row(rows[0].fields, formulas)}\n"
     loop row in rows -> out = "{out}{encode_row(row.values, formulas)}\n"
     out
 }
@@ -815,7 +815,7 @@ codec_error: fn(kind: EncodingErrorKind, offset: Int, line: Int, column: Int, pa
 
 csv_limits: fn(limits: EncodingLimits) EncodingError! {
     stream.validate_limits(limits) ?? {
-        error := err
+        ^error: err
         error.format = .CSV
         return Err(error)
     }
@@ -841,7 +841,7 @@ CSVWriter: struct<W: Writer> {
     }
 
     io_error: fn(self, cause: EncodingCause) -> EncodingError Never! {
-        error := self.error(.IO, 0, "file IO failed")
+        ^error: self.error(.IO, 0, "file IO failed")
         error.cause = Val(cause)
         error
     }
@@ -877,16 +877,16 @@ CSVWriter: struct<W: Writer> {
     write_inner: fn(^self, row: [String]) -[IO]> EncodingError! {
         if self.finished -> return Err(self.error(.State, 0, "write called after finish"))
         self.close_record() ?? return Err(err)
-        decoded := 0
-        wire := 0
+        ^decoded: 0
+        ^wire: 0
         loop i in 0..<row.len() {
             field: row[i]
             decoded += field.count_bytes()
             if decoded > self.limits.max_item_bytes {
                 return Err(self.error(.Limit, i, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
             }
-            quoted := false
-            quotes := 0
+            ^quoted: false
+            ^quotes: 0
             loop at in 0..<field.count_bytes() {
                 byte: stream.byte_at(field, at)
                 if byte == (U8{34}) -> quotes += 1
@@ -906,7 +906,7 @@ CSVWriter: struct<W: Writer> {
         loop i in 0..<row.len() {
             if i > 0 -> self.buffer.push(U8{44})
             field: row[i]
-            quoted := false
+            ^quoted: false
             loop at in 0..<field.count_bytes() {
                 byte: stream.byte_at(field, at)
                 if byte == (U8{44}) || byte == (U8{34}) || byte == (U8{13}) || byte == (U8{10}) {
@@ -1042,7 +1042,7 @@ CSVReader: struct<R: Reader> {
             // its error words there); the growth is charged like any other.
             capacity: mem.__list_capacity<U8>(self.buffer)
             count: self.input.read_into(self.buffer, self.limits.buffer_bytes) ?? {
-                error := codec_error(.IO, self.offset, self.line, self.column, self.path(), "file IO failed")
+                ^error: codec_error(.IO, self.offset, self.line, self.column, self.path(), "file IO failed")
                 error.cause = Val(stream.io_cause(err))
                 return Err(error)
             }
@@ -1102,7 +1102,7 @@ CSVReader: struct<R: Reader> {
         if (n == 224 && second < 160) || (n == 237 && second > 159) || (n == 240 && second < 144) || (n == 244 && second > 143) {
             return Err(self.utf8_error(self.offset - width))
         }
-        value := n & (if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7)
+        ^value: n & (if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7)
         loop i in 1..<width -> value = (value << 6) | (Int{self.character_byte(i)} & 63)
         Ok(Val(value))
     }
@@ -1138,7 +1138,7 @@ CSVReader: struct<R: Reader> {
             self.__grow_fields() ?? return Err(err)
         }
         self.fields_heap += mem.__list_capacity<U8>(self.field)
-        text := ""
+        ^text: ""
         #Unsafe("each completed UTF-8 scalar was validated before its original bytes entered this field") {
             text = rt.bytes_into_text(self.field)
         }
@@ -1176,7 +1176,7 @@ CSVReader: struct<R: Reader> {
     }
 
     push: fn(^self, character: Int) -> CSVRow? EncodingError! {
-        appended := 0
+        ^appended: 0
         if self.pending_cr {
             if self.quoted && character == 10 -> appended = 2
         } else if self.quoted {
@@ -1271,7 +1271,7 @@ CSVReader: struct<R: Reader> {
     // LF ends the record here.
     __take_plain: fn(^self) -> CSVRow? EncodingError! {
         loop !self.quoted && !self.pending_cr && self.buffered < self.buffer.len() {
-            room := self.buffer.len() - self.buffered
+            ^room: self.buffer.len() - self.buffered
             if self.limits.max_total_bytes == .Val(limit) -> room = min(room, limit - self.total)
             if room <= 0 -> return Ok(None)
             b: self.buffer[self.buffered]
@@ -1291,7 +1291,7 @@ CSVReader: struct<R: Reader> {
             if self.field.len() == 0 {
                 start: self.buffered
                 scan: start + min(room, self.limits.max_item_bytes + 1)
-                end := start
+                ^end: start
                 loop end < scan && self.stops[Int{self.buffer[end]}] == 0 -> end += 1
                 taken: end - start
                 if taken > 0 && end < start + room && taken <= self.limits.max_item_bytes {
@@ -1328,7 +1328,7 @@ CSVReader: struct<R: Reader> {
                 }
             }
             count: min(room, min(mem.__list_capacity<U8>(self.field), self.limits.max_item_bytes) - self.field.len())
-            taken := 0
+            ^taken: 0
             loop taken < count {
                 c: self.buffer[self.buffered + taken]
                 if self.stops[Int{c}] != 0 -> break
@@ -1383,15 +1383,27 @@ CSVReader: struct<R: Reader> {
         }
         buf_len: self.buffer.len()
         remaining: buf_len - self.buffered
-        if remaining <= 1 -> return
-        if self.limits.max_total_bytes == .Val(limit) && self.total + remaining > limit -> return
-        if remaining > self.limits.max_item_bytes -> return
-        if self.allocation.used + remaining * 4 > self.allocation.limit -> return
-        last_lf := buf_len - 1
+        if remaining <= 1 {
+            return
+        }
+        if self.limits.max_total_bytes == .Val(limit) && self.total + remaining > limit {
+            return
+        }
+        if remaining > self.limits.max_item_bytes {
+            return
+        }
+        if self.allocation.used + remaining * 4 > self.allocation.limit {
+            return
+        }
+        ^last_lf: buf_len - 1
         loop last_lf >= self.buffered && self.buffer[last_lf] != 10 -> last_lf -= 1
-        if last_lf < self.buffered -> return
+        if last_lf < self.buffered {
+            return
+        }
         chunk: String.from_bytes(self.buffer) ?? return
-        if chunk.len() != buf_len || chunk.contains("\"") || chunk.contains("\r") -> return
+        if chunk.len() != buf_len || chunk.contains("\"") || chunk.contains("\r") {
+            return
+        }
         self.plain_chunk = chunk
         self.plain_start = self.buffered
         self.plain_end = last_lf + 1
@@ -1406,7 +1418,7 @@ CSVReader: struct<R: Reader> {
             self.record = number + 1
             self.record_line = line_num + 1
             if self.header && number == 1 {
-                pos := line_start
+                ^pos: line_start
                 loop self.buffer[pos] != 10 -> pos += 1
                 self.buffered = pos + 1
                 if self.buffered >= self.plain_end -> self.__finish_plain_chunk()
@@ -1417,7 +1429,7 @@ CSVReader: struct<R: Reader> {
                 if self.buffered >= self.plain_end -> self.__finish_plain_chunk()
                 next
             }
-            pos := line_start
+            ^pos: line_start
             parts: csv_plain_fields(self.buffer, self.plain_chunk, pos, delim, self.record_width)
             self.buffered = pos
             self.record_width = parts.len()
@@ -1493,12 +1505,10 @@ CSVReader: struct<R: Reader> {
 }
 
 priv csv_plain_fields: fn(buffer: [U8], chunk: String, pos: ^Int, delim: U8, width: Int) -> [String] Never! {
-    parts := [String]{}
-    if width > 0 {
-        _: mem.__list_reserve_exact<String>(parts, width)
-    }
-    start := pos
-    i := pos
+    ^parts: [String]{}
+    if width > 0 -> _: mem.__list_reserve_exact<String>(parts, width)
+    ^start: pos
+    ^i: pos
     // For any delimiter above LF (comma is 44), any byte > delim is plain data.
     if delim > 10 {
         loop {
@@ -1550,9 +1560,9 @@ reader: fn<R: Reader>(source: ^^R, limits: EncodingLimits{EncodingLimits.safe()}
     if raw.len() != width || n == 34 || n == 13 || n == 10 {
         return Err(unsupported_error(EncodingFormat.CSV, 0, reason))
     }
-    code := n & (if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7)
+    ^code: n & (if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7)
     loop i in 1..<width -> code = (code << 6) | (Int{raw[i]} & 63)
-    stops := [U8]{}
+    ^stops: [U8]{}
     loop b in 0..<256 {
         stops.push(if b >= 128 || b == 34 || b == 13 || b == 10 || b == code -> U8{1} else -> U8{0})
     }

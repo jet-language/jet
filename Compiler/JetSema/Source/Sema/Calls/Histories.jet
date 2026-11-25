@@ -46,13 +46,13 @@ sema_call_histories_is_call: fn(target: SemaCallDirectTarget, check: SemaBodyChe
 
 // The call's arguments followed by the hidden ones.
 sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, check: SemaBodyCheck) -> [CallArg] Never! {
-    written := ""
+    ^written: ""
     if type_args.len() == 1 && type_args[0] == .Named(name) -> written = name.copy()
     command_type: sema_serde_named_leaf(written)
-    module_source := ""
-    package_digest := ""
-    tool := ""
-    target := ""
+    ^module_source: ""
+    ^package_digest: ""
+    ^tool: ""
+    ^target: ""
     graph: check.program.registration_graph
     if sema_scope_caller_index(check.environment.*, graph) == .Val(caller) {
         module_source = graph.modules[caller].source.copy()
@@ -63,10 +63,10 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, che
     }
     if graph.target_machine.triple != "" -> target = sha256_hex(graph.target_machine.triple)
     roles: [String]{"actual", "model", "observe", "strategy"}
-    identities := [String]{"", "", "", ""}
-    has_strategy := false
+    ^identities: [String]{"", "", "", ""}
+    ^has_strategy: false
     loop index in 0..<args.len() {
-        label := sema_call_devtools_label(args[index])
+        ^label: sema_call_devtools_label(args[index])
         if label == "" -> label = sema_call_histories_position_label(index)
         loop role in 0..<roles.len() {
             if roles[role] == label {
@@ -78,9 +78,9 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, che
         }
     }
     if !has_strategy -> identities[3] = "derived:{command_type}"
-    source := ""
+    ^source: ""
     if package_digest != "" {
-        frames := [String]{sema_call_histories_frame("jet.history.provenance.v1"), sema_call_histories_frame(package_digest)}
+        ^frames: [String]{sema_call_histories_frame("jet.history.provenance.v1"), sema_call_histories_frame(package_digest)}
         loop role in 0..<roles.len() {
             if identities[role] == "" -> next
             frames.push(sema_call_histories_frame(roles[role]))
@@ -89,7 +89,7 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, che
         source = sha256_hex(frames.join(""))
     }
     // copy: the rebuilt call owns its arguments; the source call keeps its own.
-    call_args := args.copy()
+    ^call_args: args.copy()
     call_args.push(sema_call_devtools_text_arg("__command_type", command_type, span))
     call_args.push(sema_call_devtools_text_arg("__source", source, span))
     call_args.push(sema_call_devtools_text_arg("__tool", tool, span))
@@ -99,14 +99,14 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, che
     // generic `__make` type would not specialize. An explicit strategy, or a
     // command type with no derived strategy, passes both empty. A derived
     // constructor is pure, as Core's `__make` row says.
-    variants_text := "[String]{{}}"
-    make_text := "[fn(Int, [Int], [Bool], [String]) -[]> {type_name(type_args[0])} Never!]{{}}"
+    ^variants_text: "[String]{{}}"
+    ^make_text: "[fn(Int, [Int], [Bool], [String]) -[]> {type_name(type_args[0])} Never!]{{}}"
     if !has_strategy {
-        derived := sema_call_histories_derive(written, command_type, check)
+        ^derived: sema_call_histories_derive(written, command_type, check)
         if derived.unsupported != "" {
             call_args.push(sema_call_devtools_text_arg("__unsupported", derived.unsupported, span))
         } else {
-            rows := [String]{}
+            ^rows: [String]{}
             loop row in derived.variants -> rows.push("\"{row}\"")
             variants_text = "[String]{{{rows.join(", ")}}}"
             make_text = derived.make.move()
@@ -137,7 +137,7 @@ sema_call_histories_frame: fn(value: String) -> String Never! { "{value.len()}:{
 
 // The digest of every module source of the package, in load order.
 sema_call_histories_package_digest: fn(graph: SemaRegistrationGraph, package_identity: String) -> String Never! {
-    frames := [String]{}
+    ^frames: [String]{}
     loop index in 0..<graph.modules.len() {
         if graph.modules[index].package_identity != package_identity || graph.modules[index].source == "" {
             next
@@ -160,7 +160,7 @@ sema_call_histories_expr_arg: fn(label: String, expr: Expr, span: Span) -> CallA
 // unit of the caller's file begins there, and the two generated arguments
 // take distinct starts, so every generated node id is unique in the file.
 sema_call_histories_parse_expr: fn(text: String, start: Int) -> Expr? Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<start -> bytes.push(32)
     loop byte in "__jet_history_value: fn() {{\n    {text}\n}}\n".bytes() -> bytes.push(byte)
     parsed: parse_generated_source(bytes)
@@ -187,19 +187,19 @@ sema_call_histories_derive: fn(written: String, command_type: String, check: Sem
     if definition.generic_params.len() > 0 -> return sema_call_histories_unsupported(no_schema)
     variants: sema_call_histories_enum_variants(definition) ?? return sema_call_histories_unsupported(no_schema)
     if variants.len() == 0 -> return sema_call_histories_unsupported(no_schema)
-    rows := [String]{}
-    arms := [String]{}
+    ^rows: [String]{}
+    ^arms: [String]{}
     loop position in 0..<variants.len() {
         variant: variants[position]
         unsupported: sema_call_histories_unsupported("core.testing.histories command type `{command_type}` has unsupported variant `{variant.name}`: no type-valid scalar generator/codec")
         if variant.wire_name == "" || variant.wire_name.contains(":") || variant.wire_name.contains("\"") || variant.wire_name.contains("\\") || variant.wire_name.contains("{") || variant.wire_name.contains("}") {
             return unsupported
         }
-        kinds := [String]{}
-        values := [String]{}
-        counts := [Int]{0, 0, 0}
-        fields := [Type]{}
-        names := [String]{}
+        ^kinds: [String]{}
+        ^values: [String]{}
+        ^counts: [Int]{0, 0, 0}
+        ^fields: [Type]{}
+        ^names: [String]{}
         if variant.payload == {
             .Unit -> {}
             .Single(ty) -> { fields.push(ty.copy()) }
@@ -218,21 +218,21 @@ sema_call_histories_derive: fn(written: String, command_type: String, check: Sem
             counts[kind] = counts[kind] + 1
         }
         rows.push(if kinds.len() == 0 -> variant.wire_name.copy() else -> "{variant.wire_name}:{kinds.join(":")}")
-        constructor := "{written}.{variant.name}"
+        ^constructor: "{written}.{variant.name}"
         if variant.payload == {
             .Unit -> {}
             .Single(_) -> { constructor = "{constructor}({values[0]})" }
             .Named(_) -> {
-                labeled := [String]{}
+                ^labeled: [String]{}
                 loop index in 0..<names.len() -> labeled.push("{names[index]}: {values[index]}")
                 constructor = "{constructor}{{{labeled.join(", ")}}}"
             }
         }
         arms.push(constructor)
     }
-    body := arms[arms.len() - 1]
+    ^body: arms[arms.len() - 1]
     if arms.len() > 1 {
-        cases := [String]{}
+        ^cases: [String]{}
         loop index in 0..<(arms.len() - 1) -> cases.push("        {index} -> {arms[index]}\n")
         body = "if __variant == {{\n{cases.join("")}        else -> {arms[arms.len() - 1]}\n    }}"
     }

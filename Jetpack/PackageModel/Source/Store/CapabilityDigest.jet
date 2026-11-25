@@ -29,7 +29,7 @@ PackageCapabilitySnapshot: struct {
 pkg_api_snapshot_line_name: fn(line: String) -> {kind: String, name: String}? Never! {
     loop kind in PKG_API_SNAPSHOT_KINDS {
         if !line.starts_with("{kind} ") -> next
-        name := line.removeprefix("{kind} ")
+        ^name: line.removeprefix("{kind} ")
         loop marker in ([String]{"<", "(", "{{", "[", ":", "=", " "}) {
             if name.split_once(marker) == .Val(pair) -> name = pair.before
         }
@@ -40,10 +40,10 @@ pkg_api_snapshot_line_name: fn(line: String) -> {kind: String, name: String}? Ne
 }
 
 pkg_capability_snapshot_parse: fn(raw: String) -> PackageCapabilitySnapshot? Never! {
-    version := Int?{None}
-    package := String?{None}
-    published := String?{None}
-    signatures := [String]{}
+    ^version: Int?{None}
+    ^package: String?{None}
+    ^published: String?{None}
+    ^signatures: [String]{}
     loop raw_line in diagnostic_text_lines(raw) {
         line: raw_line.trim()
         if line == "" -> next
@@ -53,7 +53,7 @@ pkg_capability_snapshot_parse: fn(raw: String) -> PackageCapabilitySnapshot? Nev
             line.starts_with("published_version = ") -> published = Val(line.copy().removeprefix("published_version = "))
             pkg_api_snapshot_line_name(line.copy()) != None -> signatures.push(line.copy())
             line.contains(": fn") -> {
-                name := line
+                ^name: line
                 if line.copy().split_once(": fn") == .Val(pair) -> name = pair.before
                 if name.trim() == "" -> return None
                 signatures.push(line.copy())
@@ -74,18 +74,18 @@ pkg_api_snapshot_render: fn(package: String, published_version: String, signatur
 }
 
 pkg_capability_snapshot_text: fn(snapshots: [PackageCapabilitySnapshot]) -> String Never! {
-    ordered := snapshots
+    ^ordered: snapshots
     ordered.sort_by(fn(left: PackageCapabilitySnapshot, right: PackageCapabilitySnapshot) { left.package <=> right.package })
-    parts := [String]{}
+    ^parts: [String]{}
     loop snapshot in ordered -> parts.push("{snapshot.package}\n{snapshot.signatures.join("\n")}")
     parts.join("\n--\n")
 }
 
 pkg_project_capability_digest: fn(project_root: String) -[FS, Env]> String Never! {
     directory: sys.get(ENV_JET_API_CACHE_DIR) ?? files.join(project_root, ".jet/cache/api")
-    entries := files.list_dir(directory) ?? return ""
+    ^entries: files.list_dir(directory) ?? return ""
     entries.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { left.name <=> right.name })
-    snapshots := [PackageCapabilitySnapshot]{}
+    ^snapshots: [PackageCapabilitySnapshot]{}
     loop entry in entries {
         if !entry.name.ends_with(".api") -> next
         bytes: foundation_read_file_nofollow_at_root(directory, entry.name, PKG_MAX_LOCK_BYTES) ?? next

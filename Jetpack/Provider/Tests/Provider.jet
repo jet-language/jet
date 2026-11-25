@@ -33,7 +33,7 @@ provider_core_test_spec_in: fn(raw: String, table: SourceTable) -> RefSpec {
 }
 
 provider_core_test_repeat: fn(text: String, count: Int) -> String {
-    out := ""
+    ^out: ""
     loop _ in 0..<count -> out = "{out}{text}"
     out
 }
@@ -90,7 +90,7 @@ provider_core_test_is_bad_output: fn(error: ProviderError) -> Bool {
     policy: FoundationHardenedGitPolicy.current()
     pairs: [String]{"credential.helper=", "protocol.ext.allow=never", "protocol.file.allow=always"}
     loop value in pairs {
-        found := false
+        ^found: false
         loop index in 0..<policy.args.len() - 1 {
             if policy.args[index] == "-c" && policy.args[index + 1] == value -> found = true
         }
@@ -248,7 +248,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider direct ecosystem roots do not default to nix") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     ctx: provider_core_test_ctx(".", true, None, None)
     cases: [{raw: String, kind: ProviderKind, flake: String}]{
         {raw: "hello@jet-registry#version=1.0.0", kind: ProviderKind.JetRegistry, flake: "jet-registry:hello#version=1.0.0"},
@@ -277,7 +277,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider acquisition hooks dispatch through core nix and script adapters") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-provider-seam")
     store: files.join(base, "store")
     fixtures: files.join(base, "fixtures")
@@ -407,7 +407,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     assert_eq(runtime.get("NIX_BUILD_TOP"), Val("/build"))
     assert_eq(runtime.get("LC_ALL"), Val("C"))
     assert(!runtime.has_key("PATH"))
-    tampered := producer
+    ^tampered: producer
     tampered.facts["nix.build.env.HOME"] = "/tmp"
     if provider_validate_nix_build_facts(tampered) == {
         .Ok(_) -> { panic("a changed build fact must be rejected") }
@@ -418,7 +418,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 
 #Test("provider shared carrier rejects unpinned external reference") {
     plan: ProviderPlanFacts.from_facts([String:String]{"action.kind": "test"}) ?? panic("plan")
-    producer := ProducerRecord.new("npm", "cas:source", "source", plan, "test-toolchain", "policy=test\nplatform=any", [String:String]{}) ?? panic("producer")
+    ^producer: ProducerRecord.new("npm", "cas:source", "source", plan, "test-toolchain", "policy=test\nplatform=any", [String:String]{}) ?? panic("producer")
     if provider_refresh_provider_facts(producer, "left-pad@npm") == {
         .Ok(_) -> { panic("an unpinned external reference must be rejected") }
         .Err(error) -> {
@@ -497,7 +497,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider fixture missing errors") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     dir: sys.temp_dir()
     ctx: provider_core_test_ctx(dir, false, Val(files.join(dir, "definitely-not-here-xyz")), None)
     if provider_core_test_realize_error(verification, provider_core_test_spec("nope@jetpack"), SourceTable.empty(), ctx) == {
@@ -509,7 +509,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider core builds local package") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-core")
     repo: files.join(base, "jet-pkgs")
     store: files.join(base, "store")
@@ -538,7 +538,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 // U10 Chunk 4: the repo manifest's `packages:` index decides what a realized
 // core package puts on PATH.
 #Test("provider core kind decides path entry") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-core-kind")
     repo: files.join(base, "jet-pkgs")
     store: files.join(base, "store")
@@ -559,7 +559,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider core fetches remote git package") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-core-remote")
     repo: files.join(base, "remote")
     store: files.join(base, "store")
@@ -619,7 +619,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 // U9 end to end: an inferred source whose remote carries `package.jet`
 // resolves to the core provider and builds the first-party package.
 #Test("provider realize resolves inferred remote to core") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-infer-build")
     repo: files.join(base, "remote")
     store: files.join(base, "store")
@@ -642,7 +642,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider sparse fetch materializes only addressed member") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-sparse-one")
     repo: files.join(base, "mono")
     store: files.join(base, "store")
@@ -672,7 +672,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider sparse fetch includes in repo dependency") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-sparse-dep")
     repo: files.join(base, "mono")
     store: files.join(base, "store")
@@ -704,7 +704,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider in repo dependency outside workspace is E1233") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-e1233")
     repo: files.join(base, "mono")
     store: files.join(base, "store")
@@ -726,7 +726,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 }
 
 #Test("provider canonical monorepo realization uses the requested member root") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-canonical-mono")
     repo: files.join(base, "mono")
     store: files.join(base, "store")
@@ -767,7 +767,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 // T0 a first-party library realization carries the full A4
 // envelope, and it round-trips through the store record.
 #Test("provider core build writes envelope") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: provider_core_test_dir("jpk-envelope")
     repo: files.join(base, "jet-pkgs")
     store: files.join(base, "hangar")
@@ -785,7 +785,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     entry: store_record_realized_mode(verification, roots, realized) ?? panic("record")
     assert_eq(entry.envelope, realized.envelope)
     listed: store_list(verification, roots)
-    found := StoreEntry?{None}
+    ^found: StoreEntry?{None}
     loop candidate in listed {
         if candidate.id == entry.id -> found = Val(candidate)
     }

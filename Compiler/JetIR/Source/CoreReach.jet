@@ -211,14 +211,20 @@ ir_core_reach_one_stmt_keys: fn(interner: Interner, tree: BodyTree, statement: I
             }
             ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
         }
-        .RefutableBind(_, _, body, _) -> { ir_core_reach_stmt_keys(interner, tree, body, functions, keys) }
+        .RefutableBind(_, _, body, _) -> {
+            ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
+        }
         .If(_, then_body, else_body, _, _) -> {
             ir_core_reach_stmt_keys(interner, tree, then_body, functions, keys)
-            if else_body == .Val(body) -> ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
+            if else_body == .Val(body) {
+                ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
+            }
         }
         .CountedLoop(_, init, _, step, _, body, _) -> {
             ir_core_reach_one_stmt_keys(interner, tree, init, functions, keys)
-            if step == .Val(value) -> ir_core_reach_one_stmt_keys(interner, tree, value, functions, keys)
+            if step == .Val(value) {
+                ir_core_reach_one_stmt_keys(interner, tree, value, functions, keys)
+            }
             ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
         }
         .Match(_, arms, _, _) -> {
@@ -226,11 +232,15 @@ ir_core_reach_one_stmt_keys: fn(interner: Interner, tree: BodyTree, statement: I
         }
         .EnumMatch(_, arms, else_body, _, _) -> {
             loop arm in arms -> ir_core_reach_stmt_keys(interner, tree, arm.body, functions, keys)
-            if else_body == .Val(body) -> ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
+            if else_body == .Val(body) {
+                ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
+            }
         }
         .MixedSwitch(_, _, arms, else_body, _) -> {
             loop arm in arms -> ir_core_reach_stmt_keys(interner, tree, arm.body, functions, keys)
-            if else_body == .Val(body) -> ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
+            if else_body == .Val(body) {
+                ir_core_reach_stmt_keys(interner, tree, body, functions, keys)
+            }
         }
         .RangeSwitch(_, arms, body, _) -> {
             loop arm in arms -> ir_core_reach_stmt_keys(interner, tree, arm.body, functions, keys)
@@ -245,7 +255,9 @@ ir_core_reach_one_stmt_keys: fn(interner: Interner, tree: BodyTree, statement: I
 }
 
 ir_core_reach_stmt_keys: fn(interner: Interner, tree: BodyTree, statements: [Int], functions: [FnBody], keys: ^[String]) Never! {
-    loop statement in statements -> ir_core_reach_one_stmt_keys(interner, tree, statement, functions, keys)
+    loop statement in statements {
+        ir_core_reach_one_stmt_keys(interner, tree, statement, functions, keys)
+    }
 }
 
 // The function keys one checked expression names directly; a direct call's
@@ -345,9 +357,9 @@ ir_core_reach_expr_keys: fn(interner: Interner, tree: BodyTree, expression: Int,
 // work list, so each node's visitor closure captures only the list (a
 // closure box per node is still allocated; it stays one word of capture).
 ir_core_reach_function_keys: fn(interner: Interner, function: FnBody, functions: [FnBody], symbols: SymbolTable, source_keys: IRReachSources, decl_rows: [Int], targets: ^[Int]) -> [String] Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     ir_core_reach_stmt_keys(interner, function.tree, function.body, functions, keys)
-    pending := [Int]{}
+    ^pending: [Int]{}
     loop parameter in function.params {
         if parameter.default == Val(value) -> pending.push(value)
     }
@@ -381,7 +393,7 @@ ir_core_reach_expr_children: fn(tree: BodyTree, expression: Int, pending: ^[Int]
 // explicitly called functions, so it adds these
 // (`jet_driver_comptime_function_closure`).
 ir_core_role_names: fn(interner: Interner, tree: BodyTree, roots: [Int], body: [Int]) -> [String] Never! {
-    found := [String]{}
+    ^found: [String]{}
     loop root in roots -> ir_core_role_tree(interner, tree, root, found)
     loop statement in body {
         body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_core_role_tree(interner, tree, child, found) })
@@ -405,18 +417,28 @@ ir_core_expr_roles: fn(interner: Interner, tree: BodyTree, expression: Int, foun
         return
     }
     if tree.nodes[idx].kind == .PreciseBuiltin(owner, operation, _) {
-        if owner == "Fraction" && operation == "quotient" -> return ir_core_add_role(found, ir_precise_source_role(owner, "from_parts"))
-        if owner == "Fraction" && operation == "div" -> ir_core_add_role(found, ir_precise_source_role(owner, "is_zero"))
+        if owner == "Fraction" && operation == "quotient" {
+            return ir_core_add_role(found, ir_precise_source_role(owner, "from_parts"))
+        }
+        if owner == "Fraction" && operation == "div" {
+            ir_core_add_role(found, ir_precise_source_role(owner, "is_zero"))
+        }
         return ir_core_add_role(found, ir_precise_source_role(owner, operation))
     }
     if tree.nodes[idx].kind == .MathBuiltin(owner, operation, _) {
         return ir_core_add_role(found, ir_precise_source_role(owner, operation))
     }
     if tree.nodes[idx].kind == .Binary(op, _, _, _, _) {
-        if op != .Pow -> return
+        if op != .Pow {
+            return
+        }
         bare: ir_untag(body_type(interner, tree, expression))
-        if bare == Type.Float -> return ir_core_add_role(found, ir_precise_source_role("Float", "pow"))
-        if bare == Type.Float32 -> return ir_core_add_role(found, ir_precise_source_role("F32", "pow"))
+        if bare == Type.Float {
+            return ir_core_add_role(found, ir_precise_source_role("Float", "pow"))
+        }
+        if bare == Type.Float32 {
+            return ir_core_add_role(found, ir_precise_source_role("F32", "pow"))
+        }
     }
 }
 
@@ -432,7 +454,7 @@ ir_core_add_role: fn(found: ^[String], role: ^^String?) Never! {
 // declared error conversion a `?` calls (`impl Source -> Target`). A
 // compile-time body queues each for lowering itself. Each key once, in tree order.
 ir_named_function_keys: fn(tree: BodyTree, roots: [Int], body: [Int], decls: DeclTable, symbols: SymbolTable) -> [String] Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop root in roots -> ir_named_function_tree(tree, root, keys, decls, symbols)
     loop statement in body {
         body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_named_function_tree(tree, child, keys, decls, symbols) })
@@ -484,7 +506,7 @@ IRComptimeCodecTarget: struct {
 }
 
 ir_comptime_codec_targets: fn(interner: Interner, tree: BodyTree, roots: [Int], body: [Int]) -> [IRComptimeCodecTarget] Never! {
-    targets := [IRComptimeCodecTarget]{}
+    ^targets: [IRComptimeCodecTarget]{}
     loop root in roots -> ir_comptime_codec_tree(interner, tree, root, targets)
     loop statement in body {
         body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_comptime_codec_tree(interner, tree, child, targets) })
@@ -527,8 +549,8 @@ ir_comptime_codec_tree: fn(interner: Interner, tree: BodyTree, expression: Int, 
 // with no call fact, so a compile-time body queues those methods itself
 // (jet_driver_comptime_owner_refs).
 ir_comptime_expression_types: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [TypeID] Never! {
-    seen := [U32:Bool]{}
-    ids := [TypeID]{}
+    ^seen: [U32:Bool]{}
+    ^ids: [TypeID]{}
     loop root in roots -> ir_comptime_expression_types_tree(tree, root, seen, ids)
     loop statement in body {
         body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_comptime_expression_types_tree(tree, child, seen, ids) })
@@ -551,8 +573,8 @@ ir_comptime_expression_types_tree: fn(tree: BodyTree, expression: Int, seen: ^[U
 ir_core_reach_template_key: fn(key: String) -> String Never! {
     bytes: key.bytes()
     if bytes.len() == 0 || (Int{bytes[bytes.len() - 1]}) != 62 -> return key.copy()
-    depth := 0
-    position := bytes.len() - 1
+    ^depth: 0
+    ^position: bytes.len() - 1
     loop position >= 0 {
         byte: Int{bytes[position]}
         if byte == 62 -> depth += 1
@@ -603,21 +625,21 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 // kept body names is never read, so the count can end below the total.
 ir_reachable_core_rows: fn(functions: ^[FnBody], decls: DeclTable, symbols: ^[SymbolTable], interners: ^[Interner], candidates: ^^[Bool], core_module_identities: [ModuleID], rooted_keys: NameTable, held: ^^IRReachHeld, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
-    core_modules := [U32:Bool]{}
+    ^core_modules: [U32:Bool]{}
     loop identity in core_module_identities -> core_modules[identity.id] = true
     // Each candidate key's first row (a hashed map: only looked up).
-    by_key := IRFunctionRows{keys: name_column_table(), rows: name_column()}
-    reachable := [Bool]{}
-    roots := [Int]{}
-    weights := [Int]{}
+    ^by_key: IRFunctionRows{keys: name_column_table(), rows: name_column()}
+    ^reachable: [Bool]{}
+    ^roots: [Int]{}
+    ^weights: [Int]{}
     // Each row's source bytes, a wave's weight per row.
-    sizes := [Int]{}
+    ^sizes: [Int]{}
     // The Core source helpers a lowering calls with no keyed call: Fmt.jet
     // selector helpers by name and decode helpers by role.
-    source_keys := IRReachSources{names: name_table_sized(64), keys: [String]{""}}
+    ^source_keys: IRReachSources{names: name_table_sized(64), keys: [String]{""}}
     // A declaration's first candidate row by DeclID row (-1: none).
-    decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
-    candidate_count := 0
+    ^decl_rows: (loop _ in 0..<decls.rows.len() -> -1)
+    ^candidate_count: 0
     decl_workers: compiler_threads_admit(threads, functions.len(), functions.len(), 1024, 0, 0)
     if decl_workers <= 1 {
         loop (index, function) in functions {
@@ -643,7 +665,7 @@ ir_reachable_core_rows: fn(functions: ^[FnBody], decls: DeclTable, symbols: ^[Sy
             }
         }
     } else {
-        decl_parts := [IRCoreReachDeclPart]{}
+        ^decl_parts: [IRCoreReachDeclPart]{}
         task.group ir_core_reach_decl_init {
             decl_task: task ir_core_reach_decl_parts(functions, decls, symbols[0], candidates, decl_workers)
             loop (index, function) in functions {
@@ -675,16 +697,16 @@ ir_reachable_core_rows: fn(functions: ^[FnBody], decls: DeclTable, symbols: ^[Sy
         }
     }
     // Each function a held constant names, as its candidate row (-1: none).
-    held_rows := [Int]{}
+    ^held_rows: [Int]{}
     loop key in held.functions {
-        target := ir_function_rows_get(by_key, key)
+        ^target: ir_function_rows_get(by_key, key)
         if target == None -> target = ir_function_rows_get(by_key, ir_core_reach_template_key(key))
         held_rows.push(target ?? -1)
     }
     slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, symbols: compiler_take_rows<SymbolTable>(symbols), interners: compiler_take_rows<Interner>(interners), by_key: [IRFunctionRows]{by_key.move()}, source_keys: [IRReachSources]{source_keys.move()}, decl_rows: decl_rows.move(), held: [IRReachHeld]{held}, held_rows: held_rows.move()}}
-    read := 0
+    ^read: 0
     loop {
-        reached := [Int]{}
+        ^reached: [Int]{}
         loop target in ir_core_reach_root_targets(slot, roots, weights, threads, IRReachProgress{read: read, total: candidate_count}, trace_sink) {
             if !reachable[target] {
                 reachable[target] = true
@@ -698,7 +720,7 @@ ir_reachable_core_rows: fn(functions: ^[FnBody], decls: DeclTable, symbols: ^[Sy
     }
     if trace_sink == .Val(sink) -> sink.progress("lower", read, candidate_count)
     permit: slot.guard_edit()
-    back := compiler_threads_taken(permit.value.functions)
+    ^back: compiler_threads_taken(permit.value.functions)
     compiler_transfer_rows<FnBody>(functions, back)
     compiler_transfer_rows<SymbolTable>(symbols, permit.value.symbols)
     compiler_transfer_rows<Interner>(interners, permit.value.interners)
@@ -711,8 +733,8 @@ IRCoreReachDeclPart: struct {
 }
 
 ir_core_reach_decl_range: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, candidates: [Bool], start: Int, end: Int) -> IRCoreReachDeclPart Never! {
-    decl_indices := [Int]{}
-    fn_rows := [Int]{}
+    ^decl_indices: [Int]{}
+    ^fn_rows: [Int]{}
     loop index in start..<end {
         if !candidates[index] -> next
         if decl_table_find(decls, symbols, functions[index].key) == .Val(id) {
@@ -728,10 +750,10 @@ ir_core_reach_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: S
     if at + 1 == starts.len() {
         return [IRCoreReachDeclPart]{ir_core_reach_decl_range(functions, decls, symbols, candidates, starts[at], ends[at])}
     }
-    out := [IRCoreReachDeclPart]{}
+    ^out: [IRCoreReachDeclPart]{}
     task.group ir_core_reach_decl_group {
         head: task ir_core_reach_decl_range(functions, decls, symbols, candidates, starts[at], ends[at])
-        rest := ir_core_reach_decl_threads(functions, decls, symbols, candidates, starts, ends, at + 1)
+        ^rest: ir_core_reach_decl_threads(functions, decls, symbols, candidates, starts, ends, at + 1)
         out.push(compiler_threads_joined(head))
         compiler_transfer_rows<IRCoreReachDeclPart>(out, rest)
     }
@@ -740,8 +762,8 @@ ir_core_reach_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: S
 
 ir_core_reach_decl_parts: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, candidates: [Bool], workers: Int) -> [IRCoreReachDeclPart] {
     count: functions.len()
-    starts := [Int]{}
-    ends := [Int]{}
+    ^starts: [Int]{}
+    ^ends: [Int]{}
     loop w in 0..<workers {
         s: (w * count) /% workers
         e: ((w + 1) * count) /% workers
@@ -875,20 +897,20 @@ IR_REACH_PROGRESS_STRIDE: 64
 // consecutive parts each thread claims until none is left, joined in part
 // order.
 ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, rows: [Int], weights: [Int], threads: CompilerThreads, progress: IRReachProgress, trace_sink: CompilerTraceSink?) -> [Int] {
-    total := 0
+    ^total: 0
     loop weight in weights -> total += weight
     workers: compiler_threads_admit(threads, weights.len(), total, IR_REACH_MIN_BYTES_PER_THREAD, 0, 0)
-    count := workers * IR_REACH_PARTS_PER_THREAD
+    ^count: workers * IR_REACH_PARTS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     if workers <= 1 || count <= 1 {
         return ir_core_reach_part_targets(slot, rows, 0, weights.len(), progress, trace_sink)
     }
     bounds: compiler_threads_partition(weights, count)
     queue: IRPartQueue{next: 0}
-    parts := [[Int]]{}
+    ^parts: [[Int]]{}
     loop _ in 0..<count -> parts.push([Int]{})
     ir_core_reach_claimers(slot, rows, bounds, queue, 0, workers, parts, progress, trace_sink)
-    targets := [Int]{}
+    ^targets: [Int]{}
     loop part in 0..<count -> targets.extend(compiler_take_rows<Int>(parts[part]))
     targets
 }
@@ -898,14 +920,14 @@ ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, rows: [Int], weights
 // every part a thread returned into `parts`.
 ir_core_reach_claimers: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int], queue: IRPartQueue, from: Int, workers: Int, parts: ^[[Int]], progress: IRReachProgress, trace_sink: CompilerTraceSink?) {
     if from >= workers - 1 {
-        own := ir_core_reach_claimed(slot, rows, bounds, queue, progress, trace_sink)
+        ^own: ir_core_reach_claimed(slot, rows, bounds, queue, progress, trace_sink)
         ir_core_reach_place(own, parts)
         return
     }
     task.group core_reach_threads {
         head: task ir_core_reach_claimed(slot, rows, bounds, queue, progress, None)
         ir_core_reach_claimers(slot, rows, bounds, queue, from + 1, workers, parts, progress, trace_sink)
-        claimed := compiler_threads_joined(head)
+        ^claimed: compiler_threads_joined(head)
         ir_core_reach_place(claimed, parts)
     }
 }
@@ -913,14 +935,14 @@ ir_core_reach_claimers: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [In
 // Moves each claimed part's rows into its row of `parts`.
 ir_core_reach_place: fn(claimed: ^[IRReachPart], parts: ^[[Int]]) {
     loop claimed.len() > 0 {
-        done := claimed.pop() ?? break
+        ^done: claimed.pop() ?? break
         parts[done.part] = compiler_take_rows<Int>(done.targets)
     }
 }
 
 // One thread: the rows named by the parts it claims until none is left.
 ir_core_reach_claimed: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int], queue: IRPartQueue, progress: IRReachProgress, trace_sink: CompilerTraceSink?) -> [IRReachPart] {
-    claimed := [IRReachPart]{}
+    ^claimed: [IRReachPart]{}
     loop {
         part: queue.next.add(1)
         if part >= bounds.len() - 1 -> break
@@ -934,7 +956,7 @@ ir_core_reach_claimed: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int
 // so far: the waves' before this one and this one's up to the row.
 ir_core_reach_part_targets: fn(slot: Shared<IRReachShared>, rows: [Int], first: Int, last: Int, progress: IRReachProgress, trace_sink: CompilerTraceSink?) -> [Int] {
     inputs: slot.guard_read()
-    targets := [Int]{}
+    ^targets: [Int]{}
     loop position in first..<last {
         if position %% IR_REACH_PROGRESS_STRIDE == 0 {
             if trace_sink == .Val(sink) {
@@ -953,7 +975,7 @@ ir_core_reach_part_targets: fn(slot: Shared<IRReachShared>, rows: [Int], first: 
 // it reads (`held`), appended to `targets`.
 ir_core_reach_row_targets: fn(interner: Interner, functions: [FnBody], symbols: SymbolTable, by_key: IRFunctionRows, source_keys: IRReachSources, decl_rows: [Int], held: IRReachHeld, held_rows: [Int], row: Int, targets: ^[Int]) Never! {
     loop key in ir_core_reach_function_keys(interner, functions[row], functions, symbols, source_keys, decl_rows, targets) {
-        target := ir_function_rows_get(by_key, key)
+        ^target: ir_function_rows_get(by_key, key)
         if target == None -> target = ir_function_rows_get(by_key, ir_core_reach_template_key(key))
         if target == .Val(found) -> targets.push(found)
         constant: ir_reach_held_row(held, key)

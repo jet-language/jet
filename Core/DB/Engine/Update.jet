@@ -69,8 +69,8 @@ update_from_select: fn(p: ^cg.Parse, a: ^ast.AST, i_eph: Int, pk: Int, changes: 
         ast.tab_unref(a, tab)
         a.items[si].tab = -1
     }
-    list := -1
-    e_dest := cg.SRT_UPFROM
+    ^list: -1
+    ^e_dest: cg.SRT_UPFROM
     if pk >= 0 {
         loop i in 0..<p.db.indexes[pk].n_key_col {
             e: expr_row_column(a, p.db.indexes[pk].ai_column[i])
@@ -88,7 +88,7 @@ update_from_select: fn(p: ^cg.Parse, a: ^ast.AST, i_eph: Int, pk: Int, changes: 
     }
     s: ast.select_new(a, list, new_src, where2, -1, -1, -1, ast.SF_UF_SRC_CHECK | ast.SF_INCLUDE_HIDDEN | ast.SF_UPDATE_FROM, -1)
     if s >= 0 -> a.selects[s].sel_flags = a.selects[s].sel_flags | ast.SF_ORDER_BY_REQD
-    dest := ex.select_dest_init(e_dest, i_eph)
+    ^dest: ex.select_dest_init(e_dest, i_eph)
     dest.i_sd_parm2 = if pk >= 0 -> p.db.indexes[pk].n_key_col else -> -1
     _: sel.select(p, a, s, dest)
     ast.select_delete(a, s)
@@ -133,7 +133,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     // that updateFromSelect runs.
     n_change_from: if ast.src_len(a, src) > 1 -> ast.list_len(a, changes) else -> 0
 
-    g := p.up
+    ^g: p.up
     if g.view_get_column_names(p, a, t) != 0 {
         return
     }
@@ -144,13 +144,13 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     // Cursors for the table and all its indices, the index cursors right
     // after the table's, whether they are used or not.
     i_base_cur: p.f.n_tab
-    i_data_cur := i_base_cur
+    ^i_data_cur: i_base_cur
     p.f.n_tab += 1
     i_idx_cur: i_data_cur + 1
     has_rowid: ex.has_rowid(p.db, t)
     pk: if has_rowid -> -1 else -> cat.primary_key_index(p.db, t)
-    n_idx := 0
-    ix := p.db.tables[t].index
+    ^n_idx: 0
+    ^ix: p.db.tables[t].index
     loop ix >= 0 {
         if ix == pk -> i_data_cur = p.f.n_tab
         p.f.n_tab += 1
@@ -163,9 +163,9 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     // a_xref[i] is the SET item for column i, -1 when it is not changed;
     // to_open[0] is the table, to_open[1 + i] the i-th index.
     n_col: p.db.tables[t].cols.len()
-    a_xref := [Int]{}
+    ^a_xref: [Int]{}
     loop _ in 0..<n_col -> a_xref.push(-1)
-    to_open := [Bool]{}
+    ^to_open: [Bool]{}
     loop _ in 0..<(n_idx + 1) -> to_open.push(true)
     to_open.push(false)
 
@@ -173,10 +173,10 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
 
     // Resolve the SET expressions and match each to its column, checking
     // the authorization to change it.
-    chng_rowid := false
-    chng_pk := false
-    rowid_expr := -1
-    i_rowid_expr := -1
+    ^chng_rowid: false
+    ^chng_pk: false
+    ^rowid_expr: -1
+    ^i_rowid_expr: -1
     tab_name: p.db.tables[t].name.copy()
     db_name: p.db.dbs[i_db].name.copy()
     loop i in 0..<ast.list_len(a, changes) {
@@ -186,8 +186,8 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
         if n_change_from == 0 && rs.resolve_expr_names(p, a, nc, ce) != 0 {
             return
         }
-        j := 0
-        found := false
+        ^j: 0
+        ^found: false
         loop j < n_col {
             if p.db.tables[t].cols[j].h_name == h_col && util.str_icmp(p.db.tables[t].cols[j].name, z_ename) == 0 {
                 cf: p.db.tables[t].cols[j].col_flags
@@ -229,7 +229,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     // A generated column changes when what it is computed from does.
     if p.db.tables[t].tab_flags & ast.TF_HAS_GENERATED != 0 {
         loop {
-            progress := false
+            ^progress: false
             loop i in 0..<n_col {
                 if a_xref[i] >= 0 -> next
                 if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_GENERATED == 0 -> next
@@ -248,12 +248,12 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
 
     // A register range for each index whose entry may change (0 for the
     // others), then the table record's.
-    b_replace := on_error == ast.OE_REPLACE
-    a_reg_idx := [Int]{}
-    n_all_idx := 0
+    ^b_replace: on_error == ast.OE_REPLACE
+    ^a_reg_idx: [Int]{}
+    ^n_all_idx: 0
     ix = p.db.tables[t].index
     loop ix >= 0 {
-        reg := 0
+        ^reg: 0
         if chng_key || ix == pk || index_where_clause_might_change(p.db, a, ix, a_xref, chng_rowid) {
             p.f.n_mem += 1
             reg = p.f.n_mem
@@ -292,8 +292,8 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     reg_row_set: a_reg_idx[n_all_idx]
     p.f.n_mem += 1
     reg_old_rowid: p.f.n_mem
-    reg_new_rowid := reg_old_rowid
-    reg_old := 0
+    ^reg_new_rowid: reg_old_rowid
+    ^reg_old: 0
     if chng_pk {
         reg_old = p.f.n_mem + 1
         p.f.n_mem += n_col
@@ -311,10 +311,10 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     }
 
     label_break: cg.v_make_label(p)
-    label_continue := label_break
+    ^label_continue: label_break
 
     // The count of rows updated.
-    reg_row_count := 0
+    ^reg_row_count: 0
     if p.db.flags & conn.SQLITE_COUNT_ROWS != 0 && p.f.trigger_tab < 0 && a.ctx.nested == 0 && !p.f.b_returning {
         p.f.n_mem += 1
         reg_row_count = p.f.n_mem
@@ -323,12 +323,12 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
 
     // The ephemeral table of the rows to change: their rowids, or their
     // PRIMARY KEYs (and with FROM, the SET values).
-    i_eph := 0
-    addr_open := 0
-    n_pk := 0
-    i_pk := 0
-    reg_key := 0
-    n_key := 0
+    ^i_eph: 0
+    ^addr_open: 0
+    ^n_pk: 0
+    ^i_pk: 0
+    ^reg_key: 0
+    ^n_key: 0
     if n_change_from == 0 && has_rowid {
         _: cg.op3(p, opc.OP_NULL, 0, reg_row_set, reg_old_rowid)
         i_eph = p.f.n_tab
@@ -349,7 +349,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
         if pk >= 0 {
             kio: cat.key_info_of_index(p, a, pk)
             if kio == .Val(k0) {
-                k := k0.copy()
+                ^k: k0.copy()
                 k.n_all_field = n_eph_col
                 cg.v_append_p4(p, conn.P4.KeyInfo(k))
             }
@@ -359,10 +359,10 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
 
     // Find the rows to change: one pass changes them inside the WHERE loop,
     // else the loop collects them and a second loop changes them.
-    e_one_pass := we.ONEPASS_OFF
-    ai_cur := [Int]{-1, -1}
-    b_finish_seek := true
-    wr := no_where_info()
+    ^e_one_pass: we.ONEPASS_OFF
+    ^ai_cur: [Int]{-1, -1}
+    ^b_finish_seek: true
+    ^wr: no_where_info()
     if n_change_from > 0 {
         cg.multi_write(p)
         n_key = n_pk
@@ -370,7 +370,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     } else {
         // No multi-row one pass for a nested UPDATE, a changing key, a
         // possible REPLACE or a WHERE subquery.
-        wcf := cg.WHERE_ONEPASS_DESIRED
+        ^wcf: cg.WHERE_ONEPASS_DESIRED
         if a.ctx.nested == 0 && !chng_key && !b_replace && (where_expr < 0 || !ast.has(a, where_expr, ast.EP_SUBQUERY)) {
             wcf |= cg.WHERE_ONEPASS_MULTIROW
         }
@@ -423,7 +423,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
 
     if n_change_from == 0 && e_one_pass != we.ONEPASS_MULTI {
         if wr == .Val(w0) {
-            w := w0
+            ^w: w0
             wh.where_end(p, a, w)
         }
     }
@@ -434,7 +434,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
         if ai_cur[0] >= 0 -> to_open[ai_cur[0] - i_base_cur] = false
         if ai_cur[1] >= 0 -> to_open[ai_cur[1] - i_base_cur] = false
     }
-    addr_once := 0
+    ^addr_once: 0
     n_scan_idx: if ai_cur[1] >= 0 -> 1 else -> 0
     if e_one_pass == we.ONEPASS_MULTI && n_idx - n_scan_idx > 0 {
         addr_once = cg.op0(p, opc.OP_ONCE)
@@ -443,7 +443,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     if addr_once != 0 -> cg.v_jump_here_or_pop_inst(p, addr_once)
 
     // The top of the update loop.
-    addr_top := 0
+    ^addr_top: 0
     if e_one_pass != we.ONEPASS_OFF {
         if ai_cur[0] != i_data_cur && ai_cur[1] != i_data_cur {
             _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, label_break, reg_key, n_key)
@@ -495,7 +495,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
 
     // The new row, from reg_new in storage order: the SET values and the
     // unchanged columns.
-    k := reg_new
+    ^k: reg_new
     loop i in 0..<n_col {
         reg: k
         k += 1
@@ -542,7 +542,7 @@ update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: I
     if e_one_pass == we.ONEPASS_MULTI {
         cg.v_resolve_label(p, label_continue)
         if wr == .Val(w0) {
-            w := w0
+            ^w: w0
             wh.where_end(p, a, w)
         }
     } else if e_one_pass != we.ONEPASS_SINGLE {

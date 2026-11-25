@@ -88,7 +88,7 @@ PUBLICATION_SIGN_E1292_SNAPSHOT: "Error: Jet.MissingRandomness: Jet could not cr
 }
 
 publication_sign_test_seed: fn(byte: Int) -> [U8] Never! {
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(U8{byte})
     seed
 }
@@ -117,7 +117,7 @@ publication_sign_test_seed: fn(byte: Int) -> [U8] Never! {
 }
 
 #Test("publication sign malformed author keys and signatures never verify") {
-    zeros := [U8]{}
+    ^zeros: [U8]{}
     loop _ in 0..<64 -> zeros.push(U8{0})
     loop key in ([String]{"", "gg", "00", "01".repeat(32), "00".repeat(32)}) {
         assert(!(publication_verify(key, "sha256-x", base64.encode(zeros)) ?? panic("invalid key")))
@@ -190,8 +190,8 @@ publication_sign_test_root: fn(label: String) -[FS, Env]> String Never! {
 // stores the optimizer cannot drop, and the length stays. Plain zero
 // assignments would not prove it.
 #Test("publication sign secret_temporary_zeroization_clears_every_byte") {
-    secret := [U8]{}
-    expected := [U8]{}
+    ^secret: [U8]{}
+    ^expected: [U8]{}
     loop _ in 0..<96 {
         secret.push(U8{165})
         expected.push(U8{0})

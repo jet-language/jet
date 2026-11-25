@@ -21,14 +21,14 @@ present: fn(carrier: Holder?) -> Bool { carrier != None }
 
 field_unmarked: fn() -> Res? {
     h: holder("field")
-    out := Res?{None}
+    ^out: Res?{None}
     out = Val(h.res)
     out
 }
 
 payload_unmarked: fn() -> Res? {
     carrier: Val(holder("payload"))
-    out := Holder?{None}
+    ^out: Holder?{None}
     if carrier == {
         .Val(found) -> { out = Val(found) }
         .None -> {}
@@ -77,7 +77,7 @@ payload_marked_then_used: fn() -> Res? {
 
 subject_used_after_payload_move: fn() -> Holder? {
     carrier: Val(holder("subject"))
-    out := Holder?{None}
+    ^out: Holder?{None}
     if carrier == {
         .Val(found) -> { out = Val(found.move()) }
         .None -> {}

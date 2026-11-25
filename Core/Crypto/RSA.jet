@@ -207,7 +207,7 @@ rsa_check_context: fn(ctx: RSAContext, is_priv: Bool{false}) -> Bool Never! {
     if bn.cmp_int(ctx.n, 0) <= 0 || bn.get_bit(ctx.n, 0) == 0 -> return false
     if bn.cmp_int(ctx.e, 0) <= 0 -> return false
     if !is_priv -> return true
-    ok := positive_ct(ctx.p) & bn.limb_bit(ctx.p, 0)
+    ^ok: positive_ct(ctx.p) & bn.limb_bit(ctx.p, 0)
     ok = ok & positive_ct(ctx.q) & bn.limb_bit(ctx.q, 0)
     ok = ok & positive_ct(ctx.dp) & positive_ct(ctx.dq) & positive_ct(ctx.qp)
     ok == U64{1}
@@ -369,21 +369,21 @@ rsa_deduce_primes: fn(n: bn.Mpi, e: bn.Mpi, d: bn.Mpi) -> {p: bn.Mpi, q: bn.Mpi}
     }
     // d e - 1 = 2^order t with t odd.
     de: bn.mul_mpi(d, e)
-    t := bn.sub_int(de, 1)
+    ^t: bn.sub_int(de, 1)
     order: bn.lsb(t)
     if order == 0 -> return Err(.BadInput)
     bn.shift_r(t, order)
     // n = 1 mod 8 makes 2 a square mod both primes: it never splits n.
-    attempt := 0
+    ^attempt: 0
     if n.p[0] & (U64{7}) == (U64{1}) -> attempt = 1
-    rr := bn.mpi()
+    ^rr: bn.mpi()
     loop attempt < DEDUCE_PRIMES.len() {
         base: bn.from_int(DEDUCE_PRIMES[attempt])
         attempt += 1
         coprime: bn.gcd_modinv_odd(base, n, false)
         if bn.cmp_int(coprime.g, 1) != 0 -> next
-        k := bn.exp_mod(base, t, n, rr)
-        iter := 1
+        ^k: bn.exp_mod(base, t, n, rr)
+        ^iter: 1
         loop iter <= order {
             if bn.cmp_int(k, 1) == 0 -> break
             k1: bn.add_int(k, 1)
@@ -538,7 +538,7 @@ key_gen_failed: fn(e: RSAError) -> RSAError Never! {
 rsa_gen_key: fn<R: RNG>(rng: ^R, nbits: Int, exponent: Int) -> RSAContext RSAError! {
     if exponent < 3 || nbits %% 2 != 0 -> return Err(.BadInput(None))
     if nbits < GEN_KEY_MIN_BITS -> return Err(.BadInput(None))
-    ctx := gen_key_core(rng, nbits, exponent) ?? return Err(key_gen_failed(err))
+    ^ctx: gen_key_core(rng, nbits, exponent) ?? return Err(key_gen_failed(err))
     Ok(ctx)
 }
 
@@ -546,17 +546,17 @@ gen_key_core: fn<R: RNG>(rng: ^R, nbits: Int, exponent: Int) -> RSAContext RSAEr
     // At 1024 bits or fewer the strength is at most 80 bits, so 2^-80 is
     // error rate enough.
     low_err: nbits > 1024
-    ctx := rsa_new()
+    ^ctx: rsa_new()
     bn.lset(ctx.e, exponent)
     min_diff_bits: if nbits >= 200 -> (nbits >> 1) - 99 else -> 0
     loop {
-        p := bn.gen_prime(nbits >> 1, rng, low_err: low_err)
-        q := bn.gen_prime(nbits >> 1, rng, low_err: low_err)
+        ^p: bn.gen_prime(nbits >> 1, rng, low_err: low_err)
+        ^q: bn.gen_prime(nbits >> 1, rng, low_err: low_err)
         h: bn.sub_mpi(p, q)
         if bn.bitlen(h) <= min_diff_bits -> next
         // Not required by any standard, but some users rely on p > q.
         if h.s < 0 -> bn.swap(p, q)
-        d := bn.mpi()
+        ^d: bn.mpi()
         if rsa_deduce_private_exponent(p, q, ctx.e) == {
             .Ok(found) -> bn.set_mpi(d, found)
             .Err(.NotAcceptable) -> next
@@ -588,7 +588,7 @@ gen_key_core: fn<R: RNG>(rng: ^R, nbits: Int, exponent: Int) -> RSAContext RSAEr
 rsa_public: fn(ctx: ^RSAContext, input: [U8]) -> [U8] RSAError! {
     if !rsa_check_context(ctx) -> return Err(.BadInput(None))
     if input.len() < ctx.len -> return Err(.PublicFailed(Val(.BadInput)))
-    out := public_core(ctx, input) ?? return Err(.PublicFailed(Val(err)))
+    ^out: public_core(ctx, input) ?? return Err(.PublicFailed(Val(err)))
     Ok(out)
 }
 
@@ -616,23 +616,23 @@ apply_crt: fn(tp: bn.Mpi, tq: bn.Mpi, ctx: ^RSAContext) -> bn.Mpi bn.MpiError! {
     // The output is allocated before any secret limb exists, so its
     // allocation failure leaves nothing behind.
     nl: ctx.n.p.len()
-    out := bn.zeros(nl)
+    ^out: bn.zeros(nl)
     mm: bn.core_montmul_init(ctx.p.p)
-    t := cipher.words(2 * pl + 1)
-    tq_p := cipher.words(pl)
+    ^t: cipher.words(2 * pl + 1)
+    ^tq_p: cipher.words(pl)
     bn.core_mod_wide(tq_p, tq.p, tq.p.len(), ctx.p.p, pl, mm, ctx.rp.p, t)
-    tp_w := bn.limbs_of(tp, pl)
-    diff := cipher.words(pl)
+    ^tp_w: bn.limbs_of(tp, pl)
+    ^diff: cipher.words(pl)
     bn.core_sub_mod(diff, tp_w, tq_p, ctx.p.p, pl)
-    qp_w := bn.limbs_of(ctx.qp, pl)
-    h := cipher.words(pl)
+    ^qp_w: bn.limbs_of(ctx.qp, pl)
+    ^h: cipher.words(pl)
     bn.core_mul_mod(h, diff, qp_w, ctx.p.p, pl, mm, ctx.rp.p, t)
     // h q + tq <= (p - 1) q + q - 1 < n.
     wl: pl + ql
-    wide := cipher.words(wl)
+    ^wide: cipher.words(wl)
     bn.core_mul(wide, h, pl, ctx.q.p, ql)
-    tq_w := bn.limbs_of(tq, wl)
-    sum := cipher.words(wl)
+    ^tq_w: bn.limbs_of(tq, wl)
+    ^sum: cipher.words(wl)
     _: bn.core_add(sum, wide, tq_w, wl)
     loop i in 0..<(if wl < nl -> wl else -> nl) -> out.p[i] = sum[i]
     cipher.wipe_words(t)
@@ -652,7 +652,7 @@ apply_crt: fn(tp: bn.Mpi, tq: bn.Mpi, ctx: ^RSAContext) -> bn.Mpi bn.MpiError! {
 /// RNGFailed.
 gcd_is_one: fn(g: bn.Mpi) -> Bool Never! {
     if g.s < 0 || g.p.len() == 0 -> return false
-    rest := U64{0}
+    ^rest: U64{0}
     loop i in 1..<g.p.len() -> rest |= g.p[i]
     g.p[0] ~ U64{1} | rest == U64{0}
 }
@@ -683,10 +683,10 @@ prepare_blinding: fn<R: RNG>(ctx: ^RSAContext, rng: ^R) RSAError! {
         bn.mont_r2(ctx.rn, ctx.n)
         nl: ctx.n.p.len()
         mm: bn.core_montmul_init(ctx.n.p)
-        t := cipher.words(2 * nl + 1)
-        vi := bn.limbs_of(ctx.vi, nl)
-        vf := bn.limbs_of(ctx.vf, nl)
-        sq := cipher.words(nl)
+        ^t: cipher.words(2 * nl + 1)
+        ^vi: bn.limbs_of(ctx.vi, nl)
+        ^vf: bn.limbs_of(ctx.vf, nl)
+        ^sq: cipher.words(nl)
         bn.core_mul_mod(sq, vi, vi, ctx.n.p, nl, mm, ctx.rn.p, t)
         cipher.wipe_words(ctx.vi.p)
         ctx.vi = bn.Mpi{s: 1, p: sq.copy()}
@@ -714,13 +714,13 @@ unblind: fn(t: ^bn.Mpi, ctx: ^RSAContext) bn.MpiError! {
     nlimbs: ctx.n.p.len()
     mm: bn.core_montmul_init(ctx.n.p)
     rr: bn.core_get_mont_r2_unsafe(ctx.n)
-    work := cipher.words(2 * nlimbs + 1)
+    ^work: cipher.words(2 * nlimbs + 1)
     bn.grow(t, nlimbs)
     bn.grow(ctx.vf, nlimbs)
-    a := t.p.copy()
+    ^a: t.p.copy()
     bn.core_to_mont_rep(t.p, a, ctx.n.p, nlimbs, mm, rr.p, work)
     cipher.wipe_words(a)
-    b := t.p.copy()
+    ^b: t.p.copy()
     bn.core_montmul(t.p, b, ctx.vf.p, nlimbs, ctx.n.p, nlimbs, mm, work)
     cipher.wipe_words(b)
     cipher.wipe_words(work)
@@ -740,22 +740,22 @@ private_failed: fn(e: RSAError) -> RSAError Never! {
 rsa_private: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, input: [U8]) -> [U8] RSAError! {
     if !rsa_check_context(ctx, is_priv: true) -> return Err(.BadInput(None))
     if input.len() < ctx.len -> return Err(.PrivateFailed(Val(.BadInput)))
-    out := private_core(ctx, rng, input) ?? return Err(private_failed(err))
+    ^out: private_core(ctx, rng, input) ?? return Err(private_failed(err))
     Ok(out)
 }
 
 private_core: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, input: [U8]) -> [U8] RSAError! {
     nl: ctx.n.p.len()
-    t0 := cipher.words(nl)
+    ^t0: cipher.words(nl)
     bn.core_read_be(t0, nl, cipher.bytes_of(input, 0, ctx.len))
     if !below_modulus(t0, ctx.n.p, nl) -> return Err(.Mpi(.BadInput))
     // Blinding: t = t0 vi mod n.
     prepare_blinding(ctx, rng)
     bn.mont_r2(ctx.rn, ctx.n)
     mm: bn.core_montmul_init(ctx.n.p)
-    t := bn.zeros(nl)
-    work := cipher.words(2 * nl + 1)
-    vi := bn.limbs_of(ctx.vi, nl)
+    ^t: bn.zeros(nl)
+    ^work: cipher.words(2 * nl + 1)
+    ^vi: bn.limbs_of(ctx.vi, nl)
     bn.core_mul_mod(t.p, t0, vi, ctx.n.p, nl, mm, ctx.rn.p, work)
     cipher.wipe_words(vi)
     cipher.wipe_words(work)
@@ -765,7 +765,7 @@ private_core: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, input: [U8]) -> [U8] RSAErro
     // The CRT: tp = t^dp mod p, tq = t^dq mod q.
     tp: bn.exp_mod(t, dp_blind, ctx.p, ctx.rp)
     tq: bn.exp_mod(t, dq_blind, ctx.q, ctx.rq)
-    s := apply_crt(tp, tq, ctx)
+    ^s: apply_crt(tp, tq, ctx)
     // Check the result against a fault in the computation.
     check: bn.exp_mod(s, ctx.e, ctx.n, ctx.rn)
     if !fault_check_passes(check, t, nl) -> return Err(.VerifyFailed)
@@ -790,12 +790,12 @@ blind_exponent: fn<R: RNG>(p: bn.Mpi, d: bn.Mpi, rng: ^R) -> bn.Mpi RSAError! {
     r: bn.fill_random(EXPONENT_BLINDING, rng)
     rl: r.p.len()
     wl: pl + rl
-    out := bn.zeros(wl)
-    p1 := cipher.words(pl)
+    ^out: bn.zeros(wl)
+    ^p1: cipher.words(pl)
     _: bn.core_sub_int(p1, p.p, U64{1}, pl)
-    prod := cipher.words(wl)
+    ^prod: cipher.words(wl)
     bn.core_mul(prod, p1, pl, r.p, rl)
-    dw := bn.limbs_of(d, wl)
+    ^dw: bn.limbs_of(d, wl)
     _: bn.core_add(out.p, prod, dw, wl)
     cipher.wipe_words(p1)
     cipher.wipe_words(prod)
@@ -807,9 +807,9 @@ blind_exponent: fn<R: RNG>(p: bn.Mpi, d: bn.Mpi, rng: ^R) -> bn.Mpi RSAError! {
 /// one pass over all limbs. A mismatch means a fault in the computation and
 /// fails the operation, so the verdict is public.
 fault_check_passes: fn(check: bn.Mpi, t: bn.Mpi, limbs: Int) -> Bool Never! {
-    a := bn.limbs_of(check, limbs)
-    b := bn.limbs_of(t, limbs)
-    diff := U64{0}
+    ^a: bn.limbs_of(check, limbs)
+    ^b: bn.limbs_of(t, limbs)
+    ^diff: U64{0}
     loop i in 0..<limbs -> diff |= a[i] ~ b[i]
     cipher.wipe_words(a)
     cipher.wipe_words(b)
@@ -825,15 +825,15 @@ fault_check_passes: fn(check: bn.Mpi, t: bn.Mpi, limbs: Int) -> Bool Never! {
 /// increments its last byte only, as mbedtls's does.
 mgf_mask: fn(dst: ^[U8], off: Int, len: Int, src: [U8], md: hashes.Md) Never! {
     hlen: hashes.md_size(md)
-    counter := cipher.zero_bytes(4)
-    at := off
-    left := len
+    ^counter: cipher.zero_bytes(4)
+    ^at: off
+    ^left: len
     loop left > 0 {
         use_len: if left < hlen -> left else -> hlen
-        h := hashes.hash_start(md)
+        ^h: hashes.hash_start(md)
         hashes.hash_update(h, src)
         hashes.hash_update(h, counter)
-        mask := hashes.hash_finish(h)
+        ^mask: hashes.hash_finish(h)
         loop i in 0..<use_len -> dst[at + i] = dst[at + i] ~ mask[i]
         core.crypto.wipe(mask)
         counter[3] = next_byte(counter[3])
@@ -844,7 +844,7 @@ mgf_mask: fn(dst: ^[U8], off: Int, len: Int, src: [U8], md: hashes.Md) Never! {
 
 /// Hash(0x00 * 8 || hash || salt) (hash_mprime; RFC 8017 9.1.1 steps 5, 6).
 hash_mprime: fn(hash: [U8], salt: [U8], md: hashes.Md) -> [U8] Never! {
-    h := hashes.hash_start(md)
+    ^h: hashes.hash_start(md)
     hashes.hash_update(h, cipher.zero_bytes(8))
     hashes.hash_update(h, hash)
     hashes.hash_update(h, salt)
@@ -868,8 +868,8 @@ rsa_rsaes_oaep_encrypt: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, label: [U8], input
     olen: ctx.len
     ilen: input.len()
     if olen < ilen + 2 * hlen + 2 -> return Err(.BadInput(None))
-    out := cipher.zero_bytes(olen)
-    seed := cipher.zero_bytes(hlen)
+    ^out: cipher.zero_bytes(olen)
+    ^seed: cipher.zero_bytes(hlen)
     if !rng.fill(seed) -> return Err(.RNGFailed)
     put_bytes(out, 1, seed)
     core.crypto.wipe(seed)
@@ -879,10 +879,10 @@ rsa_rsaes_oaep_encrypt: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, label: [U8], input
     out[olen - ilen - 1] = U8{1}
     put_bytes(out, olen - ilen, input)
     // maskedDB, then maskedSeed.
-    seed_part := cipher.bytes_of(out, 1, hlen)
+    ^seed_part: cipher.bytes_of(out, 1, hlen)
     mgf_mask(out, hlen + 1, olen - hlen - 1, seed_part, md)
     core.crypto.wipe(seed_part)
-    db_part := cipher.bytes_of(out, hlen + 1, olen - hlen - 1)
+    ^db_part: cipher.bytes_of(out, hlen + 1, olen - hlen - 1)
     mgf_mask(out, 1, hlen, db_part, md)
     core.crypto.wipe(db_part)
     sealed: rsa_public(ctx, out) ?? {
@@ -901,11 +901,11 @@ rsa_rsaes_pkcs1_v15_encrypt: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, input: [U8]) 
     ilen: input.len()
     if olen < ilen + 11 -> return Err(.BadInput(None))
     nb_pad: olen - 3 - ilen
-    out := cipher.zero_bytes(olen)
+    ^out: cipher.zero_bytes(olen)
     out[1] = U8{RSA_CRYPT}
-    one := cipher.zero_bytes(1)
+    ^one: cipher.zero_bytes(1)
     loop i in 0..<nb_pad {
-        rng_dl := 100
+        ^rng_dl: 100
         loop {
             if !rng.fill(one) -> return Err(.RNGFailed)
             rng_dl -= 1
@@ -949,9 +949,9 @@ rsa_rsaes_oaep_decrypt: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, label: [U8], input
     md: ctx.hash_id ?? return Err(.BadInput(None))
     hlen: hashes.md_size(md)
     if 2 * hlen + 2 > ilen -> return Err(.BadInput(None))
-    buf := rsa_private(ctx, rng, input) ?? return Err(err)
-    lhash := hashes.hash(md, label)
-    decoded := rsaes_oaep_unpadding(buf, md, lhash, output_max_len)
+    ^buf: rsa_private(ctx, rng, input) ?? return Err(err)
+    ^lhash: hashes.hash(md, label)
+    ^decoded: rsaes_oaep_unpadding(buf, md, lhash, output_max_len)
     core.crypto.wipe(lhash)
     core.crypto.wipe(buf)
     out: unpadded_message(decoded) ?? return Err(err)
@@ -970,10 +970,10 @@ rsaes_oaep_unpadding: fn(buf: ^[U8], md: hashes.Md, lhash: [U8], output_max_len:
     ilen: buf.len()
     hlen: hashes.md_size(md)
     // The seed's mask comes from maskedDB, then DB's from the seed.
-    db_part := cipher.bytes_of(buf, hlen + 1, ilen - hlen - 1)
+    ^db_part: cipher.bytes_of(buf, hlen + 1, ilen - hlen - 1)
     mgf_mask(buf, 1, hlen, db_part, md)
     core.crypto.wipe(db_part)
-    seed_part := cipher.bytes_of(buf, 1, hlen)
+    ^seed_part: cipher.bytes_of(buf, 1, hlen)
     mgf_mask(buf, hlen + 1, ilen - hlen - 1, seed_part, md)
     core.crypto.wipe(seed_part)
     room: ilen - 2 * hlen - 2
@@ -981,14 +981,14 @@ rsaes_oaep_unpadding: fn(buf: ^[U8], md: hashes.Md, lhash: [U8], output_max_len:
     max_size: U64{plaintext_max_size}
     // 0x00 || seed || lHash' || PS || 0x01 || M with lHash' = lHash and PS
     // all zeros.
-    bad := ctime.cond_of(U64{buf[0]})
+    ^bad: ctime.cond_of(U64{buf[0]})
     bad = ctime.bool_or(bad, ctime.mem_ne(lhash, 0, buf, 1 + hlen, hlen))
     // Read the whole of PS || 0x01 || M: pad_count counts the zeros before
     // the first nonzero byte, which must be 0x01.
     start: 1 + 2 * hlen
-    pad_done := ctime.ct_false()
-    one_found := ctime.ct_false()
-    pad_count := U64{0}
+    ^pad_done: ctime.ct_false()
+    ^one_found: ctime.ct_false()
+    ^pad_count: U64{0}
     loop i in start..<ilen {
         byte: U64{buf[i]}
         first: ctime.bool_and(ctime.bool_not(pad_done), ctime.uint_ne(byte, U64{0}))
@@ -1000,7 +1000,7 @@ rsaes_oaep_unpadding: fn(buf: ^[U8], md: hashes.Md, lhash: [U8], output_max_len:
     // A bad padding claims the largest message that fits, so the size does
     // not tell; ilen - start - pad_count - 1 is garbage only when the
     // padding is bad, where it is never selected.
-    plaintext_size := ctime.select(bad, max_size, wrapping(U64{ilen - start - 1} - pad_count))
+    ^plaintext_size: ctime.select(bad, max_size, wrapping(U64{ilen - start - 1} - pad_count))
     too_large: ctime.uint_gt(plaintext_size, max_size)
     // Zero what is about to be copied out when it must not be; copy the
     // same bytes from the same place either way.
@@ -1061,11 +1061,11 @@ V15Unpadded: struct {
     plaintext_max_size: if output_max_len > ilen - 11 -> ilen - 11 else -> output_max_len
     max_size: U64{plaintext_max_size}
     // 0x00 || 0x02 || PS || 0x00 with at least 8 nonzero bytes of PS.
-    bad := ctime.cond_of(U64{input[0]})
+    ^bad: ctime.cond_of(U64{input[0]})
     bad = ctime.bool_or(bad, ctime.uint_ne(U64{input[1]}, U64{RSA_CRYPT}))
     // Read the whole buffer; pad_count counts the bytes before the first 0.
-    pad_done := ctime.ct_false()
-    pad_count := U64{0}
+    ^pad_done: ctime.ct_false()
+    ^pad_count: U64{0}
     loop i in 2..<ilen {
         found: ctime.uint_eq(U64{input[i]}, U64{0})
         pad_done = ctime.bool_or(pad_done, found)
@@ -1076,7 +1076,7 @@ V15Unpadded: struct {
     // A bad padding claims the largest message that fits, so the size
     // does not tell; ilen - pad_count - 3 is garbage only when the padding
     // is bad, where it is never selected.
-    plaintext_size := ctime.select(bad, max_size, U64{ilen} - pad_count - U64{3})
+    ^plaintext_size: ctime.select(bad, max_size, U64{ilen} - pad_count - U64{3})
     too_large: ctime.uint_gt(plaintext_size, max_size)
     // Zero what is about to be copied out when it must not be; copy the
     // same bytes from the same place either way.
@@ -1094,8 +1094,8 @@ rsa_rsaes_pkcs1_v15_decrypt: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, input: [U8], 
     ilen: ctx.len
     if ctx.padding != .PKCSV15 -> return Err(.BadInput(None))
     if ilen < 16 || ilen > MPI_MAX_SIZE -> return Err(.BadInput(None))
-    buf := rsa_private(ctx, rng, input) ?? return Err(err)
-    decoded := rsaes_pkcs1_v15_unpadding(buf, output_max_len)
+    ^buf: rsa_private(ctx, rng, input) ?? return Err(err)
+    ^decoded: rsaes_pkcs1_v15_unpadding(buf, output_max_len)
     core.crypto.wipe(buf)
     out: unpadded_message(decoded) ?? return Err(err)
     Ok(out)
@@ -1130,7 +1130,7 @@ rsa_rsaes_pkcs1_v15_decrypt_fixed: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, input: 
     ilen: ctx.len
     if ctx.padding != .PKCSV15 -> return Err(.BadInput(None))
     if ilen < 16 || ilen > MPI_MAX_SIZE || len < 1 || len > ilen - 11 -> return Err(.BadInput(None))
-    buf := rsa_private(ctx, rng, input) ?? return Err(err)
+    ^buf: rsa_private(ctx, rng, input) ?? return Err(err)
     Ok(v15_fixed_of_block(buf, len))
 }
 
@@ -1140,7 +1140,7 @@ rsa_rsaes_pkcs1_v15_decrypt_fixed: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, input: 
 /// own time is the same for every block, so a timing of this part alone
 /// sees the padding's verdict without the modular exponentiation's noise.
 priv v15_fixed_of_block: fn(buf: ^[U8], len: Int) -> V15Fixed Never! {
-    decoded := rsaes_pkcs1_v15_unpadding(buf, len)
+    ^decoded: rsaes_pkcs1_v15_unpadding(buf, len)
     core.crypto.wipe(buf)
     // The unpadding keeps len bytes: the message, when it is that long and
     // the padding is good, else zeros (a bad padding or a longer message)
@@ -1161,8 +1161,8 @@ DecomposedRet: struct {
 /// `ret` 0; any other code stays in `ret` (mbedtls_rsa_decrypt_decompose_ret).
 /// Codes are mbedtls's, zero or negative.
 rsa_decrypt_decompose_ret: fn(invalid_padding_in: Int, invalid_padding_out: Int, output_too_large_in: Int, output_too_large_out: Int, combined_ret: Int) -> DecomposedRet Never! {
-    problem := 0
-    ret := combined_ret
+    ^problem: 0
+    ^ret: combined_ret
     invalid_padding: ctime.uint_eq(U64{0 - ret}, U64{0 - invalid_padding_in})
     problem = ctime.error_if(invalid_padding.mask, invalid_padding_out, problem)
     ret = ctime.error_if(invalid_padding.mask, 0, ret)
@@ -1200,17 +1200,17 @@ pss_sign_core: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, md: hashes.Md?, hash: [U8],
         olen >= hlen + hlen + 2 -> hlen
         else -> olen - hlen - 2
     }
-    sig := cipher.zero_bytes(olen)
+    ^sig: cipher.zero_bytes(olen)
     // EMSA-PSS encodes into bitlen(n) - 1 bits.
     msb: bn.bitlen(ctx.n) - 1
-    p := olen - hlen - slen - 2
+    ^p: olen - hlen - slen - 2
     sig[p] = U8{0x01}
     p += 1
-    salt := cipher.zero_bytes(slen)
+    ^salt: cipher.zero_bytes(slen)
     if !rng.fill(salt) -> return Err(.RNGFailed)
     put_bytes(sig, p, salt)
     p += slen
-    h := hash_mprime(hash, salt, hash_id)
+    ^h: hash_mprime(hash, salt, hash_id)
     put_bytes(sig, p, h)
     // With msb a multiple of 8 the encoding starts one byte in.
     offset: if msb %% 8 == 0 -> 1 else -> 0
@@ -1253,8 +1253,8 @@ rsa_rsassa_pss_sign: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, md: hashes.Md?, hash:
 /// against Bleichenbacher's forgery on lax verifiers.
 rsassa_pkcs1_v15_encode: fn(md: hashes.Md?, hash: [U8], dst_len: Int) -> [U8] RSAError! {
     hashlen: hash.len()
-    nb_pad := dst_len
-    oid := [U8]{}
+    ^nb_pad: dst_len
+    ^oid: [U8]{}
     if md == {
         .Val(m) -> {
             oid = oids.oid_by_md(m)
@@ -1271,7 +1271,7 @@ rsassa_pkcs1_v15_encode: fn(md: hashes.Md?, hash: [U8], dst_len: Int) -> [U8] RS
     // The header and the delimiter take 3 bytes, the padding at least 8.
     if nb_pad < 3 + 8 -> return Err(.BadInput(None))
     nb_pad -= 3
-    dst := [U8]{}
+    ^dst: [U8]{}
     dst.push(U8{0})
     dst.push(U8{RSA_SIGN})
     loop _ in 0..<nb_pad -> dst.push(U8{0xFF})
@@ -1299,9 +1299,9 @@ rsassa_pkcs1_v15_encode: fn(md: hashes.Md?, hash: [U8], dst_len: Int) -> [U8] RS
 /// Lenstra's CRT fault attack (mbedtls_rsa_rsassa_pkcs1_v15_sign).
 rsa_rsassa_pkcs1_v15_sign: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, md: hashes.Md?, hash: [U8]) -> [U8] RSAError! {
     if ctx.padding != .PKCSV15 -> return Err(.BadInput(None))
-    encoded := rsassa_pkcs1_v15_encode(md, hash, ctx.len) ?? return Err(err)
-    sig_try := rsa_private(ctx, rng, encoded) ?? return Err(err)
-    verif := rsa_public(ctx, sig_try) ?? return Err(err)
+    ^encoded: rsassa_pkcs1_v15_encode(md, hash, ctx.len) ?? return Err(err)
+    ^sig_try: rsa_private(ctx, rng, encoded) ?? return Err(err)
+    ^verif: rsa_public(ctx, sig_try) ?? return Err(err)
     differ: ctime.memcmp(verif, 0, encoded, 0, ctx.len)
     core.crypto.wipe(verif)
     core.crypto.wipe(encoded)
@@ -1321,9 +1321,9 @@ rsa_pkcs1_sign: fn<R: RNG>(ctx: ^RSAContext, rng: ^R, md: hashes.Md?, hash: [U8]
 /// RSASSA-PSS-VERIFY with MGF1 over mgf1_hash_id and salt length
 /// expected_salt_len or SALT_LEN_ANY (mbedtls_rsa_rsassa_pss_verify_ext).
 rsa_rsassa_pss_verify_ext: fn(ctx: ^RSAContext, md: hashes.Md?, hash: [U8], mgf1_hash_id: hashes.Md?, expected_salt_len: Int, sig: [U8]) RSAError! {
-    siglen := ctx.len
+    ^siglen: ctx.len
     if siglen < 16 || siglen > MPI_MAX_SIZE -> return Err(.BadInput(None))
-    buf := rsa_public(ctx, sig) ?? return Err(err)
+    ^buf: rsa_public(ctx, sig) ?? return Err(err)
     if buf[siglen - 1] != (U8{0xBC}) -> return Err(.InvalidPadding)
     if !hash_matches(md, hash) -> return Err(.BadInput(None))
     mgf: mgf1_hash_id ?? return Err(.BadInput(None))
@@ -1331,14 +1331,14 @@ rsa_rsassa_pss_verify_ext: fn(ctx: ^RSAContext, md: hashes.Md?, hash: [U8], mgf1
     // EMSA-PSS decodes from bitlen(n) - 1 bits: the bits above are zero.
     msb: bn.bitlen(ctx.n) - 1
     if (Int{buf[0]}) >> (8 - siglen * 8 + msb) != 0 -> return Err(.BadInput(None))
-    p := 0
+    ^p: 0
     if msb %% 8 == 0 {
         p = 1
         siglen -= 1
     }
     if siglen < hlen + 2 -> return Err(.BadInput(None))
     hash_start: p + siglen - hlen - 1
-    h_part := cipher.bytes_of(buf, hash_start, hlen)
+    ^h_part: cipher.bytes_of(buf, hash_start, hlen)
     mgf_mask(buf, p, siglen - hlen - 1, h_part, mgf)
     buf[0] = buf[0] & U8{0xFF >> (siglen * 8 - msb)}
     loop p < hash_start - 1 && buf[p] == (U8{0}) -> p += 1
@@ -1362,8 +1362,8 @@ rsa_rsassa_pss_verify: fn(ctx: ^RSAContext, md: hashes.Md?, hash: [U8], sig: [U8
 /// RSASSA-PKCS1-v1_5-VERIFY: the public operation must give exactly the
 /// encoding of hash (mbedtls_rsa_rsassa_pkcs1_v15_verify).
 rsa_rsassa_pkcs1_v15_verify: fn(ctx: ^RSAContext, md: hashes.Md?, hash: [U8], sig: [U8]) RSAError! {
-    expected := rsassa_pkcs1_v15_encode(md, hash, ctx.len) ?? return Err(err)
-    encoded := rsa_public(ctx, sig) ?? return Err(err)
+    ^expected: rsassa_pkcs1_v15_encode(md, hash, ctx.len) ?? return Err(err)
+    ^encoded: rsa_public(ctx, sig) ?? return Err(err)
     differ: ctime.memcmp(encoded, 0, expected, 0, ctx.len)
     core.crypto.wipe(encoded)
     core.crypto.wipe(expected)
@@ -1382,7 +1382,7 @@ rsa_pkcs1_verify: fn(ctx: ^RSAContext, md: hashes.Md?, hash: [U8], sig: [U8]) RS
 /// An INTEGER that must not be zero, the value rsa_complete reads as
 /// absent (asn1_get_nonzero_mpi).
 get_nonzero_mpi: fn(data: [U8], p: ^Int, end: Int) -> bn.Mpi RSAError! {
-    x := asn1.get_mpi(data, p, end) ?? return Err(.Asn1(err))
+    ^x: asn1.get_mpi(data, p, end) ?? return Err(.Asn1(err))
     if part_is_zero(x) -> return Err(.BadInput(None))
     Ok(x)
 }
@@ -1396,8 +1396,8 @@ part_is_zero: fn(x: bn.Mpi) -> Bool Never! { bn.core_check_zero_ct(x.p, x.p.len(
 /// (mbedtls_rsa_parse_key). The CRT values are taken as given, which keeps
 /// the secret-dependent deduction off the load path (eprint 2020/055).
 rsa_parse_key: fn(key: [U8]) -> RSAContext RSAError! {
-    ctx := rsa_new()
-    p := 0
+    ^ctx: rsa_new()
+    ^p: 0
     end: key.len()
     len: asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
     if end != p + len -> return Err(.BadInput(None))
@@ -1432,10 +1432,10 @@ rsa_parse_key: fn(key: [U8]) -> RSAContext RSAError! {
 /// (mbedtls_rsa_parse_pubkey). A bad or unusable modulus or exponent is
 /// BadInput.
 rsa_parse_pubkey: fn(key: [U8]) -> RSAContext RSAError! {
-    ctx := rsa_new()
-    p := 0
+    ^ctx: rsa_new()
+    ^p: 0
     end: key.len()
-    len := asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
+    ^len: asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
     if end != p + len -> return Err(.BadInput(None))
     len = asn1.get_tag(key, p, end, asn1.ASN1_INTEGER) ?? return Err(.Asn1(err))
     rsa_import_raw(ctx, .N, cipher.bytes_of(key, p, len)) ?? return Err(.BadInput(None))
@@ -1451,7 +1451,7 @@ rsa_parse_pubkey: fn(key: [U8]) -> RSAContext RSAError! {
 
 /// One INTEGER written backwards before p.
 write_int_mpi: fn(buf: ^[U8], p: ^Int, start: Int, x: bn.Mpi) -> Int RSAError! {
-    n := asn1.write_mpi(buf, p, start, x) ?? return Err(.Asn1(err))
+    ^n: asn1.write_mpi(buf, p, start, x) ?? return Err(.Asn1(err))
     Ok(n)
 }
 
@@ -1459,7 +1459,7 @@ write_int_mpi: fn(buf: ^[U8], p: ^Int, start: Int, x: bn.Mpi) -> Int RSAError! {
 /// p (mbedtls_rsa_write_key); its length.
 rsa_write_key: fn(ctx: RSAContext, buf: ^[U8], p: ^Int, start: Int) -> Int RSAError! {
     if !has_private_parts(ctx) -> return Err(.BadInput(None))
-    len := write_int_mpi(buf, p, start, ctx.qp)
+    ^len: write_int_mpi(buf, p, start, ctx.qp)
     len += write_int_mpi(buf, p, start, ctx.dq)
     len += write_int_mpi(buf, p, start, ctx.dp)
     len += write_int_mpi(buf, p, start, ctx.q)
@@ -1468,22 +1468,22 @@ rsa_write_key: fn(ctx: RSAContext, buf: ^[U8], p: ^Int, start: Int) -> Int RSAEr
     len += write_int_mpi(buf, p, start, ctx.e)
     len += write_int_mpi(buf, p, start, ctx.n)
     len += asn1.write_int(buf, p, start, 0) ?? return Err(.Asn1(err))
-    total := asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
+    ^total: asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
     Ok(total)
 }
 
 /// The DER RSAPublicKey, written backwards so it ends at p
 /// (mbedtls_rsa_write_pubkey); its length.
 rsa_write_pubkey: fn(ctx: RSAContext, buf: ^[U8], p: ^Int, start: Int) -> Int RSAError! {
-    len := write_int_mpi(buf, p, start, ctx.e)
+    ^len: write_int_mpi(buf, p, start, ctx.e)
     len += write_int_mpi(buf, p, start, ctx.n)
-    total := asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
+    ^total: asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
     Ok(total)
 }
 
 /// The RSA-1024 key of the mbedtls rsa.c self-test, completed.
 self_test_key: fn() -> RSAContext {
-    ctx := rsa_new()
+    ^ctx: rsa_new()
     n: bn.read_string(16, "9292758453063D803DD603D5E777D7888ED1D5BF35786190FA2F23EBC0848AEADDA92CA6C3D80B32C4D109BE0F36D6AE7130B9CED7ACDF54CFC7555AC14EEBAB93A89813FBF3C4F8066D2D800F7C38A81AE31942917403FF4946B0A83D3D3E05EE57C6F5F5606FB5D4BC6CD34EE0801A5E94BB77B07507233A0BC7BAC8F90F79") ?? panic("N")
     p: bn.read_string(16, "C36D0EB7FCD285223CFB5AABA5BDA3D82C01CAD19EA484A87EA4377637E75500FCB2005C5C7DD6EC4AC023CDA285D796C3D9E75E1EFC42488BB4F1D13AC30A57") ?? panic("P")
     q: bn.read_string(16, "C000DF51A7C77AE8D7C7370C1FF55B69E211C2B9E5DB1ED0BF61D0D9899620F4910E4168387E3C30AA1E00C339A795088452DD96A9A5EA5D9DCA68DA636032AF") ?? panic("Q")
@@ -1499,10 +1499,10 @@ self_test_key: fn() -> RSAContext {
 }
 
 #Test("The mbedtls rsa.c self-test: the RSA-1024 key validates, PKCS#1 v1.5 round-trips and its SHA-1 signature verifies") {
-    ctx := self_test_key()
+    ^ctx: self_test_key()
     rsa_check_pubkey(ctx) ?? panic("check pubkey")
     rsa_check_privkey(ctx) ?? panic("check privkey")
-    rng := drbg.hmac_drbg_new(.SHA256)
+    ^rng: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(rng, "rsa self-test".bytes())
     plain: [U8]{0xAA, 0xBB, 0xCC, 0x03, 0x02, 0x01, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x11, 0x22, 0x33, 0x0A, 0x0B, 0x0C, 0xCC, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD}
     sealed: rsa_pkcs1_encrypt(ctx, rng, plain) ?? panic("encrypt")
@@ -1515,12 +1515,12 @@ self_test_key: fn() -> RSAContext {
 }
 
 #Test("PKCS#1 v1.5 decryption to a fixed length gives the message, and zeros and a bad verdict for a bad padding or another length") {
-    ctx := self_test_key()
-    rng := drbg.hmac_drbg_new(.SHA256)
+    ^ctx: self_test_key()
+    ^rng: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(rng, "rsa fixed-length self-test".bytes())
-    message := [U8]{}
+    ^message: [U8]{}
     loop i in 0..<49 -> message.push(U8{i + 1})
-    zeros := [U8]{}
+    ^zeros: [U8]{}
     loop _ in 0..<48 -> zeros.push(U8{0})
     pms: cipher.bytes_of(message, 0, 48)
     sealed48: rsa_pkcs1_encrypt(ctx, rng, pms) ?? panic("encrypt 48")
@@ -1536,9 +1536,9 @@ self_test_key: fn() -> RSAContext {
     }
     // Values whose private operation gives a block that is no EME-PKCS1-v1_5
     // encoding: a first byte of 1, a second byte of 1, and no zero after PS.
-    blocks := [[U8]]{}
+    ^blocks: [[U8]]{}
     loop k in 0..<3 {
-        block := [U8]{}
+        ^block: [U8]{}
         loop _ in 0..<128 -> block.push(U8{0xA5})
         block[0] = if k == 0 -> U8{1} else -> U8{0}
         block[1] = if k == 1 -> U8{1} else -> U8{2}
@@ -1558,12 +1558,12 @@ self_test_key: fn() -> RSAContext {
 }
 
 #Test("RSAES-OAEP decryption gives each message back, and one InvalidPadding for another label or a spoiled block") {
-    ctx := self_test_key()
+    ^ctx: self_test_key()
     rsa_set_padding(ctx, .PKCSV21, Val(hashes.Md.SHA256))
-    rng := drbg.hmac_drbg_new(.SHA256)
+    ^rng: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(rng, "rsa oaep self-test".bytes())
     label: "oaep label".bytes()
-    message := [U8]{}
+    ^message: [U8]{}
     loop i in 0..<63 -> message.push(U8{i + 7})
     // RSA-1024 under SHA-256 holds 128 - 2 * 32 - 2 = 62 bytes.
     lengths: [Int]{0, 1, 32, 62}
@@ -1583,19 +1583,19 @@ self_test_key: fn() -> RSAContext {
     // A block whose first byte is not 0 is InvalidPadding, and the decoding
     // zeroes its output; the block as it was decodes to its message.
     sealed: rsa_rsaes_oaep_encrypt(ctx, rng, label, cipher.bytes_of(message, 0, 16)) ?? panic("encrypt 16")
-    block := rsa_private(ctx, rng, sealed) ?? panic("private operation")
-    spoiled := block.copy()
+    ^block: rsa_private(ctx, rng, sealed) ?? panic("private operation")
+    ^spoiled: block.copy()
     spoiled[0] = U8{1}
     first: rsa_public(ctx, spoiled) ?? panic("public operation")
     assert(rsa_rsaes_oaep_decrypt(ctx, rng, label, first, 62) == .Err(.InvalidPadding))
-    zeros := [U8]{}
+    ^zeros: [U8]{}
     loop _ in 0..<62 -> zeros.push(U8{0})
     lhash: hashes.hash(.SHA256, label)
-    decoded := rsaes_oaep_unpadding(spoiled, .SHA256, lhash, 62)
+    ^decoded: rsaes_oaep_unpadding(spoiled, .SHA256, lhash, 62)
     assert(ctime.cond_is_true(decoded.bad.mask))
     assert(decoded.out == zeros)
-    good := block.copy()
-    kept := rsaes_oaep_unpadding(good, .SHA256, lhash, 62)
+    ^good: block.copy()
+    ^kept: rsaes_oaep_unpadding(good, .SHA256, lhash, 62)
     assert(!ctime.cond_is_true(kept.bad.mask))
     assert(!ctime.cond_is_true(kept.too_large.mask))
     assert_eq(unpadded_len(kept.olen), 16)

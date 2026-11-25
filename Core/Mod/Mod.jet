@@ -56,7 +56,7 @@ load: fn(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     rt.stage_context(handle) ?? return Err(ModError.Invalid(err.message))
     // A target without a native loader refuses as Unsupported.
     rt.open_context(handle) ?? return Err(if err.message.starts_with("Unsupported: ") -> mod_error(err.message) else -> ModError.Invalid("cannot map library payload: {err.message}"))
-    text_exports := false
+    ^text_exports: false
     loop index in 0..<rt.exports_count(handle) {
         info: rt.export_info(handle, index)
         text_exports = text_exports || info.text

@@ -104,7 +104,7 @@ jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: Str
     core_root: jet_cli_named_toolchain(entry) ?? ""
     runtime_dir: jet_cli_runtime_dir()
     if jet_cli_runtime_key(runtime_dir) == None -> return None
-    runtime_row := "runtime built in"
+    ^runtime_row: "runtime built in"
     if !jet_cli_runtime_embedded() {
         pack: "{runtime_dir}/{JET_CLI_RUNTIME_PACK_FILE}"
         pack_stat: cli_files.stat(pack) ?? return None
@@ -131,7 +131,7 @@ jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: Str
 // its text's hash instead (jet_cli_script_text_identity). Core built into jet
 // has no rows: the executable's row names it.
 jet_cli_script_core_rows: fn(keep: JetCLIScriptKeep) -> [String]? {
-    rows := [String]{}
+    ^rows: [String]{}
     if keep.core_root == "" -> return Val(rows)
     loop row in keep.core {
         permit: row.text.guard_read()
@@ -187,10 +187,10 @@ jet_cli_script_frame: fn(framed: ^[U8], text: String) Never! {
 jet_cli_script_schema_inputs: fn(root: String) -> String {
     directory: schema_cache_dir(root)
     listed: cli_files.list_dir(directory) ?? return directory
-    names := [String]{}
+    ^names: [String]{}
     loop entry in listed -> names.push(entry.name)
     names.sort()
-    rows := [String]{directory}
+    ^rows: [String]{directory}
     loop name in names {
         stat: cli_files.stat("{directory}/{name}") ?? next
         rows.push("{name}\t{jet_cli_identity_key("file", stat)}")
@@ -200,7 +200,7 @@ jet_cli_script_schema_inputs: fn(root: String) -> String {
 
 // The hash of the sources a compile of `snapshot` reads, entered as `entered`.
 jet_cli_script_sources: fn(entered: String, snapshot: JetDriverAuthorizedSourceSnapshot) -> String {
-    framed := [U8]{}
+    ^framed: [U8]{}
     jet_cli_script_frame(framed, entered)
     jet_cli_script_frame(framed, snapshot.entry_path)
     jet_cli_script_frame(framed, jet_cli_script_schema_inputs(snapshot.roots[0].canonical_path))
@@ -223,14 +223,16 @@ jet_cli_script_sources: fn(entered: String, snapshot: JetDriverAuthorizedSourceS
         // routing never reads it. That directory, and any other file such as
         // one the program writes beside its source, changes nothing a
         // compile reads, so it must not miss the slot.
-        walked := [String]{}
+        ^walked: [String]{}
         loop directory in root.directories -> walked.push(directory.path)
         loop directory in root.directories {
             jet_cli_script_frame(framed, directory.path)
             loop entry in directory.entries {
                 if {
                     entry.is_directory -> {
-                        if walked.contains(entry.path) -> jet_cli_script_frame(framed, "{entry.name}/")
+                        if walked.contains(entry.path) {
+                            jet_cli_script_frame(framed, "{entry.name}/")
+                        }
                     }
                     entry.name.ends_with(".jet") -> { jet_cli_script_frame(framed, entry.name) }
                 }
@@ -247,7 +249,7 @@ jet_cli_script_sources: fn(entered: String, snapshot: JetDriverAuthorizedSourceS
 // replaces the program in the same slot (the record's toolchain names it),
 // so compilers that come and go don't add programs.
 jet_cli_script_slot: fn(options: BuildOptions, entry_path: String) -> String Never! {
-    framed := [U8]{}
+    ^framed: [U8]{}
     jet_cli_script_frame(framed, build_options_key(options))
     jet_cli_script_frame(framed, entry_path)
     script_crypto.sha256(framed).hex()
@@ -291,7 +293,7 @@ JET_CLI_EVAL_HEAD: "run: fn() {{\n"
 // namespace, as it does in a file.
 jet_cli_eval_names_core: fn(code: String) -> Bool Never! {
     tokens: lex(code.bytes()).tokens
-    reads := false
+    ^reads: false
     loop (index, token) in tokens {
         if token.kind != TOKEN_IDENT || jet_cli_repl_bytes(code, token.span.start, token.span.end) != "core" {
             next
@@ -320,8 +322,8 @@ jet_cli_eval_final_if: fn(body: String) -> Int? Never! {
     bytes: body.bytes()
     tokens: lex(bytes).tokens
     starts: statement_starts(tokens)
-    start := -1
-    line := 0
+    ^start: -1
+    ^line: 0
     loop token in tokens {
         if token.kind == TOKEN_EOF -> break
         if line < starts.len() && token.span.start >= starts[line] {
@@ -352,8 +354,8 @@ jet_cli_eval_parses: fn(body: String, result: String) -> Bool Never! {
 jet_cli_eval_items: fn(code: String) -> {items: String, body: String} Never! {
     bytes: code.bytes()
     starts: statement_starts(lex(bytes).tokens)
-    items := ""
-    body := ""
+    ^items: ""
+    ^body: ""
     loop (index, start) in starts {
         end: if index + 1 < starts.len() -> starts[index + 1] else -> bytes.len()
         statement: jet_cli_repl_bytes(code, start, end)
@@ -464,7 +466,7 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
     }
     executable: x64_executable_kept("{directory}/{program}") ?? return None
     read_scope: if rows[8] == "" -> [String]{} else -> rows[8].split("\t").to_list()
-    authority := JetCLIAuthority{required: jet_cli_script_rights(rows[4]), granted: jet_cli_script_rights(rows[5]), denied: jet_cli_script_rights(rows[6]), authority: rows[7], invocation_denied: [String]{}, read_scope: read_scope}
+    ^authority: JetCLIAuthority{required: jet_cli_script_rights(rows[4]), granted: jet_cli_script_rights(rows[5]), denied: jet_cli_script_rights(rows[6]), authority: rows[7], invocation_denied: [String]{}, read_scope: read_scope}
     jet_cli_with_invocation(authority, invocation)
     refused: jet_cli_authority_report(file, source, color, json, authority)
     if refused.move() == .Val(report) -> return Val(JetCLIRunStep.Output{output: report})
@@ -533,9 +535,9 @@ jet_cli_script_record_put: fn(record: String, text: String) -> Bool {
 // record before its removal finds the program gone and compiles again.
 jet_cli_script_trim: fn(directory: String) {
     listed: cli_files.list_dir(directory) ?? return
-    names := [String]{}
-    used := [Int]{}
-    latest := 0
+    ^names: [String]{}
+    ^used: [Int]{}
+    ^latest: 0
     loop entry in listed {
         if !entry.name.ends_with(".run") -> next
         status: cli_files.stat("{directory}/{entry.name}") ?? next
@@ -546,10 +548,10 @@ jet_cli_script_trim: fn(directory: String) {
     }
     // The oldest-used slot, one at a time; a removed one counts as newer than
     // any.
-    excess := names.len() - JET_CLI_SCRIPT_KEEP_MAX
+    ^excess: names.len() - JET_CLI_SCRIPT_KEEP_MAX
     loop excess > 0 {
         excess -= 1
-        oldest := 0
+        ^oldest: 0
         loop index in 1..<names.len() {
             if used[index] < used[oldest] -> oldest = index
         }
@@ -582,7 +584,7 @@ jet_cli_script_keeper: fn(entered: String, options: BuildOptions, snapshot: JetD
 // its text cell, so once the compile ends the rows show which Core files it
 // read (jet_cli_script_core_rows).
 jet_cli_script_with_core: fn(keep: JetCLIScriptKeep?, prepared: JetCLIPrepared) -> JetCLIScriptKeep? {
-    kept := (keep ?? return None).copy()
+    ^kept: (keep ?? return None).copy()
     if prepared == .Prepared(request, _) -> kept.core = request.core_sources.copy()
     Val(kept.move())
 }

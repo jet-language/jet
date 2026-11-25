@@ -20,8 +20,8 @@ SOCKET: "/var/run/nscd/socket"
 
 // CPU work that keeps a carrier busy.
 spin: fn(rounds: Int) -> Int {
-    total := 0
-    at := 0
+    ^total: 0
+    ^at: 0
     loop at < rounds {
         total = (total * 31 + at) % 1000003
         at += 1
@@ -38,7 +38,7 @@ has: fn(list: [String], item: String) -> Bool {
 
 // A status line with its tab-separated fields joined by one space.
 fields: fn(line: String) -> String {
-    text := ""
+    ^text: ""
     loop part in line.split("\t") {
         field: part.trim()
         if field == "" -> next
@@ -50,7 +50,7 @@ fields: fn(line: String) -> String {
 
 // The Uid, Gid and Groups lines of every thread, each once.
 credentials: fn(threads: [String]) -> [String] {
-    seen := [String]{}
+    ^seen: [String]{}
     loop thread in threads {
         status: files.read("/proc/self/task/{thread}/status") ?? next
         loop line in status.split("\n") {
@@ -65,7 +65,7 @@ credentials: fn(threads: [String]) -> [String] {
 }
 
 run: fn() {
-    waited := 0
+    ^waited: 0
     loop !files.exists(SOCKET) {
         if waited >= 1000 -> panic("no nscd socket at {SOCKET}")
         time.sleep(10ms)
@@ -83,7 +83,7 @@ run: fn() {
         print("initgroups as uid 1234 fails: {if sys.initgroups("alice", 4321) == { .Ok(_ok) -> false, .Err(_error) -> true }}")
     }
     entries: files.list_dir("/proc/self/task") ?? panic("list /proc/self/task")
-    threads := [String]{}
+    ^threads: [String]{}
     loop entry in entries -> threads.push(entry.name.copy())
     print("several threads: {threads.len() >= 2}")
     seen: credentials(threads)

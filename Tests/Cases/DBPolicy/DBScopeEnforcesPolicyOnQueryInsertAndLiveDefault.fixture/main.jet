@@ -1,9 +1,9 @@
 use db: core.db
 
 run: fn() {
-    conn := db.open_memory()
+    ^conn: db.open_memory()
     policy: db.policy("tasks", "owner == user") ?? panic("policy")
-    scoped := conn.with_policy(policy, "alice")
+    ^scoped: conn.with_policy(policy, "alice")
     audit: db.policy_audit(scoped)
     print("audit:{audit}")
     _created: db.migrate(scoped, "tasks-v1", [SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}]) ?? panic("create")
@@ -43,7 +43,7 @@ run: fn() {
         .Ok(_rows) -> { print("bypass:accepted") }
         .Err(_error) -> { print("bypass:rejected") }
     }
-    bob := conn.with_policy(policy, "bob")
+    ^bob: conn.with_policy(policy, "bob")
     alice_owner: "alice"
     three_title: "three"
     _bob_insert: bob.execute(
@@ -52,7 +52,7 @@ run: fn() {
     bob_rows: bob.query(SQL{"SELECT title FROM tasks"}) ?? panic("bob query")
     alice_rows: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("alice query")
     print("cross:{bob_rows.len()}:{alice_rows.len()}")
-    blank_user := conn.with_policy(policy, "   ")
+    ^blank_user: conn.with_policy(policy, "   ")
     blank_owner: "   "
     blank_title: "blank"
     if blank_user.execute(

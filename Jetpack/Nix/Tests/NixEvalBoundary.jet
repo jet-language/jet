@@ -326,7 +326,7 @@ nix_test_text: fn(document: NixEvalJSON, fields: [String:Int], key: String) -> S
 }
 
 nix_test_strings: fn(document: NixEvalJSON, index: Int) -> [String] {
-    strings := [String]{}
+    ^strings: [String]{}
     loop item in nix_test_array(document, index) -> strings.push(nix_test_string(document, item))
     strings
 }
@@ -392,7 +392,7 @@ nix_test_derivation: fn(source: String) -> NixNativeDerivation {
                 }
             }
             expected.get("dev") != None || expected.get("doc") != None -> {
-                count := 0
+                ^count: 0
                 loop entry in expected {
                     if entry.key == "drvPath" -> next
                     count += 1
@@ -422,7 +422,7 @@ nix_test_derivation: fn(source: String) -> NixNativeDerivation {
     boundary: nix_test_boundary()
     loop value_index in nix_test_array(document, nix_test_get(root, "values")) {
         fixture: nix_test_object(document, value_index)
-        output := "default"
+        ^output: "default"
         if fixture.get("output") == {
             .Val(output_index) -> { output = document.string(output_index) ?? "default" }
             .None -> {}

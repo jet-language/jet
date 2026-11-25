@@ -12,7 +12,7 @@ use {
 // Materialize the bundled battery `slug` under
 // `<store parent>/sources/batteries/<slug>-<key>` and return that directory.
 env_battery_materialize_package: fn(store_dir: String, slug: String) -[FS, Env, Rand]> String ProviderReason! {
-    package := BatteryPackage?{None}
+    ^package: BatteryPackage?{None}
     loop candidate in env_battery_packages() {
         if package == None && candidate.slug == slug -> package = Val(candidate)
     }
@@ -62,7 +62,7 @@ env_battery_materialize_package: fn(store_dir: String, slug: String) -[FS, Env, 
 // The content key of a bundled package: slug, then each file's path, mode,
 // and bytes, length-framed.
 env_battery_source_key: fn(package: BatteryPackage) -> String Never! {
-    identity := [U8]{}
+    ^identity: [U8]{}
     loop byte in "jet-batteries-source-v1".bytes() -> identity.push(byte)
     env_battery_append_bytes(identity, package.slug.bytes())
     loop file in package.files {
@@ -119,7 +119,7 @@ env_battery_write_package_tree: fn(root: String, package: BatteryPackage) -[FS, 
 // The cache tree holds exactly the bundled files with their bytes and modes,
 // and nothing else.
 env_battery_verify_package_tree: fn(root: String, package: BatteryPackage) -[FS, Env]> ProviderReason! {
-    seen := [String]{}
+    ^seen: [String]{}
     env_battery_verify_directory(root, "", package, seen)
     if seen.len() != package.files.len() {
         return Err(ProviderReason{message: "embedded battery cache is missing files for `{package.slug}`"})
@@ -142,7 +142,7 @@ env_battery_verify_directory: fn(directory: String, relative: String, package: B
             return Err(ProviderReason{message: "embedded battery cache contains a non-file: {entry.path}"})
         }
         relative_name: next_relative.replace("\\", "/")
-        expected := BatteryFile?{None}
+        ^expected: BatteryFile?{None}
         loop file in package.files {
             if expected == None && file.path == relative_name -> expected = Val(file)
         }

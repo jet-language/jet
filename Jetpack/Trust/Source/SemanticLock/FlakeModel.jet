@@ -157,7 +157,7 @@ FlakeSourcePin: struct {
     // This pin with `ref=`/`rev=` query fields applied; None when a query
     // field disagrees with the path.
     with_query: fn(self, query: [FlakeQueryField]) -> FlakeSourcePin? Never! {
-        pinned := self
+        ^pinned: self
         if trust_flake_query_value(query, "ref") == {
             .Val(value) -> {
                 if self.reference != None && self.reference != Val(value) -> return None
@@ -178,7 +178,7 @@ FlakeSourcePin: struct {
 
 // Outputs in derived order: name, kind, system, attribute, provenance.
 trust_flake_sorted_outputs: fn(outputs: [FlakeOutput]) -> [FlakeOutput] Never! {
-    sorted := outputs
+    ^sorted: outputs
     // Stable passes from the least significant field.
     sorted.sort_by(fn(output) { output.provenance })
     sorted.sort_by(fn(output) { output.attribute })
@@ -191,7 +191,7 @@ trust_flake_sorted_outputs: fn(outputs: [FlakeOutput]) -> [FlakeOutput] Never! {
 
 // Sorted outputs with exact duplicates removed, as a `BTreeSet` holds them.
 trust_flake_output_set: fn(outputs: [FlakeOutput]) -> [FlakeOutput] Never! {
-    unique := [FlakeOutput]{}
+    ^unique: [FlakeOutput]{}
     loop output in trust_flake_sorted_outputs(outputs) {
         if unique.len() > 0 && unique[unique.len() - 1] == output -> next
         unique.push(output)
@@ -212,7 +212,7 @@ trust_flake_is_revision: fn(value: String) -> Bool Never! {
 // The fields of a URL query, sorted by key; None when a field has no `=`,
 // an empty key, or a repeated key.
 trust_flake_query_fields: fn(query: String) -> [FlakeQueryField]? Never! {
-    fields := [FlakeQueryField]{}
+    ^fields: [FlakeQueryField]{}
     if query == "" -> return Val(fields)
     loop field in trust_text_split(query, TRUST_AMPERSAND) {
         parts: trust_text_split_first(field, TRUST_EQUALS) ?? return None
@@ -235,7 +235,7 @@ trust_flake_query_value: fn(fields: [FlakeQueryField], key: String) -> String? N
 // The exact revision a flake URL pins: a `rev=` query field, else a
 // hex-looking last path segment, else "".
 trust_flake_revision: fn(url: String) -> String Never! {
-    base := url.copy()
+    ^base: url.copy()
     if trust_text_split_first(url, TRUST_QUESTION) == {
         .Val(parts) -> {
             if trust_flake_query_fields(parts.after) == {
@@ -262,8 +262,8 @@ trust_flake_revision: fn(url: String) -> String Never! {
 // The typed source a flake URL names, or None for URL forms that only compare
 // textually.
 trust_flake_source_identity: fn(url: String) -> FlakeSourceIdentity? Never! {
-    base := url.copy()
-    query_text := ""
+    ^base: url.copy()
+    ^query_text: ""
     if trust_text_split_first(url, TRUST_QUESTION) == {
         .Val(parts) -> {
             base = parts.before
@@ -273,19 +273,19 @@ trust_flake_source_identity: fn(url: String) -> FlakeSourceIdentity? Never! {
     }
     query: trust_flake_query_fields(query_text) ?? return None
     direct: trust_flake_direct_source(base) ?? return trust_flake_indirect_identity(base, query)
-    segments := [String]{}
+    ^segments: [String]{}
     loop part in trust_text_split(direct.after, TRUST_SLASH) {
         if part != "" -> segments.push(part)
     }
     if segments.len() < 2 -> return None
-    tail := [String]{}
+    ^tail: [String]{}
     loop index in 2..<segments.len() -> tail.push(segments[index])
-    pin := FlakeSourcePin{reference: None, revision: None}
+    ^pin: FlakeSourcePin{reference: None, revision: None}
     if tail.len() > 0 {
         last: tail[tail.len() - 1]
         if {
             trust_flake_is_revision(last) -> {
-                head := [String]{}
+                ^head: [String]{}
                 loop index in 0..<(tail.len() - 1) -> head.push(tail[index])
                 if head.len() > 0 -> pin.reference = Val(head.join("/"))
                 pin.revision = Val(last)
@@ -324,12 +324,12 @@ trust_flake_indirect_identity: fn(base: String, query: [FlakeQueryField]) -> Fla
     parts: trust_text_split(path, TRUST_SLASH)
     alias: parts[0]
     if alias == "" -> return None
-    tail := [String]{}
+    ^tail: [String]{}
     loop index in 1..<parts.len() {
         if parts[index] == "" -> return None
         tail.push(parts[index])
     }
-    pin := FlakeSourcePin{reference: None, revision: None}
+    ^pin: FlakeSourcePin{reference: None, revision: None}
     if tail.len() == {
         0 -> {}
         1 -> {

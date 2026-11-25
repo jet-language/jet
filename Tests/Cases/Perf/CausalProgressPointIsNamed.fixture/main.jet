@@ -7,14 +7,14 @@ use {
 
 // A job's work: a sum the optimizer can't fold away.
 work: fn(seed: Int) -> Int {
-    total := seed
+    ^total: seed
     loop step in 0..<20000 -> total = (total * 31 + step) %% 1000003
     total
 }
 
 run: fn() {
     started: time.instant()
-    done := 0
+    ^done: 0
     loop started.elapsed_millis() < 1500 {
         if work(done) < 0 -> print("negative")
         perf.progress("job")

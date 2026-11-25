@@ -19,7 +19,7 @@ store_test_try_register: fn(verification: StoreVerification, roots: HangarRoots,
 
 store_test_count_transactions: fn(journal: String) -> Int Never! {
     names: files.listdir(journal) ?? return 0
-    count := 0
+    ^count: 0
     loop name in names {
         if name.ends_with(".txn") -> count += 1
     }
@@ -27,7 +27,7 @@ store_test_count_transactions: fn(journal: String) -> Int Never! {
 }
 
 #Test("store ingest installs valid secondary named output with matching digest") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     out: files.join(roots.root, "src-primary")
     dev: files.join(roots.root, "src-dev")
@@ -47,7 +47,7 @@ store_test_count_transactions: fn(journal: String) -> Int Never! {
 }
 
 #Test("store ingest path independent digest ignores source dirname") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     left: files.join(roots.root, "left-name")
     right: files.join(roots.root, "right-name")
@@ -63,7 +63,7 @@ store_test_count_transactions: fn(journal: String) -> Int Never! {
 }
 
 #Test("store closure graph named outputs are independent and queries are cycle safe") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     base: store_test_ingest_fixture(verification, roots, "base", [String:String]{"out": "base"}, [String]{})
     base_hash: base.entry.envelope.output_hash
@@ -93,7 +93,7 @@ store_test_count_transactions: fn(journal: String) -> Int Never! {
 }
 
 #Test("store closure refresh and delete remove stale reverse edges") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     left: store_test_ingest_fixture(verification, roots, "left", [String:String]{"out": "left"}, [String]{})
     right: store_test_ingest_fixture(verification, roots, "right", [String:String]{"out": "right"}, [String]{})
@@ -122,7 +122,7 @@ store_test_record_action: fn(verification: StoreVerification, roots: HangarRoots
 }
 
 #Test("store closure rejects one action mapping to different outputs") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     store_test_record_action(verification, roots, "first-action-output", "first") ?? panic("first")
     if store_test_record_action(verification, roots, "second-action-output", "second") == {
@@ -134,11 +134,11 @@ store_test_record_action: fn(verification: StoreVerification, roots: HangarRoots
 }
 
 #Test("store closure action key includes sorted reference digests") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     first: store_test_ingest_fixture(verification, roots, "key-first", [String:String]{"out": "first"}, [String]{})
     second: store_test_ingest_fixture(verification, roots, "key-second", [String:String]{"out": "second"}, [String]{})
-    entry := first.entry
+    ^entry: first.entry
     entry.references = [String]{second.entry.envelope.output_hash, first.entry.envelope.output_hash}
     ordered: store_entry_action_key(entry)
     entry.references = [String]{first.entry.envelope.output_hash, second.entry.envelope.output_hash}
@@ -146,10 +146,10 @@ store_test_record_action: fn(verification: StoreVerification, roots: HangarRoots
     entry.references = [String]{first.entry.envelope.output_hash}
     assert(store_entry_action_key(entry) != ordered)
 
-    left := first.entry
+    ^left: first.entry
     left.reference = "a\nsource=b"
     left.cache_identity.source_fingerprint = "c"
-    right := first.entry
+    ^right: first.entry
     right.reference = "a"
     right.cache_identity.source_fingerprint = "b\nsource=c"
     assert(store_entry_action_key(left) != store_entry_action_key(right))
@@ -157,27 +157,27 @@ store_test_record_action: fn(verification: StoreVerification, roots: HangarRoots
 }
 
 #Test("store closure action key excludes realized outputs but keeps action facts") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
-    entry := store_test_ingest_fixture(verification, roots, "action-projection", [String:String]{"out": "bytes"}, [String]{}).entry
+    ^entry: store_test_ingest_fixture(verification, roots, "action-projection", [String:String]{"out": "bytes"}, [String]{}).entry
     original_record: entry.producer_record
     original: store_entry_action_key(entry)
 
-    producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
-    replay := producer.plan.facts()
+    ^producer: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    ^replay: producer.plan.facts()
     replay["output.out"] = "sha256-different"
     producer.plan = ProviderPlanFacts.from_facts(replay) ?? panic("plan")
     entry.producer_record = producer.encode()
     assert_eq(store_entry_action_key(entry), original)
 
-    recipe_changed := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
-    recipe_replay := recipe_changed.plan.facts()
+    ^recipe_changed: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    ^recipe_replay: recipe_changed.plan.facts()
     recipe_replay["action.recipe"] = "different-recipe"
     recipe_changed.plan = ProviderPlanFacts.from_facts(recipe_replay) ?? panic("plan")
     entry.producer_record = recipe_changed.encode()
     assert(store_entry_action_key(entry) != original)
 
-    toolchain_changed := ProducerRecord.decode(original_record) ?? panic("producer")
+    ^toolchain_changed: ProducerRecord.decode(original_record) ?? panic("producer")
     toolchain_changed.toolchain_facts = "{toolchain_changed.toolchain_facts}-different"
     entry.producer_record = toolchain_changed.encode()
     assert(store_entry_action_key(entry) != original)
@@ -185,14 +185,14 @@ store_test_record_action: fn(verification: StoreVerification, roots: HangarRoots
 }
 
 #Test("store nix action key is input derivation only") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
-    first := store_test_ingest_fixture(verification, roots, "nix-action", [String:String]{"out": "bytes"}, [String]{}).entry
+    ^first: store_test_ingest_fixture(verification, roots, "nix-action", [String:String]{"out": "bytes"}, [String]{}).entry
     first.reference = "first@nixpkgs"
     first.cache_identity.source_fingerprint = "sha256-first-output"
     first.producer_record = store_test_nix_producer("/nix/store/action.drv", "out", "/nix/store/first", "first@nixpkgs")
     action: store_entry_action_key(first)
-    second := first
+    ^second: first
     second.reference = "alias:second"
     second.cache_identity.source_fingerprint = "sha256-second-output"
     second.producer_record = store_test_nix_producer("/nix/store/action.drv", "out", "/nix/store/second", "alias:second")
@@ -203,13 +203,13 @@ store_test_record_action: fn(verification: StoreVerification, roots: HangarRoots
 }
 
 store_test_project_multi: fn(original: StoreEntry, id: String, output_name: String) -> StoreEntry Never! {
-    entry := original
+    ^entry: original
     path: entry.out
     entry.id = id
     entry.name = "multi-projection"
     entry.reference = "alias:{output_name}"
     // The alias may be `out` itself, which a map literal holding both keys refuses.
-    outputs := [String:String]{"out": entry.envelope.output_hash}
+    ^outputs: [String:String]{"out": entry.envelope.output_hash}
     outputs[output_name] = entry.envelope.output_hash
     entry.named_outputs = outputs
     entry.producer_record = store_test_nix_producer("/nix/store/multi-projection.drv", output_name, path, entry.reference)
@@ -217,7 +217,7 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store nix multi projection registers recovers queries and rolls back conflict") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     out_source: store_test_ingest_fixture(verification, roots, "projection-out-bytes", [String:String]{"out": "out"}, [String]{})
     dev_source: store_test_ingest_fixture(verification, roots, "projection-dev-bytes", [String:String]{"out": "dev"}, [String]{})
@@ -244,9 +244,9 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store closure empty reference proof rejects unknown provider") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
-    entry := store_test_ingest_fixture(verification, roots, "unknown-proof", [String:String]{"out": "bytes"}, [String]{}).entry
+    ^entry: store_test_ingest_fixture(verification, roots, "unknown-proof", [String:String]{"out": "bytes"}, [String]{}).entry
     entry.id = "unknown-proof-record"
     original: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
     entry.producer_record = (ProducerRecord.new("unknown-provider", original.immutable_source, original.source_digest, original.plan, original.toolchain_facts, original.policy_facts, [String:String]{"closure.authority": "hangar-cas"}) ?? panic("producer")).encode()
@@ -258,11 +258,11 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store closure rejects named out that disagrees with primary") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     primary: store_test_ingest_fixture(verification, roots, "named-out-primary", [String:String]{"out": "primary"}, [String]{})
     other: store_test_ingest_fixture(verification, roots, "named-out-other", [String:String]{"out": "other"}, [String]{})
-    conflicting := primary.entry
+    ^conflicting: primary.entry
     conflicting.named_outputs["out"] = other.entry.envelope.output_hash
     if store_test_try_register(verification, roots, conflicting) == {
         .Ok(_) -> { panic("a disagreeing named out must be refused") }
@@ -272,12 +272,12 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store closure rejects same action output name with conflicting bytes") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     primary: store_test_ingest_fixture(verification, roots, "same-record", [String:String]{"out": "primary"}, [String]{})
     named: store_test_ingest_fixture(verification, roots, "named-source", [String:String]{"out": "named"}, [String]{})
     action: store_entry_action_key(primary.entry)
-    conflicting := primary.entry
+    ^conflicting: primary.entry
     conflicting.id = "conflicting-projection"
     conflicting.out = named.entry.out
     conflicting.envelope.output_hash = named.entry.envelope.output_hash
@@ -293,14 +293,14 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store closure journal recovers partial and rejects committed corruption") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     _: store_test_ingest_fixture(verification, roots, "journal", [String:String]{"out": "journal"}, [String]{})
     journal: files.join(roots.hangar_dir(), "closure-db/journal")
     files.write(files.join(journal, "999.partial"), "torn") ?? panic("partial")
     assert_eq(store_recover_closure_journal(verification, roots) ?? panic("recover"), 1)
     assert(!files.exists(files.join(journal, "999.partial")))
-    transaction := ""
+    ^transaction: ""
     loop name in files.listdir(journal) ?? panic("list") {
         if name.ends_with(".txn") -> transaction = files.join(journal, name)
     }
@@ -321,14 +321,14 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store committed producer transaction recovers missing package projection") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_ingest_fixture(verification, roots, "producer-recovery", [String:String]{"out": "primary", "dev": "headers"}, [String]{})
     meta: files.join(files.join(roots.hangar_dir(), ingested.entry.id), "meta.json")
     expected: files.read(meta) ?? panic("read meta")
     files.remove(meta) ?? panic("remove meta")
     assert_eq(store_recover_closure_journal(verification, roots) ?? panic("recover"), 1)
-    listed := false
+    ^listed: false
     loop entry in store_list_checked(verification, roots) ?? panic("listing") {
         if entry.id == ingested.entry.id -> listed = true
     }
@@ -352,7 +352,7 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store combined recovery sweeps staging and repairs wal projection") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_ingest_fixture(verification, roots, "combined-recovery", [String:String]{"out": "bytes"}, [String]{})
     abandoned: files.join(roots.hangar_dir(), ".stage/abandoned")
@@ -368,7 +368,7 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store admission failure points hide partial metadata and recover idempotently") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     points: [AdmissionFailurePoint]{AdmissionFailurePoint.AfterObjectPublication, AdmissionFailurePoint.AfterReceiptPublication, AdmissionFailurePoint.AfterClosureRegistration}
     loop index in 0..<points.len() {
         point: points[index]
@@ -401,10 +401,10 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store closure legacy migration is idempotent") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
-    first := store_test_ingest_fixture(verification, roots, "legacy-first", [String:String]{"out": "first"}, [String]{}).entry
-    second := store_test_ingest_fixture(verification, roots, "legacy-second", [String:String]{"out": "second"}, [String]{}).entry
+    ^first: store_test_ingest_fixture(verification, roots, "legacy-first", [String:String]{"out": "first"}, [String]{}).entry
+    ^second: store_test_ingest_fixture(verification, roots, "legacy-second", [String:String]{"out": "second"}, [String]{}).entry
     first.references = [String]{second.envelope.output_hash}
     second.references = [String]{first.envelope.output_hash}
     files.write(files.join(files.join(roots.hangar_dir(), first.id), "meta.json"), first.meta_json()) ?? panic("meta")
@@ -421,9 +421,9 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store closure legacy migration rejects atomically") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
-    entry := store_test_ingest_fixture(verification, roots, "legacy-invalid", [String:String]{"out": "invalid"}, [String]{}).entry
+    ^entry: store_test_ingest_fixture(verification, roots, "legacy-invalid", [String:String]{"out": "invalid"}, [String]{}).entry
     entry.references = [String]{"sha256-missing"}
     files.write(files.join(files.join(roots.hangar_dir(), entry.id), "meta.json"), entry.meta_json()) ?? panic("meta")
     files.remove_all(files.join(roots.hangar_dir(), "closure-db")) ?? panic("remove db")
@@ -436,9 +436,9 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store legacy migration fails closed without immutable producer facts") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
-    entry := store_test_ingest_fixture(verification, roots, "legacy-missing-producer", [String:String]{"out": "legacy"}, [String]{}).entry
+    ^entry: store_test_ingest_fixture(verification, roots, "legacy-missing-producer", [String:String]{"out": "legacy"}, [String]{}).entry
     entry.producer_record = ""
     entry.cache_identity = CacheIdentity.empty()
     files.write(files.join(files.join(roots.hangar_dir(), entry.id), "meta.json"), entry.meta_json()) ?? panic("meta")
@@ -451,7 +451,7 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
 }
 
 #Test("store provider registration moves local output into canonical objects") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     out: files.join(roots.hangar_dir(), "provider-output")
     files.create_dir_all(files.join(out, "bin")) ?? panic("dir")

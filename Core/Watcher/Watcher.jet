@@ -201,12 +201,12 @@ impl WatchHandle {
         pid: if target == 1 -> number else -> 0
         port: if target == 2 -> number else -> 0
         bus: rt.event(self)
-        out := [WatchEvent]{}
-        at := 0
+        ^out: [WatchEvent]{}
+        ^at: 0
         loop at + 2 < texts.len() {
             ev: WatchEvent{domain: watch_domain_of(target), kind: watch_kind_named(texts[at]), path: texts[at + 1], detail: texts[at + 2], pid: pid, port: port}
             out.push(ev.copy())
-            _ := bus.emit(ev)
+            ^_: bus.emit(ev)
             at += 3
         }
         out
@@ -229,9 +229,7 @@ impl WatchHandle {
     summary: fn(self) -> String Never! {
         target: rt.target(self)
         if target == 1 -> return "watch process {rt.number(self)}"
-        if target == 2 {
-            return "watch port {rt.text(self)}:{rt.number(self)}"
-        }
+        if target == 2 -> return "watch port {rt.text(self)}:{rt.number(self)}"
         "watch file {rt.text(self)}"
     }
 }
@@ -241,7 +239,7 @@ impl WatchSet {
     add: fn(self, handle: WatchHandle) -[IO]> Never! { rt.set_add(self, handle) }
 
     poll: fn(self) -[IO]> [WatchEvent] Never! {
-        out := [WatchEvent]{}
+        ^out: [WatchEvent]{}
         loop index in 0..<rt.set_len(self) {
             loop ev in rt.set_get(self, index).poll() -> out.push(ev)
         }
@@ -255,7 +253,7 @@ impl WatchSet {
 
 #Test("WatchEvent source layout keeps all fields and independent copies") {
     event: WatchEvent{domain: .Process, kind: .Exited, path: "p", detail: "gone", pid: -1, port: 65535}
-    cloned_event := event.copy()
+    ^cloned_event: event.copy()
     assert(event.equal(cloned_event))
     cloned_event.path = "changed"
     assert_eq(event.path, "p")
@@ -341,8 +339,8 @@ summary_target: fn(text: String) -> String Never! {
 }
 
 summary_count: fn(text: String) -> Int {
-    seen := false
-    n := 0
+    ^seen: false
+    ^n: 0
     loop b in text.bytes() {
         if seen {
             if b < 48 || b > 57 -> return n
@@ -353,8 +351,8 @@ summary_count: fn(text: String) -> Int {
 }
 
 has_prefix: fn(text: String, prefix: String) -> Bool Never! {
-    raw := text.bytes()
-    want := prefix.bytes()
+    ^raw: text.bytes()
+    ^want: prefix.bytes()
     if want.len() > raw.len() -> return false
     loop i in 0..<want.len() {
         if raw[i] != want[i] -> return false
@@ -363,9 +361,9 @@ has_prefix: fn(text: String, prefix: String) -> Bool Never! {
 }
 
 suffix: fn(text: String, start: Int) -> String Never! {
-    raw := text.bytes()
-    out := [U8]{}
-    i := start
+    ^raw: text.bytes()
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= raw.len() -> return String.from_bytes(out) ?? ""
         out.push(raw[i])

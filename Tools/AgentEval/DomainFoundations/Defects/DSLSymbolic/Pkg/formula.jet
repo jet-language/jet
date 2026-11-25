@@ -17,9 +17,9 @@ eval: fn(cell: CalcCell, values: [String:Int]) -> Int {
 }
 
 recalc: fn(cells: [String:CalcCell], previous: [String:Int], changed: String) -> RecalcResult {
-    values := previous.copy()
-    touched := [String]{}
-    dirty := [String:Bool]{}
+    ^values: previous.copy()
+    ^touched: [String]{}
+    ^dirty: [String:Bool]{}
     dirty[changed] = true
     order: [String]{"a", "one", "b", "total", "unrelated"}
     loop name in order {
@@ -39,7 +39,7 @@ recalc: fn(cells: [String:CalcCell], previous: [String:Int], changed: String) ->
 }
 
 sample: fn() -> [String] {
-    cells := [String:CalcCell]{
+    ^cells: [String:CalcCell]{
         "a": CalcCell{kind: 0, value: 2, left: "", right: "", deps: []},
         "one": CalcCell{kind: 0, value: 1, left: "", right: "", deps: []},
         "b": CalcCell{kind: 1, value: 0, left: "a", right: "one", deps: ["a", "one"]},

@@ -36,7 +36,7 @@ NixProvider: struct {
                             roots: ctx.nix_roots ?? return None
                             // The Store records a Nix entry under its cache
                             // key as the policy fingerprint; expect the same.
-                            identity := provider_nix_cache_identity(found.output, found.envelope.platform, spec, table, ctx)
+                            ^identity: provider_nix_cache_identity(found.output, found.envelope.platform, spec, table, ctx)
                             identity.policy_fingerprint = provider_nix_cache_key(identity)
                             return Val(CacheExpectation{
                                 identity: identity,
@@ -66,8 +66,8 @@ NixProvider: struct {
     plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
         first: if specs.len() > 0 -> specs[0].raw else -> "Nix package"
         index: ctx.nix_index ?? return Err(ProviderError.Unsupported("download planning needs a signed index for `{first}`"))
-        plan := DownloadPlan.empty()
-        nix_paths := [String]{}
+        ^plan: DownloadPlan.empty()
+        ^nix_paths: [String]{}
         loop spec in specs {
             native: if index.resolve_native_recipe(spec.package) == {
                 .Ok(found) -> found
@@ -152,7 +152,7 @@ NixProvider: struct {
             .Val(dir) -> {
                 path: files.join(dir, provider_fixture_name(spec))
                 stdout: files.read(path) ?? return Err(ProviderError.FixtureMissing(path))
-                realized := provider_parse_realization(spec, stdout)
+                ^realized: provider_parse_realization(spec, stdout)
                 realized.producer.facts[PROVIDER_NIX_NATIVE_FORMAT] = "json"
                 realized.producer.facts[PROVIDER_NIX_NATIVE_DOCUMENT] = stdout
                 return provider_finalize_nix_realization(verification, spec, table, ctx, realized)
@@ -173,7 +173,7 @@ NixProvider: struct {
         }
         store_require_catalog_permission(Val(verified.trust.label()), ctx.allow_local_nix_catalog) ?? return Err(ProviderError.BadOutput(err.message()))
         roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("index-backed Nix realization has no Hangar roots for closure admission"))
-        requests := [NixOutputRequest]{}
+        ^requests: [NixOutputRequest]{}
         loop name in provider_sorted_keys(verified.record.outputs) {
             requests.push(NixOutputRequest{name: name.copy(), store_path: verified.record.outputs[name]})
         }

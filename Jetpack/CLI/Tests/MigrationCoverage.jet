@@ -10,7 +10,7 @@ cli_test_coverage_error: fn(input: CoverageInput) -> CoverageError {
 }
 
 #Test("coverage report separates sources and measures nativeization") {
-    input := CoverageInput.empty()
+    ^input: CoverageInput.empty()
     input.inventory = [CoveragePackage]{cli_test_coverage_package("omp"), cli_test_coverage_package("ripgrep"), cli_test_coverage_package("fd"), cli_test_coverage_package("jq")}
     input.native_recipes = [CoveragePackage]{cli_test_coverage_package("omp")}
     input.centrally_imported_recipes = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
@@ -30,7 +30,7 @@ cli_test_coverage_error: fn(input: CoverageInput) -> CoverageError {
 }
 
 #Test("coverage report rejects unknown and overlapping packages") {
-    unknown := CoverageInput.empty()
+    ^unknown: CoverageInput.empty()
     unknown.inventory = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
     unknown.native_recipes = [CoveragePackage]{cli_test_coverage_package("fd")}
     if cli_test_coverage_error(unknown) == {
@@ -39,7 +39,7 @@ cli_test_coverage_error: fn(input: CoverageInput) -> CoverageError {
             panic("unknown package must not inflate coverage")
         }
     }
-    overlap := CoverageInput.empty()
+    ^overlap: CoverageInput.empty()
     overlap.inventory = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
     overlap.native_recipes = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
     overlap.centrally_imported_recipes = [CoveragePackage]{cli_test_coverage_package("ripgrep")}

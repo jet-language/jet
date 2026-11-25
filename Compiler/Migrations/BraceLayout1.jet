@@ -55,9 +55,9 @@ brace_layout1_file: fn(path: String, text: String, source: Bool) -[]> MigrationO
 brace_layout1_source: fn(path: String, text: String) -[]> MigrationOutcome {
     bytes: text.bytes()
     carrier: brace_layout1_carrier_end(bytes)
-    edits := [LambdaShapeEdit]{}
-    skipped := [String]{}
-    missing := 0
+    ^edits: [LambdaShapeEdit]{}
+    ^skipped: [String]{}
+    ^missing: 0
     loop diagnostic in parse_generated_source(bytes).diagnostics {
         if !diagnostic.what.starts_with(BRACE_LAYOUT1_MISSING) -> next
         span: diagnostic.span ?? next
@@ -65,7 +65,7 @@ brace_layout1_source: fn(path: String, text: String) -[]> MigrationOutcome {
         edits.push(LambdaShapeEdit{start: span.start, end: span.start, text: ","})
         missing += 1
     }
-    rewritten := missing
+    ^rewritten: missing
     loop token in lex_generated(bytes).tokens {
         if token.kind != TOKEN_RAW_STRING && token.kind != TOKEN_STRING -> next
         if brace_layout1_quoted(path, bytes, token, skipped) == .Val(quoted_edit) {
@@ -100,12 +100,12 @@ brace_layout1_source: fn(path: String, text: String) -[]> MigrationOutcome {
 // one-line body and gains none. The formatter reads a Core or prelude
 // source, which spells the reserved `__name` namespace, in the library lane.
 brace_layout1_closed: fn(text: String) -[]> LambdaShapeQuoted? {
-    formatted := jet_format_source(text, false)
+    ^formatted: jet_format_source(text, false)
     if !formatted.ok -> formatted = jet_format_library_source(text, false)
     if !formatted.ok || formatted.text == text -> return None
     bytes: text.bytes()
     carrier: brace_layout1_carrier_end(bytes)
-    edits := [LambdaShapeEdit]{}
+    ^edits: [LambdaShapeEdit]{}
     loop end in brace_layout1_trailing(bytes, formatted.text.bytes()) {
         if end >= carrier && brace_layout1_breaks(bytes, end) {
             edits.push(LambdaShapeEdit{start: end, end: end, text: ","})
@@ -134,7 +134,7 @@ brace_layout1_carrier_end: fn(bytes: [U8]) -[]> Int {
         return 0
     }
     if lambda_shape1_text(bytes, tokens[0].span.start, tokens[0].span.end) != "package" -> return 0
-    depth := 0
+    ^depth: 0
     loop token in tokens {
         if token.kind == TOKEN_LBRACE -> depth += 1
         if token.kind == TOKEN_RBRACE {
@@ -153,8 +153,8 @@ brace_layout1_carrier_end: fn(bytes: [U8]) -[]> Int {
 brace_layout1_trailing: fn(old_bytes: [U8], new_bytes: [U8]) -[]> [Int] {
     old: brace_layout1_tokens(old_bytes)
     new: brace_layout1_tokens(new_bytes)
-    ends := [Int]{}
-    at := BraceLayoutAt{old: 0, new: 0}
+    ^ends: [Int]{}
+    ^at: BraceLayoutAt{old: 0, new: 0}
     loop at.old < old.len() && at.new < new.len() {
         if brace_layout1_same(old_bytes, old[at.old], new_bytes, new[at.new]) {
             at.old += 1
@@ -175,7 +175,7 @@ brace_layout1_trailing: fn(old_bytes: [U8], new_bytes: [U8]) -[]> [Int] {
 // The tokens of `bytes` that the formatter keeps in order: no comments and
 // no line ends.
 brace_layout1_tokens: fn(bytes: [U8]) -[]> [Token] {
-    out := [Token]{}
+    ^out: [Token]{}
     loop token in lex_generated(bytes).tokens {
         if token.kind == TOKEN_SEMI || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT {
             next
@@ -206,7 +206,7 @@ brace_layout1_resync: fn(old_bytes: [U8], old: [Token], new_bytes: [U8], new: [T
             from_old: at.old + old_skip
             from_new: at.new + new_skip
             if from_old + 3 > old.len() || from_new + 3 > new.len() -> next
-            agree := true
+            ^agree: true
             loop offset in 0..<3 {
                 if !brace_layout1_same(old_bytes, old[from_old + offset], new_bytes, new[from_new + offset]) {
                     agree = false
@@ -226,7 +226,7 @@ brace_layout1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: ^[Str
     quote: paren_tuple1_quote_width(bytes, token)
     inner: paren_tuple1_quoted_text(bytes, token) ?? return None
     if !inner.contains("{{") -> return None
-    outcome := brace_layout1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
+    ^outcome: brace_layout1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
     if outcome.rewritten == 0 -> return None
     parsed: parse_generated_source(outcome.text.bytes())
     if parsed.program.items.len() == 0 || parsed.diagnostics.any(fn(d) { d.code.starts_with("E") }) {
@@ -245,11 +245,11 @@ brace_layout1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: ^[Str
 // the prose stay as written.
 brace_layout1_markdown: fn(path: String, text: String) -[]> MigrationOutcome {
     bytes: text.bytes()
-    edits := [LambdaShapeEdit]{}
-    skipped := [String]{}
-    rewritten := 0
+    ^edits: [LambdaShapeEdit]{}
+    ^skipped: [String]{}
+    ^rewritten: 0
     loop fence in paren_tuple1_fences(bytes) {
-        outcome := brace_layout1_source("{path}:{fence.line}", lambda_shape1_text(bytes, fence.start, fence.end))
+        ^outcome: brace_layout1_source("{path}:{fence.line}", lambda_shape1_text(bytes, fence.start, fence.end))
         skipped.extend(outcome.skipped.move())
         if outcome.rewritten > 0 {
             rewritten += outcome.rewritten

@@ -75,7 +75,7 @@ cases: fn() -> [Case] {
 // path.resolve against the working directory.
 resolve: fn(cwd: String, path: String) -> String {
     full: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in full.split("/").to_list() {
         if part == ".." {
             if parts.len() > 0 -> _: parts.pop()
@@ -106,8 +106,8 @@ ran_of: fn(spec: ProcessSpec) -> Ran {
 // and the NIX_HARDENING_ENABLE features they remove.
 load_policy: fn(root: String) -> Policy {
     text: files.read("{root}/{POLICY}") ?? fail("cannot read {POLICY}: {err}")
-    flags := [String]{}
-    removed := [String]{}
+    ^flags: [String]{}
+    ^removed: [String]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         line: lines[index]
@@ -127,7 +127,7 @@ load_policy: fn(root: String) -> Policy {
 // Tools/Packaging/NativeCCompiler.jet runs it.
 native_cc: fn(policy: Policy, args: [String]) -> Ran {
     removed: policy.removed
-    spec := process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
+    ^spec: process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
     if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
         words: re.split(Regex{"\s+"}, enabled)
         kept: loop word in words if word != "" && !removed.contains(word) -> word
@@ -149,7 +149,7 @@ write: fn(path: String, text: String) {
 
 // Every way the case's run departs from its expectations.
 departures: fn(item: Case, ran: Ran) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     label: "{item.name}/{item.tier}"
     if ran.error != "" || ran.status != item.status || ran.signal != item.signal || ran.stdout != "" {
         found.push("{label}: unexpected status, signal, spawn error or stdout; see captured status/bytes")
@@ -178,10 +178,10 @@ run: fn() {
     out: resolve(root, args[0])
     files.create_dir_all(out) ?? fail("cannot create {out}: {err}")
     inputs: loop input in args[1..<args.len()] -> if input.starts_with("-") -> input.copy() else -> resolve(root, input)
-    errors := [String]{}
-    built := [String]{}
+    ^errors: [String]{}
+    ^built: [String]{}
     loop tier in ([String]{"native", "embed"}) {
-        cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic"}
+        ^cc_args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic"}
         if tier == "native" {
             cc_args.push("-DC_ABI_ALLOC_ONLY=1")
             cc_args.push("{root}/Compiler/JetRuntime/Tests/CABIDriver.c")
@@ -195,7 +195,7 @@ run: fn() {
             errors.push("{tier} fixture build failed; see {tier}.build.stderr")
         } else { built.push(tier.copy()) }
     }
-    rows := [String]{"case\tresult\tstatus\tsignal"}
+    ^rows: [String]{"case\tresult\tstatus\tsignal"}
     loop item in cases() {
         before: errors.len()
         if built.contains(item.tier) {

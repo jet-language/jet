@@ -10,7 +10,7 @@ use {
 }
 
 build_key_number: fn(bytes: ^[U8], value: Int) Never! {
-    divisor := 72057594037927936
+    ^divisor: 72057594037927936
     loop _ in 0..<8 {
         bytes.push(U8{(value /% divisor) % 256})
         divisor = divisor /% 256
@@ -31,7 +31,7 @@ build_key_texts: fn(bytes: ^[U8], values: [String]) Never! {
 }
 
 build_key_map: fn(bytes: ^[U8], values: [String:String]) Never! {
-    keys := values.keys().collect()
+    ^keys: values.keys().collect()
     keys.sort()
     build_key_number(bytes, keys.len())
     loop key in keys {
@@ -118,15 +118,15 @@ build_key_target_kind: fn(kind: String) -> String Never! {
 }
 
 build_key_debug_text: fn(value: String) -> String Never! {
-    parts := [String]{"\""}
+    ^parts: [String]{"\""}
     raw: value.bytes()
-    position := 0
+    ^position: 0
     loop position < raw.len() {
         start: position
         first: Int{raw[position]}
         position += 1
-        scalar := first
-        remaining := 0
+        ^scalar: first
+        ^remaining: 0
         if first >= 240 {
             scalar = first & 7
             remaining = 3
@@ -150,10 +150,10 @@ build_key_debug_text: fn(value: String) -> String Never! {
             34 -> parts.push("\\\"")
             92 -> parts.push("\\\\")
             else -> {
-                escaped := scalar < 32 || scalar == 127
+                ^escaped: scalar < 32 || scalar == 127
                 if scalar >= 128 {
-                    low := 0
-                    high := JET_RUST_DEBUG_ESCAPED_RANGES.len() /% 2
+                    ^low: 0
+                    ^high: JET_RUST_DEBUG_ESCAPED_RANGES.len() /% 2
                     loop low < high {
                         middle: low + (high - low) /% 2
                         if scalar < JET_RUST_DEBUG_ESCAPED_RANGES[middle * 2] -> high = middle else if scalar > JET_RUST_DEBUG_ESCAPED_RANGES[middle * 2 + 1] {
@@ -166,8 +166,8 @@ build_key_debug_text: fn(value: String) -> String Never! {
                 }
                 if escaped {
                     alphabet: "0123456789abcdef".bytes()
-                    digits := [U8]{}
-                    number := scalar
+                    ^digits: [U8]{}
+                    ^number: scalar
                     loop {
                         digits.push(alphabet[number % 16])
                         number = number /% 16
@@ -209,7 +209,7 @@ build_session_action_target: fn(state: BuildSessionState, action: Int) -> Int? N
 
 build_session_dep_outputs: fn(state: BuildSessionState, action: Int) -> [String] Never! {
     target: build_session_action_target(state, action) ?? return [String]{}
-    paths := [String]{}
+    ^paths: [String]{}
     loop dep in state.targets[target].deps {
         loop path in state.targets[dep].outputs -> build_session_append_unique(paths, path)
         loop path in state.targets[dep].inputs -> build_session_append_unique(paths, path)
@@ -227,7 +227,7 @@ build_session_dep_outputs: fn(state: BuildSessionState, action: Int) -> [String]
 // the cpu pool, so those fields are written as those constants.
 build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never! {
     action: state.actions[id]
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     no_entries: [String:String]{}
     build_key_text(bytes, "jet.action-key.v2")
     build_key_text(bytes, "kind")
@@ -255,7 +255,7 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
     build_key_text(bytes, "helper-versions")
     build_key_map(bytes, no_entries)
     build_key_text(bytes, "generated-modules")
-    generated := state.generated
+    ^generated: state.generated
     generated = loop fresh_item in generated -> fresh_item
     generated.sort_by(fn(left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) { left.path <=> right.path })
     loop generated_row in generated {
@@ -263,7 +263,7 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
         build_key_text(bytes, generated_row.source_digest)
     }
     build_key_text(bytes, "build-fact-contributions")
-    contributions := state.contributions
+    ^contributions: state.contributions
     contributions = loop fresh_item in contributions -> fresh_item
     contributions.sort_by(fn(left: BuildSessionContribution, right: BuildSessionContribution) { left.key <=> right.key })
     loop contribution in contributions {
@@ -308,19 +308,19 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
 }
 
 build_session_compiler_node: fn(kind: String, subject: String, input_digests: [BuildGraphInputDigest]) -> BuildGraphNode Never! {
-    sorted := input_digests
+    ^sorted: input_digests
     sorted = loop fresh_item in sorted -> fresh_item
     sorted.sort_by(fn(left: BuildGraphInputDigest, right: BuildGraphInputDigest) { if left.name == right.name -> left.digest <=> right.digest else -> left.name <=> right.name })
-    digests := [BuildGraphInputDigest]{}
-    inputs := [String]{}
-    previous := BuildGraphInputDigest?{None}
+    ^digests: [BuildGraphInputDigest]{}
+    ^inputs: [String]{}
+    ^previous: BuildGraphInputDigest?{None}
     loop row in sorted {
         if previous == .Val(old) && old.name == row.name && old.digest == row.digest -> next
         previous = Val(row)
         digests.push(row.copy())
         inputs.push(row.name)
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     values: [String]{"jet.action-key.v2", "compiler-node", kind, subject}
     loop value in values -> build_key_text(bytes, value)
     loop row in digests {

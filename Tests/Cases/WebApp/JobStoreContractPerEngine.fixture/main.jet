@@ -52,7 +52,7 @@ notes_in: fn(store: db.Store) -> db.Table<Int, Note> {
 
 // The notes written whose IDs run from `first` to `first + 2`.
 noted_from: fn(store: db.Store, first: Int) -> String {
-    ids := [String]{}
+    ^ids: [String]{}
     loop id in first..<first + 3 {
         if notes_in(store).get(id) == .Val(_) -> ids.push("{id}")
     }
@@ -76,10 +76,10 @@ kept_jobs: fn(store: db.Store) -> String {
 // start before job 2 does.
 ran_of: fn(ran: Shared<[Int]>) -> String {
     held: ran.guard_read()
-    started := [Int]{}
+    ^started: [Int]{}
     loop id in held.value -> started.push(id)
     started.sort()
-    ids := [String]{}
+    ^ids: [String]{}
     loop id in started -> ids.push("{id}")
     if ids.len() == 0 -> "none" else -> ids.join(", ")
 }
@@ -87,7 +87,7 @@ ran_of: fn(ran: Shared<[Int]>) -> String {
 ran_has: fn(ran: Shared<[Int]>, id: Int) -> Bool { ran.guard_read().value.contains(id) }
 
 ran_add: fn(ran: Shared<[Int]>, id: Int) {
-    held := ran.guard_edit()
+    ^held: ran.guard_edit()
     held.value.push(id)
 }
 

@@ -2,7 +2,6 @@
 // `StatusFields`, `StatusEnvelope.json`, `render_status`,
 // `report_json_string`). Producers build typed values; only this file turns
 // them into JSON bytes.
-
 use jet_foundation.[effect_vocabulary_view_count]
 
 JET_CLI_STATUS_SCHEMA: "jet.status/v1"
@@ -77,9 +76,9 @@ jet_cli_status_hex_digit: fn(value: Int) -> String Never! {
 // sequences included) verbatim.
 jet_cli_json_string: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    output := "\""
-    segment_start := 0
-    index := 0
+    ^output: "\""
+    ^segment_start: 0
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         escape: if byte == {
@@ -142,7 +141,7 @@ jet_cli_status_render: fn(action: String, ok: Bool, fields: [JetCLIStatusField])
 // `StatusEnvelope.json` with already rendered report children.
 jet_cli_status_render_with_reports: fn(action: String, ok: Bool, reports: [String], fields: [JetCLIStatusField]) -> String Never! {
     flag: if ok -> "true" else -> "false"
-    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_STATUS_SCHEMA)},\"action\":{jet_cli_json_string(action)},\"ok\":{flag},\"reports\":[{reports.join(",")}]"
+    ^out: "{{\"schema\":{jet_cli_json_string(JET_CLI_STATUS_SCHEMA)},\"action\":{jet_cli_json_string(action)},\"ok\":{flag},\"reports\":[{reports.join(",")}]"
     rendered: jet_cli_status_fields_json(fields)
     if rendered.len() > 0 -> out = "{out},{rendered}"
     "{out}}}"

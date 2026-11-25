@@ -5,7 +5,7 @@
 // A fresh [U8] copy of `length` packed bytes; its data word, length returned.
 packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
     data: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         host_u8_put(data, at, rt_text_byte(wrapping(bytes + at)))
         at += I64{1}
@@ -26,7 +26,7 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
 // only installed event sinks; the native runtime installs none, so the event
 // has no observer to build for.
 #Export(c) jet_job_queue_publish_parts: fn(timestamp_ms: I64, source: I64, kind: I64, entity: I64, fields: I64) {
-    _ := jet_int_owned_to_i64(timestamp_ms)
+    ^_: jet_int_owned_to_i64(timestamp_ms)
 }
 
 // std.thread.sleep(Duration.from_millis(millis as u64)): nanosleep, resumed

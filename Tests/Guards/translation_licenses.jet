@@ -70,7 +70,7 @@ TL_SKIPPED: [String]{".jet", "target", "node_modules"}
 
 // The findings for one file: `listed` says whether TL_TRANSLATED names it.
 tl_file_findings: fn(path: String, source: String, listed: Bool) -> [String] Never! {
-    findings := [String]{}
+    ^findings: [String]{}
     lines: source.lines()
     first: if lines.len() > 0 -> lines[0] else -> ""
     second: if lines.len() > 1 -> lines[1] else -> ""
@@ -99,7 +99,7 @@ tl_file_findings: fn(path: String, source: String, listed: Bool) -> [String] Nev
 
 // The findings for a folder holding translations.
 tl_folder_findings: fn(folder: String) -> [String] {
-    findings := [String]{}
+    ^findings: [String]{}
     license_path: "{folder}/LICENSE-mbedtls"
     if tl_files.read(license_path) == {
         .Ok(text) -> {
@@ -126,7 +126,7 @@ tl_folder_findings: fn(folder: String) -> [String] {
 }
 
 tl_folder: fn(path: String) -> String Never! {
-    cut := path.len() - 1
+    ^cut: path.len() - 1
     loop cut > 0 && path.slice(cut, cut + 1) != "/" -> cut -= 1
     path.slice(0, cut)
 }
@@ -137,7 +137,7 @@ tl_walk: fn(path: String, out: ^[String]) {
         return
     }
     loop child in (tl_files.list_dir(path) ?? panic("list {path}: {err}")) {
-        skipped := false
+        ^skipped: false
         loop name in TL_SKIPPED {
             if child.name == name -> skipped = true
         }
@@ -147,20 +147,20 @@ tl_walk: fn(path: String, out: ^[String]) {
 
 #Test("Mbed TLS translations keep their Apache-2.0 header and license files") {
     guards_enter_root()
-    sources := [String]{}
+    ^sources: [String]{}
     tl_walk("Core", sources)
     assert(sources.len() > 100, "the walk found only {sources.len()} Core sources")
-    listed := [String:Bool]{}
+    ^listed: [String:Bool]{}
     loop path in TL_TRANSLATED -> listed[path] = true
-    findings := [String]{}
-    found := [String:Bool]{}
+    ^findings: [String]{}
+    ^found: [String:Bool]{}
     loop path in sources {
         source: tl_files.read(path) ?? panic("read {path}: {err}")
         is_listed: listed.get(path) != None
         if is_listed -> found[path] = true
         loop finding in tl_file_findings(path, source, is_listed) -> findings.push(finding)
     }
-    folders := [String:Bool]{}
+    ^folders: [String:Bool]{}
     loop path in TL_TRANSLATED {
         if found.get(path) == None {
             findings.push("{path}: no such file; delete its TL_TRANSLATED row")

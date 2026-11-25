@@ -30,7 +30,7 @@ CoreDeclUse: struct {
 
 // `[A-Za-z0-9_.]` from byte `start`: the end of the run.
 core_decl_path_end: fn(bytes: [U8], start: Int) -> Int Never! {
-    end := start
+    ^end: start
     loop end < bytes.len() && (core_decl_word(Int{bytes[end]}) || Int{bytes[end]} == 46) -> end += 1
     end
 }
@@ -48,10 +48,10 @@ core_decl_word_then_space: fn(text: String, at: Int, word: String) -> Bool Never
 // whose nested parentheses and quoted text are skipped whole.
 core_decl_attributes_end: fn(line: String) -> Int Never! {
     bytes: line.bytes()
-    at := core_decl_skip_space(bytes, 0)
+    ^at: core_decl_skip_space(bytes, 0)
     loop at < bytes.len() && (Int{bytes[at]}) == 35 {
         if core_decl_name_end(bytes, at + 1) == at + 1 -> return -1
-        end := core_decl_path_end(bytes, at + 1)
+        ^end: core_decl_path_end(bytes, at + 1)
         if end < bytes.len() && (Int{bytes[end]}) == 40 {
             end = core_decl_arguments_end(bytes, end)
             if end < 0 -> return -1
@@ -66,8 +66,8 @@ core_decl_attributes_end: fn(line: String) -> Int Never! {
 // The byte after the `)` that closes the `(` at byte `open`, skipping nested
 // parentheses and quoted text, or -1 when it is not closed.
 core_decl_arguments_end: fn(bytes: [U8], open: Int) -[]> Int {
-    depth := 0
-    at := open
+    ^depth: 0
+    ^at: open
     loop at < bytes.len() {
         code: Int{bytes[at]}
         if code == 34 {
@@ -117,7 +117,7 @@ core_decl_member_fn_name: fn(line: String) -> String Never! {
 // is not closed.
 core_decl_generics_end: fn(bytes: [U8], at: Int) -> Int Never! {
     if at >= bytes.len() || (Int{bytes[at]}) != 60 -> return at
-    end := at + 1
+    ^end: at + 1
     loop end < bytes.len() && (Int{bytes[end]}) != 62 -> end += 1
     if end >= bytes.len() -> return -1
     end + 1
@@ -160,7 +160,7 @@ core_decl_top_declaration: fn(line: String) -> Bool Never! {
     if line.starts_with("impl") && (bytes.len() == 4 || !core_decl_word(Int{bytes[4]})) {
         return true
     }
-    at := 0
+    ^at: 0
     if core_decl_word_then_space(line, 0, "pub") || core_decl_word_then_space(line, 0, "priv") {
         at = core_decl_skip_space(bytes, if line.starts_with("pub") -> 3 else -> 4)
     }
@@ -180,8 +180,8 @@ core_decl_use_entry: fn(text: String) -> CoreDeclUse? Never! { core_decl_use_at(
 // The `use` target starting at byte `start` of `text`.
 core_decl_use_at: fn(text: String, start: Int) -> CoreDeclUse? Never! {
     bytes: text.bytes()
-    at := start
-    alias := ""
+    ^at: start
+    ^alias: ""
     alias_end: core_decl_name_end(bytes, at)
     if alias_end > at && alias_end < bytes.len() && (Int{bytes[alias_end]}) == 58 {
         alias = foundation_byte_text(bytes, at, alias_end)
@@ -203,7 +203,7 @@ core_decl_use_at: fn(text: String, start: Int) -> CoreDeclUse? Never! {
 // `local` occurs in `body` after a byte that does not continue a name.
 core_decl_calls_local: fn(body: String, local: String) -> Bool Never! {
     bytes: body.bytes()
-    start := 0
+    ^start: 0
     loop {
         found: core_decl_tail(body, start).find(local)
         if found < 0 -> return false
@@ -217,7 +217,7 @@ core_decl_calls_local: fn(body: String, local: String) -> Bool Never! {
 
 // The locals one `use` target binds when it names a runtime unit.
 core_decl_runtime_locals: fn(entry: CoreDeclUse, units: [String]) -> [CoreDeclRuntimeLocal] Never! {
-    out := [CoreDeclRuntimeLocal]{}
+    ^out: [CoreDeclRuntimeLocal]{}
     if entry.items == .Val(list) {
         if !units.contains(entry.target) -> return out
         loop item in core_decl_names(list) {
@@ -243,8 +243,8 @@ core_decl_runtime_locals: fn(entry: CoreDeclUse, units: [String]) -> [CoreDeclRu
 
 // Every local a source's `use` lines bind to a runtime unit.
 core_decl_source_locals: fn(lines: [String], units: [String]) -> [CoreDeclRuntimeLocal] Never! {
-    locals := [CoreDeclRuntimeLocal]{}
-    in_block := false
+    ^locals: [CoreDeclRuntimeLocal]{}
+    ^in_block: false
     loop line in lines {
         if in_block {
             if line.trim() == "}}" {
@@ -270,7 +270,7 @@ core_decl_source_locals: fn(lines: [String], units: [String]) -> [CoreDeclRuntim
 // The runtime unit the owned wrapper `member: fn` of a source calls instead
 // of its `module_name.member` provider, or "" when it calls none.
 core_decl_wrapper_unit: fn(lines: [String], locals: [CoreDeclRuntimeLocal], module_name: String, member: String) -> String Never! {
-    start := -1
+    ^start: -1
     loop (index, line) in lines {
         if core_decl_fn_name(line) == member {
             start = index
@@ -278,7 +278,7 @@ core_decl_wrapper_unit: fn(lines: [String], locals: [CoreDeclRuntimeLocal], modu
         }
     }
     if start < 0 -> return ""
-    end := start + 1
+    ^end: start + 1
     loop end < lines.len() && !core_decl_top_declaration(lines[end]) -> end += 1
     body: lines[start..<end].join("\n")
     if body.contains("{module_name}.{member}(") -> return ""
@@ -298,7 +298,7 @@ core_decl_encoding_problem: fn(encoding: String, formats: [CoreDeclarationFormat
     if close < 0 -> return "{CORE_DECLARATIONS_ENCODING_PATH} declares no EncodingFormat enum"
     // The cases are the body's first lines; a blank line ends them, and the
     // enum's own methods and impls follow it.
-    cases := [String]{}
+    ^cases: [String]{}
     loop line in foundation_byte_text(encoding.bytes(), body_start, body_start + close).split("\n") {
         trimmed: line.trim().removesuffix(",")
         if trimmed == "" && cases.len() > 0 -> break
@@ -322,20 +322,20 @@ core_decl_encoding_problem: fn(encoding: String, formats: [CoreDeclarationFormat
 core_decl_enum_body_start: fn(text: String, name: String) -> Int Never! {
     bytes: text.bytes()
     needle: "{name}:"
-    start := 0
+    ^start: 0
     loop {
         found: core_decl_tail(text, start).find(needle)
         if found < 0 -> return -1
         at: start + found
         start = at + 1
-        back := at
+        ^back: at
         loop back > 0 && (Int{bytes[back - 1]} == 32 || Int{bytes[back - 1]} == 9) -> back -= 1
-        line_start := back == 0 || Int{bytes[back - 1]} == 10
+        ^line_start: back == 0 || Int{bytes[back - 1]} == 10
         if !line_start {
-            word := at
+            ^word: at
             loop word > 0 && core_decl_space(Int{bytes[word - 1]}) -> word -= 1
             if word < at && word >= 3 && foundation_byte_text(bytes, word - 3, word) == "pub" {
-                pub_start := word - 3
+                ^pub_start: word - 3
                 loop pub_start > 0 && (Int{bytes[pub_start - 1]} == 32 || Int{bytes[pub_start - 1]} == 9) {
                     pub_start -= 1
                 }
@@ -356,8 +356,8 @@ core_decl_enum_body_start: fn(text: String, name: String) -> Int Never! {
 // its top level; payloads, discriminants and methods are skipped.
 core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
     bytes: text.bytes()
-    end := open
-    depth := 1
+    ^end: open
+    ^depth: 1
     loop depth > 0 && end < bytes.len() {
         if (Int{bytes[end]}) == {
             123 -> depth += 1
@@ -369,9 +369,9 @@ core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
     kept: loop line in foundation_byte_text(bytes, open, end - 1).split("\n") -> if line.find(COMMENT_PREFIX) < 0 -> line.copy() else -> foundation_byte_text(line.bytes(), 0, line.find(COMMENT_PREFIX))
     body: kept.join("\n")
     code_bytes: body.bytes()
-    variants := [String]{}
-    nesting := 0
-    index := 0
+    ^variants: [String]{}
+    ^nesting: 0
+    ^index: 0
     loop index < code_bytes.len() {
         code: Int{code_bytes[index]}
         if code == 40 || code == 91 || code == 123 {
@@ -388,7 +388,7 @@ core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
             index += 1
             next
         }
-        word_end := index + 1
+        ^word_end: index + 1
         loop word_end < code_bytes.len() && core_decl_word(Int{code_bytes[word_end]}) {
             word_end += 1
         }
@@ -413,18 +413,18 @@ core_decl_source_text: fn(sources: [CoreDeclarationFile], path: String) -> Strin
 // the Syntax registry's TYPE_ constants by name, and a Core module's statics
 // as `<module>.<owner>`.
 core_decl_registry_types: fn() -> NameTable CoreDeclarationError! {
-    names := name_table_sized(2)
-    loop row in IR_RUNTIME_HANDLES -> _ := name_intern(names, row.jet_name)
-    loop row in CORE_RECORD_FIELD_ROWS -> _ := name_intern(names, row.owner)
-    loop row in CORE_RECORD_LITERAL_ROWS -> _ := name_intern(names, row.owner)
-    loop row in CORE_ENUM_PAYLOAD_ROWS -> _ := name_intern(names, row.enum_name)
+    ^names: name_table_sized(2)
+    loop row in IR_RUNTIME_HANDLES -> ^_: name_intern(names, row.jet_name)
+    loop row in CORE_RECORD_FIELD_ROWS -> ^_: name_intern(names, row.owner)
+    loop row in CORE_RECORD_LITERAL_ROWS -> ^_: name_intern(names, row.owner)
+    loop row in CORE_ENUM_PAYLOAD_ROWS -> ^_: name_intern(names, row.enum_name)
     loop row in BUILTIN_STATIC_ROWS {
-        if row.module_name != "" -> _ := name_intern(names, "{row.module_name}.{row.owner}")
+        if row.module_name != "" -> ^_: name_intern(names, "{row.module_name}.{row.owner}")
     }
     constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? return Err(err)
     loop id in 1..<name_count(constants.names) {
         if !name_text(constants.names, Name{id: U32{id}}).starts_with("TYPE_") -> next
-        _ := name_intern(names, constants.values[id])
+        ^_: name_intern(names, constants.values[id])
     }
     Ok(names)
 }
@@ -432,7 +432,7 @@ core_decl_registry_types: fn() -> NameTable CoreDeclarationError! {
 // The source paths of `listing`: its `source_module` rows, then the parts
 // attached to it; empty for a module with no source rows.
 core_decl_module_paths: fn(declared: CoreDeclarations, listing: CoreDeclarationModule) -> [String] Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop row in declared.source_rows {
         if row.module_name == listing.name && !paths.contains(row.path) {
             paths.push(row.path.copy())
@@ -449,13 +449,13 @@ core_decl_module_paths: fn(declared: CoreDeclarations, listing: CoreDeclarationM
 // sources (`paths`) declares and that is no `from(core.x)` re-export and no
 // name a compiler registry owns (`owned`).
 core_decl_undeclared_leaves: fn(sources: [CoreDeclarationFile], listing: CoreDeclarationModule, paths: [String], owned: NameTable) -> [String] Never! {
-    problems := [String]{}
-    declares := name_table_sized(2)
+    ^problems: [String]{}
+    ^declares: name_table_sized(2)
     loop path in paths {
         text: core_decl_source_text(sources, path) ?? next
         loop line in core_decl_source_lines(text) {
             name: core_decl_type_name(line)
-            if name != "" -> _ := name_intern(declares, name)
+            if name != "" -> ^_: name_intern(declares, name)
         }
     }
     loop leaf in listing.types {
@@ -487,10 +487,10 @@ core_decl_marks_error: fn(line: String) -> Bool Never! {
 // of its sources (`paths`) declares with the `#Error` attribute, on the
 // declaration's line or on the attribute lines just above it.
 core_decl_error_leaves: fn(sources: [CoreDeclarationFile], listing: CoreDeclarationModule, paths: [String]) -> [String] Never! {
-    marked := [String]{}
+    ^marked: [String]{}
     loop path in paths {
         text: core_decl_source_text(sources, path) ?? next
-        pending := false
+        ^pending: false
         loop line in core_decl_source_lines(text) {
             attributed: line.starts_with("#")
             if attributed && core_decl_marks_error(line) -> pending = true
@@ -500,7 +500,7 @@ core_decl_error_leaves: fn(sources: [CoreDeclarationFile], listing: CoreDeclarat
             if !attributed || named -> pending = false
         }
     }
-    leaves := loop member in listing.members if marked.contains(member) -> member
+    ^leaves: loop member in listing.members if marked.contains(member) -> member
     loop leaf in listing.types {
         if leaf.from_module == "" && marked.contains(leaf.name) && !leaves.contains(leaf.name) {
             leaves.push(leaf.name)
@@ -511,14 +511,14 @@ core_decl_error_leaves: fn(sources: [CoreDeclarationFile], listing: CoreDeclarat
 
 // Every problem with the sources `declared` names, in check order.
 core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile]) -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     loop file in sources {
         if !file.path.starts_with("Core/") {
             problems.push("Core source row {file.path} is outside Core/")
         }
     }
     owned: core_decl_registry_types() ?? return [String]{"{CORE_DECLARATIONS_CORE_PATH}: {err.message}"}
-    marked := [String]{}
+    ^marked: [String]{}
     loop listing in declared.modules {
         paths: core_decl_module_paths(declared, listing)
         if paths.len() == 0 -> next
@@ -539,7 +539,7 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
     }
     // Each source-owned row's function, by name; "" for a row a role routes,
     // whose function the role table checks (E1014, E1015), not this one.
-    targets := CoreDeclTexts{}
+    ^targets: CoreDeclTexts{}
     loop row in declared.dispatchers {
         if row.kind == "receiver" || row.constructor != "CoreCallRecord.source_owned" -> next
         target: if row.record.source_role != None -> "" else -> row.record.source_target ?? row.record.member
@@ -623,11 +623,11 @@ core_decl_first_owner: fn(rows: [CoreDeclarationSource], module_name: String, me
 // comments, each once in source order, as written (relative to the file's
 // own directory).
 core_decl_embedded_names: fn(text: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop line in text.split("\n") {
         if line.trim_start().starts_with(COMMENT_PREFIX) -> next
         loop call in ([String]{"embed_bytes(\"", "embed_file(\""}) {
-            rest := line.copy()
+            ^rest: line.copy()
             loop rest.contains(call) {
                 after: rest.partition(call).tail
                 name: after.partition("\"").head
@@ -643,7 +643,7 @@ core_decl_embedded_names: fn(text: String) -> [String] Never! {
 // `Core/UI/Xkb.jet`).
 core_decl_directory: fn(path: String) -> String Never! {
     parts: path.split("/").to_list()
-    kept := [String]{}
+    ^kept: [String]{}
     loop (index, part) in parts {
         if index + 1 < parts.len() -> kept.push(part.copy())
     }
@@ -655,7 +655,7 @@ core_decl_directory: fn(path: String) -> String Never! {
 // already built in as text, so it is not an asset.
 core_declarations_assets: fn(sources: [CoreDeclarationFile]) -> [String] Never! {
     row_paths: loop file in sources -> file.path
-    assets := [String]{}
+    ^assets: [String]{}
     loop file in sources {
         directory: core_decl_directory(file.path)
         loop name in core_decl_embedded_names(file.text) {

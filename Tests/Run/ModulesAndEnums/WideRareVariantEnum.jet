@@ -55,8 +55,8 @@ run: fn() {
 
     // A copy is its own value: a write through a binding by reference into
     // the copy never shows in the original.
-    second := original
-    if ^second == {
+    ^second: original
+    if second.in_place() == {
         .Wide(w) -> {
             w.name = "second"
             w.g = 100
@@ -80,8 +80,8 @@ run: fn() {
 
     // Drops: a loop that builds, copies, reassigns and drops wide and narrow
     // values releases each once.
-    churn := Shape.Dot(0)
-    sum := 0
+    ^churn: Shape.Dot(0)
+    ^sum: 0
     loop i in 0..<100000 {
         made: if {
             i % 4 == 0 -> Shape.Wide(wide("w", i))

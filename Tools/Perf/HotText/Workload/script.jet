@@ -26,8 +26,8 @@ run: fn() {
     args: process.args()
     path: if args.len() > 0 -> args[0] else -> "script.jet"
     text: files.read(path) ?? ""
-    rows := [Row]{}
-    seen := [String:Int]{}
+    ^rows: [Row]{}
+    ^seen: [String:Int]{}
     loop line in text.lines() {
         if kind(line.trim()) == {
             .Empty -> { next }
@@ -35,7 +35,7 @@ run: fn() {
         }
         seen[line.trim()] = (seen.get(line.trim()) ?? 0) + 1
     }
-    total := 0
+    ^total: 0
     loop row in rows -> total += row.count
     longest: rows.filter(fn(r) { r.count > 2 }).map(fn(r) { r.name })
     print("{rows.len()} rows, {total} words, {seen.len()} distinct, {longest.len()} long")

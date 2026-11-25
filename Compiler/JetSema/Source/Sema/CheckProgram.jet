@@ -29,35 +29,35 @@ use jet_foundation.[
 ]
 
 check_program: fn(input: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
-    diagnostics := [Diagnostic]{}
-    policy_program := Program?{None}
+    ^diagnostics: [Diagnostic]{}
+    ^policy_program: Program?{None}
     if input.user_policy_declarations.len() > 0 {
-        prepared := input.copy()
+        ^prepared: input.copy()
         declarations: sema_policy_declarations_checked(input.user_policy_declarations, diagnostics)
         sema_policy_materialize(prepared, declarations, module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, diagnostics)
         policy_program = Val(prepared.move())
     }
     source_program: policy_program ?? input
     sema_marker_rules_validate_allow(source_program, diagnostics)
-    functions := [FnBody]{}
-    call_facts := [SemaCallSiteFact]{}
-    hardware_use := sema_hardware_empty_use()
-    name_references := [SemaNameReferenceFact]{}
-    comptime_requests := [SemaComptimeRequest]{}
-    comptime_body_sources := [SemaComptimeBodySource]{}
-    compute_facts := [SemaComputeFunctionFacts]{}
+    ^functions: [FnBody]{}
+    ^call_facts: [SemaCallSiteFact]{}
+    ^hardware_use: sema_hardware_empty_use()
+    ^name_references: [SemaNameReferenceFact]{}
+    ^comptime_requests: [SemaComptimeRequest]{}
+    ^comptime_body_sources: [SemaComptimeBodySource]{}
+    ^compute_facts: [SemaComputeFunctionFacts]{}
     // A snapshot has no module table: its module is the none id, named by
     // `module_name` (sema_scope_environment_module_text).
-    scopes := sema_scope_init(module_none())
-    local_declarations := [SemaScopeDeclaration]{}
-    symbols := symbol_table()
-    exact_int_reachable := false
-    copy_events := [SemaCopyEvent]{}
-    memory_plan := sema_function_memory_plan_for_program(source_program, module_none())
+    ^scopes: sema_scope_init(module_none())
+    ^local_declarations: [SemaScopeDeclaration]{}
+    ^symbols: symbol_table()
+    ^exact_int_reachable: false
+    ^copy_events: [SemaCopyEvent]{}
+    ^memory_plan: sema_function_memory_plan_for_program(source_program, module_none())
     // User policies are materialized above and `#Allow` is validated, so only
     // other rule applications leave the slice incomplete.
-    complete := source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.no_prelude && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && !sema_policy_has_unsupported_applications(source_program)
-    item_index := 0
+    ^complete: source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.no_prelude && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && !sema_policy_has_unsupported_applications(source_program)
+    ^item_index: 0
     loop item_index < source_program.items.len() {
         item: source_program.items[item_index]
         if !sema_register_item(scopes, local_declarations, symbols, item, module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, diagnostics) {
@@ -71,7 +71,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
         }
         item_index += 1
     }
-    job_diagnostics := sema_check_job_names(source_program.items)
+    ^job_diagnostics: sema_check_job_names(source_program.items)
     if job_diagnostics.len() > 0 {
         loop diagnostic in job_diagnostics -> diagnostics.push(diagnostic)
         complete = false
@@ -79,10 +79,10 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
     loop diagnostic in sema_scope_members_check(source_program.tables, source_program.items, source_program.has_scope_member) {
         diagnostics.push(diagnostic)
     }
-    environment := sema_scope_environment_init(module_none(), "", module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, local_declarations)
+    ^environment: sema_scope_environment_init(module_none(), "", module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, local_declarations)
     // One program, the empty graph of a snapshot and no checked types; its
     // symbols are the snapshot's own.
-    program := sema_program_tables_snapshot()
+    ^program: sema_program_tables_snapshot()
     program.registration_graph.symbols = symbols.move()
     program.registration_graph.interner = interner_empty()
     environment.else_arms = source_program.else_arms
@@ -94,11 +94,11 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
     loop item_index < source_program.items.len() {
         if source_program.items[item_index] == {
             .Func(func) -> {
-                function_call_facts := [SemaCallSiteFact]{}
-                function_comptime_requests := [SemaComptimeRequest]{}
-                function_name_references := [SemaNameReferenceFact]{}
-                memory_row := sema_function_memory_position(memory_plan, module_none(), "", func.name, func.span)
-                memory_func := func.copy()
+                ^function_call_facts: [SemaCallSiteFact]{}
+                ^function_comptime_requests: [SemaComptimeRequest]{}
+                ^function_name_references: [SemaNameReferenceFact]{}
+                ^memory_row: sema_function_memory_position(memory_plan, module_none(), "", func.name, func.span)
+                ^memory_func: func.copy()
                 if memory_row == {
                     .Val(position) -> {
                         if memory_plan.functions[position].function == .Val(planned) {
@@ -111,13 +111,15 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
                     }
                     .None -> { complete = false }
                 }
-                checked := sema_function_check(memory_func, symbol_key_text(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, false, environment, program, scopes, None, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
-                table: ^program.registration_graph.interner
+                ^checked: sema_function_check(memory_func, symbol_key_text(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, false, environment, program, scopes, None, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
+                table: program.registration_graph.interner.in_place()
                 loop scopes.type_delta.len() > 0 {
-                    delta := scopes.type_delta.pop() ?? break
+                    ^delta: scopes.type_delta.pop() ?? break
                     if delta_has_rows(delta) {
                         remap: interner_merge_delta(table, delta.move())
-                        if ^checked.value == .Val(body) -> body_tree_remap_types(body.tree, remap)
+                        if checked.value.in_place() == .Val(body) {
+                            body_tree_remap_types(body.tree, remap)
+                        }
                         sema_remap_comptime_requests_from(function_comptime_requests, 0, remap)
                     }
                 }
@@ -150,7 +152,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
 // not only its checked types, so it never skips the computed-field lookup.
 sema_check_pass_environment: fn(program: ^SemaProgramTables, fixed_length_write_params: ^^[SemaWindowParam], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
     program.has_computed_fields = true
-    environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
+    ^environment: sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     // Every module's functions, so the length-preserving fact covers calls
     // into other modules, bundle-wide.
     environment.fixed_length_write_params = fixed_length_write_params.move()
@@ -216,19 +218,19 @@ sema_pass_fact_run: fn(job: Int, graph: SemaRegistrationGraph, threads: Compiler
         job == SEMA_PASS_FACT_BOXED_EDGES -> {
             facts.boxed_edges = sema_checked_program_boxed_edges(graph)
         }
-        job == SEMA_PASS_FACT_COPY -> { facts.copy_facts = sema_copy_facts_table_threads(graph, threads) }
+        job == SEMA_PASS_FACT_COPY -> {
+            facts.copy_facts = sema_copy_facts_table_threads(graph, threads)
+        }
         job == SEMA_PASS_FACT_FIXED_LENGTH -> {
             facts.fixed_length_write_params = sema_fixed_length_write_params_in_graph_threads(graph, threads)
         }
-        else -> {
-            facts.memory_plan = sema_function_memory_plan_from_graph(graph, threads)
-        }
+        else -> { facts.memory_plan = sema_function_memory_plan_from_graph(graph, threads) }
     }
 }
 
 // Moves a thread's computed fact into its field of `facts`.
 sema_pass_fact_join: fn(fact: ^^SemaPassFact, facts: ^SemaPassFacts) Never! {
-    owned := fact.move()
+    ^owned: fact.move()
     if {
         owned.job == SEMA_PASS_FACT_BOXED_EDGES -> {
             facts.boxed_edges = owned.facts.boxed_edges.move()
@@ -252,9 +254,9 @@ sema_pass_facts_claimers: fn(graph: SemaRegistrationGraph, queue: SemaFinalizeCo
     task.group sema_pass_facts_threads {
         head: task sema_pass_facts_claimed(graph, queue, threads, jobs)
         sema_pass_facts_claimers(graph, queue, threads, jobs, from + 1, workers, facts)
-        claimed := compiler_threads_joined(head)
+        ^claimed: compiler_threads_joined(head)
         loop claimed.len() > 0 {
-            done := claimed.pop() ?? break
+            ^done: claimed.pop() ?? break
             sema_pass_fact_join(done, facts)
         }
     }
@@ -263,12 +265,12 @@ sema_pass_facts_claimers: fn(graph: SemaRegistrationGraph, queue: SemaFinalizeCo
 // One thread: computes the facts of jobs 0..<`jobs` it claims, heaviest
 // (last job) first.
 sema_pass_facts_claimed: fn(graph: SemaRegistrationGraph, queue: SemaFinalizeCoreQueue, threads: CompilerThreads, jobs: Int) -> [SemaPassFact] Never! {
-    claimed := [SemaPassFact]{}
+    ^claimed: [SemaPassFact]{}
     loop {
         rank: sema_finalize_core_claim(queue)
         if rank >= jobs -> break
         job: jobs - 1 - rank
-        fact := SemaPassFact{job: job, facts: sema_pass_facts_new()}
+        ^fact: SemaPassFact{job: job, facts: sema_pass_facts_new()}
         sema_pass_fact_run(job, graph, threads, fact.facts)
         claimed.push(fact)
     }
@@ -303,17 +305,17 @@ sema_host_hook_was_wanted: fn(wanted: Shared<SemaHostHookWanted>) -> Bool {
 // (sema_check_module_function).
 // Read-only declaration/body thunks close before either owner is moved.
 sema_check_registration_module: fn(owned_environment: ^^SemaScopeEnvironment, owned_program: ^^SemaProgramTables, host_hooks: SemaHostHookAccess?, owned_memory_plan: ^^SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, check_bodies: Bool, pending_obligations: Bool, prepared: ^^SemaPreparedBodies, scheduling: SemaMethodScheduling?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaOwnedModuleCheck {
-    environment := owned_environment.move()
-    program := owned_program.move()
-    memory_plan := owned_memory_plan.move()
-    threads := CompilerThreads?{None}
+    ^environment: owned_environment.move()
+    ^program: owned_program.move()
+    ^memory_plan: owned_memory_plan.move()
+    ^threads: CompilerThreads?{None}
     if scheduling == .Val(schedule) -> threads = Val(schedule.threads)
-    run := sema_check_registration_module_head(environment, program, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, check_bodies, pending_obligations, prepared, threads, counter_phase, trace_sink)
+    ^run: sema_check_registration_module_head(environment, program, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, check_bodies, pending_obligations, prepared, threads, counter_phase, trace_sink)
     if run.wave_workers > 1 {
         if scheduling == .Val(schedule) {
             // All metadata read windows have ended before either owner
             // moves into its existing shared slot. Recover after every join.
-            lent := run.scopes.move()
+            ^lent: run.scopes.move()
             run.scopes = sema_scope_init(module_none())
             sema_check_shared_fill(schedule.shared_state, environment, program, memory_plan)
             run.method_ready = sema_check_bodies_parallel(schedule.shared_state, module_index, lent, run.wave_jobs, run.wave_weights, run.wave_workers, trace_sink)
@@ -323,7 +325,7 @@ sema_check_registration_module: fn(owned_environment: ^^SemaScopeEnvironment, ow
             run.scopes = compiler_threads_taken(run.method_ready.scopes)
         }
     }
-    module_result := sema_check_registration_module_tail(run, environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, pending_obligations, counter_phase, trace_sink)
+    ^module_result: sema_check_registration_module_tail(run, environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, pending_obligations, counter_phase, trace_sink)
     SemaOwnedModuleCheck{module_result: module_result.move(), environment: environment.move(), program: program.move(), memory_plan: memory_plan.move()}
 }
 
@@ -332,7 +334,7 @@ sema_check_registration_module: fn(owned_environment: ^^SemaScopeEnvironment, ow
 // the stream's threads and are read in place, so the module starts no method
 // wave of its own; a method body the stream did not check is checked here.
 sema_check_registration_module_lent: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, pending_obligations: Bool, prepared: ^^SemaPreparedBodies, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
-    run := sema_check_registration_module_head(environment, program, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, prepared, None, counter_phase, trace_sink)
+    ^run: sema_check_registration_module_head(environment, program, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, prepared, None, counter_phase, trace_sink)
     sema_check_registration_module_tail(run, environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, pending_obligations, counter_phase, trace_sink)
 }
 
@@ -362,50 +364,50 @@ SemaModuleCheckRun: struct {
 // jobs of its method half. With `threads` it admits a method wave for the
 // parallel method jobs the body stream did not check.
 sema_check_registration_module_head: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, check_bodies: Bool, pending_obligations: Bool, prepared: ^^SemaPreparedBodies, threads: CompilerThreads?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaModuleCheckRun {
-    ready := prepared.move()
+    ^ready: prepared.move()
     module_identity: sema_check_registered_module_identity(environment, program, module_index)
     keep_going: sema_check_registered_keep_going(environment, program)
     item_count: sema_check_registered_module_item_count(environment, program, module_index)
-    scopes := sema_scope_init(module_identity)
+    ^scopes: sema_scope_init(module_identity)
     count_work: if trace_sink == .Val(_) -> true else -> false
-    items_scanned := 0
-    started := ready.started.move()
+    ^items_scanned: 0
+    ^started: ready.started.move()
     ready.started = None
     precomputed: started != None
     // The view summary jobs the declaration check found ahead, if any.
     view_jobs: if started == .Val(check) -> check.view_summary_jobs.copy() else -> [Int]?{None}
-    module_result := sema_check_registration_module_started(environment, program, module_index, values, started, scopes, count_work, items_scanned)
+    ^module_result: sema_check_registration_module_started(environment, program, module_index, values, started, scopes, count_work, items_scanned)
     // The original declaration/header boundary: do not substitute the comptime
     // module entry, which deliberately clears real else-arm source facts.
     // copy: a handle copy (Shared facts plus length and frontier ints): the module's context reads
     // a frozen prefix while environment.comptime_body_publication keeps advancing.
-    body_values := environment.comptime_body_publication.copy()
+    ^body_values: environment.comptime_body_publication.copy()
     sema_scope_environment_enter_module(environment, program, module_index, body_values)
-    functions_checked := 0
+    ^functions_checked: 0
     if count_work -> functions_checked = ready.bodies.len()
-    impl_rows_scanned := 0
-    all_method_jobs := [SemaMethodJob]{}
-    method_ready := sema_check_prepared_none()
+    ^impl_rows_scanned: 0
+    ^all_method_jobs: [SemaMethodJob]{}
+    ^method_ready: sema_check_prepared_none()
     // The prelude conversion demands of each body a compiler thread
     // walked, by its position in module_result.functions.
-    prelude_demands := [Int:[SemaPreludeConversionDemand]]{}
-    wave_jobs := [SemaBodyJob]{}
-    wave_weights := [Int]{}
-    wave_workers := 1
+    ^prelude_demands: [Int:[SemaPreludeConversionDemand]]{}
+    ^wave_jobs: [SemaBodyJob]{}
+    ^wave_weights: [Int]{}
+    ^wave_workers: 1
     if check_bodies {
         if ready.scopes.len() > 0 -> scopes = ready.scopes.pop() ?? sema_scope_init(module_identity) else {
             if precomputed -> sema_check_registration_module_scopes(program, module_index, scopes)
-            _ := sema_check_view_summaries(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
+            ^_: sema_check_view_summaries(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
         }
         // The static-product markers bind their signatures in module scope.
         sema_marker_rules_check_static_sites(environment, program, module_index, scopes, module_result.diagnostics)
         // A distinct type's forwarded traits must exist on its base.
         sema_derive_check_distinct_forwards(environment, program, module_index, module_result.diagnostics)
-        scopes_changed := false
-        return_view_rows := [U32:Int]{}
-        trace_functions := false
+        ^scopes_changed: false
+        ^return_view_rows: [U32:Int]{}
+        ^trace_functions: false
         if trace_sink == .Val(sink) -> trace_functions = sink.functions()
-        item_index := 0
+        ^item_index: 0
         loop item_index < item_count {
             if count_work -> items_scanned += 1
             // The trace throttles progress by time, and each report reads the
@@ -431,11 +433,11 @@ sema_check_registration_module_head: fn(environment: ^SemaScopeEnvironment, prog
             ready.methods = [SemaParallelBody]{}
             ready.method_deltas = [InternerDelta?]{}
         } else if threads == .Val(pool) {
-            weights := [Int]{}
-            jobs := sema_check_registered_parallel_method_jobs(environment, program, module_index, memory_plan, all_method_jobs, comptime_rows, weights)
-            work := 0
+            ^weights: [Int]{}
+            ^jobs: sema_check_registered_parallel_method_jobs(environment, program, module_index, memory_plan, all_method_jobs, comptime_rows, weights)
+            ^work: 0
             loop weight in weights -> work += weight
-            workers := 1
+            ^workers: 1
             if !trace_functions {
                 workers = compiler_threads_admit(pool, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, scopes.bindings.len() * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
             }
@@ -468,18 +470,18 @@ sema_check_registration_module_head: fn(environment: ^SemaScopeEnvironment, prog
 // The module check's method bodies, its prelude error conversions and its
 // foreign items, after sema_check_registration_module_head.
 sema_check_registration_module_tail: fn(owned_run: ^^SemaModuleCheckRun, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, pending_obligations: Bool, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
-    run := owned_run.move()
-    module_result := run.module_result.move()
-    scopes := run.scopes.move()
-    method_ready := run.method_ready.move()
-    all_method_jobs := run.all_method_jobs.move()
-    prelude_demands := run.prelude_demands.move()
-    method_jobs := 0
+    ^run: owned_run.move()
+    ^module_result: run.module_result.move()
+    ^scopes: run.scopes.move()
+    ^method_ready: run.method_ready.move()
+    ^all_method_jobs: run.all_method_jobs.move()
+    ^prelude_demands: run.prelude_demands.move()
+    ^method_jobs: 0
     // The rows of the name references and call facts that generated bodies
     // record: a derived method keeps its template's spans and an injected
     // conversion its Prelude text's, so neither indexes this module's source.
-    generated_references := [Span]{}
-    generated_calls := [Span]{}
+    ^generated_references: [Span]{}
+    ^generated_calls: [Span]{}
     if run.check_bodies {
         loop job in all_method_jobs {
             if run.count_work -> method_jobs += 1
@@ -494,7 +496,7 @@ sema_check_registration_module_tail: fn(owned_run: ^^SemaModuleCheckRun, environ
                 generated_calls.push(Span{start: calls_from, end: module_result.call_facts.len()})
             }
         }
-        injected_from := module_result.functions.len()
+        ^injected_from: module_result.functions.len()
         references_from: module_result.name_references.len()
         calls_from: module_result.call_facts.len()
         if !sema_inject_prelude_error_conversions(sema_check_registered_module_text(program, run.module_identity), environment, program, scopes, host_hooks, module_result.functions, prelude_demands, module_result.type_delta, module_result.diagnostics, module_result.call_facts, module_result.comptime_requests, module_result.name_references, module_result.incomplete_reasons, run.keep_going) {
@@ -533,7 +535,7 @@ SEMA_CHECK_PROGRESS_STRIDE: 64
 
 // The checked type definitions a finalization reads: every staged module's.
 sema_stage_checked_types: fn(modules: [SemaGraphModuleResult]) -> [TTypeDef] Never! {
-    checked_types := [TTypeDef]{}
+    ^checked_types: [TTypeDef]{}
     loop staged_module in modules {
         loop type_definition in staged_module.declarations.type_defs {
             checked_types.push(type_definition.copy())
@@ -547,7 +549,7 @@ sema_stage_checked_types: fn(modules: [SemaGraphModuleResult]) -> [TTypeDef] Nev
 // rows their checks filled are freed, so finalizing a checked program again
 // never holds its old bodies beside the new ones.
 sema_stage_declaration_modules: fn(modules: ^^[SemaGraphModuleResult]) -> [SemaGraphModuleResult] Never! {
-    kept := modules.move()
+    ^kept: modules.move()
     loop index in 0..<kept.len() {
         kept[index].functions = [FnBody]{}
         kept[index].call_facts = [SemaCallSiteFact]{}

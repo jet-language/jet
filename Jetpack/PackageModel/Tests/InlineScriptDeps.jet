@@ -23,7 +23,7 @@ pkg_inline_deps_test_dep: fn(name: String) -> InlineDep Never! {
 }
 
 pkg_inline_deps_test_candidates: fn(pairs: [String]) -> [{version: String, dir: String}] Never! {
-    out := [{version: String, dir: String}]{}
+    ^out: [{version: String, dir: String}]{}
     loop index in 0..<(pairs.len() /% 2) {
         out.push({version: pairs[index * 2], dir: pairs[index * 2 + 1]})
     }
@@ -70,7 +70,7 @@ pkg_inline_deps_test_unresolved_from: fn(dep: InlineDep, script_dir: String, bat
 
 #Test("cache identity is order independent but binds all facts") {
     left: InlineDepResolved{name: "textkit", selector: "1.4", resolved_version: "1.4.2", dir: "/first/checkout", content_hash: "sha256-source"}
-    right := left
+    ^right: left
     right.name = "other"
     right.dir = "/second/checkout"
     first: pkg_inline_deps_cache_identity("sha256-script", [InlineDepResolved]{left, right}, "jet-1", "x86_64")
@@ -120,7 +120,7 @@ pkg_inline_deps_test_unresolved_from: fn(dep: InlineDep, script_dir: String, bat
 
 #Test("resolve rejects oversized recursive source as structured failure") {
     root: files.temp_dir("jet-script-deps-depth") ?? panic("scratch")
-    current := files.join(root.path, ".jet/inline-deps/hostile/1.0.0")
+    ^current: files.join(root.path, ".jet/inline-deps/hostile/1.0.0")
     files.create_dir_all(current) ?? panic("package root")
     loop index in 0..<(MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")

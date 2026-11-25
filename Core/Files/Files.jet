@@ -71,7 +71,7 @@ impl Path.CheckedText {
     encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
 
     build: fn(parts: [String], holes: [String]) -[]> Path {
-        text := parts[0].copy()
+        ^text: parts[0].copy()
         loop index in 0..<holes.len() {
             text = "{text}{path_component_encode(holes[index])}{parts[index + 1]}"
         }
@@ -120,7 +120,7 @@ impl Path {
 path_component_encode: fn(component: String) -> String Never! {
     hex: "0123456789ABCDEF".bytes()
     dots: component == "." || component == ".."
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in component.bytes() {
         keep: !dots && ((byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{45}) || byte == (U8{46}) || byte == (U8{95}) || byte == (U8{126}))
         if keep -> out.push(byte) else {
@@ -153,7 +153,7 @@ DirectoryEntry: struct {
 /// The shown form of a name that is not valid UTF-8: ASCII bytes stay, every
 /// other byte becomes U+FFFD.
 replacement_name: fn(raw: [U8]) -> String Never! {
-    shown := [U8]{}
+    ^shown: [U8]{}
     loop byte in raw {
         if byte < (U8{128}) -> shown.push(byte) else {
             shown.push(U8{239})
@@ -167,7 +167,7 @@ replacement_name: fn(raw: [U8]) -> String Never! {
 unicode_basename: fn(raw: [U8]) -> String? Never! { Val(String.from_bytes(raw) ?? return None) }
 
 raw_name_order: fn(left: [U8], right: [U8]) -> Ordering Never! {
-    i := 0
+    ^i: 0
     loop i < left.len() && i < right.len() {
         if left[i] < right[i] -> return .Less
         if left[i] > right[i] -> return .Greater
@@ -324,9 +324,7 @@ MappedFile: struct {
     /// How this map keeps its bytes fixed while the file changes. Every
     /// kind shows the bytes the file held when it was mapped; a `Held` map
     /// becomes `Copy` once a writer breaks its lease.
-    kind: fn(self) -> MapKind Never! {
-        MapKind.from_int(rt.map_kind(self)) ?? MapKind.Copy
-    }
+    kind: fn(self) -> MapKind Never! { MapKind.from_int(rt.map_kind(self)) ?? MapKind.Copy }
 
     /// The number of mapped bytes, and whether there are none.
     len: fn(self) -> Int Never! { self.bytes.len() }
@@ -336,7 +334,9 @@ MappedFile: struct {
     /// The bytes `start..<end` as a view of the map; an IOError when the
     /// range is not inside it.
     window: fn(self, start: Int, end: Int) -> View<U8> IOError! from self {
-        if start < 0 || end < start || end > self.bytes.len() -> return Err(map_window_error(self, "{start}..{end}"))
+        if start < 0 || end < start || end > self.bytes.len() {
+            return Err(map_window_error(self, "{start}..{end}"))
+        }
         Ok(self.bytes[start..<end])
     }
 
@@ -344,7 +344,9 @@ MappedFile: struct {
     /// are not all inside it.
     window_len: fn(self, offset: Int, count: Int) -> View<U8> IOError! from self {
         total: self.bytes.len()
-        if offset < 0 || count < 0 || offset > total || count > total - offset -> return Err(map_window_error(self, "{offset} length {count}"))
+        if offset < 0 || count < 0 || offset > total || count > total - offset {
+            return Err(map_window_error(self, "{offset} length {count}"))
+        }
         Ok(self.bytes[offset..<offset + count])
     }
 
@@ -352,11 +354,11 @@ MappedFile: struct {
     /// with a CR before it; a last line with no LF counts, and an empty one
     /// after the last LF does not.
     lines: fn(self) -> [View<U8>] Never! from self {
-        found := [View<U8>]{}
+        ^found: [View<U8>]{}
         total: self.bytes.len()
-        start := 0
+        ^start: 0
         loop start < total {
-            newline := start
+            ^newline: start
             loop newline < total && self.bytes[newline] != 10 -> newline += 1
             end: if newline > start && self.bytes[newline - 1] == 13 -> newline - 1 else -> newline
             found.push(self.bytes[start..<end])
@@ -469,9 +471,13 @@ priv HandleDirectionMismatch: struct {
     impl Diagnostic {
         code: "E2501",
 
-        what: fn(self) -> String { "`{self.method}` is not available on a {self.direction} file handle" }
+        what: fn(self) -> String {
+            "`{self.method}` is not available on a {self.direction} file handle"
+        }
 
-        why: fn(self) -> String { "{self.opener} returns a {self.direction} handle; it can only {self.can}" }
+        why: fn(self) -> String {
+            "{self.opener} returns a {self.direction} handle; it can only {self.can}"
+        }
 
         fix: fn(self) -> String { self.remedy.copy() }
     }
@@ -514,7 +520,7 @@ FileReader: struct {
     /// Returns `IOError.InvalidInput` when `size <= 0`.
     chunks: fn(^self, size: Int) -[Time.Wait]> [[U8]] IOError! {
         if size <= 0 -> return Err(io_err("read", self.stored_path, "chunk size must be positive"))
-        out := [[U8]]{}
+        ^out: [[U8]]{}
         loop {
             part: rt.reader_read(self, size)
             if part.len() == 0 -> break
@@ -704,10 +710,10 @@ Directory: struct {
     /// `name` (and `path`) show each non-ASCII byte as U+FFFD.
     list: fn(self) -[FS.Read]> [DirectoryEntry] IOError! {
         rows: rt.list_directory(self.handle)
-        out := [DirectoryEntry]{}
+        ^out: [DirectoryEntry]{}
         loop row in rows {
-            raw := [U8]{}
-            i := 1
+            ^raw: [U8]{}
+            ^i: 1
             loop i < row.len() {
                 raw.push(row[i])
                 i += 1
@@ -752,8 +758,8 @@ Directory: struct {
     /// the directory that receives `to`. `if_exists` follows `files.rename`.
     rename: fn(self, from: String, to: String, into: Directory?{None}, if_exists: RenameIfExists{.Replace}) -[FS.Write]> IOError! {
         held_name(self.path, from, true)
-        target := self.handle
-        target_path := self.path
+        ^target: self.handle
+        ^target_path: self.path
         if into == {
             Val(other) -> {
                 target = other.handle
@@ -949,7 +955,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
         output_path: join(root, "output.txt")
         write(input_path, "input\n") ?? panic("input")
         reader: open(input_path) ?? panic("open reader")
-        writer := create(output_path) ?? panic("create writer")
+        ^writer: create(output_path) ?? panic("create writer")
         writer.write_line("buffered") ?? panic("buffer a line")
         reader_fd: rt.reader_fd(reader) ?? panic("reader descriptor: {err}")
         writer_fd: rt.writer_fd(writer) ?? panic("writer descriptor: {err}")
@@ -981,7 +987,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
         create_dir_all(held_path) ?? panic("replacement")
         write(join(held_path, "replacement.txt"), "wrong\n") ?? panic("replacement marker")
         close(original)
-        names := [String]{}
+        ^names: [String]{}
         entries: twin.list() ?? panic("list through the duplicate")
         loop entry in entries -> names.push(entry.name)
         assert(names == [String]{"held.txt"})
@@ -1028,8 +1034,8 @@ held_name: fn(base: String, name: String, write: Bool) IOError! {
     if is_abs_impl(name.copy()) {
         return Err(held_name_error(shown, write, "the name is absolute; a held directory takes a relative name"))
     }
-    start := 0
-    i := 0
+    ^start: 0
+    ^i: 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{47}) || raw[i] == (U8{92}) {
             part: slice_path(name.copy(), start, i)
@@ -1078,11 +1084,11 @@ stat_kind: fn(code: Int) -> String Never! {
 // created_ns.
 stat_from_row: fn(row: [Int]) -> Stat Never! {
     kind_code: row[0]
-    owner := Int?{None}
+    ^owner: Int?{None}
     if row[7] >= 0 -> owner = Val(row[7])
     modified: core.time.from_unix_nanoseconds(row[9])
     changed: if row[10] == row[9] -> modified.copy() else -> core.time.from_unix_nanoseconds(row[10])
-    created := DateTime?{None}
+    ^created: DateTime?{None}
     if row[11] == 1 {
         created = Val(if row[12] == row[9] -> modified.copy() else if row[12] == row[10] -> changed.copy() else -> core.time.from_unix_nanoseconds(row[12]))
     }
@@ -1107,9 +1113,7 @@ stat_from_row: fn(row: [Int]) -> Stat Never! {
 /// The extended-attribute names on `path` itself, in
 /// sorted order. A final link is never followed. Windows and file systems
 /// without attributes report none.
-extended_attribute_names: fn(path: String) -[FS.Read]> [String] IOError! {
-    rt.xattr_names(path)
-}
+extended_attribute_names: fn(path: String) -[FS.Read]> [String] IOError! { rt.xattr_names(path) }
 
 /// One extended-attribute value, or None when absent.
 extended_attribute: fn(path: String, name: String) -[FS.Read]> [U8]? IOError! {
@@ -1243,7 +1247,7 @@ write_atomic: fn(path: Path | String, bytes: [U8]) -[FS.Write]> IOError! {
     parent_text: String.from_bytes(parent.encoded) ?? panic("UTF-8 path span")
     pid: rt.atomic_pid()
     loop sequence in 0..<128 {
-        candidate := parent.copy()
+        ^candidate: parent.copy()
         host_path.push(candidate, host_path.from_text(".jet_tmp_{pid}_{sequence}", platform))
         candidate_text: String.from_bytes(candidate.encoded) ?? panic("UTF-8 temporary path")
         if rt.atomic_reserve(destination, candidate_text) == {
@@ -1478,8 +1482,8 @@ anchor_for_parts: fn(drive: String, absolute: Bool) -> String Never! {
 }
 
 join_parts: fn(parts: [String]) -> String Never! {
-    s := ""
-    first := true
+    ^s: ""
+    ^first: true
     loop p in parts {
         if p.bytes().len() == 0 -> next
         if first {
@@ -1521,8 +1525,8 @@ is_abs: fn(path: String) -> Bool Never! { is_abs_impl(path) }
 is_separator: fn(b: U8) -> Bool Never! { b == (U8{47}) || b == (U8{92}) }
 
 slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
@@ -1532,9 +1536,9 @@ slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
 
 split_slash_impl: fn(path: String) -> [String] Never! {
     raw: path.bytes()
-    out := [String]{}
-    start := 0
-    i := 0
+    ^out: [String]{}
+    ^start: 0
+    ^i: 0
     loop i < raw.len() {
         n: raw[i]
         if n == 47 || n == 92 {
@@ -1553,8 +1557,8 @@ collapse_impl: fn(path: String) -> String Never! {
     raw: path.bytes()
     if raw.len() == 0 -> return "."
     absolute: is_abs_impl(path)
-    drive := ""
-    start := 0
+    ^drive: ""
+    ^start: 0
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
         drive = slice(raw, 0, 2)
         start = 2
@@ -1564,7 +1568,7 @@ collapse_impl: fn(path: String) -> String Never! {
         loop start < raw.len() && is_separator(raw[start]) -> start += 1
     }
     tail: slice(raw, start, raw.len())
-    out := [String]{}
+    ^out: [String]{}
     loop p in split_slash_impl(tail) {
         if p == "" || p == "." -> next
         if p == ".." {
@@ -1587,7 +1591,7 @@ collapse: fn(path: String) -> String Never! { collapse_impl(path) }
 
 strip_leading_separators: fn(path: String) -> String Never! {
     raw: path.bytes()
-    i := 0
+    ^i: 0
     loop i < raw.len() && is_separator(raw[i]) -> i += 1
     slice(raw, i, raw.len())
 }
@@ -1614,12 +1618,12 @@ normalize: fn(path: String) -> String Never! {
     if path == "" -> return "."
     absolute: path.starts_with("/")
     trailing: path.ends_with("/")
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in path.split("/") {
         if {
             part == "" || part == "." -> {}
             part != ".." -> parts.push(part.copy())
-            parts.len() > 0 && parts[parts.len() - 1] != ".." -> { _ := parts.pop() }
+            parts.len() > 0 && parts[parts.len() - 1] != ".." -> { ^_: parts.pop() }
             !absolute -> parts.push("..")
             else -> {}
         }
@@ -1659,7 +1663,7 @@ absolute: fn(path: Path | String) -[FS, Env]> String IOError! {
 }
 
 temp_prefix: fn(prefix: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in prefix.bytes() {
         // Continuation bytes belong to the scalar whose lead byte emitted `_`.
         if byte >= (U8{128}) && byte < (U8{192}) -> next
@@ -1707,7 +1711,7 @@ list_dir: fn(path: Path | String, matching: String?{None}) -[FS.Read]> [DirEntry
     files8_preflight("FS.Read", .Read, text)
     entries: rt.list_dir_raw(text)
     pattern: matching ?? return Ok(entries)
-    kept := [DirEntry]{}
+    ^kept: [DirEntry]{}
     loop entry in entries {
         if entries_glob_match(pattern.bytes(), entry.name.bytes()) -> kept.push(entry.copy())
     }
@@ -1724,10 +1728,10 @@ list_dir_or: fn(path: Path | String, fallback: [DirEntry], matching: String?{Non
 dirname_impl: fn(path: String) -> String Never! {
     raw: path.bytes()
     if raw.len() == 0 -> return ""
-    end := raw.len()
+    ^end: raw.len()
     loop end > 1 && is_separator(raw[end - 1]) -> end -= 1
     if end == 0 -> return "/"
-    i := end - 1
+    ^i: end - 1
     loop i >= 0 {
         if is_separator(raw[i]) {
             if i == 0 -> return "/"
@@ -1850,7 +1854,7 @@ symlink: fn(original: Path | String, link: Path | String, replace: Bool{false}) 
         gone: failure == .NotFound(_)
         if !gone -> return Err(failure)
     }
-    directory := false
+    ^directory: false
     if platform == "windows" -> directory = rt.symlink_directory_raw(source)
     rt.symlink_raw(source, target, directory)
 }
@@ -1911,7 +1915,7 @@ BestEffort: struct {
 
     /// One line per failure, in the order they happened; empty when none did.
     report: fn(self) -> String Never! {
-        lines := [String]{}
+        ^lines: [String]{}
         loop failure in self.failures -> lines.push("{failure}")
         lines.join("\n")
     }
@@ -1942,12 +1946,12 @@ read_link: fn(path: Path | String) -[FS.Read]> String IOError! {
 
 split_lines: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    out := [String]{}
-    start := 0
-    i := 0
+    ^out: [String]{}
+    ^start: 0
+    ^i: 0
     loop i < raw.len() {
         if raw[i] == (U8{10}) {
-            line := slice(raw, start, i)
+            ^line: slice(raw, start, i)
             if line.bytes().len() > 0 && line.bytes()[line.bytes().len() - 1] == (U8{13}) {
                 line = slice(line.bytes(), 0, line.bytes().len() - 1)
             }
@@ -1962,8 +1966,8 @@ split_lines: fn(text: String) -> [String] Never! {
 
 trim: fn(text: String) -> String Never! {
     raw: text.bytes()
-    a := 0
-    b := raw.len()
+    ^a: 0
+    ^b: raw.len()
     loop a < b {
         n: raw[a]
         if n == 32 || n == 9 -> a += 1 else -> break
@@ -1985,14 +1989,14 @@ glob_bytes: fn(pat: [U8], pi: Int, name: [U8], ni: Int) -> Bool Never! {
     if ni >= name.len() -> return false
     if pat[pi] == (U8{63}) -> return glob_bytes(pat, pi + 1, name, ni + 1)
     if pat[pi] == (U8{91}) {
-        j := pi + 1
-        negated := false
+        ^j: pi + 1
+        ^negated: false
         if j < pat.len() && (pat[j] == (U8{33}) || pat[j] == (U8{94})) {
             negated = true
             j += 1
         }
-        matched := false
-        closed := false
+        ^matched: false
+        ^closed: false
         loop j < pat.len() {
             if pat[j] == (U8{93}) {
                 closed = true
@@ -2033,10 +2037,10 @@ glob_parts: fn(pat: [String], pi: Int, tgt: [String], ti: Int) -> Bool Never! {
 
 glob_parts_for: fn(path: String) -> [String] Never! {
     raw: path.bytes()
-    out := [String]{}
-    drive := ""
+    ^out: [String]{}
+    ^drive: ""
     absolute: is_abs_impl(path)
-    start := 0
+    ^start: 0
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
         drive = slice(raw, 0, 2)
         start = 2
@@ -2077,7 +2081,7 @@ anchor_of: fn(path: String) -> String Never! {
 
 path_parts: fn(path: String) -> [String] Never! {
     raw: path.bytes()
-    start := 0
+    ^start: 0
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
         start = 2
         if start < raw.len() && is_separator(raw[start]) -> start += 1
@@ -2085,7 +2089,7 @@ path_parts: fn(path: String) -> [String] Never! {
         start = 1
         loop start < raw.len() && is_separator(raw[start]) -> start += 1
     }
-    out := [String]{}
+    ^out: [String]{}
     loop p in split_slash_impl(slice(raw, start, raw.len())) {
         if p.bytes().len() > 0 -> out.push(p)
     }
@@ -2098,13 +2102,13 @@ relative_impl: fn(path: String, start: String) -> String Never! {
     if anchor_of(a) != anchor_of(b) -> return a
     ap: path_parts(a)
     bp: path_parts(b)
-    i := 0
+    ^i: 0
     loop i < ap.len() && i < bp.len() {
         if ap[i] != bp[i] -> break
         i += 1
     }
-    out := [String]{}
-    j := i
+    ^out: [String]{}
+    ^j: i
     loop j < bp.len() {
         out.push("..")
         j += 1
@@ -2138,7 +2142,7 @@ walk_error: fn(operation: IOOperation, kind: Int, code: Int?, cause: String?, re
 // The ancestor slots this pushes are released before it returns.
 walk_validate: fn(context: Int, directory: Int, root: String) -[FS]> IOError! {
     source: rt.walk_validation_path(context, directory)
-    failure := IOError?{None}
+    ^failure: IOError?{None}
     loop ancestor in rt.walk_ancestors(context, source) {
         if failure == None {
             metadata: rt.walk_metadata(context, ancestor)
@@ -2183,15 +2187,15 @@ priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, igno
     if opened.status_reason != None {
         return Err(walk_error(.Read, opened.status, opened.status_code, opened.status_reason, root))
     }
-    entries := [WalkEntry]{}
-    children := [{key: String, directory: Int}]{}
+    ^entries: [WalkEntry]{}
+    ^children: [{key: String, directory: Int}]{}
     loop {
         entry: rt.walk_next(context, directory)
         if entry.status_reason != None {
             return Err(walk_error(.Read, entry.status, entry.status_code, entry.status_reason, root))
         }
         if entry.at_end -> break
-        skipped := skip.len() > 0 && skip.contains(basename(entry.relative))
+        ^skipped: skip.len() > 0 && skip.contains(basename(entry.relative))
         if !skipped && ignore != None {
             skipped = entry.rules_file || rt.walk_ignored(context, directory, entry.relative, entry.directory)
         }
@@ -2218,11 +2222,11 @@ priv walk_sort_entries: fn(entries: ^[WalkEntry]) Never! {
         return
     }
     if n <= 32 {
-        i := 1
+        ^i: 1
         loop i < n {
             if entries[i - 1].relative < entries[i].relative {
                 key: entries[i].copy()
-                j := i
+                ^j: i
                 loop j > 0 && entries[j - 1].relative < key.relative {
                     entries[j] = entries[j - 1].copy()
                     j -= 1
@@ -2242,11 +2246,11 @@ priv walk_sort_children: fn(children: ^[{key: String, directory: Int}]) Never! {
         return
     }
     if n <= 32 {
-        i := 1
+        ^i: 1
         loop i < n {
             if children[i - 1].key < children[i].key {
                 key: children[i].copy()
-                j := i
+                ^j: i
                 loop j > 0 && children[j - 1].key < key.key {
                     children[j] = children[j - 1].copy()
                     j -= 1
@@ -2281,11 +2285,11 @@ Walk: struct {
 
     /// Every entry in walk order, or the first error the walk meets.
     list: fn(^^self) -[FS]> [WalkEntry] IOError! {
-        out := [WalkEntry]{}
+        ^out: [WalkEntry]{}
         // The cursor's own `next`, not `loop entry in self`: the seed that
         // builds this Core does not yet take a type's nested Iterable as a
         // loop source inside the type's own body.
-        cursor := self.iter()
+        ^cursor: self.iter()
         loop cursor.next() == .Val(entry) -> out.push(entry?)
         Ok(out)
     }
@@ -2328,7 +2332,7 @@ priv WalkCursor: struct {
                 children: self.frames[top].children.len()
                 if children == 0 {
                     if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
-                    _ := self.frames.pop()
+                    ^_: self.frames.pop()
                     next
                 }
                 entries: self.frames[top].entries.len()
@@ -2348,7 +2352,7 @@ priv WalkCursor: struct {
                     next
                 }
                 if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
-                _ := self.frames.pop()
+                ^_: self.frames.pop()
             }
             walk_finish(self)
             None
@@ -2394,10 +2398,10 @@ walk_files: fn(root: Path | String, ignore: String?{None}, skip: [String]{[Strin
 // Match the native byte grammar: '*' crosses separators, '?' is one byte,
 // brackets have no special meaning. Backtracking retains byte indexes only.
 entries_glob_match: fn(pattern: [U8], path: [U8]) -> Bool Never! {
-    p := 0
-    t := 0
-    star := -1
-    restart := 0
+    ^p: 0
+    ^t: 0
+    ^star: -1
+    ^restart: 0
     loop t < path.len() {
         if p < pattern.len() && (pattern[p] == (U8{63}) || (pattern[p] != (U8{42}) && pattern[p] == path[t])) {
             p += 1
@@ -2418,7 +2422,7 @@ entries_glob_match: fn(pattern: [U8], path: [U8]) -> Bool Never! {
 
 entries_glob_root: fn(pattern: String, separator: U8) -> String Never! {
     bytes: pattern.bytes()
-    last := -1
+    ^last: -1
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{42}) || bytes[index] == (U8{63}) -> break
         if bytes[index] == separator -> last = index
@@ -2431,7 +2435,7 @@ entries_glob_tree: fn(context: Int, directory: Int, resource: String, output: ^[
     if opened.status_reason != None {
         return Err(walk_error(.Read, opened.status, opened.status_code, opened.status_reason, resource))
     }
-    children := [Int]{}
+    ^children: [Int]{}
     // Native collect fails on iteration errors before inspecting any file_type.
     loop {
         entry: rt.entries_next(context, directory)
@@ -2465,10 +2469,10 @@ glob: fn(pattern: Path | String) -[FS]> [String] IOError! {
     root: entries_glob_root(resource, separator)
     context: rt.entries_context(root, "", false)
     _guard: core.mem.scope.guard(fn() { rt.entries_close(context) })
-    paths := [String]{}
+    ^paths: [String]{}
     entries_glob_tree(context, 0, resource, paths)
     bytes: resource.bytes()
-    matches := [String]{}
+    ^matches: [String]{}
     loop path in paths {
         if entries_glob_match(bytes, path.bytes()) -> matches.push(path)
     }
@@ -2511,11 +2515,11 @@ lock: fn(path: Path | String, timeout: Duration?{None}) -[FS, Env]> FileLock IOE
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)
     bounded: timeout != None
-    ns := 0
+    ^ns: 0
     if timeout == .Val(duration) -> ns = duration.ns
-    deadline := 0
+    ^deadline: 0
     loop {
-        fd := lock_open(text)
+        ^fd: lock_open(text)
         waited: rt.lock_wait(fd.fd, ns, bounded, deadline)
         deadline = waited.deadline_ns
         if waited.timed_out -> return Err(lock_timeout(text))
@@ -2533,7 +2537,7 @@ try_lock: fn(path: Path | String) -[FS, Env]> FileLock? IOError! {
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)
     loop {
-        fd := lock_open(text)
+        ^fd: lock_open(text)
         result: rt.lock_try(fd.fd)
         if result.value != 0 {
             if lock_contended(result.errno, result.platform) -> return Ok(None)
@@ -2645,7 +2649,7 @@ lock_current: fn(path: String, fd: Int) -[FS, Env]> Bool IOError! {
 
 basename: fn(path: String) -> String Never! {
     raw: path.bytes()
-    i := raw.len() - 1
+    ^i: raw.len() - 1
     loop i >= 0 {
         if raw[i] == (U8{47}) || raw[i] == (U8{92}) -> return slice(raw, i + 1, raw.len())
         i -= 1
@@ -2656,7 +2660,7 @@ basename: fn(path: String) -> String Never! {
 suffix: fn(path: String) -> String Never! {
     name: basename(path)
     raw: name.bytes()
-    i := raw.len() - 1
+    ^i: raw.len() - 1
     loop i > 0 {
         if raw[i] == (U8{46}) -> return slice(raw, i, raw.len())
         i -= 1
@@ -2667,7 +2671,7 @@ suffix: fn(path: String) -> String Never! {
 stem: fn(path: String) -> String Never! {
     name: basename(path)
     raw: name.bytes()
-    i := raw.len() - 1
+    ^i: raw.len() - 1
     loop i > 0 {
         if raw[i] == (U8{46}) -> return slice(raw, 0, i)
         i -= 1
@@ -2781,7 +2785,7 @@ read_lines: fn(path: String) -[FS]> [String] IOError! {
 }
 
 write_lines: fn(path: String, lines: [String]) -[FS]> IOError! {
-    s := ""
+    ^s: ""
     loop line in lines -> s = "{s}{line}\n"
     write(path, s)
 }
@@ -2790,20 +2794,20 @@ commonpath: fn(paths: [String]) -> String Never! {
     if paths.len() == 0 -> return ""
     first: collapse_impl(paths[0])
     anchor: anchor_of(first)
-    parts := path_parts(first)
+    ^parts: path_parts(first)
     loop p in paths {
         cur: collapse_impl(p)
         if anchor_of(cur) != anchor -> return ""
         next: path_parts(cur)
-        n := parts.len()
+        ^n: parts.len()
         if next.len() < n -> n = next.len()
-        k := 0
+        ^k: 0
         loop k < n {
             if parts[k] != next[k] -> break
             k += 1
         }
-        kept := [String]{}
-        i := 0
+        ^kept: [String]{}
+        ^i: 0
         loop i < k {
             kept.push(parts[i])
             i += 1
@@ -2817,10 +2821,10 @@ fnmatch: fn(name: String, pattern: String) -> Bool Never! { glob_match(pattern, 
 
 split_path_env: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    out := [String]{}
-    start := 0
-    i := 0
-    sep := 58
+    ^out: [String]{}
+    ^start: 0
+    ^i: 0
+    ^sep: 58
     loop b in raw {
         if b == (U8{59}) {
             sep = 59
@@ -2828,7 +2832,7 @@ split_path_env: fn(text: String) -> [String] Never! {
         }
     }
     loop i <= raw.len() {
-        n := 0
+        ^n: 0
         if i < raw.len() -> n = raw[i]
         if i == raw.len() || n == sep {
             out.push(slice(raw, start, i))
@@ -2846,7 +2850,7 @@ which: fn(name: String) -[FS, Env]> String? Never! {
     }
     path_var: sys.get("PATH") ?? ""
     loop dir in split_path_env(path_var) {
-        base := dir
+        ^base: dir
         if base.bytes().len() == 0 -> base = "."
         cand: join_impl(base, name)
         if is_file_impl(cand) -> return Val(cand)
@@ -2856,8 +2860,8 @@ which: fn(name: String) -[FS, Env]> String? Never! {
 
 slice_path: fn(text: String, start: Int, end: Int) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
@@ -2902,11 +2906,11 @@ samefile: fn(a: String, b: String) -[FS]> Bool IOError! {
 
 commonprefix: fn(paths: [String]) -> String Never! {
     if paths.len() == 0 -> return ""
-    pref := paths[0].copy()
+    ^pref: paths[0].copy()
     loop p in paths {
-        n := pref.bytes().len()
+        ^n: pref.bytes().len()
         if p.bytes().len() < n -> n = p.bytes().len()
-        i := 0
+        ^i: 0
         loop i < n {
             if pref.bytes()[i] != p.bytes()[i] -> break
             i += 1
@@ -2918,12 +2922,12 @@ commonprefix: fn(paths: [String]) -> String Never! {
 
 expandvars: fn(path: String) -[Env]> String IOError! {
     raw: path.bytes()
-    out := ""
-    i := 0
+    ^out: ""
+    ^i: 0
     loop i < raw.len() {
         if raw[i] == (U8{36}) {
             i += 1
-            braced := false
+            ^braced: false
             if i < raw.len() && raw[i] == (U8{123}) {
                 braced = true
                 i += 1
@@ -2956,7 +2960,7 @@ makedirs: fn(path: String) -[FS]> IOError! { create_dir_all(path) }
 
 listdir: fn(path: String) -[FS]> [String] IOError! {
     entries: core.files.list_dir(path)
-    out := [String]{}
+    ^out: [String]{}
     loop e in entries -> out.push(e.name)
     Ok(out)
 }
@@ -2964,7 +2968,7 @@ listdir: fn(path: String) -[FS]> [String] IOError! {
 glob_recursive: fn(pattern: String) -[FS]> [String] IOError! { core.files.glob(pattern) }
 
 fnmatch_filter: fn(names: [String], pattern: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop n in names {
         if fnmatch(n, pattern) -> out.push(n.copy())
     }
@@ -2981,8 +2985,8 @@ is_mount: fn(path: String) -[FS]> Bool Never! {
 ensure_parent: fn(path: String) -[FS]> IOError! { create_dir_all(dirname_impl(path)) }
 
 slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return out
         out.push(raw[i])
@@ -3000,7 +3004,7 @@ truncate: fn(path: String, size: Int) -[FS]> IOError! {
     if size < 0 -> return Err(io_err("truncate", path, "negative size"))
     bytes: read_bytes(path.copy())
     if size < bytes.len() -> write_bytes(path.copy(), slice_bytes(bytes, 0, size)) else {
-        out := bytes
+        ^out: bytes
         loop out.len() < size -> out.push(U8{0})
         write_bytes(path.copy(), out)
     }
@@ -3077,8 +3081,8 @@ scope_denied: fn(path: String) -> IOError Never! {
 }
 
 scope_relative: fn(path: host_path.OSPath, requested: String) -> String IOError! {
-    cursor := host_path.components(path)
-    normalized := [U8]{}
+    ^cursor: host_path.components(path)
+    ^normalized: [U8]{}
     loop {
         part: host_path.next(path, cursor) ?? break
         if part.kind != .CurDir {
@@ -3104,7 +3108,7 @@ priv scope_reads: module {
     // The scope's read roots, in the authority's sorted right order.
     // `FS.Read("repo")` is the working directory; a root with a `..` part names none.
     scope_roots: fn(scope: FileScope, platform: host_path.PathPlatform) -> [ScopeRoot] Never! {
-        roots := [ScopeRoot]{}
+        ^roots: [ScopeRoot]{}
         loop right in rt.authority_to_wire(scope.authority).split("\n") {
             if !right.starts_with("FS.Read(\"") || !right.ends_with("\")") -> next
             root: right.removeprefix("FS.Read(\"").removesuffix("\")")
@@ -3122,7 +3126,7 @@ priv scope_reads: module {
     }
 
     scope_has_parent: fn(path: host_path.OSPath) -> Bool Never! {
-        cursor := host_path.components(path)
+        ^cursor: host_path.components(path)
         loop {
             part: host_path.next(path, cursor) ?? break
             if part.kind == .ParentDir -> return true
@@ -3131,7 +3135,7 @@ priv scope_reads: module {
     }
 
     scope_part_name: fn(path: host_path.OSPath, part: host_path.PathComponent, requested: String) -> String IOError! {
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         loop i in part.span.start..<part.span.end -> bytes.push(path.encoded[i])
         Ok(String.from_bytes(bytes) ?? return Err(scope_denied(requested)))
     }
@@ -3144,10 +3148,10 @@ priv scope_reads: module {
     // every part below it are opened from their held parent without following a
     // link, and the bytes come from that same opened regular file.
     scope_read_at: fn(root: ScopeRoot, relative: String, platform: host_path.PathPlatform, requested: String) -[FS.Read]> [U8] IOError! {
-        directories := [Directory]{}
+        ^directories: [Directory]{}
         directories.push(open_directory(if root.absolute -> "/" else -> "."))
         root_path: host_path.OSPath{encoded: root.encoded, platform: platform}
-        cursor := host_path.components(root_path)
+        ^cursor: host_path.components(root_path)
         loop {
             part: host_path.next(root_path, cursor) ?? break
             if part.kind == .Prefix -> return Err(scope_denied(requested))
@@ -3160,7 +3164,7 @@ priv scope_reads: module {
         loop index in 0..<(parts.len() - 1) {
             directories.push(directories[directories.len() - 1].open_directory(parts[index]))
         }
-        reader := directories[directories.len() - 1].open(parts[parts.len() - 1])
+        ^reader: directories[directories.len() - 1].open(parts[parts.len() - 1])
         opened: reader.stat()
         if !opened.is_file {
             return Err(scope_input_error(requested, "file authority input is not a regular file"))
@@ -3168,7 +3172,7 @@ priv scope_reads: module {
         if opened.links != 1 {
             return Err(scope_input_error(requested, "file authority input has multiple hard links"))
         }
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         loop {
             chunk: reader.read_bytes(65536)
             if chunk.len() == 0 -> break
@@ -3187,9 +3191,9 @@ scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
     platform: file_path_platform()
     requested: host_path.from_text(path, platform)
     absolute: host_path.is_absolute(requested)
-    last := scope_denied(path)
+    ^last: scope_denied(path)
     loop root in scope_roots(scope, platform) {
-        relative := Val(requested)
+        ^relative: Val(requested)
         if absolute {
             relative = None
             if root.absolute {
@@ -3258,12 +3262,12 @@ scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
 // std::str::Utf8Error's exact Display text; scoped reads used from_utf8,
 // unlike whole-file reads, whose read_to_string error has a fixed cause.
 file_utf8_error: fn(bytes: [U8]) -> String Never! {
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         lead: Int{bytes[at]}
-        width := if lead < 128 -> 1 else -> 0
-        low := 128
-        high := 191
+        ^width: if lead < 128 -> 1 else -> 0
+        ^low: 128
+        ^high: 191
         if lead >= 194 && lead <= 223 -> width = 2
         if lead >= 224 && lead <= 239 {
             width = 3
@@ -3322,7 +3326,7 @@ priv __reader_read_line: fn(reader: ^FileReader) -[FS.Read]> String? IOError! {
             ),
         )
     }
-    bytes := rt.reader_line_bytes(reader)
+    ^bytes: rt.reader_line_bytes(reader)
     if bytes.len() == 0 -> return Ok(None)
     trim_file_line(bytes)
     text: String.from_bytes(bytes) ?? return Err(io_err("read", rt.reader_path(reader), "stream did not contain valid UTF-8"))
@@ -3333,12 +3337,12 @@ priv __reader_read_line: fn(reader: ^FileReader) -[FS.Read]> String? IOError! {
     root: mkdtemp("jet-files-raw-leaves") ?? panic("no temp dir: {err}")
     directory: open_directory(root) ?? panic("cannot hold the temp dir: {err}")
     raw: [U8]{97, 255}
-    writer := directory.create_raw(raw, mode: Val(416)) ?? panic("create_raw: {err}")
+    ^writer: directory.create_raw(raw, mode: Val(416)) ?? panic("create_raw: {err}")
     writer.write_all("one\r\ntwo\nlast".bytes()) ?? panic("write: {err}")
     writer.fsync() ?? panic("fsync: {err}")
     assert_eq((writer.stat() ?? panic("stat: {err}")).mode % 512, 416)
     assert(directory.create_raw(raw, if_exists: .Refuse) == .Err(.AlreadyExists(_)))
-    reader := directory.open_raw(raw) ?? panic("open_raw: {err}")
+    ^reader: directory.open_raw(raw) ?? panic("open_raw: {err}")
     assert_eq(raw_leaf_line(reader), "one")
     assert_eq(raw_leaf_line(reader), "two")
     assert_eq(raw_leaf_line(reader), "last")
@@ -3375,10 +3379,10 @@ trim_file_line: fn(bytes: ^[U8]) Never! {
 }
 
 #Test("file read_line trims every trailing CR/LF including unterminated final CR") {
-    final := [U8]{108, 97, 115, 116, 13}
+    ^final: [U8]{108, 97, 115, 116, 13}
     trim_file_line(final)
     assert_eq(String.from_bytes(final) ?? panic("trimmed UTF-8"), "last")
-    repeated := [U8]{120, 13, 13, 10}
+    ^repeated: [U8]{120, 13, 13, 10}
     trim_file_line(repeated)
     assert_eq(String.from_bytes(repeated) ?? panic("trimmed UTF-8"), "x")
 }
@@ -3477,7 +3481,7 @@ trim_file_line: fn(bytes: ^[U8]) Never! {
     write(join(root, "notes.txt"), "x") ?? panic("notes")
     write(join(root, "keep/.jet/cache"), "c") ?? panic("cache")
     write(join(root, "keep/src.jet"), "s") ?? panic("src")
-    names := [String]{}
+    ^names: [String]{}
     loop entry in list_dir(root, matching: "*.files") ?? panic("list") {
         names.push(entry.name.copy())
     }
@@ -3494,7 +3498,7 @@ trim_file_line: fn(bytes: ^[U8]) Never! {
         assert(!exists(join(root, "keep/out")))
         assert(symlink("out", join(root, "keep"), replace: true) == .Err(_))
     }
-    walked := [String]{}
+    ^walked: [String]{}
     loop entry in walk_files(join(root, "keep"), skip: [String]{".jet"}) {
         walked.push((entry ?? panic("walk")).relative)
     }
@@ -3506,7 +3510,7 @@ trim_file_line: fn(bytes: ^[U8]) Never! {
     root: mktemp("files-best-effort-kat")
     create_dir_all(root) ?? panic("root")
     write(join(root, "a"), "one") ?? panic("a")
-    done := best_effort()
+    ^done: best_effort()
     done.remove_all(join(root, "gone"))
     done.remove(join(root, "gone"))
     done.create_dir_all(join(root, "out/deep"))
@@ -3540,7 +3544,7 @@ trim_file_line: fn(bytes: ^[U8]) Never! {
     assert_eq(read_or(join(root, "a.files"), "none"), "one\n")
     assert_eq(read_or(join(root, "missing"), "none"), "none")
     assert_eq(read_or(join(root, "bad"), ""), "")
-    names := [String]{}
+    ^names: [String]{}
     loop entry in list_dir_or(root, [DirEntry]{}, matching: "*.files") {
         names.push(entry.name.copy())
     }
@@ -3558,7 +3562,7 @@ trim_file_line: fn(bytes: ^[U8]) Never! {
     write(join(root, "sub/deep.txt"), "deep") ?? panic("deep")
     write(join(root, "q"), "question") ?? panic("q")
     write(join(root, "[x]"), "literal") ?? panic("literal")
-    expected := [String]{join(root, "sub/deep.txt"), join(root, "top.txt")}
+    ^expected: [String]{join(root, "sub/deep.txt"), join(root, "top.txt")}
     expected.sort()
     assert_eq(glob(Path.from(join(root, "*.txt"))) ?? panic("star"), expected)
     assert_eq(glob(join(root, "?")) ?? panic("question"), [String]{join(root, "q")})
@@ -3657,7 +3661,7 @@ metadata_fault_seen: fn(probe: String, error: IOError) {
 #Test("FileReader and FileWriter handle methods cover read, chunks, seek, stat, write_all, fsync, and set_mode") {
     root: temp_dir("file-handles-kat") ?? panic("temp_dir")
     path: join(root.path, "sample.bin")
-    writer := create(path) ?? panic("create")
+    ^writer: create(path) ?? panic("create")
     writer.write("abc") ?? panic("write")
     writer.write_all("defghij".bytes()) ?? panic("write_all")
     writer.flush() ?? panic("flush")
@@ -3667,7 +3671,7 @@ metadata_fault_seen: fn(probe: String, error: IOError) {
     assert_eq(wstat.size, 10)
     if rt.os_family() == "unix" -> assert_eq(wstat.mode % 512, 0o640)
 
-    reader := open(path) ?? panic("open")
+    ^reader: open(path) ?? panic("open")
     rstat: reader.stat() ?? panic("reader.stat")
     assert_eq(rstat.size, 10)
     head: reader.read(4) ?? panic("read")
@@ -3688,8 +3692,8 @@ metadata_fault_seen: fn(probe: String, error: IOError) {
 #Test("host_path components handle roots, empty paths, separators, and prefixes across Unix and Windows") {
     collect: fn(raw: String, platform: host_path.PathPlatform) -> [String] Never! {
         p: host_path.from_text(raw, platform)
-        cursor := host_path.components(p)
-        out := [String]{}
+        ^cursor: host_path.components(p)
+        ^out: [String]{}
         loop {
             part: host_path.next(p, cursor) ?? break
             text: slice(p.encoded, part.span.start, part.span.end)
@@ -3792,7 +3796,7 @@ metadata_fault_seen: fn(probe: String, error: IOError) {
         }
 
         // Open handle stat matches canonical target identity and nanosecond stamps.
-        reader := open(link2) ?? panic("open followed")
+        ^reader: open(link2) ?? panic("open followed")
         rstat: reader.stat() ?? panic("reader.stat")
         assert_eq(rstat.id.device, canonical.id.device)
         assert_eq(rstat.id.inode, canonical.id.inode)

@@ -40,7 +40,7 @@ JetCLIBudgetProjection: struct {
 }
 
 jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) -[FS, Time.Wait]> JetCLIBudgetProjection Never! {
-    projection := JetCLIBudgetProjection{facts: [JetCLIBudgetFact]{}, rejected: [String]{}}
+    ^projection: JetCLIBudgetProjection{facts: [JetCLIBudgetFact]{}, rejected: [String]{}}
     parts: [String]{".jet", "perf", "reports"}
     // No reports folder is an empty projection; a folder that is a link or
     // can't be opened is a rejection, so the proof can't read as complete.
@@ -69,7 +69,7 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
             projection.rejected.push("{label}: report exceeds 16 MiB projection limit")
             next
         }
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         if held.read(entry.name, JET_CLI_BUDGET_REPORT_LIMIT) == {
             .Ok(found) -> {
                 if found == {
@@ -89,7 +89,7 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
             projection.rejected.push("{label}: {err.message}")
             next
         }
-        facts := [JetCLIBudgetFact]{}
+        ^facts: [JetCLIBudgetFact]{}
         if jet_cli_budget_facts(label, report, wanted) == {
             .Ok(found) -> {
                 // An incompatible report describes other sources: skip it.
@@ -101,7 +101,7 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
             }
         }
         loop fact in facts {
-            replaced := false
+            ^replaced: false
             loop (index, known) in projection.facts {
                 if known.budget_id != fact.budget_id -> next
                 replaced = true
@@ -146,19 +146,19 @@ jet_cli_budget_facts: fn(label: String, report: CanonicalJSON, wanted: [JetCLIBu
     subject: jet_cli_budget_member(content, "subject") ?? return Err(invalid)
     members: jet_cli_budget_array(subject, "member_sources") ?? return Err(invalid)
     measurements: jet_cli_budget_array(content, "measurements") ?? return Err(invalid)
-    compatible := members.len() > 0
+    ^compatible: members.len() > 0
     loop member in members {
         path: jet_cli_budget_text(member, "path") ?? return Err(invalid)
         sha256: jet_cli_budget_text(member, "sha256") ?? return Err(invalid)
         normal: jet_cli_budget_normal(path)
-        matched := false
+        ^matched: false
         loop source in wanted {
             if source.path == normal && source.sha256 == sha256 -> matched = true
         }
         if !matched -> compatible = false
     }
     if !compatible -> return Ok(None)
-    facts := [JetCLIBudgetFact]{}
+    ^facts: [JetCLIBudgetFact]{}
     loop measurement in measurements {
         fact: jet_cli_budget_fact(report_id, evidence_id, measurement) ?? return Err(jet_cli_read_error("{label}: measurement projection fields are invalid"))
         facts.push(fact)
@@ -211,7 +211,7 @@ jet_cli_budget_normal: fn(path: String) -> String Never! {
 jet_cli_budget_relative: fn(root: String, message: String) -> String Never! {
     if root == "" -> return message.copy()
     parts: message.split(root).to_list()
-    out := parts[0].copy()
+    ^out: parts[0].copy()
     loop index in 1..<parts.len() {
         rest: parts[index]
         if {
@@ -220,9 +220,7 @@ jet_cli_budget_relative: fn(root: String, message: String) -> String Never! {
                 out = "{out}{tail}"
             }
             jet_cli_budget_name_continues(rest) -> { out = "{out}{root}{rest}" }
-            else -> {
-                out = "{out}.{rest}"
-            }
+            else -> { out = "{out}.{rest}" }
         }
     }
     out

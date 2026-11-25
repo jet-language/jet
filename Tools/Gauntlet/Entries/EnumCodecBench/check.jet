@@ -44,7 +44,7 @@ show: fn(path: String, value: Dyn, key: String, places: [String], status: String
     }
     if value == {
         .Object(fields) -> {
-            inner := ""
+            ^inner: ""
             loop field in fields {
                 if field.key == "status" && field.value == .Text(text) -> inner = text.copy()
             }
@@ -73,7 +73,7 @@ number: fn(value: Dyn, key: String, status: String) -> String {
 fixed: fn(text: String, key: String, places: [String]) -> String {
     if key == "harness" -> return "<harness>"
     if text.starts_with(NOT_STARTED) -> return NOT_STARTED
-    out := text.copy()
+    ^out: text.copy()
     loop place in places -> out = out.replace(place, "<cwd>")
     out
 }

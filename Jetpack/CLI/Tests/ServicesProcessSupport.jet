@@ -360,7 +360,7 @@ ServicesClaim: struct {
     // `jetpack <args>` from `cwd` with this claim's root, home, and fake
     // systemd; `extra` adds environment pairs.
     jetpack_in: fn(self, cwd: String, args: [String], extra: [{name: String, value: String}]) -[Env, Exec]> ProcessSpec {
-        spec := cli_test_jetpack(args).cwd(cwd).env("JETPACK_ROOT", self.root).env("HOME", self.home)
+        ^spec: cli_test_jetpack(args).cwd(cwd).env("JETPACK_ROOT", self.root).env("HOME", self.home)
         if self.fake == {
             .Val(fake) -> {
                 spec = spec.env("PATH", fake.path()).env("JETPACK_FAKE_SYSTEMD_STATE", fake.state)

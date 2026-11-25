@@ -2,9 +2,9 @@
 // threads, which are raw clones: the program's image holds no libc and no
 // pthread symbol (symbols.mjs).
 run: fn() {
-    workers := [Task<Int>]{}
+    ^workers: [Task<Int>]{}
     loop index in 0..<16 { workers.push(task { index * index }) }
-    sum := 0
+    ^sum: 0
     loop worker in workers -> sum += worker.join() ?? panic("task")
     print("tasks 16 sum {sum}")
 }

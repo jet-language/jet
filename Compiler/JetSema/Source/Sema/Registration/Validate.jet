@@ -52,7 +52,7 @@ SemaValidateRule: struct {
 // One generated impl per struct with a non-empty block, after the written
 // items. A block with a malformed rule reports it and generates nothing.
 sema_validate_blocks: fn(tables: ASTTables, items: ^[Item], diagnostics: ^[Diagnostic]) {
-    generated := [Item]{}
+    ^generated: [Item]{}
     loop index in 0..<items.len() {
         if items[index] == .Struct(definition) {
             if definition.validate_block.len() == 0 -> next
@@ -64,10 +64,10 @@ sema_validate_blocks: fn(tables: ASTTables, items: ^[Item], diagnostics: ^[Diagn
 }
 
 sema_validate_impl: fn(tables: ASTTables, definition: StructDef, diagnostics: ^[Diagnostic]) -> ImplDef? {
-    fields := [String:Bool]{}
+    ^fields: [String:Bool]{}
     loop field in definition.fields -> fields[field.name] = true
-    rules := [SemaValidateRule]{}
-    valid := true
+    ^rules: [SemaValidateRule]{}
+    ^valid: true
     loop statement in definition.validate_block {
         if sema_validate_rule(statement, fields, diagnostics) == .Val(rule) -> rules.push(rule) else {
             valid = false
@@ -125,10 +125,10 @@ sema_validate_e0354: fn(name: String, span: Span) -> Diagnostic Never! {
 // so the rules and messages read exactly those fields and `value` stays the
 // parameter after the block.
 sema_validate_build: fn(tables: ASTTables, definition: StructDef, rules: [SemaValidateRule], span: Span) -> ImplDef {
-    fields := [String:Bool]{}
+    ^fields: [String:Bool]{}
     loop field in definition.fields -> fields[field.name] = true
     referenced: sema_validate_referenced_fields(tables, rules, fields)
-    checks := [Stmt]{}
+    ^checks: [Stmt]{}
     loop name in referenced {
         checks.push(sema_serde_items_binding(name, None, sema_serde_items_field_read(SEMA_VALIDATE_VALUE, name, span), false, span))
     }
@@ -139,7 +139,7 @@ sema_validate_build: fn(tables: ASTTables, definition: StructDef, rules: [SemaVa
         push: Stmt.Expr{expr: sema_serde_items_method_call(errors, "push", [Expr]{failure}, span)}
         checks.push(sema_serde_items_if(sema_serde_items_not(rule.cond, span), [Stmt]{push}, span))
     }
-    body := [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
+    ^body: [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
     body.push(sema_serde_items_if(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, checks, span))
     has_errors: sema_serde_items_not(sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "is_empty", [Expr]{}, span), span)
     body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span, id: AST_NODE_GENERATED}, span)}, span))
@@ -148,7 +148,7 @@ sema_validate_build: fn(tables: ASTTables, definition: StructDef, rules: [SemaVa
     // user's `validate {`.
     body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span, id: AST_NODE_GENERATED}, span))
     target: Type.Named{name: definition.name}
-    function := ast_func("validate", span, span)
+    ^function: ast_func("validate", span, span)
     function.is_pub = definition.is_pub
     function.is_package_pub = definition.is_package_pub
     function.params = [Param]{sema_serde_items_param(SEMA_VALIDATE_VALUE, target, span)}
@@ -163,7 +163,7 @@ sema_validate_build: fn(tables: ASTTables, definition: StructDef, rules: [SemaVa
 // The struct fields the rules' conditions and messages name, in order of
 // first reference.
 sema_validate_referenced_fields: fn(tables: ASTTables, rules: [SemaValidateRule], fields: [String:Bool]) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     // Each visit is written at its call, where it takes the visitor's effect row.
     loop rule in rules {
         ast_visit_expr(tables, rule.cond, fn(expression: ExprNode) { sema_validate_note_name(tables, fields, found, expression) })
@@ -214,7 +214,7 @@ sema_validate_over_rule: fn(subject: Type, args: [CallArg], span: Span, check: ^
         if !sema_validate_over_has_field(subject, name, check) {
             return sema_validate_over_refuse(sema_validate_e0354(name, name_span), check.diagnostics)
         }
-        rule := args
+        ^rule: args
         // copy: the field name is a payload of read parameter `args`; the rewritten rule owns its String
         rule[1] = CallArg{
             convention: AccessConvention.Read,
@@ -243,7 +243,7 @@ sema_validate_over_has_field: fn(subject: Type, name: String, check: ^SemaBodyCh
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
     }
     if owner_name == "" -> return false
-    owner := sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, owner_name)
+    ^owner: sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, owner_name)
     if owner == None {
         owner = sema_expression_carrier_type_symbol(check.environment.*, check.program.*, owner_name)
     }

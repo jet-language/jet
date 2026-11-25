@@ -23,7 +23,7 @@ run: fn() -[Secret, IO]> {
         .Err(.InvalidName) -> print("rotate:InvalidName")
         .Ok(_) | .Err(_) -> panic("rotate must reject an invalid name")
     }
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(U8{0})
     key: crypto.SigningKey.from_bytes(seed) ?? panic("fixed signing seed")
     if vault.prepare_store<crypto.SigningKey>("", key) == {

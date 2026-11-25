@@ -98,8 +98,8 @@ Surface: struct {
 
 // The 1-based line holding byte `offset`.
 line_at: fn(starts: [Int], offset: Int) -> Int Never! {
-    lo := 0
-    hi := starts.len()
+    ^lo: 0
+    ^hi: starts.len()
     loop {
         if hi - lo <= 1 -> break
         mid: (lo + hi) /% 2
@@ -117,9 +117,9 @@ line_of: fn(text: String, needle: String) -> Int Never! {
 }
 
 parse_core: fn(sources: [SourceFile]) -> ParsedCore Never! {
-    out := ParsedCore{fns: [String:Declared]{}, returns: [String:Type]{}, types: [String:Declared]{}, methods: [String:Declared]{}, method_returns: [String:Type]{}, fields: [String:Declared]{}, enums: [String:Bool]{}, records: [String:Bool]{}, roles: [String:String]{}, errors: [String]{}}
+    ^out: ParsedCore{fns: [String:Declared]{}, returns: [String:Type]{}, types: [String:Declared]{}, methods: [String:Declared]{}, method_returns: [String:Type]{}, fields: [String:Declared]{}, enums: [String:Bool]{}, records: [String:Bool]{}, roles: [String:String]{}, errors: [String]{}}
     loop row in CORE_SOURCE_OWNED_ROWS {
-        source := SourceFile?{None}
+        ^source: SourceFile?{None}
         loop file in sources {
             if file.path == row.path -> source = Val(file.copy())
         }
@@ -146,7 +146,9 @@ parse_into: fn(out: ^ParsedCore, module_name: String, file: SourceFile) Never! {
                 loop marker in f.markers {
                     if marker.name != "Builtin.Role" || marker.args.len() != 1 -> next
                     if marker.args[0] == .Expr(value) {
-                        if value == .EnumLit(_, variant, _, _, _, _, _) -> out.roles["{variant}"] = key.copy()
+                        if value == .EnumLit(_, variant, _, _, _, _, _) {
+                            out.roles["{variant}"] = key.copy()
+                        }
                     }
                 }
             }
@@ -203,12 +205,12 @@ type_text: fn(ty: Type) -> String Never! {
         .Result(ok, err) -> "{type_text(ok)} {type_text(err)}!"
         .Named(name) -> name.copy()
         .Apply(name, args) -> {
-            parts := [String]{}
+            ^parts: [String]{}
             loop arg in args -> parts.push(type_text(arg))
             "{name}<{parts.join(", ")}>"
         }
         .Tuple(fields) -> {
-            parts := [String]{}
+            ^parts: [String]{}
             loop field in fields {
                 parts.push(if field.name == "" -> type_text(field.ty) else -> "{field.name}: {type_text(field.ty)}")
             }
@@ -249,7 +251,7 @@ result_class: fn(ty: Type?, core: ParsedCore) -> String Never! {
 }
 
 compiler_record_fields: fn(name: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     fields: ir_compiler_owned_record_fields(name, ir_compiler_owned_core_fields()) ?? return out
     loop field in fields -> out.push(field.name.copy())
     out
@@ -291,7 +293,7 @@ symbol_name: fn(symbol: CoreCallSymbol) -> String Never! {
 // The special-route table: `key<TAB>path<TAB>needle`, one row per line, a
 // `#` line is a comment. Each row must name a surface row with no other route.
 parse_special_routes: fn(text: String) -> [SpecialRoute] Err! {
-    out := [SpecialRoute]{}
+    ^out: [SpecialRoute]{}
     loop (index, line) in text.split("\n").to_list() {
         if line.trim() == "" || line.starts_with("#") -> next
         cells: line.split("\t").to_list()
@@ -304,10 +306,10 @@ parse_special_routes: fn(text: String) -> [SpecialRoute] Err! {
 }
 
 surface: fn(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFile], route_files: [SourceFile]) -> Surface Never! {
-    rows := [SurfaceRow]{}
-    errors := core.errors.copy()
-    seen := [String:Bool]{}
-    modules := [String:Bool]{}
+    ^rows: [SurfaceRow]{}
+    ^errors: core.errors.copy()
+    ^seen: [String:Bool]{}
+    ^modules: [String:Bool]{}
     loop export in CORE_MODULE_EXPORTS -> modules[export.module_name.copy()] = true
     loop export in CORE_MODULE_EXPORTS {
         loop member in export.members {
@@ -328,7 +330,7 @@ surface: fn(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFi
         }
     }
     loop record in CORE_CALLS {
-        target := record.source_target ?? ""
+        ^target: record.source_target ?? ""
         if record.source_role == .Val(role) -> target = core.roles.get(role) ?? ""
         loop owner in record.receiver_types {
             if owner == "" || owner.bytes()[0] == 0 -> next
@@ -368,16 +370,16 @@ unrouted: fn(id: String, kind: String, owner: String, member: String, problem: S
 
 module_call_row: fn(id: String, module_name: String, member: String, core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
     record: core_call(module_name, member)
-    owned_path := String?{None}
+    ^owned_path: String?{None}
     loop row in CORE_SOURCE_OWNED_ROWS {
         if row.module_name == module_name && row.owned_members.contains(member) {
             owned_path = Val(row.path.copy())
         }
     }
-    declared_aot := false
-    target := member.copy()
-    source_owned := false
-    key := "{module_name}.{member}"
+    ^declared_aot: false
+    ^target: member.copy()
+    ^source_owned: false
+    ^key: "{module_name}.{member}"
     if record == .Val(found) {
         declared_aot = core_call_coverage_contains(found.coverage, CORE_CALL_COVERAGE_AOT)
         if found.symbol == .SourceOwned {
@@ -506,7 +508,7 @@ nominal_row: fn(id: String, module_name: String, name: String, core: ParsedCore,
 // names must exist, must lack every other route, and its needle must be in the
 // named file; otherwise the table is wrong and generation fails.
 apply_specials: fn(rows: ^[SurfaceRow], errors: ^[String], specials: [SpecialRoute], special_files: [SourceFile]) Never! {
-    keys := [String:Bool]{}
+    ^keys: [String:Bool]{}
     loop special in specials {
         where: "{SPECIAL_ROUTES_PATH}:{special.row}"
         if keys.get(special.key) != None {
@@ -514,7 +516,7 @@ apply_specials: fn(rows: ^[SurfaceRow], errors: ^[String], specials: [SpecialRou
             next
         }
         keys[special.key.copy()] = true
-        text := String?{None}
+        ^text: String?{None}
         loop file in special_files {
             if file.path == special.path -> text = Val(file.text.copy())
         }
@@ -527,7 +529,7 @@ apply_specials: fn(rows: ^[SurfaceRow], errors: ^[String], specials: [SpecialRou
             errors.push("{where}: `{special.path}` does not contain `{special.needle}`")
             next
         }
-        index := -1
+        ^index: -1
         loop (at, row) in rows {
             if row.id == special.key -> index = at
         }

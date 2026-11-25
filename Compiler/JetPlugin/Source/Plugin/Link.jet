@@ -23,7 +23,7 @@ jet_plugin_link: fn(m: ^IRModule, root: String, needs: [String]) -[FS]> Never! {
         key: m.functions[id].key
         if !key.starts_with(IR_PLUGIN_GUEST_PREFIX) -> next
         artifact: key.slice(IR_PLUGIN_GUEST_PREFIX.len(), key.len() - 1)
-        detail := ""
+        ^detail: ""
         path: if root == "" || artifact.starts_with("/") -> artifact else -> plug_files.join(root, artifact)
         bytes: if plug_files.read_bytes(path) == {
             .Ok(bytes) -> bytes
@@ -48,11 +48,11 @@ jet_plugin_link: fn(m: ^IRModule, root: String, needs: [String]) -[FS]> Never! {
 // The file name of `path` without its extension.
 plug_stem: fn(path: String) -> String Never! {
     raw: path.bytes()
-    start := 0
+    ^start: 0
     loop (k, byte) in raw {
         if (Int{byte}) == 47 -> start = k + 1
     }
-    end := raw.len()
+    ^end: raw.len()
     loop k in start..<raw.len() {
         if (Int{raw[k]}) == 46 -> end = k
     }
@@ -79,17 +79,17 @@ plug_thunk_add: fn(thunks: ^[Int:Int], fids: ^[Int], fid: Int) Never! {
 
 plug_link_component: fn(m: ^IRModule, id: Int, artifact: String, name: String, bytes: [U8], needs: [String]) WasmError! {
     flat: plug_flatten(wasm_load_component(bytes.copy()))
-    sig_keys := [String:Int]{}
-    sig_types := [WasmFuncType]{}
-    sigs := [Int]{}
+    ^sig_keys: [String:Int]{}
+    ^sig_types: [WasmFuncType]{}
+    ^sigs: [Int]{}
     loop func in flat.funcs {
         class: plug_sig(sig_keys, sig_types, func.ty)
         sigs.push(class)
     }
-    scopes := [PlugScope]{}
+    ^scopes: [PlugScope]{}
     loop inst in flat.instances {
-        types := [WasmFuncType]{}
-        type_sigs := [Int]{}
+        ^types: [WasmFuncType]{}
+        ^type_sigs: [Int]{}
         if inst.source >= 0 {
             loop ty in flat.c.modules[inst.source].types {
                 class: plug_sig(sig_keys, sig_types, ty)
@@ -97,9 +97,9 @@ plug_link_component: fn(m: ^IRModule, id: Int, artifact: String, name: String, b
                 types.push(ty)
             }
         }
-        callee_types := [WasmFuncType]{}
+        ^callee_types: [WasmFuncType]{}
         loop fid in inst.funcs -> callee_types.push(flat.funcs[fid].ty)
-        global_types := [Int]{}
+        ^global_types: [Int]{}
         loop global in inst.globals -> global_types.push(flat.globals[global].value)
         scopes.push(
             PlugScope{
@@ -119,10 +119,10 @@ plug_link_component: fn(m: ^IRModule, id: Int, artifact: String, name: String, b
     // The functions a table can hold: those an element segment, a global's
     // initializer or a `ref.func` names. Each signature class dispatches
     // over its own.
-    targets := [[Int]]{}
+    ^targets: [[Int]]{}
     loop _ in sig_types -> targets.push([Int]{})
-    addressable := [Int:Bool]{}
-    referenced := [Int]{}
+    ^addressable: [Int:Bool]{}
+    ^referenced: [Int]{}
     loop elem in flat.elems {
         loop item in elem.items {
             if item > 0 -> referenced.push(item - 1)
@@ -144,8 +144,8 @@ plug_link_component: fn(m: ^IRModule, id: Int, artifact: String, name: String, b
         addressable[fid] = true
         targets[sigs[fid]].push(fid)
     }
-    thunks := [Int:Int]{}
-    thunk_fids := [Int]{}
+    ^thunks: [Int:Int]{}
+    ^thunk_fids: [Int]{}
     loop export in flat.exports {
         plug_thunk_add(thunks, thunk_fids, export.fid)
         plug_thunk_add(thunks, thunk_fids, export.realloc)
@@ -153,7 +153,7 @@ plug_link_component: fn(m: ^IRModule, id: Int, artifact: String, name: String, b
     }
     loop entry in flat.imports -> plug_thunk_add(thunks, thunk_fids, entry.realloc)
     base: m.functions.len()
-    names := [String:Int]{}
+    ^names: [String:Int]{}
     loop runtime in PLUG_RUNTIME_NAMES -> names[runtime] = ir_intern_name(m, runtime)
     kit: PlugKit{
         artifact: artifact,
@@ -192,12 +192,12 @@ plug_link_component: fn(m: ^IRModule, id: Int, artifact: String, name: String, b
 // entry thunk `thunk_base` + k (one per function of `thunk_fids`).
 plug_guest_entry: fn(m: ^IRModule, id: Int, desc: Int, thunk_base: Int, thunk_fids: [Int], base: Int, starts: [Int]) Never! {
     word: ir_word_row(m)
-    f := ir_function_new(m.functions[id].name, m.functions[id].key, m.functions[id].symbol, "", 0)
+    ^f: ir_function_new(m.functions[id].name, m.functions[id].key, m.functions[id].symbol, "", 0)
     f.symbol_hash = m.functions[id].symbol_hash
     f.result = word
     rows: plug_rows(m)
     kit: PlugKit{artifact: "", rows: rows, names: [String:Int]{}, base: base, thunk_base: thunk_base, dispatch_base: -1}
-    cx := plug_cx(kit, f, -1)
+    ^cx: plug_cx(kit, f, -1)
     op: ir_slot(cx.f, word, IRSlotKind.Param, ir_intern_name(m, "op"), 0)
     cx.inst = ir_slot(cx.f, word, IRSlotKind.Param, ir_intern_name(m, "instance"), 0)
     area: ir_slot(cx.f, word, IRSlotKind.Param, ir_intern_name(m, "area"), 0)

@@ -82,7 +82,7 @@ read_json: fn(path: String) -[FS]> Dyn? {
 
 // `text` parsed as JSON up to JSON_TEXT_BYTES.
 parse_json: fn(text: String) -> Dyn EncodingError! {
-    limits := EncodingLimits.safe()
+    ^limits: EncodingLimits.safe()
     limits.max_item_bytes = JSON_TEXT_BYTES
     json.parse_with_limits(text, limits)
 }
@@ -110,7 +110,7 @@ parse_json: fn(text: String) -> Dyn EncodingError! {
 }
 
 #Test("a set value is put; an unset one is left out") {
-    out := Dyn.object()
+    ^out: Dyn.object()
     put_present(out, "a", Val(Dyn.Int(1)))
     put_present(out, "b", None)
     put_present(out, "c", Val(Dyn.Null))

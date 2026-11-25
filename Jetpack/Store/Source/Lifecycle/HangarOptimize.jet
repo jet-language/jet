@@ -10,8 +10,8 @@ use {
 // Duplicate non-empty files across legacy package directories that
 // `optimize_package_tree_hardlinks` would share.
 store_optimize_hangar_plan: fn(hangar: String) -[FS]> CleanReport StoreError! {
-    seen := [String:String]{}
-    report := CleanReport.empty()
+    ^seen: [String:String]{}
+    ^report: CleanReport.empty()
     records: store_object_dirs(hangar)
     loop record in records {
         members: store_files_under(record.path)
@@ -51,7 +51,7 @@ store_optimize_objects_cas_pool_plan: fn(roots: HangarRoots) -[FS, Env]> CleanRe
         .None -> {}
     }
     object_dirs: store_optimize_object_dirs(objects)
-    report := CleanReport.empty()
+    ^report: CleanReport.empty()
     loop object_dir in object_dirs {
         members: store_files_under(object_dir)
         loop file in members {
@@ -89,7 +89,7 @@ store_optimize_objects_cas_pool_plan: fn(roots: HangarRoots) -[FS, Env]> CleanRe
 // roots are legal and have no files to share; they are neither followed nor
 // rejected.
 store_optimize_object_dirs: fn(objects: String) -[FS]> [String] StoreError! {
-    object_dirs := [String]{}
+    ^object_dirs: [String]{}
     items: files.list_dir(objects)
     loop item in items {
         metadata: files.stat(item.path)
@@ -102,7 +102,7 @@ store_optimize_object_dirs: fn(objects: String) -[FS]> [String] StoreError! {
 }
 
 store_optimize_hangar: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
-    report := store_optimize_package_tree_hardlinks(roots.hangar_dir())
+    ^report: store_optimize_package_tree_hardlinks(roots.hangar_dir())
     cas: store_optimize_objects_cas_pool(verification, roots)
     report.optimized_files += cas.optimized_files
     report.optimized_bytes += cas.optimized_bytes
@@ -112,8 +112,8 @@ store_optimize_hangar: fn(verification: StoreVerification, roots: HangarRoots) -
 // Legacy package-directory hardlink dedupe (pre-`objects/` layout). A failed
 // replacement is skipped.
 store_optimize_package_tree_hardlinks: fn(hangar: String) -[FS, Env]> CleanReport StoreError! {
-    seen := [String:String]{}
-    report := CleanReport.empty()
+    ^seen: [String:String]{}
+    ^report: CleanReport.empty()
     records: store_object_dirs(hangar)
     loop record in records {
         members: store_files_under(record.path)
@@ -152,7 +152,7 @@ store_optimize_objects_cas_pool: fn(verification: StoreVerification, roots: Hang
     store_ensure_real_directory(objects, "Hangar object pool")
     object_dirs: store_optimize_object_dirs(objects)
     _shared_lock: store_with_shared_cas_lock(roots)
-    report := CleanReport.empty()
+    ^report: CleanReport.empty()
     loop path in object_dirs {
         sealed: store_check_seal(verification, path, hangar)
         shared: store_share_tree_files_unlocked_with_report(verification, roots, path, false)
@@ -234,12 +234,12 @@ store_verify_hangar_object_unlocked: fn(verification: StoreVerification, roots: 
     if record.primary != entry.envelope.output_hash || record.action_key != store_entry_action_key(entry) || record.references != store_lifecycle_sorted_set(entry.references) {
         return Err(IngestError.Invalid("closure graph disagrees with record `{entry.id}`"))
     }
-    expected_outputs := entry.named_outputs
+    ^expected_outputs: entry.named_outputs
     expected_outputs["out"] = entry.envelope.output_hash
     if record.outputs != expected_outputs {
         return Err(IngestError.Invalid("closure graph output map disagrees with record `{entry.id}`"))
     }
-    names := expected_outputs.keys().to_list()
+    ^names: expected_outputs.keys().to_list()
     names.sort()
     loop name in names {
         expected: expected_outputs[name]

@@ -83,7 +83,7 @@ ModuleValuesProgram: struct {
 }
 
 module_values_program: fn(items: [Item], source: String, environment: [String:CtValue], generated: String) -> ModuleValuesProgram ComptimeEvalError! {
-    reads := [NamedCtValue]{}
+    ^reads: [NamedCtValue]{}
     loop (name, value) in environment -> reads.push(NamedCtValue{name: name, value: value})
     values: jet_config_module_values_program(items, source, reads) ?? return Err(err)
     Ok(ModuleValuesProgram{text: "{values}\n{generated}\n{ENVMODEL_ENVIRONMENT_SCHEMA}", generated_at: values.count_bytes() + 1})

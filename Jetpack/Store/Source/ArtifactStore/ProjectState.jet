@@ -97,7 +97,7 @@ StampTable: struct {
     priv changed: Bool,
 
     load: fn(workspace_root: String) -[FS]> StampTable Never! {
-        table := StampTable{entries: [String:ProjectStampedDigest]{}, changed: false}
+        ^table: StampTable{entries: [String:ProjectStampedDigest]{}, changed: false}
         bytes: files.read_bytes(files.join(store_project_state_dir(workspace_root), "stamps")) ?? return table
         reader: record_open_schema(bytes, STORE_PROJECT_STAMPS_SCHEMA).reader ?? return table
         entries: record_elements(reader, STORE_PROJECT_SECTION_ENTRIES).value ?? return table
@@ -141,9 +141,9 @@ StampTable: struct {
         if !self.changed {
             return
         }
-        paths := self.entries.keys().to_list()
+        ^paths: self.entries.keys().to_list()
         paths.sort()
-        entries := [RecordValue]{}
+        ^entries: [RecordValue]{}
         loop path in paths {
             entry: self.entries[path]
             entries.push(

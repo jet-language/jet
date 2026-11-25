@@ -39,8 +39,8 @@ gate_test_callback_borrow: fn(rows: [SemaGateModule], projected: GateLedger) Nev
     context: Shared{SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: inspection.gates}}
     seed: gate_test_entry(GateKind.TrustGrant, "seed", 0)
     tables: rows[0].program.tables
-    wrapped := SemaGateVisitor{source: "app.jet", tables: tables, ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
-    reference := SemaGateVisitor{source: "app.jet", tables: tables, ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
+    ^wrapped: SemaGateVisitor{source: "app.jet", tables: tables, ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
+    ^reference: SemaGateVisitor{source: "app.jet", tables: tables, ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
     loop item in rows[0].program.items {
         if item == .Func(function) {
             loop statement in function.body {
@@ -54,7 +54,7 @@ gate_test_callback_borrow: fn(rows: [SemaGateModule], projected: GateLedger) Nev
     loop index in 0..<reference.ledger.rows.len() {
         gate_test_require(gate_test_same_entry(wrapped.ledger.rows[index], reference.ledger.rows[index]), "callback walk and direct fixture projection collect identical ordered rows")
     }
-    matches := 0
+    ^matches: 0
     loop entry in projected.rows {
         if gate_test_same_entry(entry, wrapped.ledger.rows[1]) -> matches += 1
     }
@@ -62,40 +62,40 @@ gate_test_callback_borrow: fn(rows: [SemaGateModule], projected: GateLedger) Nev
 }
 
 run: fn() Never! {
-    ledger := GateLedger{}
+    ^ledger: GateLedger{}
     gate_ledger_push(ledger, gate_test_entry(GateKind.PrecisionDemotion, "a.jet", 1))
     gate_ledger_push(ledger, gate_test_entry(GateKind.Unsafe, "a.jet", 2))
     gate_ledger_sort(ledger)
     gate_test_require(ledger.rows[0].kind == GateKind.Unsafe, "security before knowledge")
-    first := gate_test_entry(GateKind.TrustGrant, "trust", 0)
+    ^first: gate_test_entry(GateKind.TrustGrant, "trust", 0)
     first.provenance = ["trust store"]
-    second := first
+    ^second: first
     second.provenance = ["lockfile"]
-    duplicate := GateLedger{}
+    ^duplicate: GateLedger{}
     gate_ledger_push(duplicate, first)
     gate_ledger_push(duplicate, second)
     gate_test_require(duplicate.rows.len() == 1 && duplicate.rows[0].provenance == ([String]{"lockfile", "trust store"}), "coalesced fact preserves both provenance rows")
-    external := gate_test_entry(GateKind.TrustGrant, "store", 0)
+    ^external: gate_test_entry(GateKind.TrustGrant, "store", 0)
     external.span = None
-    written := external
+    ^written: external
     written.source = "lock"
     written.reason = Val("verified publisher")
     gate_ledger_push(duplicate, external)
     gate_ledger_push(duplicate, written)
     gate_test_require(duplicate.rows.len() == 2 && duplicate.rows[1].reason == (Val("verified publisher")), "spanless writer coalescing and reason enrichment")
-    names := gate_test_names()
+    ^names: gate_test_names()
     names.facts.structure_facts.push(StructureFact{kind: StructureFactKind.Liveness, subject: "files", source: "app.jet", span: Span{start: 4, end: 9}, status: "unused", detail: "remove or rename to _files", gate: Val("_name")})
-    structure := GateLedger{}
+    ^structure: GateLedger{}
     sema_gate_append_structure(structure, names)
     gate_test_require(structure.rows.len() == 1 && structure.rows[0].kind == GateKind.Structure && structure.rows[0].reason == (Val("_name")), "structure facts use canonical ledger")
     parsed: parse_source("_helper: fn(_input: Int) {{\n_unused := approx(7)\n#Unsafe(\"live\") {{ value := pointer.* }}\n}}".bytes())
     gate_test_require(parsed.diagnostics.len() == 0, "source fixture parse")
     rows: [SemaGateModule]{SemaGateModule{source: "app.jet", program: parsed.program}}
     projected: sema_gate_ledger_collect(rows, gate_test_names(), GateSet{build_flag: true, session_flag: true}, [GateEntry]{}, sema_gate_checked_text_names([parsed.program]))
-    unsafe_count := 0
-    structure_count := 0
-    precision_count := 0
-    invocation_count := 0
+    ^unsafe_count: 0
+    ^structure_count: 0
+    ^precision_count: 0
+    ^invocation_count: 0
     loop entry in projected.rows {
         if entry.kind == {
             .Unsafe -> {
@@ -110,17 +110,17 @@ run: fn() Never! {
     }
     gate_test_require(unsafe_count == 1 && structure_count == 3 && precision_count == 1 && invocation_count == 2, "source and invocation rows")
     gate_test_callback_borrow(rows, projected)
-    refusal := rows
+    ^refusal: rows
     refusal[0].declarations = [PolicyDeclaration{key: PolicyKey.PrecisionDemotion, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 1}, target: None, source: "org.jet"}]
     diagnostics: sema_gate_policy_diagnostics(projected, refusal, 0)
     gate_test_require(diagnostics.len() == 1 && diagnostics[0].diagnostic.code == "E3415", "new gate kinds obey owning policy")
     host_parsed: parse_source("OS: #build.host.os\nTARGET: #build.target.os\nrun: fn() {{ print(#build.host.arch) }}\n".bytes())
     gate_test_require(host_parsed.diagnostics.len() == 0, "host fact fixture parse")
-    host_rows := [SemaGateModule]{SemaGateModule{source: "host.jet", program: host_parsed.program}}
+    ^host_rows: [SemaGateModule]{SemaGateModule{source: "host.jet", program: host_parsed.program}}
     host_ledger: sema_gate_ledger_collect(host_rows, gate_test_names(), GateSet{build_flag: false, session_flag: false}, [GateEntry]{}, sema_gate_checked_text_names([host_parsed.program]))
-    host_reads := 0
-    host_os := false
-    host_arch := false
+    ^host_reads: 0
+    ^host_os: false
+    ^host_arch: false
     loop entry in host_ledger.rows {
         if entry.kind != GateKind.HostFacts -> next
         host_reads += 1

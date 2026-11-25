@@ -38,13 +38,13 @@ Holder: struct {
 }
 
 squares: fn(n: Int) -> [Int] {
-    out := [Int]{}
+    ^out: [Int]{}
     loop i in 0..<n -> out.push(i * i)
     out
 }
 
 total: fn(values: [Int]) -> Int {
-    sum := 0
+    ^sum: 0
     loop value in values -> sum += value
     sum
 }
@@ -67,10 +67,10 @@ reader: fn(reuser: ^Reuser) -> fn() -> Int {
 
 // Fills the blocks the earlier blocks released with other values.
 scribble: fn(reuser: ^Reuser) -> Int {
-    filled := 0
+    ^filled: 0
     #Context(allocator: reuser) {
         loop round in 0..<40 {
-            junk := [Int]{}
+            ^junk: [Int]{}
             loop i in 0..<64 -> junk.push(-1 - round - i)
             filled += junk.len()
         }
@@ -80,13 +80,13 @@ scribble: fn(reuser: ^Reuser) -> Int {
 
 run: fn() {
     region: mem.Region.reserve(1 << 22) ?? panic("reserve")
-    reuser := Reuser{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    ^reuser: Reuser{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
     {sender, receiver}: channel<[Int]>(capacity: 1)
-    local := [Int]{}
-    holder := Holder{items: [Int]{}}
-    lists := [[Int]]{}
-    table := [String:[Int]]{}
-    task_sum := 0
+    ^local: [Int]{}
+    ^holder: Holder{items: [Int]{}}
+    ^lists: [[Int]]{}
+    ^table: [String:[Int]]{}
+    ^task_sum: 0
     broken: loop round in 0..<3 {
         #Context(allocator: reuser) {
             built: squares(30)
@@ -102,7 +102,7 @@ run: fn() {
         table["squares"] = squares(30)
         sender.send(squares(30))
         task.group workers {
-            built := squares(30)
+            ^built: squares(30)
             worker: task ^^built { total(built) }
             task_sum = worker.join() ?? panic("worker failed")
         }

@@ -7,15 +7,15 @@ use {
 // Boundary and allowlist rules are exact; this is not a blanket source grep.
 s6_ratchet_contains_word: fn(text: String, word: String) -> Bool {
     bytes: text.bytes()
-    offset := 0
+    ^offset: 0
     loop {
         rest: policy_slice_bytes(text, offset, bytes.len())
         found: s6_ratchet_text.find(rest, word)
         if found < 0 -> return false
         start: offset + found
         end: start + word.bytes().len()
-        before := false
-        after := false
+        ^before: false
+        ^after: false
         if start > 0 -> before = s3_truth_ascii_word_byte(bytes[start - 1])
         if end < bytes.len() -> after = s3_truth_ascii_word_byte(bytes[end])
         if !before && !after -> return true
@@ -111,7 +111,7 @@ s6_ratchet_unrelated: fn(path: String, line: String) -> Bool {
 }
 
 s6_ratchet_hits: fn(line: String) -> [String] {
-    hits := [String]{}
+    ^hits: [String]{}
     words: [String]{s6_ratchet_concat("Abil", "ity"), s6_ratchet_concat("Abil", "ities"), s6_ratchet_concat("Capabil", "ity"), s6_ratchet_concat("Cap", "s")}
     loop word in words {
         if s6_ratchet_contains_word(line, word) -> hits.push(word)
@@ -132,7 +132,7 @@ s6_ratchet_authority_scan: fn(directory: String, relative: String, offenders: ^[
     loop entry in entries {
         kind: s6_ratchet_files.stat(entry.path) ?? next
         if kind.is_symlink -> next
-        path := entry.name.copy()
+        ^path: entry.name.copy()
         if relative != "" -> path = "{relative}/{entry.name}"
         if kind.is_dir {
             if entry.name.starts_with(".") || entry.name.starts_with("target") || entry.name == "build" || entry.name == "node_modules" {
@@ -142,7 +142,7 @@ s6_ratchet_authority_scan: fn(directory: String, relative: String, offenders: ^[
         } else {
             if path.starts_with("Tools/Tower/") -> next
             content: s6_ratchet_files.read(entry.path) ?? next
-            number := 0
+            ^number: 0
             loop raw in content.lines() {
                 number += 1
                 line: raw.copy()
@@ -157,7 +157,7 @@ s6_ratchet_authority_scan: fn(directory: String, relative: String, offenders: ^[
 }
 
 s6_ratchet_authority_vocabulary: fn() {
-    offenders := [String]{}
+    ^offenders: [String]{}
     s6_ratchet_authority_scan(".", "", offenders)
     assert(offenders.len() == 0, "retired authority vocabulary escaped its fixture/history boundary: {offenders}")
 }

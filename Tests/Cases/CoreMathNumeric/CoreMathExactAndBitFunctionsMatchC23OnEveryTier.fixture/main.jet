@@ -75,7 +75,7 @@ hex_value: fn(b: U8) -> Int {
 // None for "----------------".
 word_at: fn(raw: [U8], at: Int) -> Int? {
     if raw[at] == (U8{45}) -> return None
-    n := 0
+    ^n: 0
     loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
     if n > 9223372036854775807 -> n -= 18446744073709551616
     Val(n)
@@ -84,8 +84,8 @@ word_at: fn(raw: [U8], at: Int) -> Int? {
 hex_word: fn(word: Int?) -> String {
     known: word ?? return "----------------"
     digits: "0123456789abcdef".bytes()
-    n := if known < 0 -> known + 18446744073709551616 else -> known
-    out := [U8]{}
+    ^n: if known < 0 -> known + 18446744073709551616 else -> known
+    ^out: [U8]{}
     loop _ in 0..<16 {
         out.push(digits[n %% 16])
         n = n /% 16
@@ -152,9 +152,9 @@ exact_nan: fn(name: String) -> Bool {
 
 check: fn(name: String, corpus: String) {
     raw: corpus.bytes()
-    at := 0
-    rows := 0
-    wrong := 0
+    ^at: 0
+    ^rows: 0
+    ^wrong: 0
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
             loop raw[at] != (U8{10}) -> at += 1
@@ -162,21 +162,21 @@ check: fn(name: String, corpus: String) {
             next
         }
         // The row's words: its arguments, then the result.
-        row := [Int?]{}
+        ^row: [Int?]{}
         loop {
             row.push(word_at(raw, at))
             at += 17
             if raw[at - 1] == (U8{10}) -> break
         }
         want: row[row.len() - 1]
-        words := [Int]{}
+        ^words: [Int]{}
         loop i in 0..<(row.len() - 1) -> words.push(row[i] ?? panic("an argument word is none"))
         got: value(name, words)
         rows += 1
         if got != want && (exact_nan(name) || !(is_nan_word(got) && is_nan_word(want))) {
             wrong += 1
             if wrong <= 3 {
-                shown := [String]{}
+                ^shown: [String]{}
                 loop word in words -> shown.push(hex_word(Val(word)))
                 print("{name}({shown.join(", ")}) = {hex_word(got)}, C23 {hex_word(want)}")
             }

@@ -13,9 +13,9 @@ use {
 worker: fn() {}
 
 run: fn() {
-    temp := testing.temp_dir("service-workflow-outcome")
+    ^temp: testing.temp_dir("service-workflow-outcome")
     path: Path.from(temp).join("workflow.log").to_string()
-    tree := service.tree("checkout")
+    ^tree: service.tree("checkout")
     store: service.state_store(path) ?? panic("state store")
     tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
     _endpoint: tree.worker("activities", worker, capacity: 1) ?? panic("worker")

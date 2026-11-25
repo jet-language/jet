@@ -46,8 +46,8 @@ jet_cli_fix_pin_failures: fn(file: String, before: String, color: Bool) -> JetCL
 }
 
 jet_cli_pin_facts: fn(modules: [JetDriverDocModule], entry: String) -> JetCLIPinFacts {
-    facts := JetCLIPinFacts{carriers: [String:TFailureCarrier]{}, minted: [String:EnumDef]{}}
-    identities := [String:String]{}
+    ^facts: JetCLIPinFacts{carriers: [String:TFailureCarrier]{}, minted: [String:EnumDef]{}}
+    ^identities: [String:String]{}
     loop doc_module in modules -> identities[doc_module.module_identity] = ""
     loop doc_module in modules {
         if jet_cli_sem_normalize(doc_module.physical_path) != entry -> next
@@ -73,7 +73,7 @@ jet_cli_pin_apply: fn(before: String, facts: JetCLIPinFacts) -> JetCLIFixApply? 
     tokens: lex(before.bytes()).tokens
     // The types the file declares; a minted enum is written only when the
     // file has no declaration of that name.
-    declared := [String:Bool]{}
+    ^declared: [String:Bool]{}
     loop item in parsed.program.items {
         if item == {
             .Struct(value) -> { declared[value.name] = true }
@@ -81,9 +81,9 @@ jet_cli_pin_apply: fn(before: String, facts: JetCLIPinFacts) -> JetCLIFixApply? 
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    edits := [TextEdit]{}
+    ^edits: [TextEdit]{}
     // The enums written after a declaration, one insertion per declaration.
-    tails := [TextEdit]{}
+    ^tails: [TextEdit]{}
     loop item in parsed.program.items {
         if item == {
             .Func(function) -> {
@@ -177,8 +177,8 @@ jet_cli_pin_mint: fn(name: String, end: Int, facts: JetCLIPinFacts, declared: ^[
 // Where `function`'s body opens: the first `{` after its parameter list
 // outside parentheses and brackets, or -1.
 jet_cli_pin_body_open: fn(tokens: [Token], function: Func) -> Int Never! {
-    depth := 0
-    closed := false
+    ^depth: 0
+    ^closed: false
     loop token in tokens {
         if token.span.start < function.name_span.end || !jet_cli_fix_meaningful(token) -> next
         if token.span.start >= function.span.end -> return -1
@@ -196,14 +196,14 @@ jet_cli_pin_body_open: fn(tokens: [Token], function: Func) -> Int Never! {
 
 // `error` as a written contract: `Never!`, `ParseError!`, `(ParseError | Err)!`.
 jet_cli_pin_contract_text: fn(error: Type) -> String {
-    formatter := jfmt_new(ast_program(), "", [Token]{}, false)
+    ^formatter: jfmt_new(ast_program(), "", [Token]{}, false)
     jfmt_fmt_error_contract(formatter, error)
     jfmt_out_text(formatter)
 }
 
 // A minted enum as its declaration: `#Error`, then one case per line.
 jet_cli_pin_enum_text: fn(definition: EnumDef) -> String {
-    text := "#Error\n{definition.name}: enum {{\n"
+    ^text: "#Error\n{definition.name}: enum {{\n"
     loop variant in definition.variants {
         text = "{text}    {variant.name}{jet_cli_pin_payload_text(variant.payload)},\n"
     }
@@ -222,7 +222,7 @@ jet_cli_pin_payload_text: fn(payload: VariantPayload) -> String {
 }
 
 jet_cli_pin_type_text: fn(ty: Type) -> String {
-    formatter := jfmt_new(ast_program(), "", [Token]{}, false)
+    ^formatter: jfmt_new(ast_program(), "", [Token]{}, false)
     jfmt_fmt_type(formatter, type_unqualified_nominals(ty))
     jfmt_out_text(formatter)
 }

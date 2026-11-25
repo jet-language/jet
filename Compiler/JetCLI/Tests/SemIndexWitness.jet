@@ -13,14 +13,14 @@ semindex_test_search: fn(function: String, effect_name: String, summaries: [SemS
     if path.contains(function) -> return None
     summary: semindex_summary(summaries, function) ?? return None
     if summary.direct.contains(effect_name) {
-        spans := [Span]{}
+        ^spans: [Span]{}
         loop (position, name) in summary.direct {
             if name == effect_name -> spans.push(summary.direct_spans[position])
         }
         return Val(SemWitness{path: [String]{function}, spans: spans})
     }
     if summary.maximal {
-        spans := [Span]{}
+        ^spans: [Span]{}
         if summary.maximal_span == .Val(span) -> spans.push(span)
         return Val(SemWitness{path: [String]{function}, spans: spans})
     }
@@ -32,15 +32,17 @@ semindex_test_search: fn(function: String, effect_name: String, summaries: [SemS
         callee_summary: semindex_summary(summaries, callee) ?? next
         if !callee_summary.solved.contains(effect_name) -> next
         found: semindex_test_search(callee, effect_name, summaries, path) ?? next
-        _ := path.pop()
-        walk := [String]{function}
+        ^_: path.pop()
+        ^walk: [String]{function}
         loop part in found.path -> walk.push(part)
         return Val(SemWitness{path: walk, spans: found.spans})
     }
-    _ := path.pop()
+    ^_: path.pop()
     loop call in summary.boundary_calls {
         loop bound in call.row {
-            if authority_covers(bound, effect_name) -> return Val(SemWitness{path: [String]{function, "{call.callee}"}, spans: [Span]{call.span}})
+            if authority_covers(bound, effect_name) {
+                return Val(SemWitness{path: [String]{function, "{call.callee}"}, spans: [Span]{call.span}})
+            }
         }
     }
     None
@@ -79,29 +81,29 @@ semindex_test_effect: fn(code: Int) -> String Never! {
 // over callees whose row does not name the effect. Effects are codes for
 // semindex_test_effect until the summaries are built.
 semindex_test_graph: fn(seed: Int, count: Int) -> [SemSummary] Never! {
-    random := SemTestRandom{state: seed}
-    callees := [[Int]]{}
-    owns := [Int]{}
-    panics := [Bool]{}
-    bounds := [Int]{}
-    wholes := [Bool]{}
-    drops := [Bool]{}
-    solved := [[Int]]{}
+    ^random: SemTestRandom{state: seed}
+    ^callees: [[Int]]{}
+    ^owns: [Int]{}
+    ^panics: [Bool]{}
+    ^bounds: [Int]{}
+    ^wholes: [Bool]{}
+    ^drops: [Bool]{}
+    ^solved: [[Int]]{}
     loop _ in 0..<count {
-        rows := [Int]{}
+        ^rows: [Int]{}
         loop _ in 0..<semindex_test_next(random, 4) {
             callee: semindex_test_next(random, count)
             if !rows.contains(callee) -> rows.push(callee)
         }
-        reached := [Int]{}
-        own := -1
+        ^reached: [Int]{}
+        ^own: -1
         if semindex_test_next(random, 4) == 0 {
             own = semindex_test_next(random, 2)
             reached.push(own)
         }
         panic_edge: semindex_test_next(random, 6) == 0
         if panic_edge && !reached.contains(2) -> reached.push(2)
-        bound := -1
+        ^bound: -1
         if semindex_test_next(random, 5) == 0 {
             bound = semindex_test_next(random, 2)
             if !reached.contains(bound) -> reached.push(bound)
@@ -120,7 +122,7 @@ semindex_test_graph: fn(seed: Int, count: Int) -> [SemSummary] Never! {
         drops.push(semindex_test_next(random, 6) == 0)
         solved.push(reached)
     }
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop node in 0..<count {
@@ -133,21 +135,23 @@ semindex_test_graph: fn(seed: Int, count: Int) -> [SemSummary] Never! {
             }
         }
     }
-    summaries := [SemSummary]{}
+    ^summaries: [SemSummary]{}
     loop node in 0..<count {
-        edges := [String]{}
+        ^edges: [String]{}
         loop callee in callees[node] -> edges.push("m.f{callee}")
         if panics[node] -> edges.push("__jet_panic__")
-        direct := [String]{}
+        ^direct: [String]{}
         if owns[node] >= 0 -> direct.push(semindex_test_effect(owns[node]))
-        row := [String]{}
+        ^row: [String]{}
         loop (position, code) in solved[node] {
             if drops[node] && position == solved[node].len() - 1 -> next
             row.push(semindex_test_effect(code))
         }
-        summary := semindex_test_summary("f{node}", direct, edges, row)
+        ^summary: semindex_test_summary("f{node}", direct, edges, row)
         summary.maximal = wholes[node]
-        if wholes[node] -> summary.maximal_span = Val(Span{start: node * 10 + 5, end: node * 10 + 6})
+        if wholes[node] {
+            summary.maximal_span = Val(Span{start: node * 10 + 5, end: node * 10 + 6})
+        }
         if bounds[node] >= 0 {
             summary.boundary_calls.push(SemBoundaryCall{callee: "core.io.call{node}", row: [String]{semindex_test_effect(bounds[node])}, span: Span{start: node * 10 + 7, end: node * 10 + 8}})
         }
@@ -163,7 +167,7 @@ semindex_test_same: fn(summaries: [SemSummary], label: String) Never! {
     witnesses: semindex_witnesses(summaries, [JetDriverDocModule]{})
     loop summary in summaries {
         loop effect_name in effect_names {
-            path := [String]{}
+            ^path: [String]{}
             expected: semindex_test_text(semindex_test_search(summary.key, effect_name, summaries, path))
             actual: semindex_test_text(semindex_witness(witnesses, summaries, summary.key, effect_name))
             assert(actual == expected, "{label}: {summary.key} {effect_name}: {actual}, the per-path search finds {expected}")
@@ -183,9 +187,7 @@ semindex_test_same: fn(summaries: [SemSummary], label: String) Never! {
     assert(semindex_test_text(semindex_witness(witnesses, cycle, "m.f0", "IO")) == "m.f0 > m.f2 [2-4]", "f0 skips the callee that only leads back to it")
     assert(semindex_test_text(semindex_witness(witnesses, cycle, "m.f1", "IO")) == "m.f1 > m.f0 > m.f2 [2-4]", "f1 reaches IO through f0")
     semindex_test_same(cycle, "cycle")
-    loop seed in 1..<200 {
-        semindex_test_same(semindex_test_graph(seed, 9), "seed {seed}")
-    }
+    loop seed in 1..<200 { semindex_test_same(semindex_test_graph(seed, 9), "seed {seed}") }
 }
 
 #Test("semindex effects carry the one-pass witnesses") {
@@ -194,7 +196,7 @@ semindex_test_same: fn(summaries: [SemSummary], label: String) Never! {
     loop effect in effects {
         summary: semindex_summary(summaries, effect.function) ?? panic("{effect.function} has no summary")
         loop entry in effect.provenance {
-            path := [String]{}
+            ^path: [String]{}
             expected: semindex_test_search(summary.key, entry.effect_name, summaries, path) ?? panic("{summary.key} {entry.effect_name} has no witness")
             assert(entry.call_path == expected.path, "{summary.key} {entry.effect_name}: {entry.call_path.join(" > ")}, the per-path search finds {expected.path.join(" > ")}")
         }

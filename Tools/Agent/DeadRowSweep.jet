@@ -50,11 +50,13 @@ sweep_fail: fn(message: String) -> DeadRowSweepError Never! {
 // The Jet sources that may call Core: tracked `.jet` and `.case` files under
 // CALLER_ROOTS, less NOT_CALLERS.
 caller_sources: fn() -[Exec, IO, Time.Wait]> [String] DeadRowSweepError! {
-    argv := [String]{"git", "ls-files", "--"}
+    ^argv: [String]{"git", "ls-files", "--"}
     loop root in CALLER_ROOTS -> argv.push(root.copy())
     receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(sweep_fail("cannot run git ls-files: {err}"))
-    if receipt.code != 0 -> return Err(sweep_fail("git ls-files failed ({receipt.code}): {receipt.errors}"))
-    paths := [String]{}
+    if receipt.code != 0 {
+        return Err(sweep_fail("git ls-files failed ({receipt.code}): {receipt.errors}"))
+    }
+    ^paths: [String]{}
     loop path in receipt.output.split("\n") {
         if !path.ends_with(".jet") && !path.ends_with(".case") -> next
         if NOT_CALLERS.contains(path) -> next
@@ -65,7 +67,7 @@ caller_sources: fn() -[Exec, IO, Time.Wait]> [String] DeadRowSweepError! {
 
 // The member a line declares (`name: fn`, `pub name: fn`), or "".
 declared_member: fn(line: String) -> String Never! {
-    text := line.trim_start()
+    ^text: line.trim_start()
     if text.starts_with("pub ") -> text = text.remove_prefix("pub ")
     if text.starts_with("priv ") -> text = text.remove_prefix("priv ")
     if text.split_once(": fn") == .Val(parts) {
@@ -82,15 +84,19 @@ member_calls: fn(source: String, candidates: [String:Bool], calls: ^[String:Int]
     loop word in WORD.find_all(source) {
         if candidates.get(word) != None -> calls[word] = (calls.get(word) ?? 0) + 1
     }
-    if !source.contains(": fn") -> return
-    marked := false
+    if !source.contains(": fn") {
+        return
+    }
+    ^marked: false
     loop line in source.split("\n") {
         if !line.contains(": fn") {
             marked = line.trim_start().starts_with("#")
             next
         }
         declared: declared_member(line)
-        if !marked && candidates.get(declared) != None -> calls[declared] = (calls.get(declared) ?? 1) - 1
+        if !marked && candidates.get(declared) != None {
+            calls[declared] = (calls.get(declared) ?? 1) - 1
+        }
         marked = false
     }
 }
@@ -110,7 +116,7 @@ derived_prefixes: fn(source: String, prefixes: ^[String:Bool]) Never! {
         before: Int{bytes[index - 1]}
         after: if index + 1 < bytes.len() -> Int{bytes[index + 1]} else -> 0
         if at != 123 || before != 95 || after == 123 -> next
-        start := index - 1
+        ^start: index - 1
         loop start > 0 && name_byte(Int{bytes[start - 1]}) -> start -= 1
         if start == 0 -> next
         quote: Int{bytes[start - 1]}
@@ -138,7 +144,7 @@ TableMember: struct {
 
 // The `module member` rows of Core.rows's dispatcher table.
 dispatcher_members: fn(text: String) -> [TableMember] Never! {
-    members := [TableMember]{}
+    ^members: [TableMember]{}
     loop (index, line) in text.split("\n").to_list() {
         if !line.starts_with("dispatcher_row ") -> next
         fields: line.split(" ").to_list()
@@ -151,16 +157,16 @@ dispatcher_members: fn(text: String) -> [TableMember] Never! {
 // The dead members of `members` as `module member` pairs: those no caller
 // source names and no compiler source derives.
 dead_members: fn(members: [TableMember]) -[Exec, FS, IO, Time.Wait]> [String:Bool] DeadRowSweepError! {
-    candidates := [String:Bool]{}
+    ^candidates: [String:Bool]{}
     loop member in members -> candidates[member.member.copy()] = true
-    calls := [String:Int]{}
-    prefixes := [String:Bool]{}
+    ^calls: [String:Int]{}
+    ^prefixes: [String:Bool]{}
     loop path in caller_sources() ?? return Err(err) {
         source: files.read(path) ?? next
         member_calls(source, candidates, calls)
         if path.starts_with(DERIVING_ROOT) -> derived_prefixes(source, prefixes)
     }
-    dead := [String:Bool]{}
+    ^dead: [String:Bool]{}
     loop member in members {
         if (calls.get(member.member) ?? 0) > 0 || derived_member(member.member, prefixes) -> next
         dead["{member.module_name} {member.member}"] = true
@@ -173,11 +179,13 @@ dead_members: fn(members: [TableMember]) -[Exec, FS, IO, Time.Wait]> [String:Boo
 without_dead: fn(line: String, opening: String, module_name: String, dead: [String:Bool]) -> String Never! {
     after: line.split_once(opening) ?? return line.copy()
     inside: after.after.split_once("}}") ?? return line.copy()
-    kept := [String]{}
-    removed := false
+    ^kept: [String]{}
+    ^removed: false
     loop name in inside.before.split(",") {
         if name.trim() == "" -> next
-        if dead.get("{module_name} {name.trim()}") == None -> kept.push(name.trim()) else -> removed = true
+        if dead.get("{module_name} {name.trim()}") == None -> kept.push(name.trim()) else {
+            removed = true
+        }
     }
     if !removed -> return line.copy()
     if kept.len() == 0 -> return "{after.before}{opening} }}{inside.after}"
@@ -187,10 +195,12 @@ without_dead: fn(line: String, opening: String, module_name: String, dead: [Stri
 // Core.rows without the dead members' dispatcher rows and their names in
 // their modules' `exports` and `owns` lists.
 sweep_core_rows: fn(text: String, dead: [String:Bool]) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in text.split("\n") {
         fields: line.split(" ").to_list()
-        if fields.len() > 3 && fields[0] == "dispatcher_row" && dead.get("{fields[2]} {fields[3]}") != None -> next
+        if fields.len() > 3 && fields[0] == "dispatcher_row" && dead.get("{fields[2]} {fields[3]}") != None {
+            next
+        }
         if fields.len() > 1 && fields[0] == "module" {
             out.push(without_dead(line, "exports {{", fields[1], dead))
             next
@@ -221,7 +231,7 @@ dead_row_sweep_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> String DeadR
     dead: dead_members(members) ?? return Err(err)
     if dead.len() == 0 -> return Ok("dead row sweep: no dead rows")
     if mode == "--check" {
-        count := 0
+        ^count: 0
         loop member in members {
             if dead.get("{member.module_name} {member.member}") != None {
                 print("{member.place}: {member.module_name} {member.member}")
@@ -251,11 +261,11 @@ run: fn() {
 }
 
 #Test("a member's declaration is no call, unless a marker names it") {
-    candidates := [String:Bool]{}
+    ^candidates: [String:Bool]{}
     candidates["spare"] = true
     candidates["kept"] = true
     candidates["role"] = true
-    calls := [String:Int]{}
+    ^calls: [String:Int]{}
     member_calls("pub spare: fn() {{ kept() }}\npriv kept: fn() {{}}\n#Builtin.Role(.Copy)\nrole: fn() {{}}\n", candidates, calls)
     assert_eq(calls.get("spare") ?? 0, 0)
     assert_eq(calls.get("kept") ?? 0, 1)
@@ -263,7 +273,7 @@ run: fn() {
 }
 
 #Test("a literal that opens with a prefix and an interpolation derives the members under it") {
-    prefixes := [String:Bool]{}
+    ^prefixes: [String:Bool]{}
     derived_prefixes("leaf: core_call(m, \"process_spec_{{leaf}}\")\nx: \"__{{id}}\"\ny: \"text a_{{b}}\"\nz: \"kept_{{{{brace\"\n", prefixes)
     assert_eq(prefixes.len(), 1)
     assert(derived_member("process_spec_env", prefixes))
@@ -272,7 +282,7 @@ run: fn() {
 }
 
 #Test("a dead member leaves its dispatcher row, its export and its ownership") {
-    dead := [String:Bool]{}
+    ^dead: [String:Bool]{}
     dead["core.x gone"] = true
     rows: "module core.x exports {{ Kept, gone, kept }} depends_on []\nsource_module core.x path Core/X.jet alias x owns {{ gone }} types {{ Kept }}\ndispatcher_row plain core.x gone | CoreCallRecord.new(\"core.x\", \"gone\", \"jet_gone\", true, &[false])\ndispatcher_row plain core.x kept | CoreCallRecord.new(\"core.x\", \"kept\", \"jet_kept\", true, &[false])\n"
     assert_eq(sweep_core_rows(rows, dead), "module core.x exports {{ Kept, kept }} depends_on []\nsource_module core.x path Core/X.jet alias x owns {{ }} types {{ Kept }}\ndispatcher_row plain core.x kept | CoreCallRecord.new(\"core.x\", \"kept\", \"jet_kept\", true, &[false])\n")

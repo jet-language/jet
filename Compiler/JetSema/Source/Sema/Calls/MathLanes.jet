@@ -37,7 +37,7 @@ sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [C
             if (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && cases.contains(variant) {
                 return false
             }
-            spelled := loop case_name in cases -> "`.{case_name}`"
+            ^spelled: loop case_name in cases -> "`.{case_name}`"
             last: spelled.pop() ?? ""
             menu: if spelled.len() == 0 -> last else -> "{spelled.join(", ")}, or {last}"
             diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts {menu}", "use a Core `ReduceOp` value"))

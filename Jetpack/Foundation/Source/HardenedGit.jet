@@ -89,8 +89,8 @@ FoundationHardenedGitPolicy: struct {
     // The captured `git` process specification of this policy. Environment
     // keys are applied in byte order (a `BTreeMap` walk).
     spec: fn(self) -[Exec]> ProcessSpec Never! {
-        spec := process.cmd([String]{"git"}).cwd(self.cwd)
-        keys := self.env.keys().to_list()
+        ^spec: process.cmd([String]{"git"}).cwd(self.cwd)
+        ^keys: self.env.keys().to_list()
         keys.sort()
         loop key in keys -> spec = spec.env(key, self.env[key])
         loop variable in self.removed_env -> spec = spec.env_remove(variable)

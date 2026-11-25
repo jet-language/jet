@@ -19,8 +19,8 @@ run: fn() {
         "1024" -> 1024
         else -> panic("gen.jet takes one arm count: 256 or 1024")
     }
-    table := [String]{}
-    chain := [String]{}
+    ^table: [String]{}
+    ^chain: [String]{}
     loop k in 0..<count {
         table.push("        {k} -> {(7 * k) % 13}\n")
         chain.push("if n == {k} {{\n        out = {(7 * k) % 13}\n    }} else ")
@@ -30,8 +30,8 @@ run: fn() {
     limit: count + 76
     source: "classify: fn(n: Int) -> Int {{\n    if n == {{\n{arms}        else -> -1\n    }}\n}}\n\nclassify_chain: fn(n: Int) -> Int {{\n    out := 0\n    {links}{{\n        out = -1\n    }}\n    out\n}}\n\nrun: fn() {{\n    table := 0\n    chain := 0\n    loop i in 0..<{limit} {{\n        table += classify(i)\n        chain += classify_chain(i)\n    }}\n    print(\"{{table}}\")\n    print(\"{{chain}}\")\n}}\n"
     files.write("table.jet", source) ?? panic("gen.jet: write table.jet: {err}")
-    opens := [String]{}
-    closes := [String]{}
+    ^opens: [String]{}
+    ^closes: [String]{}
     loop _ in 0..<300 {
         opens.push("if n == 0 {{\n")
         closes.push("}} else if n == 1 {{\n        out = 2\n    }}\n")

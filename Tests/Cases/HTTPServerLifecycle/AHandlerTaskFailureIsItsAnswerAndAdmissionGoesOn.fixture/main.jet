@@ -21,7 +21,7 @@ crlf: fn() -> String { "\r\n" }
 query: fn(addr: String, path: String) -> String {
     client: net.tcp_connect(addr) ?? return "connect failed"
     client.write_bytes("GET {path} HTTP/1.1{crlf()}Host: local{crlf()}Connection: close{crlf()}{crlf()}".bytes()) ?? return "write failed"
-    parts := [String]{}
+    ^parts: [String]{}
     loop {
         part: client.read(8192) ?? break
         if part == "" -> break

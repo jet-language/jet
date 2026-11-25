@@ -14,7 +14,7 @@ use {
 }
 
 pkg_integration_nix_repeat: fn(value: String, count: Int) -> String {
-    result := ""
+    ^result: ""
     loop _ in 0..<count -> result = "{result}{value}"
     result
 }
@@ -63,8 +63,8 @@ pkg_integration_nix_envelope: fn(output: String, platform: String) -> LockEnvelo
     assert(!files.exists(files.join(scratch.path, ".jet/lock")), "rejected identity must not publish a project lock")
     pkg_lock_record_nix_realization(scratch.path, "pkg", "1.0.0", "pkg@jetpack", output, closure, pkg_integration_nix_envelope(output, platform)) ?? panic("record")
     path: files.join(scratch.path, ".jet/lock")
-    lock := pkg_lock_parse(files.read(path) ?? panic("read")) ?? panic("parse")
-    envelope := lock.packages[0].envelope ?? panic("envelope")
+    ^lock: pkg_lock_parse(files.read(path) ?? panic("read")) ?? panic("parse")
+    ^envelope: lock.packages[0].envelope ?? panic("envelope")
     // Original deliberately writes aarch64-linux even on an aarch64 host.
     envelope.platform = "aarch64-linux"
     lock.packages[0].envelope = Val(envelope)
@@ -78,11 +78,11 @@ pkg_integration_nix_envelope: fn(output: String, platform: String) -> LockEnvelo
 #Test("nix_lock_receipt_follows_complete_closure_identity") {
     scratch: files.temp_dir("nix-lock-identity") ?? panic("scratch")
     output: pkg_integration_nix_digest("2")
-    closure := pkg_integration_nix_closure(output)
+    ^closure: pkg_integration_nix_closure(output)
     envelope: pkg_integration_nix_envelope(output, "x86_64-linux")
     pkg_lock_record_nix_realization(scratch.path, "pkg", "1.0.0", "pkg@jetpack", output, closure, envelope) ?? panic("record")
     path: files.join(scratch.path, ".jet/lock")
-    lock := pkg_lock_parse(files.read(path) ?? panic("read")) ?? panic("parse")
+    ^lock: pkg_lock_parse(files.read(path) ?? panic("read")) ?? panic("parse")
     receipt: pkg_integration_nix_digest("9")
     lock.packages[0].receipt = Val(receipt)
     files.write(path, pkg_lock_write(lock)) ?? panic("write")

@@ -19,9 +19,9 @@ jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTrace
     cut: jettrace_unsigned(fields[jettrace_get(fields, "cut")].value, "{label}.cut")
     _: jettrace_unsigned(fields[jettrace_get(fields, "samples")].value, "{label}.samples")
     functions: jettrace_array(fields[jettrace_get(fields, "functions")].value, "{label}.functions")
-    held := U64{0}
-    held_kept := U64{0}
-    held_cut := U64{0}
+    ^held: U64{0}
+    ^held_kept: U64{0}
+    ^held_cut: U64{0}
     loop index in 0..<functions.len() {
         at: "{label}.functions[{index}]"
         item: jettrace_object_keys(functions[index], at, [String]{"address", "code", "cut", "events", "file", "inlined", "instructions", "level", "lines", "names", "samples", "size", "symbol"})
@@ -34,7 +34,9 @@ jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTrace
         code: jettrace_text(item[jettrace_get(item, "code")].value, "{at}.code")
         if {
             jettrace_bool(item[jettrace_get(item, "cut")].value, "{at}.cut") -> {
-                if code.len() != 0 -> return Err(jettrace_error("{at}.code is kept for a cut function"))
+                if code.len() != 0 {
+                    return Err(jettrace_error("{at}.code is kept for a cut function"))
+                }
                 held_cut += U64{1}
             }
             else -> {
@@ -50,7 +52,7 @@ jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTrace
         events: jettrace_counts(item[jettrace_get(item, "events")].value, "{at}.events", counters.len())
         samples: jettrace_unsigned(item[jettrace_get(item, "samples")].value, "{at}.samples")
         lines: jettrace_array(item[jettrace_get(item, "lines")].value, "{at}.lines")
-        after := U64{0}
+        ^after: U64{0}
         loop row in 0..<lines.len() {
             place: "{at}.lines[{row}]"
             line: jettrace_object_keys(lines[row], place, [String]{"line", "offset"})
@@ -83,8 +85,8 @@ jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTrace
             }
         }
         rows: jettrace_array(item[jettrace_get(item, "instructions")].value, "{at}.instructions")
-        sum := U64{0}
-        sums := [U64]{}
+        ^sum: U64{0}
+        ^sums: [U64]{}
         loop _ in 0..<counters.len() -> sums.push(U64{0})
         loop row in 0..<rows.len() {
             place: "{at}.instructions[{row}]"
@@ -117,7 +119,7 @@ jettrace_counts: fn(value: CanonicalJSON, label: String, width: Int) -> [U64] Je
     if items.len() != width {
         return Err(jettrace_error("{label} does not hold one count per counter"))
     }
-    counts := [U64]{}
+    ^counts: [U64]{}
     loop index in 0..<width -> counts.push(jettrace_unsigned(items[index], "{label}[{index}]"))
     Ok(counts)
 }

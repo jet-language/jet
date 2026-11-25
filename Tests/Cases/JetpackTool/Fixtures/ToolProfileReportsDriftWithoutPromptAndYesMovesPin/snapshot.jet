@@ -12,19 +12,19 @@ use {
 
 visit: fn(root: String, path: String) {
     info: files.stat(path.copy()) ?? panic("stat {path}: {err}")
-    kind := 4
+    ^kind: 4
     if info.is_symlink -> kind = 3 else if info.is_dir -> kind = 1 else if info.is_file -> kind = 2
-    mode := info.mode
+    ^mode: info.mode
     if sys.family() != "unix" {
         mode = 0
         if info.readonly -> mode = 1
     }
-    bytes := ""
+    ^bytes: ""
     if info.is_file {
         bytes = hex.encode(files.read_bytes(path.copy()) ?? panic("read {path}: {err}"))
     }
     // Hex is injective over bytes; JSON quoting is injective over relative paths.
-    relative := ""
+    ^relative: ""
     if path != root -> relative = files.relative(path.copy(), root.copy())
     shown: json.to_string(Dyn.Text(relative))
     modified: info.modified.to_unix_ns() ?? panic("mtime outside Unix nanosecond range")
@@ -33,7 +33,7 @@ visit: fn(root: String, path: String) {
         return
     }
     entries: files.list_dir(path.copy()) ?? panic("list {path}: {err}")
-    children := [String]{}
+    ^children: [String]{}
     loop entry in entries -> children.push(entry.path)
     children.sort()
     loop child in children -> visit(root.copy(), child)

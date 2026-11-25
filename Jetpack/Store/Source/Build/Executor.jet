@@ -135,11 +135,11 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
     }
     probes: build_execute_probes(plan, selected_probes)
     model: plan.execution_model() ?? return Err(BuildExecutionError.InvalidGraph(err))
-    outcomes := [BuildActionOutcomeRow]{}
+    ^outcomes: [BuildActionOutcomeRow]{}
     loop stage in model.stages {
         loop batch in build_execution_batches(plan, stage.actions) {
             results: build_execute_actions(plan, batch, project_root, artifact_store, grants, probes, batch.len(), None, None)
-            completed := [BuildActionOutcomeRow]{}
+            ^completed: [BuildActionOutcomeRow]{}
             loop index in 0..<batch.len() {
                 if results[index] == {
                     .Ok(outcome) -> completed.push(BuildActionOutcomeRow{action: HermeticActionHandle{id: batch[index], context: plan.context}, outcome: outcome})
@@ -157,19 +157,19 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
 // Deterministic resource-pool packing. CPU and memory have automatic capacity;
 // linker, console, GPU and custom pools serialize by name.
 build_execution_batches: fn(plan: HermeticBuildPlan, actions: [Int]) -> [[Int]] Never! {
-    batches := [[Int]]{}
-    limits := [String:Int]{}
+    ^batches: [[Int]]{}
+    ^limits: [String:Int]{}
     loop spec in plan.resource_pools() -> limits[spec.pool.as_str()] = spec.slots
-    held := [[String:Int]]{}
+    ^held: [[String:Int]]{}
     loop action_id in actions {
-        pools := [String]{}
+        ^pools: [String]{}
         loop pool in build_action_pools(plan.actions[action_id]) {
             build_insert_sorted_text(pools, pool.as_str())
         }
-        slot := -1
+        ^slot: -1
         loop index in 0..<held.len() {
             used: held[index]
-            fits := true
+            ^fits: true
             loop pool in pools {
                 limit: limits.get(pool) ?? 1
                 if !(limit == 0 || (used.get(pool) ?? 0) < limit) -> fits = false
@@ -184,10 +184,10 @@ build_execution_batches: fn(plan: HermeticBuildPlan, actions: [Int]) -> [[Int]] 
             held.push([String:Int]{})
             slot = batches.len() - 1
         }
-        counts := held[slot]
+        ^counts: held[slot]
         loop pool in pools -> counts[pool] = (counts.get(pool) ?? 0) + 1
         held[slot] = counts
-        batch := batches[slot]
+        ^batch: batches[slot]
         batch.push(action_id)
         batches[slot] = batch
     }
@@ -216,7 +216,7 @@ build_rebuild_status_reason: fn(status: ActionCacheStatus) -> CacheMissReason Ne
 // The environment an action child receives: only its declared variables,
 // filtered to the allowlist when one is declared. Nothing ambient enters.
 build_action_environment: fn(action: HermeticBuildAction) -> [String:String] Never! {
-    env := [String:String]{}
+    ^env: [String:String]{}
     loop name in action.env.keys() {
         if action.env_allowlist.len() == 0 || action.env_allowlist.contains(name) {
             env[name] = action.env[name]
@@ -307,10 +307,10 @@ BUILD_STEP_TRACE_FOLDER: ".jet-trace"
 // `JET_BUILD_THREADS` (outside its key too: a cap changes no output), which
 // each jet it starts takes as its own.
 build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int, traces: String?, threads: Int?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [ActionOutcome BuildExecutionError!] Never! {
-    results := [ActionOutcome BuildExecutionError!]{}
-    runs := [BuildActionRun]{}
-    slots := [Int]{}
-    stamps := StampTable.load(project_root)
+    ^results: [ActionOutcome BuildExecutionError!]{}
+    ^runs: [BuildActionRun]{}
+    ^slots: [Int]{}
+    ^stamps: StampTable.load(project_root)
     loop action_id in ids {
         if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts, stamps, traces, threads) == {
             .Ok(start) -> {
@@ -328,7 +328,7 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
     }
     stamps.save(project_root).drop("the stamp table only saves rehashing; a lost one costs speed, never a wrong key")
     if runs.len() == 0 -> return results
-    outcomes := build_run_actions(runs, if jobs < 1 -> 1 else -> jobs)
+    ^outcomes: build_run_actions(runs, if jobs < 1 -> 1 else -> jobs)
     loop index in 0..<runs.len() {
         slot: slots[index]
         if traces == .Val(folder) -> build_keep_step_traces(runs[index], folder)
@@ -367,7 +367,7 @@ build_keep_step_traces: fn(run: BuildActionRun, traces: String) -[FS]> Never! {
 // limit on any run (a host whose process tree's CPU time cannot be read),
 // run_all runs them under their wall-clock limits.
 build_run_actions: fn(runs: [BuildActionRun], jobs: Int) -[FS, Env, Exec, Time, Time.Wait]> [ProcessReceipt BuildExecutionError!] Never! {
-    results := [ProcessReceipt BuildExecutionError!]{}
+    ^results: [ProcessReceipt BuildExecutionError!]{}
     if !runs.any(fn(run) { run.cpu_limit_ms > 0 }) {
         specs: loop run in runs -> run.command.spec
         if process.run_all(specs, jobs) == {
@@ -390,14 +390,14 @@ build_run_actions: fn(runs: [BuildActionRun], jobs: Int) -[FS, Env, Exec, Time, 
         return results
     }
     cores: sys.cpu_count()
-    finished := [(ProcessReceipt BuildExecutionError!)?]{}
+    ^finished: [(ProcessReceipt BuildExecutionError!)?]{}
     loop _ in 0..<runs.len() -> finished.push(None)
-    children := [ProcessChild]{}
-    watches := [BuildActionWatch]{}
+    ^children: [ProcessChild]{}
+    ^watches: [BuildActionWatch]{}
     clock: time.instant()
-    started := 0
-    running := 0
-    pause := 1
+    ^started: 0
+    ^running: 0
+    ^pause: 1
     loop started < runs.len() || running > 0 {
         loop started < runs.len() && running < jobs {
             if runs[started].command.spec.spawn() == {
@@ -481,27 +481,27 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     reuse: if action.reusable() -> artifact_store else -> None
     bounded: reuse != None
     inputs: build_snapshot_declared_inputs(project_root, action, bounded: bounded) ?? return Err(build_io_action(action, err))
-    snapshots := loop input in inputs -> input.snapshot
+    ^snapshots: loop input in inputs -> input.snapshot
     snapshots.extend(build_snapshot_folders(stamps, project_root, action) ?? return Err(build_io_action(action, err)))
     // A tool another step makes is a declared input, run from the work
     // tree; any other tool is looked up through the action's toolchain.
     made_tool: action.inputs.contains(action.argv[0])
-    executable := if made_tool -> files.join(project_root, action.argv[0]) else -> build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
+    ^executable: if made_tool -> files.join(project_root, action.argv[0]) else -> build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
     executable_digest: build_tool_digest(action, inputs, executable) ?? return Err(err)
-    action_probe_names := [String]{}
+    ^action_probe_names: [String]{}
     loop probe in action.probes -> action_probe_names.push(plan.probes[probe.id].name)
-    effective_probe_facts := [BuildProbeFact]{}
+    ^effective_probe_facts: [BuildProbeFact]{}
     loop fact in probe_facts {
         if action_probe_names.contains(fact.name) -> effective_probe_facts.push(fact.copy())
     }
     programs: build_found_programs(plan, action, probe_facts) ?? return Err(err)
-    program_digests := [ContentDigest]{}
+    ^program_digests: [ContentDigest]{}
     loop program in programs {
         digest: build_stream_host_digest(program) ?? return Err(build_io_action(action, err))
         program_digests.push(digest)
     }
     key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, program_digests, effective_probe_facts)
-    restore_failure := CacheMissReason?{None}
+    ^restore_failure: CacheMissReason?{None}
     if reuse == .Val(store) {
         if build_read_action_record(store, key) == {
             .Val(record) -> {
@@ -524,7 +524,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
             .Err(error) -> restore_failure = Val(build_cache_restore_miss_reason(error))
         }
     }
-    rebuild_status := ActionCacheStatus.Miss(restore_failure ?? .NoLocalActionRecord)
+    ^rebuild_status: ActionCacheStatus.Miss(restore_failure ?? .NoLocalActionRecord)
     if reuse == None -> rebuild_status = ActionCacheStatus.Miss(.ReuseOff)
     if !action.reusable() -> rebuild_status = ActionCacheStatus.Miss(.AmbientEffect)
     build_record_cache_event(action.name, key, rebuild_status, "lookup", None)
@@ -541,13 +541,13 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         .Err(_) -> {}
     }
     build_ensure_real_directory(sandbox) ?? return Err(build_io_action(action, err))
-    mounts := [NativeSandboxMount]{}
+    ^mounts: [NativeSandboxMount]{}
     if plan.toolchain(action.toolchain) == .Val(toolchain) {
         loop mount in toolchain.mounts {
             mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
         }
     }
-    staged_inputs := [ActionInputCapture]{}
+    ^staged_inputs: [ActionInputCapture]{}
     if sys.is_linux() {
         loop input in inputs {
             if action.outputs.contains(input.snapshot.path) -> staged_inputs.push(input) else {
@@ -571,8 +571,8 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         }
     }
 
-    runtime_args := build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
-    runtime_env := build_runtime_toolchain_environment(plan, action.toolchain, build_action_environment(action))
+    ^runtime_args: build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
+    ^runtime_env: build_runtime_toolchain_environment(plan, action.toolchain, build_action_environment(action))
     if traces != None {
         files.create_dir_all(files.join(sandbox, BUILD_STEP_TRACE_FOLDER)) ?? return Err(build_io_action(action, BuildIOError.from(err)))
         // The child's own path to its work tree: the Linux sandbox binds it
@@ -631,8 +631,8 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
 // bytes in memory. The error is the one writing them in order meets first.
 build_stage_inputs: fn(sandbox: String, inputs: [ActionInputCapture]) -[FS, Env]> BuildIOError! {
     // The inputs before the first whose folder can't be made.
-    staged := 0
-    folder_failure := BuildIOError?{None}
+    ^staged: 0
+    ^folder_failure: BuildIOError?{None}
     loop input in inputs {
         if build_stage_folder(sandbox, input) == .Val(error) {
             folder_failure = Val(error)
@@ -640,7 +640,7 @@ build_stage_inputs: fn(sandbox: String, inputs: [ActionInputCapture]) -[FS, Env]
         }
         staged += 1
     }
-    write_failure := BuildIOError?{None}
+    ^write_failure: BuildIOError?{None}
     task.group staging(limit: sys.cpu_count()) {
         writes: loop index in 0..<staged -> task build_stage_input(sandbox, inputs[index])
         loop (index, handle) in writes {
@@ -664,9 +664,9 @@ build_stage_folder: fn(sandbox: String, input: ActionInputCapture) -[FS]> BuildI
 // in memory and without creating hard links (`st_nlink` stays 1).
 build_stage_input: fn(sandbox: String, input: ActionInputCapture) -[FS]> {written: Bool, error: BuildIOError?} Never! {
     to: build_resolve_under(sandbox, input.snapshot.path) ?? return {written: false, error: Val(err)}
-    reader := files.open(input.source) ?? return {written: false, error: Val(BuildIOError.from(err))}
+    ^reader: files.open(input.source) ?? return {written: false, error: Val(BuildIOError.from(err))}
     mode: if input.snapshot.executable -> 0o755 else -> 0o600
-    writer := files.create(to, if_exists: .Replace, mode: Val(mode)) ?? return {written: false, error: Val(BuildIOError.from(err))}
+    ^writer: files.create(to, if_exists: .Replace, mode: Val(mode)) ?? return {written: false, error: Val(BuildIOError.from(err))}
     loop {
         chunk: reader.read_bytes(BUILD_READ_CHUNK_BYTES) ?? {
             close(writer)
@@ -700,8 +700,8 @@ build_tool_digest: fn(action: HermeticBuildAction, inputs: [ActionInputCapture],
 // `action` with each found folder bound from the folder its find_folder
 // probe chose, which the probe's fact names.
 build_found_folders: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, probe_facts: [BuildProbeFact]) -> HermeticBuildAction BuildExecutionError! {
-    resolved := action
-    folders := [ActionFolder]{}
+    ^resolved: action
+    ^folders: [ActionFolder]{}
     loop folder in action.folders {
         probe: folder.found ?? {
             folders.push(folder.copy())
@@ -723,7 +723,7 @@ build_found_folders: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pr
 // argument order: the program its find_program probe found, which the
 // probe's fact names.
 build_found_programs: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, probe_facts: [BuildProbeFact]) -[FS, Env]> [String] BuildExecutionError! {
-    programs := [String]{}
+    ^programs: [String]{}
     loop program in action.programs {
         name: plan.probes[program.probe.id].name
         found: loop fact in probe_facts {
@@ -791,8 +791,8 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
 // is left as it is and one holding bytes no build wrote (build_output_write)
 // refuses publication and returns its path.
 build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction, *, bounded: Bool{true}) -[FS, Rand]> String? BuildIOError! {
-    writes := [BuildOutputWrite]{}
-    total := 0
+    ^writes: [BuildOutputWrite]{}
+    ^total: 0
     loop declared in action.outputs {
         from: build_resolve_under(sandbox, declared)
         limit: if bounded -> build_read_budget(total) else -> BUILD_NO_BYTE_LIMIT
@@ -824,7 +824,7 @@ build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action:
 // Each selected probe resolves through its toolchain and runs inside the
 // sandbox; the first failure stops the build.
 build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Exec, Time.Wait, Rand]> [BuildProbeFact] BuildExecutionError! {
-    facts := [BuildProbeFact]{}
+    ^facts: [BuildProbeFact]{}
     loop probe in plan.probes {
         if !selected.contains(probe.id) -> next
         result: if probe.kind == {
@@ -848,7 +848,7 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
             }
             .HeaderCheck(header) -> build_run_compile_probe(plan, probe.toolchain, "#include <{header}>\nint main(void) {{ return 0; }}\n")
             .CompileCheck(_, includes, code) -> {
-                source := ""
+                ^source: ""
                 loop header in includes -> source = "{source}#include <{header}>\n"
                 source = "{source}int main(void) {{\n{code}\nreturn 0;\n}}\n"
                 build_run_compile_probe(plan, probe.toolchain, source)
@@ -919,7 +919,7 @@ build_run_probe_sandboxed: fn(executable: String, args: [String], source: {path:
 // The first declared `cc`, `clang` or `gcc` checks the probe source's syntax
 // inside the sandbox.
 build_run_compile_probe: fn(plan: HermeticBuildPlan, toolchain: ToolchainHandle, source: String) -[FS, Env, Exec, Time.Wait, Rand]> {success: Bool, detail: String} BuildExecutionError! {
-    compiler := String?{None}
+    ^compiler: String?{None}
     names: [String]{"cc", "clang", "gcc"}
     loop name in names {
         if compiler == None -> compiler = build_resolve_program_path(plan, toolchain, name)
@@ -932,7 +932,7 @@ build_run_compile_probe: fn(plan: HermeticBuildPlan, toolchain: ToolchainHandle,
 }
 
 build_path_component_count: fn(path: String) -> Int Never! {
-    count := if path.starts_with("/") -> 1 else -> 0
+    ^count: if path.starts_with("/") -> 1 else -> 0
     parts: path.split("/").to_list()
     loop index in 0..<parts.len() {
         part: parts[index]
@@ -1014,7 +1014,7 @@ build_canonical_tool_path: fn(toolchain: HermeticBuildToolchain, declared: Strin
     loop mount in toolchain.mounts {
         relative: build_strip_path_prefix(declared, mount.destination) ?? next
         if relative.contains("..") -> return None
-        source := mount.source
+        ^source: mount.source
         loop part in relative -> source = files.join(source, part)
         return build_canonical_executable_path(source)
     }
@@ -1024,7 +1024,7 @@ build_canonical_tool_path: fn(toolchain: HermeticBuildToolchain, declared: Strin
 // The components of a `/`-separated path: empty and `.` parts dropped, `..`
 // kept for the caller to refuse.
 build_path_parts: fn(path: String) -> [String] Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         parts.push(part)
@@ -1056,7 +1056,7 @@ build_runtime_toolchain_arguments: fn(plan: HermeticBuildPlan, handle: Toolchain
 build_runtime_toolchain_environment: fn(plan: HermeticBuildPlan, handle: ToolchainHandle, env: [String:String]) -[Env]> [String:String] Never! {
     if sys.is_linux() -> return env.copy()
     toolchain: plan.toolchain(handle) ?? return env
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop key in env.keys() -> out[key] = build_runtime_toolchain_argument(toolchain, env[key])
     out
 }
@@ -1075,7 +1075,7 @@ build_runtime_toolchain_argument: fn(toolchain: HermeticBuildToolchain, argument
 
 build_runtime_mount_path: fn(toolchain: HermeticBuildToolchain, value: String) -> String? Never! {
     loop mount in toolchain.mounts {
-        destination := mount.destination
+        ^destination: mount.destination
         loop destination.ends_with("/") || destination.ends_with("\\") {
             destination = destination.slice(0, destination.len() - 1)
         }
@@ -1113,7 +1113,7 @@ build_debug_toolchain: fn(t: HermeticBuildToolchain) -> String Never! {
         .Val(value) -> "Some(SysrootIdentity {{ name: {build_debug_quote(value.name)}, path_digest: {build_debug_quote(value.path_digest)}, provenance: {build_debug_provenance(value.provenance)} }})"
         .None -> "None"
     }
-    tool_keys := t.tools.keys().to_list()
+    ^tool_keys: t.tools.keys().to_list()
     tool_keys.sort()
     tools: loop key in tool_keys -> "{build_debug_quote(key)}: {build_debug_quote(t.tools[key])}"
     resolution: if t.resolution == ToolchainResolution.Ambient -> "Ambient" else -> "DeclaredOnly"

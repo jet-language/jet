@@ -31,14 +31,12 @@ X64_INT_SUM_DECLINED: 4611686018427387904
 // inline Int.
 X64_INT_SUM_BIAS: 4611686018427387904
 
-x64_int_sum_code: fn() -> [U8] Never! {
-    x64_int_sum_leaf().bytes
-}
+x64_int_sum_code: fn() -> [U8] Never! { x64_int_sum_leaf().bytes }
 
 x64_int_sum_leaf: fn() -> X64SimdLeaf Never! {
-    code := x64_code()
-    declines := [Int]{}
-    avx_declines := [Int]{}
+    ^code: x64_code()
+    ^declines: [Int]{}
+    ^avx_declines: [Int]{}
     x64_mov_ri(code, X64_RAX, X64_INT_SUM_DECLINED)
     // 0 <= first < end, end and the total inline.
     x64_test_rr(code, X64_RSI, X64_RSI)
@@ -152,9 +150,7 @@ x64_int_sum_leaf: fn() -> X64SimdLeaf Never! {
     x64_vmovmskpd(code, true, X64_R8, 2)
     x64_test_rr(code, X64_R8, X64_R8)
     avx_declines.push(x64_jcc_rel32(code, X64Cond.NE))
-    loop lane in lanes {
-        x64_int_sum_fold_ymm(code, lane, avx_declines)
-    }
+    loop lane in lanes { x64_int_sum_fold_ymm(code, lane, avx_declines) }
     x64_vzeroupper(code)
     avx2_done: x64_jmp_rel32(code)
 

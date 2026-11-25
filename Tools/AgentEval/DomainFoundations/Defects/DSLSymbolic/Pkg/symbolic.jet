@@ -19,7 +19,7 @@ constant: fn(value: Float) -> Expr { one(Node.Const(value)) }
 variable: fn(name: String) -> Expr { one(Node.Var(name.copy())) }
 
 add: fn(left: Expr, right: Expr) -> Expr {
-    code := [Node]{}
+    ^code: [Node]{}
     code.extend(left.code.copy())
     code.extend(right.code.copy())
     code.push(Node.Add)
@@ -27,7 +27,7 @@ add: fn(left: Expr, right: Expr) -> Expr {
 }
 
 mul: fn(left: Expr, right: Expr) -> Expr {
-    code := [Node]{}
+    ^code: [Node]{}
     code.extend(left.code.copy())
     code.extend(right.code.copy())
     code.push(Node.Mul)
@@ -35,14 +35,14 @@ mul: fn(left: Expr, right: Expr) -> Expr {
 }
 
 neg: fn(value: Expr) -> Expr {
-    code := [Node]{}
+    ^code: [Node]{}
     code.extend(value.code.copy())
     code.push(Node.Neg)
     return Expr{code: code}
 }
 
 show: fn(expr: Expr) -> String {
-    stack := [String]{}
+    ^stack: [String]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { stack.push("{value}") }
@@ -77,7 +77,7 @@ is_zero: fn(expr: Expr) -> Bool {
 }
 
 simplify: fn(expr: Expr) -> Expr {
-    stack := [Expr]{}
+    ^stack: [Expr]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { stack.push(constant(value)) }
@@ -113,7 +113,7 @@ Dual: struct {
 }
 
 derivative: fn(expr: Expr, wrt: String) -> Expr {
-    stack := [Dual]{}
+    ^stack: [Dual]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { stack.push(Dual{expr: constant(value), deriv: zero_expr()}) }

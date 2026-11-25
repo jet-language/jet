@@ -37,7 +37,7 @@ require_unsupported: fn(value: CtValue, reason: String) Never! {
     require_unsupported(CtValue.Map{entries: [CtMapEntry]{CtMapEntry{key: CtKey.Int{value: 1}, value: CtValue.Int{value: 2}}}}, "JSON cannot encode non-text map keys")
     assert_eq(ast_comptime_value_json(CtValue.Char{value: '\n'}) ?? panic("Char JSON"), "\"\\n\"")
     assert_eq(ast_comptime_value_json(CtValue.Char{value: '"'}) ?? panic("Char JSON"), "\"\\\"\"")
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop byte in 0..<32 -> bytes.push(U8{byte})
     controls: String.from_bytes(bytes) ?? panic("C0 text")
     encoded: ast_comptime_value_json(CtValue.Str{value: controls}) ?? panic("C0 JSON")

@@ -129,13 +129,13 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     named: jet_cli_profile_name(jet_argv)
     package_target: positionals.len() == 0 || cli_files.is_dir(positionals[0])
     if named == "" && !package_target -> return None
-    start := if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0].copy()
+    ^start: if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0].copy()
     if !package_target -> start = jet_cli_parent(start) ?? "."
     root: jet_cli_manifest_root(start) ?? return None
     manifest: jet_cli_rooted_join(root, JET_CLI_PACKAGE_FILE)
     source: cli_files.read(manifest) ?? return None
     facts: PackageFacts.parse_uncomposed(source, manifest) ?? return None
-    chosen := named.move()
+    ^chosen: named.move()
     from_default: chosen == ""
     if from_default {
         chosen = facts.defaults.get("test") ?? {
@@ -160,8 +160,8 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     if facts.test_suites_refusal(code_suites) == .Val(refusal) {
         return Val(jet_cli_fail("E1215", "`package.jet` has a shape error", refusal, "declare each suite once, in `suites:` or with `t.suite` in test.jet's `test: fn`, and name only declared suites in a profile", color, JET_DRIVER_EXIT_USER_ERROR))
     }
-    corpus := false
-    ui := false
+    ^corpus: false
+    ^ui: false
     loop suite in profile.suites {
         if suite == TEST_SUITE_TESTS || code_suites.contains(suite) -> next
         stock: facts.test_suite(suite) ?? next
@@ -183,12 +183,12 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     if test_settings_on(settings, "diagnostic_coverage") && !ui {
         return Val(jet_cli_fail("E2104", "`diagnostic_coverage` ({jet_cli_test_setting_source(settings, "diagnostic_coverage")}) checks the ui suite, and profile `{chosen}` runs none", jet_cli_why("E2104"), "drop `--diagnostic-coverage`, or run a test profile whose suites include a ui corpus", color, JET_DRIVER_EXIT_USAGE))
     }
-    words := jet_cli_test_child_words(jet_argv)
+    ^words: jet_cli_test_child_words(jet_argv)
     // A child's streams are captured, so a colored run asks for color.
     if color && !words.any(fn(argument) { argument == "--color" || argument.starts_with("--color=") }) {
         words.push("--color=always")
     }
-    runs := [JetCLITestProfileRun]{}
+    ^runs: [JetCLITestProfileRun]{}
     tests: profile.suites.contains(TEST_SUITE_TESTS)
     levels: test_settings_levels(settings)
     if tests && levels.len() == 0 {
@@ -196,7 +196,7 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     }
     loop level in levels {
         if !tests -> break
-        args := words.copy()  // copy: each level run starts from the same words.
+        ^args: words.copy()  // copy: each level run starts from the same words.
         args.push(build_option_level_flag(level))
         runs.push(JetCLITestProfileRun{label: "{TEST_SUITE_TESTS} at optimize {level}", rows_file: "{TEST_SUITE_TESTS}-{level}.rows", args: args.move()})
     }
@@ -205,7 +205,7 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     if test_settings_shard_index(settings) == 1 && !test_settings_on(settings, "list") {
         loop suite in profile.suites {
             if !code_suites.contains(suite) -> next
-            args := [String]{"test", jet_cli_rooted_join(root, TEST_CODE_SUITES_FILE)}
+            ^args: [String]{"test", jet_cli_rooted_join(root, TEST_CODE_SUITES_FILE)}
             if color -> args.push("--color=always")
             runs.push(JetCLITestProfileRun{label: suite.copy(), rows_file: "{suite}.rows", args: args.move(), suite: suite.copy()})
         }
@@ -218,8 +218,8 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
 // every run's rows as the one `results` document.
 jet_cli_test_profile: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool) -> JetDriverVerbOutput {
     if !quiet -> jet_cli_write_notice(jet_cli_test_settings_notice(settings))
-    results := [KitCaseResult]{}
-    output := if runs.len() > 0 -> jet_cli_test_profile_runs(profile, root, settings, runs, update, quiet, jet_cli_test_profile_known(profile, root), results) else -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^results: [KitCaseResult]{}
+    ^output: if runs.len() > 0 -> jet_cli_test_profile_runs(profile, root, settings, runs, update, quiet, jet_cli_test_profile_known(profile, root), results) else -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     corpus: jet_cli_test_profile_corpus(profile, root, settings, update, results)
     if corpus.exit_code > output.exit_code -> output.exit_code = corpus.exit_code
     output.stderr = "{output.stderr}{corpus.stderr}"
@@ -232,7 +232,7 @@ jet_cli_test_profile: fn(profile: String, root: String, settings: [TestSetting],
         }
     }
     if !test_settings_on(settings, "list") && test_settings_get(settings, "results") == .Val(path) {
-        suites := [String]{}
+        ^suites: [String]{}
         loop result in results {
             if !suites.contains(result.suite) -> suites.push(result.suite.copy())  // copy: the rows keep their suite names.
         }
@@ -279,8 +279,8 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
     facts: PackageFacts.parse_uncomposed(source, manifest) ?? return done
     chosen: facts.test_profile(profile) ?? return done
     package: cli_files.realpath(root) ?? return JetDriverVerbOutput{stdout: "", stderr: "{site}: couldn't resolve `{root}`: {jet_cli_io_error_text(err)}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    dirs := [String]{}
-    kinds := [String]{}
+    ^dirs: [String]{}
+    ^kinds: [String]{}
     loop suite in chosen.suites {
         if suite == TEST_SUITE_TESTS -> next
         stock: facts.test_suite(suite) ?? next
@@ -289,9 +289,9 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
         kinds.push(stock.kind.as_str())
     }
     if dirs.len() == 0 -> return done
-    ancestor := package.copy()
+    ^ancestor: package.copy()
     loop dir in dirs -> ancestor = jet_cli_test_common_dir(ancestor, dir)
-    options := kit_exec_defaults()
+    ^options: kit_exec_defaults()
     loop (index, dir) in dirs {
         relative: if dir == ancestor -> "." else -> dir.removeprefix("{ancestor}/").copy()
         if kinds[index] == {
@@ -300,7 +300,7 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
             else -> options.cases_corpora.push(relative)
         }
     }
-    selected := [String]{}
+    ^selected: [String]{}
     if options.golden_corpora.len() > 0 -> selected.push("golden")
     if options.ui_corpora.len() > 0 -> selected.push("ui")
     if options.cases_corpora.len() > 0 -> selected.push("cases")
@@ -355,7 +355,7 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
 }
 
 jet_cli_test_corpus_reports: fn(evidence: String, suites: [String]) -> [String:String] {
-    reports := [String:String]{}
+    ^reports: [String:String]{}
     loop suite in suites -> reports[suite] = jet_cli_rooted_join(evidence, "{suite}.json")
     reports
 }
@@ -364,7 +364,7 @@ jet_cli_test_corpus_reports: fn(evidence: String, suites: [String]) -> [String:S
 jet_cli_test_common_dir: fn(a: String, b: String) -> String Never! {
     left: a.split("/").to_list()
     right: b.split("/").to_list()
-    common := [String]{}
+    ^common: [String]{}
     loop (index, part) in left {
         if index >= right.len() || right[index] != part -> break
         common.push(part.copy())
@@ -397,16 +397,16 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
         filter != None -> "a filtered run"
         else -> ""
     }
-    labels := [String]{}
-    argvs := [[String]]{}
-    envs := [[String]]{}
+    ^labels: [String]{}
+    ^argvs: [[String]]{}
+    ^envs: [[String]]{}
     loop (index, run) in runs {
         labels.push(run.label.copy())
-        argv := [String]{executable.copy()}
+        ^argv: [String]{executable.copy()}
         loop argument in run.args -> argv.push(argument.copy())
         argvs.push(argv)
         if run.suite != "" {
-            env := [String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows"), JET_CLI_TEST_SUITE_ROOT_ENV, root.copy(), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()}
+            ^env: [String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows"), JET_CLI_TEST_SUITE_ROOT_ENV, root.copy(), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()}
             if filter == .Val(text) {
                 env.push(JET_CLI_TEST_SUITE_FILTER_ENV)
                 env.push(text.copy())
@@ -422,8 +422,8 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
         envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin"), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()})
     }
     finished: jet_cli_test_members_run("test: profile `{profile}`, run", labels, argvs, envs, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available(), JET_TEST_MEMBER_MEMORY), quiet)
-    exit_code := JET_DRIVER_EXIT_OK
-    summary := ""
+    ^exit_code: JET_DRIVER_EXIT_OK
+    ^summary: ""
     baselines: jet_cli_rooted_join(root, ".jet/test/{profile}")
     loop (index, run) in runs {
         child: finished[index]
@@ -433,9 +433,9 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             next
         }
         site: "jet test: profile `{profile}`, `{run.label}`"
-        rows := [String]{}
+        ^rows: [String]{}
         // The status a recorded run keeps.
-        status := child.code
+        ^status: child.code
         if {
             run.suite != "" -> {
                 // A suite that wrote no row leaves no file: it has no rows.
@@ -470,12 +470,16 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
                 report_path: jet_cli_rooted_join(scratch.path, "{index}.bin")
                 if !cli_files.exists(report_path) {
                     // The child stopped before its tests ran; its own stderr says why.
-                    if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+                    if JET_DRIVER_EXIT_USER_ERROR > exit_code {
+                        exit_code = JET_DRIVER_EXIT_USER_ERROR
+                    }
                     summary = "{summary}{site}: no test ran\n"
                     next
                 }
                 report: evidence_report_read(report_path) ?? {
-                    if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+                    if JET_DRIVER_EXIT_USER_ERROR > exit_code {
+                        exit_code = JET_DRIVER_EXIT_USER_ERROR
+                    }
                     summary = "{summary}{site}: couldn't read its test evidence: {err.message}\n"
                     next
                 }
@@ -516,7 +520,7 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             summary = "{summary}{site}: couldn't read `{shown}`: {err}\n"
             next
         }
-        baseline := jet_cli_test_rows_parse(text)
+        ^baseline: jet_cli_test_rows_parse(text)
         // A shard or a filter compares the rows it holds: the others weren't run.
         if partial != "" {
             present: loop row in rows -> jet_cli_test_row_name(row)
@@ -535,13 +539,13 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
 // outcome's name, with `,expected` for an expected failure. A repeated test
 // name gets ` (2)`, ` (3)`, … in report order.
 jet_cli_test_profile_rows: fn(records: [EvidenceRecord]) -> [String] Never! {
-    rows := [String]{}
-    names := [String]{}
+    ^rows: [String]{}
+    ^names: [String]{}
     loop record in records {
         if record.kind != EvidenceKind.Unit -> next
         base: record.identity.claim_id.replace("\t", " ").replace("\n", " ")
-        name := base.copy()
-        repeat := 1
+        ^name: base.copy()
+        ^repeat: 1
         loop names.contains(name) {
             repeat += 1
             name = "{base} ({repeat})"
@@ -578,14 +582,14 @@ jet_cli_test_stop_reason: fn(errors: String, code: Int) -> String Never! {
 // (kit_known_load) holds is accepted as failing: it is KNOWN-FAILING when it
 // fails and fails the run as UNEXPECTED-PASS when it passes, as a corpus row is.
 jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String:String]) -> JetCLITestCodeRows Never! {
-    ids := [String]{}
-    states := [String]{}
-    details := [String]{}
+    ^ids: [String]{}
+    ^states: [String]{}
+    ^details: [String]{}
     loop line in text.split("\n").to_list() {
         if line == "" -> next
         parts: line.split("\t").to_list()
         id: parts[0].copy()
-        at := -1
+        ^at: -1
         loop (seen, known) in ids {
             if known == id {
                 at = seen
@@ -606,14 +610,14 @@ jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String:Str
         states.push(JET_CLI_TEST_ROW_FAILED)
         details.push(reason.copy())
     }
-    rows := [String]{}
-    failures := [String]{}
-    verdicts := [JetCLITestCodeVerdict]{}
+    ^rows: [String]{}
+    ^failures: [String]{}
+    ^verdicts: [JetCLITestCodeVerdict]{}
     loop (at, id) in ids {
         rows.push("{id}\t{states[at]}")
-        status := jet_cli_test_code_status(states[at])
+        ^status: jet_cli_test_code_status(states[at])
         // copy: the row keeps its detail; the verdict owns its own.
-        detail := details[at].copy()
+        ^detail: details[at].copy()
         owner: accepted.get(id) ?? ""
         if {
             owner != "" && status == "FAIL" -> {
@@ -661,13 +665,13 @@ jet_cli_test_code_status: fn(state: String) -> String Never! {
 }
 
 jet_cli_test_rows_text: fn(rows: [String]) -> String Never! {
-    text := ""
+    ^text: ""
     loop row in rows -> text = "{text}{row}\n"
     text
 }
 
 jet_cli_test_rows_parse: fn(text: String) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop line in text.split("\n").to_list() {
         if line != "" -> rows.push(line)
     }
@@ -686,11 +690,11 @@ jet_cli_test_row_state: fn(row: String) -> String Never! {
 // state that moved, or a non-passing test that is gone. Added: a test the
 // baseline lacks.
 jet_cli_test_rows_compare: fn(baseline: [String], rows: [String]) -> JetCLITestRowsDiff Never! {
-    diff := JetCLITestRowsDiff{lost: [String]{}, changed: [String]{}, added: [String]{}}
+    ^diff: JetCLITestRowsDiff{lost: [String]{}, changed: [String]{}, added: [String]{}}
     loop before in baseline {
         name: jet_cli_test_row_name(before)
         was: jet_cli_test_row_state(before)
-        now := "missing"
+        ^now: "missing"
         loop row in rows {
             if jet_cli_test_row_name(row) == name {
                 now = jet_cli_test_row_state(row)
@@ -714,7 +718,7 @@ jet_cli_test_rows_compare: fn(baseline: [String], rows: [String]) -> JetCLITestR
 // The stderr lines of one compared run: the counts and each changed row
 // (unless quiet), and always every lost row.
 jet_cli_test_rows_report: fn(site: String, shown: String, count: Int, diff: JetCLITestRowsDiff, quiet: Bool) -> String Never! {
-    text := ""
+    ^text: ""
     if !quiet || diff.lost.len() > 0 {
         text = "{site}: {count} rows against `{shown}`: {diff.lost.len()} lost, {diff.changed.len()} changed, {diff.added.len()} new\n"
     }

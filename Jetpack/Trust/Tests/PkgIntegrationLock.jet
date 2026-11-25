@@ -54,7 +54,7 @@ trust_pkg_integration_lock: fn(owner: String, key: String, exact: String) -> Sem
 
 #Test("pkg integration lock_rationale_preserves_exact_identity") {
     a: trust_pkg_integration_lock("app", "core.log", "1.2.3")
-    b := a.copy()
+    ^b: a.copy()
     b.records[0].rationales[0].reason = "human text changed"
     assert_eq(a.records[0].identity.machine_identity(), b.records[0].identity.machine_identity())
 }
@@ -79,9 +79,9 @@ trust_pkg_integration_lock: fn(owner: String, key: String, exact: String) -> Sem
 
 // Only hash differs.
 #Test("pkg integration lock_merge_conflicts_on_same_version_different_hash") {
-    left := trust_pkg_integration_lock("app", "core.log", "1.2.3")
+    ^left: trust_pkg_integration_lock("app", "core.log", "1.2.3")
     left.records[0].identity.hash = "sha256-left"
-    right := trust_pkg_integration_lock("app", "core.log", "1.2.3")
+    ^right: trust_pkg_integration_lock("app", "core.log", "1.2.3")
     right.records[0].identity.hash = "sha256-right"
     assert_eq(trust_merge_semantic_locks(SemanticLockFile.empty(), left, right).conflicts.len(), 1)
 }
@@ -95,7 +95,7 @@ trust_pkg_integration_lock: fn(owner: String, key: String, exact: String) -> Sem
 
 #Test("pkg integration lock_merge_platform_specific_records") {
     left: trust_pkg_integration_lock("app", "bin.tool:x86_64-linux", "1")
-    right := trust_pkg_integration_lock("app", "bin.tool:aarch64-macos", "1")
+    ^right: trust_pkg_integration_lock("app", "bin.tool:aarch64-macos", "1")
     right.records[0].identity.platform = "aarch64-macos"
     out: trust_merge_semantic_locks(SemanticLockFile.empty(), left, right)
     assert_eq(out.conflicts.len(), 0)

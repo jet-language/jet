@@ -124,8 +124,8 @@ run: fn() -> Never Err! {
         print(check_image(root, files.resolve(argv[1])))
         process.exit(0)
     }
-    args := [String:String]{"jet": "", "out": files.join(root, LIST), "twins": ""}
-    i := 0
+    ^args: [String:String]{"jet": "", "out": files.join(root, LIST), "twins": ""}
+    ^i: 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
         if !args.has_key(key) || i + 1 >= argv.len() -> return Err(USAGE)
@@ -140,8 +140,8 @@ run: fn() -> Never Err! {
     symbols: function_symbols(jet_bytes, jet)
     boundary: symbols.filter(fn(symbol) { pack.has(symbol.name) }).map(fn(symbol) { symbol.value }).min() ?? return Err("{jet} defines none of the runtime pack's functions")
     // `main` is the object's first function whatever the list says.
-    addresses := [Int]{}
-    by_address := [Int:String]{}
+    ^addresses: [Int]{}
+    ^by_address: [Int:String]{}
     loop symbol in symbols.filter(fn(symbol) { symbol.value < boundary && symbol.name != "main" }) {
         if by_address.has_key(symbol.value) -> next
         addresses.push(symbol.value)
@@ -152,7 +152,7 @@ run: fn() -> Never Err! {
     process.cmd([process.env_nonempty("CC") ?? "cc", "-O2", "-o", tracer, files.join(root, "Tools/Perf/fntrace.c")]).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run_checked()
     address_file: files.join(work.path, "addresses")
     files.write(address_file, "{addresses.map(fn(value) { fmt.hex(value, 1) }).join("\n")}\n")
-    traces := [Trace]{
+    ^traces: [Trace]{
         {file: "hello.jet", argv: [String]{"run", "hello.jet"}, dir: "", ranked: true},
         {file: "numbers.jet", argv: [String]{"run", "numbers.jet"}, dir: "", ranked: true},
         {file: "text.jet", argv: [String]{"run", "text.jet"}, dir: "", ranked: true},
@@ -170,16 +170,16 @@ run: fn() -> Never Err! {
         traces.push({file: "", argv: [String]{TWIN_SCALING, "--", "shapes"}, dir: "Tools", ranked: false})
         traces.push({file: "", argv: [String]{files.join(twins, TWIN_OPTIMIZATION), "--", "plan", "--manifest", "manifest.json"}, dir: "Tools/Gauntlet/Entries/Optimization/Fixtures", ranked: false})
     }
-    names := [String]{}
-    listed := Set<String>.new()
-    ranked := [[String]]{}
+    ^names: [String]{}
+    ^listed: Set<String>.new()
+    ^ranked: [[String]]{}
     loop index in 0..<traces.len() {
         trace: traces[index]
         // Each trace has a user cache of its own, empty, and a project of its
         // own unless it runs in the twins' copy; that one also has an empty
         // store and names no toolchain tree, as a cold run out of tree.
         entered: files.join(work.path, "{index}.entered")
-        command := process.cmd([tracer.copy(), address_file.copy(), entered.copy(), "--", jet.copy()].concat(trace.argv)).env("XDG_CACHE_HOME", files.join(work.path, "cache-{index}"))
+        ^command: process.cmd([tracer.copy(), address_file.copy(), entered.copy(), "--", jet.copy()].concat(trace.argv)).env("XDG_CACHE_HOME", files.join(work.path, "cache-{index}"))
         if {
             trace.dir == "" -> {
                 project: files.join(work.path, "trace-{index}")
@@ -192,7 +192,7 @@ run: fn() -> Never Err! {
             }
         }
         command.stdin(.Capture).stdout(.Capture).stderr(.Inherit).run_checked()
-        traced := [String]{}
+        ^traced: [String]{}
         loop line in files.read(entered).split("\n").filter(fn(line) { line != "" }) {
             name: by_address.get(Int.from_radix(line, 16) ?? return Err("Cannot convert 0x{line} to a BigInt")) ?? next
             traced.push(name.copy())  // copy: the map keeps its names
@@ -231,10 +231,10 @@ run: fn() -> Never Err! {
 // names, first entry first): those more runs entered first, then, among as
 // many, the one entered first in run order first.
 ranked_names: fn(entries: [[String]]) -> [String] Never! {
-    order := [String]{}
-    counts := [String:Int]{}
+    ^order: [String]{}
+    ^counts: [String:Int]{}
     loop names in entries {
-        seen := Set<String>.new()
+        ^seen: Set<String>.new()
         loop name in names {
             if !seen.add(name.copy()) -> next
             count: counts.get(name) ?? 0
@@ -242,7 +242,7 @@ ranked_names: fn(entries: [[String]]) -> [String] Never! {
             counts[name.copy()] = count + 1
         }
     }
-    rows := loop (at, name) in order -> {name: name.copy(), count: counts[name], at: at}
+    ^rows: loop (at, name) in order -> {name: name.copy(), count: counts[name], at: at}
     rows.sort_by(fn(left: {name: String, count: Int, at: Int}, right: {name: String, count: Int, at: Int}) { (right.count <=> left.count).then(left.at <=> right.at) })
     loop row in rows -> row.name.copy()
 }
@@ -337,7 +337,7 @@ HotTextDeclared: struct {
 }
 
 hot_text_declared: fn(root: String) -> HotTextDeclared Err! {
-    declared := HotTextDeclared{functions: Set.from([String]{}), leaves: Set.from([String]{}), modules: Set.from([String]{}), typed: Set.from([String]{})}
+    ^declared: HotTextDeclared{functions: Set.from([String]{}), leaves: Set.from([String]{}), modules: Set.from([String]{}), typed: Set.from([String]{})}
     parts: hot_text_parts(files.read(files.join(root, PARTS)))
     loop dir in SOURCE_DIRS {
         top: files.join(root, dir)
@@ -353,7 +353,7 @@ hot_text_declared: fn(root: String) -> HotTextDeclared Err! {
 // The private Core parts of `table` (PARTS' rows: module, owner, path, ...)
 // by their source path.
 hot_text_parts: fn(table: String) -> [String:String] Never! {
-    parts := [String:String]{}
+    ^parts: [String:String]{}
     loop line in table.lines() {
         if line == "" || line.starts_with("#") -> next
         fields: line.split("\t").to_list()
@@ -378,7 +378,7 @@ hot_text_modules: fn(dir: String, relative: String, parts: [String:String]) -> [
 // `http_server`).
 hot_text_snake: fn(segment: String) -> String Never! {
     bytes: segment.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         upper: code >= 65 && code <= 90
@@ -421,7 +421,7 @@ hot_text_declare: fn(declared: ^HotTextDeclared, modules: [String], text: String
 // and equality and its computed-field getters (`<module>.__computed_<field>`).
 hot_text_row_declared: fn(declared: HotTextDeclared, row: String) -> Bool Never! {
     leaf: row.ends_with("__asm")
-    name := row.copy()
+    ^name: row.copy()
     loop COPY_SUFFIX.is_match(name) -> name = COPY_SUFFIX.replace_first(name, "")
     if name.starts_with("jet_ir_") || declared.functions.has(name) -> return true
     if leaf && (name.starts_with("jet_") || declared.leaves.has(name)) -> return true
@@ -435,7 +435,7 @@ hot_text_row_declared: fn(declared: HotTextDeclared, row: String) -> Bool Never!
 }
 
 #Test("a row names a declared function, a copy of one, or a build-made helper") {
-    declared := HotTextDeclared{functions: Set.from([String]{}), leaves: Set.from([String]{}), modules: Set.from([String]{}), typed: Set.from([String]{})}
+    ^declared: HotTextDeclared{functions: Set.from([String]{}), leaves: Set.from([String]{}), modules: Set.from([String]{}), typed: Set.from([String]{})}
     parts: hot_text_parts("# module\towner\tpath\n__core_crypto_md\tcore.crypto\tCore/Crypto/MD.jet\t__core_crypto_md\t\t\n")
     hot_text_declare(declared, hot_text_modules("Compiler", "JetCLI/Source/CLI/Host.jet", parts), "jet_cli_run: fn() {{\n    open: fn(self) -> Int {{ 1 }}\n}}\nRow: struct {{\n}}\n#Unsafe(\"the caller owns `n()` bytes\") put_text: fn(at: Int) -> Int {{ at }}\n")
     hot_text_declare(declared, hot_text_modules("Compiler", "JetCLI/Source/CLI/Plain.jet", parts), "plain: fn() -> Int {{ 1 }}\n")
@@ -484,7 +484,7 @@ fields: fn(bytes: [U8], at: Int, format: String, path: String) -> [Int] Err! {
 function_symbols: fn(bytes: [U8], path: String) -> [Symbol] Err! {
     // e_shoff, then e_shnum.
     header: fields(bytes, 40, "<Q12xH", path)
-    symbols := [Symbol]{}
+    ^symbols: [Symbol]{}
     loop k in 0..<header[1] {
         // sh_type, sh_offset, sh_size and sh_link.
         table: fields(bytes, header[0] + 64 * k, "<4xI16xQQI", path)
@@ -502,7 +502,7 @@ function_symbols: fn(bytes: [U8], path: String) -> [Symbol] Err! {
 
 // The NUL-ended text at `start` of `bytes`; none past their end.
 c_string: fn(bytes: [U8], start: Int) -> String Never! {
-    end := min(start, bytes.len())
+    ^end: min(start, bytes.len())
     loop end < bytes.len() && bytes[end] != 0 -> end += 1
     String.from_bytes_lossy(bytes[min(start, end)..<end])
 }

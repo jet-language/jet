@@ -67,7 +67,7 @@ read_file_without_symlinks: fn(path: String) -> [U8] CanvasSourceError! {
 
 // Create every missing directory of `path`, refusing link components.
 ensure_no_symlink_directory: fn(path: String) CanvasSourceError! {
-    directory := source_open_base(path)
+    ^directory: source_open_base(path)
     loop name in source_components(path) {
         if directory.entry_stat(name) == {
             .Ok(_) -> {}
@@ -89,7 +89,7 @@ ensure_no_symlink_directory: fn(path: String) CanvasSourceError! {
 // Create `path` with `bytes`; an existing entry, link or not, is refused.
 write_new_file_without_symlinks: fn(path: String, bytes: [U8]) CanvasSourceError! {
     held: source_open_parent(path)
-    writer := held.parent.create(held.name, if_exists: .Refuse, mode: Val(SOURCE_NEW_FILE_MODE)) ?? return Err(canvas_source_error("couldn't create Canvas source `{path}`: {err}"))
+    ^writer: held.parent.create(held.name, if_exists: .Refuse, mode: Val(SOURCE_NEW_FILE_MODE)) ?? return Err(canvas_source_error("couldn't create Canvas source `{path}`: {err}"))
     if source_write_all(writer, bytes) == .Err(error) {
         source_remove_quietly(held.parent, held.name)
         return Err(error)
@@ -163,7 +163,7 @@ source_open_base: fn(path: String) -> Directory CanvasSourceError! {
 
 // The normal components of `path`; `..` is refused, `.` and empty are skipped.
 source_components: fn(path: String) -> [String] CanvasSourceError! {
-    names := [String]{}
+    ^names: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -179,7 +179,7 @@ source_open_parent: fn(path: String) -> SourceTarget CanvasSourceError! {
     if names.len() == 0 || path.ends_with("/") {
         return Err(canvas_source_error("Canvas source path has no file name"))
     }
-    parent := source_open_base(path)
+    ^parent: source_open_base(path)
     loop index in 0..<names.len() - 1 {
         parent = parent.open_directory(names[index]) ?? return Err(canvas_source_error("Canvas source paths must not traverse symlinks: `{names[index]}`: {err}"))
     }
@@ -191,13 +191,13 @@ source_open_parent: fn(path: String) -> SourceTarget CanvasSourceError! {
 // read is refused.
 source_read_current: fn(parent: Directory, name: String) -> SourceCurrentFile? CanvasSourceError! {
     if parent.entry_stat(name) == .Err(_) -> return Ok(None)
-    reader := parent.open(name) ?? return Err(canvas_source_error("Canvas source paths must not traverse symlinks: `{name}`: {err}"))
+    ^reader: parent.open(name) ?? return Err(canvas_source_error("Canvas source paths must not traverse symlinks: `{name}`: {err}"))
     before: reader.stat() ?? return Err(canvas_source_error("couldn't inspect Canvas source `{name}`: {err}"))
     source_require_regular(before, name)
     if before.size > SOURCE_MAX_BYTES {
         return Err(canvas_source_error("file exceeds the devserver response limit"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(SOURCE_MAX_BYTES + 1 - bytes.len()) ?? return Err(canvas_source_error("couldn't read Canvas source `{name}`: {err}"))
         if chunk.len() == 0 -> break
@@ -237,12 +237,12 @@ source_replace: fn(target: SourceTarget, bytes: [U8], mode: Int?) CanvasSourceEr
         .None -> SOURCE_NEW_FILE_MODE
     }
     pid: source_sys.pid()
-    temporary := ""
+    ^temporary: ""
     loop attempt in 0..<SOURCE_TEMP_ATTEMPTS {
         name: ".{target.name}.canvas-{pid}-{attempt}.tmp"
         if target.parent.create(name, if_exists: .Refuse, mode: Val(file_mode)) == {
             .Ok(created) -> {
-                writer := created
+                ^writer: created
                 if source_write_all(writer, bytes) == .Err(error) {
                     source_remove_quietly(target.parent, name)
                     return Err(error)

@@ -44,9 +44,9 @@ sign: fn(n: Int) -> Int Never! {
 isqrt: fn(n: Int) -> Int? Never! {
     if n < 0 -> return None
     if n < 2 -> return Val(n)
-    lo := 1
-    hi := n
-    ans := 1
+    ^lo: 1
+    ^hi: n
+    ^ans: 1
     loop lo <= hi {
         mid: lo + (hi - lo) /% 2
         // Compare through division so `mid * mid` cannot overflow.
@@ -60,8 +60,8 @@ isqrt: fn(n: Int) -> Int? Never! {
 }
 
 gcd: fn(a: Int, b: Int) -> Int Never! {
-    x := abs(a)
-    y := abs(b)
+    ^x: abs(a)
+    ^y: abs(b)
     loop y != 0 {
         next: x % y
         x = y
@@ -152,10 +152,10 @@ acosh: fn(n: Float) -> Float Never! {
         return acosh_one(z, sh, sl)
     }
     // ln(x + sqrt(x^2 - 1)) as ln(2x) + g for x >= 111.75
-    g := Float{0.0}
-    eps := Float{1.8380614955418317e-19}
-    off := 1022
-    tb := b
+    ^g: Float{0.0}
+    ^eps: Float{1.8380614955418317e-19}
+    ^off: 1022
+    ^tb: b
     if b < 0x405B_F000_0000_0000 {
         off = 1023
         x2h: n * n
@@ -206,9 +206,9 @@ priv acosh_one: fn(x: Float, sh: Float, sl: Float) -> Float Never! {
 // from 2^52 on.
 priv acosh_refine: fn(x: Float, a: Float) -> Float Never! {
     b: to_bits(x)
-    zh := x
-    zl := Float{0.0}
-    huge := 0
+    ^zh: x
+    ^zl: Float{0.0}
+    ^huge: 0
     if b < 0x4190_0000_0000_0000 {
         x2h: x * x
         w: fast_two_sum(x2h - Float{1.0}, fma(x, x, -x2h))
@@ -273,7 +273,7 @@ asinh: fn(n: Float) -> Float Never! {
         x2h: n * n
         x2l: fma(n, n, -x2h)
         x3h: x2h * n
-        sl := Float{0.0}
+        ^sl: Float{0.0}
         if u < 0x3E5A_0000_0000_0000 -> sl = x3h * Float{-0.16666666666666666} else if u < 0x3F30_0000_0000_0000 {
             sl = x3h * (Float{-0.16666666666666666} + x2h * Float{0.07499999733907847})
         } else if u < 0x3F93_0000_0000_0000 {
@@ -291,11 +291,11 @@ asinh: fn(n: Float) -> Float Never! {
         return asinh_zero(n, x2h, x2l)
     }
     // ln(|x| + sqrt(x^2 + 1)) with the sign of x
-    x2h := Float{0.0}
-    x2l := Float{0.0}
-    ah := ax
-    al := Float{0.0}
-    off := 1023
+    ^x2h: Float{0.0}
+    ^x2l: Float{0.0}
+    ^ah: ax
+    ^al: Float{0.0}
+    ^off: 1023
     if u < 0x4190_0000_0000_0000 {
         x2h = n * n
         x2l = fma(n, n, -x2h)
@@ -508,9 +508,9 @@ atan: fn(n: Float) -> Float Never! {
         if ub == lb -> return ub
         return atan_refine(n, ub)
     }
-    h := Float{0.0}
-    ah := Float{0.0}
-    al := Float{0.0}
+    ^h: Float{0.0}
+    ^ah: Float{0.0}
+    ^al: Float{0.0}
     if at > 0x4062_DED8_E34A_9035 {
         // |x| > 150.9639755684199
         ah = copysign(Float{1.5707963267948966}, n)
@@ -563,8 +563,8 @@ atan2: fn(a: Float, b: Float) -> Float Never! {
     sg: if (gt != (ux < 0)) != (uy < 0) -> Float{-1.0} else -> Float{1.0}
     kw: (if ux < 0 -> 4 else -> 0) + (if uy < 0 -> 2 else -> 0) + (if gt -> 1 else -> 0)
     // x / y in [0, 1], and jt / 64 the table point nearest it
-    x := if gt -> fabs(a) else -> fabs(b)
-    y := if gt -> fabs(b) else -> fabs(a)
+    ^x: if gt -> fabs(a) else -> fabs(b)
+    ^y: if gt -> fabs(b) else -> fabs(a)
     jt: (to_bits(y / x + Float{2.0078125}) >> 45) & 127
     fh: ATAN2_F[2 * jt + 1] * sg + ATAN2_O[2 * kw]
     fl: ATAN2_F[2 * jt] * sg + ATAN2_O[2 * kw + 1]
@@ -731,7 +731,7 @@ priv ah_refine: fn(zh: Float, zl: Float, a: Float, adj: Int, l20: Float, l21: Fl
     sh: tl * tf
     sl: fma(tl, tf, -sh)
     x0: fast_two_sum(dh - Float{1.0}, dl)
-    xl := x0.lo
+    ^xl: x0.lo
     // zl / 2^e by its exponent field, as the C does
     if always || zl != (Float{0.0}) -> xl += th * from_bits(wrap_i64(to_bits(zl) - (e << 52)))
     xd: ah_add(x0.hi, xl, sh, sl, two)
@@ -1499,19 +1499,19 @@ bessel_j: fn(n: Int, x: Float) -> Float Never! {
     ix: bessel_high(ax)
     mf: Float{m}
     nf: mf + 1.0
-    b := Float{0.0}
+    ^b: Float{0.0}
     if ax == 0.0 || is_inf(ax) -> b = 0.0 else if mf < ax {
         // Upward: J(k + 1, x) = 2k/x J(k, x) - J(k - 1, x) is stable.
         if ix >= 0x52D0_0000 {
             // x > 2^302: the leading term of the asymptotic expansion
             phase: m & 3
-            t := cos(ax) + sin(ax)
+            ^t: cos(ax) + sin(ax)
             if phase == 0 -> t = -cos(ax) + sin(ax)
             if phase == 1 -> t = -cos(ax) - sin(ax)
             if phase == 2 -> t = cos(ax) - sin(ax)
             b = BESSEL_INVSQRTPI * t / sqrt(ax)
         } else {
-            a := bessel_j0(ax)
+            ^a: bessel_j0(ax)
             b = bessel_j1(ax)
             loop i in 1..<(m + 1) {
                 t: b
@@ -1524,7 +1524,7 @@ bessel_j: fn(n: Int, x: Float) -> Float Never! {
         if m > 32 -> b = 0.0 else {
             half: ax * 0.5
             b = half
-            factorial := Float{1.0}
+            ^factorial: Float{1.0}
             loop i in 2..<(m + 2) {
                 factorial *= Float{i}
                 b *= half
@@ -1538,10 +1538,10 @@ bessel_j: fn(n: Int, x: Float) -> Float Never! {
         // passes 1e9.
         w: Float{2.0} * nf / ax
         h: Float{2.0} / ax
-        z := w + h
-        q0 := w
-        q1 := w * z - 1.0
-        k := 1
+        ^z: w + h
+        ^q0: w
+        ^q1: w * z - 1.0
+        ^k: 1
         loop q1 < 1.0e9 {
             k += 1
             z += h
@@ -1549,13 +1549,13 @@ bessel_j: fn(n: Int, x: Float) -> Float Never! {
             q0 = q1
             q1 = next_q
         }
-        t := Float{0.0}
-        i := k
+        ^t: Float{0.0}
+        ^i: k
         loop i >= 0 {
             t = Float{1.0} / (Float{2.0} * (Float{i} + nf) / ax - t)
             i -= 1
         }
-        a := t
+        ^a: t
         b = 1.0
         // When n ln(2n/x) passes ln(max) the recurrence may overflow, so b
         // is scaled back whenever it passes 2^500.
@@ -1594,20 +1594,20 @@ bessel_y: fn(n: Int, x: Float) -> Float Never! {
         return if negative -> -one else -> one
     }
     if is_inf(x) -> return 0.0
-    b := Float{0.0}
+    ^b: Float{0.0}
     if bessel_high(x) >= 0x52D0_0000 {
         // x > 2^302: the leading term of the asymptotic expansion
         phase: m & 3
-        t := sin(x) - cos(x)
+        ^t: sin(x) - cos(x)
         if phase == 0 -> t = -sin(x) - cos(x)
         if phase == 1 -> t = -sin(x) + cos(x)
         if phase == 2 -> t = sin(x) + cos(x)
         b = BESSEL_INVSQRTPI * t / sqrt(x)
     } else {
         // Upward recurrence, which stops at -inf.
-        a := bessel_y0(x)
+        ^a: bessel_y0(x)
         b = bessel_y1(x)
-        i := 0
+        ^i: 0
         loop i < m && (to_bits(b) >> 32) & 0xFFFF_FFFF != 0xFFF0_0000 {
             i += 1
             t: b
@@ -1663,12 +1663,12 @@ priv bessel_q: fn(r: [Float], s: [Float], c: Float, x: Float) -> Float Never! {
 // cancels.
 priv bessel_common0: fn(ix: Int, x: Float, second: Bool) -> Float Never! {
     s: sin(x)
-    c := cos(x)
+    ^c: cos(x)
     if second -> c = -c
-    cc := s + c
+    ^cc: s + c
     // 2x overflows from 2^1023
     if ix < 0x7FE0_0000 {
-        ss := s - c
+        ^ss: s - c
         z: -cos(Float{2.0} * x)
         if s * c < 0.0 -> cc = z / ss else -> ss = z / cc
         if ix < 0x4800_0000 {
@@ -1682,12 +1682,12 @@ priv bessel_common0: fn(ix: Int, x: Float, second: Bool) -> Float Never! {
 // J1 or Y1 for x >= 2, as bessel_common0 with the phase 3pi/4; `negative`
 // negates the result (J1 is odd).
 priv bessel_common1: fn(ix: Int, x: Float, second: Bool, negative: Bool) -> Float Never! {
-    s := sin(x)
+    ^s: sin(x)
     if second -> s = -s
     c: cos(x)
-    cc := s - c
+    ^cc: s - c
     if ix < 0x7FE0_0000 {
-        ss := -s - c
+        ^ss: -s - c
         z: cos(Float{2.0} * x)
         if s * c > 0.0 -> cc = z / ss else -> ss = z / cc
         if ix < 0x4800_0000 {
@@ -1740,7 +1740,7 @@ priv bessel_j1: fn(x: Float) -> Float Never! {
     // +-0 at +-inf, as glibc's j1 gives (musl's is +0 for both)
     if ix >= 0x7FF0_0000 -> return Float{1.0} / x
     if ix >= 0x4000_0000 -> return bessel_common1(ix, fabs(x), false, sign_bit(x))
-    z := x
+    ^z: x
     if ix >= 0x3800_0000 {
         // 2^-127 <= |x| < 2: x/2 + x R(x^2)/S(x^2)
         zz: x * x
@@ -1977,8 +1977,8 @@ priv BESSEL_Q1_S: [Float]{
 /// at every exact cube, and +-0, +-inf and NaN return themselves.
 cbrt: fn(n: Float) -> Float Never! {
     hx: to_bits(n)
-    mant := hx & 0xF_FFFF_FFFF_FFFF
-    e := (hx >> 52) & 0x7FF
+    ^mant: hx & 0xF_FFFF_FFFF_FFFF
+    ^e: (hx >> 52) & 0x7FF
     if (e + 1) & 0x7FF < 2 {
         ix: hx & 0x7FFF_FFFF_FFFF_FFFF
         if e == 0x7FF || ix == 0 -> return n + n
@@ -2010,9 +2010,9 @@ cbrt: fn(n: Float) -> Float Never! {
     y: (y0 - (h0 * y0) * (Float{0.3333333333333333} - Float{0.2222222222222222} * h0)) * isc
     // then a linear one on zz, with y^3 in double-double
     s: cbrt_step(y, zz, rr)
-    y1 := s.hi
-    dy := s.lo
-    ady := fabs(dy)
+    ^y1: s.hi
+    ^dy: s.lo
+    ^ady: fabs(dy)
     if (fabs(ady - Float{1.1102230246251565e-16}) < Float{2.6469779601696886e-23}) || (fabs(ady - Float{3.3306690738754696e-16}) < Float{2.6469779601696886e-23}) {
         t: cbrt_step(y1, zz, rr)
         y1 = t.hi
@@ -2025,7 +2025,7 @@ cbrt: fn(n: Float) -> Float Never! {
         }
     }
     // the scaled magnitude; its low 34 bits near 0 or 2^34 flag an exact cube
-    mag := to_bits(fabs(y1)) + ((et - 342 - 1023) << 52)
+    ^mag: to_bits(fabs(y1)) + ((et - 342 - 1023) << 52)
     low: mag & 0x3_FFFF_FFFF
     if low <= 1 || low == 0x3_FFFF_FFFF {
         rounded: copysign(from_bits((to_bits(fabs(y1)) + 0x8000) & 0x7FFF_FFFF_FFFF_0000), y1)
@@ -2209,8 +2209,8 @@ exp: fn(n: Float) -> Float Never! {
     dx: (n - Float{0.00016922538588914904} * t) + Float{1.0256140314162804e-14} * t
     dx2: dx * dx
     p: (Float{1.0} + dx * Float{0.5}) + dx2 * (Float{0.16666666674124284} + dx * Float{0.04166666665427057})
-    fh := tt.hi
-    fl := tt.lo + tt.hi * dx * p
+    ^fh: tt.hi
+    ^fl: tt.lo + tt.hi * dx * p
     eps: Float{2.498747194400186e-19}
     if bits < 0 && ax > 0x4086_232B_DD7A_BCD2 {
         // a subnormal result: 2^(-1022 - ie) added so the sum rounds at the
@@ -2257,8 +2257,8 @@ exp2: fn(n: Float) -> Float Never! {
     ie: k >> 12
     tt: exp_cr_muldd(EXP2CR_T0[2 * i0 + 1], EXP2CR_T0[2 * i0], EXP2CR_T1[2 * i1 + 1], EXP2CR_T1[2 * i1])
     tz: tt.hi * z
-    fh := tt.hi
-    fl := tz * ((Float{0.0001692253858788929} + z * Float{1.4318615612930102e-8}) + z2 * (Float{8.076910844779527e-13} + z * Float{3.417045885940598e-17})) + tt.lo
+    ^fh: tt.hi
+    ^fl: tz * ((Float{0.0001692253858788929} + z * Float{1.4318615612930102e-8}) + z2 * (Float{8.076910844779527e-13} + z * Float{3.417045885940598e-17})) + tt.lo
     eps: Float{2.1556988507621944e-19}
     if bits >= 0 || ax <= 0x408F_F000_0000_0000 {
         if !whole {
@@ -2296,7 +2296,7 @@ exp10: fn(n: Float) -> Float Never! {
         if ax > 0x4074_39B7_46E3_6B52 -> return 0.0
     }
     if (bits & 0xFFFF_FFFF_FFFF == 0 && (ax >> 48) <= 0x4036 && bits >= 0 && round_ties_even(n) == n) {
-        r := Float{1.0}
+        ^r: Float{1.0}
         loop _ in 0..<(checked(Int{n}) ?? 0) -> r *= Float{10.0}
         return r
     }
@@ -2311,8 +2311,8 @@ exp10: fn(n: Float) -> Float Never! {
     dx: (n - Float{0.00007349365125719487} * t) - Float{2.795678930181113e-14} * t
     dx2: dx * dx
     p: (Float{2.302585092994046} + dx * Float{2.650949055239199}) + dx2 * (Float{2.0346785932039073} + dx * Float{1.171255149401227})
-    fh := tt.hi
-    fl := tt.lo + (tt.hi * dx) * p
+    ^fh: tt.hi
+    ^fl: tt.lo + (tt.hi * dx) * p
     eps: Float{2.17e-19}
     if bits >= 0 || ax < 0x4073_3A71_46F7_2A42 {
         ub: fh + (fl + eps)
@@ -2386,8 +2386,8 @@ exp_m1: fn(n: Float) -> Float Never! {
     dx: (n - Float{0.00016922538588914904} * t) + Float{1.0256140314162804e-14} * t
     dx2: dx * dx
     p: (Float{1.0} + dx * Float{0.5}) + dx2 * (Float{0.16666666674124284} + dx * Float{0.04166666665427057})
-    fh := tt.hi
-    fl := tt.lo + (tt.hi * dx) * p
+    ^fh: tt.hi
+    ^fl: tt.lo + (tt.hi * dx) * p
     eps: Float{1.64e-19} * tt.hi
     // -1 as -2^-ie before the 2^ie scaling, added where it is exact
     off: -__from_bits_i64((1023 - ie) << 52)
@@ -2515,7 +2515,7 @@ erf: fn(n: Float) -> Float Never! {
     f: erf_fast(z)
     left: f.hi + fma(f.err, -f.hi, f.lo)
     if left == f.hi + fma(f.err, f.hi, f.lo) -> return if (n >= Float{0.0}) -> left else -> -left
-    r := hard_case(ERF_HARD, z)
+    ^r: hard_case(ERF_HARD, z)
     if is_nan(r) {
         a: erf_accurate(z)
         r = a.hi + a.lo
@@ -2575,13 +2575,13 @@ priv erf_accurate: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     v: float_floor(Float{8.0} * z)
     b: 27 * ((checked(Int{v}) ?? 1) - 1)
     x: (z - Float{0.0625}) - Float{0.125} * v
-    h := ERF_C2[b + 26]
-    j := 17
+    ^h: ERF_C2[b + 26]
+    ^j: 17
     loop j > 10 {
         h = fma(h, x, ERF_C2[b + 8 + j])
         j -= 1
     }
-    l := Float{0.0}
+    ^l: Float{0.0}
     loop j >= 0 {
         t: s_mul(x, h, l)
         // two_sum: a small coefficient may follow a larger one
@@ -2603,13 +2603,13 @@ priv erf_accurate: fn(z: Float) -> {hi: Float, lo: Float} Never! {
 // 1/8.
 priv erf_accurate_tiny: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     z2: z * z
-    h := ERF_TINY_P[14]
-    k := 13
+    ^h: ERF_TINY_P[14]
+    ^k: 13
     loop k >= 10 {
         h = fma(h, z2, ERF_TINY_P[k])
         k -= 1
     }
-    l := Float{0.0}
+    ^l: Float{0.0}
     // (h + l) z^2, then the next coefficient: degree 11 and 9 as Floats,
     // degree 7 to 1 as (hi, lo)
     loop k >= 0 {
@@ -5743,7 +5743,7 @@ priv erfc_fast: fn(x: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     e: exp_dd_fast(-uh, -fma(x, x, -uh))
     yh: Float{1.0} / x
     yl: yh * fma(-x, yh, Float{1.0})
-    i := 0
+    ^i: 0
     loop yh > ERFC_ASYMPT_CUT[i] -> i += 1
     b: 13 * i
     vh: yh * yh
@@ -5751,9 +5751,9 @@ priv erfc_fast: fn(x: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     // p(y) = y (c1 + y^2 (c3 + ...)): c1 as (hi, lo), then c3 to c23
     p: s_mul(fma(fma(ERFC_ASYMPT[b + 12], vh, ERFC_ASYMPT[b + 11]), vh, ERFC_ASYMPT[b + 10]), vh, vl)
     s: fast_two_sum(ERFC_ASYMPT[b + 9], p.hi)
-    zh := s.hi
-    zl := s.lo + p.lo
-    k := 8
+    ^zh: s.hi
+    ^zl: s.lo + p.lo
+    ^k: 8
     loop k >= 2 {
         d: d_mul(zh, zl, vh, vl)
         t: fast_two_sum(ERFC_ASYMPT[b + k], d.hi)
@@ -5789,16 +5789,16 @@ priv erfc_asympt_accurate: fn(x: Float) -> Float Never! {
     e: erfc_exp_accurate(-uh, -fma(x, x, -uh))
     yh: Float{1.0} / x
     yl: yh * fma(-x, yh, Float{1.0})
-    i := 0
+    ^i: 0
     loop yh > ERFC_ACC_CUT[i] -> i += 1
     b: 30 * i
     vh: yh * yh
     vl: fma(Float{2.0} * yh, yl, fma(yh, yh, -vh))
     // p(y) = y (c1 + y^2 (c3 + ...)): c1 to c11 as (hi, lo), then c13 to the
     // degree 29 + 2i
-    zh := ERFC_ASYMPT_ACC[b + 20 + i]
-    zl := Float{0.0}
-    j := 27 + 2 * i
+    ^zh: ERFC_ASYMPT_ACC[b + 20 + i]
+    ^zl: Float{0.0}
+    ^j: 27 + 2 * i
     loop j >= 1 {
         d: d_mul(zh, zl, vh, vl)
         if j >= 13 {
@@ -5846,9 +5846,9 @@ priv erfc_exp_accurate: fn(xh: Float, xl: Float) -> {hi: Float, lo: Float, k: In
     y: fast_two_sum(yh, t.hi)
     yl: fma(-kf, Float{1.94704509238075e-31}, y.lo + t.lo)
     // y.lo is below 2^-104 in the terms of degree 16 to 19
-    h := fma(fma(fma(ERFC_EXP_P[27], y.hi, ERFC_EXP_P[26]), y.hi, ERFC_EXP_P[25]), y.hi, ERFC_EXP_P[24])
-    l := Float{0.0}
-    i := 15
+    ^h: fma(fma(fma(ERFC_EXP_P[27], y.hi, ERFC_EXP_P[26]), y.hi, ERFC_EXP_P[25]), y.hi, ERFC_EXP_P[24])
+    ^l: Float{0.0}
+    ^i: 15
     loop i >= 0 {
         d: d_mul(h, l, y.hi, yl)
         if i >= 8 {
@@ -6536,10 +6536,10 @@ gamma: fn(n: Float) -> Float Never! {
         if (n < Float{0.0}) { return Float{0.0} / Float{0.0} }
         // (n - 1)! exactly in double-double up to 23!, then rounded once
         k: checked(Int{fx}) ?? 0
-        th := Float{1.0}
-        tl := Float{0.0}
-        x0 := Float{1.0}
-        i := 1
+        ^th: Float{1.0}
+        ^tl: Float{0.0}
+        ^x0: Float{1.0}
+        ^i: 1
         loop i < k {
             t: exp2_cr_mulddd(x0, th, tl)
             th = t.hi
@@ -6603,13 +6603,13 @@ gamma: fn(n: Float) -> Float Never! {
     c: TGAMMA_MID_C
     f: gamma_polyddd(d, TGAMMA_MID_CC, 0, 10, d * (((c[0] + d * c[1]) + d2 * (c[2] + d * c[3])) + d4 * ((c[4] + d * c[5]) + d2 * (c[6] + d * c[7]))))
     jm: checked(Int{fabs(i)}) ?? 0
-    wh := Float{1.0}
-    wl := Float{0.0}
+    ^wh: Float{1.0}
+    ^wl: Float{0.0}
     if jm != 0 {
-        xph := n
-        xpl := Float{0.0}
+        ^xph: n
+        ^xpl: Float{0.0}
         wh = n
-        j := jm - 1
+        ^j: jm - 1
         loop j > 0 {
             s: if (fabs(xph) > Float{1.0}) -> fast_two_sum(xph, Float{1.0}) else -> fast_two_sum(Float{1.0}, xph)
             xph = s.hi
@@ -6659,20 +6659,20 @@ priv tgamma_accurate: fn(x: Float) -> Float Never! {
     ix: float_floor(x)
     d: Float{2.0} * (x - (ix + Float{0.5}))
     i: checked(Int{ix}) ?? 0
-    seg := 0
+    ^seg: 0
     loop seg < 8 && i <= TGAMMA_ACC_SEG[7 * seg] -> seg += 1
     sg: 7 * seg
     f: gamma_poly3(d, TGAMMA_ACC_SEG[sg + 3], TGAMMA_ACC_SEG[sg + 4], TGAMMA_ACC_SEG[sg + 5], TGAMMA_ACC_SEG[sg + 6])
     jm: TGAMMA_ACC_SEG[sg + 1] - i
-    eoff := TGAMMA_ACC_SEG[sg + 2]
-    wh := Float{1.0}
-    wl := Float{0.0}
+    ^eoff: TGAMMA_ACC_SEG[sg + 2]
+    ^wh: Float{1.0}
+    ^wl: Float{0.0}
     if jm > 0 {
         // x (x + 1) ... (x + jm - 1), rescaled by 2^-500 as it grows
-        xph := x
-        xpl := Float{0.0}
+        ^xph: x
+        ^xpl: Float{0.0}
         wh = x
-        j := jm - 1
+        ^j: jm - 1
         loop j > 0 {
             s: if (fabs(xph) > Float{1.0}) -> fast_two_sum(xph, Float{1.0}) else -> fast_two_sum(Float{1.0}, xph)
             t: fast_two_sum(s.hi, xpl + s.lo)
@@ -6690,10 +6690,10 @@ priv tgamma_accurate: fn(x: Float) -> Float Never! {
         }
     } else if jm < 0 {
         // (x - 1) (x - 2) ... (x + jm)
-        xph := x - Float{1.0}
-        xpl := Float{0.0}
+        ^xph: x - Float{1.0}
+        ^xpl: Float{0.0}
         wh = xph
-        j := -1 - jm
+        ^j: -1 - jm
         loop j > 0 {
             s: fast_two_sum(xph, Float{-1.0})
             t: fast_two_sum(s.hi, xpl + s.lo)
@@ -6705,8 +6705,8 @@ priv tgamma_accurate: fn(x: Float) -> Float Never! {
             j -= 1
         }
     }
-    fh := f.hi
-    fl := f.lo
+    ^fh: f.hi
+    ^fl: f.lo
     if jm > 0 {
         rh: Float{1.0} / wh
         g: gamma_mul_dd3(fh, fl, rh, (fma(rh, -wh, Float{1.0}) - wl * rh) * rh)
@@ -6720,7 +6720,7 @@ priv tgamma_accurate: fn(x: Float) -> Float Never! {
     eps: Float{1.8488927466117464e-31} * fh
     r: fh + fl
     re: (to_bits(r) >> 52) & 0x7FF
-    res := Float{0.0}
+    ^res: Float{0.0}
     if re + eoff <= 0 {
         // a subnormal result, rounded once as in gamma's reflection
         s: fast_two_sum(copysign(ldexp(Float{1.0}, -1022 - eoff), r), fh)
@@ -6738,13 +6738,13 @@ priv tgamma_accurate: fn(x: Float) -> Float Never! {
 // double-double polynomial of cl; ch and cl are runs of TGAMMA_ACC_CH and
 // TGAMMA_ACC_CL.
 priv gamma_poly3: fn(d: Float, ch: Int, nh: Int, cl: Int, nl: Int) -> {hi: Float, lo: Float} Never! {
-    t0 := Float{1.0}
-    t1 := Float{0.0}
-    t2 := Float{0.0}
-    s0 := TGAMMA_ACC_CH[ch]
-    s1 := Float{0.0}
-    s2 := Float{0.0}
-    i := 1
+    ^t0: Float{1.0}
+    ^t1: Float{0.0}
+    ^t2: Float{0.0}
+    ^s0: TGAMMA_ACC_CH[ch]
+    ^s1: Float{0.0}
+    ^s2: Float{0.0}
+    ^i: 1
     loop i < nh {
         // sprod: d (t0 + t1 + t2) as the triple t0 + t1 + t2 again
         z0: d * t0
@@ -6781,10 +6781,10 @@ priv gamma_mul_dd3: fn(xh: Float, xl: Float, yh: Float, yl: Float) -> {hi: Float
 // at the double x, Horner in double-double with two-sums, l added to the top
 // coefficient.
 priv gamma_polyddd: fn(x: Float, c: [Float], o: Int, n: Int, l: Float) -> {hi: Float, lo: Float} Never! {
-    i := n - 1
+    ^i: n - 1
     t: fast_two_sum(c[o + 2 * i], l)
-    ch := t.hi
-    cl := t.lo + c[o + 2 * i + 1]
+    ^ch: t.hi
+    ^cl: t.lo + c[o + 2 * i + 1]
     loop i > 0 {
         i -= 1
         p: exp2_cr_mulddd(x, ch, cl)
@@ -6876,10 +6876,10 @@ priv tgamma_lgamma_asym: fn(xh: Float, xl: Float) -> {hi: Float, lo: Float} Neve
     m: exp_cr_muldd(xh - Float{0.5}, xl, lg.hi - Float{1.0}, lg.lo + dz)
     z2: exp_cr_muldd(zh, zl, zh, zl)
     x2: z2.hi * z2.hi
-    lh := Float{0.0}
-    ll := Float{0.0}
-    fh := Float{0.0}
-    fl := Float{0.0}
+    ^lh: Float{0.0}
+    ^ll: Float{0.0}
+    ^fh: Float{0.0}
+    ^fl: Float{0.0}
     if (xh > Float{11.5}) {
         c: TGAMMA_ASYM_FAR
         l: fast_sum_dd(m.hi, m.lo, c[0], c[1])
@@ -8492,9 +8492,9 @@ lgamma: fn(n: Float) -> Float Never! {
         if (n == Float{1.0} || n == Float{2.0}) { return Float{0.0} }
     }
     au: ab >> 37
-    fh := Float{0.0}
-    fl := Float{0.0}
-    eps := Float{0.0}
+    ^fh: Float{0.0}
+    ^fl: Float{0.0}
+    ^eps: Float{0.0}
     if au < LGAMMA_BRD[0] {
         // |x| < 1/2: lgamma(x) = lgamma(1 + x) - ln|x|
         lg: gamma_log(fabs(n))
@@ -8538,8 +8538,8 @@ lgamma: fn(n: Float) -> Float Never! {
         if au >= LGAMMA_BRD[19] {
             // |x| >= 8.29541: Stirling, (x - 1/2) (ln(x) - 1) + c0 + c1 z + ...
             lg: gamma_log(ax)
-            lh := lg.hi - Float{1.0}
-            ll := lg.lo
+            ^lh: lg.hi - Float{1.0}
+            ^ll: lg.lo
             if au >= 0x219_8000 {
                 // x >= 2^52: x (ln(x) - 1) - (ln(x) - 1)/2
                 if au >= 0x3FA_BAA6 {
@@ -8558,8 +8558,8 @@ lgamma: fn(n: Float) -> Float Never! {
             }
             c: LGAMMA_ASYM_CC
             l: fast_sum_dd(lh, ll, c[0], c[1])
-            sh := Float{0.0}
-            sl := Float{0.0}
+            ^sh: Float{0.0}
+            ^sl: Float{0.0}
             if (ax < Float{1.2676506002282294e30}) {
                 zh: Float{1.0} / ax
                 zl: fma(zh, -ax, Float{1.0}) * zh
@@ -8653,9 +8653,9 @@ priv lgamma_sin_pi: fn(x: Float) -> {hi: Float, lo: Float} Never! {
 // (-10.5, -2) a polynomial in the distance to the root, and the hard cases.
 priv lgamma_accurate: fn(sx: Float) -> Float Never! {
     x: fabs(sx)
-    fh := Float{0.0}
-    fl := Float{0.0}
-    fll := Float{0.0}
+    ^fh: Float{0.0}
+    ^fl: Float{0.0}
+    ^fll: Float{0.0}
     if (x < Float{0.25}) {
         if (x < Float{7.888609052210118e-31}) {
             lg: lgamma_log_accurate(x)
@@ -8686,8 +8686,8 @@ priv lgamma_accurate: fn(sx: Float) -> Float Never! {
         // (lgamma(1 + d) + ln(1 + d))/d and logs of x - 1 and x - 2, then for
         // sx < 0 the log of x (lgamma(1 + x) is the reflection's lgamma(1 - sx))
         neg: (sx < Float{0.0})
-        addlog := neg
-        f := lgamma_dd3(Float{0.0}, Float{0.0}, Float{0.0})
+        ^addlog: neg
+        ^f: lgamma_dd3(Float{0.0}, Float{0.0}, Float{0.0})
         if (fabs(x - Float{0.5}) < Float{0.25}) {
             p: exp_m1_cr_opolyddd(x - Float{0.5}, LGAMMA_ACC_B, 0, LGAMMA_ACC_B.len() /% 2, Float{0.0})
             f = lgamma_dd3(p.hi, p.lo, Float{0.0})
@@ -8754,8 +8754,8 @@ priv lgamma_accurate: fn(sx: Float) -> Float Never! {
     if (fabs(fh) < Float{0.375}) {
         // near a root x0 of lgamma: lgamma(x) = z P(sc z), z = x + x0
         rt: LGAMMA_ROOT
-        k := 0
-        row := -1
+        ^k: 0
+        ^row: -1
         loop k < 17 {
             if (sx > rt[7 * k] && sx < rt[7 * k + 1]) { row = k }
             k += 1
@@ -8769,8 +8769,8 @@ priv lgamma_accurate: fn(sx: Float) -> Float Never! {
             sh: z.hi * rt[7 * row + 6]
             sl: zl * rt[7 * row + 6]
             c: LGAMMA_ROOT_C
-            i := nf - 1
-            pk := c[o + 2 * (nd + i)]
+            ^i: nf - 1
+            ^pk: c[o + 2 * (nd + i)]
             loop i > 0 {
                 i -= 1
                 pk = c[o + 2 * (nd + i)] + sh * pk
@@ -8868,8 +8868,8 @@ priv lgamma_sin_pi_accurate: fn(x: Float) -> {hi: Float, lo: Float} Never! {
 priv lgamma_asym_accurate: fn(xh: Float, xl: Float) -> {hi: Float, mid: Float, lo: Float} Never! {
     lg: lgamma_log_accurate(xh)
     l0: lg.hi - Float{1.0}
-    l1 := lg.mid
-    l2 := lg.lo
+    ^l1: lg.mid
+    ^l2: lg.lo
     if (xh >= Float{1.329227995784916e36}) {
         wl: xl - Float{0.5}
         l0x: l0 * xh
@@ -11093,7 +11093,7 @@ priv float_ceil: fn(x: Float) -> Float Never! {
 // Core's bit work (an Int mask past 2^62 would be a boxed big Int).
 priv float_trunc: fn(x: Float) -> Float Never! {
     bits: __to_bits_i64(x)
-    e := ((bits >> 52) & 0x7FF) - 1011
+    ^e: ((bits >> 52) & 0x7FF) - 1011
     if e >= 64 -> return x
     if e < 12 -> e = 1
     fraction: I64{0x7FFF_FFFF_FFFF_FFFF} >> (e - 1)
@@ -11122,7 +11122,7 @@ hypot: fn(a: Float, b: Float) -> Float Never! {
     if vb == 0 -> return from_bits(ub)
     if ub < 0x10_0000_0000_0000 -> return hypot_exact(from_bits(ub), from_bits(vb))
     // a subnormal v as a normalized significand under an exponent field <= 0
-    ve := vb
+    ^ve: vb
     if vb < 0x10_0000_0000_0000 {
         sh: 53 - bit_len(vb)
         ve = ((vb << sh) & 0xF_FFFF_FFFF_FFFF) + ((1 - sh) << 52)
@@ -11178,7 +11178,7 @@ priv isqrt_floor: fn(n: Int) -> Int Never! {
     seed: checked(Int{float_floor(sqrt(approx(n >> (2 * sh))))}) ?? 1
     x0: if seed < 1 -> Int{1} << sh else -> seed << sh
     // one step lands at or above floor(sqrt(n)); from there it decreases
-    x := (x0 + n /% x0) /% 2
+    ^x: (x0 + n /% x0) /% 2
     loop {
         y: (x + n /% x) /% 2
         if y >= x -> return x
@@ -12048,8 +12048,8 @@ priv sinh_cosh: fn(ax: Float, sg: Float, m: Float, e36: Float, hard: [Float]) ->
     dx2: dx * dx
     mx: -dx
     pp: dx * ((Float{1.0} + dx * Float{0.5}) + dx2 * (Float{0.1666666668218872} + dx * Float{0.041666666640865824}))
-    rh := Float{0.0}
-    rl := Float{0.0}
+    ^rh: Float{0.0}
+    ^rl: Float{0.0}
     if aix > 0x4014_0000_0000_0000 {
         if aix > 0x4042_5E4F_7B27_37FA {
             // e^-ax is below the rounding: only e^ax / 2
@@ -12164,10 +12164,10 @@ priv hyp_mul_dd_d: fn(xh: Float, xl: Float, c: Float) -> {hi: Float, lo: Float} 
 // The double-double polynomial of n (hi, lo) pairs of c in xh + xl, with l
 // added to the last coefficient (the polydd of sinh.c, cosh.c and tanh.c).
 priv hyp_poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float, acc: Bool) -> {hi: Float, lo: Float} Never! {
-    i := n - 1
+    ^i: n - 1
     s0: fast_two_sum(c[2 * i], l)
-    ch := s0.hi
-    cl := s0.lo + c[2 * i + 1]
+    ^ch: s0.hi
+    ^cl: s0.lo + c[2 * i + 1]
     loop i > 0 {
         i -= 1
         p: hyp_mul_dd(xh, xl, ch, cl, acc)
@@ -12189,7 +12189,7 @@ priv hyp_nudge: fn(y1: Float, y2: Float) -> Float Never! {
 
 // f, or the listed sg (hi + lo) of a hard case |x| = ax in rows of three.
 priv hyp_listed: fn(hard: [Float], ax: Float, sg: Float, f: Float) -> Float Never! {
-    k := 0
+    ^k: 0
     loop k < hard.len() {
         if ax == hard[k] -> return sg * hard[k + 1] + sg * hard[k + 2]
         k += 3
@@ -12648,10 +12648,10 @@ sqrt: fn(n: Float) -> Float Never! { __float_sqrt(n) }
     if n == 0.0 || n == INFINITY -> return n
     if n < 0.0 -> return NAN
     parts: float_parts(n)
-    shift := 112 - bit_len(parts.m)
+    ^shift: 112 - bit_len(parts.m)
     if (parts.e - shift) % 2 != 0 -> shift += 1
     m: parts.m << shift
-    root := isqrt(m) ?? 0
+    ^root: isqrt(m) ?? 0
     if root * root != m -> root |= 1
     nearest_scaled(root, (parts.e - shift) /% 2)
 }
@@ -12668,7 +12668,7 @@ rsqrt: fn(n: Float) -> Float Never! {
         if is_nan(n) -> return n + n
         return from_bits(0x7FF8_0000_0000_0000)
     }
-    r := Float{0.0}
+    ^r: Float{0.0}
     if biased == 0 {
         if bits == 0 -> return INFINITY
         r = sqrt(n) / n
@@ -12695,7 +12695,7 @@ rsqrt: fn(n: Float) -> Float Never! {
 // comparing m * m * x with 1 in integers. No midpoint is ever exact.
 priv rsqrt_exact: fn(candidate: Float, n: Float) -> Float Never! {
     x: float_parts(n)
-    r := candidate
+    ^r: candidate
     loop {
         c: float_parts(r)
         if square_times_below_one(2 * c.m + 1, c.e - 1, x) {
@@ -12727,10 +12727,10 @@ priv float_parts: fn(n: Float) -> {m: Int, e: Int} Never! {
 // and down to the unit 2^-1074 for a subnormal, so the last scaling is
 // exact.
 priv nearest_scaled: fn(n: Int, e: Int) -> Float Never! {
-    shift := bit_len(n) - 53
+    ^shift: bit_len(n) - 53
     if -1074 - e > shift -> shift = -1074 - e
     if shift <= 0 -> return ldexp(Float{n}, e)
-    q := n >> shift
+    ^q: n >> shift
     rest: n - (q << shift)
     half: Int{1} << (shift - 1)
     if rest > half || (rest == half && is_odd(q)) -> q += 1
@@ -12862,9 +12862,9 @@ priv pow_cr: fn(a: Float, y: Float) -> Float Never! {
 // below 2^-24 hi.
 priv pow_log_1: fn(x: Float) -> {hi: Float, lo: Float, cancel: Bool} Never! {
     u: __to_bits_i64(x)
-    m := u & 0xF_FFFF_FFFF_FFFF
-    e := (u >> 52) & 0x7FF
-    tb := I64{0}
+    ^m: u & 0xF_FFFF_FFFF_FFFF
+    ^e: (u >> 52) & 0x7FF
+    ^tb: I64{0}
     if e != 0 {
         tb = m | 0x3FF0_0000_0000_0000
         m += 0x10_0000_0000_0000
@@ -12899,8 +12899,8 @@ priv pow_p_1: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     wh: z * z
     wl: fma(z, z, -wh)
     t: fma(Float{-0.12500370131039634}, z, Float{0.1428610267999632})
-    u := fma(Float{-0.16666666662262275}, z, Float{0.19999999995699516})
-    v := fma(Float{-0.25000000000000017}, z, Float{0.3333333333333335})
+    ^u: fma(Float{-0.16666666662262275}, z, Float{0.19999999995699516})
+    ^v: fma(Float{-0.25000000000000017}, z, Float{0.3333333333333335})
     u = fma(t, wh, u)
     v = fma(u, wh, v)
     {hi: Float{-0.5} * wh, lo: fma(v * wh, z, Float{-0.5} * wl)}
@@ -12929,7 +12929,7 @@ priv pow_exp_1: fn(rh: Float, rl: Float) -> {hi: Float, lo: Float} Never! {
 
 // e^z for |z| < 2^-12.905 as hi + lo (CORE-MATH pow.c q_1): degree 4.
 priv pow_q_1: fn(z: Float) -> {hi: Float, lo: Float} Never! {
-    q := fma(Float{0.041666666688168076}, z, Float{0.16666666679061554})
+    ^q: fma(Float{0.041666666688168076}, z, Float{0.16666666679061554})
     q = fma(q, z, Float{0.5})
     h0: fma(q, z, Float{1.0})
     h1: z * h0
@@ -12959,7 +12959,7 @@ priv pow_big: fn(a: Float, n: Int) -> Float Never! {
     x: float_parts(a)
     if x.m & x.m - 1 == 0 -> return round_scaled(1, (x.e + bit_len(x.m) - 1) * n)
     cap: Int{1} << 1000
-    cn := n
+    ^cn: n
     if cn > cap -> cn = cap
     if cn < -cap -> cn = -cap
     lg: approx(cn) * log2(a)
@@ -13019,8 +13019,8 @@ priv root_cr: fn(a: Float, n: Int) -> Float Never! {
 // divide e and m must be the nth power of a whole s, and s = 1 for n < 0.
 priv root_exact: fn(a: Float, n: Int) -> Float Never! {
     x: float_parts(a)
-    m := x.m
-    e := x.e
+    ^m: x.m
+    ^e: x.e
     loop m & 1 == 0 {
         m = m >> 1
         e += 1
@@ -13029,8 +13029,8 @@ priv root_exact: fn(a: Float, n: Int) -> Float Never! {
     if m == 1 -> return ldexp(Float{1.0}, e /% n)
     // 3^34 > 2^53
     if n < 0 || n > 33 -> return NAN
-    lo := 1
-    hi := Int{1} << (bit_len(m) /% n + 1)
+    ^lo: 1
+    ^hi: Int{1} << (bit_len(m) /% n + 1)
     loop lo + 1 < hi {
         mid: (lo + hi) >> 1
         if mid.pow(n) <= m -> lo = mid else -> hi = mid
@@ -13086,7 +13086,7 @@ priv compound_cr: fn(x: Float, bh: Float, bl: Float, n: Int) -> Float Never! {
     bm: if p.e < 0 -> (Int{1} << -p.e) + sx else -> 1 + (sx << p.e)
     be: if p.e < 0 -> p.e else -> 0
     cap: Int{1} << 1000
-    cn := n
+    ^cn: n
     if cn > cap -> cn = cap
     if cn < -cap -> cn = -cap
     // log2(1 + x) within 2^-20 relative
@@ -13188,45 +13188,81 @@ priv f32_listed: fn(x: Float, r: Float, sides: [Float]) -> Float Never! {
     r
 }
 
-#Builtin.Role(.Exp2F32) priv __exp2_f32: fn(x: Float) -> Float Never! { f32_listed(x, exp2(x), EXP2_F32) }
+#Builtin.Role(.Exp2F32) priv __exp2_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, exp2(x), EXP2_F32)
+}
 
 #Builtin.Role(.LnF32) priv __ln_f32: fn(x: Float) -> Float Never! { f32_listed(x, ln(x), LN_F32) }
 
-#Builtin.Role(.Log10F32) priv __log10_f32: fn(x: Float) -> Float Never! { f32_listed(x, log10(x), LOG10_F32) }
+#Builtin.Role(.Log10F32) priv __log10_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, log10(x), LOG10_F32)
+}
 
-#Builtin.Role(.Ln1pF32) priv __ln_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, ln_1p(x), LN1P_F32) }
+#Builtin.Role(.Ln1pF32) priv __ln_1p_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, ln_1p(x), LN1P_F32)
+}
 
 #Builtin.Role(.Log1pF32) priv __log1p_f32: fn(x: Float) -> Float Never! { __ln_1p_f32(x) }
 
-#Builtin.Role(.AtanPiF32) priv __atan_pi_f32: fn(x: Float) -> Float Never! { f32_listed(x, atan_pi(x), ATANPI_F32) }
+#Builtin.Role(.AtanPiF32) priv __atan_pi_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, atan_pi(x), ATANPI_F32)
+}
 
-#Builtin.Role(.Exp10M1F32) priv __exp10_m1_f32: fn(x: Float) -> Float Never! { f32_listed(x, exp10_m1(x), EXP10M1_F32) }
+#Builtin.Role(.Exp10M1F32) priv __exp10_m1_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, exp10_m1(x), EXP10M1_F32)
+}
 
-#Builtin.Role(.Log21pF32) priv __log2_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, log2_1p(x), LOG2P1_F32) }
+#Builtin.Role(.Log21pF32) priv __log2_1p_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, log2_1p(x), LOG2P1_F32)
+}
 
-#Builtin.Role(.Log101pF32) priv __log10_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, log10_1p(x), LOG10P1_F32) }
+#Builtin.Role(.Log101pF32) priv __log10_1p_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, log10_1p(x), LOG10P1_F32)
+}
 
-#Builtin.Role(.SinF32) priv __sin_f32: fn(x: Float) -> Float Never! { f32_listed(x, sin(x), SIN_F32) }
+#Builtin.Role(.SinF32) priv __sin_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, sin(x), SIN_F32)
+}
 
-#Builtin.Role(.CosF32) priv __cos_f32: fn(x: Float) -> Float Never! { f32_listed(x, cos(x), COS_F32) }
+#Builtin.Role(.CosF32) priv __cos_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, cos(x), COS_F32)
+}
 
-#Builtin.Role(.AcosF32) priv __acos_f32: fn(x: Float) -> Float Never! { f32_listed(x, acos(x), ACOS_F32) }
+#Builtin.Role(.AcosF32) priv __acos_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, acos(x), ACOS_F32)
+}
 
-#Builtin.Role(.AtanF32) priv __atan_f32: fn(x: Float) -> Float Never! { f32_listed(x, atan(x), ATAN_F32) }
+#Builtin.Role(.AtanF32) priv __atan_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, atan(x), ATAN_F32)
+}
 
-#Builtin.Role(.SinhF32) priv __sinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, sinh(x), SINH_F32) }
+#Builtin.Role(.SinhF32) priv __sinh_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, sinh(x), SINH_F32)
+}
 
-#Builtin.Role(.AsinhF32) priv __asinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, asinh(x), ASINH_F32) }
+#Builtin.Role(.AsinhF32) priv __asinh_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, asinh(x), ASINH_F32)
+}
 
-#Builtin.Role(.AcoshF32) priv __acosh_f32: fn(x: Float) -> Float Never! { f32_listed(x, acosh(x), ACOSH_F32) }
+#Builtin.Role(.AcoshF32) priv __acosh_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, acosh(x), ACOSH_F32)
+}
 
-#Builtin.Role(.ErfF32) priv __erf_f32: fn(x: Float) -> Float Never! { f32_listed(x, erf(x), ERF_F32) }
+#Builtin.Role(.ErfF32) priv __erf_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, erf(x), ERF_F32)
+}
 
-#Builtin.Role(.ErfcF32) priv __erfc_f32: fn(x: Float) -> Float Never! { f32_listed(x, erfc(x), ERFC_F32) }
+#Builtin.Role(.ErfcF32) priv __erfc_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, erfc(x), ERFC_F32)
+}
 
-#Builtin.Role(.GammaF32) priv __gamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, gamma(x), GAMMA_F32) }
+#Builtin.Role(.GammaF32) priv __gamma_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, gamma(x), GAMMA_F32)
+}
 
-#Builtin.Role(.LgammaF32) priv __lgamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, lgamma(x), LGAMMA_F32) }
+#Builtin.Role(.LgammaF32) priv __lgamma_f32: fn(x: Float) -> Float Never! {
+    f32_listed(x, lgamma(x), LGAMMA_F32)
+}
 
 // The F32 form of hypot, CORE-MATH hypotf.c on the widened binary32 a and b:
 // a Float that narrows to the correctly rounded binary32 result. Narrowing
@@ -13258,7 +13294,7 @@ priv f32_listed: fn(x: Float, r: Float, sides: [Float]) -> Float Never! {
     dr: r * ir2 * dz
     rh: r + dr
     rl: dr + (r - rh)
-    t := to_bits(rh)
+    ^t: to_bits(rh)
     if t & 0xFFF_FFFF == 0 {
         if (rl > Float{0.0}) { t += 1 }
         if (rl < Float{0.0}) { t -= 1 }
@@ -13369,7 +13405,7 @@ priv pow_side: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, a: Float) -> Int 
     n: if ye > 0 -> yn << ye else -> yn
     d: if ye < 0 -> yd << -ye else -> yd
     if pow_equal(xm, xe, n, d, t.m, t.e) -> return 0
-    w := 160
+    ^w: 160
     loop {
         f: pow_fixed(xm, xe, yn, ye, yd, w)
         // a and the approximation q 2^(k - w) in one unit
@@ -13389,14 +13425,14 @@ priv pow_side: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, a: Float) -> Int 
 // is xo^(n/g) = ao^(d/g), so both are powers of one whole c >= 3: n/g < 16,
 // as ao < 2^25 here, and d/g at most the bit length of xo.
 priv pow_equal: fn(xm: Int, xe: Int, n: Int, d: Int, am: Int, ae: Int) -> Bool Never! {
-    xo := xm
-    xs := xe
+    ^xo: xm
+    ^xs: xe
     loop xo & 1 == 0 {
         xo = xo >> 1
         xs += 1
     }
-    ao := am
-    ash := ae
+    ^ao: am
+    ^ash: ae
     loop ao & 1 == 0 {
         ao = ao >> 1
         ash += 1
@@ -13418,15 +13454,15 @@ priv pow_equal: fn(xm: Int, xe: Int, n: Int, d: Int, am: Int, ae: Int) -> Bool N
 // odd power below 2^54.
 priv pow_exact: fn(a: Float, y: Float) -> Float Never! {
     x: float_parts(a)
-    m := x.m
-    e := x.e
+    ^m: x.m
+    ^e: x.e
     loop m & 1 == 0 {
         m = m >> 1
         e += 1
     }
     p: float_parts(fabs(y))
-    n := p.m
-    f := p.e
+    ^n: p.m
+    ^f: p.e
     loop n & 1 == 0 {
         n = n >> 1
         f += 1
@@ -13445,8 +13481,8 @@ priv pow_exact: fn(a: Float, y: Float) -> Float Never! {
         if v >= 0x40_0000_0000_0000 -> return NAN
         return round_scaled(v, e * power)
     }
-    r := m
-    k := -f
+    ^r: m
+    ^k: -f
     loop k > 0 {
         if e & 1 != 0 -> return NAN
         root: isqrt(r) ?? 0
@@ -13463,14 +13499,14 @@ priv pow_exact: fn(a: Float, y: Float) -> Float Never! {
 
 // The bit length of v > 0.
 priv bit_len: fn(v: Int) -> Int Never! {
-    r := v
-    n := 0
+    ^r: v
+    ^n: 0
     loop r > 0xFFFF_FFFF_FFFF_FFFF {
         r = r >> 64
         n += 64
     }
     // approx(r) rounds up to the next power of two at most
-    b := (to_bits(approx(r)) >> 52) - 1022
+    ^b: (to_bits(approx(r)) >> 52) - 1022
     if (Int{1} << (b - 1)) > r -> b -= 1
     n + b
 }
@@ -13484,7 +13520,7 @@ priv round_scaled: fn(m: Int, e: Int) -> Float Never! {
     if b + e < -1076 -> return 0.0
     shift: if b - 53 > -1074 - e -> b - 53 else -> -1074 - e
     if shift <= 0 -> return ldexp(Float{m}, e)
-    q := m >> shift
+    ^q: m >> shift
     rest: m - (q << shift)
     half: Int{1} << (shift - 1)
     if rest > half || (rest == half && q & 1 == 1) -> q += 1
@@ -13498,7 +13534,7 @@ priv round_scaled: fn(m: Int, e: Int) -> Float Never! {
 // 2^-240.07 relative error, so pow decides by 320; past 1024 bits, the
 // width LN2_1024 allows, the approximation's own rounding is returned.
 priv pow_ziv: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int) -> Float Never! {
-    w := 160
+    ^w: 160
     loop {
         f: pow_fixed(xm, xe, yn, ye, yd, w)
         if f.err < f.q {
@@ -13518,9 +13554,9 @@ priv pow_ziv: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int) -> Float Never! {
 priv pow_fixed: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, w: Int) -> {q: Int, err: Int, k: Int} Never! {
     one: Int{1} << w
     b: bit_len(xm)
-    big_e := b + xe
-    t := if b <= w -> xm << (w - b) else -> xm >> (b - w)
-    terr := if b <= w -> 0 else -> 1
+    ^big_e: b + xe
+    ^t: if b <= w -> xm << (w - b) else -> xm >> (b - w)
+    ^terr: if b <= w -> 0 else -> 1
     if 2 * t * t < one * one {
         t = t << 1
         terr = 2 * terr
@@ -13532,9 +13568,9 @@ priv pow_fixed: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, w: Int) -> {q: I
     s: (d << w) /% (t + one)
     serr: terr + 1
     s2: (s * s) >> w
-    sum := s
-    term := s
-    j := 1
+    ^sum: s
+    ^term: s
+    ^j: 1
     loop term != 0 {
         term = (term * s2) >> w
         j += 2
@@ -13544,8 +13580,8 @@ priv pow_fixed: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, w: Int) -> {q: I
     logt: if t >= one -> 2 * sum else -> -2 * sum
     lx: big_e * ln2 + logt
     lxerr: 2 * (3 * serr + j + 3) + (if big_e < 0 -> -big_e else -> big_e) + 1
-    num := lx * yn
-    nerr := lxerr * (if yn < 0 -> -yn else -> yn)
+    ^num: lx * yn
+    ^nerr: lxerr * (if yn < 0 -> -yn else -> yn)
     if ye >= 0 {
         num = num << ye
         nerr = nerr << ye
@@ -13563,15 +13599,15 @@ priv pow_fixed: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, w: Int) -> {q: I
     // e^(-|r| / 2^8) or e^(|r| / 2^8) by Taylor terms, each within 2 units
     ra: (if r < 0 -> -r else -> r) >> 8
     raerr: (rerr >> 8) + 2
-    q := one
-    a := one
-    i := 0
+    ^q: one
+    ^a: one
+    ^i: 0
     loop a != 0 {
         i += 1
         a = ((a * ra) >> w) /% i
         if r < 0 && i & 1 == 1 -> q -= a else -> q += a
     }
-    err := 2 * raerr + 2 * i + 4
+    ^err: 2 * raerr + 2 * i + 4
     loop _ in 0..<8 {
         err = ((2 * q * err + err * err) >> w) + 2
         q = (q * q) >> w
@@ -14204,9 +14240,9 @@ tan_pi: fn(n: Float) -> Float Never! {
     bits: to_bits(n)
     ax: bits & 0x7FFF_FFFF_FFFF_FFFF
     sgn: if bits < 0 -> -1 else -> 0
-    th := Float{0.0}
-    tl := Float{0.0}
-    res := Float{0.0}
+    ^th: Float{0.0}
+    ^tl: Float{0.0}
+    ^res: Float{0.0}
     if ax >= 0x3F30_0000_0000_0000 {
         if ax >= 0x42D0_0000_0000_0000 {
             // |x| >= 2^46 is a multiple of 2^-6: the table holds the answer
@@ -14234,7 +14270,7 @@ tan_pi: fn(n: Float) -> Float Never! {
         sm: if sgn < 0 -> -m else -> m
         // the bits of x of weight at most 2^-7, as a signed 64-bit word
         k: wrap_i64(sm << (e - 1005))
-        z := approx(k)
+        ^z: approx(k)
         if (k << 1) & 0xFFFF_FFFF_FFFF_FFFF == 0 {
             if k == 0 {
                 if iq & 31 == 0 -> return tan_pi_pole_or_zero(sm >> (s + 6), sgn)
@@ -14248,7 +14284,7 @@ tan_pi: fn(n: Float) -> Float Never! {
         z4: z2 * z2
         z3: z * z2
         f: z3 * ((Float{6.281006949579927e-63} + z2 * Float{1.779055995675284e-104}) + z4 * (Float{5.099053215602634e-146} + z2 * Float{1.4640479742404237e-187}))
-        eps := z3 * Float{8.636168555094445e-78} + copysign(Float{4.930380657631324e-32}, z)
+        ^eps: z3 * Float{8.636168555094445e-78} + copysign(Float{4.930380657631324e-32}, z)
         p: mul_dd_d(Float{2.6610324844426207e-21}, Float{1.0373161876273278e-37}, z)
         q: fast_sum_ddd(p.hi, p.lo, f)
         r: tan_pi_combine(iq, ms, q.hi, q.lo)
@@ -14339,9 +14375,9 @@ atan_pi: fn(n: Float) -> Float Never! {
         if ub == lb -> return ub
         return atan_pi_refine(n, (f + f * Float{9.992007221626409e-16}) + n)
     }
-    h := Float{0.0}
-    ah := Float{0.0}
-    al := Float{0.0}
+    ^h: Float{0.0}
+    ^ah: Float{0.0}
+    ^al: Float{0.0}
     if at > 0x4062_DED8_E34A_9035 {
         // |x| > 150.9639755684199
         if at >= 0x4344_5F30_6DC9_C883 {
@@ -14384,10 +14420,10 @@ atan_pi: fn(n: Float) -> Float Never! {
 /// [-1/2, 1/2] with the sign of x, and NaN for |x| > 1.
 asin_pi: fn(n: Float) -> Float Never! {
     u: to_bits(n) & 0xFFFF_FFFF_FFFF_FFFF
-    e := ((u >> 52) & 0x7FF) - 0x3FF
+    ^e: ((u >> 52) & 0x7FF) - 0x3FF
     // |x| = 2^(e + 1) * sm / 2^64 with 2^63 <= sm < 2^64
     sm: (u << 11) & 0xFFFF_FFFF_FFFF_FFFF | 0x8000_0000_0000_0000
-    fi := 0
+    ^fi: 0
     if e >= 0 {
         m: (u << 12) & 0xFFFF_FFFF_FFFF_FFFF
         if e == 0 && m == 0 -> return n * Float{0.5}
@@ -14416,7 +14452,7 @@ asin_pi: fn(n: Float) -> Float Never! {
         ax: fabs(n)
         x2: n * n
         // c0 roughly 64 + 64 acos(|x|) / (pi / 2); indx is round(c0) - 64
-        c0 := Float{63.96459584605448} + ax * Float{-39.39065080729959}
+        ^c0: Float{63.96459584605448} + ax * Float{-39.39065080729959}
         c2: Float{23.579467473196825} + ax * Float{-7.445150988059025}
         c0 += x2 * c2
         c0 *= c
@@ -14427,7 +14463,7 @@ asin_pi: fn(n: Float) -> Float Never! {
         ce: (cu >> 52) - 0x3FF
         // one Newton step for sqrt(1 - x^2), from frac(2^50 (x^2 + c^2))
         sm2: u128((sm * sm) << (52 + 2 * e))
-        sc := 52 + 2 * ce
+        ^sc: 52 + 2 * ce
         cm2: if sc >= 0 -> u128((cm * cm) << sc) else -> (cm * cm) >> -sc
         h: wrap_i64(u128(sm2 + cm2) >> 64)
         iu: to_bits(ixx)
@@ -14438,7 +14474,7 @@ asin_pi: fn(n: Float) -> Float Never! {
         sc = 6 + ce
         cmh0: if sc >= 0 -> wrap_i64(cm << sc) else -> cm >> -sc
         cmh: wrap_i64(wrap_i64(cmh0 - ASINPI_SH[indx]) - (mul_high(h, ixm) >> (34 - ixe)))
-        v := wrap_i64(mul_high(smh, ASINPI_S[indx]) - mul_high(cmh, ASINPI_S[64 - indx]))
+        ^v: wrap_i64(mul_high(smh, ASINPI_S[indx]) - mul_high(cmh, ASINPI_S[64 - indx]))
         v2: mul_high(v, v)
         v3: mul_high(v2, v)
         a: ASINPI_A
@@ -14466,9 +14502,9 @@ acos_pi: fn(n: Float) -> Float Never! {
     ax: from_bits(ab)
     pih: Float{3.141592653589793}
     pil: Float{1.2246467991473532e-16}
-    du := Float{0.0}
-    dv := Float{0.0}
-    i := 0
+    ^du: Float{0.0}
+    ^dv: Float{0.0}
+    ^i: 0
     if k < 0x3FE8_0000 {
         // |x| < 0.75: acos(x) from a degree-6 polynomial at the piece's point
         if k < 0x3C99_21FB -> return fma(Float{-2.7755575615628914e-17}, n, Float{0.5})
@@ -14479,7 +14515,7 @@ acos_pi: fn(n: Float) -> Float Never! {
         yy: y * y
         p56: fma(ACOSPI_T[b + 6], y, ACOSPI_T[b + 5])
         p34: fma(ACOSPI_T[b + 4], y, ACOSPI_T[b + 3])
-        zh := fma(p56, yy, p34)
+        ^zh: fma(p56, yy, p34)
         zh = fma(zh, y, ACOSPI_T[b + 2])
         z: fast_two_sum(ACOSPI_T[b + 1], y * zh)
         d: fast_two_sum(ACOSPI_T[b], z.hi * y)
@@ -14502,7 +14538,7 @@ acos_pi: fn(n: Float) -> Float Never! {
         yy: y * y
         p45: fma(ACOSPI_T[b + 5], y, ACOSPI_T[b + 4])
         p23: fma(ACOSPI_T[b + 3], y, ACOSPI_T[b + 2])
-        zh := fma(p45, yy, p23)
+        ^zh: fma(p45, yy, p23)
         zh = fma(zh, y, ACOSPI_T[b + 1])
         z: fast_two_sum(ACOSPI_T[b], zh * y)
         l1zh: s.lo * z.hi
@@ -14597,7 +14633,7 @@ atan2_pi: fn(a: Float, b: Float) -> Float Never! {
     z0: if gt -> x / y else -> y / x
     z2: z0 * z0
     z: if gt -> -z0 else -> z0
-    r := ATAN2PIF_N[0]
+    ^r: ATAN2PIF_N[0]
     // the polynomial underflows spuriously only below 2^-54
     if (z2 > Float{5.551115123125783e-17}) {
         z4: z2 * z2
@@ -14721,7 +14757,7 @@ priv ATAN2PIF_C: [Float]{
     off: ATAN2F_OFF[i]
     z0: if gt -> x / y else -> y / x
     d: ax - ay
-    r := Float{1.0}
+    ^r: Float{1.0}
     if d < 27 << 23 && d > -(27 << 23) {
         z2: z0 * z0
         z4: z2 * z2
@@ -14743,7 +14779,7 @@ priv ATAN2PIF_C: [Float]{
         sh: s.hi + off
         sl: (((off - sh) + s.hi) + s.lo) + ATAN2F_OFFL[i]
         th: Float.from_f32(F32{sh})
-        tm := (sh - th) + sl
+        ^tm: (sh - th) + sl
         // th + tm on a binary32 midpoint: move tm off it to its own side
         if (th + th * Float{8.673617379884035e-19} == th - th * Float{8.673617379884035e-19}) {
             half: from_bits((to_bits(th) & 0x7FF0_0000_0000_0000) - (24 << 52))
@@ -14901,9 +14937,9 @@ priv mul_dd_d: fn(xh: Float, xl: Float, c: Float) -> {hi: Float, lo: Float} Neve
 // The double-double polynomial c[0] + x * (c[1] + ...) of n pairs (hi, lo)
 // of `c`, with `l` added to the last coefficient.
 priv poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float) -> {hi: Float, lo: Float} Never! {
-    i := n - 1
-    ch := c[2 * i] + l
-    cl := ((c[2 * i] - ch) + l) + c[2 * i + 1]
+    ^i: n - 1
+    ^ch: c[2 * i] + l
+    ^cl: ((c[2 * i] - ch) + l) + c[2 * i + 1]
     loop i > 0 {
         i -= 1
         p: mul_dd(xh, xl, ch, cl)
@@ -14930,9 +14966,9 @@ priv d_mul: fn(ah: Float, al: Float, bh: Float, bl: Float) -> {hi: Float, lo: Fl
 // x (c0 + x (c1 + ... x (c(n-1) + x (h + l)))), each ci the double-double
 // c[2i] + c[2i + 1]: one s_mul and fast two-sum per step.
 priv horner_dd_x: fn(x: Float, h0: Float, l0: Float, c: [Float], n: Int) -> {hi: Float, lo: Float} Never! {
-    h := h0
-    l := l0
-    i := n
+    ^h: h0
+    ^l: l0
+    ^i: n
     loop i > 0 {
         i -= 1
         p: s_mul(x, h, l)
@@ -14954,8 +14990,8 @@ priv mul_dd_tiny: fn(x: Float, ch: Float, cl: Float) -> Float Never! {
 // From t's rows (x, result, correction) sorted by x, result + correction for
 // the row of x, or NaN when x has none: the hard cases of a CORE-MATH port.
 priv hard_case: fn(t: [Float], x: Float) -> Float Never! {
-    a := 0
-    b := t.len() /% 3
+    ^a: 0
+    ^b: t.len() /% 3
     loop a + 1 != b {
         c: (a + b) >> 1
         if t[3 * c] <= x -> a = c else -> b = c
@@ -16444,8 +16480,8 @@ priv tan_trunc53: fn(v: Int) -> Float Never! {
 // 1.3538603431225862e-8: beyond 2pi from 128 bits of the fraction, h and l
 // truncated from them as tan.c's set_dd does.
 priv tan_reduce_fast: fn(x: Float) -> {i: Int, h: Float, l: Float} Never! {
-    h := Float{0.0}
-    l := Float{0.0}
+    ^h: Float{0.0}
+    ^l: Float{0.0}
     if (x <= Float{6.283185307179585}) {
         h = Float{0.15915494309189535} * x
         l = fma(Float{-9.839338337591243e-18}, x, fma(Float{0.15915494309189535}, x, -h))
@@ -16453,8 +16489,8 @@ priv tan_reduce_fast: fn(x: Float) -> {i: Int, h: Float, l: Float} Never! {
         b: to_bits(x)
         e: b >> 52
         m: b & 0xF_FFFF_FFFF_FFFF | 0x10_0000_0000_0000
-        c := 0
-        sh := 0
+        ^c: 0
+        ^sh: 0
         if e <= 1074 {
             c = ((m * SINCOS_T[1]) << 64) + m * SINCOS_T[2] + ((m * SINCOS_T[3]) >> 64)
             sh = 1075 - e
@@ -16487,11 +16523,11 @@ priv tan_fast: fn(x: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     red: tan_reduce_fast(fabs(x))
     // pi <= x mod 2pi: tan(x - pi); pi/2 <= x mod pi: -cot(x - pi/2)
     flip: red.i & 0x200 != 0
-    is_tan := !flip
+    ^is_tan: !flip
     neg: (x < Float{0.0}) != flip
-    i := red.i & 0x1FF
-    h := red.h
-    l := red.l
+    ^i: red.i & 0x1FF
+    ^h: red.h
+    ^l: red.l
     if i & 0x100 != 0 {
         // pi/4 <= x mod pi/2: cot(pi/2 - x)
         is_tan = !is_tan
@@ -16570,10 +16606,10 @@ priv tan_accurate: fn(x: Float) -> Float Never! {
     w: (SINCOS_T[k0 + 1] << 256) + (SINCOS_T[k0 + 2] << 192) + (SINCOS_T[k0 + 3] << 128) + (SINCOS_T[k0 + 4] << 64) + SINCOS_T[k0 + 5]
     sh: 1075 + 64 * (k0 + 5) - e
     f: ((m * w) & (1 << sh) - 1) >> (sh - 192)
-    is_tan := true
-    neg := x < Float{0.0}
-    i := (f >> 181) & 0x3FF
-    xr := f & (1 << 181) - 1
+    ^is_tan: true
+    ^neg: x < Float{0.0}
+    ^i: (f >> 181) & 0x3FF
+    ^xr: f & (1 << 181) - 1
     if i & 0x200 != 0 {
         // pi/2 <= x mod pi: -1/tan(x - pi/2)
         is_tan = false
@@ -16589,9 +16625,9 @@ priv tan_accurate: fn(x: Float) -> Float Never! {
     xn: exact_bit_length(xr)
     xt: if xr == 0 -> {sig: 0, ex: -1076, sgn: 0} else -> {sig: xr << (192 - xn), ex: xn - 192, sgn: 0}
     x2: tint_mul(xt, xt)
-    u := tint_mul(x2, tan_coef(TAN_PC, 5))
-    v := tint_mul(x2, tan_coef(TAN_PS, 5))
-    j := 4
+    ^u: tint_mul(x2, tan_coef(TAN_PC, 5))
+    ^v: tint_mul(x2, tan_coef(TAN_PS, 5))
+    ^j: 4
     loop j >= 0 {
         u = tint_add(u, tan_coef(TAN_PC, j))
         v = tint_add(v, tan_coef(TAN_PS, j))
@@ -19092,7 +19128,7 @@ priv pi_trig_refine: fn(iq: Int, z: Float, hard_iq: [Int], hard: [Float]) -> Flo
     if tail == 0xF_FFFF_FFFF_FFFF || tail == 0 {
         sign: if iq > 2048 -> Float{-1.0} else -> Float{1.0}
         q: iq & 0x7FF
-        i := 0
+        ^i: 0
         loop i < hard_iq.len() {
             hx: hard[3 * i]
             if (x == hx && q == hard_iq[i]) || (x == -hx && q == 2048 - hard_iq[i]) {
@@ -19200,17 +19236,17 @@ priv tan_pi_combine: fn(iq: Int, ms: Int, th: Float, tl: Float) -> {hi: Float, l
 priv tan_pi_hard: fn(x: Float, f: Float) -> Float Never! {
     bits: to_bits(x)
     aix: bits & 0x7FFF_FFFF_FFFF_FFFF
-    ax := fabs(x)
+    ^ax: fabs(x)
     e: (aix >> 52) - 1022
-    p := 0
+    ^p: 0
     if e >= 0 {
         ax -= from_bits(aix & 0xFFFF_FFFF_FFFF_FFFF - (0xFFFF_FFFF_FFFF_FFFF >> (12 + e)))
         p = ((aix | 0x10_0000_0000_0000) >> (52 - e)) & 1
         if p != 0 -> ax = Float{0.5} - ax
     }
     sign: if (p != 0) != (bits < 0) -> Float{-1.0} else -> Float{1.0}
-    lo := 0
-    hi := TANPI_HARD.len() /% 3 - 1
+    ^lo: 0
+    ^hi: TANPI_HARD.len() /% 3 - 1
     loop lo <= hi {
         mid: (lo + hi) /% 2
         v: TANPI_HARD[3 * mid]
@@ -19967,7 +20003,7 @@ priv atan_pi_tiny: fn(x: Float) -> Float Never! {
     l: fma(Float{-0.1061032953945969} * x, x * x, fma(x, Float{-1.9678676675182486e-17}, fma(x, ph, -h)))
     ax: fabs(x)
     sx: copysign(Float{1.0}, x)
-    k := 0
+    ^k: 0
     loop k < ATANPI_TINY_HARD.len() {
         if ax == ATANPI_TINY_HARD[k] {
             return ATANPI_TINY_HARD[k + 1] * sx + ATANPI_TINY_HARD[k + 2] * sx
@@ -19986,7 +20022,7 @@ priv atan_pi_asympt: fn(x: Float) -> Float Never! {
     l: fma(Float{0.1061032953945969} * yh, yh * yh, -p.lo)
     s: fast_two_sum(copysign(Float{0.5}, x), -p.hi)
     t: fast_two_sum(s.lo, l)
-    m := t.hi
+    ^m: t.hi
     if (fabs(m) == Float{2.7755575615628914e-17}) {
         // half an ulp of the result: the tail settles the tie
         m = if (m * t.lo > Float{0.0}) -> copysign(Float{2.775557561562892e-17}, m) else -> copysign(Float{2.775557561562891e-17}, m)
@@ -20001,14 +20037,14 @@ priv atan_pi_refine: fn(x: Float, a: Float) -> Float Never! {
     if (ax > Float{1826816.0}) { return atan_pi_asympt(x) }
     if (ax < Float{1.3242242857813835e-8}) { return atan_pi_tiny(x) }
     sx: copysign(Float{1.0}, x)
-    k := 0
+    ^k: 0
     loop k < ATANPI_HARD.len() {
         if ax == ATANPI_HARD[k] -> return ATANPI_HARD[k + 1] * sx + ATANPI_HARD[k + 2] * sx
         k += 3
     }
     i: (to_bits(fabs(a) * Float{81.48733086305042} + Float{256.5}) >> 44) & 0xFF
-    h := Float{0.0}
-    hl := Float{0.0}
+    ^h: Float{0.0}
+    ^hl: Float{0.0}
     if i == 128 {
         h = Float{-1.0} / x
         hl = fma(h, x, Float{1.0}) * h
@@ -20032,9 +20068,9 @@ priv atan_pi_refine: fn(x: Float, a: Float) -> Float Never! {
     fl: h2.hi * ((Float{0.1111111111111111} + h2.hi * Float{-0.09090909090907358}) + h4 * (Float{0.07692307637971313} + h2.hi * Float{-0.06665779689246536}))
     f0: poly_dd(h2.hi, h2.lo, ATANPI_REFINE_C, 3, fl)
     f: mul_dd(h3.hi, h3.lo, f0.hi, f0.lo)
-    ah := h
-    al := f.hi
-    at := f.lo
+    ^ah: h
+    ^al: f.hi
+    ^at: f.lo
     if i != 0 {
         id: copysign(approx(i), x)
         df: if i < 128 -> sx * ATANPI_A[2 * i + 1] else -> Float{0.0}
@@ -20056,8 +20092,8 @@ priv atan_pi_refine: fn(x: Float, a: Float) -> Float Never! {
 // by the tail's sign; the hardest inputs are tabulated.
 priv atan_refine: fn(x: Float, a: Float) -> Float Never! {
     i: (to_bits(fabs(a) * Float{81.48733086305042} + Float{256.5}) >> 44) & 0xFF
-    h := Float{0.0}
-    hl := Float{0.0}
+    ^h: Float{0.0}
+    ^hl: Float{0.0}
     if i == 128 {
         h = Float{-1.0} / x
         hl = fma(h, x, Float{1.0}) * h
@@ -20082,9 +20118,9 @@ priv atan_refine: fn(x: Float, a: Float) -> Float Never! {
     f0: poly_dd(h2.hi, h2.lo, ATANPI_REFINE_C, 3, fl)
     f: mul_dd(h3.hi, h3.lo, f0.hi, f0.lo)
     sx: copysign(Float{1.0}, x)
-    ah := h
-    al := f.hi
-    at := f.lo
+    ^ah: h
+    ^al: f.hi
+    ^at: f.lo
     if i != 0 {
         id: copysign(approx(i), x)
         df: if i < 128 -> sx * ATANPI_A[2 * i + 1] else -> Float{0.0}
@@ -20097,11 +20133,11 @@ priv atan_refine: fn(x: Float, a: Float) -> Float Never! {
     }
     v: fast_two_sum(ah, al)
     w: fast_two_sum(v.lo, at)
-    b1 := to_bits(w.hi)
+    ^b1: to_bits(w.hi)
     de: ((to_bits(v.hi) >> 52) & 0x7FF) - ((b1 >> 52) & 0x7FF)
     if (b1 + 1) & 0xF_FFFF_FFFF_FFFF <= 2 || de < 0 || de > 103 {
         ax: fabs(x)
-        k := 0
+        ^k: 0
         loop k < ATAN_HARD.len() {
             if ax == ATAN_HARD[k] -> return sx * ATAN_HARD[k + 1] + sx * ATAN_HARD[k + 2]
             k += 3
@@ -20218,7 +20254,7 @@ priv asin_refine: fn(x: Float, phi: Float) -> Float Never! {
     res: p.hi + p.mid
     if gap > 2 && (gap >> 52) <= 47 -> return res
     ax: fabs(x)
-    k := 0
+    ^k: 0
     loop k < ASIN_HARD.len() {
         if ax == ASIN_HARD[k] -> return sg * ASIN_HARD[k + 1] + sg * ASIN_HARD[k + 2]
         k += 3
@@ -20242,7 +20278,7 @@ priv acos_refine: fn(x: Float, phi: Float) -> Float Never! {
     bp: sh - ap
     tail: (f.hi - ap) + (pl0 - bp)
     p: asin_renorm(jt * Float{0.04908738521234035}, sh, (f.lo + Float{-3.917809439666406e-31} * jt) + tail)
-    tb := to_bits(p.mid)
+    ^tb: to_bits(p.mid)
     e0: ((tb >> 52) & 0x7FF) - 1023
     e1: 52 - (107 + e0)
     e: if e1 < 0 -> 0 else if e1 > 52 -> 52 else -> e1
@@ -21341,7 +21377,7 @@ priv asin_pi_tiny: fn(x: Float) -> Float Never! {
     // h is exact: x times the high part of 1/pi before any scaling
     h: x * Float{0.3183098861837907}
     sx: x * Float{8.112963841460668e31}
-    l := fma(sx, Float{0.3183098861837907}, -h * Float{8.112963841460668e31})
+    ^l: fma(sx, Float{0.3183098861837907}, -h * Float{8.112963841460668e31})
     l = fma(sx, Float{-1.9678676675182486e-17}, l)
     fma(l, Float{1.232595164407831e-32}, h)
 }
@@ -21350,7 +21386,7 @@ priv asin_pi_tiny: fn(x: Float) -> Float Never! {
 // and its hard cases.
 priv asin_pi_small: fn(x: Float) -> Float Never! {
     ax: fabs(x)
-    i := 0
+    ^i: 0
     loop i < 18 {
         if (ax == ASINPI_SMALL_HARD[3 * i]) {
             r: ASINPI_SMALL_HARD[3 * i + 1] + ASINPI_SMALL_HARD[3 * i + 2]
@@ -21362,7 +21398,7 @@ priv asin_pi_small: fn(x: Float) -> Float Never! {
     ch: Float{0.3183098861837907}
     l: fma(Float{0.05305164769729846}, x * x, Float{-1.967867667518249e-17})
     hh: ch * x
-    ll := fma(ch, x, -hh)
+    ^ll: fma(ch, x, -hh)
     ll = fma(l, x, ll)
     hh + ll
 }
@@ -21371,10 +21407,10 @@ priv asin_pi_small: fn(x: Float) -> Float Never! {
 // to within a few units of 2^-127, with no early exit.
 priv asin_pi_acc: fn(x: Float) -> Float Never! {
     u: to_bits(x) & 0xFFFF_FFFF_FFFF_FFFF
-    se := ((u >> 52) & 0x7FF) - 0x3FF
+    ^se: ((u >> 52) & 0x7FF) - 0x3FF
     ax: fabs(x)
     sm: (u << 11) & 0xFFFF_FFFF_FFFF_FFFF | 0x8000_0000_0000_0000
-    fi := 0
+    ^fi: 0
     if (ax < Float{0.0131875}) {
         // asin(y) = y + y^3 P(y^2), y = |x| scaled into [0, 2^-6)
         fi = u128(((sm >> 1) << 64) + mul_hi64_128(sm >> 1, asin_pi_poly((sm * sm) >> (-14 - 2 * se))))
@@ -21384,7 +21420,7 @@ priv asin_pi_acc: fn(x: Float) -> Float Never! {
         c: sqrt(xx)
         ixx: (Float{1.0} / xx) * c
         x2: x * x
-        c0 := Float{63.96459584605448} + ax * Float{-39.39065080729959}
+        ^c0: Float{63.96459584605448} + ax * Float{-39.39065080729959}
         c2: Float{23.579467473196825} + ax * Float{-7.445150988059025}
         c0 += x2 * c2
         indx: ((to_bits(c0 * c + Float{64.0}) & 0xF_FFFF_FFFF_FFFF) + 0x2000_0000_0000) >> 46
@@ -21392,7 +21428,7 @@ priv asin_pi_acc: fn(x: Float) -> Float Never! {
         cm: (cu << 11) & 0xFFFF_FFFF_FFFF_FFFF | 0x8000_0000_0000_0000
         ce: (cu >> 52) - 0x3FF
         // two Newton steps take sqrt(1 - x^2) to 128 bits as cmv
-        s := u128(u128((sm * sm) << (52 + 2 * se)) + u128((cm * cm) << (52 + 2 * ce)))
+        ^s: u128(u128((sm * sm) << (52 + 2 * se)) + u128((cm * cm) << (52 + 2 * ce)))
         iu: to_bits(ixx)
         ixm: iu & 0xF_FFFF_FFFF_FFFF | 0x10_0000_0000_0000
         ixe: (iu >> 52) - 0x3FF
@@ -21404,7 +21440,7 @@ priv asin_pi_acc: fn(x: Float) -> Float Never! {
         k: ixe - ce
         ss: 24 + k
         // dc 2^ss; C builds it from two words, which only works for ss < 64
-        cmv := u128((cm << 64) - (dc << ss))
+        ^cmv: u128((cm << 64) - (dc << ss))
         dc2: mul_high(wrap_i64(s >> 14), ixm)
         ss2: 26 - k
         cmv = if ss2 >= 0 -> u128(cmv - (dc2 >> ss2)) else -> u128(cmv - (dc2 << -ss2))
@@ -21417,10 +21453,10 @@ priv asin_pi_acc: fn(x: Float) -> Float Never! {
         } else {
             v: wrap_i128(mul_hi64_128(sm >> -se, asin_pi_acc_s(indx - 1)) - (mul_hi128(cmv, asin_pi_acc_s(63 - indx)) >> -ce))
             vu: u128(v)
-            v2 := sqr_hi128(vu)
+            ^v2: sqr_hi128(vu)
             if v < 0 -> v2 = u128(v2 - (v + v))
             p: asin_pi_poly(u128(v2 << 14))
-            w := mul_hi128(p, vu)
+            ^w: mul_hi128(p, vu)
             if v < 0 -> w -= p
             fi = u128(fi + v + w)
         }
@@ -21841,7 +21877,7 @@ priv sqrt_dd: fn(x: Float) -> {hi: Float, lo: Float} Never! {
 priv acos_pi_div_pi: fn(h: Float, l: Float) -> {hi: Float, lo: Float} Never! {
     ph: Float{0.3183098861837907}
     hi: h * ph
-    lo := fma(h, ph, -hi)
+    ^lo: fma(h, ph, -hi)
     lo = fma(h, Float{-1.9678676675182486e-17}, lo)
     {hi: hi, lo: fma(l, ph, lo)}
 }
@@ -21849,9 +21885,9 @@ priv acos_pi_div_pi: fn(h: Float, l: Float) -> {hi: Float, lo: Float} Never! {
 // The double-double ACOSPI_T2 polynomial of piece i at y.
 priv acos_pi_poly: fn(i: Int, y: Float, ordered: Bool) -> {hi: Float, lo: Float} Never! {
     p: 21 * i
-    h := ACOSPI_T2[p + 19]
-    l := Float{0.0}
-    j := 10
+    ^h: ACOSPI_T2[p + 19]
+    ^l: Float{0.0}
+    ^j: 10
     loop j >= 0 {
         if j >= 8 {
             h = ACOSPI_T2[p + 8 + j] + h * y
@@ -21877,8 +21913,8 @@ priv acos_pi_accurate: fn(x: Float) -> Float Never! {
     w: Float{1.0} + ax
     i: if (w == Float{2.0}) -> 127 else -> (to_bits(w) >> 45) & 127
     if i < 64 {
-        a := 0
-        b := 114
+        ^a: 0
+        ^b: 114
         loop a + 1 != b {
             c: (a + b) >> 1
             if (ACOSPI_HARD[3 * c] <= x) { a = c } else { b = c }
@@ -21906,8 +21942,8 @@ priv acos_pi_accurate: fn(x: Float) -> Float Never! {
     // acos(x) = sqrt(1 - |x|) (h + l), or pi minus it
     s: sqrt_dd(Float{1.0} - ax)
     q: acos_pi_poly(i, ax - ACOSPI_T2[21 * i + 20], true)
-    u := s.hi * q.hi
-    v := fma(s.hi, q.hi, -u) + (s.lo * q.hi + s.hi * q.lo)
+    ^u: s.hi * q.hi
+    ^v: fma(s.hi, q.hi, -u) + (s.lo * q.hi + s.hi * q.lo)
     if (x < Float{0.0}) {
         t: fast_two_sum(Float{3.141592653589793}, -u)
         u = t.hi
@@ -27280,7 +27316,7 @@ priv atan2_pi_fast: fn(y0: Float, x0: Float) -> {hi: Float, lo: Float, err: Floa
     ay: vy & 0x7FFF_FFFF_FFFF_FFFF
     ax: vx & 0x7FFF_FFFF_FFFF_FFFF
     if ax == ay {
-        v := Float{0.75}
+        ^v: Float{0.75}
         if y0 == x0 -> v = if (x0 > Float{0.0}) -> Float{0.25} else -> Float{-0.75} else if (x0 > Float{0.0}) {
             v = Float{-0.25}
         }
@@ -27302,8 +27338,8 @@ priv atan2_pi_fast: fn(y0: Float, x0: Float) -> {hi: Float, lo: Float, err: Floa
     b: 10 * i
     zh: zh0 - ATAN2PI_POINT[i]
     z: zh + zl
-    h := if i == 0 -> fma(Float{0.11105902526508889}, z * z, ATAN2PI_FAST[9]) else -> ATAN2PI_FAST[b + 9]
-    j := 6
+    ^h: if i == 0 -> fma(Float{0.11105902526508889}, z * z, ATAN2PI_FAST[9]) else -> ATAN2PI_FAST[b + 9]
+    ^j: 6
     loop j >= 2 {
         h = fma(h, z, ATAN2PI_FAST[b + 2 + j])
         j -= 1
@@ -27321,8 +27357,8 @@ priv atan2_pi_fast: fn(y0: Float, x0: Float) -> {hi: Float, lo: Float, err: Floa
     // atan_pi(|z|), then its sign
     ph: s0.hi * Float{0.3183098861837907}
     pl: fma(s0.hi, Float{-1.9678676675182486e-17}, fma(l0, Float{0.3183098861837907}, fma(s0.hi, Float{0.3183098861837907}, -ph)))
-    hi := ph * sz
-    lo := pl * sz
+    ^hi: ph * sz
+    ^lo: pl * sz
     if inv {
         // +-1/2 - atan_pi(x/y)
         c: if negz -> Float{-0.5} else -> Float{0.5}
@@ -27372,9 +27408,9 @@ priv atan2_pi_accurate: fn(y: Float, x: Float) -> Float Never! {
     }
     q: if inv -> tint_div(tint_from_float(x), tint_from_float(y)) else -> tint_div(tint_from_float(y), tint_from_float(x))
     z: {sig: q.sig, ex: q.ex, sgn: 0}
-    p := tint_coef(ATAN2PI_P, 29)
-    d := tint_coef(ATAN2PI_Q, 29)
-    i := 28
+    ^p: tint_coef(ATAN2PI_P, 29)
+    ^d: tint_coef(ATAN2PI_Q, 29)
+    ^i: 28
     loop i >= 0 {
         p = tint_add(tint_mul(p, z), tint_coef(ATAN2PI_P, i))
         d = tint_add(tint_mul(d, z), tint_coef(ATAN2PI_Q, i))
@@ -27382,8 +27418,8 @@ priv atan2_pi_accurate: fn(y: Float, x: Float) -> Float Never! {
     }
     // atan_pi(|z|) within 683 units of the last place
     t: tint_mul(tint_div(tint_mul(p, z), d), {sig: 0xa2f9_836e_4e44_1529_fc27_57d1_f534_ddc0_db62_9599_3c43_9042, ex: -1, sgn: 0})
-    w := {sig: t.sig, ex: t.ex, sgn: q.sgn}
-    err := 683
+    ^w: {sig: t.sig, ex: t.ex, sgn: q.sgn}
+    ^err: 683
     if inv {
         // +-1/2 - atan_pi(x/y)
         half: {sig: 1 << 191, ex: 0, sgn: 0}
@@ -27483,9 +27519,9 @@ priv atan2_accurate: fn(y: Float, x: Float) -> Float Never! {
         return tint_to_float({sig: q.sig - 2, ex: q.ex, sgn: q.sgn}, 1)
     }
     z: {sig: q.sig, ex: q.ex, sgn: 0}
-    p := tint_coef(ATAN2PI_P, 29)
-    d := tint_coef(ATAN2PI_Q, 29)
-    i := 28
+    ^p: tint_coef(ATAN2PI_P, 29)
+    ^d: tint_coef(ATAN2PI_Q, 29)
+    ^i: 28
     loop i >= 0 {
         p = tint_add(tint_mul(p, z), tint_coef(ATAN2PI_P, i))
         d = tint_add(tint_mul(d, z), tint_coef(ATAN2PI_Q, i))
@@ -27493,8 +27529,8 @@ priv atan2_accurate: fn(y: Float, x: Float) -> Float Never! {
     }
     // atan(|z|) within 662 units of the last place
     r: tint_div(tint_mul(p, z), d)
-    w := {sig: r.sig, ex: r.ex, sgn: q.sgn}
-    err := 662
+    ^w: {sig: r.sig, ex: r.ex, sgn: q.sgn}
+    ^err: 662
     pis: 0xc90f_daa2_2168_c234_c4c6_628b_80dc_1cd1_2902_4e08_8a67_cc74
     if inv {
         // +-pi/2 - atan(x/y)
@@ -27761,8 +27797,8 @@ priv tint_to_float: fn(a: {sig: Int, ex: Int, sgn: Int}, err: Int) -> Float Neve
         if a.ex < -1074 || a.sig == (1 << 191) -> return s * from_bits(1) * Float{0.5}
         return s * from_bits(1) * Float{0.75}
     }
-    sig := a.sig
-    ex := a.ex
+    ^sig: a.sig
+    ^ex: a.ex
     if ex <= -1022 {
         // keep the shifted-out bits as a sticky bit, as tint.h does
         k: -1021 - ex
@@ -27771,7 +27807,7 @@ priv tint_to_float: fn(a: {sig: Int, ex: Int, sgn: Int}, err: Int) -> Float Neve
         ex = -1021
     }
     low: (sig >> 128) & 0x7FF
-    l := Float{0.0}
+    ^l: Float{0.0}
     if err != 0 {
         l = Float{0.75}
         if low < 0x400 -> l = Float{0.25} else if low == 0x400 && sig & (1 << 128) - 1 == 0 {
@@ -28827,7 +28863,7 @@ priv exp_q1: fn(zh: Float, zl: Float) -> {hi: Float, lo: Float} Never! {
 // 2^-42.6: a degree-7 polynomial, double-double from degree 3 down.
 priv exp_q2: fn(zh: Float, zl: Float) -> {hi: Float, lo: Float} Never! {
     z: zh + zl
-    q := fma(Float{0.000198412702925094}, zh, Float{0.0013888890379584226})
+    ^q: fma(Float{0.000198412702925094}, zh, Float{0.0013888890379584226})
     q = fma(q, z, Float{0.008333333333333333})
     q = fma(q, z, Float{0.041666666666666664})
     h: q * z
@@ -28868,9 +28904,9 @@ priv exp_cr_fma_dw: fn(ah: Float, al: Float, bh: Float, bl: Float, ch: Float, cl
 
 // The double-double polynomial of the n (hi, lo) pairs of c at xh + xl.
 priv exp_cr_poly: fn(xh: Float, xl: Float, c: [Float], n: Int) -> {hi: Float, lo: Float} Never! {
-    i := n - 1
-    ch := c[2 * i]
-    cl := c[2 * i + 1]
+    ^i: n - 1
+    ^ch: c[2 * i]
+    ^cl: c[2 * i + 1]
     loop i > 0 {
         i -= 1
         r: exp_cr_fma_dw(xh, xl, ch, cl, c[2 * i], c[2 * i + 1])
@@ -28909,7 +28945,7 @@ priv exp_cr_accurate: fn(n: Float) -> Float Never! {
     f2: exp_cr_muldd(f1.hi, f1.lo, tt.hi, tt.lo)
     // fastsum(th, tl, fh, fl)
     s0: fast_two_sum(tt.hi, f2.hi)
-    fh := s0.hi
+    ^fh: s0.hi
     fl: (tt.lo + f2.lo) + s0.lo
     bits: __to_bits_i64(n)
     if bits < 0 && bits & 0x7FFF_FFFF_FFFF_FFFF > 0x4086_232B_DD7A_BCD2 {
@@ -29287,9 +29323,9 @@ priv exp2_cr_mulddd: fn(xh: Float, ch: Float, cl: Float) -> {hi: Float, lo: Floa
 // The n (hi, lo) coefficients of c at the double xh, Horner in
 // double-double.
 priv exp2_cr_polydd: fn(xh: Float, c: [Float], n: Int) -> {hi: Float, lo: Float} Never! {
-    i := n - 1
-    ch := c[2 * i]
-    cl := c[2 * i + 1]
+    ^i: n - 1
+    ^ch: c[2 * i]
+    ^cl: c[2 * i + 1]
     loop i > 0 {
         i -= 1
         p: exp2_cr_mulddd(xh, ch, cl)
@@ -29314,8 +29350,8 @@ priv exp2_cr_accurate: fn(n: Float) -> Float Never! {
     tt: exp_cr_muldd(EXP2CR_T0[2 * i0 + 1], EXP2CR_T0[2 * i0], EXP2CR_T1[2 * i1 + 1], EXP2CR_T1[2 * i1])
     f0: exp2_cr_polydd(z, EXP2CR_CD, 6)
     f1: exp2_cr_mulddd(z, f0.hi, f0.lo)
-    fh := f1.hi
-    fl := f1.lo
+    ^fh: f1.hi
+    ^fl: f1.lo
     bits: __to_bits_i64(n)
     if bits >= 0 || bits & 0x7FFF_FFFF_FFFF_FFFF <= 0x408F_F000_0000_0000 {
         if (n >= Float{-8.008566259537294e-17}) && (n <= Float{1.6017132519074586e-16}) {
@@ -29404,8 +29440,8 @@ priv exp10_cr_accurate: fn(n: Float) -> Float Never! {
     dxl: ((dx - dxh) + dxl0) + dxll
     f0: exp10_cr_opolydd(dxh, dxl, EXP10CR_C, 6)
     f1: exp_cr_muldd(dxh, dxl, f0.hi, f0.lo)
-    fh := f1.hi
-    fl := f1.lo
+    ^fh: f1.hi
+    ^fl: f1.lo
     bits: __to_bits_i64(n)
     if bits >= 0 || bits & 0x7FFF_FFFF_FFFF_FFFF < 0x4073_3A71_46F7_2A42 {
         if jt & 0xFFF == 0 {
@@ -29413,7 +29449,7 @@ priv exp10_cr_accurate: fn(n: Float) -> Float Never! {
             a: fast_two_sum(fh, fl)
             b: fast_two_sum(tt.hi, a.hi)
             c: fast_two_sum(b.lo, a.lo)
-            hb := __to_bits_i64(c.hi)
+            ^hb: __to_bits_i64(c.hi)
             if hb & 0x000F_FFFF_FFFF_FFFF == 0 {
                 // c.hi a power of 2: moved half its exponent's unit toward c.lo
                 hb = if (hb < 0) == (__to_bits_i64(c.lo) < 0) -> hb + 0x0008_0000_0000_0000 else -> hb - 0x0008_0000_0000_0001
@@ -29441,9 +29477,9 @@ priv exp10_cr_accurate: fn(n: Float) -> Float Never! {
 
 // The n (hi, lo) coefficients of c at xh + xl, Horner in double-double.
 priv exp10_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], n: Int) -> {hi: Float, lo: Float} Never! {
-    i := n - 1
-    ch := c[2 * i]
-    cl := c[2 * i + 1]
+    ^i: n - 1
+    ^ch: c[2 * i]
+    ^cl: c[2 * i + 1]
     loop i > 0 {
         i -= 1
         p: exp_cr_muldd(xh, xl, ch, cl)
@@ -29857,7 +29893,7 @@ priv exp_m1_cr_accurate: fn(n: Float) -> Float Never! {
         b: fast_two_sum(a.lo, sl)
         c0: fast_two_sum(a.hi, b.hi)
         c1: fast_two_sum(c0.lo, b.lo)
-        v1 := c1.hi
+        ^v1: c1.hi
         vb: to_bits(v1)
         if vb & 0x000F_FFFF_FFFF_FFFF == 0 {
             if vb & 0x7FFF_FFFF_FFFF_FFFF == 0 -> return exp_m1_cr_listed(n, c0.hi)
@@ -29882,8 +29918,8 @@ priv exp_m1_cr_accurate: fn(n: Float) -> Float Never! {
     f1: exp_cr_muldd(dxh, dxl, f0.hi, f0.lo)
     f2: exp_cr_muldd(f1.hi, f1.lo, tt.hi, tt.lo)
     s: fast_two_sum(tt.hi, f2.hi)
-    fh := s.hi
-    fl := (tt.lo + f2.lo) + s.lo
+    ^fh: s.hi
+    ^fl: (tt.lo + f2.lo) + s.lo
     off: -from_bits((1023 - ie) << 52)
     if ie < 53 {
         o: fast_two_sum(off, fh)
@@ -29916,10 +29952,10 @@ priv exp_m1_cr_mulddd: fn(xh: Float, xl: Float, c: Float) -> {hi: Float, lo: Flo
 // double-double, with l added to the top coefficient (expm1.c's opolydd at l
 // = 0, log1p.c's and lgamma.c's polydd).
 priv exp_m1_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], o: Int, n: Int, l: Float) -> {hi: Float, lo: Float} Never! {
-    i := n - 1
+    ^i: n - 1
     t: fast_two_sum(c[o + 2 * i], l)
-    ch := t.hi
-    cl := c[o + 2 * i + 1] + t.lo
+    ^ch: t.hi
+    ^cl: c[o + 2 * i + 1] + t.lo
     loop i > 0 {
         i -= 1
         p: exp_cr_muldd(xh, xl, ch, cl)
@@ -29934,10 +29970,10 @@ priv exp_m1_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], o: Int, n: Int, l: 
 // double-double, with l added to the top coefficient (lgamma.c's
 // polydddfst).
 priv exp_m1_cr_opolyddd: fn(x: Float, c: [Float], o: Int, n: Int, l: Float) -> {hi: Float, lo: Float} Never! {
-    i := n - 1
+    ^i: n - 1
     t: fast_two_sum(c[o + 2 * i], l)
-    ch := t.hi
-    cl := c[o + 2 * i + 1] + t.lo
+    ^ch: t.hi
+    ^cl: c[o + 2 * i + 1] + t.lo
     loop i > 0 {
         i -= 1
         p: exp_m1_cr_mulddd(ch, cl, x)
@@ -32359,8 +32395,8 @@ priv ln_1p_cr_refine: fn(x: Float, a: Float) -> Float Never! {
     sl: fma(tl, t, -sh)
     x0: fast_two_sum(dh - Float{1.0}, dl)
     x1: fast_sum_dd(x0.hi, x0.lo, sh, sl)
-    xh := x1.hi
-    xl := x1.lo
+    ^xh: x1.hi
+    ^xl: x1.lo
     if dt0 != 0.0 {
         dt: from_bits(to_bits(dt0) - (je << 52))
         ddh: th * dt
@@ -32957,14 +32993,14 @@ priv dint_add: fn(a0: {sig: Int, ex: Int, sgn: Int}, b0: {sig: Int, ex: Int, sgn
     b: if swap -> a0 else -> b0
     w: (1 << 128) - 1
     sh: a.ex - b.ex
-    t := b.sig
+    ^t: b.sig
     if sh > 0 {
         // b rounded at a's last place, ties up
         if sh <= 128 -> t = (t + ((t >> (sh - 1)) & 1)) & w
         if sh < 128 -> t = t >> sh else -> t = 0
     }
-    ex := a.ex
-    c := (a.sig - t) & w
+    ^ex: a.ex
+    ^c: (a.sig - t) & w
     if a.sgn == b.sgn {
         c = a.sig + t
         if c > w {
@@ -33001,10 +33037,10 @@ priv dint_mul_int: fn(n: Int, a: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex
     w2: (1 << 128) - 1
     hi: (a.sig >> 64) * c
     m0: if (hi >> 64) == 0 -> 64 else -> clz64(hi >> 64)
-    m := m0
+    ^m: m0
     t: (hi << m) & w2
     l: ((((a.sig & 0xFFFF_FFFF_FFFF_FFFF) * c) << (m - 1)) & w2) >> 63
-    s := l + t
+    ^s: l + t
     if s > w2 {
         s &= w2
         s = (s + (s & 1)) & w2
@@ -33040,7 +33076,7 @@ priv dint_div: fn(b: Float, a: Float) -> {sig: Int, ex: Int, sgn: Int} Never! {
 priv dint_to_float: fn(a: {sig: Int, ex: Int, sgn: Int}) -> Float Never! {
     hi: a.sig >> 64
     r: from_bits((hi >> 11) | 0x3FF0_0000_0000_0000)
-    rd := Float{0.0}
+    ^rd: Float{0.0}
     if (hi >> 10) & 1 == 1 -> rd = Float{1.1102230246251565e-16}
     if hi & 0x3FF != 0 || a.sig & 0xFFFF_FFFF_FFFF_FFFF != 0 -> rd += Float{5.551115123125783e-17}
     s: if a.sgn == 0 -> r + rd else -> -r - rd
@@ -33056,7 +33092,7 @@ priv dint_log: fn(x: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: 
     sh: if big -> 120 else -> 119
     i: (x.sig >> sh) - 128
     z: dint_add({sig: 1 << 127, ex: 0, sgn: 1}, dint_mul({sig: x.sig, ex: x.ex - e, sgn: x.sgn}, tint_coef(LOG_DINT_INVERSE, i)))
-    p := tint_coef(LOG_DINT_P, 0)
+    ^p: tint_coef(LOG_DINT_P, 0)
     loop k in 1..<13 -> p = dint_add(tint_coef(LOG_DINT_P, k), dint_mul(z, p))
     ln2: {sig: 0xB172_17F7_D1CF_79AB_C9E3_B398_03F2_F6AF, ex: -1, sgn: 0}
     dint_add(dint_add(tint_coef(LOG_DINT_LOG_INVERSE, i), dint_mul(z, p)), dint_mul_int(e, ln2))
@@ -33089,13 +33125,13 @@ priv log2_1p_accurate: fn(x: Float) -> Float Never! {
         // degree 17 down to 11 in Floats, 10 to 8 adding the low part, then
         // double-double coefficients
         c: LOG2P1_ACCURATE
-        h := fma(c[23], x, c[22])
-        i := 21
+        ^h: fma(c[23], x, c[22])
+        ^i: 21
         loop i >= 17 {
             h = fma(h, x, c[i])
             i -= 1
         }
-        l := Float{0.0}
+        ^l: Float{0.0}
         loop i >= 14 {
             p: s_mul(x, h, l)
             s: c[i] + p.hi
@@ -33125,8 +33161,8 @@ priv log10_1p_accurate: fn(x: Float) -> Float Never! {
         // degree 17 down to 10 in Floats, 9 adding the product's error, then
         // double-double coefficients
         c: LOG10P1_ACCURATE
-        h := fma(c[24], x, c[23])
-        i := 22
+        ^h: fma(c[24], x, c[23])
+        ^i: 22
         loop i >= 17 {
             h = fma(h, x, c[i])
             i -= 1
@@ -37274,8 +37310,8 @@ tanh: fn(n: Float) -> Float Never! {
     t0h: HYP_T0[2 * i0 + 1]
     t1h: HYP_T1[2 * i1 + 1]
     th0: t0h * t1h
-    th := Float{0.0}
-    tl := Float{0.0}
+    ^th: Float{0.0}
+    ^tl: Float{0.0}
     if aix < 0x400D_76C8_B439_5810 {
         if aix < 0x3FD0_0000_0000_0000 {
             if aix <= 0x3E4D_12ED_0AF1_A27F {
@@ -37448,7 +37484,7 @@ fma: fn(a: Float, b: Float, c: Float) -> Float Never! { __float_fma(a, b, c) }
     pa: float_parts(a)
     pb: float_parts(b)
     pe: pa.e + pb.e
-    e := pe
+    ^e: pe
     ce: float_parts(c).e
     if ce < e -> e = ce
     magnitude: (pa.m * pb.m) << (pe - e)
@@ -37491,9 +37527,13 @@ f32_sqrt: fn(x: Float) -> F32 Never! { f32_narrow(sqrt_odd(x)) }
 // The F32 form of fma and muladd (an all-F32 call): the exact a * b + c
 // rounded to odd, which then narrows correctly. Narrowing fma(a, b, c) would
 // round twice.
-#Builtin.Role(.FmaF32) priv __fma_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
+#Builtin.Role(.FmaF32) priv __fma_f32: fn(a: Float, b: Float, c: Float) -> Float Never! {
+    fma_odd(a, b, c)
+}
 
-#Builtin.Role(.MuladdF32) priv __muladd_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
+#Builtin.Role(.MuladdF32) priv __muladd_f32: fn(a: Float, b: Float, c: Float) -> Float Never! {
+    fma_odd(a, b, c)
+}
 
 // The F32 nearest x, ties to even: a NaN is the F32 NaN, and a magnitude
 // from 2^128 - 2^103 (the midpoint above the largest F32) is the infinity.
@@ -37594,7 +37634,7 @@ priv odd_scaled: fn(n: Int, e: Int) -> Float Never! {
     m: if n < 0 -> -n else -> n
     b: bit_len(m)
     shift: if b > 53 -> b - 53 else -> 0
-    q := m >> shift
+    ^q: m >> shift
     if (q << shift) != m -> q |= 1
     r: ldexp(Float{q}, e + shift)
     if n < 0 -> -r else -> r
@@ -37627,7 +37667,9 @@ fabs: fn(n: Float) -> Float Never! { __from_bits_i64(__to_bits_i64(n) & 0x7FFF_F
 
 // The F32 fabs and copysign (an all-F32 call): sign-bit operations on the
 // binary32 bits, which keep a signaling NaN and its payload.
-#Builtin.Role(.FabsF32) priv __fabs_f32: fn(n: F32) -> F32 Never! { __from_bits_f32(__to_bits_f32(n) & 0x7FFF_FFFF) }
+#Builtin.Role(.FabsF32) priv __fabs_f32: fn(n: F32) -> F32 Never! {
+    __from_bits_f32(__to_bits_f32(n) & 0x7FFF_FFFF)
+}
 
 #Builtin.Role(.CopysignF32) priv __copysign_f32: fn(value: F32, sign_value: F32) -> F32 Never! {
     __from_bits_f32(__to_bits_f32(value) & 0x7FFF_FFFF | __to_bits_f32(sign_value) & 0x8000_0000)
@@ -37660,7 +37702,9 @@ is_finite: fn(n: Float) -> Bool Never! {
 }
 
 // #4747: preserve the existing F32 call contract without changing Float policy.
-#Builtin.Role(.IsFiniteF32) priv __is_finite_f32: fn(n: F32) -> Bool Never! { is_finite(Float.from_f32(n)) }
+#Builtin.Role(.IsFiniteF32) priv __is_finite_f32: fn(n: F32) -> Bool Never! {
+    is_finite(Float.from_f32(n))
+}
 
 isnan: fn(n: Float) -> Bool Never! { is_nan(n) }
 
@@ -37757,14 +37801,16 @@ nextafter: fn(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
     Float.from_f32(__from_bits_f32(if away -> bits + 1 else -> bits - 1))
 }
 
-#Builtin.Role(.NextafterF32) priv __nextafter_f32: fn(n: Float, toward: Float) -> Float Never! { __next_after_f32(n, toward) }
+#Builtin.Role(.NextafterF32) priv __nextafter_f32: fn(n: Float, toward: Float) -> Float Never! {
+    __next_after_f32(n, toward)
+}
 
 significand: fn(n: Float) -> Float Never! {
     if n == 0.0 || !is_finite(n) -> return n
     bits: to_bits(n)
     exponent: (bits >> 52) & 2047
     if exponent == 0 {
-        value := fabs(n)
+        ^value: fabs(n)
         loop value < 1.0 -> value *= 2.0
         return copysign(value, n)
     }
@@ -37787,8 +37833,8 @@ ilogb: fn(n: Float) -> Int? Never! {
     if exponent == 2047 -> return None
     if exponent != 0 -> return Val(exponent - 1023)
     if bits == 0 -> return None
-    i := bits << 12
-    found := -1023
+    ^i: bits << 12
+    ^found: -1023
     loop i < 9223372036854775808 {
         found -= 1
         i = i << 1
@@ -37799,8 +37845,8 @@ ilogb: fn(n: Float) -> Int? Never! {
 /// scalbn.c from musl 1.2.5: `n` times 2^exponent, scaled in at most three
 /// exact steps so only the last can round.
 ldexp: fn(n: Float, exponent: Int) -> Float Never! {
-    y := n
-    k := exponent
+    ^y: n
+    ^k: exponent
     if k > 1023 {
         y *= Float{8.98846567431158e307}
         k -= 1023
@@ -37849,7 +37895,9 @@ to_bits: fn(n: Float) -> Int Never! { Int{__to_bits_i64(n)} }
 // (no conversion), so NaN payloads and signaling NaNs cross unchanged.
 #Builtin.Role(.ToBitsF32) priv __to_bits_f32: fn(n: F32) -> Int Never! { Int{__f32_bits_i64(n)} }
 
-priv __from_bits_f32: fn(bits: Int) -> F32 Never! { __f32_from_bits_i64(checked(I64{bits}) ?? core.math.__numeric_stop("Value doesn't fit in destination type")) }
+priv __from_bits_f32: fn(bits: Int) -> F32 Never! {
+    __f32_from_bits_i64(checked(I64{bits}) ?? core.math.__numeric_stop("Value doesn't fit in destination type"))
+}
 
 // The binary32 bits of n as an I64 in 0..<2^32, and the F32 of the low 32
 // bits of `bits`: one copy each (InlineF32Bits, InlineF32FromBits). These
@@ -37871,9 +37919,11 @@ priv __from_bits_f32: fn(bits: Int) -> F32 Never! { __f32_from_bits_i64(checked(
 #Builtin.Role(.InlineF32FromBits) priv __f32_from_bits_i64: fn(bits: I64) -> F32 Never! {
     raw: bits & 0xFFFF_FFFF
     sign: if (raw & 0x8000_0000) != 0 -> I64{-0x8000_0000_0000_0000} else -> I64{0}
-    exponent := (raw >> 23) & 0xFF
-    fraction := raw & 0x7F_FFFF
-    if exponent == 0xFF -> return f32_narrow(__from_bits_i64(sign | 0x7FF0_0000_0000_0000 | (fraction << 29)))
+    ^exponent: (raw >> 23) & 0xFF
+    ^fraction: raw & 0x7F_FFFF
+    if exponent == 0xFF {
+        return f32_narrow(__from_bits_i64(sign | 0x7FF0_0000_0000_0000 | (fraction << 29)))
+    }
     if exponent == 0 {
         if fraction == 0 -> return f32_narrow(__from_bits_i64(sign))
         // A subnormal is a binary64 normal: shift its leading bit into place.
@@ -37895,7 +37945,9 @@ f32_to_bits: fn(value: F32) -> U32 Never! { wrapping(U32{__f32_bits_i64(value)})
 f32_from_bits: fn(word: U32) -> F32 Never! { __f32_from_bits_i64(I64{word}) }
 
 // An Int past the I64 range is no machine word: it stops at the caller's line.
-from_bits: fn(bits: Int) -> Float Never! { __from_bits_i64(checked(I64{bits}) ?? core.math.__numeric_stop("Value doesn't fit in destination type")) }
+from_bits: fn(bits: Int) -> Float Never! {
+    __from_bits_i64(checked(I64{bits}) ?? core.math.__numeric_stop("Value doesn't fit in destination type"))
+}
 
 // The bits of n as an I64, and the Float of `bits`: one bit copy each, as
 // to_bits and from_bits, without the Int those box past +-2^62. The
@@ -37914,8 +37966,8 @@ from_bits: fn(bits: Int) -> Float Never! { __from_bits_i64(checked(I64{bits}) ??
     if a == 0.0 -> return sign
     // a = f 2^(x - 1075), f whole once it is in [2^52, 2^53), or below 2^52
     // at x = 1 for a subnormal; each halving and doubling is exact.
-    f := a
-    x := I64{1075}
+    ^f: a
+    ^x: I64{1075}
     loop f >= 9007199254740992.0 {
         f *= 0.5
         x += 1
@@ -37932,14 +37984,12 @@ from_bits: fn(bits: Int) -> Float Never! { __from_bits_i64(checked(I64{bits}) ??
 #Builtin.Role(.InlineFloatFromBits) priv __from_bits_i64: fn(bits: I64) -> Float Never! {
     exponent: (bits >> 52) & 0x7FF
     fraction: bits & 0xF_FFFF_FFFF_FFFF
-    magnitude := Float{0.0}
-    if exponent == 0x7FF {
-        magnitude = if fraction == 0 -> INFINITY else -> NAN
-    } else {
+    ^magnitude: Float{0.0}
+    if exponent == 0x7FF -> magnitude = if fraction == 0 -> INFINITY else -> NAN else {
         // whole 2^k, scaled by exact halvings and doublings.
         whole: if exponent == 0 -> fraction else -> fraction | 0x10_0000_0000_0000
         magnitude = Float{Int{whole}}
-        k := if exponent == 0 -> I64{-1074} else -> exponent - 1075
+        ^k: if exponent == 0 -> I64{-1074} else -> exponent - 1075
         loop k > 0 {
             magnitude *= 2.0
             k -= 1
@@ -38055,9 +38105,9 @@ checked_rem: fn(a: Int, b: Int) -> Int? Never! {
 
 checked_pow: fn(base: Int, exponent: Int) -> Int? Never! {
     if exponent < 0 -> return None
-    result := 1
-    factor := base
-    power := exponent
+    ^result: 1
+    ^factor: base
+    ^power: exponent
     loop power > 0 {
         if ((power) & 1) != 0 -> result = checked_mul(result, factor) ?? return None
         power = power /% 2
@@ -38077,8 +38127,8 @@ saturating_mul: fn(a: Int, b: Int) -> Int Never! { a * b }
 
 factorial: fn(n: Int) -> Int? Never! {
     if n < 0 -> return None
-    acc := 1
-    i := 2
+    ^acc: 1
+    ^i: 2
     loop i <= n {
         acc = checked_mul(acc, i) ?? return None
         i += 1
@@ -38088,10 +38138,10 @@ factorial: fn(n: Int) -> Int? Never! {
 
 binomial: fn(n: Int, k: Int) -> Int? Never! {
     if n < 0 || k < 0 || k > n -> return None
-    choose_k := k
+    ^choose_k: k
     if choose_k > n - choose_k -> choose_k = n - choose_k
-    acc := 1
-    i := 1
+    ^acc: 1
+    ^i: 1
     loop i <= choose_k {
         factor: n - choose_k + i
         acc = checked_mul(acc, factor) ?? return None
@@ -38105,8 +38155,8 @@ comb: fn(n: Int, k: Int) -> Int? Never! { binomial(n, k) }
 
 perm: fn(n: Int, k: Int) -> Int? Never! {
     if n < 0 || k < 0 || k > n -> return None
-    acc := 1
-    i := 0
+    ^acc: 1
+    ^i: 0
     loop i < k {
         acc = checked_mul(acc, n - i) ?? return None
         i += 1
@@ -38115,15 +38165,15 @@ perm: fn(n: Int, k: Int) -> Int? Never! {
 }
 
 gcd_many: fn(values: [Int]) -> Int Never! {
-    acc := 0
+    ^acc: 0
     loop value in values -> acc = gcd(acc, value)
     acc
 }
 
 lcm_many: fn(values: [Int]) -> Int Never! {
     if values.len() == 0 -> return 0
-    acc := values[0]
-    i := 1
+    ^acc: values[0]
+    ^i: 1
     loop i < values.len() {
         acc = lcm(acc, values[i])
         i += 1
@@ -38133,10 +38183,10 @@ lcm_many: fn(values: [Int]) -> Int Never! {
 
 powmod: fn(base: Int, exponent: Int, modulus: Int) -> Int? Never! {
     if modulus <= 0 || exponent < 0 -> return None
-    result := 1 %% modulus
-    factor := base %% modulus
+    ^result: 1 %% modulus
+    ^factor: base %% modulus
     if factor < 0 -> factor += modulus
-    power := exponent
+    ^power: exponent
     loop power > 0 {
         if ((power) & 1) != 0 {
             product: checked_mul(result, factor) ?? return None
@@ -38150,7 +38200,7 @@ powmod: fn(base: Int, exponent: Int, modulus: Int) -> Int? Never! {
 }
 
 div_mod: fn(a: Int, b: Int) -> {quot: Int, rem: Int} Never! {
-    rem := a %% b
+    ^rem: a %% b
     if rem < 0 {
         if b > 0 -> rem += b
         if b < 0 -> rem -= b
@@ -38164,8 +38214,8 @@ div_rem: fn(a: Int, b: Int) -> {quot: Int, rem: Int} Never! {
 }
 
 digits: fn(n: Int) -> Int Never! {
-    value := abs(n)
-    count := 1
+    ^value: abs(n)
+    ^count: 1
     loop value >= 10 {
         value = value /% 10
         count += 1
@@ -38174,7 +38224,7 @@ digits: fn(n: Int) -> Int Never! {
 }
 
 leading_ones: fn(n: Int) -> Int Never! {
-    count := 0
+    ^count: 0
     loop count < 64 {
         if ((n >> (63 - count)) & 1) == 0 -> return count
         count += 1
@@ -38183,7 +38233,7 @@ leading_ones: fn(n: Int) -> Int Never! {
 }
 
 trailing_ones: fn(n: Int) -> Int Never! {
-    count := 0
+    ^count: 0
     loop count < 64 {
         if ((n >> count) & 1) == 0 -> return count
         count += 1
@@ -38199,7 +38249,9 @@ cmp: fn(a: Float, b: Float) -> Int Never! {
     return -1
 }
 
-#Builtin.Role(.CmpF32) priv __cmp_f32: fn(a: F32, b: F32) -> Int Never! { cmp(Float.from_f32(a), Float.from_f32(b)) }
+#Builtin.Role(.CmpF32) priv __cmp_f32: fn(a: F32, b: F32) -> Int Never! {
+    cmp(Float.from_f32(a), Float.from_f32(b))
+}
 
 abs_diff: fn(a: Int, b: Int) -> Int Never! {
     if a >= b -> return a - b
@@ -38213,13 +38265,13 @@ odd: fn(n: Int) -> Bool Never! { is_odd(n) }
 in_range: fn(value: Int, low: Int, high: Int) -> Bool Never! { value >= low && value < high }
 
 sum_int: fn(values: [Int]) -> Int Never! {
-    acc := 0
+    ^acc: 0
     loop value in values -> acc = saturating_add(acc, value)
     acc
 }
 
 prod_int: fn(values: [Int]) -> Int Never! {
-    acc := 1
+    ^acc: 1
     loop value in values -> acc = saturating_mul(acc, value)
     acc
 }
@@ -38242,13 +38294,13 @@ fmod: fn(a: Float, b: Float) -> Float Never! {
     // exponent of the least normal, so ex >= ey. The remainder of
     // mx 2^(ex - ey) by my is taken 10 bits at a time, each step one word
     // division below 2^63, and is a whole number of b's units below my.
-    ex := ux >> 52
-    ey := uy >> 52
-    mx := ux & 0xF_FFFF_FFFF_FFFF
-    my := uy & 0xF_FFFF_FFFF_FFFF
+    ^ex: ux >> 52
+    ^ey: uy >> 52
+    ^mx: ux & 0xF_FFFF_FFFF_FFFF
+    ^my: uy & 0xF_FFFF_FFFF_FFFF
     if ex == 0 -> ex = 1 else -> mx |= 0x10_0000_0000_0000
     if ey == 0 -> ey = 1 else -> my |= 0x10_0000_0000_0000
-    rest := mx % my
+    ^rest: mx % my
     loop ex > ey {
         step: if ex - ey > 10 -> I64{10} else -> ex - ey
         rest = (rest << step) % my
@@ -38271,18 +38323,18 @@ remainder: fn(a: Float, b: Float) -> Float Never! { rem_quo(a, b).rem }
 rem_quo: fn(a: Float, b: Float) -> {rem: Float, quo: Int} Never! {
     ux: to_bits(a) & 18446744073709551615
     uy: to_bits(b) & 18446744073709551615
-    ex := (ux >> 52) & 2047
-    ey := (uy >> 52) & 2047
+    ^ex: (ux >> 52) & 2047
+    ^ey: (uy >> 52) & 2047
     sx: ux >> 63 != 0
     sy: uy >> 63 != 0
     if is_nan(a) || is_nan(b) -> return {rem: nan_pair(a, b), quo: 0}
     if uy & 9223372036854775807 == 0 || ex == 2047 -> return {rem: (a * b) / (a * b), quo: 0}
     if ux & 9223372036854775807 == 0 -> return {rem: a, quo: 0}
-    uxi := remquo_significand(ux, ex)
+    ^uxi: remquo_significand(ux, ex)
     uyi: remquo_significand(uy, ey)
     if ex == 0 -> ex = remquo_exponent(ux)
     if ey == 0 -> ey = remquo_exponent(uy)
-    q := 0
+    ^q: 0
     if ex < ey - 1 -> return {rem: a, quo: 0}
     if ex >= ey {
         loop ex > ey {
@@ -38306,7 +38358,7 @@ rem_quo: fn(a: Float, b: Float) -> {rem: Float, quo: Int} Never! {
         }
     }
     bits: if ex > 0 -> (uxi - 4503599627370496) | ex << 52 else -> uxi >> (1 - ex)
-    x := from_bits(bits)
+    ^x: from_bits(bits)
     y: fabs(b)
     if ex == ey || (ex + 1 == ey && (Float{2.0} * x > y || (Float{2.0} * x == y && q % 2 != 0))) {
         x -= y
@@ -38332,8 +38384,8 @@ priv remquo_significand: fn(bits: Int, biased: Int) -> Int Never! {
 
 // remquo.c: a subnormal's exponent, counted down from 0 to its leading bit.
 priv remquo_exponent: fn(bits: Int) -> Int Never! {
-    i := (bits << 12) & 18446744073709551615
-    exponent := 0
+    ^i: (bits << 12) & 18446744073709551615
+    ^exponent: 0
     loop i < 9223372036854775808 {
         exponent -= 1
         i = i << 1
@@ -38350,7 +38402,7 @@ isclose: fn(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool Never! {
 
 dist: fn(left: [Float], right: [Float]) -> Float Never! {
     if left.len() != right.len() -> return NAN
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop i in 0..<left.len() {
         delta: left[i] - right[i]
         total += delta * delta
@@ -38388,8 +38440,8 @@ max_float: fn(a: Float, b: Float) -> Float Never! {
 midpoint: fn(a: Float, b: Float) -> Float Never! { a + (b - a) * 0.5 }
 
 fsum: fn(values: [Float]) -> Float Never! {
-    total := Float{0.0}
-    compensation := Float{0.0}
+    ^total: Float{0.0}
+    ^compensation: Float{0.0}
     loop value in values {
         corrected: value - compensation
         next_total: total + corrected
@@ -38400,8 +38452,8 @@ fsum: fn(values: [Float]) -> Float Never! {
 }
 
 sumprod: fn(left: [Float], right: [Float]) -> Float Never! {
-    total := Float{0.0}
-    n := left.len()
+    ^total: Float{0.0}
+    ^n: left.len()
     if right.len() < n -> n = right.len()
     loop i in 0..<n -> total += left[i] * right[i]
     total
@@ -38494,8 +38546,8 @@ impl F32.Roundable {
 // 2^-102 down, never entering subnormal range before the final multiply) so
 // there is at most one rounding step.
 priv ldexp_f32: fn(value: F32, exponent: Int) -> F32 Never! {
-    x := value
-    n := exponent
+    ^x: value
+    ^n: exponent
     if n > 127 {
         x *= __from_bits_f32(0x7F00_0000)
         n -= 127
@@ -39223,7 +39275,8 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
 #Test("math Float leaves are exact on IEEE edges") {
     // The signed zeros, the infinities, a quiet and a signaling NaN with a
     // payload, the subnormal ends, the largest Float and 1.0 keep their bits.
-    loop bits in ([Int]{0, -9223372036854775808, 9218868437227405312, -4503599627370496, 9221120237041090561, 9218868437227405313, 1, 4503599627370495, 4503599627370496, 9218868437227405311, 4607182418800017408}) {
+    loop bits in
+        ([Int]{0, -9223372036854775808, 9218868437227405312, -4503599627370496, 9221120237041090561, 9218868437227405313, 1, 4503599627370495, 4503599627370496, 9218868437227405311, 4607182418800017408}) {
         assert_eq(to_bits(from_bits(bits)), bits)
     }
     assert_eq(to_bits(fabs(from_bits(-2251799813685247))), 9221120237041090561)
@@ -40038,7 +40091,7 @@ Vec4: struct {
     }
 
     dot: fn(self, other: Vec4) -> Float Never! {
-        total := Float{0.0}
+        ^total: Float{0.0}
         loop i in 0..<4 -> total += self.lanes[i] * other.lanes[i]
         total
     }
@@ -40231,10 +40284,10 @@ Mat3: struct {
     }
 
     matmul: fn(self, other: Mat3) -> Mat3 Never! {
-        result := self.lanes.copy()
+        ^result: self.lanes.copy()
         loop column in 0..<3 {
             loop row in 0..<3 {
-                total := Float{0.0}
+                ^total: Float{0.0}
                 loop k in 0..<3 -> total += self.lanes[k * 3 + row] * other.lanes[column * 3 + k]
                 result[column * 3 + row] = total
             }
@@ -40243,9 +40296,9 @@ Mat3: struct {
     }
 
     transform: fn(self, value: Vec3) -> Vec3 Never! {
-        result := value.lanes.copy()
+        ^result: value.lanes.copy()
         loop row in 0..<3 {
-            total := Float{0.0}
+            ^total: Float{0.0}
             loop k in 0..<3 -> total += self.lanes[k * 3 + row] * value.lanes[k]
             result[row] = total
         }
@@ -40253,7 +40306,7 @@ Mat3: struct {
     }
 
     transpose: fn(self) -> Mat3 Never! {
-        result := self.lanes.copy()
+        ^result: self.lanes.copy()
         loop column in 0..<3 {
             loop row in 0..<3 -> result[column * 3 + row] = self.lanes[row * 3 + column]
         }
@@ -40262,7 +40315,7 @@ Mat3: struct {
 
     impl Add {
         add: fn(self, rhs: Mat3) -> Mat3 Never! {
-            result := self.lanes.copy()
+            ^result: self.lanes.copy()
             loop i in 0..<9 -> result[i] = self.lanes[i] + rhs.lanes[i]
             Mat3{lanes: result}
         }
@@ -40270,7 +40323,7 @@ Mat3: struct {
 
     impl Sub {
         sub: fn(self, rhs: Mat3) -> Mat3 Never! {
-            result := self.lanes.copy()
+            ^result: self.lanes.copy()
             loop i in 0..<9 -> result[i] = self.lanes[i] - rhs.lanes[i]
             Mat3{lanes: result}
         }
@@ -40306,7 +40359,7 @@ Mat4: struct {
     // The adjugate over the determinant; fails as Mat2.inverse does.
     inverse: fn(self) -> Mat4 MatrixError! {
         m: self.lanes
-        a := mat4_adjugate(m)
+        ^a: mat4_adjugate(m)
         det: m[0] * a[0] + m[1] * a[4] + m[2] * a[8] + m[3] * a[12]
         if matrix_singular(det) -> return Err(MatrixError.Singular)
         scale: Float{1.0} / det
@@ -40316,7 +40369,7 @@ Mat4: struct {
 
     impl Add {
         add: fn(self, rhs: Mat4) -> Mat4 Never! {
-            result := self.lanes.copy()
+            ^result: self.lanes.copy()
             loop i in 0..<16 -> result[i] = self.lanes[i] + rhs.lanes[i]
             Mat4{lanes: result}
         }
@@ -40324,7 +40377,7 @@ Mat4: struct {
 
     impl Sub {
         sub: fn(self, rhs: Mat4) -> Mat4 Never! {
-            result := self.lanes.copy()
+            ^result: self.lanes.copy()
             loop i in 0..<16 -> result[i] = self.lanes[i] - rhs.lanes[i]
             Mat4{lanes: result}
         }
@@ -40336,10 +40389,10 @@ Mat4: struct {
     to_array: fn(self) -> [Float#16] Never! { self.lanes.copy() }
 
     matmul: fn(self, other: Mat4) -> Mat4 Never! {
-        result := [Float#16]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+        ^result: [Float#16]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
         loop column in 0..<4 {
             loop row in 0..<4 {
-                total := Float{0.0}
+                ^total: Float{0.0}
                 loop k in 0..<4 -> total += self.lanes[k * 4 + row] * other.lanes[column * 4 + k]
                 result[column * 4 + row] = total
             }
@@ -40348,9 +40401,9 @@ Mat4: struct {
     }
 
     transform: fn(self, value: Vec4) -> Vec4 Never! {
-        result := [Float#4]{0.0, 0.0, 0.0, 0.0}
+        ^result: [Float#4]{0.0, 0.0, 0.0, 0.0}
         loop row in 0..<4 {
-            total := Float{0.0}
+            ^total: Float{0.0}
             loop k in 0..<4 -> total += self.lanes[k * 4 + row] * value.lanes[k]
             result[row] = total
         }
@@ -40502,8 +40555,8 @@ Fraction: struct {
 
 #Builtin.Role(.FractionNew) priv __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
     if denominator == 0 -> return None
-    top := numerator
-    bottom := denominator
+    ^top: numerator
+    ^bottom: denominator
     if bottom < 0 {
         top = -top
         bottom = -bottom
@@ -40523,7 +40576,9 @@ Fraction: struct {
     __fraction_from_parts(numerator, denominator)
 }
 
-#Builtin.Role(.FractionFromInt) priv __fraction_from_int: fn(value: Int) -> Fraction Never! { Fraction{num_value: value, den_value: 1} }
+#Builtin.Role(.FractionFromInt) priv __fraction_from_int: fn(value: Int) -> Fraction Never! {
+    Fraction{num_value: value, den_value: 1}
+}
 
 #Builtin.Role(.FractionAdd) priv __fraction_add: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.den_value + right.num_value * left.den_value, left.den_value * right.den_value)
@@ -40542,16 +40597,20 @@ Fraction: struct {
     __fraction_from_parts(left.num_value * right.den_value, left.den_value * right.num_value)
 }
 
-#Builtin.Role(.FractionNumerator) priv __fraction_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
+#Builtin.Role(.FractionNumerator) priv __fraction_numerator: fn(value: Fraction) -> Int Never! {
+    value.num_value.copy()
+}
 
-#Builtin.Role(.FractionDenominator) priv __fraction_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
+#Builtin.Role(.FractionDenominator) priv __fraction_denominator: fn(value: Fraction) -> Int Never! {
+    value.den_value.copy()
+}
 
 // `value` rounded in `mode` to a whole Fraction (denominator 1), exactly. The
 // denominator is positive, so the numerator carries the sign.
 priv fraction_rounded: fn(value: Fraction, mode: Rounding) -> Fraction Never! {
     negative: value.num_value < 0
     magnitude: abs(value.num_value)
-    quotient := magnitude /% value.den_value
+    ^quotient: magnitude /% value.den_value
     if magnitude_rounds_up(negative, quotient, magnitude %% value.den_value, value.den_value, mode) {
         quotient += 1
     }
@@ -40658,9 +40717,9 @@ priv math_dyn_kind: fn(tree: Dyn) -> String Never! {
 }
 
 exact_power: fn(base: Int, exponent: Int) -> Int Never! {
-    result := 1
-    factor := base
-    remaining := exponent
+    ^result: 1
+    ^factor: base
+    ^remaining: exponent
     // The power is exact: past the packed rail it goes on as a bigint, which
     // is what callers ask for (Decimal and Fraction scales, float decoding).
     #Allow(Jet.HiddenCopyInLoop, "an exact power grows past the packed Int rail by design") loop remaining > 0 {
@@ -40672,8 +40731,8 @@ exact_power: fn(base: Int, exponent: Int) -> Int Never! {
 }
 
 priv __decimal_normalized: fn(coefficient: Int, scale: Int) -> Decimal Never! {
-    magnitude := abs(coefficient)
-    places := scale
+    ^magnitude: abs(coefficient)
+    ^places: scale
     if magnitude == 0 -> places = 0
     loop places > 0 && magnitude %% 10 == 0 {
         magnitude = magnitude /% 10
@@ -40683,9 +40742,9 @@ priv __decimal_normalized: fn(coefficient: Int, scale: Int) -> Decimal Never! {
 }
 
 priv decimal_try_fraction: fn(value: Fraction) -> Decimal? Never! {
-    remaining := value.den_value
-    twos := 0
-    fives := 0
+    ^remaining: value.den_value
+    ^twos: 0
+    ^fives: 0
     loop remaining %% 2 == 0 {
         remaining = remaining /% 2
         twos += 1
@@ -40700,15 +40759,21 @@ priv decimal_try_fraction: fn(value: Fraction) -> Decimal? Never! {
     Val(__decimal_normalized(digits, places))
 }
 
-#Builtin.Role(.FractionOwnedNumerator) priv __fraction_owned_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
+#Builtin.Role(.FractionOwnedNumerator) priv __fraction_owned_numerator: fn(value: Fraction) -> Int Never! {
+    value.num_value.copy()
+}
 
-#Builtin.Role(.FractionOwnedDenominator) priv __fraction_owned_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
+#Builtin.Role(.FractionOwnedDenominator) priv __fraction_owned_denominator: fn(value: Fraction) -> Int Never! {
+    value.den_value.copy()
+}
 
 #Builtin.Role(.FractionEqual) priv __fraction_equal: fn(left: Fraction, right: Fraction) -> Bool Never! {
     left.num_value == right.num_value && left.den_value == right.den_value
 }
 
-#Builtin.Role(.FractionIsZero) priv __fraction_is_zero: fn(value: Fraction) -> Bool Never! { value.num_value == 0 }
+#Builtin.Role(.FractionIsZero) priv __fraction_is_zero: fn(value: Fraction) -> Bool Never! {
+    value.num_value == 0
+}
 
 #Builtin.Role(.FractionToFloat) priv __fraction_to_float: fn(value: Fraction) -> Float Never! {
     Float{value.num_value} / Float{value.den_value}
@@ -40741,14 +40806,14 @@ priv int_exact_stop_text: fn(source: String) -> String Never! {
     if value == 0.0 -> return __fraction_from_int(0)
     bits: to_bits(value)
     exponent: (bits >> 52) & 2047
-    significand := bits & 4503599627370495
-    power := -1074
+    ^significand: bits & 4503599627370495
+    ^power: -1074
     if exponent != 0 {
         significand |= 4503599627370496
         power = exponent - 1023 - 52
     }
-    top := significand
-    bottom := 1
+    ^top: significand
+    ^bottom: 1
     if power >= 0 -> top *= exact_power(2, power) else -> bottom = exact_power(2, -power)
     if sign_bit(value) -> top = -top
     __fraction_from_parts(top, bottom)
@@ -40775,8 +40840,8 @@ priv unit_ratio: fn(text: String) -> Fraction Never! {
 }
 
 priv unit_ratio_part: fn(text: String) -> Int Never! {
-    negative := false
-    total := 0
+    ^negative: false
+    ^total: 0
     loop byte in text.bytes() {
         code: Int{byte}
         if code == 45 -> negative = true else -> total = total * 10 + (code - 48)
@@ -40789,9 +40854,9 @@ priv unit_ratio_part: fn(text: String) -> Int Never! {
 // an exponent no finer than 2^-1074 and below 2^1024.
 priv unit_exact_float: fn(ratio: Fraction) -> Float? Never! {
     if ratio.num_value == 0 -> return Val(0.0)
-    odd := abs(ratio.num_value)
-    shift := 0
-    rest := ratio.den_value
+    ^odd: abs(ratio.num_value)
+    ^shift: 0
+    ^rest: ratio.den_value
     loop rest %% 2 == 0 {
         rest = rest /% 2
         shift -= 1
@@ -40802,14 +40867,14 @@ priv unit_exact_float: fn(ratio: Fraction) -> Float? Never! {
         shift += 1
     }
     if odd >= exact_power(2, 53) || shift < -1074 -> return None
-    width := 0
-    remaining := odd
+    ^width: 0
+    ^remaining: odd
     loop remaining > 0 {
         remaining = remaining /% 2
         width += 1
     }
     if shift + width > 1024 -> return None
-    value := Float{odd}
+    ^value: Float{odd}
     loop shift > 0 {
         value *= 2.0
         shift -= 1
@@ -40825,7 +40890,7 @@ priv unit_exact_float: fn(ratio: Fraction) -> Float? Never! {
 // `mode`: 0 toward zero, 1 floor, 2 ceiling, 3 nearest with ties to even.
 priv unit_rounded_integer: fn(numerator: Int, denominator: Int, mode: Int) -> Int Never! {
     magnitude: abs(numerator)
-    quotient := magnitude /% denominator
+    ^quotient: magnitude /% denominator
     remainder: magnitude %% denominator
     negative: numerator < 0
     increment: if mode == {
@@ -40847,8 +40912,8 @@ priv unit_ratio_compare: fn(left: Fraction, right: Fraction) -> Int Never! {
 // The bits of the largest finite nonnegative Float at or below the positive
 // `ratio`.
 priv unit_float_floor_bits: fn(ratio: Fraction) -> Int Never! {
-    low := 0
-    high := 9218868437227405311
+    ^low: 0
+    ^high: 9218868437227405311
     loop low < high {
         middle: low + (high - low) /% 2 + 1
         if unit_ratio_compare(ratio, __fraction_from_float(from_bits(middle))) >= 0 -> low = middle else {
@@ -40878,7 +40943,7 @@ priv unit_compare_times_power10: fn(left: Int, right: Int, power: Int) -> Int Ne
 // `half_step`) times 10^digits is below, at or above one.
 priv unit_candidate_distance: fn(ratio: Fraction, candidate: Float, digits: Int, half_step: Bool) -> Int Never! {
     exact: __fraction_from_float(candidate)
-    difference := abs(ratio.num_value * exact.den_value - exact.num_value * ratio.den_value)
+    ^difference: abs(ratio.num_value * exact.den_value - exact.num_value * ratio.den_value)
     if half_step -> difference *= 2
     unit_compare_times_power10(difference, ratio.den_value * exact.den_value, digits)
 }
@@ -40896,8 +40961,8 @@ priv unit_huge_precision_rounded: fn(ratio: Fraction, mode: Int, digits: Int) ->
         return Val(if negative -> -floor else -> floor)
     }
     ceiling: if floor_bits < 9218868437227405311 -> Val(from_bits(floor_bits + 1)) else -> Float?{None}
-    lower := Float?{None}
-    upper := Float?{None}
+    ^lower: Float?{None}
+    ^upper: Float?{None}
     if negative {
         if ceiling == .Val(above) -> lower = Val(-above)
         upper = Val(-floor)
@@ -40997,16 +41062,16 @@ priv decimal_signed: fn(value: Decimal) -> Int Never! {
 priv decimal_parse: fn(text: String) -> Decimal? Never! {
     bytes: text.trim().bytes()
     if bytes.len() == 0 -> return None
-    index := 0
-    negative := false
+    ^index: 0
+    ^negative: false
     if bytes[0] == (U8{45}) || bytes[0] == (U8{43}) {
         negative = bytes[0] == (U8{45})
         index = 1
     }
-    magnitude := 0
-    raw_digits := 0
-    fractional := 0
-    point := false
+    ^magnitude: 0
+    ^raw_digits: 0
+    ^fractional: 0
+    ^point: false
     mantissa_start: index
     loop index < bytes.len() && bytes[index] != (U8{101}) && bytes[index] != (U8{69}) {
         byte: bytes[index]
@@ -41025,9 +41090,9 @@ priv decimal_parse: fn(text: String) -> Decimal? Never! {
     // The spelling is checked before any arithmetic, so an over-limit
     // coefficient fails at once; 18 digits per step keeps the big-integer
     // accumulation to one multiply per chunk.
-    chunk := 0
-    chunk_digits := 0
-    at := mantissa_start
+    ^chunk: 0
+    ^chunk_digits: 0
+    ^at: mantissa_start
     loop at < index {
         byte: bytes[at]
         if byte != (U8{46}) {
@@ -41042,10 +41107,10 @@ priv decimal_parse: fn(text: String) -> Decimal? Never! {
         at += 1
     }
     if chunk_digits > 0 -> magnitude = magnitude * exact_power(10, chunk_digits) + chunk
-    exponent := 0
+    ^exponent: 0
     if index < bytes.len() {
         index += 1
-        exponent_negative := false
+        ^exponent_negative: false
         if index < bytes.len() && (bytes[index] == (U8{45}) || bytes[index] == (U8{43})) {
             exponent_negative = bytes[index] == (U8{45})
             index += 1
@@ -41061,7 +41126,7 @@ priv decimal_parse: fn(text: String) -> Decimal? Never! {
         if index == exponent_start -> return None
         if exponent_negative -> exponent = -exponent
     }
-    places := fractional - exponent
+    ^places: fractional - exponent
     if places < 0 {
         if raw_digits - places > 1000000 -> return None
         magnitude *= exact_power(10, -places)
@@ -41083,8 +41148,8 @@ priv decimal_parse: fn(text: String) -> Decimal? Never! {
 }
 
 #Builtin.Role(.DecimalMul) priv __decimal_mul: fn(left: Decimal, right: Decimal) -> Decimal Never! {
-    magnitude := left.magnitude * right.magnitude
-    places := left.scale + right.scale
+    ^magnitude: left.magnitude * right.magnitude
+    ^places: left.scale + right.scale
     minimum: max(left.scale, right.scale)
     if magnitude == 0 -> places = minimum
     loop places > minimum && magnitude %% 10 == 0 {
@@ -41115,7 +41180,7 @@ priv decimal_parse: fn(text: String) -> Decimal? Never! {
 // `value` rounded in `mode` to a whole Decimal (scale 0), exactly.
 priv decimal_rounded: fn(value: Decimal, mode: Rounding) -> Decimal Never! {
     denominator: exact_power(10, value.scale)
-    quotient := value.magnitude /% denominator
+    ^quotient: value.magnitude /% denominator
     if magnitude_rounds_up(value.negative, quotient, value.magnitude %% denominator, denominator, mode) {
         quotient += 1
     }
@@ -41188,8 +41253,8 @@ priv decimal_rounded: fn(value: Decimal, mode: Rounding) -> Decimal Never! {
 }
 
 exact_bit_length: fn(value: Int) -> Int Never! {
-    remaining := value
-    length := 0
+    ^remaining: value
+    ^length: 0
     loop remaining != 0 {
         remaining = remaining >> 1
         length += 1
@@ -41209,7 +41274,7 @@ exact_bit_length: fn(value: Int) -> Int Never! {
         return quotient
     }
     denominator: exact_power(10, value.scale)
-    exponent := exact_bit_length(value.magnitude) - exact_bit_length(denominator)
+    ^exponent: exact_bit_length(value.magnitude) - exact_bit_length(denominator)
     if exponent >= 0 {
         if value.magnitude < (denominator << exponent) -> exponent -= 1
     } else {
@@ -41220,15 +41285,15 @@ exact_bit_length: fn(value: Int) -> Int Never! {
         return INFINITY
     }
     shift: if exponent < -1022 -> 1074 else -> 52 - exponent
-    numerator := value.magnitude.copy()
-    divisor := denominator
+    ^numerator: value.magnitude.copy()
+    ^divisor: denominator
     if shift >= 0 -> numerator = numerator << shift else -> divisor = divisor << -shift
-    significand := numerator /% divisor
+    ^significand: numerator /% divisor
     remainder: numerator %% divisor
     if remainder * 2 > divisor || (remainder * 2 == divisor && significand %% 2 != 0) {
         significand += 1
     }
-    bits := significand
+    ^bits: significand
     if exponent >= -1022 {
         if significand >= 9007199254740992 {
             significand = significand >> 1
@@ -41524,7 +41589,9 @@ impl F32.Div(Complex32) {
     }
 }
 
-#Builtin.Role(.ComplexAbs) priv __complex_abs: fn(value: Complex) -> Float Never! { complex_core_abs(complex_to_core(value)) }
+#Builtin.Role(.ComplexAbs) priv __complex_abs: fn(value: Complex) -> Float Never! {
+    complex_core_abs(complex_to_core(value))
+}
 
 // How a SIMD lane reduction combines a vector's lanes into one value.
 ReduceOp: enum {
@@ -41557,25 +41624,25 @@ F64x4: struct {
 
     // Every lane reduction is the scalar left-to-right fold.
     sum: fn(self) -> Float Never! {
-        value := Float{0.0}
+        ^value: Float{0.0}
         loop i in 0..<4 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> Float Never! {
-        value := Float{1.0}
+        ^value: Float{1.0}
         loop i in 0..<4 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> Float Never! {
-        value := Float{1.0} / Float{0.0}
+        ^value: Float{1.0} / Float{0.0}
         loop i in 0..<4 -> value = min_float(value, self.lanes[i])
         value
     }
 
     max: fn(self) -> Float Never! {
-        value := -Float{1.0} / Float{0.0}
+        ^value: -Float{1.0} / Float{0.0}
         loop i in 0..<4 -> value = max_float(value, self.lanes[i])
         value
     }
@@ -41796,19 +41863,19 @@ F32x4: struct {
     }
 
     sum: fn(self) -> F32 Never! {
-        value := F32{0.0}
+        ^value: F32{0.0}
         loop i in 0..<4 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> F32 Never! {
-        value := F32{1.0}
+        ^value: F32{1.0}
         loop i in 0..<4 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> F32 Never! {
-        value := F32{1.0} / F32{0.0}
+        ^value: F32{1.0} / F32{0.0}
         loop i in 0..<4 {
             lane: self.lanes[i]
             if lane == lane && !(value < lane) -> value = lane
@@ -41817,7 +41884,7 @@ F32x4: struct {
     }
 
     max: fn(self) -> F32 Never! {
-        value := -F32{1.0} / F32{0.0}
+        ^value: -F32{1.0} / F32{0.0}
         loop i in 0..<4 {
             lane: self.lanes[i]
             if lane == lane && !(value > lane) -> value = lane
@@ -41845,7 +41912,7 @@ F32x4: struct {
 
     impl Add {
         add: fn(self, rhs: F32x4) -> F32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
             F32x4{lanes: lanes}
         }
@@ -41853,7 +41920,7 @@ F32x4: struct {
 
     impl Sub {
         sub: fn(self, rhs: F32x4) -> F32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
             F32x4{lanes: lanes}
         }
@@ -41861,7 +41928,7 @@ F32x4: struct {
 
     impl Mul {
         mul: fn(self, rhs: F32x4) -> F32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
             F32x4{lanes: lanes}
         }
@@ -41869,7 +41936,7 @@ F32x4: struct {
 
     impl Div {
         div: fn(self, rhs: F32x4) -> F32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
             F32x4{lanes: lanes}
         }
@@ -41931,19 +41998,19 @@ F32x8: struct {
     }
 
     sum: fn(self) -> F32 Never! {
-        value := F32{0.0}
+        ^value: F32{0.0}
         loop i in 0..<8 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> F32 Never! {
-        value := F32{1.0}
+        ^value: F32{1.0}
         loop i in 0..<8 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> F32 Never! {
-        value := F32{1.0} / F32{0.0}
+        ^value: F32{1.0} / F32{0.0}
         loop i in 0..<8 {
             lane: self.lanes[i]
             if lane == lane && !(value < lane) -> value = lane
@@ -41952,7 +42019,7 @@ F32x8: struct {
     }
 
     max: fn(self) -> F32 Never! {
-        value := -F32{1.0} / F32{0.0}
+        ^value: -F32{1.0} / F32{0.0}
         loop i in 0..<8 {
             lane: self.lanes[i]
             if lane == lane && !(value > lane) -> value = lane
@@ -41980,7 +42047,7 @@ F32x8: struct {
 
     impl Add {
         add: fn(self, rhs: F32x8) -> F32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
             F32x8{lanes: lanes}
         }
@@ -41988,7 +42055,7 @@ F32x8: struct {
 
     impl Sub {
         sub: fn(self, rhs: F32x8) -> F32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
             F32x8{lanes: lanes}
         }
@@ -41996,7 +42063,7 @@ F32x8: struct {
 
     impl Mul {
         mul: fn(self, rhs: F32x8) -> F32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
             F32x8{lanes: lanes}
         }
@@ -42004,7 +42071,7 @@ F32x8: struct {
 
     impl Div {
         div: fn(self, rhs: F32x8) -> F32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
             F32x8{lanes: lanes}
         }
@@ -42072,25 +42139,25 @@ F64x2: struct {
     }
 
     sum: fn(self) -> Float Never! {
-        value := Float{0.0}
+        ^value: Float{0.0}
         loop i in 0..<2 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> Float Never! {
-        value := Float{1.0}
+        ^value: Float{1.0}
         loop i in 0..<2 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> Float Never! {
-        value := Float{1.0} / Float{0.0}
+        ^value: Float{1.0} / Float{0.0}
         loop i in 0..<2 -> value = min_float(value, self.lanes[i])
         value
     }
 
     max: fn(self) -> Float Never! {
-        value := -Float{1.0} / Float{0.0}
+        ^value: -Float{1.0} / Float{0.0}
         loop i in 0..<2 -> value = max_float(value, self.lanes[i])
         value
     }
@@ -42115,7 +42182,7 @@ F64x2: struct {
 
     impl Add {
         add: fn(self, rhs: F64x2) -> F64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
             F64x2{lanes: lanes}
         }
@@ -42123,7 +42190,7 @@ F64x2: struct {
 
     impl Sub {
         sub: fn(self, rhs: F64x2) -> F64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
             F64x2{lanes: lanes}
         }
@@ -42131,7 +42198,7 @@ F64x2: struct {
 
     impl Mul {
         mul: fn(self, rhs: F64x2) -> F64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
             F64x2{lanes: lanes}
         }
@@ -42139,7 +42206,7 @@ F64x2: struct {
 
     impl Div {
         div: fn(self, rhs: F64x2) -> F64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
             F64x2{lanes: lanes}
         }
@@ -42204,19 +42271,19 @@ I8x16: struct {
     }
 
     sum: fn(self) -> I8 Never! {
-        value := I8{0}
+        ^value: I8{0}
         loop i in 0..<16 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> I8 Never! {
-        value := I8{1}
+        ^value: I8{1}
         loop i in 0..<16 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> I8 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<16 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -42224,7 +42291,7 @@ I8x16: struct {
     }
 
     max: fn(self) -> I8 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<16 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -42251,7 +42318,7 @@ I8x16: struct {
 
     impl Add {
         add: fn(self, rhs: I8x16) -> I8x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
             I8x16{lanes: lanes}
         }
@@ -42259,7 +42326,7 @@ I8x16: struct {
 
     impl Sub {
         sub: fn(self, rhs: I8x16) -> I8x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
             I8x16{lanes: lanes}
         }
@@ -42267,7 +42334,7 @@ I8x16: struct {
 
     impl Mul {
         mul: fn(self, rhs: I8x16) -> I8x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
             I8x16{lanes: lanes}
         }
@@ -42275,7 +42342,7 @@ I8x16: struct {
 
     impl Div {
         div: fn(self, rhs: I8x16) -> I8x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
             I8x16{lanes: lanes}
         }
@@ -42340,19 +42407,19 @@ U8x16: struct {
     }
 
     sum: fn(self) -> U8 Never! {
-        value := U8{0}
+        ^value: U8{0}
         loop i in 0..<16 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> U8 Never! {
-        value := U8{1}
+        ^value: U8{1}
         loop i in 0..<16 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> U8 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<16 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -42360,7 +42427,7 @@ U8x16: struct {
     }
 
     max: fn(self) -> U8 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<16 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -42387,7 +42454,7 @@ U8x16: struct {
 
     impl Add {
         add: fn(self, rhs: U8x16) -> U8x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
             U8x16{lanes: lanes}
         }
@@ -42395,7 +42462,7 @@ U8x16: struct {
 
     impl Sub {
         sub: fn(self, rhs: U8x16) -> U8x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
             U8x16{lanes: lanes}
         }
@@ -42403,7 +42470,7 @@ U8x16: struct {
 
     impl Mul {
         mul: fn(self, rhs: U8x16) -> U8x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
             U8x16{lanes: lanes}
         }
@@ -42411,7 +42478,7 @@ U8x16: struct {
 
     impl Div {
         div: fn(self, rhs: U8x16) -> U8x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
             U8x16{lanes: lanes}
         }
@@ -42476,19 +42543,19 @@ I16x8: struct {
     }
 
     sum: fn(self) -> I16 Never! {
-        value := I16{0}
+        ^value: I16{0}
         loop i in 0..<8 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> I16 Never! {
-        value := I16{1}
+        ^value: I16{1}
         loop i in 0..<8 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> I16 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<8 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -42496,7 +42563,7 @@ I16x8: struct {
     }
 
     max: fn(self) -> I16 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<8 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -42523,7 +42590,7 @@ I16x8: struct {
 
     impl Add {
         add: fn(self, rhs: I16x8) -> I16x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
             I16x8{lanes: lanes}
         }
@@ -42531,7 +42598,7 @@ I16x8: struct {
 
     impl Sub {
         sub: fn(self, rhs: I16x8) -> I16x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
             I16x8{lanes: lanes}
         }
@@ -42539,7 +42606,7 @@ I16x8: struct {
 
     impl Mul {
         mul: fn(self, rhs: I16x8) -> I16x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
             I16x8{lanes: lanes}
         }
@@ -42547,7 +42614,7 @@ I16x8: struct {
 
     impl Div {
         div: fn(self, rhs: I16x8) -> I16x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
             I16x8{lanes: lanes}
         }
@@ -42612,19 +42679,19 @@ U16x8: struct {
     }
 
     sum: fn(self) -> U16 Never! {
-        value := U16{0}
+        ^value: U16{0}
         loop i in 0..<8 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> U16 Never! {
-        value := U16{1}
+        ^value: U16{1}
         loop i in 0..<8 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> U16 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<8 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -42632,7 +42699,7 @@ U16x8: struct {
     }
 
     max: fn(self) -> U16 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<8 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -42659,7 +42726,7 @@ U16x8: struct {
 
     impl Add {
         add: fn(self, rhs: U16x8) -> U16x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
             U16x8{lanes: lanes}
         }
@@ -42667,7 +42734,7 @@ U16x8: struct {
 
     impl Sub {
         sub: fn(self, rhs: U16x8) -> U16x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
             U16x8{lanes: lanes}
         }
@@ -42675,7 +42742,7 @@ U16x8: struct {
 
     impl Mul {
         mul: fn(self, rhs: U16x8) -> U16x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
             U16x8{lanes: lanes}
         }
@@ -42683,7 +42750,7 @@ U16x8: struct {
 
     impl Div {
         div: fn(self, rhs: U16x8) -> U16x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
             U16x8{lanes: lanes}
         }
@@ -42746,19 +42813,19 @@ I32x4: struct {
     }
 
     sum: fn(self) -> I32 Never! {
-        value := I32{0}
+        ^value: I32{0}
         loop i in 0..<4 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> I32 Never! {
-        value := I32{1}
+        ^value: I32{1}
         loop i in 0..<4 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> I32 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<4 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -42766,7 +42833,7 @@ I32x4: struct {
     }
 
     max: fn(self) -> I32 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<4 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -42793,7 +42860,7 @@ I32x4: struct {
 
     impl Add {
         add: fn(self, rhs: I32x4) -> I32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
             I32x4{lanes: lanes}
         }
@@ -42801,7 +42868,7 @@ I32x4: struct {
 
     impl Sub {
         sub: fn(self, rhs: I32x4) -> I32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
             I32x4{lanes: lanes}
         }
@@ -42809,7 +42876,7 @@ I32x4: struct {
 
     impl Mul {
         mul: fn(self, rhs: I32x4) -> I32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
             I32x4{lanes: lanes}
         }
@@ -42817,7 +42884,7 @@ I32x4: struct {
 
     impl Div {
         div: fn(self, rhs: I32x4) -> I32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
             I32x4{lanes: lanes}
         }
@@ -42880,19 +42947,19 @@ U32x4: struct {
     }
 
     sum: fn(self) -> U32 Never! {
-        value := U32{0}
+        ^value: U32{0}
         loop i in 0..<4 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> U32 Never! {
-        value := U32{1}
+        ^value: U32{1}
         loop i in 0..<4 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> U32 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<4 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -42900,7 +42967,7 @@ U32x4: struct {
     }
 
     max: fn(self) -> U32 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<4 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -42927,7 +42994,7 @@ U32x4: struct {
 
     impl Add {
         add: fn(self, rhs: U32x4) -> U32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
             U32x4{lanes: lanes}
         }
@@ -42935,7 +43002,7 @@ U32x4: struct {
 
     impl Sub {
         sub: fn(self, rhs: U32x4) -> U32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
             U32x4{lanes: lanes}
         }
@@ -42943,7 +43010,7 @@ U32x4: struct {
 
     impl Mul {
         mul: fn(self, rhs: U32x4) -> U32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
             U32x4{lanes: lanes}
         }
@@ -42951,7 +43018,7 @@ U32x4: struct {
 
     impl Div {
         div: fn(self, rhs: U32x4) -> U32x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
             U32x4{lanes: lanes}
         }
@@ -43012,19 +43079,19 @@ I64x2: struct {
     }
 
     sum: fn(self) -> I64 Never! {
-        value := I64{0}
+        ^value: I64{0}
         loop i in 0..<2 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> I64 Never! {
-        value := I64{1}
+        ^value: I64{1}
         loop i in 0..<2 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> I64 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<2 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -43032,7 +43099,7 @@ I64x2: struct {
     }
 
     max: fn(self) -> I64 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<2 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -43059,7 +43126,7 @@ I64x2: struct {
 
     impl Add {
         add: fn(self, rhs: I64x2) -> I64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
             I64x2{lanes: lanes}
         }
@@ -43067,7 +43134,7 @@ I64x2: struct {
 
     impl Sub {
         sub: fn(self, rhs: I64x2) -> I64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
             I64x2{lanes: lanes}
         }
@@ -43075,7 +43142,7 @@ I64x2: struct {
 
     impl Mul {
         mul: fn(self, rhs: I64x2) -> I64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
             I64x2{lanes: lanes}
         }
@@ -43083,7 +43150,7 @@ I64x2: struct {
 
     impl Div {
         div: fn(self, rhs: I64x2) -> I64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
             I64x2{lanes: lanes}
         }
@@ -43144,19 +43211,19 @@ U64x2: struct {
     }
 
     sum: fn(self) -> U64 Never! {
-        value := U64{0}
+        ^value: U64{0}
         loop i in 0..<2 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> U64 Never! {
-        value := U64{1}
+        ^value: U64{1}
         loop i in 0..<2 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> U64 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<2 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -43164,7 +43231,7 @@ U64x2: struct {
     }
 
     max: fn(self) -> U64 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<2 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -43191,7 +43258,7 @@ U64x2: struct {
 
     impl Add {
         add: fn(self, rhs: U64x2) -> U64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
             U64x2{lanes: lanes}
         }
@@ -43199,7 +43266,7 @@ U64x2: struct {
 
     impl Sub {
         sub: fn(self, rhs: U64x2) -> U64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
             U64x2{lanes: lanes}
         }
@@ -43207,7 +43274,7 @@ U64x2: struct {
 
     impl Mul {
         mul: fn(self, rhs: U64x2) -> U64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
             U64x2{lanes: lanes}
         }
@@ -43215,7 +43282,7 @@ U64x2: struct {
 
     impl Div {
         div: fn(self, rhs: U64x2) -> U64x2 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
             U64x2{lanes: lanes}
         }
@@ -43280,19 +43347,19 @@ I8x32: struct {
     }
 
     sum: fn(self) -> I8 Never! {
-        value := I8{0}
+        ^value: I8{0}
         loop i in 0..<32 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> I8 Never! {
-        value := I8{1}
+        ^value: I8{1}
         loop i in 0..<32 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> I8 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<32 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -43300,7 +43367,7 @@ I8x32: struct {
     }
 
     max: fn(self) -> I8 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<32 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -43327,7 +43394,7 @@ I8x32: struct {
 
     impl Add {
         add: fn(self, rhs: I8x32) -> I8x32 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<32 -> lanes[i] = lanes[i] + rhs.lanes[i]
             I8x32{lanes: lanes}
         }
@@ -43335,7 +43402,7 @@ I8x32: struct {
 
     impl Sub {
         sub: fn(self, rhs: I8x32) -> I8x32 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<32 -> lanes[i] = lanes[i] - rhs.lanes[i]
             I8x32{lanes: lanes}
         }
@@ -43343,7 +43410,7 @@ I8x32: struct {
 
     impl Mul {
         mul: fn(self, rhs: I8x32) -> I8x32 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<32 -> lanes[i] = lanes[i] * rhs.lanes[i]
             I8x32{lanes: lanes}
         }
@@ -43351,7 +43418,7 @@ I8x32: struct {
 
     impl Div {
         div: fn(self, rhs: I8x32) -> I8x32 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<32 -> lanes[i] = lanes[i] / rhs.lanes[i]
             I8x32{lanes: lanes}
         }
@@ -43416,19 +43483,19 @@ U8x32: struct {
     }
 
     sum: fn(self) -> U8 Never! {
-        value := U8{0}
+        ^value: U8{0}
         loop i in 0..<32 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> U8 Never! {
-        value := U8{1}
+        ^value: U8{1}
         loop i in 0..<32 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> U8 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<32 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -43436,7 +43503,7 @@ U8x32: struct {
     }
 
     max: fn(self) -> U8 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<32 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -43463,7 +43530,7 @@ U8x32: struct {
 
     impl Add {
         add: fn(self, rhs: U8x32) -> U8x32 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<32 -> lanes[i] = lanes[i] + rhs.lanes[i]
             U8x32{lanes: lanes}
         }
@@ -43471,7 +43538,7 @@ U8x32: struct {
 
     impl Sub {
         sub: fn(self, rhs: U8x32) -> U8x32 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<32 -> lanes[i] = lanes[i] - rhs.lanes[i]
             U8x32{lanes: lanes}
         }
@@ -43479,7 +43546,7 @@ U8x32: struct {
 
     impl Mul {
         mul: fn(self, rhs: U8x32) -> U8x32 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<32 -> lanes[i] = lanes[i] * rhs.lanes[i]
             U8x32{lanes: lanes}
         }
@@ -43487,7 +43554,7 @@ U8x32: struct {
 
     impl Div {
         div: fn(self, rhs: U8x32) -> U8x32 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<32 -> lanes[i] = lanes[i] / rhs.lanes[i]
             U8x32{lanes: lanes}
         }
@@ -43552,19 +43619,19 @@ I16x16: struct {
     }
 
     sum: fn(self) -> I16 Never! {
-        value := I16{0}
+        ^value: I16{0}
         loop i in 0..<16 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> I16 Never! {
-        value := I16{1}
+        ^value: I16{1}
         loop i in 0..<16 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> I16 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<16 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -43572,7 +43639,7 @@ I16x16: struct {
     }
 
     max: fn(self) -> I16 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<16 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -43599,7 +43666,7 @@ I16x16: struct {
 
     impl Add {
         add: fn(self, rhs: I16x16) -> I16x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
             I16x16{lanes: lanes}
         }
@@ -43607,7 +43674,7 @@ I16x16: struct {
 
     impl Sub {
         sub: fn(self, rhs: I16x16) -> I16x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
             I16x16{lanes: lanes}
         }
@@ -43615,7 +43682,7 @@ I16x16: struct {
 
     impl Mul {
         mul: fn(self, rhs: I16x16) -> I16x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
             I16x16{lanes: lanes}
         }
@@ -43623,7 +43690,7 @@ I16x16: struct {
 
     impl Div {
         div: fn(self, rhs: I16x16) -> I16x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
             I16x16{lanes: lanes}
         }
@@ -43688,19 +43755,19 @@ U16x16: struct {
     }
 
     sum: fn(self) -> U16 Never! {
-        value := U16{0}
+        ^value: U16{0}
         loop i in 0..<16 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> U16 Never! {
-        value := U16{1}
+        ^value: U16{1}
         loop i in 0..<16 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> U16 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<16 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -43708,7 +43775,7 @@ U16x16: struct {
     }
 
     max: fn(self) -> U16 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<16 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -43735,7 +43802,7 @@ U16x16: struct {
 
     impl Add {
         add: fn(self, rhs: U16x16) -> U16x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
             U16x16{lanes: lanes}
         }
@@ -43743,7 +43810,7 @@ U16x16: struct {
 
     impl Sub {
         sub: fn(self, rhs: U16x16) -> U16x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
             U16x16{lanes: lanes}
         }
@@ -43751,7 +43818,7 @@ U16x16: struct {
 
     impl Mul {
         mul: fn(self, rhs: U16x16) -> U16x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
             U16x16{lanes: lanes}
         }
@@ -43759,7 +43826,7 @@ U16x16: struct {
 
     impl Div {
         div: fn(self, rhs: U16x16) -> U16x16 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
             U16x16{lanes: lanes}
         }
@@ -43824,19 +43891,19 @@ I32x8: struct {
     }
 
     sum: fn(self) -> I32 Never! {
-        value := I32{0}
+        ^value: I32{0}
         loop i in 0..<8 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> I32 Never! {
-        value := I32{1}
+        ^value: I32{1}
         loop i in 0..<8 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> I32 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<8 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -43844,7 +43911,7 @@ I32x8: struct {
     }
 
     max: fn(self) -> I32 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<8 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -43871,7 +43938,7 @@ I32x8: struct {
 
     impl Add {
         add: fn(self, rhs: I32x8) -> I32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
             I32x8{lanes: lanes}
         }
@@ -43879,7 +43946,7 @@ I32x8: struct {
 
     impl Sub {
         sub: fn(self, rhs: I32x8) -> I32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
             I32x8{lanes: lanes}
         }
@@ -43887,7 +43954,7 @@ I32x8: struct {
 
     impl Mul {
         mul: fn(self, rhs: I32x8) -> I32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
             I32x8{lanes: lanes}
         }
@@ -43895,7 +43962,7 @@ I32x8: struct {
 
     impl Div {
         div: fn(self, rhs: I32x8) -> I32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
             I32x8{lanes: lanes}
         }
@@ -43960,19 +44027,19 @@ U32x8: struct {
     }
 
     sum: fn(self) -> U32 Never! {
-        value := U32{0}
+        ^value: U32{0}
         loop i in 0..<8 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> U32 Never! {
-        value := U32{1}
+        ^value: U32{1}
         loop i in 0..<8 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> U32 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<8 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -43980,7 +44047,7 @@ U32x8: struct {
     }
 
     max: fn(self) -> U32 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<8 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -44007,7 +44074,7 @@ U32x8: struct {
 
     impl Add {
         add: fn(self, rhs: U32x8) -> U32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
             U32x8{lanes: lanes}
         }
@@ -44015,7 +44082,7 @@ U32x8: struct {
 
     impl Sub {
         sub: fn(self, rhs: U32x8) -> U32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
             U32x8{lanes: lanes}
         }
@@ -44023,7 +44090,7 @@ U32x8: struct {
 
     impl Mul {
         mul: fn(self, rhs: U32x8) -> U32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
             U32x8{lanes: lanes}
         }
@@ -44031,7 +44098,7 @@ U32x8: struct {
 
     impl Div {
         div: fn(self, rhs: U32x8) -> U32x8 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
             U32x8{lanes: lanes}
         }
@@ -44094,19 +44161,19 @@ I64x4: struct {
     }
 
     sum: fn(self) -> I64 Never! {
-        value := I64{0}
+        ^value: I64{0}
         loop i in 0..<4 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> I64 Never! {
-        value := I64{1}
+        ^value: I64{1}
         loop i in 0..<4 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> I64 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<4 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -44114,7 +44181,7 @@ I64x4: struct {
     }
 
     max: fn(self) -> I64 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<4 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -44141,7 +44208,7 @@ I64x4: struct {
 
     impl Add {
         add: fn(self, rhs: I64x4) -> I64x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
             I64x4{lanes: lanes}
         }
@@ -44149,7 +44216,7 @@ I64x4: struct {
 
     impl Sub {
         sub: fn(self, rhs: I64x4) -> I64x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
             I64x4{lanes: lanes}
         }
@@ -44157,7 +44224,7 @@ I64x4: struct {
 
     impl Mul {
         mul: fn(self, rhs: I64x4) -> I64x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
             I64x4{lanes: lanes}
         }
@@ -44165,7 +44232,7 @@ I64x4: struct {
 
     impl Div {
         div: fn(self, rhs: I64x4) -> I64x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
             I64x4{lanes: lanes}
         }
@@ -44228,19 +44295,19 @@ U64x4: struct {
     }
 
     sum: fn(self) -> U64 Never! {
-        value := U64{0}
+        ^value: U64{0}
         loop i in 0..<4 -> value += self.lanes[i]
         value
     }
 
     product: fn(self) -> U64 Never! {
-        value := U64{1}
+        ^value: U64{1}
         loop i in 0..<4 -> value *= self.lanes[i]
         value
     }
 
     min: fn(self) -> U64 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<4 {
             if self.lanes[i] < value -> value = self.lanes[i]
         }
@@ -44248,7 +44315,7 @@ U64x4: struct {
     }
 
     max: fn(self) -> U64 Never! {
-        value := self.lanes[0]
+        ^value: self.lanes[0]
         loop i in 1..<4 {
             if self.lanes[i] > value -> value = self.lanes[i]
         }
@@ -44275,7 +44342,7 @@ U64x4: struct {
 
     impl Add {
         add: fn(self, rhs: U64x4) -> U64x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
             U64x4{lanes: lanes}
         }
@@ -44283,7 +44350,7 @@ U64x4: struct {
 
     impl Sub {
         sub: fn(self, rhs: U64x4) -> U64x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
             U64x4{lanes: lanes}
         }
@@ -44291,7 +44358,7 @@ U64x4: struct {
 
     impl Mul {
         mul: fn(self, rhs: U64x4) -> U64x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
             U64x4{lanes: lanes}
         }
@@ -44299,7 +44366,7 @@ U64x4: struct {
 
     impl Div {
         div: fn(self, rhs: U64x4) -> U64x4 Never! {
-            lanes := self.lanes.copy()
+            ^lanes: self.lanes.copy()
             loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
             U64x4{lanes: lanes}
         }
@@ -44845,11 +44912,17 @@ TransformCompositionMismatch: struct {
     impl Diagnostic {
         code: "E2521",
 
-        what: fn(self) -> String { "Cannot compose `{self.first}` with `{self.second}`: `{self.middle_a}` does not match `{self.middle_b}`." }
+        what: fn(self) -> String {
+            "Cannot compose `{self.first}` with `{self.second}`: `{self.middle_a}` does not match `{self.middle_b}`."
+        }
 
-        why: fn(self) -> String { "A transform chain is valid only when the destination of the first transform is the source of the next one." }
+        why: fn(self) -> String {
+            "A transform chain is valid only when the destination of the first transform is the source of the next one."
+        }
 
-        fix: fn(self) -> String { "Reverse or replace one transform so both middle spaces are the same." }
+        fix: fn(self) -> String {
+            "Reverse or replace one transform so both middle spaces are the same."
+        }
     }
 }
 
@@ -45061,7 +45134,7 @@ Transform2: struct<T, From, To> {
 
 #Builtin.Role(.DecimalToString) priv __decimal_to_string: fn(value: Decimal) -> String Never! {
     digits: "{value.magnitude}".bytes()
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if value.negative -> bytes.push(U8{45})
     if value.scale >= digits.len() && value.scale != 0 {
         bytes.push(U8{48})
@@ -45241,8 +45314,8 @@ priv complex_core_pow: fn<T: ComplexScalar>(base: ComplexCore<T>, power: Complex
 // is near the largest T and both raised when they are near the smallest
 // normal one.
 priv complex_core_sqrt: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
-    a := z.real
-    b := z.imaginary
+    ^a: z.real
+    ^b: z.imaginary
     if a.cx_is_zero() && b.cx_is_zero() -> return ComplexCore<T>{real: a.cx_zero(), imaginary: b}
     if b.cx_is_inf() -> return ComplexCore<T>{real: a.cx_inf(), imaginary: b}
     if a.cx_is_nan() {

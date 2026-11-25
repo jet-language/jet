@@ -12,16 +12,16 @@ iter_signed: fn(word: U64) -> I64 {
 // would lose cancellation and round the total more than once.
 iter_wide_float: fn(high: I64, low: U64) -> Float {
     negative: high < I64{0}
-    hi := iter_unsigned(high)
-    lo := low
+    ^hi: iter_unsigned(high)
+    ^lo: low
     if negative {
         lo = wrapping(~lo + U64{1})
         hi = wrapping(~hi + (if (lo == U64{0}) -> U64{1} else -> U64{0}))
     }
     if (hi == U64{0} && lo == U64{0}) { return Float{0.0} }
-    exponent := I64{52}
-    guard := false
-    sticky := false
+    ^exponent: I64{52}
+    ^guard: false
+    ^sticky: false
     loop hi != (U64{0}) || lo >= (U64{9007199254740992}) {
         sticky = sticky || guard
         guard = (lo & U64{1}) != U64{0}
@@ -37,14 +37,14 @@ iter_wide_float: fn(high: I64, low: U64) -> Float {
     // The mantissa has already been rounded to 53 bits. Building it from
     // binary digits and multiplying by powers of two are exact binary64
     // operations; no general Float/word reinterpretation seam is required.
-    value := Float{0.0}
-    place := Float{1.0}
+    ^value: Float{0.0}
+    ^place: Float{1.0}
     loop lo != (U64{0}) {
         if ((lo & U64{1}) != U64{0}) { value += place }
         lo >>= U64{1}
         place *= Float{2.0}
     }
-    scale := exponent - I64{52}
+    ^scale: exponent - I64{52}
     loop scale > (I64{0}) {
         value *= Float{2.0}
         scale -= I64{1}
@@ -58,8 +58,8 @@ iter_wide_float: fn(high: I64, low: U64) -> Float {
     header: trap_word(wrapping(node + I64{112}))
     data: trap_word(wrapping(header + I64{16}))
     length: trap_word(header)
-    at := I64{0}
-    sum := Float{-0.0}
+    ^at: I64{0}
+    ^sum: Float{-0.0}
     loop at < length {
         sum += rt_f64_from_bits(trap_word(wrapping(data + at * I64{8})))
         at += I64{1}
@@ -77,8 +77,8 @@ iter_wide_float: fn(high: I64, low: U64) -> Float {
     header: trap_word(wrapping(node + I64{112}))
     data: trap_word(wrapping(header + I64{16}))
     length: trap_word(header)
-    at := I64{0}
-    sum := Float{0.0}
+    ^at: I64{0}
+    ^sum: Float{0.0}
     if (kind == I64{1}) {
         accumulator: coll_slot_new(meta)
         trap_store(accumulator, jet_int_owned_from_i64(I64{0}))
@@ -92,14 +92,14 @@ iter_wide_float: fn(high: I64, low: U64) -> Float {
         int_discard(trap_word(accumulator))
         jet_rt_free(accumulator, coll_size(meta), I64{8})
     } else {
-        hi := I64{0}
-        lo := U64{0}
+        ^hi: I64{0}
+        ^lo: U64{0}
         loop at < length {
-            word := trap_word(wrapping(data + at * trap_word(meta)))
+            ^word: trap_word(wrapping(data + at * trap_word(meta)))
             if (width < I64{64} && kind == I64{2}) {
                 word = (word << (I64{64} - width)) >> (I64{64} - width)
             }
-            bits := iter_unsigned(word)
+            ^bits: iter_unsigned(word)
             if (width < I64{64} && kind == I64{3}) {
                 bits &= (U64{1} << wrapping(U64{width})) - U64{1}
             }
@@ -118,15 +118,15 @@ iter_wide_float: fn(high: I64, low: U64) -> Float {
 // locals need no scratch allocation.
 coll_f64_fixed: fn(data: I64, length: I64, seed: Float) -> Float {
     if (length == I64{0}) { return seed }
-    a0 := seed
-    a1 := Float{0.0}
-    a2 := Float{0.0}
-    a3 := Float{0.0}
-    a4 := Float{0.0}
-    a5 := Float{0.0}
-    a6 := Float{0.0}
-    a7 := Float{0.0}
-    at := I64{0}
+    ^a0: seed
+    ^a1: Float{0.0}
+    ^a2: Float{0.0}
+    ^a3: Float{0.0}
+    ^a4: Float{0.0}
+    ^a5: Float{0.0}
+    ^a6: Float{0.0}
+    ^a7: Float{0.0}
+    ^at: I64{0}
     loop length - at >= (I64{8}) {
         a0 += rt_f64_from_bits(trap_word(wrapping(data + at * I64{8})))
         a1 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{1}) * I64{8})))
@@ -171,7 +171,7 @@ coll_f64_fixed: fn(data: I64, length: I64, seed: Float) -> Float {
     if (length <= I64{64}) { return coll_f64_fixed(data, length, seed) }
     count: length / I64{64} + (if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1})
     partials: jet_rt_alloc(count * I64{8}, I64{8})
-    chunk := I64{0}
+    ^chunk: I64{0}
     loop chunk < count {
         start: chunk * I64{64}
         remaining: length - start
@@ -180,10 +180,10 @@ coll_f64_fixed: fn(data: I64, length: I64, seed: Float) -> Float {
         trap_store(wrapping(partials + chunk * I64{8}), rt_f64_bits(value))
         chunk += I64{1}
     }
-    active := count
+    ^active: count
     loop active > (I64{1}) {
-        read := I64{0}
-        write := I64{0}
+        ^read: I64{0}
+        ^write: I64{0}
         loop read < active {
             if (read + I64{1} < active) {
                 value: coll_f64_fixed(wrapping(partials + read * I64{8}), I64{2}, Float{0.0})

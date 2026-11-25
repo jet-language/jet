@@ -31,8 +31,8 @@ CONTROL_VARIABLE_SETTERS: [{path: String, variable: String, lines: Int, why: Str
 control_variable_names: fn() -> [String] {
     text: control_variable_files.read(CONTROL_VARIABLE_REGISTRY) ?? panic("read {CONTROL_VARIABLE_REGISTRY}: {err}")
     marker: "variable: \""
-    names := [String]{}
-    at := 0
+    ^names: [String]{}
+    ^at: 0
     loop {
         start: s5_grammar_find(text, marker, at)
         if start < 0 -> break
@@ -51,7 +51,7 @@ control_variable_sets: fn(line: String, name: String, script: Bool) -> Bool {
     if line.contains("(\"{name}\", ") || line.contains("name: \"{name}\"") -> return true
     bytes: line.bytes()
     width: name.bytes().len()
-    at := 0
+    ^at: 0
     loop {
         start: s5_grammar_find(line, name, at)
         if start < 0 -> return false
@@ -102,13 +102,13 @@ control_variable_setters: fn(path: String, names: [String], out: ^[String]) {
     guards_enter_root()
     names: control_variable_names()
     assert(names.contains("JET_KEEP_GOING") && names.contains("JET_MEMORY_LEDGER"), "{CONTROL_VARIABLE_REGISTRY} lists no control variables")
-    found := [String]{}
+    ^found: [String]{}
     loop root in CONTROL_VARIABLE_ROOTS {
         assert(control_variable_files.is_dir(root) || control_variable_files.is_file(root), "the scanned root {root} must exist")
         control_variable_setters(root, names, found)
     }
     found.sort()
-    allowed := [String]{}
+    ^allowed: [String]{}
     loop row in CONTROL_VARIABLE_SETTERS {
         assert(names.contains(row.variable), "{row.path}: {row.variable} is no control variable")
         assert(row.why != "", "{row.path}: {row.variable} needs a reason")

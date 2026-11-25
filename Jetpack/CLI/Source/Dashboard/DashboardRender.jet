@@ -50,7 +50,7 @@ cli_dashboard_screen_leave_sequence: fn() -> String Never! {
 }
 
 cli_dashboard_write_stdout: fn(text: String) -[IO]> Never! {
-    out := term.stdout()
+    ^out: term.stdout()
     out.write(text).drop("a closed stdout cannot take the dashboard")
     out.flush().drop("a closed stdout cannot take the dashboard")
 }
@@ -86,7 +86,7 @@ cli_dashboard_render_frame_width: fn(frame: DashboardFrame, width: Int, theme: T
 }
 
 cli_dashboard_render_loading_width: fn(width: Int, store_message: String, theme: Theme) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     cli_dashboard_push_line(out, width, 0, theme.cyan("Jetpack dashboard"))
     cli_dashboard_push_line(out, width, 0, "{theme.gray("Project  ")}{theme.gray("reading project…")}")
     out.push("\n")
@@ -100,7 +100,7 @@ cli_dashboard_render_loading_width: fn(width: Int, store_message: String, theme:
 // The compact summary for pipes, CI, and redirected output.
 cli_dashboard_render_status_summary: fn(snapshot: DashboardSnapshot, theme: Theme) -[IO, Env]> String Never! {
     width: cli_dashboard_terminal_width()
-    out := [String]{}
+    ^out: [String]{}
     cli_dashboard_push_line(out, width, 0, theme.cyan("Jetpack status"))
     cli_dashboard_push_line(out, width, 0, "{theme.gray("Project: ")}{theme.bold(cli_dashboard_sanitize(snapshot.project.root))}")
     cli_dashboard_push_line(out, width, 0, "{theme.gray("Environment: ")}{cli_dashboard_environment_value(theme, snapshot.project)}")
@@ -118,7 +118,7 @@ cli_dashboard_render_width: fn(snapshot: DashboardSnapshot, width: Int, theme: T
 
 cli_dashboard_render_width_with_note: fn(snapshot: DashboardSnapshot, width: Int, theme: Theme, note: String?) -> String Never! {
     project: snapshot.project
-    out := [String]{}
+    ^out: [String]{}
     cli_dashboard_push_line(out, width, 0, theme.cyan("Jetpack dashboard"))
     cli_dashboard_push_line(out, width, 0, "{theme.gray("Project  ")}{theme.bold(cli_dashboard_sanitize(project.root))}")
     if note == .Val(text) -> cli_dashboard_push_line(out, width, 0, theme.yellow(text))
@@ -247,8 +247,8 @@ cli_dashboard_activity_text: fn(activity: DashboardActivity) -> String Never! {
 // rounding a tie to even.
 cli_dashboard_format_size: fn(bytes: Int) -> String Never! {
     units: [String]{"B", "KB", "MB", "GB", "TB"}
-    unit := 0
-    divisor := 1
+    ^unit: 0
+    ^divisor: 1
     loop bytes >= divisor * 1000 && unit + 1 < units.len() {
         divisor *= 1000
         unit += 1
@@ -270,7 +270,7 @@ cli_dashboard_round_even: fn(value: Int, divisor: Int) -> Int Never! {
 
 // Every control scalar (C0, DEL, C1) becomes `?`.
 cli_dashboard_sanitize: fn(value: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop scalar in value.chars() {
         text: "{scalar}"
         out.push(if cli_dashboard_is_control(text.bytes()) -> "?" else -> text)
@@ -293,7 +293,7 @@ cli_dashboard_fit: fn(value: String, width: Int) -> String Never! {
     scalars: clean.chars()
     if scalars.len() <= width -> return clean
     if width <= 0 -> return ""
-    kept := [String]{}
+    ^kept: [String]{}
     loop index in 0..<(width - 1) -> kept.push("{scalars[index]}")
     "{kept.join("")}…"
 }

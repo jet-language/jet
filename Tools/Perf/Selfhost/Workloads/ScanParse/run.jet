@@ -10,9 +10,9 @@ Node: struct {
 }
 
 parse: fn(tokens: ^[Token]) -> [Node] {
-    nodes := [Node]{}
+    ^nodes: [Node]{}
     loop token in tokens {
-        child_count := 0
+        ^child_count: 0
         if token.kind == "keyword" -> child_count = 1
         if token.kind == "operator" -> child_count = 2
         nodes.push(Node{kind: token.kind.copy(), children: child_count})
@@ -32,8 +32,8 @@ run: fn() {
         {kind: "identifier", text: "right", width: 5},
     }
     nodes: parse(tokens)
-    lexeme_bytes := 0
-    identifiers := 0
+    ^lexeme_bytes: 0
+    ^identifiers: 0
     loop token in tokens {
         lexeme_bytes += token.width
         if token.kind == "identifier" -> identifiers += 1

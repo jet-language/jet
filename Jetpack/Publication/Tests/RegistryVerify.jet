@@ -34,7 +34,7 @@ publication_verify_test_entry: fn(name: String, version: String, hash: String, k
 }
 
 publication_verify_test_seed: fn(byte: U8) -> [U8] Never! {
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(byte)
     seed
 }
@@ -55,7 +55,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     unsigned: publication_verify_test_entry("corpkit", "1.0.0", "sha256-abc", "", "")
     publication_verify_test_refusal([PublicationIndexEntry]{unsigned}, unsigned, true, "E1247")
     assert_eq(publication_verify_index_entry([PublicationIndexEntry]{unsigned}, unsigned, false, "corp") ?? panic("optional unsigned"), [String]{})
-    whitespace := unsigned.copy()
+    ^whitespace: unsigned.copy()
     whitespace.signature = " \t\n"
     publication_verify_test_refusal([PublicationIndexEntry]{whitespace}, whitespace, true, "E1247")
 }
@@ -63,7 +63,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
 #Test("publication registry signed entry without discoverable pin is E1246") {
     signed: publication_verify_test_entry("textkit", "1.0.0", "sha256-abc", "", "nonempty")
     publication_verify_test_refusal([PublicationIndexEntry]{signed}, signed, false, "E1246")
-    candidate := signed.copy()
+    ^candidate: signed.copy()
     candidate.public_key = "candidate-key"
     publication_verify_test_refusal([PublicationIndexEntry]{signed}, candidate, false, "E1246")
 }
@@ -82,7 +82,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     good: publication_verify_test_entry("textkit", "1.0.0", hash, public_key, signature)
     assert_eq(publication_verify_index_entry([PublicationIndexEntry]{good}, good, false, "jet") ?? panic("verify"), [String]{})
     assert(publication_verify(public_key, hash, signature) ?? panic("direct verify"))
-    bad := good.copy()
+    ^bad: good.copy()
     bad.content_hash = "sha256-TAMPEREDdeadbeef"
     publication_verify_test_refusal([PublicationIndexEntry]{bad}, bad, false, "E1246")
 }
@@ -93,7 +93,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     public_a: publication_verify_test_public(seed_a)
     public_b: publication_verify_test_public(seed_b)
     assert(public_a != public_b)
-    old := publication_verify_test_entry("textkit", "1.0.0", "sha256-old", " {public_a} ", publication_sign_bytes(seed_a, "sha256-old") ?? panic("sign old"))
+    ^old: publication_verify_test_entry("textkit", "1.0.0", "sha256-old", " {public_a} ", publication_sign_bytes(seed_a, "sha256-old") ?? panic("sign old"))
     old.yanked = true
     hash: "sha256-new"
     wrong: publication_verify_test_entry("textkit", "2.0.0", hash, public_b, publication_sign_bytes(seed_a, hash) ?? panic("old signer"))
@@ -114,7 +114,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
 }
 
 #Test("publication registry core bypasses community gates but community requires all four") {
-    entry := publication_verify_test_entry("communitykit", "1.0.0", "sha256-abc", "", "")
+    ^entry: publication_verify_test_entry("communitykit", "1.0.0", "sha256-abc", "", "")
     publication_verify_entry_tier(entry) ?? panic("core")
     entry.tier = .Community
     entry.gate_status = publication_community_with_name(.Blocked, .Blocked, .Blocked)
@@ -130,7 +130,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     entry.gate_status = PublicationGateStatus{signature: .Passed, audit: .Passed, name: .Passed, liveness: .Passed, review: .NotRequired}
     publication_verify_entry_tier(entry) ?? panic("open community")
     loop gate in 0..<4 {
-        closed := entry.copy()
+        ^closed: entry.copy()
         if gate == 0 -> closed.gate_status.signature = .NotRequired
         if gate == 1 -> closed.gate_status.audit = .Blocked
         if gate == 2 -> closed.gate_status.name = .NotRequired
@@ -227,7 +227,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     good: publication_verify_test_entry("textkit", "1.0.0", hash, generated.public_key_hex, signature)
     assert_eq(publication_verify_index_entry([PublicationIndexEntry]{good}, good, false, "jet") ?? panic("verify"), [String]{})
     assert(publication_verify(generated.public_key_hex, hash, signature) ?? panic("direct verify"))
-    bad := good.copy()
+    ^bad: good.copy()
     bad.content_hash = "sha256-TAMPEREDdeadbeef"
     publication_verify_test_refusal([PublicationIndexEntry]{bad}, bad, false, "E1246")
     if previous_keys == {

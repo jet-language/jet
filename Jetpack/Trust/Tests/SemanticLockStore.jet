@@ -45,7 +45,7 @@ dependencies = ["app"]
     root: trust_test_project("live")
     lock_path: trust_semantic_lock_live_path(root)
     files.write(lock_path, TRUST_TEST_MACHINE_ONLY_LOCK) ?? panic("write machine lock")
-    semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    ^semantic: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     semantic.inputs = [LockInput]{
         {name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
         {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"},
@@ -76,7 +76,7 @@ dependencies = ["app"]
     root: trust_test_project("machine-write")
     lock_path: trust_semantic_lock_live_path(root)
     files.write(lock_path, TRUST_TEST_MACHINE_ONLY_LOCK) ?? panic("write machine lock")
-    semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    ^semantic: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     semantic.inputs = [LockInput]{
         {name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
         {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"},

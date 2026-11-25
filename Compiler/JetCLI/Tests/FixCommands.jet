@@ -62,7 +62,7 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
     // One fix's edits across two files apply together. Row 0 of the file
     // table is a file read before, row 1 one that can't be read.
     other: [JetCLIFixFile]{JetCLIFixFile{path: "/fixture/other.jet", before: Val("xyz"), source: None}, JetCLIFixFile{path: "/fixture/missing.jet", before: None, source: None}}
-    both := cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
+    ^both: cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
     both.edits = [TextEdit]{TextEdit{span: Span{start: 2, end: 3}, new_text: "Q"}, TextEdit{span: Span{start: 1, end: 2}, new_text: "W"}}
     both.files = [Int]{-1, 0}
     spread_fixes: [JetCLIFix]{both}
@@ -76,7 +76,7 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
         panic("edits apply to the text with the fixes so far")
     }
     // A fix whose own edits overlap is refused whole: no edit of it applies.
-    tangled := cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
+    ^tangled: cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
     tangled.edits = [TextEdit]{TextEdit{span: Span{start: 1, end: 2}, new_text: "W"}, TextEdit{span: Span{start: 0, end: 3}, new_text: "V"}}
     tangled.files = [Int]{0, 0}
     tangled_fixes: [JetCLIFix]{tangled, cli_fix_fixture_edit(2, 3, "C", .Safe, .Formatting)}
@@ -85,7 +85,7 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
         panic("overlapping edits refuse the whole fix")
     }
     // A fix editing a file `jet fix` can't read is refused whole.
-    unread := cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
+    ^unread: cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
     unread.edits = [TextEdit]{TextEdit{span: Span{start: 0, end: 1}, new_text: "W"}}
     unread.files = [Int]{1}
     unread_fixes: [JetCLIFix]{unread}
@@ -94,7 +94,7 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
         panic("an unread file refuses the whole fix")
     }
     // A fix with one edit overlapping a kept fix's edit in the other file waits whole.
-    later := cli_fix_fixture_edit(3, 3, "C", .Safe, .Formatting)
+    ^later: cli_fix_fixture_edit(3, 3, "C", .Safe, .Formatting)
     later.edits = [TextEdit]{TextEdit{span: Span{start: 0, end: 2}, new_text: "K"}}
     later.files = [Int]{0}
     waiting: [JetCLIFix]{both, later}
@@ -128,10 +128,10 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
 // The rename receipts as the pairwise scan found them before the facts were
 // grouped: every fact before against every fact after.
 cli_fix_reference_rename_ops: fn(before: [SemDefinitionFact], after: [SemDefinitionFact]) -> [JetCLISemOp] Never! {
-    used := [Int]{}
-    operations := [JetCLISemOp]{}
+    ^used: [Int]{}
+    ^operations: [JetCLISemOp]{}
     loop (old_index, old) in before {
-        candidates := [Int]{}
+        ^candidates: [Int]{}
         loop (new_index, candidate) in after {
             if !used.contains(new_index) && old.kind == candidate.kind && old.module_path == candidate.module_path && old.signature_id == candidate.signature_id && old.name != candidate.name {
                 candidates.push(new_index)
@@ -140,7 +140,7 @@ cli_fix_reference_rename_ops: fn(before: [SemDefinitionFact], after: [SemDefinit
         if candidates.len() != 1 -> next
         index: candidates[0]
         candidate: after[index]
-        reverse := 0
+        ^reverse: 0
         loop (other_index, other) in before {
             if other_index == old_index || (other.kind == candidate.kind && other.module_path == candidate.module_path && other.signature_id == candidate.signature_id && other.name != candidate.name) {
                 reverse += 1
@@ -171,21 +171,21 @@ cli_fix_rename_rows: fn(operations: [JetCLISemOp]) -> [String] Never! {
 // ambiguous either way and unchanged facts.
 #Test("keyed rename receipts match the pairwise scan") {
     loop count in ([Int]{0, 1, 7, 12, 40, 120}) {
-        before := [SemDefinitionFact]{}
-        after := [SemDefinitionFact]{}
+        ^before: [SemDefinitionFact]{}
+        ^after: [SemDefinitionFact]{}
         loop index in 0..<count {
             module_path: "m{index % 4}.jet"
             signature: "sig{index % 6}"
             kind: if index % 9 < 3 -> "type" else -> "function"
-            fact := cli_fix_fixture_fact("f{index}", signature, module_path)
+            ^fact: cli_fix_fixture_fact("f{index}", signature, module_path)
             fact.kind = kind
             before.push(fact)
             if index % 5 == 4 -> next
-            moved := cli_fix_fixture_fact(if index % 3 == 0 -> "g{index}" else -> "f{index}", signature, module_path)
+            ^moved: cli_fix_fixture_fact(if index % 3 == 0 -> "g{index}" else -> "f{index}", signature, module_path)
             moved.kind = kind
             after.push(moved)
             if index % 7 == 6 {
-                twin := cli_fix_fixture_fact("h{index}", signature, module_path)
+                ^twin: cli_fix_fixture_fact("h{index}", signature, module_path)
                 twin.kind = kind
                 after.push(twin)
             }

@@ -8,7 +8,7 @@
 // The leaves' constants, else 0: the byte-reversal shuffle mask (16 bytes),
 // then four zero blocks (64 bytes). Set up only on a host whose cpuid
 // reports the instructions; the table lives for the process.
-aes_ni_table := I64{0}
+^aes_ni_table: I64{0}
 
 // runtime-init: 4 when aes_ni_table
 #Export(c) jet_rt_aes_ni_init: fn() {
@@ -18,7 +18,7 @@ aes_ni_table := I64{0}
     table: jet_rt_alloc(I64{80}, I64{8})
     rt_text_store(table, I64{0x08090a0b0c0d0e0f})
     rt_text_store(wrapping(table + I64{8}), I64{0x0001020304050607})
-    at := I64{16}
+    ^at: I64{16}
     loop at < (I64{80}) {
         rt_text_store(wrapping(table + at), I64{0})
         at += I64{8}
@@ -56,7 +56,7 @@ RT_AES_XTS_DEC: I64{10}
 
 // dst[0..bytes) = a ^ b, bytes a multiple of 8.
 rt_aes_xor: fn(dst: I64, a: I64, b: I64, bytes: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < bytes {
         rt_text_store(wrapping(dst + at), rt_text_word(wrapping(a + at)) ~ rt_text_word(wrapping(b + at)))
         at += I64{8}
@@ -106,7 +106,7 @@ rt_aes_one: fn(keys: I64, rounds: I64, src: I64, pre: I64, post: I64, out: I64, 
 // Add one to the big-endian integer of the last `width` bytes of the
 // counter block at ctr. The counter is public.
 rt_aes_increment: fn(ctr: I64, width: I64) {
-    i := I64{15}
+    ^i: I64{15}
     loop i >= (I64{16} - width) {
         byte: (rt_text_byte(wrapping(ctr + i)) + I64{1}) & I64{255}
         rt_text_put(wrapping(ctr + i), byte)
@@ -157,7 +157,7 @@ rt_aes_xts_double: fn(t: I64) {
     scratch: jet_rt_alloc(I64{320}, I64{8})
     masks: wrapping(scratch + I64{192})
     tweaked: wrapping(scratch + I64{256})
-    done := I64{0}
+    ^done: I64{0}
     loop done < blocks {
         n: if (blocks - done < I64{4}) -> blocks - done else -> I64{4}
         at: wrapping(data + done * I64{16})
@@ -176,7 +176,7 @@ rt_aes_xts_double: fn(t: I64) {
             }
         } else if (kind == RT_AES_CTR || kind == RT_AES_CTR32) {
             width: if (kind == RT_AES_CTR) -> I64{16} else -> I64{4}
-            b := I64{0}
+            ^b: I64{0}
             loop b < n {
                 rt_text_bytes_copy(wrapping(masks + b * I64{16}), iv, I64{16})
                 rt_aes_increment(iv, width)
@@ -186,7 +186,7 @@ rt_aes_xts_double: fn(t: I64) {
         } else if (kind == RT_AES_XTS_ENC || kind == RT_AES_XTS_DEC) {
             // C_i = E(P_i ^ T_i) ^ T_i, T_{i+1} = T_i * x (IEEE 1619-2007
             // section 5.3.1).
-            b := I64{0}
+            ^b: I64{0}
             loop b < n {
                 rt_text_bytes_copy(wrapping(masks + b * I64{16}), iv, I64{16})
                 rt_aes_xts_double(iv)
@@ -196,7 +196,7 @@ rt_aes_xts_double: fn(t: I64) {
             rt_aes_group(keys, r, kind == RT_AES_XTS_DEC, tweaked, masks, to, n, scratch)
         } else {
             // CBC_ENC, CFB_ENC and OFB chain every block on the last.
-            b := I64{0}
+            ^b: I64{0}
             loop b < n {
                 block: wrapping(at + b * I64{16})
                 into: wrapping(to + b * I64{16})
@@ -211,7 +211,7 @@ rt_aes_xts_double: fn(t: I64) {
         }
         done += n
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{320}) {
         rt_text_store(wrapping(scratch + at), I64{0})
         at += I64{8}
@@ -238,14 +238,14 @@ rt_aes_xts_double: fn(t: I64) {
     }
     y: rt_text_word(wrapping(y_header + I64{16}))
     zero: wrapping(table + I64{16})
-    at := wrapping(data + start)
-    left := blocks
+    ^at: wrapping(data + start)
+    ^left: blocks
     // H, H^2, H^3, H^4 for the four-block steps: each power is (H^k ^ 0) * H.
     powers: if (left >= I64{4}) -> jet_rt_alloc(I64{64}, I64{8}) else -> I64{0}
     if (powers != I64{0}) { rt_text_bytes_copy(powers, h, I64{16}) }
     #Unsafe("y and h hold one block, the range check keeps every block inside the length borrowed bytes, and the powers table holds four") {
         if (powers != I64{0}) {
-            k := I64{1}
+            ^k: I64{1}
             loop k < (I64{4}) {
                 power: wrapping(powers + k * I64{16})
                 rt_text_bytes_copy(power, wrapping(power - I64{16}), I64{16})
@@ -265,7 +265,7 @@ rt_aes_xts_double: fn(t: I64) {
         }
     }
     if (powers != I64{0}) {
-        k := I64{0}
+        ^k: I64{0}
         loop k < (I64{64}) {
             rt_text_store(wrapping(powers + k), I64{0})
             k += I64{8}

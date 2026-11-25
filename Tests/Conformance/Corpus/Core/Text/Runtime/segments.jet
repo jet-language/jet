@@ -10,15 +10,15 @@ use {
 }
 
 segment_text: fn(points: [Int]) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop cp in points -> text_segment_string.append_cp(out, cp)
     String.from_bytes(out) ?? panic("segment fixture")
 }
 
 break_hex: fn(token: String) -> Int Never! {
-    value := 0
+    ^value: 0
     loop b in token.bytes() {
-        digit := Int{b}
+        ^digit: Int{b}
         digit = if digit >= 65 -> digit - 55 else -> digit - 48
         value = value * 16 + digit
     }
@@ -28,9 +28,9 @@ break_hex: fn(token: String) -> Int Never! {
 // parse_break/check_break: ÷ closes a nonempty
 // expected segment, × continues it, hex tokens append one scalar.
 break_case: fn(row: String, sentence: Bool) Never! {
-    full := [U8]{}
-    current := [U8]{}
-    expected := [String]{}
+    ^full: [U8]{}
+    ^current: [U8]{}
+    ^expected: [String]{}
     loop token in row.split(" ") {
         if token == "×" -> next
         if token == "÷" {

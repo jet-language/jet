@@ -14,7 +14,7 @@ use jet_foundation.[
 // `source` is the bytes of the module's text, which holds the body at its span.
 sema_inline_assembly_contract: fn(function: Func, target: String, source: [U8], diagnostics: ^[Diagnostic]) -> InlineAsmContract? {
     inline: function.inline_foreign ?? return None
-    contract := InlineAsmContract?{None}
+    ^contract: InlineAsmContract?{None}
     if inline_assembly_contract(function, target) == {
         .NotAssembly -> return None
         .Checked(checked) -> contract = Val(checked)
@@ -34,12 +34,12 @@ sema_inline_assembly_contract: fn(function: Func, target: String, source: [U8], 
 // Only x86-64 has the template assembler.
 sema_inline_assembly_encoded: fn(inline: InlineForeign, target: String, bytes: [U8], diagnostics: ^[Diagnostic]) -> Bool {
     if target != "x86_64" && !target.starts_with("x86_64-") -> return true
-    body := inline.source
-    offset := -1
+    ^body: inline.source
+    ^offset: -1
     span: inline.source_span
     if span.start >= 0 && span.end >= span.start && span.end <= bytes.len() {
-        open := -1
-        at := span.start
+        ^open: -1
+        ^at: span.start
         loop at + 2 < span.end {
             if bytes[at] == (U8{34}) && bytes[at + 1] == (U8{34}) && bytes[at + 2] == (U8{34}) {
                 if open < 0 {
@@ -54,7 +54,7 @@ sema_inline_assembly_encoded: fn(inline: InlineForeign, target: String, bytes: [
             at += 1
         }
     }
-    encoded := true
+    ^encoded: true
     loop word in inline_assembly_x64_unencoded(body) {
         encoded = false
         site: if offset >= 0 -> Span{start: offset + word.start, end: offset + word.end} else -> span

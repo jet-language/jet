@@ -9,22 +9,22 @@ use {
 
 #Test("workspace force and dependency grants refuse before lock publication") {
     keys: [String]{"force_pin", "dependency_grant"}
-    refused := [Bool]{}
-    absent := [Bool]{}
+    ^refused: [Bool]{}
+    ^absent: [Bool]{}
     loop key in keys {
         root: env_wlock_test_dir("s5-gate-law-{key}")
         files.write(files.join(root, "package.jet"), "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ {key}: .Forbid }}\n") ?? panic("original policy")
-        plan := WorkspacePlan.empty()
+        ^plan: WorkspacePlan.empty()
         if key == "force_pin" {
             plan.overlay_policy = pkg_parse_workspace_policy("workspace: module {{ overlay audit {{ package(\"app\").version: Force(\"2\") }} }}\n") ?? panic("original force overlay")
         } else {
             plan.overlay_policy.build_grants.push(BuildGrant{subject: "app", effects: [String]{"Exec"}})
         }
-        cache := WorkspaceDeclarationCache.new()
+        ^cache: WorkspaceDeclarationCache.new()
         denied: if env_workspace_lock_write(cache, root, plan) == {
             .Err(error) -> if error == {
                 .Gate(gate) -> {
-                    found := false
+                    ^found: false
                     loop diagnostic in gate.diagnostics {
                         if diagnostic.code == "E3415" && diagnostic.what.contains(key) {
                             found = true

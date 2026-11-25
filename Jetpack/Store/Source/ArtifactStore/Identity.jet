@@ -62,7 +62,7 @@ ArtifactDigest: struct {
     from_hex: fn(value: String) -> ArtifactDigest ArtifactStoreError! {
         raw: value.bytes()
         if raw.len() != 64 -> return Err(ArtifactStoreError.InvalidDigest(value))
-        digest := [U8]{}
+        ^digest: [U8]{}
         loop index in 0..<32 {
             high: store_artifact_hex_value(raw[index * 2]) ?? return Err(ArtifactStoreError.InvalidDigest(value))
             low: store_artifact_hex_value(raw[index * 2 + 1]) ?? return Err(ArtifactStoreError.InvalidDigest(value))
@@ -263,7 +263,7 @@ ArtifactEntryKey: enum {
 
 // Keys in their derived order.
 store_artifact_sort_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Never! {
-    out := keys
+    ^out: keys
     out = loop fresh_item in out -> fresh_item
     out.sort_by(fn(left: ArtifactEntryKey, right: ArtifactEntryKey) { (left.kind().rank() <=> right.kind().rank()).then(left.primary() <=> right.primary()).then(left.secondary() <=> right.secondary()) })
     out
@@ -271,8 +271,8 @@ store_artifact_sort_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Nev
 
 // Keys in their derived order without duplicates.
 store_artifact_unique_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Never! {
-    out := [ArtifactEntryKey]{}
-    seen := [String:Bool]{}
+    ^out: [ArtifactEntryKey]{}
+    ^seen: [String:Bool]{}
     loop key in store_artifact_sort_keys(keys) {
         identity: key.identity()
         if seen.has_key(identity) -> next
@@ -294,7 +294,7 @@ store_artifact_split_once: fn(value: String, separator: String) -> {before: Stri
 store_artifact_find: fn(haystack: [U8], needle: [U8], from: Int) -> Int Never! {
     if needle.len() == 0 -> return from
     last: haystack.len() - needle.len()
-    at := from
+    ^at: from
     loop at <= last {
         if pkg_bytes_starts_with(haystack, at, needle) -> return at
         at += 1

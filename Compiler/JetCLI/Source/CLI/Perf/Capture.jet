@@ -50,13 +50,13 @@ jet_cli_perf_capture_observations: fn(capture: ^JetCLIPerfCapture, observations:
     }
     first: observations[0]
     latest: observations[observations.len() - 1]
-    task_indexes := [U64:Int]{}
-    first_seen := [U64:U64]{}
-    last_seen := [U64:U64]{}
-    previous := U64{0}
-    lock_indexes := [U64:Int]{}
-    arena_allocations := U64{0}
-    arena_bytes := U64{0}
+    ^task_indexes: [U64:Int]{}
+    ^first_seen: [U64:U64]{}
+    ^last_seen: [U64:U64]{}
+    ^previous: U64{0}
+    ^lock_indexes: [U64:Int]{}
+    ^arena_allocations: U64{0}
+    ^arena_bytes: U64{0}
     loop observed in observations {
         live: observed.live
         if live.pid != first.live.pid || live.start_id != first.live.start_id || live.session_id != first.live.session_id || live.source_id != first.live.source_id || live.build_id != first.live.build_id || live.revision != first.live.revision || live.world_id != first.live.world_id {
@@ -133,7 +133,7 @@ jet_cli_perf_capture_observations: fn(capture: ^JetCLIPerfCapture, observations:
     if arena_allocations > (U64{0}) || arena_bytes > (U64{0}) {
         capture.allocations.push(TraceAllocation{count: arena_allocations, bytes: arena_bytes, symbol: symbol})
     }
-    root := U64?{None}
+    ^root: U64?{None}
     loop observed_task in capture.tasks {
         if observed_task.parent == (U64{0}) {
             root = Val(observed_task.id)
@@ -181,21 +181,21 @@ jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCL
     }
     source: jet_cli_perf_source(path, text)
     place: jet_cli_perf_run_place(source)
-    sampled := TraceProfile?{None}
+    ^sampled: TraceProfile?{None}
     if samples == .Val(found) {
         sampled = jet_cli_perf_samples_profile(source, found, wall: place, wall_samples: U64{observations.len()})
     }
-    cpu_samples := U64{0}
+    ^cpu_samples: U64{0}
     loop observed in observations {
         if observed.live.runtime.cpu_ns != None -> cpu_samples += U64{1}
     }
-    identities := [SourceIdentity]{}
+    ^identities: [SourceIdentity]{}
     if sampled != None && samples == .Val(found) {
         loop other in found.sources -> identities.push(other.identity)
     }
     profile: sampled ?? jet_cli_perf_source_profile(source, U64{observations.len()}, cpu_samples, false)
     identities.insert(0, source.identity)
-    capture := jet_cli_perf_capture_new(profile, identities)
+    ^capture: jet_cli_perf_capture_new(profile, identities)
     // copy: the run symbol below keeps the path; the source map owns its own.
     capture.source_maps.push(trace_source_map_jet_with_source(path.copy(), text) ?? return Err(jet_cli_read_error(err.message)))
     if observations.len() == 0 -> return Ok(capture)
@@ -208,12 +208,12 @@ jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCL
 }
 
 jet_cli_perf_capture_browser: fn(browser: JetCLIPerfBrowser, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
-    capture := jet_cli_perf_capture_new(trace_profile_unsupported("browser relay supplies compiler-checked symbol identities, not parser-span samples"), browser.sources)
+    ^capture: jet_cli_perf_capture_new(trace_profile_unsupported("browser relay supplies compiler-checked symbol identities, not parser-span samples"), browser.sources)
     capture.browser = browser.rows
     capture.source_maps = browser.source_maps
     capture.policy.browser_rows_truncated = browser.truncated
     if observations.len() > 0 {
-        symbol := JetSymbolRef?{None}
+        ^symbol: JetSymbolRef?{None}
         loop source in capture.source_identity {
             loop named in source.symbols {
                 if symbol == None || (named.name == "run" && named.kind == "fn") {

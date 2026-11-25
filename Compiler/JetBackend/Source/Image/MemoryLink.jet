@@ -67,7 +67,7 @@ link_image_u32: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // A two's-complement 64-bit field.
 link_image_i64: fn(bytes: [U8], at: Int) -> Int Never! {
-    high := link_image_u32(bytes, at + 4)
+    ^high: link_image_u32(bytes, at + 4)
     if high >= 0x80000000 -> high -= 0x100000000
     link_image_u32(bytes, at) + high * 0x100000000
 }
@@ -88,7 +88,7 @@ link_image_at: fn(at: Int, gap_at: Int, gap: Int) -> Int Never! {
 // The headers, the program header table and the sections the bind reads
 // lie outside the gap; the view's offsets index `b`.
 link_image_view: fn(c: ^LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImageView Never! {
-    v := LinkImageView{base: -1, phoff: 0, phnum: 0, load_end: 0, program_base: 0, sites: [Int]{}, symtab_at: 0, symtab_count: 0, first_global: 0, strtab_at: 0, strtab_size: 0, shoff: 0, alloc_headers: 0, names_at: 0, exports_at: 0, exports_slots: 0}
+    ^v: LinkImageView{base: -1, phoff: 0, phnum: 0, load_end: 0, program_base: 0, sites: [Int]{}, symtab_at: 0, symtab_count: 0, first_global: 0, strtab_at: 0, strtab_size: 0, shoff: 0, alloc_headers: 0, names_at: 0, exports_at: 0, exports_slots: 0}
     size: c.bufs[b].len()
     head: if gap == 0 -> size else -> gap_at
     if size < LINK_EHDR_SIZE || link_u32(c.bufs, b, 0) != 0x464c457f || link_u16(c.bufs, b, 16) != 2 || link_u16(c.bufs, b, 18) != 62 {
@@ -117,10 +117,10 @@ link_image_view: fn(c: ^LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImage
         link_error(c, "runtime image: malformed section headers")
         return v
     }
-    bind_at := -1
-    bind_size := 0
-    exports_at := -1
-    exports_size := 0
+    ^bind_at: -1
+    ^bind_size: 0
+    ^exports_at: -1
+    ^exports_size: 0
     loop k in 1..<shnum {
         h: v.shoff + 64 * k
         if v.alloc_headers == k - 1 && (link_s64(c.bufs, b, h + 8) & 2) != 0 -> v.alloc_headers = k
@@ -178,7 +178,7 @@ link_image_view: fn(c: ^LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImage
 // an index entry can only miss, never bind a wrong symbol.
 link_image_export: fn(c: LinkContext, view: LinkImageView, name: String) -> Int Never! {
     mask: view.exports_slots - 1
-    slot := link_image_export_hash(name.bytes()) & mask
+    ^slot: link_image_export_hash(name.bytes()) & mask
     loop _ in 0..<view.exports_slots {
         k: link_u32(c.bufs, 1, view.exports_at + 4 * slot)
         if k == 0 -> return -1
@@ -212,7 +212,7 @@ link_image_defines: fn(c: LinkContext, view: LinkImageView, name: String) -> Boo
 // libgcc's unwinder has nothing that walks them, so its startup is the
 // tail call alone.
 link_bind_startup: fn(frames: Bool) -> LinkSynth Never! {
-    s := link_synth()
+    ^s: link_synth()
     link_synth_function(s, "__jet_bind_main")
     if frames {
         // push rdi; push rsi; push rdx; lea rdi, [rip + __jet_bind_eh]
@@ -242,17 +242,17 @@ link_bind_startup: fn(frames: Bool) -> LinkSynth Never! {
 // has any (StaticLink.jet link_zone_write), then its loaded sections.
 link_bind_layout: fn(c: ^LinkContext, view: LinkImageView) -> LinkLayout Never! {
     order: link_order(c)
-    commons := false
+    ^commons: false
     loop g in 0..<c.g_name.len() {
         if c.g_kind[g] == LINK_G_COMMON -> commons = true
     }
-    has_rw := c.got_keys.len() > 0 || commons
+    ^has_rw: c.got_keys.len() > 0 || commons
     loop class in LINK_RELRO..<LINK_CLASSES {
         if order[class].len() > 0 -> has_rw = true
     }
     sites: link_zone_count(c)
     phnum: view.phnum + 2 + (if has_rw -> 1 else -> 0) + (if sites > 0 -> 1 else -> 0)
-    addr := view.program_base + LINK_PHDR_SIZE * phnum
+    ^addr: view.program_base + LINK_PHDR_SIZE * phnum
     zone_note_at: if sites > 0 -> link_align(addr, 8) else -> 0
     if sites > 0 -> addr = zone_note_at + link_zone_note_size(sites)
     addr = link_place(c, order[LINK_RODATA], addr)
@@ -306,10 +306,10 @@ link_bind_layout: fn(c: ^LinkContext, view: LinkImageView) -> LinkLayout Never! 
 // the image's ELF header naming the combined program header table, for
 // link_bind_sections to finish.
 link_bind_write: fn(c: ^LinkContext, exe: ^X64Executable, view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     elf: link_bind_header(c, exe, out, view, l, target)
     link_zone_write(c, out, l, view.program_base)
-    in_place := link_no_pieces()
+    ^in_place: link_no_pieces()
     link_write_contents(c, out, l, view.program_base, in_place)
     exe.tail = out
     elf
@@ -320,7 +320,7 @@ link_bind_write: fn(c: ^LinkContext, exe: ^X64Executable, view: LinkImageView, l
 // the patches of the image part's `main` places bound to `target` in `exe`;
 // a place outside the image's loaded bytes or out of range is reported on `c`.
 link_bind_header: fn(c: ^LinkContext, exe: ^X64Executable, out: ^[U8], view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
-    elf := c.bufs[1][0..<LINK_EHDR_SIZE]
+    ^elf: c.bufs[1][0..<LINK_EHDR_SIZE]
     link_put64(elf, 32, view.program_base - c.base)
     elf[56] = U8{l.phnum & 255}
     elf[57] = U8{(l.phnum >> 8) & 255}
@@ -339,7 +339,7 @@ link_bind_header: fn(c: ^LinkContext, exe: ^X64Executable, out: ^[U8], view: Lin
             link_error(c, "runtime image: `main` at {target} is out of rel32 range of {address}")
             next
         }
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         if {
             kind == LINK_R_64 -> elf64_u64(bytes, value)
             else -> elf64_u32(bytes, value)
@@ -371,10 +371,10 @@ link_bind_header: fn(c: ^LinkContext, exe: ^X64Executable, out: ^[U8], view: Lin
 // first), and the section headers, which `elf` names. The image's symbols
 // are left out (link_bind_named_tail).
 link_bind_sections: fn(c: ^LinkContext, out: ^[U8], origin: Int, view: LinkImageView, l: LinkLayout, debug: LinkDebug, elf: ^[U8]) Never! {
-    headers := link_bind_image_headers(c, view)
-    extents := [[Int]]{}
+    ^headers: link_bind_image_headers(c, view)
+    ^extents: [[Int]]{}
     loop class in 0..<LINK_CLASSES {
-        extent := link_class_extent(c, l, class)
+        ^extent: link_class_extent(c, l, class)
         if class == LINK_EH -> extent = [Int]{c.eh_start, c.eh_start + c.eh_size}
         if class == LINK_BSS {
             extent = if l.has_rw -> [Int]{l.bss_start, l.mem_end} else -> [Int]{0, 0}
@@ -382,7 +382,7 @@ link_bind_sections: fn(c: ^LinkContext, out: ^[U8], origin: Int, view: LinkImage
         extents.push(extent)
     }
     class_headers: link_bind_class_headers(headers, extents, c.got_start, c.got_keys.len(), c.base)
-    in_place := link_no_pieces()
+    ^in_place: link_no_pieces()
     sections: link_debug_bytes(c, debug, in_place, l.text_start, l.text_end)
     loop (group, name) in debug.names {
         start: out.len()
@@ -393,8 +393,8 @@ link_bind_sections: fn(c: ^LinkContext, out: ^[U8], origin: Int, view: LinkImage
     // program's local and global symbols are made apart first, their names
     // in `symbol_names` past the empty name.
     names_base: 1
-    symbol_names := [U8]{}
-    locals := [U8]{}
+    ^symbol_names: [U8]{}
+    ^locals: [U8]{}
     loop obj in 0..<c.obj_name.len() {
         b: c.obj_buffer[obj].copy()
         loop k in 1..<c.obj_first_global[obj] {
@@ -409,7 +409,7 @@ link_bind_sections: fn(c: ^LinkContext, out: ^[U8], origin: Int, view: LinkImage
             link_image_symbol(locals, symbol_names, names_base, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
         }
     }
-    globals := [U8]{}
+    ^globals: [U8]{}
     loop g in 0..<c.g_name.len() {
         if c.g_kind[g] != LINK_G_FILE || c.g_alias[g] >= 0 -> next
         s: c.g_section[g]
@@ -424,7 +424,7 @@ link_bind_sections: fn(c: ^LinkContext, out: ^[U8], origin: Int, view: LinkImage
 
 // The image's headers of its loaded sections, as they are.
 link_bind_image_headers: fn(c: LinkContext, view: LinkImageView) -> [LinkSectionHeader] Never! {
-    headers := [LinkSectionHeader]{}
+    ^headers: [LinkSectionHeader]{}
     loop k in 1..<view.alloc_headers + 1 {
         h: view.shoff + 64 * k
         headers.push(
@@ -450,7 +450,7 @@ link_bind_image_headers: fn(c: LinkContext, view: LinkImageView) -> [LinkSection
 // `got_slots` slots from `got_start`, appended to `headers`; returns per
 // class its header's index (-1: none). File offsets are addresses less `base`.
 link_bind_class_headers: fn(headers: ^[LinkSectionHeader], extents: [[Int]], got_start: Int, got_slots: Int, base: Int) -> [Int] Never! {
-    class_headers := [Int]{}
+    ^class_headers: [Int]{}
     loop _ in 0..<LINK_CLASSES -> class_headers.push(-1)
     names: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
     kinds: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
@@ -540,7 +540,7 @@ x64_executable_whole: fn(bytes: ^^[U8]) -> X64Executable Never! {
 
 // The executable a split link wrote (x64_link_executable_split).
 x64_executable_split: fn(linked: ^^X64SplitExecutableResult) -> X64Executable Never! {
-    exe := x64_executable_whole(linked.bytes.move())
+    ^exe: x64_executable_whole(linked.bytes.move())
     exe.debug_file = linked.debug_file.move()
     exe.build_id = linked.build_id.move()
     exe
@@ -551,7 +551,7 @@ x64_executable_split: fn(linked: ^^X64SplitExecutableResult) -> X64Executable Ne
 // rewrite all of it (link_bind_write), so one whose image part its caller
 // took back (Native.jet jet_eval_native_bind) has its header too.
 x64_executable_header: fn(exe: X64Executable) -> [U8] Never! {
-    header := if exe.image.len() >= 64 -> exe.image[0..<64] else -> [U8]{}
+    ^header: if exe.image.len() >= 64 -> exe.image[0..<64] else -> [U8]{}
     loop header.len() < 64 -> header.push(U8{0})
     loop (k, at) in exe.patch_at {
         loop (j, byte) in exe.patch_bytes[k] {
@@ -567,12 +567,12 @@ x64_executable_bytes: fn(exe: ^^X64Executable) -> [U8] Never! {
     if exe.image_gap > 0 {
         panic("x64_executable_bytes: the image part of {exe.image_path} was read without its loaded segments")
     }
-    whole := exe.move()
+    ^whole: exe.move()
     if whole.image_symbols_left {
         named: link_bind_named_tail(whole, whole.image, 0, 0) ?? panic("x64_executable_bytes: the runtime image {whole.image_path} or its program part has no symbol table")
         whole.tail = named
     }
-    out := whole.image[0..<whole.image_end]
+    ^out: whole.image[0..<whole.image_end]
     loop (k, at) in whole.patch_at {
         loop (j, byte) in whole.patch_bytes[k] -> out[at + j] = byte
     }
@@ -596,7 +596,7 @@ x64_executable_bytes: fn(exe: ^^X64Executable) -> [U8] Never! {
 // file without its bytes [gap_at, gap_at + gap). None when either has no
 // symbol table.
 link_bind_named_tail: fn(exe: X64Executable, image: [U8], gap_at: Int, gap: Int) -> [U8]? Never! {
-    header := -1
+    ^header: -1
     loop (k, at) in exe.patch_at {
         if at == 0 -> header = k
     }
@@ -610,7 +610,7 @@ link_bind_named_tail: fn(exe: X64Executable, image: [U8], gap_at: Int, gap: Int)
     program_end: program[1] + 24 * program[2]
     // Each program name moves past the image's names, less the empty name.
     shift: tables[6] - 1
-    tail := [U8]{}
+    ^tail: [U8]{}
     tail.try_reserve(exe.tail.len() + 8 + image_end - tables[1] + program_end - program[1] + tables[6] + program[6]) ?? ()
     tail.extend(exe.tail)
     elf64_pad(tail, 8)
@@ -692,7 +692,7 @@ X64BindResult: struct {
 // under `debug_info` (link_debug_sections) and names the program's symbols
 // only, until its file is written (link_bind_named_tail).
 x64_bind_runtime_image: fn(name: String, program: ^^[U8], image: ^^[U8], image_path: String, image_stamp: [Int], image_at: Int, gap_at: Int, gap: Int, debug_info: Bool) -> X64BindResult Never! {
-    bound := link_bind_image(name, program, image, gap_at, gap, None, debug_info)
+    ^bound: link_bind_image(name, program, image, gap_at, gap, None, debug_info)
     if bound.errors.len() == 0 {
         bound.executable.image_path = image_path
         bound.executable.image_stamp = image_stamp
@@ -729,10 +729,10 @@ x64_bind_runtime_image_at: fn(name: String, program: ^^[U8], image: ^^[U8], prog
 // it moves into a context for the reads and back. Nothing is defined when
 // the image is absent or can't be read.
 x64_runtime_image_defines: fn(images: ^[[U8]], gap_at: Int, gap: Int, names: [String], rows: [Int]) -> [Bool] Never! {
-    found := [Bool]{}
+    ^found: [Bool]{}
     if images.len() == 0 -> return found
     image: images.remove(0, .Slot) ?? return found
-    c := link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
+    ^c: link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
     view: link_image_view(c, 1, gap_at, gap)
     loop row in rows -> found.push(c.errors.len() == 0 && link_image_defines(c, view, names[row]))
     images.push(c.bufs.remove(1, .Slot) ?? [U8]{})
@@ -748,9 +748,9 @@ x64_runtime_image_defines: fn(images: ^[[U8]], gap_at: Int, gap: Int, names: [St
 x64_runtime_image_export: fn(images: ^[[U8]], gap_at: Int, gap: Int, name: String) -> Int? Never! {
     if images.len() == 0 -> return None
     image: images.remove(0, .Slot) ?? return None
-    c := link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
+    ^c: link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
     view: link_image_view(c, 1, gap_at, gap)
-    found := Int?{None}
+    ^found: Int?{None}
     if c.errors.len() == 0 {
         if {
             view.exports_slots > 0 -> {
@@ -761,7 +761,9 @@ x64_runtime_image_export: fn(images: ^[[U8]], gap_at: Int, gap: Int, name: Strin
                 loop k in view.first_global..<view.symtab_count {
                     at: view.symtab_at + 24 * k
                     if link_u16(c.bufs, 1, at + 6) == 0 -> next
-                    if link_cstr(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at)) == name -> found = Val(link_s64(c.bufs, 1, at + 8))
+                    if link_cstr(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at)) == name {
+                        found = Val(link_s64(c.bufs, 1, at + 8))
+                    }
                 }
             }
         }
@@ -780,15 +782,15 @@ link_bind_bytes: fn(bound: ^^X64BindResult) -> X64ExecutableResult Never! {
 // A bind that failed: its errors, and the image (input 1) as the
 // executable's image part, as a bound one has it.
 link_bind_failure: fn(c: ^LinkContext) -> X64BindResult Never! {
-    exe := x64_executable_whole([U8]{})
+    ^exe: x64_executable_whole([U8]{})
     exe.image = c.bufs.remove(1, .Slot) ?? [U8]{}
     // copy: a few report lines; the context drops its own with it.
     X64BindResult{executable: exe, errors: c.errors.copy()}
 }
 
 link_bind_image: fn(name: String, program: ^^[U8], image: ^^[U8], gap_at: Int, gap: Int, program_base: Int?, debug_info: Bool) -> X64BindResult Never! {
-    c := link_context([[U8]]{program.move(), image.move()}, LINK_RUN_BASE)
-    view := link_image_view(c, 1, gap_at, gap)
+    ^c: link_context([[U8]]{program.move(), image.move()}, LINK_RUN_BASE)
+    ^view: link_image_view(c, 1, gap_at, gap)
     if c.errors.len() > 0 -> return link_bind_failure(c)
     if program_base == .Val(chosen) {
         if chosen & LINK_PAGE - 1 != 0 || chosen < view.program_base {
@@ -869,12 +871,12 @@ link_bind_image: fn(name: String, program: ^^[U8], image: ^^[U8], gap_at: Int, g
     debug: link_debug_sections(c, debug_info)
     target: link_global_addr(c, start_g)
     origin: view.program_base - c.base
-    exe := x64_executable_whole([U8]{})
+    ^exe: x64_executable_whole([U8]{})
     exe.image_end = view.load_end
     exe.image_gap_at = gap_at
     exe.image_gap = gap
     exe.tail_at = origin
-    elf := link_bind_write(c, exe, view, layout, target)
+    ^elf: link_bind_write(c, exe, view, layout, target)
     link_bind_sections(c, exe.tail, origin, view, layout, debug, elf)
     exe.image_symbols_left = program_base == None
     if c.errors.len() > 0 -> return link_bind_failure(c)

@@ -38,13 +38,13 @@ AMERICAN_IDENT1_WORDS: [AmericanIdentWord]{
 
 // Rewrites the British words of the names in one file of any kind.
 american_ident1_file: fn(path: String, text: String, source: Bool) -[]> MigrationOutcome {
-    words := [String:String]{}
+    ^words: [String:String]{}
     loop row in AMERICAN_IDENT1_WORDS -> words[row.british] = row.american
     bytes: text.bytes()
-    out := [String]{}
-    rewritten := 0
-    cursor := 0
-    at := 0
+    ^out: [String]{}
+    ^rewritten: 0
+    ^cursor: 0
+    ^at: 0
     loop at < bytes.len() {
         if !american_ident1_name_byte(bytes[at]) {
             at += 1
@@ -75,9 +75,9 @@ american_ident1_file: fn(path: String, text: String, source: Bool) -[]> Migratio
 // `name` with each of its words that `words` lists in the American spelling.
 american_ident1_name: fn(name: String, words: [String:String]) -[]> String {
     bytes: name.bytes()
-    out := [String]{}
-    cursor := 0
-    at := 0
+    ^out: [String]{}
+    ^cursor: 0
+    ^at: 0
     loop at < bytes.len() {
         if !american_ident1_letter(bytes[at]) {
             at += 1
@@ -109,7 +109,7 @@ american_ident1_word_starts: fn(bytes: [U8], at: Int) -[]> Bool {
 // `american` in the case `word` is written in.
 american_ident1_cased: fn(word: String, american: String) -[]> String {
     if word.len() > 1 && word == word.to_upper() -> return american.to_upper()
-    bytes := american.bytes()
+    ^bytes: american.bytes()
     if american_ident1_upper(word.bytes()[0]) -> bytes[0] = U8{Int{bytes[0]} - 32}
     String.from_bytes(bytes) ?? ""
 }
@@ -127,7 +127,7 @@ american_ident1_upper: fn(byte: U8) -[]> Bool { byte >= 65 && byte <= 90 }
 american_ident1_lower: fn(byte: U8) -[]> Bool { byte >= 97 && byte <= 122 }
 
 #Test("each British word of a name takes the American word in its case") {
-    words := [String:String]{}
+    ^words: [String:String]{}
     loop row in AMERICAN_IDENT1_WORDS -> words[row.british] = row.american
     assert_eq(american_ident1_name("Cancelled", words), "Canceled")
     assert_eq(american_ident1_name("is_cancelled", words), "is_canceled")

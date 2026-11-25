@@ -723,7 +723,7 @@ id_char: fn(c: Int) -> Bool Never! { is_alpha(c) || is_digit(c) || c == 95 || c 
 // aKeywordTable of 3.45.0 with every keyword the default build enables.
 keyword_code: fn(sql: [U8], start: Int, len: Int) -> Int Never! {
     if len < 2 || len > 17 -> return TK_ID
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop i in 0..<len {
         c: Int{sql[start + i]}
         bytes.push(U8{if c >= 97 && c <= 122 -> c - 32 else -> c})
@@ -893,7 +893,7 @@ get_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
     if at >= sql.len() -> return SQLToken{kind: TK_ILLEGAL, start: at, len: 0}
     z1: sql_byte(sql, at + 1)
     cls: AI_CLASS[z0]
-    i := 0
+    ^i: 0
     if cls == {
         CC_SPACE -> {
             i = 1
@@ -926,7 +926,7 @@ get_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
             }
             // for(i=3, c=z[2]; (c!='*' || z[i]!='/') && (c=z[i])!=0; i++){}
             i = 3
-            c := sql_byte(sql, at + 2)
+            ^c: sql_byte(sql, at + 2)
             loop {
                 if c == 42 && sql_byte(sql, at + i) == 47 -> break
                 c = sql_byte(sql, at + i)
@@ -963,7 +963,7 @@ get_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
         CC_QUOTE -> {
             delim: z0
             i = 1
-            c := 0
+            ^c: 0
             loop {
                 c = sql_byte(sql, at + i)
                 if c == 0 -> break
@@ -982,7 +982,7 @@ get_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
         }
         CC_QUOTE2 -> {
             i = 1
-            c := z0
+            ^c: z0
             loop c != 93 {
                 c = sql_byte(sql, at + i)
                 if c == 0 -> break
@@ -1009,7 +1009,7 @@ get_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
         }
         CC_X -> {
             if z1 == 39 {
-                kind := TK_BLOB
+                ^kind: TK_BLOB
                 i = 2
                 loop is_xdigit(sql_byte(sql, at + i)) -> i += 1
                 if sql_byte(sql, at + i) != 39 || i % 2 != 0 {
@@ -1038,13 +1038,13 @@ get_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
 // The CC_DIGIT case of sqlite3GetToken: decimal, hexadecimal and floating
 // literals; trailing identifier bytes make the whole token illegal.
 number_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
-    kind := TK_INTEGER
+    ^kind: TK_INTEGER
     if sql_byte(sql, at) == 48 && (sql_byte(sql, at + 1) == 120 || sql_byte(sql, at + 1) == 88) && is_xdigit(sql_byte(sql, at + 2)) {
-        i := 3
+        ^i: 3
         loop is_xdigit(sql_byte(sql, at + i)) -> i += 1
         return SQLToken{kind: kind, start: at, len: i}
     }
-    i := 0
+    ^i: 0
     loop is_digit(sql_byte(sql, at + i)) -> i += 1
     if sql_byte(sql, at + i) == 46 {
         i += 1
@@ -1070,9 +1070,9 @@ number_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
 // The CC_DOLLAR / CC_VARALPHA case: $name, @name, :name and #name, with
 // the TCL forms $a(b) and $a::b.
 variable_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
-    kind := TK_VARIABLE
-    n := 0
-    i := 1
+    ^kind: TK_VARIABLE
+    ^n: 0
+    ^i: 1
     loop {
         c: sql_byte(sql, at + i)
         if c == 0 -> break
@@ -1095,12 +1095,12 @@ variable_token: fn(sql: [U8], at: Int) -> SQLToken Never! {
 // identifier-like token (ID, STRING, JOIN_KW, WINDOW, OVER and the fallback
 // keywords) reported as TK_ID.
 peek_class: fn(sql: [U8], at: Int) -> SQLToken Never! {
-    pos := at
+    ^pos: at
     loop {
         t: get_token(sql, pos)
         pos += t.len
         if t.kind != TK_SPACE {
-            k := t.kind
+            ^k: t.kind
             if k == TK_ID || k == TK_STRING || k == TK_JOIN_KW || k == TK_WINDOW || k == TK_OVER || fallback_id(k) {
                 k = TK_ID
             }
@@ -1133,8 +1133,8 @@ window_keyword: fn(sql: [U8], kind: Int, after: Int, last: Int) -> Int Never! {
 
 #Test("the tokenizer splits SQL as tokenize.c does") {
     sql: "SELECT a1, 'it''s', x'0aFF', 1.5e3, 0x1F, ?3, :name -- c\n/* b */ <> != || ->> [q id] \"d\"".bytes()
-    kinds := [Int]{}
-    pos := 0
+    ^kinds: [Int]{}
+    ^pos: 0
     loop {
         t: get_token(sql, pos)
         if t.len == 0 -> break

@@ -47,7 +47,7 @@ utf8_width: fn(source: [U8], index: Int) -> Int Never! {
 scalar_at: fn(source: [U8], index: Int) -> String Never! {
     width: utf8_width(source, index)
     if width <= 0 -> return ""
-    out := [U8]{}
+    ^out: [U8]{}
     loop offset in 0..<width {
         if index + offset >= source.len() -> break
         out.push(source[index + offset])
@@ -102,7 +102,7 @@ is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
 }
 
 emit: fn(facts: ^[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never! {
-    flag := 0
+    ^flag: 0
     if uppercase -> flag = 1
     facts.push(kind)
     facts.push(start)
@@ -117,7 +117,7 @@ push_code: fn(facts: ^[Int], kind: Int, start: Int, end: Int, uppercase: Bool) -
 
 previous_scalar_start: fn(source: [U8], index: Int) -> Int Never! {
     if index <= 0 -> return -1
-    cursor := index - 1
+    ^cursor: index - 1
     loop cursor > 0 && is_continuation(byte_at(source, cursor)) -> cursor -= 1
     cursor
 }
@@ -128,7 +128,7 @@ previous_is_identifier: fn(source: [U8], index: Int) -> Bool {
 }
 
 scan_ident_cont_table: fn() -> [U8] Never! {
-    table := [U8]{}
+    ^table: [U8]{}
     loop i in 0..<256 {
         ok: i == 95 || (i >= 97 && i <= 122) || (i >= 65 && i <= 90) || (i >= 48 && i <= 57)
         table.push(if ok -> U8{1} else -> U8{0})
@@ -142,7 +142,7 @@ SCAN_IDENT_CONT: #run scan_ident_cont_table()
 // takes the scalar path (`is_identifier_continue`, `utf8_width`).
 scan_identifier_end: fn(source: [U8], start: Int) -> Int {
     if start < 0 -> return start
-    i := start
+    ^i: start
     count: source.len()
     loop i < count {
         value: Int{source[i]}
@@ -164,7 +164,7 @@ scan_identifier_end: fn(source: [U8], start: Int) -> Int {
 // a paste is never glued to letters. `end` is where the word or paste just
 // scanned stops; the result is where the glued word stops.
 scan_glued_paste_end: fn(source: [U8], end: Int) -> Int {
-    i := end
+    ^i: end
     loop i < source.len() {
         if byte_at(source, i) == 35 && byte_at(source, i + 1) == 123 && is_identifier_start(source, i + 2) {
             paste_end: scan_identifier_end(source, i + 2)
@@ -181,7 +181,7 @@ scan_glued_paste_end: fn(source: [U8], end: Int) -> Int {
 scan_unit_suffix_end: fn(source: [U8], start: Int) -> Int { scan_identifier_end(source, start) }
 
 scan_digits: fn(source: [U8], start: Int) -> Int Never! {
-    i := start
+    ^i: start
     loop i < source.len() {
         value: byte_at(source, i)
         if {
@@ -208,7 +208,7 @@ base_number_end: fn(source: [U8], start: Int) -> Int Never! {
         else -> 0
     }
     if radix == 0 -> return -1
-    i := start + 2
+    ^i: start + 2
     loop i < source.len() {
         value: byte_at(source, i)
         if {
@@ -224,7 +224,7 @@ scan_numeric_end: fn(source: [U8], start: Int) -> Int Never! {
         prefixed: base_number_end(source, start)
         if prefixed >= 0 -> return prefixed
     }
-    i := scan_digits(source, start)
+    ^i: scan_digits(source, start)
     if byte_at(source, i) == 46 && ascii_digit(byte_at(source, i + 1)) {
         i += 1
         i = scan_digits(source, i)
@@ -232,7 +232,7 @@ scan_numeric_end: fn(source: [U8], start: Int) -> Int Never! {
     exponent: byte_at(source, i)
     if exponent == 101 || exponent == 69 {
         after: byte_at(source, i + 1)
-        valid := ascii_digit(after)
+        ^valid: ascii_digit(after)
         if (after == 43 || after == 45) && ascii_digit(byte_at(source, i + 2)) -> valid = true
         if valid {
             i += 1
@@ -266,8 +266,8 @@ numeric_is_float: fn(source: [U8], start: Int) -> Bool Never! {
 // Whether the decimal digits in `start..end` (separators skipped) fit the
 // i64 token fast path.
 decimal_digits_fit_int: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
-    value := 0
-    i := start
+    ^value: 0
+    ^i: start
     loop i < end {
         code: byte_at(source, i)
         i += 1
@@ -283,7 +283,7 @@ decimal_digits_fit_int: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
 }
 
 scan_plain_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never! {
-    i := start + 1
+    ^i: start + 1
     count: source.len()
     loop i < count {
         value: Int{source[i]}
@@ -329,10 +329,10 @@ scan_plain_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never
 // template payload only balances braces. An interpolation left open at the line
 // end returns that line end, so the string scan reports it unclosed there.
 scan_plain_interpolation_end: fn(source: [U8], open: Int) -> Int Never! {
-    j := open + 1
-    depth := 1
+    ^j: open + 1
+    ^depth: 1
     template: byte_at(source, open - 1) == 36 && byte_at(source, open - 2) == 92
-    in_quote := false
+    ^in_quote: false
     loop j < source.len() {
         value: byte_at(source, j)
         if {
@@ -367,9 +367,9 @@ scan_plain_interpolation_end: fn(source: [U8], open: Int) -> Int Never! {
 }
 
 scan_raw_fence_end: fn(source: [U8], start: Int) -> Int Never! {
-    fence_len := 0
+    ^fence_len: 0
     loop byte_at(source, start + fence_len) == 96 -> fence_len += 1
-    cursor := start + fence_len
+    ^cursor: start + fence_len
     loop cursor < source.len() {
         if byte_at(source, cursor) != 96 {
             cursor += 1
@@ -383,8 +383,8 @@ scan_raw_fence_end: fn(source: [U8], start: Int) -> Int Never! {
 }
 
 scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never! {
-    i := start + 3
-    depth := 0
+    ^i: start + 3
+    ^depth: 0
     loop i < source.len() {
         value: byte_at(source, i)
         if depth == 0 {
@@ -422,7 +422,7 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
         }
         if value == BLOCK_OPEN_FIRST && byte_at(source, i + 1) == BLOCK_OPEN_SECOND {
             i += 2
-            comment_depth := 1
+            ^comment_depth: 1
             loop i < source.len() && comment_depth > 0 {
                 if {
                     byte_at(source, i) == BLOCK_OPEN_FIRST && byte_at(source, i + 1) == BLOCK_OPEN_SECOND -> {
@@ -479,7 +479,7 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
 }
 
 scan_raw_foreign_string_end: fn(source: [U8], start: Int) -> Int Never! {
-    i := start + 3
+    ^i: start + 3
     loop i + 2 < source.len() {
         if byte_at(source, i) == 34 && byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34 {
             return i + 3
@@ -493,7 +493,7 @@ scan_raw_foreign_string_end: fn(source: [U8], start: Int) -> Int Never! {
 // and closing brace, so that brace opens no hole. Malformed escapes end where
 // they stop, and the payload pass reports them.
 scan_scalar_escape_end: fn(source: [U8], at: Int) -> Int Never! {
-    i := at + 2
+    ^i: at + 2
     if byte_at(source, i) != 123 -> return i
     i += 1
     loop hex_value(byte_at(source, i)) >= 0 -> i += 1
@@ -502,7 +502,7 @@ scan_scalar_escape_end: fn(source: [U8], at: Int) -> Int Never! {
 }
 
 scan_char_end: fn(source: [U8], start: Int) -> Int Never! {
-    i := start + 1
+    ^i: start + 1
     if i >= source.len() -> return -1
     if {
         byte_at(source, i) == 92 -> {
@@ -520,8 +520,8 @@ scan_char_end: fn(source: [U8], start: Int) -> Int Never! {
 // whose openers are not all closed runs to the source end and returns
 // `-(end + 1)`, so the payload pass can report it unclosed.
 scan_block_comment_end: fn(source: [U8], start: Int) -> Int Never! {
-    i := start + 2
-    depth := 1
+    ^i: start + 2
+    ^depth: 1
     loop i < source.len() && depth > 0 {
         if {
             byte_at(source, i) == BLOCK_OPEN_FIRST && byte_at(source, i + 1) == BLOCK_OPEN_SECOND -> {
@@ -540,9 +540,9 @@ scan_block_comment_end: fn(source: [U8], start: Int) -> Int Never! {
 }
 
 raw_token_facts: fn(source: [U8], config_surface: Bool) -> [Int] {
-    facts := [Int]{}
+    ^facts: [Int]{}
     if source.len() > 16 -> facts.try_reserve(source.len() * 3 /% 4 + 8) ?? ()
-    _ := raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
+    ^_: raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
     facts
 }
 
@@ -566,12 +566,12 @@ RawScanStop: struct {
 // the end of the source.
 raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int, previous_code: Int, facts: ^[Int]) -> RawScanStop {
     if facts.len() <= 4 && to - from > 16 -> facts.try_reserve((to - from) * 3 /% 4 + 8) ?? ()
-    last_code := previous_code
-    fn_in_range := false
-    bodies_local := true
-    has_paste := false
-    unclosed_block_comment := false
-    i := from
+    ^last_code: previous_code
+    ^fn_in_range: false
+    ^bodies_local: true
+    ^has_paste: false
+    ^unclosed_block_comment: false
+    ^i: from
     count: source.len()
     if i == 0 && count >= 3 && source[0] == (U8{35}) && source[1] == (U8{33}) && source[2] == (U8{47}) {
         loop i < count && source[i] != (U8{10}) -> i += 1
@@ -579,7 +579,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
     }
     loop i < to {
         // Fast-skip ASCII whitespace runs (including 4-space indentation blocks).
-        b0 := source[i]
+        ^b0: source[i]
         if b0 == (U8{32}) || (b0 >= (U8{9}) && b0 <= (U8{13})) {
             i += 1
             loop i + 4 <= to && source[i] == (U8{32}) && source[i + 1] == (U8{32}) && source[i + 2] == (U8{32}) && source[i + 3] == (U8{32}) {
@@ -634,7 +634,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                 if end != word_end -> has_paste = true
                 kind: word_kind(source, i, end, last_code)
                 if kind == TOKEN_KW_FN -> fn_in_range = true
-                case_name := false
+                ^case_name: false
                 if kind == TOKEN_IDENT -> case_name = case_name_start(source, i, end)
                 last_code = push_code(facts, kind, i, end, case_name)
                 i = end
@@ -1020,7 +1020,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                         if i < count -> i += 1
                     }
                     next1 == 123 && is_identifier_start(source, i + 2) -> {
-                        paste_end := scan_identifier_end(source, i + 2)
+                        ^paste_end: scan_identifier_end(source, i + 2)
                         if byte_at(source, paste_end) == 46 && byte_at(source, paste_end + 1) == 98 && byte_at(source, paste_end + 2) == 111 && byte_at(source, paste_end + 3) == 100 && byte_at(source, paste_end + 4) == 121 && byte_at(source, paste_end + 5) == 125 {
                             paste_end += 5
                         }
@@ -1161,9 +1161,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     }
                 }
             }
-            else -> {
-                i += 1
-            }
+            else -> { i += 1 }
         }
     }
     if to >= count -> emit(facts, TOKEN_EOF, count, count, false)

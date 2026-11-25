@@ -3,8 +3,8 @@ Counter: struct {
 }
 
 bump_local: fn() {
-    maybe := Int?{Val(1)}
-    if ^maybe == {
+    ^maybe: Int?{Val(1)}
+    if maybe.in_place() == {
         .Val(n) -> { n += 1 }
         .None -> {}
     }
@@ -12,8 +12,8 @@ bump_local: fn() {
 }
 
 bump_field: fn() {
-    counter := Counter{value: Val(10)}
-    if ^counter.value == {
+    ^counter: Counter{value: Val(10)}
+    if counter.value.in_place() == {
         .Val(n) -> { n += 5 }
         .None -> {}
     }
@@ -21,7 +21,7 @@ bump_field: fn() {
 }
 
 bump_param: fn(slot: ^Int?) {
-    if ^slot == {
+    if slot.in_place() == {
         .Val(n) -> { n *= 2 }
         .None -> {}
     }
@@ -30,7 +30,7 @@ bump_param: fn(slot: ^Int?) {
 run: fn() {
     bump_local()
     bump_field()
-    held := Int?{Val(21)}
+    ^held: Int?{Val(21)}
     bump_param(held)
     print(held ?? 0)
 }

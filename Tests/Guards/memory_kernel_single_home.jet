@@ -55,7 +55,7 @@ mksh_walk: fn(path: String, out: ^[String]) {
         return
     }
     loop child in (mksh_files.list_dir(path) ?? panic("list {path}: {err}")) {
-        skipped := false
+        ^skipped: false
         loop name in MKSH_SKIPPED {
             if child.name == name -> skipped = true
         }
@@ -65,12 +65,12 @@ mksh_walk: fn(path: String, out: ^[String]) {
 
 // The entries of a manifest's `memory: .Kernel([...])`, in written order.
 mksh_kernel_entries: fn(manifest: String) -> [String] Never! {
-    entries := [String]{}
+    ^entries: [String]{}
     parts: manifest.split("memory: .Kernel([").to_list()
     if parts.len() < 2 -> return entries
     list: parts[1].split("])").to_list()[0].to_string()
     loop item in list.split(",") {
-        entry := item.trim()
+        ^entry: item.trim()
         if entry.starts_with("\"") && entry.ends_with("\"") && entry.len() >= 2 {
             entry = entry.slice(1, entry.len() - 1)
         }
@@ -85,8 +85,8 @@ mksh_kernel_entries: fn(manifest: String) -> [String] Never! {
 // wrapped group's inner lines and its closing `]` or `)`. A gate reads the
 // same however its markers are laid out.
 mksh_gate: fn(lines: [String], index: Int) -> String Never! {
-    gate := lines[index].trim()
-    above := index - 1
+    ^gate: lines[index].trim()
+    ^above: index - 1
     loop above >= 0 {
         line: lines[above]
         marker: line.starts_with("#") || line.starts_with(" ") || line.starts_with("\t") || line.starts_with("]") || line.starts_with(")")
@@ -100,11 +100,11 @@ mksh_gate: fn(lines: [String], index: Int) -> String Never! {
 // The kernel declarations of `source`, one finding per primitive that is not
 // declared exactly once or whose declaration states no precondition.
 mksh_home_findings: fn(source: String) -> [String] Never! {
-    findings := [String]{}
+    ^findings: [String]{}
     lines: source.split("\n").to_list()
     loop primitive in MKSH_PRIMITIVES {
-        count := 0
-        gated := false
+        ^count: 0
+        ^gated: false
         loop index in 0..<lines.len() {
             if !mksh_declares(lines[index], primitive.name) -> next
             count += 1
@@ -130,10 +130,10 @@ mksh_home_findings: fn(source: String) -> [String] Never! {
 
 #Test("no source outside the memory kernel declares a raw memory primitive") {
     guards_enter_root()
-    sources := [String]{}
+    ^sources: [String]{}
     loop root in MKSH_ROOTS -> mksh_walk(root, sources)
     assert(sources.len() > 1000, "the walk found only {sources.len()} Jet sources")
-    findings := [String]{}
+    ^findings: [String]{}
     loop path in sources {
         if path == MKSH_KERNEL -> next
         source: mksh_files.read(path) ?? panic("read {path}: {err}")
@@ -150,10 +150,10 @@ mksh_home_findings: fn(source: String) -> [String] Never! {
 
 #Test("every kernel a shipped package names exists, and no raw memory region stands outside one") {
     guards_enter_root()
-    sources := [String]{}
+    ^sources: [String]{}
     loop root in MKSH_ROOTS -> mksh_walk(root, sources)
-    manifests := 0
-    findings := [String]{}
+    ^manifests: 0
+    ^findings: [String]{}
     loop path in sources {
         if !path.ends_with("/package.jet") -> next
         manifest: mksh_files.read(path) ?? panic("read {path}: {err}")

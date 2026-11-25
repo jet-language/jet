@@ -68,8 +68,8 @@ jet_cli_settings_member: fn(directory: String, name: String) -[FS, Env]> String?
 // The settings layers seen from `directory`, with the user configuration
 // directory `config` (None: there is no user file).
 jet_cli_command_layers_at: fn(directory: String, config: String?) -[FS]> JetCLICommandLayers Never! {
-    layers := [JetCLICommandSettingLayer]{}
-    reports := [Diagnostic]{}
+    ^layers: [JetCLICommandSettingLayer]{}
+    ^reports: [Diagnostic]{}
     if config == .Val(base) {
         file: jet_cli_user_settings_file(base)
         if layers_files.is_file(file) {
@@ -98,7 +98,7 @@ jet_cli_command_layers_at: fn(directory: String, config: String?) -[FS]> JetCLIC
                         }
                     }
                     .Err(error) -> {
-                        report := pkg_manifest_parse_diagnostic(file, error)
+                        ^report: pkg_manifest_parse_diagnostic(file, error)
                         report.source_path = Val(file.move())  // the report keeps the path past this read.
                         reports.push(report)
                     }
@@ -127,9 +127,9 @@ jet_cli_user_settings_refused: fn(file: String, error: PackageParseError) -> Dia
 // relative path a control takes is resolved against `base`, the directory of
 // the file that declares it.
 jet_cli_command_layer: fn(file: String, base: String, text: String, entries: [ManifestEntry]) -> JetCLICommandSettingLayer Never! {
-    settings := [JetCLICommandSetting]{}
+    ^settings: [JetCLICommandSetting]{}
     loop entry in entries {
-        value := layers_json.parse(entry.value) ?? Dyn.Null
+        ^value: layers_json.parse(entry.value) ?? Dyn.Null
         if jet_cli_command_setting_path(entry.key) && value == .Text(path) && path != "" && path != "off" && !layers_files.is_absolute(path) {
             value = Dyn.Text(layers_files.join(base, path))
         }
@@ -173,7 +173,7 @@ jet_cli_settings_word: fn(argv: [String]) -[FS]> String? Never! {
 // The words of `words` that are compiler control flags (`controls`), or the
 // rest. A control is always one `--flag` or `--flag=VALUE` word.
 jet_cli_settings_controls: fn(words: [String], controls: Bool) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop word in words {
         if (jet_cli_control_of_flag(word.split("=").to_list()[0]) != None) == controls {
             out.push(word.copy())  // copy: the caller keeps its words.

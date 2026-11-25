@@ -17,7 +17,7 @@ use {
 }
 
 #Test("fetch selected update closure excludes unrelated packages and terminates on repeated graph edges") {
-    lock := LockFile.empty()
+    ^lock: LockFile.empty()
     lock.packages = [LockedPackage]{LockedPackage{name: "root", version: "1", source: .Root, dependencies: [String]{"a", "unrelated"}}, LockedPackage{name: "a", version: "1", source: .Path("a"), dependencies: [String]{"b"}}, LockedPackage{name: "b", version: "1", source: .Path("b"), dependencies: [String]{"a"}}, LockedPackage{name: "unrelated", version: "1", source: .Path("unrelated")}}
     assert_eq(pkg_fetch_closure(lock, "a"), [String]{"a", "b"})
     assert_eq(pkg_fetch_update_scope(Val(lock), PackageFetchOptions{update: true, update_dep: Val("a")}), [String]{"a", "b"})
@@ -27,7 +27,7 @@ use {
 }
 
 #Test("fetch cached version retains the canonical conflict diagnostic") {
-    resolver := PackageFetchResolver{root: "", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String:PackageFetchNode]{}, versions: [String:PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String:PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String:ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    ^resolver: PackageFetchResolver{root: "", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String:PackageFetchNode]{}, versions: [String:PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String:PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String:ForeignRealization]{}, advisory_loaded: false, advisory: None}
     pkg_fetch_record_version(resolver, "shared", "1.0.0", [String]{"root", "first"}) ?? panic("first version")
     pkg_fetch_record_version(resolver, "shared", "1.0.0", [String]{"root", "second"}) ?? panic("same version")
     if pkg_fetch_record_version(resolver, "shared", "2.0.0", [String]{"root", "third"}) == {
@@ -92,10 +92,10 @@ use {
 }
 
 #Test("fetch cached dependency aliases only check an already recorded alias version") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: HangarRoots{root: ".", dev_mode: false}
     context: ProviderCtx{fixtures: None, store_dir: ".", offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
-    resolver := PackageFetchResolver{root: ".", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String:PackageFetchNode]{}, versions: [String:PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String:PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String:ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    ^resolver: PackageFetchResolver{root: ".", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String:PackageFetchNode]{}, versions: [String:PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String:PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String:ForeignRealization]{}, advisory_loaded: false, advisory: None}
     actual: PackageFetchNode{package: LockedPackage{name: "actual", version: "1.0.0", source: .Path(".")}, directory: "."}
     resolver.nodes["alias"] = actual
     pkg_fetch_record_version(resolver, "actual", "1.0.0", [String]{"root", "actual"}) ?? panic("first authored version")
@@ -132,7 +132,7 @@ use {
 #Test("fetch records no registry rationale for a battery pin, so package policy asks it for no registry license") {
     root: files.tmpdir("jet-fetch-semantic-battery-") ?? panic("fixture")
     manifest: Manifest.parse("package.jet", "name: \"service\"\nversion: \"0.1.0\"\n") ?? panic("manifest")
-    lock := LockFile.empty()
+    ^lock: LockFile.empty()
     lock.packages.push(LockedPackage{name: "backend", version: "0.1.0", source: pkg_fetch_battery_source("backend", "0.1.0", "sha256-0123")})
     semantic: pkg_fetch_semantic_records(root, lock, manifest, PackageFetchOptions{}) ?? panic("a battery pin needs no registry policy record: {err.diagnostic.what}")
     assert_eq(trust_write_semantic_lock(semantic), trust_write_semantic_lock(pkg_fetch_semantic_records(root, LockFile.empty(), manifest, PackageFetchOptions{}) ?? panic("empty")))

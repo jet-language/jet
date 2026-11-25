@@ -190,15 +190,15 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     program_entry: native_image_entry(image, codes)
     registry: native_dump_word(bytes, 80)
     // Each memory section is a span of the dump's bytes, which back them.
-    blocks := [NativeBlock]{}
-    cut := [NativeCut]{}
-    ring_at := 0
-    ring_size := 0
-    budget := 0
-    memory := 0
-    cut_off := 0
-    tasks := [NativeDumpTask]{}
-    at := header
+    ^blocks: [NativeBlock]{}
+    ^cut: [NativeCut]{}
+    ^ring_at: 0
+    ^ring_size: 0
+    ^budget: 0
+    ^memory: 0
+    ^cut_off: 0
+    ^tasks: [NativeDumpTask]{}
+    ^at: header
     loop at + 24 <= bytes.len() {
         kind: native_dump_word(bytes, at)
         address: native_dump_word(bytes, at + 8)
@@ -217,7 +217,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
         if kind == NATIVE_DUMP_SECTION_CUT && size >= 32 {
             budget = native_dump_word(bytes, at)
             cut_off = native_dump_word(bytes, at + 16)
-            row := at + 32
+            ^row: at + 32
             loop row + 16 <= at + size {
                 cut.push(NativeCut{address: native_dump_word(bytes, row), size: native_dump_word(bytes, row + 8)})
                 row += 16
@@ -232,7 +232,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     // A dump whose tasks were not captured still has its stop.
     if tasks.len() == 0 {
         frame: native_dump_word(bytes, 56)
-        general := loop _ in 0..<NATIVE_DUMP_GENERAL -> 0
+        ^general: loop _ in 0..<NATIVE_DUMP_GENERAL -> 0
         general[X64_TRACE_RBP] = frame
         tasks.push(NativeDumpTask{id: 0, how: NATIVE_DUMP_TASK_STOPPED, pc: native_dump_word(bytes, 40), stack: native_dump_word(bytes, 48), frame: frame, tid: native_dump_word(bytes, 64), general: general, known: NATIVE_DUMP_KNOWN_RBP})
     }
@@ -246,7 +246,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     // nothing, so it reads no runtime pack.
     facts: native_eval_image_of(elf, [U8]{})
     routines: x64_image_functions(elf).functions
-    backing := bytes.move()
+    ^backing: bytes.move()
     backing.extend(elf.move())
     dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: backing.move(), cut: cut}, registry: registry, image: "{image_file}"}
     session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry, eval_image: Val(facts)}
@@ -258,7 +258,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
 // digits, the most significant first.
 native_dump_build: fn(build: Int) -> String Never! {
     digits: "0123456789abcdef"
-    text := ""
+    ^text: ""
     loop index in 0..<NATIVE_DUMP_BUILD_DIGITS {
         digit: (build >> (4 * (NATIVE_DUMP_BUILD_DIGITS - 1 - index))) & 15
         text = "{text}{digits.slice(digit, digit + 1)}"
@@ -271,7 +271,7 @@ native_dump_build: fn(build: Int) -> String Never! {
 // writer folds it. A wrapping product of exact Ints costs far more per byte,
 // so an image of tens of megabytes would take minutes to hash.
 native_dump_digest: fn(bytes: [U8]) -> Int Never! {
-    hash := I64{NATIVE_DUMP_BUILD_OFFSET}
+    ^hash: I64{NATIVE_DUMP_BUILD_OFFSET}
     prime: I64{NATIVE_DUMP_BUILD_PRIME}
     loop byte in bytes -> hash = wrapping((hash ~ I64{byte}) * prime)
     Int{hash}
@@ -307,7 +307,7 @@ NATIVE_DUMP_CYCLE_ENTRY: 24
 // task's name. The tasks are those the registry whose root is `registry`
 // lists; a stop that was no deadlock has none.
 native_dump_waits: fn(memory: NativeMemory, registry: Int) -> [Int:String] Never! {
-    waits := [Int:String]{}
+    ^waits: [Int:String]{}
     loop task in native_registry_tasks(memory, registry) {
         if task.control == 0 -> next
         delivered: native_debug_read(memory, task.control + NATIVE_DUMP_WAIT_CYCLE, 8, 1) ?? next
@@ -338,7 +338,7 @@ native_dump_pad: fn(size: Int) -> Int Never! { (size + 7) & -8 }
 // each task's; a thread outside every task, or a row its thread never
 // wrote, has id 0.
 native_dump_tasks: fn(tasks: ^[NativeDumpTask], bytes: [U8], at: Int, size: Int) Never! {
-    row := at
+    ^row: at
     loop row + 8 * NATIVE_DUMP_TASK_WORDS <= at + size {
         id: native_dump_word(bytes, row)
         how: native_dump_word(bytes, row + 8)
@@ -353,7 +353,7 @@ native_dump_tasks: fn(tasks: ^[NativeDumpTask], bytes: [U8], at: Int, size: Int)
 // The registers of the dump's task `index`, as x64_trace_registers reads a
 // stopped thread's: its general registers, rip and rsp, the rest zero.
 native_dump_registers: fn(dump: NativeDump, index: Int) -> [Int] Never! {
-    registers := loop _ in 0..<NATIVE_DUMP_REGISTERS -> 0
+    ^registers: loop _ in 0..<NATIVE_DUMP_REGISTERS -> 0
     if index < 0 || index >= dump.tasks.len() -> return registers
     loop (k, value) in dump.tasks[index].general -> registers[k] = value
     registers[X64_TRACE_RIP] = dump.tasks[index].pc
@@ -365,7 +365,7 @@ native_dump_registers: fn(dump: NativeDump, index: Int) -> [Int] Never! {
 // Which of native_dump_registers' registers the dump knows: rip, rsp and
 // the general registers its row marks.
 native_dump_known: fn(dump: NativeDump, index: Int) -> [Bool] Never! {
-    known := loop _ in 0..<NATIVE_DUMP_REGISTERS -> false
+    ^known: loop _ in 0..<NATIVE_DUMP_REGISTERS -> false
     if index < 0 || index >= dump.tasks.len() -> return known
     mask: dump.tasks[index].known
     loop k in 0..<NATIVE_DUMP_GENERAL -> known[k] = (mask >> k) & 1 == 1
@@ -410,7 +410,7 @@ native_dump_loaded: fn(blocks: ^[NativeBlock], elf: [U8], from: Int, bias: Int) 
 // The index among `frames` of Jet frame `jet`, as a dump's `bt` numbers
 // them (0 is the innermost Jet frame); None past the last.
 native_dump_jet_frame: fn(frames: [NativeFrame], jet: Int) -> Int? Never! {
-    seen := 0
+    ^seen: 0
     loop (index, frame) in frames {
         if !native_debug_jet_frame(frame) -> next
         if seen == jet -> return Val(index)
@@ -434,8 +434,8 @@ native_dump_secret: fn(name: String) -[]> Bool { name == "Secret" || name.ends_w
 // The flight ring's records, one line each, oldest first; `routines` (the
 // image's sized functions) name where a sample with no Jet frame is.
 native_dump_events: fn(image: NativeImage, ring: [U8], routines: [X64ImageFunction]) -> [String] Never! {
-    shown := [String]{}
-    at := 0
+    ^shown: [String]{}
+    ^at: 0
     loop at + 8 <= ring.len() {
         head: native_dump_word(ring, at)
         words: (head >> 48) & 2047
@@ -537,7 +537,7 @@ native_dump_where: fn(image: NativeImage, ring: [U8], at: Int, pc: Int, first: I
     loop index in first..<words {
         site: native_dump_word(ring, at + 8 * index)
         if site <= 0 -> next
-        frame := native_frame_at(image, site - 1)
+        ^frame: native_frame_at(image, site - 1)
         if native_call_row(image, site - 1) == .Val(call) -> frame.line = call.line
         if native_debug_jet_frame(frame) -> return "  at {frame.function} {frame.file}:{frame.line}"
     }
@@ -576,11 +576,11 @@ NativeDumpSources: struct {
 }
 
 native_dump_sources: fn(path: String, image: NativeImage) -[FS.Read]> NativeDumpSources Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop name in image.sources.keys() -> names.push("{name}")
     names.sort()
-    text := ""
-    changed := [String]{}
+    ^text: ""
+    ^changed: [String]{}
     loop name in names {
         built: image.sources.get(name) ?? next
         line: "Source: {name}, sha256 {native_dump_hex.encode(built)}"
@@ -634,7 +634,7 @@ native_dump_command: fn(session: ^NativeSession, line: String, events: [String],
             native_debug_backtrace(frames, routines: false, count: count)
         }
         "locals" -> {
-            locals := native_dump_locals(session) ?? return Err(err)
+            ^locals: native_dump_locals(session) ?? return Err(err)
             locals.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
             native_debug_locals_typed(locals)
         }
@@ -681,13 +681,13 @@ native_dump_command: fn(session: ^NativeSession, line: String, events: [String],
             session.task = index
             frames: session.backtrace() ?? return Err(err)
             stop: native_dump_jet_frame(frames, 0) ?? 0
-            _ := session.select_frame(stop) ?? return Err(err)
+            ^_: session.select_frame(stop) ?? return Err(err)
             native_dump_frame(session, frames, stop, file, lines) ?? return Err(err)
         }
         "events" -> {
             last: if operand.starts_with("--last") -> Int.parse(operand.after("--last").trim()) ?? NATIVE_DUMP_EVENTS else -> NATIVE_DUMP_EVENTS
             from: if last >= 0 && events.len() > last -> events.len() - last else -> 0
-            listed := if events.len() == 0 -> "No events in the flight ring\n" else -> ""
+            ^listed: if events.len() == 0 -> "No events in the flight ring\n" else -> ""
             loop index in from..<events.len() -> listed = "{listed}{events[index]}\n"
             listed
         }
@@ -708,7 +708,7 @@ native_dump_command: fn(session: ^NativeSession, line: String, events: [String],
 
 // The selected frame's locals, each #Secret one redacted.
 native_dump_locals: fn(session: ^NativeSession) -> [NativeLocal] NativeDebugError! {
-    locals := session.locals() ?? return Err(err)
+    ^locals: session.locals() ?? return Err(err)
     native_dump_redact(locals)
     Ok(locals)
 }
@@ -733,7 +733,7 @@ native_dump_task_list: fn(session: ^NativeSession, file: String) -> String Never
     tasks: if session.dump == .Val(dumped) -> dumped.tasks else -> [NativeDumpTask]{}
     waits: if session.dump == .Val(dumped) -> native_dump_waits(dumped.memory, dumped.registry) else -> [Int:String]{}
     chosen: session.task
-    text := ""
+    ^text: ""
     loop (index, task) in tasks {
         session.task = index
         frames: session.backtrace() ?? [NativeFrame]{}
@@ -795,7 +795,7 @@ native_dump_frame: fn(session: ^NativeSession, frames: [NativeFrame], index: Int
     dump: native_dump_files.join(root, ".jet/dumps/crash-1.jetdump")
     native_dump_files.write_bytes(native_dump_files.join(root, "crash.jet"), "crash\n".bytes()) ?? panic("source: {err}")
     native_dump_files.write_bytes(native_dump_files.join(root, "other.jet"), "changed\n".bytes()) ?? panic("source: {err}")
-    image := NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    ^image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
     image.sources["crash.jet"] = native_dump_crypto.sha256("crash\n".bytes()).as_bytes()
     image.sources["other.jet"] = native_dump_crypto.sha256("built\n".bytes()).as_bytes()
     image.sources["gone.jet"] = native_dump_crypto.sha256("gone\n".bytes()).as_bytes()
@@ -810,7 +810,7 @@ native_dump_frame: fn(session: ^NativeSession, frames: [NativeFrame], index: Int
     dump: native_dump_files.join(root, ".jet/dumps/crash-1.jetdump")
     native_dump_files.write_bytes(native_dump_files.join(root, "crash.jet"), "edited\n".bytes()) ?? panic("source: {err}")
     native_dump_files.write_bytes(native_dump_files.join(root, "lib.jet"), "edited\n".bytes()) ?? panic("source: {err}")
-    image := NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    ^image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
     image.lines.functions.push(X64JetlineFunction{low: 0x2000, high: 0x2040, name: "check", file: "crash.jet", dir: ".", decl: 1, rows: 0, rows_end: 0})
     image.lines.functions.push(X64JetlineFunction{low: 0x2040, high: 0x2080, name: "helper", file: "lib.jet", dir: "/w/run", decl: 1, rows: 0, rows_end: 0})
     image.sources["crash.jet"] = native_dump_crypto.sha256("built\n".bytes()).as_bytes()
@@ -836,7 +836,7 @@ native_dump_frame: fn(session: ^NativeSession, frames: [NativeFrame], index: Int
     // of 2 call sites of the record 5 words back; sampler 1's end at count
     // 250000; sampler 1 stopped 1500 us past the epoch, and restarted.
     records: [[Int]]{[Int]{0x1000 | (5 << 48), 0x2000, 500, 3, (1 << 48) | 125000}, [Int]{0x1000 | (5 << 48), 0x2000, -1, 0, 0}, [Int]{0x1000 | (1 << 48)}, [Int]{0x1000 | (6 << 48), 0x2000, (-9223372036854775807 - 1) | (2 << 32) | 5, 600, 3, 0}, [Int]{(13 << 59) | (4 << 48) | 2, 1, 250000, 2000000}, [Int]{(13 << 59) | (4 << 48) | 3, 1, 1500000, 1}, [Int]{(13 << 59) | (4 << 48) | 3, 1, 1700000, 0}}
-    ring := [U8]{}
+    ^ring: [U8]{}
     loop record in records {
         loop word in record -> ring.extend(native_low_bytes(word, 8))
     }
@@ -851,7 +851,7 @@ native_dump_frame: fn(session: ^NativeSession, frames: [NativeFrame], index: Int
 // registry's root and the build; then the end section.
 native_dump_test_bytes: fn(version: Int, length: Int, build: Int) -> [U8] Never! {
     words: [Int]{NATIVE_DUMP_MAGIC, version, 0, 0, 0, 0, 0, 0, 0, length, 0, build, NATIVE_DUMP_SECTION_END, 0, 0}
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop word in words -> bytes.extend(native_word_bytes(word))
     bytes
 }

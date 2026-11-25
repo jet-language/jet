@@ -32,7 +32,7 @@ engine_receipt_clock: fn(unix: Int) -> Int {
     files.write(files.join(source, "payload"), "trusted bytes\n") ?? panic("payload")
     files.write(files.join(dependency_source, "payload"), "dependency bytes\n") ?? panic("dependency payload")
     roots: HangarRoots{root: root, dev_mode: false}
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     dependency: engine_cache_ingest(verification, roots, "cache-trust-dependency", "./cache-trust-dependency", dependency_source, engine_cache_identity("cache-trust-dependency"), [String]{}, "cache trust dependency")
     identity: engine_cache_identity("cache-trust")
     entry: engine_cache_ingest(verification, roots, "cache-trust-demo", "./cache-trust-demo", source, identity, [String]{dependency.envelope.output_hash}, "cache trust test")
@@ -54,7 +54,7 @@ engine_receipt_clock: fn(unix: Int) -> Int {
     receipt_bytes: files.read_bytes(receipt_path) ?? panic("receipt bytes")
     provenance: CacheProvenance{reference: engine_receipt_field(receipt_bytes, "reference"), source: engine_receipt_field(receipt_bytes, "source"), builder: engine_receipt_field(receipt_bytes, "builder"), action: engine_receipt_field(receipt_bytes, "action"), output: engine_receipt_field(receipt_bytes, "output"), platform: engine_receipt_field(receipt_bytes, "platform"), sandbox: engine_receipt_field(receipt_bytes, "sandbox"), policy: engine_receipt_field(receipt_bytes, "policy")}
     now: time.unix_ns() /% 1000000000
-    wrong_closure := provenance
+    ^wrong_closure: provenance
     wrong_closure.action = without_action
     closure_receipt: CacheReceipt.issue("public", wrong_closure, 2, engine_receipt_clock(now - 1), now + 600, key) ?? panic("wrong closure receipt")
     files.write(receipt_path, engine_receipt_text(closure_receipt)) ?? panic("wrong closure")
@@ -86,7 +86,7 @@ engine_receipt_clock: fn(unix: Int) -> Int {
     wrong_source: files.tmpdir("engine-cache-trust-wrong-payload-") ?? panic("wrong source")
     files.write(files.join(wrong_source, "payload"), "wrong trusted bytes\n") ?? panic("wrong payload")
     wrong_nar: store_write_nar(wrong_source) ?? panic("wrong nar")
-    wrong_info := NarInfo.parse(String.from_bytes(info_bytes) ?? panic("info text")) ?? panic("wrong info")
+    ^wrong_info: NarInfo.parse(String.from_bytes(info_bytes) ?? panic("info text")) ?? panic("wrong info")
     wrong_info.file_size = wrong_nar.stats.bytes
     wrong_info.nar_size = wrong_nar.stats.bytes
     wrong_info.nar_hash = wrong_nar.stats.digest
@@ -107,7 +107,7 @@ engine_receipt_clock: fn(unix: Int) -> Int {
     files.write(receipt_path, engine_receipt_text(frozen)) ?? panic("frozen write")
     assert(engine_cache_verify_error(verification, roots, entry.id).contains("expired"))
     engine_cache_substitute_rejected(verification, roots, entry.id, files.join(root, "frozen-destination/out"))
-    mixed := provenance
+    ^mixed: provenance
     mixed.output = "sha256:another-output"
     mixed_receipt: CacheReceipt.issue("public", mixed, 4, engine_receipt_clock(now - 1), now + 600, key) ?? panic("mixed receipt")
     files.write(receipt_path, engine_receipt_text(mixed_receipt)) ?? panic("mixed receipt write")

@@ -30,7 +30,7 @@ PKG_MANIFEST_SCALAR_FIELDS: #run { [String]{MANIFEST_FIELD_NAME, MANIFEST_FIELD_
 // manifest block and package marker blanked, or None when no top-level
 // `build: fn` remains.
 pkg_build_entry_source: fn(text: String) -> String? Never! {
-    masked := text.bytes()
+    ^masked: text.bytes()
     pkg_mask_manifest_blocks(text.bytes(), masked)
     if pkg_package_markers(text) == .Ok(markers) {
         loop marker in markers -> pkg_blank_range(masked, marker.start, marker.end)
@@ -41,12 +41,12 @@ pkg_build_entry_source: fn(text: String) -> String? Never! {
 }
 
 pkg_mask_manifest_blocks: fn(bytes: [U8], masked: ^[U8]) Never! {
-    i := 0
-    brace_depth := 0
-    bracket_depth := 0
-    paren_depth := 0
-    in_string := false
-    escaped := false
+    ^i: 0
+    ^brace_depth: 0
+    ^bracket_depth: 0
+    ^paren_depth: 0
+    ^in_string: false
+    ^escaped: false
     loop i < bytes.len() {
         code: Int{bytes[i]}
         if in_string {
@@ -111,7 +111,7 @@ pkg_is_ascii_space_code: fn(code: Int) -> Bool Never! {
 }
 
 pkg_skip_ascii_space: fn(bytes: [U8], at: Int) -> Int Never! {
-    cursor := at
+    ^cursor: at
     loop pkg_is_ascii_space_code(pkg_bytes_code(bytes, cursor)) -> cursor += 1
     cursor
 }
@@ -130,7 +130,7 @@ pkg_key_at: fn(bytes: [U8], at: Int, key: String) -> Int? Never! {
 pkg_manifest_block_start: fn(bytes: [U8], at: Int) -> EditSpan? Never! {
     loop key in PKG_MANIFEST_BLOCKS {
         end: pkg_key_at(bytes, at, key) ?? next
-        cursor := pkg_skip_ascii_space(bytes, end)
+        ^cursor: pkg_skip_ascii_space(bytes, end)
         if pkg_bytes_code(bytes, cursor) != 58 -> next
         cursor = pkg_skip_ascii_space(bytes, cursor + 1)
         if pkg_bytes_code(bytes, cursor) == 46 -> cursor = pkg_skip_ascii_space(bytes, cursor + 1)
@@ -151,10 +151,10 @@ pkg_manifest_scalar_start: fn(bytes: [U8], at: Int) -> EditSpan? Never! {
         if peek == 46 && pkg_bytes_code(bytes, pkg_skip_ascii_space(bytes, value_start + 1)) == 123 {
             next
         }
-        i := value_start
-        depth := 0
-        quoted := false
-        escaped := false
+        ^i: value_start
+        ^depth: 0
+        ^quoted: false
+        ^escaped: false
         loop i < bytes.len() {
             code: Int{bytes[i]}
             if quoted {
@@ -186,10 +186,10 @@ pkg_manifest_scalar_start: fn(bytes: [U8], at: Int) -> EditSpan? Never! {
 // The byte after the `}` matching the `{` at `open`, skipping strings
 // (including `"""` and `'…'`) and comments.
 pkg_balanced_block_end: fn(bytes: [U8], open: Int) -> Int? Never! {
-    depth := 0
-    i := open
-    quote := -1
-    triple := false
+    ^depth: 0
+    ^i: open
+    ^quote: -1
+    ^triple: false
     loop i < bytes.len() {
         code: Int{bytes[i]}
         if quote >= 0 {
@@ -250,10 +250,10 @@ pkg_blank_range: fn(masked: ^[U8], start: Int, end: Int) Never! {
 }
 
 pkg_has_top_level_build_function: fn(bytes: [U8]) -> Bool Never! {
-    i := 0
-    depth := 0
-    in_string := false
-    escaped := false
+    ^i: 0
+    ^depth: 0
+    ^in_string: false
+    ^escaped: false
     loop i < bytes.len() {
         code: Int{bytes[i]}
         if in_string {
@@ -299,8 +299,8 @@ pkg_has_top_level_build_function: fn(bytes: [U8]) -> Bool Never! {
 
 // The offset just past the nested `/* … */` comment opening at `start`.
 pkg_skip_block_comment: fn(bytes: [U8], start: Int) -> Int Never! {
-    depth := 1
-    i := start + 2
+    ^depth: 1
+    ^i: start + 2
     loop i < bytes.len() {
         if (Int{bytes[i]}) == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
             depth += 1
@@ -336,7 +336,7 @@ InlinePackageBlock: struct {
 
     // The source with the carrier blanked, every offset and line ending kept.
     mask_source: fn(self, source: String) -> String Never! {
-        masked := source.bytes()
+        ^masked: source.bytes()
         pkg_blank_range(masked, self.span.start, self.span.end)
         String.from_bytes(masked) ?? source
     }
@@ -433,7 +433,7 @@ pkg_inline_package_block: fn(keyword: Int, open: Int, end: Int) -> InlinePackage
 // keyword and the brace.
 pkg_inline_package_start: fn(bytes: [U8], at: Int) -> EditSpan? Never! {
     end: pkg_key_at(bytes, at, INLINE_PACKAGE_DECL) ?? return None
-    cursor := pkg_skip_inline_trivia(bytes, end)
+    ^cursor: pkg_skip_inline_trivia(bytes, end)
     if pkg_bytes_code(bytes, cursor) == 58 && pkg_bytes_code(bytes, cursor + 1) != 58 && pkg_bytes_code(bytes, cursor + 1) != 61 {
         cursor = pkg_skip_inline_trivia(bytes, cursor + 1)
     }
@@ -442,11 +442,11 @@ pkg_inline_package_start: fn(bytes: [U8], at: Int) -> EditSpan? Never! {
 }
 
 pkg_find_top_level_inline_package: fn(bytes: [U8], from: Int) -> EditSpan? Never! {
-    i := from
-    braces := 0
-    brackets := 0
-    parens := 0
-    item_position := true
+    ^i: from
+    ^braces: 0
+    ^brackets: 0
+    ^parens: 0
+    ^item_position: true
     loop i < bytes.len() {
         code: Int{bytes[i]}
         if code == 34 || code == 39 {
@@ -501,7 +501,7 @@ pkg_find_top_level_inline_package: fn(bytes: [U8], from: Int) -> EditSpan? Never
 }
 
 pkg_skip_inline_trivia: fn(bytes: [U8], from: Int) -> Int Never! {
-    at := from
+    ^at: from
     loop {
         if at == 0 && pkg_bytes_starts_with(bytes, 0, "#!/".bytes()) {
             at = pkg_skip_inline_line_comment(bytes, at)
@@ -523,7 +523,7 @@ pkg_skip_inline_trivia: fn(bytes: [U8], from: Int) -> Int Never! {
 }
 
 pkg_skip_inline_line_comment: fn(bytes: [U8], from: Int) -> Int Never! {
-    at := from + 2
+    ^at: from + 2
     loop at < bytes.len() && (Int{bytes[at]}) != 10 -> at += 1
     at
 }
@@ -531,8 +531,8 @@ pkg_skip_inline_line_comment: fn(bytes: [U8], from: Int) -> Int Never! {
 pkg_skip_inline_string: fn(bytes: [U8], start: Int) -> Int Never! {
     triple: pkg_bytes_starts_with(bytes, start, "\"\"\"".bytes())
     quote: Int{bytes[start]}
-    i := start + (if triple -> 3 else -> 1)
-    escaped := false
+    ^i: start + (if triple -> 3 else -> 1)
+    ^escaped: false
     loop i < bytes.len() {
         code: Int{bytes[i]}
         if escaped {
@@ -570,17 +570,17 @@ PackageMarker: struct {
 // name, or an argument list left open, is malformed.
 pkg_package_markers: fn(text: String) -> [PackageMarker] PackageParseError! {
     bytes: text.bytes()
-    markers := [PackageMarker]{}
-    at := pkg_skip_inline_trivia(bytes, 0)
+    ^markers: [PackageMarker]{}
+    ^at: pkg_skip_inline_trivia(bytes, 0)
     loop pkg_bytes_code(bytes, at) == 35 {
         start: at
-        cursor := at + 1
+        ^cursor: at + 1
         loop pkg_bytes_is_word(pkg_bytes_code(bytes, cursor)) || (cursor > start + 1 && pkg_bytes_code(bytes, cursor) == 46 && pkg_bytes_is_word(pkg_bytes_code(bytes, cursor + 1))) {
             cursor += 1
         }
         if cursor == start + 1 -> return Err(PackageParseError.MalformedField("#"))
         name: pkg_bytes_text(bytes, start + 1, cursor)
-        args := ""
+        ^args: ""
         if pkg_bytes_code(bytes, cursor) == 40 {
             close: pkg_package_marker_args_end(bytes, cursor) ?? return Err(PackageParseError.MalformedField("#{name}("))
             args = pkg_bytes_text(bytes, cursor + 1, close - 1).trim()
@@ -596,8 +596,8 @@ pkg_package_markers: fn(text: String) -> [PackageMarker] PackageParseError! {
 // `open`, skipping strings, comments and nested delimiters; None when it
 // never closes.
 pkg_package_marker_args_end: fn(bytes: [U8], open: Int) -> Int? Never! {
-    depth := 0
-    i := open
+    ^depth: 0
+    ^i: open
     loop i < bytes.len() {
         code: Int{bytes[i]}
         if code == 34 || code == 39 {
@@ -625,7 +625,7 @@ pkg_package_marker_args_end: fn(bytes: [U8], open: Int) -> Int? Never! {
 // `text` with each of `markers` blanked, every offset and line ending kept:
 // the record the field readers see.
 pkg_package_markers_masked: fn(text: String, markers: [PackageMarker]) -> String Never! {
-    masked := text.bytes()
+    ^masked: text.bytes()
     loop marker in markers -> pkg_blank_range(masked, marker.start, marker.end)
     String.from_bytes(masked) ?? text
 }
@@ -634,7 +634,7 @@ pkg_package_markers_masked: fn(text: String, markers: [PackageMarker]) -> String
 // blanked before it, so the Jet parser reads it as the file's last rule and
 // every span stays a `package.jet` span.
 pkg_package_marker_source: fn(text: String, marker: PackageMarker) -> String Never! {
-    masked := pkg_binder_slice(text, 0, marker.end).bytes()
+    ^masked: pkg_binder_slice(text, 0, marker.end).bytes()
     pkg_blank_range(masked, 0, marker.start)
     String.from_bytes(masked) ?? ""
 }

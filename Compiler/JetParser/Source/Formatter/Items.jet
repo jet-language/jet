@@ -141,7 +141,7 @@ jfmt_member_is_compact: fn(member: JetFmtMember) -> Bool Never! {
 
 // The markers written above a declaration; the rest are lines of its body.
 jfmt_above_markers: fn(markers: [Marker]) -> [Marker] Never! {
-    above := [Marker]{}
+    ^above: [Marker]{}
     loop marker in markers {
         if !marker.inside -> above.push(marker.copy())
     }
@@ -150,7 +150,7 @@ jfmt_above_markers: fn(markers: [Marker]) -> [Marker] Never! {
 
 // The `#X: value` lines of a declaration's body, in source order.
 jfmt_inside_markers: fn(markers: [Marker]) -> [Marker] Never! {
-    inside := [Marker]{}
+    ^inside: [Marker]{}
     loop marker in markers {
         if marker.inside -> inside.push(marker.copy())
     }
@@ -180,11 +180,11 @@ jfmt_fmt_above_markers: fn(f: ^JetFmt, markers: [Marker]) {
 
 // A stable sort on the authored offset.
 jfmt_sort_members: fn(members: [JetFmtMember]) -> [JetFmtMember] Never! {
-    sorted := members
-    index := 1
+    ^sorted: members
+    ^index: 1
     loop index < sorted.len() {
         current: sorted[index].copy()
-        position := index
+        ^position: index
         loop position > 0 && current.start < sorted[position - 1].start {
             sorted[position] = sorted[position - 1]
             position -= 1
@@ -209,9 +209,9 @@ jfmt_item_spans_for: fn(f: JetFmt, source: JetFmtSourceList?) -> [Span] {
 // Byte search over source text; forward and reverse find offsets.
 jfmt_items_find: fn(haystack: [U8], needle: [U8], from: Int) -> Int? Never! {
     if needle.len() == 0 -> return Val(from)
-    index := from
+    ^index: from
     loop index + needle.len() <= haystack.len() {
-        matched := true
+        ^matched: true
         loop offset in 0..<needle.len() {
             if haystack[index + offset] != needle[offset] {
                 matched = false
@@ -225,9 +225,9 @@ jfmt_items_find: fn(haystack: [U8], needle: [U8], from: Int) -> Int? Never! {
 }
 
 jfmt_items_rfind: fn(haystack: [U8], needle: [U8], before: Int) -> Int? Never! {
-    index := before - needle.len()
+    ^index: before - needle.len()
     loop index >= 0 {
-        matched := true
+        ^matched: true
         loop offset in 0..<needle.len() {
             if haystack[index + offset] != needle[offset] {
                 matched = false
@@ -278,7 +278,7 @@ jfmt_substitute_type: fn(ty: Type, params: [TypeParam], args: [Type]) -> Type Ne
             ty.copy()
         }
         .Apply(name, nested) -> {
-            out := [Type]{}
+            ^out: [Type]{}
             loop arg in nested -> out.push(jfmt_substitute_type(arg, params, args))
             Type.Apply{name: name, args: out}
         }
@@ -292,7 +292,7 @@ jfmt_substitute_type: fn(ty: Type, params: [TypeParam], args: [Type]) -> Type Ne
         .Option(inner) -> Type.Option{inner: jfmt_substitute_type(inner, params, args)}
         .Result(ok, err) -> Type.Result{ok: jfmt_substitute_type(ok, params, args), err: jfmt_substitute_type(err, params, args)}
         .Tuple(fields) -> {
-            out := [TypeTupleField]{}
+            ^out: [TypeTupleField]{}
             loop field in fields {
                 out.push(TypeTupleField{name: field.name, ty: jfmt_substitute_type(field.ty, params, args)})
             }
@@ -301,7 +301,7 @@ jfmt_substitute_type: fn(ty: Type, params: [TypeParam], args: [Type]) -> Type Ne
         // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: jfmt_substitute_type(inner, params, args)}
         .Union(members) -> {
-            out := [Type]{}
+            ^out: [Type]{}
             loop member in members -> out.push(jfmt_substitute_type(member, params, args))
             Type.Union{members: out}
         }
@@ -320,7 +320,7 @@ jfmt_push_shape: fn(shapes: ^[SerdeWireShape], shape: SerdeWireShape) Never! {
 
 // Dedup; an empty shape set is no fact.
 jfmt_finish_shapes: fn(shapes: [SerdeWireShape]) -> [SerdeWireShape]? Never! {
-    out := [SerdeWireShape]{}
+    ^out: [SerdeWireShape]{}
     loop shape in shapes -> jfmt_push_shape(out, shape)
     if out.len() == 0 -> return None
     Val(out)
@@ -328,7 +328,7 @@ jfmt_finish_shapes: fn(shapes: [SerdeWireShape]) -> [SerdeWireShape]? Never! {
 
 // `m_per_s` -> `MPerS`.
 jfmt_unit_type_name: fn(member: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop segment in member.split("_") {
         bytes: segment.bytes()
         if bytes.len() == 0 -> next
@@ -342,7 +342,7 @@ jfmt_unit_type_name: fn(member: String) -> String Never! {
 // `Decode` fact (base `Float`).
 jfmt_unit_family_decodes: fn(family: UnitFamilyDef, name: String) -> Bool? Never! {
     if family.family == "Time" && (family.resolved_owner ?? "") == "core.units" -> return None
-    affine := false
+    ^affine: false
     if family.base != None {
         loop member in family.members {
             if member.offset.numerator != 0 {
@@ -369,7 +369,7 @@ jfmt_member_name_prefix: fn(module_name: String) -> String Never! {
 
 jfmt_generated_path: fn(path: String) -> String Never! {
     hex: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in path.bytes() {
         code: Int{byte}
         if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) {
@@ -405,8 +405,8 @@ jfmt_hex_value: fn(code: Int) -> Int Never! {
 
 jfmt_decode_generated_suffix: fn(suffix: String) -> String? Never! {
     bytes: suffix.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) {
@@ -444,7 +444,7 @@ jfmt_decode_named_shapes: fn(items: [Item], name: String, args: [Type], seen: ^[
     }
     seen.push(name.copy())
     result: jfmt_decode_named_shapes_inner(items, name, args, seen)
-    kept := [String]{}
+    ^kept: [String]{}
     loop seen_name in seen {
         if seen_name != name -> kept.push(seen_name.copy())
     }
@@ -480,7 +480,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
                     if codable_tag_field(def.type_markers) != None {
                         return Val([SerdeWireShape]{SerdeWireShape.Object})
                     }
-                    shapes := [SerdeWireShape]{}
+                    ^shapes: [SerdeWireShape]{}
                     if !codable_untagged(def.type_markers) {
                         loop variant in def.variants {
                             if variant.payload == {
@@ -546,7 +546,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
 
 // The resolved decode wire shapes' `resolve`.
 jfmt_decode_shapes: fn(items: [Item], ty: Type, seen: ^[String]) -> [SerdeWireShape]? {
-    shapes := [SerdeWireShape]{}
+    ^shapes: [SerdeWireShape]{}
     if ty == {
         .Int | .IntN(_, _) | .InlineRange(_, _, _) -> {
             shapes.push(SerdeWireShape.Int)
@@ -583,9 +583,9 @@ jfmt_decode_shapes: fn(items: [Item], ty: Type, seen: ^[String]) -> [SerdeWireSh
 
 jfmt_has_ambiguous_decode_union: fn(items: [Item], ty: Type) -> Bool {
     if ty == .Union(members) {
-        seen := [SerdeWireShape]{}
+        ^seen: [SerdeWireShape]{}
         loop member in members {
-            visited := [String]{}
+            ^visited: [String]{}
             shapes: jfmt_decode_shapes(items, member, visited) ?? next
             loop shape in shapes {
                 loop prior in seen {
@@ -691,7 +691,7 @@ jfmt_write_verbatim: fn(f: ^JetFmt, start: Int, end: Int, newline: Bool) {
 // A verbatim item whose body holds `#X: value` lines: the text between
 // them is copied, and each line prints as the formatter prints marker lines.
 jfmt_write_verbatim_marker_lines: fn(f: ^JetFmt, start: Int, end: Int, markers: [Marker]) {
-    cursor := start
+    ^cursor: start
     loop marker in jfmt_inside_markers(markers) {
         if marker.span.start < cursor || marker.span.end > end -> next
         text: jfmt_src_text(f, cursor, marker.span.start)
@@ -907,7 +907,7 @@ jfmt_fmt_item_template_loop: fn(f: ^JetFmt, loop_item: ItemTemplateLoop) {
 // line written between two template lines stays, as it does between
 // statements.
 jfmt_fmt_derive_body_items: fn(f: ^JetFmt, body: [DeriveBodyItem]) {
-    previous_end := -1
+    ^previous_end: -1
     loop index in 0..<body.len() {
         body_item: body[index]
         if index > 0 && !f.at_line_start -> jfmt_newline(f)
@@ -996,7 +996,7 @@ jfmt_derive_body_item_end: fn(f: JetFmt, body_item: DeriveBodyItem) -> Int {
 // order while formatting. Each run of imports with no item between them prints
 // as one group (jfmt_fmt_import_groups).
 jfmt_fmt_module_body: fn(f: ^JetFmt, imports: [ImportDecl], items: [Item], markers: [Marker], span_end: Int) {
-    entries := [JetFmtMember]{}
+    ^entries: [JetFmtMember]{}
     loop index in 0..<imports.len() {
         entries.push(JetFmtMember{kind: JFMT_MEMBER_IMPORT, index: index, start: imports[index].span.start})
     }
@@ -1007,7 +1007,7 @@ jfmt_fmt_module_body: fn(f: ^JetFmt, imports: [ImportDecl], items: [Item], marke
         entries.push(JetFmtMember{kind: JFMT_MEMBER_ITEM, index: index, start: jfmt_item_span_start(f, items[index])})
     }
     sorted: jfmt_sort_members(entries)
-    position := 0
+    ^position: 0
     loop position < sorted.len() {
         entry: sorted[position]
         if position > 0 {
@@ -1021,7 +1021,7 @@ jfmt_fmt_module_body: fn(f: ^JetFmt, imports: [ImportDecl], items: [Item], marke
         }
         if {
             entry.kind == JFMT_MEMBER_IMPORT -> {
-                run := [ImportDecl]{}
+                ^run: [ImportDecl]{}
                 loop position < sorted.len() && sorted[position].kind == JFMT_MEMBER_IMPORT {
                     run.push(imports[sorted[position].index].copy())
                     position += 1
@@ -1102,8 +1102,8 @@ jfmt_fmt_generic_module: fn(f: ^JetFmt, generic: GenericModuleDef) {
     jfmt_write(f, generic.name)
     jfmt_write(f, ": module")
 
-    type_params := [GenericModuleParam]{}
-    value_params := [GenericModuleParam]{}
+    ^type_params: [GenericModuleParam]{}
+    ^value_params: [GenericModuleParam]{}
     loop param in generic.params {
         if param == {
             .Type(_, _, _) -> { type_params.push(param.copy()) }
@@ -1302,7 +1302,7 @@ jfmt_fmt_trait: fn(f: ^JetFmt, t: TraitDef) {
     // `Name: type` associated-type declarations live in `assoc_types`,
     // constants in `constants` and signatures in `methods`, so printing one
     // vector and then another moves a signature the author wrote before a row.
-    members := [JetFmtMember]{}
+    ^members: [JetFmtMember]{}
     loop index in 0..<t.assoc_types.len() {
         members.push(JetFmtMember{kind: JFMT_MEMBER_ASSOC_TYPE, index: index, start: t.assoc_types[index].span.start})
     }
@@ -1796,7 +1796,7 @@ jfmt_fmt_operator_head: fn(f: ^JetFmt, rhs: Type?, marker: OperatorMarker?, mark
 // constants and methods arrive in three vectors, so printing one vector and
 // then another moves a row the author wrote after a method.
 jfmt_fmt_impl_body: fn(f: ^JetFmt, assoc_types: [NamedType], constants: [ImplConstValue], methods: [Func], markers: [Marker]) {
-    members := [JetFmtMember]{}
+    ^members: [JetFmtMember]{}
     loop index in 0..<assoc_types.len() {
         members.push(JetFmtMember{kind: JFMT_MEMBER_ASSOC_TYPE, index: index, start: assoc_types[index].span.start})
     }
@@ -1825,9 +1825,7 @@ jfmt_fmt_impl_body: fn(f: ^JetFmt, assoc_types: [NamedType], constants: [ImplCon
                 jfmt_fmt_type(f, row.ty)
                 jfmt_write(f, ",")
             }
-            member.kind == JFMT_MEMBER_MARKER -> {
-                jfmt_fmt_marker_line(f, markers[member.index])
-            }
+            member.kind == JFMT_MEMBER_MARKER -> { jfmt_fmt_marker_line(f, markers[member.index]) }
             member.kind == JFMT_MEMBER_CONSTANT -> {
                 constant: constants[member.index]
                 jfmt_emit_leading_declaration(f, constant.span.start)
@@ -1912,7 +1910,7 @@ jfmt_fmt_func: fn(f: ^JetFmt, func: Func) {
     type_source: jfmt_source_list_span_after(f, func.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, func.type_params, type_source)
     jfmt_write(f, "(")
-    head_written := false
+    ^head_written: false
     if func.head_pattern == .Val(head) {
         if head == .Variant(variant, bindings, _, pattern_span) {
             head_written = true
@@ -2032,9 +2030,7 @@ jfmt_fmt_func: fn(f: ^JetFmt, func: Func) {
     // body written as fields.
     if func.body.len() == 1 && func.body[0] == .Expr(value) && jfmt_is_record_body(f, value) {
         jfmt_fmt_record_body(f, value)
-    } else {
-        jfmt_fmt_body(f, func.body)
-    }
+    } else { jfmt_fmt_body(f, func.body) }
     f.value_tail_at = saved_tail
     f.expected_return_type = saved_return_type
 }
@@ -2069,8 +2065,8 @@ JetFmtParamEntry: struct {
 // after the last positional-only parameter, `*` before the first label-only
 // one, so the printed form re-parses to the same zones.
 jfmt_fmt_param_list: fn(f: ^JetFmt, params: [Param], source: JetFmtSourceList?) {
-    entries := [JetFmtParamEntry]{}
-    star_done := false
+    ^entries: [JetFmtParamEntry]{}
+    ^star_done: false
     loop index in 0..<params.len() {
         param: params[index]
         if param.zone == ParamZone.LabelOnly && !star_done {
@@ -2217,7 +2213,7 @@ jfmt_fmt_view_source_union: fn(f: ^JetFmt, provenance: ViewProvenance, params: [
         if path.source == {
             .Receiver -> { jfmt_write(f, "self") }
             .Parameter(position) -> {
-                ordinary := [Param]{}
+                ^ordinary: [Param]{}
                 loop param in params {
                     if param.name != "self" -> ordinary.push(param.copy())
                 }
@@ -2249,7 +2245,7 @@ jfmt_fmt_view_source_union: fn(f: ^JetFmt, provenance: ViewProvenance, params: [
 jfmt_fmt_state_section: fn(f: ^JetFmt, state: StateDecl) {
     jfmt_emit_leading(f, state.span.start)
     jfmt_write(f, "state {{")
-    lines := state.groups.len() > 0
+    ^lines: state.groups.len() > 0
     loop arrow in state.arrows {
         if arrow.to.len() > 0 -> lines = true
     }
@@ -2273,8 +2269,8 @@ jfmt_fmt_state_section: fn(f: ^JetFmt, state: StateDecl) {
     }
     f.indent += 1
     // Entries and groups print in source order.
-    arrow_at := 0
-    group_at := 0
+    ^arrow_at: 0
+    ^group_at: 0
     loop arrow_at < state.arrows.len() || group_at < state.groups.len() {
         jfmt_newline(f)
         take_arrow: group_at >= state.groups.len() || (arrow_at < state.arrows.len() && state.arrows[arrow_at].span.start < state.groups[group_at].span.start)
@@ -2347,9 +2343,7 @@ jfmt_fmt_type_body_member: fn(f: ^JetFmt, member: JetFmtMember, body: JetFmtType
                 jfmt_fmt_body(f, body.validate_body)
             }
         }
-        member.kind == JFMT_MEMBER_MARKER -> {
-            jfmt_fmt_marker_line(f, body.markers[member.index])
-        }
+        member.kind == JFMT_MEMBER_MARKER -> { jfmt_fmt_marker_line(f, body.markers[member.index]) }
         member.kind == JFMT_MEMBER_MARKER_IMPL -> {
             declaration: body.marker ?? return
             jfmt_fmt_marker_impl(f, declaration, body.trait_impls, body.methods, member.start, body.marker_expand_span)
@@ -2369,14 +2363,14 @@ jfmt_fmt_type_body_member: fn(f: ^JetFmt, member: JetFmtMember, body: JetFmtType
 // the first, so the second comes from the block's generated `Marker` impl.
 jfmt_fmt_marker_impl: fn(f: ^JetFmt, declaration: MarkerDecl, impls: [TraitImplBlock], methods: [Func], start: Int, expand: Span?) {
     jfmt_emit_leading(f, start)
-    settings := [MarkerDeclParam]{}
+    ^settings: [MarkerDeclParam]{}
     loop param in declaration.params {
         if param.name.starts_with("$") && param.value != None -> settings.push(param.copy())
     }
     loop block in impls {
         if !block.compiler_generated || block.trait_name != "Marker" -> next
         loop constant in block.constants {
-            at := settings.len()
+            ^at: settings.len()
             loop index in 0..<settings.len() {
                 if settings[index].name_span.start >= constant.name_span.start {
                     at = index
@@ -2389,8 +2383,8 @@ jfmt_fmt_marker_impl: fn(f: ^JetFmt, declaration: MarkerDecl, impls: [TraitImplB
             settings.insert(at, MarkerDeclParam{name: "${constant.name}", name_span: constant.name_span, ty: None, value: Val(constant.value.copy()), variadic: false})
         }
     }
-    check := Int?{None}
-    row := Int?{None}
+    ^check: Int?{None}
+    ^row: Int?{None}
     loop (index, method) in methods {
         if method.marker_check && method.name == "check" -> check = Val(index)
         if method.marker_check && method.name == "row" -> row = Val(index)
@@ -2402,7 +2396,7 @@ jfmt_fmt_marker_impl: fn(f: ^JetFmt, declaration: MarkerDecl, impls: [TraitImplB
     jfmt_write(f, "impl Marker {{")
     jfmt_newline(f)
     f.indent += 1
-    rows := 0
+    ^rows: 0
     loop setting in settings {
         value: setting.value ?? next
         if rows > 0 -> jfmt_newline(f)
@@ -2568,7 +2562,7 @@ jfmt_fmt_struct: fn(f: ^JetFmt, s: StructDef) {
     jfmt_write(f, ": struct")
     type_source: jfmt_source_list_span_after(f, s.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, s.type_params, type_source)
-    members := [JetFmtMember]{}
+    ^members: [JetFmtMember]{}
     if s.state == .Val(state) {
         members.push(JetFmtMember{kind: JFMT_MEMBER_STATE, index: 0, start: state.span.start})
     }
@@ -2666,7 +2660,7 @@ jfmt_fmt_enum: fn(f: ^JetFmt, e: EnumDef) {
     jfmt_write(f, ": enum")
     type_source: jfmt_source_list_span_after(f, e.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, e.type_params, type_source)
-    inside_marker := false
+    ^inside_marker: false
     loop marker in e.type_markers {
         if marker.inside -> inside_marker = true
     }
@@ -2697,7 +2691,7 @@ jfmt_fmt_enum: fn(f: ^JetFmt, e: EnumDef) {
     }
     if {
         e.groups.len() == 0 -> {
-            previous := -1
+            ^previous: -1
             loop index in 0..<e.variants.len() {
                 if index > 0 -> jfmt_newline(f)
                 start: e.variants[index].name_span.start
@@ -2725,7 +2719,7 @@ jfmt_fmt_enum: fn(f: ^JetFmt, e: EnumDef) {
             jfmt_fmt_enum_entries(f, e, "", derives_decode, false)
         }
     }
-    members := [JetFmtMember]{}
+    ^members: [JetFmtMember]{}
     loop index in 0..<e.trait_impls.len() {
         members.push(JetFmtMember{kind: JFMT_MEMBER_TRAIT_IMPL, index: index, start: e.trait_impls[index].trait_span.start})
     }
@@ -2869,12 +2863,12 @@ jfmt_fmt_variant_name_and_payload: fn(f: ^JetFmt, v: Variant, name: String, deri
 }
 
 jfmt_enum_entries_at_prefix: fn(e: EnumDef, prefix: String) -> [JetFmtEnumEntry] Never! {
-    items := [JetFmtEnumEntry]{}
+    ^items: [JetFmtEnumEntry]{}
     loop group_index in 0..<e.groups.len() {
         g: e.groups[group_index]
         if !jfmt_is_direct_child_path(g.path, prefix) -> next
         group_prefix: "{g.path}."
-        order := 9223372036854775807
+        ^order: 9223372036854775807
         loop variant_index in 0..<e.variants.len() {
             if e.variants[variant_index].name.starts_with(group_prefix) {
                 order = variant_index
@@ -2888,11 +2882,11 @@ jfmt_enum_entries_at_prefix: fn(e: EnumDef, prefix: String) -> [JetFmtEnumEntry]
             items.push(JetFmtEnumEntry{is_group: false, index: variant_index, order: variant_index})
         }
     }
-    sorted := items
-    position_index := 1
+    ^sorted: items
+    ^position_index: 1
     loop position_index < sorted.len() {
         current: sorted[position_index].copy()
-        position := position_index
+        ^position: position_index
         loop position > 0 && current.order < sorted[position - 1].order {
             sorted[position] = sorted[position - 1]
             position -= 1
@@ -3027,7 +3021,7 @@ jfmt_fmt_const_name: fn(f: ^JetFmt, c: ConstDef) {
 // imports. Comments before the first import print above the group; the rest
 // stay beside their rows.
 jfmt_fmt_import_groups: fn(f: ^JetFmt, imports: [ImportDecl]) {
-    groups := [[ImportDecl]]{[ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}}
+    ^groups: [[ImportDecl]]{[ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}}
     loop import in jfmt_import_rows(imports) {
         slot: if {
             import.is_pub -> 2
@@ -3036,7 +3030,7 @@ jfmt_fmt_import_groups: fn(f: ^JetFmt, imports: [ImportDecl]) {
         }
         groups[slot].push(import)
     }
-    printed := false
+    ^printed: false
     loop slot in 0..<groups.len() {
         if groups[slot].len() == 0 -> next
         if printed {
@@ -3058,7 +3052,7 @@ jfmt_fmt_reexport_group: fn(f: ^JetFmt, imports: [ImportDecl]) {
         imp: imports[index]
         jfmt_emit_leading(f, imp.span.start)
         jfmt_write(f, "{imp.alias}: ")
-        written := ""
+        ^written: ""
         if imp.kind == {
             .Module(_, span) | .File(_, span) -> {
                 written = jfmt_src_text(f, span.start, span.end)
@@ -3075,13 +3069,13 @@ jfmt_fmt_reexport_group: fn(f: ^JetFmt, imports: [ImportDecl]) {
 // A renamed member leaves its member list for an `alias: owner.member` row
 // of its own (#6542); the list keeps the members that are not renamed.
 jfmt_import_rows: fn(imports: [ImportDecl]) -> [ImportDecl] Never! {
-    rows := [ImportDecl]{}
+    ^rows: [ImportDecl]{}
     loop import in imports {
         if import.kind == .Unqualified(module_alias, module_alias_span, items, items_span, span) {
-            plain := [ImportedItem]{}
-            item_spans := [Span]{}
-            local_spans := [Span]{}
-            renamed := [ImportDecl]{}
+            ^plain: [ImportedItem]{}
+            ^item_spans: [Span]{}
+            ^local_spans: [Span]{}
+            ^renamed: [ImportDecl]{}
             loop index in 0..<items.len() {
                 item: items[index]
                 item_span: if index < import.item_spans.len() -> import.item_spans[index] else -> items_span
@@ -3102,7 +3096,7 @@ jfmt_import_rows: fn(imports: [ImportDecl]) -> [ImportDecl] Never! {
                 next
             }
             if plain.len() > 0 {
-                row := import
+                ^row: import
                 row.kind = ImportKind.Unqualified{module_alias: module_alias, module_alias_span: module_alias_span, items: plain, items_span: items_span, span: span}
                 row.item_spans = item_spans
                 row.local_spans = local_spans
@@ -3228,7 +3222,7 @@ jfmt_fmt_field: fn(f: ^JetFmt, field: Field, derives_decode: Bool) {
             jfmt_write(f, "[")
             source: jfmt_source_marker_group_span(f, field.name_span.start)
             multiline: jfmt_comma_begin(f, count, source)
-            position := 0
+            ^position: 0
             loop marker in field.serde_markers {
                 jfmt_comma_before(f, position, multiline, marker.span.start)
                 jfmt_fmt_marker(f, marker)

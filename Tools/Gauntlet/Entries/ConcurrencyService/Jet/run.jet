@@ -14,7 +14,7 @@ worker: fn(receiver: Receiver<Int>, sender: Sender<Int>) {
 
 run_batch: fn(count: Int, jobs: Sender<Int>, results: Receiver<Int>) -> Int {
     loop value in 1..count -> jobs.send(value)
-    sum := 0
+    ^sum: 0
     loop _ in 0..<count -> sum += results.receive() ?? 0
     sum
 }
@@ -38,7 +38,7 @@ run: fn(args: Args) {
         <: worker1..worker4 :>: task worker(jobs_receiver.copy(), results_sender.copy())
         listener: net.tcp_listen("127.0.0.1:{args.port}")
         loop {
-            stream := listener.accept()
+            ^stream: listener.accept()
             command: "{stream.read(1024).trim()}"
             reply: response(command, jobs_sender.copy(), results_receiver.copy())
             stream.write("{reply}\n")

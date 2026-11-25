@@ -11,8 +11,8 @@ jettrace_validate_tasks: fn(value: CanonicalJSON, limit: Int) -> [U64:JetTraceTa
     if items.len() > limit {
         return Err(jettrace_error("content.tasks exceeds capture_policy.task_row_limit"))
     }
-    tasks := [U64:JetTraceTaskFact]{}
-    ids := [U64]{}
+    ^tasks: [U64:JetTraceTaskFact]{}
+    ^ids: [U64]{}
     loop index in 0..<items.len() {
         label: "content.tasks[{index}]"
         fields: jettrace_object_keys(items[index], label, [String]{"canceled", "id", "parent", "state", "symbol", "wait"})
@@ -35,15 +35,15 @@ jettrace_validate_tasks: fn(value: CanonicalJSON, limit: Int) -> [U64:JetTraceTa
     ids.sort()
     // Sorted root order fixes which diagnostic comes first. Three-color walks
     // memoize finished chains: no repeated traversal of every prior ancestor.
-    finished := [U64:Bool]{}
-    visiting := [U64:Bool]{}
+    ^finished: [U64:Bool]{}
+    ^visiting: [U64:Bool]{}
     loop id in ids {
         parent: tasks[id].parent
         if parent != (U64{0}) && !tasks.has_key(parent) {
             return Err(jettrace_error("content.tasks task {id} has missing parent {parent}"))
         }
-        chain := [U64]{}
-        current := id
+        ^chain: [U64]{}
+        ^current: id
         loop tasks.has_key(current) {
             if finished.has_key(current) -> break
             next_parent: tasks[current].parent
@@ -210,8 +210,8 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
     if items.len() > limit {
         return Err(jettrace_error("content.spans exceeds capture_policy.span_row_limit"))
     }
-    captured := 0
-    unavailable := 0
+    ^captured: 0
+    ^unavailable: 0
     loop index in 0..<items.len() {
         label: "content.spans[{index}]"
         fields: jettrace_object_keys(items[index], label, [String]{"awaited_task_id", "channel_id", "clock", "end_ns", "kind", "local_address", "parent_task_id", "peer_address", "reason", "spawn_line", "start_ns", "status", "symbol", "task_id", "wait_stack", "waker", "waker_line", "waker_task_id"})
@@ -262,9 +262,7 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
                     return Err(jettrace_error("{label}.spawn_line must be a line, from 1"))
                 }
             }
-            if channel != CanonicalJSON.Null {
-                _ := jettrace_unsigned(channel, "{label}.channel_id")
-            }
+            if channel != CanonicalJSON.Null -> ^_: jettrace_unsigned(channel, "{label}.channel_id")
             jettrace_validate_stack(stack, "{label}.wait_stack")
             if {
                 waker == "task" -> {

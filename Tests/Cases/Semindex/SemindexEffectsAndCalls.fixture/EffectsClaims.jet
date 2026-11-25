@@ -32,13 +32,13 @@ s5f_index: fn(path: String) -> Dyn {
 
 s5f_original_effect_assertions: fn() {
     index: s5f_index("effects.json")
-    report_found := false
+    ^report_found: false
     loop definition in s5f_array(s5f_member(index, "definitions")) {
         if s5f_text(s5f_member(definition, "leaf_name")) == "report" -> report_found = true
     }
     assert(report_found, "original report lookup absent")
     assert(!s5f_array(s5f_member(index, "calls")).is_empty(), "original call edges empty")
-    effects_found := false
+    ^effects_found: false
     loop row in s5f_array(s5f_member(index, "effects")) {
         if !effects_found && s5f_text(s5f_member(row, "function")) == "report" {
             effects_found = true

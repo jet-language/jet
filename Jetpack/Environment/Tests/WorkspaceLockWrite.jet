@@ -30,7 +30,7 @@ env_wlock_test_index: fn(root: String) -[FS]> String {
 }
 
 env_wlock_test_plan: fn(members: [WorkspacePlanMember]) -> WorkspacePlan {
-    plan := WorkspacePlan.empty()
+    ^plan: WorkspacePlan.empty()
     plan.members = members
     plan
 }
@@ -40,7 +40,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("workspace lock round trips an empty plan") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("empty")
     env_wlock_test_index(root)
     env_workspace_lock_write(cache, root, WorkspacePlan.empty()) ?? panic("write the empty workspace lock")
@@ -51,7 +51,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("workspace lock round trips members") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("members")
     env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
@@ -68,7 +68,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("package root members round trip through one lock") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("package-root")
     files.create_dir_all(files.join(root, "packages/hello")) ?? panic("member dir")
     files.write(files.join(root, PACKAGE_FILE), "name: \"root\"\nmembers: [\"packages/hello\"]\n") ?? panic("root manifest")
@@ -87,7 +87,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("a single package has no workspace membership") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("root-member")
     files.write(files.join(root, PACKAGE_FILE), "name: \"root\"\n") ?? panic("root manifest")
     env_workspace_lock_write(cache, root, WorkspacePlan.empty()) ?? panic("write the single Package lock")
@@ -97,7 +97,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("workspace lock load reads members from the unified lock") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("parse")
     files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
     source_digest: env_wlock_test_index(root)
@@ -125,11 +125,11 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("comptime inputs round trip through the lock") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("ct")
     env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
-    plan := env_wlock_test_plan([WorkspacePlanMember]{env_wlock_test_member("hello", "packages/hello")})
+    ^plan: env_wlock_test_plan([WorkspacePlanMember]{env_wlock_test_member("hello", "packages/hello")})
     plan.comptime_inputs = [ComptimeInput]{ComptimeInput{path: "assets/index.json", hash: "sha256-deadbeef"}}
     env_workspace_lock_write(cache, root, plan) ?? panic("write comptime inputs")
     raw: env_wlock_test_lock_text(root)
@@ -146,7 +146,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("lock load revalidates member manifest and flat membership") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("member-validation")
     env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
@@ -161,7 +161,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("lock load rejects a workspace digest when the source is missing") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("missing-source")
     files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
     files.write(files.join(root, UNIFIED_LOCK_FILE), "version = 1\nworkspace_source_digest = \"sha256-stale\"\n") ?? panic("stale lock")
@@ -170,7 +170,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("workspace lock write preserves existing package entries") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("preserve")
     files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
     receipt: "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -189,7 +189,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 }
 
 #Test("workspace lock write rejects a malformed existing lock without overwriting it") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: env_wlock_test_dir("malformed")
     files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
     lock_path: files.join(root, UNIFIED_LOCK_FILE)
@@ -208,11 +208,11 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 #Test("workspace policy refuses force pins and build grants before any lock write") {
     loop key in ([PolicyKey]{PolicyKey.ForcePin, PolicyKey.DependencyGrant}) {
         root: env_wlock_test_dir("gate-forbidden")
-        cache := WorkspaceDeclarationCache.new()
+        ^cache: WorkspaceDeclarationCache.new()
         name: policy_key_name(key)
         files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ {name}: .Forbid }}\n") ?? panic("gate policy")
-        plan := WorkspacePlan.empty()
-        site := "workspace.jet build grant app"
+        ^plan: WorkspacePlan.empty()
+        ^site: "workspace.jet build grant app"
         if key == PolicyKey.ForcePin {
             plan.overlay_policy = pkg_parse_workspace_policy("workspace: module {{ overlay audit {{ package(\"app\").version: Force(\"2\") }} }}\n") ?? panic("force overlay")
             site = "workspace.jet overlay audit package app .Force"
@@ -244,9 +244,9 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
 
 #Test("workspace GateOnly permits forced overlays and nonempty dependency grants") {
     root: env_wlock_test_dir("gate-allowed")
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\npolicy: {{ force_pin: .GateOnly, dependency_grant: .GateOnly }}\n") ?? panic("gate policy")
-    plan := WorkspacePlan.empty()
+    ^plan: WorkspacePlan.empty()
     plan.overlay_policy = pkg_parse_workspace_policy("workspace: module {{ overlay audit {{ package(\"app\").version: Force(\"2\") }} }}\n") ?? panic("force overlay")
     plan.overlay_policy.build_grants.push(BuildGrant{subject: "app", effects: [String]{"Exec"}})
     env_workspace_lock_write(cache, root, plan) ?? panic("workspace gates permitted")

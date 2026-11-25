@@ -24,8 +24,10 @@ use core.[files, process, sys]
 // The checkout holding the running program: the nearest directory above it
 // that holds the table.
 checkout: fn() -[Env, FS]> String {
-    dir := files.dirname(files.absolute(sys.executable()) ?? sys.executable())
-    loop dir != "/" && dir != "" && !files.exists("{dir}/Tools/Agent/roots.env") -> dir = files.dirname(dir)
+    ^dir: files.dirname(files.absolute(sys.executable()) ?? sys.executable())
+    loop dir != "/" && dir != "" && !files.exists("{dir}/Tools/Agent/roots.env") {
+        dir = files.dirname(dir)
+    }
     dir
 }
 
@@ -41,9 +43,7 @@ all: fn() -[Env, FS]> [String:String] IOError! {
 }
 
 // The root `name` names: None when it is not a root.
-root: fn(name: String) -[Env, FS]> String? IOError! {
-    all().get(name)
-}
+root: fn(name: String) -[Env, FS]> String? IOError! { all().get(name) }
 
 // The root `name` names, for a tool that keeps going: when the env file is
 // refused, the environment alone stands in for it, and "" is no root.

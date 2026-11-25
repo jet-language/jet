@@ -94,7 +94,7 @@ run: fn(args: LiveArgs) Failure! {
     check(args.port > 0, "usage: SourceMapLive.jet --port <port> [--prefix /click]")
     origin: "http://127.0.0.1:{args.port}"
     script: served(origin, "{args.prefix}/app.js")
-    named := false
+    ^named: false
     loop line in script.split("\n").to_list() {
         if SOURCE_MAPPING_URL.is_match(line) -> named = true
     }
@@ -113,7 +113,7 @@ run: fn(args: LiveArgs) Failure! {
 
     mappings: decode_mappings(map.mappings)
     check(mappings.len() > 0, "app.js.map has no mappings")
-    hit := mappings[0].copy()
+    ^hit: mappings[0].copy()
     loop mapping in mappings {
         lines: texts.get(mapping.source) ?? next
         line: lines.get(mapping.original_line) ?? next
@@ -166,7 +166,7 @@ pause_in: fn(session: Browser, origin: String, prefix: String, mappings: [Mappin
     send(cdp, "Page.navigate", json.stringify(Navigation{url: "{origin}{prefix}/"}))
 
     map_hash: browser.fact_hash("app.js.map")
-    named := false
+    ^named: false
     loop {
         event: cdp.next_event(timeout) ?? return Err(Failure{message: "the page did not pause at app.js:{hit.generated_line + 1}:{hit.generated_column} within {C_PAUSE_MS} ms: {err}"})
         if event.kind() == "Debugger.scriptParsed" && event.source_map_url_hash() == map_hash {
@@ -178,7 +178,7 @@ pause_in: fn(session: Browser, origin: String, prefix: String, mappings: [Mappin
         send(cdp, "Debugger.resume", "{{}}")
         // The mapping that covers the paused position: the last one on its
         // line that starts at or before its column.
-        at := Mapping?{None}
+        ^at: Mapping?{None}
         loop mapping in mappings {
             if mapping.generated_line == line && mapping.generated_column <= column {
                 at = Val(mapping.copy())
@@ -198,13 +198,13 @@ send: fn(cdp: BrowserProtocol, method: String, params: String) Failure! {
 
 // The segments of a version 3 `mappings` string that name a source.
 decode_mappings: fn(mappings: String) -> [Mapping] Failure! {
-    out := [Mapping]{}
-    generated_line := 0
-    source := 0
-    original_line := 0
-    original_column := 0
+    ^out: [Mapping]{}
+    ^generated_line: 0
+    ^source: 0
+    ^original_line: 0
+    ^original_column: 0
     loop line in mappings.split(";").to_list() {
-        generated_column := 0
+        ^generated_column: 0
         loop segment in line.split(",").to_list() {
             if segment == "" -> next
             values: decode_vlq(segment)
@@ -223,9 +223,9 @@ decode_mappings: fn(mappings: String) -> [Mapping] Failure! {
 
 // The signed base64 VLQ values of one segment.
 decode_vlq: fn(segment: String) -> [Int] Failure! {
-    values := [Int]{}
-    result := 0
-    shift := 0
+    ^values: [Int]{}
+    ^result: 0
+    ^shift: 0
     loop (index, byte) in segment.bytes() {
         code: Int{byte}
         digit: if {

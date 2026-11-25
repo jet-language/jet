@@ -5,7 +5,7 @@
 // 1 to N, each once, whatever order the calls ran in.
 
 make_counter: fn() -> fn(Int) -> Int {
-    seen := [Int]{}
+    ^seen: [Int]{}
     fn(value: Int) -> Int {
         seen.push(value)
         seen.len()
@@ -14,7 +14,7 @@ make_counter: fn() -> fn(Int) -> Int {
 
 // The sum of the counts `counter` answers over `rounds` calls.
 hammer: fn(counter: fn(Int) -> Int, rounds: Int) -> Int {
-    total := 0
+    ^total: 0
     loop turn in 0..<rounds -> total += counter(turn)
     total
 }
@@ -22,7 +22,7 @@ hammer: fn(counter: fn(Int) -> Int, rounds: Int) -> Int {
 // Two children share a lambda the caller passes, which writes the caller's
 // own local through its capture.
 tally: fn(step: fn(Int) -> Int, rounds: Int) -> Int {
-    total := 0
+    ^total: 0
     task.group group {
         first: task hammer(step, rounds)
         second: task hammer(step, rounds)
@@ -34,7 +34,7 @@ tally: fn(step: fn(Int) -> Int, rounds: Int) -> Int {
 run: fn() {
     rounds: 2000
     counter: make_counter()
-    total := 0
+    ^total: 0
     task.group group {
         first: task hammer(counter, rounds)
         second: task hammer(counter, rounds)
@@ -43,7 +43,7 @@ run: fn() {
     }
     print(total)
     print(counter(-1))
-    count := 0
+    ^count: 0
     print(
         tally(
             fn(value: Int) -> Int {

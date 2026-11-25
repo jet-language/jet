@@ -124,7 +124,7 @@ publication_sign_bytes: fn(seed: [U8], content_hash: String) -> String Publicati
 }
 
 publication_sign: fn(seed_path: String, content_hash: String) -[FS, Env]> String PublicationDiagnosticError! {
-    held := if foundation_open_file_authority(files.dirname(seed_path), files.basename(seed_path)) == {
+    ^held: if foundation_open_file_authority(files.dirname(seed_path), files.basename(seed_path)) == {
         .Ok(source) -> source
         .Err(error) -> {
             return Err(publication_sign_io_error("signing key", "{error}"))
@@ -161,7 +161,7 @@ publication_verify: fn(public_key_hex: String, content_hash: String, signature_b
     key_bytes: publication_sign_hex_decode(public_key_hex) ?? return Ok(false)
     key: crypto.VerifyKey.from_bytes(key_bytes) ?? return Ok(false)
     signature: crypto.Signature.from_bytes(signature_bytes) ?? return Ok(false)
-    verified := false
+    ^verified: false
     #Unsafe("package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process") {
         verified = publication_sign_expert.ed25519_verify_strict(key.bytes, content_hash.bytes(), signature.bytes) ?? false
     }

@@ -94,7 +94,7 @@ jet_driver_compiler_queries_set_document: fn(queries: ^JetDriverCompilerQueries,
 
 // Each document the session was given, ordered by path.
 jet_driver_compiler_queries_documents: fn(queries: JetDriverCompilerQueries) -> [JetDriverSourceDocument] Never! {
-    documents := [JetDriverSourceDocument]{}
+    ^documents: [JetDriverSourceDocument]{}
     loop (path, source) in queries.documents {
         documents.push(JetDriverSourceDocument{path: path, source: source})
     }
@@ -118,7 +118,7 @@ jet_driver_compiler_check_failure: fn(load: JetDriverLoadResult, stage: JetDrive
 }
 
 jet_driver_compiler_check_package_policies: fn(load: JetDriverLoadResult) -> [SemaRegistrationPackagePolicy] Never! {
-    policies := [SemaRegistrationPackagePolicy]{}
+    ^policies: [SemaRegistrationPackagePolicy]{}
     loop package in load.packages {
         policies.push(
             SemaRegistrationPackagePolicy{
@@ -136,7 +136,7 @@ jet_driver_compiler_check_package_policies: fn(load: JetDriverLoadResult) -> [Se
 }
 
 jet_driver_compiler_check_source_bytes: fn(load: JetDriverLoadResult, path: String) -> String? {
-    found := String?{None}
+    ^found: String?{None}
     loop file in load.source_files {
         if file.path != path -> next
         if found != None -> return None
@@ -148,7 +148,7 @@ jet_driver_compiler_check_source_bytes: fn(load: JetDriverLoadResult, path: Stri
 // The loaded text of the entry module's source unit; None unless exactly one
 // loaded module is the entry and its unit has exactly one loaded text.
 jet_driver_compiler_check_entry_source: fn(load: JetDriverLoadResult) -> String? {
-    found := String?{None}
+    ^found: String?{None}
     loop loaded_module in load.modules {
         if loaded_module.module_identity != load.entry_module_identity -> next
         if found != None -> return None
@@ -163,7 +163,7 @@ jet_driver_compiler_check_entry_source: fn(load: JetDriverLoadResult) -> String?
 // Path -> position of its first loaded source text, built once per compile so
 // each module reads its text without rescanning the file list.
 jet_driver_source_file_positions: fn(files: [SourceFile]) -> [String:Int] Never! {
-    positions := [String:Int]{}
+    ^positions: [String:Int]{}
     loop (index, file) in files {
         if positions.get(file.path) == None -> positions[file.path] = index
     }
@@ -178,13 +178,13 @@ jet_driver_source_text_at: fn(files: [SourceFile], positions: [String:Int], path
 }
 
 jet_driver_compiler_check_module_sources: fn(load: JetDriverLoadResult, canonical: SemaRegistrationModuleInput, canonical_source: String, parsed: JetCompilerServicesParseFacts) -> [SemaCompilerModuleSource]? {
-    rows := [SemaCompilerModuleSource]{}
+    ^rows: [SemaCompilerModuleSource]{}
     loop loaded_module in load.modules {
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
             return None
         }
-        unit := load.source_units[loaded_module.source_unit_index]
-        source := jet_driver_compiler_check_source_bytes(load, unit.path) ?? return None
+        ^unit: load.source_units[loaded_module.source_unit_index]
+        ^source: jet_driver_compiler_check_source_bytes(load, unit.path) ?? return None
         if loaded_module.module_identity == load.entry_module_identity {
             if source != parsed.source -> return None
             if parsed.compiler_source.len() > 0 {
@@ -192,7 +192,7 @@ jet_driver_compiler_check_module_sources: fn(load: JetDriverLoadResult, canonica
                 source = parsed.compiler_source
             }
         }
-        duplicate := false
+        ^duplicate: false
         loop existing in rows {
             if existing.module_identity == loaded_module.module_identity -> duplicate = true
         }
@@ -208,7 +208,7 @@ jet_driver_compiler_check_module_sources: fn(load: JetDriverLoadResult, canonica
 
 jet_driver_compiler_check_result: fn(input: JetDriverCompilerCheckInput, registration: ^^SemaRegistrationGraph, graph: ^^SemaGraphResult, module_sources: [SemaCompilerModuleSource], diagnostics: [Diagnostic]) -> JetDriverCompilerCheckResult {
     graph_complete: graph.complete
-    checked := jet_eval_compiler_services_checked(
+    ^checked: jet_eval_compiler_services_checked(
         JetCompilerServicesCheckedInput{
             parsed: input.parsed,
             registration: registration.move(),
@@ -218,7 +218,7 @@ jet_driver_compiler_check_result: fn(input: JetDriverCompilerCheckInput, registr
             entry_path: input.entry_path,
         },
     )
-    complete := graph_complete && checked.semantic_index_complete
+    ^complete: graph_complete && checked.semantic_index_complete
     JetDriverCompilerCheckResult{product: .CheckedCompilerValue{checked: checked}, diagnostics: diagnostics, failed_stage: None, complete: complete, internal_problem: None}
 }
 
@@ -245,19 +245,19 @@ jet_driver_compiler_check_parse_only: fn(load: JetDriverLoadResult) -> Bool Neve
 }
 
 jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCompilerCheckResult {
-    load := jet_driver_load(input.request)
+    ^load: jet_driver_load(input.request)
     if load.internal_problem == .Val(internal) {
         return jet_driver_compiler_check_failure(load, JetDriverStage.Parse, Val(internal))
     }
-    parse_only := jet_driver_compiler_check_parse_only(load)
+    ^parse_only: jet_driver_compiler_check_parse_only(load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only {
         return jet_driver_compiler_check_failure(load, load.failed_stage ?? JetDriverStage.Load, None)
     }
-    canonical_option := jet_driver_canonical_effect_module(input.request.canonical_effects, load.module_table)
+    ^canonical_option: jet_driver_canonical_effect_module(input.request.canonical_effects, load.module_table)
     if canonical_option == None {
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the embedded compiler-owned Prelude effect source is invalid"))
     }
-    canonical := canonical_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the embedded compiler-owned Prelude effect source is unavailable"))
+    ^canonical: canonical_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the embedded compiler-owned Prelude effect source is unavailable"))
     canonical_text: module_text(load.module_table, canonical.module_identity)
     loop unit in load.source_units {
         if jet_driver_module_identity(unit.package_identity, unit.relative_path) == canonical_text || unit.path == canonical.source_file {
@@ -265,7 +265,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         }
     }
     load.generated_source_files.push(SourceFile{id: source_file_id(canonical.source_file), path: canonical.source_file, source: input.request.canonical_effects.source})
-    providers := jet_driver_assemble_foreign_providers(input.request.authorized_sources, load)
+    ^providers: jet_driver_assemble_foreign_providers(input.request.authorized_sources, load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only {
         return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     }
@@ -275,7 +275,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     if !jet_driver_retain_prelude_modules(load) {
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
-    module_sources := [SemaCompilerModuleSource]{}
+    ^module_sources: [SemaCompilerModuleSource]{}
     if {
         input.retain_projection -> {
             // Retained products use the canonical registration/Doc ownership
@@ -298,7 +298,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         loop diagnostic in setting_refusals -> load.diagnostics.push(diagnostic)
         return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     }
-    target_option := jet_driver_selected_target_machine(input.request, load.diagnostics)
+    ^target_option: jet_driver_selected_target_machine(input.request, load.diagnostics)
     if target_option == None {
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
@@ -306,9 +306,9 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     // A script's functions take the script variables they name, as a build's
     // do, so the query's facts show the same parameters.
     jet_driver_script_helpers(input.request, load, providers, target)
-    registration_inputs_option := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, load.diagnostics, input.request.core_sources, false)
-    registration_inputs := registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
-    canonical_identity := canonical.module_identity
+    ^registration_inputs_option: jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, load.diagnostics, input.request.core_sources, false)
+    ^registration_inputs: registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
+    ^canonical_identity: canonical.module_identity
     registration_inputs.push(canonical)
     loop index in 0..<registration_inputs.len() {
         if registration_inputs[index].module_identity == load.entry_module_identity {
@@ -318,7 +318,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     }
     registration_count: registration_inputs.len()
     plugin_facts: jet_driver_plugin_facts(input.request, registration_inputs, load.package_identity)
-    registration := sema_registration_prepare_graph(
+    ^registration: sema_registration_prepare_graph(
         registration_inputs,
         load.imports,
         load.package_identity,
@@ -355,20 +355,20 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     // A registration error or an incomplete module stops the check here; any
     // other declaration error goes on, and the bodies are checked too (Pipeline.jet).
     registration_errors: jet_driver_has_errors(registration.diagnostics)
-    stage := sema_collect_comptime_declarations(registration, jet_driver_compiler_check_package_policies(load), input.request.compiler_threads, input.request.trace_sink)
-    declared_registration := stage.graph.move()
+    ^stage: sema_collect_comptime_declarations(registration, jet_driver_compiler_check_package_policies(load), input.request.compiler_threads, input.request.trace_sink)
+    ^declared_registration: stage.graph.move()
     stage.graph = None
     registration = declared_registration.move() ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the declaration pass lost its registration graph"))
     if !stage.complete || stage.modules.len() != registration_count || registration_errors {
         jet_driver_comptime_diagnostics_add(load.diagnostics, stage.diagnostics)
         if stage.modules.len() == registration_count {
-            trail := sema_graph_trail_init()
+            ^trail: sema_graph_trail_init()
             provisional_run: sema_finalize_graph(registration, trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, input.request.eval_config.host_hooks, input.request.compiler_threads, true, input.request.trace_sink)
             registration = provisional_run.graph.move()
             provisional: provisional_run.result.move()
             sema_graph_trail_undo(registration, trail)
             jet_driver_comptime_diagnostics_add(load.diagnostics, provisional.diagnostics)
-            packet := jet_driver_compiler_check_diagnostic_packet(input, registration, provisional, module_sources, load.diagnostics)
+            ^packet: jet_driver_compiler_check_diagnostic_packet(input, registration, provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
         if !jet_driver_has_errors(load.diagnostics) {
@@ -378,16 +378,16 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     }
     // Body/comptime stage callees read the complete load while appending
     // diagnostics, so this existing stage boundary travels beside the load.
-    stage_diagnostics := load.diagnostics
+    ^stage_diagnostics: load.diagnostics
     load.diagnostics = [Diagnostic]{}
     // The run owns this same graph and hands it back on every exit.
-    declared_modules := stage.modules.move()
+    ^declared_modules: stage.modules.move()
     stage.modules = [SemaGraphModuleResult]{}
-    declared_facts := stage.graph_facts.move()
+    ^declared_facts: stage.graph_facts.move()
     stage.graph_facts = None
-    memory_plan := [SemaFunctionMemoryPlan]{}
+    ^memory_plan: [SemaFunctionMemoryPlan]{}
     jet_driver_comptime_core_first(stage.sources)
-    run := jet_driver_run_comptime(
+    ^run: jet_driver_run_comptime(
         registration,
         declared_modules,
         declared_facts,
@@ -400,9 +400,9 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     )
     jet_driver_comptime_return_declared(stage, run)
     load.diagnostics = stage_diagnostics
-    finished_registration := run.graph.move()
+    ^finished_registration: run.graph.move()
     run.graph = None
-    partial_registration := run.partial_graph.move()
+    ^partial_registration: run.partial_graph.move()
     run.partial_graph = None
     registration = jet_driver_comptime_take_registration(finished_registration, partial_registration)
     // The stage's reports reach the result through finalization; a run that
@@ -420,14 +420,14 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
             provisional: provisional_run.result.move()
             sema_graph_trail_undo(registration, run.trail)
             jet_driver_comptime_diagnostics_add(load.diagnostics, provisional.diagnostics)
-            packet := jet_driver_compiler_check_diagnostic_packet(input, registration, provisional, module_sources, load.diagnostics)
+            ^packet: jet_driver_compiler_check_diagnostic_packet(input, registration, provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
         return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, run.internal_problem)
     }
     finalized: sema_finalize_graph(registration, run.trail, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, true, input.request.trace_sink)
     registration = finalized.graph.move()
-    graph := finalized.result.move()
+    ^graph: finalized.result.move()
     sema_graph_trail_undo(registration, run.trail)
     if graph.modules.len() != registration_count {
         jet_driver_comptime_diagnostics_add(load.diagnostics, graph.diagnostics)
@@ -438,7 +438,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     loop diagnostic in schema_check.diagnostics -> load.diagnostics.push(diagnostic)
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
-    body_run := jet_driver_orchestrate_comptime_bodies(
+    ^body_run: jet_driver_orchestrate_comptime_bodies(
         registration,
         stage,
         graph,
@@ -450,7 +450,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         stage_diagnostics,
     )
     load.diagnostics = stage_diagnostics
-    returned_registration := body_run.registration.move()
+    ^returned_registration: body_run.registration.move()
     body_run.registration = None
     registration = returned_registration.move() ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, Val("comptime body rechecking lost the registration graph"))
     if body_run.soft_stop {
@@ -458,7 +458,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     }
     if !body_run.complete {
         if body_run.internal_problem == None {
-            packet := jet_driver_compiler_check_diagnostic_packet(input, registration, body_run.graph.move(), module_sources, load.diagnostics)
+            ^packet: jet_driver_compiler_check_diagnostic_packet(input, registration, body_run.graph.move(), module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, body_run.internal_problem)
@@ -466,7 +466,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     graph = body_run.graph.move()
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
-    validation := jet_driver_validate_checked_text(
+    ^validation: jet_driver_validate_checked_text(
         registration,
         stage,
         graph,
@@ -478,7 +478,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         stage_diagnostics,
     )
     load.diagnostics = stage_diagnostics
-    validated_registration := validation.registration.move()
+    ^validated_registration: validation.registration.move()
     validation.registration = None
     registration = validated_registration.move() ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, Val("checked text validation lost the registration graph"))
     if validation.soft_stop {
@@ -486,7 +486,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     }
     if !validation.complete {
         if validation.internal_problem == None {
-            packet := jet_driver_compiler_check_diagnostic_packet(input, registration, validation.graph.move(), module_sources, load.diagnostics)
+            ^packet: jet_driver_compiler_check_diagnostic_packet(input, registration, validation.graph.move(), module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
         return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, validation.internal_problem)
@@ -494,8 +494,8 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     graph = validation.graph.move()
     if input.retain_projection {
         schema_ingress: schema_check.ingress ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the retained compiler query lost its actual schema input"))
-        resolved_registration := sema_comptime_graph_with_values(registration, validation.values)
-        projection := jet_driver_project_completed_check(input.request, load, resolved_registration, graph, validation.values, canonical_identity, schema_ingress, validation.trace)
+        ^resolved_registration: sema_comptime_graph_with_values(registration, validation.values)
+        ^projection: jet_driver_project_completed_check(input.request, load, resolved_registration, graph, validation.values, canonical_identity, schema_ingress, validation.trace)
         diagnostics: projection.compile.diagnostics
         failed_stage: projection.compile.failed_stage
         complete: projection.compile.complete

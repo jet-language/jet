@@ -11,7 +11,7 @@ use {
 cli_rust_foreign_test_plan: fn(name: String) -> JetDriverRustForeignPlan {
     parsed: parse_source("extern rust \"base64@0.22\" {{\n    {name}: fn(s: String) -> String = \"base64::encode\"\n}}\n".bytes())
     assert(parsed.diagnostics.len() == 0, "the extern rust block parses: {parsed.diagnostics:Debug}")
-    entries := [JetDriverRustForeignEntry]{}
+    ^entries: [JetDriverRustForeignEntry]{}
     loop item in parsed.program.items {
         if item == .ExternRust(block) {
             loop declaration in block.functions {
@@ -106,7 +106,7 @@ cli_rust_foreign_test_metadata: fn(plan: JetDriverRustForeignPlan) {
 cli_rust_foreign_test_environment: fn() {
     loop metadata in ([Bool]{true, false}) {
         args: jet_cli_rust_foreign_bwrap("bwrap", "/fixture/source", "/fixture/output", "", true, metadata) ?? panic("helper sandbox arguments: {err}")
-        offline := String?{None}
+        ^offline: String?{None}
         loop index in 0..<args.len() {
             if args[index] == "--setenv" && index + 2 < args.len() && args[index + 1] == "CARGO_NET_OFFLINE" {
                 assert(offline == None)

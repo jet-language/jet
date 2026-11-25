@@ -76,8 +76,8 @@ PackageProfilePlan: struct {
     // Seal the plan: its canonical length-prefixed identity and the per-ref
     // provider facts index.
     finalize: fn(^^self) -> PackageProfilePlan Never! {
-        updated := self
-        lines := [String]{"jet-package-profile-plan-v1\n"}
+        ^updated: self
+        ^lines: [String]{"jet-package-profile-plan-v1\n"}
         lines.push(envmodel_fingerprint_line("name", updated.name))
         loop value in updated.selected_profiles {
             lines.push(envmodel_fingerprint_line("selected", value))
@@ -101,7 +101,7 @@ PackageProfilePlan: struct {
             lines.push(envmodel_fingerprint_line("collision.provider", updated.collisions[path]))
         }
         updated.fingerprint = "sha256-{pkg_sha256_hex(lines.join("").bytes())}"
-        facts := [String:ProviderFacts]{}
+        ^facts: [String:ProviderFacts]{}
         loop package in updated.packages -> facts[package.raw] = package.provider_facts
         updated.provider_facts = facts
         updated
@@ -157,7 +157,7 @@ PackageProfileSet: struct {
             if existing.extends != profile.extends || existing.packages != profile.packages || existing.collisions != profile.collisions {
                 return Err(PackageProfileError.Conflict(profile.name))
             }
-            merged := existing
+            ^merged: existing
             loop source in profile.sources {
                 if !merged.sources.contains(source) -> merged.sources.push(source.copy())
             }
@@ -177,8 +177,8 @@ PackageProfileSet: struct {
     // Parent-first, iterative depth-first composition. Iteration keeps the
     // full resolver budget within a bounded native stack.
     resolve_many: fn(self, names: [String]) -> ResolvedPackageProfile PackageProfileError! {
-        selected := [String]{}
-        selected_seen := [String:Bool]{}
+        ^selected: [String]{}
+        ^selected_seen: [String:Bool]{}
         loop name in names {
             if selected_seen.get(name) == None {
                 selected_seen[name] = true
@@ -188,14 +188,14 @@ PackageProfileSet: struct {
                 selected.push(name.copy())
             }
         }
-        resolved := ResolvedPackageProfile{name: selected.join("+"), selected_profiles: selected}
-        state := [String:Int]{}
-        stack := [String]{}
-        frame_names := [String]{}
-        frame_next := [Int]{}
-        source_seen := [String:Bool]{}
-        declared_by_seen := [String:Bool]{}
-        package_indices := [String:Int]{}
+        ^resolved: ResolvedPackageProfile{name: selected.join("+"), selected_profiles: selected}
+        ^state: [String:Int]{}
+        ^stack: [String]{}
+        ^frame_names: [String]{}
+        ^frame_next: [Int]{}
+        ^source_seen: [String:Bool]{}
+        ^declared_by_seen: [String:Bool]{}
+        ^package_indices: [String:Int]{}
         loop name in selected {
             if (state.get(name) ?? 0) == ENVMODEL_PROFILE_FINISHED -> next
             frame_names.push(name)
@@ -217,9 +217,9 @@ PackageProfileSet: struct {
                 parent_index: frame_next[top].copy()
                 frame_next[top] = parent_index + 1
                 if parent_index >= profile.extends.len() {
-                    _ := frame_names.pop()
-                    _ := frame_next.pop()
-                    _ := stack.pop()
+                    ^_: frame_names.pop()
+                    ^_: frame_next.pop()
+                    ^_: stack.pop()
                     state[current] = ENVMODEL_PROFILE_FINISHED
                     resolved.applied.push(current.copy())
                     loop source in profile.sources {
@@ -273,8 +273,8 @@ PackageProfileSet: struct {
                 parent_state: state.get(parent) ?? 0
                 if parent_state == {
                     ENVMODEL_PROFILE_ENTERED -> {
-                        cycle := [String]{}
-                        started := false
+                        ^cycle: [String]{}
+                        ^started: false
                         loop item in stack {
                             if item == parent -> started = true
                             if started -> cycle.push(item)

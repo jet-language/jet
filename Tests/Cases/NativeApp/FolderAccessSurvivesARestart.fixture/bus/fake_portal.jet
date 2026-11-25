@@ -19,12 +19,12 @@ run: fn() -[Env, FS, Net, Time]> {
     files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
     here: files.cwd() ?? panic("cwd: {err}")
     chosen: "file://{here}/exports"
-    stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
-    members := [String]{}
-    asked := ""
-    said := [U8]{}
-    authenticated := false
-    serial := 0
+    ^stream: net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+    ^members: [String]{}
+    ^asked: ""
+    ^said: [U8]{}
+    ^authenticated: false
+    ^serial: 0
     loop {
         got: net.unix_receive(stream, 4096) ?? break
         if got.bytes.len() == 0 -> break
@@ -48,7 +48,7 @@ run: fn() -[Env, FS, Net, Time]> {
             members.push(member.copy())
             said = said[n..<said.len()].copy()
             call: word(message, 8)
-            answer := [U8]{}
+            ^answer: [U8]{}
             serial += 1
             if member == "Hello" -> answer = returned(serial, call, "s", text_value(":1.48")) else if member == "OpenFile" {
                 asked = texts_of(message[(16 + aligned(word(message, 12), 8))..<n].copy()).join(" | ")
@@ -64,7 +64,7 @@ run: fn() -[Env, FS, Net, Time]> {
 
 // A method return for the call `call`, with a body of `signature`.
 returned: fn(serial: Int, call: Int, signature: String, body: [U8]) -> [U8] {
-    fields := [U8]{}
+    ^fields: [U8]{}
     number_field(fields, 5, call)
     text_field(fields, 7, 115, "org.freedesktop.DBus")
     if signature != "" -> signature_field(fields, signature)
@@ -73,22 +73,22 @@ returned: fn(serial: Int, call: Int, signature: String, body: [U8]) -> [U8] {
 
 // The request's Response signal: the person chose the file at `uri`.
 response: fn(serial: Int, uri: String) -> [U8] {
-    fields := [U8]{}
+    ^fields: [U8]{}
     text_field(fields, 1, 111, REQUEST)
     text_field(fields, 2, 115, "org.freedesktop.portal.Request")
     text_field(fields, 3, 115, "Response")
     text_field(fields, 7, 115, "org.freedesktop.DBus")
     signature_field(fields, "ua{{sv}}")
     // The code 0, then the results: { "uris": <["uri"]> }.
-    body := [U8]{}
+    ^body: [U8]{}
     put_word(body, 0)
-    entry := [U8]{}
+    ^entry: [U8]{}
     put_text(entry, "uris")
     entry.push(U8{2})
     append(entry, "as".bytes())
     entry.push(U8{0})
     pad(entry, 4)
-    uris := [U8]{}
+    ^uris: [U8]{}
     put_text(uris, uri)
     put_word(entry, uris.len())
     append(entry, uris)
@@ -101,7 +101,7 @@ response: fn(serial: Int, uri: String) -> [U8] {
 // A whole message: the fixed header, the header fields padded to 8 bytes,
 // and the body.
 framed: fn(kind: Int, serial: Int, fields: [U8], body: [U8]) -> [U8] {
-    out := [U8]{U8{108}, U8{kind}, U8{1}, U8{1}}
+    ^out: [U8]{U8{108}, U8{kind}, U8{1}, U8{1}}
     put_word(out, body.len())
     put_word(out, serial)
     put_word(out, fields.len())
@@ -134,7 +134,7 @@ signature_field: fn(out: ^[U8], signature: String) {
 
 // A body of one string or object path.
 text_value: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     put_text(out, text)
     out
 }
@@ -164,8 +164,8 @@ append: fn(out: ^[U8], bytes: [U8]) {
 // The runs of two or more printable ASCII bytes in `body`: the texts of a
 // message body whose numbers are not printable.
 texts_of: fn(body: [U8]) -> [String] {
-    found := [String]{}
-    run := [U8]{}
+    ^found: [String]{}
+    ^run: [U8]{}
     loop b in body {
         n: Int{b}
         if n >= 32 && n < 127 {
@@ -195,7 +195,7 @@ message_length: fn(m: [U8]) -> Int { 16 + aligned(word(m, 12), 8) + word(m, 4) }
 // The member the header of the message `m` names (field 3), or "".
 member_of: fn(m: [U8]) -> String {
     end: 16 + word(m, 12)
-    at := 16
+    ^at: 16
     loop at < end {
         code: Int{m[at]}
         kind: Int{m[at + 2]}

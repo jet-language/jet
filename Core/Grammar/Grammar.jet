@@ -1,0 +1,47 @@
+// core.grammar — grammars as checked values.
+//
+// A grammar literal is rule notation in the style ANTLR 4 and Bison share.
+// `analyze` reads it, checks it (left recursion outside the operator form,
+// ambiguity within 3 tokens, token clashes, unprintable token pairs and
+// field shapes are refusals) and returns its plan: the data a generated
+// parser and printer run from. Every refusal is a `GrammarFault`.
+use {
+    core.grammar.error.[GrammarFaults, grammar_faults]
+    core.grammar.plan.[GrammarPlan, GrammarSource]
+    __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
+    __core_grammar_keywords.[plan_keywords]
+    __core_grammar_lookahead.[assign_tokens, plan_decisions, plan_sets]
+    __core_grammar_precedence.[plan_precedence, report_empty_repeats]
+    __core_grammar_print.[plan_printer]
+    __core_grammar_shape.[plan_shapes]
+    __core_grammar_tokens.[plan_tokens]
+}
+
+/// The plan of grammar `text`, or every fault in it. `start` is the
+/// binding name of the rule a parse starts from; "" lets every parser rule
+/// start one. `imports` are the grammars `import Name ;` may name.
+analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPlan GrammarFaults! {
+    ^work: resolve(text, start, imports)
+    if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
+    split_operators(work)
+    mark_parents(work)
+    mark_nullable(work)
+    report_left_recursion(work)
+    report_empty_repeats(work)
+    if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
+    plan_precedence(work)
+    assign_tokens(work)
+    plan_sets(work)
+    plan_decisions(work)
+    lexer: plan_tokens(work)
+    if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
+    shapes: plan_shapes(work)
+    if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
+    printer: plan_printer(work, lexer, shapes)
+    if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
+    keywords: plan_keywords(work)
+    ^decision_of: [Int]{}
+    loop _ in work.tree.nodes -> decision_of.push(-1)
+    loop (d, decision) in work.decisions -> decision_of[decision.node] = d
+    Ok(GrammarPlan{tree: work.tree, start: work.start, parent: work.parent, nullable: work.nullable, operators: work.operators, tokens: work.tokens, decisions: work.decisions, decision_of: decision_of, lexer: lexer, keywords: keywords, shapes: shapes, printer: printer})
+}

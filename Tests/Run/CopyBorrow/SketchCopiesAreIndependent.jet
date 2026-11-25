@@ -13,22 +13,22 @@ use {
 }
 
 run: fn() {
-    distinct := hll.new()
+    ^distinct: hll.new()
     distinct.add("apple")
-    more := distinct
+    ^more: distinct
     more.add("banana")
     more.add("cherry")
     print("hll: {distinct.count()} {more.count()}")  // 1 3
 
-    digest := tdigest.new()
+    ^digest: tdigest.new()
     digest.add(7.0)
-    other := digest.copy()
+    ^other: digest.copy()
     other.add(1.0)
     print("tdigest: {digest.quantile(0.5)} {other.quantile(0.5)}")  // 7.0 1.0
 
-    counts := cms.new()
+    ^counts: cms.new()
     counts.add("hello")
-    twin := counts
+    ^twin: counts
     twin.add("hello")
     twin.add("world")
     print("cms: {counts.count("hello")} {counts.count("world")} {twin.count("hello")} {twin.count("world")}")  // 1 0 2 1
@@ -36,10 +36,10 @@ run: fn() {
     // Past capacity, so the sampler's RNG has run before the copy.
     first: [String]{"a", "b", "c", "d", "e"}
     later: [String]{"f", "g", "h", "i", "j", "k", "l", "m"}
-    sampler := reservoir.new(2)
+    ^sampler: reservoir.new(2)
     loop item in first -> sampler.add(item)
     before: sampler.sample()
-    fork := sampler.copy()
+    ^fork: sampler.copy()
     loop item in later -> fork.add(item)
     print("reservoir original unchanged: {sampler.sample() == before}")  // true
     loop item in later -> sampler.add(item)

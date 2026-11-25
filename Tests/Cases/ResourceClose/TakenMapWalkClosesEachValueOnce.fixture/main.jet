@@ -12,7 +12,7 @@ Res: struct {
 }
 
 fill: fn(prefix: String) -> [String:Res] Never! {
-    table := [String:Res]{}
+    ^table: [String:Res]{}
     parts: [String]{"c", "a", "b", "d"}
     loop part in parts {
         name: "{prefix}{part}"
@@ -22,7 +22,7 @@ fill: fn(prefix: String) -> [String:Res] Never! {
 }
 
 walked: fn() {
-    table := fill("w")
+    ^table: fill("w")
     loop (key, res) in table.move() {
         if key == "wb" -> next
         if key == "wc" -> close(res)
@@ -32,7 +32,7 @@ walked: fn() {
 }
 
 stopped: fn() {
-    table := fill("s")
+    ^table: fill("s")
     loop (key, res) in table.move() {
         if key == "sb" -> break
         print("step {key} {res.name}")
@@ -41,7 +41,7 @@ stopped: fn() {
 }
 
 first: fn() {
-    table := fill("f")
+    ^table: fill("f")
     loop (key, _res) in table.move() {
         print("step {key}")
         break
@@ -50,7 +50,7 @@ first: fn() {
 }
 
 returned: fn() -> Int {
-    table := fill("r")
+    ^table: fill("r")
     loop (key, _res) in table.move() {
         if key == "rb" -> return 2
         print("step {key}")
@@ -59,7 +59,7 @@ returned: fn() -> Int {
 }
 
 kept: fn() {
-    table := fill("k")
+    ^table: fill("k")
     loop (key, res) in table -> print("read {key} {res.name}")
     print("kept done")
 }

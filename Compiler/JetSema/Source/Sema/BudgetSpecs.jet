@@ -125,7 +125,7 @@ BudgetFieldEntry: struct {
 // Collect budgets while retaining the module that owns each source span. Each
 // diagnostic carries its module's source location.
 sema_budget_located_specs_graph: fn(graph: SemaRegistrationGraph) -> [LocatedBudgetSpec] BudgetSpecError! {
-    specs := [LocatedBudgetSpec]{}
+    ^specs: [LocatedBudgetSpec]{}
     findings: sema_budget_graph_findings(graph, specs)
     if findings.len() > 0 {
         diagnostics: loop finding in findings -> sema_diagnostic_with_source_location(finding.diagnostic, graph.modules[finding.module_index].source_segments)
@@ -137,7 +137,7 @@ sema_budget_located_specs_graph: fn(graph: SemaRegistrationGraph) -> [LocatedBud
 // The diagnostics the graph check reports, each with the position of the module
 // its span belongs to.
 sema_budget_validate_graph: fn(graph: SemaRegistrationGraph) -> [BudgetLocatedDiagnostic] Never! {
-    specs := [LocatedBudgetSpec]{}
+    ^specs: [LocatedBudgetSpec]{}
     sema_budget_graph_findings(graph, specs)
 }
 
@@ -151,11 +151,11 @@ BudgetLocatedDiagnostic: struct {
 // owning package's resolution and collision findings. Only a package with a
 // budget reads its attachments, so only its modules are walked for them.
 sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: ^[LocatedBudgetSpec]) -> [BudgetLocatedDiagnostic] Never! {
-    findings := [BudgetLocatedDiagnostic]{}
-    packages := [String]{}
-    group_specs := [String:[LocatedBudgetSpec]]{}
+    ^findings: [BudgetLocatedDiagnostic]{}
+    ^packages: [String]{}
+    ^group_specs: [String:[LocatedBudgetSpec]]{}
     loop (module_index, row) in graph.modules {
-        module_diagnostics := [Diagnostic]{}
+        ^module_diagnostics: [Diagnostic]{}
         module_specs: sema_budget_elaborate_items(row.program.items, module_diagnostics)
         loop diagnostic in module_diagnostics {
             findings.push(BudgetLocatedDiagnostic{module_index: module_index, diagnostic: diagnostic})
@@ -166,7 +166,7 @@ sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: ^[LocatedBud
             group_specs[package] = [LocatedBudgetSpec]{}
         }
         if module_specs.len() == 0 -> next
-        grouped := group_specs.get(package) ?? [LocatedBudgetSpec]{}
+        ^grouped: group_specs.get(package) ?? [LocatedBudgetSpec]{}
         loop spec in module_specs {
             grouped.push(LocatedBudgetSpec{spec: spec.copy(), module_index: module_index})
             specs.push(LocatedBudgetSpec{spec: spec, module_index: module_index})
@@ -177,7 +177,7 @@ sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: ^[LocatedBud
     loop package in packages {
         grouped: group_specs.get(package) ?? [LocatedBudgetSpec]{}
         if grouped.len() == 0 -> next
-        catalog := sema_budget_empty_catalog()
+        ^catalog: sema_budget_empty_catalog()
         loop row in graph.modules {
             if row.package_identity == package {
                 sema_budget_catalog_extend(catalog, sema_budget_attachment_catalog(row.program.tables, row.program.items))
@@ -190,7 +190,7 @@ sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: ^[LocatedBud
 }
 
 sema_budget_elaborate_items: fn(items: [Item], diagnostics: ^[Diagnostic]) -> [BudgetSpec] Never! {
-    specs := [BudgetSpec]{}
+    ^specs: [BudgetSpec]{}
     loop item in items {
         if item == .Module(declaration) {
             sema_budget_validate_module(declaration, specs, diagnostics)
@@ -216,11 +216,11 @@ sema_budget_catalog_extend: fn(catalog: ^BudgetAttachmentCatalog, other: BudgetA
 }
 
 sema_budget_attachment_catalog: fn(tables: ASTTables, items: [Item]) -> BudgetAttachmentCatalog Never! {
-    catalog := sema_budget_empty_catalog()
+    ^catalog: sema_budget_empty_catalog()
     loop item in items {
         if item == {
             .Test(definition) -> {
-                measured := false
+                ^measured: false
                 loop statement in definition.body {
                     if statement == .ScopeMember(name, _, _, _, _, _, _, _) && name == SCOPE_TEST_MEASURE {
                         measured = true
@@ -448,8 +448,8 @@ sema_budget_fail: fn(diagnostic: Diagnostic) -> BudgetSpecError Never! {
 
 sema_budget_elaborate: fn(role: String, entry: BudgetDecl, workloads: [String:CompileWorkloadFact]) -> BudgetSpec BudgetSpecError! {
     span: entry.span
-    map := [String:BudgetFieldEntry]{}
-    field_spans := [String:Span]{}
+    ^map: [String:BudgetFieldEntry]{}
+    ^field_spans: [String:Span]{}
     loop field in entry.fields {
         if !BUDGET_SPEC_FIELDS.contains(field.name) {
             return Err(sema_budget_fail(sema_budget_invalid("entry", "`{field.name}` is not a Budget field", "use one of: {BUDGET_SPEC_FIELDS.join(", ")}", field.name_span)))
@@ -502,7 +502,7 @@ sema_budget_elaborate: fn(role: String, entry: BudgetDecl, workloads: [String:Co
         .None -> "Package"
     }
     provider_written: map.get("provider")
-    provider := ""
+    ^provider: ""
     if provider_written == .Val(written) {
         provider = sema_budget_closed_provider(name, written.value)
     } else if metric_variant == "GeneratedUnsafe" || metric_variant == "PublicApiItems" || metric_variant == "DependencyCount" || metric_variant == "EffectCount" {
@@ -514,7 +514,7 @@ sema_budget_elaborate: fn(role: String, entry: BudgetDecl, workloads: [String:Co
         return Err(sema_budget_fail(sema_budget_invalid(name, "`{metric_variant}` has no unambiguous measurement provider", "add the metric's explicit typed `provider`", expr_span(metric_expr))))
     }
     provider_span: if provider_written == .Val(written) -> expr_span(written.value) else -> expr_span(metric_expr)
-    compile_workload := CompileWorkloadFact?{None}
+    ^compile_workload: CompileWorkloadFact?{None}
     if metric_variant == "CompileTime" {
         target: if sema_budget_named_key(scope) == .Val(key) && key.kind == "Target" -> key.name else -> "Package"
         identity: sema_budget_provider_identity(provider) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`CompileTime` requires a typed `CompilerProbe` workload value", "use `.CompilerProbe(.Clean)`, `.CompilerProbe(.NoChange)`, or `.CompilerProbe(.Edit(\"name\"))`", provider_span)))
@@ -535,7 +535,7 @@ sema_budget_elaborate: fn(role: String, entry: BudgetDecl, workloads: [String:Co
         .Val(written) -> sema_budget_parse_applicability(name, written.value)
         .None -> BudgetApplicability{targets: BudgetAxis.Current, profiles: BudgetAxis.Current}
     }
-    enforcement := "Fail"
+    ^enforcement: "Fail"
     if map.get("enforcement") == .Val(written) {
         variant_name: sema_budget_enum_variant(written.value) ?? ""
         if variant_name == "Fail" -> enforcement = "Fail" else if variant_name == "Warn" && !deterministic {
@@ -700,7 +700,7 @@ sema_budget_validate_scope_provider_pair: fn(name: String, metric: String, scope
 }
 
 sema_budget_compile_workload_catalog: fn(role: String, declarations: [CompileWorkloadDecl], diagnostics: ^[Diagnostic]) -> [String:CompileWorkloadFact] Never! {
-    catalog := [String:CompileWorkloadFact]{}
+    ^catalog: [String:CompileWorkloadFact]{}
     loop declaration in declarations {
         target_value: sema_budget_string_value(declaration.target)
         if target_value == None || !sema_budget_snake_or_kebab(target_value ?? "") {
@@ -794,8 +794,8 @@ sema_budget_parse_applicability: fn(name: String, expr: Expr) -> BudgetApplicabi
     if literal.type_name != "BudgetApplies" {
         return Err(sema_budget_fail(sema_budget_invalid(name, "`applies` has type `BudgetApplies`", "write `BudgetApplies{{ targets: ..., profiles: ... }}`", expr_span(expr))))
     }
-    targets := BudgetAxis?{None}
-    profiles := BudgetAxis?{None}
+    ^targets: BudgetAxis?{None}
+    ^profiles: BudgetAxis?{None}
     loop field in literal.fields {
         if field.name != "targets" && field.name != "profiles" {
             return Err(sema_budget_fail(sema_budget_invalid(name, "`{field.name}` is not a BudgetApplies field", "use only `targets` and `profiles`", expr_span(field.value))))
@@ -826,7 +826,7 @@ sema_budget_parse_axis: fn(name: String, axis: String, expr: Expr) -> BudgetAxis
             if values.len() == 0 {
                 return Err(sema_budget_fail(sema_budget_invalid(name, "applicability `{axis}` Only list cannot be empty", "add at least one selector", expr_span(value))))
             }
-            selectors := [String]{}
+            ^selectors: [String]{}
             loop selector in values {
                 key: if axis == "targets" -> sema_budget_target_selector(name, selector) else -> sema_budget_profile_selector(name, selector)
                 sema_budget_set_insert(selectors, key)
@@ -871,7 +871,7 @@ sema_budget_profile_selector: fn(name: String, expr: Expr) -> String BudgetSpecE
             value: sema_budget_arg_value(args[0])
             profile: sema_budget_string_value(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "named profile selector requires constant quoted text", "write `.Named(\"lowercase_snake_case\")`", expr_span(value))))
             lower: sema_budget_ascii_lower(profile)
-            built_in := false
+            ^built_in: false
             loop item in PERF_BUDGET_PROFILES {
                 if item != "Named" && lower == sema_budget_ascii_lower(item) -> built_in = true
             }
@@ -886,7 +886,7 @@ sema_budget_profile_selector: fn(name: String, expr: Expr) -> String BudgetSpecE
 
 // ASCII lowercase of `value`.
 sema_budget_ascii_lower: fn(value: String) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
         bytes.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
@@ -926,7 +926,7 @@ sema_budget_enum_variant: fn(expr: Expr) -> String? Never! {
 sema_budget_enum_key: fn(expr: Expr) -> String? Never! {
     if expr == .EnumLit(_, variant, _, args, _, _, _) {
         if args.len() == 0 -> return Val(variant)
-        rendered := [String]{}
+        ^rendered: [String]{}
         loop arg in args {
             value: sema_budget_arg_value(arg)
             if value == {
@@ -1050,8 +1050,8 @@ sema_budget_normalize_rate: fn(name: String, value: Expr) -> BudgetRate BudgetSp
     if literal.type_name != "Rate" {
         return Err(sema_budget_fail(sema_budget_invalid(name, "Throughput limits use the `Rate` value family", "write `Rate{{ count: 100, per: 1s }}`", expr_span(value))))
     }
-    count := Expr?{None}
-    per := Expr?{None}
+    ^count: Expr?{None}
+    ^per: Expr?{None}
     loop field in literal.fields {
         if field.name != "count" && field.name != "per" {
             return Err(sema_budget_fail(sema_budget_invalid(name, "`{field.name}` is not a Rate field", "use exactly `count` and `per`", expr_span(field.value))))
@@ -1065,8 +1065,8 @@ sema_budget_normalize_rate: fn(name: String, value: Expr) -> BudgetRate BudgetSp
     count_expr: count ?? return Err(sema_budget_fail(sema_budget_invalid(name, "Rate requires `count`", "add `count: <nonnegative integer>`", expr_span(value))))
     per_expr: per ?? return Err(sema_budget_fail(sema_budget_invalid(name, "Rate requires `per`", "add `per: <positive duration>`", expr_span(value))))
     count_error: sema_budget_fail(sema_budget_invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", expr_span(count_expr)))
-    count_value := 0
-    count_raw := ""
+    ^count_value: 0
+    ^count_raw: ""
     if count_expr == .Int(written, _, _, raw, _) && raw == .Val(text) {
         if written < 0 || written > sema_budget_u128_max() -> return Err(count_error)
         count_value = written
@@ -1087,8 +1087,8 @@ sema_budget_normalize_rate: fn(name: String, value: Expr) -> BudgetRate BudgetSp
 }
 
 sema_budget_gcd: fn(left: Int, right: Int) -> Int Never! {
-    a := left
-    b := right
+    ^a: left
+    ^b: right
     loop b != 0 {
         remainder: a % b
         a = b

@@ -83,8 +83,8 @@ jet_cli_import_plan_error: fn(message: String) -> JetCLIImportPlanError Never! {
 
 // `raw` starts at the command word.
 jet_cli_import_parse_args: fn(raw: [String]) -> JetCLIImportArguments JetCLIImportUsageError! {
-    positionals := [String]{}
-    mode := JetCLIImportMode.Create
+    ^positionals: [String]{}
+    ^mode: JetCLIImportMode.Create
     loop index in 1..<raw.len() {
         arg: raw[index]
         if arg == "--dry-run" || arg == "--update" {
@@ -131,7 +131,7 @@ jet_cli_import_foreign_language: fn(language: String) -> String? Never! {
 
 // Redundant separators and `.` drop, `..` stays.
 jet_cli_import_components: fn(path: String) -> [String] Never! {
-    components := [String]{}
+    ^components: [String]{}
     loop part in import_files.split_slash(path) {
         if part != "" && part != "." -> components.push(part)
     }
@@ -189,7 +189,7 @@ jet_cli_import_io_text: fn(error: IOError) -> String Never! { jet_cli_io_error_t
 // Entries in file-name byte order, no-follow entry types (links are skipped),
 // recursive walk.
 jet_cli_import_collect_sources: fn(root: String, dir: String, language: String, out: ^[String]) -[FS.Read]> JetCLIImportPlanError! {
-    entries := import_files.list_dir(dir) ?? return Err(jet_cli_import_plan_error("read {dir}: {jet_cli_import_io_text(err)}"))
+    ^entries: import_files.list_dir(dir) ?? return Err(jet_cli_import_plan_error("read {dir}: {jet_cli_import_io_text(err)}"))
     entries.sort_by(fn(left: DirEntry, right: DirEntry) { ast_comptime_bytes_compare(left.name.bytes(), right.name.bytes()) <=> 0 })
     loop entry in entries {
         path: import_files.join(dir, entry.name)
@@ -208,7 +208,7 @@ jet_cli_import_collect_sources: fn(root: String, dir: String, language: String, 
 
 // The bytes are reread after every translation.
 jet_cli_import_tree_identity: fn(source: String, files: [String], schema: String) -[FS.Read]> String JetCLIImportPlanError! {
-    identity := ForeignIdentityBuilder.new(schema)
+    ^identity: ForeignIdentityBuilder.new(schema)
     loop path in files {
         relative: jet_cli_import_relative(path, source) ?? return Err(err)
         bytes: import_files.read_bytes(path) ?? return Err(jet_cli_import_plan_error("read {path}: {jet_cli_import_io_text(err)}"))
@@ -219,7 +219,7 @@ jet_cli_import_tree_identity: fn(source: String, files: [String], schema: String
 }
 
 jet_cli_import_generated_tree_identity: fn(generated: [JetCLIImportGenerated], schema: String) -> String Never! {
-    identity := ForeignIdentityBuilder.new(schema)
+    ^identity: ForeignIdentityBuilder.new(schema)
     loop file in generated {
         identity.field("path", file.relative.bytes())
         identity.field("bytes", file.contents.bytes())
@@ -255,7 +255,7 @@ jet_cli_import_evidence: fn(boundary: ForeignBoundaryContract, source: String, t
     detail: if omission_count == 0 -> "source import generated {file_count} files, {function_count} functions, and {test_count} tests" else -> "source import translated {file_count} files, {function_count} functions, and {test_count} tests with {omission_count} reported omissions"
     count: checked(U64{file_count}) ?? return Err(jet_cli_import_plan_error("source import file count is too large"))
     identity: evidence_identity_for_record(report_id, "source-import", EvidenceProducerKind.Compile, EvidenceKind.Contract, source_ref, count, detail)
-    record := evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Compile, outcome, count, source_ref, build, revision)
+    ^record: evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Compile, outcome, count, source_ref, build, revision)
     record.detail = detail
     record.attachments = [EvidenceAttachment]{
         {name: "boundary", value: boundary_digest},
@@ -271,9 +271,9 @@ jet_cli_import_evidence: fn(boundary: ForeignBoundaryContract, source: String, t
     loop assumption in boundary.assumptions {
         record.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
     }
-    derivation := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), DerivationMethod.StaticDerivation, "foreign-source-import", [String]{boundary_digest, boundary.artifact_coverage.digest(), source_digest, replacement_digest}, derivation_identity)
+    ^derivation: derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), DerivationMethod.StaticDerivation, "foreign-source-import", [String]{boundary_digest, boundary.artifact_coverage.digest(), source_digest, replacement_digest}, derivation_identity)
     if omission_count != 0 -> derivation.disposition = DerivationDisposition.Unavailable
-    report := evidence_report_new(report_id, EvidenceProducerKind.Compile, source_ref, build, revision)
+    ^report: evidence_report_new(report_id, EvidenceProducerKind.Compile, source_ref, build, revision)
     evidence_report_add_record_with_derivation(report, record, derivation) ?? return Err(jet_cli_import_plan_error(evidence_merge_error_text(err)))
     Ok(report)
 }
@@ -292,16 +292,16 @@ jet_cli_import_extensions: fn(language: String) -> String Never! {
 }
 
 jet_cli_import_build_plan: fn(source: String, target: String, language: String) -[FS.Read, Env]> JetCLIImportPlan JetCLIImportPlanError! {
-    files := [String]{}
+    ^files: [String]{}
     jet_cli_import_collect_sources(source, source, language, files) ?? return Err(err)
     if files.len() == 0 {
         return Err(jet_cli_import_plan_error("no {jet_cli_import_extensions(language)} files found under {source}"))
     }
     files.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
-    generated := [JetCLIImportGenerated]{}
-    todos := [JetCLIImportTodo]{}
-    functions := 0
-    tests := 0
+    ^generated: [JetCLIImportGenerated]{}
+    ^todos: [JetCLIImportTodo]{}
+    ^functions: 0
+    ^tests: 0
     loop path in files {
         relative: jet_cli_import_relative(path, source) ?? return Err(err)
         output: import_files.with_suffix(relative, ".jet")

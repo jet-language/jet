@@ -28,7 +28,7 @@ use {
 }
 
 trust_test_pkg: fn(owner: String, key: String, exact: String, hash: String) -> SemanticRecord {
-    rationale := LockRationale.empty()
+    ^rationale: LockRationale.empty()
     rationale.owner_package = owner
     rationale.reason = "{owner} declared {key}"
     rationale.source_ref = "catalog:{key}"
@@ -46,7 +46,7 @@ trust_test_pkg: fn(owner: String, key: String, exact: String, hash: String) -> S
 trust_test_record_block: fn(text: String, needle: String) -> String {
     raw: text.bytes()
     header: "[[semantic_record]]".bytes()
-    start := 0
+    ^start: 0
     loop {
         at: trust_text_find(raw, header, start)
         end: if at < 0 -> raw.len() else -> at
@@ -87,7 +87,7 @@ dependencies = ["app"]
 ` }
 
 #Test("live lock text keeps machine sections beside semantic sections") {
-    semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    ^semantic: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     semantic.inputs = [LockInput]{
         {name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
         {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"},
@@ -116,7 +116,7 @@ dependencies = ["app"]
 }
 
 #Test("catalog selection records owner and source ref") {
-    lock := SemanticLockFile.empty()
+    ^lock: SemanticLockFile.empty()
     lock.record_catalog_selection("app", "log", "core.log@1.2.3", "sha256-catalog", "x86_64-linux", "workspace selected shared logging")
     assert_eq(lock.records.len(), 1)
     assert_eq(lock.records[0].rationales[0].source_ref, "catalog:log")
@@ -125,7 +125,7 @@ dependencies = ["app"]
 }
 
 #Test("selective update keeps unrelated record bytes stable") {
-    lock := SemanticLockFile.with_records(
+    ^lock: SemanticLockFile.with_records(
         [SemanticRecord]{
             trust_test_pkg("app", "core.log", "1.2.3", "sha256-log"),
             trust_test_pkg("app", "core.http", "2.0.0", "sha256-http"),
@@ -141,7 +141,7 @@ dependencies = ["app"]
 }
 
 #Test("input follows cycle and missing target fail revalidate") {
-    lock := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    ^lock: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     lock.inputs = [LockInput]{
         {name: "a", url: "u-a", follows: "b"},
         {name: "b", url: "u-b", follows: "a"},
@@ -152,14 +152,14 @@ dependencies = ["app"]
 }
 
 #Test("source map rejects wrong authority") {
-    lock := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "Company.Lib", "1.0.0", "sha256-lib")})
+    ^lock: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "Company.Lib", "1.0.0", "sha256-lib")})
     lock.records[0].rationales[0].source_ref = "nuget:PublicGallery"
     lock.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "Company.*", sources: [String]{"nuget:CompanyFeed"}}}
     assert(trust_test_has_issue(trust_semantic_lock_issues(lock), "SourceAuthority"))
 }
 
 #Test("overlay change invalidates exact action keys and explains why") {
-    actions := [String:[String]]{}
+    ^actions: [String:[String]]{}
     actions["foo"] = [String]{"action:foo:build", "action:foo:check"}
     invalidations: trust_overlay_invalidations(
         [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-patch-a"}},
@@ -171,9 +171,9 @@ dependencies = ["app"]
     assert(invalidations[0].reason.contains("changed package `foo`"))
     assert(invalidations[0].policy_fingerprint_before != invalidations[0].policy_fingerprint_after)
 
-    overlay_record := trust_test_pkg("app", "beta:foo", "1.0.0", "sha256-overlay")
+    ^overlay_record: trust_test_pkg("app", "beta:foo", "1.0.0", "sha256-overlay")
     overlay_record.identity.kind = LockRecordKind.PackageOverlay
-    lock := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "foo", "1.0.0", "sha256-foo"), overlay_record})
+    ^lock: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "foo", "1.0.0", "sha256-foo"), overlay_record})
     trust_apply_overlay_invalidations(lock, invalidations)
     loop record in lock.records { assert(record.identity.kind != LockRecordKind.PackageOverlay) }
     assert_eq(lock.records.len(), 1)
@@ -182,13 +182,13 @@ dependencies = ["app"]
 }
 
 #Test("overlay records keep future fields and every contender through the lock text") {
-    base := LockRationale.empty()
+    ^base: LockRationale.empty()
     base.owner_package = "app"
     base.reason = "overlay `base` contributed `version` = `1` at priority 0"
-    force := LockRationale.empty()
+    ^force: LockRationale.empty()
     force.owner_package = "app"
     force.reason = "overlay `force` contributed `version` = `2` at priority 100"
-    record := SemanticRecord.new(LockIdentity{kind: LockRecordKind.PackageOverlay, key: "force:foo", exact: "2", hash: "sha256-force", platform: "x86_64-linux"}, base)
+    ^record: SemanticRecord.new(LockIdentity{kind: LockRecordKind.PackageOverlay, key: "force:foo", exact: "2", hash: "sha256-force", platform: "x86_64-linux"}, base)
     record.rationales.push(force)
     record.future_fields["overlay-fact-version"] = "2"
 
@@ -231,7 +231,7 @@ dependencies = ["app"]
 }
 
 #Test("overlay invalidations helper matches fingerprint diff") {
-    actions := [String:[String]]{}
+    ^actions: [String:[String]]{}
     actions["foo"] = [String]{"a:foo"}
     invalidations: trust_overlay_invalidations(
         [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-1"}},
@@ -242,11 +242,11 @@ dependencies = ["app"]
 }
 
 #Test("three way merge preserves inputs and source maps") {
-    base := SemanticLockFile.empty()
+    ^base: SemanticLockFile.empty()
     base.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "old", follows: ""}}
-    left := base.copy()
+    ^left: base.copy()
     left.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "Acme.*", sources: [String]{"nuget:Acme"}}}
-    right := base.copy()
+    ^right: base.copy()
     right.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "new", follows: ""}}
     outcome: trust_merge_semantic_locks(base, left, right)
     assert_eq(outcome.conflicts.len(), 0)

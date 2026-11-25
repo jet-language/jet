@@ -14,7 +14,7 @@ use {
 run: fn() {
     here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
     printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
-    progress := [String]{}
+    ^progress: [String]{}
     loop line in printed.lines() {
         text: line.replace(here, "<case>").replace("node Tools/Perf/Scaling/RunGate.mjs", "jet Tools/Perf/Scaling/RunGate")
         if text.contains(" wall ") {
@@ -29,7 +29,7 @@ run: fn() {
     if !files.is_dir("work") {
         return
     }
-    reports := files.list_dir("work", matching: "run-*").map(fn(entry) { "work/{entry.name}/report.md" }).filter(fn(file) { files.exists(file) })
+    ^reports: files.list_dir("work", matching: "run-*").map(fn(entry) { "work/{entry.name}/report.md" }).filter(fn(file) { files.exists(file) })
     reports.sort()
     reports.push("work/report.md")
     loop file in reports.filter(fn(file) { files.exists(file) }) {

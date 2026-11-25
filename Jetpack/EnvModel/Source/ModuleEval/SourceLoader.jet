@@ -63,7 +63,7 @@ FileSystemSourceLoader: struct {
         list_jet_files: fn(^self, relative: String) -[FS, Env]> [String] EnvModelEvalError! {
             directory: self.checked_path(relative)
             entries: envmodel_source_files.list_dir(directory) ?? return Err(envmodel_source_loader_error(directory, "{err}"))
-            found := [String]{}
+            ^found: [String]{}
             loop entry in entries {
                 if !entry.name.ends_with(".{FILE_EXT}") || entry.name == (".{FILE_EXT}") -> next
                 canonical: envmodel_source_files.canonicalize(entry.path) ?? return Err(envmodel_source_loader_error(entry.path, "{err}"))
@@ -85,7 +85,7 @@ FileSystemSourceLoader: struct {
             entry_files: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
             loop relative in entry_files {
                 path: envmodel_source_files.join(self.root, relative)
-                source := ""
+                ^source: ""
                 if envmodel_source_files.read(path) == {
                     .Ok(text) -> { source = text }
                     .Err(error) -> {
@@ -97,7 +97,7 @@ FileSystemSourceLoader: struct {
                         }
                     }
                 }
-                extracted := InlinePackageBlock?{None}
+                ^extracted: InlinePackageBlock?{None}
                 if pkg_extract_inline_package(source) == {
                     .Ok(found) -> { extracted = found }
                     .Err(error) -> { return Err(EnvModelEvalError{diagnostic: error.diagnostic()}) }
@@ -139,7 +139,7 @@ envmodel_path_within: fn(path: String, root: String) -> Bool Never! {
 
 // A relative path with `.` components and empty segments dropped.
 envmodel_normalize_relative_path: fn(path: String) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in envmodel_source_files.split_slash(path) {
         if part != "" && part != "." -> parts.push(part)
     }
@@ -171,13 +171,13 @@ EvalUnit: struct {
 // discovered `*.jet` file. Discovery is one level deep: a discovered file may
 // not itself import (the liftability law, E0971).
 envmodel_discover_imports: fn<L: SourceLoader>(root: EvalUnit, base_dir: String, loader: ^L) -[FS, Env]> [EvalUnit] EnvModelEvalError! {
-    out := [EvalUnit]{}
+    ^out: [EvalUnit]{}
     environment_root: envmodel_source_files.canonicalize(base_dir) ?? return Err(envmodel_error("E1331", "environment root `{base_dir}` cannot be resolved: {err}", "imports follow physical paths and cannot be evaluated from an unresolved root", "run the command from an existing project directory", None))
-    seen_files := [String]{}
+    ^seen_files: [String]{}
     loop item in root.items {
         decl: envmodel_module_decl(item) ?? next
         if !decl.auto_discovered -> next
-        directives := [Expr]{}
+        ^directives: [Expr]{}
         loop import in decl.imports -> envmodel_collect_import_leaves(import, directives)
         loop directive in directives {
             if envmodel_qualified_call_name(directive) == {
@@ -248,7 +248,7 @@ envmodel_find_dir_arg: fn(directive: Expr) -> String EnvModelEvalError! {
             return Err(envmodel_bad_import_directive(expr_span(directive)))
         }
     }
-    path := ""
+    ^path: ""
     loop part in parts {
         if part == {
             .Lit(text) -> path = "{path}{text}"
@@ -265,13 +265,13 @@ envmodel_find_dir_arg: fn(directive: Expr) -> String EnvModelEvalError! {
 // different ref conflicts, E0967). Each `target@provider` ref is
 // translated to the colon/flake upstream the providers realize.
 envmodel_build_source_table: fn(units: [EvalUnit]) -[FS]> SourceTable EnvModelEvalError! {
-    maps := [[String:String]]{}
-    policies := [String:ChannelPolicy]{}
-    raw_refs := [String:String]{}
+    ^maps: [[String:String]]{}
+    ^policies: [String:ChannelPolicy]{}
+    ^raw_refs: [String:String]{}
     // U9: the provider kind is inferred, never declared. The §6 merge
     // guarantees a given name resolves to one upstream (else E0967), so the
     // probe result is consistent across units.
-    kinds := [String:ProviderKind]{}
+    ^kinds: [String:ProviderKind]{}
     loop index in 0..<units.len() {
         unit: units[index]
         // Spans index into each unit's own source, but the CLI renders against
@@ -281,7 +281,7 @@ envmodel_build_source_table: fn(units: [EvalUnit]) -[FS]> SourceTable EnvModelEv
         loop item in unit.items {
             decl: envmodel_module_decl(item) ?? next
             if !decl.auto_discovered -> next
-            map := [String:String]{}
+            ^map: [String:String]{}
             loop declaration in decl.sources {
                 ref_text: pkg_bytes_text(source_bytes, declaration.ref_span.start, declaration.ref_span.end).trim()
                 span: if is_root -> Val(declaration.ref_span) else -> None
@@ -316,13 +316,13 @@ envmodel_build_source_table: fn(units: [EvalUnit]) -[FS]> SourceTable EnvModelEv
         }
     }
     merged: pkg_merge_sources(maps) ?? return Err(envmodel_merge_error_to_diagnostic(err))
-    names := merged.keys().to_list()
+    ^names: merged.keys().to_list()
     names.sort()
-    declarations := [NamedSourceDecl]{}
+    ^declarations: [NamedSourceDecl]{}
     loop name in names {
         declarations.push(NamedSourceDecl{name: name, upstream: merged[name], via: kinds.get(name) ?? ProviderKind.Nix})
     }
-    table := SourceTable.from_decls(declarations)
+    ^table: SourceTable.from_decls(declarations)
     loop name in table.declared_names() {
         policy: policies.get(name) ?? ChannelPolicy.Pinned
         raw: raw_refs.get(name) ?? (table.upstream(name) ?? "")

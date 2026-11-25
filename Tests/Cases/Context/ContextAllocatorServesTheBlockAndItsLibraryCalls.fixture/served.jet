@@ -31,27 +31,27 @@ Counter: struct {
 
 run: fn() {
     region: mem.Region.reserve(1 << 20) ?? panic("reserve")
-    counter := Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
-    evens := [Int]{}
+    ^counter: Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    ^evens: [Int]{}
     loop i in 0..<50 -> evens.push(i * 2)
-    odds := [Int]{}
+    ^odds: [Int]{}
     loop i in 0..<50 -> odds.push(i * 2 + 1)
     print("before the block: {counter.taken}")
 
-    last := 0
+    ^last: 0
     #Context(allocator: counter) {
-        squares := [Int]{}
+        ^squares: [Int]{}
         loop i in 0..<100 -> squares.push(i * i)
         last = squares[99]
     }
     inside: counter.taken
     print("inside the block: {last}, served {inside > 0}")
 
-    outside := [Int]{}
+    ^outside: [Int]{}
     loop i in 0..<100 -> outside.push(i)
     print("outside the block: {outside.len()}, served {counter.taken > inside}")
 
-    merged_last := 0
+    ^merged_last: 0
     #Context(allocator: counter) {
         merged: collections.merge_sorted(evens, odds)
         merged_last = merged[merged.len() - 1]

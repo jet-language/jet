@@ -5,7 +5,7 @@ use ar_files: core.files
 
 // The modules Core.rows declares, in file order.
 ar_core_modules: fn(rows: String) -> [String] Never! {
-    modules := [String]{}
+    ^modules: [String]{}
     loop line in rows.lines() {
         if !line.starts_with("module ") -> next
         modules.push(line.split(" ").to_list()[1].to_string())
@@ -19,7 +19,7 @@ ar_core_modules: fn(rows: String) -> [String] Never! {
     architecture: ar_files.read("Docs/Spec/architecture.md") ?? panic("read Docs/Spec/architecture.md")
     modules: ar_core_modules(rows)
     assert(modules.len() > 100, "Core.rows declares {modules.len()} modules; the module lines were not found")
-    missing := [String]{}
+    ^missing: [String]{}
     loop name in modules {
         if !architecture.contains("| `{name}` |") -> missing.push(name)
     }

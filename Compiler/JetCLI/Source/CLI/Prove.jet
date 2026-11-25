@@ -12,7 +12,7 @@ use {
 
 // The `--lens` values, in report order: the evidence facets' names.
 jet_cli_proof_lenses: fn() -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop {
         facet: EvidenceFacet.from_int(names.len()) ?? break
         names.push(evidence_facet_name(facet))
@@ -112,7 +112,7 @@ jet_cli_prove_lens_names: fn(lenses: [String]) -> [String] Never! {
     if lenses.contains("all") {
         return if lenses.contains("solver") -> [String]{"all", "solver"} else -> [String]{"all"}
     }
-    names := [String]{}
+    ^names: [String]{}
     loop lens in jet_cli_proof_lenses() {
         if lenses.contains(lens) -> names.push(lens.copy())
     }
@@ -136,7 +136,7 @@ jet_cli_prove_refused: fn(refusal: JetCLIProveRefusal, color: Bool, json: Bool) 
 
 // The registered diagnostic a refusal reports.
 jet_cli_prove_refusal_report: fn(refusal: JetCLIProveRefusal) -> Diagnostic Never! {
-    report := diagnostic_from_registry(refusal.code, None, refusal.what, refusal.why, refusal.fix)
+    ^report: diagnostic_from_registry(refusal.code, None, refusal.what, refusal.why, refusal.fix)
     report.detail = refusal.detail
     report
 }
@@ -144,13 +144,13 @@ jet_cli_prove_refusal_report: fn(refusal: JetCLIProveRefusal) -> Diagnostic Neve
 // The closed grammar. The output flags the front already read are skipped;
 // every other `-` word is a flag `jet prove` must know.
 jet_cli_prove_parse: fn(words: [String]) -> JetCLIProveRequest JetCLIProveRefusal! {
-    positionals := [String]{}
-    lenses := [String]{}
-    capture := JetCLIProveCapture?{None}
-    replay := String?{None}
-    save := String?{None}
-    unsave := String?{None}
-    index := 0
+    ^positionals: [String]{}
+    ^lenses: [String]{}
+    ^capture: JetCLIProveCapture?{None}
+    ^replay: String?{None}
+    ^save: String?{None}
+    ^unsave: String?{None}
+    ^index: 0
     loop index < words.len() {
         // copy: each word stays in `words` (no move out of an element, E0225).
         word: words[index].copy()
@@ -182,7 +182,7 @@ jet_cli_prove_parse: fn(words: [String]) -> JetCLIProveRequest JetCLIProveRefusa
         }
         if word == "--save" || word.starts_with("--save=") || word == "--unsave" || word.starts_with("--unsave=") {
             name: if word.starts_with("--save") -> "--save" else -> "--unsave"
-            value := word.removeprefix("{name}=")
+            ^value: word.removeprefix("{name}=")
             if word == name {
                 value = if has_value -> next_word else -> ""
                 if has_value -> index += 1
@@ -201,7 +201,7 @@ jet_cli_prove_parse: fn(words: [String]) -> JetCLIProveRequest JetCLIProveRefusa
             next
         }
         if word == "--lens" || word.starts_with("--lens=") {
-            value := word.removeprefix("--lens=")
+            ^value: word.removeprefix("--lens=")
             if word == "--lens" {
                 value = next_word
                 if index < words.len() -> index += 1
@@ -275,7 +275,7 @@ jet_cli_prove_resolve: fn(raw: String) -[FS, Env]> JetCLIProveTarget JetCLIProve
     if !info.is_dir {
         return Err(jet_cli_prove_target_refusal("proof target `{raw}` is not a file or directory"))
     }
-    kind := "workspace"
+    ^kind: "workspace"
     manifest: jet_cli_rooted_join(raw, "package.jet")
     if cli_files.stat(manifest) == {
         .Ok(manifest_info) -> {
@@ -290,14 +290,14 @@ jet_cli_prove_resolve: fn(raw: String) -[FS, Env]> JetCLIProveTarget JetCLIProve
             }
         }
     }
-    found := [String]{}
+    ^found: [String]{}
     if jet_cli_prove_collect(raw, found) == .Err(problem) {
         return Err(jet_cli_prove_target_refusal(problem.message))
     }
     if found.len() == 0 {
         return Err(jet_cli_prove_target_refusal("proof target `{raw}` contains no .jet files"))
     }
-    members := loop path in found -> jet_cli_prove_normalized(path, cwd)
+    ^members: loop path in found -> jet_cli_prove_normalized(path, cwd)
     members.sort()
     Ok(JetCLIProveTarget{kind: kind, root: root, members: members})
 }
@@ -309,7 +309,7 @@ jet_cli_prove_target_refusal: fn(what: String) -> JetCLIProveRefusal Never! {
 // `reject_symlink_ancestors`: walk the absolute path one component at a time.
 jet_cli_prove_reject_symlink_ancestors: fn(raw: String, cwd: String) -[FS]> JetCLIProveRefusal! {
     absolute: if raw.starts_with("/") -> raw else -> jet_cli_rooted_join(cwd, raw)
-    current := "/"
+    ^current: "/"
     loop part in absolute.split("/").to_list() {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -352,11 +352,11 @@ jet_cli_prove_collect: fn(directory: String, found: ^[String]) -[FS]> JetCLIRead
 // empty and inner `.` components drop. A leading `.` stays: `jet prove .` shows
 // `./a.jet`.
 jet_cli_prove_normalized: fn(path: String, cwd: String) -> String Never! {
-    text := path
+    ^text: path
     prefix: if cwd.ends_with("/") -> cwd else -> "{cwd}/"
     stripped: text.starts_with(prefix)
     if stripped -> text = text.removeprefix(prefix)
-    parts := [String]{}
+    ^parts: [String]{}
     if !stripped && (text == "." || text.starts_with("./")) -> parts.push(".")
     loop part in text.split("/").to_list() {
         if part != "" && part != "." -> parts.push(part)

@@ -89,7 +89,7 @@ Lexed: struct {
 TOKEN_KIND_SLOTS: 114
 
 token_tables: fn() -> TokenTables Never! {
-    spellings := [Int]{}
+    ^spellings: [Int]{}
     loop _ in 0..<TOKEN_KIND_SLOTS -> spellings.push(-1)
     TokenTables{names: name_table(), literals: [TokenLiteral]{}, spellings: spellings.move()}
 }
@@ -167,13 +167,13 @@ literal_shift_spans: fn(row: Int, offset: Int, literals: ^[TokenLiteral]) Never!
     loop part_index in 0..<literals[row].string_parts.len() {
         literals[row].string_parts[part_index].span = shifted_token_span(literals[row].string_parts[part_index].span, offset)
         loop nested_index in 0..<literals[row].string_parts[part_index].tokens.len() {
-            nested := literals[row].string_parts[part_index].tokens[nested_index]
+            ^nested: literals[row].string_parts[part_index].tokens[nested_index]
             token_shift_spans(nested, offset, literals)
             literals[row].string_parts[part_index].tokens[nested_index] = nested
         }
     }
     loop index in 0..<literals[row].deferred.len() {
-        diagnostic := literals[row].deferred[index]
+        ^diagnostic: literals[row].deferred[index]
         shifted_diagnostic(diagnostic, offset)
         literals[row].deferred[index] = diagnostic
     }
@@ -408,7 +408,7 @@ TOKEN_CARET_CARET: 113
 // `without_comments`: the code tokens of `tokens`, comment trivia dropped, in
 // source order.
 lexer_without_comments: fn(tokens: [Token]) -> [Token] Never! {
-    kept := [Token]{}
+    ^kept: [Token]{}
     loop token in tokens {
         if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT {
             kept.push(token.copy())

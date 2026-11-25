@@ -174,9 +174,9 @@ run: fn() -> Never Err! {
     // `--option=value` splits at its first `=`, as argparse splits it; a
     // positional is refused either way.
     tokens: process.args().flat_map(fn(arg) { text.splitn(arg, "=", 2) })
-    values := [String:String]{"--rounds": "5000", "--samples": "5"}
-    require_win := false
-    i := 0
+    ^values: [String:String]{"--rounds": "5000", "--samples": "5"}
+    ^require_win: false
+    ^i: 0
     loop i < tokens.len() {
         token: tokens[i]
         named: OPTIONS.filter(fn(option) { option.starts_with(token) })
@@ -230,7 +230,7 @@ pair: fn(offset: Int) -> String Never! {
 // byte's low 7 - N bits, then six bits from each continuation byte.
 scalar: fn(character: String) -> Int Never! {
     bytes: character.bytes()
-    value := Int{bytes[0]} % (64 >> (bytes.len() - 1))
+    ^value: Int{bytes[0]} % (64 >> (bytes.len() - 1))
     loop byte in bytes.skip(1) -> value = value * 64 + Int{byte} % 64
     value
 }
@@ -277,7 +277,7 @@ run_binary: fn(root: String, binary: String) -> Int Err! {
 // int(statistics.median(values)): the middle sample, or the mean of the
 // middle two truncated.
 median: fn(values: [Int]) -> Int Never! {
-    sorted := values.copy()  // copy: the report keeps the run order
+    ^sorted: values.copy()  // copy: the report keeps the run order
     sorted.sort()
     m: sorted.len() /% 2
     if sorted.len() % 2 == 1 -> sorted[m] else -> (sorted[m - 1] + sorted[m]) /% 2
@@ -318,14 +318,14 @@ measure: fn(options: Options) -> {report: String, code: Int} Err! {
     paths: [builds.rust_native.artifact, builds.rust_core_aot.artifact, builds.jet_source_aot.artifact]
     // A Jet arm is unbuilt when its build failed or left no program; the
     // native arm when rustc left none.
-    ready := paths.map(fn(path) { files.is_file(path) })
+    ^ready: paths.map(fn(path) { files.is_file(path) })
     ready.extend([rust.exit == 0, source.exit == 0])
     if ready.contains(false) {
         return Ok({report: tight(json.to_string_pretty(Unbuilt{builds: builds, metric: "runtime_only_ns", passed: false})), code: 1})
     }
     // The warm-up checks every output and is left out of the samples.
     loop path in paths -> run_binary(root, path)
-    taken := [[Int]]{[], [], []}
+    ^taken: [[Int]]{[], [], []}
     loop _ in 0..<samples {
         loop index in 0..<paths.len() -> taken[index].push(run_binary(root, paths[index]))
     }

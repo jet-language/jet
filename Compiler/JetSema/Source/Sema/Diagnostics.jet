@@ -66,8 +66,8 @@ SemaSourceLocation: struct {
 
 sema_source_location_at: fn(segments: [SemaSourceSegment], site: Span) -> SemaSourceLocation? {
     if site.end < site.start || segments.len() == 0 -> return None
-    candidate := -1
-    matches := 0
+    ^candidate: -1
+    ^matches: 0
     if {
         site.start == site.end -> {
             loop (index, segment) in segments {
@@ -77,7 +77,7 @@ sema_source_location_at: fn(segments: [SemaSourceSegment], site: Span) -> SemaSo
                 }
             }
             if matches == 0 {
-                final_end := segments[0].generated.end
+                ^final_end: segments[0].generated.end
                 loop index in 1..<segments.len() {
                     if segments[index].generated.end > final_end {
                         final_end = segments[index].generated.end
@@ -123,7 +123,7 @@ sema_source_edit_at: fn(segments: [SemaSourceSegment], edit: TextEdit) -> TextEd
 }
 
 sema_diagnostic_with_source_location: fn(diagnostic: ^^Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
-    updated := diagnostic
+    ^updated: diagnostic
     span: updated.span ?? return updated
     location: sema_source_location_at(segments, span) ?? {
         updated.source_path = None
@@ -181,14 +181,16 @@ sema_has_error_since: fn(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
 // (E0107) or a function or method (E0102) that exists nowhere in scope.
 sema_has_unresolved_name_since: fn(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
     loop index in start..<diagnostics.len() {
-        if diagnostics[index].severity == DIAGNOSTIC_ERROR && (diagnostics[index].code == "E0102" || diagnostics[index].code == "E0107") -> return true
+        if diagnostics[index].severity == DIAGNOSTIC_ERROR && (diagnostics[index].code == "E0102" || diagnostics[index].code == "E0107") {
+            return true
+        }
     }
     false
 }
 
 // How many diagnostics from `start` on are errors.
 sema_error_count_since: fn(diagnostics: [Diagnostic], start: Int) -> Int Never! {
-    count := 0
+    ^count: 0
     loop index in start..<diagnostics.len() {
         if diagnostics[index].severity == DIAGNOSTIC_ERROR -> count += 1
     }
@@ -214,7 +216,7 @@ sema_registration_blocking_diagnostic: fn(diagnostic: Diagnostic) -> Bool Never!
 // Names the first error in `root_start..<start` as the cause of every report
 // from `start` on; nothing changes when that range has no error.
 sema_link_reports_to_first_error: fn(diagnostics: ^[Diagnostic], root_start: Int, start: Int) Never! {
-    root := -1
+    ^root: -1
     loop index in root_start..<start {
         if diagnostics[index].severity == DIAGNOSTIC_ERROR {
             root = index
@@ -234,7 +236,7 @@ sema_link_reports_to_first_error: fn(diagnostics: ^[Diagnostic], root_start: Int
 // derive expanded from `Prelude/Derives.jet` keeps that template's offsets,
 // which can run past a small file's end.
 sema_source_line_at: fn(segments: [SemaSourceSegment], site: Span) -> Int? {
-    last_index := -1
+    ^last_index: -1
     loop (index, segment) in segments {
         if site.start >= segment.generated.start && site.start < segment.generated.end {
             return sema_source_segment_line(segment, site.start - segment.generated.start)
@@ -249,8 +251,8 @@ sema_source_line_at: fn(segments: [SemaSourceSegment], site: Span) -> Int? {
 
 sema_source_segment_line: fn(segment: SemaSourceSegment, local_offset: Int) -> Int? {
     if segment.line_starts.len() == 0 -> return None
-    low := 0
-    high := segment.line_starts.len()
+    ^low: 0
+    ^high: segment.line_starts.len()
     loop low < high {
         middle: (low + high) /% 2
         if {
@@ -291,9 +293,7 @@ sema_lint: fn(code: String, span: Span, what: String, why: String, fix: String) 
 // Tools/Agent/DiagnosticCensus.jet counts each quoted code in a compiler
 // source as an emission, and its gate fails on an emitted code with no row,
 // so the registry holds every code a caller can name.
-sema_diagnostic_row: fn(code: String) -> DiagnosticRegistryRow {
-    diagnostic_registry_row_of(code)
-}
+sema_diagnostic_row: fn(code: String) -> DiagnosticRegistryRow { diagnostic_registry_row_of(code) }
 
 // L0511: a user binding or parameter spelled `err`.
 sema_err_shadow_lint: fn(span: Span) -> Diagnostic {
@@ -437,7 +437,7 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
     if near.len() == 0 {
         return sema_error("E0107", span, what, why, sema_unknown_name_declare_fix(name))
     }
-    names := ""
+    ^names: ""
     loop (index, candidate) in near {
         names = if {
             index == 0 -> "`{candidate}`"
@@ -461,8 +461,8 @@ sema_core_path_unimported: fn(base: Expr, member: String, call: String, scopes: 
     if sema_scope_resolve_index(scopes, "core") != None -> return None
     names: "{sema_core_path_text(base)}.{member}".split(".").to_list()
     // The index of the last name of the longest prefix that is a Core module.
-    module_end := 0
-    prefix := "core"
+    ^module_end: 0
+    ^prefix: "core"
     loop index in 1..<names.len() {
         prefix = "{prefix}.{names[index]}"
         if core_module_export(prefix) != None -> module_end = index
@@ -602,10 +602,10 @@ sema_trait_value_unimplemented: fn(required: Type, offered: Type, span: Span) ->
     if required == .TraitObject(bounds) {
         if bounds.len() == 1 {
             bound: type_unqualified_name(bounds[0])
-            name := type_name(offered)
+            ^name: type_name(offered)
             closure: offered == .Fn(_, _, _, _, _, _)
-            why := if closure -> "a closure has no declared type, so no impl can make it `{bound}`" else -> "`{name}` would need to implement `{bound}` before it can be used here"
-            fix := if closure -> "pass a value of a type that implements `{bound}`" else -> sema_trait_impl_fix(name, bound)
+            ^why: if closure -> "a closure has no declared type, so no impl can make it `{bound}`" else -> "`{name}` would need to implement `{bound}` before it can be used here"
+            ^fix: if closure -> "pass a value of a type that implements `{bound}`" else -> sema_trait_impl_fix(name, bound)
             if offered == .TraitObject(carried) {
                 leaves: loop trait_name in carried -> type_unqualified_name(trait_name)
                 if leaves.contains(bound) -> return None
@@ -624,7 +624,9 @@ sema_trait_value_unimplemented: fn(required: Type, offered: Type, span: Span) ->
 // Decimal) is core.math's type, which a program implements through that
 // import (`impl math.Decimal.Shown`); a bare `impl Decimal.Shown` is E0301.
 sema_trait_impl_fix: fn(name: String, bound: String) -> String Never! {
-    if name == "Decimal" || name == "Fraction" -> return "write `use core.math`, then `impl math.{name}.{bound} {{ … }}` with every required method"
+    if name == "Decimal" || name == "Fraction" {
+        return "write `use core.math`, then `impl math.{name}.{bound} {{ … }}` with every required method"
+    }
     "write `impl {name}.{bound} {{ … }}` with every required method"
 }
 
@@ -687,7 +689,7 @@ sema_nested_fn_failure_mismatch: fn(required: Type, offered: Type, span: Span) -
 // A slot whose check reports its own mismatch wording finds the generic
 // E0108 its value's check reported at the value, from `start` on.
 sema_value_mismatch_index: fn(diagnostics: [Diagnostic], start: Int, span: Span) -> Int? {
-    index := start
+    ^index: start
     loop index < diagnostics.len() {
         if diagnostics[index].code == "E0108" && diagnostics[index].span == (Val(span)) {
             return Val(index)
@@ -768,7 +770,7 @@ sema_type_int_range_text: fn(signed: Bool, bits: Int) -> String Never! {
 sema_type_nominal_leaf: fn(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> {
-            parts := name.split(".").to_list()
+            ^parts: name.split(".").to_list()
             if parts.len() < 2 -> parts = name.split(".").to_list()
             parts[parts.len() - 1]
         }
@@ -1002,9 +1004,9 @@ sema_diagnostic_placed_origin: fn(diagnostic: Diagnostic, entry_file: String, en
 // it, as it read them. `entry_path` is the path the entry's origin names: the
 // file the caller read it from, or None for text handed to the query.
 sema_diagnostic_loaded_origins: fn(diagnostics: [Diagnostic], files: [SourceFile], entry_file: String, entry_source: String, entry_path: String?) -> [SemaDiagnosticOrigin] Never! {
-    origins := [SemaDiagnosticOrigin]{}
+    ^origins: [SemaDiagnosticOrigin]{}
     // The entry text may be named both ways; it is hashed once.
-    entry_digest := ""
+    ^entry_digest: ""
     loop diagnostic in diagnostics {
         file: sema_diagnostic_origin_file(diagnostic) ?? next
         if sema_diagnostic_origin_file_row(origins, file) >= 0 -> next
@@ -1036,13 +1038,13 @@ sema_diagnostic_loaded_origins: fn(diagnostics: [Diagnostic], files: [SourceFile
 // stitched from several files, a file that starts at its first byte is that
 // file's own slice of the module source.
 sema_diagnostic_checked_origins: fn(diagnostics: [Diagnostic], registration: SemaRegistrationGraph, entry_digest: String, entry_path: String?) -> [SemaDiagnosticOrigin] Never! {
-    entry_file := ""
+    ^entry_file: ""
     loop row in registration.modules {
         if row.module_identity == registration.entry_module_identity {
             entry_file = "{row.source_file}"
         }
     }
-    origins := [SemaDiagnosticOrigin]{}
+    ^origins: [SemaDiagnosticOrigin]{}
     loop diagnostic in diagnostics {
         file: sema_diagnostic_origin_file(diagnostic) ?? next
         if sema_diagnostic_origin_file_row(origins, file) >= 0 -> next

@@ -45,7 +45,7 @@ indexed_root: fn() -> String {
 // Sixteen fixed colors, then a 240-entry ramp; each entry is 0xRRGGBB.
 palette: fn() -> [Int] {
     fixed: [Int]{0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA, 0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF}
-    entries := [Int]{}
+    ^entries: [Int]{}
     loop rgb in fixed -> entries.push(rgb)
     loop step in 0..<C_CYCLE {
         red: (step * 37) % 256
@@ -58,7 +58,7 @@ palette: fn() -> [Int] {
 // The key log: a header line, then "frame<TAB>key,key" for each frame that
 // holds keys. Frames the log does not name hold none.
 key_log: fn(path: String) -> [[String]] {
-    held := [[String]]{}
+    ^held: [[String]]{}
     loop _ in 0..<C_FRAMES -> held.push([String]{})
     text: files.read(path) ?? panic("key log {path}: {err}")
     loop line in text.lines() {
@@ -84,10 +84,10 @@ key_named: fn(name: String) -> Key? {
 // Frame i's events press the keys held in frame i but not in the one before
 // and release the keys held before but not in frame i.
 script: fn(held: [[String]]) -> [[ui.UIEvent]] {
-    frames := [[ui.UIEvent]]{}
-    before := [String]{}
+    ^frames: [[ui.UIEvent]]{}
+    ^before: [String]{}
     loop keys in held {
-        events := [ui.UIEvent]{}
+        ^events: [ui.UIEvent]{}
         loop name in before {
             if !keys.contains(name) && key_named(name) == .Val(key) {
                 events.push(ui.UIEvent.KeyUp(key))
@@ -119,7 +119,7 @@ shown: fn(index: Int, shift: Int) -> Int {
 present: fn(frame: ui.Frame, pixels: [Int], colors: [Int], shift: Int) {
     loop y in 0..<C_HEIGHT {
         row: y * C_WIDTH
-        x := 0
+        ^x: 0
         loop x < C_WIDTH {
             rgb: colors[shown(pixels[row + x], shift)]
             start: x
@@ -134,16 +134,16 @@ run: fn() {
     root: indexed_root()
     held: key_log("{root}/runs/keys.log")
     colors: palette()
-    pixels := [Int]{}
+    ^pixels: [Int]{}
     loop y in 0..<C_HEIGHT {
         loop x in 0..<C_WIDTH -> pixels.push(C_FIXED + ((x + 2 * y) /% 8) % C_CYCLE)
     }
     window: ui.headless(width: C_WIDTH, height: C_HEIGHT, script: script(held)) ?? panic("a {C_WIDTH}x{C_HEIGHT} window")
-    cursor_x := 156
-    cursor_y := 96
-    shift := 0
-    cycling := true
-    presented := 0
+    ^cursor_x: 156
+    ^cursor_y: 96
+    ^shift: 0
+    ^cycling: true
+    ^presented: 0
     loop frame in window.frames() {
         if frame.index >= C_FRAMES -> break
         if frame.is_key_down(.Left) -> cursor_x -= C_STEP
@@ -168,7 +168,7 @@ run: fn() {
 
 // An image as a PAM file (P7, RGB_ALPHA).
 save_pam: fn(image: ui.Image, path: String) {
-    bytes := "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
+    ^bytes: "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
     bytes.extend(image.pixels())
     files.write_bytes(path, bytes) ?? panic("write {path}: {err}")
 }

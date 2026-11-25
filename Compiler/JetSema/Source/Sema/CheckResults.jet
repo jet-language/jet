@@ -131,10 +131,10 @@ SemaCheckedFacts: struct {
 // modules pop off whole and go back in order, so no fact moves one at a time
 // and none drops here.
 sema_graph_modules_take_checked_facts: fn(modules: ^[SemaGraphModuleResult]) -> [SemaCheckedFacts] Never! {
-    taken := [SemaCheckedFacts]{}
-    kept := [SemaGraphModuleResult]{}
+    ^taken: [SemaCheckedFacts]{}
+    ^kept: [SemaGraphModuleResult]{}
     loop {
-        graph_module := modules.pop() ?? break
+        ^graph_module: modules.pop() ?? break
         taken.push(
             SemaCheckedFacts{
                 name_references: graph_module.name_references.move(),
@@ -206,15 +206,15 @@ SemaRegistrationPackagePolicy: struct {
 // A checked item expression as a flat body of its own; its Flat nodes are
 // rows of `context.arena`.
 sema_publish_expression: fn(value: TExpr, program: SemaProgramTables, context: ^SemaCheckContext) -> BodyExpr Never! {
-    flat := BodyFlat{tree: body_tree_new(), arena: context.arena.tree, into_arena: false}
+    ^flat: BodyFlat{tree: body_tree_new(), arena: context.arena.tree, into_arena: false}
     root: body_flat_expr(value, flat)
     // The arena's syntax column lends itself to the resolve only when an
     // arena row waits on it.
     lends: flat.out_arena_rows.len() > 0
-    syntax := if lends -> compiler_take_rows<Type>(context.arena.arena_syntax) else -> [Type]{}
+    ^syntax: if lends -> compiler_take_rows<Type>(context.arena.arena_syntax) else -> [Type]{}
     body_flat_resolve_types(flat, syntax, program, context)
     if lends -> context.arena.arena_syntax = syntax.move()
-    tree := flat.tree.move()
+    ^tree: flat.tree.move()
     sema_precise_bind(tree, program)
     // The expression's own symbol keys leave with it (body_flat_function).
     tree.symbols = context.arena.tree.symbols

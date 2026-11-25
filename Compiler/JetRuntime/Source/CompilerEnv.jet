@@ -16,15 +16,15 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
     rt_test_reads_text(I64{65}, I64{0})
     root: logical_environment_current()
     shared_acquire(root, false)
-    pairs := I64{0}
-    entry := rt_text_word(wrapping(root + I64{56}))
+    ^pairs: I64{0}
+    ^entry: rt_text_word(wrapping(root + I64{56}))
     loop entry != (I64{0}) {
         pairs += I64{1}
         entry = rt_text_word(entry)
     }
     data: compiler_env_columns_storage(pairs, output)
     entry = rt_text_word(wrapping(root + I64{56}))
-    at := I64{0}
+    ^at: I64{0}
     loop entry != (I64{0}) {
         host_startup_list(rt_text_word(wrapping(entry + I64{8})), rt_text_word(wrapping(entry + I64{16})), wrapping(data + at * I64{48}))
         host_startup_list(rt_text_word(wrapping(entry + I64{24})), rt_text_word(wrapping(entry + I64{32})), wrapping(wrapping(data + at * I64{48}) + I64{24}))
@@ -39,7 +39,7 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
     rt_test_reads_text(I64{65}, I64{0})
     host_environment_require()
     data: compiler_env_columns_storage(host_env_length, output)
-    at := I64{0}
+    ^at: I64{0}
     loop at < host_env_length {
         row: wrapping(host_env_rows + at * I64{24})
         key: rt_text_word(row)
@@ -61,7 +61,7 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
 
 // The order of two names' packed bytes: -1, 0 or 1.
 env_key_order: fn(left_data: I64, left_length: I64, right_data: I64, right_length: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     loop at < left_length && at < right_length {
         a: rt_text_byte(wrapping(left_data + at))
         b: rt_text_byte(wrapping(right_data + at))

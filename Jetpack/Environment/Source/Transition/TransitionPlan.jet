@@ -69,7 +69,7 @@ TransitionPlan: struct {
     reverse: Bool,
 
     summary: fn(self) -> TransitionSummary Never! {
-        changes := [ChangeSummary]{}
+        ^changes: [ChangeSummary]{}
         loop change in self.changes {
             old: if self.reverse -> change.after else -> change.before
             new: if self.reverse -> change.before else -> change.after
@@ -108,7 +108,7 @@ TransitionPlan: struct {
                 return Err(env_transition_error("stale transition: {change.relative} changed after the plan was created; rerun jet {verb} --check"))
             }
         }
-        snapshots := [TransitionSnapshot]{}
+        ^snapshots: [TransitionSnapshot]{}
         loop change in self.changes {
             path: env_transition_safe_path(self.root, change.relative)
             snapshots.push(TransitionSnapshot{path: path.copy(), state: env_transition_read_state(path)})
@@ -145,7 +145,7 @@ TransitionPlan: struct {
     // Restore each path this attempt wrote, newest first. A path that holds
     // bytes neither recorded nor written is preserved and reported.
     rollback: fn(self, snapshots: [TransitionSnapshot], error: EnvironmentError) -[FS, Env]> EnvironmentError Never! {
-        failures := [String]{}
+        ^failures: [String]{}
         count: self.changes.len()
         loop offset in 0..<count {
             index: count - 1 - offset
@@ -217,10 +217,10 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
     }
     package: loaded ?? return Err(env_transition_error("no {TRANSITION_PACKAGE_FILE} found in {canonical}"))
     entries: env_transition_source_entries(package_text)
-    changes := [TransitionFileChange]{}
-    root_after := ""
-    semantic_before := env_transition_semantic_fingerprint(package)
-    semantic_after := semantic_before
+    ^changes: [TransitionFileChange]{}
+    ^root_after: ""
+    ^semantic_before: env_transition_semantic_fingerprint(package)
+    ^semantic_after: semantic_before
     if target == {
         .Environment -> {
             field: env_transition_required_field(entries, "environments", package_path)
@@ -257,7 +257,7 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
             root_after = env_transition_add_member_reference(root_after, package.members, destination)
             root_after_facts: PackageFacts.parse_uncomposed(root_after, package_path) ?? return Err(env_transition_package_error(package_path, err))
             root_after_facts.validate_members() ?? return Err(env_transition_error(err.message()))
-            composed_after := root_after_facts
+            ^composed_after: root_after_facts
             composed_after.compose([ConfigFacts]{member_config}) ?? return Err(env_transition_error(err.message()))
             semantic_before = env_transition_semantic_fingerprint(package)
             semantic_after = env_transition_semantic_fingerprint(composed_after)
@@ -296,13 +296,13 @@ env_transition_fold_plan: fn(root: String, path: String) -[FS, Env]> TransitionP
     }
     journal_dir: files.join(canonical, TRANSITION_JOURNAL_DIR)
     entries: files.list_dir(journal_dir) ?? return Err(env_transition_error("no transition journal for {relative}: {err}"))
-    matches := [TransitionJournalMatch]{}
+    ^matches: [TransitionJournalMatch]{}
     loop entry in entries {
         journal_path: files.join(journal_dir, entry.name)
         info: files.stat(journal_path) ?? return Err(env_transition_error("couldn't read transition journal: {err}"))
         if info.is_symlink || !info.is_file -> next
         journal: env_transition_read_journal(journal_path)
-        records_relative := false
+        ^records_relative: false
         loop change in journal.changes {
             if change.relative == relative -> records_relative = true
         }
@@ -336,7 +336,7 @@ env_transition_forward_plan: fn(root: String, operation: String, changes: [Trans
 // generated contribution is checked for real conflicts and default errors.
 env_transition_validate_composed_root: fn(root_text: String, original: PackageFacts, config: ConfigFacts) EnvironmentError! {
     PackageFacts.parse_uncomposed(root_text, TRANSITION_PACKAGE_FILE) ?? return Err(env_transition_error(err.message()))
-    candidate := original
+    ^candidate: original
     candidate.compose([ConfigFacts]{config}) ?? return Err(env_transition_error(err.message()))
     candidate.validate_defaults() ?? return Err(env_transition_error(err.message()))
 }

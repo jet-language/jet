@@ -26,7 +26,7 @@ use {
 }
 
 jet_cli_gates_entry: fn(args: [String]) -> String? Never! {
-    skip := false
+    ^skip: false
     loop argument in args {
         if skip {
             skip = false
@@ -61,7 +61,7 @@ jet_cli_build_option_gate: fn(kind: GateKind, choice: BuildOptionChoice, detail:
 // Host reads the actual canonical TrustStore once; only typed projection lives
 // here. Unknown authorities/raw records survive exactly as the store parsed them.
 jet_cli_gate_trust_entries: fn(path: String, records: [TrustRecord]) -> [GateEntry] Never! {
-    rows := [GateEntry]{}
+    ^rows: [GateEntry]{}
     loop record in records {
         if record == {
             .Hash(hash) -> {
@@ -96,7 +96,7 @@ jet_cli_gate_invocation_kind: fn(argument: String) -> GateKind? Never! {
 jet_cli_gate_append_invocation: fn(ledger: ^GateLedger, args: [String]) Never! {
     loop (index, argument) in args {
         kind: jet_cli_gate_invocation_kind(argument) ?? next
-        subject := argument.copy()
+        ^subject: argument.copy()
         separate: argument == "--gate" || argument == "--allow" || argument == "--deny" || argument == "--target" || argument == "--profile"
         if separate && index + 1 < args.len() -> subject = "{argument} {args[index + 1]}"
         scope: if kind == GateKind.SessionFlag -> "session" else -> "build"
@@ -138,8 +138,8 @@ jet_cli_gates_span: fn(span: Span) -> JetCLIStatusValue Never! {
 
 jet_cli_gates_entry_json: fn(entry: GateEntry, modules: [JetDriverSourceQueryModule]) -> JetCLIStatusValue Never! {
     source: jet_cli_gates_source(modules, entry.source)
-    span := JetCLIStatusValue.Null
-    location := JetCLIStatusValue.Null
+    ^span: JetCLIStatusValue.Null
+    ^location: JetCLIStatusValue.Null
     if entry.span == .Val(site) {
         span = jet_cli_gates_span(site)
         location = jet_cli_gates_location(source, site)
@@ -182,9 +182,9 @@ jet_cli_gates_matches: fn(entry: GateEntry, kind: GateKind?, scope: String?) -> 
 jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModule], kind: GateKind?, scope: String?, json: Bool) -> String Never! {
     selected: loop (index, entry) in ledger.rows if jet_cli_gates_matches(entry, kind, scope) -> index
     if json {
-        names := [String]{}
-        counts := [String:Int]{}
-        entries := [JetCLIStatusValue]{}
+        ^names: [String]{}
+        ^counts: [String:Int]{}
+        ^entries: [JetCLIStatusValue]{}
         loop index in selected {
             entry: ledger.rows[index]
             name: gate_kind_name(entry.kind)
@@ -198,11 +198,11 @@ jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModul
         gates: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("entries", jet_cli_status_array(entries)), jet_cli_status_field("counts", jet_cli_status_object(fields))})
         return "{jet_cli_status_render("inspect.gates", true, [JetCLIStatusField]{jet_cli_status_field("gates", gates)})}\n"
     }
-    out := "Gates: {selected.len()}\n"
-    index := 0
+    ^out: "Gates: {selected.len()}\n"
+    ^index: 0
     loop index < selected.len() {
         entry_kind: ledger.rows[selected[index]].kind
-        end := index + 1
+        ^end: index + 1
         loop end < selected.len() && ledger.rows[selected[end]].kind == entry_kind -> end += 1
         count: end - index
         if {
@@ -214,14 +214,16 @@ jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModul
                 loop position in index..<end {
                     entry: ledger.rows[selected[position]]
                     source: jet_cli_gates_source(modules, entry.source)
-                    location := entry.source
+                    ^location: entry.source
                     if entry.span == .Val(site) {
                         location = "{entry.source}:{diagnostic_line_at(source, site.start)}:{diagnostic_column_at(source, site.start)}"
                     }
                     status: if entry.status == .Val(value) -> " status={value}" else -> ""
                     reason: if entry.reason == .Val(value) -> " reason={value}" else -> ""
                     out = "{out}    {location}  {entry.subject}  {entry.detail}{status}{reason}\n"
-                    loop provenance in entry.provenance -> out = "{out}      Provenance {provenance}\n"
+                    loop provenance in entry.provenance {
+                        out = "{out}      Provenance {provenance}\n"
+                    }
                     loop operation in entry.operations {
                         site: operation.span
                         out = "{out}      {entry.source}:{diagnostic_line_at(source, site.start)}:{diagnostic_column_at(source, site.start)}  {operation.kind}  {if operation.discharged -> "discharged" else -> "missing"}  required=[{operation.required.join(",")}] asserted=[{operation.asserted.join(",")}]\n"
@@ -235,8 +237,8 @@ jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModul
 }
 
 jet_cli_gates_diagnostics: fn(result: JetDriverGateQueryResult, snapshot: JetDriverAuthorizedSourceSnapshot, file: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput {
-    reports := [String]{}
-    stderr := ""
+    ^reports: [String]{}
+    ^stderr: ""
     base: if json -> jet_cli_report_base(file) else -> None
     diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, [SourceFile]{})
     loop (index, diagnostic) in diagnostics {
@@ -265,7 +267,7 @@ jet_cli_gates_host: fn(request: JetDriverCompileRequest, args: [String], file: S
     if !result.source.complete {
         return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
     }
-    kind := GateKind?{None}
+    ^kind: GateKind?{None}
     if jet_cli_option_value(args, "--kind") == .Val(value) {
         parsed: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, check_removal, link_override, impure, nondeterministic, dependency_grant, build_flag, session_flag, trust_grant, force_pin, host_facts, taint_scrub, duty_drop, state_transition, precision_demotion, structure, or lint_allow", color, json)
         kind = Val(parsed)

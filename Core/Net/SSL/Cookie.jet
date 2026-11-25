@@ -51,7 +51,7 @@ ssl_cookie_set_timeout: fn(ctx: ^SSLCookieContext, delay: Int) Never! { ctx.time
 
 /// Draw the HMAC key from `rng` (mbedtls_ssl_cookie_setup).
 ssl_cookie_setup: fn<R: RNG>(ctx: ^SSLCookieContext, rng: ^R) ssldefs.SSLError! {
-    key := ssldefs.ssl_zeros(SSL_COOKIE_MD_OUTLEN)
+    ^key: ssldefs.ssl_zeros(SSL_COOKIE_MD_OUTLEN)
     if !rng.fill(key) -> return Err(.RandomFailed)
     ctx.hmac_key = Val(hashes.hmac_key(.SHA256, key))
     ssldefs.ssl_wipe(key)
@@ -69,10 +69,10 @@ ssl_cookie_free: fn(ctx: ^SSLCookieContext) Never! {
 ssl_cookie_hmac: fn(ctx: SSLCookieContext, time: [U8], off: Int, cli_id: [U8]) -> [U8] ssldefs.SSLError! {
     if ctx.hmac_key == {
         .Val(key) -> {
-            inner := hashes.hash_clone(key.inner)
+            ^inner: hashes.hash_clone(key.inner)
             hashes.hash_update_range(inner, time, off, 4)
             hashes.hash_update(inner, cli_id)
-            hmac_out := hashes.hmac_finish(key, inner)
+            ^hmac_out: hashes.hmac_finish(key, inner)
             out: ssldefs.ssl_bytes_of(hmac_out, 0, SSL_COOKIE_HMAC_LEN)
             ssldefs.ssl_wipe(hmac_out)
             Ok(out)
@@ -84,7 +84,7 @@ ssl_cookie_hmac: fn(ctx: SSLCookieContext, time: [U8], off: Int, cli_id: [U8]) -
 /// A cookie for the client with transport ID `cli_id`
 /// (mbedtls_ssl_cookie_write).
 ssl_cookie_write: fn(ctx: SSLCookieContext, cli_id: [U8]) -> [U8] ssldefs.SSLError! {
-    cookie := ssldefs.ssl_zeros(4)
+    ^cookie: ssldefs.ssl_zeros(4)
     // C keeps the low 32 bits of the time.
     ssldefs.ssl_put_u32(cookie, 0, ssldefs.ssl_time())
     hmac: ssl_cookie_hmac(ctx, cookie, 0, cli_id) ?? return Err(err)
@@ -97,7 +97,7 @@ ssl_cookie_write: fn(ctx: SSLCookieContext, cli_id: [U8]) -> [U8] ssldefs.SSLErr
 /// where it returns -1).
 ssl_cookie_check: fn(ctx: SSLCookieContext, cookie: [U8], cli_id: [U8]) -> Bool ssldefs.SSLError! {
     if cookie.len() != SSL_COOKIE_LEN -> return Ok(false)
-    ref_hmac := if ssl_cookie_hmac(ctx, cookie, 0, cli_id) == {
+    ^ref_hmac: if ssl_cookie_hmac(ctx, cookie, 0, cli_id) == {
         .Ok(h) -> h
         .Err(_) -> {
             return Ok(false)
@@ -115,12 +115,12 @@ ssl_cookie_check: fn(ctx: SSLCookieContext, cookie: [U8], cli_id: [U8]) -> Bool 
 }
 
 ssl_cookie_write_locked: fn(ctx: Shared<SSLCookieContext>, cli_id: [U8]) -> [U8] ssldefs.SSLError! {
-    guard := ctx.guard_edit()
+    ^guard: ctx.guard_edit()
     ssl_cookie_write(guard.value, cli_id)
 }
 
 ssl_cookie_check_locked: fn(ctx: Shared<SSLCookieContext>, cookie: [U8], cli_id: [U8]) -> Bool ssldefs.SSLError! {
-    guard := ctx.guard_edit()
+    ^guard: ctx.guard_edit()
     ssl_cookie_check(guard.value, cookie, cli_id)
 }
 

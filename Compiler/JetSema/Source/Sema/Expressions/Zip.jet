@@ -58,7 +58,7 @@ sema_expression_zip_type_error: fn(message: String, span: Span, diagnostics: ^[D
 }
 
 sema_expression_zip_cloneable: fn(ty: Type, span: Span, message: String, check: ^SemaBodyCheck) {
-    facts := sema_copy_classify(ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.environment.generic_params, false)
+    ^facts: sema_copy_classify(ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.environment.generic_params, false)
     if facts.complete && !facts.accepted {
         sema_expression_zip_type_error(message, span, check.diagnostics)
     }
@@ -87,7 +87,7 @@ sema_expression_zip_numeric_fill: fn(fill: Type, literal: Int?, element: Type, c
         else -> {
             if fill == {
                 .InlineRange(_, _, _) -> {
-                    _ := sema_scope_require_knowledge_gate(check, SemaKnowledgePlane.Range, SemaKnowledgeGate.BoundedArithmetic, span)
+                    ^_: sema_scope_require_knowledge_gate(check, SemaKnowledgePlane.Range, SemaKnowledgeGate.BoundedArithmetic, span)
                 }
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
@@ -96,7 +96,7 @@ sema_expression_zip_numeric_fill: fn(fill: Type, literal: Int?, element: Type, c
 }
 
 sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String], common_fill: TExpr?, column_fills: TExpr?, fill_args: ^^[TExpr], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    elements := [Type]{}
+    ^elements: [Type]{}
     loop input in inputs {
         if sema_expression_zip_sequence_elem(input.ty) == {
             .Val(element) -> { elements.push(element) }
@@ -107,12 +107,12 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
         }
     }
 
-    names := [String]{}
+    ^names: [String]{}
     loop (index, _) in elements {
         name: if index < fields.len() -> fields[index] else -> sema_expression_zip_field_name(index, None)
         names.push(name)
     }
-    seen := [String]{}
+    ^seen: [String]{}
     loop name in names {
         if {
             seen.contains(name) -> {
@@ -124,22 +124,22 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
 
     // Zero columns yield Iter<Unit>; one column is the identity sequence.
     if elements.len() <= 1 {
-        result_element := if elements.len() == 1 -> elements[0] else -> Type.Named{name: "Unit"}
-        result_ty := Type.Apply{name: "Iter", args: [Type]{result_element}}
+        ^result_element: if elements.len() == 1 -> elements[0] else -> Type.Named{name: "Unit"}
+        ^result_ty: Type.Apply{name: "Iter", args: [Type]{result_element}}
         if inputs.len() == 0 {
-            empty := sema_tree_node(Type.List{element: Type.Named{name: "Unit"}}, TExprKind.ListLit{values: [TExpr]{}}, span)
-            value := sema_tree_node(result_ty, TExprKind.BuiltinMethod{receiver: empty, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+            ^empty: sema_tree_node(Type.List{element: Type.Named{name: "Unit"}}, TExprKind.ListLit{values: [TExpr]{}}, span)
+            ^value: sema_tree_node(result_ty, TExprKind.BuiltinMethod{receiver: empty, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
             return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
         }
-        receiver := inputs[0]
+        ^receiver: inputs[0]
         if sema_expression_zip_is_iter(receiver.ty) {
             return sema_expr_expected(receiver, expected, check.environment.*, check.program.*, check.diagnostics)
         }
-        value := sema_tree_node(result_ty, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+        ^value: sema_tree_node(result_ty, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
         return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
     }
 
-    output_elements := elements
+    ^output_elements: elements
     if method == "zip_pad" {
         if common_fill != None && column_fills != None {
             sema_expression_zip_type_error("`zip_pad` accepts either `fill:` or `fills:`, not both", span, check.diagnostics)
@@ -155,7 +155,7 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
                 .Tuple(fill_fields) -> {
                     loop (index, element) in elements {
                         field_name: names[index]
-                        field := Type?{None}
+                        ^field: Type?{None}
                         loop candidate in fill_fields {
                             if candidate.name == field_name {
                                 field = Val(candidate.ty)
@@ -168,7 +168,7 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
                         }
                         if field == .Val(fill_type) {
                             sema_expression_zip_cloneable(fill_type, span, "zip fill `{field_name}` has non-cloneable type `{type_name(fill_type)}`", check)
-                            literal := Int?{None}
+                            ^literal: Int?{None}
                             if fills.kind == .Tuple(values) {
                                 loop (position, candidate) in fill_fields {
                                     if candidate.name == field_name && position < values.len() {
@@ -192,12 +192,12 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
     }
 
     tuple_fields: loop index in 0..<elements.len() -> TypeTupleField{name: names[index], ty: output_elements[index]}
-    tuple_ty := Type.Tuple{fields: tuple_fields}
-    result_ty := Type.Apply{name: "Iter", args: [Type]{tuple_ty}}
-    receiver := inputs[0]
-    field_types := [Type]{}
+    ^tuple_ty: Type.Tuple{fields: tuple_fields}
+    ^result_ty: Type.Apply{name: "Iter", args: [Type]{tuple_ty}}
+    ^receiver: inputs[0]
+    ^field_types: [Type]{}
     loop field in tuple_fields -> field_types.push(field.ty)
-    fill_mode := TZipFillMode.DefaultNone
+    ^fill_mode: TZipFillMode.DefaultNone
     if method == "zip_pad" && fill_args.len() == 1 {
         if fill_args[0].ty == {
             .Tuple(_) -> { fill_mode = TZipFillMode.Columns }
@@ -206,14 +206,14 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
             }
         }
     }
-    mode := TZipMode.Strict
+    ^mode: TZipMode.Strict
     if method == "zip_short" -> mode = TZipMode.Short
     if method == "zip_pad" -> mode = TZipMode.Pad
-    operation := TBuiltinOp.Zip{mode: mode, fields: names, flatten: false, input_count: inputs.len(), fill_mode: fill_mode, field_types: field_types}
-    lowered_args := [TExpr]{}
+    ^operation: TBuiltinOp.Zip{mode: mode, fields: names, flatten: false, input_count: inputs.len(), fill_mode: fill_mode, field_types: field_types}
+    ^lowered_args: [TExpr]{}
     loop index in 1..<inputs.len() -> lowered_args.push(inputs[index])
     lowered_args.extend(fill_args.move())
-    value := sema_tree_node(result_ty, TExprKind.BuiltinMethod{receiver: receiver, operation: operation, args: lowered_args}, span)
+    ^value: sema_tree_node(result_ty, TExprKind.BuiltinMethod{receiver: receiver, operation: operation, args: lowered_args}, span)
     return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
@@ -225,12 +225,12 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, check: ^SemaBodyC
     if !sema_expression_zip_family_name(call.name) || sema_scope_resolve_index(check.scopes, call.name) != None {
         return None
     }
-    method := call.name
-    is_pad := method == "zip_pad"
-    inputs := [TExpr]{}
-    fields := [String]{}
+    ^method: call.name
+    ^is_pad: method == "zip_pad"
+    ^inputs: [TExpr]{}
+    ^fields: [String]{}
     loop arg_index in 0..<call.args.len() {
-        label := if call.args[arg_index].label == {
+        ^label: if call.args[arg_index].label == {
             .Val(value) -> Val(value.name)
             .None -> None
         }
@@ -240,18 +240,18 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, check: ^SemaBodyC
         inputs.push(checked)
     }
 
-    common_fill_arg := CallArg?{None}
-    column_fills_arg := CallArg?{None}
+    ^common_fill_arg: CallArg?{None}
+    ^column_fills_arg: CallArg?{None}
     loop arg_index in 0..<call.args.len() {
-        label := if call.args[arg_index].label == {
+        ^label: if call.args[arg_index].label == {
             .Val(value) -> Val(value.name)
             .None -> None
         }
         if is_pad && label == (Val("fill")) -> common_fill_arg = Val(call.args[arg_index])
         if is_pad && label == (Val("fills")) -> column_fills_arg = Val(call.args[arg_index])
     }
-    common_fill := TExpr?{None}
-    column_fills := TExpr?{None}
+    ^common_fill: TExpr?{None}
+    ^column_fills: TExpr?{None}
     if common_fill_arg == .Val(arg) {
         checked: sema_expression_zip_infer_arg(arg, check) ?? return None
         common_fill = Val(checked)
@@ -260,9 +260,9 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, check: ^SemaBodyC
         checked: sema_expression_zip_infer_arg(arg, check) ?? return None
         column_fills = Val(checked)
     }
-    fill_args := [TExpr]{}
+    ^fill_args: [TExpr]{}
     loop arg_index in 0..<call.args.len() {
-        label := if call.args[arg_index].label == {
+        ^label: if call.args[arg_index].label == {
             .Val(value) -> Val(value.name)
             .None -> None
         }
@@ -282,7 +282,7 @@ sema_expression_zip_consume_receiver: fn(receiver: Expr, receiver_type: Type, me
     if receiver == {
         .Ident(name, receiver_span, _) -> {
             index: sema_scope_resolve_index(check.scopes, name) ?? return true
-            binding := check.scopes.bindings[index]
+            ^binding: check.scopes.bindings[index]
             if binding.symbol.kind == SymbolKind.Parameter && !sema_ownership_type_is_copy(receiver_type) && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write) {
                 check.diagnostics.push(sema_error("E0120", receiver_span, "`{name}` was not moved here, so `.{method}()` can't take it", "this function has read access only and does not own the value", "call it on a copy, or take ownership: `{name}: ^^{type_name(receiver_type)}`"))
                 return false
@@ -301,14 +301,14 @@ sema_expression_zip_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     if !sema_expression_zip_family_name(method) || sema_expression_zip_sequence_elem(receiver_value.ty) == None {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    is_pad := method == "zip_pad"
-    inputs := [TExpr]{receiver_value}
-    fields := [String]{sema_expression_zip_field_name(0, None)}
-    common_fill := TExpr?{None}
-    column_fills := TExpr?{None}
-    fill_args := [TExpr]{}
+    ^is_pad: method == "zip_pad"
+    ^inputs: [TExpr]{receiver_value}
+    ^fields: [String]{sema_expression_zip_field_name(0, None)}
+    ^common_fill: TExpr?{None}
+    ^column_fills: TExpr?{None}
+    ^fill_args: [TExpr]{}
     loop arg in args {
-        label := if arg.label == {
+        ^label: if arg.label == {
             .Val(value) -> Val(value.name)
             .None -> None
         }
@@ -345,11 +345,11 @@ sema_expression_option_zip: fn(receiver_value: TExpr, args: [CallArg], span: Spa
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 1 {
         check.diagnostics.push(sema_error("E0104", span, "`.zip()` takes one optional argument, got {args.len()}", "`.zip(other)` pairs this optional with another: present only when both are", "call `a.zip(b)` with exactly one `T?` argument"))
-        loop argument in args -> _ := sema_expression_zip_infer_arg(argument, check)
+        loop argument in args -> ^_: sema_expression_zip_infer_arg(argument, check)
         return failed
     }
     other: sema_expression_zip_infer_arg(args[0], check) ?? return failed
-    fields := [TypeTupleField]{}
+    ^fields: [TypeTupleField]{}
     if receiver_value.ty == .Option(left) && other.ty == .Option(right) {
         // copy: `left` and `right` are payloads of the operands' types, which the operands keep
         fields = [TypeTupleField]{TypeTupleField{name: "a", ty: left.copy()}, TypeTupleField{name: "b", ty: right}}

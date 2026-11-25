@@ -30,7 +30,7 @@ fail: fn(message: String) -> Never {
 // `tested_root`: every tracked path's bytes, and no path only it has.
 same_tree: fn(tested_root: String) {
     tracked: Sh{"git -c core.quotepath=off ls-files"}.lines()
-    drift := [String]{}
+    ^drift: [String]{}
     loop path in tracked {
         tested: "{tested_root}/{path}"
         if {
@@ -80,7 +80,7 @@ run: fn() {
     if (Sh{"git status --porcelain=v1 -uno"}.text()) != "" {
         fail("integ-land: dev worktree has changes")
     }
-    _ := Sh{"git fetch -q origin"}.ok()
+    ^_: Sh{"git fetch -q origin"}.ok()
     base: files.read("{integ}/BASE").trim()
     // origin/dev may have moved past BASE only by changes that are not build inputs and share no file with this
     // batch: the net diff BASE..origin/dev may touch no Compiler/, Core/, Jetpack/ or Tools/ file and none of the
@@ -95,7 +95,7 @@ run: fn() {
     if !(Sh{"git merge -q --ff-only origin/dev"}.ok()) {
         fail("integ-land: cannot fast-forward the worktree to origin/dev")
     }
-    landed := [String]{}
+    ^landed: [String]{}
     loop given in args.slice(1, args.len()) {
         sub: given.removesuffix("/")
         name: files.basename(sub)

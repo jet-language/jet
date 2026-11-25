@@ -10,7 +10,7 @@ use {
 // The first run of message 2 fails. A failing handler restarts the worker
 // from its `state:` value, so the flag is a shared cell the restart keeps.
 tally: fn(failed: ^Shared<Bool>, n: Int) -> Int {
-    flag := failed.guard_edit()
+    ^flag: failed.guard_edit()
     if n == 2 && !flag.value {
         flag.value = true
         return Err("the first run of 2 fails")
@@ -21,7 +21,7 @@ tally: fn(failed: ^Shared<Bool>, n: Int) -> Int {
 // The receipt's state once it is Delivered, or after five seconds. A
 // Delivery is a single-use handle, so `settle` takes it.
 settle: fn(delivery: ^^Delivery) -> DeliveryState {
-    waited := 0
+    ^waited: 0
     loop {
         state: delivery.copy().status() ?? panic("status")
         if state == .Delivered || waited == 500 -> return state
@@ -31,11 +31,11 @@ settle: fn(delivery: ^^Delivery) -> DeliveryState {
 }
 
 run: fn() {
-    temp := testing.temp_dir("durable-handoff")
+    ^temp: testing.temp_dir("durable-handoff")
     state_path: Path.from(temp).join("state.log").to_string()
     retention: Duration.seconds(86400) ?? panic("retention")
-    runtime := service.runtime("{state_path}.delivery", retention: retention)
-    tree := service.tree("durable-handoff")
+    ^runtime: service.runtime("{state_path}.delivery", retention: retention)
+    ^tree: service.tree("durable-handoff")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(state_path) ?? panic("state")
     tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")

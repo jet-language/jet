@@ -95,8 +95,8 @@ pkg_fetch_missing_manifest: fn(directory: String, name: String) -> PackageFetchE
 }
 
 pkg_fetch_closure: fn(lock: LockFile, target: String) -> [String] Never! {
-    seen := [String]{}
-    pending := [String]{target}
+    ^seen: [String]{}
+    ^pending: [String]{target}
     loop pending.len() > 0 {
         name: pending.pop() ?? break
         if seen.contains(name) -> next
@@ -112,7 +112,7 @@ pkg_fetch_closure: fn(lock: LockFile, target: String) -> [String] Never! {
 pkg_fetch_update_scope: fn(previous: LockFile?, options: PackageFetchOptions) -> [String] Never! {
     if !options.update -> return [String]{}
     if options.update_dep == .Val(target) {
-        scope := if previous == .Val(lock) -> pkg_fetch_closure(lock, target) else -> [String]{}
+        ^scope: if previous == .Val(lock) -> pkg_fetch_closure(lock, target) else -> [String]{}
         if !scope.contains(target) -> scope.push(target.copy())
         return scope
     }
@@ -223,9 +223,9 @@ pkg_fetch_source_node: fn(verification: StoreVerification, roots: HangarRoots, c
     manifest: pkg_fetch_load_manifest(snapshot.path(), name)
     pkg_fetch_record_version(resolver, manifest.package.name, manifest.package.version, chain)
     dependencies: pkg_lock_manifest_dependency_names(manifest)
-    fingerprints := [String]{}
+    ^fingerprints: [String]{}
     loop child in dependencies {
-        child_chain := chain
+        ^child_chain: chain
         child_chain.push(child.copy())
         pkg_fetch_resolve(verification, roots, context, resolver, child, manifest.dependencies[child], snapshot.path(), child_chain)
         fingerprints.push(resolver.nodes[child].package.fingerprint)
@@ -240,7 +240,7 @@ pkg_fetch_source_node: fn(verification: StoreVerification, roots: HangarRoots, c
 
 // Lexical path normalization precedes the separate held/canonical checks.
 pkg_fetch_normalize_path: fn(path: String) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." && parts.len() > 0 && parts[parts.len() - 1] != ".." -> _: parts.pop() else if part != ".." || !path.starts_with("/") {

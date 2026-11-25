@@ -76,7 +76,7 @@ s6_retirement_reviewed_contains_word: fn(text: String, word: String) -> Bool {
     raw: text.bytes()
     needle: word.bytes()
     loop start in 0..<(raw.len() - needle.len() + 1) {
-        matches := true
+        ^matches: true
         loop at in 0..<needle.len() {
             if raw[start + at] != needle[at] -> matches = false
         }
@@ -157,7 +157,7 @@ s6_retirement_reviewed_type_prefix: fn(source: String, token: Token) -> Bool {
 }
 
 s6_retirement_reviewed_line: fn(source: String, offset: Int) -> Int {
-    line := 1
+    ^line: 1
     bytes: source.bytes()
     loop at in 0..<offset {
         if (Int{bytes[at]}) == 10 -> line += 1
@@ -173,16 +173,16 @@ s6_retirement_reviewed_value_end: fn(token: Token) -> Bool {
 // expression end or in a contract position.
 s6_retirement_reviewed_candidates: fn(source: String) -> [S6RetirementReviewedCandidate] {
     lexed: lex(source.bytes())
-    tokens := [Token]{}
+    ^tokens: [Token]{}
     s6_retirement_reviewed_collect(lexed.tables, lexed.tokens, tokens)
     tokens.sort_by(fn(token) { token.span.start })
-    candidates := [S6RetirementReviewedCandidate]{}
+    ^candidates: [S6RetirementReviewedCandidate]{}
     loop index in 0..<tokens.len() {
         token: tokens[index]
-        proposed := ""
+        ^proposed: ""
         if token.kind == TOKEN_BANG {
             marker_negation: index >= 2 && tokens[index - 2].kind == TOKEN_HASH
-            canonical_prefix := false
+            ^canonical_prefix: false
             if index + 1 < tokens.len() {
                 following: tokens[index + 1]
                 canonical_prefix = token.span.end == following.span.start && (following.kind == TOKEN_IDENT || following.kind == TOKEN_LPAREN || following.kind == TOKEN_LBRACKET || following.kind == TOKEN_STAR || following.kind == TOKEN_KW_FN)
@@ -228,7 +228,7 @@ s6_retirement_reviewed_parses: fn(source: String) -> Bool {
 // (`table.delete(key: K) -[DB]> DBError!`), so that shape parses without
 // the name.
 s6_retirement_reviewed_snippet_current: fn(source: String) -> Bool {
-    shapes := [String]{source, "probe: fn() {{\n{source}\n}}", "alias Probe: {source}", "probe: fn() {source} {{}}", "probe: fn() -> {source} {{}}", "{source} {{}}", "probe: fn{source} {{}}"}
+    ^shapes: [String]{source, "probe: fn() {{\n{source}\n}}", "alias Probe: {source}", "probe: fn() {source} {{}}", "probe: fn() -> {source} {{}}", "{source} {{}}", "probe: fn{source} {{}}"}
     open: s6_retirement_reviewed_find(source, "(", 0)
     if open > 0 && !s6_retirement_reviewed_slice(source, 0, open).contains(" ") {
         shapes.push("probe: fn{s6_retirement_reviewed_slice(source, open, source.bytes().len())} {{}}")
@@ -243,8 +243,8 @@ s6_retirement_reviewed_snippet_current: fn(source: String) -> Bool {
 // a JSON or source string actually carries.
 s6_retirement_reviewed_unescape: fn(source: String) -> String {
     bytes: source.bytes()
-    out := [U8]{}
-    cursor := 0
+    ^out: [U8]{}
+    ^cursor: 0
     loop cursor < bytes.len() {
         byte: bytes[cursor]
         if (Int{byte}) == 92 && cursor + 1 < bytes.len() {
@@ -298,7 +298,7 @@ s6_retirement_reviewed_line_current: fn(line: String) -> Bool {
 s6_retirement_reviewed_rewrites_current: fn(bytes: [U8], from: Int, to: Int, candidate: S6RetirementReviewedCandidate) -> Bool {
     head: s6_retirement_reviewed_slice_bytes(bytes, from, candidate.start)
     tail: s6_retirement_reviewed_slice_bytes(bytes, candidate.end, to)
-    rewrites := [String]{}
+    ^rewrites: [String]{}
     if !candidate.question || candidate.after_value -> rewrites.push("{head}{tail}")
     if candidate.after >= candidate.end && candidate.after <= to {
         between: s6_retirement_reviewed_slice_bytes(bytes, candidate.end, candidate.after)
@@ -330,12 +330,12 @@ s6_retirement_reviewed_hits: fn(source: String) -> [S6RetirementReviewedHit] {
         return [S6RetirementReviewedHit]{}
     }
     bytes: source.bytes()
-    hits := [S6RetirementReviewedHit]{}
-    rejected := [Int:Bool]{}
+    ^hits: [S6RetirementReviewedHit]{}
+    ^rejected: [Int:Bool]{}
     loop candidate in candidates {
-        from := candidate.start
+        ^from: candidate.start
         loop from > 0 && (Int{bytes[from - 1]}) != 10 -> from -= 1
-        to := candidate.end
+        ^to: candidate.end
         loop to < bytes.len() && (Int{bytes[to]}) != 10 -> to += 1
         line_rejected: rejected.get(from) ?? !s6_retirement_reviewed_line_current(s6_retirement_reviewed_slice_bytes(bytes, from, to).trim().copy())
         rejected[from] = line_rejected
@@ -386,7 +386,7 @@ s6_retirement_reviewed_fence: fn(line: String) -> S6RetirementReviewedFence? {
     if bytes.len() == 0 -> return None
     marker: Int{bytes[0]}
     if marker != 96 && marker != 126 -> return None
-    length := 0
+    ^length: 0
     loop length < bytes.len() && (Int{bytes[length]}) == marker -> length += 1
     if length < 3 -> return None
     Val(S6RetirementReviewedFence{marker: marker, length: length, rest: s6_retirement_reviewed_slice(trimmed, length, bytes.len())})
@@ -394,23 +394,23 @@ s6_retirement_reviewed_fence: fn(line: String) -> S6RetirementReviewedFence? {
 
 s6_retirement_reviewed_inline: fn(line: String) -> [String] {
     bytes: line.bytes()
-    fragments := [String]{}
-    cursor := 0
+    ^fragments: [String]{}
+    ^cursor: 0
     loop cursor < bytes.len() {
         if (Int{bytes[cursor]}) != 96 {
             cursor += 1
             next
         }
-        length := 0
+        ^length: 0
         loop cursor + length < bytes.len() && (Int{bytes[cursor + length]}) == 96 -> length += 1
         start: cursor + length
-        close := start
+        ^close: start
         loop close < bytes.len() {
             if (Int{bytes[close]}) != 96 {
                 close += 1
                 next
             }
-            close_length := 0
+            ^close_length: 0
             loop close + close_length < bytes.len() && (Int{bytes[close + close_length]}) == 96 {
                 close_length += 1
             }
@@ -440,7 +440,7 @@ s6_retirement_reviewed_find: fn(text: String, needle: String, from: Int) -> Int 
 
 s6_retirement_reviewed_find_bytes: fn(raw: [U8], wanted: [U8], from: Int) -> Int {
     loop start in from..<(raw.len() - wanted.len() + 1) {
-        matches := true
+        ^matches: true
         loop at in 0..<wanted.len() {
             if raw[start + at] != wanted[at] -> matches = false
         }
@@ -457,17 +457,17 @@ s6_retirement_reviewed_slice_bytes: fn(bytes: [U8], start: Int, end: Int) -> Str
 // a large data file costs linear time rather than one full rescan per string.
 s6_retirement_reviewed_embedded: fn(text: String) -> [S6RetirementReviewedFragment] {
     bytes: text.bytes()
-    fragments := [S6RetirementReviewedFragment]{}
-    cursor := 0
-    line := 1
-    line_cursor := 0
+    ^fragments: [S6RetirementReviewedFragment]{}
+    ^cursor: 0
+    ^line: 1
+    ^line_cursor: 0
     loop cursor < bytes.len() {
         loop line_cursor < cursor {
             if (Int{bytes[line_cursor]}) == 10 -> line += 1
             line_cursor += 1
         }
         if (Int{bytes[cursor]}) == 114 {
-            quote := cursor + 1
+            ^quote: cursor + 1
             loop quote < bytes.len() && (Int{bytes[quote]}) == 35 -> quote += 1
             if quote < bytes.len() && (Int{bytes[quote]}) == 34 {
                 hashes: s6_retirement_reviewed_slice_bytes(bytes, cursor + 1, quote)
@@ -488,7 +488,7 @@ s6_retirement_reviewed_embedded: fn(text: String) -> [S6RetirementReviewedFragme
         }
         if (Int{bytes[cursor]}) == 34 {
             start: cursor + 1
-            end := start
+            ^end: start
             loop end < bytes.len() {
                 if (Int{bytes[end]}) == 92 -> end += 2 else if (Int{bytes[end]}) == 34 -> break else {
                     end += 1
@@ -526,18 +526,18 @@ s6_retirement_reviewed_fragments: fn(path: String, text: String) -> [S6Retiremen
         return [S6RetirementReviewedFragment]{S6RetirementReviewedFragment{first_line: 1, source: source}}
     }
     if extension != "md" -> return s6_retirement_reviewed_embedded(text)
-    fragments := [S6RetirementReviewedFragment]{}
-    opened := false
-    marker := 0
-    length := 0
-    first_line := 0
-    active := false
-    source := ""
-    index := 0
+    ^fragments: [S6RetirementReviewedFragment]{}
+    ^opened: false
+    ^marker: 0
+    ^length: 0
+    ^first_line: 0
+    ^active: false
+    ^source: ""
+    ^index: 0
     loop line in text.lines() {
         fence: s6_retirement_reviewed_fence(line)
         if opened {
-            closing := false
+            ^closing: false
             if fence == .Val(found) {
                 closing = found.marker == marker && found.length >= length && found.rest.trim() == ""
             }
@@ -618,7 +618,7 @@ s6_retirement_reviewed_walk: fn(path: String, offenders: ^[String]) {
 }
 
 s6_retirement_reviewed_surface_law: fn() {
-    offenders := [String]{}
+    ^offenders: [String]{}
     // The live tree: the Rust law walked crates, Source and corelib, which the
     // compiler, Core and Jetpack trees replaced.
     roots: [String]{"Compiler", "Core", "Jetpack", "Examples", "Tests", "Docs", "Tools"}

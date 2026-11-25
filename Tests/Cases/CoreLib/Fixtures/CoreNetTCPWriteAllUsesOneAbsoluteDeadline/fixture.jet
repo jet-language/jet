@@ -11,22 +11,22 @@ run: fn() {
     typed_address: net.listener_local_socket_addr(listener) ?? panic("address")
     address: net.socket_to_string(typed_address)
     server: task {
-        stream := net.tcp_accept(listener) ?? return
+        ^stream: net.tcp_accept(listener) ?? return
         loop {
-            chunk := stream.read_bytes(65536) ?? return
+            ^chunk: stream.read_bytes(65536) ?? return
             if chunk.len() == 0 {
                 return
             }
             time.sleep(15ms)
         }
     }
-    client := net.tcp_connect(address) ?? panic("connect")
-    started := time.unix_ns() /% 1_000_000
+    ^client: net.tcp_connect(address) ?? panic("connect")
+    ^started: time.unix_ns() /% 1_000_000
     if client.write("x".repeat(16000000), deadline: 80ms) == {
         .Ok(_) -> { print("unexpected write") }
         .Err(error) -> print(net.error_message(error))
     }
-    elapsed := time.unix_ns() /% 1_000_000 - started
+    ^elapsed: time.unix_ns() /% 1_000_000 - started
     print(elapsed < 300)
     client.close() ?? panic("close")
     server.join() ?? panic("server task failed")

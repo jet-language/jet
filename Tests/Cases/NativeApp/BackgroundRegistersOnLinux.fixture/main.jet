@@ -15,7 +15,7 @@ RUNS: Shared{Runs{count: 0}}
 
 // One background refresh; the third finds the network down.
 refresh: fn() app.Notice! {
-    held := RUNS.guard_edit()
+    ^held: RUNS.guard_edit()
     held.value.count += 1
     if held.value.count == 3 -> return Err(app.Notice{text: "Couldn't refresh the board: offline."})
     Ok()

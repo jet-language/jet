@@ -10,9 +10,9 @@
 use jet_foundation.[Diagnostic, Func, Span, WebBucket, target_os_name, target_os_parse]
 
 sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) {
-    gate_of_type := [String:String]{}
+    ^gate_of_type: [String:String]{}
     loop graph_module in graph.modules {
-        found := [Diagnostic]{}
+        ^found: [Diagnostic]{}
         loop item in graph_module.program.items {
             if item == {
                 .Impl(implementation) -> {
@@ -44,7 +44,7 @@ sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic
         return
     }
     loop graph_module in graph.modules {
-        found := [Diagnostic]{}
+        ^found: [Diagnostic]{}
         loop item in graph_module.program.items {
             if item == {
                 .Func(function) -> { sema_os_target_signature(function, None, gate_of_type, found) }

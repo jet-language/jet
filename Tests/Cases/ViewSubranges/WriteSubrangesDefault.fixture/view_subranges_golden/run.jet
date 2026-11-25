@@ -21,7 +21,7 @@ Packet: struct {
 }
 
 total: fn(view: View<U8>) -> Int {
-    sum := 0
+    ^sum: 0
     loop byte in view -> sum += (Int{byte})
     sum
 }
@@ -42,13 +42,13 @@ fill: fn(window: ViewMut<U8>, value: Int) {
 
 // A write window over part of a write window reborrows the same storage.
 tail_mut: fn(window: ViewMut<U8>, start: Int) -> ViewMut<U8> from window {
-    tail: ^window[start..<window.len()]
+    tail: window[start..<window.len()].in_place()
     tail
 }
 
 // A reader over a view parameter grabs subranges of that view.
 read: fn(all: View<U8>) {
-    reader := Reader{bytes: all, at: 0}
+    ^reader: Reader{bytes: all, at: 0}
     first: reader.grab(2) ?? return
     print(total(first))
     second: reader.grab(3) ?? return
@@ -73,20 +73,20 @@ run: fn() {
     print(total(packet.body))
     // A write subrange of a write view takes over that view's exclusive loan,
     // and writes through it land in `data`.
-    data := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
-    edit: ^data[0..<data.len()]
-    window: ^edit[1..<4]
+    ^data: [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
+    edit: data[0..<data.len()].in_place()
+    window: edit[1..<4].in_place()
     window[0] = U8{7}
     window[2] = U8{9}
-    center: ^window[1..<2]
+    center: window[1..<2].in_place()
     center[0] = U8{5}
     loop byte in data -> print(Int{byte})
     // Constant-bound write windows lend their storage to a write view
     // parameter, and a write subrange returned from one still reaches `cells`.
-    cells := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
-    lead: ^cells[0..<2]
+    ^cells: [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
+    lead: cells[0..<2].in_place()
     fill(lead, 7)
-    whole: ^cells[0..<5]
+    whole: cells[0..<5].in_place()
     rest: tail_mut(whole, 3)
     fill(rest, 9)
     loop byte in cells -> print(Int{byte})

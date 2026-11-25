@@ -190,7 +190,7 @@ perf_validate_trend: fn(value: CanonicalJSON) PerfBudgetError! {
         ids: perf_report_index(f, "report_ids")
         estimators: perf_report_index(f, "estimators")
         perf_report_array(f[ids].value, "trend.report_ids")
-        id_count := 0
+        ^id_count: 0
         if f[ids].value == .Array(values) {
             id_count = values.len()
             loop id in values -> _: perf_report_hex64(id, "trend report id")
@@ -242,7 +242,7 @@ perf_validate_provider: fn(value: CanonicalJSON) PerfBudgetError! {
         _: perf_report_unsigned(f[perf_report_index(f, "logical_cpus")].value, "provider.logical_cpus")
         _: perf_report_unsigned(f[perf_report_index(f, "memory_bytes")].value, "provider.memory_bytes")
         hash: perf_report_hex64(f[perf_report_index(f, "hardware_fingerprint")].value, "provider.hardware_fingerprint")
-        unhashed := [CanonicalJSONField]{}
+        ^unhashed: [CanonicalJSONField]{}
         loop field in f {
             if field.key != "hardware_fingerprint" -> unhashed.push(field.copy())
         }
@@ -286,7 +286,7 @@ perf_validate_comparison: fn(value: CanonicalJSON) PerfBudgetError! {
 
 perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
     if value == .Object(f) {
-        required := [String]{"budget_id", "budget_spec", "budget_spec_sha256", "source", "metric", "target_class", "unit", "direction", "provider", "comparison", "enforcement", "context_key", "policy", "samples", "statistics", "history", "baseline", "decision"}
+        ^required: [String]{"budget_id", "budget_spec", "budget_spec_sha256", "source", "metric", "target_class", "unit", "direction", "provider", "comparison", "enforcement", "context_key", "policy", "samples", "statistics", "history", "baseline", "decision"}
         compile: perf_report_find(f, "compile")
         if compile != None -> required.push("compile")
         perf_report_object(value, "measurement", required)
@@ -344,8 +344,8 @@ perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
 
 perf_validate_phase_totals: fn(value: CanonicalJSON, name: String) -> [String:Int] PerfBudgetError! {
     perf_report_array(value, name)
-    totals := [String:Int]{}
-    prior := ""
+    ^totals: [String:Int]{}
+    ^prior: ""
     if value == .Array(entries) {
         loop entry in entries {
             perf_report_object(entry, "{name} entry", [String]{"name", "ns"})
@@ -427,7 +427,7 @@ perf_validate_compile_metadata: fn(value: CanonicalJSON, measurement_samples: Ca
         }
         records: perf_report_index(f, "sample_records")
         perf_report_array(f[records].value, "compile.sample_records")
-        aggregate := PerfCompileAggregate{phases: [String:Int]{}, elapsed: [PerfRational]{}, peak_rss_bytes: 0}
+        ^aggregate: PerfCompileAggregate{phases: [String:Int]{}, elapsed: [PerfRational]{}, peak_rss_bytes: 0}
         if f[records].value == .Array(entries) {
             if entries.len() != samples {
                 return Err(perf_error("compile.sample_records count does not match compile.samples"))
@@ -452,10 +452,10 @@ perf_validate_compile_metadata: fn(value: CanonicalJSON, measurement_samples: Ca
         if phases != aggregate.phases {
             return Err(perf_error("compile.phase_totals does not equal the per-sample phase totals"))
         }
-        sum := perf_rational_zero()
+        ^sum: perf_rational_zero()
         loop v in aggregate.elapsed -> sum = perf_rational_add(sum, v)
         mean: perf_rational_div(sum, perf_rational_integer(aggregate.elapsed.len()))
-        squares := perf_rational_zero()
+        ^squares: perf_rational_zero()
         loop v in aggregate.elapsed {
             delta: perf_rational_sub(v, mean)
             squares = perf_rational_add(squares, perf_rational_mul(delta, delta))
@@ -469,7 +469,7 @@ perf_validate_compile_metadata: fn(value: CanonicalJSON, measurement_samples: Ca
 
 perf_sanitize_measurement: fn(value: CanonicalJSON) -> CanonicalJSON PerfBudgetError! {
     if value == .Object(f) {
-        out := [CanonicalJSONField]{}
+        ^out: [CanonicalJSONField]{}
         loop field in f {
             if field.key != "history" && field.key != "baseline" && field.key != "decision" {
                 out.push(field.copy())
@@ -507,7 +507,7 @@ perf_budget_context_key: fn(subject: [CanonicalJSONField], tool: [CanonicalJSONF
     provider: perf_report_index(measurement, "provider")
     if measurement[metric].value == .Object(m) {
         if measurement[provider].value == .Object(p) {
-            input := "jet-budget-context-v1".bytes()
+            ^input: "jet-budget-context-v1".bytes()
             input.push(U8{0})
             perf_report_frame(input, perf_report_wire_text(subject[perf_report_index(subject, "target_id")].value))
             perf_report_frame(input, perf_report_wire_text(m[perf_report_index(m, "name")].value))
@@ -554,7 +554,7 @@ perf_report_rational_or_none: fn(value: CanonicalJSON, name: String) -> PerfRati
 
 perf_report_quantities: fn(value: CanonicalJSON, name: String, item_name: String) -> [PerfRational] PerfBudgetError! {
     perf_report_array(value, name)
-    out := [PerfRational]{}
+    ^out: [PerfRational]{}
     if value == .Array(v) {
         loop q in v -> out.push(perf_validate_rational(q, true, item_name))
     }
@@ -563,7 +563,7 @@ perf_report_quantities: fn(value: CanonicalJSON, name: String, item_name: String
 
 perf_report_ids: fn(value: CanonicalJSON, name: String, item_name: String) -> [String] PerfBudgetError! {
     perf_report_array(value, name)
-    out := [String]{}
+    ^out: [String]{}
     if value == .Array(v) {
         loop id in v -> out.push(perf_report_text(id, item_name))
     }
@@ -705,8 +705,8 @@ perf_verify_wire_evaluation: fn(evidence_id: String, m: [CanonicalJSONField]) Pe
         comparison: perf_report_parse_comparison(m[perf_report_index(m, "comparison")].value)
         policy: perf_report_parse_policy(m[perf_report_index(m, "policy")].value)
         candidate: perf_report_quantities(m[perf_report_index(m, "samples")].value, "measurement.samples", "measurement.samples")
-        baseline := [PerfRational]{}
-        ids := [String]{}
+        ^baseline: [PerfRational]{}
+        ^ids: [String]{}
         b: perf_report_index(m, "baseline")
         if {
             m[b].value == .Object(fields) -> {
@@ -781,9 +781,9 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
             }
             sources: perf_report_index(subject, "member_sources")
             perf_report_array(subject[sources].value, "subject.member_sources")
-            prior_path := ""
-            prior_hash := ""
-            seen := false
+            ^prior_path: ""
+            ^prior_hash: ""
+            ^seen: false
             if subject[sources].value == .Array(values) {
                 loop source in values {
                     perf_report_object(source, "member source", [String]{"path", "sha256"})
@@ -811,7 +811,7 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
             perf_report_object(f[tool_index].value, "toolchain", [String]{"jet_version", "compiler_build_id", "stdlib_id", "runner_id", "digest"})
             if f[tool_index].value == .Object(tool) {
                 tool_keys: [String]{"jet_version", "compiler_build_id", "stdlib_id", "runner_id"}
-                digest_fields := [CanonicalJSONField]{}
+                ^digest_fields: [CanonicalJSONField]{}
                 loop key in tool_keys {
                     i: perf_report_index(tool, key)
                     _: perf_report_text(tool[i].value, "toolchain.{key}")
@@ -822,10 +822,10 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
                 evidence: perf_report_hex64(f[perf_report_index(f, "evidence_id")].value, "evidence_id")
                 measurements: perf_report_index(f, "measurements")
                 perf_report_array(f[measurements].value, "measurements")
-                sanitized := [CanonicalJSON]{}
-                prior_budget := ""
-                prior_source := ""
-                has_prior := false
+                ^sanitized: [CanonicalJSON]{}
+                ^prior_budget: ""
+                ^prior_source: ""
+                ^has_prior: false
                 if f[measurements].value == .Array(values) {
                     loop measurement in values {
                         perf_validate_measurement(measurement)
@@ -873,8 +873,8 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
             loop key in keys {
                 i: perf_report_index(fields, key)
                 perf_report_array(fields[i].value, "privacy.{key}")
-                prior := ""
-                has_prior := false
+                ^prior: ""
+                ^has_prior: false
                 if fields[i].value == .Array(values) {
                     loop v in values {
                         text: perf_report_text(v, "privacy.{key} item")

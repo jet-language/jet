@@ -3,7 +3,7 @@ use db: core.db
 run: fn() {
     conn: db.open_memory()
     policy: db.policy("person", "true") ?? panic("policy")
-    scoped := conn.with_policy(policy, "owner")
+    ^scoped: conn.with_policy(policy, "owner")
     _: db.migrate(
         scoped,
         "person-v1",

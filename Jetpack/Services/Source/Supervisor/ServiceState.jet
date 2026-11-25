@@ -24,7 +24,7 @@ ServiceProcessState: struct {
     containment: String?,
 
     encode: fn(self) -> String Never! {
-        text := "version=1\npid={self.pid}\nstart={self.start_identity}\n"
+        ^text: "version=1\npid={self.pid}\nstart={self.start_identity}\n"
         if self.containment == .Val(name) -> text = "{text}containment={name}\n"
         text
     }
@@ -205,7 +205,7 @@ services_write_atomic: fn(path: String, contents: [U8]) -[FS, Env]> IOError! {
 }
 
 services_replace_through: fn(temporary: String, path: String, contents: [U8]) -[FS]> IOError! {
-    writer := files.create(temporary, if_exists: .Refuse)
+    ^writer: files.create(temporary, if_exists: .Refuse)
     writer.write_bytes(contents)
     close(writer)
     files.rename(temporary, path)
@@ -249,7 +249,7 @@ services_read_text_bounded: fn(path: String, limit: Int) -[FS]> String IOError! 
 
 // Split at LF and drop one trailing CR per line.
 services_lines: fn(text: String) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     if text == "" -> return lines
     pieces: text.split("\n").to_list()
     count: if text.ends_with("\n") -> pieces.len() - 1 else -> pieces.len()
@@ -282,11 +282,11 @@ services_read_process_state: fn(dir: String) -[FS]> PersistedProcessState? Servi
         return Ok(Val(PersistedProcessState.LegacyPID(legacy)))
     }
     if trimmed == "" -> return Err(invalid)
-    version := false
-    pid := Int?{None}
-    start := String?{None}
-    containment := String?{None}
-    seen := [String]{}
+    ^version: false
+    ^pid: Int?{None}
+    ^start: String?{None}
+    ^containment: String?{None}
+    ^seen: [String]{}
     lines: services_lines(trimmed)
     loop raw in lines {
         pair: raw.trim().split_once("=") ?? return Err(invalid)
@@ -347,7 +347,7 @@ services_lifecycle_for: fn(authority: ServiceAuthority, generation: Int, phase: 
 }
 
 services_write_lifecycle: fn(dir: String, facts: LifecycleFacts) -[FS, Env]> IOError! {
-    encoded := "version=1\nbackend={facts.backend}\ngeneration={facts.generation}\nphase={facts.phase.as_str()}\ncontainment={facts.containment}\nrecovery={facts.recovery}\n"
+    ^encoded: "version=1\nbackend={facts.backend}\ngeneration={facts.generation}\nphase={facts.phase.as_str()}\ncontainment={facts.containment}\nrecovery={facts.recovery}\n"
     if facts.pid == .Val(pid) -> encoded = "{encoded}pid={pid}\n"
     if facts.unit == .Val(unit) -> encoded = "{encoded}unit={unit}\n"
     if facts.guardian == .Val(guardian) -> encoded = "{encoded}guardian={guardian}\n"
@@ -371,17 +371,17 @@ services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
             return Err(ServicesError.new("couldn't read service lifecycle state `{path}`: {error}"))
         }
     }
-    version := false
-    backend := String?{None}
-    generation := Int?{None}
-    phase := ServicePhase?{None}
-    containment := String?{None}
-    recovery := String?{None}
-    pid := Int?{None}
-    unit := String?{None}
-    guardian := String?{None}
-    dependencies := [String]{}
-    seen := [String]{}
+    ^version: false
+    ^backend: String?{None}
+    ^generation: Int?{None}
+    ^phase: ServicePhase?{None}
+    ^containment: String?{None}
+    ^recovery: String?{None}
+    ^pid: Int?{None}
+    ^unit: String?{None}
+    ^guardian: String?{None}
+    ^dependencies: [String]{}
+    ^seen: [String]{}
     lines: services_lines(text)
     loop line in lines {
         pair: line.split_once("=") ?? return Err(invalid)

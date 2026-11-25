@@ -65,7 +65,7 @@ BuildRecipe: struct {
 
     // A stable content hash of the recipe, used by the trust gate.
     recipe_hash: fn(self) -> String Never! {
-        writer := RecipeCanonicalWriter.new("jet.build-recipe.v2")
+        ^writer: RecipeCanonicalWriter.new("jet.build-recipe.v2")
         writer.push_count(self.steps.len())
         loop index in 0..<self.steps.len() {
             writer.push_count(index)
@@ -78,7 +78,7 @@ BuildRecipe: struct {
     // from the finite step graph, never from a host environment or a
     // caller-supplied label.
     declared_capabilities: fn(self) -> [String] Never! {
-        capabilities := [String]{}
+        ^capabilities: [String]{}
         loop step in self.steps {
             capability: step.capability()
             if !capabilities.contains(capability) -> capabilities.push(capability)
@@ -106,9 +106,9 @@ BuildRecipe: struct {
     // provider/source invalidates both the cache identity and the exact trust
     // grant even when the recipe bytes stay unchanged. Their order is not.
     build_identity_for_source_with_dependencies: fn(self, package: String, provider_source: String, source_digest: String, platform: String, dependencies: [String]) -> String Never! {
-        sorted_dependencies := dependencies
+        ^sorted_dependencies: dependencies
         sorted_dependencies.sort()
-        writer := RecipeCanonicalWriter.new("jet-build-hook.v3")
+        ^writer: RecipeCanonicalWriter.new("jet-build-hook.v3")
         writer.push_text(package)
         writer.push_text(provider_source)
         writer.push_text(source_digest)
@@ -126,14 +126,14 @@ RecipeCanonicalWriter: struct {
     bytes: [U8],
 
     new: fn(domain: String) -> RecipeCanonicalWriter Never! {
-        writer := RecipeCanonicalWriter{bytes: [U8]{}}
+        ^writer: RecipeCanonicalWriter{bytes: [U8]{}}
         writer.push_text(domain)
         writer
     }
 
     // A count or index as eight big-endian bytes.
     push_count: fn(^self, value: Int) Never! {
-        shift := 56
+        ^shift: 56
         loop shift >= 0 {
             byte: ((value >> shift)) & 255
             self.bytes.push(U8{byte})

@@ -12,7 +12,7 @@ Reading: struct {
 }
 
 run: fn() {
-    items := [Item]{
+    ^items: [Item]{
         Item{name: "two", score: 2.0},
         Item{name: "nan", score: Float.NAN},
         Item{name: "minus_inf", score: -Float.INFINITY},
@@ -22,22 +22,22 @@ run: fn() {
     print(items.min_by(fn(item) { item.score })?.name ?? "none")
     print(items.max_by(fn(item) { item.score })?.name ?? "none")
 
-    zeros := [Item]{Item{name: "zero", score: 0.0}, Item{name: "minus_zero", score: -0.0}}
+    ^zeros: [Item]{Item{name: "zero", score: 0.0}, Item{name: "minus_zero", score: -0.0}}
     print(zeros.min_by(fn(item) { item.score })?.name ?? "none")
     print(zeros.max_by(fn(item) { item.score })?.name ?? "none")
 
-    ties := [Item]{Item{name: "first", score: 1.5}, Item{name: "last", score: 1.5}}
+    ^ties: [Item]{Item{name: "first", score: 1.5}, Item{name: "last", score: 1.5}}
     print(ties.min_by(fn(item) { item.score })?.name ?? "none")
     print(ties.max_by(fn(item) { item.score })?.name ?? "none")
 
-    finite := [Item]{Item{name: "mid", score: 0.5}, Item{name: "low", score: -3.0}, Item{name: "high", score: 7.25}}
+    ^finite: [Item]{Item{name: "mid", score: 0.5}, Item{name: "low", score: -3.0}, Item{name: "high", score: 7.25}}
     print(finite.lazy().min_by(fn(item) { item.score })?.name ?? "none")
     print(finite.lazy().max_by(fn(item) { item.score })?.name ?? "none")
 
-    empty := [Item]{}
+    ^empty: [Item]{}
     print(empty.max_by(fn(item) { item.score })?.name ?? "none")
 
-    readings := [Reading]{
+    ^readings: [Reading]{
         Reading{name: "high", level: F32{3.5}},
         Reading{name: "nan", level: F32.NAN},
         Reading{name: "low", level: F32{-1.0}},

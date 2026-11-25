@@ -36,7 +36,7 @@ jet_cli_crash: fn(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never!
     }
     text: cli_term.read_all_input() ?? return jet_cli_fail("E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USAGE)
     lines: text.split("\n").to_list()
-    build := -1
+    ^build: -1
     loop k in 1..<lines.len() {
         if jet_cli_crash_build_id(lines[k]) != .None {
             build = k
@@ -55,8 +55,8 @@ jet_cli_crash: fn(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never!
     // runtime's are routines (x64_jetline_program).
     read: x64_jetline_read(bytes) ?? return jet_cli_fail("E2105", "the debug info `{side}` has no `.debug_jetline` location table", jet_cli_why("E2105"), "rebuild the program with `jet build --release` to save its debug info again", color, JET_DRIVER_EXIT_USER_ERROR)
     table: x64_jetline_program(read)
-    out := [String]{}
-    at := 0
+    ^out: [String]{}
+    ^at: 0
     loop at < lines.len() {
         if at == 0 || jet_cli_crash_build_id(lines[at]) == .None {
             out.push(lines[at])
@@ -72,8 +72,8 @@ jet_cli_crash: fn(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never!
         // faulting instruction, the rest return addresses.
         head: out.pop() ?? ""
         at += 1
-        backtrace := false
-        addresses := [Int]{}
+        ^backtrace: false
+        ^addresses: [Int]{}
         if at < lines.len() && lines[at] == "Backtrace:" {
             backtrace = true
             at += 1
@@ -99,8 +99,8 @@ jet_cli_crash: fn(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never!
 // leaves.
 jet_cli_crash_callers: fn(lines: [String], at: Int, table: X64Jetline, out: ^[String]) -> Int Never! {
     with_function: lines[at] == JET_CLI_CRASH_CALLERS_IN
-    next_line := at + 1
-    named := String?{None}
+    ^next_line: at + 1
+    ^named: String?{None}
     loop next_line < lines.len() {
         address: jet_cli_crash_frame(lines[next_line]) ?? break
         next_line += 1
@@ -124,7 +124,7 @@ jet_cli_crash_site_line: fn(line: String) -> Bool Never! {
     if line.starts_with("  --> ") -> return true
     trimmed: line.trim_start()
     if trimmed.starts_with("|") -> return true
-    digits := 0
+    ^digits: 0
     loop byte in trimmed.bytes() {
         digit: Int{byte}
         if digit < 48 || digit > 57 -> break
@@ -160,14 +160,12 @@ jet_cli_crash_build_id: fn(line: String) -> String? Never! {
 // The value of lowercase hex digits; None for any other text.
 jet_cli_crash_hex: fn(text: String) -> Int? Never! {
     if text.len() == 0 || text.len() > 16 -> return None
-    value := 0
+    ^value: 0
     loop byte in text.bytes() {
         digit: Int{byte}
         if {
             digit >= 48 && digit <= 57 -> value = value * 16 + digit - 48
-            digit >= 97 && digit <= 102 -> {
-                value = value * 16 + digit - 87
-            }
+            digit >= 97 && digit <= 102 -> { value = value * 16 + digit - 87 }
             else -> { return None }
         }
     }
@@ -177,7 +175,7 @@ jet_cli_crash_hex: fn(text: String) -> Int? Never! {
 // `store` under the working directory or the nearest directory above it
 // that has it.
 jet_cli_crash_side: fn(store: String) -[FS, Env]> String? Never! {
-    current := cli_files.cwd() ?? "."
+    ^current: cli_files.cwd() ?? "."
     loop {
         path: jet_cli_entry_join(current, store)
         if cli_files.is_file(path) -> return Val(path)
@@ -206,14 +204,14 @@ jet_cli_crash_stop_head: fn() -> String Never! {
 // off`), the release line is the dev line.
 jet_cli_crash_stop: fn(head: String, addresses: [Int], table: X64Jetline) -[FS]> String Never! {
     footer: diagnostic_stop_footer("E3012")
-    found := -1
+    ^found: -1
     loop (k, address) in addresses {
         found = x64_jetline_find(table, if k == 0 -> address else -> address - 1)
         if found >= 0 -> break
     }
     if found < 0 -> return "{head}\n{footer}"
     function: table.functions[found]
-    out := "{diagnostic_stop_line("E3012", jet_cli_crash_stop_what(function.name))}\n  --> {function.file}:{function.decl} in {function.name}\n"
+    ^out: "{diagnostic_stop_line("E3012", jet_cli_crash_stop_what(function.name))}\n  --> {function.file}:{function.decl} in {function.name}\n"
     if jet_cli_crash_source(function) == .Val(source) {
         gutter: " ".repeat("{function.decl}".len() + 3)
         out = "{out}{gutter}|\n{function.decl} | {source}\n{gutter}| ^\n"
@@ -226,7 +224,7 @@ jet_cli_crash_stop: fn(head: String, addresses: [Int], table: X64Jetline) -[FS]>
 // its call (a call row too, as report.S `line` reads it).
 jet_cli_crash_fault: fn(head: String, backtrace: Bool, addresses: [Int], table: X64Jetline) -> String Never! {
     if !backtrace -> return "{head}\n"
-    out := "{head}\nBacktrace:\n"
+    ^out: "{head}\nBacktrace:\n"
     loop (k, address) in addresses {
         pc: if k == 0 -> address else -> address - 1
         found: x64_jetline_find(table, pc)
@@ -251,11 +249,11 @@ jet_cli_crash_fault: fn(head: String, backtrace: Bool, addresses: [Int], table: 
 jet_cli_crash_source: fn(function: X64JetlineFunction) -[FS]> String? Never! {
     if function.decl < 1 -> return None
     full: if function.file.starts_with("/") || function.dir == "" || function.dir == "." -> function.file else -> "{function.dir}/{function.file}"
-    found := jet_cli_crash_bytes(full)
+    ^found: jet_cli_crash_bytes(full)
     if found == .None -> found = jet_cli_crash_bytes(function.file)
     bytes: found ?? return None
-    start := 0
-    line := 1
+    ^start: 0
+    ^line: 1
     loop line < function.decl {
         loop start < bytes.len() && (Int{bytes[start]}) != 10 -> start += 1
         if start >= bytes.len() -> return None
@@ -263,7 +261,7 @@ jet_cli_crash_source: fn(function: X64JetlineFunction) -[FS]> String? Never! {
         line += 1
     }
     if start >= bytes.len() -> return None
-    end := start
+    ^end: start
     loop end < bytes.len() && (Int{bytes[end]}) != 10 -> end += 1
     loop end > start && jet_cli_crash_blank(Int{bytes[end - 1]}) -> end -= 1
     Val(String.from_bytes(bytes[start..<end]) ?? return None)

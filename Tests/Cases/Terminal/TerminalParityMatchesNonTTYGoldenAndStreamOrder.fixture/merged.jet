@@ -14,11 +14,11 @@ use {
 }
 
 run: fn() {
-    argv := [String]{process.env_get("JET") ?? "jet", "run", "--quiet"}
+    ^argv: [String]{process.env_get("JET") ?? "jet", "run", "--quiet"}
     if (process.args().get(0) ?? "") == "release" -> argv.push("--release")
     argv.push("terminal.jet")
     receipt: process.run_spec(process.cmd(argv).stdin(.Inherit).stdout(.Capture).stderr(.Stdout)) ?? panic("merged run failed: {err}")
-    out := term.stdout()
+    ^out: term.stdout()
     out.write(receipt.output) ?? panic("merged output write failed")
     out.flush() ?? panic("merged output flush failed")
     process.exit(receipt.code)

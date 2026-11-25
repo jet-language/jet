@@ -90,7 +90,7 @@ vars: fn() -[Env]> [String] EnvError! { entry_names(__env_snapshot()) }
 /// environment().get("JET_DOCTEST_ENVIRONMENT") == Val("on") // => true
 /// ```
 environment: fn() -[Env]> [String:String] Never! {
-    found := [String:String]{}
+    ^found: [String:String]{}
     loop entry in __env_snapshot() {
         name: String.from_bytes(entry.name) ?? next
         found[name] = String.from_bytes(entry.value) ?? next
@@ -104,13 +104,15 @@ priv __startup_env: fn() -> [{name: [U8], value: [U8]}] Never! {
 }
 
 // Snapshot once, under the existing host cell's lock. No per-name rereads.
-priv __env_snapshot: fn() -> [{name: [U8], value: [U8]}] Never! { env_columns(sys_rt.env_columns()) }
+priv __env_snapshot: fn() -> [{name: [U8], value: [U8]}] Never! {
+    env_columns(sys_rt.env_columns())
+}
 
 priv __env_present: fn(name: String) -[Env]> Bool Never! { sys_rt.env_value(name) != None }
 
 env_columns: fn(columns: [[U8]]) -> [{name: [U8], value: [U8]}] Never! {
-    entries := [{name: [U8], value: [U8]}]{}
-    index := 0
+    ^entries: [{name: [U8], value: [U8]}]{}
+    ^index: 0
     loop index < columns.len() {
         entries.push({name: columns[index], value: columns[index + 1]})
         index += 2
@@ -128,7 +130,7 @@ priv __env_compose: fn(
     removals: [String],
 ) -> [{name: [U8], value: [U8]}] IOError! {
     assert(names.len() == values.len())
-    entries := if clear -> [{name: [U8], value: [U8]}]{} else -> snapshot.copy()
+    ^entries: if clear -> [{name: [U8], value: [U8]}]{} else -> snapshot.copy()
     loop index in 0..<names.len() {
         name: names[index]
         if validate_env_name(name) == {
@@ -177,9 +179,7 @@ validate_env_name: fn(name: String) EnvError! {
     Ok()
 }
 
-env_key_compare: fn(left: [U8], right: [U8]) -> Int Never! {
-    sys_rt.env_key_compare(left, right)
-}
+env_key_compare: fn(left: [U8], right: [U8]) -> Int Never! { sys_rt.env_key_compare(left, right) }
 
 entry_index: fn(entries: [{name: [U8], value: [U8]}], key: [U8]) -> Int Never! {
     loop index in 0..<entries.len() {
@@ -207,15 +207,15 @@ replace_entry: fn(entries: ^[{name: [U8], value: [U8]}], key: [U8], value: [U8])
 }
 
 entry_names: fn(entries: [{name: [U8], value: [U8]}]) -> [String] EnvError! {
-    raw := [[U8]]{}
-    names := [String]{}
+    ^raw: [[U8]]{}
+    ^names: [String]{}
     loop entry in entries {
         name: String.from_bytes(entry.name) ?? return Err(EnvError.NonUnicode)
         _: String.from_bytes(entry.value) ?? return Err(EnvError.NonUnicode)
         raw.push(entry.name)
         names.push(name)
     }
-    ordered := [String]{}
+    ^ordered: [String]{}
     loop index in env_key_order(raw) -> ordered.push(names[index])
     Ok(ordered)
 }
@@ -224,17 +224,17 @@ entry_names: fn(entries: [{name: [U8], value: [U8]}]) -> [String] EnvError! {
 // given order: a bottom-up merge sort, n log n host compares.
 env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
     count: keys.len()
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<count -> order.push(index)
-    merged := order.copy()
-    width := 1
+    ^merged: order.copy()
+    ^width: 1
     loop width < count {
-        start := 0
+        ^start: 0
         loop start < count {
             middle: if start + width < count -> start + width else -> count
             end: if start + 2 * width < count -> start + 2 * width else -> count
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop out in start..<end {
                 if right >= end || (left < middle && env_key_compare(keys[order[left]], keys[order[right]]) <= 0) {
                     merged[out] = order[left]
@@ -253,7 +253,7 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 }
 
 #Test("environment names enumerate in key order, odd counts and runs included") {
-    entries := [{name: [U8], value: [U8]}]{}
+    ^entries: [{name: [U8], value: [U8]}]{}
     loop name in ([String]{"PATH", "B", "HOME", "A", "TERM", "C", "A_1"}) {
         entries.push({name: name.bytes(), value: "v".bytes()})
     }
@@ -262,7 +262,7 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 }
 
 #Test("logical environment replacement and removal retain one last spelling") {
-    entries := [{name: [U8], value: [U8]}]{}
+    ^entries: [{name: [U8], value: [U8]}]{}
     replace_entry(entries, "JET_ENV_A".bytes(), "old".bytes())
     replace_entry(entries, "JET_ENV_B".bytes(), "other".bytes())
     replace_entry(entries, "JET_ENV_A".bytes(), "".bytes())
@@ -455,8 +455,8 @@ version: fn() -[Env, FS, Exec, Time.Wait]> String Never! {
 /// An unset `$` name expands to nothing, an unset `%VAR%` and any other text stay as written.
 expand: fn(value: String) -[Env]> String Never! {
     raw: value.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop {
         if i >= raw.len() -> return String.from_bytes(out) ?? ""
         byte: raw[i]
@@ -468,7 +468,7 @@ expand: fn(value: String) -[Env]> String Never! {
                 next
             }
             if after == (U8{123}) {
-                close := i + 2
+                ^close: i + 2
                 loop close < raw.len() && raw[close] != (U8{125}) -> close += 1
                 if close < raw.len() {
                     replacement: get(slice_ascii(raw, i + 2, close)) ?? ""
@@ -477,7 +477,7 @@ expand: fn(value: String) -[Env]> String Never! {
                     next
                 }
             }
-            end := i + 1
+            ^end: i + 1
             loop end < raw.len() && is_env_ident(raw[end]) -> end += 1
             if end > i + 1 {
                 replacement: get(slice_ascii(raw, i + 1, end)) ?? ""
@@ -487,7 +487,7 @@ expand: fn(value: String) -[Env]> String Never! {
             }
         }
         if byte == (U8{37}) {
-            close := i + 1
+            ^close: i + 1
             loop close < raw.len() && is_env_ident(raw[close]) -> close += 1
             if close > i + 1 && close < raw.len() && raw[close] == (U8{37}) {
                 found: get(slice_ascii(raw, i + 1, close))
@@ -510,7 +510,7 @@ expand: fn(value: String) -[Env]> String Never! {
 /// `path` leaves the environment as it is, as `[ -f path ] && . path` does.
 env_file: fn(path: String) -[Env, FS.Read]> [String:String] IOError! {
     vars: environment()
-    text := ""
+    ^text: ""
     if files.read(path) == {
         .Ok(found) -> text = found
         .Err(.NotFound(_)) -> return Ok(vars)
@@ -555,11 +555,11 @@ env_file: fn(path: String) -[Env, FS.Read]> [String:String] IOError! {
 /// (env_text("readonly D=1\nD=2", vars) ?? [String: String]{"failed": "yes"}).get("failed") == Val("yes") // => true
 /// ```
 env_text: fn(text: String, vars: [String:String], source: String{"env text"}) -> [String:String] IOError! {
-    scope := EnvScope{vars: vars, assigned: [String:String]{}, readonly: [String]{}}
-    number := 0
+    ^scope: EnvScope{vars: vars, assigned: [String:String]{}, readonly: [String]{}}
+    ^number: 0
     loop raw in text.lines() {
         number += 1
-        line := EnvLine{raw: raw.bytes(), at: 0}
+        ^line: EnvLine{raw: raw.bytes(), at: 0}
         reason: env_line(line, scope) ?? next
         return Err(
             IOError.InvalidInput(
@@ -624,8 +624,8 @@ env_line: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
 /// ```
 env_command: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
     keyword: env_keyword(line)
-    later := [{name: String, value: String?}]{}
-    count := 0
+    ^later: [{name: String, value: String?}]{}
+    ^count: 0
     loop {
         env_blanks(line)
         if line.at >= line.raw.len() || line.raw[line.at] == (U8{59}) || line.raw[line.at] == (U8{35}) {
@@ -648,7 +648,7 @@ env_command: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
             next
         }
         line.at += 1
-        value := [U8]{}
+        ^value: [U8]{}
         if append {
             loop byte in (env_lookup(name, scope) ?? "").bytes() -> value.push(byte)
         }
@@ -734,7 +734,7 @@ env_word: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: B
         if braced && c == (U8{125}) -> return None
         if !braced && (env_blank(c) || c == (U8{59})) -> return None
         if c == (U8{39}) {
-            close := line.at + 1
+            ^close: line.at + 1
             loop close < line.raw.len() && line.raw[close] != (U8{39}) -> close += 1
             if close >= line.raw.len() -> return Val("a `'` quote is not closed")
             loop index in line.at + 1..<close -> out.push(line.raw[index])
@@ -904,7 +904,7 @@ env_braced: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> Stri
     if line.at >= line.raw.len() -> return Val("a `${{` is not closed")
     name: slice_ascii(line.raw, start, line.at)
     if name == "0" -> return Val("`${{0}}` is the shell's name, which an env file does not have")
-    value := env_lookup(name, scope)
+    ^value: env_lookup(name, scope)
     if argument -> value = None
     if line.raw[line.at] == (U8{125}) {
         line.at += 1
@@ -921,7 +921,7 @@ env_braced: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> Stri
     line.at += 1
     unset: value == None || (colon && value == Val(""))
     takes: if op == (U8{43}) -> !unset else -> unset
-    word := [U8]{}
+    ^word: [U8]{}
     reason: env_word(line, scope, word, live && takes, true)
     if reason != None -> return reason
     line.at += 1
@@ -1037,7 +1037,7 @@ getgroups: fn() -[Env]> [Int] Never! {
     if count < 0 || count > 2147483647 -> return [Int]{}
     row: sys_rt.groups_fill(count)
     if row[0] < 0 -> return [Int]{}
-    out := [Int]{}
+    ^out: [Int]{}
     loop index in 0..<row[0] -> out.push(row[index + 1])
     out
 }
@@ -1045,7 +1045,7 @@ getgroups: fn() -[Env]> [Int] Never! {
 loadavg: fn() -[Env]> [Float] Never! {
     row: sys_rt.loadavg()
     if !row.available || row.count < 0 -> return [Float]{0.0, 0.0, 0.0}
-    out := [Float]{}
+    ^out: [Float]{}
     if row.count > 0 -> out.push(row.first)
     if row.count > 1 -> out.push(row.second)
     if row.count > 2 -> out.push(row.third)
@@ -1294,9 +1294,9 @@ tree_cpu_time: fn(pid: Int{0}) -[Env, FS.Read]> Duration IOError! {
     ticks: if !clock.available || clock.ticks < 1 -> 100 else -> clock.ticks
     // Parents before children: a child a parent reaps between the two reads
     // is missed once, never counted twice.
-    total := 0
-    queue := [Int]{root}
-    at := 0
+    ^total: 0
+    ^queue: [Int]{root}
+    ^at: 0
     loop at < queue.len() {
         current: queue[at]
         at += 1
@@ -1322,7 +1322,7 @@ tree_cpu_time: fn(pid: Int{0}) -[Env, FS.Read]> Duration IOError! {
 // since the name itself may hold spaces and parentheses.
 priv tree_stat_ticks: fn(stat: String) -> Int Never! {
     raw: stat.bytes()
-    close := -1
+    ^close: -1
     loop index in 0..<raw.len() {
         if raw[index] == (U8{41}) -> close = index
     }
@@ -1331,7 +1331,7 @@ priv tree_stat_ticks: fn(stat: String) -> Int Never! {
     fields: (String.from_bytes(raw[after..<raw.len()]) ?? "").words()
     // fields[0] is field 3, the state.
     if fields.len() < 15 -> return 0
-    sum := 0
+    ^sum: 0
     loop index in 11..<15 -> sum += Int.parse(fields[index]) ?? 0
     sum
 }
@@ -1531,9 +1531,7 @@ Fd: struct {
     size: fn(self) -[Env]> Int IOError! { sys_rt.fd_size(self.token) }
 
     // A second descriptor for the same open file, owned on its own.
-    duplicate: fn(self) -[Env]> Fd IOError! {
-        Ok(Fd{token: sys_rt.fd_duplicate(self.token)})
-    }
+    duplicate: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: sys_rt.fd_duplicate(self.token)}) }
 
     // The foreground process group of the terminal the descriptor is open
     // on. A descriptor that is no terminal fails (ENOTTY).
@@ -1714,9 +1712,7 @@ SharedMemory: struct {
     }
 
     // A new descriptor for this memory, to pass to another process.
-    descriptor: fn(self) -[Env]> Fd IOError! {
-        Ok(Fd{token: sys_rt.fd_duplicate(self.token)})
-    }
+    descriptor: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: sys_rt.fd_duplicate(self.token)}) }
 }
 
 FD_READ_MAX: 16777216
@@ -1753,7 +1749,7 @@ priv shared_bounds: module {
 priv fd_words: module {
     // The `index`th eight-byte little-endian word of `packed`.
     packed_word: fn(packed: [U8], index: Int) -> Int {
-        word := 0
+        ^word: 0
         loop byte in 0..<8 -> word = word * 256 + (Int{packed[index * 8 + 7 - byte]})
         word
     }
@@ -1898,7 +1894,7 @@ Group: struct {
 /// Directory Services). A line that is not UTF-8, lacks a field, or has an ID
 /// outside 0..4294967294 is skipped.
 users: fn() -[FS.Read]> [User] IOError! {
-    out := [User]{}
+    ^out: [User]{}
     loop line in database_lines(files.read_bytes("/etc/passwd")) {
         out.push(passwd_entry(line) ?? next)
     }
@@ -1925,7 +1921,7 @@ user_by_id: fn(uid: Int) -[FS.Read]> User? IOError! {
 
 /// Every group in /etc/group, in file order, skipping lines as `users` does.
 groups: fn() -[FS.Read]> [Group] IOError! {
-    out := [Group]{}
+    ^out: [Group]{}
     loop line in database_lines(files.read_bytes("/etc/group")) {
         out.push(group_entry(line) ?? next)
     }
@@ -1988,10 +1984,10 @@ priv id_rows: module {
 
     // The UTF-8 lines of a database file; a line that is not UTF-8 is dropped.
     database_lines: fn(raw: [U8]) -> [String] Never! {
-        out := [String]{}
-        start := 0
+        ^out: [String]{}
+        ^start: 0
         loop start < raw.len() {
-            end := start
+            ^end: start
             loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
             first: start
             start = end + 1
@@ -2029,7 +2025,7 @@ priv id_rows: module {
         password: name.tail.partition(":")
         gid: password.tail.partition(":")
         if name.sep == "" || password.sep == "" || gid.sep == "" -> return None
-        members := [String]{}
+        ^members: [String]{}
         if gid.tail != "" {
             loop member in gid.tail.split(",") {
                 if member != "" -> members.push(member)
@@ -2143,8 +2139,8 @@ is_env_ident: fn(byte: U8) -> Bool {
 }
 
 slice_ascii: fn(raw: [U8], start: Int, end: Int) -> String {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
@@ -2153,7 +2149,7 @@ slice_ascii: fn(raw: [U8], start: Int, end: Int) -> String {
 }
 
 ascii_lower: fn(text: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         n: byte
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(byte)
@@ -2179,7 +2175,7 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
 }
 
 #Test("env_text reads NAME=value lines as the shell sources them") {
-    vars := [String:String]{}
+    ^vars: [String:String]{}
     vars["HOME"] = "/home/u"
     vars["EMPTY"] = ""
     vars["JET_SCRATCH_ROOT"] = "/from/env"
@@ -2200,7 +2196,7 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
 }
 
 #Test("env_text reads commands, export and readonly, +=, ~ and the other expansions as bash sources them") {
-    vars := [String:String]{}
+    ^vars: [String:String]{}
     vars["HOME"] = "/h"
     vars["EMPTY"] = ""
     // bash 5 printed these values after `env -i HOME=/h EMPTY= bash -c '. ./t.env'`.
@@ -2233,7 +2229,7 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
 }
 
 #Test("env_text refuses what only a shell would run, naming the line") {
-    vars := [String:String]{}
+    ^vars: [String:String]{}
     refused: [String]{"A=$(id)", "A=`id`", "A=~/x", "A=x:~/y", "A=~ada/x", "A=~+", "A=$0", "A=${{0}}", "A=${{1=x}}", "A=${{#B}}", "A=${{B%c}}", "readonly R; R=1", "export", "; A=b", "A=b c", "A=b; c", "A=b|c", ": ${{A:=b}}", "A=\"b", "A='b", "A=${{B", "A=b\\", "A=${{UNSET_NAME:?is required}}", "1A=b", "A b"}
     loop line in refused {
         if env_text("OK=1\n{line}\n", vars, "probe") == {
@@ -2293,22 +2289,22 @@ decode_host_env: fn(raw: [U8]?) -> String? Never! {
 release_field: fn(config: String, key: String) -> String? Never! {
     raw: config.bytes()
     wanted: key.bytes()
-    start := 0
+    ^start: 0
     loop start < raw.len() {
-        end := start
+        ^end: start
         loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
-        line_end := end
+        ^line_end: end
         // Lines end at LF and CRLF, not at a bare CR or the additional
         // Unicode/Python splitlines separators.
         if end < raw.len() && end > start && raw[end - 1] == (U8{13}) -> line_end = end - 1
-        matched := line_end - start >= wanted.len()
-        i := 0
+        ^matched: line_end - start >= wanted.len()
+        ^i: 0
         loop matched && i < wanted.len() {
             if raw[start + i] != wanted[i] -> matched = false
             i += 1
         }
         if matched {
-            value_start := start + wanted.len()
+            ^value_start: start + wanted.len()
             loop value_start < line_end && raw[value_start] == (U8{34}) -> value_start += 1
             loop line_end > value_start && raw[line_end - 1] == (U8{34}) -> line_end -= 1
             return Val(slice_ascii(raw, value_start, line_end))
@@ -2377,10 +2373,12 @@ has_nul: fn(value: String) -> Bool {
 // fails these known answers. Fork, setsid, setpgrp, wait, waitpid and
 // lock_memory change the process, so a Case runs them in a forked child.
 #Test("POSIX calls read each kernel answer from its own slot") {
-    if name() != "linux" -> return
+    if name() != "linux" {
+        return
+    }
     pid: process_api.current_pid()
     status: files.read("/proc/self/status") ?? panic("no /proc/self/status: {err}")
-    proc_ids := [String]{}
+    ^proc_ids: [String]{}
     loop line in status.split("\n") {
         if line.starts_with("Uid:") || line.starts_with("Gid:") {
             fields: [String]{loop field in line.split("\t") -> field}
@@ -2495,33 +2493,31 @@ priv __decode_tree: fn(prefix: String, file: String, allow: [String], names: [{e
     if host_path.is_absolute(path) {
         return Err(config_error("Jet.EnvDecodeFailed: Dotenv.file must be project-relative"))
     }
-    cursor := host_path.components(path)
+    ^cursor: host_path.components(path)
     loop {
         part: host_path.next(path, cursor) ?? break
         if part.kind == .ParentDir {
             return Err(config_error("Jet.EnvDecodeFailed: Dotenv.file must be project-relative"))
         }
     }
-    dotenv := String?{None}
+    ^dotenv: String?{None}
     if file.len() > 0 {
         read: sys_rt.dotenv_read(file)
-        if read.text == .Val(value) {
-            dotenv = Val(value)
-        } else if !read.not_found {
+        if read.text == .Val(value) -> dotenv = Val(value) else if !read.not_found {
             return Err(config_error("Jet.EnvDecodeFailed: cannot read Dotenv.file `{file}`: {read.cause}"))
         }
     }
-    process := [{name: String, value: String}]{}
+    ^process: [{name: String, value: String}]{}
     loop entry in __env_snapshot() {
         name: String.from_bytes(entry.name) ?? next
         value: String.from_bytes(entry.value) ?? next
         process.push({name: name, value: value})
     }
     values: config_entries(prefix, dotenv, allow, process) ?? return Err(err)
-    tree := ConfigTree.Object([{key: String, value: ConfigTree}]{})
-    origins := [{name: String, path: String}]{}
+    ^tree: ConfigTree.Object([{key: String, value: ConfigTree}]{})
+    ^origins: [{name: String, path: String}]{}
     loop entry in values {
-        segments := entry.segments
+        ^segments: entry.segments
         loop rename in names {
             full_match: ascii_lower(entry.name) == ascii_lower(rename.env_name)
             suffix_match: ascii_lower(slice_ascii(entry.name.bytes(), prefix.bytes().len(), entry.name.bytes().len())) == ascii_lower(rename.env_name)
@@ -2541,9 +2537,9 @@ priv __decode_tree: fn(prefix: String, file: String, allow: [String], names: [{e
 // supplied it. The value is hidden when the field path or the variable's
 // name after the prefix contains a secret word (`db_password`, `api_key`).
 priv __decode_errors: fn(errors: [FieldError], origins: [{name: String, path: String}], prefix: String, names: [{env_name: String, key: String}]) -> [FieldError] Never! {
-    framed := [FieldError]{}
+    ^framed: [FieldError]{}
     loop error in errors {
-        variable := String?{None}
+        ^variable: String?{None}
         loop entry in origins {
             if ascii_lower(entry.path) == ascii_lower(error.path) {
                 variable = Val(entry.name)
@@ -2551,7 +2547,7 @@ priv __decode_errors: fn(errors: [FieldError], origins: [{name: String, path: St
             }
         }
         if variable == None -> variable = decode_variable(error.path, prefix, names)
-        hidden := decode_secret(error.path)
+        ^hidden: decode_secret(error.path)
         if variable == .Val(name) {
             raw: name.bytes()
             own: if ascii_lower(name).starts_with(ascii_lower(prefix)) -> slice_ascii(raw, prefix.bytes().len(), raw.len()) else -> name
@@ -2617,7 +2613,7 @@ ConfigTree: enum {
 }
 
 ascii_upper: fn(value: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         if byte >= (U8{97}) && byte <= (U8{122}) -> out.push(U8{Int{byte} - 32}) else {
             out.push(byte)
@@ -2653,7 +2649,7 @@ config_put: fn(values: ^[ConfigValue], name: String, value: String) Never! {
 config_find: fn(raw: [U8], needle: [U8]) -> Int? Never! {
     if needle.len() > raw.len() -> return None
     loop at in 0..<raw.len() - needle.len() + 1 {
-        matched := true
+        ^matched: true
         loop i in 0..<needle.len() {
             if raw[at + i] != needle[i] -> matched = false
         }
@@ -2677,17 +2673,17 @@ config_dotenv_value: fn(value: String) -> String Never! {
 // Dotenv syntax joins the same typed FieldError domain as Decode failures.
 
 config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [{name: String, value: String}]) -> [ConfigEntry] [FieldError]! {
-    values := [ConfigValue]{}
+    ^values: [ConfigValue]{}
     if dotenv == .Val(contents) {
         raw: contents.bytes()
-        start := 0
-        line_index := 0
+        ^start: 0
+        ^line_index: 0
         loop start < raw.len() {
-            end := start
+            ^end: start
             loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
-            line_end := end
+            ^line_end: end
             if end < raw.len() && line_end > start && raw[line_end - 1] == (U8{13}) -> line_end -= 1
-            line := slice_ascii(raw, start, line_end).trim().copy()
+            ^line: slice_ascii(raw, start, line_end).trim().copy()
             line_index += 1
             if line.len() > 0 && line.bytes()[0] != (U8{35}) {
                 bytes: line.bytes()
@@ -2710,21 +2706,21 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [{
     // Same bytewise uppercase-name order as the native BTreeMap, including
     // punctuation. Lowercase sorting would move '_' before alphabetic keys.
     loop index in 1..<values.len() {
-        at := index
+        ^at: index
         loop at > 0 && values[at].folded < values[at - 1].folded {
             values.__swap(at - 1, at)
             at -= 1
         }
     }
-    out := [ConfigEntry]{}
+    ^out: [ConfigEntry]{}
     prefix_bytes: prefix.bytes()
     loop entry in values {
         name_bytes: entry.name.bytes()
         if name_bytes.len() >= prefix_bytes.len() && ascii_lower(slice_ascii(name_bytes, 0, prefix_bytes.len())) == ascii_lower(prefix) {
             rest: slice_ascii(name_bytes, prefix_bytes.len(), name_bytes.len())
-            segments := [String]{}
+            ^segments: [String]{}
             bytes: rest.bytes()
-            start := 0
+            ^start: 0
             loop start < bytes.len() {
                 found: config_find(bytes[start..<bytes.len()], "__".bytes())
                 end: if found == {
@@ -2746,7 +2742,7 @@ config_insert: fn(tree: ^^ConfigTree, segments: [String], at: Int, value: String
     owned: tree.move()
     if owned.move() == {
         .Object(pairs) -> {
-            out := pairs.move()
+            ^out: pairs.move()
             segment: segments[at]
             loop index in 0..<out.len() {
                 matches: ascii_lower(out[index].key) == ascii_lower(segment)
@@ -2775,7 +2771,7 @@ config_tree: fn(tree: ^^ConfigTree) -> Dyn Never! {
     if owned.move() == {
         .Text(text) -> Dyn.Text(text)
         .Object(pairs) -> {
-            encoded := [{key: String, value: Dyn}]{}
+            ^encoded: [{key: String, value: Dyn}]{}
             loop pair in pairs.move() {
                 encoded.push({key: pair.key, value: config_tree(pair.value.move())})
             }
@@ -2820,7 +2816,7 @@ config_tree: fn(tree: ^^ConfigTree) -> Dyn Never! {
 }
 
 #Test("Dotenv tree replacement preserves sibling order and nested values") {
-    tree := ConfigTree.Object([{key: String, value: ConfigTree}]{})
+    ^tree: ConfigTree.Object([{key: String, value: ConfigTree}]{})
     tree = config_insert(tree, [String]{"first"}, 0, "one")
     tree = config_insert(tree, [String]{"db", "host"}, 0, "local")
     tree = config_insert(tree, [String]{"last"}, 0, "three")

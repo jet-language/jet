@@ -39,8 +39,8 @@ parser_policy_file_decl_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_kind_at(state, 3) == TOKEN_IDENT && parser_kind_at(state, 4) == TOKEN_LPAREN {
         return false
     }
-    offset := 2
-    depth := 0
+    ^offset: 2
+    ^depth: 0
     loop parser_kind_at(state, offset) != TOKEN_EOF {
         kind: parser_kind_at(state, offset)
         if kind == TOKEN_LPAREN -> depth += 1
@@ -68,7 +68,7 @@ parser_parse_policy_file_decl: fn(state: ^JetParserState, program: ^Program) {
 // `#Policy(...) { … }` scopes its declarations to the block. Each declaration
 // targets the whole statement.
 parser_policy_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt? {
-    declarations := parser_policy_declarations_from_marker(state, marker, PolicyScope.Block) ?? return None
+    ^declarations: parser_policy_declarations_from_marker(state, marker, PolicyScope.Block) ?? return None
     loop index in 0..<declarations.len() -> declarations[index].target = Val(span)
     loop declaration in declarations -> state.block_policy_declarations.push(declaration)
     Val(Stmt.Policy{declarations: declarations, body: body, span: span})
@@ -87,7 +87,7 @@ parser_overflow_declaration: fn(marker: Marker, scope: PolicyScope, target: Span
 // `#Overflow(.Wrapping) { … }` scopes its mode to the block. A malformed
 // argument still keeps the body, with no mode open.
 parser_overflow_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
-    declarations := [PolicyDeclaration]{}
+    ^declarations: [PolicyDeclaration]{}
     if parser_overflow_declaration(marker, PolicyScope.Block, Val(span)) == .Val(declaration) {
         state.block_policy_declarations.push(declaration.copy())
         declarations.push(declaration)
@@ -100,7 +100,7 @@ parser_overflow_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [St
 // as `#Runtime`. A malformed argument still keeps the body, with no policy
 // open.
 parser_runtime_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
-    declarations := [PolicyDeclaration]{}
+    ^declarations: [PolicyDeclaration]{}
     if runtime_marker_mode(marker) == .Val(value) {
         declaration: PolicyDeclaration{key: PolicyKey.Runtime, value: value, scope: PolicyScope.Block, span: marker.span, target: Val(span), source: MARKER_RUNTIME}
         state.block_policy_declarations.push(declaration.copy())
@@ -153,16 +153,16 @@ parser_callable_policy_marker: fn(marker: Marker) -> Bool Never! {
 
 // One declaration per argument, or None after reporting the first refusal.
 parser_policy_declarations_from_marker: fn(state: ^JetParserState, marker: Marker, scope: PolicyScope) -> [PolicyDeclaration]? {
-    out := [PolicyDeclaration]{}
+    ^out: [PolicyDeclaration]{}
     loop index in 0..<marker.args.len() {
         expr: parser_marker_expression(marker, index) ?? {
             parser_marker_shape_error(state, marker)
             return None
         }
         label: parser_marker_label(marker, index)
-        name := label.copy()
-        name_span := marker.span
-        mode := PolicyValue?{None}
+        ^name: label.copy()
+        ^name_span: marker.span
+        ^mode: PolicyValue?{None}
         if {
             label == "copies" || label == "writes" || label == "failures" || label == "sentries" -> {
                 variant: if expr == {
@@ -224,11 +224,11 @@ parser_policy_declarations_from_marker: fn(state: ^JetParserState, marker: Marke
                 parser_add_error_code(state, "E0355", name_span, "`sentries` needs an explicit mode", "sentry instrumentation is either on or off; it is not a boolean memory fact", "write `sentries: .Off` or `sentries: .On`")
                 return None
             }
-            // `#Overflow` and `#Runtime` declare the arithmetic and run-time
-            // keys; no policy name parses to either.
-            .Arithmetic | .Runtime -> panic("policy_key_parse never names a body-policy key")
             .ScopedGC | .ExplicitUnits -> PolicyValue.Enabled
-            .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride | .HostFacts -> {
+            // `#Overflow` and `#Runtime` declare the arithmetic and run-time
+            // keys; policy_key_parse names neither, and a source policy could
+            // not set them anyway.
+            .Arithmetic | .Runtime | .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride | .HostFacts -> {
                 parser_add_error_code(state, "E0355", name_span, "`{name}` is not a source policy", "organization and package policy own the audited-escape floor; source code can only write the corresponding marker", "use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`")
                 return None
             }

@@ -52,8 +52,8 @@ mapping_changes: fn(cp: Int, index: View<U8>, pool: View<U8>) -> Bool Never! {
 
 // Final sigma: ignore Case_Ignorable in both directions.
 final_sigma: fn(chars: [Int], at: Int, cased: [U8], ignorable: [U8]) -> Bool Never! {
-    before := false
-    i := at - 1
+    ^before: false
+    ^i: at - 1
     loop i >= 0 {
         cp: chars[i]
         if !text_asset.asset_contains(ignorable, cp) {
@@ -75,7 +75,7 @@ final_sigma: fn(chars: [Int], at: Int, cased: [U8], ignorable: [U8]) -> Bool Nev
 // Decode only the current UTF-8 scalar. String's checked owner guarantees UTF-8.
 scalar_at: fn(raw: [U8], at: Int) -> Int Never! {
     width: utf8_width_at(raw, at)
-    cp := Int{raw[at]}
+    ^cp: Int{raw[at]}
     if width == 2 -> cp &= 31
     if width == 3 -> cp &= 15
     if width == 4 -> cp &= 7
@@ -93,13 +93,13 @@ lower: fn(text: String) -> String Never! {
     index: lower_index[40..<lower_index.len()]
     pool: lower_pool[40..<lower_pool.len()]
     raw: utf8_bytes(text)
-    chars := [Int]{}
-    at := 0
+    ^chars: [Int]{}
+    ^at: 0
     loop at < raw.len() {
         chars.push(scalar_at(raw, at))
         at += utf8_width_at(raw, at)
     }
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<chars.len() {
         cp: chars[i]
         if cp == 931 && final_sigma(chars, i, cased_asset, ignorable_asset) -> append_cp(out, 962) else {
@@ -128,8 +128,8 @@ map_stream: fn(text: String, index_asset: [U8], pool_asset: [U8]) -> String Neve
     index: index_asset[40..<index_asset.len()]
     pool: pool_asset[40..<pool_asset.len()]
     raw: utf8_bytes(text)
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < raw.len() {
         append_mapping(out, scalar_at(raw, at), index, pool)
         at += utf8_width_at(raw, at)
@@ -153,9 +153,9 @@ title: fn(text: String) -> String Never! {
     alphabetic: text_unicode_alphabetic.UNICODE_ALPHABETIC
     numeric: text_unicode_numeric.UNICODE_NUMERIC
     raw: utf8_bytes(text)
-    out := [U8]{}
-    word_start := true
-    at := 0
+    ^out: [U8]{}
+    ^word_start: true
+    ^at: 0
     loop at < raw.len() {
         cp: scalar_at(raw, at)
         if text_asset.asset_contains(alphabetic, cp) || text_asset.asset_contains(numeric, cp) {
@@ -181,9 +181,9 @@ capitalize: fn(text: String) -> String Never! {
     assert(text_asset.valid(title_index_asset, 4, 11) && text_asset.valid(title_pool_asset, 1, 3), "invalid Unicode mapping assets")
     title_index: title_index_asset[40..<title_index_asset.len()]
     title_pool: title_pool_asset[40..<title_pool_asset.len()]
-    out := [U8]{}
+    ^out: [U8]{}
     append_mapping(out, scalar_at(raw, 0), title_index, title_pool)
-    rest := text.slice(1, text.len())  // #4303: String-typed lowercase input.
+    ^rest: text.slice(1, text.len())  // #4303: String-typed lowercase input.
     loop byte in utf8_bytes(lower(rest)) -> out.push(byte)
     String.from_bytes(out) ?? panic("Unicode capitalization produced invalid UTF-8")
 }
@@ -203,8 +203,8 @@ swapcase: fn(text: String) -> String Never! {
     lower_index: lower_index_asset[40..<lower_index_asset.len()]
     lower_pool: lower_pool_asset[40..<lower_pool_asset.len()]
     raw: utf8_bytes(text)
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < raw.len() {
         cp: scalar_at(raw, at)
         if {
@@ -240,8 +240,8 @@ all_cased_change: fn(text: String, index_asset: [U8], pool_asset: [U8]) -> Bool 
     pool: pool_asset[40..<pool_asset.len()]
     cased: text_unicode_cased.UNICODE_CASED
     raw: utf8_bytes(text)
-    saw := false
-    at := 0
+    ^saw: false
+    ^at: 0
     loop at < raw.len() {
         cp: scalar_at(raw, at)
         if text_asset.asset_contains(cased, cp) {
@@ -262,7 +262,7 @@ ascii_upper: fn(text: String) -> String Never! { ascii_case(text, true) }
 
 ascii_case: fn(text: String, upper: Bool) -> String Never! {
     raw: utf8_bytes(text)
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in raw {
         if {
             upper && byte >= (U8{97}) && byte <= (U8{122}) -> out.push(byte - U8{32})
@@ -280,9 +280,9 @@ is_title: fn(text: String) -> Bool Never! {
     lowercase: text_unicode_lowercase.UNICODE_LOWERCASE
     alphabetic: text_unicode_alphabetic.UNICODE_ALPHABETIC
     raw: utf8_bytes(text)
-    has_cased := false
-    expect_upper := true
-    at := 0
+    ^has_cased: false
+    ^expect_upper: true
+    ^at: 0
     loop at < raw.len() {
         cp: scalar_at(raw, at)
         if {
@@ -321,7 +321,7 @@ is_whitespace: fn(text: String) -> Bool Never! {
 all_property: fn(text: String, asset: [U8]) -> Bool Never! {
     raw: utf8_bytes(text)
     if raw.len() == 0 -> return false
-    at := 0
+    ^at: 0
     loop at < raw.len() {
         if !text_asset.asset_contains(asset, scalar_at(raw, at)) -> return false
         at += utf8_width_at(raw, at)
@@ -334,7 +334,7 @@ is_alnum: fn(text: String) -> Bool Never! {
     numeric: text_unicode_numeric.UNICODE_NUMERIC
     raw: utf8_bytes(text)
     if raw.len() == 0 -> return false
-    at := 0
+    ^at: 0
     loop at < raw.len() {
         cp: scalar_at(raw, at)
         if !text_asset.asset_contains(alphabetic, cp) && !text_asset.asset_contains(numeric, cp) {
@@ -352,7 +352,7 @@ is_identifier: fn(text: String) -> Bool Never! {
     numeric: text_unicode_numeric.UNICODE_NUMERIC
     raw: utf8_bytes(text)
     if raw.len() == 0 -> return false
-    at := 0
+    ^at: 0
     loop at < raw.len() {
         cp: scalar_at(raw, at)
         if cp != 95 && !text_asset.asset_contains(alphabetic, cp) {
@@ -368,7 +368,7 @@ is_identifier: fn(text: String) -> Bool Never! {
 isprintable: fn(text: String) -> Bool Never! {
     category: text_unicode_category.UNICODE_GENERAL_CATEGORY
     raw: utf8_bytes(text)
-    at := 0
+    ^at: 0
     loop at < raw.len() {
         if text_asset.asset_tag(category, scalar_at(raw, at), 8) == 0 -> return false
         at += utf8_width_at(raw, at)
@@ -383,11 +383,11 @@ isprintable: fn(text: String) -> Bool Never! {
 trim_bounds: fn(text: String, left: Bool, right: Bool) -> {start: Int, end: Int} Never! {
     whitespace_asset: text_unicode_white_space.UNICODE_WHITE_SPACE
     raw: utf8_bytes(text)
-    start := 0
-    end := 0
-    scalar := 0
-    at := 0
-    leading := true
+    ^start: 0
+    ^end: 0
+    ^scalar: 0
+    ^at: 0
+    ^leading: true
     loop at < raw.len() {
         space: text_asset.asset_contains(whitespace_asset, scalar_at(raw, at))
         if leading && space -> start = scalar + 1
@@ -425,9 +425,9 @@ trim: fn(text: String) -> String Never! {
 split_whitespace: fn(text: String) -> [String] Never! {
     whitespace_asset: text_unicode_white_space.UNICODE_WHITE_SPACE
     raw: utf8_bytes(text)
-    out := [String]{}
-    start := -1
-    at := 0
+    ^out: [String]{}
+    ^start: -1
+    ^at: 0
     loop at < raw.len() {
         width: utf8_width_at(raw, at)
         space: text_asset.asset_contains(whitespace_asset, scalar_at(raw, at))
@@ -454,10 +454,10 @@ byte_at: fn(bytes: [U8], at: Int, reverse: Bool) -> U8 Never! {
 }
 
 maximal_suffix: fn(needle: [U8], reverse: Bool, order: Bool) -> {split: Int, period: Int} Never! {
-    suffix := -1
-    candidate := 0
-    offset := 1
-    period := 1
+    ^suffix: -1
+    ^candidate: 0
+    ^offset: 1
+    ^period: 1
     loop candidate + offset < needle.len() {
         a: byte_at(needle, candidate + offset, reverse)
         b: byte_at(needle, suffix + offset, reverse)
@@ -491,13 +491,13 @@ find_bytes: fn(hay: [U8], needle: [U8], from: Int, reverse: Bool) -> Int? {
     if from < 0 || from > hay.len() || size > hay.len() - from -> return None
     first: maximal_suffix(needle, reverse, true)
     second: maximal_suffix(needle, reverse, false)
-    split := first.split
-    period := first.period
+    ^split: first.split
+    ^period: first.period
     if second.split > split {
         split = second.split
         period = second.period
     }
-    periodic := period + split <= size
+    ^periodic: period + split <= size
     if periodic {
         loop i in 0..<split {
             if byte_at(needle, i, reverse) != byte_at(needle, period + i, reverse) {
@@ -511,10 +511,10 @@ find_bytes: fn(hay: [U8], needle: [U8], from: Int, reverse: Bool) -> Int? {
         if size - split > period -> period = size - split
         period += 1
     }
-    position := from
-    memory := 0
+    ^position: from
+    ^memory: 0
     loop position <= hay.len() - size {
-        i := split
+        ^i: split
         if memory > i -> i = memory
         loop i < size && byte_at(needle, i, reverse) == byte_at(hay, position + i, reverse) {
             i += 1
@@ -539,8 +539,8 @@ find_bytes: fn(hay: [U8], needle: [U8], from: Int, reverse: Bool) -> Int? {
 }
 
 scalar_offset: fn(raw: [U8], byte: Int) -> Int Never! {
-    at := 0
-    count := 0
+    ^at: 0
+    ^count: 0
     loop at < byte {
         at += utf8_width_at(raw, at)
         count += 1
@@ -566,8 +566,8 @@ count: fn(text: String, needle: String) -> Int Never! {
     nd: utf8_bytes(needle)
     if nd.len() == 0 -> return 0
     raw: utf8_bytes(text)
-    from := 0
-    count := 0
+    ^from: 0
+    ^count: 0
     loop {
         at: find_bytes(raw, nd, from, false) ?? break
         count += 1
@@ -636,7 +636,7 @@ utf8_width_at: fn(raw: [U8], at: Int) -> Int Never! {
 
 // Write into the caller's UTF-8 buffer: normalization allocates no per-scalar strings.
 append_cp: fn(out: ^[U8], cp: Int) Never! {
-    n := cp
+    ^n: cp
     if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
     if n < 128 -> out.push(U8{n}) else if n < 2048 {
         out.push(U8{Int{192} | (n >> 6)})

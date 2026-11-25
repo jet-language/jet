@@ -104,7 +104,7 @@ InlineRec: struct {
 // cover the modules of the program's own package; Core and dependency
 // modules stay out of the document.
 canvas_graph_projection: fn(source_id: String, src: String, modules: [JetDriverDocModule], entry_identity: String, index: SemIndex) -> Projection {
-    sink := GraphSink{graphs: [String]{}, inline_exprs: [InlineExpr]{}, anchors: [GraphEditAnchor]{}, node_refs: [NodeQueryRef]{}}
+    ^sink: GraphSink{graphs: [String]{}, inline_exprs: [InlineExpr]{}, anchors: [GraphEditAnchor]{}, node_refs: [NodeQueryRef]{}}
     loop doc in modules {
         if doc.alias != "" -> next
         collect_item_graphs(index, doc, doc.module_identity == entry_identity, doc.items, None, sink)
@@ -187,11 +187,11 @@ function_is_fallible: fn(f: Func) -> Bool Never! {
 // Every unit variant of each enum the modules declare, by enum name: the
 // choices of an enum-valued inline editor.
 enum_catalog_json: fn(modules: [JetDriverDocModule]) -> String Never! {
-    catalog := [String:[String]]{}
+    ^catalog: [String:[String]]{}
     loop doc in modules {
         if doc.alias == "" -> collect_enum_variants(doc.items, catalog)
     }
-    names := catalog.keys().to_list()
+    ^names: catalog.keys().to_list()
     names.sort()
     entries: loop name in names -> {
         variants: loop variant in catalog[name] -> "{{\"name\":{json_str(variant)},\"source\":{json_str("{name}.{variant}")}}}"
@@ -205,7 +205,7 @@ collect_enum_variants: fn(items: [Item], catalog: ^[String:[String]]) {
         if item == {
             .Enum(def) -> {
                 if catalog.has_key(def.name) -> next
-                variants := [String]{}
+                ^variants: [String]{}
                 loop variant in def.variants {
                     if variant.payload == .Unit -> variants.push(variant.name)
                 }
@@ -222,11 +222,11 @@ collect_enum_variants: fn(items: [Item], catalog: ^[String:[String]]) {
 // Every variant of each enum with its payload arity, by enum name: the arms a
 // pattern editor offers.
 pattern_catalog_json: fn(modules: [JetDriverDocModule]) -> String Never! {
-    catalog := [String:[String]]{}
+    ^catalog: [String:[String]]{}
     loop doc in modules {
         if doc.alias == "" -> collect_pattern_variants(doc.items, catalog)
     }
-    names := catalog.keys().to_list()
+    ^names: catalog.keys().to_list()
     names.sort()
     entries: loop name in names -> "{json_str(name)}:[{catalog[name].join(",")}]"
     "{{{entries.join(",")}}}"
@@ -237,7 +237,7 @@ collect_pattern_variants: fn(items: [Item], catalog: ^[String:[String]]) {
         if item == {
             .Enum(def) -> {
                 if catalog.has_key(def.name) -> next
-                variants := [String]{}
+                ^variants: [String]{}
                 loop variant in def.variants {
                     arity: if variant.payload == {
                         .Unit -> 0
@@ -258,7 +258,7 @@ collect_pattern_variants: fn(items: [Item], catalog: ^[String:[String]]) {
 
 project_func: fn(index: SemIndex, tables: ASTTables, module_display: String, module_src: String, f: Func) -> GraphBuilder {
     id: graph_id(module_display, f)
-    g := GraphBuilder{graph_id: id, tables: tables}
+    ^g: GraphBuilder{graph_id: id, tables: tables}
     entry_id: "{id}:entry"
     entry_descriptor: descriptor_for_id("entry")
     g.nodes.push(NodeRec{id: entry_id, kind: entry_descriptor.kind, archetype: entry_descriptor.archetype, title: f.name, span: f.name_span, x: 40, y: 40, badges: effect_badges(index, f.name), affordances: [String]{"source_jump", "insert_call", "rename_function", "edit_function_signature", "create_function"}, meta_json: meta_attr_json(tables, f.meta)})

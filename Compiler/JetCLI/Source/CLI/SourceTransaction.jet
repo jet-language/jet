@@ -76,7 +76,7 @@ jet_cli_transaction_relative: fn(root: String, path: String) -> [String] JetCLIR
             return Err(jet_cli_read_error("transaction path escapes the project root: {path}"))
         }
     }
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in relative.split("/") {
         jet_cli_rooted_validate_name(part)
         parts.push(part)
@@ -86,10 +86,10 @@ jet_cli_transaction_relative: fn(root: String, path: String) -> [String] JetCLIR
 }
 
 jet_cli_transaction_record: fn(project: JetCLIRootedDirectory, change: JetCLISourceChange) -[FS]> JetCLITransactionRecord JetCLIReadError! {
-    parts := jet_cli_transaction_relative(project.path, change.path)
+    ^parts: jet_cli_transaction_relative(project.path, change.path)
     name: parts.pop() ?? return Err(jet_cli_read_error("transaction path has no file name"))
-    parent := JetCLIRootedDirectory?{None}
-    info := cli_files.Stat?{None}
+    ^parent: JetCLIRootedDirectory?{None}
+    ^info: cli_files.Stat?{None}
     if {
         parts.len() != 0 -> {
             held: project.descendant(parts, false)
@@ -107,7 +107,7 @@ jet_cli_transaction_id_json: fn(id: cli_files.FileID) -> String Never! {
 }
 
 jet_cli_transaction_journal: fn(tx: String, completed: Int, records: [JetCLITransactionRecord], log_path: String, log: [U8]) -> [U8] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop record in records {
         parent: jet_cli_parent(record.change.path) ?? ""
         temp: jet_cli_rooted_join(parent, record.temp)
@@ -163,9 +163,9 @@ jet_cli_transaction_recover: fn(project: JetCLIRootedDirectory, journal: JetCLIR
     log: jet_cli_transaction_bytes(value, "log")
     values: jet_cli_status_list(jet_cli_status_get(value, "files")) ?? return Err(jet_cli_read_error("invalid recovery journal files"))
     if values.len() == 0 -> return Err(jet_cli_read_error("recovery journal has no file changes"))
-    records := [JetCLITransactionRecord]{}
-    identities := [String:Bool]{}
-    all_after := true
+    ^records: [JetCLITransactionRecord]{}
+    ^identities: [String:Bool]{}
+    ^all_after: true
     loop row in values {
         path: jet_cli_transaction_text(row, "path")
         if !path.starts_with(jet_cli_rooted_join(project.path, "")) {
@@ -174,7 +174,7 @@ jet_cli_transaction_recover: fn(project: JetCLIRootedDirectory, journal: JetCLIR
         temp_path: jet_cli_transaction_text(row, "temp")
         before: jet_cli_transaction_bytes(row, "before")
         after: jet_cli_transaction_bytes(row, "after")
-        record := jet_cli_transaction_record(project, JetCLISourceChange{path: path, before: before, after: after})
+        ^record: jet_cli_transaction_record(project, JetCLISourceChange{path: path, before: before, after: after})
         record.destination_id = jet_cli_transaction_identity(row, "destination_id")
         record.temp_id = jet_cli_transaction_identity(row, "temp_id")
         record.temp = jet_cli_file_name(temp_path)
@@ -240,10 +240,10 @@ jet_cli_transaction_commit_locked: fn(project: JetCLIRootedDirectory, journal: J
     if journal.read(log_name, JET_CLI_TRANSACTION_MAX_BYTES) != None {
         return Err(jet_cli_read_error("codemod replay log already exists"))
     }
-    records := [JetCLITransactionRecord]{}
-    identities := [String:Bool]{}
+    ^records: [JetCLITransactionRecord]{}
+    ^identities: [String:Bool]{}
     loop change in changes {
-        record := jet_cli_transaction_record(project, change) ?? {
+        ^record: jet_cli_transaction_record(project, change) ?? {
             loop previous in records -> previous.discard(project)
             return Err(err)
         }
@@ -313,7 +313,7 @@ jet_cli_source_hash: fn(bytes: [U8]) -> String Never! {
 }
 
 jet_cli_fix_operation_json: fn(operation: JetCLISemOp, changes: [JetCLISourceChange]) -> String Never! {
-    targets := [String]{}
+    ^targets: [String]{}
     loop target in operation.targets {
         stable: foundation_json_quote(target.stable_id)
         before: foundation_json_quote(target.before)
@@ -322,7 +322,7 @@ jet_cli_fix_operation_json: fn(operation: JetCLISemOp, changes: [JetCLISourceCha
         module_path: foundation_json_quote(target.module_path)
         targets.push("{{\"stable_id\":{stable},\"before\":{before},\"after\":{after},\"kind\":{kind},\"module_path\":{module_path}}}")
     }
-    files := [String]{}
+    ^files: [String]{}
     loop change in changes {
         path: foundation_json_quote(change.path)
         before: jet_cli_source_hash(change.before)
@@ -344,7 +344,7 @@ jet_cli_fix_operation_json: fn(operation: JetCLISemOp, changes: [JetCLISourceCha
 // `skipped`: the fixes `jet fix` left out and why (FixCommands.jet), one
 // `skipped` row each.
 jet_cli_fix_log: fn(root: String, name: String, changes: [JetCLISourceChange], operations: [JetCLISemOp], skipped: [JetCLIFixSkip]) -> [U8] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop change in changes {
         path: foundation_json_quote(change.path)
         before_hash: jet_cli_source_hash(change.before)
@@ -368,15 +368,15 @@ jet_cli_fix_rewrite: fn(before: [U8], after: [U8]) -> [JetCLISemOp] Never! {
     // The producer only attaches textual rewrite intent to UTF-8.
     _: String.from_bytes(before) ?? return [JetCLISemOp]{}
     _: String.from_bytes(after) ?? return [JetCLISemOp]{}
-    prefix := 0
+    ^prefix: 0
     loop prefix < before.len() && prefix < after.len() && before[prefix] == after[prefix] {
         prefix += 1
     }
     loop prefix > 0 && (!jet_cli_memory_boundary(before, prefix) || !jet_cli_memory_boundary(after, prefix)) {
         prefix -= 1
     }
-    before_end := before.len()
-    after_end := after.len()
+    ^before_end: before.len()
+    ^after_end: after.len()
     loop before_end > prefix && after_end > prefix && before[before_end - 1] == after[after_end - 1] {
         before_end -= 1
         after_end -= 1
@@ -389,7 +389,7 @@ jet_cli_fix_rewrite: fn(before: [U8], after: [U8]) -> [JetCLISemOp] Never! {
 }
 
 jet_cli_fix_name: fn(stem: String) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop character in stem.chars() {
         text: "{character}"
         parts.push(if text.is_alphabetic() || text.is_numeric() || text == "-" || text == "_" -> text else -> "_")
@@ -406,7 +406,7 @@ jet_cli_fix_name: fn(stem: String) -> String Never! {
 jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: ^^[JetCLISemOp], skipped: [JetCLIFixSkip], others: ^^[JetCLISourceChange]) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
     path: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
     parent: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     // Absence selects the standalone-file root; a failed manifest observation
     // is distinct and must not be flattened into that fallback.
     found: if jet_cli_find_package_root_checked(cache, parent) == {
@@ -416,9 +416,9 @@ jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: ^
             return Err(jet_cli_read_error(error.diagnostic.what))
         }
     }
-    root := found ?? parent
+    ^root: found ?? parent
     if found == None {
-        ancestor := parent
+        ^ancestor: parent
         loop {
             relative: if path.starts_with("{ancestor}/") -> path.slice(ancestor.len() + 1, path.len()) else -> ""
             if relative.starts_with("Examples/") || relative.starts_with("Tests/UI/") {
@@ -436,15 +436,15 @@ jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: ^
     cut: filename.rpartition(".")
     stem: if cut.head != "" -> cut.head else -> filename
     base: "Fix-{jet_cli_fix_name(stem)}"
-    suffix := 0
-    name := base
+    ^suffix: 0
+    ^name: base
     loop journal.member_present("{name}.log.json") {
         suffix += 1
         name = "{base}-{suffix}"
     }
-    operations := semantic_ops.move()
+    ^operations: semantic_ops.move()
     if operations.len() == 0 -> operations = jet_cli_fix_rewrite(before, staged)
-    changes := [JetCLISourceChange]{JetCLISourceChange{path: path, before: before, after: staged}}
+    ^changes: [JetCLISourceChange]{JetCLISourceChange{path: path, before: before, after: staged}}
     loop other in others.move() {
         other_path: cli_files.realpath(other.path) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{other.path}`: {jet_cli_io_error_text(err)}"))
         changes.push(JetCLISourceChange{path: other_path, before: other.before.move(), after: other.after.move()})
@@ -493,7 +493,7 @@ jet_cli_undo_source_changes: fn(root: String, log_name: String) -[FS, Env, Exec,
         return Err(jet_cli_read_error("replay log project does not match its .jet/codemods location"))
     }
     values: jet_cli_status_list(jet_cli_status_get(value, "files")) ?? return Err(jet_cli_read_error("replay log files must be an array"))
-    changes := [JetCLISourceChange]{}
+    ^changes: [JetCLISourceChange]{}
     loop row in values {
         jet_cli_transaction_known_fields(row, [String]{"path", "before_hash", "after_hash", "before_bytes", "after_bytes"}, "replay log file")
         path: jet_cli_transaction_text(row, "path")

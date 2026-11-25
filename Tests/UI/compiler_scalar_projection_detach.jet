@@ -16,7 +16,7 @@ consume_parameter: fn(owner: ^ScalarOwner) {
 byte_count: fn(bytes: View<U8>) -> Int { bytes.len() }
 
 run: fn() {
-    owner := ScalarOwner{parameter: Val(3), parameters: [Int?]{Val(4)}, changes: 0}
+    ^owner: ScalarOwner{parameter: Val(3), parameters: [Int?]{Val(4)}, changes: 0}
     consume_parameter(owner)
     if owner.changes != 7 -> panic("detached scalar IDs changed")
     expected: Int?{Val(3)}

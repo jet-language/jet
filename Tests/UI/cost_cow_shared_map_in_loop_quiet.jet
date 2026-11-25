@@ -1,14 +1,14 @@
 // The no-fire pair of cost_cow_shared_map_in_loop: an edit of a
 // map the loop never shares clones it at most once, so it is no L2511.
 tally: fn(keys: [String]) -> [String:Int] {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop key in keys -> counts[key] = (counts.get(key) ?? 0) + 1
     counts
 }
 
 // Shared once before the loop: the first edit clones, the rest edit in place.
 after_snapshot: fn(keys: [String]) -> Int {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     before: counts.copy()
     loop key in keys -> counts[key] = 1
     before.len() + counts.len()
@@ -16,9 +16,9 @@ after_snapshot: fn(keys: [String]) -> Int {
 
 // The loop shares a map other than the one it edits.
 mirrored: fn(keys: [String]) -> Int {
-    seen := [String:Int]{}
+    ^seen: [String:Int]{}
     frozen: [String:Int]{"x": 1}
-    out := [[String:Int]]{}
+    ^out: [[String:Int]]{}
     loop key in keys {
         out.push(frozen.copy())
         seen[key] = out.len()

@@ -27,7 +27,7 @@ first_name: fn(env: Env) -> String {
 total_length: fn(env: Env) -> Int {
     graph_option: env.graph
     graph: graph_option ?? return 0
-    total := 0
+    ^total: 0
     loop name in graph.names -> total += name.len()
     total
 }
@@ -35,7 +35,7 @@ total_length: fn(env: Env) -> Int {
 count_matches: fn(env: Env, wanted: String) -> Int {
     if env.graph == {
         .Val(graph) -> {
-            count := 0
+            ^count: 0
             loop name in graph.names {
                 if name == wanted -> count += 1
             }
@@ -54,7 +54,7 @@ kept_graph: fn(env: Env) -> Graph {
 // Editing a copy taken from a read alias never reaches the parameter.
 renamed: fn(env: Env) -> Graph {
     plain: env.plain
-    updated := plain
+    ^updated: plain
     updated.names.push("added")
     updated
 }
@@ -86,14 +86,14 @@ Holder: struct {
 hold: fn(graph: ^^Graph, note: ^^String) -> Holder { Holder{graph: graph, note: note} }
 
 run: fn() {
-    env := Env{graph: Val(Graph{names: [String]{"ab", "c", "ab"}}), plain: Graph{names: [String]{"p"}}}
+    ^env: Env{graph: Val(Graph{names: [String]{"ab", "c", "ab"}}), plain: Graph{names: [String]{"p"}}}
     print(names_in(env))
     print(has_graph(env))
     print(first_name(env))
     print(total_length(env))
     print(count_matches(env, "ab"))
-    kept := kept_graph(env)
-    edited := renamed(env)
+    ^kept: kept_graph(env)
+    ^edited: renamed(env)
     print(consumed(env))
     print(tail_count(env))
     held: hold(Graph{names: [String]{"h", "i"}}, "note")

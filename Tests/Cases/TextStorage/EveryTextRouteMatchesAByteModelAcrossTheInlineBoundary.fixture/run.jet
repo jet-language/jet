@@ -34,37 +34,37 @@ same: fn(got: String, model: [U8]) -> Bool {
 
 run: fn() {
     names: [String]{"+=", "shared +=", "interpolation", "join", "split", "slice", "clear", "clone", "grown clone"}
-    whole := ""
+    ^whole: ""
     loop i in 0..<UNITS -> whole += unit_text(i)
-    rows := 0
-    mismatches := 0
-    checksum := 0
+    ^rows: 0
+    ^mismatches: 0
+    ^checksum: 0
     loop n in 0..<UNITS {
-        model := [U8]{}
+        ^model: [U8]{}
         loop i in 0..<n -> unit_bytes(i, model)
-        grown := ""
+        ^grown: ""
         loop i in 0..<n -> grown += unit_text(i)
         half: n /% 2
-        left := ""
+        ^left: ""
         loop i in 0..<half -> left += unit_text(i)
-        right := ""
+        ^right: ""
         loop i in half..<n -> right += unit_text(i)
-        parts := [String]{}
+        ^parts: [String]{}
         loop i in 0..<n -> parts.push(unit_text(i))
-        split := ""
+        ^split: ""
         loop piece in parts.join(",").split(",") -> split += piece
-        cleared := parts.join("")
+        ^cleared: parts.join("")
         cleared = ""
         loop i in 0..<n -> cleared += unit_text(i)
         // `joined` shares `left`'s text, so its `+=` builds a fresh one.
-        joined := left.to_string()
+        ^joined: left.to_string()
         interpolated: "{left}{right}"
         joined += right
         kept: grown.to_string()
         grown += "!"
         clone: kept.to_string()
         routes: [String]{kept, joined, interpolated, parts.join(""), split, whole.slice(0, n), cleared, clone, grown}
-        bang := [U8]{}
+        ^bang: [U8]{}
         loop byte in model -> bang.push(byte)
         bang.push("!".bytes()[0])
         loop k in 0..<routes.len() {

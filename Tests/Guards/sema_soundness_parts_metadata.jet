@@ -4,11 +4,11 @@ use s3_sema_corpus_files: core.files
 // SEMA_SOUNDNESS_CASE routing is a Rust harness law retired with that harness;
 // the floor always counts the complete fixed corpus, never a replay subset.
 s3_guard_full_corpus_count: fn() {
-    total := 0
+    ^total: 0
     categories: [String]{"Valid", "Invalid", "Differential"}
     loop kind in categories {
         entries: s3_sema_corpus_files.list_dir("Tests/Fuzz/Sema/{kind}") ?? panic("cannot read sema corpus {kind}")
-        count := 0
+        ^count: 0
         loop entry in entries {
             if entry.name != ".jet" && entry.name.ends_with(".jet") -> count += 1
         }

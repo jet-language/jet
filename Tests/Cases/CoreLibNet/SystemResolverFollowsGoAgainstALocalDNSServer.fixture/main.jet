@@ -108,7 +108,7 @@ v4: fn(a: Int, b: Int, c: Int, d: Int) -> Record {
 }
 
 v6: fn(words: [Int]) -> Record {
-    data := [U8]{}
+    ^data: [U8]{}
     loop word in words {
         data.push(byte(word /% 256))
         data.push(byte(word % 256))
@@ -118,7 +118,7 @@ v6: fn(words: [Int]) -> Record {
 
 // A name in DNS wire form: length-prefixed labels, then the root.
 wire_name: fn(name: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop label in name.split(".") {
         out.push(byte(label.bytes().len()))
         loop b in label.bytes() -> out.push(b)
@@ -148,7 +148,7 @@ zone: fn(name: String, kind: Int, tcp: Bool, asked: Int) -> Reply {
     }
     if name == "big.test" && !tcp -> return Reply{rcode: 0, truncated: true, records: [Record]{}}
     if name == "big.test" {
-        records := [Record]{}
+        ^records: [Record]{}
         loop i in 1..<31 -> records.push(v4(10, 2, 0, i))
         return answer(records)
     }
@@ -204,7 +204,7 @@ zone: fn(name: String, kind: Int, tcp: Bool, asked: Int) -> Reply {
 
 // A hostile name's honest address: 10.3.0.N for the Nth HOSTILE name.
 honest: fn(name: String) -> Int {
-    at := 1
+    ^at: 1
     loop candidate in HOSTILE {
         if candidate.to_lower() == ("{name}.") -> return at
         at += 1
@@ -213,7 +213,7 @@ honest: fn(name: String) -> Int {
 }
 
 join: fn(parts: [[U8]]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop part in parts {
         loop b in part -> out.push(b)
     }
@@ -221,7 +221,7 @@ join: fn(parts: [[U8]]) -> [U8] {
 }
 
 with_byte: fn(bytes: [U8], at: Int, value: Int) -> [U8] {
-    out := bytes.copy()
+    ^out: bytes.copy()
     out[at] = byte(value)
     out
 }
@@ -230,7 +230,7 @@ bumped: fn(bytes: [U8], at: Int) -> [U8] { with_byte(bytes, at, Int{bytes[at]} +
 
 // The question's name bytes (12 up to `end`) in lowercase.
 lowered: fn(bytes: [U8], end: Int) -> [U8] {
-    out := bytes.copy()
+    ^out: bytes.copy()
     loop i in 12..<end {
         c: Int{out[i]}
         if c >= 65 && c <= 90 -> out[i] = byte(c + 32)
@@ -259,7 +259,7 @@ renamed: fn(query: [U8], asked: Question, reply: Reply) -> [U8] {
 
 // The forged UDP packets sent ahead of the reply to an A question.
 forgeries: fn(query: [U8], asked: Question) -> [[U8]] {
-    out := [[U8]]{}
+    ^out: [[U8]]{}
     if asked.kind != 1 -> return out
     name: asked.name
     all: name == "onlyforged.evil"
@@ -327,8 +327,8 @@ broken: fn(query: [U8], asked: Question, tcp: Bool) -> [U8]? {
 
 // The query's question: its lowercase name, type, and the offset past it.
 question: fn(query: [U8]) -> Question? {
-    at := 12
-    name := ""
+    ^at: 12
+    ^name: ""
     loop at < query.len() && (Int{query[at]}) != 0 {
         from: at + 1
         to: from + Int{query[at]}
@@ -342,7 +342,7 @@ question: fn(query: [U8]) -> Question? {
 }
 
 slice: fn(bytes: [U8], from: Int, to: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in from..<to -> out.push(bytes[i])
     out
 }
@@ -350,12 +350,12 @@ slice: fn(bytes: [U8], from: Int, to: Int) -> [U8] {
 // The response: the query's ID, RD and question, then the reply's records
 // of the asked type and its CNAMEs.
 encode: fn(query: [U8], asked: Question, reply: Reply) -> [U8] {
-    records := [Record]{}
+    ^records: [Record]{}
     loop record in reply.records {
         if record.kind == asked.kind || record.kind == 5 -> records.push(record.copy())
     }
     flags: 128 + Int{query[2]} % 2 + (if reply.truncated -> 2 else -> 0)
-    out := [U8]{query[0], query[1], byte(flags), byte(128 + reply.rcode), 0, 1, byte(records.len() /% 256), byte(records.len() % 256), 0, 0, 0, 0}
+    ^out: [U8]{query[0], query[1], byte(flags), byte(128 + reply.rcode), 0, 1, byte(records.len() /% 256), byte(records.len() % 256), 0, 0, 0, 0}
     loop b in slice(query, 12, asked.end) -> out.push(b)
     loop record in records {
         header: [U8]{0xc0, 0x0c, 0, byte(record.kind), 0, 1, 0, 0, 0, 60, byte(record.data.len() /% 256), byte(record.data.len() % 256)}
@@ -366,7 +366,7 @@ encode: fn(query: [U8], asked: Question, reply: Reply) -> [U8] {
 }
 
 udp_serve: fn(server: UDPSocket) {
-    seen := [String:Int]{}
+    ^seen: [String:Int]{}
     loop {
         request: net.udp_receive(server, 512) ?? return
         query: net.udp_packet_bytes(request)
@@ -389,7 +389,7 @@ udp_serve: fn(server: UDPSocket) {
 // One TCP connection's length-prefixed queries, answered until the client
 // closes it or a silent name comes up; false once STOP is asked.
 tcp_answer: fn(stream: TCPStream) -> Bool {
-    pending := [U8]{}
+    ^pending: [U8]{}
     loop {
         chunk: net.tcp_read_bytes(stream, 4096) ?? return true
         if chunk.len() == 0 -> return true
@@ -421,14 +421,14 @@ tcp_serve: fn(listener: TCPListener) {
 
 // A message with its two-byte TCP length prefix.
 framed: fn(message: [U8]) -> [U8] {
-    out := [U8]{byte(message.len() /% 256), byte(message.len() % 256)}
+    ^out: [U8]{byte(message.len() /% 256), byte(message.len() % 256)}
     loop b in message -> out.push(b)
     out
 }
 
 // A recursive A query for `name`.
 query_for: fn(name: String) -> [U8] {
-    out := [U8]{0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0}
+    ^out: [U8]{0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0}
     loop b in wire_name(name) -> out.push(b)
     tail: [U8]{0, 1, 0, 1}
     loop b in tail -> out.push(b)
@@ -438,7 +438,7 @@ query_for: fn(name: String) -> [U8] {
 describe: fn(name: String) -> String {
     if net.socket_addrs(name, 80) == {
         .Ok(addresses) -> {
-            line := "{name}:"
+            ^line: "{name}:"
             loop address in addresses -> line = "{line} {net.socket_host(address)}"
             line
         }
@@ -480,7 +480,7 @@ Ticks: struct {
 
 // 200 ticks 5 ms apart.
 ticks: fn(origin: Instant) -> Ticks {
-    out := Ticks{stamps: [Int]{}, threads: [Int]{}}
+    ^out: Ticks{stamps: [Int]{}, threads: [Int]{}}
     loop _ in 0..<200 {
         time.sleep(5ms)
         out.stamps.push(time.instant().difference(origin).ns)
@@ -492,9 +492,9 @@ ticks: fn(origin: Instant) -> Ticks {
 // The most lookups in flight at one instant: at each one's start, those
 // that began no later and have not ended.
 overlap: fn(lookups: [Lookup]) -> Int {
-    most := 0
+    ^most: 0
     loop lookup in lookups {
-        open := 0
+        ^open: 0
         loop other in lookups {
             if other.start <= lookup.start && lookup.start < other.end -> open += 1
         }
@@ -510,7 +510,7 @@ overlap: fn(lookups: [Lookup]) -> Int {
 // thread of its own, the ticks would count more threads than before the
 // lookups began, once the servers were parked.
 parked: fn() {
-    names := [String]{}
+    ^names: [String]{}
     loop n in 1..<(PARKED + 1) -> names.push("p{n}.park.")
     time.sleep(50ms)
     before: threads()
@@ -518,9 +518,9 @@ parked: fn() {
     ticker: task ticks(origin)
     lookups: names.para_map(fn(name: String) { timed_lookup(name, origin) }, limit: PARKED)
     record: ticker.join() ?? panic("ticker")
-    answered := true
-    first := lookups[0].start
-    last := lookups[0].end
+    ^answered: true
+    ^first: lookups[0].start
+    ^last: lookups[0].end
     loop at in 0..<lookups.len() {
         expected: "p{at + 1}.park.: 10.4.0.{at + 1}"
         if lookups[at].line != expected {
@@ -530,8 +530,8 @@ parked: fn() {
         if lookups[at].start < first -> first = lookups[at].start
         if lookups[at].end > last -> last = lookups[at].end
     }
-    during := 0
-    most := before
+    ^during: 0
+    ^most: before
     loop at in 0..<record.stamps.len() {
         if record.stamps[at] > first && record.stamps[at] < last {
             during += 1
@@ -571,7 +571,7 @@ run: fn() {
     }
     client: net.udp_bind("127.0.0.1:0") ?? panic("bind the stopping client")
     _: net.udp_send_bytes_to(client, query_for(STOP), net.socket_addr_parse("127.0.0.1:53") ?? panic("server address")) ?? panic("stop UDP")
-    stopper := net.tcp_connect("127.0.0.1:53") ?? panic("connect to stop TCP")
+    ^stopper: net.tcp_connect("127.0.0.1:53") ?? panic("connect to stop TCP")
     net.tcp_write_all_bytes(stopper, framed(query_for(STOP))) ?? panic("stop TCP")
     udp_server.join() ?? panic("UDP server")
     tcp_server.join() ?? panic("TCP server")

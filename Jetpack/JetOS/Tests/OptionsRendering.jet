@@ -131,7 +131,7 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
         {tier: "\"...users.Force\"", priority: 10000},
     }
     loop case in cases {
-        system := jetos_test_system(
+        ^system: jetos_test_system(
             [OptionPlan]{
                 jetos_test_option("k.tier", case.tier),
                 jetos_test_option("k.tier", "Default"),
@@ -277,7 +277,7 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 #Test("JetOS boot profile defaults empty lists and honors explicit aliases") {
     empty: jetos_test_system([OptionPlan]{})
     assert_eq(jetos_boot_profile(empty).to_json(), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"]}}")
-    overrides := jetos_test_system(
+    ^overrides: jetos_test_system(
         [OptionPlan]{
             jetos_test_option("boot.loader", ".Grub"),
             jetos_test_option("kernel.package", "packages.linux"),
@@ -335,7 +335,7 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 }
 
 #Test("JetOS risks retain encounter order and enabled service risk only once") {
-    system := jetos_test_system(
+    ^system: jetos_test_system(
         [OptionPlan]{
             jetos_test_option("performance.x", "0"),
             jetos_test_option("reboot.kernel", "x"),
@@ -356,7 +356,7 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 #Test("JetOS proof renders exact sections and only matching ISO images") {
     empty: jetos_test_system([OptionPlan]{})
     assert_eq(jetos_render_proof(empty, [JetOSRealizedPackage]{}, jetos_test_plan([ImagePlan]{})), "jetos proof for devhost\ntarget: linux.x64\nrisk: low\nplan: pass\npackages:\noptions:\nservices:\nimages:\n")
-    system := jetos_test_system([OptionPlan]{jetos_test_option("boot.kernel", " .Linux ")})
+    ^system: jetos_test_system([OptionPlan]{jetos_test_option("boot.kernel", " .Linux ")})
     system.services = [ServicePlan]{ServicePlan{name: "off", enable: false, extra: [ServicePlanExtra]{}}, ServicePlan{name: "on", enable: true, extra: [ServicePlanExtra]{}}}
     images: [ImagePlan]{jetos_test_image("iso", ImageKind.Iso, "devhost", "raw"), jetos_test_image("oci", ImageKind.OCI, "devhost", "oci"), jetos_test_image("other", ImageKind.Iso, "elsewhere", "raw")}
     assert_eq(jetos_render_proof(system, [JetOSRealizedPackage]{}, jetos_test_plan(images)), "jetos proof for devhost\ntarget: linux.x64\nrisk: boot, kernel, service-risk\nplan: pass\npackages:\noptions:\n  boot.kernel =  .Linux \nservices:\n  off enable=false\n  on enable=true\nimages:\n  iso raw\n")
@@ -365,12 +365,12 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 // The lease is produced by the real Store snapshot path, not forged test data.
 // This is a metadata-only proof render: no consumption/admission is claimed.
 #Test("JetOS proof reads held package entry instead of original or override paths") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: files.tmpdir("jetos-proof-package-") ?? panic("create root")
     entry: StoreEntry{id: "fixture", name: "fixture", version: "1", reference: "fixture@jetpack", out: files.join(root, "missing-output"), bin: "", rlib: "", envelope: Envelope.empty(), cache_identity: CacheIdentity.empty(), references: [String]{}, named_outputs: [String:String]{}, platform_artifact_kind: "", producer_record: "", receipt: "", realized_at: 0, last_used_at: 0}
     lease: store_snapshot_lease(verification, HangarRoots.at(root), entry) ?? panic("create real non-consumable lease")
     package: JetOSRealizedPackage{entry: entry, lease: lease, original_out: "/original", original_reference_text: "original@jetpack", consumption_override: Val("/override")}
-    packages := [JetOSRealizedPackage]{package}
+    ^packages: [JetOSRealizedPackage]{package}
     assert_eq(jetos_render_proof(jetos_test_system([OptionPlan]{}), packages, jetos_test_plan([ImagePlan]{})), "jetos proof for devhost\ntarget: linux.x64\nrisk: low\nplan: pass\npackages:\n  fixture@jetpack -> {entry.out}\noptions:\nservices:\nimages:\n")
     // The list owns the package: take it out before releasing its lease, so the
     // lease's locks close once (E0211 refuses a take from the element in place).

@@ -48,7 +48,7 @@ CranProvider: struct {
         project: ctx.project_dir ?? return None
         locked: pkg_lock_cran_realization(project, spec.raw) ?? return None
         authority: provider_cran_cache_authority(ctx) ?? return None
-        identity := provider_cache_identity(locked.source_hash, CRAN_RECIPE_ID, ctx, authority.provenance())
+        ^identity: provider_cache_identity(locked.source_hash, CRAN_RECIPE_ID, ctx, authority.provenance())
         identity.platform = provider_registry_locked_platform(locked.envelope)
         Val(CacheExpectation{identity: identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
@@ -56,7 +56,7 @@ CranProvider: struct {
     // CRAN metadata carries no trusted sizes: every ref is a new item of
     // unknown size.
     plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
-        plan := DownloadPlan.empty()
+        ^plan: DownloadPlan.empty()
         loop spec in specs {
             plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
         }
@@ -89,7 +89,7 @@ provider_cran_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, 
     fetch_authority: authority.provenance()
     wanted: provider_cran_parse_ref(spec.package)
     scratch: provider_registry_scratch(ctx.store_dir, "cran", "could not create CRAN scratch")
-    guard := RegistryScratch{path: scratch}
+    ^guard: RegistryScratch{path: scratch}
     defer close(guard)
     metadata_path: files.join(scratch, "PACKAGES")
     authority.to_path("{repository}/src/contrib/PACKAGES", metadata_path, scratch)
@@ -100,7 +100,7 @@ provider_cran_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, 
         return Err(RegistryError.Reason("CRAN metadata resolves `{wanted.name}` to {root.version}, not locked version {wanted.version}"))
     }
     order: provider_cran_dependency_order(wanted.name, records)
-    artifacts := [CranSourceArtifact]{}
+    ^artifacts: [CranSourceArtifact]{}
     loop name in order {
         record: records.get(name) ?? return Err(RegistryError.Reason("resolved CRAN dependency `{name}` has no metadata record"))
         filename: "{record.name}_{record.version}.tar.gz"
@@ -139,7 +139,7 @@ provider_cran_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, 
     provider_registry_write_text(files.join(out_dir, "cran.provenance"), provider_cran_render_provenance(repository, fetch_authority, source_hash, artifacts), "could not write CRAN provenance")
     provider_registry_seal(out_dir, "could not seal CRAN output")
     envelope: Envelope.for_output(out_dir, spec.raw, CRAN_RECIPE_ID)
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop dependency in root.dependencies -> dependencies.push(dependency.name)
     if ctx.project_dir == {
         .Val(project) -> {
@@ -148,12 +148,12 @@ provider_cran_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, 
         .None -> {}
     }
     identity: provider_cache_identity(source_hash, CRAN_RECIPE_ID, ctx, fetch_authority)
-    objects := [RegistrySourceObject]{}
+    ^objects: [RegistrySourceObject]{}
     loop artifact in artifacts {
         objects.push(RegistrySourceObject{name: artifact.record.name, sha256: artifact.hash, file_name: files.basename(artifact.path)})
     }
     edges: provider_registry_dependency_objects(root.name, objects)
-    facts := edges.facts
+    ^facts: edges.facts
     facts["repository"] = repository
     facts["fetch.authority"] = fetch_authority
     producer: provider_registry_producer("cran", "cran-install", source_hash, repository, fetch_authority, root.version, [String:String]{}, CRAN_RECIPE_ID, identity, facts)
@@ -198,7 +198,7 @@ provider_cran_parse_ref: fn(raw: String) -> {name: String, version: String} Regi
 
 // Parse a Debian-control `PACKAGES` index into records by package name.
 provider_cran_parse_packages: fn(raw: String) -> [String:CranRecord] RegistryError! {
-    records := [String:CranRecord]{}
+    ^records: [String:CranRecord]{}
     paragraphs: provider_registry_crlf_to_lf(raw).split("\n\n").to_list()
     loop paragraph in paragraphs {
         fields: provider_cran_dcf_fields(paragraph)
@@ -219,8 +219,8 @@ provider_cran_parse_packages: fn(raw: String) -> [String:CranRecord] RegistryErr
 // One Debian-control paragraph's fields; a continuation line folds into the
 // field above it.
 provider_cran_dcf_fields: fn(paragraph: String) -> [String:String] Never! {
-    fields := [String:String]{}
-    current := ""
+    ^fields: [String:String]{}
+    ^current: ""
     lines: provider_lines(paragraph)
     loop line in lines {
         if line.starts_with(" ") || line.starts_with("\t") {
@@ -240,7 +240,7 @@ provider_cran_dcf_fields: fn(paragraph: String) -> [String:String] Never! {
 // The installable `Depends`, `Imports`, and `LinkingTo` packages of one
 // paragraph, base packages and duplicates dropped, sorted by name.
 provider_cran_record_dependencies: fn(fields: [String:String]) -> [CranDependency] Never! {
-    dependencies := [CranDependency]{}
+    ^dependencies: [CranDependency]{}
     keys: [String]{"Depends", "Imports", "LinkingTo"}
     loop key in keys {
         value: fields.get(key) ?? next
@@ -280,7 +280,7 @@ provider_cran_parse_dependency: fn(raw_item: String) -> CranDependency? Never! {
     if name == "" || name == "R" -> return None
     requirement: if raw.split_once("(") == {
         .Val(pair) -> {
-            rest := pair.after
+            ^rest: pair.after
             loop rest.ends_with(")") -> rest = rest.removesuffix(")")
             words: provider_registry_words(rest)
             if words.len() == 2 -> Val({operator: words[0], wanted: words[1]}) else -> None
@@ -301,7 +301,7 @@ provider_cran_is_base_package: fn(name: String) -> Bool Never! {
 // Dependencies before dependents, each once, checking every requirement
 // against the selected metadata version and refusing cycles.
 provider_cran_dependency_order: fn(root: String, records: [String:CranRecord]) -> [String] RegistryError! {
-    walk := CranOrderWalk{records: records, active: [String]{}, done: [String]{}, out: [String]{}}
+    ^walk: CranOrderWalk{records: records, active: [String]{}, done: [String]{}, out: [String]{}}
     walk.visit(root)
     Ok(walk.out)
 }
@@ -333,7 +333,7 @@ CranOrderWalk: struct {
             }
             self.visit(dependency.name)
         }
-        _ := self.active.pop()
+        ^_: self.active.pop()
         self.done.push(name.copy())
         self.out.push(name.copy())
     }
@@ -374,7 +374,7 @@ provider_cran_compare_versions: fn(left: String, right: String) -> Ordering Neve
 
 // The closure identity: every artifact's name, version, and tarball hash.
 provider_cran_closure_hash: fn(artifacts: [CranSourceArtifact]) -> String Never! {
-    values := [String]{}
+    ^values: [String]{}
     loop artifact in artifacts {
         values.push(artifact.record.name)
         values.push(artifact.record.version)
@@ -402,7 +402,7 @@ provider_cran_write_runtime_wrapper: fn(out: String) -[FS, Env]> RegistryError! 
 }
 
 provider_cran_render_provenance: fn(repository: String, fetch_authority: String, source_hash: String, artifacts: [CranSourceArtifact]) -> String Never! {
-    lines := [String]{"schema=jet-cran-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\n"}
+    ^lines: [String]{"schema=jet-cran-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\n"}
     loop artifact in artifacts {
         lines.push("package={artifact.record.name}:{artifact.record.version}:{artifact.hash}\n")
     }

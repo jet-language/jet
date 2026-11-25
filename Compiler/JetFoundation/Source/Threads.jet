@@ -42,7 +42,7 @@ compiler_threads_single: fn() -> CompilerThreads Never! {
 // copied out for their threads, say) plus `scratch_per_thread` bytes for each
 // thread.
 compiler_threads_admit: fn(threads: CompilerThreads, items: Int, work: Int, min_work_per_thread: Int, scratch_per_thread: Int, parallel_scratch: Int) -> Int Never! {
-    limit := compiler_threads_limit(threads)
+    ^limit: compiler_threads_limit(threads)
     if limit > items -> limit = items
     loop limit > 1 && limit * min_work_per_thread > work -> limit -= 1
     if threads.memory_available == .Val(free) {
@@ -58,7 +58,7 @@ compiler_threads_admit: fn(threads: CompilerThreads, items: Int, work: Int, min_
 // of that (compiler_threads_share).
 compiler_threads_limit: fn(threads: CompilerThreads) -> Int Never! {
     cores: if threads.cores < 1 -> 1 else -> threads.cores
-    limit := threads.cap ?? cores
+    ^limit: threads.cap ?? cores
     if limit > cores -> limit = cores
     if limit < 1 -> limit = 1
     permit: COMPILER_THREADS_COMPILES.guard_read()
@@ -77,14 +77,14 @@ COMPILER_THREADS_COMPILES: Shared{0}
 
 // One more compile runs at once with the others of this process.
 compiler_threads_join: fn() Never! {
-    held := COMPILER_THREADS_COMPILES.guard_edit()
+    ^held: COMPILER_THREADS_COMPILES.guard_edit()
     held.value += 1
 }
 
 // A compile that joined (compiler_threads_join) ends, or waits on work
 // outside the compiler holding none of its threads.
 compiler_threads_leave: fn() Never! {
-    held := COMPILER_THREADS_COMPILES.guard_edit()
+    ^held: COMPILER_THREADS_COMPILES.guard_edit()
     if held.value > 0 -> held.value -= 1
 }
 
@@ -99,7 +99,7 @@ compiler_threads_share: fn(limit: Int, compiles: Int) -> Int Never! {
 
 // `threads` capped at `count` threads (at least one).
 compiler_threads_capped: fn(threads: CompilerThreads, count: Int) -> CompilerThreads Never! {
-    limit := compiler_threads_limit(threads)
+    ^limit: compiler_threads_limit(threads)
     if count < limit -> limit = count
     if limit < 1 -> limit = 1
     CompilerThreads{cap: Val(limit), cores: threads.cores, memory_available: threads.memory_available}
@@ -135,7 +135,9 @@ compiler_threads_beside: fn(threads: CompilerThreads, held: Int) -> CompilerThre
     // one thread each.
     loop limit in 1..<65 {
         loop compiles in 1..<9 {
-            if limit >= compiles -> assert(compiler_threads_share(limit, compiles) * compiles <= limit, "{compiles} compiles over {limit} threads take more than the limit")
+            if limit >= compiles {
+                assert(compiler_threads_share(limit, compiles) * compiles <= limit, "{compiles} compiles over {limit} threads take more than the limit")
+            }
         }
     }
 }
@@ -145,11 +147,11 @@ compiler_threads_beside: fn(threads: CompilerThreads, held: Int) -> CompilerThre
 // count. Each part holds about an equal share of the total weight (a job
 // weighs at least 1); a part is empty when one heavy job covers its share.
 compiler_threads_partition: fn(weights: [Int], workers: Int) -> [Int] Never! {
-    total := 0
+    ^total: 0
     loop weight in weights -> total += if weight < 1 -> 1 else -> weight
-    bounds := [Int]{0}
-    reached := 0
-    part := 1
+    ^bounds: [Int]{0}
+    ^reached: 0
+    ^part: 1
     loop (index, weight) in weights {
         loop part < workers && reached * workers >= total * part {
             bounds.push(index)
@@ -171,22 +173,22 @@ compiler_threads_partition: fn(weights: [Int], workers: Int) -> [Int] Never! {
 // threads' tails. `order[rank]` is the job index claimed at `rank`.
 compiler_threads_heaviest_first: fn(weights: [Int]) -> [Int] Never! {
     count: weights.len()
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<count -> order.push(index)
     if count < 2 -> return order
-    scratch := [Int]{}
+    ^scratch: [Int]{}
     loop _ in 0..<count -> scratch.push(0)
-    width := 1
+    ^width: 1
     loop width < count {
-        start := 0
+        ^start: 0
         loop start < count {
-            middle := start + width
+            ^middle: start + width
             if middle > count -> middle = count
-            end := start + width + width
+            ^end: start + width + width
             if end > count -> end = count
-            left := start
-            right := middle
-            out := start
+            ^left: start
+            ^right: middle
+            ^out: start
             loop left < middle && right < end {
                 if {
                     weights[order[right]] > weights[order[left]] -> {

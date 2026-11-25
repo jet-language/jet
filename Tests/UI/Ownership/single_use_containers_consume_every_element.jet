@@ -32,7 +32,7 @@ release_nested: fn() {
 }
 
 release_drained_list: fn() {
-    leases := [Lease]{acquire("drain a"), acquire("drain b")}
+    ^leases: [Lease]{acquire("drain a"), acquire("drain b")}
     loop leases.len() > 0 {
         if leases.pop() == {
             .Val(lease) -> { release(lease) }

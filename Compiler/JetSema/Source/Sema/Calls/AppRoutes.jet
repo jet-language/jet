@@ -131,7 +131,7 @@ sema_app_state: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: Modu
     if nominal.kind != SemaRegistrationNominalKind.Struct || nominal.generic_params.len() != 0 {
         return None
     }
-    found := SemaAppState{key: nominal.identity_key.copy(), name: nominal.symbol.name.copy(), fields: [String]{}, types: [Type]{}, query: [String]{}, module_identity: module_row.module_identity}
+    ^found: SemaAppState{key: nominal.identity_key.copy(), name: nominal.symbol.name.copy(), fields: [String]{}, types: [Type]{}, query: [String]{}, module_identity: module_row.module_identity}
     loop field in nominal.fields {
         if field.computed -> next
         found.fields.push(field.symbol.name)
@@ -168,8 +168,8 @@ sema_app_no_screen: fn(state: String, span: Span) -> Diagnostic {
 sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     graph: check.program.registration_graph
-    positional := [CallArg]{}
-    signed_in := Expr?{None}
+    ^positional: [CallArg]{}
+    ^signed_in: Expr?{None}
     loop argument in args {
         if argument.spread {
             check.diagnostics.push(sema_error("E0104", argument.span, "`.screen` can't spread its arguments", "`.screen(path, view, signed_in:)` takes a path, a view and whether only a signed-in caller opens it", "pass each argument"))
@@ -199,10 +199,10 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     }
     handler: sema_app_named_handler("screen", positional[1], check) ?? return rejected
     view_module: handler.function.symbol.module_identity
-    states := [Type]{}
+    ^states: [Type]{}
     // The view's parameters in order: the service of each `app.Remote<S>`
     // one, with its key, and None for the state.
-    services := [{ty: Type, key: String}?]{}
+    ^services: [{ty: Type, key: String}?]{}
     loop parameter in handler.function.declaration.params {
         ty: sema_type_resolve_declared(graph, parameter.ty, view_module)
         if !sema_app_is_remote(ty, check) {
@@ -224,7 +224,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
         check.diagnostics.push(sema_app_screen_error(path, "the state `{type_name(states[0])}` of `{handler.name}` is no struct declared outside Core, or has type parameters", positional[1].span))
         return rejected
     }
-    segments := [String]{}
+    ^segments: [String]{}
     loop segment in path.split("/") {
         if !segment.starts_with(":") -> next
         name: segment.removeprefix(":")
@@ -273,7 +273,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     }
     text: if node -> [Type]{} else -> [Type]{shown}
     opener: sema_app_screen_callback(sema_app_screen_opener(positional[1].expr, services, states[0], text, found, graph, span), sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 4, span, check) ?? return rejected, span, check) ?? return rejected
-    query := [Expr]{}
+    ^query: [Expr]{}
     loop field in found.query -> query.push(sema_app_text(field, span))
     listed: sema_app_strings(query, span)
     queried: sema_check_expression(listed, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 2, span, check) ?? return rejected), check) ?? return rejected
@@ -295,7 +295,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
         sema_call_http_static_tree_arg(gated, sema_http_mount_arg(open, span)),
         opener,
     }
-    candidates := sema_expr_registration_method_candidates(graph, check.environment.module_identity, receiver_value.ty, SEMA_APP_SCREEN, [Type]{}, [Type]{}, span, check.environment.*, check.program.*, check.diagnostics)
+    ^candidates: sema_expr_registration_method_candidates(graph, check.environment.module_identity, receiver_value.ty, SEMA_APP_SCREEN, [Type]{}, [Type]{}, span, check.environment.*, check.program.*, check.diagnostics)
     registered: candidates.pop() ?? {
         check.context.incomplete_reasons.push("App.{SEMA_APP_SCREEN} is not registered")
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -317,7 +317,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
 // whatever its package's authority allows, its reads and its Remotes' calls
 // among them, and the framework runs it on a request worker.
 sema_app_screen_callback: fn(opener: Expr, callback_type: Type, span: Span, check: ^SemaBodyCheck) -> TCallArg? {
-    argument := sema_http_mount_arg(opener, span)
+    ^argument: sema_http_mount_arg(opener, span)
     unbounded: if {
         callback_type == .Fn(params, ret, _, contract, metadata, provenance) -> Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         else -> callback_type
@@ -411,8 +411,8 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
     }
     graph_name: "__jet_sitemap_graph_{span.start}"
     state_name: "__jet_sitemap_state_{span.start}"
-    names := [Expr]{}
-    texts := [Expr]{}
+    ^names: [Expr]{}
+    ^texts: [Expr]{}
     loop field in found.fields {
         names.push(sema_app_text(field, span))
         read: Expr.Field{base: Expr.Ident{name: state_name, span: span, id: AST_NODE_GENERATED}, member: field, span: span, id: AST_NODE_GENERATED}
@@ -514,7 +514,7 @@ sema_app_screen_opener: fn(view: Expr, services: [{ty: Type, key: String}?], sta
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
     state_name: "__jet_app_state_{span.start}"
-    view_args := [CallArg]{}
+    ^view_args: [CallArg]{}
     loop service in services {
         argument: if service == .Val(remote) -> sema_app_member_call(sema_app_ident(graph_name, span), "__remote", [Type]{remote.ty.copy()}, [CallArg]{sema_app_arg(sema_app_text(remote.key.copy(), span), AccessConvention.Read, span)}, span) else -> sema_app_ident(state_name, span)
         view_args.push(sema_app_arg(argument, AccessConvention.Read, span))
@@ -541,8 +541,8 @@ sema_app_screen_opener: fn(view: Expr, services: [{ty: Type, key: String}?], sta
 // [graph.__address_json<T>(fields, name), …])`, each field read as its own
 // type `T`.
 sema_app_state_made: fn(graph_expr: Expr, found: SemaAppState, state_ty: Type, fields_name: String, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
-    names := [Expr]{}
-    values := [Expr]{}
+    ^names: [Expr]{}
+    ^values: [Expr]{}
     loop index in 0..<found.fields.len() {
         names.push(sema_app_text(found.fields[index], span))
         field_ty: sema_type_resolve_declared(graph, found.types[index], found.module_identity)
@@ -579,8 +579,8 @@ sema_call_app_api: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], 
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     graph: check.program.registration_graph
     shape: "`.api<S>(path, max_upload:)` declares the service `S` its clients reach at `path`"
-    positional := [CallArg]{}
-    max_upload := Expr?{None}
+    ^positional: [CallArg]{}
+    ^max_upload: Expr?{None}
     loop argument in args {
         if argument.spread {
             check.diagnostics.push(sema_error("E0104", argument.span, "`.api` can't spread its arguments", shape, "pass each argument"))
@@ -665,7 +665,7 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     }
     // The parameter each argument passes: its label's, else the first one
     // not passed yet.
-    slots := [Int]{}
+    ^slots: [Int]{}
     loop argument in args {
         if argument.spread {
             check.diagnostics.push(sema_error("E0104", argument.span, "`{alias}.{member}` can't spread its arguments", shape, "pass each argument"))
@@ -680,11 +680,11 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     }
     state_slot: params.len() - 1
     sema_scope_enter(check.scopes, check.state, "address:{span.start}")
-    body := [TStmt]{}
-    locals := [Expr?]{}
+    ^body: [TStmt]{}
+    ^locals: [Expr?]{}
     loop _ in params -> locals.push(None)
-    view := Type?{None}
-    view_span := span
+    ^view: Type?{None}
+    ^view_span: span
     loop index in 0..<args.len() {
         slot: slots[index]
         value: args[index].expr.copy()  // copy: the caller's argument list keeps its expression
@@ -726,8 +726,8 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
         return rejected
     }
     opened: locals[state_slot] ?? panic("the state's argument was bound above")
-    names := [Expr]{}
-    texts := [Expr]{}
+    ^names: [Expr]{}
+    ^texts: [Expr]{}
     loop field in found.fields {
         names.push(sema_app_text(field, view_span))
         read: Expr.Field{base: opened.copy(), member: field.copy(), span: view_span, id: AST_NODE_GENERATED}  // copy: each field reads the one bound state
@@ -817,7 +817,7 @@ sema_app_first_unpassed: fn(count: Int, slots: [Int]) -> Int Never! {
 // `alias.App.__notify_here(title, body, address)`: `locals` are the locals
 // `notify`'s arguments were bound to, in parameter order, the state last.
 sema_app_notify_call: fn(alias: String, locals: [Expr?], address: Expr, here: Bool, span: Span) -> Expr Never! {
-    sent := [CallArg]{}
+    ^sent: [CallArg]{}
     loop index in 0..<locals.len() - 1 {
         bound: locals[index] ?? panic("each argument was bound above")
         sent.push(sema_live_arg(bound, span))
@@ -867,14 +867,14 @@ sema_app_route_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraph
     } ?? return [Diagnostic]{}
     // The members that take a state's address: `__url_of`, `__go` and
     // `__current`.
-    takes := [U32]{}
+    ^takes: [U32]{}
     loop member in ([String]{SEMA_APP_URL_OF, SEMA_APP_GO, SEMA_APP_CURRENT}) {
         takes.push(sema_app_graph_member(graph.modules[app_index], member) ?? return [Diagnostic]{})
     }
     screen: sema_app_graph_member(graph.modules[app_index], SEMA_APP_SCREEN) ?? return [Diagnostic]{}
-    places := [SemaAppCallerPlace]{}
-    weights := [Int]{}
-    work := 0
+    ^places: [SemaAppCallerPlace]{}
+    ^weights: [Int]{}
+    ^work: 0
     loop module_index in 0..<modules.len() {
         if module_is_core(modules[module_index].module_identity) -> next
         loop function_index in 0..<modules[module_index].functions.len() {
@@ -889,12 +889,12 @@ sema_app_route_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraph
     scans: sema_app_route_scans(graph, modules, places, bounds, 0, takes, screen)
     // The states the screens open, by key; a key interned before is a state
     // a second screen opens. Id 0 is the empty name, so one name is none.
-    opened := name_table()
-    reports := [SemaAppCallerReport]{}
+    ^opened: name_table()
+    ^reports: [SemaAppCallerReport]{}
     loop scan in scans {
         loop site in scan.screens {
             known: name_count(opened)
-            _ := name_intern(opened, site.key)
+            ^_: name_intern(opened, site.key)
             if name_count(opened) == known {
                 reports.push(SemaAppCallerReport{module_index: site.module_index, diagnostic: sema_app_screen_error("…", "`{site.name}` is the state of another screen of the graph too, and a state has one address", site.span)})
             }
@@ -908,7 +908,7 @@ sema_app_route_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraph
             }
         }
     }
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop report in reports.move() {
         start: diagnostics.len()
         diagnostics.push(report.diagnostic)
@@ -921,7 +921,7 @@ sema_app_route_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraph
 // The scans of the parts from bounds `at` on, each but the last on a task of
 // its own, in part order.
 sema_app_route_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], bounds: [Int], at: Int, takes: [U32], screen: U32) -> [SemaAppRouteScan] Never! {
-    done := [SemaAppRouteScan]{}
+    ^done: [SemaAppRouteScan]{}
     if at + 1 >= bounds.len() -> return done
     from: bounds[at]
     to: bounds[at + 1]
@@ -941,7 +941,7 @@ sema_app_route_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
 // The `__screen` calls of functions `from..<to` of `places`, and their calls
 // of `takes`, the members that take a state's address.
 sema_app_route_scan: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], from: Int, to: Int, takes: [U32], screen: U32) -> SemaAppRouteScan Never! {
-    scan := SemaAppRouteScan{screens: [SemaAppRouteSite]{}, addresses: [SemaAppRouteSite]{}}
+    ^scan: SemaAppRouteScan{screens: [SemaAppRouteSite]{}, addresses: [SemaAppRouteSite]{}}
     loop index in from..<to {
         place: places[index]
         function: modules[place.module_index].functions[place.function_index]

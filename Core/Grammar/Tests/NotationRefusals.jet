@@ -1,0 +1,117 @@
+// What the notation takes beyond plain rules (`<assoc=right>`, holes,
+// imports) and what it refuses, each refusal with its fix.
+use {
+    core.grammar.[analyze]
+    core.grammar.error.[GrammarFault]
+    core.grammar.plan.[GrammarSource, RuleTree]
+}
+
+tree_of: fn(text: String) -> RuleTree Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan.tree
+        .Err(error) -> panic("{error}")
+    }
+}
+
+faults_of: fn(text: String) -> [GrammarFault] Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(_) -> [GrammarFault]{}
+        .Err(error) -> error.faults
+    }
+}
+
+/// The one notation fault `text` has.
+only_fault: fn(text: String) -> GrammarFault Never! {
+    faults: faults_of(text)
+    assert_eq(faults.len(), 1)
+    assert(faults[0].kind == .Notation)
+    faults[0]
+}
+
+#Test("associativity marks the alternative it starts") {
+    tree: tree_of("e : <assoc=right> '^' e # Up | <assoc=left> '-' e # Down | value=NUM # Num ;\nNUM : [0-9]+ ;")
+    body: tree.nodes[tree.rules[0].body]
+    assert(tree.nodes[body.children[0]].right)
+    assert(!tree.nodes[body.children[1]].right)
+}
+
+#Test("a hole names its slot") {
+    tree: tree_of("where : 'id' '=' HOLE<slot=Value> ;")
+    alt: tree.nodes[tree.nodes[tree.rules[0].body].children[0]]
+    hole: tree.nodes[alt.children[2]]
+    assert(hole.kind == .Hole)
+    assert_eq(hole.text, "Value")
+}
+
+#Test("imports list the grammars they name, in order") {
+    sources: [GrammarSource]{GrammarSource{name: "Lexical", text: "NAME : [a-z]+ ;"}, GrammarSource{name: "Common", text: "SEMI : ';' ;"}, GrammarSource{name: "Extra", text: "X : 'x' ;"}}
+    if analyze("import Lexical ;\nimport Common, Extra ;\nfile : name=NAME ;", "", sources) == {
+        .Ok(plan) -> {
+            assert_eq(plan.tree.imports.len(), 3)
+            assert_eq(plan.tree.imports[0].name, "Lexical")
+            assert_eq(plan.tree.imports[0].at, 7)
+            assert_eq(plan.tree.imports[2].name, "Extra")
+        }
+        .Err(error) -> panic("{error}")
+    }
+}
+
+#Test("an option other than associativity is refused") {
+    fault: only_fault("e : <fail=yes> e '+' e | NUM ;\nNUM : [0-9]+ ;")
+    assert_eq(fault.at.offset, 4)
+    assert(fault.fix.contains("<assoc=right>"))
+    late: only_fault("e : e '+' <assoc=right> e | NUM ;\nNUM : [0-9]+ ;")
+    assert(late.message.contains("only start an alternative"))
+}
+
+#Test("a hole needs a slot and lives in parser rules") {
+    bare: only_fault("a : HOLE ;")
+    assert(bare.fix.contains("HOLE<slot=Name>"))
+    token: only_fault("A : HOLE<slot=Value> ;")
+    assert(token.message.contains("parser rules"))
+}
+
+#Test("actions and predicates are refused with a fix") {
+    action: only_fault("a : 'x' {{count += 1}} ;")
+    assert(action.message.contains("actions"))
+    assert(action.fix != "")
+    predicate: only_fault("a : {{is_ready()}}? 'x' ;")
+    assert(predicate.message.contains("predicates"))
+    peg: only_fault("a : !'x' 'y' ;")
+    assert(peg.message.contains("PEG"))
+    separator: only_fault("list : item % ',' ;\nitem : 'x' ;")
+    assert(separator.fix.contains("(',' items+=x)*"))
+}
+
+#Test("options blocks, modes and headers are refused with a fix") {
+    options: only_fault("options {{ k = 2 ; }}\na : 'x' ;")
+    assert(options.message.contains("options"))
+    assert_eq(options.at.offset, 0)
+    mode: only_fault("mode STRING ;\na : 'x' ;")
+    assert(mode.message.contains("modes"))
+    assert(mode.fix.contains("context"))
+    header: only_fault("grammar Calc ;\na : 'x' ;")
+    assert(header.fix.contains("binding"))
+}
+
+#Test("token-only notation in a parser rule is refused") {
+    any: only_fault("a : . ;")
+    assert(any.message.contains("token rules"))
+    lazy: only_fault("a : 'x'*? ;")
+    assert(lazy.message.contains("non-greedy"))
+    label: only_fault("A : x='a' ;")
+    assert(label.message.contains("token rules have no fields"))
+    skip: only_fault("a : 'x' -> skip ;")
+    assert(skip.message.contains("token rules"))
+    fragment: only_fault("fragment a : 'x' ;")
+    assert(fragment.message.contains("parser rule"))
+}
+
+#Test("a missing semicolon, colon or parenthesis is a fault at its spot") {
+    semi: only_fault("a : 'x'\nb : 'y' ;")
+    assert_eq(semi.at.offset, 10)
+    colon: only_fault("a 'x' ;")
+    assert(colon.message.contains("`:`"))
+    paren: only_fault("a : ('x' | 'y' ;")
+    assert(paren.message.contains("`)`"))
+}

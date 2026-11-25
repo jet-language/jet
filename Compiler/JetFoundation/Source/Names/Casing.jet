@@ -52,13 +52,13 @@ sema_casing_drop_first_byte: fn(text: String) -> String Never! {
 }
 
 sema_casing_trim_leading_underscores: fn(text: String) -> String Never! {
-    body := text
+    ^body: text
     loop body.starts_with("_") -> body = sema_casing_drop_first_byte(body)
     body
 }
 
 sema_casing_join: fn(scalars: [String], start: Int, end: Int) -> String Never! {
-    out := ""
+    ^out: ""
     loop index in start..<end -> out = "{out}{scalars[index]}"
     out
 }
@@ -72,7 +72,7 @@ sema_casing_ascii_has_case: fn(name: String, case: SemaNameCase) -> Bool? Never!
         if (Int{bytes[index]}) >= 128 -> return None
     }
     if name == "_" -> return Val(true)
-    start := 0
+    ^start: 0
     if count > 0 && (Int{bytes[0]}) == 95 -> start = 1
     if start >= count || (Int{bytes[start]}) == 95 || (Int{bytes[count - 1]}) == 95 {
         return Val(false)
@@ -124,7 +124,7 @@ sema_casing_has_case: fn(name: String, case: SemaNameCase) -> Bool {
     }
     if sema_casing_ascii_has_case(name, case) == .Val(ascii) -> return ascii
     if name == "_" -> return true
-    body := name
+    ^body: name
     if body.starts_with("_") -> body = sema_casing_drop_first_byte(body)
     if body == "" || body.starts_with("_") || body.ends_with("_") || body.contains("__") {
         return false
@@ -170,12 +170,12 @@ sema_casing_has_case: fn(name: String, case: SemaNameCase) -> Bool {
 // capital run followed by lowercase yields its last capital to the next word
 // (`HTTPHeader` -> `HTTP` + `Header`).
 sema_casing_split_words: fn(name: String) -> [String] {
-    words := [String]{}
+    ^words: [String]{}
     loop segment in name.split("_") {
         if segment == "" -> next
         scalars: unicode.scalars(segment)
-        start := 0
-        index := 0
+        ^start: 0
+        ^index: 0
         loop index < scalars.len() {
             if {
                 sema_casing_is_upper(scalars[index]) -> {
@@ -225,19 +225,19 @@ sema_casing_split_words: fn(name: String) -> [String] {
 
 sema_casing_snake_words: fn(name: String) -> String {
     if name.contains("_") {
-        already_lower := true
+        ^already_lower: true
         loop scalar in unicode.scalars(name) {
             if sema_casing_is_upper(scalar) -> already_lower = false
         }
         if already_lower -> return name.copy()
     }
-    words := [String]{}
+    ^words: [String]{}
     loop word in sema_casing_split_words(name) -> words.push(unicode.lower(word))
     words.join("_")
 }
 
 sema_casing_pascal_words: fn(name: String) -> String {
-    out := ""
+    ^out: ""
     loop segment in name.split("_") {
         if segment == "" -> next
         scalars: unicode.scalars(segment)
@@ -373,7 +373,7 @@ sema_casing_acronym_word: fn(word: String) -> String {
     if lower == "ipv4" -> return "IPv4"
     if lower == "ipv6" -> return "IPv6"
     scalars: unicode.scalars(word)
-    letters := scalars.len()
+    ^letters: scalars.len()
     loop letters > 0 && sema_casing_is_digit(scalars[letters - 1]) -> letters -= 1
     if letters == 0 -> return word.copy()
     // The longest lexicon acronyms (ASCII, JSONL) have five letters, and
@@ -394,8 +394,8 @@ sema_casing_acronym_name: fn(name: String) -> String {
     // scalar: only a name that starts upper-case and has a lower-case letter
     // is respelled.
     bytes: name.bytes()
-    ascii := true
-    has_lower := false
+    ^ascii: true
+    ^has_lower: false
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code >= 128 {
@@ -419,9 +419,9 @@ sema_casing_acronym_name: fn(name: String) -> String {
             if !has_lower -> return name.copy()
         }
     }
-    segments := [String]{}
+    ^segments: [String]{}
     loop segment in name.split("_") {
-        out := ""
+        ^out: ""
         loop word in sema_casing_split_words(segment) {
             out = "{out}{sema_casing_acronym_word(word)}"
         }

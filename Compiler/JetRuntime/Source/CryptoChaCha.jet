@@ -21,10 +21,10 @@ rt_chacha_qr: fn(state: I64, ai: I64, bi: I64, ci: I64, di: I64) {
     bp: wrapping(state + bi * I64{8})
     cp: wrapping(state + ci * I64{8})
     dp: wrapping(state + di * I64{8})
-    a := rt_text_word(ap)
-    b := rt_text_word(bp)
-    c := rt_text_word(cp)
-    d := rt_text_word(dp)
+    ^a: rt_text_word(ap)
+    ^b: rt_text_word(bp)
+    ^c: rt_text_word(cp)
+    ^d: rt_text_word(dp)
     a = (a + b) & I64{0xffffffff}
     d = rt_chacha_rot(d ~ a, I64{16})
     c = (c + d) & I64{0xffffffff}
@@ -44,7 +44,7 @@ rt_chacha_setup: fn(state: I64, key: I64) {
     rt_text_store(wrapping(state + I64{8}), I64{0x3320646e})
     rt_text_store(wrapping(state + I64{16}), I64{0x79622d32})
     rt_text_store(wrapping(state + I64{24}), I64{0x6b206574})
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{8}) { break }
         rt_text_store(wrapping(wrapping(state + I64{32}) + i * I64{8}), rt_crypto_le32(wrapping(key + i * I64{4})))
@@ -53,7 +53,7 @@ rt_chacha_setup: fn(state: I64, key: I64) {
 }
 
 rt_chacha_rounds: fn(state: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{10}) { break }
         rt_chacha_qr(state, I64{0}, I64{4}, I64{8}, I64{12})
@@ -78,7 +78,7 @@ rt_crypto_chacha_block: fn(key: I64, nonce: I64, counter: I64, output: I64, scra
     work: wrapping(scratch + I64{128})
     rt_x25519_copy(work, scratch)
     rt_chacha_rounds(work)
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{16}) { break }
         rt_crypto_put32(wrapping(output + i * I64{4}), (rt_text_word(wrapping(work + i * I64{8})) + rt_text_word(wrapping(scratch + i * I64{8}))) & I64{0xffffffff})
@@ -90,7 +90,7 @@ rt_crypto_chacha_block: fn(key: I64, nonce: I64, counter: I64, output: I64, scra
 // output32, nonce16, scratch128 aligned8; no feed-forward in HChaCha.
 rt_crypto_hchacha: fn(key: I64, nonce: I64, output: I64, scratch: I64) {
     rt_chacha_setup(scratch, key)
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{4}) { break }
         rt_text_store(wrapping(wrapping(scratch + I64{96}) + i * I64{8}), rt_crypto_le32(wrapping(nonce + i * I64{4})))
@@ -120,13 +120,13 @@ rt_crypto_chacha_xor: fn(key: I64, nonce: I64, counter: I64, input: I64, length:
         return false
     }
     block: wrapping(scratch + I64{256})
-    at := I64{0}
-    ctr := counter
+    ^at: I64{0}
+    ^ctr: counter
     loop at < length {
         rt_crypto_chacha_block(key, nonce, ctr, block, scratch)
-        count := I64{64}
+        ^count: I64{64}
         if (length - at < count) { count = length - at }
-        i := I64{0}
+        ^i: I64{0}
         loop i < count {
             rt_text_put(wrapping(wrapping(output + at) + i), rt_text_byte(wrapping(wrapping(input + at) + i)) ~ rt_text_byte(wrapping(block + i)))
             i += I64{1}

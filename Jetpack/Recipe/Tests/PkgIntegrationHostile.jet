@@ -12,8 +12,8 @@ recipe_hostile_rows: fn() -> [[String]] {
     // named by JETPACK_TEST_REPO_ROOT, never the working directory.
     root: sys.get("JETPACK_TEST_REPO_ROOT") ?? panic("JETPACK_TEST_REPO_ROOT must name the Jet repository whose committed fixtures the claims read")
     corpus: files.read(files.join(root, "Tests/Fixtures/BuildSandbox/hostile-corpus.tsv")) ?? panic("hostile corpus")
-    rows := [[String]]{}
-    ids := [String]{}
+    ^rows: [[String]]{}
+    ^ids: [String]{}
     categories: [String]{"escape", "exfiltration", "resource-abuse", "toctou", "child-process-abuse"}
     loop line in corpus.lines() {
         if line == "" || line.starts_with("#") -> next
@@ -28,7 +28,7 @@ recipe_hostile_rows: fn() -> [[String]] {
     }
     assert(rows.len() == 7, "hostile corpus lost required case")
     loop category in categories {
-        found := false
+        ^found: false
         loop row in rows {
             if row[1] == category -> found = true
         }
@@ -45,12 +45,12 @@ recipe_hostile_observe: fn(listener: TCPListener, milliseconds: Int, bytes_predi
         // Exact WouldBlock polling: deadline0 drains queued sockets; ONLY Timeout polls.
         if listener.accept(deadline: 0s) == {
             .Ok(accepted) -> {
-                stream := accepted
+                ^stream: accepted
                 if !bytes_predicate {
                     hostile_net.tcp_close(stream) ?? panic("drop observer connection")
                     return true
                 }
-                bytes := [U8]{}
+                ^bytes: [U8]{}
                 loop {
                     if hostile_net.tcp_read_bytes(stream, 8192) == {
                         .Ok(chunk) -> {
@@ -137,7 +137,7 @@ recipe_hostile_matrix: fn(windows: Bool) {
             files.symlink(secret, files.join(src, "link")) ?? panic("source symlink")
         }
         tool: if windows -> "hostile-tool" else -> "sh"
-        ctx := RecipeBuildContext{source_dir: src, output_root: out, tools: [String:String]{tool: shell}, fetch_cache: files.join(base, "cache"), offline: false}
+        ^ctx: RecipeBuildContext{source_dir: src, output_root: out, tools: [String:String]{tool: shell}, fetch_cache: files.join(base, "cache"), offline: false}
         if id == "network-exfiltration" {
             listener: hostile_net.tcp_listen("127.0.0.1:0") ?? panic("network observer")
             port: hostile_net.socket_port(hostile_net.listener_local_socket_addr(listener) ?? panic("observer address"))

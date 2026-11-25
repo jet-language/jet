@@ -92,7 +92,7 @@ native_image_listing: fn(binary: String, word: String) -[FS.Read]> String Native
     if word == "segments" {
         return Ok(native_image_segments_text(binary, native_image_segments(elf)))
     }
-    side := [U8]?{None}
+    ^side: [U8]?{None}
     if native_image_side(binary, elf) == {
         .Ok(found) -> { side = found }
         .Err(failure) -> return Err(failure)
@@ -126,7 +126,7 @@ native_image_side: fn(binary: String, elf: [U8]) -[FS.Read]> [U8]? NativeDebugEr
 // The defined symbols of `elf`'s `.symtab`, in address order then by name:
 // every one but the undefined ones and those naming a section or a file.
 native_image_symbols: fn(elf: [U8]) -> [NativeImageSymbol] Never! {
-    found := [NativeImageSymbol]{}
+    ^found: [NativeImageSymbol]{}
     headers: native_dump_word(elf, 40)
     size: native_number(elf, 58, 2, X64DebugEncoding.Unsigned)
     count: native_number(elf, 60, 2, X64DebugEncoding.Unsigned)
@@ -172,7 +172,7 @@ native_image_symbol_kind: fn(kind: Int) -> String Never! {
 // name, as `0x401000  31  function  main`, in columns of 20, 10 and 10.
 native_image_symbols_text: fn(binary: String, symbols: [NativeImageSymbol]) -> String Never! {
     if symbols.len() == 0 -> return "`{binary}` keeps no symbol table\n"
-    text := ""
+    ^text: ""
     loop symbol in symbols {
         text = "{text}{native_listing_pad(x64_hex(symbol.address), 20)}{native_listing_pad("{symbol.size}", 10)}{native_listing_pad(symbol.kind, 10)}{symbol.name}\n"
     }
@@ -181,7 +181,7 @@ native_image_symbols_text: fn(binary: String, symbols: [NativeImageSymbol]) -> S
 
 // `elf`'s program headers, in their order.
 native_image_segments: fn(elf: [U8]) -> [NativeImageSegment] Never! {
-    found := [NativeImageSegment]{}
+    ^found: [NativeImageSegment]{}
     if elf.len() < 64 -> return found
     table: native_dump_word(elf, 32)
     entry: native_number(elf, 54, 2, X64DebugEncoding.Unsigned)
@@ -221,7 +221,7 @@ native_image_segment_kind: fn(kind: Int) -> String Never! {
 // offset and address in hexadecimal, the sizes and alignment in bytes.
 native_image_segments_text: fn(binary: String, segments: [NativeImageSegment]) -> String Never! {
     if segments.len() == 0 -> return "`{binary}` has no program headers\n"
-    text := ""
+    ^text: ""
     loop segment in segments {
         text = "{text}{native_listing_pad(segment.kind, 13)}offset {native_listing_pad(x64_hex(segment.offset), 12)}address {native_listing_pad(x64_hex(segment.address), 20)}file {native_listing_pad("{segment.file}", 10)}memory {native_listing_pad("{segment.memory}", 10)}flags {segment.flags} align {segment.align}\n"
     }
@@ -237,8 +237,8 @@ native_image_segments_text: fn(binary: String, segments: [NativeImageSegment]) -
 // in its `.gnu_debuglink` names it under the rows.
 native_image_sections_answer: fn(binary: String, operand: String, whole: Bool{false}) -[FS.Read]> NativeAnswer NativeDebugError! {
     elf: native_image_bytes(binary) ?? return Err(err)
-    names := [String]{}
-    bytes := false
+    ^names: [String]{}
+    ^bytes: false
     loop part in operand.split(" ") {
         if part == "--bytes" -> bytes = true
         if part != "" && part != "--bytes" -> names.push("{part}")
@@ -246,13 +246,13 @@ native_image_sections_answer: fn(binary: String, operand: String, whole: Bool{fa
     sections: native_image_sections(elf)
     if sections.len() == 0 -> return Ok(NativeAnswer{text: "`{binary}` has no section headers\n"})
     cap: if whole -> 0 else -> NATIVE_IMAGE_BYTES_SHOWN
-    rows := [String]{}
+    ^rows: [String]{}
     if names.len() == 0 {
         loop section in sections {
             rows.push(native_image_section_text(elf, section, cap, bytes: bytes))
         }
     }
-    refused := false
+    ^refused: false
     loop name in names {
         before: rows.len()
         loop section in sections {
@@ -276,13 +276,13 @@ native_image_sections_answer: fn(binary: String, operand: String, whole: Bool{fa
 // count in the null header's size, and the index of the section of names,
 // when it is past that too, in the null header's link.
 native_image_sections: fn(elf: [U8]) -> [NativeImageSection] Never! {
-    found := [NativeImageSection]{}
+    ^found: [NativeImageSection]{}
     table: native_dump_word(elf, 40)
     entry: native_number(elf, 58, 2, X64DebugEncoding.Unsigned)
     if table <= 0 || entry < 64 || table + entry > elf.len() -> return found
-    count := native_number(elf, 60, 2, X64DebugEncoding.Unsigned)
+    ^count: native_number(elf, 60, 2, X64DebugEncoding.Unsigned)
     if count == 0 -> count = native_dump_word(elf, table + 32)
-    names_index := native_number(elf, 62, 2, X64DebugEncoding.Unsigned)
+    ^names_index: native_number(elf, 62, 2, X64DebugEncoding.Unsigned)
     if names_index == NATIVE_IMAGE_XINDEX {
         names_index = native_number(elf, table + 40, 4, X64DebugEncoding.Unsigned)
     }
@@ -332,7 +332,7 @@ native_image_section_kind: fn(kind: Int) -> String Never! {
 native_image_section_flags: fn(flags: Int) -> String Never! {
     letters: [String]{"W", "A", "X", "M", "S", "I", "L", "O", "G", "T", "C", "E"}
     bits: [Int]{0x1, 0x2, 0x4, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800, 0x80000000}
-    text := ""
+    ^text: ""
     loop (index, bit) in bits {
         if (flags & bit) != 0 -> text = "{text}{letters[index]}"
     }
@@ -363,11 +363,11 @@ native_image_section_bytes: fn(elf: [U8], section: NativeImageSection, cap: Int)
     shown: if cap > 0 && held > cap -> cap else -> held
     if shown <= 0 && held == section.size -> return ""
     width: x64_hex(section.address + ((shown - 1) >> 4) * 16).len() + 2
-    rows := [String]{}
+    ^rows: [String]{}
     loop row in 0..<((shown + 15) >> 4) {
         at: section.offset + 16 * row
         end: if 16 * row + 16 < shown -> at + 16 else -> section.offset + shown
-        text := [U8]{}
+        ^text: [U8]{}
         loop byte in elf[at..<end] {
             value: Int{byte}
             text.push(if value >= 0x20 && value < 0x7f -> byte else -> U8{0x2e})
@@ -397,7 +397,7 @@ native_image_of: fn(session: NativeSession) -> String Never! {
 // its code lists by its symbols alone. The image's bytes back its memory.
 native_image_session: fn(binary: String) -[FS.Read]> NativeSession NativeDebugError! {
     elf: native_image_bytes(binary) ?? return Err(err)
-    side := [U8]?{None}
+    ^side: [U8]?{None}
     if native_image_side(binary, elf) == {
         .Ok(found) -> { side = found }
         .Err(_) -> {}
@@ -409,7 +409,7 @@ native_image_session: fn(binary: String) -[FS.Read]> NativeSession NativeDebugEr
     symbols: if side == .Val(apart) -> native_fix_symbols(apart) else -> native_fix_symbols(elf)
     code: native_elf_code(elf)
     facts: Shared{NativeEvalImage{symbols: symbols, code: code, owned: native_eval_owned(symbols, code)}}
-    blocks := [NativeBlock]{}
+    ^blocks: [NativeBlock]{}
     native_dump_loaded(blocks, elf, 0, 0)
     dump: NativeDump{tasks: [NativeDumpTask]{}, memory: NativeMemory{trace: None, blocks: blocks, backing: elf.move()}, registry: 0, image: "{binary}"}
     Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: false, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry, eval_image: Val(facts)})
@@ -457,7 +457,7 @@ native_image_command: fn(session: ^NativeSession, line: String, file: String, li
 // own source), with each row's `bytes` when asked; with neither, each
 // executable segment whole, as `segment 0`, `segment 1` and on.
 native_image_code_text: fn(session: ^NativeSession, file: String, lines: [String], bytes: Bool{false}) -> String Never! {
-    runs := [NativeImageSegment]{}
+    ^runs: [NativeImageSegment]{}
     if session.dump == .Val(dumped) {
         loop segment in native_image_segments(dumped.memory.backing) {
             if segment.kind == "LOAD" && segment.flags.ends_with("x") -> runs.push(segment)
@@ -465,7 +465,7 @@ native_image_code_text: fn(session: ^NativeSession, file: String, lines: [String
     }
     symbols: native_listing_symbols(session)
     ask: NativeListingAsk{pc: -1, first: 0, last: 0, bytes: bytes, places: ""}
-    text := ""
+    ^text: ""
     loop symbol in symbols {
         if !native_image_in_runs(runs, symbol.address) -> next
         index: x64_jetline_find(session.image.lines, symbol.address)
@@ -511,7 +511,7 @@ native_image_in_runs: fn(runs: [NativeImageSegment], address: Int) -> Bool Never
 }
 
 #Test("a file-only session answers from the image and leaves a running command to the program") {
-    session := native_image_session("/proc/self/exe") ?? panic("session: {err.detail}")
+    ^session: native_image_session("/proc/self/exe") ?? panic("session: {err.detail}")
     assert(!session.started)
     segments: native_image_command(session, "segments", "", [String]{}) ?? panic("segments unanswered")
     assert(segments.text.contains("flags r-x"))
@@ -544,7 +544,7 @@ native_image_in_runs: fn(runs: [NativeImageSegment], address: Int) -> Bool Never
     debug: NativeImageSection{name: ".debug_info", kind: "PROGBITS", nobits: false, offset: 0x251e, address: 0, size: 233, flags: "", align: 1}
     assert_eq(native_image_section_text(elf, debug, 0), ".debug_info         PROGBITS    offset 0x251e      address 0x0                 size 233        flags      align 1\n")
     // A last row short of 16 bytes keeps the text column where it is.
-    letters := loop _ in 0..<40 -> U8{0x61}
+    ^letters: loop _ in 0..<40 -> U8{0x61}
     letters[39] = U8{0x7f}
     run: NativeImageSection{name: ".data", kind: "PROGBITS", nobits: false, offset: 0, address: 0x400120, size: 40, flags: "WA", align: 8}
     sixteen: "61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61"
@@ -567,7 +567,7 @@ native_image_in_runs: fn(runs: [NativeImageSegment], address: Int) -> Bool Never
     // A table whose count and names' index are in its null header: .data,
     // then the names, whose first bytes .data holds. Room is left for a
     // fourth header and the bytes of its section.
-    elf := loop _ in 0..<384 -> U8{0}
+    ^elf: loop _ in 0..<384 -> U8{0}
     native_fix_put(elf, 0, NATIVE_IMAGE_MAGIC, 4)
     elf[4] = U8{2}
     elf[5] = U8{1}
@@ -621,7 +621,7 @@ native_image_in_runs: fn(runs: [NativeImageSegment], address: Int) -> Bool Never
         .Ok(_) -> { panic("a big-endian image listed") }
         .Err(refused) -> assert_eq(refused.detail, "`{path}` is a big-endian ELF image")
     }
-    bare := loop _ in 0..<64 -> U8{0}
+    ^bare: loop _ in 0..<64 -> U8{0}
     native_fix_put(bare, 0, NATIVE_IMAGE_MAGIC, 4)
     bare[4] = U8{2}
     bare[5] = U8{1}

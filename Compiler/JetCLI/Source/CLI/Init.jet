@@ -38,7 +38,7 @@ jet_cli_init_status: fn(text: String, quiet: Bool, json: Bool) -> String Never! 
 // `lift_inline_deps_into_manifest`: a script that cannot be read, masked,
 // lexed or parsed, or that has no inline refs, lifts nothing and says nothing.
 jet_cli_init_lift: fn(cwd: String, script: String) -[FS, Env]> String Never! {
-    file := script
+    ^file: script
     if !cli_files.is_file(file) && cli_files.is_file("{script}.jet") -> file = "{script}.jet"
     source: cli_files.read(file) ?? return ""
     masked: pkg_mask_inline_package_source(source) ?? return ""
@@ -51,7 +51,7 @@ jet_cli_init_lift: fn(cwd: String, script: String) -[FS, Env]> String Never! {
     deps: pkg_inline_deps_collect(parsed.program)
     if deps.len() == 0 -> return ""
     manifest: cli_files.join(cwd, JET_CLI_PACKAGE_FILE)
-    raw := cli_files.read(manifest) ?? return ""
+    ^raw: cli_files.read(manifest) ?? return ""
     loop dep in deps -> raw = pkg_add_dependency(raw, dep.name, DepSpec.Registry(dep.selector))
     cli_files.write(manifest, raw) ?? return ""
     noun: if deps.len() == 1 -> "dependency" else -> "dependencies"

@@ -14,13 +14,13 @@ PackageNode: struct {
     }
 
     with_deps: fn(self, deps: [String]) -> PackageNode Never! {
-        out := self
+        ^out: self
         out.direct_deps = deps
         out
     }
 
     with_transitives: fn(self, deps: [String]) -> PackageNode Never! {
-        out := self
+        ^out: self
         out.transitive_deps = deps
         out
     }
@@ -90,7 +90,7 @@ PackageGraph: struct {
     add_catalog: fn(^self, entry: CatalogEntry) Never! { self.catalogs.push(entry.copy()) }
 
     add_workspace_member: fn(^self, name: String, path: String) Never! {
-        paths := self.workspace_members.get(name) ?? [String]{}
+        ^paths: self.workspace_members.get(name) ?? [String]{}
         paths.push(path.copy())
         self.workspace_members[name] = paths
     }
@@ -98,7 +98,7 @@ PackageGraph: struct {
     // The package's declared direct dependencies and the catalog entries
     // that allow it, ordered by dependency name; ties keep that order.
     visible_edges: fn(self, owner_package: String) -> [VisibleEdge] Never! {
-        edges := [VisibleEdge]{}
+        ^edges: [VisibleEdge]{}
         if self.packages.get(owner_package) == {
             .Val(node) -> {
                 loop dep in node.direct_deps {
@@ -138,7 +138,7 @@ PackageGraph: struct {
 
     // Names of the packages that reach `dep` transitively, sorted.
     packages_using_hidden_dep: fn(self, dep: String) -> [String] Never! {
-        names := [String]{}
+        ^names: [String]{}
         loop entry in self.packages {
             if entry.value.transitive_deps.contains(dep) && !names.contains(entry.key) {
                 names.push(entry.key)
@@ -151,13 +151,13 @@ PackageGraph: struct {
 
 // Order edges by dependency name, keeping insertion order among equal names.
 provider_graph_stable_sort_edges: fn(edges: [VisibleEdge]) -> [VisibleEdge] Never! {
-    sorted := [VisibleEdge]{}
+    ^sorted: [VisibleEdge]{}
     loop edge in edges {
-        position := sorted.len()
+        ^position: sorted.len()
         loop position > 0 && (sorted[position - 1].dependency <=> edge.dependency) == Ordering.Greater {
             position -= 1
         }
-        shifted := [VisibleEdge]{}
+        ^shifted: [VisibleEdge]{}
         loop index in 0..<position -> shifted.push(sorted[index])
         shifted.push(edge.copy())
         loop index in position..<sorted.len() -> shifted.push(sorted[index])

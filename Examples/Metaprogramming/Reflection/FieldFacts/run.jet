@@ -16,7 +16,7 @@ FromMarker: struct {
         expand: fn(self, target: Target) {
             impl Facts {
                 from_marker: fn() -> String {
-                    out := ""
+                    ^out: ""
                     #loop field in target.reflect().fields {
                         default: if field.default == {
                             Val(d) -> "{d.source.start}..{d.source.end}"
@@ -40,7 +40,7 @@ Describe: struct {
             tname: target.name
             impl #{tname} {
                 described: fn(self) -> String {
-                    out := ""
+                    ^out: ""
                     #loop field in target.reflect().fields {
                         start: field.default?.source?.start ?? -1
                         end: field.default?.source?.end ?? -1
@@ -62,7 +62,7 @@ Rock: struct {
 
 // The comptime, ordinary-code and fn build rungs share one function.
 describe: fn(info: TypeInfo) -> String {
-    out := ""
+    ^out: ""
     loop field in info.fields {
         default: if field.default == {
             Val(d) -> "{d.source.start}..{d.source.end}"

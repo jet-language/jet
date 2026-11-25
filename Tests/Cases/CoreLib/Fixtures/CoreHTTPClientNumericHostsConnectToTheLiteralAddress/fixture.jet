@@ -10,9 +10,9 @@ http_crlf: fn() -> String { "\r\n" }
 serve: fn(listener: net.TCPListener, count: Int) {
     crlf: http_crlf()
     loop _ in 0..<count {
-        stream := net.tcp_accept(listener) ?? panic("accept")
+        ^stream: net.tcp_accept(listener) ?? panic("accept")
         request: String.from_bytes(stream.read_bytes(4096, deadline: 5s) ?? panic("read request")) ?? panic("request UTF-8")
-        host := ""
+        ^host: ""
         loop line in request.lines() {
             if line.starts_with("host:") || line.starts_with("Host:") {
                 host = line.slice(5, line.len()).trim()

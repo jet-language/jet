@@ -56,7 +56,7 @@ hex_value: fn(b: U8) -> Int {
 
 // The binary64 value of the 16 hex digit word at `at`.
 float_at: fn(raw: [U8], at: Int) -> Float {
-    n := 0
+    ^n: 0
     loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
     if n >= 0x8000_0000_0000_0000 -> return math.from_bits(n - 0x1_0000_0000_0000_0000)
     math.from_bits(n)
@@ -64,9 +64,9 @@ float_at: fn(raw: [U8], at: Int) -> Float {
 
 hex_word: fn(value: Float) -> String {
     digits: "0123456789abcdef".bytes()
-    n := math.to_bits(value)
+    ^n: math.to_bits(value)
     if n < 0 -> n += 0x1_0000_0000_0000_0000
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<16 {
         out.push(digits[n %% 16])
         n = n /% 16
@@ -114,9 +114,9 @@ apply: fn(name: String, z: math.Complex) -> math.Complex {
 
 check: fn(name: String, corpus: String) {
     raw: corpus.bytes()
-    at := 0
-    rows := 0
-    wrong := 0
+    ^at: 0
+    ^rows: 0
+    ^wrong: 0
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
             loop raw[at] != (U8{10}) -> at += 1
@@ -124,7 +124,7 @@ check: fn(name: String, corpus: String) {
             next
         }
         // The row's words: its arguments, then the result.
-        words := [Float]{}
+        ^words: [Float]{}
         loop {
             words.push(float_at(raw, at))
             at += 17
@@ -138,7 +138,7 @@ check: fn(name: String, corpus: String) {
         if !part_matches(got.real, want_real) || !part_matches(got.imaginary, want_imaginary) {
             wrong += 1
             if wrong <= 3 {
-                shown := [String]{}
+                ^shown: [String]{}
                 loop i in 0..<(words.len() - 2) -> shown.push(hex_word(words[i]))
                 print("{name}({shown.join(", ")}) = {hex_word(got.real)} {hex_word(got.imaginary)}, glibc {hex_word(want_real)} {hex_word(want_imaginary)}")
             }

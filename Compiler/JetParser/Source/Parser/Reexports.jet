@@ -51,7 +51,7 @@ parser_has_reexport_candidate: fn(items: [Item]) -> Bool Never! {
 // `items` with each re-exporting binding moved out, as a public import, to
 // the end of `imports`; the items as they are when none re-exports.
 parser_reexport_declarations: fn(items: ^^[Item], imports: ^[ImportDecl]) -> [Item] Never! {
-    found := false
+    ^found: false
     loop item in items {
         if item == .Const(definition) {
             if parser_reexport_import(definition, imports) != None {
@@ -61,7 +61,7 @@ parser_reexport_declarations: fn(items: ^^[Item], imports: ^[ImportDecl]) -> [It
         }
     }
     if !found -> return items.move()
-    kept := [Item]{}
+    ^kept: [Item]{}
     loop item in items.move() {
         if item == .Const(definition) {
             if parser_reexport_import(definition, imports) == .Val(import) {
@@ -172,7 +172,7 @@ parser_reexport_bound: fn(name: String, imports: [ImportDecl]) -> String? Never!
 // one (a soft-public `_preview`).
 parser_reexport_value_word: fn(word: String) -> Bool Never! {
     bytes: word.bytes()
-    first := 0
+    ^first: 0
     if bytes.len() > 1 && bytes[0] == 95 -> first = 1
     bytes.len() > first && bytes[first] >= 97 && bytes[first] <= 122
 }

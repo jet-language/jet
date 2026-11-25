@@ -10,7 +10,7 @@ bh_bytes_reserve: fn(bytes: I64, extra: I64) {
     if (length + extra <= capacity) {
         return
     }
-    grown := if (capacity < I64{16}) -> I64{16} else -> capacity * I64{2}
+    ^grown: if (capacity < I64{16}) -> I64{16} else -> capacity * I64{2}
     if (grown < length + extra) { grown = length + extra }
     data: jet_rt_alloc(grown * RT_HOST_U8_STRIDE, I64{8})
     old: rt_text_word(wrapping(bytes + I64{16}))
@@ -28,7 +28,7 @@ bh_bytes_append: fn(bytes: I64, source: I64, count: I64) {
     bh_bytes_reserve(bytes, count)
     length: rt_text_word(bytes)
     data: rt_text_word(wrapping(bytes + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         host_u8_put(data, length + at, rt_text_byte(wrapping(source + at)))
         at += I64{1}
@@ -86,7 +86,7 @@ bh_rows_push: fn(rows: I64, bytes: I64) {
 bh_rows_publish: fn(rows: I64, ok: I64, ok_len: I64) -> I64 {
     length: rt_text_word(rows)
     capacity: rt_text_word(wrapping(rows + I64{8}))
-    data := rt_text_word(wrapping(rows + I64{16}))
+    ^data: rt_text_word(wrapping(rows + I64{16}))
     if (length == I64{0}) {
         if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{24}, I64{8}) }
         data = I64{0}
@@ -149,7 +149,7 @@ bh_range_error: fn(error: I64) -> I64 {
     output: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(output, I64{48})
     bytes: wrapping(output + I64{24})
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         row: wrapping(rows + at * I64{56})
         bh_bytes_append(bytes, wrapping(row + I64{8}), if (rt_text_word(row) == I64{4}) -> I64{4} else -> I64{16})

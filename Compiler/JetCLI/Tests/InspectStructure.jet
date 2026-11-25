@@ -17,8 +17,8 @@ inspect_structure_test_kind_ordinal: fn(kind: StructureFactKind) -> Int {
 INSPECT_STRUCTURE_TEST_KINDS: [StructureFactKind]{StructureFactKind.Liveness, StructureFactKind.Lifecycle, StructureFactKind.ImportEdge}
 
 #Test("each structure fact kind has exactly one registration row and each Structure row has a kind") {
-    seen := [Int]{}
-    names := [String]{}
+    ^seen: [Int]{}
+    ^names: [String]{}
     loop kind in INSPECT_STRUCTURE_TEST_KINDS {
         ordinal: inspect_structure_test_kind_ordinal(kind)
         assert(!seen.contains(ordinal), "each structure fact kind is listed once")
@@ -27,7 +27,7 @@ INSPECT_STRUCTURE_TEST_KINDS: [StructureFactKind]{StructureFactKind.Liveness, St
     }
     assert_eq(seen.len(), 3)
     rows: jet_cli_structure_rows()
-    row_names := [String]{}
+    ^row_names: [String]{}
     loop row in rows {
         assert(names.contains(row.name), "registration row `{row.name}` names a structure fact kind")
         assert(!row_names.contains(row.name), "registration row `{row.name}` is listed once")

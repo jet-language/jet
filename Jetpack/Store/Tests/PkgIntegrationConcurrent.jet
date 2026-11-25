@@ -32,8 +32,8 @@ store_concurrent_original: fn() {
     owner: ArtifactProcessIdentity.current() ?? panic("current process identity")
     lock: files.join(holder.root(), "locks/store.lock")
     files.write(lock, "jet.store.v1|lock|{owner.pid()}|{owner.start()}\n") ?? panic("hold shared store lock")
-    left_child := store_concurrent_build_spec(jet, left, store).spawn() ?? panic("spawn left concurrent build")
-    right_child := store_concurrent_build_spec(jet, right, store).spawn() ?? panic("spawn right concurrent build")
+    ^left_child: store_concurrent_build_spec(jet, left, store).spawn() ?? panic("spawn left concurrent build")
+    ^right_child: store_concurrent_build_spec(jet, right, store).spawn() ?? panic("spawn right concurrent build")
     time.sleep(time.duration_ms(3000))
     files.remove(lock) ?? panic("release shared store lock")
     left_build: left_child.wait() ?? panic("wait left build")
@@ -65,7 +65,7 @@ store_concurrent_fresh_original: fn() {
     root: files.join(scratch, "store")
     loop round in 0..<4 {
         if files.exists(root) -> files.remove_all(root) ?? panic("reset fresh store")
-        children := [ProcessChild]{}
+        ^children: [ProcessChild]{}
         loop _ in 0..<8 {
             children.push(
                 concurrent_process.cmd([String]{jet.copy(), "cache", "status"})

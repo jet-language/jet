@@ -122,7 +122,7 @@ ty_size: fn(ty: Ty) -> Int {
         .Int -> 1
         .Named(name) -> name.len()
         .Tuple(fields) -> {
-            n := 1
+            ^n: 1
             loop field in fields -> n += ty_size(field.ty) + field.name.len()
             n
         }
@@ -130,7 +130,7 @@ ty_size: fn(ty: Ty) -> Int {
 }
 
 in_list: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         t: Ty.Tuple{fields: [Field{name: "a{i}", ty: Ty.Int}, Field{name: "b", ty: Ty.Tuple{fields: [Field{name: "c", ty: Ty.Named{name: "n{i}"}}]}}]}
         u: t.copy()
@@ -144,10 +144,10 @@ depth: fn(node: Node) -> Int { if node.next == .Val(inner) -> 1 + depth(inner) e
 cut: fn(node: ^Node) { node.next = None }
 
 via_option: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         x: Node{name: "a{i}", next: Val(Node{name: "b{i}", next: None})}
-        y := x.copy()
+        ^y: x.copy()
         y.name = "z{i}"
         y.next = Val(Node{name: "c{i}", next: Val(Node{name: "d", next: None})})
         total += depth(x) + depth(y)
@@ -158,19 +158,19 @@ via_option: fn(from: Int, to: Int) -> Int {
 }
 
 count: fn(tree: Tree) -> Int {
-    n := tree.name.len()
+    ^n: tree.name.len()
     loop (_, kid) in tree.kids -> n += count(kid)
     n
 }
 
 via_map: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
-        kids := [String:Tree]{}
+        ^kids: [String:Tree]{}
         kids["x"] = Tree{name: "x{i}", kids: [String:Tree]{}}
         kids["y"] = Tree{name: "y", kids: [String:Tree]{}}
         t: Tree{name: "r{i}", kids: kids}
-        u := t.copy()
+        ^u: t.copy()
         u.name = "u"
         total += count(t) + count(u)
     }
@@ -182,11 +182,11 @@ pairing_size: fn(pairing: Pairing) -> Int {
 }
 
 via_tuple: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         inner: Pairing{_name: "i{i}", pair: {label: "l{i}", link: Link.End}}
         w: Pairing{_name: "o", pair: {label: "m", link: Link.To{pairing: inner}}}
-        v := w.copy()
+        ^v: w.copy()
         v.pair = {label: "n{i}", link: Link.End}
         total += pairing_size(w) + pairing_size(v)
     }
@@ -208,7 +208,7 @@ right_size: fn(right: Right) -> Int {
 }
 
 mutual: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         a: Left.Wrap{middle: Middle{name: "s{i}", right: Right.Wrap{left: Left.Wrap{middle: Middle{name: "t", right: Right.Leaf{n: "l{i}"}}}}}}
         c: a.copy()
@@ -226,10 +226,10 @@ shape_weight: fn(shape: Shape) -> Int {
 }
 
 only_edge: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         x: CycleOnly{ty: Shape.Named{name: "n{i}"}}
-        y := x.copy()
+        ^y: x.copy()
         y.ty = Shape.Other{items: [CycleOnly{ty: Shape.Named{name: "m{i}"}}]}
         f: fn(n: Int) -> Int { n + shape_weight(x.ty) }
         total += f(shape_weight(y.ty))
@@ -243,14 +243,14 @@ bump: fn(inner: ^Inner) {
 }
 
 write_through: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         x: Outer{name: "x{i}", inner: Inner{n: 1, tag: "t{i}", back: []}}
-        y := x.copy()
+        ^y: x.copy()
         y.inner.n = 5
-        z := y.copy()
+        ^z: y.copy()
         bump(z.inner)
-        w := z.copy()
+        ^w: z.copy()
         w.inner.back.push(Outer{name: "b", inner: Inner{n: 2, tag: "u", back: []}})
         if x.inner.n != 1 || y.inner.n != 5 || z.inner.n != 15 || w.inner.n != 15 {
             panic("a write through a copy's edge showed in another copy")
@@ -267,12 +267,12 @@ write_through: fn(from: Int, to: Int) -> Int {
 }
 
 from_constant: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         x: Outer{name: "c{i}", inner: BLANK}
-        y := x.copy()
+        ^y: x.copy()
         bump(y.inner)
-        z := Outer{name: "d", inner: BLANK}
+        ^z: Outer{name: "d", inner: BLANK}
         z.inner.n = 7
         if x.inner.n != 3 || x.inner.tag != "blank" || BLANK.n != 3 || BLANK.tag != "blank" {
             panic("a write through an edge built from a constant showed in the constant")

@@ -31,7 +31,7 @@ checked: fn(row: Int) -> Int {
 ones: fn(rows: [Int]) -> Int { rows.filter(fn(row: Int) { score(row, "odd") == 1 }).len() }
 
 ordered: fn(rows: [Int]) -> [Int] {
-    sorted := rows.copy()
+    ^sorted: rows.copy()
     sorted.sort_by(fn(row: Int) { row_key(row) })
     sorted
 }
@@ -46,13 +46,13 @@ local: fn(row: Int) -> Int {
 named: fn(rows: [Int]) -> Int { rows.filter(fn(row: Int) { text(row, "x") == "x1" }).len() }
 
 joined: fn(values: [Int]) -> String {
-    out := ""
+    ^out: ""
     loop value in values -> out = "{out}{value}"
     out
 }
 
 joined_text: fn(values: [String]) -> String {
-    out := ""
+    ^out: ""
     loop value in values -> out = "{out}{value}"
     out
 }
@@ -72,7 +72,7 @@ named_strict: fn(rows: [Int]) -> Int Failure! {
 positives: fn(rows: [Int]) -> Int { rows.filter(fn(row: Int) { checked(row) > 1 }).len() }
 
 run: fn() {
-    rows := [1, 2, 3, 4, 5]
+    ^rows: [1, 2, 3, 4, 5]
     print(summary(rows))
     print(named_strict(rows) ?? -1)
     print(positives(rows) ?? -1)

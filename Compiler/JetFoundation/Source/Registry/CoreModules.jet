@@ -445,16 +445,28 @@ CORE_ROLE_MARKER: "#Builtin.Role(."
 
 // The declarations of `source` whose `#Builtin.Role(.X)` marker names one of
 // `roles`, as a generated body spells them: a trait's or type's marker
-// starts its declaration line at the margin, and a method's starts its
-// indented line inside the block of the type declared last at the margin.
-// A role of `roles` that no declaration fills stops the build.
+// starts its declaration line at the margin, or stands alone on the line
+// above it as `jet fmt` writes a block declaration's marker, and a method's
+// starts its indented line inside the block of the type declared last at the
+// margin. A role of `roles` that no declaration fills stops the build.
 core_role_spellings: fn(source: String, roles: [String]) -> [CoreRoleSpelling] Never! {
-    found := [CoreRoleSpelling]{}
-    owner := ""
+    ^found: [CoreRoleSpelling]{}
+    ^owner: ""
+    ^pending: ""
     loop line in source.split("\n") {
         indented: line.starts_with(" ")
+        trimmed: line.trim()
+        if trimmed.starts_with(CORE_ROLE_MARKER) && trimmed.ends_with(")") {
+            pending = "{trimmed}"
+            next
+        }
         pair: line.trim_start().split_once(": ") ?? next
-        declared: core_role_declaration(pair.before, pair.after)
+        head: if {
+            pending != "" -> "{pending} {pair.before}"
+            else -> "{pair.before}"
+        }
+        pending = ""
+        declared: core_role_declaration(head, pair.after)
         if !indented && declared.name != "" -> owner = "{declared.name}"
         if declared.role == "" || declared.name == "" || !roles.contains(declared.role) -> next
         spelling: if {
@@ -490,7 +502,9 @@ core_role_declaration: fn(head: String, kind: String) -> {role: String, name: St
 // name.
 core_role_declared_name: fn(declared: String) -> String Never! {
     name: declared.removeprefix("priv ").removeprefix("pub ")
-    if name == "" || name.contains(" ") || name.starts_with("#") || name.starts_with("/") -> return ""
+    if name == "" || name.contains(" ") || name.starts_with("#") || name.starts_with("/") {
+        return ""
+    }
     "{name}"
 }
 
@@ -519,7 +533,7 @@ core_source_value_hook: fn(name: String, operation: String) -> String? Never! {
 // Core.rows enum leaf whose case list carries payloads (`Key`, `DataEvent`:
 // CORE_ENUM_CASE_PAYLOADS).
 core_enum_payload_variants: fn(name: String) -> [String]? {
-    variants := [String]{}
+    ^variants: [String]{}
     loop row in CORE_ENUM_PAYLOAD_ROWS {
         if row.enum_name == name -> variants.push(row.variant)
     }
@@ -538,7 +552,7 @@ core_enum_payload_variants: fn(name: String) -> [String]? {
 // case payload, none for a unit case or a list that carries no payloads. `None`
 // when the enum or its variant is not a Core enum case.
 core_enum_variant_payload: fn(name: String, variant: String) -> [Type]? {
-    family := false
+    ^family: false
     loop row in CORE_ENUM_PAYLOAD_ROWS {
         if row.enum_name != name -> next
         if row.variant == variant -> return Val(row.payload)
@@ -595,7 +609,7 @@ CoreRecordLiteralRow: struct {
 // is a Core module.
 core_path_module: fn(path: String) -> String? Never! {
     bytes: path.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop {
         head: foundation_byte_text(bytes, 0, end)
         if core_module_export(head) != None || core_module_source_path(head) != None {
@@ -695,8 +709,8 @@ core_record_field_in: fn(rows: [CoreRecordFieldRow], owner: String, field: Strin
 // names the record.
 core_record_field_types: fn(owner: String) -> [Type]? {
     leaf: core_record_leaf(owner)
-    taken := [Int]{}
-    types := [Type]{}
+    ^taken: [Int]{}
+    ^types: [Type]{}
     loop (index, row) in CORE_RECORD_FIELD_ROWS {
         if row.owner != leaf || core_record_field_taken(taken, row.field) -> next
         taken.push(index)
@@ -721,8 +735,8 @@ core_record_field_taken: fn(taken: [Int], field: String) -> Bool Never! {
 // about 140 compiler-owned records to every program, and core_record_field
 // would rescan the rows from the top for each of their fields.
 core_record_field_table: fn(owners: [String], fields: [[String]]) -> [[Type?]] Never! {
-    at := [String:Int]{}
-    table := [[Type?]]{}
+    ^at: [String:Int]{}
+    ^table: [[Type?]]{}
     loop (k, owner) in owners {
         at[owner] = k
         table.push(loop _ in fields[k] -> Type?{None})

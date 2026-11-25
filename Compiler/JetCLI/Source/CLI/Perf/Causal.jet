@@ -131,7 +131,7 @@ JetCLIPerfCausalPlace: struct {
 // The line link-time address `address` stands for: the innermost frame of
 // the checked source there; line 0 and no name when none is.
 jet_cli_perf_causal_place: fn(sampled: JetCLIPerfSamples, owned: [Bool], address: Int) -> JetCLIPerfCausalPlace Never! {
-    frames := jet_cli_perf_samples_frames(sampled, owned, address, false)
+    ^frames: jet_cli_perf_samples_frames(sampled, owned, address, false)
     frames.reverse()
     loop frames.len() > 0 {
         frame: frames.pop() ?? break
@@ -177,8 +177,8 @@ JetCLIPerfCausalRate: struct {
 // end falls from a pass depends on which line ran then, which is how its
 // line was chosen.
 jet_cli_perf_causal_sum: fn(experiments: [JetCLIPerfExperiment], chosen: [Int], slot: Int) -> JetCLIPerfCausalRate Never! {
-    passes := 0
-    wall := 0
+    ^passes: 0
+    ^wall: 0
     loop index in chosen {
         experiment: experiments[index]
         if slot < experiment.after.len() {
@@ -216,8 +216,8 @@ jet_cli_perf_causal_resample: fn(chosen: [Int], state: ^U64) -> [Int] Never! {
 jet_cli_perf_causal_line: fn(experiments: [JetCLIPerfExperiment], base: [Int], chosen: [Int], slot: Int, fit: JetCLIPerfCausalFit) -> JetCLIPerfCausalLine? Never! {
     virtual: jet_cli_perf_causal_gain(jet_cli_perf_causal_sum(experiments, base, slot), jet_cli_perf_causal_sum(experiments, chosen, slot)) ?? return None
     gain: jet_cli_perf_causal_warm(fit, virtual)
-    state := U64{88172645463325252 + slot}
-    gains := [Int]{}
+    ^state: U64{88172645463325252 + slot}
+    ^gains: [Int]{}
     loop _ in 0..<JET_CLI_PERF_CAUSAL_RESAMPLES {
         drawn_base: jet_cli_perf_causal_sum(experiments, jet_cli_perf_causal_resample(base, state), slot)
         drawn: jet_cli_perf_causal_sum(experiments, jet_cli_perf_causal_resample(chosen, state), slot)
@@ -284,8 +284,8 @@ JetCLIPerfCausalFit: struct {
 jet_cli_perf_causal_octave: fn(ns: Int) -> Int Never! {
     micros: ns /% 1000
     if micros < 1 -> return 0
-    whole := 0
-    span := 1
+    ^whole: 0
+    ^span: 1
     loop span * 2 <= micros {
         span *= 2
         whole += 1
@@ -300,22 +300,22 @@ jet_cli_perf_causal_octave: fn(ns: Int) -> Int Never! {
 // octaves; an octave of that many tasks is a point of the fit.
 jet_cli_perf_causal_fit: fn(idle: [Int]) -> JetCLIPerfCausalFit Never! {
     row: 1 + JET_CLI_PERF_CAUSAL_GAPS * 3
-    tasks := [Int]{}
-    runs := [Int]{}
-    gaps := [Int]{}
-    scaled := [Int]{}
+    ^tasks: [Int]{}
+    ^runs: [Int]{}
+    ^gaps: [Int]{}
+    ^scaled: [Int]{}
     loop _ in 0..<JET_CLI_PERF_CAUSAL_GAPS {
         tasks.push(0)
         runs.push(0)
         gaps.push(0)
         scaled.push(0)
     }
-    bodies := 0
+    ^bodies: 0
     loop kind in 0..<idle.len() /% row {
         at: kind * row
         if idle[at] == 0 -> next
-        count := 0
-        run := 0
+        ^count: 0
+        ^run: 0
         loop cell in 0..<JET_CLI_PERF_CAUSAL_GAPS {
             count += idle[at + 1 + cell * 3]
             run += idle[at + 2 + cell * 3]
@@ -330,10 +330,10 @@ jet_cli_perf_causal_fit: fn(idle: [Int]) -> JetCLIPerfCausalFit Never! {
             scaled[cell] = scaled[cell] + idle[at + 2 + cell * 3] * 1000 /% mean
         }
     }
-    cells := [JetCLIPerfCausalCell]{}
-    weight := 0
-    octaves := 0
-    slowness := 0
+    ^cells: [JetCLIPerfCausalCell]{}
+    ^weight: 0
+    ^octaves: 0
+    ^slowness: 0
     loop cell in 0..<JET_CLI_PERF_CAUSAL_GAPS {
         if tasks[cell] == 0 -> next
         gap: gaps[cell] /% tasks[cell]
@@ -345,12 +345,12 @@ jet_cli_perf_causal_fit: fn(idle: [Int]) -> JetCLIPerfCausalFit Never! {
             slowness += scaled[cell]
         }
     }
-    fit := JetCLIPerfCausalFit{cells: cells, mean_octave: 0, mean_slowness: 0, slope: 0, r2: 0, low: 0, high: 0, refused: ""}
+    ^fit: JetCLIPerfCausalFit{cells: cells, mean_octave: 0, mean_slowness: 0, slope: 0, r2: 0, low: 0, high: 0, refused: ""}
     if bodies == 0 {
         fit.refused = if idle.len() == 0 -> "the run wrote no idle table" else -> "no task body ran {JET_CLI_PERF_CAUSAL_FIT_TASKS} times after an idle gap"
         return fit
     }
-    points := 0
+    ^points: 0
     loop cell in fit.cells {
         if cell.fitted -> points += 1
     }
@@ -361,9 +361,9 @@ jet_cli_perf_causal_fit: fn(idle: [Int]) -> JetCLIPerfCausalFit Never! {
     fit.mean_octave = octaves /% weight
     fit.mean_slowness = slowness /% weight
     // Weighted least squares over the fitted octaves.
-    across := 0
-    spread := 0
-    total := 0
+    ^across: 0
+    ^spread: 0
+    ^total: 0
     fit.low = -1
     loop cell in fit.cells {
         if !cell.fitted -> next
@@ -376,7 +376,7 @@ jet_cli_perf_causal_fit: fn(idle: [Int]) -> JetCLIPerfCausalFit Never! {
         total += cell.tasks * y * y
     }
     fit.slope = if across > 0 -> spread * 1000 /% across else -> 0
-    left := 0
+    ^left: 0
     loop index in 0..<fit.cells.len() {
         residual: fit.cells[index].slowness - jet_cli_perf_causal_fitted(fit, fit.cells[index].octave, clamped: false)
         fit.cells[index].residual = residual
@@ -398,7 +398,7 @@ jet_cli_perf_causal_fit: fn(idle: [Int]) -> JetCLIPerfCausalFit Never! {
 // The fit's slowness at octave `octave`, in thousandths; `clamped` holds
 // the octave within the fitted ones, so the fit is never read past them.
 jet_cli_perf_causal_fitted: fn(fit: JetCLIPerfCausalFit, octave: Int, clamped: Bool) -> Int Never! {
-    at := octave
+    ^at: octave
     if clamped && at < fit.low -> at = fit.low
     if clamped && at > fit.high -> at = fit.high
     fit.mean_slowness + fit.slope * (at - fit.mean_octave) /% 1000
@@ -415,12 +415,12 @@ jet_cli_perf_causal_fitted: fn(fit: JetCLIPerfCausalFit, octave: Int, clamped: B
 // gap, leaves the gain as it is.
 jet_cli_perf_causal_warm: fn(fit: JetCLIPerfCausalFit, gain: Int) -> Int Never! {
     if fit.refused != "" || fit.slope <= 0 || gain == 0 -> return gain
-    weighted := 0
-    total := 0
+    ^weighted: 0
+    ^total: 0
     loop cell in fit.cells {
         before: jet_cli_perf_causal_fitted(fit, cell.octave, clamped: true)
         if before <= 0 -> next
-        shortened := cell.gap_ns - gain * (cell.gap_ns + cell.run_ns /% cell.tasks) /% 1000
+        ^shortened: cell.gap_ns - gain * (cell.gap_ns + cell.run_ns /% cell.tasks) /% 1000
         if shortened < 0 -> shortened = 0
         after: jet_cli_perf_causal_fitted(fit, jet_cli_perf_causal_octave(shortened), clamped: true)
         micros: cell.run_ns /% 1000
@@ -445,17 +445,17 @@ jet_cli_perf_causal_warm: fn(fit: JetCLIPerfCausalFit, gain: Int) -> Int Never! 
 // failed: they may read low.
 jet_cli_perf_causal_section: fn(source: ^^String, experiments: ^^[JetCLIPerfExperiment], points: ^^[Int:String], idle: ^^[Int]) -> TraceReceiptSection Never! {
     fit: jet_cli_perf_causal_fit(idle)
-    base := [Int]{}
-    groups := [JetCLIPerfCausalGroup]{}
+    ^base: [Int]{}
+    ^groups: [JetCLIPerfCausalGroup]{}
     // The speedup the experiments took, in percent.
-    percent := 30
-    run_ns := 0
-    wait_ns := 0
+    ^percent: 30
+    ^run_ns: 0
+    ^wait_ns: 0
     // The experiments' highest and lowest clocks summed, in kHz, over those
     // that read both.
-    khz_high := 0
-    khz_low := 0
-    clocked := 0
+    ^khz_high: 0
+    ^khz_low: 0
+    ^clocked: 0
     loop (index, experiment) in experiments {
         if experiment.speedup > 0 -> percent = experiment.speedup /% 10
         run_ns += experiment.run_ns
@@ -473,7 +473,7 @@ jet_cli_perf_causal_section: fn(source: ^^String, experiments: ^^[JetCLIPerfExpe
             next
         }
         if experiment.line == (U64{0}) -> next
-        at := groups.len()
+        ^at: groups.len()
         loop (k, group) in groups {
             if group.line == experiment.line && group.name == experiment.name {
                 at = k
@@ -485,19 +485,19 @@ jet_cli_perf_causal_section: fn(source: ^^String, experiments: ^^[JetCLIPerfExpe
         }
         groups[at].chosen.push(index)
     }
-    slots := [Int]{}
+    ^slots: [Int]{}
     loop (slot, _) in points -> slots.push(slot)
     slots.sort()
-    ranked := 0
-    rows := [CanonicalJSON]{}
+    ^ranked: 0
+    ^rows: [CanonicalJSON]{}
     // The points with their lines withheld.
-    withheld := [CanonicalJSON]{}
+    ^withheld: [CanonicalJSON]{}
     loop slot in slots {
-        found := [JetCLIPerfCausalLine]{}
-        unranked := [CanonicalJSON]{}
+        ^found: [JetCLIPerfCausalLine]{}
+        ^unranked: [CanonicalJSON]{}
         loop group in groups {
             chosen: group.chosen
-            why := ""
+            ^why: ""
             if {
                 chosen.len() < JET_CLI_PERF_CAUSAL_MIN || base.len() < JET_CLI_PERF_CAUSAL_MIN -> {
                     why = "{chosen.len()} experiments on it and {base.len()} baselines; it needs {JET_CLI_PERF_CAUSAL_MIN} of each"
@@ -554,7 +554,7 @@ jet_cli_perf_causal_section: fn(source: ^^String, experiments: ^^[JetCLIPerfExpe
             ),
         )
     }
-    reason := ""
+    ^reason: ""
     if {
         ranked == 0 -> {
             // Each experiment is a baseline or a line at even odds, so a
@@ -671,15 +671,15 @@ JetCLIPerfCausalTasks: struct {
 // timings.
 jet_cli_perf_causal_tasks_section: fn(source: String, experiments: ^^[JetCLIPerfExperiment], tasks: ^^JetCLIPerfCausalTasks) -> TraceReceiptSection? Never! {
     if tasks.seen < 0 -> return None
-    first := 0
+    ^first: 0
     loop row in 0..<tasks.rows.len() /% (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1) {
         start: tasks.rows[row * (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1) + 1]
         if row == 0 || start < first -> first = start
     }
-    rows := [CanonicalJSON]{}
+    ^rows: [CanonicalJSON]{}
     loop row in 0..<tasks.rows.len() /% (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1) {
         at: row * (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1)
-        words := [CanonicalJSON]{}
+        ^words: [CanonicalJSON]{}
         loop column in 0..<JET_CLI_PERF_CAUSAL_ROW_WORDS - 1 {
             value: if {
                 column == 1 -> tasks.rows[at + 1] - first

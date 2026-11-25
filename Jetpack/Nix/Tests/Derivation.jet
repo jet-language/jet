@@ -20,8 +20,8 @@ NIX_TEST_EMPTY_SHA256_HEX: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 
 nix_test_hex_decode: fn(text: String) -> [U8] {
     bytes: text.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index + 1 < bytes.len() {
         out.push(U8{nix_test_hex_value(Int{bytes[index]}) * 16 + nix_test_hex_value(Int{bytes[index + 1]})})
         index += 2
@@ -73,7 +73,7 @@ nix_test_is_parse_error: fn(error: NixError) -> Bool {
     drv: NixDerivation.parse(aterm) ?? panic("minimal fixed ATerm must parse")
     assert(drv.is_fixed())
     nix_verify_aterm_roundtrip(aterm, drv) ?? panic("minimal fixed ATerm must roundtrip")
-    store := nix_derivation_store([String:NixDerivation]{})
+    ^store: nix_derivation_store([String:NixDerivation]{})
     store.verify_output_paths(NIX_DEFAULT_STORE_DIR, "{real}.drv", drv) ?? panic("fixed-output paths must verify")
 }
 

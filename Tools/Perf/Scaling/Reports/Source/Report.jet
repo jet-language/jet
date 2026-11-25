@@ -29,7 +29,7 @@ fixed: fn(value: Float?, digits: Int{2}) -> String {
 hot: fn(s: Dyn, f: Dyn) -> String [FieldError]! {
     profile: s.get("profile") ?? return Ok("(not profiled)")
     phase: profile.field("phases").get(f.field("phase").text()) ?? return Ok("(not profiled)")
-    rows := [String]{}
+    ^rows: [String]{}
     loop row in phase.field("inclusive").decode<[Dyn]>().take(3) {
         rows.push("{(row.get("source") ?? Dyn.Null).decode<String?>()?("source") ?? row.field("symbol").text()?("symbol")} {fmt.decimal(row.field("share").float() * 100.0, 0)}%")
     }
@@ -37,8 +37,8 @@ hot: fn(s: Dyn, f: Dyn) -> String [FieldError]! {
 }
 
 report: fn(receipts: [{file: String, receipt: Dyn}]) -> String [FieldError]! {
-    out := ["# Scaling gate report (#4601)", ""]
-    series := [Dyn]{}
+    ^out: ["# Scaling gate report (#4601)", ""]
+    ^series: [Dyn]{}
     loop loaded in receipts {
         r: loaded.receipt
         compilers: r.field("compilers").decode<[Dyn]>().map(fn(c) { "{c.get("label") ?? "undefined"}={if (c.get("path") ?? Dyn.Null) == Dyn.Null -> "{c.get("template") ?? "undefined"}" else -> "{c.field("path")}"}" })
@@ -47,16 +47,16 @@ report: fn(receipts: [{file: String, receipt: Dyn}]) -> String [FieldError]! {
     }
     out.extend(["Counter-only series gate deterministic work and compile outcomes; their contended wall/RSS observations are not timing samples. Timing floors and 1M projections come only from serial timing-mode series. Unmeasured timing cells remain uncovered, not wins.", "", "## Ladder outcome", "", "| Corpus | Layout | Compiler | Mode | Rungs passed (x: N or lines) | Top rung wall s | Peak RSS GB | Stopped |", "|---|---|---|---|---|---:|---:|---|"])
     // One pass over the series fills every later section in series order.
-    growth := ["", "## Superlinear phases and counters (growth vs N log N over the measured rungs)", "", "| Corpus | Layout | Compiler | Mode | Metric | x N log N | Exponent | Dominating counter | Responsible functions (profile, phase share) |", "|---|---|---|---|---|---:|---:|---|---|"]
-    floors := ["", "## Floor failures at the top rung", "", "| Corpus | Layout | Compiler | Failure |", "|---|---|---|---|"]
-    broken := ["", "## Compile failures, timeouts and incomplete ladders", "", "| Corpus | Layout | Compiler | Mode | Phase | Failure |", "|---|---|---|---|---|---|"]
-    uncovered := ["", "## Timing coverage not established", "", "| Corpus | Layout | Compiler | Reason |", "|---|---|---|---|"]
-    projected := ["", "## Domain corpora: phases projected to 1M lines (budget 10 s end to end)", "", "| Corpus | Layout | Compiler | Measured at lines | Phase | Measured s | Exponent | Projected s at 1M |", "|---|---|---|---:|---|---:|---:|---:|"]
+    ^growth: ["", "## Superlinear phases and counters (growth vs N log N over the measured rungs)", "", "| Corpus | Layout | Compiler | Mode | Metric | x N log N | Exponent | Dominating counter | Responsible functions (profile, phase share) |", "|---|---|---|---|---|---:|---:|---|---|"]
+    ^floors: ["", "## Floor failures at the top rung", "", "| Corpus | Layout | Compiler | Failure |", "|---|---|---|---|"]
+    ^broken: ["", "## Compile failures, timeouts and incomplete ladders", "", "| Corpus | Layout | Compiler | Mode | Phase | Failure |", "|---|---|---|---|---|---|"]
+    ^uncovered: ["", "## Timing coverage not established", "", "| Corpus | Layout | Compiler | Reason |", "|---|---|---|---|"]
+    ^projected: ["", "## Domain corpora: phases projected to 1M lines (budget 10 s end to end)", "", "| Corpus | Layout | Compiler | Measured at lines | Phase | Measured s | Exponent | Projected s at 1M |", "|---|---|---|---:|---|---:|---:|---:|"]
     loop s in series {
         mode: (s.get("mode") ?? "timing").text()
         cell: "| {s.field("shape").text()} | {s.field("layout").text()} | {s.field("compiler").text()} |"
-        rungs := [String]{}
-        top := Dyn.Null
+        ^rungs: [String]{}
+        ^top: Dyn.Null
         loop p in s.field("points").decode<[Dyn]>() {
             if !p.field("ok").bool() -> next
             rungs.push("{p.field("x").int()}")
@@ -78,12 +78,12 @@ report: fn(receipts: [{file: String, receipt: Dyn}]) -> String [FieldError]! {
             broken.push("{cell} {mode} | - | incomplete checkpoint |")
         }
         if mode == "counters" {
-            reason := "not in the timing sample"
+            ^reason: "not in the timing sample"
             loop t in series {
                 if (t.get("mode") ?? "timing").text() == "counters" || "| {t.field("shape").text()} | {t.field("layout").text()} | {t.field("compiler").text()} |" != cell {
                     next
                 }
-                oks := [Bool]{}
+                ^oks: [Bool]{}
                 loop p in t.field("points").decode<[Dyn]>() -> oks.push(p.field("ok").bool()?("ok"))
                 reason = if oks.contains(true) -> "" else -> "timing compilation failed"
                 break
@@ -91,7 +91,7 @@ report: fn(receipts: [{file: String, receipt: Dyn}]) -> String [FieldError]! {
             if reason != "" -> uncovered.push("{cell} {reason} |")
         }
         phases: (s.get("projection") ?? next).field("phases")
-        rows := [{key: String, p: Dyn, projected: Float}]{}
+        ^rows: [{key: String, p: Dyn, projected: Float}]{}
         loop key in phases.keys() {
             p: phases.field(key)?(key)
             rows.push({key: key, p: p, projected: p.field("projected_s").float()?("projected_s")})

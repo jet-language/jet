@@ -14,24 +14,30 @@ SemStructuralAudit: struct {
 }
 
 semindex_structural_audit: fn(before: SemIndex, after: SemIndex) -> SemStructuralAudit Never! {
-    earlier := [String:Int]{}
+    ^earlier: [String:Int]{}
     loop (at, fact) in before.definition_facts {
         if earlier.get(fact.human_identity) == None -> earlier[fact.human_identity] = at
     }
-    later := [String:Int]{}
+    ^later: [String:Int]{}
     loop (at, fact) in after.definition_facts {
         if later.get(fact.human_identity) == None -> later[fact.human_identity] = at
     }
-    audit := SemStructuralAudit{added: [Int]{}, removed: [Int]{}, changed: [Int]{}}
+    ^audit: SemStructuralAudit{added: [Int]{}, removed: [Int]{}, changed: [Int]{}}
     loop (at, fact) in after.definition_facts {
         if later.get(fact.human_identity) != Val(at) -> next
         if earlier.get(fact.human_identity) == {
-            .Val(previous) -> if before.definition_facts[previous].signature_id != fact.signature_id -> audit.changed.push(at)
+            .Val(previous) -> {
+                if before.definition_facts[previous].signature_id != fact.signature_id {
+                    audit.changed.push(at)
+                }
+            }
             .None -> audit.added.push(at)
         }
     }
     loop (at, fact) in before.definition_facts {
-        if (earlier.get(fact.human_identity) ?? -1) == at && later.get(fact.human_identity) == None -> audit.removed.push(at)
+        if (earlier.get(fact.human_identity) ?? -1) == at && later.get(fact.human_identity) == None {
+            audit.removed.push(at)
+        }
     }
     audit.added.sort_by(fn(left: Int, right: Int) { after.definition_facts[left].human_identity <=> after.definition_facts[right].human_identity })
     audit.changed.sort_by(fn(left: Int, right: Int) { after.definition_facts[left].human_identity <=> after.definition_facts[right].human_identity })

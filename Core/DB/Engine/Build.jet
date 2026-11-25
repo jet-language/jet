@@ -149,7 +149,7 @@ DBFixer: struct {
 
 // sqlite3FindDbName over the database names the fixer copied.
 fixer_find_db: fn(f: DBFixer, name: [U8]) -> Int Never! {
-    i := f.db_names.len() - 1
+    ^i: f.db_names.len() - 1
     loop i >= 0 {
         if util.str_icmp(f.db_names[i], name) == 0 -> return i
         if i == 0 && util.str_icmp("main".bytes(), name) == 0 -> return 0
@@ -161,7 +161,7 @@ fixer_find_db: fn(f: DBFixer, name: [U8]) -> Int Never! {
 // sqlite3FixInit: a fixer for database i_db; `name` is the object's name
 // and name_off where its token lies in the statement, -1 if it does not.
 fix_init: fn(p: cg.Parse, i_db: Int, z_type: String, name: String, name_off: Int) -> DBFixer Never! {
-    names := [[U8]]{}
+    ^names: [[U8]]{}
     loop d in p.db.dbs -> names.push(d.name.copy())
     DBFixer{b_temp: i_db == 1, i_db: i_db, busy: p.db.init.busy, db_names: names, schema: p.db.dbs[i_db].schema, z_type: z_type, name: name, name_off: name_off}
 }
@@ -210,7 +210,7 @@ nested_parse: fn(p: ^cg.Parse, a: ^ast.AST, fmt: String, args: [base.Mem]) -[DB]
     }
     z_sql: pf.mprintf(fmt.bytes(), args, p.db.limits[ast.LIMIT_LENGTH])
     if z_sql == .Val(sql) {
-        g := p.up
+        ^g: p.up
         g.nested_parse(p, a, sql)
     } else {
         if !p.db.malloc_failed -> a.ctx.rc = base.TOOBIG
@@ -286,7 +286,7 @@ open_schema_table: fn(p: ^cg.Parse, i_db: Int) Never! {
 // sqlite3ChangeCookie: code the schema-version bump of database i_db.
 change_cookie: fn(p: ^cg.Parse, i_db: Int) Never! {
     s: p.db.dbs[i_db].schema
-    x := (p.db.schemas[s].schema_cookie + 1) & 4294967295
+    ^x: (p.db.schemas[s].schema_cookie + 1) & 4294967295
     if x >= 2147483648 -> x -= 4294967296
     _: cg.op3(p, opc.OP_SET_COOKIE, i_db, btree.BTREE_SCHEMA_VERSION, x)
 }
@@ -306,10 +306,10 @@ add_parse_schema_op: fn(p: ^cg.Parse, i_db: Int, where: [U8], p5: Int) Never! {
 // sqlite3StartTable: begin a table (or a view, or a virtual table) named
 // name1.name2, its schema row reserved; the table is p.f.new_table.
 start_table: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp0: Bool, is_view: Bool, is_virtual: Bool, no_err: Bool) -[DB]> Never! {
-    is_temp := is_temp0
-    i_db := 0
-    z_name := [U8]{}
-    name := name1
+    ^is_temp: is_temp0
+    ^i_db: 0
+    ^z_name: [U8]{}
+    ^name: name1
     if p.db.init.busy && p.db.init.new_tnum == 1 {
         i_db = p.db.init.i_db
         z_name = schema_table(i_db).bytes()
@@ -353,7 +353,7 @@ start_table: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok,
         }
     }
     if !cg.in_special_parse(a) {
-        g := p.up
+        ^g: p.up
         if g.read_schema(p, a) != base.OK {
             p.f.check_schema = true
             return
@@ -428,8 +428,8 @@ add_column: fn(p: ^cg.Parse, a: ^ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) N
         ast.error(a, "too many columns on {ast.text(p.db.tables[t].name)}")
         return
     }
-    name := name0
-    typ := typ0
+    ^name: name0
+    ^typ: typ0
     name = dequote_token(a, name)
     if typ.n >= 16 && util.str_nicmp(a.ctx.sql[(typ.z + typ.n - 6)..<(typ.z + typ.n)].copy(), "always".bytes(), 6) == 0 {
         typ.n -= 6
@@ -441,9 +441,9 @@ add_column: fn(p: ^cg.Parse, a: ^ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) N
             }
         }
     }
-    e_type := conn.COLTYPE_CUSTOM
-    affinity := base.AFF_BLOB
-    sz_est := 1
+    ^e_type: conn.COLTYPE_CUSTOM
+    ^affinity: base.AFF_BLOB
+    ^sz_est: 1
     if typ.n >= 3 {
         typ = dequote_token(a, typ)
         loop i in 0..<vc.STD_TYPES.len() {
@@ -466,7 +466,7 @@ add_column: fn(p: ^cg.Parse, a: ^ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) N
             return
         }
     }
-    col := conn.Column{name: z, typ: [U8]{}, coll: [U8]{}, not_null: ast.OE_NONE, ctype: 0, affinity: affinity, sz_est: sz_est, h_name: h, i_dflt: 0, col_flags: 0}
+    ^col: conn.Column{name: z, typ: [U8]{}, coll: [U8]{}, not_null: ast.OE_NONE, ctype: 0, affinity: affinity, sz_est: sz_est, h_name: h, i_dflt: 0, col_flags: 0}
     if typ.n == 0 {
         col.affinity = affinity
         col.ctype = e_type
@@ -494,7 +494,7 @@ add_not_null: fn(p: ^cg.Parse, a: ast.AST, on_error: Int) Never! {
     p.db.tables[t].cols[last].not_null = on_error
     p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | ast.TF_HAS_NOT_NULL
     if p.db.tables[t].cols[last].col_flags & conn.COLFLAG_UNIQUE != 0 {
-        ix := p.db.tables[t].index
+        ^ix: p.db.tables[t].index
         loop ix >= 0 {
             if p.db.indexes[ix].ai_column[0] == last -> p.db.indexes[ix].uniq_not_null = true
             ix = p.db.indexes[ix].next
@@ -514,7 +514,7 @@ add_default_value: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, start: Int, end: Int) -
         } else if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_GENERATED != 0 {
             ast.error(a, "cannot use DEFAULT on a generated column")
         } else {
-            x := ast.zero_expr(tk.TK_SPAN)
+            ^x: ast.zero_expr(tk.TK_SPAN)
             x.token = Val(ast.span_dup(a, start, end))
             x.left = e
             x.flags = ast.EP_SKIP
@@ -546,9 +546,9 @@ make_column_part_of_primary_key: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i: Int) N
 // of `list`.
 add_primary_key: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, on_error: Int, auto_inc: Bool, sort_order: Int) -[DB]> Never! {
     t: p.f.new_table
-    ilist := list
-    i_col := -1
-    n_term := 0
+    ^ilist: list
+    ^i_col: -1
+    ^n_term: 0
     if t < 0 {
         ast.expr_list_delete(a, ilist)
         return
@@ -605,9 +605,9 @@ add_check_constraint: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, start: Int, end: Int
             cname: ast.tok_bytes(a, a.ctx.constraint_name)
             ast.expr_list_set_name(a, p.db.tables[t].check, cname, true)
         } else {
-            s := start + 1
+            ^s: start + 1
             loop s < end && util.is_space(util.sql_byte(a.ctx.sql, s)) -> s += 1
-            z := end
+            ^z: end
             loop z > s && util.is_space(util.sql_byte(a.ctx.sql, z - 1)) -> z -= 1
             ast.expr_list_set_name(a, p.db.tables[t].check, a.ctx.sql[s..<z].copy(), true)
         }
@@ -626,7 +626,7 @@ add_collate_type: fn(p: ^cg.Parse, a: ^ast.AST, name: ast.SQLTok) Never! {
     }
     if cat.locate_coll_seq(p, a, z_coll) >= 0 {
         cat.column_set_coll(p.db, t, i, z_coll)
-        ix := p.db.tables[t].index
+        ^ix: p.db.tables[t].index
         loop ix >= 0 {
             if p.db.indexes[ix].ai_column[0] == i -> p.db.indexes[ix].coll[0] = z_coll.copy()
             ix = p.db.indexes[ix].next
@@ -637,7 +637,7 @@ add_collate_type: fn(p: ^cg.Parse, a: ^ast.AST, name: ast.SQLTok) Never! {
 // sqlite3AddGenerated: GENERATED ALWAYS AS (e) VIRTUAL or STORED (`typ`,
 // z -1 when absent) on the last column.
 add_generated: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, typ: ast.SQLTok) Never! {
-    e := e0
+    ^e: e0
     t: p.f.new_table
     if t < 0 {
         ast.expr_delete(a, e)
@@ -654,7 +654,7 @@ add_generated: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, typ: ast.SQLTok) Never! {
         ast.expr_delete(a, e)
         return
     }
-    e_type := conn.COLFLAG_VIRTUAL
+    ^e_type: conn.COLFLAG_VIRTUAL
     if typ.z >= 0 {
         if typ.n == 7 && util.str_nicmp(ast.tok_bytes(a, typ), "virtual".bytes(), 7) == 0 {
             e_type = conn.COLFLAG_VIRTUAL
@@ -682,7 +682,7 @@ add_generated: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, typ: ast.SQLTok) Never! {
 
 // estimateTableWidth.
 estimate_table_width: fn(db: ^conn.Conn, t: Int) Never! {
-    w := 0
+    ^w: 0
     loop c in db.tables[t].cols -> w += c.sz_est
     if db.tables[t].ipkey < 0 -> w += 1
     db.tables[t].sz_tab_row = util.log_est(w * 4)
@@ -690,7 +690,7 @@ estimate_table_width: fn(db: ^conn.Conn, t: Int) Never! {
 
 // estimateIndexWidth.
 estimate_index_width: fn(db: ^conn.Conn, ix: Int) Never! {
-    w := 0
+    ^w: 0
     t: db.indexes[ix].table
     loop i in 0..<db.indexes[ix].n_column {
         x: db.indexes[ix].ai_column[i]
@@ -769,7 +769,7 @@ end_table: fn(p: ^cg.Parse, a: ^ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
         }
     }
     if p.db.tables[t].tab_flags & ast.TF_HAS_GENERATED != 0 {
-        n_ng := 0
+        ^n_ng: 0
         loop ii in 0..<p.db.tables[t].cols.len() {
             if p.db.tables[t].cols[ii].col_flags & conn.COLFLAG_GENERATED != 0 {
                 x: cat.column_expr(p.db, a, t, ii)
@@ -785,7 +785,7 @@ end_table: fn(p: ^cg.Parse, a: ^ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
         }
     }
     estimate_table_width(p.db, t)
-    ix := p.db.tables[t].index
+    ^ix: p.db.tables[t].index
     loop ix >= 0 {
         estimate_index_width(p.db, ix)
         ix = p.db.indexes[ix].next
@@ -798,7 +798,7 @@ end_table: fn(p: ^cg.Parse, a: ^ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
         z_type2: if is_table -> "TABLE" else -> "VIEW"
         end2: if tab_opts != 0 -> a.ctx.last_token else -> end
         start: p.f.name_token.z
-        n := end2.z - start
+        ^n: end2.z - start
         if util.sql_byte(a.ctx.sql, end2.z) != 59 -> n += end2.n
         z_stmt: "CREATE {z_type2} {ast.text(a.ctx.sql[start..<(start + n)].copy())}".bytes()
         z_db: p.db.dbs[i_db].name.copy()
@@ -842,7 +842,7 @@ default_row_est: fn(db: ^conn.Conn, ix: Int) Never! {
     t: db.indexes[ix].table
     n_key: db.indexes[ix].n_key_col
     n_copy: if n_key < vals.len() -> n_key else -> vals.len()
-    x := db.tables[t].n_row_log_est
+    ^x: db.tables[t].n_row_log_est
     if x < 99 {
         db.tables[t].n_row_log_est = 99
         x = 99
@@ -857,9 +857,9 @@ default_row_est: fn(db: ^conn.Conn, ix: Int) Never! {
 // recomputeColumnsNotIndexed: colNotIdxed, a 0 bit for each column (of the
 // first 63) the index holds, virtual columns excepted.
 recompute_columns_not_indexed: fn(db: ^conn.Conn, ix: Int) Never! {
-    m := 0
+    ^m: 0
     t: db.indexes[ix].table
-    j := db.indexes[ix].n_column - 1
+    ^j: db.indexes[ix].n_column - 1
     loop j >= 0 {
         x: db.indexes[ix].ai_column[j]
         if x >= 0 && db.tables[t].cols[x].col_flags & conn.COLFLAG_VIRTUAL == 0 {
@@ -872,7 +872,7 @@ recompute_columns_not_indexed: fn(db: ^conn.Conn, ix: Int) Never! {
 
 // sqlite3IndexHasDuplicateRootPage.
 index_has_duplicate_root_page: fn(db: conn.Conn, ix: Int) -> Bool Never! {
-    o := db.tables[db.indexes[ix].table].index
+    ^o: db.tables[db.indexes[ix].table].index
     loop o >= 0 {
         if o != ix && db.indexes[o].tnum == db.indexes[ix].tnum -> return true
         o = db.indexes[o].next
@@ -893,7 +893,7 @@ CreateIndexState: struct {
 // created, `list` -1 for its last column). `start` is the CREATE token of a
 // CREATE INDEX statement (none for an implied index).
 create_index: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Bool, idx_type: Int) -[DB]> Never! {
-    s := CreateIndexState{t: -1, list: list, where_expr: where_expr}
+    ^s: CreateIndexState{t: -1, list: list, where_expr: where_expr}
     ix: create_index_object(p, a, s, name1, name2, tbl, on_error, start, sort_order, if_not_exist, idx_type)
     if ix >= 0 -> conn.free_index(p.db, ix)
     if s.t >= 0 -> replace_indexes_last(p.db, s.t)
@@ -905,11 +905,11 @@ create_index: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok
 // The exit_create_index loop of sqlite3CreateIndex: the one REPLACE index
 // out of place moves to the end of table t's index list.
 replace_indexes_last: fn(db: ^conn.Conn, t: Int) Never! {
-    from := -1
-    this := db.tables[t].index
+    ^from: -1
+    ^this: db.tables[t].index
     loop this >= 0 {
         if db.indexes[this].on_error == ast.OE_REPLACE {
-            nxt := db.indexes[this].next
+            ^nxt: db.indexes[this].next
             loop nxt >= 0 && db.indexes[nxt].on_error != ast.OE_REPLACE {
                 if from < 0 -> db.tables[t].index = nxt else -> db.indexes[from].next = nxt
                 db.indexes[this].next = db.indexes[nxt].next
@@ -931,18 +931,18 @@ create_index_object: fn(p: ^cg.Parse, a: ^ast.AST, s: ^CreateIndexState, name1: 
     if a.ctx.parse_mode == ast.PARSE_MODE_DECLARE_VTAB && idx_type != ast.IDXTYPE_PRIMARYKEY {
         return -1
     }
-    g := p.up
+    ^g: p.up
     if g.read_schema(p, a) != base.OK -> return -1
     if ast.has_explicit_nulls(a, s.list) -> return -1
-    i_db := 0
-    name := ast.SQLTok{z: -1, n: 0}
-    tab := -1
+    ^i_db: 0
+    ^name: ast.SQLTok{z: -1, n: 0}
+    ^tab: -1
     if tbl >= 0 {
         r: two_part_name(p, a, name1, name2)
         if r.i_db < 0 -> return -1
         i_db = r.i_db
         name = r.name
-        f := fix_init(p, i_db, "index", ast.tok_text(a, name), ast.tok_offset(a, name))
+        ^f: fix_init(p, i_db, "index", ast.tok_text(a, name), ast.tok_offset(a, name))
         _: fix_src_list(f, a, tbl)
         tbl_item: ast.src_item(a, tbl, 0)
         tab = cat.locate_table_item(p, a, 0, tbl_item)
@@ -972,7 +972,7 @@ create_index_object: fn(p: ^cg.Parse, a: ^ast.AST, s: ^CreateIndexState, name1: 
         return -1
     }
     z_db: p.db.dbs[i_db].name.copy()
-    z_name := [U8]{}
+    ^z_name: [U8]{}
     if name.z >= 0 {
         z_name = name_from_token(a, name) ?? {
             return -1
@@ -990,8 +990,8 @@ create_index_object: fn(p: ^cg.Parse, a: ^ast.AST, s: ^CreateIndexState, name1: 
             return -1
         }
     } else {
-        n := 1
-        o := p.db.tables[tab].index
+        ^n: 1
+        ^o: p.db.tables[tab].index
         loop o >= 0 {
             n += 1
             o = p.db.indexes[o].next
@@ -1036,7 +1036,7 @@ create_index_object: fn(p: ^cg.Parse, a: ^ast.AST, s: ^CreateIndexState, name1: 
         _: rs.resolve_self_reference(p, a, tab, ast.NC_IDX_EXPR, item_e, -1)
         if cg.n_err(a) > 0 -> return ix
         c_expr: ast.skip_collate(a, item_e)
-        j := 0
+        ^j: 0
         if a.exprs[c_expr].op != tk.TK_COLUMN {
             if tab == p.f.new_table {
                 ast.error(a, "expressions prohibited in PRIMARY KEY and UNIQUE constraints")
@@ -1063,7 +1063,7 @@ create_index_object: fn(p: ^cg.Parse, a: ^ast.AST, s: ^CreateIndexState, name1: 
             }
             p.db.indexes[ix].ai_column[i] = j
         }
-        z_coll := "BINARY".bytes()
+        ^z_coll: "BINARY".bytes()
         if a.exprs[item_e].op == tk.TK_COLLATE -> z_coll = a.exprs[item_e].token ?? z_coll else if j >= 0 {
             if cat.column_coll(p.db.tables[tab].cols[j]) == .Val(c) -> z_coll = c
         }
@@ -1087,10 +1087,10 @@ create_index_object: fn(p: ^cg.Parse, a: ^ast.AST, s: ^CreateIndexState, name1: 
         }
     }
     if tab == p.f.new_table {
-        o := p.db.tables[tab].index
+        ^o: p.db.tables[tab].index
         loop o >= 0 {
             if p.db.indexes[o].n_key_col == n_key {
-                k := 0
+                ^k: 0
                 loop k < n_key {
                     if p.db.indexes[o].ai_column[k] != p.db.indexes[ix].ai_column[k] -> break
                     if util.str_icmp(p.db.indexes[o].coll[k], p.db.indexes[ix].coll[k]) != 0 {
@@ -1134,10 +1134,10 @@ create_index_object: fn(p: ^cg.Parse, a: ^ast.AST, s: ^CreateIndexState, name1: 
         _: cg.op3(p, opc.OP_CREATE_BTREE, i_db, i_mem, btree.BTREE_BLOBKEY)
         // The text of a CREATE INDEX statement, from its name to its last
         // token; an implied index of CREATE TABLE has none.
-        z_stmt := base.mem_null()
+        ^z_stmt: base.mem_null()
         if start.z >= 0 {
             last: a.ctx.last_token
-            n := last.z - name.z + last.n
+            ^n: last.z - name.z + last.n
             if util.sql_byte(a.ctx.sql, name.z + n - 1) == 59 -> n -= 1
             unique: if on_error == ast.OE_NONE -> "" else -> " UNIQUE"
             z_stmt = pf.txt("CREATE{unique} INDEX {ast.text(a.ctx.sql[name.z..<(name.z + n)].copy())}".bytes())
@@ -1181,7 +1181,7 @@ refill_index: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int, mem_root_page: Int) -[DB]> 
     }
     _: cg.op4(p, opc.OP_SORTER_OPEN, i_sorter, 0, p.db.indexes[ix].n_key_col, conn.P4.KeyInfo(key.copy()))
     ex.open_table(p, a, i_tab, i_db, t, opc.OP_OPEN_READ)
-    addr1 := cg.op2(p, opc.OP_REWIND, i_tab, 0)
+    ^addr1: cg.op2(p, opc.OP_REWIND, i_tab, 0)
     reg_record: cg.get_temp_reg(p)
     cg.multi_write(p)
     row_key: wh.generate_index_key(p, a, ix, i_tab, reg_record, false, true, -1, 0)
@@ -1192,7 +1192,7 @@ refill_index: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int, mem_root_page: Int) -[DB]> 
     _: cg.op4(p, opc.OP_OPEN_WRITE, i_idx, mem_root_page, i_db, conn.P4.KeyInfo(key.copy()))
     cg.v_change_p5(p, conn.OPFLAG_BULKCSR | conn.OPFLAG_P2ISREG)
     addr1 = cg.op2(p, opc.OP_SORTER_SORT, i_sorter, 0)
-    addr2 := 0
+    ^addr2: 0
     if p.db.indexes[ix].on_error != ast.OE_NONE {
         j2: cg.goto(p, 1)
         addr2 = cg.v_current_addr(p)
@@ -1233,11 +1233,11 @@ destroy_root_page: fn(p: ^cg.Parse, a: ^ast.AST, i_table: Int, i_db: Int) -[DB]>
 // destroyTable: the root pages of table t and its indexes, largest first.
 destroy_table: fn(p: ^cg.Parse, a: ^ast.AST, t: Int) -[DB]> Never! {
     i_tab: p.db.tables[t].tnum
-    i_destroyed := 0
+    ^i_destroyed: 0
     loop {
-        largest := 0
+        ^largest: 0
         if i_destroyed == 0 || i_tab < i_destroyed -> largest = i_tab
-        ix := p.db.tables[t].index
+        ^ix: p.db.tables[t].index
         loop ix >= 0 {
             i_idx: p.db.indexes[ix].tnum
             if (i_destroyed == 0 || i_idx < i_destroyed) && i_idx > largest -> largest = i_idx
@@ -1303,13 +1303,13 @@ drop_table: fn(p: ^cg.Parse, a: ^ast.AST, name: Int, is_view: Bool, no_err: Bool
 
 // The body of sqlite3DropTable up to exit_drop_table.
 drop_table_code: fn(p: ^cg.Parse, a: ^ast.AST, name: Int, is_view: Bool, no_err: Bool) -[DB]> Never! {
-    g := p.up
+    ^g: p.up
     if g.read_schema(p, a) != base.OK {
         return
     }
     si: ast.src_item(a, name, 0)
     flags: if is_view -> cat.LOCATE_VIEW else -> 0
-    t := -1
+    ^t: -1
     if no_err {
         saved: suppress_err(p, a)
         t = cat.locate_table_item(p, a, flags, si)
@@ -1329,7 +1329,7 @@ drop_table_code: fn(p: ^cg.Parse, a: ^ast.AST, name: Int, is_view: Bool, no_err:
     if cg.auth_check(p, a, conn.AUTH_DELETE, Val(schema_table(i_db).bytes()), None, Val(z_db)) != base.OK {
         return
     }
-    code := conn.AUTH_DROP_TABLE
+    ^code: conn.AUTH_DROP_TABLE
     if is_view -> code = if i_db == 1 -> conn.AUTH_DROP_TEMP_VIEW else -> conn.AUTH_DROP_VIEW else if i_db == 1 {
         code = conn.AUTH_DROP_TEMP_TABLE
     }
@@ -1370,7 +1370,7 @@ begin_transaction: fn(p: ^cg.Parse, a: ^ast.AST, kind: Int) -[DB]> Never! {
     if kind != tk.TK_DEFERRED {
         loop i in 0..<p.db.dbs.len() {
             bt: p.db.dbs[i].bt
-            e_txn_type := 1
+            ^e_txn_type: 1
             if bt >= 0 && btree.btree_is_readonly(p.db.btrees[bt]) -> e_txn_type = 0 else if kind == tk.TK_EXCLUSIVE {
                 e_txn_type = 2
             }

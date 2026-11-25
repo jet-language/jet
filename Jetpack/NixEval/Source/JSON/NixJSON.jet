@@ -51,7 +51,7 @@ NixEvalJSON: struct {
     root: Int,
 
     parse: fn(input: String) -> NixEvalJSON NixEvalError! {
-        parser := NixEvalJSONParser{bytes: input.bytes(), position: 0, nodes: [NixEvalJSONNode]{}}
+        ^parser: NixEvalJSONParser{bytes: input.bytes(), position: 0, nodes: [NixEvalJSONNode]{}}
         parser.skip_whitespace()
         root: parser.value(0)
         parser.skip_whitespace()
@@ -173,7 +173,7 @@ NixEvalJSONParser: struct {
 
     object: fn(^self, depth: Int) -> Int NixEvalError! {
         _: self.bump()
-        fields := [String:Int]{}
+        ^fields: [String:Int]{}
         self.skip_whitespace()
         if self.peek() == 125 {
             _: self.bump()
@@ -200,7 +200,7 @@ NixEvalJSONParser: struct {
 
     array: fn(^self, depth: Int) -> Int NixEvalError! {
         _: self.bump()
-        items := [Int]{}
+        ^items: [Int]{}
         self.skip_whitespace()
         if self.peek() == 93 {
             _: self.bump()
@@ -218,7 +218,7 @@ NixEvalJSONParser: struct {
 
     string: fn(^self) -> String NixEvalError! {
         self.position += 1
-        out := [U8]{}
+        ^out: [U8]{}
         loop {
             if self.position >= self.bytes.len() {
                 return Err(NixEvalError.JSON("unterminated string"))
@@ -270,7 +270,7 @@ NixEvalJSONParser: struct {
     }
 
     hex4: fn(^self) -> Int NixEvalError! {
-        codepoint := 0
+        ^codepoint: 0
         loop _ in 0..<4 {
             value: self.bump()
             if value < 0 -> return Err(NixEvalError.JSON("truncated unicode escape"))
@@ -328,15 +328,15 @@ nixeval_json_hex_digit: fn(value: Int) -> Int Never! {
 // exponent with at least one digit.
 nixeval_json_parse_number: fn(text: String) -> NixEvalJSONNumber? Never! {
     bytes: text.bytes()
-    index := 0
-    negative := false
+    ^index: 0
+    ^negative: false
     first: nixeval_byte(bytes, 0)
     if first == 45 || first == 43 {
         negative = first == 45
         index = 1
     }
-    digits := [U8]{}
-    fraction_digits := 0
+    ^digits: [U8]{}
+    ^fraction_digits: 0
     loop nixeval_is_ascii_digit(nixeval_byte(bytes, index)) {
         digits.push(bytes[index])
         index += 1
@@ -350,11 +350,11 @@ nixeval_json_parse_number: fn(text: String) -> NixEvalJSONNumber? Never! {
         }
     }
     if digits.len() == 0 -> return None
-    exponent := 0
+    ^exponent: 0
     marker: nixeval_byte(bytes, index)
     if marker == 101 || marker == 69 {
         index += 1
-        exponent_negative := false
+        ^exponent_negative: false
         sign: nixeval_byte(bytes, index)
         if sign == 45 || sign == 43 {
             exponent_negative = sign == 45
@@ -379,16 +379,16 @@ nixeval_json_round: fn(negative: Bool, mantissa: Int, exponent10: Int) -> NixEva
         return NixEvalJSONNumber{negative: negative, infinite: true, mantissa: 0, exponent: 0}
     }
     if exponent10 + digits <= -324 -> return NixEvalJSONNumber.zero()
-    numerator := mantissa
-    denominator := 1
+    ^numerator: mantissa
+    ^denominator: 1
     if {
         exponent10 >= 0 -> numerator = mantissa * (10).pow(exponent10)
         else -> denominator = (10).pow(-exponent10)
     }
-    exponent := nixeval_bit_length(numerator) - nixeval_bit_length(denominator) - 53
+    ^exponent: nixeval_bit_length(numerator) - nixeval_bit_length(denominator) - 53
     low: (2).pow(52)
     high: low * 2
-    quotient := nixeval_scaled_quotient(numerator, denominator, exponent)
+    ^quotient: nixeval_scaled_quotient(numerator, denominator, exponent)
     loop quotient >= high {
         exponent += 1
         quotient = nixeval_scaled_quotient(numerator, denominator, exponent)
@@ -402,8 +402,8 @@ nixeval_json_round: fn(negative: Bool, mantissa: Int, exponent10: Int) -> NixEva
         quotient = nixeval_scaled_quotient(numerator, denominator, exponent)
     }
     // Remainder test against the exact scaled value for round-half-even.
-    scaled_numerator := numerator
-    scaled_denominator := denominator
+    ^scaled_numerator: numerator
+    ^scaled_denominator: denominator
     if {
         exponent >= 0 -> scaled_denominator = denominator * (2).pow(exponent)
         else -> scaled_numerator = numerator * (2).pow(-exponent)
@@ -435,8 +435,8 @@ nixeval_scaled_quotient: fn(numerator: Int, denominator: Int, exponent: Int) -> 
 }
 
 nixeval_bit_length: fn(value: Int) -> Int Never! {
-    bits := 0
-    remaining := value
+    ^bits: 0
+    ^remaining: value
     loop remaining >= 4294967296 {
         remaining /%= 4294967296
         bits += 32
@@ -449,8 +449,8 @@ nixeval_bit_length: fn(value: Int) -> Int Never! {
 }
 
 nixeval_decimal_digits: fn(value: Int) -> Int Never! {
-    digits := 0
-    remaining := value
+    ^digits: 0
+    ^remaining: value
     loop remaining > 0 {
         remaining /%= 10
         digits += 1

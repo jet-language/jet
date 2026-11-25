@@ -47,7 +47,7 @@ notes_in: fn(store: db.Store) -> db.Table<Int, Note> {
 
 // The guarded notes table.
 notes_now: fn() -> db.Table<Int, Note> {
-    notes := NOTES.guard_edit()
+    ^notes: NOTES.guard_edit()
     store: notes.value.store ?? panic("the notes store is open")
     notes_in(store)
 }
@@ -65,10 +65,10 @@ note_policy: fn(row: Note, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> 
 // The texts of the notes the caller may read, a query function an app binds
 // with app.live.
 note_texts: fn() -[DB.Read]> [String] NoteError! {
-    notes := NOTES.guard_edit()
+    ^notes: NOTES.guard_edit()
     store: notes.value.store ?? return Err(NoteError.Unopened)
     rows: (notes_in(store).query() ?? return Err(NoteError.Read)).collect() ?? return Err(NoteError.Read)
-    texts := [String]{}
+    ^texts: [String]{}
     loop note in rows -> texts.push(note.text)
     texts
 }
@@ -192,7 +192,7 @@ deliver: fn(addr: String, project: String, key: String, body: String) -> String 
 step: fn(label: String, outcome: String) { print("{label}: {outcome}") }
 
 hold: fn(store: db.Store) {
-    notes := NOTES.guard_edit()
+    ^notes: NOTES.guard_edit()
     notes.value.store = Val(store.copy())
 }
 
@@ -235,7 +235,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     addr: listener.local_addr()
     serving: task {
         app.as_caller<Int, Never>(ann(), fn() {
-            answered := 0
+            ^answered: 0
             loop _ in 0..<4 {
                 if served.serve_once(listener) == .Ok(_) -> answered += 1
             }

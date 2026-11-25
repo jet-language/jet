@@ -5,7 +5,7 @@ use math: core.math
 // escaped, every other byte as is.
 json_quote: fn(text: String) -> String Never! {
     hex: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     out.push(34)
     loop byte in text.bytes() {
         code: Int{byte}
@@ -34,7 +34,7 @@ array_index: fn(key: String) -> Int? Never! {
     if bytes.len() == 0 || bytes.len() > 10 || (bytes.len() > 1 && Int{bytes[0]} == 48) {
         return None
     }
-    value := 0
+    ^value: 0
     loop byte in bytes {
         code: Int{byte}
         if code < 48 || code > 57 -> return None
@@ -47,11 +47,11 @@ array_index: fn(key: String) -> Int? Never! {
 // An object's keys in JavaScript property order: array indices ascending,
 // then the rest in first-seen order; a duplicated key keeps its last value.
 ordered: fn(entries: [{key: String, value: Dyn}]) -> [{key: String, value: Dyn}] Never! {
-    indexed := [{index: Int, key: String, value: Dyn}]{}
-    named := [{key: String, value: Dyn}]{}
+    ^indexed: [{index: Int, key: String, value: Dyn}]{}
+    ^named: [{key: String, value: Dyn}]{}
     loop entry in entries {
         index: array_index(entry.key) ?? -1
-        at := -1
+        ^at: -1
         if index >= 0 {
             loop i in 0..<indexed.len() {
                 if indexed[i].index == index -> at = i
@@ -69,7 +69,7 @@ ordered: fn(entries: [{key: String, value: Dyn}]) -> [{key: String, value: Dyn}]
         }
     }
     indexed.sort_by(fn(row) { row.index })
-    out := indexed.map(fn(row) { {key: row.key, value: row.value} })
+    ^out: indexed.map(fn(row) { {key: row.key, value: row.value} })
     out.extend(named)
     out
 }

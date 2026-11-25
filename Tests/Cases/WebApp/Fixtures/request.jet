@@ -19,7 +19,7 @@ run: fn() {
     path: s6_web_request_env("S6_WEB_PATH")
     output: s6_web_request_env("S6_WEB_RESPONSE")
     deadline: time.instant() + 30s
-    connected := net.TCPStream?{None}
+    ^connected: net.TCPStream?{None}
     loop {
         if net.tcp_connect("127.0.0.1:{port}") == {
             .Ok(stream) -> {
@@ -32,13 +32,13 @@ run: fn() {
             }
         }
     }
-    stream := connected ?? panic("connected stream")
+    ^stream: connected ?? panic("connected stream")
     crlf: "\r\n"
     request: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
     stream.write_bytes(request.bytes()) ?? panic("request write")
     net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
-    bytes := [U8]{}
-    complete := false
+    ^bytes: [U8]{}
+    ^complete: false
     reload: sys.get("S6_WEB_RELOAD_APP")
     if reload == .Val(app) {
         // Original predicate: completion must not arrive during the absolute
@@ -46,7 +46,7 @@ run: fn() {
         started: time.instant()
         loop time.instant() - started < 250ms {
             remaining: 250 - time.duration_as_ms(time.instant() - started)
-            failed := false
+            ^failed: false
             if stream.read_bytes(8192, deadline: time.duration_ms(remaining)) == {
                 .Ok(part) -> {
                     if part.len() == 0 {

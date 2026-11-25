@@ -83,27 +83,27 @@ jet_cli_foreign_binder: fn(root: String) -> JetCLIForeignBinder? Never! {
         "java" -> Val(jet_cli_foreign_scalar(root, "<source.java>", false, "the source file", "use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`."))
         "cs" -> Val(jet_cli_foreign_scalar(root, "<source.cs>", true, "the C# source", "use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`."))
         "go" -> {
-            binder := jet_cli_foreign_scalar(root, "<source.go>", false, "the source file", "export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet inspect bind go`.")
+            ^binder: jet_cli_foreign_scalar(root, "<source.go>", false, "the source file", "export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet inspect bind go`.")
             binder.summary = "Generate typed Jet bindings for scalar and uintptr //export Go functions."
             Val(binder)
         }
         "fortran" -> {
-            binder := jet_cli_foreign_scalar(root, "<source.f90>", false, "the source file", "use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.")
+            ^binder: jet_cli_foreign_scalar(root, "<source.f90>", false, "the source file", "use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.")
             binder.summary = "Generate typed Jet bindings for scalar and fixed-shape input ISO_C_BINDING functions."
             Val(binder)
         }
         "dart" -> {
-            binder := jet_cli_foreign_scalar(root, "<contract.dart> --jet <compute.jet>", true, "the Dart contract", "mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.")
+            ^binder: jet_cli_foreign_scalar(root, "<contract.dart> --jet <compute.jet>", true, "the Dart contract", "mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.")
             binder.flags = [String]{"--jet"}
             Val(binder)
         }
         "js" -> {
-            binder := jet_cli_foreign_scalar(root, "<module.d.ts> --runtime <module.js>", true, "the TypeScript declaration file", "export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.")
+            ^binder: jet_cli_foreign_scalar(root, "<module.d.ts> --runtime <module.js>", true, "the TypeScript declaration file", "export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.")
             binder.flags = [String]{"--runtime"}
             Val(binder)
         }
         "cobol" -> {
-            binder := jet_cli_foreign_scalar(root, "<program.cob> --copybook <record.cpy>", true, "the program", "use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet inspect bind cobol`.")
+            ^binder: jet_cli_foreign_scalar(root, "<program.cob> --copybook <record.cpy>", true, "the program", "use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet inspect bind cobol`.")
             binder.flags = [String]{"--copybook"}
             Val(binder)
         }
@@ -175,7 +175,7 @@ jet_cli_foreign_parse: fn(binder: JetCLIForeignBinder, args: [String], color: Bo
         help: if binder.summary == "" -> usage else -> "{usage}\n{binder.summary}\n"
         return JetCLIForeignParse.Done{output: JetDriverVerbOutput{stdout: "", stderr: help, exit_code: if args.len() == 0 -> JET_DRIVER_EXIT_USAGE else -> JET_DRIVER_EXIT_OK}}
     }
-    request := JetCLIForeignBindRequest{
+    ^request: JetCLIForeignBindRequest{
         path: args[0],
         pkg: None,
         out: None,
@@ -189,12 +189,12 @@ jet_cli_foreign_parse: fn(binder: JetCLIForeignBinder, args: [String], color: Bo
         namespaces: [String]{},
         templates: [CppTemplateInstantiation]{},
     }
-    index := 1
+    ^index: 1
     loop index < args.len() {
         flag: args[index]
         if flag != "--pkg" && flag != "-o" && flag != "--out" && !binder.flags.contains(flag) {
             shared: jet_cli_diagnostic_copy("E2102")
-            output := jet_cli_report_output("", "E2102", "unknown `inspect bind {binder.language}` flag `{flag}`", shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
+            ^output: jet_cli_report_output("", "E2102", "unknown `inspect bind {binder.language}` flag `{flag}`", shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
             output.stderr = "{output.stderr}{usage}"
             return JetCLIForeignParse.Done{output: output}
         }
@@ -258,7 +258,7 @@ jet_cli_foreign_output: fn(binder: JetCLIForeignBinder, request: JetCLIForeignBi
     if request.out == .Val(out) -> return JetCLIForeignOutput.Given{path: out}
     cwd: cli_files.cwd() ?? "."
     absolute: if request.path.starts_with("/") -> request.path else -> jet_cli_entry_join(cwd, request.path)
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: jet_cli_selected_project_root(cache, jet_cli_parent(absolute) ?? ".") ?? return JetCLIForeignOutput.Refused{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(request.path, source, [Diagnostic]{err.diagnostic}, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     JetCLIForeignOutput.Given{path: pkg_cffi_binding_cache_file(root, binder.language, lib)}
 }
@@ -294,7 +294,7 @@ jet_cli_foreign_bind: fn(binder: JetCLIForeignBinder, args: [String], color: Boo
 jet_cli_foreign_bind_request: fn(binder: JetCLIForeignBinder, request: JetCLIForeignBindRequest, color: Bool) -> JetDriverVerbOutput {
     if binder.language == "dart" && request.companion == None {
         shared: jet_cli_diagnostic_copy("E2104")
-        output := jet_cli_report_output("", "E2104", "`inspect bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load", shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
+        ^output: jet_cli_report_output("", "E2104", "`inspect bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load", shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
         output.stderr = "{output.stderr}{jet_cli_foreign_usage(binder)}"
         return output
     }
@@ -306,14 +306,14 @@ jet_cli_foreign_bind_request: fn(binder: JetCLIForeignBinder, request: JetCLIFor
     }
     lib: jet_cli_foreign_lib(binder, request)
     // The C++ binder reads the header itself.
-    source := ""
+    ^source: ""
     if binder.language != "cpp" {
         source = cli_files.read(request.path) ?? return jet_cli_foreign_fail(binder, request.path, "{binder.input} could not be read ({jet_cli_io_error_text(err)})", color)
     }
     if binder.language == "js" && request.companion == None {
         return jet_cli_foreign_fail(binder, request.path, "the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`", color)
     }
-    copybook := ""
+    ^copybook: ""
     if binder.language == "cobol" && request.companion == .Val(copybook_path) {
         copybook = cli_files.read(copybook_path) ?? return jet_cli_foreign_fail(binder, copybook_path, "the copybook could not be read ({jet_cli_io_error_text(err)})", color)
     }
@@ -369,9 +369,9 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
         }
         "fortran" -> {
             result: pkg_fortran_bind(path, source, lib, cache)
-            stdout := "Bound {jet_cli_foreign_count(result.bound.len(), "ISO_C_BINDING routine")} from `{path}` → {out}\n"
+            ^stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "ISO_C_BINDING routine")} from `{path}` → {out}\n"
             loop layout in result.layouts {
-                extents := [String]{}
+                ^extents: [String]{}
                 loop extent in layout.extents -> extents.push("{extent}")
                 stdout = "{stdout}  Layout: {layout.routine}.{layout.parameter} {layout.order} {extents.join("x")}\n"
             }
@@ -380,7 +380,7 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
         "cobol" -> {
             copybook_path: request.companion ?? ""
             result: pkg_cobol_bind(path, source, copybook_path, copybook, lib, cache)
-            stdout := "Bound GnuCOBOL program `{result.program}` and {result.layout.width}-byte copybook `{result.layout.name}` → {out}\n"
+            ^stdout: "Bound GnuCOBOL program `{result.program}` and {result.layout.width}-byte copybook `{result.layout.name}` → {out}\n"
             loop field in result.layout.fields {
                 stdout = "{stdout}  Layout: {field.name} offset={field.offset} width={field.width} type={field.kind.jet_type()}\n"
             }

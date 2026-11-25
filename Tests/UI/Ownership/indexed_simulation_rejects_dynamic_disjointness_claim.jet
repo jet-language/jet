@@ -3,14 +3,14 @@ Particle: struct {
 }
 
 update_pair: fn(particles: ^[Particle], left_index: Int, right_index: Int) {
-    left: ^particles[left_index]
-    right: ^particles[right_index]
+    left: particles[left_index].in_place()
+    right: particles[right_index].in_place()
     left.position += 1
     right.position += 1
 }
 
 run: fn() {
-    particles := [Particle]{
+    ^particles: [Particle]{
         Particle{position: 10},
         Particle{position: 20},
     }

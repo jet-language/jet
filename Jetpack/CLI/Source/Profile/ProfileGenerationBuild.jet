@@ -131,10 +131,10 @@ cli_package_profile_owner: fn(project_dir: String) -> String Never! {
 // Realize every package fact, project the chosen outputs into a staged
 // generation root, record and root its lock, and publish the generation.
 cli_build_package_generation: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
-    realized := [RealizedProfilePackage]{}
+    ^realized: [RealizedProfilePackage]{}
     // Every realized lease is released whether or not the build succeeded.
-    generation := 0
-    failure := CLIError?{None}
+    ^generation: 0
+    ^failure: CLIError?{None}
     if cli_build_package_generation_body(verification, cache, theme, parsed, project_dir, plan, realized) == {
         .Ok(built) -> { generation = built }
         .Err(error) -> failure = Val(error)
@@ -156,13 +156,13 @@ cli_build_package_generation_body: fn(verification: StoreVerification, cache: ^W
     rootfs: files.join(generation_dir, PACKAGE_PROFILE_ROOTFS_DIR)
     roots: pkg_resolve_roots()
     table: cli_cwd_table(cache)
-    name_width := 1
+    ^name_width: 1
     loop package in plan.packages {
         if package.target.len() > name_width -> name_width = package.target.len()
     }
     loop package in plan.packages {
         spec: cli_package_realization_spec(package, table)
-        live := LiveRegion?{None}
+        ^live: LiveRegion?{None}
         outcome: cli_realize_ref_outcome(verification, theme, roots, parsed.flags, table, spec, name_width, RowStyle.Ledger, live, RealizeScope.UserProfile)
         if outcome == {
             .Realized(entry, _, _, lease) -> {
@@ -183,10 +183,10 @@ cli_build_package_generation_body: fn(verification: StoreVerification, cache: ^W
         }
         realized[index].nodes = cli_collect_output_nodes(realized[index].lease, package.raw)
     }
-    groups := [String:[PackageOutputNode]]{}
+    ^groups: [String:[PackageOutputNode]]{}
     loop package in realized {
         loop node in package.nodes {
-            contenders := groups.get(node.path) ?? [PackageOutputNode]{}
+            ^contenders: groups.get(node.path) ?? [PackageOutputNode]{}
             contenders.push(node.copy())
             groups[node.path] = contenders
         }
@@ -196,7 +196,7 @@ cli_build_package_generation_body: fn(verification: StoreVerification, cache: ^W
     cli_copy_package_projection(rootfs, selected, realized)
     loop package in realized -> package.lease.validate()
     metadata: cli_format_package_generation_metadata(generation, plan, realized, groups, roots, rootfs)
-    target_hashes := [String]{}
+    ^target_hashes: [String]{}
     loop package in realized -> target_hashes.push(package.entry.envelope.output_hash)
     targets: cli_sorted_unique(target_hashes)
     witness: cli_profile_generation_witness(metadata, targets)
@@ -230,7 +230,7 @@ cli_package_realization_spec: fn(package: PackageProfileFact, table: SourceTable
     source: if package.source == DEFAULT_SOURCE -> REF_SOURCE_JETPACK else -> package.source
     raw: if package.source == REF_SOURCE_PATH -> target else -> "{target}{REF_PROVIDER_AT}{source}"
     spec: RefSpec.classify_in(raw, table) ?? return Err(CLIError.ProviderFacts("unsupported profile ref: {err:Debug}"))
-    default_alias := String?{None}
+    ^default_alias: String?{None}
     if facts_reference.cut_last(REF_PROVIDER_AT) == .Val(halves) {
         if halves.after == DEFAULT_SOURCE {
             default_alias = Val("{halves.before}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}")
@@ -253,14 +253,14 @@ cli_choose_output_nodes: fn(plan: PackageProfilePlan, groups: [String:[PackageOu
             return Err(CLIError.ProviderFacts("collision selection for `{path}` names `{provider}`, but contenders are {cli_contender_text(nodes)}"))
         }
     }
-    selected := [String:PackageOutputNode]{}
-    paths := groups.keys().to_list()
+    ^selected: [String:PackageOutputNode]{}
+    ^paths: groups.keys().to_list()
     paths.sort()
     loop path in paths {
         nodes: groups[path]
-        kinds := [String]{}
-        digests := [String]{}
-        has_symlink := false
+        ^kinds: [String]{}
+        ^digests: [String]{}
+        ^has_symlink: false
         loop node in nodes {
             if !kinds.contains(node.kind.as_str()) -> kinds.push(node.kind.as_str())
             if node.kind != SealRootKind.Directory && !digests.contains(node.digest) {
@@ -278,7 +278,7 @@ cli_choose_output_nodes: fn(plan: PackageProfilePlan, groups: [String:[PackageOu
         if digests.len() > 1 && provider == None {
             return Err(CLIError.ProviderFacts("unresolved package collision at `{path}`; contenders: {cli_contender_text(nodes)}"))
         }
-        chosen := nodes[0]
+        ^chosen: nodes[0]
         if provider == .Val(named) {
             cli_ensure_collision_selection_current(previous, path, named, nodes)
             loop node in nodes {
@@ -301,13 +301,13 @@ cli_nodes_include_package: fn(nodes: [PackageOutputNode], package: String) -> Bo
 }
 
 cli_sorted_map_keys: fn(values: [String:String]) -> [String] Never! {
-    keys := values.keys().to_list()
+    ^keys: values.keys().to_list()
     keys.sort()
     keys
 }
 
 cli_sorted_contenders: fn(contenders: [PackageCollisionContender]) -> [PackageCollisionContender] Never! {
-    sorted := contenders
+    ^sorted: contenders
     sorted.sort_by(fn(left: PackageCollisionContender, right: PackageCollisionContender) { (left.provider <=> right.provider).then(left.kind <=> right.kind).then(left.digest <=> right.digest) })
     sorted
 }
@@ -323,7 +323,7 @@ cli_ensure_collision_selection_current: fn(previous: [PackageGenerationRecord], 
     if previous_provider != provider {
         return
     }
-    current := [PackageCollisionContender]{}
+    ^current: [PackageCollisionContender]{}
     loop node in nodes {
         current.push(PackageCollisionContender{provider: node.package, kind: node.kind.as_str(), digest: node.digest})
     }
@@ -339,7 +339,7 @@ cli_package_collision_record: fn(metadata: String, path: String) -> PackageColli
     collisions: pkg_json_object(collisions_value) ?? return Ok(None)
     record_value: collisions.get(path) ?? return Ok(None)
     record: pkg_json_object(record_value) ?? return Err(CLIError.Other("profile collision record is not an object"))
-    selected := String?{None}
+    ^selected: String?{None}
     if record.get("selected") == .Val(value) {
         if value != Dyn.Null {
             text: pkg_json_text(value) ?? return Err(CLIError.Other(PKG_JSON_NOT_STRING))
@@ -348,7 +348,7 @@ cli_package_collision_record: fn(metadata: String, path: String) -> PackageColli
     }
     contender_values: record.get("contenders") ?? return Err(CLIError.Other("profile collision record lacks contenders"))
     items: pkg_json_array(contender_values) ?? return Err(CLIError.Other(PKG_JSON_NOT_ARRAY))
-    contenders := [PackageCollisionContender]{}
+    ^contenders: [PackageCollisionContender]{}
     loop item in items {
         contender: pkg_json_object(item) ?? return Err(CLIError.Other(PKG_JSON_NOT_OBJECT))
         provider: cli_required_json_text(contender, "provider", "profile collision contender lacks provider")
@@ -368,7 +368,7 @@ cli_required_json_text: fn(object: [String:Dyn], key: String, missing: String) -
 }
 
 cli_contender_text: fn(nodes: [PackageOutputNode]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop node in nodes -> parts.push("{node.package} [{node.kind.as_str()} {node.digest}]")
     parts.join(", ")
 }
@@ -376,7 +376,7 @@ cli_contender_text: fn(nodes: [PackageOutputNode]) -> String Never! {
 // The generation lock: plan identity, root hash, every collision with more
 // than one contender (or an explicit selection), and each realized package.
 cli_format_package_generation_metadata: fn(generation: Int, plan: PackageProfilePlan, realized: [RealizedProfilePackage], groups: [String:[PackageOutputNode]], roots: HangarRoots, rootfs: String) -[FS, Env]> String CLIError! {
-    packages := [Dyn]{}
+    ^packages: [Dyn]{}
     loop package in realized {
         fact: package.fact
         packages.push(
@@ -397,13 +397,13 @@ cli_format_package_generation_metadata: fn(generation: Int, plan: PackageProfile
             ),
         )
     }
-    collisions := [{key: String, value: Dyn}]{}
-    paths := groups.keys().to_list()
+    ^collisions: [{key: String, value: Dyn}]{}
+    ^paths: groups.keys().to_list()
     paths.sort()
     loop path in paths {
         nodes: groups[path]
         if nodes.len() <= 1 && !plan.collisions.has_key(path) -> next
-        contenders := [Dyn]{}
+        ^contenders: [Dyn]{}
         loop node in nodes {
             contenders.push(Dyn.Object(["provider": Dyn.Text(node.package), "kind": Dyn.Text(node.kind.as_str()), "digest": Dyn.Text(node.digest)]))
         }
@@ -434,13 +434,13 @@ cli_collect_output_nodes: fn(lease: ^CacheLease, package: String) -[FS]> [Packag
     if !info.is_dir || info.is_symlink {
         return Err(CLIError.ProviderFacts("realized `{package}` output is not a real directory"))
     }
-    nodes := [PackageOutputNode]{}
+    ^nodes: [PackageOutputNode]{}
     cli_collect_output_nodes_inner(lease, "", package, nodes)
     Ok(nodes)
 }
 
 cli_collect_output_nodes_inner: fn(lease: ^CacheLease, prefix: String, package: String, nodes: ^[PackageOutputNode]) -[FS]> CLIError! {
-    names := [String]{}
+    ^names: [String]{}
     loop entry in lease.list_output(prefix) -> names.push(entry.name)
     names.sort()
     loop name in names {
@@ -464,8 +464,8 @@ cli_collect_output_nodes_inner: fn(lease: ^CacheLease, prefix: String, package: 
                 cli_collect_output_nodes_inner(lease, path, package, nodes)
             }
             info.is_file -> {
-                input := lease.open_output(path)
-                hasher := StreamingSHA256.new()
+                ^input: lease.open_output(path)
+                ^hasher: StreamingSHA256.new()
                 loop {
                     chunk: input.read_bytes(65536)
                     if chunk.len() == 0 -> break
@@ -483,7 +483,7 @@ cli_collect_output_nodes_inner: fn(lease: ^CacheLease, prefix: String, package: 
 // Materialize the selected nodes under the generation root, in path order.
 // File bytes stream from the handle each package's lease holds.
 cli_copy_package_projection: fn(root: String, selected: [String:PackageOutputNode], realized: [RealizedProfilePackage]) -[FS, Env]> CLIError! {
-    paths := selected.keys().to_list()
+    ^paths: selected.keys().to_list()
     paths.sort()
     loop relative in paths {
         node: selected[relative]
@@ -498,7 +498,7 @@ cli_copy_package_projection: fn(root: String, selected: [String:PackageOutputNod
             }
             .File -> {
                 cli_ensure_projection_parent(destination)
-                owner := Int?{None}
+                ^owner: Int?{None}
                 loop index in 0..<realized.len() {
                     if owner == None && realized[index].fact.raw == node.package {
                         owner = Val(index)
@@ -540,7 +540,7 @@ cli_copy_projection_file: fn(lease: CacheLease, relative: String, destination: S
     if info.is_symlink || !info.is_file {
         return Err(CLIError.Other("profile projection source is not a regular file"))
     }
-    input := lease.open_output(relative)
+    ^input: lease.open_output(relative)
     proof: store_reuse_copy_open_profile_file(input, destination)
     if proof.digest != expected {
         return Err(CLIError.Other("profile projection source changed while copying"))
@@ -549,7 +549,7 @@ cli_copy_projection_file: fn(lease: CacheLease, relative: String, destination: S
 
 // Remove every abandoned `.generation-<n>.partial` stage.
 cli_cleanup_package_generation_stages: fn(directory: String) -[FS]> CLIError! {
-    removed := false
+    ^removed: false
     loop entry in files.list_dir(directory) {
         inner: cli_strip_prefix(entry.name, PACKAGE_PROFILE_STAGE_PREFIX) ?? next
         if !inner.ends_with(PACKAGE_PROFILE_STAGE_SUFFIX) -> next
@@ -568,7 +568,7 @@ cli_cleanup_package_generation_stages: fn(directory: String) -[FS]> CLIError! {
 cli_next_package_generation: fn(state: String) -[FS]> Int CLIError! {
     directory: cli_package_generations_dir(state)
     files.create_dir_all(directory)
-    maximum := 0
+    ^maximum: 0
     loop entry in files.list_dir(directory) {
         info: files.stat(entry.path)
         if info.is_symlink || !info.is_dir -> next
@@ -587,7 +587,7 @@ cli_read_package_generations: fn(verification: StoreVerification, state: String)
         return Err(CLIError.Other("profile generations path is not a real directory"))
     }
     cli_cleanup_package_generation_stages(directory)
-    numbers := [Int]{}
+    ^numbers: [Int]{}
     loop entry in files.list_dir(directory) {
         entry_info: files.stat(entry.path)
         if entry_info.is_symlink || !entry_info.is_dir -> next
@@ -595,7 +595,7 @@ cli_read_package_generations: fn(verification: StoreVerification, state: String)
         numbers.push(generation)
     }
     numbers.sort()
-    records := [PackageGenerationRecord]{}
+    ^records: [PackageGenerationRecord]{}
     loop generation in numbers {
         complete: files.join(files.join(directory, "{generation}"), PACKAGE_PROFILE_COMPLETE_FILE)
         marker: cli_stat_optional(complete) ?? next
@@ -646,7 +646,7 @@ cli_read_package_generation_record: fn(verification: StoreVerification, state: S
     }
     packages_value: object.get("packages") ?? return Err(CLIError.Other("profile generation metadata lacks packages"))
     packages: pkg_json_array(packages_value) ?? return Err(CLIError.Other(PKG_JSON_NOT_ARRAY))
-    targets := [String]{}
+    ^targets: [String]{}
     loop package_value in packages {
         package: pkg_json_object(package_value) ?? return Err(CLIError.Other(PKG_JSON_NOT_OBJECT))
         targets.push(cli_validate_package_generation_entry(package))
@@ -768,7 +768,7 @@ cli_activate_package_generation: fn(verification: StoreVerification, project_dir
 // not a package generation.
 cli_dev_shell_projection: fn(verification: StoreVerification, project_dir: String, environment: EnvironmentFacts) -[FS, Env, Time]> String? CLIError! {
     name: "dev"
-    declared := false
+    ^declared: false
     loop profile in environment.package_profiles {
         if profile.name == name -> declared = true
     }

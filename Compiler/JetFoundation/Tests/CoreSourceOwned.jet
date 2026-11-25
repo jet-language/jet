@@ -23,7 +23,7 @@ core_source_owned_require: fn(ok: Bool, message: String) Never! {
     // Compiler/JetFoundation/Tests/CoreDeclarations.jet prove a source-owned
     // row keeps its declaration facts.
     row: CoreCallRecord{module_name: "core.ui.host", member: "shortcut", receiver_types: [String]{}, signature: CoreCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, false}}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}, aot_direct: false, authority: None}
-    original := row.copy()
+    ^original: row.copy()
     original.symbol = CoreCallSymbol.Prelude{name: "jet_ui_host_shortcut"}
     original.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}
     original.aot_direct = true
@@ -35,7 +35,7 @@ core_source_owned_require: fn(ok: Bool, message: String) Never! {
         },
         "default source export",
     )
-    selected := row.copy()
+    ^selected: row.copy()
     selected.source_target = Val("__shortcut_entry")
     core_source_owned_require(
         if core_call_source_member(selected) == {
@@ -44,7 +44,7 @@ core_source_owned_require: fn(ok: Bool, message: String) Never! {
         },
         "normalized source export",
     )
-    host_selected := original.copy()
+    ^host_selected: original.copy()
     host_selected.source_target = Val("__not_a_host_route")
     core_source_owned_require(core_call_source_member(host_selected) == None, "non-source-owned row unchanged")
     rows: [CoreCallRecord]{row}

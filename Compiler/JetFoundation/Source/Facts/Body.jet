@@ -48,14 +48,12 @@ body_tree_new: fn() -> BodyTree Never! {
 // so each row list moves to a buffer of exactly its length and the symbol
 // keys drop their slots (symbol_local_keys_seal).
 body_tree_sealed: fn(tree: ^^BodyTree, nodes_fitted: Bool{false}, stmts_fitted: Bool{false}) -> BodyTree Never! {
-    sealed := tree
+    ^sealed: tree
     if !nodes_fitted {
         sealed.nodes = body_rows_fitted(sealed.nodes.move())
         sealed.expr_types = body_rows_fitted(sealed.expr_types.move())
     }
-    if !stmts_fitted {
-        sealed.stmts = body_rows_fitted(sealed.stmts.move())
-    }
+    if !stmts_fitted -> sealed.stmts = body_rows_fitted(sealed.stmts.move())
     sealed.symbols.bytes = body_rows_fitted(sealed.symbols.bytes.move())
     sealed.symbols.ends = body_rows_fitted(sealed.symbols.ends.move())
     sealed.symbols.hashes = [Int]{}
@@ -67,7 +65,7 @@ body_tree_sealed: fn(tree: ^^BodyTree, nodes_fitted: Bool{false}, stmts_fitted: 
 // exactly the room asked for. `rows` itself when the buffer can't be had.
 body_rows_fitted: fn<T>(rows: ^^[T]) -> [T] Never! {
     if rows.len() == 0 -> return rows
-    fitted := [T]{}
+    ^fitted: [T]{}
     fitted.try_reserve(rows.len()) ?? return rows
     fitted.extend(rows.move())
     fitted
@@ -88,8 +86,8 @@ body_node_index: fn(tree: BodyTree, id: Int) -> Int Never! {
             }
         }
     }
-    low := 0
-    high := count
+    ^low: 0
+    ^high: count
     loop low < high {
         middle: (low + high) >> 1
         if tree.nodes[middle].id < id -> low = middle + 1 else -> high = middle
@@ -99,12 +97,10 @@ body_node_index: fn(tree: BodyTree, id: Int) -> Int Never! {
 }
 
 // The row of node `id`.
-body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
-    tree.nodes[body_node_index(tree, id)]
-}
+body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! { tree.nodes[body_node_index(tree, id)] }
 
 #Test("a node and its type row are found by id across gaps in the ids") {
-    tree := body_tree_new()
+    ^tree: body_tree_new()
     ids: [Int]{-9, -5, 3, 4, 5, 9, 10, 11}
     loop (index, id) in ids {
         tree.nodes.push(BodyNode{id: id, kind: NodeKind.IntLit{value: index, width: None}, span: Span{start: index, end: index + 1}})
@@ -120,7 +116,7 @@ body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
 }
 
 #Test("a sealed tree keeps its rows and finds its nodes and symbol keys") {
-    tree := body_tree_new()
+    ^tree: body_tree_new()
     local: symbol_local_keys_intern(tree.symbols, "local:m:f:x")
     loop id in 0..<9 {
         tree.nodes.push(BodyNode{id: id, kind: NodeKind.IntLit{value: id, width: None}, span: Span{start: id, end: id + 1}})
@@ -147,17 +143,21 @@ body_type_id: fn(tree: BodyTree, id: Int) -> TypeID Never! {
 // and every TypeId handle a compile-time literal holds
 // (comptime_value_remap_types).
 body_tree_remap_types: fn(tree: ^BodyTree, remap: InternerRemap) Never! {
-    if remap.types.len() == 0 -> return
+    if remap.types.len() == 0 {
+        return
+    }
     mark: remap.marks.types
     loop i in 0..<tree.expr_types.len() {
         row_id: Int{tree.expr_types[i].ty.id}
-        if row_id >= mark {
-            tree.expr_types[i].ty = remap.types[row_id - mark]
-        }
+        if row_id >= mark -> tree.expr_types[i].ty = remap.types[row_id - mark]
     }
     loop i in 0..<tree.nodes.len() {
-        if tree.nodes[i].kind == .CtLit(value) && !comptime_value_holds_types_from(value, mark) -> next
-        if ^tree.nodes[i].kind == .CtLit(value) -> comptime_value_remap_types(value, remap)
+        if tree.nodes[i].kind == .CtLit(value) && !comptime_value_holds_types_from(value, mark) {
+            next
+        }
+        if tree.nodes[i].kind.in_place() == .CtLit(value) {
+            comptime_value_remap_types(value, remap)
+        }
     }
 }
 

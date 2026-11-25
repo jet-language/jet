@@ -41,16 +41,16 @@ skip: fn(n: Int) Never! {}
 tally: fn(n: Int) -[IO]> Never! { print("tally {n}") }
 
 run: fn() {
-    quiet := Hook.recording()
+    ^quiet: Hook.recording()
     walk("root", quiet)
     print("quiet events: {quiet.events.len()}")
 
-    loud := Hook{events: [String]{}, react: announce}
+    ^loud: Hook{events: [String]{}, react: announce}
     walk("tree", loud)
     print("loud events: {loud.events.len()}")
 
     label: "seen"
-    captured := Hook{events: [String]{}, react: fn(path: String, stage: Stage) -[IO]> { print("{label} {path}") }}
+    ^captured: Hook{events: [String]{}, react: fn(path: String, stage: Stage) -[IO]> { print("{label} {path}") }}
     walk("lambda", captured)
     print("captured events: {captured.events.len()}")
 

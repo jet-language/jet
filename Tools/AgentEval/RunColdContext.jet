@@ -255,7 +255,7 @@ items: fn(value: Dyn?, path: String) -> [Dyn]? {
 }
 
 strings: fn(value: Dyn?, path: String) -> [String]? {
-    out := [String]{}
+    ^out: [String]{}
     loop item in items(value, path) ?? return None {
         if item == .Text(found) -> out.push(found) else -> return None
     }
@@ -283,7 +283,7 @@ truthy: fn(value: Dyn?) -> Bool {
 // What JavaScript's String() shows for a JSON value: an array its items
 // joined by commas (null as nothing), an object `[object Object]`.
 shown: fn(value: Dyn?) -> String {
-    found := value ?? return "undefined"
+    ^found: value ?? return "undefined"
     if found == .Text(written) -> return written
     if found == .Object(_) -> return "[object Object]"
     if found == .Array(list) {
@@ -329,7 +329,7 @@ js_numbers: fn(value: Dyn) -> Dyn {
     }
     if value == .Array(list) -> return Dyn.Array(list.map(fn(item) { js_numbers(item) }))
     if value == .Object(entries) {
-        out := Dyn.object()
+        ^out: Dyn.object()
         loop entry in entries -> out[entry.key] = js_numbers(entry.value)
         return out
     }
@@ -349,7 +349,7 @@ repo_root: fn() -> String {
 
 parse_args: fn(args: [String], repo: String) -> Options Failure! {
     // Each path option's value: its default until the arguments name one.
-    paths := [String:String]{
+    ^paths: [String:String]{
         "--config": "{repo}/Tools/AgentEval/adapters.json",
         "--capsule": "{repo}/Tools/AgentEval/jet-context-capsule.md",
         "--llms": "",
@@ -358,11 +358,11 @@ parse_args: fn(args: [String], repo: String) -> Options Failure! {
         "--output": "{repo}/Docs/Audits/cold-agent-jet-scoreboard.json",
         "--jet-bin": "",
     }
-    mode := "both"
-    record := false
-    check := false
-    help := false
-    i := 0
+    ^mode: "both"
+    ^record: false
+    ^check: false
+    ^help: false
+    ^i: 0
     loop i < args.len() {
         token: args[i]
         i += 1
@@ -406,7 +406,7 @@ rel_path: fn(file: String, repo: String) -> String {
 
 // The path of `file` with the size and sha256 of `bytes`.
 described: fn(file: String, bytes: [U8], repo: String) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["path"] = Dyn.Text(rel_path(file, repo))
     out["bytes"] = bytes.len()
     out["sha256"] = Dyn.Text(crypto.sha256(bytes).hex())
@@ -422,7 +422,7 @@ descriptor: fn(file: String, repo: String) -> Dyn Failure! {
 // character boundary.
 build_control: fn(source: String, budget: Int) -> String Failure! {
     bytes: source.bytes()
-    end := if bytes.len() < budget -> bytes.len() else -> budget
+    ^end: if bytes.len() < budget -> bytes.len() else -> budget
     loop end > 0 && end < bytes.len() && bytes[end] >= 0x80 && bytes[end] < 0xC0 -> end -= 1
     if end != budget && end != bytes.len() {
         usage("control digest could not preserve its byte budget")
@@ -473,7 +473,7 @@ validate_task: fn(task: Dyn) -> Task Failure! {
     args: need(strings(task, "args"), "{id}: args must be a string array")
     // The expected stdout an HTTP task's descriptor hashes is none.
     expected: if mode == "batch" -> need(str(task, "expected_stdout"), "{id}: batch task needs expected_stdout") else -> ""
-    out := Task{id: id, mode: mode, prompt: prompt, args: args, stdin: str(task, "stdin"), expected: expected, files: [], ready_path: "", probes: [], spec: task.copy()}
+    ^out: Task{id: id, mode: mode, prompt: prompt, args: args, stdin: str(task, "stdin"), expected: expected, files: [], ready_path: "", probes: [], spec: task.copy()}
     if member(task, "files") == .Val(given) {
         if given == .Object(entries) {
             loop entry in entries {
@@ -505,7 +505,7 @@ load_tasks: fn(config: Dyn) -> [Task] Failure! {
     if str(config, "schema") != Val("jet.cold-agent.tasks.v1") {
         usage("task fixture has the wrong schema")
     }
-    out := [Task]{}
+    ^out: [Task]{}
     loop item in need(items(config, "tasks"), "task fixture has the wrong schema") {
         task: validate_task(item)
         if out.map(fn(seen: Task) { seen.id }).contains(task.id) {
@@ -529,7 +529,7 @@ load_adapters: fn(config: Dyn) -> [Adapter] Failure! {
     if !unique.contains("openai") || !unique.contains("anthropic") {
         usage("adapter config must require the openai and anthropic families")
     }
-    out := [Adapter]{}
+    ^out: [Adapter]{}
     loop spec in specs {
         id: need(str(spec, "id"), "each adapter needs id and family")
         family: need(str(spec, "family"), "each adapter needs id and family")
@@ -566,7 +566,7 @@ load_adapters: fn(config: Dyn) -> [Adapter] Failure! {
 // ---- adapters ----
 
 environment: fn() -> [String:String] {
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop name in sys.vars() ?? [] -> out[name] = sys.get(name) ?? ""
     out
 }
@@ -599,7 +599,7 @@ command_from_env: fn(adapter: Adapter, env: [String:String]) -> [String] Failure
 }
 
 preflight: fn(adapters: [Adapter], env: [String:String]) -> Preflight Failure! {
-    out := Preflight{resolved: [], blocked: []}
+    ^out: Preflight{resolved: [], blocked: []}
     loop adapter in adapters {
         transport: selected_transport(adapter, env)
         if transport == "command" {
@@ -614,7 +614,7 @@ preflight: fn(adapters: [Adapter], env: [String:String]) -> Preflight Failure! {
             api: member(adapter.spec, "api")
             if !truthy(api) -> usage("{adapter.id}: API transport is not configured")
             // Each variable as String() names it; the message joins the names as an array does.
-            missing := [String]{}
+            ^missing: [String]{}
             loop field in ["endpoint_env", "api_key_env", "model_env", "version_env"] {
                 name: member(api, field)
                 if field == "version_env" && !truthy(name) -> next
@@ -676,7 +676,7 @@ jet_prefix: fn(jet_bin: String, repo: String) -> [String] {
 // ---- cases ----
 
 base_row: fn(adapter: Adapter, context: String, task: Task, source: String?) -> Dyn {
-    row := Dyn.object()
+    ^row: Dyn.object()
     row["adapter"] = adapter.id
     row["family"] = adapter.family
     row["context"] = context
@@ -741,7 +741,7 @@ free_port: fn() -> String {
 
 // The probe's answer: status 0 when there is none.
 request: fn(port: String, method: String, path: String, body: String?, timeout_ms: Int) -> {status: Int, body: String, content_type: String} {
-    req := http.request(method, "http://127.0.0.1:{port}{path}").timeout(timeout_ms)
+    ^req: http.request(method, "http://127.0.0.1:{port}{path}").timeout(timeout_ms)
     if body == .Val(given) -> req = req.header("content-type", "text/plain").body(given)
     answer: req.send() ?? return {status: 0, body: "", content_type: ""}
     {status: answer.status(), body: answer.text(1048576) ?? "", content_type: answer.header("content-type") ?? ""}
@@ -768,13 +768,13 @@ run_http: fn(task: Task, dir: String, prefix: [String], row: ^Dyn) {
     if !(child.exited() ?? true) {
         child.terminate() ?? ()
         if !exits_within(child, 1000) -> child.kill() ?? ()
-        _ := child.wait() ?? return
+        ^_: child.wait() ?? return
     }
 }
 
 serve_case: fn(task: Task, port: String, child: ProcessChild, row: ^Dyn) {
     watch: time.instant()
-    ready := false
+    ^ready: false
     loop !ready && watch.elapsed().ns < 60000000000 {
         if child.exited() ?? true -> break
         answer: request(port, "GET", task.ready_path, None, 500)
@@ -801,7 +801,7 @@ serve_case: fn(task: Task, port: String, child: ProcessChild, row: ^Dyn) {
 }
 
 run_case: fn(task: Task, adapter: Adapter, context: String, source: String, root: String, prefix: [String]) -> Dyn Failure! {
-    row := base_row(adapter, context, task, Val(source))
+    ^row: base_row(adapter, context, task, Val(source))
     dir: scratch_dir(root, "case-")
     compiled: compile_case(task, source, dir, prefix, row) ?? {
         files.remove_all(dir) ?? ()
@@ -817,7 +817,7 @@ run_case: fn(task: Task, adapter: Adapter, context: String, source: String, root
 }
 
 scratch_dir: fn(root: String, prefix: String) -> String Failure! {
-    n := 0
+    ^n: 0
     loop files.exists("{root}/{prefix}{sys.pid()}-{n}") -> n += 1
     dir: "{root}/{prefix}{sys.pid()}-{n}"
     files.create_dir_all(dir) ?? return Err(usage_error("{err}"))
@@ -827,7 +827,7 @@ scratch_dir: fn(root: String, prefix: String) -> String Failure! {
 // The model's Jet source: bare, in a JSON `source` field, or fenced; None
 // when it has no entry point or keeps a fence open.
 extract_source: fn(answer: String) -> String? {
-    value := answer.trim()
+    ^value: answer.trim()
     if value.starts_with("{{") && str(json.parse(value) ?? Dyn.Null, "source") == .Val(source) {
         value = source.trim()
     }
@@ -841,7 +841,7 @@ extract_source: fn(answer: String) -> String? {
 
 call_command: fn(adapter: Adapter, prompt: String, task: String, context: String, env: [String:String], cwd: String) -> String Failure! {
     command: command_from_env(adapter, env)
-    request := Dyn.object()
+    ^request: Dyn.object()
     request["schema"] = "jet.cold-agent.request.v1"
     request["adapter"] = adapter.id
     request["family"] = adapter.family
@@ -856,10 +856,10 @@ call_command: fn(adapter: Adapter, prompt: String, task: String, context: String
 }
 
 call_api: fn(adapter: Adapter, prompt: String, env: [String:String]) -> String Failure! {
-    message := Dyn.object()
+    ^message: Dyn.object()
     message["role"] = "user"
     message["content"] = prompt
-    body := Dyn.object()
+    ^body: Dyn.object()
     body["model"] = Dyn.Text(setting(adapter, env, "model_env"))
     body["messages"] = [message]
     body["temperature"] = 0
@@ -923,11 +923,11 @@ score: fn(row: Dyn, key: String) -> Int { integer(row, key) ?? -1 }
 ones: fn(rows: [Dyn], key: String) -> Int { rows.filter(fn(row) { score(row, key) == 1 }).len() }
 
 summarize: fn(rows: [Dyn]) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     loop context in ["capsule", "control"] {
         wanted: Val(context.copy())
         selected: rows.filter(fn(row) { str(row, "context") == wanted })
-        entry := Dyn.object()
+        ^entry: Dyn.object()
         entry["cases"] = selected.len()
         entry["passes"] = Dyn.Int(ones(selected, "score"))
         entry["compile_passes"] = Dyn.Int(ones(selected, "compile_score"))
@@ -943,7 +943,7 @@ row_key: fn(row: Dyn) -> String {
 }
 
 task_descriptor: fn(task: Task) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["id"] = task.id
     if member(task.spec, "domain") == .Val(domain) -> out["domain"] = domain
     out["mode"] = task.mode
@@ -953,7 +953,7 @@ task_descriptor: fn(task: Task) -> Dyn {
 }
 
 adapter_descriptor: fn(r: Resolved, env: [String:String]) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["id"] = r.adapter.id
     out["family"] = r.adapter.family
     out["transport"] = r.transport
@@ -973,11 +973,11 @@ make_report: fn(inputs: Inputs, resolved: [Resolved], rows: [Dyn], modes: [Strin
     keys: combinatorics.unique(rows.map(fn(row) { row_key(row) }))
     complete: rows.len() == inputs.tasks.len() * resolved.len() * modes.len() && keys.len() == rows.len() && keys.all(fn(key: String) { expected.contains(key) })
     status: if blocked_reasons.len() > 0 || !complete -> "blocked" else -> "recorded"
-    sorted := rows.copy()
+    ^sorted: rows.copy()
     sorted.sort_by(fn(row: Dyn) { row_key(row) })
-    reasons := combinatorics.unique(blocked_reasons)
+    ^reasons: combinatorics.unique(blocked_reasons)
     reasons.sort()
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["schema"] = "jet.cold-agent.scoreboard.v1"
     out["status"] = status
     out["contexts"] = modes
@@ -1017,7 +1017,7 @@ baseline_from_report: fn(report: Dyn) -> Dyn Failure! {
     if rows.len() == 0 || (integer(report, "summary/capsule/cases") ?? -1) != rows.len() {
         usage("cannot record a baseline without a complete capsule matrix")
     }
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["schema"] = "jet.cold-agent.baseline.v1"
     out["status"] = "recorded"
     out["contexts"] = ["capsule"]
@@ -1029,7 +1029,7 @@ baseline_from_report: fn(report: Dyn) -> Dyn Failure! {
         }
     }
     out["rows"] = rows
-    summary := Dyn.object()
+    ^summary: Dyn.object()
     if member(report, "summary/capsule") == .Val(found) -> summary["capsule"] = found
     out["summary"] = summary
     Ok(out)
@@ -1070,7 +1070,7 @@ validate_baseline: fn(b: Dyn) Failure! {
     tasks: items(b, "tasks") ?? []
     if tasks.len() == 0 -> block("baseline has no task identity")
     // The families as a JavaScript Set holds them.
-    families := [String]{}
+    ^families: [String]{}
     loop (at, adapter) in adapters -> families.push(set_key(member(adapter, "family"), at))
     if !families.contains(set_key(Val(Dyn.Text("openai")), 0)) || !families.contains(set_key(Val(Dyn.Text("anthropic")), 0)) {
         block("baseline does not cover both required model families")
@@ -1082,7 +1082,7 @@ validate_baseline: fn(b: Dyn) Failure! {
     task_ids: unique_ids(tasks) ?? return Err(blocked("baseline task identities are invalid"))
     rows: items(b, "rows") ?? []
     if rows.len() != adapters.len() * tasks.len() -> block("baseline capsule matrix is incomplete")
-    seen := [String]{}
+    ^seen: [String]{}
     loop row in rows {
         adapter: str(row, "adapter")
         task: str(row, "task")
@@ -1102,7 +1102,7 @@ validate_baseline: fn(b: Dyn) Failure! {
 }
 
 unique_ids: fn(list: [Dyn]) -> [String]? {
-    ids := [String]{}
+    ^ids: [String]{}
     loop item in list {
         id: str(item, "id") ?? return None
         if ids.contains(id) -> return None
@@ -1151,13 +1151,13 @@ compare_baseline: fn(r: Dyn, b: Dyn) Failure! {
     }
     // The current rows by adapter and task, as a Map keeps them: a later row
     // replaces an earlier one of the same key.
-    by_key := [String:Dyn]{}
+    ^by_key: [String:Dyn]{}
     loop row in current {
         by_key["{shown(member(row, "adapter"))}{NUL}{shown(member(row, "task"))}"] = row.copy()
     }
     expected: items(b, "rows") ?? []
     if by_key.len() != expected.len() -> regress("current capsule matrix is incomplete")
-    failures := [String]{}
+    ^failures: [String]{}
     loop want in expected {
         adapter: shown(member(want, "adapter"))
         task: shown(member(want, "task"))
@@ -1193,7 +1193,7 @@ write_report: fn(file: String, report: Dyn) Failure! {
 prepare: fn(o: Options, repo: String) -> Inputs Failure! {
     capsule_text: read_text(o.capsule) ?? return Err(usage_error("{err}"))
     validate_capsule(capsule_text)
-    llms_text := ""
+    ^llms_text: ""
     if o.llms != "" -> llms_text = read_text(o.llms) ?? return Err(usage_error("{err}")) else {
         digest: run_command(jet_spec(jet_prefix(o.jet_bin, repo).concat(["inspect", "digest"]), repo), "")
         if digest.bad() -> usage("cannot generate control digest: {failure("digest", digest)}")
@@ -1206,16 +1206,16 @@ prepare: fn(o: Options, repo: String) -> Inputs Failure! {
     control_text: build_control(llms_text, budget)
     tasks: load_tasks(read_json(o.tasks))
     adapters: load_adapters(read_json(o.config))
-    control := Dyn.object()
+    ^control: Dyn.object()
     control["path"] = if o.llms == "" -> Dyn.Text("jet inspect digest") else -> Dyn.Text(rel_path(o.llms, repo))
     control["source_bytes"] = llms_text.bytes().len()
     control["source_sha256"] = Dyn.Text(crypto.sha256(llms_text.bytes()).hex())
     control["context_budget_bytes"] = budget
     control["context_sha256"] = Dyn.Text(crypto.sha256(control_text.bytes()).hex())
-    fixtures := Dyn.object()
+    ^fixtures: Dyn.object()
     fixtures["task_file"] = descriptor(o.tasks, repo)
     fixtures["adapter_file"] = descriptor(o.config, repo)
-    harness := descriptor("{repo}{TOOL}", repo)
+    ^harness: descriptor("{repo}{TOOL}", repo)
     harness["adapter_timeout_ms"] = TIMEOUT_MS
     // The capsule descriptor sizes and hashes the text as read, as the evaluation used it.
     capsule: described(o.capsule, capsule_text.bytes(), repo)
@@ -1240,8 +1240,8 @@ evaluate: fn(o: Options, repo: String) -> Int Failure! {
         loop reason in checked.blocked -> eprint("BLOCKED: {reason}")
         return Ok(78)
     }
-    rows := [Dyn]{}
-    reasons := [String]{}
+    ^rows: [Dyn]{}
+    ^reasons: [String]{}
     cases_root: scratch_root("JET_AGENT_EVAL_SCRATCH_DIR", "agent-eval") ?? return Err(usage_error("{err}"))
     adapter_root: scratch_root("JET_AGENT_EVAL_ADAPTER_SCRATCH_DIR", "agent-eval-adapters") ?? return Err(usage_error("{err}"))
     files.create_dir_all(cases_root) ?? return Err(usage_error("{err}"))
@@ -1257,7 +1257,7 @@ evaluate: fn(o: Options, repo: String) -> Int Failure! {
                     next
                 }
                 source: extract_source(answer) ?? {
-                    row := base_row(r.adapter, mode, task, None)
+                    ^row: base_row(r.adapter, mode, task, None)
                     row["error"] = "model-output"
                     rows.push(row)
                     next
@@ -1306,9 +1306,9 @@ cold_report: fn(score: Int) -> Dyn {
 // load_adapters orders the adapters by id.
 #Test("preflight stays blocked when neither provider path is configured") {
     config: read_json("{repo_root()}/Tools/AgentEval/adapters.json") ?? Dyn.Null
-    adapters := load_adapters(config) ?? [Adapter]{}
+    ^adapters: load_adapters(config) ?? [Adapter]{}
     loop i in 0..<adapters.len() {
-        command := (member(adapters[i].spec, "command") ?? Dyn.Null).copy()
+        ^command: (member(adapters[i].spec, "command") ?? Dyn.Null).copy()
         command["default_argv"] = Dyn.Null
         adapters[i].spec["command"] = command
         adapters[i].spec["default_transport"] = "command"
@@ -1322,7 +1322,7 @@ cold_report: fn(score: Int) -> Dyn {
     config: read_json("{repo_root()}/Tools/AgentEval/adapters.json") ?? Dyn.Null
     adapters: load_adapters(config) ?? [Adapter]{}
     result: preflight(adapters, [String:String]{}) ?? Preflight{resolved: [Resolved]{}, blocked: [String]{}}
-    families := [String]{}
+    ^families: [String]{}
     loop r in result.resolved -> families.push(r.adapter.family.copy())
     assert_eq(families.join(","), "anthropic,openai")
     assert_eq(result.blocked.len(), 0)
@@ -1358,14 +1358,14 @@ cold_report: fn(score: Int) -> Dyn {
 
 #Test("baseline comparison binds the task and adapter identities") {
     baseline: baseline_from_report(cold_report(1)) ?? Dyn.Null
-    changed := cold_report(1)
+    ^changed: cold_report(1)
     changed["tasks"] = json.parse("[{{\"id\": \"hello\", \"domain\": \"hello\", \"mode\": \"batch\", \"spec_sha256\": \"changed-task\", \"expected_sha256\": \"hello-output\"}}]") ?? Dyn.Null
     task: if compare_baseline(changed, baseline) == {
         .Ok(_) -> false
         .Err(failure) -> failure.kind == .Regression
     }
     assert(task)
-    adapter := cold_report(1)
+    ^adapter: cold_report(1)
     adapter["adapters"] = json.parse("[{{\"id\": \"anthropic\", \"family\": \"anthropic\", \"transport\": \"command\", \"command_sha256\": \"anthropic-command\"}}, {{\"id\": \"openai\", \"family\": \"openai\", \"transport\": \"api\", \"protocol\": \"openai-chat\", \"model\": \"different-stock-model\", \"endpoint_sha256\": \"openai-endpoint\"}}]") ?? Dyn.Null
     model: if compare_baseline(adapter, baseline) == {
         .Ok(_) -> false
@@ -1376,9 +1376,9 @@ cold_report: fn(score: Int) -> Dyn {
 
 #Test("a baseline needs the scoreboard's reproducibility metadata") {
     bare: js_numbers(json.parse("{{\"status\":\"recorded\",\"contexts\":[\"capsule\"],\"rows\":[{{\"context\":\"capsule\"}}],\"summary\":{{\"capsule\":{{\"cases\":1}}}}}}") ?? Dyn.Null)
-    reports := [bare]
+    ^reports: [bare]
     loop key in ["control", "fixtures", "harness", "adapters", "tasks", "required_families"] {
-        report := cold_report(1)
+        ^report: cold_report(1)
         report[key] = Dyn.Null
         reports.push(report)
     }
@@ -1410,7 +1410,7 @@ cold_report: fn(score: Int) -> Dyn {
 }
 
 #Test("control-only runs cannot become capsule baselines") {
-    control := cold_report(1)
+    ^control: cold_report(1)
     control["contexts"] = ["control"]
     control["rows"] = js_numbers(json.parse("[{{\"adapter\": \"anthropic\", \"family\": \"anthropic\", \"context\": \"control\", \"task\": \"hello\", \"compile_score\": 1, \"run_score\": 1, \"score\": 1}}]") ?? Dyn.Null)
     control["summary"] = js_numbers(json.parse("{{\"capsule\": {{\"cases\": 0, \"passes\": 0, \"compile_passes\": 0, \"run_passes\": 0, \"pass_rate\": null}}, \"control\": {{\"cases\": 2, \"passes\": 2, \"compile_passes\": 2, \"run_passes\": 2, \"pass_rate\": 1}}}}") ?? Dyn.Null)
@@ -1427,7 +1427,7 @@ cold_report: fn(score: Int) -> Dyn {
         .Err(failure) -> failure.kind == .Blocked
     }
     assert(unrecorded)
-    empty := baseline_from_report(cold_report(1)) ?? Dyn.Null
+    ^empty: baseline_from_report(cold_report(1)) ?? Dyn.Null
     empty["rows"] = Dyn.Array([Dyn]{})
     no_rows: if compare_baseline(cold_report(1), empty) == {
         .Ok(_) -> false

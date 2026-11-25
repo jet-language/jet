@@ -74,7 +74,7 @@ foundation_number_family: fn(name: String) -> Bool Never! {
 // `raw: builtin.FloatWord<…>`, in source order. A text with none stops the
 // build.
 foundation_number_family_rows: fn(text: String) -> [String] {
-    families := [String]{}
+    ^families: [String]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() - 1 {
         line: lines[index]
@@ -85,7 +85,9 @@ foundation_number_family_rows: fn(text: String) -> [String] {
             families.push(line.slice(0..<colon))
         }
     }
-    if families.len() == 0 -> build_time_refused("the text declares no number family `Name: struct<…> {{ raw: builtin.Word<…> }}`")
+    if families.len() == 0 {
+        build_time_refused("the text declares no number family `Name: struct<…> {{ raw: builtin.Word<…> }}`")
+    }
     families
 }
 
@@ -93,15 +95,11 @@ foundation_number_family_rows: fn(text: String) -> [String] {
 // number literal (`Unsigned<8>`, `IEEE<11, 52>`). None when one is a name,
 // as inside the family's own declaration (`Unsigned<bits>`).
 foundation_family_sizes: fn(args: [Type]) -> [Int]? Never! {
-    sizes := [Int]{}
+    ^sizes: [Int]{}
     loop arg in args {
         if {
-            arg == .Measure(measure) && measure == .Literal(_, value) -> {
-                sizes.push(value)
-            }
-            else -> {
-                return None
-            }
+            arg == .Measure(measure) && measure == .Literal(_, value) -> { sizes.push(value) }
+            else -> { return None }
         }
     }
     Val(sizes)
@@ -147,7 +145,7 @@ FOUNDATION_SIZE_ALIASES: #run foundation_size_alias_rows(embed_file("toolchain:C
 // family has, a name declared twice, or a text with none stops the build.
 foundation_size_alias_rows: fn(text: String) -> [FoundationSizeAlias] {
     families: foundation_number_family_rows(text)
-    rows := [FoundationSizeAlias]{}
+    ^rows: [FoundationSizeAlias]{}
     loop line in text.split("\n").to_list() {
         colon: line.find(": ")
         if colon <= 0 || line.starts_with(" ") || !line.ends_with(">") -> next
@@ -157,17 +155,21 @@ foundation_size_alias_rows: fn(text: String) -> [FoundationSizeAlias] {
         if open <= 0 -> next
         family: written.slice(0..<open)
         if !families.contains(family) -> next
-        sizes := [Int]{}
+        ^sizes: [Int]{}
         loop part in written.slice(open + 1..<written.len()).split(", ").to_list() {
             sizes.push(Int.parse(part) ?? build_time_refused("`{line}`: a size alias names its family at number sizes"))
         }
-        if foundation_family_type(family, sizes) == None -> build_time_refused("`{line}`: no family has that size")
+        if foundation_family_type(family, sizes) == None {
+            build_time_refused("`{line}`: no family has that size")
+        }
         loop row in rows {
             if row.name == name -> build_time_refused("`{name}` is declared as a size alias twice")
         }
         rows.push(FoundationSizeAlias{name: name, family: family, sizes: sizes})
     }
-    if rows.len() == 0 -> build_time_refused("the text declares no size alias `NAME: Family<sizes>`")
+    if rows.len() == 0 {
+        build_time_refused("the text declares no size alias `NAME: Family<sizes>`")
+    }
     rows
 }
 
@@ -187,7 +189,7 @@ foundation_size_alias: fn(name: String) -> Type? Never! {
     assert_eq(rows.len(), 2)
     assert_eq(rows[0].name, "I8")
     assert_eq(rows[1].sizes, [Int]{8, 23})
-    sized := [Type]{}
+    ^sized: [Type]{}
     loop row in FOUNDATION_SIZE_ALIASES {
         ty: foundation_family_type(row.family, row.sizes) ?? panic("`{row.name}` names no size")
         assert(!sized.contains(ty))
@@ -203,9 +205,7 @@ foundation_size_alias: fn(name: String) -> Type? Never! {
 
 // Canonical live-link type `@T` (`Type.Apply{name: "@", args: [T]}`), matching
 // `Ptr<T>`, `View<T>`, and `Cell<T>` without breaking downstream Type matches.
-foundation_link_type: fn(inner: Type) -> Type Never! {
-    Type.Apply{name: "@", args: [Type]{inner}}
-}
+foundation_link_type: fn(inner: Type) -> Type Never! { Type.Apply{name: "@", args: [Type]{inner}} }
 
 foundation_link_inner: fn(ty: Type) -> Type? Never! {
     if ty == .Apply(name, args) && name == "@" && args.len() == 1 -> return Val(args[0])
@@ -364,12 +364,12 @@ dimension_divide: fn(left: Dimension, right: Dimension) -> Dimension? {
 }
 
 dimension_combine: fn(left: Dimension, right: Dimension, subtract: Bool) -> Dimension? {
-    axes := left.axes.copy()
+    ^axes: left.axes.copy()
     loop axis in right.axes {
         exponent: measure_signed_value(axis.exponent) ?? return None
         delta: if subtract -> -exponent else -> exponent
-        found := false
-        index := 0
+        ^found: false
+        ^index: 0
         loop index < axes.len() {
             if axes[index].name == axis.name {
                 found = true
@@ -377,13 +377,13 @@ dimension_combine: fn(left: Dimension, right: Dimension, subtract: Bool) -> Dime
             }
             index += 1
         }
-        current := 0
+        ^current: 0
         if found -> current = measure_signed_value(axes[index].exponent) ?? return None
         next: current + delta
         if next < -2147483648 || next > 2147483647 -> return None
         if {
             found -> {
-                if next == 0 -> _ := axes.remove(index, .Slot) else {
+                if next == 0 -> ^_: axes.remove(index, .Slot) else {
                     axes[index].exponent = Measure.SignedLiteral{kind: "dimension", value: next}
                 }
             }
@@ -400,7 +400,7 @@ dimension_combine: fn(left: Dimension, right: Dimension, subtract: Bool) -> Dime
 }
 
 dimension_identity: fn(dimension: Dimension) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop axis in dimension.axes {
         exponent: measure_signed_value(axis.exponent).map(fn(value) { "{value}" }) ?? measure_expression(axis.exponent)
         parts.push("{escape_dimension_axis(axis.name)}:{exponent}")
@@ -409,7 +409,7 @@ dimension_identity: fn(dimension: Dimension) -> String Never! {
 }
 
 dimension_display_name: fn(dimension: Dimension) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop axis in dimension.axes {
         leaf: axis.name.split(".").to_list()
         name: if leaf.len() == 0 -> axis.name else -> leaf[leaf.len() - 1]
@@ -438,7 +438,7 @@ escape_dimension_axis: fn(axis: String) -> String Never! {
 // byte, a non-ASCII axis name included. None when a part is not `name:exponent`
 // or its exponent is not a whole number in i32.
 dimension_from_identity: fn(identity: String) -> Dimension? {
-    axes := [DimensionAxis]{}
+    ^axes: [DimensionAxis]{}
     if identity == "" -> return Val(Dimension{axes: axes})
     loop part in identity.split(";") {
         cut: part.cut_last(":") ?? return None
@@ -660,7 +660,7 @@ symbol_key_text: fn(kind: SymbolKind, module_name: String, owner: String, name: 
 // `:` (symbol_key_text). A name holds neither.
 symbol_key_leaf_start: fn(key: String) -> Int Never! {
     bytes: key.bytes()
-    at := bytes.len()
+    ^at: bytes.len()
     loop at > 0 {
         if bytes[at - 1] == (U8{46}) || bytes[at - 1] == (U8{58}) -> return at
         at -= 1
@@ -712,7 +712,7 @@ symbol_key_parts: fn(key: String, is_module: fn(String) -[Mem.Alloc, Mem.Rc, Tim
         return Val(SymbolKeyParts{kind: split.before, module_identity: "", owner: "", owner_name: "", name: name})
     }
     head_end: name_start - 1
-    at := head_end
+    ^at: head_end
     loop at > 0 {
         if at == head_end || bytes[at] == (U8{46}) {
             module_identity: foundation_byte_text(bytes, 0, at)
@@ -852,21 +852,17 @@ symbol_local_keys_row: fn(keys: SymbolLocalKeys, key: String, hash: Int) -> Int?
             return None
         }
         loop row in 0..<keys.ends.len() {
-            if symbol_local_keys_spells(keys, row, key.bytes()) {
-                return Val(row)
-            }
+            if symbol_local_keys_spells(keys, row, key.bytes()) -> return Val(row)
         }
         return None
     }
-    slot := hash & keys.mask
+    ^slot: hash & keys.mask
     loop {
         entry: keys.slots[slot]
         if entry == 0 -> break
         if (entry >> 32) == hash {
             row: (entry & 0xffffffff) - 1
-            if symbol_local_keys_spells(keys, row, key.bytes()) {
-                return Val(row)
-            }
+            if symbol_local_keys_spells(keys, row, key.bytes()) -> return Val(row)
         }
         slot = (slot + 1) & keys.mask
     }
@@ -892,13 +888,13 @@ symbol_local_keys_intern: fn(keys: ^SymbolLocalKeys, key: String) -> SymbolID Ne
     if keys.slots.len() == 0 || (row + 1) * 2 > keys.mask {
         // The slots double as the keys grow; sealed keys rebuild theirs at
         // the size growing to this many keys reached.
-        capacity := SYMBOL_LOCAL_INITIAL_SLOTS
+        ^capacity: SYMBOL_LOCAL_INITIAL_SLOTS
         loop capacity - 1 < (row + 1) * 2 -> capacity *= 2
         mask: capacity - 1
-        slots := (loop _ in 0..<capacity -> 0)
+        ^slots: (loop _ in 0..<capacity -> 0)
         loop index in 0..<keys.hashes.len() {
             item_hash: keys.hashes[index]
-            slot := item_hash & mask
+            ^slot: item_hash & mask
             loop slots[slot] != 0 -> slot = (slot + 1) & mask
             slots[slot] = (item_hash << 32) | (index + 1)
         }
@@ -906,7 +902,7 @@ symbol_local_keys_intern: fn(keys: ^SymbolLocalKeys, key: String) -> SymbolID Ne
         keys.mask = mask
         return symbol_local_id(row)
     }
-    slot := hash & keys.mask
+    ^slot: hash & keys.mask
     loop keys.slots[slot] != 0 -> slot = (slot + 1) & keys.mask
     keys.slots[slot] = (hash << 32) | (row + 1)
     symbol_local_id(row)
@@ -944,16 +940,16 @@ symbol_local_keys_text_at: fn(keys: SymbolLocalKeys, id: SymbolID) -> String? Ne
 // (rounded up to a power of two, so a probe visits every slot); they grow
 // as keys arrive.
 symbol_key_rows: fn(slots: Int) -> SymbolKeyRows Never! {
-    capacity := 2
+    ^capacity: 2
     loop capacity < slots -> capacity *= 2
-    rows := SymbolKeyRows{texts: [String]{}, hashes: [Int]{}, slots: (loop _ in 0..<capacity -> 0), mask: capacity - 1}
-    _ := symbol_key_rows_intern(rows, "")
+    ^rows: SymbolKeyRows{texts: [String]{}, hashes: [Int]{}, slots: (loop _ in 0..<capacity -> 0), mask: capacity - 1}
+    ^_: symbol_key_rows_intern(rows, "")
     rows
 }
 
 // The row of `key`, whose `name_text_hash` is `hash`, when `rows` holds it.
 symbol_key_rows_find: fn(rows: SymbolKeyRows, key: String, hash: Int) -> Int? Never! {
-    slot := hash & rows.mask
+    ^slot: hash & rows.mask
     loop {
         entry: rows.slots[slot]
         if entry == 0 -> break
@@ -977,10 +973,10 @@ symbol_key_rows_intern: fn(rows: ^SymbolKeyRows, key: String) -> Int Never! {
     if (row + 1) * 2 > rows.mask {
         capacity: (rows.mask + 1) * 2
         mask: capacity - 1
-        slots := (loop _ in 0..<capacity -> 0)
+        ^slots: (loop _ in 0..<capacity -> 0)
         loop index in 0..<rows.texts.len() {
             item_hash: rows.hashes[index]
-            slot := item_hash & mask
+            ^slot: item_hash & mask
             loop slots[slot] != 0 -> slot = (slot + 1) & mask
             slots[slot] = (item_hash << 32) | (index + 1)
         }
@@ -988,7 +984,7 @@ symbol_key_rows_intern: fn(rows: ^SymbolKeyRows, key: String) -> Int Never! {
         rows.mask = mask
         return row
     }
-    slot := hash & rows.mask
+    ^slot: hash & rows.mask
     loop rows.slots[slot] != 0 -> slot = (slot + 1) & rows.mask
     rows.slots[slot] = (hash << 32) | (row + 1)
     row
@@ -1012,17 +1008,17 @@ SYMBOL_BUILTIN_TYPES_CHECKED: #run effect_vocabulary_list_view_count("Types/Type
 // (OwnedTrait.declared_in) is keyed by that module's name, and that
 // declaration takes this id (sema_registration_trait_symbol).
 symbol_builtin_keys_build: fn() -> SymbolKeys Never! {
-    keys := symbol_keys(0, SYMBOL_LOCAL_BOUND)
+    ^keys: symbol_keys(0, SYMBOL_LOCAL_BOUND)
     loop index in 0..<OWNED_TRAITS.len() {
-        _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Trait, OWNED_TRAITS[index].declared_in, "", OWNED_TRAITS[index].name))
+        ^_: symbol_keys_intern(keys, symbol_key_text(SymbolKind.Trait, OWNED_TRAITS[index].declared_in, "", OWNED_TRAITS[index].name))
     }
     loop name in SYMBOL_BUILTIN_TYPES {
-        _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Type, "", "", name))
+        ^_: symbol_keys_intern(keys, symbol_key_text(SymbolKind.Type, "", "", name))
     }
     loop index in 0..<OWNED_TRAITS.len() {
         if OWNED_TRAITS[index].contract == .Methods(methods, _, _) {
             loop declared in methods {
-                _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Function, "", OWNED_TRAITS[index].name, declared.name))
+                ^_: symbol_keys_intern(keys, symbol_key_text(SymbolKind.Function, "", OWNED_TRAITS[index].name, declared.name))
             }
         }
     }
@@ -1070,7 +1066,7 @@ symbol_builtin_declared: fn(kind: SymbolKind, module_name: String, name: String)
 // The id of owned trait `trait_name`'s declared method `method`
 // (symbol_builtin_keys).
 symbol_builtin_method: fn(trait_name: String, method: String) -> SymbolID? Never! {
-    row := 1 + OWNED_TRAITS.len() + SYMBOL_BUILTIN_TYPES.len()
+    ^row: 1 + OWNED_TRAITS.len() + SYMBOL_BUILTIN_TYPES.len()
     loop index in 0..<OWNED_TRAITS.len() {
         if OWNED_TRAITS[index].contract == .Methods(methods, _, _) {
             loop declared in methods {
@@ -1110,24 +1106,24 @@ symbol_table_open: fn(keys: ^^SymbolKeys) -> SymbolTable Never! {
 // last. Overlapping ranges, or a key held by two ranges, are an internal
 // error, since equal keys must be equal ids.
 symbol_table_of: fn(ranges: ^^[SymbolKeys]) -> SymbolTable Never! {
-    owned := ranges.move()
+    ^owned: ranges.move()
     owned.sort_by(fn(left: SymbolKeys, right: SymbolKeys) { left.base <=> right.base })
-    end := 0
+    ^end: 0
     loop range in owned {
         if range.base < end {
             panic("symbol range at {range.base} overlaps the range before it, which ends at {end}")
         }
         end = range.base + range.bound
     }
-    count := 0
+    ^count: 0
     loop range in owned -> count += range.keys.texts.len()
-    capacity := 16
+    ^capacity: 16
     loop capacity < count * 2 -> capacity *= 2
-    table := SymbolTable{ranges: owned.move(), slots: (loop _ in 0..<capacity -> 0), mask: capacity - 1}
+    ^table: SymbolTable{ranges: owned.move(), slots: (loop _ in 0..<capacity -> 0), mask: capacity - 1}
     loop index in 0..<table.ranges.len() {
         loop row in 1..<table.ranges[index].keys.texts.len() {
             hash: table.ranges[index].keys.hashes[row]
-            slot := hash & table.mask
+            ^slot: hash & table.mask
             loop table.slots[slot] != 0 {
                 if symbol_table_holds(table, table.slots[slot] - 1, hash, table.ranges[index].keys.texts[row]) {
                     panic("symbol key `{table.ranges[index].keys.texts[row]}` is held by two ranges")
@@ -1161,7 +1157,7 @@ symbol_table_module_range: fn(table: SymbolTable, identity: ModuleID) -> Int? Ne
 symbol_find: fn(table: SymbolTable, key: String) -> SymbolID? Never! {
     if key == "" -> return Val(symbol_none())
     hash: name_text_hash(key)
-    slot := hash & table.mask
+    ^slot: hash & table.mask
     loop table.slots[slot] != 0 {
         id: table.slots[slot] - 1
         if symbol_table_holds(table, id, hash, key) {
@@ -1189,14 +1185,14 @@ symbol_mint: fn(table: ^SymbolTable, kind: SymbolKind, module_name: String, owne
 }
 
 #Test("symbol keys intern once, grow past their slots, and resolve across closed and open ranges") {
-    module_keys := SymbolKeys{base: 1000, bound: 100, keys: symbol_key_rows(2)}
+    ^module_keys: SymbolKeys{base: 1000, bound: 100, keys: symbol_key_rows(2)}
     loop index in 0..<40 {
         assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v{index}").id}, 1001 + index)
     }
     assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v7").id}, 1008)
     assert_eq(module_keys.keys.texts.len(), 41)
     assert(symbol_key_rows_find(module_keys.keys, "local:m:f:v40", name_text_hash("local:m:f:v40")) == None)
-    table := symbol_table_of([SymbolKeys]{symbol_builtin_keys(), module_keys})
+    ^table: symbol_table_of([SymbolKeys]{symbol_builtin_keys(), module_keys})
     assert_eq(Int{(symbol_find(table, "local:m:f:v39") ?? symbol_none()).id}, 1040)
     assert(symbol_find(table, "") != None)
     fresh: symbol_mint(table, SymbolKind.Function, "m", "", "g")
@@ -1207,7 +1203,7 @@ symbol_mint: fn(table: ^SymbolTable, kind: SymbolKind, module_name: String, owne
 }
 
 #Test("a body's symbol keys intern once, grow past their slots, and spell each key back") {
-    keys := symbol_local_keys()
+    ^keys: symbol_local_keys()
     loop index in 0..<40 {
         assert_eq(Int{symbol_local_keys_intern(keys, "local:m:f:v{index}").id}, SYMBOL_LOCAL_BASE + 1 + index)
     }
@@ -1221,8 +1217,8 @@ symbol_mint: fn(table: ^SymbolTable, kind: SymbolKind, module_name: String, owne
 }
 
 #Test("sealed symbol keys still find each key, and an intern rebuilds their slots") {
-    keys := symbol_local_keys()
-    loop index in 0..<40 -> _ := symbol_local_keys_intern(keys, "local:m:f:v{index}")
+    ^keys: symbol_local_keys()
+    loop index in 0..<40 -> ^_: symbol_local_keys_intern(keys, "local:m:f:v{index}")
     symbol_local_keys_seal(keys)
     assert_eq(keys.slots.len(), 0)
     assert_eq(Int{(symbol_local_keys_find(keys, "local:m:f:v39") ?? symbol_none()).id}, SYMBOL_LOCAL_BASE + 40)
@@ -1244,11 +1240,13 @@ symbol_table_range: fn(table: SymbolTable, id: SymbolID) -> Int Never! {
 symbol_table_range_of: fn(table: SymbolTable, value: Int) -> Int Never! {
     count: table.ranges.len()
     if count <= 1 || value < table.ranges[1].base -> return 0
-    low := I64{1}
-    high := I64{count - 1}
+    ^low: I64{1}
+    ^high: I64{count - 1}
     loop low < high {
         middle: wrapping(low + high + I64{1}) >> I64{1}
-        if table.ranges[Int{middle}].base <= value -> low = middle else -> high = wrapping(middle - I64{1})
+        if table.ranges[Int{middle}].base <= value -> low = middle else {
+            high = wrapping(middle - I64{1})
+        }
     }
     Int{low}
 }
@@ -1267,7 +1265,7 @@ symbol_table_key: fn(table: SymbolTable, id: SymbolID) -> String Never! {
 // How many keys `table` holds (each range's empty row included). A run's
 // table only grows, so two of its states with one count are the same.
 symbol_table_count: fn(table: SymbolTable) -> Int Never! {
-    count := 0
+    ^count: 0
     loop range in table.ranges -> count += range.keys.texts.len()
     count
 }
@@ -1384,21 +1382,21 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
         .Option(inner) -> "?{type_carrier_identity_grouped(inner)}"
         .Result(ok, err) -> "{type_carrier_identity_grouped(ok)} ! {type_carrier_identity_grouped(err)}"
         .Fn(params, ret, _, _, _, _) -> {
-            names := [String]{}
+            ^names: [String]{}
             loop param in params -> names.push(type_carrier_identity(param))
-            signature := "fn({names.join(", ")})"
+            ^signature: "fn({names.join(", ")})"
             if ret == .Val(value) -> signature = "{signature} => {type_carrier_identity(value)}"
             signature
         }
         .Named(name) -> name
         .Apply(name, args) -> {
-            names := [String]{}
+            ^names: [String]{}
             loop arg in args -> names.push(type_carrier_identity(arg))
             "{name}<{names.join(", ")}>"
         }
         .TraitObject(bounds) -> bounds.join(" + ")
         .Tuple(fields) -> {
-            names := [String]{}
+            ^names: [String]{}
             loop field in fields -> names.push("{field.name}: {type_carrier_identity(field.ty)}")
             "({names.join(", ")})"
         }
@@ -1414,7 +1412,7 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
         .Float32 -> "F32"
         .Tagged(_, inner) -> type_carrier_identity(inner)
         .Union(members) -> {
-            names := [String]{}
+            ^names: [String]{}
             loop member in members -> names.push(type_carrier_identity_grouped(member))
             names.join(" | ")
         }
@@ -1465,7 +1463,7 @@ type_name: fn(ty: Type) -> String Never! {
         .Measure(value) -> measure_expression(value)
         .TraitObject(bounds) -> bounds.join(" + ")
         .Union(members) -> {
-            names := [String]{}
+            ^names: [String]{}
             loop member in members -> names.push(type_name(member))
             names.join(" | ")
         }
@@ -1478,7 +1476,7 @@ type_name: fn(ty: Type) -> String Never! {
                 dimensions_opt: compute_shape_dimensions(ty)
                 if dimensions_opt == {
                     .Val(values) -> {
-                        dimensions := [String]{}
+                        ^dimensions: [String]{}
                         loop dimension in values -> dimensions.push("{dimension}")
                         "{name}<{dimensions.join(", ")}>"
                     }
@@ -1504,10 +1502,10 @@ type_name: fn(ty: Type) -> String Never! {
         // A callable type's surface spelling: `fn(T) -> U`, `fn(T) -[E]> U`,
         // and the unit-fallible `fn(T) IOError!` with no arrow before its contract.
         .Fn(params, ret, effect_bound, param_contract, _, _) -> {
-            out := "fn({function_parameter_names(params, param_contract)})"
-            shown_ret := ret
+            ^out: "fn({function_parameter_names(params, param_contract)})"
+            ^shown_ret: ret
             if ret == .Val(value) && type_is_unit_callable_return(value) -> shown_ret = None
-            unit_fallible := false
+            ^unit_fallible: false
             if shown_ret == .Val(value) {
                 if value == .Result(ok, _) -> unit_fallible = ok == Type.Named{name: "Unit"}
             }
@@ -1594,7 +1592,7 @@ type_union_member_tag: fn(ty: Type) -> String Never! {
 // boxing, arms, coverage) reads its tag here.
 type_union_member_tag_in: fn(members: [Type], ty: Type) -> String Never! {
     own: type_union_member_tag(ty)
-    first := -1
+    ^first: -1
     loop (index, member) in members {
         if type_union_member_tag(member) != own -> next
         if first < 0 -> first = index
@@ -1608,7 +1606,7 @@ type_union_member_tag_in: fn(members: [Type], ty: Type) -> String Never! {
 // digits, so two spellings never give one tag.
 type_union_member_identity_tag: fn(ty: Type) -> String Never! {
     hex: "0123456789abcdef".bytes()
-    bytes := [U8]{73, 95}
+    ^bytes: [U8]{73, 95}
     loop byte in type_name(ty).bytes() {
         value: Int{byte}
         if {
@@ -1643,13 +1641,13 @@ type_union_sort: fn(members: ^[Type]) -[]> {
     if members.len() < 2 {
         return
     }
-    keys := [String]{}
+    ^keys: [String]{}
     loop member in members -> keys.push(type_union_order_key(member))
-    index := 1
+    ^index: 1
     loop index < members.len() {
         current: members[index]
         current_key: keys[index]
-        insertion := index - 1
+        ^insertion: index - 1
         loop insertion >= 0 && type_union_member_after(keys[insertion], members[insertion], current_key, current) {
             members[insertion + 1] = members[insertion]
             keys[insertion + 1] = keys[insertion]
@@ -1684,16 +1682,16 @@ type_union_order_key: fn(ty: Type) -[]> String {
 // A nominal name's leaf: what follows its last `.` (a declaration key's
 // module) and then its last `.` (a written module alias, `net.NetError`).
 type_union_unqualified: fn(name: String) -[]> String {
-    leaf := name
+    ^leaf: name
     loop part in name.split(".") -> leaf = part
-    unaliased := leaf
+    ^unaliased: leaf
     loop part in leaf.split(".") -> unaliased = part
     unaliased
 }
 
 // The union member tag sanitizer over one written spelling.
 type_union_member_tag_name: fn(raw: String) -> String Never! {
-    safe := true
+    ^safe: true
     loop byte in raw.bytes() {
         value: Int{byte}
         if !((value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95) {
@@ -1702,7 +1700,7 @@ type_union_member_tag_name: fn(raw: String) -> String Never! {
         }
     }
     if safe && raw.len() > 0 -> return raw.copy()
-    bytes := [U8]{77, 95}
+    ^bytes: [U8]{77, 95}
     loop byte in raw.bytes() {
         value: Int{byte}
         if {
@@ -1760,7 +1758,7 @@ type_unqualified_name: fn(name: String) -> String Never! { type_unqualified_text
 // module identity (`module:…`, `<corelib>/…`, which hold `:` or start with
 // `<`) is a qualifier, and a written module path stays.
 type_unqualified_text: fn(name: String, identities_only: Bool) -> String Never! {
-    leaf := name
+    ^leaf: name
     if !identities_only || name.contains(":") || name.starts_with("<") {
         loop part in name.split(".") -> leaf = part
     }
@@ -1776,9 +1774,9 @@ type_unqualified_text: fn(name: String, identities_only: Bool) -> String Never! 
 }
 
 function_parameter_names: fn(params: [Type], param_contract: [CallContractRow]?) -> String Never! {
-    names := [String]{}
+    ^names: [String]{}
     contracts: param_contract ?? [CallContractRow]{}
-    star_done := false
+    ^star_done: false
     loop (i, param) in params {
         zone: if i < contracts.len() -> contracts[i].zone else -> ParamZone.Either
         if zone == ParamZone.LabelOnly && !star_done {
@@ -1798,7 +1796,7 @@ function_parameter_names: fn(params: [Type], param_contract: [CallContractRow]?)
 }
 
 type_application_name: fn(name: String, args: [Type]) -> String Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop arg in args -> names.push(type_name(arg))
     "{name}<{names.join(", ")}>"
 }
@@ -1828,7 +1826,7 @@ type_failure_name: fn(ty: Type) -> String Never! {
 type_marked_name: fn(ty: Type) -> String Never! {
     if ty == {
         .Union(members) -> {
-            names := [String]{}
+            ^names: [String]{}
             loop member in members -> names.push(type_name(member))
             "({names.join(" | ")})"
         }
@@ -2044,13 +2042,13 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         .Option(inner) -> Type.Option{inner: type_with_effective_fn_returns(inner)}
         .Result(ok, err) -> Type.Result{ok: type_with_effective_fn_returns(ok), err: type_with_effective_fn_returns(err)}
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
-            normalized_params := [Type]{}
+            ^normalized_params: [Type]{}
             loop param in params -> normalized_params.push(type_with_effective_fn_returns(param))
             normalized_ret: ret.map(fn(value) { effective_callable_return(type_with_effective_fn_returns(value)) })
             Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         .Apply(name, args) -> {
-            normalized_args := [Type]{}
+            ^normalized_args: [Type]{}
             loop arg in args -> normalized_args.push(type_with_effective_fn_returns(arg))
             Type.Apply{name: name, args: normalized_args}
         }
@@ -2135,7 +2133,7 @@ compute_shape_measures_apply: fn(name: String, args: [Type]) -> [Measure]? {
         else -> 0
     }
     if expected == 0 || args.len() != expected -> return None
-    measures := [Measure]{}
+    ^measures: [Measure]{}
     loop arg in args {
         if arg == {
             .Measure(measure) -> {
@@ -2150,7 +2148,7 @@ compute_shape_measures_apply: fn(name: String, args: [Type]) -> [Measure]? {
 
 compute_shape_dimensions: fn(ty: Type) -> [Int]? {
     measures: compute_shape_measures(ty) ?? return None
-    dimensions := [Int]{}
+    ^dimensions: [Int]{}
     loop measure in measures {
         value: measure_literal_value(measure) ?? return None
         dimensions.push(value)
@@ -2221,7 +2219,7 @@ type_simd_lane_arity: fn(name: String) -> Int? {
 }
 
 identity_key: fn(identity: TypeIdentity) -> String Never! {
-    facts := [String]{}
+    ^facts: [String]{}
     loop entry in identity.knowledge.entries {
         path: if entry.path.len() == 0 -> "self" else -> entry.path.join(".")
         facts.push("{path}:{entry.plane}={knowledge_fact_key(entry.fact)}")
@@ -2248,10 +2246,10 @@ knowledge_fact_key: fn(fact: KnowledgeFact) -> String Never! {
 }
 
 function_obligations_key: fn(value: FunctionObligations) -> String Never! {
-    contract := [String]{}
+    ^contract: [String]{}
     contract_rows: value.param_contract ?? [CallContractRow]{}
     loop row in contract_rows -> contract.push("{row.label}:{param_zone_name(row.zone)}")
-    variadic := [String]{}
+    ^variadic: [String]{}
     variadic_values: value.variadic ?? [Bool]{}
     loop is_variadic in variadic_values -> variadic.push("{is_variadic}")
     "contract=[{contract.join(",")}];variadic=[{variadic.join(",")}]"
@@ -2266,7 +2264,7 @@ param_zone_name: fn(zone: ParamZone) -> String Never! {
 }
 
 type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
-    entries := [KnowledgeEntry]{}
+    ^entries: [KnowledgeEntry]{}
     if ty == {
         .Int -> {
             entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
@@ -2278,8 +2276,8 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
             entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Approximate{precision: 24}}})
         }
         .IntN(signed, bits) -> {
-            lower := 0
-            upper := ((2).pow(bits)) - 1
+            ^lower: 0
+            ^upper: ((2).pow(bits)) - 1
             if signed {
                 lower = -((2).pow((bits - 1)))
                 upper = ((2).pow((bits - 1))) - 1
@@ -2394,7 +2392,7 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
             if name == "Decimal" || name == "Fraction" {
                 entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
             }
-            lanes := type_simd_lane_arity(name)
+            ^lanes: type_simd_lane_arity(name)
             if lanes != None {
                 entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: Measure.Literal{kind: "lane", value: lanes ?? 0}}})
             }
@@ -2406,7 +2404,7 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
 
 function_variadic_obligation: fn(metadata: FunctionCallMetadata?) -> [Bool]? {
     value: metadata ?? return None
-    has_variadic := false
+    ^has_variadic: false
     loop is_variadic in value.variadic {
         if is_variadic {
             has_variadic = true
@@ -2418,9 +2416,9 @@ function_variadic_obligation: fn(metadata: FunctionCallMetadata?) -> [Bool]? {
 }
 
 merge_type_knowledge: fn(target: [KnowledgeEntry], nested: KnowledgeVector, prefix: [String]) -> [KnowledgeEntry] Never! {
-    out := target
+    ^out: target
     loop entry in nested.entries {
-        path := [String]{}
+        ^path: [String]{}
         loop part in prefix -> path.push(part.copy())
         loop part in entry.path -> path.push(part.copy())
         out.push(KnowledgeEntry{path: path, plane: entry.plane, fact: entry.fact})

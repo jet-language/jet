@@ -79,7 +79,7 @@ LSP_TEST_PROVIDERS: [String]{
 }
 
 #Test("initialize advertises exactly the answered capabilities") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     result: lsp_test_result(server, "initialize", "{{}}")
     capabilities: lsp_test_field(result, "capabilities")
     loop provider in LSP_TEST_PROVIDERS {
@@ -135,7 +135,7 @@ LSP_TEST_PROVIDER_METHODS: [String]{
 }
 
 #Test("initialize speaks only LSP, and every advertised provider's request is answered") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     result: lsp_test_result(server, "initialize", "{{}}")
     assert(lsp_member(result, "protocolVersion") == None, "initialize has no protocolVersion")
     assert(lsp_member(result, "resources") == None, "initialize has no resources")
@@ -149,7 +149,7 @@ LSP_TEST_PROVIDER_METHODS: [String]{
 }
 
 #Test("an unknown method is not found and shutdown is acknowledged") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     assert_eq(lsp_test_error_code(server, "textDocument/moniker", "{{}}"), -32601)
     assert(!server.shutdown, "no shutdown yet")
     assert(lsp_test_result(server, "shutdown", "{{}}") == .Null, "shutdown answers null")

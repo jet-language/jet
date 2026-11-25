@@ -15,7 +15,7 @@ csv_words_new: fn() -> I64 {
 csv_words_push: fn(list: I64, word: I64) {
     length: trap_word(list)
     capacity: trap_word(wrapping(list + I64{8}))
-    data := trap_word(wrapping(list + I64{16}))
+    ^data: trap_word(wrapping(list + I64{16}))
     if (length == capacity) {
         grown: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
         buffer: jet_rt_alloc(grown * I64{8}, I64{8})
@@ -44,7 +44,7 @@ csv_words_free: fn(list: I64) {
 
 // Releases a record: its field Strings and the word list.
 csv_record_free: fn(record: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(record) {
         jet_rt_string_drop(csv_words_get(record, at))
         at += I64{1}
@@ -53,7 +53,7 @@ csv_record_free: fn(record: I64) {
 }
 
 csv_records_free: fn(records: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(records) {
         csv_record_free(csv_words_get(records, at))
         at += I64{1}
@@ -237,8 +237,8 @@ csv_parse: fn(text: I64, out: I64) -> I64 {
     trap_store(wrapping(state + CSV_RECORDS), csv_words_new())
     data: rt_text_data(text)
     length: rt_text_len(text)
-    at := I64{0}
-    failure := I64{0}
+    ^at: I64{0}
+    ^failure: I64{0}
     loop at < length && failure == (I64{0}) {
         width: rt_text_width(wrapping(data + at))
         failure = csv_push(state, wrapping(data + at), width)
@@ -263,7 +263,7 @@ csv_parse: fn(text: I64, out: I64) -> I64 {
 csv_row_tree: fn(header: I64, record: I64) -> I64 {
     columns: trap_word(header)
     entries: data_sequence_new(columns, DYN_ENTRY_BYTES)
-    at := I64{0}
+    ^at: I64{0}
     loop at < columns {
         cell: if (at < trap_word(record)) -> csv_words_get(record, at) else -> rt_static_text("")
         data_sequence_push(entries, csv_words_get(header, at), jet_rt_record_new_dyn_text(cell), true)
@@ -274,7 +274,7 @@ csv_row_tree: fn(header: I64, record: I64) -> I64 {
 
 // Releases owned FieldError handles in a word list and the list.
 csv_errors_free: fn(errors: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(errors) {
         jet_rt_handle_drop_field_error(csv_words_get(errors, at))
         at += I64{1}
@@ -303,8 +303,8 @@ csv_invoke: fn(invoke: I64, tree: I64, value: I64, status: I64, errors: I64, cou
     failures: csv_words_new()
     slot: jet_rt_alloc(coll_size(meta), I64{8})
     outs: jet_rt_alloc(I64{24}, I64{8})
-    stopped := false
-    row := I64{1}
+    ^stopped: false
+    ^row: I64{1}
     loop !stopped && row < trap_word(records) {
         tree: csv_row_tree(csv_words_get(records, I64{0}), csv_words_get(records, row))
         coll_zero(outs, I64{24})
@@ -325,8 +325,8 @@ csv_invoke: fn(invoke: I64, tree: I64, value: I64, status: I64, errors: I64, cou
                 jet_rt_string_builder_push(segment, rt_static_text("row "))
                 rt_text_push_number(segment, row)
                 framed: jet_rt_alloc(I64{8}, I64{8})
-                _ := jet_rt_codec_under(segment, found, count, framed)
-                at := I64{0}
+                ^_: jet_rt_codec_under(segment, found, count, framed)
+                ^at: I64{0}
                 loop at < count {
                     jet_rt_handle_drop_field_error(trap_word(wrapping(found + at * I64{8})))
                     csv_words_push(failures, trap_word(wrapping(trap_word(framed) + at * I64{8})))

@@ -151,7 +151,7 @@ ir_sentry_range: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, pointer: Int, byt
 // inside an `#Unsafe` block of this function (the gate in force is a
 // caller's, maybe in another file) or the span is not in a checked source.
 ir_sentry_site: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, span: Span) -> Int Never! {
-    gated := false
+    ^gated: false
     loop frame in b.transactions {
         if frame.gate -> gated = true
     }
@@ -178,7 +178,7 @@ ir_core_volatile: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, member: String, 
         address: ir_sentry_access(m, p, b, pointer, row, member, span)
         return ir_load_at(m, b, address, 0, row)
     }
-    value := ir_expr(m, p, b, args[1])
+    ^value: ir_expr(m, p, b, args[1])
     if ir_failed(b) -> return -1
     address: ir_sentry_access(m, p, b, pointer, row, member, span)
     drops: m.types[row].drop != ""
@@ -244,7 +244,7 @@ ir_core_list_append: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [Int], 
         return ir_fail_slot(b, span, "core.mem.{member} without its checked element type and arguments")
     }
     row: ir_value_type(m, p, type_args[0]) ?? return ir_type_fail(b, span, type_args[0])
-    backs := [IRWriteBack]{}
+    ^backs: [IRWriteBack]{}
     list: ir_place_address(m, p, b, args[0], backs, span)
     if ir_failed(b) || list < 0 -> return -1
     pointer: ir_expr(m, p, b, args[1])
@@ -350,7 +350,7 @@ ir_core_list_copy: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [Int], ty
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     exclusive: ir_temp(m, b, bool_row)
     ir_emit(b.f, IROp.Const, exclusive, 1, -1, -1, b.line)
-    stop_args := [Int]{start, finish, exclusive, ir_list_length(m, b, list)}
+    ^stop_args: [Int]{start, finish, exclusive, ir_list_length(m, b, list)}
     loop value in ir_location(m, b, b.line) -> stop_args.push(value)
     word_row: ir_word_row(m)
     _: ir_runtime(m, b, "jet_rt_slice_end", stop_args, word_row)

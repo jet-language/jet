@@ -44,7 +44,7 @@ cli_metadata_elf: fn(record: [U8], wide: Bool, little: Bool) -> [U8] Never! {
     names: [U8]{0, 46, 115, 104, 115, 116, 114, 116, 97, 98, 0, 46, 106, 101, 116, 95, 99, 111, 109, 109, 97, 110, 100, 0}
     record_at: header + names.len()
     table: record_at + record.len()
-    out := cli_metadata_zeros(table + 3 * stride)
+    ^out: cli_metadata_zeros(table + 3 * stride)
     cli_metadata_copy(out, 0, [U8]{127, 69, 76, 70})
     out[4] = if wide -> U8{2} else -> U8{1}
     out[5] = if little -> U8{1} else -> U8{2}
@@ -69,7 +69,7 @@ cli_metadata_pe: fn(record: [U8], count: Int, trailing: [U8]) -> [U8] Never! {
     table: 0x80 + 24
     raw: table + count * 40
     size: record.len() + trailing.len()
-    out := cli_metadata_zeros(raw + count * size)
+    ^out: cli_metadata_zeros(raw + count * size)
     cli_metadata_copy(out, 0, [U8]{77, 90})
     cli_metadata_number(out, 0x3c, 4, U64{0x80}, true)
     cli_metadata_copy(out, 0x80, [U8]{80, 69, 0, 0})
@@ -92,7 +92,7 @@ cli_metadata_mach: fn(record: [U8], wide: Bool) -> [U8] Never! {
     stride: if wide -> 80 else -> 68
     size: sections + stride
     at: header + size
-    out := cli_metadata_zeros(at + record.len())
+    ^out: cli_metadata_zeros(at + record.len())
     cli_metadata_copy(out, 0, [U8]{if wide -> U8{207} else -> U8{206}, 250, 237, 254})
     cli_metadata_number(out, 16, 4, U64{1}, true)
     cli_metadata_number(out, 20, 4, U64{size}, true)
@@ -112,7 +112,7 @@ cli_metadata_fat: fn(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8
     width: if wide -> 8 else -> 4
     first_at: 8 + 2 * stride
     second_at: first_at + first.len()
-    out := cli_metadata_zeros(second_at + second.len())
+    ^out: cli_metadata_zeros(second_at + second.len())
     cli_metadata_number(out, 0, 4, if wide -> U64{0xcafebabf} else -> U64{0xcafebabe}, little)
     cli_metadata_number(out, 4, 4, U64{2}, little)
     cli_metadata_number(out, 16, width, U64{first_at}, little)
@@ -125,9 +125,9 @@ cli_metadata_fat: fn(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8
 }
 
 cli_metadata_leb: fn(out: ^[U8], value: Int) Never! {
-    rest := value
+    ^rest: value
     loop {
-        byte := U8{rest & 127}
+        ^byte: U8{rest & 127}
         rest >>= 7
         if rest != 0 -> byte |= U8{128}
         out.push(byte)
@@ -136,8 +136,8 @@ cli_metadata_leb: fn(out: ^[U8], value: Int) Never! {
 }
 
 cli_metadata_wasm: fn(record: [U8], count: Int) -> [U8] Never! {
-    out := [U8]{0, 97, 115, 109, 1, 0, 0, 0}
-    payload := [U8]{}
+    ^out: [U8]{0, 97, 115, 109, 1, 0, 0, 0}
+    ^payload: [U8]{}
     cli_metadata_leb(payload, 11)
     payload.extend("jet.command".bytes())
     payload.extend(record.copy())
@@ -165,7 +165,7 @@ cli_metadata_refuse: fn(bytes: [U8], expected: RecordDecodeError, maximum: U64) 
 #Test("cli_metadata") {
     input: CLIInputSchema{field: "output_file", flag: "output-file", short: Val("o"), env: Val("OUTPUT_FILE"), help: "destination", metavar: Val("OUTPUT_FILE"), shape: CLIInputShape.Value{kind: CLIValueKind.Path, optional: false, default: None}, positional: Val(U16{0})}
     job: JobFact{name: "release", scope: JobScope.Ship, doc: Val("ship"), arguments: [JobArgumentSchema]{}, after: [String]{}, packages: [String]{"."}, cwd: None, inputs: [String]{"a"}, outputs: [String]{"b"}, skip: Val(JobSkip.UnlessPlatform{platform: "linux"}), cache: JobCachePolicy.Shared, parallel: 2, limits: [StringMapEntry]{StringMapEntry{key: "cpu", value: "2"}}, schedule: Val("daily")}
-    hidden := job.copy()
+    ^hidden: job.copy()
     hidden.scope = JobScope.Internal
     schema: CLICommandSchema{entry_type: "Options", description: Val("example"), inputs: [CLIInputSchema]{input}, commands: [CLISubcommandSchema]{CLISubcommandSchema{name: "send", description: None, inputs: [CLIInputSchema]{}}}, jobs: [JobFact]{job, job, hidden}, standard: true, version: Val("1.2.3")}
     record: encode_record(schema)
@@ -194,18 +194,18 @@ cli_metadata_refuse: fn(bytes: [U8], expected: RecordDecodeError, maximum: U64) 
     cli_metadata_refuse(cli_metadata_wasm(record, 2), RecordDecodeError.Duplicate, max)
     nested: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(record, true), false, false)
     cli_metadata_refuse(cli_metadata_fat(nested, nested, false, false), RecordDecodeError.Malformed{why: "nested universal Mach-O slice"}, max)
-    unsupported := record.copy()
+    ^unsupported: record.copy()
     unsupported[8] = U8{6}
     cli_metadata_refuse(cli_metadata_wasm(unsupported, 1), RecordDecodeError.UnsupportedVersion{version: U16{6}}, max)
-    corrupt := record.copy()
+    ^corrupt: record.copy()
     corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1] ~ U8{1}
     cli_metadata_refuse(cli_metadata_wasm(corrupt, 1), RecordDecodeError.Malformed{why: "digest mismatch"}, max)
     disagreement: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(corrupt, true), false, false)
     cli_metadata_refuse(disagreement, RecordDecodeError.Malformed{why: "universal Mach-O slices disagree"}, max)
-    offset_overflow := cli_metadata_elf(record, true, true)
+    ^offset_overflow: cli_metadata_elf(record, true, true)
     cli_metadata_number(offset_overflow, 40, 8, U64{0x100000000}, true)
     cli_metadata_refuse(offset_overflow, RecordDecodeError.Malformed{why: "file offset overflow"}, U64{0xffffffff})
-    invalid_name := cli_metadata_pe(record, 1, [U8]{})
+    ^invalid_name: cli_metadata_pe(record, 1, [U8]{})
     invalid_name[0x80 + 24] = U8{255}
     cli_metadata_refuse(invalid_name, RecordDecodeError.Malformed{why: "section name is not UTF-8"}, max)
 }

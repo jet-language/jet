@@ -77,12 +77,12 @@ Stores: struct {
 STORE: Shared{Stores{store: None}}
 
 open_store: fn(store: db.Store) {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     stores.value.store = Val(store.copy())
 }
 
 opened: fn() -> db.Store {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     store: stores.value.store ?? panic("the store is open")
     store.copy()
 }
@@ -118,7 +118,7 @@ Crew: struct {
 // and sends none of it, as the first line of its answer, read within five
 // seconds.
 announced: fn(addr: String, session: String) -> String {
-    stream := net.tcp_connect(addr) ?? return "no connection: {err}"
+    ^stream: net.tcp_connect(addr) ?? return "no connection: {err}"
     crlf: "\r\n"
     head: "POST /api/attach?args=%5B1%5D&name=plan.pdf HTTP/1.1{crlf}Host: {addr}{crlf}Authorization: Bearer {session}{crlf}Content-Length: 100000{crlf}Connection: close{crlf}{crlf}"
     stream.write_bytes(head.bytes()) ?? return "no request: {err}"

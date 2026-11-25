@@ -212,7 +212,9 @@ UnixStream: struct {
     close: fn(self) -[Net]> NetError! { rt.unix_close(self) }
 
     /// The read and write timeout of every later call without a deadline.
-    set_timeout: fn(self, timeout: Duration) -[Net]> NetError! { rt.unix_set_timeout(self, timeout.ns) }
+    set_timeout: fn(self, timeout: Duration) -[Net]> NetError! {
+        rt.unix_set_timeout(self, timeout.ns)
+    }
 }
 
 // JetNetErrorDetail: public construction is already supported.
@@ -332,7 +334,7 @@ NetInterface: struct {
 /// Empty where the host exposes no such directory.
 interfaces: fn() -[FS.Read]> [NetInterface] Never! {
     entries: core.files.list_dir("/sys/class/net") ?? return [NetInterface]{}
-    found := [NetInterface]{}
+    ^found: [NetInterface]{}
     loop entry in entries {
         contents: core.files.read("{entry.path}/ifindex") ?? next
         index: Int.parse(core.text.trim(contents)) ?? next
@@ -384,7 +386,7 @@ resolve_socket_addrs: fn(operation: String, host: String, port: Int) -[Net, Time
         return Err(net_err(operation, host, "socket host is empty or contains invalid bytes"))
     }
     if !valid_port(port) -> return Err(net_err(operation, host, "port must be in 0..=65535"))
-    host_text := host
+    ^host_text: host
     if contains_byte(host, 58) && !starts_with(host, "[") -> host_text = "[{host}]"
     text: "{host_text}:{port}"
     if socket_addr_parse(text) == .Ok(address) -> return Ok([SocketAddr]{address})
@@ -400,10 +402,10 @@ socket_addr_parse: fn(text: String) -> SocketAddr NetError! {
         return Err(net_err("socket_addr_parse", text, "socket address is empty or contains control bytes"))
     }
     raw: text.bytes()
-    host := ""
-    port_text := ""
-    scope := 0
-    bytes := [U8]{}
+    ^host: ""
+    ^port_text: ""
+    ^scope: 0
+    ^bytes: [U8]{}
     if raw[0] == (U8{91}) {
         close: last_index(raw, 93)
         if close < 2 || close + 2 >= raw.len() || raw[close + 1] != (U8{58}) {
@@ -457,9 +459,7 @@ tcp_listen: fn(addr: String) -[Net]> TCPListener NetError! {
     rt.tcp_listen(addr)
 }
 
-tcp_listen_addr: fn(addr: SocketAddr) -[Net]> TCPListener NetError! {
-    rt.tcp_listen_addr(addr)
-}
+tcp_listen_addr: fn(addr: SocketAddr) -[Net]> TCPListener NetError! { rt.tcp_listen_addr(addr) }
 
 tcp_accept: fn(listener: TCPListener) -[Net, Time.Wait]> TCPStream NetError! {
     rt.tcp_accept(listener)
@@ -577,16 +577,14 @@ tcp_reply: fn(stream: ^^TCPStream, status: String, body: String) -[Net, Time.Wai
     if !valid_status(status) {
         return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
     }
-    conn := stream.move()
+    ^conn: stream.move()
     conn.write_bytes("HTTP/1.1 {status}\r\nContent-Length: {body.bytes().len()}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{body}".bytes()) ?? return Err(err)
     return conn.shutdown(NetShutdown.Write)
 }
 
 nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! { rt.nodelay(stream) }
 
-set_nodelay: fn(stream: ^TCPStream, on: Bool) -[Net]> NetError! {
-    rt.set_nodelay(stream, on)
-}
+set_nodelay: fn(stream: ^TCPStream, on: Bool) -[Net]> NetError! { rt.set_nodelay(stream, on) }
 
 ttl: fn(stream: TCPStream) -[Net]> Int NetError! { rt.ttl(stream) }
 
@@ -611,9 +609,7 @@ udp_bind: fn(addr: String) -[Net]> UDPSocket NetError! {
 
 udp_bind_addr: fn(addr: SocketAddr) -[Net]> UDPSocket NetError! { rt.udp_bind_addr(addr) }
 
-udp_local_addr: fn(socket: UDPSocket) -[Net]> SocketAddr NetError! {
-    rt.udp_local_addr(socket)
-}
+udp_local_addr: fn(socket: UDPSocket) -[Net]> SocketAddr NetError! { rt.udp_local_addr(socket) }
 
 udp_send_to: fn(socket: UDPSocket, text: String, addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
     rt.udp_send_to(socket, text, addr)
@@ -654,8 +650,16 @@ unix_accept: fn(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! 
     rt.unix_accept(listener)
 }
 
-// The checked `unix_connect` rows run these entries, picked by argument
-// count; their zones are the calls' label rules.
+/// A stream connected to the Unix socket at `path`, waiting at most
+/// `deadline` when one is given.
+unix_connect: fn(path: String, /, *, deadline: Duration?{None}) -[Net, Time.Wait]> UnixStream NetError! {
+    if deadline == .Val(limit) -> return rt.unix_connect_deadline_host(path, limit.ns)
+    rt.unix_connect_host(path)
+}
+
+// A compiler that still checks `unix_connect` through its dispatcher row
+// runs these entries, picked by argument count; their zones are the calls'
+// label rules.
 #Builtin.Role(.UnixConnect) priv __unix_connect_entry: fn(path: String, /) -[Net, Time.Wait]> UnixStream NetError! {
     rt.unix_connect_host(path)
 }
@@ -664,9 +668,7 @@ unix_accept: fn(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! 
     rt.unix_connect_deadline_host(path, deadline.ns)
 }
 
-unix_read: fn(stream: ^UnixStream) -[Net, Time.Wait]> String NetError! {
-    rt.unix_read(stream)
-}
+unix_read: fn(stream: ^UnixStream) -[Net, Time.Wait]> String NetError! { rt.unix_read(stream) }
 
 unix_write: fn(stream: ^UnixStream, text: String) -[Net, Time.Wait]> NetError! {
     rt.unix_write(stream, text)
@@ -697,7 +699,7 @@ unix_send: fn(stream: ^UnixStream, bytes: [U8], fds: [sys.Fd]) -[Net, Time.Wait]
     if fds.len() > 253 {
         return Err(net_err("unix_send", "", "a send carries at most 253 descriptors"))
     }
-    tokens := [Int]{}
+    ^tokens: [Int]{}
     loop fd in fds { tokens.push(sys.__fd_token(fd)) }
     rt.unix_send_fds_raw(stream, bytes, tokens)
 }
@@ -715,9 +717,9 @@ unix_receive: fn(stream: ^UnixStream, max: Int) -[Net, Time.Wait]> UnixMessage N
     // and then one byte counting them.
     count: Int{packed[packed.len() - 1]}
     end: packed.len() - 1 - count * 8
-    fds := [sys.Fd]{}
+    ^fds: [sys.Fd]{}
     loop index in 0..<count {
-        token := 0
+        ^token: 0
         loop byte in 0..<8 -> token = token * 256 + (Int{packed[end + index * 8 + 7 - byte]})
         fds.push(sys.__fd_adopt(token))
     }
@@ -904,7 +906,7 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
 // The resolver leaf answers native SRV rows; the public record is the Jet
 // `SRVRecord`, read field by field once per answer.
 srv_records: fn(raw: [DNSSRV]) -> [SRVRecord] Never! {
-    records := [SRVRecord]{}
+    ^records: [SRVRecord]{}
     loop row in raw {
         records.push(SRVRecord{target: rt.dns_srv_target(row), port: rt.dns_srv_port(row), priority: rt.dns_srv_priority(row), weight: rt.dns_srv_weight(row)})
     }
@@ -1108,7 +1110,7 @@ valid_host_text: fn(host: String) -> Bool Never! {
     raw: host.bytes()
     if raw.len() == 0 -> return false
     if raw[0] == (U8{91}) && (raw.len() < 3 || raw[raw.len() - 1] != (U8{93})) -> return false
-    i := 0
+    ^i: 0
     loop i < raw.len() {
         n: Int{raw[i]}
         if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 -> return false
@@ -1160,7 +1162,7 @@ index_of: fn(raw: [U8], b: Int) -> Int Never! {
 }
 
 last_index: fn(raw: [U8], b: Int) -> Int Never! {
-    i := raw.len() - 1
+    ^i: raw.len() - 1
     loop i >= 0 {
         if (Int{raw[i]}) == b -> return i
         i -= 1
@@ -1171,7 +1173,7 @@ last_index: fn(raw: [U8], b: Int) -> Int Never! {
 parse_port: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return None
-    n := 0
+    ^n: 0
     loop b in raw {
         d: Int{b}
         if d < 48 || d > 57 -> return None
@@ -1182,7 +1184,7 @@ parse_port: fn(text: String) -> Int? Never! {
 }
 
 ascii_lower: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
@@ -1195,8 +1197,8 @@ slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
 }
 
 slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    limit := if end < raw.len() -> end else -> raw.len()
+    ^out: [U8]{}
+    ^limit: if end < raw.len() -> end else -> raw.len()
     if start < 0 || start >= limit -> return out
     loop i in start..<limit -> out.push(raw[i])
     out
@@ -1298,13 +1300,13 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 // no sign, whitespace, leading zeroes, or abbreviated dotted forms.
 parse_ipv4_bytes: fn(text: String) -> [U8]? Never! {
     raw: text.bytes()
-    bytes := [U8]{}
-    start := 0
+    ^bytes: [U8]{}
+    ^start: 0
     loop i in 0..<(raw.len() + 1) {
         if i < raw.len() && raw[i] != (U8{46}) -> next
         if i == start || i - start > 3 -> return None
         if i - start > 1 && raw[start] == (U8{48}) -> return None
-        value := 0
+        ^value: 0
         loop j in start..<i {
             digit: Int{raw[j]} - 48
             if digit < 0 || digit > 9 -> return None
@@ -1321,10 +1323,10 @@ parse_ipv4_bytes: fn(text: String) -> [U8]? Never! {
 parse_ip_bytes: fn(text: String) -> [U8]? Never! {
     if !contains_byte(text, 58) -> return parse_ipv4_bytes(text)
     raw: text.bytes()
-    words := [Int]{}
-    compression := -1
-    start := 0
-    position := 0
+    ^words: [Int]{}
+    ^compression: -1
+    ^start: 0
+    ^position: 0
     if raw[0] == (U8{58}) {
         if raw.len() < 2 || raw[1] != (U8{58}) -> return None
         compression = 0
@@ -1348,7 +1350,7 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
             words.push(Int{dotted[2]} * 256 + Int{dotted[3]})
         } else {
             if position - start > 4 -> return None
-            value := 0
+            ^value: 0
             loop j in start..<position {
                 digit: net_hex_digit(raw[j])
                 if digit < 0 -> return None
@@ -1368,7 +1370,7 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
     }
     if compression < 0 && words.len() != 8 -> return None
     if compression >= 0 && words.len() >= 8 -> return None
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop i in 0..<(words.len() + 1) {
         if i == compression {
             loop _ in 0..<(8 - words.len()) {
@@ -1393,9 +1395,9 @@ net_hex_digit: fn(byte: U8) -> Int Never! {
 }
 
 net_hex_word: fn(word: Int) -> String Never! {
-    value := word
-    bytes := [U8]{}
-    started := false
+    ^value: word
+    ^bytes: [U8]{}
+    ^started: false
     loop divisor in ([Int]{4096, 256, 16, 1}) {
         digit: (value /% divisor) %% 16
         if digit > 0 || started || divisor == 1 {
@@ -1408,15 +1410,15 @@ net_hex_word: fn(word: Int) -> String Never! {
 
 format_ip_bytes: fn(bytes: [U8]) -> String Never! {
     if bytes.len() == 4 -> return "{Int{bytes[0]}}.{Int{bytes[1]}}.{Int{bytes[2]}}.{Int{bytes[3]}}"
-    words := [Int]{}
+    ^words: [Int]{}
     loop i in 0..<8 -> words.push(Int{bytes[i * 2]} * 256 + Int{bytes[i * 2 + 1]})
     // std::net's canonical IPv4-mapped spelling is dotted, not hexadecimal.
     if words[0] == 0 && words[1] == 0 && words[2] == 0 && words[3] == 0 && words[4] == 0 && words[5] == 65535 {
         return "::ffff:{Int{bytes[12]}}.{Int{bytes[13]}}.{Int{bytes[14]}}.{Int{bytes[15]}}"
     }
-    best_start := -1
-    best_length := 1
-    i := 0
+    ^best_start: -1
+    ^best_length: 1
+    ^i: 0
     loop i < 8 {
         if words[i] != 0 {
             i += 1
@@ -1429,7 +1431,7 @@ format_ip_bytes: fn(bytes: [U8]) -> String Never! {
             best_length = i - start
         }
     }
-    result := ""
+    ^result: ""
     i = 0
     loop i < 8 {
         if i == best_start {
@@ -1485,7 +1487,7 @@ format_ip_bytes: fn(bytes: [U8]) -> String Never! {
 parse_scope: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return None
-    value := 0
+    ^value: 0
     loop byte in raw {
         digit: Int{byte} - 48
         if digit < 0 || digit > 9 -> return None
@@ -1496,8 +1498,8 @@ parse_scope: fn(text: String) -> Int? Never! {
 }
 
 decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < bytes.len() {
         lead: Int{bytes[i]}
         if lead < 128 {
@@ -1505,12 +1507,12 @@ decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
             i += 1
             next
         }
-        width := 0
+        ^width: 0
         if lead >= 194 && lead <= 223 -> width = 2
         if lead >= 224 && lead <= 239 -> width = 3
         if lead >= 240 && lead <= 244 -> width = 4
-        consumed := 1
-        valid := width > 0
+        ^consumed: 1
+        ^valid: width > 0
         loop valid && consumed < width {
             if i + consumed >= bytes.len() {
                 valid = false

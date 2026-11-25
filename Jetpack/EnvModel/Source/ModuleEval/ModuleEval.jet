@@ -57,7 +57,7 @@ envmodel_first_error: fn(diagnostics: [Diagnostic]) -> Diagnostic? Never! {
 
 // The last error-severity diagnostic in `diagnostics`, if any.
 envmodel_last_error: fn(diagnostics: [Diagnostic]) -> Diagnostic? Never! {
-    found := Diagnostic?{None}
+    ^found: Diagnostic?{None}
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> found = Val(diagnostic)
     }
@@ -92,7 +92,7 @@ envmodel_environment_reads: fn(src: String) -> [EnvironmentRead] EnvModelEvalErr
     if lexed.diagnostics.len() > 0 {
         return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
     }
-    reads := [EnvironmentRead]{}
+    ^reads: [EnvironmentRead]{}
     envmodel_collect_environment_reads(lexed.tokens, lexed.tables, reads)
     Ok(reads)
 }
@@ -103,7 +103,7 @@ envmodel_collect_environment_reads: fn(all_tokens: [Token], tables: TokenTables,
         // The lexer reads `$NAME` as one identifier word.
         if token.kind == TOKEN_IDENT && token_decoded(tables, token).starts_with(COMPTIME_MARK) {
             name: token_decoded(tables, token)
-            seen := false
+            ^seen: false
             loop read in reads {
                 if read.name == name -> seen = true
             }
@@ -121,7 +121,7 @@ envmodel_collect_environment_reads: fn(all_tokens: [Token], tables: TokenTables,
 
 // Each read's current process value (empty when unset), keyed by its `$NAME`.
 envmodel_environment_globals: fn(reads: [EnvironmentRead]) -[Env]> [String:CtValue] Never! {
-    globals := [String:CtValue]{}
+    ^globals: [String:CtValue]{}
     loop read in reads {
         name: read.name.removeprefix("$")
         globals[read.name] = CtValue.Str{value: envmodel_module_sys.get(name) ?? ""}
@@ -131,12 +131,12 @@ envmodel_environment_globals: fn(reads: [EnvironmentRead]) -[Env]> [String:CtVal
 
 // Evaluate every enabled `Item.Module` in `items` (already parsed).
 envmodel_evaluate_modules: fn(items: [Item], src: String, base_dir: String) -> [EvaluatedModule] EnvModelEvalError! {
-    scope := ModuleEvalScope{base_dir: base_dir, source: src, values: [Int:CtValue]{}}
+    ^scope: ModuleEvalScope{base_dir: base_dir, source: src, values: [Int:CtValue]{}}
     reads: envmodel_environment_reads(src)
     computed: envmodel_collect_comptime_globals(items, scope, envmodel_environment_globals(reads))
     globals: computed.globals
     scope.values = computed.values
-    out := [EvaluatedModule]{}
+    ^out: [EvaluatedModule]{}
     loop item in items {
         if item == {
             .Module(decl) -> {
@@ -167,7 +167,7 @@ ModuleConstants: struct {
 }
 
 envmodel_module_constants: fn(items: [Item], environment_globals: [String:CtValue]) -> ModuleConstants Never! {
-    constants := ModuleConstants{names: [String]{}, spans: [Span]{}, globals: environment_globals, all_plain: true}
+    ^constants: ModuleConstants{names: [String]{}, spans: [Span]{}, globals: environment_globals, all_plain: true}
     loop item in items {
         if item == .Const(definition) {
             if !definition.mutable {
@@ -188,7 +188,7 @@ envmodel_module_constants: fn(items: [Item], environment_globals: [String:CtValu
 // before any namespace field runs, as envmodel_compute_values does.
 envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue]) -> ComputedValues EnvModelEvalError! {
     constants: envmodel_module_constants(items, environment_globals)
-    plan := envmodel_value_program(scope.source, environment_globals)
+    ^plan: envmodel_value_program(scope.source, environment_globals)
     loop item in items {
         if item == .Module(decl) {
             if decl.auto_discovered {
@@ -213,7 +213,7 @@ envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, env
 envmodel_compute_values: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue], plan: EnvValueProgram, constants: ModuleConstants) -> ComputedValues EnvModelEvalError! {
     names: constants.names
     name_spans: constants.spans
-    globals := constants.globals
+    ^globals: constants.globals
     if constants.all_plain && !plan.needed {
         return Ok(ComputedValues{globals: globals, values: plan.known})
     }
@@ -224,7 +224,7 @@ envmodel_compute_values: fn(items: [Item], scope: ModuleEvalScope, environment_g
         // A span in the generated values stands for the source text it was
         // spelled from; one past them lies in the schema or the program's
         // own lines: the first value.
-        span := first
+        ^span: first
         if diagnostic.span == .Val(at) {
             if {
                 at.end <= scope.source.count_bytes() -> { span = at }
@@ -235,14 +235,14 @@ envmodel_compute_values: fn(items: [Item], scope: ModuleEvalScope, environment_g
         }
         return Err(EnvModelEvalError{diagnostic: envmodel_value_diagnostic(plan, diagnostic, span)})
     }
-    computed := [String:CtValue]{}
+    ^computed: [String:CtValue]{}
     loop named in outcome.values -> computed[named.name] = named.value
     // Every name is read back from the compiler, literals included.
     loop (index, name) in names {
         value: computed.get(name) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(name_spans[index]), "the module value `{name}` holds a value an environment can't read as data, such as a function")})
         globals[name] = value
     }
-    fields := plan.known
+    ^fields: plan.known
     loop (start, generated) in plan.leaves {
         if fields.get(start) != None -> next
         value: computed.get(generated) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(Span{start: start, end: start}), "this value holds a value an environment can't read as data, such as a function")})
@@ -292,13 +292,13 @@ envmodel_plan_module_values: fn(plan: ^EnvValueProgram, decl: ModuleDecl, global
 }
 
 envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalScope, globals: [String:CtValue]) -> EvaluatedModule EnvModelEvalError! {
-    entries := [ModuleEntry]{}
-    images := [ImagePlan]{}
-    environment_contributions := [EnvironmentContribution]{}
-    package_profiles := [PackageProfileSpec]{}
-    systems := [SystemPlan]{}
-    fleets := [FleetPlan]{}
-    vmtests := [FleetPlan]{}
+    ^entries: [ModuleEntry]{}
+    ^images: [ImagePlan]{}
+    ^environment_contributions: [EnvironmentContribution]{}
+    ^package_profiles: [PackageProfileSpec]{}
+    ^systems: [SystemPlan]{}
+    ^fleets: [FleetPlan]{}
+    ^vmtests: [FleetPlan]{}
     integrations: envmodel_evaluate_integration_imports(decl.imports, scope)
     source_bytes: src.bytes()
     loop contribution in decl.contributions {
@@ -321,7 +321,7 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
             }
             .Env(lit) -> {
                 capture: envmodel_evaluate_env_fields(lit.fields, src, scope, globals, source)
-                services := [DevServicePlan]{}
+                ^services: [DevServicePlan]{}
                 loop service in lit.services {
                     services.push(envmodel_evaluate_dev_service(service, scope))
                 }
@@ -338,7 +338,7 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
                 systems.push(envmodel_evaluate_system(contribution.path, lit, src, scope, globals))
             }
             .Fleet(lit) -> {
-                hosts := [HostPlan]?{None}
+                ^hosts: [HostPlan]?{None}
                 loop field in lit.fields {
                     if field.value == {
                         .Hosts(host_entries) -> hosts = Val(envmodel_evaluate_hosts(host_entries, src, scope, globals))
@@ -349,7 +349,7 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
                 fleets.push(FleetPlan{name: contribution.path, hosts: captured})
             }
             .VMTest(lit) -> {
-                hosts := [HostPlan]?{None}
+                ^hosts: [HostPlan]?{None}
                 loop field in lit.fields {
                     if field.value == {
                         // VM hosts use the same override evaluator as fleet
@@ -384,11 +384,11 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
 // Merge every evaluated module's contributions through the §6 engine,
 // grouping by `(namespace, path)` first, in first-seen key order.
 envmodel_merge_all: fn(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeError! {
-    keys := [ModuleEntryKey]{}
-    grouped := [[EntryContribution]]{}
+    ^keys: [ModuleEntryKey]{}
+    ^grouped: [[EntryContribution]]{}
     loop evaluated in modules {
         loop keyed in evaluated.entries {
-            index := -1
+            ^index: -1
             loop position in 0..<keys.len() {
                 if keys[position] == keyed.key {
                     index = position
@@ -399,13 +399,13 @@ envmodel_merge_all: fn(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeE
                 keys.push(keyed.key)
                 grouped.push([EntryContribution]{keyed.entry})
             } else {
-                group := grouped[index]
+                ^group: grouped[index]
                 group.push(keyed.entry)
                 grouped[index] = group
             }
         }
     }
-    out := [MergedModuleEntry]{}
+    ^out: [MergedModuleEntry]{}
     loop position in 0..<keys.len() {
         out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])})
     }
@@ -437,11 +437,11 @@ envmodel_pkg_ref: fn(pkg: Pkg) -> String Never! {
 // Both host namespaces evaluate overrides before capture; an absent tail stays
 // absent, not an empty record.
 envmodel_evaluate_hosts: fn(entries: [HostEntry], src: String, scope: ModuleEvalScope, globals: [String:CtValue]) -> [HostPlan] EnvModelEvalError! {
-    captured := [HostPlan]{}
+    ^captured: [HostPlan]{}
     bytes: src.bytes()
     loop entry in entries {
-        overrides := HostOverride?{None}
-        override_source := String?{None}
+        ^overrides: HostOverride?{None}
+        ^override_source: String?{None}
         if entry.overrides == {
             .Val(span) -> {
                 record: envmodel_host_override_record(bytes, span)
@@ -477,11 +477,11 @@ envmodel_host_override_record: fn(bytes: [U8], span: Span) -> HostOverrideRecord
     pad: " ".repeat(at - head.bytes().len())
     wrapped: "{pad}{head}{source}"
     program: envmodel_parse_program(wrapped) ?? {
-        diagnostic := err.diagnostic
+        ^diagnostic: err.diagnostic
         diagnostic.span = Val(span)
         return Err(EnvModelEvalError{diagnostic: diagnostic})
     }
-    found := ModuleDecl?{None}
+    ^found: ModuleDecl?{None}
     loop item in program.items {
         if item == {
             .Module(decl) -> {
@@ -512,8 +512,8 @@ envmodel_plan_hosts: fn(plan: ^EnvValueProgram, entries: [HostEntry], globals: [
     loop entry in entries {
         span: entry.overrides ?? next
         record: envmodel_host_override_record(plan.source, span) ?? next
-        siblings := [String:String]{}
-        readable := envmodel_value_readable(plan, names)
+        ^siblings: [String:String]{}
+        ^readable: envmodel_value_readable(plan, names)
         loop field in record.lit.fields {
             if field.value == .Other(expr) {
                 if siblings.get(field.name) != None -> next
@@ -521,7 +521,7 @@ envmodel_plan_hosts: fn(plan: ^EnvValueProgram, entries: [HostEntry], globals: [
                 if !readable.contains(field.name) -> readable.push(field.name)
             }
         }
-        planned := [String:Bool]{}
+        ^planned: [String:Bool]{}
         loop field in record.lit.fields {
             if field.value == .Other(expr) {
                 generated: if planned.get(field.name) == None -> siblings.get(field.name) ?? "" else -> ""
@@ -540,32 +540,32 @@ envmodel_plan_hosts: fn(plan: ^EnvValueProgram, entries: [HostEntry], globals: [
 // generic fields and its source text.
 envmodel_evaluate_host_override: fn(record: HostOverrideRecord, scope: ModuleEvalScope, globals: [String:CtValue]) -> HostOverride EnvModelEvalError! {
     source: record.source
-    field_names := [String]{}
+    ^field_names: [String]{}
     loop field in record.lit.fields {
         if field.value == .Other(_) && !field_names.contains(field.name) {
             field_names.push(field.name)
         }
     }
-    readable := globals.keys().to_list()
+    ^readable: globals.keys().to_list()
     loop name in field_names {
         if !readable.contains(name) -> readable.push(name)
     }
     prefix_len: record.wrapped.bytes().len() - source.bytes().len()
-    fields := [{name: String, value: HostOverrideValue}]{}
-    provenance := [HostOverrideProvenance]{}
+    ^fields: [{name: String, value: HostOverrideValue}]{}
+    ^provenance: [HostOverrideProvenance]{}
     loop field in record.lit.fields {
         value: if field.value == {
             .Platform(os, arch, span) -> HostOverrideValue.Platform{value: envmodel_check_platform(os, arch, span)}
             .Packages(expr) -> HostOverrideValue.Packages{values: envmodel_extract_packages(expr, record.wrapped).packages}
             .Services(entries) -> {
-                services := [ServicePlan]{}
+                ^services: [ServicePlan]{}
                 loop entry in entries {
                     services.push(envmodel_evaluate_system_service(entry, scope))
                 }
                 HostOverrideValue.Services{values: services}
             }
             .Options(entries) -> {
-                options := [OptionPlan]{}
+                ^options: [OptionPlan]{}
                 loop entry in entries {
                     options.push(OptionPlan{key: entry.key, value: envmodel_evaluate_option_value(entry.value, envmodel_host_field_source(source, entry.value_span, prefix_len), scope, readable)})
                 }
@@ -602,7 +602,7 @@ envmodel_host_field_source: fn(source: String, span: Span, prefix_len: Int) -> S
 // Dependencies of typed fields only name generic sibling fields, de-duplicated
 // and sorted regardless of source order.
 envmodel_typed_field_dependencies: fn(value: SystemFieldValue, field_names: [String]) -> [String] Never! {
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     if value == {
         .Packages(expr) | .Other(expr) -> {
             dependencies = envmodel_dependencies_for_expression(expr, field_names)

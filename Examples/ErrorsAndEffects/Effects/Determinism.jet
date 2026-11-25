@@ -41,14 +41,14 @@ coin_and_card: fn(rng: ^RNG) -[]> String {
 }
 
 run: fn() {
-    clock := Clock.new(1000)
-    rng := random.rng(42)
+    ^clock: Clock.new(1000)
+    ^rng: random.rng(42)
     print(roll_at(clock, rng))
     print(two_rolls(rng))
     print(coin_and_card(rng))
     // D-DET-CAPAPI: in-place deterministic shuffle (Fisher–Yates) — the list arg
     // needs `^`, the rng receiver needs `^` (every draw advances the stream).
-    deck := [1, 2, 3, 4, 5]
+    ^deck: [1, 2, 3, 4, 5]
     rng.shuffle(deck)
     print("deck={deck}")
     // D-DET-CAPAPI: the widened clock — absolute `advance`, and a `Duration`-based
@@ -60,7 +60,7 @@ run: fn() {
     print("span={span_ms}ms waited={clock.wait(span)}")
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.
-    fixed := 0
+    ^fixed: 0
     #Nondeterministic("example deliberately reads ambient state") { fixed = 7 }
     print("escape: {fixed}")
 }

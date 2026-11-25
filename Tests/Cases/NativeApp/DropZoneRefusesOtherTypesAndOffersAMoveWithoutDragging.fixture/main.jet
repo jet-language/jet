@@ -47,7 +47,7 @@ move_task: fn(task: Task, column: Int) app.Notice! {
     if task.id != TASK.id {
         return Err(app.Notice{text: "Couldn't move task {task.id}: the board has no such task"})
     }
-    held := BOARD.guard_edit()
+    ^held: BOARD.guard_edit()
     held.value.column = column
     app.invalidate(task_column)
     Ok()

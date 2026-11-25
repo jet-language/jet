@@ -74,7 +74,7 @@ sema_data_filter_lambda: fn(lambda: Lambda, row: Type, check: SemaBodyCheck) -> 
 sema_data_filter_body: fn(predicate: Expr, parameter: String, row: Type, check: SemaBodyCheck) -> SemaDataFilterSQL Never! {
     fields: sema_data_filter_fields(row, check)
     if fields.len() == 0 -> return sema_data_filter_none()
-    values := [Expr]{}
+    ^values: [Expr]{}
     condition: sema_data_filter_condition(predicate, parameter, fields, values) ?? return sema_data_filter_none()
     SemaDataFilterSQL{condition: condition, values: values}
 }
@@ -85,7 +85,7 @@ sema_data_filter_body: fn(predicate: Expr, parameter: String, row: Type, check: 
 // declaration is checked here, and its body keeps the condition the
 // program check writes.
 sema_data_filter_fields: fn(row: Type, check: SemaBodyCheck) -> [SemaDataFilterField] Never! {
-    out := [SemaDataFilterField]{}
+    ^out: [SemaDataFilterField]{}
     if row == .Named(name) {
         definition: sema_comparability_definition(check.environment.*, check.program.*, check.environment.module_identity, name) ?? return out
         if !sema_data_filter_derived(definition) || sema_data_filter_migrated(check.program.*, definition.name) {
@@ -243,12 +243,12 @@ sema_data_filter_texts: fn(sql: SemaDataFilterSQL, span: Span) -> Expr Never! {
 // Values that do not check give the empty condition, and the predicate
 // reports what is wrong with them.
 sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, check: ^SemaBodyCheck, source_args: ^[CallArg], argument_types: ^[Type], typed: ^[TExpr]) {
-    sql := sema_data_filter_sql(callback, row, check)
-    texts := sema_data_filter_texts(sql, span)
+    ^sql: sema_data_filter_sql(callback, row, check)
+    ^texts: sema_data_filter_texts(sql, span)
     text_list: Type.List{element: Type.String}
-    probe := [Diagnostic]{}
+    ^probe: [Diagnostic]{}
     sema_body_check_swap_diagnostics(check, probe)
-    bound := sema_check_expression(texts, Val(text_list), check)
+    ^bound: sema_check_expression(texts, Val(text_list), check)
     sema_body_check_swap_diagnostics(check, probe)
     if bound == None || sema_has_error_since(probe, 0) {
         sql = sema_data_filter_none()
@@ -272,7 +272,7 @@ SemaDataCountByTarget: struct {
 sema_data_count_by_target: fn(callback: Expr, row: Type, check: SemaBodyCheck) -> SemaDataCountByTarget? Never! {
     if callback == .Lambda(lambda, _) {
         if lambda.params.len() != 1 -> return None
-        body := Expr?{None}
+        ^body: Expr?{None}
         if lambda.body == .Expr(value) -> body = Val(value) else if lambda.body == .Block(statements) && statements.len() == 1 && statements[0] == .Expr(value) {
             body = Val(value)
         }

@@ -64,8 +64,8 @@ pkg_parse_lints_policy: fn(body: String) -> [String]? PackageParseError! {
 // The source-level policy declarations of a `policy:` body. Package-only
 // fields are skipped when `package_only_fields` is set.
 pkg_parse_policy: fn(body: String, package_only_fields: Bool) -> [PolicyDeclaration] PackageParseError! {
-    out := [PolicyDeclaration]{}
-    seen := [PolicyKey]{}
+    ^out: [PolicyDeclaration]{}
+    ^seen: [PolicyKey]{}
     loop entry in pkg_key_value_entries(body) {
         name: entry.key
         raw: entry.value
@@ -147,15 +147,15 @@ PackagePolicySurface: struct {
 }
 
 pkg_parse_package_policy_surface: fn(body: String) -> PackagePolicySurface PackageParseError! {
-    surface := PackagePolicySurface{licenses: None, source_maps: [PolicySourceMap]{}, exceptions: [PackagePolicyException]{}, unsafe_paths: None, memory_kernel: None, expert: None, deps: None, claims_min: None}
-    seen_sources := [String]{}
-    sources_seen := false
-    exceptions_seen := false
-    unsafe_seen := false
-    memory_seen := false
-    expert_seen := false
-    deps_seen := false
-    claims_seen := false
+    ^surface: PackagePolicySurface{licenses: None, source_maps: [PolicySourceMap]{}, exceptions: [PackagePolicyException]{}, unsafe_paths: None, memory_kernel: None, expert: None, deps: None, claims_min: None}
+    ^seen_sources: [String]{}
+    ^sources_seen: false
+    ^exceptions_seen: false
+    ^unsafe_seen: false
+    ^memory_seen: false
+    ^expert_seen: false
+    ^deps_seen: false
+    ^claims_seen: false
     loop entry in pkg_key_value_entries(body) {
         raw: entry.value
         if entry.key == {
@@ -202,7 +202,7 @@ pkg_parse_package_policy_surface: fn(body: String) -> PackagePolicySurface Packa
                     return Err(pkg_bad_policy("`policy.claims` is declared more than once"))
                 }
                 claims_seen = true
-                min_seen := false
+                ^min_seen: false
                 loop field in pkg_key_value_entries(pkg_record_value_body(raw, "policy.claims")) {
                     if field.key != "min" {
                         return Err(pkg_bad_policy("`policy.claims` has unknown field `{field.key}`; use `min`"))
@@ -276,7 +276,7 @@ pkg_policy_any_blank: fn(values: [String]) -> Bool Never! {
 }
 
 pkg_policy_has_repeat: fn(values: [String]) -> Bool Never! {
-    unique := [String]{}
+    ^unique: [String]{}
     loop value in values {
         if unique.contains(value) -> return true
         unique.push(value.copy())
@@ -311,7 +311,7 @@ pkg_parse_policy_path: fn(input: String, field: String) -> String PackageParseEr
     if value.starts_with("/") {
         return Err(pkg_bad_policy("`{field}` must stay within the project root"))
     }
-    components := [String]{}
+    ^components: [String]{}
     loop component in value.split("/") {
         if component == "" || component == "." -> next
         if component == ".." {
@@ -328,7 +328,7 @@ pkg_parse_policy_path: fn(input: String, field: String) -> String PackageParseEr
 
 pkg_parse_policy_path_list: fn(raw: String, field: String) -> [String] PackageParseError! {
     inner: pkg_strip_wrapped(raw.trim(), "[", "]") ?? return Err(pkg_bad_policy("`{field}` must contain a path list"))
-    paths := [String]{}
+    ^paths: [String]{}
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" -> return Err(pkg_bad_policy("`{field}` cannot contain an empty path"))
@@ -340,7 +340,7 @@ pkg_parse_policy_path_list: fn(raw: String, field: String) -> [String] PackagePa
 
 pkg_parse_dependency_policy_list: fn(raw: String) -> [String] PackageParseError! {
     inner: pkg_strip_wrapped(raw.trim(), "[", "]") ?? return Err(pkg_bad_policy("`policy.deps` must contain a dependency-name list"))
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" {
@@ -357,17 +357,17 @@ pkg_parse_dependency_policy_list: fn(raw: String) -> [String] PackageParseError!
 
 pkg_parse_policy_exceptions: fn(raw: String) -> [PackagePolicyException] PackageParseError! {
     inner: pkg_strip_wrapped(raw.trim(), "[", "]") ?? return Err(pkg_bad_policy("`policy.exceptions` must be a list of PolicyException records"))
-    exceptions := [PackagePolicyException]{}
-    seen_ids := [String]{}
-    seen_scopes := [String]{}
+    ^exceptions: [PackagePolicyException]{}
+    ^seen_ids: [String]{}
+    ^seen_scopes: [String]{}
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" -> next
         body: pkg_strip_wrapped(entry.copy(), "{POLICY_EXCEPTION_TYPE}{{", "}}") ?? return Err(pkg_bad_policy("`policy.exceptions` entries must use `PolicyException{{ id: \"…\", scope: \"package#version\", reason: \"…\", expires: … }}`"))
-        id_value := String?{None}
-        scope_value := String?{None}
-        reason_value := String?{None}
-        expires_value := String?{None}
+        ^id_value: String?{None}
+        ^scope_value: String?{None}
+        ^reason_value: String?{None}
+        ^expires_value: String?{None}
         loop field in pkg_key_value_entries(body) {
             duplicate: if field.key == {
                 POLICY_EXCEPTION_FIELD_ID -> id_value != None
@@ -447,7 +447,7 @@ pkg_is_exact_exception_scope: fn(scope: String) -> Bool Never! {
 pkg_parse_policy_expiry: fn(raw: String) -> Int PackageParseError! {
     value: raw.trim()
     if pkg_parse_u64(value) == .Val(timestamp) -> return Ok(timestamp)
-    date := String?{None}
+    ^date: String?{None}
     if pkg_strip_wrapped(value, "Date.parse(\"", "\")?") == .Val(inner) -> date = Val(inner) else {
         unquoted: pkg_unquote(value)
         if unquoted != value -> date = Val(unquoted)
@@ -500,10 +500,10 @@ GuaranteePolicy: struct {
 }
 
 pkg_parse_guarantee_policy: fn(body: String) -> GuaranteePolicy PackageParseError! {
-    contain := [String]{}
-    contain_seen := false
-    harden_seen := false
-    harden := false
+    ^contain: [String]{}
+    ^contain_seen: false
+    ^harden_seen: false
+    ^harden: false
     loop entry in pkg_key_value_entries(body) {
         if entry.key == POLICY_FIELD_CONTAIN {
             if contain_seen {
@@ -545,8 +545,8 @@ PackageOrganizationDocument: struct {
 // `authority: { deny: [...] }` block, or both. The organization's authority
 // only narrows, so `deny` is its one field.
 pkg_parse_organization_document: fn(text: String) -> PackageOrganizationDocument PackageParseError! {
-    document := PackageOrganizationDocument{declarations: [PolicyDeclaration]{}, deny: [String]{}}
-    seen := [String]{}
+    ^document: PackageOrganizationDocument{declarations: [PolicyDeclaration]{}, deny: [String]{}}
+    ^seen: [String]{}
     loop entry in pkg_key_value_entries(pkg_strip_comments(text).trim()) {
         if seen.contains(entry.key) {
             return Err(pkg_bad_mem("organization policy `{entry.key}` is declared more than once"))

@@ -99,7 +99,7 @@ s4_review_rows: fn(root: String, file: String, header: String, width: Int) -> [[
     lines: s4_review_read("{root}/{file}").lines()
     assert(lines.len() > 0)
     assert_eq(lines[0], header)
-    result := [[String]]{}
+    ^result: [[String]]{}
     loop index in 1..<lines.len() {
         if lines[index] == "" -> next
         fields: lines[index].split("\t").to_list()
@@ -110,15 +110,15 @@ s4_review_rows: fn(root: String, file: String, header: String, width: Int) -> [[
 }
 
 s4_review_column: fn(rows: [[String]], column: Int) -> [String] {
-    result := [String]{}
+    ^result: [String]{}
     loop row in rows -> result.push(row[column])
     result
 }
 
 s4_review_set: fn(values: [String]) -> [String] {
-    sorted := values
+    ^sorted: values
     sorted.sort()
-    result := [String]{}
+    ^result: [String]{}
     loop value in sorted {
         if result.len() == 0 || result[result.len() - 1] != value -> result.push(value)
     }
@@ -143,7 +143,7 @@ s4_review_field: fn(name: String) -> String {
 
 s4_review_digest: fn() -> String {
     loop field in S4_REVIEW_POLICY_FIELDS -> s4_review_field(field)
-    raw := s4_review_read("Tests/AgentWorkloads/policy.tsv")
+    ^raw: s4_review_read("Tests/AgentWorkloads/policy.tsv")
     loop raw.ends_with("\n") -> raw = s4_review_slice(raw, 0, raw.len() - 1)
     s4_review_crypto.sha256(raw.bytes()).hex()
 }
@@ -168,7 +168,7 @@ s4_review_sha: fn(path: String) -> String {
 }
 
 s4_review_walk: fn(directory: String, relative: String) -> [String] {
-    result := [String]{}
+    ^result: [String]{}
     entries: s4_review_files.list_dir(directory) ?? panic("walk {directory}")
     loop entry in entries {
         child: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
@@ -190,7 +190,7 @@ s4_review_checksum_error: fn(message: String) -> S4ReviewChecksumError {
 }
 
 s4_review_quoted: fn(paths: [String]) -> String {
-    quoted := [String]{}
+    ^quoted: [String]{}
     loop path in paths -> quoted.push("\"{path}\"")
     "[{quoted.join(", ")}]"
 }
@@ -199,8 +199,8 @@ s4_review_quoted: fn(paths: [String]) -> String {
 // unique relative path; the listed set equals the files under inputs/ and
 // expected/; each listed file hashes to its row. Returns the row count.
 s4_review_checksum_closure: fn(root: String, sums: String) -> Int S4ReviewChecksumError! {
-    declared := [String]{}
-    hashes := [String]{}
+    ^declared: [String]{}
+    ^hashes: [String]{}
     loop line in sums.lines() {
         if line == "" -> next
         parts: s4_review_parse.split_once(line.to_string(), "  ")
@@ -214,7 +214,7 @@ s4_review_checksum_closure: fn(root: String, sums: String) -> Int S4ReviewChecks
         declared.push(parts.tail)
         hashes.push(parts.head)
     }
-    actual := [String]{}
+    ^actual: [String]{}
     fixture_roots: [String]{"inputs", "expected"}
     loop name in fixture_roots {
         if s4_review_files.is_dir("{root}/{name}") {
@@ -224,11 +224,11 @@ s4_review_checksum_closure: fn(root: String, sums: String) -> Int S4ReviewChecks
     actual_set: s4_review_set(actual)
     listed: s4_review_set(declared)
     if actual_set != listed {
-        unhashed := [String]{}
+        ^unhashed: [String]{}
         loop path in actual_set {
             if !listed.contains(path) -> unhashed.push(path)
         }
-        missing := [String]{}
+        ^missing: [String]{}
         loop path in listed {
             if !actual_set.contains(path) -> missing.push(path)
         }
@@ -236,7 +236,7 @@ s4_review_checksum_closure: fn(root: String, sums: String) -> Int S4ReviewChecks
     }
     loop relative in listed {
         bytes: s4_review_files.read_bytes("{root}/{relative}") ?? return Err(s4_review_checksum_error("{err}"))
-        index := 0
+        ^index: 0
         loop declared[index] != relative -> index += 1
         if s4_review_crypto.sha256(bytes).hex() != hashes[index] {
             return Err(s4_review_checksum_error("fixture drift: {relative}"))
@@ -246,7 +246,7 @@ s4_review_checksum_closure: fn(root: String, sums: String) -> Int S4ReviewChecks
 }
 
 s4_review_input: fn(path: String) -> String {
-    canonical := ""
+    ^canonical: ""
     if s4_review_files.is_dir(path) {
         loop relative in s4_review_walk(path, "") {
             canonical += "{relative}\t{s4_review_sha("{path}/{relative}")}\n"
@@ -259,7 +259,7 @@ s4_review_input: fn(path: String) -> String {
 }
 
 s4_review_unsigned: fn(value: String, maximum: String, canonical: Bool) -> Bool {
-    raw := value
+    ^raw: value
     if !canonical && raw.starts_with("+") -> raw = s4_review_slice(raw, 1, raw.len())
     if raw == "" -> return false
     loop byte in raw.bytes() {
@@ -314,9 +314,9 @@ s4_review_recorded_baselines_cover_frozen_tasks: fn() {
         assert(s4_review_path(subject[5]) && s4_review_path(subject[6]))
     }
     rows: s4_review_rows("{root}/baselines", "receipt.tsv", S4_REVIEW_BASELINE_HEADER, 23)
-    seen := [String]{}
-    run_id := ""
-    machine := ""
+    ^seen: [String]{}
+    ^run_id: ""
+    ^machine: ""
     loop row in rows {
         assert_eq(row[0], "1")
         assert(S4_REVIEW_BASELINE_ADAPTERS.contains(row[3]))
@@ -364,7 +364,7 @@ s4_review_recorded_baselines_cover_frozen_tasks: fn() {
 
 s4_review_manifest_is_complete_frozen_and_non_vacuous: fn() {
     root: "Tests/AgentWorkloads"
-    hostile := [[String]]{}
+    ^hostile: [[String]]{}
     loop line in s4_review_read("Tests/Fixtures/BuildSandbox/hostile-corpus.tsv").lines() {
         if line == "" || line.starts_with("#") -> next
         row: line.split("\t").to_list()
@@ -374,8 +374,8 @@ s4_review_manifest_is_complete_frozen_and_non_vacuous: fn() {
     }
     assert_eq(hostile.len(), 7)
     tasks: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
-    actual := [[String]]{}
-    ids := [String]{}
+    ^actual: [[String]]{}
+    ^ids: [String]{}
     loop subject in tasks {
         assert_eq(subject[0], "1")
         assert(s4_review_path(subject[5]) && s4_review_path(subject[6]))
@@ -405,7 +405,7 @@ s4_review_manifest_is_complete_frozen_and_non_vacuous: fn() {
                 assert(source.contains("100000") && source.contains(">&2"))
             } else { assert(source.contains("trap '' TERM") && source.contains("50")) }
         } else if hostile_ids.contains(id) {
-            found := false
+            ^found: false
             loop line in s4_review_read("{root}/{subject[6]}").lines() {
                 if id == {
                     "desktop-interaction-focus" -> {
@@ -437,7 +437,7 @@ s4_review_manifest_is_complete_frozen_and_non_vacuous: fn() {
     }
     assert_eq(actual, S4_REVIEW_EXPECTED_TASKS)
     domains: s4_review_rows(root, "domain_contract.tsv", S4_REVIEW_DOMAIN_CONTRACT_HEADER, 6)
-    actual_domains := [[String]]{}
+    ^actual_domains: [[String]]{}
     loop row in domains {
         assert_eq(row[0], "1")
         assert(ids.contains(row[1]))
@@ -485,8 +485,8 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
     assert_eq(systems_adapter[3], "Fixtures/SystemsFileIndex/hostile")
     assert_eq(systems_adapter[5], "Fixtures/SystemsFileIndex/hostile")
     peers: s4_review_rows(root, "peer_ledger.tsv", "version\ttask_id\tselection\tlanguage\tprogram\tsource_url\tsource_revision\tbuild_command\trun_command\tdependency_rule\tsource_boundary\tapplicable_targets\towner", 13)
-    selected := [[String]]{}
-    candidate_cxx := false
+    ^selected: [[String]]{}
+    ^candidate_cxx: false
     loop row in peers {
         if row[2] == "best-applicable" -> selected.push(row.copy())
         if row[2] == "candidate" && row[3] == "cxx" -> candidate_cxx = true
@@ -543,7 +543,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
     assert(!archive[2].contains("libarchive"))
     toolchains: s4_review_rows(root, "toolchain_contract.tsv", "version\tlanguage\tcommand\tversion_prefix", 4)
     assert_eq(toolchains.len(), 6)
-    toolchain_keys := [String]{}
+    ^toolchain_keys: [String]{}
     loop row in toolchains -> toolchain_keys.push("{row[1]}|{row[2]}|{row[3]}")
     assert_eq(s4_review_set(toolchain_keys), s4_review_set([String]{"jet|jet|jet a0.0.", "rust|rustc|rustc 1.97.1", "go|go|go version go1.26.5", "cxx|clang++|clang version 21.1.8", "zig|zig|zig 0.16.0", "domain|node|node v22.23.2"}))
     receipt_fields: S4_REVIEW_COMPILED_RECEIPT_HEADER.split("\t").to_list()
@@ -552,10 +552,10 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
     assert_eq(S4_REVIEW_PEER_LAUNCH_CONTRACT, "compiled-workload-peer-isolation-v1")
     tiers: s4_review_rows(root, "tier_matrix.tsv", "version\ttask_id\tplatform\ttarget\ttier\trequirement\tavailability\tavailability_reason\trationale", 9)
     assert_eq(tiers.len(), 39)
-    availability := [String]{}
-    aarch64 := 0
-    web_found := false
-    cross_web_found := false
+    ^availability: [String]{}
+    ^aarch64: 0
+    ^web_found: false
+    ^cross_web_found: false
     loop row in tiers {
         availability.push("{row[6]}|{row[7]}")
         if row[2] == "cross-target" && row[3] == "aarch64-unknown-linux-gnu" {
@@ -578,7 +578,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
     hosted_ids: [String]{"systems-file-index", "service-json-http", "cli-archive-filter", "library-json-roundtrip", "compute-mandelbrot", "cross-platform-notes"}
     loop id in hosted_ids {
         cross_target: if id == "cross-platform-notes" -> "web" else -> "aarch64-unknown-linux-gnu"
-        required := [String]{}
+        ^required: [String]{}
         loop row in tiers {
             if row[1] == id && row[5] == "required" {
                 required.push("{row[1]}|{row[2]}|{row[3]}|{row[4]}")
@@ -586,9 +586,9 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
         }
         assert_eq(s4_review_set(required), s4_review_set([String]{"{id}|linux|x86_64-unknown-linux-gnu|aot", "{id}|macos|x86_64-apple-darwin|aot", "{id}|windows|x86_64-pc-windows-msvc|aot", "{id}|cross-target|{cross_target}|aot", "{id}|linux|x86_64-unknown-linux-gnu|jit"}))
     }
-    embedded := 0
-    excluded := 0
-    embedded_required := [String]{}
+    ^embedded: 0
+    ^excluded: 0
+    ^embedded_required: [String]{}
     loop row in tiers {
         if row[1] != "embedded-sensor-ring" -> next
         embedded += 1

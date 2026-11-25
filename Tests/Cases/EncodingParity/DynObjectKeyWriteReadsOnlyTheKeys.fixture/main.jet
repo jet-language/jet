@@ -7,9 +7,9 @@
 use json: core.encoding.json
 
 rows: fn(first: Int, count: Int) -> Dyn {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop index in first..<first + count {
-        row := Dyn.object()
+        ^row: Dyn.object()
         row["id"] = Dyn.Int(index)
         row["name"] = Dyn.Text("row {index}")
         items.push(row)
@@ -21,7 +21,7 @@ stamp: fn(report: ^Dyn, key: String, value: Int) { report[key] = Dyn.Int(value) 
 
 run: fn() {
     // Keys set after a large member.
-    after := Dyn.object()
+    ^after: Dyn.object()
     after["rows"] = rows(0, 50000)
     loop index in 0..<300 -> after["key{index}"] = Dyn.Int(index)
     print("after: {after.len()} members, key299 = {after["key299"]}, {after["rows"].len()} rows")
@@ -39,7 +39,7 @@ run: fn() {
     print("first keys: {keys[0]}, {keys[1]}, {keys[2]}; last: {keys[keys.len() - 1]}")
 
     // A report built with keys interleaved between large members.
-    report := Dyn.object()
+    ^report: Dyn.object()
     loop section in 0..<800 {
         report["section{section}"] = rows(section * 250, 250)
         report["count{section}"] = Dyn.Int(250)

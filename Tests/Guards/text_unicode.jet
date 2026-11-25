@@ -6,14 +6,14 @@ use {
 // Port ; exact UnicodeData Cc codepoint vector
 s3_guard_control_scan_ranges: fn() {
     data: s3_control_files.read("Tests/Data/Unicode/Ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
-    controls := [Int]{}
+    ^controls: [Int]{}
     loop raw in data.lines() {
         fields: s3_control_parse.split(raw, ";")
         if fields.len() < 3 -> next
         cp: s3_control_parse.parse_int_base(fields[0], 16) ?? next
         if fields[2] == "Cc" -> controls.push(cp)
     }
-    expected := [Int]{}
+    ^expected: [Int]{}
     loop cp in 0..<32 -> expected.push(cp)
     loop cp in 127..<160 -> expected.push(cp)
     assert_eq(controls, expected)

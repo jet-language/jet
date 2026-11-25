@@ -51,7 +51,7 @@ env_script_lock_write: fn(script_path: String, lock: ScriptLockFile) -[FS]> IOEr
 }
 
 env_script_lock_render: fn(lock: ScriptLockFile) -> String Never! {
-    out := [String]{"version = {lock.version}\n", "script_hash = \"{lock.script_hash}\"\n"}
+    ^out: [String]{"version = {lock.version}\n", "script_hash = \"{lock.script_hash}\"\n"}
     loop dep in lock.deps {
         out.push("\n{SCRIPT_LOCK_DEP_HEADER}\n")
         out.push("name = \"{dep.name}\"\n")
@@ -69,12 +69,12 @@ env_script_lock_load: fn(script_path: String) -[FS]> ScriptLockFile? Never! {
 }
 
 env_script_lock_parse: fn(raw: String) -> ScriptLockFile EnvironmentError! {
-    version := SCRIPT_LOCK_VERSION
-    script_hash := ""
-    deps := [LockedInlineDep]{}
+    ^version: SCRIPT_LOCK_VERSION
+    ^script_hash: ""
+    ^deps: [LockedInlineDep]{}
     // The `[[dep]]` block under construction; `in_dep` once one has opened.
-    in_dep := false
-    current := LockedInlineDep.empty()
+    ^in_dep: false
+    ^current: LockedInlineDep.empty()
     loop raw_line in raw.split("\n") {
         line: raw_line.trim()
         if line == "" || line.starts_with("#") -> next

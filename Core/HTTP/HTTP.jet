@@ -213,7 +213,7 @@ Body: struct {
     /// count written.
     copy_to: fn(self, writer: ^^FileWriter, limit: Int) -[Net, Time.Wait]> Int HTTPError! {
         raw: body_bytes_within(self, limit) ?? return Err(err)
-        out := writer.move()
+        ^out: writer.move()
         out.write_bytes(raw) ?? return Err(.IO{operation: "copy body"})
         out.flush() ?? return Err(.IO{operation: "copy body"})
         Ok(raw.len())
@@ -339,7 +339,7 @@ HTTPRequest: struct {
 
     // `header(name, value)`: an invalid name or value fails the send.
     __with_header: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         if !client_header_name(name) || !client_header_value(value) {
             out.__header_error = Val(HTTPError.InvalidHeader)
             return out
@@ -355,7 +355,7 @@ HTTPRequest: struct {
 
     // `with_body(request, body)`: any body, bytes kept as bytes.
     __with_body_value: fn(self, body: Body) -> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.body = body
         out.__body_set = true
         out
@@ -363,7 +363,7 @@ HTTPRequest: struct {
 
     // `json(value)`: the value's JSON as the body, typed application/json.
     __with_json: fn<Value: Encode>(self, value: Value) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         if json_codec.to_string(value) == {
             .Ok(text) -> {
                 out.body = body_bytes(text.bytes())
@@ -376,79 +376,79 @@ HTTPRequest: struct {
     }
 
     timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__timeout_ms = Val(ms)
         out
     }
 
     connect_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__connect_timeout_ms = Val(ms)
         out
     }
 
     read_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__read_timeout_ms = Val(ms)
         out
     }
 
     total_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__total_timeout_ms = Val(ms)
         out
     }
 
     dns_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__dns_timeout_ms = Val(ms)
         out
     }
 
     tls_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__tls_timeout_ms = Val(ms)
         out
     }
 
     write_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__write_timeout_ms = Val(ms)
         out
     }
 
     first_byte_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__first_byte_timeout_ms = Val(ms)
         out
     }
 
     redirects: fn(self, limit: Int) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__redirects = Val(limit)
         out
     }
 
     proxy: fn(self, url: String) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__proxy = Val(url)
         out
     }
 
     cookie: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__cookies.push(Header{name: name, value: value})
         out
     }
 
     form: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__form.push(Header{name: name, value: value})
         out
     }
 
     multipart_text: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
-        out := self.copy()
+        ^out: self.copy()
         out.__multipart.push(Header{name: name, value: value})
         out
     }
@@ -495,7 +495,7 @@ HTTPResponse: struct {
 
     // `header(name, value)` appends one field; an invalid one is dropped.
     __with_header: fn(self, name: String, value: String) -> HTTPResponse Never! {
-        out := self.copy()
+        ^out: self.copy()
         if !client_header_name(name) || !client_header_value(value) -> return out
         out.headers.fields.push(Header{name: name, value: value})
         out
@@ -507,7 +507,7 @@ HTTPResponse: struct {
                 return Err(.InvalidHeader)
             }
         }
-        out := self.copy()
+        ^out: self.copy()
         out.__trailers = Val(fields)
         Ok(out)
     }
@@ -558,7 +558,7 @@ priv HTTPBodyCursor: struct {
                 return Val(Err(error))
             }
             if self.live == .Val(cell) {
-                piece := [U8]{}
+                ^piece: [U8]{}
                 if provider.live_next(cell, self.at, self.max, piece) == {
                     .Ok(count) -> {
                         if count == 0 {
@@ -616,7 +616,7 @@ priv body_text_of: fn(raw: [U8]) -> String HTTPError! {
 // the body arrived surfaces at that read, as the reference's lazy body did.
 priv take_body: fn(cell: Shared<HTTPBodyCell>?, failure: HTTPError?) HTTPError! {
     if cell == .Val(state) {
-        guard := state.guard_edit()
+        ^guard: state.guard_edit()
         if guard.value.taken -> return Err(.BodyConsumed)
         guard.value.taken = true
     }
@@ -637,7 +637,7 @@ priv cell_upgraded: fn(cell: Shared<HTTPUpgradeCell>) -> Bool Never! {
 // a TLS connection or a connection already upgraded.
 priv upgrade_claim: fn(request: HTTPRequest) -> Int? Never! {
     cell: request.__upgrade ?? return None
-    guard := cell.guard_edit()
+    ^guard: cell.guard_edit()
     if guard.value.upgraded || guard.value.fd < 0 -> return None
     guard.value.upgraded = true
     Val(guard.value.fd)
@@ -684,7 +684,7 @@ priv client_response: fn(status: Int, body: Body, fields: Headers, redirect_hist
 // query; any other text is taken as the target itself.
 request_target_path: fn(url: String) -> String Never! {
     parsed: http_url.parse(url) ?? return url.copy()
-    path := parsed.path()
+    ^path: parsed.path()
     if path == "" -> path = "/"
     query: parsed.query()
     if query != "" -> return "{path}?{query}"
@@ -732,7 +732,7 @@ client_header_value: fn(value: String) -> Bool Never! {
 // Set one field without the public setter's trimming or validation.
 headers_set_raw: fn(h: Headers, name: String, value: String) -> Headers Never! {
     want: ascii_lower(name)
-    fields := [Header]{}
+    ^fields: [Header]{}
     loop f in h.fields {
         if ascii_lower(f.name) != want -> fields.push(f.copy())
     }
@@ -758,7 +758,7 @@ HTTPRouter: struct {
         state: self.__state
         index: router_handler_count(self.__state)
         routes.route_add(self.__mux, method, pattern, routes.__handler(fn(request: HTTPRequest) { router_call(state, index, request) }), contract, at)
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.handlers.push(HTTPRouterHandler{call: handler.move()})
     }
 }
@@ -815,10 +815,10 @@ StaticRoutes: struct {
 // A route path literal as written, each hole as `{name}`, or `{…}` when the
 // hole is not a bare name.
 route_written_pattern: fn(parts: [CompilerWrittenPart]) -> String Never! {
-    pattern := ""
+    ^pattern: ""
     loop part in parts {
         if part == {
-            .Text(text) -> pattern = "{pattern}{text}"
+            .Text(text) -> { pattern = "{pattern}{text}" }
             .Hole(name, _) -> {
                 hole: name ?? "…"
                 pattern = "{pattern}{{{hole}}}"
@@ -835,13 +835,17 @@ priv RouteInterpolated: struct {
     impl Diagnostic {
         code: "E2805",
 
-        what: fn(self) -> String { "invalid HTTP route `{self.pattern}`: brace interpolation is not allowed in route patterns" }
+        what: fn(self) -> String {
+            "invalid HTTP route `{self.pattern}`: brace interpolation is not allowed in route patterns"
+        }
 
         why: fn(self) -> String {
             "route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree"
         }
 
-        fix: fn(self) -> String { "use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`" }
+        fix: fn(self) -> String {
+            "use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`"
+        }
     }
 }
 
@@ -864,7 +868,9 @@ priv static_route: fn(call: CompilerCall) -> StaticRoute? {
     method: if {
         verbs.contains(name) -> name.upper()
         name == "route" || name == "page" || name == "layout" -> "GET"
-        else -> return None
+        else -> {
+            return None
+        }
     }
     Val(StaticRoute{method: method, pattern: static_route_text(call, 0) ?? return None})
 }
@@ -898,7 +904,9 @@ priv RouteMethodNotStatic: struct {
             "router and `#Server.Custom` routes are fully checked while building; only an App takes a run-time method, checked when it registers"
         }
 
-        fix: fn(self) -> String { "use a literal or compile-time String constant, or register the route on a `web.app()`" }
+        fix: fn(self) -> String {
+            "use a literal or compile-time String constant, or register the route on a `web.app()`"
+        }
     }
 }
 
@@ -957,7 +965,7 @@ priv router_mux: fn(router: HTTPRouter) -> HTTPMux Never! { router.__mux }
 // without a blank line is all head lines, and an unparseable message is
 // `GET /`.
 parse: fn(raw: String) -> HTTPRequest Never! {
-    bytes := raw.bytes()
+    ^bytes: raw.bytes()
     if find_double_crlf(bytes) < 0 {
         lines: raw.replace("\r\n", "\n").replace("\n", "\r\n")
         framed: if lines.contains("\r\n\r\n") -> lines else -> "{lines.removesuffix("\r\n")}\r\n\r\n"
@@ -1171,7 +1179,7 @@ headers_get: fn(h: Headers, name: String) -> String? Never! {
 
 headers_all: fn(h: Headers, name: String) -> [String] Never! {
     want: ascii_lower(name)
-    out := [String]{}
+    ^out: [String]{}
     loop f in h.fields {
         if ascii_lower(f.name) == want -> out.push(f.value)
     }
@@ -1181,8 +1189,8 @@ headers_all: fn(h: Headers, name: String) -> [String] Never! {
 headers_set: fn(h: Headers, name: String, value: String) -> Headers Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return h.copy()
     want: ascii_lower(name)
-    fields := [Header]{}
-    replaced := false
+    ^fields: [Header]{}
+    ^replaced: false
     loop f in h.fields {
         if ascii_lower(f.name) == want {
             if !replaced {
@@ -1197,7 +1205,7 @@ headers_set: fn(h: Headers, name: String, value: String) -> Headers Never! {
 
 headers_append: fn(h: Headers, name: String, value: String) -> Headers Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return h.copy()
-    fields := [Header]{}
+    ^fields: [Header]{}
     loop f in h.fields -> fields.push(f.copy())
     fields.push(Header{name: name, value: trim(value)})
     Headers{fields: fields}
@@ -1205,7 +1213,7 @@ headers_append: fn(h: Headers, name: String, value: String) -> Headers Never! {
 
 headers_remove: fn(h: Headers, name: String) -> Headers Never! {
     want: ascii_lower(name)
-    fields := [Header]{}
+    ^fields: [Header]{}
     loop f in h.fields {
         if ascii_lower(f.name) != want -> fields.push(f.copy())
     }
@@ -1213,17 +1221,17 @@ headers_remove: fn(h: Headers, name: String) -> Headers Never! {
 }
 
 headers_encode: fn(h: Headers) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop f in h.fields -> out.push("{f.name}: {f.value}")
     out
 }
 
 headers_parse: fn(lines: [String]) -> Headers Never! {
-    h := headers()
+    ^h: headers()
     if !headers_lines_bounded(lines) -> return h
     loop line in lines {
         raw: line.bytes()
-        col := index_byte(raw, 58)
+        ^col: index_byte(raw, 58)
         if col <= 0 -> next
         name_bytes: slice_b(raw, 0, col)
         value: slice_b(raw, col + 1, raw.len())
@@ -1255,7 +1263,7 @@ body_typed_text: fn(text: String, _media_type: String) -> Body Never! { body_tex
 
 /// application/x-www-form-urlencoded fields, in map order.
 body_form: fn(fields: [String:String]) -> Body Never! {
-    pairs := [QueryPair]{}
+    ^pairs: [QueryPair]{}
     loop (name, value) in fields -> pairs.push(QueryPair{key: name.copy(), value: value.copy()})
     body_text(form_encode(Query{pairs: pairs}))
 }
@@ -1268,14 +1276,14 @@ body_json: fn<T: Encode>(value: T) -> Body Never! {
 
 /// The reader's bytes to end of file, at most 1 GiB (BodyTooLarge past it).
 body_reader: fn(reader: ^^FileReader) -[FS.Read, Time.Wait]> Body HTTPError! {
-    source := reader.move()
+    ^source: reader.move()
     body_read(source, -1)
 }
 
 /// Exactly `length` (at most 1 GiB) of the reader's bytes. A negative length,
 /// or a reader that ends short, is InvalidFraming.
 body_reader_sized: fn(reader: ^^FileReader, length: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
-    source := reader.move()
+    ^source: reader.move()
     if length < 0 -> return Err(.InvalidFraming)
     if length > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_CONSUME_BYTES})
     body_read(source, length)
@@ -1284,7 +1292,7 @@ body_reader_sized: fn(reader: ^^FileReader, length: Int) -[FS.Read, Time.Wait]> 
 // Up to `want` bytes of `source` (to end of file when `want` is -1).
 priv body_read: fn(source: ^FileReader, want: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
     cap: if want >= 0 -> want else -> C_MAX_CONSUME_BYTES + 1
-    out := [U8]{}
+    ^out: [U8]{}
     loop out.len() < cap {
         room: cap - out.len()
         piece: source.read_bytes(if room > C_BODY_CHUNK_BYTES -> C_BODY_CHUNK_BYTES else -> room) ?? return Err(.IO{operation: "read body"})
@@ -1301,7 +1309,7 @@ priv body_read: fn(source: ^FileReader, want: Int) -[FS.Read, Time.Wait]> Body H
 /// and that boundary; the message names it in its Content-Type field
 /// (`multipart/form-data; boundary=...`).
 body_multipart: fn(fields: [String:String]) -> Body Never! {
-    pairs := [Header]{}
+    ^pairs: [Header]{}
     loop (name, value) in fields -> pairs.push(Header{name: name.copy(), value: value.copy()})
     body_text(provider.client_multipart(pairs, provider.client_boundary(pairs)))
 }
@@ -1395,7 +1403,7 @@ reason_phrase: fn(code: Int) -> String Never! {
 }
 
 ascii_upper: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
         if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
@@ -1404,7 +1412,7 @@ ascii_upper: fn(text: String) -> String Never! {
 }
 
 ascii_lower: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
@@ -1414,8 +1422,8 @@ ascii_lower: fn(text: String) -> String Never! {
 
 trim: fn(text: String) -> String Never! {
     raw: text.bytes()
-    start := 0
-    end := raw.len()
+    ^start: 0
+    ^end: raw.len()
     loop start < end {
         n: Int{raw[start]}
         if n == 32 || n == 9 || n == 13 || n == 10 -> start += 1 else -> break
@@ -1442,26 +1450,26 @@ post: fn(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
 put: fn(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_url(url) -> return Err(.InvalidURL)
     if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
-    req := core.http.client.request("PUT", url)
+    ^req: core.http.client.request("PUT", url)
     send_request(req.__with_body(body))
 }
 
 patch: fn(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_url(url) -> return Err(.InvalidURL)
     if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
-    req := core.http.client.request("PATCH", url)
+    ^req: core.http.client.request("PATCH", url)
     send_request(req.__with_body(body))
 }
 
 delete: fn(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_url(url) -> return Err(.InvalidURL)
-    req := core.http.client.request("DELETE", url)
+    ^req: core.http.client.request("DELETE", url)
     send_request(req)
 }
 
 head: fn(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_url(url) -> return Err(.InvalidURL)
-    req := core.http.client.request("HEAD", url)
+    ^req: core.http.client.request("HEAD", url)
     send_request(req)
 }
 
@@ -1479,7 +1487,7 @@ exchange: fn(method: String, url: String, body: String, header_lines: [String]) 
 send_request: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! { provider.send(req) }
 
 parse_response: fn(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
-    split := find_double_crlf(raw)
+    ^split: find_double_crlf(raw)
     if split < 0 -> return Err(.InvalidFraming)
     if !strict_crlf(raw, split) -> return Err(.InvalidFraming)
     head_end: header_text_end(raw, split)
@@ -1492,14 +1500,14 @@ parse_response: fn(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
         return Err(.InvalidStatus)
     }
     parsed: parse_status_line(lines[0]) ?? return Err(.InvalidStatus)
-    hdr_lines := [String]{}
+    ^hdr_lines: [String]{}
     loop i in 1..<lines.len() {
         if lines[i].bytes().len() > 0 -> hdr_lines.push(lines[i])
     }
     if !headers_lines_bounded(hdr_lines) || !headers_lines_valid(hdr_lines) {
         return Err(.InvalidHeader)
     }
-    h := headers_parse(hdr_lines)
+    ^h: headers_parse(hdr_lines)
     if has_ambiguous_framing(h) -> return Err(.InvalidFraming)
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     if response_forbids_content_length(parsed.status.code) && has_header(h, "content-length") {
@@ -1513,9 +1521,9 @@ parse_response: fn(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
         return Err(.InvalidFraming)
     }
     body_text: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
-    parsed_response := text_response(parsed.status.code, body_text)
+    ^parsed_response: text_response(parsed.status.code, body_text)
     loop line in hdr_lines {
-        col := index_byte(line.bytes(), 58)
+        ^col: index_byte(line.bytes(), 58)
         name: String.from_bytes(slice_b(line.bytes(), 0, col)) ?? return Err(.InvalidHeader)
         value: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
         parsed_response = parsed_response.__with_header(name, trim(value))
@@ -1524,7 +1532,7 @@ parse_response: fn(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
 }
 
 parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
-    split := find_double_crlf(raw)
+    ^split: find_double_crlf(raw)
     if split < 0 -> return Err(.InvalidFraming)
     if !strict_crlf(raw, split) -> return Err(.InvalidFraming)
     head_end: header_text_end(raw, split)
@@ -1550,13 +1558,13 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     if parsed_version == Version.HTTP2 || parsed_version == Version.HTTP3 {
         return Err(.Protocol{version: parts[2]})
     }
-    hlines := [String]{}
+    ^hlines: [String]{}
     loop i in 1..<lines.len() {
         if lines[i].bytes().len() > 0 -> hlines.push(lines[i])
     }
     if !headers_lines_bounded(hlines) || !headers_lines_valid(hlines) -> return Err(.InvalidHeader)
-    h := headers_parse(hlines)
-    hosts := headers_all(h, "host")
+    ^h: headers_parse(hlines)
+    ^hosts: headers_all(h, "host")
     if parsed_version == Version.HTTP11 {
         if hosts.len() != 1 || !valid_host_value(hosts[0]) -> return Err(.InvalidHeader)
     } else {
@@ -1570,9 +1578,9 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_len) || (expected < 0 && body_len > 0) {
         return Err(.InvalidFraming)
     }
-    fields := headers()
+    ^fields: headers()
     loop line in hlines {
-        col := index_byte(line.bytes(), 58)
+        ^col: index_byte(line.bytes(), 58)
         name: String.from_bytes(slice_b(line.bytes(), 0, col)) ?? return Err(.InvalidHeader)
         value: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
         fields.fields.push(Header{name: name, value: trim(value)})
@@ -1601,10 +1609,10 @@ parse_status_line: fn(line: String) -> StatusLine? {
     if parts[1].bytes().len() != 3 -> return None
     code: parse_decimal(parts[1]) ?? return None
     if code < 100 || code > 599 -> return None
-    reason := reason_phrase(code)
+    ^reason: reason_phrase(code)
     if parts.len() > 2 {
         reason = parts[2]
-        i := 3
+        ^i: 3
         loop i < parts.len() {
             reason = "{reason} {parts[i]}"
             i += 1
@@ -1615,10 +1623,10 @@ parse_status_line: fn(line: String) -> StatusLine? {
 
 split_space_line: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    out := [String]{}
+    ^out: [String]{}
     if raw.len() == 0 -> return out
-    start := 0
-    i := 0
+    ^start: 0
+    ^i: 0
     loop i < raw.len() {
         n: Int{raw[i]}
         if n == 32 {
@@ -1635,7 +1643,7 @@ split_space_line: fn(text: String) -> [String] Never! {
 
 find_double_crlf: fn(raw: [U8]) -> Int Never! {
     if raw.len() < 4 -> return -1
-    i := 0
+    ^i: 0
     loop i + 3 < raw.len() {
         if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) && raw[i + 2] == (U8{13}) && raw[i + 3] == (U8{10}) {
             return i + 4
@@ -1651,7 +1659,7 @@ header_text_end: fn(raw: [U8], split: Int) -> Int Never! {
 }
 
 strict_crlf: fn(raw: [U8], end: Int) -> Bool Never! {
-    i := 0
+    ^i: 0
     loop i < end {
         if raw[i] == (U8{13}) {
             if i + 1 >= end || raw[i + 1] != (U8{10}) -> return false
@@ -1665,12 +1673,12 @@ strict_crlf: fn(raw: [U8], end: Int) -> Bool Never! {
 
 split_lines: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    out := [String]{}
-    start := 0
-    i := 0
+    ^out: [String]{}
+    ^start: 0
+    ^i: 0
     loop i < raw.len() {
         if raw[i] == (U8{10}) {
-            end := i
+            ^end: i
             if end > start && raw[end - 1] == (U8{13}) -> end -= 1
             out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
             start = i + 1
@@ -1711,7 +1719,7 @@ query_get: fn(q: Query, key: String) -> String? Never! {
 }
 
 query_all: fn(q: Query, key: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop p in q.pairs {
         if p.key == key -> out.push(p.value)
     }
@@ -1719,8 +1727,8 @@ query_all: fn(q: Query, key: String) -> [String] Never! {
 }
 
 query_set: fn(q: Query, key: String, value: String) -> Query Never! {
-    pairs := [QueryPair]{}
-    replaced := false
+    ^pairs: [QueryPair]{}
+    ^replaced: false
     loop p in q.pairs {
         if p.key == key {
             if !replaced {
@@ -1734,11 +1742,11 @@ query_set: fn(q: Query, key: String, value: String) -> Query Never! {
 }
 
 query_encode: fn(q: Query) -> String Never! {
-    s := ""
-    first := true
+    ^s: ""
+    ^first: true
     loop p in q.pairs {
         piece: "{percent_encode(p.key)}={percent_encode(p.value)}"
-        piece_len := piece.bytes().len()
+        ^piece_len: piece.bytes().len()
         if piece_len > C_MAX_BODY_BYTES -> return ""
         if first {
             s = piece
@@ -1785,14 +1793,14 @@ priv form_split: fn(text: String, policy: FormPolicy) -> Query FormDecodeError! 
         if policy == FormPolicy.Strict -> return Err(.TooLarge)
         return Ok(query())
     }
-    pairs := [QueryPair]{}
-    start := 0
+    ^pairs: [QueryPair]{}
+    ^start: 0
     if raw.len() > 0 && raw[0] == (U8{63}) -> start = 1
-    i := start
+    ^i: start
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{38}) {
             if i > start {
-                eq := start
+                ^eq: start
                 loop eq < i && raw[eq] != (U8{61}) -> eq += 1
                 value_start: if eq < i -> eq + 1 else -> i
                 key: form_scan(raw, start, eq, policy) ?? return Err(err)
@@ -1808,8 +1816,8 @@ priv form_split: fn(text: String, policy: FormPolicy) -> Query FormDecodeError! 
 
 // Decodes raw[from..<to], one form component, once: %252F is %2F.
 priv form_scan: fn(raw: [U8], from: Int, to: Int, policy: FormPolicy) -> String FormDecodeError! {
-    out := [U8]{}
-    i := from
+    ^out: [U8]{}
+    ^i: from
     loop i < to {
         b: raw[i]
         if b == (U8{43}) {
@@ -1840,13 +1848,13 @@ priv form_scan: fn(raw: [U8], from: Int, to: Int, policy: FormPolicy) -> String 
 // sequence becomes one U+FFFD (FF: one; C0 AF: two; ED A0 80: three;
 // E2 28 A1: U+FFFD ( U+FFFD; a truncated E2 82: one).
 priv utf8_replacing: fn(bytes: [U8]) -> String Never! {
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < bytes.len() {
         lead: Int{bytes[at]}
-        width := if lead < 128 -> 1 else -> 0
-        low := 128
-        high := 191
+        ^width: if lead < 128 -> 1 else -> 0
+        ^low: 128
+        ^high: 191
         if lead >= 194 && lead <= 223 -> width = 2
         if lead >= 224 && lead <= 239 {
             width = 3
@@ -1858,7 +1866,7 @@ priv utf8_replacing: fn(bytes: [U8]) -> String Never! {
             if lead == 240 -> low = 144
             if lead == 244 -> high = 143
         }
-        good := 1
+        ^good: 1
         loop good < width && at + good < bytes.len() {
             byte: Int{bytes[at + good]}
             valid: if good == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
@@ -1943,7 +1951,7 @@ form_decode_strict: fn(text: String) -> Query FormDecodeError! { query_decode_st
 
 #Test("a binary body stays bytes through parse_request, with_body, request_with and response_ok") {
     crlf: "\r\n"
-    raw := "POST / HTTP/1.1{crlf}Host: example{crlf}Content-Length: 2{crlf}{crlf}".bytes()
+    ^raw: "POST / HTTP/1.1{crlf}Host: example{crlf}Content-Length: 2{crlf}{crlf}".bytes()
     raw.push(U8{255})
     raw.push(U8{0})
     req: parse_request(raw) ?? panic("binary upload framing")
@@ -1962,7 +1970,7 @@ cookie: fn(name: String, value: String) -> Cookie Never! {
 
 cookie_encode: fn(c: Cookie) -> String Never! {
     if !valid_cookie_token(c.name) || !valid_cookie_value(c.value) -> return ""
-    s := "{c.name}={c.value}"
+    ^s: "{c.name}={c.value}"
     if c.domain.bytes().len() > 0 {
         if !valid_cookie_attribute(c.domain) -> return ""
         s = "{s}; Domain={c.domain}"
@@ -1982,16 +1990,16 @@ cookie_encode: fn(c: Cookie) -> String Never! {
 }
 
 cookies_parse: fn(header: String) -> [Cookie] Never! {
-    out := [Cookie]{}
+    ^out: [Cookie]{}
     raw: header.bytes()
     if raw.len() > C_MAX_HEADER_LINE_BYTES -> return out
-    start := 0
-    i := 0
-    first := true
+    ^start: 0
+    ^i: 0
+    ^first: true
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{59}) {
             piece: trim(String.from_bytes(slice_b(raw, start, i)) ?? "")
-            eq := index_byte_str(piece, 61)
+            ^eq: index_byte_str(piece, 61)
             if eq > 0 {
                 n: trim(slice_str(piece, 0, eq))
                 v: trim(slice_str(piece, eq + 1, piece.bytes().len()))
@@ -2009,7 +2017,7 @@ cookies_parse: fn(header: String) -> [Cookie] Never! {
 }
 
 basic_auth: fn(user: String, password: String) -> String Never! {
-    credentials := "{user}:{password}"
+    ^credentials: "{user}:{password}"
     "Basic {base64_encode(credentials.bytes())}"
 }
 
@@ -2028,8 +2036,8 @@ with_query: fn(url: String, q: Query) -> String Never! {
     if enc.bytes().len() == 0 -> return url.copy()
     frag: split_fragment(url)
     base: frag.url
-    sep := if index_byte_str(base, 63) >= 0 -> "&" else -> "?"
-    suffix := ""
+    ^sep: if index_byte_str(base, 63) >= 0 -> "&" else -> "?"
+    ^suffix: ""
     if frag.fragment.bytes().len() > 0 -> suffix = "#{frag.fragment}"
     "{base}{sep}{enc}{suffix}"
 }
@@ -2044,7 +2052,7 @@ status_class: fn(s: Status) -> String Never! {
 }
 
 request_with: fn(method: Method, url: String, h: Headers, body: Body) -> HTTPRequest Never! {
-    req := core.http.client.request(method_text(method), url)
+    ^req: core.http.client.request(method_text(method), url)
     loop f in h.fields -> req = req.__with_header(f.name, f.value)
     with_body(req, body)
 }
@@ -2067,7 +2075,7 @@ has_header: fn(h: Headers, name: String) -> Bool Never! { headers_get(h, name) !
 content_length: fn(h: Headers) -> Int Never! {
     values: headers_all(h, "content-length")
     if values.len() == 0 -> return -1
-    first := -1
+    ^first: -1
     loop value in values {
         n: parse_content_length_value(value) ?? return -1
         if first >= 0 && n != first -> return -1
@@ -2082,11 +2090,11 @@ valid_url: fn(url: String) -> Bool Never! {
     parsed: http_url.parse(url) ?? return false
     if parsed.scheme() != "http" && parsed.scheme() != "https" -> return false
     if parsed.host() == None || parsed.userinfo().bytes().len() > 0 -> return false
-    colon := index_byte(raw, 58)
+    ^colon: index_byte(raw, 58)
     if colon <= 0 || colon + 2 >= raw.len() -> return false
     if raw[colon + 1] != (U8{47}) || raw[colon + 2] != (U8{47}) -> return false
-    start := colon + 3
-    end := start
+    ^start: colon + 3
+    ^end: start
     loop end < raw.len() {
         if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35}) -> break
         n: Int{raw[end]}
@@ -2099,9 +2107,9 @@ valid_url: fn(url: String) -> Bool Never! {
 parse_content_length_value: fn(text: String) -> Int? {
     raw: text.bytes()
     if raw.len() == 0 -> return None
-    first := -1
-    start := 0
-    i := 0
+    ^first: -1
+    ^start: 0
+    ^i: 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{44}) {
             token: trim(String.from_bytes(slice_b(raw, start, i)) ?? "")
@@ -2189,7 +2197,7 @@ token_char: fn(n: Int) -> Bool Never! {
 }
 
 has_ambiguous_framing: fn(h: Headers) -> Bool Never! {
-    first := -1
+    ^first: -1
     loop value in headers_all(h, "content-length") {
         n: parse_content_length_value(value) ?? return true
         if first >= 0 && n != first -> return true
@@ -2201,7 +2209,7 @@ has_ambiguous_framing: fn(h: Headers) -> Bool Never! {
 has_unsupported_encoding: fn(h: Headers) -> Bool Never! {
     if has_header(h, "transfer-encoding") -> return true
     loop value in headers_all(h, "content-encoding") {
-        encoding := ascii_lower(trim(value))
+        ^encoding: ascii_lower(trim(value))
         if encoding != "identity" -> return true
     }
     false
@@ -2209,7 +2217,7 @@ has_unsupported_encoding: fn(h: Headers) -> Bool Never! {
 
 valid_header_line: fn(line: String) -> Bool Never! {
     raw: line.bytes()
-    col := index_byte(raw, 58)
+    ^col: index_byte(raw, 58)
     if col <= 0 -> return false
     name: String.from_bytes(slice_b(raw, 0, col)) ?? return false
     value: slice_b(raw, col + 1, raw.len())
@@ -2218,9 +2226,9 @@ valid_header_line: fn(line: String) -> Bool Never! {
 
 headers_lines_bounded: fn(lines: [String]) -> Bool Never! {
     if lines.len() > C_MAX_HEADER_COUNT -> return false
-    total := 0
+    ^total: 0
     loop line in lines {
-        n := line.bytes().len()
+        ^n: line.bytes().len()
         if n + 2 > C_MAX_HEADER_BYTES || n > C_MAX_HEADER_LINE_BYTES -> return false
         total = total + n + 2
         if total > C_MAX_HEADER_BYTES -> return false
@@ -2285,7 +2293,7 @@ valid_cookie_attribute: fn(value: String) -> Bool {
 parse_decimal: fn(text: String) -> Int? {
     raw: text.bytes()
     if raw.len() == 0 || raw.len() > 10 -> return None
-    n := 0
+    ^n: 0
     loop b in raw {
         d: Int{b}
         if d < 48 || d > 57 -> return None
@@ -2295,10 +2303,10 @@ parse_decimal: fn(text: String) -> Int? {
 }
 
 percent_encode: fn(text: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
-        unreserved := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 46 || n == 95 || n == 126
+        ^unreserved: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 46 || n == 95 || n == 126
         if unreserved -> out.push(b) else if n == 32 -> out.push(U8{43}) else {
             out.push(U8{37})
             out.push(hex_digit(n /% 16))
@@ -2310,14 +2318,14 @@ percent_encode: fn(text: String) -> String {
 
 base64_encode: fn(bytes: [U8]) -> String Never! {
     alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < bytes.len() {
         a: Int{bytes[i]}
-        b := 0
-        c := 0
-        have_b := i + 1 < bytes.len()
-        have_c := i + 2 < bytes.len()
+        ^b: 0
+        ^c: 0
+        ^have_b: i + 1 < bytes.len()
+        ^have_c: i + 2 < bytes.len()
         if have_b -> b = (Int{bytes[i + 1]})
         if have_c -> c = (Int{bytes[i + 2]})
         block: (a * 65536) + (b * 256) + c
@@ -2353,7 +2361,7 @@ index_byte: fn(text: [U8], code: Int) -> Int Never! {
 index_byte_str: fn(text: String, code: Int) -> Int { index_byte(text.bytes(), code) }
 
 last_index: fn(raw: [U8], code: Int) -> Int {
-    i := raw.len() - 1
+    ^i: raw.len() - 1
     loop i >= 0 {
         if (Int{raw[i]}) == code -> return i
         i -= 1
@@ -2377,7 +2385,7 @@ FragmentSplit: struct {
 }
 
 split_fragment: fn(text: String) -> FragmentSplit {
-    at := index_byte_str(text, 35)
+    ^at: index_byte_str(text, 35)
     if at < 0 -> return FragmentSplit{url: text, fragment: ""}
     FragmentSplit{url: slice_str(text, 0, at), fragment: slice_str(text, at + 1, text.bytes().len())}
 }

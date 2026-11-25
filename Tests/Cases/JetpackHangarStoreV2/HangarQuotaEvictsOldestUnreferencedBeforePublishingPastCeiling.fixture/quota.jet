@@ -9,7 +9,7 @@ use {
 }
 
 quota_payload: fn(path: String, byte: U8, count: Int) {
-    payload := [U8]{}
+    ^payload: [U8]{}
     loop _ in 0..<count -> payload.push(byte)
     files.create_dir_all(files.dirname(path)) ?? panic("mkdir {path}")
     files.write_bytes(path, payload) ?? panic("write {path}")
@@ -18,7 +18,7 @@ quota_payload: fn(path: String, byte: U8, count: Int) {
 quota_logical_bytes: fn(path: String) -> Int {
     metadata: files.stat(path) ?? panic("metadata {path}")
     if !metadata.is_dir || metadata.is_symlink -> return metadata.size
-    total := 0
+    ^total: 0
     loop entry in files.list_dir(path) ?? panic("entries {path}") {
         total += quota_logical_bytes(entry.path)
     }

@@ -27,7 +27,7 @@ impl MetadataFacts {
                 break
             }
         }
-        values := existing
+        ^values: existing
         if !values.contains(rendered) -> values.push(rendered)
         self.typed[key] = values
     }
@@ -73,7 +73,7 @@ provider_graph_json_keys: fn(object: [String:Dyn], key: String) -> [String] Neve
 provider_graph_json_array_strings: fn(object: [String:Dyn], key: String) -> [String] Never! {
     value: object.get(key) ?? return [String]{}
     items: pkg_json_array(value) ?? return [String]{}
-    out := [String]{}
+    ^out: [String]{}
     loop item in items {
         if pkg_json_text(item) == {
             .Val(text) -> {
@@ -114,7 +114,7 @@ provider_graph_json_string_list: fn(value: Dyn) -> [String]? Never! {
         .None -> {}
     }
     items: pkg_json_array(value) ?? return None
-    out := [String]{}
+    ^out: [String]{}
     loop item in items {
         text: pkg_json_text(item) ?? return None
         out.push(text)
@@ -140,7 +140,7 @@ provider_graph_json_parses: fn(document: String) -> Bool Never! {
 
 // The report with extra losses and conflicts appended.
 provider_graph_finish: fn(facts: MetadataFacts, losses: [String], conflicts: [String]) -> ProviderFactReport Never! {
-    report := ProviderFactReport.with_identity(facts)
+    ^report: ProviderFactReport.with_identity(facts)
     loop loss in losses -> report.losses.push(loss.copy())
     loop conflict in conflicts -> report.conflicts.push(conflict.copy())
     report
@@ -150,11 +150,11 @@ impl ProviderFactReport {
     // An npm package.json, or a packument with exactly one version.
     npm_document: fn(document: String) -> ProviderFactReport Never! {
         object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Npm, "npm", "package.json is not valid JSON")
-        facts := MetadataFacts.empty(ProviderFamily.Npm, provider_graph_json_string(object, "name") ?? "")
-        metadata := object
-        is_packument := false
-        losses := [String]{}
-        conflicts := [String]{}
+        ^facts: MetadataFacts.empty(ProviderFamily.Npm, provider_graph_json_string(object, "name") ?? "")
+        ^metadata: object
+        ^is_packument: false
+        ^losses: [String]{}
+        ^conflicts: [String]{}
         if facts.name == "" -> losses.push("npm metadata has no package name")
         facts.version = provider_graph_json_string(object, "version") ?? ""
         if object.has_key("version") && facts.version == "" {
@@ -385,13 +385,13 @@ impl ProviderFactReport {
         info_object: pkg_json_object(object.get("info") ?? Dyn.Null)
         has_info: info_object == .Val(_)
         info: info_object ?? object
-        facts := MetadataFacts.empty(ProviderFamily.PyPI, provider_graph_either(provider_graph_json_string(info, "name"), provider_graph_json_string(object, "name")) ?? "")
+        ^facts: MetadataFacts.empty(ProviderFamily.PyPI, provider_graph_either(provider_graph_json_string(info, "name"), provider_graph_json_string(object, "name")) ?? "")
         facts.version = provider_graph_either(provider_graph_json_string(info, "version"), provider_graph_json_string(object, "version")) ?? ""
         facts.license = provider_graph_json_string(info, "license") ?? ""
         facts.add_json_projection("provider.pypi.native", object)
         if has_info -> facts.add_json_projection("provider.pypi.info", info)
-        losses := [String]{}
-        conflicts := [String]{}
+        ^losses: [String]{}
+        ^conflicts: [String]{}
         if !object.has_key("info") -> losses.push("PyPI JSON has no `info` object")
         if object.has_key("info") && !has_info -> losses.push("PyPI `info` must be an object")
         if has_info {
@@ -514,7 +514,7 @@ impl ProviderFactReport {
             value: info.get(projection.field) ?? next
             facts.add_typed_json(projection.target, value)
         }
-        artifact_hashes := [{filename: String, digest: String}]{}
+        ^artifact_hashes: [{filename: String, digest: String}]{}
         urls: pkg_json_array(object.get("urls") ?? Dyn.Null) ?? [Dyn]{}
         loop index in 0..<urls.len() {
             url: pkg_json_object(urls[index]) ?? {
@@ -522,7 +522,7 @@ impl ProviderFactReport {
                 next
             }
             facts.add_json_projection("provider.pypi.artifact.{index}", url)
-            filename := provider_graph_json_string(url, "filename") ?? ""
+            ^filename: provider_graph_json_string(url, "filename") ?? ""
             if filename == "" {
                 losses.push("PyPI artifact {index} has no filename")
                 filename = "{index}"
@@ -613,9 +613,9 @@ impl ProviderFactReport {
         }
         raw_pins: provider_graph_either(root_pins, object_pins) ?? return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "Package.resolved has no `pins` array")
         pins: pkg_json_array(raw_pins) ?? return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "Package.resolved `pins` must be an array")
-        facts := MetadataFacts.empty(ProviderFamily.SwiftPM, "")
-        losses := [String]{}
-        conflicts := [String]{}
+        ^facts: MetadataFacts.empty(ProviderFamily.SwiftPM, "")
+        ^losses: [String]{}
+        ^conflicts: [String]{}
         facts.add_json_projection("provider.swiftpm.native", root)
         if root.get("version") == {
             .Val(raw_version) -> {
@@ -648,8 +648,8 @@ impl ProviderFactReport {
                 }
             }
             facts.name = provider_graph_either(identity, package) ?? ""
-            state := [String:Dyn]{}
-            has_state := false
+            ^state: [String:Dyn]{}
+            ^has_state: false
             if pin.get("state") == {
                 .Val(raw_state) -> {
                     if pkg_json_object(raw_state) == {
@@ -709,7 +709,7 @@ impl ProviderFactReport {
             facts.source_identity = "swiftpm:{facts.name}@{source}"
         } else {
             facts.name = "swiftpm-lock"
-            identities := [String]{}
+            ^identities: [String]{}
             loop index in 0..<pins.len() {
                 pin: pkg_json_object(pins[index]) ?? {
                     losses.push("SwiftPM pin {index} is not an object")

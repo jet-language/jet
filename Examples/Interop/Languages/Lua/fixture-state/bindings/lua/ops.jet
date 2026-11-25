@@ -63,7 +63,7 @@ decode_status: fn(code: Int) -> Bool LuaError! {
 
 decode_response: fn(raw: String, code: Int) -> Dyn LuaError! {
     decode_status(code)
-    value := json.parse(raw) ?? return Err(LuaError.Protocol)
+    ^value: json.parse(raw) ?? return Err(LuaError.Protocol)
     return Ok(value)
 }
 
@@ -94,9 +94,9 @@ counters: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
 }
 
 counters_typed: fn<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
-    value := counters(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^tree: json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^value: counters(session, tree, deadline_ms)
+    ^decoded: json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
@@ -113,9 +113,9 @@ transform: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
 }
 
 transform_typed: fn<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
-    value := transform(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^tree: json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^value: transform(session, tree, deadline_ms)
+    ^decoded: json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
@@ -132,9 +132,9 @@ echo: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
 }
 
 echo_typed: fn<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
-    value := echo(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^tree: json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^value: echo(session, tree, deadline_ms)
+    ^decoded: json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
@@ -151,9 +151,9 @@ fail_call: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
 }
 
 fail_call_typed: fn<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
-    value := fail_call(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^tree: json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^value: fail_call(session, tree, deadline_ms)
+    ^decoded: json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
@@ -170,9 +170,9 @@ spin: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
 }
 
 spin_typed: fn<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
-    value := spin(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^tree: json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
+    ^value: spin(session, tree, deadline_ms)
+    ^decoded: json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 

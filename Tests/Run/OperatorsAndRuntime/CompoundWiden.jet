@@ -4,15 +4,15 @@
 
 // FNV-1a style fold: `hash: U64` absorbs each `U8` byte widened to `U64`.
 fold: fn(text: String) -> U64 {
-    hash := U64{5}
+    ^hash: U64{5}
     loop byte in text.bytes() -> hash = (hash) ~ U64{byte}
     hash
 }
 
 // Each row is `[compound, long form]`; the long form restates every step.
 unsigned64: fn(byte: U8) -> [[U64]] {
-    rows := [[U64]]{}
-    value := U64{1000}
+    ^rows: [[U64]]{}
+    ^value: U64{1000}
     value += U64{byte}
     step1: U64{1000} + U64{byte}
     rows.push([value, step1])
@@ -42,8 +42,8 @@ unsigned64: fn(byte: U8) -> [[U64]] {
 }
 
 unsigned32: fn(small: U16) -> [[U32]] {
-    rows := [[U32]]{}
-    value := U32{70000}
+    ^rows: [[U32]]{}
+    ^value: U32{70000}
     value += U32{small}
     step1: U32{70000} + U32{small}
     rows.push([value, step1])
@@ -73,8 +73,8 @@ unsigned32: fn(small: U16) -> [[U32]] {
 }
 
 signed64: fn(delta: I32) -> [[I64]] {
-    rows := [[I64]]{}
-    value := I64{-500}
+    ^rows: [[I64]]{}
+    ^value: I64{-500}
     value += I64{delta}
     step1: I64{-500} + I64{delta}
     rows.push([value, step1])

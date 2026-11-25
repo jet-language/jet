@@ -66,7 +66,7 @@ TrustKey: struct {
     // Deterministic drill material: the domain-tagged label, padded or
     // truncated to 32 bytes.
     generate: fn(label: String) -> TrustKey Never! {
-        secret := [U8]{}
+        ^secret: [U8]{}
         loop byte in TRUST_KEY_DOMAIN.bytes() -> secret.push(byte)
         loop byte in label.bytes() -> secret.push(byte)
         loop secret.len() < 32 -> secret.push(U8{0})
@@ -245,7 +245,7 @@ trust_validate_receipt_witness: fn(witness: String) TrustRootError! {
 
 // The stable host-owned identity of one cache builder input domain.
 trust_cache_builder_identity: fn(provider: String, immutable_source: String, source_digest: String) -> String Never! {
-    canonical := "jet-cache-builder-v1\n"
+    ^canonical: "jet-cache-builder-v1\n"
     values: [String]{provider, immutable_source, source_digest}
     loop value in values -> canonical = "{canonical}{value.bytes().len()}:{value}\n"
     "cache-builder:sha256:{crypto.sha256(canonical.bytes()).hex()}"
@@ -254,7 +254,7 @@ trust_cache_builder_identity: fn(provider: String, immutable_source: String, sou
 // A cache role is 1..=128 ASCII alphanumerics, `-`, `_`, or `.`.
 trust_cache_role_component: fn(role: String) TrustRootError! {
     raw: role.bytes()
-    valid := raw.len() > 0 && raw.len() <= 128
+    ^valid: raw.len() > 0 && raw.len() <= 128
     loop byte in raw {
         code: Int{byte}
         word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46
@@ -292,8 +292,8 @@ trust_read_cache_key_pin: fn(path: String, role: String) -[FS]> String TrustRoot
         }
     }
     text: files.read(path)
-    key_id := String?{None}
-    algorithm := String?{None}
+    ^key_id: String?{None}
+    ^algorithm: String?{None}
     loop line in trust_root_lines(text) {
         if {
             line.starts_with("key_id=") -> key_id = Val(line.removeprefix("key_id="))
@@ -314,7 +314,7 @@ trust_pin_cache_key: fn(roots_dir: String, role: String, key: TrustKey) -[FS]> T
     expected: trust_cache_key_fingerprint(key)
     if files.create(path, if_exists: .Refuse) == {
         .Ok(created) -> {
-            writer := created
+            ^writer: created
             writer.write_bytes(trust_cache_key_pin_body(key).bytes())
             writer.fsync()
         }
@@ -361,7 +361,7 @@ trust_read_state_lines: fn(path: String, not_regular: String) -[FS]> [String]? T
             }
         }
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in trust_root_lines(files.read(path)) {
         if line.trim() != "" -> lines.push(line)
     }
@@ -370,9 +370,9 @@ trust_read_state_lines: fn(path: String, not_regular: String) -[FS]> [String]? T
 
 // Sorted unique lines, each newline-terminated.
 trust_state_body: fn(lines: [String]) -> String Never! {
-    sorted := lines
+    ^sorted: lines
     sorted.sort()
-    unique := [String]{}
+    ^unique: [String]{}
     loop line in sorted {
         if unique.len() == 0 || unique[unique.len() - 1] != line -> unique.push(line)
     }
@@ -386,7 +386,7 @@ trust_revoke_cache_builder: fn(roots_dir: String, builder: String) -[FS]> TrustR
     }
     dir: trust_ensure_trust_dir(roots_dir)
     path: trust_revoked_builders_path(roots_dir)
-    builders := trust_read_state_lines(path, "revoked cache-builder list is not a regular file") ?? [String]{}
+    ^builders: trust_read_state_lines(path, "revoked cache-builder list is not a regular file") ?? [String]{}
     builders.push(builder.copy())
     trust_atomic_write(files.join(dir, "revoked-cache-builders"), trust_state_body(builders).bytes())
 }
@@ -410,7 +410,7 @@ trust_allow_cache_identity: fn(roots_dir: String, directory: String, role: Strin
     }
     path: trust_cache_identity_allowlist_path(roots_dir, directory, role)
     files.create_dir_all(files.dirname(path))
-    identities := trust_read_state_lines(path, "{label} allowlist is not a regular file") ?? [String]{}
+    ^identities: trust_read_state_lines(path, "{label} allowlist is not a regular file") ?? [String]{}
     identities.push(identity.copy())
     trust_atomic_write(path, trust_state_body(identities).bytes())
 }
@@ -480,7 +480,7 @@ trust_atomic_write: fn(path: String, body: [U8]) -[FS]> TrustRootError! {
 
 // Split at `\n`, dropping a `\r` before it.
 trust_root_lines: fn(text: String) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     pieces: text.split("\n").to_list()
     loop index in 0..<pieces.len() {
         piece: pieces[index]

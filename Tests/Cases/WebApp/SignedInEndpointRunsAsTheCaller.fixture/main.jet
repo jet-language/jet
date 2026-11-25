@@ -23,7 +23,7 @@ Accounts: struct {
 // POST a call of `whoami` from `origin` ("" sends no `Origin`) with the
 // header `name: value`, as the status and body it is answered with.
 call: fn(addr: String, origin: String, name: String, value: String) -> String HTTPError! {
-    fields := http.headers_set(http.headers(), name, value)
+    ^fields: http.headers_set(http.headers(), name, value)
     if origin != "" -> fields = http.headers_set(fields, "origin", origin)
     answer: http.send_request(http.request_with(.Post, "http://{addr}/api/whoami", fields, http.body_text("[]")))
     Ok("{answer.status} {answer.text()}")

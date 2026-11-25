@@ -30,8 +30,8 @@ zero: fn() -> Wide {
 }
 
 called: fn(n: Int) -> I64 Never! {
-    total := I64{0}
-    step := wrapping(I64{0} - I64{2})
+    ^total: I64{0}
+    ^step: wrapping(I64{0} - I64{2})
     loop _ in 0..<n {
         got: wide(step) ?? zero()
         total = wrapping(total + sum(got))
@@ -43,8 +43,8 @@ called: fn(n: Int) -> I64 Never! {
 closed: fn(n: Int) -> I64 {
     bias: I64{3}
     make: fn(x: I64) -> Wide WideError! { wide(wrapping(x - bias)) }
-    total := I64{0}
-    step := I64{0}
+    ^total: I64{0}
+    ^step: I64{0}
     loop _ in 0..<n {
         got: make(step) ?? zero()
         total = wrapping(total + sum(got))
@@ -54,7 +54,7 @@ closed: fn(n: Int) -> I64 {
 }
 
 tasked: fn(n: Int) -> I64 {
-    total := I64{0}
+    ^total: I64{0}
     task.group pool(limit: 2) {
         first: task called(n)
         second: task called(n + 3)

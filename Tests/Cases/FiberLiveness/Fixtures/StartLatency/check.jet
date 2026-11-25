@@ -22,7 +22,7 @@ numbers: fn(path: String) -> [Int] {
 
 percentile99: fn(values: [Int]) -> Int {
     if values.len() == 0 -> panic("no values")
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort()
     sorted[sorted.len() * 99 /% 100]
 }
@@ -36,7 +36,7 @@ run: fn() {
         return
     }
     bound: max(percentile99(numbers(args[base])), percentile99(numbers(args[base + 1])))
-    wrong := [String]{}
+    ^wrong: [String]{}
     loop (at, name) in ["the causal fixture", "the fan-out"] {
         starts: numbers(args[base + 2 + at])
         late: percentile99(starts)

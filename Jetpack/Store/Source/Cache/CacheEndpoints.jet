@@ -95,7 +95,7 @@ store_cache_parse_endpoint: fn(endpoint: String) -> CacheEndpoint StoreError! {
 }
 
 store_cache_trim_trailing_slashes: fn(value: String) -> String Never! {
-    trimmed := value
+    ^trimmed: value
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
     trimmed
 }
@@ -120,7 +120,7 @@ store_cache_parse_ssh_endpoint: fn(endpoint: String) -> CacheEndpoint StoreError
     split: rest.split_once("/")
     authority: split?.before ?? rest
     path: split?.after ?? ""
-    safe := authority != "" && !authority.starts_with("-")
+    ^safe: authority != "" && !authority.starts_with("-")
     loop byte in authority.bytes() {
         code: Int{byte}
         alphanumeric: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
@@ -157,7 +157,7 @@ store_cache_validate_s3_uri: fn(endpoint: String) StoreError! {
     rest: endpoint.removeprefix("s3://")
     segments: rest.split("/").to_list()
     bucket: segments[0]
-    safe := bucket != "" && !rest.contains("?") && !rest.contains("#") && !segments.contains("..")
+    ^safe: bucket != "" && !rest.contains("?") && !rest.contains("#") && !segments.contains("..")
     loop byte in bucket.bytes() {
         code: Int{byte}
         alphanumeric: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
@@ -178,7 +178,7 @@ store_cache_has_whitespace: fn(value: String) -> Bool Never! {
 // A remote path handed to `ssh`: absolute, no NUL, whitespace, `..`, or
 // shell metacharacter.
 store_cache_validate_remote_key: fn(key: String) StoreError! {
-    rejected := key == "" || !key.starts_with("/") || key.bytes().contains(U8{0}) || store_cache_has_whitespace(key) || key.split("/").to_list().contains("..")
+    ^rejected: key == "" || !key.starts_with("/") || key.bytes().contains(U8{0}) || store_cache_has_whitespace(key) || key.split("/").to_list().contains("..")
     loop byte in key.bytes() {
         if (Int{byte}) == {
             39 | 34 | 96 | 36 | 59 | 38 | 124 | 60 | 62 -> rejected = true
@@ -190,7 +190,7 @@ store_cache_validate_remote_key: fn(key: String) StoreError! {
 
 // A cache object key relative to its endpoint root.
 store_cache_validate_relative_key: fn(key: String) StoreError! {
-    rejected := key == "" || key.starts_with("/") || store_archive_path_components(key).contains("..")
+    ^rejected: key == "" || key.starts_with("/") || store_archive_path_components(key).contains("..")
     loop byte in key.bytes() {
         code: Int{byte}
         if code < 32 || code == 127 || code == 63 || code == 35 || code == 37 -> rejected = true
@@ -288,7 +288,7 @@ store_cache_publish_remote_atomic: fn(endpoint: CacheEndpoint, objects: [CacheRe
 // SSH, anything else is rewritten.
 store_cache_write_remote_resumable: fn(endpoint: CacheEndpoint, key: String, bytes: [U8]) StoreError! {
     found: store_cache_endpoint_get(endpoint, key, bytes.len() + 1)
-    offset := 0
+    ^offset: 0
     if found == {
         .Val(existing) -> {
             if existing == bytes {
@@ -344,7 +344,7 @@ store_cache_http_get: fn(url: String, limit: Int) -> [U8]? StoreError! {
     if status < 200 || status >= 300 {
         return Err(StoreError.InvalidData("HTTP cache GET failed with status {status}"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop part in response.body().chunks(65536) {
         chunk: part ?? return Err(StoreError.InvalidData("HTTP cache response could not be read: {err}"))
         loop byte in chunk -> bytes.push(byte)
@@ -471,7 +471,7 @@ store_cache_run_bounded_output: fn(spec: ProcessSpec, input: [U8]?, limit: Int, 
         }
         .None -> {}
     }
-    stdout := [U8]{}
+    ^stdout: [U8]{}
     loop {
         chunk: child.stdout.read_bytes(65536)
         if chunk.len() == 0 -> break
@@ -492,7 +492,7 @@ store_cache_bounded_stderr: fn(text: String) -> String Never! {
     if raw.len() <= STORE_CACHE_STDERR_LIMIT -> return text.trim()
     // The diagnostic is valid UTF-8, so only the cut can split a scalar: back
     // off to its lead byte and render the partial scalar as U+FFFD.
-    end := STORE_CACHE_STDERR_LIMIT
+    ^end: STORE_CACHE_STDERR_LIMIT
     loop end > 0 && ((Int{raw[end]}) & 0xC0) == 0x80 -> end -= 1
     kept: pkg_bytes_text(raw, 0, end)
     if end == STORE_CACHE_STDERR_LIMIT -> return kept.trim()

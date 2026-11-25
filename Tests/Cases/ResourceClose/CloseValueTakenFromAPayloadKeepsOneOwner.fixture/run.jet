@@ -58,8 +58,8 @@ wrappers_at: fn(name: String) -> Wrappers? {
 // written `^`, and the carrier then ends with this function.
 lease_from_payload: fn() -> Lease {
     wrappers: wrappers_at("payload")
-    root := String?{None}
-    handle := Held?{None}
+    ^root: String?{None}
+    ^handle: Held?{None}
     if wrappers == {
         .Val(found) -> {
             root = Val(found.root)
@@ -118,7 +118,7 @@ check_arm: fn() {
 // list, which then closes each tracer once.
 check_loop: fn() {
     list: [Res{name: "loop a"}, Res{name: "loop b"}]
-    out := [Res]{}
+    ^out: [Res]{}
     loop item in list.move() { out.push(item) }
     print("loop moved {out.len()}")
 }

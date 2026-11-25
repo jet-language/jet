@@ -10,9 +10,9 @@ package: {
 use db: core.db
 
 run: fn() {
-    conn := db.open_memory()
+    ^conn: db.open_memory()
     policy: db.policy("tasks", "owner == user") ?? panic("policy")
-    scoped := conn.with_policy(policy, "alice")
+    ^scoped: conn.with_policy(policy, "alice")
     print(db.policy_audit(scoped))
     _created: db.migrate(
         scoped,
@@ -29,7 +29,7 @@ run: fn() {
     _two: scoped.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {mine})"}) ?? panic("insert")
     rows: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("query")
     print("rows:{rows.len()}")
-    carol := conn.with_policy(policy, "carol")
+    ^carol: conn.with_policy(policy, "carol")
     other: "three"
     _three: carol.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {other})"}) ?? panic("carol insert")
     visible: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("query")

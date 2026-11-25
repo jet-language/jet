@@ -49,7 +49,7 @@ sema_owned_has_self: fn(method: Func) -> Bool Never! {
 }
 
 sema_owned_render: fn(method: OwnedMethod, names: [String], types: [Type]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     if method.receiver == {
         .Static -> {}
         .Any -> { parts.push("self") }
@@ -181,7 +181,7 @@ sema_owned_method_matches: fn(wanted: OwnedMethod, actual: Func, names: [String]
 // parse (`defaults_unknown`) is not reported: the driver's internal compiler
 // error is the one report of that.
 sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associated_names: [String], owner_type: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], span: Span, diagnostics: ^[Diagnostic], defaults_unknown: Bool{false}) -> Bool {
-    missing := [String]{}
+    ^missing: [String]{}
     loop wanted in declared {
         if defaults_unknown && wanted.default_source != None -> next
         present: loop method in methods {
@@ -192,9 +192,9 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
         if !present -> missing.push(wanted.name)
     }
     if missing.len() > 0 -> diagnostics.push(sema_owned_missing(trait_name, missing, span))
-    names := [String]{"Self"}
-    types := [Type]{owner_type.copy()}
-    unbound := [String]{}
+    ^names: [String]{"Self"}
+    ^types: [Type]{owner_type.copy()}
+    ^unbound: [String]{}
     loop name in associated_names {
         bound: loop binding in associated {
             if binding.name == name {
@@ -219,7 +219,7 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
             types.push(binding.ty.copy())
         }
     }
-    valid := missing.len() == 0
+    ^valid: missing.len() == 0
     loop method in methods {
         wanted: loop candidate in declared {
             if candidate.name == method.name {
@@ -302,8 +302,8 @@ sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, m
     owner: sema_owned_owner_name(owner_type)
     encode: verb == "encode"
     expected: if encode -> "`encode: fn(self) -> Dyn`" else -> "`decode: fn(tree: Dyn) -> {owner} [FieldError]!`"
-    valid := true
-    saw_verb := false
+    ^valid: true
+    ^saw_verb: false
     loop method in methods {
         if method.name != verb {
             valid = false
@@ -313,8 +313,8 @@ sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, m
         saw_verb = true
         has_self: sema_owned_has_self(method)
         values: loop param in method.params if param.name != "self" -> param.ty.copy()
-        returns_data := false
-        returns_owner := false
+        ^returns_data: false
+        ^returns_owner: false
         if method.return_type == .Val(returned) {
             returns_data = sema_owned_codec_data(sema_owned_infallible(returned))
             if returned == .Result(ok, err) {
@@ -356,7 +356,7 @@ sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type,
     }
     owner: sema_owned_owner_name(owner_type)
     hook: methods[constructors[0]]
-    valid := constructors.len() == 1 && hook.is_comptime && hook.type_params.len() == 0 && hook.params.len() == 1
+    ^valid: constructors.len() == 1 && hook.is_comptime && hook.type_params.len() == 0 && hook.params.len() == 1
     if valid {
         value: hook.params[0]
         valid = value.name != "self" && value.convention == AccessConvention.Read && type_identity_equal(value.ty, source) && value.default == None && !value.variadic
@@ -390,7 +390,7 @@ sema_owned_check_conversion: fn(trait_name: String, hook: String, owner_type: Ty
         return false
     }
     found: methods[hooks[0]]
-    valid := hooks.len() == 1 && found.type_params.len() == 0 && found.params.len() >= 1 && !found.is_comptime
+    ^valid: hooks.len() == 1 && found.type_params.len() == 0 && found.params.len() >= 1 && !found.is_comptime
     if valid {
         value: found.params[0]
         valid = value.name != "self" && value.convention != AccessConvention.Write && type_name(value.ty) == type_name(source) && value.default == None && !value.variadic
@@ -491,7 +491,7 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
     }
     if checks.len() > 0 {
         check: methods[checks[0]]
-        check_ok := check.type_params.len() == 0 && sema_owned_plain_param(check, Type.String) && sema_owned_pure(check) && errors.len() > 0
+        ^check_ok: check.type_params.len() == 0 && sema_owned_plain_param(check, Type.String) && sema_owned_pure(check) && errors.len() > 0
         if check_ok {
             check_ok = false
             if check.return_type == .Val(returned) {
@@ -506,7 +506,7 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
     }
     if holes.len() > 0 {
         hole: methods[holes[0]]
-        hole_ok := sema_owned_plain_param(hole, Type.Named{name: "T"}) && sema_owned_pure(hole) && hole.type_params.len() == 1
+        ^hole_ok: sema_owned_plain_param(hole, Type.Named{name: "T"}) && sema_owned_pure(hole) && hole.type_params.len() == 1
         if hole_ok {
             hole_ok = hole.type_params[0].name == "T" && hole.type_params[0].bounds == ([String]{"Printable"})
         }
@@ -519,7 +519,7 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
     }
     if builds.len() > 0 {
         build: methods[builds[0]]
-        build_ok := build.type_params.len() == 0 && sema_owned_pure(build) && build.params.len() == 2
+        ^build_ok: build.type_params.len() == 0 && sema_owned_pure(build) && build.params.len() == 2
         if build_ok {
             holes_param: if hole_bindings.len() > 0 -> sema_owned_list_param(build.params[1], associated[hole_bindings[0]].ty) else -> sema_owned_list_param(build.params[1], Type.String)
             build_ok = sema_owned_list_param(build.params[0], Type.String) && holes_param

@@ -38,7 +38,7 @@ store_recover_certification_staging_unlocked: fn(roots: HangarRoots) -[FS, Env]>
     if info.is_symlink || !info.is_dir {
         return Err(store_repro_invalid("reproducibility staging is not a real directory"))
     }
-    swept := 0
+    ^swept: 0
     loop entry in files.list_dir(parent) {
         child: files.stat(entry.path)
         if child.is_symlink || !child.is_dir {
@@ -61,7 +61,7 @@ RootWorkspace: struct {
         store_ensure_real_directory(hangar, "Hangar root")
         parent: files.join(hangar, STORE_REPRO_CERTIFICATION_STAGE_DIR)
         store_ensure_real_directory(parent, "reproducibility staging")
-        path := ""
+        ^path: ""
         loop {
             sequence: process_sequence_take(STORE_REPRO_CERTIFICATION_SEQUENCE)
             candidate: files.join(parent, "{sys.pid()}-{side}-{attempt}-{sequence}")
@@ -138,7 +138,7 @@ store_realize_uncached: fn(verification: StoreVerification, roots: HangarRoots, 
         }
         .Adapter(plan, table, expectation) -> {
             tools: store_realize_adapter_tools(verification, roots, ctx, plan, table)
-            realized := provider_realize_adapter(plan, ctx, expectation, tools.tools, table) ?? return Err(RealizeError.Provider(err))
+            ^realized: provider_realize_adapter(plan, ctx, expectation, tools.tools, table) ?? return Err(RealizeError.Provider(err))
             store_bind_adapter_hook_identity(realized, plan, table, expectation, ctx) ?? return Err(RealizeError.Store(err))
             Ok(realized)
         }
@@ -149,7 +149,7 @@ store_realize_uncached: fn(verification: StoreVerification, roots: HangarRoots, 
 // stays the durable substitution boundary: `nix_roots` still publishes the
 // complete Nix closure into the caller's Hangar.
 store_repro_workspace_ctx: fn(ctx: ProviderCtx, store_dir: String) -> ProviderCtx Never! {
-    workspace_ctx := ctx
+    ^workspace_ctx: ctx
     workspace_ctx.store_dir = store_dir
     workspace_ctx
 }
@@ -304,7 +304,7 @@ store_repro_entry_from_realized: fn(verification: StoreVerification, roots: Hang
     if realized.envelope.output_hash == "" || realized.reference.trim() == "" || realized.envelope.provenance.trim() == "" || identity.source_fingerprint == "" || identity.recipe_fingerprint == "" || identity.policy_fingerprint == "" || identity.platform == "" || realized.envelope.platform != identity.platform {
         return Err(store_repro_invalid("independent root result has incomplete or mismatched build identity"))
     }
-    producer := realized.producer
+    ^producer: realized.producer
     producer.bind_cache_provenance(realized.reference, realized.envelope.output_hash, identity, realized.references)
     provider_refresh_provider_facts(producer, realized.reference) ?? return Err(StoreError.Other("{err}"))
     producer = ProducerRecord.decode(producer.encode())
@@ -330,8 +330,8 @@ store_repro_entry_from_realized: fn(verification: StoreVerification, roots: Hang
     if actual != realized.envelope.output_hash {
         return Err(store_repro_invalid("independent root output re-hashed as `{actual}`, expected `{realized.envelope.output_hash}`"))
     }
-    named_outputs := [String:String]{}
-    names := realized.named_outputs.keys().to_list()
+    ^named_outputs: [String:String]{}
+    ^names: realized.named_outputs.keys().to_list()
     names.sort()
     loop name in names {
         path: realized.named_outputs[name]
@@ -388,13 +388,13 @@ store_repro_certify_registration: fn(verification: StoreVerification, roots: Han
     if store_reproducibility_blocked(roots, action_key) && !fresh_agreement {
         return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
     }
-    candidates := [String:StoreEntry]{}
+    ^candidates: [String:StoreEntry]{}
     loop candidate in existing.concat(additional) {
         if candidate.id != entry.id && store_entry_action_key(candidate) == action_key {
             candidates[candidate.id] = candidate
         }
     }
-    ids := candidates.keys().to_list()
+    ^ids: candidates.keys().to_list()
     ids.sort()
     loop id in ids {
         candidate: candidates[id]
@@ -440,7 +440,7 @@ store_repro_compare_registration_entries: fn(verification: StoreVerification, le
     }
     left_outputs: store_repro_nix_action_outputs(left, left_producer)
     right_outputs: store_repro_nix_action_outputs(right, right_producer)
-    names := left_outputs.keys().to_list()
+    ^names: left_outputs.keys().to_list()
     loop name in right_outputs.keys() {
         if !left_outputs.has_key(name) -> names.push(name)
     }
@@ -465,7 +465,7 @@ store_repro_compare_registration_entries: fn(verification: StoreVerification, le
 
 // `["a", "b"]`.
 store_repro_debug_list: fn(values: [String]) -> String Never! {
-    quoted := [String]{}
+    ^quoted: [String]{}
     loop value in values -> quoted.push(json.to_string(Dyn.Text(value.copy())) ?? "\"{value}\"")
     "[{quoted.join(", ")}]"
 }
@@ -477,7 +477,7 @@ NixActionOutput: struct {
 
 // `nix.output.<name>` producer facts paired with their recorded digests.
 store_repro_nix_action_outputs: fn(entry: StoreEntry, producer: ProducerRecord) -> [String:NixActionOutput] Never! {
-    outputs := [String:NixActionOutput]{}
+    ^outputs: [String:NixActionOutput]{}
     loop fact in producer.facts {
         if !fact.key.starts_with("nix.output.") -> next
         name: fact.key.removeprefix("nix.output.")
@@ -588,7 +588,7 @@ store_repro_side_json: fn(entry: StoreEntry, producer: ProducerRecord, action_ke
 }
 
 store_repro_report_entry_id: fn(entry: StoreEntry, action_key: String) -> String Never! {
-    identity := "jet-reproducibility-candidate-v1".bytes()
+    ^identity: "jet-reproducibility-candidate-v1".bytes()
     identity.push(U8{0})
     store_nix_push_field(identity, action_key)
     store_nix_push_field(identity, entry.envelope.output_hash)
@@ -616,7 +616,7 @@ store_repro_persist_report: fn(roots: HangarRoots, action_key: String, report: S
 }
 
 store_repro_publish_report: fn(directory: String, partial: String, destination: String, report: String) -[FS]> StoreError! {
-    output := files.create(partial, if_exists: .Refuse)
+    ^output: files.create(partial, if_exists: .Refuse)
     output.write_bytes(report.bytes())
     output.fsync()
     files.set_mode(partial, 0o600)
@@ -684,7 +684,7 @@ store_repro_report_path: fn(directory: String, action_key: String) -> String Nev
 // is, anything else hashed into that shape.
 store_repro_report_file_stem: fn(action_key: String) -> String Never! {
     raw: action_key.bytes()
-    valid := raw.len() == 71 && action_key.starts_with("sha256-")
+    ^valid: raw.len() == 71 && action_key.starts_with("sha256-")
     if valid {
         loop index in 7..<71 {
             code: Int{raw[index]}

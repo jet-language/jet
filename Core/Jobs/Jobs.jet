@@ -145,14 +145,14 @@ queue: fn() -[DB, Env, FS, Rand, Time]> JobQueue ServiceError! {
     endpoint: core.service.__active_endpoint("{path}.authority") ?? return Err(err)
     service.__authority_validate(endpoint) ?? return Err(err)
     authority: core.service.__endpoint_authority(endpoint)
-    driver := db.__driver_open(path) ?? return Err(queue_unavailable("queue SQLite open failed"))
+    ^driver: db.__driver_open(path) ?? return Err(queue_unavailable("queue SQLite open failed"))
     queue_begin(driver) ?? return Err(err)
     initialized: queue_initialize_on_driver(driver, authority, name, 1024) ?? {
         _: db.__driver_rollback(driver)
         return Err(err)
     }
     queue_finish(driver, initialized) ?? return Err(err)
-    queue := JobQueue{
+    ^queue: JobQueue{
         data: Shared{QueueData{driver: driver.move()}},
         endpoint: endpoint,
         authority: authority,
@@ -175,7 +175,7 @@ JobQueue: struct {
     receipt: fn(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
-        guard := self.data.guard_edit()
+        ^guard: self.data.guard_edit()
         record: queue_find(guard.value.driver, self.authority, self.name, id) ?? return Err(err)
         Ok(queue_receipt(record, false))
     }
@@ -186,14 +186,14 @@ JobQueue: struct {
         if limit <= 0 || limit > 1024 {
             return Err(ServiceError.Policy("queue inspection limit must be positive and bounded"))
         }
-        guard := self.data.guard_edit()
+        ^guard: self.data.guard_edit()
         queue_inspect_on_driver(guard.value.driver, self.authority, self.name, limit, include_payload && false)
     }
 
     events: fn(self, id: String) -[DB]> [JobQueueEvent] ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
-        guard := self.data.guard_edit()
+        ^guard: self.data.guard_edit()
         queue_events_on_driver(guard.value.driver, self.authority, self.name, id)
     }
 
@@ -288,7 +288,7 @@ JobQueue: struct {
     prune: fn(self) -[DB, Time]> Int ServiceError! {
         now: queue_now()
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
+        ^guard: self.data.guard_edit()
         queue_begin(guard.value.driver) ?? return Err(err)
         result: queue_prune_on_driver(guard.value.driver, self.authority, self.name, 604800000, now) ?? {
             _: db.__driver_rollback(guard.value.driver)
@@ -434,7 +434,7 @@ queue_set_paused: fn(queue: JobQueue, paused: Bool) -[DB, Time]> JobQueueStatus 
 // Returning from these helpers releases the lexical SharedGuard before any
 // publication or subsequent acquisition of the same queue lock.
 queue_enqueue_transaction: fn(queue: JobQueue, requests: [EnqueueRequest], now: Int) -[DB]> {receipts: [JobQueueReceipt], observations: [QueueTransition]} ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_enqueue_on_driver(guard.value.driver, queue.authority, queue.name, 1024, false, requests, now) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -444,7 +444,7 @@ queue_enqueue_transaction: fn(queue: JobQueue, requests: [EnqueueRequest], now: 
 }
 
 queue_claim_transaction: fn(queue: JobQueue, worker: String, limit: Int) -[DB, Rand, Time]> {claims: [JobQueueClaim], observations: [QueueTransition]} ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_claim_on_driver(guard.value.driver, queue.authority, queue.name, worker, limit, 3, 30000, queue_now()) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -454,7 +454,7 @@ queue_claim_transaction: fn(queue: JobQueue, worker: String, limit: Int) -[DB, R
 }
 
 queue_heartbeat_transaction: fn(queue: JobQueue, claim: JobQueueClaim) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_heartbeat_on_driver(guard.value.driver, queue.authority, queue.name, 30000, claim) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -464,7 +464,7 @@ queue_heartbeat_transaction: fn(queue: JobQueue, claim: JobQueueClaim) -[DB, Tim
 }
 
 queue_acknowledge_transaction: fn(queue: JobQueue, claim: JobQueueClaim, result: JobResult) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     outcome: queue_acknowledge_on_driver(guard.value.driver, queue.authority, queue.name, claim, result) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -474,7 +474,7 @@ queue_acknowledge_transaction: fn(queue: JobQueue, claim: JobQueueClaim, result:
 }
 
 queue_fail_transaction: fn(queue: JobQueue, claim: JobQueueClaim, failure: JobError) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_fail_on_driver(guard.value.driver, queue.authority, queue.name, 3, 1000, 60000, claim, failure) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -484,7 +484,7 @@ queue_fail_transaction: fn(queue: JobQueue, claim: JobQueueClaim, failure: JobEr
 }
 
 queue_cancel_transaction: fn(queue: JobQueue, id: String, reason: String, lease_token: String?) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_cancel_on_driver(guard.value.driver, queue.authority, queue.name, id, reason, lease_token) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -494,7 +494,7 @@ queue_cancel_transaction: fn(queue: JobQueue, id: String, reason: String, lease_
 }
 
 queue_dead_letter_transaction: fn(queue: JobQueue, id: String, reason: String, lease_token: String?) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_dead_letter_on_driver(guard.value.driver, queue.authority, queue.name, id, reason, lease_token) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -504,7 +504,7 @@ queue_dead_letter_transaction: fn(queue: JobQueue, id: String, reason: String, l
 }
 
 queue_recover_transaction: fn(queue: JobQueue) -[DB, Time]> [QueueTransition] ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_recover_on_driver(guard.value.driver, queue.authority, queue.name, 3, queue_now()) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -514,12 +514,12 @@ queue_recover_transaction: fn(queue: JobQueue) -[DB, Time]> [QueueTransition] Se
 }
 
 queue_read_status: fn(queue: JobQueue) -[DB, Time]> JobQueueStatus ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_status_on_driver(guard.value.driver, queue.authority, queue.name)
 }
 
 queue_pause_transaction: fn(queue: JobQueue, paused: Bool, now: Int) -[DB]> ServiceError! {
-    guard := queue.data.guard_edit()
+    ^guard: queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
     result: queue_pause_on_driver(guard.value.driver, queue.authority, queue.name, paused, now) ?? {
         _: db.__driver_rollback(guard.value.driver)
@@ -531,10 +531,10 @@ queue_pause_transaction: fn(queue: JobQueue, paused: Bool, now: Int) -[DB]> Serv
 queue_json_text: fn(value: String) -> String Never! {
     raw: value.bytes()
     alphabet: "0123456789abcdef".bytes()
-    output := [U8]{34}
-    index := 0
+    ^output: [U8]{34}
+    ^index: 0
     loop index < raw.len() {
-        code := Int{raw[index]}
+        ^code: Int{raw[index]}
         index += 1
         if code == 34 || code == 92 {
             output.push(U8{92})
@@ -584,7 +584,7 @@ queue_transition_fields: fn(observation: QueueTransition) -> String Never! {
         .Completed -> "completed"
         .Failed | .DeadLettered | .Canceled -> "failed"
     }
-    failure := String?{None}
+    ^failure: String?{None}
     if observation.state == .Canceled -> failure = Val("canceled")
     if observation.state == .Failed || observation.state == .DeadLettered {
         failure = Val("error")
@@ -979,7 +979,7 @@ queue_saturating_sub: fn(left: Int, right: Int) -> Int Never! {
 }
 
 queue_receipt: fn(record: StoredJob, duplicate: Bool) -> JobQueueReceipt Never! {
-    duration := Int?{None}
+    ^duration: Int?{None}
     if record.started_at_ms == .Val(started) {
         if record.finished_at_ms == .Val(finished) {
             duration = Val(queue_saturating_sub(finished, started))
@@ -1007,9 +1007,9 @@ queue_receipt: fn(record: StoredJob, duplicate: Bool) -> JobQueueReceipt Never! 
 }
 
 queue_record: fn(record: StoredJob, include_payload: Bool) -> JobQueueRecord Never! {
-    payload := JobPayload?{None}
-    result := JobResult?{None}
-    error := JobError?{None}
+    ^payload: JobPayload?{None}
+    ^result: JobResult?{None}
+    ^error: JobError?{None}
     if include_payload && record.payload_public {
         payload = Val(JobPayload{type_id: record.payload_type, bytes: record.payload, publish: true})
     }
@@ -1041,7 +1041,7 @@ queue_frame: fn(input: ^[U8], field: [U8]) Never! {
 }
 
 queue_id: fn(authority: String, name: String, sequence: Int, job_type: String, payload: [U8]) -> String Never! {
-    input := [U8]{}
+    ^input: [U8]{}
     queue_frame(input, "jet-job-id-v1".bytes())
     queue_frame(input, authority.bytes())
     queue_frame(input, name.bytes())
@@ -1052,7 +1052,7 @@ queue_id: fn(authority: String, name: String, sequence: Int, job_type: String, p
 }
 
 queue_signature: fn(key: [U8], authority: String, id: String, name: String, job_type: String, sequence: Int, due: Int, payload: [U8]) -> String Never! {
-    input := [U8]{}
+    ^input: [U8]{}
     queue_frame(input, "jet-job-queue-v1".bytes())
     queue_frame(input, authority.bytes())
     queue_frame(input, id.bytes())
@@ -1061,9 +1061,9 @@ queue_signature: fn(key: [U8], authority: String, id: String, name: String, job_
     queue_frame(input, "{sequence}".bytes())
     queue_frame(input, "{due}".bytes())
     queue_frame(input, crypto.sha256(payload).bytes)
-    bytes := crypto.hmac_sha256(key, input)
+    ^bytes: crypto.hmac_sha256(key, input)
     alphabet: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in bytes {
         out.push(alphabet[Int{byte} /% 16])
         out.push(alphabet[Int{byte} % 16])
@@ -1118,7 +1118,7 @@ QUEUE_CREATE_FORMAT: "CREATE TABLE jet_job_queue_format (version INTEGER NOT NUL
 // for queue tables without one, or 0 when the database holds no queue yet.
 priv queue_format_version: fn(driver: ^db.DBDriver) -[DB]> Int ServiceError! {
     tables: queue_query(driver, "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('jet_job_queue_format', 'jet_job_queue_jobs')", [DBValue]{}, "format") ?? return Err(err)
-    names := [String]{}
+    ^names: [String]{}
     loop row in tables { names.push(queue_row_text(row, "name") ?? return Err(err)) }
     if !names.contains("jet_job_queue_format") {
         if names.contains("jet_job_queue_jobs") -> return Ok(1)
@@ -1194,8 +1194,8 @@ queue_insert_event: fn(driver: ^db.DBDriver, record: StoredJob, state: JobQueueS
 }
 
 queue_update_event: fn(driver: ^db.DBDriver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?, extra: [{column: String, value: DBValue}]) -[DB]> ServiceError! {
-    assignments := "state = ?, attempts = ?, event_sequence = ?, updated_at_ms = ?"
-    bindings := [DBValue]{
+    ^assignments: "state = ?, attempts = ?, event_sequence = ?, updated_at_ms = ?"
+    ^bindings: [DBValue]{
         .Text(queue_state_text(state)),
         .Int(attempts),
         .Int(queue_saturating_add(record.event_sequence, 1)),
@@ -1250,7 +1250,7 @@ queue_next_sequence: fn(driver: ^db.DBDriver, authority: String, name: String) -
         [DBValue]{.Text(authority), .Text(name)},
         "sequence",
     ) ?? return Err(err)
-    last := 0
+    ^last: 0
     if rows.len() > 0 -> last = queue_row_int(rows[0], "sequence") ?? return Err(err)
     if last == 9223372036854775807 -> return Err(ServiceError.Full("queue sequence exhausted"))
     Ok(last + 1)
@@ -1352,9 +1352,9 @@ queue_validate_bulk: fn(requests: [EnqueueRequest]) ServiceError! {
 // The caller owns the exclusive Shared guard and the SQLite transaction;
 // observations leave that transaction only after its successful commit.
 queue_enqueue_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String, capacity: Int, publish_payload: Bool, requests: [EnqueueRequest], now: Int) -[DB]> {receipts: [JobQueueReceipt], observations: [QueueTransition]} ServiceError! {
-    next_sequence := queue_next_sequence(driver, authority, name) ?? return Err(err)
-    receipts := [JobQueueReceipt]{}
-    observations := [QueueTransition]{}
+    ^next_sequence: queue_next_sequence(driver, authority, name) ?? return Err(err)
+    ^receipts: [JobQueueReceipt]{}
+    ^observations: [QueueTransition]{}
     loop request in requests {
         if request.idempotency_key == .Val(key) {
             prior: if queue_find_by_key(driver, authority, name, key) == {
@@ -1378,7 +1378,7 @@ queue_enqueue_on_driver: fn(driver: ^db.DBDriver, authority: String, name: Strin
             [DBValue]{.Text(authority), .Text(name)},
             "capacity",
         ) ?? return Err(err)
-        depth := 0
+        ^depth: 0
         if rows.len() > 0 {
             depth = queue_row_int(rows[0], "depth") ?? return Err(err)
             if depth < 0 {
@@ -1495,7 +1495,7 @@ queue_enqueue_on_driver: fn(driver: ^db.DBDriver, authority: String, name: Strin
     }
     assert_eq(queue_saturating_add(9223372036854775807, 1), 9223372036854775807)
     assert_eq(queue_saturating_sub(-9223372036854775808, 1), -9223372036854775808)
-    framed := [U8]{}
+    ^framed: [U8]{}
     queue_frame(framed, [U8]{0, 255})
     assert_eq(framed, [U8]{0, 0, 0, 0, 0, 0, 0, 2, 0, 255})
 }
@@ -1506,7 +1506,7 @@ queue_duration: fn(record: StoredJob, now: Int) -> Int? Never! {
 }
 
 queue_heartbeat_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String, lease_ms: Int, claim: JobQueueClaim) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    record := queue_find(driver, authority, name, claim.receipt.id) ?? return Err(err)
+    ^record: queue_find(driver, authority, name, claim.receipt.id) ?? return Err(err)
     if record.state == .Completed {
         return Ok({receipt: queue_receipt(record, false), observation: None})
     }
@@ -1524,7 +1524,7 @@ queue_heartbeat_on_driver: fn(driver: ^db.DBDriver, authority: String, name: Str
         Val(claim.worker),
         [{column: String, value: DBValue}]{{column: "lease_until_ms", value: .Int(until)}},
     ) ?? return Err(err)
-    observation := queue_transition(record, .Running, record.attempts, now, Val("heartbeat"), None, Val(claim.worker))
+    ^observation: queue_transition(record, .Running, record.attempts, now, Val("heartbeat"), None, Val(claim.worker))
     observation.event = "heartbeat"
     record.lease_until_ms = Val(until)
     record.updated_at_ms = now
@@ -1533,7 +1533,7 @@ queue_heartbeat_on_driver: fn(driver: ^db.DBDriver, authority: String, name: Str
 }
 
 queue_acknowledge_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String, claim: JobQueueClaim, result: JobResult) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    record := queue_find(driver, authority, name, claim.receipt.id) ?? return Err(err)
+    ^record: queue_find(driver, authority, name, claim.receipt.id) ?? return Err(err)
     if record.state == .Completed {
         return Ok({receipt: queue_receipt(record, false), observation: None})
     }
@@ -1584,7 +1584,7 @@ queue_acknowledge_on_driver: fn(driver: ^db.DBDriver, authority: String, name: S
 // Match the durable provider's attempts.saturating_sub(1).min(20),
 // signed-i64 saturating multiplication, then the configured delay ceiling.
 queue_backoff: fn(retry_delay_ms: Int, max_retry_delay_ms: Int, attempts: Int) -> Int Never! {
-    exponent := attempts - 1
+    ^exponent: attempts - 1
     if exponent < 0 -> exponent = 0
     if exponent > 20 -> exponent = 20
     product: retry_delay_ms * (1 << exponent)
@@ -1604,7 +1604,7 @@ queue_backoff: fn(retry_delay_ms: Int, max_retry_delay_ms: Int, attempts: Int) -
 }
 
 queue_fail_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String, max_attempts: Int, retry_delay_ms: Int, max_retry_delay_ms: Int, claim: JobQueueClaim, failure: JobError) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    record := queue_find(driver, authority, name, claim.receipt.id) ?? return Err(err)
+    ^record: queue_find(driver, authority, name, claim.receipt.id) ?? return Err(err)
     if record.state == .DeadLettered || record.state == .Failed {
         return Ok({receipt: queue_receipt(record, false), observation: None})
     }
@@ -1659,7 +1659,7 @@ queue_fail_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String, 
 }
 
 queue_cancel_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String, id: String, reason: String, lease_token: String?) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    record := queue_find(driver, authority, name, id) ?? return Err(err)
+    ^record: queue_find(driver, authority, name, id) ?? return Err(err)
     if record.state == .Canceled || record.state == .Completed || record.state == .DeadLettered {
         return Ok({receipt: queue_receipt(record, false), observation: None})
     }
@@ -1704,7 +1704,7 @@ queue_cancel_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String
 }
 
 queue_dead_letter_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String, id: String, reason: String, lease_token: String?) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
-    record := queue_find(driver, authority, name, id) ?? return Err(err)
+    ^record: queue_find(driver, authority, name, id) ?? return Err(err)
     if record.state == .DeadLettered {
         return Ok({receipt: queue_receipt(record, false), observation: None})
     }
@@ -1758,7 +1758,7 @@ queue_recover_on_driver: fn(driver: ^db.DBDriver, authority: String, name: Strin
         [DBValue]{.Text(authority), .Text(name), .Int(now)},
         "lease recovery",
     ) ?? return Err(err)
-    observations := [QueueTransition]{}
+    ^observations: [QueueTransition]{}
     loop row in rows {
         record: queue_stored(row) ?? return Err(err)
         terminal: record.attempts >= max_attempts
@@ -1853,7 +1853,7 @@ queue_status_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String
         [DBValue]{.Text(authority), .Text(name), .Int(queue_saturating_sub(now, 60000))},
         "throughput status",
     ) ?? return Err(err)
-    throughput := 0
+    ^throughput: 0
     if throughput_rows.len() > 0 {
         throughput = queue_count(queue_row_int(throughput_rows[0], "throughput") ?? return Err(err), "throughput") ?? return Err(err)
     }
@@ -1913,7 +1913,7 @@ queue_inspect_on_driver: fn(driver: ^db.DBDriver, authority: String, name: Strin
         [DBValue]{.Text(authority), .Text(name), .Int(limit)},
         "inspection",
     ) ?? return Err(err)
-    records := [JobQueueRecord]{}
+    ^records: [JobQueueRecord]{}
     loop row in rows {
         records.push(queue_record(queue_stored(row) ?? return Err(err), include_payload))
     }
@@ -1928,7 +1928,7 @@ queue_events_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String
         [DBValue]{.Text(authority), .Text(name), .Text(record.id)},
         "events",
     ) ?? return Err(err)
-    events := [JobQueueEvent]{}
+    ^events: [JobQueueEvent]{}
     loop row in rows {
         events.push(
             JobQueueEvent{
@@ -1965,7 +1965,7 @@ queue_events_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String
 
 queue_lease_token: fn(id: String, worker: String) -[Rand, Time]> String ServiceError! {
     entropy: core.crypto.random.bytes(24) ?? return Err(ServiceError.Policy("queue lease token could not obtain cryptographic entropy"))
-    input := [U8]{}
+    ^input: [U8]{}
     queue_frame(input, id.bytes())
     queue_frame(input, worker.bytes())
     now: queue_now()
@@ -1986,16 +1986,16 @@ queue_claim_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String,
             return Ok({claims: [JobQueueClaim]{}, observations: [QueueTransition]{}})
         }
     }
-    observations := queue_recover_on_driver(driver, authority, name, max_attempts, now) ?? return Err(err)
+    ^observations: queue_recover_on_driver(driver, authority, name, max_attempts, now) ?? return Err(err)
     candidates: queue_query(
         driver,
         "{QUEUE_SELECT} WHERE authority = ? AND queue = ? AND state IN ('queued', 'retrying') AND due_at_ms <= ? ORDER BY sequence LIMIT ?",
         [DBValue]{.Text(authority), .Text(name), .Int(now), .Int(limit)},
         "claim lookup",
     ) ?? return Err(err)
-    claims := [JobQueueClaim]{}
+    ^claims: [JobQueueClaim]{}
     loop row in candidates {
-        record := queue_stored(row) ?? return Err(err)
+        ^record: queue_stored(row) ?? return Err(err)
         if record.attempts >= max_attempts {
             queue_update_event(
                 driver,

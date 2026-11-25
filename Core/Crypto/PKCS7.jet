@@ -133,7 +133,7 @@ pkcs7_get_version: fn(data: [U8], p: ^Int, end: Int) -> Int PKCS7Error! {
 // pkcs7_get_content_info_type: the contentType OID of a ContentInfo, and
 // where the ContentInfo ends.
 pkcs7_get_content_info_type: fn(data: [U8], p: ^Int, end: Int) -> {seq_end: Int, content_type: asn1.ASN1Buf} PKCS7Error! {
-    len := asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidContentInfo(Val(err)))
+    ^len: asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidContentInfo(Val(err)))
     seq_end: p + len
     len = asn1.get_tag(data, p, seq_end, asn1.ASN1_OID) ?? return Err(.InvalidContentInfo(Val(err)))
     content_type: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
@@ -185,7 +185,7 @@ pkcs7_get_certificates: fn(data: [U8], p: ^Int, end: Int, certs: ^[x509crt.X509C
 // Every failure is INVALID_SIGNER_INFO, with the ASN.1 failure only when a
 // SEQUENCE header itself does not read, as in mbedtls.
 pkcs7_get_signer_info: fn(data: [U8], p: ^Int, end: Int, alg: asn1.ASN1Buf) -> PKCS7SignerInfo PKCS7Error! {
-    len := asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidSignerInfo(Val(err)))
+    ^len: asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidSignerInfo(Val(err)))
     end_signer: p + len
     version: pkcs7_get_version(data, p, end_signer) ?? return Err(.InvalidSignerInfo(None))
     len = asn1.get_tag(data, p, end_signer, PKCS7_SEQUENCE) ?? return Err(.InvalidSignerInfo(Val(err)))
@@ -224,7 +224,7 @@ pkcs7_get_signer_info: fn(data: [U8], p: ^Int, end: Int, alg: asn1.ASN1Buf) -> P
 
 // pkcs7_get_signers_info_set: the SignerInfos SET, which may be empty.
 pkcs7_get_signers_info_set: fn(data: [U8], p: ^Int, end: Int, digest_alg: asn1.ASN1Buf) -> [PKCS7SignerInfo] PKCS7Error! {
-    signers := [PKCS7SignerInfo]{}
+    ^signers: [PKCS7SignerInfo]{}
     len: asn1.get_tag(data, p, end, PKCS7_SET) ?? return Err(.InvalidSignerInfo(Val(err)))
     if len == 0 -> return Ok(signers)
     end_set: p + len
@@ -240,7 +240,7 @@ pkcs7_get_signers_info_set: fn(data: [U8], p: ^Int, end: Int, digest_alg: asn1.A
 // pkcs7_get_signed_data: the SignedData in data[from..<from + len], which
 // it must fill.
 pkcs7_get_signed_data: fn(data: [U8], from: Int, buflen: Int) -> PKCS7SignedData PKCS7Error! {
-    p := from
+    ^p: from
     end: from + buflen
     len: asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
     if p + len != end -> return Err(.InvalidFormat(Val(.LengthMismatch)))
@@ -258,7 +258,7 @@ pkcs7_get_signed_data: fn(data: [U8], from: Int, buflen: Int) -> PKCS7SignedData
         // Encapsulated content is valid but not read.
         return Err(.FeatureUnavailable)
     }
-    certs := [x509crt.X509Crt]{}
+    ^certs: [x509crt.X509Crt]{}
     no_of_certs: pkcs7_get_certificates(data, p, end, certs)
     // A CRLs field is not read: the signers below fail on its tag.
     signers: pkcs7_get_signers_info_set(data, p, end, digest_alg)
@@ -281,13 +281,13 @@ pkcs7_get_signed_data: fn(data: [U8], from: Int, buflen: Int) -> PKCS7SignedData
 /// FeatureUnavailable; an unknown one BadInput.
 pkcs7_parse_der: fn(buf: [U8]) -> PKCS7 PKCS7Error! {
     raw: buf.copy()
-    p := 0
+    ^p: 0
     end: raw.len()
-    len := asn1.get_tag(raw, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
+    ^len: asn1.get_tag(raw, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
     if end - p != len -> return Err(.InvalidFormat(Val(.LengthMismatch)))
     // Without a content type OID the whole input is read as the SignedData.
-    from := 0
-    body_len := end
+    ^from: 0
+    ^body_len: end
     if asn1.get_tag(raw, p, end, asn1.ASN1_OID) == {
         .Err(e) -> {
             if e != .UnexpectedTag -> return Err(.Asn1(e))
@@ -323,14 +323,14 @@ pkcs7_data_or_hash_verify: fn(msg: PKCS7, cert: ^x509crt.X509Crt, given: [U8], i
     profile: x509crt.x509_crt_profile_default()
     if !x509crt.x509_profile_check_md_alg(profile, Val(md)) -> return Err(.InvalidAlg(None))
     if !x509crt.x509_profile_check_pk_alg(profile, cert.sig_pk) -> return Err(.InvalidAlg(None))
-    digest := [U8]{}
+    ^digest: [U8]{}
     if is_hash {
         if given.len() != hashes.md_size(md) -> return Err(.VerifyFail)
         digest = given.copy()
     } else { digest = hashes.hash(md, given) }
     // Any signer whose signature verifies will do; mbedtls does not match
     // the signer to the certificate first.
-    last := pk.PKError.BadInput
+    ^last: pk.PKError.BadInput
     loop signer in signers {
         sig: cipher.bytes_of(msg.raw, signer.sig.p, signer.sig.len)
         if pk.pk_verify(cert.pk, Val(md), digest, sig) == {

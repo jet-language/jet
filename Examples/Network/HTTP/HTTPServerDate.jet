@@ -46,15 +46,15 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     dated: http.get("http://{addr}/dated") ?? panic("GET /dated failed")
     print("handler date: {dated.header("date") ?? "missing"}")
     wire: net.tcp_connect(addr) ?? panic("connect failed")
-    request := "".bytes()
+    ^request: "".bytes()
     loop line in ["GET / HTTP/1.1", "Host: local", "Connection: close", ""] {
         loop byte in line.bytes() -> request.push(byte)
         request.push(13)
         request.push(10)
     }
     wire.write_bytes(request) ?? panic("request failed")
-    raw := ""
-    chunk := ""
+    ^raw: ""
+    ^chunk: ""
     loop _ in 0..32 {
         chunk = wire.read(8192) ?? panic("response failed")
         if chunk == "" -> break

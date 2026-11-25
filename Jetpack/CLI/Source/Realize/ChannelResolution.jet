@@ -27,14 +27,14 @@ ChannelSource: struct {
 
 // Every declared source that tracks a channel, in source-table name order.
 cli_channel_sources: fn(table: SourceTable) -> [ChannelSource] Never! {
-    sources := [ChannelSource]{}
+    ^sources: [ChannelSource]{}
     loop decl in table.declarations() {
         split: pkg_split_channel_ref(decl.upstream)
         policy: table.channel_policy(decl.name)
         raw: table.source_ref(decl.name) ?? split.base
-        nix_channel := cli_nixpkgs_channel(raw)
+        ^nix_channel: cli_nixpkgs_channel(raw)
         if nix_channel == None -> nix_channel = cli_nixpkgs_channel(split.base)
-        tracked := split.channel
+        ^tracked: split.channel
         if tracked == None && (policy.moves() || nix_channel != None) {
             tracked = Val(ChannelRef.Latest)
         }
@@ -172,7 +172,7 @@ cli_resolve_source_channel: fn(source: ChannelSource, flags: CLIFlags) -[FS, Env
 cli_channel_fixture_rows: fn(flags: CLIFlags) -[FS, Env]> [[String]] Never! {
     dir: cli_fixtures_for(flags) ?? return [[String]]{}
     raw: files.read(files.join(dir, "channels.txt")) ?? return [[String]]{}
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop line in raw.lines() -> rows.push(trust_text_words(line))
     rows
 }
@@ -291,7 +291,7 @@ cli_offline_refusal: fn(theme: Theme, command: String) -[IO, Time.Wait]> Int Nev
 // The newest semver-shaped tag of `git ls-remote` output, optionally limited
 // to one `v<major>.x` series. Ties keep the first tag seen.
 cli_newest_tag: fn(lines: [String], mask: String?) -> String? Never! {
-    major := Int?{None}
+    ^major: Int?{None}
     if mask == .Val(series) {
         if series.starts_with("v") && series.ends_with(".x") {
             if Int.parse(series.removeprefix("v").removesuffix(".x")) == .Ok(wanted) {
@@ -299,8 +299,8 @@ cli_newest_tag: fn(lines: [String], mask: String?) -> String? Never! {
             }
         }
     }
-    best_nums := [Int]{}
-    best := String?{None}
+    ^best_nums: [Int]{}
+    ^best: String?{None}
     loop line in lines {
         tail: line.split_once("refs/tags/")?.after ?? next
         release_tag: tail.trim()
@@ -329,9 +329,9 @@ cli_version_greater: fn(left: [Int], right: [Int]) -> Bool Never! {
 // when a part has no leading digits.
 cli_semver_nums: fn(text: String) -> [Int]? Never! {
     rest: text.removeprefix("v")
-    out := [Int]{}
+    ^out: [Int]{}
     loop part in rest.split(".") {
-        digits := ""
+        ^digits: ""
         loop byte in part.bytes() {
             code: Int{byte}
             if code < 48 || code > 57 -> break

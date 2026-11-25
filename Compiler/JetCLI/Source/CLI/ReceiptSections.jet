@@ -31,7 +31,7 @@ jet_cli_receipt_section_record_validate: fn(record: JetCLIReceiptSectionRecord) 
 }
 
 jet_cli_receipt_section_record_body: fn(record: JetCLIReceiptSectionRecord, marker: String) -> [U8] Never! {
-    bytes := jet_driver_run_receipt_section_marker(marker)
+    ^bytes: jet_driver_run_receipt_section_marker(marker)
     jet_driver_run_receipt_frame(bytes, record.claim_key.bytes())
     jet_driver_run_receipt_frame(bytes, record.parent_digest.bytes())
     jet_driver_run_receipt_frame(bytes, record.section.name.bytes())
@@ -47,7 +47,7 @@ jet_cli_receipt_section_record_identity: fn(record: JetCLIReceiptSectionRecord) 
 
 jet_cli_receipt_section_record_encode: fn(record: JetCLIReceiptSectionRecord) -> [U8] JetCLIReadError! {
     jet_cli_receipt_section_record_validate(record)
-    bytes := jet_cli_receipt_section_record_body(record, "jet-receipt-section-record-v1")
+    ^bytes: jet_cli_receipt_section_record_body(record, "jet-receipt-section-record-v1")
     jet_driver_run_receipt_frame(bytes, record.section.bytes)
     if bytes.len() > JET_CLI_RECEIPT_SECTION_RECORD_MAX {
         return Err(jet_cli_read_error("receipt section record is too large (maximum 67112960 bytes)"))
@@ -68,7 +68,7 @@ jet_cli_receipt_section_record_decode: fn(bytes: [U8]) -> JetCLIReceiptSectionRe
     if bytes.len() < magic.len() || bytes.slice(0, magic.len()) != magic {
         return Err(jet_cli_read_error("receipt section record magic is invalid"))
     }
-    cursor := JetDriverRunReceiptCursor{bytes: bytes, at: magic.len(), prefix: "receipt section record", maximum: JET_CLI_RECEIPT_SECTION_RECORD_MAX}
+    ^cursor: JetDriverRunReceiptCursor{bytes: bytes, at: magic.len(), prefix: "receipt section record", maximum: JET_CLI_RECEIPT_SECTION_RECORD_MAX}
     claim_key: jet_cli_receipt_section_record_text(cursor, "claim key")
     parent_digest: jet_cli_receipt_section_record_text(cursor, "parent digest")
     name: jet_cli_receipt_section_record_text(cursor, "name")
@@ -116,8 +116,8 @@ jet_cli_receipt_missing_fields: fn(section: String, prefix: String, value: Canon
 
 jet_cli_receipt_diff_fields: fn(section: String, prefix: String, before: CanonicalJSON, after: CanonicalJSON, diffs: ^[JetCLIReceiptFieldDiff]) Never! {
     if before == .Object(before_fields) && after == .Object(after_fields) {
-        left := 0
-        right := 0
+        ^left: 0
+        ^right: 0
         loop left < before_fields.len() || right < after_fields.len() {
             if {
                 right == after_fields.len() || (left < before_fields.len() && before_fields[left].key < after_fields[right].key) -> {
@@ -152,9 +152,9 @@ jet_cli_receipt_diff_fields: fn(section: String, prefix: String, before: Canonic
 jet_cli_receipt_diff_sections: fn(before: [JetDriverRunReceiptSection], after: [JetDriverRunReceiptSection]) -> [JetCLIReceiptFieldDiff] JetCLIReadError! {
     before_sections: jet_driver_run_receipt_normalized_sections(before)
     after_sections: jet_driver_run_receipt_normalized_sections(after)
-    diffs := [JetCLIReceiptFieldDiff]{}
-    left := 0
-    right := 0
+    ^diffs: [JetCLIReceiptFieldDiff]{}
+    ^left: 0
+    ^right: 0
     loop left < before_sections.len() || right < after_sections.len() {
         if {
             right == after_sections.len() || (left < before_sections.len() && before_sections[left].name < after_sections[right].name) -> {

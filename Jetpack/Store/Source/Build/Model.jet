@@ -114,55 +114,55 @@ TargetSpec: struct {
     }
 
     with_source: fn(self, path: String) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.sources.push(path.copy())
         updated
     }
 
     with_input: fn(self, path: String) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.inputs.push(path.copy())
         updated
     }
 
     with_output: fn(self, path: String) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.outputs.push(path.copy())
         updated
     }
 
     with_dep: fn(self, target: TargetRef) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.deps.push(target.copy())
         updated
     }
 
     with_action: fn(self, action: HermeticActionHandle) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.actions.push(action.copy())
         updated
     }
 
     with_probe: fn(self, probe: ProbeHandle) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.probes.push(probe.copy())
         updated
     }
 
     with_toolchain: fn(self, toolchain: ToolchainHandle) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.toolchain = Val(toolchain)
         updated
     }
 
     with_signing_identity: fn(self, identity: SigningIdentityHandle) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.signing_identity = Val(identity)
         updated
     }
 
     with_metadata: fn(self, key: String, value: String) -> TargetSpec Never! {
-        updated := self
+        ^updated: self
         updated.metadata[key] = value
         updated
     }
@@ -326,20 +326,20 @@ ActionSpec: struct {
     }
 
     with_inputs: fn(self, paths: [String]) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         loop path in paths -> updated.inputs.push(path.copy())
         updated
     }
 
     with_outputs: fn(self, paths: [String]) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         loop path in paths -> updated.outputs.push(path.copy())
         updated
     }
 
     // `path`, one of the outputs, kept in git; `written` as KeptOutput says.
     with_kept: fn(self, path: String, written: String?) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.kept.push(KeptOutput{path: path.copy(), written: written.copy()})
         updated
     }
@@ -347,7 +347,7 @@ ActionSpec: struct {
     // The folder at `path` in the work tree, read whole; `source` as
     // ActionFolder says.
     with_folder: fn(self, path: String, source: String?) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.folders.push(ActionFolder{path: path.copy(), source: source.copy(), found: None})
         updated
     }
@@ -356,7 +356,7 @@ ActionSpec: struct {
     // whole at `path` in the work tree. The action must also use the probe
     // (with_probe), whose fact names the folder.
     with_found_folder: fn(self, path: String, probe: ProbeHandle) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.folders.push(ActionFolder{path: path.copy(), source: None, found: Val(probe)})
         updated
     }
@@ -365,79 +365,79 @@ ActionSpec: struct {
     // find_program `probe` finds when the build runs. The action must also
     // use the probe (with_probe).
     with_found_program: fn(self, at: Int, flag: String, probe: ProbeHandle) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.programs.push(ActionProgram{at: at, flag: flag.copy(), probe: probe})
         updated
     }
 
     with_env: fn(self, key: String, value: String) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.env[key] = value
         updated
     }
 
     with_env_allowlist: fn(self, keys: [String]) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         loop key in keys -> build_insert_sorted_text(updated.env_allowlist, key)
         updated
     }
 
     with_kind: fn(self, kind: ActionKind) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.kind = kind
         updated
     }
 
     with_helper_version: fn(self, helper: String, version: String) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.helper_versions[helper] = version
         updated
     }
 
     with_cap: fn(self, cap: BuildEffect) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         build_insert_effect(updated.caps, cap)
         updated
     }
 
     with_toolchain: fn(self, toolchain: ToolchainHandle) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.toolchain = Val(toolchain)
         updated
     }
 
     with_probe: fn(self, probe: ProbeHandle) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.probes.push(probe.copy())
         updated
     }
 
     with_signing_identity: fn(self, identity: SigningIdentityHandle) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.signing_identity = Val(identity)
         updated
     }
 
     with_label: fn(self, key: String, value: String) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.labels[key] = value
         updated
     }
 
     with_pool: fn(self, pool: BuildResourcePool) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         build_insert_pool(updated.resource_pools, pool)
         updated
     }
 
     with_variant_identity: fn(self, identity: String) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.variant_identity = Val(identity)
         updated
     }
 
     with_timeout_ms: fn(self, limit: Int) -> ActionSpec Never! {
-        updated := self
+        ^updated: self
         updated.timeout_ms = Val(limit)
         updated
     }
@@ -652,44 +652,44 @@ ToolchainSpec: struct {
     }
 
     with_host_triple: fn(self, host_triple: String) -> ToolchainSpec Never! {
-        updated := self
+        ^updated: self
         updated.host_triple = host_triple
         updated
     }
 
     with_sdk: fn(self, sdk: SDKIdentity) -> ToolchainSpec Never! {
-        updated := self
+        ^updated: self
         updated.sdk = Val(sdk)
         updated
     }
 
     with_linker: fn(self, linker: LinkerIdentity) -> ToolchainSpec Never! {
-        updated := self
+        ^updated: self
         updated.linker = Val(linker)
         updated
     }
 
     with_sysroot: fn(self, sysroot: SysrootIdentity) -> ToolchainSpec Never! {
-        updated := self
+        ^updated: self
         updated.sysroot = Val(sysroot)
         updated
     }
 
     with_tool: fn(self, name: String, path: String) -> ToolchainSpec Never! {
-        updated := self
+        ^updated: self
         updated.tools[name] = path
         updated
     }
 
     // Require every action executable to be named by this toolchain.
     declared_only: fn(self) -> ToolchainSpec Never! {
-        updated := self
+        ^updated: self
         updated.resolution = ToolchainResolution.DeclaredOnly
         updated
     }
 
     with_read_only_mount_identity: fn(self, source: String, destination: String, identity: String) -> ToolchainSpec Never! {
-        updated := self
+        ^updated: self
         updated.mounts.push(BuildMount{source: source, destination: destination, identity: identity})
         updated
     }
@@ -761,7 +761,7 @@ ProbeSpec: struct {
     }
 
     with_min_version: fn(self, version: String) -> ProbeSpec Never! {
-        updated := self
+        ^updated: self
         if self.kind == {
             .PkgConfig(package, _) -> {
                 updated.kind = ProbeKind.PkgConfig{package: package, min_version: Val(version)}
@@ -772,19 +772,19 @@ ProbeSpec: struct {
     }
 
     with_toolchain: fn(self, toolchain: ToolchainHandle) -> ProbeSpec Never! {
-        updated := self
+        ^updated: self
         updated.toolchain = Val(toolchain)
         updated
     }
 
     with_reproducibility: fn(self, reproducibility: ReproducibilityClass) -> ProbeSpec Never! {
-        updated := self
+        ^updated: self
         updated.reproducibility = reproducibility
         updated
     }
 
     with_provenance: fn(self, provenance: BuildProvenance) -> ProbeSpec Never! {
-        updated := self
+        ^updated: self
         updated.provenance = provenance
         updated
     }

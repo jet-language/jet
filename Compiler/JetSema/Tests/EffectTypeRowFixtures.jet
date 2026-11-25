@@ -36,12 +36,12 @@ TYPE_ROW_SOURCE: "Logger: struct {{\n    prefix: String,\n\n    say: fn(self, te
 TYPE_ROW_MODULE: "type-rows.main"
 
 effect_type_row_graph: fn(failures: ^[String]) -> SemaRegistrationGraph? {
-    parsed := parse_source(TYPE_ROW_SOURCE.bytes())
+    ^parsed: parse_source(TYPE_ROW_SOURCE.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
         failures.push("source parsing failed: {parsed.diagnostics:Debug}")
         return None
     }
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, TYPE_ROW_MODULE)
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module(TYPE_ROW_EFFECTS), table) ?? {
         failures.push("canonical effect module declares no effects")
@@ -64,7 +64,7 @@ effect_type_row_graph: fn(failures: ^[String]) -> SemaRegistrationGraph? {
 
 // The row of the struct, enum or trait `name` the fixture declares.
 effect_type_row_find: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRow], name: String) -> SemaEffectTypeRow? {
-    key := ""
+    ^key: ""
     loop nominal in graph.modules[0].nominals {
         if nominal.symbol.name == name -> key = symbol_table_key(graph.symbols, nominal.symbol.id)
     }
@@ -85,7 +85,7 @@ effect_type_row_expect: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRo
         failures.push("{name}: no inferred row")
         return
     }
-    reach := Int?{None}
+    ^reach: Int?{None}
     loop found in row.reaches {
         if found.name == effect_name -> reach = Val(found.source)
     }
@@ -104,14 +104,14 @@ effect_type_row_expect: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRo
 }
 
 effect_type_row_run: fn() {
-    failures := [String]{}
-    graph := effect_type_row_graph(failures) ?? panic("EffectTypeRowFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
+    ^failures: [String]{}
+    ^graph: effect_type_row_graph(failures) ?? panic("EffectTypeRowFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
-    declared := stage.graph.move()
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
+    ^declared: stage.graph.move()
     stage.graph = None
     graph = declared.move() ?? panic("EffectTypeRowFixtures: the declaration pass lost its registration graph")
-    checked := sema_finalize_registration_graph(graph.copy(), None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None)
+    ^checked: sema_finalize_registration_graph(graph.copy(), None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None)
     if !checked.complete {
         panic("EffectTypeRowFixtures: the body and effect check failed {checked.diagnostics:Debug}")
     }

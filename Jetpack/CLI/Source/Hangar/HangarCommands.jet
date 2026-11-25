@@ -10,7 +10,7 @@ use files: core.files
 
 // The same parse with the Hangar subcommand word removed.
 cli_hangar_nested: fn(parsed: CLIParsed) -> CLIParsed Never! {
-    nested := parsed
+    ^nested: parsed
     nested.positional = cli_tail(parsed.positional, 1)
     nested
 }
@@ -58,7 +58,7 @@ cli_cmd_list: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read the Hangar", err.message(), "repair the Hangar journal, then retry listing.")
     }
     if parsed.flags.json {
-        packages := [Dyn]{}
+        ^packages: [Dyn]{}
         loop entry in entries {
             fields: StatusFields.new()
                 .with("id", Dyn.Text(entry.id))
@@ -77,8 +77,8 @@ cli_cmd_list: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int
         return EXIT_OK
     }
     theme.status("{entries.len()} Realized Package(s):")
-    name_w := 8
-    ver_w := 1
+    ^name_w: 8
+    ^ver_w: 1
     loop entry in entries {
         if entry.name.len() > name_w -> name_w = entry.name.len()
         if entry.version.len() > ver_w -> ver_w = entry.version.len()
@@ -105,7 +105,7 @@ cli_hangar_du_all: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read machine Hangar disk usage", err.message(), "repair the reported Hangar root, then retry.")
     }
     if parsed.flags.json {
-        roots := [Dyn]{}
+        ^roots: [Dyn]{}
         loop entry in report.roots {
             roots.push(
                 report_status_object(
@@ -147,7 +147,7 @@ cli_hangar_du: fn(verification: StoreVerification, theme: Theme, parsed: CLIPars
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read Hangar disk usage", err.message(), "run `jetpack hangar recover`, repair the reported state, then retry.")
     }
     if parsed.flags.json {
-        entries := [Dyn]{}
+        ^entries: [Dyn]{}
         loop entry in report.entries {
             entries.push(
                 report_status_object(
@@ -209,7 +209,7 @@ cli_hangar_recover: fn(verification: StoreVerification, theme: Theme, parsed: CL
 // `jetpack hangar ingest <dir> --name <n> [--version <v>] [--ref <r>]` —
 // atomic staged ingest of a local tree.
 cli_hangar_ingest: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
-    name := parsed.flags.name ?? ""
+    ^name: parsed.flags.name ?? ""
     if name == "" -> name = cli_flag_value(parsed, "--name") ?? ""
     if name == "" {
         return cli_hangar_report_error(theme, parsed, "E1340", "`hangar ingest` needs `--name`", "every hangar object has a package name in its record.", "pass `--name <pkg>`.")
@@ -220,7 +220,7 @@ cli_hangar_ingest: fn(verification: StoreVerification, theme: Theme, parsed: CLI
         return cli_hangar_report_error(theme, parsed, "E1340", "`hangar ingest` needs a source directory", "atomic staged ingest copies a local tree into the hangar.", "run `jetpack hangar ingest <dir> --name <pkg>`.")
     }
     reference: cli_flag_value(parsed, "--ref") ?? dir
-    outputs := [String:String]{}
+    ^outputs: [String:String]{}
     outputs["out"] = dir
     if cli_flag_value(parsed, "--output-dev") == .Val(dev) -> outputs["dev"] = dev
     request: IngestRequest{
@@ -266,7 +266,7 @@ cli_hangar_doctor: fn(verification: StoreVerification, theme: Theme, parsed: CLI
     }
     remaining: report.remaining_count()
     if parsed.flags.json {
-        findings := [Dyn]{}
+        ^findings: [Dyn]{}
         loop finding in report.findings {
             findings.push(
                 report_status_object(
@@ -312,7 +312,7 @@ cli_hangar_verify: fn(verification: StoreVerification, theme: Theme, parsed: CLI
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read the Hangar", err.message(), "repair the Hangar journal, then retry verification.")
     }
     target: cli_positional_path_after(parsed, "verify") ?? {
-        verified := 0
+        ^verified: 0
         loop entry in entries {
             store_verify_archive(verification, roots, entry.id, key) ?? return cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, err)
             verified += 1
@@ -326,7 +326,7 @@ cli_hangar_verify: fn(verification: StoreVerification, theme: Theme, parsed: CLI
         report: store_verify_archive(verification, roots, target, key) ?? return cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, err)
         return cli_hangar_archive_done(theme, parsed, HangarArchiveAction.Verify, report)
     }
-    found := StoreEntry?{None}
+    ^found: StoreEntry?{None}
     loop entry in entries {
         if entry.id == target || entry.envelope.output_hash == target || entry.reference == target || "{entry.name}@{entry.version}" == target {
             found = Val(entry)
@@ -357,7 +357,7 @@ cli_hangar_referrers: fn(verification: StoreVerification, theme: Theme, parsed: 
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read the hangar closure graph", err.message(), "run `jetpack hangar verify` before querying referrers.")
     }
     if parsed.flags.json {
-        values := [Dyn]{}
+        ^values: [Dyn]{}
         loop reference in referrers -> values.push(Dyn.Text(reference))
         cli_hangar_status_json("referrers", StatusFields.new().with("digest", Dyn.Text(digest)).with("referrers", Dyn.Array(values))) ?? return cli_status_encoding_error(err)
         return EXIT_OK
@@ -483,9 +483,9 @@ cli_flag_value: fn(parsed: CLIParsed, name: String) -> String? Never! {
 // The positional words after `sub`, skipping `--flag value` pairs and
 // `--flag=value` words.
 cli_positional_values_after: fn(parsed: CLIParsed, sub: String) -> [String] Never! {
-    values := [String]{}
-    seen_sub := false
-    skip_next := false
+    ^values: [String]{}
+    ^seen_sub: false
+    ^skip_next: false
     loop arg in parsed.positional {
         if skip_next {
             skip_next = false
@@ -515,8 +515,8 @@ cli_positional_path_after: fn(parsed: CLIParsed, sub: String) -> String? Never! 
 // `1.0 G` (one decimal, rounded to nearest).
 cli_human_bytes: fn(bytes: Int) -> String Never! {
     units: [String]{"B", "K", "M", "G"}
-    unit := 0
-    divisor := 1
+    ^unit: 0
+    ^divisor: 1
     loop bytes >= divisor * 1024 && unit + 1 < units.len() {
         divisor *= 1024
         unit += 1

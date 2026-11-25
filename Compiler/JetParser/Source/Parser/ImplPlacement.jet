@@ -37,15 +37,15 @@ JetParserImplPlacementRule: enum {
 parser_impl_placement_lints: fn(program: Program, source: [U8], diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
     // The struct and enum names the program declares, interned: a name the
     // table holds past its empty spelling (id 0) is declared here.
-    declared := name_table_sized(64)
+    ^declared: name_table_sized(64)
     loop item in program.items {
         if item == {
-            .Struct(value) -> { _ := name_intern(declared, value.name) }
-            .Enum(value) -> _ := name_intern(declared, value.name)
+            .Struct(value) -> { ^_: name_intern(declared, value.name) }
+            .Enum(value) -> ^_: name_intern(declared, value.name)
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    found := [Diagnostic]{}
+    ^found: [Diagnostic]{}
     loop item in program.items {
         if item == .Impl(value) {
             known: name_find(declared, value.type_name) ?? {
@@ -67,7 +67,7 @@ parser_impl_placement_lints: fn(program: Program, source: [U8], diagnostics: [Di
 parser_impl_placement_rule: fn(value: ImplDef, source: [U8], diagnostics: [Diagnostic]) -> JetParserImplPlacementRule? Never! {
     // The head runs from `impl` to the end of the line its type (or trait)
     // name ends on.
-    head_end := (value.trait_span ?? value.type_span).end
+    ^head_end: (value.trait_span ?? value.type_span).end
     loop head_end < source.len() && source[head_end] != 10 -> head_end += 1
     loop diagnostic in diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next

@@ -291,21 +291,21 @@ static_validation: fn() -> Dyn Err! {
 }
 
 workload_description: fn() -> Dyn Never! {
-    forms := [Dyn]{}
+    ^forms: [Dyn]{}
     loop form in FORMS {
-        entry := FORM_INFO[form].encode()
+        ^entry: FORM_INFO[form].encode()
         entry["name"] = form.copy()
         entry["wire_payloads"] = wires(form, CASES)
         forms.push(entry)
     }
-    cases := [Dyn]{}
+    ^cases: [Dyn]{}
     loop case in CASES {
-        entry := WORKLOAD_CASES[case].encode()
+        ^entry: WORKLOAD_CASES[case].encode()
         entry["name"] = case
         entry["wire_is_fixture_only"] = true
         cases.push(entry)
     }
-    payload_by_form := Dyn{[String:Dyn]{}}
+    ^payload_by_form: Dyn{[String:Dyn]{}}
     loop form in FORMS -> payload_by_form[form] = Dyn.Text(WIRE_PAYLOADS[form]["payload"])
     Dyn{
         [String:Dyn]{
@@ -323,7 +323,7 @@ workload_description: fn() -> Dyn Never! {
 }
 
 wires: fn(form: String, cases: [String]) -> Dyn Never! {
-    out := Dyn{[String:Dyn]{}}
+    ^out: Dyn{[String:Dyn]{}}
     loop case in cases -> out[case] = Dyn.Text(WIRE_PAYLOADS[form][case])
     out
 }
@@ -427,7 +427,7 @@ fixed_reason: fn(form: String, case: String, operation: String) -> {status: Stri
 }
 
 with_reason: fn(base: Matrix, fixed: {status: String, reason: String}) -> Matrix Never! {
-    cell := base
+    ^cell: base
     cell.status = fixed.status
     cell.reason = fixed.reason
     cell
@@ -436,7 +436,7 @@ with_reason: fn(base: Matrix, fixed: {status: String, reason: String}) -> Matrix
 // The cell as the report holds it: #Codable(only: .Encode) leaves an absent figure out, and
 // the report writes it as null.
 cell_tree: fn(cell: Matrix) -> Dyn Never! {
-    tree := cell.encode()
+    ^tree: cell.encode()
     loop key in
         ["process_wall_median_ns", "codec_median_ns", "encode_median_ns", "decode_median_ns", "encode_time_ns", "decode_time_ns", "allocation_count", "allocation_median"] {
         if tree.get(key) == .None -> tree[key] = Dyn.Null
@@ -447,7 +447,7 @@ cell_tree: fn(cell: Matrix) -> Dyn Never! {
 // Every cell of a static report, each executable one unavailable for
 // `reason`: --run without a command, or no --run.
 static_cells: fn(reason: String) -> [Matrix] Never! {
-    cells := [Matrix]{}
+    ^cells: [Matrix]{}
     loop form in FORMS {
         loop case in CASES {
             loop operation in OPERATIONS {
@@ -461,7 +461,7 @@ static_cells: fn(reason: String) -> [Matrix] Never! {
 // Every cell, each executable one measured in a fresh directory below the
 // scratch root that is gone when this returns.
 measured_cells: fn(bench: Bench, scratch_root: String) -> [Matrix] Err! {
-    scoped := bench.copy()
+    ^scoped: bench.copy()
     scoped.scratch = files.join(scratch_root, ".enum-codec-bench-{process.current_pid()}-{time.unix_ns()}")
     files.create_dir_all(scoped.scratch)
     cells: measure_all(scoped) ?? {
@@ -480,7 +480,7 @@ measure_all: fn(bench: Bench) -> [Matrix] Err! {
             files.write("{stem}.wire", WIRE_PAYLOADS[form][case])
         }
     }
-    cells := [Matrix]{}
+    ^cells: [Matrix]{}
     loop form in FORMS {
         loop case in CASES {
             loop operation in OPERATIONS {
@@ -495,11 +495,11 @@ measure_all: fn(bench: Bench) -> [Matrix] Err! {
 
 // One cell's samples and, when all of them measured, their medians.
 measure_cell: fn(bench: Bench, base: Matrix) -> Matrix Err! {
-    cell := base
+    ^cell: base
     stem: files.join(bench.scratch, "{cell.form}-{cell.case}")
     source: "{stem}.source"
     wire: "{stem}.wire"
-    samples := [Sample]{}
+    ^samples: [Sample]{}
     loop index in 0..<bench.samples {
         samples.push(sample(bench, cell, if cell.operation == "encode" -> source else -> wire, if cell.operation == "encode" -> wire else -> source, index))
     }
@@ -535,11 +535,11 @@ measure_cell: fn(bench: Bench, base: Matrix) -> Matrix Err! {
 // statistics.median as an int: the middle value, or the two middle values'
 // mean rounded down; None unless every value is present.
 median: fn(values: [Int?]) -> Int? Never! {
-    present := [Int]{}
+    ^present: [Int]{}
     loop value in values {
         if value == .Val(number) -> present.push(number) else -> return None
     }
-    sorted := present.copy()
+    ^sorted: present.copy()
     sorted.sort()
     middle: sorted.len() /% 2
     if sorted.len() % 2 == 1 -> Val(sorted[middle]) else -> Val((sorted[middle - 1] + sorted[middle]) /% 2)
@@ -584,7 +584,7 @@ sample: fn(bench: Bench, cell: Matrix, input: String, expected: String, index: I
         .cpu_time_limit(time.duration_seconds(max(1, checked(Int{math.ceil(bench.timeout_seconds)}) ?? 1)))
         .memory_limit(bench.memory_limit_mib * 1048576).output_limit(bench.max_output_bytes)
     watch: time.start()
-    tree := Dyn{[String:Dyn]{"codec_ns": Dyn.Null, "allocation_count": Dyn.Null, "encoded_bytes": expected_bytes, "stderr": ""}}
+    ^tree: Dyn{[String:Dyn]{"codec_ns": Dyn.Null, "allocation_count": Dyn.Null, "encoded_bytes": expected_bytes, "stderr": ""}}
     receipt: spec.run() ?? {
         tree["wall_ns"] = time.elapsed(watch).ns
         tree["returncode"] = Dyn.Null
@@ -636,7 +636,7 @@ sample: fn(bench: Bench, cell: Matrix, input: String, expected: String, index: I
 
 // A sample the adapter ran to the end, with its verdict.
 judged: fn(tree: Dyn, verdict: {status: String, reason: String}, wall_ns: Int, read: Metrics) -> Sample Never! {
-    row := tree
+    ^row: tree
     row["status"] = verdict.status
     row["reason"] = verdict.reason
     Sample{tree: row, status: verdict.status, wall_ns: wall_ns, codec_ns: read.codec_ns, allocation_count: read.allocation_count}
@@ -649,7 +649,7 @@ optional: fn(value: Int?) -> Dyn Never! {
 // A sample the adapter protocol or the fixture check failed, which reports
 // no codec figures.
 errored: fn(tree: Dyn, reason: String) -> Sample Never! {
-    row := tree
+    ^row: tree
     row["status"] = "error"
     row["reason"] = reason
     row["codec_ns"] = Dyn.Null
@@ -700,8 +700,8 @@ command_argv: fn(command: String, values: [String:String]) -> [String] Err! {
     }
     parts: WORD.find_all(command).map(fn(word) { unquote(word) })
     if parts.len() == 0 -> return Err("configured command is empty")
-    argv := [String]{}
-    placeholder := false
+    ^argv: [String]{}
+    ^placeholder: false
     loop part in parts {
         if !part.contains("{{") && !part.contains("}}") {
             argv.push(part.copy())
@@ -724,8 +724,8 @@ command_argv: fn(command: String, values: [String:String]) -> [String] Err! {
 // str.format over one word: `{{` and `}}` are braces and `{name}` is the
 // value of name; any other field is None.
 format_word: fn(word: String, values: [String:String]) -> String? Never! {
-    out := ""
-    rest := word.copy()
+    ^out: ""
+    ^rest: word.copy()
     loop rest != "" {
         step: if {
             rest.starts_with("{{{{") || rest.starts_with("}}}}") -> {text: rest.slice(0, 1), used: 2}
@@ -778,15 +778,15 @@ general: fn(value: Float) -> String Never! {
 
 trimmed: fn(text: String) -> String Never! {
     if !text.contains(".") -> return text.copy()
-    out := text.copy()
+    ^out: text.copy()
     loop out.ends_with("0") -> out = out.remove_suffix("0")
     out.remove_suffix(".")
 }
 
 summarize: fn(cells: [Matrix]) -> Dyn Never! {
-    counts := Dyn{[String:Dyn]{}}
-    tally := [String:Int]{}
-    unavailable := [Dyn]{}
+    ^counts: Dyn{[String:Dyn]{}}
+    ^tally: [String:Int]{}
+    ^unavailable: [Dyn]{}
     loop cell in cells {
         tally[cell.status] = (tally.get(cell.status) ?? 0) + 1
         if cell.status == "unavailable" || cell.status == "unsupported" {

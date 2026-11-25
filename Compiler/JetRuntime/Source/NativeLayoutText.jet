@@ -1,6 +1,6 @@
 // Reused RtBurn3c draft literals: seed failure/label spellings. Immutable
 // process-lifetime UTF-8; twelve (pointer,length) pairs.
-layout_literal_root := I64{0}
+^layout_literal_root: I64{0}
 
 layout_literals_init: fn() {
     if (layout_literal_root != I64{0}) {
@@ -73,9 +73,9 @@ layout_append_literal: fn(target: I64, kind: I64) {
 }
 
 layout_append_index: fn(target: I64, index: I64) {
-    divisor := I64{1}
+    ^divisor: I64{1}
     loop divisor <= index /% (I64{10}) -> divisor *= I64{10}
-    remainder := index
+    ^remainder: index
     loop divisor > (I64{0}) {
         rt_text_push_scalar(target, I64{48} + remainder /% divisor)
         remainder = remainder %% divisor

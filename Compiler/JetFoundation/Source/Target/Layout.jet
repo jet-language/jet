@@ -281,7 +281,7 @@ jet_target_layout_from_machine: fn(machine: TargetMachine) -> JetTargetLayout Ne
 }
 
 jet_target_layout_u64_bytes: fn(value: Int) -> [U8] Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop index in 0..<8 -> bytes.push(U8{((value >> (8 * index))) & 255})
     bytes
 }
@@ -319,7 +319,7 @@ jet_target_layout_frame_support: fn(bytes: ^[U8], support: LayoutSupportFacts) N
 }
 
 jet_target_layout_cache_identity: fn(facts: LayoutCapabilityFacts) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     jet_target_layout_frame_string(bytes, facts.fact_version)
     jet_target_layout_frame_string(bytes, facts.target_profile)
     jet_target_layout_frame_string(bytes, facts.backend)
@@ -368,18 +368,18 @@ jet_target_layout_engine: fn(items: [Item], target: JetTargetLayout) -> TargetLa
 }
 
 jet_target_layout_engine_with_registry: fn(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], target: JetTargetLayout) -> TargetLayoutEngine Never! {
-    item_keys := name_column_table(items.len())
-    item_positions := name_column(items.len())
+    ^item_keys: name_column_table(items.len())
+    ^item_positions: name_column(items.len())
     loop position in 0..<items.len() {
         name_column_set_first(item_keys, item_positions, jet_target_layout_item_name(items[position]), position)
     }
-    qualified_keys := name_column_table(qualified_items.len())
-    qualified_positions := name_column(qualified_items.len())
+    ^qualified_keys: name_column_table(qualified_items.len())
+    ^qualified_positions: name_column(qualified_items.len())
     loop position in 0..<qualified_items.len() {
         name_column_set_first(qualified_keys, qualified_positions, qualified_items[position].qualified_name, position)
     }
-    resolution_keys := name_column_table(name_resolutions.len())
-    resolution_positions := name_column(name_resolutions.len())
+    ^resolution_keys: name_column_table(name_resolutions.len())
+    ^resolution_positions: name_column(name_resolutions.len())
     loop position in 0..<name_resolutions.len() {
         key: jet_target_layout_resolution_key(name_resolutions[position].owner_qualified_name, name_resolutions[position].source_name)
         name_column_set_first(resolution_keys, resolution_positions, key, position)
@@ -393,7 +393,7 @@ jet_target_layout_engine_target: fn(engine: TargetLayoutEngine) -> JetTargetLayo
 
 // `module_text` is the declaring module identity's text ("" for none).
 jet_target_layout_struct_facts_in_module: fn(engine: TargetLayoutEngine, definition: StructDef, module_text: String) -> LayoutFacts Never! {
-    query := jet_target_layout_query()
+    ^query: jet_target_layout_query()
     identity: if module_text == "" -> definition.name else -> "{module_text}.{definition.name}"
     jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, query)
 }
@@ -488,7 +488,7 @@ jet_target_layout_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
 }
 
 jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definition: EnumDef, module_text: String) -> LayoutFacts Never! {
-    query := jet_target_layout_query()
+    ^query: jet_target_layout_query()
     identity: if module_text == "" -> definition.name else -> "{module_text}.{definition.name}"
     jet_target_layout_enum_facts_inner_named(engine, definition, identity, identity, query)
 }
@@ -496,7 +496,7 @@ jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definitio
 // A distinct type takes its base's bytes, the bytes a field of the type is
 // laid out with.
 jet_target_layout_distinct_facts_in_module: fn(engine: TargetLayoutEngine, definition: DistinctDef, module_text: String) -[Mem.Alloc]> LayoutFacts Never! {
-    query := jet_target_layout_query()
+    ^query: jet_target_layout_query()
     identity: if module_text == "" -> definition.name else -> "{module_text}.{definition.name}"
     if !jet_target_layout_enter(query, identity) {
         return LayoutFacts{bytes: None, fields: [FieldLayoutFacts]{}}
@@ -505,7 +505,7 @@ jet_target_layout_distinct_facts_in_module: fn(engine: TargetLayoutEngine, defin
 }
 
 jet_target_layout_type_facts: fn(engine: TargetLayoutEngine, ty: Type) -> ByteLayout? {
-    query := jet_target_layout_query()
+    ^query: jet_target_layout_query()
     jet_target_layout_type_inner(engine, ty, "", query)
 }
 
@@ -516,8 +516,8 @@ jet_target_layout_struct_facts_inner_named: fn(engine: TargetLayoutEngine, defin
         return jet_target_layout_unknown(field_names)
     }
     if !jet_target_layout_enter(query, identity) -> return jet_target_layout_unknown(field_names)
-    names := [String]{}
-    types := [Type]{}
+    ^names: [String]{}
+    ^types: [Type]{}
     loop field in definition.fields {
         if field.computed != None -> next
         names.push(field.name)
@@ -535,9 +535,9 @@ jet_target_layout_struct_facts_inner_named: fn(engine: TargetLayoutEngine, defin
 // descending alignment, declaration order among equals, when `reorder`;
 // declaration order otherwise.
 jet_target_layout_member_order: fn(aligns: [Int], reorder: Bool) -> [Int] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<aligns.len() {
-        at := order.len()
+        ^at: order.len()
         if reorder {
             loop at > 0 && aligns[order[at - 1]] < aligns[index] -> at -= 1
         }
@@ -566,9 +566,9 @@ JetLayoutPlacement: struct {
 // jet_target_layout_native_record), so the two never disagree.
 // None when an offset overflows.
 jet_target_layout_place: fn(sizes: [Int], aligns: [Int], start: Int, reorder: Bool) -> JetLayoutPlacement? {
-    offsets := loop _ in 0..<sizes.len() -> 0
-    cursor := start
-    alignment := 1
+    ^offsets: loop _ in 0..<sizes.len() -> 0
+    ^cursor: start
+    ^alignment: 1
     loop index in jet_target_layout_member_order(aligns, reorder) {
         if sizes[index] > 0 -> cursor = jet_layout_align_up(cursor, aligns[index]) ?? return None
         offsets[index] = cursor
@@ -590,15 +590,15 @@ jet_target_layout_aggregate_size: fn(end: Int) -> Int? {
 // placed by jet_target_layout_place, reordered unless it has a `#Layout`.
 // Unknown when any member's bytes are.
 jet_target_layout_native_struct_facts: fn(engine: TargetLayoutEngine, definition: StructDef, identity: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
-    names := [String]{}
-    types := [Type]{}
+    ^names: [String]{}
+    ^types: [Type]{}
     loop field in definition.fields {
         if field.computed != None -> next
         names.push(field.name)
         types.push(field.ty)
     }
     if !jet_target_layout_enter(query, identity) -> return jet_target_layout_unknown(names)
-    layouts := [ByteLayout]{}
+    ^layouts: [ByteLayout]{}
     loop ty in types {
         layout: jet_target_layout_native_type(engine, ty, identity, query)
         if layout == .Val(known) -> layouts.push(known) else { break }
@@ -633,12 +633,14 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
         .Float32 -> Val(jet_target_layout_scalar(4))
         .IntN(_, bits) -> {
             if bits < 1 || bits > 64 -> return None
-            Val(jet_target_layout_scalar(if {
-                bits <= 8 -> 1
-                bits <= 16 -> 2
-                bits <= 32 -> 4
-                else -> 8
-            }))
+            Val(jet_target_layout_scalar(
+                if {
+                    bits <= 8 -> 1
+                    bits <= 16 -> 2
+                    bits <= 32 -> 4
+                    else -> 8
+                },
+            ))
         }
         .List(_) -> Val(ByteLayout{size: 24, alignment: 8, stride: 24})
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, query)
@@ -654,7 +656,7 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
 // ir_tuple_members_in), placed as a struct's are.
 jet_target_layout_native_record: fn(engine: TargetLayoutEngine, fields: [TypeTupleField], owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
     names: loop field in fields -> field.name
-    layouts := [ByteLayout]{}
+    ^layouts: [ByteLayout]{}
     loop field in fields {
         layouts.push(jet_target_layout_native_type(engine, field.ty, owner_qualified_name, query) ?? return jet_target_layout_unknown(names))
     }
@@ -710,8 +712,8 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
     enum_tag: jet_target_layout_enum_c_tag(definition) ?? return jet_target_layout_native_enum_facts(engine, definition, identity, query)
     if !jet_target_layout_enter(query, identity) -> return jet_target_layout_unknown(variant_names)
     tag_layout: jet_target_layout_scalar(jet_target_layout_enum_tag_size(enum_tag))
-    payloads := [ByteLayout?]{}
-    payloads_known := [Bool]{}
+    ^payloads: [ByteLayout?]{}
+    ^payloads_known: [Bool]{}
     loop variant in definition.variants {
         if variant.payload == {
             .Unit -> {
@@ -724,8 +726,8 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
                 payloads_known.push(payload != None)
             }
             .Named(fields) -> {
-                names := [String]{}
-                types := [Type]{}
+                ^names: [String]{}
+                ^types: [Type]{}
                 loop field in fields {
                     names.push(field.name)
                     types.push(field.ty)
@@ -736,9 +738,9 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
             }
         }
     }
-    payload_alignment := 1
-    payload_size := 0
-    all_known := true
+    ^payload_alignment: 1
+    ^payload_size: 0
+    ^all_known: true
     loop index in 0..<payloads.len() {
         if !payloads_known[index] -> all_known = false
         if payloads[index] == .Val(payload) {
@@ -760,8 +762,8 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
         return jet_target_layout_unknown(variant_names)
     }
     bytes: jet_target_layout_enum_bytes(all_known, size, alignment)
-    facts := [FieldLayoutFacts]{}
-    index := 0
+    ^facts: [FieldLayoutFacts]{}
+    ^index: 0
     loop index < definition.variants.len() {
         variant: definition.variants[index]
         if payloads[index] == {
@@ -793,17 +795,19 @@ jet_target_layout_native_enum_facts: fn(engine: TargetLayoutEngine, definition: 
         return jet_target_layout_unknown(variant_names)
     }
     word: jet_target_layout_scalar(8)
-    facts := [FieldLayoutFacts]{}
+    ^facts: [FieldLayoutFacts]{}
     loop variant in definition.variants {
-        sizes := [Int]{}
-        aligns := [Int]{}
-        known := true
+        ^sizes: [Int]{}
+        ^aligns: [Int]{}
+        ^known: true
         if variant.payload == {
             .Unit -> {
                 facts.push(FieldLayoutFacts{name: variant.name, offset: Val(0), size: Val(word.size), alignment: Val(word.alignment), stride: Val(word.stride)})
                 next
             }
-            .Single(ty, _) -> known = jet_target_layout_variant_member(engine, ty, identity, query, sizes, aligns)
+            .Single(ty, _) -> {
+                known = jet_target_layout_variant_member(engine, ty, identity, query, sizes, aligns)
+            }
             .Named(fields) -> {
                 loop field in fields {
                     if !jet_target_layout_variant_member(engine, field.ty, identity, query, sizes, aligns) {
@@ -841,10 +845,10 @@ priv jet_target_layout_variant_member: fn(engine: TargetLayoutEngine, ty: Type, 
 }
 
 jet_target_layout_aggregate: fn(engine: TargetLayoutEngine, names: [String], types: [Type], owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
-    cursor := Val(0)
-    aggregate_alignment := Val(1)
-    facts := [FieldLayoutFacts]{}
-    index := 0
+    ^cursor: Val(0)
+    ^aggregate_alignment: Val(1)
+    ^facts: [FieldLayoutFacts]{}
+    ^index: 0
     loop index < names.len() {
         name: names[index]
         layout: jet_target_layout_type_inner(engine, types[index], owner_qualified_name, query)
@@ -993,7 +997,9 @@ jet_target_layout_resolved_name: fn(engine: TargetLayoutEngine, owner_qualified_
 jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identity: String, registry_key: String, args: [Type], query: ^JetTargetLayoutQuery) -> ByteLayout? {
     key: type_identity_key(Type.Apply{name: registry_key, args: args})
     if !jet_target_layout_active(query, identity) {
-        if name_column_get(query.completed_keys, query.completed_positions, key) == .Val(position) -> return query.completed[position]
+        if name_column_get(query.completed_keys, query.completed_positions, key) == .Val(position) {
+            return query.completed[position]
+        }
     }
     cycle_hits: query.cycle_hits
     result: if item == {
@@ -1159,7 +1165,7 @@ jet_target_layout_enter: fn(query: ^JetTargetLayoutQuery, identity: String) -> B
 }
 
 jet_target_layout_ascii_lower: fn(text: String) -> String Never! {
-    bytes := text.bytes()
+    ^bytes: text.bytes()
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}

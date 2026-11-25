@@ -10,10 +10,10 @@ use {
 // what follows the key's last `.` or `:` (symbol_key_text).
 ir_impl_method_leaf: fn(key: String) -> String Never! {
     bytes: key.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     if end > 0 && (Int{bytes[end - 1]}) == 62 {
-        depth := 0
-        position := end - 1
+        ^depth: 0
+        ^position: end - 1
         loop position >= 0 {
             byte: Int{bytes[position]}
             if byte == 62 -> depth += 1
@@ -27,7 +27,7 @@ ir_impl_method_leaf: fn(key: String) -> String Never! {
             position -= 1
         }
     }
-    start := end
+    ^start: end
     loop start > 0 {
         byte: Int{bytes[start - 1]}
         if byte == 46 || byte == 58 -> break
@@ -38,7 +38,7 @@ ir_impl_method_leaf: fn(key: String) -> String Never! {
 
 ir_string_rows_equal: fn(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
-    index := 0
+    ^index: 0
     loop index < left.len() {
         if left[index] != right[index] -> return false
         index += 1
@@ -48,7 +48,7 @@ ir_string_rows_equal: fn(left: [String], right: [String]) -> Bool Never! {
 
 ir_bool_rows_equal: fn(left: [Bool], right: [Bool]) -> Bool Never! {
     if left.len() != right.len() -> return false
-    index := 0
+    ^index: 0
     loop index < left.len() {
         if left[index] != right[index] -> return false
         index += 1
@@ -79,7 +79,9 @@ ir_core_records_match: fn(left: CoreCallRecord, right: CoreCallRecord) -> Bool N
         return false
     }
     if left.pure_route != right.pure_route || left.symbol != right.symbol -> return false
-    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct -> return false
+    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct {
+        return false
+    }
     if !ir_core_capability_equal(left.capability, right.capability) -> return false
     ir_authority_decisions_equal(left.authority, right.authority)
 }
@@ -93,7 +95,7 @@ ir_canonical_core_record: fn(record: CoreCallRecord) -> CoreCallRecord? Never! {
 // the first. None when no row has the record's key or its row disagrees
 // with the record.
 ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord? Never! {
-    key := core_call_key(record)
+    ^key: core_call_key(record)
     loop candidate in rows {
         if core_call_key(candidate) == key {
             if !ir_core_records_match(candidate, record) -> return None
@@ -104,7 +106,7 @@ ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) 
 }
 
 ir_lambda_function_type: fn(lambda: BodyLambda) -> Type Never! {
-    metadata := FunctionCallMetadata?{None}
+    ^metadata: FunctionCallMetadata?{None}
     if lambda.host_param_conventions != None {
         conventions: lambda.host_param_conventions ?? [AccessConvention]{}
         metadata = Val(FunctionCallMetadata{
@@ -165,7 +167,7 @@ ir_comptime_item_shell: fn(module_identity: ModuleID, module_name: String, key: 
 // `module_name` is the item's module identity text: the function's module
 // name and its key's prefix.
 ir_comptime_item_function: fn(interner: Interner, request: SemaComptimeItemRequest, module_name: String) -> FnBody {
-    result_type := body_type(interner, request.expression.tree, request.expression.root)
+    ^result_type: body_type(interner, request.expression.tree, request.expression.root)
     if request.expected_type == .Val(expected) {
         if type_identity_key(expected) != type_identity_key(result_type) {
             panic("checked comptime item result disagrees with its expected type")

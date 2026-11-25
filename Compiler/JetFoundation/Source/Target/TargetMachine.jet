@@ -242,9 +242,9 @@ jet_target_json_hex: fn(value: Int) -> String Never! {
 
 jet_target_json_quote: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    output := "\""
-    segment_start := 0
-    index := 0
+    ^output: "\""
+    ^segment_start: 0
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         escape: if byte == {
@@ -454,17 +454,17 @@ jet_target_hardware_json: fn(facts: TargetHardwareFacts) -> String Never! {
         .Val(provenance) -> "{{\"source\":{jet_target_json_quote(provenance.source)},\"sha256\":{jet_target_json_quote(provenance.sha256)}}}"
         .None -> "null"
     }
-    blocks := [String]{}
+    ^blocks: [String]{}
     loop block in facts.register_blocks {
         registers: loop register in block.registers -> "{{\"name\":{jet_target_json_quote(register.name)},\"offset\":{register.offset},\"width\":{jet_target_json_quote(jet_target_register_width_name(register.width))},\"access\":{jet_target_json_quote(jet_target_register_access_name(register.access))},\"volatile\":{jet_target_bool_json(register.volatile)}}}"
         blocks.push("{{\"name\":{jet_target_json_quote(block.name)},\"base\":{block.base},\"size_bytes\":{block.size.bytes},\"registers\":[{registers.join(",")}]}}")
     }
-    interrupts := [String]{}
+    ^interrupts: [String]{}
     loop interrupt in facts.interrupts {
         effects: loop effect_name in interrupt.forbidden_effects -> jet_target_json_quote(effect_name)
         interrupts.push("{{\"name\":{jet_target_json_quote(interrupt.name)},\"vector\":{interrupt.vector},\"forbidden_effects\":[{effects.join(",")}],\"bounded\":{jet_target_bool_json(interrupt.bounded)}}}")
     }
-    channels := [String]{}
+    ^channels: [String]{}
     loop channel in facts.dma_channels {
         ownership: if channel.ownership == TargetDMAOwnership.Borrowed -> "borrowed" else -> "transfer"
         channels.push("{{\"name\":{jet_target_json_quote(channel.name)},\"channel\":{channel.channel},\"transfer_width\":{jet_target_json_quote(jet_target_register_width_name(channel.transfer_width))},\"ownership\":{jet_target_json_quote(ownership)},\"max_transfer_bytes\":{jet_target_optional_int_json(channel.max_transfer_bytes)}}}")
@@ -481,9 +481,9 @@ jet_target_programmer_adapter_name: fn(value: TargetProgrammerAdapter) -> String
 }
 
 jet_target_programmers_json: fn(programmers: [TargetProgrammerFacts]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop programmer in programmers {
-        config := [String]{}
+        ^config: [String]{}
         loop value in programmer.config -> config.push(jet_target_json_quote(value))
         rows.push("{{\"adapter\":{jet_target_json_quote(jet_target_programmer_adapter_name(programmer.adapter))},\"chip\":{jet_target_optional_string_json(programmer.chip)},\"config\":[{config.join(",")}],\"cpu\":{jet_target_optional_string_json(programmer.cpu)},\"executable\":{jet_target_json_quote(programmer.executable)},\"interface\":{jet_target_optional_string_json(programmer.interface)},\"machine\":{jet_target_optional_string_json(programmer.machine)},\"reset\":{jet_target_bool_json(programmer.reset)},\"speed_khz\":{jet_target_optional_int_json(programmer.speed_khz)}}}")
     }
@@ -565,7 +565,7 @@ jet_target_machine_denied_effects: fn(machine: TargetMachine) -> [String] Never!
 }
 
 jet_target_provider_identity: fn(machine: TargetMachine) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     jet_target_append_frame(bytes, "environment", jet_target_environment_identity(machine))
     jet_target_append_frame(bytes, "linker", jet_target_linker_json(machine.linker))
     jet_target_append_frame(bytes, "allocator", jet_target_allocator_json(machine.allocator))
@@ -645,7 +645,7 @@ jet_target_machine_for_facts: fn(no_os: Bool, web_target: Bool, target_triple: S
 }
 
 jet_target_wasm_provider: fn(name: String, implementation: String) -> ProviderContract Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     jet_target_append_frame(bytes, "provider", name)
     jet_target_append_frame(bytes, "implementation", implementation)
     digest: sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
@@ -659,7 +659,7 @@ jet_target_wasm_provider: fn(name: String, implementation: String) -> ProviderCo
 }
 
 jet_target_machine_wasm_browser: fn(package_version: String) -> TargetMachine Never! {
-    machine := jet_target_machine_hosted("wasm32-unknown-unknown", package_version)
+    ^machine: jet_target_machine_hosted("wasm32-unknown-unknown", package_version)
     machine.name = "wasm.browser"
     machine.allocator = AllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.allocator", "wasm-browser-allocator")}
     machine.panic = PanicPolicy.Report{provider: jet_target_wasm_provider("wasm.browser.report", "wasm-browser-report")}
@@ -680,7 +680,7 @@ jet_target_machine_wasm_browser: fn(package_version: String) -> TargetMachine Ne
 }
 
 jet_target_machine_wasm_wasi: fn(package_version: String) -> TargetMachine Never! {
-    machine := jet_target_machine_hosted("wasm32-wasip2", package_version)
+    ^machine: jet_target_machine_hosted("wasm32-wasip2", package_version)
     machine.name = "wasm.wasi"
     machine.allocator = AllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.allocator", "wasm-wasi-allocator")}
     machine.panic = PanicPolicy.Report{provider: jet_target_wasm_provider("wasm.wasi.report", "wasm-wasi-report")}
@@ -768,7 +768,7 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
     // The module is the longest one this table reads that `api` names or
     // starts with, cut at a `.`; the helper is the member path after it
     // (`core.time.sleep` -> `core.time`, `sleep`).
-    module_name := ""
+    ^module_name: ""
     loop name in
         ([String]{"core.mem", "core.term", "core.concurrency", "core.tasks", "core.time", "core.crypto.random", "core.crypto.uuid", "core.hardware"}) {
         if name.len() > module_name.len() && (api == name || api.starts_with("{name}.")) {
@@ -777,7 +777,7 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
     }
     if module_name == "" -> return [TargetCapability]{}
     helper: if module_name.len() == api.len() -> "" else -> api.slice(module_name.len() + 1, api.len())
-    result := [TargetCapability]{}
+    ^result: [TargetCapability]{}
     if module_name == {
         "core.mem" -> {
             if helper == "Atomic" || helper == "atomic" -> result.push(.Atomic64)
@@ -810,8 +810,8 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
 }
 
 jet_target_machine_use_from_core_apis: fn(apis: [String]) -> TargetMachineUse Never! {
-    usage := jet_target_machine_use_default()
-    sorted := apis.copy()
+    ^usage: jet_target_machine_use_default()
+    ^sorted: apis.copy()
     sorted.sort()
     loop api in sorted {
         if usage.core_apis.is_empty() || usage.core_apis[usage.core_apis.len() - 1] != api {
@@ -990,8 +990,8 @@ jet_target_validate_simple_capability: fn(machine: TargetMachine, capability: Ta
 
 // Validate the memory regions; sort indices, not copied region payloads.
 jet_target_validate_memory_regions: fn(regions: [MemoryRegion], errors: ^[TargetMachineError]) Never! {
-    names := [String:Bool]{}
-    indices := [Int]{}
+    ^names: [String:Bool]{}
+    ^indices: [Int]{}
     loop index in 0..<regions.len() {
         region: regions[index]
         if region.size.bytes == 0 -> errors.push(.EmptyMemoryRegion{name: region.name})
@@ -1074,7 +1074,7 @@ jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineU
     }
     kinds: [MemoryKind]{.Flash, .Ram}
     loop kind in kinds {
-        present := false
+        ^present: false
         loop region in machine.memory {
             if region.kind == kind -> present = true
         }
@@ -1082,7 +1082,7 @@ jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineU
     }
     // Keep the true RAM total in exact Int; a u64 sum could wrap into a false
     // small budget. Used bytes keep the saturation below.
-    ram := 0
+    ^ram: 0
     loop region in machine.memory {
         if region.kind == .Ram -> ram += region.size.bytes
     }
@@ -1189,7 +1189,7 @@ jet_target_validate_startup_facts: fn(machine: TargetMachine, errors: ^[TargetMa
 
 jet_target_validate_mmio: fn(machine: TargetMachine, usage: TargetMachineUse, errors: ^[TargetMachineError]) Never! {
     loop access in usage.mmio {
-        inside := false
+        ^inside: false
         loop region in machine.memory {
             if region.kind == .MMIO && jet_target_memory_contains(region, access.address, access.size) {
                 inside = true
@@ -1216,7 +1216,7 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
             errors.push(.InvalidHardwareSVD{source: svd.source, sha256: svd.sha256})
         }
     }
-    blocks := [String:Bool]{}
+    ^blocks: [String:Bool]{}
     loop block in hardware.register_blocks {
         if block.name.trim().is_empty() {
             errors.push(.HardwareFactEmptyName{kind: "register block"})
@@ -1229,7 +1229,7 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
                 errors.push(.RegisterBlockAddressOverflow{name: block.name})
             }
             else -> {
-                inside := false
+                ^inside: false
                 loop region in memory {
                     if region.kind == .MMIO && jet_target_memory_contains(region, block.base, block.size) {
                         inside = true
@@ -1240,7 +1240,7 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
                 }
             }
         }
-        registers := [String:Bool]{}
+        ^registers: [String:Bool]{}
         loop register in block.registers {
             if register.name.trim().is_empty() {
                 errors.push(.HardwareFactEmptyName{kind: "register in `{block.name}`"})
@@ -1266,8 +1266,8 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
             }
         }
     }
-    interrupts := [String:Bool]{}
-    vectors := [Int:Bool]{}
+    ^interrupts: [String:Bool]{}
+    ^vectors: [Int:Bool]{}
     loop interrupt in hardware.interrupts {
         if interrupt.name.trim().is_empty() {
             errors.push(.HardwareFactEmptyName{kind: "interrupt"})
@@ -1286,8 +1286,8 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
             }
         }
     }
-    channels := [String:Bool]{}
-    numbers := [Int:Bool]{}
+    ^channels: [String:Bool]{}
+    ^numbers: [Int:Bool]{}
     loop channel in hardware.dma_channels {
         if channel.name.trim().is_empty() {
             errors.push(.HardwareFactEmptyName{kind: "DMA channel"})
@@ -1305,14 +1305,14 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
 }
 
 jet_target_hardware_validate: fn(hardware: TargetHardwareFacts, memory: [MemoryRegion]) -> [TargetMachineError] Never! {
-    errors := [TargetMachineError]{}
+    ^errors: [TargetMachineError]{}
     jet_target_hardware_validate_into(hardware, memory, errors)
     errors
 }
 
 // Validate a target machine; preserve push order.
 jet_target_machine_validate: fn(machine: TargetMachine, usage: TargetMachineUse) -> [TargetMachineError] Never! {
-    errors := [TargetMachineError]{}
+    ^errors: [TargetMachineError]{}
     if machine.triple.trim().is_empty() -> errors.push(.MissingTargetTriple)
     jet_target_validate_memory_regions(machine.memory, errors)
     jet_target_validate_linker(machine.linker, machine.no_os, errors)
@@ -1440,7 +1440,7 @@ jet_target_memory_region_new: fn(name: String, origin: Int, size: ByteSize, kind
 }
 
 jet_target_machine_with_startup_facts: fn(machine: TargetMachine, entry: String, vectors: String, abi: ProviderABI, placement: String) -> TargetMachine Never! {
-    result := machine
+    ^result: machine
     result.startup_entry = entry
     result.startup_vectors = vectors
     result.startup_abi = abi
@@ -1462,7 +1462,7 @@ jet_target_builtin_provider_digest: fn(name: String, digest: String) -> Provider
 }
 
 jet_target_machine_board_sensor_v1: fn(package_version: String) -> TargetMachine Never! {
-    machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", package_version)
+    ^machine: jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", package_version)
     machine.memory = [MemoryRegion]{
         jet_target_memory_region_new("flash", 0, ByteSize{bytes: 4194304}, .Flash, .Rx),
         jet_target_memory_region_new("ram", 0x20000000, ByteSize{bytes: 4194304}, .Ram, .Rw),
@@ -1501,7 +1501,7 @@ jet_target_machine_board_sensor_v1: fn(package_version: String) -> TargetMachine
 }
 
 jet_target_machine_board_virt_aarch64: fn(package_version: String) -> TargetMachine Never! {
-    machine := jet_target_machine_with_startup_facts(jet_target_machine_bare_metal("board.virt_aarch64", "aarch64-unknown-none", package_version), "_start", "vectors", ProviderABI{calling_convention: "AArch64", version: "1"}, ".vectors")
+    ^machine: jet_target_machine_with_startup_facts(jet_target_machine_bare_metal("board.virt_aarch64", "aarch64-unknown-none", package_version), "_start", "vectors", ProviderABI{calling_convention: "AArch64", version: "1"}, ".vectors")
     machine.memory = [MemoryRegion]{
         jet_target_memory_region_new("flash", 0x40000000, ByteSize{bytes: 1048576}, .Flash, .Rx),
         jet_target_memory_region_new("ram", 0x40100000, ByteSize{bytes: 1048576}, .Ram, .Rw),
@@ -1537,7 +1537,7 @@ jet_target_machine_board_virt_aarch64: fn(package_version: String) -> TargetMach
 }
 
 jet_target_machine_wasm_no_os: fn(package_version: String) -> TargetMachine Never! {
-    machine := jet_target_machine_bare_metal("wasm.no-os", "wasm32-unknown-unknown", package_version)
+    ^machine: jet_target_machine_bare_metal("wasm.no-os", "wasm32-unknown-unknown", package_version)
     machine.memory = [MemoryRegion]{
         jet_target_memory_region_new("flash", 0, ByteSize{bytes: 16777216}, .Flash, .Rx),
         jet_target_memory_region_new("ram", 0x01000000, ByteSize{bytes: 16777216}, .Ram, .Rw),
@@ -1593,9 +1593,9 @@ jet_target_machine_display_name: fn(machine: TargetMachine) -> String Never! {
 // filled in with `values[i]`.
 jet_target_registry_diagnostic: fn(code: String, names: [String], values: [String]) -> Diagnostic Never! {
     row: diagnostic_registry_row_of(code)
-    what := row.what
-    why := row.why
-    fix := row.fix
+    ^what: row.what
+    ^why: row.why
+    ^fix: row.fix
     loop (at, name) in names {
         what = what.replace("{{{name}}}", values[at])
         why = why.replace("{{{name}}}", values[at])

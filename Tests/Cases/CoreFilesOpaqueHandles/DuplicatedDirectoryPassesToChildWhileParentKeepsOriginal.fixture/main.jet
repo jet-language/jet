@@ -20,11 +20,11 @@ run: fn() -[IO, FS, Exec, Env]> {
     files.write(files.join(held_path, "marker.txt"), "replacement\n") ?? panic("replacement marker")
     receipt: spec.run() ?? panic("run")
     print("child read: {receipt.output.trim()}")
-    names := [String]{}
+    ^names: [String]{}
     entries: original.list() ?? panic("list the original")
     loop entry in entries -> names.push(entry.name)
     print("parent lists: {names.join(", ")}")
-    after := original.create("after.txt") ?? panic("create through the original")
+    ^after: original.create("after.txt") ?? panic("create through the original")
     after.write_line("after") ?? panic("write through the original")
     print("parent wrote after the child: {files.exists(files.join(files.join(root, "moved"), "after.txt"))}")
 }

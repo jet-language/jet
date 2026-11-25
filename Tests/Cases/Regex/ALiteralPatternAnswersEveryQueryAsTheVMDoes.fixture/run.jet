@@ -36,19 +36,19 @@ run: fn() {
     print(escaped.find_all("a.b axb a.b"))
 
     // Texts of a kilobyte or more, where the search skips by the needle.
-    long := ""
+    ^long: ""
     loop k in 0..<200 -> long = "{long}st{k}struct sstruc structs "
     starts: word.matches(long).map(fn(m) { m.start })
     print("{starts.len()} {starts.fold(0, fn(sum, start) { sum + start })} {word.replace(long, "").len()}")
     print(word.split(long).len())
-    pairs := ""
+    ^pairs: ""
     loop _ in 0..<1000 -> pairs = "{pairs}ab"
     print(Regex{"abab"}.find_all(pairs).len())
     print(Regex{"bab"}.matches(pairs).map(fn(m) { m.start }).fold(0, fn(sum, start) { sum + start }))
-    runs := ""
+    ^runs: ""
     loop _ in 0..<300 -> runs = "{runs}aaaab"
     print(Regex{"aab"}.matches(runs).map(fn(m) { m.start }).fold(0, fn(sum, start) { sum + start }))
-    accents := ""
+    ^accents: ""
     loop _ in 0..<600 -> accents = "{accents}eé"
     print(Regex{"eé"}.find_all(accents).len())
     print(Regex{"éeé"}.matches(accents).map(fn(m) { m.start }).fold(0, fn(sum, start) { sum + start }))

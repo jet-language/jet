@@ -19,18 +19,18 @@ BOARD: Shared{Board{tasks: 3, runs: 0}}
 // counting its own runs.
 open_tasks: fn(board: String) -[DB.Read]> Int BoardError! {
     if board == "" -> return Err(BoardError.NoBoard)
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.runs += 1
     if board == "crewboard" -> state.value.tasks else -> 0
 }
 
 runs: fn() -> Int {
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.runs
 }
 
 add_task: fn() {
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.tasks += 1
 }
 

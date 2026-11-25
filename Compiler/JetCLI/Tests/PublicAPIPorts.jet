@@ -163,7 +163,7 @@ pap_cap_source: fn(receipt: String) -> String {
     owner: PapFixtureRoot{path: root}
     defer close(owner)
     api: pap_api(root, "published", "shop", pap_cap_source("IO, !FS"))
-    caps := [String]{}
+    ^caps: [String]{}
     loop row in api {
         if row.kind == "cap" -> caps.push(row.signature.copy())
     }
@@ -253,7 +253,7 @@ pap_cap_source: fn(receipt: String) -> String {
         }
     }
     clamp_api: pap_api(root, "clamp", "blender", "blend: core.math.clamp_float\n\nmix: fn() -> Float {{ blend(0.0, 2.0, 0.5) }}\n")
-    description := ""
+    ^description: ""
     loop change in pap_changes(lerp_api, clamp_api) {
         if change.item_name == "blend" -> description = "{change.description}"
     }
@@ -278,4 +278,3 @@ pap_cap_source: fn(receipt: String) -> String {
     assert_eq(loop change in pap_changes(pap_frozen("net", v2_closed), v1_open) -> "{change.item_name}", [String]{"ErrorKind"})
     assert_eq(loop change in pap_changes(published, v2_open_removed) -> "{change.item_name}", [String]{"ErrorKind.Timeout"})
 }
-

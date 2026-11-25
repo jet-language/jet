@@ -7,16 +7,16 @@ worker: fn(k: Int) -> Int {
 
 run: fn() {
     subscribed: process.signals([ProcessSignal]{.Usr1}) ?? panic("process.signals refused Usr1: {err}")
-    received := 0
+    ^received: 0
     loop _ in 0..<100 {
         sent: process.shell("kill -USR1 {process.current_pid()}").run() ?? panic("sh did not start: {err}")
         if !sent.success -> panic("kill -USR1 failed")
-        _ := subscribed.receiver.receive() ?? panic("the receiver closed early")
+        ^_: subscribed.receiver.receive() ?? panic("the receiver closed early")
         received += 1
     }
     subscribed.close()
     print("{received} USR1 received")
-    failed := 0
+    ^failed: 0
     loop k in 0..<40 {
         helper: task worker(k)
         if (helper.join() ?? -1) < 0 -> failed += 1

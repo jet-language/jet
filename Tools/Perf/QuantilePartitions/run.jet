@@ -25,14 +25,14 @@ LEVELS: [Float]{0.5, 0.1234567}
 RUNS: 8
 
 run: fn() {
-    tsv := "quantile-partitions.tsv"
+    ^tsv: "quantile-partitions.tsv"
     args: process.args()
     loop index in 0..<args.len() {
         if args[index] == "--tsv" && index + 1 < args.len() -> tsv = args[index + 1]
     }
-    rows := ["kind\tn\tq\tselection_ns\tbaseline_ns\tratio\tverdict"]
-    passed := 0
-    cells := 0
+    ^rows: ["kind\tn\tq\tselection_ns\tbaseline_ns\tratio\tverdict"]
+    ^passed: 0
+    ^cells: 0
     loop kind in KINDS {
         loop n in SIZES {
             values: inputs(kind, n)
@@ -43,8 +43,8 @@ run: fn() {
                     panic("{kind} n={n} q={q}: selection gives {selected}, the sorted baseline {indexed}")
                 }
                 print("{kind} n={n} q={q}: {selected}")
-                selection_times := [Int]{}
-                baseline_times := [Int]{}
+                ^selection_times: [Int]{}
+                ^baseline_times: [Int]{}
                 loop trial in 0..<RUNS {
                     if trial %% 2 == 0 {
                         selection_times.push(time_selection(values, q))
@@ -72,8 +72,8 @@ run: fn() {
 // `n` values of `kind`: a fixed pseudo-random sequence, ascending, descending,
 // one repeated value, or seven values cycling.
 inputs: fn(kind: String, n: Int) -> [Float] {
-    values := [Float]{}
-    seed := 41
+    ^values: [Float]{}
+    ^seed: 41
     loop index in 0..<n {
         if kind == {
             "random" -> {
@@ -92,7 +92,7 @@ inputs: fn(kind: String, n: Int) -> [Float] {
 // The baseline: sort a copy, then interpolate between the two ranks around
 // q * (n - 1), as core.data.quantile defines its result.
 sorted_quantile: fn(values: [Float], q: Float) -> Float {
-    sorted := values.copy()  // copy: the caller's values stay in input order
+    ^sorted: values.copy()  // copy: the caller's values stay in input order
     sorted.sort()
     position: q * Float{sorted.len() - 1}
     lo: checked(Int{math.trunc(position)}) ?? panic("quantile position {position}")
@@ -118,7 +118,7 @@ time_baseline: fn(values: [Float], q: Float) -> Int {
 
 // The 4th smallest of 8 timings: the lower median.
 lower_median: fn(times: [Int]) -> Int {
-    sorted := times.copy()  // copy: the trials keep their run order
+    ^sorted: times.copy()  // copy: the trials keep their run order
     sorted.sort()
     sorted[(sorted.len() - 1) /% 2]
 }

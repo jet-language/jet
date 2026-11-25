@@ -163,7 +163,7 @@ RLRow: struct {
 
 // The index of the bracket closing the one opened at `open` in `text`.
 rl_close: fn(text: String, open: Int) -> Int Never! {
-    depth := 0
+    ^depth: 0
     loop (at, byte) in text.bytes() {
         if at < open -> next
         if byte == 40 || byte == 91 || byte == 123 -> depth += 1
@@ -178,10 +178,10 @@ rl_close: fn(text: String, open: Int) -> Int Never! {
 // `text` split at each top-level `separator` byte (outside brackets), each
 // part trimmed; no parts for blank text.
 rl_split: fn(text: String, separator: U8) -> [String] Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     if text.trim() == "" -> return parts
-    depth := 0
-    start := 0
+    ^depth: 0
+    ^start: 0
     loop (at, byte) in text.bytes() {
         if byte == 40 || byte == 91 || byte == 123 -> depth += 1
         if byte == 41 || byte == 93 || byte == 125 -> depth -= 1
@@ -202,7 +202,7 @@ rl_quoted: fn(line: String, label: String) -> String? Never! {
 
 // The bindings of RuntimeInterface.jet's rows.
 rl_bindings: fn(source: String) -> [RLBinding] Never! {
-    rows := [RLBinding]{}
+    ^rows: [RLBinding]{}
     loop line in source.lines() {
         if !line.trim().starts_with("RuntimeInterfaceRow{{module_name: ") -> next
         module_name: rl_quoted(line, "module_name: ") ?? next
@@ -218,21 +218,21 @@ rl_bindings: fn(source: String) -> [RLBinding] Never! {
 rl_exports: fn(source: String, out: ^[String:RLExport]) Never! {
     loop line in source.lines() {
         if !line.starts_with("#Export(c) ") -> next
-        head := line.slice("#Export(c) ".len(), line.len())
+        ^head: line.slice("#Export(c) ".len(), line.len())
         if head.starts_with("priv ") -> head = head.slice("priv ".len(), head.len())
         parts: head.split_once(": fn(") ?? next
         open: parts.before.len() + ": fn".len()
         close: rl_close(head, open)
         if close < 0 -> next
-        names := [String]{}
-        types := [String]{}
+        ^names: [String]{}
+        ^types: [String]{}
         loop param in rl_split(head.slice(open + 1, close), 44) {
             pair: param.split_once(": ") ?? next
             names.push(pair.before.trim())
             types.push(pair.after.trim())
         }
         rest: head.slice(close + 1, head.len()).trim()
-        returned := ""
+        ^returned: ""
         if rest.starts_with("-> ") {
             tail: rest.slice(3, rest.len())
             returned = (tail.split_once(" {{") ?? next).before.trim()
@@ -260,7 +260,7 @@ rl_mask: fn(text: String) -> [Bool] Never! {
 // `CoreCallRecord.new` or `receiver_with_symbol` call ends `"<symbol>",
 // <ok>, &[<mask>]`.
 rl_rows: fn(source: String) -> [RLRow] Never! {
-    rows := [RLRow]{}
+    ^rows: [RLRow]{}
     loop line in source.lines() {
         if !line.starts_with("dispatcher_row ") -> next
         call: (line.split_once(".new(") ?? line.split_once(".receiver_with_symbol(") ?? next).after
@@ -306,7 +306,7 @@ rl_width: fn(carrier: String) -> String Never! {
 
 // The fields of a tuple type `{a: T, b: U}`, each as `name` and type.
 rl_tuple: fn(ty: String) -> [[String]] Never! {
-    fields := [[String]]{}
+    ^fields: [[String]]{}
     loop field in rl_split(ty.slice(1, ty.len() - 1), 44) {
         pair: field.split_once(": ") ?? next
         fields.push([String]{pair.before.trim(), pair.after.trim()})
@@ -320,7 +320,7 @@ rl_words: fn(ty: String) -> Int Never! {
     if carrier == "Option" -> return 1 + rl_words(ty.slice(0, ty.len() - 1))
     if carrier == "List" -> return 2
     if carrier == "Tuple" {
-        words := 0
+        ^words: 0
         loop field in rl_tuple(ty) -> words += rl_words(field[1])
         return words
     }
@@ -330,7 +330,7 @@ rl_words: fn(ty: String) -> Int Never! {
 // The tuple fields of `ty` with their value words, its out words starting
 // at `start`.
 rl_fields: fn(ty: String, start: Int, out: ^[RLField]) Never! {
-    at := start
+    ^at: start
     loop field in rl_tuple(ty) {
         word: if rl_carrier(field[1]) == "Option" -> at + 1 else -> at
         out.push(RLField{name: field[0].copy(), word: word})
@@ -340,18 +340,18 @@ rl_fields: fn(ty: String, start: Int, out: ^[RLField]) Never! {
 
 // The C side `declaration` projects; None when the guard can't read it.
 rl_shape: fn(declaration: String) -> RLShape? Never! {
-    text := declaration.trim()
+    ^text: declaration.trim()
     if text.starts_with("priv ") -> text = text.slice("priv ".len(), text.len())
     parts: text.split_once(": fn(") ?? return None
     open: parts.before.len() + ": fn".len()
     close: rl_close(text, open)
     if close < 0 -> return None
-    inputs := [String]{}
-    lent := [Bool]{}
-    owned := [Bool]{}
+    ^inputs: [String]{}
+    ^lent: [Bool]{}
+    ^owned: [Bool]{}
     loop param in rl_split(text.slice(open + 1, close), 44) {
         pair: param.split_once(": ") ?? return None
-        ty := pair.after.trim()
+        ^ty: pair.after.trim()
         taken: ty.starts_with("^^")
         written: !taken && ty.starts_with("^")
         if taken -> ty = ty.slice(2, ty.len()) else if written -> ty = ty.slice(1, ty.len())
@@ -365,11 +365,11 @@ rl_shape: fn(declaration: String) -> RLShape? Never! {
             loop _ in 0..<3 -> inputs.push("I64")
         } else { inputs.push(rl_width(carrier)) }
     }
-    rest := text.slice(close + 1, text.len()).trim()
+    ^rest: text.slice(close + 1, text.len()).trim()
     if rest.starts_with("-[") -> rest = (rest.split_once("]>") ?? return None).after.trim() else if rest.starts_with("->") {
         rest = rest.slice(2, rest.len()).trim()
     }
-    fields := [RLField]{}
+    ^fields: [RLField]{}
     start: inputs.len()
     if rest.ends_with("!") {
         // `T E!` or a bare `E!` (a Unit success): the success's words, then
@@ -433,7 +433,7 @@ rl_field_word: fn(field_words: [String], symbol: String, field: String) -> Strin
 // What `binding` gets wrong against `export` and the Core.rows `rows` that
 // route the same export, one line each; `field_words` as RL_FIELD_WORDS.
 rl_binding_findings: fn(binding: RLBinding, export: RLExport?, rows: [RLRow], field_words: [String]) -> [String] Never! {
-    findings := [String]{}
+    ^findings: [String]{}
     name: "{binding.module_name}.{binding.member}"
     shape: rl_shape(binding.declaration) ?? {
         findings.push("{name}: the guard can't read the declaration `{binding.declaration}`")
@@ -462,7 +462,7 @@ rl_binding_findings: fn(binding: RLBinding, export: RLExport?, rows: [RLRow], fi
         loop field in shape.fields {
             word: rl_field_word(field_words, binding.symbol, field.name)
             if rl_names(found.names[field.word], word) -> next
-            elsewhere := -1
+            ^elsewhere: -1
             loop at in shape.inputs.len()..<words {
                 if rl_names(found.names[at], word) -> elsewhere = at
             }
@@ -496,7 +496,7 @@ rl_binding_findings: fn(binding: RLBinding, export: RLExport?, rows: [RLRow], fi
 // Every finding over the interface `bindings`, the runtime `exports`, the
 // Core.rows `rows` and the `field_words` rows, sorted.
 rl_findings: fn(bindings: [RLBinding], exports: [String:RLExport], rows: [RLRow], field_words: [String]) -> [String] Never! {
-    findings := [String]{}
+    ^findings: [String]{}
     loop binding in bindings {
         loop finding in rl_binding_findings(binding, exports.get(binding.symbol), rows, field_words) {
             findings.push(finding)
@@ -511,7 +511,7 @@ rl_findings: fn(bindings: [RLBinding], exports: [String:RLExport], rows: [RLRow]
                 findings.push("RL_FIELD_WORDS row `{row}`: `{word}` is not `<field>=<word>`")
                 next
             }
-            used := false
+            ^used: false
             loop binding in bindings {
                 if binding.symbol != words[0] -> next
                 shape: rl_shape(binding.declaration) ?? next
@@ -533,15 +533,15 @@ rl_findings: fn(bindings: [RLBinding], exports: [String:RLExport], rows: [RLRow]
 // which the runtime pack renders from the declaration (JetDriver
 // RuntimeInterface.jet), or the call lends what the export ends.
 rl_taken_findings: fn(source: String, bindings: [RLBinding]) -> [String] Never! {
-    findings := [String]{}
-    module_name := ""
+    ^findings: [String]{}
+    ^module_name: ""
     loop line in source.lines() {
         if !line.starts_with(" ") && line.ends_with(": module {{") {
             head: line.split_once(": module {{") ?? next
             module_name = "jet.runtime.{head.before}"
             next
         }
-        text := line.trim()
+        ^text: line.trim()
         if !text.starts_with("#Import(c) ") -> next
         text = (text.slice("#Import(c) ".len(), text.len()).split_once(" = \"") ?? next).before
         if text.starts_with("priv ") -> text = text.slice("priv ".len(), text.len())
@@ -552,7 +552,7 @@ rl_taken_findings: fn(source: String, bindings: [RLBinding]) -> [String] Never! 
         loop param in rl_split(text.slice(open + 1, close), 44) {
             pair: param.split_once(": ") ?? next
             if !pair.after.trim().starts_with("^^") -> next
-            kept := false
+            ^kept: false
             loop binding in bindings {
                 if binding.module_name == module_name && binding.member == parts.before && binding.declaration.contains(param) {
                     kept = true
@@ -593,7 +593,7 @@ RLIntWords: struct {
 // `text` with each non-ASCII byte as `?`: the analysis indexes bytes and
 // slices text, which agree on ASCII.
 rl_ascii: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() -> out.push(if byte < 128 -> byte else -> U8{63})
     String.from_bytes(out) ?? panic("ASCII bytes are valid UTF-8")
 }
@@ -602,10 +602,10 @@ rl_ascii: fn(text: String) -> String Never! {
 // (`""`).
 rl_blank: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    out := [U8]{}
-    quoted := false
-    comment := false
-    escaped := false
+    ^out: [U8]{}
+    ^quoted: false
+    ^comment: false
+    ^escaped: false
     loop (at, byte) in bytes {
         if comment {
             if byte == 10 {
@@ -648,7 +648,7 @@ rl_name: fn(text: String) -> Bool Never! {
 
 // The function a source line at column 0 declares; "" for any other line.
 rl_function_name: fn(line: String) -> String Never! {
-    head := line
+    ^head: line
     if head.starts_with("#Export(c) ") -> head = head.slice("#Export(c) ".len(), head.len())
     if head.starts_with("priv ") -> head = head.slice("priv ".len(), head.len())
     parts: head.split_once(": fn(") ?? return ""
@@ -659,24 +659,24 @@ rl_function_name: fn(line: String) -> String Never! {
 // The functions one ASCII runtime source declares at column 0.
 rl_functions: fn(source: String, out: ^[String:RLFunction]) Never! {
     lines: source.lines()
-    at := 0
+    ^at: 0
     loop at < lines.len() {
         name: rl_function_name(lines[at])
         if name == "" {
             at += 1
             next
         }
-        end := at
+        ^end: at
         if !lines[at].ends_with("}}") {
             end = at + 1
             loop end < lines.len() && !lines[end].starts_with("}}") -> end += 1
         }
-        parts := [String]{}
+        ^parts: [String]{}
         loop k in at..<(end + 1) {
             if k < lines.len() -> parts.push(lines[k])
         }
-        doc := [String]{}
-        above := at - 1
+        ^doc: [String]{}
+        ^above: at - 1
         loop above >= 0 && lines[above].starts_with("//") {
             doc.push(lines[above])
             above -= 1
@@ -689,7 +689,7 @@ rl_functions: fn(source: String, out: ^[String:RLFunction]) Never! {
         brace: text.slice(close, text.len()).find("{{")
         last: text.rfind("}}")
         if brace < 0 || last <= close + brace -> next
-        params := [String]{}
+        ^params: [String]{}
         loop param in rl_split(text.slice(open + 1, close), 44) {
             params.push((param.split_once(":") ?? next).before.trim())
         }
@@ -701,8 +701,8 @@ rl_functions: fn(source: String, out: ^[String:RLFunction]) Never! {
 // `.`, not a type before `{`.
 rl_occurrences: fn(body: String, name: String) -> [Int] Never! {
     bytes: body.bytes()
-    found := [Int]{}
-    from := 0
+    ^found: [Int]{}
+    ^from: 0
     loop from < bytes.len() {
         hit: body.slice(from, body.len()).find(name)
         if hit < 0 -> break
@@ -722,14 +722,14 @@ rl_space: fn(byte: U8) -> Bool Never! { byte == 32 || byte == 10 || byte == 9 }
 // argument; None when the identifier is anything else.
 rl_call_of: fn(body: String, at: Int, end: Int) -> RLCall? Never! {
     bytes: body.bytes()
-    before := at - 1
+    ^before: at - 1
     loop before >= 0 && rl_space(bytes[before]) -> before -= 1
     if before < 0 || (bytes[before] != 40 && bytes[before] != 44) -> return None
-    after := end
+    ^after: end
     loop after < bytes.len() && rl_space(bytes[after]) -> after += 1
     if after >= bytes.len() || (bytes[after] != 44 && bytes[after] != 41) -> return None
-    depth := 0
-    open := at - 1
+    ^depth: 0
+    ^open: at - 1
     loop open >= 0 {
         byte: bytes[open]
         if byte == 41 || byte == 93 || byte == 125 -> depth += 1
@@ -740,7 +740,7 @@ rl_call_of: fn(body: String, at: Int, end: Int) -> RLCall? Never! {
         open -= 1
     }
     if open < 0 || bytes[open] != 40 -> return None
-    start := open
+    ^start: open
     loop start > 0 && rl_ident(bytes[start - 1]) -> start -= 1
     if start == open -> return None
     close: rl_close(body, open)
@@ -770,9 +770,9 @@ rl_param_reads: fn(functions: [String:RLFunction], name: String, index: Int, sta
     function: functions.get(name) ?? return [String]{"{name} takes it, and the guard reads no runtime function `{name}`"}
     if index >= function.params.len() -> return [String]{"{name} takes it past its parameters"}
     param: function.params[index]
-    inner := stack.copy()
+    ^inner: stack.copy()
     inner.push(key.copy())
-    reasons := [String]{}
+    ^reasons: [String]{}
     loop at in rl_occurrences(function.body, param) {
         call: rl_call_of(function.body, at, at + param.len()) ?? RLCall{callee: "", index: 0, args: [String]{}}
         if call.callee == "" || RL_NATIVE_CALLS.contains(call.callee) {
@@ -801,7 +801,7 @@ rl_statement: fn(text: String) -> Bool Never! {
         return true
     }
     bytes: text.bytes()
-    width := 0
+    ^width: 0
     loop width < bytes.len() && rl_ident(bytes[width]) -> width += 1
     if width == 0 -> return false
     rest: text.slice(width, text.len()).trim()
@@ -810,9 +810,9 @@ rl_statement: fn(text: String) -> Bool Never! {
 
 // A body's statements: its lines outside brackets, trimmed.
 rl_statements: fn(body: String) -> [String] Never! {
-    out := [String]{}
-    depth := 0
-    start := 0
+    ^out: [String]{}
+    ^depth: 0
+    ^start: 0
     loop (at, byte) in body.bytes() {
         if byte == 40 || byte == 91 || byte == 123 -> depth += 1
         if byte == 41 || byte == 93 || byte == 125 -> depth -= 1
@@ -830,7 +830,7 @@ rl_statements: fn(body: String) -> [String] Never! {
 // The values `body` binds to the local `local`: `local: v`, `local := v`
 // and `local = v`, each to its line's end.
 rl_definitions: fn(body: String, local: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     prefixes: [String]{"{local}: ", "{local} := ", "{local} = "}
     loop line in body.lines() {
         text: line.trim()
@@ -854,9 +854,9 @@ rl_spells: fn(bytes: [U8], at: Int, word: String) -> Bool Never! {
 // The arms of a one-line `if c -> a else if d -> b else -> e`, classified.
 rl_arms: fn(functions: [String:RLFunction], expr: String, name: String, depth: Int) -> [String] Never! {
     bytes: expr.bytes()
-    arrows := [Int]{}
-    elses := [Int]{}
-    level := 0
+    ^arrows: [Int]{}
+    ^elses: [Int]{}
+    ^level: 0
     loop (at, byte) in bytes {
         if byte == 40 || byte == 91 || byte == 123 -> level += 1
         if byte == 41 || byte == 93 || byte == 125 -> level -= 1
@@ -864,9 +864,9 @@ rl_arms: fn(functions: [String:RLFunction], expr: String, name: String, depth: I
         if level == 0 && rl_spells(bytes, at, " else ") -> elses.push(at)
     }
     if arrows.len() == 0 -> return [String]{"{name}: `{expr}` is native"}
-    reasons := [String]{}
+    ^reasons: [String]{}
     loop arrow in arrows {
-        stop := bytes.len()
+        ^stop: bytes.len()
         loop at in elses {
             if at > arrow && at < stop -> stop = at
         }
@@ -883,7 +883,7 @@ rl_arms: fn(functions: [String:RLFunction], expr: String, name: String, depth: I
 // or a local bound only to such. `={j}` stands for `name`'s `j`th
 // parameter, which a caller maps to its argument.
 rl_classify: fn(functions: [String:RLFunction], text: String, name: String, depth: Int) -> [String] Never! {
-    expr := text.trim()
+    ^expr: text.trim()
     loop expr.starts_with("(") && rl_close(expr, 0) == expr.len() - 1 {
         expr = expr.slice(1, expr.len() - 1).trim()
     }
@@ -909,7 +909,7 @@ rl_classify: fn(functions: [String:RLFunction], text: String, name: String, dept
         }
         defined: rl_definitions(function.body, expr)
         if defined.len() > 0 && depth < 8 {
-            reasons := [String]{}
+            ^reasons: [String]{}
             loop value in defined {
                 loop reason in rl_classify(functions, value, name, depth + 1) {
                     reasons.push(reason)
@@ -926,11 +926,11 @@ rl_classify: fn(functions: [String:RLFunction], text: String, name: String, dept
 rl_returns: fn(functions: [String:RLFunction], name: String, depth: Int) -> [String] Never! {
     function: functions.get(name) ?? return [String]{"the guard reads no runtime function `{name}`"}
     body: function.body
-    reasons := [String]{}
+    ^reasons: [String]{}
     loop at in rl_occurrences(body, "return") {
         rest: body.slice(at + "return".len(), body.len())
         stop: rest.find("\n")
-        line := if stop < 0 -> rest else -> rest.slice(0, stop)
+        ^line: if stop < 0 -> rest else -> rest.slice(0, stop)
         // `if c { return v }`: the block's brace closes after the value.
         loop line.bytes().count(U8{125}) > line.bytes().count(U8{123}) {
             line = line.slice(0, line.rfind("}}"))
@@ -961,7 +961,7 @@ rl_store_value: fn(callee: String) -> Int Never! {
 // into the functions it is passed to.
 rl_stores: fn(functions: [String:RLFunction], name: String, param: String, depth: Int) -> [String] Never! {
     function: functions.get(name) ?? return [String]{"the guard reads no runtime function `{name}`"}
-    reasons := [String]{}
+    ^reasons: [String]{}
     loop at in rl_occurrences(function.body, param) {
         call: rl_call_of(function.body, at, at + param.len()) ?? next
         value: rl_store_value(call.callee)
@@ -998,7 +998,7 @@ rl_int_slots: fn(ty: String, start: Int, out: ^[Int]) Never! {
     if ty == "Int" -> out.push(start)
     if carrier == "Option" -> rl_int_slots(ty.slice(0, ty.len() - 1), start + 1, out)
     if carrier == "Tuple" {
-        at := start
+        ^at: start
         loop field in rl_tuple(ty) {
             rl_int_slots(field[1], at, out)
             at += rl_words(field[1])
@@ -1009,17 +1009,17 @@ rl_int_slots: fn(ty: String, start: Int, out: ^[Int]) Never! {
 // The Int words of `declaration`'s binding; None when the guard can't
 // read it (rl_findings names it).
 rl_int_words: fn(declaration: String) -> RLIntWords? Never! {
-    text := declaration.trim()
+    ^text: declaration.trim()
     if text.starts_with("priv ") -> text = text.slice("priv ".len(), text.len())
     parts: text.split_once(": fn(") ?? return None
     open: parts.before.len() + ": fn".len()
     close: rl_close(text, open)
     if close < 0 -> return None
-    arguments := [Int]{}
-    at := 0
+    ^arguments: [Int]{}
+    ^at: 0
     loop param in rl_split(text.slice(open + 1, close), 44) {
         pair: param.split_once(": ") ?? return None
-        ty := pair.after.trim()
+        ^ty: pair.after.trim()
         written: !ty.starts_with("^^") && ty.starts_with("^")
         if ty.starts_with("^^") -> ty = ty.slice(2, ty.len()) else if written {
             ty = ty.slice(1, ty.len())
@@ -1028,11 +1028,11 @@ rl_int_words: fn(declaration: String) -> RLIntWords? Never! {
         carrier: rl_carrier(ty)
         at += if carrier == "List" && !written -> 2 else if carrier == "Callback" -> 3 else -> 1
     }
-    rest := text.slice(close + 1, text.len()).trim()
+    ^rest: text.slice(close + 1, text.len()).trim()
     if rest.starts_with("-[") -> rest = (rest.split_once("]>") ?? return None).after.trim() else if rest.starts_with("->") {
         rest = rest.slice(2, rest.len()).trim()
     }
-    results := [Int]{}
+    ^results: [Int]{}
     if rest.ends_with("!") {
         split: rl_split(rest.slice(0, rest.len() - 1), 32)
         if split.len() > 1 -> rl_int_slots(split[0], at, results)
@@ -1048,8 +1048,8 @@ rl_int_words: fn(declaration: String) -> RLIntWords? Never! {
 // (rl_functions). An export whose doc says RL_INLINE_MARK answers counts
 // bounded by live memory, which an inline carrier holds as its native word.
 rl_int_findings: fn(bindings: [RLBinding], functions: [String:RLFunction]) -> [String] Never! {
-    findings := [String]{}
-    memo := [String:[String]]{}
+    ^findings: [String]{}
+    ^memo: [String:[String]]{}
     loop binding in bindings {
         name: "{binding.module_name}.{binding.member}"
         words: rl_int_words(binding.declaration) ?? next
@@ -1073,7 +1073,7 @@ rl_int_findings: fn(bindings: [RLBinding], functions: [String:RLFunction]) -> [S
         }
     }
     findings.sort()
-    unique := [String]{}
+    ^unique: [String]{}
     loop finding in findings {
         if unique.len() == 0 || unique[unique.len() - 1] != finding -> unique.push(finding)
     }
@@ -1084,10 +1084,10 @@ rl_int_findings: fn(bindings: [RLBinding], functions: [String:RLFunction]) -> [S
     guards_enter_root()
     bindings: rl_bindings(rl_files.read(RL_INTERFACE_PATH) ?? panic("read {RL_INTERFACE_PATH}: {err}"))
     assert(bindings.len() > 400, "the interface has only {bindings.len()} bindings")
-    sources := [String]{}
+    ^sources: [String]{}
     rl_walk(RL_RUNTIME_SOURCES, sources)
-    exports := [String:RLExport]{}
-    taken := [String]{}
+    ^exports: [String:RLExport]{}
+    ^taken: [String]{}
     loop path in sources {
         text: rl_files.read(path) ?? panic("read {path}: {err}")
         rl_exports(text, exports)
@@ -1106,9 +1106,9 @@ rl_int_findings: fn(bindings: [RLBinding], functions: [String:RLFunction]) -> [S
 #Test("every jet.runtime binding's export reads a lent Int whole and answers an Int as an owned carrier") {
     guards_enter_root()
     bindings: rl_bindings(rl_files.read(RL_INTERFACE_PATH) ?? panic("read {RL_INTERFACE_PATH}: {err}"))
-    sources := [String]{}
+    ^sources: [String]{}
     rl_walk(RL_RUNTIME_SOURCES, sources)
-    functions := [String:RLFunction]{}
+    ^functions: [String:RLFunction]{}
     loop path in sources {
         if path.starts_with(RL_PUBLIC_SOURCES) -> next
         rl_functions(rl_ascii(rl_files.read(path) ?? panic("read {path}: {err}")), functions)
@@ -1147,7 +1147,7 @@ rl_int_findings: fn(bindings: [RLBinding], functions: [String:RLFunction]) -> [S
         "    wrapping(value & I64{{255}})",
         "}}",
     }.join("\n")
-    functions := [String:RLFunction]{}
+    ^functions: [String:RLFunction]{}
     rl_functions(rl_ascii(runtime), functions)
     assert_eq(functions.len(), 7)
     // The saturating read and the made carrier pass; the helper's native
@@ -1172,7 +1172,7 @@ rl_int_findings: fn(bindings: [RLBinding], functions: [String:RLFunction]) -> [S
     bindings: rl_bindings(interface)
     assert_eq(bindings.len(), 3)
     assert_eq(bindings[0].declaration, "priv directory_fd: fn(handle: Int) -[FS.Read]> {{available: Bool, fd: Int, held: Bool}}")
-    exports := [String:RLExport]{}
+    ^exports: [String:RLExport]{}
     rl_exports(runtime, exports)
     rows: rl_rows(core_rows)
     assert_eq(rows.len(), 1)
@@ -1194,7 +1194,7 @@ rl_int_findings: fn(bindings: [RLBinding], functions: [String:RLFunction]) -> [S
     runtime: "#Export(c) jet_rt_coded_stop: fn(code: I64, message: I64) {{\n"
     bindings: rl_bindings(interface)
     assert_eq(bindings.len(), 2)
-    exports := [String:RLExport]{}
+    ^exports: [String:RLExport]{}
     rl_exports(runtime, exports)
     // The stop agrees with its export; an Int result over the same export
     // reads a word it never returns.
@@ -1209,7 +1209,7 @@ rl_int_findings: fn(bindings: [RLBinding], functions: [String:RLFunction]) -> [S
     assert_eq(bindings.len(), 3)
     shape: rl_shape(bindings[0].declaration) ?? panic("the guard can't read {bindings[0].declaration}")
     assert_eq(rl_mask_text(shape.lent), "&[false]")
-    exports := [String:RLExport]{}
+    ^exports: [String:RLExport]{}
     rl_exports(runtime, exports)
     rows: rl_rows(core_rows)
     assert_eq(rows.len(), 2)

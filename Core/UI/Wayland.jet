@@ -474,7 +474,7 @@ Connection: struct {
 }
 
 spans: fn(intervals: [Int], refresh: Int) -> [Int] {
-    counts := [Int]{0, 0, 0, 0}
+    ^counts: [Int]{0, 0, 0, 0}
     if refresh <= 0 -> return counts
     loop interval in intervals {
         spanned: (interval + refresh /% 2) /% refresh
@@ -486,7 +486,7 @@ spans: fn(intervals: [Int], refresh: Int) -> [Int] {
 
 percentile: fn(samples: [Int], percent: Int) -> Int {
     if samples.len() == 0 -> return 0
-    sorted := samples.copy()
+    ^sorted: samples.copy()
     sorted.sort()
     count: sorted.len()
     sorted[min_int(count - 1, (count - 1) * percent /% 100)]
@@ -510,7 +510,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     }
     path: if display.starts_with("/") -> display else -> "{runtime}/{display}"
     stream: net.unix_connect(path) ?? return Err(UIError.Connect("{path}: {err}"))
-    wake := sys.open_pipe() ?? return Err(UIError.Protocol("opening the window's wake pipe failed: {err}"))
+    ^wake: sys.open_pipe() ?? return Err(UIError.Protocol("opening the window's wake pipe failed: {err}"))
     wake_write: wake.pop() ?? return Err(UIError.Protocol("opening the window's wake pipe gave no write end"))
     wake_read: wake.pop() ?? return Err(UIError.Protocol("opening the window's wake pipe gave no read end"))
     // Replaced by the first `allocate`; a page until then.
@@ -527,7 +527,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         focus: frame.FrameButton.Nothing,
         dark: true,
     }
-    c := Connection{
+    ^c: Connection{
         stream: stream,
         out: [U8]{},
         out_fds: [sys.Fd]{},
@@ -746,7 +746,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     }
     request(c, c.surface, 6, [U8]{})
     flush(c)
-    waited := 0
+    ^waited: 0
     loop !c.configured && c.failure == None && waited < 50 {
         receive(c, 100000000)
         waited += 1
@@ -898,7 +898,7 @@ safety: fn(c: Connection) -> Int {
 // The slowest of the recent frames' draw times: frame start to the
 // commit leaving.
 draw_budget: fn(c: Connection) -> Int {
-    most := 0
+    ^most: 0
     loop cost in c.costs {
         if cost > most -> most = cost
     }
@@ -927,7 +927,7 @@ request_frame: fn(c: ^Connection) {
 // the window jump. Acking a configure answers every older one too; a
 // newer configure of another size waits for the frame drawn at it.
 ack_configure: fn(c: ^Connection) {
-    found := -1
+    ^found: -1
     loop index in 0..<c.configures.len() {
         if answers(c, c.configures[index]) -> found = index
     }
@@ -981,7 +981,7 @@ present: fn(c: ^Connection, pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> U
     if pixels.len() != frame_bytes {
         return Err(UIError.Size("present needs {frame_bytes} bytes for {c.width}x{c.height} RGBA, got {pixels.len()}"))
     }
-    free := free_buffer(c)
+    ^free: free_buffer(c)
     if free < 0 {
         started: rt.clock_mono_ns()
         loop free < 0 && c.failure == None && rt.clock_mono_ns() - started < 1000000000 {
@@ -995,7 +995,7 @@ present: fn(c: ^Connection, pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> U
     }
     // The damage clipped to the window; the copy is it plus what changed
     // since this buffer was last drawn, rectangle by rectangle.
-    shown := [UIRect]{}
+    ^shown: [UIRect]{}
     loop rect in damage {
         left: max_int(rect.x, 0)
         top: max_int(rect.y, 0)
@@ -1005,7 +1005,7 @@ present: fn(c: ^Connection, pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> U
             shown.push(UIRect{x: left, y: top, width: right - left, height: bottom - top})
         }
     }
-    copies := c.buffers[free].stale.copy()
+    ^copies: c.buffers[free].stale.copy()
     loop rect in shown -> grow_damage(copies, rect)
     offset: c.buffers[free].offset
     loop rect in copies {
@@ -1080,20 +1080,20 @@ grow_damage: fn(damage: ^[UIRect], rect: UIRect) {
     }
     // The list moves into a local for the scans and back after: reads
     // through `damage` cost several times as much.
-    rects := damage
+    ^rects: damage
     damage = [UIRect]{}
-    merged := rect
-    inside := false
+    ^merged: rect
+    ^inside: false
     loop {
         // The newest rectangles are the likeliest near: from the end.
-        hit := -1
-        k := rects.len() - 1
+        ^hit: -1
+        ^k: rects.len() - 1
         loop k >= 0 && hit < 0 {
             if near(rects[k], merged) -> hit = k
             k -= 1
         }
         if hit < 0 && rects.len() >= DAMAGE_RECTS {
-            least := -1
+            ^least: -1
             loop i in 0..<rects.len() {
                 cost: area(bounds(rects[i], merged)) - area(rects[i])
                 if least < 0 || cost < least {
@@ -1152,14 +1152,14 @@ put32: fn(out: ^[U8], value: Int) {
 }
 
 words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> put32(out, value)
     out
 }
 
 // A wire string: length with the NUL, the bytes, the NUL, padding to 4.
 text_argument: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     put32(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -1239,7 +1239,7 @@ roundtrip: fn(c: ^Connection) -[Env, Net, Time]> {
     c.sync_callback = new_id(c)
     request(c, DISPLAY, 0, words([Int]{c.sync_callback}))
     flush(c)
-    waited := 0
+    ^waited: 0
     loop !c.synced && c.failure == None && waited < 50 {
         receive(c, 100000000)
         waited += 1
@@ -1265,7 +1265,7 @@ string_at: fn(bytes: [U8], at: Int) -> String {
 
 // Handles every complete event in the inbox.
 dispatch: fn(c: ^Connection) -[Env, Time]> {
-    at := 0
+    ^at: 0
     loop c.inbox.len() - at >= 8 && c.failure == None {
         object: u32_at(c.inbox, at)
         word: u32_at(c.inbox, at + 4)
@@ -1283,8 +1283,8 @@ dispatch: fn(c: ^Connection) -[Env, Time]> {
 
 bind: fn(c: ^Connection, name: Int, interface: String, version: Int) -> Int {
     id: new_id(c)
-    arguments := text_argument(interface)
-    args := words([Int]{name})
+    ^arguments: text_argument(interface)
+    ^args: words([Int]{name})
     loop b in arguments -> args.push(b)
     put32(args, version)
     put32(args, id)
@@ -1335,7 +1335,7 @@ event: fn(c: ^Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
         output: u32_at(body, 0)
         if opcode == 0 && !c.entered.contains(output) -> c.entered.push(output)
         if opcode == 1 {
-            kept := [Int]{}
+            ^kept: [Int]{}
             loop id in c.entered {
                 if id != output -> kept.push(id)
             }
@@ -1426,7 +1426,7 @@ event: fn(c: ^Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
         // offer: one more type the data comes as.
         if opcode == 0 {
             at: offer_index(c, object)
-            types := c.offers[at].types.copy()
+            ^types: c.offers[at].types.copy()
             types.push(string_at(body, 0))
             c.offers[at].types = types
         }
@@ -1572,7 +1572,7 @@ wanted_scale: fn(c: Connection) -> Int {
     if c.fractional != 0 -> return if c.fractional_scale > 0 -> c.fractional_scale else -> 120
     if c.compositor_version < 3 -> return 120
     if c.buffer_scale > 0 -> return c.buffer_scale * 120
-    largest := 1
+    ^largest: 1
     loop output in c.outputs {
         if c.entered.contains(output.id) && output.scale > largest -> largest = output.scale
     }
@@ -1699,7 +1699,7 @@ keyboard: fn(c: ^Connection, opcode: Int, body: [U8]) -[Env, Time]> {
         latched: u32_at(body, 8)
         locked: u32_at(body, 12)
         c.modifiers = depressed | latched | locked
-        map := c.keymap.pop() ?? return
+        ^map: c.keymap.pop() ?? return
         map.modifiers(depressed, latched, locked, u32_at(body, 16))
         c.keymap.push(map)
     }
@@ -1722,7 +1722,7 @@ load_keymap: fn(c: ^Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
         return
     }
     max: Int(1..16777216).from_int(size) ?? return
-    bytes := fd.read_at(0, max) ?? {
+    ^bytes: fd.read_at(0, max) ?? {
         fail(c, UIError.Protocol("reading the keymap failed: {err}"))
         return
     }
@@ -1758,7 +1758,7 @@ key_event: fn(c: ^Connection, serial: Int, code: Int, state: Int) -[Time]> {
 // else the US table: the key and, on a press, the text it types.
 press: fn(c: ^Connection, code: Int, state: Int) -> {key: Key, text: String} {
     down: state == KEY_PRESSED
-    map := c.keymap.pop() ?? {
+    ^map: c.keymap.pop() ?? {
         text: if down -> evdev_text(code, c.modifiers) else -> ""
         return {key: evdev_key(code), text: text}
     }
@@ -1811,7 +1811,7 @@ portal_wait: fn(c: Connection, timeout_ns: Int) -> Int {
 // prefers light. No bus leaves the frame dark. A portal that does not
 // answer yet is read when it starts.
 watch_portal: fn(c: ^Connection) -[Env, Net, Time]> {
-    bus := dbus.session(PORTAL_WAIT_NS) ?? return
+    ^bus: dbus.session(PORTAL_WAIT_NS) ?? return
     dbus.watch_appearance(bus, PORTAL_WAIT_NS) ?? return
     look: dbus.appearance(bus, PORTAL_WAIT_NS) ?? dbus.default_appearance()
     c.portal.push(bus)
@@ -1825,9 +1825,9 @@ follow_portal: fn(c: ^Connection) -[Net, Time]> {
     if c.portal.len() == 0 {
         return
     }
-    bus := c.portal.pop() ?? return
+    ^bus: c.portal.pop() ?? return
     got: dbus.signals(bus, 0) ?? return
-    look := c.appearance.copy()
+    ^look: c.appearance.copy()
     loop m in got {
         if dbus.portal_restarted(m) {
             look = dbus.appearance(bus, PORTAL_WAIT_NS) ?? dbus.default_appearance()
@@ -1990,7 +1990,7 @@ drag_enter: fn(c: ^Connection, body: [U8]) {
         return
     }
     kind: if u32_at(body, 4) == c.surface -> drop_type(c.offers[at].types) else -> ""
-    accepted := words([Int]{u32_at(body, 0)})
+    ^accepted: words([Int]{u32_at(body, 0)})
     named: if kind == "" -> words([Int]{0}) else -> text_argument(kind)
     loop b in named -> accepted.push(b)
     request(c, offer, 0, accepted)
@@ -2017,7 +2017,7 @@ drop_type: fn(types: [String]) -> String {
 // drag's over the window and those dropped and not yet read.
 drop_offers: fn(c: ^Connection) {
     offers: c.offers.copy()
-    kept := [Offer]{}
+    ^kept: [Offer]{}
     loop offer in offers {
         if offer.id == c.selection || offer.id == c.drag || dropped(c, offer.id) {
             kept.push(offer.copy())
@@ -2045,7 +2045,7 @@ take_drops: fn(c: ^Connection) -[Env, Net, Time]> {
         text: offer_text(c, drop.offer, drop.kind) ?? ""
         if c.data_version >= 3 -> request(c, drop.offer, 3, [U8]{})
         request(c, drop.offer, 2, [U8]{})
-        kept := [Offer]{}
+        ^kept: [Offer]{}
         loop offer in c.offers.copy() {
             if offer.id != drop.offer -> kept.push(offer.copy())
         }
@@ -2060,7 +2060,7 @@ take_drops: fn(c: ^Connection) -[Env, Net, Time]> {
 // list of URIs that is neither empty nor a `#` comment is a URI item, and
 // text that isn't empty is one text item.
 drop_items: fn(kind: String, text: String) -> [UIDropItem] {
-    items := [UIDropItem]{}
+    ^items: [UIDropItem]{}
     if kind != URI_LIST {
         if text.len() > 0 -> items.push(UIDropItem.Text{value: text.copy()})
         return items
@@ -2102,7 +2102,7 @@ source_event: fn(c: ^Connection, object: Int, opcode: Int) -[Env, Time]> {
         c.source_text = ""
         return
     }
-    kept := [Int]{}
+    ^kept: [Int]{}
     loop id in c.old_sources {
         if id != object -> kept.push(id)
     }
@@ -2114,7 +2114,7 @@ source_event: fn(c: ^Connection, object: Int, opcode: Int) -[Env, Time]> {
 // was written by then. Dropping `fd` closes the pipe.
 send_text: fn(fd: sys.Fd, bytes: [U8]) -[Env, Time]> {
     deadline: rt.clock_mono_ns() + CLIPBOARD_WAIT_NS
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         left: deadline - rt.clock_mono_ns()
         if left <= 0 {
@@ -2145,7 +2145,7 @@ clipboard_text: fn(c: ^Connection) -[Env, Net, Time]> String UIError! {
 // The data of `offer` as `kind`, read through a pipe whose write end goes
 // to its source (wl_data_offer.receive).
 offer_text: fn(c: ^Connection, offer: Int, kind: String) -[Env, Net, Time]> String UIError! {
-    ends := sys.open_pipe() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed: {err}"))
+    ^ends: sys.open_pipe() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed: {err}"))
     writer: ends.pop() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed"))
     reader: ends.pop() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed"))
     // receive(mime_type, fd): the write end rides along, and flush closes
@@ -2160,7 +2160,7 @@ offer_text: fn(c: ^Connection, offer: Int, kind: String) -[Env, Net, Time]> Stri
 // Reads a pipe to its end within the clipboard's wait, as UTF-8 text.
 read_text: fn(reader: sys.Fd) -[Env, Time]> String UIError! {
     deadline: rt.clock_mono_ns() + CLIPBOARD_WAIT_NS
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         left: deadline - rt.clock_mono_ns()
         if left <= 0 {
@@ -2284,7 +2284,7 @@ preedit_composition: fn(text: String, begin: Int, end: Int) -> UIIMEComposition 
 
 // The characters (Unicode scalars) in the first `count` bytes of UTF-8.
 characters: fn(bytes: [U8], count: Int) -> Int {
-    total := 0
+    ^total: 0
     loop index in 0..<count {
         if (Int{bytes[index]}) & 192 != 128 -> total += 1
     }
@@ -2316,7 +2316,7 @@ enable_text_input: fn(c: ^Connection) {
 // zwp_text_input_v3 leaves typing to the keyboard alone.
 set_text_input: fn(c: ^Connection, area: UIRect?) -[Net, Time]> UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
-    logical := [Int]{}
+    ^logical: [Int]{}
     if area == .Val(rect) {
         x: (rect.x * 120) /% c.scale120
         y: (rect.y * 120) /% c.scale120
@@ -2394,7 +2394,7 @@ set_menu_address: fn(c: ^Connection, service: String, path: String) -[Net, Time]
         c.appmenu = new_id(c)
         request(c, c.appmenu_manager, 0, words([Int]{c.appmenu, c.surface}))
     }
-    arguments := text_argument(service)
+    ^arguments: text_argument(service)
     loop b in text_argument(path) -> arguments.push(b)
     request(c, c.appmenu, 0, arguments)
     flush(c)
@@ -2415,14 +2415,14 @@ set_icon: fn(c: ^Connection, icon: UIIcon) -[Env]> UIError! {
         release_icon(c)
         return Ok()
     }
-    pool := 0
-    buffers := [Int]{}
+    ^pool: 0
+    ^buffers: [Int]{}
     if icon.images.len() > 0 {
-        total := 0
+        ^total: 0
         loop image in icon.images -> total += image.pixels.len()
         room: Int(1..1073741824).from_int(total) ?? return Err(UIError.Size("the icon's {total} bytes do not fit one pool of 1 GiB"))
-        memory := sys.shared_memory(room) ?? return Err(UIError.Protocol("allocating the icon failed: {err}"))
-        offset := 0
+        ^memory: sys.shared_memory(room) ?? return Err(UIError.Protocol("allocating the icon failed: {err}"))
+        ^offset: 0
         loop image in icon.images {
             shm_write(memory, offset, premultiplied_argb(image.pixels), "writing the icon") ?? return Err(err)
             offset += image.pixels.len()
@@ -2455,7 +2455,7 @@ set_icon: fn(c: ^Connection, icon: UIIcon) -[Env]> UIError! {
 
 // Jet's mark, at the sizes taskbars and window switchers show most.
 jet_icon: fn() -> UIIcon {
-    images := [UIIconImage]{}
+    ^images: [UIIconImage]{}
     sides: [Int]{32, 64, 128}
     loop side in sides -> images.push(UIIconImage{side: side, pixels: frame.app_icon(side)})
     UIIcon{name: "", images: images}
@@ -2464,8 +2464,8 @@ jet_icon: fn() -> UIIcon {
 // Straight-alpha RGBA pixels as premultiplied ARGB8888 words stored
 // little-endian: B, G, R, A, each color scaled by its alpha.
 premultiplied_argb: fn(rgba: [U8]) -> [U8] {
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at + 4 <= rgba.len() {
         alpha: Int{rgba[at + 3]}
         out.push(U8{(Int{rgba[at + 2]} * alpha + 127) /% 255})
@@ -2630,7 +2630,7 @@ allocate: fn(c: ^Connection, width: Int, height: Int) -[Env, Net, Time]> {
     c.out_fds.push(descriptor)
     // With Jet's frame the content's bottom corners are see-through, so
     // its buffers carry alpha: written opaque, then covered.
-    format := FORMAT_XRGB8888
+    ^format: FORMAT_XRGB8888
     c.format = sys.PixelFormat.XRGB8888
     if c.chrome != 0 && c.abgr {
         format = FORMAT_ABGR8888
@@ -2667,12 +2667,12 @@ rounded: fn(c: Connection) -> Bool { c.chrome != 0 && header_height(c) > 0 && !c
 // visibility, minimized or not.
 toplevel_states: fn(c: ^Connection, body: [U8]) {
     end: min_int(12 + u32_at(body, 8), body.len())
-    maximized := false
-    fullscreen := false
-    activated := false
-    tiled := false
-    suspended := false
-    at := 12
+    ^maximized: false
+    ^fullscreen: false
+    ^activated: false
+    ^tiled: false
+    ^suspended: false
+    ^at: 12
     loop at + 4 <= end {
         state: u32_at(body, at)
         if state == 1 -> maximized = true
@@ -2757,7 +2757,7 @@ draw_chrome: fn(c: ^Connection) -[Env]> {
             return
         }
     }
-    free := -1
+    ^free: -1
     loop index in 0..<c.chrome_buffers.len() {
         if free < 0 && !c.chrome_buffers[index].busy -> free = index
     }
@@ -2934,7 +2934,7 @@ cover_run: fn(c: ^Connection, offset: Int, y: Int, from: Int, to: Int, start: In
         return
     }
     at: offset + (y * c.width + from) * 4
-    pixels := shm_read(c.memory, at, (to - from) * 4, "rounding the frame's corners") ?? {
+    ^pixels: shm_read(c.memory, at, (to - from) * 4, "rounding the frame's corners") ?? {
         fail(c, err)
         return
     }
@@ -3115,7 +3115,7 @@ act: fn(c: ^Connection, button: frame.FrameButton) {
 
 // The button under the pointer or finger lights.
 hover_spot: fn(c: ^Connection) {
-    lit := frame.FrameButton.Nothing
+    ^lit: frame.FrameButton.Nothing
     place: chrome_spot(c)
     if place == .Button(button) -> lit = button
     set_hover(c, lit)

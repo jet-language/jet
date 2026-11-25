@@ -55,7 +55,7 @@ clamp_offset: fn(value: String, offset: Int) -> Int {
 snap_boundary: fn(value: String, offset: Int) -> Int {
     bounded: clamp_offset(value, offset)
     clusters: text.graphemes(value)
-    cursor := 0
+    ^cursor: 0
     loop cluster in clusters {
         next: cursor + text.scalar_count(cluster)
         if bounded <= cursor -> return cursor
@@ -68,8 +68,8 @@ snap_boundary: fn(value: String, offset: Int) -> Int {
 grapheme_boundary: fn(value: String, grapheme_index: Int) -> Int {
     clusters: text.graphemes(value)
     bounded: if grapheme_index < 0 -> 0 else -> grapheme_index
-    offset := 0
-    position := 0
+    ^offset: 0
+    ^position: 0
     loop cluster in clusters {
         if position >= bounded -> break
         offset += text.scalar_count(cluster)
@@ -81,8 +81,8 @@ grapheme_boundary: fn(value: String, grapheme_index: Int) -> Int {
 grapheme_index: fn(value: String, offset: Int) -> Int {
     boundary: snap_boundary(value, offset)
     clusters: text.graphemes(value)
-    cursor := 0
-    index := 0
+    ^cursor: 0
+    ^index: 0
     loop cluster in clusters {
         if cursor >= boundary -> break
         cursor += text.scalar_count(cluster)
@@ -144,7 +144,7 @@ move_cursor: fn(value: String, current: TextSelection, delta: Int) -> TextSelect
     }
     base_index: grapheme_index(value, base)
     clusters: text.graphemes(value)
-    target_index := base_index + delta
+    ^target_index: base_index + delta
     if target_index < 0 -> target_index = 0
     if target_index > clusters.len() -> target_index = clusters.len()
     target: grapheme_boundary(value, target_index)
@@ -189,7 +189,7 @@ status_of: fn(state: EditorState) -> String { state.status.copy() }
 
 commit_edit: fn(state: EditorState, next: String, next_selection: TextSelection, status: String) -> EditorState {
     if state.body == next -> return state.copy()
-    history := state.undo
+    ^history: state.undo
     history.push(state.body)
     EditorState{
         body: next.copy(),
@@ -279,9 +279,9 @@ cancel_composition: fn(state: EditorState) -> EditorState {
 drop_text: fn(state: EditorState, dropped: String) -> EditorState { apply_text(state, dropped) }
 
 undo: fn(state: EditorState) -> EditorState {
-    history := state.undo
+    ^history: state.undo
     previous: history.pop() ?? return state
-    forward := state.redo
+    ^forward: state.redo
     forward.push(state.body)
     cursor: text.scalar_count(previous)
     EditorState{
@@ -299,9 +299,9 @@ undo: fn(state: EditorState) -> EditorState {
 }
 
 redo: fn(state: EditorState) -> EditorState {
-    forward := state.redo
+    ^forward: state.redo
     next: forward.pop() ?? return state
-    history := state.undo
+    ^history: state.undo
     history.push(state.body)
     cursor: text.scalar_count(next)
     EditorState{
@@ -391,7 +391,7 @@ restore_session: fn(raw: String) -> SessionSettings {
     parts: text.splitn(raw, "|", 3)
     version: parts.get(0) ?? ""
     if version != "JET-GUI-SESSION-1" -> return SessionSettings{theme: "dark", settings_open: false}
-    theme := parts.get(1) ?? "dark"
+    ^theme: parts.get(1) ?? "dark"
     if theme == "" -> theme = "dark"
     mode: parts.get(2) ?? "closed"
     SessionSettings{theme: theme.copy(), settings_open: mode == "open"}

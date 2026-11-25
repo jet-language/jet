@@ -33,9 +33,9 @@ LineTable: struct {
 }
 
 lsp_line_table_bytes: fn(bytes: [U8]) -> LineTable Never! {
-    lines := [Span]{}
-    start := 0
-    index := 0
+    ^lines: [Span]{}
+    ^start: 0
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         if byte == 13 || byte == 10 {
@@ -52,8 +52,8 @@ lsp_line_table_bytes: fn(bytes: [U8]) -> LineTable Never! {
 lsp_checked_offset_bytes: fn(table: LineTable, bytes: [U8], pos: LSPPos) -> Int? Never! {
     if pos.line < 0 || pos.line >= table.lines.len() -> return None
     line: table.lines[pos.line]
-    utf16_count := 0
-    byte_offset := line.start
+    ^utf16_count: 0
+    ^byte_offset: line.start
     loop byte_offset < line.end {
         if utf16_count == pos.character -> return Val(byte_offset)
         width: diagnostic_utf8_width(bytes, byte_offset)
@@ -76,8 +76,8 @@ lsp_clamped_offset_bytes: fn(table: LineTable, bytes: [U8], pos: LSPPos) -> Int?
 }
 
 lsp_utf16_length: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
-    count := 0
-    index := start
+    ^count: 0
+    ^index: start
     loop index < end {
         width: diagnostic_utf8_width(bytes, index)
         count += if width == 4 -> 2 else -> 1
@@ -107,8 +107,8 @@ lsp_byte_offset_in_table: fn(bytes: [U8], table: LineTable, offset: Int) -> LSPP
         else -> offset
     }
     // The last line starting at or before the offset holds it.
-    low := 0
-    high := table.lines.len() - 1
+    ^low: 0
+    ^high: table.lines.len() - 1
     loop low < high {
         middle: (low + high + 1) /% 2
         if table.lines[middle].start <= bounded -> low = middle else -> high = middle - 1
@@ -135,7 +135,7 @@ lsp_apply_edit: fn(src: String, range: LSPRange, expected_utf16_len: Int?, new_t
     if expected_utf16_len == .Val(expected) {
         if lsp_utf16_length(bytes, start, end) != expected -> return None
     }
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<start -> out.push(bytes[index])
     loop byte in new_text.bytes() -> out.push(byte)
     loop index in end..<bytes.len() -> out.push(bytes[index])

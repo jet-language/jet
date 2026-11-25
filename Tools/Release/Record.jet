@@ -36,7 +36,7 @@ seed_asset_name: fn(name: String, target: String) -> String Never! { "jet-{name}
 text: fn(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
 
 artifacts_dyn: fn(artifacts: [Artifact]) -> Dyn Never! {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop artifact in artifacts {
         out.push(Dyn.Object([String:Dyn]{"path": text(artifact.path), "sha256": text(artifact.sha256), "size": Dyn.Int(artifact.size)}))
     }
@@ -44,9 +44,9 @@ artifacts_dyn: fn(artifacts: [Artifact]) -> Dyn Never! {
 }
 
 receipt_dyn: fn(receipt: Receipt) -> Dyn Never! {
-    rows := [Dyn]{}
+    ^rows: [Dyn]{}
     loop row in receipt.rows {
-        entry := [String:Dyn]{"scope": text(row.scope), "status": text(row.status)}
+        ^entry: [String:Dyn]{"scope": text(row.scope), "status": text(row.status)}
         if row.total == .Val(total) -> entry["total"] = Dyn.Int(total)
         if row.passed == .Val(passed) -> entry["passed"] = Dyn.Int(passed)
         rows.push(Dyn.Object(entry))
@@ -68,7 +68,7 @@ receipt_dyn: fn(receipt: Receipt) -> Dyn Never! {
 }
 
 upload_names: fn(candidate: Candidate) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop artifact in candidate.staged -> names.push(artifact.path.copy())
     names.extend([String]{CANDIDATE_FILE, SIGNATURE_FILE})
     names
@@ -77,17 +77,17 @@ upload_names: fn(candidate: Candidate) -> [String] Never! {
 // The record of `candidate`, without its content digest.
 record_of: fn(candidate: Candidate) -> Dyn Never! {
     release: candidate.release
-    receipts := [Dyn]{}
+    ^receipts: [Dyn]{}
     loop receipt in candidate.receipts -> receipts.push(receipt_dyn(receipt))
-    matrix := [Dyn]{}
+    ^matrix: [Dyn]{}
     loop row in candidate.matrix {
-        files := [Dyn]{}
+        ^files: [Dyn]{}
         loop receipt in candidate.receipts {
             if receipt.target == row.target -> files.push(text(receipt.file))
         }
         matrix.push(Dyn.Object([String:Dyn]{"asset": text(seed_asset_name(candidate.name, row.target)), "name": text(row.name), "receipts": Dyn.Array(files), "target": text(row.target)}))
     }
-    assets := [Dyn]{}
+    ^assets: [Dyn]{}
     loop name in upload_names(candidate) -> assets.push(text(name))
     Dyn.Object(
         [String:Dyn]{
@@ -136,7 +136,7 @@ record_of: fn(candidate: Candidate) -> Dyn Never! {
 }
 
 without_digest: fn(tree: Dyn) -> Dyn Never! {
-    kept := [String:Dyn]{}
+    ^kept: [String:Dyn]{}
     if tree == .Object(entries) {
         loop entry in entries {
             if entry.key != "content_digest" -> kept[entry.key.copy()] = entry.value.copy()
@@ -154,7 +154,7 @@ content_digest: fn(tree: Dyn) -> String Problem! {
 // The record with its content digest, as stored.
 sealed_record: fn(record: Dyn) -> String Problem! {
     digest: content_digest(record) ?? return Err(err)
-    kept := [String:Dyn]{}
+    ^kept: [String:Dyn]{}
     if record == .Object(entries) {
         loop entry in entries -> kept[entry.key.copy()] = entry.value.copy()
     }
@@ -166,7 +166,7 @@ sealed_record: fn(record: Dyn) -> String Problem! {
 canonical_or_empty: fn(tree: Dyn) -> String Never! { json.canonical(tree) ?? "" }
 
 keys_of: fn(tree: Dyn) -> [String] Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     if tree == .Object(entries) {
         loop entry in entries -> keys.push(entry.key.copy())
     }
@@ -177,8 +177,8 @@ keys_of: fn(tree: Dyn) -> [String] Never! {
 // Every section, and every field of an object section, where the stored
 // record and the record derived from disk differ.
 record_mismatches: fn(stored: Dyn, fresh: Dyn) -> [Problem] Never! {
-    problems := [Problem]{}
-    names := keys_of(without_digest(stored))
+    ^problems: [Problem]{}
+    ^names: keys_of(without_digest(stored))
     loop name in keys_of(fresh) {
         if !contains_text(names, name) -> names.push(name.copy())
     }
@@ -190,7 +190,7 @@ record_mismatches: fn(stored: Dyn, fresh: Dyn) -> [Problem] Never! {
             problems.push(problem(MISMATCH, "the record's `{name}` does not match the release directory"))
             next
         }
-        keys := keys_of(left)
+        ^keys: keys_of(left)
         loop key in keys_of(right) {
             if !contains_text(keys, key) -> keys.push(key.copy())
         }
@@ -243,7 +243,7 @@ release_notes: fn(candidate: Candidate, gate: String) -> String Never! {
 
 // The gate line of the notes.
 gate_text: fn(release: Release, receipts: [Receipt]) -> String Never! {
-    checks := 0
+    ^checks: 0
     loop receipt in receipts -> checks += receipt.rows.len()
     if release.kind == "admitted" {
         seed_name: text_field(field(release.admission, "seed"), "name")

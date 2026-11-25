@@ -61,7 +61,7 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
@@ -72,7 +72,7 @@ fake_u32: fn(bytes: [U8], at: Int) -> Int {
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -115,7 +115,7 @@ fake_configure: fn(f: ^Fake, states: [Int]) {
     f.serial += 1
     toplevel: f.toplevel
     xdg_surface: f.xdg_surface
-    args := fake_words([Int]{200, 100, states.len() * 4})
+    ^args: fake_words([Int]{200, 100, states.len() * 4})
     loop state in states -> fake_put(args, state)
     fake_event(f, toplevel, 0, args)
     fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
@@ -191,7 +191,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
         f.registry = fake_u32(body, 0)
         registry: f.registry
         loop (index, interface) in GLOBALS {
-            args := fake_words([Int]{index + 1})
+            ^args: fake_words([Int]{index + 1})
             loop b in fake_text(interface) -> args.push(b)
             version: if interface == "wl_compositor" || interface == "xdg_wm_base" -> 6 else if interface == "wl_seat" -> 5 else -> 1
             fake_put(args, version)
@@ -250,7 +250,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
 }
 
 fake_dispatch: fn(f: ^Fake) {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -272,7 +272,7 @@ fake_dispatch: fn(f: ^Fake) {
 // minute of quiet.
 fake_serve: fn(listener: net.UnixListener) -[FS, Net, Time]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept on wl.sock: {err}")
-    f := Fake{
+    ^f: Fake{
         stream: stream,
         inbox: [U8]{},
         out: [U8]{},
@@ -292,7 +292,7 @@ fake_serve: fn(listener: net.UnixListener) -[FS, Net, Time]> Fake {
         records: [String]{},
         failures: [String]{},
     }
-    idle := 0
+    ^idle: 0
     loop idle < 1200 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("wait failed: {err}")

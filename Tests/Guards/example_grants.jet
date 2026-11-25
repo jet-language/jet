@@ -34,7 +34,7 @@ ex_grants_is_exempt: fn(path: String) -> Bool {
 }
 
 ex_grants_strip_comments: fn(text: String) -> String {
-    kept := [String]{}
+    ^kept: [String]{}
     loop line in text.lines() {
         trimmed: line.trim()
         if trimmed.starts_with("//") -> next
@@ -54,7 +54,7 @@ ex_grants_parse_allow: fn(text: String) -> [String] {
     close_pos: s3_truth_find_bytes(raw, "]".bytes(), open_pos + 1)
     if close_pos < 0 -> return [String]{}
     inner: policy_slice_raw(raw, open_pos + 1, close_pos)
-    items := [String]{}
+    ^items: [String]{}
     loop part in inner.split(",") {
         trimmed: part.trim()
         if trimmed != "" -> items.push(trimmed)
@@ -67,14 +67,14 @@ ex_grants_extract_reaches: fn(json_text: String) -> [String] {
     start: s3_truth_find_bytes(raw, `"reaches":[`.bytes(), 0)
     if start < 0 -> return [String]{}
     needle: `"effect":"`.bytes()
-    effects := [String]{}
-    at := start
+    ^effects: [String]{}
+    ^at: start
     loop {
         pos: s3_truth_find_bytes(raw, needle, at)
         if pos < 0 -> break
         val_start: pos + needle.len()
-        end := val_start
-        escaped := false
+        ^end: val_start
+        ^escaped: false
         loop end < raw.len() {
             b: raw[end]
             if escaped {
@@ -112,10 +112,10 @@ ex_grants_is_used: fn(grant: String, reaches: [String]) -> Bool {
 
 ex_grants_collect_pkg_jet_files: fn(dir: String) -> [String] {
     entries: ex_grants_files.list_dir(dir) ?? return [String]{}
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries -> paths.push(entry.path.copy())
     paths.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop path in paths {
         if ex_grants_files.is_dir(path) {
             if path.ends_with("/.jet") || path.ends_with("/fixture-state") -> next
@@ -129,7 +129,7 @@ ex_grants_collect_pkg_jet_files: fn(dir: String) -> [String] {
 
 ex_grants_collect_targets: fn(dir: String, out: ^[ExGrantTarget]) {
     entries: ex_grants_files.list_dir(dir) ?? return
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries -> paths.push(entry.path.copy())
     paths.sort()
     pkg_path: "{dir}/package.jet"
@@ -161,13 +161,13 @@ ex_grants_collect_targets: fn(dir: String, out: ^[ExGrantTarget]) {
 #Test("example_grants") {
     guards_enter_root()
     jet: md_jet()
-    targets := [ExGrantTarget]{}
+    ^targets: [ExGrantTarget]{}
     ex_grants_collect_targets("Examples", targets)
     assert(targets.len() > 0, "no Examples targets with authority.allow found")
 
     // Build one flat command list for bounded parallel execution.
-    specs := [ProcessSpec]{}
-    owner_idx := [Int]{}
+    ^specs: [ProcessSpec]{}
+    ^owner_idx: [Int]{}
     loop ti in 0..<targets.len() {
         loop entry in targets[ti].entries {
             specs.push(ex_grants_process.cmd([String]{jet, "explain", "effects", "--json", entry}).stdout(.Capture).stderr(.Capture))
@@ -176,8 +176,8 @@ ex_grants_collect_targets: fn(dir: String, out: ^[ExGrantTarget]) {
     }
     results: ex_grants_process.run_all(specs, 8) ?? panic("run_all explain effects: {err}")
 
-    ok_flags := [Bool]{}
-    reaches_by_target := [[String]]{}
+    ^ok_flags: [Bool]{}
+    ^reaches_by_target: [[String]]{}
     loop _ in 0..<targets.len() {
         ok_flags.push(false)
         reaches_by_target.push([String]{})
@@ -197,10 +197,10 @@ ex_grants_collect_targets: fn(dir: String, out: ^[ExGrantTarget]) {
         }
     }
 
-    unused_reports := [String]{}
+    ^unused_reports: [String]{}
     loop ti in 0..<targets.len() {
         if !ok_flags[ti] -> next
-        unused := [String]{}
+        ^unused: [String]{}
         loop grant in targets[ti].grants {
             if !ex_grants_is_used(grant, reaches_by_target[ti]) -> unused.push(grant)
         }

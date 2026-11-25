@@ -109,9 +109,9 @@ jet_cli_sem_json_callable_signature: fn(callable: SemCallable, view_provenance: 
 // Shared fact encoding; expand uses its documented display form for views.
 jet_cli_sem_json_callable_fields: fn(callable: SemCallable, views: String, producer: String) -> String {
     parameters: loop parameter in callable.params -> {
-        default := "null"
-        default_source := "null"
-        default_value := "null"
+        ^default: "null"
+        ^default_source: "null"
+        ^default_value: "null"
         if parameter.default == .Val(value) {
             default = jet_cli_json_string(value.source_text)
             default_source = jet_cli_sem_json_span(value.source)
@@ -119,9 +119,9 @@ jet_cli_sem_json_callable_fields: fn(callable: SemCallable, views: String, produ
         }
         "{{\"name\":{jet_cli_json_string(parameter.name)},\"label\":{jet_cli_json_string(parameter.label)},\"source\":{jet_cli_sem_json_span(parameter.source)},\"default\":{default},\"default_source\":{default_source},\"default_value\":{default_value},\"access\":{jet_cli_json_string(semindex_access_name(parameter.access))},\"zone\":{jet_cli_json_string(semindex_zone_name(parameter.zone))},\"type\":{jet_cli_json_string(type_name(parameter.ty))},\"variadic\":{jet_cli_sem_json_bool(parameter.variadic)}}}"
     }
-    effects := "null"
-    effect_status := jet_cli_sem_json_unavailable(SemUnavailable{required_stage: "Typed", reason: "the checker has not published a checked callable effect row"})
-    effect_facts := "null"
+    ^effects: "null"
+    ^effect_status: jet_cli_sem_json_unavailable(SemUnavailable{required_stage: "Typed", reason: "the checker has not published a checked callable effect row"})
+    ^effect_facts: "null"
     if {
         callable.effect_via == .Val(via) -> {
             effects = jet_cli_sem_json_strings([String]{"via {via.name}"})
@@ -136,16 +136,16 @@ jet_cli_sem_json_callable_fields: fn(callable: SemCallable, views: String, produ
             effect_facts = "[{facts.join(",")}]"
         }
     }
-    errors := "null"
-    failure_contract := "null"
-    failure_source := "null"
-    failure_status := "null"
+    ^errors: "null"
+    ^failure_contract: "null"
+    ^failure_source: "null"
+    ^failure_status: "null"
     if {
         callable.failure_contract == .Val(contract) -> {
             effective: failure_contract_shown_type(contract)
-            error_names := [String]{}
+            ^error_names: [String]{}
             if effective == .Result(_, err) {
-                never := false
+                ^never: false
                 if err == .Named(name) {
                     if name == "Never" -> never = true
                 }
@@ -160,8 +160,8 @@ jet_cli_sem_json_callable_fields: fn(callable: SemCallable, views: String, produ
             failure_status = jet_cli_sem_json_unavailable(unavailable)
         }
     }
-    generic_parameters := "null"
-    generic_status := "null"
+    ^generic_parameters: "null"
+    ^generic_status: "null"
     if {
         callable.generic_parameters == .Val(names) -> {
             generic_parameters = jet_cli_sem_json_strings(names)
@@ -198,7 +198,7 @@ jet_cli_sem_json_kind: fn(kind: SemKind, stage: SemLocalStage?) -> String {
         .Field(ty, parent) -> "{{\"kind\":\"field\",\"type\":{jet_cli_json_string(type_name(ty))},\"parent\":{jet_cli_json_string(parent)}}}"
         .Local(mutable, ty) -> {
             shown: if ty == .Val(value) -> jet_cli_json_string(type_name(value)) else -> "null"
-            staged := ""
+            ^staged: ""
             if stage == .Val(known) {
                 if known == {
                     .Build(value) -> {
@@ -239,11 +239,11 @@ jet_cli_sem_json_def: fn(definition: SemDefinition, index: SemIndex) -> String {
 }
 
 jet_cli_sem_json_ref: fn(reference: SemRef) -> String Never! {
-    target := "null"
+    ^target: "null"
     if reference.target == .Val(anchor) {
         target = "{{\"module\":{jet_cli_json_string(anchor.module_path)},\"kind\":{jet_cli_json_string(anchor.kind)},\"semantic_identity\":{jet_cli_sem_json_optional(anchor.semantic_identity)},\"span\":{jet_cli_sem_json_span(anchor.def_span)}}}"
     }
-    fact := "null"
+    ^fact: "null"
     if reference.fact == .Val(value) {
         fact = "{{\"name\":{jet_cli_json_string(value.name)},\"kind\":{jet_cli_json_string(value.kind)},\"type\":{jet_cli_json_string(value.type_name)}}}"
     }
@@ -352,7 +352,7 @@ jet_cli_semindex_audit_report: fn(before_path: String, after_path: String, befor
         )
         return "{jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("audit", payload)})}\n"
     }
-    out := "Structural audit\n  Before: {before_path}\n  After:  {after_path}\n"
+    ^out: "Structural audit\n  Before: {before_path}\n  After:  {after_path}\n"
     out = "{out}{jet_cli_semindex_audit_section("Added", after, audit.added)}"
     out = "{out}{jet_cli_semindex_audit_section("Removed", before, audit.removed)}"
     "{out}{jet_cli_semindex_audit_section("Changed", after, audit.changed)}"
@@ -362,8 +362,10 @@ jet_cli_semindex_audit_report: fn(before_path: String, after_path: String, befor
 // definition facts.
 jet_cli_semindex_audit_section: fn(title: String, index: SemIndex, positions: [Int]) -> String Never! {
     if positions.len() == 0 -> return "{title}: none\n"
-    out := "{title} ({positions.len()}):\n"
-    loop at in positions -> out = "{out}  {semindex_display_text(index, index.definition_facts[at].human_identity)}\n"
+    ^out: "{title} ({positions.len()}):\n"
+    loop at in positions {
+        out = "{out}  {semindex_display_text(index, index.definition_facts[at].human_identity)}\n"
+    }
     out
 }
 
@@ -379,7 +381,7 @@ jet_cli_effect_projection_line: fn(projection: SemEffectProjection) -> String Ne
 // `run_semindex` text mode, a lifted type spelled by its ledger path as in
 // the JSON document.
 jet_cli_semindex_text: fn(index: SemIndex) -> String {
-    out := "Semantic Index (schema v{SEMINDEX_SCHEMA_VERSION})\n"
+    ^out: "Semantic Index (schema v{SEMINDEX_SCHEMA_VERSION})\n"
     out = "{out}  Definitions: {index.definitions.len()}\n"
     out = "{out}  References:  {index.references.len()}\n"
     out = "{out}  Call edges:  {index.calls.len()}\n"

@@ -2,7 +2,7 @@
 // grown by push: nothing in its loop shares its buffer. kept's loop keeps
 // copies of its token, so each push there makes the token its own again.
 words: fn(bytes: [U8]) {
-    token := [U8]{}
+    ^token: [U8]{}
     space: U8{32}
     loop byte in bytes {
         if byte == space {
@@ -16,9 +16,9 @@ words: fn(bytes: [U8]) {
 }
 
 kept: fn(bytes: [U8]) {
-    token := [U8]{}
+    ^token: [U8]{}
     space: U8{32}
-    copies := [[U8]]{}
+    ^copies: [[U8]]{}
     loop byte in bytes {
         if byte == space {
             copies.push(token.copy())
@@ -35,7 +35,7 @@ kept: fn(bytes: [U8]) {
 }
 
 run: fn() {
-    bytes := "one two  thréé longerthanfour".bytes()
+    ^bytes: "one two  thréé longerthanfour".bytes()
     bytes.push(U8{32})
     bytes.push(U8{255})
     bytes.push(U8{32})

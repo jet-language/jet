@@ -36,7 +36,7 @@ parallel_chunk_size: fn(length: I64, limit: I64, limited: I64) -> I64 {
 }
 
 parallel_worker_run: fn(worker: I64) {
-    chunk := sync_load(wrapping(worker + I64{32}))
+    ^chunk: sync_load(wrapping(worker + I64{32}))
     chunks: sync_load(wrapping(worker + I64{16}))
     stride: sync_load(wrapping(worker + I64{24}))
     length: sync_load(wrapping(worker + I64{8}))
@@ -85,11 +85,11 @@ parallel_raise: fn(record: I64) {
     if (scheduler_control_current() != I64{0}) {
         if (sync_load(record) == I64{5}) {
             if (jet_rt_stop_domain() != I64{0} && !scheduler_stop_fatal()) {
-                _ := scheduler_panic_publish_record(record)
+                ^_: scheduler_panic_publish_record(record)
                 return
             }
         } else {
-            _ := scheduler_native_publish(record)
+            ^_: scheduler_native_publish(record)
             return
         }
     }
@@ -140,7 +140,7 @@ parallel_raise: fn(record: I64) {
     workers: wrapping(block + I64{8})
     sync_store(block, count)
     stack: fiber_stack_current()
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         worker: workers + at * PARALLEL_WORKER_BYTES
         sync_store(worker, PARALLEL_JOB)
@@ -167,11 +167,11 @@ parallel_raise: fn(record: I64) {
         loop {
             left: sync_load(block)
             if (left == I64{0}) { break }
-            _ := sync_wait(block, left, I64{-1})
+            ^_: sync_wait(block, left, I64{-1})
         }
     }
-    first := I64{0}
-    index := length
+    ^first: I64{0}
+    ^index: length
     at = I64{0}
     loop at < count {
         worker: workers + at * PARALLEL_WORKER_BYTES

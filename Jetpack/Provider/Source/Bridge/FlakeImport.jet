@@ -22,7 +22,7 @@ ImportCatalog: struct {
     names: [String],
 
     load: fn(project_dir: String, fixtures: String?, local_catalog: String?) -[FS, Env]> ImportCatalog Never! {
-        names := [String]{}
+        ^names: [String]{}
         if fixtures == {
             .Val(dir) -> {
                 provider_add_catalog_json(files.join(dir, "catalog.json"), names)
@@ -59,14 +59,14 @@ ImportCatalog: struct {
     // The catalog name closest (edit distance, then name) to the item's last
     // `/`, `:` or `.` segment, among catalog names and the fallback names.
     nearest: fn(self, item: String, fallback: [String]) -> String Never! {
-        candidates := self.names
+        ^candidates: self.names
         loop name in fallback {
             if provider_is_catalog_name(name) -> candidates.push(name.copy())
         }
         candidates = provider_sorted_unique(candidates)
         query: provider_last_segment(item)
-        best := "none"
-        best_distance := -1
+        ^best: "none"
+        ^best_distance: -1
         loop candidate in candidates {
             distance: pkg_edit_distance(query, candidate)
             if best_distance < 0 || distance < best_distance {
@@ -82,7 +82,7 @@ ImportCatalog: struct {
 // empty.
 provider_last_segment: fn(item: String) -> String Never! {
     raw: item.bytes()
-    start := raw.len()
+    ^start: raw.len()
     loop start > 0 {
         code: Int{raw[start - 1]}
         if code == 47 || code == 58 || code == 46 -> break
@@ -111,7 +111,7 @@ provider_add_catalog_value: fn(value: Dyn, names: ^[String]) Never! {
             loop item in values -> provider_add_catalog_value(item, names)
         }
         .Object(pairs) -> {
-            fields := [String:Dyn]{}
+            ^fields: [String:Dyn]{}
             loop pair in pairs -> fields[pair.key] = pair.value
             if fields.get("name") == {
                 .Val(found) -> {
@@ -172,7 +172,7 @@ provider_is_catalog_name: fn(name: String) -> Bool Never! {
 provider_import_package_name: fn(raw: String) -> String? Never! {
     if raw.starts_with("cross:") -> return None
     raw_bytes: raw.bytes()
-    start := raw_bytes.len()
+    ^start: raw_bytes.len()
     loop start > 0 {
         code: Int{raw_bytes[start - 1]}
         if code == 47 || code == 58 || code == 46 -> break
@@ -187,7 +187,7 @@ provider_import_package_name: fn(raw: String) -> String? Never! {
 // the first supported file in `dir`.
 provider_import_source_path: fn(dir: String, requested: String?) -[FS]> String ProviderReason! {
     supported: [String]{FOREIGN_FLAKE_FILE, FOREIGN_SHELL_FILE, FOREIGN_DEFAULT_FILE, FOREIGN_DEVENV_FILE}
-    found := String?{None}
+    ^found: String?{None}
     if requested == {
         .Val(raw) -> {
             path: if files.is_abs(raw) -> raw else -> files.join(dir, raw)
@@ -240,8 +240,8 @@ provider_render_import_env: fn(packages: [String]) -> String Never! {
 // gap with its nearest candidate. Packages sorted; gaps sorted and unique by
 // item.
 provider_import_projection: fn(facts: DevShellFacts, catalog: ImportCatalog) -> {packages: [String], gaps: [ImportGap]} Never! {
-    packages := [String]{}
-    gaps := [ImportGap]{}
+    ^packages: [String]{}
+    ^gaps: [ImportGap]{}
     loop package in facts.packages {
         name: if provider_import_package_name(package) == {
             .Val(found) -> found
@@ -265,9 +265,9 @@ provider_import_projection: fn(facts: DevShellFacts, catalog: ImportCatalog) -> 
 
 // Gaps ordered by item; the first of equal items is kept.
 provider_sorted_unique_gaps: fn(gaps: [ImportGap]) -> [ImportGap] Never! {
-    sorted := gaps
+    ^sorted: gaps
     sorted.sort_by(fn(gap) { gap.item })
-    unique := [ImportGap]{}
+    ^unique: [ImportGap]{}
     loop gap in sorted {
         if unique.len() == 0 || unique[unique.len() - 1].item != gap.item -> unique.push(gap)
     }
@@ -285,13 +285,13 @@ provider_report_import_gap: fn(file: String, gap: ImportGap) -[IO]> Never! {
         "the bounded importer could not prove a catalog package for this input",
         "review the generated env.jet and use the nearest catalog candidate `{candidate}` if it fits",
     )
-    stderr_handle := term.stderr()
+    ^stderr_handle: term.stderr()
     stderr_handle.write_line(diagnostic_render(diagnostic, file, "", false).trim_end()).drop("warnings are best-effort output")
 }
 
 // Carriage returns and newlines as spaces.
 provider_one_line: fn(value: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
         if code == 10 || code == 13 -> out.push(U8{32}) else -> out.push(byte)
@@ -300,7 +300,7 @@ provider_one_line: fn(value: String) -> String Never! {
 }
 
 provider_import_rationale: fn(file: String, provider: String, exact: String, reason: String) -> LockRationale Never! {
-    rationale := LockRationale.empty()
+    ^rationale: LockRationale.empty()
     rationale.source_ref = file
     rationale.provider = provider
     rationale.exact_output = exact
@@ -317,7 +317,7 @@ provider_add_import_source_record: fn(lock: ^SemanticLockFile, file: String, fin
 }
 
 provider_retain_records_without_key: fn(lock: ^SemanticLockFile, key: String) Never! {
-    kept := [SemanticRecord]{}
+    ^kept: [SemanticRecord]{}
     loop record in lock.records {
         if record.identity.key != key -> kept.push(record.copy())
     }
@@ -328,11 +328,11 @@ provider_retain_records_without_key: fn(lock: ^SemanticLockFile, key: String) Ne
 // a re-import.
 provider_clear_import_records: fn(lock: ^SemanticLockFile) Never! {
     lock.inputs = [LockInput]{}
-    kept := [SemanticRecord]{}
+    ^kept: [SemanticRecord]{}
     loop record in lock.records {
         graph_record: record.identity.key.starts_with("flake-")
         import_record: record.identity.key.starts_with("nix-import-")
-        imported_package := false
+        ^imported_package: false
         if record.identity.kind == LockRecordKind.Package {
             loop rationale in record.rationales {
                 if rationale.reason.starts_with("imported from bounded Nix devShell") {
@@ -357,7 +357,7 @@ provider_add_import_gap_record: fn(lock: ^SemanticLockFile, file: String, gap: I
 
 provider_add_import_evaluator_record: fn(lock: ^SemanticLockFile, file: String, packages: [String], gaps: [ImportGap], system: String) Never! {
     key: "nix-import-evaluator:{file}"
-    items := [String]{}
+    ^items: [String]{}
     loop gap in gaps -> items.push(gap.item)
     exact: "packages={packages.join(",")};unmapped={items.join(",")}"
     provider_retain_records_without_key(lock, key)
@@ -392,7 +392,7 @@ provider_write_import_env: fn(dir: String, contents: String) -[FS, Env]> Provide
 }
 
 provider_write_then_rename: fn(temporary: String, path: String, contents: String) -[FS]> IOError! {
-    writer := files.create(temporary)
+    ^writer: files.create(temporary)
     writer.write_bytes(contents.bytes())
     writer.fsync()
     close(writer)
@@ -418,7 +418,7 @@ provider_cmd_import: fn(theme: Theme, dir: String, requested: String?, fixtures:
     catalog: ImportCatalog.load(dir, fixtures, local_catalog)
     projection: provider_import_projection(facts, catalog)
     packages: projection.packages
-    gaps := projection.gaps
+    ^gaps: projection.gaps
     file: files.basename(source_path)
     env: provider_render_import_env(packages)
     env_path: files.join(dir, ENV_FILE)
@@ -439,9 +439,9 @@ provider_cmd_import: fn(theme: Theme, dir: String, requested: String?, fixtures:
         }
     }
     fingerprint: pkg_sha256_hex(source)
-    lock := trust_semantic_lock_load(dir) ?? SemanticLockFile.empty()
+    ^lock: trust_semantic_lock_load(dir) ?? SemanticLockFile.empty()
     provider_clear_import_records(lock)
-    source_channel := LockedSourceChannel?{None}
+    ^source_channel: LockedSourceChannel?{None}
     if file == FOREIGN_FLAKE_FILE {
         if FlakeGraph.load(source_path) == {
             .Ok(graph) -> {
@@ -501,7 +501,7 @@ provider_cmd_import: fn(theme: Theme, dir: String, requested: String?, fixtures:
 
 // The UTF-8 bytes of `parts` separated by NUL bytes.
 provider_nul_joined: fn(parts: [String]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<parts.len() {
         if index > 0 -> out.push(U8{0})
         loop byte in parts[index].bytes() -> out.push(byte)

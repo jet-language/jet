@@ -110,7 +110,7 @@ sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, recei
         }
         return
     }
-    want := PlaceAccess?{None}
+    ^want: PlaceAccess?{None}
     if param.convention == AccessConvention.Write -> want = Val(PlaceAccess.Write)
     if param.convention == AccessConvention.Move && arg.expr == .Ident(_, _, _) && !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "_"}) && !sema_ownership_argument_is_function_item(arg, scopes) {
         want = Val(PlaceAccess.Take)
@@ -139,7 +139,7 @@ sema_call_marks_check_receiver: fn(check: ^SemaBodyCheck, receiver: Expr, unmark
     if have == None && expr_node_id(unmarked) == AST_NODE_GENERATED {
         return
     }
-    want := PlaceAccess?{None}
+    ^want: PlaceAccess?{None}
     if frame.convention == .Val(convention) {
         if convention == AccessConvention.Write -> want = Val(PlaceAccess.Write)
         if convention == AccessConvention.Move && unmarked == .Ident(_, _, _) {

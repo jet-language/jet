@@ -25,7 +25,7 @@ PinnedLifecycleDirectory: struct {
     open_or_create: fn(path: String) -[FS, Env]> PinnedLifecycleDirectory StoreError! {
         absolute: store_pinned_absolute(path)
         parts: store_pinned_components(absolute)
-        directory := files.open_directory(parts.anchor)
+        ^directory: files.open_directory(parts.anchor)
         loop name in parts.names {
             if directory.open_directory(name) == {
                 .Ok(child) -> { directory = child }
@@ -53,7 +53,7 @@ PinnedLifecycleDirectory: struct {
 
     // At most `maximum` member names of the held directory.
     names: fn(self, maximum: Int) -[FS]> [String] StoreError! {
-        names := [String]{}
+        ^names: [String]{}
         entries: self.directory.list()
         loop entry in entries {
             if names.len() >= maximum -> break
@@ -131,7 +131,7 @@ store_pinned_absolute: fn(path: String) -[FS, Env]> String StoreError! {
 // Split an absolute path into its root anchor (`/`, or a Windows drive root)
 // and the normal components below it.
 store_pinned_components: fn(absolute: String) -> PinnedPathParts StoreError! {
-    parts := [String]{}
+    ^parts: [String]{}
     segments: files.split_slash(absolute)
     loop part in segments {
         if part != "" -> parts.push(part)
@@ -141,7 +141,7 @@ store_pinned_components: fn(absolute: String) -> PinnedPathParts StoreError! {
         return Err(StoreError.InvalidInput("pinned directory has no normal component"))
     }
     anchor: "{parts[0]}/"
-    names := [String]{}
+    ^names: [String]{}
     loop index in 1..<parts.len() -> names.push(parts[index])
     Ok(PinnedPathParts{anchor: anchor, names: names})
 }

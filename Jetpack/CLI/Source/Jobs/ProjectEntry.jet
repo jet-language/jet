@@ -21,7 +21,7 @@ JobRegistryCheckError: struct {
 // `<package>.jet`, else the (missing) root `run.jet`.
 cli_find_project_entry: fn(project_dir: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
     resolver: AuthorityResolver.open(project_dir) ?? cli_report_entry_authority_error(err.diagnostic())
-    package := CheckedPackage?{None}
+    ^package: CheckedPackage?{None}
     if resolver.checked_package(".") == {
         .Ok(found) -> { package = Val(found) }
         .Err(error) -> {
@@ -117,7 +117,7 @@ cli_job_registry_unchecked: fn(file: String, detail: String) -> JobRegistryCheck
 // sorted and distinct; an unchecked bundle has none.
 cli_list_project_jobs: fn(file: String) -[FS, Env, Exec, Time.Wait]> [String] Never! {
     registry: cli_checked_project_job_registry(file) ?? return [String]{}
-    names := [String]{}
+    ^names: [String]{}
     loop job in registry.jobs() -> names.push(job.name)
     cli_sorted_unique(names)
 }

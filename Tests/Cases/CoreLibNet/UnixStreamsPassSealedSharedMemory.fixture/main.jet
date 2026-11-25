@@ -12,8 +12,8 @@ run: fn() {
     root: files.temp_dir("unix_fd_passing") ?? panic("temporary directory")
     path: files.join(root.path, "s")
     listener: net.unix_listen(path) ?? panic("listen: {err}")
-    client := net.unix_connect(path) ?? panic("connect: {err}")
-    server := net.unix_accept(listener) ?? panic("accept: {err}")
+    ^client: net.unix_connect(path) ?? panic("connect: {err}")
+    ^server: net.unix_accept(listener) ?? panic("accept: {err}")
     print(net.unix_wait(server, 0) ?? panic("idle wait: {err}"))
     // A wait that also watches a wake pipe: 0 while neither has bytes, then
     // bit 2 once the pipe has one.
@@ -22,7 +22,7 @@ run: fn() {
     _: wake[1].write([U8]{1}, 1000000000) ?? panic("wake: {err}")
     print(net.unix_wait_wake(server, wake[0], 1000000000) ?? panic("woken wait: {err}"))
 
-    memory := sys.shared_memory(4096) ?? panic("shared memory: {err}")
+    ^memory: sys.shared_memory(4096) ?? panic("shared memory: {err}")
     memory.write(8, "jet".bytes()) ?? panic("write: {err}")
     pixels: [U8]{1, 2, 3, 4, 5, 6, 7, 8}
     memory.write_pixels(16, pixels, 8, 0, 0, 2, 1, .XRGB8888) ?? panic("pixels: {err}")
@@ -34,7 +34,7 @@ run: fn() {
     net.unix_send(client, [U8]{42}, [sys.Fd]{descriptor}) ?? panic("send: {err}")
 
     print(net.unix_wait(server, 1000000000) ?? panic("ready wait: {err}"))
-    message := net.unix_receive(server, 16) ?? panic("receive: {err}")
+    ^message: net.unix_receive(server, 16) ?? panic("receive: {err}")
     print("{message.bytes} {message.fds.len()}")
     received: message.fds.remove(0, .Slot) ?? panic("no descriptor arrived")
     inspect(received)

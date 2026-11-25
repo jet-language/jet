@@ -12,7 +12,7 @@ add3: fn(x: [Float#3], y: [Float#3]) -> [Float#3] {
 }
 
 bumped: fn(xs: [Int#3]) -> [Int#3] {
-    own := xs
+    ^own: xs
     own[0] = own[0] + 100
     return own
 }
@@ -24,7 +24,7 @@ scale: fn(xs: ^[Int#3], k: Int) {
 total: fn(xs: [Int#3]) -> Int { return xs[0] + xs[1] + xs[2] }
 
 widened: fn(xs: [Int]) -> Int {
-    sum := 0
+    ^sum: 0
     loop x in xs -> sum += x
     return sum
 }
@@ -32,7 +32,7 @@ widened: fn(xs: [Int]) -> Int {
 first_doubled: fn(xs: ^[Int]) { xs[0] = xs[0] * 2 }
 
 squares: fn() -> [Int#3] {
-    out := [Int#3]{0, 0, 0}
+    ^out: [Int#3]{0, 0, 0}
     loop i in 0..<3 -> out[i] = (i + 1) * (i + 1)
     return out
 }
@@ -42,8 +42,8 @@ ORIGIN: [Float#3]{1.5, 2.5, 3.5}
 SQUARES: squares()
 
 run: fn() {
-    a := [Int#3]{1, 2, 3}
-    b := a
+    ^a: [Int#3]{1, 2, 3}
+    ^b: a
     b[0] = 9
     print("assign {a[0]} {b[0]}")
     c: bumped(a)
@@ -57,8 +57,8 @@ run: fn() {
     print("reversed {a}")
     first_doubled(a)
     print("as a list {a}")
-    p := Body{at: ORIGIN, _mass: 2.0}
-    q := p
+    ^p: Body{at: ORIGIN, _mass: 2.0}
+    ^q: p
     q.at[2] = 8.5
     print("field {p.at[2]} {q.at[2]}")
     moved: add3(p.at, q.at)

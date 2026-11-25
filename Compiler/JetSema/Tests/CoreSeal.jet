@@ -17,7 +17,7 @@ use {
 #Test("core_seal_fixpoint") {
     // 10 calls 11, which fails nowhere; 12 calls 13, which calls a function
     // with no callable row; 14 and 15 call each other; 16 calls 12.
-    inferred := [Int:Bool]{10: true, 11: true, 12: true, 13: true, 14: true, 15: true, 16: true}
+    ^inferred: [Int:Bool]{10: true, 11: true, 12: true, 13: true, 14: true, 15: true, 16: true}
     rows: [Int]{10, 11, 12, 13, 14, 15, 16}
     edges: [[Int]]{[Int]{11}, [Int]{}, [Int]{13}, [Int]{-1}, [Int]{15}, [Int]{14}, [Int]{12}}
     sema_core_seal_fixpoint(inferred, rows, edges)
@@ -59,7 +59,7 @@ use {
 
 // A seal of `lines`, sorted as the Core library sorts them.
 core_seal_of: fn(lines: ^^[String]) -> SemaCoreSeal {
-    sorted := lines.move()
+    ^sorted: lines.move()
     sorted.sort()
     SemaCoreSeal{bytes: sorted.join("\n").bytes()}
 }
@@ -80,7 +80,7 @@ core_seal_of: fn(lines: ^^[String]) -> SemaCoreSeal {
         "function:<corelib>/core.é.k",
         "function:<corelib>/core.z.last",
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop (index, key) in keys -> lines.push("{key}\tSP\tIO{index}")
     lines.push("function:<corelib>/core.m.bare")
     seal: core_seal_of(lines.move())

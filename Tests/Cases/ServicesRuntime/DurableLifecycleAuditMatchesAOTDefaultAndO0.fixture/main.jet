@@ -20,12 +20,12 @@ state_name: fn(delivery: ^^Delivery) -> String {
 }
 
 run: fn() {
-    temp := testing.temp_dir("durable-audit")
+    ^temp: testing.temp_dir("durable-audit")
     store: Path.from(temp).join("state.log.delivery").to_string()
     state_path: Path.from(temp).join("state.log").to_string()
     retention: Duration.seconds(86400) ?? panic("retention")
-    runtime := service.runtime(store, retention: retention)
-    tree := service.tree("durable-audit")
+    ^runtime: service.runtime(store, retention: retention)
+    ^tree: service.tree("durable-audit")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(state_path) ?? panic("state")
     tree.set_state_event_log(state, "audit-events", 1, "reversible") ?? panic("state adapter")
@@ -47,7 +47,7 @@ run: fn() {
     dead: runtime.dead_letter(dead_handle) ?? panic("dead letter")
     print("dead:{state_name(dead)}")
 
-    short_runtime := service.runtime(store, retention: Duration.milliseconds(1) ?? panic("short retention"))
+    ^short_runtime: service.runtime(store, retention: Duration.milliseconds(1) ?? panic("short retention"))
     expiring: short_runtime.send(endpoint, "expiring", key: "expiring") ?? panic("expiring")
     time.sleep(Duration.milliseconds(5) ?? panic("sleep"))
     print("expired:{state_name(expiring)}")

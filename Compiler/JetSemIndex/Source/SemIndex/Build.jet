@@ -251,10 +251,10 @@ semindex_default_text: fn(parameter: Param, source: String, span: Span) -> Strin
 }
 
 semindex_params: fn(tables: ASTTables, params: [Param], source: String, skip_self: Bool) -> [SemParam] {
-    output := [SemParam]{}
+    ^output: [SemParam]{}
     loop parameter in params {
         if skip_self && parameter.name == "self" -> next
-        default := SemDefault?{None}
+        ^default: SemDefault?{None}
         if parameter.default == .Val(value) {
             span: ast_expr_span(tables, value)
             default = Val(SemDefault{source_text: semindex_default_text(parameter, source, span), source: span})
@@ -291,7 +291,7 @@ semindex_policy_argument: fn(tables: ASTTables, expr: ExprNode) -> String {
         .Int(value, _, _, raw, _) -> raw ?? "{value}"
         .Bool(value, _, _) -> if value -> "true" else -> "false"
         .Str(parts, _, _) -> {
-            text := ""
+            ^text: ""
             loop part in parts {
                 if part == .Lit(value) -> text = "{text}{value}"
             }
@@ -308,7 +308,7 @@ semindex_policy_argument: fn(tables: ASTTables, expr: ExprNode) -> String {
 
 // `callable_policies`: the `#Policy(...)` chain on a function.
 semindex_callable_policies: fn(tables: ASTTables, markers: [Marker]) -> [CallablePolicy] {
-    policies := [CallablePolicy]{}
+    ^policies: [CallablePolicy]{}
     loop marker in markers {
         if marker.name != "Policy" -> next
         loop argument in marker.args {
@@ -353,8 +353,8 @@ semindex_callable_kind: fn(tables: ASTTables, function: Func, source: String) ->
 // zone separators as their own parts and each written or taken parameter's
 // `^` or `^^` mark on its type, as a signature writes it.
 semindex_parameter_parts: fn(params: [SemParam]) -> [String] Never! {
-    parts := [String]{}
-    star_done := false
+    ^parts: [String]{}
+    ^star_done: false
     loop (index, parameter) in params {
         if parameter.zone == ParamZone.LabelOnly && !star_done {
             star_done = true
@@ -380,7 +380,7 @@ semindex_parameter_parts: fn(params: [SemParam]) -> [String] Never! {
 // (failure_contract_signature_return). A unit success writes its failure
 // alone, with no arrow: `fn(path: String) IOError!`.
 semindex_signature_tail: fn(callable: SemCallable) -> String Never! {
-    shown := [String]{}
+    ^shown: [String]{}
     if callable.effects == .Val(rows) {
         loop row in rows {
             root: row.name.split(".").to_list()[0]
@@ -400,8 +400,8 @@ semindex_signature_tail: fn(callable: SemCallable) -> String Never! {
 }
 
 semindex_fn_signature: fn(name: String, callable: SemCallable, view_provenance: ViewProvenanceMap?) -> String {
-    parts := semindex_parameter_parts(callable.params)
-    parameter_index := 0
+    ^parts: semindex_parameter_parts(callable.params)
+    ^parameter_index: 0
     loop part_index in 0..<parts.len() {
         if parts[part_index] == "/" || parts[part_index] == "*" -> next
         if parameter_index < callable.params.len() {
@@ -412,7 +412,7 @@ semindex_fn_signature: fn(name: String, callable: SemCallable, view_provenance: 
         }
         parameter_index += 1
     }
-    signature := "{name}: fn({parts.join(", ")}){semindex_signature_tail(callable)}"
+    ^signature: "{name}: fn({parts.join(", ")}){semindex_signature_tail(callable)}"
     if view_provenance == .Val(map) {
         if {
             map.entries.len() == 1 && map.entries[0].slot.len() == 0 -> {
@@ -433,7 +433,7 @@ semindex_fn_signature: fn(name: String, callable: SemCallable, view_provenance: 
 semindex_method_fact: fn(ctx: SemWalk, owner: String, function: Func, origin: String, origin_trait: String) -> SemMember {
     identity: semindex_callable_identity(ctx.scope_identity, Val(owner), function.name)
     kind: semindex_callable_kind(ctx.tables, function, ctx.source)
-    signature := ""
+    ^signature: ""
     if kind == .Function(callable) {
         signature = semindex_fn_signature(function.name, callable, function.return_view_provenance)
     }
@@ -466,7 +466,7 @@ semindex_reference_key: fn(span: Span, name: String) -> String Never! {
 
 // Each name reference's position by its span and name, the first one kept.
 semindex_reference_positions: fn(references: [SemaNameReferenceFact]) -> [String:Int] Never! {
-    positions := [String:Int]{}
+    ^positions: [String:Int]{}
     loop (position, reference) in references {
         key: semindex_reference_key(reference.span, reference.symbol.name)
         if positions.get(key) == None -> positions[key] = position
@@ -480,12 +480,10 @@ SemGroups: struct {
     groups: [[Int]],
 }
 
-semindex_groups: fn() -> SemGroups Never! {
-    SemGroups{at: [String:Int]{}, groups: [[Int]]{}}
-}
+semindex_groups: fn() -> SemGroups Never! { SemGroups{at: [String:Int]{}, groups: [[Int]]{}} }
 
 semindex_group_add: fn(groups: ^SemGroups, key: String, position: Int) Never! {
-    group := groups.at.get(key) ?? -1
+    ^group: groups.at.get(key) ?? -1
     if group < 0 {
         group = groups.groups.len()
         groups.at[key] = group
@@ -495,9 +493,7 @@ semindex_group_add: fn(groups: ^SemGroups, key: String, position: Int) Never! {
 }
 
 // The group of `key`, or -1 when nothing was filed under it.
-semindex_group: fn(groups: SemGroups, key: String) -> Int Never! {
-    groups.at.get(key) ?? -1
-}
+semindex_group: fn(groups: SemGroups, key: String) -> Int Never! { groups.at.get(key) ?? -1 }
 
 // The type an item declares at module scope: a struct, an enum, a trait, a
 // tag, a distinct type or an alias.
@@ -529,10 +525,10 @@ SemDeclarations: struct {
 }
 
 semindex_declarations: fn(modules: [JetDriverDocModule]) -> SemDeclarations Never! {
-    by_module := [[String:SemAnchor]]{}
-    holders := semindex_groups()
+    ^by_module: [[String:SemAnchor]]{}
+    ^holders: semindex_groups()
     loop (position, doc_module) in modules {
-        declared := [String:SemAnchor]{}
+        ^declared: [String:SemAnchor]{}
         loop item in doc_module.items {
             head: semindex_type_head(item) ?? next
             if declared.has_key(head.name) -> next
@@ -547,7 +543,7 @@ semindex_declarations: fn(modules: [JetDriverDocModule]) -> SemDeclarations Neve
 // The declaration a module-scope name names, for trait and impl heads: the
 // walked module's own, else the first other module's.
 semindex_declaration_ref: fn(name: String, span: Span, db: SemDB, ctx: SemWalk, modules: [JetDriverDocModule]) -> SemRef {
-    target := SemAnchor?{None}
+    ^target: SemAnchor?{None}
     group: semindex_group(db.declarations.holders, name)
     if group >= 0 {
         loop position in db.declarations.holders.groups[group] {
@@ -574,12 +570,12 @@ semindex_declaration_ref: fn(name: String, span: Span, db: SemDB, ctx: SemWalk, 
 // its row; the module's references start at `first_ref`.
 semindex_type_refs: fn(db: ^SemDB, doc_module: JetDriverDocModule, modules: [JetDriverDocModule], first: Int, first_ref: Int, scope: String) {
     bytes: doc_module.source.bytes()
-    taken := [Int:Bool]{}
+    ^taken: [Int:Bool]{}
     loop index in first_ref..<db.refs.len() {
         if db.refs[index].module_path == doc_module.path -> taken[db.refs[index].span.start] = true
     }
-    imported := [String:Bool]{}
-    aliases := [String:Bool]{}
+    ^imported: [String:Bool]{}
+    ^aliases: [String:Bool]{}
     loop import in doc_module.imports {
         aliases[import.alias] = true
         if import.kind == .Unqualified(_, _, items, _, _) {
@@ -591,8 +587,8 @@ semindex_type_refs: fn(db: ^SemDB, doc_module: JetDriverDocModule, modules: [Jet
         node: db.nodes[index]
         if node.class != "type" -> next
         end: if node.span.end < bytes.len() -> node.span.end else -> bytes.len()
-        at := node.span.start
-        qualifier := ""
+        ^at: node.span.start
+        ^qualifier: ""
         loop at < end {
             if !semindex_type_name_byte(bytes[at]) {
                 if bytes[at] != (U8{46}) -> qualifier = ""
@@ -610,8 +606,10 @@ semindex_type_refs: fn(db: ^SemDB, doc_module: JetDriverDocModule, modules: [Jet
             owner: qualifier
             qualifier = ""
             leading: bytes[start]
-            if following == (U8{58}) || (leading >= (U8{48}) && leading <= (U8{57})) || taken.has_key(start) -> next
-            target := SemAnchor?{None}
+            if following == (U8{58}) || (leading >= (U8{48}) && leading <= (U8{57})) || taken.has_key(start) {
+                next
+            }
+            ^target: SemAnchor?{None}
             group: semindex_group(db.declarations.holders, name)
             if group < 0 -> next
             loop position in db.declarations.holders.groups[group] {
@@ -646,7 +644,7 @@ semindex_state_marker_path: fn(tables: ASTTables, expr: ExprNode) -> NamedSpan? 
 }
 
 semindex_marker_expr: fn(marker: Marker, slot: Int) -> ExprNode? {
-    position := 0
+    ^position: 0
     loop argument in marker.args {
         if argument == .Expr(value) {
             if position == slot -> return Val(value)
@@ -704,7 +702,7 @@ semindex_state_marker_refs: fn(item: Item, db: ^SemDB, ctx: SemWalk) {
 semindex_record_node: fn(db: ^SemDB, ctx: SemWalk, class: String, shape: String, span: Span) -> Int? {
     if span.end < span.start -> return None
     id: db.nodes.len()
-    parent := Int?{None}
+    ^parent: Int?{None}
     if ctx.structural_parents.len() > 0 {
         parent = Val(ctx.structural_parents[ctx.structural_parents.len() - 1])
     }
@@ -728,8 +726,8 @@ semindex_slot_enter: fn(db: ^SemDB, ctx: ^SemWalk, name: String, kind: String) -
         exact_parent_end: db.nodes[parent].class == "arm"
         // `ctx.block_spans` is sorted by start: from the partition-point lower bound,
         // the first unclaimed candidate is the minimum-start one (the first minimum wins).
-        first := 0
-        high := ctx.block_spans.len()
+        ^first: 0
+        ^high: ctx.block_spans.len()
         loop first < high {
             middle: first + (high - first) /% 2
             if ctx.block_spans[middle].start < parent_start -> first = middle + 1 else {
@@ -737,8 +735,8 @@ semindex_slot_enter: fn(db: ^SemDB, ctx: ^SemWalk, name: String, kind: String) -
             }
         }
         // Claimed spans are skipped through `block_next`, not rescanned on every entry.
-        chosen := Int?{None}
-        index := semindex_next_unclaimed(ctx, first)
+        ^chosen: Int?{None}
+        ^index: semindex_next_unclaimed(ctx, first)
         loop index < ctx.block_spans.len() {
             if exact_parent_end && !(ctx.block_spans[index].end <= parent_end || parent_end <= ctx.block_spans[index].start) {
                 index = semindex_next_unclaimed(ctx, index + 1)
@@ -768,9 +766,9 @@ semindex_slot_enter: fn(db: ^SemDB, ctx: ^SemWalk, name: String, kind: String) -
 // The first unclaimed index of `ctx.block_spans` at or after `index` (`block_spans.len()` when
 // none), compressing the path it walked.
 semindex_next_unclaimed: fn(ctx: ^SemWalk, index: Int) -> Int {
-    root := index
+    ^root: index
     loop ctx.block_next[root] != root -> root = ctx.block_next[root]
-    cursor := index
+    ^cursor: index
     loop cursor != root {
         following: ctx.block_next[cursor]
         ctx.block_next[cursor] = root
@@ -789,19 +787,19 @@ semindex_push_parent: fn(ctx: ^SemWalk, id: Int?) Never! {
 }
 
 semindex_pop_parent: fn(ctx: ^SemWalk, id: Int?) Never! {
-    if id != None -> _ := ctx.structural_parents.pop()
+    if id != None -> ^_: ctx.structural_parents.pop()
 }
 
 semindex_type_node: fn(db: ^SemDB, ctx: ^SemWalk, slot: String, kind: String, span: Span) {
     saved: semindex_slot_enter(db, ctx, slot, kind)
-    _ := semindex_record_node(db, ctx, "type", "type", span)
+    ^_: semindex_record_node(db, ctx, "type", "type", span)
     semindex_slot_leave(ctx, saved)
 }
 
 semindex_func_type_nodes: fn(function: Func, db: ^SemDB, ctx: ^SemWalk) {
     saved: semindex_slot_enter(db, ctx, "params", "list")
     loop parameter in function.params {
-        _ := semindex_record_node(db, ctx, "type", "type", parameter.ty_span)
+        ^_: semindex_record_node(db, ctx, "type", "type", parameter.ty_span)
     }
     semindex_slot_leave(ctx, saved)
     if {
@@ -819,7 +817,7 @@ semindex_func_type_nodes: fn(function: Func, db: ^SemDB, ctx: ^SemWalk) {
 // return type. The written return type is still a source type node, so a
 // module with such a row reads its spans back from its own parse.
 semindex_written_returns: fn(doc_module: JetDriverDocModule) -> [Int:Span] Never! {
-    written := [Int:Span]{}
+    ^written: [Int:Span]{}
     lost: (loop item in doc_module.items {
         if item == .Func(f) {
             if f.return_type_span == None {
@@ -841,7 +839,7 @@ semindex_written_returns: fn(doc_module: JetDriverDocModule) -> [Int:Span] Never
 // keyed by name and name span (sema gives the checked local its binding's
 // name span). A generic body's instances share spans and keep the first.
 semindex_local_types: fn(doc_module: JetDriverDocModule) -> [String:Type] Never! {
-    types := [String:Type]{}
+    ^types: [String:Type]{}
     loop function in doc_module.functions {
         if function.synthetic -> next
         loop statement in function.tree.stmts {
@@ -984,7 +982,9 @@ semindex_param_defs: fn(params: [Param], owner_identity: String, db: ^SemDB, ctx
 }
 
 semindex_with_caller_body: fn(frame: SemCallerFrame, slot: String, body: [StmtNode], db: ^SemDB, ctx: ^SemWalk, modules: [JetDriverDocModule]) {
-    if !ctx.bodies -> return
+    if !ctx.bodies {
+        return
+    }
     // copy: the enclosing caller frame (owner: ctx, a write parameter that the body walk
     // reads) is restored after the body (owner: `previous`); a write parameter's field cannot
     // be left moved out across the calls that borrow ctx.
@@ -1011,7 +1011,9 @@ semindex_method: fn(owner: String, method: Func, origin: String, origin_trait: S
     identity: semindex_callable_identity(ctx.scope_identity, Val(owner), method.name)
     db.members.push(semindex_method_fact(ctx, owner, method, origin, origin_trait))
     db.defs.push(semindex_def(ctx, identity, method.name, semindex_display(ctx, Val(owner), method.name), method.name_span, semindex_callable_kind(ctx.tables, method, ctx.source)))
-    if method.compiler_generated -> return
+    if method.compiler_generated {
+        return
+    }
     if params -> semindex_param_defs(method.params, identity, db, ctx)
     semindex_with_caller_body(SemCallerFrame{name: method.name, owner: Val(owner), identity: identity}, "method_bodies", method.body, db, ctx, modules)
 }
@@ -1079,7 +1081,7 @@ semindex_item: fn(item: Item, db: ^SemDB, ctx: ^SemWalk, modules: [JetDriverDocM
         .Struct(s) -> {
             saved: semindex_slot_enter(db, ctx, "field_types", "list")
             loop field in s.fields {
-                _ := semindex_record_node(db, ctx, "type", "type", field.ty_span)
+                ^_: semindex_record_node(db, ctx, "type", "type", field.ty_span)
             }
             semindex_slot_leave(ctx, saved)
             semindex_allow_markers(s.serde_markers, s.name, db, ctx)
@@ -1125,7 +1127,7 @@ semindex_item: fn(item: Item, db: ^SemDB, ctx: ^SemWalk, modules: [JetDriverDocM
                     .Named(fields) -> {
                         saved: semindex_slot_enter(db, ctx, "variant_types", "list")
                         loop field in fields {
-                            _ := semindex_record_node(db, ctx, "type", "type", field.ty_span)
+                            ^_: semindex_record_node(db, ctx, "type", "type", field.ty_span)
                         }
                         semindex_slot_leave(ctx, saved)
                     }
@@ -1338,9 +1340,11 @@ semindex_arms: fn(arms: [SwitchArm], db: ^SemDB, ctx: ^SemWalk, modules: [JetDri
         semindex_scalar("condition", arm.cond, db, ctx, modules)
         semindex_body("body", arm.body, db, ctx, modules)
         if arm_id == .Val(id) {
-            has_boundary := false
+            ^has_boundary: false
             loop at in first_boundary..<db.slot_boundaries.len() {
-                if db.slot_boundaries[at].parent == id && db.slot_boundaries[at].slot == "body" -> has_boundary = true
+                if db.slot_boundaries[at].parent == id && db.slot_boundaries[at].slot == "body" {
+                    has_boundary = true
+                }
             }
             if !has_boundary && arm.body.len() == 1 {
                 db.slot_boundaries.push(SemSlotBoundary{parent: id, slot: "body", module_path: ctx.module_path, span: semindex_stmt_head(ctx.tables, arm.body[0]).span})
@@ -1462,7 +1466,7 @@ semindex_bind_name: fn(name: BindName) -> NamedSpan Never! {
 }
 
 semindex_bind_names: fn(pattern: BindPattern) -> [NamedSpan] Never! {
-    names := [NamedSpan]{}
+    ^names: [NamedSpan]{}
     if pattern == {
         .Struct(_, _, fields, _, _) -> {
             loop field in fields -> names.push(semindex_bind_name(field))
@@ -1538,12 +1542,14 @@ semindex_method_call: fn(receiver: ExprNode, method: String, method_span: Span, 
     semindex_scalar("receiver", receiver, db, ctx, modules)
     if ast_expr(ctx.tables, receiver) == .Ident(_, span, _) && db.refs.len() > 0 {
         last: db.refs.len() - 1
-        if db.refs[last].span.start == span.start && db.refs[last].span.end == span.end -> db.call_receivers[semindex_site_key(ctx.module_path, method_span)] = last
+        if db.refs[last].span.start == span.start && db.refs[last].span.end == span.end {
+            db.call_receivers[semindex_site_key(ctx.module_path, method_span)] = last
+        }
     }
     semindex_record_call(db, ctx, method, method_span)
     db.refs.push(semindex_scoped_ref(method, method_span, ctx))
     if method == "drop" {
-        reason := ""
+        ^reason: ""
         if args.len() > 0 {
             if ast_expr(ctx.tables, args[0].expr) == .Str(parts, _, _) {
                 if parts.len() == 1 {
@@ -1615,7 +1621,7 @@ semindex_expr: fn(expr: ExprNode, db: ^SemDB, ctx: ^SemWalk, modules: [JetDriver
             semindex_scalar("end", end, db, ctx, modules)
         }
         .Str(parts, _, _) -> {
-            interpolations := [ExprNode]{}
+            ^interpolations: [ExprNode]{}
             loop part in parts {
                 if part == .Interp(inner, _) -> interpolations.push(inner.copy())
             }
@@ -1649,12 +1655,14 @@ semindex_expr: fn(expr: ExprNode, db: ^SemDB, ctx: ^SemWalk, modules: [JetDriver
                 }
                 None -> 0
             }
-            if written > 0 -> semindex_type_node(db, ctx, "head", "scalar", Span{start: span.start, end: span.start + written})
+            if written > 0 {
+                semindex_type_node(db, ctx, "head", "scalar", Span{start: span.start, end: span.start + written})
+            }
             values: if body == {
                 .Fields(fields) -> loop field in fields -> field.value
                 .Elements(elements) -> elements
                 .Entries(entries) -> {
-                    pairs := [ExprNode]{}
+                    ^pairs: [ExprNode]{}
                     loop entry in entries {
                         pairs.push(entry.key)
                         pairs.push(entry.value)
@@ -1755,7 +1763,9 @@ semindex_resolved_ref: fn(name: String, span: Span, db: ^SemDB, ctx: SemWalk) Ne
 semindex_pattern: fn(pattern: Pattern, db: ^SemDB, ctx: SemWalk) Never! {
     if pattern == {
         .Variant(variant, slots, leading_dot, span) -> {
-            if leading_dot -> semindex_resolved_ref(variant, Span{start: span.start + 1, end: span.start + 1 + variant.count_bytes()}, db, ctx)
+            if leading_dot {
+                semindex_resolved_ref(variant, Span{start: span.start + 1, end: span.start + 1 + variant.count_bytes()}, db, ctx)
+            }
             if !leading_dot && variant.split_once(".") == .Val(qualified) {
                 start: span.start + qualified.before.count_bytes() + 1
                 semindex_resolved_ref(qualified.after, Span{start: start, end: start + qualified.after.count_bytes()}, db, ctx)
@@ -1777,7 +1787,7 @@ semindex_pattern: fn(pattern: Pattern, db: ^SemDB, ctx: SemWalk) Never! {
 
 semindex_pattern_slot: fn(slot: PatSlot, db: ^SemDB, ctx: SemWalk) Never! {
     if slot == {
-        .Nested(pattern) -> semindex_pattern(pattern, db, ctx)
+        .Nested(pattern) -> { semindex_pattern(pattern, db, ctx) }
         .Named(_, _, inner) -> semindex_pattern_slot(inner, db, ctx)
         .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) | .Value(_) -> {}
     }
@@ -1801,10 +1811,10 @@ semindex_module_alias: fn(doc_module: JetDriverDocModule) -> String Never! {
 // sorted by module, span, and name.
 semindex_import_alias_defs: fn(db: ^SemDB, modules: [JetDriverDocModule]) {
     loop doc_module in modules {
-        found := [SemDef]{}
+        ^found: [SemDef]{}
         loop import in doc_module.imports {
             alias_name: import.alias
-            bound_elsewhere := false
+            ^bound_elsewhere: false
             if import.kind == .Unqualified(_, _, _, _, _) {
                 loop other in doc_module.imports {
                     if other.alias != alias_name -> next
@@ -1829,7 +1839,7 @@ semindex_import_alias_defs: fn(db: ^SemDB, modules: [JetDriverDocModule]) {
         }
         loop index in 1..<found.len() {
             value: found[index]
-            position := index
+            ^position: index
             loop position > 0 && (found[position - 1].def_span.start > value.def_span.start || (found[position - 1].def_span.start == value.def_span.start && (found[position - 1].def_span.end > value.def_span.end || (found[position - 1].def_span.end == value.def_span.end && found[position - 1].name > value.name)))) {
                 found[position] = found[position - 1]
                 position -= 1
@@ -1870,13 +1880,13 @@ SemBoundaryCall: struct {
 }
 
 semindex_sorted_unique: fn(values: [String]) -> [String] Never! {
-    output := [String]{}
+    ^output: [String]{}
     loop value in values {
         if !output.contains(value) -> output.push(value.copy())
     }
     loop index in 1..<output.len() {
         value: output[index]
-        position := index
+        ^position: index
         loop position > 0 && output[position - 1] > value {
             output[position] = output[position - 1]
             position -= 1
@@ -1919,15 +1929,15 @@ semindex_outside_edge: fn(key: SemFunctionKey) -> String Never! {
 // `qualified_effect_facts` over the checked user functions: every summary under
 // `alias.key`, plus its short key when exactly one module defines it.
 semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
-    summaries := [SemSummary]{}
-    module_aliases := [String:String]{}
+    ^summaries: [SemSummary]{}
+    ^module_aliases: [String:String]{}
     loop doc_module in modules {
         module_aliases[doc_module.module_identity] = semindex_module_alias(doc_module)
     }
     // Each caller's calls into callees outside the indexed modules, grouped
     // once by caller key in module order.
-    boundary_by_caller := [String:Int]{}
-    boundary_groups := [[SemBoundaryCall]]{}
+    ^boundary_by_caller: [String:Int]{}
+    ^boundary_groups: [[SemBoundaryCall]]{}
     loop doc_module in modules {
         storage: doc_module.name_ledger ?? next
         permit: storage.guard_read()
@@ -1936,10 +1946,10 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
             callee_key: semindex_function_key(target, module_aliases) ?? next
             if module_aliases.get(callee_key.module_identity) != None -> next
             row: fact.facts.effect_bound ?? next
-            group := boundary_by_caller.get(fact.caller_key) ?? -1
+            ^group: boundary_by_caller.get(fact.caller_key) ?? -1
             if group < 0 {
                 group = boundary_groups.len()
-                _ := boundary_by_caller.add(fact.caller_key, group)
+                ^_: boundary_by_caller.add(fact.caller_key, group)
                 boundary_groups.push([SemBoundaryCall]{})
             }
             boundary_groups[group].push(SemBoundaryCall{callee: semindex_outside_edge(callee_key), row: loop entry in row -> entry.name.copy(), span: fact.span})
@@ -1951,9 +1961,9 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
             if function.synthetic -> next
             local: (semindex_function_key(function.key, module_aliases) ?? next).local
             direct: semindex_sorted_unique(function.effects.direct)
-            spans := [Span]{}
+            ^spans: [Span]{}
             loop effect_name in direct {
-                found := Span{start: 0, end: 0}
+                ^found: Span{start: 0, end: 0}
                 loop entry in function.effects.direct_spans {
                     if entry.name == effect_name {
                         found = entry.span
@@ -1962,8 +1972,8 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
                 }
                 spans.push(found)
             }
-            edges := [String]{}
-            edge_locals := [String]{}
+            ^edges: [String]{}
+            ^edge_locals: [String]{}
             loop edge in function.effects.call_edges {
                 if edge == "__jet_panic__" {
                     edges.push(edge.copy())
@@ -1982,26 +1992,24 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
                 }
                 edges.push("{edge_alias}.{edge_key.local}")
             }
-            maximal_span := Span?{None}
+            ^maximal_span: Span?{None}
             if function.effects.maximal -> maximal_span = Val(function.source_span)
-            boundary_calls := [SemBoundaryCall]{}
+            ^boundary_calls: [SemBoundaryCall]{}
             if boundary_by_caller.get(function.key) == .Val(group) {
                 boundary_calls = boundary_groups[group].copy()
             }
             summaries.push(SemSummary{key: "{alias}.{local}", local: local, raw_key: function.key, direct: direct, direct_spans: spans, edges: semindex_sorted_unique(edges), raw_edges: function.effects.call_edges, edge_locals: edge_locals, solved: semindex_sorted_unique(function.effects.solved), maximal: function.effects.maximal, maximal_span: maximal_span, boundary_calls: boundary_calls})
         }
     }
-    locals := [String:Int]{}
-    loop summary in summaries {
-        locals[summary.local] = (locals.get(summary.local) ?? 0) + 1
-    }
-    shorts := [SemSummary]{}
+    ^locals: [String:Int]{}
+    loop summary in summaries -> locals[summary.local] = (locals.get(summary.local) ?? 0) + 1
+    ^shorts: [SemSummary]{}
     loop summary in summaries {
         count: locals.get(summary.local) ?? 0
         if count == 1 && summary.local != summary.key {
             // copy: the summary stays in `summaries` under its qualified key (owner: summaries)
             // and its short-key twin is a second row (owner: shorts); both are read afterwards.
-            short := summary.copy()
+            ^short: summary.copy()
             short.key = summary.local
             shorts.push(short)
         }
@@ -2045,7 +2053,9 @@ semindex_own_spans: fn(summary: SemSummary, effect_name: String, spans: ^[Span])
         }
         return
     }
-    if summary.maximal && summary.maximal_span == .Val(span) -> spans.push(Span{start: span.start, end: span.end})
+    if summary.maximal && summary.maximal_span == .Val(span) {
+        spans.push(Span{start: span.start, end: span.end})
+    }
 }
 
 // The first call of `summary` into a callee outside the indexed modules whose
@@ -2069,7 +2079,9 @@ semindex_own_end: fn(summary: SemSummary, effect_name: String) -> Int Never! {
 }
 
 SEM_WITNESS_NONE: -1
+
 SEM_WITNESS_OWN: -2
+
 SEM_WITNESS_BOUNDARY: -3
 
 // One effect's witness for every summary row. A row's path starts with its
@@ -2117,13 +2129,13 @@ semindex_witnesses: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -
     index: semindex_index(summaries, modules)
     // Each row's callee rows in edge order, and the first rows (the rows a
     // key names) holding each effect, by effect in first-seen order.
-    calls := [[Int]]{}
-    first_rows := [Bool]{}
-    name_rows := [Int]{}
-    name_positions := [Int]{}
-    holders := [[Int]]{}
+    ^calls: [[Int]]{}
+    ^first_rows: [Bool]{}
+    ^name_rows: [Int]{}
+    ^name_positions: [Int]{}
+    ^holders: [[Int]]{}
     loop (row, summary) in summaries {
-        callees := [Int]{}
+        ^callees: [Int]{}
         loop callee in summary.edges {
             callee_row: index.by_key.get(callee) ?? next
             callees.push(callee_row)
@@ -2133,7 +2145,7 @@ semindex_witnesses: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -
         first_rows.push(first)
         if !first -> next
         loop (position, effect_name) in summary.solved {
-            graph := semindex_witness_graph(name_rows, name_positions, summaries, effect_name)
+            ^graph: semindex_witness_graph(name_rows, name_positions, summaries, effect_name)
             if graph < 0 {
                 graph = holders.len()
                 name_rows.push(row)
@@ -2143,9 +2155,9 @@ semindex_witnesses: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -
             holders[graph].push(row)
         }
     }
-    graphs := [SemEffectWitnesses]{}
+    ^graphs: [SemEffectWitnesses]{}
     loop (graph, rows) in holders {
-        eligible := [Bool]{}
+        ^eligible: [Bool]{}
         loop _ in 0..<summaries.len() -> eligible.push(false)
         loop row in rows -> eligible[row] = true
         effect_name: summaries[name_rows[graph]].solved[name_positions[graph]]
@@ -2160,16 +2172,16 @@ semindex_witnesses: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -
 // recursion, and each component is walked as it closes.
 semindex_effect_witnesses: fn(effect_name: String, summaries: [SemSummary], calls: [[Int]], first_rows: [Bool], eligible: [Bool]) -> SemEffectWitnesses Never! {
     count: summaries.len()
-    order := [Int]{}
-    low := [Int]{}
-    on_stack := [Bool]{}
-    component := [Int]{}
-    good := [Bool]{}
-    on_path := [Bool]{}
-    marks := [Int]{}
-    chain_starts := [Int]{}
-    chain_lens := [Int]{}
-    ends := [Int]{}
+    ^order: [Int]{}
+    ^low: [Int]{}
+    ^on_stack: [Bool]{}
+    ^component: [Int]{}
+    ^good: [Bool]{}
+    ^on_path: [Bool]{}
+    ^marks: [Int]{}
+    ^chain_starts: [Int]{}
+    ^chain_lens: [Int]{}
+    ^ends: [Int]{}
     loop _ in 0..<count {
         order.push(-1)
         low.push(0)
@@ -2182,14 +2194,14 @@ semindex_effect_witnesses: fn(effect_name: String, summaries: [SemSummary], call
         chain_lens.push(0)
         ends.push(SEM_WITNESS_NONE)
     }
-    chain_items := [Int]{}
+    ^chain_items: [Int]{}
     // Whether each closed component holds a row that reaches the effect.
-    reaches := [Bool]{}
-    stack := [Int]{}
-    frames := [Int]{}
-    cursors := [Int]{}
-    visits := 0
-    stamp := 0
+    ^reaches: [Bool]{}
+    ^stack: [Int]{}
+    ^frames: [Int]{}
+    ^cursors: [Int]{}
+    ^visits: 0
+    ^stamp: 0
     loop root in 0..<count {
         if !first_rows[root] || order[root] >= 0 -> next
         order[root] = visits
@@ -2220,13 +2232,13 @@ semindex_effect_witnesses: fn(effect_name: String, summaries: [SemSummary], call
                 if on_stack[callee] && order[callee] < low[row] -> low[row] = order[callee]
                 next
             }
-            _ := frames.pop()
-            _ := cursors.pop()
+            ^_: frames.pop()
+            ^_: cursors.pop()
             if top > 0 && low[row] < low[frames[top - 1]] -> low[frames[top - 1]] = low[row]
             if low[row] != order[row] -> next
             // `row` closes a component: the stack down to it.
             id: reaches.len()
-            members := [Int]{}
+            ^members: [Int]{}
             loop {
                 member: stack.pop() ?? break
                 on_stack[member] = false
@@ -2234,12 +2246,14 @@ semindex_effect_witnesses: fn(effect_name: String, summaries: [SemSummary], call
                 members.push(member)
                 if member == row -> break
             }
-            reached := false
+            ^reached: false
             loop member in members {
                 good[member] = semindex_own_end(summaries[member], effect_name) != SEM_WITNESS_NONE
                 loop callee in calls[member] {
                     if good[member] -> break
-                    if eligible[callee] && component[callee] != id && reaches[component[callee]] -> good[member] = true
+                    if eligible[callee] && component[callee] != id && reaches[component[callee]] {
+                        good[member] = true
+                    }
                 }
                 if good[member] -> reached = true
             }
@@ -2249,14 +2263,14 @@ semindex_effect_witnesses: fn(effect_name: String, summaries: [SemSummary], call
                 chain_starts[member] = chain_items.len()
                 chain_items.push(member)
                 on_path[member] = true
-                current := member
-                end := SEM_WITNESS_NONE
+                ^current: member
+                ^end: SEM_WITNESS_NONE
                 loop {
                     if semindex_reaches_itself(summaries[current], effect_name) {
                         end = SEM_WITNESS_OWN
                         break
                     }
-                    step := -1
+                    ^step: -1
                     loop callee in calls[current] {
                         if !eligible[callee] || on_path[callee] -> next
                         if component[callee] != id {
@@ -2277,10 +2291,14 @@ semindex_effect_witnesses: fn(effect_name: String, summaries: [SemSummary], call
                     on_path[step] = true
                     current = step
                 }
-                if end == SEM_WITNESS_NONE && semindex_boundary_call(summaries[current], effect_name) != None -> end = SEM_WITNESS_BOUNDARY
+                if end == SEM_WITNESS_NONE && semindex_boundary_call(summaries[current], effect_name) != None {
+                    end = SEM_WITNESS_BOUNDARY
+                }
                 ends[member] = end
                 chain_lens[member] = chain_items.len() - chain_starts[member]
-                loop at in chain_starts[member]..<chain_items.len() -> on_path[chain_items[at]] = false
+                loop at in chain_starts[member]..<chain_items.len() {
+                    on_path[chain_items[at]] = false
+                }
             }
         }
     }
@@ -2293,13 +2311,15 @@ semindex_effect_witnesses: fn(effect_name: String, summaries: [SemSummary], call
 // `stamp` for each row this search has seen.
 semindex_component_reaches: fn(start: Int, calls: [[Int]], eligible: [Bool], component: [Int], good: [Bool], on_path: [Bool], marks: ^[Int], stamp: Int) -> Bool Never! {
     id: component[start]
-    work := [Int]{start}
+    ^work: [Int]{start}
     marks[start] = stamp
     loop {
         row: work.pop() ?? return false
         if good[row] -> return true
         loop callee in calls[row] {
-            if !eligible[callee] || component[callee] != id || on_path[callee] || marks[callee] == stamp -> next
+            if !eligible[callee] || component[callee] != id || on_path[callee] || marks[callee] == stamp {
+                next
+            }
             marks[callee] = stamp
             work.push(callee)
         }
@@ -2311,12 +2331,12 @@ semindex_component_reaches: fn(start: Int, calls: [[Int]], eligible: [Bool], com
 // own spans or its boundary call. A name no solved row holds has no graph; a
 // path for it can only end at the function itself.
 semindex_witness: fn(witnesses: SemWitnesses, summaries: [SemSummary], function: String, effect_name: String) -> SemWitness? Never! {
-    row := witnesses.index.by_key.get(function) ?? return None
+    ^row: witnesses.index.by_key.get(function) ?? return None
     graph: semindex_witness_graph(witnesses.name_rows, witnesses.name_positions, summaries, effect_name)
-    path := [String]{}
-    spans := [Span]{}
-    last := row
-    end := SEM_WITNESS_NONE
+    ^path: [String]{}
+    ^spans: [Span]{}
+    ^last: row
+    ^end: SEM_WITNESS_NONE
     if graph < 0 {
         path.push(summaries[row].key)
         end = semindex_own_end(summaries[row], effect_name)
@@ -2328,12 +2348,16 @@ semindex_witness: fn(witnesses: SemWitnesses, summaries: [SemSummary], function:
         first: walk.chain_starts[row]
         loop position in 0..<walk.chain_lens[row] {
             member: walk.chain_items[first + position]
-            if position > 0 && semindex_indexed_span(summaries[last], summaries[member].key, witnesses.index) == .Val(span) -> spans.push(span)
+            if position > 0 && semindex_indexed_span(summaries[last], summaries[member].key, witnesses.index) == .Val(span) {
+                spans.push(span)
+            }
             path.push(summaries[member].key)
             last = member
         }
         if end < 0 -> break
-        if semindex_indexed_span(summaries[last], summaries[end].key, witnesses.index) == .Val(span) -> spans.push(span)
+        if semindex_indexed_span(summaries[last], summaries[end].key, witnesses.index) == .Val(span) {
+            spans.push(span)
+        }
         row = end
         last = end
     }
@@ -2354,10 +2378,10 @@ semindex_witness: fn(witnesses: SemWitnesses, summaries: [SemSummary], function:
 // effect rows quadratically).
 semindex_effects: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> [SemEffect] {
     witnesses: semindex_witnesses(summaries, modules)
-    output := [SemEffect]{}
+    ^output: [SemEffect]{}
     loop row in semindex_key_order(summaries) {
         summary: summaries[row]
-        provenance := [SemEffectProvenance]{}
+        ^provenance: [SemEffectProvenance]{}
         loop effect_name in summary.solved {
             found: semindex_witness(witnesses, summaries, summary.key, effect_name) ?? next
             provenance.push(SemEffectProvenance{effect_name: effect_name, call_path: found.path, spans: found.spans})
@@ -2380,17 +2404,17 @@ SemEffectIndex: struct {
 
 semindex_index: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> SemEffectIndex {
     by_key: semindex_summary_rows(summaries)
-    by_caller := [String:Int]{}
-    callers := [[SemCallTarget]]{}
+    ^by_caller: [String:Int]{}
+    ^callers: [[SemCallTarget]]{}
     loop doc_module in modules {
         storage: doc_module.name_ledger ?? next
         permit: storage.guard_read()
         loop fact in doc_module.call_facts {
             target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
-            group := by_caller.get(fact.caller_key) ?? -1
+            ^group: by_caller.get(fact.caller_key) ?? -1
             if group < 0 {
                 group = callers.len()
-                _ := by_caller.add(fact.caller_key, group)
+                ^_: by_caller.add(fact.caller_key, group)
                 callers.push([SemCallTarget]{})
             }
             callers[group].push(SemCallTarget{key: target, span: fact.span})
@@ -2401,17 +2425,17 @@ semindex_index: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> Se
 
 // Row indices ordered by summary key; equal keys keep row order (stable).
 semindex_key_order: fn(summaries: [SemSummary]) -> [Int] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop row in 0..<summaries.len() -> order.push(row)
-    width := 1
+    ^width: 1
     loop width < order.len() {
-        merged := [Int]{}
-        start := 0
+        ^merged: [Int]{}
+        ^start: 0
         loop start < order.len() {
             middle: if start + width < order.len() -> start + width else -> order.len()
             end: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
                 if {
                     right >= end || (left < middle && !(summaries[order[left]].key > summaries[order[right]].key)) -> {
@@ -2435,7 +2459,7 @@ semindex_key_order: fn(summaries: [SemSummary]) -> [Int] Never! {
 // The span of `summary`'s call to `callee`: its first call fact naming the
 // raw edge whose local key `callee` ends with.
 semindex_indexed_span: fn(summary: SemSummary, callee: String, index: SemEffectIndex) -> Span? {
-    raw_callee := ""
+    ^raw_callee: ""
     loop (row, edge) in summary.raw_edges {
         local: summary.edge_locals[row]
         if local == "" -> next
@@ -2453,9 +2477,9 @@ semindex_indexed_span: fn(summary: SemSummary, callee: String, index: SemEffectI
 
 // Each summary key's first row, the one semindex_summary finds.
 semindex_summary_rows: fn(summaries: [SemSummary]) -> [String:Int] Never! {
-    rows := [String:Int]{}
+    ^rows: [String:Int]{}
     loop (row, summary) in summaries {
-        if rows.get(summary.key) == None -> _ := rows.add(summary.key, row)
+        if rows.get(summary.key) == None -> ^_: rows.add(summary.key, row)
     }
     rows
 }
@@ -2465,7 +2489,7 @@ semindex_summary_rows: fn(summaries: [SemSummary]) -> [String:Int] Never! {
 // `summary_rows` is semindex_summary_rows of `summaries`.
 semindex_apply_inferred_rows: fn(db: ^SemDB, doc_module: JetDriverDocModule, summaries: [SemSummary], summary_rows: [String:Int], first: Int) {
     prefix: "{semindex_module_alias(doc_module)}."
-    inline_keys := [String:String]{}
+    ^inline_keys: [String:String]{}
     loop item in doc_module.items {
         if item == .CodeModule(code_module) {
             if code_module.body == .Val(body) {
@@ -2479,15 +2503,17 @@ semindex_apply_inferred_rows: fn(db: ^SemDB, doc_module: JetDriverDocModule, sum
     }
     // The member signature each inferred identity shows; of two definitions
     // of one identity, the later one's.
-    signatures := [String:String]{}
-    inferred_any := false
+    ^signatures: [String:String]{}
+    ^inferred_any: false
     loop index in first..<db.defs.len() {
         inferred: semindex_inferred_row(db.defs[index], doc_module, summaries, summary_rows, prefix, inline_keys, db.view_provenance) ?? next
         signatures[db.defs[index].identity] = inferred.signature
         inferred_any = true
         db.defs[index].kind = SemKind.Function{callable: inferred.callable}
     }
-    if !inferred_any -> return
+    if !inferred_any {
+        return
+    }
     loop member_index in 0..<db.members.len() {
         if signatures.get(db.members[member_index].identity) == .Val(signature) {
             db.members[member_index].signature = signature
@@ -2508,7 +2534,7 @@ semindex_inferred_row: fn(definition: SemDef, doc_module: JetDriverDocModule, su
     if callable.foreign_boundary || callable.effects != None || callable.effect_via != None {
         return None
     }
-    local_key := definition.name
+    ^local_key: definition.name
     if {
         inline_keys.get("{definition.def_span.start}:{definition.def_span.end}") == .Val(key) -> {
             local_key = key
@@ -2524,7 +2550,7 @@ semindex_inferred_row: fn(definition: SemDef, doc_module: JetDriverDocModule, su
     row: summary_rows.get("{prefix}{local_key}") ?? return None
     summary: summaries[row]
     rows: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}
-    updated := callable.move()
+    ^updated: callable.move()
     updated.effects = Val(rows)
     signature: semindex_fn_signature(definition.name, updated, view_provenance.get(definition.identity))
     Val(SemInferredRow{callable: updated.move(), signature: signature})
@@ -2571,7 +2597,7 @@ semindex_anchor_kind: fn(db: SemDB, sites: SemGroups, group: Int, target: SemAnc
 
 // `SymbolDB.align_reference_targets`.
 semindex_align_reference_targets: fn(db: ^SemDB) {
-    sites := semindex_groups()
+    ^sites: semindex_groups()
     loop (position, definition) in db.defs {
         semindex_group_add(sites, semindex_site_key(definition.module_path, definition.def_span), position)
     }
@@ -2580,10 +2606,10 @@ semindex_align_reference_targets: fn(db: ^SemDB) {
         // copy: the reference's target (owner: db.refs[index], replaced below) and the aligned
         // anchor built from it (owner: `anchor`) are both live while db is read for its kind and
         // matches; an element field cannot be moved out (E0225).
-        anchor := target.copy()
+        ^anchor: target.copy()
         group: semindex_group(sites, semindex_site_key(target.module_path, target.def_span))
         anchor.kind = semindex_anchor_kind(db, sites, group, target)
-        matches := [String]{}
+        ^matches: [String]{}
         if group >= 0 {
             loop position in sites.groups[group] {
                 definition: db.defs[position]
@@ -2620,10 +2646,10 @@ semindex_named_key: fn(module_path: String, name: String) -> String Never! {
 }
 
 semindex_call_lookup: fn(db: SemDB, modules: [JetDriverDocModule]) -> SemCallLookup Never! {
-    ledgers := [String:Int]{}
-    facts := semindex_groups()
-    functions := [String:SemFunctionAt]{}
-    identities := [String:Int]{}
+    ^ledgers: [String:Int]{}
+    ^facts: semindex_groups()
+    ^functions: [String:SemFunctionAt]{}
+    ^identities: [String:Int]{}
     loop (position, doc_module) in modules {
         if doc_module.name_ledger == .Val(_) && ledgers.get(doc_module.path) == None {
             ledgers[doc_module.path] = position
@@ -2632,13 +2658,15 @@ semindex_call_lookup: fn(db: SemDB, modules: [JetDriverDocModule]) -> SemCallLoo
             }
         }
         loop (row, function) in doc_module.functions {
-            if functions.get(function.key) == None -> functions[function.key] = SemFunctionAt{owner: position, row: row}
+            if functions.get(function.key) == None {
+                functions[function.key] = SemFunctionAt{owner: position, row: row}
+            }
         }
         if doc_module.module_identity != "" && identities.get(doc_module.module_identity) == None {
             identities[doc_module.module_identity] = position
         }
     }
-    named := semindex_groups()
+    ^named: semindex_groups()
     loop (position, definition) in db.defs {
         semindex_group_add(named, semindex_named_key(definition.module_path, definition.name), position)
     }
@@ -2658,7 +2686,7 @@ semindex_call_targets: fn(db: ^SemDB, modules: [JetDriverDocModule]) {
     lookup: semindex_call_lookup(db, modules)
     loop index in 0..<db.refs.len() {
         if db.refs[index].target != None -> next
-        target := SemAnchor?{None}
+        ^target: SemAnchor?{None}
         site: semindex_site_key(db.refs[index].module_path, db.refs[index].span)
         group: semindex_group(lookup.facts, site)
         if group < 0 && db.free_calls.get(site) != None {
@@ -2693,7 +2721,7 @@ semindex_site_key: fn(module_path: String, span: Span) -> String Never! {
 semindex_free_call_anchor: fn(db: SemDB, lookup: SemCallLookup, module_path: String, name: String) -> SemAnchor? Never! {
     group: semindex_group(lookup.named, semindex_named_key(module_path, name))
     if group < 0 -> return None
-    found := SemAnchor?{None}
+    ^found: SemAnchor?{None}
     loop position in lookup.named.groups[group] {
         definition: db.defs[position]
         if found != None || semindex_definition_kind(definition.kind) != "function" || !definition.identity.starts_with("fn:") {
@@ -2725,14 +2753,14 @@ semindex_callee_anchor: fn(db: SemDB, lookup: SemCallLookup, modules: [JetDriver
 semindex_function_anchor: fn(db: SemDB, lookup: SemCallLookup, module_path: String, name: String, foreign: Bool{false}) -> SemAnchor? Never! {
     group: semindex_group(lookup.named, semindex_named_key(module_path, name))
     if group < 0 -> return None
-    found := SemAnchor?{None}
+    ^found: SemAnchor?{None}
     loop position in lookup.named.groups[group] {
         definition: db.defs[position]
         if semindex_definition_kind(definition.kind) != "function" || !definition.identity.starts_with("fn:") {
             next
         }
         if foreign {
-            boundary := false
+            ^boundary: false
             if definition.kind == .Function(callable) -> boundary = callable.foreign_boundary
             if !boundary -> next
         }
@@ -2774,7 +2802,7 @@ semindex_definition_signature: fn(definition: SemDefinition) -> String {
         .Function(callable) -> {
             contract: loop parameter in callable.params -> "{parameter.label}:{semindex_zone_name(parameter.zone)}:{if parameter.variadic -> "true" else -> "false"}"
             types: loop parameter in callable.params -> type_name(parameter.ty)
-            views := [String]{}
+            ^views: [String]{}
             if definition.view_provenance == .Val(map) {
                 loop entry in map.entries {
                     views.push(sema_compiler_index_view_provenance(entry.value))
@@ -2795,9 +2823,9 @@ semindex_definition_signature: fn(definition: SemDefinition) -> String {
 // string literals.
 semindex_normalize_definition: fn(source: String) -> String {
     bytes: source.bytes()
-    output := [U8]{}
-    in_string := false
-    index := 0
+    ^output: [U8]{}
+    ^in_string: false
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if in_string {
@@ -2873,7 +2901,7 @@ semindex_nominal_methods: fn(methods: [Func], blocks: [TraitImplBlock], output: 
 // span is its type's name) has no text of its own, nor has a catalog family
 // the units prelude injected.
 semindex_written_declarations: fn(items: [Item]) -> [SemDeclarationAt] Never! {
-    output := [SemDeclarationAt]{}
+    ^output: [SemDeclarationAt]{}
     loop item in items {
         if item == {
             .Impl(implementation) -> {
@@ -2910,8 +2938,8 @@ semindex_written_declarations: fn(items: [Item]) -> [SemDeclarationAt] Never! {
 // (module, start, listing order). A catalog family's symbol is never it: its
 // span indexes the prelude text.
 semindex_declared_definition: fn(definitions: [SemDefinition], candidates: [SemDefinitionAt], module_path: String, declaration: SemDeclarationAt, catalog: [NamedSpan]) -> Int? Never! {
-    first := 0
-    high := candidates.len()
+    ^first: 0
+    ^high: candidates.len()
     loop first < high {
         middle: first + (high - first) /% 2
         if {
@@ -2944,8 +2972,8 @@ semindex_declared_definition: fn(definitions: [SemDefinition], candidates: [SemD
 // that definition's. A definition gets at most one fact, and a text outside
 // its module's source none.
 semindex_definition_facts: fn(definitions: [SemDefinition], modules: [JetDriverDocModule]) -> [SemDefinitionFact] {
-    output := [SemDefinitionFact]{}
-    candidates := [SemDefinitionAt]{}
+    ^output: [SemDefinitionFact]{}
+    ^candidates: [SemDefinitionAt]{}
     loop (index, definition) in definitions {
         if definition.def.kind == {
             .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> next
@@ -2954,13 +2982,13 @@ semindex_definition_facts: fn(definitions: [SemDefinition], modules: [JetDriverD
         candidates.push(SemDefinitionAt{module_path: definition.def.module_path, start: definition.def.def_span.start, end: definition.def.def_span.end, index: index})
     }
     candidates.sort_by(fn(left: SemDefinitionAt, right: SemDefinitionAt) { (left.module_path <=> right.module_path).then(left.start <=> right.start).then(left.index <=> right.index) })
-    walked := [String:Bool]{}
-    credited := [Int:Bool]{}
+    ^walked: [String:Bool]{}
+    ^credited: [Int:Bool]{}
     loop doc_module in modules {
         if walked.has_key(doc_module.path) -> next
         walked[doc_module.path] = true
         source: doc_module.source.bytes()
-        catalog := [NamedSpan]{}
+        ^catalog: [NamedSpan]{}
         loop item in doc_module.items {
             if item == .UnitFamily(family) && family.resolved_owner == Val("core.units") {
                 catalog.push(NamedSpan{name: family.family, span: family.family_span})
@@ -2997,7 +3025,7 @@ semindex_definition_facts: fn(definitions: [SemDefinition], modules: [JetDriverD
 
 semindex_hex: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    output := [U8]{}
+    ^output: [U8]{}
     loop byte in bytes {
         value: Int{byte}
         output.push(digits[value /% 16])
@@ -3007,7 +3035,7 @@ semindex_hex: fn(bytes: [U8]) -> String Never! {
 }
 
 semindex_exported: fn(item: Item) -> String? Never! {
-    name := String?{None}
+    ^name: String?{None}
     if item == {
         .Func(value) -> {
             if value.is_pub -> name = Val(value.name)
@@ -3032,11 +3060,11 @@ semindex_exported: fn(item: Item) -> String? Never! {
 // `SymbolDB.finalize_index` instance rows. An instance expanded inside a
 // module body (a template's nested module) is a row too.
 semindex_instances: fn(modules: [JetDriverDocModule]) -> [SemInstance] {
-    output := [SemInstance]{}
+    ^output: [SemInstance]{}
     loop doc_module in modules {
         loop code_module in semindex_instance_modules(doc_module.items) {
             identity: code_module.instance_identity ?? next
-            exported := [String]{}
+            ^exported: [String]{}
             if code_module.body == .Val(body) {
                 loop nested in body {
                     if semindex_exported(nested) == .Val(name) -> exported.push(name)
@@ -3054,7 +3082,7 @@ semindex_instances: fn(modules: [JetDriverDocModule]) -> [SemInstance] {
 // The module instances among `items` and inside their module bodies, in
 // source order.
 semindex_instance_modules: fn(items: [Item]) -> [CodeModule] {
-    found := [CodeModule]{}
+    ^found: [CodeModule]{}
     loop item in items {
         if item == .CodeModule(code_module) {
             if code_module.instance_identity != None -> found.push(code_module.copy())
@@ -3082,17 +3110,17 @@ semindex_output_kind: fn(kind: OutputKind) -> String Never! {
 
 // `SymbolDB.finalize_index` output rows.
 semindex_outputs: fn(modules: [JetDriverDocModule]) -> [SemOutput] {
-    output := [SemOutput]{}
+    ^output: [SemOutput]{}
     loop doc_module in modules {
         loop item in doc_module.items {
             if item == .Const(value) {
                 resolved: value.resolved_output ?? next
-                target_alias := semindex_module_alias(doc_module)
+                ^target_alias: semindex_module_alias(doc_module)
                 if resolved.module_id >= 0 && resolved.module_id < modules.len() {
                     target_alias = semindex_module_alias(modules[resolved.module_id])
                 }
                 params: loop parameter in resolved.params -> type_name(parameter.ty)
-                return_type := String?{None}
+                ^return_type: String?{None}
                 if resolved.return_type == .Val(ty) -> return_type = Val(type_name(ty))
                 output.push(
                     SemOutput{
@@ -3123,7 +3151,7 @@ semindex_outputs: fn(modules: [JetDriverDocModule]) -> [SemOutput] {
 }
 
 semindex_state_graphs: fn(modules: [JetDriverDocModule]) -> [SemStateGraph] {
-    output := [SemStateGraph]{}
+    ^output: [SemStateGraph]{}
     loop doc_module in modules {
         facts: sema_state_graph_facts(doc_module.items)
         loop item in doc_module.items {
@@ -3131,9 +3159,9 @@ semindex_state_graphs: fn(modules: [JetDriverDocModule]) -> [SemStateGraph] {
                 state: definition.state ?? next
                 loop fact in facts {
                     if fact.type_name != definition.name -> next
-                    states := [SemStateNode]{}
+                    ^states: [SemStateNode]{}
                     loop node in fact.states {
-                        span := Span{start: 0, end: 0}
+                        ^span: Span{start: 0, end: 0}
                         loop entry in state.states {
                             if entry.name == node.name {
                                 span = entry.span
@@ -3155,7 +3183,7 @@ semindex_state_graphs: fn(modules: [JetDriverDocModule]) -> [SemStateGraph] {
 // `member_signatures`: sorted, deduplicated. `by_kind` groups the members by
 // semindex_member_key.
 semindex_member_signatures: fn(members: [SemMember], by_kind: SemGroups, owner: String, origin: String, trait_name: String) -> [String] {
-    methods := [String]{}
+    ^methods: [String]{}
     group: semindex_group(by_kind, semindex_member_key(owner, origin, trait_name))
     if group >= 0 {
         loop position in by_kind.groups[group] -> methods.push(members[position].signature)
@@ -3211,7 +3239,7 @@ semindex_collect_trait_contracts: fn(items: [Item], owner: String, members: [Sem
 
 semindex_find_declaration: fn(items: [Item], span: Span) -> Item? {
     loop item in items {
-        declaration := Span?{None}
+        ^declaration: Span?{None}
         if item == {
             .Distinct(value) -> { declaration = Val(value.name_span) }
             .Struct(value) -> { declaration = Val(value.name_span) }
@@ -3222,7 +3250,7 @@ semindex_find_declaration: fn(items: [Item], span: Span) -> Item? {
         if declaration == .Val(found) {
             if found.start == span.start && found.end == span.end -> return Val(item)
         }
-        nested_items := [Item]?{None}
+        ^nested_items: [Item]?{None}
         if item == {
             .CodeModule(code_module) -> { nested_items = code_module.body }
             .GenericModule(generic) -> nested_items = Val(generic.body)
@@ -3236,22 +3264,22 @@ semindex_find_declaration: fn(items: [Item], span: Span) -> Item? {
 }
 
 semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefinition] {
-    by_kind := semindex_groups()
+    ^by_kind: semindex_groups()
     loop (position, member) in db.members {
         semindex_group_add(by_kind, semindex_member_key(member.owner, member.origin, member.origin_trait), position)
     }
     // A definition's module path -> the first module of that path or alias.
-    module_at := [String:Int]{}
+    ^module_at: [String:Int]{}
     loop (position, doc_module) in modules {
         if module_at.get(doc_module.path) == None -> module_at[doc_module.path] = position
         if module_at.get(doc_module.alias) == None -> module_at[doc_module.alias] = position
     }
-    output := [SemDefinition]{}
+    ^output: [SemDefinition]{}
     loop def in db.defs {
-        derives := [String]{}
-        nominal_base := String?{None}
-        contracts := [SemTraitContract]{}
-        needs_contracts := false
+        ^derives: [String]{}
+        ^nominal_base: String?{None}
+        ^contracts: [SemTraitContract]{}
+        ^needs_contracts: false
         if def.kind == {
             .Struct(_, values) | .Enum(_, values) | .Type(values) -> {
                 derives = values
@@ -3292,7 +3320,7 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
 semindex_walk: fn(doc_module: JetDriverDocModule, module_paths: [Int:String], bodies: Bool{true}) -> SemWalk {
     // copy: `doc_module.block_spans` stays in the indexed module (owner: the caller's modules;
     // no move out of a read parameter, E0201) and the walk orders its own.
-    block_spans := doc_module.block_spans.copy()
+    ^block_spans: doc_module.block_spans.copy()
     block_spans.sort_by(fn(left: Span, right: Span) { left.start <=> right.start })
     block_next: loop index in 0..<block_spans.len() + 1 -> index
     SemWalk{
@@ -3320,7 +3348,7 @@ semindex_walk: fn(doc_module: JetDriverDocModule, module_paths: [Int:String], bo
 // A reference's symbol names its module by ModuleID; each checked module
 // carries its own, so the id finds the module's path directly.
 semindex_module_paths: fn(modules: [JetDriverDocModule]) -> [Int:String] Never! {
-    module_paths := [Int:String]{}
+    ^module_paths: [Int:String]{}
     loop doc_module in modules -> module_paths[Int{doc_module.module_id.id}] = doc_module.path
     module_paths
 }
@@ -3336,7 +3364,7 @@ semindex_instance_key: fn(identity: String, module_path: String, span: Span) -> 
 // witness search is most of a large program's index cost), for a reader of
 // its definitions alone.
 semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_projection: SemEffectProjection, effects: Bool{true}) -> SemIndex {
-    db := semindex_db()
+    ^db: semindex_db()
     db.declarations = semindex_declarations(modules)
     module_paths: semindex_module_paths(modules)
     summaries: semindex_summaries(modules)
@@ -3344,14 +3372,14 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
     stage_rows: semindex_local_stage_rows(summaries)
     // Where the walk of each module path began in `db.refs` and `db.defs`: a
     // later module of one path reads the earlier one's rows too.
-    first_refs := [String:Int]{}
-    first_defs := [String:Int]{}
+    ^first_refs: [String:Int]{}
+    ^first_defs: [String:Int]{}
     loop doc_module in modules {
         if first_refs.get(doc_module.path) == None {
             first_refs[doc_module.path] = db.refs.len()
             first_defs[doc_module.path] = db.defs.len()
         }
-        ctx := semindex_walk(doc_module, module_paths)
+        ^ctx: semindex_walk(doc_module, module_paths)
         ctx.written_returns = semindex_written_returns(doc_module)
         ctx.local_types = semindex_local_types(doc_module)
         ctx.local_stages = semindex_local_stages(doc_module, summaries, stage_rows, interner)
@@ -3363,16 +3391,20 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
     semindex_import_alias_defs(db, modules)
     // The instance definitions present, by identity and site
     // (semindex_instance_key).
-    present := [String:Bool]{}
+    ^present: [String:Bool]{}
     loop definition in db.defs {
-        if definition.identity.starts_with("instance:") -> present[semindex_instance_key(definition.identity, definition.module_path, definition.def_span)] = true
+        if definition.identity.starts_with("instance:") {
+            present[semindex_instance_key(definition.identity, definition.module_path, definition.def_span)] = true
+        }
     }
     loop doc_module in modules {
         loop instance in semindex_instance_modules(doc_module.items) {
             identity: instance.instance_identity ?? next
             semantic: "instance:{identity.fingerprint}"
             loop application in identity.applications {
-                if present.has_key(semindex_instance_key(semantic, doc_module.path, application.span)) -> next
+                if present.has_key(semindex_instance_key(semantic, doc_module.path, application.span)) {
+                    next
+                }
                 present[semindex_instance_key(application.semantic_identity, doc_module.path, application.span)] = true
                 db.defs.push(SemDef{identity: application.semantic_identity, name: application.name, qualified_name: application.name, def_span: application.span, module_path: doc_module.path, kind: SemKind.Module})
             }
@@ -3385,16 +3417,16 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
     definition_facts: semindex_definition_facts(definitions, modules)
     // One relation holds every derivation the check made: each written
     // definition's, then each frame schedule's.
-    derivations := derivation_store_new()
+    ^derivations: derivation_store_new()
     loop fact in definition_facts {
         record: derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
         _: derivation_store_add(derivations, record) ?? panic("checked definition {fact.stable_id}: {err.message}")
     }
     semindex_frame_derivations(modules, derivations)
-    arithmetic := db.arithmetic.move()
+    ^arithmetic: db.arithmetic.move()
     arithmetic = loop fresh_item in arithmetic -> fresh_item
     arithmetic.sort_by(fn(left: SemArithmetic, right: SemArithmetic) { (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end) })
-    display_paths := [String:String]{}
+    ^display_paths: [String:String]{}
     loop doc_module in modules -> sema_name_generated_type_paths(doc_module.items, display_paths)
     SemIndex{
         definitions: definitions,
@@ -3421,11 +3453,11 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
 // derivations, so a workspace outlines its saved files at the cost of their
 // declarations.
 semindex_build_outline: fn(modules: [JetDriverDocModule]) -> SemIndex {
-    db := semindex_db()
+    ^db: semindex_db()
     db.declarations = semindex_declarations(modules)
     module_paths: semindex_module_paths(modules)
     loop doc_module in modules {
-        ctx := semindex_walk(doc_module, module_paths, bodies: false)
+        ^ctx: semindex_walk(doc_module, module_paths, bodies: false)
         loop item in doc_module.items -> semindex_item(item, db, ctx, modules)
     }
     semindex_import_alias_defs(db, modules)

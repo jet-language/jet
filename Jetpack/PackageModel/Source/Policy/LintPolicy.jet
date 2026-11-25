@@ -22,7 +22,7 @@ pkg_lint_policy_is_denied: fn(deny: [String], code: String) -> Bool Never! {
 // Apply the package wall to every lint one sema run emitted: a denied lint
 // becomes E1293; everything else passes through unchanged.
 pkg_lint_policy_apply: fn(deny: [String], diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
-    out := [Diagnostic]{}
+    ^out: [Diagnostic]{}
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_LINT && pkg_lint_policy_is_denied(deny, diagnostic.code) {
             out.push(pkg_lint_e1293(diagnostic))
@@ -35,7 +35,7 @@ pkg_lint_policy_apply: fn(deny: [String], diagnostics: [Diagnostic]) -> [Diagnos
 pkg_lint_e1293: fn(original: Diagnostic) -> Diagnostic Never! {
     row: diagnostic_registry_row("E1293") ?? panic("diagnostic `E1293` has no generated Source registry row")
     name: pkg_lint_name_for_code(original.code) ?? original.code
-    why := original.why
+    ^why: original.why
     loop why.ends_with(".") -> why = why.removesuffix(".")
     holes: [{key: String, value: String}]{
         {key: "name", value: name},
@@ -44,7 +44,7 @@ pkg_lint_e1293: fn(original: Diagnostic) -> Diagnostic Never! {
         {key: "why_text", value: why},
         {key: "fix_text", value: original.fix},
     }
-    denied := diagnostic_from_registry("E1293", original.span, pkg_lint_fill_row(row.what, holes), pkg_lint_fill_row(row.why, holes), pkg_lint_fill_row(row.fix, holes))
+    ^denied: diagnostic_from_registry("E1293", original.span, pkg_lint_fill_row(row.what, holes), pkg_lint_fill_row(row.why, holes), pkg_lint_fill_row(row.fix, holes))
     // The lint's site stays its site.
     denied.source_path = original.source_path
     denied.source_offset = original.source_offset
@@ -55,7 +55,7 @@ pkg_lint_e1293: fn(original: Diagnostic) -> Diagnostic Never! {
 
 // Replace each `{hole}` of a registry template with its value.
 pkg_lint_fill_row: fn(template: String, holes: [{key: String, value: String}]) -> String Never! {
-    out := template
+    ^out: template
     loop hole in holes -> out = out.replace("{{{hole.key}}}", hole.value)
     out
 }
@@ -65,7 +65,7 @@ pkg_lint_fill_row: fn(template: String, holes: [{key: String, value: String}]) -
 // default: the result is empty and every lint stays a warning.
 pkg_lint_enforce: fn(lints: [Diagnostic], manifest: PackageFacts) -> [Diagnostic] Never! {
     deny: manifest.policy.lints_deny ?? [String]{}
-    out := [Diagnostic]{}
+    ^out: [Diagnostic]{}
     loop diagnostic in pkg_lint_policy_apply(deny, lints) {
         if diagnostic.code == "E1293" -> out.push(diagnostic)
     }
@@ -77,7 +77,7 @@ pkg_lint_enforce: fn(lints: [Diagnostic], manifest: PackageFacts) -> [Diagnostic
 // truthful report.
 pkg_lint_non_denied: fn(lints: [Diagnostic], manifest: PackageFacts) -> [Diagnostic] Never! {
     deny: manifest.policy.lints_deny ?? [String]{}
-    out := [Diagnostic]{}
+    ^out: [Diagnostic]{}
     loop lint in lints {
         if !pkg_lint_policy_is_denied(deny, lint.code) -> out.push(lint.copy())
     }

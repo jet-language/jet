@@ -42,14 +42,14 @@ jet_driver_source_query: fn(request: JetDriverCompileRequest) -> JetDriverSource
 // the ledger, so a compile's `jet_driver_load` leaves `names` None. The
 // ledger names every declaration of each loaded Core module, reached or not.
 jet_driver_load_with_names: fn(request: JetDriverCompileRequest) -> JetDriverLoadResult {
-    load := jet_driver_load_reach(request, false)
+    ^load: jet_driver_load_reach(request, false)
     load.names = Val(jet_driver_loaded_names(load.modules, load.source_units, load.imports))
     load
 }
 
 jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
-    entry_package_version := String?{None}
-    dependency_roots := [String:String]{}
+    ^entry_package_version: String?{None}
+    ^dependency_roots: [String:String]{}
     loop package in load.packages {
         if package.identity == load.package_identity {
             entry_package_version = package.version
@@ -64,12 +64,12 @@ jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriver
             break
         }
     }
-    modules := [JetDriverSourceQueryModule]{}
+    ^modules: [JetDriverSourceQueryModule]{}
     source_positions: jet_driver_source_file_positions(load.source_files)
     loop loaded in load.modules {
         unit: load.source_units[loaded.source_unit_index]
-        physical := unit.path
-        source := ""
+        ^physical: unit.path
+        ^source: ""
         if unit.source_origin == SemaSourceOrigin.Snapshot && unit.root_index >= 0 && unit.file_index >= 0 {
             file: request.authorized_sources.roots[unit.root_index].files[unit.file_index]
             physical = file.path
@@ -89,7 +89,7 @@ jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriver
             },
         )
     }
-    entry_index := -1
+    ^entry_index: -1
     loop (index, module_row) in load.modules {
         if module_row.module_identity == load.entry_module_identity -> entry_index = index
     }
@@ -101,20 +101,20 @@ jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriver
 // loaded modules for the read and back after it (pushing each program into
 // the list copied the whole parse tree).
 jet_driver_loaded_names: fn(loaded: ^[JetDriverLoadedModule], units: [JetDriverSourceUnit], edges: [SemaRegistrationImportEdge]) -> NameLedger Never! {
-    modules := [NameModule]{}
-    programs := [Program]{}
-    positions := [U32:Int]{}
+    ^modules: [NameModule]{}
+    ^programs: [Program]{}
+    ^positions: [U32:Int]{}
     loop index in 0..<loaded.len() {
         unit_index: loaded[index].source_unit_index
         positions[loaded[index].module_identity.id] = index
         namespace: if units[unit_index].in_namespace -> Val(loaded[index].package_identity) else -> None
         modules.push(NameModule{alias: loaded[index].module_name, path: jet_driver_module_display(units[unit_index].relative_path), package: loaded[index].package_identity, namespace: namespace})
-        items := ast_program()
+        ^items: ast_program()
         compiler_transfer_rows<Item>(items.items, loaded[index].program.items)
         programs.push(items)
     }
-    aliases := [NameAlias]{}
-    structure := [StructureFact]{}
+    ^aliases: [NameAlias]{}
+    ^structure: [StructureFact]{}
     loop edge in edges {
         source: positions.get(edge.source_module_identity.id) ?? next
         target: positions.get(edge.target_module_identity.id) ?? next

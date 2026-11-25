@@ -193,7 +193,7 @@ stage_entry: fn(repo_dir: String, entry_dir: String, entry: Dyn, run_dir: String
     languages_value: member(entry, "languages") ?? Dyn.Array([])
     languages: texts_at(languages_value, "")
     mode: text_or_empty(entry, "mode")
-    provenance := Dyn.object()
+    ^provenance: Dyn.object()
     provenance["entry_json_sha256"] = Dyn.Text(file_sha256(path_joined(entry_dir, "entry.json")))
     provenance["corpus_tree_sha256"] = Dyn.Text(tree_sha256(entry_dir))
     files.create_dir_all(entry_stage)
@@ -208,7 +208,7 @@ stage_entry: fn(repo_dir: String, entry_dir: String, entry: Dyn, run_dir: String
     fixture: dyn_at(entry, "spec/fixtureGen")
     common_fixtures: path_joined(entry_stage, "fixtures")
     fixture_out: js_text(dyn_at(fixture, "out"))
-    generated := ""
+    ^generated: ""
     if truthy(Val(fixture)) {
         script: js_text(dyn_at(fixture, "script"))
         fixture_dir: path_joined(entry_dir, files.dirname(script))
@@ -239,11 +239,11 @@ stage_entry: fn(repo_dir: String, entry_dir: String, entry: Dyn, run_dir: String
     runs: options.runs ?? (if truthy_at(entry, "perf") -> 7 else -> 3)
     not_measured: if options.measure == .Val(list) -> "not measured: this run measures {list.join(", ")} only" else -> ""
     st: Staging{s: s, entry: entry.copy(), entry_dir: entry_dir.copy(), entry_stage: entry_stage.copy(), mode: mode.copy(), expected: expected, expected_path: expected_path, fixture_out: fixture_out, common_fixtures: common_fixtures, generated: generated, runs: runs, measure: options.measure.copy(), not_measured: not_measured}
-    rows := Dyn.object()
-    jet_reset := no_reset()
+    ^rows: Dyn.object()
+    ^jet_reset: no_reset()
     loop language in languages -> rows[language] = stage_row(st, language, jet_reset)
     tiers: jet_tiers(st, rows, jet_reset, options)
-    ready := true
+    ^ready: true
     loop rule in tier_policy(mode) {
         if rule.required && !(dyn_at(tiers, "{rule.tier}/status") == Dyn.Text("ok")) {
             ready = false
@@ -253,7 +253,7 @@ stage_entry: fn(repo_dir: String, entry_dir: String, entry: Dyn, run_dir: String
         status: dyn_at(rows, "{language}/status")
         if !(status == Dyn.Text("ok") || status == Dyn.Text("not_applicable")) -> ready = false
     }
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["entry"] = entry.copy()
     out["status"] = Dyn.Text(if ready -> "ok" else -> "broken")
     out["stage"] = Dyn.Text(entry_stage)
@@ -306,9 +306,9 @@ clock_offset_ns: fn(launcher: String, run_dir: String) -> Int {
 // An entry that could not be staged for `reason`: every row and Jet tier
 // broken or unavailable for it.
 broken_entry: fn(entry: Dyn, languages_value: Dyn, languages: [String], options: StageOptions, reason: String, provenance: Dyn) -> Dyn {
-    rows := Dyn.object()
+    ^rows: Dyn.object()
     loop language in languages {
-        row := Dyn.object()
+        ^row: Dyn.object()
         row["language"] = Dyn.Text(language.copy())
         row["status"] = Dyn.Text("broken")
         row["disqualified"] = Dyn.Bool(true)
@@ -317,11 +317,11 @@ broken_entry: fn(entry: Dyn, languages_value: Dyn, languages: [String], options:
         row["diagnostics"] = Dyn.Array([])
         rows[language] = row
     }
-    tiers := Dyn.object()
+    ^tiers: Dyn.object()
     loop rule in tier_policy(text_or_empty(entry, "mode")) {
         tiers[rule.tier] = unavailable_tier(rule, if rule.tier == "dev" && !options.dev -> "jet dev is unavailable" else -> reason.copy())
     }
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["entry"] = entry.copy()
     out["status"] = Dyn.Text("broken")
     out["reason"] = Dyn.Text(reason.copy())
@@ -335,7 +335,7 @@ broken_entry: fn(entry: Dyn, languages_value: Dyn, languages: [String], options:
 
 // A tier that could not run for `reason`.
 unavailable_tier: fn(rule: TierRule, reason: String) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["applicable"] = Dyn.Bool(true)
     out["required"] = Dyn.Bool(rule.required)
     out["status"] = Dyn.Text("unavailable")
@@ -350,7 +350,7 @@ stage_row: fn(st: Staging, language: String, jet_reset: ^Reset) -> Dyn IOError! 
     base: base_language(language)
     source_dir: path_joined(st.entry_dir, language_source_dir(language))
     source_file: language_file(base)
-    row := Dyn.object()
+    ^row: Dyn.object()
     row["language"] = Dyn.Text(language.copy())
     row["status"] = Dyn.Text("broken")
     row["metrics"] = Dyn.object()
@@ -362,12 +362,12 @@ stage_row: fn(st: Staging, language: String, jet_reset: ^Reset) -> Dyn IOError! 
         row["disqualified"] = Dyn.Bool(false)
         put_present(row, "reason", value_at(declared, "reason"))
         put_present(row, "evidence", value_at(declared, "evidence"))
-        verification := Dyn.object()
+        ^verification: Dyn.object()
         verification["status"] = Dyn.Text("not_applicable")
         verification["kind"] = Dyn.Text("declared_non_applicability")
         put_present(verification, "reason", value_at(declared, "reason"))
         row["verification"] = verification
-        provenance := Dyn.object()
+        ^provenance: Dyn.object()
         provenance["source"] = Dyn.Null
         provenance["source_sha256"] = Dyn.Null
         provenance["base_language"] = Dyn.Text(base.copy())
@@ -385,7 +385,7 @@ stage_row: fn(st: Staging, language: String, jet_reset: ^Reset) -> Dyn IOError! 
         row["status"] = Dyn.Text("unavailable")
         row["reason"] = Dyn.Text(st.not_measured.copy())
         row["not_measured"] = Dyn.Bool(true)
-        provenance := Dyn.object()
+        ^provenance: Dyn.object()
         provenance["source_tree_sha256"] = Dyn.Text(source_tree_sha256.copy())
         provenance["base_language"] = Dyn.Text(base.copy())
         row["provenance"] = provenance
@@ -408,7 +408,7 @@ stage_row: fn(st: Staging, language: String, jet_reset: ^Reset) -> Dyn IOError! 
         }
         files.copy(full, files.join(staged, item.name))
     }
-    fixture_reset := no_reset()
+    ^fixture_reset: no_reset()
     if fixture && st.generated != "" {
         fixture_reset = Reset{state_dir: "", fixture_target: path_joined(staged, st.fixture_out), fixture_source: st.generated.copy(), make_parent: true}
         restore(fixture_reset)
@@ -424,7 +424,7 @@ stage_row: fn(st: Staging, language: String, jet_reset: ^Reset) -> Dyn IOError! 
     row["build"] = if build.build == .Null -> Dyn.Null else -> merged(Dyn{[String:Dyn]{"command": words(build.command ?? [])}}, build.build)
     metrics: source_metrics(source_dir, source_file)
     row["metrics"] = metrics.copy()
-    provenance := Dyn.object()
+    ^provenance: Dyn.object()
     provenance["source"] = Dyn.Text(files.relative(path_joined(source_dir, source_file), st.entry_dir))
     provenance["source_sha256"] = dyn_at(metrics, "source_sha256")
     provenance["source_tree_sha256"] = Dyn.Text(source_tree_sha256.copy())
@@ -463,7 +463,7 @@ stage_steps: fn(st: Staging, language: String, staged: String, artifact: String,
     if verification != "" -> return failed(row, "byte_exact_stdout", verification)
     passed(row, "byte_exact_stdout")
     row["command"] = Dyn.Array(commands.map(fn(command) { words(command) }))
-    before := before_runs(reset)
+    ^before: before_runs(reset)
     row["runtime"] = measure_steps(st.s, staged, commands, st.runs, before)
     if !is_true(row, "runtime/valid") -> return invalid_runs(row)
     put_run_metrics(row, artifact)
@@ -474,7 +474,7 @@ stage_steps: fn(st: Staging, language: String, staged: String, artifact: String,
 stage_service: fn(st: Staging, language: String, staged: String, artifact: String, row: ^Dyn) IOError! {
     service: run_service(st.s, st.entry, staged, run_command(language, artifact, []), st.runs)
     row["command"] = words(run_command(language, artifact, ["<port>"]))
-    metrics := dyn_at(row, "metrics")
+    ^metrics: dyn_at(row, "metrics")
     put_build_metrics(metrics, dyn_at(row, "build"))
     metrics["runtime_wall_seconds"] = Dyn.Null
     metrics["runtime_first_stdout_seconds"] = Dyn.Null
@@ -513,16 +513,16 @@ stage_web: fn(st: Staging, language: String, staged: String, row: ^Dyn) IOError!
     web: web_artifact_sizes(staged, command)
     passed(row, "byte_exact_stdout")
     row["command"] = words(command)
-    receipt := Dyn.object()
+    ^receipt: Dyn.object()
     receipt["rail"] = Dyn.Text(language.copy())
     receipt["artifact_bytes"] = or_null(web, "artifact_bytes")
     receipt["wasm_bytes"] = or_null(web, "wasm_bytes")
     receipt["files"] = member(web, "files") ?? Dyn.Array([])
-    before := before_runs(no_reset())
+    ^before: before_runs(no_reset())
     row["runtime"] = measure_runs(st.s, staged, command, st.runs, shell, before, receipt)
     if !is_true(row, "runtime/valid") -> return invalid_runs(row)
     wasm_rail: WEB_WASM_LANGUAGES.contains(base_language(language))
-    metrics := dyn_at(row, "metrics")
+    ^metrics: dyn_at(row, "metrics")
     put_runtime_metrics(metrics, dyn_at(row, "runtime"))
     put_build_metrics(metrics, dyn_at(row, "build"))
     metrics["binary_bytes"] = if wasm_rail -> or_null(web, "wasm_bytes") else -> Dyn.Null
@@ -535,7 +535,7 @@ stage_web: fn(st: Staging, language: String, staged: String, row: ^Dyn) IOError!
 // timed, then its peer stopped.
 stage_batch: fn(st: Staging, language: String, staged: String, artifact: String, fixture_reset: Reset, row: ^Dyn) IOError! {
     peer: dyn_at(st.entry, "spec/peer")
-    peer_service := Service?{None}
+    ^peer_service: Service?{None}
     if truthy(Val(peer)) {
         started: start_peer(st.s, staged, peer) ?? return disqualified_row(row, "peer unavailable: {err.message}")
         peer_service = Val(started)
@@ -549,7 +549,7 @@ stage_batch: fn(st: Staging, language: String, staged: String, artifact: String,
     }
     passed(row, "byte_exact_stdout")
     row["command"] = words(command)
-    before := before_runs(fixture_reset)
+    ^before: before_runs(fixture_reset)
     row["runtime"] = measure_runs(st.s, staged, command, st.runs, .Plain, before, Dyn.Null)
     if !is_true(row, "runtime/valid") {
         invalid_runs(row)
@@ -561,7 +561,7 @@ stage_batch: fn(st: Staging, language: String, staged: String, artifact: String,
 
 // `row` disqualified for `reason`, with no verification.
 disqualified: fn(row: Dyn, reason: String) -> Dyn {
-    out := row.copy()
+    ^out: row.copy()
     disqualified_row(out, reason)
     out
 }
@@ -591,7 +591,7 @@ invalid_runs: fn(row: ^Dyn) {
 }
 
 verification_of: fn(status: String, kind: String, reason: Dyn?) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["status"] = Dyn.Text(status.copy())
     out["kind"] = Dyn.Text(kind.copy())
     put_present(out, "reason", reason)
@@ -601,7 +601,7 @@ verification_of: fn(status: String, kind: String, reason: Dyn?) -> Dyn {
 // A timed row's metrics: its source metrics, runtime and build medians and
 // the size of its `artifact`.
 put_run_metrics: fn(row: ^Dyn, artifact: String) {
-    metrics := dyn_at(row, "metrics")
+    ^metrics: dyn_at(row, "metrics")
     put_runtime_metrics(metrics, dyn_at(row, "runtime"))
     put_build_metrics(metrics, dyn_at(row, "build"))
     metrics["binary_bytes"] = binary_bytes(artifact)
@@ -629,7 +629,7 @@ binary_bytes: fn(artifact: String) -> Dyn {
 or_null: fn(value: Dyn, path: String) -> Dyn { member(value, path) ?? Dyn.Null }
 
 no_latency: fn() -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["median"] = Dyn.Null
     out["p99"] = Dyn.Null
     out
@@ -637,7 +637,7 @@ no_latency: fn() -> Dyn {
 
 // `left` with each member of `right` set over it.
 merged: fn(left: Dyn, right: Dyn) -> Dyn {
-    out := left.copy()
+    ^out: left.copy()
     loop field in members(right) -> out[field.key] = field.value
     out
 }
@@ -664,15 +664,15 @@ jet_tiers: fn(st: Staging, rows: Dyn, jet_reset: Reset, options: StageOptions) -
     jet_source: files.exists(jet_dir)
     fixture_reset: if st.generated != "" && jet_source -> Reset{state_dir: "", fixture_target: path_joined(jet_dir, st.fixture_out), fixture_source: st.generated.copy(), make_parent: false} else -> no_reset()
     peer: dyn_at(st.entry, "spec/peer")
-    peer_service := Service?{None}
-    peer_failure := ""
+    ^peer_service: Service?{None}
+    ^peer_failure: ""
     if truthy(Val(peer)) && jet_source {
         if start_peer(st.s, jet_dir, peer) == {
             .Ok(started) -> { peer_service = Val(started) }
             .Err(error) -> peer_failure = "peer unavailable: {error.message}"
         }
     }
-    tiers := Dyn.object()
+    ^tiers: Dyn.object()
     loop rule in tier_policy(st.mode) {
         tiers[rule.tier] = if {
             !measures(st, "jet") -> not_measured_tier(rule, st.not_measured)
@@ -690,7 +690,7 @@ jet_tiers: fn(st: Staging, rows: Dyn, jet_reset: Reset, options: StageOptions) -
 
 // A tier a --languages run without Jet leaves unmeasured for `reason`.
 not_measured_tier: fn(rule: TierRule, reason: String) -> Dyn {
-    out := unavailable_tier(rule, reason)
+    ^out: unavailable_tier(rule, reason)
     out["not_measured"] = Dyn.Bool(true)
     out
 }
@@ -698,12 +698,12 @@ not_measured_tier: fn(rule: TierRule, reason: String) -> Dyn {
 // The AOT tier: the Jet row as it stands.
 aot_tier: fn(rule: TierRule, jet_row: Dyn) -> Dyn {
     ok: dyn_at(jet_row, "status") == Dyn.Text("ok")
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["applicable"] = Dyn.Bool(true)
     out["required"] = Dyn.Bool(rule.required)
     out["status"] = Dyn.Text(if ok -> "ok" else -> "broken")
     if !ok -> out["reason"] = member(jet_row, "reason") ?? Dyn.Text("Jet AOT row is unavailable")
-    command := Dyn.object()
+    ^command: Dyn.object()
     command["build"] = or_null(jet_row, "build/command")
     command["run"] = or_null(jet_row, "command")
     out["command"] = command
@@ -716,7 +716,7 @@ aot_tier: fn(rule: TierRule, jet_row: Dyn) -> Dyn {
 // tier.
 service_tier: fn(st: Staging, rule: TierRule, jet_dir: String, jet_row: Dyn) -> Dyn IOError! {
     prefix: tier_prefix(st.s.jet_bin, rule.tier)
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["applicable"] = Dyn.Bool(true)
     out["required"] = Dyn.Bool(rule.required)
     out["command"] = words(prefix.concat(["<port>"]))
@@ -744,7 +744,7 @@ run_tier: fn(st: Staging, rule: TierRule, jet_dir: String, jet_row: Dyn, reset: 
     first: if commands.len() > 0 -> commands[0].copy() else -> [String]{}
     restore(fixture_reset)
     verification: if commands.len() > 1 -> verify_steps(st.s, jet_dir, commands, st.expected, reset, st.s.tier_timeout_ms) else -> verify(st.s, jet_dir, first, st.expected, .Plain, st.s.tier_timeout_ms)
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["applicable"] = Dyn.Bool(true)
     out["required"] = Dyn.Bool(rule.required)
     out["command"] = if commands.len() == 1 -> words(first) else -> Dyn.Array(commands.map(fn(command) { words(command) }))
@@ -761,7 +761,7 @@ run_tier: fn(st: Staging, rule: TierRule, jet_dir: String, jet_row: Dyn, reset: 
         settle_run_tier(out, primary_metric(st.mode), source_metric_values(dyn_at(jet_row, "metrics")), "timed_run")
         return Ok(out)
     }
-    before := before_runs(if commands.len() > 1 -> reset.copy() else -> fixture_reset.copy())
+    ^before: before_runs(if commands.len() > 1 -> reset.copy() else -> fixture_reset.copy())
     runtime: if commands.len() > 1 -> measure_steps(st.s, jet_dir, commands, st.runs, before) else -> measure_runs(st.s, jet_dir, first, st.runs, .Plain, before, Dyn.Null)
     out["runtime"] = runtime.copy()
     if !is_true(runtime, "valid") {
@@ -770,7 +770,7 @@ run_tier: fn(st: Staging, rule: TierRule, jet_dir: String, jet_row: Dyn, reset: 
         out["verification"] = verification_of("failed", "timed_run", Val(Dyn.Text("measured run samples are invalid")))
         return Ok(out)
     }
-    metrics := source_metric_values(dyn_at(jet_row, "metrics"))
+    ^metrics: source_metric_values(dyn_at(jet_row, "metrics"))
     put_runtime_metrics(metrics, runtime)
     metrics["binary_bytes"] = Dyn.Null
     out["metrics"] = metrics
@@ -794,14 +794,14 @@ tier_commands: fn(st: Staging, tier: String) -> [[String]] {
 
 // The source metrics of the Jet row's `metrics`, each null when absent.
 source_metric_values: fn(metrics: Dyn) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     loop name in SOURCE_METRIC_NAMES -> out[name] = or_null(metrics, name)
     out
 }
 
 // A service tier's metrics from what `service` measured.
 service_tier_metrics: fn(service: Dyn) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["runtime_wall_seconds"] = Dyn.Null
     out["runtime_first_stdout_seconds"] = Dyn.Null
     out["runtime_peak_rss_kb"] = or_null(service, "rssKb")
@@ -830,11 +830,11 @@ cache_states: fn(st: Staging, jet_dir: String, commands: [[String]], reset: Rese
     times: "{jet_dir}.run-times"
     copy_path(script, times)
     cache_home: "{jet_dir}.fresh-cache"
-    states := Dyn.object()
+    ^states: Dyn.object()
     loop state in RUN_CACHE_STATE_ORDER {
         prefix: if state == "fresh_install" -> ["env", "XDG_CACHE_HOME={cache_home}"] else -> [String]{}
-        before := Before{reset: if service -> no_reset() else -> reset.copy(), cache_state: state.copy(), script: script.copy(), original: String.from_bytes_lossy(original), cache_home: cache_home.copy(), edits: 0}
-        row := Dyn.object()
+        ^before: Before{reset: if service -> no_reset() else -> reset.copy(), cache_state: state.copy(), script: script.copy(), original: String.from_bytes_lossy(original), cache_home: cache_home.copy(), edits: 0}
+        ^row: Dyn.object()
         row["cache_state"] = Dyn.Text(state.copy())
         row["gated"] = Dyn.Bool(GATED_STATE_ORDER.contains(state))
         measured: if service -> service_state(st, jet_dir, prefix.concat(commands[0]), before) else -> runs_state(st, jet_dir, commands.map(fn(command) { prefix.concat(command) }), before)
@@ -853,7 +853,7 @@ service_state: fn(st: Staging, jet_dir: String, prefix: [String], before: ^Befor
     prepare(before)
     service: run_service(st.s, st.entry, jet_dir, prefix, 1)
     failure: or_null(service, "failure")
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["status"] = Dyn.Text(if truthy(Val(failure)) -> "broken" else -> "ok")
     out["reason"] = failure
     out["command"] = words(prefix.concat(["<port>"]))
@@ -867,12 +867,12 @@ runs_state: fn(st: Staging, jet_dir: String, commands: [[String]], before: ^Befo
     first: if commands.len() > 0 -> commands[0].copy() else -> [String]{}
     runtime: if commands.len() > 1 -> measure_steps(st.s, jet_dir, commands, st.runs, before) else -> measure_runs(st.s, jet_dir, first, st.runs, .Plain, before, Dyn.Null)
     valid: is_true(runtime, "valid")
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["status"] = Dyn.Text(if valid -> "ok" else -> "broken")
     if !valid -> out["reason"] = Dyn.Text("measured run samples are invalid")
     out["command"] = if commands.len() == 1 -> words(first) else -> Dyn.Array(commands.map(fn(command) { words(command) }))
     out["runtime"] = runtime.copy()
-    metrics := Dyn.object()
+    ^metrics: Dyn.object()
     put_runtime_metrics(metrics, runtime)
     metrics["binary_bytes"] = Dyn.Null
     out["metrics"] = metrics
@@ -891,7 +891,7 @@ settle_run_tier: fn(tier: ^Dyn, metric: String, source_metrics: Dyn, kind: Strin
         tier["verification"] = verification_of("failed", kind, Val(Dyn.Text(reason)))
         return
     }
-    slower := gated[0].copy()
+    ^slower: gated[0].copy()
     loop state in gated[1..<gated.len()] {
         if (number_at(state, "metrics/{metric}") ?? 0.0) > (number_at(slower, "metrics/{metric}") ?? 0.0) {
             slower = state.copy()
@@ -932,7 +932,7 @@ timed_steps: fn(s: Stager, cwd: String, commands: [[String]]) -> Dyn {
 timer_sample: fn(run: ToolRun) -> Dyn {
     parsed: parse_json(run.stdout.trim()) ?? Dyn.Null
     object: parsed == .Object(_)
-    sample := if object -> parsed else -> Dyn.object()
+    ^sample: if object -> parsed else -> Dyn.object()
     if !object {
         sample["error"] = Dyn.Text(if run.stdout != "" -> limited(run.stdout, STAGE_REASON_LIMIT) else -> limited(run.stderr, STAGE_REASON_LIMIT))
     }
@@ -962,7 +962,7 @@ verify: fn(s: Stager, cwd: String, command: [String], expected: [U8], shell: She
 // together: "" when they do, else why not.
 verify_steps: fn(s: Stager, cwd: String, commands: [[String]], expected: [U8], reset: Reset, timeout_ms: Int) -> String IOError! {
     restore(reset)
-    output := [U8]{}
+    ^output: [U8]{}
     loop command in commands {
         run: run_in(s, cwd, command, .Plain, timeout_ms)
         output = output.concat(run.stdout.bytes())
@@ -977,10 +977,10 @@ failed_run: fn(run: ToolRun) -> String {
 
 // The samples of `count` timed runs of `command`, each after `before`.
 measure_runs: fn(s: Stager, cwd: String, command: [String], count: Int, shell: Shell, before: ^Before, receipt: Dyn) -> Dyn IOError! {
-    samples := [Dyn]{}
+    ^samples: [Dyn]{}
     loop _ in 0..<count {
         prepare(before)
-        sample := timed(s, cwd, command, shell)
+        ^sample: timed(s, cwd, command, shell)
         if receipt != .Null {
             sample["rail"] = dyn_at(receipt, "rail")
             sample["artifact_bytes"] = dyn_at(receipt, "artifact_bytes")
@@ -988,9 +988,9 @@ measure_runs: fn(s: Stager, cwd: String, command: [String], count: Int, shell: S
         }
         samples.push(sample)
     }
-    summary := summarize_samples(samples)
+    ^summary: summarize_samples(samples)
     if receipt != .Null {
-        artifact := Dyn.object()
+        ^artifact: Dyn.object()
         artifact["artifact_bytes"] = dyn_at(receipt, "artifact_bytes")
         artifact["wasm_bytes"] = dyn_at(receipt, "wasm_bytes")
         artifact["files"] = member(receipt, "files") ?? Dyn.Array([])
@@ -1002,7 +1002,7 @@ measure_runs: fn(s: Stager, cwd: String, command: [String], count: Int, shell: S
 // The samples of `count` timed runs of `commands` as one sequence, each
 // after `before`.
 measure_steps: fn(s: Stager, cwd: String, commands: [[String]], count: Int, before: ^Before) -> Dyn IOError! {
-    samples := [Dyn]{}
+    ^samples: [Dyn]{}
     loop _ in 0..<count {
         prepare(before)
         samples.push(timed_steps(s, cwd, commands))
@@ -1091,7 +1091,7 @@ build_and_measure: fn(s: Stager, language: String, source_dir: String, override:
     cold: timed(s, source_dir, command, .Plain)
     warm: if int_at(cold, "exit_code") == Val(0) -> timed(s, source_dir, command, .Plain) else -> Dyn.Null
     artifact: if base == "jet" -> discover_jet_artifact(source_dir) else -> path_joined(source_dir, compiled_name(base))
-    failure := build_failure(cold, warm)
+    ^failure: build_failure(cold, warm)
     if failure == "" && (artifact == "" || !files.exists(artifact)) {
         failure = "build produced no executable"
     }
@@ -1110,7 +1110,7 @@ configured_build: fn(s: Stager, language: String, source_dir: String, entry: Dyn
 }
 
 build_samples: fn(cold: Dyn, warm: Dyn) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["cold"] = cold.copy()
     out["warm"] = warm.copy()
     out
@@ -1200,7 +1200,7 @@ found_executable: fn(dir: String) -> String IOError! {
 // `fallback` when it configures none.
 command_from_spec: fn(value: Dyn, language: String, jet_bin: String, fallback: [String]?) -> [String]? {
     if value == .Null -> return fallback.copy()
-    command := if value == .Array(_) -> words_of(value) else -> COMMAND_SPACE.split(js_text(value).trim())
+    ^command: if value == .Array(_) -> words_of(value) else -> COMMAND_SPACE.split(js_text(value).trim())
     if command.len() > 0 && command[0] == "jet" -> command[0] = jet_bin.copy()
     if language == "jet" && command.len() > 0 && command[0] == "build" {
         command = [jet_bin.copy()].concat(command)
@@ -1226,22 +1226,22 @@ words: fn(command: [String]) -> Dyn { Dyn.Array(command.map(fn(word) { Dyn.Text(
 // every one is valid.
 summarize_samples: fn(samples: [Dyn]) -> Dyn {
     valid: samples.len() > 0 && samples.all(fn(sample) { valid_sample(sample) })
-    medians := Dyn.object()
+    ^medians: Dyn.object()
     loop metric in SAMPLE_METRICS {
         medians[metric] = if valid -> median_of(field_values(samples, metric)) else -> Dyn.Null
     }
-    raw_medians := Dyn.object()
+    ^raw_medians: Dyn.object()
     loop metric in RAW_SAMPLE_METRICS {
         raw_medians[metric] = if valid -> median_of(field_values(samples, metric)) else -> Dyn.Null
     }
-    noise_metrics := Dyn.object()
+    ^noise_metrics: Dyn.object()
     loop metric in SAMPLE_METRICS.concat(RAW_SAMPLE_METRICS) {
         noise_metrics[metric] = noise_summary(field_values(samples, metric))
     }
-    noise := Dyn.object()
+    ^noise: Dyn.object()
     noise["method"] = Dyn.Text("sample_range_over_median")
     noise["metrics"] = noise_metrics
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["samples"] = Dyn.Array(samples.copy())
     out["valid"] = Dyn.Bool(valid)
     out["protocol"] = Dyn.Text(TIMER_SCHEMA)
@@ -1258,7 +1258,7 @@ valid_sample: fn(sample: Dyn) -> Bool {
 }
 
 confidence: fn(method: String, reason: String) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["status"] = Dyn.Text("not_computed")
     out["method"] = Dyn.Text(method.copy())
     out["level"] = Dyn.Null
@@ -1273,9 +1273,9 @@ field_values: fn(samples: [Dyn], field: String) -> [Float] {
 
 // `values` in ascending order.
 sorted_numbers: fn(values: [Float]) -> [Float] {
-    out := values.copy()
+    ^out: values.copy()
     loop i in 1..<out.len() {
-        j := i
+        ^j: i
         loop j > 0 && out[j - 1] > out[j] {
             held: out[j - 1]
             out[j - 1] = out[j]
@@ -1308,7 +1308,7 @@ percentile_of: fn(values: [Float], quantile: Float) -> Dyn {
 // their median.
 noise_summary: fn(values: [Float]) -> Dyn {
     numbers: sorted_numbers(values)
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["count"] = Dyn.Int(numbers.len())
     if numbers.len() == 0 {
         loop key in ["min", "max", "range", "relative_range"] -> out[key] = Dyn.Null
@@ -1330,7 +1330,7 @@ noise_summary: fn(values: [Float]) -> Dyn {
 source_metrics: fn(source_dir: String, filename: String) -> Dyn IOError! {
     source: String.from_bytes_lossy(files.read_bytes(path_joined(source_dir, filename)))
     python: files.suffix(filename) == ".py"
-    loc := 0
+    ^loc: 0
     loop line in source.split("\n") {
         trimmed: line.trim()
         if trimmed == "" || ["//", "/*", "*", "# ", "#!"].any(fn(prefix) { trimmed.starts_with(prefix) }) || (python && trimmed.starts_with("#")) {
@@ -1338,7 +1338,7 @@ source_metrics: fn(source_dir: String, filename: String) -> Dyn IOError! {
         }
         loc += 1
     }
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["loc"] = Dyn.Int(loc)
     out["source_bytes"] = Dyn.Int(source.bytes().len())
     out["tokens"] = Dyn.Int(SOURCE_TOKEN.find_all(source).len())
@@ -1359,7 +1359,7 @@ path_sha256: fn(target: String) -> String IOError! {
 // under build/, dist/ or out/, else the modules the command's entry script
 // reaches; null for none.
 web_artifact_sizes: fn(source_dir: String, command: [String]) -> Dyn IOError! {
-    found := [WebFile]{}
+    ^found: [WebFile]{}
     roots: ["build", "dist", "out"].map(fn(name) { path_joined(source_dir, name) }).filter(fn(root) { files.exists(root) })
     loop root in roots -> record_tree(source_dir, root, found)
     if roots.len() == 0 {
@@ -1367,26 +1367,26 @@ web_artifact_sizes: fn(source_dir: String, command: [String]) -> Dyn IOError! {
         entry: if declared == "" -> "" else -> files.normalize(if files.is_absolute(declared) -> declared.copy() else -> "{source_dir}/{declared}")
         relative: files.relative(entry, source_dir)
         if declared != "" && !relative.starts_with("..") && !files.is_absolute(relative) && files.exists(entry) {
-            seen := [String]{}
+            ^seen: [String]{}
             harness_entry: if files.basename(entry) == "runner.mjs" -> entry.copy() else -> ""
             visit_module(source_dir, entry, harness_entry, seen, found)
         }
     }
     if found.len() == 0 -> return Ok(Dyn.Null)
     found.sort_by(fn(left: WebFile, right: WebFile) { text.collate(left.path, right.path) })
-    listed := [Dyn]{}
-    total := 0
-    wasm := 0
+    ^listed: [Dyn]{}
+    ^total: 0
+    ^wasm: 0
     loop file in found {
         total += file.bytes
         if file.kind == "wasm" -> wasm += file.bytes
-        item := Dyn.object()
+        ^item: Dyn.object()
         item["path"] = Dyn.Text(file.path.copy())
         item["bytes"] = Dyn.Int(file.bytes)
         item["kind"] = Dyn.Text(file.kind.copy())
         listed.push(item)
     }
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["artifact_bytes"] = Dyn.Int(total)
     out["wasm_bytes"] = Dyn.Int(wasm)
     out["files"] = Dyn.Array(listed)
@@ -1485,7 +1485,7 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String], runs: Int)
         files.remove_all(reports)
         return Ok(service_failure(verified.failure, Val(verified.startup)))
     }
-    startups := field_values([verified.startup.copy()], "")
+    ^startups: field_values([verified.startup.copy()], "")
     loop sample in 1..<runs {
         seconds: startup_sample(s, cwd, prefix, shell, config, probes, protocol, path_joined(reports, "startup-{sample}")) ?? return Ok(removed_failure(reports, err.message, median_of(startups)))
         startups.push(seconds)
@@ -1493,13 +1493,13 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String], runs: Int)
     startup: median_of(startups)
     report: path_joined(reports, "measure")
     port: free_port() ?? return Ok(removed_failure(reports, "{err}", startup))
-    service := start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Ok(removed_failure(reports, "{err}", startup))
+    ^service: start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Ok(removed_failure(reports, "{err}", startup))
     ready: wait_for_ready(service, port, config, report, s.clock_offset_ns) ?? {
         stop_process(service)
         return Ok(removed_failure(reports, err.message, startup))
     }
-    latencies := [Float]{}
-    measurement := ""
+    ^latencies: [Float]{}
+    ^measurement: ""
     repeated: probes[0..<probes.len() - 1]
     loop _ in 0..<SERVICE_REPEATS {
         if measurement != "" -> break
@@ -1531,10 +1531,10 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String], runs: Int)
         exit.code != Val(0) -> Dyn.Text("service clean exit {exit_shown(exit)}")
         else -> Dyn.Null
     }
-    latency := Dyn.object()
+    ^latency: Dyn.object()
     latency["median"] = median_of(latencies)
     latency["p99"] = percentile_of(latencies, 0.99)
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["failure"] = failure
     out["startupSeconds"] = startup.copy()
     out["startup_samples_seconds"] = Dyn.Array(startups.map(fn(value) { Dyn.Float(value) }))
@@ -1560,12 +1560,12 @@ Verified: struct {
 
 verify_service: fn(s: Stager, cwd: String, prefix: [String], shell: Shell, config: Dyn, probes: [Dyn], protocol: String, report: String) -> Verified IOError! {
     port: free_port() ?? return Ok(Verified{failure: "{err}", startup: Dyn.Null})
-    service := start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Ok(Verified{failure: "{err}", startup: Dyn.Null})
+    ^service: start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Ok(Verified{failure: "{err}", startup: Dyn.Null})
     ready: wait_for_ready(service, port, config, report, s.clock_offset_ns) ?? {
         stop_process(service)
         return Ok(Verified{failure: err.message, startup: Dyn.Null})
     }
-    failure := probe_sequence(port, probes, protocol)
+    ^failure: probe_sequence(port, probes, protocol)
     first: wait_for_exit(service, 1000)
     if first.code != Val(0) && failure == "" {
         failure = "verification service exit {exit_shown(first)}"
@@ -1582,7 +1582,7 @@ verify_service: fn(s: Stager, cwd: String, prefix: [String], shell: Shell, confi
 // its last probe, which must answer as expected and end it cleanly.
 startup_sample: fn(s: Stager, cwd: String, prefix: [String], shell: Shell, config: Dyn, probes: [Dyn], protocol: String, report: String) -> Float Err! {
     port: free_port() ?? return Err("{err}")
-    service := start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Err("{err}")
+    ^service: start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Err("{err}")
     ready: wait_for_ready(service, port, config, report, s.clock_offset_ns) ?? {
         stop_process(service)
         return Err(err.message)
@@ -1615,7 +1615,7 @@ probe_sequence: fn(port: Int, probes: [Dyn], protocol: String) -> String {
 }
 
 service_failure: fn(failure: String, startup: Dyn?) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["failure"] = Dyn.Text(failure.copy())
     put_present(out, "startupSeconds", startup)
     out
@@ -1638,7 +1638,7 @@ free_port: fn() -> Int NetError! {
 start_service: fn(s: Stager, cwd: String, command: [String], shell: Shell, report: String) -> Service IOError! {
     launched: if report == "" -> command.copy() else -> [s.launcher.copy(), report.copy()].concat(command)
     runner: if shell == .Full -> [s.env_runner.copy(), "full"] else -> [s.env_runner.copy()]
-    spec := process.cmd(["sh", "-c", QUIET_EXEC, "sh"].concat(runner).concat(launched)).cwd(cwd).detached().stderr(.Capture)
+    ^spec: process.cmd(["sh", "-c", QUIET_EXEC, "sh"].concat(runner).concat(launched)).cwd(cwd).detached().stderr(.Capture)
     if s.launcher != "" -> spec = spec.env("JET_GAUNTLET_LAUNCHER", s.launcher)
     Ok(Service{child: spec.spawn(), exit: None})
 }
@@ -1665,7 +1665,7 @@ wait_for_ready: fn(service: ^Service, port: Int, config: Dyn, report: String, of
                 }
             }
             else -> {
-                probe := Dyn.object()
+                ^probe: Dyn.object()
                 probe["method"] = Dyn.Text("GET")
                 probe["path"] = dyn_at(config, "readyPath")
                 if truthy_at(http_probe(port, probe, READY_PROBE_MS), "ok") {
@@ -1678,7 +1678,7 @@ wait_for_ready: fn(service: ^Service, port: Int, config: Dyn, report: String, of
 }
 
 default_ready: fn() -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["send"] = Dyn.Text("ready\n")
     out["expect"] = Dyn.Text("ready\n")
     out
@@ -1716,7 +1716,7 @@ number_field: fn(fields: [String], index: Int) -> Dyn {
 // Starts `peer`'s script on its port from `cwd`, once the port opens.
 start_peer: fn(s: Stager, cwd: String, peer: Dyn) -> Service Err! {
     command: ["python3", js_text(dyn_at(peer, "script")), js_text(dyn_at(peer, "port"))]
-    service := start_service(s, cwd, command, .Plain, "") ?? return Err("{err}")
+    ^service: start_service(s, cwd, command, .Plain, "") ?? return Err("{err}")
     port: int_at(peer, "port") ?? 0
     wait_for_tcp(port, PEER_OPEN_MS) ?? {
         stop_process(service)
@@ -1731,7 +1731,7 @@ wait_for_tcp: fn(port: Int, timeout_ms: Int) Err! {
     address: net.socket_addr_parse("127.0.0.1:{port}") ?? return Err("{err}")
     loop {
         remaining: timeout_ms - started.elapsed_millis()
-        stream := connect_within(address, if remaining > 0 -> remaining else -> 0) ?? {
+        ^stream: connect_within(address, if remaining > 0 -> remaining else -> 0) ?? {
             if started.elapsed_millis() >= timeout_ms -> return Err("TCP port {port} did not open")
             time.sleep(time.duration_ms(PROCESS_POLL_MS))
             next
@@ -1742,7 +1742,7 @@ wait_for_tcp: fn(port: Int, timeout_ms: Int) Err! {
 }
 
 stop_peer: fn(peer: Service?) {
-    found := peer ?? return
+    ^found: peer ?? return
     stop_process(found)
 }
 

@@ -42,7 +42,7 @@ run: fn() {
     response: client.get("http://{addr}/lookup") ?? panic("get")
     print("looked up {response.text()}")
     _: serving.join() ?? panic("serve join")
-    total := 0
+    ^total: 0
     task.group counters {
         first: task counted(1)
         second: task counted(2)
@@ -51,7 +51,7 @@ run: fn() {
     print("counted {total}")
     log.flush()
     text: files.read("events.jsonl") ?? panic("the sink file is missing")
-    lines := text.split("\n").to_list().filter(fn(line) { line.len() > 0 }).map(fn(line) { shown(line) })
+    ^lines: text.split("\n").to_list().filter(fn(line) { line.len() > 0 }).map(fn(line) { shown(line) })
     lines.sort()
     loop line in lines -> print(line)
 }

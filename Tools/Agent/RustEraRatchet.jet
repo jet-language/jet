@@ -75,7 +75,7 @@ git_lines: fn(argv: [String], allow_empty: Bool) -[Exec, IO, Time.Wait]> [String
     if receipt.code != 0 {
         return Err(RatchetError{message: "{argv.join(" ")} failed ({receipt.code}): {receipt.errors}"})
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in receipt.output.split("\n") {
         if line != "" -> lines.push(line.copy())
     }
@@ -91,7 +91,7 @@ base_name: fn(path: String) -> String Never! {
 // A harness table: a `.tsv` or `.txt` directly in tests/, or anywhere under
 // Tools/CI/.
 is_harness_table: fn(path: String) -> Bool Never! {
-    suffixed := false
+    ^suffixed: false
     loop suffix in DATA_SUFFIXES {
         if path.ends_with(suffix) -> suffixed = true
     }
@@ -106,13 +106,13 @@ is_reader: fn(table: String, path: String) -> Bool Never! {
 }
 
 unread_tables: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
-    argv := [String]{"git", "ls-files", "--"}
+    ^argv: [String]{"git", "ls-files", "--"}
     loop root in DATA_ROOTS -> argv.push(root)
-    unread := [String]{}
+    ^unread: [String]{}
     loop table in git_lines(argv, false) ?? return Err(err) {
         if !is_harness_table(table) -> next
         naming: git_lines([String]{"git", "grep", "-l", "-I", "-F", "-e", base_name(table), "--", "."}, true) ?? return Err(err)
-        read := false
+        ^read: false
         loop path in naming {
             if is_reader(table, path) -> read = true
         }
@@ -137,9 +137,9 @@ closes_strings: fn(prefix: String) -> Bool Never! {
 // The comment of a source line: from the first `//` that starts the line or
 // follows whitespace outside a string literal, else "".
 comment_text: fn(line: String) -> String Never! {
-    prefix := ""
-    comment := ""
-    first := true
+    ^prefix: ""
+    ^comment: ""
+    ^first: true
     loop part in line.split("//") {
         if comment != "" {
             comment = "{comment}//{part}"
@@ -164,7 +164,7 @@ cites_rust: fn(comment: String) -> Bool Never! {
 
 // `path:line:text` rows of git grep -n whose comment cites deleted Rust code.
 stale_citations: fn(rows: [String]) -> [String] Never! {
-    stale := [String]{}
+    ^stale: [String]{}
     loop row in rows {
         location: row.partition(":")
         rest: location.tail.partition(":")
@@ -175,7 +175,7 @@ stale_citations: fn(rows: [String]) -> [String] Never! {
 }
 
 citation_rows: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
-    argv := [String]{"git", "grep", "-n", "-I", "-i", "-E", "-e", CITATION_GREP, "-e", PHRASE_GREP, "--"}
+    ^argv: [String]{"git", "grep", "-n", "-I", "-i", "-E", "-e", CITATION_GREP, "-e", PHRASE_GREP, "--"}
     loop root in CITATION_ROOTS -> argv.push(root)
     git_lines(argv, true)
 }
@@ -201,7 +201,7 @@ names_rust: fn(path: String, comment: String) -> Bool Never! {
 // Each source file's count of comments that name Rust, from `path:line:text`
 // rows of git grep -n.
 naming_counts: fn(rows: [String]) -> [String:Int] Never! {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop row in rows {
         location: row.partition(":")
         rest: location.tail.partition(":")
@@ -212,14 +212,14 @@ naming_counts: fn(rows: [String]) -> [String:Int] Never! {
 }
 
 naming_rows: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
-    argv := [String]{"git", "grep", "-n", "-I", "-i", "-w", "-e", "rust", "--"}
+    ^argv: [String]{"git", "grep", "-n", "-I", "-i", "-w", "-e", "rust", "--"}
     loop root in CITATION_ROOTS -> argv.push(root)
     git_lines(argv, true)
 }
 
 // The NAMING_BASELINE rows of `text`; a line is `path<TAB>count`.
 parse_baseline: fn(text: String) -> [String:Int] RatchetError! {
-    rows := [String:Int]{}
+    ^rows: [String:Int]{}
     loop line in text.split("\n") {
         if line.trim() == "" -> next
         cells: line.partition("\t")
@@ -230,18 +230,18 @@ parse_baseline: fn(text: String) -> [String:Int] RatchetError! {
 }
 
 render_baseline: fn(counts: [String:Int]) -> String Never! {
-    paths := counts.keys().to_list()
+    ^paths: counts.keys().to_list()
     paths.sort()
-    lines := loop path in paths -> "{path}\t{counts.get(path) ?? 0}"
+    ^lines: loop path in paths -> "{path}\t{counts.get(path) ?? 0}"
     if lines.len() == 0 -> return ""
     "{lines.join("\n")}\n"
 }
 
 // A line per file over its baseline row (rule 3).
 naming_over: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
-    paths := counts.keys().to_list()
+    ^paths: counts.keys().to_list()
     paths.sort()
-    over := [String]{}
+    ^over: [String]{}
     loop path in paths {
         count: counts.get(path) ?? 0
         limit: baseline.get(path) ?? 0
@@ -254,9 +254,9 @@ naming_over: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never!
 
 // A line per baseline row above its file's live count.
 naming_under: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
-    paths := baseline.keys().to_list()
+    ^paths: baseline.keys().to_list()
     paths.sort()
-    under := [String]{}
+    ^under: [String]{}
     loop path in paths {
         count: counts.get(path) ?? 0
         limit: baseline.get(path) ?? 0
@@ -272,20 +272,18 @@ rust_era_main: fn(write: Bool) -[Exec, FS, IO, Time.Wait]> Int RatchetError! {
     stale: stale_citations(citation_rows() ?? return Err(err))
     counts: naming_counts(naming_rows() ?? return Err(err))
     seeded: files.is_file(NAMING_BASELINE)
-    baseline := [String:Int]{}
+    ^baseline: [String:Int]{}
     if seeded {
         text: files.read(NAMING_BASELINE) ?? return Err(RatchetError{message: "cannot read {NAMING_BASELINE}: {err}"})
         baseline = parse_baseline(text) ?? return Err(err)
     }
     over: if seeded || !write -> naming_over(counts, baseline) else -> [String]{}
-    under := [String]{}
+    ^under: [String]{}
     if write && over.len() == 0 {
         files.write(NAMING_BASELINE, render_baseline(counts)) ?? return Err(RatchetError{message: "cannot write {NAMING_BASELINE}: {err}"})
-    } else {
-        under = naming_under(counts, baseline)
-    }
+    } else { under = naming_under(counts, baseline) }
     if unread.len() == 0 && stale.len() == 0 && over.len() == 0 && under.len() == 0 {
-        total := 0
+        ^total: 0
         loop path in counts.keys() -> total += counts.get(path) ?? 0
         print("rust-era-ratchet: ok (every harness table has a reader; no comment in Compiler, Core or Jetpack cites deleted Rust code; {total} comment(s) naming Rust remain in {NAMING_BASELINE})")
         return Ok(0)
@@ -378,7 +376,7 @@ run: fn() {
 #Test("the Rust-naming baseline only falls") {
     baseline: parse_baseline("Compiler/A.jet\t2\nCore/D.c\t1\n") ?? panic("parse: {err.message}")
     assert_eq(render_baseline(baseline), "Compiler/A.jet\t2\nCore/D.c\t1\n")
-    live := [String:Int]{}
+    ^live: [String:Int]{}
     live["Compiler/A.jet"] = 3
     live["Compiler/New.jet"] = 1
     assert_eq(naming_over(live, baseline).len(), 2)

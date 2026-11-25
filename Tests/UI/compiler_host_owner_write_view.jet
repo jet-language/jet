@@ -26,14 +26,14 @@ leaf: fn(token: Int) -> HostValue Never! {
 
 adopt: fn(value: ^HostValue, path: [Int], position: Int) -> Bool Never! {
     if position >= path.len() {
-        if ^value == .Leaf(carrier) {
+        if value.in_place() == .Leaf(carrier) {
             if carrier.adopted -> return false
             carrier.adopted = true
             return true
         }
         return false
     }
-    if ^value == .List(values) {
+    if value.in_place() == .List(values) {
         index: path[position]
         if index < 0 || index >= values.len() -> return false
         return adopt(values[index], path, position + 1)
@@ -47,7 +47,7 @@ adopted: fn(value: HostValue, token: Int) -> Bool Never! {
 }
 
 run: fn() {
-    root := HostValue.List{values: [HostValue]{leaf(10), HostValue.List{values: [HostValue]{leaf(20), leaf(30)}}}}
+    ^root: HostValue.List{values: [HostValue]{leaf(10), HostValue.List{values: [HostValue]{leaf(20), leaf(30)}}}}
     if !adopt(root, [Int]{1, 0}, 0) -> panic("nested owner adoption failed")
     if adopt(root, [Int]{1, 0}, 0) -> panic("owner alias adopted twice")
     if adopt(root, [Int]{9}, 0) -> panic("invalid path adopted an owner")

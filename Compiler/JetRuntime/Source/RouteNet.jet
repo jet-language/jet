@@ -79,9 +79,9 @@ net_udp_receive: fn(value: I64, limit: I64, positive: Bool, ceiling: I64, explic
     buffer: jet_rt_alloc(I64{65535} * RT_HOST_U8_STRIDE, I64{8})
     packet: jet_rt_alloc(NET_UDP_PACKET_BYTES, I64{8})
     thread_zero(packet, NET_UDP_PACKET_BYTES)
-    result := I64{0}
+    ^result: I64{0}
     loop {
-        received := jet_socket_receive_from_raw(jet_udp_socket_fd_raw(value), buffer, I64{65535}, packet, scratch)
+        ^received: jet_socket_receive_from_raw(jet_udp_socket_fd_raw(value), buffer, I64{65535}, packet, scratch)
         if (received >= I64{0}) {
             if (received > I64{65535}) { received = I64{65535} }
             kept: if (received < cap) -> received else -> cap
@@ -100,7 +100,7 @@ net_udp_receive: fn(value: I64, limit: I64, positive: Bool, ceiling: I64, explic
         if (code == I64{11} || code == I64{4}) {
             if !net_udp_wait(jet_udp_socket_fd_raw(value), true, operation, scratch, error) -> break
         } else {
-            _ := net_route_errno(operation, I64{0}, code, error)
+            ^_: net_route_errno(operation, I64{0}, code, error)
             break
         }
     }

@@ -68,7 +68,7 @@ pkg_go_bind: fn(source_path: String, source: String, lib: String, cache: String)
     header: files.join(cache, "lib{stem}.h")
     pkg_binder_remove_file_quiet(archive)
     pkg_binder_remove_file_quiet(header)
-    uses_handles := false
+    ^uses_handles: false
     loop function in functions {
         loop param in function.params {
             if param.scalar == GoScalar.Handle -> uses_handles = true
@@ -85,9 +85,9 @@ pkg_go_bind: fn(source_path: String, source: String, lib: String, cache: String)
     if !output.success {
         return Err(ForeignBindError.ToolFailed{tool: PKG_GO_BUILD_TOOL, action: PKG_GO_BUILD_ACTION, detail: pkg_go_launder(output.stderr)})
     }
-    provenance := "schema=jet-go-bind-v1\n"
+    ^provenance: "schema=jet-go-bind-v1\n"
     pkg_binder_append_artifact_boundary(provenance, GO_MODULE_ROOT, "Go", lib, source_path, archive, "go={pkg_bridge_tool_identity("go")};cgo=enabled;trimpath;ar")
-    bound := [String]{}
+    ^bound: [String]{}
     loop function in functions -> bound.push(function.name)
     Ok(ForeignBindResult{source: pkg_go_render(lib, functions), bound: bound, archive: archive, provenance: provenance})
 }
@@ -95,7 +95,7 @@ pkg_go_bind: fn(source_path: String, source: String, lib: String, cache: String)
 // Each `//export Name` marker must be followed by its one-line scalar `func`.
 pkg_go_parse_exports: fn(source: String) -> [GoFunction] ForeignBindError! {
     lines: pkg_binder_lines(source)
-    functions := [GoFunction]{}
+    ^functions: [GoFunction]{}
     loop index in 0..<lines.len() {
         marker: lines[index].trim()
         if !marker.starts_with("//export ") -> next
@@ -123,7 +123,7 @@ pkg_go_parse_exports: fn(source: String) -> [GoFunction] ForeignBindError! {
         if close < 0 {
             return Err(ForeignBindError.Source("function `{exported}` has no closed parameter list"))
         }
-        params := [GoParam]{}
+        ^params: [GoParam]{}
         raw_params: pkg_binder_slice(rest, open + 1, close).trim()
         if raw_params != "" {
             loop raw in raw_params.split(",") {
@@ -155,7 +155,7 @@ pkg_go_parse_exports: fn(source: String) -> [GoFunction] ForeignBindError! {
 
 pkg_go_render: fn(lib: String, functions: [GoFunction]) -> String Never! {
     abi: "jet_go_{lib}"
-    out := [String]{"#Import c.{abi}: module {{\n"}
+    ^out: [String]{"#Import c.{abi}: module {{\n"}
     loop function in functions {
         result: if function.result == {
             .Val(scalar) -> " {scalar.jet()}"
@@ -165,7 +165,7 @@ pkg_go_render: fn(lib: String, functions: [GoFunction]) -> String Never! {
     }
     out.push("}}\nuse abi: c.{abi}\n\nHandle: struct {{ value: Int }}\n\n")
     loop function in functions {
-        args := [String]{}
+        ^args: [String]{}
         loop param in function.params {
             if param.scalar == {
                 .Handle -> args.push("{param.name}.value")
@@ -191,7 +191,7 @@ pkg_go_render: fn(lib: String, functions: [GoFunction]) -> String Never! {
 
 // `(name: Type, ...)`; the public form spells handle parameters `Handle`.
 pkg_go_params: fn(params: [GoParam], public: Bool) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params {
         ty: if public -> param.scalar.public_jet() else -> param.scalar.jet()
         parts.push("{param.name}: {ty}")

@@ -91,7 +91,7 @@ hex_value: fn(b: U8) -> Int {
 // The 8 hex digit word at `at`; -1 for "--------".
 word_at: fn(raw: [U8], at: Int) -> Int {
     if raw[at] == (U8{45}) -> return -1
-    n := 0
+    ^n: 0
     loop i in 0..<8 -> n = n * 16 + hex_value(raw[at + i])
     n
 }
@@ -99,8 +99,8 @@ word_at: fn(raw: [U8], at: Int) -> Int {
 hex_word: fn(word: Int) -> String {
     if word < 0 -> return "--------"
     digits: "0123456789abcdef".bytes()
-    n := word
-    out := [U8]{}
+    ^n: word
+    ^out: [U8]{}
     loop _ in 0..<8 {
         out.push(digits[n %% 16])
         n = n /% 16
@@ -218,9 +218,9 @@ exact_nan: fn(name: String) -> Bool {
 // same F32 bits on every argument of `corpus`.
 same: fn(name: String, corpus: String) {
     raw: corpus.bytes()
-    at := 0
-    rows := 0
-    wrong := 0
+    ^at: 0
+    ^rows: 0
+    ^wrong: 0
     loop at < raw.len() {
         comment: raw[at] == (U8{35})
         x: f32_of(if comment -> 0 else -> word_at(raw, at))
@@ -237,9 +237,9 @@ same: fn(name: String, corpus: String) {
 
 check: fn(name: String, corpus: String) {
     raw: corpus.bytes()
-    at := 0
-    rows := 0
-    wrong := 0
+    ^at: 0
+    ^rows: 0
+    ^wrong: 0
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
             loop raw[at] != (U8{10}) -> at += 1
@@ -247,7 +247,7 @@ check: fn(name: String, corpus: String) {
             next
         }
         // The row's words: its arguments, then the results.
-        words := [Int]{}
+        ^words: [Int]{}
         loop {
             words.push(word_at(raw, at))
             at += 9
@@ -255,7 +255,7 @@ check: fn(name: String, corpus: String) {
         }
         got: results(name, words)
         arguments: words.len() - got.len()
-        differs := false
+        ^differs: false
         loop i in 0..<got.len() {
             want: words[arguments + i]
             if got[i] != want && (exact_nan(name) || i != 0 || !(is_nan_word(got[i]) && is_nan_word(want))) {
@@ -266,11 +266,11 @@ check: fn(name: String, corpus: String) {
         if differs {
             wrong += 1
             if wrong <= 3 {
-                shown := [String]{}
+                ^shown: [String]{}
                 loop i in 0..<arguments -> shown.push(hex_word(words[i]))
-                gave := [String]{}
+                ^gave: [String]{}
                 loop i in 0..<got.len() -> gave.push(hex_word(got[i]))
-                wanted := [String]{}
+                ^wanted: [String]{}
                 loop i in arguments..<words.len() -> wanted.push(hex_word(words[i]))
                 print("{name}({shown.join(", ")}) = {gave.join(" ")}, C23 {wanted.join(" ")}")
             }

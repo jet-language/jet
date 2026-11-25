@@ -28,8 +28,8 @@ use combinatorics: core.math.combinatorics
 // ---------------------------------------------------------------- stress
 
 modules: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    entries := [String]{}
+    ^files: [String:String]{}
+    ^entries: [String]{}
     loop i in 0..<n {
         a: r.int(3, 97)
         b: r.int(2, 31)
@@ -81,10 +81,10 @@ small_body: fn(i: Int, a: Int, b: Int) -> String {
 }
 
 small_fns: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
+    ^files: [String:String]{}
     per_file: (n + 15) /% 16
-    items := [String]{}
-    entries := [String]{}
+    ^items: [String]{}
+    ^entries: [String]{}
     loop i in 0..<n {
         a: r.int(2, 97)
         items.push(small_body(i, a, r.int(1, 63)))
@@ -102,10 +102,10 @@ small_fns: fn(n: Int, r: ^Seeded) -> [String:String] {
 // locals, each read by the statement after it (or by a final update when the
 // function ends on one).
 huge_fns: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    entries := [String]{}
+    ^files: [String:String]{}
+    ^entries: [String]{}
     loop f in 0..<4 {
-        body := [String]{"huge_{f}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
+        ^body: [String]{"huge_{f}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
         count: (n + 3) /% 4
         loop s in 0..<count {
             c: r.int(1, 997)
@@ -131,11 +131,11 @@ huge_fns: fn(n: Int, r: ^Seeded) -> [String:String] {
 // Nesting depth n: statement blocks (if / loop / value-if) and one
 // parenthesized expression, each n deep, in four functions.
 deep_nesting: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    body := [String]{}
+    ^files: [String:String]{}
+    ^body: [String]{}
     loop f in 0..<3 {
         body.extend(["nested_{f}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"])
-        indent := "    "
+        ^indent: "    "
         loop d in 0..<n {
             kind: (d + f) % 3
             body.push(
@@ -163,18 +163,18 @@ deep_nesting: fn(n: Int, r: ^Seeded) -> [String:String] {
 
 // One enum of n variants and four n-arm tables over it.
 wide_enums: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
+    ^files: [String:String]{}
     kinds: ["Plain", "Count", "Span", "Named"]
-    decl := [String]{"Opcode: enum {{"}
+    ^decl: [String]{"Opcode: enum {{"}
     loop i in 0..<n {
         v: "{kinds[i % 4]}{i}"
         decl.push(["    {v},", "    {v}(Int),", "    {v}(start: Int, width: Int),", "    {v}(String),"][i % 4])
     }
     decl.extend(["}}", ""])
-    cost := [String]{"opcode_cost: fn(op: Opcode) -> Int {{", "    if op == {{"}
-    name := [String]{"opcode_name: fn(op: Opcode) -> String {{", "    if op == {{"}
-    from := [String]{"opcode_from_code: fn(code: Int) -> Opcode {{", "    if code == {{"}
-    keyword := [String]{"keyword_code: fn(text: String) -> Int {{", "    if text == {{"}
+    ^cost: [String]{"opcode_cost: fn(op: Opcode) -> Int {{", "    if op == {{"}
+    ^name: [String]{"opcode_name: fn(op: Opcode) -> String {{", "    if op == {{"}
+    ^from: [String]{"opcode_from_code: fn(code: Int) -> Opcode {{", "    if code == {{"}
+    ^keyword: [String]{"keyword_code: fn(text: String) -> Int {{", "    if text == {{"}
     loop i in 0..<n {
         v: "{kinds[i % 4]}{i}"
         lower: "{kinds[i % 4].to_lower()}{i}"
@@ -221,10 +221,10 @@ trait_word: fn() -> String { "{"Capabil"}ity" }
 // n types, n/8 traits (at least 4), four trait impls and one inherent impl
 // per type, trait values consumed per trait.
 impls_traits: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
+    ^files: [String:String]{}
     trait_count: max(4, n /% 8)
     named: trait_word()
-    traits := [[String]]{}
+    ^traits: [[String]]{}
     loop k in 0..<trait_count {
         traits.push(
             lines(
@@ -244,11 +244,11 @@ impls_traits: fn(n: Int, r: ^Seeded) -> [String:String] {
         )
     }
     pack(files, "traits/traits", traits)
-    types := [[String]]{}
-    entries := [String]{}
+    ^types: [[String]]{}
+    ^entries: [String]{}
     loop i in 0..<n {
-        body := [String]{"Entity{i}: struct {{", "    id: Int,", "    name: String,", "}}", ""}
-        chosen := [Int]{}
+        ^body: [String]{"Entity{i}: struct {{", "    id: Int,", "    name: String,", "}}", ""}
+        ^chosen: [Int]{}
         loop j in 0..<4 {
             k: (i * 4 + j) % trait_count
             if chosen.contains(k) -> next
@@ -294,9 +294,9 @@ impls_traits: fn(n: Int, r: ^Seeded) -> [String:String] {
 // the entry file: generic code outside the entry file does not compile today
 // (Domains.jet explains the two compilers' errors).
 generics: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    entries := [String]{}
-    text := """
+    ^files: [String:String]{}
+    ^entries: [String]{}
+    ^text: """
     Slot: struct<T> {{
         value: T,
         mark: Int
@@ -353,9 +353,9 @@ generics: fn(n: Int, r: ^Seeded) -> [String:String] {
 // n comptime constants (a third chained on the previous one) with n/2
 // record types whose methods read them.
 comptime_items: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    items := [[String]]{}
-    entries := [String]{}
+    ^files: [String:String]{}
+    ^items: [[String]]{}
+    ^entries: [String]{}
     loop i in 0..<n {
         a: r.int(3, 40)
         b: r.int(5, 90)
@@ -386,13 +386,13 @@ comptime_items: fn(n: Int, r: ^Seeded) -> [String:String] {
 // n table elements: four Int tables, a record table and a string-keyed map,
 // as functions returning literal tables, plus one long string literal.
 data_tables: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    body := [String]{}
+    ^files: [String:String]{}
+    ^body: [String]{}
     quarter: max(16, n /% 4)
     loop k in 0..<4 {
         body.extend(["table_{k}: fn() -> [Int] {{", "    [Int]{{"])
         loop row in 0..<(quarter + 15) /% 16 {
-            values := [String]{}
+            ^values: [String]{}
             loop _ in row * 16..<min(quarter, row * 16 + 16) -> values.push("{r.int(0, 99999)}")
             body.push("        {values.join(", ")},")
         }
@@ -454,8 +454,8 @@ data_tables: fn(n: Int, r: ^Seeded) -> [String:String] {
 // is left out: the generated compiler rejects Core/Time today (E0312/E0109 on
 // LocalDate comparisons).
 imports: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    entries := [String]{}
+    ^files: [String:String]{}
+    ^entries: [String]{}
     loop i in 0..<n {
         files["services/service_{i}.jet"] = """
         use math: core.math
@@ -479,10 +479,10 @@ imports: fn(n: Int, r: ^Seeded) -> [String:String] {
 
 // One call chain n deep across eight files.
 call_chains: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
+    ^files: [String:String]{}
     per_file: (n + 7) /% 8
     loop f in 0..<8 {
-        body := [String]{}
+        ^body: [String]{}
         loop i in min(n, f * per_file)..<min(n, (f + 1) * per_file) {
             body.push(if i == n - 1 -> "chain_{i}: fn(x: Int) -> Int {{ x % {M} }}" else -> "chain_{i}: fn(x: Int) -> Int {{ (chain_{i + 1}((x * {r.int(2, 9)} + {r.int(1, 99)}) % {M}) + 1) % {M} }}")
             body.push("")
@@ -496,9 +496,9 @@ call_chains: fn(n: Int, r: ^Seeded) -> [String:String] {
 // n fallible functions: typed error families (one per 16 functions),
 // propagation, recovery by `??` and by result tables, inferred text errors.
 errors: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    items := [[String]]{}
-    entries := [String]{}
+    ^files: [String:String]{}
+    ^items: [[String]]{}
+    ^entries: [String]{}
     loop i in 0..<n {
         k: i /% 16
         family: if i % 16 == 0 -> """
@@ -562,9 +562,9 @@ errors: fn(n: Int, r: ^Seeded) -> [String:String] {
 
 // n functions with one undefined name each: n diagnostics expected.
 diagnostics: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    items := [[String]]{}
-    entries := [String]{}
+    ^files: [String:String]{}
+    ^items: [[String]]{}
+    ^entries: [String]{}
     loop i in 0..<n {
         items.push(["broken_{i}: fn(seed: Int) -> Int {{", "    base: seed * {r.int(2, 9)}", "    base + missing_value_{i}", "}}"])
         entries.push("broken_{i}")
@@ -577,10 +577,10 @@ diagnostics: fn(n: Int, r: ^Seeded) -> [String:String] {
 
 // n interpolation holes and 64n literal bytes, in n/16 functions.
 strings: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
-    items := [[String]]{}
-    entries := [String]{}
-    holes := ""
+    ^files: [String:String]{}
+    ^items: [[String]]{}
+    ^entries: [String]{}
+    ^holes: ""
     loop h in 0..<16 -> holes = "{holes}part{h}={{x + {h}}} "
     literal: "lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do ".repeat(16)
     loop i in 0..<max(1, n /% 16) {
@@ -605,17 +605,17 @@ strings: fn(n: Int, r: ^Seeded) -> [String:String] {
 
 // n call sites into two shared helpers.
 fan_in: fn(n: Int, r: ^Seeded) -> [String:String] {
-    files := [String:String]{}
+    ^files: [String:String]{}
     files["shared.jet"] = """
     shared_scale: fn(x: Int) -> Int {{ (x * 3 + 1) % 1000003 }}
 
     shared_label: fn(x: Int) -> Int {{ "v{{x % 100}}".len() }}
 
     """
-    items := [[String]]{}
-    entries := [String]{}
+    ^items: [[String]]{}
+    ^entries: [String]{}
     loop g in 0..<(n + 31) /% 32 {
-        body := [String]{"callers_{g}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
+        ^body: [String]{"callers_{g}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
         loop c in 0..<min(32, n - g * 32) {
             body.push(if c % 2 == 0 -> "    acc = (acc + shared_scale(acc + {r.int(1, 99)})) % {M}" else -> "    acc = (acc + shared_label(acc)) % {M}")
         }
@@ -650,7 +650,7 @@ stress: fn(name: String, dimension: String, base: Int, make: ^^fn(Int, Int) -> [
 }
 
 shapes: fn() -> [Shape] {
-    found := [Shape]{
+    ^found: [Shape]{
         stress("modules", "files in one package", 128, fn(n, seed) { modules(n, seeded(seed, .Scaled)) }),
         stress("small-fns", "small functions", 1024, fn(n, seed) { small_fns(n, seeded(seed, .Scaled)) }),
         stress("huge-fns", "statements in four functions", 2048, fn(n, seed) { huge_fns(n, seeded(seed, .Scaled)) }),
@@ -712,14 +712,14 @@ corpus: fn(shape: Shape, n: Int, seed: Int, layout: String) -> Corpus {
 // One package file: the other files in path order, then main.jet.
 single_file: fn(files: [String:String]) -> [String:String] {
     // copy: the names are sorted apart from the map
-    names := files.keys().filter(fn(name) { !["package.jet", "main.jet"].contains(name) }).map(fn(name) { name.copy() }).to_list()
+    ^names: files.keys().filter(fn(name) { !["package.jet", "main.jet"].contains(name) }).map(fn(name) { name.copy() }).to_list()
     names.sort()
     names.push("main.jet")
     lines: names.map(fn(name) { "// ---- {name}\n{files[name]}" }).join("\n").split("\n").to_list()
-    uses := combinatorics.unique(lines.filter(fn(line) { line.starts_with("use ") }))
+    ^uses: combinatorics.unique(lines.filter(fn(line) { line.starts_with("use ") }))
     uses.push("")
     uses.extend(lines.filter(fn(line) { !line.starts_with("use ") }))
-    single := [String:String]{}
+    ^single: [String:String]{}
     single["package.jet"] = files["package.jet"].copy()
     single["main.jet"] = "{uses.join("\n")}\n"
     single

@@ -21,7 +21,7 @@ cli_run_project_job_with_mode: fn(verification: StoreVerification, cache: ^Works
         }
         return EXIT_USAGE
     }
-    metadata := if registry.find(job) == {
+    ^metadata: if registry.find(job) == {
         .Val(root_fact) -> root_fact[0].metadata()
         .None -> {
             theme.error_coded(
@@ -30,7 +30,7 @@ cli_run_project_job_with_mode: fn(verification: StoreVerification, cache: ^Works
                 "lifecycle job names must refer to a checked top-level #Job function.",
                 "declare the job with #Job, or remove it from the environment lifecycle.",
             )
-            declared := [String]{}
+            ^declared: [String]{}
             loop fact in registry.jobs() -> declared.push(fact.name)
             if declared.len() > 0 -> theme.detail("declared jobs: {declared.join(", ")}")
             return EXIT_USAGE
@@ -69,7 +69,7 @@ cli_run_project_job_leaf: fn(verification: StoreVerification, cache: ^WorkspaceD
     // Env is optional for job-only projects. A job may still add package
     // metadata, composed through the same RunPlan path as `jet env`.
     has_env: files.is_file(EnvFile.path_in(project_dir))
-    plan := RunPlan.empty(cli_current_dir(), cli_builtin_table())
+    ^plan: RunPlan.empty(cli_current_dir(), cli_builtin_table())
     if has_env {
         plan = cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     }
@@ -79,7 +79,7 @@ cli_run_project_job_leaf: fn(verification: StoreVerification, cache: ^WorkspaceD
             cli_ref_error(theme, err)
             return EXIT_USAGE
         }
-        known := false
+        ^known: false
         loop existing in plan.refs {
             if existing.raw == spec.raw -> known = true
         }
@@ -89,12 +89,12 @@ cli_run_project_job_leaf: fn(verification: StoreVerification, cache: ^WorkspaceD
         return code
     }
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
-    env := cli_empty_job_env()
+    ^env: cli_empty_job_env()
     if has_env || plan.refs.len() > 0 {
         env = cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     }
     loop limit in metadata.limits -> env.vars[cli_task_limit_env_name(limit.key)] = limit.value
-    task_args := cli_tail(parsed.positional, 1)
+    ^task_args: cli_tail(parsed.positional, 1)
     if parsed.command == .Val(command) {
         loop arg in command -> task_args.push(arg.copy())
     }
@@ -106,8 +106,8 @@ cli_run_project_job_leaf: fn(verification: StoreVerification, cache: ^WorkspaceD
         theme.error_coded("E1330", "job `{job}` has a non-directory cwd", "job cwd `{job_cwd}` is not a directory", "use a project-relative directory for `cwd`.")
         return EXIT_USAGE
     }
-    jet_binary := envmodel_find_jet_binary()
-    cache_key := String?{None}
+    ^jet_binary: envmodel_find_jet_binary()
+    ^cache_key: String?{None}
     if metadata.cache != JobCachePolicy.Uncached {
         if metadata.outputs.len() == 0 {
             theme.error_coded(
@@ -143,13 +143,13 @@ cli_run_project_job_leaf: fn(verification: StoreVerification, cache: ^WorkspaceD
         cache_key = Val(key)
     }
     theme.status("running job {theme.bold(job)} ({theme.gray(entry)})")
-    argv := [String]{jet_binary, "run", entry, "--", job}
+    ^argv: [String]{jet_binary, "run", entry, "--", job}
     loop arg in task_args -> argv.push(arg)
     access_trace: if cache_key == {
         .Val(key) -> Val(cli_task_access_trace_path(key))
         .None -> String?{None}
     }
-    code := 0
+    ^code: 0
     if access_trace == .Val(trace_path) {
         // A strict cache key must describe the complete job environment, so
         // cached jobs run in the clean composed environment whose values are
@@ -174,8 +174,8 @@ cli_run_project_job_leaf: fn(verification: StoreVerification, cache: ^WorkspaceD
     }
     if cache_key == .Val(key) {
         if access_trace == .Val(trace_path) {
-            accesses := [String]{}
-            failure := String?{None}
+            ^accesses: [String]{}
+            ^failure: String?{None}
             if cli_task_undeclared_accesses(project_dir, job_cwd, entry, metadata, trace_path) == {
                 .Ok(found) -> { accesses = found }
                 .Err(error) -> failure = Val(error.message())
@@ -273,7 +273,7 @@ cli_empty_job_env: fn() -> ShellEnv Never! {
 // `JET_TASK_LIMIT_<NAME>`: ASCII alphanumerics upper-cased, anything else
 // becomes `_`.
 cli_task_limit_env_name: fn(name: String) -> String Never! {
-    out := ENV_PREFIX_JET_TASK_LIMIT
+    ^out: ENV_PREFIX_JET_TASK_LIMIT
     loop scalar in name.chars() {
         text: "{scalar}"
         raw: text.bytes()
@@ -326,7 +326,7 @@ cli_job_path: fn(project_dir: String, raw: String?, field: String, allow_missing
     if !allow_missing && !exists {
         return Err(CLIError.Other("job {field} `{relative}` does not exist"))
     }
-    resolved := ""
+    ^resolved: ""
     if exists {
         resolved = files.canonicalize(candidate) ?? return Err(CLIError.Other("couldn't resolve job {field} `{relative}`: {err}"))
     } else {

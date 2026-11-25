@@ -105,7 +105,7 @@ MCPRPCError: struct {
     }
 
     to_json_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["code"] = Dyn.Int(self.code)
         if self.data == {
             .Val(data) -> { object["data"] = data }
@@ -170,7 +170,7 @@ MCPMessage: enum {
     }
 
     to_json_tree: fn(self) -> Dyn MCPCodecError! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         if self == {
             .Request(request) -> {
                 request.validate()
@@ -273,7 +273,7 @@ MCPCapabilities: struct {
         if self.values.len() > limits.max_capability_entries {
             return Err(MCPCodecError.CapabilityLimitExceeded{actual: self.values.len(), maximum: limits.max_capability_entries})
         }
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         loop name in pkg_mcp_sorted(self.values.keys().to_list()) {
             object[name] = self.values[name]
         }
@@ -289,7 +289,7 @@ MCPCapabilities: struct {
         if object.len() > limits.max_capability_entries {
             return Err(MCPCodecError.CapabilityLimitExceeded{actual: object.len(), maximum: limits.max_capability_entries})
         }
-        values := [String:Dyn]{}
+        ^values: [String:Dyn]{}
         loop name in pkg_mcp_sorted(object.keys().to_list()) -> values[name] = object[name]
         Ok(MCPCapabilities{values: values})
     }
@@ -313,7 +313,7 @@ MCPInitializeParams: struct {
     to_json_tree: fn(self, limits: MCPLimits) -> Dyn MCPCodecError! {
         limits.validate()
         revision: MCPRevision.parse(self.protocol_version) ?? return Err(MCPCodecError.InvalidMessage("unknown initialize protocol version"))
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["capabilities"] = self.capabilities.to_json_tree(limits)
         if self.client_info == {
             .Val(client_info) -> { object["clientInfo"] = client_info.to_json_tree() }
@@ -360,7 +360,7 @@ MCPInitializeResult: struct {
 
     to_json_tree: fn(self, limits: MCPLimits) -> Dyn MCPCodecError! {
         limits.validate()
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["capabilities"] = self.capabilities.to_json_tree(limits)
         object["protocolVersion"] = Dyn.Text(self.protocol_version.as_str())
         object["serverInfo"] = self.server_info.to_json_tree()
@@ -385,7 +385,7 @@ MCPInitializeResult: struct {
 impl MCPImplementation {
     to_json_tree: fn(self) -> Dyn MCPCodecError! {
         self.validate()
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["name"] = Dyn.Text(self.name.copy())
         object["version"] = Dyn.Text(self.version.copy())
         Ok(Dyn.Object(object))
@@ -452,7 +452,7 @@ pkg_mcp_ensure_encodable: fn(value: Dyn) MCPCodecError! {
 }
 
 pkg_mcp_sorted: fn(values: [String]) -> [String] Never! {
-    out := values
+    ^out: values
     out.sort()
     out
 }

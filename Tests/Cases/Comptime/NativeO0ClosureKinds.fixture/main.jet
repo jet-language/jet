@@ -34,13 +34,13 @@ transact: fn(log: Shared<Log>, commit: Bool) -> Int Fail! {
 
 closures: fn() -> String {
     log: Shared{Log{rows: [String]{}}}
-    _ := guarded(log) ?? 0
-    _ := transact(log, true) ?? 0
-    _ := transact(log, false) ?? 0
+    ^_: guarded(log) ?? 0
+    ^_: transact(log, true) ?? 0
+    ^_: transact(log, false) ?? 0
     worker: task log.rows.len()
     seen: worker.join() ?? -1
-    price := reactive.signal(100)
-    qty := reactive.signal(2)
+    ^price: reactive.signal(100)
+    ^qty: reactive.signal(2)
     total: reactive.derived(fn() { price.get() * qty.get() })
     _subscription: reactive.autorun(fn() { log.rows.push("total {total.get()}") })
     price.set(150)
@@ -50,9 +50,9 @@ closures: fn() -> String {
 // A click handler, a drop handler and a render body are registered, not run;
 // each keeps its own count.
 interface: fn() -> String {
-    clicks := 0
+    ^clicks: 0
     save: ui.button("Save", fn() { clicks += 1 })
-    dropped := 0
+    ^dropped: 0
     draft: ui.text_input(
         "draft",
         UIIMEMode.Native,
@@ -60,7 +60,7 @@ interface: fn() -> String {
             if item == .Text(value) -> dropped += value.len()
         },
     )
-    renders := 0
+    ^renders: 0
     ui.reactive_render(fn() { renders += 10 })
     "{save.label} {draft.label}"
 }

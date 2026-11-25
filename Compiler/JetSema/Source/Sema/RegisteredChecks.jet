@@ -34,17 +34,17 @@ SemaMethodInput: struct {
 }
 
 sema_check_method_input_row: fn(module_identity: ModuleID, job: SemaBodyJob, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaMethodInput {
-    diagnostics := [Diagnostic]{}
-    memory_complete := false
+    ^diagnostics: [Diagnostic]{}
+    ^memory_complete: false
     if memory_position == .Val(position) {
         loop diagnostic in memory_plan.functions[position].diagnostics {
             diagnostics.push(diagnostic.copy())
         }
         memory_complete = memory_plan.functions[position].complete
     }
-    method_generic_params := environment.generic_params.copy()
-    owner_generic_complete := true
-    normalized_owner_type := owner_type
+    ^method_generic_params: environment.generic_params.copy()
+    ^owner_generic_complete: true
+    ^normalized_owner_type: owner_type
     normalized: sema_comptime_normalize_owner(environment, program, owner_type, module_identity)
     if normalized == {
         .Val(owner) -> {
@@ -127,10 +127,10 @@ sema_function_check_registered: fn(job: SemaBodyJob, declaration: Func, module_i
         return unavailable
     }
     base_generic_params: environment.generic_params.copy()
-    generics := sema_function_check_registered_generics(declaration, memory_plan, memory_position, environment, program)
+    ^generics: sema_function_check_registered_generics(declaration, memory_plan, memory_position, environment, program)
     environment.generic_params = generics.merged.copy()
     sema_function_check_registered_name(declaration, memory_plan, memory_position, environment)
-    checked := sema_function_check_registered_passes(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    ^checked: sema_function_check_registered_passes(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
     environment.generic_params = base_generic_params.move()
     checked
 }
@@ -277,7 +277,7 @@ sema_function_check_registered_shared: fn(job: SemaBodyJob, declaration: Func, m
     if sema_function_check_registered_unregistered(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, environment, program, module_scopes) == .Val(unavailable) {
         return unavailable
     }
-    generics := sema_function_check_registered_generics(declaration, memory_plan, memory_position, environment, program)
+    ^generics: sema_function_check_registered_generics(declaration, memory_plan, memory_position, environment, program)
     sema_function_check_registered_location(declaration, memory_plan, memory_position, module_scopes)
     sema_function_check_registered_passes(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
 }
@@ -302,7 +302,7 @@ sema_function_check_registered_on_thread: fn(job: SemaBodyJob, declaration: Func
 // set, which shares the shared environment's rows until the check sets its
 // generic parameters and name.
 sema_function_check_registered_with_generics: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, generic_params: [TGenericParam], environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
-    job_environment := environment
+    ^job_environment: environment
     job_environment.generic_params = generic_params
     sema_function_check_registered_location(declaration, memory_plan, memory_position, module_scopes)
     sema_function_check_registered(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, job_environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)

@@ -74,7 +74,7 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
@@ -85,7 +85,7 @@ fake_u32: fn(bytes: [U8], at: Int) -> Int {
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -124,7 +124,7 @@ fake_fail: fn(f: ^Fake, message: String) {
 
 // `count` copies of the ten digits.
 digits: fn(count: Int) -> String {
-    out := ""
+    ^out: ""
     loop _ in 0..<count -> out = "{out}0123456789"
     out
 }
@@ -132,7 +132,7 @@ digits: fn(count: Int) -> String {
 // Writes all of `bytes` into `fd`, 4096 at a time; dropping `fd` closes
 // the pipe and ends the text.
 fake_write_all: fn(f: ^Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         end: if at + 4096 < bytes.len() -> at + 4096 else -> bytes.len()
         wrote: fd.write(bytes[at..<end].copy(), WAIT_NS) ?? {
@@ -145,7 +145,7 @@ fake_write_all: fn(f: ^Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
 
 // Reads `fd` to its end.
 fake_read_all: fn(f: ^Fake, fd: sys.Fd) -[Env]> [U8] {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: fd.read(65536, WAIT_NS) ?? {
             fake_fail(f, "pipe read failed: {err}")
@@ -177,7 +177,7 @@ fake_paste_copy: fn(f: ^Fake, source: Int, serial: Int) -[Env, Net, Time]> {
     f.source = source
     f.records.push("copy offers {f.source_types.join(",")}")
     fake_flush(f)
-    ends := sys.open_pipe() ?? {
+    ^ends: sys.open_pipe() ?? {
         fake_fail(f, "pipe: {err}")
         return
     }
@@ -250,7 +250,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
         f.registry = fake_u32(body, 0)
         registry: f.registry
         loop (index, interface) in GLOBALS {
-            args := fake_words([Int]{index + 1})
+            ^args: fake_words([Int]{index + 1})
             loop b in fake_text(interface) -> args.push(b)
             version: if interface == "wl_compositor" -> 6 else if interface == "wl_seat" -> 5 else if interface == "xdg_wm_base" -> 2 else if interface == "wl_data_device_manager" -> 3 else -> 1
             fake_put(args, version)
@@ -366,7 +366,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
 }
 
 fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -387,7 +387,7 @@ fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
 // Accepts one window and serves it until it disconnects.
 fake_serve: fn(listener: net.UnixListener) -[Env, Net, Time, IO]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept: {err}")
-    f := Fake{
+    ^f: Fake{
         stream: stream,
         inbox: [U8]{},
         out: [U8]{},
@@ -419,7 +419,7 @@ fake_serve: fn(listener: net.UnixListener) -[Env, Net, Time, IO]> Fake {
         records: [String]{},
         failures: [String]{},
     }
-    idle := 0
+    ^idle: 0
     loop idle < 40 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("wait failed: {err}")
@@ -452,7 +452,7 @@ client: fn() -[Env, IO, Net, Time]> {
         return
     }
     loop frame in window.frames() {
-        closed := false
+        ^closed: false
         loop event in frame.events() {
             if event == .Close -> closed = true
             if event == .Focus(focused) {
@@ -481,8 +481,8 @@ client: fn() -[Env, IO, Net, Time]> {
             }
         }
         if closed -> break
-        pixels := [U8]{}
-        count := frame.width * frame.height * 4
+        ^pixels: [U8]{}
+        ^count: frame.width * frame.height * 4
         loop count > 0 {
             pixels.push(U8{255})
             count -= 1

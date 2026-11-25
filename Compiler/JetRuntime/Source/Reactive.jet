@@ -23,9 +23,9 @@ REACTIVE_OBSERVER_BYTES: I64{104}
 
 REACTIVE_THREAD_BYTES: I64{48}
 
-reactive_thread_key := I64{0}
+^reactive_thread_key: I64{0}
 
-reactive_next_observer := I64{1}
+^reactive_next_observer: I64{1}
 
 reactive_word: fn(address: I64) -> I64 { trap_word(address) }
 
@@ -109,7 +109,7 @@ reactive_clear_dependencies: fn(observer: I64) {
     capacity: reactive_word(wrapping(base + I64{8}))
     data: reactive_word(wrapping(base + I64{16}))
     event_words_take(base)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         cell: reactive_word(wrapping(data + at * I64{8}))
         reactive_cell_unsubscribe(cell, observer)
@@ -122,7 +122,7 @@ reactive_clear_dependencies: fn(observer: I64) {
 reactive_cell_unsubscribe: fn(cell: I64, observer: I64) {
     base: wrapping(cell + I64{32})
     length: reactive_word(base)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (event_words_get(base, at) == observer) {
             event_words_remove(base, at)
@@ -164,9 +164,9 @@ reactive_observer_run: fn(observer: I64) {
     state: reactive_thread()
     event_words_push(state, observer)
     target: reactive_word(wrapping(observer + I64{88}))
-    out := I64{0}
+    ^out: I64{0}
     if (target != I64{0}) { out = coll_slot_new(reactive_word(wrapping(target + I64{8}))) }
-    _ := coll_call2(invoke, reactive_word(wrapping(observer + I64{40})), out)
+    ^_: coll_call2(invoke, reactive_word(wrapping(observer + I64{40})), out)
     event_words_remove(state, reactive_word(state) - I64{1})
     stopped: reactive_stopped()
     reactive_store(wrapping(observer + I64{32}), I64{0})
@@ -215,7 +215,7 @@ reactive_cell_release: fn(cell: I64) {
     capacity: reactive_word(wrapping(base + I64{8}))
     data: reactive_word(wrapping(base + I64{16}))
     event_words_take(base)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         reactive_observer_release(reactive_word(wrapping(data + at * I64{8})))
         at += I64{1}
@@ -244,7 +244,7 @@ reactive_cell_notify: fn(cell: I64) {
         return
     }
     snapshot: jet_rt_alloc(length * I64{8}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         observer: event_words_get(base, at)
         reactive_observer_retain(observer)
@@ -270,7 +270,7 @@ reactive_cell_track: fn(cell: I64) {
     }
     base: wrapping(cell + I64{32})
     length: reactive_word(base)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (event_words_get(base, at) == observer) {
             return
@@ -350,7 +350,7 @@ reactive_cell_read: fn(cell: I64, out: I64) {
     cell: reactive_cell_new(meta, I64{0})
     owned: reactive_word(wrapping(cell + I64{8}))
     payload: coll_slot_new(owned)
-    _ := coll_call2(invoke, env, payload)
+    ^_: coll_call2(invoke, env, payload)
     if reactive_stopped() {
         jet_rt_free(payload, coll_size(owned), I64{8})
         event_release_closure(env, release)

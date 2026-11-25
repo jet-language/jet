@@ -43,7 +43,7 @@ parser_parse_migration: fn(state: ^JetParserState) -> MigrationDecl {
     start: parser_bump(state)
     type_name: parser_expect_name(state, "as the migrated type name")
     parser_expect(state, TOKEN_LBRACE, "after the migration type name")
-    ops := [MigrationOp]{}
+    ^ops: [MigrationOp]{}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         if parser_current_kind(state) == TOKEN_SEMI {
             parser_bump(state)
@@ -79,8 +79,8 @@ parser_parse_migration: fn(state: ^JetParserState) -> MigrationDecl {
                 from_ty: parser_parse_type(state, 0)
                 parser_migration_arrow(state, "between the old and new field types in `change`")
                 to_ty: parser_parse_type(state, 0)
-                converter := Expr?{None}
-                converter_span := Span?{None}
+                ^converter: Expr?{None}
+                ^converter_span: Span?{None}
                 next_token: parser_current(state)
                 if next_token.kind == TOKEN_IDENT && parser_value(state, next_token) == "via" {
                     via: parser_bump(state)

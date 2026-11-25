@@ -48,15 +48,15 @@ db_vfs_fd_valid: fn(fd: I64) -> Bool { fd >= I64{0} && fd <= I64{2147483647} }
     name: fd_c_path(path)
     create_mode: if (native_mode == I64{0}) -> DB_VFS_DEFAULT_MODE else -> native_mode
     exclusive_create: DB_VFS_O_EXCL | DB_VFS_O_CREAT
-    fd := DB_VFS_EINTR
+    ^fd: DB_VFS_EINTR
     loop {
         fd = host_call(I64{2}, name, native_flags | DB_VFS_O_CLOEXEC, create_mode)
         if (fd == DB_VFS_EINTR) { next }
         if (fd < I64{0} || fd >= DB_VFS_MINIMUM_FD) { break }
         if (native_flags & exclusive_create == exclusive_create) {
-            _ := host_call(I64{87}, name, I64{0}, I64{0})
+            ^_: host_call(I64{87}, name, I64{0}, I64{0})
         }
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        ^_: host_call(I64{3}, fd, I64{0}, I64{0})
         fd = db_vfs_open_dev_null(native_mode)
         if (fd < I64{0}) { break }
     }
@@ -65,7 +65,7 @@ db_vfs_fd_valid: fn(fd: I64) -> Bool { fd >= I64{0} && fd <= I64{2147483647} }
         facts: jet_rt_alloc(I64{144}, I64{8})
         thread_zero(facts, I64{144})
         if (host_call(I64{5}, fd, facts, I64{0}) == I64{0} && rt_text_word(wrapping(facts + I64{48})) == I64{0} && rt_text_word(wrapping(facts + I64{24})) & I64{511} != native_mode) {
-            _ := host_call(I64{91}, fd, native_mode, I64{0})
+            ^_: host_call(I64{91}, fd, native_mode, I64{0})
         }
         jet_rt_free(facts, I64{144}, I64{8})
     }
@@ -98,7 +98,7 @@ db_vfs_open_dev_null: fn(mode: I64) -> I64 {
 // retrying EINTR until end of file. The bytes read, or the negated code.
 #Export(c) jet_db_vfs_read: fn(fd: I64, offset: I64, header: I64, at: I64, count: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
-    position := jet_int_owned_to_i64(offset)
+    ^position: jet_int_owned_to_i64(offset)
     start: jet_int_owned_to_i64(at)
     wanted: jet_int_owned_to_i64(count)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
@@ -108,7 +108,7 @@ db_vfs_open_dev_null: fn(mode: I64) -> I64 {
         return jet_int_owned_from_i64(DB_VFS_EINVAL)
     }
     buffer: wrapping(rt_text_word(wrapping(header + DATA_SEQUENCE_DATA)) + start * RT_HOST_U8_STRIDE)
-    total := I64{0}
+    ^total: I64{0}
     loop total < wanted {
         got: host_call4(I64{17}, native_fd, wrapping(buffer + total), wanted - total, position)
         if (got == DB_VFS_EINTR) { next }
@@ -125,7 +125,7 @@ db_vfs_open_dev_null: fn(mode: I64) -> I64 {
 // written, or the negated code.
 #Export(c) jet_db_vfs_write: fn(fd: I64, offset: I64, data: I64, length: I64, at: I64, count: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
-    position := jet_int_owned_to_i64(offset)
+    ^position: jet_int_owned_to_i64(offset)
     start: jet_int_owned_to_i64(at)
     wanted: jet_int_owned_to_i64(count)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
@@ -135,7 +135,7 @@ db_vfs_open_dev_null: fn(mode: I64) -> I64 {
         return jet_int_owned_from_i64(DB_VFS_EINVAL)
     }
     source: wrapping(data + start * RT_HOST_U8_STRIDE)
-    total := I64{0}
+    ^total: I64{0}
     loop total < wanted {
         put: host_call4(I64{18}, native_fd, wrapping(source + total), wanted - total, position)
         if (put == DB_VFS_EINTR) { next }
@@ -163,7 +163,7 @@ db_vfs_open_dev_null: fn(mode: I64) -> I64 {
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !db_vfs_fd_valid(native_fd) -> return jet_int_owned_from_i64(I64{-9})
     if (native_size < I64{0}) { return jet_int_owned_from_i64(DB_VFS_EINVAL) }
-    status := DB_VFS_EINTR
+    ^status: DB_VFS_EINTR
     loop status == DB_VFS_EINTR -> status = host_call(I64{77}, native_fd, native_size, I64{0})
     jet_int_owned_from_i64(status)
 }
@@ -320,7 +320,7 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
 // when the path is not a symbolic link or cannot be read.
 #Export(c) jet_db_vfs_readlink: fn(path: I64) -> I64 {
     buffer: jet_rt_alloc(I64{4097}, I64{1})
-    got := DB_VFS_EINVAL
+    ^got: DB_VFS_EINVAL
     if !walk_has_nul(rt_text_data(path), rt_text_len(path)) {
         name: fd_c_path(path)
         got = host_call(I64{89}, name, buffer, I64{4097})
@@ -352,7 +352,7 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     request: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(request, span /% I64{1000000})
     rt_text_store(wrapping(request + I64{8}), (span %% I64{1000000}) * I64{1000})
-    _ := host_call(I64{35}, request, I64{0}, I64{0})
+    ^_: host_call(I64{35}, request, I64{0}, I64{0})
     jet_rt_free(request, I64{16}, I64{8})
     jet_int_owned_from_i64(span)
 }
@@ -363,7 +363,7 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     if !db_vfs_packed() -> return jet_int_owned_from_i64(DB_VFS_EINVAL)
     length: rt_text_word(wrapping(header + DATA_SEQUENCE_LENGTH))
     buffer: rt_text_word(wrapping(header + DATA_SEQUENCE_DATA))
-    total := I64{0}
+    ^total: I64{0}
     loop total < length {
         got: host_call(I64{318}, wrapping(buffer + total), length - total, I64{0})
         if (got == DB_VFS_EINTR) { next }
@@ -378,7 +378,7 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
 #Export(c) jet_db_vfs_now_ms: fn() -> I64 {
     clock: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(clock, I64{16})
-    _ := host_call(I64{228}, I64{0}, clock, I64{0})
+    ^_: host_call(I64{228}, I64{0}, clock, I64{0})
     ms: rt_text_word(clock) * I64{1000} + rt_text_word(wrapping(clock + I64{8})) /% I64{1000000}
     jet_rt_free(clock, I64{16}, I64{8})
     jet_int_owned_from_i64(ms)

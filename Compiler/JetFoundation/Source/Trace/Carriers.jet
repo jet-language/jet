@@ -375,29 +375,29 @@ jettrace_optional_text: fn(value: String?) -> CanonicalJSON Never! {
 }
 
 trace_toolchain_to_json: fn(value: TraceToolchain) -> CanonicalJSON JetTraceError! {
-    fields := [CanonicalJSONField]{jettrace_field("compiler_build_id", .String(value.compiler_build_id.copy())), jettrace_field("jet_version", .String(value.jet_version.copy())), jettrace_field("runner_id", .String(value.runner_id.copy())), jettrace_field("stdlib_id", .String(value.stdlib_id.copy()))}
+    ^fields: [CanonicalJSONField]{jettrace_field("compiler_build_id", .String(value.compiler_build_id.copy())), jettrace_field("jet_version", .String(value.jet_version.copy())), jettrace_field("runner_id", .String(value.runner_id.copy())), jettrace_field("stdlib_id", .String(value.stdlib_id.copy()))}
     body: jettrace_object(fields)
     fields.push(jettrace_field("digest", .String(canonical_json_sha256(body))))
     jettrace_object(fields)
 }
 
 trace_hardware_to_json: fn(value: TraceHardware) -> CanonicalJSON JetTraceError! {
-    fields := [CanonicalJSONField]{jettrace_field("cpu_arch", .String(value.cpu_arch.copy())), jettrace_field("logical_cpus", jettrace_uint(value.logical_cpus)), jettrace_field("os", .String(value.os.copy())), jettrace_field("target", .String(value.target.copy()))}
+    ^fields: [CanonicalJSONField]{jettrace_field("cpu_arch", .String(value.cpu_arch.copy())), jettrace_field("logical_cpus", jettrace_uint(value.logical_cpus)), jettrace_field("os", .String(value.os.copy())), jettrace_field("target", .String(value.target.copy()))}
     body: jettrace_object(fields)
     fields.push(jettrace_field("fingerprint", .String(canonical_json_sha256(body))))
     jettrace_object(fields)
 }
 
 capture_policy_to_json: fn(value: CapturePolicy) -> CanonicalJSON JetTraceError! {
-    names := value.allowlist.copy()
+    ^names: value.allowlist.copy()
     names.sort()
-    allowlist := [CanonicalJSON]{}
-    prior := String?{None}
+    ^allowlist: [CanonicalJSON]{}
+    ^prior: String?{None}
     loop name in names {
         if prior != Val(name) -> allowlist.push(.String(name.copy()))
         prior = Val(name.copy())
     }
-    exclusions := [CanonicalJSON]{}
+    ^exclusions: [CanonicalJSON]{}
     loop name in DEFAULT_EXCLUSIONS -> exclusions.push(.String(name.copy()))
     jettrace_object(
         [CanonicalJSONField]{
@@ -436,9 +436,9 @@ trace_counter_to_json: fn(value: TraceCounter) -> CanonicalJSON JetTraceError! {
 }
 
 trace_profile_to_json: fn(value: TraceProfile) -> CanonicalJSON JetTraceError! {
-    counters := [CanonicalJSON]{}
+    ^counters: [CanonicalJSON]{}
     loop counter in value.counters -> counters.push(trace_counter_to_json(counter))
-    rows := [CanonicalJSON]{}
+    ^rows: [CanonicalJSON]{}
     loop row in value.rows -> rows.push(trace_profile_row_to_json(row))
     jettrace_object([CanonicalJSONField]{jettrace_field("counters", .Array(counters.move())), jettrace_field("coverage", .String(value.coverage.copy())), jettrace_field("method", .String(value.method.copy())), jettrace_field("overhead_kernel_ns", jettrace_optional_uint(value.overhead_kernel_ns)), jettrace_field("overhead_ns", jettrace_optional_uint(value.overhead_ns)), jettrace_field("overhead_reason", .String(value.overhead_reason.copy())), jettrace_field("overhead_runtime_ns", jettrace_optional_uint(value.overhead_runtime_ns)), jettrace_field("overhead_status", .String(value.overhead_status.copy())), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("row_limit", jettrace_uint(value.row_limit)), jettrace_field("rows", .Array(rows.move())), jettrace_field("rows_truncated", .Bool(value.rows_truncated)), jettrace_field("status", .String(value.status.copy())), jettrace_field("window_cpu_ns", jettrace_optional_uint(value.window_cpu_ns)), jettrace_field("window_reason", .String(value.window_reason.copy())), jettrace_field("window_status", .String(value.window_status.copy())), jettrace_field("window_wall_ns", jettrace_optional_uint(value.window_wall_ns))})
 }
@@ -501,10 +501,10 @@ trace_browser_to_json: fn(value: TraceBrowser) -> CanonicalJSON JetTraceError! {
 }
 
 source_identity_to_json: fn(value: SourceIdentity) -> CanonicalJSON JetTraceError! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<value.symbols.len() -> order.push(index)
     order.sort_by(fn(left: Int, right: Int) { value.symbols[left] <=> value.symbols[right] })
-    symbols := [CanonicalJSON]{}
+    ^symbols: [CanonicalJSON]{}
     loop index in order {
         pair: value.symbols[index]
         symbols.push(jettrace_object([CanonicalJSONField]{jettrace_field("kind", .String(pair.kind.copy())), jettrace_field("name", .String(pair.name.copy()))}))

@@ -18,7 +18,7 @@ registry_cli_test_root: fn(label: String) -[FS, Env]> String Never! {
 // Original CLI claims use the real rebuilt engine named by JET_BIN, never a
 // helper/mock binary. Core process/provider #3593/#3594 and composition #4262.
 publication_tuf_test_git: fn(cwd: String, args: [String]) -[Exec, Time]> ProcessReceipt Never! {
-    argv := [String]{"git"}
+    ^argv: [String]{"git"}
     argv.extend(args.copy())
     receipt: publication_tuf_test_process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).run() ?? panic("git fixture")
     assert(receipt.success, "git fixture failed: {receipt.errors}")
@@ -57,7 +57,7 @@ publication_tuf_test_registry: fn(root: String, name: String, version: String) -
 }
 
 publication_tuf_test_command: fn(root: String, project: String, bare: String, store: String, args: [String]) -[Env, Exec]> ProcessSpec Never! {
-    argv := [String]{sys.get("JET_BIN") ?? panic("JET_BIN must name the real rebuilt Jet publication/fetch engine (#4262)")}
+    ^argv: [String]{sys.get("JET_BIN") ?? panic("JET_BIN must name the real rebuilt Jet publication/fetch engine (#4262)")}
     argv.extend(args.copy())
     publication_tuf_test_process.cmd(argv).cwd(project).stdout(.Capture).stderr(.Capture)
         .env("JET_REGISTRY_URL", "file://{bare}").env("JET_REGISTRY_CACHE_DIR", files.join(root, "cache"))
@@ -108,7 +108,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     loser: if a.success -> b else -> a
     assert(loser.errors.contains("Jet.VersionAlreadyPublished"))
     index: publication_tuf_test_git(root, [String]{"--git-dir", bare, "show", "HEAD:index/racekit/racekit.jsonl"}).output
-    count := 0
+    ^count: 0
     loop line in index.lines() {
         if line.contains("\"version\":\"1.0.0\"") -> count += 1
     }
@@ -121,7 +121,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
 }
 
 #Test("publication tuf original registry_fetch_rejects_tampered_referrer_index_before_hangar_ingest") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: registry_cli_test_root("referrer-tamper")
     publisher: files.join(root, "publisher")
     consumer: files.join(root, "consumer")
@@ -136,7 +136,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     tamper: files.join(root, "tamper")
     _: publication_tuf_test_git(root, [String]{"clone", "file://{bare}", tamper})
     referrer_index: files.join(files.join(files.join(tamper, "referrers"), entry.content_hash), "index.json")
-    bytes := files.read_bytes(referrer_index) ?? panic("read referrer")
+    ^bytes: files.read_bytes(referrer_index) ?? panic("read referrer")
     bytes.push(U8{10})
     files.write_bytes(referrer_index, bytes) ?? panic("tamper referrer")
     loop args in
@@ -159,7 +159,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
 // Compose through the real CLI, and inspect the SAME canonical lock/Hangar
 // models rather than accept a second cache path.
 #Test("publication tuf original registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: registry_cli_test_root("locked-reuse")
     publisher: files.join(root, "publisher")
     consumer: files.join(root, "consumer")
@@ -188,7 +188,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     files.write(manifest_path, allowed) ?? panic("allowed manifest")
     fetched: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).run() ?? panic("fetch")
     assert(fetched.success, fetched.errors)
-    installed := StoreEntry?{None}
+    ^installed: StoreEntry?{None}
     loop stored in store_list(verification, roots) {
         if stored.name == "textkit" && stored.version == "1.2.0" -> installed = Val(stored)
     }
@@ -198,7 +198,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     assert(!entry.out.starts_with(store))
     lock_path: files.join(files.join(consumer, ".jet"), "lock")
     lock: pkg_lock_parse(files.read(lock_path) ?? panic("read lock")) ?? panic("parse canonical lock")
-    locked_package := LockedPackage?{None}
+    ^locked_package: LockedPackage?{None}
     loop package in lock.packages {
         if package.name == "textkit" -> locked_package = Val(package)
     }
@@ -226,7 +226,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     }
     locked: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch", "--locked"}).run() ?? panic("locked fetch")
     assert(locked.success, locked.errors)
-    same := String?{None}
+    ^same: String?{None}
     loop stored in store_list(verification, roots) {
         if stored.name == "textkit" && stored.version == "1.2.0" -> same = Val(stored.out)
     }
@@ -247,7 +247,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
 // `jet add` step; the second run resolves from the locked local copy with the
 // registry gone and no engine to ask, so it opens no connection.
 #Test("jetpack script dependency first run fetches verifies and locks then runs offline") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: registry_cli_test_root("script-dep")
     publisher: files.join(root, "publisher")
     publication_tuf_test_project(publisher, "textkit", "1.4.2")
@@ -272,7 +272,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     }
     assert(files.is_dir(files.join(files.join(files.join(files.join(script_dir, ".jet"), "inline-deps"), "textkit"), "1.4.2")))
     roots: HangarRoots.at(files.join(root, "jetpack-root"))
-    verified := false
+    ^verified: false
     loop stored in store_list(verification, roots) {
         if stored.name == "textkit" && stored.version == "1.4.2" && stored.envelope.provenance.contains("package=textkit#1.4.2") {
             verified = true
@@ -298,7 +298,7 @@ registry_cli_test_fetch: fn(root: String, consumer: String, bare: String, store:
 }
 
 registry_cli_test_entry_with: fn(verification: StoreVerification, roots: HangarRoots, name: String, version: String, provenance: String) -> StoreEntry? {
-    found := StoreEntry?{None}
+    ^found: StoreEntry?{None}
     loop stored in store_list(verification, roots) {
         if found == None && stored.name == name && stored.version == version && stored.envelope.provenance.contains(provenance) {
             found = Val(stored)
@@ -308,7 +308,7 @@ registry_cli_test_entry_with: fn(verification: StoreVerification, roots: HangarR
 }
 
 #Test("publication tuf original registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: registry_cli_test_root("advisory-freshness")
     publisher: files.join(root, "publisher")
     consumer: files.join(root, "consumer")
@@ -325,7 +325,7 @@ registry_cli_test_entry_with: fn(verification: StoreVerification, roots: HangarR
     previous_keys: sys.get("JET_KEYS_DIR")
     sys.set("JET_KEYS_DIR", files.join(root, "keys"))
     generated: publication_keygen("advisory", false) ?? panic("advisory keygen")
-    feed := PublicationAdvisoryFeed{
+    ^feed: PublicationAdvisoryFeed{
         sequence: 1,
         issued_at: 100,
         expires_at: 200000,
@@ -361,21 +361,21 @@ registry_cli_test_entry_with: fn(verification: StoreVerification, roots: HangarR
     mature: registry_cli_test_fetch(root, consumer, bare, store, "100000")
     assert(mature.success, mature.errors)
     lock: pkg_lock_parse(files.read(lock_path) ?? panic("read lock")) ?? panic("parse canonical lock")
-    locked := false
+    ^locked: false
     loop package in lock.packages {
         if package.name == "freshlib" -> locked = true
     }
     assert(locked, "a mature release must be locked")
     entry: registry_cli_test_entry_with(verification, roots, "freshlib", "1.2.0", "advisory-feed=sequence=1") ?? panic("a mature release must reach Hangar with its advisory receipt")
     assert(entry.envelope.provenance.contains("maturity=86400s"), entry.envelope.provenance)
-    stale := feed.copy()
+    ^stale: feed.copy()
     stale.expires_at = 150
     stale.signature = publication_sign_advisory_feed(stale, generated.seed_path) ?? panic("sign stale feed")
     files.write(feed_path, publication_advisory_feed_text(stale)) ?? panic("write stale feed")
     reused: registry_cli_test_fetch(root, consumer, bare, store, "200")
     assert(reused.success, "an exact lock must remain usable when advisory metadata expires: {reused.errors}")
-    same := false
-    seen := [String]{}
+    ^same: false
+    ^seen: [String]{}
     loop stored in store_list(verification, roots) {
         if stored.name == "freshlib" && stored.version == "1.2.0" {
             seen.push("{stored.out}: {stored.envelope.provenance}")

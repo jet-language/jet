@@ -31,8 +31,10 @@ LSPPrintChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             plain: LSPFixtureChecker{}
-            checked := plain.check(entry, overlays)
-            if semindex_imports(checked.modules, "core.term") -> checked.declared = semindex_declared("core.term", LSP_PRINT_CORE_TERM)
+            ^checked: plain.check(entry, overlays)
+            if semindex_imports(checked.modules, "core.term") {
+                checked.declared = semindex_declared("core.term", LSP_PRINT_CORE_TERM)
+            }
             checked
         }
 
@@ -51,7 +53,7 @@ LSPPrintChecker: struct {
 }
 
 lsp_print_server: fn(text: String) -> LSPServer {
-    server := lsp_server(LSPPrintChecker{})
+    ^server: lsp_server(LSPPrintChecker{})
     lsp_test_open(server, LSP_PRINT_URI, text)
     server
 }
@@ -66,7 +68,7 @@ lsp_print_hover: fn(server: ^LSPServer, line: Int, character: Int) -> String {
 lsp_print_signature: fn(server: ^LSPServer, line: Int, character: Int) -> [String] {
     help: lsp_test_result(server, "textDocument/signatureHelp", lsp_test_at(LSP_PRINT_URI, line, character))
     signature: lsp_test_rows(lsp_test_field(help, "signatures"))[0]
-    shown := [String]{lsp_test_text(signature, "label")}
+    ^shown: [String]{lsp_test_text(signature, "label")}
     loop parameter in lsp_test_rows(lsp_test_field(signature, "parameters")) {
         shown.push(lsp_test_text(parameter, "label"))
     }
@@ -75,7 +77,7 @@ lsp_print_signature: fn(server: ^LSPServer, line: Int, character: Int) -> [Strin
 }
 
 #Test("hover and signature help on print show the declared contract") {
-    server := lsp_print_server(LSP_PRINT_SOURCE)
+    ^server: lsp_print_server(LSP_PRINT_SOURCE)
     ambient: lsp_print_hover(server, 3, 5)
     assert(ambient.contains("print: fn(values: ...Printable)"), "the ambient print takes Printable values")
     assert(ambient.contains("A call names at least one value."), "and at least one of them")
@@ -99,14 +101,14 @@ lsp_print_signature: fn(server: ^LSPServer, line: Int, character: Int) -> [Strin
 }
 
 #Test("a print the source declares hovers as that declaration") {
-    server := lsp_print_server("print: fn(text: String) {{}}\n\nrun: fn() {{\n    print(\"x\")\n}}\n")
+    ^server: lsp_print_server("print: fn(text: String) {{}}\n\nrun: fn() {{\n    print(\"x\")\n}}\n")
     local: lsp_print_hover(server, 3, 5)
     assert(local.contains("print: fn(text: String)"), "the source's own print")
     assert(!local.contains("Declared in"), "never the ambient one")
 }
 
 #Test("a print imported from core.term by name hovers as Core's") {
-    server := lsp_print_server("use core.term.[print]\n\nrun: fn() {{\n    print(\"x\")\n}}\n")
+    ^server: lsp_print_server("use core.term.[print]\n\nrun: fn() {{\n    print(\"x\")\n}}\n")
     imported: lsp_print_hover(server, 3, 5)
     assert(imported.contains("print: fn(text: String)"), "the Core contract")
     assert(imported.contains("Declared in `core.term` as `core.term.print`."), "Core's declaration")
@@ -122,13 +124,13 @@ lsp_print_call_declaration: fn(calls: [SemCall], start: Int) -> String {
 }
 
 #Test("print_hover_signature_call_record_agree") {
-    server := lsp_print_server(LSP_PRINT_SOURCE)
+    ^server: lsp_print_server(LSP_PRINT_SOURCE)
     checked: LSPPrintChecker{}.check("/w/main.jet", [JetDriverSourceDocument]{JetDriverSourceDocument{path: "/w/main.jet", source: LSP_PRINT_SOURCE}})
     index: checked.index ?? panic("the fixture check builds an index")
     // `print` starts at byte 31, `term.print`'s `print` at byte 56.
     ambient: semindex_ambient_print()
     assert_eq(lsp_print_call_declaration(index.calls, 31), ambient.def.identity)
-    core := ""
+    ^core: ""
     loop declared in checked.declared {
         if declared.def.qualified_name == "core.term.print" -> core = "{declared.def.identity}"
     }

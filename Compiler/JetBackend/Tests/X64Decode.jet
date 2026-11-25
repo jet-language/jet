@@ -27,7 +27,7 @@ X64DecodeTestAt: struct {
 // `bytes` as space-separated hex pairs, for a failure message.
 x64_decode_test_bytes: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef"
-    pairs := [String]{}
+    ^pairs: [String]{}
     loop byte in bytes {
         value: Int{byte}
         pairs.push("{digits.slice(value >> 4, (value >> 4) + 1)}{digits.slice(value & 15, (value & 15) + 1)}")
@@ -38,8 +38,8 @@ x64_decode_test_bytes: fn(bytes: [U8]) -> String Never! {
 // The instructions of `bytes` from offset 0 to its end, each at its offset
 // as its address; a run that ends inside an instruction panics.
 x64_decode_test_linear: fn(bytes: [U8], label: String) -> [X64DecodeTestAt] Never! {
-    found := [X64DecodeTestAt]{}
-    at := 0
+    ^found: [X64DecodeTestAt]{}
+    ^at: 0
     loop at < bytes.len() {
         insn: x64_decode(bytes, at, at) ?? panic("{label}: the bytes end inside the instruction at {at}: {x64_decode_test_bytes(bytes.slice(at, bytes.len()))}")
         at += insn.length
@@ -52,12 +52,12 @@ x64_decode_test_linear: fn(bytes: [U8], label: String) -> [X64DecodeTestAt] Neve
 // following relative branches and calls that stay inside it: code that
 // holds its own data (the fault reports' texts) decodes only where it runs.
 x64_decode_test_reached: fn(bytes: [U8], label: String) -> [X64DecodeTestAt] Never! {
-    seen := loop _at in 0..<bytes.len() -> false
-    work := [Int]{0}
-    found := [X64DecodeTestAt]{}
-    k := 0
+    ^seen: loop _at in 0..<bytes.len() -> false
+    ^work: [Int]{0}
+    ^found: [X64DecodeTestAt]{}
+    ^k: 0
     loop k < work.len() {
-        cursor := work[k]
+        ^cursor: work[k]
         k += 1
         loop cursor < bytes.len() && !seen[cursor] {
             seen[cursor] = true
@@ -78,7 +78,7 @@ x64_decode_test_reached: fn(bytes: [U8], label: String) -> [X64DecodeTestAt] Nev
 // Every instruction of `found` that no table form names, as
 // "LABEL+OFFSET: BYTES".
 x64_decode_test_unnamed: fn(bytes: [U8], found: [X64DecodeTestAt], label: String) -> [String] Never! {
-    unnamed := [String]{}
+    ^unnamed: [String]{}
     loop item in found {
         if !item.insn.named {
             unnamed.push("{label}+{item.at}: {x64_decode_test_bytes(bytes.slice(item.at, item.at + item.insn.length))}")
@@ -105,8 +105,8 @@ x64_decode_test_form: fn(forms: ^[X64DecodeTestForm], text: String, code: X64Cod
 
 // Each encoder form and the text it decodes to.
 x64_decode_test_forms: fn() -> [X64DecodeTestForm] Never! {
-    forms := [X64DecodeTestForm]{}
-    code := x64_code()
+    ^forms: [X64DecodeTestForm]{}
+    ^code: x64_code()
     x64_mov_rr(code, X64_RAX, X64_R8)
     x64_decode_test_form(forms, "mov rax,r8", code)
     code = x64_code()
@@ -411,7 +411,7 @@ x64_decode_test_rails: fn() -> [{lines: [String], bytes: [U8]}] Never! {
 
 // The asm leaves, each run whole from its first byte.
 x64_decode_test_leaves: fn() -> [{label: String, bytes: [U8]}] Never! {
-    leaves := [{label: String, bytes: [U8]}]{{label: "int_sum", bytes: x64_int_sum_code()}}
+    ^leaves: [{label: String, bytes: [U8]}]{{label: "int_sum", bytes: x64_int_sum_code()}}
     loop width in ([Int]{1, 2, 4, 8}) {
         leaves.push({label: "fill{width}", bytes: x64_fill_code(width, false)})
         leaves.push({label: "fill{width}_exact", bytes: x64_fill_code(width, true)})
@@ -473,7 +473,7 @@ X64_DECODE_TEST_SPOTS: [[U8]]{
 }
 
 #Test("every encoder form decodes to its own objdump -M intel text") {
-    problems := [String]{}
+    ^problems: [String]{}
     loop form in x64_decode_test_forms() {
         text: x64_decode_test_text(form.bytes)
         if text != form.text {
@@ -484,8 +484,8 @@ X64_DECODE_TEST_SPOTS: [[U8]]{
 }
 
 #Test("every template-assembler mnemonic and rail decodes to its own name") {
-    problems := [String]{}
-    covered := [String]{}
+    ^problems: [String]{}
+    ^covered: [String]{}
     loop sample in x64_decode_test_samples() {
         assembled: x64_assemble_template(sample.template, sample.names, false, false)
         if assembled.error == .Val(error) {
@@ -509,9 +509,9 @@ X64_DECODE_TEST_SPOTS: [[U8]]{
     loop mnemonic in INLINE_ASSEMBLY_X64_MNEMONICS {
         if !covered.contains(mnemonic) -> problems.push("no sample assembles `{mnemonic}`")
     }
-    rail_words := [String]{}
+    ^rail_words: [String]{}
     loop rail in x64_decode_test_rails() {
-        expected := [String]{}
+        ^expected: [String]{}
         loop line in rail.lines {
             word: line.split(" ").to_list()[0]
             if word.ends_with(":") -> next
@@ -531,7 +531,7 @@ X64_DECODE_TEST_SPOTS: [[U8]]{
 }
 
 #Test("the asm leaves and the fault reports decode to named instructions only") {
-    problems := [String]{}
+    ^problems: [String]{}
     loop leaf in x64_decode_test_leaves() {
         found: x64_decode_test_linear(leaf.bytes, leaf.label)
         problems.extend(x64_decode_test_unnamed(leaf.bytes, found, leaf.label))
@@ -547,7 +547,7 @@ X64_DECODE_TEST_SPOTS: [[U8]]{
 
 // Every instruction the tests above decode, one byte run each.
 x64_decode_test_instructions: fn() -> [[U8]] Never! {
-    runs := [[U8]]{}
+    ^runs: [[U8]]{}
     loop form in x64_decode_test_forms() -> x64_decode_test_split(runs, form.bytes)
     loop sample in x64_decode_test_samples() {
         x64_decode_test_split(runs, x64_assemble_template(sample.template, sample.names, false, false).code)
@@ -567,7 +567,7 @@ x64_decode_test_instructions: fn() -> [[U8]] Never! {
 // objdump's text as the decoder writes it: one space between words, no
 // `<symbol>` after a target and no `# address` comment.
 x64_decode_test_objdump_text: fn(text: String) -> String Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop word in text.split(" ") {
         piece: word.trim()
         if piece.starts_with("#") || piece.starts_with("<") -> break
@@ -586,8 +586,8 @@ x64_decode_test_split: fn(runs: ^[[U8]], bytes: [U8]) Never! {
 #Test("objdump -M intel decodes every instruction as the decoder does") {
     objdump: kit_require_tool("objdump") ?? return
     runs: x64_decode_test_instructions()
-    blob := [U8]{}
-    starts := [Int]{}
+    ^blob: [U8]{}
+    ^starts: [Int]{}
     loop run in runs {
         starts.push(blob.len())
         blob.extend(run)
@@ -597,8 +597,8 @@ x64_decode_test_split: fn(runs: ^[[U8]], bytes: [U8]) Never! {
     x64_decode_test_files.write_bytes(path, blob) ?? panic("{path}: {err}")
     receipt: x64_decode_test_process.cmd([String]{objdump, "-D", "-b", "binary", "-m", "i386:x86-64", "-M", "intel", "--insn-width=16", path}).output_limit(256 << 20).run() ?? panic("objdump could not start: {err}")
     assert(receipt.success, "objdump failed: {receipt.errors}")
-    theirs := [String]{}
-    at := [Int]{}
+    ^theirs: [String]{}
+    ^at: [Int]{}
     loop line in receipt.output.split("\n") {
         fields: line.split("\t").to_list()
         if fields.len() < 3 || !fields[0].trim().ends_with(":") -> next
@@ -606,8 +606,8 @@ x64_decode_test_split: fn(runs: ^[[U8]], bytes: [U8]) Never! {
         at.push(x64_decode_hex_parse(offset.slice(0, offset.len() - 1), line))
         theirs.push(x64_decode_test_objdump_text(fields[2]))
     }
-    problems := [String]{}
-    k := 0
+    ^problems: [String]{}
+    ^k: 0
     loop (index, start) in starts {
         loop k < at.len() && at[k] < start -> k += 1
         insn: x64_decode(blob, start, start) ?? panic("run {index} is cut short")

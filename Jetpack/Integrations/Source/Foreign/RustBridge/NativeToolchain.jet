@@ -64,8 +64,8 @@ pkg_ffi_rust_debug_optional: fn(value: String?) -> String Never! {
 // Resolve the native tools the entries' inline C/C++ bodies need, or `None`
 // when no entry carries a native body.
 pkg_ffi_inline_native_toolchain: fn(entries: [ExternEntry], target: String) -[FS, Env, Exec, Time.Wait]> InlineNativeToolchain? RustBridgeError! {
-    has_c := false
-    has_cpp := false
+    ^has_c: false
+    ^has_cpp: false
     loop entry in entries {
         lang: entry.inline_lang() ?? next
         if lang == "c" -> has_c = true
@@ -73,9 +73,9 @@ pkg_ffi_inline_native_toolchain: fn(entries: [ExternEntry], target: String) -[FS
     }
     if !has_c && !has_cpp -> return Ok(None)
     host: pkg_ffi_host_target()
-    cc := NativeTool?{None}
+    ^cc: NativeTool?{None}
     if has_c -> cc = Val(pkg_ffi_resolve_native_tool("CC", target, host, "clang"))
-    cxx := NativeTool?{None}
+    ^cxx: NativeTool?{None}
     if has_cpp -> cxx = Val(pkg_ffi_resolve_native_tool("CXX", target, host, "clang++"))
     archiver: if target == host -> "ar" else -> "llvm-ar"
     ar: pkg_ffi_resolve_native_tool("AR", target, host, archiver)
@@ -86,7 +86,7 @@ pkg_ffi_inline_native_toolchain: fn(entries: [ExternEntry], target: String) -[FS
 // applies only to host builds; otherwise the named fallback on PATH.
 pkg_ffi_resolve_native_tool: fn(variable: String, target: String, host: String, fallback: String) -[FS, Env, Exec, Time.Wait]> NativeTool RustBridgeError! {
     target_key: target.replace("-", "_")
-    selected := fallback
+    ^selected: fallback
     if target == host -> selected = sys.get(variable) ?? fallback
     selected = sys.get("{variable}_{target_key}") ?? selected
     path: pkg_ffi_locate_tool(selected) ?? return Err(pkg_ffi_tool_error("selected native tool `{selected}` was not found"))
@@ -95,7 +95,7 @@ pkg_ffi_resolve_native_tool: fn(variable: String, target: String, host: String, 
         return Err(pkg_ffi_tool_error("selected native tool `{path}` rejected `--version`"))
     }
     version: "{receipt.output}{receipt.errors}"
-    target_arg := String?{None}
+    ^target_arg: String?{None}
     if variable != "AR" && pkg_ascii_lower(version).contains("clang") {
         target_arg = Val("--target={target}")
     }
@@ -121,7 +121,7 @@ pkg_ffi_locate_tool: fn(requested: String) -[FS, Env]> String? Never! {
 }
 
 pkg_ffi_inline_toolchain_identity: fn(toolchain: InlineNativeToolchain) -> String Never! {
-    value := "target={toolchain.target}\nruntime={pkg_ffi_cxx_runtime_for_target(toolchain.target)}\nproof-suffix={pkg_ffi_proof_suffix_for_target(toolchain.target)}\nundefined={pkg_ffi_undefined_symbol_flag_for_target(toolchain.target)}\n"
+    ^value: "target={toolchain.target}\nruntime={pkg_ffi_cxx_runtime_for_target(toolchain.target)}\nproof-suffix={pkg_ffi_proof_suffix_for_target(toolchain.target)}\nundefined={pkg_ffi_undefined_symbol_flag_for_target(toolchain.target)}\n"
     if toolchain.cc == .Val(tool) {
         value = "{value}cc={tool.identity}\ntarget-arg={pkg_ffi_rust_debug_optional(tool.target_arg)}\n"
     }
@@ -136,7 +136,7 @@ pkg_ffi_inline_toolchain_identity: fn(toolchain: InlineNativeToolchain) -> Strin
 // build and pass it on; the toolchain cannot change under a running build.
 pkg_ffi_native_toolchain_identity: fn() -[Env, Exec, Time.Wait]> String Never! {
     rustc: sys.get("RUSTC") ?? "rustc"
-    version := "unavailable"
+    ^version: "unavailable"
     if process.cmd([String]{rustc, "-vV"}).run() == .Ok(receipt) {
         if receipt.success -> version = receipt.output
     }

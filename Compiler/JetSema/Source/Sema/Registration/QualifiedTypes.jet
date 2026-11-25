@@ -26,11 +26,11 @@ use jet_foundation.[
 // scans (sema_graph_scan), claimed largest source first; each module's
 // rewritten types then move into its rows, the same for any thread count.
 sema_registration_canonicalize_qualified_types: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
-    owned := graph.move()
+    ^owned: graph.move()
     count: owned.modules.len()
-    rows := [Int]{}
-    weights := [Int]{}
-    work := 0
+    ^rows: [Int]{}
+    ^weights: [Int]{}
+    ^work: 0
     loop module_index in 0..<count {
         bytes: owned.modules[module_index].source.count_bytes()
         rows.push(module_index)
@@ -38,21 +38,21 @@ sema_registration_canonicalize_qualified_types: fn(graph: ^^SemaRegistrationGrap
         work += bytes
     }
     workers: compiler_threads_admit(threads, rows.len(), work, SEMA_QUALIFIED_MIN_BYTES_PER_THREAD, 0, 0)
-    keyed := sema_graph_scan(sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, rows, compiler_threads_heaviest_first(weights)), workers)
-    jobs := SemaQualifiedJobs{keys: [[String:Type]]{}}
+    ^keyed: sema_graph_scan(sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, rows, compiler_threads_heaviest_first(weights)), workers)
+    ^jobs: SemaQualifiedJobs{keys: [[String:Type]]{}}
     loop _ in 0..<count -> jobs.keys.push([String:Type]{})
-    found_keys := sema_registration_qualified_take(keyed.found)
+    ^found_keys: sema_registration_qualified_take(keyed.found)
     loop found_keys.len() > 0 {
-        found := found_keys.pop() ?? break
+        ^found: found_keys.pop() ?? break
         jobs.keys[keyed.rows[found_keys.len()]] = compiler_threads_slot_taken(found.keys.move())
     }
-    scan := sema_graph_scan_new(keyed.graph.move(), [SemaGraphModuleResult]{}, keyed.rows.move(), keyed.order.move())
+    ^scan: sema_graph_scan_new(keyed.graph.move(), [SemaGraphModuleResult]{}, keyed.rows.move(), keyed.order.move())
     scan.qualified = Val(jobs.move())
-    rewritten := sema_graph_scan(scan, workers)
+    ^rewritten: sema_graph_scan(scan, workers)
     owned = rewritten.graph.move()
-    rewrites := sema_registration_qualified_take(rewritten.found)
+    ^rewrites: sema_registration_qualified_take(rewritten.found)
     loop rewrites.len() > 0 {
-        found := rewrites.pop() ?? break
+        ^found: rewrites.pop() ?? break
         sema_registration_qualified_apply(owned, rewritten.rows[rewrites.len()], found.types.move())
     }
     owned
@@ -86,12 +86,12 @@ sema_registration_qualified_scan: fn(graph: SemaRegistrationGraph, module_index:
 
 // A graph scan's qualified findings, by position.
 sema_registration_qualified_take: fn(found: ^^[SemaGraphScanFound?]) -> [SemaQualifiedFound] {
-    slots := found.move()
+    ^slots: found.move()
     slots.reverse()
-    taken := [SemaQualifiedFound]{}
+    ^taken: [SemaQualifiedFound]{}
     loop slots.len() > 0 {
-        slot := slots.pop() ?? break
-        row := compiler_threads_slot_taken(slot)
+        ^slot: slots.pop() ?? break
+        ^row: compiler_threads_slot_taken(slot)
         taken.push(compiler_threads_slot_taken(row.qualified.move()))
     }
     taken
@@ -103,7 +103,7 @@ sema_registration_qualified_take: fn(found: ^^[SemaGraphScanFound?]) -> [SemaQua
 // its import bindings' symbol types, an import binding being a copy of its
 // declaring module's symbol, written in that module's names.
 sema_registration_qualified_types: fn(graph: SemaRegistrationGraph, module_index: Int, jobs: SemaQualifiedJobs) -> [Type?] Never! {
-    slots := [Type?]{}
+    ^slots: [Type?]{}
     sema_registration_qualified_function_types(graph.modules[module_index].functions, jobs, module_index, slots)
     loop nominal in graph.modules[module_index].nominals {
         sema_registration_qualified_function_types(nominal.methods, jobs, module_index, slots)
@@ -145,7 +145,7 @@ sema_registration_qualified_symbol_type: fn(symbol: Symbol, jobs: SemaQualifiedJ
 // within a module, only a row a slot rewrites is written, so a list whose
 // rows keep their types is not copied either.
 sema_registration_qualified_apply: fn(graph: ^SemaRegistrationGraph, module_index: Int, types: ^^[Type?]) {
-    slots := types.move()
+    ^slots: types.move()
     if !sema_registration_qualified_rewrites(slots) {
         return
     }
@@ -192,9 +192,7 @@ sema_registration_qualified_apply_functions: fn(functions: ^[SemaRegistrationFun
 
 // The next slot's rewritten type, None to keep the row's own (as every row
 // past the last slot does).
-sema_registration_qualified_next: fn(slots: ^[Type?]) -> Type? {
-    slots.pop() ?? None
-}
+sema_registration_qualified_next: fn(slots: ^[Type?]) -> Type? { slots.pop() ?? None }
 
 // Each alias-qualified or bare type name the module's declarations write,
 // mapped to the type it resolves to in that module (the checker's own
@@ -202,7 +200,7 @@ sema_registration_qualified_next: fn(slots: ^[Type?]) -> Type? {
 // their spelling, as does a name some generic parameter or associated type
 // of the module spells, which means that parameter where it is written.
 sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module_index: Int) -> [String:Type] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop function in graph.modules[module_index].functions {
         sema_registration_function_qualified_names(function, names)
     }
@@ -217,7 +215,7 @@ sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module
     loop symbol in graph.modules[module_index].symbols {
         if symbol.ty == .Val(ty) -> sema_registration_type_qualified_names(ty, names)
     }
-    keys := [String:Type]{}
+    ^keys: [String:Type]{}
     identity: graph.modules[module_index].module_identity
     loop name in names {
         if sema_registration_canonical_spelling(graph, name) -> next
@@ -294,10 +292,10 @@ sema_registration_function_qualified_names: fn(function: SemaRegistrationFunctio
 // `ty` with `keys`, or None when it writes no name they key.
 sema_registration_canonical_type: fn(ty: Type, keys: [String:Type]) -> Type? Never! {
     if keys.len() == 0 -> return None
-    names := [String]{}
+    ^names: [String]{}
     sema_registration_type_qualified_names(ty, names)
-    found := [String]{}
-    actuals := [Type]{}
+    ^found: [String]{}
+    ^actuals: [Type]{}
     loop name in names {
         resolved: keys.get(name) ?? next
         found.push(name)
@@ -325,7 +323,7 @@ sema_registration_canonical_heads: fn(ty: Type, keys: [String:Type]) -> Type Nev
         }
         .Apply(name, args) -> {
             canonical: loop arg in args -> sema_registration_canonical_heads(arg, keys)
-            head := name.copy()
+            ^head: name.copy()
             if keys.get(name) == .Val(resolved) {
                 if resolved == .Named(key) -> head = key.copy()
             }

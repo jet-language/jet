@@ -39,8 +39,8 @@ copy_ratchet_scan: fn(path: String, counts: ^[String:Int]) {
 // Every file whose count differs from its ceiling, and every ledger row
 // that is malformed, repeated or names a file without copies.
 copy_ratchet_problems: fn(counts: [String:Int], ledger: String) -> [String] {
-    problems := [String]{}
-    ceilings := [String:Int]{}
+    ^problems: [String]{}
+    ^ceilings: [String:Int]{}
     loop line in ledger.lines() {
         if line == "" || line.starts_with("#") -> next
         row: line.split("\t").to_list()
@@ -77,7 +77,7 @@ copy_ratchet_problems: fn(counts: [String:Int], ledger: String) -> [String] {
 #Test("no compiler source file holds more copies than its ledger ceiling, and every ceiling matches its file") {
     guards_enter_root()
     assert(copy_ratchet_files.is_dir(COPY_RATCHET_ROOT), "the copy ratchet root {COPY_RATCHET_ROOT} must exist")
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     copy_ratchet_scan(COPY_RATCHET_ROOT, counts)
     ledger: copy_ratchet_files.read(COPY_RATCHET_LEDGER) ?? panic("read {COPY_RATCHET_LEDGER}: {err}")
     assert_eq(copy_ratchet_problems(counts, ledger).join("\n"), "")

@@ -13,7 +13,7 @@ provider_cc_toolchain_resolve_for_target: fn(verification: StoreVerification, ha
     }
     // The last corrupt candidate wins over "missing" so a damaged record is
     // never silently re-acquired.
-    corrupt := ""
+    ^corrupt: ""
     loop entry in entries {
         if entry.name != CC_TOOLCHAIN_PACKAGE -> next
         producer: ProducerRecord.decode(entry.producer_record) ?? {
@@ -65,7 +65,7 @@ provider_cc_descriptor_from_entry: fn(roots: HangarRoots, entry: StoreEntry, pro
     layout_text: provider_cc_fact(producer, entry.id, "cc.layout")
     bundle_sha256: provider_cc_fact(producer, entry.id, "cc.bundle.sha256")
     layout: CcToolchainLayout.parse(layout_text) ?? return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has unsupported layout `{layout_text}`"))
-    descriptor := CcToolchainDescriptor{
+    ^descriptor: CcToolchainDescriptor{
         entry_id: entry.id,
         root: root,
         host: provider_cc_fact(producer, entry.id, "cc.host"),
@@ -304,7 +304,7 @@ provider_cc_checked_relative_path: fn(root: String, relative: String, label: Str
     provider_cc_validate_relative_path(relative) ?? {
         return Err(CcToolchainError.Invalid("C toolchain {label} path: {err.message()}"))
     }
-    current := root
+    ^current: root
     parts: provider_cc_path_parts(relative)
     loop part in parts {
         current = files.join(current, part)
@@ -330,10 +330,10 @@ provider_cc_read_bounded_file: fn(path: String, limit: Int, label: String) -[FS]
     if metadata.size > limit {
         return Err(CcToolchainError.Invalid("{label} exceeds its size limit"))
     }
-    reader := files.open(path, links: .Refuse) ?? {
+    ^reader: files.open(path, links: .Refuse) ?? {
         return Err(CcToolchainError.Invalid("read {label}: {err}"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(limit + 1 - bytes.len()) ?? {
             return Err(CcToolchainError.Invalid("read {label}: {err}"))

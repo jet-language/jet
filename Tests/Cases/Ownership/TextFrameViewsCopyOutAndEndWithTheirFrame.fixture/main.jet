@@ -25,7 +25,7 @@ entry_of: fn(line: String) -> Entry {
 
 // Whole pairs pushed into a List the caller keeps.
 pairs_of: fn(text: String) -> [{before: String, after: String}] {
-    kept := [{before: String, after: String}]{}
+    ^kept: [{before: String, after: String}]{}
     loop line in text.lines() {
         pair: line.cut_last(".") ?? next
         kept.push(pair)
@@ -35,7 +35,7 @@ pairs_of: fn(text: String) -> [{before: String, after: String}] {
 
 // Pieces of pieces as map keys the caller keeps; lookups borrow them.
 tally: fn(text: String) -> [String:Int] {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop line in text.lines() {
         pair: line.split_once("=") ?? next
         key: pair.before.trim()
@@ -50,7 +50,7 @@ tally: fn(text: String) -> [String:Int] {
 // and the piece as they were.
 grown: fn(line: String) {
     pair: line.split_once(":") ?? return
-    word := pair.before
+    ^word: pair.before
     word += "!"
     word += pair.after
     print("grown [{word}] [{pair.before}] [{pair.after}] [{line}]")
@@ -71,7 +71,7 @@ first_long: fn(lines: [String], width: Int) -> String {
 // Many small pieces of big lines: each kept piece is a copy of its bytes.
 keep_heads: fn(rows: Int) -> [String] {
     pad: "x".repeat(4000)
-    heads := [String]{}
+    ^heads: [String]{}
     loop index in 0..<rows {
         line: "k{index} {pad}"
         pair: line.split_once(" ") ?? next
@@ -83,7 +83,7 @@ keep_heads: fn(rows: Int) -> [String] {
 // Negative case: a var parent appended to after the split is not marked, so
 // its pieces are owned copies that keep the old bytes.
 appended_after_split: fn() {
-    buf := "alpha beta".copy()
+    ^buf: "alpha beta".copy()
     pair: buf.split_once(" ") ?? panic("no space")
     buf += " gamma"
     buf += "x".repeat(200)
@@ -93,12 +93,12 @@ appended_after_split: fn() {
 // Negative case: a parent dropped early (reassigned, or moved away) while its
 // pieces live is not marked either.
 dropped_early: fn() {
-    text := "left|right".copy()
+    ^text: "left|right".copy()
     pair: text.split_once("|") ?? panic("no bar")
     text = "replaced"
     owned: "up|down".copy()
     cut: owned.split_once("|") ?? panic("no bar")
-    sink := [String]{}
+    ^sink: [String]{}
     sink.push(owned)
     print("dropped [{pair.before}] [{pair.after}] [{text}] [{cut.before}] [{cut.after}] [{sink[0]}]")
 }
@@ -106,7 +106,7 @@ dropped_early: fn() {
 // A frame view cloned into a map that outlives the function: the map holds
 // copies, so it reads the same after every line is gone.
 map_of_views: fn(lines: [String]) -> [String:String] {
-    kept := [String:String]{}
+    ^kept: [String:String]{}
     loop line in lines {
         pair: line.split_once("=") ?? next
         name: pair.before.trim()
@@ -129,12 +129,12 @@ run: fn() {
     print("first {first_long(["ab;c", "abcdef;tail"], 3)}")
     print("first {first_long(["x;y"], 3)}")
     heads: keep_heads(20000)
-    total := 0
+    ^total: 0
     loop head in heads -> total += head.len()
     print("heads {heads.len()} bytes {total} [{heads[0]}] [{heads[19999]}]")
     appended_after_split()
     dropped_early()
-    lines := [String]{}
+    ^lines: [String]{}
     loop index in 0..<4 -> lines.push("key{index % 3} = value {index} {"y".repeat(100)}")
     lines.push("no equals here")
     views: map_of_views(lines)

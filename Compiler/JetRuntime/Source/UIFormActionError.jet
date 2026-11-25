@@ -25,7 +25,7 @@ ui_form_messages_copy: fn(value: I64, result: I64) {
     length: ui_carrier_word(wrapping(value + DATA_SEQUENCE_LENGTH))
     source: ui_carrier_word(wrapping(value + DATA_SEQUENCE_DATA))
     target: ui_carrier_word(wrapping(result + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         ui_carrier_store(wrapping(target + at * DYN_ELEMENT_BYTES), jet_rt_string_clone(ui_carrier_word(wrapping(source + at * DYN_ELEMENT_BYTES))))
         at += I64{1}
@@ -35,7 +35,7 @@ ui_form_messages_copy: fn(value: I64, result: I64) {
 ui_form_messages_drop: fn(value: I64) {
     length: ui_carrier_word(wrapping(value + DATA_SEQUENCE_LENGTH))
     data: ui_carrier_word(wrapping(value + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         jet_rt_string_drop(ui_carrier_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
         at += I64{1}
@@ -48,7 +48,7 @@ ui_form_messages_eq: fn(a: I64, b: I64) -> Bool {
     if (length != ui_carrier_word(wrapping(b + DATA_SEQUENCE_LENGTH))) { return false }
     first: ui_carrier_word(wrapping(a + DATA_SEQUENCE_DATA))
     second: ui_carrier_word(wrapping(b + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (!jet_rt_string_eq(ui_carrier_word(wrapping(first + at * DYN_ELEMENT_BYTES)), ui_carrier_word(wrapping(second + at * DYN_ELEMENT_BYTES)))) {
             return false
@@ -68,7 +68,7 @@ ui_form_valid_name: fn(name: I64) -> Bool {
     length: rt_text_len(name)
     if (length == I64{0} || length > I64{256}) { return false }
     data: rt_text_data(name)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         alphabetic: (byte >= I64{65} && byte <= I64{90}) || (byte >= I64{97} && byte <= I64{122})
@@ -85,7 +85,7 @@ ui_form_bound_message: fn(message: I64) -> I64 {
     // Keep the entire scalar whose start is below 4096. The original buffer
     // capacity remains owned for drop; no unnecessary replacement allocation.
     data: rt_text_data(message)
-    end := I64{0}
+    ^end: I64{0}
     limit: I64{4096}
     loop end < limit -> end += rt_text_width(wrapping(data + end))
     rt_text_store(wrapping(message + I64{8}), end)
@@ -115,8 +115,8 @@ ui_form_bound_message: fn(message: I64) -> I64 {
     fields: wrapping(error + UI_FORM_ACTION_ERROR_FIELDS)
     length: ui_carrier_word(wrapping(fields + DATA_SEQUENCE_LENGTH))
     data: ui_carrier_word(wrapping(fields + DATA_SEQUENCE_DATA))
-    low := I64{0}
-    high := length
+    ^low: I64{0}
+    ^high: length
     loop low < high {
         middle: low + (high - low) /% I64{2}
         order: jet_rt_string_compare(ui_carrier_word(wrapping(wrapping(data + middle * UI_FORM_ERROR_ENTRY_BYTES) + UI_FORM_ERROR_ENTRY_KEY)), name)
@@ -127,7 +127,7 @@ ui_form_bound_message: fn(message: I64) -> I64 {
     } else {
         data_sequence_reserve(fields, UI_FORM_ERROR_ENTRY_BYTES)
         buffer: ui_carrier_word(wrapping(fields + DATA_SEQUENCE_DATA))
-        at := length
+        ^at: length
         loop at > low {
             coll_copy(wrapping(buffer + (at - I64{1}) * UI_FORM_ERROR_ENTRY_BYTES), wrapping(buffer + at * UI_FORM_ERROR_ENTRY_BYTES), UI_FORM_ERROR_ENTRY_BYTES)
             at -= I64{1}
@@ -148,7 +148,7 @@ ui_form_bound_message: fn(message: I64) -> I64 {
     length: ui_carrier_word(wrapping(wrapping(value + UI_FORM_ACTION_ERROR_FIELDS) + DATA_SEQUENCE_LENGTH))
     source: ui_carrier_word(wrapping(wrapping(value + UI_FORM_ACTION_ERROR_FIELDS) + DATA_SEQUENCE_DATA))
     target: ui_carrier_word(wrapping(wrapping(result + UI_FORM_ACTION_ERROR_FIELDS) + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         first: wrapping(source + at * UI_FORM_ERROR_ENTRY_BYTES)
         second: wrapping(target + at * UI_FORM_ERROR_ENTRY_BYTES)
@@ -166,7 +166,7 @@ ui_form_bound_message: fn(message: I64) -> I64 {
     }
     length: ui_carrier_word(wrapping(wrapping(value + UI_FORM_ACTION_ERROR_FIELDS) + DATA_SEQUENCE_LENGTH))
     data: ui_carrier_word(wrapping(wrapping(value + UI_FORM_ACTION_ERROR_FIELDS) + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         entry: wrapping(data + at * UI_FORM_ERROR_ENTRY_BYTES)
         jet_rt_string_drop(ui_carrier_word(wrapping(entry + UI_FORM_ERROR_ENTRY_KEY)))
@@ -185,7 +185,7 @@ ui_form_bound_message: fn(message: I64) -> I64 {
     }
     first: ui_carrier_word(wrapping(wrapping(a + UI_FORM_ACTION_ERROR_FIELDS) + DATA_SEQUENCE_DATA))
     second: ui_carrier_word(wrapping(wrapping(b + UI_FORM_ACTION_ERROR_FIELDS) + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         left: wrapping(first + at * UI_FORM_ERROR_ENTRY_BYTES)
         right: wrapping(second + at * UI_FORM_ERROR_ENTRY_BYTES)

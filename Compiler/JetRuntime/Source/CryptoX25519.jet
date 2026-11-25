@@ -6,7 +6,7 @@
 // All field accesses/loops depend on public indices; cswap uses an integer mask.
 // Limbs stay below 2^17 after carry; multiply accumulators fit signed 64 bits.
 rt_crypto_wipe: fn(bytes: I64, length: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         rt_text_put(wrapping(bytes + at), I64{0})
         at += I64{1}
@@ -14,7 +14,7 @@ rt_crypto_wipe: fn(bytes: I64, length: I64) {
 }
 
 rt_x25519_copy: fn(out: I64, input: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{16}) { break }
         rt_text_store(wrapping(out + i * I64{8}), rt_text_word(wrapping(input + i * I64{8})))
@@ -23,7 +23,7 @@ rt_x25519_copy: fn(out: I64, input: I64) {
 }
 
 rt_x25519_carry: fn(a: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{16}) { break }
         value: rt_text_word(wrapping(a + i * I64{8})) + I64{65536}
@@ -38,7 +38,7 @@ rt_x25519_carry: fn(a: I64) {
 
 rt_x25519_swap: fn(a: I64, b: I64, bit: I64) {
     mask: I64{0} - bit
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{16}) { break }
         x: rt_text_word(wrapping(a + i * I64{8}))
@@ -51,7 +51,7 @@ rt_x25519_swap: fn(a: I64, b: I64, bit: I64) {
 }
 
 rt_x25519_add: fn(out: I64, a: I64, b: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{16}) { break }
         rt_text_store(wrapping(out + i * I64{8}), rt_text_word(wrapping(a + i * I64{8})) + rt_text_word(wrapping(b + i * I64{8})))
@@ -60,7 +60,7 @@ rt_x25519_add: fn(out: I64, a: I64, b: I64) {
 }
 
 rt_x25519_sub: fn(out: I64, a: I64, b: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{16}) { break }
         rt_text_store(wrapping(out + i * I64{8}), rt_text_word(wrapping(a + i * I64{8})) - rt_text_word(wrapping(b + i * I64{8})))
@@ -69,7 +69,7 @@ rt_x25519_sub: fn(out: I64, a: I64, b: I64) {
 }
 
 rt_x25519_mul: fn(out: I64, a: I64, b: I64, work: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{31}) { break }
         rt_text_store(wrapping(work + i * I64{8}), I64{0})
@@ -78,7 +78,7 @@ rt_x25519_mul: fn(out: I64, a: I64, b: I64, work: I64) {
     i = I64{0}
     loop {
         if (i >= I64{16}) { break }
-        j := I64{0}
+        ^j: I64{0}
         loop {
             if (j >= I64{16}) { break }
             at: work + (i + j) * I64{8}
@@ -103,11 +103,11 @@ rt_x25519_pack: fn(out: I64, value: I64, reduced: I64) {
     rt_x25519_carry(value)
     rt_x25519_carry(value)
     rt_x25519_carry(value)
-    pass := I64{0}
+    ^pass: I64{0}
     loop {
         if (pass >= I64{2}) { break }
         rt_text_store(reduced, rt_text_word(value) - I64{65517})
-        i := I64{1}
+        ^i: I64{1}
         loop {
             if (i >= I64{15}) { break }
             previous: rt_text_word(wrapping(reduced + (i - I64{1}) * I64{8}))
@@ -122,7 +122,7 @@ rt_x25519_pack: fn(out: I64, value: I64, reduced: I64) {
         rt_x25519_swap(value, reduced, I64{1} - ((top >> I64{16}) & I64{1}))
         pass += I64{1}
     }
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{16}) { break }
         limb: rt_text_word(wrapping(value + i * I64{8}))
@@ -147,7 +147,7 @@ rt_crypto_x25519: fn(scalar: I64, point: I64, output: I64, scratch: I64) -> I64 
     reduced: wrapping(scratch + I64{1024})
     work: wrapping(scratch + I64{1152})
     key: wrapping(scratch + I64{1400})
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{32}) { break }
         rt_text_put(wrapping(key + i), rt_text_byte(wrapping(scalar + i)))
@@ -206,7 +206,7 @@ rt_crypto_x25519: fn(scalar: I64, point: I64, output: I64, scratch: I64) -> I64 
     }
     rt_x25519_mul(a, a, e, work)
     rt_x25519_pack(output, a, reduced)
-    nonzero := I64{0}
+    ^nonzero: I64{0}
     i = I64{0}
     loop {
         if (i >= I64{32}) { break }

@@ -171,19 +171,19 @@ path_case_slice: fn(text: String, start: Int, end: Int) -> String {
 }
 
 path_case_uppers_end: fn(bytes: [U8], at: Int) -> Int {
-    end := at
+    ^end: at
     loop end < bytes.len() && path_case_upper(bytes[end]) -> end += 1
     end
 }
 
 path_case_lowers_end: fn(bytes: [U8], at: Int) -> Int {
-    end := at
+    ^end: at
     loop end < bytes.len() && path_case_lower(bytes[end]) -> end += 1
     end
 }
 
 path_case_digits_end: fn(bytes: [U8], at: Int) -> Int {
-    end := at
+    ^end: at
     loop end < bytes.len() && path_case_digit(bytes[end]) -> end += 1
     end
 }
@@ -192,15 +192,15 @@ path_case_digits_end: fn(bytes: [U8], at: Int) -> Int {
 // joins them (`MuslErrno1_2_5` is one part).
 path_case_parts: fn(stem: String) -> [String] {
     bytes: stem.bytes()
-    parts := [String]{}
-    start := 0
-    index := 0
+    ^parts: [String]{}
+    ^start: 0
+    ^index: 0
     loop index < bytes.len() {
         if !path_case_separator(bytes[index]) {
             index += 1
             next
         }
-        end := index
+        ^end: index
         loop end < bytes.len() && path_case_separator(bytes[end]) -> end += 1
         joined: end - index == 1 && index > 0 && end < bytes.len() && path_case_digit(bytes[index - 1]) && path_case_digit(bytes[end])
         if !joined {
@@ -250,11 +250,11 @@ path_case_hump_end: fn(bytes: [U8], at: Int) -> Int {
 // `4k`) and stays on the word, so a TitleCase name such as `Within100ms`
 // keeps the spelling its snake_case source `within_100ms` was given.
 path_case_words: fn(stem: String) -> [String] {
-    words := [String]{}
+    ^words: [String]{}
     loop part in path_case_parts(stem) {
         bytes: part.bytes()
-        found := false
-        at := 0
+        ^found: false
+        ^at: 0
         loop at < bytes.len() {
             end: path_case_hump_end(bytes, at)
             if end == at {
@@ -281,8 +281,8 @@ path_case_words: fn(stem: String) -> [String] {
 // lowercase one, or it is an acronym plural (`[A-Z]{2,}[0-9]*s`).
 path_case_capitals: fn(word: String) -> Bool {
     bytes: word.bytes()
-    upper := false
-    lower := false
+    ^upper: false
+    ^lower: false
     loop byte in bytes {
         if path_case_upper(byte) -> upper = true
         if path_case_lower(byte) -> lower = true
@@ -309,7 +309,7 @@ path_case_title_word: fn(word: String) -> String {
     if path_case_spelling(PATH_CASE_LEXICON.compounds, lower) == .Val(spelled) -> return spelled
     if path_case_spelling(PATH_CASE_LEXICON.exceptions, lower) == .Val(spelled) -> return spelled
     bytes: lower.bytes()
-    letters := bytes.len()
+    ^letters: bytes.len()
     loop letters > 0 && path_case_digit(bytes[letters - 1]) -> letters -= 1
     head: path_case_slice(lower, 0, letters)
     digits: path_case_slice(lower, letters, bytes.len())
@@ -326,7 +326,7 @@ path_case_title_word: fn(word: String) -> String {
 
 // A name stem in TitleCase with acronyms in capitals.
 path_case_title: fn(stem: String) -> String {
-    out := ""
+    ^out: ""
     loop word in path_case_words(stem) {
         spelled: path_case_spelling(PATH_CASE_DOMAIN_WORDS, word.to_lower()) ?? path_case_title_word(word)
         out = "{out}{spelled}"
@@ -337,7 +337,7 @@ path_case_title: fn(stem: String) -> String {
 // The string literals on one line.
 path_case_quoted: fn(line: String) -> [String] {
     pieces: line.split("\"").to_list()
-    out := [String]{}
+    ^out: [String]{}
     loop index in 0..<pieces.len() {
         if index % 2 == 1 && index + 1 < pieces.len() -> out.push(pieces[index])
     }
@@ -347,10 +347,10 @@ path_case_quoted: fn(line: String) -> [String] {
 // The lexicon read from its home's text: `ACRONYMS`, `ACRONYM_COMPOUNDS`
 // and `ACRONYM_WORD_EXCEPTIONS`.
 path_case_lexicon: fn(source: String) -> PathCaseLexicon {
-    acronyms := [PathCaseWord]{}
-    compounds := [PathCaseWord]{}
-    exceptions := [PathCaseWord]{}
-    in_acronyms := false
+    ^acronyms: [PathCaseWord]{}
+    ^compounds: [PathCaseWord]{}
+    ^exceptions: [PathCaseWord]{}
+    ^in_acronyms: false
     loop line in source.lines() {
         if in_acronyms {
             if line.starts_with("}}") {
@@ -395,7 +395,7 @@ path_case_snake: fn(word: String) -> Bool Never! {
 path_case_pascal: fn(stem: String) -> Bool Never! {
     bytes: stem.bytes()
     if bytes.len() == 0 || !path_case_upper(bytes[0]) -> return false
-    lower := false
+    ^lower: false
     loop byte in bytes {
         if path_case_lower(byte) {
             lower = true
@@ -462,7 +462,7 @@ path_case_tool_owned: fn(segments: [String]) -> Bool {
 // Whether the folder `segments` lies strictly below one of the roots `roots`
 // marks (a column of `paths`) that has at least `shortest` segments.
 path_case_below: fn(segments: [String], paths: NameTable, roots: [Int], shortest: Int) -> Bool {
-    prefix := ""
+    ^prefix: ""
     loop index in 0..<segments.len() - 1 {
         prefix = if index == 0 -> segments[0] else -> "{prefix}/{segments[index]}"
         if index + 1 >= shortest && path_case_holds(paths, roots, prefix) -> return true
@@ -492,8 +492,8 @@ path_case_leaf: fn(path: String) -> String {
 }
 
 path_case_parent: fn(folder: String) -> String {
-    segments := folder.split("/").to_list()
-    _ := segments.pop()
+    ^segments: folder.split("/").to_list()
+    ^_: segments.pop()
     segments.join("/")
 }
 
@@ -525,11 +525,11 @@ path_case_kept: fn(folder: String, facts: PathCaseFacts) -> Bool {
 
 // `path` with `.` and `..` segments resolved.
 path_case_normal: fn(path: String) -> String {
-    out := [String]{}
+    ^out: [String]{}
     loop segment in path.split("/") {
         if segment == "" || segment == "." -> next
         if segment == ".." && out.len() > 0 && out[out.len() - 1] != ".." {
-            _ := out.pop()
+            ^_: out.pop()
             next
         }
         out.push(segment)
@@ -543,7 +543,7 @@ path_case_normal: fn(path: String) -> String {
 path_case_fixture_root: fn(line: String) -> String? {
     halves: line.split(":fixture:").to_list()
     if halves.len() != 2 -> return None
-    value := halves[1].trim()
+    ^value: halves[1].trim()
     if value == "" || value.contains(" ") || value.contains("\t") -> return None
     if value.starts_with("\"") && value.ends_with("\"") && value.bytes().len() >= 2 {
         value = path_case_slice(value, 1, value.bytes().len() - 1)
@@ -552,7 +552,7 @@ path_case_fixture_root: fn(line: String) -> String? {
 }
 
 path_case_facts: fn(tracked: [String], fixture_roots: [String]) -> PathCaseFacts {
-    facts := PathCaseFacts{}
+    ^facts: PathCaseFacts{}
     loop path in tracked {
         name_column_set(facts.paths, facts.tracked, path, 1)
         segments: path.split("/").to_list()
@@ -560,13 +560,15 @@ path_case_facts: fn(tracked: [String], fixture_roots: [String]) -> PathCaseFacts
         leaf: segments[segments.len() - 1]
         parent: path_case_parent(path)
         if leaf == {
-            "run.jet" | "package.jet" | "workspace.jet" -> { name_column_set(facts.paths, facts.projects, parent, 1) }
+            "run.jet" | "package.jet" | "workspace.jet" -> {
+                name_column_set(facts.paths, facts.projects, parent, 1)
+            }
             "module.jet" -> { name_column_set(facts.paths, facts.modules, parent, 1) }
             "Cargo.toml" -> { name_column_set(facts.paths, facts.crates, parent, 1) }
             else -> {}
         }
         if !path.ends_with(".jet") -> next
-        prefix := ""
+        ^prefix: ""
         loop index in 0..<segments.len() - 1 {
             prefix = if index == 0 -> segments[0] else -> "{prefix}/{segments[index]}"
             name_column_set(facts.paths, facts.jet_folders, prefix, 1)
@@ -607,12 +609,12 @@ path_case_file_check: fn(path: String) -> PathCaseFinding? {
 
 // Every folder above the files `tracked` names, once each, sorted.
 path_case_folders: fn(tracked: [String]) -> [String] {
-    seen := name_column_table()
-    marks := name_column()
-    folders := [String]{}
+    ^seen: name_column_table()
+    ^marks: name_column()
+    ^folders: [String]{}
     loop path in tracked {
         segments: path.split("/").to_list()
-        prefix := ""
+        ^prefix: ""
         loop index in 0..<segments.len() - 1 {
             prefix = if index == 0 -> segments[0] else -> "{prefix}/{segments[index]}"
             if path_case_holds(seen, marks, prefix) -> next
@@ -629,9 +631,9 @@ path_case_folders: fn(tracked: [String]) -> [String] {
 // only when its folder is not kept.
 path_case_findings: fn(tracked: [String], fixture_roots: [String]) -> [PathCaseFinding] {
     facts: path_case_facts(tracked, fixture_roots)
-    findings := [PathCaseFinding]{}
-    folders := name_column_table()
-    kept := name_column()
+    ^findings: [PathCaseFinding]{}
+    ^folders: name_column_table()
+    ^kept: name_column()
     loop folder in path_case_folders(tracked) {
         if path_case_kept(folder, facts) {
             name_column_set(folders, kept, folder, 1)
@@ -639,7 +641,7 @@ path_case_findings: fn(tracked: [String], fixture_roots: [String]) -> [PathCaseF
         }
         if path_case_folder_check(folder, facts) == .Val(finding) -> findings.push(finding)
     }
-    files := [String]{}
+    ^files: [String]{}
     loop path in tracked {
         if path.contains("/") && path_case_holds(folders, kept, path_case_parent(path)) -> next
         files.push(path.copy())
@@ -654,7 +656,7 @@ path_case_findings: fn(tracked: [String], fixture_roots: [String]) -> [PathCaseF
 // The repository root above the file at `path`: the nearest folder holding
 // the lexicon at PATH_CASE_LEXICON_PATH. None outside every repository.
 path_case_repository: fn(path: String) -[FS]> String? Never! {
-    folder := path_case_parent(path)
+    ^folder: path_case_parent(path)
     loop folder != "" {
         if pc_files.is_file("{folder}/{PATH_CASE_LEXICON_PATH}") -> return Val(folder)
         folder = path_case_parent(folder)
@@ -671,8 +673,8 @@ PathCaseListing: struct {
 
 // The listing of `folder` (a path from `root`, "" for the root itself).
 path_case_listing: fn(root: String, folder: String) -[FS]> PathCaseListing Never! {
-    files := [String]{}
-    fixture_roots := [String]{}
+    ^files: [String]{}
+    ^fixture_roots: [String]{}
     listed: pc_files.list_dir(if folder == "" -> root else -> "{root}/{folder}") ?? [pc_files.DirEntry]{}
     loop entry in listed {
         if entry.is_dir -> next
@@ -698,23 +700,23 @@ path_case_listing: fn(root: String, folder: String) -[FS]> PathCaseListing Never
 // file: their files, and the `fixture:` lines of the cases among them. A
 // file outside every repository has none.
 path_case_disk_findings: fn(paths: [String]) -[FS]> [PathCasePlaced] Never! {
-    placed := [PathCasePlaced]{}
+    ^placed: [PathCasePlaced]{}
     // Each folder and file already reported on, and each folder's listing,
     // a row of `listings`, by absolute path at its id in `named`.
-    named := name_column_table()
-    seen := name_column()
-    listed := name_column()
-    listings := [PathCaseListing]{}
+    ^named: name_column_table()
+    ^seen: name_column()
+    ^listed: name_column()
+    ^listings: [PathCaseListing]{}
     loop path in paths {
         root: path_case_repository(path) ?? next
         relative: path_case_slice(path, root.bytes().len() + 1, path.bytes().len())
         segments: relative.split("/").to_list()
-        tracked := [String]{}
-        fixture_roots := [String]{}
-        folder := ""
+        ^tracked: [String]{}
+        ^fixture_roots: [String]{}
+        ^folder: ""
         loop index in 0..<segments.len() {
             key: "{root}/{folder}"
-            row := name_column_get(named, listed, key) ?? -1
+            ^row: name_column_get(named, listed, key) ?? -1
             if row < 0 {
                 row = listings.len()
                 listings.push(path_case_listing(root, folder))
@@ -727,8 +729,8 @@ path_case_disk_findings: fn(paths: [String]) -[FS]> [PathCasePlaced] Never! {
             }
         }
         facts: path_case_facts(tracked, fixture_roots)
-        prefix := ""
-        kept := false
+        ^prefix: ""
+        ^kept: false
         loop index in 0..<segments.len() - 1 {
             prefix = if index == 0 -> segments[0] else -> "{prefix}/{segments[index]}"
             kept = path_case_kept(prefix, facts)

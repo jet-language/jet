@@ -82,7 +82,7 @@ pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[
         return Err(ForeignBindError.Source("the Ada binder requires a `.ads` package spec"))
     }
     body_path: files.with_suffix(spec_path, ".adb")
-    body := ""
+    ^body: ""
     if files.read(body_path) == {
         .Ok(text) -> body = text
         .Err(error) -> return Err(ForeignBindError.Source("the package body `{body_path}` could not be read ({error})"))
@@ -109,14 +109,14 @@ pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[
     pkg_binder_remove_file_quiet(archive)
     pkg_ada_run([String]{"ar", "rcs", archive, files.join(build, "{stem}.o"), files.join(build, "b~{stem}.o"), bridge_obj}, None, "ar")
     runtime_dir: pkg_ada_gnat_runtime_dir()
-    identity := [U8]{}
+    ^identity: [U8]{}
     pkg_binder_append_field(identity, ADA_BIND_SCHEMA.bytes())
     pkg_binder_append_field(identity, spec.bytes())
     pkg_binder_append_field(identity, body.bytes())
     loop byte in runtime_dir.bytes() -> identity.push(byte)
     source: pkg_ada_render_jet(lib, routines)
-    bound := [String]{}
-    constraints := [String]{}
+    ^bound: [String]{}
+    ^constraints: [String]{}
     loop routine in routines {
         bound.push(routine.name)
         loop param in routine.params {
@@ -129,7 +129,7 @@ pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[
         }
     }
     pkg_binder_remove_tree_quiet(build)
-    provenance := "schema={ADA_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nsource={spec_path}\nbody={body_path}\nruntime={runtime_dir}\nabi=C\nexports={bound.join(",")}\nconstraints={constraints.join(",")}\n"
+    ^provenance: "schema={ADA_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nsource={spec_path}\nbody={body_path}\nruntime={runtime_dir}\nabi=C\nexports={bound.join(",")}\nconstraints={constraints.join(",")}\n"
     pkg_binder_append_artifact_boundary(provenance, ADA_MODULE_ROOT, "Ada", lib, spec_path, archive, "gnatmake/gnatbind/cc/ar")
     Ok(AdaBindResult{source: source, bound: bound, archive: archive, runtime_dir: runtime_dir, provenance: provenance})
 }
@@ -137,13 +137,13 @@ pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[
 // The exported scalar functions of a package spec. Comments (`--`) are
 // dropped and statements split at top-level `;`.
 pkg_ada_parse: fn(source: String) -> [AdaRoutine] ForeignBindError! {
-    stripped := [String]{}
+    ^stripped: [String]{}
     loop line in pkg_binder_lines(source) { stripped.push(line.split_once("--")?.before ?? line) }
     text: stripped.join(" ")
-    subtypes := [String:AdaType]{}
-    routines := [AdaRoutine]{}
-    names := [String:String]{}
-    symbols := [String:String]{}
+    ^subtypes: [String:AdaType]{}
+    ^routines: [AdaRoutine]{}
+    ^names: [String:String]{}
+    ^symbols: [String:String]{}
     loop raw in pkg_ada_statements(text) {
         statement: pkg_binder_words(raw).join(" ")
         if statement == "" -> next
@@ -194,7 +194,7 @@ pkg_ada_parse: fn(source: String) -> [AdaRoutine] ForeignBindError! {
         if !pkg_binder_is_ident(symbol) {
             return Err(ForeignBindError.Source("`{symbol}` is not a bindable C symbol"))
         }
-        params := [AdaParam]{}
+        ^params: [AdaParam]{}
         loop group in pkg_binder_slice(header, open + 1, close).split(";") {
             declared: group.split_once(":") ?? return Err(ForeignBindError.Source("function `{name}` has a malformed parameter"))
             trimmed_kind: declared.after.trim()
@@ -253,7 +253,7 @@ pkg_ada_resolve_type: fn(name: String, subtypes: [String:AdaType]) -> AdaType? N
 
 pkg_ada_render_jet: fn(lib: String, routines: [AdaRoutine]) -> String Never! {
     abi: "jet_ada_{lib}"
-    out := "#Import c.{abi}: module {{\n"
+    ^out: "#Import c.{abi}: module {{\n"
     loop routine in routines {
         out = "{out}    {routine.name}: fn{pkg_ada_params_jet(routine.params)} -> {routine.result.jet()} = \"{abi}_{routine.name}\"\n"
     }
@@ -268,7 +268,7 @@ pkg_ada_render_jet: fn(lib: String, routines: [AdaRoutine]) -> String Never! {
                 .None -> {}
             }
         }
-        args := [String]{}
+        ^args: [String]{}
         loop param in routine.params -> args.push(param.name)
         out = "{out}    return Ok(abi.{routine.name}({args.join(", ")}))\n}}\n\n"
     }
@@ -276,7 +276,7 @@ pkg_ada_render_jet: fn(lib: String, routines: [AdaRoutine]) -> String Never! {
 }
 
 pkg_ada_params_jet: fn(params: [AdaParam]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push("{param.name}: {param.scalar.jet()}")
     "({parts.join(", ")})"
 }
@@ -284,7 +284,7 @@ pkg_ada_params_jet: fn(params: [AdaParam]) -> String Never! {
 // An Ada literal as a Jet number: digit separators dropped, and a Float
 // bound always carries a fraction or exponent.
 pkg_ada_jet_number: fn(value: String, scalar: AdaScalar) -> String Never! {
-    out := value.replace("_", "")
+    ^out: value.replace("_", "")
     if scalar == AdaScalar.Float && !out.contains(".") && !out.contains("e") && !out.contains("E") {
         out = "{out}.0"
     }
@@ -293,9 +293,9 @@ pkg_ada_jet_number: fn(value: String, scalar: AdaScalar) -> String Never! {
 
 pkg_ada_render_c: fn(lib: String, routines: [AdaRoutine]) -> String Never! {
     abi: "jet_ada_{lib}"
-    out := "#include <stdint.h>\n#include <pthread.h>\n#include <stdlib.h>\nextern void {abi}init(void);\nextern void {abi}final(void);\nstatic pthread_once_t once=PTHREAD_ONCE_INIT;\nstatic void finish(void){{{abi}final();}}\nstatic void init(void){{{abi}init();atexit(finish);}}\n"
+    ^out: "#include <stdint.h>\n#include <pthread.h>\n#include <stdlib.h>\nextern void {abi}init(void);\nextern void {abi}final(void);\nstatic pthread_once_t once=PTHREAD_ONCE_INIT;\nstatic void finish(void){{{abi}final();}}\nstatic void init(void){{{abi}init();atexit(finish);}}\n"
     loop routine in routines {
-        args := [String]{}
+        ^args: [String]{}
         loop param in routine.params -> args.push(param.name)
         params: pkg_ada_params_c(routine.params)
         out = "{out}extern {routine.result.c()} {routine.symbol}{params};\n{routine.result.c()} {abi}_{routine.name}{params}{{pthread_once(&once,init);return {routine.symbol}({args.join(",")});}}\n"
@@ -305,7 +305,7 @@ pkg_ada_render_c: fn(lib: String, routines: [AdaRoutine]) -> String Never! {
 
 pkg_ada_params_c: fn(params: [AdaParam]) -> String Never! {
     if params.len() == 0 -> return "(void)"
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push("{param.scalar.c()} {param.name}")
     "({parts.join(",")})"
 }
@@ -335,7 +335,7 @@ pkg_ada_run: fn(argv: [String], cwd: String?, tool: String) -[Exec, Time.Wait]> 
 // The status byte (0 on success) followed by stdout then stderr.
 pkg_ada_capture: fn(argv: [String], cwd: String?, tool: String) -[Exec, Time.Wait]> [U8] ForeignBindError! {
     output: pkg_binder_capture(argv, cwd, tool, ADA_TOOL_ACTION)
-    result := [U8]{if output.success -> U8{0} else -> U8{1}}
+    ^result: [U8]{if output.success -> U8{0} else -> U8{1}}
     loop byte in output.stdout -> result.push(byte)
     loop byte in output.stderr -> result.push(byte)
     Ok(result)
@@ -369,9 +369,9 @@ pkg_ada_quoted_after: fn(text: String, needle: String) -> String? Never! {
 // Statements split at `;` outside parentheses.
 pkg_ada_statements: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    out := [String]{}
-    start := 0
-    depth := 0
+    ^out: [String]{}
+    ^start: 0
+    ^depth: 0
     loop index in 0..<raw.len() {
         code: Int{raw[index]}
         if code == {
@@ -393,7 +393,7 @@ pkg_ada_statements: fn(text: String) -> [String] Never! {
 // The byte index of the `)` closing the `(` at `open`, or -1.
 pkg_ada_matching_close: fn(text: String, open: Int) -> Int Never! {
     raw: text.bytes()
-    depth := 0
+    ^depth: 0
     loop index in open..<raw.len() {
         code: Int{raw[index]}
         if code == 40 -> depth += 1

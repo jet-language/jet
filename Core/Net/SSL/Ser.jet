@@ -61,7 +61,7 @@ ssl_serialized_session_header: fn() -> [U8] Never! {
 /// The version and format bytes that start a serialized context
 /// (ssl_serialized_context_header).
 ssl_serialized_context_header: fn() -> [U8] Never! {
-    header := ssl_serialized_session_header()
+    ^header: ssl_serialized_session_header()
     header.push(ssldefs.ssl_byte(SSL_SERIALIZED_CONTEXT_CONFIG_BITFLAG >> 16))
     header.push(ssldefs.ssl_byte(SSL_SERIALIZED_CONTEXT_CONFIG_BITFLAG >> 8))
     header.push(ssldefs.ssl_byte(SSL_SERIALIZED_CONTEXT_CONFIG_BITFLAG))
@@ -93,7 +93,7 @@ ssl_ser_push_u64: fn(out: ^[U8], v: U64) Never! {
 
 // MBEDTLS_GET_UINT64_BE into a U64 counter.
 ssl_ser_get_u64: fn(buf: [U8], off: Int) -> U64 Never! {
-    v := U64{0}
+    ^v: U64{0}
     loop i in 0..<8 -> v = (v << 8) | U64{Int{buf[off + i]}}
     v
 }
@@ -122,7 +122,7 @@ ssl_tls12_session_save: fn(session: ssldefs.SSLSession, out: ^[U8]) Never! {
     ssl_ser_push_fixed(out, session.master, 48)
     ssldefs.ssl_push_u32(out, session.verify_result)
     // C keeps the end-entity certificate alone (peer_cert->raw).
-    cert_len := 0
+    ^cert_len: 0
     if session.peer_cert == {
         .Val(chain) -> {
             if chain.len() > 0 -> cert_len = chain[0].raw.len()
@@ -157,7 +157,7 @@ ssl_tls12_session_save: fn(session: ssldefs.SSLSession, out: ^[U8]) Never! {
 /// (ssl_tls12_session_load); the data must fill it exactly. The endpoint
 /// is already read.
 ssl_tls12_session_load: fn(session: ^ssldefs.SSLSession, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
-    p := start
+    ^p: start
     end: start + len
     if 8 > end - p -> return Err(.BadInputData)
     session.start = ssl_ser_get_time(buf, p)
@@ -184,7 +184,7 @@ ssl_tls12_session_load: fn(session: ^ssldefs.SSLSession, buf: [U8], start: Int, 
     p += 3
     if cert_len != 0 {
         if cert_len > end - p -> return Err(.BadInputData)
-        peer := [x509crt.X509Crt]{}
+        ^peer: [x509crt.X509Crt]{}
         x509crt.x509_crt_parse_der(peer, ssldefs.ssl_bytes_of(buf, p, cert_len)) ?? return Err(.X509(err))
         session.peer_cert = Val(peer)
         p += cert_len
@@ -261,7 +261,7 @@ ssl_tls13_session_save: fn(session: ssldefs.SSLSession, out: ^[U8]) ssldefs.SSLE
 /// (ssl_tls13_session_load); the data must fill it exactly. The endpoint
 /// is already read.
 ssl_tls13_session_load: fn(session: ^ssldefs.SSLSession, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
-    p := start
+    ^p: start
     end: start + len
     if end - p < 6 -> return Err(.BadInputData)
     session.ticket_age_add = ssldefs.ssl_get_u32(buf, p)
@@ -289,7 +289,7 @@ ssl_tls13_session_load: fn(session: ^ssldefs.SSLSession, buf: [U8], start: Int, 
             // It is used as a NUL-terminated string, so it must be one.
             if buf[p + hostname_len - 1] != (U8{0}) -> return Err(.BadInputData)
             // C's strlen: the name ends at its first NUL.
-            n := 0
+            ^n: 0
             loop buf[p + n] != (U8{0}) -> n += 1
             hostname: String.from_bytes(ssldefs.ssl_bytes_of(buf, p, n)) ?? return Err(.BadInputData)
             ssltls.ssl_session_set_hostname(session, Val(hostname)) ?? return Err(err)
@@ -323,7 +323,7 @@ ssl_tls13_session_load: fn(session: ^ssldefs.SSLSession, buf: [U8], start: Int, 
 /// ciphersuite, then the version's own fields. Versions other than TLS
 /// 1.2 and 1.3 are FEATURE_UNAVAILABLE.
 ssl_session_save_int: fn(session: ssldefs.SSLSession, omit_header: Bool) -> [U8] ssldefs.SSLError! {
-    out := [U8]{}
+    ^out: [U8]{}
     if !omit_header -> ssldefs.ssl_push_all(out, ssl_serialized_session_header())
     out.push(ssldefs.ssl_byte(session.tls_version))
     out.push(ssldefs.ssl_byte(session.endpoint))
@@ -348,7 +348,7 @@ ssl_session_save: fn(session: ssldefs.SSLSession) -> [U8] ssldefs.SSLError! {
 /// header that is not this version's and format is VERSION_MISMATCH, and a
 /// TLS version other than 1.2 and 1.3 is BAD_INPUT_DATA.
 ssl_session_load_int: fn(session: ^ssldefs.SSLSession, omit_header: Bool, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
-    p := start
+    ^p: start
     end: start + len
     if !omit_header {
         header: ssl_serialized_session_header()
@@ -413,8 +413,8 @@ ssl_context_save: fn(ssl: ^ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
     if ssl.conf.disable_renegotiation != ssldefs.SSL_RENEGOTIATION_DISABLED {
         return Err(.BadInputData)
     }
-    out := ssl_serialized_context_header()
-    session := ssl_session_save_int(ssl.spool[ssl.session], true) ?? return Err(err)
+    ^out: ssl_serialized_context_header()
+    ^session: ssl_session_save_int(ssl.spool[ssl.session], true) ?? return Err(err)
     ssldefs.ssl_push_u32(out, session.len())
     ssldefs.ssl_push_all(out, session)
     ssldefs.ssl_wipe(session)
@@ -472,7 +472,7 @@ ssl_context_load_int: fn(ssl: ^ssldefs.SSLContext, buf: [U8]) ssldefs.SSLError! 
     // C uses the session and transform the set-up or reset allocated; a
     // context without them is not one.
     if ssl.session_negotiate < 0 || ssl.transform_negotiate < 0 -> return Err(.BadInputData)
-    p := 0
+    ^p: 0
     end: buf.len()
     header: ssl_serialized_context_header()
     if end - p < header.len() -> return Err(.BadInputData)
@@ -505,11 +505,11 @@ ssl_context_load_int: fn(ssl: ^ssldefs.SSLContext, buf: [U8]) ssldefs.SSLError! 
     ciphersuite: ssl.spool[s].ciphersuite
     prf_md: ssl_tls12prf_from_cs(ciphersuite) ?? return Err(.BadInputData)
     if end - p < SSL_SER_RANDBYTES_LEN -> return Err(.BadInputData)
-    master := ssl.spool[s].master.copy()
+    ^master: ssl.spool[s].master.copy()
     encrypt_then_mac: ssl.spool[s].encrypt_then_mac
     endpoint: ssl.conf.endpoint
-    randbytes := ssldefs.ssl_bytes_of(buf, p, SSL_SER_RANDBYTES_LEN)
-    failure := ssldefs.SSLError?{None}
+    ^randbytes: ssldefs.ssl_bytes_of(buf, p, SSL_SER_RANDBYTES_LEN)
+    ^failure: ssldefs.SSLError?{None}
     if ssltls.ssl_tls12_populate_transform(ssl, t, ciphersuite, master, encrypt_then_mac, prf_md, randbytes, ssldefs.SSL_VERSION_TLS1_2, endpoint) == {
         .Ok(_) -> {}
         .Err(e) -> failure = Val(e)

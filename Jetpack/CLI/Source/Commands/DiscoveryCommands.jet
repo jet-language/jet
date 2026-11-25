@@ -16,7 +16,7 @@ cli_empty_dash: fn(value: String) -> String Never! {
 
 // `jet search <query>`: local/offline package discovery (U26).
 cli_cmd_search: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     query: parsed.positional.get(0) ?? {
         theme.error("search needs a query", "`jet search` reads the local discovery index; it never fetches.", "write `jet search postgres`.")
         return EXIT_USAGE
@@ -40,7 +40,7 @@ cli_cmd_search: fn(verification: StoreVerification, theme: Theme, parsed: CLIPar
 
 // `jet info <ref>`: local/offline package metadata (U26).
 cli_cmd_info: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     query: parsed.positional.get(0) ?? {
         theme.error("info needs a package ref", "`jet info` reads the local discovery index; it never fetches.", "write `jet info default.ripgrep`.")
         return EXIT_USAGE
@@ -80,7 +80,7 @@ cli_cmd_info: fn(verification: StoreVerification, theme: Theme, parsed: CLIParse
 // project's declared refs; written back when the project has an env file.
 cli_discovery_index: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageIndex CLIError! {
     project_dir: cli_current_dir()
-    index := if env_discovery_load(project_dir) == {
+    ^index: if env_discovery_load(project_dir) == {
         .Val(found) -> found
         .None -> PackageIndex.empty()
         .Err(error) -> {
@@ -112,7 +112,7 @@ cli_discovery_index: fn(verification: StoreVerification, cache: ^WorkspaceDeclar
 // [--patch] [--allow-unfree]`: draft reviewed workspace overlay policy; it
 // never records hidden override state.
 cli_cmd_override: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     action: parsed.positional.get(0) ?? {
         theme.error("override needs an action", "`jetpack override` only drafts reviewed source policy; it never records hidden override state.", "write `jetpack override draft <ref> --patch <file>`.")
         return EXIT_USAGE
@@ -125,12 +125,12 @@ cli_cmd_override: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, 
         theme.error("override draft needs a package ref", "the ref names the package whose typed workspace policy should be drafted.", "write `jetpack override draft foo@jetpack --patch patches/foo.patch`.")
         return EXIT_USAGE
     }
-    overlay := "local"
-    patch := String?{None}
-    provider := String?{None}
-    channel := String?{None}
-    allow_unfree := false
-    index := 2
+    ^overlay: "local"
+    ^patch: String?{None}
+    ^provider: String?{None}
+    ^channel: String?{None}
+    ^allow_unfree: false
+    ^index: 2
     loop index < parsed.positional.len() {
         flag: parsed.positional[index]
         if flag == {
@@ -202,7 +202,7 @@ cli_cmd_logs: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time
         if recipe_debug_latest_json(hangar, package) == {
             .Ok(found) -> {
                 text: found ?? return cli_missing_logs(theme, package)
-                stdout_handle := term.stdout()
+                ^stdout_handle: term.stdout()
                 stdout_handle.write(text).drop("log output is best-effort")
                 return EXIT_OK
             }
@@ -212,7 +212,7 @@ cli_cmd_logs: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time
         if recipe_debug_latest(hangar, package) == {
             .Ok(found) -> {
                 attempt: found ?? return cli_missing_logs(theme, package)
-                stdout_handle := term.stdout()
+                ^stdout_handle: term.stdout()
                 stdout_handle.write(recipe_debug_text_logs(attempt)).drop("log output is best-effort")
                 return EXIT_OK
             }

@@ -35,7 +35,7 @@ use jet_foundation.[
 // are the only labeled built-in method parameters.
 sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool {
     if method == "zip" || method == "zip_short" || method == "zip_pad" -> return true
-    valid := true
+    ^valid: true
     loop (index, argument) in args {
         if argument.label == .Val(label) {
             if method == "merge" && index == 1 && label.name == "conflict" -> next
@@ -81,7 +81,7 @@ sema_value_method_argument_mismatch: fn(method: String, index: Int, required: Ty
 sema_value_method_replace_mismatch: fn(argument: Expr, method: String, index: Int, required: Type, start: Int, check: ^SemaBodyCheck) {
     value_span: expr_span(argument)
     mismatch_index: sema_value_mismatch_index(check.diagnostics, start, value_span) ?? return
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     offered: sema_probe_expression(argument, None, check, probe_diagnostics) ?? return
     check.diagnostics[mismatch_index] = sema_value_method_argument_mismatch(method, index, sema_expr_expected_type(required, check.environment.*, check.program.*), sema_expr_expected_type(offered.ty, check.environment.*, check.program.*), value_span)
 }
@@ -113,8 +113,8 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
         .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation.copy(), args: typed}
         .StringSlice -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.Slice{line: line}, args: typed}
         .StringRangeSlice -> {
-            zero_start := sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-            zero_end := sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+            ^zero_start: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+            ^zero_end: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             TExprKind.Slice{base: receiver_value, start: zero_start.move(), end: zero_end.move(), range: Val(typed[0]), location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, span)}
         }
         .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce, args: typed}
@@ -166,7 +166,7 @@ sema_value_method_core_source: fn(owner: String, role: String, receiver_value: T
         check.diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    args := [TCallArg]{sema_value_method_source_arg(receiver_value)}
+    ^args: [TCallArg]{sema_value_method_source_arg(receiver_value)}
     loop argument in typed -> args.push(sema_value_method_source_arg(argument))
     value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: args}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
@@ -176,20 +176,20 @@ sema_value_method_core_source: fn(owner: String, role: String, receiver_value: T
 // call boundary, so the result wraps its success value. The callback result is
 // open, so it is checked like a collection callback and validated below.
 sema_value_method_option_map: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    required := Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    ^required: Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     callback: sema_expression_lambda_collection_callback(args[0].expr, Val(required), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if sema_call_host_callback_assignable(required, callback.ty, check) != (Val(true)) {
         check.diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "argument 1 to `.map()` should be {sema_type_show(required)}, not {sema_type_show(callback.ty)}", "built-in methods need arguments of the right type", sema_type_fix_hint(required, callback.ty)))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    returned := sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}
-    success := if returned == {
+    ^returned: sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}
+    ^success: if returned == {
         .Result(ok, _) | .Option(ok) -> ok
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> returned
     }
-    updated_args := args
-    params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false}}
-    ownership := sema_ownership_check_method_call(check, "Option.map", receiver, AccessConvention.Read, params, updated_args, span)
+    ^updated_args: args
+    ^params: [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false}}
+    ^ownership: sema_ownership_check_method_call(check, "Option.map", receiver, AccessConvention.Read, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -198,7 +198,7 @@ sema_value_method_option_map: fn(receiver: Expr, receiver_value: TExpr, inner: T
     if !sema_effect_record_intrinsic_effects(check, "Option.map", span, [EffectRowEntry]{}) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value := sema_tree_node(Type.Option{inner: success}, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.OptionMap, args: [TExpr]{callback}}, span)
+    ^value: sema_tree_node(Type.Option{inner: success}, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.OptionMap, args: [TExpr]{callback}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
@@ -213,9 +213,9 @@ sema_value_method_source_arg: fn(value: TExpr) -> TCallArg Never! {
 // move parameter.
 sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     why: sema_value_method_argument(args[0], "or_err", 0, Type.String, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    updated_args := args
-    params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
-    ownership := sema_ownership_check_snapshot_receiver_call(check, "Option.or_err", receiver, params, updated_args, span)
+    ^updated_args: args
+    ^params: [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    ^ownership: sema_ownership_check_snapshot_receiver_call(check, "Option.or_err", receiver, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -231,8 +231,8 @@ sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner
         }
     }
     callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    kind := TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(why)}}
-    value := sema_tree_node(Type.Result{ok: inner, err: Type.Named{name: "Err"}}, kind.move(), span)
+    ^kind: TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(why)}}
+    ^value: sema_tree_node(Type.Result{ok: inner, err: Type.Named{name: "Err"}}, kind.move(), span)
     // A success slot (`return opt.or_err("why")` in a `T Err!` body) meets the
     // carrier the way any fallible call does: the caller propagates it.
     if expected == .Val(want) && !(sema_expr_unwrap_tag(want) == .Result(_, _)) {
@@ -315,7 +315,7 @@ sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: Str
     if !sema_value_method_check_labels(method, args, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    typed := [TExpr]{}
+    ^typed: [TExpr]{}
     loop argument in args {
         value: sema_check_expression(argument.expr, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(value)
@@ -323,7 +323,7 @@ sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: Str
     if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.PreciseMethod{type_name: owner, method: method}, args: typed}, span)
+    ^value: sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.PreciseMethod{type_name: owner, method: method}, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
@@ -336,20 +336,20 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
             return sema_value_method_option_or_err(receiver, receiver_value, inner, args, span, expected, check)
         }
     }
-    precise := sema_value_method_precise(receiver, receiver_value, method, args, span, expected, check)
+    ^precise: sema_value_method_precise(receiver, receiver_value, method, args, span, expected, check)
     if precise.handled -> return precise
     row: builtin_method_row(receiver_value.ty, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    owner := sema_value_method_owner(receiver_value.ty)
+    ^owner: sema_value_method_owner(receiver_value.ty)
     if row.lowering == .Atomic(_) && check.scopes.transaction_wall_depth > 0 {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
         check.diagnostics.push(sema_error("E0752", span, "`Atomic` cannot be used inside `#Transact`", "`Shared<T>` is the lock-guarded family for multi-value transactions; `Atomic<T>` is one lock-free scalar and has no transaction commit semantics", "move the atomic operation outside `#Transact`, or use `Shared<T>` when several values must commit together"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    labels_valid := sema_value_method_check_labels(method, args, check.diagnostics)
+    ^labels_valid: sema_value_method_check_labels(method, args, check.diagnostics)
     // `a.pow(b)` across float widths is the same E0109 as the operator, over
     // both operands, not a parameter mismatch on `b`.
     if method == "pow" && args.len() == 1 && (receiver_value.ty == Type.Float || receiver_value.ty == Type.Float32) {
-        probe_diagnostics := [Diagnostic]{}
+        ^probe_diagnostics: [Diagnostic]{}
         if sema_probe_expression(args[0].expr, None, check, probe_diagnostics) == .Val(exponent) {
             if sema_expr_pow_widths_mixed(receiver_value.ty, exponent.ty) {
                 check.diagnostics.push(sema_expr_pow_width_mismatch(Span{start: receiver_value.span.start, end: expr_span(args[0].expr).end}))
@@ -357,23 +357,23 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
             }
         }
     }
-    typed := [TExpr]{}
-    params := [SemaCallParam]{}
+    ^typed: [TExpr]{}
+    ^params: [SemaCallParam]{}
     loop (index, argument) in args {
-        required := builtin_method_bind(row.parameters[index], receiver_value.ty)
+        ^required: builtin_method_bind(row.parameters[index], receiver_value.ty)
         value: sema_value_method_argument(argument, method, index, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(value)
         params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false})
     }
     if !labels_valid -> return SemaMethodSpecialCheck{handled: true, value: None}
-    updated_args := args
+    ^updated_args: args
     // A String edit reserves its receiver two-phase, so
     // `s.insert(s.len(), "]")` reads `s` before the edit begins (JetIR evaluates
     // the arguments before it takes the place); its arguments retain no call
     // loan.
     callee: "{owner}.{method}"
     two_phase: row.access == AccessConvention.Write && row.receiver == BuiltinMethodReceiver.String
-    ownership := if two_phase -> sema_ownership_check_two_phase_method_call(check, callee, sema_ownership_receiver_consumer(callee), receiver, row.access, false, params, updated_args, span, expr_span(receiver)) else -> sema_ownership_check_method_call(check, callee, receiver, row.access, params, updated_args, span)
+    ^ownership: if two_phase -> sema_ownership_check_two_phase_method_call(check, callee, sema_ownership_receiver_consumer(callee), receiver, row.access, false, params, updated_args, span, expr_span(receiver)) else -> sema_ownership_check_method_call(check, callee, receiver, row.access, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -396,7 +396,7 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     if row.lowering == .CoreSource(source_owner, role) {
         return sema_value_method_core_source(source_owner, role, receiver_value, typed, span, expected, check)
     }
-    result := builtin_method_bind(row.result, receiver_value.ty)
+    ^result: builtin_method_bind(row.result, receiver_value.ty)
     needs_line: if row.lowering == {
         .StringSlice | .Arithmetic(_) | .Overflow(_, _) -> true
         .Builtin(_) | .StringRangeSlice | .StringSplitOnce | .StringCutLast | .IntToRadix | .Show | .Predicate | .BitCount | .Euclidean(_) | .Atomic(_) | .CoreSource(_, _) -> false
@@ -411,6 +411,6 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         exact: sema_tree_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{one, power}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(exact, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
-    value := sema_tree_node(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, check), span)
+    ^value: sema_tree_node(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, check), span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }

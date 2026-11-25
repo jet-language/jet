@@ -4,13 +4,13 @@
 use perf: core.perf
 
 churn: fn(seed: Int) -> Int Never! {
-    acc := seed
+    ^acc: seed
     loop i in 0..<20000 -> acc = (acc * 31 + i) % 1000003
     acc
 }
 
 parse: fn(count: Int) -> Int {
-    total := 0
+    ^total: 0
     loop at in 0..<count {
         worker: task {
             _zone: perf.zone("parse")
@@ -22,7 +22,7 @@ parse: fn(count: Int) -> Int {
 }
 
 lower: fn(count: Int) -> Int {
-    total := 0
+    ^total: 0
     loop at in 0..<count {
         worker: task {
             _zone: perf.zone("lower")
@@ -34,7 +34,7 @@ lower: fn(count: Int) -> Int {
 }
 
 emit: fn(count: Int) -> Int {
-    total := 0
+    ^total: 0
     loop at in 0..<count {
         worker: task {
             _zone: perf.zone("emit")

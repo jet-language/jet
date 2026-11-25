@@ -37,27 +37,19 @@ JetFrameTypes: struct {
 
 jet_frame_types: fn(defs: ^^[TTypeDef]) -> JetFrameTypes Never! {
     owned: defs.move()
-    keys := name_column_table(owned.len() * 2)
-    rows := name_column(owned.len() * 2)
-    loop (index, definition) in owned {
-        name_column_set_first(keys, rows, definition.key, index)
-    }
-    loop (index, definition) in owned {
-        name_column_set_first(keys, rows, definition.name, index)
-    }
+    ^keys: name_column_table(owned.len() * 2)
+    ^rows: name_column(owned.len() * 2)
+    loop (index, definition) in owned { name_column_set_first(keys, rows, definition.key, index) }
+    loop (index, definition) in owned { name_column_set_first(keys, rows, definition.name, index) }
     // -3 not yet computed, -2 generic, -1 unknown/cycle, >= 0 cached storage bytes.
-    fixed := [Int]{}
+    ^fixed: [Int]{}
     if owned.len() > 0 -> fixed.try_reserve(owned.len()) ?? ()
-    loop definition in owned {
-        fixed.push(if definition.generic_params.len() > 0 -> -2 else -> -3)
-    }
-    types := JetFrameTypes{defs: owned.move(), keys: keys.move(), rows: rows.move(), fixed_storage: fixed.move()}
+    loop definition in owned { fixed.push(if definition.generic_params.len() > 0 -> -2 else -> -3) }
+    ^types: JetFrameTypes{defs: owned.move(), keys: keys.move(), rows: rows.move(), fixed_storage: fixed.move()}
     // Precompute every non-generic declaration's storage once.
-    laying := [Int]{}
+    ^laying: [Int]{}
     loop row in 0..<types.defs.len() {
-        if types.fixed_storage[row] == -3 {
-            _ := jet_frame_precompute_row(types, row, laying)
-        }
+        if types.fixed_storage[row] == -3 -> ^_: jet_frame_precompute_row(types, row, laying)
     }
     types
 }
@@ -69,18 +61,14 @@ jet_frame_precompute_row: fn(types: ^JetFrameTypes, row: Int, laying: ^[Int]) ->
         if active == row -> return -1
     }
     laying.push(row)
-    result := -1
+    ^result: -1
     if types.defs[row].kind == {
-        .Enum(_, _) | .UnitFamily(_, _) -> result = 0
-        .Distinct(base, _) -> {
-            result = jet_frame_precompute_type(types, base, laying)
-        }
-        .Alias(target) -> {
-            result = jet_frame_precompute_type(types, target, laying)
-        }
+        .Enum(_, _) | .UnitFamily(_, _) -> { result = 0 }
+        .Distinct(base, _) -> { result = jet_frame_precompute_type(types, base, laying) }
+        .Alias(target) -> { result = jet_frame_precompute_type(types, target, laying) }
         .Struct(fields, _) -> {
-            total := 0
-            ok := true
+            ^total: 0
+            ^ok: true
             loop field_idx in 0..<fields.len() {
                 if fields[field_idx].computed -> next
                 if types.defs[row].boxed_edges.contains(fields[field_idx].name) {
@@ -94,12 +82,10 @@ jet_frame_precompute_row: fn(types: ^JetFrameTypes, row: Int, laying: ^[Int]) ->
                 }
                 total += jet_frame_member_bytes(bytes)
             }
-            if ok {
-                result = if total < 8 -> 8 else -> total
-            }
+            if ok -> result = if total < 8 -> 8 else -> total
         }
     }
-    _ := laying.pop()
+    ^_: laying.pop()
     types.fixed_storage[row] = result
     result
 }
@@ -111,7 +97,7 @@ jet_frame_precompute_type: fn(types: ^JetFrameTypes, ty: Type, laying: ^[Int]) -
         .InlineRange(base, _, _) | .Quantity(base, _) -> jet_frame_precompute_type(types, base, laying)
         .Tagged(_, inner) -> jet_frame_precompute_type(types, inner, laying)
         .Tuple(fields) -> {
-            total := 0
+            ^total: 0
             loop field in fields {
                 bytes: jet_frame_precompute_type(types, field.ty, laying)
                 if bytes < 0 -> return -1
@@ -140,8 +126,10 @@ jet_frame_precompute_type: fn(types: ^JetFrameTypes, ty: Type, laying: ^[Int]) -
                 if captured < 0 -> return -1
                 return 16 + jet_frame_member_bytes(captured)
             }
-            if name_column_get(types.keys, types.rows, name) == None -> return JET_FRAME_CARRIER_BYTES
-            active_keys := [String]{}
+            if name_column_get(types.keys, types.rows, name) == None {
+                return JET_FRAME_CARRIER_BYTES
+            }
+            ^active_keys: [String]{}
             loop idx in laying -> active_keys.push(types.defs[idx].key)
             jet_frame_nominal(types, name, args, [String:Int]{}, active_keys) ?? -1
         }
@@ -164,7 +152,7 @@ jet_frame_storage_fast: fn(types: JetFrameTypes, ty: Type) -> Int? Never! {
             if cached >= 0 -> Val(cached) else -> None
         }
         .Tuple(fields) -> {
-            total := 0
+            ^total: 0
             loop field in fields {
                 bytes: jet_frame_storage_fast(types, field.ty) ?? return None
                 total += jet_frame_member_bytes(bytes)
@@ -184,7 +172,9 @@ jet_frame_storage_fast: fn(types: JetFrameTypes, ty: Type) -> Int? Never! {
                 captured: jet_frame_storage_fast(types, args[1]) ?? return None
                 return Val(16 + jet_frame_member_bytes(captured))
             }
-            if name_column_get(types.keys, types.rows, name) == None -> return Val(JET_FRAME_CARRIER_BYTES)
+            if name_column_get(types.keys, types.rows, name) == None {
+                return Val(JET_FRAME_CARRIER_BYTES)
+            }
             jet_frame_nominal(types, name, args, [String:Int]{}, [String]{})
         }
     }
@@ -218,7 +208,7 @@ jet_frame_storage_bytes: fn(types: JetFrameTypes, ty: Type, env: [String:Int], l
         .InlineRange(base, _, _) | .Quantity(base, _) -> jet_frame_storage_bytes(types, base, env, laying)
         .Tagged(_, inner) -> jet_frame_storage_bytes(types, inner, env, laying)
         .Tuple(fields) -> {
-            total := 0
+            ^total: 0
             loop field in fields {
                 bytes: jet_frame_storage_bytes(types, field.ty, env, laying) ?? return None
                 total += jet_frame_member_bytes(bytes)
@@ -292,19 +282,17 @@ jet_frame_nominal: fn(types: JetFrameTypes, name: String, args: [Type], env: [St
     definition: types.defs[row]
     if laying.contains(definition.key) -> return None
     if definition.generic_params.len() != args.len() -> return None
-    if args.len() == 0 && types.fixed_storage[row] >= 0 {
-        return Val(types.fixed_storage[row])
-    }
-    params := [String:Int]{}
+    if args.len() == 0 && types.fixed_storage[row] >= 0 -> return Val(types.fixed_storage[row])
+    ^params: [String:Int]{}
     loop (index, parameter) in definition.generic_params {
         bound: if args[index] == .Measure(measure) -> jet_frame_measure(measure, env) else -> jet_frame_storage_bytes(types, args[index], env, laying)
         params[parameter.name.copy()] = bound ?? return None
     }
-    inner := laying
+    ^inner: laying
     inner.push(definition.key.copy())
     declared: if definition.kind == {
         .Struct(fields, _) -> {
-            total := 0
+            ^total: 0
             loop field in fields {
                 if field.computed -> next
                 if definition.boxed_edges.contains(field.name) {

@@ -38,7 +38,7 @@ status_kb: fn(field: String) -> Int {
 }
 
 make_table: fn(n: Int) -> Table {
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop i in 0..<n -> rows.push(Row{_name: "row {i}", items: [String]{"a {i}", "b {i}"}})
     Table{rows: rows, title: "table {n}", count: n}
 }
@@ -48,7 +48,7 @@ scalar_tail: fn() -> Int { make_table(16).count }
 
 // A list field read in place, in a statement.
 list_in_a_statement: fn() -> Int {
-    total := make_table(16).rows.len()
+    ^total: make_table(16).rows.len()
     total
 }
 
@@ -63,7 +63,7 @@ text_returned: fn() -> String { return make_table(16).title }
 
 // A field read in a loop condition, once per pass.
 in_a_loop_condition: fn() -> Int {
-    passes := 0
+    ^passes: 0
     loop passes < make_table(16).count /% 4 -> passes += 1
     passes
 }
@@ -78,7 +78,7 @@ in_an_if_condition: fn(flag: Bool) -> Int {
 }
 
 measure: fn(name: String, scenario: fn() -> Int) {
-    total := scenario()
+    ^total: scenario()
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
     grown: status_kb("VmRSS:") - start

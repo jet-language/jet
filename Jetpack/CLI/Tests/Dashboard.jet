@@ -29,16 +29,16 @@ DashboardTestRun: struct {
 }
 
 cli_dashboard_test_run: fn(initial: DashboardLoader?, keys: String, results: [DashboardLoadResult], clock_step_ms: Int?) -> DashboardTestRun {
-    loader := initial
-    frame := DashboardFrame.Loading
-    reader := DashboardKeyReader.from_bytes(keys.bytes())
-    output := DashboardOutput.recording(80)
-    factory := DashboardLoaderFactory.scripted(results)
-    clock := if clock_step_ms == {
+    ^loader: initial
+    ^frame: DashboardFrame.Loading
+    ^reader: DashboardKeyReader.from_bytes(keys.bytes())
+    ^output: DashboardOutput.recording(80)
+    ^factory: DashboardLoaderFactory.scripted(results)
+    ^clock: if clock_step_ms == {
         .Val(step) -> DashboardClock.stepping(step)
         .None -> DashboardClock.system()
     }
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     code: cli_dashboard_run_loop(verification, reader, loader, frame, output, Theme.plain(), factory, clock)
     DashboardTestRun{code: code, frames: output.frames, starts: factory.starts}
 }

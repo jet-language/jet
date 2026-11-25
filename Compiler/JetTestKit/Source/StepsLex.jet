@@ -4,8 +4,8 @@ use json: core.encoding.json
 // is decoded. Single-quoted and bare words retain their original escape rule.
 kit_steps_tokens: fn(text: String) -> [KitWord]? {
     bytes: text.bytes()
-    result := [KitWord]{}
-    i := 0
+    ^result: [KitWord]{}
+    ^i: 0
     loop i < bytes.len() {
         if bytes[i] == (U8{32}) || bytes[i] == (U8{9}) {
             i += 1
@@ -19,10 +19,10 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
             next
         }
         quoted: first == 34 || first == 39
-        quote := if quoted -> first else -> 0
-        escape := false
-        bare_escape := false
-        path_depth := 0
+        ^quote: if quoted -> first else -> 0
+        ^escape: false
+        ^bare_escape: false
+        ^path_depth: 0
         if quoted -> i += 1
         loop i < bytes.len() {
             c: Int{bytes[i]}
@@ -52,7 +52,7 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
         if quote != 0 || escape -> return None
         if quoted && i < bytes.len() && bytes[i] != (U8{32}) && bytes[i] != (U8{9}) -> return None
         raw: kit_steps_byte_slice(text, start, i)
-        decoded := raw.copy()
+        ^decoded: raw.copy()
         if first == 34 {
             tree: json.parse(raw) ?? return None
             if tree == {
@@ -63,8 +63,8 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
             interior: kit_steps_byte_slice(text, start + 1, i - 1)
             decoded = interior.copy()
             if interior.contains("\\") {
-                buffer := [U8]{}
-                at := start + 1
+                ^buffer: [U8]{}
+                ^at: start + 1
                 loop at < i - 1 {
                     if bytes[at] == (U8{92}) -> at += 1
                     if at >= i - 1 -> return None
@@ -82,10 +82,10 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
 
 kit_steps_unquoted: fn(text: String) -> String? {
     bytes: text.bytes()
-    result := [U8]{}
-    quote := 0
-    escape := false
-    i := 0
+    ^result: [U8]{}
+    ^quote: 0
+    ^escape: false
+    ^i: 0
     loop i < bytes.len() {
         c: Int{bytes[i]}
         if quote == 0 && c == 92 {
@@ -106,8 +106,8 @@ kit_steps_integer: fn(text: String) -> Int? { Val(Int.parse(text) ?? return None
 
 kit_steps_comment: fn(text: String) -> Int {
     bytes: text.bytes()
-    quote := 0
-    escape := false
+    ^quote: 0
+    ^escape: false
     loop (i, byte) in bytes {
         c: Int{byte}
         if quote != 0 {
@@ -141,7 +141,7 @@ kit_steps_scalar_word: fn(text: String) -> String? {
 }
 
 kit_steps_capture_tokens: fn(text: String, defined: [String]) -> Bool {
-    rest := text
+    ^rest: text
     loop {
         start: kit_steps_byte_index(rest, "{{cap:") ?? return true
         after: start + 5
@@ -155,7 +155,7 @@ kit_steps_capture_tokens: fn(text: String, defined: [String]) -> Bool {
 // Syntax-check scalar substitution slots without evaluating or accepting a
 // fallback value. The executor always parses the expanded JSON itself.
 kit_steps_json_preview: fn(text: String) -> String {
-    preview := text.replace("{{work}}", "0").replace("{{root}}", "0").replace("{{scratch}}", "0")
+    ^preview: text.replace("{{work}}", "0").replace("{{root}}", "0").replace("{{scratch}}", "0")
         .replace("{{jet}}", "0").replace("{{jetpack}}", "0").replace("{{built}}", "0").replace("{{sys:dll-suffix}}", "0").replace("{{sys:exe-suffix}}", "0")
     loop prefix in ["{{cap:", "{{tool:", "{{free-port:"] {
         loop {
@@ -170,7 +170,7 @@ kit_steps_json_preview: fn(text: String) -> String {
 
 kit_steps_exit_codes: fn(text: String) -> [String]? {
     if !text.starts_with("[") || !text.ends_with("]") -> return None
-    result := [String]{}
+    ^result: [String]{}
     loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
         code: raw.trim().copy()
         if kit_steps_integer(code) == None -> return None

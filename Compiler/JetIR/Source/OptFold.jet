@@ -21,9 +21,9 @@ use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit,
 ir_opt_fold_identical: fn(m: ^IRModule, functions: ^[IRFunction], threads: CompilerThreads) -> Int Never! {
     count: functions.len()
     // Each function's class to start: every candidate's is the first one.
-    start := [Int]{}
-    lowest := -1
-    total := 0
+    ^start: [Int]{}
+    ^lowest: -1
+    ^total: 0
     loop f in functions {
         candidate: ir_opt_fold_candidate(f)
         if candidate && lowest < 0 -> lowest = start.len()
@@ -33,13 +33,13 @@ ir_opt_fold_identical: fn(m: ^IRModule, functions: ^[IRFunction], threads: Compi
     loop id in 0..<count {
         if start[id] == 0 -> start[id] = lowest
     }
-    classes := if lowest < 0 -> 0 else -> 1
+    ^classes: if lowest < 0 -> 0 else -> 1
     // Each candidate's body is spelled once, as its shape: everything but
     // the functions it reaches, which a round reads by their class. Bodies
     // of one shape number the same: the first of them.
     found: ir_opt_fold_shapes(m, functions, threads)
     admitted: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
-    groups := IROptFoldGroups{first: start.move(), shape_of: [Int]{}, shapes: found.move(), workers: if admitted < 1 -> 1 else -> admitted, rounds: 0}
+    ^groups: IROptFoldGroups{first: start.move(), shape_of: [Int]{}, shapes: found.move(), workers: if admitted < 1 -> 1 else -> admitted, rounds: 0}
     _: ir_opt_fold_grouped(groups, count)
     loop classes > 0 {
         found_classes: ir_opt_fold_grouped(groups, count)
@@ -47,7 +47,7 @@ ir_opt_fold_identical: fn(m: ^IRModule, functions: ^[IRFunction], threads: Compi
         classes = found_classes
     }
     first: compiler_take_rows<Int>(groups.first)
-    folded := 0
+    ^folded: 0
     loop id in 0..<count {
         if first[id] >= 0 && first[id] != id -> folded += 1
     }
@@ -73,14 +73,14 @@ ir_opt_fold_candidate: fn(f: IRFunction) -> Bool Never! {
 ir_opt_fold_shapes: fn(m: IRModule, functions: ^[IRFunction], threads: CompilerThreads) -> [IROptFoldShape] Never! {
     rows: ir_opt_fold_rows(m)
     count: functions.len()
-    weights := [Int]{}
-    total := 0
+    ^weights: [Int]{}
+    ^total: 0
     loop f in functions {
         weight: if ir_opt_fold_candidate(f) -> 1 + f.op.len() else -> 1
         weights.push(weight)
         total += weight
     }
-    found := [IROptFoldShape]{}
+    ^found: [IROptFoldShape]{}
     workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers <= 1 {
         loop f in functions -> found.push(ir_opt_fold_shape_of(m, f, rows))
@@ -88,10 +88,10 @@ ir_opt_fold_shapes: fn(m: IRModule, functions: ^[IRFunction], threads: CompilerT
     }
     bounds: compiler_threads_partition(weights, workers)
     // Parts leave the list last-first: part `workers - 1` pops first.
-    parts := [[IRFunction]]{}
-    part := workers - 1
+    ^parts: [[IRFunction]]{}
+    ^part: workers - 1
     loop part >= 0 {
-        bodies := [IRFunction]{}
+        ^bodies: [IRFunction]{}
         loop functions.len() > bounds[part] {
             body: functions.pop() ?? break
             bodies.push(body)
@@ -101,7 +101,7 @@ ir_opt_fold_shapes: fn(m: IRModule, functions: ^[IRFunction], threads: CompilerT
         part -= 1
     }
     parts.reverse()
-    shaped := ir_opt_fold_shape_parts(m, rows, parts, 0)
+    ^shaped: ir_opt_fold_shape_parts(m, rows, parts, 0)
     loop at in 0..<shaped.len() {
         functions.extend(compiler_take_rows<IRFunction>(shaped[at].functions))
         found.extend(compiler_take_rows<IROptFoldShape>(shaped[at].shapes))
@@ -125,7 +125,7 @@ IROptFoldPart: struct {
 // Parts `at` on, in part order, each shaped on its own thread and the last
 // on this one (ir_opt_fold_part).
 ir_opt_fold_shape_parts: fn(m: IRModule, rows: [Int], parts: ^[[IRFunction]], at: Int) -> [IROptFoldPart] Never! {
-    done := [IROptFoldPart]{}
+    ^done: [IROptFoldPart]{}
     if at >= parts.len() -> return done
     if at == parts.len() - 1 {
         done.push(ir_opt_fold_part(m, rows, compiler_take_rows<IRFunction>(parts[at])))
@@ -142,7 +142,7 @@ ir_opt_fold_shape_parts: fn(m: IRModule, rows: [Int], parts: ^[[IRFunction]], at
 
 // One part's functions and their shapes.
 ir_opt_fold_part: fn(m: IRModule, rows: [Int], functions: ^^[IRFunction]) -> IROptFoldPart Never! {
-    part := IROptFoldPart{functions: functions.move(), shapes: [IROptFoldShape]{}}
+    ^part: IROptFoldPart{functions: functions.move(), shapes: [IROptFoldShape]{}}
     loop row in 0..<part.functions.len() {
         part.shapes.push(ir_opt_fold_shape_of(m, part.functions[row], rows))
     }
@@ -179,9 +179,9 @@ IROptFoldBucket: struct {
 // returns how many groups there are.
 ir_opt_fold_grouped: fn(groups: ^IROptFoldGroups, count: Int) -> Int Never! {
     found: ir_opt_fold_buckets(groups, 0)
-    result := [Int]{}
+    ^result: [Int]{}
     loop _ in 0..<count -> result.push(-1)
-    keys := 0
+    ^keys: 0
     loop bucket in found {
         loop k in 0..<bucket.ids.len() -> result[bucket.ids[k]] = bucket.firsts[k]
         keys += bucket.keys
@@ -197,7 +197,7 @@ ir_opt_fold_grouped: fn(groups: ^IROptFoldGroups, count: Int) -> Int Never! {
 // Buckets `at` on, in order, each grouped on its own thread and the last
 // on this one (ir_opt_fold_bucket).
 ir_opt_fold_buckets: fn(groups: IROptFoldGroups, at: Int) -> [IROptFoldBucket] Never! {
-    done := [IROptFoldBucket]{}
+    ^done: [IROptFoldBucket]{}
     if at >= groups.workers -> return done
     if at == groups.workers - 1 {
         done.push(ir_opt_fold_bucket(groups, at))
@@ -216,11 +216,11 @@ ir_opt_fold_buckets: fn(groups: IROptFoldGroups, at: Int) -> [IROptFoldBucket] N
 // (the first walk) or their key.
 ir_opt_fold_bucket: fn(groups: IROptFoldGroups, bucket: Int) -> IROptFoldBucket Never! {
     shaping: groups.rounds == 0
-    found := IROptFoldBucket{ids: [Int]{}, firsts: [Int]{}, keys: 0}
+    ^found: IROptFoldBucket{ids: [Int]{}, firsts: [Int]{}, keys: 0}
     // Each text's first candidate, by the text's id in `seen`; NameTable id
     // 0 is the empty text, which no candidate has.
-    seen := name_table()
-    first_of := [Int]{-1}
+    ^seen: name_table()
+    ^first_of: [Int]{-1}
     loop id in 0..<groups.first.len() {
         if groups.first[id] < 0 -> next
         spread: if shaping -> groups.shapes[id].spread else -> groups.shape_of[id]
@@ -262,8 +262,8 @@ ir_opt_fold_callee: fn(first: [Int], callee: Int) -> Int Never! {
 // Per type row of `m`, its layout (ir_opt_fold_row) as a number, its id in
 // `layouts`: rows of the same layout share one.
 ir_opt_fold_rows: fn(m: IRModule) -> [Int] Never! {
-    layouts := name_table()
-    rows := [Int]{}
+    ^layouts: name_table()
+    ^rows: [Int]{}
     loop ty in m.types -> rows.push(name_index(name_intern(layouts, ir_opt_fold_row(m, ty))))
     rows
 }
@@ -302,8 +302,8 @@ IROptFoldShape: struct {
 
 ir_opt_fold_shape: fn(m: IRModule, f: IRFunction, rows: [Int]) -> IROptFoldShape Never! {
     result: if f.result < 0 -> -1 else -> rows[f.result]
-    parts := [String]{"{f.param_count} {result}"}
-    reached := [Int]{}
+    ^parts: [String]{"{f.param_count} {result}"}
+    ^reached: [Int]{}
     loop slot in 0..<f.slot_type.len() {
         kind: if f.slot_kind[slot] == {
             .Param -> "p"
@@ -349,22 +349,22 @@ ir_opt_fold_spread: fn(text: String) -> Int Never! {
 // Body `id` as a round of ir_opt_fold_identical compares it: its class, its
 // shape's number, and the class of each function it reaches.
 ir_opt_fold_key: fn(first: [Int], id: Int, shape: Int, reached: [Int]) -> String Never! {
-    parts := [String]{"{first[id]}", "{shape}"}
+    ^parts: [String]{"{first[id]}", "{shape}"}
     loop callee in reached -> parts.push("{ir_opt_fold_callee(first, callee)}")
     parts.join("|")
 }
 
 #Test("Folding finds the same copies for any thread count") {
-    one := ir_opt_slot_test_wide(12, false)
-    eight := ir_opt_slot_test_wide(12, false)
+    ^one: ir_opt_slot_test_wide(12, false)
+    ^eight: ir_opt_slot_test_wide(12, false)
     // The callers of make are the same body, built by the build.
     loop id in 1..<one.functions.len() {
         one.functions[id].source_file = ""
         eight.functions[id].source_file = ""
     }
-    alone := [IRFunction]{}
+    ^alone: [IRFunction]{}
     compiler_transfer_rows<IRFunction>(alone, one.functions)
-    shared := [IRFunction]{}
+    ^shared: [IRFunction]{}
     compiler_transfer_rows<IRFunction>(shared, eight.functions)
     assert_eq(ir_opt_fold_identical(one, alone, compiler_threads_single()), 11)
     assert_eq(ir_opt_fold_identical(eight, shared, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}), 11)

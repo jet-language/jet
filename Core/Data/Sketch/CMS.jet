@@ -10,7 +10,7 @@ CountMinSketch: struct {
     }
 
     new: fn() -> CountMinSketch Never! {
-        counters := [Int]{}
+        ^counters: [Int]{}
         loop _ in 0..<1024 -> counters.push(0)
         CountMinSketch{counters: counters}
     }
@@ -25,7 +25,7 @@ CountMinSketch: struct {
 
     count: fn(self, key: String) -> Int Never! {
         {first, second}: hashes(key)
-        count := self.counters[counter_index(first, second, 0)]
+        ^count: self.counters[counter_index(first, second, 0)]
         loop row in 1..<4 {
             value: self.counters[counter_index(first, second, row)]
             if value < count -> count = value
@@ -48,15 +48,15 @@ counter_index: fn(first: U64, second: U64, row: Int) -> Int Never! {
 
 /// Merge by adding corresponding counters, as the existing source API does.
 merge: fn(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
-    counters := a.counters.copy()
+    ^counters: a.counters.copy()
     loop i in 0..<1024 -> counters[i] = counters[i] + b.counters[i]
     CountMinSketch{counters: counters}
 }
 
 #Test("CMS retains unit counts, independent clones and additive merge") {
-    cms := new()
+    ^cms: new()
     cms.add("hello")
-    clone := cms.copy()
+    ^clone: cms.copy()
     clone.add("hello")
     clone.add("world")
     assert_eq(cms.count("hello"), 1)

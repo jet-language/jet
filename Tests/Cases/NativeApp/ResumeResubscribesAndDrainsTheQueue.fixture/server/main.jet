@@ -23,7 +23,7 @@ TITLES: Shared{[String]{}}
 Board: struct {
     // Adds a task titled `title`.
     #App.Public add: fn(self, title: String) BoardError! {
-        held := TITLES.guard_edit()
+        ^held: TITLES.guard_edit()
         held.value.push(title.copy())
         Ok()
     }
@@ -45,7 +45,7 @@ run: fn() {
     served: web.app().mount("/api", Board{})
     server: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen: {err}")
     files.write("server.ready", "") ?? panic("write server.ready: {err}")
-    written := false
+    ^written: false
     loop {
         served.serve_once(server) ?? return
         if files.exists("done") {

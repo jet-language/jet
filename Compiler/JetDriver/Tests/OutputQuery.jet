@@ -19,7 +19,7 @@ output_query_require: fn(ok: Bool, detail: String) Never! {
 
 output_query_request: fn(source: String, triple: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/output-query", identity: "output-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/output-query/run.jet", relative_path: "run.jet", identity: "output-source", source: source}}, foreign_cache_files: []}}, entry_root_identity: "output-root", entry_path: "/output-query/run.jet"}
-    request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+    ^request: jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
     request.host_facts.target_triple = Val(triple)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request

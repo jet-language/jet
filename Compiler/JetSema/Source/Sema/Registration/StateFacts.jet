@@ -50,8 +50,8 @@ sema_state_graph_contains: fn(values: [String], name: String) -> Bool Never! {
 // is a move. The list's arrows give the edges.
 sema_state_graph_add_typed_transitions: fn(methods: [Func], owner: String, state_names: [String], entries: ^[String], transitions: ^[SemaStateGraphTransition]) Never! {
     loop method in methods {
-        sources := [String]{}
-        targets := [String]{}
+        ^sources: [String]{}
+        ^targets: [String]{}
         loop typed in method.state_types {
             if typed.owner != owner -> next
             if typed.position == 0 {
@@ -79,9 +79,9 @@ sema_state_graph_add_typed_transitions: fn(methods: [Func], owner: String, state
 sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaStateGraphFact Never! {
     state: definition.state ?? StateDecl{is_pub: false, is_package_pub: false, type_name: definition.name, type_name_span: definition.name_span, states: [NamedSpan]{}, span: definition.span}
     state_names: loop member in state.states -> member.name
-    edges := [SemaStateGraphEdge]{}
-    transitions := [SemaStateGraphTransition]{}
-    entries := [String]{}
+    ^edges: [SemaStateGraphEdge]{}
+    ^transitions: [SemaStateGraphTransition]{}
+    ^entries: [String]{}
     loop item in items {
         if item == {
             .Impl(implementation) -> {
@@ -100,7 +100,7 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
             .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    outgoing := [String]{}
+    ^outgoing: [String]{}
     loop arrow in state.arrows {
         loop target in arrow.to {
             if !sema_state_graph_contains(state_names, arrow.from.name) || !sema_state_graph_contains(state_names, target.name) {
@@ -110,10 +110,10 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
             edges.push(SemaStateGraphEdge{from: arrow.from.name, to: target.name})
         }
     }
-    reachable_states := [String]{}
+    ^reachable_states: [String]{}
     if entries.len() > 0 {
-        queue := entries
-        cursor := 0
+        ^queue: entries
+        ^cursor: 0
         loop cursor < queue.len() {
             current: queue[cursor]
             cursor += 1
@@ -126,7 +126,7 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
             }
         }
     }
-    nodes := [SemaStateGraphNode]{}
+    ^nodes: [SemaStateGraphNode]{}
     loop name in state_names {
         nodes.push(
             SemaStateGraphNode{
@@ -140,7 +140,7 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
 }
 
 sema_state_graph_facts: fn(items: [Item]) -> [SemaStateGraphFact] Never! {
-    graphs := [SemaStateGraphFact]{}
+    ^graphs: [SemaStateGraphFact]{}
     loop item in items {
         if item == .Struct(definition) && definition.state != None {
             graphs.push(sema_state_graph_for_struct(definition, items))
@@ -216,7 +216,7 @@ sema_state_validate_list: fn(state: StateDecl, type_name: String, kind: String, 
             sema_state_check_reference(target.name, type_name, kind, seen, target.span, diagnostics)
         }
     }
-    groups := [String]{}
+    ^groups: [String]{}
     loop group in state.groups {
         if sema_state_graph_contains(seen, group.name.name) || sema_state_graph_contains(groups, group.name.name) {
             diagnostics.push(sema_error("E0166", group.name.span, "state `{group.name.name}` is declared more than once for `{type_name}`", "the owning {kind} has one bounded state set, so a group named like a state would make `{type_name}.{group.name.name}` ambiguous", "rename the group or the state so each name is declared once"))
@@ -233,7 +233,7 @@ sema_state_declared_names: fn(state: StateDecl, type_name: String, kind: String,
     if state.states.len() == 0 {
         diagnostics.push(sema_error("E0169", state.span, "`{type_name}` has an empty `state {{ … }}` section", "an empty state set cannot validate markers or provide a useful reflected fact", "add at least one state name, or remove the section"))
     }
-    seen := [String]{}
+    ^seen: [String]{}
     loop member in state.states {
         if sema_state_graph_contains(seen, member.name) {
             diagnostics.push(sema_error("E0166", member.span, "state `{member.name}` is declared more than once for `{type_name}`", "the owning {kind} has one bounded state set, so a repeated name would make `Type.State.{member.name}` ambiguous", "keep one declaration of `{member.name}` in the {kind}'s `state {{ … }}` section"))
@@ -267,7 +267,7 @@ sema_state_validate_owner: fn(definition: StructDef, state: StateDecl, all_items
     type_name: definition.name
     seen: sema_state_declared_names(state, type_name, "struct", diagnostics)
     sema_state_validate_list(state, type_name, "struct", seen, diagnostics)
-    members := [String]{}
+    ^members: [String]{}
     loop field_index in 0..<definition.fields.len() {
         members.push(definition.fields[field_index].name)
     }
@@ -290,7 +290,7 @@ sema_state_validate_owner: fn(definition: StructDef, state: StateDecl, all_items
     graph: sema_state_graph_for_struct(definition, all_items)
     loop node in graph.states {
         if node.reachable != Val(false) -> next
-        span := Span{start: 0, end: 0}
+        ^span: Span{start: 0, end: 0}
         loop member in state.states {
             if member.name == node.name {
                 span = member.span
@@ -305,7 +305,7 @@ sema_state_validate_owner: fn(definition: StructDef, state: StateDecl, all_items
 // in different modules), so `all_items` is every user module's items; reports
 // cover `items`' owners.
 sema_state_validate_declarations: fn(items: [Item], all_items: [Item]) -> [Diagnostic] {
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop item in items {
         if item == {
             .Struct(definition) -> {
@@ -384,8 +384,8 @@ sema_state_validate_typed: fn(function: Func, all_items: [Item], diagnostics: ^[
             diagnostics.push(sema_state_unknown(state, typed.owner, list.kind, candidates, typed.span, None))
         }
     }
-    from := StateTypeUse?{None}
-    to := StateTypeUse?{None}
+    ^from: StateTypeUse?{None}
+    ^to: StateTypeUse?{None}
     loop typed in function.state_types {
         if typed.position == 0 -> from = Val(typed)
         if typed.position == -1 -> to = Val(typed)

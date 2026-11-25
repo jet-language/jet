@@ -102,7 +102,7 @@ ssl_session_copy: fn(dst: ^ssldefs.SSLSession, src: ssldefs.SSLSession) ssldefs.
     if src.peer_cert == {
         .Val(chain) -> {
             if chain.len() > 0 {
-                peer := [x509crt.X509Crt]{}
+                ^peer: [x509crt.X509Crt]{}
                 x509crt.x509_crt_parse_der(peer, chain[0].raw) ?? return Err(.X509(err))
                 dst.peer_cert = Val(peer)
             }
@@ -147,13 +147,13 @@ ssl_reset_checksum: fn(ssl: ^ssldefs.SSLContext) Never! {
 /// alone (ssl_update_checksum_sha256, ssl_update_checksum_sha384).
 ssl_update_checksum: fn(hs: ^ssldefs.SSLHandshake, buf: [U8], off: Int, len: Int) Never! {
     if hs.checksum_md != 2 {
-        if ^hs.fin_sha256 == {
+        if hs.fin_sha256.in_place() == {
             .Val(c) -> { hashes.hash_update_range(c, buf, off, len) }
             None -> {}
         }
     }
     if hs.checksum_md != 1 {
-        if ^hs.fin_sha384 == {
+        if hs.fin_sha384.in_place() == {
             .Val(c) -> { hashes.hash_update_range(c, buf, off, len) }
             None -> {}
         }
@@ -166,7 +166,7 @@ ssl_update_checksum: fn(hs: ^ssldefs.SSLHandshake, buf: [U8], off: Int, len: Int
 /// A fresh handshake state (ssl_handshake_params_init), its fixed-size
 /// buffers allocated.
 ssl_handshake_params_init: fn() -> ssldefs.SSLHandshake Never! {
-    hs := ssldefs.SSLHandshake{}
+    ^hs: ssldefs.SSLHandshake{}
     hs.alt_out_ctr = ssldefs.ssl_zeros(ssldefs.SSL_SEQUENCE_NUMBER_LEN)
     loop _ in 0..<ssldefs.SSL_MAX_BUFFERED_HS -> hs.hs.push(ssldefs.SSLHsBuffer{})
     hs.premaster = ssldefs.ssl_zeros(ssldefs.SSL_PREMASTER_SIZE)
@@ -351,7 +351,7 @@ ssl_handshake_free: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssldefs.ssl_wipe(ssl.handshake.client_handshake_traffic_secret)
     ssldefs.ssl_wipe(ssl.handshake.server_handshake_traffic_secret)
     ssldefs.ssl_wipe(ssl.handshake.finished_digest)
-    if ^ssl.handshake.psk == {
+    if ssl.handshake.psk.in_place() == {
         .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
@@ -380,7 +380,7 @@ ssl_free: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssldefs.ssl_session_release(ssl, ssl.session)
     loop i in 0..<ssl.tpool.len() -> ssldefs.ssl_transform_release(ssl, i)
     loop i in 0..<ssl.spool.len() -> ssldefs.ssl_session_release(ssl, i)
-    if ^ssl.conf.psk == {
+    if ssl.conf.psk.in_place() == {
         .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
@@ -463,7 +463,7 @@ ssl_own_key_cert: fn(ssl: ssldefs.SSLContext) -> Int Never! {
 ssl_own_cert_der: fn(ssl: ssldefs.SSLContext) -> [[U8]]? Never! {
     i: ssl_own_key_cert(ssl)
     if i < 0 -> return None
-    out := [[U8]]{}
+    ^out: [[U8]]{}
     if ssl_own_key_cert_is_hs(ssl) {
         loop crt in ssl.handshake.sni_key_cert[i].cert -> out.push(crt.raw.copy())
     } else {
@@ -603,7 +603,7 @@ ssl_conf_has_static_psk: fn(conf: ssldefs.SSLConfig) -> Bool Never! {
 
 // Drop the configured PSK and identity (ssl_conf_remove_psk).
 ssl_conf_remove_psk: fn(conf: ^ssldefs.SSLConfig) Never! {
-    if ^conf.psk == {
+    if conf.psk.in_place() == {
         .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
@@ -631,7 +631,7 @@ ssl_set_hs_psk: fn(ssl: ^ssldefs.SSLContext, psk: [U8]) ssldefs.SSLError! {
     if !ssl.has_handshake -> return Err(.BadInputData)
     if psk.len() > ssldefs.SSL_PSK_MAX_LEN -> return Err(.BadInputData)
     // ssl_remove_psk.
-    if ^ssl.handshake.psk == {
+    if ssl.handshake.psk.in_place() == {
         .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
@@ -824,7 +824,7 @@ ssl_set_hostname: fn(ssl: ^ssldefs.SSLContext, hostname: String?) ssldefs.SSLErr
 /// The application protocols to offer or accept, in preference order
 /// (mbedtls_ssl_conf_alpn_protocols).
 ssl_conf_alpn_protocols: fn(conf: ^ssldefs.SSLConfig, protos: [String]) ssldefs.SSLError! {
-    tot_len := 0
+    ^tot_len: 0
     loop p in protos {
         cur_len: p.bytes().len()
         tot_len += cur_len
@@ -912,7 +912,7 @@ ssl_get_version: fn(ssl: ssldefs.SSLContext) -> String Never! {
 
 /// The largest record the peer may send (mbedtls_ssl_get_input_max_frag_len).
 ssl_get_input_max_frag_len: fn(ssl: ssldefs.SSLContext) -> Int Never! {
-    max_len := ssldefs.SSL_IN_CONTENT_LEN
+    ^max_len: ssldefs.SSL_IN_CONTENT_LEN
     // A TLS 1.2 client past ServerHelloDone uses the length it asked for.
     if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && ssl.state >= ssldefs.SSL_SERVER_HELLO_DONE {
         return ssl_mfl_code_to_length(ssl.conf.mfl_code)
@@ -930,7 +930,7 @@ ssl_get_input_max_frag_len: fn(ssl: ssldefs.SSLContext) -> Int Never! {
 
 /// The largest record to send (mbedtls_ssl_get_output_max_frag_len).
 ssl_get_output_max_frag_len: fn(ssl: ssldefs.SSLContext) -> Int Never! {
-    max_len := ssl_mfl_code_to_length(ssl.conf.mfl_code)
+    ^max_len: ssl_mfl_code_to_length(ssl.conf.mfl_code)
     if ssl.session_out >= 0 {
         mfl: ssl_mfl_code_to_length(ssl.spool[ssl.session_out].mfl_code)
         if mfl < max_len -> max_len = mfl
@@ -953,7 +953,7 @@ ssl_get_current_mtu: fn(ssl: ssldefs.SSLContext) -> Int Never! {
 /// The most application data one record can carry
 /// (mbedtls_ssl_get_max_out_record_payload).
 ssl_get_max_out_record_payload: fn(ssl: ssldefs.SSLContext) -> Int ssldefs.SSLError! {
-    max_len := ssldefs.SSL_OUT_CONTENT_LEN
+    ^max_len: ssldefs.SSL_OUT_CONTENT_LEN
     mfl: ssl_get_output_max_frag_len(ssl)
     if max_len > mfl -> max_len = mfl
     if ssl.transform_out >= 0 && ssl.tpool[ssl.transform_out].tls_version == ssldefs.SSL_VERSION_TLS1_3 {
@@ -972,7 +972,7 @@ ssl_get_max_out_record_payload: fn(ssl: ssldefs.SSLContext) -> Int ssldefs.SSLEr
 /// The most application data one received record can carry
 /// (mbedtls_ssl_get_max_in_record_payload).
 ssl_get_max_in_record_payload: fn(ssl: ssldefs.SSLContext) -> Int Never! {
-    max_len := ssldefs.SSL_IN_CONTENT_LEN
+    ^max_len: ssldefs.SSL_IN_CONTENT_LEN
     mfl: ssl_get_input_max_frag_len(ssl)
     if max_len > mfl -> max_len = mfl
     max_len
@@ -985,7 +985,7 @@ ssl_get_peer_cert_der: fn(ssl: ssldefs.SSLContext) -> [[U8]]? Never! {
     if ssl.session < 0 -> return None
     if ssl.spool[ssl.session].peer_cert == {
         .Val(chain) -> {
-            out := [[U8]]{}
+            ^out: [[U8]]{}
             loop crt in chain -> out.push(crt.raw.copy())
             Val(out)
         }
@@ -1569,8 +1569,8 @@ ssl_renegotiate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError!
 /// double from its minimum to its maximum.
 ssl_resend_hello_request: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if ssl.conf.renego_max_records < 0 {
-        ratio := ssl.conf.hs_timeout_max /% ssl.conf.hs_timeout_min + 1
-        doublings := 1
+        ^ratio: ssl.conf.hs_timeout_max /% ssl.conf.hs_timeout_min + 1
+        ^doublings: 1
         loop ratio != 0 {
             doublings += 1
             ratio = ratio >> 1
@@ -1592,20 +1592,20 @@ ssl_tls_prf_generic: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], random
     md_len: hashes.md_size(md)
     key: hashes.hmac_key(md, secret)
     // A(1) = HMAC(secret, label || random).
-    first := hashes.hash_clone(key.inner)
+    ^first: hashes.hash_clone(key.inner)
     hashes.hash_update(first, label)
     hashes.hash_update(first, random)
-    a := hashes.hmac_finish(key, first)
-    out := [U8]{}
-    i := 0
+    ^a: hashes.hmac_finish(key, first)
+    ^out: [U8]{}
+    ^i: 0
     loop i < dlen {
         // HMAC(secret, A(i) || label || random), then A(i + 1) = HMAC(secret, A(i)).
-        inner := hashes.hash_clone(key.inner)
+        ^inner: hashes.hash_clone(key.inner)
         hashes.hash_update(inner, a)
         hashes.hash_update(inner, label)
         hashes.hash_update(inner, random)
-        h_i := hashes.hmac_finish(key, inner)
-        next_a := hashes.hmac_mac(key, a)
+        ^h_i: hashes.hmac_finish(key, inner)
+        ^next_a: hashes.hmac_mac(key, a)
         ssldefs.ssl_wipe(a)
         a = next_a
         k: if i + md_len > dlen -> dlen %% md_len else -> md_len
@@ -1672,7 +1672,7 @@ ssl_get_handshake_transcript: fn(ssl: ssldefs.SSLContext, md: hashes.Md) -> [U8]
     if md == .SHA384 {
         if ssl.handshake.fin_sha384 == {
             .Val(c) -> {
-                c384 := hashes.hash_clone(c)
+                ^c384: hashes.hash_clone(c)
                 return Ok(hashes.hash_finish(c384))
             }
             None -> return Err(.InternalError)
@@ -1681,7 +1681,7 @@ ssl_get_handshake_transcript: fn(ssl: ssldefs.SSLContext, md: hashes.Md) -> [U8]
     if md == .SHA256 {
         if ssl.handshake.fin_sha256 == {
             .Val(c) -> {
-                c256 := hashes.hash_clone(c)
+                ^c256: hashes.hash_clone(c)
                 return Ok(hashes.hash_finish(c256))
             }
             None -> return Err(.InternalError)
@@ -1704,14 +1704,14 @@ ssl_compute_master: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     if ssl.handshake.resume != 0 {
         return
     }
-    lbl := "master secret".bytes()
-    seed := ssl.handshake.randbytes
+    ^lbl: "master secret".bytes()
+    ^seed: ssl.handshake.randbytes
     if ssl.handshake.extended_ms == ssldefs.SSL_EXTENDED_MS_ENABLED {
         lbl = "extended master secret".bytes()
         seed = ssl_calc_verify(ssl) ?? return Err(err)
     }
     md: ssl.handshake.tls_prf_md ?? return Err(.InternalError)
-    pms := ssldefs.ssl_bytes_of(ssl.handshake.premaster, 0, ssl.handshake.pmslen)
+    ^pms: ssldefs.ssl_bytes_of(ssl.handshake.premaster, 0, ssl.handshake.pmslen)
     ssl.spool[ssl.session_negotiate].master = ssl_tls_prf_generic(md, pms, lbl, seed, 48)
     ssldefs.ssl_wipe(pms)
     ssldefs.ssl_wipe(ssl.handshake.premaster)
@@ -1725,7 +1725,7 @@ ssl_derive_keys: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     ssl_compute_master(ssl) ?? return Err(err)
     // The master secret takes client || server random, the key expansion
     // server || client (RFC 5246 6.3 and 8.1).
-    tmp := ssl.handshake.randbytes.copy()
+    ^tmp: ssl.handshake.randbytes.copy()
     ssldefs.ssl_copy_into(ssl.handshake.randbytes, 0, tmp, 32, 32)
     ssldefs.ssl_copy_into(ssl.handshake.randbytes, 32, tmp, 0, 32)
     ssldefs.ssl_wipe(tmp)
@@ -1755,9 +1755,9 @@ ssl_tls12_key_cipher: fn(ctx: ^layer.CipherContext, key: [U8], op: layer.CipherO
 // Key the encryption and decryption contexts from the key block; the
 // failure, None for none. The key copies are wiped.
 ssl_tls12_key_ciphers: fn(enc: ^layer.CipherContext, dec: ^layer.CipherContext, keyblk: [U8], key1: Int, key2: Int, keylen: Int) -> layer.CipherLayerError? Never! {
-    k1 := ssldefs.ssl_bytes_of(keyblk, key1, keylen)
-    k2 := ssldefs.ssl_bytes_of(keyblk, key2, keylen)
-    failure := ssl_tls12_key_cipher(enc, k1, .Encrypt)
+    ^k1: ssldefs.ssl_bytes_of(keyblk, key1, keylen)
+    ^k2: ssldefs.ssl_bytes_of(keyblk, key2, keylen)
+    ^failure: ssl_tls12_key_cipher(enc, k1, .Encrypt)
     if failure == None -> failure = ssl_tls12_key_cipher(dec, k2, .Decrypt)
     ssldefs.ssl_wipe(k1)
     ssldefs.ssl_wipe(k2)
@@ -1775,7 +1775,7 @@ ssl_tls12_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, ciphersuite
     if tls_version == ssldefs.SSL_VERSION_TLS1_3 -> return Err(.InternalError)
     cs: suites.ssl_ciphersuite_from_id(ciphersuite) ?? return Err(.BadInputData)
     ssl_mode: ssl_get_mode_from_ciphersuite(encrypt_then_mac, cs)
-    taglen := 0
+    ^taglen: 0
     if ssl_mode == .AEAD {
         taglen = 16
         if cs.flags & suites.CIPHERSUITE_SHORT_TAG != 0 -> taglen = 8
@@ -1786,9 +1786,9 @@ ssl_tls12_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, ciphersuite
         ssl.tpool[tix].in_cid = ssl.own_cid
         ssl.tpool[tix].out_cid = ssl.handshake.peer_cid
     }
-    keyblk := ssl_tls_prf_generic(prf_md, master, "key expansion".bytes(), randbytes, 256)
+    ^keyblk: ssl_tls_prf_generic(prf_md, master, "key expansion".bytes(), randbytes, 256)
     keylen: info.key_bits /% 8
-    mac_key_len := 0
+    ^mac_key_len: 0
     if ssl_mode == .AEAD {
         // 12-byte nonces: GCM and CCM have a 4-byte fixed part and an 8-byte
         // explicit one (RFC 5288 3, RFC 6655 3), ChaChaPoly a 12-byte fixed
@@ -1825,12 +1825,12 @@ ssl_tls12_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, ciphersuite
     ivlen: ssl.tpool[tix].ivlen
     fixed: ssl.tpool[tix].fixed_ivlen
     iv_copy_len: if fixed != 0 -> fixed else -> ivlen
-    key1 := mac_key_len * 2
-    key2 := mac_key_len * 2 + keylen
-    mac_enc := 0
-    mac_dec := mac_key_len
-    iv_enc := key2 + keylen
-    iv_dec := key2 + keylen + iv_copy_len
+    ^key1: mac_key_len * 2
+    ^key2: mac_key_len * 2 + keylen
+    ^mac_enc: 0
+    ^mac_dec: mac_key_len
+    ^iv_enc: key2 + keylen
+    ^iv_dec: key2 + keylen + iv_copy_len
     if endpoint == ssldefs.SSL_IS_SERVER {
         key1 = mac_key_len * 2 + keylen
         key2 = mac_key_len * 2
@@ -1846,12 +1846,12 @@ ssl_tls12_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, ciphersuite
     if ssl.f_export_keys == {
         .Val(cb) -> {
             call: cb.call
-            _ := call(ssldefs.SSLExportedKey{ktype: ssldefs.SSL_KEY_EXPORT_TLS12_MASTER_SECRET, secret: master, client_random: ssldefs.ssl_bytes_of(randbytes, 32, 32), server_random: ssldefs.ssl_bytes_of(randbytes, 0, 32), tls_prf_type: ssl_tls_prf_get_type(Val(prf_md))})
+            ^_: call(ssldefs.SSLExportedKey{ktype: ssldefs.SSL_KEY_EXPORT_TLS12_MASTER_SECRET, secret: master, client_random: ssldefs.ssl_bytes_of(randbytes, 32, 32), server_random: ssldefs.ssl_bytes_of(randbytes, 0, 32), tls_prf_type: ssl_tls_prf_get_type(Val(prf_md))})
         }
         None -> {}
     }
-    enc := layer.cipher_setup(info)
-    dec := layer.cipher_setup(info)
+    ^enc: layer.cipher_setup(info)
+    ^dec: layer.cipher_setup(info)
     if ssl_tls12_key_ciphers(enc, dec, keyblk, key1, key2, keylen) == {
         .Val(e) -> {
             ssldefs.ssl_wipe(keyblk)
@@ -1862,8 +1862,8 @@ ssl_tls12_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, ciphersuite
     ssl.tpool[tix].cipher_enc = Val(enc)
     ssl.tpool[tix].cipher_dec = Val(dec)
     if mac_key_len != 0 {
-        mk_enc := ssldefs.ssl_bytes_of(keyblk, mac_enc, mac_key_len)
-        mk_dec := ssldefs.ssl_bytes_of(keyblk, mac_dec, mac_key_len)
+        ^mk_enc: ssldefs.ssl_bytes_of(keyblk, mac_enc, mac_key_len)
+        ^mk_dec: ssldefs.ssl_bytes_of(keyblk, mac_dec, mac_key_len)
         ssl.tpool[tix].md_enc = Val(hashes.hmac_key(cs.mac, mk_enc))
         ssl.tpool[tix].md_dec = Val(hashes.hmac_key(cs.mac, mk_dec))
         ssldefs.ssl_wipe(mk_enc)
@@ -1877,7 +1877,7 @@ ssl_tls12_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, ciphersuite
 /// RFC 4279 2, RFC 5489 2).
 ssl_psk_derive_premaster: fn<R: RNG>(ssl: ^ssldefs.SSLContext, key_ex: suites.SSLKeyExchange, rng: ^R) ssldefs.SSLError! {
     // Only DHE-PSK goes on without a PSK, with the DH secret alone.
-    psk := [U8]{}
+    ^psk: [U8]{}
     if ssl_get_psk(ssl) == {
         .Ok(k) -> { psk = k }
         .Err(_) -> {
@@ -1885,7 +1885,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: ^ssldefs.SSLContext, key_ex: suites.SS
         }
     }
     end: ssl.handshake.premaster.len()
-    p := 0
+    ^p: 0
     if key_ex == {
         .PSK -> {
             // The other secret is as many zeros as the PSK has bytes.
@@ -1904,7 +1904,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: ^ssldefs.SSLContext, key_ex: suites.SS
             p += 50
         }
         .DHEPSK -> {
-            secret := if ^ssl.handshake.dhm_ctx == {
+            ^secret: if ^ssl.handshake.dhm_ctx == {
                 .Val(ctx) -> dhm.dhm_calc_secret(ctx, rng) ?? return Err(.DHM(err))
                 None -> {
                     return Err(.InternalError)
@@ -1921,7 +1921,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: ^ssldefs.SSLContext, key_ex: suites.SS
         }
         .ECDHEPSK -> {
             plen: end - (p + 2)
-            z := if ^ssl.handshake.ecdh_ctx == {
+            ^z: if ^ssl.handshake.ecdh_ctx == {
                 .Val(ctx) -> ecdh.ecdh_calc_secret(ctx, plen, rng) ?? return Err(.ECP(err))
                 None -> {
                     return Err(.InternalError)
@@ -1963,7 +1963,7 @@ ssl_write_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSL
     ders: ssl_own_cert_der(ssl)
     if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER && ders == None -> return Err(.InternalError)
     list: ders ?? [[U8]]{}
-    i := 7
+    ^i: 7
     loop der in list {
         n: der.len()
         if n > ssldefs.SSL_OUT_CONTENT_LEN - 3 - i -> return Err(.BufferTooSmall)
@@ -1992,7 +1992,7 @@ ssl_parse_certificate_chain: fn<R: RNG>(ssl: ^ssldefs.SSLContext, chain: ^[x509c
         ssl_send_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, rng)
         return Err(.DecodeError)
     }
-    i := hdr
+    ^i: hdr
     // The certificate list's length is 3 bytes, the first of them 0.
     n0: ssldefs.ssl_get_u16(ssl.in_buf, m + i + 1)
     if ssldefs.ssl_u8(ssl.in_buf, m + i) != 0 || ssl.in_hslen != n0 + 3 + hdr {
@@ -2000,7 +2000,7 @@ ssl_parse_certificate_chain: fn<R: RNG>(ssl: ^ssldefs.SSLContext, chain: ^[x509c
         return Err(.DecodeError)
     }
     i += 3
-    crt_cnt := 0
+    ^crt_cnt: 0
     loop i < ssl.in_hslen {
         if i + 3 > ssl.in_hslen {
             ssl_send_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, rng)
@@ -2022,7 +2022,7 @@ ssl_parse_certificate_chain: fn<R: RNG>(ssl: ^ssldefs.SSLContext, chain: ^[x509c
         if first && ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && ssl.renego_status == ssldefs.SSL_RENEGOTIATION_IN_PROGRESS {
             // The server's end certificate must be the one of the session
             // being renegotiated; it is then dropped from that session.
-            same := false
+            ^same: false
             if ssl.session >= 0 {
                 if ssl.spool[ssl.session].peer_cert == {
                     .Val(old) -> {
@@ -2114,7 +2114,7 @@ ssl_parse_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSL
     }
     // A session that failed to resume may hold a certificate.
     ssl.spool[sn].peer_cert = None
-    chain := [x509crt.X509Crt]{}
+    ^chain: [x509crt.X509Crt]{}
     ssl_parse_certificate_chain(ssl, chain, rng) ?? return Err(err)
     ssl_verify_certificate(ssl, authmode, chain, Val(cs), rng) ?? return Err(err)
     ssl.spool[sn].peer_cert = Val(chain)
@@ -2126,7 +2126,7 @@ ssl_parse_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSL
 // (ssl_calc_finished_tls_sha256 and _sha384, RFC 5246 7.4.9).
 ssl_calc_finished: fn(ssl: ssldefs.SSLContext, from: Int) -> [U8] ssldefs.SSLError! {
     md: ssl.handshake.tls_prf_md ?? return Err(.InternalError)
-    padbuf := ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
+    ^padbuf: ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
     session: if ssl.session_negotiate >= 0 -> ssl.session_negotiate else -> ssl.session
     sender: if from == ssldefs.SSL_IS_CLIENT -> "client finished" else -> "server finished"
     out: ssl_tls_prf_generic(md, ssl.spool[session].master, sender.bytes(), padbuf, 12)
@@ -2186,7 +2186,7 @@ ssl_handshake_wrapup: fn(ssl: ^ssldefs.SSLContext) Never! {
 /// the flight with.
 ssl_write_finished: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     sslmsg.ssl_update_out_pointers(ssl, ssl.transform_negotiate)
-    buf := ssl_calc_finished(ssl, ssl.conf.endpoint) ?? return Err(err)
+    ^buf: ssl_calc_finished(ssl, ssl.conf.endpoint) ?? return Err(err)
     hash_len: 12
     ssldefs.ssl_copy_into(ssl.out_buf, ssl.out_msg + 4, buf, 0, hash_len)
     ssl.verify_data_len = hash_len
@@ -2209,7 +2209,7 @@ ssl_write_finished: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLErr
         ssl.handshake.alt_transform_out = ssl.transform_out
         ssldefs.ssl_copy_into(ssl.handshake.alt_out_ctr, 0, ssl.cur_out_ctr, 0, ssldefs.SSL_SEQUENCE_NUMBER_LEN)
         ssldefs.ssl_fill(ssl.cur_out_ctr, 2, ssldefs.SSL_SEQUENCE_NUMBER_LEN - 2, U8{0})
-        i := 2
+        ^i: 2
         loop i > 0 {
             v: (Int{ssl.cur_out_ctr[i - 1]} + 1) & 0xFF
             ssl.cur_out_ctr[i - 1] = ssldefs.ssl_byte(v)
@@ -2228,7 +2228,7 @@ ssl_write_finished: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLErr
 
 /// Read and check the peer's Finished message (mbedtls_ssl_parse_finished).
 ssl_parse_finished: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
-    buf := ssl_calc_finished(ssl, ssl.conf.endpoint ~ 1) ?? return Err(err)
+    ^buf: ssl_calc_finished(ssl, ssl.conf.endpoint ~ 1) ?? return Err(err)
     if sslmsg.ssl_read_record(ssl, true, rng) == {
         .Err(e) -> {
             ssldefs.ssl_wipe(buf)
@@ -2238,7 +2238,7 @@ ssl_parse_finished: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLErr
     }
     hdr: sslmsg.ssl_hs_hdr_len(ssl)
     hash_len: 12
-    failure := ssl_parse_finished_check(ssl, buf, hdr, hash_len)
+    ^failure: ssl_parse_finished_check(ssl, buf, hdr, hash_len)
     if failure == {
         .Val(alert) -> {
             ssldefs.ssl_wipe(buf)
@@ -2289,7 +2289,7 @@ ssl_parse_finished_check: fn(ssl: ssldefs.SSLContext, expected: [U8], hdr: Int, 
 /// server random, then the parameters at buf[off..<off + len]
 /// (mbedtls_ssl_get_key_exchange_md_tls1_2).
 ssl_get_key_exchange_md_tls1_2: fn(ssl: ssldefs.SSLContext, buf: [U8], off: Int, len: Int, md: hashes.Md) -> [U8] Never! {
-    ctx := hashes.hash_start(md)
+    ^ctx: hashes.hash_start(md)
     hashes.hash_update(ctx, ssl.handshake.randbytes)
     hashes.hash_update_range(ctx, buf, off, len)
     hashes.hash_finish(ctx)
@@ -2329,7 +2329,7 @@ ssl_write_sig_alg_ext: fn(ssl: ^ssldefs.SSLContext, p: Int, end: Int) -> Int ssl
     ssl_chk_buf(p, end, 6) ?? return Err(err)
     sig_algs: ssl_get_sig_algs(ssl)
     if sig_algs.len() == 0 -> return Err(.BadConfig)
-    q := p + 6
+    ^q: p + 6
     loop sig_alg in sig_algs {
         if !ssl_sig_alg_is_supported(ssl, sig_alg) -> next
         ssl_chk_buf(q, end, 2) ?? return Err(err)
@@ -2349,7 +2349,7 @@ ssl_write_sig_alg_ext: fn(ssl: ^ssldefs.SSLContext, p: Int, end: Int) -> Int ssl
 /// received_sig_algs (mbedtls_ssl_parse_sig_alg_ext). Under TLS 1.2 only
 /// those we support and offer are kept.
 ssl_parse_sig_alg_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
-    p := buf
+    ^p: buf
     ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     supported_sig_algs_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
     p += 2
@@ -2381,7 +2381,7 @@ ssl_parse_sig_alg_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssldefs.
 /// the host name to the SNI callback (mbedtls_ssl_parse_server_name_ext,
 /// RFC 6066 3).
 ssl_parse_server_name_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
-    p := buf
+    ^p: buf
     ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     server_name_list_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
     p += 2
@@ -2418,7 +2418,7 @@ ssl_parse_server_name_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssld
 /// (mbedtls_ssl_parse_alpn_ext, RFC 7301 3.1).
 ssl_parse_alpn_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
     ours: ssl.conf.alpn_list ?? return
-    p := buf
+    ^p: buf
     // Extension data length, then at least one name and its length.
     ssl_chk_buf_read(ssl, p, end, 4) ?? return Err(err)
     protocol_name_list_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
@@ -2439,7 +2439,7 @@ ssl_parse_alpn_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSL
     // Our preference order wins.
     loop alpn in ours {
         alpn_bytes: alpn.bytes()
-        q := buf + 2
+        ^q: buf + 2
         loop q < protocol_name_list_end {
             protocol_name_len: ssldefs.ssl_u8(ssl.in_buf, q)
             q += 1
@@ -2492,8 +2492,8 @@ ssl_session_set_hostname: fn(session: ^ssldefs.SSLSession, hostname: String?) ss
 /// (mbedtls_ssl_check_cert_usage, true where C returns 0); what they do not
 /// allow is added to `flags`.
 ssl_check_cert_usage: fn(cert: x509crt.X509Crt, ciphersuite: suites.SSLCiphersuite?, recv_endpoint: Int, tls_version: Int, flags: ^Int) -> Bool Never! {
-    ok := true
-    usage := x509.X509_KU_DIGITAL_SIGNATURE
+    ^ok: true
+    ^usage: x509.X509_KU_DIGITAL_SIGNATURE
     if tls_version == ssldefs.SSL_VERSION_TLS1_2 && recv_endpoint == ssldefs.SSL_IS_CLIENT {
         // The server's part of a TLS 1.2 key exchange.
         usage = 0
@@ -2577,11 +2577,11 @@ ssl_verify_alert: fn(verify_result: Int) -> Int Never! {
 // None for none.
 ssl_verify_chain: fn(ssl: ^ssldefs.SSLContext, chain: ^[x509crt.X509Crt], cn: [U8]?, vrfy: x509crt.X509VerifyCallback?) -> x509.X509Error? Never! {
     // The CRLs and profile are read before the CA list's write window.
-    profile := ssl.conf.cert_profile
-    sni_crl := ssl.handshake.sni_ca_crl.copy()
-    conf_crl := ssl.conf.ca_crl.copy()
+    ^profile: ssl.conf.cert_profile
+    ^sni_crl: ssl.handshake.sni_ca_crl.copy()
+    ^conf_crl: ssl.conf.ca_crl.copy()
     now: x509.x509_time_gmtime(ssldefs.ssl_time())
-    if ^ssl.handshake.sni_ca_chain == {
+    if ssl.handshake.sni_ca_chain.in_place() == {
         .Val(c) -> {
             if x509crt.x509_crt_verify_with_profile_at(chain, c, sni_crl, profile, cn, vrfy, now) == {
                 .Err(e) -> return Val(e)
@@ -2590,7 +2590,7 @@ ssl_verify_chain: fn(ssl: ^ssldefs.SSLContext, chain: ^[x509crt.X509Crt], cn: [U
         }
         None -> {}
     }
-    if ^ssl.conf.ca_chain == {
+    if ssl.conf.ca_chain.in_place() == {
         .Val(c) -> {
             if x509crt.x509_crt_verify_with_profile_at(chain, c, conf_crl, profile, cn, vrfy, now) == {
                 .Err(e) -> return Val(e)
@@ -2599,7 +2599,7 @@ ssl_verify_chain: fn(ssl: ^ssldefs.SSLContext, chain: ^[x509crt.X509Crt], cn: [U
         }
         None -> {}
     }
-    empty := [x509crt.X509Crt]{}
+    ^empty: [x509crt.X509Crt]{}
     if x509crt.x509_crt_verify_with_profile_at(chain, empty, conf_crl, profile, cn, vrfy, now) == {
         .Err(e) -> Val(e)
         .Ok(_) -> None
@@ -2616,7 +2616,7 @@ ssl_verify_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, authmode: Int, chai
         ssl.spool[sn].verify_result = 0
         return
     }
-    vrfy := ssl.conf.f_vrfy
+    ^vrfy: ssl.conf.f_vrfy
     if ssl.f_vrfy == {
         .Val(_) -> { vrfy = ssl.f_vrfy }
         None -> {}
@@ -2627,8 +2627,8 @@ ssl_verify_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, authmode: Int, chai
     }
     cn: ssl_hostname_bytes(ssl)
     have_ca_chain: ssl.handshake.sni_ca_chain != None || ssl.conf.ca_chain != None
-    failed := false
-    reason := ssldefs.SSLError.InternalError
+    ^failed: false
+    ^reason: ssldefs.SSLError.InternalError
     if ssl_verify_chain(ssl, chain, cn, vrfy) == {
         .Val(e) -> {
             failed = true
@@ -2657,7 +2657,7 @@ ssl_verify_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, authmode: Int, chai
                 reason = ssldefs.SSLError.BadCertificate
             }
         }
-        flags := ssl.spool[sn].verify_result
+        ^flags: ssl.spool[sn].verify_result
         usage_ok: ssl_check_cert_usage(chain[0], ciphersuite_info, ssl.conf.endpoint, ssl.tls_version, flags)
         ssl.spool[sn].verify_result = flags
         if !usage_ok && !failed {
@@ -2696,7 +2696,7 @@ ssl_export_keying_material: fn(ssl: ssldefs.SSLContext, key_len: Int, label: [U8
         // Client random, server random, then the context after its 2-byte
         // length.
         randbytes: ssl.tpool[ssl.transform].randbytes
-        prf_input := ssldefs.ssl_bytes_of(randbytes, ssldefs.SERVER_HELLO_RANDOM_LEN, ssldefs.CLIENT_HELLO_RANDOM_LEN)
+        ^prf_input: ssldefs.ssl_bytes_of(randbytes, ssldefs.SERVER_HELLO_RANDOM_LEN, ssldefs.CLIENT_HELLO_RANDOM_LEN)
         prf_input.extend(ssldefs.ssl_bytes_of(randbytes, 0, ssldefs.SERVER_HELLO_RANDOM_LEN))
         if context == {
             .Val(c) -> {
@@ -2817,7 +2817,7 @@ vec_is: fn(got: [U8]?, want: [U8]) -> Bool Never! {
 /// Every record of `t` agreed, and there was at least one.
 vec_assert: fn(t: VecTally) {
     if t.fail > 0 || t.pass == 0 {
-        detail := ""
+        ^detail: ""
         loop f in t.failures -> detail = "{detail}\n  {f}"
         panic("{t.what}: {t.pass} agree, {t.fail} disagree{detail}")
     }
@@ -2832,7 +2832,7 @@ vec_hex: fn(text: String) -> [U8] {
 }
 
 vec_concat: fn(a: [U8], b: [U8]) -> [U8] Never! {
-    out := a.copy()
+    ^out: a.copy()
     loop x in b -> out.push(x)
     out
 }
@@ -2849,7 +2849,7 @@ vec_md_named: fn(name: String) -> hashes.Md? Never! {
 /// A deterministic generator for the blinding the ECDH and RSA operations ask
 /// for; the vectors' results do not depend on it.
 vec_rng: fn() -> drbg.HMACDrbg Never! {
-    g := drbg.hmac_drbg_new(.SHA256)
+    ^g: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(g, "Jet test vector blinding".bytes())
     g
 }
@@ -2870,11 +2870,11 @@ VecRecord: struct {
 vec_nist: fn(file: String) -[FS.Read]> [VecRecord] {
     path: "{VEC_NIST_DIR}/{file}"
     text: core.files.read(path) ?? panic("{path}: {err}; the vector tests run from the repository root")
-    out := [VecRecord]{}
-    section := ""
-    in_header := false
-    names := [String]{}
-    values := [String]{}
+    ^out: [VecRecord]{}
+    ^section: ""
+    ^in_header: false
+    ^names: [String]{}
+    ^values: [String]{}
     loop raw in text.lines() {
         line: raw.trim()
         if line.starts_with("#") -> next
@@ -2916,7 +2916,7 @@ vec_has: fn(r: VecRecord, name: String) -> Bool Never! { r.names.contains(name) 
 
 /// The `nth` value named `name` in r (fields repeat in the DRBG files).
 vec_field_nth: fn(r: VecRecord, name: String, nth: Int) -> String {
-    seen := 0
+    ^seen: 0
     loop i in 0..<r.names.len() {
         if r.names[i] == name {
             if seen == nth -> return r.values[i].copy()
@@ -2952,11 +2952,11 @@ vec_sha256_hex: fn(bytes: [U8]) -> String Never! {
 /// client. The response must be a 200 with a Content-Length.
 vec_https_get: fn(host: String, path: String) -[Net, Time.Wait]> [U8] {
     url: "https://{host}{path}"
-    stream := core.net.tls.client(host, 443) ?? panic("Fetching {url}: {err}")
+    ^stream: core.net.tls.client(host, 443) ?? panic("Fetching {url}: {err}")
     _: core.net.tls.write(stream, "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n") ?? panic("Fetching {url}: {err}")
-    raw := [U8]{}
-    head := -1
-    length := 0
+    ^raw: [U8]{}
+    ^head: -1
+    ^length: 0
     loop {
         if head < 0 {
             head = vec_head_end(raw)
@@ -3003,7 +3003,7 @@ vec_wycheproof: fn(name: String) -[FS, Env, Net, Time.Wait]> Dyn {
     if pin.is_empty() -> panic("Wycheproof file {name} has no SHA-256 pin")
     dir: vec_cache_dir()
     path: "{dir}/{name}_test.json"
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if core.files.exists(path) {
         cached: core.files.read_bytes(path) ?? panic("{path}: {err}")
         if vec_sha256_hex(cached) == pin -> bytes = cached.copy()
@@ -3047,7 +3047,7 @@ vec_items: fn(d: Dyn, key: String) -> [Dyn] {
 }
 
 vec_flags: fn(d: Dyn) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop f in vec_items(d, "flags") {
         if f == .Text(s) -> out.push(s.copy())
     }
@@ -3098,19 +3098,19 @@ vec_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
 // certificate key is `key`: 0 when the engine takes it, else the alert it
 // pends.
 vec_certificate_verify: fn(key: ^^pk.PKContext, algorithm: Int, signature: [U8], signed: [U8]) -> Int {
-    conf := ssldefs.SSLConfig{}
+    ^conf: ssldefs.SSLConfig{}
     ssl_config_defaults(conf, ssldefs.SSL_IS_CLIENT, ssldefs.SSL_TRANSPORT_STREAM, ssldefs.SSL_PRESET_DEFAULT) ?? panic("defaults: {err}")
-    ssl := ssldefs.SSLContext{}
+    ^ssl: ssldefs.SSLContext{}
     ssl_setup(ssl, conf) ?? panic("setup: {err}")
     ssl.tls_version = ssldefs.SSL_VERSION_TLS1_3
     sn: ssldefs.ssl_session_alloc(ssl)
     ssl.session_negotiate = sn
-    crt := x509crt.x509_crt_new()
+    ^crt: x509crt.x509_crt_new()
     crt.pk = key
-    chain := [x509crt.X509Crt]{}
+    ^chain: [x509crt.X509Crt]{}
     chain.push(crt)
     ssl.spool[sn].peer_cert = Val(chain)
-    body := [U8]{ssldefs.ssl_byte(algorithm >> 8), ssldefs.ssl_byte(algorithm), ssldefs.ssl_byte(signature.len() >> 8), ssldefs.ssl_byte(signature.len())}
+    ^body: [U8]{ssldefs.ssl_byte(algorithm >> 8), ssldefs.ssl_byte(algorithm), ssldefs.ssl_byte(signature.len() >> 8), ssldefs.ssl_byte(signature.len())}
     body.extend(signature.copy())
     ssl.in_buf = body.copy()
     if gen13.ssl_tls13_parse_certificate_verify(ssl, 0, body.len(), signed) == .Err(_) {
@@ -3120,41 +3120,41 @@ vec_certificate_verify: fn(key: ^^pk.PKContext, algorithm: Int, signature: [U8],
 }
 
 vec_localhost_key: fn() -> pk.PKContext {
-    rng := vec_rng()
+    ^rng: vec_rng()
     pem_key: core.files.read_bytes("Tests/Fixtures/TLS/localhost.key.pem") ?? panic("{err}")
     pkparse.pk_parse_key(pem_key, None, rng) ?? panic("localhost.key.pem: {err}")
 }
 
 vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
-    rng := vec_rng()
-    key := pk.pk_new()
+    ^rng: vec_rng()
+    ^key: pk.pk_new()
     pk.pk_setup(key, Val(oids.PKType.ECKey)) ?? panic("pk_setup: {err}")
     key.ec = ecp.gen_key(id, rng) ?? panic("gen_key: {err}")
     key
 }
 
 #Test("A TLS 1.3 CertificateVerify must use an algorithm RFC 8446 allows there, and an ECDSA one must name the key's curve") {
-    rng := vec_rng()
+    ^rng: vec_rng()
     signed: "TLS 1.3 CertificateVerify content".bytes()
     sha256: hashes.hash(.SHA256, signed)
     sha384: hashes.hash(.SHA384, signed)
     // RSASSA-PSS is taken; PKCS#1 v1.5, which the default configuration
     // offers for certificate signatures only, is refused with a signature
     // that verifies.
-    pss_key := vec_localhost_key()
+    ^pss_key: vec_localhost_key()
     pss: pk.pk_sign_ext(.RSASSAPSS, pss_key, Val(hashes.Md.SHA256), sha256, 1024, rng) ?? panic("PSS: {err}")
     assert_eq(vec_certificate_verify(pss_key, ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256, pss, signed), 0)
-    pkcs1_key := vec_localhost_key()
+    ^pkcs1_key: vec_localhost_key()
     pkcs1: pk.pk_sign(pkcs1_key, Val(hashes.Md.SHA256), sha256, 1024, rng) ?? panic("PKCS#1: {err}")
     pk.pk_verify_ext(.RSA, None, pkcs1_key, Val(hashes.Md.SHA256), sha256, pkcs1) ?? panic("the PKCS#1 v1.5 signature does not verify: {err}")
     assert_eq(vec_certificate_verify(pkcs1_key, ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA256, pkcs1, signed), ssldefs.SSL_ALERT_MSG_DECRYPT_ERROR)
     // A P-256 key signs under ecdsa_secp256r1_sha256, but not under
     // ecdsa_secp384r1_sha384 with a signature over the SHA-384 hash that
     // verifies.
-    p256_key := vec_ec_key(.Secp256r1)
+    ^p256_key: vec_ec_key(.Secp256r1)
     p256: pk.pk_sign(p256_key, Val(hashes.Md.SHA256), sha256, 200, rng) ?? panic("ECDSA: {err}")
     assert_eq(vec_certificate_verify(p256_key, ssldefs.TLS1_3_SIG_ECDSA_SECP256R1_SHA256, p256, signed), 0)
-    mismatch_key := vec_ec_key(.Secp256r1)
+    ^mismatch_key: vec_ec_key(.Secp256r1)
     mismatch: pk.pk_sign(mismatch_key, Val(hashes.Md.SHA384), sha384, 200, rng) ?? panic("ECDSA: {err}")
     pk.pk_verify_ext(.ECDSA, None, mismatch_key, Val(hashes.Md.SHA384), sha384, mismatch) ?? panic("the P-256 signature over SHA-384 does not verify: {err}")
     assert_eq(vec_certificate_verify(mismatch_key, ssldefs.TLS1_3_SIG_ECDSA_SECP384R1_SHA384, mismatch, signed), ssldefs.SSL_ALERT_MSG_DECRYPT_ERROR)
@@ -3162,7 +3162,7 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
 
 #Test("NIST CAVP GCM vectors seal and open with AES-128 and AES-256, 96-bit IVs and 128-bit tags") {
     loop file in ([String]{"gcmEncryptExtIV128.rsp", "gcmEncryptExtIV256.rsp"}) {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         records: vec_nist(file)
         loop n in 0..<records.len() {
             r: records[n]
@@ -3174,7 +3174,7 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
         vec_assert(t)
     }
     loop file in ([String]{"gcmDecrypt128.rsp", "gcmDecrypt256.rsp"}) {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         records: vec_nist(file)
         loop n in 0..<records.len() {
             r: records[n]
@@ -3190,7 +3190,7 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
 
 #Test("Wycheproof AES-GCM vectors with the key, IV and tag sizes TLS uses seal and open") {
     file: "aes_gcm"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
         key_size: vec_int(g, "keySize")
         if (key_size != 128 && key_size != 256) || vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 {
@@ -3203,7 +3203,7 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
             msg: vec_wy_hex(c, "msg")
             sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
             opened: vec_gcm_open(key, iv, aad, sealed)
-            accepted := vec_is(opened, msg)
+            ^accepted: vec_is(opened, msg)
             if vec_text(c, "result") == "valid" {
                 accepted = accepted && vec_is(vec_gcm_seal(key, iv, aad, msg), sealed)
             }
@@ -3215,7 +3215,7 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
 
 #Test("Wycheproof ChaCha20-Poly1305 vectors with 96-bit nonces seal and open") {
     file: "chacha20_poly1305"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
         if vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 -> next
         loop c in vec_items(g, "tests") {
@@ -3224,7 +3224,7 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
             aad: vec_wy_hex(c, "aad")
             msg: vec_wy_hex(c, "msg")
             sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
-            accepted := vec_is(vec_chacha_open(key, iv, aad, sealed), msg)
+            ^accepted: vec_is(vec_chacha_open(key, iv, aad, sealed), msg)
             if vec_text(c, "result") == "valid" {
                 accepted = accepted && vec_is(vec_chacha_seal(key, iv, aad, msg), sealed)
             }
@@ -3250,10 +3250,10 @@ vec_chacha_open: fn(key: [U8], nonce: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
 /// curve `id`, in its wire form: little-endian for X25519, big-endian
 /// field-size bytes otherwise.
 vec_ecdh: fn(id: ecp.GroupID, private: [U8], public: [U8]) -> [U8]? {
-    key := ecp.keypair_new()
+    ^key: ecp.keypair_new()
     ecp.read_key(id, key, private) ?? return None
     q: ecp.point_read_binary(key.grp, public) ?? return None
-    rng := vec_rng()
+    ^rng: vec_rng()
     z: ecdh.ecdh_compute_shared(key.grp, q, key.d, rng) ?? return None
     size: (key.grp.pbits + 7) >> 3
     if ecp.group_type(key.grp) == .Montgomery {
@@ -3271,7 +3271,7 @@ vec_scalar: fn(bytes: [U8], size: Int) -> [U8]? {
 
 #Test("NIST CAVP ECC CDH primitive vectors agree on P-256 and P-384") {
     file: "ECC_CDH_Primitive.txt"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     records: vec_nist(file)
     loop n in 0..<records.len() {
         r: records[n]
@@ -3281,7 +3281,7 @@ vec_scalar: fn(bytes: [U8], size: Int) -> [U8]? {
             r.section.contains("P-384") -> ecp.GroupID.Secp384r1
             else -> panic("{file}: section {r.section}")
         }
-        public := [U8]{0x04}
+        ^public: [U8]{0x04}
         loop b in vec_bytes(r, "QCAVSx") -> public.push(b)
         loop b in vec_bytes(r, "QCAVSy") -> public.push(b)
         got: vec_ecdh(id, vec_bytes(r, "dIUT"), public)
@@ -3292,7 +3292,7 @@ vec_scalar: fn(bytes: [U8], size: Int) -> [U8]? {
 
 #Test("Wycheproof X25519 vectors agree, and low-order points give no secret") {
     file: "x25519"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
         if vec_text(g, "curve") != "curve25519" -> next
         loop c in vec_items(g, "tests") {
@@ -3309,7 +3309,7 @@ vec_scalar: fn(bytes: [U8], size: Int) -> [U8]? {
 
 #Test("Wycheproof ECDH vectors on uncompressed P-256 and P-384 points agree, and bad points are refused") {
     loop file in ([String]{"ecdh_secp256r1_ecpoint", "ecdh_secp384r1_ecpoint"}) {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         id: if file.contains("256") -> ecp.GroupID.Secp256r1 else -> ecp.GroupID.Secp384r1
         size: if id == .Secp256r1 -> 32 else -> 48
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
@@ -3332,7 +3332,7 @@ vec_scalar: fn(bytes: [U8], size: Int) -> [U8]? {
 
 #Test("NIST CAVP ECDSA SigVer vectors verify on P-256 with SHA-256 and P-384 with SHA-384") {
     file: "ECDSA_SigVer.rsp"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     records: vec_nist(file)
     loop n in 0..<records.len() {
         r: records[n]
@@ -3342,7 +3342,7 @@ vec_scalar: fn(bytes: [U8], size: Int) -> [U8]? {
         id: if p384 -> ecp.GroupID.Secp384r1 else -> ecp.GroupID.Secp256r1
         md: if p384 -> hashes.Md.SHA384 else -> hashes.Md.SHA256
         grp: ecp.group_load(id) ?? panic("group {id}")
-        public := [U8]{0x04}
+        ^public: [U8]{0x04}
         loop b in vec_bytes(r, "Qx") -> public.push(b)
         loop b in vec_bytes(r, "Qy") -> public.push(b)
         hash: hashes.hash(md, vec_bytes(r, "Msg"))
@@ -3366,7 +3366,7 @@ vec_ecdsa_raw: fn(grp: ecp.EcpGroup, public: [U8], hash: [U8], r: [U8], s: [U8])
 /// PK layer, as a TLS peer's CertificateVerify is checked. `pss` carries the
 /// salt length for RSASSA-PSS, or is None for PKCS#1 v1.5 and ECDSA.
 vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> Bool {
-    ctx := pkparse.pk_parse_public_key(der) ?? return false
+    ^ctx: pkparse.pk_parse_public_key(der) ?? return false
     hash: hashes.hash(md, msg)
     if pss == {
         .Val(salt) -> {
@@ -3379,7 +3379,7 @@ vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> 
 
 #Test("Wycheproof ECDSA vectors verify DER signatures on P-256 with SHA-256 and P-384 with SHA-384") {
     loop file in ([String]{"ecdsa_secp256r1_sha256", "ecdsa_secp384r1_sha384"}) {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
             md: vec_md_named(vec_text(g, "sha")) ?? panic("{file}: hash {vec_text(g, "sha")}")
             der: vec_wy_hex(g, "publicKeyDer")
@@ -3404,7 +3404,7 @@ vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> 
         "rsa_signature_4096_sha512",
     }
     loop file in files {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
             md: vec_md_named(vec_text(g, "sha")) ?? panic("{file}: hash {vec_text(g, "sha")}")
             der: vec_wy_hex(g, "publicKeyDer")
@@ -3427,7 +3427,7 @@ vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> 
         "rsa_pss_4096_sha512_mgf1_64",
     }
     loop file in files {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
             md: vec_md_named(vec_text(g, "sha")) ?? panic("{file}: hash {vec_text(g, "sha")}")
             if vec_md_named(vec_text(g, "mgfSha")) != Val(md) {
@@ -3447,8 +3447,8 @@ vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> 
 /// The PKCS#1 v1.5 signature of `msg` under the PKCS#8 private key `der`,
 /// made through the PK layer as a TLS server signs, is `want`.
 vec_pk_signs: fn(der: [U8], md: hashes.Md, msg: [U8], want: [U8]) -> Bool {
-    rng := vec_rng()
-    ctx := pkparse.pk_parse_key(der, None, rng) ?? return false
+    ^rng: vec_rng()
+    ^ctx: pkparse.pk_parse_key(der, None, rng) ?? return false
     sig: pk.pk_sign(ctx, Val(md), hashes.hash(md, msg), 1024, rng) ?? return false
     sig == want
 }
@@ -3456,7 +3456,7 @@ vec_pk_signs: fn(der: [U8], md: hashes.Md, msg: [U8], want: [U8]) -> Bool {
 #Test("Wycheproof RSA PKCS#1 v1.5 signing vectors sign at 2048, 3072 and 4096 bits with SHA-256, SHA-384 and SHA-512") {
     loop file in
         ([String]{"rsa_pkcs1_2048_sig_gen", "rsa_pkcs1_3072_sig_gen", "rsa_pkcs1_4096_sig_gen"}) {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
             // SHA-1 and SHA-224 are not among the signature schemes Core's TLS offers.
             md: vec_md_named(vec_text(g, "sha")) ?? next
@@ -3472,7 +3472,7 @@ vec_pk_signs: fn(der: [U8], md: hashes.Md, msg: [U8], want: [U8]) -> Bool {
 /// An RSA public key with modulus `n` and exponent `e`, completed; None when
 /// the parts do not form a key.
 vec_rsa_key: fn(n: [U8], e: [U8]) -> rsa.RSAContext? {
-    ctx := rsa.rsa_new()
+    ^ctx: rsa.rsa_new()
     rsa.rsa_import_raw(ctx, .N, n) ?? return None
     rsa.rsa_import_raw(ctx, .E, e) ?? return None
     rsa.rsa_complete(ctx) ?? return None
@@ -3482,7 +3482,7 @@ vec_rsa_key: fn(n: [U8], e: [U8]) -> rsa.RSAContext? {
 /// (n, e) accepts `sig` over `hash`: PKCS#1 v1.5, or RSASSA-PSS with MGF1
 /// over `md` and a salt of `pss` bytes.
 vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss: Int?) -> Bool {
-    ctx := vec_rsa_key(n, e) ?? return false
+    ^ctx: vec_rsa_key(n, e) ?? return false
     if pss == {
         .Val(salt) -> {
             rsa.rsa_set_padding(ctx, .PKCSV21, Val(md))
@@ -3497,10 +3497,10 @@ vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss
     // SigGen15 gives (n, e) and the deterministic signature of each message,
     // which must verify.
     gen_file: "RSA_SigGen15.rsp"
-    gen := vec_tally(gen_file)
+    ^gen: vec_tally(gen_file)
     gen_records: vec_nist(gen_file)
-    n_hex := ""
-    e_hex := ""
+    ^n_hex: ""
+    ^e_hex: ""
     loop i in 0..<gen_records.len() {
         r: gen_records[i]
         if vec_has(r, "n") -> n_hex = vec_field(r, "n")
@@ -3514,7 +3514,7 @@ vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss
     // SigVer15 and SigVerPSS: n heads each modulus section; e, the message
     // and the expected verdict are per record.
     loop file in ([String]{"RSA_SigVer15.rsp", "RSA_SigVerPSS.rsp"}) {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         records: vec_nist(file)
         pss: file.contains("PSS")
         n_hex = ""
@@ -3539,14 +3539,14 @@ vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss
 
 #Test("Wycheproof HMAC-SHA-256 and HMAC-SHA-384 vectors agree, truncated tags included") {
     loop file in ([String]{"hmac_sha256", "hmac_sha384"}) {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         md: if file == "hmac_sha256" -> hashes.Md.SHA256 else -> hashes.Md.SHA384
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
             tag_bytes: vec_int(g, "tagSize") >> 3
             loop c in vec_items(g, "tests") {
                 mac: hashes.hmac(md, vec_wy_hex(c, "key"), vec_wy_hex(c, "msg"))
                 want: vec_wy_hex(c, "tag")
-                accepted := want.len() == tag_bytes && tag_bytes <= mac.len()
+                ^accepted: want.len() == tag_bytes && tag_bytes <= mac.len()
                 if accepted {
                     loop i in 0..<tag_bytes -> accepted = accepted && mac[i] == want[i]
                 }
@@ -3559,7 +3559,7 @@ vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss
 
 #Test("Wycheproof HKDF-SHA-256 and HKDF-SHA-384 vectors agree, and oversized outputs are refused") {
     loop file in ([String]{"hkdf_sha256", "hkdf_sha384"}) {
-        t := vec_tally(file)
+        ^t: vec_tally(file)
         md: if file == "hkdf_sha256" -> hashes.Md.SHA256 else -> hashes.Md.SHA384
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
             loop c in vec_items(g, "tests") {
@@ -3573,7 +3573,7 @@ vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss
 
 #Test("Wycheproof HKDF-SHA-256 and PBKDF2-HMAC-SHA-256 vectors agree through core.crypto's public KDFs") {
     hkdf_file: "hkdf_sha256"
-    t := vec_tally("core.crypto.hkdf_sha256")
+    ^t: vec_tally("core.crypto.hkdf_sha256")
     loop g in vec_items(vec_wycheproof(hkdf_file), "testGroups") {
         loop c in vec_items(g, "tests") {
             accepted: vec_hkdf_public(c)
@@ -3582,7 +3582,7 @@ vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss
     }
     vec_assert(t)
     pbkdf2_file: "pbkdf2_hmacsha256"
-    p := vec_tally("core.crypto.pbkdf2_hmac")
+    ^p: vec_tally("core.crypto.pbkdf2_hmac")
     loop g in vec_items(vec_wycheproof(pbkdf2_file), "testGroups") {
         loop c in vec_items(g, "tests") {
             accepted: vec_pbkdf2_public(c)
@@ -3604,7 +3604,7 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
 
 #Test("NIST CAVP TLS 1.2 PRF vectors derive the master secret and key block with SHA-256 and SHA-384") {
     file: "TLS_PRF.rsp"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     records: vec_nist(file)
     loop n in 0..<records.len() {
         r: records[n]
@@ -3626,17 +3626,17 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
 
 #Test("NIST CAVP HMAC_DRBG SHA-256 vectors without prediction resistance return the expected bits") {
     file: "HMAC_DRBG_SHA256.rsp"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     records: vec_nist(file)
     loop n in 0..<records.len() {
         r: records[n]
         if !vec_has(r, "EntropyInput") -> next
-        g := drbg.hmac_drbg_new(.SHA256)
-        seed := vec_concat(vec_bytes(r, "EntropyInput"), vec_bytes(r, "Nonce"))
+        ^g: drbg.hmac_drbg_new(.SHA256)
+        ^seed: vec_concat(vec_bytes(r, "EntropyInput"), vec_bytes(r, "Nonce"))
         loop b in vec_bytes(r, "PersonalizationString") -> seed.push(b)
         drbg.hmac_drbg_seed_buf(g, seed)
         want: vec_bytes(r, "ReturnedBits")
-        none := drbg.NoEntropy{}
+        ^none: drbg.NoEntropy{}
         first: drbg.hmac_drbg_random_with_add(g, none, want.len(), vec_hex(vec_field_nth(r, "AdditionalInput", 0))) ?? panic("first generate")
         second: drbg.hmac_drbg_random_with_add(g, none, want.len(), vec_hex(vec_field_nth(r, "AdditionalInput", 1))) ?? panic("second generate")
         vec_check(t, first.len() == want.len() && second == want, vec_label(file, r, n))
@@ -3652,7 +3652,7 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
 
 #Unsafe("`key` and `iv` are a vector record's, used for that record only")
 vec_expert_gcm_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
-    out := [U8]{}
+    ^out: [U8]{}
     #Unsafe("a vector record's key and nonce, used for that record only") {
         out = core.crypto.expert.aes256gcm_seal(key, iv, plain, aad) ?? return None
     }
@@ -3661,7 +3661,7 @@ vec_expert_gcm_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
 
 #Unsafe("`key` and `iv` are a vector record's, used for that record only")
 vec_expert_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
-    out := [U8]{}
+    ^out: [U8]{}
     #Unsafe("a vector record's key and nonce, used for that record only") {
         out = core.crypto.expert.aes256gcm_open(key, iv, sealed, aad) ?? return None
     }
@@ -3670,7 +3670,7 @@ vec_expert_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
 
 #Unsafe("`key` and `iv` are a vector record's, used for that record only")
 vec_expert_xchacha_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
-    out := [U8]{}
+    ^out: [U8]{}
     #Unsafe("a vector record's key and nonce, used for that record only") {
         out = core.crypto.expert.xchacha20poly1305_seal(key, iv, plain, aad) ?? return None
     }
@@ -3679,7 +3679,7 @@ vec_expert_xchacha_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]
 
 #Unsafe("`key` and `iv` are a vector record's, used for that record only")
 vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
-    out := [U8]{}
+    ^out: [U8]{}
     #Unsafe("a vector record's key and nonce, used for that record only") {
         out = core.crypto.expert.xchacha20poly1305_open(key, iv, sealed, aad) ?? return None
     }
@@ -3689,7 +3689,7 @@ vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8
 #Test("NIST CAVP GCM AES-256 vectors seal and open through core.crypto.expert") {
     #Unsafe("each record's key and IV are used for that record only") {
         file: "gcmEncryptExtIV256.rsp"
-        t := vec_tally("{file} (expert)")
+        ^t: vec_tally("{file} (expert)")
         records: vec_nist(file)
         loop n in 0..<records.len() {
             r: records[n]
@@ -3700,7 +3700,7 @@ vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8
         }
         vec_assert(t)
         open_file: "gcmDecrypt256.rsp"
-        u := vec_tally("{open_file} (expert)")
+        ^u: vec_tally("{open_file} (expert)")
         opened: vec_nist(open_file)
         loop n in 0..<opened.len() {
             r: opened[n]
@@ -3716,7 +3716,7 @@ vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8
 
 #Test("Wycheproof AES-256-GCM vectors with 96-bit IVs and 128-bit tags seal and open through core.crypto.expert") {
     file: "aes_gcm"
-    t := vec_tally("{file} (expert)")
+    ^t: vec_tally("{file} (expert)")
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
         if vec_int(g, "keySize") != 256 || vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 {
             next
@@ -3727,7 +3727,7 @@ vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8
             aad: vec_wy_hex(c, "aad")
             msg: vec_wy_hex(c, "msg")
             sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
-            accepted := false
+            ^accepted: false
             #Unsafe("the record's key and IV are used for that record only") {
                 accepted = vec_is(vec_expert_gcm_open(key, iv, aad, sealed), msg)
                 if vec_text(c, "result") == "valid" {
@@ -3742,7 +3742,7 @@ vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8
 
 #Test("Wycheproof XChaCha20-Poly1305 vectors with 192-bit nonces seal and open through core.crypto.expert") {
     file: "xchacha20_poly1305"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
         if vec_int(g, "ivSize") != 192 || vec_int(g, "tagSize") != 128 -> next
         loop c in vec_items(g, "tests") {
@@ -3751,7 +3751,7 @@ vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8
             aad: vec_wy_hex(c, "aad")
             msg: vec_wy_hex(c, "msg")
             sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
-            accepted := false
+            ^accepted: false
             #Unsafe("the record's key and nonce are used for that record only") {
                 accepted = vec_is(vec_expert_xchacha_open(key, iv, aad, sealed), msg)
                 if vec_text(c, "result") == "valid" {
@@ -3766,7 +3766,7 @@ vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8
 
 #Unsafe("`private` is a vector record's key, used for that record only")
 vec_expert_x25519: fn(private: [U8], public: [U8]) -> [U8]? {
-    out := [U8]{}
+    ^out: [U8]{}
     #Unsafe("a vector record's private key, used for that record only") {
         shared: core.crypto.expert.x25519_raw(private, public) ?? return None
         out = core.crypto.expert.secret_bytes(shared)
@@ -3776,7 +3776,7 @@ vec_expert_x25519: fn(private: [U8], public: [U8]) -> [U8]? {
 
 #Unsafe("the arguments are a vector record's public key, message and signature")
 vec_expert_ed25519_verifies: fn(public: [U8], msg: [U8], sig: [U8]) -> Bool {
-    accepted := false
+    ^accepted: false
     #Unsafe("verification of a vector record's public signature") {
         accepted = core.crypto.expert.ed25519_verify_strict(public, msg, sig) ?? return false
     }
@@ -3785,11 +3785,11 @@ vec_expert_ed25519_verifies: fn(public: [U8], msg: [U8], sig: [U8]) -> Bool {
 
 #Test("Wycheproof X25519 vectors agree through core.crypto.expert, and low-order points give no secret") {
     file: "x25519"
-    t := vec_tally("{file} (expert)")
+    ^t: vec_tally("{file} (expert)")
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
         if vec_text(g, "curve") != "curve25519" -> next
         loop c in vec_items(g, "tests") {
-            agreed := false
+            ^agreed: false
             #Unsafe("the record's private key is used for that record only") {
                 agreed = vec_is(vec_expert_x25519(vec_wy_hex(c, "private"), vec_wy_hex(c, "public")), vec_wy_hex(c, "shared"))
             }
@@ -3801,11 +3801,11 @@ vec_expert_ed25519_verifies: fn(public: [U8], msg: [U8], sig: [U8]) -> Bool {
 
 #Test("Wycheproof Ed25519 vectors verify strictly through core.crypto.expert") {
     file: "ed25519"
-    t := vec_tally(file)
+    ^t: vec_tally(file)
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
         public: vec_wy_hex(g["publicKey"], "pk")
         loop c in vec_items(g, "tests") {
-            accepted := false
+            ^accepted: false
             #Unsafe("the record's public key, message and signature") {
                 accepted = vec_expert_ed25519_verifies(public, vec_wy_hex(c, "msg"), vec_wy_hex(c, "sig"))
             }
@@ -3850,7 +3850,7 @@ CtRand: struct {
 }
 
 #Overflow(.Wrapping) ct_next: fn(r: ^CtRand) -> U64 Never! {
-    x := r.s.copy()
+    ^x: r.s.copy()
     x ~= x << 13
     x ~= x >> 7
     x ~= x << 17
@@ -3859,7 +3859,7 @@ CtRand: struct {
 }
 
 ct_bytes: fn(r: ^CtRand, n: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<n -> out.push(U8{ct_next(r) & U64{255}})
     out
 }
@@ -3869,8 +3869,8 @@ ct_abs: fn(x: Float) -> Float Never! { if x < (Float{0}) -> Float{0} - x else ->
 /// Welch's t between the random class's and the fixed class's timings, over
 /// the runs that took at most `limit` nanoseconds.
 ct_welch: fn(times: [Int], random: [Bool], limit: Int) -> Float Never! {
-    n := [Int]{0, 0}
-    sum := [Float]{Float{0}, Float{0}}
+    ^n: [Int]{0, 0}
+    ^sum: [Float]{Float{0}, Float{0}}
     loop i in 0..<times.len() {
         if times[i] > limit -> next
         c: if random[i] -> 1 else -> 0
@@ -3879,7 +3879,7 @@ ct_welch: fn(times: [Int], random: [Bool], limit: Int) -> Float Never! {
     }
     if n[0] < 2 || n[1] < 2 -> return Float{0}
     mean: [Float]{sum[0] / Float{n[0]}, sum[1] / Float{n[1]}}
-    sq := [Float]{Float{0}, Float{0}}
+    ^sq: [Float]{Float{0}, Float{0}}
     loop i in 0..<times.len() {
         if times[i] > limit -> next
         c: if random[i] -> 1 else -> 0
@@ -3896,26 +3896,26 @@ ct_welch: fn(times: [Int], random: [Bool], limit: Int) -> Float Never! {
 /// xorshift seeded with `seed` picks, and returns the t of largest size
 /// over all runs and the 50th, 75th, 90th, 95th and 99th percentile crops.
 ct_measure: fn(what: String, seed: U64, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) -> Int) -[Time, IO]> Float {
-    r := CtRand{s: seed}
-    inputs := [[U8]]{}
-    random := [Bool]{}
+    ^r: CtRand{s: seed}
+    ^inputs: [[U8]]{}
+    ^random: [Bool]{}
     loop i in 0..<samples {
         pick: if i %% 2 == 0 -> ct_next(r) & U64{1} == U64{1} else -> !random[i - 1]
         random.push(pick)
         if pick -> inputs.push(ct_bytes(r, fixed.len())) else -> inputs.push(fixed.copy())
     }
-    sink := 0
+    ^sink: 0
     loop i in 0..<32 -> sink ~= op(inputs[i %% samples])
-    times := [Int]{}
+    ^times: [Int]{}
     loop i in 0..<samples {
         x: inputs[i]
         watch: core.time.start()
         loop _ in 0..<batch -> sink ~= op(x)
         times.push(core.time.elapsed(watch).ns)
     }
-    sorted := times.copy()
+    ^sorted: times.copy()
     sorted.sort()
-    worst := ct_welch(times, random, sorted[samples - 1])
+    ^worst: ct_welch(times, random, sorted[samples - 1])
     loop pct in ([Int]{50, 75, 90, 95, 99}) {
         t: ct_welch(times, random, sorted[((samples - 1) * pct) /% 100])
         if ct_abs(t) > ct_abs(worst) -> worst = t
@@ -3929,7 +3929,7 @@ ct_measure: fn(what: String, seed: U64, samples: Int, batch: Int, fixed: [U8], o
 /// list of three, each at least `bound` in size.
 ct_dudect_measures: fn(what: String, bound: Float, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) -> Int) -[Time, IO]> [Float] {
     seeds: [U64]{U64{88172645463325252}, U64{2463534242}, U64{6364136223846793005}}
-    found := [Float]{}
+    ^found: [Float]{}
     loop seed in seeds {
         t: ct_measure(what, seed, samples, batch, fixed, op)
         found.push(t)
@@ -3954,13 +3954,13 @@ ct_dudect: fn(what: String, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) 
 /// `bytes` with the last byte's low bit flipped: a tag that differs from
 /// `bytes` at the end only, where a random one differs at the start.
 ct_last_flipped: fn(bytes: [U8]) -> [U8] Never! {
-    out := bytes.copy()
+    ^out: bytes.copy()
     out[out.len() - 1] = out[out.len() - 1] ~ U8{1}
     out
 }
 
 ct_take: fn(bytes: [U8], from: Int, count: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in from..<from + count -> out.push(bytes[i])
     out
 }
@@ -3981,7 +3981,7 @@ ct_early_exit: fn(a: [U8], b: [U8]) -> Int Never! {
 }
 
 #Test("dudect finds the leak in a comparison that stops at the first differing byte") {
-    r := CtRand{s: U64{3}}
+    ^r: CtRand{s: U64{3}}
     mac: ct_bytes(r, 32)
     t: ct_measure("early-exit compare (the leak dudect must find)", U64{88172645463325252}, 20000, 64, ct_last_flipped(mac), fn(x) { ct_early_exit(mac, x) })
     if ct_abs(t) < (Float{10}) -> panic("dudect missed an early-exit compare: t {t}")
@@ -3999,7 +3999,7 @@ ct_early_exit: fn(a: [U8], b: [U8]) -> Int Never! {
 }
 
 #Test("dudect: ctime.memcmp and core.crypto.constant_time_equal_bytes take as long wherever two tags differ") {
-    r := CtRand{s: U64{5}}
+    ^r: CtRand{s: U64{5}}
     mac: ct_bytes(r, 32)
     fixed: ct_last_flipped(mac)
     other: mac.copy()
@@ -4009,13 +4009,13 @@ ct_early_exit: fn(a: [U8], b: [U8]) -> Int Never! {
 
 ct_aes: fn(key: [U8], block: [U8]) -> Int Never! {
     k: cipher.aes_key(key, false) ?? return 0
-    out := ct_take(block, 0, 16)
+    ^out: ct_take(block, 0, 16)
     cipher.encrypt_block(k, block, 0, out, 0)
     Int{out[0]}
 }
 
 #Test("dudect: AES key expansion and block encryption take as long on fixed and random keys") {
-    r := CtRand{s: U64{7}}
+    ^r: CtRand{s: U64{7}}
     block: ct_bytes(r, 16)
     other: block.copy()
     ct_dudect("AES-128 key and block", 5000, 4, ct_bytes(r, 16), fn(x) { ct_aes(x, block) })
@@ -4023,7 +4023,7 @@ ct_aes: fn(key: [U8], block: [U8]) -> Int Never! {
 }
 
 #Test("dudect: AES-GCM and ChaCha20-Poly1305 refuse a forged tag in the same time wherever it differs") {
-    r := CtRand{s: U64{11}}
+    ^r: CtRand{s: U64{11}}
     key: ct_bytes(r, 32)
     iv: ct_bytes(r, 12)
     aad: ct_bytes(r, 13)
@@ -4040,7 +4040,7 @@ ct_aes: fn(key: [U8], block: [U8]) -> Int Never! {
 }
 
 #Test("dudect: HMAC-SHA-256 and HMAC-SHA-384 take as long on fixed and random keys") {
-    r := CtRand{s: U64{13}}
+    ^r: CtRand{s: U64{13}}
     data: ct_bytes(r, 64)
     other: data.copy()
     ct_dudect("HMAC-SHA-256", 4000, 4, ct_bytes(r, 32), fn(x) { Int{hashes.hmac(hashes.Md.SHA256, x, data)[0]} })
@@ -4050,7 +4050,7 @@ ct_aes: fn(key: [U8], block: [U8]) -> Int Never! {
 /// A private key for curve `id` from `bytes`: the top bit cleared, so it is
 /// below the group order, and the low bit set, so it is not zero.
 ct_scalar: fn(bytes: [U8]) -> [U8] Never! {
-    out := bytes.copy()
+    ^out: bytes.copy()
     out[0] = out[0] & U8{0x7f}
     out[out.len() - 1] = out[out.len() - 1] | U8{1}
     out
@@ -4063,8 +4063,8 @@ ct_generator: fn(id: ecp.GroupID, size: Int) -> [U8] {
 }
 
 #Test("dudect: X25519, P-256 and P-384 ECDH take as long on fixed and random private keys") {
-    r := CtRand{s: U64{17}}
-    base := [U8]{9}
+    ^r: CtRand{s: U64{17}}
+    ^base: [U8]{9}
     loop _ in 1..<32 -> base.push(U8{0})
     ct_dudect("X25519 ECDH", 600, 1, ct_bytes(r, 32), fn(x) { ct_opened(vec_ecdh(.Curve25519, x, base)) })
     p256: ct_generator(.Secp256r1, 32)
@@ -4076,13 +4076,13 @@ ct_generator: fn(id: ecp.GroupID, size: Int) -> [U8] {
 ct_ecdsa_sign: fn(id: ecp.GroupID, key: [U8], hash: [U8]) -> Int {
     grp: ecp.group_load(id) ?? return 0
     d: bn.read_binary(ct_scalar(key)) ?? return 0
-    rng := vec_rng()
+    ^rng: vec_rng()
     sig: ecdsa.ecdsa_sign(grp, d, hash, rng) ?? return 0
     ct_opened(Val(bn.write_binary(sig.s, key.len()) ?? return 0))
 }
 
 #Test("dudect: ECDSA signing on P-256 and P-384 takes as long on fixed and random private keys") {
-    r := CtRand{s: U64{19}}
+    ^r: CtRand{s: U64{19}}
     h256: ct_bytes(r, 32)
     ct_dudect("P-256 ECDSA sign", 400, 1, ct_bytes(r, 32), fn(x) { ct_ecdsa_sign(.Secp256r1, x, h256) })
     h384: ct_bytes(r, 48)
@@ -4090,8 +4090,8 @@ ct_ecdsa_sign: fn(id: ecp.GroupID, key: [U8], hash: [U8]) -> Int {
 }
 
 ct_rsa_sign: fn(der: [U8], hash: [U8]) -> Int {
-    rng := vec_rng()
-    ctx := pkparse.pk_parse_key(der, None, rng) ?? return 0
+    ^rng: vec_rng()
+    ^ctx: pkparse.pk_parse_key(der, None, rng) ?? return 0
     sig: pk.pk_sign(ctx, Val(hashes.Md.SHA256), hash, 1024, rng) ?? return 0
     sig.len()
 }
@@ -4099,14 +4099,14 @@ ct_rsa_sign: fn(der: [U8], hash: [U8]) -> Int {
 #Test("dudect: RSA-2048 PKCS#1 v1.5 signing takes as long on fixed and random hashes") {
     groups: vec_items(vec_wycheproof("rsa_pkcs1_2048_sig_gen"), "testGroups")
     der: vec_wy_hex(groups[0], "privateKeyPkcs8")
-    r := CtRand{s: U64{23}}
+    ^r: CtRand{s: U64{23}}
     ct_dudect("RSA-2048 sign", 200, 1, ct_bytes(r, 32), fn(x) { ct_rsa_sign(der, x) })
 }
 
 /// `bytes` as base64 text, one digit per byte.
 ct_base64_text: fn(bytes: [U8]) -> [U8] Never! {
     digits: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in bytes -> out.push(digits[Int{b & U8{63}}])
     out
 }
@@ -4117,13 +4117,13 @@ ct_base64_decoded: fn(bytes: [U8]) -> Int Never! {
 }
 
 #Test("dudect: PEM's base64 decoding of key text takes as long on fixed and random digits") {
-    r := CtRand{s: U64{29}}
+    ^r: CtRand{s: U64{29}}
     ct_dudect("PEM base64 decode", 5000, 8, ct_bytes(r, 64), fn(x) { ct_base64_decoded(x) })
 }
 
 #Unsafe("`seed` is a timing run's test key, used for that run only")
 vec_expert_ed25519_sign: fn(seed: [U8], msg: [U8]) -> Int {
-    n := 0
+    ^n: 0
     #Unsafe("a timing run's test key, used for that run only") {
         sig: core.crypto.expert.ed25519_sign(seed, msg) ?? return 0
         n = sig.bytes.len()
@@ -4132,8 +4132,8 @@ vec_expert_ed25519_sign: fn(seed: [U8], msg: [U8]) -> Int {
 }
 
 #Test("dudect: core.crypto.expert's X25519, Ed25519 signing and AEAD tag checks take as long on fixed and random secrets") {
-    r := CtRand{s: U64{31}}
-    base := [U8]{9}
+    ^r: CtRand{s: U64{31}}
+    ^base: [U8]{9}
     loop _ in 1..<32 -> base.push(U8{0})
     msg: ct_bytes(r, 64)
     key: ct_bytes(r, 32)
@@ -4196,15 +4196,15 @@ ct_pbkdf2: fn(password: [U8], salt: [U8]) -> Int {
 // section 3.4), so its time depends on the password; the emission check
 // lists it as expected.
 #Test("dudect: core.crypto's envelope open, key unwrap, X25519, Ed25519 signing, digests, hex and PBKDF2 take as long on fixed and random secrets") {
-    r := CtRand{s: U64{53}}
+    ^r: CtRand{s: U64{53}}
     identity: X25519SecretKey.from_bytes(ct_bytes(r, 32)) ?? panic("identity")
     holder: X25519SecretKey.from_bytes(ct_bytes(r, 32)) ?? panic("holder")
     holder_public: core.crypto.x25519_public(holder) ?? panic("holder public key")
     // A one-byte input picks the envelope (of a random plaintext) and the
     // wrapped key (a random one): the fixed class always gets the same one,
     // the random class any of 32.
-    boxes := [Sealed]{}
-    wraps := [WrappedKey]{}
+    ^boxes: [Sealed]{}
+    ^wraps: [WrappedKey]{}
     loop _ in 0..<32 {
         boxes.push(core.crypto.privateencrypt(identity, ct_bytes(r, 64)) ?? panic("envelope seal"))
         wraps.push(core.crypto.wrap(Secret.from_bytes(ct_bytes(r, 32)), holder_public) ?? panic("wrap"))
@@ -4240,14 +4240,14 @@ ct_rsa_kx_sealed: fn(key: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, r: ^CtRand, kind
     if kind == 1 || kind == 2 {
         // The block's private-key image is no EME-PKCS1-v1_5 encoding: the
         // raw public operation turns it into the ciphertext.
-        block := ct_bytes(r, key.len)
+        ^block: ct_bytes(r, key.len)
         loop i in 0..<block.len() -> block[i] = block[i] | U8{1}
         block[0] = if kind == 1 -> U8{1} else -> U8{0}
         block[1] = U8{2}
         if kind == 1 -> block[key.len - 49] = U8{0}
         return rsa.rsa_public(key, block) ?? panic("raw public operation: {err}")
     }
-    pms := ct_bytes(r, if kind == 3 -> 47 else -> 48)
+    ^pms: ct_bytes(r, if kind == 3 -> 47 else -> 48)
     pms[0] = U8{3}
     pms[1] = if kind == 4 -> U8{2} else -> U8{3}
     rsa.rsa_pkcs1_encrypt(key, rng, pms) ?? panic("encrypt: {err}")
@@ -4257,13 +4257,13 @@ ct_rsa_kx_sealed: fn(key: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, r: ^CtRand, kind
 /// body is `sealed`, for srv12.ssl_srv12_parse_encrypted_pms (RFC 5246
 /// section 7.4.7.1).
 ct_rsa_kx_server: fn(key: rsa.RSAContext, sealed: [U8]) -> ssldefs.SSLContext {
-    own := pk.pk_new()
+    ^own: pk.pk_new()
     pk.pk_setup(own, pk.pk_info_from_type(.RSA)) ?? panic("own key: {err}")
     own.rsa = rsa.rsa_copy(key)
-    crt := x509crt.x509_crt_new()
+    ^crt: x509crt.x509_crt_new()
     pk.pk_setup(crt.pk, pk.pk_info_from_type(.RSA)) ?? panic("certificate key: {err}")
     crt.pk.rsa = rsa.rsa_copy(key)
-    ssl := ssldefs.SSLContext{}
+    ^ssl: ssldefs.SSLContext{}
     ssl.conf.key_cert.push(ssldefs.SSLKeyCert{cert: [x509crt.X509Crt]{crt}, key: own})
     ssl.in_buf = ssldefs.ssl_zeros(2 + sealed.len())
     ssldefs.ssl_put_u16(ssl.in_buf, 0, sealed.len())
@@ -4288,18 +4288,18 @@ ct_rsa_kx_premaster: fn(ssl: ^ssldefs.SSLContext, rng: ^drbg.HMACDrbg) -> [U8] {
 // half each kind of bad one (bad first byte, no separator, a 47-byte
 // message, another version).
 #Test("dudect: a TLS 1.2 server takes as long on a good RSA premaster as on each kind of bad padding, and replaces a bad one") {
-    r := CtRand{s: U64{59}}
-    key := ct_rsa_key()
-    rng := vec_rng()
-    servers := [ssldefs.SSLContext]{}
+    ^r: CtRand{s: U64{59}}
+    ^key: ct_rsa_key()
+    ^rng: vec_rng()
+    ^servers: [ssldefs.SSLContext]{}
     loop i in 0..<32 {
         kind: if i %% 2 == 0 -> 0 else -> 1 + (i >> 1) %% 4
         sealed: ct_rsa_kx_sealed(key, rng, r, kind)
-        ssl := ct_rsa_kx_server(key, sealed)
+        ^ssl: ct_rsa_kx_server(key, sealed)
         // The good premaster comes out as sent, on every run; a bad one is
         // replaced by a new random one each time.
         if kind == 0 {
-            clear := rsa.rsa_pkcs1_decrypt(key, rng, sealed, 48) ?? panic("decrypt: {err}")
+            ^clear: rsa.rsa_pkcs1_decrypt(key, rng, sealed, 48) ?? panic("decrypt: {err}")
             assert_eq(ct_rsa_kx_premaster(ssl, rng), clear)
             assert_eq(ct_rsa_kx_premaster(ssl, rng), clear)
         } else {
@@ -4317,7 +4317,7 @@ ct_rsa_kx_premaster: fn(ssl: ^ssldefs.SSLContext, rng: ^drbg.HMACDrbg) -> [U8] {
 /// nonzero padding, 0, version 3.3, 46 drawn bytes); 1 a first byte of 1;
 /// 2 no zero after the padding; 3 a 47-byte message; 4 version 3.2.
 ct_rsa_kx_block: fn(r: ^CtRand, len: Int, kind: Int) -> [U8] {
-    block := ct_bytes(r, len)
+    ^block: ct_bytes(r, len)
     loop i in 0..<len -> block[i] = block[i] | U8{1}
     block[0] = if kind == 1 -> U8{1} else -> U8{0}
     block[1] = U8{2}
@@ -4335,8 +4335,8 @@ ct_rsa_kx_block: fn(r: ^CtRand, len: Int, kind: Int) -> [U8] {
 /// the premaster's choice (srv12.ssl_srv12_take_premaster). Gives a byte
 /// of the premaster taken.
 ct_rsa_kx_after_private: fn<R: RNG>(ssl: ^ssldefs.SSLContext, block: [U8], rng: ^R) -> Int {
-    buf := block.copy()
-    fixed := rsa.v15_fixed_of_block(buf, 48)
+    ^buf: block.copy()
+    ^fixed: rsa.v15_fixed_of_block(buf, 48)
     srv12.ssl_srv12_take_premaster(ssl, fixed.out, fixed.bad, 0, rng) ?? panic("premaster: {err}")
     Int{ssl.handshake.premaster[2]}
 }
@@ -4371,12 +4371,12 @@ ct_rsa_kx_block_turn: fn(blocks: ^CtKxBlocks, ssl: ^ssldefs.SSLContext, x: [U8],
 // and the unpadding counted in Int words, this gave t = -25.4, -20.2 and
 // -17.1; now it gives -1.5, -2.1 and -3.0. The bound is 4.5.
 #Test("dudect: after its private operation a TLS 1.2 server takes as long on a good RSA premaster block as on each kind of bad one") {
-    r := CtRand{s: U64{61}}
-    rng := vec_rng()
-    key := ct_rsa_key()
+    ^r: CtRand{s: U64{61}}
+    ^rng: vec_rng()
+    ^key: ct_rsa_key()
     sealed: ct_rsa_kx_sealed(key, rng, r, 0)
-    ssl := ct_rsa_kx_server(key, sealed)
-    blocks := CtKxBlocks{good: [[U8]]{}, bad: [[U8]]{}, turn: 0}
+    ^ssl: ct_rsa_kx_server(key, sealed)
+    ^blocks: CtKxBlocks{good: [[U8]]{}, bad: [[U8]]{}, turn: 0}
     loop i in 0..<16 {
         blocks.good.push(ct_rsa_kx_block(r, key.len, 0))
         blocks.bad.push(ct_rsa_kx_block(r, key.len, 1 + i %% 4))
@@ -4386,12 +4386,12 @@ ct_rsa_kx_block_turn: fn(blocks: ^CtKxBlocks, ssl: ^ssldefs.SSLContext, x: [U8],
         kept: ct_rsa_kx_after_private(ssl, good, rng)
         assert_eq(kept, Int{good[key.len - 46]})
         assert_eq(ssl.handshake.premaster, ssldefs.ssl_bytes_of(good, key.len - 48, 48))
-        _ := ct_rsa_kx_after_private(ssl, blocks.bad[i], rng)
+        ^_: ct_rsa_kx_after_private(ssl, blocks.bad[i], rng)
         first: ssl.handshake.premaster.copy()
-        _ := ct_rsa_kx_after_private(ssl, blocks.bad[i], rng)
+        ^_: ct_rsa_kx_after_private(ssl, blocks.bad[i], rng)
         assert(ssl.handshake.premaster != first)
     }
-    fast := CtRand{s: U64{97}}
+    ^fast: CtRand{s: U64{97}}
     _: ct_dudect_within("TLS 1.2 RSA premaster after the private operation, good against bad padding", Float{9} / Float{2}, 20000, 1, [U8]{255, 255}, fn(x) { ct_rsa_kx_block_turn(blocks, ssl, x, fast) })
 }
 
@@ -4402,7 +4402,7 @@ ct_rsa_kx_block_turn: fn(blocks: ^CtKxBlocks, ssl: ^ssldefs.SSLContext, x: [U8],
 /// the 0x01; 4 a good padding with a 40-byte message, longer than the 32
 /// bytes the output holds.
 ct_oaep_db: fn(r: ^CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
-    db := [U8]{}
+    ^db: [U8]{}
     lhash: hashes.hash(.SHA256, label)
     loop i in 0..<32 -> db.push(lhash[i])
     if kind == 2 -> db[31] = db[31] ~ U8{1}
@@ -4419,7 +4419,7 @@ ct_oaep_db: fn(r: ^CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
 /// ct_oaep_db, `len` bytes; kind 1 has a first byte of 1.
 ct_oaep_block: fn(r: ^CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
     seed: ct_bytes(r, 32)
-    block := [U8]{U8{0}}
+    ^block: [U8]{U8{0}}
     if kind == 1 -> block[0] = U8{1}
     loop b in seed -> block.push(b)
     loop b in ct_oaep_db(r, len - 33, label, kind) -> block.push(b)
@@ -4434,7 +4434,7 @@ ct_oaep_block: fn(r: ^CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
 /// label's hash, the unmasking and the decoding, with its verdict in
 /// constant-time words. Gives the first byte out.
 ct_oaep_after_private: fn(block: [U8], label: [U8]) -> Int {
-    buf := block.copy()
+    ^buf: block.copy()
     lhash: hashes.hash(.SHA256, label)
     decoded: rsa.rsaes_oaep_unpadding(buf, .SHA256, lhash, 32)
     Int{decoded.out[0]}
@@ -4475,12 +4475,12 @@ ct_oaep_block_turn: fn(blocks: ^CtOaepBlocks, x: [U8]) -> Int {
 // as soon as it had one and copied out a message of the length it found,
 // this gave t = -47.6; now it gives -0.9, -1.3 and 0.8. The bound is 4.5.
 #Test("dudect: after its private operation an RSAES-OAEP decryption takes as long on a good block as on each kind of bad one") {
-    r := CtRand{s: U64{67}}
-    key := ct_rsa_key()
-    rng := vec_rng()
+    ^r: CtRand{s: U64{67}}
+    ^key: ct_rsa_key()
+    ^rng: vec_rng()
     rsa.rsa_set_padding(key, .PKCSV21, Val(hashes.Md.SHA256))
     label: "jet oaep".bytes()
-    blocks := CtOaepBlocks{good: [[U8]]{}, bad: [[U8]]{}, turn: 0, label: label.copy()}
+    ^blocks: CtOaepBlocks{good: [[U8]]{}, bad: [[U8]]{}, turn: 0, label: label.copy()}
     loop i in 0..<16 {
         blocks.good.push(ct_oaep_block(r, key.len, label, 0))
         blocks.bad.push(ct_oaep_block(r, key.len, label, 1 + i %% 4))
@@ -4509,7 +4509,7 @@ ct_oaep_block_turn: fn(blocks: ^CtOaepBlocks, x: [U8]) -> Int {
 
 /// The RSA-1024 key of the mbedtls rsa.c self-test (RSA.jet), completed.
 ct_rsa_key: fn() -> rsa.RSAContext {
-    ctx := rsa.rsa_new()
+    ^ctx: rsa.rsa_new()
     n: bn.read_string(16, "9292758453063D803DD603D5E777D7888ED1D5BF35786190FA2F23EBC0848AEADDA92CA6C3D80B32C4D109BE0F36D6AE7130B9CED7ACDF54CFC7555AC14EEBAB93A89813FBF3C4F8066D2D800F7C38A81AE31942917403FF4946B0A83D3D3E05EE57C6F5F5606FB5D4BC6CD34EE0801A5E94BB77B07507233A0BC7BAC8F90F79") ?? panic("N")
     p: bn.read_string(16, "C36D0EB7FCD285223CFB5AABA5BDA3D82C01CAD19EA484A87EA4377637E75500FCB2005C5C7DD6EC4AC023CDA285D796C3D9E75E1EFC42488BB4F1D13AC30A57") ?? panic("P")
     q: bn.read_string(16, "C000DF51A7C77AE8D7C7370C1FF55B69E211C2B9E5DB1ED0BF61D0D9899620F4910E4168387E3C30AA1E00C339A795088452DD96A9A5EA5D9DCA68DA636032AF") ?? panic("Q")
@@ -4528,7 +4528,7 @@ ct_rsa_key: fn() -> rsa.RSAContext {
 /// public key (RFC 5915), so every key of the class has one layout and the
 /// parse derives the public point.
 ct_sec1_der: fn(d: [U8]) -> [U8] Never! {
-    out := [U8]{0x30, 0x31, 0x02, 0x01, 0x01, 0x04, 0x20}
+    ^out: [U8]{0x30, 0x31, 0x02, 0x01, 0x01, 0x04, 0x20}
     loop b in d -> out.push(b)
     curve: [U8]{0xA0, 0x0A, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07}
     loop b in curve -> out.push(b)
@@ -4538,14 +4538,14 @@ ct_sec1_der: fn(d: [U8]) -> [U8] Never! {
 /// The same P-256 key as a PKCS#8 PrivateKeyInfo (RFC 5208, RFC 5480) whose
 /// SEC1 body leaves the curve to the algorithm identifier.
 ct_pkcs8_p256_der: fn(d: [U8]) -> [U8] Never! {
-    out := [U8]{0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x04, 0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20}
+    ^out: [U8]{0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x04, 0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20}
     loop b in d -> out.push(b)
     out
 }
 
 /// An X25519 private key as a PKCS#8 PrivateKeyInfo (RFC 8410 section 7).
 ct_pkcs8_x25519_der: fn(k: [U8]) -> [U8] Never! {
-    out := [U8]{0x30, 0x2E, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x6E, 0x04, 0x22, 0x04, 0x20}
+    ^out: [U8]{0x30, 0x2E, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x6E, 0x04, 0x22, 0x04, 0x20}
     loop b in k -> out.push(b)
     out
 }
@@ -4556,7 +4556,7 @@ ct_pkcs8_x25519_der: fn(k: [U8]) -> [U8] Never! {
 ct_pkcs8_rsa_der: fn(pkcs1: [U8]) -> [U8] Never! {
     body: pkcs1.len()
     total: body + 22
-    out := [U8]{0x30, 0x82, U8{total >> 8}, U8{total & 255}, 0x02, 0x01, 0x00, 0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x05, 0x00, 0x04, 0x82, U8{body >> 8}, U8{body & 255}}
+    ^out: [U8]{0x30, 0x82, U8{total >> 8}, U8{total & 255}, 0x02, 0x01, 0x00, 0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x05, 0x00, 0x04, 0x82, U8{body >> 8}, U8{body & 255}}
     loop b in pkcs1 -> out.push(b)
     out
 }
@@ -4564,15 +4564,15 @@ ct_pkcs8_rsa_der: fn(pkcs1: [U8]) -> [U8] Never! {
 /// The bit length of the key pk_parse_key reads from `key`, 0 when it
 /// refuses it.
 ct_parsed_bits: fn(key: [U8], rng: ^drbg.HMACDrbg) -> Int {
-    ctx := pkparse.pk_parse_key(key, None, rng) ?? return 0
+    ^ctx: pkparse.pk_parse_key(key, None, rng) ?? return 0
     pk.pk_get_bitlen(ctx)
 }
 
 /// The PKCS#1 RSAPrivateKey of ct_rsa_key, written from a key of its own:
 /// the layout the emission check's RSA key parses draw their secrets into.
 ct_rsa_key_der: fn() -> [U8] {
-    buf := cipher.zero_bytes(2048)
-    at := buf.len()
+    ^buf: cipher.zero_bytes(2048)
+    ^at: buf.len()
     len: rsa.rsa_write_key(ct_rsa_key(), buf, at, 0) ?? panic("RSAPrivateKey: {err}")
     cipher.bytes_of(buf, at, len)
 }
@@ -4583,11 +4583,11 @@ ct_rsa_key_der: fn() -> [U8] {
 /// checks the private values only for being positive and p and q for being
 /// odd (rsa_check_context), so the result parses, at the original's layout.
 ct_rsa_redrawn: fn(r: ^CtRand, der: [U8]) -> [U8] {
-    out := der.copy()
+    ^out: der.copy()
     end: out.len()
-    p := 0
-    _ := asn1.get_tag(out, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? panic("RSAPrivateKey: {err}")
-    _ := asn1.get_int(out, p, end) ?? panic("version: {err}")
+    ^p: 0
+    ^_: asn1.get_tag(out, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? panic("RSAPrivateKey: {err}")
+    ^_: asn1.get_int(out, p, end) ?? panic("version: {err}")
     loop part in 0..<8 {
         len: asn1.get_tag(out, p, end, asn1.ASN1_INTEGER) ?? panic("INTEGER {part}: {err}")
         // n and e (parts 0 and 1) are public; p and q are parts 3 and 4.
@@ -4601,9 +4601,9 @@ ct_rsa_redrawn: fn(r: ^CtRand, der: [U8]) -> [U8] {
 /// r: a leading zero byte and the top set bit stay where they are; `odd`
 /// sets the lowest bit.
 ct_redraw_integer: fn(r: ^CtRand, buf: ^[U8], at: Int, len: Int, odd: Bool) {
-    lead := at
+    ^lead: at
     if buf[lead] == (U8{0}) -> lead += 1
-    top := U8{0x80}
+    ^top: U8{0x80}
     loop top & buf[lead] == (U8{0}) -> top = top >> 1
     fresh: ct_bytes(r, at + len - lead)
     loop i in 0..<fresh.len() -> buf[lead + i] = fresh[i]
@@ -4618,9 +4618,9 @@ ct_redraw_integer: fn(r: ^CtRand, buf: ^[U8], at: Int, len: Int, odd: Bool) {
 // are ct_entry's parameters, which a build at O1 and O2 keeps where it drops
 // a test's locals.
 #Test("The secret-dependent primitives each run once on test secrets (the emission check's entry)") {
-    r := CtRand{s: U64{37}}
-    ctx := ct_rsa_key()
-    rng := vec_rng()
+    ^r: CtRand{s: U64{37}}
+    ^ctx: ct_rsa_key()
+    ^rng: vec_rng()
     rsa_der: ct_rsa_key_der()
     #Unsafe("test keys and nonces, each used for this run only") { ct_entry(r, ctx, rng, rsa_der) }
 }
@@ -4645,7 +4645,7 @@ ct_entry: fn(r: ^CtRand, ctx: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, rsa_der: [U8
     assert_eq(ct_opened(vec_chacha_open(key, iv, aad, chacha)), 64)
     assert_eq(hashes.hmac(hashes.Md.SHA256, key, plain).len(), 32)
     assert_eq(hashes.hmac(hashes.Md.SHA384, ct_bytes(r, 48), plain).len(), 48)
-    base := [U8]{9}
+    ^base: [U8]{9}
     loop _ in 1..<32 -> base.push(U8{0})
     assert_eq(ct_opened(vec_ecdh(.Curve25519, ct_bytes(r, 32), base)), 32)
     assert_eq(ct_opened(vec_ecdh(.Secp256r1, ct_scalar(ct_bytes(r, 32)), ct_generator(.Secp256r1, 32))), 32)
@@ -4678,12 +4678,12 @@ ct_entry: fn(r: ^CtRand, ctx: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, rsa_der: [U8
     // its tag forged, and a TLS 1.2 AES-128-CBC-SHA256 record, MAC then
     // encrypt, sealed and opened (ssl_decrypt_buf's Lucky Thirteen path).
     keys: ct_record_keys(r)
-    layer := ct_record_layer(keys)
+    ^layer: ct_record_layer(keys)
     sealed13: ct_record_seal(layer, ct_bytes(r, 64), 0)
     real: ct_take(sealed13, sealed13.len() - 16, 16)
     assert_eq(ct_record_open(keys, sealed13, real), 64)
     assert(ct_record_open(keys, sealed13, ct_last_flipped(real)) < 0)
-    cbc := ct_cbc_layer(ct_bytes(r, 48), ct_bytes(r, 64))
+    ^cbc: ct_cbc_layer(ct_bytes(r, 48), ct_bytes(r, 64))
     sealed12: ct_record_seal(cbc, ct_bytes(r, 64), 16)
     assert_eq(ct_cbc_open(cbc.tpool[1], sealed12, [U8]{}), 64)
     // RSA-PSS signing, a TLS 1.3 CertificateVerify's.
@@ -4693,15 +4693,15 @@ ct_entry: fn(r: ^CtRand, ctx: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, rsa_der: [U8
     // server's decryption with implicit rejection of a good premaster and
     // of a bad padding.
     kx_good_sealed: ct_rsa_kx_sealed(ctx, rng, r, 0)
-    kx_good := ct_rsa_kx_server(ctx, kx_good_sealed)
+    ^kx_good: ct_rsa_kx_server(ctx, kx_good_sealed)
     assert_eq(ct_rsa_kx_premaster(kx_good, rng).len(), 48)
     kx_bad_sealed: ct_rsa_kx_sealed(ctx, rng, r, 1)
-    kx_bad := ct_rsa_kx_server(ctx, kx_bad_sealed)
+    ^kx_bad: ct_rsa_kx_server(ctx, kx_bad_sealed)
     assert_eq(ct_rsa_kx_premaster(kx_bad, rng).len(), 48)
     // An RSAES-OAEP decryption of a good block and of a bad one: after the
     // private operation only the decoding's verdict shows.
     oaep_label: "jet oaep".bytes()
-    oaep := rsa.rsa_copy(ctx)
+    ^oaep: rsa.rsa_copy(ctx)
     rsa.rsa_set_padding(oaep, .PKCSV21, Val(hashes.Md.SHA256))
     oaep_good_sealed: ct_oaep_sealed(oaep, r, oaep_label, 0)
     oaep_good: rsa.rsa_rsaes_oaep_decrypt(oaep, rng, oaep_label, oaep_good_sealed, 32) ?? panic("OAEP decrypt: {err}")
@@ -4749,7 +4749,7 @@ ct_entry: fn(r: ^CtRand, ctx: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, rsa_der: [U8
     assert_eq(core.crypto.sha3_384(plain).bytes().len(), 96)
     assert_eq(core.crypto.sha3_512(plain).bytes().len(), 128)
     assert_eq(core.crypto.blake3(plain).hex().bytes().len(), 64)
-    hasher := Hasher.new()
+    ^hasher: Hasher.new()
     hasher.update(plain)
     assert_eq(hasher.digest().bytes().len(), 64)
     password: Secret.from_bytes(ct_bytes(r, 16))
@@ -4775,15 +4775,15 @@ ct_entry: fn(r: ^CtRand, ctx: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, rsa_der: [U8
 ct_ecdsa_nonce: fn(id: ecp.GroupID, key: [U8], hash: [U8], seed: [U8]) -> Int {
     grp: ecp.group_load(id) ?? return 0
     d: bn.read_binary(ct_scalar(key)) ?? return 0
-    nonces := drbg.hmac_drbg_new(.SHA256)
+    ^nonces: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(nonces, seed)
-    blind := vec_rng()
+    ^blind: vec_rng()
     sig: ecdsa.ecdsa_sign_blinded(grp, d, hash, nonces, blind) ?? return 0
     ct_opened(Val(bn.write_binary(sig.s, key.len()) ?? return 0))
 }
 
 #Test("dudect: ECDSA signing on P-256 and P-384 takes as long on fixed and random nonces") {
-    r := CtRand{s: U64{43}}
+    ^r: CtRand{s: U64{43}}
     key256: ct_bytes(r, 32)
     h256: ct_bytes(r, 32)
     assert_eq(ct_ecdsa_nonce(.Secp256r1, key256, h256, ct_bytes(r, 32)), 32)
@@ -4797,8 +4797,8 @@ ct_ecdsa_nonce: fn(id: ecp.GroupID, key: [U8], hash: [U8], seed: [U8]) -> Int {
 /// `count` uncompressed points of curve `id`, each the public key of a fresh
 /// private key: the peer points of the variable-base ECDH runs.
 ct_points: fn(id: ecp.GroupID, size: Int, count: Int) -> [[U8]] {
-    rng := vec_rng()
-    out := [[U8]]{}
+    ^rng: vec_rng()
+    ^out: [[U8]]{}
     loop _ in 0..<count {
         pair: ecp.gen_key(id, rng) ?? panic("gen_key {id}: {err}")
         out.push(ecp.point_write_binary(pair.grp, pair.q, .Uncompressed, 1 + 2 * size) ?? panic("point {id}: {err}"))
@@ -4807,7 +4807,7 @@ ct_points: fn(id: ecp.GroupID, size: Int, count: Int) -> [[U8]] {
 }
 
 #Test("dudect: X25519, P-256 and P-384 ECDH take as long on fixed and random peer points") {
-    r := CtRand{s: U64{47}}
+    ^r: CtRand{s: U64{47}}
     x25519_key: ct_bytes(r, 32)
     assert_eq(ct_opened(vec_ecdh(.Curve25519, x25519_key, ct_bytes(r, 32))), 32)
     ct_dudect("X25519 ECDH, peer point", 600, 1, ct_bytes(r, 32), fn(x) { ct_opened(vec_ecdh(.Curve25519, x25519_key, x)) })
@@ -4824,8 +4824,8 @@ ct_points: fn(id: ecp.GroupID, size: Int, count: Int) -> [[U8]] {
 }
 
 ct_rsa_pss_sign: fn(der: [U8], hash: [U8]) -> Int {
-    rng := vec_rng()
-    ctx := pkparse.pk_parse_key(der, None, rng) ?? return 0
+    ^rng: vec_rng()
+    ^ctx: pkparse.pk_parse_key(der, None, rng) ?? return 0
     sig: pk.pk_sign_ext(.RSASSAPSS, ctx, Val(hashes.Md.SHA256), hash, 1024, rng) ?? return 0
     sig.len()
 }
@@ -4836,10 +4836,10 @@ ct_rsa_pss_sign: fn(der: [U8], hash: [U8]) -> Int {
 /// shape sets its signing time (the CRT halves run at the primes' sizes, the
 /// fault check at e's), so the key tests vary the secret values at one shape.
 ct_rsa_keys: fn() -[FS, Env, Net, Time.Wait]> [[U8]] {
-    out := [[U8]]{}
+    ^out: [[U8]]{}
     loop g in vec_items(vec_wycheproof("rsa_pkcs1_2048_sig_gen"), "testGroups") {
         der: vec_wy_hex(g, "privateKeyPkcs8")
-        ctx := pkparse.pk_parse_key(der, None, vec_rng()) ?? panic("an RSA-2048 test key parses")
+        ^ctx: pkparse.pk_parse_key(der, None, vec_rng()) ?? panic("an RSA-2048 test key parses")
         e: rsa.rsa_export(ctx.rsa, .E) ?? panic("E")
         p: rsa.rsa_export(ctx.rsa, .P) ?? panic("P")
         q: rsa.rsa_export(ctx.rsa, .Q) ?? panic("Q")
@@ -4855,7 +4855,7 @@ ct_rsa_keys: fn() -[FS, Env, Net, Time.Wait]> [[U8]] {
     assert_eq(keys.len(), 5)
     pss_keys: keys.copy()
     pss_hash_keys: keys.copy()
-    r := CtRand{s: U64{53}}
+    ^r: CtRand{s: U64{53}}
     // A one-byte input picks the key: the fixed class always gets the same
     // one, the random class any of the five.
     hash: ct_bytes(r, 32)
@@ -4873,8 +4873,8 @@ ct_rsa_keys: fn() -[FS, Env, Net, Time.Wait]> [[U8]] {
 /// run wherever the host leaf does not.
 ct_aes_portable: fn(key: [U8], blocks: [U8]) -> [U8] Never! {
     k: cipher.aes_key(key, false) ?? return [U8]{}
-    iv := cipher.zero_bytes(16)
-    out := [U8]{}
+    ^iv: cipher.zero_bytes(16)
+    ^out: [U8]{}
     cipher.blocks_portable(k, cipher.ECB_ENC, iv, blocks, 0, blocks.len() /% 16, out)
     out
 }
@@ -4883,7 +4883,7 @@ ct_aes_portable: fn(key: [U8], blocks: [U8]) -> [U8] Never! {
 /// subkey of the AES key `key`.
 ct_ghash_portable: fn(key: [U8], data: [U8]) -> [U8] Never! {
     k: aead.gcm_key(cipher.aes_key(key, false) ?? return [U8]{})
-    y := cipher.zero_bytes(16)
+    ^y: cipher.zero_bytes(16)
     aead.ghash_portable(k.g, y, data, 0, data.len() /% 16)
     y
 }
@@ -4893,7 +4893,7 @@ ct_ghash_portable: fn(key: [U8], data: [U8]) -> [U8] Never! {
     // zero key's ciphertext block, then its length block).
     assert_eq(ct_aes_portable(vec_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), vec_hex("00112233445566778899aabbccddeeff")), vec_hex("8ea2b7ca516745bfeafc49904b496089"))
     assert_eq(ct_ghash_portable(cipher.zero_bytes(16), vec_hex("0388dace60b6a392f328c2b971b2fe7800000000000000000000000000000080")), vec_hex("f38cbb1ad69223dcc3457ae5b6b0f885"))
-    r := CtRand{s: U64{67}}
+    ^r: CtRand{s: U64{67}}
     blocks: ct_bytes(r, 64)
     aes_key: ct_bytes(r, 32)
     ghash_data: ct_bytes(r, 64)
@@ -4905,7 +4905,7 @@ ct_ghash_portable: fn(key: [U8], data: [U8]) -> [U8] Never! {
 }
 
 #Test("dudect: AES-GCM and ChaCha20-Poly1305 key set-up and sealing take as long on fixed and random keys and plaintexts") {
-    r := CtRand{s: U64{71}}
+    ^r: CtRand{s: U64{71}}
     iv: ct_bytes(r, 12)
     aad: ct_bytes(r, 13)
     plain: ct_bytes(r, 64)
@@ -4944,7 +4944,7 @@ ct_tls13_schedule: fn(early: [U8], shared: [U8], transcript: [U8]) -> [U8] {
     ecdhe: vec_hex("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d")
     hello: vec_hex("860c06edc07858ee8e78f0e7428c58edd6b43f2ca3e6e95f02ed063cf0e1cad8")
     assert_eq(ct_tls13_schedule(early, ecdhe, hello), vec_hex("dbfaa693d1762c5b666af5d950258d01"))
-    r := CtRand{s: U64{73}}
+    ^r: CtRand{s: U64{73}}
     salt: ct_bytes(r, 32)
     info: ct_bytes(r, 16)
     salt2: salt.copy()
@@ -4965,14 +4965,14 @@ ct_tls13_schedule: fn(early: [U8], shared: [U8], transcript: [U8]) -> [U8] {
 
 /// HMAC_DRBG seeded with `seed`, and the 32 bytes it generates first.
 ct_drbg: fn(seed: [U8]) -> [U8] {
-    g := drbg.hmac_drbg_new(.SHA256)
+    ^g: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(g, seed)
-    none := ecp.NoRNG{}
+    ^none: ecp.NoRNG{}
     drbg.hmac_drbg_random(g, none, 32) ?? [U8]{}
 }
 
 #Test("dudect: HMAC_DRBG seeding and generation take as long on fixed and random seeds") {
-    r := CtRand{s: U64{79}}
+    ^r: CtRand{s: U64{79}}
     assert_eq(ct_drbg(ct_bytes(r, 48)).len(), 32)
     ct_dudect("HMAC_DRBG-SHA-256", 3000, 2, ct_bytes(r, 48), fn(x) { Int{ct_drbg(x)[0]} })
 }
@@ -4985,7 +4985,7 @@ ct_record_keys: fn(r: ^CtRand) -> keys13.SSLKeySet Never! {
 /// A TLS 1.3 record layer under the AES-128-GCM traffic keys `keys`:
 /// transform 0 is the server's, which seals, and 1 the client's, which opens.
 ct_record_layer: fn(keys: keys13.SSLKeySet) -> ssldefs.SSLContext {
-    ssl := ssldefs.SSLContext{}
+    ^ssl: ssldefs.SSLContext{}
     server: ssldefs.ssl_transform_alloc(ssl)
     keys13.ssl_tls13_populate_transform(ssl, server, ssldefs.SSL_IS_SERVER, suites.TLS1_3_AES_128_GCM_SHA256, keys) ?? panic("server transform: {err}")
     client: ssldefs.ssl_transform_alloc(ssl)
@@ -4998,10 +4998,10 @@ ct_record_layer: fn(keys: keys13.SSLKeySet) -> ssldefs.SSLContext {
 /// `head` bytes free before the data for an explicit IV: the 5-byte header,
 /// then the explicit IV, the ciphertext and its tag or MAC.
 ct_record_seal: fn(ssl: ^ssldefs.SSLContext, plain: [U8], head: Int) -> [U8] {
-    buf := ssldefs.ssl_zeros(5 + head + plain.len() + 64)
+    ^buf: ssldefs.ssl_zeros(5 + head + plain.len() + 64)
     ssldefs.ssl_copy_into(buf, 5 + head, plain, 0, plain.len())
-    rec := ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 5, buf_len: buf.len() - 5, data_offset: head, data_len: plain.len(), cid_len: 0}
-    rng := vec_rng()
+    ^rec: ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 5, buf_len: buf.len() - 5, data_offset: head, data_len: plain.len(), cid_len: 0}
+    ^rng: vec_rng()
     sslmsg.ssl_encrypt_buf(ssl.tpool[0], rec, buf, rng) ?? panic("seal: {err}")
     assert_eq(rec.data_offset, 0)
     ssldefs.ssl_bytes_of(buf, 0, 5 + rec.data_len)
@@ -5010,19 +5010,19 @@ ct_record_seal: fn(ssl: ^ssldefs.SSLContext, plain: [U8], head: Int) -> [U8] {
 /// ssl_decrypt_buf on the client under `keys` of `sealed` with its tag
 /// replaced by `tag`: the plaintext length, or the error code.
 ct_record_open: fn(keys: keys13.SSLKeySet, sealed: [U8], tag: [U8]) -> Int {
-    ssl := ct_record_layer(keys)
-    buf := sealed.copy()
+    ^ssl: ct_record_layer(keys)
+    ^buf: sealed.copy()
     ssldefs.ssl_copy_into(buf, buf.len() - tag.len(), tag, 0, tag.len())
-    rec := ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 0, buf_len: buf.len(), data_offset: 5, data_len: buf.len() - 5, cid_len: 0}
+    ^rec: ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 0, buf_len: buf.len(), data_offset: 5, data_len: buf.len() - 5, cid_len: 0}
     if sslmsg.ssl_decrypt_buf(ssl.tpool[1], rec, buf) == .Err(e) -> return ssldefs.ssl_error_code(e)
     rec.data_len
 }
 
 #Test("dudect: the TLS 1.3 record layer refuses a forged record tag in the same time wherever it differs") {
-    r := CtRand{s: U64{89}}
-    key_draw := CtRand{s: U64{83}}
+    ^r: CtRand{s: U64{89}}
+    ^key_draw: CtRand{s: U64{83}}
     keys: ct_record_keys(key_draw)
-    ssl := ct_record_layer(keys)
+    ^ssl: ct_record_layer(keys)
     sealed: ct_record_seal(ssl, ct_bytes(r, 64), 0)
     mac: ct_take(sealed, sealed.len() - 16, 16)
     assert_eq(ct_record_open(keys, sealed, mac), 64)
@@ -5035,7 +5035,7 @@ ct_record_open: fn(keys: keys13.SSLKeySet, sealed: [U8], tag: [U8]) -> Int {
 /// `randbytes`: transform 0 is the server's, which seals, and 1 the
 /// client's, which opens.
 ct_cbc_layer: fn(master: [U8], randbytes: [U8]) -> ssldefs.SSLContext {
-    ssl := ssldefs.SSLContext{}
+    ^ssl: ssldefs.SSLContext{}
     server: ssldefs.ssl_transform_alloc(ssl)
     ssl_tls12_populate_transform(ssl, server, suites.TLS_RSA_WITH_AES_128_CBC_SHA256, master, ssldefs.SSL_ETM_DISABLED, .SHA256, randbytes, ssldefs.SSL_VERSION_TLS1_2, ssldefs.SSL_IS_SERVER) ?? panic("server transform: {err}")
     client: ssldefs.ssl_transform_alloc(ssl)
@@ -5053,17 +5053,17 @@ ct_cbc_layer: fn(master: [U8], randbytes: [U8]) -> ssldefs.SSLContext {
 ct_cbc_record: fn(t: ^ssldefs.SSLTransform, plain: [U8], pad: Int, iv: [U8], mac_ok: Bool) -> [U8] {
     rec: ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, data_len: plain.len(), cid_len: 0}
     add_data: sslmsg.ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
-    body := plain.copy()
+    ^body: plain.copy()
     ssldefs.ssl_push_all(body, sslmsg.ssl_mac_of(t.md_enc, add_data, plain, 0, plain.len()) ?? panic("no MAC key"))
     if !mac_ok -> body[plain.len()] = body[plain.len()] ~ U8{1}
     loop _ in 0..pad -> body.push(ssldefs.ssl_byte(pad))
     assert(body.len() %% 16 == 0)
-    enc := [U8]{}
-    if ^t.cipher_enc == {
+    ^enc: [U8]{}
+    if t.cipher_enc.in_place() == {
         .Val(c) -> { enc = layer.cipher_crypt(c, iv, body) ?? panic("encrypt: {err}") }
         None -> panic("no cipher")
     }
-    out := [U8]{23, 3, 3, 0, 0}
+    ^out: [U8]{23, 3, 3, 0, 0}
     ssldefs.ssl_push_all(out, iv)
     ssldefs.ssl_push_all(out, enc)
     out
@@ -5074,9 +5074,9 @@ ct_cbc_record: fn(t: ^ssldefs.SSLTransform, plain: [U8], pad: Int, iv: [U8], mac
 /// code. Each call sets the transform's IV from the record and restarts its
 /// cipher, so one transform opens every record alike.
 ct_cbc_open: fn(t: ^ssldefs.SSLTransform, sealed: [U8], tail: [U8]) -> Int {
-    buf := sealed.copy()
+    ^buf: sealed.copy()
     ssldefs.ssl_copy_into(buf, buf.len() - tail.len(), tail, 0, tail.len())
-    rec := ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 0, buf_len: buf.len(), data_offset: 5, data_len: buf.len() - 5, cid_len: 0}
+    ^rec: ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 0, buf_len: buf.len(), data_offset: 5, data_len: buf.len() - 5, cid_len: 0}
     if sslmsg.ssl_decrypt_buf(t, rec, buf) == .Err(e) -> return ssldefs.ssl_error_code(e)
     rec.data_len
 }
@@ -5093,9 +5093,9 @@ ct_cbc_open: fn(t: ^ssldefs.SSLTransform, sealed: [U8], tail: [U8]) -> Int {
 // mbedtls_ct_memcpy_offset), so the two take the same time. With the MAC
 // taken over the true length instead, |t| was 7.7 and 8.6 here.
 #Test("dudect: TLS 1.2 CBC records with good and bad padding are refused in the same time") {
-    r := CtRand{s: U64{101}}
-    key_draw := CtRand{s: U64{97}}
-    ssl := ct_cbc_layer(ct_bytes(key_draw, 48), ct_bytes(key_draw, 64))
+    ^r: CtRand{s: U64{101}}
+    ^key_draw: CtRand{s: U64{97}}
+    ^ssl: ct_cbc_layer(ct_bytes(key_draw, 48), ct_bytes(key_draw, 64))
     plain: ct_bytes(r, 64)
     iv: ct_bytes(r, 16)
     valid: ct_cbc_record(ssl.tpool[0], plain, 255, iv, true)
@@ -5112,7 +5112,7 @@ ct_cbc_open: fn(t: ^ssldefs.SSLTransform, sealed: [U8], tail: [U8]) -> Int {
 /// prime.
 ct_exp_mod: fn(grp: ecp.EcpGroup, base: bn.Mpi, e: [U8]) -> Int {
     x: bn.read_binary(e) ?? return 0
-    rr := bn.mpi()
+    ^rr: bn.mpi()
     out: bn.exp_mod(base, x, grp.p, rr) ?? return 0
     ct_opened(Val(bn.write_binary(out, 32) ?? return 0))
 }
@@ -5126,7 +5126,7 @@ ct_modinv: fn(grp: ecp.EcpGroup, a: [U8]) -> Int {
 }
 
 #Test("dudect: Bignum exp_mod and gcd_modinv_odd take as long on fixed and random secrets") {
-    r := CtRand{s: U64{101}}
+    ^r: CtRand{s: U64{101}}
     grp: ecp.group_load(.Secp256r1) ?? panic("P-256: {err}")
     order: ecp.group_load(.Secp256r1) ?? panic("P-256: {err}")
     base: bn.read_binary(ct_scalar(ct_bytes(r, 32))) ?? panic("base: {err}")
@@ -5144,8 +5144,8 @@ ct_modinv: fn(grp: ecp.EcpGroup, a: [U8]) -> Int {
         print("dudect soak tier: not run; set JET_DUDECT_SOAK=1 to run it")
         return
     }
-    r := CtRand{s: U64{97}}
-    base := [U8]{9}
+    ^r: CtRand{s: U64{97}}
+    ^base: [U8]{9}
     loop _ in 1..<32 -> base.push(U8{0})
     ct_dudect("X25519 ECDH (soak)", 6000, 1, ct_bytes(r, 32), fn(x) { ct_opened(vec_ecdh(.Curve25519, x, base)) })
     g256: ct_generator(.Secp256r1, 32)

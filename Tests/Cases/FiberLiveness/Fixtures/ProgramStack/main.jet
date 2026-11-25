@@ -39,12 +39,12 @@ run: fn() {
     sys.set_stack_limit(Val(PROGRAM_STACK), limit.hard) ?? panic("set stack limit: {err}")
     before: vm_size()
     { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
-    handles := [Task<Int>]{}
+    ^handles: [Task<Int>]{}
     loop _ in 0..<TASKS -> handles.push(task waiter(rx))
     time.sleep(200ms)
     parked: vm_size()
     loop _ in 0..<TASKS -> tx.send(1)
-    total := 0
+    ^total: 0
     loop handle in handles -> total += handle.join() ?? 0
     print("{total} of {TASKS} tasks completed")
     print("address space grew under 1 GiB while parked {before > 0 && parked - before < GROWTH_LIMIT}")

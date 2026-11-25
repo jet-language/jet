@@ -8,7 +8,7 @@ Tile: struct {
 }
 
 run: fn() {
-    particles := [Particle]{
+    ^particles: [Particle]{
         Particle{position: 10, velocity: 2},
         Particle{position: 20, velocity: 3},
         Particle{position: 30, velocity: 4},
@@ -20,8 +20,8 @@ run: fn() {
     }
 
     middle_before: particles[1].copy()
-    left: ^particles[0]
-    right: ^particles[2]
+    left: particles[0].in_place()
+    right: particles[2].in_place()
     left.velocity += grid[0].force
     right.velocity += grid[2].force
     left.position += left.velocity

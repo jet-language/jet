@@ -12,7 +12,7 @@ use {
 }
 
 publication_registry_cache_component: fn(name: String) -> String Never! {
-    safe := name != "" && name != "." && name != ".."
+    ^safe: name != "" && name != "." && name != ".."
     loop byte in name.bytes() {
         code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46) {
@@ -55,7 +55,7 @@ publication_registry_origin_matches: fn(url: String, success: Bool, origin: Stri
 // configured URL as the clone's origin.
 // HTTP/SSH already pin through the hardened transport ProcessSpec.
 publication_registry_clone_arguments: fn(url: String, pinned: String, path: String) -> [String] Never! {
-    args := [String]{}
+    ^args: [String]{}
     if pinned != url -> args.push("-c")
     if pinned != url -> args.push("url.{pinned}.insteadOf={url}")
     args.push("clone")
@@ -86,7 +86,7 @@ publication_acquire_registry_lock: fn(parent: String, name: String, delay_ms: In
     path: files.join(parent, name)
     deadline: time.unix_ns() + wait_ms * 1000000
     loop time.unix_ns() < deadline {
-        writer := if authority.create_exclusive(name, 384) == {
+        ^writer: if authority.create_exclusive(name, 384) == {
             .Ok(file) -> file
             .Err(error) -> if error == {
                 .AlreadyExists(_) -> {
@@ -162,7 +162,7 @@ publication_registry_clone_cleanup: fn(parent: FoundationDirectoryAuthority, nam
 }
 
 publication_registry_attach_clone_cleanup: fn(primary: PublicationDiagnosticError, path: String, cleanup: IOError) -> PublicationDiagnosticError Never! {
-    diagnostic := primary.diagnostic
+    ^diagnostic: primary.diagnostic
     existing: diagnostic.detail ?? ""
     separator: if existing != "" && !existing.ends_with("\n") -> "\n" else -> ""
     diagnostic.detail = Val("{existing}{separator}cleanup failed: couldn't remove registry checkout `{path}`: {cleanup}")

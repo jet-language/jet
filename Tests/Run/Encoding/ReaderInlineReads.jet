@@ -2,7 +2,7 @@
 // width, sign and byte order in sequence, the exact-fit boundary, and a
 // short read that reports its error without moving the position.
 values: fn(r: Reader) -> Int Err! {
-    total := 0
+    ^total: 0
     total += Int{r.read_u8()}
     total += Int{r.read_i8()}
     total += Int{r.read_u16_le()} + Int{r.read_u16_be()}
@@ -59,7 +59,7 @@ run: fn() {
         .Err(error) -> print(error)
     }
 
-    sum := 0
+    ^sum: 0
     pairs: Reader.over([U8]{0x01, 0x00, 0x02, 0x00, 0x03})
     loop {
         pair: pairs.read_u16_le() ?? break

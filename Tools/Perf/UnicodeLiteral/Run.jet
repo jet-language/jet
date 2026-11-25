@@ -87,8 +87,8 @@ usage: fn(message: String) -> Never {
 }
 
 parse_options: fn(args: [String]) -> Options {
-    options := Options{work: "", memory: "8G", bytes: ORIGINAL_BYTES, receipt: "", time: ""}
-    index := 0
+    ^options: Options{work: "", memory: "8G", bytes: ORIGINAL_BYTES, receipt: "", time: ""}
+    ^index: 0
     loop index < args.len() {
         flag: args[index]
         if index + 1 >= args.len() -> usage("{flag} takes a value")
@@ -109,8 +109,8 @@ parse_options: fn(args: [String]) -> Options {
 // The program: `count` bytes of a fixed pseudo-random stream as one `[U8]`
 // literal of `\xHH` escapes, and a `run` that prints its fifth element.
 program_source: fn(count: Int) -> String {
-    escapes := [String]{}
-    state := 12345
+    ^escapes: [String]{}
+    ^state: 12345
     loop _ in 0..<count {
         state = (state * 1103515245 + 12345) % 2147483648
         byte: (state /% 65536) % 256
@@ -123,9 +123,9 @@ program_source: fn(count: Int) -> String {
 // The trace's top-level spans of its opening lane (the lane of its first
 // span), in order; a partial last line of a killed compile is skipped.
 trace_phases: fn(text: String) -> [PhaseMemory] {
-    phases := [PhaseMemory]{}
-    stack := [OpenSpan]{}
-    lane := -1
+    ^phases: [PhaseMemory]{}
+    ^stack: [OpenSpan]{}
+    ^lane: -1
     loop raw in text.split("\n") {
         line: raw.trim().remove_suffix(",")
         if line == "" || line == "[" || line == "]" -> next
@@ -156,7 +156,7 @@ time_value: fn(report: String, key: String) -> String {
 }
 
 phase_table: fn(phases: [PhaseMemory]) -> [String] {
-    rows := [String]{"{"phase".pad_end(28, " ")} {"wall s".pad_start(9, " ")} {"rss MiB".pad_start(9, " ")} {"peak MiB".pad_start(9, " ")}"}
+    ^rows: [String]{"{"phase".pad_end(28, " ")} {"wall s".pad_start(9, " ")} {"rss MiB".pad_start(9, " ")} {"peak MiB".pad_start(9, " ")}"}
     loop phase in phases {
         wall: "{Float.from_int(phase.wall_us) / 1e6:Fixed(2)}"
         rows.push("{phase.kind.pad_end(28, " ")} {wall.pad_start(9, " ")} {"{phase.rss_kb /% 1024}".pad_start(9, " ")} {"{phase.peak_rss_kb /% 1024}".pad_start(9, " ")}")
@@ -171,7 +171,7 @@ identity_of: fn(jet: String) -> String {
 }
 
 run: fn() -> Never {
-    options := parse_options(process.args())
+    ^options: parse_options(process.args())
     jet: sys.get("JET") ?? usage("set JET to the compiler to measure")
     if !files.is_file(jet) -> usage("JET={jet} is not a file")
     if options.work == "" {
@@ -192,7 +192,7 @@ run: fn() -> Never {
     time_file: files.join(work, "time.txt")
     identity: identity_of(jet)
     gnu_time: if options.time != "" -> options.time else -> process.which("time") ?? usage("no `time` on PATH; pass --time PATH to GNU time")
-    argv := [String]{"systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax={options.memory}", "-p", "MemorySwapMax=0", gnu_time, "-v", "-o", time_file, "env", "JET_STORE_DIR={store}", "XDG_CACHE_HOME={cache}"}
+    ^argv: [String]{"systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax={options.memory}", "-p", "MemorySwapMax=0", gnu_time, "-v", "-o", time_file, "env", "JET_STORE_DIR={store}", "XDG_CACHE_HOME={cache}"}
     if identity != "" -> argv.push("JET_COMPILER_IDENTITY={identity}")
     argv.extend([String]{jet, "check", "--trace={trace_file}", "main.jet"})
     receipt: process.cmd(argv).cwd(program).output_limit(GIB).run() ?? usage("cannot run systemd-run: {err}")
@@ -200,7 +200,7 @@ run: fn() -> Never {
     files.write(files.join(work, "err"), receipt.errors) ?? ()
     report: files.read(time_file) ?? ""
     phases: trace_phases(files.read(trace_file) ?? "")
-    peak := 0
+    ^peak: 0
     loop phase in phases {
         if phase.peak_rss_kb > peak -> peak = phase.peak_rss_kb
     }
@@ -208,7 +208,7 @@ run: fn() -> Never {
     status: time_value(report, "Exit status")
     passed: receipt.code == 0 && status == "0" && phases.len() > 0
     shown_identity: if identity == "" -> "none" else -> identity
-    lines := [String]{
+    ^lines: [String]{
         "program: <work>/program/main.jet ({source.len()} bytes, a {options.bytes}-element [U8] literal)",
         "jet: $JET (identity {shown_identity})",
         "memory cap: MemoryMax={options.memory}, no swap",

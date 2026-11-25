@@ -18,7 +18,7 @@ use {
 #Test("a known-failing case waits a short time for an answer, and an answer still shows as an unexpected pass") {
     root: cases_test_root("session-known")
     // The session outlives the answer cap, so only the cap can end its recv.
-    context := cases_test_context(root, files.join(root, "scratch-silent"))
+    ^context: cases_test_context(root, files.join(root, "scratch-silent"))
     context.env.timeout = 30s
     cases_test_source(root, "silent", "# KNOWN-FAILING the peer never answers\nsession peer raw: cat\nrecv peer until ~ \"never\" timeout 600s # waits for absent output\nclose peer\n")
     started: time.instant()

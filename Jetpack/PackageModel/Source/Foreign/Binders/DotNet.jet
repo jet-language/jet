@@ -130,14 +130,14 @@ pkg_dotnet_bind: fn(path: String, source: String, lib: String, cache: String) -[
     pkg_binder_remove_file_quiet(archive)
     pkg_dotnet_run([String]{"ar", "rcs", archive, object}, "ar")
     jet: pkg_dotnet_render_jet(lib, surface)
-    identity := [U8]{}
+    ^identity: [U8]{}
     pkg_binder_append_field(identity, DOTNET_BIND_SCHEMA.bytes())
     pkg_binder_append_field(identity, source.bytes())
     pkg_binder_append_field(identity, inspected.stdout)
     loop byte in hostfxr.bytes() -> identity.push(byte)
-    provenance := "schema={DOTNET_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nclass={surface.class}\nhostfxr={hostfxr}\n"
+    ^provenance: "schema={DOTNET_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nclass={surface.class}\nhostfxr={hostfxr}\n"
     pkg_binder_append_artifact_boundary(provenance, CS_MODULE_ROOT, ".NET", lib, path, archive, "dotnet/cc/ar")
-    bound := [String]{"new"}
+    ^bound: [String]{"new"}
     loop method in surface.methods -> bound.push(method.name)
     pkg_binder_remove_tree_quiet(build)
     Ok(ForeignBindResult{source: jet, bound: bound, archive: archive, provenance: provenance})
@@ -145,10 +145,10 @@ pkg_dotnet_bind: fn(path: String, source: String, lib: String, cache: String) -[
 
 pkg_dotnet_parse_surface: fn(bytes: [U8], expected: String) -> DotNetSurface ForeignBindError! {
     text: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("the .NET reflection inspector returned non-UTF-8 metadata"))
-    class := String?{None}
-    ctor := [DotNetScalar]?{None}
-    methods := [DotNetMethod]{}
-    names := [String]{}
+    ^class: String?{None}
+    ^ctor: [DotNetScalar]?{None}
+    ^methods: [DotNetMethod]{}
+    ^names: [String]{}
     loop line in pkg_binder_lines(text) {
         fields: line.split("\t").to_list()
         if fields[0] == {
@@ -188,7 +188,7 @@ pkg_dotnet_parse_surface: fn(bytes: [U8], expected: String) -> DotNetSurface For
 }
 
 pkg_dotnet_parse_scalars: fn(fields: [String], start: Int, member: String) -> [DotNetScalar] ForeignBindError! {
-    out := [DotNetScalar]{}
+    ^out: [DotNetScalar]{}
     loop index in start..<fields.len() {
         scalar: DotNetScalar.parse(fields[index]) ?? return Err(ForeignBindError.Source("C# member `{member}` uses an unsupported parameter type; use long or double"))
         out.push(scalar)
@@ -199,7 +199,7 @@ pkg_dotnet_parse_scalars: fn(fields: [String], start: Int, member: String) -> [D
 pkg_dotnet_render_cs: fn(lib: String, surface: DotNetSurface) -> String Never! {
     abi: "jet_cs_{lib}"
     class: surface.class
-    out := "using System.Runtime.CompilerServices;\nusing System.Runtime.InteropServices;\nnamespace JetBinding;\npublic static class EntryPoints {{\n    const int Capacity=1024;\n    static readonly object Gate=new();\n    static readonly GCHandle[] Handles=new GCHandle[Capacity];\n    static readonly uint[] Generations=new uint[Capacity];\n    [ThreadStatic] static long error;\n    static "
+    ^out: "using System.Runtime.CompilerServices;\nusing System.Runtime.InteropServices;\nnamespace JetBinding;\npublic static class EntryPoints {{\n    const int Capacity=1024;\n    static readonly object Gate=new();\n    static readonly GCHandle[] Handles=new GCHandle[Capacity];\n    static readonly uint[] Generations=new uint[Capacity];\n    [ThreadStatic] static long error;\n    static "
     out = "{out}{class} Get(long raw){{var slot=(int)(raw&0xffff)-1;var generation=(uint)((ulong)raw>>16);lock(Gate){{if(slot<0||slot>=Capacity||generation==0||Generations[slot]!=generation||!Handles[slot].IsAllocated)throw new InvalidOperationException();return Handles[slot].Target is {class} value?value:throw new InvalidOperationException();}}}}\n    static long Store("
     out = "{out}{class} value){{lock(Gate){{for(var slot=0;slot<Capacity;slot++){{if(Handles[slot].IsAllocated)continue;var generation=unchecked(Generations[slot]+1);if(generation==0)generation=1;Generations[slot]=generation;Handles[slot]=GCHandle.Alloc(value);return ((long)generation<<16)|(uint)(slot+1);}}}}throw new InsufficientMemoryException();}}\n    static void Release(long raw){{var slot=(int)(raw&0xffff)-1;var generation=(uint)((ulong)raw>>16);GCHandle handle;lock(Gate){{if(slot<0||slot>=Capacity||generation==0||Generations[slot]!=generation||!Handles[slot].IsAllocated)throw new InvalidOperationException();handle=Handles[slot];Handles[slot]=default;}}handle.Free();}}\n    [UnmanagedCallersOnly(EntryPoint=\""
     out = "{out}{abi}_take_error\")] public static long {abi}_take_error(){{var v=error;error=0;return v;}}\n    [UnmanagedCallersOnly(EntryPoint=\""
@@ -215,20 +215,20 @@ pkg_dotnet_render_cs: fn(lib: String, surface: DotNetSurface) -> String Never! {
 }
 
 pkg_dotnet_cs_params: fn(params: [DotNetScalar]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in 0..<params.len() -> parts.push("{params[index].cs()} arg{index}")
     parts.join(",")
 }
 
 pkg_dotnet_args: fn(count: Int) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in 0..<count -> parts.push("arg{index}")
     parts.join(",")
 }
 
 pkg_dotnet_render_jet: fn(lib: String, surface: DotNetSurface) -> String Never! {
     abi: "jet_cs_{lib}"
-    out := "#Import c.{abi}: module {{\n    new: fn({pkg_dotnet_jet_params(surface.ctor)}) -> Int = \"{abi}_new\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"
+    ^out: "#Import c.{abi}: module {{\n    new: fn({pkg_dotnet_jet_params(surface.ctor)}) -> Int = \"{abi}_new\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"
     loop method in surface.methods {
         handle: if method.is_static -> "" else if method.params.len() > 0 -> "handle: Int, " else -> "handle: Int"
         out = "{out}    {method.name}: fn({handle}{pkg_dotnet_jet_params(method.params)}) -> {method.result.jet()} = \"{abi}_{method.name}\"\n"
@@ -246,14 +246,14 @@ pkg_dotnet_render_jet: fn(lib: String, surface: DotNetSurface) -> String Never! 
 }
 
 pkg_dotnet_jet_params: fn(params: [DotNetScalar]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in 0..<params.len() -> parts.push("arg{index}: {params[index].jet()}")
     parts.join(", ")
 }
 
 pkg_dotnet_render_c: fn(lib: String, surface: DotNetSurface, hostfxr: String, assembly: String, config: String) -> String Never! {
     abi: "jet_cs_{lib}"
-    wrappers := "int64_t {abi}_take_error(void){{typedef int64_t(*F)(void);F f=(F)entry(\"{abi}_take_error\");return f?f():1;}}\nvoid {abi}_close(int64_t h){{typedef void(*F)(int64_t);F f=(F)entry(\"{abi}_close\");if(f)f(h);}}\n"
+    ^wrappers: "int64_t {abi}_take_error(void){{typedef int64_t(*F)(void);F f=(F)entry(\"{abi}_take_error\");return f?f():1;}}\nvoid {abi}_close(int64_t h){{typedef void(*F)(int64_t);F f=(F)entry(\"{abi}_close\");if(f)f(h);}}\n"
     wrappers = "{wrappers}int64_t {abi}_new({pkg_dotnet_c_params(surface.ctor)}){{typedef int64_t(*F)({pkg_dotnet_c_types(surface.ctor)});F f=(F)entry(\"{abi}_new\");return f?f({pkg_dotnet_args(surface.ctor.len())}):0;}}\n"
     loop method in surface.methods {
         has_params: method.params.len() > 0
@@ -272,13 +272,13 @@ pkg_dotnet_render_c: fn(lib: String, surface: DotNetSurface, hostfxr: String, as
 }
 
 pkg_dotnet_c_params: fn(params: [DotNetScalar]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in 0..<params.len() -> parts.push("{params[index].c()} arg{index}")
     parts.join(",")
 }
 
 pkg_dotnet_c_types: fn(params: [DotNetScalar]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push(param.c())
     parts.join(",")
 }
@@ -286,7 +286,7 @@ pkg_dotnet_c_types: fn(params: [DotNetScalar]) -> String Never! {
 // The newest `host/fxr/<version>` runtime under DOTNET_ROOT, or beside the
 // resolved `dotnet` tool.
 pkg_dotnet_find_hostfxr: fn() -[FS, Env]> String ForeignBindError! {
-    root := sys.get("DOTNET_ROOT")
+    ^root: sys.get("DOTNET_ROOT")
     if root == None {
         if pkg_dotnet_which("dotnet") == {
             .Val(found) -> {
@@ -301,7 +301,7 @@ pkg_dotnet_find_hostfxr: fn() -[FS, Env]> String ForeignBindError! {
     base: root ?? return Err(ForeignBindError.ToolMissing("DOTNET_ROOT"))
     directory: files.join(base, "host/fxr")
     entries: files.list_dir(directory) ?? return Err(ForeignBindError.IO("could not inspect provisioned hostfxr: {err}"))
-    versions := [String]{}
+    ^versions: [String]{}
     loop entry in entries -> versions.push(entry.path)
     versions.sort()
     name: if VariantOS.current() == {
@@ -309,7 +309,7 @@ pkg_dotnet_find_hostfxr: fn() -[FS, Env]> String ForeignBindError! {
         .Windows -> "hostfxr.dll"
         .Linux -> "libhostfxr.so"
     }
-    index := versions.len() - 1
+    ^index: versions.len() - 1
     loop index >= 0 {
         candidate: files.join(versions[index], name)
         if files.is_file(candidate) -> return Ok(candidate)
@@ -348,7 +348,7 @@ pkg_dotnet_launder: fn(stdout: [U8], stderr: [U8]) -> String Never! {
         if !line.contains(": error CS") -> next
         compiler: line.copy().split_once(": error CS") ?? break
         detail_parts: compiler.after.split_once(": ") ?? break
-        detail := detail_parts.after
+        ^detail: detail_parts.after
         project_at: pkg_binder_rfind(detail, " [")
         if project_at >= 0 -> detail = pkg_binder_slice(detail, 0, project_at)
         return pkg_binder_take_chars(detail, 160)

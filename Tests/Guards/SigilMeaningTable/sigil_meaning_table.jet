@@ -224,7 +224,7 @@ SIGIL_LONGEST: 3
 sigil_meaning_token: fn(spelling: String) -> Int? {
     lexed: lex(spelling.bytes())
     if !lexed.diagnostics.is_empty() -> return None
-    found := [Int]{}
+    ^found: [Int]{}
     loop token in lexed.tokens {
         if token.span.end > token.span.start {
             if token.span.start != 0 || token.span.end != spelling.bytes().len() -> return None
@@ -236,12 +236,12 @@ sigil_meaning_token: fn(spelling: String) -> Int? {
 
 // Every spelling of one to SIGIL_LONGEST sigil characters.
 sigil_meaning_spellings: fn() -> [String] {
-    singles := [String]{}
+    ^singles: [String]{}
     loop byte in SIGIL_CHARACTERS.bytes() -> singles.push(String.from_bytes_lossy([U8]{byte}))
-    out := [String]{}
-    shorter := [String]{""}
+    ^out: [String]{}
+    ^shorter: [String]{""}
     loop _ in 0..<SIGIL_LONGEST {
-        longer := [String]{}
+        ^longer: [String]{}
         loop head in shorter {
             loop tail in singles {
                 out.push("{head}{tail}")
@@ -262,7 +262,7 @@ sigil_meaning_rows: fn(spelling: String) -> Int {
 }
 
 #Test("sigil_meaning_table rows lex as their tokens") {
-    failures := [String]{}
+    ^failures: [String]{}
     loop row in SIGIL_MEANINGS {
         if row.spelling.bytes().len() > SIGIL_LONGEST {
             failures.push("`{row.spelling}` is longer than SIGIL_LONGEST")
@@ -276,7 +276,7 @@ sigil_meaning_rows: fn(spelling: String) -> Int {
 }
 
 #Test("sigil_meaning_table has a row for every sigil the lexer reads") {
-    failures := [String]{}
+    ^failures: [String]{}
     loop spelling in sigil_meaning_spellings() {
         kind: sigil_meaning_token(spelling) ?? next
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> next
@@ -288,7 +288,7 @@ sigil_meaning_rows: fn(spelling: String) -> Int {
 }
 
 #Test("sigil_meaning_table gives a sigil one meaning in each place") {
-    failures := [String]{}
+    ^failures: [String]{}
     loop (index, row) in SIGIL_MEANINGS {
         loop other in SIGIL_MEANINGS[0..<index] {
             if other.spelling == row.spelling && other.place == row.place {

@@ -66,7 +66,7 @@ effect_vocabulary_canonical_module: fn(machine_source: String, core_source: Stri
     core_base: machine_text.bytes().len() + 2
     core: effect_vocabulary_source_scan(core_source, "Core/Effects/Effects.jet", Val(machine.rows), core_base)
     meta: effect_vocabulary_source_scan(meta_source, "Core/Compiler/Meta.jet", Val(machine.rows), core_base + core_text.bytes().len() + 2)
-    decls := [EffectDecl]{}
+    ^decls: [EffectDecl]{}
     loop declaration in machine.decls -> decls.push(declaration)
     loop declaration in core.decls -> decls.push(declaration)
     loop declaration in meta.decls -> decls.push(declaration)
@@ -80,7 +80,7 @@ effect_vocabulary_module: fn(source: String) -> EffectModuleSource {
 }
 
 effect_vocabulary_module_source: fn(source: String, decls: [EffectDecl]) -> EffectModuleSource {
-    line_starts := [Int]{0}
+    ^line_starts: [Int]{0}
     loop (index, byte) in source.bytes() {
         if byte == (U8{10}) -> line_starts.push(index + 1)
     }
@@ -90,13 +90,15 @@ effect_vocabulary_module_source: fn(source: String, decls: [EffectDecl]) -> Effe
 // The rows of the three sources, in order.
 effect_vocabulary_rows: fn(machine_source: String, core_source: String, meta_source: String) -> [EffectVocabularyRow] {
     machine: effect_vocabulary_source_rows(machine_source, EFFECT_VOCABULARY_MACHINE_PATH, None)
-    rows := machine.copy()
+    ^rows: machine.copy()
     loop row in effect_vocabulary_source_rows(core_source, "Core/Effects/Effects.jet", Val(machine)) {
         rows.push(row.copy())
     }
     loop row in effect_vocabulary_source_rows(meta_source, "Core/Compiler/Meta.jet", Val(machine)) {
         loop seen in rows {
-            if seen.name == row.name -> build_time_refused("Core/Compiler/Meta.jet: duplicate effect {row.name}")
+            if seen.name == row.name {
+                build_time_refused("Core/Compiler/Meta.jet: duplicate effect {row.name}")
+            }
         }
         rows.push(row.copy())
     }
@@ -105,7 +107,7 @@ effect_vocabulary_rows: fn(machine_source: String, core_source: String, meta_sou
 
 // The effect names that are leaves (`Root.Member`) or, with `leaf` false, roots.
 effect_vocabulary_names: fn(rows: [EffectVocabularyRow], leaf: Bool) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop row in rows {
         if row.name.contains(".") == leaf -> out.push(row.name.copy())
     }
@@ -118,8 +120,8 @@ effect_vocabulary_names: fn(rows: [EffectVocabularyRow], leaf: Bool) -> [String]
 // no such enum.
 effect_vocabulary_enum_cases: fn(text: String, type_name: String) -> [String]? {
     head: "{type_name}: enum {{"
-    cases := [String]{}
-    inside := false
+    ^cases: [String]{}
+    ^inside: false
     loop line in text.split("\n") {
         if inside {
             if line == "}}" || line.trim() == "" -> return Val(cases)
@@ -138,7 +140,7 @@ effect_vocabulary_enum_cases: fn(text: String, type_name: String) -> [String]? {
 
 // The names of `found` that `known` does not hold, in `found`'s order.
 effect_vocabulary_strays: fn(found: [String], known: [String]) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop name in found {
         if !known.contains(name) -> out.push(name.copy())
     }
@@ -151,8 +153,8 @@ effect_vocabulary_strays: fn(found: [String], known: [String]) -> [String] {
 // None when `text` declares no such enum.
 effect_vocabulary_enum_case_heads: fn(text: String, type_name: String) -> [String]? {
     head: "{type_name}: enum {{"
-    cases := [String]{}
-    inside := false
+    ^cases: [String]{}
+    ^inside: false
     loop line in text.split("\n") {
         if inside {
             if line == "}}" || line.trim() == "" -> return Val(cases)
@@ -214,14 +216,14 @@ effect_vocabulary_lowered: fn(names: [String]) -> [String] {
 // its own package cannot import.
 effect_vocabulary_list_strings: fn(file: String, text: String, name: String) -> [String] {
     head: "{name}: [String]{{"
-    out := [String]{}
-    inside := false
+    ^out: [String]{}
+    ^inside: false
     loop line in text.split("\n") {
         if !inside {
             if !line.starts_with(head) -> next
             inside = true
         }
-        quoted := false
+        ^quoted: false
         loop piece in line.split("\"") {
             if quoted -> out.push(piece)
             quoted = !quoted
@@ -234,7 +236,7 @@ effect_vocabulary_list_strings: fn(file: String, text: String, name: String) -> 
 // The words of `text`, split at whitespace and at the commas that end enum
 // cases.
 effect_vocabulary_words: fn(text: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop word in text.split(" ") {
         loop part in word.split("\t") {
             loop piece in part.split(",") {
@@ -262,25 +264,25 @@ EffectVocabularyScan: struct {
 }
 
 effect_vocabulary_source_scan: fn(source: String, path: String, machine: [EffectVocabularyRow]?, base: Int) -> EffectVocabularyScan {
-    rows := [EffectVocabularyRow]{}
-    decls := [EffectDecl]{}
+    ^rows: [EffectVocabularyRow]{}
+    ^decls: [EffectDecl]{}
     lines: source.split("\n").to_list()
-    type_name := ""
-    type_span := Span{start: 0, end: 0}
-    family := false
-    cases := [String]{}
-    case_spans := [Span]{}
-    body := String?{None}
-    expert_body := String?{None}
-    parent := String?{None}
-    impl_seen := false
-    in_impl := false
-    kernel := [String]{}
-    listed := false
+    ^type_name: ""
+    ^type_span: Span{start: 0, end: 0}
+    ^family: false
+    ^cases: [String]{}
+    ^case_spans: [Span]{}
+    ^body: String?{None}
+    ^expert_body: String?{None}
+    ^parent: String?{None}
+    ^impl_seen: false
+    ^in_impl: false
+    ^kernel: [String]{}
+    ^listed: false
     impl_head: "irreversible: fn(self) -> Bool {{ "
     expert_head: "expert: fn(self) -> Bool {{ "
     parent_head: "parent: "
-    offset := base
+    ^offset: base
     loop index in 0..<lines.len() {
         raw: lines[index]
         // The byte where the line's first word starts.
@@ -359,7 +361,9 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             next
         }
         if line == "impl Effect {{}}" || line == "impl Effect {{" {
-            if impl_seen -> build_time_refused("{place}: `{type_name}` has a second `impl Effect` block")
+            if impl_seen {
+                build_time_refused("{place}: `{type_name}` has a second `impl Effect` block")
+            }
             impl_seen = true
             in_impl = line == "impl Effect {{"
             next
@@ -369,8 +373,8 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             if family && cases.len() == 0 {
                 build_time_refused("{place}: the effect family `{type_name}` has no cases")
             }
-            case_rows := [EffectVocabularyRow]{}
-            any := false
+            ^case_rows: [EffectVocabularyRow]{}
+            ^any: false
             // A family under a parent case names its cases below that case.
             prefix: parent ?? type_name
             loop member in cases {
@@ -379,8 +383,8 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 if irreversible -> any = true
                 case_rows.push(EffectVocabularyRow{name: "{prefix}.{member}", irreversible: irreversible, kernel: kernel.copy(), expert: expert})
             }
-            root := any
-            root_expert := false
+            ^root: any
+            ^root_expert: false
             if !family {
                 root = effect_vocabulary_fact(body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`")
                 root_expert = effect_vocabulary_fact(expert_body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true` or `false`")
@@ -403,7 +407,9 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
         }
         // A case ends at its comma.
         member: line.removesuffix(",")
-        if cases.contains(member) -> build_time_refused("{place}: duplicate effect {type_name}.{member}")
+        if cases.contains(member) {
+            build_time_refused("{place}: duplicate effect {type_name}.{member}")
+        }
         case_spans.push(Span{start: start, end: start + member.bytes().len()})
         cases.push(member)
     }
@@ -415,10 +421,10 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
 // The machine effects of a `#FX(…)` line above a Core effect: each entry a
 // root or leaf of `machine`, listed once.
 effect_vocabulary_kernel: fn(line: String, machine: [EffectVocabularyRow], place: String) -> [String] {
-    kernel := [String]{}
+    ^kernel: [String]{}
     loop part in line.removeprefix("#FX(").removesuffix(")").split(",") {
         entry: part.trim()
-        known := false
+        ^known: false
         loop row in machine {
             if row.name == entry -> known = true
         }
@@ -444,7 +450,7 @@ effect_vocabulary_row_at: fn(rows: [EffectVocabularyRow], name: String) -> Int {
 // when the body is not the effect fact form. No body is `false`.
 effect_vocabulary_fact: fn(body: String?, cases: [String], member: String?) -> Bool? {
     written: body ?? return Val(false)
-    holds := false
+    ^holds: false
     loop part in written.split("||") {
         term: part.trim()
         if {

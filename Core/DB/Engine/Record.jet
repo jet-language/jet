@@ -28,7 +28,7 @@ serial_len: fn(t: Int) -> Int Never! {
 // A big-endian two's-complement integer of `n` bytes (1..8): ONE_BYTE_INT
 // to FOUR_BYTE_INT and the 6- and 8-byte forms.
 get_signed: fn(buf: [U8], at: Int, n: Int) -> Int Never! {
-    value := Int{buf[at]}
+    ^value: Int{buf[at]}
     if value >= 128 -> value -= 256
     loop i in 1..<n -> value = (value << 8) | Int{buf[at + i]}
     value
@@ -61,12 +61,12 @@ RecordHeader: struct {
 // Parse a record's header (fileformat2.html 2.1). A header that runs past
 // the record or claims impossible sizes is SQLITE_CORRUPT.
 parse_header: fn(rec: [U8]) -> RecordHeader SQLError! {
-    header := RecordHeader{types: [Int]{}, offsets: [Int]{}}
+    ^header: RecordHeader{types: [Int]{}, offsets: [Int]{}}
     if rec.len() == 0 -> return Ok(header)
     size: get_varint32(rec, 0)
     if size.value < size.len || size.value > rec.len() -> return Err(base.corrupt())
-    at := size.len
-    body := size.value
+    ^at: size.len
+    ^body: size.value
     loop at < size.value {
         t: get_varint32(rec, at)
         if t.value < 0 -> return Err(base.corrupt())
@@ -83,7 +83,7 @@ parse_header: fn(rec: [U8]) -> RecordHeader SQLError! {
 // Decode every column of a record, its text in encoding enc.
 decode_record: fn(rec: [U8], enc: Int) -> [Mem] SQLError! {
     header: parse_header(rec) ?? return Err(err)
-    values := [Mem]{}
+    ^values: [Mem]{}
     loop i in 0..<header.types.len() {
         values.push(serial_get(rec, header.offsets[i], header.types[i], enc))
     }
@@ -119,7 +119,7 @@ serial_type: fn(m: ^Mem, file_format: Int) -> Int Never! {
         return 6
     }
     if f & MEM_REAL != 0 -> return 7
-    n := m.z.len()
+    ^n: m.z.len()
     if f & MEM_ZERO != 0 -> n += m.i
     n * 2 + 12 + (if f & MEM_STR != 0 -> 1 else -> 0)
 }
@@ -146,23 +146,23 @@ serial_put: fn(out: ^[U8], m: Mem, t: Int) Never! {
 // The record OP_MakeRecord builds from `values` (fileformat2.html 2.1):
 // the header size varint, the serial types, then the bodies.
 make_record: fn(values: ^[Mem], file_format: Int) -> [U8] Never! {
-    types := [Int]{}
-    header_body := 0
+    ^types: [Int]{}
+    ^header_body: 0
     loop k in 0..<values.len() {
-        m := values[k]
+        ^m: values[k]
         t: serial_type(m, file_format)
         values[k] = m
         types.push(t)
         header_body += varint_len(t)
     }
     // The header size counts its own varint.
-    header_size := header_body + 1
+    ^header_size: header_body + 1
     if header_body > 126 {
         own: varint_len(header_body)
         header_size = header_body + own
         if own < varint_len(header_size) -> header_size += 1
     }
-    out := [U8]{}
+    ^out: [U8]{}
     put_varint(out, header_size)
     loop t in types -> put_varint(out, t)
     loop i in 0..<values.len() -> serial_put(out, values[i], types[i])
@@ -187,16 +187,16 @@ coll_enc: fn(coll: Int, enc: Int) -> Int Never! {
 
 // A collating function over two texts; negative, zero or positive.
 compare_text: fn(a: [U8], b: [U8], coll: Int) -> Int Never! {
-    na := a.len()
-    nb := b.len()
+    ^na: a.len()
+    ^nb: b.len()
     if coll == COLL_RTRIM {
         loop na > 0 && (Int{a[na - 1]}) == 32 -> na -= 1
         loop nb > 0 && (Int{b[nb - 1]}) == 32 -> nb -= 1
     }
     n: if na < nb -> na else -> nb
     loop i in 0..<n {
-        x := Int{a[i]}
-        y := Int{b[i]}
+        ^x: Int{a[i]}
+        ^y: Int{b[i]}
         if coll == COLL_NOCASE {
             x = lower_byte(x)
             y = lower_byte(y)
@@ -254,13 +254,13 @@ int_float_compare: fn(i: Int, r: Float) -> Int Never! {
     if r == math.INFINITY -> return -1
     if r == -math.INFINITY -> return 1
     bits: util.as_u64(math.to_bits(r))
-    e := (bits >> 52) & 2047
-    m := bits & 4503599627370495
+    ^e: (bits >> 52) & 2047
+    ^m: bits & 4503599627370495
     if e == 0 -> e = 1 else -> m += 4503599627370496
     if bits >= 9223372036854775808 -> m = 0 - m
     shift: e - 1075
-    lhs := i
-    rhs := m
+    ^lhs: i
+    ^rhs: m
     if shift >= 0 -> rhs = m * (1 << shift) else -> lhs = i * (1 << (0 - shift))
     if lhs < rhs -> return -1
     if lhs > rhs -> return 1
@@ -342,7 +342,7 @@ UnpackedRecord: struct {
 
 // sqlite3VdbeAllocUnpackedRecord: room for n_key_field + 1 values.
 unpacked_record_alloc: fn(info: KeyInfo) -> UnpackedRecord Never! {
-    mem := [Mem]{}
+    ^mem: [Mem]{}
     loop _ in 0..<info.n_key_field + 1 -> mem.push(base.mem_null())
     UnpackedRecord{key_info: info, mem: mem, u_i: 0, u_z: [U8]{}, n_field: info.n_key_field + 1, default_rc: 0, err_code: 0, r1: 0, r2: 0, eq_seen: false}
 }
@@ -357,14 +357,14 @@ key_byte: fn(buf: [U8], at: Int) -> Int Never! {
 // getVarint32 at buf[at], reading zero bytes past the end.
 key_varint: fn(buf: [U8], at: Int) -> util.Varint Never! {
     if at + 9 <= buf.len() -> return get_varint32(buf, at)
-    tail := [U8]{}
+    ^tail: [U8]{}
     loop i in 0..<9 -> tail.push(U8{key_byte(buf, at + i)})
     get_varint32(tail, 0)
 }
 
 // The `n`-byte big-endian signed integer at buf[at].
 key_signed: fn(buf: [U8], at: Int, n: Int) -> Int Never! {
-    value := key_byte(buf, at)
+    ^value: key_byte(buf, at)
     if value >= 128 -> value -= 256
     loop i in 1..<n -> value = (value << 8) | key_byte(buf, at + i)
     value
@@ -372,7 +372,7 @@ key_signed: fn(buf: [U8], at: Int, n: Int) -> Int Never! {
 
 // buf[at..<at + n], zero-padded past the end.
 key_slice: fn(buf: [U8], at: Int, n: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<n -> out.push(U8{key_byte(buf, at + i)})
     out
 }
@@ -383,14 +383,14 @@ record_unpack: fn(info: KeyInfo, n_key: Int, key: [U8], p: ^UnpackedRecord) Neve
     p.default_rc = 0
     hdr: key_varint(key, 0)
     sz_hdr: hdr.value
-    idx := hdr.len
-    d := sz_hdr
-    u := 0
+    ^idx: hdr.len
+    ^d: sz_hdr
+    ^u: 0
     loop idx < sz_hdr && d <= n_key {
         t: key_varint(key, idx)
         idx += t.len
         n: serial_len(t.value)
-        m := serial_get(key_slice(key, d, n), 0, t.value, info.enc)
+        ^m: serial_get(key_slice(key, d, n), 0, t.value, info.enc)
         m.enc = info.enc
         if u < p.mem.len() -> p.mem[u] = m else -> p.mem.push(m)
         d += n
@@ -438,12 +438,12 @@ coll_of: fn(info: KeyInfo, i: Int) -> Int Never! {
 // first fields are known equal. A corrupt record sets p.err_code and
 // compares 0.
 record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord, skip: Bool) -> Int Never! {
-    d1 := 0
-    i := 0
-    sz_hdr1 := 0
-    idx1 := 0
+    ^d1: 0
+    ^i: 0
+    ^sz_hdr1: 0
+    ^idx1: 0
     if skip {
-        s1 := key_byte(buf, at + 1)
+        ^s1: key_byte(buf, at + 1)
         if s1 < 128 -> idx1 = 2 else {
             v: key_varint(buf, at + 1)
             s1 = v.value
@@ -467,8 +467,8 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord
     }
     loop {
         rhs: p.mem[i]
-        rc := 0
-        serial_type := 0
+        ^rc: 0
+        ^serial_type: 0
         if rhs.flags & (MEM_INT | MEM_INT_REAL) != 0 {
             serial_type = key_byte(buf, at + idx1)
             if serial_type >= 10 -> rc = if serial_type == 10 -> -1 else -> 1 else if serial_type == 0 {
@@ -571,7 +571,7 @@ record_compare_int: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -> I
 // vdbeRecordCompareString: the first field of p is a text compared BINARY
 // and the record's header size fits in one byte.
 record_compare_string: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -> Int Never! {
-    serial_type := key_byte(buf, at + 1)
+    ^serial_type: key_byte(buf, at + 1)
     if serial_type >= 128 {
         // (signed char)aKey1[1] < 0: the serial type is a longer varint.
         serial_type = key_varint(buf, at + 1).value
@@ -587,7 +587,7 @@ record_compare_string: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -
     }
     n: p.u_z.len()
     n_cmp: if n < n_str -> n else -> n_str
-    res := key_memcmp(buf, at + sz_hdr, p.u_z, n_cmp)
+    ^res: key_memcmp(buf, at + sz_hdr, p.u_z, n_cmp)
     if res > 0 -> return p.r2
     if res < 0 -> return p.r1
     res = n_str - n
@@ -639,30 +639,30 @@ compare_by: fn(kind: Int, n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -
 }
 
 #Test("records round-trip every storage class and integer width") {
-    values := [Mem]{base.mem_null(), base.mem_int(0), base.mem_int(1), base.mem_int(-1), base.mem_int(300), base.mem_int(-8388608), base.mem_int(2147483648), base.mem_int(140737488355327), base.mem_int(-9223372036854775808), base.mem_real(2.5), base.mem_real(-0.0), base.mem_text([U8]{104, 105}, base.UTF8), base.mem_blob([U8]{0, 255}), base.mem_text([U8]{}, base.UTF8)}
+    ^values: [Mem]{base.mem_null(), base.mem_int(0), base.mem_int(1), base.mem_int(-1), base.mem_int(300), base.mem_int(-8388608), base.mem_int(2147483648), base.mem_int(140737488355327), base.mem_int(-9223372036854775808), base.mem_real(2.5), base.mem_real(-0.0), base.mem_text([U8]{104, 105}, base.UTF8), base.mem_blob([U8]{0, 255}), base.mem_text([U8]{}, base.UTF8)}
     rec: make_record(values, 4)
-    back := decode_record(rec, base.UTF8) ?? panic("decode")
+    ^back: decode_record(rec, base.UTF8) ?? panic("decode")
     assert_eq(back.len(), values.len())
     loop i in 0..<values.len() {
-        x := back[i]
-        y := values[i]
+        ^x: back[i]
+        ^y: values[i]
         assert_eq(serial_type(x, 4), serial_type(y, 4))
     }
     assert_eq(make_record(back, 4), rec)
     // Schema format 1 stores 0 and 1 in a byte.
-    old := [Mem]{base.mem_int(0), base.mem_int(1)}
+    ^old: [Mem]{base.mem_int(0), base.mem_int(1)}
     assert_eq(make_record(old, 1), [U8]{3, 1, 1, 0, 1})
 }
 
 #Test("an IntReal past six bytes is stored as a REAL") {
-    m := base.mem_init(MEM_INT_REAL)
+    ^m: base.mem_init(MEM_INT_REAL)
     m.i = 1 << 50
     assert_eq(serial_type(m, 4), 7)
     assert(m.flags == MEM_REAL && m.r == Float{1 << 50})
-    z := base.mem_init(MEM_BLOB | MEM_ZERO)
+    ^z: base.mem_init(MEM_BLOB | MEM_ZERO)
     z.z = [U8]{7}
     z.i = 2
-    vals := [Mem]{z}
+    ^vals: [Mem]{z}
     assert_eq(make_record(vals, 4), [U8]{2, 18, 7, 0, 0})
 }
 
@@ -698,12 +698,12 @@ compare_by: fn(kind: Int, n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -
 }
 
 #Test("record comparisons follow sqlite3VdbeRecordCompare and its fast paths") {
-    vals := [Mem]{base.mem_int(5), base.mem_text("abc".bytes(), base.UTF8), base.mem_int(1)}
+    ^vals: [Mem]{base.mem_int(5), base.mem_text("abc".bytes(), base.UTF8), base.mem_int(1)}
     rec: make_record(vals, 4)
     n: rec.len()
     asc: KeyInfo{enc: base.UTF8, n_key_field: 2, n_all_field: 3, sort_flags: [Int]{0, 0, 0}, colls: [Int]{COLL_NONE, COLL_NONE, COLL_NONE}}
     // A record unpacked compares equal to itself.
-    p := unpacked_record_alloc(asc)
+    ^p: unpacked_record_alloc(asc)
     record_unpack(asc, n, rec, p)
     assert_eq(p.n_field, 3)
     assert_eq(record_compare(n, rec, 0, p), 0)
@@ -728,23 +728,23 @@ compare_by: fn(kind: Int, n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -
     assert(record_compare(n, rec, 0, p) > 0)
     // DESC inverts the order; BIGNULL takes the general comparison.
     desc: KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 1, sort_flags: [Int]{KEYINFO_ORDER_DESC}, colls: [Int]{COLL_NONE}}
-    d := unpacked_record_alloc(desc)
+    ^d: unpacked_record_alloc(desc)
     d.n_field = 1
     d.mem[0] = base.mem_int(4)
     k_desc: find_compare(d)
     assert_eq(k_desc, COMPARE_INT)
     assert(compare_by(k_desc, n, rec, 0, d) < 0 && record_compare(n, rec, 0, d) < 0)
     big: KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 1, sort_flags: [Int]{KEYINFO_ORDER_BIGNULL}, colls: [Int]{COLL_NONE}}
-    g := unpacked_record_alloc(big)
+    ^g: unpacked_record_alloc(big)
     g.n_field = 1
     g.mem[0] = base.mem_null()
     assert_eq(find_compare(g), COMPARE_GENERIC)
     assert(record_compare(n, rec, 0, g) < 0)
     // The string fast path, on a record whose first field is text.
-    svals := [Mem]{base.mem_text("abc".bytes(), base.UTF8), base.mem_int(7)}
+    ^svals: [Mem]{base.mem_text("abc".bytes(), base.UTF8), base.mem_int(7)}
     srec: make_record(svals, 4)
     sn: srec.len()
-    s := unpacked_record_alloc(asc)
+    ^s: unpacked_record_alloc(asc)
     s.n_field = 1
     s.mem[0] = base.mem_text("abd".bytes(), base.UTF8)
     k_str: find_compare(s)
@@ -759,7 +759,7 @@ compare_by: fn(kind: Int, n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -
     assert(compare_by(k_txt, n, rec, 0, s) < 0)
     // A NOCASE column compares through the general path.
     nocase: KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 2, sort_flags: [Int]{0, 0}, colls: [Int]{COLL_NOCASE, COLL_NONE}}
-    c := unpacked_record_alloc(nocase)
+    ^c: unpacked_record_alloc(nocase)
     c.n_field = 1
     c.mem[0] = base.mem_text("ABC".bytes(), base.UTF8)
     assert_eq(find_compare(c), COMPARE_GENERIC)

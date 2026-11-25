@@ -1180,7 +1180,7 @@ jet_driver_module_identity: fn(package_identity: String, path: String) -> String
 
 jet_driver_source_segments: fn(path: String, source: String) -> [SemaSourceSegment] Never! {
     bytes: source.bytes()
-    line_starts := [Int]{0}
+    ^line_starts: [Int]{0}
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) -> line_starts.push(index + 1)
     }
@@ -1212,11 +1212,11 @@ jet_driver_display_path: fn(entry_root: String, path: String) -> String Never! {
     if !path.starts_with("/") || !entry_root.starts_with("/") -> return path.copy()
     root_parts: jet_driver_path_segments(entry_root)
     path_parts: jet_driver_path_segments(path)
-    common := 0
+    ^common: 0
     loop common < root_parts.len() && common < path_parts.len() && root_parts[common] == path_parts[common] {
         common += 1
     }
-    parts := [String]{}
+    ^parts: [String]{}
     loop _ in common..<root_parts.len() -> parts.push("..")
     loop index in common..<path_parts.len() -> parts.push(path_parts[index])
     parts.join("/")
@@ -1224,7 +1224,7 @@ jet_driver_display_path: fn(entry_root: String, path: String) -> String Never! {
 
 // The non-empty `/`-separated segments of a path.
 jet_driver_path_segments: fn(path: String) -> [String] Never! {
-    segments := [String]{}
+    ^segments: [String]{}
     loop segment in path.split("/").to_list() {
         if segment.len() > 0 -> segments.push(segment)
     }
@@ -1243,9 +1243,9 @@ jet_driver_physical_path: fn(entry_root: String, display: String) -> String Neve
     if !display.starts_with("../") {
         return if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
     }
-    parts := jet_driver_path_segments(entry_root)
+    ^parts: jet_driver_path_segments(entry_root)
     loop segment in jet_driver_path_segments(display) {
-        if segment != ".." -> parts.push(segment) else if parts.len() > 0 -> _ := parts.pop()
+        if segment != ".." -> parts.push(segment) else if parts.len() > 0 -> ^_: parts.pop()
     }
     joined: parts.join("/")
     "/{joined}"
@@ -1285,15 +1285,15 @@ jet_driver_module_index_key: fn(package_identity: String, module_name: String) -
 }
 
 jet_driver_build_source_index: fn(source_units: [JetDriverSourceUnit]) -> JetDriverSourceIndexResult {
-    by_identity := [String:Int]{}
-    by_module_name := [String:Int]{}
-    ambiguous_module_names := [String:Bool]{}
-    by_path := [String:Int]{}
-    diagnostics := [Diagnostic]{}
+    ^by_identity: [String:Int]{}
+    ^by_module_name: [String:Int]{}
+    ^ambiguous_module_names: [String:Bool]{}
+    ^by_path: [String:Int]{}
+    ^diagnostics: [Diagnostic]{}
     loop (index, unit) in source_units {
         identity: jet_driver_source_identity(unit.package_identity, unit.path)
         module_key: jet_driver_module_index_key(unit.package_identity, unit.module_name)
-        valid := true
+        ^valid: true
         if unit.package_identity.len() == 0 {
             diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no package identity", "module identities must be scoped to the package selected by the loader", "resolve the package identity from its authorized manifest"))
             valid = false
@@ -1315,13 +1315,13 @@ jet_driver_build_source_index: fn(source_units: [JetDriverSourceUnit]) -> JetDri
             valid = false
         }
         if valid {
-            _ := by_identity.add(identity, index)
-            _ := by_path.add(unit.path, index)
+            ^_: by_identity.add(identity, index)
+            ^_: by_path.add(unit.path, index)
             if {
                 by_module_name.get(module_key) != None -> {
-                    _ := ambiguous_module_names.add(module_key, true)
+                    ^_: ambiguous_module_names.add(module_key, true)
                 }
-                else -> _ := by_module_name.add(module_key, index)
+                else -> ^_: by_module_name.add(module_key, index)
             }
         }
     }
@@ -1356,7 +1356,7 @@ jet_driver_receipt_field: fn(label: String, value: String) -> String Never! {
 jet_driver_receipt_closure: fn(verb: String, request: JetDriverCompileRequest, options: [String]) -> String Never! {
     compiler: request.host_facts.compiler_identity ?? ""
     target: request.host_facts.target_triple ?? ""
-    closure := jet_driver_receipt_field("schema", "jet.receipt-closure/v1")
+    ^closure: jet_driver_receipt_field("schema", "jet.receipt-closure/v1")
     verb_field: jet_driver_receipt_field("verb", verb)
     compiler_field: jet_driver_receipt_field("compiler", compiler)
     target_field: jet_driver_receipt_field("target", target)
@@ -1398,7 +1398,7 @@ jet_driver_script_dependency_identity: fn(dependency: JetDriverScriptDependency)
 // target triple and the package edition. The build clock and root policy
 // never enter.
 jet_driver_package_target_facts: fn(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
-    facts := [PackageKeyTargetFact]{
+    ^facts: [PackageKeyTargetFact]{
         {name: "active_os", value: request.host_facts.active_os ?? ""},
         {name: "edition", value: package.edition},
         {name: "host_arch", value: request.host_facts.host_arch ?? ""},
@@ -1425,7 +1425,7 @@ jet_driver_package_manifest_source: fn(package: JetDriverPackageInfo, snapshot: 
 // The package's exact loaded source bytes, including selected generated
 // modules, and its authorized package.jet manifest.
 jet_driver_package_source_digest: fn(package: JetDriverPackageInfo, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
-    files := [PackageKeySourceFile]{}
+    ^files: [PackageKeySourceFile]{}
     loop unit in source_units {
         if unit.package_identity != package.identity -> next
         source: jet_driver_source_unit_text(request, unit) ?? return None
@@ -1439,7 +1439,7 @@ jet_driver_package_source_digest: fn(package: JetDriverPackageInfo, request: Jet
 // first). `interface_digests` maps package identity to interface digest.
 jet_driver_package_check_key: fn(package: JetDriverPackageInfo, packages: [JetDriverPackageInfo], interface_digests: [String:String], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
     compiler: request.host_facts.compiler_identity ?? return None
-    dependencies := [PackageKeyDependency]{}
+    ^dependencies: [PackageKeyDependency]{}
     loop dependency in package.dependencies {
         loop candidate in packages {
             if candidate.root_index != dependency.target_root_index -> next

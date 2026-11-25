@@ -151,7 +151,7 @@ sm: fn(s: [SQLStackEntry], i: Int) -> Int Never! { s[i].major }
 
 // sqlite3ParserInit.
 new_parser: fn() -> SQLParser Never! {
-    stack := [SQLStackEntry]{}
+    ^stack: [SQLStackEntry]{}
     loop _i in 0..<tables.YYSTACKDEPTH {
         stack.push(SQLStackEntry{stateno: 0, major: 0, minor: no_tok()})
     }
@@ -162,7 +162,7 @@ new_parser: fn() -> SQLParser Never! {
 // following YYFALLBACK and YYWILDCARD.
 find_shift_action: fn(look0: Int, stateno: Int) -> Int Never! {
     if stateno > tables.YY_MAX_SHIFT -> return stateno
-    look := look0
+    ^look: look0
     loop {
         i: tables.YY_SHIFT_OFST[stateno] + look
         if tables.YY_LOOKAHEAD[i] == look -> return tables.YY_ACTION[i]
@@ -215,7 +215,7 @@ syntax_error: fn(a: ^ast.AST, t: ast.SQLTok) Never! {
 // the parse fails.
 parse_token: fn<B: SQLBuilder>(p: ^SQLParser, b: ^B, a: ^ast.AST, major: Int, minor: ast.SQLTok) -[DB]> Never! {
     end_of_input: major == 0
-    act := p.stack[p.tos].stateno
+    ^act: p.stack[p.tos].stateno
     loop {
         act = find_shift_action(major, act)
         if act >= tables.YY_MIN_REDUCE {
@@ -252,7 +252,7 @@ reduce: fn<B: SQLBuilder>(p: ^SQLParser, b: ^B, a: ^ast.AST, rule: Int, look: as
     nrhs: tables.YY_RULE_NRHS[rule]
     lhs: m + nrhs + 1
     keep: p.stack[lhs].minor
-    value := keep
+    ^value: keep
     if rule < 100 -> value = actions_ddl<B>(b, a, p.stack, m, rule, look, keep) else if rule < 178 {
         value = actions_query<B>(b, a, p.stack, m, rule, keep)
     } else if rule < 258 { value = actions_expr<B>(b, a, p.stack, m, rule, keep) } else if rule < tables.YYNRULE_WITH_ACTION {
@@ -271,7 +271,7 @@ reduce: fn<B: SQLBuilder>(p: ^SQLParser, b: ^B, a: ^ast.AST, rule: Int, look: as
 // tokenExpr: a leaf node for one token, dequoted when quoted.
 token_expr: fn(a: ^ast.AST, op: Int, t: ast.SQLTok) -> Int Never! {
     z: ast.tok_bytes(a, t)
-    e := ast.zero_expr(op)
+    ^e: ast.zero_expr(op)
     e.flags = ast.EP_LEAF
     e.w = t.z
     if z.len() > 0 && is_quote(Int{z[0]}) {
@@ -288,9 +288,9 @@ double_link_select: fn(a: ^ast.AST, p: Int) Never! {
     if a.selects[p].prior < 0 {
         return
     }
-    nxt := -1
-    lp := p
-    cnt := 1
+    ^nxt: -1
+    ^lp: p
+    ^cnt: 1
     loop {
         a.selects[lp].next_sel = nxt
         a.selects[lp].sel_flags = a.selects[lp].sel_flags | ast.SF_COMPOUND
@@ -511,7 +511,7 @@ actions_ddl: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, r
         37 -> {
             t: st(s, m)
             e: token_expr(a, tk.TK_STRING, t)
-            _ := ast.expr_id_to_true_false(a, e)
+            ^_: ast.expr_id_to_true_false(a, e)
             b.add_default_value(a, e, t.z, t.z + t.n)
             keep
         }
@@ -657,7 +657,7 @@ actions_ddl: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, r
         }
         // selectnowith ::= selectnowith multiselect_op oneselect
         88 -> {
-            rhs := sv(s, m)
+            ^rhs: sv(s, m)
             lhs: sv(s, m - 2)
             op: sv(s, m - 1)
             if rhs >= 0 && a.selects[rhs].prior >= 0 {
@@ -910,10 +910,10 @@ actions_query: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int,
         // cmd ::= with UPDATE orconf xfullname indexed_opt SET setlist from
         //         where_opt_ret
         157 -> {
-            src := sv(s, m - 5)
+            ^src: sv(s, m - 5)
             ast.src_list_indexed_by(a, src, st(s, m - 4))
             ast.expr_list_check_length(a, sv(s, m - 2), "set list")
-            from := sv(s, m - 1)
+            ^from: sv(s, m - 1)
             if from >= 0 {
                 if ast.src_len(a, from) > 1 {
                     sub: ast.select_new(a, -1, from, -1, -1, -1, -1, ast.SF_NESTED_FROM, -1)
@@ -1163,7 +1163,7 @@ actions_expr: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, 
             name: ast.SQLTok{z: op.z, n: util.clear_bits(op.n, LIKE_NOT_BIT)}
             l1: ast.expr_list_append(a, -1, sv(s, m))
             l: ast.expr_list_append(a, l1, sv(s, m - 2))
-            e := ast.expr_function(a, l, name, 0)
+            ^e: ast.expr_function(a, l, name, 0)
             if not -> e = ast.pexpr(a, tk.TK_NOT, e, -1)
             if e >= 0 -> ast.set_flags(a, e, ast.EP_INFIX_FUNC)
             tv(e)
@@ -1176,7 +1176,7 @@ actions_expr: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, 
             l1: ast.expr_list_append(a, -1, sv(s, m - 2))
             l2: ast.expr_list_append(a, l1, sv(s, m - 4))
             l: ast.expr_list_append(a, l2, sv(s, m))
-            e := ast.expr_function(a, l, name, 0)
+            ^e: ast.expr_function(a, l, name, 0)
             if not -> e = ast.pexpr(a, tk.TK_NOT, e, -1)
             if e >= 0 -> ast.set_flags(a, e, ast.EP_INFIX_FUNC)
             tv(e)
@@ -1227,7 +1227,7 @@ actions_expr: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, 
         218 -> {
             l1: ast.expr_list_append(a, -1, sv(s, m - 2))
             l: ast.expr_list_append(a, l1, sv(s, m))
-            e := ast.pexpr(a, tk.TK_BETWEEN, sv(s, m - 4), -1)
+            ^e: ast.pexpr(a, tk.TK_BETWEEN, sv(s, m - 4), -1)
             if e >= 0 -> a.exprs[e].x = l else -> ast.expr_list_delete(a, l)
             if sv(s, m - 3) != 0 -> e = ast.pexpr(a, tk.TK_NOT, e, -1)
             tv(e)
@@ -1242,7 +1242,7 @@ actions_expr: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, 
         }
         // expr ::= expr in_op LP select RP
         223 -> {
-            e := ast.pexpr(a, tk.TK_IN, sv(s, m - 4), -1)
+            ^e: ast.pexpr(a, tk.TK_IN, sv(s, m - 4), -1)
             ast.pexpr_add_select(a, e, sv(s, m - 1))
             if sv(s, m - 3) != 0 -> e = ast.pexpr(a, tk.TK_NOT, e, -1)
             tv(e)
@@ -1254,7 +1254,7 @@ actions_expr: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, 
             src: ast.src_list_append(a, -1, tb, db)
             sel: ast.select_new(a, -1, src, -1, -1, -1, -1, 0, -1)
             if sv(s, m) >= 0 -> ast.src_list_func_args(a, if sel >= 0 -> src else -> -1, sv(s, m))
-            e := ast.pexpr(a, tk.TK_IN, sv(s, m - 4), -1)
+            ^e: ast.pexpr(a, tk.TK_IN, sv(s, m - 4), -1)
             ast.pexpr_add_select(a, e, sel)
             if sv(s, m - 3) != 0 -> e = ast.pexpr(a, tk.TK_NOT, e, -1)
             tv(e)
@@ -1377,14 +1377,14 @@ actions_expr: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, 
 // the term's affinity from being used); one subquery becomes IN (SELECT);
 // a vector left side compares against a VALUES list.
 in_list: fn(a: ^ast.AST, lhs: Int, not: Int, list: Int) -> ast.SQLTok Never! {
-    e := lhs
+    ^e: lhs
     if list < 0 {
         ast.expr_unmap_and_delete(a, e)
         e = ast.expr(a, tk.TK_STRING, (if not != 0 -> "true" else -> "false").bytes())
-        if e >= 0 -> _ := ast.expr_id_to_true_false(a, e)
+        if e >= 0 -> ^_: ast.expr_id_to_true_false(a, e)
         return tv(e)
     }
-    rhs := ast.list_expr(a, list, 0)
+    ^rhs: ast.list_expr(a, list, 0)
     n: ast.list_len(a, list)
     if n == 1 && ast.expr_is_constant(a, rhs) && a.exprs[e].op != tk.TK_VECTOR {
         a.lists[list].items[0].expr = -1
@@ -1703,7 +1703,7 @@ actions_trigger: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: In
         335 -> keep
         // filter_over ::= filter_clause
         336 -> {
-            w := ast.new_window()
+            ^w: ast.new_window()
             w.frm_type = tk.TK_FILTER
             w.filter = sv(s, m)
             a.windows.push(w)
@@ -1713,7 +1713,7 @@ actions_trigger: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: In
         337 -> tv(sv(s, m - 1))
         // over_clause ::= OVER nm
         338 -> {
-            w := ast.new_window()
+            ^w: ast.new_window()
             w.name = Val(ast.tok_bytes(a, st(s, m)))
             a.windows.push(w)
             tv(a.windows.len() - 1)
@@ -1731,15 +1731,15 @@ actions_trigger: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: In
 // Freeing Parse.pNewTable and Parse.pNewTrigger after a failed parse is the
 // builder's, which owns them.
 run_parser: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST) -[DB]> Int Never! {
-    mx := a.limits[ast.LIMIT_SQL_LENGTH]
+    ^mx: a.limits[ast.LIMIT_SQL_LENGTH]
     a.ctx.rc = base.OK
-    p := new_parser()
-    pos := 0
-    last := -1
+    ^p: new_parser()
+    ^pos: 0
+    ^last: -1
     loop {
         t: tk.get_token(a.ctx.sql, pos)
-        n := t.len
-        kind := t.kind
+        ^n: t.len
+        ^kind: t.kind
         mx -= n
         if mx < 0 {
             a.ctx.rc = base.TOOBIG
@@ -1772,7 +1772,7 @@ run_parser: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST) -[DB]> Int Never! {
         pos += n
         if a.ctx.rc != base.OK -> break
     }
-    errs := 0
+    ^errs: 0
     if a.ctx.errmsg != None || (a.ctx.rc != base.OK && a.ctx.rc != base.DONE) {
         if a.ctx.errmsg == None -> a.ctx.errmsg = Val(base.error_string(a.ctx.rc))
         errs = 1
@@ -1917,8 +1917,8 @@ SQLRecorder: struct {
 
         finish_trigger: fn(^self, a: ^ast.AST, steps: Int, all: ast.SQLTok) Never! {
             t: ast.tok_text(a, all)
-            n := 0
-            st := steps
+            ^n: 0
+            ^st: steps
             loop st >= 0 {
                 n += 1
                 st = a.steps[st].next_step
@@ -1992,8 +1992,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("a SELECT parses into one statement") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "SELECT a, b + 1 AS c FROM t WHERE x > 2 ORDER BY a DESC LIMIT 3") == 0)
     assert(r.log == [String]{"select", "finish"})
     sel: r.sel
@@ -2006,8 +2006,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("syntax errors report the token") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "SELEC 1") == 1)
     assert(a.ctx.errmsg == Val("near \"SELEC\": syntax error"))
     assert(a.err_offset == 0)
@@ -2019,8 +2019,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("CREATE TABLE drives the table builder") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "CREATE TABLE IF NOT EXISTS t(a INTEGER PRIMARY KEY DESC, b VARCHAR(10) NOT NULL DEFAULT 'x', c CHECK(c > 0), UNIQUE(b)) WITHOUT ROWID, STRICT") == 0)
     opts: ast.TF_WITHOUT_ROWID | ast.TF_NO_VISIBLE_ROWID | ast.TF_STRICT
     dflt: ast.OE_DEFAULT
@@ -2030,8 +2030,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("compound selects link and VALUES rows stay one compound") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "SELECT 1 UNION SELECT 2 ORDER BY 1") == 0)
     s2: r.sel
     s1: a.selects[s2].prior
@@ -2048,8 +2048,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("IN lists simplify as parse.y does") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "SELECT x IN (1), x NOT IN (), x IN (1, 2), x IN (SELECT 1)") == 0)
     l: a.selects[r.sel].elist
     e0: ast.list_expr(a, l, 0)
@@ -2067,8 +2067,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("operators, LIKE and IS NULL build the right nodes") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "SELECT a NOT LIKE 'x%' ESCAPE '!', b IS NULL, c IS NOT d, -e, f BETWEEN 1 AND 2, CAST(g AS TEXT), h COLLATE nocase") == 0)
     l: a.selects[r.sel].elist
     e0: ast.list_expr(a, l, 0)
@@ -2088,8 +2088,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("window functions take their frame") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "SELECT sum(a) OVER (PARTITION BY b ORDER BY c ROWS BETWEEN 1 PRECEDING AND CURRENT ROW), count(*) FILTER (WHERE a > 0) OVER w FROM t WINDOW w AS (ORDER BY a)") == 0)
     l: a.selects[r.sel].elist
     f: ast.list_expr(a, l, 0)
@@ -2106,8 +2106,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("triggers collect their steps") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "CREATE TRIGGER tr AFTER INSERT ON t BEGIN UPDATE t SET a = 1; DELETE FROM t WHERE a = 2; END") == 0)
     after: tk.TK_AFTER
     ins: tk.TK_INSERT
@@ -2117,8 +2117,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("statements of every kind reach the builder") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "BEGIN IMMEDIATE; INSERT OR REPLACE INTO t(a) VALUES (1) ON CONFLICT DO NOTHING; PRAGMA main.cache_size = -100; ALTER TABLE t ADD COLUMN d INT DEFAULT 0; COMMIT") == 0)
     imm: tk.TK_IMMEDIATE
     rep: ast.OE_REPLACE
@@ -2127,8 +2127,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("variables number as sqlite3ExprAssignVarNumber does") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     assert(parse_with(a, r, "SELECT ?, ?5, :x, :x, ?") == 0)
     l: a.selects[r.sel].elist
     assert(a.exprs[ast.list_expr(a, l, 0)].icolumn == 1)
@@ -2142,9 +2142,9 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("deep nesting overflows the parser stack") {
-    a := ast.new_ast()
-    r := new_recorder()
-    sql := "SELECT "
+    ^a: ast.new_ast()
+    ^r: new_recorder()
+    ^sql: "SELECT "
     loop _i in 0..<120 -> sql = "{sql}("
     sql = "{sql}1"
     loop _i in 0..<120 -> sql = "{sql})"
@@ -2153,8 +2153,8 @@ parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
 }
 
 #Test("the SQL length limit stops the tokenizer") {
-    a := ast.new_ast()
-    r := new_recorder()
+    ^a: ast.new_ast()
+    ^r: new_recorder()
     a.limits[ast.LIMIT_SQL_LENGTH] = 10
     assert(parse_with(a, r, "SELECT 1, 2, 3") == 1)
     assert(a.ctx.rc == base.TOOBIG)

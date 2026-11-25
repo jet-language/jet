@@ -71,7 +71,7 @@ shared_output_pair: fn() -> JetCLIAdaptiveTable Never! {
 }
 
 shared_output_term_error: fn(term: [U8]) Never! {
-    facts := shared_output_facts()
+    ^facts: shared_output_facts()
     // copy: `term` stays with the caller (`term` is a read parameter: no move out of it, E0201) and
     // the new `Val` value owns its own.
     facts.term = Val(term.copy())
@@ -86,7 +86,7 @@ shared_output_term_error: fn(term: [U8]) Never! {
 }
 
 shared_output_profiles: fn() Never! {
-    facts := shared_output_facts()
+    ^facts: shared_output_facts()
     profile: shared_output_profile(facts)
     shared_output_require(profile.width == U64{100} && profile._ansi_enabled && profile.unicode_enabled && profile._progress_enabled && profile.human_enabled && !profile.machine_enabled, "Rust human terminal capabilities")
     shared_output_require(jet_cli_output_channel(profile, ._Renderable) == .HumanStdout && jet_cli_output_channel(profile, ._Machine) == .Hidden, "human primary channels")
@@ -167,7 +167,7 @@ shared_output_profiles: fn() Never! {
 
 shared_output_grids: fn() Never! {
     table: shared_output_pair()
-    facts := shared_output_facts()
+    ^facts: shared_output_facts()
     facts.tty = false
     facts.width = Val(U64{80})
     ascii: shared_output_render(table, shared_output_profile(facts))
@@ -186,7 +186,7 @@ shared_output_grids: fn() Never! {
 
     padding: [String]{"x   ", "   x"}
     loop (index, alignment) in ([JetCLITableAlignment]{.Left, .Right}) {
-        out := [U8]{}
+        ^out: [U8]{}
         jet_cli_table_append_pad(out, "x".bytes(), 4, alignment)
         shared_output_bytes(out, padding[index], "literal alignment")
     }
@@ -252,21 +252,21 @@ shared_output_text: fn() Never! {
 }
 
 shared_output_bounds: fn() Never! {
-    columns := [JetCLITableColumn]{}
+    ^columns: [JetCLITableColumn]{}
     loop _ in 0..<65 -> columns.push(jet_cli_table_column("c".bytes(), .Text))
-    cells := [JetCLITableCell]{}
+    ^cells: [JetCLITableCell]{}
     loop _ in 0..<65 -> cells.push(.Empty)
     row: jet_cli_table_row(cells)
     shared_output_require(row.cells.len() == 64, "row constructor cap")
     table: jet_cli_table(columns, [JetCLITableRow]{row})
     shared_output_require(table.columns.len() == 64 && table.rows[0].cells.len() == 64 && table.truncated, "column cap flags truncation")
-    source_columns := [JetCLITableColumn]{}
+    ^source_columns: [JetCLITableColumn]{}
     loop _ in 0..<64 -> source_columns.push(jet_cli_table_column("c".bytes(), .Text))
-    source_cells := [JetCLITableCell]{}
+    ^source_cells: [JetCLITableCell]{}
     loop _ in 0..<65 -> source_cells.push(.Empty)
     prebounded: jet_cli_table(source_columns, [JetCLITableRow]{jet_cli_table_row(source_cells)})
     shared_output_require(!prebounded.truncated, "row pre-truncation is not detected again")
-    rows := [JetCLITableRow]{}
+    ^rows: [JetCLITableRow]{}
     loop _ in 0..<4097 -> rows.push(JetCLITableRow{cells: [JetCLITableCell]{}})
     row_bound: jet_cli_table([JetCLITableColumn]{}, rows)
     shared_output_require(row_bound.rows.len() == 4096 && row_bound.truncated, "row cap")

@@ -16,10 +16,12 @@ jet_cli_derived_explanation_output: fn(explanation: DiagnosticExplanation, deriv
 }
 
 jet_cli_derived_explanation_verb: fn(explanation: DiagnosticExplanation, derivation: DerivationRecord?, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
-    if !json -> return JetDriverVerbOutput{stdout: diagnostic_explanation_render(explanation, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if !json {
+        return JetDriverVerbOutput{stdout: diagnostic_explanation_render(explanation, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     // A retired or reserved row runs in no stage: its stage is null.
     stage: if explanation.stage == "" -> None else -> Val(explanation.stage)
-    fields := [JetCLIStatusField]{
+    ^fields: [JetCLIStatusField]{
         jet_cli_status_field("code", jet_cli_status_text(explanation.code)),
         jet_cli_status_field("stage", jet_cli_status_optional_text(stage)),
         jet_cli_status_field("what", jet_cli_status_text(explanation.what ?? explanation.meaning)),
@@ -82,7 +84,7 @@ jet_cli_is_diagnostic_type_path: fn(value: String) -> Bool Never! {
 // literal with the `{self.field}` holes it fills.
 jet_cli_explain_loaded_diagnostic_type: fn(name: String, loaded: JetDriverSourceQueryResult, color: Bool, json: Bool) -> JetCLIPlan Never! {
     if !loaded.complete {
-        stderr := ""
+        ^stderr: ""
         loop diagnostic in loaded.diagnostics -> stderr = "{stderr}{diagnostic.what}\n"
         return jet_cli_done("", stderr, JET_DRIVER_EXIT_USER_ERROR)
     }
@@ -92,7 +94,7 @@ jet_cli_explain_loaded_diagnostic_type: fn(name: String, loaded: JetDriverSource
     loop source_module in loaded.modules {
         if source_module.module_name != module_name -> next
         loop item in source_module.program.items {
-            methods := [Func]?{None}
+            ^methods: [Func]?{None}
             if item == .Impl(definition) && definition.type_name == type_name && definition.trait_name == .Val(trait_name) && trait_name == "Diagnostic" {
                 methods = Val(definition.methods)
             }

@@ -20,7 +20,7 @@ BUILD_SYSTEM_HARNESS: "Tools/Gauntlet/Harness/BuildSystem.mjs"
 // not the axis the harness measures.
 build_system_contract_issues: fn(axis: Dyn) -> [String] {
     if axis == Dyn.Null -> return ["build_system axis is missing"]
-    rules := [ContractRule]{
+    ^rules: [ContractRule]{
         {holds: text_at(axis, "status") == Val("required"), issue: "build_system must be required"},
         {holds: text_at(axis, "schema") == Val(BUILD_SYSTEM_SCHEMA), issue: "build_system schema must be {BUILD_SYSTEM_SCHEMA}"},
         {holds: text_at(axis, "metric") == Val("wall_ns"), issue: "build_system metric must be wall_ns"},
@@ -75,10 +75,10 @@ run_build_system_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> BuildSystemRe
     done: process.cmd(["node", harness, "--jet", run.jet_bin, "--work-dir", files.join(axis_dir, "work"), "--receipt", receipt_path]).cwd(run.repo_dir).stdout(.Inherit).stderr(.Inherit).run()
     // A missing receipt reads as null: it has no cells and no failures.
     receipt: read_json(receipt_path) ?? Dyn.Null
-    blockers := if receipt == Dyn.Null -> ["the build-system harness exited {done.code} without a receipt"] else -> texts_at(receipt, "failures")
+    ^blockers: if receipt == Dyn.Null -> ["the build-system harness exited {done.code} without a receipt"] else -> texts_at(receipt, "failures")
     cells: items_at(receipt, "cells")
-    metrics := [{key: String, value: Dyn}]{}
-    readings := [{key: String, value: Dyn}]{}
+    ^metrics: [{key: String, value: Dyn}]{}
+    ^readings: [{key: String, value: Dyn}]{}
     loop cell in cells {
         id: text_or_empty(cell, "id")
         jet: dyn_at(cell, "jet/median_ns")

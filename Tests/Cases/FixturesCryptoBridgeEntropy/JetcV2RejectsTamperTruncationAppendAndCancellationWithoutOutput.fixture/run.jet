@@ -7,20 +7,20 @@ use {
 }
 
 filled: fn(value: Int, count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<count -> out.push((U8{value}))
     out
 }
 
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
 
 hex: fn(text: String) -> [U8] {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<(raw.len() /% 2) {
         a: Int{raw[2 * i]}
         b: Int{raw[2 * i + 1]}
@@ -32,7 +32,7 @@ hex: fn(text: String) -> [U8] {
 }
 
 little: fn(bytes: [U8], at: Int, width: Int) -> Int {
-    out := 0
+    ^out: 0
     loop i in 0..<width -> out |= Int{bytes[at + i]} << (8 * i)
     out
 }
@@ -48,7 +48,7 @@ store_little: fn(bytes: ^[U8], at: Int, width: Int, value: Int) {
     canonical: files.read_bytes("sealed.jetc") ?? panic("canonical")
     body_at: 20 + little(canonical, 8, 4)
     loop mode in 0..<17 {
-        hostile := canonical.copy()
+        ^hostile: canonical.copy()
         if mode == 0 {
             last: hostile.len() - 1
             hostile[last] = (U8{Int{hostile[last]} ~ 1})

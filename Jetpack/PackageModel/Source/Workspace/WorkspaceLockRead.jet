@@ -66,9 +66,9 @@ pkg_workspace_lock_load_checked_file: fn(cache: ^WorkspaceDeclarationCache, reso
         // Only a checked workspace index may persist member-index facts.
         if !is_index -> return None
         present: source ?? return None
-        physical_paths := [String]{}
-        names := [String]{}
-        checked_members := [CheckedMember]{}
+        ^physical_paths: [String]{}
+        ^names: [String]{}
+        ^checked_members: [CheckedMember]{}
         loop member in lock.workspace_members {
             if member.name == "" || member.path == "" || files.is_abs(member.path) || pkg_workspace_path_has_parent(member.path) {
                 return None
@@ -97,7 +97,7 @@ pkg_workspace_lock_load_checked_file: fn(cache: ^WorkspaceDeclarationCache, reso
         resolver.revalidate_source(present) ?? return None
     }
     plan_source_digest: if lock.workspace_members.len() > 0 -> lock.workspace_members[0].source_digest else -> source_digest
-    members := [WorkspacePlanMember]{}
+    ^members: [WorkspacePlanMember]{}
     if is_index {
         loop member in lock.workspace_members {
             members.push(WorkspacePlanMember{name: member.name, path: member.path, canonical_path: member.canonical_path})

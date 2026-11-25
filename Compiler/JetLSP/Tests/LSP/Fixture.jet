@@ -18,10 +18,10 @@ use {
 LSPFixtureChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
-            modules := [JetDriverDocModule]{}
-            diagnostics := [Diagnostic]{}
+            ^modules: [JetDriverDocModule]{}
+            ^diagnostics: [Diagnostic]{}
             loop overlay in overlays {
-                parsed := parse_source(overlay.source.bytes())
+                ^parsed: parse_source(overlay.source.bytes())
                 alias: lsp_fixture_alias(overlay.path)
                 modules.push(
                     JetDriverDocModule{
@@ -44,17 +44,17 @@ LSPFixtureChecker: struct {
         }
 
         stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
-            bytes := [U8]{}
+            ^bytes: [U8]{}
             loop overlay in overlays.move() {
                 if overlay.path == entry -> bytes = overlay.source.bytes()
             }
-            answers := [[JetDriverToolStageItem]]{}
+            ^answers: [[JetDriverToolStageItem]]{}
             loop body in bodies {
-                lead := body.start
+                ^lead: body.start
                 loop lead < body.end && (bytes[lead] == (U8{32}) || bytes[lead] == (U8{10})) {
                     lead += 1
                 }
-                word := lead
+                ^word: lead
                 loop word < body.end && bytes[word] != (U8{32}) && bytes[word] != (U8{10}) {
                     word += 1
                 }
@@ -69,11 +69,11 @@ LSPFixtureChecker: struct {
         }
 
         failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
-            sites := [Int]{}
+            ^sites: [Int]{}
             loop overlay in overlays {
                 if overlay.path != entry -> next
                 text: overlay.source
-                at := text.find("fail()")
+                ^at: text.find("fail()")
                 loop at >= 0 {
                     sites.push(at + 6)
                     later: (String.from_bytes(text.bytes().slice(at + 6, text.bytes().len())) ?? panic("a cut after `fail()` keeps whole characters")).find("fail()")
@@ -86,10 +86,16 @@ LSPFixtureChecker: struct {
         // The saved workspace below `/w`: `ClosedFirst` in `/w/first`,
         // `DiskSecond` in `/w/second` and `AddedThird` in `/w/third`.
         sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
-            saved := [JetDriverSourceDocument]{}
-            if lsp_path_below("/w/first/closed.jet", root) -> saved.push(JetDriverSourceDocument{path: "/w/first/closed.jet", source: "ClosedFirst: fn() {{}}\n"})
-            if lsp_path_below("/w/second/open.jet", root) -> saved.push(JetDriverSourceDocument{path: "/w/second/open.jet", source: "DiskSecond: fn() {{}}\n"})
-            if lsp_path_below("/w/third/added.jet", root) -> saved.push(JetDriverSourceDocument{path: "/w/third/added.jet", source: "AddedThird: fn() {{}}\n"})
+            ^saved: [JetDriverSourceDocument]{}
+            if lsp_path_below("/w/first/closed.jet", root) {
+                saved.push(JetDriverSourceDocument{path: "/w/first/closed.jet", source: "ClosedFirst: fn() {{}}\n"})
+            }
+            if lsp_path_below("/w/second/open.jet", root) {
+                saved.push(JetDriverSourceDocument{path: "/w/second/open.jet", source: "DiskSecond: fn() {{}}\n"})
+            }
+            if lsp_path_below("/w/third/added.jet", root) {
+                saved.push(JetDriverSourceDocument{path: "/w/third/added.jet", source: "AddedThird: fn() {{}}\n"})
+            }
             saved
         }
     }
@@ -129,7 +135,7 @@ lsp_test_open: fn(server: ^LSPServer, uri: String, text: String) Never! {
 
 // A server with the main fixture open.
 lsp_test_main_server: fn() -> LSPServer Never! {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN)
     server
 }

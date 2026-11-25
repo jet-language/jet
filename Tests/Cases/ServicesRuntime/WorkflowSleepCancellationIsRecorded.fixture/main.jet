@@ -8,7 +8,7 @@ use {
 worker: fn() {}
 
 sleeping_workflow: fn(store_path: String, ready: Sender<Int>) {
-    tree := service.tree("checkout")
+    ^tree: service.tree("checkout")
     store: service.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
     tree.worker("activities", worker, capacity: 1) ?? panic("worker")
@@ -33,7 +33,7 @@ run: fn() {
     { sender: ready, receiver: started }: channel<Int>()
     task_handle: task sleeping_workflow(store_path.copy(), ready)
     started.receive() ?? panic("workflow did not start")
-    tries := 0
+    ^tries: 0
     loop !sleep_recorded(store_path.copy()) {
         if tries == 2000 -> panic("the workflow never recorded its sleep")
         time.sleep(5ms)
@@ -46,7 +46,7 @@ run: fn() {
         .Ok(_) -> print("completed")
     }
 
-    tree := service.tree("checkout")
+    ^tree: service.tree("checkout")
     store: service.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
     tree.worker("activities", worker, capacity: 1) ?? panic("worker")

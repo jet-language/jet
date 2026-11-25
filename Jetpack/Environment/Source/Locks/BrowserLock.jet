@@ -61,7 +61,7 @@ env_browser_lock_binary: fn(project_root: String, engine_input: String, binary: 
     if !files.is_file(binary) -> return Err(BrowserLockError.MissingBinary(binary))
     absolute: files.canonicalize(binary) ?? return Err(BrowserLockError.IO("could not resolve {binary}: {err}"))
     hashed: env_browser_hash_file(absolute)
-    locked := LockedBrowser{
+    ^locked: LockedBrowser{
         engine: engine,
         version: version,
         binary: absolute,

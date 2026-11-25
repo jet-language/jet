@@ -41,7 +41,7 @@ sema_head_pattern_pattern_span: fn(pattern: Pattern) -> Span {
 }
 
 sema_head_pattern_payload_types: fn(payload: VariantPayload) -> [Type] Never! {
-    types := [Type]{}
+    ^types: [Type]{}
     if payload == {
         .Unit -> {}
         .Single(ty, _) -> { types.push(ty.copy()) }
@@ -53,18 +53,18 @@ sema_head_pattern_payload_types: fn(payload: VariantPayload) -> [Type] Never! {
 }
 
 sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: ^[Diagnostic]) -> Func {
-    folded := heads[0]
-    enum_name := String?{None}
-    invalid := false
-    arms := [SwitchArm]{}
+    ^folded: heads[0]
+    ^enum_name: String?{None}
+    ^invalid: false
+    ^arms: [SwitchArm]{}
 
     loop head in heads {
         pattern: head.head_pattern ?? {
             invalid = true
             next
         }
-        pattern_span := sema_head_pattern_pattern_span(pattern)
-        variant_name := String?{None}
+        ^pattern_span: sema_head_pattern_pattern_span(pattern)
+        ^variant_name: String?{None}
         if pattern == {
             .Variant(name, _, _, _) -> variant_name = Val(name)
             .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
@@ -76,10 +76,10 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
         }
         variant: variant_name ?? ""
 
-        candidate := SemaHeadPatternVariant?{None}
-        candidate_enum := ""
-        candidate_payload := VariantPayload.Unit
-        ambiguous := false
+        ^candidate: SemaHeadPatternVariant?{None}
+        ^candidate_enum: ""
+        ^candidate_payload: VariantPayload.Unit
+        ^ambiguous: false
         loop row in variants {
             if row.name == variant {
                 if {
@@ -112,11 +112,11 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
             }
         }
 
-        expected := sema_head_pattern_payload_types(candidate_payload)
-        payload_index := 0
+        ^expected: sema_head_pattern_payload_types(candidate_payload)
+        ^payload_index: 0
         loop payload_index < head.params.len() && payload_index < expected.len() {
-            parameter := head.params[payload_index]
-            expected_type := expected[payload_index]
+            ^parameter: head.params[payload_index]
+            ^expected_type: expected[payload_index]
             if parameter.ty != expected_type {
                 diagnostics.push(sema_error("E0305", parameter.ty_span, "multi-head binding `{parameter.name}` has type `{type_name(parameter.ty)}` but variant `{variant}` carries `{type_name(expected_type)}`", "head bindings must use the variant payload types", "write `{type_name(expected_type)}` for this binding"))
                 invalid = true
@@ -124,7 +124,7 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
             payload_index += 1
         }
 
-        subject := Expr.Ident{name: "__jet_multi_head_subject", span: folded.name_span, id: AST_NODE_GENERATED}
+        ^subject: Expr.Ident{name: "__jet_multi_head_subject", span: folded.name_span, id: AST_NODE_GENERATED}
         arms.push(
             SwitchArm{
                 cond: Expr.PatternTest{subject: subject, pattern: pattern, span: pattern_span, id: AST_NODE_GENERATED},
@@ -139,10 +139,10 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
         return folded
     }
     enum_name_value: enum_name ?? ""
-    last_head := heads[heads.len() - 1]
-    full_span := Span{start: folded.span.start, end: last_head.span.end}
-    subject_name := "__jet_multi_head_subject"
-    subject := Expr.Ident{name: subject_name, span: folded.name_span, id: AST_NODE_GENERATED}
+    ^last_head: heads[heads.len() - 1]
+    ^full_span: Span{start: folded.span.start, end: last_head.span.end}
+    ^subject_name: "__jet_multi_head_subject"
+    ^subject: Expr.Ident{name: subject_name, span: folded.name_span, id: AST_NODE_GENERATED}
     folded.params = [Param]{
         Param{
             convention: AccessConvention.Read,
@@ -173,8 +173,8 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
 // position. Variants come from the module's enums. Items without a head
 // pattern are left in place, uncopied.
 sema_head_patterns_fold_items: fn(items: ^[Item], diagnostics: ^[Diagnostic]) Never! {
-    has_heads := false
-    variants := [SemaHeadPatternVariant]{}
+    ^has_heads: false
+    ^variants: [SemaHeadPatternVariant]{}
     loop item in items {
         if item == {
             .Enum(definition) -> {
@@ -191,15 +191,15 @@ sema_head_patterns_fold_items: fn(items: ^[Item], diagnostics: ^[Diagnostic]) Ne
     if !has_heads {
         return
     }
-    groups := [SemaHeadPatternGroup]{}
-    ordered := [SemaHeadPatternOrderedItem]{}
+    ^groups: [SemaHeadPatternGroup]{}
+    ^ordered: [SemaHeadPatternOrderedItem]{}
     loop item in items {
-        head := Func?{None}
+        ^head: Func?{None}
         if item == .Func(function) {
             if function.head_pattern != None -> head = Val(function)
         }
         if head == .Val(function) {
-            group_index := 0
+            ^group_index: 0
             loop group_index < groups.len() && groups[group_index].name != function.name {
                 group_index += 1
             }
@@ -212,7 +212,7 @@ sema_head_patterns_fold_items: fn(items: ^[Item], diagnostics: ^[Diagnostic]) Ne
         }
         ordered.push(SemaHeadPatternOrderedItem.Item{item: item})
     }
-    folded := [Item]{}
+    ^folded: [Item]{}
     loop entry in ordered {
         if entry == {
             .Item(item) -> { folded.push(item) }

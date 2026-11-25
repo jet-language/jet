@@ -21,7 +21,7 @@ impl NixEvaluator {
             }
             .AttrValues -> {
                 fields: nixeval_attribute_set(argument, "attribute set")
-                values := [Int]{}
+                ^values: [Int]{}
                 loop name in nixeval_sorted(fields.keys().to_list()) -> values.push(fields[name])
                 NixEvalValue.List(values)
             }
@@ -53,7 +53,7 @@ impl NixEvaluator {
             }
             .ConcatLists -> {
                 lists: nixeval_list(argument, "list of lists")
-                flattened := [Int]{}
+                ^flattened: [Int]{}
                 loop list in lists {
                     forced: self.force(list)
                     items: forced.list_items() ?? return Err(NixEvalError.TypeMismatch{expected: "list of lists", actual: "non-list item"})
@@ -101,7 +101,7 @@ impl NixEvaluator {
 
     // `builtins.attrNames`: the attribute names in key order, as strings.
     attribute_names: fn(^self, fields: [String:Int]) -> NixEvalValue Never! {
-        names := [Int]{}
+        ^names: [Int]{}
         loop name in nixeval_sorted(fields.keys().to_list()) {
             names.push(self.value_thunk(NixEvalValue.Str(name)))
         }
@@ -152,7 +152,7 @@ impl NixEvaluator {
             .Map | .Filter -> {
                 values: nixeval_list(second, "list")
                 keep_matches: operation == NixEvalOperation.Filter
-                output := [Int]{}
+                ^output: [Int]{}
                 loop value in values {
                     result: self.apply(first, value)
                     if !keep_matches {
@@ -167,8 +167,8 @@ impl NixEvaluator {
             .ConcatStringsSep -> {
                 separator: first.plain_string()
                 values: nixeval_list(second, "list")
-                output := [U8]{}
-                contexts := [String]{}
+                ^output: [U8]{}
+                ^contexts: [String]{}
                 loop index in 0..<values.len() {
                     if index > 0 -> nixeval_push_text(output, separator)
                     forced: self.force(values[index])
@@ -189,8 +189,8 @@ impl NixEvaluator {
                 subject_value: self.force(arguments[2])
                 subject: subject_value.stringify()
                 bytes: subject.value.bytes()
-                output := [U8]{}
-                position := 0
+                ^output: [U8]{}
+                ^position: 0
                 loop position < bytes.len() {
                     matched: nixeval_first_match(bytes, from, position)
                     if matched >= 0 {
@@ -213,9 +213,9 @@ impl NixEvaluator {
                     return Err(NixEvalError.Invalid("negative start position in substring"))
                 }
                 bytes: subject.value.bytes()
-                output := [U8]{}
-                position := 0
-                scalar := 0
+                ^output: [U8]{}
+                ^position: 0
+                ^scalar: 0
                 loop position < bytes.len() {
                     width: nixeval_scalar_width(bytes, position)
                     if scalar >= start && (length < 0 || scalar < start + length) {
@@ -231,7 +231,7 @@ impl NixEvaluator {
 
     string_list: fn(^self, value: NixEvalValue) -> [String] NixEvalError! {
         items: nixeval_list(value, "string list")
-        strings := [String]{}
+        ^strings: [String]{}
         loop item in items {
             forced: self.force(item)
             strings.push(forced.plain_string())
@@ -422,8 +422,8 @@ nixeval_fetch_name: fn(url: String) -> String Never! {
     base: if query < 0 -> bytes else -> bytes[0..<query]
     fragment: nixeval_first_byte(base, 35)
     end: if fragment < 0 -> base.len() else -> fragment
-    stop := end
-    index := end - 1
+    ^stop: end
+    ^index: end - 1
     loop index >= -1 {
         if index < 0 || (Int{base[index]}) == 47 {
             if stop > index + 1 -> return nixeval_slice(base, index + 1, stop)

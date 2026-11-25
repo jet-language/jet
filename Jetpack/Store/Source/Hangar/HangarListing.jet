@@ -81,8 +81,8 @@ store_is_hangar_internal_directory: fn(name: String) -> Bool Never! {
 // cannot be healthy to one command and stale to the other.
 store_inspect_leases: fn(roots: HangarRoots) -> LeaseInventory StoreError! {
     stale_flags: store_lease_nodes_unlocked(roots)
-    active := 0
-    stale := 0
+    ^active: 0
+    ^stale: 0
     loop flag in stale_flags {
         if {
             flag -> stale += 1
@@ -98,7 +98,7 @@ store_inspect_leases: fn(roots: HangarRoots) -> LeaseInventory StoreError! {
 store_audit_read_only: fn(verification: StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
     graph: store_closure_graph_read_only(verification, roots)
     entries: store_list_read_only_checked(roots)
-    known := [String:Bool]{}
+    ^known: [String:Bool]{}
     loop entry in entries -> known[entry.id] = true
 
     hangar: roots.hangar_dir()
@@ -129,7 +129,7 @@ store_audit_read_only: fn(verification: StoreVerification, roots: HangarRoots) -
         if metadata != record.package_meta {
             return Err(StoreError.InvalidData("metadata projection for `{entry.id}` disagrees with the committed closure record"))
         }
-        expected_outputs := entry.named_outputs.copy()
+        ^expected_outputs: entry.named_outputs.copy()
         expected_outputs["out"] = entry.envelope.output_hash
         if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs || record.references != store_sorted_unique(entry.references) || (record.producer_record != "" && record.producer_record != entry.producer_record) {
             return Err(StoreError.InvalidData("closure graph for `{entry.id}` disagrees with its metadata projection"))
@@ -153,7 +153,7 @@ store_audit_read_only: fn(verification: StoreVerification, roots: HangarRoots) -
 
 // The package record ids of `graph` in key order.
 store_sorted_record_ids: fn(graph: ClosureGraph) -> [String] Never! {
-    ids := graph.records.keys().to_list()
+    ^ids: graph.records.keys().to_list()
     ids.sort()
     ids
 }
@@ -170,7 +170,7 @@ store_list_checked: fn(verification: StoreVerification, roots: HangarRoots) -> [
 store_list_checked_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
     _: store_migrate_closure_graph_unlocked(verification, roots)
     entries: store_list_unlocked(roots)
-    healthy := [StoreEntry]{}
+    ^healthy: [StoreEntry]{}
     loop entry in entries {
         if entry.envelope.output_hash == "" {
             return Err(StoreError.InvalidData("Hangar object `{entry.id}` has no output digest"))
@@ -250,7 +250,7 @@ store_lease_nodes_unlocked: fn(roots: HangarRoots) -> [Bool] StoreError! {
     if metadata.is_symlink || !metadata.is_dir {
         return Err(StoreError.InvalidData("Hangar lease directory is not a real directory; repair the path before recovery"))
     }
-    nodes := [Bool]{}
+    ^nodes: [Bool]{}
     loop entry in files.list_dir(leases) {
         text: entry.name
         // Executable-lease recovery quarantines are outside the live lease
@@ -316,7 +316,7 @@ store_entry_id: fn(name: String, version: String, reference: String, out: String
 // that path would make the same locked result look different on every
 // checkout or machine.
 store_content_addressed_entry_id: fn(name: String, version: String, reference: String, output_hash: String) -> String Never! {
-    canonical := "jet.content-entry.v1".bytes()
+    ^canonical: "jet.content-entry.v1".bytes()
     canonical.push(U8{0})
     store_push_bytes(canonical, reference.bytes())
     canonical.push(U8{0})

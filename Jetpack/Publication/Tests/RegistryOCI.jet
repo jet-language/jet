@@ -52,14 +52,14 @@ publication_oci_test_subject: fn() -> String Never! {
 }
 
 publication_oci_test_entry: fn() -> PublicationIndexEntry Never! {
-    entry := publication_index_test_entry("ref-kit", "1.0.0", false)
+    ^entry: publication_index_test_entry("ref-kit", "1.0.0", false)
     entry.content_hash = publication_oci_test_subject()
     entry.fingerprint = "sha256-fingerprint"
     entry
 }
 
 publication_oci_test_descriptors: fn() -> [PublicationOCIDescriptor] Never! {
-    out := [PublicationOCIDescriptor]{}
+    ^out: [PublicationOCIDescriptor]{}
     loop kind in
         ([String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}) {
         out.push(PublicationOCIDescriptor{artifact_type: kind, digest: publication_oci_test_subject(), size: 7})
@@ -87,7 +87,7 @@ publication_oci_test_descriptors: fn() -> [PublicationOCIDescriptor] Never! {
 }
 
 #Test("OCI payload exact unsigned signed provenance and reproducibility bytes") {
-    entry := publication_oci_test_entry()
+    ^entry: publication_oci_test_entry()
     subject: entry.content_hash
     assert_eq(publication_oci_signature_payload(entry) ?? panic("signature"), "jet-oci-signature-v1\nsubject={subject}\nname=ref-kit\nversion=1.0.0\npublic-key=\nsignature=\nstatus=unsigned\n")
     entry.public_key = "aa"
@@ -189,7 +189,7 @@ publication_oci_test_descriptors: fn() -> [PublicationOCIDescriptor] Never! {
     files.symlink(path, link) ?? panic("link")
     assert(publication_read_oci_file(link, 5) == .Err(.InvalidInput(_)))
     assert(publication_write_oci_file(link, "first".bytes(), "OCI referrer blob") == .Err(.InvalidInput(_)))
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<PUBLICATION_MAX_OCI_REFERRER_BYTES -> bytes.push(U8{120})
     large: files.join(repo, "large")
     publication_write_oci_file(large, bytes, "OCI referrer blob") ?? panic("4 MiB exact")
@@ -252,7 +252,7 @@ publication_oci_test_write_outcome: fn(path: String, payload: String) -[FS, Env,
 publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> [PublicationOCIDescriptor] Never! {
     root: publication_oci_referrer_root(repo, entry.content_hash) ?? panic("root")
     payloads: [String]{publication_registry_spdx(None, entry.name, entry.version, entry.content_hash), publication_oci_signature_payload(entry) ?? panic("signature"), publication_oci_provenance_payload(entry) ?? panic("provenance"), publication_oci_reproducibility_payload(entry) ?? panic("reproducibility")}
-    descriptors := publication_oci_test_descriptors()
+    ^descriptors: publication_oci_test_descriptors()
     loop index in 0..<4 {
         digest: "sha256-{pkg_sha256_hex(payloads[index].bytes())}"
         descriptors[index].digest = digest.copy()
@@ -272,7 +272,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     index: files.join(root, PUBLICATION_OCI_REFERRER_INDEX)
     assert_eq(publication_referrer_index_digest(repo, entry) ?? panic("digest"), "sha256-{pkg_sha256_hex((publication_render_oci_index(entry.content_hash, descriptors)).bytes())}")
     original: publication_read_oci_file(index, PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? panic("index bytes")
-    changed := descriptors.copy()
+    ^changed: descriptors.copy()
     changed[0].size += 1
     files.write(index, publication_render_oci_index(entry.content_hash, changed)) ?? panic("size tamper")
     assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidInput(_)))
@@ -282,7 +282,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     files.write(blob, "x".repeat(bytes.len())) ?? panic("same length digest tamper")
     assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidInput(_)))
     files.write_bytes(blob, bytes) ?? panic("restore blob")
-    changed_entry := entry.copy()
+    ^changed_entry: entry.copy()
     changed_entry.public_key = "changed"
     assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidInput(_)))
     changed_entry = entry.copy()
@@ -309,7 +309,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     repo: publication_index_test_root("oci-finalize")
     source: publication_index_test_root("oci-finalize-source")
     files.write(files.join(source, "package.jet"), "package bytes\n") ?? panic("source")
-    entry := publication_oci_test_entry()
+    ^entry: publication_oci_test_entry()
     entry.content_hash = foundation_tree_hash(source)
     _: publication_publish_artifact(repo, source, entry.name, entry.version, entry.content_hash) ?? panic("actual artifact")
     publication_finalize_oci_referrers(repo, entry) ?? panic("finalize")
@@ -407,7 +407,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     }
     loop control in 0..<forgeries.len() {
         repo: publication_index_test_root("oci-forged-{control}")
-        descriptors := publication_oci_test_evidence(repo, entry)
+        ^descriptors: publication_oci_test_evidence(repo, entry)
         slot: if control < 4 -> 0 else -> control - 3
         root: files.join(files.join(repo, "referrers"), entry.content_hash)
         blobs: files.join(root, "blobs")
@@ -425,7 +425,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
 #Test("OCI verifier rejects repeated digest and nonregular blob store") {
     repo: publication_index_test_root("oci-repeated")
     entry: publication_oci_test_entry()
-    descriptors := publication_oci_test_evidence(repo, entry)
+    ^descriptors: publication_oci_test_evidence(repo, entry)
     root: files.join(files.join(repo, "referrers"), entry.content_hash)
     descriptors[1].digest = descriptors[0].digest
     descriptors[1].size = descriptors[0].size
@@ -470,7 +470,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     path: files.join(repo, "blob")
     publication_write_oci_file(path, "winner".bytes(), "OCI referrer blob") ?? panic("first")
     parent: foundation_open_directory_authority(repo)
-    held := foundation_open_file_authority(repo, "blob") ?? panic("hold original winner")
+    ^held: foundation_open_file_authority(repo, "blob") ?? panic("hold original winner")
     files.rename(path, files.join(repo, "detached")) ?? panic("replace winner binding")
     files.write(path, "winner") ?? panic("same bytes different file")
     parent.revalidate() ?? panic("parent remained unchanged")

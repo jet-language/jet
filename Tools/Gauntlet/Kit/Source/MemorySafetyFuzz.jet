@@ -174,7 +174,7 @@ RunnerOutcome: struct {
 }
 
 xorshift32: fn(value: Int) -> Int {
-    state := value & WORD_MASK
+    ^state: value & WORD_MASK
     state ~= (state << 13) & WORD_MASK
     state ~= state >> 17
     state ~ (state << 5) & WORD_MASK
@@ -211,10 +211,10 @@ byte_at: fn(data: [U8], offset: Int) -> Int { Int{data[offset]} }
 // length it declares and the index it reads, both drawn from its payload so
 // a valid read stays inside it and an out-of-bounds one leaves it, and a tag.
 generate_corpus: fn(spec: Dyn) -> Corpus Err! {
-    corpus := corpus_shape(spec)
+    ^corpus: corpus_shape(spec)
     payload: corpus.payload_bytes
-    data := [U8]{}
-    state := corpus.seed
+    ^data: [U8]{}
+    ^state: corpus.seed
     loop _ in 0..<(corpus.case_count * corpus.bytes_per_case) {
         state = xorshift32(state)
         data.push(U8{state & 255})
@@ -258,9 +258,9 @@ generate_corpus: fn(spec: Dyn) -> Corpus Err! {
 record_summary: fn(corpus: Corpus) -> CorpusSummary {
     data: corpus.data
     payload: corpus.payload_bytes
-    counts := [0, 0, 0, 0, 0]
-    records := [CaseRecord]{}
-    semantic := 0
+    ^counts: [0, 0, 0, 0, 0]
+    ^records: [CaseRecord]{}
+    ^semantic: 0
     loop index in 0..<corpus.case_count {
         offset: index * corpus.bytes_per_case
         kind: byte_at(data, offset)
@@ -288,7 +288,7 @@ expected_output: fn(summary: CorpusSummary, corpus: Corpus) -> String {
 }
 
 case_counts: fn(summary: CorpusSummary) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     loop i in 0..<CASE_KINDS.len() -> out[CASE_KINDS[i]] = summary.counts[i]
     out
 }
@@ -331,7 +331,7 @@ evidence_of: fn(outcome: CommandOutcome, limit: Int) -> Evidence {
 }
 
 evidence_tree: fn(evidence: Evidence) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["code"] = or_null_int(evidence.code)
     out["signal"] = or_null_text(evidence.signal)
     out["timed_out"] = Dyn.Bool(evidence.timed_out)
@@ -353,7 +353,7 @@ failure_process: fn(reason: String) -> Dyn {
 // space made uniform, so the same fault on another host or build has the
 // same signature.
 normalize_finding_text: fn(text: String, run: FuzzRun, limit: Int) -> String {
-    normalized := text.copy()
+    ^normalized: text.copy()
     loop root in [run.run_dir, run.repo_dir].filter(fn(root) { root != "" }) {
         normalized = normalized.replace(root, "<path>")
     }
@@ -388,7 +388,7 @@ wall_budget: fn(pass: AxisPass) -> String {
 // answer that is not the oracle's.
 classify: fn(phase: String, evidence: Evidence, pass: AxisPass, patterns: [String]) -> [Finding] {
     hits: evidence_hits(patterns, "{evidence.stdout}\n{evidence.stderr}")
-    findings := [Finding]{}
+    ^findings: [Finding]{}
     stopped: evidence.timed_out || evidence.resource_exceeded != None
     if stopped {
         detail: evidence.resource_exceeded ?? "wall timeout after {wall_budget(pass)}ms"
@@ -426,7 +426,7 @@ minimized_case: fn(pass: AxisPass, kind: String) -> Dyn {
     records: pass.summary.records
     record: preferred.filter_map(fn(wanted) { records.find(fn(record) { record.kind == wanted }) }).first() ?? pass.summary.records[0]
     bytes: pass.corpus.data.slice(record.offset, record.offset + pass.corpus.bytes_per_case)
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["index"] = record.index
     out["kind"] = CASE_KINDS[record.kind]
     out["byte_count"] = bytes.len()
@@ -451,7 +451,7 @@ hardening_payload: fn(finding: Finding, runner: Dyn, process: Dyn, pass: AxisPas
     id: "HF-{sha256_text(key).slice(0, 16)}"
     actual: if finding.kind == "wrong-output" -> finding.detail.copy() else -> "{finding.kind}: {finding.detail}"
     expected: pass.expected.trim_end()
-    evidence := Dyn.object()
+    ^evidence: Dyn.object()
     evidence["source"] = "fuzz-input.bin#case-{json.stringify(dyn_at(minimized, "index"))};base64:{text_or_empty(minimized, "bytes")}"
     evidence["commands"] = Dyn.Array([command])
     evidence["expectedRelation"] = expected
@@ -465,7 +465,7 @@ hardening_payload: fn(finding: Finding, runner: Dyn, process: Dyn, pass: AxisPas
     evidence["signal"] = dyn_at(process, "signal")
     evidence["timeout"] = Dyn.Bool(is_true(process, "timed_out") || truthy_at(process, "resource_exceeded"))
     evidence["normalization"] = ["ANSI control sequences", "absolute paths", "addresses", "line numbers"]
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["hardeningDedupKey"] = key
     out["hardeningSeam"] = "unclassified.semantic-primitive"
     out["hardeningRelation"] = finding.kind
@@ -488,7 +488,7 @@ hardening_payload: fn(finding: Finding, runner: Dyn, process: Dyn, pass: AxisPas
 }
 
 finding_tree: fn(finding: Finding, pass: AxisPass, probes: [Dyn]) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["kind"] = finding.kind
     out["phase"] = finding.phase
     out["detail"] = finding.detail
@@ -523,7 +523,7 @@ record_finding: fn(receipts: ^[FindingReceipt], finding: Finding, runner: Dyn, p
     rail: text_or_empty(runner, "id")
     if !receipts[at].rails.contains(rail) -> receipts[at].rails.push(rail.copy())
     receipts[at].rails.sort()
-    occurrence := Dyn.object()
+    ^occurrence: Dyn.object()
     occurrence["runner"] = rail
     copy_member(occurrence, "language", runner, "language")
     occurrence["phase"] = finding.phase
@@ -541,13 +541,13 @@ record_finding: fn(receipts: ^[FindingReceipt], finding: Finding, runner: Dyn, p
 }
 
 receipt_tree: fn(receipt: FindingReceipt) -> Dyn {
-    tracking := Dyn.object()
+    ^tracking: Dyn.object()
     tracking["status"] = "pending"
     tracking["transport"] = "tower-cli"
     tracking["command"] = ["node", "Tools/Tower/tower.mjs", "card", "add", "--file", "-"]
     tracking["dedup_key"] = dyn_at(receipt.payload, "hardeningDedupKey")
     tracking["payload"] = receipt.payload
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["id"] = Dyn.Text(receipt.dedupe_key.slice(0, 16))
     out["dedupe_key"] = receipt.dedupe_key
     out["axis"] = "memory_safety_fuzz"
@@ -566,7 +566,7 @@ receipt_tree: fn(receipt: FindingReceipt) -> Dyn {
 runner_corpus: fn(pass: AxisPass) -> Dyn {
     corpus: pass.corpus
     valid: pass.summary.counts[CASE_VALID]
-    out := Dyn.object()
+    ^out: Dyn.object()
     copy_member(out, "path", pass.axis, "corpus/path")
     out["seed"] = corpus.seed
     out["case_count"] = corpus.case_count
@@ -582,11 +582,11 @@ runner_corpus: fn(pass: AxisPass) -> Dyn {
 }
 
 base_runner_result: fn(pass: AxisPass, runner: Dyn) -> Dyn {
-    enforcement := Dyn.object()
+    ^enforcement: Dyn.object()
     enforcement["cpu"] = "RLIMIT_CPU via ulimit -t"
     enforcement["memory"] = "process-tree VmRSS monitor"
     enforcement["wall"] = "harness process-group timeout"
-    out := Dyn.object()
+    ^out: Dyn.object()
     copy_member(out, "id", runner, "id")
     copy_member(out, "language", runner, "language")
     out["tools"] = Dyn.Array([Dyn]{})
@@ -603,7 +603,7 @@ base_runner_result: fn(pass: AxisPass, runner: Dyn) -> Dyn {
 }
 
 stage_failure: fn(stage: String, reason: Dyn) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["stage"] = stage
     out["status"] = "failed"
     out["reason"] = reason
@@ -614,11 +614,11 @@ stage_failure: fn(stage: String, reason: Dyn) -> Dyn {
 // already recorded (its command and process) and the command it ran.
 mark_runner_failure: fn(result: ^Dyn, stage: String, command: Dyn, reason: String) {
     found: dyn_at(result, stage)
-    entry := if found == .Object(_) -> found else -> Dyn.object()
+    ^entry: if found == .Object(_) -> found else -> Dyn.object()
     entry["status"] = "failed"
     entry["command"] = if command != Dyn.Null -> command else -> dyn_at(entry, "command")
     if member(entry, "process") == None -> entry["process"] = failure_process(reason)
-    failure := Dyn.object()
+    ^failure: Dyn.object()
     failure["stage"] = stage
     failure["reason"] = reason
     entry["failure"] = failure
@@ -630,7 +630,7 @@ mark_runner_failure: fn(result: ^Dyn, stage: String, command: Dyn, reason: Strin
 }
 
 stage_record: fn(command: [String], evidence: Evidence) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["command"] = texts(command)
     out["process"] = evidence_tree(evidence)
     out
@@ -656,7 +656,7 @@ run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: 
     files.create_dir_all(files.dirname(input_path))
     files.write_bytes(input_path, pass.corpus.data)
     copied: host.file_sha256(input_path)
-    corpus := dyn_at(result, "corpus")
+    ^corpus: dyn_at(result, "corpus")
     corpus["copied_sha256"] = copied
     corpus["matches_generator"] = Dyn.Bool(copied == pass.corpus.sha256)
     result["corpus"] = corpus
@@ -674,7 +674,7 @@ run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: 
     if progress.probes.find(fn(probe) { text_at(probe, "status") == Val("probe_failed") }) == .Val(probe) {
         reason: dyn_at(probe, "reason")
         failure: stage_failure("setup", reason)
-        setup := Dyn.object()
+        ^setup: Dyn.object()
         setup["status"] = "failed"
         setup["command"] = Dyn.Null
         setup["process"] = failure_process(text_or_empty(probe, "reason"))
@@ -711,7 +711,7 @@ run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: 
     evidence: evidence_of(ran.process, pass.run.output_limit)
     result["run"] = stage_record(ran.command, evidence)
     result["toolchain"] = Dyn.Array(progress.probes.copy())
-    output := Dyn.object()
+    ^output: Dyn.object()
     output["expected"] = pass.expected
     output["actual_stdout"] = evidence.stdout
     output["exact_stdout"] = Dyn.Bool(evidence.stdout == pass.expected)
@@ -740,8 +740,8 @@ run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: 
 }
 
 run_runner: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H) -[FS, Exec]> RunnerOutcome {
-    result := base_runner_result(pass, runner)
-    progress := RunnerProgress{stage: "setup", command: Dyn.Null, probes: [Dyn]{}, findings: [Finding]{}}
+    ^result: base_runner_result(pass, runner)
+    ^progress: RunnerProgress{stage: "setup", command: Dyn.Null, probes: [Dyn]{}, findings: [Finding]{}}
     if run_stages(pass, runner, host, result, progress) == .Err(failure) {
         result["findings"] = findings_tree(progress.findings, pass, progress.probes)
         mark_runner_failure(result, progress.stage, progress.command, failure.message)
@@ -772,8 +772,8 @@ run_memory_safety_fuzz_axis: fn<H: MemoryAxisHost>(axis: Dyn, run: FuzzRun, host
     files.create_dir_all(files.dirname(corpus_path))
     files.write_bytes(corpus_path, corpus.data)
     pass: AxisPass{axis: axis, axis_dir: axis_dir, corpus: corpus, summary: summary, expected: expected, run: run}
-    receipts := [FindingReceipt]{}
-    runners := [Dyn]{}
+    ^receipts: [FindingReceipt]{}
+    ^runners: [Dyn]{}
     loop runner in declared {
         outcome: run_runner(pass, runner, host)
         process: first_member(outcome.result, ["run/process", "compile/process"]) ?? evidence_tree(evidence_of(CommandOutcome{code: None, signal: None, timed_out: false, resource_exceeded: None, stdout: "", stderr: ""}, 0))
@@ -786,13 +786,13 @@ run_memory_safety_fuzz_axis: fn<H: MemoryAxisHost>(axis: Dyn, run: FuzzRun, host
     measured: runners.all(fn(result) { finished(result) })
     receipts.sort_by(fn(receipt: FindingReceipt) { receipt.dedupe_key.slice(0, 16) })
     occurrences: receipts.map(fn(receipt) { receipt.occurrences.len() }).sum()
-    blockers := runners.filter(fn(result) { !finished(result) }).map(fn(result) { "{text_or_empty(result, "id")}: {text_at(result, "reason") ?? "status {text_or_empty(result, "status")}"}" })
+    ^blockers: runners.filter(fn(result) { !finished(result) }).map(fn(result) { "{text_or_empty(result, "id")}: {text_at(result, "reason") ?? "status {text_or_empty(result, "status")}"}" })
     if receipts.len() > 0 {
         blockers.push("{receipts.len()} deduplicated finding receipt(s) require Tower CLI tracking")
     }
     valid: summary.counts[CASE_VALID]
     findings: Dyn.Array(receipts.map(fn(receipt) { receipt_tree(receipt) }))
-    corpus_out := Dyn.object()
+    ^corpus_out: Dyn.object()
     copy_member(corpus_out, "path", axis, "corpus/path")
     corpus_out["generator"] = CORPUS_GENERATOR
     corpus_out["seed"] = corpus.seed
@@ -807,21 +807,21 @@ run_memory_safety_fuzz_axis: fn<H: MemoryAxisHost>(axis: Dyn, run: FuzzRun, host
     corpus_out["adversarial_case_count"] = corpus.case_count - valid
     corpus_out["format"] = "jet-memory-safety-case-v1"
     declared_oracle: dyn_at(axis, "oracle")
-    oracle := if declared_oracle == .Object(_) -> declared_oracle else -> Dyn.object()
+    ^oracle: if declared_oracle == .Object(_) -> declared_oracle else -> Dyn.object()
     oracle["algorithm"] = "memory-safety-case-summary-v1"
     oracle["output"] = expected
     counts: [{key: "memory_safety_findings", value: receipts.len()}, {key: "finding_occurrences", value: occurrences}, {key: "valid_cases", value: valid}, {key: "adversarial_cases", value: corpus.case_count - valid}]
-    metrics := Dyn.object()
+    ^metrics: Dyn.object()
     loop count in counts {
         metrics[count.key] = if measured -> Dyn.Int(count.value) else -> Dyn.Null
     }
-    publication := Dyn.object()
+    ^publication: Dyn.object()
     publication["status"] = if blockers.len() == 0 -> "ready" else -> "blocked"
     publication["blockers"] = texts(blockers)
     publication["finding_receipts_deduplicated"] = Dyn.Bool(true)
     publication["tower_transport"] = "cli-only"
     publication["performance_exclusions"] = 0
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["id"] = "memory_safety_fuzz"
     out["required"] = Dyn.Bool(text_at(axis, "status") == Val("required"))
     out["status"] = if measured -> "complete" else -> "incomplete"

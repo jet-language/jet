@@ -101,7 +101,7 @@ context_scratch_drop: fn(record: I64) {
 // read is a view of that arena, which the task owns.
 #Export(c) jet_ctx_scratch: fn() -> I64 {
     current: context_current()
-    _ := context_scratch_arena(current)
+    ^_: context_scratch_arena(current)
     wrapping(current + CONTEXT_SCRATCH)
 }
 
@@ -199,7 +199,7 @@ context_user_owner: fn(address: I64) -> I64 {
 // of control, and its `context.scratch` is its own.
 context_inherit: fn(record: I64) {
     current: context_current()
-    at := I64{0}
+    ^at: I64{0}
     loop at < CONTEXT_RECORD_BYTES {
         sync_store(wrapping(record + at), sync_load(wrapping(current + at)))
         at += I64{8}
@@ -221,7 +221,7 @@ context_release: fn(record: I64) {
 // drops its value and frees it, and its reference to the next node goes
 // the same way.
 context_values_release: fn(node: I64) {
-    at := node
+    ^at: node
     loop at != (I64{0}) {
         if !jet_rt_native_closure_unref(at) {
             return
@@ -246,7 +246,7 @@ context_values_release: fn(node: I64) {
 // current record's chain, which keeps the next one.
 #Export(c) jet_ctx_value_pop: fn(count: I64) {
     head: wrapping(context_current() + CONTEXT_VALUES)
-    left := count
+    ^left: count
     loop left > (I64{0}) {
         node: sync_load(head)
         if node == (I64{0}) {
@@ -263,7 +263,7 @@ context_values_release: fn(node: I64) {
 // The innermost node of the current record's chain holding key word `key`,
 // else 0.
 #Export(c) jet_ctx_value_find: fn(key: I64) -> I64 {
-    at := sync_load(wrapping(context_current() + CONTEXT_VALUES))
+    ^at: sync_load(wrapping(context_current() + CONTEXT_VALUES))
     loop at != (I64{0}) {
         if sync_load(wrapping(at + CONTEXT_NODE_KEY)) == key -> return at
         at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
@@ -350,7 +350,7 @@ CONTEXT_ON_STOP_KEY: I64{1}
 // handler). The stop door (Trap.jet trap_stop) calls through it, so a
 // program that never sets a stop handler links none of the handler's run:
 // its stops build no `Stop` and drop no message.
-context_on_stop_rail_code := I64{0}
+^context_on_stop_rail_code: I64{0}
 
 rt_context_on_stop_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }

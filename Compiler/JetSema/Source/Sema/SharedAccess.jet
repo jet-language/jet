@@ -293,7 +293,7 @@ sema_shared_access_payload_name: fn(scopes: SemaScopeTable) -> String {
     if sema_scope_resolve_index(scopes, SEMA_SHARED_PAYLOAD_PARAM) == None {
         return SEMA_SHARED_PAYLOAD_PARAM
     }
-    depth := 1
+    ^depth: 1
     loop sema_scope_resolve_index(scopes, "{SEMA_SHARED_PAYLOAD_PARAM}_{depth}") != None {
         depth += 1
     }
@@ -319,7 +319,7 @@ sema_shared_access_callback: fn(body: LambdaBody, span: Span, name: String) -> E
 
 sema_shared_access_call: fn(handle: Expr, method: String, body: LambdaBody, span: Span, name: String) -> Expr Never! {
     callback: sema_shared_access_callback(body, span, name)
-    flags := AST_EMPTY_CALL_ARG_FLAGS
+    ^flags: AST_EMPTY_CALL_ARG_FLAGS
     flags.shared_access_desugar = true
     argument: CallArg{convention: AccessConvention.Read, expr: callback, span: span, flags: flags, label: None, spread: false}
     Expr.MethodCall{receiver: handle, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
@@ -346,7 +346,7 @@ sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment
             return sema_scope_binding_type(environment, scopes, index)
         }
         .Field(base, member, _, _) -> {
-            owner_ty := sema_shared_access_place_type(base, environment, program, scopes) ?? return None
+            ^owner_ty: sema_shared_access_place_type(base, environment, program, scopes) ?? return None
             if owner_ty == .Shared(inner) -> owner_ty = inner
             return sema_shared_access_field_type(owner_ty, member, environment, program, scopes)
         }
@@ -382,7 +382,7 @@ sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: S
         .Apply(_, args) -> args
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
-    owner := sema_expression_type_symbol(scopes, environment, program, owner_name)
+    ^owner: sema_expression_type_symbol(scopes, environment, program, owner_name)
     if owner == None {
         owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
     }
@@ -400,7 +400,7 @@ sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: S
 // Split at the cell, retaining every field/index below it in the edit callback
 // whose payload parameter is `name`.
 sema_shared_access_project_place: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> {handle: Expr, place: Expr, name: String}? {
-    ty := sema_shared_access_place_type(value, environment, program, scopes)
+    ^ty: sema_shared_access_place_type(value, environment, program, scopes)
     if ty == .Val(known) && sema_shared_access_is_shared_type(known) {
         name: sema_shared_access_payload_name(scopes)
         return Val({handle: value, place: sema_shared_access_payload(expr_span(value), name), name: name})
@@ -493,11 +493,11 @@ sema_shared_access_place_call_transaction: fn(expr: Expr, check: ^SemaBodyCheck)
             return None
         }
         found: sema_shared_access_call_place(receiver, method_span, check) ?? return None
-        body := [Stmt]{}
-        hoisted := [CallArg]{}
+        ^body: [Stmt]{}
+        ^hoisted: [CallArg]{}
         loop index in 0..<args.len() {
             // copy: `args` is a read parameter the caller keeps; the hoisted call owns its arguments.
-            argument := args[index].copy()
+            ^argument: args[index].copy()
             if sema_shared_access_expr_touches_shared(argument.expr, check.scopes) {
                 name: "{SEMA_SHARED_HOISTED_RHS}_{index}"
                 span: expr_span(argument.expr)
@@ -517,10 +517,10 @@ sema_shared_access_place_call_transaction: fn(expr: Expr, check: ^SemaBodyCheck)
 // receive, or write to the polled field in its body, spins a core. Runs on the
 // parsed condition and body before they are checked.
 sema_shared_access_lint_busy_wait: fn(tables: ASTTables, condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
-    handles := [String]{}
-    members := [String]{}
+    ^handles: [String]{}
+    ^members: [String]{}
     ast_visit_expr(tables, condition, fn(expression: ExprNode) { sema_shared_access_note_field_read(handles, members, ast_expr(tables, expression)) })
-    poll := -1
+    ^poll: -1
     loop index in 0..<handles.len() {
         if sema_shared_access_name_is_shared(handles[index], scopes) {
             poll = index
@@ -530,7 +530,7 @@ sema_shared_access_lint_busy_wait: fn(tables: ASTTables, condition: Expr, body: 
     if poll < 0 {
         return
     }
-    blocking := false
+    ^blocking: false
     ast_visit_body(tables, body, fn(expression: ExprNode) { sema_shared_access_note_blocking_call(blocking, ast_expr(tables, expression)) }, true)
     if blocking || sema_shared_access_statements_write_field(body, handles[poll], members[poll]) {
         return

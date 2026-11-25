@@ -48,7 +48,7 @@ run: fn() {
     command: args.get(0) ?? ""
     if command == {
         "policy" -> {
-            categories := Dyn.object()
+            ^categories: Dyn.object()
             loop owner in LOSS_OWNERS -> categories[owner.metric] = owner.category
             print(json.stringify(Dyn{[String:Dyn]{"strict_performance_policy": strict_performance_policy(), "ceiling_policy": ceiling_policy(), "loss_owner_category_by_metric": categories}}, 2))
         }

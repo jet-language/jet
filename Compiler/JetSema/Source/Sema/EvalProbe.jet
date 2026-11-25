@@ -133,7 +133,7 @@ SEMA_EVAL_PROBE_SELF: "jet_debug_self"
 // is a parameter the function takes. None for an expression with no value.
 sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: String) -> String? {
     value: answer.value_type ?? return None
-    params := [String]{}
+    ^params: [String]{}
     loop capture in answer.captures {
         shown: if capture.source == "self" -> SEMA_EVAL_PROBE_SELF else -> capture.source
         taken: if answer.lent -> "^^" else -> ""
@@ -147,8 +147,8 @@ sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: St
 // longer name) read as SEMA_EVAL_PROBE_SELF.
 sema_eval_probe_without_self: fn(text: String) -> String {
     bytes: text.bytes()
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < bytes.len() {
         if sema_eval_probe_self_at(bytes, at) {
             out.extend(SEMA_EVAL_PROBE_SELF.bytes())
@@ -183,7 +183,7 @@ sema_eval_probes: fn(probes: [SemaEvalProbe]) -> SemaEvalProbes { SemaEvalProbes
 // expression and function. A function checked both ahead for compile time
 // and in its module answers once (sema_eval_answer_put).
 sema_eval_probe_answers: fn(modules: ^[SemaGraphModuleResult]) -> [SemaEvalProbeAnswer] {
-    rows := [SemaEvalProbeAnswer]{}
+    ^rows: [SemaEvalProbeAnswer]{}
     loop index in 0..<modules.len() {
         taken: compiler_take_rows<SemaEvalProbeAnswer>(modules[index].eval_answers)
         loop answer in taken.move() -> sema_eval_answer_put(rows, answer)
@@ -198,8 +198,8 @@ sema_eval_probe_answers: fn(modules: ^[SemaGraphModuleResult]) -> [SemaEvalProbe
 sema_eval_probe_parse: fn(text: String, offset: Int) -> SemaEvalProbeParse {
     source: "{SEMA_EVAL_PROBE_LEAD}{text}\n}}\n"
     shift: offset - SEMA_EVAL_PROBE_LEAD.len()
-    lexed := lex_generated(source.bytes())
-    diagnostics := [Diagnostic]{}
+    ^lexed: lex_generated(source.bytes())
+    ^diagnostics: [Diagnostic]{}
     loop diagnostic in lexed.diagnostics {
         diagnostics.push(sema_eval_probe_shift_diagnostic(diagnostic, shift))
     }
@@ -209,7 +209,7 @@ sema_eval_probe_parse: fn(text: String, offset: Int) -> SemaEvalProbeParse {
     loop token_index in 0..<lexed.tokens.len() {
         token_shift_spans(lexed.tokens[token_index], shift, lexed.tables.literals)
     }
-    parsed := parse_lexed(lexed)
+    ^parsed: parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics.move() -> diagnostics.push(diagnostic)
     if sema_has_error_since(diagnostics, 0) {
         return SemaEvalProbeParse{expression: None, diagnostics: diagnostics}
@@ -222,7 +222,7 @@ sema_eval_probe_parse: fn(text: String, offset: Int) -> SemaEvalProbeParse {
 }
 
 sema_eval_probe_shift_diagnostic: fn(diagnostic: Diagnostic, shift: Int) -> Diagnostic Never! {
-    shifted := diagnostic
+    ^shifted: diagnostic
     shifted.span = if shifted.span == {
         .Val(span) -> Val(Span{start: span.start + shift, end: span.end + shift})
         .None -> None
@@ -245,8 +245,8 @@ sema_eval_walk_open: fn(program: SemaProgramTables, module_identity: ModuleID, s
 }
 
 sema_eval_walk_for: fn(probes: SemaEvalProbes, module_identity: ModuleID, span: Span, function: String) -> SemaEvalWalk {
-    rows := [Int]{}
-    offsets := [Int]{}
+    ^rows: [Int]{}
+    ^offsets: [Int]{}
     loop (row, probe) in probes.probes {
         if probe.module_identity != module_identity || probe.offset < span.start || probe.offset >= span.end {
             next
@@ -285,7 +285,7 @@ sema_eval_probe_stmt_span: fn(statement: Stmt) -> Span {
 // The probes `span` answers: those that start there, and those inside a
 // statement's span that no node starting at their position answered yet.
 sema_eval_walk_matches: fn(walk: SemaEvalWalk, program: SemaProgramTables, span: Span, statement: Bool) -> [SemaEvalAsk] {
-    asked := [SemaEvalAsk]{}
+    ^asked: [SemaEvalAsk]{}
     graph: program.registration_graph
     if graph.eval_probes == .Val(probes) {
         loop (local, offset) in walk.offsets {
@@ -353,8 +353,8 @@ sema_eval_answer_put: fn(answers: ^[SemaEvalProbeAnswer], answer: ^^SemaEvalProb
 // A bare name of a non-scalar local is lent (sema_eval_probe_lends): the
 // compiled function takes it, so returning it as-is is no refusal (E0120).
 sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, check: ^SemaBodyCheck) -> SemaEvalProbeAnswer {
-    probe_state := sema_ownership_state_snapshot(check.state)
-    probe_context := sema_check_context_snapshot(check.context)
+    ^probe_state: sema_ownership_state_snapshot(check.state)
+    ^probe_context: sema_check_context_snapshot(check.context)
     // The probe's own check answers no probe.
     probe_context.eval_walk = SemaEvalWalk{}
     probe_context.fresh_expr_ids = true
@@ -363,13 +363,13 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
     lent: sema_eval_probe_lends(value, check)
     lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Expr{value: value}, span: span, meta: ast_empty_lambda_meta()}
     expected: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     sema_body_check_swap(check, probe_state, probe_context)
     sema_body_check_swap_diagnostics(check, diagnostics)
     checked: sema_expression_lambda_with_host(lambda, Val(expected), check, false, false, false, true)
     sema_body_check_swap_diagnostics(check, diagnostics)
     sema_body_check_swap(check, probe_state, probe_context)
-    answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: check.context.eval_walk.function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}, lent: lent}
+    ^answer: SemaEvalProbeAnswer{probe: probe, expression: expression, function: check.context.eval_walk.function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}, lent: lent}
     loop diagnostic in diagnostics.move() {
         if diagnostic.severity != DIAGNOSTIC_ERROR || (diagnostic.detail ?? "").starts_with(sema_failure_obligation_mark()) || (lent && diagnostic.code == "E0120") {
             next
@@ -420,14 +420,14 @@ sema_eval_probe_judge_effects: fn(modules: ^[SemaGraphModuleResult], nodes: [Sem
 }
 
 sema_eval_probe_effect_refusals: fn(answer: SemaEvalProbeAnswer, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]]) -> [Diagnostic] {
-    refusals := [Diagnostic]{}
+    ^refusals: [Diagnostic]{}
     if !answer.complete -> return refusals
-    own := [String]{}
+    ^own: [String]{}
     loop name in answer.effects.direct -> sema_effect_set_add(own, name)
     if answer.effects.maximal -> sema_effect_set_union(own, authority_grantable_roots())
     sema_eval_probe_row_refusals(own, "this expression", answer.span, refusals)
-    seen := (loop _ in nodes -> false)
-    visited := [Int]{}
+    ^seen: (loop _ in nodes -> false)
+    ^visited: [Int]{}
     loop edge in answer.effects.call_edges {
         if edge == "__jet_panic__" -> next
         target: sema_effect_node_index(calls.node_by_key, edge) ?? next
@@ -458,7 +458,7 @@ SemaEvalHeldRows: struct {
 }
 
 sema_eval_held_rows: fn(functions: [FnBody]) -> SemaEvalHeldRows Never! {
-    by_key := SemaEvalHeldRows{keys: name_table_sized(functions.len() + 1), rows: [Int]{-1}}
+    ^by_key: SemaEvalHeldRows{keys: name_table_sized(functions.len() + 1), rows: [Int]{-1}}
     loop (row, held) in functions -> sema_eval_held_set(by_key, held.key, row)
     by_key
 }
@@ -511,12 +511,12 @@ sema_eval_held_failure_settle: fn(function: ^FnBody, candidate: Bool, failure: S
 // `functions` has is left out, as the effect pass leaves out a call with no
 // node.
 sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], by_key: SemaEvalHeldRows, span: Span) -> [Diagnostic] {
-    refusals := [Diagnostic]{}
-    own := [String]{}
+    ^refusals: [Diagnostic]{}
+    ^own: [String]{}
     loop name in function.effects.direct -> sema_effect_set_add(own, name)
     if function.effects.maximal -> sema_effect_set_union(own, authority_grantable_roots())
     sema_eval_probe_row_refusals(own, "this expression", span, refusals)
-    seen := (loop _ in functions -> false)
+    ^seen: (loop _ in functions -> false)
     loop edge in function.effects.call_edges {
         if edge == "__jet_panic__" -> next
         target: sema_eval_held_row(by_key, edge) ?? next

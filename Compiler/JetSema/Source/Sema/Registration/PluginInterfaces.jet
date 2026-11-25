@@ -61,8 +61,8 @@ sema_plugin_export_after: fn(left: SemaPluginInterfaceExport, right: SemaPluginI
 
 sema_plugin_sort_exports: fn(exports: ^[SemaPluginInterfaceExport]) Never! {
     loop index in 1..<exports.len() {
-        item := exports[index]
-        cursor := index
+        ^item: exports[index]
+        ^cursor: index
         loop cursor > 0 && sema_plugin_export_after(exports[cursor - 1], item) {
             exports[cursor] = exports[cursor - 1]
             cursor -= 1
@@ -77,8 +77,8 @@ sema_plugin_interface_after: fn(left: SemaPluginInterface, right: SemaPluginInte
 
 sema_plugin_sort_interfaces: fn(interfaces: ^[SemaPluginInterface]) Never! {
     loop index in 1..<interfaces.len() {
-        item := interfaces[index]
-        cursor := index
+        ^item: interfaces[index]
+        ^cursor: index
         loop cursor > 0 && sema_plugin_interface_after(interfaces[cursor - 1], item) {
             interfaces[cursor] = interfaces[cursor - 1]
             cursor -= 1
@@ -98,16 +98,16 @@ sema_plugin_put_interface: fn(interfaces: ^[SemaPluginInterface], interface: Sem
 }
 
 sema_plugin_normalize_artifact: fn(raw: String) -> String? {
-    bytes := raw.trim().bytes()
-    loop bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{47}) -> _ := bytes.pop()
+    ^bytes: raw.trim().bytes()
+    loop bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{47}) -> ^_: bytes.pop()
     if bytes.len() == 0 -> return None
-    start := 0
+    ^start: 0
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{47}) -> start = index + 1
     }
     name: String.from_bytes(bytes.slice(start, bytes.len())) ?? return None
-    name_bytes := name.bytes()
-    dot := -1
+    ^name_bytes: name.bytes()
+    ^dot: -1
     loop index in 0..<name_bytes.len() {
         if name_bytes[index] == (U8{46}) -> dot = index
     }
@@ -128,9 +128,9 @@ sema_plugin_put_alias: fn(aliases: ^[SemaPluginArtifactAlias], artifact: String,
 }
 
 sema_plugin_identity: fn(artifact: String, digest: String) -> String Never! {
-    bytes := artifact.bytes()
-    output := ""
-    index := 0
+    ^bytes: artifact.bytes()
+    ^output: ""
+    ^index: 0
     loop index < bytes.len() {
         first: Int{bytes[index]}
         width: if {
@@ -189,12 +189,12 @@ SemaPluginComponent: struct {
 // and its identity pins the exports' signatures, so a changed Component is a
 // different type.
 sema_plugin_interface_facts: fn(components: [SemaPluginComponent]) -> SemaPluginInterfaceFacts Never! {
-    interfaces := [SemaPluginInterface]{}
-    aliases := [SemaPluginArtifactAlias]{}
-    digests := ""
+    ^interfaces: [SemaPluginInterface]{}
+    ^aliases: [SemaPluginArtifactAlias]{}
+    ^digests: ""
     loop component in components {
         stem: sema_plugin_normalize_artifact(component.artifact) ?? next
-        exports := [SemaPluginInterfaceExport]{}
+        ^exports: [SemaPluginInterfaceExport]{}
         loop fact in component.exports {
             sema_plugin_put_export(exports, sema_plugin_component_export(fact))
         }

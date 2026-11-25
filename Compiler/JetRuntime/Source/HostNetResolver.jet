@@ -41,7 +41,7 @@ net_resolve_rows: fn(host: I64, port: I64, rows_out: I64, length_out: I64, error
     // Source has already validated host/port. The NUL case still has std's
     // exact InvalidInput meaning at this foreign-string boundary.
     length: rt_text_len(host)
-    at := I64{0}
+    ^at: I64{0}
     // `host` lends `length` E4 bytes and `error_out` its writable word.
     loop at < length {
         if (rt_text_byte(wrapping(rt_text_data(host) + at)) == I64{0}) {
@@ -90,10 +90,10 @@ net_resolve_rows: fn(host: I64, port: I64, rows_out: I64, length_out: I64, error
     }
     rows: net_word(rows_out, I64{0})
     count: net_word(length_out, I64{0})
-    handles := I64{0}
+    ^handles: I64{0}
     if (count != I64{0}) {
         handles = jet_rt_alloc(count * I64{8}, I64{8})
-        at := I64{0}
+        ^at: I64{0}
         loop at < count {
             net_put(handles, at * I64{8}, net_copy(wrapping(rows + at * I64{56}), I64{56}))
             at += I64{1}

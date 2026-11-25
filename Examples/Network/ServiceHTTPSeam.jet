@@ -41,7 +41,7 @@ add_note: fn(store: NoteStore, calls: Shared<Calls>, owner: String, text: String
             return Ok(rows.len())
         }
         .Fake(book) -> {
-            guard := book.guard_edit()
+            ^guard: book.guard_edit()
             guard.value.notes.push(text.copy())
             return Ok(guard.value.notes.len())
         }
@@ -87,7 +87,7 @@ isolated: fn(raw: String, store: NoteStore, calls: Shared<Calls>) -> Int {
 loopback: fn(addr: String, raw: String) -> Int NetError! {
     client: net.tcp_connect(addr) ?? return Err(err)
     client.write_bytes(raw.bytes()) ?? return Err(err)
-    parts := [String]{}
+    ^parts: [String]{}
     loop {
         part: client.read(8192) ?? break
         if part == "" -> break

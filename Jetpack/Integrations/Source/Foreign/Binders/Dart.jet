@@ -155,15 +155,15 @@ pkg_dart_bind: fn(path: String, source: String, lib: String, cache: String) -[FS
             return Err(error)
         }
     }
-    identity := [U8]{}
+    ^identity: [U8]{}
     pkg_binder_append_field(identity, DART_BIND_SCHEMA.bytes())
     pkg_binder_append_field(identity, source.bytes())
     pkg_binder_append_field(identity, canonical.bytes())
     pkg_binder_append_field(identity, sdk.bytes())
     loop byte in dart.bytes() -> identity.push(byte)
-    provenance := "schema={DART_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\ndart={dart}\nsdk={sdk}\ncontract={canonical}\n"
+    ^provenance: "schema={DART_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\ndart={dart}\nsdk={sdk}\ncontract={canonical}\n"
     pkg_binder_append_artifact_boundary(provenance, DART_MODULE_ROOT, "Dart", lib, canonical, archive, "dart={dart};{pkg_binder_cc_ar_identity()}")
-    bound := [String]{}
+    ^bound: [String]{}
     loop function in functions -> bound.push(function.jet)
     result: DartBindResult{
         source: pkg_dart_render_jet(lib, functions),
@@ -185,7 +185,7 @@ pkg_dart_build_compute: fn(guest_rust: String, host_rust: String, ffi: FFILink?,
     archive: files.join(cache, "libjet_dart_{lib}.a")
     pkg_binder_remove_file_quiet(output)
     pkg_binder_write(source, "{guest_rust}\n{host_rust}", "could not write the native Jet plugin source")
-    argv := [String]{"rustc", "--edition", "2021", "--crate-type", "cdylib", "-O", "--crate-name", foundation_sanitize_crate_name("jet_dart_{lib}"), source, "-o", output}
+    ^argv: [String]{"rustc", "--edition", "2021", "--crate-type", "cdylib", "-O", "--crate-name", foundation_sanitize_crate_name("jet_dart_{lib}"), source, "-o", output}
     if ffi == {
         .Val(link) -> {
             argv.push("--extern")
@@ -221,7 +221,7 @@ pkg_dart_build_compute: fn(guest_rust: String, host_rust: String, ffi: FFILink?,
 // Extend a contract provenance record with the compute plugin identity.
 pkg_dart_bind_compute_provenance: fn(base: String, compute_path: String, compute_source: String) -[FS, Env]> String ForeignBindError! {
     canonical: pkg_binder_canonicalize(compute_path, "could not resolve the Jet compute path")
-    identity := [U8]{}
+    ^identity: [U8]{}
     pkg_binder_append_field(identity, DART_COMPUTE_SCHEMA.bytes())
     pkg_binder_append_field(identity, base.bytes())
     pkg_binder_append_field(identity, compute_source.bytes())
@@ -234,8 +234,8 @@ pkg_dart_bind_compute_provenance: fn(base: String, compute_path: String, compute
 pkg_dart_parse: fn(source: String) -> [DartFunction] ForeignBindError! {
     text: pkg_dart_strip_comments(source)
     raw: text.bytes()
-    functions := [DartFunction]{}
-    cursor := 0
+    ^functions: [DartFunction]{}
+    ^cursor: 0
     loop {
         at: pkg_dart_find_top_level_pragma(raw, cursor)
         if at < 0 -> break
@@ -284,7 +284,7 @@ pkg_dart_parse: fn(source: String) -> [DartFunction] ForeignBindError! {
         if pkg_dart_reserved_function(jet) {
             return Err(ForeignBindError.Source("Dart entry point `{name}` projects to reserved Jet name `{jet}`"))
         }
-        params := [DartParam]{}
+        ^params: [DartParam]{}
         loop raw_item in pkg_binder_slice(header, open + 1, close).split(",") {
             item: raw_item.trim()
             if item == "" -> next
@@ -338,11 +338,11 @@ pkg_dart_triple_at: fn(raw: [U8], at: Int, quote: Int) -> Bool Never! {
 // The first `@pragma(` at brace depth 0, at or after `from`, outside strings.
 pkg_dart_find_top_level_pragma: fn(raw: [U8], from: Int) -> Int Never! {
     marker: "@pragma(".bytes()
-    depth := 0
-    quote := 0
-    triple := false
-    escaped := false
-    i := 0
+    ^depth: 0
+    ^quote: 0
+    ^triple: false
+    ^escaped: false
+    ^i: 0
     loop i < raw.len() {
         code: Int{raw[i]}
         if quote != 0 {
@@ -380,10 +380,10 @@ pkg_dart_find_top_level_pragma: fn(raw: [U8], from: Int) -> Int Never! {
 // The offset just past the `)` closing the annotation that starts at
 // `start`, or -1.
 pkg_dart_find_annotation_end: fn(raw: [U8], start: Int) -> Int Never! {
-    depth := 0
-    quote := 0
-    escaped := false
-    i := start + 7
+    ^depth: 0
+    ^quote: 0
+    ^escaped: false
+    ^i: start + 7
     loop i < raw.len() {
         code: Int{raw[i]}
         if {
@@ -411,10 +411,10 @@ pkg_dart_find_annotation_end: fn(raw: [U8], start: Int) -> Int Never! {
 
 // The first `{`, `=`, or `;` outside parentheses and strings, or -1.
 pkg_dart_find_decl_boundary: fn(raw: [U8], start: Int) -> Int Never! {
-    parens := 0
-    quote := 0
-    escaped := false
-    i := start
+    ^parens: 0
+    ^quote: 0
+    ^escaped: false
+    ^i: start
     loop i < raw.len() {
         code: Int{raw[i]}
         if {
@@ -441,9 +441,9 @@ pkg_dart_find_decl_boundary: fn(raw: [U8], start: Int) -> Int Never! {
 
 // The `)` closing the `(` at `open`, outside strings, or -1.
 pkg_dart_matching_close: fn(raw: [U8], open: Int) -> Int Never! {
-    depth := 0
-    quote := 0
-    escaped := false
+    ^depth: 0
+    ^quote: 0
+    ^escaped: false
     loop i in open..<raw.len() {
         code: Int{raw[i]}
         if quote != 0 {
@@ -471,7 +471,7 @@ pkg_dart_matching_close: fn(raw: [U8], open: Int) -> Int Never! {
 
 pkg_dart_render_jet: fn(lib: String, functions: [DartFunction]) -> String Never! {
     abi: "jet_dart_{lib}"
-    out := "#Import c.{abi}: module {{\n    take_error: fn() -> Int = \"{abi}_take_error\"\n"
+    ^out: "#Import c.{abi}: module {{\n    take_error: fn() -> Int = \"{abi}_take_error\"\n"
     loop function in functions {
         out = "{out}    {function.jet}: fn{pkg_dart_jet_params(function.params)} -> {function.result.jet()} = \"{abi}_call_{function.name}\"\n"
     }
@@ -483,20 +483,20 @@ pkg_dart_render_jet: fn(lib: String, functions: [DartFunction]) -> String Never!
 }
 
 pkg_dart_jet_params: fn(params: [DartParam]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push("{param.name}: {param.kind.jet()}")
     "({parts.join(", ")})"
 }
 
 pkg_dart_call_args: fn(params: [DartParam]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push(param.name)
     "({parts.join(", ")})"
 }
 
 pkg_dart_render_c: fn(lib: String, functions: [DartFunction]) -> String Never! {
     abi: "jet_dart_{lib}"
-    out := "#include <stdint.h>\n#include <stddef.h>\n#include \"dart_api_dl.h\"\nstatic _Thread_local int64_t jet_dart_error;\nstatic _Thread_local int initialized;\n"
+    ^out: "#include <stdint.h>\n#include <stddef.h>\n#include \"dart_api_dl.h\"\nstatic _Thread_local int64_t jet_dart_error;\nstatic _Thread_local int initialized;\n"
     loop function in functions {
         out = "{out}typedef {function.result.c()} (*callback_{function.name})({pkg_dart_c_param_types(function.params)});\nstatic _Thread_local callback_{function.name} cb_{function.name};\n"
     }
@@ -513,27 +513,27 @@ pkg_dart_render_c: fn(lib: String, functions: [DartFunction]) -> String Never! {
 
 pkg_dart_c_param_types: fn(params: [DartParam]) -> String Never! {
     if params.len() == 0 -> return "void"
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push(param.kind.c())
     parts.join(",")
 }
 
 pkg_dart_c_params: fn(params: [DartParam]) -> String Never! {
     if params.len() == 0 -> return "void"
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push("{param.kind.c()} {param.name}")
     parts.join(",")
 }
 
 pkg_dart_rust_types: fn(params: [DartParam]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push(param.kind.rust())
     parts.join(", ")
 }
 
 pkg_dart_render_host_rust: fn(lib: String, functions: [DartFunction]) -> String Never! {
     abi: "jet_dart_{lib}"
-    out := "\nuse std::ffi::c_void;\nunsafe extern \"C\" {{\n"
+    ^out: "\nuse std::ffi::c_void;\nunsafe extern \"C\" {{\n"
     out = "{out}fn {abi}_initialize(data: *mut c_void) -> i64;\nfn {abi}_reset();\n"
     loop function in functions {
         out = "{out}fn {abi}_register_{function.name}(callback: extern \"C\" fn({pkg_dart_rust_types(function.params)}) -> {function.result.rust()}) -> i64;\n"
@@ -551,7 +551,7 @@ pkg_dart_render_host: fn(contract: String, lib: String, functions: [DartFunction
     abi: "jet_dart_{lib}"
     uri: pkg_dart_file_uri(contract)
     ext: VariantOS.current().shared_ext()
-    out := "// Generated by `jet inspect bind dart`.\nimport 'dart:ffi';\nimport '{uri}' as contract;\n\ntypedef _InitializeNative = Int64 Function(Pointer<Void>);\ntypedef _InitializeDart = int Function(Pointer<Void>);\nlate final DynamicLibrary jetDartLibrary;\nfinal List<NativeCallable> _jetDartCallbacks = <NativeCallable>[];\nbool _jetDartReady = false;\nbool _jetDartClosed = false;\n\nvoid initializeJetDart([String libraryPath = 'libjet_dart_{lib}_compute{ext}']) {{\n  if (_jetDartReady) return;\n  if (_jetDartClosed) {{ throw StateError('Dart callbacks were already closed'); }}\n  jetDartLibrary = DynamicLibrary.open(libraryPath);\n  final initialize = jetDartLibrary.lookupFunction<_InitializeNative, _InitializeDart>('{abi}_host_initialize');\n  if (initialize(NativeApi.initializeApiDLData) != 0) {{ throw StateError('Dart API DL initialization failed'); }}\n"
+    ^out: "// Generated by `jet inspect bind dart`.\nimport 'dart:ffi';\nimport '{uri}' as contract;\n\ntypedef _InitializeNative = Int64 Function(Pointer<Void>);\ntypedef _InitializeDart = int Function(Pointer<Void>);\nlate final DynamicLibrary jetDartLibrary;\nfinal List<NativeCallable> _jetDartCallbacks = <NativeCallable>[];\nbool _jetDartReady = false;\nbool _jetDartClosed = false;\n\nvoid initializeJetDart([String libraryPath = 'libjet_dart_{lib}_compute{ext}']) {{\n  if (_jetDartReady) return;\n  if (_jetDartClosed) {{ throw StateError('Dart callbacks were already closed'); }}\n  jetDartLibrary = DynamicLibrary.open(libraryPath);\n  final initialize = jetDartLibrary.lookupFunction<_InitializeNative, _InitializeDart>('{abi}_host_initialize');\n  if (initialize(NativeApi.initializeApiDLData) != 0) {{ throw StateError('Dart API DL initialization failed'); }}\n"
     loop function in functions {
         name: function.name
         native_sig: pkg_dart_signature(function, true)
@@ -565,7 +565,7 @@ pkg_dart_render_host: fn(contract: String, lib: String, functions: [DartFunction
 // percent-encoded.
 pkg_dart_file_uri: fn(path: String) -> String Never! {
     hex: "0123456789ABCDEF".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in "file://".bytes() -> out.push(byte)
     loop byte in path.replace("\\", "/").bytes() {
         code: Int{byte}
@@ -581,7 +581,7 @@ pkg_dart_file_uri: fn(path: String) -> String Never! {
 }
 
 pkg_dart_signature: fn(function: DartFunction, native: Bool) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in function.params {
         parts.push(if native -> param.kind.dart_native() else -> param.kind.dart())
     }
@@ -592,9 +592,9 @@ pkg_dart_signature: fn(function: DartFunction, native: Bool) -> String Never! {
 // Breadth-first search below `root` for an entry named `name`, bounded by
 // depth and total entries seen.
 pkg_dart_find_named: fn(root: String, name: String) -[FS]> String? ForeignBindError! {
-    queue := [{dir: String, depth: Int}]{{dir: root, depth: 0}}
-    head := 0
-    seen := 0
+    ^queue: [{dir: String, depth: Int}]{{dir: root, depth: 0}}
+    ^head: 0
+    ^seen: 0
     loop head < queue.len() {
         current: queue[head]
         head += 1
@@ -615,11 +615,11 @@ pkg_dart_find_named: fn(root: String, name: String) -[FS]> String? ForeignBindEr
 // comment keeps its newline and a block comment keeps its line breaks.
 pkg_dart_strip_comments: fn(source: String) -> String Never! {
     raw: source.bytes()
-    out := [U8]{}
-    i := 0
-    quote := 0
-    triple := false
-    escaped := false
+    ^out: [U8]{}
+    ^i: 0
+    ^quote: 0
+    ^triple: false
+    ^escaped: false
     loop i < raw.len() {
         code: Int{raw[i]}
         if quote != 0 {

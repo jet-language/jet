@@ -5,14 +5,14 @@
 // the header is encoded here, field for field; a path longer than the 100-byte
 // name field is truncated, as there.
 image_build_tar: fn(layer_files: [LayerFile]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop file in layer_files -> image_write_tar_entry(out, file)
     loop _ in 0..<1024 -> out.push(U8{0})
     out
 }
 
 image_write_tar_entry: fn(out: ^[U8], file: LayerFile) Never! {
-    header := [U8]{}
+    ^header: [U8]{}
     loop _ in 0..<512 -> header.push(U8{0})
     image_tar_set(header, 0, 100, file.path.bytes())
     image_tar_set(header, 100, 8, image_tar_octal(file.mode, 7))
@@ -26,9 +26,9 @@ image_write_tar_entry: fn(out: ^[U8], file: LayerFile) Never! {
     // The checksum field reads as spaces while summing, then holds six octal
     // digits, a NUL, and a space.
     loop i in 148..<156 -> header[i] = U8{32}
-    checksum := 0
+    ^checksum: 0
     loop byte in header -> checksum += (Int{byte})
-    field := image_tar_octal(checksum, 6)
+    ^field: image_tar_octal(checksum, 6)
     field.push(U8{32})
     image_tar_set(header, 148, 8, field)
     loop byte in header -> out.push(byte)
@@ -46,16 +46,16 @@ image_tar_set: fn(header: ^[U8], offset: Int, length: Int, bytes: [U8]) Never! {
 
 // `value` as at least `digits` zero-padded octal digits, then a NUL.
 image_tar_octal: fn(value: Int, digits: Int) -> [U8] Never! {
-    reversed := [U8]{}
-    rest := value
+    ^reversed: [U8]{}
+    ^rest: value
     loop {
         reversed.push(U8{48 + (rest & 7)})
         rest = rest >> 3
         if rest == 0 -> break
     }
     loop reversed.len() < digits -> reversed.push(U8{48})
-    out := [U8]{}
-    index := reversed.len() - 1
+    ^out: [U8]{}
+    ^index: reversed.len() - 1
     loop index >= 0 {
         out.push(reversed[index])
         index -= 1

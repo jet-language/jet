@@ -54,7 +54,7 @@ ImpactReport: struct {
 
     // Preserve ordering and whitespace.
     render_text: fn(self) -> String Never! {
-        out := ""
+        ^out: ""
         if {
             !self.found -> {
                 out = "symbol `{self.symbol}` not found in index\n"
@@ -99,16 +99,16 @@ ImpactReport: struct {
 impact_report: fn(definitions: [SemDefinition], references: [SemRef], calls: [SemCall], symbol: String, depth_limit: Int) -> ImpactReport Never! {
     definition_module: impact_resolve_module(definitions, symbol)
     found: definition_module != None
-    direct_references := [ImpactRef]{}
+    ^direct_references: [ImpactRef]{}
     loop reference in references {
         if reference.name == symbol -> direct_references.push(impact_ref_to_impact(reference, 1))
     }
-    call_sites := [ImpactEdge]{}
+    ^call_sites: [ImpactEdge]{}
     loop call in calls {
         if call.callee == symbol -> call_sites.push(impact_edge_to_impact(call, 1))
     }
-    upstream_callers := [ImpactEdge]{}
-    downstream_callees := [ImpactEdge]{}
+    ^upstream_callers: [ImpactEdge]{}
+    ^downstream_callees: [ImpactEdge]{}
     if found {
         upstream_callers = impact_transitive_edges(calls, symbol, depth_limit, true)
         downstream_callees = impact_transitive_edges(calls, symbol, depth_limit, false)
@@ -130,7 +130,7 @@ impact_report: fn(definitions: [SemDefinition], references: [SemRef], calls: [Se
 // that name.
 impact_resolve_module: fn(definitions: [SemDefinition], query: String) -> String? Never! {
     bytes: query.bytes()
-    separator := -1
+    ^separator: -1
     loop position in 0..<bytes.len() {
         if bytes[position] == (U8{46}) -> separator = position
     }
@@ -167,9 +167,9 @@ ImpactFrontier: struct {
 // the frontier name (its callers), otherwise calls out of it (its callees).
 // Each (caller, callee) pair is reported once, at its shortest depth.
 impact_transitive_edges: fn(calls: [SemCall], start: String, depth_limit: Int, upstream: Bool) -> [ImpactEdge] Never! {
-    out := [ImpactEdge]{}
-    seen_edges := [ImpactEdgeKey:Bool]{}
-    frontier := Queue<ImpactFrontier>.new()
+    ^out: [ImpactEdge]{}
+    ^seen_edges: [ImpactEdgeKey:Bool]{}
+    ^frontier: Queue<ImpactFrontier>.new()
     frontier.push_back(ImpactFrontier{name: start.copy(), depth: 0})
     loop {
         current: (frontier.pop_front()) ?? break

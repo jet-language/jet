@@ -66,6 +66,9 @@ net: module {
 
     #Import(c) priv set_ttl: fn(stream: ^TCPStream, ttl: Int) -[Net]> NetError! = "jet_net_set_ttl"
 
+    // Sends the file at `path` down `stream`: the count of bytes sent.
+    #Import(c) priv sendfile: fn(stream: ^TCPStream, path: String) -[Net, Time.Wait]> Int NetError! = "jet_net_sendfile"
+
     // The TCPListener and TCPStream methods' leaves (Core/Net/Net.jet): an
     // accept, the stream's reads and writes (a `_deadline` form waits at most
     // `deadline_ns`), a shutdown of `how`, a wait for `interest` (each the

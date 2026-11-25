@@ -129,14 +129,14 @@ board: fn(project: Int) -[DB.Read]> Board db.DBError! {
     }
     task_query: tasks().query() ?? return Err(err)
     task_rows: task_query.filter(fn(row: Task) { row.project == project }).collect() ?? return Err(db.DBError.Failed(err.reason))
-    titles := [String]{}
+    ^titles: [String]{}
     loop row in task_rows -> titles.push(row.title)
     member_query: members().query() ?? return Err(err)
     member_rows: member_query.filter(fn(row: Member) { row.project == project }).collect() ?? return Err(db.DBError.Failed(err.reason))
-    accounts := [String]{}
+    ^accounts: [String]{}
     loop row in member_rows -> accounts.push(row.account)
     found: profiles().get_many(accounts) ?? return Err(err)
-    names := [String]{}
+    ^names: [String]{}
     loop row in found -> names.push(row.name)
     Ok(Board{project: name, tasks: titles, members: names})
 }
@@ -145,7 +145,7 @@ board: fn(project: Int) -[DB.Read]> Board db.DBError! {
 names_one_by_one: fn(project: Int) -[DB.Read]> [String] db.DBError! {
     member_query: members().query() ?? return Err(err)
     member_rows: member_query.filter(fn(row: Member) { row.project == project }).collect() ?? return Err(db.DBError.Failed(err.reason))
-    names := [String]{}
+    ^names: [String]{}
     loop row in member_rows {
         if profiles().get(row.account) == {
             .Ok(found) -> {
@@ -179,13 +179,13 @@ first_tasks: fn(count: Int) -[DB.Read]> String {
     query: tasks().query() ?? return "unreadable"
     first: query.limit(count)
     rows: first.collect() ?? return "uncollected"
-    titles := [String]{}
+    ^titles: [String]{}
     loop row in rows -> titles.push(row.title)
     "[{titles.join(", ")}]"
 }
 
 open_store: fn() {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     stores.value.store = Val(db.open_memory())
 }
 

@@ -64,12 +64,12 @@ use jet_foundation.[
 // scanned once for those keys, instead of keying every staged value (and
 // copying it into a map) on each of the run's item checks.
 sema_comptime_dependencies_from_references: fn(graph: SemaRegistrationGraph, references: [SemaNameReferenceFact], values: [SemaComptimeItemValue]) -> [String] Never! {
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     if references.len() == 0 -> return dependencies
-    wanted := [U32:Bool]{}
+    ^wanted: [U32:Bool]{}
     // The modules the references name constants of: a staged value of any
     // other module is never looked up, so the scan skips it unhashed.
-    wanted_modules := [U32:Bool]{}
+    ^wanted_modules: [U32:Bool]{}
     loop reference in references {
         if reference.symbol.kind == SymbolKind.Constant {
             wanted[reference.symbol.id.id] = true
@@ -79,7 +79,7 @@ sema_comptime_dependencies_from_references: fn(graph: SemaRegistrationGraph, ref
     if wanted.len() == 0 -> return dependencies
     // Every staged constant value a reference can name, by its module id
     // above its symbol id's 32 bits.
-    staged := [Int:Bool]{}
+    ^staged: [Int:Bool]{}
     loop value in values {
         if value.kind != SemaComptimeItemKind.Constant -> next
         if wanted_modules.get(value.module_identity.id) == None -> next
@@ -87,11 +87,13 @@ sema_comptime_dependencies_from_references: fn(graph: SemaRegistrationGraph, ref
         if wanted.get(id.id) == None -> next
         staged[(Int{value.module_identity.id} << 32) | Int{id.id}] = true
     }
-    seen := [U32:Bool]{}
+    ^seen: [U32:Bool]{}
     loop reference in references {
         if reference.symbol.kind != SymbolKind.Constant -> next
         if seen.get(reference.symbol.id.id) != None -> next
-        if staged.get((Int{reference.symbol.module_identity.id} << 32) | Int{reference.symbol.id.id}) != None -> next
+        if staged.get((Int{reference.symbol.module_identity.id} << 32) | Int{reference.symbol.id.id}) != None {
+            next
+        }
         key: symbol_table_key(graph.symbols, reference.symbol.id)
         if sema_comptime_constant_has_ast_value(graph, reference.symbol.module_identity, key) {
             next
@@ -121,11 +123,11 @@ SemaComptimeAvailableConstants: struct {
 }
 
 sema_comptime_available_constants: fn(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaComptimeAvailableConstants Never! {
-    available := SemaComptimeAvailableConstants{keys: name_table(), counted_values: 0}
+    ^available: SemaComptimeAvailableConstants{keys: name_table(), counted_values: 0}
     loop module_row in graph.modules {
         loop constant in module_row.constants {
             if constant.declaration.ct != None {
-                _ := name_intern(available.keys, symbol_table_key(graph.symbols, constant.symbol.id))
+                ^_: name_intern(available.keys, symbol_table_key(graph.symbols, constant.symbol.id))
             }
         }
     }
@@ -137,7 +139,7 @@ sema_comptime_available_constants: fn(graph: SemaRegistrationGraph, values: [Sem
 sema_comptime_available_constants_add: fn(available: ^SemaComptimeAvailableConstants, values: [SemaComptimeItemValue]) Never! {
     loop index in available.counted_values..<values.len() {
         if values[index].kind == SemaComptimeItemKind.Constant {
-            _ := name_intern(available.keys, values[index].key)
+            ^_: name_intern(available.keys, values[index].key)
         }
     }
     if values.len() > available.counted_values -> available.counted_values = values.len()
@@ -151,7 +153,7 @@ sema_comptime_available_version: fn(available: SemaComptimeAvailableConstants) -
 }
 
 sema_comptime_waiting_dependencies: fn(available: SemaComptimeAvailableConstants, dependencies: [String]) -> [String] Never! {
-    waiting := [String]{}
+    ^waiting: [String]{}
     loop key in dependencies {
         if name_find(available.keys, key) == None -> waiting.push(key.copy())
     }
@@ -167,8 +169,8 @@ sema_comptime_find_function_source_by_key: fn(graph: SemaRegistrationGraph, func
 // evaluator's effect gate (E3401) rejects an effectful call. A function need
 // not be marked `#run fn` or `pure` to be reached.
 sema_comptime_reachable_function_keys: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact]) -> [String] Never! {
-    keys := [String]{}
-    seen := [U32:Bool]{}
+    ^keys: [String]{}
+    ^seen: [U32:Bool]{}
     loop fact in call_facts {
         callee: fact.callee ?? next
         if symbol_is_local(callee) || seen.get(callee.id) != None -> next
@@ -189,7 +191,7 @@ sema_comptime_reachable_function_keys: fn(graph: SemaRegistrationGraph, call_fac
 // closure checks each like a callee, so their call sites count toward the
 // evaluation's purity: a local value whose drops print runs with the program.
 sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, type_delta: [InternerDelta], tree: BodyTree, module_identity: ModuleID, keys: ^[String]) {
-    dropped := [Int]{}
+    ^dropped: [Int]{}
     loop node in tree.nodes {
         made: node.kind == .Call(_, _, _) || node.kind == .IndirectCall(_, _, _, _) || node.kind == .MethodCall(_, _, _, _) || node.kind == .StaticCall(_, _, _, _, _) || node.kind == .CoreCall(_, _, _, _, _, _) || node.kind == .StructLit(_) || node.kind == .EnumCtor(_, _, _)
         if made -> dropped.push(node.id)
@@ -199,8 +201,8 @@ sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, type_delta: [Int
     }
     // A type's walk is the same at each of its drops, and one walk adds
     // every key it can, so each of the tree's TypeIDs is walked once.
-    seen := [U32:Bool]{}
-    walked := [U32:Bool]{}
+    ^seen: [U32:Bool]{}
+    ^walked: [U32:Bool]{}
     has_delta: type_delta.len() > 0
     loop id in dropped {
         tid: checked_expr_type_id(tree.expr_types, id) ?? next
@@ -307,7 +309,7 @@ sema_comptime_close_key_add: fn(graph: SemaRegistrationGraph, keys: ^[String], k
 // codec the body pass has not demanded yet is checked with the body its
 // demand would give it (sema_codec_pending_body).
 sema_comptime_codec_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID, encode: Bool, decode: Bool) -> [{module_identity: ModuleID, key: String}] {
-    found := [{module_identity: ModuleID, key: String}]{}
+    ^found: [{module_identity: ModuleID, key: String}]{}
     sema_comptime_codec_methods_add(graph, ty, module_identity, encode, decode, found)
     found
 }
@@ -412,7 +414,7 @@ SemaComptimeRenderMemo: struct {
 // `ty` holds, itself or as an element, member, argument, field or payload,
 // adds its own; `seen` holds the nominals (rows of `memo`) already read.
 sema_comptime_render_methods: fn(graph: SemaRegistrationGraph, memo: ^SemaComptimeRenderMemo, ty: Type, module_identity: ModuleID, seen: ^[Int:Bool]) -> [{module_identity: ModuleID, key: String}] {
-    found := [{module_identity: ModuleID, key: String}]{}
+    ^found: [{module_identity: ModuleID, key: String}]{}
     loop nominal in sema_comptime_render_nominals(graph, memo, ty, module_identity) {
         sema_comptime_render_visit(memo, nominal, seen, found)
     }
@@ -434,7 +436,7 @@ sema_comptime_render_visit: fn(memo: SemaComptimeRenderMemo, nominal: Int, seen:
 // `module_identity`) holds as itself, an element, member or argument, in the
 // order the walk meets them: an applied type's arguments before the type.
 sema_comptime_render_nominals: fn(graph: SemaRegistrationGraph, memo: ^SemaComptimeRenderMemo, ty: Type, module_identity: ModuleID) -> [Int] {
-    nominals := [Int]{}
+    ^nominals: [Int]{}
     sema_comptime_render_nominals_add(graph, memo, ty, module_identity, nominals)
     nominals
 }
@@ -483,7 +485,7 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: ^SemaCompti
     if memo.ids.get(nominal.symbol.id.id) == .Val(known) -> return known
     id: memo.methods.len()
     memo.ids[nominal.symbol.id.id] = id
-    found := [{module_identity: ModuleID, key: String}]{}
+    ^found: [{module_identity: ModuleID, key: String}]{}
     loop reference in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[reference.module_index].impls[reference.row]
         symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
@@ -521,7 +523,7 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: ^SemaCompti
     memo.methods.push(found)
     memo.children.push([Int]{})
     owner_identity: graph.modules[row.module_index].module_identity
-    children := [Int]{}
+    ^children: [Int]{}
     loop field in nominal.fields {
         sema_comptime_render_nominals_add(graph, memo, field.ty, owner_identity, children)
     }
@@ -559,7 +561,7 @@ sema_comptime_derived_compare: fn(method_name: String, compiler_generated: Bool)
 // close and the drop that ends the value's scope, and no call fact records
 // it (sema_call_check_ambient_close).
 sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> [{module_identity: ModuleID, key: String}] {
-    found := [{module_identity: ModuleID, key: String}]{}
+    ^found: [{module_identity: ModuleID, key: String}]{}
     owner: sema_expr_unwrap_tag(ty)
     if !(owner == .Named(_) || owner == .Apply(_, _)) -> return found
     row: sema_type_resolve_nominal_row(graph, owner, module_identity) ?? return found
@@ -602,7 +604,7 @@ sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_i
 // them, so a compile-time closure queues the argument's implementation of
 // each bound like a callee.
 sema_comptime_bound_methods: fn(graph: SemaRegistrationGraph, tree: BodyTree, module_identity: ModuleID) -> [{module_identity: ModuleID, key: String}] {
-    found := [{module_identity: ModuleID, key: String}]{}
+    ^found: [{module_identity: ModuleID, key: String}]{}
     loop node in tree.nodes {
         if node.kind == .Call(callee, type_args, _) {
             if type_args.len() == 0 -> next
@@ -630,8 +632,8 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
     owner: sema_expr_unwrap_tag(ty)
     parts: bound.split(".").to_list()
     trait_name: parts[parts.len() - 1]
-    nominal := SymbolID?{None}
-    target := type_name(owner)
+    ^nominal: SymbolID?{None}
+    ^target: type_name(owner)
     if owner == .Named(_) || owner == .Apply(_, _) {
         row: sema_type_resolve_nominal_row(graph, owner, module_identity) ?? return
         declared: graph.modules[row.module_index].nominals[row.row]
@@ -847,7 +849,7 @@ sema_comptime_body_unfoldable: fn(graph: SemaRegistrationGraph, function: FnBody
 // The first module binding written `name := …` and not prepared while
 // building that checked tree `tree` reads, or None.
 sema_comptime_tree_module_state: fn(graph: SemaRegistrationGraph, tree: BodyTree) -> String? Never! {
-    read := [U32:Bool]{}
+    ^read: [U32:Bool]{}
     loop node in tree.nodes {
         if node.kind == .ConstRef(symbol) -> read[symbol.id] = true
     }
@@ -938,7 +940,7 @@ sema_comptime_add_source: fn(sources: ^SemaComptimeSourceList, graph: SemaRegist
         checked_text: None,
     }
     sources.items.push(source)
-    _ := sema_comptime_key_set_add(sources.keys, module_identity, key)
+    ^_: sema_comptime_key_set_add(sources.keys, module_identity, key)
 }
 
 sema_comptime_add_marker_source: fn(sources: ^SemaComptimeSourceList, graph: SemaRegistrationGraph, module_identity: ModuleID, owner_key: String, marker: Marker, expected_type: Type?) {
@@ -1009,7 +1011,7 @@ sema_comptime_add_module_item_sources: fn(sources: ^SemaComptimeSourceList, grap
             if !sema_comptime_function_has_sources(function) {
                 return
             }
-            owner_key := symbol_key_text(SymbolKind.Function, module_text(graph.module_table, source_module.module_identity), "", function.name)
+            ^owner_key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, source_module.module_identity), "", function.name)
             sema_comptime_add_function_sources(sources, graph, source_module, function, owner_key)
         }
         .Struct(definition) -> {
@@ -1023,7 +1025,7 @@ sema_comptime_add_module_item_sources: fn(sources: ^SemaComptimeSourceList, grap
                 sema_comptime_add_marker_source(sources, graph, source_module.module_identity, nominal_key, marker, None)
             }
             loop field in definition.fields {
-                field_symbol := Symbol?{None}
+                ^field_symbol: Symbol?{None}
                 loop registered in nominal.fields {
                     if registered.symbol.name == field.name -> field_symbol = Val(registered.symbol)
                 }
@@ -1034,7 +1036,7 @@ sema_comptime_add_module_item_sources: fn(sources: ^SemaComptimeSourceList, grap
                     // must evaluate.
                     if field.default != None && field.default_ct == None {
                         expression: field.default ?? Expr.Unit{span: field.name_span, id: AST_NODE_GENERATED}
-                        destination_key := symbol_table_key(graph.symbols, symbol.id)
+                        ^destination_key: symbol_table_key(graph.symbols, symbol.id)
                         key: "{destination_key}.default"
                         added: sources.items.len()
                         sema_comptime_add_source(sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{field.name}", SemaComptimeItemKind.FieldDefault, expression, Val(field.ty))
@@ -1074,7 +1076,7 @@ sema_comptime_add_module_item_sources: fn(sources: ^SemaComptimeSourceList, grap
             }
             loop variant in definition.variants {
                 if variant.discriminant_expr != None && variant.discriminant == None {
-                    registered_symbol := Symbol?{None}
+                    ^registered_symbol: Symbol?{None}
                     loop registered in nominal.variants {
                         if registered.symbol.name == variant.name {
                             registered_symbol = Val(registered.symbol)
@@ -1083,7 +1085,7 @@ sema_comptime_add_module_item_sources: fn(sources: ^SemaComptimeSourceList, grap
                     if registered_symbol != None {
                         symbol: registered_symbol ?? return
                         expression: variant.discriminant_expr ?? Expr.Unit{span: variant.name_span, id: AST_NODE_GENERATED}
-                        destination_key := symbol_table_key(graph.symbols, symbol.id)
+                        ^destination_key: symbol_table_key(graph.symbols, symbol.id)
                         key: "{destination_key}.discriminant"
                         sema_comptime_add_source(sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{variant.name}", SemaComptimeItemKind.TypeLevel, expression, Val(Type.Int))
                     }
@@ -1114,11 +1116,11 @@ sema_comptime_add_module_item_sources: fn(sources: ^SemaComptimeSourceList, grap
             }
         }
         .Const(definition) -> {
-            owner_key := symbol_key_text(SymbolKind.Constant, module_text(graph.module_table, source_module.module_identity), "", definition.name)
+            ^owner_key: symbol_key_text(SymbolKind.Constant, module_text(graph.module_table, source_module.module_identity), "", definition.name)
             sema_comptime_add_meta_sources(sources, graph, source_module.module_identity, owner_key, definition.meta)
         }
         .Distinct(definition) -> {
-            owner_key := symbol_key_text(SymbolKind.Type, module_text(graph.module_table, source_module.module_identity), "", definition.name)
+            ^owner_key: symbol_key_text(SymbolKind.Type, module_text(graph.module_table, source_module.module_identity), "", definition.name)
             loop marker in definition.type_markers {
                 sema_comptime_add_marker_source(sources, graph, source_module.module_identity, owner_key, marker, None)
             }
@@ -1138,7 +1140,7 @@ sema_comptime_struct_bakes_defaults: fn(derives: [NamedSpan]) -> Bool Never! {
 // The comptime sources of `source_module`, in declaration order, their
 // dependencies not yet named (the run's check of each names them).
 sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
-    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}}
+    ^sources: SemaComptimeSourceList{items: [SemaComptimeItemSource]{}}
     loop constant in source_module.constants {
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
@@ -1146,10 +1148,10 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
         // literal (E0622); it is never evaluated.
         module_value: sema_checked_module_value_computed(constant.declaration)
         if !module_value && !sema_checked_module_value_evaluates(constant.declaration) -> next
-        expression := constant.declaration.value
+        ^expression: constant.declaration.value
         // A bare decimal literal binding is a Float constant, not the
         // expression default Decimal.
-        expected := constant.declaration.ty
+        ^expected: constant.declaration.ty
         if expected == None && constant.declaration.value == .Float(_, _, _, _, _) {
             expected = Val(Type.Float)
         }
@@ -1170,7 +1172,7 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
     loop item in source_module.program.items {
         sema_comptime_add_module_item_sources(sources, graph, source_module, item)
     }
-    items := sources.items.move()
+    ^items: sources.items.move()
     sources.items = [SemaComptimeItemSource]{}
     items
 }
@@ -1189,16 +1191,16 @@ sema_comptime_step_limit: fn(markers: [Marker]) -> Int? Never! {
 }
 
 sema_comptime_collect_module_sources_range: fn(program: SemaProgramTables, from: Int, to: Int) -> [SemaComptimeItemSource] {
-    out := [SemaComptimeItemSource]{}
+    ^out: [SemaComptimeItemSource]{}
     loop source_module_index in from..<to {
-        module_sources := sema_comptime_module_sources(program, source_module_index)
+        ^module_sources: sema_comptime_module_sources(program, source_module_index)
         out.extend(module_sources.move())
     }
     out
 }
 
 sema_comptime_collect_module_sources_parts: fn(program: SemaProgramTables, module_count: Int, from: Int, workers: Int) -> [[SemaComptimeItemSource]] {
-    done := [[SemaComptimeItemSource]]{}
+    ^done: [[SemaComptimeItemSource]]{}
     lo: from * module_count /% workers
     hi: (from + 1) * module_count /% workers
     if from + 1 >= workers {
@@ -1207,7 +1209,7 @@ sema_comptime_collect_module_sources_parts: fn(program: SemaProgramTables, modul
     }
     task.group sema_comptime_sources_group {
         head: task sema_comptime_collect_module_sources_range(program, lo, hi)
-        rest := sema_comptime_collect_module_sources_parts(program, module_count, from + 1, workers)
+        ^rest: sema_comptime_collect_module_sources_parts(program, module_count, from + 1, workers)
         done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
@@ -1215,17 +1217,15 @@ sema_comptime_collect_module_sources_parts: fn(program: SemaProgramTables, modul
 }
 
 sema_comptime_collect_all_module_sources: fn(program: SemaProgramTables, module_count: Int, threads: CompilerThreads) -> [SemaComptimeItemSource] {
-    workers := compiler_threads_limit(threads)
+    ^workers: compiler_threads_limit(threads)
     cap: module_count /% 32
     if workers > cap -> workers = cap
-    if workers <= 1 {
-        return sema_comptime_collect_module_sources_range(program, 0, module_count)
-    }
-    parts := sema_comptime_collect_module_sources_parts(program, module_count, 0, workers)
+    if workers <= 1 -> return sema_comptime_collect_module_sources_range(program, 0, module_count)
+    ^parts: sema_comptime_collect_module_sources_parts(program, module_count, 0, workers)
     parts.reverse()
-    out := [SemaComptimeItemSource]{}
+    ^out: [SemaComptimeItemSource]{}
     loop parts.len() > 0 {
-        part := parts.pop() ?? break
+        ^part: parts.pop() ?? break
         out.extend(part.move())
     }
     out
@@ -1238,29 +1238,29 @@ sema_comptime_collect_all_module_sources: fn(program: SemaProgramTables, module_
 // graph: the pass never copies it. The modules' declaration checks and the
 // name facts run on up to `threads` compiler threads.
 sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop diagnostic in graph.diagnostics -> diagnostics.push(diagnostic)
-    complete := graph.complete
+    ^complete: graph.complete
     module_count: graph.modules.len()
-    modules := [SemaGraphModuleResult]{}
-    body_values := sema_comptime_body_values_freeze([SemaComptimeBodyValue]{}, sema_comptime_body_work_new(trace_sink), false)
-    facts := sema_pass_facts_new()
-    owned := sema_pass_facts(graph, threads, SEMA_PASS_FACT_TABLES, facts)
-    initial_program := sema_program_tables_with(owned, [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
+    ^modules: [SemaGraphModuleResult]{}
+    ^body_values: sema_comptime_body_values_freeze([SemaComptimeBodyValue]{}, sema_comptime_body_work_new(trace_sink), false)
+    ^facts: sema_pass_facts_new()
+    ^owned: sema_pass_facts(graph, threads, SEMA_PASS_FACT_TABLES, facts)
+    ^initial_program: sema_program_tables_with(owned, [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
     initial_environment: sema_check_pass_environment(initial_program, facts.fixed_length_write_params.move(), body_values)
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, initial_environment, initial_program, sema_function_memory_plan_new())
-    every_module := [Int]{}
+    ^every_module: [Int]{}
     loop module_index in 0..<module_count -> every_module.push(module_index)
-    checks := sema_check_declaration_modules(module_state, every_module, [SemaComptimeItemValue]{}, true, threads)
-    pass_environment := sema_check_shared_take_environment(module_state)
-    pass_program := sema_check_shared_take_program(module_state)
+    ^checks: sema_check_declaration_modules(module_state, every_module, [SemaComptimeItemValue]{}, true, threads)
+    ^pass_environment: sema_check_shared_take_environment(module_state)
+    ^pass_program: sema_check_shared_take_program(module_state)
     checks.reverse()
-    module_index := 0
+    ^module_index: 0
     loop checks.len() > 0 {
-        check := checks.pop() ?? break
-        checked := check.module_result.move()
+        ^check: checks.pop() ?? break
+        ^checked: check.module_result.move()
         if trace_sink == .Val(sink) {
             sema_comptime_trace_module_begin(sink, pass_program, module_index, module_count)
             sink.progress("counters.sema.check.items_scanned", check.items_scanned, -1)
@@ -1274,8 +1274,8 @@ sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_p
         modules.push(checked)
         module_index += 1
     }
-    sources := sema_comptime_collect_all_module_sources(pass_program, module_count, threads)
-    has_checked_text := false
+    ^sources: sema_comptime_collect_all_module_sources(pass_program, module_count, threads)
+    ^has_checked_text: false
     loop checked_module_index in 0..<modules.len() {
         loop request in modules[checked_module_index].comptime_requests {
             if request.checked_text != None {
@@ -1286,28 +1286,30 @@ sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_p
         if has_checked_text -> break
     }
     if has_checked_text {
-        source_keys := SemaComptimeKeySet{}
+        ^source_keys: SemaComptimeKeySet{}
         loop source in sources {
-            _ := sema_comptime_key_set_add(source_keys, source.module_identity, source.key)
+            ^_: sema_comptime_key_set_add(source_keys, source.module_identity, source.key)
         }
         loop checked_module_index in 0..<modules.len() {
             checked_module: modules[checked_module_index]
             loop request in checked_module.comptime_requests {
                 evaluation: request.checked_text ?? next
-                source := sema_comptime_checked_text_source(evaluation)
-                if !sema_comptime_key_set_add(source_keys, source.module_identity, source.key) -> next
+                ^source: sema_comptime_checked_text_source(evaluation)
+                if !sema_comptime_key_set_add(source_keys, source.module_identity, source.key) {
+                    next
+                }
                 sources.push(source)
             }
         }
     }
     // Recover the original graph from its tables.
     sema_comptime_body_work_flush(pass_environment.comptime_body_publication, trace_sink, "sema.check")
-    imports := sema_comptime_stage_imports(pass_program)
-    pass_graph := pass_program.registration_graph.move()
+    ^imports: sema_comptime_stage_imports(pass_program)
+    ^pass_graph: pass_program.registration_graph.move()
     // The name facts only read the graph: the pass's facts of it stand.
-    graph_facts := SemaComptimeGraphFacts{boxed_edges: pass_program.boxed_edges.move(), copy_facts: pass_program.copy_facts.move()}
-    names := sema_name_facts_empty()
-    returned := pass_graph
+    ^graph_facts: SemaComptimeGraphFacts{boxed_edges: pass_program.boxed_edges.move(), copy_facts: pass_program.copy_facts.move()}
+    ^names: sema_name_facts_empty()
+    ^returned: pass_graph
     // The bodies that reach a declaration a misspelled member type left
     // unusable are skipped; every other body is checked.
     if sema_has_error_since(diagnostics, 0) {
@@ -1348,20 +1350,20 @@ sema_comptime_stage_imports: fn(program: SemaProgramTables) -> [SemaRegistration
 // reads its entered module.
 sema_comptime_modules_with_values: fn(programs: ^[SemaProgramTables], values: [SemaComptimeItemValue], threads: CompilerThreads) -> [SemaGraphModuleResult] {
     module_count: programs[0].registration_graph.modules.len()
-    environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
+    ^environment: sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), None, false)
-    program := compiler_threads_taken(programs)
+    ^program: compiler_threads_taken(programs)
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, environment, program, sema_function_memory_plan_new())
-    every_module := [Int]{}
+    ^every_module: [Int]{}
     loop module_index in 0..<module_count -> every_module.push(module_index)
-    checks := sema_check_declaration_modules(module_state, every_module, values, true, threads)
+    ^checks: sema_check_declaration_modules(module_state, every_module, values, true, threads)
     programs.push(sema_check_shared_take_program(module_state))
-    modules := [SemaGraphModuleResult]{}
+    ^modules: [SemaGraphModuleResult]{}
     checks.reverse()
     loop checks.len() > 0 {
-        check := checks.pop() ?? break
+        ^check: checks.pop() ?? break
         modules.push(check.module_result.move())
     }
     modules
@@ -1390,14 +1392,14 @@ SemaDeclarationCheck: struct {
 // (sema_check_sorted_view_summary_jobs), which read only the graph, so its
 // summary scopes need not search for them on the calling thread.
 sema_check_declaration_module: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, position: Int, values: [SemaComptimeItemValue], foreign: Bool) -> SemaDeclarationCheck {
-    scopes := sema_scope_init(sema_check_registered_module_identity(environment, program, module_index))
-    module_result := sema_check_registration_module_start(environment, program, module_index, values, scopes)
-    items_scanned := 0
+    ^scopes: sema_scope_init(sema_check_registered_module_identity(environment, program, module_index))
+    ^module_result: sema_check_registration_module_start(environment, program, module_index, values, scopes)
+    ^items_scanned: 0
     sema_check_registration_module_program(environment, program, module_index, module_result, true, items_scanned)
     if foreign {
         sema_check_registration_module_foreign(environment, program, module_index, module_result)
     }
-    view_summary_jobs := [Int]?{None}
+    ^view_summary_jobs: [Int]?{None}
     if !foreign {
         view_summary_jobs = Val(sema_check_sorted_view_summary_jobs(environment, program, module_index))
     }
@@ -1412,11 +1414,11 @@ sema_check_declaration_module: fn(environment: SemaScopeEnvironment, program: Se
 // counters' permit and serialize the threads. Work that admits one thread
 // checks on the calling thread.
 sema_check_declaration_modules: fn(shared_state: Shared<SemaCheckShared>, modules: [Int], values: [SemaComptimeItemValue], foreign: Bool, threads: CompilerThreads) -> [SemaDeclarationCheck] {
-    weights := [Int]{}
-    scope_rows := 0
+    ^weights: [Int]{}
+    ^scope_rows: 0
     work: sema_check_declaration_weights_in_shared(shared_state, modules, weights, scope_rows)
     workers: compiler_threads_admit(threads, modules.len(), work, SEMA_DECLARATION_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
-    checks := [SemaDeclarationCheck]{}
+    ^checks: [SemaDeclarationCheck]{}
     if workers <= 1 {
         loop position in 0..<modules.len() {
             checks.push(sema_check_declaration_module_in_shared(shared_state, modules[position], position, values, foreign))
@@ -1428,14 +1430,14 @@ sema_check_declaration_modules: fn(shared_state: Shared<SemaCheckShared>, module
     // comptime values are read parameters here.
     inputs: Shared{SemaDeclarationInputs{modules: modules.copy(), values: values.copy(), foreign: foreign}}
     plan: Shared{SemaDeclarationPlan{order: compiler_threads_heaviest_first(weights), next: 0}}
-    placed := [SemaDeclarationCheck?]{}
+    ^placed: [SemaDeclarationCheck?]{}
     loop _ in 0..<modules.len() -> placed.push(None)
     sema_check_declaration_claimers(shared_state, inputs, plan, 0, workers, placed)
     _: sema_check_shared_counting(shared_state, counting)
     placed.reverse()
     loop placed.len() > 0 {
-        slot := placed.pop() ?? break
-        check := compiler_threads_slot_taken(slot)
+        ^slot: placed.pop() ?? break
+        ^check: compiler_threads_slot_taken(slot)
         checks.push(check)
     }
     checks
@@ -1450,9 +1452,9 @@ sema_check_declaration_weights_in_shared: fn(shared_state: Shared<SemaCheckShare
 
 sema_check_declaration_weights: fn(program: SemaProgramTables, modules: [Int], weights: ^[Int], scope_rows: ^Int) -> Int {
     graph: program.registration_graph
-    work := 0
+    ^work: 0
     loop module_index in modules {
-        weight := 0
+        ^weight: 0
         loop item_index in 0..<graph.modules[module_index].program.items.len() {
             span: sema_compiler_index_item_span(graph.modules[module_index].program.items[item_index])
             weight += span.end - span.start
@@ -1474,7 +1476,7 @@ sema_check_declaration_module_in_shared: fn(shared_state: Shared<SemaCheckShared
 // lookups; the old flag.
 sema_check_shared_counting: fn(shared_state: Shared<SemaCheckShared>, counting: Bool) -> Bool {
     permit: shared_state.guard_edit()
-    program := compiler_threads_taken(permit.value.programs)
+    ^program: compiler_threads_taken(permit.value.programs)
     old: sema_comptime_precheck_graph_counting(program)
     program.registration_graph.counting = counting
     permit.value.programs.push(program)
@@ -1506,9 +1508,9 @@ sema_check_declaration_claimers: fn(shared_state: Shared<SemaCheckShared>, input
     task.group sema_declaration_threads {
         head: task sema_check_declaration_claimed(shared_state, inputs, plan)
         sema_check_declaration_claimers(shared_state, inputs, plan, from + 1, workers, placed)
-        claimed := compiler_threads_joined(head)
+        ^claimed: compiler_threads_joined(head)
         loop claimed.len() > 0 {
-            check := claimed.pop() ?? break
+            ^check: claimed.pop() ?? break
             position: check.position
             placed[position] = Val(check.move())
         }
@@ -1519,7 +1521,7 @@ sema_check_declaration_claimers: fn(shared_state: Shared<SemaCheckShared>, input
 sema_check_declaration_claimed: fn(shared_state: Shared<SemaCheckShared>, inputs: Shared<SemaDeclarationInputs>, plan: Shared<SemaDeclarationPlan>) -> [SemaDeclarationCheck] {
     tables: shared_state.guard_read()
     rows: inputs.guard_read()
-    claimed := [SemaDeclarationCheck]{}
+    ^claimed: [SemaDeclarationCheck]{}
     ranks: plan.guard_read()
     loop {
         position: sema_check_declaration_claim(ranks.value)
@@ -1543,8 +1545,8 @@ sema_check_declaration_claim: fn(plan: SemaDeclarationPlan) -> Int {
 // never skips the computed-field lookup.
 sema_comptime_environment: fn(program: ^SemaProgramTables, values: [SemaComptimeItemValue], trace_sink: CompilerTraceSink?) -> SemaScopeEnvironment Never! {
     program.has_computed_fields = true
-    environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
-    work := sema_comptime_body_work_new(trace_sink)
+    ^environment: sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
+    ^work: sema_comptime_body_work_new(trace_sink)
     count_key_bytes: if work == .Val(_) -> true else -> false
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
     environment.comptime_body_publication.item_frontier = values.len()
@@ -1558,10 +1560,10 @@ sema_comptime_environment: fn(program: ^SemaProgramTables, values: [SemaComptime
 // (SemaComptimeDeclarationStage.graph_facts) come with no values, and a
 // finalization's carried ones with the values its graph already holds.
 sema_comptime_environment_tables: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptimeItemValue], graph_facts: ^^SemaComptimeGraphFacts?) -> SemaProgramTables Never! {
-    resolved := graph.move()
-    trail := sema_graph_trail_init()
+    ^resolved: graph.move()
+    ^trail: sema_graph_trail_init()
     sema_comptime_graph_apply_values(resolved, values, trail)
-    facts := graph_facts.move() ?? return sema_program_tables_init(resolved.move(), [TTypeDef]{})
+    ^facts: graph_facts.move() ?? return sema_program_tables_init(resolved.move(), [TTypeDef]{})
     sema_program_tables_with(resolved.move(), [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
 }
 
@@ -1582,7 +1584,7 @@ sema_comptime_environment_publish_body_values: fn(environment: ^SemaScopeEnviron
 // one environment. The caller applies each later value to their graph in
 // place.
 sema_comptime_program: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptimeItemValue], trail: ^SemaGraphTrail) -> SemaProgramTables Never! {
-    resolved := graph.move()
+    ^resolved: graph.move()
     sema_comptime_graph_apply_values(resolved, values, trail)
     sema_program_tables_init(resolved.move(), [TTypeDef]{})
 }
@@ -1594,12 +1596,12 @@ sema_comptime_program: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptimeI
 // lent to every item and function check of the run.
 sema_check_comptime_item: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, comptime_scopes: ^SemaComptimeScopes, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource) -> SemaComptimeItemCheck {
     if source.checked_text == .Val(evaluation) {
-        dependencies := evaluation.dependencies
-        waiting := sema_comptime_waiting_dependencies(available, dependencies)
+        ^dependencies: evaluation.dependencies
+        ^waiting: sema_comptime_waiting_dependencies(available, dependencies)
         if waiting.len() > 0 {
             return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: [Diagnostic]{}, complete: true}
         }
-        request := SemaComptimeItemRequest{
+        ^request: SemaComptimeItemRequest{
             module_identity: source.module_identity,
             key: source.key,
             destination_key: source.destination_key,
@@ -1615,7 +1617,7 @@ sema_check_comptime_item: fn(environment: ^SemaScopeEnvironment, program: SemaPr
         }
         return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: [Diagnostic]{}, complete: true}
     }
-    empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
+    ^empty: sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
     entered: sema_scope_environment_enter_comptime_module(environment, program, source.module_identity, empty)
     if !entered {
         return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: [Diagnostic]{}, complete: false}
@@ -1628,12 +1630,12 @@ sema_check_comptime_item: fn(environment: ^SemaScopeEnvironment, program: SemaPr
 // `module_identity` is the source module, the locals' symbol module;
 // `module_name` its identity text for the locals' keys.
 sema_comptime_declare_prepared_locals: fn(source: SemaComptimeItemSource, module_identity: ModuleID, module_name: String, program: SemaProgramTables, context: ^SemaCheckContext, table: ^SemaScopeTable, state: ^SemaOwnershipState) Never! {
-    _ := sema_scope_enter(table, state, "{source.key}#prepared")
+    ^_: sema_scope_enter(table, state, "{source.key}#prepared")
     owner: sema_scope_local_owner_key(table)
     loop local in source.prepared {
         key: symbol_key_text(SymbolKind.Local, module_name, owner, local.name)
         id: sema_symbol_id_of(program, context, key)
-        symbol := Symbol{id: id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner.copy()), span: local.span, ty: Val(local.ty), visibility: 0}
+        ^symbol: Symbol{id: id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner.copy()), span: local.span, ty: Val(local.ty), visibility: 0}
         if !sema_scope_declare_local(table, symbol, key, false, AccessConvention.Read, None, false) {
             next
         }
@@ -1665,7 +1667,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
     resolved_graph: program.registration_graph
     sema_comptime_scopes_prepare(comptime_scopes, environment, program, sema_comptime_available_version(available))
     at: comptime_scopes.current
-    diagnostics := comptime_scopes.slots[at].diagnostics.copy()
+    ^diagnostics: comptime_scopes.slots[at].diagnostics.copy()
     if !comptime_scopes.slots[at].applied {
         return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: diagnostics, complete: false}
     }
@@ -1677,14 +1679,14 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
     // The build edge carries the implicit `Err!` rail of `run: fn()`
     // so a fallible call here propagates to the build.
     comptime_scopes.slots[at].table.failure_carrier = Val(sema_failure_carrier(None))
-    check := sema_body_check_init(@program, @environment)
+    ^check: sema_body_check_init(@program, @environment)
     check.context.host_hooks = comptime_scopes.host_hooks
     check.context.compiler_records = sema_call_rule_batch_item(source)
     // A module value's checks run inside its own owner frame, so its
     // intrinsic call sites are recorded (sema_effect_record_intrinsic_fact
     // records only under an owner) and its purity can be read.
     if source.module_value || source.runtime_check {
-        _ := sema_scope_enter(comptime_scopes.slots[at].table, check.state, sema_comptime_item_owner_key(source.key))
+        ^_: sema_scope_enter(comptime_scopes.slots[at].table, check.state, sema_comptime_item_owner_key(source.key))
     }
     if source.prepared.len() > 0 {
         sema_comptime_declare_prepared_locals(source, source.module_identity, module_text(resolved_graph.module_table, source.module_identity), program, check.context, comptime_scopes.slots[at].table, check.state)
@@ -1698,14 +1700,16 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
     first_finding: diagnostics.len()
     sema_body_check_swap_diagnostics(check, diagnostics)
     sema_body_check_swap_scopes(check, comptime_scopes.slots[at].table)
-    checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, check) else -> sema_check_expression(source.expression, source.expected_type, check)
+    ^checked: if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, check) else -> sema_check_expression(source.expression, source.expected_type, check)
     sema_body_check_swap_scopes(check, comptime_scopes.slots[at].table)
     sema_body_check_swap_diagnostics(check, diagnostics)
     // A rule batch's loop is parsed text (sema_call_rule_batch_expression),
     // whose offsets name no place in the rule's file, so a finding in it
     // is placed at the batch's span, the rule's.
     if check.context.compiler_records {
-        loop index in first_finding..<diagnostics.len() -> diagnostics[index].span = Val(source.span)
+        loop index in first_finding..<diagnostics.len() {
+            diagnostics[index].span = Val(source.span)
+        }
     }
     comptime_scopes.slots[at].table.comptime_runtime_locals = [String]{}
     comptime_scopes.slots[at].table.position_free = false
@@ -1722,15 +1726,15 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             }
         }
     }
-    dependencies := sema_comptime_dependencies_from_references(resolved_graph, check.context.name_references, [SemaComptimeItemValue]{})
+    ^dependencies: sema_comptime_dependencies_from_references(resolved_graph, check.context.name_references, [SemaComptimeItemValue]{})
     loop dependency in source.dependencies {
-        already := false
+        ^already: false
         loop existing in dependencies {
             if existing == dependency -> already = true
         }
         if !already -> dependencies.push(dependency.copy())
     }
-    waiting := sema_comptime_waiting_dependencies(available, dependencies)
+    ^waiting: sema_comptime_waiting_dependencies(available, dependencies)
     // A check that waits returns its request too: a batch that computes
     // the constants it waits on, whose types landed ahead of their values,
     // evaluates it in the same program (the driver's
@@ -1750,15 +1754,15 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: true}
         }
     }
-    checked_expected := source.expected_type
+    ^checked_expected: source.expected_type
     if checked_expected != None {
         required: checked_expected ?? expression.ty
         if expression.ty != required -> checked_expected = None
     }
     published: sema_publish_expression(expression, program, check.context)
-    reachable := sema_comptime_reachable_function_keys(resolved_graph, check.context.call_facts)
+    ^reachable: sema_comptime_reachable_function_keys(resolved_graph, check.context.call_facts)
     sema_comptime_drop_close_keys(resolved_graph, check.context.type_delta, published.tree, source.module_identity, reachable)
-    request := SemaComptimeItemRequest{
+    ^request: SemaComptimeItemRequest{
         module_identity: source.module_identity,
         key: source.key,
         destination_key: source.destination_key,
@@ -1781,7 +1785,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
 // value the compiler can't compute or an operand that isn't `Int` is E0035 at
 // the number, in place of the expression's own diagnostics.
 sema_comptime_check_discriminant: fn(source: SemaComptimeItemSource, check: ^SemaBodyCheck) -> TExpr? {
-    attempt := [Diagnostic]{}
+    ^attempt: [Diagnostic]{}
     sema_body_check_swap_diagnostics(check, attempt)
     checked: sema_check_expression(source.expression, None, check)
     sema_body_check_swap_diagnostics(check, attempt)
@@ -1815,7 +1819,7 @@ sema_comptime_dependency_cycle_diagnostic: fn(chain: [String], span: Span) -> Di
 // `graph` where its `impl` block is written, which binds the trait's cap
 // and its trait-value calls to it.
 sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, type_caps: [U32:SemaEffectTypeCap]) -> [SemaEffectFunctionSource] Never! {
-    sources := [SemaEffectFunctionSource]{}
+    ^sources: [SemaEffectFunctionSource]{}
     compute_aliases: sema_kernel_compute_aliases(source_module, graph.module_table)
     loop function in source_module.functions {
         sources.push(sema_comptime_effect_source(graph, source_module, function, compute_aliases, true))
@@ -1823,19 +1827,19 @@ sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: Se
     loop nominal in source_module.nominals {
         block_traits: sema_effect_body_block_traits(graph, source_module.module_identity, nominal)
         loop (index, function) in nominal.methods {
-            source := sema_comptime_effect_source(graph, source_module, function, compute_aliases, false)
+            ^source: sema_comptime_effect_source(graph, source_module, function, compute_aliases, false)
             sema_effect_bind_type_cap(source, type_caps, Val(nominal.symbol.id), source_module.module_identity)
             if index < block_traits.len() -> source.trait_symbol = block_traits[index].copy()
             sources.push(source)
         }
     }
     loop implementation in source_module.impls {
-        trait_id := SymbolID?{None}
+        ^trait_id: SymbolID?{None}
         if implementation.trait_name == .Val(trait_name) {
             trait_id = if implementation.trait_symbol == .Val(symbol) -> Val(symbol.id) else -> sema_effect_impl_trait(graph, source_module.module_identity, trait_name)
         }
         loop function in implementation.methods {
-            source := sema_comptime_effect_source(graph, source_module, function, compute_aliases, false)
+            ^source: sema_comptime_effect_source(graph, source_module, function, compute_aliases, false)
             sema_effect_bind_type_cap(source, type_caps, implementation.target_nominal, source_module.module_identity)
             source.trait_symbol = trait_id.copy()
             sources.push(source)
@@ -1851,7 +1855,7 @@ sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: Se
 // aliases of `core.compute`).
 sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, function: SemaRegistrationFunction, compute_aliases: [String], top_level: Bool) -> SemaEffectFunctionSource Never! {
     body: sema_registration_function_body(source_module, function)
-    facts := sema_effect_body_facts(body)
+    ^facts: sema_effect_body_facts(body)
     if top_level -> facts.kernel = sema_kernel_pending(function.declaration, body, compute_aliases)
     sema_effect_source_from_header(function.declaration, symbol_table_key(graph.symbols, function.symbol.id), facts)
 }
@@ -1861,7 +1865,7 @@ sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, source_module: Sem
 // its body writes. The registration rows a nominal's own methods first, then
 // each block's methods in block order.
 sema_effect_body_block_traits: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, nominal: SemaRegistrationNominal) -> [SymbolID?] Never! {
-    rows := [SymbolID?]{}
+    ^rows: [SymbolID?]{}
     if nominal.source == .SourceAST(item) {
         own: if item == {
             .Struct(definition) -> definition.methods.len()
@@ -1912,13 +1916,11 @@ sema_effect_module_input: fn(graph: SemaRegistrationGraph, source_index: Int, mo
 // or enum body, implements, by function symbol id (E0742 bounds those
 // methods to `-[]>`). A block naming a user trait of the module is that trait's.
 sema_effect_owned_trait_hooks: fn(graph: SemaRegistrationGraph, source: SemaRegistrationModule) -> [U32:String] Never! {
-    hooks := [U32:String]{}
+    ^hooks: [U32:String]{}
     loop implementation in source.impls {
         trait_name: implementation.trait_name ?? next
         if implementation.trait_symbol != None || !owned_trait_bounds_pure(trait_name) -> next
-        loop function in implementation.methods {
-            hooks[function.symbol.id.id] = trait_name.copy()
-        }
+        loop function in implementation.methods -> hooks[function.symbol.id.id] = trait_name.copy()
     }
     loop nominal in source.nominals {
         if nominal.source == .SourceAST(item) {
@@ -1961,7 +1963,7 @@ sema_comptime_runtime_ceiling_diagnostic: fn(subject: String, needed: RuntimeLay
 // The Core modules one import declaration names: `use fs: core.files`
 // parses as member `files` of `core`; `use core.mem.[...]` names its module.
 sema_runtime_ceiling_import_modules: fn(declaration: ImportDecl) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     if declaration.kind == {
         .Module(name, _) -> {
             if name.starts_with("core.") -> names.push(name.copy())

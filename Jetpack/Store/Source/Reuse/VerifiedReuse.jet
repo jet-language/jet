@@ -22,7 +22,7 @@ store_find_by_reference_read_only: fn(roots: HangarRoots, reference: String) -> 
 
 // The most recently used entry for `reference`; ties go to the greatest id.
 store_reuse_newest: fn(entries: [StoreEntry], reference: String) -> StoreEntry? Never! {
-    best := StoreEntry?{None}
+    ^best: StoreEntry?{None}
     loop entry in entries {
         if entry.reference != reference -> next
         if best == {
@@ -242,7 +242,7 @@ VerifiedCacheHit: struct {
 store_find_verified_by_reference: fn(verification: StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> VerifiedCacheHit? StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     graph: store_closure_graph_structure_unlocked(verification, roots)
-    verified := [StoreEntry]{}
+    ^verified: [StoreEntry]{}
     entries: store_list_unlocked(roots)
     loop entry in entries {
         if entry.reference != reference -> next
@@ -274,9 +274,9 @@ store_reuse_verified_user_profile_batch: fn(verification: StoreVerification, roo
     if references.len() == 0 -> return None
     // Only a candidate probe: a mixed cache is still worth the locked
     // verification below.
-    candidate_refs := [String:Bool]{}
+    ^candidate_refs: [String:Bool]{}
     loop entry in store_list_read_only(roots) -> candidate_refs[entry.reference] = true
-    any_candidate := false
+    ^any_candidate: false
     loop reference in references {
         if candidate_refs.has_key(reference) -> any_candidate = true
     }
@@ -289,11 +289,11 @@ store_reuse_user_profile_batch_locked: fn(verification: StoreVerification, roots
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     graph: store_closure_graph_structure_unlocked(verification, roots)
     entries: store_list_unlocked(roots)
-    selected := [StoreEntry]{}
+    ^selected: [StoreEntry]{}
     loop reference in references {
         candidate: store_reuse_newest(entries, reference) ?? next
         expectation: CacheExpectation{identity: candidate.cache_identity, owned_output: None, allow_unsigned_local: true}
-        valid := [StoreEntry]{}
+        ^valid: [StoreEntry]{}
         loop entry in entries {
             if entry.reference != reference -> next
             if store_verify_cache_entry_with_graph(verification, roots, entry, reference, expectation, Val(graph)).trusted() {
@@ -310,7 +310,7 @@ store_reuse_user_profile_batch_locked: fn(verification: StoreVerification, roots
     }
     if selected.len() == 0 -> return Ok(None)
     index: NixProjectionIndex.from_entries(entries)
-    realized := [VerifiedRealization]{}
+    ^realized: [VerifiedRealization]{}
     loop entry in selected {
         lease: store_snapshot_lease_unlocked(verification, roots, entry, Val(index), true)
         if lease.status() != ConsumptionStatus.Consumable {
@@ -331,7 +331,7 @@ store_reuse_verified_environment_members: fn(verification: StoreVerification, ro
     graph: store_closure_graph_structure_unlocked(verification, roots)
     entries: store_list_unlocked(roots)
     index: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
-    selected := [StoreEntry]{}
+    ^selected: [StoreEntry]{}
     loop selection in selections {
         reference: selection.reference
         expectation: expectations.get(reference) ?? next
@@ -345,7 +345,7 @@ store_reuse_verified_environment_members: fn(verification: StoreVerification, ro
         // primary output is covered by output_digest; opaque dependencies
         // stay on the ordinary path.
         external: store_external_output_paths(roots, [StoreEntry]{entry.copy()})
-        auxiliary := false
+        ^auxiliary: false
         loop path in external {
             if !store_reuse_same_path(path, entry.out) -> auxiliary = true
         }
@@ -357,7 +357,7 @@ store_reuse_verified_environment_members: fn(verification: StoreVerification, ro
     // partial cache. Reuse only a strict subset.
     if selected.len() == 0 || selected.len() == selections.len() -> return Ok(None)
     projection_index: NixProjectionIndex.from_entries(entries)
-    realized := [VerifiedRealization]{}
+    ^realized: [VerifiedRealization]{}
     loop entry in selected {
         lease: store_snapshot_lease_unlocked(verification, roots, entry, Val(projection_index), true)
         if lease.status() == ConsumptionStatus.Consumable {
@@ -377,7 +377,7 @@ store_snapshot_lease: fn(verification: StoreVerification, roots: HangarRoots, en
 // missing consumable output fails the whole warm path.
 store_snapshot_leases_with_entries_unlocked: fn(verification: StoreVerification, roots: HangarRoots, selected: [StoreEntry], entries: [StoreEntry]) -> [CacheLease] StoreError! {
     projection_index: NixProjectionIndex.from_entries(entries)
-    leases := [CacheLease]{}
+    ^leases: [CacheLease]{}
     loop entry in selected {
         leases.push(store_snapshot_lease_unlocked(verification, roots, entry, Val(projection_index), false))
     }

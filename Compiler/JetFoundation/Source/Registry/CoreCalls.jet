@@ -128,21 +128,6 @@ core_call_source_role: fn(row: CoreCallRecord) -> String? Never! {
     row.source_role
 }
 
-// The checked authority boundary sema applies to a `core.plugin.load` argument.
-core_call_authority_boundary_at: fn(row: CoreCallRecord, index: Int) -> Bool Never! {
-    row.module_name == "core.plugin" && row.member == "load" && index == 1
-}
-
-#Test("authority boundary stays on plugin load argument one") {
-    row: core_call("core.plugin", "load") ?? panic("plugin load row")
-    assert_eq(core_call_authority_boundary_at(row, 0), false)
-    assert_eq(core_call_authority_boundary_at(row, 1), true)
-    assert_eq(core_call_authority_boundary_at(row, 2), false)
-    wire: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
-    assert_eq(core_call_authority_boundary_at(wire, 1), false)
-    assert_eq(wire.effects.len(), 0)
-}
-
 #Test("a source-owned row carries no effects of its own") {
     loop row in CORE_CALLS {
         if row.symbol == CoreCallSymbol.SourceOwned && row.effects.len() > 0 {
@@ -183,25 +168,21 @@ core_call_keyed: fn(rows: [CoreCallRecord], keys: [String], key_rows: [Int], mod
     Val(rows[row])
 }
 
-core_receiver_method_in: fn(rows: [CoreCallRecord], receiver_type: String, member: String) -> CoreCallRecord? {
-    loop row in rows {
-        if row.member == member && core_call_one_of(receiver_type, row.receiver_types) {
-            return Val(row)
-        }
-    }
-    None
-}
-
-core_receiver_method: fn(receiver_type: String, member: String) -> CoreCallRecord? {
-    core_receiver_method_in(CORE_CALLS, receiver_type, member)
-}
-
 // The source-owned record of `receiver_type`'s method `member`, whose call
 // runs the Core function that fills `role`. `borrowed[i]` is whether that
 // function reads its parameter `i` rather than taking it.
 core_call_role_receiver: fn(receiver_type: String, member: String, role: String, borrowed: [Bool]) -> CoreCallRecord Never! {
     arity: borrowed.len()
     CoreCallRecord{module_name: "", member: member, receiver_types: [String]{receiver_type}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: borrowed}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, source_role: Val(role), coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}, aot_direct: false, authority: None}
+}
+
+// The source-owned record of the Core module call `module_name.member`, whose
+// call runs the Core function that fills `role`, else the module's own
+// `member`. `borrowed[i]` is whether that function reads its parameter `i`
+// rather than taking it.
+core_call_source_function: fn(module_name: String, member: String, role: String?, borrowed: [Bool]) -> CoreCallRecord Never! {
+    arity: borrowed.len()
+    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: borrowed}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, source_role: role, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}, aot_direct: false, authority: None}
 }
 
 core_call_projection_in: fn(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {

@@ -25,7 +25,7 @@ RemoteSource: struct {
             if owner == "" || repo == "" {
                 return Err(ProviderError.CoreBuild("`github:` sources need `github:owner/repo`, got `{upstream}`"))
             }
-            path_rev := [String]{}
+            ^path_rev: [String]{}
             loop index in 2..<parts.len() -> path_rev.push(parts[index])
             joined: path_rev.join("/")
             rev: if split.rev != None -> split.rev else -> (if joined == "" -> None else -> Val(joined))
@@ -120,7 +120,7 @@ provider_dir_has_top_level_run: fn(dir: String) -[FS]> Bool Never! {
 provider_file_has_top_level_run: fn(src: String) -> Bool Never! {
     lexed: lex(src.bytes())
     tokens: lexed.tokens
-    depth := 0
+    ^depth: 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1 else if kind == TOKEN_RBRACE -> depth -= 1 else if kind == TOKEN_IDENT && depth == 0 && index + 2 < tokens.len() && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_FN && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) {
@@ -134,10 +134,10 @@ provider_file_has_top_level_run: fn(src: String) -> Bool Never! {
 // semantics) in a `git ls-tree -r --name-only` listing, sorted and unique.
 // Root-level markers are not member subtrees.
 provider_member_dirs_from_listing: fn(listing: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in listing.split("\n") {
         path: line.trim()
-        dir := ""
+        ^dir: ""
         if path.ends_with("/{PACKAGE_FILE}") -> dir = path.copy().removesuffix("/{PACKAGE_FILE}")
         if dir != "" && !out.contains(dir) -> out.push(dir)
     }
@@ -177,9 +177,9 @@ provider_classify_canonical_dep: fn(name: String, source: DepSource, member_dir:
 
 // Every directory that appears in a tree listing.
 provider_all_tree_dirs: fn(listing: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in listing.split("\n") {
-        current := line.trim()
+        ^current: line.trim()
         loop current.contains("/") {
             current = current.cut_last("/")?.before ?? ""
             if current != "" && !out.contains(current) -> out.push(current.copy())
@@ -194,7 +194,7 @@ provider_dir_basename: fn(dir: String) -> String Never! { dir.cut_last("/")?.aft
 // Resolve a bare path relative to a member directory, staying inside the
 // repo; None when it escapes the repo root (an external local dependency).
 provider_join_repo_relative: fn(member_dir: String, target: String) -> String? Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in member_dir.split("/") {
         if part != "" -> parts.push(part)
     }

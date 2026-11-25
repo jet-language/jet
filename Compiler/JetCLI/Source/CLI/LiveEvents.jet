@@ -21,8 +21,8 @@ jet_cli_live_event_render: fn(events: [JetLiveEvent]) -> String JetCLIReadError!
     if events.len() > 256 {
         return Err(jet_cli_read_error("runtime event observation exceeds the 256-record limit"))
     }
-    previous := 0
-    lines := [String]{}
+    ^previous: 0
+    ^lines: [String]{}
     loop event in events {
         sequence: jet_cli_live_event_minimum(event.sequence, "sequence", 0)
         if sequence <= previous {

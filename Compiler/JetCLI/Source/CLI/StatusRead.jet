@@ -65,7 +65,7 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
             if foundation_json_integer(tree) == .Val(number) {
                 return Ok(jet_cli_status_int(number))
             }
-            float_spelled := false
+            ^float_spelled: false
             loop byte in lexeme.bytes() {
                 if byte == (U8{46}) || byte == (U8{101}) || byte == (U8{69}) -> float_spelled = true
             }
@@ -80,13 +80,13 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
         .Text(value) -> jet_cli_status_text(value)
         .Bytes(_) | .DateTime(_) -> jet_cli_status_text(tree.to_text() ?? panic("Bytes and DateTime always have a text form"))
         .Array(values) -> {
-            items := [JetCLIStatusValue]{}
+            ^items: [JetCLIStatusValue]{}
             loop value in values -> items.push(jet_cli_status_from_tree(value))
             jet_cli_status_array(items)
         }
         .Object(values) -> {
-            fields := [JetCLIStatusField]{}
-            names := [String:Bool]{}
+            ^fields: [JetCLIStatusField]{}
+            ^names: [String:Bool]{}
             loop entry in values {
                 if entry.key == "" || status_text.has_control(entry.key) {
                     return Err(jet_cli_read_error("status field names must be non-empty and contain no control characters"))

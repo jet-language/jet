@@ -20,7 +20,7 @@ RUST_TOOLS: [String]{"cargo", "rustc", "rustup"}
 // `jet`: with the dev shell's host tools (the pack's C toolchain, a suite
 // row's compilers), and with no Rust tool on PATH when `norust`.
 in_dev_shell: fn(jet: String, tree: String, norust: Bool, args: [String]) -> [String] Never! {
-    argv := STACK.copy()
+    ^argv: STACK.copy()
     argv.extend([String]{jet.copy(), files.join(tree, "Tools/Agent/JetEnv.jet")})
     if norust -> argv.push("--norust")
     argv.extend(args.copy())
@@ -30,9 +30,9 @@ in_dev_shell: fn(jet: String, tree: String, norust: Bool, args: [String]) -> [St
 // This process's PATH without every directory that holds cargo, rustc or
 // rustup, as the child's PATH: no Rust tool stays reachable through it.
 norust_var: fn() -[Env, FS]> Var Never! {
-    kept := [String]{}
+    ^kept: [String]{}
     loop dir in (sys.get("PATH") ?? "").split(":") {
-        holds := false
+        ^holds: false
         loop tool in RUST_TOOLS {
             if files.is_file(files.join(dir, tool)) -> holds = true
         }
@@ -86,7 +86,7 @@ dev_roots: fn(root: String, names: [String]) -[Env, Exec, Time.Wait]> {roots: [S
     if receipt.code != 0 || receipt.signal != None {
         return {roots: [String:String]{}, err: "Tools/Agent/Roots.jet failed: {receipt.errors.trim()}"}
     }
-    found := [String:String]{}
+    ^found: [String:String]{}
     loop line in receipt.output.lines() {
         pair: line.partition("=")
         found[pair.head] = pair.tail
@@ -125,7 +125,7 @@ short: fn(text: String, length: Int) -> String Never! {
 // The last `count` non-empty lines of `path`, joined, at most 600 bytes.
 tail_of: fn(path: String, count: Int) -[FS]> String Never! {
     text: files.read(path) ?? return ""
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.split("\n").to_list() {
         if line != "" -> lines.push(line.copy())
     }
@@ -181,7 +181,7 @@ export_commit: fn(repo: String, commit: String, dir: String) -[FS, Exec, Time.Wa
     files.create_dir_all(dir) ?? return Val("cannot create {dir}: {err}")
     index: "{dir.removesuffix("/")}.index"
     files.remove(index) ?? ()
-    failed := git_indexed(repo, index, [String]{"read-tree", commit.copy()})
+    ^failed: git_indexed(repo, index, [String]{"read-tree", commit.copy()})
     if failed == "" {
         failed = git_indexed(repo, index, [String]{"--work-tree={dir}", "checkout-index", "--all", "--force"})
     }
@@ -196,9 +196,9 @@ GIT_REPOSITORY_VARS: [String]{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT
 // GIT_REPOSITORY_VARS variable would point git at another one (a test
 // fixture's commit would land there).
 git_spec: fn(repo: String, args: [String]) -> ProcessSpec Never! {
-    argv := [String]{"git", "-C", repo.copy()}
+    ^argv: [String]{"git", "-C", repo.copy()}
     argv.extend(args.copy())
-    spec := process.cmd(argv).cwd(repo).output_limit(268435456)
+    ^spec: process.cmd(argv).cwd(repo).output_limit(268435456)
     loop name in GIT_REPOSITORY_VARS -> spec = spec.env_remove(name)
     spec
 }
@@ -224,7 +224,7 @@ git_in: fn(repo: String, args: [String]) -[Exec, Time.Wait]> {rc: Int, out: Stri
 // the build slot's CPUs when there is one, and killed with its whole process
 // group after `seconds` (then SIGKILL 30 s later).
 logged_argv: fn(argv: [String], seconds: Int) -[Env]> [String] Never! {
-    out := [String]{"setpriv", "--pdeathsig", "KILL", "--"}
+    ^out: [String]{"setpriv", "--pdeathsig", "KILL", "--"}
     if seconds > 0 -> out.extend([String]{"timeout", "-k", "30", "{seconds}"})
     if sys.get("SLOT_CPUS") == .Val(cpus) && cpus != "" {
         out.extend([String]{"taskset", "-c", cpus.copy()})
@@ -243,7 +243,7 @@ finished_of: fn(code: Int, signaled: Bool, seconds: Int, wall: Int) -> Finished 
 run_logged: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: Int, append: Bool{false}) -[Env, Exec, FS, Time, Time.Wait]> Finished Never! {
     watch: time.start()
     if !append -> files.write(log, "") ?? return Finished{rc: 127, timed_out: false, wall: 0}
-    spec := process.cmd(logged_argv(argv, seconds)).cwd(cwd).stdout(.Stream).stderr(.Stream)
+    ^spec: process.cmd(logged_argv(argv, seconds)).cwd(cwd).stdout(.Stream).stderr(.Stream)
     loop change in vars {
         spec = if change.drop -> spec.env_remove(change.name) else -> spec.env(change.name, change.value)
     }
@@ -267,7 +267,7 @@ run_logged: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: I
 // Copies each piece of a child's output into `log` as it arrives; a failed
 // write still drains the pipe.
 pump_stdout: fn(stream: ProcessStdoutStream, log: String) -[Exec, FS, Time.Wait]> Never! {
-    writer := files.append(log) ?? {
+    ^writer: files.append(log) ?? {
         loop _ in stream.chunks(65536) {
 
         }
@@ -280,7 +280,7 @@ pump_stdout: fn(stream: ProcessStdoutStream, log: String) -[Exec, FS, Time.Wait]
 }
 
 pump_stderr: fn(stream: ProcessStderrStream, log: String) -[Exec, FS, Time.Wait]> Never! {
-    writer := files.append(log) ?? {
+    ^writer: files.append(log) ?? {
         loop _ in stream.chunks(65536) {
 
         }
@@ -303,7 +303,7 @@ Job: struct {
 
 // Runs every job at once and returns their results in order.
 run_batch: fn(jobs: [Job]) -[Env, Exec, FS, Time, Time.Wait]> [Finished] Never! {
-    out := [Finished]{}
+    ^out: [Finished]{}
     task.group batch(limit: if jobs.len() > 0 -> jobs.len() else -> 1) {
         handles: loop job in jobs -> task run_logged(job.argv.copy(), job.cwd.copy(), job.vars.copy(), job.log.copy(), job.seconds)
         loop handle in handles {
@@ -321,7 +321,7 @@ preflight_gate: fn(launcher: String, repo: String, seed_dir: String, sha: String
     identity: read_text(files.join(seed_dir, "IDENTITY")) ?? return Admission{admitted: false, text: "{launcher}: seed {seed_dir} has no IDENTITY"}
     argv: [String]{files.join(seed_dir, "jet"), "Tools/Agent/Land.jet", "receipt", "commit", launcher.copy(), repo.copy(), sha.copy(), seed_dir.copy()}
     receipt: process.cmd(argv).cwd(repo).env("JET_COMPILER_IDENTITY", identity.trim()).env("JET_TOOLCHAIN_ROOT", repo).output_limit(16777216).run() ?? return Admission{admitted: false, text: "{launcher}: the preflight gate did not run ({err})"}
-    text := "{receipt.output}{receipt.errors}".trim().copy()
+    ^text: "{receipt.output}{receipt.errors}".trim().copy()
     if text == "" -> text = "{launcher}: the preflight gate did not run (exit {receipt.code})"
     Admission{admitted: receipt.code == 0 && receipt.signal == None, text: text}
 }
@@ -334,7 +334,7 @@ source_identity: fn(repo: String, seed_dir: String, tree: String) -[Exec, FS, Ti
     identity: read_text(files.join(seed_dir, "IDENTITY")) ?? return ""
     argv: [String]{files.join(seed_dir, "jet"), files.join(repo, "Tools/Agent/CompilerPackages.jet"), "--root", tree.copy(), "identity"}
     ran: process.cmd(argv).cwd(tree).env("JET_COMPILER_IDENTITY", identity.trim()).env("JET_TOOLCHAIN_ROOT", repo).output_limit(16777216).run() ?? return ""
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in ran.output.split("\n").to_list() {
         if line.trim() != "" -> lines.push(line.trim().copy())
     }

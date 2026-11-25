@@ -24,10 +24,10 @@ run: fn() {
     path: Path.from(root).join("events.csv").to_string()
     files.write(path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0\n") ?? panic("write")
     input: files.open(path) ?? panic("open")
-    limits := data.DataLimits.safe()
+    ^limits: data.DataLimits.safe()
     limits.max_groups = 1
     limits.max_output_rows = 10
-    reader := files_data.csv_reader<Event>(input, limits) ?? panic("reader")
+    ^reader: files_data.csv_reader<Event>(input, limits) ?? panic("reader")
     first: stream.next(reader) ?? panic("next")
     print("first: {first.service} {first.latency_ms}")
     // The query reads the rest of the stream under the reader's limits, so

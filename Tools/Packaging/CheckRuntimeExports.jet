@@ -15,8 +15,8 @@ definitions: fn(path: String) -> [String] {
     row: Regex{"^(?:.*:\s+)?(\S+)\s+([A-Z])\s"}
     receipt: process.cmd(["nm", "-g", "--defined-only", "--format=posix", path.copy()]).output_limit(268435456).run() ?? fail("nm {path} failed: {err}")
     if receipt.code != 0 -> fail("nm {path} failed: {receipt.errors}")
-    names := [String]{}
-    seen := [String:Bool]{}
+    ^names: [String]{}
+    ^seen: [String:Bool]{}
     loop line in receipt.output.split("\n").to_list() {
         if re.match(row, line) == None -> next
         hit: re.match(row, line) ?? panic("unreachable: matched row")
@@ -37,9 +37,9 @@ run: fn() {
     }
     jet: definitions(args[0].copy())
     rust: definitions(args[1].copy())
-    rust_set := [String:Bool]{}
+    ^rust_set: [String:Bool]{}
     loop name in rust -> rust_set[name.copy()] = true
-    duplicates := [String]{}
+    ^duplicates: [String]{}
     loop name in jet {
         if rust_set.get(name) != None -> duplicates.push(name.copy())
     }
@@ -47,7 +47,7 @@ run: fn() {
         return
     }
     duplicates.sort()
-    listed := [String]{}
+    ^listed: [String]{}
     loop name in duplicates { listed.push("  {name}") }
     fail("check-runtime-exports: replaced runtime exports still defined in Rust:\n{listed.join("\n")}\nDelete these Rust definitions in the same cutover as their Jet runtime layer; duplicate definitions are not permitted.")
 }

@@ -90,9 +90,9 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     } ?? return [Diagnostic]{}
     caller: sema_registration_direct_symbol(graph.modules[app_index], "caller") ?? return [Diagnostic]{}
     as_caller: sema_registration_direct_symbol(graph.modules[app_index], "as_caller") ?? return [Diagnostic]{}
-    places := [SemaAppCallerPlace]{}
-    weights := [Int]{}
-    work := 0
+    ^places: [SemaAppCallerPlace]{}
+    ^weights: [Int]{}
+    ^work: 0
     loop module_index in 0..<modules.len() {
         if module_is_core(modules[module_index].module_identity) -> next
         loop function_index in 0..<modules[module_index].functions.len() {
@@ -106,18 +106,18 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     bounds: if workers <= 1 -> [Int]{0, places.len()} else -> compiler_threads_partition(weights, workers)
     caller_id: caller.symbol.id.id
     gates: sema_app_caller_scans(graph, modules, places, bounds, 0, caller_id, SemaAppCallerRead.Nodes)
-    named := false
+    ^named: false
     loop scan in gates {
         if scan.reached -> named = true
     }
     if !named -> return [Diagnostic]{}
     scans: sema_app_caller_scans(graph, modules, places, bounds, 0, caller_id, SemaAppCallerRead.Walk)
-    reached := false
+    ^reached: false
     loop scan in scans {
         if scan.reached -> reached = true
     }
     if !reached -> return [Diagnostic]{}
-    program := SemaAppCallerProgram{functions: [SemaAppCallerFunction]{}, rows: [U32:Int]{}, signed_in: [U32:Bool]{}, caller: caller_id, as_caller: as_caller.symbol.id.id}
+    ^program: SemaAppCallerProgram{functions: [SemaAppCallerFunction]{}, rows: [U32:Int]{}, signed_in: [U32:Bool]{}, caller: caller_id, as_caller: as_caller.symbol.id.id}
     loop scan in scans {
         loop function in scan.functions {
             program.rows[function.symbol] = program.functions.len()
@@ -126,7 +126,7 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     }
     // What the functions call: the functions outside Core they reach, and
     // `app.caller`, read from the bodies as the walk reads them.
-    called := [U32:Bool]{}
+    ^called: [U32:Bool]{}
     loop scan in scans {
         loop (symbol, _) in scan.callees {
             if symbol == program.caller || program.rows.get(symbol) != None -> called[symbol] = true
@@ -136,8 +136,8 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     // start a path, before the others, so a report names the marked method
     // its path starts at; a signed-in one, and the check of a signed-in
     // upload, has its caller, so only a task it spawns starts one.
-    signed_in := [Int]{}
-    marked := [Int]{}
+    ^signed_in: [Int]{}
+    ^marked: [Int]{}
     loop module_row in graph.modules {
         if module_is_core(module_row.module_identity) -> next
         loop nominal in module_row.nominals {
@@ -165,7 +165,7 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
             }
         }
     }
-    walk := SemaAppCallerWalk{visited: [U32:Bool]{}, certain_visited: [U32:Bool]{}, root: "", path: [String]{}, reports: [SemaAppCallerReport]{}}
+    ^walk: SemaAppCallerWalk{visited: [U32:Bool]{}, certain_visited: [U32:Bool]{}, root: "", path: [String]{}, reports: [SemaAppCallerReport]{}}
     loop row in marked {
         sema_app_caller_root(graph, modules, program, row, SemaAppCallerAccount.Uncertain, walk)
     }
@@ -177,7 +177,7 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
         if called.get(symbol) != None || program.signed_in.get(symbol) != None -> next
         sema_app_caller_root(graph, modules, program, row, SemaAppCallerAccount.Uncertain, walk)
     }
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop report in walk.reports.move() {
         start: diagnostics.len()
         diagnostics.push(report.diagnostic)
@@ -281,7 +281,7 @@ SEMA_APP_CALLER_NODES_PER_THREAD: 20000
 // The scans of the parts from bounds `at` on, each but the last on a task of
 // its own, in part order.
 sema_app_caller_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], bounds: [Int], at: Int, caller: U32, read: SemaAppCallerRead) -> [SemaAppCallerScan] Never! {
-    done := [SemaAppCallerScan]{}
+    ^done: [SemaAppCallerScan]{}
     if at + 1 >= bounds.len() -> return done
     from: bounds[at]
     to: bounds[at + 1]
@@ -301,7 +301,7 @@ sema_app_caller_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModul
 // The scan of functions `from..<to` of `places` for `app.caller`
 // (`caller`), read as `read` says.
 sema_app_caller_scan: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], from: Int, to: Int, caller: U32, read: SemaAppCallerRead) -> SemaAppCallerScan Never! {
-    scan := SemaAppCallerScan{reached: false, functions: [SemaAppCallerFunction]{}, callees: [U32:Bool]{}}
+    ^scan: SemaAppCallerScan{reached: false, functions: [SemaAppCallerFunction]{}, callees: [U32:Bool]{}}
     loop index in from..<to {
         place: places[index]
         function: modules[place.module_index].functions[place.function_index]

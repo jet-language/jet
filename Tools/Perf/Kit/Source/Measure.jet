@@ -95,7 +95,7 @@ stat_field: fn(fields: [String], number: Int) -> Int Never! {
 }
 
 children: fn(pid: Int) -[FS]> [Int] Never! {
-    result := [Int]{}
+    ^result: [Int]{}
     tasks: files.list_dir("/proc/{pid}/task") ?? return result
     loop task in tasks {
         text: files.read("/proc/{pid}/task/{task.name}/children") ?? next
@@ -107,12 +107,12 @@ children: fn(pid: Int) -[FS]> [Int] Never! {
 }
 
 sample_tree: fn(root: Int, host: Host) -[FS]> TreeSample Never! {
-    seen := [Int]{}
-    stack := [Int]{root}
-    cpu_ticks := 0
-    threads := 0
-    rss_bytes := 0
-    processes := 0
+    ^seen: [Int]{}
+    ^stack: [Int]{root}
+    ^cpu_ticks: 0
+    ^threads: 0
+    ^rss_bytes: 0
+    ^processes: 0
     loop stack.len() > 0 {
         pid: stack.pop() ?? break
         if seen.contains(pid) -> next
@@ -224,9 +224,9 @@ run_measured: fn(argv: [String], options: MeasureOptions) -[Env, Exec, FS, Time,
     files.write(errors, "") ?? return Err(measure_error("{err}"))
     gnu: gnu_time()
     if !files.is_file(gnu) -> return Err(measure_error("spawn {gnu} ENOENT"))
-    command := [String]{"sh", "-c", REDIRECT, "sh", out, errors, gnu, "-f", "%e %U %S %M", "-o", time_file.copy()}  // copy: the time file is read after the run
+    ^command: [String]{"sh", "-c", REDIRECT, "sh", out, errors, gnu, "-f", "%e %U %S %M", "-o", time_file.copy()}  // copy: the time file is read after the run
     loop arg in argv -> command.push(arg.copy())  // copy: the caller keeps its argv
-    spec := process.cmd(command).stdout(.Inherit).stderr(.Inherit)
+    ^spec: process.cmd(command).stdout(.Inherit).stderr(.Inherit)
     if options.cwd == .Val(dir) -> spec = spec.cwd(dir)
     if options.env == .Val(settings) {
         spec = spec.env_clear()
@@ -236,10 +236,10 @@ run_measured: fn(argv: [String], options: MeasureOptions) -[Env, Exec, FS, Time,
     start: time.instant()
     child: spec.spawn() ?? return Err(measure_error("{err}"))
     pid: child.id()
-    samples := [Sample]{}
-    killed := false
+    ^samples: [Sample]{}
+    ^killed: false
     step: SAMPLE_MS * 1000000
-    next_sample := step
+    ^next_sample: step
     loop !(child.exited() ?? true) {
         elapsed: time.instant().start_ns - start.start_ns
         if options.timeout_ms > 0 && !killed && elapsed >= options.timeout_ms * 1000000 {
@@ -258,8 +258,8 @@ run_measured: fn(argv: [String], options: MeasureOptions) -[Env, Exec, FS, Time,
     wall_ns: time.instant().start_ns - start.start_ns
     receipt: child.wait() ?? return Err(measure_error("{err}"))
     rusage: read_rusage(time_file)
-    peak := 0
-    threads_used := 0
+    ^peak: 0
+    ^threads_used: 0
     loop sample in samples {
         if sample.rss_bytes > peak -> peak = sample.rss_bytes
         if sample.threads > threads_used -> threads_used = sample.threads
@@ -349,7 +349,7 @@ read_trace: fn(file: String, completed: Completed?) -[FS]> [Dyn] MeasureError! {
             return Err(measure_error("invalid or truncated completed trace stream"))
         }
     }
-    events := [Dyn]{}
+    ^events: [Dyn]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         raw: lines[index]
@@ -378,8 +378,8 @@ Open: struct {
 
 check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
     identity: measure_error("completed trace does not match the recorded process identity")
-    starts := 0
-    unix_ms := Int?{None}
+    ^starts: 0
+    ^unix_ms: Int?{None}
     loop event in events {
         if is_text(field(Val(event), "name"), "trace.start") && is_text(field(Val(event), "ph"), "i") {
             if starts == 0 -> unix_ms = safe_integer(field(field(Val(event), "args"), "unix_ms"))
@@ -392,8 +392,8 @@ check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
     loop event in events {
         if !same(field(Val(event), "pid"), Val(Dyn.Int(run.pid))) -> return Err(identity)
     }
-    stacks := [Open]{}
-    last_time := [String:Int]{}
+    ^stacks: [Open]{}
+    ^last_time: [String:Int]{}
     phases: [String]{"M", "i", "C", "B", "E"}
     loop event in events {
         value: Val(event)
@@ -421,7 +421,7 @@ check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
         if (text_of(field(value, "cat")) ?? "") == "" {
             return Err(measure_error("invalid completed trace span category"))
         }
-        at := -1
+        ^at: -1
         loop i in 0..<stacks.len() {
             if stacks[i].thread == thread -> at = i
         }
@@ -481,9 +481,9 @@ PhaseTable: struct {
 
 // Stable order of start time (`a.start - b.start`).
 by_start: fn(spans: [SpanTime]) -> [SpanTime] Never! {
-    out := spans
+    ^out: spans
     loop i in 1..<out.len() {
-        j := i
+        ^j: i
         loop j > 0 && out[j - 1].start - out[j].start > KIT_ZERO {
             held: out[j - 1]
             out[j - 1] = out[j]
@@ -500,9 +500,9 @@ by_start: fn(spans: [SpanTime]) -> [SpanTime] Never! {
 // (thread time), `cpu_ns` the tree CPU spent inside the union, `count` and
 // `items`. `offset_ns` places trace time 0 on the sampler's clock.
 phase_table: fn(events: [Dyn], samples: [Sample], offset_ns: Float) -> PhaseTable Never! {
-    open := [OpenSpans]{}
-    kinds := [KindSpans]{}
-    first_begin := Float?{None}
+    ^open: [OpenSpans]{}
+    ^kinds: [KindSpans]{}
+    ^first_begin: Float?{None}
     loop event in events {
         value: Val(event)
         ph: field(value, "ph")
@@ -511,7 +511,7 @@ phase_table: fn(events: [Dyn], samples: [Sample], offset_ns: Float) -> PhaseTabl
         tid: js_string(field(value, "tid"))
         cat_text: js_string(cat)
         t_ns: to_number(field(value, "ts")) * Float{1000.0} + offset_ns
-        at := -1
+        ^at: -1
         loop i in 0..<open.len() {
             if open[i].tid == tid && open[i].cat == cat_text -> at = i
         }
@@ -534,7 +534,7 @@ phase_table: fn(events: [Dyn], samples: [Sample], offset_ns: Float) -> PhaseTabl
         items_value: field(field(value, "args"), "items")
         items: if present(items_value) -> items_value else -> None
         key: map_key(cat, 0)
-        kind_at := -1
+        ^kind_at: -1
         loop i in 0..<kinds.len() {
             if kinds[i].key == key -> kind_at = i
         }
@@ -544,16 +544,16 @@ phase_table: fn(events: [Dyn], samples: [Sample], offset_ns: Float) -> PhaseTabl
         }
         kinds[kind_at].spans.push(SpanTime{start: begun, end: t_ns, items: items})
     }
-    unclosed := [String]{}
+    ^unclosed: [String]{}
     loop entry in open {
         if entry.starts.len() > 0 -> unclosed.push(entry.cat.copy())  // copy: the open list goes on
     }
     order: kind_order(kinds)
-    phases := [PhaseRow]{}
+    ^phases: [PhaseRow]{}
     loop at in order {
         entry: kinds[at]
         list: by_start(entry.spans)
-        union := [SpanTime]{}
+        ^union: [SpanTime]{}
         loop span in list {
             last: union.len() - 1
             if last >= 0 && span.start <= union[last].end {
@@ -562,15 +562,15 @@ phase_table: fn(events: [Dyn], samples: [Sample], offset_ns: Float) -> PhaseTabl
             }
             union.push(SpanTime{start: span.start, end: span.end, items: None})
         }
-        items := Dyn?{None}
+        ^items: Dyn?{None}
         loop span in list {
             if span.items == .Val(count) -> items = Val(js_add(items ?? Dyn.Int(0), Val(count)))
         }
-        wall := KIT_ZERO
+        ^wall: KIT_ZERO
         loop span in union -> wall = wall + span.end - span.start
-        thread := KIT_ZERO
+        ^thread: KIT_ZERO
         loop span in list -> thread = thread + span.end - span.start
-        cpu := KIT_ZERO
+        ^cpu: KIT_ZERO
         loop span in union -> cpu = cpu + cpu_at(samples, span.end) - cpu_at(samples, span.start)
         phases.push(PhaseRow{kind: entry.kind.copy(), wall_ns: js_round(wall), span_ns: js_round(thread), cpu_ns: js_round(cpu), count: list.len(), items: items})  // copy: the kinds keep their names
     }
@@ -579,10 +579,10 @@ phase_table: fn(events: [Dyn], samples: [Sample], offset_ns: Float) -> PhaseTabl
 
 // The kinds' indexes in `localeCompare` order of their names, stable.
 kind_order: fn(kinds: [KindSpans]) -> [Int] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop at in 0..<kinds.len() -> order.push(at)
     loop i in 1..<order.len() {
-        j := i
+        ^j: i
         loop j > 0 && locale_compare(kinds[order[j - 1]].kind, kinds[order[j]].kind) > 0 {
             held: order[j - 1]
             order[j - 1] = order[j]
@@ -595,12 +595,12 @@ kind_order: fn(kinds: [KindSpans]) -> [Int] Never! {
 
 // phaseTable's object, as JSON.stringify writes it.
 phase_table_json: fn(table: PhaseTable) -> Dyn Never! {
-    rows := [{key: String, value: Dyn}]{}
+    ^rows: [{key: String, value: Dyn}]{}
     loop row in table.phases {
         rows.push({key: row.kind.copy(), value: Dyn.Object([{key: "wall_ns", value: Dyn.Float(row.wall_ns)}, {key: "span_ns", value: Dyn.Float(row.span_ns)}, {key: "cpu_ns", value: Dyn.Float(row.cpu_ns)}, {key: "count", value: Dyn.Int(row.count)}, {key: "items", value: row.items.copy() ?? Dyn.Null}])})  // copy: the table keeps its kinds and items
     }
     first: if table.first_begin_ns == .Val(at) -> Dyn.Float(at) else -> Dyn.Null
-    unclosed := [Dyn]{}
+    ^unclosed: [Dyn]{}
     loop kind in table.unclosed -> unclosed.push(Dyn.Text(kind.copy()))  // copy: the table keeps its kinds
     Dyn.Object([{key: "phases", value: Dyn.Object(rows)}, {key: "firstBeginNs", value: first}, {key: "unclosed", value: Dyn.Array(unclosed)}])
 }
@@ -642,10 +642,10 @@ walk_counters: fn(value: Dyn, key: String, counters: ^[Counter]) MeasureError! {
 counter_body: fn(line: String) -> String? Never! {
     rest: line.removeprefix("JET_PHASE_COUNTERS")
     bytes: rest.bytes()
-    at := 0
+    ^at: 0
     colon: bytes.len() > 0 && Int{bytes[0]} == 58
     if colon -> at = 1
-    spaced := 0
+    ^spaced: 0
     loop at < bytes.len() {
         width: js_space_len(bytes, at)
         if width == 0 -> break
@@ -671,7 +671,7 @@ counter_body: fn(line: String) -> String? Never! {
 // every counter summed under `phase.name` (`total` without a phase), in
 // `localeCompare` order of their names.
 parse_counters: fn(output: String) -> [Counter] MeasureError! {
-    counters := [Counter]{}
+    ^counters: [Counter]{}
     loop raw in output.split("\n") {
         line: raw.removesuffix("\r")
         body: counter_body(line) ?? {
@@ -682,8 +682,8 @@ parse_counters: fn(output: String) -> [Counter] MeasureError! {
         }
         parsed: json.parse(body) ?? return Err(MeasureError{message: "{err}", syntax: true})
         entries: if parsed == .Object(members) -> ordered(members) else -> [{key: String, value: Dyn}]{}
-        phase := Dyn?{None}
-        values := [{key: String, value: Dyn}]{}
+        ^phase: Dyn?{None}
+        ^values: [{key: String, value: Dyn}]{}
         loop entry in entries {
             if entry.key == "phase" {
                 phase = Val(entry.value)
@@ -697,10 +697,10 @@ parse_counters: fn(output: String) -> [Counter] MeasureError! {
         }
         walk_counters(Dyn.Object(values), key, counters) ?? return Err(err)
     }
-    order := [Int]{}
+    ^order: [Int]{}
     loop at in 0..<counters.len() -> order.push(at)
     loop i in 1..<order.len() {
-        j := i
+        ^j: i
         loop j > 0 && locale_compare(counters[order[j - 1]].key, counters[order[j]].key) > 0 {
             held: order[j - 1]
             order[j - 1] = order[j]
@@ -713,7 +713,7 @@ parse_counters: fn(output: String) -> [Counter] MeasureError! {
 
 // parseCounters' object, as JSON.stringify writes it.
 counters_json: fn(counters: [Counter]) -> Dyn Never! {
-    entries := [{key: String, value: Dyn}]{}
+    ^entries: [{key: String, value: Dyn}]{}
     loop counter in counters {
         entries.push({key: counter.key.copy(), value: Dyn.Float(counter.value)})  // copy: the list keeps its keys
     }

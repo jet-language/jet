@@ -175,7 +175,7 @@ evidence_revision_empty: fn() -> EvidenceRevision Never! {
 
 // Reuse the identical canonical derivation framed hash.
 evidence_identity_for_record: fn(report_id: String, claim_id: String, producer: EvidenceProducerKind, kind: EvidenceKind, source: EvidenceSource, count: U64, detail: String) -> EvidenceIdentity Never! {
-    state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
+    ^state: DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
     derivation_hash_frame(state, report_id)
     derivation_hash_frame(state, claim_id)
     derivation_hash_frame(state, evidence_producer_name(producer))
@@ -204,7 +204,7 @@ evidence_record_set_expectation: fn(record: ^EvidenceRecord, expectation: Eviden
 }
 
 evidence_record_with_expectation: fn(record: ^^EvidenceRecord, expectation: EvidenceExpectation) -> EvidenceRecord EvidenceExpectationError! {
-    value := record
+    ^value: record
     evidence_record_set_expectation(value, expectation)
     Ok(value)
 }
@@ -215,7 +215,7 @@ evidence_record_set_derivation: fn(record: ^EvidenceRecord, derivation: Derivati
 
 evidence_record_checked_derivation: fn(record: EvidenceRecord) -> DerivationRecord Never! {
     method: if record.kind == EvidenceKind.Property -> DerivationMethod.SampledAgreement else -> DerivationMethod.RecordedExecution
-    value := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), method, "evidence-record", [String]{record.identity.claim_id, record.identity.evidence_id}, derivation_identity(record.revision.source, record.revision.build, record.revision.revision, record.build.target))
+    ^value: derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), method, "evidence-record", [String]{record.identity.claim_id, record.identity.evidence_id}, derivation_identity(record.revision.source, record.revision.build, record.revision.revision, record.build.target))
     if evidence_outcome_is_incomplete(record.outcome) || record.outcome == EvidenceOutcome.Unchecked {
         value.disposition = DerivationDisposition.Unavailable
     }
@@ -242,7 +242,7 @@ evidence_report_intern_derivation: fn(report: ^EvidenceReport, derivation: ^^Der
 }
 
 evidence_report_add_record_with_derivation: fn(report: ^EvidenceReport, record: ^^EvidenceRecord, derivation: ^^DerivationRecord) EvidenceMergeError! {
-    value := record
+    ^value: record
     value.derivation = Val(evidence_report_intern_derivation(report, derivation))
     evidence_report_add_record(report, value)
 }
@@ -280,7 +280,7 @@ evidence_report_add_record: fn(report: ^EvidenceReport, record: ^^EvidenceRecord
 }
 
 evidence_report_try_from_records: fn(report_id: String, records: ^^[EvidenceRecord], derivations: ^^[DerivationRecord]) -> EvidenceReport EvidenceMergeError! {
-    report := evidence_report_new(report_id, EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
+    ^report: evidence_report_new(report_id, EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
     if records.len() > 0 {
         report.producer = records[0].producer
         report.source = records[0].source.copy()
@@ -308,7 +308,7 @@ evidence_report_is_complete: fn(report: EvidenceReport) -> Bool Never! {
 }
 
 evidence_report_query: fn(report: EvidenceReport, claim_id: String?) -> [EvidenceProjection] Never! {
-    rows := [EvidenceProjection]{}
+    ^rows: [EvidenceProjection]{}
     loop record in report.records {
         if claim_id == {
             .Val(claim) -> {
@@ -323,7 +323,7 @@ evidence_report_query: fn(report: EvidenceReport, claim_id: String?) -> [Evidenc
 }
 
 evidence_projection_from_record: fn(record: EvidenceRecord) -> EvidenceProjection Never! {
-    chain := record.chain.copy()
+    ^chain: record.chain.copy()
     chain = loop fresh_item in chain -> fresh_item
     chain.sort_by(fn(left: EvidenceChainLink, right: EvidenceChainLink) { evidence_chain_order(left, right) })
     EvidenceProjection{evidence_id: record.identity.evidence_id, claim_id: record.identity.claim_id, kind: record.kind, facet: record.facet, producer: record.producer, expectation: record.expectation, outcome: record.outcome, source: record.source, completeness: record.completeness, chain: chain, derivation: record.derivation}
@@ -386,7 +386,7 @@ evidence_diagnostic_order: fn(left: EvidenceDiagnostic, right: EvidenceDiagnosti
 
 // Sorted index vectors borrow payloads; canonical output never clones records.
 evidence_sorted_record_indices: fn(report: EvidenceReport) -> [Int] Never! {
-    indices := [Int]{}
+    ^indices: [Int]{}
     loop index in 0..<report.records.len() -> indices.push(index)
     indices.sort_by(fn(left: Int, right: Int) { evidence_record_order(report.records[left], report.records[right]) })
     indices
@@ -400,7 +400,7 @@ evidence_record_from_test_codes: fn(kind_code: Int, state: Int, name: String, me
     source: EvidenceSource{path: file, line: if kind == EvidenceKind.Property -> U32{0} else -> line, column: U32{1}}
     count: if kind == EvidenceKind.Property -> (U64{Int{line}}) else -> (U64{1})
     identity: evidence_identity_for_record(report_id, if name == "" -> "<anonymous>" else -> name, EvidenceProducerKind.Test, kind, source, count, message)
-    record := evidence_record_new(identity, kind, EvidenceProducerKind.Test, outcome, count, source, build, revision)
+    ^record: evidence_record_new(identity, kind, EvidenceProducerKind.Test, outcome, count, source, build, revision)
     record.detail = message
     if message != "" -> record.attachments.push(EvidenceAttachment{name: "detail", value: message})
     if evidence_outcome_is_failure(outcome) {

@@ -14,7 +14,7 @@ Point: struct {
 }
 
 run: fn() {
-    bytes := [U8#128]{ uninit }
+    ^bytes: [U8#128]{ uninit }
     fixed: mem.Fixed.over(bytes)
 
     // Typed allocation: the control witness is payload 9.
@@ -32,10 +32,10 @@ run: fn() {
     // Exhaustion is a typed failure. One Int allocation uses 8 payload bytes
     // plus a 32-byte header: 3 of them use 3 * (8 + 32) = 120 of the 128
     // bytes, and a fourth would need 160, so exactly 3 fit.
-    fills := [Int]{}
-    round := 0
+    ^fills: [Int]{}
+    ^round: 0
     loop round < 2 {
-        count := 0
+        ^count: 0
         loop {
             if fixed.try_alloc(count) == {
                 .Ok(_) -> { count += 1 }

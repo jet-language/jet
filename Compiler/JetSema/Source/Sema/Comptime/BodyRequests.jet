@@ -34,7 +34,9 @@ sema_comptime_body_source_place: fn(source: SemaComptimeBodySource) -> SemaCompt
 // sema_comptime_index_module_slot gives one in a key index.
 sema_comptime_place_module_slot: fn(modules: ^[Int], rows: ^[SemaComptimePlaceRows], module_identity: ModuleID) -> Int Never! {
     slot: sema_comptime_claim_module_slot(modules, module_identity, rows.len())
-    if slot == rows.len() -> rows.push(SemaComptimePlaceRows{owners: name_table_sized(SEMA_COMPTIME_KEY_SLOTS), rows: [SemaComptimePlaceKey:Int]{}})
+    if slot == rows.len() {
+        rows.push(SemaComptimePlaceRows{owners: name_table_sized(SEMA_COMPTIME_KEY_SLOTS), rows: [SemaComptimePlaceKey:Int]{}})
+    }
     slot
 }
 
@@ -145,9 +147,7 @@ sema_comptime_key_set_has: fn(set: SemaComptimeKeySet, module_identity: ModuleID
 }
 
 // How many pairs `set` holds.
-sema_comptime_key_set_len: fn(set: SemaComptimeKeySet) -> Int Never! {
-    set.pair_slots.len()
-}
+sema_comptime_key_set_len: fn(set: SemaComptimeKeySet) -> Int Never! { set.pair_slots.len() }
 
 // The module of pair `pair` of `set`, in the order added.
 sema_comptime_key_set_module: fn(set: SemaComptimeKeySet, pair: Int) -> ModuleID Never! {
@@ -161,20 +161,26 @@ sema_comptime_key_set_key: fn(set: SemaComptimeKeySet, pair: Int) -> String Neve
 
 // The key of body source `source` in `index` (sema_comptime_place_key).
 sema_comptime_body_source_place_key: fn(index: ^SemaComptimePlaceRows, source: SemaComptimeBodySource) -> SemaComptimePlaceKey Never! {
-    if source.site_owner == .Val(owner) -> return sema_comptime_place_key(index, owner, source.span, source.site_span)
+    if source.site_owner == .Val(owner) {
+        return sema_comptime_place_key(index, owner, source.span, source.site_span)
+    }
     sema_comptime_place_key(index, source.function_key, source.span, source.site_span)
 }
 
 // The key of body source `source` in `index` (sema_comptime_place_find).
 sema_comptime_body_source_place_find: fn(index: SemaComptimePlaceRows, source: SemaComptimeBodySource) -> SemaComptimePlaceKey? Never! {
-    if source.site_owner == .Val(owner) -> return sema_comptime_place_find(index, owner, source.span, source.site_span)
+    if source.site_owner == .Val(owner) {
+        return sema_comptime_place_find(index, owner, source.span, source.site_span)
+    }
     sema_comptime_place_find(index, source.function_key, source.span, source.site_span)
 }
 
 sema_comptime_body_source_index: fn(context: ^SemaCheckContext, row: Int) Never! {
     slot: sema_comptime_place_module_slot(context.comptime_body_source_modules, context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
     key: sema_comptime_body_source_place_key(context.comptime_body_source_rows[slot], context.comptime_body_sources[row])
-    if (context.comptime_body_source_rows[slot].rows.get(key) ?? -1) < 0 -> context.comptime_body_source_rows[slot].rows[key] = row
+    if (context.comptime_body_source_rows[slot].rows.get(key) ?? -1) < 0 {
+        context.comptime_body_source_rows[slot].rows[key] = row
+    }
 }
 
 sema_comptime_body_sources_index: fn(context: ^SemaCheckContext) Never! {
@@ -222,7 +228,7 @@ sema_comptime_body_sources_truncate: fn(context: ^SemaCheckContext, length: Int)
                 }
             }
         }
-        _ := context.comptime_body_sources.pop()
+        ^_: context.comptime_body_sources.pop()
     }
 }
 
@@ -243,11 +249,11 @@ sema_comptime_body_value_index_row: fn(modules: ^[Int], first_rows: ^[SemaCompti
 // reads it.
 sema_comptime_body_values_freeze: fn(values: ^^[SemaComptimeBodyValue], work: Shared<SemaComptimeBodyWork>?, count_key_bytes: Bool) -> SemaComptimeBodyValues Never! {
     length: values.len()
-    modules := [Int]{}
-    first_rows := [SemaComptimePlaceRows]{}
-    second_rows := [[SemaComptimePlaceKey:Int]]{}
-    indexed_rows := 0
-    index_key_utf8_bytes := 0
+    ^modules: [Int]{}
+    ^first_rows: [SemaComptimePlaceRows]{}
+    ^second_rows: [[SemaComptimePlaceKey:Int]]{}
+    ^indexed_rows: 0
+    ^index_key_utf8_bytes: 0
     loop row in 0..<length {
         indexed_rows += 1
         if values[row].place == .Val(place) {
@@ -256,7 +262,7 @@ sema_comptime_body_values_freeze: fn(values: ^^[SemaComptimeBodyValue], work: Sh
         }
     }
     if work == .Val(cell) {
-        permit := cell.guard_edit()
+        ^permit: cell.guard_edit()
         permit.value.publications += 1
         permit.value.publication_rows += length
         if length > 0 -> permit.value.index_builds += 1
@@ -278,12 +284,12 @@ sema_comptime_body_values_freeze: fn(values: ^^[SemaComptimeBodyValue], work: Sh
 // The staging owner's one payload guard closes before diagnostic counters or
 // any caller/evaluator/sink executes. Work is proportional to new item rows.
 sema_comptime_body_facts_append_items: fn(facts: Shared<SemaComptimeBodyFacts>, values: [SemaComptimeItemValue], from: Int, expected_length: Int, count_key_bytes: Bool) -> {length: Int, rows: Int, key_utf8_bytes: Int} {
-    permit := facts.guard_edit()
+    ^permit: facts.guard_edit()
     if permit.value.values.len() != expected_length {
         panic("body publication attempted to append through an old prefix generation")
     }
-    appended := 0
-    key_utf8_bytes := 0
+    ^appended: 0
+    ^key_utf8_bytes: 0
     loop index in from..<values.len() {
         if values[index].kind != SemaComptimeItemKind.BodyExpression -> next
         row: permit.value.values.len()
@@ -310,7 +316,7 @@ sema_comptime_body_values_append_items: fn(publication: ^SemaComptimeBodyValues,
     if added.rows == 0 -> panic("the authenticated body frontier contained no new body row")
     publication.length = added.length
     if publication.work == .Val(cell) {
-        permit := cell.guard_edit()
+        ^permit: cell.guard_edit()
         permit.value.publications += 1
         permit.value.publication_rows += added.rows
         if new_generation -> permit.value.index_builds += 1
@@ -330,7 +336,7 @@ sema_comptime_body_values_truncate: fn(context: ^SemaCheckContext, length: Int) 
 sema_comptime_body_values_prefix: fn(values: SemaComptimeBodyValues, length: Int) -> SemaComptimeBodyValues Never! {
     // copy: a handle copy (Shared facts plus ints): the prefix narrows its own `length`, while
     // `values` (the caller's publication) keeps its full length.
-    prefix := values.copy()
+    ^prefix: values.copy()
     if prefix.length > length -> prefix.length = length
     prefix.move()
 }
@@ -346,7 +352,7 @@ sema_comptime_body_work_new: fn(trace_sink: CompilerTraceSink?) -> Shared<SemaCo
 
 sema_comptime_body_work_count: fn(values: SemaComptimeBodyValues, operation: SemaComptimeBodyWorkOperation) {
     cell: values.work ?? return
-    permit := cell.guard_edit()
+    ^permit: cell.guard_edit()
     if operation == {
         .FunctionsStarted -> { permit.value.functions_started += 1 }
         .CheckPassStarted -> { permit.value.check_passes_started += 1 }
@@ -414,7 +420,7 @@ sema_comptime_body_capture_binding: fn(
     source_span: Span,
     site_span: Span,
 ) Never! {
-    _ := sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, expected_type, source_span, site_span, false, true, false)
+    ^_: sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, expected_type, source_span, site_span, false, true, false)
 }
 
 // An immutable local `name: value` that calls code, staged to be computed
@@ -427,7 +433,7 @@ sema_comptime_body_capture_local: fn(
     source_span: Span,
     site_span: Span,
 ) Never! {
-    _ := sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, expected_type, source_span, site_span, true, false, false)
+    ^_: sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, expected_type, source_span, site_span, true, false, false)
 }
 
 // The prepared local that marks a generic body's compile-time site
@@ -439,15 +445,11 @@ SEMA_COMPTIME_GENERIC_SITE_LOCAL: "__jet_generic_site"
 // The prepared local of an instance's copy of a generic site that holds the
 // TypeInfo record of the type filling type parameter `name`, bound only
 // when that type has one.
-sema_comptime_reflect_local: fn(name: String) -> String Never! {
-    "__jet_reflect_{name}"
-}
+sema_comptime_reflect_local: fn(name: String) -> String Never! { "__jet_reflect_{name}" }
 
 // The prepared local of an instance's copy of a generic site that holds the
 // TypeId of the type filling type parameter `name`, which every type has.
-sema_comptime_type_id_local: fn(name: String) -> String Never! {
-    "__jet_type_id_{name}"
-}
+sema_comptime_type_id_local: fn(name: String) -> String Never! { "__jet_type_id_{name}" }
 
 // Whether `source` is a generic body's site (SEMA_COMPTIME_GENERIC_SITE_LOCAL).
 sema_comptime_generic_site: fn(source: SemaComptimeBodySource) -> Bool Never! {
@@ -495,10 +497,10 @@ sema_comptime_unreflected: fn(name: String, span: Span, check: ^SemaBodyCheck) -
 // `start` read (SemaCheckContext.generic_reflections), each once, in the
 // order read.
 sema_comptime_generic_site_params: fn(context: SemaCheckContext, start: Int) -> [Type] Never! {
-    params := [Type]{}
+    ^params: [Type]{}
     loop index in start..<context.generic_reflections.len() {
         if context.generic_reflections[index] == .Named(name) {
-            seen := false
+            ^seen: false
             loop param in params {
                 if param == .Named(known) && known == name -> seen = true
             }
@@ -528,7 +530,7 @@ sema_comptime_generic_site_read: fn(check: ^SemaBodyCheck, name: String, express
 // `infos` holds one there, to that TypeInfo record
 // (sema_comptime_reflect_local).
 sema_comptime_generic_site_instance: fn(site: SemaComptimeBodySource, params: [String], ids: [TComptimeValue], infos: [TComptimeValue?], identity: String) -> SemaComptimeBodySource Never! {
-    prepared := [SemaComptimePreparedLocal]{}
+    ^prepared: [SemaComptimePreparedLocal]{}
     loop index in 0..<params.len() {
         prepared.push(SemaComptimePreparedLocal{name: sema_comptime_type_id_local(params[index]), ty: Type.Named{name: "TypeId"}, value: ids[index], span: site.span})
         info: infos[index] ?? next
@@ -569,18 +571,18 @@ sema_comptime_body_capture_site: fn(
     local_binding: Bool,
     generic: Bool,
 ) -> SemaComptimeBodySource Never! {
-    function_key := sema_scope_function_owner_key(scopes)
+    ^function_key: sema_scope_function_owner_key(scopes)
     if sema_comptime_body_source_row(context, environment.module_identity, function_key, source_span, site_span) == .Val(row) {
         return context.comptime_body_sources[row]
     }
-    destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
+    ^destination_key: sema_comptime_body_destination_key(function_key, source_span, site_span)
     key: "{environment.module_identity.id}.{destination_key}"
-    prepared := [SemaComptimePreparedLocal]{}
+    ^prepared: [SemaComptimePreparedLocal]{}
     if generic {
         prepared.push(SemaComptimePreparedLocal{name: SEMA_COMPTIME_GENERIC_SITE_LOCAL, ty: Type.Bool, value: TComptimeValue.Bool{value: true}, span: source_span})
     }
     prepared.extend(sema_comptime_body_prepared_locals(environment, scopes))
-    source := SemaComptimeBodySource{
+    ^source: SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: function_key,
         source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, source_span),
@@ -603,7 +605,7 @@ sema_comptime_body_capture_site: fn(
 
 // The prepared locals the site can read: each visible binding with a value.
 sema_comptime_body_prepared_locals: fn(environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [SemaComptimePreparedLocal] Never! {
-    prepared := [SemaComptimePreparedLocal]{}
+    ^prepared: [SemaComptimePreparedLocal]{}
     loop index in 0..<scopes.bindings.len() {
         if scopes.bindings[index].prepared == None -> next
         binding: sema_scope_binding_row(environment, scopes, index)
@@ -622,7 +624,7 @@ sema_comptime_body_prepared_locals: fn(environment: SemaScopeEnvironment, scopes
 // local there, and walking them at every site cost each body a pass over
 // the whole module.
 sema_comptime_body_runtime_locals: fn(scopes: SemaScopeTable) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop index in 0..<scopes.bindings.len() {
         if scopes.bindings[index].frame == 0 || scopes.bindings[index].prepared != None -> next
         name: scopes.bindings[index].symbol.name

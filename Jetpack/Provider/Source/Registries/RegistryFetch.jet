@@ -182,8 +182,8 @@ RegistrySourceObject: struct {
 // The CAS closure edges and `dependency.object.*` facts of every non-root
 // source archive, in closure order.
 provider_registry_dependency_objects: fn(root: String, objects: [RegistrySourceObject]) -> {references: [String], facts: [String:String]} Never! {
-    references := [String]{}
-    facts := [String:String]{}
+    ^references: [String]{}
+    ^facts: [String:String]{}
     loop object in objects {
         if object.name == root -> next
         digest: "sha256-{object.sha256}"
@@ -208,8 +208,8 @@ provider_registry_run: fn(spec: ProcessSpec, action: String, failure: String) -[
 // `str::split_whitespace`.
 provider_registry_words: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    words := [String]{}
-    cursor := 0
+    ^words: [String]{}
+    ^cursor: 0
     loop cursor < raw.len() {
         cursor = pkg_bytes_skip_space(raw, cursor)
         if cursor >= raw.len() -> break
@@ -225,7 +225,7 @@ provider_registry_find: fn(text: String, needle: String, from: Int) -> Int? Neve
     raw: text.bytes()
     wanted: needle.bytes()
     if wanted.len() == 0 -> return if from <= raw.len() -> Val(from) else -> None
-    position := from
+    ^position: from
     loop position + wanted.len() <= raw.len() {
         if pkg_bytes_starts_with(raw, position, wanted) -> return Val(position)
         position += 1
@@ -237,7 +237,7 @@ provider_registry_find: fn(text: String, needle: String, from: Int) -> Int? Neve
 provider_registry_rfind: fn(text: String, needle: String) -> Int? Never! {
     raw: text.bytes()
     wanted: needle.bytes()
-    position := raw.len() - wanted.len()
+    ^position: raw.len() - wanted.len()
     loop position >= 0 {
         if pkg_bytes_starts_with(raw, position, wanted) -> return Val(position)
         position -= 1
@@ -299,7 +299,7 @@ provider_registry_valid_hex: fn(value: String, length: Int) -> Bool Never! {
 provider_registry_safe_relative: fn(path: String) -> Bool Never! {
     if path == "" || path.starts_with("/") -> return false
     pieces: path.split("/").to_list()
-    normal := 0
+    ^normal: 0
     loop index in 0..<pieces.len() {
         piece: pieces[index]
         if {
@@ -321,7 +321,7 @@ provider_registry_stable_suffix: fn(value: String) -> String Never! {
 // Every CR LF pair as LF.
 provider_registry_crlf_to_lf: fn(text: String) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<raw.len() {
         if (Int{raw[index]}) == 13 && pkg_bytes_code(raw, index + 1) == 10 -> next
         out.push(raw[index])
@@ -333,8 +333,8 @@ provider_registry_crlf_to_lf: fn(text: String) -> String Never! {
 provider_registry_split_any: fn(text: String, delimiters: String) -> [String] Never! {
     raw: text.bytes()
     stops: delimiters.bytes()
-    pieces := [String]{}
-    start := 0
+    ^pieces: [String]{}
+    ^start: 0
     loop index in 0..<raw.len() {
         if stops.contains(raw[index]) {
             pieces.push(pkg_bytes_text(raw, start, index))
@@ -348,7 +348,7 @@ provider_registry_split_any: fn(text: String, delimiters: String) -> [String] Ne
 // The SHA-256 of `prefix`, NUL, then every value followed by NUL: the
 // closure identity every registry provider hashes.
 provider_registry_identity_hash: fn(prefix: String, values: [String]) -> String Never! {
-    identity := prefix.bytes()
+    ^identity: prefix.bytes()
     identity.push(U8{0})
     loop value in values {
         loop byte in value.bytes() -> identity.push(byte)
@@ -378,7 +378,7 @@ provider_registry_locked_platform: fn(envelope: LockEnvelope) -[Env]> String Nev
 // authority as plan facts, and the recipe as its toolchain facts. A refused
 // record keeps the `invalid producer record: {error:?}` text.
 provider_registry_producer: fn(provider: String, action_kind: String, source_hash: String, repository: String, fetch_authority: String, version: String, extra_plan_facts: [String:String], recipe: String, identity: CacheIdentity, facts: [String:String]) -> ProducerRecord RegistryError! {
-    plan_facts := [String:String]{
+    ^plan_facts: [String:String]{
         "action.kind": action_kind,
         "repository": repository,
         "fetch.authority": fetch_authority,
@@ -422,9 +422,9 @@ RegistryAuthority: struct {
     // The configured `authority.providers.<provider>` entry of the project
     // package, else the provider defaults.
     load: fn(ctx: ProviderCtx, provider: String, default_registry: String, default_allow: [String]) -[FS, Env]> RegistryAuthority RegistryError! {
-        registry := default_registry
-        allow := default_allow
-        deny := [String]{}
+        ^registry: default_registry
+        ^allow: default_allow
+        ^deny: [String]{}
         if ctx.project_dir == {
             .Val(project) -> {
                 if PackageFacts.load(project) == {
@@ -450,9 +450,9 @@ RegistryAuthority: struct {
             }
             .None -> {}
         }
-        normalized_allow := [String]{provider_registry_authority_of(registry)}
+        ^normalized_allow: [String]{provider_registry_authority_of(registry)}
         loop value in allow -> normalized_allow.push(provider_registry_normalize_authority(value))
-        normalized_deny := [String]{}
+        ^normalized_deny: [String]{}
         loop value in deny -> normalized_deny.push(provider_registry_normalize_authority(value))
         normalized_allow = provider_sorted_unique(normalized_allow)
         normalized_deny = provider_sorted_unique(normalized_deny)
@@ -522,8 +522,8 @@ RegistryAuthority: struct {
     // PROVIDER_FETCH_MAX_REDIRECTS, is followed here only after its target
     // passes the same allow/deny check as the first URL.
     get_checked: fn(self, url: String) -[Net, Time.Wait]> HTTPResponse RegistryError! {
-        current := url
-        hops := 0
+        ^current: url
+        ^hops: 0
         loop {
             request: http_client.request("GET", current).total_timeout(60000).redirects(0)
             response: if http_client.send(request) == {
@@ -570,7 +570,7 @@ provider_registry_authority_of: fn(url: String) -> String RegistryError! {
     }
     rest: url.removeprefix("https://")
     raw: rest.bytes()
-    end := 0
+    ^end: 0
     loop end < raw.len() {
         code: Int{raw[end]}
         if code == 47 || code == 63 || code == 35 -> break
@@ -580,7 +580,7 @@ provider_registry_authority_of: fn(url: String) -> String RegistryError! {
     if written == "" || written.contains("@") || written.contains("\\") {
         return Err(RegistryError.Reason("provider URL has invalid or credentialed authority `{written}`"))
     }
-    authority := pkg_ascii_lower(written)
+    ^authority: pkg_ascii_lower(written)
     if {
         authority.ends_with(":443") -> authority = authority.removesuffix(":443")
         authority.contains(":") -> return Err(RegistryError.Reason("provider HTTPS URL may only use port 443"))
@@ -605,12 +605,12 @@ provider_registry_authority_of: fn(url: String) -> String RegistryError! {
 provider_registry_ipv4_octets: fn(text: String) -> [Int]? Never! {
     parts: text.split(".").to_list()
     if parts.len() != 4 -> return None
-    octets := [Int]{}
+    ^octets: [Int]{}
     loop part in parts {
         raw: part.bytes()
         if raw.len() == 0 || raw.len() > 3 -> return None
         if raw.len() > 1 && (Int{raw[0]}) == 48 -> return None
-        value := 0
+        ^value: 0
         loop byte in raw {
             code: Int{byte}
             if code < 48 || code > 57 -> return None
@@ -668,19 +668,19 @@ provider_registry_validate_tar_archive: fn(path: String, gzipped: Bool) -[FS]> R
     stream: provider_registry_tar_stream(path, gzipped)
     provider_registry_preflight_tar(stream, gzipped)
     listing: provider_registry_tar_entries(stream)
-    count := 0
+    ^count: 0
     loop entry in listing {
         count += 1
         if count > PROVIDER_MAX_ARCHIVE_ENTRIES {
             return Err(RegistryError.Reason("source archive has too many entries"))
         }
-        trimmed := entry.name
+        ^trimmed: entry.name
         loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
         if entry.name == "" || !provider_registry_safe_relative(trimmed) {
             return Err(RegistryError.Reason("source archive contains unsafe path `{entry.name}`"))
         }
     }
-    total := 0
+    ^total: 0
     loop entry in listing {
         if entry.kind == {
             .File | .Directory -> {}
@@ -710,7 +710,7 @@ provider_registry_tar_stream: fn(path: String, gzipped: Bool) -[FS]> [U8] Regist
 // Walk the raw tar headers of the decoded archive stream. Past the end
 // marker of a gzip stream at most the pipe capacity may follow.
 provider_registry_preflight_tar: fn(stream: [U8], gzipped: Bool) RegistryError! {
-    preflight := RegistryTarPreflight.new()
+    ^preflight: RegistryTarPreflight.new()
     preflight.feed(stream)
     preflight.finish()
     if gzipped && preflight.trailing > PROVIDER_TAR_TRAILER_BYTES {
@@ -739,7 +739,7 @@ RegistryTarPreflight: struct {
     }
 
     feed: fn(^self, chunk: [U8]) RegistryError! {
-        index := 0
+        ^index: 0
         loop index < chunk.len() {
             if self.done {
                 self.trailing += chunk.len() - index
@@ -783,7 +783,7 @@ RegistryTarPreflight: struct {
     }
 
     header: fn(^self, header: [U8]) RegistryError! {
-        zero := true
+        ^zero: true
         loop byte in header {
             if (Int{byte}) != 0 {
                 zero = false
@@ -860,7 +860,7 @@ provider_registry_pax_logical_size: fn(text: String) -> Int? Never! {
 // padded with NUL or space.
 provider_registry_tar_number: fn(field: View<U8>) -> Int RegistryError! {
     if field.len() > 0 && (Int{field[0]}) >= 128 {
-        value := Int{field[0]} - 128
+        ^value: Int{field[0]} - 128
         loop index in 1..<field.len() {
             byte: Int{field[index]}
             if value > (9223372036854775807 - byte) /% 256 {
@@ -870,15 +870,15 @@ provider_registry_tar_number: fn(field: View<U8>) -> Int RegistryError! {
         }
         return Ok(value)
     }
-    start := 0
-    end := field.len()
+    ^start: 0
+    ^end: field.len()
     loop start < end && (Int{field[start]} == 0 || Int{field[start]} == 32) -> start += 1
     loop end > start && (Int{field[end - 1]} == 0 || Int{field[end - 1]} == 32) -> end -= 1
     text: String.from_bytes(field[start..<end].copy()) ?? return Err(RegistryError.Reason("tar size is not ASCII"))
     digits: text.removeprefix("+")
     if text == "" -> return Ok(0)
     if digits == "" -> return Err(RegistryError.Reason("tar size is malformed"))
-    value := 0
+    ^value: 0
     loop byte in digits.bytes() {
         code: Int{byte}
         if code < 48 || code > 55 -> return Err(RegistryError.Reason("tar size is malformed"))
@@ -933,9 +933,9 @@ provider_registry_tar_kind: fn(flag: Int, name: String) -> RegistryTarKind Never
 // header checksum and payload bound is checked against the stream.
 provider_registry_tar_members: fn(stream: [U8]) -> [RegistryTarMember] RegistryError! {
     unreadable: RegistryError.Reason("source is not a readable tar archive")
-    members := [RegistryTarMember]{}
-    pending_name := String?{None}
-    at := 0
+    ^members: [RegistryTarMember]{}
+    ^pending_name: String?{None}
+    ^at: 0
     loop members.len() <= PROVIDER_MAX_ARCHIVE_ENTRIES {
         if at + PROVIDER_TAR_BLOCK > stream.len() -> return Err(unreadable)
         header: stream[at..<(at + PROVIDER_TAR_BLOCK)]
@@ -989,7 +989,7 @@ provider_registry_tar_checksum_valid: fn(header: [U8]) -> Bool Never! {
             return false
         }
     }
-    sum := 0
+    ^sum: 0
     loop index in 0..<PROVIDER_TAR_BLOCK {
         sum += if index >= 148 && index < 156 -> 32 else -> (Int{header[index]})
     }
@@ -998,7 +998,7 @@ provider_registry_tar_checksum_valid: fn(header: [U8]) -> Bool Never! {
 
 // A NUL-terminated header or long-name field.
 provider_registry_tar_text: fn(field: [U8]) -> String RegistryError! {
-    end := 0
+    ^end: 0
     loop end < field.len() && (Int{field[end]}) != 0 -> end += 1
     text: String.from_bytes(field[0..<end]) ?? return Err(RegistryError.Reason("tar entry name is not UTF-8"))
     Ok(text)
@@ -1017,10 +1017,10 @@ provider_registry_tar_header_name: fn(header: [U8]) -> String RegistryError! {
 // `<length> <key>=<value>\n` with its length exactly covering it.
 provider_registry_pax_path: fn(records: [U8]) -> String? RegistryError! {
     bad: RegistryError.Reason("tar PAX metadata is malformed")
-    found := String?{None}
-    at := 0
+    ^found: String?{None}
+    ^at: 0
     loop at < records.len() {
-        space := at
+        ^space: at
         loop space < records.len() && (Int{records[space]}) != 32 -> space += 1
         if space == records.len() -> return Err(bad)
         digits: String.from_bytes(records[at..<space]) ?? return Err(bad)
@@ -1037,7 +1037,7 @@ provider_registry_pax_path: fn(records: [U8]) -> String? RegistryError! {
 }
 
 provider_registry_tar_entries: fn(stream: [U8]) -> [RegistryTarEntry] RegistryError! {
-    listing := [RegistryTarEntry]{}
+    ^listing: [RegistryTarEntry]{}
     loop member in provider_registry_tar_members(stream) -> listing.push(member.entry)
     Ok(listing)
 }
@@ -1060,7 +1060,7 @@ provider_registry_extract_tar: fn(path: String, gzipped: Bool, destination: Stri
         entry: member.entry
         prepared: provider_registry_prepare_entry(entry.name, entry.kind, destination)
         target: prepared ?? next
-        out := if files.create(target, if_exists: .Replace, mode: (member.mode) & 0o777) == {
+        ^out: if files.create(target, if_exists: .Replace, mode: (member.mode) & 0o777) == {
             .Ok(writer) -> writer
             .Err(error) -> {
                 return Err(RegistryError.Reason("could not create `{entry.name}`: {error}"))
@@ -1073,7 +1073,7 @@ provider_registry_extract_tar: fn(path: String, gzipped: Bool, destination: Stri
 // Create a directory entry (and return None) or a regular file's parent
 // directories (and return the file's target path).
 provider_registry_prepare_entry: fn(name: String, kind: RegistryTarKind, destination: String) -[FS]> String? RegistryError! {
-    trimmed := name
+    ^trimmed: name
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
     if !provider_registry_safe_relative(trimmed) {
         return Err(RegistryError.Reason("source archive contains unsafe path `{name}`"))

@@ -84,7 +84,7 @@ check_collision_circle_line: fn(center: Point, radius: Float, p1: Point, p2: Poi
     if abs_float(dx) + abs_float(dy) <= C_FLT_EPSILON {
         return check_collision_circles(p1, 0.0, center, radius)
     }
-    along := ((center.x - p1.x) * (p2.x - p1.x) + (center.y - p1.y) * (p2.y - p1.y)) / (dx * dx + dy * dy)
+    ^along: ((center.x - p1.x) * (p2.x - p1.x) + (center.y - p1.y) * (p2.y - p1.y)) / (dx * dx + dy * dy)
     if along > 1.0 -> along = Float{1.0} else if along < 0.0 { along = Float{0.0} }
     near_x: p1.x - along * dx - center.x
     near_y: p1.y - along * dy - center.y
@@ -131,9 +131,9 @@ check_collision_point_line: fn(point: Point, p1: Point, p2: Point, threshold: In
 // Even-odd crossing count over the polygon's edges; fewer than three points
 // enclose nothing.
 check_collision_point_poly: fn(point: Point, points: [Point]) -> Bool Never! {
-    inside := false
+    ^inside: false
     if points.len() < 3 -> return inside
-    previous := points.len() - 1
+    ^previous: points.len() - 1
     loop at in 0..<points.len() {
         a: points[at]
         b: points[previous]
@@ -198,7 +198,7 @@ gen_image_checked: fn(width: Int, height: Int, checks_x: Int, checks_y: Int, fir
     step_y: max_int(checks_y, 1)
     even: premultiply(pack_rgba(first))
     odd: premultiply(pack_rgba(second))
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop y in 0..<height {
         loop x in 0..<width {
             rgba: if (x /% step_x + y /% step_y) %% 2 == 0 -> even else -> odd
@@ -221,7 +221,7 @@ get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! {
 // not blend.
 image_clear_background: fn(image: ^Image, color: Color) Never! {
     rgba: premultiply(pack_rgba(color))
-    at := 0
+    ^at: 0
     loop at < image.pixels.len() {
         put_rgba(image.pixels, at, rgba)
         at += 4
@@ -247,10 +247,10 @@ image_draw_rectangle_rec: fn(image: ^Image, rec: Rect, color: Color) Never! {
     if image.width == 0 || image.height == 0 {
         return
     }
-    x := rec.x
-    y := rec.y
-    width := rec.width
-    height := rec.height
+    ^x: rec.x
+    ^y: rec.y
+    ^width: rec.width
+    ^height: rec.height
     if x < 0.0 {
         width += x
         x = Float{0.0}
@@ -294,10 +294,10 @@ image_crop: fn(image: ^Image, crop: Rect) Never! {
     if image.width == 0 || image.height == 0 {
         return
     }
-    x := crop.x
-    y := crop.y
-    width := crop.width
-    height := crop.height
+    ^x: crop.x
+    ^y: crop.y
+    ^width: crop.width
+    ^height: crop.height
     if x < 0.0 {
         width += x
         x = Float{0.0}
@@ -323,7 +323,7 @@ image_crop: fn(image: ^Image, crop: Rect) Never! {
         image.height = max_int(rows, 0)
         return
     }
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop row in top..<(top + rows) {
         start: (row * image.width + left) * 4
         loop at in start..<(start + columns * 4) -> pixels.push(image.pixels[at])
@@ -344,7 +344,7 @@ image_resize_nn: fn(image: ^Image, new_width: Int, new_height: Int) Never! {
     }
     x_ratio: (image.width << 16) /% new_width + 1
     y_ratio: (image.height << 16) /% new_height + 1
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop y in 0..<new_height {
         row: min_int((y * y_ratio) >> 16, image.height - 1) * image.width
         loop x in 0..<new_width {
@@ -358,8 +358,8 @@ image_resize_nn: fn(image: ^Image, new_width: Int, new_height: Int) Never! {
 }
 
 image_flip_vertical: fn(image: ^Image) Never! {
-    pixels := [U8]{}
-    row := image.height - 1
+    ^pixels: [U8]{}
+    ^row: image.height - 1
     loop row >= 0 {
         start: row * image.width * 4
         loop at in start..<(start + image.width * 4) -> pixels.push(image.pixels[at])
@@ -369,7 +369,7 @@ image_flip_vertical: fn(image: ^Image) Never! {
 }
 
 image_flip_horizontal: fn(image: ^Image) Never! {
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop y in 0..<image.height {
         loop x in 0..<image.width {
             at: (y * image.width + image.width - 1 - x) * 4
@@ -382,9 +382,9 @@ image_flip_horizontal: fn(image: ^Image) Never! {
 // A quarter turn clockwise: column x of the result is row height - 1 - x of
 // the image read left to right.
 image_rotate_cw: fn(image: ^Image) Never! {
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop x in 0..<image.width {
-        y := image.height - 1
+        ^y: image.height - 1
         loop y >= 0 {
             at: (y * image.width + x) * 4
             loop k in 0..<4 -> pixels.push(image.pixels[at + k])
@@ -397,8 +397,8 @@ image_rotate_cw: fn(image: ^Image) Never! {
 // A quarter turn counterclockwise: row i of the result is column
 // width - 1 - i of the image read top to bottom.
 image_rotate_ccw: fn(image: ^Image) Never! {
-    pixels := [U8]{}
-    x := image.width - 1
+    ^pixels: [U8]{}
+    ^x: image.width - 1
     loop x >= 0 {
         loop y in 0..<image.height {
             at: (y * image.width + x) * 4
@@ -416,11 +416,11 @@ image_rotate_ccw: fn(image: ^Image) Never! {
 // down, alpha included.
 image_color_tint: fn(image: ^Image, color: Color) Never! {
     tint: pack_rgba(color)
-    at := 0
+    ^at: 0
     loop at + 4 <= image.pixels.len() {
         rgba: straight_at(image.pixels, at)
-        tinted := 0
-        shift := 24
+        ^tinted: 0
+        ^shift: 24
         loop shift >= 0 {
             tinted = (tinted << 8) + ((rgba >> shift) & 255) * ((tint >> shift) & 255) /% 255
             shift -= 8
@@ -432,7 +432,7 @@ image_color_tint: fn(image: ^Image, color: Color) Never! {
 
 // Red, green and blue become 255 minus themselves.
 image_color_invert: fn(image: ^Image) Never! {
-    at := 0
+    ^at: 0
     loop at + 4 <= image.pixels.len() {
         rgba: straight_at(image.pixels, at)
         put_rgba(image.pixels, at, premultiply(0xFFFFFF00 - (rgba & 0xFFFFFF00) + (rgba & 255)))
@@ -445,11 +445,11 @@ image_color_invert: fn(image: ^Image) Never! {
 // sum below 0 becomes 1.
 image_color_brightness: fn(image: ^Image, brightness: Int) Never! {
     amount: max_int(min_int(brightness, 255), -255)
-    at := 0
+    ^at: 0
     loop at + 4 <= image.pixels.len() {
         rgba: straight_at(image.pixels, at)
-        bright := 0
-        shift := 24
+        ^bright: 0
+        ^shift: 24
         loop shift >= 8 {
             sum: ((rgba >> shift) & 255) + amount
             value: if sum < 0 -> 1 else -> min_int(sum, 255)
@@ -467,7 +467,7 @@ image_color_brightness: fn(image: ^Image, brightness: Int) Never! {
 image_color_replace: fn(image: ^Image, color: Color, replace: Color) Never! {
     target: premultiply(pack_rgba(color))
     rgba: premultiply(pack_rgba(replace))
-    at := 0
+    ^at: 0
     loop at < image.pixels.len() {
         if image_rgba(image.pixels, at) == target -> put_rgba(image.pixels, at, rgba)
         at += 4
@@ -494,8 +494,8 @@ straight_at: fn(pixels: [U8], at: Int) -> Int { unpremultiply(image_rgba(pixels,
 
 // Premultiplied pixels straight again, each as unpremultiply makes it.
 straight_pixels: fn(pixels: [U8]) -> [U8] {
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at + 4 <= pixels.len() {
         push_rgba(out, straight_at(pixels, at))
         at += 4
@@ -588,11 +588,11 @@ draw_text: fn(target: ^Image, set: ^Typeset, text: String, x: Int, y: Int, size:
     px: Float{size}
     metrics: face.metrics(px)
     step: line_height(metrics)
-    baseline := y + round_px(metrics.ascent)
-    x0 := 0
-    y0 := 0
-    x1 := 0
-    y1 := 0
+    ^baseline: y + round_px(metrics.ascent)
+    ^x0: 0
+    ^y0: 0
+    ^x1: 0
+    ^y1: 0
     loop line in text_lines(text) {
         if baseline - step >= target.height -> break
         if line != "" && baseline + step > 0 {
@@ -632,7 +632,7 @@ draw_text: fn(target: ^Image, set: ^Typeset, text: String, x: Int, y: Int, size:
 measure_text: fn(text: String, size: Int) -> Int Never! {
     if size < 1 -> return 0
     face: regular_face()
-    widest := 0
+    ^widest: 0
     loop line in text_lines(text) {
         if line != "" -> widest = max_int(widest, round_px(face.layout(line, Float{size}).advance))
     }
@@ -646,8 +646,8 @@ line_height: fn(metrics: font.FaceMetrics) -> Int {
 
 // The lines of `text`, split at "\n".
 text_lines: fn(text: String) -> [String] {
-    lines := [String]{}
-    line := [U8]{}
+    ^lines: [String]{}
+    ^line: [U8]{}
     loop byte in text.bytes() {
         if byte == (U8{10}) {
             lines.push(String.from_bytes(line) ?? "")
@@ -669,7 +669,7 @@ coverage_ramp: fn(rgba: Int) -> [Int] {
     green: (rgba >> 16) & 255
     blue: (rgba >> 8) & 255
     alpha: rgba & 255
-    ramp := [Int]{}
+    ^ramp: [Int]{}
     loop cover in 0..<256 {
         a: div255(cover * alpha + 127)
         ramp.push((a << 24) + (div255(red * a + 127) << 16) + (div255(green * a + 127) << 8) + div255(blue * a + 127))
@@ -695,11 +695,11 @@ paint_mask: fn(target: ^Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]
     // blend_pixel's sums, inlined as `fill` inlines them, on the pixels
     // moved out of the image for the loop; a premultiplied channel at
     // weight 255 is the channel itself.
-    pixels := target.pixels
+    ^pixels: target.pixels
     target.pixels = [U8]{}
     loop row in top..<bottom {
-        from := (row - y0) * mask.width + left - x0
-        at := (row * target.width + left) * 4
+        ^from: (row - y0) * mask.width + left - x0
+        ^at: (row * target.width + left) * 4
         loop _ in left..<right {
             source: ramp[Int{mask.coverage[from]}]
             a: source >> 24
@@ -812,7 +812,7 @@ draw_rectangle_gradient_v: fn(target: ^Image, x: Int, y: Int, width: Int, height
     }
     first: pack_rgba(top)
     last: pack_rgba(bottom)
-    levels := [Int]{}
+    ^levels: [Int]{}
     loop row in box.top..<box.bottom {
         levels.push(axis_rgba(first, last, (Float{row} + 0.5 - rec.y) / rec.height))
     }
@@ -820,8 +820,8 @@ draw_rectangle_gradient_v: fn(target: ^Image, x: Int, y: Int, width: Int, height
     loop k in 0..<levels.len() {
         if levels[k] >= 0 -> fill(target, box.left, box.top + k, span, 1, levels[k], false)
     }
-    across := [Float]{}
-    pixels := target.pixels
+    ^across: [Float]{}
+    ^pixels: target.pixels
     target.pixels = [U8]{}
     loop k in 0..<levels.len() {
         if levels[k] >= 0 -> next
@@ -829,7 +829,7 @@ draw_rectangle_gradient_v: fn(target: ^Image, x: Int, y: Int, width: Int, height
         row: box.top + k
         v: (Float{row} + 0.5 - rec.y) / rec.height
         line: tie_line(tie_axis(first, last, v), v, across)
-        at := (row * target.width + box.left) * 4
+        ^at: (row * target.width + box.left) * 4
         loop rgba in line {
             blend_pixel(pixels, at, (rgba >> 24) & 255, (rgba >> 16) & 255, (rgba >> 8) & 255, rgba & 255)
             at += 4
@@ -848,7 +848,7 @@ draw_rectangle_gradient_h: fn(target: ^Image, x: Int, y: Int, width: Int, height
     }
     first: pack_rgba(left)
     last: pack_rgba(right)
-    levels := [Int]{}
+    ^levels: [Int]{}
     loop column in box.left..<box.right {
         levels.push(axis_rgba(first, last, (Float{column} + 0.5 - rec.x) / rec.width))
     }
@@ -857,7 +857,7 @@ draw_rectangle_gradient_h: fn(target: ^Image, x: Int, y: Int, width: Int, height
     // Opaque, one row of the levels copied to every row (a column on a tie
     // takes black here and its own pixels below); translucent, blended.
     if opaque {
-        line := [U8]{}
+        ^line: [U8]{}
         loop level in levels -> push_rgba(line, max_int(level, 0))
         loop row in box.top..<box.bottom {
             start: (row * target.width + box.left) * 4
@@ -865,7 +865,7 @@ draw_rectangle_gradient_h: fn(target: ^Image, x: Int, y: Int, width: Int, height
         }
     } else {
         loop row in box.top..<box.bottom {
-            at := (row * target.width + box.left) * 4
+            ^at: (row * target.width + box.left) * 4
             loop level in levels {
                 if level >= 0 {
                     blend_pixel(target.pixels, at, (level >> 24) & 255, (level >> 16) & 255, (level >> 8) & 255, level & 255)
@@ -874,9 +874,9 @@ draw_rectangle_gradient_h: fn(target: ^Image, x: Int, y: Int, width: Int, height
             }
         }
     }
-    across := [Float]{}
+    ^across: [Float]{}
     stride: target.width * 4
-    pixels := target.pixels
+    ^pixels: target.pixels
     target.pixels = [U8]{}
     loop k in 0..<levels.len() {
         if levels[k] >= 0 -> next
@@ -884,7 +884,7 @@ draw_rectangle_gradient_h: fn(target: ^Image, x: Int, y: Int, width: Int, height
         column: box.left + k
         u: (Float{column} + 0.5 - rec.x) / rec.width
         line: tie_line(tie_axis(first, last, u), u, across)
-        at := box.top * stride + column * 4
+        ^at: box.top * stride + column * 4
         loop rgba in line {
             blend_pixel(pixels, at, (rgba >> 24) & 255, (rgba >> 16) & 255, (rgba >> 8) & 255, rgba & 255)
             at += stride
@@ -923,8 +923,8 @@ gradient_box: fn(extent: Extent, rec: Rect) -> GradientBox {
 // (or column) of one gradient shares one color; on a tie the caller paints
 // the line pixel by pixel (tie_axis, tie_line).
 axis_rgba: fn(first: Int, last: Int, t: Float) -> Int {
-    rgba := 0
-    shift := 24
+    ^rgba: 0
+    ^shift: 24
     loop shift >= 0 {
         level: Float{(first >> shift) & 255} * (Float{1.0} - t) + Float{(last >> shift) & 255} * t + 0.5
         whole: core.math.floor(level)
@@ -952,13 +952,13 @@ TieAxis: struct {
 }
 
 tie_axis: fn(first: Int, last: Int, t: Float) -> TieAxis {
-    rgba := 0
-    shifts := [Int]{}
-    near := [Int]{}
-    edge := [Float]{}
-    firsts := [Float]{}
-    lasts := [Float]{}
-    shift := 24
+    ^rgba: 0
+    ^shifts: [Int]{}
+    ^near: [Int]{}
+    ^edge: [Float]{}
+    ^firsts: [Float]{}
+    ^lasts: [Float]{}
+    ^shift: 24
     loop shift >= 0 {
         from: Float{(first >> shift) & 255}
         to: Float{(last >> shift) & 255}
@@ -991,7 +991,7 @@ tie_axis: fn(first: Int, last: Int, t: Float) -> TieAxis {
 // sum plus 1/2 lies next to the channel's near level: its floor is that
 // level or the one below.
 tie_line: fn(axis: TieAxis, t: Float, across: [Float]) -> [Int] {
-    line := [Int]{}
+    ^line: [Int]{}
     loop _ in across -> line.push(axis.rgba)
     loop k in 0..<axis.shifts.len() {
         first: axis.first[k]
@@ -1011,7 +1011,7 @@ tie_line: fn(axis: TieAxis, t: Float, across: [Float]) -> [Int] {
 // The pixel centers start..<end of a rectangle at `origin`, `size` long,
 // in its unit coordinate.
 centers: fn(start: Int, end: Int, origin: Float, size: Float) -> [Float] {
-    out := [Float]{}
+    ^out: [Float]{}
     loop at in start..<end -> out.push((Float{at} + 0.5 - origin) / size)
     out
 }
@@ -1125,7 +1125,7 @@ Region: struct {
 // Reads the atlas text at `path` (see parse_atlas), then reads and decodes
 // its texture. An atlas that cannot be read has no regions.
 load_texture_atlas: fn(path: String) -[FS]> TextureAtlas Never! {
-    atlas := parse_atlas(path, core.files.read(path) ?? "")
+    ^atlas: parse_atlas(path, core.files.read(path) ?? "")
     bytes: core.files.read_bytes(atlas.texture_path) ?? return atlas
     atlas.texture = decode_png(bytes)
     atlas
@@ -1141,10 +1141,10 @@ load_texture_atlas: fn(path: String) -[FS]> TextureAtlas Never! {
 parse_atlas: fn(path: String, text: String) -> TextureAtlas Never! {
     raw: path.bytes()
     file: file_name(raw)
-    name := "atlas"
+    ^name: "atlas"
     if file.start >= 0 -> name = text_of(raw, file.start, stem_end(raw, file.start, file.end))
-    texture := ""
-    regions := [Region]{}
+    ^texture: ""
+    ^regions: [Region]{}
     loop each in text.lines() {
         line: each.trim()
         if line.starts_with("atlas:") {
@@ -1199,8 +1199,8 @@ draw_sprite: fn(target: ^Image, atlas: TextureAtlas, source: String, x: Int, y: 
             return
         }
         loop row in first_row..<end_row {
-            from := ((region.y + row) * texture.width + region.x + first_column) * 4
-            at := ((y + row) * target.width + x + first_column) * 4
+            ^from: ((region.y + row) * texture.width + region.x + first_column) * 4
+            ^at: ((y + row) * target.width + x + first_column) * 4
             loop _ in first_column..<end_column {
                 alpha: byte_at(texture.pixels, from + 3)
                 if alpha == 255 {
@@ -1227,7 +1227,7 @@ draw_sprite: fn(target: ^Image, atlas: TextureAtlas, source: String, x: Int, y: 
 // The end of raw[0..end) without the trailing separators and "." components
 // that Path's components skip.
 path_trim_end: fn(raw: [U8], end: Int) -> Int {
-    at := end
+    ^at: end
     loop {
         loop at > 0 && byte_at(raw, at - 1) == 47 -> at -= 1
         if at >= 2 && byte_at(raw, at - 1) == 46 && byte_at(raw, at - 2) == 47 {
@@ -1243,7 +1243,7 @@ path_trim_end: fn(raw: [U8], end: Int) -> Int {
 // for none ("", "/", a lone ".", a trailing "..").
 file_name: fn(raw: [U8]) -> {start: Int, end: Int} {
     end: path_trim_end(raw, raw.len())
-    start := end
+    ^start: end
     loop start > 0 && byte_at(raw, start - 1) != 47 -> start -= 1
     dot: end - start == 1 && byte_at(raw, start) == 46
     dotdot: end - start == 2 && byte_at(raw, start) == 46 && byte_at(raw, start + 1) == 46
@@ -1254,7 +1254,7 @@ file_name: fn(raw: [U8]) -> {start: Int, end: Int} {
 // Path::file_stem's end: the name before its last ".", unless that dot
 // leads it.
 stem_end: fn(raw: [U8], start: Int, end: Int) -> Int {
-    dot := end - 1
+    ^dot: end - 1
     loop dot > start && byte_at(raw, dot) != 46 -> dot -= 1
     if dot <= start -> return end
     dot
@@ -1263,7 +1263,7 @@ stem_end: fn(raw: [U8], start: Int, end: Int) -> Int {
 // Path::parent's end ("/" keeps the root), or -1 when the last component is
 // the root or there is none.
 parent_end: fn(raw: [U8]) -> Int {
-    end := path_trim_end(raw, raw.len())
+    ^end: path_trim_end(raw, raw.len())
     if end == 0 -> return -1
     loop end > 0 && byte_at(raw, end - 1) != 47 -> end -= 1
     stop: path_trim_end(raw, end)
@@ -1298,8 +1298,8 @@ text_of: fn(raw: [U8], start: Int, end: Int) -> String { String.from_bytes(raw[s
 
 // str::split_whitespace: the runs of scalars that are not White_Space.
 split_fields: fn(text: String) -> [String] {
-    out := [String]{}
-    field := ""
+    ^out: [String]{}
+    ^field: ""
     loop scalar in core.text.scalars(text) {
         if core.text.is_whitespace(scalar) {
             if field != "" -> out.push(field.copy())
@@ -1383,10 +1383,10 @@ fill: fn(target: ^Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
     // (x + 1 + (x >> 8)) >> 8 for every sum src-over makes (at most
     // 255 * 255 + 127).
     rest: 255 - alpha
-    pixels := target.pixels
+    ^pixels: target.pixels
     target.pixels = [U8]{}
     loop row in top..<bottom {
-        at := (row * target.width + left) * 4
+        ^at: (row * target.width + left) * 4
         loop _ in left..<right {
             r: Int{pixels[at]} * rest + 127
             g: Int{pixels[at + 1]} * rest + 127
@@ -1404,7 +1404,7 @@ fill: fn(target: ^Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
 
 // `count` pixels of the packed color, built by doubling.
 solid_row: fn(rgba: Int, count: Int) -> [U8] {
-    row := [U8]{}
+    ^row: [U8]{}
     if count <= 0 -> return row
     push_rgba(row, rgba)
     loop row.len() * 2 <= count * 4 -> row.extend(row.copy())
@@ -1463,8 +1463,8 @@ max_float: fn(a: Float, b: Float) -> Float {
 // floor(sqrt(n)) for n >= 0, by Newton's method from above.
 isqrt_floor: fn(n: Int) -> Int {
     if n < 2 -> return n
-    x := n
-    y := (x + 1) /% 2
+    ^x: n
+    ^y: (x + 1) /% 2
     loop y < x {
         x = y
         y = (x + n /% x) /% 2
@@ -1487,7 +1487,7 @@ push_clipped: fn(runs: ^[Run], extent: Extent, x: Int, y: Int, width: Int, heigh
 }
 
 rect_runs: fn(extent: Extent, x: Int, y: Int, width: Int, height: Int, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     push_clipped(runs, extent, x, y, width, height, rgba)
     runs
 }
@@ -1496,15 +1496,15 @@ rect_runs: fn(extent: Extent, x: Int, y: Int, width: Int, height: Int, rgba: Int
 // minor coordinate is the exact rounded line value there, so only the visible
 // steps are walked; pixels in one row (or column) merge into one run.
 line_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     if x0 == x1 && y0 == y1 {
         push_clipped(runs, extent, x0, y0, 1, 1, rgba)
         return runs
     }
-    ax := x0
-    ay := y0
-    bx := x1
-    by := y1
+    ^ax: x0
+    ^ay: y0
+    ^bx: x1
+    ^by: y1
     if abs_int(x1 - x0) >= abs_int(y1 - y0) {
         if x0 > x1 {
             ax = x1
@@ -1512,10 +1512,10 @@ line_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, rgba: Int) -> 
             bx = x0
             by = y0
         }
-        run_x := 0
-        run_y := 0
-        run_width := 0
-        x := max_int(ax, 0)
+        ^run_x: 0
+        ^run_y: 0
+        ^run_width: 0
+        ^x: max_int(ax, 0)
         last: min_int(bx, extent.width - 1)
         loop x <= last {
             y: ay + round_div((x - ax) * (by - ay), bx - ax)
@@ -1536,10 +1536,10 @@ line_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, rgba: Int) -> 
         bx = x0
         by = y0
     }
-    run_x := 0
-    run_y := 0
-    run_height := 0
-    y := max_int(ay, 0)
+    ^run_x: 0
+    ^run_y: 0
+    ^run_height: 0
+    ^y: max_int(ay, 0)
     last: min_int(by, extent.height - 1)
     loop y <= last {
         x: ax + round_div((y - ay) * (bx - ax), by - ay)
@@ -1558,9 +1558,9 @@ line_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, rgba: Int) -> 
 // A filled disc: every pixel whose offset from the center satisfies
 // dx^2 + dy^2 <= radius^2, one run per visible row.
 circle_runs: fn(extent: Extent, center_x: Int, center_y: Int, radius: Int, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     if radius <= 0 -> return runs
-    row := max_int(center_y - radius, 0)
+    ^row: max_int(center_y - radius, 0)
     last: min_int(center_y + radius, extent.height - 1)
     loop row <= last {
         dy: row - center_y
@@ -1592,11 +1592,11 @@ half_plane: fn(span: Span, p: Int, q: Int, inclusive: Bool) -> Span {
         return Span{lo: 1, hi: 0}
     }
     if p > 0 {
-        bound := ((-q) /% p) + 1
+        ^bound: ((-q) /% p) + 1
         if inclusive -> bound = -(q /% p)
         return Span{lo: max_int(span.lo, bound), hi: span.hi}
     }
-    bound := -((-q) /% (-p)) - 1
+    ^bound: -((-q) /% (-p)) - 1
     if inclusive -> bound = q /% (-p)
     Span{lo: span.lo, hi: min_int(span.hi, bound)}
 }
@@ -1604,23 +1604,23 @@ half_plane: fn(span: Span, p: Int, q: Int, inclusive: Bool) -> Span {
 // A filled triangle in either winding: the pixels whose centers lie inside,
 // one run per visible row. A degenerate triangle covers nothing.
 triangle_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     area: (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0)
     if area == 0 -> return runs
-    bx := x1
-    by := y1
-    cx := x2
-    cy := y2
+    ^bx: x1
+    ^by: y1
+    ^cx: x2
+    ^cy: y2
     if area < 0 {
         bx = x2
         by = y2
         cx = x1
         cy = y1
     }
-    row := max_int(min_int(y0, min_int(y1, y2)), 0)
+    ^row: max_int(min_int(y0, min_int(y1, y2)), 0)
     last: min_int(max_int(y0, max_int(y1, y2)) - 1, extent.height - 1)
     loop row <= last {
-        span := Span{lo: 0, hi: extent.width - 1}
+        ^span: Span{lo: 0, hi: extent.width - 1}
         span = edge_span(span, x0, y0, bx, by, row)
         span = edge_span(span, bx, by, cx, cy, row)
         span = edge_span(span, cx, cy, x0, y0, row)
@@ -1656,7 +1656,7 @@ center_from: fn(at: Int) -> Int { -((128 - at) /% 256) }
 
 // The pixels whose centers lie in the rectangle, left and top edges included.
 rec_runs: fn(extent: Extent, rec: Rect, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     if rec.width <= 0.0 || rec.height <= 0.0 -> return runs
     left: center_from(subpixel(rec.x))
     top: center_from(subpixel(rec.y))
@@ -1668,7 +1668,7 @@ rec_runs: fn(extent: Extent, rec: Rect, rgba: Int) -> [Run] {
 
 // The rectangle's outermost pixels, each in one run.
 rect_lines_runs: fn(extent: Extent, x: Int, y: Int, width: Int, height: Int, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     if width <= 0 || height <= 0 -> return runs
     push_clipped(runs, extent, x, y, width, 1, rgba)
     if height > 2 {
@@ -1682,12 +1682,12 @@ rect_lines_runs: fn(extent: Extent, x: Int, y: Int, width: Int, height: Int, rgb
 // draw_rectangle_lines_ex's bands, top, bottom, left, right: a thickness
 // past either side becomes half the shorter side.
 lines_ex_bands: fn(rec: Rect, line_thick: Float) -> [Rect] {
-    thick := line_thick
+    ^thick: line_thick
     if thick > rec.width || thick > rec.height {
         if rec.width >= rec.height -> thick = rec.height / 2.0 else -> thick = rec.width / 2.0
     }
     side: rec.height - thick * 2.0
-    bands := [Rect]{}
+    ^bands: [Rect]{}
     bands.push(Rect{x: rec.x, y: rec.y, width: rec.width, height: thick})
     bands.push(Rect{x: rec.x, y: rec.y - thick + rec.height, width: rec.width, height: thick})
     bands.push(Rect{x: rec.x, y: rec.y + thick, width: thick, height: side})
@@ -1700,18 +1700,18 @@ lines_ex_bands: fn(rec: Rect, line_thick: Float) -> [Rect] {
 // the blend at its center, rounded to the nearest level. Equal neighbors in
 // a row share a run.
 gradient_runs: fn(extent: Extent, rec: Rect, top_left: Int, bottom_left: Int, bottom_right: Int, top_right: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     if rec.width <= 0.0 || rec.height <= 0.0 -> return runs
     left: max_int(center_from(subpixel(rec.x)), 0)
     right: min_int(center_from(subpixel(rec.x + rec.width)), extent.width)
     bottom: min_int(center_from(subpixel(rec.y + rec.height)), extent.height)
     if left >= right -> return runs
-    row := max_int(center_from(subpixel(rec.y)), 0)
+    ^row: max_int(center_from(subpixel(rec.y)), 0)
     loop row < bottom {
         v: (Float{row} + 0.5 - rec.y) / rec.height
-        start := left
-        current := 0
-        column := left
+        ^start: left
+        ^current: 0
+        ^column: left
         loop column < right {
             u: (Float{column} + 0.5 - rec.x) / rec.width
             rgba: gradient_rgba(top_left, bottom_left, bottom_right, top_right, u, v)
@@ -1730,14 +1730,14 @@ gradient_runs: fn(extent: Extent, rec: Rect, top_left: Int, bottom_left: Int, bo
 
 // The packed color at (u, v) in the unit square.
 gradient_rgba: fn(top_left: Int, bottom_left: Int, bottom_right: Int, top_right: Int, u: Float, v: Float) -> Int {
-    rgba := 0
-    shift := 24
+    ^rgba: 0
+    ^shift: 24
     loop shift >= 0 {
         tl: (top_left >> shift) & 255
         bl: (bottom_left >> shift) & 255
         br: (bottom_right >> shift) & 255
         tr: (top_right >> shift) & 255
-        level := Float{0.0}
+        ^level: Float{0.0}
         if v >= u -> level = Float{tl} * (Float{1.0} - v) + Float{bl} * (v - u) + Float{br} * u else {
             level = Float{tl} * (Float{1.0} - u) + Float{tr} * (u - v) + Float{br} * v
         }
@@ -1756,14 +1756,14 @@ Piece: struct {
 
 // Snaps a convex polygon given in either winding and keeps it if it has area.
 push_piece: fn(pieces: ^[Piece], xs: [Float], ys: [Float]) {
-    sx := [Int]{}
-    sy := [Int]{}
+    ^sx: [Int]{}
+    ^sy: [Int]{}
     loop at in 0..<xs.len() {
         sx.push(subpixel(xs[at]))
         sy.push(subpixel(ys[at]))
     }
     count: sx.len()
-    area := 0
+    ^area: 0
     loop at in 0..<count {
         following: (at + 1) %% count
         area += sx[at] * sy[following] - sx[following] * sy[at]
@@ -1775,9 +1775,9 @@ push_piece: fn(pieces: ^[Piece], xs: [Float], ys: [Float]) {
         pieces.push(Piece{xs: sx, ys: sy})
         return
     }
-    rx := [Int]{}
-    ry := [Int]{}
-    at := count - 1
+    ^rx: [Int]{}
+    ^ry: [Int]{}
+    ^at: count - 1
     loop at >= 0 {
         rx.push(sx[at])
         ry.push(sy[at])
@@ -1789,7 +1789,7 @@ push_piece: fn(pieces: ^[Piece], xs: [Float], ys: [Float]) {
 // The columns of `row` whose centers lie inside the piece, within lo..hi.
 // Edges keep the triangle tie rule, so pieces sharing an edge split it.
 piece_span: fn(piece: Piece, row: Int, lo: Int, hi: Int) -> Span {
-    span := Span{lo: lo, hi: hi}
+    ^span: Span{lo: lo, hi: hi}
     center: row * 256 + 128
     count: piece.xs.len()
     loop at in 0..<count {
@@ -1817,8 +1817,8 @@ Cover: struct {
 
 // The union of the pieces.
 pieces_cover: fn(extent: Extent, pieces: [Piece]) -> Cover {
-    first := extent.height + 1
-    last := -2
+    ^first: extent.height + 1
+    ^last: -2
     loop piece in pieces {
         loop y in piece.ys {
             first = min_int(first, center_from(y))
@@ -1827,11 +1827,11 @@ pieces_cover: fn(extent: Extent, pieces: [Piece]) -> Cover {
     }
     first = max_int(first, -1)
     last = min_int(last, extent.height)
-    starts := [Int]{0}
-    spans := [Span]{}
-    row := first
+    ^starts: [Int]{0}
+    ^spans: [Span]{}
+    ^row: first
     loop row <= last {
-        row_spans := [Span]{}
+        ^row_spans: [Span]{}
         loop piece in pieces {
             span: piece_span(piece, row, -1, extent.width)
             if span.lo <= span.hi -> row_spans.push(span)
@@ -1846,13 +1846,13 @@ pieces_cover: fn(extent: Extent, pieces: [Piece]) -> Cover {
 // Appends the union of `spans` in column order, joining spans that overlap
 // or touch.
 merge_spans: fn(out: ^[Span], spans: [Span]) {
-    taken := [Bool]{}
+    ^taken: [Bool]{}
     loop _ in 0..<spans.len() -> taken.push(false)
-    lo := 0
-    hi := -1
-    open := false
+    ^lo: 0
+    ^hi: -1
+    ^open: false
     loop _ in 0..<spans.len() {
-        pick := -1
+        ^pick: -1
         loop at in 0..<spans.len() {
             if !taken[at] && (pick < 0 || spans[at].lo < spans[pick].lo) -> pick = at
         }
@@ -1869,12 +1869,12 @@ merge_spans: fn(out: ^[Span], spans: [Span]) {
 
 // draw_circle's disc as a cover.
 disc_cover: fn(extent: Extent, center_x: Int, center_y: Int, radius: Int) -> Cover {
-    starts := [Int]{0}
-    spans := [Span]{}
+    ^starts: [Int]{0}
+    ^spans: [Span]{}
     first: max_int(center_y - radius, -1)
     if radius <= 0 -> return Cover{top: first, starts: starts, spans: spans}
     last: min_int(center_y + radius, extent.height)
-    row := first
+    ^row: first
     loop row <= last {
         dy: row - center_y
         half: isqrt_floor(radius * radius - dy * dy)
@@ -1890,20 +1890,20 @@ disc_cover: fn(extent: Extent, center_x: Int, center_y: Int, radius: Int) -> Cov
 // draw_ellipse's area as a cover. Each row starts from the square-root
 // estimate and settles on the widest offset the exact test keeps.
 ellipse_cover: fn(extent: Extent, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float) -> Cover {
-    starts := [Int]{0}
-    spans := [Span]{}
+    ^starts: [Int]{0}
+    ^spans: [Span]{}
     if !(radius_h > 0.0) || !(radius_v > 0.0) -> return Cover{top: 0, starts: starts, spans: spans}
     reach_h: whole_reach(radius_h)
     reach_v: whole_reach(radius_v)
     limit: (radius_h * radius_v) * (radius_h * radius_v)
     first: max_int(center_y - reach_v, -1)
     last: min_int(center_y + reach_v, extent.height)
-    row := first
+    ^row: first
     loop row <= last {
         dy: Float{row - center_y} * radius_h
         if dy * dy <= limit {
             estimate: core.math.floor(core.math.sqrt(limit - dy * dy) / radius_v)
-            half := reach_h
+            ^half: reach_h
             reach: Float{reach_h}
             if estimate < reach -> half = max_int(checked(Int{estimate}) ?? 0, 0)
             loop half < reach_h && ellipse_inside(half + 1, dy, radius_v, limit) -> half += 1
@@ -1930,7 +1930,7 @@ whole_reach: fn(radius: Float) -> Int {
 }
 
 cover_runs: fn(extent: Extent, cover: Cover, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     loop k in 0..<(cover.starts.len() - 1) {
         loop at in cover.starts[k]..<cover.starts[k + 1] {
             push_clipped(runs, extent, cover.spans[at].lo, cover.top + k, cover.spans[at].hi - cover.spans[at].lo + 1, 1, rgba)
@@ -1941,7 +1941,7 @@ cover_runs: fn(extent: Extent, cover: Cover, rgba: Int) -> [Run] {
 
 // The cover's pixels with a 4-neighbor outside it.
 outline_runs: fn(extent: Extent, cover: Cover, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     loop k in 0..<(cover.starts.len() - 1) {
         row: cover.top + k
         if row < 0 || row >= extent.height -> next
@@ -1956,7 +1956,7 @@ outline_runs: fn(extent: Extent, cover: Cover, rgba: Int) -> [Run] {
 
 // The columns within lo..hi covered in both rows next to row k.
 interior_spans: fn(cover: Cover, k: Int, lo: Int, hi: Int) -> [Span] {
-    inside := [Span]{}
+    ^inside: [Span]{}
     if k == 0 || k + 2 >= cover.starts.len() -> return inside
     loop above in cover.starts[k - 1]..<cover.starts[k] {
         a_lo: max_int(cover.spans[above].lo, lo)
@@ -1973,10 +1973,10 @@ interior_spans: fn(cover: Cover, k: Int, lo: Int, hi: Int) -> [Span] {
 
 // The pixels `outer` covers and `inner` does not.
 difference_runs: fn(extent: Extent, outer: Cover, inner: Cover, rgba: Int) -> [Run] {
-    runs := [Run]{}
+    ^runs: [Run]{}
     loop k in 0..<(outer.starts.len() - 1) {
         row: outer.top + k
-        holes := [Span]{}
+        ^holes: [Span]{}
         j: row - inner.top
         if j >= 0 && j + 1 < inner.starts.len() {
             loop at in inner.starts[j]..<inner.starts[j + 1] {
@@ -1992,7 +1992,7 @@ difference_runs: fn(extent: Extent, outer: Cover, inner: Cover, rgba: Int) -> [R
 
 // Runs for the columns lo..hi of `row` outside the sorted `holes`.
 push_gaps: fn(runs: ^[Run], extent: Extent, row: Int, lo: Int, hi: Int, holes: [Span], rgba: Int) {
-    pen := lo
+    ^pen: lo
     loop hole in holes {
         if hole.hi < pen || hole.lo > hi -> next
         push_clipped(runs, extent, pen, row, hole.lo - pen, 1, rgba)
@@ -2012,25 +2012,25 @@ arc_step: fn(radius: Float) -> Float {
 // corner radius plus `grow`. Below 4 segments, a corner takes 1/`divisor` of
 // the segment count for a full circle of the radius.
 rounded_pieces: fn(rec: Rect, roundness: Float, segments: Int, grow: Float, divisor: Float) -> [Piece] {
-    pieces := [Piece]{}
-    share := roundness
+    ^pieces: [Piece]{}
+    ^share: roundness
     if share >= 1.0 -> share = 1.0
-    radius := rec.width * share / 2.0
+    ^radius: rec.width * share / 2.0
     if rec.width > rec.height -> radius = rec.height * share / 2.0
     if radius <= 0.0 -> return pieces
-    count := segments
+    ^count: segments
     if count < 4 {
         count = checked(Int{core.math.trunc(core.math.ceil(C_TAU / arc_step(radius)) / divisor)}) ?? 0
         if count <= 0 -> count = 4
     }
     step: Float{90.0} / Float{count}
     reach: radius + grow
-    xs := [Float]{}
-    ys := [Float]{}
+    ^xs: [Float]{}
+    ^ys: [Float]{}
     loop corner in 0..<4 {
-        cx := rec.x + radius
-        cy := rec.y + radius
-        start := Float{180.0}
+        ^cx: rec.x + radius
+        ^cy: rec.y + radius
+        ^start: Float{180.0}
         if corner == 1 {
             cx = (rec.x + rec.width) - radius
             start = 270.0
@@ -2055,23 +2055,23 @@ rounded_pieces: fn(rec: Rect, roundness: Float, segments: Int, grow: Float, divi
 // draw_ring's quads, or circle-sector triangles when the inner radius is 0
 // or less, with the C original's argument fixes and segment count.
 ring_pieces: fn(center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int) -> [Piece] {
-    pieces := [Piece]{}
+    ^pieces: [Piece]{}
     if start_angle == end_angle -> return pieces
-    inner := inner_radius
-    outer := outer_radius
+    ^inner: inner_radius
+    ^outer: outer_radius
     if outer < inner {
         inner = outer_radius
         outer = inner_radius
         if outer <= 0.0 -> outer = 0.1
     }
-    start := start_angle
-    finish := end_angle
+    ^start: start_angle
+    ^finish: end_angle
     if finish < start {
         start = end_angle
         finish = start_angle
     }
     least: checked(Int{core.math.ceil((finish - start) / 90.0)}) ?? 1
-    count := segments
+    ^count: segments
     if count < least {
         count = checked(Int{core.math.trunc((finish - start) * core.math.ceil(C_TAU / arc_step(outer)) / 360.0)}) ?? 0
         if count <= 0 -> count = least
@@ -2083,8 +2083,8 @@ ring_pieces: fn(center: Point, inner_radius: Float, outer_radius: Float, start_a
     loop at in 0..<count {
         before: (start + step * Float{at}) * C_DEG2RAD
         after: (start + step * Float{at + 1}) * C_DEG2RAD
-        xs := [Float]{}
-        ys := [Float]{}
+        ^xs: [Float]{}
+        ^ys: [Float]{}
         if sector {
             xs.push(center.x)
             ys.push(center.y)
@@ -2108,14 +2108,14 @@ ring_pieces: fn(center: Point, inner_radius: Float, outer_radius: Float, start_a
 // draw_poly's outline: vertex i at rotation + 360 * i / sides degrees.
 poly_pieces: fn(center: Point, sides: Int, radius: Float, rotation: Float) -> [Piece] {
     count: max_int(sides, 3)
-    xs := [Float]{}
-    ys := [Float]{}
+    ^xs: [Float]{}
+    ^ys: [Float]{}
     loop at in 0..<count {
         angle: (rotation + Float{360.0} * Float{at} / Float{count}) * C_DEG2RAD
         xs.push(center.x + core.math.cos(angle) * radius)
         ys.push(center.y + core.math.sin(angle) * radius)
     }
-    pieces := [Piece]{}
+    ^pieces: [Piece]{}
     push_piece(pieces, xs, ys)
     pieces
 }
@@ -2169,8 +2169,8 @@ byte_at: fn(data: [U8], at: Int) -> Int { Int{data[at]} }
 decode_png: fn(data: [U8]) -> Image {
     info: core.image.inspect(data, C_PNG_LIMITS) ?? return no_image()
     if info.width > C_PNG_SIDE_MAX || info.height > C_PNG_SIDE_MAX -> return no_image()
-    decoded := core.image.decode(data, C_PNG_LIMITS) ?? return no_image()
-    at := 0
+    ^decoded: core.image.decode(data, C_PNG_LIMITS) ?? return no_image()
+    ^at: 0
     loop at < decoded.pixels.len() {
         rgba: premultiply(image_rgba(decoded.pixels, at))
         put_rgba(decoded.pixels, at, rgba)
@@ -2205,7 +2205,7 @@ png_rgba: fn(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
 }
 
 run_words: fn(runs: [Run]) -> [Int] {
-    words := [Int]{}
+    ^words: [Int]{}
     loop run in runs {
         words.push(run.x)
         words.push(run.y)
@@ -2217,7 +2217,7 @@ run_words: fn(runs: [Run]) -> [Int] {
 }
 
 coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
-    counts := [Int]{}
+    ^counts: [Int]{}
     loop _ in 0..<(width * height) -> counts.push(0)
     loop run in runs {
         loop y in run.y..<(run.y + run.height) {
@@ -2245,7 +2245,7 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     assert_eq(run_words(line_runs(extent, 4, 2, 0, 0, 1)), shallow)
     assert_eq(run_words(line_runs(extent, 2, 1, 2, 5, 1)), [Int]{2, 1, 1, 5, 1})
     assert_eq(run_words(line_runs(extent, 3, 3, 3, 3, 1)), [Int]{3, 3, 1, 1, 1})
-    diagonal := [Int]{}
+    ^diagonal: [Int]{}
     loop i in 0..<8 {
         diagonal.push(i)
         diagonal.push(i)
@@ -2277,13 +2277,13 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     assert_eq(run_words(triangle_runs(extent, 0, 0, 4, 4, 4, 0, 1)), run_words(upper))
     lower: triangle_runs(extent, 0, 0, 4, 4, 0, 4, 1)
     assert_eq(run_words(lower), [Int]{0, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 2, 3, 1, 1, 0, 3, 4, 1, 1})
-    both := [Run]{}
+    ^both: [Run]{}
     loop run in upper -> both.push(run)
     loop run in lower -> both.push(run)
     counts: coverage(both, 6, 6)
     loop y in 0..<6 {
         loop x in 0..<6 {
-            expected := 0
+            ^expected: 0
             if x < 4 && y < 4 -> expected = 1
             assert_eq(counts[y * 6 + x], expected)
         }
@@ -2306,16 +2306,16 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     // c = 51: (200 * 51 + 127) / 255 = 40, (100 * 51 + 127) / 255 = 20,
     // (50 * 51 + 127) / 255 = 10, alpha 255.
     mask: font.GlyphMask{width: 2, height: 2, left: -1, top: 1, coverage: [U8]{255, 128, 0, 51}}
-    drawn := gen_image_color(3, 2, color(0, 0, 0, 255))
+    ^drawn: gen_image_color(3, 2, color(0, 0, 0, 255))
     paint_mask(drawn, mask, 2, 1, coverage_ramp(pack_rgba(color(200, 100, 50, 255))))
     assert_eq(image_words(drawn), [Int]{3, 2, black, png_rgba(200, 100, 50, 255), png_rgba(100, 50, 25, 255), black, black, png_rgba(40, 20, 10, 255)})
     // At origin (0, 0) only the mask's bottom right pixel lands, on (0, 0).
-    clipped := gen_image_color(2, 1, color(0, 0, 0, 255))
+    ^clipped: gen_image_color(2, 1, color(0, 0, 0, 255))
     paint_mask(clipped, mask, 0, 0, coverage_ramp(pack_rgba(color(200, 100, 50, 255))))
     assert_eq(image_words(clipped), [Int]{2, 1, png_rgba(40, 20, 10, 255), black})
     // A color at alpha 128 weighs coverage 255 as (255 * 128 + 127) / 255 =
     // 128, and the opaque image stays opaque.
-    half := gen_image_color(1, 1, color(0, 0, 0, 255))
+    ^half: gen_image_color(1, 1, color(0, 0, 0, 255))
     paint_mask(half, font.GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, coverage_ramp(pack_rgba(color(200, 100, 50, 128))))
     assert_eq(image_words(half), [Int]{1, 1, png_rgba(100, 50, 25, 255)})
 }
@@ -2396,13 +2396,13 @@ axis_matches: fn(width: Int, height: Int, x: Int, y: Int, gw: Int, gh: Int, firs
     rec: int_rectangle(x, y, gw, gh)
     f: pack_rgba(first)
     l: pack_rgba(last)
-    vertical := gen_image_color(width, height, color(9, 30, 60, 200))
+    ^vertical: gen_image_color(width, height, color(9, 30, 60, 200))
     draw_rectangle_gradient_v(vertical, x, y, gw, gh, first, last)
-    vertical_runs := gen_image_color(width, height, color(9, 30, 60, 200))
+    ^vertical_runs: gen_image_color(width, height, color(9, 30, 60, 200))
     reference_paint(vertical_runs, gradient_runs(extent, rec, f, l, l, f))
-    horizontal := gen_image_color(width, height, color(9, 30, 60, 200))
+    ^horizontal: gen_image_color(width, height, color(9, 30, 60, 200))
     draw_rectangle_gradient_h(horizontal, x, y, gw, gh, first, last)
-    horizontal_runs := gen_image_color(width, height, color(9, 30, 60, 200))
+    ^horizontal_runs: gen_image_color(width, height, color(9, 30, 60, 200))
     reference_paint(horizontal_runs, gradient_runs(extent, rec, f, f, l, l))
     vertical.pixels == vertical_runs.pixels && horizontal.pixels == horizontal_runs.pixels
 }
@@ -2449,18 +2449,18 @@ checks_20x10: fn() -> Image {
         rec_runs(extent, int_rectangle(0, 0, 20, 10), 0x99887766),
     }
     loop runs in pieces {
-        drawn := checks_20x10()
+        ^drawn: checks_20x10()
         paint(drawn, runs)
-        expected := checks_20x10()
+        ^expected: checks_20x10()
         reference_paint(expected, runs)
         assert_eq(image_words(drawn), image_words(expected))
     }
-    filled := checks_20x10()
+    ^filled: checks_20x10()
     fill(filled, -2, 1, 30, 8, 0x0A0B0CFF, false)
-    filled_runs := checks_20x10()
+    ^filled_runs: checks_20x10()
     reference_paint(filled_runs, rec_runs(extent, int_rectangle(-2, 1, 30, 8), 0x0A0B0CFF))
     assert_eq(image_words(filled), image_words(filled_runs))
-    cleared := checks_20x10()
+    ^cleared: checks_20x10()
     clear_background(cleared, color(1, 2, 3, 0))
     assert_eq(image_words(cleared), image_words(gen_image_color(20, 10, color(1, 2, 3, 0))))
     assert_eq(solid_row(0x01020304, 3), [U8]{1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4})
@@ -2468,7 +2468,7 @@ checks_20x10: fn() -> Image {
 }
 
 #Test("a range fill repeats its pattern in place") {
-    bytes := [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^bytes: [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     bytes.fill_repeat(1..<11, [U8]{1, 2, 3})
     assert_eq(bytes, [U8]{0, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1})
     bytes.fill_repeat(0..<2, [U8]{7, 8, 9})
@@ -2478,13 +2478,13 @@ checks_20x10: fn() -> Image {
     assert_eq(bytes, [U8]{7, 8, 2, 3, 1, 2, 3, 1, 2, 3, 1})
     bytes.fill_repeat(9..<11, [U8]{6, 6, 6, 6})
     assert_eq(bytes, [U8]{7, 8, 2, 3, 1, 2, 3, 1, 2, 6, 6})
-    words := [Int]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^words: [Int]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     words.fill_repeat(0..<7, [Int]{1, 2, 3})
     assert_eq(words, [Int]{1, 2, 3, 1, 2, 3, 1, 0, 0, 0})
     words.fill_repeat(8..<10, [Int]{4, 5})
     assert_eq(words, [Int]{1, 2, 3, 1, 2, 3, 1, 0, 4, 5})
     // Owned elements: each replaced one is dropped and the pattern lent.
-    names := [String]{"a", "b", "c", "d", "e"}
+    ^names: [String]{"a", "b", "c", "d", "e"}
     pattern: [String]{"x", "yz"}
     names.fill_repeat(1..<4, pattern)
     assert_eq(names, [String]{"a", "x", "yz", "x", "e"})
@@ -2492,7 +2492,7 @@ checks_20x10: fn() -> Image {
 }
 
 triangle_piece: fn(xs: [Float], ys: [Float]) -> [Piece] {
-    pieces := [Piece]{}
+    ^pieces: [Piece]{}
     push_piece(pieces, xs, ys)
     pieces
 }
@@ -2504,7 +2504,7 @@ triangle_piece: fn(xs: [Float], ys: [Float]) -> [Piece] {
     counter: triangle_piece([Float]{0.0, 4.0, 4.0}, [Float]{0.0, 4.0, 0.0})
     assert_eq(run_words(cover_runs(extent, pieces_cover(extent, clockwise), 1)), run_words(upper))
     assert_eq(run_words(cover_runs(extent, pieces_cover(extent, counter), 1)), run_words(upper))
-    pieces := [Piece]{}
+    ^pieces: [Piece]{}
     push_piece(pieces, [Float]{0.0, 4.0, 4.0}, [Float]{0.0, 0.0, 4.0})
     push_piece(pieces, [Float]{0.0, 4.0, 0.0}, [Float]{0.0, 4.0, 4.0})
     assert_eq(run_words(cover_runs(extent, pieces_cover(extent, pieces), 1)), [Int]{0, 0, 4, 1, 1, 0, 1, 4, 1, 1, 0, 2, 4, 1, 1, 0, 3, 4, 1, 1})
@@ -2535,7 +2535,7 @@ triangle_piece: fn(xs: [Float], ys: [Float]) -> [Piece] {
 }
 
 piece_words: fn(pieces: [Piece]) -> [Int] {
-    words := [Int]{}
+    ^words: [Int]{}
     loop piece in pieces {
         loop at in 0..<piece.xs.len() {
             words.push(piece.xs[at])
@@ -2557,9 +2557,9 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     // The pieces of a ring split their shared edges, so each pixel is drawn once.
     full: ring_pieces(point_at(5.0, 5.0), 2.0, 4.5, 0.0, 360.0, 12)
     square: Extent{width: 10, height: 10}
-    runs := [Run]{}
+    ^runs: [Run]{}
     loop piece in full {
-        one := [Piece]{}
+        ^one: [Piece]{}
         one.push(piece)
         loop run in cover_runs(square, pieces_cover(square, one), 1) -> runs.push(run)
     }
@@ -2584,7 +2584,7 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     outer: pieces_cover(extent, rounded_pieces(placed, 1.0, 4, 1.0, 2.0))
     inner: pieces_cover(extent, rounded_pieces(placed, 1.0, 4, 0.0, 2.0))
     band: difference_runs(extent, outer, inner, 1)
-    both := [Run]{}
+    ^both: [Run]{}
     loop run in band -> both.push(run)
     loop run in cover_runs(extent, inner, 1) -> both.push(run)
     assert_eq(coverage(both, 12, 8), coverage(cover_runs(extent, outer, 1), 12, 8))
@@ -2638,7 +2638,7 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     red: Color{r: 255, g: 0, b: 0, a: 255}
     blue: Color{r: 0, g: 0, b: 255, a: 255}
     black: Color{r: 0, g: 0, b: 0, a: 255}
-    checks := gen_image_checked(4, 2, 2, 1, red, blue)
+    ^checks: gen_image_checked(4, 2, 2, 1, red, blue)
     assert(checks.width == 4 && checks.height == 2 && checks.pixels.len() == 32)
     assert(get_image_color(checks, 1, 0).r == 255 && get_image_color(checks, 2, 0).b == 255)
     assert(get_image_color(checks, 0, 1).b == 255 && get_image_color(checks, 3, 1).r == 255)
@@ -2659,7 +2659,7 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     assert(checks.width == 4 && checks.height == 2)
     assert(get_image_color(checks, 0, 0).b == 255 && get_image_color(checks, 3, 1).b == 255)
     // A rectangle under one column sets only its first pixel; under one row, its first row.
-    canvas := gen_image_color(4, 4, black)
+    ^canvas: gen_image_color(4, 4, black)
     image_draw_rectangle_rec(canvas, rect_of(1.0, 1.0, 0.5, 3.0), red)
     assert(get_image_color(canvas, 1, 1).r == 255 && get_image_color(canvas, 1, 2).r == 0)
     image_draw_rectangle_rec(canvas, rect_of(0.0, 3.0, 4.0, 0.5), blue)
@@ -2675,13 +2675,13 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     image_crop(canvas, rect_of(0.0, 0.0, 0.5, 2.0))
     assert(canvas.width == 0 && canvas.height == 2 && canvas.pixels.len() == 0)
     // Columns 0 0 1 1 for a 2 to 4 enlargement.
-    pair := gen_image_checked(2, 1, 1, 1, red, blue)
+    ^pair: gen_image_checked(2, 1, 1, 1, red, blue)
     image_resize_nn(pair, 4, 1)
     assert(pair.width == 4 && get_image_color(pair, 1, 0).r == 255 && get_image_color(pair, 2, 0).b == 255)
     image_resize_nn(pair, 0, 1)
     assert(pair.width == 4)
     // 200 * 128 / 255 rounds down to 100; a sum below 0 becomes 1.
-    tone := gen_image_color(1, 1, Color{r: 200, g: 100, b: 50, a: 255})
+    ^tone: gen_image_color(1, 1, Color{r: 200, g: 100, b: 50, a: 255})
     image_color_tint(tone, Color{r: 128, g: 255, b: 0, a: 255})
     tinted: get_image_color(tone, 0, 0)
     assert(tinted.r == 100 && tinted.g == 100 && tinted.b == 0 && tinted.a == 255)
@@ -2699,7 +2699,7 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     // 100, (100 * 128 + 127) / 255 = 50 and (50 * 128 + 127) / 255 = 25,
     // and reads back as (100 * 255 + 64) / 128 = 199, (50 * 255 + 64) /
     // 128 = 100 and (25 * 255 + 64) / 128 = 50.
-    soft := gen_image_color(1, 1, Color{r: 200, g: 100, b: 50, a: 128})
+    ^soft: gen_image_color(1, 1, Color{r: 200, g: 100, b: 50, a: 128})
     assert_eq(image_words(soft), [Int]{1, 1, png_rgba(100, 50, 25, 128)})
     back: get_image_color(soft, 0, 0)
     assert(back.r == 199 && back.g == 100 && back.b == 50 && back.a == 128)
@@ -2747,8 +2747,8 @@ push_chunk: fn(out: ^[U8], kind: Int, body: [U8]) {
 
 // A PNG of one zlib stream of already filtered scanlines.
 png_bytes: fn(width: Int, height: Int, depth: Int, color_type: Int, interlace: Int, palette: [U8], key: [U8], raw: [U8]) -> [U8] {
-    out := [U8]{137, 80, 78, 71, 13, 10, 26, 10}
-    header := [U8]{}
+    ^out: [U8]{137, 80, 78, 71, 13, 10, 26, 10}
+    ^header: [U8]{}
     push_be32(header, width)
     push_be32(header, height)
     fields: [Int]{depth, color_type, 0, 0, interlace}
@@ -2762,8 +2762,8 @@ png_bytes: fn(width: Int, height: Int, depth: Int, color_type: Int, interlace: I
 }
 
 image_words: fn(image: Image) -> [Int] {
-    words := [Int]{image.width, image.height}
-    at := 0
+    ^words: [Int]{image.width, image.height}
+    ^at: 0
     loop at < image.pixels.len() {
         words.push(png_rgba(byte_at(image.pixels, at), byte_at(image.pixels, at + 1), byte_at(image.pixels, at + 2), byte_at(image.pixels, at + 3)))
         at += 4
@@ -2816,7 +2816,7 @@ gray: fn(value: Int) -> Int { png_rgba(value, value, value, 255) }
     // Red at alpha 128 premultiplies to (255 * 128 + 127) / 255 = 128, and
     // over black adds (0 * 127 + 127) / 255 = 0; alpha is
     // 128 + (255 * 127 + 127) / 255 = 255: the image stays opaque.
-    image := gen_image_color(2, 1, color(0, 0, 0, 255))
+    ^image: gen_image_color(2, 1, color(0, 0, 0, 255))
     draw_rectangle(image, 0, 0, 1, 1, color(255, 0, 0, 128))
     assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 255), png_rgba(0, 0, 0, 255)})
     draw_rectangle(image, -5, 0, 9, 4, color(9, 9, 9, 0))
@@ -2831,14 +2831,14 @@ gray: fn(value: Int) -> Int { png_rgba(value, value, value, 255) }
     assert_eq(image_words(image), [Int]{2, 1, 0, 0})
     // Half-alpha red over a clear image: red 128 + (0 * 127 + 127) / 255 =
     // 128, green and blue 0, and alpha 128 + 0 = 128.
-    clear := gen_image_color(1, 1, color(0, 0, 0, 0))
+    ^clear: gen_image_color(1, 1, color(0, 0, 0, 0))
     draw_rectangle(clear, 0, 0, 1, 1, color(255, 0, 0, 128))
     assert_eq(image_words(clear), [Int]{1, 1, png_rgba(128, 0, 0, 128)})
     // White at alpha 20 over Jet black, #0B0B0D: the source is
     // (255 * 20 + 127) / 255 = 20 and each byte adds
     // (d * 235 + 127) / 255 of the image, 10 of 11 and 12 of 13, so
     // #1E1E20; alpha 20 + (255 * 235 + 127) / 255 = 255.
-    ink := gen_image_color(1, 1, color(11, 11, 13, 255))
+    ^ink: gen_image_color(1, 1, color(11, 11, 13, 255))
     draw_rectangle(ink, 0, 0, 1, 1, color(255, 255, 255, 20))
     assert_eq(image_words(ink), [Int]{1, 1, png_rgba(30, 30, 32, 255)})
     // A clear source keeps (255 * 127 + 127) / 255 = 127 of white under
@@ -2847,7 +2847,7 @@ gray: fn(value: Int) -> Int { png_rgba(value, value, value, 255) }
     assert_eq(over(200, 100, 0), 200)
     assert_eq(over(0, 100, 255), 100)
     // An image whose pixels do not match its size takes nothing.
-    broken := Image{width: 2, height: 2, pixels: [U8]{0, 0, 0, 0}}
+    ^broken: Image{width: 2, height: 2, pixels: [U8]{0, 0, 0, 0}}
     draw_rectangle(broken, 0, 0, 2, 2, color(255, 255, 255, 255))
     assert_eq(broken.pixels.len(), 4)
     assert_eq(Int{broken.pixels[0]}, 0)
@@ -2855,9 +2855,9 @@ gray: fn(value: Int) -> Int { png_rgba(value, value, value, 255) }
 
 // The pixels that differ between two images of one size, as x, y pairs.
 changed_pixels: fn(before: Image, after: Image) -> [Int] {
-    out := [Int]{}
+    ^out: [Int]{}
     loop at in 0..<(before.width * before.height) {
-        same := true
+        ^same: true
         loop k in 0..<4 {
             if before.pixels[at * 4 + k] != after.pixels[at * 4 + k] -> same = false
         }
@@ -2870,10 +2870,10 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
 }
 
 #Test("text draws the face's glyphs inside its line box") {
-    set := typeset()
+    ^set: typeset()
     white: color(255, 255, 255, 255)
     blank: gen_image_color(60, 50, color(0, 0, 0, 255))
-    hi := gen_image_color(60, 50, color(0, 0, 0, 255))
+    ^hi: gen_image_color(60, 50, color(0, 0, 0, 255))
     box: draw_text(hi, set, "Hi", 4, 3, 16, white)
     marks: changed_pixels(blank, hi)
     assert(marks.len() > 0)
@@ -2891,7 +2891,7 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
         assert(marks[2 * k + 1] >= 3 && marks[2 * k + 1] < 3 + round_px(metrics.ascent))
     }
     // A whole pixel to the right draws the same pixels one column over.
-    moved := gen_image_color(60, 50, color(0, 0, 0, 255))
+    ^moved: gen_image_color(60, 50, color(0, 0, 0, 255))
     _: draw_text(moved, set, "Hi", 5, 3, 16, white)
     shifted: changed_pixels(blank, moved)
     assert_eq(shifted.len(), marks.len())
@@ -2902,9 +2902,9 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
         assert_eq(moved.pixels[at + 4], hi.pixels[at])
     }
     // A second line draws the first's ink again, one line height lower.
-    one := gen_image_color(60, 50, color(0, 0, 0, 255))
+    ^one: gen_image_color(60, 50, color(0, 0, 0, 255))
     _: draw_text(one, set, "H", 4, 3, 16, white)
-    two := gen_image_color(60, 50, color(0, 0, 0, 255))
+    ^two: gen_image_color(60, 50, color(0, 0, 0, 255))
     _: draw_text(two, set, "H\nH", 4, 3, 16, white)
     ink: changed_pixels(blank, one)
     both: changed_pixels(blank, two)
@@ -2915,7 +2915,7 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
         assert_eq(both[ink.len() + 2 * k + 1], ink[2 * k + 1] + step)
     }
     // A clear color, a size below 1 and empty text leave the image.
-    same := gen_image_color(60, 50, color(0, 0, 0, 255))
+    ^same: gen_image_color(60, 50, color(0, 0, 0, 255))
     assert_eq(draw_text(same, set, "Hi", 4, 3, 0, white).width, 0)
     assert_eq(draw_text(same, set, "Hi", 4, 3, 16, color(255, 255, 255, 0)).width, 0)
     assert_eq(draw_text(same, set, "", 4, 3, 16, white).width, 0)
@@ -2931,14 +2931,14 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
     // (10, 20, 30, 40) premultiplies to (10 * 40 + 127) / 255 = 2,
     // (20 * 40 + 127) / 255 = 3 and (30 * 40 + 127) / 255 = 5.
     base: png_rgba(2, 3, 5, 40)
-    image := gen_image_color(3, 2, color(10, 20, 30, 40))
+    ^image: gen_image_color(3, 2, color(10, 20, 30, 40))
     draw_sprite(image, atlas, "a", 1, 0)
     // Texel (0, 1), (0, 0, 128, 128), over (2, 3, 5, 40) keeps
     // (d * 127 + 127) / 255 of each byte: 0 + 1, 0 + 1, 128 + 2 and
     // 128 + 20.
     assert_eq(image_words(image), [Int]{3, 2, base, png_rgba(255, 0, 0, 255), base, base, png_rgba(1, 1, 130, 148), png_rgba(9, 9, 9, 255)})
     // Hanging off the left edge, only the region's right column lands.
-    left := gen_image_color(3, 2, color(10, 20, 30, 40))
+    ^left: gen_image_color(3, 2, color(10, 20, 30, 40))
     draw_sprite(left, atlas, "a", -1, 0)
     assert_eq(image_words(left), [Int]{3, 2, base, base, base, png_rgba(9, 9, 9, 255), base, base})
     // Unknown regions and atlases without a texture draw nothing.
@@ -2971,7 +2971,7 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
 }
 
 #Test("a drawing target fits its frame and keeps what it drew while it fits") {
-    target := no_image()
+    ^target: no_image()
     fit(target, 2, 1)
     assert_eq(image_words(target), [Int]{2, 1, 0, 0})
     draw_pixel(target, 1, 0, color(1, 2, 3, 255))

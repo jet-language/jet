@@ -2,13 +2,13 @@
 // env hooks. TLS32: authorizer closure0, trust raw-text8, fault text16, borrow
 // flag24. The source owns cleanup; the C test transport supplies its real code
 // address.
-vault_test_key := I64{0}
+^vault_test_key: I64{0}
 
-vault_test_destructor := I64{0}
+^vault_test_destructor: I64{0}
 
-vault_test_backup_mutex := I64{0}
+^vault_test_backup_mutex: I64{0}
 
-vault_test_backup_config := I64{0}
+^vault_test_backup_config: I64{0}
 
 #Export(c) jet_rt_vault_test_hooks_init: fn(destructor_code: I64) {
     if (destructor_code == I64{0}) {
@@ -44,7 +44,7 @@ vault_test_state: fn() -> I64 {
 
 vault_test_state_ensure: fn() -> I64 {
     if (vault_test_key == I64{0}) { panic("vault test hooks used before initialization") }
-    state := vault_test_state()
+    ^state: vault_test_state()
     if (state == I64{0}) {
         state = jet_rt_alloc(I64{32}, I64{8})
         thread_zero(state, I64{32})
@@ -149,7 +149,7 @@ vault_test_set_text: fn(offset: I64, text: I64) {
     barrier
 }
 
-vault_test_barrier_retain: fn(barrier: I64) { _ := sync_add(barrier, I64{1}) }
+vault_test_barrier_retain: fn(barrier: I64) { ^_: sync_add(barrier, I64{1}) }
 
 #Export(c) jet_rt_vault_test_barrier_drop: fn(barrier: I64) {
     if (sync_add(barrier, I64{-1}) == I64{1}) { jet_rt_free(barrier, I64{48}, I64{8}) }
@@ -175,7 +175,7 @@ vault_test_barrier_retain: fn(barrier: I64) { _ := sync_add(barrier, I64{1}) }
         sync_cond_notify_all(wrapping(barrier + I64{40}))
     } else {
         loop sync_load(wrapping(barrier + I64{32})) == generation {
-            _ := sync_cond_wait(wrapping(barrier + I64{40}), mutex, I64{-1})
+            ^_: sync_cond_wait(wrapping(barrier + I64{40}), mutex, I64{-1})
         }
     }
     sync_mutex_unlock(mutex)
@@ -198,7 +198,7 @@ vault_test_backup_drop: fn(config: I64) {
 
 #Export(c) jet_rt_vault_set_test_backup_barrier: fn(root: I64, entered: I64, release: I64) {
     if (vault_test_key == I64{0}) { panic("vault test hooks used before initialization") }
-    next := I64{0}
+    ^next: I64{0}
     if (root != I64{0}) {
         if (entered == I64{0} || release == I64{0}) {
             panic("vault test backup barrier pair is incomplete")
@@ -226,7 +226,7 @@ vault_test_backup_drop: fn(config: I64) {
     }
     sync_mutex_lock(vault_test_backup_mutex)
     config: vault_test_backup_config
-    if (config != I64{0}) { _ := sync_add(config, I64{1}) }
+    if (config != I64{0}) { ^_: sync_add(config, I64{1}) }
     sync_mutex_unlock(vault_test_backup_mutex)
     if (config == I64{0}) {
         return

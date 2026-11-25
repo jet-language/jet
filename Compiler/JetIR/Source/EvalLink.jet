@@ -95,11 +95,11 @@ IREvalCalls: struct {
 // path (JetSema sema_unsafe_unit_map): the runtime is built as one unit.
 ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport], units: [IREvalUnit]) -> [String] Never! {
     count: m.functions.len()
-    name_callees := loop _ in m.names -> -1
+    ^name_callees: loop _ in m.names -> -1
     loop row in exports {
         if ir_interned_name(m, row.symbol) == .Val(at) -> name_callees[at] = row.function
     }
-    entries := loop f in m.functions -> f.host_symbol != ""
+    ^entries: loop f in m.functions -> f.host_symbol != ""
     loop row in exports -> entries[row.function] = true
     loop f in m.functions {
         loop (at, op) in f.op {
@@ -111,7 +111,7 @@ ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport], units: [IREval
     calls: ir_eval_calls(m, name_callees, roots)
     stubs: ir_eval_stubs(m, name_callees, calls, roots, entries, files)
     sites: ir_eval_syscalls(m, stubs, name_callees, calls)
-    rows := [String]{}
+    ^rows: [String]{}
     loop (id, f) in m.functions {
         if stubs[id] != "" -> rows.push("stub\t{f.name}\t{stubs[id]}")
     }
@@ -121,7 +121,7 @@ ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport], units: [IREval
             rows.push("export\t{row.symbol}\tstub\t{stubs[id]}")
             next
         }
-        refused := ""
+        ^refused: ""
         loop (index, site) in sites[id] {
             why: ir_eval_syscall_refusal(site)
             if why == "" -> next
@@ -153,7 +153,7 @@ IREvalUnit: struct {
 // name of the source whose unit lines hold the function's first line; else
 // its own file's.
 ir_eval_function_files: fn(m: IRModule, units: [IREvalUnit]) -> [String] Never! {
-    files := loop f in m.functions -> ir_eval_file_name(f.source_file)
+    ^files: loop f in m.functions -> ir_eval_file_name(f.source_file)
     loop unit in units {
         starts: loop source in unit.map.sources -> source.line
         loop (id, f) in m.functions {
@@ -168,7 +168,7 @@ ir_eval_function_files: fn(m: IRModule, units: [IREvalUnit]) -> [String] Never! 
 // The function call `at` of `f` calls, else -1. `name_callees` is the
 // function a CallRuntime of each name row reaches (-1: a C symbol).
 ir_eval_callee: fn(m: IRModule, f: IRFunction, at: Int, name_callees: [Int]) -> Int Never! {
-    callee := -1
+    ^callee: -1
     if f.op[at] == .Call -> callee = f.a[at]
     if f.op[at] == .CallRuntime -> callee = name_callees[f.a[at]]
     if callee >= m.functions.len() -> -1 else -> callee
@@ -177,14 +177,14 @@ ir_eval_callee: fn(m: IRModule, f: IRFunction, at: Int, name_callees: [Int]) -> 
 // The calls of each function of `m`, live and dead (IREvalCalls); `roots`
 // marks the functions that start a stop report.
 ir_eval_calls: fn(m: IRModule, name_callees: [Int], roots: [Bool]) -> IREvalCalls Never! {
-    calls := IREvalCalls{live: [[Int]]{}, dead: [[Int]]{}}
+    ^calls: IREvalCalls{live: [[Int]]{}, dead: [[Int]]{}}
     loop f in m.functions {
-        live := [Int]{}
-        dead := [Int]{}
-        depth := 0
+        ^live: [Int]{}
+        ^dead: [Int]{}
+        ^depth: 0
         // The block depth from whose stop-report call on the code is dead,
         // -1 while it is live.
-        dead_depth := -1
+        ^dead_depth: -1
         loop (at, op) in f.op {
             if op == .Else || op == .End {
                 if dead_depth == depth -> dead_depth = -1
@@ -219,11 +219,11 @@ ir_eval_calls: fn(m: IRModule, name_callees: [Int], roots: [Bool]) -> IREvalCall
 // is no stub and is checked itself.
 ir_eval_stubs: fn(m: IRModule, name_callees: [Int], calls: IREvalCalls, roots: [Bool], entries: [Bool], files: [String]) -> [String] Never! {
     count: m.functions.len()
-    stubs := [String]{}
-    reached := [Bool]{}
-    work := [Int]{}
+    ^stubs: [String]{}
+    ^reached: [Bool]{}
+    ^work: [Int]{}
     loop (id, f) in m.functions {
-        row := ""
+        ^row: ""
         if IR_EVAL_STUB_FILES.contains(files[id]) -> row = ir_eval_stub_file_row(files[id])
         if IR_EVAL_STUB_NAMES.index_of(f.name) == .Val(at) -> row = IR_EVAL_STUB_NAME_ROWS[at]
         if ir_stop_key(f.key) -> row = "stop-poll"
@@ -238,16 +238,16 @@ ir_eval_stubs: fn(m: IRModule, name_callees: [Int], calls: IREvalCalls, roots: [
             work.push(callee)
         }
     }
-    callers := loop _ in 0..<count -> [Int]{}
+    ^callers: loop _ in 0..<count -> [Int]{}
     loop (id, live) in calls.live {
         loop at in live -> callers[ir_eval_callee(m, m.functions[id], at, name_callees)].push(id)
     }
-    head := 0
+    ^head: 0
     loop head < work.len() {
         id: work[head]
         head += 1
         f: m.functions[id]
-        callees := loop at in calls.live[id] -> ir_eval_callee(m, f, at, name_callees)
+        ^callees: loop at in calls.live[id] -> ir_eval_callee(m, f, at, name_callees)
         loop callee in calls.dead[id] -> callees.push(callee)
         loop callee in callees {
             if reached[callee] -> next
@@ -258,10 +258,10 @@ ir_eval_stubs: fn(m: IRModule, name_callees: [Int], calls: IREvalCalls, roots: [
     // A reached function leaves the stop report when anything outside it can
     // call it, and then so may what it alone called.
     loop {
-        dropped := false
+        ^dropped: false
         loop id in 0..<count {
             if !reached[id] || roots[id] -> next
-            outside := entries[id]
+            ^outside: entries[id]
             loop caller in callers[id] {
                 if !reached[caller] -> outside = true
             }
@@ -279,9 +279,7 @@ ir_eval_stubs: fn(m: IRModule, name_callees: [Int], calls: IREvalCalls, roots: [
 }
 
 // The last part of source path `path`.
-ir_eval_file_name: fn(path: String) -> String Never! {
-    path.rpartition("/").tail
-}
+ir_eval_file_name: fn(path: String) -> String Never! { path.rpartition("/").tail }
 
 // Per function of `m`, the syscall sites it reaches past the stubs `stubs`
 // (ir_eval_stubs), one per number and second argument: its own template's,
@@ -289,11 +287,11 @@ ir_eval_file_name: fn(path: String) -> String Never! {
 // parameters read as the arguments the call passes (ir_eval_word_values),
 // grown until no function gains one.
 ir_eval_syscalls: fn(m: IRModule, stubs: [String], name_callees: [Int], calls: IREvalCalls) -> [[IREvalSyscall]] Never! {
-    sites := [[IREvalSyscall]]{}
+    ^sites: [[IREvalSyscall]]{}
     loop f in m.functions {
-        own := [IREvalSyscall]{}
+        ^own: [IREvalSyscall]{}
         if f.asm == .Val(leaf) {
-            pair := 0
+            ^pair: 0
             loop pair + 1 < leaf.syscalls.len() {
                 own.push(IREvalSyscall{number: leaf.syscalls[pair], second: leaf.syscalls[pair + 1], callee: -1, site: -1})
                 pair += 2
@@ -303,7 +301,7 @@ ir_eval_syscalls: fn(m: IRModule, stubs: [String], name_callees: [Int], calls: I
     }
     writes: loop f in m.functions -> ir_slot_writes(f)
     loop {
-        grown := false
+        ^grown: false
         loop (id, f) in m.functions {
             if stubs[id] != "" -> next
             loop at in calls.live[id] {
@@ -345,9 +343,9 @@ ir_eval_argument: fn(f: IRFunction, writes: [[Int]], at: Int, word: Int) -> [Int
 // numeric conversions to each write of it: a constant (>= 0), the function's
 // parameter i (-1 - i), else X64_ASM_UNKNOWN. `writes` is f's ir_slot_writes.
 ir_eval_word_values: fn(f: IRFunction, writes: [[Int]], slot: Int) -> [Int] Never! {
-    found := [Int]{}
-    seen := [Int]{}
-    work := [Int]{slot}
+    ^found: [Int]{}
+    ^seen: [Int]{}
+    ^work: [Int]{slot}
     loop {
         at: work.pop() ?? break
         if at < 0 || at >= writes.len() {
@@ -397,9 +395,9 @@ ir_eval_syscall_refusal: fn(site: IREvalSyscall) -> String Never! {
 // The functions from `id` to the template that makes its syscall site
 // `index`, ` > ` between their names.
 ir_eval_syscall_path: fn(m: IRModule, sites: [[IREvalSyscall]], id: Int, index: Int) -> String Never! {
-    path := "{m.functions[id].name}"
-    at := id
-    site := index
+    ^path: "{m.functions[id].name}"
+    ^at: id
+    ^site: index
     loop sites[at][site].callee >= 0 {
         next_site: sites[at][site].site
         at = sites[at][site].callee

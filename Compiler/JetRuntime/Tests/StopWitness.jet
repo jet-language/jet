@@ -40,11 +40,11 @@ fail: fn(message: String) -[IO]> Int Never! {
 // An absolute path with `.`, `..` and empty segments folded, as path.resolve gives.
 resolve: fn(cwd: String, path: String) -> String Never! {
     full: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in full.split("/").to_list() {
         if part == ".." {
             if parts.len() > 0 {
-                kept := [String]{}
+                ^kept: [String]{}
                 loop index in 0..<parts.len() - 1 { kept.push(parts[index].copy()) }
                 parts = kept
             }
@@ -62,7 +62,7 @@ same_bytes: fn(left: [U8], right: [U8]) -> Bool Never! {
 }
 
 json_text: fn(text: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop byte in text.bytes() {
         code: Int{byte}
         if code == 34 -> out = "{out}\\\"" else if code == 92 -> out = "{out}\\\\" else {
@@ -82,7 +82,7 @@ signal_name: fn(number: Int) -> String Never! {
 // spawnSync does: no status after a signal, a timeout or a spawn failure, and
 // spawn failures and timeouts as an error message.
 run_binary: fn(binary: String, mode: String) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
-    none := [U8]{}
+    ^none: [U8]{}
     if !files.exists(binary) {
         return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
     }
@@ -141,13 +141,13 @@ data_sequence: fn(cwd: String, out: String, binary: String) -[Exec, FS, IO, Time
     capacity: "DataSequenceCapacity.stderr"
     modes: [String]{"list-oob", "entries-oob", "list-negative", "entries-negative", "list-capacity-negative", "list-capacity-overflow", "entries-capacity-negative", "entries-capacity-overflow"}
     goldens: [String]{zero, zero, negative, negative, capacity, capacity, capacity, capacity}
-    rows := [String]{}
+    ^rows: [String]{}
     loop index in 0..<modes.len() {
         mode: modes[index]
         golden: goldens[index]
         outcome: run_binary(binary, mode)
         if !record(out, mode, outcome) -> return 1
-        matched := fatal(outcome) && outcome.stdout.len() == 0
+        ^matched: fatal(outcome) && outcome.stdout.len() == 0
         if matched {
             golden_path: "{cwd}/{GOLDENS}/{golden}"
             expected: if files.read_bytes(golden_path) == {
@@ -171,7 +171,7 @@ data_sequence: fn(cwd: String, out: String, binary: String) -[Exec, FS, IO, Time
 scalar_reflect: fn(out: String, binary: String) -[Exec, FS, IO, Time.Wait]> Int Never! {
     modes: [String]{"bounds-equal", "bounds-negative"}
     indexes: [String]{"0", "18446744073709551615"}
-    rows := [String]{}
+    ^rows: [String]{}
     loop index in 0..<modes.len() {
         mode: modes[index]
         outcome: run_binary(binary, mode)

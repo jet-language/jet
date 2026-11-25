@@ -8,32 +8,32 @@ use {
 // The lexer decodes JSON-quoted tokens and retains raw spans for JSON literals.
 kit_steps_words: fn(text: String) -> [String]? {
     tokens: kit_steps_tokens(text) ?? return None
-    result := [String]{}
+    ^result: [String]{}
     loop token in tokens -> result.push(token.text)
     Val(result)
 }
 
 kit_steps_parse: fn(source: String) -> KitPlan {
-    plan := KitPlan{requires: [], fixture: "", environment: [], normalize: ["paths"], compile_only: false, artifact: "", refused: "", steps: [], error: ""}
-    line_number := 0
-    pending := [String]{}
-    joined := [String]{}
-    captures := [String]{}
-    capture_scopes := [KitCaptureScope]{}
-    inventories := [String]{}
-    conditions := [String]{}
-    before_steps := 0
-    before_assertions := 0
-    blocks := [String]{}
-    modifier_adjacent := false
-    process_seen := false
+    ^plan: KitPlan{requires: [], fixture: "", environment: [], normalize: ["paths"], compile_only: false, artifact: "", refused: "", steps: [], error: ""}
+    ^line_number: 0
+    ^pending: [String]{}
+    ^joined: [String]{}
+    ^captures: [String]{}
+    ^capture_scopes: [KitCaptureScope]{}
+    ^inventories: [String]{}
+    ^conditions: [String]{}
+    ^before_steps: 0
+    ^before_assertions: 0
+    ^blocks: [String]{}
+    ^modifier_adjacent: false
+    ^process_seen: false
     loop raw in source.split("\n") {
         line_number += 1
         plan = kit_steps_attach_conditions(plan, before_steps, before_assertions, conditions)
         before_steps = plan.steps.len()
         before_assertions = if before_steps == 0 -> 0 else -> plan.steps[before_steps - 1].assertions.len()
         conditions = []
-        line := raw.trim().copy()
+        ^line: raw.trim().copy()
         if line == "" || line.starts_with("#") -> next
         if line == "end for" || line == "end repeat" || line == "end parallel" {
             kind: kit_steps_byte_slice(line, 4, line.count_bytes())
@@ -109,7 +109,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
         if line == "" -> next
         if line.starts_with("recv ") {
             words: kit_steps_words(kit_steps_body(line)) ?? []
-            session := false
+            ^session: false
             if words.len() >= 2 {
                 loop opened in plan.steps {
                     if opened.label == words[1] && opened.action == "session" -> session = true
@@ -220,7 +220,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
         if key == "requires" {
             if value.starts_with("first-existing ") {
                 words: kit_steps_words(value) ?? []
-                valid := words.len() >= 4 && words.len() % 2 == 0 && words[2] == "=" && kit_steps_env_name(words[1]) && !kit_expect_named(captures, words[1])
+                ^valid: words.len() >= 4 && words.len() % 2 == 0 && words[2] == "=" && kit_steps_env_name(words[1]) && !kit_expect_named(captures, words[1])
                 loop index in 4..<words.len() {
                     if index % 2 == 0 && words[index] != "|" -> valid = false
                 }
@@ -331,7 +331,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             tokens: kit_steps_tokens(value) ?? []
-            cursor := kit_steps_await_boundary(original, tokens)
+            ^cursor: kit_steps_await_boundary(original, tokens)
             loop cursor < tokens.len() {
                 if tokens[cursor].text == "optional" -> break
                 if tokens[cursor].text == "capture" {
@@ -360,7 +360,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid {key} setup action"
                 return plan
             }
-            argv := [String]{key.copy()}
+            ^argv: [String]{key.copy()}
             loop word in words -> argv.push(word)
             plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key})
             next
@@ -370,9 +370,9 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid file action paths"
                 return plan
             }
-            paths := [String]{}
+            ^paths: [String]{}
             loop token in tokens -> paths.push(token.text)
-            literal := false
+            ^literal: false
             if key == "write" {
                 if paths.len() == 3 && paths[1] == "=" {
                     first: value.bytes()[tokens[2].start]
@@ -394,7 +394,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid {key} path count"
                 return plan
             }
-            argv := [String]{key.copy()}
+            ^argv: [String]{key.copy()}
             loop (position, path) in paths {
                 external_source: key == "copy" && position == 0 && (path.contains("{{root}}") || path.contains("{{jet}}") || path.contains("{{jetpack}}"))
                 template: key == "write" && position == 1
@@ -417,7 +417,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             next
         }
         if key == "capture" {
-            words := kit_steps_words(value) ?? []
+            ^words: kit_steps_words(value) ?? []
             accumulating: words.len() > 1 && words[1] == "+="
             if accumulating {
                 if !kit_expect_named(blocks, "for") && !kit_expect_named(blocks, "repeat") {
@@ -485,7 +485,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: wait/close needs an unjoined child label"
                 return plan
             }
-            duration := 0
+            ^duration: 0
             if words.len() > 1 {
                 if words.len() != 3 || words[1] != "timeout" || kit_steps_duration_ns(words[2]) == None {
                     plan.error = "line {line_number}: wait needs timeout <duration>"
@@ -511,7 +511,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             }
             literal: value.starts_with("\"") || value.starts_with("'")
             if sending {
-                session := false
+                ^session: false
                 loop opened in plan.steps {
                     if opened.label == label && opened.action == "session" -> session = true
                 }
@@ -779,7 +779,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             next
         }
         if key.starts_with("process ") {
-            assertion := kit_steps_process_form(original) ?? {
+            ^assertion: kit_steps_process_form(original) ?? {
                 plan.error = "line {line_number}: invalid process predicate"
                 return plan
             }
@@ -898,9 +898,9 @@ kit_steps_known_label: fn(plan: KitPlan, label: String, before: Int) -> Bool {
 }
 
 kit_steps_parse_case: fn(source: String) -> KitPlan {
-    plan := kit_steps_parse(source)
+    ^plan: kit_steps_parse(source)
     if plan.error != "" -> return plan
-    built := false
+    ^built: false
     loop step in plan.steps {
         if step.argv.len() == 0 -> next
         if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" -> built = true
@@ -981,7 +981,7 @@ kit_steps_bless_plan: fn(plan: KitPlan, id: String, bless: KitBless) -> KitVerdi
 }
 
 kit_steps_environment: fn(plan: KitPlan, env: KitEnv, work: String, scratch: String, built: String) -> [KitEnvVar] {
-    overlay := [KitEnvVar]{}
+    ^overlay: [KitEnvVar]{}
     loop assignment in plan.environment {
         equals: kit_steps_byte_index(assignment, "=") ?? -1
         if equals <= 0 -> panic("env requires NAME=VALUE")
@@ -993,7 +993,7 @@ kit_steps_environment: fn(plan: KitPlan, env: KitEnv, work: String, scratch: Str
 }
 
 kit_steps_step_environment: fn(step: KitStep, env: KitEnv, work: String, scratch: String, built: String, overlay: [KitEnvVar]) -> [KitEnvVar] {
-    result := overlay
+    ^result: overlay
     loop variable in step.environment {
         value: if variable.value == {
             .Val(text) -> Val(kit_steps_argv_env(kit_steps_expand(text, env, work, scratch, built), env, scratch, result))
@@ -1020,7 +1020,7 @@ kit_steps_prepare: fn(step: KitStep, env: KitEnv, work: String, scratch: String,
     files.create_dir_all(files.join(scratch, "tmp")) ?? return Err("create child temp directory: {err}")
     policy: kit_steps_policy(step, env) ?? return Err("time limit outside Duration range")
     environment: kit_steps_step_environment(step, policy, work, scratch, built, overlay)
-    argv := [String]{}
+    ^argv: [String]{}
     loop argument in step.argv {
         expanded: kit_steps_expand(argument, env, work, scratch, built)
         if expanded.starts_with("{{env-words:") {
@@ -1057,7 +1057,7 @@ kit_steps_answer_deadline: fn(env: KitEnv, deadline: Int) -> Int {
 }
 
 kit_steps_policy: fn(step: KitStep, env: KitEnv) -> KitEnv? {
-    policy := env
+    ^policy: env
     policy.env_clear = step.env_clear
     if step.duration > 0 -> policy.timeout = time.duration_ns(step.duration)
     if step.limit_time > 0 -> policy.timeout = Duration.seconds(step.limit_time) ?? return None
@@ -1123,7 +1123,7 @@ kit_steps_timeout_name: fn(step: KitStep) -> String {
 }
 
 kit_steps_normalize: fn(text: String, env: KitEnv, work: String, scratch: String, normalize: [String], built: String, source_name: String) -> String {
-    actual := text
+    ^actual: text
     if kit_expect_named(normalize, "argv0") && built != "" {
         actual = kit_expect_argv0(actual, files.basename(built), source_name)
     }
@@ -1138,8 +1138,8 @@ kit_steps_normalize: fn(text: String, env: KitEnv, work: String, scratch: String
 }
 
 kit_steps_elapsed: fn(assertion: KitAssertion, history: [KitCapturedStep]) -> KitVerdict {
-    left := Int?{None}
-    right := Int?{None}
+    ^left: Int?{None}
+    ^right: Int?{None}
     loop capture in history {
         if capture.label == assertion.path -> left = Val(capture.elapsed_ns)
         if capture.label == assertion.value -> right = Val(capture.elapsed_ns)
@@ -1187,10 +1187,10 @@ kit_steps_streams_verdict: fn(verdict: ^^KitVerdict, context: KitStepCtx, step: 
         return verdict
     }
     named: if step.label == "" -> "" else -> "step {step.label}: "
-    out := "--- streams/{context.id}: {named}`{step.argv.join(" ")}` exit {result.code}\n"
+    ^out: "--- streams/{context.id}: {named}`{step.argv.join(" ")}` exit {result.code}\n"
     if result.stderr == "" && result.stdout == "" -> out = "{out}(stdout and stderr empty)\n"
-    errors := [String]{}
-    counters := 0
+    ^errors: [String]{}
+    ^counters: 0
     loop line in result.stderr.split("\n") {
         if line == "" -> next
         if line.starts_with(KIT_STEPS_PHASE_COUNTER_PREFIX) {
@@ -1204,7 +1204,7 @@ kit_steps_streams_verdict: fn(verdict: ^^KitVerdict, context: KitStepCtx, step: 
         out = "{out}stderr| ({first} earlier lines and {counters} phase counter lines not shown)\n"
     }
     loop at in first..<errors.len() -> out = "{out}stderr| {errors[at]}\n"
-    count := errors.len() - first
+    ^count: errors.len() - first
     loop line in result.stdout.split("\n") {
         if count >= KIT_STEPS_STREAM_LINES -> break
         if line != "" {
@@ -1278,9 +1278,9 @@ kit_steps_exit_status: fn(expected: String, code: Int) -> KitVerdict {
 // file stem.
 kit_steps_artifact: fn(entry: String, source: String, artifact: String) -> String {
     directory: files.dirname(files.join(source, entry))
-    root := directory
-    packaged := false
-    ancestor := directory
+    ^root: directory
+    ^packaged: false
+    ^ancestor: directory
     loop {
         if files.exists(files.join(ancestor, "package.jet")) {
             root = ancestor
@@ -1293,7 +1293,7 @@ kit_steps_artifact: fn(entry: String, source: String, artifact: String) -> Strin
         ancestor = parent
     }
     if artifact != "" -> return files.join(files.join(root, ".jet/build"), artifact)
-    sources := [String]{}
+    ^sources: [String]{}
     if packaged {
         kit_steps_package_sources(root, sources)
         sources.push(files.join(root, "package.jet"))
@@ -1313,7 +1313,7 @@ kit_steps_artifact: fn(entry: String, source: String, artifact: String) -> Strin
 // build entry: dot names, `target`, `build`, `node_modules`, `bin` and nested
 // packages stay out, as the package source walk skips them.
 kit_steps_package_sources: fn(directory: String, sources: ^[String]) {
-    entries := files.list_dir(directory) ?? return
+    ^entries: files.list_dir(directory) ?? return
     entries.sort_by(fn(entry) { entry.name })
     loop entry in entries {
         if entry.name.starts_with(".") || kit_expect_named(["target", "build", "node_modules", "bin"], entry.name) {
@@ -1334,8 +1334,8 @@ kit_steps_package_sources: fn(directory: String, sources: ^[String]) {
 // None when `text` declares no entry or the entry registers no executable.
 kit_steps_build_entry_executable: fn(text: String) -> String? {
     lines: text.split("\n").to_list()
-    index := 0
-    builder := ""
+    ^index: 0
+    ^builder: ""
     loop index < lines.len() {
         line: lines[index]
         index += 1
@@ -1347,9 +1347,9 @@ kit_steps_build_entry_executable: fn(text: String) -> String? {
         }
     }
     if builder == "" -> return None
-    handles := [String]{}
-    names := [String]{}
-    selected := ""
+    ^handles: [String]{}
+    ^names: [String]{}
+    ^selected: ""
     loop index < lines.len() {
         line: lines[index]
         index += 1
@@ -1361,8 +1361,8 @@ kit_steps_build_entry_executable: fn(text: String) -> String? {
         call: line.split_once("{builder}.add_executable(") ?? next
         handle: if call.before.split_once(":") == .Val(bound) -> bound.before.trim().copy() else -> ""
         // The target name is the call's first string, on its line or a later one.
-        rest := call.after.copy()
-        cursor := index
+        ^rest: call.after.copy()
+        ^cursor: index
         loop !rest.contains("\"") && cursor < lines.len() {
             rest = lines[cursor].copy()
             cursor += 1
@@ -1387,7 +1387,7 @@ kit_steps_context: fn(plan: KitPlan, id: String, env: KitEnv, work: String, scra
 
 // The entry file a `jet build` step names, or "" for a bare package build.
 kit_steps_build_entry: fn(step: KitStep) -> String {
-    i := 2
+    ^i: 2
     loop i < step.argv.len() {
         argument: step.argv[i]
         if !argument.starts_with("-") -> return argument
@@ -1412,8 +1412,8 @@ kit_steps_build_output_dir: fn(step: KitStep) -> String {
 // a quoted string stays one word and a `//` comment is dropped.
 kit_steps_manifest_tokens: fn(text: String) -> [String] {
     bytes: text.bytes()
-    tokens := [String]{}
-    i := 0
+    ^tokens: [String]{}
+    ^i: 0
     loop i < bytes.len() {
         c: Int{bytes[i]}
         if c == 47 && i + 1 < bytes.len() && bytes[i + 1] == (U8{47}) {
@@ -1452,8 +1452,8 @@ kit_steps_manifest_word_byte: fn(c: Int) -> Bool {
 
 // The index of the `}` or `]` closing the bracket at `open`.
 kit_steps_manifest_close: fn(tokens: [String], open: Int) -> Int {
-    depth := 0
-    i := open
+    ^depth: 0
+    ^i: open
     loop i < tokens.len() {
         if tokens[i] == "{{" || tokens[i] == "[" -> depth += 1 else if tokens[i] == "}}" || tokens[i] == "]" {
             depth -= 1
@@ -1471,10 +1471,10 @@ kit_steps_manifest_close: fn(tokens: [String], open: Int) -> Int {
 kit_steps_manifest_entry_stem: fn(root: String) -> String? {
     text: kit_exec_optional(files.join(root, "package.jet")) ?? return None
     tokens: kit_steps_manifest_tokens(text)
-    names := [String]{}
-    stems := [String]{}
-    selected := ""
-    i := 0
+    ^names: [String]{}
+    ^stems: [String]{}
+    ^selected: ""
+    ^i: 0
     loop i < tokens.len() {
         if tokens[i] == "{{" || tokens[i] == "[" {
             i = kit_steps_manifest_close(tokens, i) + 1
@@ -1492,7 +1492,7 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
                 }
             }
         } else if tokens[i] == "outputs" {
-            j := i + 3
+            ^j: i + 3
             loop j < close {
                 // `name: .Kind{ … }` or `name: Kind{ … }`.
                 kind_at: if j + 2 < close && tokens[j + 2] == "." -> j + 3 else -> j + 2
@@ -1532,7 +1532,7 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
 // The stem of the package source under `root` that declares the top-level
 // `callable: fn`, None when none does.
 kit_steps_callable_stem: fn(root: String, callable: String) -> String? {
-    sources := [String]{}
+    ^sources: [String]{}
     kit_steps_package_sources(root, sources)
     loop path in sources {
         text: files.read(path) ?? next
@@ -1559,7 +1559,7 @@ kit_steps_build_member: fn(step: KitStep) -> String {
 // The directory under `root` whose `package.jet` declares `name: "NAME"`,
 // walked as kit_steps_package_sources walks; None when no package does.
 kit_steps_member_dir: fn(root: String, name: String) -> String? {
-    entries := files.list_dir(root) ?? return None
+    ^entries: files.list_dir(root) ?? return None
     entries.sort_by(fn(entry) { entry.name })
     loop entry in entries {
         if !entry.is_dir || entry.name.starts_with(".") || kit_expect_named(["target", "build", "node_modules", "bin"], entry.name) {
@@ -1612,7 +1612,7 @@ kit_steps_library_build: fn(step: KitStep) -> Bool {
 }
 
 kit_steps_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
-    state := previous
+    ^state: previous
     if step.argv[0] == "build" {
         return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step requires golden entry; cases use jet build")}
     }
@@ -1623,12 +1623,12 @@ kit_steps_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previous: K
     overlay: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
     state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay)
     if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && !kit_steps_help_request(step) && !kit_steps_library_build(step) && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
-        cwd := if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
+        ^cwd: if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
         // `jet build -p NAME` builds the workspace member named NAME, whose
         // artifacts land under that member's root.
         member: kit_steps_build_member(step)
         if member != "" -> cwd = kit_steps_member_dir(cwd, member) ?? cwd
-        entry := kit_steps_build_entry(step)
+        ^entry: kit_steps_build_entry(step)
         if entry == "" {
             // A bare `jet build` names its artifact for the package's run
             // output entry file (Docs/Spec/Reference/cli.md:581,

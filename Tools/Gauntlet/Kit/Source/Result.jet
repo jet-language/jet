@@ -49,7 +49,7 @@ result_shape_issues: fn(result: Dyn, matrix: Dyn) -> [String] {
     metrics: comparison_metrics(mode)
     non_applicable: value_at(entry, "non_applicable") ?? Dyn.Null
 
-    issues := selection_issues(value_at(result, "rows") ?? Dyn.Null, "{name}.rows")
+    ^issues: selection_issues(value_at(result, "rows") ?? Dyn.Null, "{name}.rows")
     issues.extend(selection_issues(value_at(result, "comparisons") ?? Dyn.Null, "{name}.comparisons"))
     issues.extend(selection_issues(value_at(result, "jet_tiers") ?? Dyn.Null, "{name}.jet_tiers"))
     if !is_entry_mode(value_at(entry, "mode")) {
@@ -77,7 +77,7 @@ result_shape_issues: fn(result: Dyn, matrix: Dyn) -> [String] {
         else -> {}
     }
     if truthy(Val(matrix)) && value_at(entry, "cells") == .Val(.Array(_)) && value_at(matrix, "cells") == .Val(.Array(matrix_cells)) {
-        required := [String]{}
+        ^required: [String]{}
         loop cell_id in cells {
             found: matrix_cells.find(fn(candidate) { is_value(value_at(candidate, "id"), cell_id) }) ?? next
             loop peer in matrix_peer_languages(matrix, Val(found)) {
@@ -140,7 +140,7 @@ result_shape_issues: fn(result: Dyn, matrix: Dyn) -> [String] {
 row_issues: fn(entry: Dyn, name: String, language: String, row: Dyn, non_applicable: Dyn, metrics: [String]) -> [String] {
     prefix: "{name}/{language}"
     if !(row == .Object(_)) -> return ["{prefix}: missing result row"]
-    issues := [String]{}
+    ^issues: [String]{}
     if text_at(row, "language") != Val(language) {
         issues.push("{prefix}: row identity is {js_json(value_at(row, "language"))}")
     }
@@ -190,7 +190,7 @@ tier_issues: fn(name: String, rule: TierRule, found: Dyn, metrics: [String]) -> 
     prefix: "{name}/jet/{rule.tier}"
     if !(found == .Object(_)) -> return ["{prefix}: missing Jet tier result"]
     status: valid_status(value_at(found, "status")) ?? return ["{prefix}: invalid tier status {js_json(value_at(found, "status"))}"]
-    issues := [String]{}
+    ^issues: [String]{}
     if rule.required && status != "ok" -> issues.push("{prefix}: required tier status {status}")
     if status == "not_applicable" {
         issues.push("{prefix}: declared Jet tier cannot be not_applicable")
@@ -225,7 +225,7 @@ tier_issues: fn(name: String, rule: TierRule, found: Dyn, metrics: [String]) -> 
 comparison_issues: fn(entry: Dyn, name: String, language: String, comparison: Dyn, row: Dyn?, non_applicable: Dyn, metrics: [String]) -> [String] {
     prefix: "{name}/{language}"
     if !(comparison == .Object(_)) -> return ["{prefix}: missing peer comparison row"]
-    issues := [String]{}
+    ^issues: [String]{}
     status: value_at(comparison, "status")
     if valid_status(status) == None {
         issues.push("{prefix}: invalid comparison status {js_json(status)}")
@@ -243,7 +243,7 @@ comparison_issues: fn(entry: Dyn, name: String, language: String, comparison: Dy
         issues.push("{prefix}: comparison applicability does not match peer row")
     }
     tiers: value_at(comparison, "tiers") ?? Dyn.Null
-    scopes := [{scope: String, sample: Dyn}]{{scope: "comparison", sample: value_at(comparison, "peer_sample") ?? Dyn.Null}}
+    ^scopes: [{scope: String, sample: Dyn}]{{scope: "comparison", sample: value_at(comparison, "peer_sample") ?? Dyn.Null}}
     loop tier in members(tiers) {
         scopes.push({scope: "{tier.key} tier", sample: value_at(tier.value, "peer_sample") ?? Dyn.Null})
     }
@@ -329,7 +329,7 @@ peer_tier_policy: fn(entry: Dyn, language: String) -> [TierRule] {
 
 // Tier rules as a result declares them: each tier to whether it is required.
 tier_policy_object: fn(rules: [TierRule]) -> Dyn {
-    shown := Dyn.object()
+    ^shown: Dyn.object()
     loop rule in rules -> shown[rule.tier] = Dyn{[String:Dyn]{"required": Dyn.Bool(rule.required)}}
     shown
 }
@@ -337,7 +337,7 @@ tier_policy_object: fn(rules: [TierRule]) -> Dyn {
 // The issues of every member of `value` (each element of an array) whose key
 // would hold a selected or aggregate measurement, at any depth.
 selection_issues: fn(value: Dyn, prefix: String) -> [String] {
-    issues := [String]{}
+    ^issues: [String]{}
     loop child in members(value) {
         path: "{prefix}.{child.key}"
         if FORBIDDEN_SELECTION_KEYS.contains(child.key.replace("-", "_").lower()) {
@@ -354,7 +354,7 @@ members: fn(value: Dyn) -> [{key: String, value: Dyn}] {
     if value == {
         .Object(rows) -> rows
         .Array(list) -> {
-            out := [{key: String, value: Dyn}]{}
+            ^out: [{key: String, value: Dyn}]{}
             loop (index, item) in list -> out.push({key: "{index}", value: item})
             out
         }
@@ -425,7 +425,7 @@ non_empty: fn(value: Dyn?) -> Bool {
 // Whether no two of `values` are the same value, as a JS Set sees them: a
 // scalar by its JSON, an array or object only as itself.
 all_distinct: fn(values: [Dyn]) -> Bool {
-    keys := [String]{}
+    ^keys: [String]{}
     loop index in 0..<values.len() {
         key: if values[index] == {
             .Array(_) | .Object(_) -> "#{index}"
@@ -445,7 +445,7 @@ js_json: fn(value: Dyn?) -> String {
 #Test("a complete result has no issues, and each departure from its shape is an issue once") {
     result: json.parse(`{"entry": {"name": "demo", "mode": "web-app", "languages": ["jet"], "cells": ["webfront.app"]}, "status": "ok", "rows": {"jet": {"language": "jet", "status": "ok", "verification": {"status": "passed", "kind": "byte_exact_stdout"}, "metrics": {"source_sha256": "abc", "runtime_first_stdout_seconds": 0.5, "runtime_wall_seconds": 0.5, "runtime_peak_rss_kb": 9, "cold_build_seconds": 1, "warm_build_seconds": 1, "binary_bytes": 9, "artifact_bytes": 9, "wasm_bytes": 9, "loc": 9, "source_bytes": 9, "tokens": 9, "source_tokens": 9}, "provenance": {"base_language": "jet", "source_sha256": "abc"}}}, "jet_tiers": {"aot": {"status": "ok", "verification": {"status": "passed", "kind": "byte_exact_stdout"}, "metrics": {"runtime_first_stdout_seconds": 0.5, "runtime_wall_seconds": 0.5, "runtime_peak_rss_kb": 9, "cold_build_seconds": 1, "warm_build_seconds": 1, "binary_bytes": 9, "artifact_bytes": 9, "wasm_bytes": 9, "loc": 9, "source_bytes": 9, "tokens": 9, "source_tokens": 9}}}, "comparisons": {}}`) ?? panic("result")
     assert_eq(result_shape_issues(result, Dyn.Null), [String]{})
-    tampered := result.copy()
+    ^tampered: result.copy()
     tampered["status"] = "failed"
     tampered["mean"] = 1
     tampered["jet_tiers"] = json.parse(`{"aot": {"status": "ok", "verification": {"status": "passed", "kind": "byte_exact_stdout"}, "best": 1}}`) ?? panic("tiers")

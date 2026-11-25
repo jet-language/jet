@@ -23,7 +23,7 @@ Query: struct {
         Hole: Param,
 
         check: fn(text: String) -[]> QueryError! {
-            depth := 0
+            ^depth: 0
             loop byte in text.bytes() {
                 if byte == (U8{40}) -> depth += 1
                 if byte == (U8{41}) {
@@ -43,7 +43,7 @@ Query: struct {
         }
 
         build: fn(parts: [String], holes: [Param]) -[]> Query {
-            text := parts[0].copy()
+            ^text: parts[0].copy()
             loop index in 0..<holes.len() -> text = "{text}${index + 1}{parts[index + 1]}"
             Query{text: text, params: holes.copy()}
         }
@@ -58,8 +58,8 @@ show: fn(param: Param) -> String {
 }
 
 run: fn() {
-    age := 42
-    name := "Ada'); DROP TABLE people; --"
+    ^age: 42
+    ^name: "Ada'); DROP TABLE people; --"
     query: Query{"MATCH (p:Person) WHERE p.age > {age} AND p.name = {name} RETURN p"}
     print(query.text)
     loop param in query.params -> print(show(param))

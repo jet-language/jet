@@ -25,7 +25,7 @@
     fault_schedule_arm(selectors, I64{3}, I64{-1}, I64{0})
     if jet_fault_should_fail(rt_static_text("IO.Flush")) -> return I64{12}
     trap_store(trap_word(state + I64{40}) + I64{8}, I64{-1})
-    _ := jet_fault_should_fail(rt_static_text("IO.Write"))
+    ^_: jet_fault_should_fail(rt_static_text("IO.Write"))
     if (trap_word(trap_word(state + I64{40}) + I64{8}) != I64{-1}) { return I64{13} }
     jet_rt_fault_allocation_clear()
     jet_rt_free(selectors, I64{24}, I64{8})

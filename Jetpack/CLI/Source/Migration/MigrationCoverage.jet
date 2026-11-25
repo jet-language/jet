@@ -89,11 +89,11 @@ CoverageReport: struct {
     // no bucket claims is not yet imported. Each bucket is in identity order.
     from_input: fn(input: CoverageInput) -> CoverageReport CoverageError! {
         inventory: cli_coverage_unique(input.inventory, None)
-        assigned := [{package: CoveragePackage, bucket: CoverageBucket}]{}
+        ^assigned: [{package: CoveragePackage, bucket: CoverageBucket}]{}
         native_recipes: cli_coverage_assign(input.native_recipes, CoverageBucket.NativeRecipe, inventory, assigned)
         centrally_imported_recipes: cli_coverage_assign(input.centrally_imported_recipes, CoverageBucket.CentrallyImportedRecipe, inventory, assigned)
         local_imports: cli_coverage_assign(input.local_imports, CoverageBucket.LocalImport, inventory, assigned)
-        not_yet_imported := [CoveragePackage]{}
+        ^not_yet_imported: [CoveragePackage]{}
         loop package in inventory {
             if cli_coverage_bucket_of(assigned, package) == None -> not_yet_imported.push(package)
         }
@@ -167,7 +167,7 @@ CoverageError: enum {
 // Valid packages without repeats, in identity order. `bucket` names the
 // list for the repeat error; None is the inventory.
 cli_coverage_unique: fn(packages: [CoveragePackage], bucket: CoverageBucket?) -> [CoveragePackage] CoverageError! {
-    unique := [CoveragePackage]{}
+    ^unique: [CoveragePackage]{}
     loop package in packages {
         package.validate()
         if unique.contains(package) {
@@ -208,7 +208,7 @@ cli_coverage_bucket_of: fn(assigned: [{package: CoveragePackage, bucket: Coverag
 }
 
 cli_coverage_packages_json: fn(packages: [CoveragePackage]) -> Dyn Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop package in packages -> items.push(package.to_json_tree())
     Dyn.Array(items)
 }

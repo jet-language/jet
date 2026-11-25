@@ -51,19 +51,19 @@ kit_steps_stream_assertion: fn(key: String, original: String) -> KitAssertion? {
     stream: if offset == 1 -> "file" else -> subject
     path: if offset == 1 -> tokens[0].text else -> ""
     if offset == 1 && !kit_steps_relative_path(path) -> return None
-    mode := tokens[offset].text
+    ^mode: tokens[offset].text
     if stream == "file" && mode == "first" {
         inner: "{kit_steps_byte_slice(original, 0, tokens[offset].start)}{kit_steps_byte_slice(original, tokens[offset].end, original.count_bytes())}"
-        assertion := kit_steps_stream_assertion(key, inner) ?? return None
+        ^assertion: kit_steps_stream_assertion(key, inner) ?? return None
         if assertion.file_first -> return None
         assertion.file_first = true
         return Val(assertion)
     }
-    data := ""
-    extra := ""
-    alternatives := [String]{}
-    literal := false
-    rhs_transform := ""
+    ^data: ""
+    ^extra: ""
+    ^alternatives: [String]{}
+    ^literal: false
+    ^rhs_transform: ""
     arity: tokens.len() - offset
     if mode == "is-f64" || mode == "f64" {
         return kit_steps_f64_assertion(stream, path, transform, original, offset)
@@ -216,7 +216,7 @@ kit_steps_bare_code: fn(text: String) -> Bool {
 }
 
 kit_steps_ascii_lower: fn(text: String) -> String {
-    bytes := text.bytes()
+    ^bytes: text.bytes()
     loop i in 0..<bytes.len() {
         byte: Int{bytes[i]}
         if byte >= 65 && byte <= 90 -> bytes[i] = U8{byte + 32}
@@ -226,8 +226,8 @@ kit_steps_ascii_lower: fn(text: String) -> String {
 
 kit_steps_occurrences: fn(text: String, needle: String) -> Int {
     if needle == "" -> return 0
-    count := 0
-    cursor := 0
+    ^count: 0
+    ^cursor: 0
     loop cursor <= text.count_bytes() {
         found: kit_steps_byte_index(kit_steps_byte_slice(text, cursor, text.count_bytes()), needle) ?? break
         count += 1
@@ -243,12 +243,12 @@ kit_steps_line: fn(text: String, prefix: String, substring: String) -> String? {
 // LF and CRLF end lines; a final bare CR is data.
 kit_steps_line_value: fn(text: String, prefix: String, substring: String, tail: Bool) -> String? {
     bytes: text.bytes()
-    start := 0
+    ^start: 0
     loop start < bytes.len() {
-        end := start
+        ^end: start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         content_end: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
-        line := String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
+        ^line: String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
         if line.starts_with(prefix) && line.contains(substring) {
             return Val(if tail -> kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()) else -> line.move())
         }
@@ -286,12 +286,12 @@ kit_steps_select_stream: fn(stdout: String, stderr: String, subject: String) -> 
 }
 
 kit_steps_bytes_search: fn(bytes: [U8], needle: [U8], start: Int, end: Int, insensitive: Bool) -> Int? {
-    cursor := start
+    ^cursor: start
     loop cursor + needle.len() <= end {
-        matches := true
+        ^matches: true
         loop i in 0..<needle.len() {
-            left := Int{bytes[cursor + i]}
-            right := Int{needle[i]}
+            ^left: Int{bytes[cursor + i]}
+            ^right: Int{needle[i]}
             if insensitive {
                 if left >= 65 && left <= 90 -> left += 32
                 if right >= 65 && right <= 90 -> right += 32
@@ -328,8 +328,8 @@ kit_steps_file_predicate: fn(bytes: [U8], mode: String, value: String, extra: St
     }
     if mode == "count" {
         if needle.len() == 0 -> return false
-        count := 0
-        cursor := 0
+        ^count: 0
+        ^cursor: 0
         loop cursor <= bytes.len() {
             at: kit_steps_bytes_search(bytes, needle, cursor, bytes.len(), false) ?? break
             count += 1
@@ -343,9 +343,9 @@ kit_steps_file_predicate: fn(bytes: [U8], mode: String, value: String, extra: St
         return left < right
     }
     tail: extra.bytes()
-    start := 0
+    ^start: 0
     loop start < bytes.len() {
-        end := start
+        ^end: start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         content_end: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
         if (kit_steps_bytes_search(bytes, needle, start, content_end, false) ?? -1) == start && kit_steps_bytes_search(bytes, tail, start, content_end, false) != None {
@@ -360,7 +360,7 @@ kit_steps_string_array: fn(text: String) -> [String]? {
     tree: json.parse(text) ?? return None
     if tree == {
         .Array(items) -> {
-            result := [String]{}
+            ^result: [String]{}
             loop item in items {
                 if item == {
                     .Text(value) -> result.push(value)

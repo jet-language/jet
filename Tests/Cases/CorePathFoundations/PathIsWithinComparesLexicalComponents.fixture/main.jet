@@ -26,8 +26,8 @@ run: fn() IOError! {
     row("./a/../../b", ".")
     // Lexical, not symlink truth: a link inside the base that points outside
     // is still within it; canonicalize resolves the link and says it is not.
-    outside := fs.temp_dir("within-outside") ?? return Err(err)
-    base := fs.temp_dir("within-base") ?? return Err(err)
+    ^outside: fs.temp_dir("within-outside") ?? return Err(err)
+    ^base: fs.temp_dir("within-base") ?? return Err(err)
     link: "{base.path}/link"
     fs.symlink(outside.path, link) ?? return Err(err)
     lexical: Path.from("{link}/file").is_within(Path.from(base.path))

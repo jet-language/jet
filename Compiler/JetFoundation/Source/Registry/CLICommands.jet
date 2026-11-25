@@ -920,16 +920,16 @@ JET_CLI_FORMS: #run { [JetCLIFormSpec]{
 JET_CLI_FLAGS: #run jet_cli_flag_rows()
 
 jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
-    rows := [JetCLIFlagSpec]{}
+    ^rows: [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FIXED_FLAGS {
         rows.push(spec.copy())
         if spec.long == "--profile" {
             loop option in JET_BUILD_OPTIONS {
-                help := "With build/run/dev/test/inspect: {option.help}"
+                ^help: "With build/run/dev/test/inspect: {option.help}"
                 if option.kind == .Level {
                     // Each level is its own flag; the option has no `--name` flag.
                     loop value in option.values {
-                        level_help := "{help}; this flag is {value}"
+                        ^level_help: "{help}; this flag is {value}"
                         if test_setting_row(option.name) == .Val(row) {
                             level_help = "{level_help}; with test: {jet_cli_test_setting_text(row)}"
                         }

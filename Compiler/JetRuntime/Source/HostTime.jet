@@ -4,7 +4,7 @@
 // Root56: SyncOnce0, epoch seconds8, epoch nanoseconds16, provider TLS key24,
 // and the wall-clock override of jet_std_time_now (Deadline.jet): SyncOnce32,
 // present40, milliseconds48.
-time_host_root := I64{0}
+^time_host_root: I64{0}
 
 // runtime-init: 4 when time_host_root
 #Export(c) jet_rt_time_host_init: fn() {
@@ -62,8 +62,8 @@ time_seconds_magnitude: fn(seconds: I64) -> I64 {
     seconds: sync_load(scratch)
     nanos: sync_load(wrapping(scratch + I64{8}))
     before: seconds < I64{0}
-    magnitude := I64{0}
-    part := nanos
+    ^magnitude: I64{0}
+    ^part: nanos
     if before {
         if (nanos == I64{0}) { magnitude = time_seconds_magnitude(seconds) } else {
             // POSIX (-1s,+250ms) is 750ms before the epoch, not 1.25s.
@@ -92,8 +92,8 @@ time_host_monotonic_sample_at: fn(root: I64) -> I64 {
         sync_once_complete(root)
     }
     sample: time_clock_read(I64{1})
-    seconds := sync_load(sample) - sync_load(wrapping(root + I64{8}))
-    nanos := sync_load(wrapping(sample + I64{8})) - sync_load(wrapping(root + I64{16}))
+    ^seconds: sync_load(sample) - sync_load(wrapping(root + I64{8}))
+    ^nanos: sync_load(wrapping(sample + I64{8})) - sync_load(wrapping(root + I64{16}))
     if (nanos < I64{0}) {
         seconds -= I64{1}
         nanos += I64{1000000000}
@@ -185,7 +185,7 @@ time_optional_i64: fn(present: Bool, output: I64) -> I64 {
     replay: rt_env_get(replay_name)
     jet_rt_string_drop(replay_name)
     scratch: wrapping(thread_base() + I64{248})
-    parsed := deadline_parse_i64(replay, scratch)
+    ^parsed: deadline_parse_i64(replay, scratch)
     jet_rt_string_drop(replay)
     if !parsed {
         epoch_name: scheduler_msg_epoch()
@@ -211,7 +211,7 @@ time_optional_i64: fn(present: Bool, output: I64) -> I64 {
 #Export(c) jet_time_raw_zone_file_bytes: fn(path: I64, data_out: I64, length_out: I64) -> I64 {
     length: rt_text_len(path)
     source: rt_text_data(path)
-    at := I64{0}
+    ^at: I64{0}
     // `path` lends `length` bytes; std file open rejects embedded NUL.
     loop at < length {
         if (rt_text_byte(wrapping(source + at)) == I64{0}) { return I64{0} }
@@ -224,10 +224,10 @@ time_optional_i64: fn(present: Bool, output: I64) -> I64 {
     fd: host_call(I64{2}, name, I64{524288}, I64{0})
     jet_rt_free(name, length + I64{1}, I64{1})
     if (fd < I64{0}) { return I64{0} }
-    capacity := I64{8192}
-    bytes := jet_rt_alloc(capacity, I64{8})
-    used := I64{0}
-    failed := false
+    ^capacity: I64{8192}
+    ^bytes: jet_rt_alloc(capacity, I64{8})
+    ^used: I64{0}
+    ^failed: false
     loop {
         if (used == capacity) {
             grown: capacity * I64{2}
@@ -246,12 +246,12 @@ time_optional_i64: fn(present: Bool, output: I64) -> I64 {
         if (count == I64{0}) { break }
         used += count
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if failed {
         jet_rt_free(bytes, capacity, I64{8})
         return I64{0}
     }
-    data := I64{0}
+    ^data: I64{0}
     if (used != I64{0}) {
         if (RT_HOST_U8_STRIDE == I64{1} && used == capacity) { data = bytes } else {
             data = jet_rt_alloc(used * RT_HOST_U8_STRIDE, I64{8})

@@ -47,10 +47,10 @@ JetDriverRecursionFlow: struct {
 
 // Direct call edges for `functions[start..<end]` among reported functions.
 jet_driver_recursion_calls_range: fn(functions: [FnBody], bodies: [Int?], decls: DeclTable, start: Int, end: Int) -> [[Int]] Never! {
-    calls := [[Int]]{}
+    ^calls: [[Int]]{}
     loop index in start..<end {
         function: functions[index]
-        targets := [Int]{}
+        ^targets: [Int]{}
         if jet_driver_cost_reports(function) {
             loop node in function.tree.nodes {
                 target: jet_driver_recursion_target(node.kind, bodies, decls) ?? next
@@ -71,20 +71,20 @@ JetDriverRecursionMustPart: struct {
 }
 
 jet_driver_recursion_must_range: fn(functions: [FnBody], bodies: [Int?], decls: DeclTable, groups: [Int], cyclic: [Int], start: Int, end: Int) -> JetDriverRecursionMustPart Never! {
-    positions := [Int]{}
-    out_targets := [[Int]]{}
-    out_spans := [[Span]]{}
+    ^positions: [Int]{}
+    ^out_targets: [[Int]]{}
+    ^out_spans: [[Span]]{}
     loop k in start..<end {
         position: cyclic[k]
         function: functions[position]
-        hits := [Int:Int]{}
+        ^hits: [Int:Int]{}
         loop node in function.tree.nodes {
             target: jet_driver_recursion_target(node.kind, bodies, decls) ?? next
             if groups[target] == groups[position] -> hits[node.id] = target
         }
         leaving: jet_driver_recursion_leaving(jet_driver_recursion_statements(function.tree, hits, function.body))
-        targets := [Int]{}
-        at := [Span]{}
+        ^targets: [Int]{}
+        ^at: [Span]{}
         loop call in leaving {
             targets.push(call.target)
             at.push(call.span)
@@ -101,10 +101,10 @@ jet_driver_recursion_must_threads: fn(functions: [FnBody], bodies: [Int?], decls
     if at + 1 == starts.len() {
         return [JetDriverRecursionMustPart]{jet_driver_recursion_must_range(functions, bodies, decls, groups, cyclic, starts[at], ends[at])}
     }
-    out := [JetDriverRecursionMustPart]{}
+    ^out: [JetDriverRecursionMustPart]{}
     task.group driver_recursion_must {
         head: task jet_driver_recursion_must_range(functions, bodies, decls, groups, cyclic, starts[at], ends[at])
-        rest := jet_driver_recursion_must_threads(functions, bodies, decls, groups, cyclic, starts, ends, at + 1)
+        ^rest: jet_driver_recursion_must_threads(functions, bodies, decls, groups, cyclic, starts, ends, at + 1)
         out.push(compiler_threads_joined(head))
         compiler_transfer_rows<JetDriverRecursionMustPart>(out, rest)
     }
@@ -114,23 +114,23 @@ jet_driver_recursion_must_threads: fn(functions: [FnBody], bodies: [Int?], decls
 // Finishes L0305 recursion lints from a precomputed `calls` adjacency list.
 jet_driver_recursion_lints_from_calls: fn(load: JetDriverLoadResult, functions: [FnBody], bodies: [Int?], decls: DeclTable, calls: [[Int]], threads: CompilerThreads{compiler_threads_single()}) -> [Diagnostic] {
     groups: jet_driver_recursion_components(calls)
-    cyclic := [Int]{}
-    must := (loop _ in functions -> [Int]{})
-    spans := (loop _ in functions -> [Span]{})
+    ^cyclic: [Int]{}
+    ^must: (loop _ in functions -> [Int]{})
+    ^spans: (loop _ in functions -> [Span]{})
     loop position in 0..<functions.len() {
         if jet_driver_recursion_cyclic(calls, groups, position) -> cyclic.push(position)
     }
     workers: compiler_threads_admit(threads, cyclic.len(), cyclic.len(), 16, 0, 0)
     if workers <= 1 {
-        part := jet_driver_recursion_must_range(functions, bodies, decls, groups, cyclic, 0, cyclic.len())
+        ^part: jet_driver_recursion_must_range(functions, bodies, decls, groups, cyclic, 0, cyclic.len())
         loop i in 0..<part.positions.len() {
             pos: part.positions[i]
             must[pos] = part.targets[i]
             spans[pos] = part.spans[i]
         }
     } else {
-        starts := [Int]{}
-        ends := [Int]{}
+        ^starts: [Int]{}
+        ^ends: [Int]{}
         loop w in 0..<workers {
             s: (w * cyclic.len()) /% workers
             e: ((w + 1) * cyclic.len()) /% workers
@@ -139,7 +139,7 @@ jet_driver_recursion_lints_from_calls: fn(load: JetDriverLoadResult, functions: 
                 ends.push(e)
             }
         }
-        parts := jet_driver_recursion_must_threads(functions, bodies, decls, groups, cyclic, starts, ends, 0)
+        ^parts: jet_driver_recursion_must_threads(functions, bodies, decls, groups, cyclic, starts, ends, 0)
         loop part in parts.move() {
             loop i in 0..<part.positions.len() {
                 pos: part.positions[i]
@@ -149,7 +149,7 @@ jet_driver_recursion_lints_from_calls: fn(load: JetDriverLoadResult, functions: 
         }
     }
     cycles: jet_driver_recursion_components(must)
-    lints := [Diagnostic]{}
+    ^lints: [Diagnostic]{}
     loop (position, function) in functions {
         if !jet_driver_recursion_cyclic(must, cycles, position) -> next
         loop (index, target) in must[position] {
@@ -201,21 +201,21 @@ jet_driver_recursion_cyclic: fn(edges: [[Int]], groups: [Int], position: Int) ->
 // The strongly connected component of each node of `edges`, numbered from
 // 0 (Tarjan's algorithm, its recursion kept on an explicit stack).
 jet_driver_recursion_components: fn(edges: [[Int]]) -> [Int] Never! {
-    order := [Int]{}
-    low := [Int]{}
-    groups := [Int]{}
-    held := [Bool]{}
+    ^order: [Int]{}
+    ^low: [Int]{}
+    ^groups: [Int]{}
+    ^held: [Bool]{}
     loop _ in 0..<edges.len() {
         order.push(-1)
         low.push(0)
         groups.push(-1)
         held.push(false)
     }
-    stack := [Int]{}
-    frames := [Int]{}
-    cursors := [Int]{}
-    visited := 0
-    count := 0
+    ^stack: [Int]{}
+    ^frames: [Int]{}
+    ^cursors: [Int]{}
+    ^visited: 0
+    ^count: 0
     loop root in 0..<edges.len() {
         if order[root] != -1 -> next
         order[root] = visited
@@ -294,7 +294,7 @@ jet_driver_recursion_at: fn(calls: [JetDriverRecursionCall], target: Int) -> Spa
 jet_driver_recursion_meet: fn(left: ^^[JetDriverRecursionCall]?, right: ^^[JetDriverRecursionCall]?) -> [JetDriverRecursionCall]? Never! {
     first: left ?? return right
     second: right ?? return Val(first)
-    kept := [JetDriverRecursionCall]{}
+    ^kept: [JetDriverRecursionCall]{}
     loop call in first {
         other: jet_driver_recursion_at(second, call.target) ?? next
         kept.push(JetDriverRecursionCall{target: call.target, span: if other.start < call.span.start -> other else -> call.span})
@@ -306,7 +306,7 @@ jet_driver_recursion_meet: fn(left: ^^[JetDriverRecursionCall]?, right: ^^[JetDr
 jet_driver_recursion_after: fn(calls: ^^[JetDriverRecursionCall]?, prefix: [JetDriverRecursionCall]) -> [JetDriverRecursionCall]? Never! {
     later: calls ?? return None
     if prefix.len() == 0 -> return Val(later)
-    joined := [JetDriverRecursionCall]{}
+    ^joined: [JetDriverRecursionCall]{}
     loop call in prefix -> joined.push(JetDriverRecursionCall{target: call.target, span: call.span})
     loop call in later {
         if !jet_driver_recursion_has(prefix, call.target) -> joined.push(call)
@@ -367,7 +367,7 @@ jet_driver_recursion_leaving: fn(flow: ^^JetDriverRecursionFlow) -> [JetDriverRe
 // The flow of the statements `body` of `tree` in order, each call of
 // `hits` (call node id to the target it reaches) counted.
 jet_driver_recursion_statements: fn(tree: BodyTree, hits: [Int:Int], body: [Int]) -> JetDriverRecursionFlow Never! {
-    flow := jet_driver_recursion_fall()
+    ^flow: jet_driver_recursion_fall()
     loop statement in body {
         if flow.fall == None -> break
         flow = jet_driver_recursion_then(flow, jet_driver_recursion_statement(tree, hits, statement))
@@ -377,7 +377,7 @@ jet_driver_recursion_statements: fn(tree: BodyTree, hits: [Int:Int], body: [Int]
 
 // The flow of the expressions `values` of `tree` evaluated in order.
 jet_driver_recursion_sequence: fn(tree: BodyTree, hits: [Int:Int], values: [Int]) -> JetDriverRecursionFlow Never! {
-    flow := jet_driver_recursion_fall()
+    ^flow: jet_driver_recursion_fall()
     loop value in values {
         if flow.fall == None -> break
         flow = jet_driver_recursion_then(flow, jet_driver_recursion_expression(tree, hits, value))
@@ -417,7 +417,7 @@ jet_driver_recursion_statement: fn(tree: BodyTree, hits: [Int:Int], statement: I
         .Assign(_, _, value, _, _) -> jet_driver_recursion_expression(tree, hits, value)
         .CountedLoop(_, init, condition, step, _, body, _) -> {
             header: jet_driver_recursion_then(jet_driver_recursion_statement(tree, hits, init), jet_driver_recursion_expression(tree, hits, condition))
-            turn := jet_driver_recursion_statements(tree, hits, body)
+            ^turn: jet_driver_recursion_statements(tree, hits, body)
             if step == .Val(row) {
                 turn = jet_driver_recursion_then(turn, jet_driver_recursion_statement(tree, hits, row))
             }
@@ -451,14 +451,14 @@ jet_driver_recursion_statement: fn(tree: BodyTree, hits: [Int:Int], statement: I
             jet_driver_recursion_then(jet_driver_recursion_condition(tree, hits, condition), jet_driver_recursion_either(jet_driver_recursion_statements(tree, hits, then_body), otherwise))
         }
         .Match(subject, arms, exhaustive, _) -> {
-            branches := if exhaustive -> JetDriverRecursionFlow{} else -> jet_driver_recursion_fall()
+            ^branches: if exhaustive -> JetDriverRecursionFlow{} else -> jet_driver_recursion_fall()
             loop arm in arms {
                 branches = jet_driver_recursion_either(branches, jet_driver_recursion_statements(tree, hits, arm.body))
             }
             jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, subject), branches)
         }
         .EnumMatch(scrutinee, arms, else_body, fallthrough, _) -> {
-            branches := if else_body == .Val(rows) -> jet_driver_recursion_statements(tree, hits, rows) else -> jet_driver_recursion_fall()
+            ^branches: if else_body == .Val(rows) -> jet_driver_recursion_statements(tree, hits, rows) else -> jet_driver_recursion_fall()
             if fallthrough -> branches = jet_driver_recursion_maybe(branches)
             loop arm in arms {
                 branches = jet_driver_recursion_either(branches, jet_driver_recursion_statements(tree, hits, arm.body))
@@ -466,21 +466,21 @@ jet_driver_recursion_statement: fn(tree: BodyTree, hits: [Int:Int], statement: I
             jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, scrutinee), branches)
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            branches := jet_driver_recursion_statements(tree, hits, else_body)
+            ^branches: jet_driver_recursion_statements(tree, hits, else_body)
             loop arm in arms {
                 branches = jet_driver_recursion_either(branches, jet_driver_recursion_statements(tree, hits, arm.body))
             }
             jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, subject), branches)
         }
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            branches := if else_body == .Val(rows) -> jet_driver_recursion_statements(tree, hits, rows) else -> jet_driver_recursion_fall()
+            ^branches: if else_body == .Val(rows) -> jet_driver_recursion_statements(tree, hits, rows) else -> jet_driver_recursion_fall()
             loop arm in arms {
                 branches = jet_driver_recursion_either(branches, jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, arm.condition), jet_driver_recursion_statements(tree, hits, arm.body)))
             }
             jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, subject), branches)
         }
         .ContextBlock(guards, body, _) -> {
-            values := [Int]{}
+            ^values: [Int]{}
             loop guard in guards -> values.push(guard.value)
             jet_driver_recursion_then(jet_driver_recursion_sequence(tree, hits, values), jet_driver_recursion_statements(tree, hits, body))
         }
@@ -508,7 +508,7 @@ jet_driver_recursion_condition: fn(tree: BodyTree, hits: [Int:Int], condition: B
 
 // The direct children of node `id` of `tree`, in evaluation order.
 jet_driver_recursion_child_ids: fn(tree: BodyTree, id: Int) -> [Int] Never! {
-    children := [Int]{}
+    ^children: [Int]{}
     body_each_expr_child(tree, body_node(tree, id), fn(child: Int) { children.push(child) })
     children
 }
@@ -522,7 +522,7 @@ jet_driver_recursion_children: fn(tree: BodyTree, hits: [Int:Int], id: Int) -> J
 // The flow of the direct children of node `id` of `tree`, each of which
 // may not run.
 jet_driver_recursion_perhaps: fn(tree: BodyTree, hits: [Int:Int], id: Int) -> JetDriverRecursionFlow Never! {
-    flow := jet_driver_recursion_fall()
+    ^flow: jet_driver_recursion_fall()
     loop child in jet_driver_recursion_child_ids(tree, id) {
         flow = jet_driver_recursion_then(flow, jet_driver_recursion_maybe(jet_driver_recursion_expression(tree, hits, child)))
     }
@@ -540,16 +540,14 @@ jet_driver_recursion_expression: fn(tree: BodyTree, hits: [Int:Int], id: Int) ->
         .Lambda(_) -> jet_driver_recursion_fall()
         .InlineBlock(body) -> jet_driver_recursion_statements(tree, hits, body)
         .Binary(op, _, _, lhs, rhs) -> {
-            right := jet_driver_recursion_expression(tree, hits, rhs)
-            if op == BinOp.And || op == BinOp.Or {
-                right = jet_driver_recursion_maybe(right)
-            }
+            ^right: jet_driver_recursion_expression(tree, hits, rhs)
+            if op == BinOp.And || op == BinOp.Or -> right = jet_driver_recursion_maybe(right)
             jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, lhs), right)
         }
         .CompareChain(operands, _, _) -> {
-            chain := jet_driver_recursion_fall()
+            ^chain: jet_driver_recursion_fall()
             loop (index, operand) in operands {
-                step := jet_driver_recursion_expression(tree, hits, operand)
+                ^step: jet_driver_recursion_expression(tree, hits, operand)
                 if index > 1 -> step = jet_driver_recursion_maybe(step)
                 chain = jet_driver_recursion_then(chain, step)
             }

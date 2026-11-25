@@ -104,7 +104,7 @@ FoldBudget: struct {
 }
 
 validate_limits: fn(limits: EncodingLimits) EncodingError! {
-    reason := ""
+    ^reason: ""
     if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 {
         reason = "buffer_bytes {limits.buffer_bytes} is outside 4096..16777216"
     } else if limits.max_depth < 1 || limits.max_depth > 4096 {
@@ -127,7 +127,7 @@ stream_error: fn(kind: EncodingErrorKind, offset: Int, line: Int, column: Int, r
 }
 
 io_error: fn(offset: Int, line: Int, column: Int, cause: EncodingCause) -> EncodingError Never! {
-    error := stream_error(.IO, offset, line, column, "file IO failed")
+    ^error: stream_error(.IO, offset, line, column, "file IO failed")
     error.cause = Val(cause)
     error
 }
@@ -256,7 +256,7 @@ JSONPull: struct<R: Reader> {
         result: if self.next_inner() == {
             .Ok(value) -> value
             .Err(failure) -> {
-                error := failure
+                ^error: failure
                 if error.path == "" -> error.path = self.path()
                 self.discard()
                 self.terminal = Val(error)
@@ -272,8 +272,8 @@ JSONPull: struct<R: Reader> {
     }
 
     path: fn(self) -> String Never! {
-        out := "$"
-        object := 0
+        ^out: "$"
+        ^object: 0
         loop frame in self.frames {
             if frame == {
                 .ArrayValueOrEnd(_, index) | .ArrayCommaOrEnd(index) -> out = "{out}[{index}]"
@@ -289,7 +289,7 @@ JSONPull: struct<R: Reader> {
     }
 
     discard: fn(^self) Never! {
-        bytes := mem.__list_capacity<ReadFrame>(self.frames) * mem.__type_size<ReadFrame>()
+        ^bytes: mem.__list_capacity<ReadFrame>(self.frames) * mem.__type_size<ReadFrame>()
         self.frames = [ReadFrame]{}
         bytes += mem.__list_capacity<U8>(self.buffer)
         self.buffer = [U8]{}
@@ -312,8 +312,8 @@ JSONPull: struct<R: Reader> {
     drop_keys: fn(^self, start: Int) Never! {
         loop self.seen_keys.len() > start {
             key: self.seen_keys.pop() ?? panic("retained JSON object key")
-            _ := self.seen_places.pop()
-            _ := self.seen_places.pop()
+            ^_: self.seen_places.pop()
+            ^_: self.seen_places.pop()
             self.allocation.release(key.count_bytes() + mem.__type_size<String>() + 2 * mem.__type_size<Int>())
         }
     }
@@ -400,7 +400,7 @@ JSONPull: struct<R: Reader> {
         }
         capacity: mem.__list_capacity<U8>(bytes)
         if needed > capacity {
-            grown := if capacity < 1 -> 2 else -> capacity * 2
+            ^grown: if capacity < 1 -> 2 else -> capacity * 2
             if grown < needed -> grown = needed
             additional: grown - bytes.len()
             if !reserve<U8>(self.allocation, bytes, additional) -> return Err(self.item_error(item))
@@ -409,7 +409,7 @@ JSONPull: struct<R: Reader> {
     }
 
     hex4: fn(^self) -[IO, Time.Wait]> Int EncodingError! {
-        value := 0
+        ^value: 0
         loop _ in 0..<4 {
             byte: self.consume()
             if byte == None -> return Err(self.error(.Truncated, "incomplete Unicode escape"))
@@ -426,14 +426,14 @@ JSONPull: struct<R: Reader> {
     // the same position they always did.
     read_string: fn(^self) -[IO, Time.Wait]> String EncodingError! {
         start: self.buffered
-        at := start
+        ^at: start
         loop at < self.buffer.len() {
             byte: self.buffer[at]
             if byte == (U8{34}) || byte == (U8{92}) || byte <= (U8{31}) -> break
             at += 1
         }
         count: at - start
-        within := at < self.buffer.len() && self.buffer[at] == (U8{34}) && count <= self.limits.max_item_bytes
+        ^within: at < self.buffer.len() && self.buffer[at] == (U8{34}) && count <= self.limits.max_item_bytes
         if within && self.limits.max_total_bytes == .Val(max) -> within = self.total + count < max
         if within && self.allocation.charge(count) {
             self.buffered = at + 1
@@ -447,7 +447,7 @@ JSONPull: struct<R: Reader> {
             self.output_heap = count
             return Ok(text)
         }
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         self.read_string_bytes(bytes) ?? {
             self.allocation.release(mem.__list_capacity<U8>(bytes))
             return Err(err)
@@ -457,7 +457,7 @@ JSONPull: struct<R: Reader> {
             self.allocation.release(capacity)
             return Err(self.error(.Syntax, "JSON string is not valid UTF-8"))
         }
-        text := ""
+        ^text: ""
         #Unsafe("the shared UTF-8 validator just accepted this owned byte allocation") {
             text = rt.bytes_into_text(bytes)
         }
@@ -471,13 +471,13 @@ JSONPull: struct<R: Reader> {
     // per-byte checks with its exact position.
     take_plain: fn(^self, bytes: ^[U8]) EncodingError! {
         start: self.buffered
-        stop := self.buffer.len()
-        room := self.limits.max_item_bytes - bytes.len()
+        ^stop: self.buffer.len()
+        ^room: self.limits.max_item_bytes - bytes.len()
         if self.limits.max_total_bytes == .Val(max) {
             if max - self.total < room -> room = max - self.total
         }
         if room < stop - start -> stop = start + (if room > 0 -> room else -> 0)
-        end := start
+        ^end: start
         loop end < stop {
             byte: self.buffer[end]
             if byte == (U8{34}) || byte == (U8{92}) || byte <= (U8{31}) -> break
@@ -490,7 +490,7 @@ JSONPull: struct<R: Reader> {
         needed: bytes.len() + count
         capacity: mem.__list_capacity<U8>(bytes)
         if needed > capacity {
-            grown := if capacity < 1 -> 2 else -> capacity * 2
+            ^grown: if capacity < 1 -> 2 else -> capacity * 2
             if grown < needed -> grown = needed
             if !reserve<U8>(self.allocation, bytes, grown - bytes.len()) {
                 return Err(self.item_error("string"))
@@ -529,7 +529,7 @@ JSONPull: struct<R: Reader> {
             } else if esc == (U8{110}) { self.append(bytes, U8{10}, "string") } else if esc == (U8{114}) {
                 self.append(bytes, U8{13}, "string")
             } else if esc == (U8{116}) { self.append(bytes, U8{9}, "string") } else if esc == (U8{117}) {
-                cp := self.hex4()
+                ^cp: self.hex4()
                 if cp >= 55296 && cp <= 56319 {
                     self.expect(U8{92}, "a low-surrogate escape")
                     self.expect(U8{117}, "a low-surrogate escape")
@@ -565,11 +565,11 @@ JSONPull: struct<R: Reader> {
     // number at the buffer's end or one that meets a limit) takes `number`.
     small_int: fn(^self, first: U8) -> Int? Never! {
         negative: first == (U8{45})
-        value := if negative -> 0 else -> (Int{first}) - 48
-        digits := if negative -> 0 else -> 1
-        leading := if negative -> -1 else -> value
+        ^value: if negative -> 0 else -> (Int{first}) - 48
+        ^digits: if negative -> 0 else -> 1
+        ^leading: if negative -> -1 else -> value
         start: self.buffered
-        at := start
+        ^at: start
         loop at < self.buffer.len() {
             n: Int{self.buffer[at]}
             if n < 48 || n > 57 {
@@ -597,7 +597,7 @@ JSONPull: struct<R: Reader> {
     }
 
     number: fn(^self, first: U8) -[IO, Time.Wait]> DataEvent EncodingError! {
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         self.number_bytes(bytes, first) ?? {
             self.allocation.release(mem.__list_capacity<U8>(bytes))
             return Err(err)
@@ -612,7 +612,7 @@ JSONPull: struct<R: Reader> {
             self.allocation.release(capacity)
             return Err(stream_error(.Syntax, start, self.line, self.column, "JSON number is not valid UTF-8"))
         }
-        text := ""
+        ^text: ""
         #Unsafe("the shared UTF-8 validator just accepted this owned ASCII token") {
             text = rt.bytes_into_text(bytes)
         }
@@ -799,7 +799,7 @@ JSONPull: struct<R: Reader> {
                     if self.allow_duplicates -> self.drop_keys(start) else {
                         loop index in start..<self.seen_keys.len() {
                             if self.seen_keys[index] == key {
-                                error := self.error(.Syntax, "duplicate object key `{key}` (first at line {self.seen_places[2 * index]}, column {self.seen_places[2 * index + 1]})")
+                                ^error: self.error(.Syntax, "duplicate object key `{key}` (first at line {self.seen_places[2 * index]}, column {self.seen_places[2 * index + 1]})")
                                 error.path = "{self.path()}[{quote_path(key)}]"
                                 return Err(error)
                             }
@@ -889,7 +889,7 @@ JSONPull: struct<R: Reader> {
             }
             .ArrayStart -> {
                 self.fold_charge(1, heap)
-                values := [Dyn]{}
+                ^values: [Dyn]{}
                 loop {
                     child: self.next()
                     if child == None {
@@ -904,7 +904,7 @@ JSONPull: struct<R: Reader> {
             }
             .ObjectStart -> {
                 self.fold_charge(1, heap)
-                entries := [{key: String, value: Dyn}]{}
+                ^entries: [{key: String, value: Dyn}]{}
                 loop {
                     child: self.next()
                     if child == None {
@@ -953,7 +953,7 @@ json_reader: fn<R: Reader>(input: ^^R, limits: EncodingLimits, allow_duplicates:
 }
 
 valid_number: fn(bytes: [U8]) -> Bool Never! {
-    i := 0
+    ^i: 0
     if bytes.len() > 0 && bytes[0] == (U8{45}) -> i = 1
     if i >= bytes.len() -> return false
     if bytes[i] == (U8{48}) -> i += 1 else if bytes[i] >= (U8{49}) && bytes[i] <= (U8{57}) {
@@ -980,7 +980,7 @@ debug_byte: fn(byte: U8) -> String Never! {
     n: Int{byte}
     if n == 39 -> return "'\\''"
     if n == 34 -> return "'\"'"
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if n < 128 -> bytes.push(byte) else {
         bytes.push(U8{(192) | (n >> 6)})
         bytes.push(U8{(128) | (n & 63)})
@@ -994,7 +994,7 @@ quote_path: fn(text: String) -> String Never! { text.debug() }
 // RFC 8785 admits an Int only when binary64 holds it exactly: its odd part
 // must fit in the 53-bit significand.
 int_is_binary64: fn(n: Int) -> Bool Never! {
-    odd := n
+    ^odd: n
     loop odd != 0 && odd %% 2 == 0 -> odd = odd /% 2
     if odd < 0 -> odd = -odd
     odd <= 9007199254740992
@@ -1007,12 +1007,12 @@ int_is_binary64: fn(n: Int) -> Bool Never! {
 jcs_number: fn(value: Float) -> String Never! {
     if value == (Float{0.0}) -> return "0"
     negative: value < (Float{0.0})
-    magnitude := value
+    ^magnitude: value
     if negative -> magnitude = -value
-    digits := [U8]{}
-    exponent_bytes := [U8]{}
-    decimal := -1
-    in_exponent := false
+    ^digits: [U8]{}
+    ^exponent_bytes: [U8]{}
+    ^decimal: -1
+    ^in_exponent: false
     loop b in jcs_shortest(magnitude).bytes() {
         if in_exponent {
             exponent_bytes.push(b)
@@ -1029,20 +1029,20 @@ jcs_number: fn(value: Float) -> String Never! {
         digits.push(b)
     }
     if decimal < 0 -> decimal = digits.len()
-    exponent := 0
+    ^exponent: 0
     if exponent_bytes.len() > 0 {
         exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
     }
-    leading := 0
+    ^leading: 0
     loop leading < digits.len() && digits[leading] == (U8{48}) -> leading += 1
-    significant := [U8]{}
+    ^significant: [U8]{}
     loop i in leading..<digits.len() -> significant.push(digits[i])
     loop significant.len() > 1 && significant[significant.len() - 1] == (U8{48}) {
         _: significant.pop()
     }
     n: decimal + exponent - leading
     k: significant.len()
-    out := [U8]{}
+    ^out: [U8]{}
     if negative -> out.push(U8{45})
     if n > 0 && n <= 21 {
         if k <= n {
@@ -1080,22 +1080,22 @@ jcs_number: fn(value: Float) -> String Never! {
 jcs_shortest: fn(magnitude: Float) -> String Never! {
     shortest: "{magnitude}"
     bytes: shortest.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop i in 0..<bytes.len() {
         if bytes[i] == (U8{101}) || bytes[i] == (U8{69}) {
             end = i
             break
         }
     }
-    index := end - 1
+    ^index: end - 1
     loop index >= 0 && (bytes[index] < (U8{48}) || bytes[index] > (U8{57})) -> index -= 1
     if index < 0 -> return shortest
     digit: Int{bytes[index]} - 48
     bits: math.to_bits(magnitude)
-    candidates := [String]{}
+    ^candidates: [String]{}
     loop replacement in [digit - 1, digit + 1] {
         if replacement < 0 || replacement > 9 -> next
-        candidate := bytes.copy()
+        ^candidate: bytes.copy()
         candidate[index] = checked(U8{48 + replacement}) ?? panic("ASCII digit")
         text: String.from_bytes(candidate) ?? panic("ASCII float candidate")
         if Float.parse(text) == .Ok(parsed) && math.to_bits(parsed) == bits -> candidates.push(text)
@@ -1107,9 +1107,9 @@ jcs_shortest: fn(magnitude: Float) -> String Never! {
     fraction: bits %% 4503599627370496
     significand: if biased == 0 -> fraction else -> fraction + 4503599627370496
     power: if biased == 0 -> -1074 else -> biased - 1075
-    best := shortest.copy()
-    best_distance := jcs_distance(shortest, significand, power)
-    best_odd := digit %% 2 == 1
+    ^best: shortest.copy()
+    ^best_distance: jcs_distance(shortest, significand, power)
+    ^best_odd: digit %% 2 == 1
     loop candidate in candidates {
         distance: jcs_distance(candidate, significand, power)
         odd: (Int{candidate.bytes()[index]} - 48) %% 2 == 1
@@ -1125,11 +1125,11 @@ jcs_shortest: fn(magnitude: Float) -> String Never! {
 // |digits * 10^decimal_power - significand * 2^power|, scaled by the positive
 // powers of 2 and 10 that make both sides integers.
 jcs_distance: fn(text: String, significand: Int, power: Int) -> Int Never! {
-    digits := 0
-    fraction_digits := 0
-    seen_point := false
-    exponent_bytes := [U8]{}
-    in_exponent := false
+    ^digits: 0
+    ^fraction_digits: 0
+    ^seen_point: false
+    ^exponent_bytes: [U8]{}
+    ^in_exponent: false
     loop b in text.bytes() {
         if in_exponent {
             exponent_bytes.push(b)
@@ -1146,13 +1146,13 @@ jcs_distance: fn(text: String, significand: Int, power: Int) -> Int Never! {
         digits = digits * 10 + (Int{b} - 48)
         if seen_point -> fraction_digits += 1
     }
-    exponent := 0
+    ^exponent: 0
     if exponent_bytes.len() > 0 {
         exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
     }
     decimal_power: exponent - fraction_digits
-    left := digits
-    right := significand
+    ^left: digits
+    ^right: significand
     if power < 0 -> left *= int_power(2, -power) else -> right *= int_power(2, power)
     if decimal_power < 0 -> right *= int_power(10, -decimal_power) else {
         left *= int_power(10, decimal_power)
@@ -1161,21 +1161,21 @@ jcs_distance: fn(text: String, significand: Int, power: Int) -> Int Never! {
 }
 
 int_power: fn(base: Int, exponent: Int) -> Int Never! {
-    out := 1
+    ^out: 1
     loop _ in 0..<exponent -> out *= base
     out
 }
 
 // UTF-16 code units of a key, the RFC 8785 sort order.
 utf16_units: fn(text: String) -> [Int] Never! {
-    units := [Int]{}
+    ^units: [Int]{}
     bytes: text.bytes()
     length: bytes.len()
-    i := 0
+    ^i: 0
     loop i < length {
         b: Int{bytes[i]}
-        cp := b
-        width := 1
+        ^cp: b
+        ^width: 1
         if b >= 240 {
             cp = ((b & 7) << 18) | ((Int{bytes[i + 1]} & 63) << 12) | ((Int{bytes[i + 2]} & 63) << 6) | (Int{bytes[i + 3]} & 63)
             width = 4
@@ -1198,7 +1198,7 @@ utf16_units: fn(text: String) -> [Int] Never! {
 }
 
 compare_units: fn(left: [Int], right: [Int]) -> Int Never! {
-    n := left.len()
+    ^n: left.len()
     if right.len() < n -> n = right.len()
     loop i in 0..<n {
         if left[i] < right[i] -> return -1
@@ -1211,21 +1211,21 @@ compare_units: fn(left: [Int], right: [Int]) -> Int Never! {
 
 // Stable bottom-up merge sort of key indices: O(n log n) comparisons.
 sort_by_units: fn(units: [[Int]]) -> [Int] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop i in 0..<units.len() -> order.push(i)
-    width := 1
+    ^width: 1
     loop width < order.len() {
-        merged := [Int]{}
-        start := 0
+        ^merged: [Int]{}
+        ^start: 0
         loop start < order.len() {
-            middle := start + width
+            ^middle: start + width
             if middle > order.len() -> middle = order.len()
-            end := start + 2 * width
+            ^end: start + 2 * width
             if end > order.len() -> end = order.len()
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
-                take_left := right >= end
+                ^take_left: right >= end
                 if !take_left && left < middle {
                     take_left = compare_units(units[order[left]], units[order[right]]) <= 0
                 }
@@ -1347,7 +1347,7 @@ JSONPush: struct<W: Writer> {
     }
 
     quoted_len: fn(self, text: String) -> Int EncodingError! {
-        size := 0
+        ^size: 0
         loop i in 0..<text.count_bytes() {
             byte: Int{byte_at(text, i)}
             size += if byte == 34 || byte == 92 || byte == 10 || byte == 13 || byte == 9 || byte == 8 || byte == 12 -> 2 else if byte < 32 -> 6 else -> 1
@@ -1360,9 +1360,9 @@ JSONPush: struct<W: Writer> {
 
     quote_into: fn(self, out: ^[U8], text: String) Never! {
         out.push(U8{34})
-        i := 0
+        ^i: 0
         loop i < text.count_bytes() {
-            scratch := [U8#6]{0, 0, 0, 0, 0, 0}
+            ^scratch: [U8#6]{0, 0, 0, 0, 0, 0}
             count: escaped_unit(text, i, scratch)
             loop j in 0..<count -> out.push(scratch[j])
             i += scalar_width(byte_at(text, i))
@@ -1373,9 +1373,9 @@ JSONPush: struct<W: Writer> {
     write_quoted: fn(^self, text: String) -[IO]> EncodingError! {
         _: self.quoted_len(text)
         self.write_byte(U8{34})
-        i := 0
+        ^i: 0
         loop i < text.count_bytes() {
-            scratch := [U8#6]{0, 0, 0, 0, 0, 0}
+            ^scratch: [U8#6]{0, 0, 0, 0, 0, 0}
             count: escaped_unit(text, i, scratch)
             window: scratch[0..<count]
             self.write_bytes(window)
@@ -1442,7 +1442,7 @@ JSONPush: struct<W: Writer> {
                     return Err(self.state_error("Key is only valid while an object expects a key"))
                 }
                 at: self.frames.len() - 1
-                first := false
+                ^first: false
                 if self.frames[at] == .ObjectKey(is_first) -> first = is_first else {
                     return Err(self.state_error("Key is only valid while an object expects a key"))
                 }
@@ -1483,8 +1483,8 @@ JSONPush: struct<W: Writer> {
             }
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ObjectStart -> {}
         }
-        payload := ""
-        size := 0
+        ^payload: ""
+        ^size: 0
         if event == {
             .Null -> size = 4
             .Bool(value) -> size = if value -> 4 else -> 5
@@ -1543,7 +1543,7 @@ JSONPush: struct<W: Writer> {
     }
 
     canonical_sink: fn(self) -> Int? Never! {
-        at := self.canonical_frames.len()
+        ^at: self.canonical_frames.len()
         loop at > 0 {
             at -= 1
             if self.canonical_frames[at].is_object -> return Val(at)
@@ -1569,7 +1569,7 @@ JSONPush: struct<W: Writer> {
 
     canonical_quote: fn(self, text: String) -> [U8] EncodingError! {
         size: self.quoted_len(text) + 2
-        out := [U8]{}
+        ^out: [U8]{}
         if !mem.__list_reserve_exact<U8>(out, size) {
             return Err(self.error(.Limit, "canonical JSON string allocation failed within configured bounds"))
         }
@@ -1615,7 +1615,7 @@ JSONPush: struct<W: Writer> {
         if growth > 0 && !mem.__list_reserve_exact<{key: String, value: [U8]}>(self.canonical_frames[at].entries, growth) {
             return Err(self.error(.Limit, "canonical JSON entry allocation failed within configured bounds"))
         }
-        frame := self.canonical_frames.pop() ?? panic("canonical value requires an active object frame")
+        ^frame: self.canonical_frames.pop() ?? panic("canonical value requires an active object frame")
         key: frame.key.move() ?? ""
         value: frame.value.move()
         frame.key = None
@@ -1625,7 +1625,7 @@ JSONPush: struct<W: Writer> {
     }
 
     canonical_render_object: fn(^self) -> [U8] EncodingError! {
-        frame := self.canonical_frames.pop() ?? return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
+        ^frame: self.canonical_frames.pop() ?? return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
         if !frame.is_object || frame.key != None {
             return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
         }
@@ -1642,8 +1642,8 @@ JSONPush: struct<W: Writer> {
                 return Err(self.error(.Syntax, "JCS requires unique object keys"))
             }
         }
-        size := 2
-        quoted := [[U8]]{}
+        ^size: 2
+        ^quoted: [[U8]]{}
         loop i in 0..<frame.entries.len() {
             text: self.canonical_quote(frame.entries[i].key)
             size += (if i > 0 -> 1 else -> 0) + text.len() + 1 + frame.entries[i].value.len()
@@ -1653,7 +1653,7 @@ JSONPush: struct<W: Writer> {
             self.canonical_retained -= Int{frame.retained}
             return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))
         }
-        out := [U8]{}
+        ^out: [U8]{}
         if !mem.__list_reserve_exact<U8>(out, size) {
             self.canonical_retained -= Int{frame.retained}
             return Err(self.error(.Limit, "canonical JSON object allocation failed within configured bounds"))
@@ -1724,7 +1724,7 @@ JSONPush: struct<W: Writer> {
         if (event == .ArrayStart || event == .ObjectStart) && self.canonical_frames.len() >= self.limits.max_depth {
             return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
         }
-        encoded := [U8]{}
+        ^encoded: [U8]{}
         if event == {
             .Null -> encoded = [U8]{110, 117, 108, 108}
             .Bool(value) -> encoded = if value -> [U8]{116, 114, 117, 101} else -> [U8]{102, 97, 108, 115, 101}
@@ -1827,7 +1827,7 @@ canonical_frame: fn(is_object: Bool) -> CanonicalFrame Never! {
 next_text_unit: fn(text: String, at: Int) -> {unit: Int, position: Int, pending: Int} Never! {
     first: Int{byte_at(text, at)}
     width: scalar_width(U8{first})
-    codepoint := first
+    ^codepoint: first
     if width == 2 -> codepoint = ((first & 31) << 6) | (Int{byte_at(text, at + 1)} & 63) else if width == 3 {
         codepoint = ((first & 15) << 12) | ((Int{byte_at(text, at + 1)} & 63) << 6) | (Int{byte_at(text, at + 2)} & 63)
     } else if width == 4 {
@@ -1838,18 +1838,18 @@ next_text_unit: fn(text: String, at: Int) -> {unit: Int, position: Int, pending:
 }
 
 compare_text_units: fn(left: String, right: String) -> Int Never! {
-    li := 0
-    ri := 0
-    lp := -1
-    rp := -1
+    ^li: 0
+    ^ri: 0
+    ^lp: -1
+    ^rp: -1
     loop {
         left_end: li >= left.count_bytes() && lp < 0
         right_end: ri >= right.count_bytes() && rp < 0
         if left_end && right_end -> return 0
         if left_end -> return -1
         if right_end -> return 1
-        lu := lp
-        ru := rp
+        ^lu: lp
+        ^ru: rp
         if lp >= 0 -> lp = -1 else {
             decoded: next_text_unit(left, li)
             lu = decoded.unit
@@ -1871,9 +1871,9 @@ parse_int64: fn(text: String) -> Int? Never! {
     length: text.count_bytes()
     if length == 0 || length > 20 -> return None
     negative: byte_at(text, 0) == (U8{45})
-    at := if negative -> 1 else -> 0
+    ^at: if negative -> 1 else -> 0
     if at == length -> return None
-    magnitude := U64{0}
+    ^magnitude: U64{0}
     loop at < length {
         byte: Int{byte_at(text, at)}
         if byte < 48 || byte > 57 -> return None
@@ -1894,7 +1894,7 @@ parse_int64: fn(text: String) -> Int? Never! {
 
 ascii_text: fn(bytes: ^^[U8]) -> String Never! {
     rt.utf8_validate(bytes) ?? panic("Core ASCII formatter produced invalid UTF-8")
-    out := ""
+    ^out: ""
     #Unsafe("the shared UTF-8 validator accepted this exact owned formatter buffer") {
         out = rt.bytes_into_text(bytes)
     }
@@ -1906,7 +1906,7 @@ ascii_text: fn(bytes: ^^[U8]) -> String Never! {
 // None for any other text, or when `open` is not a quote.
 plain_quoted: fn(bytes: [U8], open: Int) -> String? Never! {
     if open < 0 || open >= bytes.len() || bytes[open] != (U8{34}) -> return None
-    at := open + 1
+    ^at: open + 1
     loop at < bytes.len() {
         n: Int{bytes[at]}
         if n == 34 {
@@ -1924,11 +1924,11 @@ plain_quoted: fn(bytes: [U8], open: Int) -> String? Never! {
 // display. Re-spell the existing shortest digits without another kernel.
 wire_float: fn(value: Float) -> String Never! {
     shown: "{value}"
-    bytes := shown.bytes()
+    ^bytes: shown.bytes()
     negative: bytes[0] == (U8{45})
     start: if negative -> 1 else -> 0
-    decimal := -1
-    exponent_at := bytes.len()
+    ^decimal: -1
+    ^exponent_at: bytes.len()
     loop i in start..<bytes.len() {
         if bytes[i] == (U8{46}) -> decimal = i - start
         if bytes[i] == (U8{101}) || bytes[i] == (U8{69}) {
@@ -1937,10 +1937,10 @@ wire_float: fn(value: Float) -> String Never! {
         }
     }
     if decimal < 0 -> decimal = exponent_at - start
-    exponent := 0
+    ^exponent: 0
     if exponent_at < bytes.len() {
-        at := exponent_at + 1
-        exponent_negative := false
+        ^at: exponent_at + 1
+        ^exponent_negative: false
         if bytes[at] == (U8{45}) || bytes[at] == (U8{43}) {
             exponent_negative = bytes[at] == (U8{45})
             at += 1
@@ -1952,7 +1952,7 @@ wire_float: fn(value: Float) -> String Never! {
         if exponent_negative -> exponent = -exponent
         loop bytes.len() > exponent_at -> _: bytes.pop()
     }
-    dot := -1
+    ^dot: -1
     loop i in start..<bytes.len() {
         if bytes[i] == (U8{46}) {
             dot = i
@@ -1972,7 +1972,7 @@ wire_float: fn(value: Float) -> String Never! {
         loop _ in 0..<(position - digits) -> bytes.push(U8{48})
     } else if position > 0 {
         bytes.push(U8{0})
-        i := bytes.len() - 1
+        ^i: bytes.len() - 1
         loop i > start + position {
             bytes[i] = bytes[i - 1]
             i -= 1
@@ -1981,7 +1981,7 @@ wire_float: fn(value: Float) -> String Never! {
     } else {
         prefix: 2 - position
         loop _ in 0..<prefix -> bytes.push(U8{0})
-        i := bytes.len() - 1
+        ^i: bytes.len() - 1
         loop i >= start + prefix {
             bytes[i] = bytes[i - prefix]
             i -= 1
@@ -2005,9 +2005,9 @@ JSONLinesPull: struct<R: Reader> {
             .Err(failure) -> {
                 // A record fold error carries no path; the parser still holds
                 // the record's open frames, so its own path is the deepest known.
-                inner := failure
+                ^inner: failure
                 if inner.path == "" -> inner.path = self.parser.path()
-                error := jsonl_under(inner, "$[{self.record_index}]")
+                ^error: jsonl_under(inner, "$[{self.record_index}]")
                 error.format = .JSONL
                 self.parser.discard()
                 self.terminal = Val(error)
@@ -2038,7 +2038,7 @@ JSONLinesPull: struct<R: Reader> {
         }
         first: self.parser.next()
         if first == None -> return Ok(None)
-        heap := FoldBudget{decoded: 0, tracked: 0}
+        ^heap: FoldBudget{decoded: 0, tracked: 0}
         tree: self.parser.fold(first, heap) ?? {
             self.parser.allocation.release(heap.tracked)
             return Err(err)
@@ -2061,7 +2061,7 @@ JSONLinesPull: struct<R: Reader> {
 
 jsonl_reader: fn<R: Reader>(input: ^^R, limits: EncodingLimits, typed_numbers: Bool) -> JSONLinesPull<R> EncodingError! {
     // The record fold rejects a repeated key itself while building each record.
-    parser := json_reader<R>(input, limits, true) ?? return Err(err)
+    ^parser: json_reader<R>(input, limits, true) ?? return Err(err)
     parser.record_mode = true
     parser.typed_numbers = typed_numbers
     Ok(JSONLinesPull<R>{parser: parser, record_index: 0, terminal: None})
@@ -2103,7 +2103,7 @@ write_tree: fn<W: Writer>(writer: ^JSONPush<W>, value: Dyn) -[IO]> EncodingError
 }
 
 jsonl_under: fn(error: EncodingError, segment: String) -> EncodingError Never! {
-    out := error
+    ^out: error
     suffix: if out.path.starts_with("$") -> out.path.slice(1, out.path.len()) else -> out.path
     out.path = "{segment}{suffix}"
     out
@@ -2111,17 +2111,17 @@ jsonl_under: fn(error: EncodingError, segment: String) -> EncodingError Never! {
 
 jsonl_tree_size: fn(value: Dyn, depth: Int, limits: EncodingLimits) -> Int EncodingError! {
     if (value == .Array(_) || value == .Object(_)) && depth >= limits.max_depth {
-        out := stream_error(.Limit, 0, 1, 1, "max_depth {limits.max_depth} exceeded")
+        ^out: stream_error(.Limit, 0, 1, 1, "max_depth {limits.max_depth} exceeded")
         out.path = "$"
         return Err(out)
     }
-    size := 0
+    ^size: 0
     if value == {
         .Null | .Bool(_) -> { size = 1 }
         .Int(_) -> { size = 8 }
         .Float(number) -> {
             if !math.is_finite(number) {
-                out := stream_error(.Unsupported, 0, 1, 1, "JSON cannot encode a non-finite Float")
+                ^out: stream_error(.Unsupported, 0, 1, 1, "JSON cannot encode a non-finite Float")
                 out.path = "$"
                 return Err(out)
             }
@@ -2143,21 +2143,21 @@ jsonl_tree_size: fn(value: Dyn, depth: Int, limits: EncodingLimits) -> Int Encod
             }
         }
         .Number(_) | .Bytes(_) | .DateTime(_) -> {
-            reason := "internal JSON carrier escaped typed decode"
-            kind := EncodingErrorKind.State
+            ^reason: "internal JSON carrier escaped typed decode"
+            ^kind: EncodingErrorKind.State
             #Unsafe("classify the private Bytes carrier without borrowing or exposing its payload") {
                 if value == .Bytes(_) {
                     reason = "JSON cannot encode Bytes; encode bytes as Text explicitly"
                     kind = EncodingErrorKind.Unsupported
                 }
             }
-            out := stream_error(kind, 0, 1, 1, reason)
+            ^out: stream_error(kind, 0, 1, 1, reason)
             out.path = "$"
             return Err(out)
         }
     }
     if size > limits.max_item_bytes {
-        out := stream_error(.Limit, 0, 1, 1, "max_item_bytes {limits.max_item_bytes} exceeded")
+        ^out: stream_error(.Limit, 0, 1, 1, "max_item_bytes {limits.max_item_bytes} exceeded")
         out.path = "$"
         return Err(out)
     }
@@ -2179,7 +2179,7 @@ jsonl_wire_size: fn<W: Writer>(writer: JSONPush<W>, value: Dyn) -> Int EncodingE
         .Float(number) -> Ok(wire_float(number).count_bytes())
         .Text(text) -> jsonl_wire_add(writer, writer.quoted_len(text) ?? return Err(err), 2)
         .Array(items) -> {
-            size := 2
+            ^size: 2
             loop index in 0..<items.len() {
                 size = jsonl_wire_add(writer, size, if index > 0 -> 1 else -> 0) ?? return Err(err)
                 child: jsonl_wire_size(writer, items[index]) ?? return Err(err)
@@ -2188,8 +2188,8 @@ jsonl_wire_size: fn<W: Writer>(writer: JSONPush<W>, value: Dyn) -> Int EncodingE
             Ok(size)
         }
         .Object(_) -> {
-            size := 2
-            first := true
+            ^size: 2
+            ^first: true
             loop entry in object_entries(value) {
                 size = jsonl_wire_add(writer, size, if first -> 0 else -> 1) ?? return Err(err)
                 key: writer.quoted_len(entry.key) ?? return Err(err)
@@ -2229,7 +2229,7 @@ JSONLinesPush: struct<W: Writer> {
         if self.finished -> return self.fail(self.writer.state_error("write called after finish"))
         self.close_line() ?? return Err(err)
         _: jsonl_tree_size(value, 0, self.writer.limits) ?? {
-            out := err
+            ^out: err
             out.byte_offset = self.writer.total
             out.line = Val(self.record_index + 1)
             out.column = Val(1)
@@ -2250,7 +2250,7 @@ JSONLinesPush: struct<W: Writer> {
     }
 
     fail: fn(^self, error: EncodingError) EncodingError! {
-        first := jsonl_under(error, "$[{self.record_index}]")
+        ^first: jsonl_under(error, "$[{self.record_index}]")
         first.format = .JSONL
         if self.terminal == None -> self.writer.discard()
         if self.terminal == .Val(prior) -> return Err(prior)
@@ -2276,7 +2276,7 @@ JSONLinesPush: struct<W: Writer> {
 
 jsonl_writer: fn<W: Writer>(output: ^^W, limits: EncodingLimits) -> JSONLinesPush<W> EncodingError! {
     writer: json_writer(output, limits, false) ?? {
-        error := err
+        ^error: err
         error.format = .JSONL
         return Err(error)
     }
@@ -2309,7 +2309,7 @@ jsonl_writer: fn<W: Writer>(output: ^^W, limits: EncodingLimits) -> JSONLinesPus
 }
 
 #Test("expansion limits are checked even with an explicit total bound") {
-    limits := EncodingLimits.safe()
+    ^limits: EncodingLimits.safe()
     limits.max_total_bytes = Val(1000)
     limits.max_expansion_depth = 257
     if validate_limits(limits) == {
@@ -2319,7 +2319,7 @@ jsonl_writer: fn<W: Writer>(output: ^^W, limits: EncodingLimits) -> JSONLinesPus
 }
 
 #Test("JSONL preflight counts decoded tree bytes and retains nested error paths") {
-    limits := EncodingLimits.safe()
+    ^limits: EncodingLimits.safe()
     assert_eq(jsonl_tree_size(Dyn.Int(4), 0, limits) ?? panic("size"), 8)
     limits.max_item_bytes = 4
     value: object_from_entries([{key: "a", value: Dyn.Text("longer")}])

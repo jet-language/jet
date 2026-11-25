@@ -93,10 +93,10 @@ body_index_values_debug: fn(values: SemaComptimeBodyValues) -> String {
 // this file builds gives each the same ModuleID, so a value or a query named
 // by identity text agrees with the registration graphs below.
 body_index_table: fn() -> ModuleTable Never! {
-    table := module_table()
+    ^table: module_table()
     loop text in
         ([String]{"mod.one", "mod.two", "different.module", "scale.module", "shared.module", "prefix.module", "append.module", "late.module", "append.scale", "constant.0", "constant.1"}) {
-        _ := module_intern(table, text)
+        ^_: module_intern(table, text)
     }
     table
 }
@@ -110,7 +110,7 @@ body_index_environment: fn(module_identity: String, file: String) -> SemaScopeEn
 }
 
 body_index_scopes: fn(function_key: String) -> SemaScopeTable Never! {
-    scopes := sema_scope_init(module_none())
+    ^scopes: sema_scope_init(module_none())
     scopes.frames.push(SemaScopeFrame{parent: 0, owner: function_key})
     scopes.current = 1
     scopes
@@ -134,7 +134,7 @@ body_index_value: fn(module_identity: String, function_key: String, source: Span
 body_index_linear_value: fn(values: [SemaComptimeBodyValue], length: Int, module_identity: String, function_key: String, source: Span, site: Span) -> SemaComptimeBodyValue? {
     module_id: body_index_module(module_identity)
     key: "{module_id.id}.{sema_comptime_body_destination_key(function_key, source, site)}"
-    found := SemaComptimeBodyValue?{None}
+    ^found: SemaComptimeBodyValue?{None}
     loop index in 0..<length {
         value: values[index]
         if value.module_identity == module_id && value.key == key {
@@ -147,7 +147,7 @@ body_index_linear_value: fn(values: [SemaComptimeBodyValue], length: Int, module
 
 body_index_query: fn(context: SemaCheckContext, module_identity: String, function_key: String, source: Span, site: Span) {
     actual: sema_comptime_body_value_find(context, body_index_module(module_identity), function_key, source, site)
-    expected := SemaComptimeBodyValue?{None}
+    ^expected: SemaComptimeBodyValue?{None}
     if context.comptime_body_values.facts == .Val(facts) {
         permit: facts.guard_read()
         expected = body_index_linear_value(permit.value.values, context.comptime_body_values.length, module_identity, function_key, source, site)
@@ -156,23 +156,23 @@ body_index_query: fn(context: SemaCheckContext, module_identity: String, functio
 }
 
 body_index_source_identity: fn() {
-    environment := body_index_environment("mod.one", "identity.jet")
+    ^environment: body_index_environment("mod.one", "identity.jet")
     program: sema_program_tables_snapshot()
     scopes: body_index_scopes("function.one")
     other_scopes: body_index_scopes("function.two")
     source: Span{start: 10, end: 20}
     site: Span{start: 3, end: 7}
     expression: Expr.Int{value: 1, span: source, width: None, raw: None, id: AST_NODE_GENERATED}
-    context := sema_check_context_init()
-    _ := sema_comptime_body_capture(context, environment, program, scopes, "base", expression, Type.Int, source, site)
+    ^context: sema_check_context_init()
+    ^_: sema_comptime_body_capture(context, environment, program, scopes, "base", expression, Type.Int, source, site)
     environment.module_identity = body_index_module("mod.two")
-    _ := sema_comptime_body_capture(context, environment, program, scopes, "module", expression, Type.Int, source, site)
+    ^_: sema_comptime_body_capture(context, environment, program, scopes, "module", expression, Type.Int, source, site)
     environment.module_identity = body_index_module("mod.one")
-    _ := sema_comptime_body_capture(context, environment, program, other_scopes, "function", expression, Type.Int, source, site)
-    _ := sema_comptime_body_capture(context, environment, program, scopes, "source start", expression, Type.Int, Span{start: 11, end: 20}, site)
-    _ := sema_comptime_body_capture(context, environment, program, scopes, "source end", expression, Type.Int, Span{start: 10, end: 21}, site)
-    _ := sema_comptime_body_capture(context, environment, program, scopes, "site start", expression, Type.Int, source, Span{start: 4, end: 7})
-    _ := sema_comptime_body_capture(context, environment, program, scopes, "site end", expression, Type.Int, source, Span{start: 3, end: 8})
+    ^_: sema_comptime_body_capture(context, environment, program, other_scopes, "function", expression, Type.Int, source, site)
+    ^_: sema_comptime_body_capture(context, environment, program, scopes, "source start", expression, Type.Int, Span{start: 11, end: 20}, site)
+    ^_: sema_comptime_body_capture(context, environment, program, scopes, "source end", expression, Type.Int, Span{start: 10, end: 21}, site)
+    ^_: sema_comptime_body_capture(context, environment, program, scopes, "site start", expression, Type.Int, source, Span{start: 4, end: 7})
+    ^_: sema_comptime_body_capture(context, environment, program, scopes, "site end", expression, Type.Int, source, Span{start: 3, end: 8})
     body_index_require(context.comptime_body_sources.len() == 7, "source dedup preserves module/function and all source/site span endpoints")
     expected_names: [String]{"base", "module", "function", "source start", "source end", "site start", "site end"}
     loop index in 0..<expected_names.len() {
@@ -181,18 +181,18 @@ body_index_source_identity: fn() {
 }
 
 body_index_identity_and_lifecycle: fn() {
-    environment := body_index_environment("mod.one", "first.jet")
+    ^environment: body_index_environment("mod.one", "first.jet")
     program: sema_program_tables_snapshot()
     scopes: body_index_scopes("function.one")
     source: Span{start: 10, end: 20}
     site: Span{start: 3, end: 7}
-    context := sema_check_context_init()
+    ^context: sema_check_context_init()
     body_index_query(context, "mod.one", "function.one", source, site)
     first: sema_comptime_body_capture(context, environment, program, scopes, "original", Expr.Int{value: 7, span: source, width: None, raw: Val("7"), id: AST_NODE_GENERATED}, Type.Int, source, site)
     environment.source_file = "replacement.jet"
     duplicate: sema_comptime_body_capture(context, environment, program, scopes, "different", Expr.Bool{value: true, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
     body_index_require(duplicate == first && context.comptime_body_sources.len() == 1, "duplicate capture returns the entire first row, including file/name/expression/type")
-    variants := [SemaComptimeBodyValue]{
+    ^variants: [SemaComptimeBodyValue]{
         body_index_value("mod.one", "function.one", source, site, 1),
         body_index_value("mod.two", "function.one", source, site, 2),
         body_index_value("mod.one", "function.two", source, site, 3),
@@ -213,7 +213,7 @@ body_index_identity_and_lifecycle: fn() {
     body_index_query(context, "mod.one", "function.one", Span{start: 10, end: 21}, site)
     body_index_query(context, "mod.one", "function.one", source, Span{start: 4, end: 7})
     body_index_query(context, "mod.one", "function.one", source, Span{start: 3, end: 8})
-    replacements := variants.move()
+    ^replacements: variants.move()
     replacements[0] = body_index_value("mod.two", "function.two", source, site, 9)
     sema_comptime_body_values_replace(context, replacements)
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", source, site) == None, "same-length replacement drops the old key")
@@ -236,13 +236,13 @@ body_index_identity_and_lifecycle: fn() {
     sema_comptime_body_values_replace(context, [SemaComptimeBodyValue]{repeated})
     sema_comptime_body_values_replace(context, [SemaComptimeBodyValue]{changed_value})
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", source, site) == Val((changed_value)), "same-key same-length replacement reads the current canonical payload")
-    wrong_module := repeated
+    ^wrong_module: repeated
     wrong_module.module_identity = body_index_module("mod.two")
     sema_comptime_body_values_replace(context, [SemaComptimeBodyValue]{repeated, wrong_module})
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", source, site) == Val((repeated)), "an equal key with a different module is not a second match")
     mark: sema_check_context_mark(context)
     sema_comptime_body_source_append(context, first)
-    _ := sema_comptime_body_capture(context, environment, program, scopes, "temporary", Expr.Int{value: 8, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, Span{start: 30, end: 31})
+    ^_: sema_comptime_body_capture(context, environment, program, scopes, "temporary", Expr.Int{value: 8, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, Span{start: 30, end: 31})
     sema_comptime_body_values_replace(context, [SemaComptimeBodyValue]{repeated, wrong_module, repeated})
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", source, site) == None, "a probe may append a second matching value")
     sema_check_context_rollback(context, mark.move())
@@ -250,13 +250,13 @@ body_index_identity_and_lifecycle: fn() {
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", source, site) == Val((repeated)), "rollback rebuilds value uniqueness from the retained rows")
     retained: sema_comptime_body_capture(context, environment, program, scopes, "after rollback", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
     body_index_require(retained == first && context.comptime_body_sources.len() == 1, "duplicate pop retains the first source index")
-    child := sema_check_context_snapshot(context)
+    ^child: sema_check_context_snapshot(context)
     start: child.comptime_body_sources.len()
     added: sema_comptime_body_capture(child, environment, program, scopes, "lambda", Expr.Int{value: 9, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, Span{start: 40, end: 41})
     sema_expression_lambda_merge_context_facts(child, context, 0, 0, 0, start, 0, 0, 0)
     merged: sema_comptime_body_capture(context, environment, program, scopes, "merged duplicate", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, Span{start: 40, end: 41})
     body_index_require(merged == added && context.comptime_body_sources.len() == 2 && child.comptime_body_sources.len() == 2, "real lambda merge indexes its appended rows without changing snapshot identity")
-    replacement_parent := sema_check_context_init()
+    ^replacement_parent: sema_check_context_init()
     sema_comptime_body_source_append(replacement_parent, added)
     sema_comptime_body_source_append(replacement_parent, first)
     child = sema_check_context_snapshot(replacement_parent)
@@ -265,7 +265,7 @@ body_index_identity_and_lifecycle: fn() {
     body_index_require(reordered == first && child.comptime_body_sources.len() == 2, "snapshot source replacement rebuilds row positions at the same length")
     sema_comptime_body_sources_truncate(child, 0)
     sema_comptime_body_values_replace(child, [SemaComptimeBodyValue]{})
-    _ := sema_comptime_body_capture(child, environment, program, scopes, "fresh", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
+    ^_: sema_comptime_body_capture(child, environment, program, scopes, "fresh", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
     body_index_require(child.comptime_body_sources.len() == 1 && child.comptime_body_sources[0].name == "fresh" && context.comptime_body_sources.len() == 2, "reset and recapture do not use a stale row or alter the parent")
     body_index_query(child, "mod.one", "function.one", source, site)
     body_index_query(context, "mod.one", "function.one", source, site)
@@ -278,12 +278,12 @@ body_index_size: fn(size: Int) {
     environment: body_index_environment("scale.module", "scale.jet")
     program: sema_program_tables_snapshot()
     scopes: body_index_scopes("scale.function")
-    context := sema_check_context_init()
-    values := [SemaComptimeBodyValue]{}
+    ^context: sema_check_context_init()
+    ^values: [SemaComptimeBodyValue]{}
     loop index in 0..<size {
         source: Span{start: index * 4, end: index * 4 + 2}
         site: Span{start: index * 4 + 2, end: index * 4 + 3}
-        _ := sema_comptime_body_capture(context, environment, program, scopes, "row_{index}", Expr.Int{value: index, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, site)
+        ^_: sema_comptime_body_capture(context, environment, program, scopes, "row_{index}", Expr.Int{value: index, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, site)
         values.push(body_index_value("scale.module", "scale.function", source, site, index))
     }
     loop index in 0..<size {
@@ -294,9 +294,9 @@ body_index_size: fn(size: Int) {
         body_index_require(existing.name == expected_name && context.comptime_body_sources[index].name == existing.name, "scaled duplicate capture retains source order and the first payload")
     }
     body_index_require(context.comptime_body_sources.len() == size, "scaled unique source cardinality")
-    duplicate := values[size - 1].copy()
+    ^duplicate: values[size - 1].copy()
     values.push(duplicate)
-    mismatch := values[0]
+    ^mismatch: values[0]
     mismatch.module_identity = body_index_module("different.module")
     values.push(mismatch)
     sema_comptime_body_values_replace(context, values)
@@ -313,9 +313,9 @@ body_index_size: fn(size: Int) {
 // publication and opens its own lexical read window; replacing or truncating a
 // context cannot mutate that publication or another task's visible prefix.
 body_index_shared_read: fn(values: SemaComptimeBodyValues, size: Int) -> Int {
-    context := sema_check_context_init()
+    ^context: sema_check_context_init()
     context.comptime_body_values = values.copy()
-    checked := 0
+    ^checked: 0
     loop index in 0..<size {
         source: Span{start: index * 4, end: index * 4 + 2}
         site: Span{start: index * 4 + 2, end: index * 4 + 3}
@@ -329,11 +329,11 @@ body_index_shared_read: fn(values: SemaComptimeBodyValues, size: Int) -> Int {
 
 body_index_shared_size: fn(size: Int) {
     rows: loop index in 0..<size -> body_index_value("shared.module", "shared.function", Span{start: index * 4, end: index * 4 + 2}, Span{start: index * 4 + 2, end: index * 4 + 3}, index)
-    context := sema_check_context_init()
+    ^context: sema_check_context_init()
     work: Shared{SemaComptimeBodyWork{}}
     context.comptime_body_values = sema_comptime_body_values_freeze(rows, Val(work.copy()), true)
     publication: context.comptime_body_values.copy()
-    child := sema_check_context_snapshot(context)
+    ^child: sema_check_context_snapshot(context)
     sema_comptime_body_values_truncate(child, 0)
     body_index_require(context.comptime_body_values.length == size && child.comptime_body_values.length == 0, "fork truncation changes only its own visible prefix")
     if publication.facts == .Val(facts) {
@@ -362,10 +362,10 @@ body_index_duplicate_prefixes: fn() {
     source: Span{start: 10, end: 20}
     site: Span{start: 3, end: 7}
     repeated: body_index_value("prefix.module", "prefix.function", source, site, 7)
-    context := sema_check_context_init()
+    ^context: sema_check_context_init()
     sema_comptime_body_values_replace(context, [SemaComptimeBodyValue]{repeated, repeated, repeated})
     loop length in 0..<4 {
-        child := sema_check_context_snapshot(context)
+        ^child: sema_check_context_snapshot(context)
         sema_comptime_body_values_truncate(child, length)
         actual: sema_comptime_body_value_find(child, body_index_module("prefix.module"), "prefix.function", source, site)
         expected: if length == 1 -> Val(repeated) else -> None
@@ -377,32 +377,32 @@ body_index_duplicate_prefixes: fn() {
 
 body_index_publication_lifecycle: fn() {
     source: "staged: fn() -> Int Never! {{ 1 }}\n"
-    parsed := parse_source(source.bytes())
+    ^parsed: parse_source(source.bytes())
     body_index_require(parsed.diagnostics.len() == 0, "the real publication-lifecycle module parses")
-    table := body_index_table()
-    canonical := jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("the canonical effect module declares no effects")
+    ^table: body_index_table()
+    ^canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("the canonical effect module declares no effects")
     bytes: source.bytes()
     input: SemaRegistrationModuleInput{package_identity: "body-index", module_identity: body_index_module("mod.one"), module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "lifecycle.jet", source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: "lifecycle.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
     facts: SemaBuildFacts{package_name: "body-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     canonical_identity: canonical.module_identity.copy()
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "body-index", body_index_module("mod.one"), canonical_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "body-index", body_index_module("mod.one"), canonical_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     body_index_require(graph.complete && graph.internal_problem == None, "the real publication-lifecycle graph registers")
     span: Span{start: 10, end: 20}
     site: Span{start: 3, end: 7}
     first: body_index_value("mod.one", "function.one", span, site, 7)
     initial: SemaComptimeItemValue{module_identity: first.module_identity, key: first.key, destination_key: first.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: first.value, ty: first.ty, place: first.place}
-    available := sema_comptime_available_constants(graph, [SemaComptimeItemValue]{initial})
+    ^available: sema_comptime_available_constants(graph, [SemaComptimeItemValue]{initial})
     sites: sema_comptime_value_sites(graph)
-    trail := sema_graph_trail_init()
-    program := sema_comptime_environment_tables(graph, [SemaComptimeItemValue]{initial}, None)
-    environment := sema_comptime_environment(program, [SemaComptimeItemValue]{initial}, None)
-    empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
+    ^trail: sema_graph_trail_init()
+    ^program: sema_comptime_environment_tables(graph, [SemaComptimeItemValue]{initial}, None)
+    ^environment: sema_comptime_environment(program, [SemaComptimeItemValue]{initial}, None)
+    ^empty: sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
     body_index_require(sema_scope_environment_enter_comptime_module(environment, program, body_index_module("mod.one"), empty), "an item check retargets the registered module")
-    context := sema_check_context_init()
+    ^context: sema_check_context_init()
     context.comptime_body_values = environment.comptime_body_values.copy()
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", span, site) == None, "the item check intentionally sees no body values")
     body_index_require(body_index_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{}:Debug}", "an empty selected view sees the original empty ordered row list")
-    full := environment.comptime_body_publication.copy()
+    ^full: environment.comptime_body_publication.copy()
     body_index_require(sema_scope_environment_enter_comptime_module(environment, program, body_index_module("mod.one"), full), "the next function restores the publication")
     context.comptime_body_values = environment.comptime_body_values.copy()
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", span, site) == Val((first)), "empty item reset cannot erase a published function value")
@@ -419,7 +419,7 @@ body_index_publication_lifecycle: fn() {
             body_index_require(old_facts.same(new_facts), "append retains the single authenticated facts owner")
         } else { panic("append lost its facts owner") }
     } else { panic("the old prefix lost its facts owner") }
-    next_full := environment.comptime_body_publication.copy()
+    ^next_full: environment.comptime_body_publication.copy()
     body_index_require(sema_scope_environment_enter_comptime_module(environment, program, body_index_module("mod.one"), next_full), "the next function selects the new publication")
     context.comptime_body_values = environment.comptime_body_values.copy()
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", span, site) == Val((first)) && sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", span, next_site) == Val((second)), "the new function sees the entire ordered updated publication")
@@ -443,9 +443,9 @@ body_index_append_prefixes: fn() {
     first: body_index_value("append.module", "append.function", source, site, 7)
     different: body_index_value("append.module", "append.function", source, site, 9)
     late: body_index_value("late.module", "late.function", source, site, 11)
-    publication := SemaComptimeBodyValues{}
+    ^publication: SemaComptimeBodyValues{}
     empty: publication.copy()
-    items := [SemaComptimeItemValue]{body_index_item(first, SemaComptimeItemKind.Constant), body_index_item(first, SemaComptimeItemKind.BodyExpression)}
+    ^items: [SemaComptimeItemValue]{body_index_item(first, SemaComptimeItemKind.Constant), body_index_item(first, SemaComptimeItemKind.BodyExpression)}
     sema_comptime_body_values_append_items(publication, items, 0)
     one: publication.copy()
     items.push(body_index_item(different, SemaComptimeItemKind.BodyExpression))
@@ -457,7 +457,7 @@ body_index_append_prefixes: fn() {
     sema_comptime_body_values_append_items(publication, items, 3)
     views: [SemaComptimeBodyValues]{empty.move(), one.copy(), two.copy(), publication.copy()}
     loop index in 0..<views.len() {
-        context := sema_check_context_init()
+        ^context: sema_check_context_init()
         context.comptime_body_values = views[index].copy()
         actual: sema_comptime_body_value_find(context, body_index_module("append.module"), "append.function", source, site)
         expected: if index == 1 -> Val(first) else -> None
@@ -466,12 +466,12 @@ body_index_append_prefixes: fn() {
         body_index_require(sema_comptime_body_value_find(context, body_index_module("late.module"), "late.function", source, site) == (if index == 3 -> Val(late) else -> None), "a late module and key are invisible to earlier prefixes")
     }
     body_index_require(body_index_values_debug(one) == "{[SemaComptimeBodyValue]{first}:Debug}" && body_index_values_debug(two) == "{[SemaComptimeBodyValue]{first, different}:Debug}", "prefix rows match the canonical ordered list Debug")
-    restored := sema_check_context_init()
+    ^restored: sema_check_context_init()
     restored.comptime_body_values = publication.copy()
     mark: sema_check_context_mark(restored)
     sema_comptime_body_values_replace(restored, [SemaComptimeBodyValue]{late})
     body_index_require(sema_comptime_body_value_find(restored, body_index_module("late.module"), "late.function", source, site) == Val((late)), "replacement publishes an isolated new generation")
-    replacement := restored.comptime_body_values.copy()
+    ^replacement: restored.comptime_body_values.copy()
     replacement_items: [SemaComptimeItemValue]{body_index_item(late, SemaComptimeItemKind.BodyExpression), body_index_item(first, SemaComptimeItemKind.BodyExpression)}
     sema_comptime_body_values_append_items(replacement, replacement_items, 1)
     body_index_require(replacement.length == 2 && publication.length == 4 && restored.comptime_body_values.length == 1, "append to a replacement generation cannot retarget an older owner or its selected prefix")
@@ -482,8 +482,8 @@ body_index_append_prefixes: fn() {
 
 body_index_append_size: fn(size: Int) {
     work: Shared{SemaComptimeBodyWork{}}
-    publication := SemaComptimeBodyValues{work: Val(work.copy())}
-    items := [SemaComptimeItemValue]{}
+    ^publication: SemaComptimeBodyValues{work: Val(work.copy())}
+    ^items: [SemaComptimeItemValue]{}
     loop index in 0..<size {
         from: items.len()
         row: body_index_value("append.scale", "append.function", Span{start: index * 4, end: index * 4 + 2}, Span{start: index * 4 + 2, end: index * 4 + 3}, index)
@@ -497,17 +497,17 @@ body_index_append_size: fn(size: Int) {
 }
 
 body_index_constant_graph: fn(sources: [String]) -> SemaRegistrationGraph {
-    inputs := [SemaRegistrationModuleInput]{}
-    table := body_index_table()
+    ^inputs: [SemaRegistrationModuleInput]{}
+    ^table: body_index_table()
     loop index in 0..<sources.len() {
-        parsed := parse_source(sources[index].bytes())
+        ^parsed: parse_source(sources[index].bytes())
         body_index_require(!sema_has_error_since(parsed.diagnostics, 0), "the real constant-index module parses")
         file: "constant_{index}.jet"
         segments: jet_driver_source_segments(file, sources[index])
         // The module path is built again from the index; the source file takes `file`.
         inputs.push(SemaRegistrationModuleInput{package_identity: "constant-index", module_identity: module_intern(table, "constant.{index}"), module_name: "module_{index}", core_source_alias: "", module_path: "constant_{index}.jet", source_file: file.move(), source_segments: segments, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: sources[index]})
     }
-    canonical := jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("the canonical effect module declares no effects")
+    ^canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("the canonical effect module declares no effects")
     canonical_identity: canonical.module_identity.copy()
     inputs.push(canonical)
     facts: SemaBuildFacts{package_name: "constant-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
@@ -519,8 +519,8 @@ body_index_constant_value: fn(module_identity: String, key: String, number: Int)
 }
 
 body_index_constant_projection: fn() {
-    graph := body_index_constant_graph([String]{"first: 0\nsecond: 1\n", "first: 2\n"})
-    trail := sema_graph_trail_init()
+    ^graph: body_index_constant_graph([String]{"first: 0\nsecond: 1\n", "first: 2\n"})
+    ^trail: sema_graph_trail_init()
     body_index_require(graph.complete && graph.internal_problem == None && graph.modules[0].constants.len() == 2 && graph.modules[1].constants.len() == 1, "real constant declarations register in their authored order")
     first: body_index_constant_value("constant.0", symbol_table_key(graph.symbols, graph.modules[0].constants[0].symbol.id), 7)
     duplicate: body_index_constant_value("constant.0", first.key, 99)

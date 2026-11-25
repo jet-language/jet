@@ -19,7 +19,7 @@ FILE: "cross_server.db"
 titles: fn(state: Loadable<[[String:db.DBValue]], db.DBError>) -> String {
     if state == {
         .Loaded(rows) -> {
-            out := [String]{}
+            ^out: [String]{}
             loop row in rows -> out.push(db.row_text(row, "title") ?? "?")
             "[{out.join(",")}]"
         }
@@ -74,7 +74,7 @@ run: fn() {
     _: other.wait() ?? panic("server a ends")
 
     // B's next poll re-runs its binding; it reads until it does, or 3 s.
-    waited := 0
+    ^waited: 0
     loop titles(app.state(mine)) != "[from server a,from server b]" && waited < 3000 {
         time.sleep(20ms)
         waited += 20

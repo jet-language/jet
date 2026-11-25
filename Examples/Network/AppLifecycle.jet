@@ -32,7 +32,7 @@ place_order: fn(pool: DBPool) -> HTTPResponse HTTPError! {
 
 // What the client reads until the server closes the connection.
 read_all: fn(stream: TCPStream) -> String {
-    parts := [String]{}
+    ^parts: [String]{}
     loop {
         part: stream.read(8192) ?? break
         if part == "" -> break
@@ -68,7 +68,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     addr: listening.local_addr()
     print("2. bound, not serving yet: readiness {listening.readiness()}")
     serving: task { listening.serve() ?? panic("serve") }
-    polls := 0
+    ^polls: 0
     loop listening.readiness() != .Ready && polls < 400 {
         time.sleep(5ms)
         polls += 1

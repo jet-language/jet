@@ -12,7 +12,7 @@ canonical_effect_parsed: fn(label: String, source: String) -> [EffectDecl] Never
     if parsed.diagnostics.len() != 0 {
         panic("{label}: the effect text does not parse: {parsed.diagnostics:Debug}")
     }
-    decls := [EffectDecl]{}
+    ^decls: [EffectDecl]{}
     loop item in parsed.program.items {
         if item == .EffectDecl(declaration) -> decls.push(declaration)
     }
@@ -31,7 +31,7 @@ canonical_effect_require: fn(label: String, effects: EffectModuleSource) Never! 
             panic("{label}: declaration {index}: the parser reads {declaration:Debug}, the module holds {built:Debug}")
         }
     }
-    starts := [Int]{0}
+    ^starts: [Int]{0}
     loop (index, byte) in effects.source.bytes() {
         if byte == (U8{10}) -> starts.push(index + 1)
     }

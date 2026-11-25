@@ -168,7 +168,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
     kit_exec_write(files.join(directory, "second.out"), "second")
     cases_test_source(root, "alternatives", "step: jet -c 'printf second'\nstdout: one-of first.out second.out # host-dependent result\n")
     cases_test_source(root, "bless", "step: jet -c 'printf new'\nstdout: = new.out\n")
-    context := cases_test_context(root, files.join(root, "scratch"))
+    ^context: cases_test_context(root, files.join(root, "scratch"))
     assert_eq(kit_cases_run(cases_test_entry("alternatives"), context)[0].verdict.status, "PASS")
     context.bless.ids = [cases_test_entry("alternatives").path]
     assert_eq(kit_cases_run(cases_test_entry("alternatives"), context)[0].verdict.status, "REFUSED")
@@ -242,7 +242,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
     pid: Int.parse(outcome.run.stdout.trim().copy()) ?? panic("stray pid: {outcome.run.stdout}")
     assert(kit_steps_process_nonzombie(pid, "proc-readable-nonzombie"))
     kit_exec_stop_strays(scratch)
-    stopped := false
+    ^stopped: false
     loop _ in 0..<500 {
         if !kit_steps_process_nonzombie(pid, "proc-readable-nonzombie") {
             stopped = true

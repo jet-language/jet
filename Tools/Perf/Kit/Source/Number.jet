@@ -39,11 +39,11 @@ Shortest: struct {
 shortest: fn(value: Float) -> Shortest Never! {
     text: "{value:Debug}"
     bytes: text.bytes()
-    mantissa := [U8]{}
-    exponent := 0
-    exponent_sign := 1
-    in_exponent := false
-    point_at := -1
+    ^mantissa: [U8]{}
+    ^exponent: 0
+    ^exponent_sign: 1
+    ^in_exponent: false
+    ^point_at: -1
     loop byte in bytes {
         code: Int{byte}
         if in_exponent {
@@ -65,13 +65,13 @@ shortest: fn(value: Float) -> Shortest Never! {
         if code >= 48 && code <= 57 -> mantissa.push(byte)
     }
     if point_at < 0 -> point_at = mantissa.len()
-    point := point_at + exponent_sign * exponent
-    start := 0
+    ^point: point_at + exponent_sign * exponent
+    ^start: 0
     loop start < mantissa.len() && (Int{mantissa[start]}) == 48 {
         start += 1
         point -= 1
     }
-    end := mantissa.len()
+    ^end: mantissa.len()
     loop end > start && (Int{mantissa[end - 1]}) == 48 -> end -= 1
     Shortest{digits: String.from_bytes_lossy(mantissa[start..<end]), point: point}
 }
@@ -112,7 +112,7 @@ to_fixed: fn(value: Float, digits: Int) -> String Never! {
         parts.exponent >= 0 -> parts.mantissa * pow_int(2, parts.exponent) * pow_int(10, digits)
         else -> (2 * parts.mantissa * pow_int(10, digits) + pow_int(2, -parts.exponent)) /% (2 * pow_int(2, -parts.exponent))
     }
-    text := "{scaled}"
+    ^text: "{scaled}"
     if digits == 0 -> return text
     if text.bytes().len() <= digits -> text = "{"0".repeat(digits + 1 - text.bytes().len())}{text}"
     bytes: text.bytes()
@@ -142,16 +142,16 @@ js_space_len: fn(bytes: [U8], at: Int) -> Int Never! {
 // String.prototype.trim().
 js_trim: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    start := 0
+    ^start: 0
     loop start < bytes.len() {
         width: js_space_len(bytes, start)
         if width == 0 -> break
         start += width
     }
-    end := bytes.len()
+    ^end: bytes.len()
     loop end > start {
         // Find the sequence that ends at `end`.
-        lead := end - 1
+        ^lead: end - 1
         loop lead > start && (Int{bytes[lead]}) >= 128 && (Int{bytes[lead]}) < 192 -> lead -= 1
         width: js_space_len(bytes, lead)
         if width == 0 || lead + width != end -> break
@@ -172,7 +172,7 @@ digit_value: fn(code: Int, radix: Int) -> Int Never! {
 
 // The end of the run of decimal digits that starts at `at`.
 digits_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    end := at
+    ^end: at
     loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 -> end += 1
     end
 }
@@ -196,7 +196,7 @@ number_from_text: fn(raw: String) -> Float Never! {
             else -> 0
         }
         if radix > 0 {
-            value := 0
+            ^value: 0
             loop at in 2..<bytes.len() {
                 digit: digit_value(Int{bytes[at]}, radix)
                 if digit < 0 -> return math.NAN
@@ -206,8 +206,8 @@ number_from_text: fn(raw: String) -> Float Never! {
         }
     }
     // [+-] (digits [. digits?] | . digits) ([eE] [+-] digits)?
-    at := 0
-    sign := ""
+    ^at: 0
+    ^sign: ""
     if (Int{bytes[0]}) == 43 || (Int{bytes[0]}) == 45 {
         if (Int{bytes[0]}) == 45 -> sign = "-"
         at = 1
@@ -215,17 +215,17 @@ number_from_text: fn(raw: String) -> Float Never! {
     whole_end: digits_end(bytes, at)
     whole: String.from_bytes_lossy(bytes[at..<whole_end])
     at = whole_end
-    fraction := ""
+    ^fraction: ""
     if at < bytes.len() && (Int{bytes[at]}) == 46 {
         fraction_end: digits_end(bytes, at + 1)
         fraction = String.from_bytes_lossy(bytes[at + 1..<fraction_end])
         at = fraction_end
     }
     if whole == "" && fraction == "" -> return math.NAN
-    exponent := "0"
+    ^exponent: "0"
     if at < bytes.len() && (Int{bytes[at]} == 101 || Int{bytes[at]} == 69) {
         at += 1
-        exponent_sign := ""
+        ^exponent_sign: ""
         if at < bytes.len() && (Int{bytes[at]} == 43 || Int{bytes[at]} == 45) {
             if (Int{bytes[at]}) == 45 -> exponent_sign = "-"
             at += 1

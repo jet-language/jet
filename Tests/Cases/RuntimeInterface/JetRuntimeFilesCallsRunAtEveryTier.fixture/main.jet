@@ -8,7 +8,7 @@ use files: jet.runtime.files
 listing: fn(key: Int, index: Int, output: ^[String]) -[FS.Read]> Bool {
     opened: files.entries_read_dir(key, index)
     if opened.status_reason != None -> return false
-    children := [Int]{}
+    ^children: [Int]{}
     loop {
         entry: files.entries_next(key, index)
         if entry.status_reason != None -> return false
@@ -23,7 +23,7 @@ listing: fn(key: Int, index: Int, output: ^[String]) -[FS.Read]> Bool {
     loop child in children {
         kind: files.entries_file_type(key, child)
         if kind.status_reason != None -> return false
-        label := "other"
+        ^label: "other"
         if kind.file -> label = "file"
         if kind.directory -> label = "dir"
         output.push("{label} {files.entries_shown(key, child)}")
@@ -57,7 +57,7 @@ copy_tree: fn(key: Int, index: Int) -[FS]> Bool {
 
 show: fn(root: String) -[IO, FS.Read]> {
     key: files.entries_context(root, "", false)
-    paths := [String]{}
+    ^paths: [String]{}
     print(listing(key, 0, paths))
     loop path in paths -> print(path)
     files.entries_close(key)

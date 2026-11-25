@@ -4,7 +4,7 @@ use files: core.files
 // never the repository root or arbitrary scratch paths.
 kit_steps_relative_path: fn(path: String) -> Bool {
     if path == "" || path.contains("{{root}}") || path.contains("{{scratch}}") -> return false
-    relative := path.replace("{{work}}", ".").replace("{{tmp}}", ".").replace("{{sys:dll-suffix}}", "suffix").replace("{{sys:exe-suffix}}", "")
+    ^relative: path.replace("{{work}}", ".").replace("{{tmp}}", ".").replace("{{sys:dll-suffix}}", "suffix").replace("{{sys:exe-suffix}}", "")
     loop prefix in ["{{cap:", "{{tool:", "{{pid:"] {
         loop {
             start: kit_steps_byte_index(relative, prefix) ?? break
@@ -33,7 +33,7 @@ kit_steps_work_path: fn(path: String, env: KitEnv, work: String, scratch: String
 kit_steps_file_action: fn(step: KitStep, env: KitEnv, work: String, scratch: String, built: String, snapshots: String) -> KitRun {
     if step.action == "concat" {
         destination: kit_steps_work_path(step.argv[1], env, work, scratch, built) ?? return kit_exec_failed("concat destination escapes work directory")
-        combined := [U8]{}
+        ^combined: [U8]{}
         loop raw in step.argv.slice(2, step.argv.len()) {
             source: kit_steps_work_path(raw, env, work, scratch, built) ?? return kit_exec_failed("concat source escapes work directory")
             bytes: files.read_bytes(source) ?? return kit_exec_failed("concat source {source}: {err}")

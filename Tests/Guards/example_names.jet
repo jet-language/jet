@@ -192,7 +192,7 @@ example_name_acronym_at: fn(word: [U8], at: Int, acronym: [U8]) -> Bool Never! {
 // The initialisms `word` spells TitleCased instead of in capitals.
 example_name_lowered_acronyms: fn(word: String) -> [String] Never! {
     bytes: word.bytes()
-    found := [String]{}
+    ^found: [String]{}
     loop acronym in EXAMPLE_NAME_ACRONYMS {
         letters: acronym.bytes()
         loop at in 0..<bytes.len() {
@@ -253,7 +253,7 @@ example_name_listed: fn(rows: [ExampleNameKept], relative: String) -> Bool Never
 
 example_name_walk: fn(root: String, directory: String, in_project: Bool, findings: ^[String]) {
     entries: example_name_files.list_dir(directory) ?? panic("list {directory}: {err}")
-    project := in_project
+    ^project: in_project
     loop entry in entries {
         if EXAMPLE_NAME_PROJECT_MARKERS.contains(entry.name) -> project = true
     }
@@ -278,7 +278,7 @@ example_name_walk: fn(root: String, directory: String, in_project: Bool, finding
 
 // Every name under `root` that breaks the rule, sorted.
 example_name_findings: fn(root: String) -> [String] {
-    findings := [String]{}
+    ^findings: [String]{}
     example_name_walk(root, root, false, findings)
     findings.sort()
     findings
@@ -337,7 +337,7 @@ example_name_findings: fn(root: String) -> [String] {
         }
         example_name_files.write(path, "") ?? panic("write {path}: {err}")
     }
-    flagged := [String]{}
+    ^flagged: [String]{}
     loop finding in example_name_findings(root) {
         named: finding.split_once(": ") ?? panic("a finding names no reason: {finding}")
         flagged.push(named.before.removeprefix("{root}/"))

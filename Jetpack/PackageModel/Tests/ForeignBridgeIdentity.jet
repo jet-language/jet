@@ -33,11 +33,11 @@ pkg_bridge_test_tool_runs: fn(tool: String) -[Exec, Time.Wait]> Bool Never! {
 }
 
 #Test("identity is stable and input sensitive") {
-    first := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    ^first: ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     first.field("descriptor", "one".bytes())
-    same := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    ^same: ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     same.field("descriptor", "one".bytes())
-    changed := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    ^changed: ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     changed.field("descriptor", "two".bytes())
     first_digest: first.finish()
     assert_eq(first_digest, same.finish())
@@ -49,7 +49,7 @@ pkg_bridge_test_tool_runs: fn(tool: String) -[Exec, Time.Wait]> Bool Never! {
     functions: pkg_bridge_test_probe("probe")
     stub: pkg_bridge_render_scalar_jet("jet_py_probe", descriptor, functions) ?? panic("render stub")
     binder: pkg_bridge_render_scalar_c("jet_py_probe", "python3", "worker.py", "probe.py", descriptor, functions) ?? panic("render binder")
-    changed := descriptor
+    ^changed: descriptor
     changed.effect_root = "FFI.changed"
     changed_stub: pkg_bridge_render_scalar_jet("jet_py_probe", changed, functions) ?? panic("render changed stub")
     changed_binder: pkg_bridge_render_scalar_c("jet_py_probe", "python3", "worker.py", "probe.py", changed, functions) ?? panic("render changed binder")
@@ -98,11 +98,11 @@ pkg_bridge_test_tool_runs: fn(tool: String) -[Exec, Time.Wait]> Bool Never! {
     functions: pkg_bridge_test_probe("probe")
     descriptor: pkg_bridge_test_py_descriptor()
     identity: pkg_bridge_scalar_bridge_identity(descriptor, "ops", "jet_py_ops", "python3", source, worker, functions) ?? panic("identity")
-    changed_descriptor := descriptor
+    ^changed_descriptor: descriptor
     changed_descriptor.effect_root = "FFI.changed"
     descriptor_identity: pkg_bridge_scalar_bridge_identity(changed_descriptor, "ops", "jet_py_ops", "python3", source, worker, functions) ?? panic("descriptor identity")
     assert(identity != descriptor_identity)
-    changed_capabilities := descriptor
+    ^changed_capabilities: descriptor
     changed_capabilities.capabilities = [BinderCapability]{}
     capability_error: if pkg_bridge_scalar_bridge_identity(changed_capabilities, "ops", "jet_py_ops", "python3", source, worker, functions) == {
         .Ok(_) -> panic("the bridge input must be refused")

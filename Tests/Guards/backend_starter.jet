@@ -19,7 +19,7 @@ BACKEND_STARTER_SECRET_NAMES: [String]{"PASSWORD\") ?? \"", "SECRET\") ?? \"", "
 
 // Every Jet source under `directory`, in directory order.
 backend_starter_sources_under: fn(directory: String) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     entries: backend_starter_files.list_dir(directory) ?? panic("read {directory}: {err}")
     loop entry in entries {
         if entry.name.starts_with(".") -> next
@@ -38,8 +38,8 @@ BACKEND_STARTER_DESTRUCTIVE: [String]{"DROP TABLE", "DROP SCHEMA", "DROP DATABAS
 
 // Every finding in `source` (read from `path`), as `path:line: problem`.
 backend_starter_findings: fn(path: String, source: String) -> [String] {
-    found := [String]{}
-    line_number := 0
+    ^found: [String]{}
+    ^line_number: 0
     loop line in source.lines() {
         line_number += 1
         code: line.trim()
@@ -75,8 +75,8 @@ backend_starter_findings: fn(path: String, source: String) -> [String] {
 
 #Test("the backend starter presents no sample secret, plaintext password or destructive schema change as its default") {
     guards_enter_root()
-    found := [String]{}
-    sources := BACKEND_STARTER_SOURCES.copy()
+    ^found: [String]{}
+    ^sources: BACKEND_STARTER_SOURCES.copy()
     loop path in backend_starter_sources_under(BACKEND_STARTER_WORKSPACE) -> sources.push(path)
     assert(sources.len() > BACKEND_STARTER_SOURCES.len() + 3, "the starter workspace lost its sources: {sources}")
     loop path in sources {

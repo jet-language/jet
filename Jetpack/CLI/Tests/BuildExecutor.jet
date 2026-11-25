@@ -56,8 +56,8 @@ build_test_assert_descendant_reaped: fn(marker: String) -[FS, Time]> {
 
 // One host action `sh -c <script>` reading `input.txt` and writing `out.txt`.
 build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPlan Never! {
-    build := HermeticBuildContext.new()
-    spec := ActionSpec.new([String]{"sh", "-c", script}).with_inputs([String]{"input.txt"}).with_outputs([String]{"out.txt"})
+    ^build: HermeticBuildContext.new()
+    ^spec: ActionSpec.new([String]{"sh", "-c", script}).with_inputs([String]{"input.txt"}).with_outputs([String]{"out.txt"})
     loop cap in caps -> spec = spec.with_cap(cap)
     action: build.action("write", spec) ?? panic("declare action")
     target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("declare target")
@@ -78,7 +78,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
         .Err(error) -> { assert(error == HermeticBuildError.EmptyPath) }
         .Ok(_) -> panic("a blank build path must be refused")
     }
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     if build.action("escape", ActionSpec.new([String]{"cc"}).with_outputs([String]{"../escape.o"})) == {
         .Err(error) -> { assert(error == HermeticBuildError.InvalidPath("../escape.o")) }
         .Ok(_) -> panic("an escaping output must be refused")
@@ -128,7 +128,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 
 #Test("probe grants: probes run only with the Exec grant") {
     root: build_test_root("probe-grant")
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     probe: build.find_program("has-sh", "sh") ?? panic("probe")
     target: build.add_executable("probed", TargetSpec.new().with_probe(probe)) ?? panic("target")
     plan: build.plan_with_default(target) ?? panic("plan")
@@ -279,7 +279,7 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     // a fault or as other bytes.
     lost_root: files.join(root, ".lost-store")
     lost: BuildArtifactStoreHandle.at(lost_root) ?? panic("lost store")
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     handle: build.action("cc", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("action")
     cc_plan: build.plan() ?? panic("plan")
     action: cc_plan.actions[handle.id]
@@ -365,7 +365,7 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
 // One cached action `cc` declaring `outputs`, for the work-tree publication
 // fixtures.
 build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Never! {
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     handle: build.action("cc", ActionSpec.new([String]{"cc"}).with_outputs(outputs)) ?? panic("declare action")
     plan: build.plan() ?? panic("plan")
     plan.actions[handle.id]
@@ -439,7 +439,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     root: build_test_root("kept-output")
     sandbox: build_test_root("kept-output-sandbox")
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     // The last build wrote "old" to `table.txt`.
     spec: ActionSpec.new([String]{"gen"}).with_outputs([String]{"a.o", "table.txt"}).with_kept("table.txt", Val(ContentDigest.from_bytes("old".bytes()).as_str()))
     handle: build.action("gen", spec) ?? panic("declare action")
@@ -586,7 +586,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 
 #Test("tool resolution: declared tools resolve, a declared-only toolchain refuses undeclared tools and a foreign target refuses PATH") {
     sh: build_find_program_path("sh") ?? panic("host sh on PATH")
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     declared: build.toolchain("declared", ToolchainSpec.target("riscv64-unknown-elf", BuildProvenance.user_declared("fixture", None)).with_tool("sh", sh).declared_only()) ?? panic("declared toolchain")
     foreign: build.toolchain("foreign", ToolchainSpec.target("riscv64-unknown-elf", BuildProvenance.user_declared("fixture", None))) ?? panic("foreign toolchain")
     plan: build.plan() ?? panic("plan")
@@ -662,8 +662,8 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("context handles: same-context handles are accepted, another context's handles are refused") {
-    build := HermeticBuildContext.new()
-    other := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
+    ^other: HermeticBuildContext.new()
     own: build.toolchain("own", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("own toolchain")
     foreign: other.toolchain("foreign", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("foreign toolchain")
     _: build.action("own", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) ?? panic("a same-context toolchain must be accepted")
@@ -685,7 +685,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 
 #Test("action environment: allowlisted variables reach the action, others and undeclared allowlist names are refused") {
     spec: ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"}).with_env("PATH", "/toolchain/bin").with_env("SECRET", "x").with_env_allowlist([String]{"PATH"})
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     handle: build.action("env", spec) ?? panic("action")
     plan: build.plan() ?? panic("plan")
     env: build_action_environment(plan.actions[handle.id])
@@ -699,7 +699,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("output ownership: distinct outputs plan, a second owner of one output is refused") {
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     build.action("first", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("first")
     build.action("second", ActionSpec.new([String]{"cc"}).with_outputs([String]{"b.o"})) ?? panic("second")
     assert(build.plan() == .Ok(_))
@@ -713,7 +713,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("folder inputs: an output outside every read folder plans, one inside a read folder and a folder outside the project are refused") {
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     build.action("read", ActionSpec.new([String]{"sh"}).with_outputs([String]{"out.txt"}).with_folder("data", None)) ?? panic("read")
     build.action("near", ActionSpec.new([String]{"sh"}).with_outputs([String]{"database.txt"})) ?? panic("near")
     assert(build.plan() == .Ok(_))
@@ -731,7 +731,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("found folders: an action reads a found folder only through a find_folder probe it uses") {
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     if build.probe("nested", ProbeSpec.find_folder("lib/libc.a")) == {
         .Err(_) -> {}
         .Ok(_) -> panic("a find_folder probe names a file alone")
@@ -751,7 +751,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("found programs: an action is passed a found program only through a find_program probe it uses, as one of its arguments") {
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     cc: build.probe("cc", ProbeSpec.find_program("cc")) ?? panic("cc")
     musl: build.probe("musl", ProbeSpec.find_folder("libc.a")) ?? panic("musl")
     if build.action("unused", ActionSpec.new([String]{"sh", "cc"}).with_outputs([String]{"a.txt"}).with_found_program(1, "", cc)) == {
@@ -780,10 +780,10 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.write(files.join(root, "data/.jet/state"), "x") ?? panic("state")
     files.write(files.join(root, "data/.gitignore"), "skip.txt\n") ?? panic("ignore")
     files.write(files.join(root, "data/skip.txt"), "skip") ?? panic("skip")
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     build.action("read", ActionSpec.new([String]{"sh"}).with_outputs([String]{"out.txt"}).with_folder("data", None)) ?? panic("action")
     plan: build.plan() ?? panic("plan")
-    stamps := StampTable.load(root)
+    ^stamps: StampTable.load(root)
     first: build_snapshot_folders(stamps, root, plan.actions[0]) ?? panic("snapshot")
     paths: loop snapshot in first -> snapshot.path
     assert(paths.contains("data/a.txt"))
@@ -823,7 +823,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.create_dir_all(files.join(root, "data")) ?? panic("data")
     files.write(files.join(root, "data/a.txt"), "one") ?? panic("a")
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     script: "read -r line < data/a.txt; printf %s \"$line\" > out.txt; if (printf x > data/w) 2>/dev/null; then printf ' writable' >> out.txt; fi"
     spec: ActionSpec.new([String]{"sh", "-c", script}).with_outputs([String]{"out.txt"}).with_folder("data", None).with_cap(BuildEffect.Exec)
     action: build.action("read", spec) ?? panic("action")
@@ -847,7 +847,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.write(files.join(lib, "marker.txt"), "found") ?? panic("marker")
     previous: sys.get("LIBRARY_PATH")
     sys.set("LIBRARY_PATH", "{files.join(root, "none")}:{lib}")
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     probe: build.probe("marks", ProbeSpec.find_folder("marker.txt")) ?? panic("probe")
     script: "read -r line < .jet/found/marks/marker.txt; printf %s \"$line\" > out.txt"
     spec: ActionSpec.new([String]{"sh", "-c", script}).with_outputs([String]{"out.txt"}).with_found_folder(".jet/found/marks", probe).with_probe(probe).with_cap(BuildEffect.Exec)
@@ -856,7 +856,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     plan: build.plan_with_default(target) ?? panic("plan")
     build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) ?? panic("run")
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out"), "found")
-    missing := HermeticBuildContext.new()
+    ^missing: HermeticBuildContext.new()
     absent: missing.probe("absent", ProbeSpec.find_folder("jet-test-no-such-file.a")) ?? panic("absent probe")
     needs: missing.action("needs", ActionSpec.new([String]{"sh"}).with_outputs([String]{"o.txt"}).with_found_folder(".jet/found/absent", absent).with_probe(absent).with_cap(BuildEffect.Exec)) ?? panic("needs")
     missing_target: missing.add_executable("o", TargetSpec.new().with_action(needs)) ?? panic("missing target")
@@ -886,7 +886,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 #Test("cache records: a matching record restores, a record for another key or with mismatched outputs is refused") {
     root: build_test_root("records")
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     handle: build.action("cc", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("action")
     plan: build.plan() ?? panic("plan")
     action: plan.actions[handle.id]
@@ -913,7 +913,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
         }
         .Ok(_) -> panic("a record naming another key must be refused")
     }
-    mismatched := found
+    ^mismatched: found
     mismatched.outputs = [ActionOutputRecord]{ActionOutputRecord{path: "b.o", digest: digest, byte_len: 6}}
     if build_restore_action_outputs(store, root, action, mismatched) == {
         .Err(error) -> {
@@ -1059,7 +1059,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 
 #Test("toolchain mounts: an absolute mount is accepted, relative and parent destinations are refused") {
     provenance: BuildProvenance.user_declared("fixture", None)
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     _: build.toolchain("absolute", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", "/toolchain", "sha256:x")) ?? panic("an absolute mount must be accepted")
     destinations: [String]{"toolchain", "/toolchain/../etc"}
     loop destination in destinations {

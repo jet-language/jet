@@ -35,7 +35,7 @@ tray_menu: fn(projects: app.Live<[String], BoardError>) -> [app.MenuItem] app.No
         }
         .Idle | .Loading -> [String]{}
     }
-    items := [app.MenuItem]{}
+    ^items: [app.MenuItem]{}
     loop name in names {
         picked: name.copy()
         items.push(app.item(name.copy(), fn() app.Notice! { open_project(picked.copy()) }))
@@ -51,7 +51,7 @@ open_project: fn(name: String) app.Notice! {
 }
 
 add_project: fn(name: String) {
-    held := BOARD.guard_edit()
+    ^held: BOARD.guard_edit()
     held.value.projects.push(name.copy())
 }
 

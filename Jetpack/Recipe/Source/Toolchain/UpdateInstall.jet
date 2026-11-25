@@ -78,7 +78,7 @@ recipe_update_resolve: fn(options: ToolchainUpdateOptions, now: Int) -[FS, Env, 
     if options.allow_unofficial && !is_file_endpoint {
         return Err(RecipeError.Update("unofficial keyless toolchain sources must use an explicit file:// endpoint"))
     }
-    trusted := ToolchainTrustedKey?{None}
+    ^trusted: ToolchainTrustedKey?{None}
     if !options.allow_unofficial -> trusted = Val(recipe_update_read_public_key(options.trust_key))
     manifest_path: "v1/{options.channel}/manifest.json"
     manifest_bytes: recipe_update_fetch_bytes(endpoint, manifest_path, TOOLCHAIN_MAX_MANIFEST_BYTES, "toolchain channel manifest")
@@ -91,7 +91,7 @@ recipe_update_resolve: fn(options: ToolchainUpdateOptions, now: Int) -[FS, Env, 
     }
     manifest: ToolchainChannelManifest.parse(manifest_bytes, options.channel)
     recipe_update_validate_manifest_policy(manifest, options, now)
-    artifact := ToolchainArtifact?{None}
+    ^artifact: ToolchainArtifact?{None}
     loop candidate in manifest.artifacts {
         if candidate.target == options.platform {
             artifact = Val(candidate)
@@ -107,7 +107,7 @@ recipe_update_resolve: fn(options: ToolchainUpdateOptions, now: Int) -[FS, Env, 
     if pkg_sha256_hex(artifact_bytes) != selected.sha256 {
         return Err(RecipeError.Update("toolchain artifact digest disagrees with the channel manifest"))
     }
-    key_id := String?{None}
+    ^key_id: String?{None}
     if trusted == {
         .Val(key) -> {
             signature: recipe_update_fetch_bytes(endpoint, selected.signature, TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain artifact signature")
@@ -192,7 +192,7 @@ recipe_update_reject_existing: fn(path: String, label: String) -[FS]> RecipeErro
 recipe_update_stage_executable: fn(staged: String, bytes: [U8], mode: Int) -[FS, Env]> RecipeError! {
     recipe_update_reject_existing(staged, "self-update staging file")
     recipe_update_validate_no_symlink_ancestors(staged, "self-update staging file")
-    out := files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
+    ^out: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
     if recipe_update_write_all_synced(out, bytes) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -401,7 +401,7 @@ recipe_update_install_windows_deferred: fn(current_exe: String, parent: String, 
 
 recipe_update_stage_windows_file: fn(staged: String, bytes: [U8]) -[FS]> RecipeError! {
     recipe_update_reject_existing(staged, "self-update staging file")
-    out := files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
+    ^out: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
     if recipe_update_write_all_synced(out, bytes) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -472,8 +472,8 @@ recipe_update_windows_helper_run: fn() -[FS, Env, Exec, Time, Time.Wait]> Recipe
     recipe_update_helper_regular(rollback, "Windows self-update rollback file")
     previous_state: recipe_update_read_state(state_path)
     recipe_update_validate_state_transition(previous_state, state.channel, state.platform, state.sequence, state.version)
-    last_error := "unknown error"
-    activated := false
+    ^last_error: "unknown error"
+    ^activated: false
     loop _ in 0..<TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS {
         recipe_update_helper_regular(current, "Windows self-update current executable")
         // MoveFileExW REPLACE_EXISTING|WRITE_THROUGH.

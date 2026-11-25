@@ -57,8 +57,8 @@ ahead_sink: fn(trace: ^^AheadTrace) -> CompilerTraceSink Never! { trace.move() }
 // the local values run on.
 ahead_runtime_dir: fn() -> String {
     jet: ahead_sys.get("JET") ?? (ahead_process.which("jet") ?? panic("set JET to the compiler under test"))
-    parts := jet.split("/").to_list()
-    _ := parts.pop()
+    ^parts: jet.split("/").to_list()
+    ^_: parts.pop()
     "{parts.join("/")}/jet-runtime"
 }
 
@@ -101,7 +101,7 @@ ahead_request: fn(path: String, source: String, threads: Int) -> JetDriverCompil
         entry_root_identity: "local-values-ahead-root",
         entry_path: "/local-values-ahead/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(threads), JetDriverCompileMode.Program)
+    ^request: jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(threads), JetDriverCompileMode.Program)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request.eval_config.native = Val(jet_cli_native_session_at(ahead_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
     request.trace_sink = Val(ahead_sink(AheadTrace{path: path}))
@@ -110,7 +110,7 @@ ahead_request: fn(path: String, source: String, threads: Int) -> JetDriverCompil
 
 // The comptime runs of `trace` that built a program.
 ahead_programs_built: fn(trace: String) -> Int {
-    built := 0
+    ^built: 0
     loop line in trace.split("\n") {
         if line.starts_with("counters.comptime.programs_built = ") && line != "counters.comptime.programs_built = 0" {
             built += 1
@@ -121,7 +121,7 @@ ahead_programs_built: fn(trace: String) -> Int {
 
 // The programs the comptime runs of `trace` built, all told.
 ahead_programs: fn(trace: String) -> Int {
-    built := 0
+    ^built: 0
     loop line in trace.split("\n") {
         if line.starts_with("counters.comptime.programs_built = ") {
             built += Int.parse(line.remove_prefix("counters.comptime.programs_built = ")) ?? panic("a programs_built counter is not a count: {line}")
@@ -132,7 +132,7 @@ ahead_programs: fn(trace: String) -> Int {
 
 // Whether the landing of `trace` checks comptime item `item`.
 ahead_landing_checks: fn(trace: String, item: String) -> Bool {
-    landing := false
+    ^landing: false
     loop line in trace.split("\n") {
         if line.starts_with("> comptime.land.open") -> landing = true
         if landing && line.starts_with("> comptime.check {item} (") -> return true
@@ -142,7 +142,7 @@ ahead_landing_checks: fn(trace: String, item: String) -> Bool {
 
 // Whether `trace` first checks comptime item `item` after its first build.
 ahead_checked_after_build: fn(trace: String, item: String) -> Bool {
-    built := false
+    ^built: false
     loop line in trace.split("\n") {
         if line.starts_with("< comptime.build") -> built = true
         if line.starts_with("> comptime.check {item} (") -> return built
@@ -159,7 +159,7 @@ ahead_compile: fn(path: String, source: String, verify: Bool) -> String {
 // Compiles `source` as ahead_compile does, on `threads` compiler threads.
 ahead_compile_on: fn(path: String, source: String, verify: Bool, threads: Int) -> String {
     ahead_files.write(path, "") ?? panic("cannot start the trace: {err}")
-    request := ahead_request(path, source, threads)
+    ^request: ahead_request(path, source, threads)
     request.recheck_verify = verify
     front: jet_driver_lowering_inputs(request, None)
     trace: ahead_files.read(path) ?? panic("cannot read the trace: {err}")

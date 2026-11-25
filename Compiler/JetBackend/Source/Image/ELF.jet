@@ -68,7 +68,7 @@ x64_executable_add_parts: fn(image: [U8], names: [String], payloads: [[U8]]) -> 
     if names.len() != payloads.len() || names.len() == 0 {
         return Err("image parts need one payload per name, and at least one")
     }
-    labels := [[U8]]{}
+    ^labels: [[U8]]{}
     loop name in names {
         label: name.bytes()
         if label.len() == 0 || label.contains(U8{0}) {
@@ -90,9 +90,9 @@ x64_executable_add_parts: fn(image: [U8], names: [String], payloads: [[U8]]) -> 
     }
     first: plan.segments[0]
     distance: first.vaddr - first.offset
-    at := os_page_round(image.len())
+    ^at: os_page_round(image.len())
     if distance + at < plan.high -> at = plan.high - distance
-    table := [U8]{}
+    ^table: [U8]{}
     table.extend(image[phoff..<phoff + phnum * 56])
     table_size: count * 56
     loop k in 0..<phnum {
@@ -104,8 +104,8 @@ x64_executable_add_parts: fn(image: [U8], names: [String], payloads: [[U8]]) -> 
         link_put64(table, k * 56 + 40, table_size)
     }
     // Each note ends where its page-aligned payload starts.
-    note_at := [Int]{}
-    end := at + table_size
+    ^note_at: [Int]{}
+    ^end: at + table_size
     loop (k, label) in labels {
         descriptor: (label.len() + 8) /% 8 * 8
         payload_at: os_page_round(end + 16 + descriptor)
@@ -120,7 +120,7 @@ x64_executable_add_parts: fn(image: [U8], names: [String], payloads: [[U8]]) -> 
     }
     // The image, the table and each note are written once each, straight
     // into the output, sized once.
-    out := [U8]{}
+    ^out: [U8]{}
     out.try_reserve(end) ?? return Err("the image with its parts needs {end} bytes: {err}")
     out.extend(image[0..<image.len()])
     link_pad_to(out, at, 0)
@@ -158,7 +158,7 @@ x64_executable_part: fn(image: [U8], name: String) -> [U8]? Never! {
         size: loader_u64(image, row + 32)
         if at + size > image.len() -> next
         if x64_part_note(image, at, size, label) == .Val(length) {
-            bytes := [U8]{}
+            ^bytes: [U8]{}
             bytes.extend(image[at + 16 + descriptor..<at + 16 + descriptor + length])
             return Val(bytes)
         }
@@ -185,7 +185,7 @@ x64_part_note: fn(bytes: [U8], from: Int, size: Int, label: [U8]) -> Int? Never!
 }
 
 #Test("image parts are a mapped segment above the others, each on its own page, that their names read back") {
-    image := [U8]{}
+    ^image: [U8]{}
     loop byte in ([Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}) {
         image.push(U8{byte})
     }

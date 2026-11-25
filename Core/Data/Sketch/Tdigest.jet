@@ -26,8 +26,8 @@ new: fn() -> TDigest Never! { TDigest.new() }
 
 insertion_index: fn(values: [Centroid], value: Float) -> Int Never! {
     if values.len() == 0 -> return 0
-    base := 0
-    size := values.len()
+    ^base: 0
+    ^size: values.len()
     loop size > 1 {
         half: size /% 2
         middle: base + half
@@ -40,17 +40,17 @@ insertion_index: fn(values: [Centroid], value: Float) -> Int Never! {
 add_sample: fn(values: ^[Centroid], value: Float) Never! {
     index: insertion_index(values, value)
     values.push(Centroid{mean: value, weight: Float{1.0}})
-    at := values.len() - 1
+    ^at: values.len() - 1
     loop at > index {
         values[at] = values[at - 1].copy()
         at -= 1
     }
     values[index] = Centroid{mean: value, weight: Float{1.0}}
 
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop centroid in values -> total += centroid.weight
-    last := 0
-    cumulative := values[0].weight
+    ^last: 0
+    ^cumulative: values[0].weight
     loop i in 1..<values.len() {
         sample: values[i].copy()
         previous: values[last].copy()
@@ -74,10 +74,10 @@ add_sample: fn(values: ^[Centroid], value: Float) Never! {
 
 step_quantile: fn(values: [Centroid], q: Float) -> Float Never! {
     if values.len() == 0 -> return Float{0.0}
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop centroid in values -> total += centroid.weight
     target: q * total
-    cumulative := Float{0.0}
+    ^cumulative: Float{0.0}
     loop centroid in values {
         cumulative += centroid.weight
         if cumulative >= target -> return centroid.mean
@@ -86,7 +86,7 @@ step_quantile: fn(values: [Centroid], q: Float) -> Float Never! {
 }
 
 #Test("unit-weight digest retains shipped step quantiles") {
-    digest := new()
+    ^digest: new()
     assert_eq(digest.quantile(Float{0.5}), Float{0.0})
     digest.add(Float{2.0})
     digest.add(Float{1.0})
@@ -97,9 +97,9 @@ step_quantile: fn(values: [Centroid], q: Float) -> Float Never! {
 }
 
 #Test("digest clones have independent samples") {
-    digest := new()
+    ^digest: new()
     digest.add(Float{7.0})
-    clone := digest.copy()
+    ^clone: digest.copy()
     clone.add(Float{1.0})
     assert_eq(digest.quantile(Float{0.5}), Float{7.0})
     assert_eq(clone.quantile(Float{0.5}), Float{1.0})

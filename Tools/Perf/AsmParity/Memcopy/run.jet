@@ -44,8 +44,8 @@ next: fn(state: Int) -> Int { (state * 1103515245 + 12345) & 2147483647 }
 // a size class of up to 8, 16, 32, 64, 128, 512, 2048 or 16384 bytes) and a
 // second the four offsets.
 operations: fn() -> [Op] {
-    ops := [Op]{}
-    state := 12345
+    ^ops: [Op]{}
+    ^state: 12345
     loop _ in 0..<OPS {
         state = next(state)
         class: state & 7
@@ -60,7 +60,7 @@ operations: fn() -> [Op] {
 run: fn(args: Args) {
     passes: if args.n > 0 -> args.n else -> 1
     ops: operations()
-    total := 0
+    ^total: 0
     #Unsafe("the block holds the source, the target and the moved bytes, LARGEST bytes and their room each, every offset stays inside its room, and the block is freed once after the passes") {
         block: mem.alloc_raw(MOVED_AT + LARGEST + MOVE_ROOM, 4096) ?? panic("no memory")
         source: block.byte_offset(0)

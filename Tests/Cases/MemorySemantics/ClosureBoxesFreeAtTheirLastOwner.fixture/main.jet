@@ -55,7 +55,7 @@ apply: fn(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
 make_adder: fn(data: [Int], k: Int) -> fn(Int) -> Int { fn(n: Int) { n + k + data[k % 3] } }
 
 each_checked: fn(values: [Int], handler: fn(Int) -> Int Reject!) -> Int {
-    total := 0
+    ^total: 0
     loop value in values -> total += handler(value) ?? 1
     total
 }
@@ -63,7 +63,7 @@ each_checked: fn(values: [Int], handler: fn(Int) -> Int Reject!) -> Int {
 by_value: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
     name: "capture"
-    total := 0
+    ^total: 0
     loop i in from..<to {
         f: fn(x: Int) -> Int { x + data[x % 3] + name.len() }
         total += f(i)
@@ -73,9 +73,9 @@ by_value: fn(from: Int, to: Int) -> Int {
 
 by_write_var: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
-        count := 0
+        ^count: 0
         apply(
             fn(x: Int) {
                 count += x + data[x % 3]
@@ -89,7 +89,7 @@ by_write_var: fn(from: Int, to: Int) -> Int {
 }
 
 named_value: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         total += apply(add_one, i)
         f: add_one
@@ -100,7 +100,7 @@ named_value: fn(from: Int, to: Int) -> Int {
 
 copied: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         f: fn(x: Int) -> Int { x + data[x % 3] }
         held: [fn(Int) -> Int]{f, fn(x: Int) { x * data[0] }}
@@ -111,7 +111,7 @@ copied: fn(from: Int, to: Int) -> Int {
 
 in_struct: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         worker: Worker{step: fn(x: Int) { x + data[x % 3] }}
         total += worker.step(i)
@@ -121,7 +121,7 @@ in_struct: fn(from: Int, to: Int) -> Int {
 
 returned: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         adder: make_adder(data, i)
         total += adder(1)
@@ -131,7 +131,7 @@ returned: fn(from: Int, to: Int) -> Int {
 
 in_map: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         handlers: [String:fn(Int) -> Int]{"add": fn(x: Int) { x + data[x % 3] }, "one": fn(x: Int) { x + 1 }}
         f: handlers.get("add").or_err("missing add") ?? panic("missing add")
@@ -142,7 +142,7 @@ in_map: fn(from: Int, to: Int) -> Int {
 
 widened: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         name: "widened"
         checked: each_checked(data, fn(value: Int) { value + name.len() + i })
@@ -153,7 +153,7 @@ widened: fn(from: Int, to: Int) -> Int {
 
 zipped: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         loop row in zip(a: data, b: data, c: data) -> total += row.a + row.c
         loop row in data.zip_pad([i], fill: 0) -> total += row.b
@@ -163,7 +163,7 @@ zipped: fn(from: Int, to: Int) -> Int {
 
 lazy_chain: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         mapped: data.lazy().map(fn(x: Int) { x + i }).filter(fn(x: Int) { x % 2 == 0 }).to_list()
         total += mapped.len()
@@ -177,7 +177,7 @@ lazy_chain: fn(from: Int, to: Int) -> Int {
 
 option_map: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         held: Int?{Val(i)}
         total += held.map(fn(x: Int) { x + data[x % 3] }) ?? 0
@@ -187,11 +187,11 @@ option_map: fn(from: Int, to: Int) -> Int {
 
 merge_with: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
-        left := [String:Int]{}
+        ^left: [String:Int]{}
         left["k"] = i
-        right := [String:Int]{}
+        ^right: [String:Int]{}
         right["k"] = 2
         merged: left.merge(right, fn(key: String, a: Int, b: Int) { key.len() + a + b + data[0] })
         total += merged["k"]
@@ -201,7 +201,7 @@ merge_with: fn(from: Int, to: Int) -> Int {
 
 tasks: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         handle: task data[i % 3] + i
         total += handle.join() ?? 0
@@ -211,7 +211,7 @@ tasks: fn(from: Int, to: Int) -> Int {
 
 guarded: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to { guarded_round(data, i, total) }
     total
 }
@@ -223,7 +223,7 @@ guarded_round: fn(data: [Int], i: Int, total: ^Int) {
 
 hooks: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to -> total += hooked(data, i) ?? 0
     total
 }
@@ -244,7 +244,7 @@ settle: fn(value: Int) Never! {
 
 fallible_hooks: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to -> total += fallible_hooked(data, i) ?? 0
     total
 }
@@ -265,7 +265,7 @@ note: fn(value: Int) {
 
 listened: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
-    total := 0
+    ^total: 0
     loop i in from..<to {
         app: event.scope()
         clicks: event.new<Int>()
@@ -297,7 +297,7 @@ cycle_weight: fn(shape: CycleShape) -> Int {
 }
 
 captures_cycle_struct: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         x: CycleOnly{ty: CycleShape.Named{name: "n{i % 1000}"}}
         f: fn(n: Int) -> Int { n + cycle_weight(x.ty) }

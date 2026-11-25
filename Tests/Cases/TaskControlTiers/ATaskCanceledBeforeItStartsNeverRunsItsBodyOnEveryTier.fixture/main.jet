@@ -18,9 +18,9 @@ run: fn() {
     spawner: task {
         task.group limited(limit: 1) {
             blocker: task {
-                _ := hold.receive() ?? 0
+                ^_: hold.receive() ?? 0
             }
-            gate := Gate{wake: wake}
+            ^gate: Gate{wake: wake}
             ready.send(1)
             late: task {
                 print("late ran")
@@ -28,7 +28,7 @@ run: fn() {
             print("spawner went on")
         }
     }
-    _ := started.receive() ?? 0
+    ^_: started.receive() ?? 0
     spawner.cancel()
     if spawner.join() == {
         .Err(failure) -> { print("spawner: {failure}") }

@@ -20,7 +20,7 @@ show: fn(label: String, error: plugin.PluginError) {
 run: fn() {
     policy: Authority.from_rights(["FS.Read(\".\")"])
     wire: plugin.load("wire.wat", policy)
-    large := "x"
+    ^large: "x"
     loop large.len() <= 1048576 -> large = "{large}{large}"
     if wire.size(large) == {
         .Ok(length) -> { print("large argument crossed: {length}") }

@@ -58,7 +58,7 @@ CLILockDiffGuard: struct {
 
 // `jetpack lock diff [--against rev]`; the default revision is `HEAD`.
 cli_cmd_lock: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if parsed.positional.len() != 1 || parsed.positional[0] != LOCK_DIFF_VERB || parsed.command != None {
         theme.error("`jetpack lock` needs the `diff` subcommand", "the unified `.jet/lock` is inspected through one read-only diff surface", "run `jetpack lock diff [--against <rev>]`")
         return EXIT_USAGE
@@ -93,12 +93,12 @@ cli_render_lock_diff_lines: fn(diff: LockDiff, sizes: DiffSizes) -[FS]> [String]
         .Val(bytes) -> Val(bytes)
         .None -> sizes.disk
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop change in diff.packages -> lines.push(cli_render_package_change(change))
     loop change in diff.channels {
-        mark := ""
-        before := ""
-        after := ""
+        ^mark: ""
+        ^before: ""
+        ^after: ""
         if change.before == {
             .None -> {
                 shown_after: change.after ?? next
@@ -142,9 +142,9 @@ cli_render_delta: fn(value: Int?) -> String Never! {
 // The measured on-disk change of every package output the diff names, or
 // None when no output could be measured.
 cli_measured_disk_delta: fn(diff: LockDiff) -[FS]> Int? Never! {
-    counted := [String]{}
-    delta := 0
-    measured := false
+    ^counted: [String]{}
+    ^delta: 0
+    ^measured: false
     loop change in diff.packages {
         if change.kind == {
             .Added -> {

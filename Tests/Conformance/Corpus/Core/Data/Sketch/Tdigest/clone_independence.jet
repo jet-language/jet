@@ -3,10 +3,10 @@
 use tdigest: core.data.sketch.tdigest
 
 run: fn() {
-    original := tdigest.new()
+    ^original: tdigest.new()
     assert_eq(original.quantile(Float{0.5}), Float{0.0})
     original.add(Float{2.0})
-    clone := original.copy()
+    ^clone: original.copy()
     clone.add(Float{1.0})
     clone.add(Float{3.0})
     clone.add(Float{4.0})
@@ -18,7 +18,7 @@ run: fn() {
     assert_eq(clone.quantile(Float{2.0}), Float{5.0})
     original.add(Float{0.0})
     assert_eq(clone.quantile(Float{-1.0}), Float{1.0})
-    repeated := tdigest.new()
+    ^repeated: tdigest.new()
     loop _ in 0..<500 -> repeated.add(Float{1.0})
     assert_eq(repeated.quantile(Float{0.5}), Float{1.0})
     print(original.quantile(Float{0.5}))

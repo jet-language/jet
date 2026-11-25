@@ -72,7 +72,7 @@ OutputFact: struct {
 
     // The checked binding language names of this output.
     binding_languages: fn(self) -> [String] Never! {
-        out := [String]{}
+        ^out: [String]{}
         fields: if self.payload == {
             .Object(fields) -> fields
             .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> {
@@ -221,12 +221,12 @@ ClaimsProjection: struct {
     failed: Bool,
 
     from_records: fn(records: [EvidenceRecord]) -> ClaimsProjection Never! {
-        generated_attempts := 0
-        generated_successes := 0
-        examples_successes := 0
-        failed := false
-        solver_proved := false
-        checked := false
+        ^generated_attempts: 0
+        ^generated_successes: 0
+        ^examples_successes: 0
+        ^failed: false
+        ^solver_proved: false
+        ^checked: false
         loop record in records {
             expected_failure: evidence_record_is_expected_failure(record)
             if (evidence_outcome_is_failure(record.outcome) && !expected_failure) || evidence_record_is_unexpected_pass(record) {
@@ -370,7 +370,7 @@ PackagePolicy: struct {
     // The effective fenced set for the package dependency graph.
     contained_dependencies: fn(self, dependencies: [String]) -> [String] Never! {
         if !self.harden -> return self.contain
-        out := [String]{}
+        ^out: [String]{}
         loop dependency in dependencies {
             if !out.contains(dependency) -> out.push(dependency.copy())
         }
@@ -562,8 +562,8 @@ PackageFacts: struct {
         level: self.strictness ?? return
         if level.hardened() {
             self.policy.harden = true
-            has_sentries := false
-            has_unsafe := false
+            ^has_sentries: false
+            ^has_unsafe: false
             loop declaration in self.policy.declarations {
                 if declaration.key == PolicyKey.Sentries -> has_sentries = true
                 if declaration.key == PolicyKey.Unsafe -> has_unsafe = true

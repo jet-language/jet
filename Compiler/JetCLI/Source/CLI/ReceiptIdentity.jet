@@ -11,7 +11,7 @@ use {
 
 jet_cli_receipt_secret_component: fn(component: String) -> Bool Never! {
     bytes: component.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop end > 0 && bytes[end - 1] >= (U8{48}) && bytes[end - 1] <= (U8{57}) -> end -= 1
     name: foundation_byte_text(bytes, 0, end)
     [String]{"secret", "token", "password", "passwd", "credential", "key"}.contains(name)
@@ -19,12 +19,12 @@ jet_cli_receipt_secret_component: fn(component: String) -> Bool Never! {
 
 jet_cli_receipt_secret_name: fn(name: String) -> Bool Never! {
     bytes: name.bytes()
-    component := ""
+    ^component: ""
     loop (index, byte) in bytes {
         upper: byte >= U8{65} && byte <= U8{90}
         lower: byte >= U8{97} && byte <= U8{122}
         digit: byte >= U8{48} && byte <= U8{57}
-        boundary := false
+        ^boundary: false
         if upper && index > 0 {
             previous: bytes[index - 1]
             boundary = (previous >= U8{97} && previous <= U8{122}) || (previous >= U8{48} && previous <= U8{57})
@@ -54,8 +54,8 @@ jet_cli_receipt_secret_environment: fn(name: String) -> Bool Never! {
 }
 
 jet_cli_receipt_argv_identity: fn(argv: [String]) -> [U8] Never! {
-    out := [U8]{}
-    redact_next := false
+    ^out: [U8]{}
+    ^redact_next: false
     loop arg in argv {
         if redact_next {
             jet_driver_run_receipt_frame(out, "<redacted>".bytes())
@@ -75,9 +75,9 @@ jet_cli_receipt_argv_identity: fn(argv: [String]) -> [U8] Never! {
 }
 
 jet_cli_receipt_environment_identity: fn(names: [String]) -[Env]> [U8] Never! {
-    sorted := names
+    ^sorted: names
     sorted.sort()
-    out := [U8]{}
+    ^out: [U8]{}
     loop name in sorted {
         if ([String]{"INVOCATION_ID", ENV_JET_RECEIPT_BYPASS, "NIX_BUILD_TOP", "TEMP", "TEMPDIR", "TMP", "TMPDIR"}).contains(name) {
             next
@@ -117,13 +117,13 @@ jet_cli_receipt_context_identity: fn(verb: String, argv: [String], terminal: [U8
             return Err(jet_cli_read_error("receipt terminal identity requires three host bits"))
         }
     }
-    out := jet_driver_run_receipt_section_marker(JET_DRIVER_RUN_RECEIPT_MAGIC)
+    ^out: jet_driver_run_receipt_section_marker(JET_DRIVER_RUN_RECEIPT_MAGIC)
     jet_driver_run_receipt_frame(out, verb.bytes())
     jet_driver_run_receipt_frame(out, (cli_sys.current_dir() ?? ".").bytes())
     jet_driver_run_receipt_frame(out, jet_cli_receipt_argv_identity(argv))
     names: cli_sys.vars() ?? return Err(jet_cli_read_error("could not read receipt environment: {err}"))
     jet_driver_run_receipt_frame(out, jet_cli_receipt_environment_identity(names))
-    tools := [U8]{}
+    ^tools: [U8]{}
     loop name in ([String]{"jet", "jetpack", "rustc", "cargo", "wasm-tools"}) {
         jet_driver_run_receipt_frame(tools, name.bytes())
         path: jet_cli_receipt_tool_path(name) ?? {
@@ -150,7 +150,7 @@ jet_cli_receipt_context_identity: fn(verb: String, argv: [String], terminal: [U8
 // Checked root discovery is authoritative; the lexical floor retains changed
 // malformed authorities so they cannot make an old claim appear current.
 jet_cli_receipt_authority_roots: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> [String] Never! {
-    root := cli_files.realpath(start) ?? start
+    ^root: cli_files.realpath(start) ?? start
     if {
         jet_cli_find_workspace_root_checked(cache, start) == .Ok(found) && found == .Val(found_root) -> {
             root = found_root
@@ -159,9 +159,9 @@ jet_cli_receipt_authority_roots: fn(cache: ^WorkspaceDeclarationCache, start: St
             root = found_root
         }
     }
-    roots := [String]{root}
-    directory := start
-    package_seen := false
+    ^roots: [String]{root}
+    ^directory: start
+    ^package_seen: false
     loop {
         package: jet_cli_receipt_regular(jet_cli_rooted_join(directory, "package.jet")) || jet_cli_receipt_regular(jet_cli_rooted_join(directory, "pkg.jet"))
         workspace: jet_cli_receipt_regular(jet_cli_rooted_join(directory, "workspace.jet"))
@@ -218,7 +218,7 @@ jet_cli_comparison_input_paths: fn(cache: ^WorkspaceDeclarationCache, target: St
     }
     // The authority walk starts at the corpus file's directory, not the file.
     directory: AuthorityResolver.authority_walk_root(jet_cli_parent(absolute) ?? "/") ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
-    paths := [String]{absolute}
+    ^paths: [String]{absolute}
     loop root in jet_cli_receipt_authority_roots(cache, directory) {
         loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"}) {
             path: jet_cli_rooted_join(root, name)
@@ -231,7 +231,7 @@ jet_cli_comparison_input_paths: fn(cache: ^WorkspaceDeclarationCache, target: St
 
 jet_cli_receipt_claim: fn(verb: String, paths: [String], argv: [String], terminal: [U8]) -[FS, Env, Time.Wait]> JetDriverRunReceiptClaim JetCLIReadError! {
     identity: jet_cli_receipt_context_identity(verb, argv, terminal)
-    inputs := [JetDriverRunReceiptInput]{}
+    ^inputs: [JetDriverRunReceiptInput]{}
     loop path in paths {
         canonical: cli_files.realpath(path) ?? return Err(jet_cli_read_error("could not canonicalize input {path}: {jet_cli_io_error_text(err)}"))
         observed: jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: canonical, digest: ""})
@@ -243,11 +243,11 @@ jet_cli_receipt_claim: fn(verb: String, paths: [String], argv: [String], termina
 // The claim over already observed `inputs`: `identity` framed with each
 // input's path and digest in path order, one row per path.
 jet_cli_receipt_claim_of: fn(verb: String, identity: [U8], inputs: [JetDriverRunReceiptInput]) -> JetDriverRunReceiptClaim Never! {
-    framed := identity
-    sorted := inputs
+    ^framed: identity
+    ^sorted: inputs
     sorted.sort_by(fn(left: JetDriverRunReceiptInput, right: JetDriverRunReceiptInput) { left.path <=> right.path })
-    previous := ""
-    unique := [JetDriverRunReceiptInput]{}
+    ^previous: ""
+    ^unique: [JetDriverRunReceiptInput]{}
     loop input in sorted {
         if input.path == previous -> next
         previous = input.path
@@ -261,7 +261,7 @@ jet_cli_receipt_claim_of: fn(verb: String, identity: [U8], inputs: [JetDriverRun
 // The non-empty values of secret-named environment variables and argv options,
 // longest first, so redaction never leaves the tail of a longer secret behind.
 jet_cli_receipt_secret_values: fn(argv: [String]) -[Env]> [String] Never! {
-    values := [String]{}
+    ^values: [String]{}
     names: cli_sys.vars() ?? [String]{}
     loop name in names {
         if !jet_cli_receipt_secret_environment(name) -> next
@@ -281,7 +281,7 @@ jet_cli_receipt_secret_values: fn(argv: [String]) -[Env]> [String] Never! {
         }
     }
     values.sort_by(fn(left: String, right: String) { right.bytes().len() <=> left.bytes().len() })
-    unique := [String]{}
+    ^unique: [String]{}
     loop value in values {
         if !unique.contains(value) -> unique.push(value)
     }
@@ -289,7 +289,7 @@ jet_cli_receipt_secret_values: fn(argv: [String]) -[Env]> [String] Never! {
 }
 
 jet_cli_receipt_canonical_member: fn(input: JetDriverRunReceiptInput, cwd: String, members: ^[JetDriverRunReceiptInput]) JetCLIReadError! {
-    path := input.path.replace("\\", "/")
+    ^path: input.path.replace("\\", "/")
     prefix: if cwd.ends_with("/") -> cwd else -> "{cwd}/"
     if path.starts_with(prefix) -> path = path.removeprefix(prefix)
     components: path.split("/").to_list()
@@ -335,7 +335,7 @@ jet_cli_receipt_target_identity: fn(cache: ^WorkspaceDeclarationCache, target: S
         }
     }
     start: AuthorityResolver.authority_walk_root(directory) ?? return Err(jet_cli_read_error("couldn't resolve canonical target directory"))
-    roots := [String]{}
+    ^roots: [String]{}
     if jet_cli_find_workspace_root_checked(cache, start) == {
         .Ok(found) -> {
             if found == .Val(root) -> roots.push(root)
@@ -354,7 +354,7 @@ jet_cli_receipt_target_identity: fn(cache: ^WorkspaceDeclarationCache, target: S
     }
     authority_root: jet_cli_selected_project_root(cache, start) ?? return Err(jet_cli_read_error("couldn't resolve the workspace root for `{target}`: {err.diagnostic}"))
     cwd: if rooted -> "{authority_root}" else -> cli_sys.current_dir() ?? "."
-    members := [JetDriverRunReceiptInput]{}
+    ^members: [JetDriverRunReceiptInput]{}
     loop input in inputs -> jet_cli_receipt_canonical_member(input, cwd, members)
     loop root in jet_cli_lock_canonical(roots) {
         loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"}) {
@@ -370,7 +370,7 @@ jet_cli_receipt_target_identity: fn(cache: ^WorkspaceDeclarationCache, target: S
             observed: jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: path, digest: ""})
             jet_cli_receipt_canonical_member(observed, cwd, members)
         }
-        generated := [String]{}
+        ^generated: [String]{}
         jet_cli_receipt_generated_paths(jet_cli_rooted_join(root, ".jet/generated"), true, generated)
         loop path in generated {
             observed: jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: path, digest: ""})
@@ -378,7 +378,7 @@ jet_cli_receipt_target_identity: fn(cache: ^WorkspaceDeclarationCache, target: S
         }
     }
     members.sort_by(fn(left: JetDriverRunReceiptInput, right: JetDriverRunReceiptInput) { left.path <=> right.path })
-    text := ""
+    ^text: ""
     loop member in members {
         text = "{text}{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}\n"
     }

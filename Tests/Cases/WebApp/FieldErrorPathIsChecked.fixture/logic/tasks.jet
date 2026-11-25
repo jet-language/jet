@@ -36,7 +36,7 @@ Crew: struct {
     // A signed-in caller adds a task: its assignee must be in the crew, and
     // each of its steps needs a title.
     #App.SignedIn add_task: fn(self, draft: TaskDraft) -> Int TaskError! {
-        errors := [FieldError]{}
+        ^errors: [FieldError]{}
         if draft.assignee == .Val(who) {
             if !self.members.contains(who) {
                 errors.push(app.field_error(at: "assignee", reason: "Pick someone in this project."))

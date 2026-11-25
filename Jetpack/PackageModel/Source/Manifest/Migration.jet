@@ -19,7 +19,7 @@ ManifestSource: struct {
 
 pkg_manifest_source: fn(text: String) -> ManifestSource Never! {
     comments: pkg_comment_spans(text)
-    raw := text.bytes()
+    ^raw: text.bytes()
     loop comment in comments {
         loop index in comment.start..<comment.end -> raw[index] = U8{32}
     }
@@ -66,8 +66,8 @@ pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError
     // The comments above the first header marker stay above the header, a
     // blank line after one kept, one at most.
     first: if markers.len() > 0 -> markers[0].start else -> 0
-    leading := ""
-    last_end := -1
+    ^leading: ""
+    ^last_end: -1
     loop comment in source.comments {
         if comment.start >= first -> break
         if last_end >= 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) > 1 {
@@ -79,7 +79,7 @@ pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError
     if last_end >= 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, first)) > 1 {
         leading = "{leading}\n"
     }
-    header := leading
+    ^header: leading
     loop marker in markers {
         header = if marker.args == "" -> "{header}#{marker.name}\n" else -> "{header}#{marker.name}({marker.args})\n"
     }
@@ -119,19 +119,19 @@ pkg_has_comment: fn(source: ManifestSource, start: Int, end: Int) -> Bool Never!
 // the last one too, as a record laid out over several lines is written.
 pkg_format_body: fn(source: ManifestSource, start: Int, end: Int, indent: Int, top: Bool) -> ManifestBody Never! {
     region: pkg_binder_slice(source.masked, start, end)
-    cores := [EditSpan]{}
+    ^cores: [EditSpan]{}
     loop span in pkg_top_level_entry_spans(region) {
         cores.push(pkg_trim_span(source.masked, EditSpan{start: start + span.start, end: start + span.end}))
     }
     comma: pkg_package_top_level_comma(region) != None
     trailing_comma: pkg_package_has_trailing_top_level_comma(region)
     pad: " ".repeat(indent)
-    lines := [String]{}
-    open := [String]{}
-    last_end := start
+    ^lines: [String]{}
+    ^open: [String]{}
+    ^last_end: start
     // Whether the last line is an entry that no comment follows yet.
-    entry_line := false
-    comment_index := 0
+    ^entry_line: false
+    ^comment_index: 0
     loop entry_index in 0..<cores.len() + 1 {
         limit: if entry_index < cores.len() -> cores[entry_index].start else -> end
         loop comment_index < source.comments.len() && source.comments[comment_index].start < limit {
@@ -171,7 +171,7 @@ pkg_format_body: fn(source: ManifestSource, start: Int, end: Int, indent: Int, t
 }
 
 pkg_format_newlines: fn(gap: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop byte in gap.bytes() {
         if byte == (U8{10}) -> count += 1
     }
@@ -249,10 +249,10 @@ pkg_package_has_trailing_top_level_comma: fn(value: String) -> Bool Never! {
 // The byte offset of the last top-level comma.
 pkg_package_top_level_comma: fn(value: String) -> Int? Never! {
     raw: value.bytes()
-    depth := 0
-    quoted := false
-    escaped := false
-    comma := Int?{None}
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
+    ^comma: Int?{None}
     loop index in 0..<raw.len() {
         code: Int{raw[index]}
         if quoted {
@@ -280,10 +280,10 @@ pkg_package_top_level_comma: fn(value: String) -> Int? Never! {
 // The outermost `{ … }` of a value that ends at its closing brace.
 pkg_package_record_bounds: fn(value: String) -> EditSpan? Never! {
     raw: value.bytes()
-    open := -1
-    depth := 0
-    quoted := false
-    escaped := false
+    ^open: -1
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
     loop index in 0..<raw.len() {
         code: Int{raw[index]}
         if quoted {

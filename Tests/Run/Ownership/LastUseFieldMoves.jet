@@ -38,9 +38,9 @@ Pair: struct {
 // Two fields of a loop's element copy feed a record and nothing reads the
 // copy again: both fields move out, and the copy's cleanup releases the rest.
 entries: fn(units: [SourceUnit]) -> [Entry] {
-    out := [Entry]{}
+    ^out: [Entry]{}
     loop index in 0..<units.len() {
-        unit := units[index]
+        ^unit: units[index]
         out.push(Entry{name: unit.name, path: unit.path})
     }
     out
@@ -58,7 +58,7 @@ pick_left: fn(seed: String) -> Graph {
 // `left` is still read, then moves too.
 split: fn(seed: String) -> [[String]] {
     pair: make_pair(seed)
-    out := [[String]]{}
+    ^out: [[String]]{}
     out.push(pair.right)
     print("split left {pair.left.len()}")
     out.push(pair.left)
@@ -88,7 +88,7 @@ maybe_left: fn(pair_seed: String, moving: Bool) -> Int {
 // Read again by the next iteration: every iteration stores a copy.
 repeated: fn(rounds: Int) -> Int {
     pair: make_pair("x")
-    sum := 0
+    ^sum: 0
     loop round in 0..<rounds {
         graph: Graph{names: pair.left}
         sum += graph.names.len() + round
@@ -102,13 +102,13 @@ project: fn(n: Int) -> Host? {
 }
 
 gather: fn(values: [Int]) -> [Host]? {
-    output := [Host]{}
+    ^output: [Host]{}
     loop value in values -> output.push(project(value) ?? return None)
     Val(output)
 }
 
 group: fn(name: String, values: [Int]) -> Host? {
-    output := [Host]{}
+    ^output: [Host]{}
     loop value in values -> output.push(project(value) ?? return None)
     Val(Host.Group{name: name, items: output})
 }
@@ -116,11 +116,11 @@ group: fn(name: String, values: [Int]) -> Host? {
 add_name: fn(graph: ^Graph, name: String) { graph.names.push(name.copy()) }
 
 stage: fn(start: Graph, names: [String]) -> Int {
-    env := Env{graph: Val(start), count: 0}
+    ^env: Env{graph: Val(start), count: 0}
     loop name in names {
-        staged := env.graph.move()
+        ^staged: env.graph.move()
         env.graph = None
-        resolved := staged.move() ?? {
+        ^resolved: staged.move() ?? {
             return -1
         }
         add_name(resolved, name)
@@ -132,17 +132,17 @@ stage: fn(start: Graph, names: [String]) -> Int {
 }
 
 total: fn(values: View<Int>) -> Int {
-    sum := 0
+    ^sum: 0
     loop value in values -> sum += value
     sum
 }
 
 run: fn() {
-    hosts := gather([Int]{1, 2, 3}) ?? [Host]{}
-    missing := gather([Int]{1, -2}) ?? [Host]{}
+    ^hosts: gather([Int]{1, 2, 3}) ?? [Host]{}
+    ^missing: gather([Int]{1, -2}) ?? [Host]{}
     print("gather {hosts.len()} missing {missing.len()}")
 
-    grouped := group("g", [Int]{4, 5}) ?? Host.Leaf{n: 0}
+    ^grouped: group("g", [Int]{4, 5}) ?? Host.Leaf{n: 0}
     if grouped == {
         .Group(name, items) -> { print("group {name} {items.len()}") }
         .Leaf(n) -> print("leaf {n}")
@@ -150,17 +150,17 @@ run: fn() {
 
     print("stage {stage(Graph{names: [String]{"a"}}, [String]{"b", "c"})}")
 
-    env := Env{graph: Val(Graph{names: [String]{"x"}}), count: 0}
-    copied := env.graph ?? Graph{names: [String]{}}
+    ^env: Env{graph: Val(Graph{names: [String]{"x"}}), count: 0}
+    ^copied: env.graph ?? Graph{names: [String]{}}
     copied.names.push("y")
-    kept := env.graph ?? Graph{names: [String]{}}
+    ^kept: env.graph ?? Graph{names: [String]{}}
     print("copied {copied.names.len()} kept {kept.names.len()}")
 
     records: [Int]{1, 2, 3}
     window: records[0..<records.len()]
     print("total {total(window)} records {records.len()}")
 
-    listed := entries([SourceUnit]{SourceUnit{name: "a", path: "a.jet"}, SourceUnit{name: "b", path: "b.jet"}})
+    ^listed: entries([SourceUnit]{SourceUnit{name: "a", path: "a.jet"}, SourceUnit{name: "b", path: "b.jet"}})
     print("entries {listed.len()} {listed[1].name} {listed[1].path}")
 
     picked: pick_left("p")

@@ -4,13 +4,13 @@
 // shorter result stays short, and a result the caller keeps is never changed
 // by a later call.
 evens: fn(count: Int) -> [Int] {
-    out := [Int]{}
+    ^out: [Int]{}
     loop i in 0..<count -> out.push(i * 2)
     out
 }
 
 label: fn(seed: Int) -> String {
-    out := ""
+    ^out: ""
     loop i in 0..<seed % 4 {
         if i % 2 == 0 -> out += "a" else -> out += "bc"
     }
@@ -18,7 +18,7 @@ label: fn(seed: Int) -> String {
 }
 
 pick: fn(fresh: Bool, count: Int) -> [String] {
-    out := [String]{"seed"}
+    ^out: [String]{"seed"}
     if fresh {
         out = [String]{}
         loop i in 0..<count -> out.push("n{i}")
@@ -27,14 +27,14 @@ pick: fn(fresh: Bool, count: Int) -> [String] {
 }
 
 run: fn() {
-    total := 0
+    ^total: 0
     loop round in 0..<5 {
         xs: evens(5 - round)
         print(xs)
         loop x in xs -> total += x
     }
     print(total)
-    kept := [[Int]]{}
+    ^kept: [[Int]]{}
     loop round in 0..<3 {
         ys: evens(round + 1)
         kept.push(ys)
@@ -48,7 +48,7 @@ run: fn() {
         names: pick(round % 2 == 0, round + 1)
         print(names.join(","))
     }
-    last := [Int]{}
+    ^last: [Int]{}
     loop round in 0..<3 {
         zs: evens(round + 2)
         if round == 1 {

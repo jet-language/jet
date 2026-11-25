@@ -51,7 +51,7 @@ ir_dyn_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver:
     if args.len() != route.arity {
         return Val(ir_fail_slot(b, span, "handle method {route.symbol} with {args.len()} arguments"))
     }
-    operands := [Int]{}
+    ^operands: [Int]{}
     tree: ir_expr(m, p, b, receiver)
     if ir_failed(b) -> return Val(-1)
     operands.push(tree)
@@ -113,7 +113,7 @@ ir_dyn_checked: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, row: Int
     ir_open_if(b.f, failed, b.line)
     message: ir_load_at(m, b, outcome, 8, string_row)
     null: ir_word_const(m, b, 0)
-    at := location.copy()
+    ^at: location.copy()
     at.column = 0
     at.caret = 0
     ir_stop(m, p, b, 2, message, null, null, ir_report_location(p, at))
@@ -286,8 +286,8 @@ ir_dyn_field: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, dyn_row: I
 // the operands stay owned by the caller, which releases them once after the
 // branch joins.
 ir_dyn_route_lent: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, operands: [Int], ty: Type, span: Span) -> Int Never! {
-    fresh := [Bool]{}
-    mask := [Bool]{}
+    ^fresh: [Bool]{}
+    ^mask: [Bool]{}
     loop slot in operands {
         fresh.push(b.fresh[slot])
         mask.push(true)
@@ -347,7 +347,7 @@ ir_dyn_place_open: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, dyn_row: Int, r
         _: ir_type_fail(b, span, receiver_ty)
         return None
     }
-    backs := [IRWriteBack]{}
+    ^backs: [IRWriteBack]{}
     cell: ir_place_address(m, p, b, receiver, backs, span)
     if ir_failed(b) || cell < 0 -> return None
     current: ir_temp(m, b, value_row)
@@ -454,7 +454,7 @@ ir_dyn_set_key: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, dyn_row: Int, rece
     ir_close_disarm(b, owned)
     receiver_ty: ir_ty(m, p, b, receiver)
     value_row: ir_value_type(m, p, receiver_ty) ?? return ir_type_fail(b, span, receiver_ty)
-    backs := [IRWriteBack]{}
+    ^backs: [IRWriteBack]{}
     cell: ir_place_address(m, p, b, receiver, backs, span)
     if ir_failed(b) || cell < 0 -> return -1
     current: ir_temp(m, b, value_row)
@@ -805,7 +805,7 @@ ir_serde_encode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receive
     }
     slot: ir_expr(m, p, b, receiver)
     if ir_failed(b) || slot < 0 -> return -1
-    payload := slot
+    ^payload: slot
     if ir_untag(concrete) == .IntN(_, _) {
         int_row: ir_value_type(m, p, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
         payload = ir_numeric_cast(m, p, b, slot, int_row, span)
@@ -948,7 +948,7 @@ ir_dyn_encode_source: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, 
     source: ir_expr(m, p, b, value)
     if ir_failed(b) || source < 0 -> return -1
     value_ty: ir_ty(m, p, b, value)
-    local := checked_generated_local("{stem}_{source}", span, value_ty)
+    ^local: checked_generated_local("{stem}_{source}", span, value_ty)
     owned: b.fresh[source] && ir_has_drop(m, b, source)
     b.bindings.push(IRBinding{name: local.name.move(), slot: source, owned: owned})
     b.fresh[source] = false
@@ -976,7 +976,7 @@ ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -
     candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, codec, method)]
     loop row in candidates {
         if ir_function_row(p, p.functions[row].key) != (Val(row)) -> next
-        owner := Type?{None}
+        ^owner: Type?{None}
         if p.functions[row].kind == {
             .Method(_, owner_type) -> { owner = Val(owner_type.copy()) }
             .TraitMethod(_, _, owner_type, trait_name, _) -> {
@@ -1000,7 +1000,9 @@ ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -
             method_args: ir_codec_method_args(p, p.functions[row], concrete) ?? next
             return Val({key: p.functions[row].key.copy(), args: method_args})
         }
-        if ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, implementer) != declaration -> next
+        if ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, implementer) != declaration {
+            next
+        }
         args: ir_owner_args(p, p.functions[row], concrete) ?? next
         return Val({key: p.functions[row].key.copy(), args: args})
     }
@@ -1017,10 +1019,10 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
     declared: p.types[row].generic_params
     actual: ir_type_args(concrete)
     if declared.len() != actual.len() -> return None
-    args := [Type]{}
+    ^args: [Type]{}
     loop parameter in function.generic_params {
         if parameter.name == "__Source" -> next
-        found := -1
+        ^found: -1
         loop (index, candidate) in declared {
             if candidate.name == parameter.name -> found = index
         }
@@ -1040,18 +1042,16 @@ ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> {key:
     if function.role != CORE_ROLE_TYPED_DECODE_READ || type_args.len() != 2 || !function.key.ends_with(function.name) {
         return None
     }
-    if !module_is_core(function.module_identity) {
-        return None
-    }
+    if !module_is_core(function.module_identity) -> return None
     target: type_args[0]
     source: type_args[1]
     if ir_codec_impl(p, target, "Decode", "__read") == .Val(own) {
-        args := own.args.copy()
+        ^args: own.args.copy()
         args.push(source.copy())
         return Val({key: own.key.copy(), args: args})
     }
-    helper := ""
-    args := [Type]{}
+    ^helper: ""
+    ^args: [Type]{}
     if ir_untag(target) == {
         .List(element) -> {
             bytes: if ir_untag(element) == {

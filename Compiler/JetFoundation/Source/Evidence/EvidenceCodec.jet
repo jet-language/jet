@@ -28,7 +28,7 @@ evidence_get_number: fn(cursor: ^EvidenceCursor, width: Int) -> U64 EvidenceCode
     // read_byte checks only bounds; read_u16/u32/u64 check addition first.
     end: if width == 1 -> cursor.at + 1 else -> (Int{evidence_checked_offset(U64{cursor.at}, U64{width}, cursor.usize_max) ?? return Err(evidence_codec_error("evidence report offset overflow"))})
     if end > cursor.bytes.len() -> return Err(evidence_codec_error("truncated evidence report"))
-    value := U64{0}
+    ^value: U64{0}
     loop _ in 0..<width {
         value = (value << 8) | U64{cursor.bytes[cursor.at]}
         cursor.at += 1
@@ -87,14 +87,14 @@ evidence_decode_derivation: fn(cursor: ^EvidenceCursor) -> DerivationRecord Evid
     method_code: evidence_get_byte(cursor)
     method: DerivationMethod.from_int(method_code) ?? return Err(evidence_codec_error("unknown derivation method {method_code}"))
     rule: evidence_get_string(cursor)
-    premises := [String]{}
+    ^premises: [String]{}
     premise_count: evidence_get_len(cursor)
     loop _ in 0..<premise_count -> premises.push(evidence_get_string(cursor))
     source: evidence_get_string(cursor)
     build: evidence_get_string(cursor)
     run: evidence_get_string(cursor)
     target: evidence_get_string(cursor)
-    assumptions := [String]{}
+    ^assumptions: [String]{}
     assumption_count: evidence_get_len(cursor)
     loop _ in 0..<assumption_count -> assumptions.push(evidence_get_string(cursor))
     disposition_code: evidence_get_byte(cursor)
@@ -112,7 +112,7 @@ evidence_decode_derivation: fn(cursor: ^EvidenceCursor) -> DerivationRecord Evid
         0 -> None
         1 -> Val(DerivationPayload.FrameSchedule{schedule: evidence_decode_frame_schedule(evidence_get_string(cursor))})
         2 -> {
-            writers := [String]{}
+            ^writers: [String]{}
             writer_count: evidence_get_len(cursor)
             loop _ in 0..<writer_count -> writers.push(evidence_get_string(cursor))
             Val(DerivationPayload.BuildFactChain{writers: writers})
@@ -121,7 +121,7 @@ evidence_decode_derivation: fn(cursor: ^EvidenceCursor) -> DerivationRecord Evid
             return Err(evidence_codec_error("unknown derivation payload marker {payload_marker}"))
         }
     }
-    value := derivation_record(subject, claim, producer, method, rule, premises, derivation_identity(source, build, run, target))
+    ^value: derivation_record(subject, claim, producer, method, rule, premises, derivation_identity(source, build, run, target))
     value.assumptions = derivation_strings_sorted_unique(assumptions)
     value.disposition = disposition
     value.observation = observation
@@ -169,12 +169,12 @@ evidence_decode_record: fn(cursor: ^EvidenceCursor) -> EvidenceDecodedRecord Evi
     build: EvidenceBuild{toolchain: evidence_get_string(cursor), target: evidence_get_string(cursor), profile: evidence_get_string(cursor)}
     revision: EvidenceRevision{source: evidence_get_string(cursor), build: evidence_get_string(cursor), revision: evidence_get_string(cursor)}
     detail: evidence_get_string(cursor)
-    attachments := [EvidenceAttachment]{}
+    ^attachments: [EvidenceAttachment]{}
     attachment_count: evidence_get_len(cursor)
     loop _ in 0..<attachment_count {
         attachments.push(EvidenceAttachment{name: evidence_get_string(cursor), value: evidence_get_string(cursor)})
     }
-    diagnostics := [EvidenceDiagnostic]{}
+    ^diagnostics: [EvidenceDiagnostic]{}
     diagnostic_count: evidence_get_len(cursor)
     loop _ in 0..<diagnostic_count {
         code: evidence_get_string(cursor)
@@ -194,7 +194,7 @@ evidence_decode_record: fn(cursor: ^EvidenceCursor) -> EvidenceDecodedRecord Evi
         }
         diagnostics.push(EvidenceDiagnostic{code: code, message: message, source: diagnostic_source})
     }
-    chain := [EvidenceChainLink]{}
+    ^chain: [EvidenceChainLink]{}
     chain_count: evidence_get_len(cursor)
     loop _ in 0..<chain_count {
         chain.push(EvidenceChainLink{evidence_id: evidence_get_string(cursor), relation: evidence_get_string(cursor)})
@@ -230,14 +230,14 @@ evidence_decode_report_bytes: fn(bytes: [U8], usize_max: U64) -> EvidenceDecoded
             return Err(evidence_codec_error("invalid evidence report magic"))
         }
     }
-    cursor := evidence_cursor(bytes, 8, usize_max)
+    ^cursor: evidence_cursor(bytes, 8, usize_max)
     version: U16{Int{evidence_get_number(cursor, 2)}}
     if version != EVIDENCE_REPORT_VERSION {
         return Err(evidence_codec_error("unsupported evidence report schema version {version}"))
     }
-    records := [EvidenceRecord]{}
-    derivations := [DerivationRecord]{}
-    definitions := [String:Int]{}
+    ^records: [EvidenceRecord]{}
+    ^derivations: [DerivationRecord]{}
+    ^definitions: [String:Int]{}
     loop cursor.at < cursor.bytes.len() {
         if records.len() >= 10000 {
             return Err(evidence_codec_error("too many evidence report records"))
@@ -282,13 +282,17 @@ evidence_report_from_bytes: fn(bytes: [U8], usize_max: U64) -> EvidenceReport Ev
 
 derivation_store_decode: fn(bytes: [U8], usize_max: U64) -> DerivationStore EvidenceCodecError! {
     magic: DERIVATION_STORE_MAGIC.bytes()
-    if bytes.len() < magic.len() -> return Err(evidence_codec_error("invalid derivation relation magic"))
-    loop index in 0..<magic.len() {
-        if bytes[index] != magic[index] -> return Err(evidence_codec_error("invalid derivation relation magic"))
+    if bytes.len() < magic.len() {
+        return Err(evidence_codec_error("invalid derivation relation magic"))
     }
-    cursor := evidence_cursor(bytes, magic.len(), usize_max)
+    loop index in 0..<magic.len() {
+        if bytes[index] != magic[index] {
+            return Err(evidence_codec_error("invalid derivation relation magic"))
+        }
+    }
+    ^cursor: evidence_cursor(bytes, magic.len(), usize_max)
     count: Int{evidence_get_number(cursor, 4)}
-    store := derivation_store_new()
+    ^store: derivation_store_new()
     loop _ in 0..<count {
         record: evidence_decode_derivation(cursor)
         if derivation_store_add(store, record) == {
@@ -296,6 +300,8 @@ derivation_store_decode: fn(bytes: [U8], usize_max: U64) -> DerivationStore Evid
             .Err(error) -> return Err(evidence_codec_error(error.message))
         }
     }
-    if cursor.at != cursor.bytes.len() -> return Err(evidence_codec_error("derivation relation has trailing bytes"))
+    if cursor.at != cursor.bytes.len() {
+        return Err(evidence_codec_error("derivation relation has trailing bytes"))
+    }
     Ok(store)
 }

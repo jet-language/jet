@@ -15,7 +15,7 @@ jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJS
         return Err(jettrace_error("content.profile.counters must hold all {TRACE_COUNTERS.len()} counters of the memory lens, or none"))
     }
     // Which counters the profile captured: only their counts are in rows.
-    captured := [Bool]{}
+    ^captured: [Bool]{}
     loop _ in TRACE_COUNTERS -> captured.push(false)
     loop index in 0..<counters.len() {
         label: "content.profile.counters[{index}]"
@@ -111,7 +111,7 @@ jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJS
     identities: jettrace_array(source_identity, "content.source_identity")
     // Source identities have been validated already. Index path+digest once,
     // so this stays linear in rows plus source identities.
-    identity_index := [String:[String:Bool]]{}
+    ^identity_index: [String:[String:Bool]]{}
     loop identity in identities {
         identity_fields: jettrace_object_keys(identity, "content.source_identity", [String]{"path", "sha256", "symbols"})
         path: jettrace_text(identity_fields[jettrace_get(identity_fields, "path")].value, "content.source_identity.path")

@@ -71,7 +71,7 @@ publication_resolve_test_solve: fn(roots: [PublicationVersionConstraint], candid
 
 #Test("publication registry_solver_backtracks_and_keeps_a_causal_proof") {
     roots: [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "^1.0", "root")}
-    candidates := [String:[PublicationSolverCandidate]]{
+    ^candidates: [String:[PublicationSolverCandidate]]{
         "app": [PublicationSolverCandidate]{
             publication_resolve_test_candidate("1.1.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "^2.0", "app 1.1.0")}),
             publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "^1.0", "app 1.0.0")}),
@@ -141,7 +141,7 @@ publication_resolve_test_solve: fn(roots: [PublicationVersionConstraint], candid
 }
 
 #Test("publication selector all unsatisfiable reasons and conflicting pair") {
-    constraints := [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "uninvolved"), publication_resolve_test_constraint("app", "^1", "left"), publication_resolve_test_constraint("app", "^2", "right")}
+    ^constraints: [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "uninvolved"), publication_resolve_test_constraint("app", "^1", "left"), publication_resolve_test_constraint("app", "^2", "right")}
     error: publication_resolve_test_selection_error(publication_select_highest_compatible("app", constraints, [PublicationSemVer]{}))
     assert(error.why.contains("from `left`"))
     assert(error.why.contains("from `right`"))
@@ -195,7 +195,7 @@ publication_resolve_test_solve: fn(roots: [PublicationVersionConstraint], candid
 }
 
 #Test("publication graph merges rejection preference and strict candidate edges") {
-    root_candidate := publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "^1", "app")})
+    ^root_candidate: publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "^1", "app")})
     root_candidate.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.9.0+rejected")}
     root_candidate.preferred["shared"] = [PublicationVersionReq]{publication_parse_version_req("=1.1.0") ?? panic("fixture")}
     root_candidate.strict.push("shared")
@@ -209,7 +209,7 @@ publication_resolve_test_solve: fn(roots: [PublicationVersionConstraint], candid
 }
 
 #Test("publication backtracking isolates candidate local policies") {
-    bad := publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "*", "app 2")})
+    ^bad: publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "*", "app 2")})
     bad.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.0.0")}
     candidates: [String:[PublicationSolverCandidate]]{
         "app": [PublicationSolverCandidate]{bad, publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "*", "app 1")})},
@@ -277,8 +277,8 @@ publication_resolve_test_solve: fn(roots: [PublicationVersionConstraint], candid
 }
 
 #Test("publication multi edge policy unions and duplicate requirements") {
-    a := publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", ">=1.0.0", "a")})
-    b := publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "<2.0.0", "b")})
+    ^a: publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", ">=1.0.0", "a")})
+    ^b: publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "<2.0.0", "b")})
     a.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.9.0")}
     b.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.8.0")}
     a.preferred["shared"] = [PublicationVersionReq]{publication_parse_version_req("=1.2.0") ?? panic("fixture")}

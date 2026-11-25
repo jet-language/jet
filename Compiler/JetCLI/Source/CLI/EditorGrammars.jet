@@ -130,12 +130,12 @@ jet_cli_devtools_grammars: fn(quiet: Bool, color: Bool) -[FS, Env]> JetCLIPlan N
         jet_cli_grammar_render_tree_sitter(inputs.tokens, inputs.separator),
         jet_cli_grammar_render_zed(inputs.tokens, inputs.anonymous),
     }
-    rewritten := [String]{}
+    ^rewritten: [String]{}
     loop (index, path) in targets {
         text: cli_files.read(path) ?? return jet_cli_grammar_fail("couldn't read `{path}`: {jet_cli_io_error_text(err)}", color)
         rewritten.push(jet_cli_grammar_replace_section(text, sections[index], path) ?? return jet_cli_grammar_fail(err.message, color))
     }
-    out := ""
+    ^out: ""
     loop (index, path) in targets {
         cli_files.write(path, rewritten[index]) ?? return jet_cli_grammar_fail("couldn't write `{path}`: {jet_cli_io_error_text(err)}", color)
         // The files are always written; `--quiet` only mutes the confirmations.
@@ -153,7 +153,7 @@ jet_cli_grammar_inputs: fn(root: String) -[FS]> JetCLIGrammarInputs JetCLIReadEr
     constants: jet_cli_grammar_constants(root)
     tokens: jet_cli_grammar_tokens(root, constants)
     anonymous: jet_cli_grammar_anonymous(root)
-    separator := ""
+    ^separator: ""
     loop constant in constants {
         if constant.name == "MARKER_INBODY_SEPARATOR" -> separator = constant.value.copy()
     }
@@ -177,9 +177,9 @@ jet_cli_grammar_slice: fn(text: String, start: Int, end: Int) -> String Never! {
 jet_cli_grammar_find: fn(text: String, needle: String, from: Int) -> Int Never! {
     raw: text.bytes()
     want: needle.bytes()
-    at := from
+    ^at: from
     loop at + want.len() <= raw.len() {
-        matched := true
+        ^matched: true
         loop (offset, byte) in want {
             if raw[at + offset] != byte {
                 matched = false
@@ -211,14 +211,14 @@ jet_cli_grammar_is_space: fn(byte: U8) -> Bool Never! {
 }
 
 jet_cli_grammar_skip_space: fn(raw: [U8], from: Int) -> Int Never! {
-    at := from
+    ^at: from
     loop at < raw.len() && jet_cli_grammar_is_space(raw[at]) -> at += 1
     at
 }
 
 // The end (exclusive) of the identifier starting at `from`, or `from`.
 jet_cli_grammar_ident_end: fn(raw: [U8], from: Int) -> Int Never! {
-    at := from
+    ^at: from
     loop at < raw.len() && jet_cli_grammar_is_ident_byte(raw[at], at == from) -> at += 1
     at
 }
@@ -227,14 +227,12 @@ jet_cli_grammar_ident_end: fn(raw: [U8], from: Int) -> Int Never! {
 // at `from`, or -1.
 jet_cli_grammar_literal_end: fn(raw: [U8], from: Int) -> Int Never! {
     if from >= raw.len() || raw[from] != (U8{34}) -> return -1
-    at := from + 1
+    ^at: from + 1
     loop at < raw.len() {
         if {
             raw[at] == (U8{92}) -> at += 2
             raw[at] == (U8{34}) -> return at + 1
-            raw[at] == (U8{10}) -> {
-                return -1
-            }
+            raw[at] == (U8{10}) -> { return -1 }
             else -> { at += 1 }
         }
     }
@@ -250,8 +248,8 @@ jet_cli_grammar_string: fn(literal: String, field: String) -> String JetCLIReadE
         return Err(jet_cli_read_error("{field} string literal {literal} interpolates; highlight tokens must be literal text"))
     }
     raw: body.bytes()
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < raw.len() {
         byte: raw[at]
         if {
@@ -290,7 +288,7 @@ jet_cli_grammar_constant_line: fn(line: String) -> {name: String, literal: Strin
     raw: line.bytes()
     name_end: jet_cli_grammar_ident_end(raw, 0)
     if name_end == 0 || name_end + 1 >= raw.len() || raw[name_end] != (U8{58}) -> return None
-    at := name_end + 1
+    ^at: name_end + 1
     at = jet_cli_grammar_skip_space(raw, at)
     close: jet_cli_grammar_literal_end(raw, at)
     if close < 0 -> return None
@@ -302,16 +300,16 @@ jet_cli_grammar_constant_line: fn(line: String) -> {name: String, literal: Strin
 // Every `NAME: "literal"` constant in the syntax registry directory.
 jet_cli_grammar_constants: fn(root: String) -[FS]> [JetCLIGrammarConstant] JetCLIReadError! {
     directory: cli_files.join(root, JET_CLI_GRAMMAR_SYNTAX_DIR)
-    names := cli_files.listdir(directory) ?? return Err(jet_cli_read_error("could not list {JET_CLI_GRAMMAR_SYNTAX_DIR}: {jet_cli_io_error_text(err)}"))
+    ^names: cli_files.listdir(directory) ?? return Err(jet_cli_read_error("could not list {JET_CLI_GRAMMAR_SYNTAX_DIR}: {jet_cli_io_error_text(err)}"))
     names.sort()
-    constants := [JetCLIGrammarConstant]{}
+    ^constants: [JetCLIGrammarConstant]{}
     loop entry in names {
         if !entry.ends_with(".jet") -> next
         path: "{JET_CLI_GRAMMAR_SYNTAX_DIR}/{entry}"
         loop line in jet_cli_grammar_read(root, path).split("\n") {
             found: jet_cli_grammar_constant_line(line.copy()) ?? next
             value: jet_cli_grammar_string(found.literal, found.name)
-            known := false
+            ^known: false
             loop prior in constants {
                 if prior.name != found.name -> next
                 if prior.value != value {
@@ -329,8 +327,8 @@ jet_cli_grammar_constants: fn(root: String) -[FS]> [JetCLIGrammarConstant] JetCL
 
 // Active rule names: every top-level marker struct with an `impl Marker` block.
 jet_cli_grammar_markers: fn(root: String) -[FS]> [String] JetCLIReadError! {
-    names := [String]{}
-    current := String?{None}
+    ^names: [String]{}
+    ^current: String?{None}
     loop line in jet_cli_grammar_read(root, JET_CLI_GRAMMAR_MARKERS).split("\n") {
         head: jet_cli_grammar_marker_head(line.copy())
         if {
@@ -369,7 +367,7 @@ jet_cli_grammar_marker_head: fn(line: String) -> String? Never! {
 jet_cli_grammar_tokens: fn(root: String, constants: [JetCLIGrammarConstant]) -[FS]> [JetCLIGrammarToken] JetCLIReadError! {
     source: jet_cli_grammar_read(root, JET_CLI_GRAMMAR_HIGHLIGHTS)
     head: "JET_HIGHLIGHT_TOKENS: [HighlightToken]{{"
-    start := if source.starts_with(head) -> 0 else -> jet_cli_grammar_find(source, "\n{head}", 0)
+    ^start: if source.starts_with(head) -> 0 else -> jet_cli_grammar_find(source, "\n{head}", 0)
     if start > 0 -> start += 1
     if start < 0 {
         return Err(jet_cli_read_error("missing the JET_HIGHLIGHT_TOKENS table in {JET_CLI_GRAMMAR_HIGHLIGHTS}"))
@@ -380,9 +378,9 @@ jet_cli_grammar_tokens: fn(root: String, constants: [JetCLIGrammarConstant]) -[F
     }
     table: jet_cli_grammar_slice(source, start, close + 2)
     raw: table.bytes()
-    tokens := [JetCLIGrammarToken]{}
-    written := 0
-    at := jet_cli_grammar_find(table, "text:", 0)
+    ^tokens: [JetCLIGrammarToken]{}
+    ^written: 0
+    ^at: jet_cli_grammar_find(table, "text:", 0)
     loop at >= 0 {
         written += 1
         if jet_cli_grammar_row(table, raw, at, constants) == .Val(token) -> tokens.push(token)
@@ -400,11 +398,11 @@ jet_cli_grammar_tokens: fn(root: String, constants: [JetCLIGrammarConstant]) -[F
 // One `{ text: X, class: HighlightClass.Y, }` row whose `text:` starts at
 // `at`; None when the row has another shape.
 jet_cli_grammar_row: fn(table: String, raw: [U8], at: Int, constants: [JetCLIGrammarConstant]) -> JetCLIGrammarToken? JetCLIReadError! {
-    before := at - 1
+    ^before: at - 1
     loop before >= 0 && jet_cli_grammar_is_space(raw[before]) -> before -= 1
     if before < 0 || raw[before] != (U8{123}) -> return Ok(None)
-    cursor := jet_cli_grammar_skip_space(raw, at + 5)
-    text := ""
+    ^cursor: jet_cli_grammar_skip_space(raw, at + 5)
+    ^text: ""
     if {
         cursor < raw.len() && raw[cursor] == (U8{34}) -> {
             end: jet_cli_grammar_literal_end(raw, cursor)
@@ -416,7 +414,7 @@ jet_cli_grammar_row: fn(table: String, raw: [U8], at: Int, constants: [JetCLIGra
             end: jet_cli_grammar_ident_end(raw, cursor)
             if end == cursor -> return Ok(None)
             name: jet_cli_grammar_slice(table, cursor, end)
-            found := String?{None}
+            ^found: String?{None}
             loop constant in constants {
                 if constant.name == name -> found = Val(constant.value.copy())
             }
@@ -441,7 +439,7 @@ jet_cli_grammar_row: fn(table: String, raw: [U8], at: Int, constants: [JetCLIGra
         cursor = jet_cli_grammar_skip_space(raw, cursor + 1)
     }
     if cursor >= raw.len() || raw[cursor] != (U8{125}) -> return Ok(None)
-    known := false
+    ^known: false
     loop entry in JET_CLI_GRAMMAR_CLASSES {
         if entry.name == class -> known = true
     }
@@ -464,11 +462,11 @@ jet_cli_grammar_anonymous: fn(root: String) -[FS]> [String] JetCLIReadError! {
             return Err(jet_cli_read_error("could not parse {JET_CLI_GRAMMAR_NODE_TYPES}: the node types are not an array"))
         }
     }
-    anonymous := [String]{}
+    ^anonymous: [String]{}
     loop node in nodes {
         if node == .Object(fields) {
-            kind := String?{None}
-            unnamed := false
+            ^kind: String?{None}
+            ^unnamed: false
             loop field in fields {
                 if field.key == "type" && field.value == .Text(name) -> kind = Val(name.copy())
                 if field.key == "named" && field.value == .Bool(flag) -> unnamed = !flag
@@ -486,7 +484,7 @@ jet_cli_grammar_anonymous: fn(root: String) -[FS]> [String] JetCLIReadError! {
 
 // The distinct non-bracket texts of `class`, in text order.
 jet_cli_grammar_class_texts: fn(tokens: [JetCLIGrammarToken], class: String) -> [String] Never! {
-    texts := [String]{}
+    ^texts: [String]{}
     loop token in tokens {
         if token.class != class || JET_CLI_GRAMMAR_BRACKETS.contains(token.text) || texts.contains(token.text) {
             next
@@ -499,7 +497,7 @@ jet_cli_grammar_class_texts: fn(tokens: [JetCLIGrammarToken], class: String) -> 
 
 jet_cli_grammar_regex_escape: fn(text: String) -> String Never! {
     special: "\\.+*?^$()[]{{}}|/-".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         if special.contains(byte) -> out.push(U8{92})
         out.push(byte)
@@ -512,18 +510,16 @@ jet_cli_grammar_vscode_pattern: fn(scope: String, pattern: String) -> String Nev
 }
 
 jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never! {
-    patterns := [String]{}
+    ^patterns: [String]{}
     loop (class_index, class) in JET_CLI_GRAMMAR_CLASSES {
         texts: jet_cli_grammar_class_texts(tokens, class.name)
-        words := [String]{}
-        symbols := [String]{}
-        longest := 0
+        ^words: [String]{}
+        ^symbols: [String]{}
+        ^longest: 0
         loop text in texts {
             if {
                 jet_cli_grammar_is_word(text) -> words.push(jet_cli_grammar_regex_escape(text))
-                text.count_bytes() > longest -> {
-                    longest = text.count_bytes()
-                }
+                text.count_bytes() > longest -> { longest = text.count_bytes() }
             }
         }
         // Longest first, so `:=` is never read as `:` and `=`.
@@ -534,8 +530,8 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
                 }
             }
         }
-        global := [String]{}
-        contextual := [String]{}
+        ^global: [String]{}
+        ^contextual: [String]{}
         loop word in words {
             if {
                 class.keyword && !CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(word) -> {
@@ -562,7 +558,7 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
             if contextual.contains("as") {
                 patterns.push(jet_cli_grammar_vscode_pattern(scope, "(?<![.A-Za-z0-9_])(as)(?=\\s+[A-Za-z_][A-Za-z0-9_]*)"))
             }
-            rest := [String]{}
+            ^rest: [String]{}
             loop word in contextual {
                 if word != "as" -> rest.push(word)
             }
@@ -586,7 +582,7 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
 // pattern that matches, so a symbol refuses to start a longer symbol of a later
 // class.
 jet_cli_grammar_symbol_pattern: fn(tokens: [JetCLIGrammarToken], class_index: Int, text: String) -> String Never! {
-    rests := [String]{}
+    ^rests: [String]{}
     loop (index, later) in JET_CLI_GRAMMAR_CLASSES {
         if index <= class_index -> next
         loop other in jet_cli_grammar_class_texts(tokens, later.name) {
@@ -603,7 +599,7 @@ jet_cli_grammar_symbol_pattern: fn(tokens: [JetCLIGrammarToken], class_index: In
 }
 
 jet_cli_grammar_render_tree_sitter: fn(tokens: [JetCLIGrammarToken], separator: String) -> String Never! {
-    out := "// {JET_CLI_GRAMMAR_START}\n"
+    ^out: "// {JET_CLI_GRAMMAR_START}\n"
     loop class in JET_CLI_GRAMMAR_CLASSES {
         quoted: loop text in jet_cli_grammar_class_texts(tokens, class.name) -> foundation_json_quote(text)
         out = "{out}const {class.tree_sitter} = [{quoted.join(", ")}];\n"
@@ -613,12 +609,12 @@ jet_cli_grammar_render_tree_sitter: fn(tokens: [JetCLIGrammarToken], separator: 
 }
 
 jet_cli_grammar_render_zed: fn(tokens: [JetCLIGrammarToken], anonymous: [String]) -> String Never! {
-    out := "; {JET_CLI_GRAMMAR_START}\n"
+    ^out: "; {JET_CLI_GRAMMAR_START}\n"
     loop class in JET_CLI_GRAMMAR_CLASSES {
         texts: jet_cli_grammar_class_texts(tokens, class.name)
         out = "{out}; {class.label}: {texts.join(" ")}\n"
         if class.name == "MarkerRule" -> next
-        words := [String]{}
+        ^words: [String]{}
         loop text in texts {
             if !jet_cli_grammar_is_word(text) || !anonymous.contains(text) -> next
             if class.keyword && !CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(text) -> next
@@ -639,7 +635,7 @@ jet_cli_grammar_replace_section: fn(text: String, fresh: String, path: String) -
     end: jet_cli_grammar_find(text, JET_CLI_GRAMMAR_END, start)
     if end < 0 -> return Err(jet_cli_read_error("`{path}` has no `{JET_CLI_GRAMMAR_END}` marker"))
     raw: text.bytes()
-    prefix_end := start
+    ^prefix_end: start
     loop prefix_end > 0 && raw[prefix_end - 1] != (U8{10}) -> prefix_end -= 1
     end_marker: end + JET_CLI_GRAMMAR_END.count_bytes()
     newline: jet_cli_grammar_find(text, "\n", end_marker)

@@ -14,9 +14,9 @@ use {
 worker: fn() {}
 
 run: fn() {
-    tree := service.tree("partitioned")
+    ^tree: service.tree("partitioned")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    temp := testing.temp_dir("service-partition")
+    ^temp: testing.temp_dir("service-partition")
     store: Path.from(temp).join("events.log").to_string()
     state: service.state_store(store) ?? panic("state store")
     tree.set_state_event_log(state, "partition-events", 1, "reversible") ?? panic("state")
@@ -29,7 +29,7 @@ run: fn() {
     tree.directory_register("api", api.copy()) ?? panic("api directory")
     tree.directory_register("drained", drained.copy()) ?? panic("drained directory")
 
-    foreign := service.tree("outside")
+    ^foreign: service.tree("outside")
     foreign_api: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
     foreign.start() ?? panic("foreign start")
     if tree.send(foreign_api, "intrude") == {

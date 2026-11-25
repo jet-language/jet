@@ -25,6 +25,7 @@ SOURCE_DOCUMENTS_ONE_REGION: "🙂\n<script lang=\"jet\">\nrun: fn() {{print(1)}
 // Two regions with host text between them. The Jet source joins them with a
 // generated line the host does not hold.
 SOURCE_DOCUMENTS_TWO_REGIONS: "<p>a</p>\n<script lang=\"jet\">\nlimit: 3\n</script>\n<p>b</p>\n<script lang=\"jet\">\nrun: fn() {{print(limit)}}\n</script>\n"
+
 SOURCE_DOCUMENTS_TWO_REGIONS_JET: "limit: 3\n// generated\nrun: fn() {{print(limit)}}\n"
 
 source_documents_one_region: fn() -> JetDriverSourceDocument Never! {
@@ -65,7 +66,9 @@ source_documents_two_mappings: fn() -> [JetDriverSourceMapping] Never! {
     }
     // `print` is Jet bytes 11..16.
     if jet_driver_host_span(document, Span{start: 11, end: 16}) == {
-        .Val(span) -> source_documents_require(span.start == 36 && span.end == 41, "`print` is host bytes 36..41")
+        .Val(span) -> {
+            source_documents_require(span.start == 36 && span.end == 41, "`print` is host bytes 36..41")
+        }
         .None -> source_documents_require(false, "`print` maps")
     }
     source_documents_require(jet_driver_jet_offset(document, 36) == Val(11), "host byte 36 is Jet byte 11")
@@ -78,11 +81,15 @@ source_documents_two_mappings: fn() -> [JetDriverSourceMapping] Never! {
     source_documents_require(jet_driver_source_document_problem(document) == None, "both mappings hold")
     // `limit` in `print(limit)` is Jet bytes 39..44.
     if jet_driver_host_span(document, Span{start: 39, end: 44}) == {
-        .Val(span) -> source_documents_require(span.start == 94 && span.end == 99, "region 2's `limit` is host bytes 94..99, got {span.start}..{span.end}")
+        .Val(span) -> {
+            source_documents_require(span.start == 94 && span.end == 99, "region 2's `limit` is host bytes 94..99, got {span.start}..{span.end}")
+        }
         .None -> source_documents_require(false, "region 2 maps")
     }
     if jet_driver_host_span(document, Span{start: 0, end: 5}) == {
-        .Val(span) -> source_documents_require(span.start == 29 && span.end == 34, "region 1's `limit` is host bytes 29..34")
+        .Val(span) -> {
+            source_documents_require(span.start == 29 && span.end == 34, "region 1's `limit` is host bytes 29..34")
+        }
         .None -> source_documents_require(false, "region 1 maps")
     }
     // The generated comment line, and a span across both regions.
@@ -95,7 +102,9 @@ source_documents_two_mappings: fn() -> [JetDriverSourceMapping] Never! {
 #Test("an edit maps into its region and is refused across generated text") {
     document: source_documents_two_regions(source_documents_two_mappings())
     if jet_driver_host_edit(document, TextEdit{span: Span{start: 7, end: 8}, new_text: "4"}) == {
-        .Val(edit) -> source_documents_require(edit.span.start == 36 && edit.span.end == 37 && edit.new_text == "4", "the edit lands on host bytes 36..37")
+        .Val(edit) -> {
+            source_documents_require(edit.span.start == 36 && edit.span.end == 37 && edit.new_text == "4", "the edit lands on host bytes 36..37")
+        }
         .None -> source_documents_require(false, "an edit inside region 1 maps")
     }
     source_documents_require(jet_driver_host_edit(document, TextEdit{span: Span{start: 8, end: 23}, new_text: ""}) == None, "an edit reaching generated text is refused")
@@ -153,7 +162,9 @@ source_documents_reported: fn(fix_edits: [TextEdit]) -> Diagnostic Never! {
     source_documents_require(placed.diagnostic.labels[0].span == Span{start: 29, end: 34} && placed.diagnostic.labels[0].message == "declared here", "the region 1 label is host bytes 29..34")
     source_documents_require(placed.diagnostic.cause[0].span == Val(Span{start: 36, end: 37}), "the cause is host bytes 36..37")
     if placed.diagnostic.edit == {
-        .Val(edit) -> source_documents_require(edit.span == Span{start: 36, end: 37} && edit.new_text == "4", "the fix lands on host bytes 36..37")
+        .Val(edit) -> {
+            source_documents_require(edit.span == Span{start: 36, end: 37} && edit.new_text == "4", "the fix lands on host bytes 36..37")
+        }
         .None -> source_documents_require(false, "the fix maps")
     }
     source_documents_require(placed.diagnostic.fix_edits.len() == 1 && placed.diagnostic.fix_edits[0].span == Span{start: 29, end: 34}, "the fix's other edit is host bytes 29..34")
@@ -164,7 +175,7 @@ source_documents_reported: fn(fix_edits: [TextEdit]) -> Diagnostic Never! {
     refused: jet_driver_host_diagnostic(document, source_documents_reported([TextEdit]{TextEdit{span: Span{start: 8, end: 23}, new_text: ""}}))
     source_documents_require(refused.diagnostic.edit == None && refused.diagnostic.fix_edits.len() == 0, "no part of a fix that reaches generated text is kept")
     source_documents_require(refused.diagnostic.span == Val(Span{start: 94, end: 99}), "the span still maps")
-    generated := source_documents_reported([TextEdit]{})
+    ^generated: source_documents_reported([TextEdit]{})
     generated.span = Val(Span{start: 12, end: 20})
     placed: jet_driver_host_diagnostic(document, generated)
     source_documents_require(placed.generated, "a span in the generated line is labeled generated")

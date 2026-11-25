@@ -6,9 +6,9 @@ impl ProviderFactReport {
     // A vcpkg.json manifest.
     vcpkg_document: fn(document: String) -> ProviderFactReport Never! {
         object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Vcpkg, "vcpkg", "vcpkg.json is not valid JSON")
-        losses := [String]{}
-        conflicts := [String]{}
-        facts := MetadataFacts.empty(ProviderFamily.Vcpkg, provider_graph_json_string(object, "name") ?? "")
+        ^losses: [String]{}
+        ^conflicts: [String]{}
+        ^facts: MetadataFacts.empty(ProviderFamily.Vcpkg, provider_graph_json_string(object, "name") ?? "")
         facts.add_json_projection("provider.vcpkg.native", object)
         if facts.name == "" -> losses.push("vcpkg manifest has no package name")
         if object.get("name") == {
@@ -20,7 +20,7 @@ impl ProviderFactReport {
             .None -> {}
         }
         version_fields: [String]{"version", "version-string", "version-semver", "version-date"}
-        versions := [{key: String, version: String}]{}
+        ^versions: [{key: String, version: String}]{}
         loop key in version_fields {
             value: object.get(key) ?? next
             if pkg_json_text(value) == {
@@ -136,7 +136,7 @@ impl ProviderFactReport {
                 break
             }
         }
-        report := provider_graph_finish(facts, losses, conflicts)
+        ^report: provider_graph_finish(facts, losses, conflicts)
         if report.facts.version != "" && !provider_exact_version(report.facts.version) {
             report.losses.push("vcpkg package version is not an exact identity")
         }
@@ -146,13 +146,13 @@ impl ProviderFactReport {
     // Homebrew formula JSON (`brew info --json=v2` style).
     homebrew_document: fn(document: String) -> ProviderFactReport Never! {
         object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Homebrew, "homebrew", "formula metadata is not valid JSON")
-        losses := [String]{}
-        conflicts := [String]{}
+        ^losses: [String]{}
+        ^conflicts: [String]{}
         name: provider_graph_json_first_string(object, [String]{"name", "full_name"}) ?? ""
         if name == "" -> losses.push("Homebrew formula has no name or full_name")
-        facts := MetadataFacts.empty(ProviderFamily.Homebrew, name)
+        ^facts: MetadataFacts.empty(ProviderFamily.Homebrew, name)
         facts.add_json_projection("provider.homebrew.native", object)
-        versions := [String]{}
+        ^versions: [String]{}
         if object.get("version") == {
             .Val(raw_version) -> {
                 if pkg_json_text(raw_version) == {
@@ -244,12 +244,12 @@ impl ProviderFactReport {
     // A Jet registry entry: one JSON object, or newline-delimited objects
     // whose later lines must repeat the first identity.
     jet_registry_document: fn(document: String) -> ProviderFactReport Never! {
-        lines := [String]{}
+        ^lines: [String]{}
         loop line in provider_lines(document) {
             if line.trim() != "" -> lines.push(line)
         }
-        object := [String:Dyn]{}
-        duplicate_lines := [String]{}
+        ^object: [String:Dyn]{}
+        ^duplicate_lines: [String]{}
         if pkg_json_parse_protocol(document) == {
             .Parsed(tree) -> {
                 object = pkg_json_object(tree) ?? return ProviderFactReport.unreadable(ProviderFamily.JetRegistry, "jet-registry", "registry metadata must be a JSON object or newline-delimited JSON objects")
@@ -262,14 +262,14 @@ impl ProviderFactReport {
                 loop index in 1..<lines.len() -> duplicate_lines.push(lines[index])
             }
         }
-        facts := MetadataFacts.empty(ProviderFamily.JetRegistry, provider_graph_json_string(object, "name") ?? "")
+        ^facts: MetadataFacts.empty(ProviderFamily.JetRegistry, provider_graph_json_string(object, "name") ?? "")
         facts.version = provider_graph_json_string(object, "version") ?? ""
         facts.integrity_hash = provider_graph_json_first_string(object, [String]{"content_hash", "sha256"}) ?? ""
         facts.license = provider_graph_json_string(object, "license") ?? ""
         facts.dependencies = provider_graph_json_keys(object, "dependencies")
         facts.platforms = provider_graph_json_array_strings(object, "platforms")
         facts.add_json_projection("provider.registry.native", object)
-        losses := [String]{}
+        ^losses: [String]{}
         if object.get("dependencies") == {
             .Val(raw_dependencies) -> {
                 if pkg_json_object(raw_dependencies) == {
@@ -308,7 +308,7 @@ impl ProviderFactReport {
             .Val(raw_features) -> {
                 if pkg_json_object(raw_features) == {
                     .Val(features) -> {
-                        all_lists := true
+                        ^all_lists: true
                         loop name in features.keys().to_list() {
                             if !provider_graph_is_string_array(features[name]) -> all_lists = false
                         }
@@ -366,7 +366,7 @@ impl ProviderFactReport {
             facts.add_typed_json(projection.target, value)
         }
         facts.source_identity = "jet-registry:{facts.name}@{facts.version}"
-        report := provider_graph_finish(facts, losses, [String]{})
+        ^report: provider_graph_finish(facts, losses, [String]{})
         if report.facts.integrity_hash == "" {
             report.losses.push("registry entry has no content hash")
         }
@@ -401,12 +401,12 @@ impl ProviderFactReport {
     // A GitHub release record.
     github_document: fn(document: String) -> ProviderFactReport Never! {
         object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Github, "github", "release metadata is not valid JSON")
-        losses := [String]{}
-        conflicts := [String]{}
+        ^losses: [String]{}
+        ^conflicts: [String]{}
         repository: pkg_json_object(object.get("repository") ?? Dyn.Null) ?? [String:Dyn]{}
         name: provider_graph_either(provider_graph_json_first_string(object, [String]{"name", "full_name"}), provider_graph_json_string(repository, "full_name")) ?? ""
         if name == "" -> losses.push("GitHub release has no package or repository name")
-        facts := MetadataFacts.empty(ProviderFamily.Github, name)
+        ^facts: MetadataFacts.empty(ProviderFamily.Github, name)
         facts.add_json_projection("provider.github.native", object)
         release_tag: provider_graph_json_string(object, "tag_name")
         version: provider_graph_json_string(object, "version")
@@ -525,11 +525,11 @@ impl ProviderFactReport {
     // identity.
     binary_document: fn(document: String) -> ProviderFactReport Never! {
         object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Binary, "binary", "binary metadata is not valid JSON")
-        losses := [String]{}
-        conflicts := [String]{}
+        ^losses: [String]{}
+        ^conflicts: [String]{}
         name: provider_graph_json_string(object, "name") ?? ""
         if name == "" -> losses.push("binary metadata has no package name")
-        facts := MetadataFacts.empty(ProviderFamily.Binary, name)
+        ^facts: MetadataFacts.empty(ProviderFamily.Binary, name)
         facts.add_json_projection("provider.binary.native", object)
         if object.get("version") == {
             .Val(raw_version) -> {
@@ -540,7 +540,7 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        digests := [String]{}
+        ^digests: [String]{}
         digest_keys: [String]{"hash", "sha256", "digest"}
         loop key in digest_keys {
             value: object.get(key) ?? next
@@ -569,7 +569,7 @@ impl ProviderFactReport {
             }
             else -> {}
         }
-        platforms := [String]{}
+        ^platforms: [String]{}
         platform_keys: [String]{"platform", "target"}
         loop key in platform_keys {
             value: object.get(key) ?? next
@@ -671,7 +671,7 @@ provider_graph_dependency_field: fn(facts: ^MetadataFacts, object: [String:Dyn],
         losses.push("{namespace} `{field}` must be an array")
         return [String]{}
     }
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop index in 0..<items.len() {
         item: items[index]
         facts.add_typed_json("provider.{namespace}.dependency.{kind}.{index}", item)
@@ -708,7 +708,7 @@ provider_vcpkg_dependencies: fn(object: [String:Dyn], facts: ^MetadataFacts, los
         losses.push("vcpkg `dependencies` must be an array")
         return [String]{}
     }
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     version_keys: [String]{"version>=", "version>", "version"}
     fact_keys: [String]{"features", "platform", "host", "default-features"}
     loop index in 0..<items.len() {
@@ -820,7 +820,7 @@ provider_homebrew_bottle_facts: fn(facts: ^MetadataFacts, value: Dyn, losses: ^[
 // The formula's source hash from `sha256`, `source.sha256`, or
 // `urls.stable.sha256`; differing hashes are a loss.
 provider_homebrew_source_hash: fn(object: [String:Dyn], losses: ^[String]) -> String? Never! {
-    hashes := [String]{}
+    ^hashes: [String]{}
     if object.get("sha256") == {
         .Val(value) -> {
             if pkg_json_text(value) == {

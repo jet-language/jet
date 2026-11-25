@@ -117,7 +117,7 @@ ArtifactStoredEntry: struct {
 }
 
 store_artifact_sort_entries: fn(entries: [ArtifactStoredEntry]) -> [ArtifactStoredEntry] Never! {
-    out := entries
+    ^out: entries
     out = loop fresh_item in out -> fresh_item
     out.sort_by(fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) { store_artifact_entry_order(left, right) })
     out
@@ -129,7 +129,7 @@ store_artifact_entry_order: fn(left: ArtifactStoredEntry, right: ArtifactStoredE
 }
 
 store_artifact_footprint: fn(entries: [ArtifactStoredEntry]) -> Int Never! {
-    total := 0
+    ^total: 0
     loop entry in entries -> total = store_artifact_saturating_add(total, entry.size_bytes)
     total
 }
@@ -163,10 +163,10 @@ store_artifact_footprint_tally_text: fn(tally: ArtifactFootprintTally) -> String
 // when the window starts at the journal's first byte.
 store_artifact_journal_checksum_before: fn(window: [U8], end: Int, whole: Bool) -> String? Never! {
     if end <= 0 || end > window.len() || (Int{window[end - 1]}) != 10 -> return None
-    start := end - 1
+    ^start: end - 1
     loop start > 0 && (Int{window[start - 1]}) != 10 -> start -= 1
     if start == 0 && !whole -> return None
-    field := end - 1
+    ^field: end - 1
     loop field > start && (Int{window[field - 1]}) != 124 -> field -= 1
     if field == start -> return None
     text: String.from_bytes(store_artifact_slice(window, field, end - 1)) ?? return None
@@ -191,7 +191,7 @@ store_artifact_footprint_replay: fn(tally_path: String, journal_path: String, jo
         return None
     }
     offset: store_artifact_parse_count(fields[2]) ?? return None
-    total := store_artifact_parse_count(fields[3]) ?? return None
+    ^total: store_artifact_parse_count(fields[3]) ?? return None
     if offset > journal_bytes -> return None
     // A tally from before the journal's first line holds only while the
     // journal is empty: a compaction rewrites the journal from its first byte.
@@ -206,7 +206,7 @@ store_artifact_footprint_replay: fn(tally_path: String, journal_path: String, jo
     if window.len() != length -> return None
     found: store_artifact_journal_checksum_before(window, before, offset == before) ?? return None
     if found != fields[4] -> return None
-    start := before
+    ^start: before
     loop index in before..<window.len() {
         if (Int{window[index]}) != 10 -> next
         record: store_artifact_parse_journal_line(store_artifact_slice(window, start, index)) ?? return None
@@ -487,7 +487,7 @@ ArtifactStore: struct {
         }
         lock: self.acquire_lock() ?? return
         defer close(lock)
-        entries := [ArtifactJournalAppend]{}
+        ^entries: [ArtifactJournalAppend]{}
         loop action in actions {
             info: files.stat(self.action_path(action)) ?? next
             entries.push(ArtifactJournalAppend{operation: "touch", key: ArtifactEntryKey.Action(action.key()), length: info.size})
@@ -517,8 +517,8 @@ ArtifactStore: struct {
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
         defer close(lock)
-        journal := [ArtifactJournalAppend]{}
-        pending := [ArtifactPendingWrite]{}
+        ^journal: [ArtifactJournalAppend]{}
+        ^pending: [ArtifactPendingWrite]{}
         loop record in records {
             path: self.action_path(record.action)
             key: ArtifactEntryKey.Action(record.action.key())
@@ -540,7 +540,7 @@ ArtifactStore: struct {
             pending.push(ArtifactPendingWrite{path: path, key: key, encoded: store_artifact_encode_action(record.action, record.bytes)})
         }
         if pending.len() > 0 {
-            incoming := 0
+            ^incoming: 0
             loop write in pending {
                 incoming = store_artifact_saturating_add(incoming, write.encoded.len())
             }
@@ -591,7 +591,7 @@ ArtifactStore: struct {
     }
 
     acquire_lease: fn(self, objects: [ObjectHandle]) -[FS, Env, Time, Rand]> ArtifactLease ArtifactStoreError! {
-        targets := [LeaseTarget]{}
+        ^targets: [LeaseTarget]{}
         loop object in objects -> targets.push(LeaseTarget.Blob(object))
         self.acquire_artifact_lease(targets)
     }
@@ -607,9 +607,9 @@ ArtifactStore: struct {
         defer close(lock)
         directory: files.join(self.root(), "leases")
         path: files.join(directory, "lease-{self.owner_value.pid()}-{store_artifact_unique_token()}")
-        keys := [ArtifactEntryKey]{}
+        ^keys: [ArtifactEntryKey]{}
         loop target in targets -> keys.push(target.entry_key())
-        text := self.owner_value.owner_line("lease")
+        ^text: self.owner_value.owner_line("lease")
         loop key in store_artifact_unique_keys(keys) {
             text = "{text}{key.kind_name()}|{key.wire_value()}\n"
         }
@@ -806,7 +806,7 @@ ArtifactStore: struct {
     // Scanned entries with their last use and whether a live lease pins them.
     // `pinned` is keyed by entry identity.
     annotated_entries: fn(self, journal: ArtifactJournalState, pinned: [String:Bool]) -[FS]> [ArtifactStoredEntry] ArtifactStoreError! {
-        entries := self.scan_entries()
+        ^entries: self.scan_entries()
         loop index in 0..<entries.len() {
             entries[index].last_use = journal.last_use_of(entries[index].key)
             entries[index].pinned = pinned.has_key(entries[index].key.identity())
@@ -815,7 +815,7 @@ ArtifactStore: struct {
     }
 
     pinned_identities: fn(self, leases: [ArtifactLeaseRecord]) -> [String:Bool] Never! {
-        pinned := [String:Bool]{}
+        ^pinned: [String:Bool]{}
         loop lease in leases {
             loop target in lease.targets -> pinned[target.identity()] = true
         }
@@ -824,7 +824,7 @@ ArtifactStore: struct {
 
     status_locked: fn(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus ArtifactStoreError! {
         journal_path: files.join(self.root(), "journal")
-        journal := store_artifact_read_journal(journal_path)
+        ^journal: store_artifact_read_journal(journal_path)
         if !journal.valid {
             self.compact_journal_locked()
             journal = store_artifact_read_journal(journal_path)
@@ -841,7 +841,7 @@ ArtifactStore: struct {
             .Val(stats) -> Val(stats.available_bytes)
             .None -> None
         }
-        statuses := [ArtifactEntryStatus]{}
+        ^statuses: [ArtifactEntryStatus]{}
         loop entry in entries -> statuses.push(entry.status())
         Ok(
             ArtifactStoreStatus{
@@ -865,7 +865,7 @@ ArtifactStore: struct {
         leases: self.read_leases_locked(true)
         entries: self.annotated_entries(journal, self.pinned_identities(leases))
         before: store_artifact_footprint(entries)
-        pinned_bytes := 0
+        ^pinned_bytes: 0
         loop entry in entries {
             if entry.pinned {
                 pinned_bytes = store_artifact_saturating_add(pinned_bytes, entry.size_bytes)
@@ -873,11 +873,11 @@ ArtifactStore: struct {
         }
         // Order by (pinned, last_use, key) in one comparator; no reliance on
         // sort stability across two passes.
-        order := entries.copy()
+        ^order: entries.copy()
         order = loop fresh_item in order -> fresh_item
         order.sort_by(fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) { ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)) })
-        after := before
-        removed := [ArtifactEntryStatus]{}
+        ^after: before
+        ^removed: [ArtifactEntryStatus]{}
         loop entry in order {
             if after <= target_bytes -> break
             if entry.pinned -> next
@@ -925,7 +925,7 @@ ArtifactStore: struct {
             return Err(ArtifactStoreError.Capacity{path: path, needed_bytes: incoming, available_bytes: available, limit_bytes: limit})
         }
         footprint: self.footprint_locked()
-        after := footprint
+        ^after: footprint
         if store_artifact_saturating_add(footprint, incoming) > limit {
             // Discard the report, never a prune failure.
             _: self.prune_locked(store_artifact_saturating_sub(limit, incoming))
@@ -1056,14 +1056,14 @@ ArtifactStore: struct {
             return
         }
         journal_path: files.join(self.root(), "journal")
-        last_sequence := store_artifact_journal_tail_sequence(journal_path)
+        ^last_sequence: store_artifact_journal_tail_sequence(journal_path)
         if last_sequence == None {
             self.compact_journal_locked()
             compacted: store_artifact_read_journal(journal_path)
             last_sequence = Val(compacted.last_sequence)
         }
         base: last_sequence ?? 0
-        lines := [String]{}
+        ^lines: [String]{}
         loop (index, entry) in entries {
             lines.push(store_artifact_journal_line(entry.operation, entry.key, entry.length, store_artifact_saturating_add(base, index + 1)))
         }
@@ -1074,10 +1074,10 @@ ArtifactStore: struct {
     compact_journal_locked: fn(self) -[FS, Env, Rand]> ArtifactStoreError! {
         journal_path: files.join(self.root(), "journal")
         journal: store_artifact_read_journal(journal_path)
-        entries := self.annotated_entries(journal, [String:Bool]{})
+        ^entries: self.annotated_entries(journal, [String:Bool]{})
         entries = loop fresh_item in entries -> fresh_item
         entries.sort_by(fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) { (left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)) })
-        lines := [String]{}
+        ^lines: [String]{}
         loop index in 0..<entries.len() {
             lines.push(store_artifact_journal_line("put", entries[index].key, entries[index].size_bytes, index + 1))
         }
@@ -1088,7 +1088,7 @@ ArtifactStore: struct {
     // owners are removed when `clean_stale` is set.
     read_leases_locked: fn(self, clean_stale: Bool) -[FS, Env]> [ArtifactLeaseRecord] ArtifactStoreError! {
         directory: files.join(self.root(), "leases")
-        live := [ArtifactLeaseRecord]{}
+        ^live: [ArtifactLeaseRecord]{}
         loop path in store_artifact_sorted_children(directory) {
             if !files.basename(path).starts_with("lease-") -> next
             bytes: if files.read_bytes(path) == {
@@ -1111,7 +1111,7 @@ ArtifactStore: struct {
     }
 
     scan_entries: fn(self) -[FS]> [ArtifactStoredEntry] ArtifactStoreError! {
-        entries := [ArtifactStoredEntry]{}
+        ^entries: [ArtifactStoredEntry]{}
         store_artifact_scan_flat_namespace(files.join(self.root(), "cas"), .Blob, None, entries)
         store_artifact_scan_flat_namespace(files.join(self.root(), "ac"), .Action, None, entries)
         lto_root: files.join(self.root(), "lto")
@@ -1140,11 +1140,11 @@ ArtifactStore: struct {
         owner_line: self.owner_value.owner_line("lock")
         started: time.instant()
         deadline: started + self.config_value.lock_wait()
-        retry_ms := STORE_ARTIFACT_LOCK_RETRY_MS
+        ^retry_ms: STORE_ARTIFACT_LOCK_RETRY_MS
         loop {
             if files.create(path, if_exists: .Refuse) == {
                 .Ok(created) -> {
-                    writer := created
+                    ^writer: created
                     writer.write_bytes(owner_line.bytes())
                     close(writer)
                     return Ok(ArtifactStoreLock{path: path, owner_line: owner_line.bytes()})

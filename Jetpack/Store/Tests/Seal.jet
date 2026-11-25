@@ -40,7 +40,7 @@ store_test_make_writable: fn(path: String) Never! {
 }
 
 #Test("store native admission seals after shared cas hardlinking") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_seal_fixture(verification, roots, "native", "")
     object: ingested.entry.out
@@ -60,7 +60,7 @@ store_test_make_writable: fn(path: String) Never! {
 }
 
 #Test("store seal written at admission and warm verification skips content hash") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_seal_fixture(verification, roots, "warm", "seal-test")
     object: ingested.entry.out
@@ -99,7 +99,7 @@ store_test_make_writable: fn(path: String) Never! {
 }
 
 #Test("store seal mtime drift rehashes once and reseals") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_seal_fixture(verification, roots, "drift", "seal-test")
     object: ingested.entry.out
@@ -119,7 +119,7 @@ store_test_make_writable: fn(path: String) Never! {
 }
 
 #Test("store seal digest mismatch quarantines the tampered object") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_seal_fixture(verification, roots, "quarantine", "seal-test")
     object: ingested.entry.out
@@ -129,7 +129,7 @@ store_test_make_writable: fn(path: String) Never! {
     expectation: CacheExpectation{identity: ingested.entry.cache_identity, owned_output: Val(object), allow_unsigned_local: true}
     store_quarantine_invalid_entry(verification, roots, ingested.entry, expectation) ?? panic("quarantine")
     assert(!files.exists(object))
-    quarantined := false
+    ^quarantined: false
     quarantine: files.list_dir(files.join(roots.hangar_dir(), "quarantine")) ?? panic("quarantine dir")
     loop entry in quarantine {
         if entry.name.starts_with("output-") -> quarantined = true
@@ -140,7 +140,7 @@ store_test_make_writable: fn(path: String) Never! {
 }
 
 #Test("store hangar verify rehashes despite valid seal and catches content corruption") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_seal_fixture(verification, roots, "audit", "seal-test")
     object: ingested.entry.out
@@ -166,7 +166,7 @@ store_test_make_writable: fn(path: String) Never! {
 
 // The test arms, exercises, and disarms the command memo in order.
 #Test("store armed command memo checks identity once and stays scoped") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_seal_fixture(verification, roots, "memo", "seal-test")
     object: ingested.entry.out
@@ -213,15 +213,15 @@ store_test_make_writable: fn(path: String) Never! {
 // Command memo semantics, exercised without native filesystem leaves.
 // #4454: generated IR takes an owner value slot twice; keep this real case.
 #Test("store verification owner keeps armed memo shared and invocation isolated") {
-    verification := StoreVerification.new()
-    other := StoreVerification.new()
+    ^verification: StoreVerification.new()
+    ^other: StoreVerification.new()
     store_seal_memo_put(verification, "object", "ignored")
     assert_eq(store_seal_memo_get(verification, "object"), None)
     store_arm_command_memo(verification)
     store_seal_memo_put(verification, "object", "first")
     store_arm_command_memo(verification)
     assert_eq(store_seal_memo_get(verification, "object"), Val("first"))
-    retained := verification.copy()
+    ^retained: verification.copy()
     store_seal_memo_put(retained, "object", "replacement")
     assert_eq(store_seal_memo_get(verification, "object"), Val("replacement"))
     store_arm_command_memo(other)
@@ -238,7 +238,7 @@ store_test_make_writable: fn(path: String) Never! {
 // one path, while resetting observation counts never removes a cached digest.
 // #4454: generated IR takes an owner value slot twice; keep this real case.
 #Test("store verification owner separates digest kinds counts and invalidation") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     stamp: DigestStamp{device: 1, inode: 2, size: 3, modified_ns: 4}
     file_key: store_file_digest_key("object")
     output_key: store_output_digest_key("object", Val("hangar"), false)
@@ -261,13 +261,13 @@ store_test_make_writable: fn(path: String) Never! {
     store_invalidate_verified_digest(verification, "object")
     loop key in keys { assert_eq(store_verified_digest_get(verification, key), None) }
     assert_eq((store_verified_digest_get(verification, other_key) ?? panic("unrelated memo")).digest, "other-digest")
-    other := StoreVerification.new()
+    ^other: StoreVerification.new()
     assert_eq(store_verified_digest_get(other, other_key), None)
 }
 
 store_test_set_census_enabled: fn(verification: StoreVerification, enabled: Bool) Never! {
     state: verification.state
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.seal_census_enabled = enabled
 }
 
@@ -275,7 +275,7 @@ store_test_set_census_enabled: fn(verification: StoreVerification, enabled: Bool
 // rendered descending rows stop at fifteen. #4454: generated IR takes an owner
 // value slot twice; keep this real case.
 #Test("store verification census counts checks and bounds descending report") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_test_set_census_enabled(verification, false)
     store_seal_census_note(verification, "disabled")
     assert_eq(store_seal_census_report(verification), None)
@@ -295,8 +295,8 @@ store_test_set_census_enabled: fn(verification: StoreVerification, enabled: Bool
 // The (hangar, digest) proof is shared by copies of one owner, absent from
 // another owner, and invalidation drops only the exact (hangar, digest) member.
 #Test("store verification owner shares proven closure members and invalidates exactly") {
-    verification := StoreVerification.new()
-    other := StoreVerification.new()
+    ^verification: StoreVerification.new()
+    ^other: StoreVerification.new()
     key: store_proven_member_key("hangar", "sha256-member")
     sibling: store_proven_member_key("other-hangar", "sha256-member")
     neighbor: store_proven_member_key("hangar", "sha256-other-member")
@@ -305,7 +305,7 @@ store_test_set_census_enabled: fn(verification: StoreVerification, enabled: Bool
     store_proven_member_insert(verification, key)
     store_proven_member_insert(verification, sibling)
     store_proven_member_insert(verification, neighbor)
-    retained := verification.copy()
+    ^retained: verification.copy()
     assert(store_proven_member_contains(retained, key))
     assert(!store_proven_member_contains(other, key))
     store_invalidate_proven_member(retained, "hangar", "sha256-member")
@@ -321,8 +321,8 @@ store_test_set_census_enabled: fn(verification: StoreVerification, enabled: Bool
 // bytes drift, another owner re-hashes and sees the drift, and removing the
 // seal drops the owner's proof so the next check re-hashes real bytes.
 #Test("store seal removal invalidates the owner's proven closure member") {
-    verification := StoreVerification.new()
-    other := StoreVerification.new()
+    ^verification: StoreVerification.new()
+    ^other: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_seal_fixture(verification, roots, "proven", "seal-test")
     object: ingested.entry.out

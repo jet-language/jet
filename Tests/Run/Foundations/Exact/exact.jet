@@ -159,8 +159,8 @@ ScaledDecimal: struct {
             whole: Int.parse(unsigned_whole) ?? 0
             fraction_text: if parts.len() > 1 -> parts[1] else -> ""
             fraction: if fraction_text == "" -> 0 else -> Int.parse(fraction_text) ?? 0
-            scale := fraction_text.len()
-            coefficient := whole * (10).pow(scale) + fraction
+            ^scale: fraction_text.len()
+            ^coefficient: whole * (10).pow(scale) + fraction
             if negative -> coefficient = 0 - coefficient
             if exponent > 0 {
                 // A positive exponent uses up the fraction digits first.
@@ -168,7 +168,7 @@ ScaledDecimal: struct {
                 scale -= shifted
                 coefficient *= (10).pow(exponent - shifted)
             } else if exponent < 0 {
-                remaining := 0 - exponent
+                ^remaining: 0 - exponent
                 loop remaining > 0 {
                     scale += 1
                     remaining -= 1
@@ -332,7 +332,7 @@ Money: struct {
 
 round_tax: fn(amount: Money, basis_points: Int, mode: Rounding) -> Money {
     scaled: amount.cents * basis_points
-    whole := scaled /% 10000
+    ^whole: scaled /% 10000
     remainder: scaled % 10000
     if mode == Rounding.Up && remainder != 0 -> whole += 1
     if mode == Rounding.HalfUp && remainder >= 5000 -> whole += 1
@@ -343,8 +343,8 @@ pair_add: fn<T: Add>(left: T, right: T) -> T { left + right }
 
 largest: fn<T: Comparable>(values: [T]) -> T? {
     if values.len() == 0 -> return None
-    best := values[0].copy()
-    index := 1
+    ^best: values[0].copy()
+    ^index: 1
     loop index < values.len() {
         if values[index] > best -> best = values[index].copy()
         index += 1
@@ -361,7 +361,7 @@ accept_money: fn(value: Money) -> Money { value.copy() }
 add_decimals: fn(left: ScaledDecimal, right: ScaledDecimal) -> ScaledDecimal { left + right }
 
 million_money: fn() -> Money {
-    total := Money{cents: 0}
+    ^total: Money{cents: 0}
     loop i in 0..<1_000_000 -> total += Money{cents: i % 100}
     return total
 }

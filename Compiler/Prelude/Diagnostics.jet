@@ -6253,7 +6253,9 @@ ExplicitSemicolon: struct {
         no_fix: None,
         fix_safety: .NeedsReview,
 
-        what: fn(self) -> String { "A `;` can't stand here: it only separates statements and items" }
+        what: fn(self) -> String {
+            "A `;` can't stand here: it only separates statements and items"
+        }
 
         why: fn(self) -> String {
             "A `;` means a line break between statements or items; inside a member list, an argument list, a type, a loop header or an interpolation hole it separates nothing."
@@ -6276,7 +6278,9 @@ SemicolonWithoutLineBreak: struct {
         detail: true,
         no_fix: .Ambiguous,
 
-        what: fn(self) -> String { "A `;` can't stand here, because a line break here would not end the statement" }
+        what: fn(self) -> String {
+            "A `;` can't stand here, because a line break here would not end the statement"
+        }
 
         why: fn(self) -> String {
             "A `;` means exactly a line break, so it stands only where a line break would end the statement; here the next line would continue this one, or nothing before it is a statement to end."
@@ -8017,7 +8021,9 @@ WriteMarkNeverWritten: struct {
         detail: true,
         no_fix: .Ambiguous,
 
-        what: fn(self) -> String { "`{self.name}` gives write access, but the body never writes through it" }
+        what: fn(self) -> String {
+            "`{self.name}` gives write access, but the body never writes through it"
+        }
 
         why: fn(self) -> String {
             "`^` tells every caller that the function changes the value it lends; on a dead-key layout a typed `^^` can also arrive as `^`, which lends the value instead of taking it"
@@ -9455,9 +9461,7 @@ PublicDunderName: struct {
         meaning: "A Core item whose `__` name is declared public",
         fix_next: "Declare the item `priv`.",
 
-        what: fn(self) -> String {
-            "`{self.name}` is a Core machine name, which is `priv`"
-        }
+        what: fn(self) -> String { "`{self.name}` is a Core machine name, which is `priv`" }
 
         why: fn(self) -> String {
             "A `__` name is Core's machine space: user source can't spell one, so only Core and the code the compiler generates reach it, and it never joins Core's public surface"
@@ -13274,9 +13278,7 @@ OutputSettingWrongType: struct {
             "Code reads `#build.settings.{self.key}` as its declared type, whichever output it is built into."
         }
 
-        fix: fn(self) -> String {
-            "Give `{self.key}` a value of type `{self.declared}`."
-        }
+        fix: fn(self) -> String { "Give `{self.key}` a value of type `{self.declared}`." }
     }
 }
 
@@ -15012,7 +15014,9 @@ RejectOutsideTemplate: struct {
         expert_path: "none: `reject` belongs in a marker's `expand` template or `check` rule",
         meaning: "`reject` called outside a marker's compile-time template or check rule",
 
-        what: fn(self) -> String { "`reject` runs only inside a marker's `expand` template or `check` rule." }
+        what: fn(self) -> String {
+            "`reject` runs only inside a marker's `expand` template or `check` rule."
+        }
 
         why: fn(self) -> String {
             "`reject(value)` raises a diagnostic at a marker's use site while the compiler expands the marker, or at a call its `check` rule hears; ordinary code has no use site to report at, so the call has nothing to run."
@@ -15912,13 +15916,17 @@ ServiceImportOutsideCore: struct {
         meaning: "A program outside Core declares an `#Import(jet.compiler)` or `#Import(jet.build)` service",
         no_fix: .Ambiguous,
 
-        what: fn(self) -> String { "`{self.name}` imports a `{self.provider}` service, which only Core declares" }
+        what: fn(self) -> String {
+            "`{self.name}` imports a `{self.provider}` service, which only Core declares"
+        }
 
         why: fn(self) -> String {
             "The compiler and build host answer each `{self.provider}` symbol for the declaration Core writes for it; the provider, not a program, decides which services exist and where they run."
         }
 
-        fix: fn(self) -> String { "Call the Core function or method that declares this service, such as `core.build` or `core.compiler`." }
+        fix: fn(self) -> String {
+            "Call the Core function or method that declares this service, such as `core.build` or `core.compiler`."
+        }
     }
 }
 
@@ -16143,7 +16151,9 @@ FlagArgumentCount: struct {
         status: .Retired,
         no_fix: None,
 
-        what: fn(self) -> String { "*Retired* (was: `flag` expects 2 arguments (name, help), got N)" }
+        what: fn(self) -> String {
+            "*Retired* (was: `flag` expects 2 arguments (name, help), got N)"
+        }
 
         why: fn(self) -> String {
             "`ArgsSpec.flag` is an ordinary Core method, so a wrong argument count is the ordinary method arity error"
@@ -16159,7 +16169,9 @@ OptionArgumentCount: struct {
         status: .Retired,
         no_fix: None,
 
-        what: fn(self) -> String { "*Retired* (was: `option` expects 3 arguments (name, help, metavar), got N)" }
+        what: fn(self) -> String {
+            "*Retired* (was: `option` expects 3 arguments (name, help, metavar), got N)"
+        }
 
         why: fn(self) -> String {
             "`ArgsSpec.option` is an ordinary Core method, so a wrong argument count is the ordinary method arity error"
@@ -16175,7 +16187,9 @@ PositionalArgumentCount: struct {
         status: .Retired,
         no_fix: None,
 
-        what: fn(self) -> String { "*Retired* (was: `positional` expects 2 arguments (name, help), got N)" }
+        what: fn(self) -> String {
+            "*Retired* (was: `positional` expects 2 arguments (name, help), got N)"
+        }
 
         why: fn(self) -> String {
             "`ArgsSpec.positional` is an ordinary Core method, so a wrong argument count is the ordinary method arity error"
@@ -16191,7 +16205,9 @@ ParseArgumentCount: struct {
         status: .Retired,
         no_fix: None,
 
-        what: fn(self) -> String { "*Retired* (was: `parse` expects 1 argument (the argument list), got N)" }
+        what: fn(self) -> String {
+            "*Retired* (was: `parse` expects 1 argument (the argument list), got N)"
+        }
 
         why: fn(self) -> String {
             "`ArgsSpec.parse` is an ordinary Core method, so a wrong argument count is the ordinary method arity error"
@@ -17472,9 +17488,7 @@ OpenNotPublicEnum: struct {
         meaning: "`#Open` on a declaration that is not a public enum",
         detail: true,
 
-        what: fn(self) -> String {
-            "`#Open` is on {self.kind} `{self.name}`, not a public enum."
-        }
+        what: fn(self) -> String { "`#Open` is on {self.kind} `{self.name}`, not a public enum." }
 
         why: fn(self) -> String {
             "`#Open` marks a public enum whose variants may grow across releases without breaking external matches."
@@ -17486,23 +17500,19 @@ OpenNotPublicEnum: struct {
     }
 }
 
-UndischargedTask: struct {
+RetiredUndischargedTask: struct {
     impl Diagnostic {
         code: "L1101",
-        safety_class: .Soundness,
-        safety_reason: "The program may end before the task finishes, so its work and the resources it holds are lost unseen.",
-        expert_path: "`.detach()`, which lets the task go free",
-        meaning: "Bound `Task` value dropped without discharge",
+        status: .Retired,
+        no_fix: None,
 
-        what: fn(self) -> String { "A bound `Task` still owes `join`." }
+        what: fn(self) -> String { "*Retired* (was: a bound `Task` still owes `join`)" }
 
         why: fn(self) -> String {
-            "The program may end before that task finishes; a task's duty is discharged by joining it or using its result."
+            "A task's join is the `#SingleUse` duty its type declares; Jet.SingleUseDropped reports an unjoined task, naming `join` and `detach`"
         }
 
-        fix: fn(self) -> String {
-            "Join it with `.join()`, use its result, or write `.detach()` to let it go free."
-        }
+        fix: fn(self) -> String { "Follow the guidance for Jet.SingleUseDropped" }
     }
 }
 

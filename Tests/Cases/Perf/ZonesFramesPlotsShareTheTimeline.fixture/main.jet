@@ -10,14 +10,14 @@ use {
 
 settle: fn(bodies: Int) -> Int Never! {
     _solve: perf.zone("solve")
-    acc := 0
+    ^acc: 0
     loop i in 0..<bodies * 30000 -> acc = (acc * 31 + i) % 1000003
     acc
 }
 
 step: fn(bodies: Int) -> Int Never! {
     _physics: perf.zone("physics")
-    moved := 0
+    ^moved: 0
     loop body in 0..<bodies {
         _broadphase: perf.zone("broadphase")
         moved += body % 3
@@ -27,7 +27,7 @@ step: fn(bodies: Int) -> Int Never! {
 
 run: fn() {
     _session: log.span("session")
-    total := 0
+    ^total: 0
     loop frame in 1..<6 {
         moved: step(frame * 100)
         perf.plot("moved", Float{moved})

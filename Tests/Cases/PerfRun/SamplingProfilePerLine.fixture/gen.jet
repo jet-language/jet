@@ -30,13 +30,13 @@ capital: fn(word: String) -> String {
 }
 
 run: fn() {
-    rng := RNG{state: 3}
+    ^rng: RNG{state: 3}
     syl: ["ka", "lo", "mi", "ne", "ru", "sa", "ti", "vo", "ze", "qua", "ber", "don", "fel", "gri", "hap", "jun"]
-    vocab := [String]{}
-    seen := Set.from([String]{})
+    ^vocab: [String]{}
+    ^seen: Set.from([String]{})
     loop vocab.len() < 5000 {
         k: 1 + rng.below(4)
-        w := ""
+        ^w: ""
         loop _ in 0..<k -> w = "{w}{syl[rng.below(16)]}"
         if !seen.has(w) {
             seen.add(w.copy())
@@ -44,27 +44,27 @@ run: fn() {
         }
     }
     // Zipf weights 1/(i+1), scaled to integers.
-    cum := [Int]{}
-    total := 0
+    ^cum: [Int]{}
+    ^total: 0
     loop i in 0..<5000 {
         total += 1000000 /% (i + 1)
         cum.push(total)
     }
     punct: [" ", " ", " ", " ", " ", ", ", "; ", " - "]
-    parts := [String]{}
-    bytes := 0
+    ^parts: [String]{}
+    ^bytes: 0
     loop bytes < 4000000 {
         n: 6 + rng.below(10)
-        line := ""
+        ^line: ""
         loop j in 0..<n {
             x: rng.below(total)
-            lo := 0
-            hi := 4999
+            ^lo: 0
+            ^hi: 4999
             loop lo < hi {
                 m: (lo + hi) /% 2
                 if cum[m] <= x -> lo = m + 1 else -> hi = m
             }
-            w := vocab[lo].copy()
+            ^w: vocab[lo].copy()
             if j == 0 || rng.below(100) < 5 -> w = capital(w)
             if rng.below(100) < 1 -> w = w.to_upper()
             tail: if j == n - 1 -> (if rng.below(2) == 0 -> "." else -> "!") else -> punct[rng.below(8)]

@@ -20,14 +20,14 @@ use {
     { sender: ready_tx, receiver: ready_rx }: channel<String>()
     addr_text: net.socket_to_string(local)
     tcp_task: task {
-        server := listener.move()
+        ^server: listener.move()
         ready_tx.send(addr_text) ?? panic("ready")
         stream: server.accept() ?? panic("accept")
         msg: stream.read(8192) ?? panic("read")
         stream.write_bytes("tcp:{msg}".bytes()) ?? panic("write")
     }
     addr: ready_rx.receive() ?? panic("ready")
-    client := net.tcp_connect(addr) ?? panic("connect")
+    ^client: net.tcp_connect(addr) ?? panic("connect")
     net.set_nodelay(client, true) ?? panic("nodelay")
     nd: net.nodelay(client) ?? panic("nodelay")
     print("nodelay:{nd}")
@@ -57,12 +57,12 @@ use {
     { sender: unix_tx, receiver: unix_rx }: channel<String>()
     unix_task: task {
         unix_tx.send("ready") ?? panic("unix ready")
-        s := net.unix_accept(unix_listener) ?? panic("unix accept")
+        ^s: net.unix_accept(unix_listener) ?? panic("unix accept")
         msg: net.unix_read(s) ?? panic("unix read")
         net.unix_write_all_bytes(s, "unix:{msg}".bytes()) ?? panic("unix write")
     }
     _ready: unix_rx.receive() ?? panic("unix ready")
-    unix_client := net.unix_connect(path) ?? panic("unix connect")
+    ^unix_client: net.unix_connect(path) ?? panic("unix connect")
     net.unix_write_all_bytes(unix_client, "ok".bytes()) ?? panic("unix write")
     print(net.unix_read(unix_client) ?? panic("unix read"))
     net.unix_close(unix_client) ?? panic("unix close")

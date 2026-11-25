@@ -16,9 +16,9 @@ xml_name: fn(local: String) -[]> Dyn {
 }
 
 run: fn() {
-    path := "{work}/doc.xml"
+    ^path: "{work}/doc.xml"
     output: files.create(path) ?? panic("create")
-    writer := fmt.writer(output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    ^writer: fmt.writer(output, encoding.EncodingLimits.safe()) ?? panic("writer")
     writer.write(
         Dyn.Object(
             [
@@ -56,7 +56,7 @@ run: fn() {
     writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? panic("end")
     writer.finish() ?? panic("finish")
     input: files.open(path) ?? panic("open")
-    reader := fmt.reader(input) ?? panic("reader")
+    ^reader: fmt.reader(input) ?? panic("reader")
     first: reader.next()
     if first == {
         .Val(_) -> { print(true) }

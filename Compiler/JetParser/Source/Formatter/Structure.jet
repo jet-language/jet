@@ -28,12 +28,12 @@ jfmt_structure: fn(program: Program) -> String Never! {
     arrow_head: "arrow_body: ".bytes()
     paren_head: "Paren {{ value: ".bytes()
     paren_tail: ", span: ".bytes()
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     // The brace depth outside quoted text, and the depth at which each open
     // `Paren` node's tail (`, span: …, id: … }`) follows its value.
-    depth := 0
-    parens := [Int]{}
+    ^depth: 0
+    ^parens: [Int]{}
     loop at < bytes.len() {
         if parens.len() > 0 && parens[parens.len() - 1] == depth && jfmt_structure_holds(bytes, at, paren_tail) {
             at = jfmt_structure_node_close(bytes, at) + 1
@@ -53,7 +53,7 @@ jfmt_structure: fn(program: Program) -> String Never! {
             next
         }
         if jfmt_structure_holds(bytes, at, span_head) {
-            close := at
+            ^close: at
             loop close < bytes.len() && bytes[close] != (U8{125}) -> close += 1
             out.push(U8{83})
             at = close + 1
@@ -66,9 +66,9 @@ jfmt_structure: fn(program: Program) -> String Never! {
             next
         }
         if jfmt_structure_holds(bytes, at, label_head) {
-            close := at + 1
+            ^close: at + 1
             loop close < bytes.len() && bytes[close] != (U8{34}) -> close += 1
-            digits := close
+            ^digits: close
             loop digits > at + 1 && bytes[digits - 1] >= (U8{48}) && bytes[digits - 1] <= (U8{57}) {
                 digits -= 1
             }
@@ -108,7 +108,7 @@ jfmt_structure_head_at: fn(bytes: [U8], at: Int, heads: [[U8]]) -> [U8]? Never! 
 
 // The index just past the quoted text that opens at `at`, over `\` escapes.
 jfmt_structure_quote_close: fn(bytes: [U8], at: Int) -> Int Never! {
-    index := at + 1
+    ^index: at + 1
     loop index < bytes.len() {
         if bytes[index] == (U8{92}) {
             index += 2
@@ -123,8 +123,8 @@ jfmt_structure_quote_close: fn(bytes: [U8], at: Int) -> Int Never! {
 // The index of the `}` that closes the node whose last fields start at `at`
 // (a `Paren` node's `, span: Span { … }, id: N }`).
 jfmt_structure_node_close: fn(bytes: [U8], at: Int) -> Int Never! {
-    level := 0
-    index := at
+    ^level: 0
+    ^index: at
     loop index < bytes.len() {
         if bytes[index] == (U8{123}) -> level += 1
         if bytes[index] == (U8{125}) {
@@ -139,8 +139,8 @@ jfmt_structure_node_close: fn(bytes: [U8], at: Int) -> Int Never! {
 // The index of the `]` that closes a list whose items start at `at`,
 // skipping the brackets inside quoted text (`"errors[0]"`).
 jfmt_structure_list_close: fn(bytes: [U8], at: Int) -> Int Never! {
-    depth := 0
-    index := at
+    ^depth: 0
+    ^index: at
     loop index < bytes.len() {
         if (Int{bytes[index]}) == {
             34 -> index = jfmt_structure_quote_close(bytes, index) - 1
@@ -197,15 +197,15 @@ jfmt_structure_change: fn(source: Program, formatted: Program, formatted_diagnos
 jfmt_structure_difference: fn(before: String, after: String) -> String Never! {
     old: before.bytes()
     new: after.bytes()
-    at := 0
+    ^at: 0
     loop at < old.len() && at < new.len() && old[at] == new[at] -> at += 1
     "the first difference is in `{jfmt_structure_node(old, at)}`: `{jfmt_structure_window(old, at)}` became `{jfmt_structure_window(new, at)}`"
 }
 
 // The name of the innermost `Name {{ … }}` node open at `at`.
 jfmt_structure_node: fn(bytes: [U8], at: Int) -> String Never! {
-    depth := 0
-    open := at - 1
+    ^depth: 0
+    ^open: at - 1
     loop open >= 0 {
         code: Int{bytes[open]}
         if code == 125 -> depth += 1
@@ -216,9 +216,9 @@ jfmt_structure_node: fn(bytes: [U8], at: Int) -> String Never! {
         open -= 1
     }
     if open < 0 -> return "Program"
-    end := open
+    ^end: open
     loop end > 0 && bytes[end - 1] == (U8{32}) -> end -= 1
-    start := end
+    ^start: end
     loop start > 0 && jfmt_structure_name_byte(bytes[start - 1]) -> start -= 1
     String.from_bytes_lossy(bytes[start..<end])
 }

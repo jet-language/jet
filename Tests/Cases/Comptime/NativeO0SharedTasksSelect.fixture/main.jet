@@ -17,7 +17,7 @@ shared_total: fn() -> Int {
 }
 
 sum_range: fn(first: Int, last: Int) -> Int {
-    total := 0
+    ^total: 0
     loop n in first..last -> total += n
     total
 }
@@ -53,11 +53,11 @@ native_value: fn() -> String {
 // Int allocations that fit a 128-byte fixed backing: 8 payload bytes plus a
 // 32-byte header each, so 3, and the same 3 again after a reset.
 fixed_count: fn() -> Int {
-    bytes := [U8#128]{ uninit }
+    ^bytes: [U8#128]{ uninit }
     fixed: mem.Fixed.over(bytes)
-    counts := [Int]{}
+    ^counts: [Int]{}
     loop counts.len() < 2 {
-        count := 0
+        ^count: 0
         loop {
             if fixed.try_alloc(count) == {
                 .Ok(_) -> { count += 1 }

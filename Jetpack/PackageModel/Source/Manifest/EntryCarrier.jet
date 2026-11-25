@@ -121,10 +121,10 @@ pkg_find_package_roots_checked: fn(cache: ^WorkspaceDeclarationCache, start: Str
 // inline walk ends at or below the manifest walk's end; its failure is reported
 // only when the manifest walk completes without one, as if it ran second.
 pkg_walk_package_roots: fn(cache: ^WorkspaceDeclarationCache, root: String, inline: Bool) -[FS, Env]> PkgPackageRoots ManifestError! {
-    dir := root
-    seeking_inline := inline
-    inline_root := String?{None}
-    inline_error := ManifestError?{None}
+    ^dir: root
+    ^seeking_inline: inline
+    ^inline_root: String?{None}
+    ^inline_error: ManifestError?{None}
     loop {
         authority: if AuthorityResolver.open_for_authority_walk(cache, dir) == {
             .Ok(found) -> found
@@ -141,7 +141,7 @@ pkg_walk_package_roots: fn(cache: ^WorkspaceDeclarationCache, root: String, inli
             .Val(opened) -> opened
             .None -> AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
         }
-        workspace := false
+        ^workspace: false
         if walked -> workspace = pkg_entry_has_workspace(resolver, cache)
         has_manifest: if resolver.checked_manifest(".") == {
             .Ok(manifest) -> {
@@ -224,8 +224,8 @@ pkg_entry_load_conventional: fn(root: String) -[FS, Env]> PackageFacts? Manifest
         return Err(pkg_entry_authority_error(err))
     }
     resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
-    facts := manifest.facts
-    compose_error := PackageParseError?{None}
+    ^facts: manifest.facts
+    ^compose_error: PackageParseError?{None}
     if pkg_load_compose_and_validate(facts, resolver) == .Err(error) -> compose_error = Val(error)
     resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
     if compose_error == .Val(error) {
@@ -252,14 +252,14 @@ pkg_package_facts_from_checked_entry: fn(resolver: AuthorityResolver, entry: Che
     resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
     if block == .Val(inline) {
         if manifest_root != None -> return Err(pkg_inline_manifest_conflict(Val(inline.span)))
-        facts := if PackageFacts.parse_uncomposed(inline.body(source), origin) == {
+        ^facts: if PackageFacts.parse_uncomposed(inline.body(source), origin) == {
             .Ok(parsed) -> parsed
             .Err(error) -> {
                 resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
                 return Err(pkg_inline_body_error(error, inline.body_span))
             }
         }
-        compose_error := PackageParseError?{None}
+        ^compose_error: PackageParseError?{None}
         if pkg_load_compose_and_validate(facts, resolver) == .Err(error) {
             compose_error = Val(error)
         }

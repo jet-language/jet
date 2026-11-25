@@ -14,7 +14,7 @@ TASKS: 60000
 
 // One task's work: a few hundred nanoseconds.
 tiny: fn(seed: Int) -> Int {
-    total := seed
+    ^total: seed
     loop step in 0..<200 -> total = (total * 31 + step) % 1000003
     total
 }
@@ -23,7 +23,7 @@ run: fn() {
     args: process.args()
     if args.len() < 1 -> panic("usage: main.jet -- FILE")
     started: time.instant()
-    total := 0
+    ^total: 0
     loop wave in 0..<TASKS /% 4 {
         handles: loop offset in 0..<4 -> task tiny(wave * 4 + offset)
         loop handle in handles -> total += handle.join() ?? 0

@@ -6,20 +6,20 @@ use {
 }
 
 filled: fn(value: Int, count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<count -> out.push((U8{value}))
     out
 }
 
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
 
 hex: fn(text: String) -> [U8] {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<(raw.len() /% 2) {
         a: Int{raw[2 * i]}
         b: Int{raw[2 * i + 1]}
@@ -31,7 +31,7 @@ hex: fn(text: String) -> [U8] {
 }
 
 little: fn(bytes: [U8], at: Int, width: Int) -> Int {
-    out := 0
+    ^out: 0
     loop i in 0..<width -> out |= Int{bytes[at + i]} << (8 * i)
     out
 }
@@ -41,7 +41,7 @@ store_little: fn(bytes: ^[U8], at: Int, width: Int, value: Int) {
 }
 
 #Test("jetc_v1_expert_open_accepts_only_the_pinned_grammar") {
-    key := [U8]{}
+    ^key: [U8]{}
     loop i in 0..<32 -> key.push((U8{i}))
     plain: "historical JETC v1".bytes()
     #Unsafe("original pinned JETC v1 migration grammar") {
@@ -52,13 +52,13 @@ store_little: fn(bytes: ^[U8], at: Int, width: Int, value: Int) {
             if envelope[5] == (U8{2}) {
                 nonce: cut(envelope, 6, 18)
                 ciphertext: expert.aes256gcm_seal(key, nonce, plain, [U8]{}) ?? panic("v1 AES")
-                generated := cut(envelope, 0, 18)
+                ^generated: cut(envelope, 0, 18)
                 loop byte in ciphertext -> generated.push(byte)
                 assert_eq(generated, envelope)
             }
             assert_eq(expert.open_v1(key, envelope) ?? panic("v1 open"), plain)
             loop mode in 0..<5 {
-                hostile := envelope.copy()
+                ^hostile: envelope.copy()
                 if mode == 0 -> hostile[0] = (U8{Int{hostile[0]} ~ 1})
                 if mode == 1 -> hostile[4] = (U8{2})
                 if mode == 2 -> hostile[5] = (U8{3})

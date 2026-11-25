@@ -72,7 +72,7 @@ PEMBlock: struct {
 
     impl Close {
         close: fn(^^self) {
-            der := self.der.move()
+            ^der: self.der.move()
             core.crypto.wipe(der)
         }
     }
@@ -98,7 +98,7 @@ EQUALS: U8{61}
 /// The Base64 digit of a 6-bit value (0..63), without a branch or a table
 /// lookup on it (mbedtls_ct_base64_enc_char).
 #Overflow(.Wrapping) base64_enc_char: fn(value: U8) -> U8 Never! {
-    digit := ctime.uchar_in_range_if(U8{0}, U8{25}, value, U8{65} + value)
+    ^digit: ctime.uchar_in_range_if(U8{0}, U8{25}, value, U8{65} + value)
     digit |= ctime.uchar_in_range_if(U8{26}, U8{51}, value, U8{97} + value - U8{26})
     digit |= ctime.uchar_in_range_if(U8{52}, U8{61}, value, U8{48} + value - U8{52})
     digit |= ctime.uchar_in_range_if(U8{62}, U8{62}, value, U8{43})
@@ -108,7 +108,7 @@ EQUALS: U8{61}
 // One plus the value of Base64 digit c, or zero when c is no digit; no
 // branch or table lookup on c.
 #Overflow(.Wrapping) dec_bits: fn(c: U8) -> U8 Never! {
-    v := ctime.uchar_in_range_if(U8{65}, U8{90}, c, c - U8{65} + U8{1})
+    ^v: ctime.uchar_in_range_if(U8{65}, U8{90}, c, c - U8{65} + U8{1})
     v |= ctime.uchar_in_range_if(U8{97}, U8{122}, c, c - U8{97} + U8{27})
     v |= ctime.uchar_in_range_if(U8{48}, U8{57}, c, c - U8{48} + U8{53})
     v |= ctime.uchar_in_range_if(U8{43}, U8{43}, c, U8{63})
@@ -133,7 +133,7 @@ LAYOUT_INVALID: U8{5}
 // digit, a space, a CR, an LF, an `=`, or invalid. The decoder branches on
 // the class, the text's layout; never on a digit's value.
 #Overflow(.Wrapping) layout_class: fn(c: U8) -> U8 Never! {
-    v := ctime.uchar_in_range_if(SPACE, SPACE, c, LAYOUT_SPACE)
+    ^v: ctime.uchar_in_range_if(SPACE, SPACE, c, LAYOUT_SPACE)
     v |= ctime.uchar_in_range_if(CR, CR, c, LAYOUT_CR)
     v |= ctime.uchar_in_range_if(LF, LF, c, LAYOUT_LF)
     v |= ctime.uchar_in_range_if(EQUALS, EQUALS, c, LAYOUT_EQUALS)
@@ -142,7 +142,7 @@ LAYOUT_INVALID: U8{5}
 
 /// The padded Base64 of src, no line breaks (mbedtls_base64_encode).
 base64_encode: fn(src: [U8]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     cipher.reserve(out, (src.len() + 2) /% 3 * 4)
     whole: src.len() /% 3
     loop b in 0..<whole {
@@ -174,11 +174,11 @@ base64_encode: fn(src: [U8]) -> [U8] Never! {
 /// a lone CR, or padding anywhere but the end is InvalidCharacter.
 base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
     slen: src.len()
-    n := 0
-    equals := 0
-    i := 0
+    ^n: 0
+    ^equals: 0
+    ^i: 0
     loop i < slen {
-        spaces := false
+        ^spaces: false
         loop i < slen && layout_class(src[i]) == LAYOUT_SPACE {
             i += 1
             spaces = true
@@ -206,10 +206,10 @@ base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
     }
     // Digits come in 4k, 4k + 2 or 4k + 3; with the padding, in 4k.
     if (n - equals) %% 4 == 1 || n %% 4 != 0 -> return Err(.InvalidCharacter)
-    out := [U8]{}
+    ^out: [U8]{}
     cipher.reserve(out, n /% 4 * 3 - equals)
-    x := U32{0}
-    digits := 0
+    ^x: U32{0}
+    ^digits: 0
     loop c in src {
         class: layout_class(c)
         if class == LAYOUT_CR || class == LAYOUT_LF || class == LAYOUT_SPACE -> next
@@ -236,8 +236,8 @@ base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
 // header and a footer are found, when data is PEM text, and the emission
 // check takes it as public.
 nul_at: fn(data: [U8]) -> U64 Never! {
-    n := U64{data.len()}
-    seen := ctime.ct_false()
+    ^n: U64{data.len()}
+    ^seen: ctime.ct_false()
     loop i in 0..<data.len() {
         nul: ctime.bool_and(ctime.uint_eq(U64{data[i]}, U64{0}), ctime.bool_not(seen))
         n = ctime.select(nul, U64{i}, n)
@@ -299,7 +299,7 @@ find_block: fn(data: [U8], header: [U8], footer: [U8]) -> PEMSpan? Never! {
 // The end of the footer line of span's block: past the footer, an optional
 // space, CR and LF.
 block_end: fn(data: [U8], span: PEMSpan, footer_len: Int) -> Int Never! {
-    end := span.footer + footer_len
+    ^end: span.footer + footer_len
     if byte_at(data, span.n, end) == SPACE -> end += 1
     if byte_at(data, span.n, end) == CR -> end += 1
     if byte_at(data, span.n, end) == LF -> end += 1
@@ -310,7 +310,7 @@ block_end: fn(data: [U8], span: PEMSpan, footer_len: Int) -> Int Never! {
 // read through byte_at: the IV is a header line's, as public as the
 // ciphertext it opens.
 get_iv: fn(data: [U8], at: Int, count: Int) -> [U8] PEMError! {
-    iv := cipher.zero_bytes(count)
+    ^iv: cipher.zero_bytes(count)
     loop i in 0..<(2 * count) {
         c: byte_at(data, data.len(), at + i)
         j: if {
@@ -331,21 +331,21 @@ get_iv: fn(data: [U8], at: Int, count: Int) -> [U8] PEMError! {
 // MD5(pwd || iv[0..8]), key[16..] = MD5(key[0..16] || pwd || iv[0..8])
 // (pem_pbkdf1).
 pbkdf1: fn(keylen: Int, iv: [U8], pwd: [U8]) -> [U8] Never! {
-    ctx := hashes.hash_start(.MD5)
+    ^ctx: hashes.hash_start(.MD5)
     hashes.hash_update(ctx, pwd)
     hashes.hash_update_range(ctx, iv, 0, 8)
-    first := hashes.hash_finish(ctx)
+    ^first: hashes.hash_finish(ctx)
     if keylen <= 16 {
         key: cipher.bytes_of(first, 0, keylen)
         core.crypto.wipe(first)
         return key
     }
-    key := first.copy()
-    more := hashes.hash_start(.MD5)
+    ^key: first.copy()
+    ^more: hashes.hash_start(.MD5)
     hashes.hash_update(more, first)
     hashes.hash_update(more, pwd)
     hashes.hash_update_range(more, iv, 0, 8)
-    second := hashes.hash_finish(more)
+    ^second: hashes.hash_finish(more)
     count: if keylen < 32 -> keylen - 16 else -> 16
     loop i in 0..<count -> key.push(second[i])
     core.crypto.wipe(first)
@@ -362,7 +362,7 @@ decrypt: fn(alg: PEMCipher, iv: ^[U8], body: [U8], pwd: [U8]) -> [U8] PEMError! 
         .AES192CBC -> 24
         .AES256CBC -> 32
     }
-    key := pbkdf1(keylen, iv, pwd)
+    ^key: pbkdf1(keylen, iv, pwd)
     if alg == .DESCBC {
         k: des.des_setkey_dec(key) ?? {
             core.crypto.wipe(key)
@@ -383,7 +383,7 @@ decrypt: fn(alg: PEMCipher, iv: ^[U8], body: [U8], pwd: [U8]) -> [U8] PEMError! 
     }
     k: cipher.aes_key(key, true) ?? panic("PEM AES key size")
     core.crypto.wipe(key)
-    out := [U8]{}
+    ^out: [U8]{}
     if !cipher.cbc(k, true, iv, body, 0, body.len(), out) -> return Err(.AESInvalidInputLength)
     Ok(out)
 }
@@ -421,16 +421,16 @@ pem_read_buffer: fn(header: String, footer: String, data: [U8], pwd: [U8]?) -> P
     span: find_block(data, hb, fb) ?? return Err(.NoHeaderFooterPresent)
     n: span.n
     s2: span.footer
-    s1 := span.header + hb.len()
+    ^s1: span.header + hb.len()
     if byte_at(data, n, s1) == SPACE -> s1 += 1
     if byte_at(data, n, s1) == CR -> s1 += 1
     if byte_at(data, n, s1) != LF -> return Err(.NoHeaderFooterPresent)
     s1 += 1
     used: block_end(data, span, fb.len())
     encrypted: s2 - s1 >= 22 && starts_at(data, s1, "Proc-Type: 4,ENCRYPTED".bytes())
-    alg := PEMCipher.DESCBC
-    known := false
-    iv := [U8]{}
+    ^alg: PEMCipher.DESCBC
+    ^known: false
+    ^iv: [U8]{}
     if encrypted {
         s1 += 22
         if byte_at(data, n, s1) == CR -> s1 += 1
@@ -467,10 +467,10 @@ pem_read_buffer: fn(header: String, footer: String, data: [U8], pwd: [U8]?) -> P
         s1 += 1
     }
     if s1 >= s2 -> return Err(.InvalidData(None))
-    body := base64_decode(cipher.bytes_of(data, s1, s2 - s1)) ?? return Err(.InvalidData(Val(err)))
+    ^body: base64_decode(cipher.bytes_of(data, s1, s2 - s1)) ?? return Err(.InvalidData(Val(err)))
     if body.len() == 0 -> return Err(.BadInputData)
     if !encrypted -> return Ok(PEMBlock{der: body.move(), used: used})
-    sealed := sealed_body(body)
+    ^sealed: sealed_body(body)
     der: open_block(alg, iv, sealed, pwd)
     Ok(PEMBlock{der: der, used: used})
 }
@@ -484,7 +484,7 @@ sealed_body: fn(body: [U8]) -> [U8] Never! { body.copy() }
 // path.
 open_block: fn(alg: PEMCipher, iv: ^[U8], body: ^[U8], pwd: [U8]?) -> [U8] PEMError! {
     secret: pwd ?? return refuse(body, .PasswordRequired)
-    plain := decrypt(alg, iv, body, secret) ?? return refuse(body, err)
+    ^plain: decrypt(alg, iv, body, secret) ?? return refuse(body, err)
     core.crypto.wipe(body)
     keep: unpadded_len(plain) ?? return refuse(plain, err)
     der: cipher.bytes_of(plain, 0, keep)
@@ -513,10 +513,10 @@ pem_write_buffer: fn(header: String, footer: String, der: [U8]) -> [U8] Never! {
     encoded: base64_encode(der)
     hb: header.bytes()
     fb: footer.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     cipher.reserve(out, hb.len() + encoded.len() + (encoded.len() + 63) /% 64 + fb.len())
     loop b in hb -> out.push(b)
-    at := 0
+    ^at: 0
     loop at < encoded.len() {
         end: if encoded.len() - at > 64 -> at + 64 else -> encoded.len()
         loop i in at..<end -> out.push(encoded[i])

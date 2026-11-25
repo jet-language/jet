@@ -6,8 +6,8 @@ use {
 lifecycle_worker: fn() {}
 
 run: fn() {
-    temp := testing.temp_dir("service-state")
-    snapshot := services.tree("snapshot")
+    ^temp: testing.temp_dir("service-state")
+    ^snapshot: services.tree("snapshot")
     snapshot_store: Path.from(temp).join("snapshot.state").to_string()
     snapshot_authority: services.state_store(snapshot_store) ?? panic("snapshot store")
     snapshot.set_state_snapshot(snapshot_authority, "snapshot", 1, "reversible") ?? panic("snapshot state")
@@ -18,7 +18,7 @@ run: fn() {
     print("snapshot:{restored}")
     snapshot.stop() ?? panic("snapshot stop")
 
-    events := services.tree("events")
+    ^events: services.tree("events")
     event_store: Path.from(temp).join("events.state").to_string()
     event_authority: services.state_store(event_store) ?? panic("event store")
     events.set_state_event_log(event_authority, "events", 1, "reversible") ?? panic("event state")
@@ -30,7 +30,7 @@ run: fn() {
     print("event_count:{events.event_count()}")
     events.stop() ?? panic("event stop")
 
-    workflow := services.tree("workflow")
+    ^workflow: services.tree("workflow")
     workflow_store_path: Path.from(temp).join("workflow.state").to_string()
     workflow_store: services.state_store(workflow_store_path) ?? panic("workflow store")
     workflow.set_state_event_log(workflow_store, "workflow-events", 1, "reversible") ?? panic("workflow state")
@@ -47,7 +47,7 @@ run: fn() {
     }
     workflow.stop() ?? panic("workflow stop")
 
-    cluster := services.tree("cluster")
+    ^cluster: services.tree("cluster")
     endpoint: cluster.worker("api", lifecycle_worker, capacity: 2) ?? panic("cluster worker")
     cluster.start() ?? panic("cluster start")
     // copy: the drain and the stale send still use the endpoint.

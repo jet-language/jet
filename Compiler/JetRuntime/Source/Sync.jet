@@ -44,7 +44,7 @@ priv sync_cas: fn(address: I64, expected: I64, desired: I64) -> I64 {
 // Every count-limited caller rechecks its word or predicate on a spurious wake.
 sync_wake: fn(address: I64, count: I64) {
     lot: sync_lot
-    remaining := count
+    ^remaining: count
     // The locked read orders it after the store this wake publishes.
     if (lot != I64{0} && sync_add(lot, I64{0}) != I64{0}) {
         remaining -= coll_call3(sync_load(wrapping(lot + I64{16})), lot, address, count)
@@ -63,7 +63,7 @@ sync_futex_wake: fn(address: I64, count: I64) {
         return
     }
     #Unsafe("futex wake borrows a live aligned word and retains no pointer") {
-        _ := host_syscall(I64{202}, address, I64{129}, count, I64{0}, I64{0}, I64{0})
+        ^_: host_syscall(I64{202}, address, I64{129}, count, I64{0}, I64{0}, I64{0})
     }
 }
 
@@ -138,7 +138,7 @@ sync_futex_wait_shared: fn(address: I64, expected: I64) -> I64 {
 // The kernel's vDSO clock_gettime reads its time page in user space; a raw
 // syscall 228 enters the kernel on every clock read. 0 until resolved, then
 // the code address, or 1 for none (no vDSO image or symbol).
-sync_vdso_clock := I64{0}
+^sync_vdso_clock: I64{0}
 
 // musl's __vdsosym("__vdso_clock_gettime") over the vDSO image the kernel
 // maps at AT_SYSINFO_EHDR: the first PT_LOAD gives the load bias, PT_DYNAMIC
@@ -151,10 +151,10 @@ sync_vdso_lookup: fn() -> I64 {
     headers: wrapping(image + sync_word(image, I64{32}))
     entry: net_load_uint(wrapping(image + I64{54}), I64{2})
     count: net_load_uint(wrapping(image + I64{56}), I64{2})
-    bias := I64{0}
-    loaded := false
-    dynamic := I64{0}
-    at := I64{0}
+    ^bias: I64{0}
+    ^loaded: false
+    ^dynamic: I64{0}
+    ^at: I64{0}
     loop at < count {
         header: wrapping(headers + at * entry)
         kind: net_load_uint(header, I64{4})
@@ -165,10 +165,10 @@ sync_vdso_lookup: fn() -> I64 {
         at += I64{1}
     }
     if (!loaded || dynamic == I64{0}) { return I64{1} }
-    hash := I64{0}
-    strings := I64{0}
-    symbols := I64{0}
-    field := sync_word(dynamic, I64{0})
+    ^hash: I64{0}
+    ^strings: I64{0}
+    ^symbols: I64{0}
+    ^field: sync_word(dynamic, I64{0})
     loop field != (I64{0}) {
         value: wrapping(bias + sync_word(dynamic, I64{8}))
         if (field == I64{4}) { hash = value }
@@ -213,7 +213,7 @@ priv sync_word: fn(base: I64, offset: I64) -> I64 {
 sync_vdso_name: fn(text: I64, name: I64) -> Bool {
     data: rt_text_word(name)
     length: rt_text_word(wrapping(name + I64{8}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(text + at)) != rt_text_byte(wrapping(data + at))) { return false }
         at += I64{1}
@@ -225,14 +225,14 @@ sync_vdso_name: fn(text: I64, name: I64) -> Bool {
 // musl's clock_gettime: the vDSO's call, then the system call unless the vDSO
 // refused the clock (EINVAL).
 sync_clock_read: fn(clock: I64, timespec: I64) {
-    code := sync_vdso_clock
+    ^code: sync_vdso_clock
     if (code == I64{0}) {
         code = sync_vdso_lookup()
         #Unsafe("an idempotent install: every writer stores the same resolved address") {
             sync_vdso_clock = code
         }
     }
-    status := I64{-38}
+    ^status: I64{-38}
     if (code != I64{1}) {
         #Unsafe("the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words") {
             status = net_i32(os_call_address_two_i64(code, clock, timespec))
@@ -279,7 +279,7 @@ sync_mutex_lock: fn(address: I64) {
         if (sync_swap(address, I64{2}) == I64{0}) {
             return
         }
-        _ := sync_wait(address, I64{2}, I64{-1})
+        ^_: sync_wait(address, I64{2}, I64{-1})
     }
 }
 
@@ -299,7 +299,7 @@ sync_thread_lock: fn(address: I64) {
     if (sync_cas(address, I64{0}, I64{1}) == I64{0}) {
         return
     }
-    spins := I64{0}
+    ^spins: I64{0}
     loop spins < (I64{128}) {
         #Unsafe("x86 pause only hints that this thread is waiting in a spin loop") {
             os_spin_pause()
@@ -313,7 +313,7 @@ sync_thread_lock: fn(address: I64) {
         if (sync_swap(address, I64{2}) == I64{0}) {
             return
         }
-        _ := sync_futex_wait(address, I64{2}, I64{-1})
+        ^_: sync_futex_wait(address, I64{2}, I64{-1})
     }
 }
 
@@ -336,9 +336,9 @@ sync_thread_unlock: fn(address: I64) {
 // flag, makes every thread's earlier stores visible with membarrier before it
 // waits for the count to drain (an asymmetric Dekker fence: either the main
 // thread read the cleared flag and locks for real, or its count is seen).
-sync_sole := I64{1}
+^sync_sole: I64{1}
 
-sync_sole_inflight := I64{0}
+^sync_sole_inflight: I64{0}
 
 // true: the lock word was set with a plain store (an elided section); release
 // it with sync_sole_exit(address, true). false: the mutex is held. Entry
@@ -378,14 +378,14 @@ sync_sole_end: fn() {
     }
     #Unsafe("membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0") {
         sync_sole = I64{0}
-        fenced := host_syscall(I64{324}, I64{16}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
+        ^fenced: host_syscall(I64{324}, I64{16}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
         if fenced {
             fenced = host_syscall(I64{324}, I64{8}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
         }
-        if !fenced -> _ := host_syscall(I64{324}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        if !fenced -> ^_: host_syscall(I64{324}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         loop {
             if (sync_sole_inflight == I64{0}) { break }
-            _ := host_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            ^_: host_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
 }
@@ -401,12 +401,12 @@ sync_cond_wait: fn(sequence: I64, mutex: I64, deadline_ns: I64) -> Bool {
 }
 
 sync_cond_notify_one: fn(sequence: I64) {
-    _ := sync_add(sequence, I64{1})
+    ^_: sync_add(sequence, I64{1})
     sync_wake(sequence, I64{1})
 }
 
 sync_cond_notify_all: fn(sequence: I64) {
-    _ := sync_add(sequence, I64{1})
+    ^_: sync_add(sequence, I64{1})
     sync_wake(sequence, I64{2147483647})
 }
 
@@ -423,7 +423,7 @@ sync_park_new: fn() -> I64 {
     slot
 }
 
-sync_park_retain: fn(slot: I64) { _ := sync_add(wrapping(slot + I64{24}), I64{1}) }
+sync_park_retain: fn(slot: I64) { ^_: sync_add(wrapping(slot + I64{24}), I64{1}) }
 
 sync_park_drop: fn(slot: I64) {
     if (sync_add(wrapping(slot + I64{24}), I64{-1}) == I64{1}) {
@@ -438,11 +438,11 @@ sync_park: fn(slot: I64, timeout_ns: I64) {
     }
     fiber: fiber_current()
     if (fiber != I64{0}) {
-        _ := coll_call3(sync_load(wrapping(sync_lot + I64{24})), fiber, slot, timeout_ns)
+        ^_: coll_call3(sync_load(wrapping(sync_lot + I64{24})), fiber, slot, timeout_ns)
         return
     }
     if (sync_cas(slot, I64{0}, I64{2}) != I64{0}) {
-        _ := sync_swap(slot, I64{0})
+        ^_: sync_swap(slot, I64{0})
         return
     }
     deadline: sync_deadline(timeout_ns)
@@ -456,9 +456,9 @@ sync_park: fn(slot: I64, timeout_ns: I64) {
             }
             break
         }
-        _ := sync_futex_wait(slot, I64{2}, deadline)
+        ^_: sync_futex_wait(slot, I64{2}, deadline)
     }
-    _ := sync_swap(slot, I64{0})
+    ^_: sync_swap(slot, I64{0})
     perf_causal_woken(blocked)
 }
 
@@ -477,7 +477,7 @@ sync_park_wake_as: fn(slot: I64, waker: I64) {
     }
     previous: sync_swap(slot, I64{1})
     if (previous == I64{2}) { sync_futex_wake(slot, I64{1}) }
-    if (previous > I64{2}) { _ := coll_call1(sync_load(wrapping(sync_lot + I64{32})), previous) }
+    if (previous > I64{2}) { ^_: coll_call1(sync_load(wrapping(sync_lot + I64{32})), previous) }
 }
 
 // Once: 0 empty, 1 initializer running, 2 published. The initializer must not
@@ -487,11 +487,11 @@ sync_once_enter: fn(state: I64) -> Bool {
         old: sync_cas(state, I64{0}, I64{1})
         if (old == I64{0}) { return true }
         if (old == I64{2}) { return false }
-        _ := sync_wait(state, I64{1}, I64{-1})
+        ^_: sync_wait(state, I64{1}, I64{-1})
     }
 }
 
 sync_once_complete: fn(state: I64) {
-    _ := sync_swap(state, I64{2})
+    ^_: sync_swap(state, I64{2})
     sync_wake(state, I64{2147483647})
 }

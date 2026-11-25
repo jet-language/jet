@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     core: core
 }
 
@@ -17,8 +18,9 @@ use {
 //
 // The compiler still requires a literal artifact and attaches its frozen
 // Component interface, then projects tightened authority to its canonical
-// wire at that same boundary. `load` is the native `jet_plugin_load` route,
-// which decodes the host's load wire into the typed handle.
+// wire at that same boundary. The compiler lowers a `load` call as the
+// native `jet_plugin_load` route, which decodes the host's load wire into the
+// typed handle; `load`'s body is what a compiler that does not lower it runs.
 // Every export call fails with a `PluginError`; each case carries a
 // compiler-owned `PluginFault { export, message, frames }` whose frames are
 // `PluginFrame { function, component, offset }`.
@@ -28,7 +30,7 @@ use {
 // A literal `path`, from the package root, embeds the artifact and gives the
 // handle its Component's interface: its exports are its methods. A path known
 // only at run time names no embedded artifact, so its calls fail as `Guest`.
-load: fn(path: String, authority: Authority, /, *, limits: Limits{Limits{}}) -[Exec]> Plugin {
+#Builtin.Role(.InlinePluginLoad) load: fn(path: String, authority: Authority, /, *, limits: Limits{Limits{}}) -[Exec]> Plugin {
     core.plugin.load(path, authority, limits: limits)
 }
 

@@ -24,7 +24,7 @@ cbd_walk: fn(path: String, out: ^[String]) {
         return
     }
     loop child in (cbd_files.list_dir(path) ?? panic("list {path}: {err}")) {
-        skipped := false
+        ^skipped: false
         loop name in CBD_SKIPPED {
             if child.name == name -> skipped = true
         }
@@ -44,7 +44,7 @@ cbd_ident_byte: fn(byte: U8) -> Bool Never! {
 
 // The end of the identifier that starts at `at` of `raw`.
 cbd_ident_end: fn(raw: [U8], at: Int) -> Int Never! {
-    end := at
+    ^end: at
     loop end < raw.len() && cbd_ident_byte(raw[end]) -> end += 1
     end
 }
@@ -54,8 +54,8 @@ cbd_ident_end: fn(raw: [U8], at: Int) -> Int Never! {
 // names nothing; a string runs to its closing quote or the line's end.
 cbd_spelled: fn(text: String, words: ^[String:Bool]) Never! {
     raw: text.bytes()
-    at := 0
-    quoted := false
+    ^at: 0
+    ^quoted: false
     loop at + 2 < raw.len() {
         byte: raw[at]
         if {
@@ -84,10 +84,10 @@ cbd_spelled: fn(text: String, words: ^[String:Bool]) Never! {
 // `priv` may come before the name.
 cbd_declared_name: fn(line: String) -> String Never! {
     raw: line.bytes()
-    at := 0
+    ^at: 0
     if raw.len() > 0 && raw[0] == (U8{35}) {
-        depth := 0
-        quoted := false
+        ^depth: 0
+        ^quoted: false
         loop at < raw.len() {
             byte: raw[at]
             at += 1
@@ -121,17 +121,17 @@ cbd_declared_name: fn(line: String) -> String Never! {
 
 // The compiler-known Core names declared outside the door, sorted.
 cbd_outside: fn() -> [String] {
-    spelled := [String:Bool]{}
-    compiler := [String]{}
+    ^spelled: [String:Bool]{}
+    ^compiler: [String]{}
     cbd_walk("Compiler", compiler)
     assert(compiler.len() > 1000, "the walk found only {compiler.len()} compiler sources")
     loop path in compiler {
         cbd_spelled(cbd_files.read(path) ?? panic("read {path}: {err}"), spelled)
     }
     cbd_spelled(cbd_files.read(CBD_ROWS) ?? panic("read {CBD_ROWS}: {err}"), spelled)
-    core := [String]{}
+    ^core: [String]{}
     cbd_walk("Core", core)
-    found := [String:Bool]{}
+    ^found: [String:Bool]{}
     loop path in core {
         if path == CBD_DOOR -> next
         source: cbd_files.read(path) ?? panic("read {path}: {err}")
@@ -140,7 +140,7 @@ cbd_outside: fn() -> [String] {
             if name != "" && spelled.get(name) != None -> found[name] = true
         }
     }
-    names := [String]{}
+    ^names: [String]{}
     loop (name, _) in found -> names.push(name.copy())
     names.sort()
     names
@@ -177,7 +177,7 @@ cbd_outside: fn() -> [String] {
     assert_eq(cbd_declared_name("// __note: a comment"), "")
     assert_eq(cbd_declared_name("AppCall: struct {{"), "")
     assert_eq(cbd_declared_name("__AppCall.call(x)"), "")
-    words := [String:Bool]{}
+    ^words: [String:Bool]{}
     cbd_spelled("a.__AppCall(x) + b__inner + \"__TempPath // \\\"x\" __Rows // core.time's __ClockObserver\n\"a\" __", words)
     assert(words.get("__AppCall") != None)
     assert(words.get("__TempPath") != None)

@@ -57,8 +57,8 @@ lsp_hierarchy_kind: fn(kind: SemKind, calls: Bool{false}) -> Bool Never! {
 lsp_named_type_slot: fn(index: SemIndex, module_path: String, written: String, traits: Bool{false}) -> Int? Never! {
     parts: written.split(".").to_list()
     leaf: parts[parts.len() - 1]
-    found := Int?{None}
-    count := 0
+    ^found: Int?{None}
+    ^count: 0
     loop slot in 0..<index.definitions.len() {
         def: index.definitions[slot].def
         fits: if traits -> lsp_hierarchy_trait_kind(def.kind) else -> lsp_hierarchy_type_kind(def.kind)
@@ -146,8 +146,8 @@ lsp_type_supertypes_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
     index: found.view.checked.index ?? return lsp_response(id, "null")
     definition: index.definitions[found.slot]
     own: definition.def
-    rows := [String]{}
-    seen := [Int]{}
+    ^rows: [String]{}
+    ^seen: [Int]{}
     loop contract in definition.trait_contracts {
         slot: lsp_named_type_slot(index, own.module_path, contract.trait_name, traits: true) ?? next
         if slot == found.slot || seen.contains(slot) -> next
@@ -160,8 +160,10 @@ lsp_type_supertypes_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
 lsp_type_subtypes_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     found: lsp_hierarchy_item(server, params, calls: false) ?? return lsp_response(id, lsp_hierarchy_unknown(params))
     index: found.view.checked.index ?? return lsp_response(id, "null")
-    rows := [String]{}
-    if !lsp_hierarchy_trait_kind(index.definitions[found.slot].def.kind) -> return lsp_response(id, "[]")
+    ^rows: [String]{}
+    if !lsp_hierarchy_trait_kind(index.definitions[found.slot].def.kind) {
+        return lsp_response(id, "[]")
+    }
     loop slot in 0..<index.definitions.len() {
         definition: index.definitions[slot]
         if slot == found.slot || !lsp_hierarchy_type_kind(definition.def.kind) -> next
@@ -180,7 +182,9 @@ lsp_type_subtypes_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Stri
 // (`module.name`).
 lsp_call_callee: fn(index: SemIndex, call: SemCall) -> Int? Never! {
     loop reference in index.references {
-        if reference.module_path != call.module_path || reference.span.end != call.span.end || reference.span.start > call.span.start -> next
+        if reference.module_path != call.module_path || reference.span.end != call.span.end || reference.span.start > call.span.start {
+            next
+        }
         anchor: reference.target ?? return None
         target: LSPTarget{module_path: anchor.module_path, span: anchor.def_span}
         loop slot in 0..<index.definitions.len() {
@@ -196,7 +200,9 @@ lsp_call_callee: fn(index: SemIndex, call: SemCall) -> Int? Never! {
 lsp_call_caller: fn(index: SemIndex, call: SemCall) -> Int? Never! {
     loop slot in 0..<index.definitions.len() {
         def: index.definitions[slot].def
-        if lsp_hierarchy_function_kind(def.kind) && def.module_path == call.module_path && def.name == call.caller -> return Val(slot)
+        if lsp_hierarchy_function_kind(def.kind) && def.module_path == call.module_path && def.name == call.caller {
+            return Val(slot)
+        }
     }
     None
 }
@@ -223,15 +229,17 @@ lsp_call_group_add: fn(groups: ^[LSPCallGroup], checked: LSPChecked, index: SemI
 
 // Each group as `{"<side>": item, "fromRanges": [...]}`.
 lsp_call_groups_json: fn(groups: [LSPCallGroup], side: String) -> String Never! {
-    rows := [String]{}
-    loop group in groups -> rows.push("{{\"{side}\":{group.item},\"fromRanges\":[{group.ranges.join(",")}]}}")
+    ^rows: [String]{}
+    loop group in groups {
+        rows.push("{{\"{side}\":{group.item},\"fromRanges\":[{group.ranges.join(",")}]}}")
+    }
     "[{rows.join(",")}]"
 }
 
 lsp_incoming_calls_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     found: lsp_hierarchy_item(server, params, calls: true) ?? return lsp_response(id, "null")
     index: found.view.checked.index ?? return lsp_response(id, "null")
-    groups := [LSPCallGroup]{}
+    ^groups: [LSPCallGroup]{}
     loop call in index.calls {
         if lsp_call_callee(index, call) != Val(found.slot) -> next
         caller: lsp_call_caller(index, call) ?? next
@@ -244,7 +252,7 @@ lsp_outgoing_calls_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
     found: lsp_hierarchy_item(server, params, calls: true) ?? return lsp_response(id, "null")
     index: found.view.checked.index ?? return lsp_response(id, "null")
     caller: index.definitions[found.slot].def
-    groups := [LSPCallGroup]{}
+    ^groups: [LSPCallGroup]{}
     loop call in index.calls {
         if call.module_path != caller.module_path || call.caller != caller.name -> next
         callee: lsp_call_callee(index, call) ?? next

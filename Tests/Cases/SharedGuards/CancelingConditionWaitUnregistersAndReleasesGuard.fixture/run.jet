@@ -23,10 +23,10 @@ finish_after_start: fn(started: Shared<Int>, began: Condition) -> Int {
 }
 
 run: fn() {
-    cell := Shared{0}
-    changed := Condition.new()
-    started := Shared{0}
-    began := Condition.new()
+    ^cell: Shared{0}
+    ^changed: Condition.new()
+    ^started: Shared{0}
+    ^began: Condition.new()
     task.group workers {
         print(
             (task.race {wait_until_cancel(cell, changed, started, began), finish_after_start(started, began)}) ?? panic("race failed"),

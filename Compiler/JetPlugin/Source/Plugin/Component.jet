@@ -156,7 +156,7 @@ plug_fail: fn(message: String) -> WasmError Never! { WasmError.new(message, -1) 
 
 // The flat instance of `c`.
 plug_flatten: fn(c: WasmComponent) -> PlugFlat WasmError! {
-    flat := PlugFlat{
+    ^flat: PlugFlat{
         c: c,
         funcs: [PlugFunc]{},
         instances: [PlugInstance]{},
@@ -192,7 +192,7 @@ plug_flatten: fn(c: WasmComponent) -> PlugFlat WasmError! {
 
 plug_instantiate: fn(flat: ^PlugFlat, index: Int) WasmError! {
     ci: flat.c.core_instances[index]
-    inst := PlugInstance{
+    ^inst: PlugInstance{
         source: ci.source,
         funcs: [Int]{},
         tables: [Int]{},
@@ -211,7 +211,7 @@ plug_instantiate: fn(flat: ^PlugFlat, index: Int) WasmError! {
         wm: flat.c.modules[ci.source]
         wasm_validate_module(wm)
         loop entry in wm.imports {
-            arg := -1
+            ^arg: -1
             loop (k, name) in ci.arg_names {
                 if name == entry.module_name -> arg = ci.arg_instances[k]
             }
@@ -231,7 +231,7 @@ plug_instantiate: fn(flat: ^PlugFlat, index: Int) WasmError! {
         loop (k, type_index) in wm.funcs {
             ty: wm.types[type_index]
             function: imported + k
-            name := wm.function_name(function)
+            ^name: wm.function_name(function)
             if name == "" {
                 loop entry in wm.exports {
                     if name == "" && entry.kind == WASM_EXTERN_FUNC && entry.index == function {
@@ -263,7 +263,7 @@ plug_instantiate: fn(flat: ^PlugFlat, index: Int) WasmError! {
         }
         loop elem in wm.elems {
             active: elem.mode == WASM_SEGMENT_ACTIVE
-            items := [Int]{}
+            ^items: [Int]{}
             loop item in elem.items -> items.push(if item < 0 -> 0 else -> inst.funcs[item] + 1)
             offset: if active -> plug_const_value(flat, inst, elem.offset) else -> 0
             table: if active -> inst.tables[elem.table] else -> 0
@@ -294,7 +294,7 @@ plug_instance_export: fn(flat: ^PlugFlat, instance: Int, name: String, kind: Int
     }
     source: flat.instances[instance].source
     if source < 0 {
-        found := -1
+        ^found: -1
         loop k in 0..<flat.instances[instance].names.len() {
             if flat.instances[instance].names[k] == name && flat.instances[instance].sorts[k] == kind {
                 found = flat.instances[instance].targets[k]
@@ -352,7 +352,7 @@ plug_lower: fn(flat: ^PlugFlat, index: Int, item: WasmCoreItem, expected: WasmFu
     }
     target: item.target
     func: flat.c.func_type(target) ?? return Err(plug_fail("lowered function {target} has no function type"))
-    params := [Int]{}
+    ^params: [Int]{}
     loop param in func.types -> params.push(plug_value_code(flat.c, param))
     result: if func.ok == WASM_CT_NONE -> PLUG_VALUE_NONE else -> plug_value_code(flat.c, func.ok)
     row: flat.imports.len()
@@ -392,7 +392,7 @@ plug_import_name: fn(c: WasmComponent, target: Int) -> String Never! {
 
 // The value code of Component value type `ty`.
 plug_value_code: fn(c: WasmComponent, ty: Int) -> Int Never! {
-    code := ty
+    ^code: ty
     if code >= 0 {
         resolved: c.resolve_type(code) ?? return PLUG_VALUE_UNSUPPORTED
         if resolved.kind != WASM_CT_PRIMITIVE -> return PLUG_VALUE_UNSUPPORTED
@@ -413,7 +413,7 @@ plug_flat_types: fn(code: Int) -> [Int] Never! {
 
 // Lifted export `name` (Component function `index`).
 plug_lift: fn(flat: ^PlugFlat, name: String, index: Int) WasmError! {
-    export := PlugExport{name: name, fid: -1, params: [Int]{}, result: PLUG_VALUE_NONE, fields: [Int]{}, memory: -1, realloc: -1, post: -1, unsupported: true}
+    ^export: PlugExport{name: name, fid: -1, params: [Int]{}, result: PLUG_VALUE_NONE, fields: [Int]{}, memory: -1, realloc: -1, post: -1, unsupported: true}
     item: flat.c.funcs[index]
     if item.origin == WASM_ORIGIN_LIFT {
         if flat.c.func_type(index) == .Val(func) {
@@ -446,7 +446,7 @@ plug_tuple_fields: fn(c: WasmComponent, ty: Int) -> [Int] Never! {
     if ty < 0 -> return [Int]{}
     resolved: c.resolve_type(ty) ?? return [Int]{}
     if resolved.kind != WASM_CT_TUPLE && resolved.kind != WASM_CT_RECORD -> return [Int]{}
-    fields := [Int]{}
+    ^fields: [Int]{}
     loop field in resolved.types {
         code: plug_value_code(c, field)
         if code == PLUG_VALUE_UNSUPPORTED || code == PLUG_VALUE_CHAR -> return [Int]{}
@@ -459,14 +459,14 @@ plug_tuple_fields: fn(c: WasmComponent, ty: Int) -> [Int] Never! {
 // signature. A result that flattens to more than one core value is lifted
 // from the return area, so the core function returns its i32 address.
 plug_lift_fits: fn(export: PlugExport, ty: WasmFuncType) -> Bool Never! {
-    flat := [Int]{}
+    ^flat: [Int]{}
     loop code in export.params {
         if code == PLUG_VALUE_UNSUPPORTED -> return false
         loop core in plug_flat_types(code) -> flat.push(core)
     }
     if export.result == PLUG_VALUE_UNSUPPORTED || flat != ty.params -> return false
     if export.result == PLUG_VALUE_NONE -> return ty.results.len() == 0
-    results := [Int]{}
+    ^results: [Int]{}
     codes: if export.result == PLUG_VALUE_TUPLE -> export.fields else -> [Int]{export.result}
     loop code in codes {
         loop core in plug_flat_types(code) -> results.push(core)

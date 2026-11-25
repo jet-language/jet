@@ -61,14 +61,14 @@ diagnostic_is_terminal_control: fn(codepoint: Int) -> Bool Never! {
 
 diagnostic_lower_hex: fn(value: Int, min_digits: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    reversed := [U8]{}
-    rest := value
+    ^reversed: [U8]{}
+    ^rest: value
     loop rest > 0 || reversed.len() < min_digits {
         reversed.push(digits[rest % 16])
         rest /%= 16
     }
-    out := [U8]{}
-    index := reversed.len() - 1
+    ^out: [U8]{}
+    ^index: reversed.len() - 1
     loop index >= 0 {
         out.push(reversed[index])
         index -= 1
@@ -80,8 +80,8 @@ diagnostic_lower_hex: fn(value: Int, min_digits: Int) -> String Never! {
 // C0/C1 controls, line separators, and line breaks become visible escapes.
 diagnostic_escape_terminal_text: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         width: diagnostic_utf8_width(bytes, index)
         codepoint: diagnostic_codepoint_at(bytes, index, width)
@@ -103,7 +103,7 @@ diagnostic_escape_terminal_text: fn(value: String) -> String Never! {
 
 // Byte offset just past the last newline before `offset` (0 on line one).
 diagnostic_line_start: fn(bytes: [U8], offset: Int) -> Int Never! {
-    index := offset - 1
+    ^index: offset - 1
     loop index >= 0 {
         if bytes[index] == (U8{10}) -> return index + 1
         index -= 1
@@ -121,7 +121,7 @@ diagnostic_clamp_offset: fn(bytes: [U8], offset: Int) -> Int Never! {
 diagnostic_line_at: fn(source: String, offset: Int) -> Int Never! {
     bytes: source.bytes()
     limit: diagnostic_clamp_offset(bytes, offset)
-    line := 1
+    ^line: 1
     loop index in 0..<limit {
         if bytes[index] == (U8{10}) -> line += 1
     }
@@ -132,7 +132,7 @@ diagnostic_line_at: fn(source: String, offset: Int) -> Int Never! {
 diagnostic_column_at: fn(source: String, offset: Int) -> Int Never! {
     bytes: source.bytes()
     limit: diagnostic_clamp_offset(bytes, offset)
-    column := 1
+    ^column: 1
     loop index in diagnostic_line_start(bytes, limit)..<limit {
         if !diagnostic_is_continuation(Int{bytes[index]}) -> column += 1
     }
@@ -152,7 +152,7 @@ DiagnosticSourceText: struct {
 
 diagnostic_source_text: fn(source: String) -> DiagnosticSourceText Never! {
     bytes: source.bytes()
-    starts := [Int]{0}
+    ^starts: [Int]{0}
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) -> starts.push(index + 1)
     }
@@ -162,8 +162,8 @@ diagnostic_source_text: fn(source: String) -> DiagnosticSourceText Never! {
 // The 0-based line holding the clamped offset `limit`: the last line start
 // at or before it.
 diagnostic_source_line_index: fn(text: DiagnosticSourceText, limit: Int) -> Int Never! {
-    low := 0
-    high := text.line_starts.len() - 1
+    ^low: 0
+    ^high: text.line_starts.len() - 1
     loop low < high {
         middle: (low + high + 1) /% 2
         if text.line_starts[middle] <= limit -> low = middle else -> high = middle - 1
@@ -179,7 +179,7 @@ diagnostic_source_line: fn(text: DiagnosticSourceText, offset: Int) -> Int Never
 // diagnostic_column_at over an indexed source.
 diagnostic_source_column: fn(text: DiagnosticSourceText, offset: Int) -> Int Never! {
     limit: diagnostic_clamp_offset(text.bytes, offset)
-    column := 1
+    ^column: 1
     loop index in text.line_starts[diagnostic_source_line_index(text, limit)]..<limit {
         if !diagnostic_is_continuation(Int{text.bytes[index]}) -> column += 1
     }
@@ -215,7 +215,7 @@ diagnostic_source_position: fn(sources: ^DiagnosticSourceTexts, origin: Diagnost
 // The text of the line holding `offset`.
 diagnostic_line_text_at: fn(bytes: [U8], offset: Int) -> String Never! {
     start: diagnostic_line_start(bytes, diagnostic_clamp_offset(bytes, offset))
-    end := start
+    ^end: start
     loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
     if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
     foundation_byte_text(bytes, start, end)
@@ -224,8 +224,8 @@ diagnostic_line_text_at: fn(bytes: [U8], offset: Int) -> String Never! {
 // The first `count` characters of `text`.
 diagnostic_prefix_chars: fn(text: String, count: Int) -> String Never! {
     bytes: text.bytes()
-    index := 0
-    taken := 0
+    ^index: 0
+    ^taken: 0
     loop taken < count && index < bytes.len() {
         index += diagnostic_utf8_width(bytes, index)
         taken += 1
@@ -245,7 +245,7 @@ diagnostic_snippet_first_line: fn(bytes: [U8], span: Span) -> String Never! {
     if span.start > end || !diagnostic_is_char_boundary(bytes, span.start) || !diagnostic_is_char_boundary(bytes, end) {
         return ""
     }
-    stop := span.start
+    ^stop: span.start
     loop stop < end && bytes[stop] != (U8{10}) -> stop += 1
     foundation_byte_text(bytes, span.start, stop)
 }
@@ -275,7 +275,7 @@ diagnostic_push_snippet: fn(out: ^[U8], diagnostic: Diagnostic, color: Bool, fil
     snippet_first_line: diagnostic_escape_terminal_text(diagnostic_snippet_first_line(text.bytes, span))
     line_width: diagnostic_unicode.display_width(line_text)
     avail: if line_width > pad_width -> line_width - pad_width else -> 0
-    caret_len := diagnostic_unicode.display_width(snippet_first_line)
+    ^caret_len: diagnostic_unicode.display_width(snippet_first_line)
     if caret_len < 1 -> caret_len = 1
     if avail > 0 && caret_len > avail -> caret_len = avail
     pad: " ".repeat(pad_width)
@@ -294,10 +294,10 @@ diagnostic_push_snippet: fn(out: ^[U8], diagnostic: Diagnostic, color: Bool, fil
 diagnostic_has_structured_detail_key: fn(detail: String) -> Bool Never! {
     bytes: detail.bytes()
     if bytes.len() == 0 -> return false
-    end := 0
+    ^end: 0
     loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
     if end > 0 && bytes[end - 1] == (U8{13}) -> end -= 1
-    colon := -1
+    ^colon: -1
     loop index in 0..<end {
         if bytes[index] == (U8{58}) {
             colon = index
@@ -314,7 +314,7 @@ diagnostic_has_structured_detail_key: fn(detail: String) -> Bool Never! {
 }
 
 diagnostic_join_escaped: fn(parts: [String], separator: String) -> String Never! {
-    joined := ""
+    ^joined: ""
     loop (index, part) in parts {
         escaped: diagnostic_escape_terminal_text(part)
         joined = if index == 0 -> escaped else -> "{joined}{separator}{escaped}"
@@ -325,7 +325,7 @@ diagnostic_join_escaped: fn(parts: [String], separator: String) -> String Never!
 // One diagnostic as terminal text. `file` and `source` name the checked
 // source; a diagnostic's own origin replaces both.
 diagnostic_render: fn(diagnostic: Diagnostic, file: String, source: String, color: Bool) -> String Never! {
-    sources := diagnostic_source_texts()
+    ^sources: diagnostic_source_texts()
     diagnostic_render_with(diagnostic, file, source, color, sources)
 }
 
@@ -337,7 +337,7 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     why: diagnostic_escape_terminal_text(diagnostic.why)
     fix: diagnostic_escape_terminal_text(diagnostic.fix)
     label: diagnostic_theme_severity(color, diagnostic, if diagnostic_is_warning(diagnostic) -> "Warning" else -> "Error")
-    out := [U8]{}
+    ^out: [U8]{}
     diagnostic_push_text(out, "{label}: {diagnostic_headline(diagnostic.code, what)}\n")
     if diagnostic.span != None || diagnostic.labels.len() > 0 {
         position: diagnostic_source_position(sources, diagnostic.origin, source)
@@ -352,7 +352,7 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Fix:")} {fix}\n")
     if diagnostic.detail == .Val(detail) {
         if !diagnostic_has_structured_detail_key(detail) {
-            first := true
+            ^first: true
             loop line in detail.split("\n") {
                 if !first -> diagnostic_push_text(out, "\n")
                 first = false
@@ -431,7 +431,7 @@ diagnostic_stop_footer: fn(code: String) -> String Never! {
 // reads is indexed once (DiagnosticSourceTexts), and the reports are joined
 // once at the end.
 diagnostic_render_all: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool) -> String Never! {
-    sources := diagnostic_source_texts()
+    ^sources: diagnostic_source_texts()
     rendered: loop diagnostic in diagnostics -> diagnostic_render_with(diagnostic, file, source, color, sources)
     rendered.join("\n")
 }

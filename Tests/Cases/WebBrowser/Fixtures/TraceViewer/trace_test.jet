@@ -13,7 +13,7 @@ use {
     server: browser.server_start(config) ?? panic("the app is not serving {config.server_url()}: {err}")
     url: server.url()
     marker: "{files.basename(config.report_path())}.attempted"
-    report := browser.report_new(config)
+    ^report: browser.report_new(config)
     notes: browser.run_case(config, "notes", fn(page: BrowserPage) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserError! {
         page.goto(url)
         page.get_by_text("milk").wait(browser.timeout(10000))

@@ -126,7 +126,7 @@ envmodel_workspace_load_checked_source: fn(resolver: AuthorityResolver, expected
 envmodel_workspace_evaluate_package_source: fn(source: WorkspaceSource, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan EnvModelEvalError! {
     package: resolver.checked_package(".")
     checked_members: package.facts.checked_members_in(resolver, package.member.directory)
-    members := [WorkspacePlanMember]{}
+    ^members: [WorkspacePlanMember]{}
     loop member in checked_members {
         resolver.revalidate_member(member.member)
         canonical_path: resolver.relative_identity(member.member.directory)
@@ -187,7 +187,7 @@ envmodel_workspace_evaluate_checked_source: fn(source: WorkspaceSource, resolver
 
 // The final component of a path (`Path::file_name`).
 envmodel_workspace_file_name: fn(path: String) -> String Never! {
-    trimmed := path
+    ^trimmed: path
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
     parts: trimmed.cut_last("/") ?? return trimmed
     parts.after
@@ -216,8 +216,8 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
     // module (`workspace: module {}`); that still proves the declaration was
     // syntactically present without turning it into an index.
     ws_module: envmodel_workspace_module(program.items)
-    code_workspace := false
-    workspace_declarations := 0
+    ^code_workspace: false
+    ^workspace_declarations: 0
     loop item in program.items {
         if item == .Module(declaration) && declaration.name == NS_WORKSPACE && declaration.auto_discovered {
             workspace_declarations += 1
@@ -247,9 +247,9 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
     // top-level `fn`s and module values (envmodel_compute_values), so it can
     // compose a sibling `PACKAGES: […]` or call a local helper `fn`, not only
     // inline literals and the `find("./dir")` fast path.
-    scope := ModuleEvalScope{base_dir: base_dir, source: eval_src, values: [Int:CtValue]{}}
+    ^scope: ModuleEvalScope{base_dir: base_dir, source: eval_src, values: [Int:CtValue]{}}
     constants: envmodel_module_constants(program.items, [String:CtValue]{})
-    value_plan := envmodel_value_program(eval_src, [String:CtValue]{})
+    ^value_plan: envmodel_value_program(eval_src, [String:CtValue]{})
     loop expr in workspace_module.members {
         envmodel_workspace_plan_members(value_plan, expr, constants.globals)
     }
@@ -257,8 +257,8 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
     scope.values = computed.values
 
     // Evaluate each `members:` expression (typically just one).
-    members := [WorkspacePlanMember]{}
-    comptime_inputs := [ComptimeInput]{}
+    ^members: [WorkspacePlanMember]{}
+    ^comptime_inputs: [ComptimeInput]{}
     loop expr in workspace_module.members {
         evaluated: envmodel_workspace_eval_members_expr(expr, resolver, scope)
         comptime_inputs.extend(evaluated.inputs)
@@ -406,7 +406,7 @@ envmodel_workspace_escapes_root: fn(path: String) -> Bool Never! {
 
 // The authority diagnostic re-anchored at the `members:` span.
 envmodel_workspace_authority_error: fn(error: AuthorityError, span: Span?) -> EnvModelEvalError Never! {
-    diagnostic := error.diagnostic()
+    ^diagnostic: error.diagnostic()
     diagnostic.span = span
     EnvModelEvalError{diagnostic: diagnostic}
 }
@@ -477,7 +477,7 @@ envmodel_workspace_eval_members_expr: fn(expr: Expr, resolver: AuthorityResolver
         if envmodel_workspace_literal_string(arg.expr) == .Val(dir) {
             scan_dir: envmodel_workspace_validate_find_scan_dir(dir, resolver, span)
             arg_span: expr_span(arg.expr)
-            paths := [WorkspaceMemberPath]{}
+            ^paths: [WorkspaceMemberPath]{}
             loop found in envmodel_workspace_find_package_dirs(scan_dir, resolver, span) {
                 paths.push(WorkspaceMemberPath{path: found, span: arg_span})
             }
@@ -501,7 +501,7 @@ envmodel_workspace_eval_members_expr: fn(expr: Expr, resolver: AuthorityResolver
         return Err(envmodel_error("E2104", "`members:` reads the build-time input `{site.name}`, which the workspace lock cannot record yet", "the workspace lock pins every file or URL a `members:` expression reads, and this evaluator does not report those reads", "list the member paths directly, or use the `find(\"./dir\")` fast path", Val(site.span)))
     }
     value: envmodel_value_of(expr, scope)
-    paths := [WorkspaceMemberPath]{}
+    ^paths: [WorkspaceMemberPath]{}
     loop path in envmodel_workspace_string_list(value, span) {
         paths.push(WorkspaceMemberPath{path: path, span: span})
     }
@@ -528,7 +528,7 @@ envmodel_workspace_literal_string: fn(expr: Expr) -> String? Never! {
             return None
         }
     }
-    text := [String]{}
+    ^text: [String]{}
     loop part in parts {
         if part == {
             .Lit(literal) -> { text.push(literal) }
@@ -554,7 +554,7 @@ envmodel_workspace_string_list: fn(value: CtValue, span: Span) -> [String] EnvMo
             )
         }
     }
-    out := [String]{}
+    ^out: [String]{}
     loop item in items {
         path: envmodel_workspace_member_path_string(item) ?? return Err(
             envmodel_error(
@@ -600,7 +600,7 @@ envmodel_workspace_validate_find_scan_dir: fn(raw: String, resolver: AuthorityRe
 envmodel_workspace_strip_cur_dir: fn(raw: String) -> String Never! {
     components: envmodel_path_components(raw)
     if components.len() == 0 || components[0] != EnvPathComponent.CurDir -> return raw.copy()
-    rest := [String]{}
+    ^rest: [String]{}
     loop component in components {
         if component == .Normal(segment) -> rest.push(segment)
     }
@@ -616,7 +616,7 @@ envmodel_workspace_find_package_dirs: fn(scan_dir: String, resolver: AuthorityRe
             return Err(envmodel_workspace_authority_error(error, Val(span)))
         }
     }
-    paths := [String]{}
+    ^paths: [String]{}
     loop member in discovered -> paths.push(member.directory.relative)
     Ok(paths)
 }

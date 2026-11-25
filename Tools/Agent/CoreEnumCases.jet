@@ -113,7 +113,7 @@ byte_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 code_at: fn(bytes: [U8], at: Int) -> Int Never! { Int{bytes[at]} }
 
 skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
-    at := start
+    ^at: start
     loop at < bytes.len() && space_byte(code_at(bytes, at)) -> at += 1
     at
 }
@@ -122,7 +122,7 @@ skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
 // (`source_module <module> path <path> …`), then each part CoreSourceParts.tsv
 // attaches to it (columns: module, owner, path, …).
 module_sources: fn(rows: String, parts: String) -> [String:[String]] Never! {
-    sources := [String:[String]]{}
+    ^sources: [String:[String]]{}
     loop line in rows.lines() {
         if !line.starts_with("source_module ") -> next
         words: line.split(" ").to_list()
@@ -143,11 +143,11 @@ module_sources: fn(rows: String, parts: String) -> [String:[String]] Never! {
 // Whether `name:` at byte `at` starts a declaration: only spaces, tabs and an
 // optional `pub` stand before it on its line.
 declaration_start: fn(bytes: [U8], at: Int) -> Bool Never! {
-    back := at
+    ^back: at
     loop back > 0 && (code_at(bytes, back - 1) == 32 || code_at(bytes, back - 1) == 9) -> back -= 1
     if back == 0 || code_at(bytes, back - 1) == 10 -> return true
     if back == at || back < 3 || byte_text(bytes, back - 3, back) != "pub" -> return false
-    start := back - 3
+    ^start: back - 3
     loop start > 0 && (code_at(bytes, start - 1) == 32 || code_at(bytes, start - 1) == 9) {
         start -= 1
     }
@@ -166,7 +166,7 @@ EnumCase: struct {
 declared_enum: fn(text: String, name: String) -> [EnumCase]? {
     bytes: text.bytes()
     needle: "{name}:"
-    start := 0
+    ^start: 0
     loop {
         found: byte_text(bytes, start, bytes.len()).find(needle)
         if found < 0 -> return None
@@ -186,7 +186,7 @@ declared_enum: fn(text: String, name: String) -> [EnumCase]? {
 // such enum.
 declared_cases: fn(text: String, name: String) -> [String]? {
     cases: declared_enum(text, name) ?? return None
-    carried := true
+    ^carried: true
     loop entry in cases {
         if entry.payload != "" && !carried_payload(entry.payload) -> carried = false
     }
@@ -196,8 +196,8 @@ declared_cases: fn(text: String, name: String) -> [String]? {
 // The cases of the enum body that opens at byte `open`: the upper-case names
 // at its top level, comments dropped, until its first `fn` or `impl`.
 body_cases: fn(bytes: [U8], open: Int) -> [EnumCase] Never! {
-    end := open
-    depth := 1
+    ^end: open
+    ^depth: 1
     loop depth > 0 && end < bytes.len() {
         code: code_at(bytes, end)
         if code == 123 -> depth += 1
@@ -205,9 +205,9 @@ body_cases: fn(bytes: [U8], open: Int) -> [EnumCase] Never! {
         end += 1
     }
     body_end: end - 1
-    cases := [EnumCase]{}
-    nesting := 0
-    index := open
+    ^cases: [EnumCase]{}
+    ^nesting: 0
+    ^index: open
     loop index < body_end {
         code: code_at(bytes, index)
         if code == 47 && index + 1 < body_end && code_at(bytes, index + 1) == 47 {
@@ -228,7 +228,7 @@ body_cases: fn(bytes: [U8], open: Int) -> [EnumCase] Never! {
             index += 1
             next
         }
-        word_end := index + 1
+        ^word_end: index + 1
         loop word_end < body_end && word_byte(code_at(bytes, word_end)) -> word_end += 1
         word: byte_text(bytes, index, word_end)
         if word == "fn" || word == "impl" -> break
@@ -250,8 +250,8 @@ body_cases: fn(bytes: [U8], open: Int) -> [EnumCase] Never! {
 // The text inside the parentheses that open at byte `open`, white space
 // dropped.
 payload_slot: fn(bytes: [U8], open: Int, body_end: Int) -> String Never! {
-    depth := 0
-    close := open
+    ^depth: 0
+    ^close: open
     loop close < body_end {
         code: code_at(bytes, close)
         if code == 40 || code == 91 || code == 123 -> depth += 1
@@ -259,7 +259,7 @@ payload_slot: fn(bytes: [U8], open: Int, body_end: Int) -> String Never! {
         if depth == 0 -> break
         close += 1
     }
-    kept := [U8]{}
+    ^kept: [U8]{}
     loop byte in bytes.slice(open + 1, close) {
         if !space_byte(Int{byte}) -> kept.push(byte)
     }
@@ -299,7 +299,7 @@ module_line: fn(line: String, texts: [String:String], sources: [String:[String]]
     if closed.sep == "" {
         return Err(cases_fail("{ROWS_PATH}: the types of module {module_name} are not closed with ` }}`"))
     }
-    entries := [String]{}
+    ^entries: [String]{}
     loop entry in closed.head.split(", ").to_list() {
         listed: entry.partition(LIST_OPEN)
         if listed.sep == "" || !listed.tail.ends_with(")") {
@@ -328,8 +328,8 @@ module_line: fn(line: String, texts: [String:String], sources: [String:[String]]
 
 // Core.rows (`rows`) with every list a Core source declares written from it.
 case_lists: fn(rows: String, texts: [String:String], sources: [String:[String]]) -> CaseLists CoreEnumCasesError! {
-    lists := CaseLists{text: "", stale: [StaleList]{}, written: 0, residue: 0}
-    out := [String]{}
+    ^lists: CaseLists{text: "", stale: [StaleList]{}, written: 0, residue: 0}
+    ^out: [String]{}
     loop line in rows.split("\n") {
         if !line.starts_with("module ") {
             out.push(line)
@@ -346,7 +346,7 @@ case_lists: fn(rows: String, texts: [String:String], sources: [String:[String]])
 // (`CPUTime` is CPU_TIME, `InvalidURL` INVALID_URL).
 upper_snake: fn(name: String) -> String Never! {
     bytes: name.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop (at, byte) in bytes {
         code: Int{byte}
         if at > 0 && upper_byte(code) {
@@ -365,7 +365,7 @@ upper_snake: fn(name: String) -> String Never! {
 // top-level comma, no body of named fields, and no option of a scalar.
 word_payload: fn(payload: String) -> Bool Never! {
     if payload == "{{" -> return false
-    depth := 0
+    ^depth: 0
     loop byte in payload.bytes() {
         code: Int{byte}
         if code == 40 || code == 91 || code == 123 -> depth += 1
@@ -381,7 +381,7 @@ word_payload: fn(payload: String) -> Bool Never! {
 // `_TAG` and, when a case carries a payload, `_PAYLOAD`; or the case whose
 // payload no word holds.
 enum_carrier: fn(prefix: String, cases: [EnumCase]) -> {constants: [String], problem: String} Never! {
-    payload := false
+    ^payload: false
     loop entry in cases {
         if entry.payload == "" -> next
         if !word_payload(entry.payload) {
@@ -389,7 +389,7 @@ enum_carrier: fn(prefix: String, cases: [EnumCase]) -> {constants: [String], pro
         }
         payload = true
     }
-    constants := [String]{"{prefix}_BYTES: I64{{{if payload -> 16 else -> 8}}}", "{prefix}_TAG: I64{{0}}"}
+    ^constants: [String]{"{prefix}_BYTES: I64{{{if payload -> 16 else -> 8}}}", "{prefix}_TAG: I64{{0}}"}
     if payload -> constants.push("{prefix}_PAYLOAD: I64{{8}}")
     {constants: constants, problem: ""}
 }
@@ -397,10 +397,10 @@ enum_carrier: fn(prefix: String, cases: [EnumCase]) -> {constants: [String], pro
 // CoreEnumABI.jet as the declarations of `enums` (ORDINAL_ENUMS) number their
 // cases and lay out their carriers, and each listed enum they cannot, with why.
 ordinal_text: fn(enums: [OrdinalEnum], texts: [String:String]) -> {text: String, problems: [String]} Never! {
-    blocks := [String]{ORDINALS_HEADER}
-    problems := [String]{}
+    ^blocks: [String]{ORDINALS_HEADER}
+    ^problems: [String]{}
     loop listed in enums {
-        declared := [{cases: [EnumCase], path: String}]{}
+        ^declared: [{cases: [EnumCase], path: String}]{}
         loop path in texts.keys().to_list() {
             cases: declared_enum(texts.get(path) ?? "", listed.core) ?? next
             declared.push({cases: cases, path: path})
@@ -409,7 +409,7 @@ ordinal_text: fn(enums: [OrdinalEnum], texts: [String:String]) -> {text: String,
             problems.push("{listed.core}: {declared.len()} Core sources declare it with cases, not one")
             next
         }
-        constants := [String]{}
+        ^constants: [String]{}
         if listed.carrier {
             carrier: enum_carrier(listed.prefix, declared[0].cases)
             if carrier.problem != "" {
@@ -434,7 +434,7 @@ core_enum_cases_main: fn(args: [String]) -[FS]> String CoreEnumCasesError! {
     rows: files.read(ROWS_PATH) ?? return Err(cases_fail("cannot read {ROWS_PATH}: {err}"))
     parts: files.read(PARTS_PATH) ?? return Err(cases_fail("cannot read {PARTS_PATH}: {err}"))
     sources: module_sources(rows, parts)
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     loop module_name in sources.keys().to_list() {
         paths: sources.get(module_name) ?? [String]{}
         loop path in paths {
@@ -449,7 +449,7 @@ core_enum_cases_main: fn(args: [String]) -[FS]> String CoreEnumCasesError! {
     }
     ordinals_stale: (files.read(ORDINALS_PATH) ?? "") != ordinals.text
     if (lists.stale.len() > 0 || ordinals_stale) && mode == "--check" {
-        problems := loop stale in lists.stale -> "{ROWS_PATH}: {stale.module_name} lists {stale.name}:plain({stale.written}) but {stale.path} declares {stale.declared}"
+        ^problems: loop stale in lists.stale -> "{ROWS_PATH}: {stale.module_name} lists {stale.name}:plain({stale.written}) but {stale.path} declares {stale.declared}"
         if ordinals_stale {
             problems.push("{ORDINALS_PATH}: an enum's ordinals differ from its declaration")
         }
@@ -485,7 +485,7 @@ run: fn() { print(core_enum_cases_main(process.args()) ?? process.fail(1, err.me
 
 #Test("a module line's lists follow the declarations of the module's sources") {
     sources: module_sources("source_module core.demo path Core/Demo/Demo.jet alias demo owns {{ }}\n", "# module\towner\tpath\n__core_demo_part\tcore.demo\tCore/Demo/Part.jet\t__core_demo_part\t\t\n")
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     texts["Core/Demo/Demo.jet"] = "Mode: enum {{\n    Fast,\n    Slow,\n}}\n"
     texts["Core/Demo/Part.jet"] = "Kind: enum {{\n    One,\n}}\n"
     rows: "// head\nmodule core.demo exports {{ Mode, Kind, Gone }} types {{ Mode:plain(Fast), Kind:plain(One), Gone:plain(A|B), Box:plain }} depends_on []\n"
@@ -501,7 +501,7 @@ run: fn() { print(core_enum_cases_main(process.args()) ?? process.fail(1, err.me
     assert_eq(upper_snake("CPUTime"), "CPU_TIME")
     assert_eq(upper_snake("InvalidURL"), "INVALID_URL")
     assert_eq(upper_snake("Utf8Error"), "UTF8_ERROR")
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     texts["Core/Demo/Demo.jet"] = "Limit: enum {{\n    WallTime,\n    Budget(limit: Int, fault: String),\n    TLS(String),\n}}\n"
     texts["Core/Demo/Twice.jet"] = "Twice: enum {{\n    One,\n}}\n"
     texts["Core/Demo/Again.jet"] = "Twice: enum {{\n    One,\n}}\n"
@@ -513,7 +513,7 @@ run: fn() { print(core_enum_cases_main(process.args()) ?? process.fail(1, err.me
 }
 
 #Test("a carrier enum is its tag word, then one payload word when a case carries one") {
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     texts["Core/Demo/Demo.jet"] = "Fault: enum {{\n    Stopped,\n    Panicked(String),\n    Code(code: Int),\n}}\nBare: enum {{\n    On,\n    Off,\n}}\nWide: enum {{\n    Late(Int?),\n}}\nPair: enum {{\n    Two(Int, [U8]),\n}}\n"
     laid: ordinal_text([OrdinalEnum]{{core: "Fault", prefix: "FAULT", carrier: true}, {core: "Bare", prefix: "BARE", carrier: true}}, texts)
     assert_eq(laid.problems.len(), 0)

@@ -21,12 +21,12 @@ impl ProviderFactReport {
     // `targets`, and `projectFileDependencyGroups`, plus an optional root
     // package identity.
     nuget_json_document: fn(object: [String:Dyn]) -> ProviderFactReport Never! {
-        packages := [NuGetLockPackage]{}
-        dependency_values := [String]{}
-        losses := [String]{}
-        typed_projection := [{key: String, value: String}]{}
-        target_frameworks := [String]{}
-        library_hashes := [{identity: String, hash: String}]{}
+        ^packages: [NuGetLockPackage]{}
+        ^dependency_values: [String]{}
+        ^losses: [String]{}
+        ^typed_projection: [{key: String, value: String}]{}
+        ^target_frameworks: [String]{}
+        ^library_hashes: [{identity: String, hash: String}]{}
         if object.get("dependencies") == {
             .Val(raw_dependencies) -> {
                 if pkg_json_object(raw_dependencies) == {
@@ -145,7 +145,7 @@ impl ProviderFactReport {
                                 loop dependency in dependencies.keys().to_list() {
                                     resolved: dependencies[dependency]
                                     typed_projection.push({key: "provider.nuget.target.{framework}.{identity}.{dependency}", value: pkg_json_render(resolved)})
-                                    version := pkg_json_text(resolved) ?? ""
+                                    ^version: pkg_json_text(resolved) ?? ""
                                     if pkg_json_object(resolved) == {
                                         .Val(fields) -> {
                                             version = provider_graph_json_string(fields, "version") ?? ""
@@ -194,8 +194,8 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        root_name := provider_graph_json_first_string(object, [String]{"id", "name"})
-        root_version := provider_graph_json_string(object, "version")
+        ^root_name: provider_graph_json_first_string(object, [String]{"id", "name"})
+        ^root_version: provider_graph_json_string(object, "version")
         if root_name == None || root_version == None {
             nested: pkg_json_object(object.get("package") ?? Dyn.Null) ?? [String:Dyn]{}
             root_name = provider_graph_json_first_string(nested, [String]{"id", "name"})
@@ -204,11 +204,11 @@ impl ProviderFactReport {
         has_root_identity: root_name != None && root_version != None
         packages.sort_by(fn(package) { package.version })
         packages.sort_by(fn(package) { package.name })
-        unique := [NuGetLockPackage]{}
+        ^unique: [NuGetLockPackage]{}
         loop package in packages {
             if !unique.contains(package) -> unique.push(package)
         }
-        facts := MetadataFacts.empty(ProviderFamily.NuGet, "")
+        ^facts: MetadataFacts.empty(ProviderFamily.NuGet, "")
         if {
             has_root_identity -> {
                 facts.name = root_name ?? ""
@@ -225,7 +225,7 @@ impl ProviderFactReport {
             else -> facts.version = provider_graph_json_string(object, "version") ?? ""
         }
         if dependency_values.len() == 0 && facts.version == "set" {
-            listed := [String]{}
+            ^listed: [String]{}
             loop package in unique {
                 listed.push(provider_format_dependency(package.name, package.version))
             }
@@ -245,7 +245,7 @@ impl ProviderFactReport {
         facts.license = provider_graph_json_first_string(object, [String]{"licenseExpression", "license", "licenseUrl"}) ?? ""
         if pkg_json_object(object.get("dependencies") ?? Dyn.Null) == {
             .Val(dependencies) -> {
-                frameworks := [String]{}
+                ^frameworks: [String]{}
                 loop framework in dependencies.keys().to_list() {
                     frameworks.push("framework:{framework}")
                 }
@@ -261,7 +261,7 @@ impl ProviderFactReport {
         }
         loop entry in typed_projection -> facts.add_typed_text(entry.key, entry.value)
         facts.source_identity = "nuget:{facts.name}@{facts.version}"
-        report := provider_graph_finish(facts, losses, [String]{})
+        ^report: provider_graph_finish(facts, losses, [String]{})
         if unique.len() > 1 && !has_root_identity {
             report.losses.push("NuGet lock metadata contains multiple package identities; lock each package separately")
         }
@@ -273,9 +273,9 @@ impl ProviderFactReport {
 
     // A Conan JSON package record or graph lock.
     conan_json_document: fn(object: [String:Dyn]) -> ProviderFactReport Never! {
-        losses := [String]{}
-        conflicts := [String]{}
-        facts := MetadataFacts.empty(ProviderFamily.Conan, provider_graph_json_string(object, "name") ?? "")
+        ^losses: [String]{}
+        ^conflicts: [String]{}
+        ^facts: MetadataFacts.empty(ProviderFamily.Conan, provider_graph_json_string(object, "name") ?? "")
         facts.add_json_projection("provider.conan.native", object)
         top_level_ref: provider_graph_json_string(object, "ref")
         ref_name: provider_conan_ref_part(top_level_ref ?? "", 0)
@@ -302,7 +302,7 @@ impl ProviderFactReport {
                     .None -> {
                         if pkg_json_array(raw_license) == {
                             .Val(values) -> {
-                                first := ""
+                                ^first: ""
                                 loop index in 0..<values.len() {
                                     if pkg_json_text(values[index]) == {
                                         .Val(value) -> {
@@ -326,18 +326,18 @@ impl ProviderFactReport {
             .None -> {}
         }
         facts.dependencies = provider_conan_json_dependencies(facts, object.get("requires"), "runtime", losses)
-        build_dependencies := provider_conan_json_dependencies(facts, object.get("tool_requires"), "tool", losses)
+        ^build_dependencies: provider_conan_json_dependencies(facts, object.get("tool_requires"), "tool", losses)
         loop dependency in provider_conan_json_dependencies(facts, object.get("build_requires"), "build", losses) {
             build_dependencies.push(dependency)
         }
         facts.build_dependencies = build_dependencies
         graph_value: provider_graph_either(object.get("graph_lock"), object.get("graph"))
         graph_object: pkg_json_object(graph_value ?? Dyn.Null) ?? [String:Dyn]{}
-        graph_nodes := pkg_json_object(graph_object.get("nodes") ?? Dyn.Null)
+        ^graph_nodes: pkg_json_object(graph_object.get("nodes") ?? Dyn.Null)
         if graph_nodes == None -> graph_nodes = pkg_json_object(object.get("nodes") ?? Dyn.Null)
         if graph_nodes == {
             .Val(nodes) -> {
-                node_identities := [ConanNodeIdentity]{}
+                ^node_identities: [ConanNodeIdentity]{}
                 loop node_id in nodes.keys().to_list() {
                     node: pkg_json_object(nodes[node_id]) ?? {
                         losses.push("Conan graph node `{node_id}` must be an object")
@@ -376,7 +376,7 @@ impl ProviderFactReport {
                 node_identities.sort_by(fn(identity) { identity.reference })
                 node_identities.sort_by(fn(identity) { identity.version })
                 node_identities.sort_by(fn(identity) { identity.name })
-                unique := [ConanNodeIdentity]{}
+                ^unique: [ConanNodeIdentity]{}
                 loop identity in node_identities {
                     if !unique.contains(identity) -> unique.push(identity)
                 }
@@ -410,7 +410,7 @@ impl ProviderFactReport {
             .None -> {}
         }
         facts.source_identity = "conan:{facts.name}@{facts.version}"
-        report := provider_graph_finish(facts, losses, conflicts)
+        ^report: provider_graph_finish(facts, losses, conflicts)
         if report.facts.version != "" && !provider_exact_version(report.facts.version) {
             report.losses.push("Conan package version is not an exact identity")
         }
@@ -426,7 +426,7 @@ provider_conan_json_dependencies: fn(facts: ^MetadataFacts, value: Dyn?, kind: S
         losses.push("Conan `{kind}` dependencies must be an array")
         return [String]{}
     }
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop index in 0..<items.len() {
         item: items[index]
         if pkg_json_text(item) == {

@@ -72,7 +72,7 @@ connect: fn(url_text: String) -[Net, Time.Wait]> WsConn WsError! {
     if parsed.host() == None || parsed.userinfo().bytes().len() > 0 {
         return Err(WsError.InvalidURL)
     }
-    fragment := parsed.fragment() ?? ""
+    ^fragment: parsed.fragment() ?? ""
     if fragment.bytes().len() > 0 -> return Err(WsError.InvalidURL)
     rt.ws_connect(url.unparse(parsed))
 }
@@ -94,8 +94,8 @@ upgrade: fn(request: HTTPRequest) -[Net, Time.Wait]> WsConn WsError! {
 header_has_token: fn(value: String, wanted: String) -> Bool Never! {
     raw: ascii_lower(value).bytes()
     target: ascii_lower(wanted)
-    start := 0
-    i := 0
+    ^start: 0
+    ^i: 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{44}) {
             piece: trim_ascii(slice(raw, start, i))
@@ -109,8 +109,8 @@ header_has_token: fn(value: String, wanted: String) -> Bool Never! {
 
 trim_ascii: fn(text: String) -> String Never! {
     raw: text.bytes()
-    start := 0
-    end := raw.len()
+    ^start: 0
+    ^end: raw.len()
     loop start < end {
         n: Int{raw[start]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> start += 1 else -> break
@@ -124,7 +124,7 @@ trim_ascii: fn(text: String) -> String Never! {
 }
 
 ascii_lower: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
@@ -133,8 +133,8 @@ ascii_lower: fn(text: String) -> String Never! {
 }
 
 slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
         out.push(raw[i])

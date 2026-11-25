@@ -12,7 +12,7 @@
 // holder outside any task. A guard never leaves its task (it is thread
 // confined), so the word names the permit's holder for a deadlock walk.
 shared_count_retain: fn(cell: I64, pin: Bool) -> Bool {
-    refs := sync_load(cell)
+    ^refs: sync_load(cell)
     loop {
         if (refs & I64{4294967295}) == (I64{0}) -> break
         count: if pin -> refs >> I64{32} else -> refs & I64{4294967295}
@@ -39,14 +39,14 @@ shared_retain: fn(shared: I64) {
 shared_borrow_pin: fn(cell: I64) -> Bool {
     sync_mutex_lock(wrapping(cell + I64{8}))
     retained: shared_count_retain(cell, true)
-    if retained -> _ := sync_add(wrapping(cell + I64{72}), I64{1})
+    if retained -> ^_: sync_add(wrapping(cell + I64{72}), I64{1})
     sync_mutex_unlock(wrapping(cell + I64{8}))
     retained
 }
 
 shared_borrow_unpin: fn(cell: I64) {
     sync_mutex_lock(wrapping(cell + I64{8}))
-    _ := sync_add(wrapping(cell + I64{72}), I64{-1})
+    ^_: sync_add(wrapping(cell + I64{72}), I64{-1})
     sync_mutex_unlock(wrapping(cell + I64{8}))
     shared_count_release(cell, true)
 }
@@ -65,7 +65,7 @@ SHARED_SPIN_PAUSES: I64{32}
 shared_spin: fn(mutex: I64, round: I64) -> Bool {
     if (round >= SHARED_SPIN_ROUNDS) { return false }
     sync_mutex_unlock(mutex)
-    pauses := I64{0}
+    ^pauses: I64{0}
     #Unsafe("x86 pause only hints that this thread is waiting in a spin loop; no memory is touched") {
         loop pauses < SHARED_SPIN_PAUSES {
             os_spin_pause()
@@ -77,7 +77,7 @@ shared_spin: fn(mutex: I64, round: I64) -> Bool {
 }
 
 shared_acquire: fn(shared: I64, editable: Bool) {
-    _ := shared_acquire_until(shared, editable, I64{-1}, false)
+    ^_: shared_acquire_until(shared, editable, I64{-1}, false)
 }
 
 // shared_acquire for a callback door or a guard, whose caller gives up on
@@ -115,20 +115,20 @@ shared_acquire_wait: fn(shared: I64, editable: Bool, deadline_ns: I64, checked: 
     family: if editable -> REPLAY_EDIT else -> REPLAY_READ
     mutex: wrapping(shared + I64{8})
     sync_mutex_lock(mutex)
-    if editable -> _ := sync_add(wrapping(shared + I64{40}), I64{1})
-    round := I64{0}
-    began := I64{0}
-    cycle := if (checked && deadline_ns < I64{0} && !scheduler_shielded()) -> scheduler_control_current() else -> I64{0}
-    armed := false
+    if editable -> ^_: sync_add(wrapping(shared + I64{40}), I64{1})
+    ^round: I64{0}
+    ^began: I64{0}
+    ^cycle: if (checked && deadline_ns < I64{0} && !scheduler_shielded()) -> scheduler_control_current() else -> I64{0}
+    ^armed: false
     loop {
         available: sync_load(wrapping(shared + I64{32})) == I64{0} && (if editable -> sync_load(wrapping(shared + I64{24})) == I64{0} else -> sync_load(wrapping(shared + I64{40})) == I64{0})
         if available {
             if {
                 editable -> {
-                    _ := sync_add(wrapping(shared + I64{40}), I64{-1})
+                    ^_: sync_add(wrapping(shared + I64{40}), I64{-1})
                     sync_store(wrapping(shared + I64{32}), wait_cycle_writer())
                 }
-                else -> { _ := sync_add(wrapping(shared + I64{24}), I64{1}) }
+                else -> { ^_: sync_add(wrapping(shared + I64{24}), I64{1}) }
             }
             replay_log(family, object)
             sync_mutex_unlock(mutex)
@@ -137,9 +137,9 @@ shared_acquire_wait: fn(shared: I64, editable: Bool, deadline_ns: I64, checked: 
             return true
         }
         if (armed && wait_cycle_delivered(cycle)) {
-            at := I64{0}
+            ^at: I64{0}
             if editable {
-                _ := sync_add(wrapping(shared + I64{40}), I64{-1})
+                ^_: sync_add(wrapping(shared + I64{40}), I64{-1})
                 at = perf_samples_lock_release()
                 sync_cond_notify_all(wrapping(shared + I64{16}))
             }
@@ -152,9 +152,9 @@ shared_acquire_wait: fn(shared: I64, editable: Bool, deadline_ns: I64, checked: 
             return false
         }
         if (deadline_ns >= I64{0} && sync_now_ns() >= deadline_ns) {
-            at := I64{0}
+            ^at: I64{0}
             if editable {
-                _ := sync_add(wrapping(shared + I64{40}), I64{-1})
+                ^_: sync_add(wrapping(shared + I64{40}), I64{-1})
                 at = perf_samples_lock_release()
                 sync_cond_notify_all(wrapping(shared + I64{16}))
             }
@@ -184,16 +184,16 @@ shared_acquire_wait: fn(shared: I64, editable: Bool, deadline_ns: I64, checked: 
         }
         wake: sync_deadline(I64{10000000})
         // These callback doors never observe cancellation.
-        _ := sync_cond_wait(wrapping(shared + I64{16}), mutex, if (deadline_ns >= I64{0} && deadline_ns < wake) -> deadline_ns else -> wake)
+        ^_: sync_cond_wait(wrapping(shared + I64{16}), mutex, if (deadline_ns >= I64{0} && deadline_ns < wake) -> deadline_ns else -> wake)
     }
 }
 
 shared_release: fn(shared: I64, editable: Bool) {
     sync_mutex_lock(wrapping(shared + I64{8}))
-    writer := I64{0}
+    ^writer: I64{0}
     if {
         editable -> writer = sync_swap(wrapping(shared + I64{32}), I64{0})
-        else -> { _ := sync_add(wrapping(shared + I64{24}), I64{-1}) }
+        else -> { ^_: sync_add(wrapping(shared + I64{24}), I64{-1}) }
     }
     at: perf_samples_lock_release()
     sync_cond_notify_all(wrapping(shared + I64{16}))
@@ -235,7 +235,7 @@ shared_revision_stop: fn() {
         shared_borrow_unpin(shared)
         return
     }
-    _ := coll_call3(invoke, env, sync_load(wrapping(shared + I64{64})), out)
+    ^_: coll_call3(invoke, env, sync_load(wrapping(shared + I64{64})), out)
     // No output is inspected here: a stopped callback leaves it uninitialized.
     shared_release(shared, false)
     shared_borrow_unpin(shared)
@@ -256,7 +256,7 @@ shared_revision_stop: fn() {
         shared_revision_stop()
         return
     }
-    _ := coll_call3(invoke, env, sync_load(wrapping(shared + I64{64})), out)
+    ^_: coll_call3(invoke, env, sync_load(wrapping(shared + I64{64})), out)
     if (jet_rt_session_propagate() == I64{0}) {
         sync_store(wrapping(shared + I64{48}), wrapping(revision + I64{1}))
     }
@@ -282,11 +282,11 @@ shared_revision_stop: fn() {
         shared_revision_stop()
         return I64{0}
     }
-    published := I64{0}
+    ^published: I64{0}
     if owner == shared && current == revision {
         payload: sync_load(wrapping(shared + I64{64}))
         drop_code: sync_load(wrapping(shared + I64{80}))
-        if drop_code != (I64{0}) -> _ := coll_call1(drop_code, payload)
+        if drop_code != (I64{0}) -> ^_: coll_call1(drop_code, payload)
         coll_copy(slot, payload, coll_payload(sync_load(wrapping(shared + I64{56}))))
         sync_store(wrapping(shared + I64{48}), wrapping(revision + I64{1}))
         published = I64{1}
@@ -315,7 +315,7 @@ shared_guard_token: fn(guard: I64) -> I64 { guard & I64{-4} }
 
 // The root guard a guard projects.
 shared_guard_root: fn(guard: I64) -> I64 {
-    root := guard
+    ^root: guard
     loop shared_guard_projected(root) -> root = sync_load(shared_guard_token(root))
     root
 }
@@ -324,7 +324,7 @@ shared_guard_root: fn(guard: I64) -> I64 {
 // was is freed and its own guard given up in turn. The root guard left to
 // release, or 0 when a holder remains.
 shared_guard_unproject: fn(guard: I64) -> I64 {
-    current := guard
+    ^current: guard
     loop shared_guard_projected(current) {
         token: shared_guard_token(current)
         if (sync_add(wrapping(token + I64{16}), I64{-1}) != I64{1}) { return I64{0} }
@@ -348,8 +348,8 @@ shared_guard_invalid: fn() {
 }
 
 shared_guard_payload: fn(guard: I64) -> I64 {
-    offset := I64{0}
-    root := guard
+    ^offset: I64{0}
+    ^root: guard
     loop shared_guard_projected(root) {
         token: shared_guard_token(root)
         offset = wrapping(offset + sync_load(wrapping(token + I64{8})))
@@ -491,8 +491,8 @@ shared_guard_payload: fn(guard: I64) -> I64 {
 // lifetime physical borrowers. A passive pin retains only the cell allocation.
 shared_count_release: fn(shared: I64, pin: Bool) {
     sync_mutex_lock(wrapping(shared + I64{8}))
-    refs := sync_load(shared)
-    next := refs
+    ^refs: sync_load(shared)
+    ^next: refs
     loop {
         count: if pin -> refs >> I64{32} else -> refs & I64{4294967295}
         if count == (I64{0}) {
@@ -505,9 +505,9 @@ shared_count_release: fn(shared: I64, pin: Bool) {
         if previous == refs -> break
         refs = previous
     }
-    meta := I64{0}
-    payload := I64{0}
-    drop_code := I64{0}
+    ^meta: I64{0}
+    ^payload: I64{0}
+    ^drop_code: I64{0}
     if (next & I64{4294967295}) == (I64{0}) && sync_load(wrapping(shared + I64{72})) == (I64{0}) {
         meta = sync_load(wrapping(shared + I64{56}))
         payload = sync_load(wrapping(shared + I64{64}))
@@ -518,10 +518,10 @@ shared_count_release: fn(shared: I64, pin: Bool) {
     // Keep the cell alive across out-of-lock finalizer reentry even if another
     // releasing pin wins the whole-word-zero transition meanwhile.
     temporary_weak: meta != I64{0} || next == I64{0}
-    if temporary_weak -> _ := sync_add(wrapping(shared + I64{88}), I64{1})
+    if temporary_weak -> ^_: sync_add(wrapping(shared + I64{88}), I64{1})
     sync_mutex_unlock(wrapping(shared + I64{8}))
     if meta != (I64{0}) {
-        if drop_code != (I64{0}) -> _ := coll_call1(drop_code, payload)
+        if drop_code != (I64{0}) -> ^_: coll_call1(drop_code, payload)
         jet_rt_free(payload, coll_size(meta), I64{8})
         coll_meta_drop(meta)
     }
@@ -543,7 +543,7 @@ shared_weak_release: fn(weak: I64) {
 
 #Export(c) jet_rt_native_shared_downgrade: fn(shared: I64) -> I64 {
     // The caller borrows a live strong owner, hence the implicit weak is live.
-    _ := sync_add(wrapping(shared + I64{88}), I64{1})
+    ^_: sync_add(wrapping(shared + I64{88}), I64{1})
     shared
 }
 
@@ -562,7 +562,7 @@ shared_weak_release: fn(weak: I64) {
 // Process-pinned publication registry, shared with World-lifetime site reset.
 // Reset is quiescent (all World children joined); retained nodes dedupe the
 // cell before allocation. Outstanding clones independently retain their cell.
-shared_registered := I64{0}
+^shared_registered: I64{0}
 
 // runtime-init: 3 when shared_registered
 #Export(c) jet_rt_shared_init: fn() {
@@ -579,7 +579,7 @@ shared_registered := I64{0}
 #Export(c) jet_rt_global_register: fn(cell: I64) {
     loop {
         first: sync_load(shared_registered)
-        node := first
+        ^node: first
         loop node != (I64{0}) {
             if (sync_load(node) == cell) {
                 return
@@ -612,7 +612,7 @@ shared_registry_publish: fn(expected: I64, candidate: I64) -> Bool {
 }
 
 #Export(c) jet_rt_global_reset_registered: fn() {
-    node := sync_load(shared_registered)
+    ^node: sync_load(shared_registered)
     loop node != (I64{0}) {
         jet_rt_native_shared_drop(sync_swap(sync_load(node), I64{0}))
         node = sync_load(wrapping(node + I64{8}))
@@ -636,7 +636,7 @@ shared_registry_publish: fn(expected: I64, candidate: I64) -> Bool {
 }
 
 shared_alias_next: fn() -> I64 {
-    next := sync_load(wrapping(shared_registered + I64{8}))
+    ^next: sync_load(wrapping(shared_registered + I64{8}))
     loop {
         if next == (I64{9223372036854775807}) {
             jet_rt_panic_overflow()
@@ -741,7 +741,7 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
     }
     cell: sync_load(guard)
     editable: sync_load(wrapping(guard + I64{8})) != I64{0}
-    exhausted := false
+    ^exhausted: false
     if editable && commit && sync_load(wrapping(guard + I64{24})) != (I64{0}) {
         revision: sync_load(wrapping(cell + I64{48}))
         exhausted = revision == I64{-1}
@@ -774,12 +774,12 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
     editable: sync_load(wrapping(guard + I64{8})) != I64{0}
     mutex: wrapping(cell + I64{8})
     sync_mutex_lock(mutex)
-    if editable -> _ := sync_add(wrapping(cell + I64{40}), I64{1})
-    round := I64{0}
-    began := I64{0}
+    if editable -> ^_: sync_add(wrapping(cell + I64{40}), I64{1})
+    ^round: I64{0}
+    ^began: I64{0}
     loop {
         if (cancel_flag != I64{0} && sync_load(cancel_flag) != I64{0}) || condition_interrupted() {
-            if editable -> _ := sync_add(wrapping(cell + I64{40}), I64{-1})
+            if editable -> ^_: sync_add(wrapping(cell + I64{40}), I64{-1})
             at: perf_samples_lock_release()
             sync_cond_notify_all(wrapping(cell + I64{16}))
             sync_mutex_unlock(mutex)
@@ -790,9 +790,9 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
         available: sync_load(wrapping(cell + I64{32})) == I64{0} && (if editable -> sync_load(wrapping(cell + I64{24})) == I64{0} else -> sync_load(wrapping(cell + I64{40})) == I64{0})
         if available {
             if editable {
-                _ := sync_add(wrapping(cell + I64{40}), I64{-1})
+                ^_: sync_add(wrapping(cell + I64{40}), I64{-1})
                 sync_store(wrapping(cell + I64{32}), wait_cycle_writer())
-            } else { _ := sync_add(wrapping(cell + I64{24}), I64{1}) }
+            } else { ^_: sync_add(wrapping(cell + I64{24}), I64{1}) }
             // Native payloads are already canonical; refreshing means read the live slot after reacquisition.
             sync_store(wrapping(guard + I64{16}), I64{1})
             sync_mutex_unlock(mutex)
@@ -804,7 +804,7 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
             next
         }
         if (began == I64{0}) { began = perf_samples_lock_block() }
-        _ := sync_cond_wait(wrapping(cell + I64{16}), mutex, sync_deadline(I64{10000000}))
+        ^_: sync_cond_wait(wrapping(cell + I64{16}), mutex, sync_deadline(I64{10000000}))
     }
 }
 
@@ -860,7 +860,7 @@ cell_guard_token: fn(guard: I64, address: I64) -> I64 {
     if address == (I64{0}) {
         return
     }
-    _ := coll_call3(invoke, env, address, out)
+    ^_: coll_call3(invoke, env, address, out)
 }
 
 #Export(c) jet_rt_native_cell_guard_drop: fn(token: I64) {

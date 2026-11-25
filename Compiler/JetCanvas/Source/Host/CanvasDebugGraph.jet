@@ -48,16 +48,16 @@ CanvasDebugEdge: struct {
 // the control wires each step took from its line's statement to the next
 // one's, when the graph allows exactly one way within the line it left.
 canvas_host_debug_place: fn(state: Shared<CanvasHostState>, revision: String, stops: [Span]) -> CanvasDebugPlace {
-    place := CanvasDebugPlace{graph_id: "", node_id: "", wire_ids: [String]{}, wires_truncated: false}
+    ^place: CanvasDebugPlace{graph_id: "", node_id: "", wire_ids: [String]{}, wires_truncated: false}
     if stops.len() == 0 -> return place
     root: canvas_debug_graph_root(state, revision) ?? return place
-    nodes := [CanvasDebugRecord]{}
+    ^nodes: [CanvasDebugRecord]{}
     canvas_debug_records(root, "node_id", nodes)
-    wires := [CanvasDebugRecord]{}
+    ^wires: [CanvasDebugRecord]{}
     canvas_debug_records(root, "wire_id", wires)
     // The statements: the nodes control wires join, by their spans' starts.
-    edges := [CanvasDebugEdge]{}
-    starts := [String:Int]{}
+    ^edges: [CanvasDebugEdge]{}
+    ^starts: [String:Int]{}
     loop wire in wires {
         if wire.kind != "control" -> next
         edge: CanvasDebugEdge{id: wire.id, from: canvas_debug_pin_node(wire.from_pin), to: canvas_debug_pin_node(wire.to_pin)}
@@ -72,7 +72,7 @@ canvas_host_debug_place: fn(state: Shared<CanvasHostState>, revision: String, st
     active: stops[stops.len() - 1]
     place.node_id = canvas_debug_statement(nodes, starts, active)
     if place.node_id == "" {
-        width := -1
+        ^width: -1
         loop node in nodes {
             if !spans_touch(node.span, active) -> next
             span_width: if node.span.end > node.span.start -> node.span.end - node.span.start else -> 0
@@ -81,13 +81,13 @@ canvas_host_debug_place: fn(state: Shared<CanvasHostState>, revision: String, st
             place.node_id = node.id
         }
     }
-    path := [String]{}
+    ^path: [String]{}
     loop index in 1..<stops.len() {
         from: canvas_debug_statement(nodes, starts, stops[index - 1])
         to: canvas_debug_statement(nodes, starts, stops[index])
         if from == "" || to == "" || from == to -> next
-        found := [String]{}
-        taken := [String]{}
+        ^found: [String]{}
+        ^taken: [String]{}
         canvas_debug_walk(edges, starts, from, to, stops[index - 1], taken, found)
         if found.len() != 1 -> next
         loop wire in found[0].split("\n").to_list() -> path.push(wire)
@@ -102,9 +102,9 @@ canvas_host_debug_place: fn(state: Shared<CanvasHostState>, revision: String, st
 // The statement a stop on `line` sits at: of the statements that start on
 // the line, the first, and of those the widest; "" when none does.
 canvas_debug_statement: fn(nodes: [CanvasDebugRecord], starts: [String:Int], line: Span) -> String Never! {
-    found := ""
-    start := -1
-    width := -1
+    ^found: ""
+    ^start: -1
+    ^width: -1
     loop node in nodes {
         if !starts.has_key(node.id) || node.span.start < line.start || node.span.start > line.end {
             next
@@ -168,11 +168,11 @@ canvas_debug_graph_root: fn(state: Shared<CanvasHostState>, revision: String) ->
 canvas_debug_records: fn(value: Dyn, id_key: String, records: ^[CanvasDebugRecord]) Never! {
     if value == {
         .Object(members) -> {
-            id := String?{None}
-            span := Span?{None}
-            kind := ""
-            from_pin := ""
-            to_pin := ""
+            ^id: String?{None}
+            ^span: Span?{None}
+            ^kind: ""
+            ^from_pin: ""
+            ^to_pin: ""
             loop member in members {
                 if member.key == id_key && member.value == .Text(text) -> id = Val(text)
                 if member.key == "source_span" -> span = canvas_debug_span(member.value)
@@ -194,8 +194,8 @@ canvas_debug_records: fn(value: Dyn, id_key: String, records: ^[CanvasDebugRecor
 
 canvas_debug_span: fn(value: Dyn) -> Span? Never! {
     if value == .Object(members) {
-        start := Int?{None}
-        end := Int?{None}
+        ^start: Int?{None}
+        ^end: Int?{None}
         loop member in members {
             if member.key == "start" -> start = foundation_json_integer(member.value)
             if member.key == "end" -> end = foundation_json_integer(member.value)

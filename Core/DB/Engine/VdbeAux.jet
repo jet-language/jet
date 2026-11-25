@@ -264,7 +264,7 @@ commit_internal_changes: fn(db: ^conn.Conn) Never! {
 rollback_all: fn<H: Host>(h: ^H, db: ^conn.Conn, trip_code: Int) -[DB]> Never! {
     conn.sync_btrees(db)
     schema_change: db.m_db_flags & conn.DBFLAG_SCHEMA_CHANGE != 0 && !db.init.busy
-    in_trans := false
+    ^in_trans: false
     loop i in 0..<db.dbs.len() {
         b: db.dbs[i].bt
         if b < 0 -> next
@@ -291,7 +291,7 @@ vtab_import_errmsg: fn<H: Host>(h: ^H, db: conn.Conn, v: ^conn.Vdbe, vt: Int) Ne
 // Disconnect the VTables whose last reference went (C's sqlite3VtabUnlock
 // does at once) and free their slots.
 vtab_reap: fn<H: Host>(h: ^H, db: ^conn.Conn) -[DB]> Never! {
-    i := 0
+    ^i: 0
     loop i < db.vtab_dead.len() {
         vt: db.vtab_dead[i]
         if db.vtables[vt].vtab >= 0 -> _: h.vtab_call(db, vt, VT_DISCONNECT, 0)
@@ -327,7 +327,7 @@ vtab_commit: fn<H: Host>(h: ^H, db: ^conn.Conn) -[DB]> Never! { vtab_finish<H>(h
 // sqlite3VtabSync: xSync every VTable of the transaction until one fails.
 // While the calls run the transaction is in sync (sqlite3VtabInSync).
 vtab_sync: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
-    rc := base.OK
+    ^rc: base.OK
     trans: db.v_trans.copy()
     db.vtab_in_sync = trans.len() > 0
     loop vt in trans {
@@ -349,7 +349,7 @@ vtab_begin: fn<H: Host>(h: ^H, db: ^conn.Conn, vt: Int) -[DB]> Int Never! {
     loop t in db.v_trans {
         if t == vt -> return base.OK
     }
-    rc := h.vtab_call(db, vt, VT_BEGIN, 0)
+    ^rc: h.vtab_call(db, vt, VT_BEGIN, 0)
     if rc != base.OK -> return rc
     i_svpt: db.n_statement + db.n_savepoint
     db.v_trans.push(vt)
@@ -364,14 +364,14 @@ vtab_begin: fn<H: Host>(h: ^H, db: ^conn.Conn, vt: Int) -[DB]> Int Never! {
 // sqlite3VtabSavepoint: open (SAVEPOINT_BEGIN), roll back to or release
 // savepoint i_savepoint on every VTable of the transaction.
 vtab_savepoint: fn<H: Host>(h: ^H, db: ^conn.Conn, op: Int, i_savepoint: Int) -[DB]> Int Never! {
-    rc := base.OK
+    ^rc: base.OK
     if db.vtab_in_sync -> return rc
     trans: db.v_trans.copy()
     loop vt in trans {
         if rc != base.OK -> break
         if db.vtables[vt].vtab < 0 || h.vtab_version(db, vt) < 2 -> next
         conn.vtab_lock(db, vt)
-        method := VT_RELEASE
+        ^method: VT_RELEASE
         if op == base.SAVEPOINT_BEGIN {
             method = VT_SAVEPOINT
             db.vtables[vt].i_savepoint = i_savepoint + 1
@@ -397,7 +397,7 @@ vtab_savepoint: fn<H: Host>(h: ^H, db: ^conn.Conn, op: Int, i_savepoint: Int) -[
 // the build (conn.vdbe_put returns it).
 vdbe_create: fn(db: ^conn.Conn) -> conn.Vdbe Never! {
     s: conn.vdbe_alloc(db)
-    v := conn.vdbe_take(db, s)
+    ^v: conn.vdbe_take(db, s)
     v.state = conn.VDBE_INIT_STATE
     _: add_op2(db, v, opc.OP_INIT, 0, 1)
     v
@@ -496,7 +496,7 @@ add_op_list: fn(db: ^conn.Conn, v: ^conn.Vdbe, list: [VdbeOpList]) -> Int Never!
     if v.ops.len() + list.len() > v.n_op_alloc && !grow_op_array(db, v) -> return -1
     first: v.ops.len()
     loop o in list {
-        p2 := o.p2
+        ^p2: o.p2
         if o.p2 > 0 && opc.OP_PROPERTIES[o.opcode] & opc.OPFLG_JUMP != 0 -> p2 += first
         v.ops.push(conn.VdbeOp{opcode: o.opcode, p1: o.p1, p2: p2, p3: o.p3, p4: conn.P4.NotUsed, p5: 0})
     }
@@ -545,7 +545,7 @@ reusable: fn(v: ^conn.Vdbe) Never! {
 resolve_p2_values: fn(v: ^conn.Vdbe, max_args: ^Int) Never! {
     v.read_only = true
     v.is_reader = false
-    i := v.ops.len() - 1
+    ^i: v.ops.len() - 1
     loop i >= 0 {
         o: v.ops[i].opcode
         if o <= opc.MX_JUMP_OPCODE {
@@ -584,7 +584,7 @@ current_addr: fn(v: conn.Vdbe) -> Int Never! { v.ops.len() }
 // sqlite3VdbeTakeOpArray: the finished ops of a trigger program's
 // statement, which is then freed (C deletes the sub-parse's Vdbe).
 take_op_array: fn(db: ^conn.Conn, v: ^^conn.Vdbe, max_args: ^Int) -> [conn.VdbeOp] Never! {
-    w := v
+    ^w: v
     resolve_p2_values(w, max_args)
     conn.vdbe_release(db, w.slot)
     w.ops.move()
@@ -724,7 +724,7 @@ set_varmask: fn(v: ^conn.Vdbe, i_var: Int) Never! {
 get_bound_value: fn(v: conn.Vdbe, i_var: Int, aff: Int) -> base.Mem? Never! {
     m: v.vars[i_var - 1]
     if m.flags & base.MEM_NULL != 0 -> return None
-    out := mem.mem_copy(m)
+    ^out: mem.mem_copy(m)
     mem.apply_affinity(out, aff, base.UTF8)
     Val(out)
 }
@@ -766,7 +766,7 @@ real_text: fn(r: Float) -> [U8] Never! {
 // (sqlite3StrAccumFinish of nothing). A TableRef shows its table's name
 // (C shows the Table object's bytes).
 display_p4: fn(db: conn.Conn, p4: conn.P4) -> [U8]? Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     if p4 == {
         .KeyInfo(k) -> {
             append_bytes(out, "k({k.n_key_field}".bytes())
@@ -852,14 +852,14 @@ list: fn(db: ^conn.Conn, v: ^conn.Vdbe) -> Int Never! {
     }
     list_subs: v.explain == 1 || db.flags & conn.SQLITE_TRIGGER_EQP != 0
     // sqlite3VdbeNextOpcode.
-    n_row := v.ops.len()
+    ^n_row: v.ops.len()
     if list_subs {
         loop p in v.list_subs -> n_row += v.programs[p].ops.len()
     }
-    pc := v.pc
-    i := 0
-    prog := -1
-    rc := base.OK
+    ^pc: v.pc
+    ^i: 0
+    ^prog: -1
+    ^rc: base.OK
     loop {
         i = pc
         pc += 1
@@ -871,7 +871,7 @@ list: fn(db: ^conn.Conn, v: ^conn.Vdbe) -> Int Never! {
         prog = -1
         if i >= v.ops.len() {
             i -= v.ops.len()
-            j := 0
+            ^j: 0
             loop i >= v.programs[v.list_subs[j]].ops.len() {
                 i -= v.programs[v.list_subs[j]].ops.len()
                 j += 1
@@ -880,7 +880,7 @@ list: fn(db: ^conn.Conn, v: ^conn.Vdbe) -> Int Never! {
         }
         o: op_of(v, prog, i)
         if list_subs && o.p4 == .Program(sp) {
-            seen := false
+            ^seen: false
             loop p in v.list_subs {
                 if p == sp -> seen = true
             }
@@ -949,9 +949,9 @@ rewind: fn(v: ^conn.Vdbe) Never! {
 // uses_stmt_journal is pParse->isMultiWrite && pParse->mayAbort.
 make_ready: fn(db: ^conn.Conn, v: ^conn.Vdbe, n_var: Int, n_mem_in: Int, n_cursor: Int, explain: Int, uses_stmt_journal: Bool) Never! {
     // Each cursor has a register; register 0 exists even when unused.
-    n_mem := n_mem_in + n_cursor
+    ^n_mem: n_mem_in + n_cursor
     if n_cursor == 0 && n_mem > 0 -> n_mem += 1
-    n_arg := 0
+    ^n_arg: 0
     resolve_p2_values(v, n_arg)
     v.uses_stmt_journal = uses_stmt_journal
     if explain != 0 {
@@ -1045,7 +1045,7 @@ frame_restore: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Neve
     loop v.csr.len() > v.csr_base -> _: v.csr.pop()
     loop v.once.len() > v.once_base -> _: v.once.pop()
     if v.aux.len() > 0 {
-        kept := [conn.AuxData]{}
+        ^kept: [conn.AuxData]{}
         loop a in v.aux {
             if a.depth != depth -> kept.push(a.copy())
         }
@@ -1082,7 +1082,7 @@ close_all_cursors: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Neve
 // all of it for i_op < 0.
 delete_aux_data: fn(v: ^conn.Vdbe, i_op: Int, mask: Int) Never! {
     depth: v.frames.len()
-    kept := [conn.AuxData]{}
+    ^kept: [conn.AuxData]{}
     loop a in v.aux {
         gone: a.depth == depth && (i_op < 0 || (a.i_aux_op == i_op && a.i_aux_arg >= 0 && (a.i_aux_arg > 31 || mask & 1 << a.i_aux_arg == 0)))
         if !gone -> kept.push(a.copy())
@@ -1092,7 +1092,7 @@ delete_aux_data: fn(v: ^conn.Vdbe, i_op: Int, mask: Int) Never! {
 
 // sqlite3VdbeFinishMoveto: do cursor ci's deferred seek to moveto_target.
 finish_moveto: fn(db: ^conn.Conn, v: ^conn.Vdbe, ci: Int) -[DB]> Int Never! {
-    res := 0
+    ^res: 0
     rc: btree.btree_table_moveto(db.btrees[v.csr[ci].bt], v.csr[ci].btc, v.csr[ci].moveto_target, false, res)
     if rc != base.OK -> return rc
     if res != 0 -> return base.CORRUPT
@@ -1104,7 +1104,7 @@ finish_moveto: fn(db: ^conn.Conn, v: ^conn.Vdbe, ci: Int) -[DB]> Int Never! {
 // sqlite3VdbeHandleMovedCursor: restore cursor ci after its btree moved
 // it; a row that went leaves the cursor on a NULL row.
 handle_moved_cursor: fn(db: ^conn.Conn, v: ^conn.Vdbe, ci: Int) -[DB]> Int Never! {
-    different := false
+    ^different: false
     rc: btree.btree_cursor_restore(db.btrees[v.csr[ci].bt], v.csr[ci].btc, different)
     v.csr[ci].cache_status = conn.CACHE_STALE
     if different -> v.csr[ci].null_row = true
@@ -1130,7 +1130,7 @@ cursor_record: fn(db: ^conn.Conn, bt: Int, btc: Int, n: Int, buf: ^[U8]) -[DB]> 
 // btc read where it lies when all of it is on the cursor's page (buf the
 // page image, at its offset there), else a cursor_record copy at 0.
 cursor_payload: fn(db: ^conn.Conn, bt: Int, btc: Int, n: Int, buf: ^[U8], at: ^Int) -[DB]> Int Never! {
-    amt := 0
+    ^amt: 0
     off: btree.btree_payload_fetch(db.btrees[bt], btc, amt)
     if n <= amt {
         buf = db.btrees[bt].pager.pcache.pages[db.btrees[bt].cursors[btc].page].data
@@ -1145,8 +1145,8 @@ cursor_payload: fn(db: ^conn.Conn, bt: Int, btc: Int, n: Int, buf: ^[U8], at: ^I
 // cursor btc.
 idx_rowid: fn(db: ^conn.Conn, bt: Int, btc: Int, rowid: ^Int) -[DB]> Int Never! {
     n: btree.btree_payload_size(db.btrees[bt], btc)
-    buf := [U8]{}
-    at := 0
+    ^buf: [U8]{}
+    ^at: 0
     rc: cursor_payload(db, bt, btc, n, buf, at)
     if rc != base.OK -> return rc
     sz_hdr: record.key_varint(buf, at).value
@@ -1168,8 +1168,8 @@ idx_key_compare: fn(db: ^conn.Conn, bt: Int, btc: Int, key: ^record.UnpackedReco
         res = 0
         return base.CORRUPT
     }
-    buf := [U8]{}
-    at := 0
+    ^buf: [U8]{}
+    ^at: 0
     rc: cursor_payload(db, bt, btc, n, buf, at)
     if rc != base.OK -> return rc
     res = record.record_compare_with_skip(n, buf, at, key, false)
@@ -1189,10 +1189,10 @@ set_changes: fn(db: ^conn.Conn, n: Int) Never! {
 // journal when more than one file with a rollback journal is written.
 commit: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     conn.sync_btrees(db)
-    rc := vtab_sync<H>(h, db, v)
-    n_trans := 0
-    need_xcommit := false
-    i := 0
+    ^rc: vtab_sync<H>(h, db, v)
+    ^n_trans: 0
+    ^need_xcommit: false
+    ^i: 0
     loop rc == base.OK && i < db.dbs.len() {
         b: db.dbs[i].bt
         if b >= 0 && btree.btree_txn_state(db.btrees[b]) == btree.TRANS_WRITE {
@@ -1226,8 +1226,8 @@ commit: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
         return rc
     }
     // A multi-file transaction: name a new super-journal.
-    super := ""
-    retry := 0
+    ^super: ""
+    ^retry: 0
     loop {
         if retry > 100 {
             _: file.file_delete(super, false)
@@ -1240,16 +1240,16 @@ commit: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
         super = "{main_file}{String.from_bytes(tail) ?? ""}"
         if !file.file_exists(super) -> break
     }
-    sj := file.file_closed()
+    ^sj: file.file_closed()
     rc = file.file_open(sj, super, os.OPEN_READWRITE | os.OPEN_CREATE | os.OPEN_EXCLUSIVE | os.OPEN_SUPER_JOURNAL)
     if rc != base.OK -> return rc
     // Write the name of each journal into it.
-    offset := 0
+    ^offset: 0
     loop k in 0..<db.dbs.len() {
         b: db.dbs[k].bt
         if b < 0 || btree.btree_txn_state(db.btrees[b]) != btree.TRANS_WRITE -> next
         if btree.btree_get_journalname(db.btrees[b]) == .Val(jname) {
-            z := jname.bytes().copy()
+            ^z: jname.bytes().copy()
             z.push(U8{0})
             rc = file.file_write(sj, z, z.len(), offset)
             offset += z.len()
@@ -1294,12 +1294,12 @@ commit: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
 close_statement: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, op: Int) -[DB]> Int Never! {
     if db.n_statement == 0 || v.i_statement == 0 -> return base.OK
     conn.sync_btrees(db)
-    rc := base.OK
+    ^rc: base.OK
     i_savepoint: v.i_statement - 1
     loop i in 0..<db.dbs.len() {
         b: db.dbs[i].bt
         if b < 0 -> next
-        rc2 := base.OK
+        ^rc2: base.OK
         if op == base.SAVEPOINT_ROLLBACK {
             rc2 = btree.btree_savepoint(db.btrees[b], base.SAVEPOINT_ROLLBACK, i_savepoint)
         }
@@ -1352,7 +1352,7 @@ halt: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     if db.malloc_failed -> v.rc = base.NOMEM
     close_all_cursors<H>(h, db, v)
     if v.is_reader {
-        stmt_op := 0
+        ^stmt_op: 0
         mrc: if v.rc != base.OK -> v.rc & 255 else -> 0
         special: mrc == base.NOMEM || mrc == base.IOERR || mrc == base.INTERRUPT || mrc == base.FULL
         if special && (!v.read_only || mrc != base.INTERRUPT) {
@@ -1366,7 +1366,7 @@ halt: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
         writers: if v.read_only -> 0 else -> 1
         if !db.vtab_in_sync && db.auto_commit && db.n_vdbe_write == writers {
             if v.rc == base.OK || (v.error_action == ast.OE_FAIL && !special) {
-                rc := check_fk(db, v, true)
+                ^rc: check_fk(db, v, true)
                 if rc != base.OK {
                     if v.read_only -> return base.ERROR
                     rc = base.CONSTRAINT_FOREIGNKEY
@@ -1465,16 +1465,16 @@ delete: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^^conn.Vdbe) -[DB]> Never! {
 
 // sqlite3VdbeFinalize: reset (if it ran) and delete; reset's result.
 finalize: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^^conn.Vdbe) -[DB]> Int Never! {
-    w := v
-    rc := base.OK
+    ^w: v
+    ^rc: base.OK
     if w.state >= conn.VDBE_READY_STATE -> rc = reset<H>(h, db, w)
     delete<H>(h, db, w)
     rc
 }
 
 #Test("labels resolve into jump operands and the flags settle") {
-    db := conn.conn_new()
-    v := vdbe_create(db)
+    ^db: conn.conn_new()
+    ^v: vdbe_create(db)
     done: make_label(v)
     _: add_op2(db, v, opc.OP_TRANSACTION, 0, 1)
     _: add_goto(db, v, done)
@@ -1482,7 +1482,7 @@ finalize: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^^conn.Vdbe) -[DB]> Int Never! {
     _: resolve_label(v, done)
     _: add_op2(db, v, opc.OP_RESULT_ROW, 1, 1)
     _: add_op0(db, v, opc.OP_HALT)
-    n_arg := 0
+    ^n_arg: 0
     resolve_p2_values(v, n_arg)
     assert_eq(v.ops[2].p2, 4)
     assert_eq(v.read_only, false)
@@ -1491,8 +1491,8 @@ finalize: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^^conn.Vdbe) -[DB]> Int Never! {
 }
 
 #Test("an op list offsets its jumps") {
-    db := conn.conn_new()
-    v := vdbe_create(db)
+    ^db: conn.conn_new()
+    ^v: vdbe_create(db)
     list: [VdbeOpList]{VdbeOpList{opcode: opc.OP_INTEGER, p1: 1, p2: 2, p3: 0}, VdbeOpList{opcode: opc.OP_GOTO, p1: 0, p2: 1, p3: 0}}
     first: add_op_list(db, v, list)
     assert_eq(first, 1)
@@ -1501,7 +1501,7 @@ finalize: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^^conn.Vdbe) -[DB]> Int Never! {
 }
 
 #Test("P4 renders as EXPLAIN shows it") {
-    db := conn.conn_new()
+    ^db: conn.conn_new()
     key: record.KeyInfo{enc: base.UTF8, n_key_field: 2, n_all_field: 3, sort_flags: [Int]{0, 1}, colls: [Int]{record.COLL_BINARY, record.COLL_NOCASE}}
     assert_eq(String.from_bytes(display_p4(db, conn.P4.KeyInfo(key)) ?? [U8]{}) ?? "", "k(2,B,-NOCASE)")
     assert_eq(String.from_bytes(display_p4(db, conn.P4.Coll(record.COLL_NOCASE)) ?? [U8]{}) ?? "", "NOCASE-8")
@@ -1511,14 +1511,14 @@ finalize: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^^conn.Vdbe) -[DB]> Int Never! {
 }
 
 #Test("EXPLAIN lists the program") {
-    db := conn.conn_new()
-    v := vdbe_create(db)
+    ^db: conn.conn_new()
+    ^v: vdbe_create(db)
     _: add_op2(db, v, opc.OP_INTEGER, 7, 1)
     _: add_op4(db, v, opc.OP_STRING8, 0, 2, 0, conn.P4.Text("hi".bytes()))
     _: add_op0(db, v, opc.OP_HALT)
     make_ready(db, v, 0, 2, 0, 1, false)
     v.pc = 0
-    rows := 0
+    ^rows: 0
     loop list(db, v) == base.ROW {
         if rows == 2 -> assert_eq(String.from_bytes(v.mem[6].z) ?? "", "hi")
         if rows == 3 -> assert_eq(String.from_bytes(v.mem[2].z) ?? "", "Halt")

@@ -25,12 +25,12 @@ ProcessRow: struct {
 // Every process /proc shows now, or None when /proc cannot be read.
 process_rows: fn() -> [ProcessRow]? {
     listed: files.list_dir("/proc") ?? return None
-    rows := [ProcessRow]{}
+    ^rows: [ProcessRow]{}
     loop item in listed {
         if !item.is_dir || !item.name.bytes().all(fn(b) { b >= 48 && b <= 57 }) -> next
         pid: Int.parse(item.name) ?? next
         status: files.read("/proc/{item.name}/status") ?? next
-        row := ProcessRow{pid: pid, parent: None, rss_kb: None}
+        ^row: ProcessRow{pid: pid, parent: None, rss_kb: None}
         loop line in status.lines() {
             if line.starts_with("PPid:") {
                 row.parent = parsed_int(line.remove_prefix("PPid:").trim())
@@ -49,8 +49,8 @@ parsed_int: fn(text: String) -> Int? { Val(Int.parse(text) ?? return None) }
 
 // `root` and every process below it in `rows`, `root` first.
 process_tree: fn(rows: [ProcessRow], root: Int) -> [Int] {
-    tree := [root]
-    grown := true
+    ^tree: [root]
+    ^grown: true
     loop grown {
         grown = false
         loop row in rows {
@@ -76,8 +76,8 @@ process_tree_pids: fn(root: Int) -[FS]> [Int] {
 process_tree_rss_kb: fn(root: Int) -[FS]> Int? {
     rows: process_rows() ?? return None
     tree: process_tree(rows, root)
-    total := 0
-    found := false
+    ^total: 0
+    ^found: false
     loop row in rows {
         rss: row.rss_kb ?? next
         if tree.contains(row.pid) {
@@ -92,7 +92,7 @@ process_tree_rss_kb: fn(root: Int) -[FS]> Int? {
 // `pids` and to the process group it leads; a process already gone is
 // passed over.
 signal_process_tree: fn(pids: [Int], signal: String) -[Exec]> {
-    targets := [String]{}
+    ^targets: [String]{}
     loop pid in pids {
         targets.push("-{pid}")
         targets.push("{pid}")

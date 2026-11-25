@@ -8,11 +8,11 @@ use {
 
 run: fn() {
     args: process.args()
-    listener := net.tcp_listen("127.0.0.1:0") ?? panic("bind observer")
+    ^listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind observer")
     port: net.socket_port(net.listener_local_socket_addr(listener) ?? panic("address"))
     files.write(args[0], "{port}") ?? panic("publish port")
     deadline: time.instant() + time.duration_ms(750)
-    reached := false
+    ^reached: false
     loop {
         if listener.accept(deadline: 0s) == {
             .Ok(stream) -> {

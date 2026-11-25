@@ -128,9 +128,9 @@ native_fix_pack: fn(elf: ^^[U8]) -> NativeFixPack? Never! {
     size: link_debug_le(elf, 58, 2)
     count: link_debug_le(elf, 60, 2)
     if headers <= 0 || size < 64 || count <= 0 || headers + count * size > elf.len() -> return None
-    pack := NativeFixPack{elf: [U8]{}, kinds: [Int]{}, flags: [Int]{}, offsets: [Int]{}, sizes: [Int]{}, aligns: [Int]{}, relas: [Int]{}, rela_rows: [Int]{}, names: [String]{}, sections: [Int]{}, values: [Int]{}, defined: [String:Int]{}, owners: [Int]{}, readers: [Int:[Int]]{}}
-    symtab := -1
-    xindex := -1
+    ^pack: NativeFixPack{elf: [U8]{}, kinds: [Int]{}, flags: [Int]{}, offsets: [Int]{}, sizes: [Int]{}, aligns: [Int]{}, relas: [Int]{}, rela_rows: [Int]{}, names: [String]{}, sections: [Int]{}, values: [Int]{}, defined: [String:Int]{}, owners: [Int]{}, readers: [Int:[Int]]{}}
+    ^symtab: -1
+    ^xindex: -1
     loop k in 0..<count {
         at: headers + k * size
         kind: link_debug_le(elf, at + 4, 4)
@@ -299,9 +299,9 @@ NativeFixPackUse: enum {
 // of another kind.
 native_fix_pack_reach: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, start: Int, rows: [Int:Int], held: [Int:Int], purpose: NativeFixPackUse) -> NativeFixReach? Never! {
     fresh: purpose == .Fresh
-    reach := NativeFixReach{placed: [Int]{}, held: [Int:Int]{}}
-    seen := [Int:Bool]{}
-    pending := [Int]{start}
+    ^reach: NativeFixReach{placed: [Int]{}, held: [Int:Int]{}}
+    ^seen: [Int:Bool]{}
+    ^pending: [Int]{start}
     loop pending.len() > 0 {
         s: pending.pop() ?? -1
         if s <= 0 || s >= pack.kinds.len() -> return None
@@ -345,11 +345,11 @@ native_fix_pack_reach: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: 
 // its code. A function it can't place stays out of `entries`.
 native_fix_pack_place: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, wanted: [String:Int], offset: Int, purpose: NativeFixPackUse) -> NativeFixLoads Never! {
     fresh: purpose == .Fresh
-    loads := NativeFixLoads{loaded: [NativeFixLoaded]{}, entries: [String:Int]{}, end: offset}
+    ^loads: NativeFixLoads{loaded: [NativeFixLoaded]{}, entries: [String:Int]{}, end: offset}
     // Each placed section's row in `loads.loaded`, and each held one's
     // address in the image.
-    rows := [Int:Int]{}
-    held := [Int:Int]{}
+    ^rows: [Int:Int]{}
+    ^held: [Int:Int]{}
     loop place in 0..<wanted.len() {
         loop (symbol, at) in wanted {
             if at != place -> next
@@ -367,7 +367,7 @@ native_fix_pack_place: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: 
             }
             loop (s, address) in reach.held -> held[s] = address
             loop s in reach.placed {
-                relocs := [NativeFixLoadedReloc]{}
+                ^relocs: [NativeFixLoadedReloc]{}
                 loop row in 0..<pack.rela_rows[s] {
                     entry: pack.relas[s] + 24 * row
                     symbol_row: link_debug_le(pack.elf, entry + 12, 4)
@@ -432,7 +432,7 @@ native_fix_pack_add: fn(plan: ^NativeFixPlan, loads: ^^NativeFixLoads) Never! {
     if loads.entries.len() == 0 {
         return
     }
-    left := [String:Int]{}
+    ^left: [String:Int]{}
     loop place in 0..<plan.absent.len() {
         loop (symbol, at) in plan.absent {
             if at == place && !loads.entries.has_key(symbol) -> left[symbol] = left.len()
@@ -470,7 +470,7 @@ native_fix_pack_write: fn(region: ^[U8], loaded: [NativeFixLoaded], base: Int, r
     // The pack's section 1 is jet_int_mul's 16 bytes. They call the image's
     // jet_rt_alloc at 1 and take the address of section 2's constant at 8,
     // by the two relocations at 24.
-    elf := loop _ in 0..<72 -> U8{0x90}
+    ^elf: loop _ in 0..<72 -> U8{0x90}
     loop k in 16..<24 -> elf[k] = U8{7}
     native_fix_put(elf, 24, 1, 8)
     native_fix_put(elf, 32, NATIVE_FIX_PACK_PLT32, 4)
@@ -480,10 +480,10 @@ native_fix_pack_write: fn(region: ^[U8], loaded: [NativeFixLoaded], base: Int, r
     native_fix_put(elf, 56, NATIVE_FIX_PACK_PC32, 4)
     native_fix_put(elf, 60, 2, 4)
     native_fix_put(elf, 64, -4, 8)
-    defined := [String:Int]{}
+    ^defined: [String:Int]{}
     defined["jet_int_mul"] = 3
     pack: NativeFixPack{elf: elf, kinds: [Int]{0, NATIVE_FIX_PACK_PROGBITS, NATIVE_FIX_PACK_PROGBITS}, flags: [Int]{0, NATIVE_FIX_PACK_ALLOC | NATIVE_FIX_PACK_EXEC, NATIVE_FIX_PACK_ALLOC}, offsets: [Int]{0, 0, 16}, sizes: [Int]{0, 16, 8}, aligns: [Int]{0, 16, 8}, relas: [Int]{0, 24, 0}, rela_rows: [Int]{0, 2, 0}, names: [String]{"", "jet_rt_alloc", "", "jet_int_mul"}, sections: [Int]{0, 0, 2, 1}, values: [Int]{0, 0, 0, 0}, defined: defined, owners: [Int]{-1, 3, -1}, readers: [Int:[Int]]{}}
-    slots := [String:Int]{}
+    ^slots: [String:Int]{}
     slots["jet_rt_alloc"] = 0
     symbols: NativeFixSymbols{slots: slots, named: [[NativeFixSymbol]]{[NativeFixSymbol]{NativeFixSymbol{address: 0x401000, size: 32}}}}
     // `call rel32` to the runtime's jet_int_mul, then to its
@@ -493,7 +493,7 @@ native_fix_pack_write: fn(region: ^[U8], loaded: [NativeFixLoaded], base: Int, r
     edit: NativeFixEdit{object: object, functions: [X64CompiledFunction]{expression}, debug: [X64FunctionDebug]{}}
     targets: NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}
     found: NativeFixPlan{changed: [Int]{}, pieces: [NativeFixPiece]{}, size: 0, targets: targets, placed: [Int:Int]{}, copied: [Int:Int]{}}
-    plan := native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
+    ^plan: native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
     assert_eq(plan.traps, 11)
     native_fix_pack_load(plan, pack, symbols, NativeCode{address: 0x401000, bytes: [U8]{}})
     // jet_int_mul's code is at 16 and its constant at 32; the trap left for
@@ -520,7 +520,7 @@ native_fix_pack_write: fn(region: ^[U8], loaded: [NativeFixLoaded], base: Int, r
     // The pack's section 1 is jet_rt_string_drop's 16 bytes. They call
     // jet_rt_free_8 at 1, which the pack leaves undefined, and take the
     // address of section 2's constant at 8, by the two relocations at 24.
-    elf := loop _ in 0..<72 -> U8{0x90}
+    ^elf: loop _ in 0..<72 -> U8{0x90}
     loop k in 16..<24 -> elf[k] = U8{7}
     native_fix_put(elf, 24, 1, 8)
     native_fix_put(elf, 32, NATIVE_FIX_PACK_PLT32, 4)
@@ -530,10 +530,10 @@ native_fix_pack_write: fn(region: ^[U8], loaded: [NativeFixLoaded], base: Int, r
     native_fix_put(elf, 56, NATIVE_FIX_PACK_PC32, 4)
     native_fix_put(elf, 60, 2, 4)
     native_fix_put(elf, 64, -4, 8)
-    defined := [String:Int]{}
+    ^defined: [String:Int]{}
     defined["jet_rt_string_drop"] = 3
     pack: NativeFixPack{elf: elf, kinds: [Int]{0, NATIVE_FIX_PACK_PROGBITS, NATIVE_FIX_PACK_PROGBITS}, flags: [Int]{0, NATIVE_FIX_PACK_ALLOC | NATIVE_FIX_PACK_EXEC, NATIVE_FIX_PACK_ALLOC}, offsets: [Int]{0, 0, 16}, sizes: [Int]{0, 16, 8}, aligns: [Int]{0, 16, 8}, relas: [Int]{0, 24, 0}, rela_rows: [Int]{0, 2, 0}, names: [String]{"", "jet_rt_free_8", "", "jet_rt_string_drop"}, sections: [Int]{0, 0, 2, 1}, values: [Int]{0, 0, 0, 0}, defined: defined, owners: [Int]{-1, 3, -1}, readers: [Int:[Int]]{}}
-    slots := [String:Int]{}
+    ^slots: [String:Int]{}
     slots["jet_rt_string_drop"] = 0
     symbols: NativeFixSymbols{slots: slots, named: [[NativeFixSymbol]]{[NativeFixSymbol]{NativeFixSymbol{address: 0x401000, size: 16}}}}
     // `call rel32` to the runtime's jet_rt_string_drop, then `ret`.
@@ -542,9 +542,9 @@ native_fix_pack_write: fn(region: ^[U8], loaded: [NativeFixLoaded], base: Int, r
     edit: NativeFixEdit{object: object, functions: [X64CompiledFunction]{condition}, debug: [X64FunctionDebug]{}}
     targets: NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}
     found: NativeFixPlan{changed: [Int]{}, pieces: [NativeFixPiece]{}, size: 0, targets: targets, placed: [Int:Int]{}, copied: [Int:Int]{}}
-    plan := native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
+    ^plan: native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
     assert_eq(plan.absent.len(), 0)
-    wanted := [String:Int]{}
+    ^wanted: [String:Int]{}
     wanted["jet_rt_string_drop"] = 0
     native_fix_pack_fresh(plan, pack, symbols, NativeCode{address: 0x401000, bytes: [U8]{}}, wanted)
     // jet_rt_string_drop's code is at 16 and its constant at 32; its call
@@ -564,7 +564,7 @@ native_fix_pack_write: fn(region: ^[U8], loaded: [NativeFixLoaded], base: Int, r
     assert_eq(native_number(region, 24, 4, X64DebugEncoding.Signed), 4)
     assert_eq(region[32], U8{7})
     // Without the route, an evaluation's load leaves it to the image.
-    held := native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
+    ^held: native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
     native_fix_pack_load(held, pack, symbols, NativeCode{address: 0x401000, bytes: [U8]{}})
     assert_eq(held.loaded.len(), 0)
 }

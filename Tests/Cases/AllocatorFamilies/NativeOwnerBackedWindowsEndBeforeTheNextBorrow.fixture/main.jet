@@ -14,12 +14,12 @@ Library: struct {
 book_at: fn(lib: Library, i: Int) -> View<Book> { lib.books[i..i] }
 
 edit_at: fn(lib: ^Library, i: Int) -> ViewMut<Book> {
-    window: ^lib.books[i..i]
+    window: lib.books[i..i].in_place()
     window
 }
 
 run: fn() {
-    lib := Library{
+    ^lib: Library{
         books: [Book]{
             {title: "Dune", pages: 412},
             {title: "Neuromancer", pages: 271},

@@ -30,7 +30,7 @@ fail: fn(message: String, code: Int) -> Never {
 
 // The text of the files in `dir` that `matching` names, in name order.
 read_all: fn(dir: String, matching: String) -> String {
-    names := files.list_dir_or(dir, [], matching: matching).map(fn(entry) { entry.name })
+    ^names: files.list_dir_or(dir, [], matching: matching).map(fn(entry) { entry.name })
     names.sort()
     names.map(fn(name) { files.read("{dir}/{name}") }).join("")
 }
@@ -54,8 +54,8 @@ adds_word: fn(patch: String, word: Regex) -> Bool {
 // The SUBs of `run` that `hits` names, each with every later SUB of its
 // lead, and the others; a SUB whose patch did not apply is in neither.
 quarantine: fn(integ: String, run: [String], hits: [Bool]) -> {blamed: [String], keep: [String]} {
-    blamed := [String]{}
-    keep := [String]{}
+    ^blamed: [String]{}
+    ^keep: [String]{}
     loop at in 0..<run.len() {
         name: files.basename(run[at])
         if files.read_or("{integ}/{name}.status", "").trim() == "NOAPPLY" -> next
@@ -77,8 +77,8 @@ census_rows: fn(integ: String) -> [String] {
 // The source lines quoted under Error headings (not warnings or notes) in census/*.err, trimmed, longer than 8.
 error_lines: fn(integ: String) -> [String] {
     quoted: regex.compile("^ *[0-9]+ \\| (.*)$")
-    out := [String]{}
-    in_error := false
+    ^out: [String]{}
+    ^in_error: false
     loop line in read_all("{integ}/census", "*.err").lines() {
         if {
             line.starts_with("Error: ") -> in_error = true
@@ -101,7 +101,7 @@ run: fn() {
         process.fail(1, "usage: jet Tools/Agent/Orchestrator/Batch10.jet BATCH SUB...")
     }
     batch: args[0]
-    run := [String]{}
+    ^run: [String]{}
     loop given in args.slice(1, args.len()) {
         sub: given.removesuffix("/")
         seeds: files.read_or("{sub}/meta", "").lines().filter(fn(line) { line.starts_with("seed:") })
@@ -130,7 +130,7 @@ run: fn() {
     if files.read_or("{integ}/REPORT.md", "").has_line_prefix("Census rc=0 ") -> process.exit(0)
     rows: census_rows(integ)
     errors: error_lines(integ)
-    hits := [Bool]{}
+    ^hits: [Bool]{}
     loop sub in run {
         name: files.basename(sub)
         paths: files.read_or("{integ}/{name}.files", "").lines().filter(fn(path) { path != "" })

@@ -120,7 +120,7 @@ ssl_cli12_write_session_ticket_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: 
     if ssltls.ssl_conf_get_session_tickets(ssl.conf) == ssldefs.SSL_SESSION_TICKETS_DISABLED {
         return Ok(0)
     }
-    ticket := if ssl.spool[ssl.session_negotiate].ticket == {
+    ^ticket: if ssl.spool[ssl.session_negotiate].ticket == {
         .Val(t) -> t.copy()
         None -> [U8]{}
     }
@@ -138,7 +138,7 @@ ssl_cli12_write_session_ticket_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: 
 /// connection_id, max_fragment_length, encrypt_then_mac,
 /// extended_master_secret and session_ticket.
 ssl_tls12_write_client_hello_exts: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int, uses_ec: Bool) -> Int ssldefs.SSLError! {
-    p := buf
+    ^p: buf
     p += ssl_cli12_write_renegotiation_ext(ssl, p, end) ?? return Err(err)
     if uses_ec -> p += ssl_cli12_write_supported_point_formats_ext(ssl, p, end) ?? return Err(err)
     p += ssl_cli12_write_cid_ext(ssl, p, end) ?? return Err(err)
@@ -158,7 +158,7 @@ ssl_tls12_write_client_hello_exts: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: I
 ssl_cli12_parse_renegotiation_info: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: Int, len: Int, rng: ^R) ssldefs.SSLError! {
     if ssl.renego_status != ssldefs.SSL_INITIAL_HANDSHAKE {
         vdl: ssl.verify_data_len
-        ok := len == 1 + vdl * 2 && ssldefs.ssl_u8(ssl.in_buf, buf) == vdl * 2
+        ^ok: len == 1 + vdl * 2 && ssldefs.ssl_u8(ssl.in_buf, buf) == vdl * 2
         if ok {
             ok = ctime.memcmp(ssl.in_buf, buf + 1, ssl.own_verify_data, 0, vdl) == 0 && ctime.memcmp(ssl.in_buf, buf + 1 + vdl, ssl.peer_verify_data, 0, vdl) == 0
         }
@@ -239,7 +239,7 @@ ssl_cli12_parse_supported_point_formats_ext: fn<R: RNG>(ssl: ^ssldefs.SSLContext
         if f == 0 || f == 1 {
             fmt: if f == 0 -> ecp.PointFormat.Uncompressed else -> ecp.PointFormat.Compressed
             ssltls.ssl_ecdh_ready(ssl)
-            if ^ssl.handshake.ecdh_ctx == {
+            if ssl.handshake.ecdh_ctx.in_place() == {
                 .Val(ctx) -> { ctx.point_format = fmt }
                 None -> {}
             }
@@ -286,7 +286,7 @@ ssl_cli12_parse_hello_verify_request: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: 
     if hdr + 3 > ssl.in_msglen {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
     }
-    p := ssl.in_msg + hdr
+    ^p: ssl.in_msg + hdr
     // DTLS 1.2 or, as the RFC is not clear there, DTLS 1.0.
     dtls_legacy_version: ssldefs.ssl_get_u16(ssl.in_buf, p)
     p += 2
@@ -351,7 +351,7 @@ ssl_cli12_parse_server_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssld
     if n > 32 {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
     }
-    ext_len := 0
+    ^ext_len: 0
     if ssl.in_hslen > hdr + 39 + n {
         ext_len = ssldefs.ssl_get_u16(ssl.in_buf, b + 38 + n)
         if (ext_len > 0 && ext_len < 4) || ssl.in_hslen != hdr + 40 + n + ext_len {
@@ -379,7 +379,7 @@ ssl_cli12_parse_server_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssld
         ssl.spool[sn].id = ssldefs.ssl_bytes_of(ssl.in_buf, b + 35, n)
     }
     // The ciphersuite must be one we offered and fit the version.
-    offered := false
+    ^offered: false
     loop id in ssl.conf.ciphersuite_list {
         if id == i -> offered = true
     }
@@ -389,8 +389,8 @@ ssl_cli12_parse_server_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssld
     if !ssltls.ssl_validate_ciphersuite(ssl, suites.ssl_ciphersuite_from_id(i), ssl.tls_version, ssl.tls_version) {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_HANDSHAKE_FAILURE, .HandshakeFailure, rng))
     }
-    ext := b + 40 + n
-    renegotiation_info_seen := false
+    ^ext: b + 40 + n
+    ^renegotiation_info_seen: false
     loop ext_len > 0 {
         ext_id: ssldefs.ssl_get_u16(ssl.in_buf, ext)
         ext_size: ssldefs.ssl_get_u16(ssl.in_buf, ext + 2)
@@ -458,8 +458,8 @@ ssl_cli12_parse_server_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssld
 ssl_cli12_parse_server_dh_params: fn(ssl: ^ssldefs.SSLContext, p: ^Int, end: Int) ssldefs.SSLError! {
     ssltls.ssl_dhm_ready(ssl)
     data: ssldefs.ssl_bytes_of(ssl.in_buf, p, end - p)
-    at := 0
-    bitlen := if ^ssl.handshake.dhm_ctx == {
+    ^at: 0
+    ^bitlen: if ^ssl.handshake.dhm_ctx == {
         .Val(ctx) -> {
             dhm.dhm_read_params(ctx, data, at, data.len()) ?? return Err(.DHM(err))
             dhm.dhm_get_bitlen(ctx)
@@ -475,8 +475,8 @@ ssl_cli12_parse_server_dh_params: fn(ssl: ^ssldefs.SSLContext, p: ^Int, end: Int
 // Whether the ECDH curve is one we offered (ssl_check_server_ecdh_params,
 // true where C returns 0).
 ssl_cli12_check_server_ecdh_params: fn(ssl: ^ssldefs.SSLContext) -> Bool Never! {
-    grp_id := ecp.GroupID.Unknown
-    if ^ssl.handshake.ecdh_ctx == {
+    ^grp_id: ecp.GroupID.Unknown
+    if ssl.handshake.ecdh_ctx.in_place() == {
         .Val(ctx) -> grp_id = ctx.grp_id
         None -> return false
     }
@@ -489,7 +489,7 @@ ssl_cli12_check_server_ecdh_params: fn(ssl: ^ssldefs.SSLContext) -> Bool Never! 
 ssl_cli12_parse_server_ecdh_params: fn(ssl: ^ssldefs.SSLContext, p: ^Int, end: Int) ssldefs.SSLError! {
     ssltls.ssl_ecdh_ready(ssl)
     data: ssldefs.ssl_bytes_of(ssl.in_buf, p, end - p)
-    used := if ^ssl.handshake.ecdh_ctx == {
+    ^used: if ^ssl.handshake.ecdh_ctx == {
         .Val(ctx) -> ecdh.ecdh_read_params(ctx, data) ?? return Err(.ECP(err))
         None -> {
             return Err(.InternalError)
@@ -516,16 +516,16 @@ ssl_cli12_write_encrypted_pms: fn<R: RNG>(ssl: ^ssldefs.SSLContext, offset: Int,
     if offset + 2 > ssldefs.SSL_OUT_CONTENT_LEN -> return Err(.BufferTooSmall)
     // The newest version we offered, then 46 random bytes.
     sslmsg.ssl_write_version(ssl.handshake.premaster, pms_offset, ssl.conf.transport, ssldefs.SSL_VERSION_TLS1_2)
-    random := ssldefs.ssl_zeros(46)
+    ^random: ssldefs.ssl_zeros(46)
     if !rng.fill(random) -> return Err(.RandomFailed)
     ssldefs.ssl_copy_into(ssl.handshake.premaster, pms_offset + 2, random, 0, 46)
     ssldefs.ssl_wipe(random)
     ssl.handshake.pmslen = 48
     if !ssltls.ssl_has_peer_cert(ssl) -> return Err(.InternalError)
     if !ssltls.ssl_peer_pk_can_do(ssl, .RSA) -> return Err(.PKTypeMismatch)
-    plain := ssldefs.ssl_bytes_of(ssl.handshake.premaster, pms_offset, 48)
+    ^plain: ssldefs.ssl_bytes_of(ssl.handshake.premaster, pms_offset, 48)
     sn: ssl.session_negotiate
-    enc := if ^ssl.spool[sn].peer_cert == {
+    ^enc: if ^ssl.spool[sn].peer_cert == {
         .Val(chain) -> if pk.pk_encrypt(chain[0].pk, plain, ssldefs.SSL_OUT_CONTENT_LEN - offset - 2, rng) == {
             .Ok(e) -> e
             .Err(e) -> {
@@ -550,7 +550,7 @@ ssl_cli12_get_ecdh_params_from_cert: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLErr
     if !ssltls.ssl_peer_pk_can_do(ssl, .ECKey) -> return Err(.PKTypeMismatch)
     ssltls.ssl_ecdh_ready(ssl)
     sn: ssl.session_negotiate
-    failure := if ^ssl.handshake.ecdh_ctx == {
+    ^failure: if ^ssl.handshake.ecdh_ctx == {
         .Val(ctx) -> if ssl.spool[sn].peer_cert == {
             .Val(chain) -> ssltls.ssl_ecdh_get_params_failure(ctx, chain[0].pk.ec, .Theirs)
             None -> None
@@ -568,7 +568,7 @@ ssl_cli12_get_ecdh_params_from_cert: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLErr
 // version supports (or an rsa_pss_rsae one, RFC 8446 4.2.3) that we
 // offered; None for an illegal_parameter alert (ssl_parse_signature_algorithm).
 ssl_cli12_parse_signature_algorithm: fn(ssl: ssldefs.SSLContext, sig_alg: Int) -> ssltls.SSLSigAlgParts? Never! {
-    parts := if ssltls.ssl_get_pk_type_and_md_alg_from_sig_alg(sig_alg) == {
+    ^parts: if ssltls.ssl_get_pk_type_and_md_alg_from_sig_alg(sig_alg) == {
         .Ok(found) -> found
         .Err(_) -> {
             return None
@@ -634,7 +634,7 @@ ssl_cli12_parse_server_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_UNEXPECTED_MESSAGE, .UnexpectedMessage, rng))
     }
     params: ssl.in_msg + sslmsg.ssl_hs_hdr_len(ssl)
-    p := params
+    ^p: params
     end: ssl.in_msg + ssl.in_hslen
     psk_only: kx == .PSK || kx == .RSAPSK
     dhe: kx == .DHERSA || kx == .DHEPSK
@@ -664,7 +664,7 @@ ssl_cli12_parse_server_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         // The digitally-signed structure: the algorithm, then the signature.
         ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
         sig_alg: ssldefs.ssl_get_u16(ssl.in_buf, p)
-        parts := ssl_cli12_parse_signature_algorithm(ssl, sig_alg) ?? return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter, rng))
+        ^parts: ssl_cli12_parse_signature_algorithm(ssl, sig_alg) ?? return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter, rng))
         p += 2
         if !ssltls.ssl_peer_pk_can_do(ssl, parts.pk_type) {
             return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter, rng))
@@ -683,7 +683,7 @@ ssl_cli12_parse_server_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         }
         sig: ssldefs.ssl_bytes_of(ssl.in_buf, p, sig_len)
         sn: ssl.session_negotiate
-        failure := if ^ssl.spool[sn].peer_cert == {
+        ^failure: if ^ssl.spool[sn].peer_cert == {
             .Val(chain) -> ssl_cli12_verify_signature(chain[0].pk, parts, hash, sig)
             None -> {
                 return Err(.InternalError)
@@ -705,8 +705,8 @@ ssl_cli12_parse_server_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
 
 // Whether in_buf[start..<end] starts with a well-formed DER Name.
 ssl_cli12_dn_hint_is_name: fn(data: [U8], start: Int, end: Int) -> Bool Never! {
-    p := start
-    asn1_len := if asn1.get_tag(data, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) == {
+    ^p: start
+    ^asn1_len: if asn1.get_tag(data, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) == {
         .Ok(len) -> len
         .Err(_) -> {
             return false
@@ -745,7 +745,7 @@ ssl_cli12_parse_certificate_request: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
     }
     // certificate_types, then supported_signature_algorithms.
-    n := ssldefs.ssl_u8(ssl.in_buf, buf + hdr)
+    ^n: ssldefs.ssl_u8(ssl.in_buf, buf + hdr)
     if ssl.in_hslen <= hdr + 2 + n {
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
     }
@@ -761,7 +761,7 @@ ssl_cli12_parse_certificate_request: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
     }
     dn: buf + hdr + 3 + n - dn_len
-    i := 0
+    ^i: 0
     loop i < dn_len {
         if dn_len - i < 2 {
             return Err(ssl_cli12_fail(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError, rng))
@@ -797,12 +797,12 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     kx: cs.key_exchange
     out: ssl.out_msg
-    header_len := 0
-    content_len := 0
+    ^header_len: 0
+    ^content_len: 0
     if kx == {
         .DHERSA -> {
             ssltls.ssl_dhm_ready(ssl)
-            public := if ^ssl.handshake.dhm_ctx == {
+            ^public: if ^ssl.handshake.dhm_ctx == {
                 .Val(ctx) -> {
                     size: dhm.dhm_get_len(ctx)
                     dhm.dhm_make_public(ctx, size, size, rng) ?? return Err(.DHM(err))
@@ -815,7 +815,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
             ssldefs.ssl_put_u16(ssl.out_buf, out + 4, content_len)
             header_len = 6
             ssldefs.ssl_copy_into(ssl.out_buf, out + header_len, public, 0, content_len)
-            secret := if ^ssl.handshake.dhm_ctx == {
+            ^secret: if ^ssl.handshake.dhm_ctx == {
                 .Val(ctx) -> {
                     // The premaster buffer must hold a value as long as p.
                     if dhm.dhm_get_len(ctx) > ssldefs.SSL_PREMASTER_SIZE {
@@ -832,7 +832,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         .ECDHERSA | .ECDHEECDSA | .ECDHRSA | .ECDHECDSA -> {
             header_len = 4
             ssltls.ssl_ecdh_ready(ssl)
-            public := if ^ssl.handshake.ecdh_ctx == {
+            ^public: if ^ssl.handshake.ecdh_ctx == {
                 .Val(ctx) -> ecdh.ecdh_make_public(ctx, 1000, rng) ?? return Err(.ECP(err))
                 None -> {
                     return Err(.InternalError)
@@ -840,7 +840,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
             }
             content_len = public.len()
             ssldefs.ssl_copy_into(ssl.out_buf, out + header_len, public, 0, content_len)
-            secret := if ^ssl.handshake.ecdh_ctx == {
+            ^secret: if ^ssl.handshake.ecdh_ctx == {
                 .Val(ctx) -> ecdh.ecdh_calc_secret(ctx, ssldefs.SSL_PREMASTER_SIZE, rng) ?? return Err(.ECP(err))
                 None -> {
                     return Err(.InternalError)
@@ -851,7 +851,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         .PSK | .RSAPSK | .DHEPSK | .ECDHEPSK -> {
             // We offer PSK ciphersuites only with a PSK.
             if !ssltls.ssl_conf_has_static_psk(ssl.conf) -> return Err(.InternalError)
-            identity := if ssl.conf.psk_identity == {
+            ^identity: if ssl.conf.psk_identity == {
                 .Val(id) -> id.copy()
                 None -> {
                     return Err(.InternalError)
@@ -873,8 +873,8 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
                 }
                 .DHEPSK -> {
                     ssltls.ssl_dhm_ready(ssl)
-                    size := 0
-                    if ^ssl.handshake.dhm_ctx == {
+                    ^size: 0
+                    if ssl.handshake.dhm_ctx.in_place() == {
                         .Val(ctx) -> { size = dhm.dhm_get_len(ctx) }
                         None -> {}
                     }
@@ -884,7 +884,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
                     }
                     ssldefs.ssl_put_u16(ssl.out_buf, out + header_len, content_len)
                     header_len += 2
-                    public := if ^ssl.handshake.dhm_ctx == {
+                    ^public: if ^ssl.handshake.dhm_ctx == {
                         .Val(ctx) -> dhm.dhm_make_public(ctx, size, size, rng) ?? return Err(.DHM(err))
                         None -> {
                             return Err(.InternalError)
@@ -894,7 +894,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
                 }
                 .NoExchange | .RSA | .DHERSA | .ECDHERSA | .ECDHEECDSA | .ECDHEPSK | .ECDHRSA | .ECDHECDSA -> {
                     ssltls.ssl_ecdh_ready(ssl)
-                    public := if ^ssl.handshake.ecdh_ctx == {
+                    ^public: if ^ssl.handshake.ecdh_ctx == {
                         .Val(ctx) -> ecdh.ecdh_make_public(ctx, ssldefs.SSL_OUT_CONTENT_LEN - header_len, rng) ?? return Err(.ECP(err))
                         None -> {
                             return Err(.InternalError)
@@ -930,14 +930,14 @@ ssl_cli12_write_certificate_verify: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R
         sslmsg.ssl_handshake_increment_state(ssl)
         return
     }
-    hash := ssltls.ssl_calc_verify(ssl) ?? return Err(err)
+    ^hash: ssltls.ssl_calc_verify(ssl) ?? return Err(err)
     out: ssl.out_msg
     md: if cs.mac == .SHA384 -> hashes.Md.SHA384 else -> hashes.Md.SHA256
     ssl.out_buf[out + 4] = ssldefs.ssl_byte(ssltls.ssl_hash_from_md_alg(Val(md)))
     ssl.out_buf[out + 5] = ssldefs.ssl_byte(ssltls.ssl_sig_from_pk_alg(ssltls.ssl_own_key_type(ssl)))
     // The hash and signature bytes come first.
     offset: 2
-    sig := ssltls.ssl_own_key_sign(ssl, Val(md), hash, ssldefs.SSL_OUT_BUFFER_LEN - out - 6 - offset, rng) ?? return Err(.PK(err))
+    ^sig: ssltls.ssl_own_key_sign(ssl, Val(md), hash, ssldefs.SSL_OUT_BUFFER_LEN - out - 6 - offset, rng) ?? return Err(.PK(err))
     ssldefs.ssl_copy_into(ssl.out_buf, out + 6 + offset, sig, 0, sig.len())
     ssldefs.ssl_put_u16(ssl.out_buf, out + offset + 4, sig.len())
     ssl.out_msglen = 6 + sig.len() + offset
@@ -952,7 +952,7 @@ ssl_cli12_write_certificate_verify: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R
 
 // Wipe and forget a session's ticket.
 ssl_cli12_drop_ticket: fn(s: ^ssldefs.SSLSession) Never! {
-    if ^s.ticket == {
+    if s.ticket.in_place() == {
         .Val(t) -> { ssldefs.ssl_wipe(t) }
         None -> {}
     }

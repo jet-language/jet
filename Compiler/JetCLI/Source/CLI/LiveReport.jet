@@ -3,11 +3,11 @@
 use jet_foundation.[JetLiveChannel, JetLiveSnapshot, JetLiveTask]
 
 jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
-    event_lines := snapshot.events
+    ^event_lines: snapshot.events
     if event_lines == None {
         event_lines = Val(jet_cli_live_event_render(snapshot.event_records) ?? return "jet inspect live · invalid snapshot: {err.message}\n")
     }
-    out := "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\nTask Tree\n"
+    ^out: "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\nTask Tree\n"
     if snapshot.tasks.len() == 0 -> out = "{out}  (no live tasks)\n"
     loop live_task in snapshot.tasks {
         deadline: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
@@ -52,9 +52,9 @@ jet_cli_live_identity_fields: fn(snapshot: JetLiveSnapshot) -> [JetCLIStatusFiel
 }
 
 jet_cli_live_json_report: fn(snapshot: JetLiveSnapshot, plane: String) -> String Never! {
-    values := [JetCLIStatusValue]{}
-    grouped := [String:[String]]{}
-    names := [String]{}
+    ^values: [JetCLIStatusValue]{}
+    ^grouped: [String:[String]]{}
+    ^names: [String]{}
     loop value in snapshot.values {
         values.push(
             jet_cli_status_object(
@@ -68,17 +68,17 @@ jet_cli_live_json_report: fn(snapshot: JetLiveSnapshot, plane: String) -> String
             ),
         )
         if !grouped.has_key(value.type_identity) -> names.push(value.type_identity)
-        ids := grouped.get(value.type_identity) ?? [String]{}
+        ^ids: grouped.get(value.type_identity) ?? [String]{}
         ids.push(value.value_id)
         grouped[value.type_identity] = ids
     }
     names.sort()
-    shapes := [JetCLIStatusValue]{}
+    ^shapes: [JetCLIStatusValue]{}
     loop name in names {
         ids: grouped.get(name) ?? [String]{}
         shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(fn(id) { jet_cli_status_text(id) })))]))
     }
-    fields := [JetCLIStatusField]{jet_cli_status_field("plane", jet_cli_status_text(plane))}
+    ^fields: [JetCLIStatusField]{jet_cli_status_field("plane", jet_cli_status_text(plane))}
     fields.extend(jet_cli_live_identity_fields(snapshot))
     fields.push(jet_cli_status_field("tasks", jet_cli_status_array(snapshot.tasks.map(fn(live_task) { jet_cli_live_task_json(live_task) }))))
     fields.push(jet_cli_status_field("channels", jet_cli_status_array(snapshot.channels.map(fn(channel) { jet_cli_live_channel_json(channel) }))))

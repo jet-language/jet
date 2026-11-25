@@ -106,7 +106,7 @@ mod_span_is: fn(context: I64, span: I64, text: I64) -> Bool {
 }
 
 mod_bytes_have_nul: fn(data: I64, length: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(data + at)) == I64{0}) { return true }
         at += I64{1}
@@ -139,7 +139,7 @@ mod_push_display: fn(target: I64, path: I64) {
 
 mod_unlink: fn(path: I64) {
     name: fd_c_path(path)
-    _ := host_call(I64{87}, name, I64{0}, I64{0})
+    ^_: host_call(I64{87}, name, I64{0}, I64{0})
     fd_c_path_drop(name, path)
 }
 
@@ -158,7 +158,7 @@ mod_metadata_mode: fn(path: I64) -> I64 {
 // path. A symlink is Denied; a component that does not exist is skipped;
 // any other inspection failure is Invalid. Returns the reason or 0.
 mod_reject_reparse: fn(path: I64, label: I64) -> I64 {
-    absolute := I64{0}
+    ^absolute: I64{0}
     if jet_fs_host_path_is_absolute_raw(path) -> absolute = jet_rt_string_clone(path) else {
         scratch: jet_rt_alloc(I64{16}, I64{8})
         if (jet_sys_current_dir_raw(scratch, wrapping(scratch + I64{8})) == I64{0}) {
@@ -179,9 +179,9 @@ mod_reject_reparse: fn(path: I64, label: I64) -> I64 {
     data: rt_text_data(absolute)
     length: rt_text_len(absolute)
     prefix: jet_rt_alloc(wrapping(length + I64{1}), I64{1})
-    failure := I64{0}
-    start := I64{0}
-    at := I64{0}
+    ^failure: I64{0}
+    ^start: I64{0}
+    ^at: I64{0}
     loop at <= length && failure == (I64{0}) {
         boundary: at == length || rt_text_byte(wrapping(data + at)) == I64{47}
         if !boundary {
@@ -249,7 +249,7 @@ mod_realpath: fn(path: I64, label: I64, error: I64) -> I64 {
 // canonical_revalidated: reject reparse components, canonicalize, repeat
 // both, and require the two resolutions to agree.
 mod_canonical: fn(path: I64, label: I64, error: I64) -> I64 {
-    refused := mod_reject_reparse(path, label)
+    ^refused: mod_reject_reparse(path, label)
     if (refused != I64{0}) {
         rt_text_store(error, refused)
         return I64{0}
@@ -317,7 +317,7 @@ mod_granted_path: fn(path: I64, roots: I64, count: I64, error: I64) -> I64 {
         rt_text_store(error, reason)
         return I64{0}
     }
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         granted: rt_text_word(wrapping(roots + index * I64{8}))
         index += I64{1}
@@ -387,7 +387,7 @@ mod_granted_path: fn(path: I64, roots: I64, count: I64, error: I64) -> I64 {
     }
     jet_rt_string_drop(source)
     context: jet_rt_alloc(MOD_CONTEXT_BYTES, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < MOD_CONTEXT_BYTES {
         mod_put(context, at, I64{0})
         at += I64{8}
@@ -409,8 +409,8 @@ mod_header_error: fn(head: I64, what: I64, tail: I64) -> I64 {
 // A big-endian unsigned field of `width` bytes at `at`.
 mod_be: fn(context: I64, at: I64, width: I64) -> I64 {
     data: wrapping(mod_word(context, MOD_BYTES) + at)
-    value := I64{0}
-    index := I64{0}
+    ^value: I64{0}
+    ^index: I64{0}
     loop index < width {
         value = (value << I64{8}) | rt_text_byte(wrapping(data + index))
         index += I64{1}
@@ -488,14 +488,14 @@ mod_tag_error: fn(head: I64, value: I64) -> I64 {
 }
 
 mod_parse_exports: fn(context: I64) -> I64 {
-    failure := mod_count(context, rt_static_text("export count"), rt_static_text("export"), wrapping(context + MOD_SCRATCH))
+    ^failure: mod_count(context, rt_static_text("export count"), rt_static_text("export"), wrapping(context + MOD_SCRATCH))
     if (failure != I64{0}) { return failure }
     count: mod_word(context, MOD_SCRATCH)
     if (count > I64{0}) {
         mod_put(context, MOD_EXPORTS, jet_rt_alloc(count * MOD_EXPORT_BYTES, I64{8}))
         mod_put(context, MOD_EXPORT_COUNT, count)
     }
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         row: wrapping(mod_word(context, MOD_EXPORTS) + index * MOD_EXPORT_BYTES)
         index += I64{1}
@@ -517,7 +517,7 @@ mod_parse_exports: fn(context: I64) -> I64 {
         }
         // Each access convention is checked here; the parsed list always
         // has exactly `params` entries, so no later count check can fail.
-        convention := I64{0}
+        ^convention: I64{0}
         loop convention < params {
             failure = mod_byte(context, rt_static_text("access convention"), wrapping(context + MOD_SCRATCH))
             if (failure != I64{0}) { return failure }
@@ -532,14 +532,14 @@ mod_parse_exports: fn(context: I64) -> I64 {
 }
 
 mod_parse_effects: fn(context: I64) -> I64 {
-    failure := mod_count(context, rt_static_text("effect count"), rt_static_text("effect"), wrapping(context + MOD_SCRATCH))
+    ^failure: mod_count(context, rt_static_text("effect count"), rt_static_text("effect"), wrapping(context + MOD_SCRATCH))
     if (failure != I64{0}) { return failure }
     count: mod_word(context, MOD_SCRATCH)
     if (count > I64{0}) {
         mod_put(context, MOD_EFFECTS, jet_rt_alloc(count * MOD_EFFECT_BYTES, I64{8}))
         mod_put(context, MOD_EFFECT_COUNT, count)
     }
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         failure = mod_string(context, rt_static_text("effect"), wrapping(mod_word(context, MOD_EFFECTS) + index * MOD_EFFECT_BYTES))
         if (failure != I64{0}) { return failure }
@@ -555,7 +555,7 @@ mod_parse: fn(context: I64) -> I64 {
         return jet_rt_string_clone(rt_static_text("not a .jetlib artifact (bad magic)"))
     }
     mod_put(context, MOD_CURSOR, I64{14})
-    failure := mod_string(context, rt_static_text("compiler version"), wrapping(context + MOD_COMPILER_VERSION))
+    ^failure: mod_string(context, rt_static_text("compiler version"), wrapping(context + MOD_COMPILER_VERSION))
     if (failure != I64{0}) { return failure }
     failure = mod_string(context, rt_static_text("compiler build"), wrapping(context + MOD_COMPILER_BUILD))
     if (failure != I64{0}) { return failure }
@@ -620,7 +620,7 @@ mod_digest_valid: fn(context: I64) -> Bool {
     if (mod_word(context, wrapping(MOD_DIGEST + I64{8})) != I64{71}) { return false }
     data: wrapping(mod_word(context, MOD_BYTES) + mod_word(context, MOD_DIGEST))
     if !rt_text_equal_bytes(data, rt_text_data(rt_static_text("sha256-")), I64{7}) -> return false
-    at := I64{7}
+    ^at: I64{7}
     loop at < (I64{71}) {
         byte: rt_text_byte(wrapping(data + at))
         if !((byte >= I64{48} && byte <= I64{57}) || (byte >= I64{97} && byte <= I64{102})) {
@@ -641,7 +641,7 @@ mod_c_symbol: fn(context: I64, span: I64) -> I64 {
     if (length == I64{0} || (first >= I64{48} && first <= I64{57})) {
         rt_text_push_word(out, I64{95}, I64{1})
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         at += I64{1}
@@ -671,7 +671,7 @@ mod_check_exports: fn(context: I64) -> I64 {
         return mod_library_error(rt_static_text("Invalid: "), context, rt_static_text("` has no exported functions"))
     }
     rows: mod_word(context, MOD_EXPORTS)
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         row: wrapping(rows + index * MOD_EXPORT_BYTES)
         name: wrapping(row - context)
@@ -690,7 +690,7 @@ mod_check_exports: fn(context: I64) -> I64 {
             jet_rt_string_builder_push(reason, rt_static_text("`"))
             return reason
         }
-        earlier := I64{0}
+        ^earlier: I64{0}
         loop earlier < index {
             other: wrapping(wrapping(rows + earlier * MOD_EXPORT_BYTES) - context)
             if mod_spans_equal(context, name, other) {
@@ -773,7 +773,7 @@ mod_check: fn(context: I64) -> I64 {
     // The load-site grant spells filesystem roots only, so a library may
     // declare `FS` or an `FS.` effect and nothing else.
     effects: mod_word(context, MOD_EFFECTS)
-    index := I64{0}
+    ^index: I64{0}
     loop index < mod_word(context, MOD_EFFECT_COUNT) {
         declared: wrapping(wrapping(effects + index * MOD_EFFECT_BYTES) - context)
         index += I64{1}
@@ -815,7 +815,7 @@ mod_check: fn(context: I64) -> I64 {
     actual: jet_rt_string_builder_new()
     jet_rt_string_builder_push(actual, rt_static_text("sha256-"))
     digits: rt_static_text("0123456789abcdef")
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{32}) {
         byte: rt_text_byte(wrapping(scratch + at))
         rt_text_append(actual, wrapping(rt_text_data(digits) + (byte >> I64{4})), I64{1})
@@ -843,9 +843,9 @@ mod_stage_error: fn(errno: I64) -> I64 {
     context: jet_int_owned_to_i64(id)
     directory: jet_fs_temp_directory_raw()
     pid: host_call(I64{39}, I64{0}, I64{0}, I64{0})
-    serial := I64{0}
-    staged := I64{0}
-    fd := I64{0}
+    ^serial: I64{0}
+    ^staged: I64{0}
+    ^fd: I64{0}
     loop {
         leaf: jet_rt_string_builder_new()
         jet_rt_string_builder_push(leaf, rt_static_text("jet-mod-"))
@@ -873,8 +873,8 @@ mod_stage_error: fn(errno: I64) -> I64 {
     }
     data: wrapping(mod_word(context, MOD_BYTES) + mod_word(context, MOD_PAYLOAD))
     length: mod_word(context, MOD_LENGTH) - mod_word(context, MOD_PAYLOAD)
-    written := I64{0}
-    failure := I64{0}
+    ^written: I64{0}
+    ^failure: I64{0}
     loop written < length {
         count: host_call(I64{1}, fd, wrapping(data + written), length - written)
         if (count == I64{-4}) { next }
@@ -889,7 +889,7 @@ mod_stage_error: fn(errno: I64) -> I64 {
         }
         written += count
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (failure != I64{0}) {
         mod_unlink(staged)
         jet_rt_string_drop(staged)

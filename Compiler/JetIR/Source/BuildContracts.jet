@@ -43,7 +43,7 @@ ir_contract: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, contract: BodyContrac
         // `{marker}\t{line}\t{column}\t{file}` (JetRuntime TestContracts.jet).
         // Core's own clauses are its implementation, not the program's claims.
         marker: if contract.kind == .Pre -> "Pre" else -> "Post"
-        args := ir_static_text(m, b, "{marker}\t{contract.site.line}\t{contract.site.column}\t{contract.site.file}")
+        ^args: ir_static_text(m, b, "{marker}\t{contract.site.line}\t{contract.site.column}\t{contract.site.file}")
         args.push(condition)
         _: ir_runtime(m, b, "jet_rt_test_contract", args, -1)
     }
@@ -122,7 +122,7 @@ ir_contract_return: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, spa
                 ir_open_if(b.f, present, b.line)
                 binding_ty: ir_fact(p, b, frame.result.binding_ty, span)
                 binding_row: ir_value_type(m, p, binding_ty) ?? -1
-                payload := -1
+                ^payload: -1
                 if binding_row >= 0 {
                     payload = if result_mode -> ir_load_at(m, b, slot, 8, binding_row) else -> ir_option_payload(m, b, slot, binding_row)
                 }

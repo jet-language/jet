@@ -49,7 +49,7 @@ sema_failure_inference_candidate: fn(func: Func) -> Bool Never! {
 // found on its own thread, and the parts join in module order, so the solve
 // is the same for any thread count. Returns the inferred-infallible keys.
 sema_failure_solve: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], bounds: [Int]) -> [String] Never! {
-    address_taken := [U32:Bool]{}
+    ^address_taken: [U32:Bool]{}
     loop module_result in modules {
         loop reference in module_result.name_references {
             if reference.kind == Val(SymbolKind.Function) && !symbol_is_local(reference.symbol.id) {
@@ -57,7 +57,7 @@ sema_failure_solve: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRe
             }
         }
     }
-    candidates := [SemaFunctionFailureFacts]{}
+    ^candidates: [SemaFunctionFailureFacts]{}
     loop part in sema_failure_candidate_parts(graph, modules, address_taken, bounds, 0) {
         candidates.extend(part)
     }
@@ -66,7 +66,7 @@ sema_failure_solve: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRe
     // has no failure source and no edge. An unannotated import is therefore a
     // candidate the solve proves infallible (a C function cannot fail) and
     // projects onto `T Never!`, instead of an edge no fact ever resolves.
-    imports := [String]{}
+    ^imports: [String]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].functions.len() {
             if !sema_function_is_guest_import(graph.modules[module_index].functions[row].declaration) {
@@ -80,11 +80,11 @@ sema_failure_solve: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRe
         }
     }
     if imports.len() > 0 {
-        taken := name_table_sized(candidates.len() + imports.len() + 1)
-        loop facts in candidates -> _ := name_intern(taken, facts.function_key)
+        ^taken: name_table_sized(candidates.len() + imports.len() + 1)
+        loop facts in candidates -> ^_: name_intern(taken, facts.function_key)
         loop key in imports.move() {
             if name_find(taken, key) != None -> next
-            _ := name_intern(taken, key)
+            ^_: name_intern(taken, key)
             candidates.push(SemaFunctionFailureFacts{function_key: key, direct: false, edges: [String]{}})
         }
     }
@@ -99,8 +99,8 @@ SEMA_FAILURE_FACTS_PER_THREAD: 1024
 // Consecutive parts of `modules`, weighed by their failure facts, for as
 // many threads as `threads` admits (compiler_threads_partition).
 sema_failure_module_bounds: fn(modules: [SemaGraphModuleResult], threads: CompilerThreads) -> [Int] Never! {
-    weights := [Int]{}
-    work := 0
+    ^weights: [Int]{}
+    ^work: 0
     loop module_result in modules {
         weights.push(module_result.failure_facts.len())
         work += module_result.failure_facts.len()
@@ -112,7 +112,7 @@ sema_failure_module_bounds: fn(modules: [SemaGraphModuleResult], threads: Compil
 // the first part on its own thread, the ones after it the same way, and
 // the last on this one.
 sema_failure_candidate_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], address_taken: [U32:Bool], bounds: [Int], at: Int) -> [[SemaFunctionFailureFacts]] Never! {
-    done := [[SemaFunctionFailureFacts]]{}
+    ^done: [[SemaFunctionFailureFacts]]{}
     if at + 1 >= bounds.len() -> return done
     if at + 2 == bounds.len() {
         done.push(sema_failure_candidate_part(graph, modules, address_taken, bounds[at], bounds[at + 1]))
@@ -129,7 +129,7 @@ sema_failure_candidate_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGra
 
 // The solve's candidates among the failure facts of modules `from..<to`.
 sema_failure_candidate_part: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], address_taken: [U32:Bool], from: Int, to: Int) -> [SemaFunctionFailureFacts] Never! {
-    candidates := [SemaFunctionFailureFacts]{}
+    ^candidates: [SemaFunctionFailureFacts]{}
     loop module_index in from..<to {
         source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
         loop facts in modules[module_index].failure_facts {
@@ -147,7 +147,9 @@ sema_failure_add_candidate: fn(graph: SemaRegistrationGraph, source_index: Int, 
         return
     }
     if symbol_find(graph.symbols, facts.function_key) == .Val(id) {
-        if address_taken.get(id.id) != None -> return
+        if address_taken.get(id.id) != None {
+            return
+        }
     }
     row: sema_registration_callable_row(graph, facts.function_key) ?? return
     if !sema_failure_row_in_module(graph, row, source_index) || !sema_failure_row_candidate(graph, row) {
@@ -216,7 +218,7 @@ sema_failure_row_candidate: fn(graph: SemaRegistrationGraph, row: SemaRegistrati
 // is registered on the impl and again on the nominal `T`
 // (sema_registration_add_impl), under one key.
 sema_failure_method_rows: fn(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -> [SemaRegistrationCallableRow] Never! {
-    rows := [SemaRegistrationCallableRow]{}
+    ^rows: [SemaRegistrationCallableRow]{}
     if row == {
         .NominalMethod(module_index, owner, index) -> {
             rows.push(SemaRegistrationCallableRow.NominalMethod{module_index: module_index, owner: owner, row: index})
@@ -267,16 +269,16 @@ sema_failure_inherent_method_count: fn(nominal: SemaRegistrationNominal) -> Int 
 // candidate key has its id in `keys`; `inferred` and `dependents` are by id,
 // `ids` each candidate row's.
 sema_failure_fixpoint: fn(candidates: [SemaFunctionFailureFacts]) -> [String] Never! {
-    keys := name_table_sized(candidates.len() + 1)
-    inferred := [Bool]{false}
-    ids := [Int]{}
+    ^keys: name_table_sized(candidates.len() + 1)
+    ^inferred: [Bool]{false}
+    ^ids: [Int]{}
     loop facts in candidates {
         id: name_index(name_intern(keys, facts.function_key))
         if id == inferred.len() -> inferred.push(true)
         ids.push(id)
     }
-    dependents := loop _ in inferred -> [Int]{}
-    fallen := [Int]{}
+    ^dependents: loop _ in inferred -> [Int]{}
+    ^fallen: [Int]{}
     loop (row, facts) in candidates {
         own: ids[row]
         loop edge in facts.edges {
@@ -301,7 +303,7 @@ sema_failure_fixpoint: fn(candidates: [SemaFunctionFailureFacts]) -> [String] Ne
             }
         }
     }
-    solved := [String]{}
+    ^solved: [String]{}
     loop (row, facts) in candidates {
         if inferred[ids[row]] -> solved.push(facts.function_key)
     }
@@ -324,14 +326,14 @@ sema_failure_settle_obligations: fn(diagnostics: ^[Diagnostic], solved: NameTabl
     // none is copied): a discharged one stays out, a surviving one comes
     // back without the mark. Removing each discharged one in place would
     // shift every finding after it, once per discharge.
-    held := [Diagnostic]{}
+    ^held: [Diagnostic]{}
     loop diagnostics.len() > 0 {
         diagnostic: diagnostics.pop() ?? break
         held.push(diagnostic)
     }
-    survived := false
+    ^survived: false
     loop held.len() > 0 {
-        diagnostic := held.pop() ?? break
+        ^diagnostic: held.pop() ?? break
         detail: diagnostic.detail ?? ""
         if !detail.starts_with(mark) {
             diagnostics.push(diagnostic)
@@ -340,7 +342,7 @@ sema_failure_settle_obligations: fn(diagnostics: ^[Diagnostic], solved: NameTabl
         lines: detail.split("\n").to_list()
         callee: lines[0].replace(mark, "")
         if name_find(solved, callee) != None -> next
-        remainder := [String]{}
+        ^remainder: [String]{}
         loop line_index in 1..<lines.len() -> remainder.push(lines[line_index])
         rest: remainder.join("\n")
         diagnostic.detail = None
@@ -379,7 +381,7 @@ sema_failure_domain_dedupe: fn(diagnostics: ^[Diagnostic], seen: ^NameTable) Nev
     }
     // A repeated root leaves in place, from the back, so the kept findings
     // are never copied.
-    repeats := [Int]{}
+    ^repeats: [Int]{}
     loop (index, diagnostic) in diagnostics {
         detail: diagnostic.detail ?? ""
         if diagnostic.code != "E2404" || !detail.starts_with("failure-domain:") -> next
@@ -388,9 +390,9 @@ sema_failure_domain_dedupe: fn(diagnostics: ^[Diagnostic], seen: ^NameTable) Nev
             repeats.push(index)
             next
         }
-        _ := name_intern(seen, key)
+        ^_: name_intern(seen, key)
     }
-    loop repeats.pop() == .Val(index) -> _ := diagnostics.remove(index, .Slot)
+    loop repeats.pop() == .Val(index) -> ^_: diagnostics.remove(index, .Slot)
 }
 
 // #3708 for one comptime function closure: the failure rows, function-value
@@ -427,13 +429,13 @@ sema_comptime_failure_closure_add: fn(graph: SemaRegistrationGraph, closure: ^Se
 // was discharged.
 sema_comptime_failure_closure_settle: fn(graph: SemaRegistrationGraph, closure: SemaComptimeFailureClosure, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if closure.obligations.len() == 0 -> return true
-    candidates := [SemaFunctionFailureFacts]{}
+    ^candidates: [SemaFunctionFailureFacts]{}
     loop (index, facts) in closure.facts {
         sema_failure_add_candidate(graph, closure.owners[index], facts, closure.address_taken, candidates)
     }
-    solved := name_table_sized(4)
-    loop key in sema_failure_fixpoint(candidates) -> _ := name_intern(solved, key)
-    obligations := closure.obligations
+    ^solved: name_table_sized(4)
+    loop key in sema_failure_fixpoint(candidates) -> ^_: name_intern(solved, key)
+    ^obligations: closure.obligations
     if !sema_failure_settle_obligations(obligations, solved) -> return true
     loop diagnostic in obligations -> diagnostics.push(diagnostic)
     false
@@ -472,7 +474,9 @@ sema_failure_module_references: fn(module_result: SemaGraphModuleResult, ids: [U
         }
     }
     loop reference in module_result.name_references {
-        if !symbol_is_local(reference.symbol.id) && ids.get(reference.symbol.id.id) != None -> return true
+        if !symbol_is_local(reference.symbol.id) && ids.get(reference.symbol.id.id) != None {
+            return true
+        }
     }
     false
 }
@@ -490,19 +494,19 @@ sema_failure_module_references: fn(module_result: SemaGraphModuleResult, ids: [U
 // takes the callee's carrier there, and a keep-going trap sees the error, as
 // it does once the obligations are settled.
 sema_failure_recheck_modules: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], unions: SemaFailureUnionProjected, infallible: [String]) -> [Int] Never! {
-    union_ids := [U32:Bool]{}
+    ^union_ids: [U32:Bool]{}
     loop key in unions.keys {
         if symbol_find(graph.symbols, key) == .Val(id) -> union_ids[id.id] = true
     }
-    declaring := [Bool]{}
+    ^declaring: [Bool]{}
     loop _ in modules -> declaring.push(false)
     loop module_index in unions.modules -> declaring[module_index] = true
-    plain_keys := name_table_sized(infallible.len() + 1)
-    loop key in infallible -> _ := name_intern(plain_keys, key)
+    ^plain_keys: name_table_sized(infallible.len() + 1)
+    loop key in infallible -> ^_: name_intern(plain_keys, key)
     mark: sema_failure_obligation_mark()
-    selected := [Int]{}
+    ^selected: [Int]{}
     loop (module_index, module_result) in modules {
-        recheck := declaring[module_index]
+        ^recheck: declaring[module_index]
         if !recheck && union_ids.len() > 0 {
             recheck = sema_failure_module_references(module_result, union_ids)
         }
@@ -529,10 +533,10 @@ sema_failure_reconcile_infallible: fn(modules: ^[SemaGraphModuleResult], project
     if projected.len() == 0 {
         return
     }
-    keys := name_table_sized(projected.len() + 1)
-    ids := [U32:Bool]{}
+    ^keys: name_table_sized(projected.len() + 1)
+    ^ids: [U32:Bool]{}
     loop key in projected {
-        _ := name_intern(keys, key)
+        ^_: name_intern(keys, key)
         if symbol_find(symbols, key) == .Val(id) -> ids[id.id] = true
     }
     loop module_index in 0..<modules.len() {

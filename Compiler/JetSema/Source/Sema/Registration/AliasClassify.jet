@@ -74,16 +74,16 @@ SemaAliasGlobals: struct {
 // kept as each module's bindings are rewritten, not walked over every input
 // for each name.
 sema_alias_classify_inputs: fn(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) Never! {
-    rows := [U32:Int]{}
-    pending := [Int]{}
-    globals := SemaAliasGlobals{names: name_table_sized(64), types: [Int]{0}, seen: [Int]{0}, stamp: 0}
+    ^rows: [U32:Int]{}
+    ^pending: [Int]{}
+    ^globals: SemaAliasGlobals{names: name_table_sized(64), types: [Int]{0}, seen: [Int]{0}, stamp: 0}
     loop index in 0..<inputs.len() {
         rows[inputs[index].module_identity.id] = index
         if sema_alias_items_bind_paths(inputs[index].program.items) -> pending.push(index)
         sema_alias_globals_add(globals, inputs[index].program.items, 1)
     }
     loop index in pending {
-        keys := [SemaAliasKey]{}
+        ^keys: [SemaAliasKey]{}
         sema_alias_collect_types(inputs, edges, rows, globals, index, inputs[index].program.items, [String]{}, keys)
         if keys.len() > 0 {
             sema_alias_globals_add(globals, inputs[index].program.items, -1)
@@ -158,13 +158,13 @@ sema_alias_expr_path: fn(value: Expr) -> [String]? Never! {
     if value == {
         .Ident(name, _, _) -> Val([String]{name})
         .Field(base, member, _, _) -> {
-            parts := sema_alias_expr_path(base) ?? return None
+            ^parts: sema_alias_expr_path(base) ?? return None
             parts.push(member.copy())
             Val(parts)
         }
         .EnumLit(type_name, variant, _, args, leading_dot, _, _) -> {
             if leading_dot || args.len() > 0 || type_name == "" -> return None
-            parts := type_name.split(".").to_list()
+            ^parts: type_name.split(".").to_list()
             parts.push(variant.copy())
             Val(parts)
         }
@@ -214,7 +214,7 @@ sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [Sema
         }
         if items[item_index] == .CodeModule(code_module) {
             if code_module.body == .Val(body) {
-                inner := scope
+                ^inner: scope
                 inner.push(code_module.name)
                 sema_alias_collect_types(inputs, edges, rows, globals, index, body, inner, keys)
             }
@@ -223,9 +223,9 @@ sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [Sema
 }
 
 sema_alias_rewrite_items: fn(items: [Item], keys: [SemaAliasKey]) -> [Item] Never! {
-    rewritten := [Item]{}
+    ^rewritten: [Item]{}
     loop item in items {
-        value := item.copy()
+        ^value: item.copy()
         if item == {
             .Const(definition) -> {
                 if sema_alias_keyed(keys, definition) {
@@ -234,7 +234,7 @@ sema_alias_rewrite_items: fn(items: [Item], keys: [SemaAliasKey]) -> [Item] Neve
                 }
             }
             .CodeModule(code_module) -> {
-                row := code_module.copy()
+                ^row: code_module.copy()
                 if code_module.body == .Val(body) {
                     row.body = Val(sema_alias_rewrite_items(body, keys))
                 }
@@ -251,7 +251,7 @@ sema_alias_rewrite_items: fn(items: [Item], keys: [SemaAliasKey]) -> [Item] Neve
 // outward, with its imports, then the global types.
 sema_alias_path_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [U32:Int], globals: SemaAliasGlobals, site: SemaAliasSite, path: [String]) -> SemaAliasMeaning Never! {
     if site.depth > SEMA_ALIAS_MAX_DEPTH || path.len() == 0 -> return .Unknown
-    level := site.scope.len()
+    ^level: site.scope.len()
     loop level >= 0 {
         scope: site.scope.slice(0, level)
         declared: sema_alias_declared_in(inputs[site.input].program.items, scope, 0, path[0])
@@ -289,7 +289,7 @@ sema_alias_follow: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistr
         }
         .Module -> {
             if rest.len() == 0 -> return .Unknown
-            inner := site.scope
+            ^inner: site.scope
             inner.push(path[0])
             sema_alias_member_meaning(inputs, edges, rows, globals, SemaAliasSite{input: site.input, scope: inner, depth: site.depth + 1}, rest)
         }
@@ -361,7 +361,7 @@ sema_alias_import_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [Sem
     loop binding in import_walk_bindings(declaration) {
         if binding.original == .Val(original) {
             if binding.local != path[0] -> next
-            member := original.split(".").to_list()
+            ^member: original.split(".").to_list()
             loop part in rest -> member.push(part)
             return sema_alias_member_meaning(inputs, edges, rows, globals, target, member)
         }

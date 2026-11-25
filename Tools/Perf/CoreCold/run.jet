@@ -122,7 +122,7 @@ run: fn() -> Never Err! {
     root: files.normalize("{sys.executable()}/../../../..")
     argv: process.args()
     tmp: process.env_get_or("TMPDIR", "/tmp")
-    args := [String:String]{
+    ^args: [String:String]{
         "jet": "",
         "runs": "3",
         "cpus": "",
@@ -130,7 +130,7 @@ run: fn() -> Never Err! {
         "out": files.join(root, "Tools/Perf/CoreCold/receipt"),
         "time": gnu_time(),
     }
-    i := 0
+    ^i: 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
         if !args.has_key(key) || i + 1 >= argv.len() {
@@ -156,7 +156,7 @@ run: fn() -> Never Err! {
         Program{name: "scaling-run", cwd: "Tools", args: [String]{SCALING, "--", "shapes"}, shown: "jet {SCALING} -- shapes", bodies_max_ms: -1, wall_max_ms: 500, peak_max_mb: 200},
         Program{name: "optimization", cwd: "Tools/Gauntlet/Entries/Optimization/Fixtures", args: [String]{files.join(tree, OPTIMIZATION), "--", "plan", "--manifest", "manifest.json"}, shown: "jet <tree>/{OPTIMIZATION} -- plan --manifest manifest.json", bodies_max_ms: -1, wall_max_ms: 1000, peak_max_mb: 400},
     }
-    measured := [[Run]]{}
+    ^measured: [[Run]]{}
     loop _ in programs -> measured.push([Run]{})
     loop round in 1..<(runs + 1) {
         loop p in 0..<programs.len() {
@@ -165,20 +165,20 @@ run: fn() -> Never Err! {
             measured[p].push(ran)
         }
     }
-    lines := [String]{"# Cold Core compile receipt", ""}
+    ^lines: [String]{"# Cold Core compile receipt", ""}
     lines.extend(compiler_lines(jet))
     pinned: if cpus.len() > 0 -> " pinned to CPUs {args["cpus"]}," else -> ""
     lines.push("Each program ran {runs} times cold and out of tree, in rounds of every program once,{pinned} each with an empty JET_STORE_DIR and XDG_CACHE_HOME, no JET_TOOLCHAIN_ROOT or JET_SEED, and its own trace (`--trace=FILE`, the JET_TRACE_FILE spans), under GNU time. Wall is spawn to reap of GNU time; peak is GNU time's %M (the compiler's ru_maxrss). Each value is the median of the runs; MB is 10^6 bytes. Produced by `jet Tools/Perf/CoreCold/run.jet`.")
     lines.extend([String]{"", "| Program | Command | Wall ms (runs) | Wall ms | Peak MB (runs) | Peak MB | comptime.bodies ms | Limit | Verdict |", "|---|---|---|---:|---|---:|---:|---|---|"})
-    failed := false
+    ^failed: false
     loop p in 0..<programs.len() {
         program: programs[p]
         rows: measured[p]
         wall: median(rows.map(fn(r) { r.wall_ns }))
         peak: median(rows.map(fn(r) { r.peak_kib }))
         bodies: median(rows.map(fn(r) { r.bodies_us }))
-        limits := [String]{}
-        held := true
+        ^limits: [String]{}
+        ^held: true
         if program.bodies_max_ms >= 0 {
             limits.push("comptime.bodies <= {program.bodies_max_ms} ms")
             if bodies > program.bodies_max_ms * 1000 -> held = false
@@ -223,7 +223,7 @@ gnu_time: fn() -> String {
 
 // "24-31,40" as its CPUs.
 parse_cpus: fn(text: String) -> [Int] {
-    cpus := [Int]{}
+    ^cpus: [Int]{}
     loop part in text.split(",") {
         span: part.trim().partition("-")
         first: Int.parse(span.head) ?? next
@@ -271,11 +271,11 @@ measure: fn(jet: String, gnu: String, cpus: [Int], work: String, tree: String, p
     // `--trace=FILE` follows the verb (`check`), or comes first when the
     // program runs a file.
     at: if program.args[0] == "check" -> 1 else -> 0
-    argv := [String]{gnu, "-f", "%M", "-o", time_file, jet}
+    ^argv: [String]{gnu, "-f", "%M", "-o", time_file, jet}
     argv.extend(program.args[0..<at])
     argv.push("--trace={trace}")
     argv.extend(program.args[at..<program.args.len()])
-    spec := process.cmd(argv).cwd(files.join(tree, program.cwd)).env_remove("JET_TOOLCHAIN_ROOT").env_remove("JET_SEED").env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1")
+    ^spec: process.cmd(argv).cwd(files.join(tree, program.cwd)).env_remove("JET_TOOLCHAIN_ROOT").env_remove("JET_SEED").env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1")
     spec = spec.timeout(time.duration_seconds(TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT)
     if cpus.len() > 0 -> spec = spec.cpu_affinity(cpus.copy())  // copy: every run pins to the same CPUs
     started: time.instant()
@@ -294,14 +294,14 @@ measure: fn(jet: String, gnu: String, cpus: [Int], work: String, tree: String, p
 
 // The run of median wall.
 median_run: fn(runs: [Run]) -> Run {
-    sorted := runs.copy()  // copy: the receipt keeps the runs in their order
+    ^sorted: runs.copy()  // copy: the receipt keeps the runs in their order
     sorted.sort_by(fn(r) { r.wall_ns })
     sorted[sorted.len() /% 2].copy()  // copy: the sorted list is dropped
 }
 
 // The middle value, or the rounded mean of the middle two.
 median: fn(values: [Int]) -> Int Never! {
-    sorted := values.copy()  // copy: the values keep their run order
+    ^sorted: values.copy()  // copy: the values keep their run order
     sorted.sort()
     m: sorted.len() /% 2
     if sorted.len() % 2 == 1 -> return sorted[m]
@@ -317,13 +317,13 @@ mb: fn(kib: Int) -> String Never! { ms(kib * 1024 /% 100000) }
 // The trace's summary. A trace a run cut short has no closing bracket; its
 // events are one per line.
 summarize: fn(text: String) -> Summary {
-    top := [Total]{}
-    counters := [Total]{}
-    open := [Open]{}
-    bodies := [{start: Int, end: Int}]{}
-    lane := -1
-    first := -1
-    end_us := 0
+    ^top: [Total]{}
+    ^counters: [Total]{}
+    ^open: [Open]{}
+    ^bodies: [{start: Int, end: Int}]{}
+    ^lane: -1
+    ^first: -1
+    ^end_us: 0
     loop raw in text.split("\n") {
         line: raw.trim().remove_suffix(",")
         if line == "" || line == "[" || line == "]" -> next
@@ -331,7 +331,7 @@ summarize: fn(text: String) -> Summary {
         if event.ph == "C" {
             if !event.name.starts_with("core.") && !event.name.starts_with("load.core") -> next
             value: event.args?.value ?? next
-            at := 0
+            ^at: 0
             loop at < counters.len() && counters[at].name != event.name -> at += 1
             if at == counters.len() -> counters.push(Total{name: event.name.copy(), value: 0})  // copy: the summary outlives the event
             counters[at].value += value
@@ -348,7 +348,7 @@ summarize: fn(text: String) -> Summary {
             next
         }
         if ts > end_us -> end_us = ts
-        at := open.len() - 1
+        ^at: open.len() - 1
         loop at >= 0 && (open[at].closed || open[at].lane != tid || open[at].name != event.name) {
             at -= 1
         }
@@ -357,7 +357,7 @@ summarize: fn(text: String) -> Summary {
         start: open[at].start_us
         if event.name == "comptime.bodies" -> bodies.push({start: start, end: ts})
         if open[at].top {
-            found := 0
+            ^found: 0
             loop found < top.len() && top[found].name != event.name -> found += 1
             if found == top.len() -> top.push(Total{name: event.name.copy(), value: 0})  // copy: the summary outlives the event
             top[found].value += ts - start
@@ -372,9 +372,9 @@ summarize: fn(text: String) -> Summary {
         }
     }
     bodies.sort_by(fn(b) { b.start })
-    bodies_us := 0
-    union_start := 0
-    union_end := -1
+    ^bodies_us: 0
+    ^union_start: 0
+    ^union_end: -1
     loop span in bodies {
         if union_end >= 0 && span.start <= union_end {
             if span.end > union_end -> union_end = span.end

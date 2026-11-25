@@ -12,7 +12,7 @@ HTTP_HEADER_VALUE: I64{8}
     result: data_sequence_new(length, HTTP_HEADER_ENTRY_BYTES)
     source: dyn_word(wrapping(value + DATA_SEQUENCE_DATA))
     target: dyn_word(wrapping(result + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         input: wrapping(source + at * HTTP_HEADER_ENTRY_BYTES)
         output: wrapping(target + at * HTTP_HEADER_ENTRY_BYTES)
@@ -31,7 +31,7 @@ HTTP_HEADER_VALUE: I64{8}
     length: dyn_word(wrapping(value + DATA_SEQUENCE_LENGTH))
     capacity: dyn_word(wrapping(value + DATA_SEQUENCE_CAPACITY))
     data: dyn_word(wrapping(value + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         entry: wrapping(data + at * HTTP_HEADER_ENTRY_BYTES)
         jet_rt_string_drop(dyn_word(wrapping(entry + HTTP_HEADER_NAME)))
@@ -47,7 +47,7 @@ HTTP_HEADER_VALUE: I64{8}
     if (length != dyn_word(wrapping(right + DATA_SEQUENCE_LENGTH))) { return false }
     a: dyn_word(wrapping(left + DATA_SEQUENCE_DATA))
     b: dyn_word(wrapping(right + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         offset: at * HTTP_HEADER_ENTRY_BYTES
         if !jet_rt_string_eq(dyn_word(wrapping(wrapping(a + offset) + HTTP_HEADER_NAME)), dyn_word(wrapping(wrapping(b + offset) + HTTP_HEADER_NAME))) {

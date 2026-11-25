@@ -9,11 +9,11 @@ SHIFT: 70
 BLOCK: 8192
 
 run: fn() {
-    sizes := [Int]{}
+    ^sizes: [Int]{}
     loop size in 0..<200 -> sizes.push(size)
     loop size in ([Int]{255, 256, 257, 511, 1000, 2047, 2048, 2049, 5000}) -> sizes.push(size)
-    moves := 0
-    wrong := 0
+    ^moves: 0
+    ^wrong: 0
     #Unsafe("every move and every byte written or read stays inside the block, which is freed once after the moves") {
         block: mem.alloc_raw(BLOCK, 64) ?? panic("no memory")
         loop size in sizes {
@@ -23,19 +23,19 @@ run: fn() {
                 // The bytes the move may touch, and 8 on each side.
                 low: (if shift < 0 -> to else -> FROM) - 8
                 high: (if shift < 0 -> FROM else -> to) + size + 8
-                expected := [Int]{}
+                ^expected: [Int]{}
                 loop at in low..<high {
                     byte: (at * 31 + size + step) & 255
                     mem.volatile_write<U8>(block.byte_offset(at), U8{byte})
                     expected.push(byte)
                 }
                 // The move through a buffer.
-                buffer := [Int]{}
+                ^buffer: [Int]{}
                 loop i in 0..<size -> buffer.push(expected[FROM + i - low])
                 loop i in 0..<size -> expected[to + i - low] = buffer[i]
                 mem.copy<U8>(block.byte_offset(to), block.byte_offset(FROM), size)
                 moves += 1
-                same := true
+                ^same: true
                 loop at in low..<high {
                     byte: Int{block.byte_offset(at).*}
                     if byte != expected[at - low] -> same = false

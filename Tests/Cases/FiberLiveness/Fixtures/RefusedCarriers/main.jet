@@ -34,12 +34,12 @@ census: fn(prefix: String) -[FS]> Int {
 
 run: fn() {
     first: task work(1)
-    total := first.join() ?? 0
+    ^total: first.join() ?? 0
     cap: census("VmSize:") * 1024 + ROOM
     sys.set_memory_limit(cap, cap) ?? panic("set_memory_limit")
-    handles := [Task<Int>]{}
+    ^handles: [Task<Int>]{}
     loop i in 0..<TASKS -> handles.push(task work(i))
-    count := 0
+    ^count: 0
     loop handle in handles {
         total += handle.join() ?? 0
         count += 1

@@ -70,7 +70,7 @@ pkg_test_effect_package: fn(entries: [PackageEffects], name: String) -> PackageE
 }
 
 pkg_test_budget_manifest: fn(allow: [String]) -> PackageFacts Never! {
-    manifest := PackageFacts.default()
+    ^manifest: PackageFacts.default()
     manifest.effects_enabled = true
     manifest.authority.allow = Val(allow)
     manifest
@@ -94,7 +94,7 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String:[S
     assert(email.effects.contains("Rand"))
     assert_eq(email.effect_chains.get("Rand"), Val([String]{"crypto.migrate_v1", "crypto.seal"}))
     diagnostics: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"}))
-    found := false
+    ^found: false
     loop diagnostic in diagnostics {
         if diagnostic.what.contains("`email`") && diagnostic.what.contains("Rand") -> found = true
     }
@@ -102,7 +102,7 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String:[S
 }
 
 #Test("package budget preserves the authored effect witness location") {
-    solved := pkg_test_effect_solved()
+    ^solved: pkg_test_effect_solved()
     solved["run.run"] = [String]{"Rand"}
     entries: pkg_compute_package_effects(pkg_test_effect_program(), solved, pkg_test_effect_summaries(true))
     diagnostics: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"}))
@@ -151,7 +151,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 }
 
 #Test("effect budget authority block is the E1220 source") {
-    manifest := pkg_test_budget_manifest([String]{"FS"})
+    ^manifest: pkg_test_budget_manifest([String]{"FS"})
     // Deliberately disagree with the retired mirror field; the authority
     // block must decide the result.
     manifest.effects_allow = Val([String]{"Net"})
@@ -164,7 +164,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 }
 
 #Test("a grant line is the dependency's whole limit and names the call path") {
-    manifest := pkg_test_budget_manifest([String]{"FS", "Net"})
+    ^manifest: pkg_test_budget_manifest([String]{"FS", "Net"})
     chains: [String:[String]]{"Net": [String]{"dep.fetch", "dep.dial"}}
     entries: [PackageEffects]{pkg_test_package_effects("dep", [String]{"Net"}, chains, [String]{}, None)}
     // `allow` lists Net, so without a line the dependency may use it.
@@ -188,7 +188,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 }
 
 #Test("a written allow row is a ceiling over the root package's own code") {
-    manifest := pkg_test_budget_manifest([String]{"FS"})
+    ^manifest: pkg_test_budget_manifest([String]{"FS"})
     entries: [PackageEffects]{pkg_test_package_effects("root", [String]{"Net"}, [String:[String]]{"Net": [String]{"run.run", "run.fetch"}}, [String]{}, None)}
     diagnostics: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
@@ -241,7 +241,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
     assert(other[0].fix.contains("`FFI.C(\"c\")`"))
     span: Span{start: 4, end: 12}
     helper_call: [PackageEffects]{pkg_test_package_effects("helper", [String]{"FFI.C(\"c\")"}, [String:[String]]{"FFI.C(\"c\")": [String]{"helper.magnitude"}}, [String]{}, Val(span))}
-    manifest := pkg_test_budget_manifest([String]{"FFI.C(\"c\")", "IO", "Mem.Alloc"})
+    ^manifest: pkg_test_budget_manifest([String]{"FFI.C(\"c\")", "IO", "Mem.Alloc"})
     lent: pkg_effect_enforce(helper_call, manifest)
     assert_eq(lent.len(), 1)
     assert_eq(lent[0].code, "E1220")
@@ -253,7 +253,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 }
 
 #Test("panic budget ignores allow omission but honors denial") {
-    manifest := pkg_test_budget_manifest([String]{"IO", "GPU", "Mem.Alloc", "FS", "Rand"})
+    ^manifest: pkg_test_budget_manifest([String]{"IO", "GPU", "Mem.Alloc", "FS", "Rand"})
     span: Span{start: 4, end: 12}
     entries: [PackageEffects]{pkg_test_package_effects("panicdep", [String]{"Panic"}, [String:[String]]{}, [String]{"panicdep.parse_port"}, Val(span))}
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
@@ -303,7 +303,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
     pure: [PackageEffects]{pkg_test_package_effects("root", [String]{"IO"}, [String:[String]]{}, [String]{}, None), pkg_test_package_effects("dep", [String]{}, [String:[String]]{}, [String]{}, None)}
     // A stop is deny-only: never named as a gain nor recorded.
     witness: EffectBudgetWitness{path: "/workspace/app/dep/dep.jet", span: Span{start: 40, end: 44}}
-    reading := pkg_test_package_effects("dep", [String]{"FS.Read", "Panic"}, [String:[String]]{"FS.Read": [String]{"dep.greet", "dep.load"}}, [String]{}, None)
+    ^reading: pkg_test_package_effects("dep", [String]{"FS.Read", "Panic"}, [String:[String]]{"FS.Read": [String]{"dep.greet", "dep.load"}}, [String]{}, None)
     reading.effect_witnesses = [String:EffectBudgetWitness]{"dep.load": witness}
     widening: [PackageEffects]{reading}
     first: pkg_lock_record_effect_rows(root, pure, false) ?? panic("record first")

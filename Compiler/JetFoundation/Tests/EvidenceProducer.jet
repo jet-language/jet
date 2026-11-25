@@ -30,8 +30,8 @@ evidence_producer_require: fn(ok: Bool, name: String) Never! {
     evidence_write_record_from_codes(path, 2, 1, "stop", "boom", "a.jet", U32{12}, ordinary) ?? panic("ordinary stop record")
     report: evidence_report_read(path) ?? panic("read report")
     evidence_producer_require(report.records.len() == 4, "every append lands in one report")
-    expected := 0
-    caught := 0
+    ^expected: 0
+    ^caught: 0
     loop record in report.records {
         if record.expectation == EvidenceExpectation.ExpectedFailure -> expected += 1
         loop attachment in record.attachments {

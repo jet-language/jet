@@ -26,7 +26,7 @@ realtime_remaining: fn(deadline: I64, now: I64) -> I64 {
 }
 
 realtime_counter_add: fn(address: I64, increment: I64) {
-    previous := sync_load(address)
+    ^previous: sync_load(address)
     loop {
         next_value: realtime_add(previous, increment)
         observed: sync_cas(address, previous, next_value)
@@ -38,7 +38,7 @@ realtime_counter_add: fn(address: I64, increment: I64) {
 }
 
 realtime_counter_max: fn(address: I64, candidate: I64) {
-    previous := sync_load(address)
+    ^previous: sync_load(address)
     loop candidate > previous {
         observed: sync_cas(address, previous, candidate)
         if (observed == previous) {
@@ -52,7 +52,7 @@ realtime_counter_max: fn(address: I64, candidate: I64) {
 // Full product needs <=222 bits; capped quotient needs <=126 bits. No heap Int.
 realtime_big_product: fn(result: I64, left: I64, low: I64, high: I64, temporary: I64) {
     float_big_init(result, I64{0})
-    bit := I64{0}
+    ^bit: I64{0}
     loop bit < (I64{128}) {
         word: if (bit < I64{64}) -> low else -> high
         at: if (bit < I64{64}) -> bit else -> bit - I64{64}
@@ -83,8 +83,8 @@ realtime_big_product: fn(result: I64, left: I64, low: I64, high: I64, temporary:
     float_big_init(factor, rate)
     float_big_sub(temporary, factor)  // rate * (2^63 - 1), no aliased operands.
     if (float_big_compare(product, temporary) >= I64{0}) { return I64{9223372036854775807} }
-    quotient := I64{0}
-    bit := I64{62}
+    ^quotient: I64{0}
+    ^bit: I64{62}
     loop bit >= (I64{0}) {
         float_big_init(factor, rate)
         float_big_shift(factor, bit)
@@ -110,7 +110,7 @@ realtime_release_ref: fn(stream: I64) {
     // A last capture may drop its stream on the worker itself. No handle can
     // join it then; detach the thread before its final worker ref is freed.
     if (handle != I64{0} && sync_load(wrapping(scratch + RT_WORKER_TID)) == thread_tid()) {
-        _ := thread_detach(handle)
+        ^_: thread_detach(handle)
     }
     scheduler_control_drop(sync_load(wrapping(stream + RT_CONTROL)))
     sync_park_drop(sync_load(wrapping(stream + RT_COMPLETION_PARK)))
@@ -144,8 +144,8 @@ realtime_join: fn(stream: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_jet_realtime_stream: fn(stream: I64) -> I64 {
-    _ := sync_add(wrapping(stream + RT_REFS), I64{1})
-    _ := sync_add(wrapping(stream + RT_HANDLES), I64{1})
+    ^_: sync_add(wrapping(stream + RT_REFS), I64{1})
+    ^_: sync_add(wrapping(stream + RT_HANDLES), I64{1})
     stream
 }
 
@@ -198,24 +198,24 @@ realtime_join: fn(stream: I64) {
 // worker_code is checked FunctionAddress(jet_rt_native_realtime_worker).
 #Export(c) jet_rt_native_realtime_start: fn(rate_word: I64, frames_word: I64, env: I64, invoke: I64, release: I64, worker_code: I64, skip_cell: I64) -> I64 {
     if (jet_int_compare(rate_word, I64{0}) <= I64{0} || !int_fits(rate_word, U64{9223372036854775807})) {
-        _ := coll_call1(release, env)
+        ^_: coll_call1(release, env)
         realtime_raise(if (jet_int_compare(rate_word, I64{0}) <= I64{0}) -> scheduler_msg_rt_rate() else -> scheduler_msg_rt_native_range())
         return I64{0}
     }
     rate: jet_int_owned_to_i64(rate_word)
     jet_rt_world_reject_uncontrolled(I64{2})
     if (jet_scheduler_native_propagate() != I64{0}) {
-        _ := coll_call1(release, env)
+        ^_: coll_call1(release, env)
         return I64{0}
     }
     if (jet_int_compare(frames_word, I64{0}) <= I64{0} || !int_fits(frames_word, U64{9223372036854775807})) {
-        _ := coll_call1(release, env)
+        ^_: coll_call1(release, env)
         realtime_raise(if (jet_int_compare(frames_word, I64{0}) <= I64{0}) -> scheduler_msg_rt_frames() else -> scheduler_msg_rt_native_range())
         return I64{0}
     }
     frames: jet_int_owned_to_i64(frames_word)
     if (frames > I64{1152921504606846975}) {
-        _ := coll_call1(release, env)
+        ^_: coll_call1(release, env)
         realtime_raise(scheduler_msg_rt_capacity())
         return I64{0}
     }
@@ -249,7 +249,7 @@ realtime_join: fn(stream: I64) {
     sync_store(wrapping(stream + RT_DEADLINE_IDENTITY), realtime_add(sync_load(wrapping(stream + RT_START_IDENTITY)), offset))
     handle: thread_spawn(worker_code, stream)
     if (handle < I64{0}) {
-        _ := coll_call1(release, env)
+        ^_: coll_call1(release, env)
         sync_store(wrapping(stream + RT_REFS), I64{1})
         realtime_release_ref(stream)
         realtime_raise(scheduler_msg_rt_start_failed())
@@ -284,7 +284,7 @@ rt_realtime_worker_address: fn() -> I64 {
     frames: sync_load(wrapping(stream + RT_FRAMES))
     start: sync_load(wrapping(stream + RT_START))
     sync_mutex_lock(wrapping(scratch + RT_MATH_MUTEX))
-    deadline := realtime_add(start, jet_rt_native_realtime_deadline_offset(rate, frames, I64{1}, I64{0}, scratch))
+    ^deadline: realtime_add(start, jet_rt_native_realtime_deadline_offset(rate, frames, I64{1}, I64{0}, scratch))
     sync_mutex_unlock(wrapping(scratch + RT_MATH_MUTEX))
     loop !realtime_canceled(stream) {
         identity: sync_load(wrapping(stream + RT_DEADLINE_IDENTITY))
@@ -299,7 +299,7 @@ rt_realtime_worker_address: fn() -> I64 {
             realtime_counter_max(wrapping(stream + RT_MAX_LATENESS), lateness)
         }
         body: scheduler_body_enter()
-        _ := coll_call2(sync_load(wrapping(stream + RT_INVOKE)), sync_load(wrapping(stream + RT_ENV)), stream + RT_BUFFER)
+        ^_: coll_call2(sync_load(wrapping(stream + RT_INVOKE)), sync_load(wrapping(stream + RT_ENV)), stream + RT_BUFFER)
         scheduler_body_leave(body)
         if (jet_scheduler_native_propagate() != I64{0}) {
             scheduler_control_cancel(control)
@@ -315,8 +315,8 @@ rt_realtime_worker_address: fn() -> I64 {
         sync_mutex_lock(wrapping(scratch + RT_MATH_MUTEX))
         low: sync_load(wrapping(stream + RT_INDEX_LOW))
         high: sync_load(wrapping(stream + RT_INDEX_HIGH))
-        next_low := low
-        next_high := high
+        ^next_low: low
+        ^next_high: high
         if (low != I64{-1} || high != I64{-1}) {
             next_low = wrapping(low + I64{1})
             if (next_low == I64{0}) { next_high = wrapping(high + I64{1}) }
@@ -331,11 +331,11 @@ rt_realtime_worker_address: fn() -> I64 {
     // Preserve BOTH clock steps: JetInstant.now() samples the provider, then
     // end_identity samples again. The discarded first value is observable to a
     // stepping clock.
-    _ := realtime_now_ns()
+    ^_: realtime_now_ns()
     sync_store(wrapping(stream + RT_END), realtime_now_ns())
     jet_scheduler_shield_enter()
     release_body: scheduler_body_enter()
-    _ := coll_call1(sync_load(wrapping(stream + RT_RELEASE)), sync_load(wrapping(stream + RT_ENV)))
+    ^_: coll_call1(sync_load(wrapping(stream + RT_RELEASE)), sync_load(wrapping(stream + RT_ENV)))
     scheduler_body_leave(release_body)
     jet_scheduler_shield_leave()
     sync_store(wrapping(stream + RT_DONE), I64{1})
@@ -352,7 +352,7 @@ rt_realtime_worker_address: fn() -> I64 {
 
 #Export(c) jet_rt_handle_clone_jet_realtime_receipt: fn(receipt: I64) -> I64 {
     result: jet_rt_alloc(RT_RECEIPT_BYTES, I64{8})
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < RT_RECEIPT_BYTES {
         sync_store(wrapping(result + offset), sync_load(wrapping(receipt + offset)))
         offset += I64{8}
@@ -361,7 +361,7 @@ rt_realtime_worker_address: fn() -> I64 {
 }
 
 #Export(c) jet_rt_handle_eq_jet_realtime_receipt: fn(left: I64, right: I64) -> Bool {
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < RT_RECEIPT_BYTES {
         if (sync_load(wrapping(left + offset)) != sync_load(wrapping(right + offset))) {
             return false

@@ -90,7 +90,7 @@ ENCODING_HOSTILE_BYTES: I64{200}
 
 ENCODING_IO_CHUNK: I64{65536}
 
-encoding_hostile_key := I64{0}
+^encoding_hostile_key: I64{0}
 
 // runtime-init: 3 when encoding_hostile_key
 #Export(c) jet_rt_encoding_hostile_init: fn() {
@@ -117,8 +117,8 @@ encoding_scalar_at: fn(data: I64, at: I64) -> I64 {
     lead: rt_text_byte(wrapping(data + at))
     width: rt_text_width(wrapping(data + at))
     if (width == I64{1}) { return lead }
-    value := lead & (if (width == I64{2}) -> I64{31} else if (width == I64{3}) -> I64{15} else -> I64{7})
-    index := I64{1}
+    ^value: lead & (if (width == I64{2}) -> I64{31} else if (width == I64{3}) -> I64{15} else -> I64{7})
+    ^index: I64{1}
     loop index < width {
         value = (value << I64{6}) | rt_text_byte(wrapping(wrapping(data + at) + index)) & I64{63}
         index += I64{1}
@@ -128,13 +128,13 @@ encoding_scalar_at: fn(data: I64, at: I64) -> I64 {
 
 // Trimmed [start, end) of data[start..end).
 encoding_trim: fn(data: I64, start: I64, end: I64, out: I64) {
-    from := start
+    ^from: start
     loop from < end && encoding_white_space(encoding_scalar_at(data, from)) {
         from += rt_text_width(wrapping(data + from))
     }
-    to := end
+    ^to: end
     loop to > from {
-        back := to - I64{1}
+        ^back: to - I64{1}
         loop back > from && (rt_text_byte(wrapping(data + back)) & I64{192}) == (I64{128}) {
             back -= I64{1}
         }
@@ -148,10 +148,10 @@ encoding_trim: fn(data: I64, start: I64, end: I64, out: I64) {
 // `str.parse<uN>()` of data[start..end): optional '+', decimal digits, no
 // overflow past `limit` (an unsigned bound in U64 bits). -1: Err.
 encoding_parse_unsigned: fn(data: I64, start: I64, end: I64, limit: U64) -> I64 {
-    at := start
+    ^at: start
     if (at < end && rt_text_byte(wrapping(data + at)) == I64{43}) { at += I64{1} }
     if (at >= end) { return I64{-1} }
-    value := U64{0}
+    ^value: U64{0}
     loop at < end {
         digit: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9}) { return I64{-1} }
@@ -180,9 +180,9 @@ encoding_env_plan: fn(name: I64, plan: I64) {
     data: rt_text_data(value)
     length: rt_text_len(value)
     scratch: jet_rt_alloc(I64{16}, I64{8})
-    start := I64{0}
+    ^start: I64{0}
     loop start <= length {
-        end := start
+        ^end: start
         loop end < length && rt_text_byte(wrapping(data + end)) != (I64{44}) -> end += I64{1}
         encoding_trim(data, start, end, scratch)
         from: rt_text_word(scratch)
@@ -201,7 +201,7 @@ encoding_env_plan: fn(name: I64, plan: I64) {
 // the variable is read once per thread (active word 1 keeps "no plan"), so
 // a file write, flush or read costs no environment scan.
 encoding_hostile_state: fn() -> I64 {
-    state := jet_rt_tls_get(encoding_hostile_key)
+    ^state: jet_rt_tls_get(encoding_hostile_key)
     if (state == I64{0}) {
         state = jet_rt_alloc(ENCODING_HOSTILE_BYTES, I64{8})
         thread_zero(state, ENCODING_HOSTILE_BYTES)
@@ -268,7 +268,7 @@ encoding_hostile_write: fn(state: I64, writer: I64, bytes: I64, length: I64) -> 
     if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{128})), limit)) {
         return I64{2}
     }
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < length {
         chunk: encoding_hostile_write_chunk(state, length - offset)
         total: rt_text_word(wrapping(state + I64{128}))
@@ -349,8 +349,8 @@ encoding_hostile_read_done: fn(state: I64, count: I64) -> Bool {
 #Export(c) jet_data_host_path_is_file: fn(data: I64, length: I64, ok: I64, error: I64) -> I64 {
     count: if (length < I64{0} || data == I64{0}) -> I64{0} else -> length
     name: jet_rt_alloc(count + I64{1}, I64{1})
-    at := I64{0}
-    nul := false
+    ^at: I64{0}
+    ^nul: false
     loop at < count {
         byte: host_u8_get(data, at)
         if (byte == I64{0}) { nul = true }
@@ -363,7 +363,7 @@ encoding_hostile_read_done: fn(state: I64, count: I64) -> Bool {
         return encoding_fail(encoding_cause_custom(rt_static_text("InvalidInput"), rt_static_text("file name contained an unexpected NUL byte")), error)
     }
     facts: jet_rt_alloc(I64{128}, I64{8})
-    result := I64{0}
+    ^result: I64{0}
     rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated raw path and the 128-byte stat fact row are live for the syscall") {
         result = os_stat_facts_i64(I64{4}, name, facts)

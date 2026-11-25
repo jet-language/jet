@@ -16,7 +16,7 @@ FRAMES: 1000000
 ROUNDS: 5
 
 push_le: fn(out: ^[U8], value: Int, width: Int) {
-    rest := value
+    ^rest: value
     loop _ in 0..<width {
         out.push(U8{rest % 256})
         rest /%= 256
@@ -24,11 +24,11 @@ push_le: fn(out: ^[U8], value: Int, width: Int) {
 }
 
 payload: fn(frames: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     magic: [U8]{"EDB1"}
     loop byte in magic -> out.push(byte)
     push_le(out, frames, 4)
-    seed := 12345
+    ^seed: 12345
     loop index in 0..<frames {
         seed = (seed * 1103515245 + 12345) % 2147483648
         out.push(U8{index % 4})
@@ -45,7 +45,7 @@ take_pattern_kernel: fn(data: ^^[U8]) -> U64 {
     reader: Reader.over(data)
     reader.take_pattern([U8]{"EDB1"}) ?? return U64{0}
     count: Int{reader.read_u32_le() ?? return U64{0}}
-    check := U64{0}
+    ^check: U64{0}
     loop _ in 0..<count {
         frame: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}{energy:U16le}{load:U16le}"}) ?? return U64{0}
         check += U64{frame.channel} + U64{frame.flags} + U64{frame.sample} + U64{frame.tick} + U64{frame.energy} + U64{frame.load}
@@ -54,7 +54,7 @@ take_pattern_kernel: fn(data: ^^[U8]) -> U64 {
 }
 
 byte_checksum_kernel: fn(data: [U8]) -> U64 {
-    check := U64{0}
+    ^check: U64{0}
     loop byte in data -> check += (U64{byte})
     check
 }
@@ -64,8 +64,8 @@ run: fn() {
     frames: if args.len() > 0 -> Int.parse(args[0]) ?? FRAMES else -> FRAMES
     data: payload(frames)
 
-    best := -1
-    check := U64{0}
+    ^best: -1
+    ^check: U64{0}
     loop _ in 0..<ROUNDS {
         owned: data.copy()  // copy: the reader takes its bytes, and every round reads the same payload
         started: time.instant()

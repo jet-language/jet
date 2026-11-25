@@ -91,8 +91,8 @@ sema_call_devtools_panel_for_field: fn(check: SemaBodyCheck, field: String) -> S
     graph: check.program.registration_graph
     caller: sema_scope_caller_index(check.environment.*, graph) ?? return None
     package: graph.modules[caller].package_identity
-    found := SemaDevtoolsPanelIdentity?{None}
-    count := 0
+    ^found: SemaDevtoolsPanelIdentity?{None}
+    ^count: 0
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].package_identity != package -> next
         loop item_index in 0..<graph.modules[module_index].program.items.len() {
@@ -121,7 +121,7 @@ sema_call_devtools_marks_panel: fn(function: Func) -> Bool Never! {
 // declares `field`.
 sema_call_devtools_state_declares: fn(graph: SemaRegistrationGraph, package: String, function: Func, field: String) -> Bool Never! {
     if function.params.len() != 1 -> return false
-    state_name := ""
+    ^state_name: ""
     if function.params[0].ty == .Named(name) -> state_name = name.copy() else -> return false
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].package_identity != package -> next
@@ -143,8 +143,8 @@ sema_call_devtools_state_declares: fn(graph: SemaRegistrationGraph, package: Str
 // an optional type). A second `#DevPanel` on the same function is the shared
 // non-repeatable marker refusal (StackedRuleLines), reported before this check.
 sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
-    marker_span := Span?{None}
-    marker_valid := true
+    ^marker_span: Span?{None}
+    ^marker_valid: true
     loop marker in func.markers {
         if marker.name != MARKER_DEV_PANEL -> next
         marker_span = Val(marker.span)
@@ -172,7 +172,7 @@ sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, pro
         diagnostics.push(sema_devtools_panel_error("E1411", func.name, "a devtools panel returns `{sema_type_show(return_type)}` instead of `UINode`", "return the portable `UINode` tree from the panel function", func.return_type_span ?? func.name_span))
         return
     }
-    state_name := ""
+    ^state_name: ""
     if func.params[0].ty == .Named(name) -> state_name = name.copy() else {
         return
     }

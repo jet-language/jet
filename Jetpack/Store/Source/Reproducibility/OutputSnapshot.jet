@@ -117,13 +117,13 @@ store_repro_snapshot_for_entry: fn(roots: HangarRoots, entry: StoreEntry) -[FS, 
 
 store_repro_snapshot_output: fn(path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> OutputSnapshot StoreError! {
     canonical: files.canonicalize(path)
-    hook := EnvelopeWalkHook.recording()
+    ^hook: EnvelopeWalkHook.recording()
     digest: if hangar_root == {
         .Val(root) -> pkg_try_output_hash_of_in_hangar_with_policy(path, root, allow_semantic_xattrs, hook) ?? return Err(StoreError.Other(err.message()))
         .None -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, hook) ?? return Err(StoreError.Other(err.message()))
     }
-    nodes := [String:NodeObservation]{}
-    hardlink_first := [String:String]{}
+    ^nodes: [String:NodeObservation]{}
+    ^hardlink_first: [String:String]{}
     loop event in hook.events {
         if event.stage != EnvelopeWalkStage.Node -> next
         relative: store_path_strip_prefix(event.path, canonical) ?? return Err(store_repro_invalid("reproducibility observation escaped its output root"))
@@ -146,7 +146,7 @@ store_repro_snapshot_output: fn(path: String, hangar_root: String?, allow_semant
 store_repro_observe_node: fn(path: String, relative: String, hardlink_first: ^[String:String]) -[FS]> NodeObservation StoreError! {
     info: files.stat(path)
     names: pkg_list_xattr_names(path) ?? return Err(StoreError.Other(err.message()))
-    xattrs := [String]{}
+    ^xattrs: [String]{}
     loop name in names {
         if !pkg_is_excluded_xattr(name) -> xattrs.push(name)
     }
@@ -160,7 +160,7 @@ store_repro_observe_node: fn(path: String, relative: String, hardlink_first: ^[S
     if !info.is_file {
         return Err(store_repro_invalid("reproducibility observed an unsupported special file"))
     }
-    hardlink := String?{None}
+    ^hardlink: String?{None}
     if info.links > 1 {
         identity: "{info.id.device}:{info.id.inode}"
         if hardlink_first.get(identity) == {
@@ -175,9 +175,9 @@ store_repro_observe_node: fn(path: String, relative: String, hardlink_first: ^[S
 // `sha256-<hex>` of a file read through a no-follow handle whose metadata
 // must not change while it is read.
 store_repro_read_file_digest: fn(path: String) -[FS]> String StoreError! {
-    file := files.open(path, links: .Refuse)
+    ^file: files.open(path, links: .Refuse)
     before: store_repro_metadata_fingerprint(file.stat())
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: file.read_bytes(65536)
         if chunk.len() == 0 -> break
@@ -197,7 +197,7 @@ store_repro_metadata_fingerprint: fn(info: files.Stat) -> String Never! {
 }
 
 store_repro_first_node_difference: fn(left: OutputSnapshot, right: OutputSnapshot) -> FirstDifference? Never! {
-    paths := left.nodes.keys().to_list()
+    ^paths: left.nodes.keys().to_list()
     loop path in right.nodes.keys() {
         if !left.nodes.has_key(path) -> paths.push(path)
     }
@@ -249,7 +249,7 @@ store_repro_metadata_difference: fn(left: StoreEntry, right: StoreEntry) -> Firs
             return Val(FirstDifference{path: ".", kind: check.kind, left: check.left, right: check.right})
         }
     }
-    names := left.named_outputs.keys().to_list()
+    ^names: left.named_outputs.keys().to_list()
     loop name in right.named_outputs.keys() {
         if !left.named_outputs.has_key(name) -> names.push(name)
     }
@@ -283,7 +283,7 @@ store_repro_metadata_difference: fn(left: StoreEntry, right: StoreEntry) -> Firs
 // The producer facts that identify an action's provenance, excluding the
 // realized-output facts that legitimately differ between agreeing builds.
 store_repro_producer_provenance_facts: fn(producer: ProducerRecord) -> [String:String] Never! {
-    facts := [String:String]{
+    ^facts: [String:String]{
         "provider": producer.provider,
         "immutable_source": producer.immutable_source,
         "source_digest": producer.source_digest,
@@ -317,7 +317,7 @@ store_repro_json_map: fn(map: [String:String]) -> String Never! {
 }
 
 store_repro_text_object: fn(map: [String:String]) -> Dyn Never! {
-    object := [String:Dyn]{}
+    ^object: [String:Dyn]{}
     loop entry in map -> object[entry.key] = Dyn.Text(entry.value)
     Dyn.Object(object)
 }

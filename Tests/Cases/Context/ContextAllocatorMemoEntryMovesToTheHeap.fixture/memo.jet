@@ -30,16 +30,16 @@ Reuser: struct {
 }
 
 #Memo squares: fn(n: Int) -> [Int] {
-    out := [Int]{}
+    ^out: [Int]{}
     loop i in 0..<n -> out.push(i * i)
     out
 }
 
 run: fn() {
     region: mem.Region.reserve(1 << 22) ?? panic("reserve")
-    reuser := Reuser{region: region, kept: [mem.Block]{}, taken: 0}
-    first := 0
-    second := 0
+    ^reuser: Reuser{region: region, kept: [mem.Block]{}, taken: 0}
+    ^first: 0
+    ^second: 0
     #Context(allocator: reuser) {
         first = squares(40)[39]
         second = squares(40)[39]
@@ -47,10 +47,10 @@ run: fn() {
     inside: squares.cache()
     print("inside the block: {first} {second}, hits={inside.hits} misses={inside.misses} size={inside.size}")
     // Hand the released blocks to other values before the entry is read.
-    filled := 0
+    ^filled: 0
     #Context(allocator: reuser) {
         loop round in 0..<40 {
-            junk := [Int]{}
+            ^junk: [Int]{}
             loop i in 0..<64 -> junk.push(-1 - round - i)
             filled += junk.len()
         }

@@ -58,8 +58,8 @@ VocabularyFile: struct {
 
 // The vocabulary types `text` (a Vocabulary.tsv read from `path`) declares.
 vocabulary_types: fn(path: String, text: String) -> [VocabularyType] VocabularyRowsError! {
-    types := [VocabularyType]{}
-    seen := [String]{}
+    ^types: [VocabularyType]{}
+    ^seen: [String]{}
     loop (index, line) in text.lines() {
         if line == "" || line.starts_with("#") -> next
         at: "{path}:{index + 1}"
@@ -88,7 +88,7 @@ vocabulary_types: fn(path: String, text: String) -> [VocabularyType] VocabularyR
             return Err(rows_fail("{at}: the payload `{payload}` is not a parenthesized field list"))
         }
         if types.len() > 0 && types[types.len() - 1].name == type_name {
-            last := types[types.len() - 1]
+            ^last: types[types.len() - 1]
             if last.markers != markers {
                 return Err(rows_fail("{at}: `{type_name}` has different markers on different rows"))
             }
@@ -113,7 +113,7 @@ vocabulary_types: fn(path: String, text: String) -> [VocabularyType] VocabularyR
 
 // The generated Source/Vocabulary.jet of the package whose rows are `rows_path`.
 render_vocabulary: fn(rows_path: String, types: [VocabularyType]) -> String Never! {
-    out := "{GENERATED_BY}\n// The closed vocabularies declared one row per variant in {rows_path};\n// the module that owns each vocabulary keeps its methods.\n"
+    ^out: "{GENERATED_BY}\n// The closed vocabularies declared one row per variant in {rows_path};\n// the module that owns each vocabulary keeps its methods.\n"
     loop vocabulary in types {
         out = "{out}\n"
         if vocabulary.markers != "" {
@@ -128,9 +128,9 @@ render_vocabulary: fn(rows_path: String, types: [VocabularyType]) -> String Neve
 
 // Every package under PACKAGE_ROOTS with a Vocabulary.tsv, in path order.
 vocabulary_files: fn() -[FS]> [VocabularyFile] VocabularyRowsError! {
-    found := [VocabularyFile]{}
+    ^found: [VocabularyFile]{}
     loop root in PACKAGE_ROOTS {
-        listed := files.list_dir(root) ?? return Err(rows_fail("cannot list {root}: {err}"))
+        ^listed: files.list_dir(root) ?? return Err(rows_fail("cannot list {root}: {err}"))
         listed.sort_by(fn(left: DirEntry, right: DirEntry) { left.name <=> right.name })
         loop entry in listed {
             if !entry.is_dir -> next
@@ -150,8 +150,8 @@ vocabulary_rows_main: fn(args: [String]) -[FS]> String VocabularyRowsError! {
     if args.len() > 1 || (mode != "--check" && mode != "--write") {
         return Err(rows_fail("usage: jet Tools/Agent/VocabularyRows.jet [--check|--write]"))
     }
-    stale := [String]{}
-    count := 0
+    ^stale: [String]{}
+    ^count: 0
     loop file in (vocabulary_files() ?? return Err(err)) {
         text: files.read(file.rows_path) ?? return Err(rows_fail("cannot read {file.rows_path}: {err}"))
         types: vocabulary_types(file.rows_path, text) ?? return Err(err)

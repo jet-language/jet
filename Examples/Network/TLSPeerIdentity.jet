@@ -28,7 +28,7 @@ run: fn() {
     serving: task { listener.serve() ?? panic("serve TLS") }
     tcp: net.tcp_connect(addr) ?? panic("connect loopback")
     budget: 5s
-    secure := tls.client(tcp, server_name: "localhost", config: bounded, deadline: budget) ?? panic("TLS handshake")
+    ^secure: tls.client(tcp, server_name: "localhost", config: bounded, deadline: budget) ?? panic("TLS handshake")
     peer: secure.peer_identity()
     print(peer.verified_server_name)
     print(peer.leaf.der.len() > 0 && peer.certificate_chain.len() > 0 && peer.certificate_chain[0].sha256 == peer.leaf.sha256)

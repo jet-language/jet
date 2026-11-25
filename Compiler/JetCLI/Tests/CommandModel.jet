@@ -48,21 +48,21 @@ command_model_shown_problem: fn(form: String, place: String) -> String? Never! {
 
 // n11: run each row's invocation; `<file>` is a scratch program.
 command_model_run_rows: fn() -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     root: "{model_sys.temp_dir()}/jet-command-model-{model_process.current_pid()}"
     model_files.create_dir_all(root) ?? panic("command-model scratch root")
     program: "{root}/main.jet"
     model_files.write(program, "run: fn() {{\n}}\n") ?? panic("command-model scratch program")
     loop row in JET_CLI_FORMS {
         if row.argv.len() == 0 -> next
-        argv := [String]{}
+        ^argv: [String]{}
         loop word in row.argv {
             // copy: the row and the scratch path keep their own.
             argv.push(if word == "<file>" -> program.copy() else -> word.copy())
         }
         shown: argv.join(" ")
-        refused := false
-        stderr := ""
+        ^refused: false
+        ^stderr: ""
         if jet_cli_plan(argv) == {
             .Done(output) -> {
                 refused = output.stderr.contains("is not built yet")
@@ -97,7 +97,7 @@ command_model_run_rows: fn() -> [String] Never! {
 
 // n12: every row and every refusal a flag or setting list reaches has a card.
 command_model_listed_refusals: fn() -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     loop row in JET_CLI_FORMS {
         if !row.ported && row.card <= 0 -> problems.push("unported `{row.form}` names no card")
     }
@@ -112,7 +112,7 @@ command_model_listed_refusals: fn() -> [String] Never! {
         // A build option is ported on every command that takes it, and so is
         // each of its level flags (`-O2`).
         if build_option_flag_row(spec.long) != None -> next
-        commands := [String]{}
+        ^commands: [String]{}
         if jet_cli_flag_takes(spec, "run") -> commands.push("run")
         // `jet dev` watches by itself: `--watch` (`=on`/`=off`) is its own switch.
         if jet_cli_flag_takes(spec, "dev") && spec.long != "--watch" -> commands.push("dev")
@@ -150,7 +150,7 @@ command_model_named_form: fn(first: String, second: String) -> String Never! {
 
 // The `--flag` names a usage line spells.
 command_model_flags_in: fn(text: String) -> [String] Never! {
-    flags := [String]{}
+    ^flags: [String]{}
     spaced: text.replace("[", " ").replace("]", " ").replace("|", " ").replace("=", " ").replace("(", " ").replace(")", " ").replace(",", " ")
     loop word in spaced.split(" ").to_list() {
         if word.starts_with("--") && word.len() > 2 -> flags.push(word.copy())  // copy: the word list keeps its word.
@@ -160,7 +160,7 @@ command_model_flags_in: fn(text: String) -> [String] Never! {
 
 // The scope forms of each `With <forms>: ` clause of a flag's help.
 command_model_scope_forms: fn(help: String) -> [String] Never! {
-    forms := [String]{}
+    ^forms: [String]{}
     loop clause in help.split("; ").to_list() {
         if !clause.starts_with("With ") && !clause.starts_with("with ") -> next
         rest: clause.slice(5..<clause.len())
@@ -180,7 +180,7 @@ command_model_line_form: fn(text: String) -> String Never! {
 
 // n10: the usage page, man and fish completions show only ported forms.
 command_model_shown_forms: fn() -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     loop line in jet_cli_usage_page("frequency", "a0.0.43-dev+29517f5447").split("\n").to_list() {
         if !line.starts_with("  jet ") -> next
         form: command_model_line_form(line.slice(6..<line.len()))
@@ -192,7 +192,7 @@ command_model_shown_forms: fn() -> [String] Never! {
         }
     }
     man_lines: jet_cli_man_page().split("\n").to_list()
-    in_flags := false
+    ^in_flags: false
     loop index in 0..<man_lines.len() {
         line: man_lines[index]
         if line == ".SH Flags" -> in_flags = true
@@ -230,7 +230,7 @@ command_model_shown_forms: fn() -> [String] Never! {
 // line is `  jet <form>`, padded, then ` #<card>`; a shape row's form
 // follows `jet <command> `.
 command_model_not_built_forms: fn(page: String) -> [String] Never! {
-    forms := [String]{}
+    ^forms: [String]{}
     loop line in page.split("\n").to_list() {
         parts: line.split(" #").to_list()
         if parts.len() != 2 -> next
@@ -244,7 +244,7 @@ command_model_not_built_forms: fn(page: String) -> [String] Never! {
 
 // n13: `jet help --all` lists every unported row and no ported one.
 command_model_not_built_page: fn() -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     listed: command_model_not_built_forms(jet_cli_not_built_page())
     loop row in JET_CLI_FORMS {
         if row.ported {
@@ -261,7 +261,7 @@ command_model_not_built_page: fn() -> [String] Never! {
 }
 
 #Test("command model: rows refuse with their card, help shows only ported forms") {
-    problems := [String]{}
+    ^problems: [String]{}
     // copy: each list keeps its rows.
     loop problem in command_model_run_rows() -> problems.push(problem.copy())
     loop problem in command_model_listed_refusals() -> problems.push(problem.copy())

@@ -17,7 +17,7 @@ WhyLocation: struct {
     not_found: fn() -> WhyLocation Never! { WhyLocation{path: "not found", line: None, text: None} }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["path"] = Dyn.Text(self.path.copy())
         object["line"] = store_explain_optional_int(self.line)
         object["text"] = if self.text == {
@@ -68,8 +68,8 @@ PackageWhy: struct {
             .Val(entry) -> entry.name
             .None -> store_explain_package_name(explanation.query)
         }
-        names := [String]{package}
-        qualified := [String]{explanation.query}
+        ^names: [String]{package}
+        ^qualified: [String]{explanation.query}
         if explanation.entry == {
             .Val(entry) -> {
                 names.push(entry.name)
@@ -78,10 +78,10 @@ PackageWhy: struct {
             .None -> {}
         }
         requesting: store_why_requesting_projection(store_sorted_unique(names), store_sorted_unique(qualified))
-        provider := ""
-        facts := [String:String]{}
-        source := ""
-        source_digest := ""
+        ^provider: ""
+        ^facts: [String:String]{}
+        ^source: ""
+        ^source_digest: ""
         if explanation.provider == {
             .Val(found) -> {
                 provider = found.provider
@@ -91,7 +91,7 @@ PackageWhy: struct {
             }
             .None -> {}
         }
-        receipt := "not recorded"
+        ^receipt: "not recorded"
         if explanation.entry == {
             .Val(entry) -> {
                 if entry.receipt != "" -> receipt = entry.receipt
@@ -114,23 +114,23 @@ PackageWhy: struct {
     }
 
     to_json: fn(self) -> String ReportError! {
-        requesting := [String:Dyn]{}
+        ^requesting: [String:Dyn]{}
         requesting["env_file"] = self.requesting.env_file.to_tree()
         requesting["lock_file"] = self.requesting.lock_file.to_tree()
-        origin := [String:Dyn]{}
+        ^origin: [String:Dyn]{}
         origin["catalog"] = Dyn.Text(self.origin.catalog.copy())
         origin["endpoint"] = Dyn.Text(self.origin.endpoint.copy())
         origin["cache_endpoint"] = Dyn.Text(self.origin.cache_endpoint.copy())
         origin["signature_chain"] = Dyn.Text(self.origin.signature_chain.copy())
         origin["source"] = Dyn.Text(self.origin.source.copy())
         origin["source_digest"] = Dyn.Text(self.origin.source_digest.copy())
-        trust := [String:Dyn]{}
+        ^trust: [String:Dyn]{}
         trust["grade"] = Dyn.Text(self.trust.grade.copy())
         trust["reason"] = Dyn.Text(self.trust.reason.copy())
-        disk := [String:Dyn]{}
+        ^disk: [String:Dyn]{}
         disk["bytes"] = store_explain_optional_int(self.disk.bytes)
         disk["objects"] = Dyn.Int(self.disk.objects)
-        payload := [String:Dyn]{}
+        ^payload: [String:Dyn]{}
         payload["query"] = Dyn.Text(self.query.copy())
         payload["package"] = Dyn.Text(self.package.copy())
         payload["available"] = Dyn.Bool(self.available)
@@ -149,7 +149,7 @@ PackageWhy: struct {
             .Val(bytes) -> "{bytes} B ({self.disk.objects} closure objects)"
             .None -> if self.disk.objects > 0 -> "not recorded ({self.disk.objects} closure objects)" else -> "not recorded"
         }
-        out := "package why {self.package}\n"
+        ^out: "package why {self.package}\n"
         if !self.available -> out = "{out}status       no realized StoreEntry\n"
         out = "{out}requesting\n  env file     {store_why_location_text(self.requesting.env_file)}\n  lock line    {store_why_location_text(self.requesting.lock_file)}\n"
         out = "{out}origin\n  catalog      {store_explain_empty_dash(self.origin.catalog)}\n  endpoint     {store_explain_empty_dash(self.origin.endpoint)}\n  cache        {store_explain_empty_dash(self.origin.cache_endpoint)}\n  signature chain {store_explain_empty_dash(self.origin.signature_chain)}\n  source       {store_explain_empty_dash(self.origin.source)}\n  source digest {store_explain_empty_dash(self.origin.source_digest)}\n"
@@ -177,7 +177,7 @@ store_why_requesting_projection: fn(names: [String], qualified: [String]) -> Why
 
 // The first regular, non-linked `name` in `start` or an ancestor.
 store_why_nearest_real_file: fn(start: String, name: String) -> String? Never! {
-    current := start
+    ^current: start
     loop {
         candidate: files.join(current, name)
         if files.stat(candidate) == {
@@ -222,8 +222,8 @@ store_why_source_line: fn(raw: String, names: [String], qualified: [String]) -> 
 // else the first line naming a qualified reference.
 store_why_lock_line: fn(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {
     lines: store_text_lines(raw)
-    block := [WhyLine]{}
-    in_block := false
+    ^block: [WhyLine]{}
+    ^in_block: false
     loop index in 0..<lines.len() {
         line: lines[index]
         if line.trim() == "[[package]]" {
@@ -268,7 +268,7 @@ store_why_source_line_matches: fn(line: String, names: [String], qualified: [Str
         .Val(parts) -> parts.before
         .None -> line
     }
-    values := [String]{}
+    ^values: [String]{}
     loop name in names -> values.push(name.copy())
     loop reference in qualified -> values.push(reference.copy())
     loop value in values {
@@ -281,7 +281,7 @@ store_why_source_line_matches: fn(line: String, names: [String], qualified: [Str
 store_why_contains_package_token: fn(haystack: String, needle: String) -> Bool Never! {
     raw: haystack.bytes()
     pattern: needle.bytes()
-    offset := 0
+    ^offset: 0
     loop offset + pattern.len() <= raw.len() {
         if !pkg_bytes_starts_with(raw, offset, pattern) {
             offset += 1
@@ -321,8 +321,8 @@ store_why_location_text: fn(location: WhyLocation) -> String Never! {
 
 // At most 120 characters, then an ellipsis.
 store_why_compact_line: fn(line: String) -> String Never! {
-    kept := ""
-    count := 0
+    ^kept: ""
+    ^count: 0
     loop scalar in line.chars() {
         if count < 120 -> kept = "{kept}{scalar}"
         count += 1
@@ -337,7 +337,7 @@ store_why_origin_projection: fn(roots: HangarRoots, provider: String, fact_map: 
     tier: fact_map.get("nix.index.tier")
     catalog: store_why_catalog_origin(tier, fact_map, provider)
     nix: provider == "nix"
-    cache_endpoint := fact_map.get("nix.cache.endpoint")
+    ^cache_endpoint: fact_map.get("nix.cache.endpoint")
     if cache_endpoint == None && nix {
         cache_endpoint = store_why_config_value(roots, "config/nix-cache-v1.endpoint")
     }
@@ -346,14 +346,14 @@ store_why_origin_projection: fn(roots: HangarRoots, provider: String, fact_map: 
     cache: cache_endpoint ?? "not recorded"
     // A signed-index endpoint is the strongest catalog origin; otherwise the
     // configured cache endpoint still answers where the bytes came from.
-    endpoint := fact_map.get("nix.index.endpoint")
+    ^endpoint: fact_map.get("nix.index.endpoint")
     if endpoint == None && nix {
         endpoint = store_why_config_value(roots, "config/nix-index-v1.endpoint")
     }
     if endpoint == None {
         endpoint = if nix && cache != "not recorded" -> Val(cache) else -> fact_map.get("source.url")
     }
-    signature_chain := fact_map.get("nix.index.signature-chain")
+    ^signature_chain: fact_map.get("nix.index.signature-chain")
     if signature_chain == None {
         if fact_map.get("artifact.verification") == {
             .Val(verification) -> { signature_chain = Val("not applicable ({verification})") }
@@ -439,10 +439,10 @@ store_why_trust_projection: fn(provider: String, fact_map: [String:String]) -> W
 // Bytes on disk of the known local closure objects, counted once per path.
 // Any unmeasurable object makes the total unknown.
 store_why_disk_projection: fn(graph: ExplainGraph) -> WhyDisk Never! {
-    paths := [String]{}
-    bytes := 0
-    objects := 0
-    measurable := true
+    ^paths: [String]{}
+    ^bytes: 0
+    ^objects: 0
+    ^measurable: true
     loop object in graph.closure {
         if object.external || !object.known || object.path == "" -> next
         if paths.contains(object.path) -> next
@@ -468,7 +468,7 @@ store_why_disk_size: fn(path: String) -> Int? Never! {
 
 // Every owner of a direct or transitive referrer, sorted and unique.
 store_why_dependent_projection: fn(graph: ExplainGraph) -> [String] Never! {
-    owners := [String]{}
+    ^owners: [String]{}
     views: [[ExplainObject]]{graph.referrers, graph.direct_referrers}
     loop view in views {
         loop object in view {

@@ -182,7 +182,7 @@ publication_authorize_registry_candidate: fn(policy: PublicationAdvisoryPolicy, 
 
 publication_authorize_registry_candidate_with_source_exception: fn(policy: PublicationAdvisoryPolicy, package: String, raw_version: String, source_exception: PackagePolicyException?) PublicationDiagnosticError! {
     version: publication_parse_semver(raw_version) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2610("registry package", "{package} has an invalid selected version `{raw_version}`")})
-    release_index := Int?{None}
+    ^release_index: Int?{None}
     loop index in 0..<policy.feed.releases.len() {
         release: policy.feed.releases[index]
         if release.package == package && release.version == version {
@@ -199,7 +199,7 @@ publication_authorize_registry_candidate_with_source_exception: fn(policy: Publi
             return Err(PublicationDiagnosticError{diagnostic: publication_e2610("source policy exception", "exception `{exception.id}` is not an active exact exception for {package}#{version}")})
         }
     }
-    feed_exception := false
+    ^feed_exception: false
     loop exception in policy.feed.exceptions {
         if exception.package == package && exception.version == version && exception.expires_at > policy.now {
             feed_exception = true
@@ -233,9 +233,9 @@ publication_parse_advisory_feed: fn(text: String) -> PublicationAdvisoryFeed Pub
     // Core lines() returns its canonical List; traverse it once without making
     // a second collection of trimmed records.
     lines: text.lines()
-    number := 0
-    magic := ""
-    magic_line := 0
+    ^number: 0
+    ^magic: ""
+    ^magic_line: 0
     loop number < lines.len() {
         raw: lines[number]
         number += 1
@@ -249,8 +249,8 @@ publication_parse_advisory_feed: fn(text: String) -> PublicationAdvisoryFeed Pub
     if magic != PUBLICATION_ADVISORY_FEED_MAGIC {
         return Err(publication_advisory_bad("line {magic_line} must start with {PUBLICATION_ADVISORY_FEED_MAGIC}"))
     }
-    header := ""
-    header_line := 0
+    ^header: ""
+    ^header_line: 0
     loop number < lines.len() {
         raw: lines[number]
         number += 1
@@ -275,10 +275,10 @@ publication_parse_advisory_feed: fn(text: String) -> PublicationAdvisoryFeed Pub
     if fields[5].trim() == "" || fields[6].trim() == "" || fields[7].trim() == "" {
         return Err(publication_advisory_bad("line {header_line} has an empty trust or signature field"))
     }
-    feed := PublicationAdvisoryFeed{sequence: sequence, issued_at: issued, expires_at: expires, maturity_seconds: maturity, key_id: fields[5].trim(), public_key: fields[6].trim(), signature: fields[7].trim(), releases: [PublicationAdvisoryRelease]{}, advisories: [PublicationAdvisory]{}, exceptions: [PublicationAdvisoryException]{}}
-    release_keys := [String:Bool]{}
-    advisory_ids := [String:Bool]{}
-    exception_keys := [String:Bool]{}
+    ^feed: PublicationAdvisoryFeed{sequence: sequence, issued_at: issued, expires_at: expires, maturity_seconds: maturity, key_id: fields[5].trim(), public_key: fields[6].trim(), signature: fields[7].trim(), releases: [PublicationAdvisoryRelease]{}, advisories: [PublicationAdvisory]{}, exceptions: [PublicationAdvisoryException]{}}
+    ^release_keys: [String:Bool]{}
+    ^advisory_ids: [String:Bool]{}
+    ^exception_keys: [String:Bool]{}
     loop number < lines.len() {
         raw: lines[number]
         number += 1
@@ -308,7 +308,7 @@ publication_parse_advisory_feed: fn(text: String) -> PublicationAdvisoryFeed Pub
             }
             advisory_ids[id] = true
             affected: publication_parse_version_req(record[3].trim()) ?? return Err(publication_advisory_bad("line {line_number} has an invalid affected version range"))
-            fixed := PublicationSemVer?{None}
+            ^fixed: PublicationSemVer?{None}
             if record[4].trim() != "" {
                 fixed = Val(publication_parse_semver(record[4].trim()) ?? return Err(publication_advisory_bad("line {line_number} has an invalid fixed version")))
             }
@@ -372,8 +372,8 @@ publication_advisory_is_digest: fn(value: String) -> Bool Never! {
 
 // Sort indices, not cloned records: signed ordering is package+SemVer / id.
 publication_advisory_feed_payload: fn(feed: PublicationAdvisoryFeed) -> String Never! {
-    out := [String]{"{PUBLICATION_ADVISORY_FEED_MAGIC}\nfeed|{feed.sequence}|{feed.issued_at}|{feed.expires_at}|{feed.maturity_seconds}|{feed.key_id}|{feed.public_key}\n"}
-    releases := [Int]{}
+    ^out: [String]{"{PUBLICATION_ADVISORY_FEED_MAGIC}\nfeed|{feed.sequence}|{feed.issued_at}|{feed.expires_at}|{feed.maturity_seconds}|{feed.key_id}|{feed.public_key}\n"}
+    ^releases: [Int]{}
     loop index in 0..<feed.releases.len() -> releases.push(index)
     releases.sort_by(fn(a: Int, b: Int) {
         order: feed.releases[a].package <=> feed.releases[b].package
@@ -383,7 +383,7 @@ publication_advisory_feed_payload: fn(feed: PublicationAdvisoryFeed) -> String N
         release: feed.releases[index]
         out.push("release|{release.package}#{release.version}|{release.first_seen}|{publication_source_class_label(release.source_class)}\n")
     }
-    advisories := [Int]{}
+    ^advisories: [Int]{}
     loop index in 0..<feed.advisories.len() -> advisories.push(index)
     advisories.sort_by(fn(a: Int, b: Int) { feed.advisories[a].id <=> feed.advisories[b].id })
     loop index in advisories {
@@ -391,7 +391,7 @@ publication_advisory_feed_payload: fn(feed: PublicationAdvisoryFeed) -> String N
         fixed: if advisory.fixed == .Val(version) -> publication_semver_display(version) else -> ""
         out.push("advisory|{advisory.id}|{advisory.package}|{advisory.affected.raw}|{fixed}|{advisory.title}|{publication_severity_label(advisory.severity)}\n")
     }
-    exceptions := [Int]{}
+    ^exceptions: [Int]{}
     loop index in 0..<feed.exceptions.len() -> exceptions.push(index)
     exceptions.sort_by(fn(a: Int, b: Int) {
         order: feed.exceptions[a].package <=> feed.exceptions[b].package
@@ -453,9 +453,9 @@ publication_verify_advisory_feed: fn(feed: PublicationAdvisoryFeed, trust: Publi
 }
 
 publication_parse_advisory_trust: fn(text: String) -> PublicationAdvisoryTrustRoot PublicationDiagnosticError! {
-    root := PublicationAdvisoryTrustRoot{}
-    seen := [String]{}
-    number := 0
+    ^root: PublicationAdvisoryTrustRoot{}
+    ^seen: [String]{}
+    ^number: 0
     loop raw in text.lines() {
         number += 1
         line: raw.trim()
@@ -512,10 +512,10 @@ publication_audit_advisory_feed_with_source_exceptions: fn(lock: LockFile, feed:
 }
 
 publication_lock_maturity_diagnostics: fn(lock: LockFile, feed: PublicationAdvisoryFeed, maturity_seconds: Int, now: Int, exceptions: [PackagePolicyException]) -> PublicationLockMaturity PublicationDiagnosticError! {
-    result := PublicationLockMaturity{maturity: [Diagnostic]{}, source_exceptions: [String]{}}
+    ^result: PublicationLockMaturity{maturity: [Diagnostic]{}, source_exceptions: [String]{}}
     loop package in lock.packages {
         version: publication_locked_package_version(package)
-        release_index := Int?{None}
+        ^release_index: Int?{None}
         loop index in 0..<feed.releases.len() {
             release: feed.releases[index]
             if release.package == package.name && release.version == version {
@@ -538,13 +538,13 @@ publication_lock_maturity_diagnostics: fn(lock: LockFile, feed: PublicationAdvis
         release: feed.releases[index]
         required: if release.source_class == .ThirdParty -> maturity_seconds else -> 0
         mature_at: publication_advisory_saturating_add(release.first_seen, required)
-        feed_exception := false
+        ^feed_exception: false
         loop exception in feed.exceptions {
             if exception.package == package.name && exception.version == version && exception.expires_at > now {
                 feed_exception = true
             }
         }
-        source_exception := false
+        ^source_exception: false
         loop exception in exceptions {
             if exception.matches(package.name, publication_semver_display(version)) && exception.id.trim() != "" && exception.reason.trim() != "" && exception.expires_at > now {
                 result.source_exceptions.push(exception.summary())
@@ -574,7 +574,7 @@ publication_locked_package_version: fn(package: LockedPackage) -> PublicationSem
 }
 
 publication_audit_lockfile: fn(lock: LockFile, advisories: [PublicationAdvisory]) -> [PublicationAuditMatch] PublicationDiagnosticError! {
-    matches := [PublicationAuditMatch]{}
+    ^matches: [PublicationAuditMatch]{}
     loop package in lock.packages {
         version: publication_locked_package_version(package)
         loop advisory in advisories {

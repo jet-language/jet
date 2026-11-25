@@ -50,7 +50,7 @@ Ledger: struct {
 
     impl Encode {
         encode: fn(self) -> Dyn {
-            members := [String:Dyn]{}
+            ^members: [String:Dyn]{}
             loop line in self.lines -> members[line.name.copy()] = line.amount.encode()
             Dyn.Object(members)
         }
@@ -59,8 +59,8 @@ Ledger: struct {
     impl Decode {
         decode: fn(tree: Dyn) -> Ledger [FieldError]! {
             if tree == .Object(entries) {
-                lines := [{name: String, amount: Money}]{}
-                errors := [FieldError]{}
+                ^lines: [{name: String, amount: Money}]{}
+                ^errors: [FieldError]{}
                 loop entry in entries {
                     if FieldError.under(entry.key, entry.value.decode<Money>()) == {
                         .Ok(amount) -> { lines.push({name: entry.key.copy(), amount: amount}) }

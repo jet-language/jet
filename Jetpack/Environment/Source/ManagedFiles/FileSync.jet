@@ -106,7 +106,7 @@ FilePlan: struct {
     // same snapshot, so trust cannot approve a path while a different file
     // is applied later.
     source_snapshot_hash: fn(self) -> String Never! {
-        canonical := "jet-managed-source-snapshot-v1\n".bytes()
+        ^canonical: "jet-managed-source-snapshot-v1\n".bytes()
         loop file in self.planned {
             loop byte in file.declaration.destination.bytes() -> canonical.push(byte)
             canonical.push(U8{0})
@@ -136,11 +136,11 @@ env_files_plan: fn(project_dir: String, declarations: [ManagedFile]) -[FS, Env]>
     objects_dir: files.join(files_root, ENV_FILES_OBJECTS_DIR)
     state_path: files.join(files_root, ENV_FILES_STATE_FILE)
     state_before: env_files_load_state(state_path)
-    sorted := declarations
+    ^sorted: declarations
     sorted.sort_by(fn(declaration) { declaration.destination })
-    planned := [PlannedFile]{}
-    actions := [FileAction]{}
-    state_after := state_before
+    ^planned: [PlannedFile]{}
+    ^actions: [FileAction]{}
+    ^state_after: state_before
     loop declaration in sorted {
         destination: env_files_safe_project_path(project_root, declaration.destination, "destination")
         bytes: env_files_resolve_bytes(project_root, declaration)
@@ -150,7 +150,7 @@ env_files_plan: fn(project_dir: String, declarations: [ManagedFile]) -[FS, Env]>
         seed: declaration.mode == FileMode.Seed
         if kind != FileActionKind.Preserve && !seed {
             state_after.entries[declaration.destination] = ManagedStateEntry{digest: digest, mode: declaration.mode, permissions: declaration.permissions, sensitive: declaration.sensitive, generation: declaration.generation}
-        } else { _ := state_after.entries.remove(declaration.destination) }
+        } else { ^_: state_after.entries.remove(declaration.destination) }
         planned.push(PlannedFile{declaration: declaration, bytes: bytes, digest: digest, destination: destination, action: kind})
     }
     Ok(FilePlan{actions: actions, planned: planned, state_before: state_before, state_after: state_after, state_path: state_path, objects_dir: objects_dir})
@@ -285,8 +285,8 @@ env_files_create_new_file: fn(path: String, permissions: Int?) -[FS]> FileWriter
 }
 
 env_files_apply_plan: fn(plan: FilePlan) -[FS, Env]> FileSyncReport EnvironmentError! {
-    report := FileSyncReport{applied: 0, preserved: 0, unchanged: 0}
-    has_mutations := false
+    ^report: FileSyncReport{applied: 0, preserved: 0, unchanged: 0}
+    ^has_mutations: false
     loop file in plan.planned {
         if file.action.mutates() -> has_mutations = true
     }
@@ -305,7 +305,7 @@ env_files_apply_plan: fn(plan: FilePlan) -[FS, Env]> FileSyncReport EnvironmentE
     if has_mutations {
         files.create_dir_all(backup_dir) ?? return Err(env_files_error("couldn't create managed file rollback area: {err}"))
     }
-    journal := ManagedApplyJournal{backups: [ManagedBackup]{}, created: [String]{}, new_objects: [String]{}}
+    ^journal: ManagedApplyJournal{backups: [ManagedBackup]{}, created: [String]{}, new_objects: [String]{}}
     if env_files_apply_steps(plan, backup_dir, report, journal) == {
         .Err(error) -> {
             loop index in 0..<journal.created.len() {
@@ -371,7 +371,7 @@ env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: ^FileSyncR
 }
 
 env_files_read_all: fn(reader: ^FileReader) -[FS]> [U8] IOError! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(ENV_FILES_READ_CHUNK)
         if chunk.len() == 0 -> break
@@ -385,7 +385,7 @@ env_files_ensure_object: fn(plan: FilePlan, file: PlannedFile, new_objects: ^[St
     mode: env_files_object_permissions(file.declaration)
     if env_files_open_existing_object(object) == {
         .Val(opened) -> {
-            reader := opened
+            ^reader: opened
             existing: env_files_read_all(reader) ?? return Err(env_files_error("couldn't read managed object `{object}`: {err}"))
             if pkg_sha256_hex(existing) != file.digest {
                 return Err(env_files_error("managed object `{object}` failed its content hash"))
@@ -394,7 +394,7 @@ env_files_ensure_object: fn(plan: FilePlan, file: PlannedFile, new_objects: ^[St
         }
         .None -> {
             temp: files.join(plan.objects_dir, ".{file.digest}.tmp-{sys.pid()}")
-            output := env_files_create_new_file(temp, Val(mode)) ?? return Err(env_files_error("couldn't create managed object `{object}`: {err}"))
+            ^output: env_files_create_new_file(temp, Val(mode)) ?? return Err(env_files_error("couldn't create managed object `{object}`: {err}"))
             output.write_bytes(file.bytes) ?? return Err(env_files_error("couldn't write managed object `{object}`: {err}"))
             output.fsync() ?? return Err(env_files_error("couldn't write managed object `{object}`: {err}"))
             output.set_mode(mode) ?? return Err(env_files_error("couldn't set permissions on `{temp}`: {err}"))
@@ -446,7 +446,7 @@ env_files_install_file: fn(file: PlannedFile, object: String) -[FS, Env]> Enviro
         }
         .Seed | .Copy -> {
             permissions: env_files_destination_permissions(file.declaration)
-            output := env_files_create_new_file(temp, permissions) ?? return Err(env_files_error("couldn't create `{file.declaration.destination}`: {err}"))
+            ^output: env_files_create_new_file(temp, permissions) ?? return Err(env_files_error("couldn't create `{file.declaration.destination}`: {err}"))
             output.write_bytes(file.bytes) ?? return Err(env_files_error("couldn't write `{file.declaration.destination}`: {err}"))
             output.fsync() ?? return Err(env_files_error("couldn't write `{file.declaration.destination}`: {err}"))
             if permissions == .Val(mode) {
@@ -485,7 +485,7 @@ env_files_safe_project_path: fn(project_root: String, raw: String, label: String
         return Err(env_files_error("managed file {label} `{raw}` must stay inside the project"))
     }
     candidate: files.join(project_root, raw)
-    probe := candidate
+    ^probe: candidate
     loop !files.exists(probe) && probe != project_root {
         parent: files.dirname(probe)
         if parent == "" || parent == probe -> break
@@ -508,7 +508,7 @@ env_files_load_state: fn(path: String) -[FS]> ManagedFileState EnvironmentError!
             }
         }
     }
-    state := ManagedFileState.empty()
+    ^state: ManagedFileState.empty()
     lines: text.lines()
     loop line_number in 0..<lines.len() {
         line: lines[line_number]
@@ -528,7 +528,7 @@ env_files_load_state: fn(path: String) -[FS]> ManagedFileState EnvironmentError!
                 return Err(env_files_error("managed file state has unknown mode `{mode_name}`"))
             }
         }
-        permissions := Int?{None}
+        ^permissions: Int?{None}
         if fields[4] != "" {
             parsed: env_files_parse_u32(fields[4]) ?? return Err(env_files_error("managed file state has invalid permissions"))
             permissions = Val(parsed)
@@ -540,7 +540,7 @@ env_files_load_state: fn(path: String) -[FS]> ManagedFileState EnvironmentError!
                 return Err(env_files_error("managed file state has invalid sensitivity"))
             }
         }
-        generation := String?{None}
+        ^generation: String?{None}
         if fields[6] != "" -> generation = Val(env_files_unescape(fields[6]))
         state.entries[destination] = ManagedStateEntry{digest: digest, mode: mode, permissions: permissions, sensitive: sensitive, generation: generation}
     }
@@ -557,7 +557,7 @@ env_files_write_state_atomic: fn(path: String, state: ManagedFileState) -[FS, En
     parent: files.dirname(path)
     files.create_dir_all(parent) ?? return Err(env_files_error("couldn't create managed file state directory: {err}"))
     temp: files.join(parent, ".state-{sys.pid()}.tmp")
-    lines := [String]{"{ENV_FILES_STATE_HEADER}\n"}
+    ^lines: [String]{"{ENV_FILES_STATE_HEADER}\n"}
     loop destination in envmodel_sorted_keys(state.entries) {
         entry: state.entries[destination]
         permissions: if entry.permissions == {
@@ -582,7 +582,7 @@ env_files_write_state_atomic: fn(path: String, state: ManagedFileState) -[FS, En
 
 // Stage `bytes` in a new file, sync it, and rename it over `path`.
 env_files_publish: fn(temp: String, path: String, bytes: [U8]) -[FS]> IOError! {
-    output := files.create(temp, if_exists: .Refuse)
+    ^output: files.create(temp, if_exists: .Refuse)
     output.write_bytes(bytes)
     output.fsync()
     files.rename(temp, path)
@@ -601,8 +601,8 @@ env_files_hex_value: fn(code: Int) -> Int Never! {
 
 env_files_unescape: fn(value: String) -> String EnvironmentError! {
     bytes: value.bytes()
-    output := [U8]{}
-    index := 0
+    ^output: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         if (Int{bytes[index]}) == 37 {
             if index + 2 >= bytes.len() {

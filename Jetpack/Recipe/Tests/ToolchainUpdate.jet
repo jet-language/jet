@@ -25,7 +25,7 @@ recipe_update_test_tree: fn(label: String) -[FS, Env, Rand]> String {
 }
 
 recipe_update_test_key: fn(seed: Int) -> crypto.SigningKey {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<32 -> bytes.push(U8{seed})
     crypto.SigningKey.from_bytes(bytes) ?? panic("a 32-byte seed is a signing key")
 }
@@ -36,7 +36,7 @@ recipe_update_test_now: fn() -[Time]> Int {
 
 // A canonical signature sidecar over `domain || bytes`.
 recipe_update_test_sidecar: fn(domain: String, bytes: [U8], key: crypto.SigningKey) -> [U8] {
-    message := domain.bytes()
+    ^message: domain.bytes()
     loop byte in bytes -> message.push(byte)
     signature: crypto.sign(key, message) ?? panic("sign")
     ToolchainSignatureSidecar{schema: 1, key_id: RECIPE_UPDATE_TEST_KEY_ID, algorithm: "ed25519", signature: base64.encode(signature.bytes)}.canonical().bytes()
@@ -153,7 +153,7 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
 
 #Test("toolchain keyless override is local only") {
     tree: recipe_update_test_tree("endpoint")
-    options := ToolchainUpdateOptions{
+    ^options: ToolchainUpdateOptions{
         endpoint: TOOLCHAIN_DEFAULT_ENDPOINT,
         channel: "stable",
         platform: RECIPE_UPDATE_TEST_TARGET,
@@ -278,7 +278,7 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
 
 #Test("toolchain apply rejects a cross platform selection before resolution") {
     tree: recipe_update_test_tree("cross-platform")
-    options := recipe_update_test_options(tree, files.join(tree, "unused.pub"), true, true)
+    ^options: recipe_update_test_options(tree, files.join(tree, "unused.pub"), true, true)
     options.platform = if recipe_toolchain_default_target() == RECIPE_UPDATE_TEST_TARGET -> "aarch64-unknown-linux-gnu" else -> RECIPE_UPDATE_TEST_TARGET
     if recipe_toolchain_update_run_at(options, None, recipe_update_test_now()) == {
         .Ok(_) -> { panic("cross-platform apply must be rejected") }
@@ -293,20 +293,20 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
     now: TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS + 1000000
     base: ToolchainChannelManifest{schema: 1, channel: "stable", version: "1.2.3", sequence: 1, published_at: now - 1, expires_at: now + 100, min_version: "1.0.0", artifacts: [ToolchainArtifact]{}}
     recipe_update_validate_manifest_policy(base, options, now) ?? panic("fresh manifest policy")
-    expired := base
+    ^expired: base
     expired.expires_at = now
     assert(recipe_update_test_policy_error(expired, options, now).contains("expired"))
-    future := base
+    ^future: base
     future.published_at = now + TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS + 1
     future.expires_at = future.published_at + 100
     assert(recipe_update_test_policy_error(future, options, now).contains("future"))
-    stale := base
+    ^stale: base
     stale.published_at = now - TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS - 1
     assert(recipe_update_test_policy_error(stale, options, now).contains("freshness"))
-    downgrade := base
+    ^downgrade: base
     downgrade.version = "0.9.0"
     assert(recipe_update_test_policy_error(downgrade, options, now).contains("downgrade"))
-    too_new_minimum := downgrade
+    ^too_new_minimum: downgrade
     too_new_minimum.version = "1.2.3"
     too_new_minimum.min_version = "1.1.0"
     too_new_minimum.published_at = now - 1
@@ -322,7 +322,7 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
     recipe_update_write_state(options.state_path, state) ?? panic("write accepted state")
     manifest: ToolchainChannelManifest{schema: 1, channel: "stable", version: "1.2.3", sequence: 7, published_at: 999999, expires_at: 1000100, min_version: "1.0.0", artifacts: [ToolchainArtifact]{}}
     assert(recipe_update_test_policy_error(manifest, options, 1000000).contains("not newer"))
-    lower_version := manifest
+    ^lower_version: manifest
     lower_version.sequence = 8
     lower_version.version = "1.1.9"
     assert(recipe_update_test_policy_error(lower_version, options, 1000000).contains("downgrade"))

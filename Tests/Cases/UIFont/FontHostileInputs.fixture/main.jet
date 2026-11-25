@@ -17,7 +17,7 @@ put_field: fn(out: ^[U8], value: Int, width: Int) {
 }
 
 fields: fn(values: [Int], width: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop v in values -> put_field(out, v, width)
     out
 }
@@ -29,7 +29,7 @@ words: fn(values: [Int]) -> [U8] { fields(values, 2) }
 longs: fn(values: [Int]) -> [U8] { fields(values, 4) }
 
 join: fn(parts: [[U8]]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop part in parts {
         loop byte in part -> out.push(byte)
     }
@@ -37,14 +37,14 @@ join: fn(parts: [[U8]]) -> [U8] {
 }
 
 zeros: fn(count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<count -> out.push(U8{0})
     out
 }
 
 // `body` with the big-endian `width`-byte field at `at` set to `value`.
 patch: fn(body: [U8], at: Int, value: Int, width: Int) -> [U8] {
-    out := body.copy()
+    ^out: body.copy()
     field: fields([Int]{value}, width)
     loop k in 0..<width -> out[at + k] = field[k]
     out
@@ -92,8 +92,8 @@ hmtx: fn() -> [U8] { words([Int]{500, 0, 600, 0, 700, 10}) }
 
 // Long loca for glyphs with these bodies, laid end to end.
 loca_for: fn(glyphs: [[U8]]) -> [U8] {
-    offsets := [Int]{0}
-    total := 0
+    ^offsets: [Int]{0}
+    ^total: 0
     loop g in glyphs {
         total += g.len()
         offsets.push(total)
@@ -123,7 +123,7 @@ cmap12: fn(platform: Int, encoding: Int, groups: [Int]) -> [U8] {
 // mapped by `deltas`, with no glyph id array.
 cmap4: fn(ends: [Int], starts: [Int], deltas: [Int]) -> [U8] {
     count: ends.len()
-    offsets := [Int]{}
+    ^offsets: [Int]{}
     loop _ in 0..<count -> offsets.push(0)
     join(
         [[U8]]{
@@ -168,7 +168,7 @@ gpos: fn(feature_index: Int, lookup_index: Int, subtable: [U8]) -> [U8] {
 // Pair format 1: glyph 1 then glyph 2 closes up by 50 units (x advance).
 // `seconds` are the pair set's second glyphs; `coverage_format` is 1.
 pair_format1: fn(format: Int, seconds: [Int], coverage_format: Int) -> [U8] {
-    set := words([Int]{seconds.len()})
+    ^set: words([Int]{seconds.len()})
     loop second in seconds -> set = join([[U8]]{set, words([Int]{second, -50})})
     join(
         [[U8]]{
@@ -211,11 +211,11 @@ base: fn() -> [Table] {
 
 // The font file for `tables`: an sfnt directory, then each body.
 build: fn(tables: [Table]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     put_field(out, 65536, 4)
     put_field(out, tables.len(), 2)
     loop _ in 0..<6 -> out.push(U8{0})
-    offset := 12 + tables.len() * 16
+    ^offset: 12 + tables.len() * 16
     loop t in tables {
         loop byte in t.name.bytes() -> out.push(byte)
         put_field(out, 0, 4)
@@ -231,7 +231,7 @@ build: fn(tables: [Table]) -> [U8] {
 
 // `tables` with table `name`'s body replaced.
 with: fn(tables: [Table], name: String, body: [U8]) -> [Table] {
-    out := [Table]{}
+    ^out: [Table]{}
     loop t in tables {
         out.push(Table{name: t.name.copy(), body: if t.name == name -> body.copy() else -> t.body.copy()})
     }
@@ -240,7 +240,7 @@ with: fn(tables: [Table], name: String, body: [U8]) -> [Table] {
 
 // `tables` with table `name` called `renamed`.
 rename: fn(tables: [Table], name: String, renamed: String) -> [Table] {
-    out := [Table]{}
+    ^out: [Table]{}
     loop t in tables {
         out.push(Table{name: if t.name == name -> renamed.copy() else -> t.name.copy(), body: t.body.copy()})
     }
@@ -256,7 +256,7 @@ with_glyph: fn(glyph: [U8]) -> [Table] {
 // The valid font without GPOS (renamed to a tag nothing reads) and with a
 // kern table `kern`.
 with_kern: fn(kern: [U8]) -> [Table] {
-    out := rename(base(), "GPOS", "GPOX")
+    ^out: rename(base(), "GPOS", "GPOX")
     out.push(Table{name: "kern", body: kern})
     out
 }
@@ -276,7 +276,7 @@ report: fn(name: String, file: [U8]) {
 // How `face` wraps three kerned "AB" words (1250 px each at 1000 px, a
 // space 500 px) into 1300 px: one word per line, the spaces on no line.
 wraps: fn(face: font.Face) -> String {
-    parts := [String]{}
+    ^parts: [String]{}
     loop line in face.wrap("AB AB AB", 1000.0, 1300.0) {
         parts.push("{line.start}..{line.end} {line.width}")
     }
@@ -331,7 +331,7 @@ run: fn() {
     report("a component scale past the glyph", build(with_glyph(composite(component(2 + 8, 1, 0, 0)))))
     report("components past the glyph", build(with_glyph(composite(component(2 + 32, 1, 0, 0)))))
     report("matched points the glyphs lack", build(with_glyph(composite(join([[U8]]{component(2 + 32, 1, 0, 0), component(0, 1, 9, 0)})))))
-    many := [U8]{}
+    ^many: [U8]{}
     loop _ in 0..<16384 {
         loop byte in component(2 + 32, 1, 0, 0) -> many.push(byte)
     }

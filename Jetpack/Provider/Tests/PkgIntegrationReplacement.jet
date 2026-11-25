@@ -2,7 +2,7 @@
 // Original signatures, effects, errors, golden assertion bytes, example
 // identities, and platform are retained verbatim.
 provider_pkg_integration_surface: fn(provider: String, name: String, version: String) -> CompatibilitySurface Never! {
-    surface := CompatibilitySurface.new(PackageIdentity.new(provider, name, version))
+    ^surface: CompatibilitySurface.new(PackageIdentity.new(provider, name, version))
     surface.public_symbols = [PublicSymbol]{
         PublicSymbol.new("pad_left", "fn(String, Int) -> String").with_effects([String]{"pure"}).with_errors([String]{"ValueError"}),
         PublicSymbol.new("trim", "fn(String) -> String").with_effects([String]{"pure"}),
@@ -35,7 +35,7 @@ provider_pkg_integration_active: fn(decision: ReplacementDecision) -> ActiveRepl
 
 // The entire original record is retained.
 #Test("pkg integration replacement_candidate_visible_but_inactive") {
-    facts := MetadataFacts.from_npm("{{\"name\":\"left-pad\",\"version\":\"1.0.0\"}}")
+    ^facts: MetadataFacts.from_npm("{{\"name\":\"left-pad\",\"version\":\"1.0.0\"}}")
     facts.replacement_candidates.push(ReplacementCandidate{foreign_identity: PackageIdentity.new("npm", "left-pad", "1.0.0"), native_identity: PackageIdentity.new("core", "core.text.pad", "1.0.0"), covered_public_symbols: [String]{}, unsupported_symbols: [String]{}, license: "MIT", platforms: [String]{"x86_64-linux"}, proof_status: ProofStatus.Missing, proof_digest: "", proof_inputs: [String]{}})
     record: SemanticRecord.new(
         LockIdentity{kind: LockRecordKind.Package, key: facts.name, exact: facts.version, hash: "sha256-{facts.version}", platform: "x86_64-linux"},
@@ -49,8 +49,8 @@ provider_pkg_integration_active: fn(decision: ReplacementDecision) -> ActiveRepl
 
 #Test("pkg integration replacement_compat_proof_fails_on_missing_symbol") {
     foreign: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
-    native := provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
-    kept := [PublicSymbol]{}
+    ^native: provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    ^kept: [PublicSymbol]{}
     loop symbol in native.public_symbols {
         if symbol.name != "trim" -> kept.push(symbol)
     }
@@ -60,21 +60,21 @@ provider_pkg_integration_active: fn(decision: ReplacementDecision) -> ActiveRepl
 
 #Test("pkg integration replacement_compat_proof_fails_on_effect_mismatch") {
     foreign: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
-    native := provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    ^native: provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
     native.public_symbols[0].effects = [String]{"fs.read"}
     assert(provider_pkg_integration_failure(native.prove_against(foreign, "x86_64-linux"), ProofFailureKind.EffectMismatch, "pad_left"))
 }
 
 #Test("pkg integration replacement_compat_proof_fails_on_error_shape_mismatch") {
     foreign: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
-    native := provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    ^native: provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
     native.public_symbols[0].errors = [String]{"RangeError"}
     assert(provider_pkg_integration_failure(native.prove_against(foreign, "x86_64-linux"), ProofFailureKind.ErrorShapeMismatch, "pad_left"))
 }
 
 #Test("pkg integration replacement_compat_proof_fails_on_golden_output_diff") {
     foreign: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
-    native := provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    ^native: provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
     native.goldens = [GoldenFixture]{GoldenFixture.new("pad_left_basic", "hi\n")}
     assert(provider_pkg_integration_failure(native.prove_against(foreign, "x86_64-linux"), ProofFailureKind.GoldenOutputDiff, "pad_left_basic"))
 }

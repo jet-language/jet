@@ -223,7 +223,7 @@ checked_user_local: fn(name: String, span: Span, ty: Type) -> TLocal Never! {
 }
 
 checked_symbol_local: fn(name: String, span: Span, symbol_id: SymbolID, ty: Type) -> TLocal Never! {
-    local := checked_user_local(name, span, ty)
+    ^local: checked_user_local(name, span, ty)
     local.symbol_id = Val(symbol_id)
     local
 }
@@ -269,9 +269,6 @@ TFieldRef: struct {
 }
 
 TAllocCtor: enum {
-    Arena,
-    Bump,
-    Pool,
     Fixed(size: Int),
     FixedOver,
 }
@@ -941,8 +938,8 @@ checked_expr_type_id: fn(rows: [TExprType], id: Int) -> TypeID? Never! {
             }
         }
     }
-    low := 0
-    high := count
+    ^low: 0
+    ^high: count
     loop low < high {
         middle: (low + high) >> 1
         if rows[middle].id < id -> low = middle + 1 else -> high = middle

@@ -23,7 +23,7 @@ DEFAULT_FILTER: "ui_backend/wayland_windows_hold_a_one_millisecond_frame"
 
 // `2-5,8` as the CPUs it names.
 parse_cpus: fn(text: String) -> [Int] Never! {
-    cpus := [Int]{}
+    ^cpus: [Int]{}
     loop part in text.split(",") {
         span: part.trim().partition("-")
         first: Int.parse(span.head) ?? next
@@ -40,10 +40,10 @@ usage: fn() -[IO]> Int Never! {
 
 frame_time: fn() -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
     args: process.args()
-    jet := process.which("jet") ?? "jet"
-    filter := DEFAULT_FILTER.copy()
-    chosen := [Int]{}
-    at := 0
+    ^jet: process.which("jet") ?? "jet"
+    ^filter: DEFAULT_FILTER.copy()
+    ^chosen: [Int]{}
+    ^at: 0
     loop at < args.len() {
         if at + 1 >= args.len() -> return usage()
         if args[at] == "--jet" -> jet = args[at + 1].copy() else if args[at] == "--filter" {
@@ -55,7 +55,7 @@ frame_time: fn() -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
         at += 2
     }
     isolated: files.read(ISOLATED) ?? ""
-    cpus := parse_cpus(isolated.trim())
+    ^cpus: parse_cpus(isolated.trim())
     if cpus.len() == 0 -> cpus = chosen
     if cpus.len() == 0 {
         term.eprint("no isolated CPUs ({ISOLATED} is empty) and no --cpu LIST: boot with isolcpus= or name idle CPUs to time frames")

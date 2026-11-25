@@ -21,7 +21,7 @@ HEARD: Shared{Heard{lines: [String]{}}}
 
 // Adds `line` to phases.txt.
 note: fn(line: String) -[FS.Write]> {
-    held := HEARD.guard_edit()
+    ^held: HEARD.guard_edit()
     held.value.lines.push(line.copy())
     files.write("phases.txt", "{held.value.lines.join("\n")}\n") ?? panic("write phases.txt: {err}")
 }

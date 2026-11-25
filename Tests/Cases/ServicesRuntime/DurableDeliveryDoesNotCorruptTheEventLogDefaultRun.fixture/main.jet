@@ -6,9 +6,9 @@ use {
 durable_worker: fn() {}
 
 run: fn() {
-    tree := services.tree("app")
+    ^tree: services.tree("app")
     tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
-    temp := testing.temp_dir("services-delivery-eventlog")
+    ^temp: testing.temp_dir("services-delivery-eventlog")
     store_path: Path.from(temp).join("state.log").to_string()
     store: services.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")

@@ -145,9 +145,9 @@ scored: fn(p: RecordsModel, identifier: Int, weight: Int, label: Int) -> Int {
 }
 
 records_value: fn(p: RecordsModel, seed: Int) -> Int {
-    identifiers := [Int]{}
-    weights := [Int]{}
-    labels := [Int]{}
+    ^identifiers: [Int]{}
+    ^weights: [Int]{}
+    ^labels: [Int]{}
     loop index in 0..<p.count {
         marker: (index * p.a + seed) % 97
         identifiers.push(index + marker)
@@ -156,7 +156,7 @@ records_value: fn(p: RecordsModel, seed: Int) -> Int {
     }
     last: p.count - 1
     first_three: md(md(scored(p, identifiers[0], weights[0], labels[0]) + scored(p, identifiers[1], weights[1], labels[1])) + scored(p, identifiers[2], weights[2], labels[2]))
-    accumulator := md(md(seed) + first_three + md(scored(p, identifiers[last], weights[last], labels[last]) * 2))
+    ^accumulator: md(md(seed) + first_three + md(scored(p, identifiers[last], weights[last], labels[last]) * 2))
     loop index in 0..<p.count {
         accumulator = if weights[index] > p.threshold -> md(accumulator * 3 + 2) else -> md(accumulator + identifiers[index] * 5)
     }
@@ -166,7 +166,7 @@ records_value: fn(p: RecordsModel, seed: Int) -> Int {
 }
 
 shapes_value: fn(p: ShapesModel, seed: Int) -> Int {
-    accumulator := md(seed * p.a)
+    ^accumulator: md(seed * p.a)
     loop index in 0..<p.count {
         step: [((seed + index * p.b) % 101) * p.d, index * 5 + (seed + p.c) % 53, "shape-{index}-{seed % 7}".len() * 7, p.e][(seed + index) % 4]
         accumulator = md(accumulator * 31 + step)
@@ -175,25 +175,25 @@ shapes_value: fn(p: ShapesModel, seed: Int) -> Int {
 }
 
 words_value: fn(p: WordsModel, seed: Int) -> Int {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop (index, word) in p.words {
         key: "{word}-{(seed + index) % p.buckets}"
         counts[key] = (counts.get(key) ?? 0) + index + 1
     }
-    accumulator := counts.len()
+    ^accumulator: counts.len()
     loop (key, value) in counts -> accumulator = md(accumulator + key.len() * value * 17)
     // copy: the label grows from the unit's name
-    label := p.start_label.copy()
+    ^label: p.start_label.copy()
     loop index in 0..<p.rounds -> label = "{label}:{index * p.a % 10}"
     if label.len() > p.limit -> return md(accumulator + label.len())
     md(accumulator + 3)
 }
 
 options_value: fn(p: OptionsModel, seed: Int) -> Int {
-    table := [Int:Int]{}
+    ^table: [Int:Int]{}
     loop (i, key) in p.keys -> table[key] = p.values[i]
     probes: [Int]{p.keys[0], p.keys[1], p.keys[2], seed % 100}
-    accumulator := md(seed)
+    ^accumulator: md(seed)
     loop round in 0..<p.rounds {
         probe: probes[round % 4] + (round /% 4) * p.spread
         found: if table.get(probe) == .Val(value) -> value * 2 else -> p.fallback
@@ -204,13 +204,13 @@ options_value: fn(p: OptionsModel, seed: Int) -> Int {
 }
 
 numbers_value: fn(p: NumbersModel, seed: Int) -> Int {
-    value := seed % 1000 + 2
-    steps := 0
+    ^value: seed % 1000 + 2
+    ^steps: 0
     loop value > 1 && steps < p.limit {
         value = if value % 2 == 0 -> value /% 2 else -> value * 3 + 1
         steps += 1
     }
-    weight := p.b
+    ^weight: p.b
     loop step in 0..<steps {
         weight = [md(weight * p.a + step), md(weight + step * step), md(weight + 7)][step % 3]
     }
@@ -401,7 +401,7 @@ mixed_unit: fn(m: Int, u: Int, r: ^Seeded, stats: ^Stats) -> Generated {
     rec: "RecordM{m}U{u}"
     shape: "ShapeM{m}U{u}"
     trait_name: "ScoredM{m}"
-    lines := [String]{}
+    ^lines: [String]{}
     constant: if u % 5 == 0 || u % 5 == 2 -> "SEED_M{m}_U{u}" else -> ""
     constant_a: r.int(3, 40)
     constant_b: r.int(5, 90)
@@ -426,8 +426,8 @@ mixed_unit: fn(m: Int, u: Int, r: ^Seeded, stats: ^Stats) -> Generated {
         numbers_worker(unit_name, r),
     }
     start: if constant != "" -> constant else -> "{constant_value}"
-    total := [String]{"{unit_name}_total: fn() -> Int {{", "    accumulator := {start} % {M}"}
-    accumulator := md(constant_value)
+    ^total: [String]{"{unit_name}_total: fn() -> Int {{", "    accumulator := {start} % {M}"}
+    ^accumulator: md(constant_value)
     words: renamed()
     loop (index, worker) in workers {
         // Every worker folds its result through the section's three-argument
@@ -439,7 +439,7 @@ mixed_unit: fn(m: Int, u: Int, r: ^Seeded, stats: ^Stats) -> Generated {
         fourth: r.int(2, 97)
         label_limit: r.int(34, 42)
         tail: worker.text[worker.text.len() - 2].trim()
-        text := worker.text.slice(0, worker.text.len() - 2)
+        ^text: worker.text.slice(0, worker.text.len() - 2)
         text.extend(
             [
                 "    worker_result: {tail}",
@@ -464,7 +464,7 @@ mixed_unit: fn(m: Int, u: Int, r: ^Seeded, stats: ^Stats) -> Generated {
         checkpoint: blend(result, seed % 1000, first)
         label_length: "{worker.name}:{result % 1000}:{checkpoint % 1000}".len()
         trace_weight: blend(checkpoint, if label_length > label_limit -> label_length else -> 1, third)
-        combined := 0
+        ^combined: 0
         loop part in [result % 997, checkpoint % 991, trace_weight % 983] {
             combined = blend(combined, part, fourth)
         }
@@ -514,12 +514,12 @@ check_inputs: fn(code_lines: Int, seed: Int) Err! {
 // plus main.jet, filled section by section, unit by unit, until main.jet
 // reaches the target.
 mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
-    r := seeded(seed, .Remainder)
-    stats := Stats{functions: 1, types: 0, comptime_items: 0, sections: 0}
-    lines := [String]{"// Deterministic mixed compile-throughput workload: --code-lines {code_lines} --seed {seed}", ""}
-    section_totals := [Int]{}
+    ^r: seeded(seed, .Remainder)
+    ^stats: Stats{functions: 1, types: 0, comptime_items: 0, sections: 0}
+    ^lines: [String]{"// Deterministic mixed compile-throughput workload: --code-lines {code_lines} --seed {seed}", ""}
+    ^section_totals: [Int]{}
     // `run: fn() {`, `checksum := 0`, the print and `}`, plus one sum line per section.
-    code := 4
+    ^code: 4
     loop code < code_lines {
         m: stats.sections
         header: section_header(m)
@@ -527,9 +527,9 @@ mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
         lines.extend(header)
         stats.functions += 4
         stats.types += 1
-        total := [String]{"section_total_m{m}: fn() -> Int {{", "    accumulator := 0"}
-        value := 0
-        u := 0
+        ^total: [String]{"section_total_m{m}: fn() -> Int {{", "    accumulator := 0"}
+        ^value: 0
+        ^u: 0
         loop u < UNITS_PER_SECTION && (u == 0 || code < code_lines) {
             generated: mixed_unit(m, u, r, stats)
             code += code_of(generated.lines)
@@ -545,7 +545,7 @@ mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
         section_totals.push(value)
         stats.sections += 1
     }
-    checksum := 0
+    ^checksum: 0
     lines.extend(["run: fn() {{", "    checksum := 0"])
     loop (m, value) in section_totals {
         lines.push("    checksum = (checksum * 31 + section_total_m{m}()) % {M}")

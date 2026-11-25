@@ -84,7 +84,7 @@ plugin_frames_clone: fn(sequence: I64) -> I64 {
     result: data_sequence_new(length, PLUGIN_FRAME_BYTES)
     source: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     target: dyn_word(wrapping(result + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         plugin_frame_clone_into(wrapping(source + at * PLUGIN_FRAME_BYTES), wrapping(target + at * PLUGIN_FRAME_BYTES))
         at += I64{1}
@@ -97,7 +97,7 @@ plugin_frames_drop: fn(sequence: I64) {
     length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     capacity: dyn_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         plugin_frame_drop_fields(wrapping(data + at * PLUGIN_FRAME_BYTES))
         at += I64{1}
@@ -111,7 +111,7 @@ plugin_frames_eq: fn(left: I64, right: I64) -> Bool {
     if length != dyn_word(wrapping(right + DATA_SEQUENCE_LENGTH)) -> return false
     a: dyn_word(wrapping(left + DATA_SEQUENCE_DATA))
     b: dyn_word(wrapping(right + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if !jet_rt_handle_eq_plugin_frame(wrapping(a + at * PLUGIN_FRAME_BYTES), wrapping(b + at * PLUGIN_FRAME_BYTES)) {
             return false

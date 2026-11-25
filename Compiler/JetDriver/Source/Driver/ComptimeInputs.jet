@@ -246,7 +246,7 @@ jet_driver_comptime_input_value: fn(builtin: String, path: String, bytes: [U8], 
 
 // The matches of a `find` walk's reply; None for a failure.
 jet_driver_comptime_find_members: fn(reply: BuildSessionReply) -> [String]? Never! {
-    found := [String]{}
+    ^found: [String]{}
     if reply == {
         .Value(value) -> {
             if value == .List(values) {
@@ -271,7 +271,7 @@ jet_driver_comptime_find: fn(adapter: JetDriverComptimeInputs, base_dir: String,
         .Value(_) -> {}
     }
     found: jet_driver_comptime_find_members(reply) ?? [String]{}
-    strings := [TComptimeValue]{}
+    ^strings: [TComptimeValue]{}
     loop relative in found {
         bytes: adapter.inputs.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`find` can't open `{prefix}{relative}`", "{err.message} (matched while expanding `{prefix}{glob}`)", "check the glob — it is relative to the directory it walks", span))
         jet_driver_comptime_input_record(adapter.log, base_dir, prefix, relative, bytes)

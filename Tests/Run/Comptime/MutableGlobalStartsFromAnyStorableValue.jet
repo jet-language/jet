@@ -9,7 +9,7 @@ Score: struct {
 }
 
 marks: fn() -> [{label: String, at: Int}:Int] {
-    made := [{label: String, at: Int}:Int]{}
+    ^made: [{label: String, at: Int}:Int]{}
     made[{label: "b", at: 1}] = 10
     made[{label: "a", at: 2}] = 20
     made[{label: "c", at: 0}] = 30
@@ -18,7 +18,7 @@ marks: fn() -> [{label: String, at: Int}:Int] {
 }
 
 spots: fn() -> [{on: Bool, pos: {x: Int, y: Int}}:String] {
-    made := [{on: Bool, pos: {x: Int, y: Int}}:String]{}
+    ^made: [{on: Bool, pos: {x: Int, y: Int}}:String]{}
     made[{on: true, pos: {x: 1, y: -4}}] = "gate"
     made[{on: false, pos: {x: 7, y: 2}}] = "door"
     made[{on: true, pos: {x: 1, y: -9}}] = "lift"
@@ -29,18 +29,18 @@ spots: fn() -> [{on: Bool, pos: {x: Int, y: Int}}:String] {
 power: fn(base: Int, exponent: Int) -> Int { base.pow(exponent) }
 
 with_mark: fn(table: [{label: String, at: Int}:Int], key: {label: String, at: Int}, value: Int) -> [{label: String, at: Int}:Int] {
-    changed := table.copy()
+    ^changed: table.copy()
     changed[key] = value
     changed
 }
 
-mark_table := marks()
+^mark_table: marks()
 
-spot_table := spots()
+^spot_table: spots()
 
-huge := power(2, 70)
+^huge: power(2, 70)
 
-score := Shared{Score{hits: 3, last: "start"}}
+^score: Shared{Score{hits: 3, last: "start"}}
 
 show: fn() {
     loop (key, value) in mark_table -> print("{key.label} {key.at} {value}")

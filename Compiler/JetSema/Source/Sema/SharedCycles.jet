@@ -44,7 +44,7 @@ sema_shared_cycle_repeating_frame: fn(owner: String) -> Bool Never! {
 // True when the current scope reaches `frame` through scopes that each run
 // once per run of `frame`.
 sema_shared_cycle_frame_runs_once: fn(scopes: SemaScopeTable, frame: Int) -> Bool Never! {
-    cursor := scopes.current
+    ^cursor: scopes.current
     loop cursor >= 0 {
         if cursor == frame -> return true
         if sema_shared_cycle_repeating_frame(scopes.frames[cursor].owner) -> return false
@@ -65,8 +65,8 @@ sema_shared_cycle_owner_key: fn(owner_ty: Type, environment: SemaScopeEnvironmen
 sema_shared_cycle_reaches: fn(owner: SymbolID, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_shared_cycle_holds_function(ty) -> return true
     graph: program.registration_graph
-    memo := [U32:Bool]{}
-    walk := SemaSharedWitnessWalk{stack: [U32]{}, clear: [U32:Bool]{}, met_path: false}
+    ^memo: [U32:Bool]{}
+    ^walk: SemaSharedWitnessWalk{stack: [U32]{}, clear: [U32:Bool]{}, met_path: false}
     sema_checked_shared_witness(graph, owner, environment.module_identity, ty, memo, walk) != None
 }
 
@@ -168,7 +168,7 @@ sema_shared_cycle_enum_arg: fn(argument: EnumLitArg) -> Expr Never! {
 sema_shared_cycle_unread: fn(state: SemaOwnershipState, id: SymbolID, allowed: [Span]) -> Bool Never! {
     loop reference in state.references {
         if reference.def_id != id -> next
-        inside := false
+        ^inside: false
         loop span in allowed {
             if reference.use_span.start >= span.start && reference.use_span.end <= span.end {
                 inside = true
@@ -303,7 +303,7 @@ sema_shared_cycle_fresh_name: fn(name: String, owner: SymbolID, allowed: [Span],
     init: (scopes.bindings[row].fresh_cell ?? return false).copy()
     if !sema_shared_cycle_frame_runs_once(scopes, scopes.bindings[row].frame) -> return false
     if !sema_shared_cycle_unread(state, scopes.bindings[row].symbol.id, allowed) -> return false
-    within := allowed.copy()
+    ^within: allowed.copy()
     within.push(expr_source_span(init))
     sema_shared_cycle_fresh(init, None, owner, within, environment, program, scopes, state)
 }
@@ -312,8 +312,8 @@ sema_shared_cycle_fresh_name: fn(name: String, owner: SymbolID, allowed: [Span],
 // every local or parameter of an enclosing scope it names is (a name its own
 // parameters or bindings shadow counts too, which only errs toward E0221).
 sema_shared_cycle_lambda_fresh: fn(value: Expr, lambda: Lambda, owner: SymbolID, allowed: [Span], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: SemaOwnershipState) -> Bool {
-    parameters := (loop parameter in lambda.params -> parameter.name)
-    named := [Expr]{}
+    ^parameters: (loop parameter in lambda.params -> parameter.name)
+    ^named: [Expr]{}
     ast_visit_expr(environment.tables, value, fn(expression: ExprNode) { sema_shared_cycle_note_ident(named, ast_expr(environment.tables, expression)) })
     loop expression in named {
         if expression == .Ident(name, _, _) {
@@ -399,7 +399,7 @@ sema_shared_cycle_function_argument: fn(argument: Expr, check: ^SemaBodyCheck) -
 sema_shared_cycle_check_hoisted_call: fn(expr: Expr, check: ^SemaBodyCheck) {
     if expr == .MethodCall(receiver, _, _, _, _, args, _) {
         if receiver == .Place(value, _, _, _) {
-            touching := [CallArg]{}
+            ^touching: [CallArg]{}
             loop argument in args {
                 // copy: `args` belongs to the statement, which keeps them.
                 if sema_shared_access_expr_touches_shared(argument.expr, check.scopes) {

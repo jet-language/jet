@@ -565,8 +565,8 @@ SUBID_MAX: 0xFFFFFFFF
 /// is no BUF_TOO_SMALL.
 numeric_string: fn(data: [U8], buf: asn1.ASN1Buf) -> String asn1.ASN1Error! {
     if buf.len <= 0 -> return Err(.OutOfData)
-    out := [U8]{}
-    value := 0
+    ^out: [U8]{}
+    ^value: 0
     loop i in 0..<buf.len {
         b: Int{data[buf.p + i]}
         if value > (SUBID_MAX >> 7) -> return Err(.InvalidData)
@@ -574,8 +574,8 @@ numeric_string: fn(data: [U8], buf: asn1.ASN1Buf) -> String asn1.ASN1Error! {
         value = (value << 7) | b & 0x7F
         if b & 0x80 == 0 {
             if out.len() == 0 {
-                first := 0
-                second := value
+                ^first: 0
+                ^second: value
                 if value >= 80 {
                     first = 2
                     second = value - 80
@@ -595,8 +595,8 @@ numeric_string: fn(data: [U8], buf: asn1.ASN1Buf) -> String asn1.ASN1Error! {
 /// One decimal component at `text[p]`, moving `p` past it
 /// (oid_parse_number). At least one digit is required.
 parse_number: fn(text: [U8], p: ^Int) -> Int asn1.ASN1Error! {
-    num := 0
-    digits := 0
+    ^num: 0
+    ^digits: 0
     loop p < text.len() && text[p] >= (U8{48}) && text[p] <= (U8{57}) {
         if num > SUBID_MAX /% 10 -> return Err(.InvalidData)
         num = num * 10 + Int{text[p]} - 48
@@ -613,15 +613,15 @@ parse_number: fn(text: [U8], p: ^Int) -> Int asn1.ASN1Error! {
 /// Appends a subidentifier in base 128, high groups first, each but the
 /// last with the continuation bit (oid_subidentifier_encode_into).
 push_subidentifier: fn(out: ^[U8], value: Int) {
-    count := 1
-    rest := value >> 7
+    ^count: 1
+    ^rest: value >> 7
     loop rest != 0 {
         count += 1
         rest >>= 7
     }
     loop k in 0..<count {
         shift: (count - 1 - k) * 7
-        group := (value >> shift) & 0x7F
+        ^group: (value >> shift) & 0x7F
         if k < count - 1 -> group |= 0x80
         out.push(U8{group})
     }
@@ -631,12 +631,12 @@ push_subidentifier: fn(out: ^[U8], value: Int) {
 /// (mbedtls_oid_from_numeric_string).
 from_numeric_string: fn(text: String) -> [U8] asn1.ASN1Error! {
     s: text.bytes()
-    dots := 0
+    ^dots: 0
     loop c in s {
         if c == (U8{46}) -> dots += 1
     }
     if dots == 0 || dots > OID_MAX_COMPONENTS - 1 -> return Err(.InvalidData)
-    p := 0
+    ^p: 0
     first: parse_number(s, p)
     if first > 2 -> return Err(.InvalidData)
     if p >= s.len() || s[p] != (U8{46}) -> return Err(.InvalidData)
@@ -648,7 +648,7 @@ from_numeric_string: fn(text: String) -> [U8] asn1.ASN1Error! {
         p += 1
     }
     if second > SUBID_MAX - first * 40 -> return Err(.InvalidData)
-    out := [U8]{}
+    ^out: [U8]{}
     push_subidentifier(out, first * 40 + second)
     loop p < s.len() {
         value: parse_number(s, p)

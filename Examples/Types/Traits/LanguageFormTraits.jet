@@ -81,7 +81,9 @@ ScriptLines: struct {
     impl Iterable {
         Iter: ScriptCursor,
 
-        iter: fn(^^self) -> ScriptCursor { ScriptCursor{rows: self.text.split("\n").to_list(), at: 0} }
+        iter: fn(^^self) -> ScriptCursor {
+            ScriptCursor{rows: self.text.split("\n").to_list(), at: 0}
+        }
     }
 }
 
@@ -121,7 +123,5 @@ run: fn() {
     print("{decoded:Hex(2)} {decoded.level}")
     print("{math.round(Tenths{value: 25}).value} {math.round_even(Tenths{value: 25}).value} {math.floor(Tenths{value: -25}).value} {math.trunc(Tenths{value: -25}).value}")
     script: Script{text: "alpha\nbeta\ngamma"}
-    loop line in script.lines() {
-        print("line {line}")
-    }
+    loop line in script.lines() { print("line {line}") }
 }

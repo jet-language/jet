@@ -12,7 +12,7 @@
 test_text_new: fn(length: I64) -> I64 { rt_text_with_length(length, length) }
 
 test_copy_bytes: fn(destination: I64, source: I64, length: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         trap_put(wrapping(destination + at), trap_byte(wrapping(source + at)))
         at += I64{1}
@@ -52,10 +52,10 @@ test_outcome_new: fn(name: I64, expected: Bool, skipped: Bool, stdout: I64, erro
 }
 
 test_decimal_bytes: fn(destination: I64, value: I64) -> I64 {
-    divisor := I64{1}
+    ^divisor: I64{1}
     loop divisor <= value /% (I64{10}) -> divisor *= I64{10}
-    number := value
-    used := I64{0}
+    ^number: value
+    ^used: I64{0}
     loop {
         trap_put(wrapping(destination + used), I64{48} + number /% divisor)
         used += I64{1}
@@ -77,7 +77,7 @@ test_decimal_bytes: fn(destination: I64, value: I64) -> I64 {
     // At most 6*19 decimal digits + flags + separators + '\n'.
     wire: test_text_new(I64{136} + name_len + stdout_len + stderr_len)
     data: trap_word(wire)
-    used := test_decimal_bytes(data, trap_word(outcome))
+    ^used: test_decimal_bytes(data, trap_word(outcome))
     trap_put(wrapping(data + used), I64{32})
     used += I64{1}
     used += test_decimal_bytes(wrapping(data + used), name_len)
@@ -126,10 +126,10 @@ test_write_word: fn(fd: I64, word: I64, length: I64) {
         trap_write_word(word, length)
         return
     }
-    bytes := word
-    remaining := length
+    ^bytes: word
+    ^remaining: length
     loop remaining > (I64{0}) {
-        written := I64{0}
+        ^written: I64{0}
         #Unsafe("the OS leaf borrows at most eight initialized bytes from its own stack word") {
             written = os_write_word_i64(fd, bytes, remaining)
         }
@@ -147,7 +147,7 @@ test_write: fn(fd: I64, address: I64, length: I64) {
         trap_write(address, length)
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         written: trap_syscall(I64{1}, fd, address + at, length - at, I64{0}, I64{0}, I64{0})
         if (written == I64{-4}) { next }
@@ -159,9 +159,9 @@ test_write: fn(fd: I64, address: I64, length: I64) {
 }
 
 test_number: fn(value: I64) {
-    divisor := I64{1}
+    ^divisor: I64{1}
     loop divisor <= value /% (I64{10}) -> divisor *= I64{10}
-    number := value
+    ^number: value
     loop {
         test_write_word(I64{1}, I64{48} + number /% divisor, I64{1})
         number %= divisor
@@ -184,10 +184,10 @@ test_invalid: fn() {
 // Header parsing is bounded by the borrowed wire, not a sentinel. A record
 // descriptor holds flags, then pointer/length pairs, then the next byte offset.
 test_parse_number: fn(data: I64, end: I64, cursor: I64) -> I64 {
-    at := trap_word(cursor)
+    ^at: trap_word(cursor)
     if (at < end && trap_byte(wrapping(data + at)) == I64{43}) { at += I64{1} }
     start: at
-    value := I64{0}
+    ^value: I64{0}
     loop at < end {
         byte: trap_byte(wrapping(data + at))
         if (byte == I64{32}) { break }
@@ -212,12 +212,12 @@ test_parse_number: fn(data: I64, end: I64, cursor: I64) -> I64 {
 }
 
 test_utf8: fn(data: I64, length: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         first: trap_byte(wrapping(data + at))
-        width := I64{1}
-        low := I64{128}
-        high := I64{191}
+        ^width: I64{1}
+        ^low: I64{128}
+        ^high: I64{191}
         if {
             (first >= I64{194} && first <= I64{223}) -> width = I64{2}
             (first >= I64{224} && first <= I64{239}) -> {
@@ -237,7 +237,7 @@ test_utf8: fn(data: I64, length: I64) -> Bool {
             second: trap_byte(wrapping(wrapping(data + at) + I64{1}))
             if (second < low || second > high) { return false }
         }
-        part := I64{2}
+        ^part: I64{2}
         loop part < width {
             byte: trap_byte(wrapping(wrapping(data + at) + part))
             if (byte < I64{128} || byte > I64{191}) { return false }
@@ -260,7 +260,7 @@ test_parse_record: fn(data: I64, end: I64, start: I64, record: I64) {
     name_len: test_parse_number(data, end, cursor)
     stdout_len: test_parse_number(data, end, cursor)
     stderr_len: test_parse_number(data, end, cursor)
-    at := test_parse_cases(data, end, trap_word(cursor))
+    ^at: test_parse_cases(data, end, trap_word(cursor))
     if (at < I64{0}) {
         test_invalid()
         return
@@ -303,15 +303,15 @@ test_parse_cases: fn(data: I64, end: I64, at: I64) -> I64 {
         }
         return I64{-1}
     }
-    cursor := at
-    numbers := I64{0}
+    ^cursor: at
+    ^numbers: I64{0}
     loop numbers < (I64{3}) {
         if (numbers > I64{0}) {
             if (cursor >= end || trap_byte(wrapping(data + cursor)) != I64{47}) { return I64{-1} }
             cursor += I64{1}
         }
         first: cursor
-        value := I64{0}
+        ^value: I64{0}
         loop cursor < end {
             byte: trap_byte(wrapping(data + cursor))
             if (byte == I64{10} || byte == I64{47}) { break }
@@ -344,7 +344,7 @@ test_capture_mode: fn() -> I64 {
     if (value == I64{0}) { return I64{0} }
     data: trap_word(value)
     length: trap_word(wrapping(value + I64{8}))
-    mode := I64{0}
+    ^mode: I64{0}
     if (length == I64{3} && trap_byte(data) == I64{97} && trap_byte(wrapping(data + I64{1})) == I64{108} && trap_byte(wrapping(data + I64{2})) == I64{108}) {
         mode = I64{1}
     }
@@ -363,12 +363,12 @@ test_hex: fn(value: I64) -> I64 { if (value < I64{10}) -> I64{48} + value else -
 
 test_json_quote: fn(data: I64, length: I64) {
     test_write_word(I64{1}, I64{34}, I64{1})
-    at := I64{0}
-    plain := I64{0}
+    ^at: I64{0}
+    ^plain: I64{0}
     loop at < length {
         byte: trap_byte(wrapping(data + at))
-        control := byte
-        width := I64{1}
+        ^control: byte
+        ^width: I64{1}
         if (byte == I64{194} && at + I64{1} < length) {
             second: trap_byte(wrapping(wrapping(data + at) + I64{1}))
             if (second <= I64{159}) {
@@ -457,13 +457,13 @@ test_report_text: fn(record: I64, capture: I64) {
     data: trap_word(wire)
     end: trap_word(wrapping(wire + I64{8}))
     record: jet_rt_alloc(I64{64}, I64{8})
-    at := I64{0}
-    passed := I64{0}
-    failed := I64{0}
-    skipped := I64{0}
-    expected := I64{0}
-    unexpected := I64{0}
-    ok := true
+    ^at: I64{0}
+    ^passed: I64{0}
+    ^failed: I64{0}
+    ^skipped: I64{0}
+    ^expected: I64{0}
+    ^unexpected: I64{0}
+    ^ok: true
     loop at < end {
         test_parse_record(data, end, at, record)
         flags: trap_word(record)
@@ -545,9 +545,9 @@ test_report_shuffle: fn() {
     }
     data: trap_word(seed)
     end: trap_word(wrapping(seed + I64{8}))
-    at := I64{0}
+    ^at: I64{0}
     if (end > I64{0} && trap_byte(data) == I64{43}) { at = I64{1} }
-    valid := at < end
+    ^valid: at < end
     loop at < end && trap_byte(wrapping(data + at)) == (I64{48}) -> at += I64{1}
     first: at
     loop at < end {
@@ -560,7 +560,7 @@ test_report_shuffle: fn() {
     if (valid && digits == I64{20}) {
         // ASCII bytes of 18446744073709551615, split into three words.
         at = I64{0}
-        decided := false
+        ^decided: false
         loop at < (I64{20}) && !decided {
             word: if {
                 (at < I64{8}) -> I64{3761692294704805937}

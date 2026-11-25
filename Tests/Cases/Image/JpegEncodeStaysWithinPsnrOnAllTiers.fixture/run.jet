@@ -7,7 +7,7 @@ use {
 }
 
 ramp: fn() -> image.Image {
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop y in 0..<11 {
         loop x in 0..<19 {
             level: (x * 12 + y * 4) % 256
@@ -23,8 +23,8 @@ round_trip: fn(name: String, original: image.Image, limits: image.Limits) {
     written: files.read_bytes(name) ?? panic("read {name}")
     info: image.inspect(written, limits) ?? panic("inspect {name}")
     back: image.decode(written, limits) ?? panic("decode {name}")
-    error := 0
-    hash := 0
+    ^error: 0
+    ^hash: 0
     loop index in 0..<back.pixels.len() {
         hash = (hash * 31 + Int{back.pixels[index]}) % 1000000007
         if index % 4 != 3 {

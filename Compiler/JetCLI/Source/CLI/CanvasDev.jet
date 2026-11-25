@@ -118,7 +118,7 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
     source_id: jet_cli_dev_canvas_source_id(root, file)
     fix: "pass a free port with `--canvas-port=N`, or leave `--canvas-port` out to let the Canvas listener choose one"
     state: canvas_host_new(file, source_id, host) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", err.message, jet_cli_why("E2105"), "run `jet dev {file} --canvas` again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    stamp := jet_cli_dev_stamp(root, [String]{})
+    ^stamp: jet_cli_dev_stamp(root, [String]{})
     jet_cli_dev_canvas_project(state, file, source_id)
     listen: "{canvas_host_url_host(host)}:{port}"
     { sender: edits, receiver: taken }: channel<CanvasHostEdit>()
@@ -139,8 +139,8 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
     cli_sys.on_interrupt(fn() {
         jet_cli_dev_web_stop(stop, JET_CLI_CANVAS_INTERRUPTED)
     })
-    debugs := canvas_debug_sessions(cli_sys.executable())
-    profiles := jet_cli_canvas_profiles()
+    ^debugs: canvas_debug_sessions(cli_sys.executable())
+    ^profiles: jet_cli_canvas_profiles()
     task.group dev_canvas {
         serving: task {
             if bound.serve() == {
@@ -149,7 +149,7 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
             }
         }
         cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
-        ticks := 0
+        ^ticks: 0
         loop jet_cli_dev_web_stopped(stop) == None {
             cli_time.sleep(80ms)
             canvas_host_tick(state)
@@ -255,7 +255,7 @@ jet_cli_dev_canvas_publish: fn(state: Shared<CanvasHostState>, file: String, sou
 // The project document of the entry's source root: every source the compile
 // read there, and the root's lock when it has one.
 jet_cli_dev_canvas_publish_project: fn(state: Shared<CanvasHostState>, snapshot: JetDriverAuthorizedSourceSnapshot) {
-    found := -1
+    ^found: -1
     loop index in 0..<snapshot.roots.len() {
         if snapshot.roots[index].identity == snapshot.entry_root_identity {
             found = index
@@ -266,7 +266,7 @@ jet_cli_dev_canvas_publish_project: fn(state: Shared<CanvasHostState>, snapshot:
         return
     }
     root: snapshot.roots[found]
-    files := [CanvasProjectFile]{}
+    ^files: [CanvasProjectFile]{}
     loop file in root.files {
         kind: if file.relative_path == {
             "package.jet" | "pkg.jet" -> "package"
@@ -298,7 +298,7 @@ jet_cli_dev_canvas_transact: fn(state: Shared<CanvasHostState>, file: String, so
 }
 
 jet_cli_dev_canvas_apply: fn(state: Shared<CanvasHostState>, file: String, source_id: String, edit: CanvasEdit, text: ^^String) -> Bool {
-    candidate := text
+    ^candidate: text
     if edit.format {
         formatted: jet_cli_fmt_ordinary(candidate, false, false)
         if !formatted.ok {

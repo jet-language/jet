@@ -131,7 +131,7 @@ canvas_host_new: fn(entry: String, source_id: String, host: String) -[Env, Rand]
 }
 
 canvas_host_bound: fn(state: Shared<CanvasHostState>, port: Int) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.port = port
 }
 
@@ -144,7 +144,7 @@ canvas_host_url: fn(state: Shared<CanvasHostState>) -> String {
 // A good projection of the entry at `revision`: `graph_json` is the graph
 // document, `build_ms` how long the check and projection took.
 canvas_host_publish_graph: fn(state: Shared<CanvasHostState>, revision: String, graph_json: String, build_ms: Int) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.state = "ready"
     permit.value.source_revision = revision.copy()  // copy: the session reports it as current and as accepted
     permit.value.accepted_revision = revision
@@ -160,7 +160,7 @@ canvas_host_publish_graph: fn(state: Shared<CanvasHostState>, revision: String, 
 // A check of the entry at `revision` that failed: `code` is its first error's
 // code and `rendered` the rendered diagnostics. The last good graph stays.
 canvas_host_publish_failure: fn(state: Shared<CanvasHostState>, revision: String, code: String, rendered: String, build_ms: Int) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.state = "error"
     permit.value.source_revision = revision.copy()  // copy: the session reports it as current and as the failing revision
     permit.value.diagnostic_revision = revision
@@ -173,17 +173,17 @@ canvas_host_publish_failure: fn(state: Shared<CanvasHostState>, revision: String
 // One tick of the dev loop's clock: clients not heard from for
 // CANVAS_HOST_CLIENT_TICKS ticks are dropped.
 canvas_host_tick: fn(state: Shared<CanvasHostState>) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.tick += 1
     tick: permit.value.tick
-    expired := false
+    ^expired: false
     loop client in permit.value.clients {
         if tick - client.seen > CANVAS_HOST_CLIENT_TICKS -> expired = true
     }
     if !expired {
         return
     }
-    live := [CanvasHostClient]{}
+    ^live: [CanvasHostClient]{}
     loop client in permit.value.clients {
         if tick - client.seen <= CANVAS_HOST_CLIENT_TICKS {
             live.push(CanvasHostClient{id: client.id.copy(), seen: client.seen})  // copy: a client still leased stays listed
@@ -377,7 +377,7 @@ canvas_host_body_empty: fn(request: HTTPRequest) -> Bool Never! {
 
 // Each header the session check reads appears at most once.
 canvas_host_single_security_headers: fn(request: HTTPRequest) -> Bool Never! {
-    seen := [String]{}
+    ^seen: [String]{}
     loop field in request.headers.fields {
         name: field.name.to_ascii_lower()
         if name != "authorization" && name != "content-length" && name != "host" && name != "origin" && name != "transfer-encoding" {
@@ -417,7 +417,7 @@ canvas_host_url_host: fn(host: String) -> String Never! {
 canvas_host_same_secret: fn(left: String, right: String) -> Bool Never! {
     a: left.bytes()
     b: right.bytes()
-    difference := a.len() ~ b.len()
+    ^difference: a.len() ~ b.len()
     longest: if a.len() > b.len() -> a.len() else -> b.len()
     loop index in 0..<longest {
         x: if index < a.len() -> Int{a[index]} else -> 0
@@ -430,7 +430,7 @@ canvas_host_same_secret: fn(left: String, right: String) -> Bool Never! {
 // How many `session` names the query carries.
 canvas_host_session_count: fn(query: String) -> Int Never! {
     if query == "" -> return 0
-    count := 0
+    ^count: 0
     loop part in query.split("&") {
         if part.partition("=").head == "session" -> count += 1
     }
@@ -452,7 +452,7 @@ canvas_host_note_client: fn(state: Shared<CanvasHostState>, client: String) {
     if client == "" || client.len() > CANVAS_HOST_MAX_CLIENT_ID || canvas_host_has_control(client) {
         return
     }
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     tick: permit.value.tick
     loop index in 0..<permit.value.clients.len() {
         if permit.value.clients[index].id == client {
@@ -508,7 +508,7 @@ CanvasHostGraph: struct {
 
 // The graph answer to serve; a good one becomes the session's kept view.
 canvas_host_take_graph: fn(state: Shared<CanvasHostState>) -> CanvasHostGraph {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if permit.value.failure == .Val(failure) {
         return CanvasHostGraph{ok: false, body: failure.copy()}  // copy: the session keeps the answer it serves
     }
@@ -583,7 +583,7 @@ canvas_host_status_json_of: fn(s: CanvasHostState) -> String {
     plural: if clients == 1 -> "" else -> "s"
     failed: s.state == "error"
     word: if failed -> "error" else -> "ready"
-    rest := if failed -> "{s.diagnostic_code} · {clients} client{plural}" else -> "localhost:{s.port} · {clients} client{plural}"
+    ^rest: if failed -> "{s.diagnostic_code} · {clients} client{plural}" else -> "localhost:{s.port} · {clients} client{plural}"
     if !failed && s.last_build_ms > 0 {
         tenths: (s.last_build_ms + 50) /% 100
         rest = "{rest} · built {tenths /% 10}.{tenths % 10}s"

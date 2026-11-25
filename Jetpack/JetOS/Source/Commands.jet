@@ -54,7 +54,7 @@ jetos_cmd_plan: fn(theme: Theme, raw: String, flags: JetOSFlags) -[IO, FS, Env, 
 
 // The closure is empty until a generation build realizes the packages.
 jetos_render_plan_json: fn(system: SystemPlan, graph_identity: String) -> String Never! {
-    packages := [Dyn]{}
+    ^packages: [Dyn]{}
     loop package in system.packages {
         reference: if package.source == "" -> package.name else -> "{package.name}@{package.source}"
         packages.push(Dyn.Object(["name": Dyn.Text(package.name.copy()), "source": Dyn.Text(package.source.copy()), "ref": Dyn.Text(reference)]))

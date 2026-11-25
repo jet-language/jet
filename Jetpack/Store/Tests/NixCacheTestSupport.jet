@@ -28,7 +28,7 @@ store_nix_test_remove_dir: fn(path: String) Never! {
 
 // A 32-byte Ed25519 seed of repeated `byte`.
 store_nix_test_seed: fn(byte: Int) -> [U8] Never! {
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(U8{byte})
     seed
 }
@@ -58,7 +58,7 @@ store_nix_test_signed_zstd_narinfo: fn(store_path: String, nar_name: String, nar
 store_nix_test_signed_narinfo_with_payload: fn(store_path: String, nar_name: String, payload: [U8], nar: [U8], compression: NixCompression, references: [String], key_id: String, seed: [U8]) -> [U8] Never! {
     file_hash: "sha256:{store_sha256_hex(payload)}"
     nar_hash: "sha256:{store_sha256_hex(nar)}"
-    names := [String]{}
+    ^names: [String]{}
     loop reference in references -> names.push(files.basename(reference))
     info: NixNarInfo{
         store_path: store_path,

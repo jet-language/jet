@@ -17,11 +17,11 @@ JetCLIBuildHTTPInputs: struct {
         get: fn(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError! {
             parsed: cli_build_url.parse(url) ?? return Err(JetDriverBuildHTTPError{message: "invalid URL"})
             host: parsed.host() ?? return Err(JetDriverBuildHTTPError{message: "URL has no host"})
-            path := parsed.path()
+            ^path: parsed.path()
             if path == "" -> path = "/"
             query: parsed.query()
             if query != "" -> path = "{path}?{query}"
-            wire := cli_build_http.jet_http_build_get(host, parsed.authority(), path, parsed.scheme() == "https", addresses, port, timeout_ms, limit) ?? return Err(JetDriverBuildHTTPError{message: "{err}"})
+            ^wire: cli_build_http.jet_http_build_get(host, parsed.authority(), path, parsed.scheme() == "https", addresses, port, timeout_ms, limit) ?? return Err(JetDriverBuildHTTPError{message: "{err}"})
             if wire.len() < 2 {
                 return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its response"})
             }

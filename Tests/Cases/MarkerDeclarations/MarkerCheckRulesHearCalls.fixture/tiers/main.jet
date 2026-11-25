@@ -29,7 +29,9 @@ Measured: struct {
         sites: [.Function],
 
         check: fn(self, call: CompilerCall) {
-            if call.span.start != call.name.span.start || call.args[0].span.start < call.name.span.end -> reject(Spread{})
+            if call.span.start != call.name.span.start || call.args[0].span.start < call.name.span.end {
+                reject(Spread{})
+            }
             if call.args[0].type.name != "Int" -> reject(Fraction{}, at: call.args[0])
         }
     }

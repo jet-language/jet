@@ -67,7 +67,7 @@ store_import_broker_archive: fn(verification: StoreVerification, roots: HangarRo
 // Report the archive, renaming a package root to its local entry identity,
 // then import it under the Hangar lock.
 store_archive_import_verified: fn(verification: StoreVerification, roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool) -> HangarArchiveReport StoreError! {
-    report := archive.report()
+    ^report: archive.report()
     loop object in archive.objects {
         if object.id != archive.root_id || object.meta == "" -> next
         meta: pkg_parse_meta(object.meta) ?? return Err(StoreError.InvalidData("archive root has malformed package metadata"))
@@ -100,7 +100,7 @@ store_recover_repair_quarantine_unlocked: fn(verification: StoreVerification, ro
     }
     objects: files.join(hangar, "objects")
     store_ensure_real_directory(objects, "Hangar object pool")
-    permissions := MovePathPermissions.default()
+    ^permissions: MovePathPermissions.default()
     recovered: if store_archive_recover_quarantine_entries(verification, roots, quarantine, objects, permissions) == {
         .Ok(count) -> count
         .Err(error) -> {
@@ -116,7 +116,7 @@ store_archive_recover_quarantine_entries: fn(verification: StoreVerification, ro
     hangar: roots.hangar_dir()
     permissions.make_writable(quarantine, hangar)
     permissions.make_writable(objects, hangar)
-    recovered := 0
+    ^recovered: 0
     loop item in files.list_dir(quarantine) {
         repair_name: item.name.removeprefix("repair-")
         if repair_name == item.name -> next
@@ -292,7 +292,7 @@ store_archive_repair_unlocked: fn(verification: StoreVerification, roots: Hangar
     store_ensure_real_directory(files.join(hangar, "objects"), "Hangar object pool")
     store_recover_closure_journal_unlocked(verification, roots)
     entry: store_archive_select_entry_unlocked(verification, roots, target)
-    live_failure := StoreError?{None}
+    ^live_failure: StoreError?{None}
     if store_archive_verify_live_entry_unlocked(verification, roots, entry) == {
         .Ok(_) -> {}
         .Err(error) -> live_failure = Val(error)
@@ -323,7 +323,7 @@ store_archive_repair_unlocked: fn(verification: StoreVerification, roots: Hangar
     store_ensure_real_directory(quarantine, "Hangar quarantine")
     backup: files.join(quarantine, "repair-{entry.envelope.output_hash}-{store_archive_unique_suffix()}")
     had_object: store_archive_lstat(object_path) != None
-    permissions := MovePathPermissions.default()
+    ^permissions: MovePathPermissions.default()
     report: if store_archive_repair_swap(verification, roots, archive, object_path, backup, quarantine, had_object, permissions) == {
         .Ok(value) -> value
         .Err(error) -> {
@@ -350,7 +350,7 @@ store_archive_repair_swap: fn(verification: StoreVerification, roots: HangarRoot
         store_sync_store_directory(object_parent)
     }
     report: archive.report()
-    import_failure := StoreError?{None}
+    ^import_failure: StoreError?{None}
     if store_archive_import_unlocked(verification, roots, archive, false) == {
         .Ok(_) -> {}
         .Err(error) -> import_failure = Val(error)
@@ -370,7 +370,7 @@ store_archive_repair_swap: fn(verification: StoreVerification, roots: HangarRoot
 // quarantined object back. Every rollback failure is appended to the import
 // error, which keeps its kind.
 store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup: String, object_parent: String, had_object: Bool, permissions: ^MovePathPermissions) -> StoreError Never! {
-    rollback_errors := [String]{}
+    ^rollback_errors: [String]{}
     if files.stat(object_path) == {
         .Ok(_) -> {
             if store_archive_remove_tree(object_path) == {
@@ -433,14 +433,14 @@ store_archive_build_unlocked: fn(verification: StoreVerification, roots: HangarR
     store_require_real_directory(objects_dir, "Hangar object pool")
     graph: store_closure_graph_structure_unlocked(verification, roots)
     root_digest: entry.envelope.output_hash
-    digests := if include_closure -> graph.closure(root_digest) else -> [String]{root_digest}
+    ^digests: if include_closure -> graph.closure(root_digest) else -> [String]{root_digest}
     if digests.len() == 0 -> digests.push(root_digest.copy())
     digests = store_archive_sorted_unique(digests)
 
-    selected := [String:StoreEntry]{}
+    ^selected: [String:StoreEntry]{}
     selected[entry.id] = entry
     loop candidate in store_list_unlocked(roots) {
-        owns := digests.contains(candidate.envelope.output_hash)
+        ^owns: digests.contains(candidate.envelope.output_hash)
         loop output in candidate.named_outputs {
             if digests.contains(output.value) -> owns = true
         }
@@ -448,7 +448,7 @@ store_archive_build_unlocked: fn(verification: StoreVerification, roots: HangarR
     }
 
     canonical_objects: files.canonicalize(objects_dir) ?? objects_dir
-    objects := [HangarArchiveObject]{}
+    ^objects: [HangarArchiveObject]{}
     loop digest in digests {
         object: graph.objects.get(digest) ?? return Err(StoreError.InvalidData("closure object `{digest}` is absent from the Hangar graph"))
         if !store_archive_is_under(object.path, canonical_objects) {
@@ -472,8 +472,8 @@ store_archive_build_unlocked: fn(verification: StoreVerification, roots: HangarR
     }
     objects.sort_by(fn(object) { object.digest })
     objects.sort_by(fn(object) { object.id })
-    output_ids := [String]{}
-    package_ids := [String]{}
+    ^output_ids: [String]{}
+    ^package_ids: [String]{}
     loop object in objects {
         if object.meta == "" {
             if output_ids.contains(object.digest) {
@@ -510,11 +510,11 @@ store_archive_import_unlocked: fn(verification: StoreVerification, roots: Hangar
     stage_objects: files.join(stage, "objects")
     files.create_dir_all(stage)
     files.create_dir_all(stage_objects)
-    moved := [HangarArchiveMove]{}
+    ^moved: [HangarArchiveMove]{}
     count: if store_archive_import_staged(verification, roots, archive, allow_nix_absolute_symlinks, stage, stage_objects, objects_dir, moved) == {
         .Ok(value) -> value
         .Err(error) -> {
-            failure := error
+            ^failure: error
             if store_archive_rollback_import_moves(verification, moved, hangar) == {
                 .Err(rollback) -> {
                     failure = StoreError.Other("{error.message()}; archive import rollback failed: {rollback.message()}")
@@ -531,8 +531,8 @@ store_archive_import_unlocked: fn(verification: StoreVerification, roots: Hangar
 
 store_archive_import_staged: fn(verification: StoreVerification, roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool, stage: String, stage_objects: String, objects_dir: String, moved: ^[HangarArchiveMove]) -> Int StoreError! {
     hangar: roots.hangar_dir()
-    package_records := [StoreEntry]{}
-    seen_digests := [String]{}
+    ^package_records: [StoreEntry]{}
+    ^seen_digests: [String]{}
     loop object in archive.objects {
         if object.meta != "" {
             meta: pkg_parse_meta(object.meta) ?? return Err(StoreError.InvalidData("package record `{object.id}` has malformed meta.json"))
@@ -575,7 +575,7 @@ store_archive_import_staged: fn(verification: StoreVerification, roots: HangarRo
 
     store_archive_validate_import_destinations(roots, package_records, seen_digests)
 
-    incoming_bytes := 0
+    ^incoming_bytes: 0
     loop digest in seen_digests {
         if !files.is_dir(files.join(objects_dir, digest)) {
             incoming_bytes = store_admission_size(stage_objects)
@@ -711,7 +711,7 @@ store_archive_verify_contents: fn(roots: HangarRoots, archive: HangarArchive, al
 
 store_archive_verify_staged: fn(roots: HangarRoots, archive: HangarArchive, stage: String, allow_nix_absolute_symlinks: Bool) StoreError! {
     files.create_dir_all(stage)
-    outputs := [String]{}
+    ^outputs: [String]{}
     loop object in archive.objects {
         if object.meta != "" -> next
         store_archive_write_nodes(files.join(stage, object.digest), object.nodes, object.root_mode, allow_nix_absolute_symlinks)
@@ -776,8 +776,8 @@ store_archive_collect_nodes: fn(root: String, allow_nix_absolute_symlinks: Bool)
         return Err(StoreError.InvalidData("Hangar output root may not be a symlink"))
     }
     canonical_root: files.canonicalize(root)
-    hardlinks := [String:String]{}
-    nodes := [HangarArchiveNode]{}
+    ^hardlinks: [String:String]{}
+    ^nodes: [HangarArchiveNode]{}
     store_archive_collect_nodes_at(root, "", canonical_root, hardlinks, nodes, allow_nix_absolute_symlinks)
     nodes.sort_by(fn(node) { node.path })
     Ok(nodes)
@@ -888,7 +888,7 @@ store_archive_write_nodes: fn(root: String, nodes: [HangarArchiveNode], root_mod
         files.create_dir_all(files.dirname(path))
         files.symlink(target, path)
     }
-    directories := [HangarArchiveNode]{}
+    ^directories: [HangarArchiveNode]{}
     loop node in nodes {
         if node.kind == HangarArchiveNodeKind.Directory -> directories.push(node.copy())
     }
@@ -898,7 +898,7 @@ store_archive_write_nodes: fn(root: String, nodes: [HangarArchiveNode], root_mod
 }
 
 store_archive_separator_count: fn(path: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop byte in path.bytes() {
         if (Int{byte}) == 47 -> count += 1
     }
@@ -919,7 +919,7 @@ store_archive_link_target: fn(root: String, link: String, bytes: [U8], allow_nix
     parent: store_archive_parent_or(link, root)
     candidate: files.join(parent, target)
     relative: store_archive_strip_prefix(candidate, root) ?? return Err(StoreError.InvalidData("archive link target escapes its output root"))
-    normalized := [String]{}
+    ^normalized: [String]{}
     loop component in relative {
         if component == {
             "." -> {}
@@ -973,7 +973,7 @@ store_archive_validate_import_destinations: fn(roots: HangarRoots, entries: [Sto
 
 // Move every published object back to staging, newest first.
 store_archive_rollback_import_moves: fn(verification: StoreVerification, moved: [HangarArchiveMove], hangar: String) StoreError! {
-    index := moved.len() - 1
+    ^index: moved.len() - 1
     loop index >= 0 {
         entry: moved[index]
         if store_archive_lstat_ok(entry.destination) != None {
@@ -1028,17 +1028,17 @@ store_archive_key_path: fn(roots: HangarRoots, requested: String) -> String Neve
 // A key file holds raw secret bytes or at least 32 even-length hex digits,
 // with one optional trailing newline.
 store_archive_decode_secret: fn(bytes: [U8]) -> [U8] StoreError! {
-    trimmed := bytes
+    ^trimmed: bytes
     if trimmed.len() > 0 && (Int{trimmed[trimmed.len() - 1]}) == 10 {
         trimmed = trimmed[0..<(trimmed.len() - 1)]
     }
-    hex := trimmed.len() >= 32 && trimmed.len() % 2 == 0
+    ^hex: trimmed.len() >= 32 && trimmed.len() % 2 == 0
     loop byte in trimmed {
         if !store_archive_is_hex_digit(Int{byte}) -> hex = false
     }
     if !hex -> return Ok(trimmed)
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < trimmed.len() {
         high: store_archive_hex_value(trimmed[index]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
         low: store_archive_hex_value(trimmed[index + 1]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
@@ -1083,8 +1083,8 @@ store_archive_read_bounded_limit: fn(path: String, limit: Int, label: String) ->
     if !metadata.is_file || metadata.size > limit {
         return Err(StoreError.InvalidData("{label} is not a regular file within the size limit"))
     }
-    reader := files.open(path, links: .Refuse)
-    bytes := [U8]{}
+    ^reader: files.open(path, links: .Refuse)
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
@@ -1118,7 +1118,7 @@ store_archive_write_atomic: fn(path: String, bytes: [U8]) StoreError! {
 }
 
 store_archive_publish_partial: fn(partial: String, path: String, bytes: [U8], mode: Int?) StoreError! {
-    out := files.create(partial, if_exists: .Refuse, mode: mode)
+    ^out: files.create(partial, if_exists: .Refuse, mode: mode)
     if mode == {
         .Val(private) -> {
             out.set_mode(private)
@@ -1233,7 +1233,7 @@ store_archive_with_extension: fn(path: String, extension: String) -> String Neve
     parent: files.dirname(path)
     name: files.basename(path)
     raw: name.bytes()
-    dot := -1
+    ^dot: -1
     loop index in 1..<raw.len() {
         if (Int{raw[index]}) == 46 -> dot = index
     }
@@ -1256,9 +1256,9 @@ store_archive_unique_suffix: fn() -[Env, Time]> String Never! {
 store_archive_now_secs: fn() -[Time]> Int Never! { time.unix_ns() /% 1000000000 }
 
 store_archive_sorted_unique: fn(values: [String]) -> [String] Never! {
-    sorted := values
+    ^sorted: values
     sorted.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop value in sorted {
         if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
     }

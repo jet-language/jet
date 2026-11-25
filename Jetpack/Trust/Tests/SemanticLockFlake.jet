@@ -169,7 +169,7 @@ TRUST_TEST_STAGE_A_LOCK: #run { `{
 }
 `,
     )
-    package_outputs := [String]{}
+    ^package_outputs: [String]{}
     loop output in graph.outputs {
         if output.kind == FlakeOutputKind.Package -> package_outputs.push(output.attribute)
     }
@@ -178,13 +178,13 @@ TRUST_TEST_STAGE_A_LOCK: #run { `{
 
 #Test("pinned flake lock fixture preserves nodes edges and registry resolution") {
     graph: FlakeGraph.parse_with_lock("Tests/Fixtures/NixCompat/stage-a-flake.nix", TRUST_TEST_STAGE_A_FLAKE, Val(TRUST_TEST_STAGE_A_LOCK), true) ?? panic("the pinned fixture should parse")
-    expected_revisions := [String:String]{}
+    ^expected_revisions: [String:String]{}
     expected_revisions["flake-utils"] = "11707dc2f618dd54ca8739b309ec4fc024de578b"
     expected_revisions["nixpkgs"] = "148bab9c1c3c53136ecb44a6ea356a0ed5b39b06"
     loop input in graph.inputs {
         assert_eq(input.revision, expected_revisions.get(input.name) ?? panic("unexpected input {input.name}"))
     }
-    node_names := [String]{}
+    ^node_names: [String]{}
     loop node in graph.lock_nodes -> node_names.push(node.name)
     assert_eq(node_names, [String]{"flake-utils", "nixpkgs", "root", "systems"})
     flake_utils: trust_flake_find_node(graph.lock_nodes, "flake-utils") ?? panic("flake-utils node")
@@ -231,7 +231,7 @@ TRUST_TEST_STAGE_A_LOCK: #run { `{
 }
 `,
     )
-    found := false
+    ^found: false
     loop registry in graph.registries {
         if registry.alias != "nixpkgs" -> next
         found = true
@@ -446,7 +446,7 @@ TRUST_TEST_STAGE_A_LOCK: #run { `{
 }
 
 #Test("semantic lock requires every flake input record") {
-    lock := SemanticLockFile.empty()
+    ^lock: SemanticLockFile.empty()
     lock.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "github:NixOS/nixpkgs", follows: ""}}
     missing: if FlakeGraph.from_semantic_lock("flake.nix", lock) == {
         .Ok(_) -> false

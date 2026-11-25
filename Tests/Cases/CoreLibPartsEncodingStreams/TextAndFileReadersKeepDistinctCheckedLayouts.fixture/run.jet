@@ -15,13 +15,13 @@ keep_record_reader: fn(value: ^^jsonl.JSONLReader<files.FileReader>) -> jsonl.JS
 run: fn() {
     input: files.open("value.json") ?? panic("open")
     file: json.reader(input) ?? panic("file reader")
-    kept := keep_file_reader(file)
+    ^kept: keep_file_reader(file)
     _: kept.next() ?? panic("file event")
     print("file event")
 
     lines: files.open("value.jsonl") ?? panic("open records")
     records: jsonl.reader(lines) ?? panic("record reader")
-    kept_records := keep_record_reader(records)
+    ^kept_records: keep_record_reader(records)
     first: kept_records.next() ?? panic("first record")
     print(json.canonical(first) ?? panic("canonical first"))
     second: kept_records.next() ?? panic("second record")

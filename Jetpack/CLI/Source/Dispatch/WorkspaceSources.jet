@@ -111,7 +111,7 @@ cli_env_file_present: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[FS, E
 }
 
 cli_nearest_project_root: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> String? CLIError! {
-    walk := AuthorityResolver.authority_walk_root(start)
+    ^walk: AuthorityResolver.authority_walk_root(start)
     loop {
         if cli_package_manifest_present(cache, walk) || cli_env_file_present(cache, walk) || cli_checked_workspace_source(cache, walk) != None {
             return Ok(Val(walk))
@@ -142,7 +142,7 @@ cli_checked_env_file: fn(dir: String) -[FS, Env]> EnvFile? CLIError! {
 }
 
 cli_nearest_workspace_source: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> WorkspaceRootSnapshot? CLIError! {
-    walk := AuthorityResolver.authority_walk_root(start)
+    ^walk: AuthorityResolver.authority_walk_root(start)
     loop {
         if cli_checked_workspace_source(cache, walk) == .Val(checked) {
             return Ok(Val(WorkspaceRootSnapshot{root: walk, source: Val(checked)}))
@@ -224,7 +224,7 @@ cli_finish_workspace_load: fn(cache: ^WorkspaceDeclarationCache, dir: String, fo
 cli_cwd_table: fn(cache: ^WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> SourceTable Never! {
     cwd: cli_current_dir()
     dir: cli_project_root(cache, cwd)
-    table := if cli_checked_env_file(dir) == {
+    ^table: if cli_checked_env_file(dir) == {
         .Ok(found) -> if found == {
             .Val(env) -> env.source_table()
             .None -> SourceTable.empty()
@@ -246,7 +246,7 @@ cli_ensure_builtin_sources: fn(table: ^SourceTable) Never! {
 
 // The built-in source table for project-independent profile commands.
 cli_builtin_table: fn() -> SourceTable Never! {
-    table := SourceTable.empty()
+    ^table: SourceTable.empty()
     cli_ensure_builtin_sources(table)
     table
 }
@@ -257,8 +257,8 @@ cli_builtin_table: fn() -> SourceTable Never! {
 // never falls through to a stale lock.
 cli_cwd_workspace_index: fn(cache: ^WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> WorkspaceIndex Never! {
     snapshot: cli_workspace_root_snapshot_or_exit(cache, cli_current_dir())
-    plan := WorkspacePlan?{None}
-    allow_lock := true
+    ^plan: WorkspacePlan?{None}
+    ^allow_lock: true
     if snapshot.source == .Val(checked) {
         allow_lock = false
         if checked.source.role == WorkspaceSourceRole.Index {
@@ -267,7 +267,7 @@ cli_cwd_workspace_index: fn(cache: ^WorkspaceDeclarationCache) -[IO, FS, Env, Ex
         }
     }
     if allow_lock -> plan = cli_workspace_lock_index(cache, snapshot.root)
-    members := [WorkspaceMember]{}
+    ^members: [WorkspaceMember]{}
     if plan == .Val(found) {
         loop member in found.members {
             members.push(WorkspaceMember{name: member.name, path: member.path})

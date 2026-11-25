@@ -11,14 +11,14 @@ package: {
 
 show: fn(items: [String]) -> String {
     joined: items.join("|")
-    sizes := [String]{}
+    ^sizes: [String]{}
     loop item in items -> sizes.push("{item.count_bytes()}")
     widths: sizes.join(",")
     "{items.len()}:[{joined}]({widths})"
 }
 
 split_walked: fn(text: String, sep: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop piece in text.split(sep) -> out.push(piece)
     out
 }
@@ -26,14 +26,14 @@ split_walked: fn(text: String, sep: String) -> [String] {
 split_listed: fn(text: String, sep: String) -> [String] { text.split(sep).to_list() }
 
 lines_walked: fn(text: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop line in text.lines() -> out.push(line)
     out
 }
 
 lines_listed: fn(text: String) -> [String] {
     all: text.lines()
-    out := [String]{}
+    ^out: [String]{}
     loop line in all -> out.push(line)
     out
 }
@@ -69,8 +69,8 @@ run: fn() {
     check_lines(5, "\n\n", "2:[|](0,0)")
     check_lines(6, "a\r\n\r\nb\r", "3:[a||b\r](1,0,2)")
 
-    text := "one two three"
-    seen := [String]{}
+    ^text: "one two three"
+    ^seen: [String]{}
     loop word in text.split(" ") {
         text = "changed"
         stop: word == "two"
@@ -79,28 +79,28 @@ run: fn() {
     }
     print("reassigned {show(seen)} {text}")
 
-    doc := "first\nsecond\nthird"
-    kept := [String]{}
+    ^doc: "first\nsecond\nthird"
+    ^kept: [String]{}
     loop line in doc.lines() {
         doc = ""
         kept.push(line)
     }
     print("lines reassigned {show(kept)} {doc.count_bytes()}")
 
-    indexed := [String]{}
+    ^indexed: [String]{}
     loop (i, line) in "x\ny".lines() -> indexed.push("{i}{line}")
     loop (i, line) in "p\r\nq\n".lines() -> indexed.push("{i}{line}")
     print("indexed {show(indexed)}")
 
     left: "alpha beta"
     right: "gamma"
-    fresh := [String]{}
+    ^fresh: [String]{}
     loop word in "{left} {right}".split(" ") -> fresh.push(word)
     print("fresh {show(fresh)}")
 
-    count := 0
-    long := 0
-    bytes := 0
+    ^count: 0
+    ^long: 0
+    ^bytes: 0
     loop line in "alpha beta gamma\ndelta epsilon 12".split("\n") {
         loop word in line.split(" ") {
             size: word.count_bytes()

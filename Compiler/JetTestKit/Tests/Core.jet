@@ -14,7 +14,7 @@ kit_test_unblessed: fn() -> KitBless {
 kit_test_ledger: fn(root: String) -> String { files.join(root, "known-failing.tsv") }
 
 kit_test_checkout_options: fn(root: String) -> KitOptions {
-    options := kit_exec_defaults()
+    ^options: kit_exec_defaults()
     options.golden_corpora = ["Examples", "Tests/Run"]
     options.ui_corpora = ["Tests/UI", "Tests/UILint"]
     options.cases_corpora = ["Tests/Cases"]
@@ -44,7 +44,7 @@ kit_test_run_limits: fn() -> KitLimits {
     counts: kit_report_counts([known, unexpected], ["golden", "cases"])
     assert(counts.contains("\"KNOWN-FAILING\":1"))
     assert(counts.contains("\"UNEXPECTED-PASS\":1"))
-    results := [KitCaseResult]{known, unexpected}
+    ^results: [KitCaseResult]{known, unexpected}
     kit_golden_mark_tier_splits(results)
     assert(results[0].detail.starts_with("tier-split:"))
     assert(results[1].detail.starts_with("tier-split:"))
@@ -99,9 +99,9 @@ kit_test_core_scratch: fn(label: String) -> String {
 
 #Test("shards are disjoint and complete in sorted corpus order") {
     ids: ["a", "b", "c", "d", "e"]
-    all := [String]{}
+    ^all: [String]{}
     loop shard in 1..3 {
-        options := kit_exec_defaults()
+        ^options: kit_exec_defaults()
         options.shard_index = shard
         options.shard_count = 3
         selection: kit_exec_select_ids(ids, options)
@@ -118,7 +118,7 @@ kit_test_core_scratch: fn(label: String) -> String {
 #Test("unknown and duplicate exact case lists are refused, unless other tests may own the names") {
     root: kit_test_core_scratch("selection")
     path: files.join(root, "cases.txt")
-    options := kit_exec_defaults()
+    ^options: kit_exec_defaults()
     options.cases = path
     kit_exec_write(path, "a\na\n")
     assert(kit_exec_select_ids(["a", "b"], options).error.contains("duplicate"))
@@ -326,7 +326,7 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! { done.send(code) }
     jobs: kit_execute_jobs(2 * cores, 2 * cores, cores)
     assert_eq(jobs, 2 * cores)
     { sender: done, receiver: finished }: channel<Int>()
-    seen := 0
+    ^seen: 0
     task.group pool(limit: jobs) {
         loop index in 0..<jobs {
             task kit_test_pool_report(env.copy(), root.copy(), index, done.copy())
@@ -469,7 +469,7 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! { done.send(code) }
 
 #Test("the step timeout is a minute unless set, and an out-of-range duration is refused before discovery") {
     assert_eq(kit_exec_defaults().timeout, 60)
-    options := kit_exec_defaults()
+    ^options: kit_exec_defaults()
     options.timeout = 9223372036854775807
     assert_eq(kit_execute_suites(options, "", ["golden"], None).code, 2)
 }
@@ -514,7 +514,7 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! { done.send(code) }
     // A 24 GiB scope with 1 GiB in use, on a host with room to spare.
     budget: kit_exec_room(100 * gib, 24 * gib, gib)
     assert_eq(budget, 23 * gib)
-    history := [String:KitHistory]{}
+    ^history: [String:KitHistory]{}
     history[kit_history_key("pool", "heavy")] = KitHistory{wall_ms: 600000, peak_kib: 12 * 1048576}
     history[kit_history_key("pool", "light")] = KitHistory{wall_ms: 60000, peak_kib: 7 * 1048576}
     keys: [kit_history_key("pool", "light"), kit_history_key("pool", "heavy"), kit_history_key("pool", "new")]
@@ -567,7 +567,7 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! { done.send(code) }
     assert_eq(kit_execute_budget(3 * gib, 16 * gib), 3 * gib)
     assert_eq(kit_execute_budget(0, 0), 0)
     entries: ["a", "b", "c", "d"].map(fn(name) { KitSelected{entry: KitEntry{path: name, expected: name, project: "", suite: "cases", mode: ""}, suite: "cases"} })
-    history := [String:KitHistory]{}
+    ^history: [String:KitHistory]{}
     history[kit_history_key("cases", "b")] = KitHistory{wall_ms: 100, peak_kib: 10240}
     history[kit_history_key("cases", "c")] = KitHistory{wall_ms: 9000, peak_kib: 8 * 1048576}
     history[kit_history_key("cases", "d")] = KitHistory{wall_ms: 9000, peak_kib: 512 * 1024}
@@ -609,7 +609,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
 }
 
 #Test("pool rows keep corpus order, suite then path, whatever the pool's size") {
-    mixed := [kit_test_selected("ui", "b"), kit_test_selected("cases", "z"), kit_test_selected("golden", "a"), kit_test_selected("cases", "a")]
+    ^mixed: [kit_test_selected("ui", "b"), kit_test_selected("cases", "z"), kit_test_selected("golden", "a"), kit_test_selected("cases", "a")]
     kit_execute_corpus_order(mixed)
     assert_eq(mixed.map(fn(item) { "{item.suite} {item.entry.path}" }), ["cases a", "cases z", "golden a", "ui b"])
     root: cases_test_root("pool-order")
@@ -624,7 +624,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
         run_scratch: files.join(root, "run-{jobs}")
         files.create_dir_all(run_scratch) ?? panic("pool run scratch: {err}")
         schedule: kit_execute_schedule(corpus, [String:KitHistory]{}, jobs, 0, 0)
-        rows := [String]{}
+        ^rows: [String]{}
         loop run in kit_execute_entries(corpus, schedule, context.options, context.env, context.known, root, run_scratch) {
             loop result in run.results -> rows.push("{result.case} {result.status}")
         }
@@ -644,7 +644,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
     cases_report: files.join(root, "cases.json")
     passed: KitCaseResult{suite: "cases", case: "Tests/Cases/a.case", tier: "-", status: "PASS", detail: "", exit: 0}
     failed: KitCaseResult{suite: "ui", case: "Tests/UI/b.jet", tier: "-", status: "FAIL", detail: "snapshot", exit: 1}
-    reports := [String:String]{}
+    ^reports: [String:String]{}
     reports["ui"] = ui_report
     only_ui: kit_execute_finish("jet", [failed], ["ui"], ["ui"], Val(reports), "")
     assert_eq(only_ui.code, 1)

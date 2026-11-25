@@ -33,7 +33,7 @@ ssl_cli_write_hostname_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> 
     hostname: ssltls.ssl_get_hostname_pointer(ssl) ?? return Ok(0)
     name: hostname.bytes()
     hostname_len: name.len()
-    p := buf
+    ^p: buf
     ssltls.ssl_chk_buf(p, end, hostname_len + 9) ?? return Err(err)
     ssldefs.ssl_put_u16(ssl.out_buf, p, ssldefs.TLS_EXT_SERVERNAME)
     ssldefs.ssl_put_u16(ssl.out_buf, p + 2, hostname_len + 5)
@@ -52,7 +52,7 @@ ssl_cli_write_hostname_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> 
 // RFC 7301 3.1). Setting the list checked each name is under 256 bytes.
 ssl_cli_write_alpn_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
     alpn_list: ssl.conf.alpn_list ?? return Ok(0)
-    p := buf
+    ^p: buf
     // The extension type, its length and the list length.
     ssltls.ssl_chk_buf(p, end, 6) ?? return Err(err)
     ssldefs.ssl_put_u16(ssl.out_buf, p, ssldefs.TLS_EXT_ALPN)
@@ -78,7 +78,7 @@ ssl_cli_write_alpn_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> Int 
 // TLS 1.3 takes its ECDHE curves and the RFC 7919 groups, TLS 1.2 its
 // ECDHE curves. A configuration without groups is BadConfig.
 ssl_cli_write_supported_groups_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int, flags: Int) -> Int ssldefs.SSLError! {
-    p := buf
+    ^p: buf
     // The extension type, its length and the list length.
     ssltls.ssl_chk_buf(p, end, 6) ?? return Err(err)
     p += 6
@@ -86,7 +86,7 @@ ssl_cli_write_supported_groups_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: 
     group_list: ssltls.ssl_get_groups(ssl)
     if group_list.len() == 0 -> return Err(.BadConfig)
     loop group in group_list {
-        propose_group := false
+        ^propose_group: false
         if flags & SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG != 0 {
             if ssltls.ssl_tls13_named_group_is_ecdhe(group) && ssltls.ssl_get_ecp_group_id_from_tls_id(group) != .Unknown {
                 propose_group = true
@@ -122,8 +122,8 @@ SSLCipherSuitesWritten: struct {
 // initial handshake the empty renegotiation_info signaling suite
 // (ssl_write_client_hello_cipher_suites, RFC 5746 3.3).
 ssl_cli_write_client_hello_cipher_suites: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> SSLCipherSuitesWritten ssldefs.SSLError! {
-    p := buf
-    tls12_uses_ec := false
+    ^p: buf
+    ^tls12_uses_ec: false
     // The list length.
     ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
     p += 2
@@ -167,8 +167,8 @@ SSLClientHelloWritten: struct {
 // extensions are those of every version proposed, the TLS 1.3
 // pre_shared_key one last; an empty extension list is left out.
 ssl_write_client_hello_body: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: Int, end: Int, rng: ^R) -> SSLClientHelloWritten ssldefs.SSLError! {
-    p := buf
-    binders_len := 0
+    ^p: buf
+    ^binders_len: 0
     propose_tls12: ssl.handshake.min_tls_version <= ssldefs.SSL_VERSION_TLS1_2 && ssldefs.SSL_VERSION_TLS1_2 <= ssl.tls_version
     propose_tls13: ssl.handshake.min_tls_version <= ssldefs.SSL_VERSION_TLS1_3 && ssldefs.SSL_VERSION_TLS1_3 <= ssl.tls_version
     ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
@@ -216,7 +216,7 @@ ssl_write_client_hello_body: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: Int, end:
     if propose_tls13 {
         p += cli13.ssl_tls13_write_client_hello_exts(ssl, p, end, rng) ?? return Err(err)
     }
-    groups_flags := 0
+    ^groups_flags: 0
     if propose_tls13 && ssltls.ssl_conf_tls13_is_some_ephemeral_enabled(ssl) {
         groups_flags |= SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG
     }
@@ -246,12 +246,12 @@ ssl_write_client_hello_body: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: Int, end:
 // The client random: TLS 1.2's starts with the time in seconds
 // (ssl_generate_random, RFC 5246 7.4.1.2); TLS 1.3's is all random.
 ssl_cli_generate_random: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
-    gmt_unix_time_len := 0
+    ^gmt_unix_time_len: 0
     if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 {
         ssldefs.ssl_put_u32(ssl.handshake.randbytes, 0, ssldefs.ssl_time())
         gmt_unix_time_len = 4
     }
-    random := ssldefs.ssl_zeros(ssldefs.CLIENT_HELLO_RANDOM_LEN - gmt_unix_time_len)
+    ^random: ssldefs.ssl_zeros(ssldefs.CLIENT_HELLO_RANDOM_LEN - gmt_unix_time_len)
     if !rng.fill(random) -> return Err(.RandomFailed)
     ssldefs.ssl_copy_into(ssl.handshake.randbytes, gmt_unix_time_len, random, 0, random.len())
 }
@@ -282,7 +282,7 @@ ssl_prepare_client_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.
     if (ssl.conf.transport != ssldefs.SSL_TRANSPORT_DATAGRAM || ssl.handshake.cookie == None) && ssl.handshake.hello_retry_request_flag == 0 {
         ssl_cli_generate_random(ssl, rng) ?? return Err(err)
     }
-    session_id_len := ssl.spool[sn].id.len()
+    ^session_id_len: ssl.spool[sn].id.len()
     if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 {
         if session_id_len < 16 || session_id_len > 32 || ssl.renego_status != ssldefs.SSL_INITIAL_HANDSHAKE || ssl.handshake.resume == 0 {
             session_id_len = 0
@@ -298,7 +298,7 @@ ssl_prepare_client_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.
     }
     if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 -> session_id_len = 32
     if session_id_len != ssl.spool[sn].id.len() {
-        id := ssldefs.ssl_zeros(session_id_len)
+        ^id: ssldefs.ssl_zeros(session_id_len)
         if session_id_len > 0 && !rng.fill(id) -> return Err(.RandomFailed)
         ssl.spool[sn].id = id
     }

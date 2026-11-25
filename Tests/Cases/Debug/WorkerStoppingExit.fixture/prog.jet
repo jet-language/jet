@@ -3,7 +3,7 @@ use process: core.process
 half: fn(n: Int) -> Int { n /% 2 }
 
 spin: fn(n: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in 0..<n -> total += i
     total
 }
@@ -16,7 +16,7 @@ work: fn(n: Int) -> Int {
         spinning: task spin(1000000000 + k)
         spinning.detach()
     }
-    total := 0
+    ^total: 0
     loop i in 0..<n -> total += half(i)
     print("total {total}")
     process.exit(70)
@@ -24,7 +24,7 @@ work: fn(n: Int) -> Int {
 }
 
 run: fn() {
-    results := [Int]{}
+    ^results: [Int]{}
     task.group big(stack: 201326592) {
         worker: task work(7)
         results.push(worker.join() ?? panic("the worker failed"))

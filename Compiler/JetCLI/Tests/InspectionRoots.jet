@@ -23,12 +23,12 @@ inspection_root_fixture_require_root: fn(start: String, expected: String) {
 }
 
 inspection_root_fixture_missing: fn(start: String) {
-    action := JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
+    ^action: JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
     if jet_cli_require_inspect_root(start, "missing package", true) == {
         .Root(_) -> { panic("missing root was invented") }
         .Refused(plan) -> action = plan
     }
-    plane := JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
+    ^plane: JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
     if jet_cli_inspect_require_root(start, "missing package", true) == {
         .File(_, _) -> { panic("missing plane root was invented") }
         .Refused(plan) -> plane = plan

@@ -54,7 +54,7 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
@@ -65,7 +65,7 @@ fake_u32: fn(bytes: [U8], at: Int) -> Int {
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -106,7 +106,7 @@ fake_fail: fn(f: ^Fake, message: String) {
 // `states`, then xdg_surface.configure.
 fake_configure: fn(f: ^Fake, width: Int, height: Int, states: [Int]) {
     f.serial += 1
-    args := fake_words([Int]{width, height, states.len() * 4})
+    ^args: fake_words([Int]{width, height, states.len() * 4})
     loop state in states -> fake_put(args, state)
     toplevel: f.toplevel
     xdg_surface: f.xdg_surface
@@ -175,7 +175,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
         f.registry = fake_u32(body, 0)
         registry: f.registry
         loop (index, interface) in GLOBALS {
-            args := fake_words([Int]{index + 1})
+            ^args: fake_words([Int]{index + 1})
             loop b in fake_text(interface) -> args.push(b)
             version: if interface == "wl_compositor" -> 6 else if interface == "xdg_wm_base" -> 2 else -> 1
             fake_put(args, version)
@@ -243,7 +243,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
 }
 
 fake_dispatch: fn(f: ^Fake) {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -263,7 +263,7 @@ fake_dispatch: fn(f: ^Fake) {
 
 // Serves one window until it disconnects.
 fake_serve: fn(stream: ^^net.UnixStream) -[Net, Time]> Fake {
-    f := Fake{
+    ^f: Fake{
         stream: stream,
         inbox: [U8]{},
         out: [U8]{},
@@ -287,7 +287,7 @@ fake_serve: fn(stream: ^^net.UnixStream) -[Net, Time]> Fake {
         records: [String]{},
         failures: [String]{},
     }
-    idle := 0
+    ^idle: 0
     loop idle < 40 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("wait failed: {err}")
@@ -322,8 +322,8 @@ fake_serve_two: fn(listener: net.UnixListener) -[Net, Time]> [Fake] {
 }
 
 white: fn(frame: ui.Frame) -> [U8] {
-    pixels := [U8]{}
-    count := frame.width * frame.height * 4
+    ^pixels: [U8]{}
+    ^count: frame.width * frame.height * 4
     loop count > 0 {
         pixels.push(U8{255})
         count -= 1
@@ -338,14 +338,14 @@ state_line: fn(window: ui.Window) -> String {
 // Maximized after its first frame; then fullscreen once maximized, out
 // of fullscreen once fullscreen, and minimized once neither.
 states_window: fn() -[Env, Net, Time]> [String] {
-    log := [String]{}
+    ^log: [String]{}
     window: ui.open(width: 200, height: 100, title: "states") ?? {
         log.push("states: open failed: {err}")
         return log
     }
     log.push("states: opened {state_line(window)}")
     loop frame in window.frames() {
-        closed := false
+        ^closed: false
         loop event in frame.events() {
             if event == .Close -> closed = true
             if event == .Resize(width, height) {
@@ -368,12 +368,12 @@ states_window: fn() -[Env, Net, Time]> [String] {
 }
 
 plain_window: fn() -[Env, Net, Time]> [String] {
-    log := [String]{}
+    ^log: [String]{}
     window: ui.open(width: 120, height: 80, title: "plain") ?? {
         log.push("plain: open failed: {err}")
         return log
     }
-    presents := 0
+    ^presents: 0
     loop frame in window.frames() {
         if frame.events().contains(.Close) -> break
         frame.present(white(frame)) ?? {
@@ -407,7 +407,7 @@ run: fn() {
     loop line in plain_log -> print(line)
     titles: [String]{"states", "plain"}
     loop title in titles {
-        served := 0
+        ^served: 0
         loop f in fakes {
             if f.title != title -> next
             served += 1

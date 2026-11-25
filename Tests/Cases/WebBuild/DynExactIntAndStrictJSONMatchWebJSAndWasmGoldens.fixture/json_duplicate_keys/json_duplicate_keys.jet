@@ -56,7 +56,7 @@ strict_decode: fn(text: String) {
 
 strict_reader: fn(path: Path) (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    events := json.reader(input) ?? return Err(err)
+    ^events: json.reader(input) ?? return Err(err)
     loop {
         if events.next() == {
             .Ok(next) -> {
@@ -78,7 +78,7 @@ strict_reader: fn(path: Path) (EncodingError | IOError)! {
 
 allow_reader: fn(path: Path) (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    events := json.reader_allow_duplicates(input) ?? return Err(err)
+    ^events: json.reader_allow_duplicates(input) ?? return Err(err)
     loop {
         // A failed read propagates; `??` handles the end of the stream.
         event: events.next() ?? break

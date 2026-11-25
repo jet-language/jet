@@ -40,7 +40,7 @@ foundation_library_folders: fn() -[Env]> [String] Never! {
 
 // foundation_library_folders for the LIBRARY_PATH value `library_path`.
 foundation_library_folders_of: fn(library_path: String) -> [String] Never! {
-    folders := [String]{}
+    ^folders: [String]{}
     loop entry in library_path.split(":") {
         if entry.starts_with("/") && !folders.contains(entry) -> folders.push(entry.copy())
     }
@@ -52,11 +52,11 @@ foundation_library_folders_of: fn(library_path: String) -> [String] Never! {
 
 // The first of `folders` holding a `file` that fits (foundation_file_fit).
 foundation_find_folder: fn(file: String, folders: [String]) -[FS]> FolderSearch Never! {
-    misses := [FolderMiss]{}
+    ^misses: [FolderMiss]{}
     loop folder in folders {
         path: files.join(folder, file)
-        reason := if files.is_file(path) -> "" else -> "no `{file}`"
-        bytes := [U8]{}
+        ^reason: if files.is_file(path) -> "" else -> "no `{file}`"
+        ^bytes: [U8]{}
         if reason == "" {
             if files.read_bytes(path) == {
                 .Ok(read) -> { bytes = read }
@@ -98,10 +98,10 @@ foundation_ar_has_object: fn(members: [String], stem: String) -> Bool Never! {
 // The member names of the ar archive `bytes`, long names (GNU `//` table)
 // resolved; [] when it is not an ar archive.
 foundation_ar_members: fn(bytes: [U8]) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     if bytes.len() < 8 || (String.from_bytes(bytes[0..<8]) ?? "") != "!<arch>\n" -> return names
-    long := [U8]{}
-    at := 8
+    ^long: [U8]{}
+    ^at: 8
     loop at + 60 <= bytes.len() {
         name: (String.from_bytes(bytes[at..<at + 16]) ?? "").trim()
         size: Int.parse((String.from_bytes(bytes[at + 48..<at + 58]) ?? "").trim()) ?? return names
@@ -110,7 +110,7 @@ foundation_ar_members: fn(bytes: [U8]) -> [String] Never! {
         if name == "//" -> long = bytes[start..<start + size] else if name.starts_with("/") {
             offset: Int.parse(name.slice(1, name.len())) ?? -1
             if offset >= 0 && offset < long.len() {
-                end := offset
+                ^end: offset
                 loop end < long.len() && long[end] != (U8{47}) && long[end] != (U8{10}) -> end += 1
                 names.push(String.from_bytes(long[offset..<end]) ?? "")
             }

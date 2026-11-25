@@ -24,7 +24,7 @@ run: fn() {
     print("ready")
     // A pipe stdout is written when its buffer fills (spec.md print); flush so
     // the parent sees ready before it signals.
-    ready_out := term.stdout()
+    ^ready_out: term.stdout()
     ready_out.flush() ?? process.fail(1, "flush: {err}")
     entry_report: entry_server.serve() ?? process.fail(1, "entry serve: {err}")
     print("entry drained: accepted={entry_report.accepted}")

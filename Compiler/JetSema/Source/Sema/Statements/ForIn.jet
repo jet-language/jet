@@ -10,11 +10,13 @@ use jet_foundation.[
     Lambda,
     BodyTree,
     body_each_node_kind_child,
+    builtin_carrier_declares,
     body_each_stmt_child,
     NamedSpan,
     OrFallback,
     PlaceAccess,
     Span,
+    MarkerHook,
     Stmt,
     Symbol,
     SymbolID,
@@ -94,7 +96,7 @@ sema_range_backward_diagnostic: fn(start: Expr, end: Expr, step: Expr?, exclusiv
     s: sema_range_written_int(start) ?? return None
     e: sema_range_written_int(end) ?? return None
     op: if exclusive -> "..<" else -> ".."
-    written_step := Int?{None}
+    ^written_step: Int?{None}
     if step == .Val(step_expr) -> written_step = sema_range_written_int(step_expr)
     range_span: Span{start: expr_span(start).start, end: expr_span(end).end}
     if s > e {
@@ -147,11 +149,13 @@ sema_stmt_for_in_type_is_named: fn(ty: Type, name: String) -> Bool Never! {
     actual == name || actual.ends_with(".{name}")
 }
 
+// Whether `ty` holds a `#SingleUse` carrier (`Task<T>`) at any depth, so a
+// walk over it has to own its items.
 sema_stmt_for_in_type_requires_owned_iteration: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, args) -> {
             if name == "ViewMut" -> return false
-            if name == "Task" -> return true
+            if builtin_carrier_declares(name, MarkerHook.SingleUse) -> return true
             loop arg in args {
                 if sema_stmt_for_in_type_requires_owned_iteration(arg) -> return true
             }
@@ -186,15 +190,15 @@ SemaForInTraitImpl: struct {
 }
 
 sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String, identity: String) -> SemaForInTraitImpl? {
-    found := SemaForInTraitImpl?{None}
+    ^found: SemaForInTraitImpl?{None}
     loop module_index in 0..<graph.modules.len() {
         loop implementation_index in 0..<graph.modules[module_index].impls.len() {
             if graph.modules[module_index].impls[implementation_index].trait_name != (Val(trait_name)) || graph.modules[module_index].impls[implementation_index].target_identity_key != identity {
                 next
             }
-            names := loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.name
-            types := loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.ty.copy()
-            keys := [String:String]{}
+            ^names: loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.name
+            ^types: loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.ty.copy()
+            ^keys: [String:String]{}
             loop method in graph.modules[module_index].impls[implementation_index].methods {
                 keys[method.declaration.name] = symbol_table_key(graph.symbols, method.symbol.id)
                 sema_owned_bind_failure(trait_name, method.declaration, names, types)
@@ -209,7 +213,7 @@ sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String
             if graph.modules[module_index].nominals[nominal_index].source == .SourceAST(item) {
                 loop block in sema_registration_item_trait_blocks(item) {
                     if block.trait_name != trait_name -> next
-                    keys := [String:String]{}
+                    ^keys: [String:String]{}
                     loop method in graph.modules[module_index].nominals[nominal_index].methods {
                         loop written in block.methods {
                             if written.span == method.declaration.span {
@@ -217,8 +221,8 @@ sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String
                             }
                         }
                     }
-                    names := loop associated in block.assoc_type_impls -> associated.name
-                    types := loop associated in block.assoc_type_impls -> associated.ty
+                    ^names: loop associated in block.assoc_type_impls -> associated.name
+                    ^types: loop associated in block.assoc_type_impls -> associated.ty
                     loop written in block.methods {
                         sema_owned_bind_failure(trait_name, written, names, types)
                     }
@@ -240,12 +244,12 @@ sema_stmt_for_in_iterable_fact: fn(check: ^SemaBodyCheck, collection_type: Type,
     // Impls key their target by the declaring nominal's identity, so a
     // source type and its `Iter` resolve to that nominal first (a Core
     // type written by its bare name, `HTTPBodyChunks`, included).
-    collection_identity := type_identity_key(collection_type)
+    ^collection_identity: type_identity_key(collection_type)
     if sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(check.environment.*, graph)) == .Val(row) {
         collection_identity = graph.modules[row.module_index].nominals[row.row].identity_key
     }
     iterable: sema_stmt_for_in_trait_impl(graph, "Iterable", collection_identity) ?? return None
-    iter_type := Type?{None}
+    ^iter_type: Type?{None}
     loop index in 0..<iterable.associated_names.len() {
         if iterable.associated_names[index] == "Iter" {
             iter_type = Val(iterable.associated_types[index])
@@ -253,13 +257,13 @@ sema_stmt_for_in_iterable_fact: fn(check: ^SemaBodyCheck, collection_type: Type,
     }
     resolved_iter_type: iter_type ?? return None
     if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
-    iterator_identity := type_identity_key(resolved_iter_type)
+    ^iterator_identity: type_identity_key(resolved_iter_type)
     if sema_type_resolve_nominal_row_at(graph, resolved_iter_type, iterable.module_index) == .Val(iter_row) {
         iterator_identity = graph.modules[iter_row.module_index].nominals[iter_row.row].identity_key
     }
     iterator: sema_stmt_for_in_trait_impl(graph, "Iterator", iterator_identity) ?? return None
-    item_type := Type?{None}
-    error_type := Type?{None}
+    ^item_type: Type?{None}
+    ^error_type: Type?{None}
     loop index in 0..<iterator.associated_names.len() {
         if iterator.associated_names[index] == "Item" {
             item_type = Val(iterator.associated_types[index])
@@ -271,8 +275,8 @@ sema_stmt_for_in_iterable_fact: fn(check: ^SemaBodyCheck, collection_type: Type,
     item: item_type ?? return None
     iter_key: iterable.method_keys.get("iter") ?? return None
     next_key: iterator.method_keys.get("next") ?? return None
-    failure := TTryConvert.Never
-    routed := true
+    ^failure: TTryConvert.Never
+    ^routed: true
     if error_type == .Val(error) && error != (Type.Named{name: "Never"}) {
         // The step call the header stands for: its callee is `next`
         // (sema_failure_call_provenance names a method call by its
@@ -301,7 +305,7 @@ sema_stmt_for_in_reader_fact: fn(check: SemaBodyCheck, collection_type: Type) ->
     }
     loop method in graph.modules[row.module_index].nominals[row.row].methods {
         if method.declaration.name != "next" -> next
-        item := sema_stmt_for_in_reader_item(method.signature) ?? next
+        ^item: sema_stmt_for_in_reader_item(method.signature) ?? next
         if collection_type == .Apply(_, args) {
             names: loop param in graph.modules[row.module_index].nominals[row.row].generic_params -> param.name
             item = sema_inference_substitute_type(item, names, args)
@@ -331,7 +335,7 @@ sema_stmt_for_in_method_kind: fn(expression: Expr, collection: TExpr) -> TForInM
         .MethodCall(receiver_expr, method, _, _, _, _, _) -> {
             if method == "chars" -> return Val(TForInMethod.Chars)
             if method == "lines" {
-                receiver := TExpr?{None}
+                ^receiver: TExpr?{None}
                 if collection.kind == {
                     // copy: `value` is a payload of read parameter `collection`, which keeps the original; the Val carrier owns this one
                     .MethodCall(value, _, _, _) -> receiver = Val(value.copy())
@@ -381,7 +385,7 @@ sema_stmt_for_in_method_kind: fn(expression: Expr, collection: TExpr) -> TForInM
 }
 
 sema_stmt_for_in_source: fn(expression: Expr, collection: TExpr, method_kind: TForInMethod?) -> TExpr Never! {
-    special_source := method_kind == (Val(TForInMethod.Chars)) || method_kind == (Val(TForInMethod.LinesFile)) || method_kind == (Val(TForInMethod.LinesStdin)) || method_kind == (Val(TForInMethod.LinesProcessStream))
+    ^special_source: method_kind == (Val(TForInMethod.Chars)) || method_kind == (Val(TForInMethod.LinesFile)) || method_kind == (Val(TForInMethod.LinesStdin)) || method_kind == (Val(TForInMethod.LinesProcessStream))
     if special_source {
         if expression == {
             .MethodCall(_, method, _, _, _, _, _) -> {
@@ -573,7 +577,7 @@ sema_stmt_for_in_body_mentions: fn(state: SemaOwnershipState, references_before:
 // `arena` holds the rows of the body's flat nodes (sema_node).
 sema_stmt_for_in_tree_mentions: fn(statements: [TStmt], key: SymbolID, arena: BodyTree) -> Bool Never! {
     if sema_stmt_for_in_tree_assigns(statements, key) -> return true
-    found := false
+    ^found: false
     loop statement in statements {
         if found -> break
         tree_each_stmt_child(statement, fn(child: TExpr) {
@@ -607,7 +611,7 @@ sema_stmt_for_in_tree_expr_names: fn(value: TExpr, key: SymbolID, arena: BodyTre
         }
         .IntLit(_, _) | .StrLit(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
     }
-    found := false
+    ^found: false
     tree_each_expr_child(value, fn(child: TExpr) {
         if !found && sema_stmt_for_in_tree_expr_names(child, key, arena) -> found = true
     })
@@ -631,7 +635,7 @@ sema_stmt_for_in_row_names: fn(tree: BodyTree, index: Int, key: SymbolID) -> Boo
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
-    found := false
+    ^found: false
     body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
         if !found && sema_stmt_for_in_row_names(tree, child, key) -> found = true
     })
@@ -784,9 +788,7 @@ sema_stmt_for_in_body_keeps: fn(state: SemaOwnershipState, references_before: In
     }
     loop index in references_before..<state.references.len() {
         reference: state.references[index]
-        if reference.def_id == root && reference.kind != AccessConvention.Read {
-            return false
-        }
+        if reference.def_id == root && reference.kind != AccessConvention.Read -> return false
     }
     !sema_stmt_for_in_tree_assigns(statements, root) && sema_stmt_for_in_tree_stays(statements, root, arena)
 }
@@ -854,7 +856,7 @@ sema_stmt_for_in_tree_stays: fn(statements: [TStmt], key: SymbolID, arena: BodyT
             }
             .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .DeferClose(_, _, _) | .Reactive(_, _) -> {}
         }
-        stays := true
+        ^stays: true
         tree_each_stmt_child(statement, fn(child: TExpr) {
             if stays && !sema_stmt_for_in_tree_expr_stays(child, key, arena) -> stays = false
         })
@@ -887,7 +889,7 @@ sema_stmt_for_in_tree_expr_stays: fn(value: TExpr, key: SymbolID, arena: BodyTre
         }
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
     }
-    stays := true
+    ^stays: true
     tree_each_expr_child(value, fn(child: TExpr) {
         if stays && !sema_stmt_for_in_tree_expr_stays(child, key, arena) -> stays = false
     })
@@ -965,7 +967,7 @@ sema_stmt_for_in_row_stmt_stays: fn(tree: BodyTree, item: Int, key: SymbolID) ->
         }
         .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .DeferClose(_, _, _) | .Reactive(_, _) -> {}
     }
-    stays := true
+    ^stays: true
     body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], fn(child: Int) {
         if stays && !sema_stmt_for_in_row_expr_stays(tree, child, key) -> stays = false
     })
@@ -993,7 +995,7 @@ sema_stmt_for_in_row_expr_stays: fn(tree: BodyTree, index: Int, key: SymbolID) -
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
-    stays := true
+    ^stays: true
     body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
         if stays && !sema_stmt_for_in_row_expr_stays(tree, child, key) -> stays = false
     })
@@ -1228,10 +1230,10 @@ sema_stmt_for_in_range_zero: fn(span: Span) -> TExpr Never! {
 // when the name could not be declared (reported here) or is untyped (the
 // loop is incomplete either way).
 sema_stmt_for_in_decl_loop_local: fn(name: String, name_span: Span, ty: Type?, owes_duty: Bool, check: ^SemaBodyCheck) -> TLocal? {
-    owner := sema_scope_local_owner_key(check.scopes)
+    ^owner: sema_scope_local_owner_key(check.scopes)
     local_module: sema_scope_environment_module_text(check.environment.*, check.program.*)
     key: symbol_key_text(SymbolKind.Local, local_module, owner, name)
-    symbol := Symbol{
+    ^symbol: Symbol{
         id: sema_symbol_id_of(check.program.*, check.context, key),
         kind: SymbolKind.Local,
         name: name,
@@ -1275,17 +1277,17 @@ sema_stmt_for_in_lend_view_item: fn(local: TLocal?, ty: Type, collection: Expr, 
     variable: local ?? return
     symbol: variable.symbol_id ?? return
     facts: sema_stmt_local_view_facts_for_expr(collection, check.scopes, check.state, check.context)
-    recorded := false
+    ^recorded: false
     loop fact in facts {
         if fact.slot.len() != 1 || fact.slot[0] != "[]" -> next
         loop place in fact.places {
-            _ := sema_ownership_record_view_fact_inner(check.state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, check.scopes, -1)
+            ^_: sema_ownership_record_view_fact_inner(check.state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, check.scopes, -1)
             recorded = true
         }
     }
     if !recorded {
         loop place in sema_ownership_element_places(collection, variable.span, check) {
-            _ := sema_ownership_record_view_fact_inner(check.state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, check.scopes, -1)
+            ^_: sema_ownership_record_view_fact_inner(check.state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, check.scopes, -1)
         }
     }
     // The item is a body local, keyed in the body's own symbols.
@@ -1407,14 +1409,14 @@ sema_stmt_check_source_stride: fn(expr: Expr, check: ^SemaBodyCheck) -> TExpr? {
 
 // The fix names the loop labels that are reachable here.
 sema_stmt_unknown_loop_label: fn(scopes: SemaScopeTable, name: String, span: Span) -> Diagnostic {
-    choices := [String]{}
-    seen := [String]{}
+    ^choices: [String]{}
+    ^seen: [String]{}
     loop label in scopes.loop_labels {
         if seen.contains(label.name) -> next
         seen.push(label.name)
         choices.push("`break({label.name})` or `next({label.name})`")
     }
-    fix := "label an enclosing loop with `name: loop {{ … }}` first"
+    ^fix: "label an enclosing loop with `name: loop {{ … }}` first"
     if choices.len() > 0 -> fix = "use a label in scope: {choices.join(", ")}"
     sema_error("E0987", span, "no loop labeled `{name}` is in scope", "a named `break`/`next` must name an enclosing `name: loop`", fix)
 }

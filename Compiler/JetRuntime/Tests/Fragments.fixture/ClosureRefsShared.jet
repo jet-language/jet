@@ -33,7 +33,7 @@ closure_ref_test_holder: fn() -> Shared<ClosureRefTestHolder> {
 
 closure_ref_test_worker: fn(holder: Shared<ClosureRefTestHolder>) -> I64 {
     closure_ref_test_enter()
-    sum := I64{0}
+    ^sum: I64{0}
     loop _ in 0..<10000 {
         // Every read clones the same box while holding only a Shared read
         // guard. The local clone is retired independently on each backedge.
@@ -46,7 +46,7 @@ closure_ref_test_worker: fn(holder: Shared<ClosureRefTestHolder>) -> I64 {
 // A function that spawns tasks carries their cancellation, and a C export is
 // infallible, so the export handles the spawning helper's failure.
 closure_ref_test_all: fn(holder: Shared<ClosureRefTestHolder>) -> I64 {
-    sum := I64{0}
+    ^sum: I64{0}
     task.group workers {
         results: task.all {closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder)} ?? panic("closure workers failed")
         loop result in results -> sum += result

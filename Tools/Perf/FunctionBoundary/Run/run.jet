@@ -55,9 +55,9 @@ run: fn() -> Never Err! {
         """,
         sys.env_file("{sys.config_dir() ?? ""}/jet/env"),
     )
-    options := [String:String]{"--jet": files.join(root, "target-rel4/release/jet"), "--runs": "7", "--cpu": "31", "--out": "{roots.value("JET_SCRATCH_ROOT")}/function-boundary", "--levels": "O1,O2"}
-    cells := [String]{}
-    at := 0
+    ^options: [String:String]{"--jet": files.join(root, "target-rel4/release/jet"), "--runs": "7", "--cpu": "31", "--out": "{roots.value("JET_SCRATCH_ROOT")}/function-boundary", "--levels": "O1,O2"}
+    ^cells: [String]{}
+    ^at: 0
     loop at < args.len() {
         arg: args[at]
         if {
@@ -94,7 +94,7 @@ run: fn() -> Never Err! {
         n: field(rows, 2)
         pair: field(rows, 1)
         expected: files.join(here, "{cell}/expected.out")
-        medians := [String:String]{}
+        ^medians: [String:String]{}
         loop program in ["c", "rust"].concat(plan.levels) {
             exe: if program.starts_with("O") -> "{plan.out}/bin/{cell}.jet-{program}" else -> "{plan.out}/bin/{cell}.{program}"
             shown: regex.replace_first(Regex{"O"}, program, "jet-O")
@@ -189,7 +189,7 @@ measure: fn(plan: Plan, exe: String, n: String, expected: String) -> Timing? Err
     if regex.replace(Regex{"\n+$"}, got.output, "") != regex.replace(Regex{"\n+$"}, files.read(expected) ?? "", "") {
         return Ok(None)
     }
-    samples := [Float]{}
+    ^samples: [Float]{}
     loop _ in 0..<plan.runs {
         start: time.instant()
         process.cmd(pinned).run().drop("the timed runs only count time")

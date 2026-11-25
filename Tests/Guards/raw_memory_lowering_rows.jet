@@ -113,7 +113,7 @@ rmlr_raw_call: fn(line: String) -> Bool Never! {
 
 // The raw routine calls of one builder source, by the function holding them.
 rmlr_census: fn(path: String, source: String, found: ^[String:Int]) {
-    function := ""
+    ^function: ""
     loop line in source.split("\n") {
         if rmlr_function_opened(line) == .Val(name) -> function = name
         if rmlr_raw_call(line) {
@@ -125,8 +125,8 @@ rmlr_census: fn(path: String, source: String, found: ^[String:Int]) {
 
 // The census against the named rows: one line per function whose count differs.
 rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
-    findings := [String]{}
-    rows := [String:Int]{}
+    ^findings: [String]{}
+    ^rows: [String:Int]{}
     loop row in RMLR_ROWS -> rows["{row.path}|{row.function}"] = row.count
     loop key in found.keys() {
         count: found[key]
@@ -149,8 +149,8 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
 
 #Test("generated raw memory goes only through the named lowering rows") {
     guards_enter_root()
-    found := [String:Int]{}
-    files := 0
+    ^found: [String:Int]{}
+    ^files: 0
     loop child in (rmlr_files.list_dir(RMLR_SOURCE) ?? panic("list {RMLR_SOURCE}: {err}")) {
         if !child.name.ends_with(".jet") -> next
         files += 1
@@ -172,10 +172,11 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
     kernel: rmlr_files.read("Core/Mem/Mem.jet") ?? panic("read Core/Mem/Mem.jet: {err}")
     // The other Core files whose functions fill an IR_CORE_INTRINSICS role:
     // core.math's bit casts and roots, core.tasks' and core.event's
-    // constructors, and core.term's described progress source.
-    paths: [String]{"Core/Math/Math.jet", "Core/Tasks/Tasks.jet", "Core/Event/Event.jet", "Core/Term/Term.jet"}
+    // constructors, core.term's described progress source, core.plugin's
+    // load, core.crypto.vault's current key and core.reflect's `of`.
+    paths: [String]{"Core/Math/Math.jet", "Core/Tasks/Tasks.jet", "Core/Event/Event.jet", "Core/Term/Term.jet", "Core/Plugin/Plugin.jet", "Core/Crypto/Vault.jet", "Core/Reflect/Reflect.jet"}
     homes: loop path in paths -> rmlr_files.read(path) ?? panic("read {path}: {err}")
-    rows := 0
+    ^rows: 0
     loop line in build.split("\n") {
         if !line.contains("IRCoreIntrinsicRow{{role: \"") -> next
         role: line.split("role: \"").to_list()[1].split("\"").to_list()[0].to_string()
@@ -200,7 +201,7 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
     assert(rmlr_raw_call("    _: ir_runtime(m, b, \"jet_rt_mem_move\", [Int]{{to, from, bytes}}, -1)"))
     assert(!rmlr_raw_call("        \"jet_rt_alloc\" | \"jet_rt_free\" -> false"))
     assert(!rmlr_raw_call("    _: ir_runtime(m, b, \"jet_rt_mem_move_count\", [Int]{{}}, -1)"))
-    found := [String:Int]{}
+    ^found: [String:Int]{}
     rmlr_census("BuildNew.jet", "ir_new_route: fn() {{\n    _: ir_runtime(m, b, \"jet_rt_free\", [Int]{{p}}, -1)\n}}\n", found)
     findings: rmlr_findings(found)
     assert(findings.contains("BuildNew.jet|ir_new_route: 1 raw memory routine calls and no RMLR_ROWS row; lower through an existing row, or name the new row"))

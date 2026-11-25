@@ -240,8 +240,8 @@ ir_builtin_route_for_receiver: fn(operation: TBuiltinOp, receiver: Type, carrier
             }
         }
         .MapFromKeys -> {
-            ty := ir_builtin_untag(receiver)
-            key := ty
+            ^ty: ir_builtin_untag(receiver)
+            ^key: ty
             if ty == {
                 .List(inner) -> { key = ir_builtin_untag(inner) }
                 .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -250,7 +250,7 @@ ir_builtin_route_for_receiver: fn(operation: TBuiltinOp, receiver: Type, carrier
                 .FixedList(inner, _) -> { key = ir_builtin_untag(inner) }
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
-            symbol := if key == {
+            ^symbol: if key == {
                 .String -> "jet_map_from_keys_kernel"
                 .Int | .IntN(_, _) -> "jet_map_from_keys_int"
                 .Float | .Bool | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> "jet_map_from_keys_composite"
@@ -510,7 +510,7 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
 ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute? Never! {
     if operation == {
         .ListLazy -> {
-            is_list_receiver := if ir_builtin_untag(receiver) == {
+            ^is_list_receiver: if ir_builtin_untag(receiver) == {
                 .List(_) | .FixedList(_, _) -> true
                 .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
             }
@@ -555,7 +555,7 @@ ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailu
 // borrowed but expandtabs's tab size, which that runtime function takes by
 // value.
 ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute? Never! {
-    arity := 0
+    ^arity: 0
     loop row in BUILTIN_METHOD_ROWS {
         if row.lowering == .Builtin(operation) && operation == .StringMethod(row_symbol) && row_symbol == symbol {
             arity = row.parameters.len() + 1
@@ -563,7 +563,7 @@ ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute? Never! {
         }
     }
     if arity == 0 -> return None
-    mask := [Bool]{}
+    ^mask: [Bool]{}
     loop index in 0..<arity -> mask.push(index == 0 || symbol != "jet_text_expandtabs")
     ir_builtin_route_row(symbol, arity, mask)
 }
@@ -574,8 +574,8 @@ ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute? Never! {
 // scalar, which the runtime takes by value.
 ir_builtin_byte_buffer_route: fn(symbol: String) -> IRBuiltinRoute? Never! {
     row: builtin_byte_buffer_row(symbol) ?? return None
-    mask := [Bool]{true}
-    writes := false
+    ^mask: [Bool]{true}
+    ^writes: false
     if row.lowering == .Builtin(operation) && operation == .ByteBufferWrite(_) -> writes = true
     loop parameter in row.parameters -> mask.push(!writes || parameter == .List(_))
     ir_builtin_route_row(symbol, mask.len(), mask)

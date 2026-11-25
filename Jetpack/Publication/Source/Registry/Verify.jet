@@ -42,7 +42,7 @@ publication_verify_index_entry: fn(all: [PublicationIndexEntry], entry: Publicat
 publication_resolve_and_verify_all: fn(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
     repo: publication_ensure_index_clone(registry)
     all: publication_verify_registry_package(repo, registry.name, name)
-    warnings := [String]{}
+    ^warnings: [String]{}
     loop entry in all {
         publication_verify_entry_tier(entry)
         retained: publication_verify_index_entry(all, entry, registry.require_signed || entry.tier == .Community, registry.name)
@@ -55,7 +55,7 @@ publication_resolve_and_verify_all: fn(registry: PublicationRegistryConfig, name
 // verification. A yank never invalidates an exact lock.
 publication_resolve_and_verify: fn(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
     verified: publication_resolve_and_verify_all(registry, name)
-    live := [PublicationIndexEntry]{}
+    ^live: [PublicationIndexEntry]{}
     loop entry in verified.entries {
         if !entry.yanked -> live.push(entry)
     }

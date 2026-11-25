@@ -56,8 +56,8 @@ int_limb: fn(value: I64, index: I64) -> I64 {
     if !int_inline(value) {
         return int_u32(wrapping(int_load(wrapping(int_node(value) + I64{24})) + index * I64{4}))
     }
-    magnitude := if (value < I64{0}) -> -value else -> value
-    at := I64{0}
+    ^magnitude: if (value < I64{0}) -> -value else -> value
+    ^at: I64{0}
     loop at < index {
         magnitude = magnitude /% I64{1000000000}
         at += I64{1}
@@ -72,7 +72,7 @@ int_node_init: fn(node: I64, limbs: I64, cap: I64) {
     int_store(wrapping(node + I64{24}), limbs)
     int_store(wrapping(node + I64{32}), I64{1})
     int_store(wrapping(node + I64{40}), cap)
-    at := I64{0}
+    ^at: I64{0}
     loop at < cap {
         int_put_u32(wrapping(limbs + at * I64{4}), I64{0})
         at += I64{1}
@@ -139,7 +139,7 @@ int_discard: fn(value: I64) {
 }
 
 int_normalize: fn(node: I64) {
-    length := int_load(wrapping(node + I64{32}))
+    ^length: int_load(wrapping(node + I64{32}))
     loop length > (I64{1}) && int_get(node, length - I64{1}) == (I64{0}) -> length -= I64{1}
     int_store(wrapping(node + I64{32}), length)
     if (length == I64{1} && int_get(node, I64{0}) == I64{0}) {
@@ -149,8 +149,8 @@ int_normalize: fn(node: I64) {
 
 int_fits: fn(value: I64, bound: U64) -> Bool {
     length: int_len(value)
-    magnitude := U64{0}
-    at := length
+    ^magnitude: U64{0}
+    ^at: length
     loop at > (I64{0}) {
         at -= I64{1}
         limb: wrapping(U64{int_limb(value, at)})
@@ -161,8 +161,8 @@ int_fits: fn(value: I64, bound: U64) -> Bool {
 }
 
 int_word: fn(value: I64) -> I64 {
-    magnitude := I64{0}
-    at := int_len(value)
+    ^magnitude: I64{0}
+    ^at: int_len(value)
     loop at > (I64{0}) {
         at -= I64{1}
         magnitude = wrapping(wrapping(magnitude * I64{1000000000}) + int_limb(value, at))
@@ -198,7 +198,7 @@ int_pack: fn(node: I64) -> I64 {
 int_copy: fn(value: I64, extra: I64) -> I64 {
     length: int_len(value)
     node: int_new(length + extra)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         int_set(node, at, int_limb(value, at))
         at += I64{1}
@@ -212,7 +212,7 @@ int_compare_abs: fn(left: I64, right: I64) -> I64 {
     ll: int_len(left)
     rl: int_len(right)
     if ll != rl -> return if (ll < rl) -> I64{-1} else -> I64{1}
-    at := ll
+    ^at: ll
     loop at > (I64{0}) {
         at -= I64{1}
         a: int_limb(left, at)
@@ -236,8 +236,8 @@ int_compare_abs: fn(left: I64, right: I64) -> I64 {
 }
 
 int_add_fill: fn(node: I64, left: I64, right: I64, length: I64, negative: Bool) {
-    carry := I64{0}
-    at := I64{0}
+    ^carry: I64{0}
+    ^at: I64{0}
     loop at < length {
         sum: int_limb(left, at) + int_limb(right, at) + carry
         int_set(node, at, sum % I64{1000000000})
@@ -250,10 +250,10 @@ int_add_fill: fn(node: I64, left: I64, right: I64, length: I64, negative: Bool) 
 }
 
 int_sub_fill: fn(node: I64, larger: I64, smaller: I64, length: I64, negative: Bool) {
-    borrow := I64{0}
-    at := I64{0}
+    ^borrow: I64{0}
+    ^at: I64{0}
     loop at < length {
-        difference := int_limb(larger, at) - int_limb(smaller, at) - borrow
+        ^difference: int_limb(larger, at) - int_limb(smaller, at) - borrow
         borrow = I64{0}
         if (difference < I64{0}) {
             difference += I64{1000000000}
@@ -364,23 +364,23 @@ int_try_add: fn(left: I64, right: I64, output: I64, requested: I64, probed: I64)
     // other operand; an inline operand has at most three limbs.
     if !int_inline(right) {
         limbs: int_load(wrapping(int_node(right) + I64{24}))
-        i := I64{0}
+        ^i: I64{0}
         loop i < ll {
             int_mul_pass(out, limbs, rl, int_limb(left, i), i)
             i += I64{1}
         }
     } else if !int_inline(left) {
         limbs: int_load(wrapping(int_node(left) + I64{24}))
-        i := I64{0}
+        ^i: I64{0}
         loop i < rl {
             int_mul_pass(out, limbs, ll, int_limb(right, i), i)
             i += I64{1}
         }
     } else {
-        i := I64{0}
+        ^i: I64{0}
         loop i < ll {
-            carry := I64{0}
-            j := I64{0}
+            ^carry: I64{0}
+            ^j: I64{0}
             loop j < rl {
                 product: int_limb(left, i) * int_limb(right, j) + int_get(node, i + j) + carry
                 int_set(node, i + j, product % I64{1000000000})
@@ -404,8 +404,8 @@ int_mul_pass: fn(out: I64, limbs: I64, length: I64, factor: I64, offset: I64) {
         return
     }
     base: wrapping(out + offset * I64{4})
-    carry := I64{0}
-    j := I64{0}
+    ^carry: I64{0}
+    ^j: I64{0}
     loop j < length {
         slot: wrapping(base + j * I64{4})
         product: int_u32(wrapping(limbs + j * I64{4})) * factor + int_u32(slot) + carry
@@ -420,8 +420,8 @@ int_mul_pass: fn(out: I64, limbs: I64, length: I64, factor: I64, offset: I64) {
     if int_inline(value) -> return value
     node: int_new(I64{3})
     // Negative division keeps I64.MIN representable throughout.
-    remaining := if (value > I64{0}) -> -value else -> value
-    at := I64{0}
+    ^remaining: if (value > I64{0}) -> -value else -> value
+    ^at: I64{0}
     loop remaining != (I64{0}) {
         int_set(node, at, -(remaining %% I64{1000000000}))
         remaining = -(remaining /% I64{-1000000000})
@@ -538,7 +538,7 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
 int_fixed_fits: fn(value: I64, kind: I64) -> Bool {
     negative: int_negative(value)
     if (kind >= I64{4} && negative) { return false }
-    bound := U64{18446744073709551615}
+    ^bound: U64{18446744073709551615}
     if {
         (kind == I64{0}) -> bound = if negative -> U64{128} else -> U64{127}
         (kind == I64{1}) -> bound = if negative -> U64{32768} else -> U64{32767}
@@ -573,8 +573,8 @@ int_fixed_fits: fn(value: I64, kind: I64) -> Bool {
 
 int_mul_small_into: fn(node: I64, value: I64, factor: I64) {
     length: int_len(value)
-    carry := I64{0}
-    at := I64{0}
+    ^carry: I64{0}
+    ^at: I64{0}
     loop at < length {
         product: int_limb(value, at) * factor + carry
         int_set(node, at, product % I64{1000000000})
@@ -588,10 +588,10 @@ int_mul_small_into: fn(node: I64, value: I64, factor: I64) {
 
 int_sub_assign: fn(node: I64, value: I64) {
     length: int_load(wrapping(node + I64{32}))
-    borrow := I64{0}
-    at := I64{0}
+    ^borrow: I64{0}
+    ^at: I64{0}
     loop at < length {
-        difference := int_get(node, at) - int_limb(value, at) - borrow
+        ^difference: int_get(node, at) - int_limb(value, at) - borrow
         borrow = I64{0}
         if (difference < I64{0}) {
             difference += I64{1000000000}
@@ -637,8 +637,8 @@ int_division: fn(left: I64, right: I64, file: I64, file_len: I64, line: I64, kin
     // for it takes a few probes instead of thirty. With D the divisor and
     // B = 1e9, top = floor(D / (10^s * B^(rl-2))) is the divisor's top two
     // limbs cut to nine digits (s from 1 to 9); a one-limb divisor is exact.
-    top := int_limb(right, rl - I64{1})
-    scale := I64{1}
+    ^top: int_limb(right, rl - I64{1})
+    ^scale: I64{1}
     if (rl > I64{1}) {
         top = top * I64{1000000000} + int_limb(right, rl - I64{2})
         loop top >= (I64{1000000000}) {
@@ -646,11 +646,11 @@ int_division: fn(left: I64, right: I64, file: I64, file_len: I64, line: I64, kin
             scale *= I64{10}
         }
     }
-    at := ll
+    ^at: ll
     loop at > (I64{0}) {
         at -= I64{1}
         length: int_load(wrapping(rest + I64{32}))
-        i := length
+        ^i: length
         loop i > (I64{0}) {
             int_set(rest, i, int_get(rest, i - I64{1}))
             i -= I64{1}
@@ -663,8 +663,8 @@ int_division: fn(left: I64, right: I64, file: I64, file_len: I64, line: I64, kin
         // floor(n / (top + 1)) <= q <= floor((n + 1) / top) for the limb q,
         // and n < 1e18. A one-limb divisor's q is floor(R / top) itself.
         rest_len: int_load(wrapping(rest + I64{32}))
-        lo := I64{0}
-        hi := I64{999999999}
+        ^lo: I64{0}
+        ^hi: I64{999999999}
         if (rl == I64{1}) {
             lo = (int_rest_limb(rest, rest_len, I64{1}) * I64{1000000000} + int_rest_limb(rest, rest_len, I64{0})) /% top
             hi = lo
@@ -737,8 +737,8 @@ int_division: fn(left: I64, right: I64, file: I64, file_len: I64, line: I64, kin
 }
 
 int_div_small: fn(node: I64, divisor: I64) -> I64 {
-    carry := I64{0}
-    at := int_load(wrapping(node + I64{32}))
+    ^carry: I64{0}
+    ^at: int_load(wrapping(node + I64{32}))
     loop at > (I64{0}) {
         at -= I64{1}
         current: carry * I64{1000000000} + int_get(node, at)
@@ -751,8 +751,8 @@ int_div_small: fn(node: I64, divisor: I64) -> I64 {
 
 int_scale: fn(node: I64, factor: I64, add: I64) {
     length: int_load(wrapping(node + I64{32}))
-    carry := add
-    at := I64{0}
+    ^carry: add
+    ^at: I64{0}
     loop at < length {
         current: int_get(node, at) * factor + carry
         int_set(node, at, current % I64{1000000000})
@@ -784,7 +784,7 @@ int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
         if (int_inline(shifted) && (shifted >> bits) == value) { return shifted }
     }
     node: int_copy(value, bits /% I64{29} + I64{1})
-    remaining := bits
+    ^remaining: bits
     loop remaining > (I64{0}) {
         step: if (remaining > I64{29}) -> I64{29} else -> remaining
         int_scale(node, I64{1} << step, I64{0})
@@ -801,8 +801,8 @@ int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
         return value >> step
     }
     node: int_copy(value, I64{1})
-    remaining := bits
-    lost := false
+    ^remaining: bits
+    ^lost: false
     loop remaining > (I64{0}) {
         if (int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0}) {
             break
@@ -832,9 +832,9 @@ int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
     // two avoids imposing an I64/u32 restriction.
     small: int_inline(exponent)
     power: if small -> I64{0} else -> int_copy(exponent, I64{0})
-    remaining := if small -> exponent else -> I64{0}
-    base := if int_inline(value) -> value else -> int_pack(int_copy(value, I64{0}))
-    result := I64{1}
+    ^remaining: if small -> exponent else -> I64{0}
+    ^base: if int_inline(value) -> value else -> int_pack(int_copy(value, I64{0}))
+    ^result: I64{1}
     loop {
         active: if small -> (remaining != I64{0}) else -> !(int_load(wrapping(power + I64{32})) == I64{1} && int_get(power, I64{0}) == I64{0})
         if !active -> break
@@ -862,11 +862,11 @@ int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
 int_binary: fn(value: I64, width: I64) -> I64 {
     buffer: jet_rt_alloc(width * I64{4}, I64{4})
     workspace: int_copy(value, I64{0})
-    carry := I64{1}
-    at := I64{0}
+    ^carry: I64{1}
+    ^at: I64{0}
     negative: int_negative(value)
     loop at < width {
-        word := int_div_small(workspace, I64{4294967296})
+        ^word: int_div_small(workspace, I64{4294967296})
         if negative {
             word = (I64{4294967295} ~ word) + carry
             carry = word >> I64{32}
@@ -891,7 +891,7 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
     width: length * I64{30} /% I64{32} + I64{2}
     a: int_binary(left, width)
     b: int_binary(right, width)
-    at := I64{0}
+    ^at: I64{0}
     loop at < width {
         av: int_u32(wrapping(a + at * I64{4}))
         bv: int_u32(wrapping(b + at * I64{4}))
@@ -902,7 +902,7 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
     jet_rt_free(b, width * I64{4}, I64{4})
     negative: (int_u32(wrapping(a + (width - I64{1}) * I64{4})) & I64{2147483648}) != I64{0}
     if negative {
-        carry := I64{1}
+        ^carry: I64{1}
         at = I64{0}
         loop at < width {
             word: (I64{4294967295} ~ int_u32(wrapping(a + at * I64{4}))) + carry
@@ -930,8 +930,8 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
 
 #Export(c) jet_rt_int_from_static: fn(ptr: I64, len: I64) -> I64 {
     // The lowering supplies validated decimal IR constants, not user input.
-    at := I64{0}
-    negative := false
+    ^at: I64{0}
+    ^negative: false
     if (len > I64{0} && trap_byte(ptr) == I64{45}) {
         negative = true
         at = I64{1}
@@ -939,7 +939,7 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
         if (len > I64{0} && trap_byte(ptr) == I64{43}) { at = I64{1} }
     }
     if (len - at <= I64{18}) {
-        small := I64{0}
+        ^small: I64{0}
         loop at < len {
             digit: trap_byte(wrapping(ptr + at)) - I64{48}
             if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
@@ -952,12 +952,12 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
     // as they are: one pass over the digits, with no repeated rescaling.
     count: (len - at + I64{8}) /% I64{9}
     node: int_new(count)
-    end := len
-    index := I64{0}
+    ^end: len
+    ^index: I64{0}
     loop index < count {
         start: if (end - I64{9} > at) -> end - I64{9} else -> at
-        limb := I64{0}
-        cursor := start
+        ^limb: I64{0}
+        ^cursor: start
         loop cursor < end {
             digit: trap_byte(wrapping(ptr + cursor)) - I64{48}
             if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
@@ -983,10 +983,10 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
     // Mirrors CtBigInt/JetBigInt's guard/sticky round-half-even projection;
     // only the final <=53-bit integer crosses the machine numeric conversion.
     node: int_copy(value, I64{0})
-    top := I64{0}
-    bits := I64{0}
-    guard := false
-    sticky := false
+    ^top: I64{0}
+    ^bits: I64{0}
+    ^guard: false
+    ^sticky: false
     loop !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0}) {
         bit: int_div_small(node, I64{2})
         if (bits < I64{53}) { top |= bit << bits } else {
@@ -997,7 +997,7 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
         bits += I64{1}
     }
     int_free_node(node)
-    exponent := bits - I64{1}
+    ^exponent: bits - I64{1}
     if (bits > I64{53} && guard && (sticky || (top & I64{1}) != I64{0})) {
         top += I64{1}
         if (top == I64{9007199254740992}) {
@@ -1005,13 +1005,13 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
             exponent += I64{1}
         }
     }
-    result := Float{top}
+    ^result: Float{top}
     if (exponent > I64{1023}) {
         return if (int_negative(value)) -> -(Float{1.0} / Float{0.0}) else -> Float{1.0} / Float{0.0}
     }
     if (bits > I64{53}) {
-        shift := exponent - I64{52}
-        scale := Float{2.0}
+        ^shift: exponent - I64{52}
+        ^scale: Float{2.0}
         loop shift > (I64{0}) {
             if ((shift & I64{1}) != I64{0}) { result *= scale }
             shift >>= I64{1}
@@ -1028,7 +1028,7 @@ int_inline_to_f64: fn(value: I64) -> Float {
     width: int_word_bits(magnitude)
     if (width <= I64{53}) { return Float{value} }
     dropped: width - I64{53}
-    mantissa := magnitude >> dropped
+    ^mantissa: magnitude >> dropped
     lost: magnitude & (I64{1} << dropped) - I64{1}
     half: I64{1} << (dropped - I64{1})
     if (lost > half || (lost == half && mantissa & I64{1} != I64{0})) { mantissa += I64{1} }
@@ -1049,10 +1049,10 @@ int_ratio_to_f64: fn(left: I64, right: I64) -> Float {
     negative: int_negative(left) != int_negative(right)
     numerator: int_magnitude(left)
     denominator: int_magnitude(right)
-    shift := I64{58} - int_bits_estimate(numerator) + int_bits_estimate(denominator)
-    word := I64{0}
-    sticky := false
-    settled := false
+    ^shift: I64{58} - int_bits_estimate(numerator) + int_bits_estimate(denominator)
+    ^word: I64{0}
+    ^sticky: false
+    ^settled: false
     loop !settled {
         scaled: if (shift >= I64{0}) -> jet_int_shl(numerator, shift, I64{0}, I64{0}, I64{0}) else -> jet_rt_int_clone(numerator)
         divisor: if (shift >= I64{0}) -> jet_rt_int_clone(denominator) else -> jet_int_shl(denominator, -shift, I64{0}, I64{0}, I64{0})
@@ -1079,7 +1079,7 @@ int_ratio_to_f64: fn(left: I64, right: I64) -> Float {
     precision: if (exponent < I64{-1022}) -> exponent + I64{1075} else -> I64{53}
     if (precision < I64{0}) { return if negative -> -Float{0.0} else -> Float{0.0} }
     dropped: width - precision
-    mantissa := word >> dropped
+    ^mantissa: word >> dropped
     lost: word & (I64{1} << dropped) - I64{1}
     half: I64{1} << (dropped - I64{1})
     if (lost > half || (lost == half && (sticky || mantissa & I64{1} != I64{0}))) {
@@ -1096,8 +1096,8 @@ int_magnitude: fn(value: I64) -> I64 {
 
 // The bit width of a non-negative word.
 int_word_bits: fn(value: I64) -> I64 {
-    bits := I64{0}
-    rest := value
+    ^bits: I64{0}
+    ^rest: value
     loop rest > (I64{0}) {
         rest >>= I64{1}
         bits += I64{1}
@@ -1109,8 +1109,8 @@ int_word_bits: fn(value: I64) -> I64 {
 // 4 bits either way.
 int_bits_estimate: fn(value: I64) -> I64 {
     length: int_len(value)
-    top := int_limb(value, length - I64{1})
-    digits := I64{9} * (length - I64{1})
+    ^top: int_limb(value, length - I64{1})
+    ^digits: I64{9} * (length - I64{1})
     loop top > (I64{0}) {
         top = top /% I64{10}
         digits += I64{1}
@@ -1121,9 +1121,9 @@ int_bits_estimate: fn(value: I64) -> I64 {
 // value * 2^power, exact while the result is representable: each partial
 // product lies between value and the result.
 int_scale_f64: fn(value: Float, power: I64) -> Float {
-    result := value
-    scale := if (power < I64{0}) -> Float{0.5} else -> Float{2.0}
-    remaining := if (power < I64{0}) -> -power else -> power
+    ^result: value
+    ^scale: if (power < I64{0}) -> Float{0.5} else -> Float{2.0}
+    ^remaining: if (power < I64{0}) -> -power else -> power
     loop remaining > (I64{0}) {
         if ((remaining & I64{1}) != I64{0}) { result *= scale }
         remaining >>= I64{1}
@@ -1141,8 +1141,8 @@ int_scale_f64: fn(value: Float, power: I64) -> Float {
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     high: host_native_int(hi)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    inside := false
-    raw := value
+    ^inside: false
+    ^raw: value
     if int_inline(value) -> inside = raw >= low && raw <= high else {
         bound: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
         if int_fits(value, bound) {

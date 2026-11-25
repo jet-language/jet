@@ -9,7 +9,7 @@ net_socket_domain: fn(family: I64) -> I64 {
 
 net_socket_call: fn(state: I64, number: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         #Unsafe("the FD72 lock prevents native descriptor close/reuse throughout this nonblocking syscall") {
             result = host_syscall(number, fd_word(state, I64{8}), a2, a3, a4, a5, a6)
@@ -23,13 +23,13 @@ net_socket_call: fn(state: I64, number: I64, a2: I64, a3: I64, a4: I64, a5: I64,
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     result: host_call(I64{41}, net_socket_domain(family), (kind & I64{15}) | I64{526336}, protocol)
-    _ := fd_error(result, error)
+    ^_: fd_error(result, error)
     if (result < I64{0}) -> I64{0} else -> jet_fd_adopt_unbuffered_raw(result, I64{0})
 }
 
 net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         scratch: jet_rt_alloc(I64{128}, I64{8})
         length: jet_socket_address_encode_raw(address, scratch)
@@ -56,7 +56,7 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
 
 #Export(c) jet_socket_accept_raw: fn(state: I64, address_out: I64, error: I64) -> I64 {
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         if (address_out == I64{0}) {
             #Unsafe("accept4 retains no address pointers and atomically sets CLOEXEC/NONBLOCK on the accepted socket") {
@@ -70,20 +70,20 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
                 result = host_syscall(I64{288}, fd_word(state, I64{8}), scratch, size, I64{526336}, I64{0}, I64{0})
             }
             if (result >= I64{0} && !net_socket_decode(scratch, net_load_uint(size, I64{4}), address_out)) {
-                _ := host_call(I64{3}, result, I64{0}, I64{0})
+                ^_: host_call(I64{3}, result, I64{0}, I64{0})
                 result = I64{-22}
             }
             jet_rt_free(scratch, I64{128}, I64{8})
         }
     }
     fd_unlock(state)
-    _ := fd_error(result, error)
+    ^_: fd_error(result, error)
     if (result < I64{0}) -> I64{0} else -> jet_fd_adopt_unbuffered_raw(result, I64{0})
 }
 
 #Export(c) jet_socket_address_raw: fn(state: I64, peer: Bool, address_out: I64, error: I64) -> I64 {
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         scratch: jet_rt_alloc(I64{128}, I64{8})
         size: wrapping(scratch + I64{32})
@@ -100,7 +100,7 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
 
 #Export(c) jet_socket_option_get_raw: fn(state: I64, level: I64, option: I64, value_out: I64, error: I64) -> I64 {
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         scratch: jet_rt_alloc(I64{128}, I64{8})
         size: wrapping(scratch + I64{8})
@@ -117,7 +117,7 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
 
 #Export(c) jet_socket_option_set_raw: fn(state: I64, level: I64, option: I64, value: I64, error: I64) -> I64 {
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         scratch: jet_rt_alloc(I64{128}, I64{8})
         net_store_uint(scratch, I64{4}, value)
@@ -140,13 +140,13 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
     fd_lock(state)
     if (fd_word(state, I64{16}) == I64{0}) {
         fd_put(state, I64{16}, I64{1})
-        _ := net_fd_closed(state)
+        ^_: net_fd_closed(state)
     }
     fd_unlock(state)
 }
 
 net_copy_packed: fn(data: I64, length: I64, output: I64) {
-    at := I64{0}
+    ^at: I64{0}
     // `data` lends `length` native U8 elements; `output` owns `length` compact
     // bytes.
     loop at < length {
@@ -158,7 +158,7 @@ net_copy_packed: fn(data: I64, length: I64, output: I64) {
 net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error: I64) -> I64 {
     began: perf_samples_io_start()
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         temporary: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
         packed: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
@@ -168,7 +168,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
         }
         if reading -> result = replay_read(packed, length, result)
         if (temporary && reading && result > I64{0}) {
-            at := I64{0}
+            ^at: I64{0}
             // recvfrom initialized `result` compact bytes; `data` owns the
             // corresponding mutable native U8 slots.
             loop at < result {
@@ -196,7 +196,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
 #Export(c) jet_socket_send_to_raw: fn(state: I64, data: I64, length: I64, address: I64, error: I64) -> I64 {
     began: perf_samples_io_start()
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         // Word epoch needs one combined conversion/address allocation. Packed
         // epoch lends the input directly and owns only the address scratch.
@@ -218,7 +218,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
 #Export(c) jet_socket_receive_from_raw: fn(state: I64, data: I64, length: I64, address_out: I64, error: I64) -> I64 {
     began: perf_samples_io_start()
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         size: if (RT_HOST_U8_STRIDE == I64{1}) -> I64{128} else -> wrapping(I64{128} + length)
         scratch: jet_rt_alloc(size, I64{8})
@@ -233,7 +233,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
                 result = I64{-22}
             } else if (RT_HOST_U8_STRIDE != I64{1}) {
                 used: if (result < length) -> result else -> length
-                at := I64{0}
+                ^at: I64{0}
                 // recvfrom initialized `used` compact bytes; the caller owns
                 // `used` mutable native U8 elements.
                 loop at < used {
@@ -263,7 +263,7 @@ HOST_UNIX_PATH_NUL: I64{-4098}
 net_unix_path_status: fn(path: I64) -> I64 {
     length: rt_text_len(path)
     source: rt_text_data(path)
-    at := I64{0}
+    ^at: I64{0}
     // `path` lends its immutable E4 bytes for std-compatible sockaddr_un
     // validation.
     loop at < length {
@@ -284,7 +284,7 @@ net_unix_path_status: fn(path: I64) -> I64 {
 net_unix_long_alias: fn(path: I64, address: I64) -> I64 {
     length: rt_text_len(path)
     data: rt_text_data(path)
-    slash := length - I64{1}
+    ^slash: length - I64{1}
     loop slash >= (I64{0}) && rt_text_byte(wrapping(data + slash)) != (I64{47}) -> slash -= I64{1}
     if (slash < I64{0}) { return HOST_UNIX_PATH_TOO_LONG }
     name_length: length - slash - I64{1}
@@ -299,17 +299,17 @@ net_unix_long_alias: fn(path: I64, address: I64) -> I64 {
     jet_rt_free(directory, directory_length + I64{1}, I64{8})
     if (descriptor < I64{0}) { return descriptor }
     prefix: rt_static_text("/proc/self/fd/")
-    at := wrapping(address + I64{2})
+    ^at: wrapping(address + I64{2})
     rt_text_bytes_copy(at, rt_text_data(prefix), rt_text_len(prefix))
     at = wrapping(at + rt_text_len(prefix))
-    digits := I64{1}
-    scale := I64{10}
+    ^digits: I64{1}
+    ^scale: I64{10}
     loop descriptor >= scale {
         digits += I64{1}
         scale *= I64{10}
     }
-    value := descriptor
-    place := digits
+    ^value: descriptor
+    ^place: digits
     loop place > (I64{0}) {
         place -= I64{1}
         net_store_uint(wrapping(at + place), I64{1}, I64{48} + value % I64{10})
@@ -324,9 +324,9 @@ net_unix_long_alias: fn(path: I64, address: I64) -> I64 {
 }
 
 net_socket_unix_call: fn(state: I64, path: I64, number: I64, error: I64) -> I64 {
-    refusal := net_unix_path_status(path)
+    ^refusal: net_unix_path_status(path)
     scratch: jet_rt_alloc(I64{128}, I64{8})
-    alias := I64{-1}
+    ^alias: I64{-1}
     if (refusal == HOST_UNIX_PATH_TOO_LONG) {
         opened: net_unix_long_alias(path, scratch)
         if (opened >= I64{0}) {
@@ -343,7 +343,7 @@ net_socket_unix_call: fn(state: I64, path: I64, number: I64, error: I64) -> I64 
         return refusal
     }
     fd_lock(state)
-    result := I64{-9}
+    ^result: I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         length: if (alias >= I64{0}) -> rt_text_word(wrapping(scratch + I64{120})) else -> rt_text_len(path)
         net_store_uint(scratch, I64{2}, I64{1})
@@ -359,7 +359,7 @@ net_socket_unix_call: fn(state: I64, path: I64, number: I64, error: I64) -> I64 
         result = host_call(number, fd_word(state, I64{8}), scratch, address_length)
     }
     fd_unlock(state)
-    if (alias >= I64{0}) { _ := host_call(I64{3}, alias, I64{0}, I64{0}) }
+    if (alias >= I64{0}) { ^_: host_call(I64{3}, alias, I64{0}, I64{0}) }
     jet_rt_free(scratch, I64{128}, I64{8})
     fd_error(result, error)
 }

@@ -33,7 +33,7 @@ rt_poly_block: fn(input: I64, length: I64, padded: Bool, state: I64) {
     rt_text_store(wrapping(h + I64{24}), rt_text_word(wrapping(h + I64{24})) + (((t2 >> I64{14}) | (t3 << I64{18})) & I64{0x3ffffff}))
     rt_text_store(wrapping(h + I64{32}), rt_text_word(wrapping(h + I64{32})) + (t3 >> I64{8}) + (rt_text_byte(wrapping(block + I64{16})) << I64{24}))
     products: wrapping(state + I64{120})
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{5}) { break }
         rt_text_store(wrapping(products + i * I64{8}), I64{0})
@@ -42,7 +42,7 @@ rt_poly_block: fn(input: I64, length: I64, padded: Bool, state: I64) {
     i = I64{0}
     loop {
         if (i >= I64{5}) { break }
-        j := I64{0}
+        ^j: I64{0}
         loop {
             if (j >= I64{5}) { break }
             sum: i + j
@@ -53,7 +53,7 @@ rt_poly_block: fn(input: I64, length: I64, padded: Bool, state: I64) {
         }
         i += I64{1}
     }
-    carry := I64{0}
+    ^carry: I64{0}
     i = I64{0}
     loop {
         if (i >= I64{5}) { break }
@@ -68,9 +68,9 @@ rt_poly_block: fn(input: I64, length: I64, padded: Bool, state: I64) {
 }
 
 rt_poly_update: fn(input: I64, length: I64, padded: Bool, state: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
-        count := I64{16}
+        ^count: I64{16}
         if (length - at < count) { count = length - at }
         rt_poly_block(wrapping(input + at), count, padded, state)
         at += count
@@ -79,8 +79,8 @@ rt_poly_update: fn(input: I64, length: I64, padded: Bool, state: I64) {
 
 rt_poly_finish: fn(state: I64, output: I64) {
     h: wrapping(state + I64{40})
-    carry := I64{0}
-    i := I64{1}
+    ^carry: I64{0}
+    ^i: I64{1}
     loop {
         if (i >= I64{5}) { break }
         value: rt_text_word(wrapping(h + i * I64{8})) + carry
@@ -136,8 +136,8 @@ rt_crypto_poly1305: fn(key: I64, input: I64, length: I64, output: I64, scratch: 
 }
 
 rt_crypto_equal: fn(a: I64, b: I64, length: I64) -> Bool {
-    diff := I64{0}
-    i := I64{0}
+    ^diff: I64{0}
+    ^i: I64{0}
     loop i < length {
         diff |= (rt_text_byte(wrapping(a + i)) ~ rt_text_byte(wrapping(b + i)))
         i += I64{1}

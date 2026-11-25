@@ -24,7 +24,7 @@ use {
 
 write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
     output: files.create(path) ?? return Err(err)
-    writer := jsonl.writer(output, encoding.EncodingLimits.safe()) ?? return Err(err)
+    ^writer: jsonl.writer(output, encoding.EncodingLimits.safe()) ?? return Err(err)
     writer.write(Dyn.Object(["ok": Dyn.Bool(true)])) ?? return Err(err)
     writer.write(Dyn.Object(["n": Dyn.Int(2)])) ?? return Err(err)
     writer.flush() ?? return Err(err)
@@ -35,7 +35,7 @@ write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
 // Read every record, then show that a failure stays sticky.
 drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
     input: files.open(path) ?? return Err(err)
-    reader := jsonl.reader(input, limits) ?? {
+    ^reader: jsonl.reader(input, limits) ?? {
         print("{label}: refused {err}")
         return Ok()
     }
@@ -64,8 +64,8 @@ drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
 
 read_until_cancel: fn(path: Path, started: Sender<Int>, gate: Receiver<Int>) -> Int (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    reader := jsonl.reader(input) ?? return Err(err)
-    count := 0
+    ^reader: jsonl.reader(input) ?? return Err(err)
+    ^count: 0
     loop {
         _row: reader.next() ?? break
         count += 1
@@ -105,13 +105,13 @@ run: fn() (EncodingError | IOError)! {
     drain("unfinished final record", path, encoding.EncodingLimits.safe()) ?? return
 
     files.write(path.to_string(), "{{\"a\":1}}\n\n{{\"b\":\"a long text value\"}}\n") ?? return
-    item := encoding.EncodingLimits.safe()
+    ^item: encoding.EncodingLimits.safe()
     item.max_item_bytes = 16
     drain("max_item_bytes 16", path, item) ?? return
-    total := encoding.EncodingLimits.safe()
+    ^total: encoding.EncodingLimits.safe()
     total.max_total_bytes = Val(12)
     drain("max_total_bytes 12", path, total) ?? return
-    buffer := encoding.EncodingLimits.safe()
+    ^buffer: encoding.EncodingLimits.safe()
     buffer.buffer_bytes = 4
     drain("buffer_bytes 4", path, buffer) ?? return
 
@@ -122,7 +122,7 @@ run: fn() (EncodingError | IOError)! {
         .Err(error) -> print("eager parse: no records, {error}")
     }
 
-    lines := [String]{}
+    ^lines: [String]{}
     loop index in 0..<5 -> lines.push("{{\"n\":{index}}}")
     files.write(path.to_string(), lines.join("\n")) ?? return
     { sender: started_tx, receiver: started_rx }: channel<Int>(capacity: 1)

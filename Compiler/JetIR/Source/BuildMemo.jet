@@ -28,7 +28,7 @@ IR_MEMO_CELL_BYTES: 48
 // its result row is known: the hit path returns, the miss path goes on into
 // the body with b.memo set. Nothing for a function that is not memoized.
 ir_memo_enter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) Never! {
-    bound := -1
+    ^bound: -1
     if function.memo_bound == .Val(limit) -> bound = limit else if !function.memo_unbounded {
         return
     }
@@ -39,10 +39,10 @@ ir_memo_enter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) N
     }
     span: function.source_span
     result_row: b.f.result
-    rows := [Int]{}
-    offsets := [Int]{}
-    keys := [Int]{}
-    size := 0
+    ^rows: [Int]{}
+    ^offsets: [Int]{}
+    ^keys: [Int]{}
+    ^size: 0
     loop binding in b.bindings {
         if binding.indirect >= 0 || binding.write {
             return ir_fail(b, span, "memo key through the write parameter {binding.name}")
@@ -84,7 +84,7 @@ ir_memo_enter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) N
     }
     // The context reads are fresh values of this entry: a hit drops them and
     // a miss moves them into its entry.
-    owned := [Int]{}
+    ^owned: [Int]{}
     loop slot in keys {
         if b.fresh[slot] && ir_has_drop(m, b, slot) -> owned.push(slot)
     }
@@ -114,7 +114,7 @@ ir_memo_enter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) N
         return
     }
     _: ir_runtime(m, b, "jet_rt_memo_hit", [Int]{cell, index}, -1)
-    result := -1
+    ^result: -1
     if result_row >= 0 {
         stored: ir_load_at(m, b, entry, value_offset, result_row)
         if stored >= 0 -> result = ir_copy_value(m, p, b, stored, span)
@@ -151,10 +151,10 @@ ir_memo_enter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) N
 // capacity, entries, hits, misses]) per function instance.
 ir_memo_cell: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
     object_key: "memo:{key}"
-    object := name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
+    ^object: name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
     if object < 0 {
         object = m.data.len()
-        cell := [U8]{}
+        ^cell: [U8]{}
         loop _ in 0..<IR_MEMO_CELL_BYTES -> cell.push(U8{0})
         m.data.push(cell)
         // No address words; the entry marks a word-aligned static object.

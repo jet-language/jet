@@ -33,7 +33,7 @@ runtime_duration_scale: fn(unit_int: I64) -> I64 {
     // The C adapter borrows its exact-Int input; no retain/drop is needed.
     // jet_int_owned_to_i64 is a trapping conversion, so use the same existing
     // magnitude check and projection directly for this fallible boundary.
-    raw := value
+    ^raw: value
     if !int_inline(value) {
         bound: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
         if !int_fits(value, bound) -> return runtime_duration_error(error)
@@ -124,7 +124,7 @@ runtime_duration_scale_stop: fn(file: I64, file_len: I64, line: I64) -> I64 {
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     minimum: I64{-9223372036854775807 - 1}
     maximum: I64{9223372036854775807}
-    overflow := false
+    ^overflow: false
     if (a > I64{0}) { overflow = if (b > I64{0}) -> a > maximum / b else -> b < minimum / a } else if (b > I64{0}) {
         overflow = a < minimum / b
     } else { overflow = a != I64{0} && b < maximum / a }

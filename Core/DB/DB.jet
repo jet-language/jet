@@ -138,7 +138,7 @@ pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
 }
 
 #Test("pool receipt text keeps every counter and lifecycle spelling") {
-    receipt := DBPoolReceipt{
+    ^receipt: DBPoolReceipt{
         lifecycle: .Open,
         max: 2,
         available: 1,
@@ -250,22 +250,22 @@ render_value: fn(value: DBValue) -> String Never! {
 priv __float_text: fn(value: Float) -> String Never! {
     text: "{value}"
     raw: text.bytes()
-    exponent_at := -1
-    dot_at := -1
+    ^exponent_at: -1
+    ^dot_at: -1
     loop i in 0..<raw.len() {
         if raw[i] == (U8{101}) -> exponent_at = i
         if raw[i] == (U8{46}) -> dot_at = i
     }
     if exponent_at < 0 {
         if raw.len() >= 2 && raw[raw.len() - 2] == (U8{46}) && raw[raw.len() - 1] == (U8{48}) {
-            out := [U8]{}
+            ^out: [U8]{}
             loop i in 0..<raw.len() - 2 -> out.push(raw[i])
             return String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
         }
         return text
     }
-    exponent := 0
-    at := exponent_at + 1
+    ^exponent: 0
+    ^at: exponent_at + 1
     negative: raw[at] == (U8{45})
     if negative || raw[at] == (U8{43}) -> at += 1
     loop at < raw.len() {
@@ -275,15 +275,15 @@ priv __float_text: fn(value: Float) -> String Never! {
     if negative -> exponent = 0 - exponent
     start: if raw[0] == (U8{45}) -> 1 else -> 0
     point: if dot_at >= 0 -> dot_at - start else -> exponent_at - start
-    count := exponent_at - start
+    ^count: exponent_at - start
     if dot_at >= 0 -> count -= 1
-    end := exponent_at
+    ^end: exponent_at
     loop end > start && raw[end - 1] == (U8{48}) {
         end -= 1
         count -= 1
     }
     decimal: point + exponent
-    out := [U8]{}
+    ^out: [U8]{}
     if start == 1 -> out.push(U8{45})
     if decimal <= 0 {
         out.push(U8{48})
@@ -292,7 +292,7 @@ priv __float_text: fn(value: Float) -> String Never! {
     }
     loop digit in 0..<count {
         if decimal > 0 && digit == decimal -> out.push(U8{46})
-        index := start + digit
+        ^index: start + digit
         if dot_at >= 0 && index >= dot_at -> index += 1
         out.push(raw[index])
     }
@@ -350,7 +350,7 @@ priv __sql_literal: fn(literals: [String], values: [DBValue]) -> SQL Never! {
     if literals.len() != values.len() + 1 {
         panic("typed SQL literal pieces do not match its holes")
     }
-    text := literals[0].copy()
+    ^text: literals[0].copy()
     loop index in 0..<values.len() -> text = "{text}?{literals[index + 1]}"
     SQL{text: text, values: values.copy()}
 }
@@ -436,20 +436,20 @@ priv sql_lower: fn(byte: U8) -> U8 Never! {
 }
 
 priv sql_lower_text: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() -> out.push(sql_lower(byte))
     String.from_bytes(out) ?? ""
 }
 
 priv bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop at in start..<end -> out.push(raw[at])
     String.from_bytes(out) ?? ""
 }
 
 priv sql_trimmed: fn(raw: [U8], start: Int, end: Int) -> String Never! {
-    first := start
-    last := end
+    ^first: start
+    ^last: end
     loop first < last && sql_space(Int{raw[first]}) -> first += 1
     loop last > first && sql_space(Int{raw[last - 1]}) -> last -= 1
     bytes_text(raw, first, last)
@@ -486,7 +486,7 @@ priv sql_has_control: fn(raw: [U8], allow_whitespace: Bool) -> Bool Never! {
 }
 
 priv sql_skip_quoted: fn(raw: [U8], open: Int, quote: Int, limit: Int) -> Int Never! {
-    at := open + 1
+    ^at: open + 1
     loop at < limit {
         if {
             (Int{raw[at]}) == quote -> {
@@ -502,15 +502,15 @@ priv sql_skip_quoted: fn(raw: [U8], open: Int, quote: Int, limit: Int) -> Int Ne
 }
 
 priv sql_tokens: fn(raw: [U8]) -> [SQLToken] Never! {
-    tokens := [SQLToken]{}
-    at := 0
+    ^tokens: [SQLToken]{}
+    ^at: 0
     loop at < raw.len() {
         byte: Int{raw[at]}
         if {
             byte == 39 -> { at = sql_skip_quoted(raw, at, 39, raw.len()) }
             sql_word_byte(byte) -> {
                 start: at
-                word := [U8]{}
+                ^word: [U8]{}
                 loop at < raw.len() && sql_word_byte(Int{raw[at]}) {
                     word.push(sql_lower(raw[at]))
                     at += 1
@@ -524,7 +524,7 @@ priv sql_tokens: fn(raw: [U8]) -> [SQLToken] Never! {
 }
 
 priv sql_has_comment: fn(raw: [U8]) -> Bool Never! {
-    at := 0
+    ^at: 0
     loop at < raw.len() {
         byte: Int{raw[at]}
         if {
@@ -551,7 +551,7 @@ priv sql_word_index: fn(tokens: [SQLToken], word: String) -> Int Never! {
 }
 
 priv sql_count: fn(tokens: [SQLToken], word: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop token in tokens {
         if token.word == word -> count += 1
     }
@@ -594,7 +594,7 @@ priv sql_simple_target: fn(raw: [U8], tokens: [SQLToken], kind: String) -> Bool 
     target_end: tokens[target].end
     first: target + 1
     if kind == "select" || kind == "delete" {
-        clause := raw.len()
+        ^clause: raw.len()
         loop index in first..<tokens.len() {
             if sql_clause_word(tokens[index].word, true) {
                 clause = tokens[index].start
@@ -616,8 +616,8 @@ priv sql_simple_target: fn(raw: [U8], tokens: [SQLToken], kind: String) -> Bool 
 }
 
 priv sql_split_trimmed: fn(raw: [U8], start: Int, end: Int) -> [String] Never! {
-    parts := [String]{}
-    from := start
+    ^parts: [String]{}
+    ^from: start
     loop at in start..<end {
         if (Int{raw[at]}) == 44 {
             parts.push(sql_trimmed(raw, from, at))
@@ -649,7 +649,7 @@ priv sql_insert_shape: fn(raw: [U8], tokens: [SQLToken]) -> SQLInsertShape? Neve
     columns: sql_split_trimmed(raw, column_start + 1, column_end)
     cells: sql_split_trimmed(raw, value_start + 1, value_end)
     if columns.len() != cells.len() -> return None
-    owner := -1
+    ^owner: -1
     loop index in 0..<columns.len() {
         column: columns[index].bytes()
         if column.len() == 0 -> return None
@@ -676,8 +676,8 @@ priv sql_update_mutates_owner: fn(tokens: [SQLToken]) -> Bool Never! {
 
 // Bound placeholders before `end`, skipping quoted text and [bracketed] names.
 priv sql_placeholders: fn(raw: [U8], end: Int) -> Int Never! {
-    count := 0
-    at := 0
+    ^count: 0
+    ^at: 0
     loop at < end {
         byte: Int{raw[at]}
         if {
@@ -697,8 +697,8 @@ priv sql_placeholders: fn(raw: [U8], end: Int) -> Int Never! {
 }
 
 priv sql_is_migration_metadata: fn(raw: [U8]) -> Bool Never! {
-    out := [U8]{}
-    pending := false
+    ^out: [U8]{}
+    ^pending: false
     loop byte in raw {
         if {
             sql_space(Int{byte}) -> { pending = out.len() > 0 }
@@ -767,7 +767,7 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
         if shape.columns != sql.values.len() {
             return Err(db_error("owner policy INSERT bind count does not match its columns"))
         }
-        values := sql.values.copy()
+        ^values: sql.values.copy()
         values[shape.owner] = DBValue.Text(user.copy())
         return Ok(SQL{text: sql.text.copy(), values: values})
     }
@@ -775,7 +775,7 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
         return Err(db_error("owner policy does not allow changing the owner column"))
     }
     where_index: sql_word_index(tokens, "where")
-    insertion := -1
+    ^insertion: -1
     if where_index >= 0 -> insertion = sql_clause_start(tokens, tokens[where_index].end)
     if insertion < 0 -> insertion = sql_clause_start(tokens, 0)
     if insertion < 0 -> insertion = raw.len()
@@ -783,13 +783,13 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
     if user_index > sql.values.len() {
         return Err(db_error("policy-scoped SQL bind count does not match its placeholders"))
     }
-    values := [DBValue]{}
+    ^values: [DBValue]{}
     loop index in 0..<sql.values.len() {
         if index == user_index -> values.push(DBValue.Text(user.copy()))
         values.push(sql.values[index].copy())
     }
     if user_index == sql.values.len() -> values.push(DBValue.Text(user.copy()))
-    tail_start := insertion
+    ^tail_start: insertion
     loop tail_start < raw.len() && sql_space(Int{raw[tail_start]}) -> tail_start += 1
     suffix: if tail_start >= raw.len() -> "" else -> " {bytes_text(raw, tail_start, raw.len())}"
     if where_index >= 0 {
@@ -799,7 +799,7 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
         }
         return Ok(SQL{text: "{bytes_text(raw, 0, tokens[where_index].start)}WHERE ({condition}) AND owner = ?{suffix}", values: values})
     }
-    head_end := insertion
+    ^head_end: insertion
     loop head_end > 0 && sql_space(Int{raw[head_end - 1]}) -> head_end -= 1
     Ok(SQL{text: "{bytes_text(raw, 0, head_end)} WHERE owner = ?{suffix}", values: values})
 }
@@ -846,7 +846,7 @@ priv DBState: struct {
     // does not name them (DBWritten).
     priv wrote: fn(^self, table: String, rows: [String]?) Never! {
         self.writes += 1
-        kept := [DBLooked]{}
+        ^kept: [DBLooked]{}
         loop looked in self.looked {
             if looked.table != table -> kept.push(looked.copy())
         }
@@ -859,7 +859,7 @@ priv DBState: struct {
         loop at in 0..<self.written.len() {
             if self.written[at].table == table {
                 if self.written[at].rows == .Val(held) && rows == .Val(more) {
-                    joined := held.copy()
+                    ^joined: held.copy()
                     joined.extend(more.copy())
                     self.written[at].rows = Val(joined)
                 } else { self.written[at].rows = None }
@@ -897,11 +897,11 @@ priv db_live_wrote: fn(driver: ^DBDriver, table: String, rows: [String]?) Never!
     reads: app.live_reads.narrowed(source)
     if reads.len() == 0 -> return app.live_reads.invalidate(source, [String]{})
     // Each changed row as a one-row table of its field columns.
-    selects := [{sql: String, values: [DBValue]}]{}
+    ^selects: [{sql: String, values: [DBValue]}]{}
     loop row in changed {
         tree: json.parse(row) ?? Dyn.Null
-        columns := [String]{}
-        values := [DBValue]{}
+        ^columns: [String]{}
+        ^values: [DBValue]{}
         loop field in table_fields(tree) {
             columns.push("? AS \"{field.column}\"")
             values.push(field.value.copy())
@@ -909,10 +909,10 @@ priv db_live_wrote: fn(driver: ^DBDriver, table: String, rows: [String]?) Never!
         from: if columns.len() == 0 -> "" else -> " FROM (SELECT {columns.join(", ")})"
         selects.push({sql: "SELECT 1 AS held{from}", values: values})
     }
-    held := [String]{}
+    ^held: [String]{}
     loop read in reads {
         loop select in selects {
-            bound := select.values.copy()
+            ^bound: select.values.copy()
             loop value in read.values -> bound.push(.Text(value.copy()))
             // A condition the engine can't judge re-runs its binding.
             if __driver_query(driver, "{select.sql} WHERE {read.condition}", bound) == .Ok(found) && found.len() == 0 {
@@ -1006,7 +1006,7 @@ DBScope: struct {
         if tokens.len() == 0 || tokens[0].word != "select" {
             return Err(db_error("a live query must be one SELECT"))
         }
-        key := [String]{app.__live_arg<String>(self.user), app.__live_arg<String>(scoped.text)}
+        ^key: [String]{app.__live_arg<String>(self.user), app.__live_arg<String>(scoped.text)}
         loop value in scoped.values -> key.push(app.__live_arg<DBValue>(value))
         scope: self.copy()
         query: sql.copy()
@@ -1180,20 +1180,20 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     // one per key. The row policy judges each row as `get` judges one, and
     // reads a key it looks up once for all of them.
     get_many: fn(self, keys: [K]) -[DB.Read]> [T] DBError! {
-        sorted := keys.copy()
+        ^sorted: keys.copy()
         sorted.sort_by(fn(left: K, right: K) { left <=> right })
-        unique := [K]{}
+        ^unique: [K]{}
         loop key in sorted {
             if unique.len() == 0 || (unique[unique.len() - 1] <=> key) != Ordering.Equal {
                 unique.push(key.copy())
             }
         }
-        stored := [[String:DBValue]]{}
-        at := 0
+        ^stored: [[String:DBValue]]{}
+        ^at: 0
         loop at < unique.len() {
             end: if at + TABLE_KEYS_PER_READ < unique.len() -> at + TABLE_KEYS_PER_READ else -> unique.len()
-            terms := [String]{}
-            values := [DBValue]{}
+            ^terms: [String]{}
+            ^values: [DBValue]{}
             loop index in at..<end {
                 cells: table_cells(self.name, unique[index].encode()) ?? return Err(err)
                 terms.push("({table_match(cells)})")
@@ -1231,7 +1231,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     put: fn(self, row: T) -[DB.Read, DB.Write]> T DBError! {
         if self.policy == .Val(_) {
             cells: table_cells(self.name, self.key_of(row.copy()).encode()) ?? return Err(err)
-            allowed := false
+            ^allowed: false
             if table_stored<K, T>(self, cells) == {
                 .Val(stored) -> {
                     allowed = table_allows<K, T>(self, stored, Op.Update) ?? return Err(err)
@@ -1260,7 +1260,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
                 .Err(failure) -> return Err(failure)
             }
         }
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         call: app.transactions.current() ?? 0
         guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
         db_join(guard.value, self.state, call) ?? return Err(err)
@@ -1353,7 +1353,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     // it runs as the system: the row policy judges none of it.
     upgrade: fn(self) -[DB.Read, DB.Write]> Int DBError! {
         rows: table_rows<K, T>(self, "", [DBValue]{}, None) ?? return Err(err)
-        rewritten := 0
+        ^rewritten: 0
         loop stored in rows {
             text: row_text(stored, TABLE_ROW_COLUMN) ?? return Err(err)
             row: table_decode<T>(stored) ?? return Err(err)
@@ -1361,14 +1361,14 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
             encoded: json.to_string(row.encode_stored()) ?? return Err(db_error("the row for table `{self.name}` does not encode: {err}"))
             terms: if self.search_of == .Val(text_of) -> Val(search_terms(text_of(row.copy()))) else -> None
             if encoded == text && terms == .None -> next
-            guard := self.state.guard_edit()
+            ^guard: self.state.guard_edit()
             call: app.transactions.current() ?? 0
             guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
             db_join(guard.value, self.state, call) ?? return Err(err)
             if encoded != text {
                 kept: table_columns(guard.value.driver, self.name, table_fields(row.encode_stored())) ?? return Err(err)
-                sets := [String]{"{TABLE_ROW_COLUMN} = ?"}
-                values := [DBValue]{.Text(encoded.copy())}
+                ^sets: [String]{"{TABLE_ROW_COLUMN} = ?"}
+                ^values: [DBValue]{.Text(encoded.copy())}
                 loop field in kept {
                     sets.push("\"{field.column}\" = ?")
                     values.push(field.value.copy())
@@ -1395,7 +1395,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
 // binding's read set as the table narrowed by it (`table_read`).
 priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, filter: String, values: [DBValue], narrowed: [String]?) -[DB.Read]> [[String:DBValue]] DBError! {
     if !sql_identifier(table.name.bytes()) -> return Err(table_name_error(table.name))
-    guard := table.state.guard_edit()
+    ^guard: table.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
@@ -1424,7 +1424,7 @@ priv table_parse_policy_join: fn(spec: String) -> TablePolicyJoin? Never! {
     head: lines[0].split("\t").to_list()
     if head.len() < 2 || head[0] != "join" -> return None
     requires_account: head[1] == "1"
-    clauses := [TablePolicyJoinClause]{}
+    ^clauses: [TablePolicyJoinClause]{}
     loop i in 1..<lines.len() {
         line: lines[i]
         if line.len() == 0 -> next
@@ -1451,13 +1451,13 @@ priv table_parse_policy_join: fn(spec: String) -> TablePolicyJoin? Never! {
 
 // The SQL semi-join condition enforcing `join` for `who` on `table_name`.
 priv table_policy_sql: fn(table_name: String, join: TablePolicyJoin, who: Who) -> {sql: String, values: [DBValue], denied: Bool, tables: [String]} Never! {
-    tables := [String]{}
+    ^tables: [String]{}
     loop clause in join.clauses {
         if !tables.contains(clause.table) -> tables.push(clause.table.copy())
     }
     if who == Who.System -> return {sql: "", values: [DBValue]{}, denied: false, tables: [String]{}}
-    caller := ""
-    has_caller := false
+    ^caller: ""
+    ^has_caller: false
     if who == .Account(account) {
         caller = account.raw()
         has_caller = true
@@ -1465,12 +1465,12 @@ priv table_policy_sql: fn(table_name: String, join: TablePolicyJoin, who: Who) -
     if join.requires_account && !has_caller {
         return {sql: "", values: [DBValue]{}, denied: true, tables: tables}
     }
-    exists_clauses := [String]{}
-    values := [DBValue]{}
+    ^exists_clauses: [String]{}
+    ^values: [DBValue]{}
     loop i in 0..<join.clauses.len() {
         clause: join.clauses[i]
         alias: "__jp{i}"
-        terms := [String]{}
+        ^terms: [String]{}
         loop col in clause.columns {
             if col.source_kind == "field" {
                 terms.push("\"{alias}\".\"{col.join_col}\" = \"{table_name}\".\"{TABLE_ROW_COLUMN}.{col.source_value}\"")
@@ -1496,13 +1496,13 @@ priv table_policy_sql: fn(table_name: String, join: TablePolicyJoin, who: Who) -
 // Decodes `stored_rows` and returns them in ascending key order (the order
 // `Table.query` guarantees), for rows already admitted by a SQL policy join.
 priv table_decode_sorted: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, stored_rows: [[String:DBValue]]) -> [T] DBError! {
-    keyed := [{key: K, row: T}]{}
+    ^keyed: [{key: K, row: T}]{}
     loop stored in stored_rows {
         row: table_decode<T>(stored) ?? return Err(err)
         keyed.push({key: table.key_of(row.copy()), row: row})
     }
     keyed.sort_by(fn(left: {key: K, row: T}, right: {key: K, row: T}) { left.key <=> right.key })
-    out := [T]{}
+    ^out: [T]{}
     loop entry in keyed -> out.push(entry.row.copy())
     Ok(out)
 }
@@ -1515,7 +1515,7 @@ priv table_rows_joined: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>
     if who == Who.System -> return Ok(None)
     if !sql_identifier(table.name.bytes()) -> return Err(table_name_error(table.name))
     policy: table_policy_sql(table.name, join, who)
-    guard := table.state.guard_edit()
+    ^guard: table.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
@@ -1531,8 +1531,8 @@ priv table_rows_joined: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>
         }
     }
     if policy.denied -> return Ok(Val([[String:DBValue]]{}))
-    where_clause := ""
-    bound_values := [DBValue]{}
+    ^where_clause: ""
+    ^bound_values: [DBValue]{}
     if filter.len() > 0 && policy.sql.len() > 0 {
         where_clause = " WHERE ({filter}) AND ({policy.sql})"
         bound_values = values.copy()
@@ -1569,10 +1569,10 @@ priv table_count_by_sql: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]
     if !column.starts_with(prefix) -> return Ok(None)
     field_name: column.slice(prefix.len(), column.len())
     if !sql_identifier(field_name.bytes()) -> return Ok(None)
-    policy_sql := ""
-    policy_values := [DBValue]{}
-    policy_denied := false
-    policy_tables := [String]{}
+    ^policy_sql: ""
+    ^policy_values: [DBValue]{}
+    ^policy_denied: false
+    ^policy_tables: [String]{}
     if table.policy != None && who != Who.System {
         join: table.policy_join ?? return Ok(None)
         built: table_policy_sql(table.name, join, who)
@@ -1581,7 +1581,7 @@ priv table_count_by_sql: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]
         policy_denied = built.denied
         policy_tables = built.tables
     }
-    guard := table.state.guard_edit()
+    ^guard: table.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
@@ -1597,8 +1597,8 @@ priv table_count_by_sql: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]
         }
     }
     if policy_denied -> return Ok(Val([{key: String, count: Int}]{}))
-    where_clause := ""
-    bound_values := [DBValue]{}
+    ^where_clause: ""
+    ^bound_values: [DBValue]{}
     if filter.len() > 0 && policy_sql.len() > 0 {
         where_clause = " WHERE ({filter}) AND ({policy_sql})"
         bound_values = table_bound(values)
@@ -1613,7 +1613,7 @@ priv table_count_by_sql: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]
     sql: "SELECT \"{column}\" AS jet_group_key, COUNT(*) AS jet_group_count FROM \"{table.name}\"{where_clause} GROUP BY \"{column}\""
     if __driver_query(guard.value.driver, sql, bound_values) == {
         .Ok(rows) -> {
-            out := [{key: String, count: Int}]{}
+            ^out: [{key: String, count: Int}]{}
             loop row in rows {
                 key_val: row_value(row, "jet_group_key") ?? return Ok(None)
                 if key_val == .Null -> return Ok(None)
@@ -1652,7 +1652,7 @@ priv table_looked: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(tabl
     seen: db_looked(table.state, table.name, key) ?? return table_rows<K, T>(table, table_match(cells), table_values(cells), None)
     if seen.rows == .Val(kept) -> return Ok(kept)
     rows: table_rows<K, T>(table, table_match(cells), table_values(cells), None) ?? return Err(err)
-    guard := table.state.guard_edit()
+    ^guard: table.state.guard_edit()
     if guard.value.judging > 0 && guard.value.writes == seen.writes {
         guard.value.looked.push(DBLooked{table: table.name.copy(), key: key, rows: rows.copy()})
     }
@@ -1665,7 +1665,7 @@ priv table_looked: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(tabl
 // (`db_free`) finds none, so it never sees that transaction's rows. A live
 // binding still records the table in its read set.
 priv db_looked: fn(state: Shared<DBState>, table: String, key: String) -> {rows: [[String:DBValue]]?, writes: Int}? Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     if guard.value.judging == 0 -> return None
     call: app.transactions.current() ?? 0
     if !db_free(guard.value, call) -> return Val({rows: None, writes: guard.value.writes})
@@ -1684,7 +1684,7 @@ priv db_looked: fn(state: Shared<DBState>, table: String, key: String) -> {rows:
 // The cells of a key as one text, each value tagged with its kind and length
 // so no two keys share it.
 priv table_looked_key: fn(cells: [{column: String, value: DBValue}]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop cell in cells {
         kind: if cell.value == {
             .Null -> "n"
@@ -1702,7 +1702,7 @@ priv table_looked_key: fn(cells: [{column: String, value: DBValue}]) -> String N
 
 // The stored rows' `jet_row` texts.
 priv table_texts: fn(rows: [[String:DBValue]]) -> [String] DBError! {
-    out := [String]{}
+    ^out: [String]{}
     loop stored in rows {
         text: row_text(stored, TABLE_ROW_COLUMN) ?? return Err(err)
         out.push(text)
@@ -1713,7 +1713,7 @@ priv table_texts: fn(rows: [[String:DBValue]]) -> [String] DBError! {
 // The values a `__query_filter` condition binds, each as text: the
 // condition casts the ones it compares as numbers.
 priv table_bound: fn(values: [String]) -> [DBValue] Never! {
-    out := [DBValue]{}
+    ^out: [DBValue]{}
     loop value in values -> out.push(.Text(value.copy()))
     out
 }
@@ -1763,7 +1763,7 @@ priv table_judge: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
 // transaction, the rows the policies read (DBState.looked) are dropped once
 // no judgment or judged read is left; inside one, at its end.
 priv db_judging: fn(state: Shared<DBState>, judging: Int, batch: Int) Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.value.judging += judging
     guard.value.batch += batch
     if guard.value.open == 0 && guard.value.judging == 0 && guard.value.batch == 0 {
@@ -1775,13 +1775,13 @@ priv db_judging: fn(state: Shared<DBState>, judging: Int, batch: Int) Never! {
 // in key order, as a table's `query`, `search` and `get_many` give them. The
 // policy reads a key once for all of them (`db_judging`).
 priv table_readable: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, stored_rows: [[String:DBValue]], who: Who) -[DB.Read]> [T] DBError! {
-    keyed := [{key: K, row: T}]{}
+    ^keyed: [{key: K, row: T}]{}
     loop stored in stored_rows {
         row: table_decode<T>(stored) ?? return Err(err)
         keyed.push({key: table.key_of(row.copy()), row: row})
     }
     keyed.sort_by(fn(left: {key: K, row: T}, right: {key: K, row: T}) { left.key <=> right.key })
-    out := [T]{}
+    ^out: [T]{}
     db_judging(table.state, 0, 1)
     loop entry in keyed {
         allowed: table_judge<K, T>(table, entry.row.copy(), Op.Read, who) ?? {
@@ -1808,8 +1808,8 @@ priv table_index_name: fn(name: String) -> String Never! { "{name}__jet_search" 
 // ASCII stays part of the word it touches.
 priv search_terms: fn(text: String) -> [String] Never! {
     raw: text.casefold().bytes()
-    terms := [String]{}
-    start := 0
+    ^terms: [String]{}
+    ^start: 0
     loop at in 0..<(raw.len() + 1) {
         if at < raw.len() && search_word_byte(Int{raw[at]}) -> next
         if at > start {
@@ -1838,26 +1838,26 @@ priv search_word_byte: fn(byte: Int) -> Bool Never! {
 // whether they changed.
 priv table_index: fn(driver: ^DBDriver, name: String, cells: [{column: String, value: DBValue}], terms: [String]) -> Bool DBError! {
     index: table_index_name(name)
-    columns := [String]{}
+    ^columns: [String]{}
     loop cell in cells -> columns.push("\"{cell.column}\"")
     names: columns.join(", ")
     _: __driver_execute(driver, "CREATE TABLE IF NOT EXISTS \"{index}\" ({names}, {TABLE_WORD_COLUMN} TEXT NOT NULL, PRIMARY KEY ({names}, {TABLE_WORD_COLUMN}))", [DBValue]{}) ?? return Err(err)
     held: __driver_query(driver, "SELECT {TABLE_WORD_COLUMN} FROM \"{index}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
-    kept := [String]{}
+    ^kept: [String]{}
     loop stored in held {
         word: row_text(stored, TABLE_WORD_COLUMN) ?? return Err(err)
         kept.push(word)
     }
-    same := kept.len() == terms.len()
+    ^same: kept.len() == terms.len()
     loop word in kept {
         if !terms.contains(word) -> same = false
     }
     if same -> return Ok(false)
     _: __driver_execute(driver, "DELETE FROM \"{index}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
     loop term in terms {
-        values := table_values(cells)
+        ^values: table_values(cells)
         values.push(.Text(term.copy()))
-        marks := [String]{}
+        ^marks: [String]{}
         loop _ in 0..<values.len() -> marks.push("?")
         _: __driver_execute(driver, "INSERT INTO \"{index}\" ({names}, {TABLE_WORD_COLUMN}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
     }
@@ -1880,7 +1880,7 @@ priv table_unindex: fn(driver: ^DBDriver, name: String, cells: [{column: String,
 // table, since a write of any row may change what a search finds.
 priv table_found: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, terms: [String]) -[DB.Read]> [[String:DBValue]] DBError! {
     if terms.len() == 0 -> return table_rows<K, T>(table, "", [DBValue]{}, None)
-    guard := table.state.guard_edit()
+    ^guard: table.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
@@ -1891,8 +1891,8 @@ priv table_found: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     index: table_index_name(table.name)
     if !table_exists(guard.value.driver, index) -> return Ok([[String:DBValue]]{})
     known: __driver_query(guard.value.driver, "PRAGMA table_info(\"{index}\")", [DBValue]{}) ?? return Err(err)
-    keys := [String]{}
-    quoted := [String]{}
+    ^keys: [String]{}
+    ^quoted: [String]{}
     loop column in known {
         name: row_text(column, "name") ?? return Err(err)
         if name != TABLE_WORD_COLUMN {
@@ -1900,17 +1900,17 @@ priv table_found: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
             keys.push(name)
         }
     }
-    marks := [String]{}
-    values := [DBValue]{}
+    ^marks: [String]{}
+    ^values: [DBValue]{}
     loop term in terms {
         marks.push("?")
         values.push(.Text(term.copy()))
     }
     values.push(.Int(terms.len()))
     found: __driver_query(guard.value.driver, "SELECT {quoted.join(", ")} FROM \"{index}\" WHERE {TABLE_WORD_COLUMN} IN ({marks.join(", ")}) GROUP BY {quoted.join(", ")} HAVING COUNT(*) = ?", values) ?? return Err(err)
-    out := [[String:DBValue]]{}
+    ^out: [[String:DBValue]]{}
     loop held in found {
-        cells := [{column: String, value: DBValue}]{}
+        ^cells: [{column: String, value: DBValue}]{}
         loop key in keys {
             value: row_value(held, key) ?? return Err(err)
             cells.push({column: key.copy(), value: value})
@@ -1930,13 +1930,13 @@ priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     stored: row.encode_stored()
     encoded: json.to_string(stored) ?? return Err(db_error("the row for table `{table.name}` does not encode: {err}"))
     fields: table_fields(stored)
-    columns := [String]{}
+    ^columns: [String]{}
     loop cell in cells -> columns.push("\"{cell.column}\"")
     names: columns.join(", ")
-    created := [String]{}
+    ^created: [String]{}
     loop field in fields -> created.push(", \"{field.column}\"")
     terms: if table.search_of == .Val(text_of) -> Val(search_terms(text_of(row.copy()))) else -> None
-    guard := table.state.guard_edit()
+    ^guard: table.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
@@ -1945,16 +1945,16 @@ priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     kept: table_columns(guard.value.driver, table.name, fields) ?? return Err(err)
     held: __driver_query(guard.value.driver, "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
     if !replace && held.len() > 0 -> return Err(DBError.Exists)
-    changed := table_texts(held) ?? return Err(err)
+    ^changed: table_texts(held) ?? return Err(err)
     changed.push(encoded.copy())
-    values := table_values(cells)
+    ^values: table_values(cells)
     values.push(DBValue.Text(encoded))
     columns.push(TABLE_ROW_COLUMN)
     loop field in kept {
         columns.push("\"{field.column}\"")
         values.push(field.value.copy())
     }
-    marks := [String]{}
+    ^marks: [String]{}
     loop _ in 0..<values.len() -> marks.push("?")
     verb: if replace -> "INSERT OR REPLACE" else -> "INSERT"
     _: __driver_execute(guard.value.driver, "{verb} INTO \"{table.name}\" ({columns.join(", ")}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
@@ -1996,7 +1996,7 @@ priv table_blob_read: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(t
 // (`__query_filter`): one per top-level scalar field of its encoding, named
 // `jet_row.<field>`. A row that is not a record has none.
 priv table_fields: fn(row: Dyn) -> [{column: String, value: DBValue}] Never! {
-    cells := [{column: String, value: DBValue}]{}
+    ^cells: [{column: String, value: DBValue}]{}
     if !(row == .Object(_)) -> return cells
     loop entry in stream.object_entries(row) {
         if !sql_identifier(entry.key.bytes()) -> next
@@ -2016,9 +2016,9 @@ priv table_fields: fn(row: Dyn) -> [{column: String, value: DBValue}] Never! {
 // whole table (`table_rows`).
 priv table_columns: fn(driver: ^DBDriver, name: String, fields: [{column: String, value: DBValue}]) -> [{column: String, value: DBValue}] DBError! {
     known: __driver_query(driver, "PRAGMA table_info(\"{name}\")", [DBValue]{}) ?? return Err(err)
-    names := [String]{}
+    ^names: [String]{}
     loop column in known -> names.push(row_text(column, "name") ?? "")
-    kept := [{column: String, value: DBValue}]{}
+    ^kept: [{column: String, value: DBValue}]{}
     loop field in fields {
         if names.contains(field.column) {
             kept.push({column: field.column.copy(), value: field.value.copy()})
@@ -2032,7 +2032,7 @@ priv table_columns: fn(driver: ^DBDriver, name: String, fields: [{column: String
 // row column, nor of a search index's word column.
 priv table_cells: fn(name: String, key: Dyn) -> [{column: String, value: DBValue}] DBError! {
     if !sql_identifier(name.bytes()) -> return Err(table_name_error(name))
-    cells := [{column: String, value: DBValue}]{}
+    ^cells: [{column: String, value: DBValue}]{}
     if !(key == .Object(_)) {
         cells.push({column: TABLE_KEY_COLUMN, value: table_value(key)})
         return Ok(cells)
@@ -2062,13 +2062,13 @@ priv table_value: fn(value: Dyn) -> DBValue Never! {
 }
 
 priv table_match: fn(cells: [{column: String, value: DBValue}]) -> String Never! {
-    terms := [String]{}
+    ^terms: [String]{}
     loop cell in cells -> terms.push("\"{cell.column}\" = ?")
     terms.join(" AND ")
 }
 
 priv table_values: fn(cells: [{column: String, value: DBValue}]) -> [DBValue] Never! {
-    values := [DBValue]{}
+    ^values: [DBValue]{}
     loop cell in cells -> values.push(cell.value.copy())
     values
 }
@@ -2122,10 +2122,10 @@ priv DB_MEMORY_OPENED: Shared{0}
 // app.reply_cache, so the servers that share it share the replies a
 // `.Public` cache policy keeps.
 priv db_open: fn(path: String, failure: String) -> Store Never! {
-    driver := __driver_open(path) ?? panic(failure)
-    store := path.copy()
+    ^driver: __driver_open(path) ?? panic(failure)
+    ^store: path.copy()
     if path == ":memory:" {
-        opened := DB_MEMORY_OPENED.guard_edit()
+        ^opened: DB_MEMORY_OPENED.guard_edit()
         opened.value += 1
         store = ":memory: {opened.value}"
     }
@@ -2147,7 +2147,7 @@ priv db_begin: fn(state: Shared<DBState>, immediate: Bool) -> DBTransaction DBEr
     if app.transactions.current() != None {
         return Err(db_error("could not begin a transaction: a mounted method's call is one already, which commits when it succeeds"))
     }
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return Err(db_waited())
     db_join(guard.value, state, 0) ?? return Err(err)
     began: if immediate -> __driver_begin_immediate(guard.value.driver) else -> __driver_begin(guard.value.driver)
@@ -2174,7 +2174,7 @@ priv db_open_is: fn(state: Shared<DBState>, number: Int) -> Bool Never! {
 // it drops anything read from the transaction's own uncommitted writes. The
 // statements waiting for the transaction to end go on (`db_free`).
 priv db_commit: fn(state: Shared<DBState>) DBError! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.value.open = 0
     guard.value.call = 0
     guard.value.ended.notify_all()
@@ -2197,7 +2197,7 @@ priv db_commit: fn(state: Shared<DBState>) DBError! {
 // A rollback undoes the writes since the last begin, so every live binding
 // over a table they touched re-runs on its next read.
 priv db_rollback: fn(state: Shared<DBState>) DBError! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.value.open = 0
     guard.value.call = 0
     guard.value.ended.notify_all()
@@ -2362,7 +2362,7 @@ priv db_requested: fn(driver: ^DBDriver, call: Int, request: app.CallRequest) ->
 // the connection. False when the store couldn't. A request whose reply the
 // store keeps already keeps that one.
 priv db_request_keep: fn(state: Shared<DBState>, call: Int, request: app.CallRequest, reply: String) -> Bool Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return false
     if driver_closed(guard.value.driver) -> return false
     _: __driver_execute(guard.value.driver, DB_REQUESTS_TABLE, [DBValue]{}) ?? return false
@@ -2403,7 +2403,7 @@ priv db_job_now: fn() -> Int Never! { os.os_unix_ms() }
 // transaction the call running on this task has open on the store; its
 // key, a random one the store makes, or "" when that failed.
 priv db_job_keep: fn(state: Shared<DBState>, job: String, args: String, until: Int) -> String Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS __jet_jobs (key TEXT PRIMARY KEY, job TEXT NOT NULL, args TEXT NOT NULL, runs INTEGER NOT NULL DEFAULT 0, error TEXT, due INTEGER NOT NULL)", [DBValue]{}) ?? return ""
     _: __driver_execute(guard.value.driver, "CREATE INDEX IF NOT EXISTS __jet_jobs_due ON __jet_jobs (due)", [DBValue]{}) ?? return ""
     _: __driver_execute(guard.value.driver, "INSERT INTO __jet_jobs (key, job, args, due) VALUES (lower(hex(randomblob(16))), ?, ?, ?)", [DBValue]{.Text(job.copy()), .Text(args.copy()), .Int(until)}) ?? return ""
@@ -2415,7 +2415,7 @@ priv db_job_keep: fn(state: Shared<DBState>, job: String, args: String, until: I
 // its job runs in that call: 1; 0 when another run has deleted it; -1 when
 // the store couldn't.
 priv db_job_done: fn(state: Shared<DBState>, key: String) -> Int Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return -1
     if db_join(guard.value, state, call) == .Err(_) -> return -1
@@ -2426,7 +2426,7 @@ priv db_job_done: fn(state: Shared<DBState>, key: String) -> Int Never! {
 // failed each time, the last with `error`, and takes it until `until`;
 // false when the store couldn't.
 priv db_job_failed: fn(state: Shared<DBState>, key: String, runs: Int, error: String, until: Int) -> Bool Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return false
     if db_join(guard.value, state, 0) == .Err(_) -> return false
     __driver_execute(guard.value.driver, "UPDATE __jet_jobs SET runs = ?, error = ?, due = ? WHERE key = ?", [DBValue]{.Int(runs), .Text(error.copy()), .Int(until), .Text(key.copy())}) == .Ok(_)
@@ -2435,10 +2435,10 @@ priv db_job_failed: fn(state: Shared<DBState>, key: String, runs: Int, error: St
 // The outbox rows of keys `keys` are taken until `until`, unless they are
 // taken longer; false when the store couldn't.
 priv db_job_hold: fn(state: Shared<DBState>, keys: [String], until: Int) -> Bool Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return false
     if db_join(guard.value, state, 0) == .Err(_) -> return false
-    values := [DBValue]{.Int(until), .Int(until)}
+    ^values: [DBValue]{.Int(until), .Int(until)}
     loop key in keys -> values.push(.Text(key.copy()))
     __driver_execute(guard.value.driver, "UPDATE __jet_jobs SET due = ? WHERE due < ? AND key IN ({db_marks(keys.len())})", values) == .Ok(_)
 }
@@ -2451,13 +2451,13 @@ priv DB_JOBS_TAKEN: 64
 // that another server took first is left to it. Gives none when the store
 // is busy or keeps no jobs, and None once it has closed.
 priv db_job_take: fn(state: Shared<DBState>, names: [String], now: Int, until: Int) -> [app.CallQueued]? Never! {
-    taken := [app.CallQueued]{}
-    guard := state.guard_edit()
+    ^taken: [app.CallQueued]{}
+    ^guard: state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return Val(taken)
     if driver_closed(guard.value.driver) -> return None
     if !table_exists(guard.value.driver, "__jet_jobs") -> return Val(taken)
     sql: "SELECT key, job, args, runs FROM __jet_jobs WHERE due <= ? AND job IN ({db_marks(names.len())}) ORDER BY due LIMIT {DB_JOBS_TAKEN}"
-    values := [DBValue]{.Int(now)}
+    ^values: [DBValue]{.Int(now)}
     loop name in names -> values.push(.Text(name.copy()))
     due: __driver_query(guard.value.driver, sql, values) ?? return Val(taken)
     if due.len() == 0 || !__driver_begin_immediate(guard.value.driver) -> return Val(taken)
@@ -2479,7 +2479,7 @@ priv db_job_take: fn(state: Shared<DBState>, names: [String], now: Int, until: I
 
 // `count` SQL parameter marks, comma-separated.
 priv db_marks: fn(count: Int) -> String Never! {
-    marks := [String]{}
+    ^marks: [String]{}
     loop _ in 0..<count -> marks.push("?")
     marks.join(", ")
 }
@@ -2499,7 +2499,7 @@ priv db_push_devices: fn(state: Shared<DBState>, store: String) -> app.PushDevic
 // Registers `device` in place of the row of its service and token; false
 // when the store couldn't.
 priv db_push_add: fn(state: Shared<DBState>, device: app.PushDevice) -> Bool Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return false
     if db_join(guard.value, state, call) == .Err(_) -> return false
@@ -2512,8 +2512,8 @@ priv db_push_add: fn(state: Shared<DBState>, device: app.PushDevice) -> Bool Nev
 // The devices `account` registered, in the order they registered; None
 // when the store couldn't read them.
 priv db_push_of: fn(state: Shared<DBState>, account: String) -> [app.PushDevice]? Never! {
-    found := [app.PushDevice]{}
-    guard := state.guard_edit()
+    ^found: [app.PushDevice]{}
+    ^guard: state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return None
     if db_join(guard.value, state, call) == .Err(_) -> return None
@@ -2532,7 +2532,7 @@ priv db_push_of: fn(state: Shared<DBState>, account: String) -> [app.PushDevice]
 // Forgets the device of `service` and `token`; false when the store
 // couldn't.
 priv db_push_forget: fn(state: Shared<DBState>, service: String, token: String) -> Bool Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return false
     if db_join(guard.value, state, call) == .Err(_) -> return false
@@ -2561,7 +2561,7 @@ priv db_kept_replies: fn(state: Shared<DBState>, store: String) -> app.KeptRepli
 // the instant its max_age ends; None when there is none, or the store
 // couldn't read it.
 priv db_kept_find: fn(state: Shared<DBState>, key: String) -> app.KeptReply? Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return None
     if driver_closed(guard.value.driver) || !table_exists(guard.value.driver, "__jet_kept_replies") {
         return None
@@ -2581,7 +2581,7 @@ priv db_kept_find: fn(state: Shared<DBState>, key: String) -> app.KeptReply? Nev
 // `db_kept_written`) may hold what it changed, so its reply is judged and
 // not kept. False when the store couldn't keep or judge it.
 priv db_kept_keep: fn(state: Shared<DBState>, key: String, reply: String, max_age_ms: Int, ran_ms: Int) -> Bool Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return false
     if driver_closed(guard.value.driver) -> return false
     _: __driver_execute(guard.value.driver, DB_KEPT_REPLIES_TABLE, [DBValue]{}) ?? return false
@@ -2779,7 +2779,7 @@ priv call_schedule: fn(counts: Table<Int, CallCount>, schedule: String, due: Int
 // The services and tokens of the devices `account` registered in `devices`.
 priv db_push_test_of: fn(devices: app.PushDevices, account: String) -> String {
     found: devices.of(account) ?? panic("the devices read")
-    listed := [String]{}
+    ^listed: [String]{}
     loop device in found -> listed.push("{device.service} {device.token}")
     listed.join(", ")
 }
@@ -2816,14 +2816,14 @@ priv db_push_test_of: fn(devices: app.PushDevices, account: String) -> String {
 
 // How many replies the store keeps, fresh or stale.
 priv db_kept_count: fn(store: Store) -> Int {
-    guard := store.state.guard_edit()
+    ^guard: store.state.guard_edit()
     found: __driver_query_one(guard.value.driver, "SELECT count(*) AS n FROM __jet_kept_replies", [DBValue]{}) ?? panic("the kept replies read")
     if found.get("n") == .Val(.Int(n)) -> n else -> -1
 }
 
 // Keeps a reply under `key` whose max_age ended long ago.
 priv db_kept_stale: fn(store: Store, key: String) {
-    guard := store.state.guard_edit()
+    ^guard: store.state.guard_edit()
     _: __driver_execute(guard.value.driver, "INSERT OR REPLACE INTO __jet_kept_replies (key, reply, kept, fresh) VALUES (?, 'stale', 0, 1)", [DBValue]{.Text(key.copy())}) ?? panic("the stale reply writes")
 }
 
@@ -2864,7 +2864,7 @@ priv db_kept_stale: fn(store: Store, key: String) {
 
 // How many jobs the store's outbox keeps, and each one's runs and last error.
 priv db_jobs_kept: fn(store: Store) -> String {
-    guard := store.state.guard_edit()
+    ^guard: store.state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? panic("the outbox waits for open calls")
     found: __driver_query_one(guard.value.driver, "SELECT count(*) AS n, group_concat(runs || ' ' || error) AS failed FROM __jet_jobs", [DBValue]{}) ?? panic("the outbox reads")
     kept: if found.get("n") == .Val(.Int(n)) -> n else -> -1
@@ -2880,7 +2880,7 @@ priv db_jobs_kept: fn(store: Store) -> String {
     rolled: app.transactions.begin() ?? panic("no call is open")
     _: counts.put(CallCount{id: 1, count: 1}) ?? panic("the call writes")
     app.__enqueue("db.Test.never", [String]{}, 0, fn(args) {
-        count := dropped.guard_edit()
+        ^count: dropped.guard_edit()
         count.value += 1
         Ok(args.__reply_value<Int>(0))
     })
@@ -2891,7 +2891,7 @@ priv db_jobs_kept: fn(store: Store) -> String {
     committed: app.transactions.begin() ?? panic("no call is open")
     _: counts.put(CallCount{id: 1, count: 2}) ?? panic("the call writes")
     app.__enqueue("db.Test.set", [String]{app.__live_arg<Int>(20)}, 1, fn(args) {
-        count := tries.guard_edit()
+        ^count: tries.guard_edit()
         count.value += 1
         if count.value == 1 -> return Ok(args.__reply_err<String>("once"))
         set: args.__take<Int>(0) ?? return Err(err)
@@ -2945,7 +2945,7 @@ priv db_jobs_kept: fn(store: Store) -> String {
 }
 
 priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {
-    guard := state.guard_edit()
+    ^guard: state.guard_edit()
     __driver_shutdown(guard.value.driver)
 }
 
@@ -2953,7 +2953,7 @@ priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {
 // that changed a row, or a schema statement, marks them (DBState.wrote).
 priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
     scoped: policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
-    guard := scope.state.guard_edit()
+    ^guard: scope.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, scope.state, call) ?? return Err(err)
@@ -3003,7 +3003,7 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:D
     scoped: policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     read: if app.live_reads.running() -> sql_table(scoped) else -> None
     if read == .Val(table) -> app.live_reads.record(live_source(table))
-    guard := scope.state.guard_edit()
+    ^guard: scope.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, scope.state, call) ?? return Err(err)
@@ -3016,7 +3016,7 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:D
 
 // The first row `sql` reads through `scope`, or None when it reads none.
 priv scope_query_one: fn(scope: DBScope, sql: SQL) -> [String:DBValue]? DBError! {
-    rows := scope_query(scope, sql, false) ?? return Err(err)
+    ^rows: scope_query(scope, sql, false) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
     first: rows.remove(0, .Slot) ?? panic("database first row disappeared")
     Ok(Val(first))
@@ -3076,8 +3076,8 @@ priv db_live_watch: fn(held: ^DBState, state: Shared<DBState>, table: String) Ne
     if held.path == ":memory:" || held.open != 0 || held.call != 0 {
         return
     }
-    watch := LIVE_WATCH.guard_edit()
-    at := -1
+    ^watch: LIVE_WATCH.guard_edit()
+    ^at: -1
     loop index in 0..<watch.value.len() {
         if watch.value[index].path == held.path -> at = index
     }
@@ -3117,7 +3117,7 @@ priv db_live_bump: fn(held: ^DBState, table: String) Never! {
     if held.path == ":memory:" || !table_exists(held.driver, LIVE_VERSIONS) {
         return
     }
-    watch := LIVE_WATCH.guard_edit()
+    ^watch: LIVE_WATCH.guard_edit()
     bumped: __driver_execute(held.driver, "UPDATE {LIVE_VERSIONS} SET version = version + 1 WHERE name = ?", [DBValue]{.Text(table.copy())}) ?? return
     if bumped == 0 {
         return
@@ -3158,10 +3158,10 @@ priv db_live_watched: fn(path: String) -> Shared<DBState>? Never! {
 // forgotten, once its connection closed.
 priv db_live_polled: fn(path: String) -> [String]? Never! {
     held: db_live_watched(path) ?? return None
-    guard := held.guard_edit()
+    ^guard: held.guard_edit()
     if driver_closed(guard.value.driver) {
-        watch := LIVE_WATCH.guard_edit()
-        kept := [LiveWatch]{}
+        ^watch: LIVE_WATCH.guard_edit()
+        ^kept: [LiveWatch]{}
         loop known in watch.value {
             if known.path != path -> kept.push(known.copy())
         }
@@ -3169,8 +3169,8 @@ priv db_live_polled: fn(path: String) -> [String]? Never! {
         return None
     }
     guard.wait(db_ended(guard.value), fn(open) { db_free(open, 0) }) ?? return Val([String]{})
-    written := [String]{}
-    watch := LIVE_WATCH.guard_edit()
+    ^written: [String]{}
+    ^watch: LIVE_WATCH.guard_edit()
     loop index in 0..<watch.value.len() {
         if watch.value[index].path != path -> next
         loop at in 0..<watch.value[index].tables.len() {
@@ -3192,7 +3192,7 @@ priv LiveTestChore: struct {
 
 // The ids of `binding`'s rows, and how many times its source ran.
 priv live_test_ids: fn(binding: Live<[Int], DBError>, runs: Shared<Int>) -> String {
-    shown := [String]{}
+    ^shown: [String]{}
     if app.state(binding) == {
         .Loaded(list) -> {
             loop id in list -> shown.push("{id}")
@@ -3206,7 +3206,7 @@ priv live_test_ids: fn(binding: Live<[Int], DBError>, runs: Shared<Int>) -> Stri
 // The ids of the rows `query` collects.
 priv live_test_chores: fn(query: Query<LiveTestChore>) -> [Int] DBError! {
     rows: query.collect() ?? return Err(db_error("the chores collect: {err.reason}"))
-    ids := [Int]{}
+    ^ids: [Int]{}
     loop row in rows -> ids.push(row.id)
     Ok(ids)
 }
@@ -3345,7 +3345,7 @@ priv look_test_many: fn(store: Store, tasks: Table<Int, LookTestTask>, keys: [In
     held: tasks.again()
     wanted: keys.copy()
     rows: app.as_caller(auth.AccountID.from_string("mia"), fn() { held.get_many(wanted) }) ?? panic("the tasks read: {err}")
-    ids := [Int]{}
+    ^ids: [Int]{}
     loop row in rows -> ids.push(row.id)
     {ids: ids, statements: store.statements() - before}
 }
@@ -3373,7 +3373,7 @@ priv look_test_many: fn(store: Store, tasks: Table<Int, LookTestTask>, keys: [In
 priv live_test_titles: fn(binding: Live<[[String:DBValue]], DBError>) -> String {
     if app.state(binding) == {
         .Loaded(rows) -> {
-            shown := [String]{}
+            ^shown: [String]{}
             loop row in rows -> shown.push(row_text(row, "title") ?? "?")
             "[{shown.join(",")}]"
         }
@@ -3400,7 +3400,7 @@ priv live_test_titles: fn(binding: Live<[[String:DBValue]], DBError>) -> String 
     assert_eq(db_live_polled(path) ?? panic("the poll"), [String]{})
     // Another server writes through a connection of its own, which this
     // process's live registry never hears, and bumps the table's version.
-    other := __driver_open(path) ?? panic("the other server opens")
+    ^other: __driver_open(path) ?? panic("the other server opens")
     _: __driver_execute(other, "INSERT INTO tasks (owner, title) VALUES ('alice', 'three')", [DBValue]{}) ?? panic("the other server writes: {err}")
     _: __driver_execute(other, "UPDATE {LIVE_VERSIONS} SET version = version + 1 WHERE name = 'tasks'", [DBValue]{}) ?? panic("the other server bumps: {err}")
     _: __driver_shutdown(other)
@@ -3421,7 +3421,7 @@ priv sql_table: fn(sql: SQL) -> String? Never! {
     if tokens.len() == 0 -> return None
     kind: tokens[0].word.copy()
     if kind == "create" || kind == "alter" || kind == "drop" {
-        at := sql_word_index(tokens, "table")
+        ^at: sql_word_index(tokens, "table")
         if at < 0 -> return None
         at += 1
         loop at < tokens.len() && (tokens[at].word == "if" || tokens[at].word == "not" || tokens[at].word == "exists") {
@@ -3458,7 +3458,7 @@ transaction: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> In
 }
 
 priv transaction_steps: fn(scope: DBScope, steps: [SQL]) -> Int DBError! {
-    done := 0
+    ^done: 0
     loop sql in steps {
         _: scope_execute(scope, sql, false) ?? return Err(err)
         done += 1
@@ -3625,14 +3625,14 @@ priv migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBEr
         }
     }
     stored: scope_query(scope, sql_raw("SELECT transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error FROM __jet_migrations ORDER BY sequence"), true) ?? return Err(err)
-    rows := [LedgerRow]{}
+    ^rows: [LedgerRow]{}
     loop entry in stored {
         parsed: ledger_row(entry) ?? return Err(err)
         rows.push(parsed)
     }
-    drift := [String]{}
-    current := 0
-    latest := -1
+    ^drift: [String]{}
+    ^current: 0
+    ^latest: -1
     loop index in 0..<rows.len() {
         row: rows[index]
         if row.target == "direct" {
@@ -3649,7 +3649,7 @@ priv migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBEr
         return Err(db_error("migration target `direct` has unreconciled state: {drift.join("; ")}"))
     }
     checksum: migration_checksum(name, steps)
-    predecessor := ""
+    ^predecessor: ""
     if latest >= 0 {
         previous: rows[latest]
         if previous.status == "applied" && previous.operation == "direct" {
@@ -3660,7 +3660,7 @@ priv migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBEr
     }
     transition: migration_transition_key(name, checksum, predecessor)
     loop sql in steps -> _: scope_execute(scope, sql, true) ?? return Err(err)
-    step_ids := [String]{}
+    ^step_ids: [String]{}
     loop index in 0..<steps.len() -> step_ids.push(migration_step_id(index + 1, steps[index]))
     // Direct migrations run under the DB authority alone; without a granted
     // wall clock the ledger records 0 for both timestamps.
@@ -3711,8 +3711,8 @@ priv fnv_byte: fn(hash: U64, byte: Int) -> U64 Never! {
 
 priv hash_field: fn(hash: U64, value: String) -> U64 Never! {
     bytes: value.bytes()
-    out := hash
-    length := bytes.len()
+    ^out: hash
+    ^length: bytes.len()
     loop _ in 0..<8 {
         out = fnv_byte(out, length & 255)
         length = length >> 8
@@ -3736,7 +3736,7 @@ priv hash_value: fn(hash: U64, value: DBValue) -> U64 Never! {
         .Text(text) -> hash_field(hash_field(hash, "T"), text)
         .Bool(flag) -> hash_field(hash, if flag -> "B1" else -> "B0")
         .Blob(bytes) -> {
-            out := hash_field(hash, "X")
+            ^out: hash_field(hash, "X")
             loop byte in bytes -> out = fnv_byte(out, Int{byte})
             fnv_byte(out, 255)
         }
@@ -3744,7 +3744,7 @@ priv hash_value: fn(hash: U64, value: DBValue) -> U64 Never! {
 }
 
 priv hash_sql: fn(hash: U64, sql: SQL) -> U64 Never! {
-    out := hash_field(hash, sql.text)
+    ^out: hash_field(hash, sql.text)
     out = hash_field(out, "{sql.values.len()}")
     loop value in sql.values -> out = hash_value(out, value)
     out
@@ -3752,7 +3752,7 @@ priv hash_sql: fn(hash: U64, sql: SQL) -> U64 Never! {
 
 priv hex16: fn(hash: U64) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<16 {
         nibble: Int{(hash >> (60 - index * 4)) & U64{15}}
         out.push(digits[nibble])
@@ -3761,7 +3761,7 @@ priv hex16: fn(hash: U64) -> String Never! {
 }
 
 priv migration_checksum: fn(name: String, steps: [SQL]) -> String Never! {
-    hash := fnv_offset()
+    ^hash: fnv_offset()
     fields: [String]{"jet.db.migration/v2", "direct", name.copy(), "direct", "direct", "runtime", "jet.db.runtime", "jet.db.migration/v2", "jet-runtime", "0", "0", "exclusive", "runtime migration", "{steps.len()}"}
     loop field in fields -> hash = hash_field(hash, field)
     loop index in 0..<steps.len() {
@@ -3775,7 +3775,7 @@ priv migration_checksum: fn(name: String, steps: [SQL]) -> String Never! {
 }
 
 priv migration_step_id: fn(ordinal: Int, sql: SQL) -> String Never! {
-    hash := hash_field(fnv_offset(), "{ordinal}")
+    ^hash: hash_field(fnv_offset(), "{ordinal}")
     hash = hash_field(hash, "exclusive")
     hash = hash_field(hash, "runtime migration")
     hash = hash_sql(hash, sql)
@@ -3783,7 +3783,7 @@ priv migration_step_id: fn(ordinal: Int, sql: SQL) -> String Never! {
 }
 
 priv migration_transition_key: fn(name: String, checksum: String, predecessor: String) -> String Never! {
-    hash := fnv_offset()
+    ^hash: fnv_offset()
     fields: [String]{"transition", "direct", name.copy(), "direct", checksum.copy(), predecessor.copy()}
     loop field in fields -> hash = hash_field(hash, field)
     "transition:{hex16(hash)}"
@@ -3816,10 +3816,10 @@ DBPool: struct {
 
     acquire: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBLease DBError! {
         deadline_ns: pool_deadline(deadline)
-        waiter := PoolWaiter{pool: self.state.copy(), ticket: -1}
+        ^waiter: PoolWaiter{pool: self.state.copy(), ticket: -1}
         defer close(waiter)
         loop {
-            claim := pool_claim(self.state, waiter.ticket, deadline_ns)
+            ^claim: pool_claim(self.state, waiter.ticket, deadline_ns)
             if claim.failure == .Val(failure) -> return Err(failure.copy())
             if claim.drivers.len() > 0 {
                 driver: claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
@@ -3864,7 +3864,7 @@ priv LeaseState: struct {
 
     impl Close {
         close: fn(^^self) {
-            drivers := self.drivers.move()
+            ^drivers: self.drivers.move()
             loop drivers.len() > 0 {
                 driver: drivers.remove(0, .Slot) ?? panic("database lease lost its connection")
                 pool_release(self.pool, driver)
@@ -3884,7 +3884,7 @@ priv PoolWaiter: struct {
             if self.ticket < 0 {
                 return
             }
-            guard := self.pool.guard_edit()
+            ^guard: self.pool.guard_edit()
             pool_remove_waiter(guard.value, self.ticket)
         }
     }
@@ -3894,7 +3894,7 @@ DBLease: struct {
     state: Shared<LeaseState>,
 
     close: fn(self) -[DB]> DBError! {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         if guard.value.drivers.len() == 0 -> return Ok()
         driver: guard.value.drivers.remove(0, .Slot) ?? return Ok()
         pool_release(guard.value.pool, driver)
@@ -3959,7 +3959,7 @@ priv pool_replace_one: fn(state: ^PoolState) Never! {
     if state.lifecycle != .Open || state.available.len() + state.leased + state.opening >= state.max {
         return
     }
-    driver := __driver_open(state.url) ?? {
+    ^driver: __driver_open(state.url) ?? {
         state.replacement_failures += 1
         return
     }
@@ -3974,9 +3974,9 @@ priv pool_replace_one: fn(state: ^PoolState) Never! {
 }
 
 priv pool_release: fn(pool: Shared<PoolState>, driver: ^^DBDriver) Never! {
-    held := driver.move()
+    ^held: driver.move()
     fit: __driver_reset(held)
-    guard := pool.guard_edit()
+    ^guard: pool.guard_edit()
     if guard.value.leased > 0 -> guard.value.leased -= 1
     guard.value.releases += 1
     if guard.value.lifecycle == .Open && fit {
@@ -3999,8 +3999,8 @@ priv PoolClaim: struct {
 // One admission attempt under the pool lock: lease a healthy idle driver,
 // open a new one within `max`, or queue the ticket to wait.
 priv pool_claim: fn(pool: Shared<PoolState>, ticket: Int, deadline_ns: Int) -> PoolClaim Never! {
-    claim := PoolClaim{drivers: [DBDriver]{}, failure: None, ticket: ticket, retry: false}
-    guard := pool.guard_edit()
+    ^claim: PoolClaim{drivers: [DBDriver]{}, failure: None, ticket: ticket, retry: false}
+    ^guard: pool.guard_edit()
     if guard.value.lifecycle != .Open {
         if ticket >= 0 -> pool_remove_waiter(guard.value, ticket)
         claim.ticket = -1
@@ -4011,7 +4011,7 @@ priv pool_claim: fn(pool: Shared<PoolState>, ticket: Int, deadline_ns: Int) -> P
     if turn && guard.value.available.len() > 0 {
         if ticket >= 0 -> pool_remove_waiter(guard.value, ticket)
         claim.ticket = -1
-        driver := guard.value.available.pop() ?? panic("database pool lost an idle connection")
+        ^driver: guard.value.available.pop() ?? panic("database pool lost an idle connection")
         healthy: __driver_health(driver)
         expired: pool_expired(deadline_ns)
         if healthy && !expired {
@@ -4032,7 +4032,7 @@ priv pool_claim: fn(pool: Shared<PoolState>, ticket: Int, deadline_ns: Int) -> P
     if turn && guard.value.available.len() + guard.value.leased + guard.value.opening < guard.value.max {
         if ticket >= 0 -> pool_remove_waiter(guard.value, ticket)
         claim.ticket = -1
-        driver := __driver_open(guard.value.url) ?? {
+        ^driver: __driver_open(guard.value.url) ?? {
             guard.value.open_failures += 1
             if {
                 pool_expired(deadline_ns) -> {
@@ -4072,7 +4072,7 @@ priv pool_claim: fn(pool: Shared<PoolState>, ticket: Int, deadline_ns: Int) -> P
 }
 
 priv pool_drain_step: fn(pool: Shared<PoolState>, deadline_ns: Int) -> DBPoolReceipt? DBError! {
-    guard := pool.guard_edit()
+    ^guard: pool.guard_edit()
     if guard.value.lifecycle == .Open -> guard.value.lifecycle = .Draining
     loop guard.value.available.len() > 0 {
         driver: guard.value.available.pop() ?? panic("database pool lost an idle connection")
@@ -4130,7 +4130,7 @@ priv dyn_value: fn(value: DBValue) -> Dyn Never! {
         .Text(text) -> Dyn.Text(text)
         .Bool(flag) -> Dyn.Bool(flag)
         .Blob(bytes) -> {
-            items := [Dyn]{}
+            ^items: [Dyn]{}
             loop byte in bytes -> items.push(Dyn.Int(Int{byte}))
             Dyn.Array(items)
         }
@@ -4141,9 +4141,9 @@ priv dyn_value: fn(value: DBValue) -> Dyn Never! {
 // key of each of T's fields whose column differs from its key; every other
 // column decodes under its own name.
 decode: fn<T: Decode>(row: [String:DBValue], names: [{db_name: String, key: String}]) -> T [FieldError]! {
-    entries := [{key: String, value: Dyn}]{}
+    ^entries: [{key: String, value: Dyn}]{}
     loop (column, value) in row {
-        key := column.copy()
+        ^key: column.copy()
         loop rename in names {
             if rename.db_name == column {
                 key = rename.key.copy()
@@ -4185,7 +4185,7 @@ priv DBDriver: struct {
             if !self.live {
                 return
             }
-            held := DBDriver{database: self.database.move(), cache: self.cache.move(), live: true}
+            ^held: DBDriver{database: self.database.move(), cache: self.cache.move(), live: true}
             _: __driver_shutdown(held)
         }
     }
@@ -4211,8 +4211,8 @@ priv __has_nul: fn(text: String) -> Bool Never! {
 priv __driver_open: fn(path: String) -> DBDriver? Never! {
     // sqlite3_open_v2 takes a NUL-terminated filename, so a NUL never opens.
     if __has_nul(path) -> return None
-    opened := prep.open_v2(path, 32838)
-    database := opened.db.move()
+    ^opened: prep.open_v2(path, 32838)
+    ^database: opened.db.move()
     if opened.rc != base.OK {
         _: prep.close_v2(database)
         return None
@@ -4300,7 +4300,7 @@ priv driver_compile: fn(driver: ^DBDriver, sql: String) -> CachedStatement DBErr
     }
     prepared: prep.prepare_tables(driver.database, text, 1)
     if prepared.rc != base.OK {
-        failure := error(driver)
+        ^failure: error(driver)
         primary: prepared.rc & 255
         // rusqlite: only Unknown primary errors (outside 2..26) acquire
         // modern_sqlite's SQL/offset diagnostic suffix.
@@ -4312,7 +4312,7 @@ priv driver_compile: fn(driver: ^DBDriver, sql: String) -> CachedStatement DBErr
         _: prep.finalize_stmt(driver.database, prepared.stmt)
         return Err(failure)
     }
-    tables := [String]{}
+    ^tables: [String]{}
     loop name in prepared.tables -> tables.push(String.from_bytes(name) ?? "")
     Ok(CachedStatement{stmt: prepared.stmt, sql: key, tables: tables})
 }
@@ -4344,7 +4344,7 @@ bind: fn(driver: ^DBDriver, statement: Int, params: [DBValue]) -> DBError? Never
     }
     loop at in 0..<params.len() {
         index: at + 1
-        status := base.OK
+        ^status: base.OK
         if params[at] == {
             .Null -> { status = api.bind_null(driver.database, statement, index) }
             .Int(number) -> { status = api.bind_int64(driver.database, statement, index, number) }
@@ -4384,8 +4384,8 @@ priv __driver_execute: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> 
         release(driver, statement)
         return Err(failure)
     }
-    count := 0
-    failure := DBError?{None}
+    ^count: 0
+    ^failure: DBError?{None}
     // Step, then reset, matching rusqlite execute_with_bound_parameters; copy
     // any SQLite error before another operation.
     status: step_statement(driver, statement.stmt)
@@ -4409,11 +4409,11 @@ priv __driver_execute: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> 
 // Preserve the old wire decoder's externally observable size/count limits
 // without constructing a second serialized copy of the complete result.
 decimal_width: fn(number: Int) -> Int Never! {
-    rest := number
-    width := if number < 0 -> 2 else -> 1
+    ^rest: number
+    ^width: if number < 0 -> 2 else -> 1
     loop rest >= 10 || rest <= -10 {
         // Truncating division: /% floors, which overcounts some negative widths.
-        quotient := rest /% 10
+        ^quotient: rest /% 10
         if rest < 0 && quotient * 10 != rest -> quotient += 1
         rest = quotient
         width += 1
@@ -4441,15 +4441,15 @@ priv __driver_query: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> [[
         release(driver, statement)
         return Err(failure)
     }
-    rows := [[String:DBValue]]{}
-    failure := DBError?{None}
-    duplicate := false
-    wire_rows := 0
-    column_overflow := false
+    ^rows: [[String:DBValue]]{}
+    ^failure: DBError?{None}
+    ^duplicate: false
+    ^wire_rows: 0
+    ^column_overflow: false
     // Copy every column into an owned value while its row is current.
     count: if statement.stmt < 0 -> 0 else -> api.column_count(driver.database, statement.stmt)
-    names := [String]{}
-    row_prefix := decimal_width(count) + 1
+    ^names: [String]{}
+    ^row_prefix: decimal_width(count) + 1
     loop index in 0..<count {
         name: api.column_name(driver.database, statement.stmt, index) ?? panic("Null pointer from sqlite3_column_name: Out of memory?")
         row_prefix += tagged_width(name.len())
@@ -4462,9 +4462,9 @@ priv __driver_query: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> [[
             failure = Val(error(driver))
             break
         }
-        row := [String:DBValue]{}
+        ^row: [String:DBValue]{}
         loop at in 0..<count {
-            value := DBValue.Null
+            ^value: DBValue.Null
             kind: api.column_type(driver.database, statement.stmt, at)
             if {
                 kind == base.SQL_INTEGER -> {
@@ -4503,7 +4503,7 @@ priv __driver_query: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> [[
 }
 
 priv __driver_query_one: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> [String:DBValue]? DBError! {
-    rows := __driver_query(driver, sql, params) ?? return Err(err)
+    ^rows: __driver_query(driver, sql, params) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
     first: rows.remove(0, .Slot) ?? panic("SQLite first row disappeared")
     Ok(Val(first))
@@ -4549,7 +4549,7 @@ priv __driver_health: fn(driver: ^DBDriver) -> Bool Never! {
 }
 
 #Test("SQLite driver preserves typed bindings, storage affinities and transaction behavior") {
-    driver := __driver_open(":memory:") ?? panic("SQLite memory open failed")
+    ^driver: __driver_open(":memory:") ?? panic("SQLite memory open failed")
     assert(__driver_begin(driver))
     _: __driver_execute(driver, "CREATE TABLE values_store (value INTEGER)", [DBValue]{}) ?? panic("SQLite create failed")
     assert_eq(__driver_execute(driver, "INSERT INTO values_store VALUES (?)", [DBValue]{.Int(17)}) ?? -1, 1)
@@ -4585,7 +4585,7 @@ priv __driver_health: fn(driver: ^DBDriver) -> Bool Never! {
 }
 
 #Test("SQLite driver builds an index over existing rows and keeps UNIQUE indexes unique") {
-    driver := __driver_open(":memory:") ?? panic("SQLite memory open failed")
+    ^driver: __driver_open(":memory:") ?? panic("SQLite memory open failed")
     _: __driver_execute(driver, "CREATE TABLE jobs (queue TEXT NOT NULL, state TEXT NOT NULL, due INTEGER NOT NULL, sequence INTEGER NOT NULL)", [DBValue]{}) ?? panic("SQLite create failed")
     loop n in 0..<40 {
         _: __driver_execute(driver, "INSERT INTO jobs VALUES (?, ?, ?, ?)", [DBValue]{.Text("q{n % 3}"), .Text(if n % 2 == 0 -> "ready" else -> "done"), .Int(100 - n), .Int(n)}) ?? panic("SQLite insert failed")
@@ -4614,7 +4614,7 @@ priv __driver_health: fn(driver: ^DBDriver) -> Bool Never! {
 // Ordinary scope-end Close finalizes the driver's cached statements and then
 // closes its connection when this probe returns; no explicit close here.
 priv driver_cache_parity_probe: fn() Never! {
-    driver := __driver_open(":memory:") ?? panic("SQLite open failed")
+    ^driver: __driver_open(":memory:") ?? panic("SQLite open failed")
     loop number in 0..<20 {
         rows: __driver_query(driver, "SELECT {number} AS value", [DBValue]{}) ?? panic("SQLite cache prepare failed")
         assert_eq(row_int(rows[0], "value") ?? -1, number)
@@ -4648,14 +4648,14 @@ priv driver_cache_parity_probe: fn() Never! {
 }
 
 #Test("SQLite driver retains cache/error parity and releases every cached handle") {
-    warm := __driver_open(":memory:") ?? panic("SQLite warmup failed")
+    ^warm: __driver_open(":memory:") ?? panic("SQLite warmup failed")
     assert(__driver_shutdown(warm))
     assert(!__driver_shutdown(warm))
     assert(driver_closed(warm))
     driver_cache_parity_probe()
     // The cache keeps the 16 newest statements; finalizing them leaves the
     // connection with no statement.
-    driver := __driver_open(":memory:") ?? panic("SQLite open failed")
+    ^driver: __driver_open(":memory:") ?? panic("SQLite open failed")
     loop number in 0..<20 {
         _: __driver_query(driver, "SELECT {number} AS value", [DBValue]{}) ?? panic("SQLite cache prepare failed")
     }

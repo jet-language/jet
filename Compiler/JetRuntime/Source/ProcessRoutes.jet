@@ -4,7 +4,7 @@
 process_route_text_list: fn(data: I64, length: I64) -> I64 {
     count: if data == (I64{0}) || length <= (I64{0}) -> I64{0} else -> length
     result: data_sequence_new(count, DYN_ELEMENT_BYTES)
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         process_text_list_push(result, encoding_word(wrapping(data + index * DYN_ELEMENT_BYTES)))
         index += I64{1}
@@ -37,7 +37,7 @@ process_route_stream_mode: fn(mode: I64) {
     value_count: if values == (I64{0}) || values_length <= (I64{0}) -> I64{0} else -> values_length
     count: if name_count < value_count -> name_count else -> value_count
     pairs: data_sequence_new(count, DYN_ENTRY_BYTES)
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         slot: data_sequence_reserve(pairs, DYN_ENTRY_BYTES)
         encoding_store(wrapping(slot + DYN_ENTRY_KEY), jet_rt_string_clone(encoding_word(wrapping(names + index * DYN_ELEMENT_BYTES))))
@@ -81,7 +81,7 @@ process_route_i32: fn(value: I64) -> I64 {
 process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     directories: encoding_word(wrapping(spec + PROCESS_SPEC_DIRECTORIES))
     if directories == (I64{0}) -> return false
-    index := I64{0}
+    ^index: I64{0}
     loop index < encoding_word(directories) {
         if encoding_word(wrapping(encoding_word(wrapping(directories + I64{16})) + index * I64{24} + I64{8})) == target {
             return true
@@ -106,9 +106,9 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     child_fd: int_saturated(child_fd_int)
     result: value
     target: process_route_i32(child_fd)
-    assigned := I64{-1}
-    error := I64{0}
-    refusal := I64{0}
+    ^assigned: I64{-1}
+    ^error: I64{0}
+    ^refusal: I64{0}
     if (source_fd < I64{0}) {
         error = I64{9}
         refusal = error
@@ -124,7 +124,7 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
         } else {
             assigned = duplicated
             directory: jet_fd_adopt_unbuffered_raw(duplicated, I64{0})
-            directories := encoding_word(wrapping(result + PROCESS_SPEC_DIRECTORIES))
+            ^directories: encoding_word(wrapping(result + PROCESS_SPEC_DIRECTORIES))
             if directories == (I64{0}) {
                 directories = data_sequence_new(I64{1}, I64{24})
                 encoding_store(wrapping(result + PROCESS_SPEC_DIRECTORIES), directories)

@@ -331,7 +331,7 @@ holds_local: fn(list: Dyn, name: String, type_name: String, value: String) -> Bo
 
 // The frames of an answer's call stack.
 frames: fn(entry: Dyn) -> [String] {
-    shown := [String]{}
+    ^shown: [String]{}
     loop frame in items(at(entry, "response.overlay.call_stack")) -> shown.push(text(frame))
     shown
 }
@@ -391,7 +391,7 @@ debug_values_at_breakpoint: fn(c: Ctx) Failure! {
     if text(at(finished, "request.session_id")) != session || frames(finished).len() != 1 {
         return Err(fail_with("Finish must return session {session} to run: {frames(finished).join(" | ")}"))
     }
-    last := finished
+    ^last: finished
     loop _ in 0..<4 {
         last = debug_gesture(c, "debug-view-next", "[\"next\"]")
         path: js(at(last, "response.overlay.wire_path"))
@@ -501,7 +501,7 @@ draws_no_value: fn(pin: String) -> String {
 // A JavaScript test that the session selector lists the sessions `ids`, each
 // named by its engine `engine`, with `shown` picked and shown.
 lists_sessions: fn(ids: [String], shown: String, engine: String) -> String {
-    labels := [String]{}
+    ^labels: [String]{}
     loop id in ids -> labels.push("{id} · {engine}")
     "(() => {{ const picker = document.getElementById('debug-session'); return Array.from(picker.options).map((o) => o.textContent).join(' | ') === {q(labels.join(" | "))} && picker.value === {q(shown)} && s.debugSessionId === {q(shown)} && s.debugSessions.length === {ids.len()}; }})()"
 }
@@ -792,8 +792,8 @@ debug_round_trip: fn(c: Ctx, engine: DebugEngine) Failure! {
     wait_debug(c, "s.debugLiveness === 'Runtime finished · {engine.label}' && !document.body.classList.contains('is-debug-active') && s.debugValues.pins.length === 0 && s.debugValues.wires.length === 0 && {logs("total is 5")}", "the finished run shown with no value drawn")
 
     debug_url: "http://127.0.0.1:{c.port}/__jet_canvas/debug?session={c.session}"
-    continued := [{key: String, value: String}]{{key: "session_id", value: session.copy()}}
-    opener := [{key: String, value: String}]{}
+    ^continued: [{key: String, value: String}]{{key: "session_id", value: session.copy()}}
+    ^opener: [{key: String, value: String}]{}
     if engine.recording != "" {
         continued.push({key: "tier", value: engine.tier.copy()})
         opener.push({key: "tier", value: engine.tier.copy()})
@@ -813,7 +813,7 @@ debug_round_trip: fn(c: Ctx, engine: DebugEngine) Failure! {
     stale: js(Dyn.Array([Dyn]{Dyn.Text("{in_scale.anchor}@{revision}"), Dyn.Text("{in_run.anchor}@{revision}"), Dyn.Text("999999:1000000@{revision}"), Dyn.Text("{in_scale.anchor}@sha256-drawn-before")}))
     reopened: open_round_trip(c, engine)
     held_again: items(at(reopened, "response.overlay.breakpoints"))
-    states := [String]{}
+    ^states: [String]{}
     loop mark in held_again -> states.push("{text(at(mark, "anchor"))}={text(at(mark, "state"))}")
     if js(at(reopened, "request.breakpoint_spans")) != stale || held_again.len() != 4 || states.join(" ") != "=valid =valid 999999:1000000@{revision}=stale {in_scale.anchor}@sha256-drawn-before=stale" {
         return Err(fail_with("the reloaded page must send the four kept breakpoints, {stale}, and the session hold the out-of-span and earlier-revision ones as stale: {js(at(reopened, "request.breakpoint_spans"))} {states.join(" ")}"))
@@ -994,7 +994,7 @@ panel_lines: fn(c: Ctx, view: String) -> [String] Failure! {
         }})
         """,
     )
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in items(found) -> lines.push(text(line))
     Ok(lines)
 }

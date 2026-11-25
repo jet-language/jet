@@ -39,7 +39,7 @@ TITLES: Shared{[String]{}}
 Board: struct {
     // Adds a task titled `title`.
     #App.Public add: fn(self, title: String) BoardError! {
-        held := TITLES.guard_edit()
+        ^held: TITLES.guard_edit()
         held.value.push(title.copy())
         Ok()
     }
@@ -60,7 +60,7 @@ address: fn() -> String {
 }
 
 set_address: fn(port: String) {
-    held := ADDRESS.guard_edit()
+    ^held: ADDRESS.guard_edit()
     held.value = "http://127.0.0.1:{port}/api"
 }
 
@@ -86,7 +86,7 @@ serve: fn(port: String) {
     served: web.app().mount("/api", Board{})
     server: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen: {err}")
     files.write("server.ready", "") ?? panic("write server.ready: {err}")
-    written := false
+    ^written: false
     loop {
         served.serve_once(server) ?? return
         if written -> next

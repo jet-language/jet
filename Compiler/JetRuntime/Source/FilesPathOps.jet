@@ -32,7 +32,7 @@ files_lstat_mode: fn(path: I64) -> I64 {
 // lstat of a terminated raw byte path; st_mode or -errno.
 files_lstat_c: fn(name: I64) -> I64 {
     scratch: jet_rt_alloc(I64{128}, I64{8})
-    result := I64{0}
+    ^result: I64{0}
     rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated raw path and the 128-byte stat fact row are live for the syscall") {
         result = os_stat_facts_i64(I64{6}, name, scratch)
@@ -52,7 +52,7 @@ files_dot_entry: fn(name: I64) -> Bool {
 }
 
 files_c_len: fn(name: I64) -> I64 {
-    length := I64{0}
+    ^length: I64{0}
     loop rt_text_byte(wrapping(name + length)) != (I64{0}) -> length += I64{1}
     length
 }
@@ -81,19 +81,19 @@ files_c_len: fn(name: I64) -> I64 {
 #Export(c) jet_std_fs_fsync_raw: fn(path: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_FLUSH, error) -> return I64{0}
     name: fd_c_path(path)
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop {
         fd = host_call(I64{2}, name, I64{524288}, I64{0})
         if (fd != I64{-4}) { break }
     }
     fd_c_path_drop(name, path)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -fd, error) }
-    result := I64{-4}
+    ^result: I64{-4}
     loop {
         result = host_call(I64{74}, fd, I64{0}, I64{0})
         if (result != I64{-4}) { break }
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -result, error) }
     I64{1}
 }
@@ -105,23 +105,23 @@ files_c_len: fn(name: I64) -> I64 {
 #Export(c) jet_std_fs_syncfs_raw: fn(path: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_FLUSH, error) -> return I64{0}
     name: fd_c_path(path)
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop {
         fd = host_call(I64{2}, name, I64{524288}, I64{0})
         if (fd != I64{-4}) { break }
     }
     fd_c_path_drop(name, path)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -fd, error) }
-    result := I64{-4}
+    ^result: I64{-4}
     loop {
         result = host_call(I64{306}, fd, I64{0}, I64{0})
         if (result != I64{-4}) { break }
     }
     if (result == I64{-38}) {
-        _ := host_call(I64{162}, I64{0}, I64{0}, I64{0})
+        ^_: host_call(I64{162}, I64{0}, I64{0}, I64{0})
         result = I64{0}
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -result, error) }
     I64{1}
 }
@@ -148,7 +148,7 @@ files_c_len: fn(name: I64) -> I64 {
     }
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     name: fd_c_path(path)
-    result := host_call4(I64{439}, I64{-100}, name, mode, I64{512})
+    ^result: host_call4(I64{439}, I64{-100}, name, mode, I64{512})
     if (result == I64{-38}) { result = host_call(I64{269}, I64{-100}, name, mode) }
     fd_c_path_drop(name, path)
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, path, -result, error) }
@@ -165,7 +165,7 @@ files_c_len: fn(name: I64) -> I64 {
     }
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     name: fd_c_path(path)
-    result := I64{-4}
+    ^result: I64{-4}
     loop {
         result = host_call(I64{90}, name, mode, I64{0})
         if (result != I64{-4}) { break }
@@ -193,7 +193,7 @@ files_c_len: fn(name: I64) -> I64 {
 // directory is removed with AT_REMOVEDIR, ignoring ENOENT. Readdir ENOENT is
 // end of stream (musl readdir). Returns 0 or -errno.
 files_remove_tree: fn(parent: I64, name: I64, root: Bool) -> I64 {
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop {
         fd = host_call(I64{257}, parent, name, FILES_TREE_OPEN)
         if (fd != I64{-4}) { break }
@@ -205,7 +205,7 @@ files_remove_tree: fn(parent: I64, name: I64, root: Bool) -> I64 {
     }
     if (fd < I64{0}) { return fd }
     buffer: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
-    failure := I64{0}
+    ^failure: I64{0}
     loop failure == (I64{0}) {
         count: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
         if (count == I64{0} || count == I64{-2}) { break }
@@ -213,7 +213,7 @@ files_remove_tree: fn(parent: I64, name: I64, root: Bool) -> I64 {
             failure = count
             break
         }
-        at := I64{0}
+        ^at: I64{0}
         loop at < count {
             record: wrapping(buffer + at)
             at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
@@ -228,7 +228,7 @@ files_remove_tree: fn(parent: I64, name: I64, root: Bool) -> I64 {
         }
     }
     jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (failure < I64{0}) { return failure }
     removed: host_call(I64{263}, parent, name, I64{512})
     if (removed < I64{0} && removed != I64{-2}) { return removed }
@@ -250,7 +250,7 @@ files_remove_dir_all: fn(path: I64) -> I64 {
 // remove_dir_all when Core saw a directory, else remove_file.
 #Export(c) jet_std_fs_remove_all_raw: fn(path: I64, directory: Bool, error: I64) -> I64 {
     if !compiler_fs_link_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
-    result := I64{0}
+    ^result: I64{0}
     if directory -> result = files_remove_dir_all(path) else {
         name: fd_c_path(path)
         result = host_call(I64{87}, name, I64{0}, I64{0})
@@ -331,7 +331,7 @@ files_words_push: fn(words: I64, value: I64) {
         grown: if (capacity == I64{0}) -> I64{8} else -> capacity * I64{2}
         data: jet_rt_alloc(grown * I64{8}, I64{8})
         old: rt_text_word(words)
-        at := I64{0}
+        ^at: I64{0}
         loop at < length {
             rt_text_store(wrapping(data + at * I64{8}), rt_text_word(wrapping(old + at * I64{8})))
             at += I64{1}
@@ -354,7 +354,7 @@ files_words_free: fn(words: I64) {
 files_words_take: fn(words: I64, output: I64) -> I64 {
     length: rt_text_word(wrapping(words + I64{8}))
     data: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         rt_text_store(wrapping(data + at * I64{8}), rt_text_word(wrapping(rt_text_word(words) + at * I64{8})))
         at += I64{1}
@@ -371,19 +371,19 @@ files_entries_sort: fn(data: I64, count: I64) {
         return
     }
     temp: jet_rt_alloc(count * I64{8}, I64{8})
-    source := data
-    target := temp
-    width := I64{1}
+    ^source: data
+    ^target: temp
+    ^width: I64{1}
     loop width < count {
-        start := I64{0}
+        ^start: I64{0}
         loop start < count {
             middle: if (start + width < count) -> start + width else -> count
             end: if (middle + width < count) -> middle + width else -> count
-            left := start
-            right := middle
-            at := start
+            ^left: start
+            ^right: middle
+            ^at: start
             loop at < end {
-                take_left := right >= end
+                ^take_left: right >= end
                 if (!take_left && left < middle) {
                     take_left = jet_rt_string_compare(rt_text_word(rt_text_word(wrapping(source + left * I64{8}))), rt_text_word(rt_text_word(wrapping(source + right * I64{8})))) <= I64{0}
                 }
@@ -404,7 +404,7 @@ files_entries_sort: fn(data: I64, count: I64) {
         width *= I64{2}
     }
     if (source != data) {
-        at := I64{0}
+        ^at: I64{0}
         loop at < count {
             rt_text_store(wrapping(data + at * I64{8}), rt_text_word(wrapping(source + at * I64{8})))
             at += I64{1}
@@ -427,7 +427,7 @@ files_entries_sort: fn(data: I64, count: I64) {
     separator: base_len != I64{0} && rt_text_byte(wrapping(wrapping(base + base_len) - I64{1})) != I64{47}
     entries: files_words_new()
     buffer: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
-    failure := I64{0}
+    ^failure: I64{0}
     loop failure == (I64{0}) {
         count: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
         if (count == I64{0} || count == I64{-2}) { break }
@@ -435,7 +435,7 @@ files_entries_sort: fn(data: I64, count: I64) {
             failure = count
             break
         }
-        at := I64{0}
+        ^at: I64{0}
         loop at < count {
             record: wrapping(buffer + at)
             at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
@@ -448,12 +448,12 @@ files_entries_sort: fn(data: I64, count: I64) {
             if separator -> rt_text_push_word(full, I64{47}, I64{1})
             jet_rt_string_builder_push(full, entry_name)
             kind: rt_text_byte(wrapping(record + I64{18}))
-            is_dir := kind == I64{4}
+            ^is_dir: kind == I64{4}
             if (kind == I64{0}) {
                 stat_len: base_len + I64{1} + raw_len + I64{1}
                 target: jet_rt_alloc(stat_len, I64{1})
                 rt_text_bytes_copy(target, base, base_len)
-                cursor := base_len
+                ^cursor: base_len
                 if separator {
                     rt_text_put(wrapping(target + cursor), I64{47})
                     cursor += I64{1}
@@ -468,9 +468,9 @@ files_entries_sort: fn(data: I64, count: I64) {
         }
     }
     jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (failure < I64{0}) {
-        at := I64{0}
+        ^at: I64{0}
         loop at < rt_text_word(wrapping(entries + I64{8})) {
             jet_rt_handle_drop_dir_entry(rt_text_word(wrapping(rt_text_word(entries) + at * I64{8})))
             at += I64{1}
@@ -500,7 +500,7 @@ files_entries_sort: fn(data: I64, count: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_jet_temp_dir_owner: fn(owner: I64) -> I64 {
-    _ := sync_add(owner, I64{1})
+    ^_: sync_add(owner, I64{1})
     owner
 }
 
@@ -512,7 +512,7 @@ files_entries_sort: fn(data: I64, count: I64) {
         return
     }
     path: rt_text_word(wrapping(owner + I64{8}))
-    _ := files_remove_dir_all(path)
+    ^_: files_remove_dir_all(path)
     jet_rt_string_drop(path)
     jet_rt_free(owner, I64{16}, I64{8})
 }
@@ -537,8 +537,8 @@ files_fd_mode: fn(fd: I64) -> I64 {
 }
 
 files_copy_failed: fn(source: I64, target: I64, code: I64, from: I64, error: I64) -> I64 {
-    if (source >= I64{0}) { _ := host_call(I64{3}, source, I64{0}, I64{0}) }
-    if (target >= I64{0}) { _ := host_call(I64{3}, target, I64{0}, I64{0}) }
+    if (source >= I64{0}) { ^_: host_call(I64{3}, source, I64{0}, I64{0}) }
+    if (target >= I64{0}) { ^_: host_call(I64{3}, target, I64{0}, I64{0}) }
     compiler_fs_errno(HOST_IO_OP_WRITE, from, code, error)
 }
 
@@ -548,19 +548,19 @@ files_copy_failed: fn(source: I64, target: I64, code: I64, from: I64, error: I64
 #Export(c) jet_std_fs_copy_raw: fn(from: I64, to: I64, error: I64) -> I64 {
     if !files_paths_valid(from, to, from, HOST_IO_OP_WRITE, error) -> return I64{0}
     name: fd_c_path(from)
-    source := I64{-4}
+    ^source: I64{-4}
     loop source == (I64{-4}) -> source = host_call(I64{2}, name, I64{524288}, I64{0})
     fd_c_path_drop(name, from)
     if (source < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, from, -source, error) }
     mode: files_fd_mode(source)
     if (mode < I64{0}) { return files_copy_failed(source, I64{-1}, -mode, from, error) }
     if ((mode & I64{61440}) != I64{32768}) {
-        _ := host_call(I64{3}, source, I64{0}, I64{0})
+        ^_: host_call(I64{3}, source, I64{0}, I64{0})
         return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_WRITE, from, I64{0}, jet_rt_string_clone(rt_static_text("the source path is neither a regular file nor a symlink to a regular file")), error)
     }
     permissions: mode & I64{4095}
     target_name: fd_c_path(to)
-    target := I64{-4}
+    ^target: I64{-4}
     // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
     loop target == (I64{-4}) -> target = host_call(I64{2}, target_name, I64{524865}, permissions)
     fd_c_path_drop(target_name, to)
@@ -570,12 +570,12 @@ files_copy_failed: fn(source: I64, target: I64, code: I64, from: I64, error: I64
         return files_copy_failed(source, target, -target_mode, from, error)
     }
     if ((target_mode & I64{61440}) == I64{32768}) {
-        changed := I64{-4}
+        ^changed: I64{-4}
         loop changed == (I64{-4}) -> changed = host_call(I64{91}, target, permissions, I64{0})
         if (changed < I64{0}) { return files_copy_failed(source, target, -changed, from, error) }
     }
     buffer: jet_rt_alloc(I64{65536}, I64{8})
-    failure := I64{0}
+    ^failure: I64{0}
     loop {
         count: host_call(I64{0}, source, buffer, I64{65536})
         if (count == I64{-4}) { next }
@@ -592,13 +592,13 @@ files_copy_failed: fn(source: I64, target: I64, code: I64, from: I64, error: I64
     }
     jet_rt_free(buffer, I64{65536}, I64{8})
     if (failure == HOST_WRITE_ZERO) {
-        _ := host_call(I64{3}, source, I64{0}, I64{0})
-        _ := host_call(I64{3}, target, I64{0}, I64{0})
+        ^_: host_call(I64{3}, source, I64{0}, I64{0})
+        ^_: host_call(I64{3}, target, I64{0}, I64{0})
         return host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(from), host_write_zero_text(), error)
     }
     if (failure < I64{0}) { return files_copy_failed(source, target, -failure, from, error) }
-    _ := host_call(I64{3}, source, I64{0}, I64{0})
-    _ := host_call(I64{3}, target, I64{0}, I64{0})
+    ^_: host_call(I64{3}, source, I64{0}, I64{0})
+    ^_: host_call(I64{3}, target, I64{0}, I64{0})
     I64{1}
 }
 
@@ -606,7 +606,7 @@ files_copy_failed: fn(source: I64, target: I64, code: I64, from: I64, error: I64
 // before the syscall as InvalidInput naming `shown` (io_error_at's path).
 files_paths_valid: fn(first: I64, second: I64, shown: I64, operation: I64, error: I64) -> Bool {
     if !fs_text_has_nul(first) && !fs_text_has_nul(second) -> return true
-    _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")), error)
+    ^_: compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")), error)
     false
 }
 
@@ -667,7 +667,7 @@ files_two_path_call: fn(number: I64, first: I64, second: I64, shown: I64, operat
         return I64{0}
     }
     name: fd_c_path(candidate)
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop {
         fd = host_call(I64{2}, name, I64{524481}, I64{438})
         if (fd != I64{-4}) { break }
@@ -688,7 +688,7 @@ files_two_path_call: fn(number: I64, first: I64, second: I64, shown: I64, operat
 #Export(c) jet_files_atomic_finish_raw: fn(handle: I64, data: I64, length: I64, target: I64, candidate: I64, error: I64) -> I64 {
     key: host_native_int(handle)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    mode := I64{-1}
+    ^mode: I64{-1}
     if !fs_text_has_nul(target) {
         scratch: jet_rt_alloc(I64{160}, I64{8})
         jet_fs_stat_raw(target, true, scratch, wrapping(scratch + I64{128}))
@@ -707,13 +707,13 @@ files_two_path_call: fn(number: I64, first: I64, second: I64, shown: I64, operat
     if temporary -> net_copy_packed(data, length, packed)
     written: host_write_all(fd, packed, length)
     if temporary -> jet_rt_free(packed, length, I64{8})
-    result := I64{1}
+    ^result: I64{1}
     if (written == HOST_WRITE_ZERO) {
         result = host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(candidate), host_write_zero_text(), error)
     } else if (written < I64{0}) {
         result = compiler_fs_errno(HOST_IO_OP_WRITE, candidate, -written, error)
     } else {
-        failure := I64{0}
+        ^failure: I64{0}
         if (mode >= I64{0}) {
             failure = I64{-4}
             loop failure == (I64{-4}) -> failure = host_call(I64{91}, fd, mode, I64{0})
@@ -721,7 +721,7 @@ files_two_path_call: fn(number: I64, first: I64, second: I64, shown: I64, operat
         if (failure < I64{0}) {
             result = compiler_fs_errno(HOST_IO_OP_WRITE, candidate, -failure, error)
         } else {
-            synced := I64{-4}
+            ^synced: I64{-4}
             loop synced == (I64{-4}) -> synced = host_call(I64{74}, fd, I64{0}, I64{0})
             if (synced < I64{0}) {
                 result = compiler_fs_errno(HOST_IO_OP_FLUSH, candidate, -synced, error)
@@ -753,13 +753,13 @@ files_two_path_call: fn(number: I64, first: I64, second: I64, shown: I64, operat
 #Export(c) jet_files_atomic_sync_parent_raw: fn(parent: I64, target: I64, error: I64) -> I64 {
     if !files_paths_valid(parent, parent, target, HOST_IO_OP_FLUSH, error) -> return I64{0}
     name: fd_c_path(parent)
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, I64{524288}, I64{0})
     fd_c_path_drop(name, parent)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_FLUSH, target, -fd, error) }
-    result := I64{-4}
+    ^result: I64{-4}
     loop result == (I64{-4}) -> result = host_call(I64{74}, fd, I64{0}, I64{0})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_FLUSH, target, -result, error) }
     I64{1}
 }

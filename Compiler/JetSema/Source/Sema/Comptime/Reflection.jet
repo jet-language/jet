@@ -130,7 +130,7 @@ SemaComptimeReflectionStateView: struct {
 }
 
 sema_comptime_reflection_struct: fn(type_name: String, fields: [SemaComptimeReflectionField]) -> TComptimeValue Never! {
-    values := [TComptimeField]{}
+    ^values: [TComptimeField]{}
     loop field in fields -> values.push(TComptimeField{name: field.name, value: field.value})
     TComptimeValue.Struct{type_name: type_name, fields: values}
 }
@@ -152,8 +152,8 @@ sema_comptime_reflection_span: fn(span: Span, file: String) -> TComptimeValue Ne
 
 // The `SourceSpan` record `value` as a span; None for any other value.
 sema_comptime_reflection_span_of: fn(value: TComptimeValue) -> Span? Never! {
-    start := -1
-    end := -1
+    ^start: -1
+    ^end: -1
     if value == .Struct(_, fields) {
         loop field in fields {
             if field.value == .Int(number) {
@@ -211,12 +211,12 @@ sema_comptime_reflection_located: fn(value: TComptimeValue, segments: [SemaSourc
     if value == {
         .Struct(record, fields) -> {
             if record == "SourceSpan" -> return sema_comptime_reflection_in_file(value, source.file)
-            located := loop field in fields -> TComptimeField{name: field.name, value: sema_comptime_reflection_located(field.value, segments, module_path, source)}
+            ^located: loop field in fields -> TComptimeField{name: field.name, value: sema_comptime_reflection_located(field.value, segments, module_path, source)}
             declaration: record == "TypeInfo" || record == "FieldInfo" || record == "CaseInfo" || record == "MethodInfo" || record == "FunctionInfo"
             if declaration {
-                span := Span?{None}
-                has_location := false
-                has_documentation := false
+                ^span: Span?{None}
+                ^has_location: false
+                ^has_documentation: false
                 loop field in fields {
                     if field.name == "span" -> span = sema_comptime_reflection_span_of(field.value)
                     if field.name == "location" -> has_location = true
@@ -246,7 +246,7 @@ sema_comptime_reflection_in_file: fn(value: TComptimeValue, file: String) -> TCo
     if value == {
         .Struct(record, fields) -> {
             unnamed: TComptimeValue.String{value: ""}
-            filed := loop field in fields -> TComptimeField{name: field.name, value: if record == "SourceSpan" && field.name == "file" && field.value == unnamed -> TComptimeValue.String{value: file} else -> sema_comptime_reflection_in_file(field.value, file)}
+            ^filed: loop field in fields -> TComptimeField{name: field.name, value: if record == "SourceSpan" && field.name == "file" && field.value == unnamed -> TComptimeValue.String{value: file} else -> sema_comptime_reflection_in_file(field.value, file)}
             TComptimeValue.Struct{type_name: record, fields: filed}
         }
         .List(values) -> TComptimeValue.List{values: loop item in values -> sema_comptime_reflection_in_file(item, file)}
@@ -295,7 +295,7 @@ sema_comptime_reflection_comment_kind: fn(source: SemaComptimeReflectionSource, 
     if token.kind == TOKEN_BLOCK_COMMENT -> return Val("Block")
     if token.kind != TOKEN_LINE_COMMENT -> return None
     at: token.span.start
-    slashes := 0
+    ^slashes: 0
     loop at + slashes < token.span.end && at + slashes < source.bytes.len() && source.bytes[at + slashes] == (U8{47}) {
         slashes += 1
     }
@@ -307,13 +307,13 @@ sema_comptime_reflection_comment_kind: fn(source: SemaComptimeReflectionSource, 
 sema_comptime_reflection_comment_info: fn(source: SemaComptimeReflectionSource, token: Token) -> TComptimeValue? Never! {
     kind: sema_comptime_reflection_comment_kind(source, token) ?? return None
     if token.span.start < 0 || token.span.end > source.bytes.len() -> return None
-    start := token.span.start + 2
+    ^start: token.span.start + 2
     if kind == "Documentation" -> start += 1
-    end := token.span.end
+    ^end: token.span.end
     if kind == "Block" && end - start >= 2 -> end -= 2
     if end > start && source.bytes[end - 1] == (U8{13}) -> end -= 1
     if start < end && source.bytes[start] == (U8{32}) -> start += 1
-    text := ""
+    ^text: ""
     if start < end -> text = String.from_bytes(source.bytes[start..<end]) ?? return None
     Val(sema_comptime_reflection_struct(
         "CommentInfo",
@@ -327,7 +327,7 @@ sema_comptime_reflection_comment_info: fn(source: SemaComptimeReflectionSource, 
 
 // Every comment of `source` between byte `start` and byte `end`, in order.
 sema_comptime_reflection_comments: fn(source: SemaComptimeReflectionSource, start: Int, end: Int) -> [TComptimeValue] Never! {
-    comments := [TComptimeValue]{}
+    ^comments: [TComptimeValue]{}
     loop token in source.tokens {
         if token.span.start < start || token.span.end > end -> next
         comment: sema_comptime_reflection_comment_info(source, token) ?? next
@@ -342,7 +342,7 @@ sema_comptime_reflection_written_comments: fn(source: SemaComptimeReflectionSour
     if segments.len() == 0 {
         return sema_comptime_reflection_comments(source, 0, source.bytes.len())
     }
-    comments := [TComptimeValue]{}
+    ^comments: [TComptimeValue]{}
     loop segment in segments {
         if segment.origin == SemaSourceOrigin.CompilerGenerated -> next
         comments.extend(sema_comptime_reflection_comments(source, segment.generated.start, segment.generated.end))
@@ -352,7 +352,7 @@ sema_comptime_reflection_written_comments: fn(source: SemaComptimeReflectionSour
 
 // The newlines in `bytes` from `start` up to `end`.
 sema_comptime_reflection_newlines: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
-    count := 0
+    ^count: 0
     loop index in start..<end {
         if index >= 0 && index < bytes.len() && bytes[index] == (U8{10}) -> count += 1
     }
@@ -368,16 +368,16 @@ sema_comptime_reflection_documentation: fn(source: SemaComptimeReflectionSource,
     site: name ?? return [TComptimeValue]{}
     tokens: source.tokens
     if tokens.len() == 0 || site.end <= site.start -> return [TComptimeValue]{}
-    cursor := tokens.len() - 1
+    ^cursor: tokens.len() - 1
     loop (index, token) in tokens {
         if token.span.start >= site.start {
             cursor = index - 1
             break
         }
     }
-    below := site.start
+    ^below: site.start
     // The `///` tokens, bottom up.
-    found := [Int]{}
+    ^found: [Int]{}
     loop cursor >= 0 {
         kind: tokens[cursor].kind
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT {
@@ -397,9 +397,9 @@ sema_comptime_reflection_documentation: fn(source: SemaComptimeReflectionSource,
             next
         }
         // A marker: `#`, its dotted name, then any arguments in parentheses.
-        start := cursor
+        ^start: cursor
         if kind == TOKEN_RPAREN {
-            depth := 0
+            ^depth: 0
             loop start >= 0 {
                 if tokens[start].kind == TOKEN_RPAREN -> depth += 1
                 if tokens[start].kind == TOKEN_LPAREN {
@@ -417,7 +417,7 @@ sema_comptime_reflection_documentation: fn(source: SemaComptimeReflectionSource,
                 next
             }
         }
-        named := start
+        ^named: start
         loop start >= 0 && (tokens[start].kind == TOKEN_IDENT || tokens[start].kind == TOKEN_DOT) {
             start -= 1
         }
@@ -425,8 +425,8 @@ sema_comptime_reflection_documentation: fn(source: SemaComptimeReflectionSource,
         below = tokens[start].span.start
         cursor = start - 1
     }
-    documentation := [TComptimeValue]{}
-    index := found.len() - 1
+    ^documentation: [TComptimeValue]{}
+    ^index: found.len() - 1
     loop index >= 0 {
         comment: sema_comptime_reflection_comment_info(source, tokens[found[index]]) ?? break
         documentation.push(comment)
@@ -460,8 +460,8 @@ sema_comptime_reflection_state_node: fn(graph: SemaStateGraphFact?, name: String
 
 sema_comptime_reflection_state_info: fn(owner: String, name: String, graph: SemaStateGraphFact?) -> TComptimeValue Never! {
     node: sema_comptime_reflection_state_node(graph, name)
-    terminal := false
-    reachable := Bool?{None}
+    ^terminal: false
+    ^reachable: Bool?{None}
     if node == .Val(value) {
         terminal = value.terminal
         reachable = value.reachable
@@ -486,10 +486,10 @@ sema_comptime_reflection_state_info: fn(owner: String, name: String, graph: Sema
 sema_comptime_reflection_state_transitions: fn(owner: String, state: StateDecl?, methods: [Func]) -> [TComptimeValue] Never! {
     declaration: state ?? return [TComptimeValue]{}
     state_names: loop member in declaration.states -> member.name
-    entries := [String]{}
-    found := [SemaStateGraphTransition]{}
+    ^entries: [String]{}
+    ^found: [SemaStateGraphTransition]{}
     sema_state_graph_add_typed_transitions(methods, owner, state_names, entries, found)
-    values := [TComptimeValue]{}
+    ^values: [TComptimeValue]{}
     loop transition in found {
         from: transition.from ?? "_"
         values.push(
@@ -509,7 +509,7 @@ sema_comptime_reflection_state_transitions: fn(owner: String, state: StateDecl?,
 // The states keep declaration order; the checked graph supplies only the
 // terminal and reachability facts it owns.
 sema_comptime_reflection_state_view: fn(definition: StructDef, graph: SemaStateGraphFact?) -> SemaComptimeReflectionStateView Never! {
-    states := [TComptimeValue]{}
+    ^states: [TComptimeValue]{}
     if definition.state == .Val(declaration) {
         loop state in declaration.states {
             states.push(sema_comptime_reflection_state_info(definition.name, state.name, graph))
@@ -543,8 +543,8 @@ sema_comptime_reflection_marker_rule: fn(registry: SemaScopeMembersMarkerRegistr
     }
     loop rule in registry.marker_rules {
         if rule.name != name -> next
-        params := [SemaComptimeReflectionMarkerParam]{}
-        variadic_source_type := String?{None}
+        ^params: [SemaComptimeReflectionMarkerParam]{}
+        ^variadic_source_type: String?{None}
         loop parameter in rule.params {
             if parameter.name.starts_with("$") -> next
             ty: parameter.ty ?? Type.Named{name: "Value"}
@@ -616,8 +616,8 @@ sema_comptime_reflection_marker_path: fn(expression: Expr) -> String? {
 }
 
 sema_comptime_reflection_marker_menu_candidate: fn(path: String, menu: TAppliedRuleArgumentMenu) -> String Never! {
-    segments := path.split(".").to_list()
-    start := 0
+    ^segments: path.split(".").to_list()
+    ^start: 0
     loop index in 0..<segments.len() {
         if segments[index] == menu.name && index + 1 < segments.len() {
             start = index + 1
@@ -638,7 +638,7 @@ sema_comptime_reflection_marker_menu_value: fn(registry: SemaScopeMembersMarkerR
 }
 
 sema_comptime_reflection_marker_string: fn(parts: [StrPart]) -> TComptimeValue Never! {
-    output := ""
+    ^output: ""
     loop part in parts {
         if part == .Lit(text) -> output = "{output}{text}"
     }
@@ -648,7 +648,7 @@ sema_comptime_reflection_marker_string: fn(parts: [StrPart]) -> TComptimeValue N
 sema_comptime_reflection_marker_argument_value: fn(argument: MarkerCallArg, source_type: String, registry: SemaScopeMembersMarkerRegistry) -> TComptimeValue Never! {
     if argument == {
         .EffectRow(effects, _) -> {
-            values := [TComptimeValue]{}
+            ^values: [TComptimeValue]{}
             loop effect_row in effects -> values.push(TComptimeValue.String{value: effect_row.name})
             return TComptimeValue.List{values: values}
         }
@@ -656,7 +656,7 @@ sema_comptime_reflection_marker_argument_value: fn(argument: MarkerCallArg, sour
             if source_type == "[Effect]" {
                 if expression == {
                     .ListLit(values, _, _) -> {
-                        rows := [TComptimeValue]{}
+                        ^rows: [TComptimeValue]{}
                         loop value in values {
                             path: sema_comptime_reflection_marker_path(value) ?? return TComptimeValue.Unit
                             rows.push(TComptimeValue.String{value: path})
@@ -690,14 +690,14 @@ sema_comptime_reflection_marker_argument_value: fn(argument: MarkerCallArg, sour
 // the type its rule parameter is written with, named from module row
 // `caller`, where the marker is written.
 sema_comptime_reflection_marker_info: fn(graph: SemaRegistrationGraph, types: ^[InternerDelta], caller: Int, marker: Marker, registry: SemaScopeMembersMarkerRegistry) -> TComptimeValue Never! {
-    rule := sema_comptime_reflection_marker_rule(registry, marker.name)
-    args := [TComptimeValue]{}
+    ^rule: sema_comptime_reflection_marker_rule(registry, marker.name)
+    ^args: [TComptimeValue]{}
     loop (source_index, argument) in marker.args {
-        parameter := SemaComptimeReflectionMarkerParam?{None}
+        ^parameter: SemaComptimeReflectionMarkerParam?{None}
         if rule == .Val(rule_value) {
             parameter = sema_comptime_reflection_marker_parameter(rule_value, marker, source_index)
         }
-        argument_parameter := parameter
+        ^argument_parameter: parameter
         argument_name: if argument_parameter == .Val(value) -> value.name else -> "value"
         source_type: if argument_parameter == .Val(value) -> value.source_type else -> "Value"
         args.push(
@@ -712,8 +712,8 @@ sema_comptime_reflection_marker_info: fn(graph: SemaRegistrationGraph, types: ^[
             ),
         )
     }
-    sites := [TComptimeValue]{}
-    repeatable := false
+    ^sites: [TComptimeValue]{}
+    ^repeatable: false
     if rule == .Val(value) {
         loop site in value.sites -> sites.push(TComptimeValue.String{value: site})
         repeatable = value.repeatable
@@ -742,11 +742,13 @@ sema_comptime_reflection_derived_marker: fn(name: String) -> TComptimeValue Neve
 }
 
 sema_comptime_reflection_marker_views: fn(graph: SemaRegistrationGraph, types: ^[InternerDelta], caller: Int, type_markers: [Marker], serde_markers: [Marker], derives: [NamedSpan], registry: SemaScopeMembersMarkerRegistry) -> SemaComptimeReflectionMarkerViews Never! {
-    written := type_markers
+    ^written: type_markers
     if written.len() == 0 -> written = serde_markers
-    markers := [TComptimeValue]{}
-    expanded := [TComptimeValue]{}
-    loop marker in written -> markers.push(sema_comptime_reflection_marker_info(graph, types, caller, marker, registry))
+    ^markers: [TComptimeValue]{}
+    ^expanded: [TComptimeValue]{}
+    loop marker in written {
+        markers.push(sema_comptime_reflection_marker_info(graph, types, caller, marker, registry))
+    }
     loop derived in derives {
         written_at_span: loop marker in written {
             if marker.name_span.start == derived.span.start && marker.name_span.end == derived.span.end {
@@ -868,10 +870,10 @@ sema_comptime_reflection_signature_record: fn(params: [TComptimeValue], returned
 // `module_identity` that writes it.
 sema_comptime_reflection_closure_info: fn(graph: SemaRegistrationGraph, types: ^[InternerDelta], module_identity: ModuleID, name: String, span: Span, lambda: TLambda, location: TComptimeValue, file: String) -> TComptimeValue {
     caller: sema_type_module_row(graph, module_identity)
-    params := [TComptimeValue]{}
-    index := 0
+    ^params: [TComptimeValue]{}
+    ^index: 0
     loop index < lambda.source_params.len() && index < lambda.param_types.len() {
-        access := "Read"
+        ^access: "Read"
         if lambda.host_param_conventions == .Val(conventions) {
             if index < conventions.len() {
                 access = sema_comptime_reflection_access_name(conventions[index])
@@ -881,7 +883,7 @@ sema_comptime_reflection_closure_info: fn(graph: SemaRegistrationGraph, types: ^
         index += 1
     }
     returned: if sema_comptime_reflection_success_type(lambda.ret) == .Val(success) -> sema_comptime_reflection_some(sema_comptime_reflection_type_id(graph, types, caller, success)) else -> sema_comptime_reflection_none(Type.Named{name: "TypeId"})
-    captures := loop capture in lambda.captures -> sema_comptime_reflection_struct(
+    ^captures: loop capture in lambda.captures -> sema_comptime_reflection_struct(
         "CaptureInfo",
         [SemaComptimeReflectionField]{
             SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: capture.source}},
@@ -915,7 +917,7 @@ sema_comptime_reflection_capture_mode: fn(name: String, facts: TCaptureFacts) ->
 }
 
 sema_comptime_reflection_dimension: fn(dimension: Dimension) -> TComptimeValue Never! {
-    axes := [TComptimeValue]{}
+    ^axes: [TComptimeValue]{}
     loop axis in dimension.axes {
         exponent: measure_signed_value(axis.exponent) ?? return TComptimeValue.Unit
         axes.push(
@@ -962,8 +964,8 @@ sema_comptime_reflection_range: fn(start: Int, end: Int) -> TComptimeValue Never
 sema_comptime_reflection_measure: fn(value: Measure) -> TComptimeValue Never! {
     kind: measure_kind(value)
     literal: measure_signed_value(value)
-    detail := TComptimeValue?{None}
-    symbol := TComptimeValue?{None}
+    ^detail: TComptimeValue?{None}
+    ^symbol: TComptimeValue?{None}
     if literal == .Val(number) -> detail = Val(TComptimeValue.Int{value: number}) else {
         symbol = Val(TComptimeValue.String{value: measure_expression(value)})
     }
@@ -978,8 +980,8 @@ sema_comptime_reflection_measure: fn(value: Measure) -> TComptimeValue Never! {
 }
 
 sema_comptime_reflection_exactness: fn(value: Exactness) -> TComptimeValue Never! {
-    kind := "Exact"
-    precision := sema_comptime_reflection_none(Type.Int)
+    ^kind: "Exact"
+    ^precision: sema_comptime_reflection_none(Type.Int)
     if value == {
         .Exact -> {}
         .Approximate(digits) -> {
@@ -998,10 +1000,10 @@ sema_comptime_reflection_exactness: fn(value: Exactness) -> TComptimeValue Never
 }
 
 sema_comptime_reflection_obligation: fn(value: FunctionObligations) -> TComptimeValue Never! {
-    params := [TComptimeValue]{}
+    ^params: [TComptimeValue]{}
     if value.param_contract == .Val(rows) {
         loop row in rows {
-            zone := if row.zone == ParamZone.PositionalOnly -> "PositionalOnly" else if row.zone == ParamZone.Either -> "Either" else -> "LabelOnly"
+            ^zone: if row.zone == ParamZone.PositionalOnly -> "PositionalOnly" else if row.zone == ParamZone.Either -> "Either" else -> "LabelOnly"
             params.push(
                 sema_comptime_reflection_struct(
                     "ObligationParamInfo",
@@ -1029,7 +1031,7 @@ sema_comptime_reflection_fact_value: fn(kind: String, name: String, members: [St
     fact_kind: TComptimeValue.Enum{type_name: "ReflectionKind", variant: kind, args: [TComptimeEnumArg]{}}
     range_value: if range == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none_field("FactValue", "range")
     dimension_value: if dimension == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none_field("FactValue", "dimension")
-    fields := [SemaComptimeReflectionField]{
+    ^fields: [SemaComptimeReflectionField]{
         {name: "kind", value: fact_kind},
         {name: "name", value: TComptimeValue.String{value: name}},
         {name: "members", value: sema_comptime_reflection_string_list(members)},
@@ -1038,7 +1040,7 @@ sema_comptime_reflection_fact_value: fn(kind: String, name: String, members: [St
     }
     option_names: ["measure", "exactness", "layout", "classification", "nominal", "obligation", "state", "sendability", "view_provenance", "movedness", "attribution", "origin", "unit_scale_provenance", "maturity"]
     loop option_name in option_names {
-        value := sema_comptime_reflection_none_field("FactValue", option_name)
+        ^value: sema_comptime_reflection_none_field("FactValue", option_name)
         if option_name == detail_name && detail == .Val(item) {
             value = sema_comptime_reflection_some(item)
         }
@@ -1060,7 +1062,7 @@ sema_comptime_reflection_fact_info: fn(kind: String, name: String, path: String,
 }
 
 sema_comptime_reflection_type_fact_rows: fn(path: String, ty: Type) -> [TComptimeValue] Never! {
-    result := [TComptimeValue]{}
+    ^result: [TComptimeValue]{}
     entries: type_identity(ty).knowledge.entries
     loop entry in entries {
         kind: if entry.fact == {
@@ -1074,11 +1076,11 @@ sema_comptime_reflection_type_fact_rows: fn(path: String, ty: Type) -> [TComptim
             .Obligation(_) -> "Obligation"
         }
         name: if kind == "Range" -> "range" else if kind == "Layout" -> "layout" else if kind == "Measure" -> "measure" else if kind == "Exactness" -> "exactness" else if kind == "Dimension" -> "dimension" else if kind == "Classification" -> "classification" else if kind == "Nominal" -> "nominal" else -> "obligation"
-        fact_members := [String]{}
-        range := TComptimeValue?{None}
-        dimension := TComptimeValue?{None}
-        detail_name := ""
-        detail := TComptimeValue?{None}
+        ^fact_members: [String]{}
+        ^range: TComptimeValue?{None}
+        ^dimension: TComptimeValue?{None}
+        ^detail_name: ""
+        ^detail: TComptimeValue?{None}
         if entry.fact == {
             .Interval(lo, hi) -> { range = Val(sema_comptime_reflection_range(lo, hi)) }
             .Layout(bytes) -> {
@@ -1201,8 +1203,8 @@ sema_comptime_reflection_layout_item_resolutions: fn(graph: SemaRegistrationGrap
 }
 
 sema_comptime_reflection_layout_engine: fn(graph: SemaRegistrationGraph) -> TargetLayoutEngine Never! {
-    qualified_items := [TargetLayoutQualifiedItem]{}
-    resolutions := [TargetLayoutNameResolution]{}
+    ^qualified_items: [TargetLayoutQualifiedItem]{}
+    ^resolutions: [TargetLayoutNameResolution]{}
     loop registration_module_index in 0..<graph.modules.len() {
         module_identity: graph.modules[registration_module_index].module_identity
         module_name: module_text(graph.module_table, module_identity)
@@ -1266,8 +1268,8 @@ sema_comptime_reflection_layout_info: fn(kind: String, guarantee: String, source
 // `caller` is the row of the module that declares the struct.
 sema_comptime_reflection_struct_layout: fn(registration: SemaRegistrationGraph, types: ^[InternerDelta], caller: Int, definition: StructDef, engine: TargetLayoutEngine, facts: LayoutFacts) -> TComptimeValue {
     target: jet_target_layout_engine_target(engine)
-    kind := "default"
-    guarantee := "none"
+    ^kind: "default"
+    ^guarantee: "none"
     if definition.layout == {
         .Val(layout) -> {
             if layout == {
@@ -1289,8 +1291,8 @@ sema_comptime_reflection_struct_layout: fn(registration: SemaRegistrationGraph, 
         }
         .None -> {}
     }
-    requested := Int?{None}
-    effective := Int?{None}
+    ^requested: Int?{None}
+    ^effective: Int?{None}
     if definition.layout == {
         .Val(layout) -> {
             if layout == {
@@ -1309,7 +1311,7 @@ sema_comptime_reflection_struct_layout: fn(registration: SemaRegistrationGraph, 
     // A field reports its layout shape name (`Rename(layout: …)`), so typed
     // `[.name]` selection and `.name` read the one shape fact; the byte facts
     // stay keyed by the declared field.
-    layout_fields := [TComptimeValue]{}
+    ^layout_fields: [TComptimeValue]{}
     loop field_index in 0..<definition.fields.len() {
         if definition.fields[field_index].computed != None -> next
         layout_fact: sema_comptime_reflection_layout_field(facts, definition.fields[field_index].name)
@@ -1329,7 +1331,7 @@ sema_comptime_reflection_enum_layout: fn(registration: SemaRegistrationGraph, ty
     facts: jet_target_layout_enum_facts_in_module(engine, definition, module_identity)
     kind: if c_tag != None -> "c" else -> "default"
     guarantee: if c_tag != None -> "repr(C) declaration" else if facts.bytes != None -> "none" else -> "enum physical layout unspecified"
-    layout_fields := [TComptimeValue]{}
+    ^layout_fields: [TComptimeValue]{}
     loop variant_index in 0..<definition.variants.len() {
         index: sema_comptime_reflection_layout_field(facts, definition.variants[variant_index].name)
         layout_fields.push(sema_comptime_reflection_layout_field_info(definition.variants[variant_index].name, sema_comptime_reflection_variant_type_id(registration, types, caller, definition.variants[variant_index].payload), target, guarantee, "enum declaration", index))
@@ -1382,15 +1384,17 @@ sema_comptime_reflection_package_registry: fn(graph: SemaRegistrationGraph, cata
 // thus marks each of its functions, for `meta.events(watch: .Functions{marked:
 // m})` and for a FunctionInfo's `markers`.
 sema_comptime_reflection_package_function_markers: fn(graph: SemaRegistrationGraph, types: ^[InternerDelta], registry: SemaScopeMembersMarkerRegistry?) -> [TComptimeValue] Never! {
-    inherited := [TComptimeValue]{}
+    ^inherited: [TComptimeValue]{}
     caller: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
     if registry == .Val(known) {
         loop marker in graph.build_facts.package_markers {
-            allowed := false
+            ^allowed: false
             loop name in known.function_allowed_markers {
                 if name == marker.name -> allowed = true
             }
-            if allowed -> inherited.push(sema_comptime_reflection_marker_info(graph, types, caller, marker, known))
+            if allowed {
+                inherited.push(sema_comptime_reflection_marker_info(graph, types, caller, marker, known))
+            }
         }
     }
     inherited
@@ -1572,7 +1576,7 @@ sema_comptime_reflection_type_row: fn(interner: Interner, types: ^[InternerDelta
 // `interner`; the remap renumbers each TypeId it made from them
 // (comptime_value_remap_types).
 sema_comptime_reflection_merge_types: fn(interner: ^Interner, types: ^[InternerDelta]) -> InternerRemap Never! {
-    delta := types.pop() ?? return sema_interner_remap_empty()
+    ^delta: types.pop() ?? return sema_interner_remap_empty()
     if !delta_has_rows(delta) -> return sema_interner_remap_empty()
     interner_merge_delta(interner, delta)
 }
@@ -1618,7 +1622,7 @@ SemaTypeIDHead: struct {
 // The heads type `ty`, written in module row `caller`, names, its own and
 // its parts', each once.
 sema_comptime_reflection_type_heads: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> [SemaTypeIDHead] {
-    heads := [SemaTypeIDHead]{}
+    ^heads: [SemaTypeIDHead]{}
     sema_comptime_reflection_type_heads_into(graph, caller, ty, heads)
     heads
 }
@@ -1673,12 +1677,14 @@ sema_comptime_reflection_type_head_add: fn(graph: SemaRegistrationGraph, caller:
     head: sema_comptime_reflection_type_head(graph, caller, written)
     base: head.base
     heads.push(head)
-    if base == .Val(declared) -> sema_comptime_reflection_type_heads_into(graph, caller, declared, heads)
+    if base == .Val(declared) {
+        sema_comptime_reflection_type_heads_into(graph, caller, declared, heads)
+    }
 }
 
 // The head `written`, as module row `caller` resolves it.
 sema_comptime_reflection_type_head: fn(graph: SemaRegistrationGraph, caller: Int, written: String) -> SemaTypeIDHead {
-    head := SemaTypeIDHead{written: written, identity: written, name: Val(type_unqualified_text(written, true)), params: [String]{}, kind: "Builtin", base: None}
+    ^head: SemaTypeIDHead{written: written, identity: written, name: Val(type_unqualified_text(written, true)), params: [String]{}, kind: "Builtin", base: None}
     row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: written}, caller) ?? return head
     declaring: graph.modules[row.module_index]
     nominal: declaring.nominals[row.row]
@@ -1706,7 +1712,7 @@ sema_comptime_reflection_type_head: fn(graph: SemaRegistrationGraph, caller: Int
 // (JetEval JetCompilerServicesTypeTable) resolved its heads. A head `heads`
 // lacks keeps its spelling, as a builtin does.
 sema_comptime_reflection_type_id_headed: fn(heads: [SemaTypeIDHead], ty: Type, interner: Interner, types: ^[InternerDelta]) -> TComptimeValue {
-    signature := sema_comptime_reflection_none(Type.Named{name: "CallableSignature"})
+    ^signature: sema_comptime_reflection_none(Type.Named{name: "CallableSignature"})
     if ty == .Fn(params, ret, _, _, _, _) {
         made: loop param in params -> sema_comptime_reflection_type_id_headed(heads, param, interner, types)
         returned: if sema_comptime_reflection_success_type(ret) == .Val(success) -> sema_comptime_reflection_some(sema_comptime_reflection_type_id_headed(heads, success, interner, types)) else -> sema_comptime_reflection_none(Type.Named{name: "TypeId"})
@@ -1736,36 +1742,40 @@ sema_comptime_reflection_headed_bindings: fn(heads: [SemaTypeIDHead], ty: Type, 
             .List(element) -> [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "element", element, interner, types)}
             .Option(inner) | .Shared(inner) | .Tagged(_, inner) -> [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "inner", inner, interner, types)}
             .Map(key, _, value) -> {
-                bindings := [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "key", key, interner, types)}
+                ^bindings: [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "key", key, interner, types)}
                 bindings.push(sema_comptime_reflection_headed_binding(heads, "value", value, interner, types))
                 bindings
             }
             .Result(ok, err) -> {
-                bindings := [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "ok", ok, interner, types)}
+                ^bindings: [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "ok", ok, interner, types)}
                 bindings.push(sema_comptime_reflection_headed_binding(heads, "err", err, interner, types))
                 bindings
             }
             .Tuple(fields) -> loop (index, field) in fields -> sema_comptime_reflection_headed_binding(heads, if field.name == "" -> "{index}" else -> field.name, field.ty, interner, types)
             .Union(members) -> loop (index, member) in members -> sema_comptime_reflection_headed_binding(heads, "{index}", member, interner, types)
             .Fn(params, ret, _, contract, _, _) -> {
-                bindings := [TComptimeValue]{}
+                ^bindings: [TComptimeValue]{}
                 loop (index, param) in params {
                     label: if contract == .Val(rows) && index < rows.len() && rows[index].label != "" -> rows[index].label else -> "{index}"
                     bindings.push(sema_comptime_reflection_headed_binding(heads, label, param, interner, types))
                 }
-                if ret == .Val(result) -> bindings.push(sema_comptime_reflection_headed_binding(heads, "result", result, interner, types))
+                if ret == .Val(result) {
+                    bindings.push(sema_comptime_reflection_headed_binding(heads, "result", result, interner, types))
+                }
                 bindings
             }
             .FixedList(element, length) -> {
-                bindings := [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "element", element, interner, types)}
-                if length == .Literal(_, count) -> bindings.push(sema_comptime_reflection_size_binding("length", count, interner, types))
+                ^bindings: [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "element", element, interner, types)}
+                if length == .Literal(_, count) {
+                    bindings.push(sema_comptime_reflection_size_binding("length", count, interner, types))
+                }
                 bindings
             }
             .IntN(_, bits) -> [TComptimeValue]{sema_comptime_reflection_size_binding("bits", bits, interner, types)}
             .Float -> [TComptimeValue]{sema_comptime_reflection_size_binding("bits", 64, interner, types)}
             .Float32 -> [TComptimeValue]{sema_comptime_reflection_size_binding("bits", 32, interner, types)}
             .InlineRange(base, lo, hi) -> {
-                bindings := [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "base", base, interner, types)}
+                ^bindings: [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "base", base, interner, types)}
                 bindings.push(sema_comptime_reflection_size_binding("lo", lo, interner, types))
                 bindings.push(sema_comptime_reflection_size_binding("hi", hi, interner, types))
                 bindings
@@ -1782,7 +1792,7 @@ sema_comptime_reflection_headed_bindings: fn(heads: [SemaTypeIDHead], ty: Type, 
 // type; any other type is its shape.
 sema_comptime_reflection_headed_kind: fn(heads: [SemaTypeIDHead], ty: Type) -> TComptimeValue {
     if ty == .Tagged(_, inner) -> return sema_comptime_reflection_headed_kind(heads, inner)
-    declared := "Builtin"
+    ^declared: "Builtin"
     if ty == .Named(name) -> declared = sema_comptime_reflection_head_kind(heads, name)
     if ty == .Apply(name, _) -> declared = sema_comptime_reflection_head_kind(heads, name)
     sema_comptime_reflection_shape_kind(ty, declared)
@@ -1855,7 +1865,9 @@ sema_comptime_reflection_head_param: fn(heads: [SemaTypeIDHead], written: String
 sema_comptime_reflection_head_bindings: fn(heads: [SemaTypeIDHead], written: String, interner: Interner, types: ^[InternerDelta]) -> [TComptimeValue] Never! {
     loop head in heads {
         if head.written != written -> next
-        if head.base == .Val(base) -> return [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "base", base, interner, types)}
+        if head.base == .Val(base) {
+            return [TComptimeValue]{sema_comptime_reflection_headed_binding(heads, "base", base, interner, types)}
+        }
         return [TComptimeValue]{}
     }
     [TComptimeValue]{}
@@ -1866,7 +1878,9 @@ sema_comptime_reflection_head_bindings: fn(heads: [SemaTypeIDHead], written: Str
 // without a module identity when not `qualified` (type_unqualified_text).
 priv sema_comptime_reflection_head_name: fn(heads: [SemaTypeIDHead], written: String, qualified: Bool) -> String Never! {
     loop head in heads {
-        if head.written == written -> return if qualified -> head.identity else -> head.name ?? head.identity
+        if head.written == written {
+            return if qualified -> head.identity else -> head.name ?? head.identity
+        }
     }
     if qualified -> written else -> type_unqualified_text(written, true)
 }
@@ -1882,7 +1896,9 @@ sema_comptime_reflection_type_binding: fn(graph: SemaRegistrationGraph, types: ^
 // holds: its `size` is None, unless `ty` is a number argument
 // (`Matrix<3>`), which binds Int with that size.
 sema_comptime_reflection_headed_binding: fn(heads: [SemaTypeIDHead], name: String, ty: Type, interner: Interner, types: ^[InternerDelta]) -> TComptimeValue {
-    if ty == .Measure(measure) && measure == .Literal(_, size) -> return sema_comptime_reflection_size_binding(name, size, interner, types)
+    if ty == .Measure(measure) && measure == .Literal(_, size) {
+        return sema_comptime_reflection_size_binding(name, size, interner, types)
+    }
     sema_comptime_reflection_binding_info(name, sema_comptime_reflection_type_id_headed(heads, ty, interner, types), sema_comptime_reflection_none(Type.Int))
 }
 
@@ -1949,8 +1965,8 @@ sema_comptime_reflection_type_signature: fn(ty: Type, types: [TComptimeValue], r
 // call metadata of the function it names (unnamed, read, no default and not
 // variadic with none). A parameter with no name reads its label as its name.
 sema_comptime_reflection_type_param: fn(index: Int, ty: TComptimeValue, contract: [CallContractRow]?, metadata: FunctionCallMetadata?) -> TComptimeValue Never! {
-    label := ""
-    zone := "PositionalOnly"
+    ^label: ""
+    ^zone: "PositionalOnly"
     if contract == .Val(rows) && index < rows.len() {
         label = rows[index].label
         zone = if rows[index].zone == {
@@ -2004,13 +2020,19 @@ sema_comptime_reflection_root_name: fn(graph: SemaRegistrationGraph, row: SemaRe
     leaf: if path.cut_last(".") == .Val(parts) -> "{parts.after}" else -> "{path}"
     root: sema_registration_module_index(graph, graph.entry_module_identity) ?? return Val(path)
     if sema_comptime_reflection_names_row(graph, root, row, leaf) -> return Val(leaf)
-    if path != leaf && sema_comptime_reflection_names_row(graph, root, row, path) -> return Val(path)
+    if path != leaf && sema_comptime_reflection_names_row(graph, root, row, path) {
+        return Val(path)
+    }
     loop import in graph.modules[root].program.imports {
         if import.alias == "" -> next
         aliased_leaf: "{import.alias}.{leaf}"
-        if sema_comptime_reflection_names_row(graph, root, row, aliased_leaf) -> return Val(aliased_leaf)
+        if sema_comptime_reflection_names_row(graph, root, row, aliased_leaf) {
+            return Val(aliased_leaf)
+        }
         aliased_path: "{import.alias}.{path}"
-        if path != leaf && sema_comptime_reflection_names_row(graph, root, row, aliased_path) -> return Val(aliased_path)
+        if path != leaf && sema_comptime_reflection_names_row(graph, root, row, aliased_path) {
+            return Val(aliased_path)
+        }
     }
     None
 }
@@ -2141,14 +2163,14 @@ sema_comptime_reflection_type_param_info: fn(parameter: TypeParam) -> TComptimeV
 }
 
 sema_comptime_reflection_method_signature_type: fn(method: Func) -> Type Never! {
-    params := [Type]{}
-    contract := [CallContractRow]{}
-    contract_required := false
-    names := [String]{}
-    defaults := [FunctionDefaultRef?]{}
-    variadic := [Bool]{}
-    conventions := [AccessConvention]{}
-    has_variadic := false
+    ^params: [Type]{}
+    ^contract: [CallContractRow]{}
+    ^contract_required: false
+    ^names: [String]{}
+    ^defaults: [FunctionDefaultRef?]{}
+    ^variadic: [Bool]{}
+    ^conventions: [AccessConvention]{}
+    ^has_variadic: false
     loop parameter_index in 0..<method.params.len() {
         params.push(method.params[parameter_index].ty)
         label: if method.params[parameter_index].public_label == .Val(public_label) -> public_label.name else -> method.params[parameter_index].name
@@ -2163,7 +2185,7 @@ sema_comptime_reflection_method_signature_type: fn(method: Func) -> Type Never! 
         if method.params[parameter_index].variadic -> has_variadic = true
     }
     result: sema_effective_return_type(method.return_type)
-    metadata := FunctionCallMetadata?{None}
+    ^metadata: FunctionCallMetadata?{None}
     if has_variadic {
         metadata = Val(FunctionCallMetadata{
             names: names,
@@ -2188,17 +2210,17 @@ sema_comptime_reflection_method_signature_type: fn(method: Func) -> Type Never! 
 // signature names each bound parameter. Empty on a declaration.
 sema_comptime_reflection_method_info: fn(registration: SemaRegistrationGraph, types: ^[InternerDelta], caller: Int, method: Func, module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry, bindings: [SemaInferenceBinding]) -> TComptimeValue {
     result: sema_effective_return_type(method.return_type)
-    dimensions := [TComptimeValue]{}
+    ^dimensions: [TComptimeValue]{}
     loop parameter_index in 0..<method.params.len() {
         loop dimension in sema_comptime_reflection_type_dimensions(method.params[parameter_index].ty) {
             dimensions.push(dimension)
         }
     }
     loop dimension in sema_comptime_reflection_type_dimensions(result) -> dimensions.push(dimension)
-    facts := sema_comptime_reflection_declared_function_facts(method, method.name)
+    ^facts: sema_comptime_reflection_declared_function_facts(method, method.name)
     signature_type: sema_comptime_reflection_method_signature_type(method)
     facts.extend(sema_comptime_reflection_type_fact_rows(method.name, signature_type))
-    declared := sema_comptime_reflection_callable_signature(registration, types, caller, method, None, "")
+    ^declared: sema_comptime_reflection_callable_signature(registration, types, caller, method, None, "")
     signature: sema_comptime_reflection_bound_signature(registration, types, caller, declared, bindings)
     markers: sema_comptime_reflection_member_markers(registration, types, caller, method.markers, registry)
     sema_comptime_reflection_struct(
@@ -2273,13 +2295,13 @@ sema_arithmetic_binary_operation: fn(op: BinOp) -> ArithmeticOperation? Never! {
 // as the policy is: the checker lowers the fixed-width ones through the
 // mode's overflow route (Expressions.jet sema_expr_arithmetic_policy_value).
 sema_arithmetic_policy_facts: fn(function: Func) -> [ArithmeticPolicyFact] {
-    scan := SemaArithmeticScan{sites: [SemaArithmeticSite]{}, scopes: [ArithmeticPolicyFact]{}}
+    ^scan: SemaArithmeticScan{sites: [SemaArithmeticSite]{}, scopes: [ArithmeticPolicyFact]{}}
     sema_comptime_reflection_append_arithmetic_stmts(function.body, scan)
     function_policy: sema_function_arithmetic_policy(function.markers)
     function_start: if function_policy == .Val(policy) && policy.scope_span.start < function.span.start -> policy.scope_span.start else -> function.span.start
-    facts := [ArithmeticPolicyFact]{}
+    ^facts: [ArithmeticPolicyFact]{}
     loop site in scan.sites {
-        innermost := -1
+        ^innermost: -1
         loop index in 0..<scan.scopes.len() {
             block: scan.scopes[index].scope_span
             if block.start > site.span.start || block.end < site.span.end -> next
@@ -2583,7 +2605,7 @@ sema_comptime_reflection_view_provenance: fn(value: ViewProvenance) -> TComptime
 }
 
 sema_comptime_reflection_declared_function_facts: fn(method: Func, path: String) -> [TComptimeValue] Never! {
-    facts := [TComptimeValue]{}
+    ^facts: [TComptimeValue]{}
     sendability: sema_comptime_reflection_struct(
         "SendabilityInfo",
         [SemaComptimeReflectionField]{
@@ -2611,7 +2633,7 @@ sema_comptime_reflection_declared_function_facts: fn(method: Func, path: String)
     facts.push(sema_comptime_reflection_fact_info("Origin", "origin", "{path}.reflect().origin", sema_comptime_reflection_fact_value("Origin", "origin", [String]{}, None, None, "origin", Val(origin))))
     maturity: sema_comptime_reflection_maturity(method)
     facts.push(sema_comptime_reflection_fact_info("Maturity", "maturity", "{path}.reflect().maturity", sema_comptime_reflection_fact_value("Maturity", "maturity", [String]{}, None, None, "maturity", Val(maturity))))
-    provenance := ViewProvenance?{None}
+    ^provenance: ViewProvenance?{None}
     if method.return_view_provenance == {
         .Val(value) -> {
             loop entry in value.entries {
@@ -2642,7 +2664,7 @@ sema_comptime_reflection_method_failure_type: fn(method: Func) -> TComptimeValue
 // `package` are the names its reader shows. For a specialization, `function` is
 // already specialized and `bindings` are the signature's `generic_bindings`.
 sema_comptime_reflection_function_info: fn(registration: SemaRegistrationGraph, types: ^[InternerDelta], caller: Int, function: Func, module_name: String, identity: String, package: String, registered_module: SemaRegistrationModule, markers: [TComptimeValue], bindings: [SemaInferenceBinding]) -> TComptimeValue {
-    declared := sema_comptime_reflection_callable_signature(registration, types, caller, function, None, registered_module.source_file)
+    ^declared: sema_comptime_reflection_callable_signature(registration, types, caller, function, None, registered_module.source_file)
     signature: sema_comptime_reflection_bound_signature(registration, types, caller, declared, bindings)
     info: sema_comptime_reflection_struct(
         "FunctionInfo",
@@ -2712,7 +2734,7 @@ sema_comptime_reflection_specialization: fn(params: [TypeParam], args: [Type]) -
 // replaced by its argument in the parameter and return types.
 sema_comptime_reflection_specialize_func: fn(function: Func, bindings: [SemaInferenceBinding]) -> Func Never! {
     // copy: the specialization rewrites the types of its own copy; the declaration keeps its own.
-    specialized := function.copy()
+    ^specialized: function.copy()
     loop index in 0..<specialized.params.len() {
         specialized.params[index].ty = sema_inference_substitute_type_bindings(function.params[index].ty, bindings)
     }
@@ -2726,7 +2748,7 @@ sema_comptime_reflection_specialize_func: fn(function: Func, bindings: [SemaInfe
 // specialized as they are listed (sema_comptime_reflection_append_methods).
 sema_comptime_reflection_specialize_struct: fn(definition: StructDef, bindings: [SemaInferenceBinding]) -> StructDef Never! {
     // copy: the specialization rewrites the field types of its own copy; the declaration keeps its own.
-    specialized := definition.copy()
+    ^specialized: definition.copy()
     loop index in 0..<specialized.fields.len() {
         specialized.fields[index].ty = sema_inference_substitute_type_bindings(definition.fields[index].ty, bindings)
     }
@@ -2736,7 +2758,7 @@ sema_comptime_reflection_specialize_struct: fn(definition: StructDef, bindings: 
 // `definition` as a specialization sees it: variant payload types bound.
 sema_comptime_reflection_specialize_enum: fn(definition: EnumDef, bindings: [SemaInferenceBinding]) -> EnumDef Never! {
     // copy: the specialization rewrites the payload types of its own copy; the declaration keeps its own.
-    specialized := definition.copy()
+    ^specialized: definition.copy()
     loop index in 0..<specialized.variants.len() {
         if definition.variants[index].payload == {
             .Unit -> {}
@@ -2858,7 +2880,7 @@ sema_comptime_reflection_type_fact_range: fn(name: String, path: String, start: 
 }
 
 sema_comptime_reflection_distinct_facts: fn(definition: DistinctDef) -> [TComptimeValue] Never! {
-    facts := [TComptimeValue]{}
+    ^facts: [TComptimeValue]{}
     if definition.range == .Val(range) {
         facts.push(sema_comptime_reflection_type_fact_range("range", "{definition.name}.reflect().range", range.lo, range.hi))
     }
@@ -2902,7 +2924,7 @@ sema_comptime_reflection_builtin_type_info: fn(graph: SemaRegistrationGraph, typ
     number: jet_target_layout_numeric_type(name) ?? return None
     layout: sema_comptime_reflection_builtin_layout(graph, name) ?? return None
     identity: sema_comptime_reflection_type_id(graph, types, -1, number)
-    none := [TComptimeValue]{}
+    ^none: [TComptimeValue]{}
     info: sema_comptime_reflection_type_info_fields(
         name,
         name,
@@ -2941,14 +2963,14 @@ sema_comptime_reflection_append_trait_contract: fn(
     identity: String,
     registry: SemaScopeMembersMarkerRegistry,
 ) -> TComptimeValue {
-    associated := (loop item in associated_types -> sema_comptime_reflection_struct(
+    ^associated: (loop item in associated_types -> sema_comptime_reflection_struct(
         "AssociatedTypeInfo",
         [SemaComptimeReflectionField]{
             SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: item.name}},
             SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id(registration, types, caller, item.ty)},
         },
     ))
-    method_values := [TComptimeValue]{}
+    ^method_values: [TComptimeValue]{}
     sema_comptime_reflection_append_methods(registration, types, caller, methods, module_path, identity, registry, [SemaInferenceBinding]{}, method_values)
     declaring: sema_comptime_reflection_module_declared_row(registration, caller, trait_name)
     scope: if declaring == .Val(row) -> registration.modules[row.module_index].module_name else -> ""
@@ -2977,8 +2999,8 @@ sema_comptime_reflection_trait_info: fn(name: String, associated: [TComptimeValu
 // when the module has no marker registry.
 sema_comptime_reflection_declared_traits: fn(graph: SemaRegistrationGraph, types: ^[InternerDelta], index: Int, catalog: TAppliedRuleCatalog) -> [TComptimeValue]? {
     registered_module: graph.modules[index]
-    traits := [TComptimeValue]{}
-    registry := SemaScopeMembersMarkerRegistry?{None}
+    ^traits: [TComptimeValue]{}
+    ^registry: SemaScopeMembersMarkerRegistry?{None}
     loop item in registered_module.program.items {
         if item == .Trait(definition) {
             if registry == None {
@@ -2987,7 +3009,7 @@ sema_comptime_reflection_declared_traits: fn(graph: SemaRegistrationGraph, types
             known: registry ?? return None
             identity: sema_comptime_reflection_declared_identity(registered_module, definition.name)
             methods: loop signature in definition.methods -> sema_trait_impl_method(signature)
-            method_values := [TComptimeValue]{}
+            ^method_values: [TComptimeValue]{}
             sema_comptime_reflection_append_methods(graph, types, index, methods, registered_module.module_path, identity, known, [SemaInferenceBinding]{}, method_values)
             traits.push(sema_comptime_reflection_trait_info(definition.name, [TComptimeValue]{}, method_values, identity, registered_module.module_name))
         }
@@ -3057,7 +3079,7 @@ sema_comptime_reflection_trait_contracts: fn(
     identity: String,
     registry: SemaScopeMembersMarkerRegistry,
 ) -> [TComptimeValue] {
-    contracts := [TComptimeValue]{}
+    ^contracts: [TComptimeValue]{}
     loop implementation in trait_impls {
         value: sema_comptime_reflection_append_trait_contract(registration, types, caller, implementation.trait_name, implementation.assoc_type_impls, implementation.methods, module_path, identity, registry)
         contracts.push(value)
@@ -3108,7 +3130,7 @@ sema_comptime_reflection_constant_info: fn(name: String, trait_name: String, ty:
 sema_comptime_reflection_declared_constants: fn(graph: SemaRegistrationGraph, types: ^[InternerDelta], index: Int, constants: [TConstantDef]) -> [TComptimeValue] {
     registered_module: graph.modules[index]
     scope: registered_module.module_name
-    values := [TComptimeValue]{}
+    ^values: [TComptimeValue]{}
     loop constant in constants {
         if constant.symbol_key == "" || constant.module_identity != registered_module.module_identity {
             next
@@ -3184,28 +3206,28 @@ sema_comptime_reflection_struct_type_info: fn(
     constants: [TComptimeValue],
     bindings: [SemaInferenceBinding],
 ) -> TComptimeValue {
-    reflection_fields := [TComptimeValue]{}
-    dimensions := [TComptimeValue]{}
-    facts := [TComptimeValue]{}
+    ^reflection_fields: [TComptimeValue]{}
+    ^dimensions: [TComptimeValue]{}
+    ^facts: [TComptimeValue]{}
     layout_facts: jet_target_layout_struct_facts_in_module(engine, definition, module_text(registration.module_table, registered_module.module_identity))
     loop field in definition.fields {
         if field.computed != None -> next
-        default := Span?{None}
+        ^default: Span?{None}
         if field.default == .Val(expression) -> default = Val(expr_source_span(expression))
-        offset := Int?{None}
+        ^offset: Int?{None}
         if sema_comptime_reflection_layout_field(layout_facts, field.name) == .Val(layout_field) {
             offset = layout_field.offset
         }
         reflection_fields.push(sema_comptime_reflection_field_info(registration, types, caller, field.name, field.ty, reflection_fields.len(), field.serde_markers, field.is_pub, field.name_span, "{definition.name}.{field.name}", registry, default, offset))
         dimensions.extend(sema_comptime_reflection_type_dimensions(field.ty))
     }
-    method_values := [TComptimeValue]{}
+    ^method_values: [TComptimeValue]{}
     sema_comptime_reflection_append_methods(registration, types, caller, definition.methods, registered_module.module_path, identity, registry, bindings, method_values)
     sema_comptime_reflection_append_inherent_methods(registration, types, caller, registered_module.program.items, definition.name, registered_module.module_path, identity, registry, bindings, method_values)
-    type_params := (loop parameter in definition.type_params -> sema_comptime_reflection_type_param_info(parameter))
+    ^type_params: (loop parameter in definition.type_params -> sema_comptime_reflection_type_param_info(parameter))
     marker_views: sema_comptime_reflection_marker_views(registration, types, caller, definition.type_markers, definition.serde_markers, definition.derives, registry)
     state_view: sema_comptime_reflection_state_view(definition, graph)
-    states := [TComptimeValue]{}
+    ^states: [TComptimeValue]{}
     if definition.state == .Val(state) {
         loop entry in state.states {
             states.push(sema_comptime_reflection_state_info(definition.name, entry.name, graph))
@@ -3258,9 +3280,9 @@ sema_comptime_reflection_enum_type_info: fn(
     constants: [TComptimeValue],
     bindings: [SemaInferenceBinding],
 ) -> TComptimeValue {
-    cases := [TComptimeValue]{}
-    dimensions := [TComptimeValue]{}
-    facts := [TComptimeValue]{}
+    ^cases: [TComptimeValue]{}
+    ^dimensions: [TComptimeValue]{}
+    ^facts: [TComptimeValue]{}
     style: sema_checked_rename_case(definition.serde_markers)
     type_path: sema_name_type_path(registered_module.module_path, registered_module.program.items, definition.name)
     loop (index, variant) in definition.variants {
@@ -3279,13 +3301,13 @@ sema_comptime_reflection_enum_type_info: fn(
             }
         }
     }
-    methods := [TComptimeValue]{}
+    ^methods: [TComptimeValue]{}
     sema_comptime_reflection_append_methods(registration, types, caller, definition.methods, registered_module.module_path, identity, registry, bindings, methods)
     loop implementation in definition.trait_impls {
         sema_comptime_reflection_append_methods(registration, types, caller, implementation.methods, registered_module.module_path, identity, registry, bindings, methods)
     }
     sema_comptime_reflection_append_inherent_methods(registration, types, caller, registered_module.program.items, definition.name, registered_module.module_path, identity, registry, bindings, methods)
-    type_params := (loop parameter in definition.type_params -> sema_comptime_reflection_type_param_info(parameter))
+    ^type_params: (loop parameter in definition.type_params -> sema_comptime_reflection_type_param_info(parameter))
     marker_views: sema_comptime_reflection_marker_views(registration, types, caller, definition.type_markers, definition.serde_markers, definition.derives, registry)
     traits: sema_comptime_reflection_trait_contracts(registration, types, caller, registered_module.program, definition.name, definition.trait_impls, registered_module.module_path, identity, registry)
     transitions: sema_comptime_reflection_state_transitions(definition.name, definition.state, definition.methods)
@@ -3325,7 +3347,7 @@ sema_comptime_reflection_distinct_type_info: fn(
     constants: [TComptimeValue],
 ) -> TComptimeValue {
     marker_views: sema_comptime_reflection_marker_views(registration, types, caller, definition.type_markers, [Marker]{}, definition.derives, registry)
-    dimensions := [TComptimeValue]{}
+    ^dimensions: [TComptimeValue]{}
     if definition.quantity == .Val(quantity) {
         dimensions.push(sema_comptime_reflection_dimension(quantity.dimension))
     }
@@ -3369,7 +3391,7 @@ sema_comptime_reflection_type_info: fn(
     args: [Type],
 ) -> TComptimeValue? {
     if !sema_registration_package_settled(graph, module_identity) -> return None
-    module_index := Int?{None}
+    ^module_index: Int?{None}
     loop index in 0..<graph.modules.len() {
         if graph.modules[index].module_identity == module_identity {
             if module_index != None -> return None
@@ -3383,7 +3405,7 @@ sema_comptime_reflection_type_info: fn(
             break row
         }
     } ?? return None
-    item := Item?{None}
+    ^item: Item?{None}
     loop declaration in registered_module.declarations {
         if sema_comptime_reflection_layout_item_name(declaration) == (Val(type_name)) {
             if item != None -> return None
@@ -3402,12 +3424,12 @@ sema_comptime_reflection_type_info: fn(
     registry: sema_scope_members_build_marker_registry(graph, module_identity, registered_module.program, catalog) ?? return None
     engine: sema_comptime_reflection_layout_engine(graph)
     // The public identity qualifies by module name, as FunctionInfo does; the internal module key is not user surface.
-    identity := sema_comptime_reflection_declared_identity(registered_module, type_name)
+    ^identity: sema_comptime_reflection_declared_identity(registered_module, type_name)
     // A specialization is its own instance: its identity names its arguments,
     // its fields, payloads and methods read them in place of the type
     // parameters, and its identity's `generic_bindings` pair each parameter
     // with one.
-    bindings := [SemaInferenceBinding]{}
+    ^bindings: [SemaInferenceBinding]{}
     if declaration == .Struct(definition) {
         bindings = sema_comptime_reflection_specialization(definition.type_params, args)
     }
@@ -3423,7 +3445,7 @@ sema_comptime_reflection_type_info: fn(
     source: sema_comptime_reflection_doc_source(registered_module.source, registered_module.source_file)
     info: if declaration == {
         .Struct(definition) -> {
-            state_graph := SemaStateGraphFact?{None}
+            ^state_graph: SemaStateGraphFact?{None}
             loop fact in sema_state_graph_facts(registered_module.program.items) {
                 if fact.type_name == definition.name {
                     state_graph = Val(fact)

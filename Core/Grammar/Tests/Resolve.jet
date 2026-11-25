@@ -1,0 +1,115 @@
+// Resolve: references bound to rules, imports merged with overrides, the
+// start rule, rule and label casing, the all-or-none `# Name` rule, and
+// label/rule clashes.
+use {
+    core.grammar.[analyze]
+    core.grammar.error.[GrammarFault, GrammarFaultKind]
+    core.grammar.plan.[GrammarPlan, GrammarSource]
+}
+
+plan_of: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPlan Never! {
+    if analyze(text, start, imports) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+faults_of: fn(text: String, start: String, imports: [GrammarSource]) -> [GrammarFault] Never! {
+    if analyze(text, start, imports) == {
+        .Ok(_) -> [GrammarFault]{}
+        .Err(error) -> error.faults
+    }
+}
+
+rule_named: fn(plan: GrammarPlan, name: String) -> Int Never! {
+    loop (i, rule) in plan.tree.rules {
+        if rule.name == name -> return i
+    }
+    panic("no rule {name}")
+}
+
+#Test("a reference is bound to the rule it names") {
+    plan: plan_of("pair : key '=' value ;\nkey : text=NAME ;\nvalue : text=NAME ;\nNAME : [a-z]+ ;", "", [GrammarSource]{})
+    pair: plan.tree.rules[rule_named(plan, "pair")]
+    alt: plan.tree.nodes[plan.tree.nodes[pair.body].children[0]]
+    assert_eq(plan.tree.nodes[alt.children[0]].rule, rule_named(plan, "key"))
+    assert_eq(plan.tree.nodes[alt.children[2]].rule, rule_named(plan, "value"))
+}
+
+#Test("an undefined reference and a duplicate rule are each refused") {
+    faults: faults_of("a : b 'x' ;\na : 'y' ;", "", [GrammarSource]{})
+    assert_eq(faults.len(), 2)
+    assert_eq(faults[0].kind, GrammarFaultKind.UndefinedRule)
+    assert_eq(faults[0].message, "`b` names no rule")
+    assert_eq(faults[0].at.offset, 4)
+    assert_eq(faults[1].kind, GrammarFaultKind.Notation)
+    assert_eq(faults[1].message, "the rule `a` is defined twice")
+}
+
+#Test("an import merges the rules this grammar does not define") {
+    base: GrammarSource{name: "Base", text: "value : NUMBER | NAME ;\nNUMBER : [0-9]+ ;\nNAME : [a-z]+ ;"}
+    plan: plan_of("import Base ;\nentry : key=NAME '=' value ;\nNAME : [a-z_]+ ;", "", [GrammarSource]{base})
+    assert_eq(plan.tree.rules.len(), 4)
+    name: plan.tree.rules[rule_named(plan, "NAME")]
+    assert_eq(name.source, "")
+    value: plan.tree.rules[rule_named(plan, "value")]
+    assert_eq(value.source, "Base")
+    alt: plan.tree.nodes[plan.tree.nodes[value.body].children[1]]
+    assert_eq(plan.tree.nodes[alt.children[0]].rule, rule_named(plan, "NAME"))
+}
+
+#Test("an import of no grammar is refused at the import") {
+    faults: faults_of("import Missing ;\na : 'x' ;", "", [GrammarSource]{})
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.UndefinedRule)
+    assert_eq(faults[0].message, "there is no grammar `Missing` to import")
+    assert_eq(faults[0].at.offset, 7)
+}
+
+#Test("the start rule is the one the binding names in PascalCase") {
+    text: "key_value : key=KEY '=' value=KEY ;\nsql_stmt : name=KEY ;\nKEY : [a-z]+ ;"
+    assert_eq(plan_of(text, "KeyValue", [GrammarSource]{}).start, 0)
+    assert_eq(plan_of(text, "SQLStmt", [GrammarSource]{}).start, 1)
+    assert_eq(plan_of(text, "", [GrammarSource]{}).start, -1)
+    faults: faults_of(text, "Entry", [GrammarSource]{})
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.StartRule)
+    assert_eq(faults[0].message, "no rule is named for the binding `Entry`")
+    assert_eq(faults[0].fix, "Name the binding for the rule a parse starts from, as `KeyValue` names `key_value`")
+}
+
+#Test("parser rules are snake_case and token rules ALL_CAPS") {
+    faults: faults_of("keyValue : Word ;\nWord : [a-z]+ ;", "", [GrammarSource]{})
+    assert_eq(faults.len(), 2)
+    assert_eq(faults[0].message, "the parser rule `keyValue` is not snake_case")
+    assert_eq(faults[0].fix, "Name it `key_value`: a parser rule's name is snake_case, and its type is that name in PascalCase")
+    assert_eq(faults[1].message, "the token rule `Word` is not ALL_CAPS")
+    assert_eq(faults[1].fix, "Name it `WORD`")
+}
+
+#Test("either every alternative is named or none is") {
+    faults: faults_of("value : NUM # Number | NAME ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;", "", [GrammarSource]{})
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.FieldShape)
+    assert_eq(faults[0].message, "the rule `value` names some alternatives with `#` but not this one")
+    twice: faults_of("value : NUM # Lit | NAME # Lit ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;", "", [GrammarSource]{})
+    assert_eq(twice.len(), 1)
+    assert_eq(twice[0].message, "two alternatives of `value` are named `Lit`")
+    nested: faults_of("value : ( NUM # Lit | NAME ) ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;", "", [GrammarSource]{})
+    assert_eq(nested.len(), 1)
+    assert_eq(nested[0].kind, GrammarFaultKind.Notation)
+}
+
+#Test("a label may not share a rule's name") {
+    faults: faults_of("pair : value=NAME '=' NAME ;\nvalue : NAME ;\nNAME : [a-z]+ ;", "", [GrammarSource]{})
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.FieldShape)
+    assert_eq(faults[0].message, "the label `value` is also the name of a rule")
+}
+
+#Test("a parser rule may not use a fragment or a skipped token") {
+    faults: faults_of("a : DIGIT WS ;\nfragment DIGIT : [0-9] ;\nWS : ' '+ -> skip ;", "", [GrammarSource]{})
+    assert_eq(faults.len(), 2)
+    assert_eq(faults[0].message, "`DIGIT` is a fragment, a piece of token rules only")
+    assert_eq(faults[1].message, "`WS` is skipped between tokens, so a parser rule never meets it")
+}

@@ -33,7 +33,7 @@ run: fn(check: Check) {
     if !files.is_dir("bench") {
         return
     }
-    paths := (files.walk_files("bench").list() ?? process.fail(1, "{err}")).map(fn(entry) { files.normalize(entry.path) })
+    ^paths: (files.walk_files("bench").list() ?? process.fail(1, "{err}")).map(fn(entry) { files.normalize(entry.path) })
     paths.sort()
     loop path in paths -> print(path)
 }

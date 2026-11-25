@@ -47,9 +47,9 @@ run: fn() {
     args: process.args()
     if args.len() != 4 -> fail("usage: BrowserRun.jet <jet> <Serve.jet> <build-dir> <expected>")
     expected: files.read(args[3]) ?? fail("cannot read the expected output `{args[3]}`: {err}")
-    server := process.cmd([String]{args[0], "run", "--allow=Env,FS,IO,Net,Time", args[1], "--", "--port", "0", "--root", args[2]})
+    ^server: process.cmd([String]{args[0], "run", "--allow=Env,FS,IO,Net,Time", args[1], "--", "--port", "0", "--root", args[2]})
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start the web server: {err}")
-    port := ""
+    ^port: ""
     loop line in server.stdout.lines() {
         words: line.trim().split(" ").to_list()
         if words.len() >= 4 && words[0] == "serving" {
@@ -65,7 +65,7 @@ run: fn() {
     server.kill().drop("the server already exited")
     server.wait().drop("the server receipt is not reported")
     if outcome != "" -> fail(outcome)
-    out := term.stdout()
+    ^out: term.stdout()
     out.write(expected) ?? fail("cannot write the output: {err}")
 }
 
@@ -76,14 +76,14 @@ drive: fn(url: String, expected: String) -[Exec, FS, IO, Net, Time, Time.Wait]> 
     tree: bidi.send("browsingContext.getTree", "{{\"maxDepth\":0}}") ?? return "browsingContext.getTree failed: {err}"
     parsed: json.parse(tree) ?? return "browsingContext.getTree replied with bad JSON"
     contexts: field(parsed, "contexts") ?? return "browsingContext.getTree has no contexts"
-    context := ""
+    ^context: ""
     if contexts == .Array(items) && items.len() > 0 -> context = text_of(field(items[0], "context"))
     if context == "" -> return "Chromium has no top-level browsing context"
     bidi.send("script.addPreloadScript", "{{\"functionDeclaration\":{json_text(C_HOOK)}}}") ?? return "the console hook was refused: {err}"
     bidi.send("browsingContext.navigate", "{{\"context\":{json_text(context)},\"url\":{json_text(url)},\"wait\":\"complete\"}}") ?? return "navigation failed: {err}"
     want: expected.trim_end().replace("\r\n", "\n")
-    logs := ""
-    attempt := 0
+    ^logs: ""
+    ^attempt: 0
     loop attempt < 400 {
         reply: bidi.send("script.evaluate", "{{\"expression\":{json_text(C_LOGS)},\"target\":{{\"context\":{json_text(context)}}},\"awaitPromise\":false}}") ?? return "reading the console failed: {err}"
         value: json.parse(reply) ?? return "script.evaluate replied with bad JSON"

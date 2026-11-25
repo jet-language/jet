@@ -55,7 +55,7 @@ tree: fn(dir: String) {
     if fs.exists(done) {
         return
     }
-    n := 0
+    ^n: 0
     loop a in 0..<10 {
         loop b in 0..<10 {
             loop c in 0..<10 {
@@ -77,13 +77,13 @@ log: fn(dir: String) {
     if fs.exists(path) {
         return
     }
-    rng := RNG{state: 2}
+    ^rng: RNG{state: 2}
     levels: ["INFO", "INFO", "INFO", "DEBUG", "WARN", "ERROR"]
     svcs: ["api", "auth", "billing", "search", "web"]
     res: ["items", "users", "orders", "carts"]
-    parts := [String]{}
-    bytes := 0
-    i := 0
+    ^parts: [String]{}
+    ^bytes: 0
+    ^i: 0
     loop bytes < 100000000 {
         x: rng.below(100)
         status: if x < 90 -> 200 else if x < 97 -> 404 else -> 500 + rng.below(4)
@@ -101,22 +101,20 @@ log: fn(dir: String) {
     emit(path, parts)
 }
 
-capital: fn(word: String) -> String {
-    "{word.slice(0, 1).to_upper()}{word.slice(1, word.len())}"
-}
+capital: fn(word: String) -> String { "{word.slice(0, 1).to_upper()}{word.slice(1, word.len())}" }
 
 words: fn(dir: String) {
     path: "{dir}/data/words.txt"
     if fs.exists(path) {
         return
     }
-    rng := RNG{state: 3}
+    ^rng: RNG{state: 3}
     syl: ["ka", "lo", "mi", "ne", "ru", "sa", "ti", "vo", "ze", "qua", "ber", "don", "fel", "gri", "hap", "jun"]
-    vocab := [String]{}
-    seen := Set.from([String]{})
+    ^vocab: [String]{}
+    ^seen: Set.from([String]{})
     loop vocab.len() < 5000 {
         k: 1 + rng.below(4)
-        w := ""
+        ^w: ""
         loop _ in 0..<k -> w = "{w}{syl[rng.below(16)]}"
         if !seen.has(w) {
             seen.add(w.copy())
@@ -124,27 +122,27 @@ words: fn(dir: String) {
         }
     }
     // Zipf weights 1/(i+1), scaled to integers.
-    cum := [Int]{}
-    total := 0
+    ^cum: [Int]{}
+    ^total: 0
     loop i in 0..<5000 {
         total += 1000000 /% (i + 1)
         cum.push(total)
     }
     punct: [" ", " ", " ", " ", " ", ", ", "; ", " - "]
-    parts := [String]{}
-    bytes := 0
+    ^parts: [String]{}
+    ^bytes: 0
     loop bytes < 25000000 {
         n: 6 + rng.below(10)
-        line := ""
+        ^line: ""
         loop j in 0..<n {
             x: rng.below(total)
-            lo := 0
-            hi := 4999
+            ^lo: 0
+            ^hi: 4999
             loop lo < hi {
                 m: (lo + hi) /% 2
                 if cum[m] <= x -> lo = m + 1 else -> hi = m
             }
-            w := vocab[lo].copy()
+            ^w: vocab[lo].copy()
             if j == 0 || rng.below(100) < 5 -> w = capital(w)
             if rng.below(100) < 1 -> w = w.to_upper()
             tail: if j == n - 1 -> (if rng.below(2) == 0 -> "." else -> "!") else -> punct[rng.below(8)]
@@ -162,7 +160,7 @@ sales: fn(dir: String) {
     if fs.exists(path) {
         return
     }
-    parts := ["id,name,dept,qty,price_cents\n"]
+    ^parts: ["id,name,dept,qty,price_cents\n"]
     loop i in 1..<1000001 {
         parts.push("{i},name{i %% 1000},dept{i %% 17},{i %% 100},{(i * 31) %% 10000}\n")
     }
@@ -174,7 +172,7 @@ people: fn(dir: String) {
     if fs.exists(path) {
         return
     }
-    parts := ["["]
+    ^parts: ["["]
     loop i in 0..<400000 {
         comma: if i == 0 -> "" else -> ","
         active: if i %% 3 != 0 -> "true" else -> "false"
@@ -189,7 +187,7 @@ lines: fn(dir: String) {
     if fs.exists(path) {
         return
     }
-    parts := [String]{}
+    ^parts: [String]{}
     loop i in 0..<2000000 -> parts.push("k{(i * 7919) %% 1000003}\n")
     emit(path, parts)
 }

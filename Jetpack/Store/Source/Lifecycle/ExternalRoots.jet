@@ -62,7 +62,7 @@ store_external_root_manual_id: fn(principal: ProducerID, label: String) -> RootI
 // Length-framed principal, label and reference, then the closure targets,
 // digested.
 store_external_root_manual_witness: fn(principal: ProducerID, label: String, reference: String, targets: [String]) -> RootWitness StoreError! {
-    canonical := [String]{"jet-manual-root-v1\n"}
+    ^canonical: [String]{"jet-manual-root-v1\n"}
     framed: [String]{principal.as_str(), label, reference}
     loop value in framed -> canonical.push("{value.bytes().len()}\n{value}\n")
     loop target in targets -> canonical.push("{target}\n")
@@ -167,7 +167,7 @@ store_register_external_root_at: fn(verification: StoreVerification, roots: Hang
     }
     metadata: RootMetadata.manual(label, reference, expiry)
     id: store_external_root_manual_id(producer, label)
-    expected := RootEtag?{None}
+    ^expected: RootEtag?{None}
     if expected_etag == {
         .Val(text) -> { expected = Val(RootEtag.parse(text)) }
         .None -> {}
@@ -181,7 +181,7 @@ store_register_external_root_at: fn(verification: StoreVerification, roots: Hang
 store_list_external_roots: fn(verification: StoreVerification, roots: HangarRoots, principal: String) -[FS, Env, Time]> [ExternalRootView] ExternalRootError! {
     producer: ProducerID.new(principal)
     snapshot: store_lifecycle_snapshot(verification, roots)
-    views := [ExternalRootView]{}
+    ^views: [ExternalRootView]{}
     live_roots: snapshot.root_list()
     loop root in live_roots {
         if root.identity.kind != RootKind.Manual || root.identity.producer != producer || root.phase == RootPhase.Tombstoned {

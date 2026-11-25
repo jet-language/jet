@@ -38,8 +38,8 @@ run: fn() {
 failed: fn(message: String) -> PublishError Never! { PublishError{message: message, code: 1} }
 
 publish: fn(args: [String]) -[Env, Exec, FS, Time.Wait]> PublishError! {
-    values := [String:String]{}
-    index := 0
+    ^values: [String:String]{}
+    ^index: 0
     loop index < args.len() {
         name: args[index]
         if !OPTIONS.contains(name) {
@@ -84,8 +84,8 @@ publish: fn(args: [String]) -[Env, Exec, FS, Time.Wait]> PublishError! {
 
 // Every regular `*.json.zst` file under `root`, in byte order of its path.
 targets: fn(root: String) -[FS]> [String] PublishError! {
-    found := [String]{}
-    pending := [root.copy()]
+    ^found: [String]{}
+    ^pending: [root.copy()]
     loop pending.len() > 0 {
         dir: pending.pop() ?? break
         entries: files.list_dir(dir) ?? return Err(failed("cannot list {dir}: {err}"))

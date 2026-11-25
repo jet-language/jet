@@ -6,11 +6,11 @@ layout_minimize: fn(table: I64, basis: I64, cost: I64, barred: I64, objective: I
     width: (n + I64{1}) * I64{8}
     coll_zero(objective, width)
     coll_copy(cost, objective, n * I64{8})
-    i := I64{0}
+    ^i: I64{0}
     loop i < m {
         weight: layout_float(wrapping(cost + layout_word(wrapping(basis + i * I64{8})) * I64{8}))
         if (layout_abs(weight) > LAYOUT_EPS) {
-            k := I64{0}
+            ^k: I64{0}
             loop k <= n {
                 out: wrapping(objective + k * I64{8})
                 layout_float_put(out, layout_float(out) - weight * layout_float(wrapping(wrapping(table + i * width) + k * I64{8})))
@@ -20,7 +20,7 @@ layout_minimize: fn(table: I64, basis: I64, cost: I64, barred: I64, objective: I
         i += I64{1}
     }
     loop {
-        enter := I64{0}
+        ^enter: I64{0}
         loop enter < n {
             if (layout_word(wrapping(barred + enter * I64{8})) == I64{0} && layout_float(wrapping(objective + enter * I64{8})) < -LAYOUT_EPS) {
                 break
@@ -28,8 +28,8 @@ layout_minimize: fn(table: I64, basis: I64, cost: I64, barred: I64, objective: I
             enter += I64{1}
         }
         if (enter == n) { break }
-        leave := I64{-1}
-        best := rt_f64_from_bits(I64{9218868437227405312})
+        ^leave: I64{-1}
+        ^best: rt_f64_from_bits(I64{9218868437227405312})
         i = I64{0}
         loop i < m {
             coefficient: layout_float(wrapping(wrapping(table + i * width) + enter * I64{8}))
@@ -47,7 +47,7 @@ layout_minimize: fn(table: I64, basis: I64, cost: I64, barred: I64, objective: I
         if (leave == I64{-1}) { break }  // seed unbounded behavior
         pivot_row: wrapping(table + leave * width)
         pivot: layout_float(wrapping(pivot_row + enter * I64{8}))
-        k := I64{0}
+        ^k: I64{0}
         loop k <= n {
             cell: pivot_row + k * I64{8}
             layout_float_put(cell, layout_float(cell) / pivot)
@@ -87,7 +87,7 @@ layout_solution_zero: fn(inner: I64, variables: I64) {
     header: wrapping(inner + I64{88})
     // Reuse capacity across dirty resolves; never allocate for an unchanged size.
     layout_put(header, I64{0})
-    at := I64{0}
+    ^at: I64{0}
     loop at < variables {
         layout_float_put(data_sequence_reserve(header, I64{8}), Float{0.0})
         layout_list_publish(header)
@@ -113,8 +113,8 @@ layout_solve: fn(inner: I64) {
     if (m == I64{0}) {
         return
     }
-    n := variables + edit_count * I64{2}
-    i := I64{0}
+    ^n: variables + edit_count * I64{2}
+    ^i: I64{0}
     loop i < permanent {
         row: layout_word(wrapping(rows + I64{16})) + i * LAYOUT_ROW_BYTES
         if (layout_word(wrapping(row + I64{280})) != I64{0} || layout_word(wrapping(row + I64{272})) == I64{1}) {
@@ -156,8 +156,8 @@ layout_solve: fn(inner: I64) {
         layout_put(wrapping(specs + (permanent + i) * I64{8}), row)
         i += I64{1}
     }
-    next := variables
-    any_artificial := false
+    ^next: variables
+    ^any_artificial: false
     i = I64{0}
     loop i < m {
         spec: layout_word(wrapping(specs + i * I64{8}))
@@ -168,7 +168,7 @@ layout_solve: fn(inner: I64) {
         kind: if !required -> I64{3} else -> op
         layout_put(extra, kind)
         layout_put(wrapping(extra + I64{8}), next)
-        term := I64{0}
+        ^term: I64{0}
         loop term < layout_word(wrapping(spec + I64{256})) {
             source: spec + term * I64{16}
             cell: wrapping(row + layout_word(source) * I64{8})
@@ -243,7 +243,7 @@ layout_solve: fn(inner: I64) {
         }
         i += I64{1}
     }
-    _ := layout_minimize(table, basis, cost, barred, objective, n, m)
+    ^_: layout_minimize(table, basis, cost, barred, objective, n, m)
     solution: layout_word(wrapping(inner + I64{104}))
     i = I64{0}
     loop i < m {

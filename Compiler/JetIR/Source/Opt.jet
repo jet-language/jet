@@ -155,7 +155,7 @@ ir_opt_report: fn(level: Int) -> IROptReport Never! {
 }
 
 ir_opt_report_text: fn(r: IROptReport) -> String Never! {
-    text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, short circuits {r.short_circuits}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh}), reductions {r.reduced} (declined {r.reductions_declined})"
+    ^text: "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, short circuits {r.short_circuits}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh}), reductions {r.reduced} (declined {r.reductions_declined})"
     text = "{text}, stepped indices {r.stepped} (declined {r.steps_declined}), factors {r.factors} (declined {r.factors_declined})"
     loop note in r.reductions -> text = "{text}\n{note}"
     loop note in r.text_lengths -> text = "{text}\n{note}"
@@ -222,7 +222,7 @@ IR_FRAME_BOX_BYTES: 64
 // ir_optimize_module_measured fills them.
 ir_optimize_module: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
     level: options.level
-    report := ir_opt_module_start(m, options, threads)
+    ^report: ir_opt_module_start(m, options, threads)
     names: ir_opt_dump_names(options)
     if level <= 0 {
         ir_opt_module_facts(m, options, report, threads)
@@ -231,21 +231,21 @@ ir_optimize_module: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThr
     }
     // IR Lint reads every callee's signature while the bodies are out.
     lint: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
-    entry_lint := if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
-    functions := [IRFunction]{}
+    ^entry_lint: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
+    ^functions: [IRFunction]{}
     compiler_transfer_rows<IRFunction>(functions, m.functions)
-    keys := [String]{}
+    ^keys: [String]{}
     loop f in functions -> keys.push(f.key.copy())
     // Before the call graph: the `#unique<..>` calls this moves into callers
     // are edges of it.
     if ir_opt_enabled(options, "unique") {
         report.unique_hoisted += ir_opt_unique_to_callers(m, functions, keys, report.steps, threads)
     }
-    weights := [Int]{}
+    ^weights: [Int]{}
     loop f in functions -> weights.push(1 + f.op.len())
     glue: if ir_opt_enabled(options, "glue") -> ir_opt_glue_table(m) else -> [Int]{}
     light: ir_opt_glue_light(m, functions, glue)
-    calls := OptCalls{start: [Int]{}, to: [Int]{}}
+    ^calls: OptCalls{start: [Int]{}, to: [Int]{}}
     report.direct_calls += ir_opt_prepare(functions, weights, glue, light, threads, calls)
     order: ir_opt_bottom_up(calls)
     // Before `entry`, whose guard then stays in front of the loop. The call
@@ -259,14 +259,14 @@ ir_optimize_module: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThr
     }
     sites: ir_opt_call_sites(calls)
     if level >= 1 -> ir_opt_mark_cold(functions, calls)
-    total := 0
+    ^total: 0
     loop weight in weights -> total += weight
     workers: compiler_threads_admit(threads, functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers > 1 {
         ir_opt_scheduled(m, functions, keys, order, sites, calls, weights, options, lint, workers, report)
     } else {
-        view := ir_opt_view(m, keys)
-        bodies := ir_opt_rows(functions)
+        ^view: ir_opt_view(m, keys)
+        ^bodies: ir_opt_rows(functions)
         ir_opt_serial(view, bodies, keys, order.recursive, sites, options, lint, order.order, report)
         ir_opt_unview(m, view)
         ir_opt_unrows(functions, bodies)
@@ -282,7 +282,7 @@ ir_optimize_module: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThr
             compiler_transfer_rows<IRFunction>(m.functions, functions)
             entry_lint = ir_lint_context(m)
             compiler_transfer_rows<IRFunction>(functions, m.functions)
-            loop id in reduced -> _ := ir_opt_lint(m, entry_lint, functions[id], "reduce", report)
+            loop id in reduced -> ^_: ir_opt_lint(m, entry_lint, functions[id], "reduce", report)
         }
     }
     if level >= 1 {
@@ -296,11 +296,11 @@ ir_optimize_module: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThr
     if level >= 2 && ir_opt_enabled(options, "split") {
         split: ir_opt_split_module(m, functions, threads)
         if options.verify {
-            loop id in split -> _ := ir_opt_lint(m, entry_lint, functions[id], "split", report)
+            loop id in split -> ^_: ir_opt_lint(m, entry_lint, functions[id], "split", report)
         }
     }
     if ir_opt_enabled(options, "stops") -> ir_opt_stop_facts(m, functions, threads)
-    if ir_opt_enabled(options, "fold") -> _ := ir_opt_fold_identical(m, functions, threads)
+    if ir_opt_enabled(options, "fold") -> ^_: ir_opt_fold_identical(m, functions, threads)
     compiler_transfer_rows<IRFunction>(m.functions, functions)
     ir_opt_dump(m, names, "after", report)
     report
@@ -308,7 +308,7 @@ ir_optimize_module: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThr
 
 // The function names `options.dump` lists (JET_OPT_DUMP).
 ir_opt_dump_names: fn(options: IROptOptions) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     if options.dump == "" -> return names
     loop name in options.dump.split(",") {
         trimmed: name.trim()
@@ -341,9 +341,9 @@ ir_opt_dump: fn(m: IRModule, names: [String], stage: String, report: ^IROptRepor
 // ir_opt_inline_marked_module), on every tier and under every `inline`
 // value, before any pass that reads the call graph.
 ir_opt_module_start: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
-    report := ir_opt_report(options.level)
+    ^report: ir_opt_report(options.level)
     ir_opt_dump(m, ir_opt_dump_names(options), "before", report)
-    if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(m, threads)
+    if ir_opt_enabled(options, "retslot") -> ^_: ir_opt_return_slots(m, threads)
     ir_opt_inline_marked_module(m, report, threads)
     report
 }
@@ -362,7 +362,7 @@ ir_opt_module_facts: fn(m: ^IRModule, options: IROptOptions, report: ^IROptRepor
         return
     }
     work: IROptBodyWork{facts: true, versions: false, lint: false, drop: false, licm: false, strength: false, strip_mine: false, serial: false, poll: -1, trap: -1, turn: -1, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
-    found := [IRLintFinding]{}
+    ^found: [IRLintFinding]{}
     lint: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
     ir_opt_module_bodies(m, work, options, lint, "", threads, report, found)
 }
@@ -400,7 +400,7 @@ ir_opt_o0_fast: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThreads
     poll: ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
     trap: ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1
     turn: ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1
-    total := 0
+    ^total: 0
     loop f in m.functions -> total += 1 + f.op.len()
     workers: compiler_threads_admit(threads, m.functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers <= 1 {
@@ -413,7 +413,7 @@ ir_opt_o0_fast: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThreads
         return
     }
     work: IROptBodyWork{facts: false, facts_loops_only: false, versions: false, lint: false, drop: true, licm: false, strength: false, strip_mine: false, serial: false, poll: poll, trap: trap, turn: turn, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
-    found := [IRLintFinding]{}
+    ^found: [IRLintFinding]{}
     ir_opt_module_bodies(m, work, options, ir_lint_context_none(), "", threads, report, found)
     m.dropped_early = true
 }
@@ -421,11 +421,11 @@ ir_opt_o0_fast: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThreads
 // `work` over every body of `m` (ir_opt_bodies), reading the module's view
 // (ir_opt_view) and its names (an early Drop's cleanup routes).
 ir_opt_module_bodies: fn(m: ^IRModule, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, threads: CompilerThreads, report: ^IROptReport, found: ^[IRLintFinding]) Never! {
-    functions := [IRFunction]{}
+    ^functions: [IRFunction]{}
     compiler_transfer_rows<IRFunction>(functions, m.functions)
-    keys := [String]{}
+    ^keys: [String]{}
     loop f in functions -> keys.push(f.key.copy())
-    view := ir_opt_view(m, keys)
+    ^view: ir_opt_view(m, keys)
     compiler_transfer_rows<String>(view.names, m.names)
     ir_opt_bodies(view, functions, work, options, lint, pass, threads, report, found)
     compiler_transfer_rows<String>(m.names, view.names)
@@ -492,8 +492,8 @@ IROptBodyPart: struct {
 // `found` are the same for any thread count.
 ir_opt_bodies: fn(view: IRModule, functions: ^[IRFunction], work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, threads: CompilerThreads, report: ^IROptReport, found: ^[IRLintFinding]) Never! {
     count: functions.len()
-    weights := [Int]{}
-    total := 0
+    ^weights: [Int]{}
+    ^total: 0
     loop f in functions {
         weights.push(1 + f.op.len())
         total += 1 + f.op.len()
@@ -510,14 +510,14 @@ ir_opt_bodies: fn(view: IRModule, functions: ^[IRFunction], work: IROptBodyWork,
         return
     }
     claims: IROptClaims{cells: ir_opt_cells(functions), order: compiler_threads_heaviest_first(weights), next: 0}
-    parts := ir_opt_body_claimers(view, claims, work, options, lint, pass, workers)
+    ^parts: ir_opt_body_claimers(view, claims, work, options, lint, pass, workers)
     loop id in 0..<count -> functions.push(ir_opt_cell_take(claims.cells[id]))
-    kept := [IROptBodyDone]{}
+    ^kept: [IROptBodyDone]{}
     loop at in 0..<parts.len() {
         ir_opt_report_add(report, parts[at].total)
         kept.extend(compiler_take_rows<IROptBodyDone>(parts[at].done))
     }
-    rows := [Int]{}
+    ^rows: [Int]{}
     loop _ in 0..<count -> rows.push(-1)
     loop (row, done) in kept -> rows[done.id] = row
     loop id in 0..<count {
@@ -539,10 +539,10 @@ IROptPartitionDone: struct {
 // joined in deterministic part order.
 ir_opt_bodies_partitioned: fn(view: IRModule, functions: ^[IRFunction], weights: [Int], workers: Int, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, report: ^IROptReport, found: ^[IRLintFinding]) Never! {
     bounds: compiler_threads_partition(weights, workers)
-    parts := [[IRFunction]]{}
-    part := workers - 1
+    ^parts: [[IRFunction]]{}
+    ^part: workers - 1
     loop part >= 0 {
-        rows := [IRFunction]{}
+        ^rows: [IRFunction]{}
         rows.try_reserve(functions.len() - bounds[part]) ?? ()
         loop functions.len() > bounds[part] {
             row: functions.pop() ?? break
@@ -553,7 +553,7 @@ ir_opt_bodies_partitioned: fn(view: IRModule, functions: ^[IRFunction], weights:
         part -= 1
     }
     parts.reverse()
-    done := ir_opt_bodies_part_threads(view, parts, work, options, lint, pass, 0)
+    ^done: ir_opt_bodies_part_threads(view, parts, work, options, lint, pass, 0)
     loop at in 0..<done.len() {
         functions.extend(compiler_take_rows<IRFunction>(done[at].functions))
         ir_opt_report_add(report, done[at].report)
@@ -562,7 +562,7 @@ ir_opt_bodies_partitioned: fn(view: IRModule, functions: ^[IRFunction], weights:
 }
 
 ir_opt_bodies_part_threads: fn(view: IRModule, parts: ^[[IRFunction]], work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, at: Int) -> [IROptPartitionDone] Never! {
-    done := [IROptPartitionDone]{}
+    ^done: [IROptPartitionDone]{}
     if at >= parts.len() -> return done
     if at == parts.len() - 1 {
         done.push(ir_opt_bodies_part_run(view, compiler_take_rows<IRFunction>(parts[at]), work, options, lint, pass))
@@ -581,9 +581,9 @@ ir_opt_bodies_part_threads: fn(view: IRModule, parts: ^[[IRFunction]], work: IRO
 }
 
 ir_opt_bodies_part_run: fn(view: IRModule, functions: ^^[IRFunction], work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String) -> IROptPartitionDone Never! {
-    rows := functions.move()
-    part_report := ir_opt_report(options.level)
-    part_found := [IRLintFinding]{}
+    ^rows: functions.move()
+    ^part_report: ir_opt_report(options.level)
+    ^part_found: [IRLintFinding]{}
     loop id in 0..<rows.len() {
         ir_opt_body_run(view, work, options, lint, pass, rows[id], part_report, part_found)
     }
@@ -594,7 +594,7 @@ ir_opt_bodies_part_run: fn(view: IRModule, functions: ^^[IRFunction], work: IROp
 // Every thread reads the view, the claims, the context and the options in
 // place: nothing writes or moves them before the group joins.
 ir_opt_body_claimers: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, tasks: Int) -> [IROptBodyPart] Never! {
-    parts := [IROptBodyPart]{}
+    ^parts: [IROptBodyPart]{}
     if tasks <= 0 -> return parts
     task.group ir_opt_body_threads {
         head: task ir_opt_body_claimed(view, claims, work, options, lint, pass)
@@ -608,13 +608,13 @@ ir_opt_body_claimers: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWor
 // One thread: takes the body of each rank it claims out of its cell, runs
 // `work` on it and puts it back.
 ir_opt_body_claimed: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String) -> IROptBodyPart {
-    part := IROptBodyPart{total: ir_opt_report(options.level), done: [IROptBodyDone]{}}
+    ^part: IROptBodyPart{total: ir_opt_report(options.level), done: [IROptBodyDone]{}}
     loop {
         rank: claims.next.add(1)
         if rank >= claims.order.len() -> break
         id: claims.order[rank]
-        body := ir_opt_cell_take(claims.cells[id])
-        done := IROptBodyDone{id: id, report: ir_opt_report(options.level), found: [IRLintFinding]{}}
+        ^body: ir_opt_cell_take(claims.cells[id])
+        ^done: IROptBodyDone{id: id, report: ir_opt_report(options.level), found: [IRLintFinding]{}}
         ir_opt_body_run(view, work, options, lint, pass, body, done.report, done.found)
         ir_opt_cell_put(claims.cells[id], body)
         if done.found.len() > 0 || ir_opt_report_rows(done.report) {
@@ -629,15 +629,15 @@ ir_opt_body_claimed: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWork
 // One body through `work` (IROptBodyWork).
 ir_opt_body_run: fn(view: IRModule, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, f: ^IRFunction, report: ^IROptReport, found: ^[IRLintFinding]) Never! {
     if work.versions -> ir_opt_version_body(view, f, options, lint, report)
-    if work.facts -> _ := ir_opt_ssa_facts(view, f, options, lint, report, work.facts_loops_only)
+    if work.facts -> ^_: ir_opt_ssa_facts(view, f, options, lint, report, work.facts_loops_only)
     if work.licm && ir_opt_licm_with(view, work.stop_keys, work.safe_routes, work.char_len_route, f) > 0 {
-        if options.verify -> _ := ir_opt_lint(view, lint, f, "licm", report)
+        if options.verify -> ^_: ir_opt_lint(view, lint, f, "licm", report)
     }
     if work.strength && ir_opt_strength(view, f) > 0 {
-        if options.verify -> _ := ir_opt_lint(view, lint, f, "strength", report)
+        if options.verify -> ^_: ir_opt_lint(view, lint, f, "strength", report)
     }
     if work.strip_mine && ir_opt_strip_mine_with(view, f, work.poll, work.trap, work.turn) > 0 {
-        if options.verify -> _ := ir_opt_lint(view, lint, f, "stripmine", report)
+        if options.verify -> ^_: ir_opt_lint(view, lint, f, "stripmine", report)
     }
     if work.lint -> ir_lint_function(view, lint, f, pass, found)
     if !work.drop || f.asm != None {
@@ -664,8 +664,8 @@ ir_opt_post_loops: fn(m: ^IRModule, functions: ^[IRFunction], do_licm: Bool, do_
     trap: if do_strip_mine -> (ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1) else -> -1
     turn: if do_strip_mine -> (ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1) else -> -1
     work: IROptBodyWork{facts: false, versions: false, lint: false, drop: false, licm: do_licm, strength: do_strength, strip_mine: do_strip_mine && turn >= 0, serial: options.verify, poll: poll, trap: trap, turn: turn, stop_keys: stop_keys, safe_routes: safe_routes, char_len_route: char_len_route}
-    lent := ir_opt_lend(m)
-    found := [IRLintFinding]{}
+    ^lent: ir_opt_lend(m)
+    ^found: [IRLintFinding]{}
     ir_opt_bodies(lent, functions, work, options, lint, "", threads, report, found)
     ir_opt_lend_into(m, lent)
 }
@@ -680,8 +680,8 @@ ir_opt_post_loops: fn(m: ^IRModule, functions: ^[IRFunction], do_licm: Bool, do_
 // calling thread.
 ir_opt_version_entries: fn(m: ^IRModule, functions: ^[IRFunction], options: IROptOptions, lint: IRLintContext, threads: CompilerThreads, report: ^IROptReport) Never! {
     work: IROptBodyWork{facts: false, versions: true, lint: false, drop: false, licm: false, strength: false, strip_mine: false, serial: options.verify, poll: -1, trap: -1, turn: -1, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
-    lent := ir_opt_lend(m)
-    found := [IRLintFinding]{}
+    ^lent: ir_opt_lend(m)
+    ^found: [IRLintFinding]{}
     ir_opt_bodies(lent, functions, work, options, lint, "", threads, report, found)
     ir_opt_lend_into(m, lent)
 }
@@ -696,7 +696,7 @@ ir_opt_version_body: fn(m: IRModule, f: ^IRFunction, options: IROptOptions, lint
     }
     before: report.lint.len()
     ir_opt_ssa(m, f, options, lint, report)
-    if options.verify && report.lint.len() == before -> _ := ir_opt_lint(m, lint, f, "ssa", report)
+    if options.verify && report.lint.len() == before -> ^_: ir_opt_lint(m, lint, f, "ssa", report)
 }
 
 // The rows of `m` the passes after the bodies read besides the bodies (the
@@ -704,7 +704,7 @@ ir_opt_version_body: fn(m: IRModule, f: ^IRFunction, options: IROptOptions, lint
 // entry), moved into a module of their own that threads share: each reads
 // exactly what `m` holds. ir_opt_lend_into(m, lent) moves them back.
 ir_opt_lend: fn(m: ^IRModule) -> IRModule Never! {
-    lent := ir_module_new()
+    ^lent: ir_module_new()
     ir_opt_lend_into(lent, m)
     lent
 }
@@ -750,9 +750,9 @@ ir_opt_lend_rows: fn(to_keys: ^NameTable, to: ^[Int], from_keys: ^NameTable, fro
 // the cleanup of every stop edge in it.
 ir_opt_mark_cold: fn(functions: ^[IRFunction], calls: OptCalls) Never! {
     count: functions.len()
-    addressed := [Bool]{}
+    ^addressed: [Bool]{}
     loop _ in 0..<count -> addressed.push(false)
-    seeds := [Int]{}
+    ^seeds: [Int]{}
     loop (id, f) in functions {
         if f.key.ends_with(".__jet_cli_parse") || f.key.contains(".__jet_cli_parse_") {
             seeds.push(id)
@@ -764,12 +764,12 @@ ir_opt_mark_cold: fn(functions: ^[IRFunction], calls: OptCalls) Never! {
         }
     }
     loop id in seeds -> functions[id].cold = true
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         // Per function: 0 no direct call, 1 calls only from cold functions,
         // 2 a call from one that is not.
-        callers := [Int]{}
+        ^callers: [Int]{}
         loop _ in 0..<count -> callers.push(0)
         loop caller in 0..<count {
             cold: functions[caller].cold
@@ -794,7 +794,7 @@ ir_opt_mark_cold: fn(functions: ^[IRFunction], calls: OptCalls) Never! {
 // the header each takes, as "#unique@<row>" (OptRange.jet
 // ir_range_unique_call).
 ir_opt_view: fn(m: ^IRModule, keys: [String]) -> IRModule Never! {
-    view := ir_module_new()
+    ^view: ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
     compiler_transfer_rows<Interner>(view.interner, m.interner)
     compiler_transfer_rows<[U8]>(view.data, m.data)
@@ -827,9 +827,9 @@ ir_opt_unview: fn(m: ^IRModule, view: ^IRModule) Never! {
 // Each body moves into a one-row list, so a pass takes its function out and
 // puts it back while the others stay readable.
 ir_opt_rows: fn(functions: ^[IRFunction]) -> [[IRFunction]] Never! {
-    bodies := [[IRFunction]]{}
+    ^bodies: [[IRFunction]]{}
     loop functions.len() > 0 {
-        row := functions.pop() ?? {
+        ^row: functions.pop() ?? {
             break
         }
         bodies.push([IRFunction]{row.move()})
@@ -840,10 +840,10 @@ ir_opt_rows: fn(functions: ^[IRFunction]) -> [[IRFunction]] Never! {
 
 ir_opt_unrows: fn(functions: ^[IRFunction], bodies: ^[[IRFunction]]) Never! {
     loop bodies.len() > 0 {
-        row := bodies.pop() ?? {
+        ^row: bodies.pop() ?? {
             break
         }
-        body := row.pop() ?? panic("the IR optimizer lost a function body")
+        ^body: row.pop() ?? panic("the IR optimizer lost a function body")
         functions.push(body)
     }
     functions.reverse()
@@ -853,8 +853,8 @@ ir_opt_unrows: fn(functions: ^[IRFunction], bodies: ^[[IRFunction]]) Never! {
 // row, through its passes, and back.
 ir_opt_serial: fn(view: IRModule, bodies: ^[[IRFunction]], keys: [String], recursive: [Bool], sites: [Int], options: IROptOptions, lint: IRLintContext, ids: [Int], report: ^IROptReport) Never! {
     loop id in ids {
-        body := bodies[id].pop() ?? panic("the IR optimizer has no body for function {id}")
-        optimized := ir_opt_function(view, bodies, keys, body, recursive, sites, options, lint, report)
+        ^body: bodies[id].pop() ?? panic("the IR optimizer has no body for function {id}")
+        ^optimized: ir_opt_function(view, bodies, keys, body, recursive, sites, options, lint, report)
         bodies[id].push(optimized)
     }
 }
@@ -863,21 +863,21 @@ ir_opt_serial: fn(view: IRModule, bodies: ^[[IRFunction]], keys: [String], recur
 // the passes (the decisions report shows them; a build never counts).
 ir_optimize_module_measured: fn(m: ^IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
     before: ir_opt_module_size(m)
-    report := ir_optimize_module(m, options, threads)
+    ^report: ir_optimize_module(m, options, threads)
     report.instructions_before = before
     report.instructions_after = ir_opt_module_size(m)
     report
 }
 
 ir_opt_module_size: fn(m: IRModule) -> Int Never! {
-    count := 0
+    ^count: 0
     loop f in m.functions -> count += ir_opt_size(f)
     count
 }
 
 // Per type row of `m`, the module function its drop glue is (-1: none).
 ir_opt_glue_table: fn(m: IRModule) -> [Int] Never! {
-    table := [Int]{}
+    ^table: [Int]{}
     loop ty in m.types {
         table.push(if ty.kind == .Int || ty.drop == "" -> -1 else -> ir_keyed_function(m, ty.drop) ?? -1)
     }
@@ -918,12 +918,12 @@ OptCalls: struct {
 // (compiler_threads_partition by `weights`), one thread each, joined in part
 // order: every body and the call list are the same for any thread count.
 ir_opt_prepare: fn(functions: ^[IRFunction], weights: [Int], glue: ^^[Int], light: ^^[Bool], threads: CompilerThreads, calls: ^OptCalls) -> Int Never! {
-    total := 0
+    ^total: 0
     loop weight in weights -> total += weight
     count: functions.len()
     workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers <= 1 {
-        direct := 0
+        ^direct: 0
         loop id in 0..<count {
             direct += ir_opt_prepare_function(functions[id], glue, light)
             calls.start.push(calls.to.len())
@@ -934,12 +934,12 @@ ir_opt_prepare: fn(functions: ^[IRFunction], weights: [Int], glue: ^^[Int], ligh
     }
     bounds: compiler_threads_partition(weights, workers)
     // Parts leave the list last-first: part `workers - 1` pops first.
-    slots := [Shared<IROptPart>]{}
-    part := workers - 1
+    ^slots: [Shared<IROptPart>]{}
+    ^part: workers - 1
     loop part >= 0 {
-        rows := [IRFunction]{}
+        ^rows: [IRFunction]{}
         loop functions.len() > bounds[part] {
-            row := functions.pop() ?? break
+            ^row: functions.pop() ?? break
             rows.push(row)
         }
         rows.reverse()
@@ -950,9 +950,9 @@ ir_opt_prepare: fn(functions: ^[IRFunction], weights: [Int], glue: ^^[Int], ligh
     table: Shared{IROptGlue{table: glue.move(), light: light.move(), functions: count}}
     direct: ir_opt_preparers(slots, table, 0)
     loop slot in slots {
-        held := slot.guard_edit()
+        ^held: slot.guard_edit()
         functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
-        at := calls.to.len()
+        ^at: calls.to.len()
         loop n in held.value.call_counts {
             calls.start.push(at)
             at += n
@@ -972,7 +972,7 @@ ir_opt_prepare_function: fn(f: ^IRFunction, glue: [Int], light: [Bool]) -> Int N
 // Runs a preparing thread per slot from `at`; returns the direct calls made.
 ir_opt_preparers: fn(slots: [Shared<IROptPart>], table: Shared<IROptGlue>, at: Int) -> Int Never! {
     if at >= slots.len() -> return 0
-    direct := 0
+    ^direct: 0
     task.group ir_opt_prepare_threads {
         head: task ir_opt_prepare_part(slots[at], table)
         direct = ir_opt_preparers(slots, table, at + 1)
@@ -983,10 +983,10 @@ ir_opt_preparers: fn(slots: [Shared<IROptPart>], table: Shared<IROptGlue>, at: I
 
 ir_opt_prepare_part: fn(slot: Shared<IROptPart>, table: Shared<IROptGlue>) -> Int {
     reads: table.guard_read()
-    held := slot.guard_edit()
-    direct := 0
-    counts := [Int]{}
-    calls := [Int]{}
+    ^held: slot.guard_edit()
+    ^direct: 0
+    ^counts: [Int]{}
+    ^calls: [Int]{}
     loop id in 0..<held.value.functions.len() {
         direct += ir_opt_prepare_function(held.value.functions[id], reads.value.table, reads.value.light)
         counts.push(ir_opt_calls_of(held.value.functions[id], reads.value.functions, calls))
@@ -1013,14 +1013,14 @@ ir_opt_calls_of: fn(f: IRFunction, count: Int, to: ^[Int]) -> Int Never! {
 // consecutive parts (compiler_threads_partition by size), one thread each,
 // joined in part order: every body is the same for any thread count.
 ir_opt_split_module: fn(m: ^IRModule, functions: ^[IRFunction], threads: CompilerThreads) -> [Int] Never! {
-    weights := [Int]{}
-    total := 0
+    ^weights: [Int]{}
+    ^total: 0
     loop f in functions {
         weights.push(1 + f.op.len())
         total += 1 + f.op.len()
     }
     count: functions.len()
-    split := [Int]{}
+    ^split: [Int]{}
     workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers <= 1 {
         loop id in 0..<count {
@@ -1030,12 +1030,12 @@ ir_opt_split_module: fn(m: ^IRModule, functions: ^[IRFunction], threads: Compile
     }
     bounds: compiler_threads_partition(weights, workers)
     // Parts leave the list last-first: part `workers - 1` pops first.
-    slots := [Shared<IROptSplitPart>]{}
-    part := workers - 1
+    ^slots: [Shared<IROptSplitPart>]{}
+    ^part: workers - 1
     loop part >= 0 {
-        rows := [IRFunction]{}
+        ^rows: [IRFunction]{}
         loop functions.len() > bounds[part] {
-            row := functions.pop() ?? break
+            ^row: functions.pop() ?? break
             rows.push(row)
         }
         rows.reverse()
@@ -1043,18 +1043,18 @@ ir_opt_split_module: fn(m: ^IRModule, functions: ^[IRFunction], threads: Compile
         part -= 1
     }
     slots.reverse()
-    view := ir_module_new()
+    ^view: ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
     compiler_transfer_rows<Interner>(view.interner, m.interner)
     types: Shared{IROptTypes{views: [IRModule]{view.move()}}}
     _: ir_opt_splitters(slots, types, 0)
     loop slot in slots {
-        held := slot.guard_edit()
+        ^held: slot.guard_edit()
         at: functions.len()
         loop id in held.value.split -> split.push(at + id)
         functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
     }
-    held := types.guard_edit()
+    ^held: types.guard_edit()
     compiler_transfer_rows<IRType>(m.types, held.value.views[0].types)
     compiler_transfer_rows<Interner>(m.interner, held.value.views[0].interner)
     split
@@ -1076,7 +1076,7 @@ IROptTypes: struct {
 // they split.
 ir_opt_splitters: fn(slots: [Shared<IROptSplitPart>], types: Shared<IROptTypes>, at: Int) -> Int Never! {
     if at >= slots.len() -> return 0
-    split := 0
+    ^split: 0
     task.group ir_opt_split_threads {
         head: task ir_opt_split_part(slots[at], types)
         split = ir_opt_splitters(slots, types, at + 1)
@@ -1087,8 +1087,8 @@ ir_opt_splitters: fn(slots: [Shared<IROptSplitPart>], types: Shared<IROptTypes>,
 
 ir_opt_split_part: fn(slot: Shared<IROptSplitPart>, types: Shared<IROptTypes>) -> Int {
     reads: types.guard_read()
-    held := slot.guard_edit()
-    split := [Int]{}
+    ^held: slot.guard_edit()
+    ^split: [Int]{}
     loop id in 0..<held.value.functions.len() {
         if ir_opt_split_loops(reads.value.views[0], held.value.functions[id]) > 0 -> split.push(id)
     }
@@ -1123,8 +1123,8 @@ ir_opt_calls_route: fn(m: IRModule, f: IRFunction, at: Int, route: String) -> Bo
 // go to the report.
 ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^^IRFunction, recursive: [Bool], sites: [Int], options: IROptOptions, lint: IRLintContext, report: ^IROptReport) -> IRFunction Never! {
     level: options.level
-    body := f.move()
-    checking := options.verify && ir_opt_lint(m, lint, body, "prepare", report)
+    ^body: f.move()
+    ^checking: options.verify && ir_opt_lint(m, lint, body, "prepare", report)
     if ir_opt_enabled(options, "unique") {
         report.unique_hoisted += ir_opt_hoist_unique(m, body, keys, report.steps)
         if checking -> checking = ir_opt_lint(m, lint, body, "unique", report)
@@ -1133,7 +1133,7 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^^IR
     // its callee limit and budget, and no once-called callees (each copy
     // adds up to its callee's size).
     inline_level: if options.small || body.cold -> 1 else -> level
-    out := if options.inline == .Marked -> body.move() else -> ir_opt_inline_build(m, bodies, body, recursive, sites, inline_level >= 2 && ir_opt_enabled(options, "once"), inline_level, IROptInline.Auto, report) ?? body.move()
+    ^out: if options.inline == .Marked -> body.move() else -> ir_opt_inline_build(m, bodies, body, recursive, sites, inline_level >= 2 && ir_opt_enabled(options, "once"), inline_level, IROptInline.Auto, report) ?? body.move()
     if checking -> checking = ir_opt_lint(m, lint, out, "inline", report)
     if ir_opt_enabled(options, "glue") {
         ir_opt_glue_drops(out, m, keys)
@@ -1178,7 +1178,7 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^^IR
         // The SSA form is built only from a body IR Lint passed. A body
         // versioning copies takes its round trip there, once
         // (ir_opt_version_function).
-        ssa_done := false
+        ^ssa_done: false
         if !out.cold && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") && ir_range_wanted(m, out) {
             ssa_done = ir_opt_version_function(m, out, if level >= 2 -> IR_VERSION_BODY else -> IR_VERSION_BODY_SMALL, options, lint, checking, report)
             if checking && ssa_done -> checking = ir_opt_lint(m, lint, out, "ssa", report)
@@ -1206,8 +1206,8 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^^IR
     }
     // Last: every pass before may leave an address sum away from its access.
     if ir_opt_enabled(options, "sink") {
-        _ := ir_opt_sink_addresses(m, keys, out)
-        if checking -> _ := ir_opt_lint(m, lint, out, "sink", report)
+        ^_: ir_opt_sink_addresses(m, keys, out)
+        if checking -> ^_: ir_opt_lint(m, lint, out, "sink", report)
     }
     out
 }
@@ -1244,7 +1244,7 @@ ir_opt_ssa: fn(m: IRModule, f: ^IRFunction, options: IROptOptions, lint: IRLintC
     if report.branches_folded == folded {
         return
     }
-    s := ir_ssa_build(f)
+    ^s: ir_ssa_build(f)
     if !ir_opt_ssa_valid(f, s, options, report) {
         return
     }
@@ -1263,10 +1263,10 @@ ir_opt_ssa_facts: fn(m: IRModule, f: ^IRFunction, options: IROptOptions, lint: I
     if loops_only && !f.op.contains(IROp.Loop) -> return 0
     ranges: ir_opt_enabled(options, "range") && ir_range_wanted(m, f)
     if !ranges && !options.verify && !options.stress -> return 0
-    s := ir_ssa_build(f)
+    ^s: ir_ssa_build(f)
     if !ir_opt_ssa_valid(f, s, options, report) -> return -1
     traps: if ranges && !loops_only -> ir_range_traps(m, f) else -> 0
-    facts := if ranges -> ir_opt_int_facts(m, f, s) else -> 0
+    ^facts: if ranges -> ir_opt_int_facts(m, f, s) else -> 0
     // The stop points the ranges dropped leave the form stale, and the values
     // they kept unbounded at a join bounded now: one more round on a fresh
     // form (skipped on fast O0).
@@ -1285,9 +1285,9 @@ ir_opt_ssa_facts: fn(m: IRModule, f: ^IRFunction, options: IROptOptions, lint: I
             report.ssa_fresh += stats.fresh
         }
     } else if options.verify {
-        out := f.copy()
-        _ := ir_ssa_out(m, out, s, false)
-        _ := ir_opt_lint(m, lint, out, "ssa", report)
+        ^out: f.copy()
+        ^_: ir_ssa_out(m, out, s, false)
+        ^_: ir_opt_lint(m, lint, out, "ssa", report)
     }
     facts
 }
@@ -1305,7 +1305,7 @@ ir_opt_ssa_valid: fn(f: IRFunction, s: IRSsa, options: IROptOptions, report: ^IR
 
 // Per function, the direct Calls of it in the whole module.
 ir_opt_call_sites: fn(calls: OptCalls) -> [Int] Never! {
-    sites := [Int]{}
+    ^sites: [Int]{}
     loop _ in 0..<calls.start.len() - 1 -> sites.push(0)
     loop callee in calls.to -> sites[callee] = sites[callee] + 1
     sites
@@ -1317,7 +1317,7 @@ ir_opt_call_sites: fn(calls: OptCalls) -> [Int] Never! {
 // `callees[callee_start[f]..<callee_start[f + 1]]`.
 ir_opt_callee_edges: fn(calls: OptCalls, recursive: [Bool], callee_start: ^[Int], callees: ^[Int]) Never! {
     count: calls.start.len() - 1
-    seen := [Int]{}
+    ^seen: [Int]{}
     loop _ in 0..<count -> seen.push(-1)
     loop id in 0..<count {
         callee_start.push(callees.len())
@@ -1334,7 +1334,7 @@ ir_opt_callee_edges: fn(calls: OptCalls, recursive: [Bool], callee_start: ^[Int]
 // The same edges the other way: the functions waiting for each function,
 // `callers[caller_start[g]..<caller_start[g + 1]]`.
 ir_opt_caller_edges: fn(count: Int, callee_start: [Int], callees: [Int], caller_start: ^[Int], callers: ^[Int]) Never! {
-    next_at := [Int]{}
+    ^next_at: [Int]{}
     loop _ in 0..<count + 1 -> next_at.push(0)
     loop callee in callees -> next_at[callee + 1] = next_at[callee + 1] + 1
     loop at in 0..<count -> next_at[at + 1] = next_at[at + 1] + next_at[at]
@@ -1413,27 +1413,27 @@ IROptQueue: struct {
 // order.
 ir_opt_scheduled: fn(m: ^IRModule, functions: ^[IRFunction], keys: ^^[String], order: OptOrder, sites: ^^[Int], calls: OptCalls, weights: [Int], options: IROptOptions, lint: ^^IRLintContext, workers: Int, report: ^IROptReport) {
     count: functions.len()
-    callee_start := [Int]{}
-    callees := [Int]{}
+    ^callee_start: [Int]{}
+    ^callees: [Int]{}
     ir_opt_callee_edges(calls, order.recursive, callee_start, callees)
-    caller_start := [Int]{}
-    callers := [Int]{}
+    ^caller_start: [Int]{}
+    ^callers: [Int]{}
     ir_opt_caller_edges(count, callee_start, callees, caller_start, callers)
     // Callers come after their callees bottom-up, so walking the order back
     // finds every caller's rank before its callees need it.
-    ranks := [Int]{}
+    ^ranks: [Int]{}
     loop id in 0..<count -> ranks.push(weights[id])
     loop at in 0..<order.order.len() {
         id: order.order[order.order.len() - 1 - at]
-        longest := 0
+        ^longest: 0
         loop k in caller_start[id]..<caller_start[id + 1] {
             if ranks[callers[k]] > longest -> longest = ranks[callers[k]]
         }
         ranks[id] = weights[id] + longest
     }
-    heap := [Int]{}
-    pending := [IROptCount]{}
-    sizes := [IROptCount]{}
+    ^heap: [Int]{}
+    ^pending: [IROptCount]{}
+    ^sizes: [IROptCount]{}
     loop id in 0..<count {
         waits: callee_start[id + 1] - callee_start[id]
         pending.push(IROptCount{value: waits})
@@ -1443,12 +1443,12 @@ ir_opt_scheduled: fn(m: ^IRModule, functions: ^[IRFunction], keys: ^^[String], o
     cells: ir_opt_cells(functions)
     view: ir_opt_view(m, keys)
     graph: Shared{IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), ranks: ranks.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), queue: Shared{IROptQueue{heap: heap.move(), claimed: 0, count: count, failed: false}}, changed: Condition.new()}}
-    parts := ir_opt_schedulers(graph, workers)
+    ^parts: ir_opt_schedulers(graph, workers)
     loop at in 0..<parts.len() -> ir_opt_report_add(report, parts[at])
-    held := graph.guard_edit()
-    bodies := [[IRFunction]]{}
+    ^held: graph.guard_edit()
+    ^bodies: [[IRFunction]]{}
     loop cell in held.value.cells {
-        own := cell.guard_edit()
+        ^own: cell.guard_edit()
         bodies.push(compiler_take_rows<IRFunction>(own.value.body))
     }
     ir_opt_unview(m, held.value.views[0])
@@ -1458,7 +1458,7 @@ ir_opt_scheduled: fn(m: ^IRModule, functions: ^[IRFunction], keys: ^^[String], o
 // Runs `tasks` optimizing threads, one task each; returns each one's report.
 ir_opt_schedulers: fn(graph: Shared<IROptGraph>, tasks: Int) -> [IROptReport] Never! {
     if tasks <= 0 -> return [IROptReport]{}
-    parts := [IROptReport]{}
+    ^parts: [IROptReport]{}
     task.group ir_opt_threads {
         head: task ir_opt_scheduled_thread(graph)
         parts = ir_opt_schedulers(graph, tasks - 1)
@@ -1476,15 +1476,15 @@ ir_opt_schedulers: fn(graph: Shared<IROptGraph>, tasks: Int) -> [IROptReport] Ne
 // failed, so the others stop waiting for what it held.
 ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
     reads: graph.guard_read()
-    defer { _ := ir_opt_abandon(reads.value.queue, reads.value.changed) ?? false }
-    report := ir_opt_report(0)
+    defer { ^_: ir_opt_abandon(reads.value.queue, reads.value.changed) ?? false }
+    ^report: ir_opt_report(0)
     count: reads.value.cells.len()
     once: reads.value.options.level >= 2 && ir_opt_enabled(reads.value.options, "once")
-    callees := [[IRFunction]]{}
+    ^callees: [[IRFunction]]{}
     callees.try_reserve(count) ?? ()
     loop _ in 0..<count -> callees.push([IRFunction]{})
-    ready := [Int]{}
-    id := ir_opt_claim(reads.value.queue, reads.value.changed, reads.value.ranks)
+    ^ready: [Int]{}
+    ^id: ir_opt_claim(reads.value.queue, reads.value.changed, reads.value.ranks)
     loop id >= 0 {
         first: reads.value.callee_start[id]
         last: reads.value.callee_start[id + 1]
@@ -1513,7 +1513,7 @@ ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
 // ready and some are unclaimed. -1 once every function is claimed or a
 // thread stopped.
 ir_opt_claim: fn(queue: Shared<IROptQueue>, changed: Condition, ranks: [Int]) -> Int {
-    held := queue.guard_edit()
+    ^held: queue.guard_edit()
     held.wait(changed, fn(value) { value.heap.len() > 0 || value.claimed == value.count || value.failed }) ?? return -1
     if held.value.failed || held.value.heap.len() == 0 -> return -1
     id: ir_opt_heap_pop(held.value.heap, ranks)
@@ -1527,7 +1527,7 @@ ir_opt_claim: fn(queue: Shared<IROptQueue>, changed: Condition, ranks: [Int]) ->
 // next highest-rank function under one lock acquisition, waking waiting
 // threads only when extra work remains or all functions are claimed.
 ir_opt_ready_and_claim: fn(queue: Shared<IROptQueue>, changed: Condition, ranks: [Int], ready: ^[Int]) -> Int {
-    held := queue.guard_edit()
+    ^held: queue.guard_edit()
     added: ready.len()
     if added > 0 {
         loop rid in ready -> ir_opt_heap_push(held.value.heap, ranks, rid)
@@ -1546,7 +1546,7 @@ ir_opt_ready_and_claim: fn(queue: Shared<IROptQueue>, changed: Condition, ranks:
 // A thread's exit: when functions remain unclaimed it stopped early, so the
 // queue fails and every waiting thread wakes to stop too.
 ir_opt_abandon: fn(queue: Shared<IROptQueue>, changed: Condition) -> Bool {
-    held := queue.guard_edit()
+    ^held: queue.guard_edit()
     if held.value.claimed < held.value.count -> held.value.failed = true
     changed.notify_all()
     true
@@ -1560,7 +1560,7 @@ ir_opt_heap_before: fn(ranks: [Int], a: Int, b: Int) -> Bool Never! {
 
 ir_opt_heap_push: fn(heap: ^[Int], ranks: [Int], id: Int) Never! {
     heap.push(id)
-    at := heap.len() - 1
+    ^at: heap.len() - 1
     loop at > 0 {
         parent: (at - 1) /% 2
         if !ir_opt_heap_before(ranks, heap[at], heap[parent]) -> break
@@ -1576,11 +1576,11 @@ ir_opt_heap_pop: fn(heap: ^[Int], ranks: [Int]) -> Int Never! {
     last: heap.pop() ?? return top
     if heap.len() == 0 -> return top
     heap[0] = last
-    at := 0
+    ^at: 0
     loop {
         left: 2 * at + 1
         if left >= heap.len() -> break
-        best := left
+        ^best: left
         if left + 1 < heap.len() && ir_opt_heap_before(ranks, heap[left + 1], heap[left]) {
             best = left + 1
         }
@@ -1595,7 +1595,7 @@ ir_opt_heap_pop: fn(heap: ^[Int], ranks: [Int]) -> Int Never! {
 
 // Each of `functions` (emptied) in a cell of its own, in order.
 ir_opt_cells: fn(functions: ^[IRFunction]) -> [Shared<IROptCell>] {
-    cells := [Shared<IROptCell>]{}
+    ^cells: [Shared<IROptCell>]{}
     loop functions.len() > 0 {
         body: functions.pop() ?? {
             break
@@ -1607,13 +1607,13 @@ ir_opt_cells: fn(functions: ^[IRFunction]) -> [Shared<IROptCell>] {
 }
 
 ir_opt_cell_take: fn(cell: Shared<IROptCell>) -> IRFunction {
-    held := cell.guard_edit()
-    body := compiler_threads_taken(held.value.body)
+    ^held: cell.guard_edit()
+    ^body: compiler_threads_taken(held.value.body)
     body.move()
 }
 
 ir_opt_cell_put: fn(cell: Shared<IROptCell>, body: ^^IRFunction) {
-    held := cell.guard_edit()
+    ^held: cell.guard_edit()
     held.value.body.push(body)
 }
 
@@ -1627,7 +1627,7 @@ ir_opt_cell_copy: fn(cell: Shared<IROptCell>) -> IRFunction {
 // Instructions that do something (Nop and End excluded): the size inlining
 // measures.
 ir_opt_size: fn(f: IRFunction) -> Int Never! {
-    count := 0
+    ^count: 0
     loop op in f.op {
         if op != .Nop && op != .End -> count += 1
     }
@@ -1653,7 +1653,7 @@ OptFacts: struct {
 }
 
 ir_opt_facts: fn(f: IRFunction) -> OptFacts Never! {
-    facts := OptFacts{defs: [Int]{}, def_at: [Int]{}, uses: [Int]{}, region: [Int]{}, parent: [Int]{}}
+    ^facts: OptFacts{defs: [Int]{}, def_at: [Int]{}, uses: [Int]{}, region: [Int]{}, parent: [Int]{}}
     ir_opt_facts_refill(f, facts)
     facts
 }
@@ -1684,10 +1684,10 @@ ir_opt_facts_refill: fn(f: IRFunction, facts: ^OptFacts) Never! {
     if !reuse_region -> facts.region.clear()
     facts.parent.clear()
     facts.parent.push(-1)
-    open := [I64]{I64{0}}
+    ^open: [I64]{I64{0}}
     loop at in 0..<op_count {
         op: f.op[at]
-        if op == .Else || op == .End -> _ := open.pop()
+        if op == .Else || op == .End -> ^_: open.pop()
         cur: Int{open[open.len() - 1]}
         if reuse_region -> facts.region[at] = cur else -> facts.region.push(cur)
         if op == .Block || op == .Loop || op == .If || op == .Else {
@@ -1776,7 +1776,7 @@ ir_opt_facts_refill_counts: fn(f: IRFunction, facts: ^OptFacts) Never! {
 
 // Whether region `outer` encloses (or is) region `inner`.
 ir_opt_encloses: fn(facts: OptFacts, outer: Int, inner: Int) -> Bool Never! {
-    at := inner
+    ^at: inner
     loop at >= 0 {
         if at == outer -> return true
         at = facts.parent[at]
@@ -1810,8 +1810,8 @@ ir_opt_const_at: fn(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> Int? 
 // String is that String) of a slot that holds it there. Each step reads an
 // earlier write, so the walk ends.
 ir_opt_text_at: fn(f: IRFunction, facts: OptFacts, slot: Int, at: Int, clone: Int) -> Int? Never! {
-    value := slot
-    point := at
+    ^value: slot
+    ^point: at
     loop value >= 0 {
         def: ir_opt_reaching_def(f, facts, value, point)
         if def < 0 -> return None
@@ -1832,7 +1832,7 @@ ir_opt_text_at: fn(f: IRFunction, facts: OptFacts, slot: Int, at: Int, clone: In
 // only together with every Br inside it.
 
 ir_opt_compact_links: fn(f: ^IRFunction) Never! {
-    open := [I64]{}
+    ^open: [I64]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Block || op == .Loop -> open.push(I64{at}) else if op == .If {
@@ -1850,7 +1850,7 @@ ir_opt_compact_links: fn(f: ^IRFunction) Never! {
 }
 
 ir_opt_compact: fn(f: ^IRFunction) Never! {
-    has_nop := false
+    ^has_nop: false
     loop kind in f.op {
         if kind == .Nop {
             has_nop = true
@@ -1863,8 +1863,8 @@ ir_opt_compact: fn(f: ^IRFunction) Never! {
     }
     // Single pass: move kept rows down over Nops and recompute structural
     // indices simultaneously, then pop the freed tail.
-    kept := 0
-    open := [I64]{}
+    ^kept: 0
+    ^open: [I64]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Nop -> next
@@ -1890,12 +1890,12 @@ ir_opt_compact: fn(f: ^IRFunction) Never! {
         kept += 1
     }
     loop f.op.len() > kept {
-        _ := f.op.pop()
-        _ := f.dst.pop()
-        _ := f.a.pop()
-        _ := f.b.pop()
-        _ := f.c.pop()
-        _ := f.code_line.pop()
+        ^_: f.op.pop()
+        ^_: f.dst.pop()
+        ^_: f.a.pop()
+        ^_: f.b.pop()
+        ^_: f.c.pop()
+        ^_: f.code_line.pop()
     }
 }
 
@@ -1905,7 +1905,7 @@ ir_opt_compact: fn(f: ^IRFunction) Never! {
 // nesting stay; only rows move down, each with its region and, for the
 // write a slot's def_at names, that position.
 ir_opt_compact_facts: fn(f: ^IRFunction, facts: ^OptFacts) Never! {
-    has_nop := false
+    ^has_nop: false
     loop kind in f.op {
         if kind == .Nop {
             has_nop = true
@@ -1917,8 +1917,8 @@ ir_opt_compact_facts: fn(f: ^IRFunction, facts: ^OptFacts) Never! {
         return
     }
     count: facts.defs.len()
-    kept := 0
-    open := [I64]{}
+    ^kept: 0
+    ^open: [I64]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Nop -> next
@@ -1949,13 +1949,13 @@ ir_opt_compact_facts: fn(f: ^IRFunction, facts: ^OptFacts) Never! {
         kept += 1
     }
     loop f.op.len() > kept {
-        _ := f.op.pop()
-        _ := f.dst.pop()
-        _ := f.a.pop()
-        _ := f.b.pop()
-        _ := f.c.pop()
-        _ := f.code_line.pop()
-        _ := facts.region.pop()
+        ^_: f.op.pop()
+        ^_: f.dst.pop()
+        ^_: f.a.pop()
+        ^_: f.b.pop()
+        ^_: f.c.pop()
+        ^_: f.code_line.pop()
+        ^_: facts.region.pop()
     }
 }
 
@@ -1975,11 +1975,11 @@ ir_opt_kill: fn(f: ^IRFunction, at: Int) Never! {
 // a function without a CallIndirect builds no facts.
 
 ir_opt_direct_calls: fn(f: ^IRFunction) -> Int Never! {
-    first := 0
+    ^first: 0
     loop first < f.op.len() && f.op[first] != .CallIndirect -> first += 1
     if first == f.op.len() -> return 0
     facts: ir_opt_facts(f)
-    direct := 0
+    ^direct: 0
     loop at in first..<f.op.len() {
         if f.op[at] != .CallIndirect -> next
         def: ir_opt_reaching_def(f, facts, f.a[at], at)
@@ -2013,7 +2013,7 @@ OptTarjan: struct {
 
 ir_opt_bottom_up: fn(calls: OptCalls) -> OptOrder Never! {
     count: calls.start.len() - 1
-    t := OptTarjan{index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, order: [Int]{}, recursive: [Bool]{}}
+    ^t: OptTarjan{index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, order: [Int]{}, recursive: [Bool]{}}
     t.index.try_reserve(count) ?? ()
     t.low.try_reserve(count) ?? ()
     t.on_stack.try_reserve(count) ?? ()
@@ -2026,8 +2026,8 @@ ir_opt_bottom_up: fn(calls: OptCalls) -> OptOrder Never! {
         t.on_stack.push(false)
         t.recursive.push(false)
     }
-    work := [Int]{}
-    edge := [Int]{}
+    ^work: [Int]{}
+    ^edge: [Int]{}
     loop node in 0..<count {
         if t.index[node] < 0 -> ir_opt_tarjan_visit(t, calls, node, work, edge)
     }
@@ -2073,8 +2073,8 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
             }
             next
         }
-        _ := work.pop()
-        _ := edge.pop()
+        ^_: work.pop()
+        ^_: edge.pop()
         if work.len() > 0 {
             caller: work[work.len() - 1]
             if t.low[node] < t.low[caller] -> t.low[caller] = t.low[node]
@@ -2099,39 +2099,39 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // the counted loop is still versioned behind the test of n and i, the copy
 // carrying the arm, and IR Lint finds nothing after any pass.
 #Test("A counted loop whose only inner loop sits in an exit arm is versioned") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
+    ^g: ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     stop: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "stop"), 1)
     i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_open_if(g, stop, 4)
-    _ := ir_open(g, IROp.Block, 4)
-    _ := ir_open(g, IROp.Loop, 4)
-    _ := ir_emit(g, IROp.BrIf, -1, stop, 1, -1, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_open_if(g, stop, 4)
+    ^_: ir_open(g, IROp.Block, 4)
+    ^_: ir_open(g, IROp.Loop, 4)
+    ^_: ir_emit(g, IROp.BrIf, -1, stop, 1, -1, 4)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(g, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Return, -1, -1, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Return, -1, -1, -1, -1, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 5)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, -1, -1, -1, 6)
-    versioned := g.copy()
-    notes := ir_opt_report(2)
+    ^_: ir_emit(g, IROp.Return, -1, -1, -1, -1, 6)
+    ^versioned: g.copy()
+    ^notes: ir_opt_report(2)
     assert_eq(ir_opt_version_loops(m, versioned, IR_VERSION_BODY, notes), 1)
-    loops := 0
+    ^loops: 0
     loop op in versioned.op {
         if op == .Loop -> loops += 1
     }
@@ -2139,7 +2139,7 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
@@ -2149,26 +2149,26 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // step, whose i stays within 0..10, is the plain add, and nothing else
 // changes (the test of i and its branch stay, no Simplify folds them).
 #Test("O0 marks a bounded counter's step and leaves the rest of the body") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
+    ^g: ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     ten: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
     step: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(g, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
     ops: g.op.copy()
     m.entry = 0
     ir_function_bind(m, g.key, 0)
@@ -2187,15 +2187,15 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // eight.
 #Test("O0's body pass is the facts, IR Lint and early Drops in turn, for any thread count") {
     options: ir_opt_options(0)
-    apart := ir_opt_slot_test_wide(12, false)
+    ^apart: ir_opt_slot_test_wide(12, false)
     report: ir_optimize_module(apart, options, compiler_threads_single())
     lint: ir_lint_module(apart, "ir.build", compiler_threads_single())
     ir_drop_early(apart, compiler_threads_single())
     loop variant in 0..<2 {
         threads: if variant == 0 -> compiler_threads_single() else -> CompilerThreads{cap: Val(8), cores: 8, memory_available: None}
-        m := ir_opt_slot_test_wide(12, false)
-        started := ir_opt_module_start(m, options, threads)
-        found := [IRLintFinding]{}
+        ^m: ir_opt_slot_test_wide(12, false)
+        ^started: ir_opt_module_start(m, options, threads)
+        ^found: [IRLintFinding]{}
         ir_lint_types(m, "ir.build", found)
         context: ir_lint_context(m)
         ir_opt_o0_bodies(m, options, context, "ir.build", threads, started, found)
@@ -2214,34 +2214,34 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // constructs: compacting it with its facts leaves the facts a fresh count
 // of the compacted function gives.
 #Test("Compacting with facts leaves the facts a refill gives") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
+    ^g: ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    gone := [Int]{}
+    ^gone: [Int]{}
     gone.push(ir_emit(g, IROp.Const, one, 7, -1, -1, 2))
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
     gone.push(ir_emit(g, IROp.Const, done, 0, -1, -1, 3))
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_open_if(g, done, 4)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_open_if(g, done, 4)
     gone.push(ir_emit(g, IROp.Add, one, one, one, IR_OVERFLOW_TRAP, 4))
     ir_else(g, 4)
-    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 6)
+    ^_: ir_emit(g, IROp.Return, -1, i, -1, -1, 6)
     loop at in gone -> ir_opt_kill(g, at)
-    facts := ir_opt_facts(g)
+    ^facts: ir_opt_facts(g)
     ir_opt_compact_facts(g, facts)
     assert_eq(g.op.len(), 14)
     fresh: ir_opt_facts(g)
@@ -2257,10 +2257,10 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // nonnegative i are IR_OVERFLOW_NONNEG, which X64Select divides with no
 // correction toward zero.
 #Test("the inline Int facts mark a division of a nonnegative dividend IR_OVERFLOW_NONNEG") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
+    ^g: ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     seven: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
@@ -2270,27 +2270,27 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
     remainder: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     back: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     signed: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, seven, 7, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, seven, 7, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
     div: ir_emit(g, IROp.Div, quotient, i, seven, IR_OVERFLOW_TRAP, 4)
     rem: ir_emit(g, IROp.Rem, remainder, i, seven, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Sub, back, i, ten, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Sub, back, i, ten, IR_OVERFLOW_TRAP, 4)
     below: ir_emit(g, IROp.Div, signed, back, seven, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(g, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    _ := ir_optimize_module(m, ir_opt_options(0), compiler_threads_single())
+    ^_: ir_optimize_module(m, ir_opt_options(0), compiler_threads_single())
     f: m.functions[0]
     assert_eq(f.c[div], IR_OVERFLOW_NONNEG)
     assert_eq(f.c[rem], IR_OVERFLOW_NONNEG)
@@ -2302,10 +2302,10 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // a step inline, but the comparison puts i below n and n above 0: the
 // steps by 1 stay inside I64 and wrap, the step by 2 keeps its test.
 #Test("A word step by 1 toward a value it is compared past wraps") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
+    ^g: ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     zero: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
@@ -2315,28 +2315,28 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
     less: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     skip: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, zero, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, two, 2, -1, -1, 2)
-    _ := ir_emit(g, IROp.Gt, positive, n, zero, -1, 2)
-    _ := ir_open_if(g, positive, 2)
+    ^_: ir_emit(g, IROp.Const, zero, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, two, 2, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Gt, positive, n, zero, -1, 2)
+    ^_: ir_open_if(g, positive, 2)
     down: ir_emit(g, IROp.Sub, less, n, one, IR_OVERFLOW_TRAP, 2)
     ir_end(g, 2)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 3)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 3)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
     far: ir_emit(g, IROp.Add, skip, i, two, IR_OVERFLOW_TRAP, 4)
     step: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(g, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    _ := ir_optimize_module(m, ir_opt_options(0), compiler_threads_single())
+    ^_: ir_optimize_module(m, ir_opt_options(0), compiler_threads_single())
     f: m.functions[0]
     assert_eq(f.c[down], IR_OVERFLOW_WRAP)
     assert_eq(f.c[step], IR_OVERFLOW_WRAP)
@@ -2348,12 +2348,12 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // parser, unknown and usage (only cold callers) are cold; shared (run calls
 // it), callback (its address is taken) and run (no direct caller) are not.
 #Test("Cold functions are the CLI parser and what only cold functions call") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
-    parse := ir_function_new("__jet_cli_parse", "test:cli.jet.__jet_cli_parse", "", "cli.jet", 1)
+    ^parse: ir_function_new("__jet_cli_parse", "test:cli.jet.__jet_cli_parse", "", "cli.jet", 1)
     address: ir_slot(parse, word, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(parse, IROp.FunctionAddress, address, 5, -1, -1, 1)
-    functions := [IRFunction]{
+    ^_: ir_emit(parse, IROp.FunctionAddress, address, 5, -1, -1, 1)
+    ^functions: [IRFunction]{
         parse,
         ir_function_new("unknown", "test:cli.jet.unknown", "", "cli.jet", 2),
         ir_function_new("shared", "test:cli.jet.shared", "", "cli.jet", 3),

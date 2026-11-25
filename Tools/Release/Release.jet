@@ -175,7 +175,7 @@ PART_OWNER: 0x0074654a
 
 // The little-endian number of `count` bytes at `at` of `bytes`.
 le_number: fn(bytes: [U8], at: Int, count: Int) -> Int Never! {
-    value := 0
+    ^value: 0
     loop k in 0..<count -> value += Int{bytes[at + k]} * (1 << (8 * k))
     value
 }
@@ -203,7 +203,7 @@ image_part: fn(image: [U8], name: String) -> {at: Int, size: Int}? Never! {
         }
         length: le_number(image, from + 4, 4)
         if length < descriptor || 16 + length > size || image[from + 16 + label.len()] != 0 -> next
-        named := true
+        ^named: true
         loop index in 0..<label.len() {
             if image[from + 16 + index] != label[index] -> named = false
         }
@@ -224,9 +224,9 @@ image_part_text: fn(image: [U8], name: String) -> String Never! {
 // part (Compiler/JetCLI RuntimeEmbed.jet takes it the same way).
 identity_digest: fn(image: [U8]) -> String Never! {
     found: image_part(image, IDENTITY_PART) ?? return sha256_hex(image)
-    zeros := [U8]{}
+    ^zeros: [U8]{}
     loop _ in 0..<found.size -> zeros.push(U8{0})
-    hasher := crypto.Hasher.new()
+    ^hasher: crypto.Hasher.new()
     hasher.update(image[0..<found.at])
     hasher.update(zeros)
     hasher.update(image[found.at + found.size..<image.len()])
@@ -253,7 +253,7 @@ image_section: fn(image: [U8], name: String) -> [U8]? Never! {
         header: shoff + k * 64
         at: names_at + le_number(image, header, 4)
         if at + label.len() >= image.len() || image[at + label.len()] != 0 -> next
-        named := true
+        ^named: true
         loop index in 0..<label.len() {
             if image[at + index] != label[index] -> named = false
         }
@@ -274,7 +274,7 @@ image_section: fn(image: [U8], name: String) -> [U8]? Never! {
 // refuses it.
 debug_file_problem: fn(image: [U8], path: String) -[FS]> String Never! {
     link: image_section(image, ".gnu_debuglink") ?? return ""
-    end := 0
+    ^end: 0
     loop {
         if end >= link.len() || link[end] == 0 -> break
         end += 1
@@ -315,7 +315,7 @@ file_artifact: fn(path: String, shown: String) -[FS]> Artifact Problem! {
 // name; symbolic links are skipped.
 tree_artifacts: fn(root: String, prefix: String, out: ^[Artifact]) -[FS]> Never! {
     entries: files.list_dir(root) ?? return
-    names := [String]{}
+    ^names: [String]{}
     loop entry in entries -> names.push(entry.name.copy())
     names.sort_by(fn(left: String, right: String) { left <=> right })
     loop name in names {
@@ -333,7 +333,7 @@ tree_artifacts: fn(root: String, prefix: String, out: ^[Artifact]) -[FS]> Never!
 
 // The shipped files of `dir` in SHA256SUMS order.
 shipped_artifacts: fn(dir: String) -[FS]> [Artifact] Never! {
-    out := [Artifact]{}
+    ^out: [Artifact]{}
     loop name in SEED_FILES {
         path: files.join(dir, name)
         if !files.exists(path) -> next
@@ -349,7 +349,7 @@ shipped_artifacts: fn(dir: String) -[FS]> [Artifact] Never! {
 
 // SHA256SUMS text of `artifacts`: `<sha256>  <path>` lines.
 sums_text: fn(artifacts: [Artifact]) -> String Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop artifact in artifacts -> lines.push("{artifact.sha256}  {artifact.path}")
     "{lines.join("\n")}\n"
 }
@@ -359,10 +359,10 @@ first_line: fn(text: String) -> String Never! { text.partition("\n").head.trim()
 // Reads `dir`. Missing or malformed inputs become problems, so one run
 // reports all of them.
 read_release: fn(dir: String) -[FS]> Release Never! {
-    release := Release{dir: dir.copy(), kind: "build", identity: "", jet_sha256: "", identity_sha256: "", commit: "", seed: "", name: "", target: "", version_stamp: "", s2: "", s3: "", shipped: [Artifact]{}, sums: "", runtime_key: "", runtime_provenance_sha256: "", runtime_compiler_sha256: "", runtime_packer: "", admission: Dyn.Null, problems: [Problem]{}}
+    ^release: Release{dir: dir.copy(), kind: "build", identity: "", jet_sha256: "", identity_sha256: "", commit: "", seed: "", name: "", target: "", version_stamp: "", s2: "", s3: "", shipped: [Artifact]{}, sums: "", runtime_key: "", runtime_provenance_sha256: "", runtime_compiler_sha256: "", runtime_packer: "", admission: Dyn.Null, problems: [Problem]{}}
     admitted: files.exists(files.join(dir, "RELEASE.json"))
     release.kind = if admitted -> "admitted" else -> "build"
-    required := [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
+    ^required: [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
     if !admitted -> required.extend([String]{"COMMIT", "SEED", "BUILD.json"})
     loop name in required {
         if !files.exists(files.join(dir, name)) {

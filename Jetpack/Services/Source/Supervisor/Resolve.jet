@@ -43,7 +43,7 @@ services_resolve: fn(project_dir: String, plan: DevServicePlan) -[FS, Env]> Serv
     preset: services_catalog(plan.name)
     data_dir: if plan.data_dir == .Val(relative) -> files.join(project_dir, relative) else -> files.join(dir, "data")
     services_ensure_project_path(project_dir, data_dir, "data_dir")
-    declared_ports := plan.ports
+    ^declared_ports: plan.ports
     if declared_ports.len() == 0 && preset == .Val(kind) -> declared_ports = [Int]{kind.port()}
     ports: if declared_ports.contains(0) -> services_published_ports(dir, declared_ports) else -> declared_ports
     run: if plan.run == {
@@ -55,7 +55,7 @@ services_resolve: fn(project_dir: String, plan: DevServicePlan) -[FS, Env]> Serv
         }
     }
     services_validate_foreground_run(run, plan.name)
-    ready_probe := plan.ready_probe
+    ^ready_probe: plan.ready_probe
     if ready_probe == None && plan.ready == None && preset == .Val(kind) {
         ready_probe = Val(kind.readiness(if ports.len() > 0 -> ports[0] else -> kind.port()))
     }
@@ -66,7 +66,7 @@ services_resolve: fn(project_dir: String, plan: DevServicePlan) -[FS, Env]> Serv
 // published, when that record has the declared shape.
 services_published_ports: fn(dir: String, declared: [Int]) -[FS]> [Int] Never! {
     raw: services_read_text_bounded(services_ports_path(dir), SERVICES_MAX_STATE_BYTES) ?? return declared
-    published := [Int]{}
+    ^published: [Int]{}
     lines: services_lines(raw)
     loop line in lines {
         port: Int.parse(line.trim()) ?? next
@@ -98,8 +98,8 @@ services_daemonizing_error: fn(name: String) -> ServicesError Never! {
 
 // Split at every byte that is neither ASCII alphanumeric nor `-`, keeping empty words.
 services_command_words: fn(argument: String) -> [String] Never! {
-    words := [String]{}
-    current := [U8]{}
+    ^words: [String]{}
+    ^current: [U8]{}
     loop byte in argument.bytes() {
         code: Int{byte}
         if trust_text_is_alphanumeric(code) || code == 45 -> current.push(byte) else {
@@ -145,7 +145,7 @@ services_ensure_project_path: fn(project_dir: String, path: String, field: Strin
     root: files.canonicalize(project_dir) ?? return Err(ServicesError.new("couldn't resolve project root for service {field}: {err}"))
     relative: env_shell_strip_path_prefix(path, project_dir) ?? return Err(ServicesError.new("service {field} path `{path}` must stay inside the project"))
     candidate: if relative == "" -> root else -> files.join(root, relative)
-    existing := candidate
+    ^existing: candidate
     loop {
         if files.stat(existing) == {
             .Ok(_) -> break
@@ -203,7 +203,7 @@ services_validate_restart_budget: fn(name: String, max: Int, backoff_ms: Int) Se
 }
 
 services_validate_ports: fn(ports: [Int]) ServicesError! {
-    seen := [Int]{}
+    ^seen: [Int]{}
     loop port in ports {
         if port < 0 || port > 65535 {
             return Err(ServicesError.new("service port `{port}` is outside 0..65535"))
@@ -216,7 +216,7 @@ services_validate_ports: fn(ports: [Int]) ServicesError! {
 }
 
 services_validate_socket_names: fn(sockets: [String]) ServicesError! {
-    seen := [String]{}
+    ^seen: [String]{}
     loop socket in sockets {
         if files.is_abs(socket) || socket == "" || files.split_slash(socket).contains("..") {
             return Err(ServicesError.new("service socket `{socket}` must be a non-empty project-relative path"))
@@ -242,8 +242,8 @@ ServicePortReservation: struct {
 
 services_allocate_ports: fn(ports: [Int]) -[Net, Time.Wait]> ServicePortReservation ServicesError! {
     services_validate_ports(ports)
-    allocated := [Int]{}
-    listeners := [TCPListener]{}
+    ^allocated: [Int]{}
+    ^listeners: [TCPListener]{}
     loop requested in ports {
         listener: net.tcp_listen("127.0.0.1:{requested}") ?? {
             if requested == 0 {
@@ -266,7 +266,7 @@ ServiceSocketReservation: struct {
     listeners: [UnixListener],
 
     release: fn(^^self) -[FS]> ServicesError! {
-        first_error := String?{None}
+        ^first_error: String?{None}
         loop path in self.paths {
             if files.remove(path) == .Err(error) {
                 if !services_is_not_found(error) && first_error == None {
@@ -285,7 +285,7 @@ ServiceSocketReservation: struct {
 
 services_prepare_sockets: fn(project_dir: String, sockets: [String]) -[FS, Env, Net, Time.Wait]> ServiceSocketReservation ServicesError! {
     services_validate_socket_names(sockets)
-    reservation := ServiceSocketReservation{paths: [String]{}, listeners: [UnixListener]{}}
+    ^reservation: ServiceSocketReservation{paths: [String]{}, listeners: [UnixListener]{}}
     loop socket in sockets {
         if services_reserve_socket(project_dir, socket, reservation) == .Err(error) {
             reservation.abandon()

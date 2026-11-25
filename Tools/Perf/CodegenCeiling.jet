@@ -121,7 +121,7 @@ hex_digit: fn(code: Int) -> Int Never! {
 hex: fn(text: String) -> Int Never! {
     bytes: text.bytes()
     if bytes.len() == 0 -> return -1
-    value := 0
+    ^value: 0
     loop byte in bytes {
         digit: hex_digit(Int{byte})
         if digit < 0 -> return -1
@@ -136,7 +136,7 @@ parse_golden: fn(text: String) -> [Row] Err! {
     if lines.len() == 0 || lines[0] != HEADER {
         return Err("{GOLDEN}: the header is not `{HEADER}`")
     }
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop index in 1..<lines.len() {
         line: lines[index]
         if line == "" || line.starts_with("#") -> next
@@ -167,7 +167,7 @@ Flow: struct {
 
 // The words of an instruction's text.
 words_of: fn(text: String) -> [String] Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop word in text.split(" ") {
         if word != "" -> words.push(word.copy())
     }
@@ -175,14 +175,14 @@ words_of: fn(text: String) -> [String] Never! {
 }
 
 flow_of: fn(addresses: [Int], texts: [String]) -> Flow Never! {
-    falls := [Bool]{}
-    jumps := [Int]{}
-    indirect := [Bool]{}
+    ^falls: [Bool]{}
+    ^jumps: [Int]{}
+    ^indirect: [Bool]{}
     loop text in texts {
         ends: text.starts_with("ret") || text.starts_with("ud2") || text.starts_with("hlt")
         falls.push(!ends && !text.starts_with("jmp"))
-        target := -1
-        far := false
+        ^target: -1
+        ^far: false
         if text.starts_with("j") {
             // `jne    0x401040 <+16>`: the target is the word after the
             // mnemonic; `jmp    rax` and `jmp    QWORD PTR [rax]` jump
@@ -208,7 +208,7 @@ flow_of: fn(addresses: [Int], texts: [String]) -> Flow Never! {
 // go to any instruction.
 successors: fn(flow: Flow, at: Int) -> [Int] Never! {
     count: flow.falls.len()
-    found := [Int]{}
+    ^found: [Int]{}
     if flow.indirect[at] {
         loop other in 0..<count -> found.push(other)
         return found
@@ -221,7 +221,7 @@ successors: fn(flow: Flow, at: Int) -> [Int] Never! {
 // The instructions that may run right before each instruction.
 predecessors: fn(flow: Flow) -> [[Int]] Never! {
     count: flow.falls.len()
-    preceding := [[Int]]{}
+    ^preceding: [[Int]]{}
     loop _ in 0..<count -> preceding.push([Int]{})
     loop at in 0..<count {
         loop other in successors(flow, at) -> preceding[other].push(at)
@@ -235,22 +235,22 @@ predecessors: fn(flow: Flow) -> [[Int]] Never! {
 // Cooper, Harvey and Kennedy, over the instructions in reverse postorder.
 dominators: fn(flow: Flow, preceding: [[Int]]) -> [Int] Never! {
     count: flow.falls.len()
-    idom := [Int]{}
+    ^idom: [Int]{}
     loop _ in 0..<count -> idom.push(-1)
     if count == 0 -> return idom
-    following := [[Int]]{}
+    ^following: [[Int]]{}
     loop at in 0..<count -> following.push(successors(flow, at))
     // Postorder numbers, from a depth-first walk from the entry.
-    number := [Int]{}
-    visited := [Bool]{}
-    taken := [Int]{}
+    ^number: [Int]{}
+    ^visited: [Bool]{}
+    ^taken: [Int]{}
     loop _ in 0..<count {
         number.push(-1)
         visited.push(false)
         taken.push(0)
     }
-    postorder := [Int]{}
-    stack := [Int]{0}
+    ^postorder: [Int]{}
+    ^stack: [Int]{0}
     visited[0] = true
     loop stack.len() > 0 {
         top: stack[stack.len() - 1]
@@ -263,20 +263,20 @@ dominators: fn(flow: Flow, preceding: [[Int]]) -> [Int] Never! {
             }
             next
         }
-        _ := stack.pop()
+        ^_: stack.pop()
         number[top] = postorder.len()
         postorder.push(top)
     }
     idom[0] = 0
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
-        index := postorder.len() - 1
+        ^index: postorder.len() - 1
         loop index >= 0 {
             node: postorder[index]
             index -= 1
             if node == 0 -> next
-            chosen := -1
+            ^chosen: -1
             loop other in preceding[node] {
                 if idom[other] < 0 -> next
                 if chosen < 0 {
@@ -284,8 +284,8 @@ dominators: fn(flow: Flow, preceding: [[Int]]) -> [Int] Never! {
                     next
                 }
                 // The closest common dominator of the two.
-                left := other
-                right := chosen
+                ^left: other
+                ^right: chosen
                 loop left != right {
                     loop number[left] < number[right] -> left = idom[left]
                     loop number[right] < number[left] -> right = idom[right]
@@ -305,7 +305,7 @@ dominators: fn(flow: Flow, preceding: [[Int]]) -> [Int] Never! {
 // instruction `above` first (`idom` from dominators).
 dominates: fn(idom: [Int], above: Int, at: Int) -> Bool Never! {
     if idom[at] < 0 -> return false
-    node := at
+    ^node: at
     loop node != above && node != 0 -> node = idom[node]
     node == above
 }
@@ -315,11 +315,11 @@ dominates: fn(idom: [Int], above: Int, at: Int) -> Bool Never! {
 // the head. It holds the blocks laid out away from the loop's range, such
 // as a slow path that returns into the loop.
 natural_body: fn(preceding: [[Int]], idom: [Int], head: Int, tail: Int) -> [Int] Never! {
-    seen := [Bool]{}
+    ^seen: [Bool]{}
     loop _ in idom -> seen.push(false)
     seen[head] = true
-    body := [Int]{head}
-    work := [Int]{}
+    ^body: [Int]{head}
+    ^work: [Int]{}
     if !seen[tail] {
         seen[tail] = true
         body.push(tail)
@@ -345,13 +345,13 @@ natural_body: fn(preceding: [[Int]], idom: [Int], head: Int, tail: Int) -> [Int]
 // an explicit stack.
 irreducible_cycles: fn(flow: Flow, idom: [Int]) -> [[Int]] Never! {
     count: flow.falls.len()
-    forward := [[Int]]{}
-    number := [Int]{}
-    low := [Int]{}
-    held := [Bool]{}
-    taken := [Int]{}
+    ^forward: [[Int]]{}
+    ^number: [Int]{}
+    ^low: [Int]{}
+    ^held: [Bool]{}
+    ^taken: [Int]{}
     loop at in 0..<count {
-        kept := [Int]{}
+        ^kept: [Int]{}
         if idom[at] >= 0 {
             loop other in successors(flow, at) {
                 if !dominates(idom, other, at) -> kept.push(other)
@@ -363,9 +363,9 @@ irreducible_cycles: fn(flow: Flow, idom: [Int]) -> [[Int]] Never! {
         held.push(false)
         taken.push(0)
     }
-    cycles := [[Int]]{}
-    held_stack := [Int]{}
-    order := 0
+    ^cycles: [[Int]]{}
+    ^held_stack: [Int]{}
+    ^order: 0
     loop root in 0..<count {
         if idom[root] < 0 || number[root] >= 0 -> next
         number[root] = order
@@ -373,7 +373,7 @@ irreducible_cycles: fn(flow: Flow, idom: [Int]) -> [[Int]] Never! {
         order += 1
         held_stack.push(root)
         held[root] = true
-        calls := [Int]{root}
+        ^calls: [Int]{root}
         loop calls.len() > 0 {
             node: calls[calls.len() - 1]
             if taken[node] < forward[node].len() {
@@ -389,13 +389,13 @@ irreducible_cycles: fn(flow: Flow, idom: [Int]) -> [[Int]] Never! {
                 } else if held[child] && number[child] < low[node] { low[node] = number[child] }
                 next
             }
-            _ := calls.pop()
+            ^_: calls.pop()
             if calls.len() > 0 {
                 parent: calls[calls.len() - 1]
                 if low[node] < low[parent] -> low[parent] = low[node]
             }
             if low[node] != number[node] -> next
-            members := [Int]{}
+            ^members: [Int]{}
             loop {
                 member: held_stack.pop() ?? node
                 held[member] = false
@@ -420,11 +420,11 @@ ListingRows: struct {
 }
 
 listing_instructions: fn(listing: String) -> ListingRows Never! {
-    addresses := [Int]{}
-    texts := [String]{}
-    sources := [String]{}
-    source := "-"
-    inlined := false
+    ^addresses: [Int]{}
+    ^texts: [String]{}
+    ^sources: [String]{}
+    ^source: "-"
+    ^inlined: false
     loop line in listing.split("\n") {
         // `   0x401000 <+0>    push   rbp`: the address, the offset in the
         // function, then the instruction. A line heading
@@ -460,12 +460,12 @@ count_listing: fn(listing: String) -> Counts Never! {
     flow: flow_of(addresses, texts)
     preceding: predecessors(flow)
     idom: dominators(flow, preceding)
-    pushes := 0
-    pops := 0
-    frame_slots := 0
-    starts := [Int]{}
-    ends := [Int]{}
-    bodies := [[Int]]{}
+    ^pushes: 0
+    ^pops: 0
+    ^frame_slots: 0
+    ^starts: [Int]{}
+    ^ends: [Int]{}
+    ^bodies: [[Int]]{}
     loop index in 0..<texts.len() {
         text: texts[index]
         if text.starts_with("push") -> pushes += 1
@@ -481,8 +481,8 @@ count_listing: fn(listing: String) -> Counts Never! {
     // An irreducible loop has no back edge; it counts as the instructions
     // from its first to its last.
     loop cycle in irreducible_cycles(flow, idom) {
-        first := cycle[0]
-        last := cycle[0]
+        ^first: cycle[0]
+        ^last: cycle[0]
         loop member in cycle {
             if member < first -> first = member
             if member > last -> last = member
@@ -491,12 +491,12 @@ count_listing: fn(listing: String) -> Counts Never! {
         ends.push(addresses[last])
         bodies.push(cycle)
     }
-    loops := 0
+    ^loops: 0
     // An instruction in two overlapping innermost loops counts once.
-    inside := [Bool]{}
+    ^inside: [Bool]{}
     loop _ in addresses -> inside.push(false)
     loop loop_index in 0..<starts.len() {
-        inner := true
+        ^inner: true
         loop other in 0..<starts.len() {
             if other == loop_index -> next
             nested: starts[other] >= starts[loop_index] && ends[other] <= ends[loop_index]
@@ -513,7 +513,7 @@ count_listing: fn(listing: String) -> Counts Never! {
         }
         loop member in bodies[loop_index] -> inside[member] = true
     }
-    loop_insns := 0
+    ^loop_insns: 0
     loop flag in inside {
         if flag -> loop_insns += 1
     }
@@ -529,7 +529,7 @@ regressions: fn(golden: Counts, current: Counts) -> [String] Never! {
     names: [String]{"insns", "pushes", "pops", "frame_slots", "loops", "loop_insns"}
     was: [Int]{golden.insns, golden.pushes, golden.pops, golden.frame_slots, golden.loops, golden.loop_insns}
     now: [Int]{current.insns, current.pushes, current.pops, current.frame_slots, current.loops, current.loop_insns}
-    found := [String]{}
+    ^found: [String]{}
     loop index in 0..<names.len() {
         if now[index] > was[index] -> found.push("{names[index]} {was[index]} -> {now[index]}")
     }
@@ -558,7 +558,7 @@ run_command: fn(command: [String], cwd: String, scratch: String) -[Exec, Env, IO
 // machine code (`disas NAME`) of a built image, read from its file without
 // running it. Err when the image holds no such function.
 image_listing: fn(jet: [String], command: String, binary: String, cwd: String, scratch: String) -[Exec, Env, IO, Time.Wait]> String Err! {
-    argv := jet.copy()
+    ^argv: jet.copy()
     argv.extend([String]{"debug", binary.copy(), "--do", command})
     listing: run_command(argv, cwd, scratch)
     if listing.starts_with("No function") -> return Err("{binary}: {listing.trim()}")
@@ -574,7 +574,7 @@ SymbolRow: struct {
 }
 
 symbol_rows: fn(symbols: String) -> [SymbolRow] Never! {
-    found := [SymbolRow]{}
+    ^found: [SymbolRow]{}
     loop line in symbols.split("\n") {
         words: words_of(line)
         if words.len() == 4 && words[0].starts_with("0x") {
@@ -594,9 +594,9 @@ PART: "__general_"
 // function, the symbol itself or a specialization of it, then its parts
 // (PART). Err when no function or several match.
 resolve: fn(symbols: String, symbol: String) -> [String] Err! {
-    names := [String]{}
+    ^names: [String]{}
     loop row in symbol_rows(symbols) -> names.push(row.name.copy())
-    found := [String]{}
+    ^found: [String]{}
     loop name in names {
         if !name.contains(PART) && (name == symbol || name.starts_with("{symbol}__")) {
             found.push(name.copy())
@@ -623,7 +623,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
     source: files.read("{root}/{DIR}/Catalog/main.jet") ?? return fail("missing {DIR}/Catalog/main.jet: {err}")
     expected: files.read("{root}/{DIR}/Catalog/expected.out") ?? return fail("missing {DIR}/Catalog/expected.out: {err}")
     files.write("{run_dir}/main.jet", source) ?? return fail("cannot copy the catalog: {err}")
-    build := jet.copy()
+    ^build: jet.copy()
     build.extend([String]{"build", "--release", "--debug-info=true", "main.jet"})
     run_command(build, run_dir, scratch) ?? return fail("the catalog does not build: {err}")
     binary: "{run_dir}/.jet/build/main"
@@ -632,12 +632,12 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
         return fail("the catalog prints other output than {DIR}/Catalog/expected.out:\n{output}")
     }
     symbols: image_listing(jet, "symbols", binary, run_dir, scratch) ?? return fail("{err}")
-    failures := 0
-    stale := 0
-    lines := [String]{HEADER}
-    listing_lines := [String]{LISTING_HEADER}
+    ^failures: 0
+    ^stale: 0
+    ^lines: [String]{HEADER}
+    ^listing_lines: [String]{LISTING_HEADER}
     loop row in rows {
-        functions := [String]{}
+        ^functions: [String]{}
         if resolve(symbols, row.symbol) == {
             .Ok(found) -> { functions = found }
             .Err(error) -> term.eprint("MISSING {error}")
@@ -646,8 +646,8 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
             failures += 1
             next
         }
-        current := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
-        sourced := [String]{}
+        ^current: Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
+        ^sourced: [String]{}
         loop name in functions {
             listing: image_listing(jet, "disas {name}", binary, run_dir, scratch) ?? return fail("{err}")
             current = add_counts(current, count_listing(listing))
@@ -658,7 +658,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
         loop item in worse -> term.eprint("REGRESSION {row.symbol}: {item}")
         recorded: listing_of(listed, row.symbol)
         unchanged: worse.is_empty() && regressions(current, row.golden).is_empty()
-        explained := false
+        ^explained: false
         // `--update` records the listing of a row that did not regress.
         if !update || !worse.is_empty() {
             if stale_listing(row.symbol, unchanged, recorded, sourced) == .Val(why) {
@@ -675,7 +675,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
         listing_lines.extend(sourced)
     }
     if failures != 0 || stale != 0 {
-        problems := [String]{}
+        ^problems: [String]{}
         if failures != 0 -> problems.push("{failures} regression(s)")
         if stale != 0 {
             problems.push("{stale} stale row(s) in {LISTING}; `--update` with a compiler that does not regress records them again")
@@ -695,7 +695,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
 // one (`main.scan__value_3a05…` reads `main.scan__value`): two builds of the
 // same function hash differently when their programs differ.
 stem: fn(name: String) -> String Never! {
-    kept := [String]{}
+    ^kept: [String]{}
     loop segment in name.split("_") {
         if segment.len() == 16 && hex(segment) >= 0 -> next
         kept.push(segment.copy())
@@ -708,7 +708,7 @@ stem: fn(name: String) -> String Never! {
 // names of jump and call targets.
 normal_instruction: fn(text: String) -> String Never! {
     words: words_of(text.split("#").to_list()[0])
-    kept := [String]{}
+    ^kept: [String]{}
     loop index in 0..<words.len() {
         word: words[index]
         if index + 1 < words.len() && words[index + 1].starts_with("<") -> next
@@ -728,7 +728,7 @@ normal_instruction: fn(text: String) -> String Never! {
 // targets' offsets, which an instruction added before them moves (a jump
 // within its own function reads `<>`).
 listed_instruction: fn(text: String) -> String Never! {
-    kept := [String]{}
+    ^kept: [String]{}
     loop word in normal_instruction(text).split(" ") {
         kept.push(if word.starts_with("<") && word.contains("+") -> "{word.partition("+").head}>" else -> word.copy())
     }
@@ -739,7 +739,7 @@ listed_instruction: fn(text: String) -> String Never! {
 // same code: addresses, rip-relative displacements, comments and the hashes
 // in the names of call targets.
 normal_listing: fn(listing: String) -> [String] Never! {
-    found := [String]{}
+    ^found: [String]{}
     loop text in listing_instructions(listing).texts -> found.push(normal_instruction(text))
     found
 }
@@ -748,7 +748,7 @@ normal_listing: fn(listing: String) -> [String] Never! {
 // directory) as the catalog's file and line. A path outside the run
 // directory keeps only its file name.
 source_line: fn(text: String, run_dir: String) -> String Never! {
-    path := text.removeprefix("{run_dir}/")
+    ^path: text.removeprefix("{run_dir}/")
     loop path.starts_with("./") -> path = path.removeprefix("./")
     if !path.starts_with("/") -> return path
     pieces: path.split("/").to_list()
@@ -760,7 +760,7 @@ source_line: fn(text: String, run_dir: String) -> String Never! {
 // instruction lowers from (`-` before the first) and the instruction
 // without its jump targets' offsets.
 listing_rows: fn(symbol: String, function: String, listing: String, run_dir: String) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     found: listing_instructions(listing)
     loop index in 0..<found.texts.len() {
         source: if found.sources[index] == "-" -> "-" else -> source_line(found.sources[index], run_dir)
@@ -771,7 +771,7 @@ listing_rows: fn(symbol: String, function: String, listing: String, run_dir: Str
 
 // The listing.tsv rows of one symbol.
 listing_of: fn(text: String, symbol: String) -> [String] Never! {
-    found := [String]{}
+    ^found: [String]{}
     loop line in text.split("\n") {
         if line.starts_with("{symbol}\t") -> found.push(line.copy())
     }
@@ -794,7 +794,7 @@ added_rows: fn(golden: [String], current: [String]) -> [String] Never! {
     width: theirs.len() + 1
     // common[i * width + j]: the longest common subsequence of ours from i
     // and theirs from j.
-    common := [Int]{}
+    ^common: [Int]{}
     loop _ in 0..<((ours.len() + 1) * width) -> common.push(0)
     loop back_i in 0..<ours.len() {
         i: ours.len() - 1 - back_i
@@ -807,9 +807,9 @@ added_rows: fn(golden: [String], current: [String]) -> [String] Never! {
             }
         }
     }
-    found := [String]{}
-    i := 0
-    j := 0
+    ^found: [String]{}
+    ^i: 0
+    ^j: 0
     loop j < theirs.len() {
         if {
             i < ours.len() && ours[i] == theirs[j] -> {
@@ -836,7 +836,7 @@ grown: fn(symbol: String, golden: [String], current: [String]) -> [String] Never
     if added.is_empty() {
         return [String]{"GREW {symbol}: no instruction its golden listing lacks; only their order or the loops they form changed"}
     }
-    lines := [String]{"GREW {symbol}: {added.len()} instruction(s) its golden listing lacks:"}
+    ^lines: [String]{"GREW {symbol}: {added.len()} instruction(s) its golden listing lacks:"}
     loop row in added {
         fields: row.split("\t").to_list()
         lines.push("  {fields[1]} {fields[2]}: {fields[3]}")
@@ -868,7 +868,7 @@ stale_listing: fn(symbol: String, unchanged: Bool, recorded: [String], current: 
 
 // How many functions of each stem a symbol listing holds.
 function_stems: fn(symbols: String) -> [String:Int] Never! {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop row in symbol_rows(symbols) {
         if row.kind != "function" -> next
         name: stem(row.name)
@@ -882,7 +882,7 @@ function_stems: fn(symbols: String) -> [String:Int] Never! {
 // (or code only the kernel's spelling brought in).
 kept_functions: fn(kernel: String, direct: String) -> [String] Never! {
     theirs: function_stems(direct)
-    found := [String]{}
+    ^found: [String]{}
     loop (name, count) in function_stems(kernel) {
         extra: count - (theirs.get(name) ?? 0)
         if extra > 0 -> found.push("{name} x{extra}")
@@ -929,7 +929,7 @@ zero_cost_build: fn(root: String, jet: [String], arm: Int, level: String, expect
         source: files.read("{root}/{ZERO_COST}/{name}/{file}") ?? return Err("missing {ZERO_COST}/{name}/{file}: {err}")
         files.write("{dir}/{file}", source) ?? return Err("cannot copy {name}/{file}: {err}")
     }
-    build := jet.copy()
+    ^build: jet.copy()
     build.extend([String]{"build", "--release", level, "--debug-info=true", "main.jet"})
     run_command(build, dir, scratch) ?? return Err("{name} {level} does not build: {err}")
     binary: "{dir}/.jet/build/main"
@@ -953,9 +953,9 @@ ZeroCostFunction: struct {
 // as the value the program reads it as; the pair holds the two builds to the
 // same sum.
 zero_cost_function: fn(jet: [String], build: ZeroCostBuild, symbol: String, run_dir: String, scratch: String) -[Exec, Env, IO, Time.Wait]> ZeroCostFunction Err! {
-    counts := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
-    text := [String]{}
-    found := 0
+    ^counts: Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
+    ^text: [String]{}
+    ^found: 0
     loop row in symbol_rows(build.symbols) {
         if row.name != symbol && !row.name.starts_with("{symbol}__") -> next
         listing: image_listing(jet, "disas {row.name}", build.binary, run_dir, scratch)
@@ -969,7 +969,7 @@ zero_cost_function: fn(jet: [String], build: ZeroCostBuild, symbol: String, run_
 
 zero_cost: fn(root: String, jet: [String], run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     expected: files.read("{root}/{ZERO_COST}/expected.out") ?? return fail("missing {ZERO_COST}/expected.out: {err}")
-    failures := 0
+    ^failures: 0
     loop level in ZERO_COST_LEVELS {
         kernel: zero_cost_build(root, jet, 0, level, expected, run_dir, scratch) ?? return fail("{err}")
         direct: zero_cost_build(root, jet, 1, level, expected, run_dir, scratch) ?? return fail("{err}")
@@ -996,9 +996,9 @@ zero_cost: fn(root: String, jet: [String], run_dir: String, scratch: String) -[E
 
 codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     args: process.args()
-    jet := [String]{}
-    mode := ""
-    index := 0
+    ^jet: [String]{}
+    ^mode: ""
+    ^index: 0
     loop index < args.len() {
         if (args[index] == "--check" || args[index] == "--update" || args[index] == "--zero-cost") && mode == "" {
             mode = args[index].copy()

@@ -11,7 +11,7 @@ text_type_ref: fn(space: [WasmCtype], index: Int, depth: Int) -> String Never! {
 
 text_ctype: fn(space: [WasmCtype], ty: WasmCtype, depth: Int) -> String Never! {
     inner: if ty.inner.len() > 0 -> ty.inner else -> space
-    parts := [String]{}
+    ^parts: [String]{}
     loop k in 0..<ty.types.len() {
         name: if k < ty.names.len() -> ty.names[k] else -> ""
         parts.push("{name}:{text_type_ref(inner, ty.types[k], depth)}")
@@ -20,7 +20,7 @@ text_ctype: fn(space: [WasmCtype], ty: WasmCtype, depth: Int) -> String Never! {
 }
 
 text_module: fn(m: WasmModule) -> String Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop ty in m.types -> lines.push("type {ty.render()}")
     loop entry in m.imports {
         lines.push("import {entry.module_name} {entry.name} {entry.kind} {entry.type_index} {entry.table} {entry.memory} {entry.global}")
@@ -50,7 +50,7 @@ text_options: fn(o: jet_wasm.WasmCanonOptions) -> String Never! {
 }
 
 text_component: fn(c: WasmComponent) -> String Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop m in c.modules -> lines.push("module\n{text_module(m)}")
     loop inst in c.core_instances {
         lines.push("core instance {inst.source} {inst.arg_names} {inst.arg_instances} {inst.export_names} {inst.export_sorts} {inst.export_indexes}")

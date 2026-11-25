@@ -17,7 +17,7 @@ copy_tree: fn(from: String, to: String) {
     loop entry in entries {
         if entry.name == ".jet" -> next
         source: "{from}/{entry.name}"
-        target := "{to}/{entry.name}"
+        ^target: "{to}/{entry.name}"
         if entry.is_dir -> copy_tree(source, target) else {
             files.copy(source.copy(), target.move()) ?? fail("cannot copy {source}: {err}")
         }
@@ -27,7 +27,7 @@ copy_tree: fn(from: String, to: String) {
 // stdout of one `jet run` of `directory/run.jet` in `scratch`, at O2 when `release`; a failed run is fatal.
 run_tier: fn(jet: String, scratch: String, directory: String, release: Bool) -> String {
     tier: if release -> "native O2" else -> "native O0"
-    args := [String]{jet.copy(), "run"}
+    ^args: [String]{jet.copy(), "run"}
     if release -> args.push("--release")
     args.push("{scratch}/{directory}/run.jet")
     receipt: process.cmd(args).cwd(scratch.copy()).env("NO_COLOR", "1").run() ?? fail("{directory} {tier} failed: {err}")
@@ -38,11 +38,11 @@ run_tier: fn(jet: String, scratch: String, directory: String, release: Bool) -> 
 }
 
 check_fixture: fn(jet: String, scratch: String, directory: String, expected: String) {
-    native := run_tier(jet.copy(), scratch.copy(), directory.copy(), false)
+    ^native: run_tier(jet.copy(), scratch.copy(), directory.copy(), false)
     if native != expected {
         fail("{directory} native O0 output differs: {native}; expected {expected}")
     }
-    release := run_tier(jet.copy(), scratch.copy(), directory.copy(), true)
+    ^release: run_tier(jet.copy(), scratch.copy(), directory.copy(), true)
     if release != expected {
         fail("{directory} native O2 output differs: {release}; expected {expected}")
     }

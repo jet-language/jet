@@ -7,7 +7,7 @@ pick: fn(pointer: *Int, keep: Bool) -> mem.Ptr<Int>? {
 }
 
 run: fn() {
-    cell := 41
+    ^cell: 41
     address: mem.address_of(cell)
     #Unsafe("each pointer names the live local cell, or is null and never read") {
         pointer: mem.Ptr<Int>.from_addr(address)
@@ -16,7 +16,7 @@ run: fn() {
         null: pick(mem.Ptr<Int>.from_addr(0), true)
         if null == .Val(_) -> print("null present") else -> print("null is None")
         slots: [pick(pointer, false), pick(pointer, true), null]
-        present := 0
+        ^present: 0
         loop slot in slots {
             if slot == .Val(_) -> present += 1
         }

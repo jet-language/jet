@@ -42,48 +42,69 @@ Shape: enum {
 }
 
 MIXED_SIZE: #run { Mixed.reflect().layout.size ?? -1 }
+
 MIXED_A: #run { Mixed.reflect().layout.fields[0].offset ?? -1 }
+
 MIXED_B: #run { Mixed.reflect().layout.fields[1].offset ?? -1 }
+
 MIXED_C: #run { Mixed.reflect().layout.fields[2].offset ?? -1 }
+
 MIXED_D: #run { Mixed.reflect().layout.fields[3].offset ?? -1 }
+
 MIXED_E: #run { Mixed.reflect().layout.fields[4].offset ?? -1 }
 
 ORDERED_SIZE: #run { Ordered.reflect().layout.size ?? -1 }
+
 ORDERED_A: #run { Ordered.reflect().layout.fields[0].offset ?? -1 }
+
 ORDERED_B: #run { Ordered.reflect().layout.fields[1].offset ?? -1 }
+
 ORDERED_C: #run { Ordered.reflect().layout.fields[2].offset ?? -1 }
 
 PAIR_INT_SIZE: #run { Pair<Int>.reflect().layout.size ?? -1 }
+
 PAIR_INT_FLAG: #run { Pair<Int>.reflect().layout.fields[0].offset ?? -1 }
+
 PAIR_INT_VALUE: #run { Pair<Int>.reflect().layout.fields[1].offset ?? -1 }
+
 PAIR_INT_SMALL: #run { Pair<Int>.reflect().layout.fields[2].offset ?? -1 }
 
 PAIR_U8_SIZE: #run { Pair<U8>.reflect().layout.size ?? -1 }
+
 PAIR_U8_FLAG: #run { Pair<U8>.reflect().layout.fields[0].offset ?? -1 }
+
 PAIR_U8_VALUE: #run { Pair<U8>.reflect().layout.fields[1].offset ?? -1 }
+
 PAIR_U8_SMALL: #run { Pair<U8>.reflect().layout.fields[2].offset ?? -1 }
 
 HOLDER_SIZE: #run { Holder.reflect().layout.size ?? -1 }
+
 HOLDER_TAG: #run { Holder.reflect().layout.fields[0].offset ?? -1 }
+
 HOLDER_REC: #run { Holder.reflect().layout.fields[1].offset ?? -1 }
+
 HOLDER_REC_SIZE: #run { Holder.reflect().layout.fields[1].size ?? -1 }
+
 HOLDER_LAST: #run { Holder.reflect().layout.fields[2].offset ?? -1 }
 
 SHAPE_SIZE: #run { Shape.reflect().layout.size ?? -1 }
+
 SHAPE_CIRCLE: #run { Shape.reflect().layout.fields[1].offset ?? -1 }
+
 SHAPE_RECT: #run { Shape.reflect().layout.fields[2].offset ?? -1 }
+
 SHAPE_RECT_SIZE: #run { Shape.reflect().layout.fields[2].size ?? -1 }
 
 // One fact: what reflection reports against what the program has.
 agree: fn(what: String, reflected: Int, compiled: Int) {
-    if reflected != compiled -> panic("{what}: reflect().layout says {reflected}, the compiled program has {compiled}")
+    if reflected != compiled {
+        panic("{what}: reflect().layout says {reflected}, the compiled program has {compiled}")
+    }
 }
 
 // Builds the Rect case; `jet emit --ir --fn rect` shows where it stores each
 // payload member in the box.
-rect: fn(w: U8, h: Int, k: U16) -> Shape {
-    Shape.Rect{w: w, h: h, k: k}
-}
+rect: fn(w: U8, h: Int, k: U16) -> Shape { Shape.Rect{w: w, h: h, k: k} }
 
 run: fn() {
     mixed: [Mixed]{Mixed{a: U8{1}, b: 2, c: U8{3}, d: 4, e: U8{5}}, Mixed{a: U8{6}, b: 7, c: U8{8}, d: 9, e: U8{10}}}
@@ -136,7 +157,9 @@ run: fn() {
     loop value in ordered -> print("{value.a} {value.b} {value.c}")
     loop value in wide -> print("{value.flag} {value.value} {value.small}")
     loop value in narrow -> print("{value.flag} {value.value} {value.small}")
-    loop value in holders -> print("{value.tag} {value.rec.x} {value.rec.y} {value.rec.z} {value.last}")
+    loop value in holders {
+        print("{value.tag} {value.rec.x} {value.rec.y} {value.rec.z} {value.last}")
+    }
     if shape == {
         .Rect(w, h, k) -> print("{w} {h} {k}")
         .Dot | .Circle(_) -> print("other")

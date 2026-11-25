@@ -22,8 +22,8 @@ kit_steps_duration_ns: fn(text: String) -> Int? {
 
 // A zero offset is a real instant: an immediate terminal event or an elapsed bound of 0ns.
 kit_steps_offset_ns: fn(text: String) -> Int? {
-    scale := 0
-    suffix := ""
+    ^scale: 0
+    ^suffix: ""
     if text.ends_with("ns") {
         scale = 1
         suffix = "ns"
@@ -49,8 +49,8 @@ kit_steps_offset_ns: fn(text: String) -> Int? {
     if parts.len() > 2 -> return None
     whole: Int.parse(parts[0]) ?? return None
     if whole < 0 -> return None
-    fraction := 0
-    denominator := 1
+    ^fraction: 0
+    ^denominator: 1
     if parts.len() == 2 {
         if parts[1] == "" || parts[1].len() > 9 -> return None
         loop byte in parts[1].bytes() {
@@ -70,7 +70,7 @@ kit_steps_offset_ns: fn(text: String) -> Int? {
 
 kit_steps_octal: fn(text: String) -> Int? {
     if text == "" -> return None
-    result := 0
+    ^result: 0
     loop byte in text.bytes() {
         digit: Int{byte} - 48
         if digit < 0 || digit > 7 -> return None
@@ -143,7 +143,7 @@ kit_steps_setup_run: fn(step: KitStep, env: KitEnv, work: String, scratch: Strin
         files.truncate(path, size) ?? return kit_expect_verdict("ERROR", "truncate: {err}")
     } else if step.action == "poke" {
         replacement: kit_steps_hex_decode(step.argv[5]) ?? return kit_expect_verdict("ERROR", "{err}")
-        bytes := files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "poke read: {err}")
+        ^bytes: files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "poke read: {err}")
         offset: if step.argv[3] == "mid" -> bytes.len() /% 2 else -> Int.parse(step.argv[3]) ?? return kit_expect_verdict("ERROR", "invalid poke offset: {step.argv[3]}")
         if offset < 0 || offset > bytes.len() || replacement.len() > bytes.len() - offset {
             return kit_expect_verdict("ERROR", "poke span exceeds file: {step.argv[3]}")
@@ -162,7 +162,7 @@ kit_steps_setup_run: fn(step: KitStep, env: KitEnv, work: String, scratch: Strin
 
 kit_steps_entries_valid: fn(words: [String]) -> Bool {
     if words.len() == 0 || !kit_steps_relative_path(words[0]) -> return false
-    i := 1
+    ^i: 1
     loop i < words.len() {
         key: words[i]
         if key == "recursive" {
@@ -191,7 +191,7 @@ kit_steps_entries_valid: fn(words: [String]) -> Bool {
 }
 
 kit_steps_extension: fn(name: String) -> String? {
-    dot := -1
+    ^dot: -1
     loop (i, byte) in name.bytes() {
         if byte == (U8{46}) -> dot = i
     }
@@ -200,7 +200,7 @@ kit_steps_extension: fn(name: String) -> String? {
 }
 
 kit_steps_entry_matches: fn(path: String, name: String, is_dir: Bool, is_file: Bool, depth: Int, words: [String]) -> Bool {
-    i := 1
+    ^i: 1
     loop i < words.len() {
         key: words[i]
         if key == "recursive" {
@@ -241,7 +241,7 @@ kit_steps_entry_matches: fn(path: String, name: String, is_dir: Bool, is_file: B
 }
 
 kit_steps_entries_walk: fn(directory: String, depth: Int, words: [String], recursive: Bool) -> [String] Err! {
-    output := [String]{}
+    ^output: [String]{}
     entries: files.list_dir(directory) ?? return Err("entries directory: {err}")
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err("entries stat: {err}")
@@ -274,7 +274,7 @@ kit_steps_entries_assertion: fn(original: String) -> KitAssertion? {
 
 kit_steps_directory_names: fn(path: String) -> [String] Err! {
     entries: files.list_dir(path) ?? return Err("directory names: {err}")
-    names := [String]{}
+    ^names: [String]{}
     loop entry in entries -> names.push(entry.name)
     names.sort()
     Ok(names)
@@ -298,15 +298,15 @@ kit_steps_tree_assertion: fn(original: String) -> KitAssertion? {
 
 kit_steps_tree_check: fn(assertion: KitAssertion, context: KitStepCtx, state: KitStepState) -> KitVerdict {
     directory: kit_steps_work_path(assertion.path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "tree directory escapes work")
-    words := [String]{}
+    ^words: [String]{}
     loop word in assertion.alternatives {
         words.push(kit_steps_runtime_expand(word, context, state) ?? return kit_expect_verdict("ERROR", "tree filter token unavailable"))
     }
     if !kit_expect_named(words, "recursive") -> words.push("recursive")
     paths: kit_steps_entries(directory, words) ?? return kit_expect_verdict("ERROR", "{err}")
     value: kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "tree value token unavailable")
-    total := 0
-    readable := [String]{}
+    ^total: 0
+    ^readable: [String]{}
     loop path in paths {
         info: files.stat(path) ?? return kit_expect_verdict("ERROR", "tree stat: {err}")
         if !info.is_file || info.is_symlink -> next

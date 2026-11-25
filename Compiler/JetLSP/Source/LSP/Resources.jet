@@ -21,7 +21,7 @@ LSP_RESOURCE_NOT_FOUND: -32002
 
 // `resources/list`: the environment resource, when a plan is in reach.
 lsp_resources_list_response: fn(server: LSPServer, id: Dyn) -> String {
-    rows := [String]{}
+    ^rows: [String]{}
     if lsp_environment_root(server) != None {
         rows.push("{{\"uri\":{foundation_json_quote(LSP_ENVIRONMENT_URI)},\"name\":\"Jet environment\",\"description\":\"Read-only typed environment facts\",\"mimeType\":\"application/json\"}}")
     }
@@ -31,12 +31,16 @@ lsp_resources_list_response: fn(server: LSPServer, id: Dyn) -> String {
 // `resources/read`: the plan's report as the one content of the resource.
 lsp_resources_read_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     uri: lsp_text_member(params ?? Dyn.Null, "uri") ?? return lsp_error_response(id, -32602, "resources/read requires a URI")
-    if uri != LSP_ENVIRONMENT_URI -> return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "resource not found: {uri}")
+    if uri != LSP_ENVIRONMENT_URI {
+        return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "resource not found: {uri}")
+    }
     root: lsp_environment_root(server) ?? return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "environment resource not found")
     argv: [String]{lsp_resource_sys.executable(), "env", "info", "--json", "--no-color"}
     receipt: lsp_resource_process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "environment resource unavailable")
     text: receipt.output.trim()
-    if !receipt.success || text == "" -> return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "environment resource unavailable")
+    if !receipt.success || text == "" {
+        return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "environment resource unavailable")
+    }
     lsp_response(id, "{{\"contents\":[{{\"uri\":{foundation_json_quote(uri)},\"mimeType\":\"application/json\",\"text\":{foundation_json_quote(text)}}}]}}")
 }
 
@@ -45,7 +49,7 @@ lsp_resources_read_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
 lsp_environment_root: fn(server: LSPServer) -[FS, Env]> String? Never! {
     // The loop carries the candidate `env.jet` path, which it owns, so the
     // server's workspace folders are only borrowed.
-    candidate := if server.workspace_roots.len() > 0 -> lsp_resource_files.join(server.workspace_roots[0], ENV_FILE) else -> lsp_resource_files.join(lsp_resource_sys.current_dir() ?? return None, ENV_FILE)
+    ^candidate: if server.workspace_roots.len() > 0 -> lsp_resource_files.join(server.workspace_roots[0], ENV_FILE) else -> lsp_resource_files.join(lsp_resource_sys.current_dir() ?? return None, ENV_FILE)
     loop {
         folder: lsp_resource_files.dirname(candidate)
         if lsp_resource_files.is_file(candidate) -> return Val(folder)

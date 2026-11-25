@@ -47,7 +47,7 @@ wire_self: fn(node: ^SelfNode) -> Pin<SelfNode> {
 
 run: fn() {
     // Caller storage: no allocator, no heap node, no copy of `node`.
-    node := Node{payload: 41, hops: 0}
+    ^node: Node{payload: 41, hops: 0}
     pinned: mem.pin(node)
 
     // Editing through the pin is legal and lands in `node` itself; only moving
@@ -65,7 +65,7 @@ run: fn() {
     print("hops: {queue.head.hops}")
 
     // Self-referential construction through a safe library API (criterion 2+5).
-    self_node := SelfNode{payload: 7, self_addr: 0}
+    ^self_node: SelfNode{payload: 7, self_addr: 0}
     self_pinned: wire_self(self_node)
     print("self_payload: {self_pinned.payload}")
     print("self_wired: {self_pinned.self_addr != 0}")

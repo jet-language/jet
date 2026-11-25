@@ -10,22 +10,22 @@ Holder: struct {
 
 run: fn() {
     script: "i=0; while [ $i -lt 300 ]; do echo ready; echo ready >&2; i=$((i+1)); done"
-    child := process.cmd(["/bin/sh", "-c", script]).stdout(.Stream).stderr(.Stream).spawn()
-    kept := [Holder]{}
-    lines := 0
+    ^child: process.cmd(["/bin/sh", "-c", script]).stdout(.Stream).stderr(.Stream).spawn()
+    ^kept: [Holder]{}
+    ^lines: 0
     loop line in child.stdout.lines() {
         if line != "ready" -> print("stdout line {lines}: {line}")
         kept.push(Holder{name: Val("value {lines}")})
         lines += 1
     }
-    errors := 0
+    ^errors: 0
     loop line in child.stderr.lines() {
         if line != "ready" -> print("stderr line {errors}: {line}")
         kept.push(Holder{name: Val("value {lines + errors}")})
         errors += 1
     }
     receipt: child.wait()
-    intact := 0
+    ^intact: 0
     loop (index, holder) in kept {
         if holder.name == .Val(name) {
             expected: "value {index}"

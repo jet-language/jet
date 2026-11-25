@@ -33,8 +33,8 @@ Rules: struct {
 // The policy's rows at `path`: each is `kind<TAB>value`, blank lines and `#`
 // comments carry none, and a malformed row or an unknown kind stops the run.
 read_rules: fn(path: String) -> Rules {
-    flags := [String]{}
-    removed := [String]{}
+    ^flags: [String]{}
+    ^removed: [String]{}
     lines: (files.read(path) ?? process.fail(1, "cannot read {path}: {err}")).split("\n").to_list()
     loop index in 0..<lines.len() {
         if lines[index] == "" || lines[index].starts_with("#") -> next
@@ -67,7 +67,7 @@ run: fn() {
     }
     rules: read_rules("{sys.executable().removesuffix(SELF)}{POLICY}")
     compiler: process.env_get_or("CC", "cc")
-    spec := process.cmd([compiler.copy()]).args_extend(process.args()).args_extend(rules.flags)
+    ^spec: process.cmd([compiler.copy()]).args_extend(process.args()).args_extend(rules.flags)
         .env("JET_NATIVE_C_WRAPPER_ACTIVE", "1").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
         spec = spec.env("NIX_HARDENING_ENABLE", child_hardening(enabled, rules.hardening_removed))
@@ -103,7 +103,7 @@ test_command: fn(argv: [String]) -> String {
     root: files.cwd() ?? panic("cannot read the working directory")
     fallback: Regex{"process\.env\.CC\s*\?\?"}
     direct: Regex{"\b(?:spawnSync|execFileSync|run|command)\([^\n]*(['\"])(?:cc|gcc|clang)['\"]\s*[,\]]"}
-    problems := [String]{}
+    ^problems: [String]{}
     loop directory in ["Compiler/JetRuntime/Tests", "Compiler/JetBackend/Tests", "Tools/Packaging"] {
         entries: files.list_dir("{root}/{directory}") ?? panic("cannot list {directory}")
         loop entry in entries {
@@ -128,14 +128,14 @@ test_command: fn(argv: [String]) -> String {
     if musl.len() == 0 {
         panic("LIBRARY_PATH must name the static musl `libc.a` folder a C program with Jet links")
     }
-    archives := [String]{"{musl[0]}/libc.a"}
+    ^archives: [String]{"{musl[0]}/libc.a"}
     scratch: process.env_get_or("JET_TEST_SCRATCH_DIR", sys.temp_dir())
     files.create_dir_all(scratch) ?? panic("cannot create {scratch}")
     out: test_command(["mktemp", "-d", "{scratch}/native-c-platform-census-XXXXXX"]).trim()
     loop name in ["libgcc.a", "libgcc_eh.a"] {
         archives.push(test_command(["{root}/{SELF}", "-print-file-name={name}"]).trim())
     }
-    platform := [String]{}
+    ^platform: [String]{}
     loop path in archives {
         loop line in test_command(["nm", "--defined-only", "--extern-only", "--format=posix", path.copy()]).split("\n").to_list() {
             fields: re.split(Regex{"\s+"}, line)
@@ -147,7 +147,7 @@ test_command: fn(argv: [String]) -> String {
     // The #Export(c) names of the runtime sources (Compiler/JetRuntime/sources.list).
     list: files.read("{root}/Compiler/JetRuntime/sources.list") ?? panic("cannot read Compiler/JetRuntime/sources.list")
     export: re.compile_with("^(?:// runtime-(?:init|fini): \\d+\\n)?#Export\\(c\\)\\s+(?:pub\\s+)?([A-Za-z_]\\w*):\\s*fn\\b", re.flags(false, true, false)) ?? panic("export pattern")
-    provider := [String]{}
+    ^provider: [String]{}
     loop line in list.split("\n").to_list() {
         path: line.trim()
         if path == "" || path.starts_with("#") -> next
@@ -163,11 +163,11 @@ test_command: fn(argv: [String]) -> String {
     collections: files.read("{root}/Compiler/JetRuntime/Source/Collections.jet") ?? panic("cannot read Collections.jet")
     stride_match: re.match(Regex{"RT_HOST_U8_STRIDE\s*:\s*comptime\s*\{{\s*I64\{{(1|8)\}}\s*\}}"}, collections) ?? panic("the TCP fixture must use the canonical U8 carrier epoch")
     stride: stride_match.groups[0]
-    problems := [String]{}
+    ^problems: [String]{}
     loop name in
         ["ProcessRoutesWitness", "ProcessExecutionWitness", "TerminalProcessWitness", "ProcessSpecWitness", "TCPRoutesWitness"] {
         object: "{out}/{name}.o"
-        argv := [String]{"{root}/{SELF}", "-std=c11", "-O1", "-fno-stack-protector", "-fno-PIE", "-fno-builtin", "-Wall", "-Wextra", "-Werror"}
+        ^argv: [String]{"{root}/{SELF}", "-std=c11", "-O1", "-fno-stack-protector", "-fno-PIE", "-fno-builtin", "-Wall", "-Wextra", "-Werror"}
         if name == "TCPRoutesWitness" -> argv.push("-DJET_TCP_U8_STRIDE={stride}")
         loop tail in ["-c", "{root}/Compiler/JetRuntime/Tests/{name}.c", "-o", object.copy()] {
             argv.push(tail)

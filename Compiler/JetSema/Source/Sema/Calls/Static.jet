@@ -67,10 +67,10 @@ sema_call_static_registered_method_exists: fn(graph: SemaRegistrationGraph, nomi
 // The visible associated methods of `nominal`, in declaration order: its
 // statics (no `self` receiver) when `statics`, else its instance methods.
 sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, statics: Bool, check: SemaBodyCheck) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     nominal_module: nominal.symbol.module_identity
-    owner_module := nominal_module
-    owner_package := ""
+    ^owner_module: nominal_module
+    ^owner_package: ""
     if sema_type_graph_nominal_row(graph, nominal.symbol.id) == .Val(owner_row) {
         owner_module = graph.modules[owner_row.module_index].module_identity
         owner_package = graph.modules[owner_row.module_index].package_identity
@@ -172,7 +172,7 @@ sema_call_static_missing_member: fn(receiver: Expr, method: String, method_span:
     // A built-in scalar owner that no declaration takes over has no
     // registered type; every documented static method on it resolved
     // before this point.
-    scalar_owner := SEMA_CALL_SCALAR_OWNERS.contains(owner)
+    ^scalar_owner: SEMA_CALL_SCALAR_OWNERS.contains(owner)
     // Snapshot: a lone program registers no owner; a missing member is left to the caller.
     if check.program.registration_graph.mode == .Snapshot -> return unhandled
     graph: check.program.registration_graph
@@ -191,7 +191,7 @@ sema_call_static_missing_member: fn(receiver: Expr, method: String, method_span:
     if sema_call_registered_method_names(graph, nominal, false, check).contains(method) {
         check.diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{owner}`", "instance methods need a value before the dot", "call it on a `{owner}` value: `x.{method}(...)`"))
     } else {
-        statics := [String]{}
+        ^statics: [String]{}
         loop name in sema_call_registered_method_names(graph, nominal, true, check) {
             if !sema_call_method_is_generated(graph, nominal, name) -> statics.push(name)
         }
@@ -248,7 +248,7 @@ sema_call_static_function_target: fn(symbol: Symbol, signature: Type, generic_pa
     if type_args.len() == 0 {
         return Val(SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}})
     }
-    context := sema_inference_context(check.environment.module_identity, check.environment.package_identity, generic_params, check.environment.generic_params, None)
+    ^context: sema_inference_context(check.environment.module_identity, check.environment.package_identity, generic_params, check.environment.generic_params, None)
     result: sema_infer_validate_explicit(check.program.registration_graph, context, type_args, span, check.diagnostics) ?? return None
     specialized: sema_inference_substitute_type_bindings(signature, result.substitutions)
     Val(SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence})
@@ -260,9 +260,9 @@ sema_call_static_function_target: fn(symbol: Symbol, signature: Type, generic_pa
 sema_call_static_unshadowed_params: fn(owner_params: [SemaInferenceTypeParam], method_params: [SemaInferenceTypeParam], owner_type_args: [Type]) -> [SemaInferenceTypeParam] Never! {
     // copy: written owner arguments bind every owner parameter; the caller keeps its list.
     if owner_type_args.len() > 0 -> return owner_params.copy()
-    kept := [SemaInferenceTypeParam]{}
+    ^kept: [SemaInferenceTypeParam]{}
     loop param in owner_params {
-        shadowed := false
+        ^shadowed: false
         loop method_param in method_params {
             if method_param.name == param.name -> shadowed = true
         }
@@ -274,31 +274,31 @@ sema_call_static_unshadowed_params: fn(owner_params: [SemaInferenceTypeParam], m
 sema_call_static_owner_resolution: fn(owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], signature: Type, args: [CallArg], expected: Type?, check: ^SemaBodyCheck, span: Span) -> SemaInferenceResult? {
     explicit_args: loop ty in owner_type_args -> sema_call_resolved_type(ty, check.environment.*, check.program.*)
     if owner_type_args.len() > 0 {
-        explicit_context := sema_inference_context(check.environment.module_identity, check.environment.package_identity, owner_params, check.environment.generic_params, expected)
+        ^explicit_context: sema_inference_context(check.environment.module_identity, check.environment.package_identity, owner_params, check.environment.generic_params, expected)
         return sema_infer_validate_explicit(check.program.registration_graph, explicit_context, explicit_args, span, check.diagnostics)
     }
     // An owner parameter the method's signature never names (`Box.make<U>`
     // under `Box<T>`) takes no part in the call: nothing can settle it and
     // nothing reads it, so it instantiates at Unit.
-    named := [SemaInferenceTypeParam]{}
-    unnamed := [SemaInferenceBinding]{}
+    ^named: [SemaInferenceTypeParam]{}
+    ^unnamed: [SemaInferenceBinding]{}
     loop param in owner_params {
         if sema_inference_type_mentions_param(signature, param.name) -> named.push(param.copy()) else {
             unnamed.push(SemaInferenceBinding{name: param.name, ty: Type.Named{name: "Unit"}, source: "static method owner the signature never names"})
         }
     }
-    inference_context := sema_inference_context(check.environment.module_identity, check.environment.package_identity, named, check.environment.generic_params, expected)
+    ^inference_context: sema_inference_context(check.environment.module_identity, check.environment.package_identity, named, check.environment.generic_params, expected)
     if named.len() == 0 {
         return Val(SemaInferenceResult{substitutions: unnamed, type_args: [Type]{}, parameters: [Type]{}, return_type: None, evidence: [SemaInferenceBoundEvidence]{}, complete: true, compatible: true})
     }
 
     params: sema_call_params_from_type(signature) ?? return None
-    probe_args := args
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_args: args
+    ^probe_diagnostics: [Diagnostic]{}
     binding: sema_call_bind_direct("static method", signature, probe_args, span, probe_diagnostics) ?? return None
     facts: sema_call_collect_inference_facts(params, binding, args, check)
     return_type: sema_call_signature_return(signature)
-    result := sema_infer_callable(check.program.registration_graph, inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, probe_diagnostics) ?? {
+    ^result: sema_infer_callable(check.program.registration_graph, inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, probe_diagnostics) ?? {
         // An argument that settles an owner parameter but misses its bound
         // is that missing implementation, not an uninferrable owner.
         loop diagnostic in probe_diagnostics {
@@ -343,7 +343,7 @@ sema_call_static_append_registered: fn(output: ^[SemaStaticMethodTarget], graph:
     // sees them (`X25519SecretKey` is `core.crypto`'s own), so it resolves there
     // with every type parameter kept, before the caller's type arguments are
     // substituted.
-    generics := [TGenericParam]{}
+    ^generics: [TGenericParam]{}
     loop param in nominal.generic_params {
         generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
     }
@@ -351,7 +351,7 @@ sema_call_static_append_registered: fn(output: ^[SemaStaticMethodTarget], graph:
         generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
     }
     owner_signature: sema_type_resolve_declared_with_generics(graph, function.signature, owner_module, generics)
-    target := sema_call_static_function_target(function.symbol, owner_signature, sema_inference_registration_params(function.generic_params), type_args, check, span) ?? return
+    ^target: sema_call_static_function_target(function.symbol, owner_signature, sema_inference_registration_params(function.generic_params), type_args, check, span) ?? return
     // A method that declares its own type parameter under an owner
     // parameter's name (`impl Box { new: fn<T>(value: T) -> Box<T> }`) shadows
     // it: the signature names only the method's parameter, which the call
@@ -364,16 +364,16 @@ sema_call_static_append_registered: fn(output: ^[SemaStaticMethodTarget], graph:
     }
     owner_type: sema_inference_substitute_type_bindings(nominal.ty, owner_result.substitutions)
     target.signature = sema_inference_substitute_type_bindings(target.signature, owner_result.substitutions)
-    reference := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+    ^reference: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
     output.push(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type, method: reference, target: target, function: Val(function.declaration)})
 }
 
 sema_call_static_registered_targets: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, check: ^SemaBodyCheck, span: Span) -> [SemaStaticMethodTarget] Never! {
-    targets := [SemaStaticMethodTarget]{}
-    owner_name := nominal.symbol.name
+    ^targets: [SemaStaticMethodTarget]{}
+    ^owner_name: nominal.symbol.name
     nominal_module: nominal.symbol.module_identity
-    owner_module := nominal_module
-    owner_package := ""
+    ^owner_module: nominal_module
+    ^owner_package: ""
     if sema_type_graph_nominal_row(graph, nominal.symbol.id) == .Val(owner_row) {
         owner_module = graph.modules[owner_row.module_index].module_identity
         owner_package = graph.modules[owner_row.module_index].package_identity
@@ -416,7 +416,7 @@ sema_call_static_nominal_declares: fn(nominal: SemaRegistrationNominal, symbol: 
 // `from` statics, one per source: each impl's registered function, which
 // names types as its own module sees them.
 sema_call_static_builtin_conversion_targets: fn(graph: SemaRegistrationGraph, owner_name: String, method: String, check: ^SemaBodyCheck, span: Span) -> [SemaStaticMethodTarget] {
-    targets := [SemaStaticMethodTarget]{}
+    ^targets: [SemaStaticMethodTarget]{}
     owner_type: sema_registration_builtin_scalar(owner_name) ?? return targets
     loop impl_row in sema_registration_impl_rows_named(graph, owner_name) {
         module_row: graph.modules[impl_row.module_index]
@@ -435,7 +435,7 @@ sema_call_static_builtin_conversion_targets: fn(graph: SemaRegistrationGraph, ow
             generics: loop param in function.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
             signature: sema_type_resolve_declared_with_generics(graph, function.signature, module_row.module_identity, generics)
             target: sema_call_static_function_target(function.symbol, signature, sema_inference_registration_params(function.generic_params), [Type]{}, check, span) ?? next
-            reference := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+            ^reference: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
             targets.push(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type.copy(), method: reference, target: target, function: Val(function.declaration)})
         }
     }
@@ -448,7 +448,7 @@ sema_call_static_builtin_conversion_targets: fn(graph: SemaRegistrationGraph, ow
 // module that owns its bare spelling (`Path` in core.files) targets that
 // module, as its instance methods do; any other module's impl is a nominal's.
 sema_call_static_builtin_inherent_targets: fn(graph: SemaRegistrationGraph, owner_name: String, method: String, check: ^SemaBodyCheck, span: Span) -> [SemaStaticMethodTarget] {
-    targets := [SemaStaticMethodTarget]{}
+    ^targets: [SemaStaticMethodTarget]{}
     owner_module: core_bare_source_module(owner_name)
     loop impl_row in sema_registration_impl_rows_named(graph, owner_name) {
         module_row: graph.modules[impl_row.module_index]
@@ -463,7 +463,9 @@ sema_call_static_builtin_inherent_targets: fn(graph: SemaRegistrationGraph, owne
             if function.symbol.name != method || sema_call_static_has_method(targets, function.symbol.id) {
                 next
             }
-            if function.declaration.params.len() > 0 && function.declaration.params[0].name == "self" -> next
+            if function.declaration.params.len() > 0 && function.declaration.params[0].name == "self" {
+                next
+            }
             if !sema_registration_visible(function.symbol.visibility, check.environment.module_identity, check.environment.package_identity, module_row.module_identity, module_row.package_identity) {
                 next
             }
@@ -484,17 +486,17 @@ sema_call_static_local_target: fn(owner_symbol: Symbol, owner_name: String, decl
     method_id: sema_symbol_id_of(check.program.*, check.context, method_key)
     signature: sema_function_symbol_type(function, false, method_key, check.environment.source_file, check.environment.source_origin, check.environment.source_segments)
     visibility: if function.is_pub -> 2 else if function.is_package_pub -> 1 else -> 0
-    method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_identity: check.environment.module_identity, owner: Val(sema_symbol_key(check.program.*, check.context, owner_symbol.id)), span: function.name_span, ty: Val(signature), visibility: visibility}
-    target := sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, check, span) ?? return None
+    ^method_symbol: Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_identity: check.environment.module_identity, owner: Val(sema_symbol_key(check.program.*, check.context, owner_symbol.id)), span: function.name_span, ty: Val(signature), visibility: visibility}
+    ^target: sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, check, span) ?? return None
     owner_result: sema_call_static_owner_resolution(sema_call_static_unshadowed_params(owner_params, target.generic_params, owner_type_args), owner_type_args, target.signature, args, expected, check, span) ?? return None
     owner_type: sema_inference_substitute_type_bindings(declared_owner, owner_result.substitutions)
     target.signature = sema_inference_substitute_type_bindings(target.signature, owner_result.substitutions)
-    reference := TMethodRef{symbol: method_symbol.id, name: function.name, mangled: true, trait_owner: None, operator_identity: None}
+    ^reference: TMethodRef{symbol: method_symbol.id, name: function.name, mangled: true, trait_owner: None, operator_identity: None}
     Val(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type, method: reference, target: target, function: Val(function)})
 }
 
 sema_call_static_local_targets: fn(symbol: Symbol, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, check: ^SemaBodyCheck, span: Span) -> [SemaStaticMethodTarget] Never! {
-    targets := [SemaStaticMethodTarget]{}
+    ^targets: [SemaStaticMethodTarget]{}
     loop declaration_index in 0..<check.environment.declarations.len() {
         if check.environment.declarations[declaration_index].item == {
             .Struct(value) -> {
@@ -528,7 +530,7 @@ sema_call_static_local_targets: fn(symbol: Symbol, method: String, owner_type_ar
 sema_call_static_local_defaults: fn(target: SemaStaticMethodTarget, binding: SemaCallBinding, check: SemaBodyCheck) -> [SemaCallDefaultValue]? {
     if binding.default_refs.len() == 0 -> return Val([SemaCallDefaultValue]{})
     function: target.function ?? return None
-    defaults := [SemaCallDefaultValue]{}
+    ^defaults: [SemaCallDefaultValue]{}
     // A body's own id is no registered owner a default names.
     owner_key: if symbol_is_local(target.method.symbol) -> "" else -> sema_program_symbol_key(check.program.*, target.method.symbol)
     loop reference in binding.default_refs {
@@ -553,7 +555,7 @@ sema_call_static_rewrite_value: fn(value: ^TExpr, target: SemaStaticMethodTarget
             if symbol.row.index() != method_id.row.index() -> return false
             // The method's inferred type arguments bind any owner parameter
             // its own same-named parameter shadows.
-            owner_type := target.owner_type
+            ^owner_type: target.owner_type
             if type_args.len() > 0 && type_args.len() == target.target.generic_params.len() {
                 bindings: loop index in 0..<type_args.len() -> SemaInferenceBinding{name: target.target.generic_params[index].name, ty: type_args[index], source: "static method"}
                 owner_type = sema_inference_substitute_type_bindings(owner_type, bindings)
@@ -562,7 +564,7 @@ sema_call_static_rewrite_value: fn(value: ^TExpr, target: SemaStaticMethodTarget
             return true
         }
         .TraitBox(inner, target_type) -> {
-            updated_inner := inner
+            ^updated_inner: inner
             if !sema_call_static_rewrite_value(updated_inner, target, method_id) -> return false
             value.kind = TExprKind.TraitBox{value: updated_inner, target: target_type}
             return true
@@ -572,11 +574,11 @@ sema_call_static_rewrite_value: fn(value: ^TExpr, target: SemaStaticMethodTarget
             last: statements.len() - 1
             if statements[last] == {
                 .ExprStmt(call, statement_span) -> {
-                    updated_call := call
+                    ^updated_call: call
                     if !sema_call_static_rewrite_value(updated_call, target, method_id) {
                         return false
                     }
-                    updated_statements := statements.copy()
+                    ^updated_statements: statements.copy()
                     updated_statements[last] = TStmt.ExprStmt{value: updated_call, span: statement_span}
                     value.kind = TExprKind.InlineBlock{body: updated_statements}
                     return true
@@ -645,7 +647,7 @@ sema_call_builtin_static_open: fn(ty: Type, row: BuiltinStaticRow, bindings: [Se
 }
 
 sema_call_builtin_static_closed: fn(ty: Type, row: BuiltinStaticRow, bindings: [SemaInferenceBinding]) -> Type Never! {
-    complete := bindings
+    ^complete: bindings
     loop name in row.type_params {
         if !sema_call_builtin_static_bound(bindings, name) {
             complete.push(SemaInferenceBinding{name: name, ty: Type.Int, source: "builtin static default"})
@@ -764,28 +766,28 @@ sema_call_builtin_static_argument: fn(argument: CallArg, declared: Type, row: Bu
     if declared == .Fn(params, _, _, _, _, _) {
         if sema_call_builtin_static_open(declared, row, bindings) {
             // The parameters hint an unannotated lambda once they are known.
-            closed := true
-            hinted := [Type]{}
+            ^closed: true
+            ^hinted: [Type]{}
             loop param in params {
                 if sema_call_builtin_static_open(param, row, bindings) -> closed = false
                 hinted.push(sema_inference_substitute_type_bindings(param, bindings))
             }
-            probe_hint := Type?{None}
+            ^probe_hint: Type?{None}
             if closed {
                 probe_hint = Val(Type.Fn{params: hinted, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
             }
-            probe_diagnostics := [Diagnostic]{}
-            probed := sema_probe_expression(argument.expr, probe_hint, check, probe_diagnostics)
+            ^probe_diagnostics: [Diagnostic]{}
+            ^probed: sema_probe_expression(argument.expr, probe_hint, check, probe_diagnostics)
             if probed == .Val(value) {
-                _ := sema_call_builtin_static_bind(declared, value.ty, row, bindings)
+                ^_: sema_call_builtin_static_bind(declared, value.ty, row, bindings)
             }
         }
     }
     if !sema_call_builtin_static_open(declared, row, bindings) {
-        required := sema_call_resolved_type(sema_inference_substitute_type_bindings(declared, bindings), check.environment.*, check.program.*)
+        ^required: sema_call_resolved_type(sema_inference_substitute_type_bindings(declared, bindings), check.environment.*, check.program.*)
         // A Union slot hints only a decimal literal, which takes its machine
         // float member instead of exact Decimal.
-        hint := if required == {
+        ^hint: if required == {
             .Union(_) | .Case(_, _) -> None
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> Val(required)
         }
@@ -797,17 +799,17 @@ sema_call_builtin_static_argument: fn(argument: CallArg, declared: Type, row: Bu
         return sema_call_builtin_static_coerce(checked, required, argument.span, check)
     }
     checked: sema_check_expression(argument.expr, None, check) ?? return None
-    _ := sema_call_builtin_static_bind(declared, checked.ty, row, bindings)
+    ^_: sema_call_builtin_static_bind(declared, checked.ty, row, bindings)
     if sema_call_builtin_static_open(declared, row, bindings) {
         check.diagnostics.push(sema_type_mismatch(sema_call_builtin_static_closed(declared, row, bindings), checked.ty, argument.span, check.program.*))
         return None
     }
-    required := sema_call_resolved_type(sema_inference_substitute_type_bindings(declared, bindings), check.environment.*, check.program.*)
+    ^required: sema_call_resolved_type(sema_inference_substitute_type_bindings(declared, bindings), check.environment.*, check.program.*)
     sema_call_builtin_static_coerce(checked, required, argument.span, check)
 }
 
 sema_call_builtin_static_discard: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+    loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
 }
 
 sema_call_builtin_static_shape: fn(row: BuiltinStaticRow, callee: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
@@ -823,7 +825,7 @@ sema_call_builtin_static_shape: fn(row: BuiltinStaticRow, callee: String, owner_
         diagnostics.push(sema_error("E0904", span, "cannot infer the owner type arguments for `{callee}`", "`Atomic<T>` construction names its scalar type on the owner", "write `Atomic<Int>.{row.method}(value)`"))
         return false
     }
-    count := row.parameters.len()
+    ^count: row.parameters.len()
     if args.len() != count {
         diagnostics.push(sema_error(row.arity_code, span, "`{callee}` expects {count} argument{if count == 1 -> "" else -> "s"}, got {args.len()}", "a built-in static method has a fixed argument shape", "pass exactly {count} argument{if count == 1 -> "" else -> "s"}"))
         return false
@@ -865,7 +867,7 @@ sema_call_builtin_static_call_arg: fn(value: TExpr, argument: CallArg) -> TCallA
 // CoreCall rows lower through the registered Core route in the caller.
 // `line` is the call's source line, which a checked crossing stops at.
 sema_call_builtin_static_lowered: fn(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span, line: Int, program: SemaProgramTables, context: ^SemaCheckContext) -> TExprKind? {
-    rest := [TExpr]{}
+    ^rest: [TExpr]{}
     loop index in 0..<values.len() {
         if index > 0 -> rest.push(values[index])
     }
@@ -881,7 +883,7 @@ sema_call_builtin_static_lowered: fn(row: BuiltinStaticRow, values: [TExpr], arg
                 .HostUsize -> TPreludeArg.HostUsize
             }
             call_args: loop index in 0..<values.len() -> sema_call_builtin_static_call_arg(values[index], args[index])
-            reference := TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
+            ^reference: TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
             Val(TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: rooted, path: path, generics: owner_args}, owner_type: None, method: reference, type_args: [Type]{}, args: call_args})
         }
         .DurationNew(unit) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: BodyHandleOp.DurationNew{unit: unit, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
@@ -894,12 +896,12 @@ sema_call_builtin_static_lowered: fn(row: BuiltinStaticRow, values: [TExpr], arg
 
 sema_call_try_builtin_static: fn(owner: String, module_name: String, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     row: sema_call_builtin_static_row(owner, method, module_name) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    callee := "{owner}.{method}"
+    ^callee: "{owner}.{method}"
     if !sema_call_builtin_static_shape(row, callee, owner_type_args, type_args, args, span, check.diagnostics) {
         sema_call_builtin_static_discard(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    bindings := [SemaInferenceBinding]{}
+    ^bindings: [SemaInferenceBinding]{}
     loop index in 0..<owner_type_args.len() {
         bindings.push(SemaInferenceBinding{name: row.type_params[index], ty: sema_call_resolved_type(owner_type_args[index], check.environment.*, check.program.*), source: "builtin static owner"})
     }
@@ -907,7 +909,7 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
     // (`line_starts: Cell.new(None)` for a `Cell<[Int]?>` field) names them,
     // so an argument that needs its type (`None`) checks against it.
     if owner_type_args.len() == 0 && expected == .Val(wanted) {
-        seeded := [SemaInferenceBinding]{}
+        ^seeded: [SemaInferenceBinding]{}
         if sema_call_builtin_static_bind(row.return_type, sema_call_resolved_type(wanted, check.environment.*, check.program.*), row, seeded) {
             bindings = seeded
         }
@@ -918,8 +920,8 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
 
-    values := [TExpr]{}
-    explicit_moves := [Bool]{}
+    ^values: [TExpr]{}
+    ^explicit_moves: [Bool]{}
     loop index in 0..<args.len() {
         value: sema_call_builtin_static_argument(args[index], row.parameters[index], row, bindings, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         // A written `name.move()` is a checked move, as for any consuming argument
@@ -945,11 +947,11 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
     // exact move. The bare name in `Shared{x}` moves here like an unmarked
     // owning position: a borrowed parameter keeps its value, and a later use
     // turns the move into a share.
-    params := [SemaCallParam]{}
-    ownership_args := args
-    named_moves := [Int]{}
+    ^params: [SemaCallParam]{}
+    ^ownership_args: args
+    ^named_moves: [Int]{}
     loop index in 0..<values.len() {
-        convention := row.parameter_convention
+        ^convention: row.parameter_convention
         if args[index].convention == AccessConvention.Move {
             if args[index].expr == {
                 .Ident(_, _, _) -> {
@@ -966,7 +968,7 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
         }
         params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(values[index].ty), variadic: false})
     }
-    ownership := sema_ownership_check_call_arguments(check.state, callee, params, ownership_args, check.scopes, check.diagnostics)
+    ^ownership: sema_ownership_check_call_arguments(check.state, callee, params, ownership_args, check.scopes, check.diagnostics)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -978,7 +980,7 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
 
     if expected == .Val(expected_type) {
         hint: sema_call_resolved_type(expected_type, check.environment.*, check.program.*)
-        pattern := row.return_type
+        ^pattern: row.return_type
         if pattern == .Result(success, _) {
             if hint == {
                 .Result(_, _) -> {}
@@ -987,14 +989,14 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
                 }
             }
         }
-        _ := sema_call_builtin_static_bind(pattern, hint, row, bindings)
+        ^_: sema_call_builtin_static_bind(pattern, hint, row, bindings)
     }
     loop name in row.type_params {
         if !sema_call_builtin_static_bound(bindings, name) {
             bindings.push(SemaInferenceBinding{name: name, ty: Type.Int, source: "builtin static default"})
         }
     }
-    result := sema_inference_substitute_type_bindings(row.return_type, bindings)
+    ^result: sema_inference_substitute_type_bindings(row.return_type, bindings)
     // E0506: `Set.new()` / `Set.from(list)` / `Tally.new()` need a hashable element.
     if (row.owner == "Set" || row.owner == "Tally") && result == .Apply(_, result_args) && result_args.len() == 1 && !sema_type_hashable(check.environment.*, check.program.*, result_args[0]) {
         element_name: type_name(result_args[0])
@@ -1034,7 +1036,7 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
         check.diagnostics.push(sema_error("E0104", span, "static method call `{callee}` could not be lowered", "the built-in static row has no checked-tree construction", "use a registered built-in static method"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    facts := SemaCallFacts{return_type: result, failure_carrier: sema_call_builtin_static_carrier(result), effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
+    ^facts: SemaCallFacts{return_type: result, failure_carrier: sema_call_builtin_static_carrier(result), effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
     if !sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, callee, span, facts, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -1055,13 +1057,13 @@ sema_call_try_builtin_static_field: fn(base: Expr, owner: String, method: String
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     module_name: sema_call_core_import_module(check.environment.*, check.program.*, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    builtin := sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, check)
+    ^builtin: sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, check)
     if builtin.handled -> return builtin
     // A capitalized `alias.Owner` that no route resolved names no static the
     // Core module provides: report it rather than leaving the call unchecked.
     if !sema_checked_module_uppercase(owner) -> return builtin
     if core_module_has_type(module_name, owner) || core_module_has_member(module_name, owner) {
-        fix := "call a static method `{owner}` declares, or call `{method}` on a `{owner}` value"
+        ^fix: "call a static method `{owner}` declares, or call `{method}` on a `{owner}` value"
         if sema_call_core_free_twin(module_name, owner, method) == .Val(twin) {
             fix = "call the free function `{alias}.{twin}(...)` that `{module_name}` declares"
         }
@@ -1092,7 +1094,7 @@ sema_call_perf_static: fn(method: String, type_args: [Type], args: [CallArg], sp
     identity: sema_call_core_module_identity(check.environment.*, check.program.*, "core.perf") ?? return failed
     target: sema_call_core_source_target(check.environment.*, check.program.*, identity, method, type_args, span, false, check.diagnostics) ?? return failed
     sema_call_perf_name("core.perf", method, args, check.diagnostics)
-    probe_args := args
+    ^probe_args: args
     binding: sema_call_bind_direct("Perf.{method}", target.signature, probe_args, span, check.diagnostics) ?? return failed
     defaults: sema_call_registration_defaults(graph, binding) ?? return failed
     call: Call{name: "Perf.{method}", name_span: span, type_args: type_args, args: args}
@@ -1155,9 +1157,9 @@ sema_call_static_source_owner: fn(receiver: Expr, method: String, owner_type_arg
     graph: check.program.registration_graph
     found: sema_type_graph_lookup_symbol(graph, check.environment.module_identity, owner_name) ?? return None
     if sema_resolved_kind(graph, found) != SymbolKind.Type -> return None
-    resolved := found
-    args := owner_type_args
-    row := sema_type_graph_resolved_nominal_row(graph, found) ?? return None
+    ^resolved: found
+    ^args: owner_type_args
+    ^row: sema_type_graph_resolved_nominal_row(graph, found) ?? return None
     if sema_call_static_alias_target(graph, row, owner_type_args) == .Val(target) {
         row = sema_type_graph_resolved_nominal_row(graph, target.symbol) ?? return None
         resolved = target.symbol
@@ -1197,8 +1199,8 @@ sema_call_static_alias_target: fn(graph: SemaRegistrationGraph, row: SemaRegistr
         return None
     }
     written: sema_type_alias_expanded(graph, row.module_index, definition, owner_type_args, [String]{}) ?? return None
-    target_name := ""
-    target_args := [Type]{}
+    ^target_name: ""
+    ^target_args: [Type]{}
     if written == {
         .Named(name) -> target_name = name
         .Apply(name, args) -> {
@@ -1220,7 +1222,7 @@ sema_call_static_alias_target: fn(graph: SemaRegistrationGraph, row: SemaRegistr
         return Val(SemaStaticAliasTarget{symbol: target, owner_type_args: [Type]{}})
     }
     if owner_type_args.len() != definition.type_params.len() -> return None
-    names := [String]{}
+    ^names: [String]{}
     loop parameter in definition.type_params -> names.push(parameter.name)
     args: loop arg in target_args -> sema_inference_substitute_type(arg, names, owner_type_args)
     Val(SemaStaticAliasTarget{symbol: target, owner_type_args: args})
@@ -1238,8 +1240,8 @@ sema_call_option_lift2: fn(args: [CallArg], span: Span, expected: Type?, check: 
     }
     left: sema_check_expression(args[1].expr, None, check)
     right: sema_check_expression(args[2].expr, None, check)
-    left_inner := Type?{None}
-    right_inner := Type?{None}
+    ^left_inner: Type?{None}
+    ^right_inner: Type?{None}
     if left == .Val(value) {
         // copy: `inner` is a payload of the checked operand's type, which the operand keeps
         if value.ty == .Option(inner) -> left_inner = Val(inner.copy())
@@ -1257,7 +1259,7 @@ sema_call_option_lift2: fn(args: [CallArg], span: Span, expected: Type?, check: 
             shown: if right == .Val(value) -> sema_type_show(value.ty) else -> "an unknown type"
             check.diagnostics.push(sema_error("E0108", expr_span(args[2].expr), "`Option.lift2`'s third argument must be optional, got {shown}", "`Option.lift2(f, a, b)` needs `b: U?`", "pass a `T?` value"))
         }
-        _ := sema_check_expression(args[0].expr, None, check)
+        ^_: sema_check_expression(args[0].expr, None, check)
         return failed
     }
     left_value: left ?? return failed
@@ -1268,7 +1270,7 @@ sema_call_option_lift2: fn(args: [CallArg], span: Span, expected: Type?, check: 
     required: Type.Fn{params: [Type]{left_payload.copy(), right_payload.copy()}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     // The open result adopts the callback's own return type.
     function: sema_expression_lambda_collection_callback(args[0].expr, Val(required), check) ?? return failed
-    result := Type?{None}
+    ^result: Type?{None}
     if function.ty == .Fn(params, ret, _, _, _, _) && params.len() == 2 {
         accepts: sema_call_type_assignable(params[0], left_payload, check) == (Val(true)) && sema_call_type_assignable(params[1], right_payload, check) == (Val(true))
         // A total callable (`T Never!`) answers its success, as a direct call
@@ -1277,8 +1279,8 @@ sema_call_option_lift2: fn(args: [CallArg], span: Span, expected: Type?, check: 
         // as a direct `f(a, b)` would.
         if accepts && ret == .Val(value) {
             // copy: the lifted payload is a type of its own; the callable keeps its signature
-            payload := value.copy()
-            failure := Type?{None}
+            ^payload: value.copy()
+            ^failure: Type?{None}
             if sema_expr_unwrap_tag(value) == .Result(ok, err) {
                 payload = ok.copy()
                 if sema_expr_unwrap_tag(err) != (Type.Named{name: "Never"}) {
@@ -1332,7 +1334,9 @@ sema_call_static_reflect_param: fn(name: String, span: Span, expected: Type?, ch
 // (sema_comptime_bound_reflection), E0302 for a type with none
 // (sema_comptime_unreflected). None when the check binds no `T`.
 sema_call_static_reflect_bound: fn(name: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck? {
-    if sema_comptime_unreflected(name, span, check) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
+    if sema_comptime_unreflected(name, span, check) {
+        return Val(SemaMethodSpecialCheck{handled: true, value: None})
+    }
     info: sema_comptime_bound_reflection(name, check) ?? return None
     folded: sema_tree_node(sema_fact_named("TypeInfo"), TExprKind.CtLit{value: info}, span)
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, check.environment.*, check.program.*, check.diagnostics)})
@@ -1362,9 +1366,9 @@ sema_call_static_reflect_function: fn(name: String, args: [CallArg], span: Span,
     if graph.mode == .Snapshot -> return None
     resolved: if local == .Val(index) -> sema_scope_binding_symbol(check.environment.*, check.scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, check.environment.module_identity, name) ?? return None)
     if resolved.kind != SymbolKind.Function -> return None
-    types := [Type]?{None}
+    ^types: [Type]?{None}
     if args.len() == 1 && args[0].expr == .ListLit(elements, _, _) {
-        listed := [Type]{}
+        ^listed: [Type]{}
         loop element in elements {
             written: sema_call_type_written_as_value(element, check.environment.*, graph) ?? {
                 check.diagnostics.push(sema_error("E0119", expr_span(element), "`types:` lists the type arguments of `{name}`, and this is not a type", "`{name}.reflect(types: [...])` reflects one specialization of a generic function, so each element is a type written where a value goes", "write a type name such as `Int`, a generic type such as `Set<Int>`, or `[Int]` for a list"))
@@ -1479,7 +1483,7 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
     type_name: owner_symbol.name
     // The distinct conversion names its owner as written: `pkg.ID` resolves
     // from this module where the bare declared name does not.
-    alias_name := String?{None}
+    ^alias_name: String?{None}
     if receiver == .Field(.Ident(alias, _, _), leaf, _, _) -> alias_name = Val("{alias}.{leaf}")
     if owner_symbol.kind != SymbolKind.Type {
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -1495,10 +1499,10 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
         sema_call_ui_shortcut_cmd_key(args[0], check.diagnostics)
     }
 
-    diagnostics_before := check.diagnostics.len()
-    targets := [SemaStaticMethodTarget]{}
-    generic_owner_method := false
-    owner_param_names := [String]{}
+    ^diagnostics_before: check.diagnostics.len()
+    ^targets: [SemaStaticMethodTarget]{}
+    ^generic_owner_method: false
+    ^owner_param_names: [String]{}
     graph: check.program.registration_graph
     owner_row: sema_type_graph_nominal_row(graph, owner_symbol.id)
     if owner_row == .Val(row) {
@@ -1516,7 +1520,7 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
         if check.diagnostics.len() > diagnostics_before {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        distinct := sema_call_try_distinct_conversion(owner_symbol, alias_name ?? type_name, method, args, span, expected, check)
+        ^distinct: sema_call_try_distinct_conversion(owner_symbol, alias_name ?? type_name, method, args, span, expected, check)
         if distinct.handled -> return distinct
         // `T.reflect()` on a declared type is that type's TypeInfo record,
         // computed while compiling: in compile-time code, in `build: fn` and in
@@ -1540,12 +1544,12 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
         // An alias of a compiler-owned type (`Byte: Unsigned<8>`) has that
         // type's built-in statics: `Byte.parse` is `U8.parse`.
         if !generic_owner_method && static_args.len() == 0 && sema_call_static_aliased_builtin(type_name, check) == .Val(aliased) {
-            builtin := sema_call_try_builtin_static(aliased, "", method, static_args, type_args, args, span, expected, check)
+            ^builtin: sema_call_try_builtin_static(aliased, "", method, static_args, type_args, args, span, expected, check)
             if builtin.handled -> return builtin
         }
         // Declared statics win; a canonical Core or compiler owner then falls back to its built-in rows.
         if !generic_owner_method && sema_expr_canonical_type_binding(type_name, check) {
-            builtin := sema_call_try_builtin_static(type_name, sema_scope_module_text(check.environment.*, check.program.*, owner_symbol.module_identity), method, static_args, type_args, args, span, expected, check)
+            ^builtin: sema_call_try_builtin_static(type_name, sema_scope_module_text(check.environment.*, check.program.*, owner_symbol.module_identity), method, static_args, type_args, args, span, expected, check)
             if builtin.handled -> return builtin
         }
         if {
@@ -1557,7 +1561,7 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
                 // A declared method with a `self` receiver named through its
                 // type needs a value. A static of that name failed on its
                 // arguments instead.
-                instance := false
+                ^instance: false
                 loop name in sema_call_declared_method_names(owner_symbol.ty ?? Type.Named{name: type_name}, check.environment.*, check.program.*) {
                     if name == method {
                         instance = true
@@ -1572,7 +1576,7 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
                 if instance {
                     check.diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{type_name}`", "instance methods need a value before the dot", "call it on a `{type_name}` value: `x.{method}(...)`"))
                 } else {
-                    fix := "use a declared static method on this type"
+                    ^fix: "use a declared static method on this type"
                     if sema_type_graph_nominal_row(graph, owner_symbol.id) == .Val(row) {
                         if sema_call_static_free_twin(graph, row.module_index, type_name, method, check.environment.*) == .Val(twin) {
                             fix = "call the free function `{twin}(...)` that `{type_name}`'s module declares"
@@ -1619,9 +1623,9 @@ sema_call_static_bound_method: fn(name: String, method: String, type_args: [Type
     own: sema_inference_substitute_type(dispatched, [String]{"Self"}, [Type]{owner_type})
     signature: sema_type_resolve_declared_with_generics(graph, own, check.environment.module_identity, check.environment.generic_params)
     params: sema_call_params_from_type(signature) ?? return failed
-    checked_args := args
+    ^checked_args: args
     binding: sema_call_bind_direct(callee, signature, checked_args, span, check.diagnostics) ?? return failed
-    resolved_binding := binding
+    ^resolved_binding: binding
     if binding.default_refs.len() > 0 {
         defaults: sema_call_registration_defaults(graph, binding) ?? {
             check.diagnostics.push(sema_error("E0906", span, "a default argument for this call could not be resolved", "registered callable defaults retain their graph identity and source location", "make every bound default available to Registration before checking this call"))
@@ -1630,7 +1634,7 @@ sema_call_static_bound_method: fn(name: String, method: String, type_args: [Type
         resolved: sema_call_materialize_defaults(params, binding, checked_args, defaults, span, check.diagnostics) ?? return failed
         resolved_binding = resolved
     }
-    {lowered, pins} := sema_call_check_bound_arguments_owned(check, callee, params, None, true, resolved_binding, checked_args, span) ?? {
+    {^lowered, ^pins}: sema_call_check_bound_arguments_owned(check, callee, params, None, true, resolved_binding, checked_args, span) ?? {
         return failed
     }
     result_type: sema_call_resolved_type(sema_call_signature_return(signature) ?? return failed, check.environment.*, check.program.*)
@@ -1677,7 +1681,7 @@ sema_call_static_bound_declaration: fn(graph: SemaRegistrationGraph, name: Strin
 // The checked call of the one target among `targets` the arguments select,
 // rewritten to its registered method.
 sema_call_static_selected: fn(type_name: String, method: String, targets: [SemaStaticMethodTarget], type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    direct_targets := loop target in targets -> target.target
+    ^direct_targets: loop target in targets -> target.target
     // One owner's statics of one name that share a shape (each
     // `impl AppErr.From(Source)` declares one `AppErr.from`, one per source)
     // are told apart by the types of the arguments.
@@ -1686,45 +1690,45 @@ sema_call_static_selected: fn(type_name: String, method: String, targets: [SemaS
         if picked.len() > 0 {
             // Popped from the end into `all`, then back, so the kept targets
             // stay in order.
-            all := [SemaCallDirectTarget]{}
+            ^all: [SemaCallDirectTarget]{}
             loop direct_targets.len() > 0 {
-                candidate := direct_targets.pop() ?? break
+                ^candidate: direct_targets.pop() ?? break
                 all.push(candidate)
             }
-            index := 0
+            ^index: 0
             loop all.len() > 0 {
-                candidate := all.pop() ?? break
+                ^candidate: all.pop() ?? break
                 if picked.contains(index) -> direct_targets.push(candidate)
                 index += 1
             }
         }
     }
     selected: sema_call_resolve_direct_candidates("{type_name}.{method}", args, direct_targets, span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    target := targets[0]
+    ^target: targets[0]
     loop candidate in targets {
         if candidate.target.symbol.id == selected.symbol.id {
             target = candidate
             break
         }
     }
-    probe_args := args
+    ^probe_args: args
     binding: sema_call_bind_direct("{type_name}.{method}", selected.signature, probe_args, span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // Snapshot: a lone program's defaults are its own declarations'.
     defaults: if check.program.registration_graph.mode == .Snapshot -> sema_call_static_local_defaults(target, binding, check) ?? return SemaMethodSpecialCheck{handled: true, value: None} else -> sema_call_registration_defaults(check.program.registration_graph, binding) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    call := Call{name: "{type_name}.{method}", name_span: span, type_args: type_args, args: args}
+    ^call: Call{name: "{type_name}.{method}", name_span: span, type_args: type_args, args: args}
     checked: sema_call_check_direct_target_owned(check, selected, call, defaults, expected) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     method_id: sema_call_callee_decl(check.program.*, target.method.symbol, span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call_value: sema_call_static_call_value(checked.value, method_id) ?? {
         check.diagnostics.push(sema_error("E0104", span, "static method call `{type_name}.{method}` could not be lowered", "the checked callable did not preserve its registered SymbolId", "use the registered static method declaration"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    call_checked := checked
+    ^call_checked: checked
     call_checked.value = call_value
     check.context.call_return_views.push(SemaCallReturnView{span: span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(check, span, call_checked) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value := checked.value
+    ^value: checked.value
     if !sema_call_static_rewrite_value(value, target, method_id) {
         check.diagnostics.push(sema_error("E0104", span, "static method call `{type_name}.{method}` could not be lowered", "the checked callable did not preserve its registered SymbolId", "use the registered static method declaration"))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -1740,20 +1744,20 @@ sema_call_static_selected: fn(type_name: String, method: String, targets: [SemaS
 // Labeled arguments, an argument that does not probe, or no target taking
 // them picks none, leaving every target to the shape check.
 sema_call_static_by_argument_types: fn(targets: [SemaStaticMethodTarget], args: [CallArg], check: ^SemaBodyCheck) -> [Int] {
-    argument_types := [Type]{}
-    probe_diagnostics := [Diagnostic]{}
+    ^argument_types: [Type]{}
+    ^probe_diagnostics: [Diagnostic]{}
     loop arg in args {
         if arg.label != None || arg.spread -> return [Int]{}
         probed: sema_probe_expression(arg.expr, None, check, probe_diagnostics) ?? return [Int]{}
         argument_types.push(sema_call_resolved_type(probed.ty, check.environment.*, check.program.*))
     }
-    exact := [Int]{}
-    assignable := [Int]{}
+    ^exact: [Int]{}
+    ^assignable: [Int]{}
     loop target_index in 0..<targets.len() {
         params: sema_call_params_from_type(targets[target_index].target.signature) ?? next
         if params.len() != argument_types.len() -> next
-        same := true
-        accepts := true
+        ^same: true
+        ^accepts: true
         loop index in 0..<params.len() {
             declared: params[index].ty ?? {
                 accepts = false
@@ -1776,7 +1780,7 @@ sema_call_static_by_argument_types: fn(targets: [SemaStaticMethodTarget], args: 
 // Whether `value` checks under `expected`, its parameter's type, with no
 // report and a type that parameter takes.
 sema_call_static_argument_checks_under: fn(value: Expr, expected: Type?, check: ^SemaBodyCheck) -> Bool {
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     probed: sema_probe_expression(value, expected, check, probe_diagnostics) ?? return false
     if probe_diagnostics.len() > 0 -> return false
     if expected == .Val(required) {
@@ -1789,8 +1793,8 @@ sema_call_static_argument_checks_under: fn(value: Expr, expected: Type?, check: 
 // and observes only an injected Clock (E0112 at the clock). The arguments are
 // probed: the ordinary source call that follows checks and moves them once.
 sema_call_expiring_secret_new_accepts: fn(args: [CallArg], check: ^SemaBodyCheck) -> Bool {
-    accepted := true
-    probe_diagnostics := [Diagnostic]{}
+    ^accepted: true
+    ^probe_diagnostics: [Diagnostic]{}
     value: sema_probe_expression(args[0].expr, None, check, probe_diagnostics)
     if value == .Val(checked_value) && !sema_is_expiring_secret_member_type(sema_call_resolved_type(checked_value.ty, check.environment.*, check.program.*)) {
         check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`ExpiringSecret.new` cannot own {sema_type_show(checked_value.ty)}", "expiring secrets accept only the closed, move-only secret family with audited zeroizing Drop behavior", "convert text or bytes to `crypto.Secret`, or use `crypto.SigningKey` / `crypto.X25519SecretKey`"))
@@ -1878,8 +1882,8 @@ sema_call_try_distinct_conversion: fn(owner: Symbol, display_name: String, metho
         return sema_call_distinct_conversion_failed()
     }
     params: [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(argument.ty), variadic: false}}
-    ownership_args := args
-    ownership := sema_ownership_check_call_arguments(check.state, callee, params, ownership_args, check.scopes, check.diagnostics)
+    ^ownership_args: args
+    ^ownership: sema_ownership_check_call_arguments(check.state, callee, params, ownership_args, check.scopes, check.diagnostics)
     if !ownership.accepted || !ownership.complete -> return sema_call_distinct_conversion_failed()
     // The owner as written (`model.ProjectID`) names the type in this module;
     // its value carries the declared type the backend lowers.
@@ -1891,7 +1895,7 @@ sema_call_try_distinct_conversion: fn(owner: Symbol, display_name: String, metho
     operation: sema_call_distinct_numeric_operation(row, sema_source_line_at(check.environment.source_segments, span) ?? 0) ?? return sema_call_distinct_conversion_failed()
     // An integer literal that fits the base is known at compile time, so a
     // range type checks it here.
-    literal_in_range := false
+    ^literal_in_range: false
     if facts.range == .Val(bounds) {
         if argument.kind == .IntLit(literal, _) {
             base_bounds: sema_expr_integer_range_for_type(facts.base)
@@ -1977,7 +1981,7 @@ sema_call_try_inline_range_conversion: fn(descriptor: Call, method: String, args
     checked: sema_check_expression(args[0].expr, Val(Type.Int), check) ?? return sema_call_distinct_conversion_failed()
     argument: sema_expr_expected(checked, Val(Type.Int), check.environment.*, check.program.*, check.diagnostics) ?? return sema_call_distinct_conversion_failed()
     target: Type.InlineRange{base: Type.Int, lo: bounds.lo, hi: bounds.hi}
-    literal := false
+    ^literal: false
     if args[0].expr == .Int(value, literal_span, _, _, _) {
         literal = true
         if value < bounds.lo || value > bounds.hi {
@@ -2001,7 +2005,7 @@ sema_range_runtime_conversion: fn(head: String, method: String, span: Span) -> D
 // E2938: `UIShortcut.cmd` takes one positional, non-empty plain string
 // literal; a dynamic key goes through `core.ui.host.shortcut`.
 sema_call_ui_shortcut_cmd_key: fn(argument: CallArg, diagnostics: ^[Diagnostic]) {
-    literal := String?{None}
+    ^literal: String?{None}
     if sema_registration_cli_without_parens(argument.expr) == .Str(parts, _, _) {
         if parts.len() == 1 && parts[0] == .Lit(text) -> literal = Val(text.copy())
     }
@@ -2011,7 +2015,7 @@ sema_call_ui_shortcut_cmd_key: fn(argument: CallArg, diagnostics: ^[Diagnostic])
             return
         }
     }
-    reason := "the key must not be empty"
+    ^reason: "the key must not be empty"
     if literal == None -> reason = "the key must be one plain string literal"
     if labeled -> reason = "the key must be positional"
     shortcut: literal ?? "<expression>"

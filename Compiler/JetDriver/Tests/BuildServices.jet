@@ -112,7 +112,7 @@ build_services_require: fn(ok: Bool, message: String) Never! {
     loop (index, error) in errors {
         projection: build_session_error_projection(error)
         build_services_require(projection.variant == variants[index], "variant identity")
-        diagnostic := build_session_error_diag(state, error)
+        ^diagnostic: build_session_error_diag(state, error)
         diagnostic.start = 12
         diagnostic.end = 34
         failed: jet_driver_build_failed_value(diagnostic) ?? panic("typed error lost failure value")

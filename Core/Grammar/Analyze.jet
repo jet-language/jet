@@ -1,0 +1,585 @@
+// Compiler-private part of core.grammar: the first stages of the analysis.
+//
+// Resolve merges the imported grammars, binds every reference and checks
+// rule names, alternative names, labels and the start rule. Left
+// recursion splits each rule in the operator form for precedence climbing
+// and reports every other cycle of rules that can begin with each other,
+// with its path. Nullable marks what can match no input.
+use {
+    core.grammar.error.[GrammarFault, GrammarFaults, grammar_fault]
+    core.grammar.plan.[GrammarDecision, GrammarImport, GrammarNode, GrammarNodeKind, GrammarOperator, GrammarOperatorKind, GrammarOperatorRule, GrammarRule, GrammarSource, GrammarToken, RuleTree]
+    __core_grammar_notation.[read_notation]
+}
+
+/// A grammar between the stages of the analysis. Each stage adds its
+/// results and its faults; `parent` is each node's parent in the parsed
+/// structure (-1 at a rule body, -2 for a node no parse reaches), and
+/// `first`/`follow` are token-kind sets per node.
+GrammarWork: struct {
+    tree: RuleTree,
+    start: Int,
+    faults: [GrammarFault],
+    owner: [Int],
+    parent: [Int],
+    nullable: [Bool],
+    operators: [GrammarOperatorRule],
+    operator_of: [Int],
+    tokens: [GrammarToken],
+    first: [[Int]],
+    follow: [[Int]],
+    decisions: [GrammarDecision],
+    steps: Int,
+}
+
+/// Reads `text`, merges what it imports, binds every reference and checks
+/// the names. The faults it finds are in the result's `faults`.
+resolve: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarWork GrammarFaults! {
+    tree: read_notation(text)
+    ^work: GrammarWork{tree: tree, start: -1, faults: [GrammarFault]{}, owner: [Int]{}, parent: [Int]{}, nullable: [Bool]{}, operators: [GrammarOperatorRule]{}, operator_of: [Int]{}, tokens: [GrammarToken]{}, first: [[Int]]{}, follow: [[Int]]{}, decisions: [GrammarDecision]{}, steps: 0}
+    check_rule_names(work)
+    ^seen: [String]{}
+    wanted: work.tree.imports.copy()
+    merge_imports(work, wanted, imports, seen, -1)
+    mark_owners(work)
+    bind(work)
+    check_alternatives(work)
+    check_labels(work)
+    work.start = start_rule(work, start)
+    Ok(work)
+}
+
+new_node: fn(work: ^GrammarWork, kind: GrammarNodeKind, at: Int) -> Int Never! {
+    work.tree.nodes.push(GrammarNode{kind: kind, at: at, text: "", children: [Int]{}, label: "", append: false, fold: false, lazy: false, right: false, class: -1, rule: -1, token: -1})
+    if work.owner.len() == work.tree.nodes.len() - 1 -> work.owner.push(-1)
+    work.tree.nodes.len() - 1
+}
+
+is_lower: fn(c: Int) -> Bool Never! { c >= 97 && c <= 122 }
+
+is_upper: fn(c: Int) -> Bool Never! { c >= 65 && c <= 90 }
+
+is_digit: fn(c: Int) -> Bool Never! { c >= 48 && c <= 57 }
+
+/// Whether `name` is snake_case: a lowercase letter, then lowercase
+/// letters, digits and `_`.
+is_snake: fn(name: String) -> Bool Never! {
+    loop (i, b) in name.bytes() {
+        c: Int{b}
+        if i == 0 && !is_lower(c) -> return false
+        if !is_lower(c) && !is_digit(c) && c != 95 -> return false
+    }
+    name.len() > 0
+}
+
+/// Whether `name` is ALL_CAPS: an uppercase letter, then uppercase
+/// letters, digits and `_`.
+is_caps: fn(name: String) -> Bool Never! {
+    loop (i, b) in name.bytes() {
+        c: Int{b}
+        if i == 0 && !is_upper(c) -> return false
+        if !is_upper(c) && !is_digit(c) && c != 95 -> return false
+    }
+    name.len() > 0
+}
+
+/// `name` in snake_case: `selectStmt` is `select_stmt`.
+snake_name: fn(name: String) -> String Never! {
+    ^out: [U8]{}
+    loop (i, b) in name.bytes() {
+        c: Int{b}
+        if is_upper(c) {
+            last: if out.len() > 0 -> Int{out[out.len() - 1]} else -> 95
+            if i > 0 && last != 95 -> out.push(U8{95})
+            out.push(U8{c + 32})
+        } else { out.push(b) }
+    }
+    String.from_bytes(out) ?? name.copy()
+}
+
+/// `name` in ALL_CAPS.
+caps_name: fn(name: String) -> String Never! {
+    ^out: [U8]{}
+    loop b in name.bytes() {
+        c: Int{b}
+        if is_lower(c) -> out.push(U8{c - 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? name.copy()
+}
+
+/// A rule's type name: `key_value` is `KeyValue`.
+pascal_name: fn(name: String) -> String Never! {
+    ^out: [U8]{}
+    ^upper: true
+    loop b in name.bytes() {
+        c: Int{b}
+        if c == 95 {
+            upper = true
+            next
+        }
+        if upper && is_lower(c) -> out.push(U8{c - 32}) else -> out.push(b)
+        upper = false
+    }
+    String.from_bytes(out) ?? name.copy()
+}
+
+/// `name` without `_` and in lowercase: `SQLStmt` and `sql_stmt` agree.
+folded_name: fn(name: String) -> String Never! {
+    ^out: [U8]{}
+    loop b in name.bytes() {
+        c: Int{b}
+        if c == 95 -> next
+        if is_upper(c) -> out.push(U8{c + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? name.copy()
+}
+
+check_rule_names: fn(work: ^GrammarWork) Never! {
+    ^names: [String:Int]{}
+    loop (i, rule) in work.tree.rules {
+        name: rule.name
+        if name == "EOF" || name == "HOLE" {
+            work.faults.push(grammar_fault(.Notation, rule.at, "`{name}` is built in, so no rule may take its name", "Rename the rule"))
+            next
+        }
+        if (names.get(name) ?? -1) >= 0 {
+            work.faults.push(grammar_fault(.Notation, rule.at, "the rule `{name}` is defined twice", "Merge the two definitions into one rule with `|` between their alternatives"))
+            next
+        }
+        _: names.add(name.copy(), i)
+        if rule.kind == .Parser && !is_snake(name) {
+            work.faults.push(grammar_fault(.Notation, rule.at, "the parser rule `{name}` is not snake_case", "Name it `{snake_name(name)}`: a parser rule's name is snake_case, and its type is that name in PascalCase"))
+        } else if rule.kind != .Parser && !is_caps(name) {
+            work.faults.push(grammar_fault(.Notation, rule.at, "the token rule `{name}` is not ALL_CAPS", "Name it `{caps_name(name)}`"))
+        }
+    }
+}
+
+/// Merges the rules of each grammar in `wanted` that this grammar does not
+/// define itself, then what those grammars import. The first grammar to
+/// define a name wins. `spot` is where faults in an imported grammar
+/// point: its `import` in this grammar (-1 while merging this grammar's own
+/// imports).
+merge_imports: fn(work: ^GrammarWork, wanted: [GrammarImport], sources: [GrammarSource], seen: ^[String], spot: Int) Never! {
+    loop wanted_import in wanted {
+        at: if spot >= 0 -> spot else -> wanted_import.at
+        name: wanted_import.name
+        if seen.contains(name) -> next
+        seen.push(name.copy())
+        ^found: -1
+        loop (i, source) in sources {
+            if source.name == name && found < 0 -> found = i
+        }
+        if found < 0 {
+            work.faults.push(grammar_fault(.UndefinedRule, at, "there is no grammar `{name}` to import", "Import a grammar bound in this module, by its binding name"))
+            next
+        }
+        if read_notation(sources[found].text) == {
+            .Ok(sub) -> {
+                merge_rules(work, sub, name, at)
+                merge_imports(work, sub.imports, sources, seen, at)
+            }
+            .Err(_) -> {
+                work.faults.push(grammar_fault(.UndefinedRule, at, "the imported grammar `{name}` has faults of its own", "Fix `{name}` first"))
+            }
+        }
+    }
+}
+
+merge_rules: fn(work: ^GrammarWork, sub: RuleTree, source: String, at: Int) Never! {
+    base: work.tree.nodes.len()
+    class_base: work.tree.classes.len()
+    loop node in sub.nodes {
+        ^children: [Int]{}
+        loop child in node.children -> children.push(child + base)
+        class: if node.class >= 0 -> node.class + class_base else -> -1
+        work.tree.nodes.push(GrammarNode{kind: node.kind, at: at, text: node.text.copy(), children: children, label: node.label.copy(), append: node.append, fold: node.fold, lazy: node.lazy, right: node.right, class: class, rule: -1, token: -1})
+    }
+    loop k in 0..<sub.classes.len() -> work.tree.classes.push(sub.classes[k])
+    loop rule in sub.rules {
+        ^defined: false
+        loop known in work.tree.rules {
+            if known.name == rule.name -> defined = true
+        }
+        if !defined {
+            work.tree.rules.push(GrammarRule{name: rule.name.copy(), kind: rule.kind, skip: rule.skip, body: rule.body + base, at: at, source: source.copy()})
+        }
+    }
+}
+
+/// Records the rule each node is written in (-1 for a node of an
+/// overridden imported rule).
+mark_owners: fn(work: ^GrammarWork) Never! {
+    work.owner = [Int]{}
+    loop _ in 0..<work.tree.nodes.len() -> work.owner.push(-1)
+    loop r in 0..<work.tree.rules.len() -> mark_owner(work, work.tree.rules[r].body, r)
+}
+
+mark_owner: fn(work: ^GrammarWork, node: Int, rule: Int) Never! {
+    work.owner[node] = rule
+    children: work.tree.nodes[node].children.copy()
+    loop child in children -> mark_owner(work, child, rule)
+}
+
+bind: fn(work: ^GrammarWork) Never! {
+    ^names: [String:Int]{}
+    loop (i, rule) in work.tree.rules {
+        if (names.get(rule.name) ?? -1) < 0 -> _: names.add(rule.name.copy(), i)
+    }
+    loop n in 0..<work.tree.nodes.len() {
+        owner: work.owner[n]
+        node: work.tree.nodes[n]
+        if owner < 0 || node.kind != .Ref -> next
+        name: node.text
+        target: names.get(name) ?? -1
+        if target < 0 {
+            work.faults.push(grammar_fault(.UndefinedRule, node.at, "`{name}` names no rule", "Define `{name} : … ;`, or import the grammar that defines it"))
+            next
+        }
+        work.tree.nodes[n].rule = target
+        if work.tree.rules[owner].kind != .Parser -> next
+        if work.tree.rules[target].kind == .Fragment {
+            work.faults.push(grammar_fault(.UndefinedRule, node.at, "`{name}` is a fragment, a piece of token rules only", "Use a token rule here, or drop `fragment` from `{name}`"))
+        } else if work.tree.rules[target].skip {
+            work.faults.push(grammar_fault(.UndefinedRule, node.at, "`{name}` is skipped between tokens, so a parser rule never meets it", "Use another token rule here, or drop `-> skip` from `{name}`"))
+        }
+    }
+}
+
+/// `# Name` on every alternative of a parser rule or on none, each name
+/// once in a rule, in PascalCase, and only on a rule's own alternatives.
+check_alternatives: fn(work: ^GrammarWork) Never! {
+    ^own: [Bool]{}
+    loop _ in 0..<work.tree.nodes.len() -> own.push(false)
+    loop rule in work.tree.rules {
+        alts: work.tree.nodes[rule.body].children
+        ^named: 0
+        loop alt in alts {
+            own[alt] = true
+            if work.tree.nodes[alt].text != "" -> named += 1
+        }
+        if named > 0 && named < alts.len() {
+            loop alt in alts {
+                if work.tree.nodes[alt].text == "" {
+                    work.faults.push(grammar_fault(.FieldShape, work.tree.nodes[alt].at, "the rule `{rule.name}` names some alternatives with `#` but not this one", "Name every alternative of `{rule.name}` with `# Name`, or none"))
+                    break
+                }
+            }
+        }
+        ^names: [String]{}
+        loop alt in alts {
+            name: work.tree.nodes[alt].text
+            if name == "" -> next
+            if names.contains(name) {
+                work.faults.push(grammar_fault(.FieldShape, work.tree.nodes[alt].at, "two alternatives of `{rule.name}` are named `{name}`", "Give each alternative its own name"))
+            } else if !is_upper(Int{name.bytes()[0]}) {
+                work.faults.push(grammar_fault(.FieldShape, work.tree.nodes[alt].at, "the alternative name `{name}` is not PascalCase", "Name it `{pascal_name(name)}`: it becomes a case of the rule's type"))
+            }
+            names.push(name.copy())
+        }
+    }
+    loop (n, node) in work.tree.nodes {
+        if work.owner[n] < 0 || node.kind != .Alt || own[n] || node.text == "" -> next
+        work.faults.push(grammar_fault(.Notation, node.at, "`# {node.text}` names a case of the rule, so it belongs on the rule's own alternatives", "Drop the name from the group's alternative"))
+    }
+}
+
+/// Every label snake_case and no label named as a rule.
+check_labels: fn(work: ^GrammarWork) Never! {
+    loop (n, node) in work.tree.nodes {
+        if work.owner[n] < 0 || node.label == "" -> next
+        label: node.label
+        if !is_snake(label) {
+            work.faults.push(grammar_fault(.FieldShape, node.at, "the label `{label}` is not snake_case", "Name it `{snake_name(label)}`: it becomes a field"))
+            next
+        }
+        loop rule in work.tree.rules {
+            if rule.name == label {
+                work.faults.push(grammar_fault(.FieldShape, node.at, "the label `{label}` is also the name of a rule", "Rename the label, so a field and a rule's type never share a name"))
+                break
+            }
+        }
+    }
+}
+
+/// The parser rule the binding `start` names: the one whose PascalCase
+/// name it is, or failing that whose name agrees with it ignoring case and
+/// `_` (`SQLStmt` names `sql_stmt`). "" starts from any rule (-1).
+start_rule: fn(work: ^GrammarWork, start: String) -> Int Never! {
+    if start == "" -> return -1
+    loop (i, rule) in work.tree.rules {
+        if rule.kind == .Parser && pascal_name(rule.name) == start -> return i
+    }
+    folded: folded_name(start)
+    loop (i, rule) in work.tree.rules {
+        if rule.kind == .Parser && folded_name(rule.name) == folded -> return i
+    }
+    ^fix: "Name the binding for the rule a parse starts from, as `Expr` names `expr`"
+    loop rule in work.tree.rules {
+        if rule.kind == .Parser {
+            fix = "Name the binding for the rule a parse starts from, as `{pascal_name(rule.name)}` names `{rule.name}`"
+            break
+        }
+    }
+    work.faults.push(grammar_fault(.StartRule, 0, "no rule is named for the binding `{start}`", fix))
+    return -1
+}
+
+/// Whether `node` is a plain reference to rule `rule`: no suffix, any
+/// label.
+is_self: fn(work: GrammarWork, node: Int, rule: Int) -> Bool Never! {
+    work.tree.nodes[node].kind == .Ref && work.tree.nodes[node].rule == rule
+}
+
+/// Splits each parser rule that is directly left-recursive in the operator
+/// form. Its body becomes `primary repeat*`: the primary and prefix
+/// alternatives, then any number of binary and suffix tails, each the
+/// alternative without its leading operand.
+split_operators: fn(work: ^GrammarWork) Never! {
+    work.operator_of = [Int]{}
+    loop _ in 0..<work.tree.rules.len() -> work.operator_of.push(-1)
+    loop r in 0..<work.tree.rules.len() {
+        rule: work.tree.rules[r]
+        if rule.kind != .Parser -> next
+        alts: work.tree.nodes[rule.body].children
+        ^leads: 0
+        ^operands: 0
+        loop alt in alts {
+            kids: work.tree.nodes[alt].children
+            lead: kids.len() >= 2 && is_self(work, kids[0], r)
+            trail: kids.len() >= 2 && is_self(work, kids[kids.len() - 1], r)
+            if lead -> leads += 1
+            if !lead && !trail -> operands += 1
+        }
+        if leads == 0 -> next
+        // Without an operand the rule still splits, so the fault is not
+        // reported again as a cycle.
+        if operands == 0 {
+            work.faults.push(grammar_fault(.LeftRecursive, rule.at, "every alternative of `{rule.name}` starts or ends with `{rule.name}`, so it has no operand", "Add an alternative that parses an operand, such as a number or `'(' {rule.name} ')'`"))
+        }
+        primary: new_node(work, .Choice, rule.at)
+        tails: new_node(work, .Choice, rule.at)
+        ^ops: [GrammarOperator]{}
+        loop (i, alt) in alts {
+            kids: work.tree.nodes[alt].children
+            level: alts.len() - i
+            right: work.tree.nodes[alt].right
+            lead: kids.len() >= 2 && is_self(work, kids[0], r)
+            trail: kids.len() >= 2 && is_self(work, kids[kids.len() - 1], r)
+            ^levels: [Int]{}
+            loop _ in kids -> levels.push(-1)
+            if lead {
+                tail: new_node(work, .Alt, work.tree.nodes[alt].at)
+                loop k in 1..<kids.len() -> work.tree.nodes[tail].children.push(kids[k])
+                work.tree.nodes[tails].children.push(tail)
+                kind: if trail -> GrammarOperatorKind.Binary else -> GrammarOperatorKind.Suffix
+                ops.push(GrammarOperator{alt: alt, tail: tail, kind: kind, level: level, right: right, operands: levels})
+            } else {
+                work.tree.nodes[primary].children.push(alt)
+                if trail {
+                    ops.push(GrammarOperator{alt: alt, tail: -1, kind: .Prefix, level: level, right: right, operands: levels})
+                }
+            }
+        }
+        repeat: new_node(work, .Star, rule.at)
+        work.tree.nodes[repeat].children.push(tails)
+        seq: new_node(work, .Alt, rule.at)
+        work.tree.nodes[seq].children.push(primary)
+        work.tree.nodes[seq].children.push(repeat)
+        body: new_node(work, .Choice, rule.at)
+        work.tree.nodes[body].children.push(seq)
+        work.tree.rules[r].body = body
+        mark_owner(work, body, r)
+        work.operator_of[r] = work.operators.len()
+        work.operators.push(GrammarOperatorRule{rule: r, alts: alts, primary: primary, repeat: repeat, operators: ops})
+    }
+}
+
+/// Marks each node's parent in the parsed structure: the rule bodies as
+/// split, so an operator rule's written alternatives with a leading
+/// operand are not in it.
+mark_parents: fn(work: ^GrammarWork) Never! {
+    work.parent = [Int]{}
+    loop _ in 0..<work.tree.nodes.len() -> work.parent.push(-2)
+    loop rule in work.tree.rules {
+        work.parent[rule.body] = -1
+        mark_parent(work, rule.body)
+    }
+}
+
+mark_parent: fn(work: ^GrammarWork, node: Int) Never! {
+    children: work.tree.nodes[node].children.copy()
+    loop child in children {
+        work.parent[child] = node
+        mark_parent(work, child)
+    }
+}
+
+/// Which nodes can match no input, by a fixed point.
+mark_nullable: fn(work: ^GrammarWork) Never! {
+    work.nullable = [Bool]{}
+    loop _ in 0..<work.tree.nodes.len() -> work.nullable.push(false)
+    ^changed: true
+    loop changed {
+        changed = false
+        loop n in 0..<work.tree.nodes.len() {
+            work.steps += 1
+            if work.nullable[n] || !node_nullable(work, n) -> next
+            work.nullable[n] = true
+            changed = true
+        }
+    }
+}
+
+node_nullable: fn(work: GrammarWork, n: Int) -> Bool Never! {
+    node: work.tree.nodes[n]
+    kind: node.kind
+    if kind == .Optional || kind == .Star -> return true
+    if kind == .Plus -> return work.nullable[node.children[0]]
+    if kind == .Ref -> return node.rule >= 0 && work.nullable[work.tree.rules[node.rule].body]
+    if kind == .Alt {
+        loop child in node.children {
+            if !work.nullable[child] -> return false
+        }
+        return true
+    }
+    if kind == .Choice {
+        loop child in node.children {
+            if work.nullable[child] -> return true
+        }
+    }
+    false
+}
+
+/// The parser rules `node` can begin with: those it may reach before it
+/// consumes any input.
+leading_rules: fn(work: GrammarWork, node: Int, out: ^[Int]) Never! {
+    n: work.tree.nodes[node]
+    if n.kind == .Ref {
+        if n.rule >= 0 && work.tree.rules[n.rule].kind == .Parser && !out.contains(n.rule) {
+            out.push(n.rule)
+        }
+        return
+    }
+    if n.kind == .Alt {
+        loop child in n.children {
+            leading_rules(work, child, out)
+            if !work.nullable[child] {
+                return
+            }
+        }
+        return
+    }
+    if n.kind == .Choice || n.kind == .Optional || n.kind == .Star || n.kind == .Plus {
+        loop child in n.children -> leading_rules(work, child, out)
+    }
+}
+
+/// Tarjan's strongly connected components over the "can begin with" graph.
+Components: struct {
+    edges: [[Int]],
+    index: [Int],
+    low: [Int],
+    on_stack: [Bool],
+    stack: [Int],
+    next_index: Int,
+    found: [[Int]],
+
+    visit: fn(^self, v: Int) Never! {
+        self.index[v] = self.next_index
+        self.low[v] = self.next_index
+        self.next_index += 1
+        self.stack.push(v)
+        self.on_stack[v] = true
+        targets: self.edges[v]
+        loop w in targets {
+            if self.index[w] < 0 {
+                self.visit(w)
+                if self.low[w] < self.low[v] -> self.low[v] = self.low[w]
+            } else if self.on_stack[w] && self.index[w] < self.low[v] {
+                self.low[v] = self.index[w]
+            }
+        }
+        if self.low[v] != self.index[v] {
+            return
+        }
+        ^component: [Int]{}
+        loop {
+            w: self.stack[self.stack.len() - 1]
+            _: self.stack.pop()
+            self.on_stack[w] = false
+            component.push(w)
+            if w == v -> break
+        }
+        self.found.push(component)
+    }
+}
+
+/// Reports every cycle of rules that can begin with each other, once per
+/// cycle, at its first rule, with the path `a -> b -> a`.
+report_left_recursion: fn(work: ^GrammarWork) Never! {
+    count: work.tree.rules.len()
+    ^edges: [[Int]]{}
+    loop r in 0..<count {
+        ^out: [Int]{}
+        if work.tree.rules[r].kind == .Parser -> leading_rules(work, work.tree.rules[r].body, out)
+        edges.push(out)
+    }
+    ^graph: Components{edges: edges, index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, found: [[Int]]{}}
+    loop _ in 0..<count {
+        graph.index.push(-1)
+        graph.low.push(0)
+        graph.on_stack.push(false)
+    }
+    loop r in 0..<count {
+        if graph.index[r] < 0 -> graph.visit(r)
+    }
+    loop component in graph.found {
+        ^first: component[0]
+        loop r in component {
+            if r < first -> first = r
+        }
+        if component.len() == 1 && !graph.edges[first].contains(first) -> next
+        path: cycle_path(graph.edges, component, first)
+        ^names: [String]{}
+        loop r in path -> names.push(work.tree.rules[r].name.copy())
+        rule: work.tree.rules[first]
+        fix: if component.len() == 1 -> "Write `{rule.name}` in the operator form: an alternative may start with `{rule.name}` itself, as in `{rule.name} : {rule.name} '+' {rule.name} | NUMBER ;`, with nothing before it" else -> "Factor the shared start out of these rules, or merge them into one rule in the operator form"
+        cycle: names.join(" -> ")
+        work.faults.push(grammar_fault(.LeftRecursive, rule.at, "left recursion `{cycle}` is not the operator form", fix))
+    }
+}
+
+/// The shortest path from `first` back to itself inside `component`, as
+/// rule indexes starting and ending with `first`.
+cycle_path: fn(edges: [[Int]], component: [Int], first: Int) -> [Int] Never! {
+    ^before: [Int:Int]{}
+    ^queue: [Int]{}
+    loop w in edges[first] {
+        if component.contains(w) && (before.get(w) ?? -2) == -2 {
+            _: before.add(w, first)
+            queue.push(w)
+        }
+    }
+    ^at: 0
+    loop at < queue.len() {
+        v: queue[at]
+        at += 1
+        if v == first -> break
+        loop w in edges[v] {
+            if component.contains(w) && (before.get(w) ?? -2) == -2 {
+                _: before.add(w, v)
+                queue.push(w)
+            }
+        }
+    }
+    ^back: [Int]{first}
+    ^v: before.get(first) ?? first
+    loop v != first && back.len() <= component.len() {
+        back.push(v)
+        v = before.get(v) ?? first
+    }
+    back.push(first)
+    ^path: [Int]{}
+    loop k in 0..<back.len() -> path.push(back[back.len() - 1 - k])
+    path
+}

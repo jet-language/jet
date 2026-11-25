@@ -9,11 +9,11 @@ kit_steps_ascii_scalar: fn(code: Int) -> String {
 
 // Split only outside quoted arguments and balanced parentheses.
 kit_steps_transform_parts: fn(text: String) -> [String]? {
-    parts := [String]{}
-    start := 0
-    depth := 0
-    quote := 0
-    escaped := false
+    ^parts: [String]{}
+    ^start: 0
+    ^depth: 0
+    ^quote: 0
+    ^escaped: false
     loop (index, byte) in text.bytes() {
         c: Int{byte}
         if quote != 0 {
@@ -85,8 +85,8 @@ kit_steps_transform_valid: fn(transform: String) -> Bool {
 }
 
 kit_steps_strip_sgr: fn(text: String) -> String {
-    result := [U8]{}
-    escaped := false
+    ^result: [U8]{}
+    ^escaped: false
     loop byte in text.bytes() {
         if escaped {
             if byte == (U8{109}) -> escaped = false
@@ -97,8 +97,8 @@ kit_steps_strip_sgr: fn(text: String) -> String {
 
 kit_steps_strip_ansi: fn(text: String) -> String {
     bytes: text.bytes()
-    result := [U8]{}
-    cursor := 0
+    ^result: [U8]{}
+    ^cursor: 0
     loop cursor < bytes.len() {
         if bytes[cursor] == (U8{27}) {
             cursor += 1
@@ -121,7 +121,7 @@ kit_steps_strip_ansi: fn(text: String) -> String {
 // Terminal helper semantics of the PTY help steps, not a terminal emulator.
 kit_steps_terminal_transform: fn(text: String, name: String) -> String? {
     if name == "visible_cols" {
-        result := [String]{}
+        ^result: [String]{}
         loop line in kit_steps_rust_lines(text) {
             result.push("{kit_steps_scalar_count(kit_steps_strip_sgr(line))}")
         }
@@ -129,11 +129,11 @@ kit_steps_terminal_transform: fn(text: String, name: String) -> String? {
     }
     if name == "cursor_up_counts" {
         bytes: text.bytes()
-        result := [String]{}
-        i := 0
+        ^result: [String]{}
+        ^i: 0
         loop i + 3 < bytes.len() {
             if bytes[i] == (U8{27}) && bytes[i + 1] == (U8{91}) && bytes[i + 2] >= (U8{48}) && bytes[i + 2] <= (U8{57}) {
-                end := i + 2
+                ^end: i + 2
                 loop end < bytes.len() && bytes[end] >= (U8{48}) && bytes[end] <= (U8{57}) {
                     end += 1
                 }
@@ -150,10 +150,10 @@ kit_steps_terminal_transform: fn(text: String, name: String) -> String? {
     normalized: text.replace(kit_steps_ascii_scalar(13), "")
     parts: normalized.split("{esc}[J").to_list()
     if parts.len() < 3 -> return None
-    frame := parts[parts.len() - 2]
+    ^frame: parts[parts.len() - 2]
     frame = kit_steps_byte_slice(frame, 0, kit_steps_byte_index(frame, "{esc}[?1049l") ?? frame.count_bytes())
-    last := -1
-    at := 0
+    ^last: -1
+    ^at: 0
     loop {
         found: kit_steps_byte_index(kit_steps_byte_slice(frame, at, frame.count_bytes()), "{esc}[") ?? break
         last = at + found
@@ -172,10 +172,10 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
     if part == "normalize_failure_journey_paths" -> return kit_steps_failure_paths(text)
     if part == "normalize_contract_source_arrow" -> return Val(kit_steps_contract_arrow(text))
     if part == "normalize_journey_paths" {
-        lines := [String]{}
+        ^lines: [String]{}
         loop line in kit_steps_rust_lines(text) {
             open: kit_steps_byte_index(line, " (")
-            colon := Int?{None}
+            ^colon: Int?{None}
             loop (index, byte) in line.bytes() {
                 if byte == (U8{58}) -> colon = Val(index)
             }
@@ -203,8 +203,8 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
     }
     if part == "strip_whitespace" || part == "strip_ascii_whitespace" {
         bytes: text.bytes()
-        result := [U8]{}
-        index := 0
+        ^result: [U8]{}
+        ^index: 0
         loop index < bytes.len() {
             scalar: kit_steps_scalar(bytes, index)
             whitespace: if part == "strip_whitespace" -> kit_steps_unicode_space(scalar.value) else -> scalar.value == 32 || (scalar.value >= 9 && scalar.value <= 13)
@@ -216,7 +216,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
         return Val(String.from_bytes(result) ?? panic("whitespace strip changed UTF-8"))
     }
     if part == "trim_lines" || part == "first_words" || part == "until_blank" {
-        lines := [String]{}
+        ^lines: [String]{}
         loop line in kit_steps_rust_lines(text) {
             if part == "until_blank" && line == "" -> break
             if part == "trim_lines" -> lines.push(line.trim().copy()) else if part == "first_words" {
@@ -230,7 +230,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
     name: kit_steps_byte_slice(part, 0, open)
     body: kit_steps_byte_slice(part, open + 1, part.count_bytes() - 1)
     if name == "filter" && body.starts_with("where ") {
-        lines := [String]{}
+        ^lines: [String]{}
         loop line in kit_steps_rust_lines(text) {
             if kit_steps_expression(kit_steps_byte_slice(body, 6, body.count_bytes()), line) ?? return None {
                 lines.push(line)
@@ -241,7 +241,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
     args: kit_steps_transform_args(body) ?? return None
     if name == "bit_and" {
         mask: kit_steps_mask(args[0]) ?? return None
-        values := [String]{}
+        ^values: [String]{}
         loop line in kit_steps_rust_lines(text) {
             number: Int.parse(line) ?? return None
             values.push("{number & mask}")
@@ -249,10 +249,10 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
         return Val(values.join("\n"))
     }
     if name == "filter" {
-        lines := [String]{}
+        ^lines: [String]{}
         negative: args[0] == "!~" || args[0] == "!^=" || args[0] == "!="
         loop line in kit_steps_rust_lines(text) {
-            matched := negative
+            ^matched: negative
             loop value in args.slice(1, args.len()) {
                 one: kit_steps_line_atom(line, args[0], value)
                 if negative -> matched = matched && one else -> matched = matched || one
@@ -273,7 +273,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
         return Val(kit_steps_byte_slice(text, args[0].count_bytes(), text.count_bytes()))
     }
     if name == "strip_prefix_lines" {
-        lines := [String]{}
+        ^lines: [String]{}
         loop line in kit_steps_rust_lines(text) {
             if line.starts_with(args[0]) {
                 lines.push(kit_steps_byte_slice(line, args[0].count_bytes(), line.count_bytes()))
@@ -287,7 +287,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
             return Val(kit_steps_byte_slice(text, at + args[0].count_bytes(), text.count_bytes()))
         }
         if name == "from_or_all" -> return Val(kit_steps_byte_slice(text, at, text.count_bytes()))
-        result := kit_steps_byte_slice(text, 0, at)
+        ^result: kit_steps_byte_slice(text, 0, at)
         loop result.ends_with("\n\n") {
             result = kit_steps_byte_slice(result, 0, result.count_bytes() - 1)
         }
@@ -334,7 +334,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
 
 kit_steps_transform: fn(text: String, transform: String) -> String? {
     parts: kit_steps_transform_parts(transform) ?? return None
-    result := text
+    ^result: text
     loop part in parts -> result = kit_steps_transform_one(result, part) ?? return None
     Val(result)
 }

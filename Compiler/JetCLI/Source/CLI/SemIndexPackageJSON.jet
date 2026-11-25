@@ -20,7 +20,7 @@ use jet_pkg_model.[
 
 // The keys of a map, sorted.
 jet_cli_sem_pkg_keys: fn<V>(values: [String:V]) -> [String] Never! {
-    names := values.keys().to_list()
+    ^names: values.keys().to_list()
     names.sort()
     names
 }
@@ -51,10 +51,10 @@ jet_cli_sem_pkg_optional_trust: fn(decision: TrustDecision?) -> String Never! {
 
 jet_cli_sem_pkg_authority: fn(authority: PackageAuthority) -> String Never! {
     grants: loop grant in authority.grants -> "{jet_cli_json_string(grant.package)}:{jet_cli_sem_json_strings(grant.rights)}"
-    trust := "null"
+    ^trust: "null"
     if authority.trust == .Val(policy) {
         services: loop service in policy.services -> "{jet_cli_json_string(service.service)}:{jet_cli_sem_pkg_trust(service.decision)}"
-        require := "null"
+        ^require: "null"
         if policy.require == .Val(floor) -> require = jet_cli_json_string(floor.label())
         trust = "{{\"default\":{jet_cli_sem_pkg_optional_trust(policy.default)},\"ci\":{jet_cli_sem_pkg_optional_trust(policy.ci_prompt)},\"services\":{{{services.join(",")}}},\"require\":{require}}}"
     }
@@ -63,7 +63,7 @@ jet_cli_sem_pkg_authority: fn(authority: PackageAuthority) -> String Never! {
 }
 
 jet_cli_sem_pkg_services: fn(values: [String:ServiceFact]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop name in jet_cli_sem_pkg_keys(values) {
         service: values[name]
         ports: loop port in service.ports -> "{port}"
@@ -73,7 +73,7 @@ jet_cli_sem_pkg_services: fn(values: [String:ServiceFact]) -> String Never! {
 }
 
 jet_cli_sem_pkg_environments: fn(values: [String:EnvironmentFact]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop name in jet_cli_sem_pkg_keys(values) {
         environment: values[name]
         parts.push("{jet_cli_json_string(name)}:{{\"name\":{jet_cli_json_string(environment.name)},\"tools\":{jet_cli_sem_json_strings(environment.tools)},\"services\":{jet_cli_sem_pkg_services(environment.services)},\"secrets\":{jet_cli_sem_pkg_string_map(environment.secrets)},\"fields\":{jet_cli_sem_pkg_string_map(environment.fields)}}}")
@@ -102,7 +102,7 @@ jet_cli_sem_pkg_payload: fn(value: OutputPayload) -> String Never! {
 // The outputs, by name. Each carries the provenance of `outputs.<name>`, or
 // an empty list.
 jet_cli_sem_pkg_outputs: fn(values: [String:OutputFact], provenance: [String:[String]]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop name in jet_cli_sem_pkg_keys(values) {
         output: values[name]
         origins: provenance.get("outputs.{name}") ?? [String]{}
@@ -142,11 +142,13 @@ jet_cli_sem_json_package_facts: fn(facts: PackageFacts?) -> String Never! {
 jet_cli_sem_json_workspace_overlays: fn(policy: OverlayPolicy?) -> String Never! {
     overlay_policy: policy ?? return "null"
     grants: loop grant in overlay_policy.build_grants -> "{{\"package\":{jet_cli_json_string(grant.subject)},\"effects\":{jet_cli_sem_json_strings(grant.effects)}}}"
-    overlays := [String]{}
+    ^overlays: [String]{}
     loop overlay in overlay_policy.overlays {
-        provider := "null"
-        if overlay.provider == .Val(value) -> provider = "{{\"provider\":{jet_cli_json_string(value.provider)},\"channel\":{jet_cli_sem_json_optional(value.channel)}}}"
-        packages := [String]{}
+        ^provider: "null"
+        if overlay.provider == .Val(value) {
+            provider = "{{\"provider\":{jet_cli_json_string(value.provider)},\"channel\":{jet_cli_sem_json_optional(value.channel)}}}"
+        }
+        ^packages: [String]{}
         loop package in overlay.packages {
             env: loop entry in package.env -> "[{jet_cli_json_string(entry.key)},{jet_cli_json_string(entry.value)}]"
             priorities: loop field in jet_cli_sem_pkg_keys(package.field_priorities) -> "{jet_cli_json_string(field)}:{package.field_priorities[field]}"

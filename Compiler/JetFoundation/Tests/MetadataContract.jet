@@ -16,8 +16,8 @@ metadata_contract_card: fn(owner: String) -> Bool Never! {
 }
 
 #Test("every metadata contract row names its card and a witness, and a built row's witness exists") {
-    violations := [String]{}
-    seen := [String]{}
+    ^violations: [String]{}
+    ^seen: [String]{}
     loop row in METADATA_CONTRACT_ROWS {
         if row.spelling.is_empty() -> violations.push("a row has no spelling")
         if seen.contains(row.spelling) -> violations.push("`{row.spelling}` is registered twice")
@@ -37,14 +37,14 @@ metadata_contract_card: fn(owner: String) -> Bool Never! {
     surfaces: [MetadataSurface]{.Preparation, .Reflection, .Publishing, .Control}
     kinds: [MetadataItemKind]{.Fact, .Operation, .Phase, .Failure}
     loop surface in surfaces {
-        found := false
+        ^found: false
         loop row in METADATA_CONTRACT_ROWS {
             if row.surface == surface -> found = true
         }
         assert(found, "a metadata surface has no contract row")
     }
     loop kind in kinds {
-        found := false
+        ^found: false
         loop row in METADATA_CONTRACT_ROWS {
             if row.kind == kind -> found = true
         }

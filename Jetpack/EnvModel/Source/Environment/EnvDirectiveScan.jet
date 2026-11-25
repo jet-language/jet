@@ -30,8 +30,8 @@ env_file_list_arg: fn(text: String, name: String) -> [String] Never! {
 
 // The inner arguments of every `name(...)` call in `text`, in order.
 env_file_all_call_args: fn(text: String, name: String) -> [String] Never! {
-    out := [String]{}
-    rest := text
+    ^out: [String]{}
+    ^rest: text
     loop {
         parts: rest.split_once(name) ?? break
         if env_file_call_args_after(parts.after) == .Val(args) -> out.push(args)
@@ -50,12 +50,12 @@ env_file_call_args: fn(text: String, name: String) -> String? Never! {
 env_file_call_args_after: fn(after: String) -> String? Never! {
     rest: after.trim_start()
     if !rest.starts_with("(") -> return None
-    scalars := [String]{}
+    ^scalars: [String]{}
     loop scalar in rest.chars() -> scalars.push("{scalar}")
-    depth := 1
-    out := [String]{}
-    in_quote := false
-    escaped := false
+    ^depth: 1
+    ^out: [String]{}
+    ^in_quote: false
+    ^escaped: false
     loop index in 1..<scalars.len() {
         current: scalars[index]
         if in_quote {
@@ -88,17 +88,17 @@ env_file_call_args_after: fn(after: String) -> String? Never! {
 // Every `"..."` string literal in a fragment, in order, with Jet string
 // escapes and doubled braces decoded.
 env_file_quoted_strings: fn(fragment: String) -> [String] Never! {
-    scalars := [String]{}
+    ^scalars: [String]{}
     loop scalar in fragment.chars() -> scalars.push("{scalar}")
-    out := [String]{}
-    index := 0
+    ^out: [String]{}
+    ^index: 0
     loop index < scalars.len() {
         if scalars[index] != "\"" {
             index += 1
             next
         }
         index += 1
-        value := [String]{}
+        ^value: [String]{}
         loop index < scalars.len() {
             current: scalars[index]
             index += 1

@@ -79,7 +79,7 @@ store_materialize_receipt: fn(roots: HangarRoots, entry: StoreEntry) -> {digest:
 
 // Create `path` exclusively and make its bytes durable.
 store_receipt_write_new: fn(path: String, bytes: [U8]) StoreError! {
-    file := files.create(path, if_exists: .Refuse)
+    ^file: files.create(path, if_exists: .Refuse)
     file.write_bytes(bytes)
     file.fsync()
 }
@@ -91,7 +91,7 @@ store_recover_receipt_staging: fn(roots: HangarRoots) -> Int StoreError! {
     if metadata.is_symlink || !metadata.is_dir {
         return Err(StoreError.InvalidData("Hangar receipt directory is not a real directory; repair the path before recovery"))
     }
-    recovered := 0
+    ^recovered: 0
     loop item in files.list_dir(receipts) {
         if !item.name.starts_with(".") || !item.name.ends_with(STORE_RECEIPT_PARTIAL_SUFFIX) -> next
         node: files.stat(item.path)
@@ -107,7 +107,7 @@ store_recover_receipt_staging: fn(roots: HangarRoots) -> Int StoreError! {
 
 // The canonical development receipt of one package realization.
 store_render_receipt: fn(entry: StoreEntry) -> String Never! {
-    inputs := [JetDevelopmentReceiptInput]{
+    ^inputs: [JetDevelopmentReceiptInput]{
         store_receipt_input("package-name", entry.name),
         store_receipt_input("package-version", entry.version),
         store_receipt_input("reference", entry.reference),
@@ -142,9 +142,9 @@ store_render_receipt: fn(entry: StoreEntry) -> String Never! {
         inputs.push(store_receipt_input("closure", reference))
     }
     action: store_entry_action_key(entry)
-    outputs_map := entry.named_outputs.copy()
+    ^outputs_map: entry.named_outputs.copy()
     outputs_map["out"] = entry.envelope.output_hash
-    outputs := [JetDevelopmentReceiptInput]{}
+    ^outputs: [JetDevelopmentReceiptInput]{}
     loop name in store_sorted_keys(outputs_map) {
         outputs.push(store_receipt_input(name, outputs_map[name]))
     }

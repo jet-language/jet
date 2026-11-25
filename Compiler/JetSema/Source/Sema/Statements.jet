@@ -94,7 +94,7 @@ sema_stmt_block_definitely_returns: fn(statements: [Stmt]) -> Bool Never! {
 // The `value_tail_span` mark for a value block's last line: its value
 // expression, or the table that ends the block (its arms carry the value).
 sema_stmt_value_tail_marker: fn(statements: [Stmt]) -> Span? {
-    seen := 0
+    ^seen: 0
     loop last in statements {
         seen += 1
         if seen < statements.len() -> next
@@ -118,10 +118,10 @@ sema_stmt_check_value_block_end: fn(statements: [Stmt], checked: [TStmt], expect
         diagnostics.push(sema_stmt_missing_value(expected, None, function_name, block_span))
         return false
     }
-    seen := 0
+    ^seen: 0
     // An earlier line that always leaves makes a valueless last line dead
     // code, not the block's value.
-    left := false
+    ^left: false
     loop last in statements {
         seen += 1
         if seen < statements.len() {
@@ -162,16 +162,16 @@ sema_stmt_missing_value: fn(expected: Type?, uncovered: String?, function_name: 
 // level, that level.
 sema_stmt_leave_statements: fn(check: ^SemaBodyCheck, depth: Int, body_id: Int, nested: Bool) Never! {
     loop check.context.lambda_statement_tails.len() > depth {
-        _ := check.context.lambda_statement_tails.pop()
+        ^_: check.context.lambda_statement_tails.pop()
     }
-    loop check.tail_store.bodies.len() > body_id -> _ := check.tail_store.bodies.pop()
+    loop check.tail_store.bodies.len() > body_id -> ^_: check.tail_store.bodies.pop()
     if nested -> sema_leave_source_nesting(check.context)
 }
 
 sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int) -> SemaStatementResult {
     // E1403: a statement list is one source nesting level below its owner,
     // as each of its statements is.
-    entered_nesting := false
+    ^entered_nesting: false
     loop first in statements {
         if !sema_enter_source_nesting(check, sema_compiler_index_stmt_span(first)) {
             return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -179,12 +179,12 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
         entered_nesting = true
         break
     }
-    tail_frame_depth := check.context.lambda_statement_tails.len()
-    tail_body_id := sema_statement_tail_store_add_body(check.tail_store, statements)
+    ^tail_frame_depth: check.context.lambda_statement_tails.len()
+    ^tail_body_id: sema_statement_tail_store_add_body(check.tail_store, statements)
     check.context.lambda_statement_tails.push(SemaStatementTailFrame{body_id: tail_body_id, start_index: 0})
-    previous_return_type := check.scopes.return_type
-    previous_failure_carrier := check.scopes.failure_carrier
-    previous_loop_depth := check.scopes.loop_depth
+    ^previous_return_type: check.scopes.return_type
+    ^previous_failure_carrier: check.scopes.failure_carrier
+    ^previous_loop_depth: check.scopes.loop_depth
     // A nested block keeps the carrier its owner established (a lambda's is
     // not the implicit `Err!` of a function); only a new return type, or a
     // root with no carrier outside an open callback, derives it.
@@ -197,10 +197,10 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
     // compiler records on the function) is no user dispatch to rewrite.
     if !check.context.compiler_generated -> sema_stmt_lint_same_subject_dispatch(statements, check)
     sema_stmt_lint_map_group_round_trip(statements, check)
-    output := [TStmt]{}
-    complete := true
-    reachable := true
-    index := 0
+    ^output: [TStmt]{}
+    ^complete: true
+    ^reachable: true
+    ^index: 0
     loop index < statements.len() {
         // Each statement is read in place (`statements[index]`): a binding of
         // the row copied the whole statement, its nested bodies included.
@@ -225,7 +225,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
         if check.context.eval_walk.rows.len() > 0 {
             sema_eval_probe_visit(sema_eval_probe_stmt_span(statements[index]), true, check)
         }
-        output_start := output.len()
+        ^output_start: output.len()
         statement_diagnostics: check.diagnostics.len()
         statement_reasons: check.context.incomplete_reasons.len()
         statement_complete: complete
@@ -265,7 +265,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                 }
             }
             .DeferClose(close, span) -> {
-                checked := sema_stmt_check_defer_close(close, span, check)
+                ^checked: sema_stmt_check_defer_close(close, span, check)
                 if checked == {
                     .Val(checked_statement) -> { output.push(checked_statement) }
                     .None -> complete = false
@@ -313,7 +313,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                 }
             }
             .Val(binding) -> {
-                lambda_escapes := check.context.lambda_escapes
+                ^lambda_escapes: check.context.lambda_escapes
                 if binding.init == {
                     .Lambda(_, _) -> {
                         lambda_escapes = sema_expression_lambda_bound_escapes(binding, statements, index + 1, check)
@@ -400,9 +400,9 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
             .For(var, var_span, var2, kind, body, span, arrow_body, label, _) -> {
                 if kind == {
                     .Range(start_expr, end_expr, step_expr, exclusive) -> {
-                        start_value := sema_stmt_check_range_endpoint(start_expr, "start", check)
-                        end_value := sema_stmt_check_range_endpoint(end_expr, "end", check)
-                        step_value := TExpr?{None}
+                        ^start_value: sema_stmt_check_range_endpoint(start_expr, "start", check)
+                        ^end_value: sema_stmt_check_range_endpoint(end_expr, "end", check)
+                        ^step_value: TExpr?{None}
                         if step_expr != None {
                             step_value = sema_stmt_check_range_stride(step_expr, check)
                         }
@@ -413,9 +413,9 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         }
                         // An arrow body is only the body's spelling, and a
                         // second loop name is not declared for a range.
-                        valid := start_value != None && end_value != None
+                        ^valid: start_value != None && end_value != None
                         if step_expr != None && step_value == None -> valid = false
-                        range_var_type := Type.Int
+                        ^range_var_type: Type.Int
                         if start_value == {
                             .Val(value) -> { range_var_type = value.ty }
                             .None -> {}
@@ -424,7 +424,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         // The body runs in place from this mark (sema_ownership_mark).
                         loop_fork: sema_ownership_mark(check.state)
                         sema_scope_enter(check.scopes, check.state, "for@{span.start}")
-                        label_name := String?{None}
+                        ^label_name: String?{None}
                         if label != None {
                             label_name = Val(label.name)
                             if !sema_scope_push_loop_label(check.scopes, label.name) {
@@ -432,10 +432,10 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                                 valid = false
                             }
                         }
-                        module_name := sema_scope_environment_module_text(check.environment.*, check.program.*)
-                        owner := sema_scope_local_owner_key(check.scopes)
+                        ^module_name: sema_scope_environment_module_text(check.environment.*, check.program.*)
+                        ^owner: sema_scope_local_owner_key(check.scopes)
                         key: symbol_key_text(SymbolKind.Local, module_name, owner, var)
-                        symbol := Symbol{
+                        ^symbol: Symbol{
                             id: sema_symbol_id_of(check.program.*, check.context, key),
                             kind: SymbolKind.Local,
                             name: var,
@@ -455,11 +455,11 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                                 sema_ownership_declare_binding(check.state, symbol, false)
                             }
                         }
-                        loop_frame_index := check.context.loop_value_frames.len()
+                        ^loop_frame_index: check.context.loop_value_frames.len()
                         sema_loop_value_push_frame(check.context, label_name, loop_fork)
-                        previous_arrow_loop_body := check.context.arrow_loop_body
+                        ^previous_arrow_loop_body: check.context.arrow_loop_body
                         check.context.arrow_loop_body = arrow_body
-                        nested := sema_check_statements(body, return_type, check, loop_depth + 1)
+                        ^nested: sema_check_statements(body, return_type, check, loop_depth + 1)
                         if !nested.complete -> valid = false
                         check.context.arrow_loop_body = previous_arrow_loop_body
                         // E0364: inclusive `0..xs.len()` whose body
@@ -495,22 +495,22 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         // `loop x in xs.move()` takes the source: every shape
                         // check below reads it as the exact take.
                         collection_expr: sema_expr_take_place_form(written_collection, check.scopes) ?? written_collection
-                        collection_value := sema_check_expression(collection_expr, None, check)
+                        ^collection_value: sema_check_expression(collection_expr, None, check)
                         collection: collection_value ?? sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.Unit, expr_span(collection_expr))
                         if collection_value != None && var2 == None {
                             sema_stmt_lint_walk_filter(var, collection_expr, body, check)
                         }
-                        step_value := TExpr?{None}
+                        ^step_value: TExpr?{None}
                         if step_expr != None {
                             step_value = sema_stmt_check_source_stride(step_expr, check)
                         }
-                        valid := collection_value != None
+                        ^valid: collection_value != None
                         if step_expr != None && step_value == None -> valid = false
-                        range_source := sema_stmt_for_in_is_range(collection.ty)
-                        method_kind := sema_stmt_for_in_method_kind(collection_expr, collection)
-                        iterable_item_type := Type?{None}
+                        ^range_source: sema_stmt_for_in_is_range(collection.ty)
+                        ^method_kind: sema_stmt_for_in_method_kind(collection_expr, collection)
+                        ^iterable_item_type: Type?{None}
                         if method_kind == None && !range_source {
-                            iterable := sema_stmt_for_in_iterable_fact(check, collection.ty, expr_span(collection_expr))
+                            ^iterable: sema_stmt_for_in_iterable_fact(check, collection.ty, expr_span(collection_expr))
                             if iterable == None {
                                 iterable = sema_stmt_for_in_reader_fact(check, collection.ty)
                             }
@@ -521,8 +521,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                                 iterable_item_type = Val(fact.item_type)
                             }
                         }
-                        item_type_option := sema_stmt_for_in_item_type(collection.ty, method_kind, iterable_item_type)
-                        item_type := item_type_option ?? Type.Named{name: "Unit"}
+                        ^item_type_option: sema_stmt_for_in_item_type(collection.ty, method_kind, iterable_item_type)
+                        ^item_type: item_type_option ?? Type.Named{name: "Unit"}
                         // `loop (i, name) in rows` binds the index and the item, so
                         // a first name that is a member of a named-tuple item reads
                         // as the member and is not (E0182): the brace head
@@ -549,10 +549,10 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                             check.diagnostics.push(sema_error("E0109", expr_source_span(collection_expr), "values of type {type_name(collection.ty)} can't be used as a loop source", "a `loop` source must provide one checked item type per step", "use a list, map, stream, iterator, reader, or registered Iterable value"))
                             valid = false
                         }
-                        pair_types := sema_stmt_for_in_pair_types(collection.ty, item_type)
+                        ^pair_types: sema_stmt_for_in_pair_types(collection.ty, item_type)
                         // #4604: a rejected two-name form already reported why; both
                         // names stay in scope untyped so body reads add no E0107.
-                        pair_rejected := false
+                        ^pair_rejected: false
                         if var2 != None && collection_value != None {
                             if {
                                 range_source -> {
@@ -568,9 +568,9 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                             }
                         }
                         // A list whose elements owe a `#SingleUse` duty hands each one over.
-                        consumes_collection := sema_stmt_for_in_consumes_collection(collection.ty, item_type) || (sema_stmt_for_in_is_list(collection.ty) && sema_single_use_type(item_type, check.environment.*, check.program.*))
+                        ^consumes_collection: sema_stmt_for_in_consumes_collection(collection.ty, item_type) || (sema_stmt_for_in_is_list(collection.ty) && sema_single_use_type(item_type, check.environment.*, check.program.*))
                         task_list_consume: consumes_collection && sema_stmt_for_in_is_list(collection.ty)
-                        owns_collection := !consumes_collection || (sema_stmt_for_in_can_consume_collection(collection_expr) && (!task_list_consume || sema_stmt_for_in_frame_owns(collection_expr, check)))
+                        ^owns_collection: !consumes_collection || (sema_stmt_for_in_can_consume_collection(collection_expr) && (!task_list_consume || sema_stmt_for_in_frame_owns(collection_expr, check)))
                         if !owns_collection {
                             if task_list_consume {
                                 check.diagnostics.push(sema_stmt_for_in_borrowed_task_list(collection_expr, collection.ty, check))
@@ -589,12 +589,12 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         // before the names can shadow the root).
                         parameter_elements: !consumes_collection && !range_source && sema_stmt_for_in_borrowed_elements(collection_expr, check.scopes)
                         borrowed_elements: parameter_elements || (!consumes_collection && !range_source && sema_stmt_for_in_resource_elements(collection_expr, collection.ty, item_type, check))
-                        element_places := [SemaOwnershipPlace]{}
+                        ^element_places: [SemaOwnershipPlace]{}
                         if parameter_elements {
                             element_places = sema_ownership_element_places(collection_expr, var_span, check)
                         }
                         sema_scope_enter(check.scopes, check.state, "for.in@{span.start}")
-                        label_name := String?{None}
+                        ^label_name: String?{None}
                         if label != None {
                             label_name = Val(label.name)
                             if !sema_scope_push_loop_label(check.scopes, label.name) {
@@ -602,16 +602,16 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                                 valid = false
                             }
                         }
-                        first_type := item_type.copy()
-                        second_type := Type?{None}
+                        ^first_type: item_type.copy()
+                        ^second_type: Type?{None}
                         if var2 != None && pair_types != None {
                             pair: pair_types ?? SemaForInPairTypes{first: item_type, second: item_type}
                             first_type = pair.first
                             second_type = Val(pair.second)
                         }
-                        source_checked := collection_value != None
-                        first_local_type := Type?{None}
-                        second_local_type := Type?{None}
+                        ^source_checked: collection_value != None
+                        ^first_local_type: Type?{None}
+                        ^second_local_type: Type?{None}
                         if source_checked && !pair_rejected && !scalar_bindingless {
                             first_local_type = Val(first_type)
                             second_local_type = Val(second_type ?? item_type)
@@ -619,12 +619,12 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         // Each `#SingleUse` element a consuming loop hands over owes its
                         // own duty in the body; task handles keep their join rule.
                         element_owes_duty: ((consumes_collection && sema_stmt_for_in_is_list(collection.ty)) || sema_stmt_for_in_takes_map(collection_expr, collection.ty)) && !sema_stmt_for_in_type_requires_owned_iteration(item_type)
-                        first_local := TLocal?{None}
+                        ^first_local: TLocal?{None}
                         if nested_bindingless -> valid = false else {
                             first_local = sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, element_owes_duty, check)
                             if first_local == None -> valid = false
                         }
-                        variable_two := TLocal?{None}
+                        ^variable_two: TLocal?{None}
                         if var2 == .Val(second) && (second_type != None || !source_checked || pair_rejected) {
                             variable_two = sema_stmt_for_in_decl_loop_local(second.name, second.span, second_local_type, element_owes_duty, check)
                             if variable_two == None -> valid = false
@@ -647,31 +647,31 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         lending_depth: check.context.lending_view_parameter_keys.len()
                         sema_stmt_for_in_lend_view_item(first_local, first_type, collection_expr, check)
                         sema_stmt_for_in_lend_view_item(variable_two, second_type ?? item_type, collection_expr, check)
-                        loop_frame_index := check.context.loop_value_frames.len()
+                        ^loop_frame_index: check.context.loop_value_frames.len()
                         sema_loop_value_push_frame(check.context, label_name, loop_fork)
-                        previous_arrow_loop_body := check.context.arrow_loop_body
+                        ^previous_arrow_loop_body: check.context.arrow_loop_body
                         check.context.arrow_loop_body = arrow_body
-                        iter_borrowed_depth := check.context.iter_borrowed.len()
+                        ^iter_borrowed_depth: check.context.iter_borrowed.len()
                         if sema_stmt_for_in_driven_root(collection_expr) == .Val(driven) {
                             check.context.iter_borrowed.push(driven)
                         }
-                        references_before := check.state.references.len()
+                        ^references_before: check.state.references.len()
                         if bindingless && !nested_bindingless {
                             check.context.implicit_loop_subject_depth += 1
                         }
-                        nested := sema_check_statements(body, return_type, check, loop_depth + 1)
+                        ^nested: sema_check_statements(body, return_type, check, loop_depth + 1)
                         if bindingless && !nested_bindingless {
                             check.context.implicit_loop_subject_depth -= 1
                         }
                         loop check.context.lending_view_parameter_keys.len() > lending_depth {
-                            _ := check.context.lending_view_parameter_keys.pop()
+                            ^_: check.context.lending_view_parameter_keys.pop()
                         }
-                        source_stable := false
+                        ^source_stable: false
                         if stable_root_id == .Val(root) {
                             source_stable = sema_stmt_for_in_body_keeps(check.state, references_before, root, nested.value, check.context.arena.tree)
                         }
                         loop check.context.iter_borrowed.len() > iter_borrowed_depth {
-                            _ := check.context.iter_borrowed.pop()
+                            ^_: check.context.iter_borrowed.pop()
                         }
                         check.context.arrow_loop_body = previous_arrow_loop_body
                         if !nested.complete -> valid = false
@@ -696,16 +696,16 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                             valid && first_local == .Val(variable) -> {
                                 if {
                                     range_source -> {
-                                        zero_start := sema_stmt_for_in_range_zero(span)
-                                        zero_end := sema_stmt_for_in_range_zero(span)
+                                        ^zero_start: sema_stmt_for_in_range_zero(span)
+                                        ^zero_end: sema_stmt_for_in_range_zero(span)
                                         output.push(TStmt.Range{label: label_name, variable: variable, source: Val(collection), start: zero_start, end: zero_end, step: step_value, exclusive: false, vectorization: None, body: nested.value, span: span})
                                     }
                                     else -> {
-                                        source_value := sema_stmt_for_in_source(collection_expr, collection, method_kind)
-                                        columnar := var2 == None && method_kind == None && sema_stmt_for_in_columnar_list_type(collection.ty) && sema_stmt_for_in_columnar(check, item_type)
+                                        ^source_value: sema_stmt_for_in_source(collection_expr, collection, method_kind)
+                                        ^columnar: var2 == None && method_kind == None && sema_stmt_for_in_columnar_list_type(collection.ty) && sema_stmt_for_in_columnar(check, item_type)
                                         // `loop (k, v) in table.move()` takes the map, so its walk takes the entries.
-                                        by_value := (consumes_collection && (sema_stmt_for_in_by_value(collection.ty, item_type) || sema_stmt_for_in_is_list(collection.ty))) || sema_stmt_for_in_takes_map(collection_expr, collection.ty)
-                                        stable := source_stable && method_kind == None && step_value == None && !by_value && !columnar && sema_stmt_for_in_stable_list(collection.ty)
+                                        ^by_value: (consumes_collection && (sema_stmt_for_in_by_value(collection.ty, item_type) || sema_stmt_for_in_is_list(collection.ty))) || sema_stmt_for_in_takes_map(collection_expr, collection.ty)
+                                        ^stable: source_stable && method_kind == None && step_value == None && !by_value && !columnar && sema_stmt_for_in_stable_list(collection.ty)
                                         output.push(TStmt.ForIn{label: label_name, variable: variable, variable_two: variable_two, source: source_value, collection: collection, step: step_value, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: stable, body: nested.value, span: span})
                                     }
                                 }
@@ -718,8 +718,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
             .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
                 init_lambda_escapes: check.context.lambda_escapes
                 sema_scope_enter(check.scopes, check.state, "counted@{span.start}")
-                loop_scope_valid := true
-                label_name := String?{None}
+                ^loop_scope_valid: true
+                ^label_name: String?{None}
                 if label != None {
                     label_name = Val(label.name)
                     if !sema_scope_push_loop_label(check.scopes, label.name) {
@@ -727,10 +727,10 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         loop_scope_valid = false
                     }
                 }
-                init_tree := sema_stmt_check_binding(init, init_lambda_escapes, check)
+                ^init_tree: sema_stmt_check_binding(init, init_lambda_escapes, check)
                 sema_shared_access_lint_busy_wait(check.environment.tables, cond, body, check.scopes, check.diagnostics)
-                cond_tree := sema_check_expression(cond, None, check)
-                cond_valid := cond_tree != None
+                ^cond_tree: sema_check_expression(cond, None, check)
+                ^cond_valid: cond_tree != None
                 if cond_tree != None && sema_stmt_condition_type(cond_tree) != Type.Bool {
                     cond_ty: sema_stmt_condition_type(cond_tree)
                     check.diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, check.environment.*, check.program.*)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", expr_span(cond), "a `loop` condition must be Bool (true or false), but this is {sema_type_show(cond_ty)}", "the program needs a clear yes or no here", "compare the value to something, e.g. `x > 0` or `name == \"ok\"`"))
@@ -739,14 +739,14 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                 // Each iteration starts from this mark; the join base is the
                 // counted loop's own scope left (`outer`).
                 loop_fork: sema_ownership_mark(check.state)
-                loop_frame_index := check.context.loop_value_frames.len()
+                ^loop_frame_index: check.context.loop_value_frames.len()
                 sema_loop_value_push_frame(check.context, label_name, loop_fork)
-                previous_arrow_loop_body := check.context.arrow_loop_body
+                ^previous_arrow_loop_body: check.context.arrow_loop_body
                 check.context.arrow_loop_body = arrow_body
-                nested := sema_stmt_check_block(body, return_type, check, "counted.body@{span.start}", loop_depth + 1)
+                ^nested: sema_stmt_check_block(body, return_type, check, "counted.body@{span.start}", loop_depth + 1)
                 check.context.arrow_loop_body = previous_arrow_loop_body
-                step_tree := TStmt?{None}
-                step_valid := true
+                ^step_tree: TStmt?{None}
+                ^step_valid: true
                 if step != None {
                     checked_step: sema_stmt_check_loop_step(step, check)
                     if checked_step == None -> step_valid = false else -> step_tree = checked_step
@@ -801,9 +801,9 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                     }
                     else -> {
                         loop_fork: sema_ownership_mark(check.state)
-                        loop_scope_valid := true
+                        ^loop_scope_valid: true
                         sema_scope_enter(check.scopes, check.state, "while@{span.start}")
-                        label_name := String?{None}
+                        ^label_name: String?{None}
                         if label != None {
                             label_name = Val(label.name)
                             if !sema_scope_push_loop_label(check.scopes, label.name) {
@@ -811,11 +811,11 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                                 loop_scope_valid = false
                             }
                         }
-                        loop_frame_index := check.context.loop_value_frames.len()
+                        ^loop_frame_index: check.context.loop_value_frames.len()
                         sema_loop_value_push_frame(check.context, label_name, loop_fork)
-                        previous_arrow_loop_body := check.context.arrow_loop_body
+                        ^previous_arrow_loop_body: check.context.arrow_loop_body
                         check.context.arrow_loop_body = arrow_body
-                        nested := sema_stmt_check_block(body, return_type, check, "while.body@{span.start}", loop_depth + 1)
+                        ^nested: sema_stmt_check_block(body, return_type, check, "while.body@{span.start}", loop_depth + 1)
                         check.context.arrow_loop_body = previous_arrow_loop_body
                         if label != None -> sema_scope_pop_loop_label(check.scopes)
                         sema_single_use_leave_scope(check)
@@ -1035,16 +1035,16 @@ sema_stmt_note_silent_incomplete: fn(statement: Stmt, was_complete: Bool, comple
 // A separate function keeps sema_check_statements within what one backend
 // codegen unit compiles quickly; the split arms below exist for the same reason.
 sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statements: [Stmt], return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int) -> Bool {
-    complete := true
+    ^complete: true
     // Checked on the live tables and rolled back; only its failure
     // rows are kept.
     dead_scope_mark: sema_scope_mark(check.scopes)
-    dead_state := sema_ownership_state_snapshot(check.state)
+    ^dead_state: sema_ownership_state_snapshot(check.state)
     dead_mark: sema_check_context_mark(check.context)
     // A dead last line is checked for its own diagnostics, never as the value
     // the function hands back. A dead value line keeps the promised type as
     // context (so a bare `None` still types).
-    dead_value_tail := false
+    ^dead_value_tail: false
     if index + 1 == statements.len() && statement == .Expr(tail) && check.context.value_tail_span == (Val(expr_span(tail))) && !sema_stmt_refutable_expr_diverges(tail) {
         dead_value_tail = true
         check.context.value_tail_span = None
@@ -1061,11 +1061,11 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
         if !dead_result.complete -> complete = false
     }
     sema_ownership_keep_mutations(check.state, dead_state)
-    dead_edges := [String]{}
+    ^dead_edges: [String]{}
     // A dead `break value` still types its loop (`loop { break(outer, 1)
     // break 2 }` is an Int loop): the frames open at the mark keep the result
     // type the dead line gave them.
-    dead_frame_types := [Type?]{}
+    ^dead_frame_types: [Type?]{}
     loop frame_index in 0..<dead_mark.saved.loop_value_frames.len() {
         dead_frame_types.push(check.context.loop_value_frames[frame_index].ty)
     }
@@ -1101,7 +1101,7 @@ sema_stmt_check_expression_statement: fn(expr: Expr, return_type: Type?, check: 
     if expr == .Paren(inner, _, _) && sema_stmt_is_paren_if(inner) {
         return sema_stmt_check_expression_statement(inner, return_type, check, loop_depth, output)
     }
-    complete := true
+    ^complete: true
     // `.drop("reason")` is the explicit-discard
     // terminal; it checks its receiver without propagation.
     dropped: sema_stmt_check_drop(expr, check)
@@ -1222,7 +1222,7 @@ sema_stmt_is_paren_if: fn(expr: Expr) -> Bool Never! {
 // shield, region, scope members, switched, transactions, policies, authority
 // scopes, task groups). False when one is incomplete.
 sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
-    complete := true
+    ^complete: true
     if statement == {
         .Unsafe(audit, audit_expr, body, span) -> {
             if {
@@ -1230,12 +1230,12 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
                     complete = false
                 }
                 else -> {
-                    previous_unsafe_depth := check.context.unsafe_depth
+                    ^previous_unsafe_depth: check.context.unsafe_depth
                     check.context.unsafe_depth += 1
                     nested: sema_stmt_check_block(body, return_type, check, "unsafe@{span.start}", loop_depth)
                     check.context.unsafe_depth = previous_unsafe_depth
-                    source_file := sema_source_file_at(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, span)
-                    source_line := sema_source_line_at(check.environment.source_segments, span)
+                    ^source_file: sema_source_file_at(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, span)
+                    ^source_line: sema_source_line_at(check.environment.source_segments, span)
                     if {
                         !nested.complete || source_file == "" || source_line == None -> {
                             complete = false
@@ -1262,7 +1262,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
         }
         .Reactive(body, span) -> {
             check.state.reactive_bodies.push(span.copy())
-            checked := sema_stmt_check_reactive(body, span, check)
+            ^checked: sema_stmt_check_reactive(body, span, check)
             if checked == {
                 .Val(value) -> { output.push(TStmt.Reactive{executable: value, span: span}) }
                 .None -> complete = false
@@ -1281,7 +1281,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
         .Defer(body, span) -> {
             outer_frame: check.context.defer_frame
             check.context.defer_frame = Val(SemaDeferFrame{loop_depth: check.scopes.loop_depth, labels: check.scopes.loop_labels.len()})
-            moved_before := check.state.moved.len()
+            ^moved_before: check.state.moved.len()
             nested: sema_stmt_check_block(body, return_type, check, "defer@{span.start}", loop_depth)
             sema_ownership_defer_moves(check.state, moved_before)
             check.context.defer_frame = outer_frame
@@ -1319,7 +1319,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
             }
         }
         .ScopeMember(name, _, args, args_span, body, dsl, _, span) -> {
-            checked := sema_stmt_check_scope_member(name, args, args_span, body, dsl, span, return_type, check, loop_depth)
+            ^checked: sema_stmt_check_scope_member(name, args, args_span, body, dsl, span, return_type, check, loop_depth)
             // A checked text block's
             // name, site and header were validated by the scope-member pass
             // (ScopeMembers.jet, E0927/E0355/E0617); its body is ordinary
@@ -1346,7 +1346,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
                     if kept && marker.name == MARKER_ON {
                         check.scopes.deep_check = Val(SemaDeepFrame{loop_depth: check.scopes.loop_depth, labels: check.scopes.loop_labels.len(), bindings: check.scopes.bindings.len(), exits: true})
                     }
-                    erased_state := sema_ownership_state_snapshot(check.state)
+                    ^erased_state: sema_ownership_state_snapshot(check.state)
                     erased_mark: sema_check_context_mark(check.context)
                     sema_body_check_swap_state(check, erased_state)
                     checked: sema_check_statements(body, return_type, check, loop_depth)
@@ -1401,8 +1401,8 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
             }
         }
         .Policy(declarations, body, span) -> {
-            previous_unit_policy := sema_scope_push_unit_policy(check.scopes, declarations)
-            previous_copies_policy := sema_string_view_push_copies_policy(check.scopes, declarations)
+            ^previous_unit_policy: sema_scope_push_unit_policy(check.scopes, declarations)
+            ^previous_copies_policy: sema_string_view_push_copies_policy(check.scopes, declarations)
             // `#Overflow(mode) { … }` is one lexical
             // fixed-width arithmetic mode over the block, read by the
             // operator checks as `context.arithmetic_policy`.
@@ -1421,8 +1421,8 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
                 check.diagnostics.push(sema_runtime_only_build_time_diagnostic("Compile-time code runs this block", span))
                 complete = false
             }
-            previous_writes_policy := sema_call_marks_push_policy(check.scopes, declarations)
-            previous_failures_policy := sema_failure_marks_push_policy(check.scopes, declarations)
+            ^previous_writes_policy: sema_call_marks_push_policy(check.scopes, declarations)
+            ^previous_failures_policy: sema_failure_marks_push_policy(check.scopes, declarations)
             nested: sema_stmt_check_block(body, return_type, check, "policy@{span.start}", loop_depth)
             check.context.arithmetic_policy = outer_arithmetic
             check.context.runtime_policy = outer_runtime
@@ -1450,13 +1450,13 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
             // `Authority` handle. The cap subset check (E0712) runs over the
             // lowered region in the effect pass.
             sema_scope_enter(check.scopes, check.state, "fx@{span.start}")
-            region_body := [TStmt]{}
+            ^region_body: [TStmt]{}
             if binding == .Val(handle) {
-                owner := sema_scope_local_owner_key(check.scopes)
+                ^owner: sema_scope_local_owner_key(check.scopes)
                 local_module: sema_scope_environment_module_text(check.environment.*, check.program.*)
                 key: symbol_key_text(SymbolKind.Local, local_module, owner, handle.name)
-                id := sema_symbol_id_of(check.program.*, check.context, key)
-                symbol := Symbol{id: id, kind: SymbolKind.Local, name: handle.name, module_identity: check.environment.module_identity, owner: Val(owner), span: handle.span, ty: Val(Type.Named{name: "Authority"}), visibility: 0}
+                ^id: sema_symbol_id_of(check.program.*, check.context, key)
+                ^symbol: Symbol{id: id, kind: SymbolKind.Local, name: handle.name, module_identity: check.environment.module_identity, owner: Val(owner), span: handle.span, ty: Val(Type.Named{name: "Authority"}), visibility: 0}
                 if {
                     sema_scope_declare_local(check.scopes, symbol, key, false, AccessConvention.Read, None, false) -> {
                         sema_ownership_declare_binding(check.state, symbol, false)
@@ -1472,7 +1472,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
                             reference: TMethodRef{symbol: sema_symbol_id(check.program.*, check.context, SymbolKind.Function, "", "JetAuthority", "from_rights"), name: "from_rights", mangled: false, trait_owner: None, operator_identity: None}
                             // Building the handle is effect-free; record the known-pure site so
                             // the effect pass does not treat it as an unknown call.
-                            _ := sema_effect_record_intrinsic_effects(check, "Authority.from_rights", handle.span, [EffectRowEntry]{})
+                            ^_: sema_effect_record_intrinsic_effects(check, "Authority.from_rights", handle.span, [EffectRowEntry]{})
                             rights_arg: TCallArg{value: rights_value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
                             init: sema_tree_node(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{rights_arg}}, handle.span)
                             region_body.push(TStmt.Let{local: checked_symbol_local(handle.name, handle.span, symbol.id, Type.Named{name: "Authority"}), let_ty: TLetTy.Annotated{ty: Type.Named{name: "Authority"}, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: handle.span})
@@ -1495,7 +1495,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
             }
         }
         .TaskGroup(name, name_span, args, body, span) -> {
-            checked := sema_taskgroup_check_statement(name, name_span, args, body, span, return_type, check, loop_depth)
+            ^checked: sema_taskgroup_check_statement(name, name_span, args, body, span, return_type, check, loop_depth)
             if checked == {
                 .Val(value) -> { output.push(value) }
                 .None -> complete = false

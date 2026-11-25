@@ -10,7 +10,7 @@ s1_criterion_measured_bytes: fn(path: String, seen: ^[files.FileID]) -> Int {
         if id.device == metadata.id.device && id.inode == metadata.id.inode -> return 0
     }
     seen.push(metadata.id)
-    total := metadata.size_on_disk
+    ^total: metadata.size_on_disk
     if metadata.is_dir {
         loop entry in files.list_dir(path) ?? panic("entries {path}") {
             total += s1_criterion_measured_bytes(entry.path, seen)
@@ -20,7 +20,7 @@ s1_criterion_measured_bytes: fn(path: String, seen: ^[files.FileID]) -> Int {
 }
 
 run: fn() {
-    payload := ""
+    ^payload: ""
     loop entry in files.list_dir("agent-0/hangar/objects") ?? panic("objects") {
         if files.is_dir(entry.path) {
             payload = "{entry.path}/payload"
@@ -28,10 +28,10 @@ run: fn() {
         }
     }
     links: (files.stat(payload) ?? panic("payload metadata")).links
-    single_seen := [files.FileID]{}
+    ^single_seen: [files.FileID]{}
     single_bytes: s1_criterion_measured_bytes("shared-cas", single_seen) + s1_criterion_measured_bytes("agent-0/hangar", single_seen)
-    multi_seen := [files.FileID]{}
-    multi_bytes := s1_criterion_measured_bytes("shared-cas", multi_seen)
+    ^multi_seen: [files.FileID]{}
+    ^multi_bytes: s1_criterion_measured_bytes("shared-cas", multi_seen)
     loop index in 0..<30 {
         multi_bytes += s1_criterion_measured_bytes("agent-{index}/hangar", multi_seen)
     }

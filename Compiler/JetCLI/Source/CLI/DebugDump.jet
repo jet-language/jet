@@ -25,10 +25,10 @@ use {
 }
 
 jet_cli_debug_dump: fn(path: String, dos: [String], color: Bool) -[FS, Env, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
-    opened := native_dump_open(path) ?? return jet_cli_debug_unavailable(err, color)
+    ^opened: native_dump_open(path) ?? return jet_cli_debug_unavailable(err, color)
     frames: opened.session.backtrace() ?? return jet_cli_debug_unavailable(err, color)
     stop: native_dump_jet_frame(frames, 0) ?? 0
-    _ := opened.session.select_frame(stop) ?? return jet_cli_debug_unavailable(err, color)
+    ^_: opened.session.select_frame(stop) ?? return jet_cli_debug_unavailable(err, color)
     entry: opened.session.entry_source()
     sources: native_dump_sources(path, opened.session.image)
     changed: sources.changed.contains("{entry}")
@@ -38,7 +38,7 @@ jet_cli_debug_dump: fn(path: String, dos: [String], color: Bool) -[FS, Env, IO, 
     file: cli_files.basename(source)
     shown: native_dump_frame(opened.session, frames, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
     if dos.len() > 0 {
-        refused := false
+        ^refused: false
         opened.session.scripted = true
         loop command in dos {
             if command == "q" || command == "quit" -> break
@@ -49,11 +49,11 @@ jet_cli_debug_dump: fn(path: String, dos: [String], color: Bool) -[FS, Env, IO, 
         return jet_cli_done("", "", if refused -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK)
     }
     jet_cli_debug_write("Dump of process {opened.pid}, {events.len()} flight events\nImage: {opened.image} bytes, with {opened.records} bytes of records\nBuild: {opened.build}, its image in {cli_files.basename(opened.image_file)} beside the dump\n{sources.text}Memory: {opened.memory} bytes held, within the {opened.budget}-byte budget; {opened.cut_off} bytes cut off past it\n{shown}")
-    input := cli_term.stdin()
+    ^input: cli_term.stdin()
     echo: !input.is_tty()
     loop {
         jet_cli_debug_write(NATIVE_DEBUG_PROMPT)
-        read := String?{None}
+        ^read: String?{None}
         if input.read_line() == {
             .Ok(line) -> { read = line }
             .Err(_) -> {}

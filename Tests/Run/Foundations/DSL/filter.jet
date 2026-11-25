@@ -37,7 +37,7 @@ parse_stage: fn(source: String) -> [Step]? {
 }
 
 parse: fn(source: String) -> [Step]? {
-    steps := [Step]{}
+    ^steps: [Step]{}
     stages: source.split("|").to_list()
     if stages.len() == 0 -> return None
     loop stage in stages {
@@ -58,7 +58,7 @@ field: fn(value: Dyn, name: String) -> Dyn? {
 }
 
 apply_step: fn(values: [Dyn], step: Step) -> [Dyn] {
-    output := [Dyn]{}
+    ^output: [Dyn]{}
     loop value in values {
         if step == {
             .Identity -> { output.push(value.copy()) }
@@ -83,7 +83,7 @@ apply_step: fn(values: [Dyn], step: Step) -> [Dyn] {
 
 run: fn(data: Dyn, query: String) -> [Dyn]? {
     steps: parse(query) ?? return None
-    values := [Dyn]{data}
+    ^values: [Dyn]{data}
     loop step in steps -> values = apply_step(values, step)
     return Val(values)
 }

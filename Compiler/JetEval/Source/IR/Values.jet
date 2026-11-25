@@ -57,7 +57,7 @@ JetEvalIRComptime: struct {
 // (IRProgram.invocation). The build runs on up to `threads` compiler
 // threads (ir_build_roots_in); its module is the same on any count.
 jet_eval_ir_comptime_build: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, item_keys: [String], type_defs: ^^[TTypeDef], impls: ^^[TImplDef], constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], comptime_values: Bool, threads: CompilerThreads{compiler_threads_single()}) -> JetEvalIRComptime {
-    program := ir_program_new(functions, decls, symbols, interner, type_defs, impls, IRSourceTexts{}, constants)
+    ^program: ir_program_new(functions, decls, symbols, interner, type_defs, impls, IRSourceTexts{}, constants)
     jet_eval_ir_watched_sources(program)
     program.comptime_values = comptime_values
     program.invocation = !comptime_values
@@ -71,7 +71,9 @@ jet_eval_ir_comptime_build: fn(functions: ^^[FnBody], decls: DeclTable, symbols:
 // table and a breakpoint on any line finds its code. Every other build reads
 // none: the hook is closed.
 jet_eval_ir_watched_sources: fn(program: ^IRProgram) Never! {
-    if !build_debug_on() -> return
+    if !build_debug_on() {
+        return
+    }
     permit: BUILD_DEBUG.guard_read()
     ir_program_take_sources(program, ir_source_index(ir_source_texts(permit.value.sources)))
 }
@@ -87,21 +89,23 @@ jet_eval_ir_watched_sources: fn(program: ^IRProgram) Never! {
 // the run's `interner` (jet_eval_ir_build_interner). The build
 // runs on up to `threads` compiler threads, as jet_eval_ir_comptime_build's.
 jet_eval_ir_comptime_build_over: fn(declared: Shared<[IRProgram]>, functions: ^^[FnBody], decls: DeclTable, symbols: SymbolTable, interner: Interner, item_keys: [String], landed: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], taken_keys: ^NameTable, taken: ^[Int], threads: CompilerThreads) -> JetEvalIRComptime {
-    program := jet_eval_ir_program_take(declared)
+    ^program: jet_eval_ir_program_take(declared)
     program.comptime_values = true
     if symbol_table_count(program.symbols) != symbol_table_count(symbols) {
         program.symbols = symbols.copy()
     }
     program.interner = jet_eval_ir_build_interner(interner)
-    loop definition in landed.move() -> ir_program_put_constant(program, definition, taken_keys, taken)
+    loop definition in landed.move() {
+        ir_program_put_constant(program, definition, taken_keys, taken)
+    }
     ir_program_bind(program, functions, decls)
     ir_foreign_index(program, foreign, decls)
     kept: ir_build_roots_in(program, item_keys, threads)
     jet_eval_ir_program_put(declared, kept.program.move())
     built: kept.result.move()
-    lines := [String]{}
+    ^lines: [String]{}
     loop failure in built.failures -> lines.push(jet_eval_ir_build_failure_text(failure))
-    items := [Int]{}
+    ^items: [Int]{}
     loop key in item_keys -> items.push(ir_keyed_function(built.program, key) ?? -1)
     JetEvalIRComptime{code: built.program.move(), layouts: declared, items: items.move(), build_failures: lines.move()}
 }
@@ -111,9 +115,7 @@ jet_eval_ir_comptime_build_over: fn(declared: Shared<[IRProgram]>, functions: ^^
 // the build's module grows it with the IR's own types and keeps it while
 // the batch runs (its rows' types are read through it), and the run goes on
 // checking with its own.
-jet_eval_ir_build_interner: fn(interner: Interner) -> Interner Never! {
-    interner.copy()
-}
+jet_eval_ir_build_interner: fn(interner: Interner) -> Interner Never! { interner.copy() }
 
 // Builds the roots `item_keys` of `program` on up to `threads` compiler
 // threads; `cell` then holds the program.
@@ -121,22 +123,22 @@ jet_eval_ir_comptime_roots: fn(cell: Shared<[IRProgram]>, program: ^^IRProgram, 
     kept: ir_build_roots_in(program, item_keys, threads)
     jet_eval_ir_program_put(cell, kept.program.move())
     built: kept.result.move()
-    lines := [String]{}
+    ^lines: [String]{}
     loop failure in built.failures -> lines.push(jet_eval_ir_build_failure_text(failure))
-    items := [Int]{}
+    ^items: [Int]{}
     loop key in item_keys -> items.push(ir_keyed_function(built.program, key) ?? -1)
     JetEvalIRComptime{code: built.program.move(), layouts: cell, items: items.move(), build_failures: lines.move()}
 }
 
 // The program `cell` holds (its one row), moved out.
 jet_eval_ir_program_take: fn(cell: Shared<[IRProgram]>) -> IRProgram Never! {
-    held := cell.guard_edit()
+    ^held: cell.guard_edit()
     program: compiler_threads_taken(held.value)
     program.move()
 }
 
 jet_eval_ir_program_put: fn(cell: Shared<[IRProgram]>, program: ^^IRProgram) {
-    held := cell.guard_edit()
+    ^held: cell.guard_edit()
     held.value.push(program)
 }
 
@@ -259,7 +261,7 @@ jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, 
             checked: ir_untag(ir_row_ty(m, p, row))
             if ir_fixed_shape(m, p, row) == .Val(shape) {
                 // An inline `[T#N]` holds its N elements in place.
-                values := [TComptimeValue]{}
+                ^values: [TComptimeValue]{}
                 loop index in 0..<shape.count {
                     item: jet_eval_ir_member_word(m, s, word, index * shape.stride, shape.element) ?? return None
                     values.push(jet_eval_ir_data(m, p, s, item, shape.element) ?? return None)
@@ -277,7 +279,7 @@ jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, 
                     bytes: jet_eval_ir_bytes(s, buffer, length) ?? return None
                     return Val(TComptimeValue.Bytes{value: bytes})
                 }
-                values := [TComptimeValue]{}
+                ^values: [TComptimeValue]{}
                 if length > 0 {
                     if length > 16 -> values.try_reserve(length) ?? return None
                     data: jet_eval_ir_read(s, word + 16, 8) ?? return None
@@ -302,7 +304,7 @@ jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, 
                 shape: ir_map_shape(m, p, row) ?? return jet_eval_ir_transport_fail(s, checked)
                 key_ty: ir_row_ty(m, p, shape.key.ty)
                 length: jet_eval_ir_read(s, word, 8) ?? return None
-                entries := [TComptimeMapEntry]{}
+                ^entries: [TComptimeMapEntry]{}
                 if length > 0 {
                     data: jet_eval_ir_read(s, word + 16, 8) ?? return None
                     loop index in 0..<length {
@@ -317,7 +319,7 @@ jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, 
                 // rebuild out of key order.
                 if ir_map_row_hashed(m, p, row) {
                     order: ir_static_map_order(m, p, shape, entries) ?? return jet_eval_ir_transport_fail(s, checked)
-                    ordered := [TComptimeMapEntry]{}
+                    ^ordered: [TComptimeMapEntry]{}
                     loop at in order -> ordered.push(entries[at].copy())
                     return Val(TComptimeValue.Map{entries: ordered})
                 }
@@ -385,12 +387,12 @@ jet_eval_ir_err_data: fn(s: ^JetEvalIRState, p: IRProgram, ty: Type, error: Int)
     frames: jet_eval_ir_err_rows(s, error + Int{ERR_CONTEXT}, Int{ERR_CONTEXT_BYTES}, "__jet_ErrorContextFrame", [String]{"text", "file"}, Val("line")) ?? return None
     conversions: jet_eval_ir_err_rows(s, error + Int{ERR_CONVERSIONS}, Int{ERR_CONVERSION_BYTES}, "__jet_ErrorConversion", [String]{"source", "target"}, None) ?? return None
     details_word: jet_eval_ir_read_word(s, error + Int{ERR_DETAILS}) ?? return None
-    details := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "__jet_ErrorDetails"}}}
+    ^details: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "__jet_ErrorDetails"}}}
     if details_word != 0 {
         variant: jet_eval_ir_err_text(s, details_word, ERR_DETAILS_VARIANT) ?? return None
         fields: jet_eval_ir_err_rows(s, details_word + Int{ERR_DETAILS_FIELDS}, Int{ERR_FIELD_BYTES}, "__jet_ErrorField", [String]{"name", "value"}, None) ?? return None
         has_span: jet_eval_ir_read_word(s, details_word + Int{ERR_DETAILS_HAS_SPAN}) ?? return None
-        source_span := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "__jet_ErrorSpan"}}}
+        ^source_span: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "__jet_ErrorSpan"}}}
         if has_span != 0 {
             start: jet_eval_ir_read_word(s, details_word + Int{ERR_DETAILS_START}) ?? return None
             end: jet_eval_ir_read_word(s, details_word + Int{ERR_DETAILS_END}) ?? return None
@@ -458,10 +460,10 @@ jet_eval_ir_err_optional_text: fn(s: ^JetEvalIRState, base: Int, offset: I64) ->
 jet_eval_ir_err_rows: fn(s: ^JetEvalIRState, list: Int, stride: Int, record: String, texts: [String], number: String?) -> TComptimeValue? {
     count: jet_eval_ir_read_word(s, list) ?? return None
     data: jet_eval_ir_read_word(s, list + 16) ?? return None
-    rows := [TComptimeValue]{}
+    ^rows: [TComptimeValue]{}
     loop index in 0..<count {
         row: data + index * stride
-        fields := [TComptimeField]{}
+        ^fields: [TComptimeField]{}
         loop (position, name) in texts {
             header: jet_eval_ir_read_word(s, row + position * 8) ?? return None
             text: jet_eval_ir_text(s, header) ?? return None
@@ -564,7 +566,7 @@ jet_eval_ir_err_int: fn(s: ^JetEvalIRState, fields: [TComptimeField], name: Stri
 // `bytes` zeroed bytes of the child's runtime heap.
 jet_eval_ir_err_zeroed: fn(s: ^JetEvalIRState, bytes: Int) -> Int? {
     base: jet_eval_native_alloc(s, bytes, 8) ?? return None
-    at := 0
+    ^at: 0
     loop at < bytes {
         if !jet_eval_ir_write(s, base + at, 8, 0) -> return None
         at += 8
@@ -602,7 +604,7 @@ jet_eval_ir_err_put_rows: fn(s: ^JetEvalIRState, list: Int, stride: Int, value: 
             return false
         }
     }
-    data := 0
+    ^data: 0
     if rows.len() > 0 -> data = jet_eval_native_alloc(s, rows.len() * stride, 8) ?? return false
     if !jet_eval_ir_write(s, list, 8, rows.len()) || !jet_eval_ir_write(s, list + 8, 8, rows.len()) || !jet_eval_ir_write(s, list + 16, 8, data) {
         return false
@@ -636,7 +638,7 @@ jet_eval_ir_key: fn(m: IRModule, p: IRProgram, value: TComptimeValue, ty: Type) 
             Val(TComptimeKey.Enum{type_name: name, variant: variant})
         }
         .Struct(name, fields) -> {
-            keys := [TComptimeKeyField]{}
+            ^keys: [TComptimeKeyField]{}
             loop field in fields {
                 field_ty: ir_declared_field_type(m, p, ty, field.name) ?? return None
                 key: jet_eval_ir_key(m, p, field.value, field_ty) ?? return None
@@ -684,7 +686,7 @@ jet_eval_ir_member_word: fn(m: IRModule, s: ^JetEvalIRState, base: Int, offset: 
 }
 
 jet_eval_ir_fields: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, base: Int, members: [IRMember]) -> [TComptimeField]? {
-    output := [TComptimeField]{}
+    ^output: [TComptimeField]{}
     loop member in members {
         value: jet_eval_ir_member_value(m, p, s, base, member) ?? return None
         output.push(TComptimeField{name: member.name.copy(), value: value})
@@ -694,7 +696,7 @@ jet_eval_ir_fields: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, base: Int
 
 jet_eval_ir_cached_fields: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, base: Int, slot: Int) -> [TComptimeField]? {
     count: s.struct_members_cache[slot].len()
-    output := [TComptimeField]{}
+    ^output: [TComptimeField]{}
     loop index in 0..<count {
         member: s.struct_members_cache[slot][index]
         value: jet_eval_ir_member_value(m, p, s, base, member) ?? return None
@@ -722,7 +724,7 @@ jet_eval_ir_enum_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, defini
             jet_eval_ir_problem(s, "enum {declaration.name} holds discriminant {index}, outside its {variants.len()} variants")
             return None
         }
-        args := [TComptimeEnumArg]{}
+        ^args: [TComptimeEnumArg]{}
         if has_box {
             members: ir_variant_members(m, p, definition, type_args, index) ?? return jet_eval_ir_transport_fail(s, Type.Named{name: declaration.name.copy()})
             single: variants[index].payload == .Single(_)

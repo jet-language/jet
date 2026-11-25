@@ -123,7 +123,7 @@ build_graph_rules_tool: fn(session: ^BuildSession) -> BuildSessionValue Never! {
 }
 
 build_graph_rules_step: fn(session: ^BuildSession, operation: fn(^BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, step: BuildSessionValue, values: [BuildSessionValue]) -> BuildSessionReply Never! {
-    args := [BuildSessionValue]{step.copy()}
+    ^args: [BuildSessionValue]{step.copy()}
     loop value in values -> args.push(value.copy())
     build_session_call(session, operation, args, None, true, 9, 10)
 }
@@ -145,7 +145,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("duplicate_target_or_action_names_are_rejected") {
-    session := build_graph_rules_session(81)
+    ^session: build_graph_rules_session(81)
     tool: build_graph_rules_tool(session)
     empty: build_graph_rules_list([String]{})
     assert(build_graph_rules_ok(build_session_call(session, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2)))
@@ -157,7 +157,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("action_outputs_have_one_owner_in_the_plan") {
-    session := build_graph_rules_session(85)
+    ^session: build_graph_rules_session(85)
     tool: build_graph_rules_tool(session)
     assert(build_graph_rules_ok(build_graph_rules_made(session, tool, "generate-a", [String]{".jet/generated/out.jet"})))
     assert(build_graph_rules_ok(build_graph_rules_made(session, tool, "generate-b", [String]{".jet/generated/out.jet"})))
@@ -187,7 +187,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("registers_typed_targets_and_default_plan") {
-    session := build_graph_rules_session(86)
+    ^session: build_graph_rules_session(86)
     tool: build_graph_rules_tool(session)
     empty: build_graph_rules_list([String]{})
     gen: build_graph_rules_value(build_graph_rules_made(session, tool, "generate-assets", [String]{".jet/generated/assets.jet"}))
@@ -211,7 +211,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
     graph: queried.graph ?? panic("plan graph")
     assert_eq(graph.targets[1].kind, "Executable")
     assert_eq(graph.targets[0].kind, "Library")
-    bundles := 0
+    ^bundles: 0
     loop target in graph.targets {
         if target.kind == "AssetBundle" -> bundles += 1
     }
@@ -226,8 +226,8 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("foreign_toolchain_probe_and_signer_handles_are_rejected") {
-    a := build_graph_rules_session(87)
-    b := build_graph_rules_session(88)
+    ^a: build_graph_rules_session(87)
+    ^b: build_graph_rules_session(88)
     toolchain: build_graph_rules_value(build_session_call(b, build_session_toolchain, [BuildSessionValue]{.Text{value: "other"}, .Text{value: "wasm32-wasi"}}, None, false, 1, 2))
     signer: build_graph_rules_value(build_session_call(b, build_session_signing, [BuildSessionValue]{.Text{value: "other-signer"}, .Text{value: "developer-id:OTHER"}}, None, false, 3, 4))
     probe: build_graph_rules_value(build_session_call(b, build_session_probe, [BuildSessionValue]{.Text{value: "other-cc"}, .Text{value: "find_program"}, .Text{value: "cc"}}, None, true, 5, 6))
@@ -245,7 +245,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 // toolchain's SDK, linker and sysroot; a probe's code, reproducibility and
 // toolchain; a step's time limit as its Duration's nanoseconds.
 #Test("declared_build_methods_send_every_slot_absent_ones_unit") {
-    session := build_graph_rules_session(90)
+    ^session: build_graph_rules_session(90)
     cross: build_graph_rules_value(build_session_call(session, build_session_toolchain, [BuildSessionValue]{.Text{value: "cross"}, .Text{value: "aarch64-linux-gnu"}, .Text{value: "host"}, .Unit, .Text{value: "ld.lld"}, .Unit}, None, false, 1, 2))
     assert(build_graph_rules_ok(build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "cc"}, .Text{value: "find_program"}, .Text{value: "cc"}, .Unit, .Unit, cross}, None, true, 3, 4)))
     assert(build_graph_rules_ok(build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "check"}, .Text{value: "compile_check"}, .Text{value: "stdio.h"}, .Text{value: "int main(void) {{ return 0; }}"}, .Unit, .Unit}, None, true, 5, 6)))
@@ -270,7 +270,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 // value as the setting text the package's settings fold reads, and a key
 // without a value is refused.
 #Test("an_output_keeps_its_own_setting_values_as_setting_text") {
-    a := build_graph_rules_session(89)
+    ^a: build_graph_rules_session(89)
     empty: build_graph_rules_list([String]{})
     args: [BuildSessionValue]{.Text{value: "lite"}, empty, empty, empty, empty, .Unit, .Unit, .Text{value: "max_particles"}, .Int{value: 500}, .Text{value: "label"}, .Text{value: "say \"hi\""}, .Text{value: "trails"}, .Bool{value: true}, .Text{value: "quality"}, .Enum{variant: "Low"}}
     assert(build_graph_rules_ok(build_session_call(a, build_session_add_executable, args, None, false, 1, 2)))
@@ -290,8 +290,8 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 // `meta.events` reads a `Compiler` value's checked program only after
 // build_session_compiler_live accepts the value: one of this build's, while it runs.
 #Test("meta_events_read_only_a_live_compiler_value_of_this_build") {
-    a := build_graph_rules_session(187)
-    b := build_graph_rules_session(188)
+    ^a: build_graph_rules_session(187)
+    ^b: build_graph_rules_session(188)
     empty: build_graph_rules_list([String]{})
     app: build_graph_rules_value(build_session_call(a, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2))
     other: build_graph_rules_value(build_session_call(b, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 3, 4))
@@ -310,7 +310,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 // the earlier rewrite made, at that line's margin, and the module records
 // both callers.
 #Test("meta_rewrite_body_rewrites_of_one_function_compose_in_order") {
-    a := build_graph_rules_session(189)
+    ^a: build_graph_rules_session(189)
     empty: build_graph_rules_list([String]{})
     app: build_graph_rules_value(build_session_call(a, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2))
     meta: build_graph_rules_value(build_session_call(a, build_session_compiler, [BuildSessionValue]{app}, None, false, 3, 4))
@@ -332,8 +332,8 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 // its root's, which the root's own rewrites read. A value of another build is
 // not handed.
 #Test("a_handed_compiler_value_records_its_chain_and_shares_its_roots_consent") {
-    a := build_graph_rules_session(191)
-    b := build_graph_rules_session(192)
+    ^a: build_graph_rules_session(191)
+    ^b: build_graph_rules_session(192)
     empty: build_graph_rules_list([String]{})
     app: build_graph_rules_value(build_session_call(a, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2))
     other: build_graph_rules_value(build_session_call(b, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 3, 4))
@@ -360,7 +360,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 // `b.compiler` or after it, pinned or not; any other value, and a build
 // without a Compiler value, stay as they were.
 #Test("compiler_sessions_keep_checking_on") {
-    a := build_graph_rules_session(190)
+    ^a: build_graph_rules_session(190)
     empty: build_graph_rules_list([String]{})
     app: build_graph_rules_value(build_session_call(a, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2))
     tool: build_graph_rules_value(build_session_call(a, build_session_add_executable, [BuildSessionValue]{.Text{value: "tool"}, empty, empty}, None, false, 3, 4))
@@ -376,7 +376,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
     pinned: build_graph_rules_failure(build_session_call(a, build_session_pin, [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "report"}}, None, false, 13, 14)) ?? panic("a pinned bounds report after b.compiler was accepted")
     assert_eq(pinned.what, "`b.pin(.bounds, .Report)` weakens checking in a build that holds a `Compiler` value")
     assert(build_graph_rules_ok(build_session_call(a, build_session_option, [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "fatal"}}, None, false, 15, 16)))
-    b := build_graph_rules_session(191)
+    ^b: build_graph_rules_session(191)
     other: build_graph_rules_value(build_session_call(b, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2))
     assert(build_graph_rules_ok(build_session_call(b, build_session_option, [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "off"}}, None, false, 3, 4)))
     before: build_graph_rules_failure(build_session_call(b, build_session_compiler, [BuildSessionValue]{other}, None, false, 5, 6)) ?? panic("b.compiler after bounds off was accepted")
@@ -388,31 +388,31 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 // call order with its code, tier, texts, file, span and rewrite; a value of
 // another build, an unknown tier or a lost span records nothing.
 #Test("meta_report_keeps_each_finding_in_call_order") {
-    a := build_graph_rules_session(193)
-    b := build_graph_rules_session(194)
+    ^a: build_graph_rules_session(193)
+    ^b: build_graph_rules_session(194)
     empty: build_graph_rules_list([String]{})
     app: build_graph_rules_value(build_session_call(a, build_session_add_executable, [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2))
     other: build_graph_rules_value(build_session_call(b, build_session_add_executable, [BuildSessionValue]{.Text{value: "other"}, empty, empty}, None, false, 3, 4))
     meta: build_graph_rules_value(build_session_call(a, build_session_compiler, [BuildSessionValue]{app}, None, false, 5, 6))
     foreign: build_graph_rules_value(build_session_call(b, build_session_compiler, [BuildSessionValue]{other}, None, false, 7, 8))
     texts: [BuildSessionValue]{.Text{value: "mypkg.NoPrintInLib"}, .Text{value: "Tidy"}, .Text{value: "library code prints"}, .Text{value: "the caller owns the terminal"}, .Text{value: "log it"}, .Text{value: "main.jet"}}
-    found := [BuildSessionValue]{meta.copy()}
+    ^found: [BuildSessionValue]{meta.copy()}
     loop text in texts -> found.push(text.copy())
     found.push(.Span{start: 40, end: 48, file: ""})
     found.push(.Text{value: "log.info"})
     assert(build_graph_rules_ok(build_session_call(a, build_session_compiler_report, found, None, false, 9, 10)))
-    stray := [BuildSessionValue]{foreign}
+    ^stray: [BuildSessionValue]{foreign}
     loop text in texts -> stray.push(text.copy())
     stray.push(.Span{start: 50, end: 58, file: ""})
     stray.push(.Text{value: ""})
     assert(build_graph_rules_failed(build_session_call(a, build_session_compiler_report, stray, None, false, 11, 12)))
-    untiered := found.copy()
+    ^untiered: found.copy()
     untiered[2] = .Text{value: "Warning"}
     assert(build_graph_rules_failed(build_session_call(a, build_session_compiler_report, untiered, None, false, 13, 14)))
-    unplaced := found.copy()
+    ^unplaced: found.copy()
     unplaced[7] = .Int{value: 40}
     assert(build_graph_rules_failed(build_session_call(a, build_session_compiler_report, unplaced, None, false, 15, 16)))
-    later := found.copy()
+    ^later: found.copy()
     later[1] = .Text{value: "mypkg.Second"}
     later[8] = .Text{value: ""}
     assert(build_graph_rules_ok(build_session_call(a, build_session_compiler_report, later, None, false, 17, 18)))
@@ -429,7 +429,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("invalid_toolchain_probe_and_signer_specs_do_not_reserve_names") {
-    session := build_graph_rules_session(89)
+    ^session: build_graph_rules_session(89)
     bad_toolchain: build_session_call(session, build_session_toolchain, [BuildSessionValue]{.Text{value: "cross"}, .Text{value: ""}}, None, false, 1, 2)
     assert_eq(build_graph_rules_error(bad_toolchain), Val(BuildSessionError.EmptyToolchainTriple{value: "cross"}))
     toolchain: build_graph_rules_value(build_session_call(session, build_session_toolchain, [BuildSessionValue]{.Text{value: "cross"}, .Text{value: "wasm32-wasi"}}, None, false, 3, 4))
@@ -442,11 +442,11 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("a_step_toolchain_and_signer_change_its_action_key") {
-    keys := [String]{}
+    ^keys: [String]{}
     controls: [String]{"plain", "toolchain", "sign"}
     loop index in 0..<controls.len() {
         control: controls[index]
-        session := build_graph_rules_session(90 + index)
+        ^session: build_graph_rules_session(90 + index)
         tool: build_graph_rules_tool(session)
         step: build_graph_rules_value(build_graph_rules_made(session, tool, "same", [String]{"build/out"}))
         if control == "toolchain" {
@@ -467,7 +467,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("run_steps_build_their_command_line_from_declared_files") {
-    session := build_graph_rules_session(97)
+    ^session: build_graph_rules_session(97)
     caps: build_graph_rules_list([String]{"Exec", "FS"})
     shell: build_graph_rules_value(build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "shell"}, .Text{value: "find_program"}, .Text{value: "sh"}}, None, true, 1, 2))
     found: build_graph_rules_value(build_session_call(session, build_session_found, [BuildSessionValue]{shell}, None, true, 3, 4))
@@ -498,7 +498,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("kept_outputs_stay_outside_jet") {
-    session := build_graph_rules_session(95)
+    ^session: build_graph_rules_session(95)
     tool: build_graph_rules_tool(session)
     step: build_graph_rules_value(build_session_call(session, build_session_run, [BuildSessionValue]{.Text{value: "table"}, tool, build_graph_rules_list([String]{"FS"})}, None, true, 5, 6))
     assert(build_graph_rules_ok(build_graph_rules_step(session, build_session_step_output, step, [BuildSessionValue]{.Text{value: "table.jet"}, .Text{value: "--out="}, .Bool{value: true}})))
@@ -514,7 +514,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("host_image_and_jet_tools_are_step_files") {
-    session := build_graph_rules_session(99)
+    ^session: build_graph_rules_session(99)
     caps: build_graph_rules_list([String]{"Exec", "FS"})
     empty: build_graph_rules_list([String]{})
     gen: build_graph_rules_value(build_session_call(session, build_session_add_executable, [BuildSessionValue]{.Text{value: "gen"}, build_graph_rules_list([String]{"gen/main.jet"}), empty}, None, false, 1, 2))
@@ -546,7 +546,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("dependency_files_are_step_files_under_jet_deps") {
-    session := build_graph_rules_session(96)
+    ^session: build_graph_rules_session(96)
     build_session_set_dependencies(session, [String:String]{"words": "/src/words"})
     caps: build_graph_rules_list([String]{"Exec", "FS"})
     assert(build_graph_rules_failed(build_session_call(session, build_session_dependency, [BuildSessionValue]{.Text{value: "other"}}, None, false, 1, 2)))
@@ -571,7 +571,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("folders_are_read_whole_and_written_plainly") {
-    session := build_graph_rules_session(99)
+    ^session: build_graph_rules_session(99)
     build_session_set_dependencies(session, [String:String]{"words": "/src/words"})
     tool: build_graph_rules_tool(session)
     unplain: [String]{"", "../up", "/abs", "data/", "a//b", "./data", "data/."}
@@ -602,7 +602,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("no_step_output_lies_inside_a_folder_a_step_reads") {
-    session := build_graph_rules_session(100)
+    ^session: build_graph_rules_session(100)
     tool: build_graph_rules_tool(session)
     data: build_graph_rules_value(build_session_call(session, build_session_folder, [BuildSessionValue]{.Text{value: "data"}}, None, false, 1, 2))
     _: build_graph_rules_value(build_graph_rules_made(session, tool, "gen", [String]{"data/gen.txt"}))
@@ -614,7 +614,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("a_found_folder_is_read_whole_at_its_probe_name") {
-    session := build_graph_rules_session(101)
+    ^session: build_graph_rules_session(101)
     tool: build_graph_rules_tool(session)
     assert(build_graph_rules_failed(build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "deep"}, .Text{value: "find_folder"}, .Text{value: "lib/libc.a"}}, None, true, 1, 2)))
     nested: build_graph_rules_value(build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "a/b"}, .Text{value: "find_folder"}, .Text{value: "libc.a"}}, None, true, 1, 2))
@@ -641,7 +641,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("a_found_program_is_passed_to_a_step_by_the_path_its_probe_finds") {
-    session := build_graph_rules_session(102)
+    ^session: build_graph_rules_session(102)
     tool: build_graph_rules_tool(session)
     cc_probe: build_graph_rules_value(build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "cc"}, .Text{value: "find_program"}, .Text{value: "cc"}}, None, true, 1, 2))
     cc: build_graph_rules_value(build_session_call(session, build_session_found, [BuildSessionValue]{cc_probe}, None, true, 3, 4))
@@ -666,7 +666,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
 }
 
 #Test("run_step_without_an_output_refuses_the_plan") {
-    session := build_graph_rules_session(98)
+    ^session: build_graph_rules_session(98)
     shell: build_graph_rules_value(build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "shell"}, .Text{value: "find_program"}, .Text{value: "sh"}}, None, true, 1, 2))
     found: build_graph_rules_value(build_session_call(session, build_session_found, [BuildSessionValue]{shell}, None, true, 3, 4))
     _: build_graph_rules_value(build_session_call(session, build_session_run, [BuildSessionValue]{.Text{value: "quiet"}, found, build_graph_rules_list([String]{"Exec"})}, None, true, 5, 6))
@@ -722,7 +722,7 @@ build_graph_rules_finish_refusal: fn(session: ^BuildSession) -> BuildSessionDiag
 }
 
 #Test("generation_schedule_rounds_follow_declared_inputs_and_typed_barriers") {
-    session := build_graph_rules_session(120)
+    ^session: build_graph_rules_session(120)
     tool: build_graph_rules_tool(session)
     // Declared out of order: the schedule comes from the declarations, not
     // the order of the calls.
@@ -753,7 +753,7 @@ build_graph_rules_finish_refusal: fn(session: ^BuildSession) -> BuildSessionDiag
 }
 
 #Test("generation_schedule_names_the_call_that_made_each_producer_and_its_place") {
-    session := build_graph_rules_session(126)
+    ^session: build_graph_rules_session(126)
     // Line 1 starts at byte 0, line 2 at 22, line 3 at 33.
     build_session_set_source(session, "main.jet", "build: fn(b: Build) {{\n    render\n    facts\n}}\n")
     tool: build_graph_rules_tool(session)
@@ -778,7 +778,7 @@ build_graph_rules_finish_refusal: fn(session: ^BuildSession) -> BuildSessionDiag
 }
 
 #Test("generation_schedule_names_the_code_value_a_module_was_made_from") {
-    session := build_graph_rules_session(127)
+    ^session: build_graph_rules_session(127)
     build_session_set_source(session, "main.jet", "build: fn(b: Build) {{\n    render\n    facts\n}}\n")
     // A `Code` value's place follows the name (JetDriver BuildAdapter).
     assert(build_graph_rules_ok(build_session_call(session, build_session_generate, [BuildSessionValue]{.Text{value: "facts"}, .Text{value: "helper.jet:4"}}, Val("facts_value: fn() -> Int {{ 7 }}"), false, 37, 42)))
@@ -791,7 +791,7 @@ build_graph_rules_finish_refusal: fn(session: ^BuildSession) -> BuildSessionDiag
 }
 
 #Test("generation_schedule_refuses_a_step_that_waits_on_its_own_jet_source") {
-    session := build_graph_rules_session(121)
+    ^session: build_graph_rules_session(121)
     tool: build_graph_rules_tool(session)
     _: build_graph_rules_schedule_step(session, tool, "grow", [String]{".jet/generated/graph/grow.jet"}, [String]{".jet/generated/graph/grow.jet"}, 10)
     diagnostic: build_graph_rules_finish_refusal(session)
@@ -804,7 +804,7 @@ build_graph_rules_finish_refusal: fn(session: ^BuildSession) -> BuildSessionDiag
 }
 
 #Test("generation_schedule_refuses_steps_that_wait_on_each_others_jet_source") {
-    session := build_graph_rules_session(122)
+    ^session: build_graph_rules_session(122)
     tool: build_graph_rules_tool(session)
     _: build_graph_rules_schedule_step(session, tool, "left", [String]{".jet/generated/graph/right.jet"}, [String]{".jet/generated/graph/left.jet"}, 10)
     _: build_graph_rules_schedule_step(session, tool, "middle", [String]{".jet/generated/graph/left.jet"}, [String]{"out/middle.txt"}, 20)
@@ -816,7 +816,7 @@ build_graph_rules_finish_refusal: fn(session: ^BuildSession) -> BuildSessionDiag
 }
 
 #Test("generation_schedule_keeps_a_file_only_step_cycle_the_step_cycle") {
-    session := build_graph_rules_session(123)
+    ^session: build_graph_rules_session(123)
     tool: build_graph_rules_tool(session)
     _: build_graph_rules_schedule_step(session, tool, "stamp", [String]{"out/stamp.txt"}, [String]{"out/stamp.txt"}, 10)
     diagnostic: build_graph_rules_finish_refusal(session)
@@ -835,13 +835,13 @@ build_graph_rules_round_chain: fn(session: ^BuildSession, count: Int) Never! {
 }
 
 #Test("generation_schedule_holds_every_build_to_seventeen_rounds") {
-    within := build_graph_rules_session(124)
+    ^within: build_graph_rules_session(124)
     build_graph_rules_round_chain(within, 17)
     finished: build_session_finish(within, .Unit)
     plan: finished.plan ?? panic("seventeen rounds fit the limit")
     rows: build_graph_rules_schedule_rows(plan)
     assert(rows[rows.len() - 1].starts_with("17 step gen16 "), "the last of seventeen rounds holds the last step")
-    past := build_graph_rules_session(125)
+    ^past: build_graph_rules_session(125)
     build_graph_rules_round_chain(past, 18)
     diagnostic: build_graph_rules_finish_refusal(past)
     chain: loop index in 0..<18 -> "gen{index}"

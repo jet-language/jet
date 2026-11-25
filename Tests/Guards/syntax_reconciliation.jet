@@ -8,7 +8,7 @@ use {
 // Tests/Guards/DynSurface; lexical and registry oracles stay compiler unit tests.
 // Plain helpers make the author check cover assertion bodies.
 s2_syntax_paths: fn(root: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     kind: s2_syntax_files_api.stat(root) ?? return out
     if kind.is_symlink -> return out
     if kind.is_file {
@@ -20,7 +20,7 @@ s2_syntax_paths: fn(root: String) -> [String] {
     loop entry in entries {
         name: entry.name
         skipped: [String]{".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "node_modules", "target", "build", ".cache", "cache", "dist", "result"}
-        omit := false
+        ^omit: false
         loop candidate in skipped {
             if name == candidate -> omit = true
         }
@@ -47,7 +47,7 @@ s2_syntax_ident_byte: fn(ch: Int) -> Bool {
 // (`BTreeMap<`, `SyncMap<`), never as the head of one (`#context-menu`,
 // `LayoutHandles`), and never as a marker's dotted key (`#test.`).
 s2_syntax_forbidden: fn(line: String, needle: String) -> Bool {
-    offset := 0
+    ^offset: 0
     raw: line.bytes()
     width: needle.bytes().len()
     last: Int{needle.bytes()[width - 1]}
@@ -81,7 +81,7 @@ s2_syntax_scanned_text: fn(path: String) -> Bool {
 
 s2_syntax_trim_start: fn(text: String) -> String {
     bytes: text.bytes()
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
         width: policy_space_width(bytes, index)
         if width == 0 -> break
@@ -106,12 +106,12 @@ s2_syntax_old_binding: fn(line: String) -> Bool {
 // A negative UI fixture keeps a retired spelling as its subject: the lines of a
 // `Tests/UI` fixture that its `.stderr` snapshot reports an Error at.
 s2_syntax_ui_subject_lines: fn(path: String) -> [Int] {
-    lines := [Int]{}
+    ^lines: [Int]{}
     if !path.starts_with("Tests/UI/") || !path.ends_with(".jet") -> return lines
     stem: policy_slice_bytes(path, 0, path.bytes().len() - 4)
     snapshot: s2_syntax_files_api.read("{stem}.stderr") ?? return lines
     marker: "--> {path}:"
-    error := false
+    ^error: false
     loop line in snapshot.lines() {
         if line.starts_with("Error: ") {
             error = true
@@ -148,7 +148,7 @@ s2_syntax_curated: fn(path: String) -> Bool {
 s2_syntax_live_surface_has_no_retired_spellings: fn() {
     roots: [String]{"AGENTS.md", "CLAUDE.md", "Docs", "Core", "Examples", "Compiler", "Jetpack", "Tools", "Tests"}
     forbidden: [String]{"@unsafe", "@audit", "@extern", "@bindgen", "#extern", "#bindgen", "#layout", "#grant", "#context", "#test", "#pure", "pure fn", "#todo", "List<", "List[", "Map<", "#[Serialize", "Serialize]", "#[Deserialize", "Deserialize]", "core.json", "use jet.", "use std.", "?continue", "?break", "?return", "comptime val ", "LayoutHandle", "#Extern"}
-    failures := [String]{}
+    ^failures: [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             if path.ends_with(".rs") || s2_syntax_skip(path) || s2_syntax_data_file(path) -> next
@@ -225,7 +225,7 @@ s2_syntax_proposal_marker_census_matches_syntax_registry: fn() {
 s2_syntax_old_binding_migration_paths_stay_removed: fn() {
     roots: [String]{"Compiler/JetFoundation/Data/Syntax", "Compiler/JetParser/Source/Parser", "Compiler/JetDriver/Source/FixEngine.jet", "Compiler/JetLSP/Source", "Docs/Spec/Reference/syntax-surface.jet", "Tools/Editors/Vscode/README.md", "Tools/Editors/Zed/README.md", "Tests/CLI", "Tests/LSP", "Tests/UI"}
     codes: [String]{"E0009", "E0010", "E0985"}
-    failures := [String]{}
+    ^failures: [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             if path.ends_with(".rs") || s2_syntax_skip(path) -> next
@@ -259,7 +259,7 @@ s2_syntax_old_binding_migration_paths_stay_removed: fn() {
 s2_syntax_foreign_word_facts_have_one_table: fn() {
     roots: [String]{"Compiler/JetFoundation/Source", "Compiler/JetLexer", "Compiler/JetParser/Source", "Compiler/JetSema/Source", "Compiler/JetLSP/Source", "Compiler/JetDriver/Source/FixEngine.jet", "Compiler/JetDriver/Source/Driver"}
     words: [String]{"\"while\"", "\"for\"", "\"do\"", "\"repeat\"", "\"until\"", "\"continue\"", "\"fun\"", "\"func\"", "\"def\"", "\"function\"", "\"let\"", "\"var\"", "\"const\"", "\"val\"", "\"class\"", "\"switch\"", "\"match\""}
-    failures := [String]{}
+    ^failures: [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             if !path.ends_with(".jet") || s2_syntax_skip(path) -> next
@@ -269,7 +269,7 @@ s2_syntax_foreign_word_facts_have_one_table: fn() {
                 if trimmed.starts_with("FOREIGN_") && trimmed.contains(": \"") {
                     failures.push("{path}:{index + 1} defines a foreign-word fact outside the syntax registry")
                 }
-                quoted := 0
+                ^quoted: 0
                 loop word in words {
                     if line.contains(word) -> quoted += 1
                 }
@@ -296,7 +296,7 @@ s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged: fn() {
     reference: s2_syntax_files_api.read("Docs/Spec/Reference/syntax-surface.jet") ?? panic("read syntax reference")
     spec: s2_syntax_files_api.read("Docs/Spec/syntax-decisions.md") ?? panic("read syntax decisions")
     listed: [String]{"S74", "D-ONCE-UITREE1", "S56", "D-MIGRATE2A", "D-MIGRATE2D", "D-MIGRATE2E"}
-    expected := [String:Int]{"S74": 1, "D-ONCE-UITREE1": 1}
+    ^expected: [String:Int]{"S74": 1, "D-ONCE-UITREE1": 1}
     loop line in reference.lines() {
         suffix: s2_syntax_parse.split_once(line, "# RATIFIED, NOT YET IMPLEMENTED (")
         if !suffix.found -> next
@@ -344,18 +344,18 @@ s2_syntax_syntax_status_matrix_covers_unbuilt_notes: fn() {
         if !lower.contains("unbuilt") && !lower.contains("not yet implemented") -> next
         if index < 20 || lower.contains("have/have-not ledger") -> next
         if !lower.contains("ratified") && !lower.contains("not yet implemented") -> next
-        start := index
+        ^start: index
         loop start > 0 {
             if lines[start - 1].trim().is_empty() -> break
             start -= 1
         }
-        end := index + 1
+        ^end: index + 1
         loop end < lines.len() {
             if lines[end].trim().is_empty() -> break
             end += 1
         }
-        context := [String]{}
-        at := start
+        ^context: [String]{}
+        ^at: start
         loop at < end {
             context.push(lines[at])
             at += 1
@@ -404,8 +404,8 @@ s2_syntax_lexical_ledger_is_rendered_from_syntax: fn() {
 // starting with `head`, as `name toolchain`, up to the list's closing brace.
 s2_syntax_rewrite_rows: fn(path: String, head: String) -> [String] {
     source: s2_syntax_files_api.read(path) ?? panic("read {path}")
-    rows := [String]{}
-    inside := false
+    ^rows: [String]{}
+    ^inside: false
     loop line in source.lines() {
         if line.starts_with(head) {
             inside = true
@@ -487,7 +487,7 @@ s2_syntax_module_internal_is_discovery_not_access_control: fn() {
 s2_syntax_artifact_extensions_are_one_closed_kind_specific_family: fn() {
     roots: [String]{"Compiler", "Core", "Jetpack", "Examples", "Tests", "Docs"}
     retired: [String]{".jproof", ".jtrace", ".jreplay"}
-    failures := [String]{}
+    ^failures: [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             // Dated evidence keeps its words as recorded (retirement_ratchet.jet).

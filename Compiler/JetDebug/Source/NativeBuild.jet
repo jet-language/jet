@@ -103,8 +103,10 @@ NativeBuild: struct {
 
     // The lines the breakpoints wait on, for the build (build_debug_set_lines).
     lines: fn(self) -> [BuildDebugLine] Never! {
-        lines := [BuildDebugLine]{}
-        loop breakpoint in self.breakpoints -> lines.push(BuildDebugLine{file: breakpoint.file, line: breakpoint.line})
+        ^lines: [BuildDebugLine]{}
+        loop breakpoint in self.breakpoints {
+            lines.push(BuildDebugLine{file: breakpoint.file, line: breakpoint.line})
+        }
         lines
     }
 
@@ -112,7 +114,7 @@ NativeBuild: struct {
     // loaded with code there: whether it was.
     add: fn(^self, file: String, line: Int) -> Bool Never! {
         self.numbered += 1
-        placed := false
+        ^placed: false
         loop at in 0..<self.batches.len() {
             if self.place(at, file, line, self.numbered) -> placed = true
         }
@@ -127,7 +129,7 @@ NativeBuild: struct {
         if addresses.len() == 0 -> return false
         pid: self.batches[at].pid
         if !self.hold(pid) -> return false
-        placed := false
+        ^placed: false
         loop address in addresses {
             if self.trap(pid, address, number) -> placed = true
         }
@@ -150,7 +152,7 @@ NativeBuild: struct {
                 next
             }
             self.owners[id] = pid
-            _ := x64_trace_resume(x64_trace_of(self.trace, id), X64TraceResume.Run, native_trace_signal(status))
+            ^_: x64_trace_resume(x64_trace_of(self.trace, id), X64TraceResume.Run, native_trace_signal(status))
         }
         self.owners.has_key(pid)
     }
@@ -190,9 +192,11 @@ NativeBuild: struct {
             native_build_answer(taken)
             return None
         }
-        number := 0
+        ^number: 0
         loop (index, breakpoint) in self.breakpoints {
-            if breakpoint.line != taken.line || !build_debug_names(breakpoint.file, taken.file) -> next
+            if breakpoint.line != taken.line || !build_debug_names(breakpoint.file, taken.file) {
+                next
+            }
             if number == 0 -> number = breakpoint.number
             self.breakpoints[index].placed = true
         }
@@ -200,8 +204,10 @@ NativeBuild: struct {
             native_build_answer(taken)
             return None
         }
-        locals := [NativeLocal]{}
-        loop local in taken.locals -> locals.push(NativeLocal{name: "{local.name}", type_name: "", value: "{local.text}"})
+        ^locals: [NativeLocal]{}
+        loop local in taken.locals {
+            locals.push(NativeLocal{name: "{local.name}", type_name: "", value: "{local.text}"})
+        }
         frame: NativeBuildFrame{function: "{taken.rule}", file: build_files.basename(taken.file), line: taken.line, locals: locals, path: "{taken.file}"}
         Val(NativeBuildStop{number: number, frames: [NativeBuildFrame]{frame}, what: "marker", ask: Val(taken.move())})
     }
@@ -210,7 +216,7 @@ NativeBuild: struct {
     // breakpoint with code in it. Batches the child kept at the same
     // addresses before are gone, and so are their traps.
     load: fn(^self, event: BuildDebugEvent) Never! {
-        image := native_image_read(event.facts) ?? return
+        ^image: native_image_read(event.facts) ?? return
         if self.trace.scratch == 0 {
             self.trace = x64_trace_attach(event.pid)
             if self.trace.helper < 0 || self.trace.channel < 0 {
@@ -220,7 +226,7 @@ NativeBuild: struct {
             }
         }
         child: x64_trace_of(self.trace, event.pid)
-        codes := native_elf_codes(event.facts, ".text")
+        ^codes: native_elf_codes(event.facts, ".text")
         loop place in native_build_sections(event.facts, ".text") {
             bytes: x64_trace_read(child, place.address, place.size) ?? next
             codes.push(NativeCode{address: place.address, bytes: bytes})
@@ -232,8 +238,8 @@ NativeBuild: struct {
             image.frames.sections.push(code)
         }
         image.frames.fdes.sort_by(fn(left: NativeFde, right: NativeFde) { left.start <=> right.start })
-        low := 0
-        high := 0
+        ^low: 0
+        ^high: 0
         loop (index, code) in codes {
             if index == 0 || code.address < low -> low = code.address
             if code.address + code.bytes.len() > high -> high = code.address + code.bytes.len()
@@ -245,7 +251,9 @@ NativeBuild: struct {
         loop index in 0..<self.breakpoints.len() {
             file: "{self.breakpoints[index].file}"
             line: self.breakpoints[index].line
-            if self.place(at, file, line, self.breakpoints[index].number) -> self.breakpoints[index].placed = true
+            if self.place(at, file, line, self.breakpoints[index].number) {
+                self.breakpoints[index].placed = true
+            }
         }
     }
 
@@ -253,21 +261,17 @@ NativeBuild: struct {
     // and their traps; every one of its batches when `high` is 0 (the
     // child has ended).
     forget: fn(^self, pid: Int, low: Int, high: Int) Never! {
-        k := self.batches.len()
+        ^k: self.batches.len()
         loop k > 0 {
             k -= 1
             gone: self.batches[k].pid == pid && (high == 0 || (self.batches[k].low < high && low < self.batches[k].high))
-            if gone {
-                _ := self.batches.remove(k, .Slot)
-            }
+            if gone -> ^_: self.batches.remove(k, .Slot)
         }
         k = self.sites.len()
         loop k > 0 {
             k -= 1
             gone: self.sites[k].pid == pid && (high == 0 || (self.sites[k].address >= low && self.sites[k].address < high))
-            if gone {
-                _ := self.sites.remove(k, .Slot)
-            }
+            if gone -> ^_: self.sites.remove(k, .Slot)
         }
     }
 
@@ -282,11 +286,11 @@ NativeBuild: struct {
             status: stop.status
             pid: self.owners.get(thread) ?? native_build_owner(thread)
             if status & 0xff != 0x7f {
-                _ := self.owners.remove(thread)
+                ^_: self.owners.remove(thread)
                 if thread == pid {
                     self.forget(pid, 0, 0)
-                    _ := self.limits.remove(pid)
-                    _ := self.whats.remove(pid)
+                    ^_: self.limits.remove(pid)
+                    ^_: self.whats.remove(pid)
                 }
                 next
             }
@@ -294,7 +298,7 @@ NativeBuild: struct {
             if (status >> 8) & 0xff == NATIVE_DEBUG_SIGTRAP && (status >> 16) == 0 {
                 if self.hit(pid, thread) == .Val(found) -> return Val(found)
             }
-            _ := x64_trace_resume(x64_trace_of(self.trace, thread), X64TraceResume.Run, native_trace_signal(status))
+            ^_: x64_trace_resume(x64_trace_of(self.trace, thread), X64TraceResume.Run, native_trace_signal(status))
         }
     }
 
@@ -303,13 +307,13 @@ NativeBuild: struct {
     // None when the SIGTRAP is not at a trap of the session's.
     hit: fn(^self, pid: Int, thread: Int) -> NativeBuildStop? Never! {
         stopped: x64_trace_of(self.trace, thread)
-        registers := x64_trace_registers(stopped) ?? return None
+        ^registers: x64_trace_registers(stopped) ?? return None
         address: registers[X64_TRACE_RIP] - 1
         index: self.site_at(pid, address)
         if index < 0 -> return None
-        _ := x64_trace_write(stopped, address, [U8]{self.sites[index].byte})
+        ^_: x64_trace_write(stopped, address, [U8]{self.sites[index].byte})
         registers[X64_TRACE_RIP] = address
-        _ := x64_trace_set_registers(stopped, registers)
+        ^_: x64_trace_set_registers(stopped, registers)
         frames: native_build_frames(self.batches, pid, stopped, registers)
         Val(NativeBuildStop{number: self.sites[index].number, pid: pid, thread: thread, site: address, frames: frames, what: "prep"})
     }
@@ -319,10 +323,14 @@ NativeBuild: struct {
     // child set it to the call's limit (the latest Calling event, which the
     // console takes before it measures), and each step takes one.
     measure: fn(self, stop: ^NativeBuildStop) Never! {
-        if stop.what == "marker" -> return
+        if stop.what == "marker" {
+            return
+        }
         stop.what = self.whats.get(stop.pid) ?? "prep"
         at: native_build_batch_at(self.batches, stop.pid, stop.site)
-        if at < 0 || self.batches[at].steps <= 0 -> return
+        if at < 0 || self.batches[at].steps <= 0 {
+            return
+        }
         limit: self.limits.get(stop.pid) ?? return
         left: native_debug_word(x64_trace_of(self.trace, stop.pid), self.batches[at].steps) ?? return
         stop.used = limit - left
@@ -332,25 +340,27 @@ NativeBuild: struct {
     // Take breakpoint `number` out, and its traps; the traps another
     // breakpoint shared go back in.
     remove: fn(^self, number: Int) -> Bool Never! {
-        k := self.sites.len()
+        ^k: self.sites.len()
         loop k > 0 {
             k -= 1
             if self.sites[k].number != number -> next
-            _ := x64_trace_write(x64_trace_of(self.trace, self.sites[k].pid), self.sites[k].address, [U8]{self.sites[k].byte})
-            _ := self.sites.remove(k, .Slot)
+            ^_: x64_trace_write(x64_trace_of(self.trace, self.sites[k].pid), self.sites[k].address, [U8]{self.sites[k].byte})
+            ^_: self.sites.remove(k, .Slot)
         }
-        found := false
+        ^found: false
         k = self.breakpoints.len()
         loop k > 0 {
             k -= 1
             if self.breakpoints[k].number != number -> next
-            _ := self.breakpoints.remove(k, .Slot)
+            ^_: self.breakpoints.remove(k, .Slot)
             found = true
         }
         loop index in 0..<self.breakpoints.len() {
             file: "{self.breakpoints[index].file}"
             line: self.breakpoints[index].line
-            loop at in 0..<self.batches.len() -> _ := self.place(at, file, line, self.breakpoints[index].number)
+            loop at in 0..<self.batches.len() {
+                ^_: self.place(at, file, line, self.breakpoints[index].number)
+            }
         }
         found
     }
@@ -366,25 +376,25 @@ NativeBuild: struct {
             return
         }
         thread: x64_trace_of(self.trace, held.thread)
-        signal := 0
+        ^signal: 0
         if self.site_at(held.pid, held.site) >= 0 {
-            _ := x64_trace_resume(thread, X64TraceResume.Step, 0)
+            ^_: x64_trace_resume(thread, X64TraceResume.Step, 0)
             status: x64_trace_wait_for(self.trace, held.thread)
             if status < 0 || status & 0xff != 0x7f {
-                _ := self.owners.remove(held.thread)
+                ^_: self.owners.remove(held.thread)
                 return
             }
             if (status >> 8) & 0xff != NATIVE_DEBUG_SIGTRAP -> signal = native_trace_signal(status)
-            _ := x64_trace_write(x64_trace_of(self.trace, held.pid), held.site, [U8]{U8{NATIVE_DEBUG_TRAP}})
+            ^_: x64_trace_write(x64_trace_of(self.trace, held.pid), held.site, [U8]{U8{NATIVE_DEBUG_TRAP}})
         }
-        _ := x64_trace_resume(thread, X64TraceResume.Run, signal)
+        ^_: x64_trace_resume(thread, X64TraceResume.Run, signal)
     }
 
     // End the session: each trap still in a running child is taken out,
     // and the helper ends, which lets every traced thread go on.
     close: fn(^self) Never! {
         loop site in self.sites {
-            _ := x64_trace_write(x64_trace_of(self.trace, site.pid), site.address, [U8]{site.byte})
+            ^_: x64_trace_write(x64_trace_of(self.trace, site.pid), site.address, [U8]{site.byte})
         }
         self.sites = [NativeBuildSite]{}
         self.trace.pid = -1
@@ -393,7 +403,7 @@ NativeBuild: struct {
 
     // The breakpoints no batch had code for and no marker body reached.
     unplaced: fn(self) -> String Never! {
-        text := ""
+        ^text: ""
         loop breakpoint in self.breakpoints {
             if !breakpoint.placed {
                 text = "{text}Breakpoint {breakpoint.number} at {breakpoint.file}:{breakpoint.line} was never placed: no build-time code ran on that line\n"
@@ -418,10 +428,12 @@ native_build_owner: fn(thread: Int) -> Int Never! {
 // (native_line_addresses), a function's start moved past its prologue
 // (NativeSession.entry).
 native_build_starts: fn(batch: NativeBuildBatch, file: String, line: Int) -> [Int] Never! {
-    addresses := native_line_addresses(batch.image, file, line)
+    ^addresses: native_line_addresses(batch.image, file, line)
     loop k in 0..<addresses.len() {
         index: x64_jetline_find(batch.image.lines, addresses[k])
-        if index < 0 || index >= batch.openings.len() || addresses[k] != batch.image.lines.functions[index].low -> next
+        if index < 0 || index >= batch.openings.len() || addresses[k] != batch.image.lines.functions[index].low {
+            next
+        }
         if batch.openings[index].at == addresses[k] && native_frame_open(batch.openings[index].prologue) >= 0 {
             addresses[k] = native_body_start(batch.image, index)
         }
@@ -431,7 +443,7 @@ native_build_starts: fn(batch: NativeBuildBatch, file: String, line: Int) -> [In
 
 // The newest batch of the child `pid` with code at `address`, else -1.
 native_build_batch_at: fn(batches: [NativeBuildBatch], pid: Int, address: Int) -> Int Never! {
-    found := -1
+    ^found: -1
     loop (index, batch) in batches {
         if batch.pid == pid && x64_jetline_find(batch.image.lines, address) >= 0 -> found = index
     }
@@ -441,7 +453,7 @@ native_build_batch_at: fn(batches: [NativeBuildBatch], pid: Int, address: Int) -
 // The sections named `name` of the ELF `elf` that hold no bytes there
 // (SHT_NOBITS): a batch's code and frames, which are in the child.
 native_build_sections: fn(elf: [U8], name: String) -> [NativeBuildSection] Never! {
-    found := [NativeBuildSection]{}
+    ^found: [NativeBuildSection]{}
     headers: link_debug_addr(elf, 40)
     size: link_debug_le(elf, 58, 2)
     count: link_debug_le(elf, 60, 2)
@@ -465,13 +477,15 @@ native_build_sections: fn(elf: [U8], name: String) -> [NativeBuildSection] Never
 // the child's runtime, by its frame-pointer chain (native_debug_frame_row).
 native_build_frames: fn(batches: [NativeBuildBatch], pid: Int, thread: X64Trace, start: [Int]) -> [NativeBuildFrame] Never! {
     unwound: native_build_unwind(batches, pid, thread, start)
-    shown := [NativeBuildFrame]{}
+    ^shown: [NativeBuildFrame]{}
     loop (index, frame) in unwound {
         lookup: native_lookup(index, frame.pc)
         at: native_build_batch_at(batches, pid, lookup)
         if at < 0 -> next
-        sites := [Int]{}
-        if native_function_at(batches[at].image, lookup) == .Val(function) -> sites = native_inline_chain(function, lookup)
+        ^sites: [Int]{}
+        if native_function_at(batches[at].image, lookup) == .Val(function) {
+            sites = native_inline_chain(function, lookup)
+        }
         sites.push(-1)
         caller: if index + 1 < unwound.len() -> NativeUnwound?{Val(unwound[index + 1])} else -> None
         memory: NativeMemory{trace: Val(thread), blocks: [NativeBlock]{}}
@@ -489,10 +503,10 @@ native_build_frames: fn(batches: [NativeBuildBatch], pid: Int, thread: X64Trace,
 // its code. Each frame owns its registers; the caller's are built from the
 // frame just pushed.
 native_build_unwind: fn(batches: [NativeBuildBatch], pid: Int, thread: X64Trace, start: [Int]) -> [NativeUnwound] Never! {
-    registers := loop value in start -> value
-    known := loop _ in 0..<registers.len() -> true
+    ^registers: loop value in start -> value
+    ^known: loop _ in 0..<registers.len() -> true
     none: NativeFrames{sections: [NativeCode]{}, fdes: [NativeFde]{}}
-    frames := [NativeUnwound]{}
+    ^frames: [NativeUnwound]{}
     loop frames.len() < NATIVE_DEBUG_MOST_FRAMES {
         pc: registers[X64_TRACE_RIP]
         lookup: if frames.len() == 0 -> pc else -> pc - 1
@@ -535,7 +549,7 @@ native_build_stop_text: fn(stop: NativeBuildStop) -> String Never! {
         return "Stopped at breakpoint {stop.number} (build time), outside Jet code\n{native_build_steps(stop)}"
     }
     top: stop.frames[0]
-    text := "Stopped at {top.file}:{top.line} in {top.function} (build time)\n"
+    ^text: "Stopped at {top.file}:{top.line} in {top.function} (build time)\n"
     loop local in top.locals -> text = "{text}  {local.name} = {local.value}\n"
     "{text}{native_build_backtrace(stop)}{native_build_steps(stop)}"
 }
@@ -543,7 +557,7 @@ native_build_stop_text: fn(stop: NativeBuildStop) -> String Never! {
 // `stop`'s Jet frames, innermost first; the outermost says what kind of
 // build-time code it runs.
 native_build_backtrace: fn(stop: NativeBuildStop) -> String Never! {
-    text := ""
+    ^text: ""
     loop (index, frame) in stop.frames {
         tag: if index + 1 == stop.frames.len() -> " ({stop.what})" else -> ""
         text = "{text}  #{index} {frame.function} {frame.file}:{frame.line}{tag}\n"
@@ -554,7 +568,7 @@ native_build_backtrace: fn(stop: NativeBuildStop) -> String Never! {
 // The innermost frame's locals of `stop`, one a line.
 native_build_locals: fn(stop: NativeBuildStop) -> String Never! {
     if stop.frames.len() == 0 || stop.frames[0].locals.len() == 0 -> return "  (no locals)\n"
-    text := ""
+    ^text: ""
     loop local in stop.frames[0].locals -> text = "{text}  {local.name} = {local.value}\n"
     text
 }
@@ -563,7 +577,9 @@ native_build_locals: fn(stop: NativeBuildStop) -> String Never! {
 native_build_steps: fn(stop: NativeBuildStop) -> String Never! {
     if stop.what == "marker" -> return "  steps: none (a marker body has no step limit)\n"
     if stop.limit < 0 -> return "  steps: unknown\n"
-    if stop.limit == NATIVE_BUILD_NO_LIMIT -> return "  steps: {native_build_count(stop.used)} (no step limit)\n"
+    if stop.limit == NATIVE_BUILD_NO_LIMIT {
+        return "  steps: {native_build_count(stop.used)} (no step limit)\n"
+    }
     "  steps: {native_build_count(stop.used)} of {native_build_count(stop.limit)}\n"
 }
 
@@ -571,7 +587,7 @@ native_build_steps: fn(stop: NativeBuildStop) -> String Never! {
 native_build_count: fn(count: Int) -> String Never! {
     if count < 0 -> return "-{native_build_count(-count)}"
     digits: "{count}"
-    text := ""
+    ^text: ""
     loop index in 0..<digits.len() {
         if index > 0 && (digits.len() - index) % 3 == 0 -> text = "{text},"
         text = "{text}{digits.slice(index, index + 1)}"

@@ -103,7 +103,7 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
@@ -114,7 +114,7 @@ fake_u32: fn(bytes: [U8], at: Int) -> Int {
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -282,7 +282,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
         f.registry = fake_u32(body, 0)
         registry: f.registry
         loop (index, interface) in GLOBALS {
-            args := fake_words([Int]{index + 1})
+            ^args: fake_words([Int]{index + 1})
             loop b in fake_text(interface) -> args.push(b)
             version: if interface == "wl_compositor" -> 6 else if interface == "wl_seat" -> 5 else if interface == "xdg_wm_base" -> 2 else -> 1
             fake_put(args, version)
@@ -370,7 +370,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
 }
 
 fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -392,7 +392,7 @@ fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
 // minute.
 fake_serve: fn(listener: net.UnixListener) -[Env, Net, Time]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept on wl.sock: {err}")
-    f := Fake{
+    ^f: Fake{
         stream: stream,
         inbox: [U8]{},
         out: [U8]{},
@@ -421,7 +421,7 @@ fake_serve: fn(listener: net.UnixListener) -[Env, Net, Time]> Fake {
         records: [String]{},
         failures: [String]{},
     }
-    idle := 0
+    ^idle: 0
     loop idle < 1200 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("wait failed: {err}")

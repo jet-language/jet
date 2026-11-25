@@ -79,9 +79,9 @@ compiler_data_word_byte: fn(value: Int) -> Bool {
 
 // The index after the raw string whose backtick fence starts at `start`.
 compiler_data_raw_end: fn(bytes: [U8], start: Int) -> Int {
-    fence := 0
+    ^fence: 0
     loop compiler_data_at(bytes, start + fence) == 96 -> fence += 1
-    cursor := start + fence
+    ^cursor: start + fence
     loop cursor < bytes.len() {
         if compiler_data_at(bytes, cursor) != 96 {
             cursor += 1
@@ -97,8 +97,8 @@ compiler_data_raw_end: fn(bytes: [U8], start: Int) -> Int {
 // The index after the `{…}` interpolation that opens at `open` inside a
 // plain string; one left open at its line end ends there.
 compiler_data_interpolation_end: fn(bytes: [U8], open: Int) -> Int {
-    cursor := open + 1
-    depth := 1
+    ^cursor: open + 1
+    ^depth: 1
     loop cursor < bytes.len() {
         value: compiler_data_at(bytes, cursor)
         if value == 34 {
@@ -125,7 +125,7 @@ compiler_data_interpolation_end: fn(bytes: [U8], open: Int) -> Int {
 // interpolations, and ends at its closing quote or its line end.
 compiler_data_string_end: fn(bytes: [U8], start: Int) -> Int {
     triple: compiler_data_at(bytes, start + 1) == 34 && compiler_data_at(bytes, start + 2) == 34
-    cursor := if triple -> start + 3 else -> start + 1
+    ^cursor: if triple -> start + 3 else -> start + 1
     loop cursor < bytes.len() {
         value: compiler_data_at(bytes, cursor)
         if value == 92 {
@@ -157,7 +157,7 @@ compiler_data_string_end: fn(bytes: [U8], start: Int) -> Int {
 // The index after the character literal whose quote is at `start`, or just
 // past the quote when none closes on its line within a scalar's width.
 compiler_data_char_end: fn(bytes: [U8], start: Int) -> Int {
-    cursor := start + 1
+    ^cursor: start + 1
     loop cursor < bytes.len() && cursor <= start + 12 {
         value: compiler_data_at(bytes, cursor)
         if value == 10 -> break
@@ -174,7 +174,7 @@ compiler_data_char_end: fn(bytes: [U8], start: Int) -> Int {
 // The next token at or after `from` that is not a comment; blank space is
 // skipped.
 compiler_data_token: fn(bytes: [U8], from: Int) -> CompilerDataToken {
-    cursor := from
+    ^cursor: from
     loop cursor < bytes.len() {
         value: compiler_data_at(bytes, cursor)
         if value == 32 || value == 9 || value == 10 || value == 13 {
@@ -187,7 +187,7 @@ compiler_data_token: fn(bytes: [U8], from: Int) -> CompilerDataToken {
         }
         if value == 47 && compiler_data_at(bytes, cursor + 1) == 42 {
             cursor += 2
-            depth := 1
+            ^depth: 1
             loop cursor < bytes.len() && depth > 0 {
                 if compiler_data_at(bytes, cursor) == 47 && compiler_data_at(bytes, cursor + 1) == 42 {
                     depth += 1
@@ -209,7 +209,7 @@ compiler_data_token: fn(bytes: [U8], from: Int) -> CompilerDataToken {
             return CompilerDataToken{kind: COMPILER_DATA_OTHER, start: cursor, end: compiler_data_char_end(bytes, cursor)}
         }
         if compiler_data_word_byte(value) {
-            end := cursor + 1
+            ^end: cursor + 1
             loop end < bytes.len() && compiler_data_word_byte(compiler_data_at(bytes, end)) {
                 end += 1
             }
@@ -241,8 +241,8 @@ compiler_data_is_word: fn(bytes: [U8], token: CompilerDataToken, word: String) -
 // The index just past the `>` closing the type parameters that open at
 // `open`, or -1 when they do not close.
 compiler_data_params_end: fn(bytes: [U8], open: CompilerDataToken) -> Int {
-    depth := 0
-    cursor := open.start
+    ^depth: 0
+    ^cursor: open.start
     loop {
         token: compiler_data_token(bytes, cursor)
         if token.kind == COMPILER_DATA_END -> return -1
@@ -264,12 +264,12 @@ compiler_data_params_end: fn(bytes: [U8], open: CompilerDataToken) -> Int {
 // marker, or another variant and its payload; never after a method, an
 // `impl` or a discriminant.
 compiler_data_enum_body: fn(bytes: [U8], from: Int) -> {payload: Bool, end: Int} {
-    cursor := from
-    depth := 1
-    member := true
-    resume := false
-    hash := false
-    payload := false
+    ^cursor: from
+    ^depth: 1
+    ^member: true
+    ^resume: false
+    ^hash: false
+    ^payload: false
     loop {
         token: compiler_data_token(bytes, cursor)
         if token.kind == COMPILER_DATA_END -> return {payload: payload, end: cursor}
@@ -325,12 +325,12 @@ compiler_data_enum_body: fn(bytes: [U8], from: Int) -> {payload: Bool, end: Int}
 // `(` payload: `Name: enum {…}` or `Name<T>: enum {…}`.
 compiler_data_payload_enums: fn(text: String) -> Int {
     bytes: text.bytes()
-    count := 0
-    depth := 0
+    ^count: 0
+    ^depth: 0
     // Whether the depth-0 token before keeps the next word from naming a
     // declaration: `priv`, `pub` or a `.`.
-    held := false
-    cursor := 0
+    ^held: false
+    ^cursor: 0
     loop {
         token: compiler_data_token(bytes, cursor)
         if token.kind == COMPILER_DATA_END -> break
@@ -345,7 +345,7 @@ compiler_data_payload_enums: fn(text: String) -> Int {
         if depth > 0 -> next
         word: token.kind == COMPILER_DATA_WORD
         if word && !held && compiler_data_is_upper_word(bytes, token) {
-            colon := compiler_data_token(bytes, token.end)
+            ^colon: compiler_data_token(bytes, token.end)
             if compiler_data_is_punct(bytes, colon, 60) && colon.start == token.end {
                 params_end: compiler_data_params_end(bytes, colon)
                 if params_end >= 0 -> colon = compiler_data_token(bytes, params_end)
@@ -374,9 +374,9 @@ compiler_data_piece: fn(bytes: [U8], start: Int, end: Int) -> String {
 // piece; comments stay in the pieces.
 compiler_data_code_pieces: fn(text: String) -> [String] {
     bytes: text.bytes()
-    pieces := [String]{}
-    start := 0
-    cursor := 0
+    ^pieces: [String]{}
+    ^start: 0
+    ^cursor: 0
     loop cursor < bytes.len() {
         value: compiler_data_at(bytes, cursor)
         after: compiler_data_at(bytes, cursor + 1)
@@ -397,10 +397,12 @@ compiler_data_code_pieces: fn(text: String) -> [String] {
 }
 
 compiler_data_counts: fn(text: String) -> CompilerDataCounts {
-    text_keys := 0
-    shared := 0
+    ^text_keys: 0
+    ^shared: 0
     loop piece in compiler_data_code_pieces(text) {
-        loop needle in COMPILER_DATA_TEXT_KEYS -> text_keys += compiler_data_occurrences(piece, needle)
+        loop needle in COMPILER_DATA_TEXT_KEYS {
+            text_keys += compiler_data_occurrences(piece, needle)
+        }
         shared += compiler_data_occurrences(piece, COMPILER_DATA_SHARED)
     }
     CompilerDataCounts{text_keys: text_keys, shared: shared, payload_enums: compiler_data_payload_enums(text)}
@@ -430,7 +432,7 @@ compiler_data_scan: fn(path: String, found: ^[String:CompilerDataCounts]) -[FS]>
 
 // The ledger's rows; a malformed, repeated or zero row is a problem.
 compiler_data_rows: fn(ledger: String, problems: ^[String]) -> [String:CompilerDataCounts] {
-    rows := [String:CompilerDataCounts]{}
+    ^rows: [String:CompilerDataCounts]{}
     loop line in ledger.lines() {
         if line == "" || line.starts_with("#") -> next
         cells: line.split("\t").to_list()
@@ -472,8 +474,8 @@ CompilerDataDiff: struct {
 }
 
 compiler_data_diff: fn(found: [String:CompilerDataCounts], ledger: String) -> CompilerDataDiff {
-    rises := [String]{}
-    drops := [String]{}
+    ^rises: [String]{}
+    ^drops: [String]{}
     rows: compiler_data_rows(ledger, rises)
     none: CompilerDataCounts{text_keys: 0, shared: 0, payload_enums: 0}
     loop (path, counts) in found {
@@ -494,10 +496,10 @@ compiler_data_diff: fn(found: [String:CompilerDataCounts], ledger: String) -> Co
 
 // The ledger text for `found`, its rows in path order.
 compiler_data_ledger: fn(found: [String:CompilerDataCounts]) -> String {
-    paths := [String]{}
+    ^paths: [String]{}
     loop (path, _) in found -> paths.push(path.copy())
     paths.sort()
-    lines := [String]{COMPILER_DATA_HEADER}
+    ^lines: [String]{COMPILER_DATA_HEADER}
     loop path in paths {
         counts: found.get(path) ?? next
         lines.push("{path}\t{counts.text_keys}\t{counts.shared}\t{counts.payload_enums}")
@@ -506,9 +508,9 @@ compiler_data_ledger: fn(found: [String:CompilerDataCounts]) -> String {
 }
 
 compiler_data_summary: fn(found: [String:CompilerDataCounts]) -> String {
-    text_keys := 0
-    shared := 0
-    payload_enums := 0
+    ^text_keys: 0
+    ^shared: 0
+    ^payload_enums: 0
     loop (_, counts) in found {
         text_keys += counts.text_keys
         shared += counts.shared
@@ -522,7 +524,7 @@ compiler_data_main: fn(args: [String]) -[FS, IO]> Int CompilerDataError! {
     if args.len() > 1 || (mode != "--check" && mode != "--write") {
         return Err(CompilerDataError{message: "usage: jet Tools/Agent/CompilerData.jet [--check|--write]"})
     }
-    found := [String:CompilerDataCounts]{}
+    ^found: [String:CompilerDataCounts]{}
     loop package in COMPILER_DATA_PACKAGES {
         compiler_data_scan("Compiler/{package}/Source", found) ?? return Err(err)
     }

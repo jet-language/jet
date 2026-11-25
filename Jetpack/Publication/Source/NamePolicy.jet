@@ -94,10 +94,10 @@ publication_assess_name_with_thresholds: fn(name: String, existing_names: [Strin
             return PublicationNamePolicyDecision.Block(PublicationNamePolicyFinding.ReservedSuffix(suffix))
         }
     }
-    nearest_block := PublicationNamePolicyFinding?{None}
-    nearest_warning := PublicationNamePolicyFinding?{None}
-    best_block := warn_distance + 1
-    best_warning := warn_distance + 1
+    ^nearest_block: PublicationNamePolicyFinding?{None}
+    ^nearest_warning: PublicationNamePolicyFinding?{None}
+    ^best_block: warn_distance + 1
+    ^best_warning: warn_distance + 1
     loop existing in existing_names {
         if existing == name -> next
         existing_skeleton: publication_confusable_skeleton(existing)
@@ -142,8 +142,8 @@ publication_edit_distance_at_most: fn(left: String, right: String, limit: Int) -
     if math.abs_diff(left.len(), right.len()) > limit -> return None
     a: left.chars()
     b: right.chars()
-    previous := [Int]{}
-    current := [Int]{}
+    ^previous: [Int]{}
+    ^current: [Int]{}
     loop column in 0..<(b.len() + 1) {
         previous.push(column)
         current.push(limit + 1)
@@ -156,7 +156,7 @@ publication_edit_distance_at_most: fn(left: String, right: String, limit: Int) -
         loop column in start..<end {
             current[column + 1] = if a[row] == b[column] -> previous[column] else -> 1 + min(min(previous[column], previous[column + 1]), current[column])
         }
-        minimum := limit + 1
+        ^minimum: limit + 1
         loop value in current -> minimum = min(minimum, value)
         if minimum > limit -> return None
         swap: previous
@@ -168,7 +168,7 @@ publication_edit_distance_at_most: fn(left: String, right: String, limit: Int) -
 }
 
 publication_confusable_skeleton: fn(name: String) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     // Lowercase EACH scalar (not contextual whole-string casing), then map it
     // through one scalar match: no per-scalar text or substring scans.
     loop original in name.chars() {

@@ -11,8 +11,8 @@ package: {
 use ui: core.ui
 
 run: fn() {
-    window := ui.headless(width: 2, height: 1, script: [[ui.UIEvent]{.KeyDown(.Char('a'))}, [ui.UIEvent]{.Focus(true)}]) ?? panic("headless: {err}")
-    cursor := window.frames().iter()
+    ^window: ui.headless(width: 2, height: 1, script: [[ui.UIEvent]{.KeyDown(.Char('a'))}, [ui.UIEvent]{.Focus(true)}]) ?? panic("headless: {err}")
+    ^cursor: window.frames().iter()
     drain(cursor)
     print(window.checksums())
 }
@@ -41,7 +41,7 @@ show: fn(frame: ui.Frame) -[Env, IO, Net, Time]> {
         .Err(.Size(why)) -> { print(why) }
         .Err(_) -> print("another error")
     }
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop _ in 0..<(frame.width * frame.height * 4) -> pixels.push(U8{frame.index + 1})
     frame.present(pixels) ?? panic("present: {err}")
     frame.present_damage(pixels, [ui.UIRect]{ui.UIRect{x: 0, y: 0, width: 1, height: 1}}) ?? panic("present_damage: {err}")

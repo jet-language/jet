@@ -243,12 +243,12 @@ session_path: fn(address: String, runtime: String) -> String DbusError! {
 
 // Authenticates as `uid` on a connected `stream` and says Hello.
 start: fn(stream: ^^net.UnixStream, uid: Int, timeout_ns: Int) -[Net, Time]> DbusConnection DbusError! {
-    c := DbusConnection{stream: stream.move(), serial: 0, name: "", inbox: [U8]{}, queued: [DbusMessage]{}, served: [String]{}, calls: [DbusMessage]{}}
+    ^c: DbusConnection{stream: stream.move(), serial: 0, name: "", inbox: [U8]{}, queued: [DbusMessage]{}, served: [String]{}, calls: [DbusMessage]{}}
     deadline: now() + timeout_ns
     // The credentials byte, then the EXTERNAL mechanism with the uid as
     // hex-encoded decimal text.
     uid_hex: hex_text("{uid}")
-    hello := [U8]{U8{0}}
+    ^hello: [U8]{U8{0}}
     loop b in "AUTH EXTERNAL {uid_hex}\r\n".bytes() -> hello.push(b)
     send_bytes(c, hello) ?? return Err(err)
     line: read_line(c, deadline) ?? return Err(err)
@@ -297,7 +297,7 @@ call: fn(c: ^DbusConnection, destination: String, path: String, interface: Strin
 }
 
 call_until: fn(c: ^DbusConnection, destination: String, path: String, interface: String, member: String, body: [DbusValue], deadline: Int) -[Net, Time]> DbusMessage DbusError! {
-    message := blank(DbusKind.Call)
+    ^message: blank(DbusKind.Call)
     message.path = path
     message.interface = interface
     message.member = member
@@ -422,7 +422,7 @@ next_call: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> DbusMessage? Db
 // none.
 answer: fn(c: ^DbusConnection, m: DbusMessage, body: [DbusValue]) -[Net, Time]> DbusError! {
     if m.flags & NO_REPLY_EXPECTED != 0 -> return Ok()
-    reply := blank(DbusKind.Return)
+    ^reply: blank(DbusKind.Return)
     reply.flags = NO_REPLY_EXPECTED
     reply.reply_serial = m.serial
     reply.destination = m.sender.copy()
@@ -435,7 +435,7 @@ answer: fn(c: ^DbusConnection, m: DbusMessage, body: [DbusValue]) -[Net, Time]> 
 // that asked for no reply gets none.
 refuse: fn(c: ^DbusConnection, m: DbusMessage, name: String, text: String) -[Net, Time]> DbusError! {
     if m.flags & NO_REPLY_EXPECTED != 0 -> return Ok()
-    reply := blank(DbusKind.Error)
+    ^reply: blank(DbusKind.Error)
     reply.flags = NO_REPLY_EXPECTED
     reply.reply_serial = m.serial
     reply.error_name = name
@@ -448,7 +448,7 @@ refuse: fn(c: ^DbusConnection, m: DbusMessage, name: String, text: String) -[Net
 // Sends the signal `member` of `interface` from the object at `path` to
 // whoever's match rules ask for it.
 emit: fn(c: ^DbusConnection, path: String, interface: String, member: String, body: [DbusValue]) -[Net, Time]> DbusError! {
-    message := blank(DbusKind.Signal)
+    ^message: blank(DbusKind.Signal)
     message.flags = NO_REPLY_EXPECTED
     message.path = path
     message.interface = interface
@@ -521,8 +521,8 @@ now: fn() -[Time]> Int { rt.clock_mono_ns() }
 // The wire bytes of `message` sent as `serial`; its body's signature comes
 // from the values.
 encode: fn(message: DbusMessage, serial: Int) -> [U8] DbusError! {
-    body := [U8]{}
-    signature := ""
+    ^body: [U8]{}
+    ^signature: ""
     loop value in message.body {
         marshal(body, value)
         signature = "{signature}{signature_of(value)}"
@@ -530,7 +530,7 @@ encode: fn(message: DbusMessage, serial: Int) -> [U8] DbusError! {
     if !valid_signature(signature) {
         return Err(DbusError.Protocol("a body of signature {signature} cannot be sent"))
     }
-    fields := [DbusValue]{}
+    ^fields: [DbusValue]{}
     if message.path != "" -> fields.push(header_field(1, DbusValue.Path(message.path.copy())))
     if message.interface != "" {
         fields.push(header_field(2, DbusValue.Text(message.interface.copy())))
@@ -547,7 +547,7 @@ encode: fn(message: DbusMessage, serial: Int) -> [U8] DbusError! {
     }
     if message.sender != "" -> fields.push(header_field(7, DbusValue.Text(message.sender.copy())))
     if signature != "" -> fields.push(header_field(8, DbusValue.Signature(signature)))
-    out := [U8]{U8{108}, U8{message.kind.to_int()}, U8{message.flags & 255}, U8{1}}
+    ^out: [U8]{U8{108}, U8{message.kind.to_int()}, U8{message.flags & 255}, U8{1}}
     put_word(out, body.len(), 4)
     put_word(out, serial, 4)
     marshal(out, DbusValue.Array{signature: "(yv)", items: fields})
@@ -581,7 +581,7 @@ signature_of: fn(value: DbusValue) -> String {
         .Variant(_) -> "v"
         .Array(signature, _) -> "a{signature}"
         .Struct(fields) -> {
-            inner := ""
+            ^inner: ""
             loop field in fields -> inner = "{inner}{signature_of(field)}"
             "({inner})"
         }
@@ -696,10 +696,10 @@ decode: fn(bytes: [U8]) -> Decoded DbusError! {
     }
     if bytes.len() < total -> return Ok(waiting)
     if serial == 0 -> return Err(DbusError.Protocol("a message has serial 0"))
-    r := Reader{bytes: bytes[0..<total].copy(), at: 12, end: body_at}
+    ^r: Reader{bytes: bytes[0..<total].copy(), at: 12, end: body_at}
     header: read_value(r, "a(yv)".bytes(), 0, 0) ?? return Err(err)
     align(r, 8) ?? return Err(err)
-    m := blank(DbusKind.Call)
+    ^m: blank(DbusKind.Call)
     m.flags = Int{bytes[2]}
     m.serial = serial
     if header == .Array(_, fields) {
@@ -707,7 +707,7 @@ decode: fn(bytes: [U8]) -> Decoded DbusError! {
     }
     r.end = total
     sig: m.signature.bytes()
-    at := 0
+    ^at: 0
     loop at < sig.len() {
         value: read_value(r, sig, at, 0) ?? return Err(err)
         m.body.push(value)
@@ -883,7 +883,7 @@ read_array: fn(r: ^Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusErro
     stop: r.at + length
     outer: r.end
     r.end = stop
-    items := [DbusValue]{}
+    ^items: [DbusValue]{}
     loop r.at < stop {
         item: read_element(r, sig, element, depth + 1) ?? return Err(err)
         items.push(item)
@@ -895,8 +895,8 @@ read_array: fn(r: ^Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusErro
 
 read_struct: fn(r: ^Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
     align(r, 8) ?? return Err(err)
-    fields := [DbusValue]{}
-    i := at + 1
+    ^fields: [DbusValue]{}
+    ^i: at + 1
     loop sig[i] != 41 {
         value: read_value(r, sig, i, depth + 1) ?? return Err(err)
         fields.push(value)
@@ -964,7 +964,7 @@ truncated: fn() -> DbusError {
 
 // `size` little-endian bytes at `at`, unsigned.
 word: fn(bytes: [U8], at: Int, size: Int) -> Int {
-    n := 0
+    ^n: 0
     loop i in 0..<size -> n += (Int{bytes[at + i]}) << (8 * i)
     n
 }
@@ -975,7 +975,7 @@ word: fn(bytes: [U8], at: Int, size: Int) -> Int {
 valid_signature: fn(text: String) -> Bool {
     sig: text.bytes()
     if sig.len() > SIGNATURE_MAX -> return false
-    at := 0
+    ^at: 0
     loop at < sig.len() {
         at = type_end(sig, at, 0, 0)
         if at < 0 -> return false
@@ -1004,7 +1004,7 @@ type_end: fn(sig: [U8], at: Int, arrays: Int, structs: Int) -> Int {
     }
     if code == 40 {
         if structs >= NESTING_MAX -> return -1
-        i := at + 1
+        ^i: at + 1
         if i < sig.len() && (Int{sig[i]}) == 41 -> return -1
         loop i < sig.len() && (Int{sig[i]}) != 41 {
             i = type_end(sig, i, arrays, structs + 1)
@@ -1062,7 +1062,7 @@ after: fn(text: String, skip: Int) -> String {
 // Each byte of `text` as two lower-case hex digits.
 hex_text: fn(text: String) -> String {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
         out.push(digits[n >> 4])
@@ -1074,8 +1074,8 @@ hex_text: fn(text: String) -> String {
 // A D-Bus address value with its `%XX` escapes undone.
 unescape: fn(text: String) -> String? {
     bytes: text.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < bytes.len() {
         if (Int{bytes[i]}) != 37 {
             out.push(bytes[i])
@@ -1134,7 +1134,7 @@ appearance: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAppearan
     if reply.signature != "a{ascii(123)}sa{ascii(123)}sv{ascii(125)}{ascii(125)}" {
         return Err(DbusError.Protocol("ReadAll answered {reply.signature}"))
     }
-    look := default_appearance()
+    ^look: default_appearance()
     if reply.body[0] == .Array(_, groups) {
         loop group in groups {
             if group == .Entry(name, settings) {
@@ -1185,7 +1185,7 @@ portal_restarted: fn(m: DbusMessage) -> Bool {
 // as older portals' Read gave it): whether `look` changed. Values out of
 // the portal's range read as unset.
 apply_setting: fn(look: ^PortalAppearance, key: String, value: DbusValue) -> Bool {
-    plain := value.copy()
+    ^plain: value.copy()
     loop _ in 0..<2 {
         unwrapped: if plain == .Variant(inner) -> inner.copy() else -> plain.copy()
         plain = unwrapped
@@ -1222,7 +1222,7 @@ set_accent: fn(look: ^PortalAppearance, accent: [Float]) -> Bool {
 
 // accent-color: three doubles in 0..1, else unset (empty).
 accent_of: fn(value: DbusValue) -> [Float] {
-    accent := [Float]{}
+    ^accent: [Float]{}
     if value == .Struct(parts) {
         loop part in parts {
             if part == .Double(f) {
@@ -1313,7 +1313,7 @@ portal_place: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> PortalFix Db
 located: fn(c: ^DbusConnection, timeout_ns: Int, wants_place: Bool) -[Net, Time]> PortalFix DbusError! {
     deadline: now() + timeout_ns
     opened: open_location(c, wants_place, timeout_ns) ?? return Err(err)
-    place := PortalPlace?{None}
+    ^place: PortalPlace?{None}
     if wants_place && opened.answer == .Allowed {
         place = if next_place(c, opened.path, deadline - now()) == {
             .Err(err) -> {
@@ -1396,7 +1396,7 @@ next_place: fn(c: ^DbusConnection, session: String, timeout_ns: Int) -[Net, Time
 // order, for the next read.
 next_signal: fn(c: ^DbusConnection, interface: String, member: String, path: String, first: DbusValue, timeout_ns: Int) -[Net, Time]> DbusMessage? DbusError! {
     deadline: now() + timeout_ns
-    wait := 0
+    ^wait: 0
     loop {
         got: signals(c, wait) ?? return Err(err)
         loop i in 0..<got.len() {
@@ -1566,8 +1566,8 @@ PortalReply: struct {
 
 // Waits as `response` does, and reads the Response's results too.
 reply: fn(c: ^DbusConnection, request: String, deadline: Int) -[Net, Time]> PortalReply DbusError! {
-    wait := 0
-    others := [DbusMessage]{}
+    ^wait: 0
+    ^others: [DbusMessage]{}
     loop {
         got: signals(c, wait) ?? return Err(err)
         loop i in 0..<got.len() {
@@ -1642,10 +1642,10 @@ portal_save_file: fn(c: ^DbusConnection, title: String, suggested: String, filte
 file_dialog: fn(c: ^DbusConnection, member: String, title: String, named: [DbusValue], filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     deadline: now() + timeout_ns
     watch(c, REQUEST, "Response", "", deadline) ?? return Err(err)
-    options := [DbusValue]{entry_of("handle_token", DbusValue.Text(request_token(c)))}
+    ^options: [DbusValue]{entry_of("handle_token", DbusValue.Text(request_token(c)))}
     loop option in named -> options.push(option.copy())
     if filters.len() > 0 {
-        offered := [DbusValue]{}
+        ^offered: [DbusValue]{}
         loop filter in filters -> offered.push(filter_value(filter))
         options.push(entry_of("filters", DbusValue.Array{signature: "(sa(us))", items: offered}))
         options.push(entry_of("current_filter", filter_value(filters[0])))
@@ -1668,7 +1668,7 @@ file_dialog: fn(c: ^DbusConnection, member: String, title: String, named: [DbusV
 // A filter as the portal reads it: its name, then each glob pattern (kind
 // 0) and media type (kind 1).
 filter_value: fn(filter: FileFilter) -> DbusValue {
-    patterns := [DbusValue]{}
+    ^patterns: [DbusValue]{}
     loop glob in filter.globs {
         patterns.push(DbusValue.Struct([DbusValue]{DbusValue.Uint32(0), DbusValue.Text(glob)}))
     }
@@ -1699,7 +1699,7 @@ notify: fn(c: ^DbusConnection, app: String, desktop_id: String, title: String, b
     watch(c, NOTIFICATIONS, "ActionInvoked", NOTIFICATIONS_PATH, deadline) ?? return Err(err)
     watch(c, NOTIFICATIONS, "NotificationClosed", NOTIFICATIONS_PATH, deadline) ?? return Err(err)
     told: call_until(c, NOTIFICATIONS, NOTIFICATIONS_PATH, NOTIFICATIONS, "GetCapabilities", [DbusValue]{}, deadline) ?? return Err(err)
-    marked := false
+    ^marked: false
     if told.body.len() == 1 {
         if told.body[0] == .Array(_, items) {
             marked = items.contains(DbusValue.Text("body-markup"))
@@ -1877,7 +1877,7 @@ prompted: fn(c: ^DbusConnection, prompt: String, member: String, deadline: Int) 
     if prompt == "/" -> return Ok()
     watch(c, SECRET_PROMPT, "Completed", prompt, deadline) ?? return Err(err)
     _: call_until(c, SECRETS, prompt, SECRET_PROMPT, "Prompt", [DbusValue]{DbusValue.Text("")}, deadline) ?? return Err(err)
-    wait := 0
+    ^wait: 0
     loop {
         got: signals(c, wait) ?? return Err(err)
         loop i in 0..<got.len() {
@@ -1898,10 +1898,10 @@ prompted: fn(c: ^DbusConnection, prompt: String, member: String, deadline: Int) 
 
 // `attributes` as an `a{ss}` dictionary, in the order of their names.
 attributes_of: fn(attributes: [String:String]) -> DbusValue {
-    names := [String]{}
+    ^names: [String]{}
     loop name in attributes.keys() -> names.push(name.copy())
     names.sort()
-    entries := [DbusValue]{}
+    ^entries: [DbusValue]{}
     loop name in names {
         entries.push(DbusValue.Entry{key: DbusValue.Text(name.copy()), value: DbusValue.Text(attributes[name].copy())})
     }
@@ -1910,7 +1910,7 @@ attributes_of: fn(attributes: [String:String]) -> DbusValue {
 
 // The bytes of `text` as an `ay` array.
 bytes_of: fn(text: String) -> DbusValue {
-    items := [DbusValue]{}
+    ^items: [DbusValue]{}
     loop b in text.bytes() -> items.push(DbusValue.Byte(Int{b}))
     DbusValue.Array{signature: "y", items: items}
 }
@@ -1919,7 +1919,7 @@ bytes_of: fn(text: String) -> DbusValue {
 // that are not UTF-8.
 text_of_bytes: fn(value: DbusValue) -> String? {
     if value == .Array(_, items) {
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         loop item in items {
             if item == .Byte(b) -> bytes.push(U8{b}) else -> return None
         }
@@ -2066,14 +2066,14 @@ menu_call: fn(c: ^DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Time]
         return Ok(None)
     }
     if m.member == "GetGroupProperties" && m.body.len() == 2 {
-        ids := [Int]{}
+        ^ids: [Int]{}
         if m.body[0] == .Array(_, items) {
             loop item in items -> ids.push(int_of(item) ?? -1)
         }
         if ids.len() == 0 {
             loop i in 0..<(flat.len() + 1) -> ids.push(i)
         }
-        found := [DbusValue]{}
+        ^found: [DbusValue]{}
         loop id in ids {
             if id < 0 || id > flat.len() -> next
             found.push(DbusValue.Struct([DbusValue]{DbusValue.Int32(id), options_of(menu_item_props(flat, id))}))
@@ -2093,7 +2093,7 @@ menu_call: fn(c: ^DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Time]
         return Ok(menu_chosen(flat, m.body[0], m.body[1]))
     }
     if m.member == "EventGroup" && m.body.len() == 1 {
-        chosen := Int?{None}
+        ^chosen: Int?{None}
         if m.body[0] == .Array(_, events) {
             loop event in events {
                 if chosen != None -> break
@@ -2141,7 +2141,7 @@ int_of: fn(value: DbusValue) -> Int? {
 // The entries of `entries` depth first, each before its children: entry
 // `i` is the menu's item `i + 1`.
 menu_entries: fn(entries: [MenuEntry]) -> [MenuEntry] {
-    out := [MenuEntry]{}
+    ^out: [MenuEntry]{}
     loop entry in entries {
         out.push(entry.copy())
         loop inner in menu_entries(entry.children) -> out.push(inner)
@@ -2151,7 +2151,7 @@ menu_entries: fn(entries: [MenuEntry]) -> [MenuEntry] {
 
 // How many items `entry` and the entries under it are.
 menu_size: fn(entry: MenuEntry) -> Int {
-    size := 1
+    ^size: 1
     loop child in entry.children -> size += menu_size(child)
     size
 }
@@ -2178,9 +2178,9 @@ menu_layout: fn(menu: ServedMenu, flat: [MenuEntry], id: Int, depth: Int) -> Dbu
 // The layout of the item `id` with the properties `props`, whose children
 // are `children`, numbered from `id + 1` on, `depth` levels down.
 menu_node: fn(id: Int, props: [DbusValue], children: [MenuEntry], depth: Int) -> DbusValue {
-    items := [DbusValue]{}
+    ^items: [DbusValue]{}
     if depth != 0 {
-        child := id + 1
+        ^child: id + 1
         loop entry in children {
             items.push(DbusValue.Variant(menu_node(child, menu_entry_props(entry), entry.children, depth - 1)))
             child += menu_size(entry)
@@ -2202,10 +2202,10 @@ menu_item_props: fn(flat: [MenuEntry], id: Int) -> [DbusValue] {
 // opens a submenu.
 menu_entry_props: fn(entry: MenuEntry) -> [DbusValue] {
     if entry.separator -> return [DbusValue]{entry_of("type", DbusValue.Text("separator"))}
-    props := [DbusValue]{entry_of("label", DbusValue.Text(entry.label.replace("_", "__")))}
+    ^props: [DbusValue]{entry_of("label", DbusValue.Text(entry.label.replace("_", "__")))}
     if !entry.enabled -> props.push(entry_of("enabled", DbusValue.Bool(false)))
     if entry.shortcut.len() > 0 {
-        keys := [DbusValue]{}
+        ^keys: [DbusValue]{}
         loop key in entry.shortcut -> keys.push(DbusValue.Text(key))
         props.push(entry_of("shortcut", DbusValue.Array{signature: "as", items: [DbusValue]{DbusValue.Array{signature: "s", items: keys}}}))
     }
@@ -2264,7 +2264,7 @@ bus_says: fn(server: ^net.UnixStream, bytes: [U8]) -[Net, Time]> {
 
 // Everything the client has written to the fake bus.
 bus_heard: fn(server: ^net.UnixStream) -[Net, Time]> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop net.unix_wait(server, 0) ?? panic("the fake bus could not wait: {err}") {
         got: net.unix_receive(server, RECEIVE_MAX) ?? panic("the fake bus could not read: {err}")
         if got.bytes.len() == 0 -> break
@@ -2274,7 +2274,7 @@ bus_heard: fn(server: ^net.UnixStream) -[Net, Time]> [U8] {
 }
 
 hello_call: fn() -> DbusMessage {
-    m := blank(DbusKind.Call)
+    ^m: blank(DbusKind.Call)
     m.path = BUS_PATH
     m.interface = BUS_NAME
     m.member = "Hello"
@@ -2283,7 +2283,7 @@ hello_call: fn() -> DbusMessage {
 }
 
 reply_to: fn(serial: Int, body: [DbusValue]) -> DbusMessage {
-    m := blank(DbusKind.Return)
+    ^m: blank(DbusKind.Return)
     m.reply_serial = serial
     m.sender = BUS_NAME
     m.body = body
@@ -2291,7 +2291,7 @@ reply_to: fn(serial: Int, body: [DbusValue]) -> DbusMessage {
 }
 
 signal: fn(path: String, interface: String, member: String, body: [DbusValue]) -> DbusMessage {
-    m := blank(DbusKind.Signal)
+    ^m: blank(DbusKind.Signal)
     m.path = path
     m.interface = interface
     m.member = member
@@ -2305,7 +2305,7 @@ wire: fn(m: DbusMessage, serial: Int) -> [U8] { encode(m, serial) ?? panic("enco
 // The bytes `hex` spells.
 hex_bytes: fn(hex: String) -> [U8] {
     digits: hex.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<(digits.len() /% 2) {
         out.push(U8{hex_digit(Int{digits[2 * i]}) * 16 + hex_digit(Int{digits[2 * i + 1]})})
     }
@@ -2319,7 +2319,7 @@ append: fn(out: ^[U8], bytes: [U8]) {
 // A message of type `kind` built field by field, for headers `encode`
 // never writes.
 framed: fn(kind: Int, fields: [DbusValue], body: [U8]) -> [U8] {
-    out := [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
+    ^out: [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
     put_word(out, body.len(), 4)
     put_word(out, 7, 4)
     marshal(out, DbusValue.Array{signature: "(yv)", items: fields})
@@ -2330,7 +2330,7 @@ framed: fn(kind: Int, fields: [DbusValue], body: [U8]) -> [U8] {
 
 // The header of a signal whose body has `signature`.
 signal_fields: fn(signature: String) -> [DbusValue] {
-    fields := [DbusValue]{header_field(1, DbusValue.Path("/a")), header_field(2, DbusValue.Text("a.b")), header_field(3, DbusValue.Text("C"))}
+    ^fields: [DbusValue]{header_field(1, DbusValue.Path("/a")), header_field(2, DbusValue.Text("a.b")), header_field(3, DbusValue.Text("C"))}
     if signature != "" -> fields.push(header_field(8, DbusValue.Signature(signature)))
     fields
 }
@@ -2375,13 +2375,13 @@ path_error: fn(address: String, runtime: String) -> String {
 }
 
 repeat: fn(text: String, times: Int) -> String {
-    out := ""
+    ^out: ""
     loop _ in 0..<times -> out = "{out}{text}"
     out
 }
 
 #Test("a Hello call is the bytes every D-Bus client sends") {
-    want := hex_bytes("6c01000100000000010000006d000000")
+    ^want: hex_bytes("6c01000100000000010000006d000000")
     append(want, hex_bytes("01016f0015000000"))
     append(want, BUS_PATH.bytes())
     append(want, hex_bytes("000000"))
@@ -2421,7 +2421,7 @@ repeat: fn(text: String, times: Int) -> String {
         DbusValue.Array{signature: "{open}sv{close}", items: [DbusValue]{entry}},
         DbusValue.Struct([DbusValue]{DbusValue.Byte(1), DbusValue.Double(Float{0.25}), inner}),
     }
-    m := signal("/a", "a.b", "C", body.copy())
+    ^m: signal("/a", "a.b", "C", body.copy())
     m.destination = ":1.7"
     bytes: wire(m, 9)
     decoded: decode(bytes) ?? panic("decode: {err}")
@@ -2446,8 +2446,8 @@ repeat: fn(text: String, times: Int) -> String {
 
 #Test("hostile messages are protocol errors, never faults") {
     hello: wire(hello_call(), 1)
-    changed := fn(at: Int, value: Int) -> [U8] {
-        out := hello.copy()
+    ^changed: fn(at: Int, value: Int) -> [U8] {
+        ^out: hello.copy()
         out[at] = U8{value}
         out
     }
@@ -2457,11 +2457,11 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(protocol_error(changed(8, 0)), "a message has serial 0")
     assert_eq(protocol_error(changed(46, 1)), "padding at byte 46 is not zero")
     assert_eq(protocol_error(changed(20, 200)), "a value runs past the end of its message or array")
-    huge_fields := hello.copy()
+    ^huge_fields: hello.copy()
     huge_fields[15] = U8{4}
     huge_fields[12] = U8{1}
     assert_eq(protocol_error(huge_fields), "a header's fields take 67108865 bytes, over the limit")
-    huge_body := hello.copy()
+    ^huge_body: hello.copy()
     huge_body[4] = U8{255}
     huge_body[5] = U8{255}
     huge_body[6] = U8{255}
@@ -2471,7 +2471,7 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(protocol_error(framed(1, [DbusValue]{header_field(1, DbusValue.Path("/a"))}, [U8]{})), "a method call has no member")
     assert_eq(protocol_error(framed(1, [DbusValue]{header_field(1, DbusValue.Text("/a")), header_field(3, DbusValue.Text("m"))}, [U8]{})), "header field 1 holds a s, not a o")
     assert_eq(protocol_error(framed(3, [DbusValue]{header_field(4, DbusValue.Text("a.B"))}, [U8]{})), "an error has no reply serial")
-    with_fds := signal_fields("")
+    ^with_fds: signal_fields("")
     with_fds.push(header_field(9, DbusValue.Uint32(1)))
     assert_eq(protocol_error(framed(4, with_fds, [U8]{})), "a message carries Unix descriptors, which were not negotiated")
     // Values.
@@ -2484,7 +2484,7 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(protocol_error(framed(4, signal_fields("ay"), [U8]{U8{1}, U8{0}, U8{0}, U8{4}})), "an array of 67108865 bytes is over the limit")
     assert_eq(protocol_error(framed(4, signal_fields("y"), [U8]{U8{1}, U8{2}})), "a body is 1 bytes longer than its signature y")
     assert_eq(protocol_error(framed(4, signal_fields("v"), [U8]{U8{2}, U8{105}, U8{105}, U8{0}, U8{1}, U8{0}, U8{0}, U8{0}})), "a variant's signature ii is not one complete type")
-    deep := [U8]{}
+    ^deep: [U8]{}
     loop _ in 0..<65 -> append(deep, [U8]{U8{1}, U8{118}, U8{0}})
     append(deep, [U8]{U8{1}, U8{121}, U8{0}, U8{5}})
     assert_eq(protocol_error(framed(4, signal_fields("v"), deep)), "values nest deeper than 64")
@@ -2521,8 +2521,8 @@ repeat: fn(text: String, times: Int) -> String {
 #Test("a bus connection authenticates, reads the portal's appearance and hears it change") {
     open: ascii(123)
     close: ascii(125)
-    bus := test_bus("appearance")
-    ping := blank(DbusKind.Call)
+    ^bus: test_bus("appearance")
+    ^ping: blank(DbusKind.Call)
     ping.path = "/x"
     ping.interface = "org.freedesktop.DBus.Peer"
     ping.member = "Ping"
@@ -2535,23 +2535,23 @@ repeat: fn(text: String, times: Int) -> String {
         DbusValue.Entry{key: DbusValue.Text("reduced-motion"), value: DbusValue.Variant(DbusValue.Uint32(1))},
     }
     group: DbusValue.Entry{key: DbusValue.Text(APPEARANCE), value: DbusValue.Array{signature: "{open}sv{close}", items: settings}}
-    script := [U8]{}
+    ^script: [U8]{}
     append(script, "OK 0123456789abcdef0123456789abcdef\r\n".bytes())
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.42")}), 1))
     append(script, wire(signal(BUS_PATH, BUS_NAME, "NameAcquired", [DbusValue]{DbusValue.Text(":1.42")}), 2))
     append(script, wire(ping, 3))
     append(script, wire(reply_to(2, [DbusValue]{DbusValue.Array{signature: "{open}sa{open}sv{close}{close}", items: [DbusValue]{group}}}), 4))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(c.name, ":1.42")
-    look := appearance(c, 1000000000) ?? panic("appearance: {err}")
+    ^look: appearance(c, 1000000000) ?? panic("appearance: {err}")
     assert_eq(look.scheme, PortalScheme.Dark)
     assert_eq(look.accent, [Float]{Float{0.25}, Float{0.5}, Float{1.0}})
     assert(look.high_contrast, "the desktop asks for high contrast")
     // What the client said: the credentials byte, EXTERNAL for uid 1000,
     // BEGIN, Hello, ReadAll, and UnknownMethod for the Ping.
     heard: bus_heard(bus.server)
-    want := [U8]{U8{0}}
+    ^want: [U8]{U8{0}}
     append(want, "AUTH EXTERNAL 31303030\r\nBEGIN\r\n".bytes())
     append(want, wire(hello_call(), 1))
     assert_eq(heard[0..<want.len()].copy(), want)
@@ -2578,7 +2578,7 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(queued.len(), 1)
     assert_eq(queued[0].member, "NameAcquired")
     // A setting changes, then the portal restarts.
-    later := [U8]{}
+    ^later: [U8]{}
     append(later, wire(signal(PORTAL_PATH, SETTINGS, "SettingChanged", [DbusValue]{DbusValue.Text(APPEARANCE), DbusValue.Text("color-scheme"), DbusValue.Variant(DbusValue.Uint32(2))}), 5))
     append(later, wire(signal(BUS_PATH, BUS_NAME, "NameOwnerChanged", [DbusValue]{DbusValue.Text(PORTAL_NAME), DbusValue.Text(":1.5"), DbusValue.Text(":1.6")}), 6))
     bus_says(bus.server, later)
@@ -2594,26 +2594,26 @@ repeat: fn(text: String, times: Int) -> String {
 
 #Test("a refused uid, a missing portal, a closed bus and a silent bus are typed errors") {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
-    refused := test_bus("refused")
+    ^refused: test_bus("refused")
     bus_says(refused.server, "REJECTED EXTERNAL\r\n".bytes())
     assert_eq(start_error(refused.client.move(), 1000000000), "Auth")
-    closed := test_bus("closed")
+    ^closed: test_bus("closed")
     bus_says(closed.server, ok.copy())
     net.unix_shutdown(closed.server, NetShutdown.Write) ?? panic("shutdown: {err}")
     assert_eq(start_error(closed.client.move(), 1000000000), "Closed")
-    silent := test_bus("silent")
+    ^silent: test_bus("silent")
     bus_says(silent.server, ok.copy())
     assert_eq(start_error(silent.client.move(), 20000000), "Timeout")
-    absent := test_bus("absent")
-    missing := blank(DbusKind.Error)
+    ^absent: test_bus("absent")
+    ^missing: blank(DbusKind.Error)
     missing.reply_serial = 2
     missing.error_name = "org.freedesktop.DBus.Error.ServiceUnknown"
     missing.body = [DbusValue]{DbusValue.Text("The name is not activatable")}
-    script := ok.copy()
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.43")}), 1))
     append(script, wire(missing, 2))
     bus_says(absent.server, script)
-    c := start(absent.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(absent.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     if appearance(c, 1000000000) == {
         .Ok(_) -> { panic("an absent portal answered") }
         .Err(err) -> {
@@ -2625,9 +2625,9 @@ repeat: fn(text: String, times: Int) -> String {
 #Test("the portal asks for the camera and the location and reads the person's answer") {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
     no_options: DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: [DbusValue]{}}
-    camera := test_bus("camera")
+    ^camera: test_bus("camera")
     request: "{PORTAL_PATH}/request/1_42/jet4"
-    script := ok.copy()
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.42")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(true))}), 2))
     append(script, wire(reply_to(3, [DbusValue]{}), 3))
@@ -2635,7 +2635,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(signal("{PORTAL_PATH}/request/1_42/other", REQUEST, "Response", [DbusValue]{DbusValue.Uint32(1), no_options.copy()}), 5))
     append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), no_options.copy()}), 6))
     bus_says(camera.server, script)
-    c := start(camera.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(camera.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(portal_camera(c, 1000000000) ?? panic("camera: {err}"), PortalAnswer.Allowed)
     asked_camera: [String]{
         "org.freedesktop.DBus.Hello",
@@ -2645,16 +2645,16 @@ repeat: fn(text: String, times: Int) -> String {
     }
     assert_eq(calls_heard(camera.server), asked_camera)
     // No camera: nobody is asked.
-    none := test_bus("no-camera")
+    ^none: test_bus("no-camera")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.43")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(false))}), 2))
     bus_says(none.server, script)
-    d := start(none.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^d: start(none.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(portal_camera(d, 1000000000) ?? panic("no camera: {err}"), PortalAnswer.Absent)
     assert_eq(calls_heard(none.server), [String]{"org.freedesktop.DBus.Hello", "org.freedesktop.DBus.Properties.Get"})
     // The location: refused, and the session closed after.
-    place := test_bus("location")
+    ^place: test_bus("location")
     session: "{PORTAL_PATH}/session/1_44/jet3"
     started: "{PORTAL_PATH}/request/1_44/jet4"
     script = ok.copy()
@@ -2665,7 +2665,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(signal(started, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(1), no_options.copy()}), 5))
     append(script, wire(reply_to(5, [DbusValue]{}), 6))
     bus_says(place.server, script)
-    e := start(place.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^e: start(place.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(portal_location(e, 1000000000) ?? panic("location: {err}"), PortalAnswer.Refused)
     asked_location: [String]{
         "org.freedesktop.DBus.Hello",
@@ -2676,26 +2676,26 @@ repeat: fn(text: String, times: Int) -> String {
     }
     assert_eq(calls_heard(place.server), asked_location)
     // A request nobody answers in time has ended.
-    quiet := test_bus("unanswered")
+    ^quiet: test_bus("unanswered")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.45")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(true))}), 2))
     append(script, wire(reply_to(3, [DbusValue]{}), 3))
     append(script, wire(reply_to(4, [DbusValue]{DbusValue.Path(request)}), 4))
     bus_says(quiet.server, script)
-    f := start(quiet.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^f: start(quiet.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(portal_camera(f, 50000000) ?? panic("unanswered: {err}"), PortalAnswer.Ended)
 }
 
 #Test("a location session gives the first place it reports once the person allows it") {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
     no_options: DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: [DbusValue]{}}
-    allowed := test_bus("place")
+    ^allowed: test_bus("place")
     session: "{PORTAL_PATH}/session/1_46/jet4"
     started: "{PORTAL_PATH}/request/1_46/jet5"
     here: place_options([Float]{Float{52.52}, Float{13.405}, Float{20.0}})
     elsewhere: place_options([Float]{Float{1.0}, Float{2.0}, Float{3.0}})
-    script := ok.copy()
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.46")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
     append(script, wire(reply_to(3, [DbusValue]{}), 3))
@@ -2708,7 +2708,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(signal(PORTAL_PATH, LOCATION, "LocationUpdated", [DbusValue]{DbusValue.Path(session), here}), 8))
     append(script, wire(reply_to(6, [DbusValue]{}), 9))
     bus_says(allowed.server, script)
-    c := start(allowed.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(allowed.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     fix: portal_place(c, 1000000000) ?? panic("place: {err}")
     assert_eq(fix.answer, PortalAnswer.Allowed)
     assert_eq(fix.place, Val(PortalPlace{latitude: Float{52.52}, longitude: Float{13.405}, accuracy: Float{20.0}}))
@@ -2722,7 +2722,7 @@ repeat: fn(text: String, times: Int) -> String {
     }
     assert_eq(calls_heard(allowed.server), asked)
     // Refused: no place, and nothing waited for.
-    refused := test_bus("no-place")
+    ^refused: test_bus("no-place")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.47")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
@@ -2732,7 +2732,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(signal("{PORTAL_PATH}/request/1_47/jet5", REQUEST, "Response", [DbusValue]{DbusValue.Uint32(1), no_options.copy()}), 6))
     append(script, wire(reply_to(6, [DbusValue]{}), 7))
     bus_says(refused.server, script)
-    d := start(refused.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^d: start(refused.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     none: portal_place(d, 1000000000) ?? panic("no place: {err}")
     assert_eq(none.answer, PortalAnswer.Refused)
     assert_eq(none.place, None)
@@ -2741,10 +2741,10 @@ repeat: fn(text: String, times: Int) -> String {
 #Test("a location session reports each place until it is closed") {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
     no_options: DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: [DbusValue]{}}
-    bus := test_bus("places")
+    ^bus: test_bus("places")
     session: "{PORTAL_PATH}/session/1_48/jet4"
     started: "{PORTAL_PATH}/request/1_48/jet5"
-    script := ok.copy()
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.48")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
     append(script, wire(reply_to(3, [DbusValue]{}), 3))
@@ -2756,7 +2756,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(signal(PORTAL_PATH, LOCATION, "LocationUpdated", [DbusValue]{DbusValue.Path("{PORTAL_PATH}/session/1_48/other"), place_options([Float]{Float{1.0}, Float{2.0}, Float{3.0}})}), 8))
     append(script, wire(signal(PORTAL_PATH, LOCATION, "LocationUpdated", [DbusValue]{DbusValue.Path(session), place_options([Float]{Float{52.5201}, Float{13.4051}, Float{10.0}})}), 9))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     opened: open_location(c, true, 1000000000) ?? panic("open: {err}")
     assert_eq(opened.answer, PortalAnswer.Allowed)
     assert_eq(opened.path, session)
@@ -2778,8 +2778,8 @@ repeat: fn(text: String, times: Int) -> String {
 
 #Test("a sensor is claimed, read as it changes and given back") {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
-    bus := test_bus("accelerometer")
-    script := ok.copy()
+    ^bus: test_bus("accelerometer")
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.49")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(true))}), 2))
     append(script, wire(reply_to(3, [DbusValue]{}), 3))
@@ -2791,7 +2791,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(sensor_changed(SENSOR_PATH, SENSOR_PROXY, "LightLevel", DbusValue.Double(Float{3.0})), 7))
     append(script, wire(sensor_changed(SENSOR_PATH, SENSOR_PROXY, "AccelerometerOrientation", DbusValue.Text("left-up")), 8))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(found_value(claim_sensor(c, Sensor.Accelerometer, 1000000000)), Val(DbusValue.Text("normal")))
     assert_eq(found_value(sensor_change(c, Sensor.Accelerometer, 1000000000)), Val(DbusValue.Text("left-up")))
     assert_eq(found_value(sensor_change(c, Sensor.Accelerometer, 0)), DbusValue?{None})
@@ -2807,12 +2807,12 @@ repeat: fn(text: String, times: Int) -> String {
     }
     assert_eq(calls_heard(bus.server), asked)
     // A device with no compass: nothing is claimed.
-    none := test_bus("no-compass")
+    ^none: test_bus("no-compass")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.50")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(false))}), 2))
     bus_says(none.server, script)
-    d := start(none.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^d: start(none.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(found_value(claim_sensor(d, Sensor.Compass, 1000000000)), DbusValue?{None})
     assert_eq(calls_heard(none.server), [String]{"org.freedesktop.DBus.Hello", "org.freedesktop.DBus.Properties.Get"})
 }
@@ -2820,8 +2820,8 @@ repeat: fn(text: String, times: Int) -> String {
 #Test("a notification is shown, escaped where the service reads markup, and read until it ends") {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
     said: "Fix <b>the gate</b> & ship"
-    bus := test_bus("notify")
-    script := ok.copy()
+    ^bus: test_bus("notify")
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.51")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
     append(script, wire(reply_to(3, [DbusValue]{}), 3))
@@ -2832,7 +2832,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(signal(NOTIFICATIONS_PATH, NOTIFICATIONS, "ActionInvoked", [DbusValue]{DbusValue.Uint32(7), DbusValue.Text(OPEN_ACTION)}), 7))
     append(script, wire(signal(NOTIFICATIONS_PATH, NOTIFICATIONS, "NotificationClosed", [DbusValue]{DbusValue.Uint32(7), DbusValue.Uint32(2)}), 8))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     shown: notify(c, "Crew", "crew", "Due today", said, 1000000000) ?? panic("notify: {err}")
     assert_eq(shown, 7)
     assert_eq(found_flag(notification_end(c, 7, 1000000000)), Val(true))
@@ -2856,7 +2856,7 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(sent[5], texts([String]{OPEN_ACTION, "Open"}))
     assert_eq(sent[6], string_option("desktop-entry", "crew"))
     // A service that shows the body as plain text gets it as it is.
-    plain := test_bus("notify-plain")
+    ^plain: test_bus("notify-plain")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.52")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
@@ -2864,7 +2864,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(reply_to(4, [DbusValue]{texts([String]{"body"})}), 4))
     append(script, wire(reply_to(5, [DbusValue]{DbusValue.Uint32(8)}), 5))
     bus_says(plain.server, script)
-    d := start(plain.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^d: start(plain.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(notify(d, "Crew", "crew", "Due today", said, 1000000000) ?? panic("notify: {err}"), 8)
     assert_eq(messages_heard(plain.server)[4].body[4], DbusValue.Text(said))
 }
@@ -2875,14 +2875,14 @@ repeat: fn(text: String, times: Int) -> String {
     session: DbusValue.Path("/org/freedesktop/secrets/session/1")
     held: DbusValue.Array{signature: "{ascii(123)}o(oayays){ascii(125)}", items: [DbusValue]{DbusValue.Entry{key: DbusValue.Path(item), value: DbusValue.Struct([DbusValue]{session, bytes_of(""), bytes_of("refresh-1"), DbusValue.Text("text/plain")})}}}
     items: fn(paths: [String]) -> DbusValue {
-        out := [DbusValue]{}
+        ^out: [DbusValue]{}
         loop path in paths -> out.push(DbusValue.Path(path.copy()))
         DbusValue.Array{signature: "o", items: out}
     }
     none: [String]{}
     opened: [DbusValue]{DbusValue.Variant(DbusValue.Text("")), session}
-    bus := test_bus("secrets")
-    script := ok.copy()
+    ^bus: test_bus("secrets")
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.60")}), 1))
     // Kept: a session, then the item, with no prompt.
     append(script, wire(reply_to(2, opened), 2))
@@ -2908,7 +2908,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(reply_to(17, [DbusValue]{}), 17))
     append(script, wire(signal("/org/freedesktop/secrets/prompt/u1", SECRET_PROMPT, "Completed", [DbusValue]{DbusValue.Bool(false), DbusValue.Variant(items([String]{item}))}), 18))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     attributes: [String:String]{"xdg:schema": "dev.jet.Session", "server": "http://127.0.0.1:8080"}
     secret_store(c, "Crew session", attributes, "refresh-1", 1000000000) ?? panic("store: {err}")
     assert_eq(found_text(secret_lookup(c, attributes, 1000000000)), Val("refresh-1"))
@@ -2949,7 +2949,7 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(heard[12].path, item)
     assert_eq(heard[16].path, "/org/freedesktop/secrets/prompt/u1")
     // A prompt the person dismisses keeps nothing.
-    dismissed := test_bus("secrets-dismissed")
+    ^dismissed: test_bus("secrets-dismissed")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.61")}), 1))
     append(script, wire(reply_to(2, opened), 2))
@@ -2958,7 +2958,7 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(reply_to(5, [DbusValue]{}), 5))
     append(script, wire(signal("/org/freedesktop/secrets/prompt/u2", SECRET_PROMPT, "Completed", [DbusValue]{DbusValue.Bool(true), DbusValue.Variant(DbusValue.Text(""))}), 6))
     bus_says(dismissed.server, script)
-    d := start(dismissed.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^d: start(dismissed.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     refused: if secret_store(d, "Crew session", attributes, "refresh-3", 1000000000) == {
         .Ok(_) -> "kept"
         .Err(problem) -> "{problem}"
@@ -2970,15 +2970,15 @@ repeat: fn(text: String, times: Int) -> String {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
     csv: FileFilter{name: "CSV", globs: [String]{"*.csv"}, media: [String]{"text/csv"}}
     chosen: "file:///home/crew/Board%201.csv"
-    bus := test_bus("save")
+    ^bus: test_bus("save")
     request: "{PORTAL_PATH}/request/1_53/jet3"
-    script := ok.copy()
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.53")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
     append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(request)}), 3))
     append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), options_of([DbusValue]{entry_of("uris", texts([String]{chosen}))})}), 4))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(found_text(portal_save_file(c, "Save", "Board 1.csv", [FileFilter]{csv.copy()}, 1000000000)), Val(chosen))
     heard: messages_heard(bus.server)
     assert_eq(heard.len(), 3)
@@ -2993,14 +2993,14 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(option_value(sent[2], "filters"), Val(DbusValue.Array{signature: "(sa(us))", items: [DbusValue]{filter.copy()}}))
     assert_eq(option_value(sent[2], "current_filter"), Val(filter))
     // The person cancels: no file, and nothing is offered but the name.
-    canceled := test_bus("save-canceled")
+    ^canceled: test_bus("save-canceled")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.54")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
     append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(request)}), 3))
     append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(1), options_of([DbusValue]{})}), 4))
     bus_says(canceled.server, script)
-    d := start(canceled.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^d: start(canceled.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(found_text(portal_save_file(d, "Save", "notes.txt", [FileFilter]{}, 1000000000)), String?{None})
     options: messages_heard(canceled.server)[2].body[2]
     assert_eq(option_value(options, "filters"), DbusValue?{None})
@@ -3011,15 +3011,15 @@ repeat: fn(text: String, times: Int) -> String {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
     csv: FileFilter{name: "CSV", globs: [String]{"*.csv"}, media: [String]{"text/csv"}}
     chosen: "file:///home/crew/tasks.csv"
-    bus := test_bus("open")
+    ^bus: test_bus("open")
     request: "{PORTAL_PATH}/request/1_55/jet3"
-    script := ok.copy()
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.55")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
     append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(request)}), 3))
     append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), options_of([DbusValue]{entry_of("uris", texts([String]{chosen}))})}), 4))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(found_text(portal_open_file(c, "Open", [FileFilter]{csv.copy()}, 1000000000)), Val(chosen))
     heard: messages_heard(bus.server)
     assert_eq(heard.len(), 3)
@@ -3030,21 +3030,21 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(option_value(sent[2], "current_name"), DbusValue?{None})
     assert_eq(option_value(sent[2], "current_filter"), Val(filter_value(csv)))
     // The portal answers without a file: that is a protocol failure.
-    empty := test_bus("open-empty")
+    ^empty: test_bus("open-empty")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.56")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
     append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(request)}), 3))
     append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), options_of([DbusValue]{})}), 4))
     bus_says(empty.server, script)
-    d := start(empty.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^d: start(empty.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert(portal_open_file(d, "Open", [FileFilter]{}, 1000000000) == .Err(DbusError.Protocol("OpenFile's response named no file")))
 }
 
 #Test("a tray serves its item and menu, says when the menu changes and hears what the person chose") {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
-    bus := test_bus("tray")
-    script := ok.copy()
+    ^bus: test_bus("tray")
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.60")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{DbusValue.Uint32(PRIMARY_OWNER)}), 2))
     append(script, wire(reply_to(3, [DbusValue]{}), 3))
@@ -3057,13 +3057,13 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(desktop_call(MENU_PATH, "", "Event", menu_click(3)), 7))
     append(script, wire(desktop_call("/elsewhere", MENU, "GetLayout", [DbusValue]{DbusValue.Int32(0), DbusValue.Int32(-1), texts([String]{})}), 8))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
-    tray := tray_start(c, "Crewboard", "crewboard", 42, 1000000000) ?? panic("tray: {err}")
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^tray: tray_start(c, "Crewboard", "crewboard", 42, 1000000000) ?? panic("tray: {err}")
     quit: menu_item("Quit", [String]{})
     line: MenuEntry{label: "", enabled: true, separator: true, shortcut: [String]{}, children: [MenuEntry]{}}
     first: [MenuEntry]{menu_item("Gate repair", [String]{}), menu_item("Spring_fair", [String]{}), line.copy(), quit.copy()}
     menu_show(c, tray.menu, first.copy()) ?? panic("show: {err}")
-    chosen := [String]{}
+    ^chosen: [String]{}
     loop _ in 0..<4 {
         m: found_call(next_call(c, 1000000000)) ?? panic("no call came")
         got: found_choice(tray_answer(c, tray, m))
@@ -3073,12 +3073,12 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(found_call(next_call(c, 0)), DbusMessage?{None})
     // The same entries again change nothing; a new one is a new revision.
     menu_show(c, tray.menu, first.copy()) ?? panic("show: {err}")
-    launch := menu_item("Launch", [String]{})
+    ^launch: menu_item("Launch", [String]{})
     launch.enabled = false
     menu_show(c, tray.menu, [MenuEntry]{launch, quit.copy()}) ?? panic("show: {err}")
     assert_eq(tray.menu.revision, 3)
     heard: messages_heard(bus.server)
-    said := [String]{}
+    ^said: [String]{}
     loop m in heard {
         said.push(
             if m.kind == {
@@ -3102,8 +3102,8 @@ repeat: fn(text: String, times: Int) -> String {
 
 #Test("a menu bar serves its menus with their items' shortcuts and hears which item the person chose") {
     ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
-    bus := test_bus("menubar")
-    script := ok.copy()
+    ^bus: test_bus("menubar")
+    ^script: ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.60")}), 1))
     // The desktop reads the whole menu, then the Edit menu alone; the
     // person clicks New Task, the File menu itself and Copy. The
@@ -3115,14 +3115,14 @@ repeat: fn(text: String, times: Int) -> String {
     append(script, wire(desktop_call(MENU_PATH, MENU, "Event", menu_click(5)), 6))
     append(script, wire(desktop_call(ITEM_PATH, PROPERTIES, "GetAll", [DbusValue]{DbusValue.Text(ITEM)}), 7))
     bus_says(bus.server, script)
-    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
-    menu := menu_start(c)
-    file := menu_item("File", [String]{})
+    ^c: start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    ^menu: menu_start(c)
+    ^file: menu_item("File", [String]{})
     file.children = [MenuEntry]{menu_item("New Task", [String]{"Control", "n"}), MenuEntry{label: "", enabled: true, separator: true, shortcut: [String]{}, children: [MenuEntry]{}}}
-    edit := menu_item("Edit", [String]{})
+    ^edit: menu_item("Edit", [String]{})
     edit.children = [MenuEntry]{menu_item("Copy", [String]{"Control", "c"})}
     menu_show(c, menu, [MenuEntry]{file, edit}) ?? panic("show: {err}")
-    chosen := [String]{}
+    ^chosen: [String]{}
     loop _ in 0..<5 {
         m: found_call(next_call(c, 1000000000)) ?? panic("no call came")
         got: found_choice(menu_answer(c, menu, m))
@@ -3130,7 +3130,7 @@ repeat: fn(text: String, times: Int) -> String {
     }
     assert_eq(chosen.join(" "), "- - 1 - 4")
     heard: messages_heard(bus.server)
-    said := [String]{}
+    ^said: [String]{}
     loop m in heard {
         said.push(if m.kind == .Return -> "return {m.reply_serial}" else if m.kind == .Error -> "error {m.reply_serial} {m.error_name}" else -> m.member.copy())
     }
@@ -3147,7 +3147,7 @@ menu_item: fn(label: String, shortcut: [String]) -> MenuEntry {
 
 // A method call the desktop makes to the app's connection.
 desktop_call: fn(path: String, interface: String, member: String, body: [DbusValue]) -> DbusMessage {
-    m := blank(DbusKind.Call)
+    ^m: blank(DbusKind.Call)
     m.path = path
     m.interface = interface
     m.member = member
@@ -3166,19 +3166,19 @@ menu_click: fn(id: Int) -> [DbusValue] {
 // when it has no label, then its shortcut's keys in brackets and its own
 // children in parentheses, separated by ` | `.
 layout_tree: fn(layout: DbusValue) -> String {
-    out := [String]{}
+    ^out: [String]{}
     if layout == .Struct(fields) {
         if fields[2] == .Array(_, children) {
             loop child in children {
                 if child == .Variant(inner) {
                     if inner == .Struct(parts) {
                         found: option_value(parts[1], "label") ?? option_value(parts[1], "type") ?? DbusValue.Text("?")
-                        text := string_of(found)
+                        ^text: string_of(found)
                         shortcut: option_value(parts[1], "shortcut") ?? DbusValue.Text("")
                         if shortcut == .Array(_, chords) {
                             loop chord in chords {
                                 if chord == .Array(_, keys) {
-                                    names := [String]{}
+                                    ^names: [String]{}
                                     loop key in keys -> names.push(string_of(key))
                                     text = "{text}[{names.join("+")}]"
                                 }
@@ -3222,7 +3222,7 @@ found_text: fn(got: String? DbusError!) -> String? {
 
 // An array of strings.
 texts: fn(items: [String]) -> DbusValue {
-    values := [DbusValue]{}
+    ^values: [DbusValue]{}
     loop item in items -> values.push(DbusValue.Text(item))
     DbusValue.Array{signature: "s", items: values}
 }
@@ -3239,7 +3239,7 @@ found_flag: fn(got: Bool? DbusError!) -> Bool? {
 // A LocationUpdated signal's options: latitude, longitude and accuracy.
 place_options: fn(values: [Float]) -> DbusValue {
     names: [String]{"Latitude", "Longitude", "Accuracy"}
-    items := [DbusValue]{}
+    ^items: [DbusValue]{}
     loop i in 0..<names.len() {
         items.push(DbusValue.Entry{key: DbusValue.Text(names[i]), value: DbusValue.Variant(DbusValue.Double(values[i]))})
     }
@@ -3272,7 +3272,7 @@ found_value: fn(got: DbusValue? DbusError!) -> DbusValue? {
 // The interface and member of each call the client made after it
 // authenticated as uid 1000.
 calls_heard: fn(server: ^net.UnixStream) -[Net, Time]> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop m in messages_heard(server) -> out.push("{m.interface}.{m.member}")
     out
 }
@@ -3280,8 +3280,8 @@ calls_heard: fn(server: ^net.UnixStream) -[Net, Time]> [String] {
 // Each message the client sent after it authenticated as uid 1000.
 messages_heard: fn(server: ^net.UnixStream) -[Net, Time]> [DbusMessage] {
     heard: bus_heard(server)
-    rest := heard[(1 + "AUTH EXTERNAL 31303030\r\nBEGIN\r\n".bytes().len())..<heard.len()].copy()
-    out := [DbusMessage]{}
+    ^rest: heard[(1 + "AUTH EXTERNAL 31303030\r\nBEGIN\r\n".bytes().len())..<heard.len()].copy()
+    ^out: [DbusMessage]{}
     loop rest.len() > 0 {
         decoded: decode(rest) ?? panic("decode: {err}")
         if decoded.used == 0 -> break

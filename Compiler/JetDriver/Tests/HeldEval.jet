@@ -68,7 +68,7 @@ held_eval_lib_source: fn() -> String {
 }
 
 held_eval_answer: fn(opened: ^JetDriverHeldOpened, path: String, offset: Int, text: String) -> SemaEvalProbeAnswer? {
-    done := jet_driver_held_eval_answer(opened.eval, path, offset, text, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move())
+    ^done: jet_driver_held_eval_answer(opened.eval, path, offset, text, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move())
     opened.inputs.symbols = done.symbols.move()
     opened.inputs.interner = done.interner.move()
     opened.types = done.types.move()
@@ -76,7 +76,7 @@ held_eval_answer: fn(opened: ^JetDriverHeldOpened, path: String, offset: Int, te
 }
 
 held_eval_check: fn(opened: ^JetDriverHeldOpened, path: String, text: String) -> SemaScriptProbeChecked {
-    done := jet_driver_held_eval_check(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move(), text)
+    ^done: jet_driver_held_eval_check(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move(), text)
     opened.inputs.symbols = done.symbols.move()
     opened.inputs.interner = done.interner.move()
     opened.types = done.types.move()
@@ -87,11 +87,11 @@ held_eval_check: fn(opened: ^JetDriverHeldOpened, path: String, text: String) ->
 // the checked functions where the next check finds the functions it calls.
 // Whether it was.
 held_eval_append: fn(opened: ^JetDriverHeldOpened, path: String, text: String) -> Bool {
-    done := jet_driver_held_eval_append(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move(), text)
+    ^done: jet_driver_held_eval_append(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move(), text)
     opened.inputs.symbols = done.symbols.move()
     opened.inputs.interner = done.interner.move()
     opened.types = done.types.move()
-    appended := done.appended.move() ?? return false
+    ^appended: done.appended.move() ?? return false
     sema_eval_held_set(opened.eval.rows, appended.function.key, opened.inputs.functions.len())
     opened.inputs.functions.push(appended.function.move())
     true
@@ -120,53 +120,53 @@ held_eval_snapshot: fn(main: String, lib: String) -> JetDriverAuthorizedSourceSn
 
 // `snapshot`'s held check, opened.
 held_eval_opened: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverHeldOpened {
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+    ^request: jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
     request.hold_check_state = true
-    compiled := jet_driver_compile(request)
+    ^compiled: jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
-    held := compiled.held.move() ?? panic("a held check keeps its compile state")
+    ^held: compiled.held.move() ?? panic("a held check keeps its compile state")
     jet_driver_held_eval_open(held, compiled.compiler_threads) ?? panic("the held program opens at its entry module")
 }
 
 #Test("an expression's function checks against the held program's signatures, one after another on one probe") {
-    opened := held_eval_opened(held_eval_snapshot(held_eval_source(), held_eval_lib_source()))
+    ^opened: held_eval_opened(held_eval_snapshot(held_eval_source(), held_eval_lib_source()))
     assert(opened.inputs.functions.any(fn(row) { row.name == "helper" }), "the lowering inputs hold the checked functions")
     assert(opened.types.len() > 0, "the probe's checked types are handed to the lowering")
 
-    sum := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(total) + 1\n}}\n")
+    ^sum: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(total) + 1\n}}\n")
     assert(sum.complete && sum.function != None, "the call of the program's function checks: {sum.diagnostics.map(fn(row) { row.what })}")
     assert_eq(sum.diagnostics.len(), 0)
 
-    mistyped := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Bool {{\n    helper(total)\n}}\n")
+    ^mistyped: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Bool {{\n    helper(total)\n}}\n")
     assert(mistyped.diagnostics.len() > 0, "an Int where the function returns Bool is reported")
 
-    unbound := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    missing(total)\n}}\n")
+    ^unbound: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    missing(total)\n}}\n")
     assert(unbound.diagnostics.len() > 0, "a name the program doesn't bind is reported")
 
-    called := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    shout(total)\n}}\n")
+    ^called: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    shout(total)\n}}\n")
     assert(!called.complete && called.diagnostics.any(fn(row) { row.code == "E0747" && row.what.contains("`shout`") }), "a call whose solved row has an effect is refused: {called.diagnostics.map(fn(row) { row.what })}")
 
-    printed := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    print(total)\n    total\n}}\n")
+    ^printed: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    print(total)\n    total\n}}\n")
     assert(!printed.complete && printed.diagnostics.any(fn(row) { row.code == "E0747" && row.what.contains("this expression") }), "an effect the function uses itself is refused: {printed.diagnostics.map(fn(row) { row.what })}")
 
-    again := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(helper(total))\n}}\n")
+    ^again: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(helper(total))\n}}\n")
     assert(again.complete && again.diagnostics.len() == 0, "the probe checks the next function as it did the first: {again.diagnostics.map(fn(row) { row.what })}")
 
     // A stop in lib.jet: the probe enters its module, whose private names
     // bind there, and back.
-    private := held_eval_check(opened, HELD_EVAL_LIB_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    thrice(total) + tripled(total)\n}}\n")
+    ^private: held_eval_check(opened, HELD_EVAL_LIB_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    thrice(total) + tripled(total)\n}}\n")
     assert(private.complete && private.diagnostics.len() == 0, "the other module's own function checks there: {private.diagnostics.map(fn(row) { row.what })}")
-    back := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(tripled(total))\n}}\n")
+    ^back: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(tripled(total))\n}}\n")
     assert(back.complete && back.diagnostics.len() == 0, "the probe checks in the entry module again: {back.diagnostics.map(fn(row) { row.what })}")
 
-    nowhere := held_eval_check(opened, "other.jet", "jet_debug_expression: fn(total: Int) -> Int {{\n    total\n}}\n")
+    ^nowhere: held_eval_check(opened, "other.jet", "jet_debug_expression: fn(total: Int) -> Int {{\n    total\n}}\n")
     assert(!nowhere.complete && nowhere.function == None, "a file no checked module has checks nothing")
     assert(opened.inputs.symbols.ranges.len() > 0 && opened.types.len() > 0, "each check gives the symbol table and the checked types back")
 }
 
 #Test("a held check of the program's cut gains the pure functions an expression calls, callees first") {
-    opened := held_eval_opened(held_eval_snapshot("run: fn() {{}}\n", ""))
-    unbound := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total)\n}}\n")
+    ^opened: held_eval_opened(held_eval_snapshot("run: fn() {{}}\n", ""))
+    ^unbound: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total)\n}}\n")
     assert(unbound.diagnostics.len() > 0, "the cut binds no function of the program's source")
 
     assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "twice: fn(value: Int) -> Int {{ helper(helper(value)) }}\n"), "a function whose callee isn't held is not appended")
@@ -174,7 +174,7 @@ held_eval_opened: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverHe
     assert(held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "twice: fn(value: Int) -> Int {{ helper(helper(value)) }}\n"), "a function that calls an appended one is appended after it")
     assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "helper: fn(value: Int) -> Int {{ value * 3 }}\n"), "a name the module binds is not appended again")
 
-    sum := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total) + helper(total)\n}}\n")
+    ^sum: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total) + helper(total)\n}}\n")
     assert(sum.complete && sum.diagnostics.len() == 0, "an expression calls the appended functions: {sum.diagnostics.map(fn(row) { row.what })}")
 
     // Each refusal leaves the module as it was.
@@ -182,13 +182,13 @@ held_eval_opened: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverHe
     assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "count: fn(value: Int) -> Int {{\n    if value > 0 -> return count(value - 1)\n    0\n}}\n"), "a function that calls itself is not appended")
     assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "pick: fn<T>(value: T) -> T {{ value }}\n"), "a generic function is not appended")
     assert(!held_eval_append(opened, "other.jet", "third: fn(value: Int) -> Int {{ value * 3 }}\n"), "a file no checked module has gains nothing")
-    shouted := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    shout(total) + count(total)\n}}\n")
+    ^shouted: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    shout(total) + count(total)\n}}\n")
     assert(shouted.diagnostics.len() > 0, "a refused function stays unbound")
-    again := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total)\n}}\n")
+    ^again: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total)\n}}\n")
     assert(again.complete && again.diagnostics.len() == 0, "the appended functions still check after a refusal: {again.diagnostics.map(fn(row) { row.what })}")
 
     assert(held_eval_append(opened, HELD_EVAL_LIB_DISPLAY_PATH, "third: fn(value: Int) -> Int {{ value * 3 }}\n"), "another module gains its own function")
-    third := held_eval_check(opened, HELD_EVAL_LIB_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    third(total)\n}}\n")
+    ^third: held_eval_check(opened, HELD_EVAL_LIB_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    third(total)\n}}\n")
     assert(third.complete && third.diagnostics.len() == 0, "the other module's appended function checks there: {third.diagnostics.map(fn(row) { row.what })}")
 }
 
@@ -218,19 +218,19 @@ held_eval_stop_source: fn() -> String {
 
 #Test("an expression at a stop checks against the stopped function's locals as its check holds them there") {
     source: held_eval_stop_source()
-    opened := held_eval_opened(held_eval_snapshot(source, ""))
+    ^opened: held_eval_opened(held_eval_snapshot(source, ""))
     stop: source.find("print(point")
-    field := held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "point.x + xs[1]") ?? panic("the stop answers")
+    ^field: held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "point.x + xs[1]") ?? panic("the stop answers")
     assert(field.complete && field.refusals.len() == 0, "a field and an index of the frame's locals check: {field.refusals.map(fn(row) { row.what })}")
     assert_eq(field.captures.map(fn(capture) { capture.source }), [String]{"point", "xs"})
-    called := held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "point.sum() + used") ?? panic("the stop answers again")
+    ^called: held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "point.sum() + used") ?? panic("the stop answers again")
     assert(called.complete && called.refusals.len() == 0, "a method of a local checks on the same probe: {called.refusals.map(fn(row) { row.what })}")
-    moved := held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "label.len()") ?? panic("the stop answers a moved local")
+    ^moved: held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "label.len()") ?? panic("the stop answers a moved local")
     assert(moved.refusals.len() > 0, "a local the frame moved before the stop is refused")
     inside: source.find("self.x + self.y")
-    method := held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, inside, "self.y") ?? panic("a stop in a method answers")
+    ^method: held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, inside, "self.y") ?? panic("a stop in a method answers")
     assert(method.complete && method.refusals.len() == 0, "the receiver reads in its method: {method.refusals.map(fn(row) { row.what })}")
     assert(held_eval_answer(opened, "other.jet", stop, "point.x") == None, "a file no checked module has answers nothing")
-    sum := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    consume(\"a\") + total\n}}\n")
+    ^sum: held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    consume(\"a\") + total\n}}\n")
     assert(sum.complete && sum.diagnostics.len() == 0, "the probe checks a function after the answers: {sum.diagnostics.map(fn(row) { row.what })}")
 }

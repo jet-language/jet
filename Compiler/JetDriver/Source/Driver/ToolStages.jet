@@ -71,19 +71,19 @@ JetDriverToolStageItem: struct {
 jet_driver_tool_stage_blocks: fn(source: String) -> [JetDriverToolStageBlock] Never! {
     lexed: lex(source.bytes())
     tokens: lexed.tokens
-    blocks := [JetDriverToolStageBlock]{}
+    ^blocks: [JetDriverToolStageBlock]{}
     loop index in 0..<tokens.len() {
         if tokens[index].kind != TOKEN_HASH || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_IDENT {
             next
         }
-        path := token_text(lexed.tables, tokens[index + 1])
-        cursor := index + 2
+        ^path: token_text(lexed.tables, tokens[index + 1])
+        ^cursor: index + 2
         loop cursor + 1 < tokens.len() && tokens[cursor].kind == TOKEN_DOT && tokens[cursor + 1].kind == TOKEN_IDENT {
             path = "{path}.{token_text(lexed.tables, tokens[cursor + 1])}"
             cursor += 2
         }
         if cursor < tokens.len() && tokens[cursor].kind == TOKEN_LPAREN {
-            depth := 0
+            ^depth: 0
             loop cursor < tokens.len() {
                 if tokens[cursor].kind == TOKEN_LPAREN -> depth += 1
                 if tokens[cursor].kind == TOKEN_RPAREN -> depth -= 1
@@ -93,8 +93,8 @@ jet_driver_tool_stage_blocks: fn(source: String) -> [JetDriverToolStageBlock] Ne
         }
         if cursor >= tokens.len() || tokens[cursor].kind != TOKEN_LBRACE -> next
         open: tokens[cursor].span.end
-        depth := 0
-        close := -1
+        ^depth: 0
+        ^close: -1
         loop cursor < tokens.len() && tokens[cursor].kind != TOKEN_EOF {
             if tokens[cursor].kind == TOKEN_LBRACE -> depth += 1
             if tokens[cursor].kind == TOKEN_RBRACE {
@@ -121,7 +121,7 @@ jet_driver_tool_stage_blocks: fn(source: String) -> [JetDriverToolStageBlock] Ne
 // calls only those hooks, so a document whose blocks reach none of these
 // markers (jet_driver_tool_stage_hooked) needs no compile for the stage.
 jet_driver_tool_stage_snapshot_markers: fn(snapshot: JetDriverAuthorizedSourceSnapshot, stage: String) -> [String] Never! {
-    markers := [String]{}
+    ^markers: [String]{}
     loop root in snapshot.roots {
         loop file in root.files {
             if !file.relative_path.ends_with(".jet") || !jet_driver_tool_stage_spells_on(file.source) {
@@ -150,7 +150,7 @@ jet_driver_tool_stage_spells_on: fn(source: String) -> Bool Never! {
     bytes: source.bytes()
     loop at in 0..<bytes.len() {
         if bytes[at] != (U8{35}) -> next
-        cursor := at + 1
+        ^cursor: at + 1
         loop cursor < bytes.len() && (bytes[cursor] == (U8{32}) || bytes[cursor] == (U8{9}) || bytes[cursor] == (U8{10}) || bytes[cursor] == (U8{13})) {
             cursor += 1
         }
@@ -187,7 +187,7 @@ jet_driver_tool_stage_leaf: fn(path: String) -> String Never! { path.rpartition(
 // its marker, in hook then block order; only on the block holding byte `at`
 // when one is given. The program imports each hook module once.
 jet_driver_tool_stage_plan: fn(modules: [JetDriverDocModule], document: Int, stage: String, at: Int{-1}) -> JetDriverToolStagePlan Never! {
-    bodies := [Span]{}
+    ^bodies: [Span]{}
     if document < 0 || document >= modules.len() {
         return JetDriverToolStagePlan{bodies: bodies, program: ""}
     }
@@ -195,12 +195,12 @@ jet_driver_tool_stage_plan: fn(modules: [JetDriverDocModule], document: Int, sta
     imports: modules[document].imports
     blocks: jet_driver_tool_stage_blocks(source)
     bytes: source.bytes()
-    uses := [String]{"jet_tool_stage_compiler: core.compiler"}
-    values := [String]{}
+    ^uses: [String]{"jet_tool_stage_compiler: core.compiler"}
+    ^values: [String]{}
     loop (index, module_ref) in modules {
         if index == document || blocks.len() == 0 -> next
         imported: jet_driver_tool_stage_import(imports, module_ref.module_name) ?? next
-        slot := -1
+        ^slot: -1
         loop item in module_ref.items {
             if item == .Func(func) {
                 loop marker in func.markers {
@@ -242,8 +242,8 @@ JetDriverToolStagePosition: struct {
 }
 
 jet_driver_tool_stage_position: fn(bytes: [U8], offset: Int) -> JetDriverToolStagePosition Never! {
-    line := 1
-    column := 1
+    ^line: 1
+    ^column: 1
     loop at in 0..<offset {
         if {
             bytes[at] == (U8{10}) -> {
@@ -283,7 +283,7 @@ jet_driver_tool_stage_reaches: fn(written: String, marker: String, alias: String
 // Each call's answer rows, read from the values of the program's compile, in
 // call order; a call with no readable value answers nothing.
 jet_driver_tool_stage_answers: fn(stage: String, bodies: [Span], values: ^^[SemaComptimeItemValue]) -> [[JetDriverToolStageItem]] Never! {
-    answers := [[JetDriverToolStageItem]]{}
+    ^answers: [[JetDriverToolStageItem]]{}
     loop _ in bodies -> answers.push([JetDriverToolStageItem]{})
     loop value in values.move() {
         if value.kind != SemaComptimeItemKind.Constant -> next
@@ -297,7 +297,7 @@ jet_driver_tool_stage_answers: fn(stage: String, bodies: [Span], values: ^^[Sema
 }
 
 jet_driver_tool_stage_rows: fn(stage: String, body: Span, value: ^^TComptimeValue) -> [JetDriverToolStageItem] Never! {
-    rows := [JetDriverToolStageItem]{}
+    ^rows: [JetDriverToolStageItem]{}
     if stage == TOOL_STAGE_FMT_BLOCK {
         if jet_driver_tool_stage_text(value.move()) == .Val(text) {
             rows.push(JetDriverToolStageItem{at: body.start, length: body.end - body.start, label: text})
@@ -319,9 +319,9 @@ jet_driver_tool_stage_rows: fn(stage: String, body: Span, value: ^^TComptimeValu
 // One element of a list answer as a row, None when it is malformed or out of
 // its block.
 jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: ^^[TComptimeField]) -> JetDriverToolStageItem? Never! {
-    row := JetDriverToolStageItem{at: 0, length: 0, label: ""}
-    labeled := false
-    kinded := false
+    ^row: JetDriverToolStageItem{at: 0, length: 0, label: ""}
+    ^labeled: false
+    ^kinded: false
     loop field in fields.move() {
         if field.name == "at" || field.name == "length" {
             if field.value == .Int(number) {
@@ -426,7 +426,7 @@ jet_driver_link_stage_declared: fn(snapshot: JetDriverAuthorizedSourceSnapshot, 
 // calls its hooks: its `{JET_DRIVER_LINK_STAGE_VALUE}` is the hook's answer.
 jet_driver_link_stage_program: fn(hook: String, inputs: JetDriverLinkInputs) -> String Never! {
     // Jet's own link reads the objects, then the libraries.
-    linked := [TComptimeValue]{}
+    ^linked: [TComptimeValue]{}
     loop object in inputs.objects -> linked.push(TComptimeValue.String{value: object})
     loop library in inputs.libraries -> linked.push(TComptimeValue.String{value: library})
     default: compiler_event_payload("BuildAction", [TComptimeValue]{TComptimeValue.String{value: "link"}, jet_driver_moment_strings([String]{}), TComptimeValue.List{values: linked}, jet_driver_moment_strings([String]{inputs.output}), TComptimeValue.List{values: [TComptimeValue]{}}})
@@ -448,7 +448,7 @@ jet_driver_post_link_stage_program: fn(hook: String, output_name: String, path: 
 // (jet_driver_moment_payload_source).
 jet_driver_link_stage_call: fn(hook: String, given: String) -> String Never! {
     path: hook.rpartition(".")
-    uses := jet_driver_moment_uses()
+    ^uses: jet_driver_moment_uses()
     uses.push("jet_moment_hook_0: {path.head}")
     "{jet_driver_tool_stage_uses(uses)}\n{JET_DRIVER_LINK_STAGE_VALUE}: #run {{ jet_moment_hook_0.{path.tail}({given}) }}\n"
 }
@@ -461,7 +461,7 @@ jet_driver_moment_uses: fn() -> [String] Never! {
 
 // `values` as a payload's `[String]`.
 jet_driver_moment_strings: fn(values: [String]) -> TComptimeValue Never! {
-    items := [TComptimeValue]{}
+    ^items: [TComptimeValue]{}
     loop value in values -> items.push(TComptimeValue.String{value: value})
     TComptimeValue.List{values: items}
 }
@@ -489,7 +489,7 @@ jet_driver_moment_type: fn(ty: String) -> String Never! {
 jet_driver_moment_payload_source: fn(value: TComptimeValue, ty: String) -> String Never! {
     if ty.starts_with("[") && ty.ends_with("]") {
         item: ty.removeprefix("[").removesuffix("]")
-        items := [String]{}
+        ^items: [String]{}
         if value == .List(values) {
             loop each in values -> items.push(jet_driver_moment_payload_source(each, item))
         }
@@ -501,7 +501,7 @@ jet_driver_moment_payload_source: fn(value: TComptimeValue, ty: String) -> Strin
         .Bool(flag) -> if flag -> "true" else -> "false"
         .Enum(_, variant, _) -> "{jet_driver_moment_type(ty)}.{variant}"
         .Struct(_, fields) -> {
-            members := [String]{}
+            ^members: [String]{}
             loop row in COMPILER_EVENT_PAYLOADS {
                 if row.name != ty -> next
                 loop (index, field) in row.fields {
@@ -544,7 +544,7 @@ JetDriverMomentPlan: struct {
 // of each source that spells `#On`, with no check; the program that calls
 // the hooks checks them.
 jet_driver_moment_hooks: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverMomentHook] Never! {
-    hooks := [JetDriverMomentHook]{}
+    ^hooks: [JetDriverMomentHook]{}
     if snapshot.roots.len() == 0 -> return hooks
     loop file in snapshot.roots[0].files {
         if !file.relative_path.ends_with(".jet") || !jet_driver_tool_stage_spells_on(file.source) {
@@ -579,16 +579,16 @@ jet_driver_moment_told: fn(moment: String) -> Bool Never! {
 // its hooks; each hook module is imported once. No calls and no program when
 // no hook hooks a moment of `records`.
 jet_driver_moment_plan: fn(hooks: [JetDriverMomentHook], records: [CompilerEventRecord]) -> JetDriverMomentPlan Never! {
-    uses := jet_driver_moment_uses()
-    modules := [String]{}
-    calls := [Int]{}
-    starts := [Int]{}
-    body := ""
+    ^uses: jet_driver_moment_uses()
+    ^modules: [String]{}
+    ^calls: [Int]{}
+    ^starts: [Int]{}
+    ^body: ""
     loop record in records {
         loop (index, hook) in hooks {
             if hook.moment != record.name -> next
             path: hook.hook.rpartition(".")
-            slot := -1
+            ^slot: -1
             loop (at, imported) in modules {
                 if imported == path.head -> slot = at
             }
@@ -626,7 +626,7 @@ jet_driver_build_action_of: fn(value: TComptimeValue) -> JetDriverBuildAction? N
     fields: if value == .Struct(_, fields) -> fields else -> {
         return None
     }
-    action := JetDriverBuildAction{name: "", run: [String]{}, inputs: [String]{}, outputs: [String]{}, allow: [String]{}}
+    ^action: JetDriverBuildAction{name: "", run: [String]{}, inputs: [String]{}, outputs: [String]{}, allow: [String]{}}
     loop field in fields {
         if field.name == "name" {
             if field.value == .String(text) -> action.name = text else -> return None
@@ -635,7 +635,7 @@ jet_driver_build_action_of: fn(value: TComptimeValue) -> JetDriverBuildAction? N
         items: if field.value == .List(items) -> items else -> {
             return None
         }
-        words := [String]{}
+        ^words: [String]{}
         loop item in items {
             if item == {
                 .String(text) -> words.push(text)

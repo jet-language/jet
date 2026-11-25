@@ -87,8 +87,8 @@
 
 #Export(c) jet_rt_handle_clone_jet_ws_message: fn(value: I64) -> I64 {
     kind: dyn_word(wrapping(value + WS_MESSAGE_TAG))
-    payload := dyn_word(wrapping(value + WS_MESSAGE_PAYLOAD))
-    reason := I64{0}
+    ^payload: dyn_word(wrapping(value + WS_MESSAGE_PAYLOAD))
+    ^reason: I64{0}
     if (kind == I64{0}) { payload = jet_rt_string_clone(payload) } else if (kind == I64{1}) {
         payload = data_sequence_clone(payload, DYN_BYTE_LIST)
     } else { reason = jet_rt_string_clone(dyn_word(wrapping(value + WS_MESSAGE_REASON))) }
@@ -125,7 +125,7 @@
     if length != dyn_word(wrapping(b + DATA_SEQUENCE_LENGTH)) -> return false
     ad: dyn_word(wrapping(a + DATA_SEQUENCE_DATA))
     bd: dyn_word(wrapping(b + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if host_u8_get(ad, at) != host_u8_get(bd, at) -> return false
         at += I64{1}

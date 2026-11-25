@@ -15,7 +15,7 @@ Event: struct {
 
 write_fixture: fn(path: String) {
     output: files.create(path) ?? panic("create")
-    writer := csv.writer(output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    ^writer: csv.writer(output, encoding.EncodingLimits.safe()) ?? panic("writer")
     writer.write(["service", "latency_ms"]) ?? panic("header")
     writer.write(["api", "10.0"]) ?? panic("r1")
     writer.write(["api", "20.0"]) ?? panic("r2")
@@ -29,10 +29,10 @@ run: fn() {
     path: "{work}/events.csv"
     write_fixture(path)
     input: files.open(path) ?? panic("open")
-    limits := data.DataLimits.safe()
+    ^limits: data.DataLimits.safe()
     limits.max_groups = 1
     limits.max_output_rows = 10
-    reader := files_data.csv_reader<Event>(input, limits) ?? panic("reader")
+    ^reader: files_data.csv_reader<Event>(input, limits) ?? panic("reader")
     first: stream.next(reader) ?? panic("next")
     print("first:{first.service}:{first.latency_ms}")
     if data.query(reader)

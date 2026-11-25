@@ -50,9 +50,9 @@ use {
 
 patch_grow_code: fn(p: ^IRPatchEmitter, need: Int) Never! {
     min_cap: p.pos + need
-    cap := p.code.len()
+    ^cap: p.code.len()
     if cap < 16384 -> cap = 16384
-    loop cap < min_cap -> cap = cap * 2
+    loop cap < min_cap -> cap *= 2
     p.code.try_reserve(cap) ?? ()
     loop p.code.len() < cap -> p.code.push(U8{0})
 }
@@ -207,7 +207,7 @@ IRPatchEmitter: struct {
 }
 
 ir_patch_emitter_new: fn() -> IRPatchEmitter Never! {
-    code := [U8]{}
+    ^code: [U8]{}
     code.try_reserve(16384) ?? ()
     loop _ in 0..<16384 -> code.push(U8{0})
     IRPatchEmitter{
@@ -416,7 +416,7 @@ patch_bigint_rows: fn(p: ^IRPatchEmitter, name_row: Int, text: String) -> {text_
         if key == name_row -> return {text_id: p.int_text_vals[i], static_id: p.int_static_vals[i]}
     }
     tid: patch_add_use(p, IRX64UseKind.Text, -1, "{text}", text.bytes().len())
-    sid := -1
+    ^sid: -1
     if ir_x64_static_int_fits(text) {
         sid = patch_add_use(p, IRX64UseKind.StaticInt, -1, "{text}", 8)
     }
@@ -569,7 +569,9 @@ patch_load_slot: fn(p: ^IRPatchEmitter, reg: Int, slot: Int) Never! {
         return
     }
     if reg == 0 {
-        if p.rax_slot == slot -> return
+        if p.rax_slot == slot {
+            return
+        }
         h: p.homes[slot]
         patch_load_rbp(p, 0, h)
         p.rax_slot = if h != 0 -> slot else -> -1
@@ -579,7 +581,9 @@ patch_load_slot: fn(p: ^IRPatchEmitter, reg: Int, slot: Int) Never! {
 }
 
 patch_store_rbp: fn(p: ^IRPatchEmitter, disp: Int, reg: Int) Never! {
-    if disp == 0 -> return
+    if disp == 0 {
+        return
+    }
     patch_ensure(p, 8)
     if patch_fits_i8(disp) {
         p.pos = if reg == {
@@ -612,9 +616,7 @@ patch_store_slot: fn(p: ^IRPatchEmitter, slot: Int, reg: Int) Never! {
     p.const_epoch[slot] = 0
     h: p.homes[slot]
     patch_store_rbp(p, h, reg)
-    if reg == 0 {
-        p.rax_slot = if h != 0 -> slot else -> -1
-    } else if p.rax_slot == slot {
+    if reg == 0 -> p.rax_slot = if h != 0 -> slot else -> -1 else if p.rax_slot == slot {
         p.rax_slot = -1
     }
 }
@@ -700,7 +702,9 @@ patch_load_xmm: fn(p: ^IRPatchEmitter, single: Bool, xmm: Int, disp: Int) Never!
 }
 
 patch_store_xmm: fn(p: ^IRPatchEmitter, single: Bool, disp: Int, xmm: Int) Never! {
-    if disp == 0 -> return
+    if disp == 0 {
+        return
+    }
     patch_ensure(p, 24)
     if single {
         if patch_fits_i8(disp) {
@@ -780,7 +784,9 @@ patch_alu_rax_imm: fn(p: ^IRPatchEmitter, ext: Int, imm: Int) Never! {
 }
 
 patch_narrow: fn(p: ^IRPatchEmitter, reg: Int, signed: Bool, bits: Int) Never! {
-    if bits <= 0 || bits >= 64 -> return
+    if bits <= 0 || bits >= 64 {
+        return
+    }
     patch_ensure(p, 10)
     if reg == 0 -> p.rax_slot = -1
     sh: 64 - bits
@@ -851,7 +857,9 @@ patch_normalize_row: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, type_row: Int
 
 // Copies `size` bytes from [rdx] to [rax]. Clobbers rax/rcx/rdx/rsi/rdi/r11.
 patch_copy_bytes_rdx_to_rax: fn(p: ^IRPatchEmitter, size: Int) Never! {
-    if size <= 0 -> return
+    if size <= 0 {
+        return
+    }
     p.rax_slot = -1
     if size > 64 {
         patch_ensure(p, 24)
@@ -862,27 +870,19 @@ patch_copy_bytes_rdx_to_rax: fn(p: ^IRPatchEmitter, size: Int) Never! {
         p.pos = o0_st_rep_movsb(p.code, p.pos)
         return
     }
-    off := 0
+    ^off: 0
     loop off + 8 <= size {
         patch_ensure(p, 16)
-        if off == 0 {
-            p.pos = o0_st_copy8_0(p.code, p.pos)
-        } else if patch_fits_i8(off) {
+        if off == 0 -> p.pos = o0_st_copy8_0(p.code, p.pos) else if patch_fits_i8(off) {
             p.pos = o0_st_copy8_8(p.code, p.pos, off)
-        } else {
-            p.pos = o0_st_copy8_32(p.code, p.pos, off)
-        }
+        } else { p.pos = o0_st_copy8_32(p.code, p.pos, off) }
         off += 8
     }
     loop off < size {
         patch_ensure(p, 16)
-        if off == 0 {
-            p.pos = o0_st_copy1_0(p.code, p.pos)
-        } else if patch_fits_i8(off) {
+        if off == 0 -> p.pos = o0_st_copy1_0(p.code, p.pos) else if patch_fits_i8(off) {
             p.pos = o0_st_copy1_8(p.code, p.pos, off)
-        } else {
-            p.pos = o0_st_copy1_32(p.code, p.pos, off)
-        }
+        } else { p.pos = o0_st_copy1_32(p.code, p.pos, off) }
         off += 1
     }
 }
@@ -916,7 +916,7 @@ patch_cold_new: fn(kind: IRX64ColdKind, site_start: Int, site_len: Int) -> IRPat
 patch_stop_if: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int, cc: Int, stop_kind: Int) Never! {
     s_start: p.cold_sites.len()
     p.cold_sites.push(patch_jcc(p, cc))
-    cold := patch_cold_new(IRX64ColdKind.Stop, s_start, 1)
+    ^cold: patch_cold_new(IRX64ColdKind.Stop, s_start, 1)
     cold.text = patch_stop_text(p, stop_kind)
     cold.line = ir_code_line_source(f.code_line[at])
     cold.at = at
@@ -967,10 +967,10 @@ patch_call_out: fn(p: ^IRPatchEmitter, f: IRFunction, target: X64Reloc, indirect
 // (when the hot path already proved them inline, their Drop is a no-op on the
 // hot path and only runs in the cold slow path!).
 patch_operand_drops: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) -> {d0: Int, d1: Int, end_at: Int} Never! {
-    d0 := -1
-    d1 := -1
-    end_at := at
-    next_at := at + 1
+    ^d0: -1
+    ^d1: -1
+    ^end_at: at
+    ^next_at: at + 1
     loop next_at < f.op.len() && f.op[next_at] == .Drop {
         slot: f.a[next_at]
         if (slot != f.a[at] && slot != f.b[at]) || slot == f.dst[at] || slot == d0 || slot == d1 {
@@ -997,8 +997,8 @@ patch_located_stops_cold: fn(f: IRFunction, cold: IRPatchCold) -> Bool Never! {
 // Call, tail jump, memory, arithmetic, control emitters.
 
 patch_call: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, target: X64Reloc, indirect: Int, args: [Int], start: Int, count: Int, dst: Int, alloc_row: Int) Never! {
-    sret := false
-    storage := 0
+    ^sret: false
+    ^storage: 0
     if dst >= 0 {
         dst_trow: f.slot_type[dst]
         if fast.type_kind[dst_trow] == O0_KIND_AGGREGATE {
@@ -1009,8 +1009,8 @@ patch_call: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, target:
             storage = 0 - p.depth
         }
     }
-    general := if sret -> 1 else -> 0
-    floats := 0
+    ^general: if sret -> 1 else -> 0
+    ^floats: 0
     if p.call_places.len() > 0 -> p.call_places.clear()
     if p.call_stacked.len() > 0 -> p.call_stacked.clear()
     loop pos in start..<(start + count) {
@@ -1040,7 +1040,7 @@ patch_call: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, target:
         patch_ensure(p, 4)
         p.pos = o0_st_sub_rsp_i8(p.code, p.pos, 8)
     }
-    idx := n_stacked - 1
+    ^idx: n_stacked - 1
     loop idx >= 0 {
         patch_load_slot(p, 11, args[p.call_stacked[idx]])
         patch_ensure(p, 4)
@@ -1052,22 +1052,20 @@ patch_call: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, target:
         slot: args[start + row]
         if place >= 16 {
             patch_load_xmm(p, fast.type_kind[f.slot_type[slot]] == O0_KIND_FLOAT32, place - 16, p.homes[slot])
-        } else if place >= 0 {
-            patch_load_slot(p, place, slot)
-        }
+        } else if place >= 0 { patch_load_slot(p, place, slot) }
     }
     if sret -> patch_lea_rbp(p, 7, storage)
     if indirect >= 0 -> patch_load_slot(p, 10, indirect)
     patch_call_out(p, f, target, indirect >= 0, alloc_row)
     if pushed_bytes > 0 {
         patch_ensure(p, 8)
-        if patch_fits_i8(pushed_bytes) {
-            p.pos = o0_st_add_rsp_i8(p.code, p.pos, pushed_bytes)
-        } else {
+        if patch_fits_i8(pushed_bytes) -> p.pos = o0_st_add_rsp_i8(p.code, p.pos, pushed_bytes) else {
             p.pos = o0_st_add_rsp_i32(p.code, p.pos, pushed_bytes)
         }
     }
-    if dst < 0 -> return
+    if dst < 0 {
+        return
+    }
     if sret {
         patch_lea_rbp(p, 0, storage)
         patch_store_slot(p, dst, 0)
@@ -1085,8 +1083,8 @@ patch_call: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, target:
 }
 
 patch_tail_jump: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
-    general := 0
-    floats := 0
+    ^general: 0
+    ^floats: 0
     loop pos in f.b[at]..<(f.b[at] + f.c[at]) {
         slot: f.args[pos]
         trow: f.slot_type[slot]
@@ -1121,7 +1119,9 @@ patch_emit_load: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at
     dst: f.dst[at]
     trow: f.slot_type[dst]
     k: fast.type_kind[trow]
-    if k == O0_KIND_UNIT -> return
+    if k == O0_KIND_UNIT {
+        return
+    }
     off: f.b[at]
     if !x64_fits_i32(off) {
         p.errors.push("{f.name}: offset {off} does not fit a displacement")
@@ -1134,38 +1134,38 @@ patch_emit_load: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at
     width: if k == O0_KIND_BOOL -> 1 else if k == O0_KIND_FLOAT32 -> 4 else if k == O0_KIND_WORD && (sz == 1 || sz == 2 || sz == 4) -> sz else -> 8
     signed: k == O0_KIND_WORD && fast.type_signed[trow]
     if width == 8 {
-        if off == 0 -> p.pos = o0_st_load_field_i64_0(p.code, p.pos)
-        else if patch_fits_i8(off) -> p.pos = o0_st_load_field_i64_8(p.code, p.pos, off)
-        else -> p.pos = o0_st_load_field_i64_32(p.code, p.pos, off)
+        if off == 0 -> p.pos = o0_st_load_field_i64_0(p.code, p.pos) else if patch_fits_i8(off) {
+            p.pos = o0_st_load_field_i64_8(p.code, p.pos, off)
+        } else { p.pos = o0_st_load_field_i64_32(p.code, p.pos, off) }
     } else if width == 4 {
         if signed {
-            if off == 0 -> p.pos = o0_st_load_field_i32_0(p.code, p.pos)
-            else if patch_fits_i8(off) -> p.pos = o0_st_load_field_i32_8(p.code, p.pos, off)
-            else -> p.pos = o0_st_load_field_i32_32(p.code, p.pos, off)
+            if off == 0 -> p.pos = o0_st_load_field_i32_0(p.code, p.pos) else if patch_fits_i8(off) {
+                p.pos = o0_st_load_field_i32_8(p.code, p.pos, off)
+            } else { p.pos = o0_st_load_field_i32_32(p.code, p.pos, off) }
         } else {
-            if off == 0 -> p.pos = o0_st_load_field_u32_0(p.code, p.pos)
-            else if patch_fits_i8(off) -> p.pos = o0_st_load_field_u32_8(p.code, p.pos, off)
-            else -> p.pos = o0_st_load_field_u32_32(p.code, p.pos, off)
+            if off == 0 -> p.pos = o0_st_load_field_u32_0(p.code, p.pos) else if patch_fits_i8(off) {
+                p.pos = o0_st_load_field_u32_8(p.code, p.pos, off)
+            } else { p.pos = o0_st_load_field_u32_32(p.code, p.pos, off) }
         }
     } else if width == 2 {
         if signed {
-            if off == 0 -> p.pos = o0_st_load_field_i16_0(p.code, p.pos)
-            else if patch_fits_i8(off) -> p.pos = o0_st_load_field_i16_8(p.code, p.pos, off)
-            else -> p.pos = o0_st_load_field_i16_32(p.code, p.pos, off)
+            if off == 0 -> p.pos = o0_st_load_field_i16_0(p.code, p.pos) else if patch_fits_i8(off) {
+                p.pos = o0_st_load_field_i16_8(p.code, p.pos, off)
+            } else { p.pos = o0_st_load_field_i16_32(p.code, p.pos, off) }
         } else {
-            if off == 0 -> p.pos = o0_st_load_field_u16_0(p.code, p.pos)
-            else if patch_fits_i8(off) -> p.pos = o0_st_load_field_u16_8(p.code, p.pos, off)
-            else -> p.pos = o0_st_load_field_u16_32(p.code, p.pos, off)
+            if off == 0 -> p.pos = o0_st_load_field_u16_0(p.code, p.pos) else if patch_fits_i8(off) {
+                p.pos = o0_st_load_field_u16_8(p.code, p.pos, off)
+            } else { p.pos = o0_st_load_field_u16_32(p.code, p.pos, off) }
         }
     } else {
         if signed {
-            if off == 0 -> p.pos = o0_st_load_field_i8_0(p.code, p.pos)
-            else if patch_fits_i8(off) -> p.pos = o0_st_load_field_i8_8(p.code, p.pos, off)
-            else -> p.pos = o0_st_load_field_i8_32(p.code, p.pos, off)
+            if off == 0 -> p.pos = o0_st_load_field_i8_0(p.code, p.pos) else if patch_fits_i8(off) {
+                p.pos = o0_st_load_field_i8_8(p.code, p.pos, off)
+            } else { p.pos = o0_st_load_field_i8_32(p.code, p.pos, off) }
         } else {
-            if off == 0 -> p.pos = o0_st_load_field_u8_0(p.code, p.pos)
-            else if patch_fits_i8(off) -> p.pos = o0_st_load_field_u8_8(p.code, p.pos, off)
-            else -> p.pos = o0_st_load_field_u8_32(p.code, p.pos, off)
+            if off == 0 -> p.pos = o0_st_load_field_u8_0(p.code, p.pos) else if patch_fits_i8(off) {
+                p.pos = o0_st_load_field_u8_8(p.code, p.pos, off)
+            } else { p.pos = o0_st_load_field_u8_32(p.code, p.pos, off) }
         }
     }
     patch_store_slot(p, dst, 0)
@@ -1176,7 +1176,9 @@ patch_emit_store: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, a
     val: f.c[at]
     trow: f.slot_type[val]
     k: fast.type_kind[trow]
-    if k == O0_KIND_UNIT -> return
+    if k == O0_KIND_UNIT {
+        return
+    }
     off: f.b[at]
     if !x64_fits_i32(off) {
         p.errors.push("{f.name}: offset {off} does not fit a displacement")
@@ -1190,32 +1192,32 @@ patch_emit_store: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, a
     if stream && (width == 8 || width == 4) {
         p.has_stream = true
         if width == 8 {
-            if off == 0 -> p.pos = o0_st_movnti_0(p.code, p.pos)
-            else if patch_fits_i8(off) -> p.pos = o0_st_movnti_8(p.code, p.pos, off)
-            else -> p.pos = o0_st_movnti_32(p.code, p.pos, off)
+            if off == 0 -> p.pos = o0_st_movnti_0(p.code, p.pos) else if patch_fits_i8(off) {
+                p.pos = o0_st_movnti_8(p.code, p.pos, off)
+            } else { p.pos = o0_st_movnti_32(p.code, p.pos, off) }
         } else {
-            if off == 0 -> p.pos = o0_st_movnti4_0(p.code, p.pos)
-            else if patch_fits_i8(off) -> p.pos = o0_st_movnti4_8(p.code, p.pos, off)
-            else -> p.pos = o0_st_movnti4_32(p.code, p.pos, off)
+            if off == 0 -> p.pos = o0_st_movnti4_0(p.code, p.pos) else if patch_fits_i8(off) {
+                p.pos = o0_st_movnti4_8(p.code, p.pos, off)
+            } else { p.pos = o0_st_movnti4_32(p.code, p.pos, off) }
         }
         return
     }
     if width == 8 {
-        if off == 0 -> p.pos = o0_st_store_field_8_0(p.code, p.pos)
-        else if patch_fits_i8(off) -> p.pos = o0_st_store_field_8_8(p.code, p.pos, off)
-        else -> p.pos = o0_st_store_field_8_32(p.code, p.pos, off)
+        if off == 0 -> p.pos = o0_st_store_field_8_0(p.code, p.pos) else if patch_fits_i8(off) {
+            p.pos = o0_st_store_field_8_8(p.code, p.pos, off)
+        } else { p.pos = o0_st_store_field_8_32(p.code, p.pos, off) }
     } else if width == 4 {
-        if off == 0 -> p.pos = o0_st_store_field_4_0(p.code, p.pos)
-        else if patch_fits_i8(off) -> p.pos = o0_st_store_field_4_8(p.code, p.pos, off)
-        else -> p.pos = o0_st_store_field_4_32(p.code, p.pos, off)
+        if off == 0 -> p.pos = o0_st_store_field_4_0(p.code, p.pos) else if patch_fits_i8(off) {
+            p.pos = o0_st_store_field_4_8(p.code, p.pos, off)
+        } else { p.pos = o0_st_store_field_4_32(p.code, p.pos, off) }
     } else if width == 2 {
-        if off == 0 -> p.pos = o0_st_store_field_2_0(p.code, p.pos)
-        else if patch_fits_i8(off) -> p.pos = o0_st_store_field_2_8(p.code, p.pos, off)
-        else -> p.pos = o0_st_store_field_2_32(p.code, p.pos, off)
+        if off == 0 -> p.pos = o0_st_store_field_2_0(p.code, p.pos) else if patch_fits_i8(off) {
+            p.pos = o0_st_store_field_2_8(p.code, p.pos, off)
+        } else { p.pos = o0_st_store_field_2_32(p.code, p.pos, off) }
     } else {
-        if off == 0 -> p.pos = o0_st_store_field_1_0(p.code, p.pos)
-        else if patch_fits_i8(off) -> p.pos = o0_st_store_field_1_8(p.code, p.pos, off)
-        else -> p.pos = o0_st_store_field_1_32(p.code, p.pos, off)
+        if off == 0 -> p.pos = o0_st_store_field_1_0(p.code, p.pos) else if patch_fits_i8(off) {
+            p.pos = o0_st_store_field_1_8(p.code, p.pos, off)
+        } else { p.pos = o0_st_store_field_1_32(p.code, p.pos, off) }
     }
 }
 
@@ -1226,9 +1228,7 @@ patch_floor_adjust: fn(p: ^IRPatchEmitter, op: IROp) Never! {
     p.pos = o0_st_mov_r11_rdx(p.code, p.pos)
     p.pos = o0_st_xor_r11_rcx(p.code, p.pos)
     same: patch_jcc(p, 9)
-    if op == .FloorDiv {
-        p.pos = o0_st_sub_rax_i8(p.code, p.pos, 1)
-    } else {
+    if op == .FloorDiv -> p.pos = o0_st_sub_rax_i8(p.code, p.pos, 1) else {
         p.pos = o0_st_add_rdx_rcx(p.code, p.pos)
     }
     done: p.pos
@@ -1260,13 +1260,12 @@ patch_word_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, 
             if v == 0 {
                 patch_ensure(p, 4)
                 p.pos = o0_st_test_rax_rax(p.code, p.pos)
-            } else {
-                patch_alu_rax_imm(p, 7, v)
-            }
+            } else { patch_alu_rax_imm(p, 7, v) }
         } else if !patch_is_const(p, sb) && hb != 0 {
             patch_ensure(p, 8)
-            if patch_fits_i8(hb) -> p.pos = o0_st_cmp_rax_m8(p.code, p.pos, hb)
-            else -> p.pos = o0_st_cmp_rax_m32(p.code, p.pos, hb)
+            if patch_fits_i8(hb) -> p.pos = o0_st_cmp_rax_m8(p.code, p.pos, hb) else {
+                p.pos = o0_st_cmp_rax_m32(p.code, p.pos, hb)
+            }
         } else {
             patch_load_slot(p, 1, sb)
             patch_ensure(p, 4)
@@ -1312,9 +1311,7 @@ patch_word_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, 
             if op == .Shl {
                 p.pos = o0_st_shl_rax_i8(p.code, p.pos, cnt)
                 patch_narrow(p, 0, !unsigned, bits)
-            } else if unsigned {
-                p.pos = o0_st_shr_rax_i8(p.code, p.pos, cnt)
-            } else {
+            } else if unsigned { p.pos = o0_st_shr_rax_i8(p.code, p.pos, cnt) } else {
                 p.pos = o0_st_sar_rax_i8(p.code, p.pos, cnt)
             }
             patch_store_slot(p, dst, 0)
@@ -1326,7 +1323,7 @@ patch_word_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, 
             p.pos = o0_st_cmp_rcx_i8(p.code, p.pos, bits)
             s_start: p.cold_sites.len()
             p.cold_sites.push(patch_jcc(p, 3))
-            cold := patch_cold_new(IRX64ColdKind.ShiftStop, s_start, 1)
+            ^cold: patch_cold_new(IRX64ColdKind.ShiftStop, s_start, 1)
             cold.right = sb
             cold.direction = if op == .Shl -> 0 else -> 1
             cold.unsigned = if unsigned -> 1 else -> 0
@@ -1339,9 +1336,7 @@ patch_word_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, 
         if op == .Shl {
             p.pos = o0_st_shl_rax_cl(p.code, p.pos)
             patch_narrow(p, 0, !unsigned, bits)
-        } else if unsigned {
-            p.pos = o0_st_shr_rax_cl(p.code, p.pos)
-        } else {
+        } else if unsigned { p.pos = o0_st_shr_rax_cl(p.code, p.pos) } else {
             p.pos = o0_st_sar_rax_cl(p.code, p.pos)
         }
         patch_store_slot(p, dst, 0)
@@ -1356,27 +1351,25 @@ patch_word_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, 
             v: p.const_val[sb]
             if op == .Mul {
                 patch_ensure(p, 8)
-                if patch_fits_i8(v) -> p.pos = o0_st_imul_rax_i8(p.code, p.pos, v)
-                else -> p.pos = o0_st_imul_rax_i32(p.code, p.pos, v)
-            } else {
-                patch_alu_rax_imm(p, if op == .Add -> 0 else -> 5, v)
-            }
+                if patch_fits_i8(v) -> p.pos = o0_st_imul_rax_i8(p.code, p.pos, v) else {
+                    p.pos = o0_st_imul_rax_i32(p.code, p.pos, v)
+                }
+            } else { patch_alu_rax_imm(p, if op == .Add -> 0 else -> 5, v) }
         } else {
             patch_load_slot(p, 1, sb)
             patch_ensure(p, 6)
-            if op == .Add -> p.pos = o0_st_add_rax_rcx(p.code, p.pos)
-            else if op == .Sub -> p.pos = o0_st_sub_rax_rcx(p.code, p.pos)
-            else if unsigned && bits == 64 -> p.pos = o0_st_mul_rcx(p.code, p.pos)
-            else -> p.pos = o0_st_imul_rax_rcx(p.code, p.pos)
+            if op == .Add -> p.pos = o0_st_add_rax_rcx(p.code, p.pos) else if op == .Sub {
+                p.pos = o0_st_sub_rax_rcx(p.code, p.pos)
+            } else if unsigned && bits == 64 { p.pos = o0_st_mul_rcx(p.code, p.pos) } else {
+                p.pos = o0_st_imul_rax_rcx(p.code, p.pos)
+            }
         }
         if bits == 64 {
             if trap {
                 cc: if unsigned && op != .Mul -> 2 else -> 0
                 patch_stop_if(p, f, at, cc, stop_kind)
             }
-        } else if trap {
-            patch_range_check(p, f, at, !unsigned, bits, stop_kind)
-        } else {
+        } else if trap { patch_range_check(p, f, at, !unsigned, bits, stop_kind) } else {
             patch_narrow(p, 0, !unsigned, bits)
         }
         patch_store_slot(p, dst, 0)
@@ -1460,9 +1453,7 @@ patch_exact_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
             if v == 0 {
                 patch_ensure(p, 4)
                 p.pos = o0_st_test_rax_rax(p.code, p.pos)
-            } else {
-                patch_alu_rax_imm(p, 7, v)
-            }
+            } else { patch_alu_rax_imm(p, 7, v) }
         } else {
             patch_load_slot(p, 1, sb)
             if !words && !b_const {
@@ -1481,9 +1472,11 @@ patch_exact_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
         p.fused_slot = dst
         p.fused_cc = cc
         s_len: p.cold_sites.len() - s_start
-        if s_len == 0 -> return
+        if s_len == 0 {
+            return
+        }
         p.rax_slot = -1
-        cold := patch_cold_new(IRX64ColdKind.Compare, s_start, s_len)
+        ^cold: patch_cold_new(IRX64ColdKind.Compare, s_start, s_len)
         cold.resume = p.pos
         cold.left = sa
         cold.right = sb
@@ -1520,9 +1513,7 @@ patch_exact_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
                 p.cold_sites.push(t2 + 8)
             }
             patch_ensure(p, 12)
-            if op == .Add {
-                p.pos = o0_st_add_rax_rcx(p.code, p.pos)
-            } else if op == .Sub {
+            if op == .Add -> p.pos = o0_st_add_rax_rcx(p.code, p.pos) else if op == .Sub {
                 p.pos = o0_st_sub_rax_rcx(p.code, p.pos)
             } else {
                 p.pos = o0_st_imul_rax_rcx(p.code, p.pos)
@@ -1535,7 +1526,7 @@ patch_exact_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
         p.cold_sites.push(tr + 8)
         patch_store_slot(p, dst, 0)
         p.rax_slot = -1
-        cold := patch_cold_new(IRX64ColdKind.Route, s_start, p.cold_sites.len() - s_start)
+        ^cold: patch_cold_new(IRX64ColdKind.Route, s_start, p.cold_sites.len() - s_start)
         cold.resume = p.pos
         cold.sym_id = if op == .Add -> O0_RT_INT_ADD else if op == .Sub -> O0_RT_INT_SUB else -> O0_RT_INT_MUL
         cold.left = sa
@@ -1573,9 +1564,11 @@ patch_exact_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
         }
         patch_store_slot(p, dst, 0)
         s_len: p.cold_sites.len() - s_start
-        if s_len == 0 -> return
+        if s_len == 0 {
+            return
+        }
         p.rax_slot = -1
-        cold := patch_cold_new(IRX64ColdKind.Route, s_start, s_len)
+        ^cold: patch_cold_new(IRX64ColdKind.Route, s_start, s_len)
         cold.resume = p.pos
         cold.sym_id = if op == .BitAnd -> O0_RT_INT_BIT_AND else if op == .BitOr -> O0_RT_INT_BIT_OR else -> O0_RT_INT_BIT_XOR
         cold.left = sa
@@ -1613,11 +1606,15 @@ patch_exact_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
         patch_ensure(p, 8)
         p.pos = o0_st_cqo_idiv_rcx(p.code, p.pos)
         if op == .FloorDiv || op == .Mod -> patch_floor_adjust(p, op)
-        if op == .Rem || op == .Mod -> patch_store_slot(p, dst, 2) else -> patch_store_slot(p, dst, 0)
+        if op == .Rem || op == .Mod -> patch_store_slot(p, dst, 2) else {
+            patch_store_slot(p, dst, 0)
+        }
         p.rax_slot = -1
         s_len: p.cold_sites.len() - s_start
-        if s_len == 0 -> return
-        cold := patch_cold_new(IRX64ColdKind.LocatedRoute, s_start, s_len)
+        if s_len == 0 {
+            return
+        }
+        ^cold: patch_cold_new(IRX64ColdKind.LocatedRoute, s_start, s_len)
         cold.resume = p.pos
         cold.sym_id = if op == .Div -> O0_RT_INT_DIV else if op == .Rem -> O0_RT_INT_REM else if op == .FloorDiv -> O0_RT_INT_FLOORDIV else -> O0_RT_INT_MOD
         cold.left = sa
@@ -1671,9 +1668,11 @@ patch_exact_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
     }
     patch_store_slot(p, dst, 0)
     s_len: p.cold_sites.len() - s_start
-    if s_len == 0 -> return
+    if s_len == 0 {
+        return
+    }
     p.rax_slot = -1
-    cold := patch_cold_new(IRX64ColdKind.LocatedRoute, s_start, s_len)
+    ^cold: patch_cold_new(IRX64ColdKind.LocatedRoute, s_start, s_len)
     cold.resume = p.pos
     cold.sym_id = if left_shift -> O0_RT_INT_SHL else -> O0_RT_INT_SHR
     cold.left = sa
@@ -1793,7 +1792,7 @@ patch_neg: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int)
         p.cold_sites.push(tr + 8)
         patch_store_slot(p, dst, 0)
         p.rax_slot = -1
-        cold := patch_cold_new(IRX64ColdKind.Route, s_start, p.cold_sites.len() - s_start)
+        ^cold: patch_cold_new(IRX64ColdKind.Route, s_start, p.cold_sites.len() - s_start)
         cold.resume = p.pos
         cold.sym_id = O0_RT_INT_SUB
         cold.left = -1
@@ -1826,8 +1825,9 @@ patch_neg: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int)
     patch_ensure(p, 4)
     p.pos = o0_st_neg_rax(p.code, p.pos)
     if trap && signed {
-        if bits == 64 -> patch_stop_if(p, f, at, 0, 1)
-        else -> patch_range_check(p, f, at, true, bits, 1)
+        if bits == 64 -> patch_stop_if(p, f, at, 0, 1) else {
+            patch_range_check(p, f, at, true, bits, 1)
+        }
     }
     patch_narrow(p, 0, signed, bits)
     patch_store_slot(p, dst, 0)
@@ -1865,9 +1865,11 @@ patch_not: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int)
     p.pos = o0_st_xor_rax_i8(p.code, p.pos, -1)
     patch_store_slot(p, dst, 0)
     s_len: p.cold_sites.len() - s_start
-    if s_len == 0 -> return
+    if s_len == 0 {
+        return
+    }
     p.rax_slot = -1
-    cold := patch_cold_new(IRX64ColdKind.Route, s_start, s_len)
+    ^cold: patch_cold_new(IRX64ColdKind.Route, s_start, s_len)
     cold.resume = p.pos
     cold.sym_id = O0_RT_INT_BIT_XOR
     cold.left = sa
@@ -1895,7 +1897,7 @@ patch_int_big: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int) Never! {
     patch_ensure(p, 28)
     p.rax_slot = -1
     p.pos = o0_st_mov_rdx_rax(p.code, p.pos)
-    cc := 5
+    ^cc: 5
     if bits == IR_INT_INLINE_BITS {
         p.pos = o0_st_add_rdx_rdx(p.code, p.pos)
         cc = 0
@@ -1941,8 +1943,9 @@ patch_convert: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: 
     if f_from && f_to {
         patch_load_xmm(p, fk == O0_KIND_FLOAT32, 0, ha)
         patch_ensure(p, 6)
-        if fk == O0_KIND_FLOAT32 && tk == O0_KIND_FLOAT -> p.pos = o0_st_cvtss2sd(p.code, p.pos)
-        else if fk == O0_KIND_FLOAT && tk == O0_KIND_FLOAT32 -> p.pos = o0_st_cvtsd2ss(p.code, p.pos)
+        if fk == O0_KIND_FLOAT32 && tk == O0_KIND_FLOAT -> p.pos = o0_st_cvtss2sd(p.code, p.pos) else if fk == O0_KIND_FLOAT && tk == O0_KIND_FLOAT32 {
+            p.pos = o0_st_cvtsd2ss(p.code, p.pos)
+        }
         p.const_epoch[dst] = 0
         patch_store_xmm(p, tk == O0_KIND_FLOAT32, hd, 0)
     }
@@ -2002,7 +2005,7 @@ patch_transfer: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IR
             s1: p.cold_sites.len()
             p.cold_sites.push(hb + 9)
             p.cold_sites.push(hb + 22)
-            cold := patch_cold_new(IRX64ColdKind.Route, s1, 2)
+            ^cold: patch_cold_new(IRX64ColdKind.Route, s1, 2)
             cold.resume = p.pos
             cold.sym_id = O0_RT_STRING_CLONE
             cold.left = src
@@ -2011,7 +2014,7 @@ patch_transfer: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IR
             p.colds.push(cold)
             s2: p.cold_sites.len()
             p.cold_sites.push(ib + (if m.single_thread -> 6 else -> 7))
-            ovf := patch_cold_new(IRX64ColdKind.Route, s2, 1)
+            ^ovf: patch_cold_new(IRX64ColdKind.Route, s2, 1)
             ovf.resume = p.pos
             ovf.sym_id = O0_RT_PANIC_OVERFLOW
             ovf.at = at
@@ -2022,18 +2025,22 @@ patch_transfer: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IR
         p.errors.push("{f.name}: Copy of {ir_kind_name(ty.kind)} with drop {ty.drop} has no clone route")
         return
     }
-    if src == dst || k == O0_KIND_UNIT -> return
+    if src == dst || k == O0_KIND_UNIT {
+        return
+    }
     if patch_is_const(p, src) {
         v: p.const_val[src]
         hd: p.homes[dst]
         patch_ensure(p, 20)
         if x64_fits_i32(v) {
-            if patch_fits_i8(hd) -> p.pos = o0_st_const_i32_8(p.code, p.pos, hd, v)
-            else -> p.pos = o0_st_const_i32_32(p.code, p.pos, hd, v)
+            if patch_fits_i8(hd) -> p.pos = o0_st_const_i32_8(p.code, p.pos, hd, v) else {
+                p.pos = o0_st_const_i32_32(p.code, p.pos, hd, v)
+            }
             if p.rax_slot == dst -> p.rax_slot = -1
         } else {
-            if patch_fits_i8(hd) -> p.pos = o0_st_const_i64_8(p.code, p.pos, hd, v)
-            else -> p.pos = o0_st_const_i64_32(p.code, p.pos, hd, v)
+            if patch_fits_i8(hd) -> p.pos = o0_st_const_i64_8(p.code, p.pos, hd, v) else {
+                p.pos = o0_st_const_i64_32(p.code, p.pos, hd, v)
+            }
             p.rax_slot = dst
         }
         p.const_epoch[dst] = p.block_epoch
@@ -2070,20 +2077,24 @@ patch_drop: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunc
 
 patch_drop_slot: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, slot: Int, at: Int) Never! {
     trow: f.slot_type[slot]
-    if !fast.type_has_drop[trow] -> return
+    if !fast.type_has_drop[trow] {
+        return
+    }
     if p.in_stop_edge {
-        if fast.type_drop_is_int[trow] && patch_is_const(p, slot) -> return
+        if fast.type_drop_is_int[trow] && patch_is_const(p, slot) {
+            return
+        }
         patch_load_slot(p, 7, slot)
         fid: fast.type_drop_fn[trow]
-        if fid >= 0 {
-            patch_call_out(p, f, x64_reloc_function(0, fid), false, -1)
-        } else {
+        if fid >= 0 -> patch_call_out(p, f, x64_reloc_function(0, fid), false, -1) else {
             patch_call_out(p, f, patch_make_rt(fast, 0, fast.type_drop_rt_id[trow]), false, -1)
         }
         return
     }
     if fast.type_drop_is_int[trow] {
-        if patch_is_const(p, slot) -> return
+        if patch_is_const(p, slot) {
+            return
+        }
         h: p.homes[slot]
         rt_id: fast.type_drop_rt_id[trow]
         patch_ensure(p, 24)
@@ -2107,7 +2118,7 @@ patch_drop_slot: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: I
         s_start: p.cold_sites.len()
         p.cold_sites.push(b + 24)
         p.cold_sites.push(b + (if m.single_thread -> 39 else -> 41))
-        cold := patch_cold_new(IRX64ColdKind.Route, s_start, 2)
+        ^cold: patch_cold_new(IRX64ColdKind.Route, s_start, 2)
         cold.resume = p.pos
         cold.sym_id = O0_RT_STRING_DROP
         cold.left = slot
@@ -2117,9 +2128,7 @@ patch_drop_slot: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: I
     }
     patch_load_slot(p, 7, slot)
     fid: fast.type_drop_fn[trow]
-    if fid >= 0 {
-        patch_call_out(p, f, x64_reloc_function(0, fid), false, -1)
-    } else {
+    if fid >= 0 -> patch_call_out(p, f, x64_reloc_function(0, fid), false, -1) else {
         patch_call_out(p, f, patch_make_rt(fast, 0, fast.type_drop_rt_id[trow]), false, -1)
     }
 }
@@ -2193,7 +2202,7 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
         p.rax_slot = -1
         s_start: p.cold_sites.len()
         p.cold_sites.push(b + (if m.single_thread -> 15 else -> 16))
-        ovf := patch_cold_new(IRX64ColdKind.Route, s_start, 1)
+        ^ovf: patch_cold_new(IRX64ColdKind.Route, s_start, 1)
         ovf.resume = p.pos
         ovf.sym_id = O0_RT_PANIC_OVERFLOW
         ovf.at = at
@@ -2214,7 +2223,7 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
         p.rax_slot = -1
         s_start: p.cold_sites.len()
         p.cold_sites.push(marked_at)
-        cold := patch_cold_new(IRX64ColdKind.Release, s_start, 1)
+        ^cold: patch_cold_new(IRX64ColdKind.Release, s_start, 1)
         cold.resume = p.pos
         cold.left = block
         cold.dst = dst
@@ -2238,7 +2247,7 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
         p.rax_slot = -1
         s_start: p.cold_sites.len()
         p.cold_sites.push(t1 + 8)
-        cold := patch_cold_new(IRX64ColdKind.Route, s_start, 1)
+        ^cold: patch_cold_new(IRX64ColdKind.Route, s_start, 1)
         cold.resume = p.pos
         cold.sym_id = fast.name_rt_sym_id[name_row]
         cold.left = val
@@ -2258,7 +2267,7 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
         p.rax_slot = -1
         s_start: p.cold_sites.len()
         p.cold_sites.push(t1 + 8)
-        cold := patch_cold_new(IRX64ColdKind.Route, s_start, 1)
+        ^cold: patch_cold_new(IRX64ColdKind.Route, s_start, 1)
         cold.resume = p.pos
         cold.sym_id = O0_RT_INT_OWNED_FROM_I64
         cold.left = val
@@ -2301,9 +2310,11 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
                     }
                     patch_store_slot(p, dst, 0)
                     s_len: p.cold_sites.len() - s_start
-                    if s_len == 0 -> return
+                    if s_len == 0 {
+                        return
+                    }
                     p.rax_slot = -1
-                    cold := patch_cold_new(IRX64ColdKind.Call, s_start, s_len)
+                    ^cold: patch_cold_new(IRX64ColdKind.Call, s_start, s_len)
                     cold.resume = p.pos
                     cold.sym_id = fast.name_rt_sym_id[name_row]
                     cold.left = at
@@ -2331,7 +2342,7 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
             p.const_epoch[dst] = 0
             patch_store_xmm(p, false, p.homes[dst], 0)
             p.rax_slot = -1
-            cold := patch_cold_new(IRX64ColdKind.Call, s_start, 1)
+            ^cold: patch_cold_new(IRX64ColdKind.Call, s_start, 1)
             cold.resume = p.pos
             cold.sym_id = fast.name_rt_sym_id[name_row]
             cold.left = at
@@ -2349,11 +2360,14 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
             hd: p.homes[dst]
             patch_ensure(p, 12)
             p.const_epoch[dst] = 0
-            if patch_fits_i8(hd) -> p.pos = o0_st_const_i32_8(p.code, p.pos, hd, 0)
-            else -> p.pos = o0_st_const_i32_32(p.code, p.pos, hd, 0)
+            if patch_fits_i8(hd) -> p.pos = o0_st_const_i32_8(p.code, p.pos, hd, 0) else {
+                p.pos = o0_st_const_i32_32(p.code, p.pos, hd, 0)
+            }
             if p.rax_slot == dst -> p.rax_slot = -1
         }
-        if m.zones_stripped -> return
+        if m.zones_stripped {
+            return
+        }
         if m.zone_table {
             // Off-by-default `test eax, imm32` site; the runtime flips it to `jmp rel32`.
             patch_ensure(p, 6)
@@ -2422,7 +2436,7 @@ patch_ctrl_branch: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int, depth: Int, co
         p.errors.push("{f.name}: branch depth {depth} leaves the function")
         return
     }
-    site := -1
+    ^site: -1
     if conditional {
         if p.fused_slot == cond_slot && cond_slot >= 0 {
             cc: p.fused_cc
@@ -2446,9 +2460,7 @@ patch_ctrl_branch: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int, depth: Int, co
                 site = b + 10
             }
         }
-    } else {
-        site = patch_jmp(p)
-    }
+    } else { site = patch_jmp(p) }
     patch_cf_barrier(p)
     if p.ctrl_head[row] >= 0 {
         patch_rel32(p.code, site, p.ctrl_head[row])
@@ -2471,16 +2483,16 @@ patch_ctrl_end: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int) Never! {
     row: p.ctrl_open.len() - 1
     p.end_of[p.ctrl_open[row]] = here
     if p.ctrl_false[row] >= 0 -> patch_rel32(p.code, p.ctrl_false[row], here)
-    idx := p.ctrl_end_head[row]
+    ^idx: p.ctrl_end_head[row]
     loop idx >= 0 {
         patch_rel32(p.code, p.end_sites[idx], here)
         idx = p.end_next[idx]
     }
-    _ := p.ctrl_open.pop()
-    _ := p.ctrl_head.pop()
-    _ := p.ctrl_false.pop()
-    _ := p.ctrl_end_head.pop()
-    _ := p.ctrl_end_tail.pop()
+    ^_: p.ctrl_open.pop()
+    ^_: p.ctrl_head.pop()
+    ^_: p.ctrl_false.pop()
+    ^_: p.ctrl_end_head.pop()
+    ^_: p.ctrl_end_tail.pop()
 }
 
 // ---------------------------------------------------------------------------
@@ -2496,25 +2508,27 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
     if op == {
         .Nop -> {}
         .Const -> {
-            if dst < 0 || p.homes[dst] == 0 -> return
+            if dst < 0 || p.homes[dst] == 0 {
+                return
+            }
             val: f.a[at]
             hd: p.homes[dst]
             patch_ensure(p, 20)
             if x64_fits_i32(val) {
-                if patch_fits_i8(hd) -> p.pos = o0_st_const_i32_8(p.code, p.pos, hd, val)
-                else -> p.pos = o0_st_const_i32_32(p.code, p.pos, hd, val)
+                if patch_fits_i8(hd) -> p.pos = o0_st_const_i32_8(p.code, p.pos, hd, val) else {
+                    p.pos = o0_st_const_i32_32(p.code, p.pos, hd, val)
+                }
                 if p.rax_slot == dst -> p.rax_slot = -1
             } else {
-                if patch_fits_i8(hd) -> p.pos = o0_st_const_i64_8(p.code, p.pos, hd, val)
-                else -> p.pos = o0_st_const_i64_32(p.code, p.pos, hd, val)
+                if patch_fits_i8(hd) -> p.pos = o0_st_const_i64_8(p.code, p.pos, hd, val) else {
+                    p.pos = o0_st_const_i64_32(p.code, p.pos, hd, val)
+                }
                 p.rax_slot = if fast.type_class[f.slot_type[dst]] == O0_CLS_GENERAL -> dst else -> -1
             }
             if fast.type_class[f.slot_type[dst]] == O0_CLS_GENERAL {
                 p.const_epoch[dst] = p.block_epoch
                 p.const_val[dst] = val
-            } else {
-                p.const_epoch[dst] = 0
-            }
+            } else { p.const_epoch[dst] = 0 }
         }
         .ConstText -> {
             data_row: f.a[at]
@@ -2527,8 +2541,9 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
             patch_ensure(p, 16)
             p.const_epoch[dst] = 0
             b: p.pos
-            if patch_fits_i8(hd) -> p.pos = o0_st_lea_rip_slot_8(p.code, b, hd)
-            else -> p.pos = o0_st_lea_rip_slot_32(p.code, b, hd)
+            if patch_fits_i8(hd) -> p.pos = o0_st_lea_rip_slot_8(p.code, b, hd) else {
+                p.pos = o0_st_lea_rip_slot_32(p.code, b, hd)
+            }
             patch_reloc_data(p, b + 3, hdr)
             p.rax_slot = if hd != 0 -> dst else -> -1
         }
@@ -2544,8 +2559,9 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
                 patch_ensure(p, 20)
                 p.const_epoch[dst] = 0
                 b: p.pos
-                if patch_fits_i8(hd) -> p.pos = o0_st_static_int_8(p.code, b, hd)
-                else -> p.pos = o0_st_static_int_32(p.code, b, hd)
+                if patch_fits_i8(hd) -> p.pos = o0_st_static_int_8(p.code, b, hd) else {
+                    p.pos = o0_st_static_int_32(p.code, b, hd)
+                }
                 patch_reloc_data(p, b + 3, rows.static_id)
                 p.rax_slot = if hd != 0 -> dst else -> -1
                 return
@@ -2565,24 +2581,20 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
             if k == O0_KIND_INT {
                 if ir_overflow_wraps(f.c[at]) {
                     patch_word_binary(p, fast, f, at, O0_KIND_WORD, true, 64, true)
-                } else {
-                    patch_exact_binary(p, fast, f, at)
-                }
+                } else { patch_exact_binary(p, fast, f, at) }
             } else if k == O0_KIND_FLOAT || k == O0_KIND_FLOAT32 {
                 patch_float_binary(p, fast, f, at, k == O0_KIND_FLOAT32)
-            } else if k == O0_KIND_STRING {
-                patch_string_binary(p, fast, f, at)
-            } else if k == O0_KIND_WORD || k == O0_KIND_BOOL || k == O0_KIND_CHAR || k == O0_KIND_POINTER {
+            } else if k == O0_KIND_STRING { patch_string_binary(p, fast, f, at) } else if k == O0_KIND_WORD || k == O0_KIND_BOOL || k == O0_KIND_CHAR || k == O0_KIND_POINTER {
                 patch_word_binary(p, fast, f, at, k, fast.type_signed[trow], fast.type_bits[trow], false)
             } else {
                 p.errors.push("{f.name}: no arithmetic on {ir_kind_name(m.types[trow].kind)}")
             }
         }
-        .Neg -> patch_neg(p, fast, f, at)
-        .Not -> patch_not(p, fast, f, at)
-        .Sqrt -> patch_sqrt(p, fast, f, at)
-        .IntBig -> patch_int_big(p, f, at)
-        .Convert -> patch_convert(p, fast, f, at)
+        .Neg -> { patch_neg(p, fast, f, at) }
+        .Not -> { patch_not(p, fast, f, at) }
+        .Sqrt -> { patch_sqrt(p, fast, f, at) }
+        .IntBig -> { patch_int_big(p, f, at) }
+        .Convert -> { patch_convert(p, fast, f, at) }
         .Concat -> {
             patch_load_slot(p, 7, f.a[at])
             patch_load_slot(p, 6, f.b[at])
@@ -2609,7 +2621,7 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
                     p.rax_slot = -1
                     s1: p.cold_sites.len()
                     p.cold_sites.push(b + 24)
-                    shared := patch_cold_new(IRX64ColdKind.Unique, s1, 1)
+                    ^shared: patch_cold_new(IRX64ColdKind.Unique, s1, 1)
                     shared.resume = p.pos
                     shared.left = at
                     shared.right = -1
@@ -2617,7 +2629,7 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
                     p.colds.push(shared)
                     s2: p.cold_sites.len()
                     p.cold_sites.push(b + 9)
-                    rare := patch_cold_new(IRX64ColdKind.Unique, s2, 1)
+                    ^rare: patch_cold_new(IRX64ColdKind.Unique, s2, 1)
                     rare.resume = p.pos
                     rare.left = at
                     rare.right = header
@@ -2661,15 +2673,18 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
             }
             patch_call(p, fast, f, x64_reloc_function(0, callee), -1, f.args, f.b[at], f.c[at], dst, -1)
         }
-        .CallRuntime -> patch_call_runtime(p, fast, m, f, at)
-        .CallIndirect -> patch_call(p, fast, f, x64_reloc_function(0, -1), f.a[at], f.args, f.b[at], f.c[at], dst, -1)
+        .CallRuntime -> { patch_call_runtime(p, fast, m, f, at) }
+        .CallIndirect -> {
+            patch_call(p, fast, f, x64_reloc_function(0, -1), f.a[at], f.args, f.b[at], f.c[at], dst, -1)
+        }
         .FunctionAddress -> {
             hd: p.homes[dst]
             patch_ensure(p, 16)
             p.const_epoch[dst] = 0
             b: p.pos
-            if patch_fits_i8(hd) -> p.pos = o0_st_lea_rip_slot_8(p.code, b, hd)
-            else -> p.pos = o0_st_lea_rip_slot_32(p.code, b, hd)
+            if patch_fits_i8(hd) -> p.pos = o0_st_lea_rip_slot_8(p.code, b, hd) else {
+                p.pos = o0_st_lea_rip_slot_32(p.code, b, hd)
+            }
             patch_reloc_fn(p, b + 3, f.a[at])
             p.rax_slot = if hd != 0 -> dst else -> -1
         }
@@ -2678,17 +2693,19 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
             patch_ensure(p, 16)
             p.const_epoch[dst] = 0
             b: p.pos
-            if patch_fits_i8(hd) -> p.pos = o0_st_lea_rip_slot_8(p.code, b, hd)
-            else -> p.pos = o0_st_lea_rip_slot_32(p.code, b, hd)
+            if patch_fits_i8(hd) -> p.pos = o0_st_lea_rip_slot_8(p.code, b, hd) else {
+                p.pos = o0_st_lea_rip_slot_32(p.code, b, hd)
+            }
             drow: f.a[at]
             rt_id: if drow >= 0 && drow < fast.data_core_cell_rt_id.len() -> fast.data_core_cell_rt_id[drow] else -> -1
-            if rt_id >= 0 -> patch_reloc_rt_data_id(p, fast, b + 3, rt_id)
-            else -> patch_reloc_data(p, b + 3, drow)
+            if rt_id >= 0 -> patch_reloc_rt_data_id(p, fast, b + 3, rt_id) else {
+                patch_reloc_data(p, b + 3, drow)
+            }
             p.rax_slot = if hd != 0 -> dst else -> -1
         }
-        .Load -> patch_emit_load(p, fast, f, at)
-        .Store -> patch_emit_store(p, fast, f, at, false)
-        .StreamStore -> patch_emit_store(p, fast, f, at, true)
+        .Load -> { patch_emit_load(p, fast, f, at) }
+        .Store -> { patch_emit_store(p, fast, f, at, false) }
+        .StreamStore -> { patch_emit_store(p, fast, f, at, true) }
         .Offset -> {
             patch_load_slot(p, 0, f.a[at])
             off: f.b[at]
@@ -2735,7 +2752,7 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
         }
         .If -> {
             cond: f.a[at]
-            false_site := -1
+            ^false_site: -1
             if prev_fused_slot == cond && cond >= 0 {
                 inv: if prev_fused_cc % 2 == 0 -> prev_fused_cc + 1 else -> prev_fused_cc - 1
                 false_site = patch_jcc(p, inv)
@@ -2768,15 +2785,17 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
             p.ctrl_false[row] = -1
             patch_cf_barrier(p)
         }
-        .End -> patch_ctrl_end(p, f, at)
-        .Br -> patch_ctrl_branch(p, f, at, f.a[at], false, -1)
+        .End -> { patch_ctrl_end(p, f, at) }
+        .Br -> { patch_ctrl_branch(p, f, at, f.a[at], false, -1) }
         .BrIf -> {
             p.fused_slot = prev_fused_slot
             p.fused_cc = prev_fused_cc
             patch_ctrl_branch(p, f, at, f.b[at], true, f.a[at])
         }
         .Return -> {
-            if f.b[at] == IR_TAIL_JUMP -> return
+            if f.b[at] == IR_TAIL_JUMP {
+                return
+            }
             slot: f.a[at]
             if slot >= 0 {
                 if p.result_home != 0 {
@@ -2789,12 +2808,14 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
                 } else {
                     trow: f.slot_type[slot]
                     cls: fast.type_class[trow]
-                    if cls == O0_CLS_GENERAL -> patch_load_slot(p, 0, slot)
-                    else if cls == O0_CLS_FLOAT -> patch_load_xmm(p, fast.type_kind[trow] == O0_KIND_FLOAT32, 0, p.homes[slot])
+                    if cls == O0_CLS_GENERAL -> patch_load_slot(p, 0, slot) else if cls == O0_CLS_FLOAT {
+                        patch_load_xmm(p, fast.type_kind[trow] == O0_KIND_FLOAT32, 0, p.homes[slot])
+                    }
                 }
             }
-            if p.in_stop_edge -> p.stop_returns.push(patch_jmp(p))
-            else if at < f.op.len() - 1 -> p.returns.push(patch_jmp(p))
+            if p.in_stop_edge -> p.stop_returns.push(patch_jmp(p)) else if at < f.op.len() - 1 {
+                p.returns.push(patch_jmp(p))
+            }
             patch_cf_barrier(p)
         }
         .Unreachable -> {
@@ -2860,7 +2881,7 @@ patch_emit_armed_poll: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, at: Int, ed
         patch_reloc_rt_data_id(p, fast, b + 3, O0_RT_CHECKS_ARMED)
         p.cold_sites.push(b + 12)
     }
-    cold := patch_cold_new(IRX64ColdKind.Poll, s_start, p.cold_sites.len() - s_start)
+    ^cold: patch_cold_new(IRX64ColdKind.Poll, s_start, p.cold_sites.len() - s_start)
     cold.resume = p.pos
     cold.left = at
     cold.pad = edge_id
@@ -2893,7 +2914,7 @@ patch_emit_stop_quiet: fn(p: ^IRPatchEmitter, bits: Int) Never! {
 patch_push_stop_edge: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, branch: Int, end_idx: Int, hot_site: Int) Never! {
     simple_edge: patch_stop_edge_is_drop_chain(f, branch, end_idx) || patch_cleanup_edge(p, fast, f, branch, end_idx).ok
     o_start: p.edge_open.len()
-    o_len := 0
+    ^o_len: 0
     if !simple_edge {
         o_len = p.ctrl_open.len()
         loop i in 0..<o_len {
@@ -2927,7 +2948,7 @@ patch_stop_point: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
     end_idx: f.c[branch]
     bare_ret: patch_stop_edge_is_bare_return(p, f, branch, end_idx)
     if f.a[at] == trap {
-        has_trap := false
+        ^has_trap: false
         loop idx in traps..<p.colds.len() {
             k: p.colds[idx].kind
             if k == .Stop || k == .ShiftStop || (k == .LocatedRoute && patch_located_stops_cold(f, p.colds[idx])) {
@@ -2949,8 +2970,8 @@ patch_stop_point: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
         return end_idx
     }
     // poll or turn
-    edge_id := if bare_ret -> -1 else -> p.stop_edges.len()
-    hot_site := -1
+    ^edge_id: if bare_ret -> -1 else -> p.stop_edges.len()
+    ^hot_site: -1
     routed: at > 0 && p.routed_at == at - 1 && p.colds.len() - traps <= 1
     if at > 0 && ir_x64_call_reports(m, f, at - 1) {
         patch_ensure(p, 10)
@@ -2968,7 +2989,7 @@ patch_stop_point: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
         // A turn that counts steps spends one first; once the word is below
         // zero it calls the turn poll past the quiet tests, and the poll
         // enters its routine (X64Select.jet ir_x64_stop_poll).
-        spent := -1
+        ^spent: -1
         if m.step_count && f.a[at] == turn {
             patch_ensure(p, 13)
             b: p.pos
@@ -2977,9 +2998,7 @@ patch_stop_point: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
             spent = b + 9
         }
         has_quiet: patch_in_loop(p, f) || f.stack_check
-        if has_quiet {
-            patch_emit_stop_quiet(p, ir_stop_attention(m.functions[f.a[at]].key))
-        }
+        if has_quiet -> patch_emit_stop_quiet(p, ir_stop_attention(m.functions[f.a[at]].key))
         if spent >= 0 -> patch_rel32(p.code, spent, p.pos)
         patch_call_out(p, f, x64_reloc_function(0, f.a[at]), false, -1)
         patch_ensure(p, 10)
@@ -3005,11 +3024,11 @@ patch_cleanup_edge: fn(p: IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, 
     last: end_idx - 1
     if last <= branch + 2 -> return none
     if f.op[last] != .Return || f.a[last] >= 0 || f.b[last] == IR_TAIL_JUMP -> return none
-    first := branch + 1
+    ^first: branch + 1
     loop first < last && (f.op[first] == .Nop || (p.drop.has_moves && p.drop.kill[first])) {
         first += 1
     }
-    leave := last - 1
+    ^leave: last - 1
     loop leave > first && (f.op[leave] == .Nop || (p.drop.has_moves && p.drop.kill[leave])) {
         leave -= 1
     }
@@ -3019,9 +3038,11 @@ patch_cleanup_edge: fn(p: IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, 
         return none
     }
     token: f.dst[first]
-    if token < f.param_count || f.slot_kind[token] != .Temp || f.slot_name[token] >= 0 -> return none
+    if token < f.param_count || f.slot_kind[token] != .Temp || f.slot_name[token] >= 0 {
+        return none
+    }
     if f.c[leave] != 1 || f.args[f.b[leave]] != token -> return none
-    depth := 0
+    ^depth: 0
     loop k in (first + 1)..<leave {
         if f.dst[k] == token -> return none
         op: f.op[k]
@@ -3064,16 +3085,38 @@ patch_group_eq: fn(f: IRFunction, s1: Int, e1: Int, s2: Int, e2: Int) -> Bool Ne
         op: f.op[k1]
         if op != f.op[k2] -> return false
         if op == {
-            .Drop -> if f.a[k1] != f.a[k2] -> return false
-            .Close -> if f.b[k1] != f.b[k2] || f.a[k1] != f.a[k2] -> return false
-            .Const -> if f.a[k1] != f.a[k2] || f.dst[k1] != f.dst[k2] -> return false
-            .Load | .Offset -> if f.b[k1] != f.b[k2] || f.c[k1] != f.c[k2] || f.a[k1] != f.a[k2] || f.dst[k1] != f.dst[k2] -> return false
-            .Copy | .Move | .Not -> if f.a[k1] != f.a[k2] || f.dst[k1] != f.dst[k2] -> return false
-            .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> if f.c[k1] != f.c[k2] || f.a[k1] != f.a[k2] || f.b[k1] != f.b[k2] || f.dst[k1] != f.dst[k2] -> return false
-            .If -> if (f.b[k1] >= 0) != (f.b[k2] >= 0) || (f.c[k1] - s1) != (f.c[k2] - s2) || f.a[k1] != f.a[k2] -> return false
+            .Drop -> {
+                if f.a[k1] != f.a[k2] -> return false
+            }
+            .Close -> {
+                if f.b[k1] != f.b[k2] || f.a[k1] != f.a[k2] -> return false
+            }
+            .Const -> {
+                if f.a[k1] != f.a[k2] || f.dst[k1] != f.dst[k2] -> return false
+            }
+            .Load | .Offset -> {
+                if f.b[k1] != f.b[k2] || f.c[k1] != f.c[k2] || f.a[k1] != f.a[k2] || f.dst[k1] != f.dst[k2] {
+                    return false
+                }
+            }
+            .Copy | .Move | .Not -> {
+                if f.a[k1] != f.a[k2] || f.dst[k1] != f.dst[k2] -> return false
+            }
+            .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> {
+                if f.c[k1] != f.c[k2] || f.a[k1] != f.a[k2] || f.b[k1] != f.b[k2] || f.dst[k1] != f.dst[k2] {
+                    return false
+                }
+            }
+            .If -> {
+                if (f.b[k1] >= 0) != (f.b[k2] >= 0) || (f.c[k1] - s1) != (f.c[k2] - s2) || f.a[k1] != f.a[k2] {
+                    return false
+                }
+            }
             .Else | .End | .Nop -> {}
             .Call | .CallRuntime -> {
-                if f.a[k1] != f.a[k2] || f.c[k1] != f.c[k2] || f.dst[k1] != f.dst[k2] -> return false
+                if f.a[k1] != f.a[k2] || f.c[k1] != f.c[k2] || f.dst[k1] != f.dst[k2] {
+                    return false
+                }
                 loop j in 0..<f.c[k1] {
                     if f.args[f.b[k1] + j] != f.args[f.b[k2] + j] -> return false
                 }
@@ -3087,7 +3130,7 @@ patch_group_eq: fn(f: IRFunction, s1: Int, e1: Int, s2: Int, e2: Int) -> Bool Ne
 patch_group_hash: fn(f: IRFunction, s: Int, e: Int) -> Int Never! {
     len: e - s
     if len == 1 && f.op[s] == .Drop -> return 1 + f.a[s] * 31
-    h := len * 1315423911
+    ^h: len * 1315423911
     loop k in s..<e {
         op: f.op[k]
         tag: if op == {
@@ -3120,11 +3163,13 @@ patch_suffix_find: fn(p: IRPatchEmitter, slot: Int, next_off: Int) -> Int Never!
 
 // G1d: out-of-line stop edges with reusable scratch and local edge_def_epoch.
 patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, exit: Int) Never! {
-    if p.stop_edges.is_empty() -> return
+    if p.stop_edges.is_empty() {
+        return
+    }
     p.in_stop_edge = true
     p.at = -1
-    shared_tok_home := 0
-    leave_off := -1
+    ^shared_tok_home: 0
+    ^leave_off: -1
     if p.g_hash.len() > 0 -> p.g_hash.clear()
     if p.g_next.len() > 0 -> p.g_next.clear()
     if p.g_start.len() > 0 -> p.g_start.clear()
@@ -3132,7 +3177,7 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
     if p.g_off.len() > 0 -> p.g_off.clear()
     if p.enter_body.len() > 0 -> p.enter_body.clear()
     if p.enter_off.len() > 0 -> p.enter_off.clear()
-    idx := p.stop_edges.len() - 1
+    ^idx: p.stop_edges.len() - 1
     loop idx >= 0 {
         patch_cf_barrier(p)
         branch: p.stop_edges[idx].branch
@@ -3152,7 +3197,7 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
             if p.edge_ge.len() > 0 -> p.edge_ge.clear()
             p.edge_def_cur += 1
             cur_ep: p.edge_def_cur
-            k := info.first + 1
+            ^k: info.first + 1
             loop k < info.leave {
                 if f.op[k] == .Nop || (p.drop.has_moves && p.drop.kill[k]) {
                     k += 1
@@ -3160,19 +3205,17 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
                 }
                 start_k: k
                 if f.op[k] == .Drop || f.op[k] == .Close -> k += 1 else {
-                    depth := 0
+                    ^depth: 0
                     loop k < info.leave {
                         op: f.op[k]
                         k += 1
                         if op == .If -> depth += 1 else if op == .End {
                             depth -= 1
                             if depth == 0 -> break
-                        } else if depth == 0 && (op == .Drop || op == .Close) {
-                            break
-                        }
+                        } else if depth == 0 && (op == .Drop || op == .Close) { break }
                     }
                 }
-                merged := false
+                ^merged: false
                 if p.edge_gs.len() > 0 {
                     loop u in start_k..<k {
                         form: ir_x64_read_form(f.op[u])
@@ -3198,13 +3241,13 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
                     p.edge_ge.push(k)
                 }
             }
-            tail_off := leave_off
-            prefix_len := p.edge_gs.len()
+            ^tail_off: leave_off
+            ^prefix_len: p.edge_gs.len()
             loop prefix_len > 0 {
                 s: p.edge_gs[prefix_len - 1]
                 e: p.edge_ge[prefix_len - 1]
                 h: patch_group_hash(f, s, e)
-                found := -1
+                ^found: -1
                 loop gi in 0..<p.g_hash.len() {
                     if p.g_hash[gi] == h && p.g_next[gi] == tail_off && patch_group_eq(f, s, e, p.g_start[gi], p.g_end[gi]) {
                         found = p.g_off[gi]
@@ -3216,7 +3259,7 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
                 prefix_len -= 1
             }
             if prefix_len == 0 {
-                cached := -1
+                ^cached: -1
                 loop ei in 0..<p.enter_body.len() {
                     if p.enter_body[ei] == tail_off {
                         cached = p.enter_off[ei]
@@ -3261,8 +3304,8 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
                     }
                 }
                 patch_jmp_to(p, tail_off)
-                next_off := tail_off
-                pos := prefix_len - 1
+                ^next_off: tail_off
+                ^pos: prefix_len - 1
                 loop pos >= 0 {
                     s: p.edge_gs[pos]
                     e: p.edge_ge[pos]
@@ -3284,8 +3327,8 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
             loop k in (branch + 1)..<(end_idx - 1) {
                 if f.op[k] == .Drop && !(p.drop.has_moves && p.drop.kill[k]) -> p.edge_drops.push(k)
             }
-            tail_off := exit
-            prefix_len := p.edge_drops.len()
+            ^tail_off: exit
+            ^prefix_len: p.edge_drops.len()
             loop prefix_len > 0 {
                 slot: f.a[p.edge_drops[prefix_len - 1]]
                 found: patch_suffix_find(p, slot, tail_off)
@@ -3308,8 +3351,8 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
                     patch_drop(p, fast, m, f, k)
                 }
                 patch_jmp_to(p, tail_off)
-                next_off := tail_off
-                pos := prefix_len - 1
+                ^next_off: tail_off
+                ^pos: prefix_len - 1
                 loop pos >= 0 {
                     slot: f.a[p.edge_drops[pos]]
                     off: p.edge_offs[pos]
@@ -3368,14 +3411,16 @@ patch_cold_target: fn(p: IRPatchEmitter, pad: Int, exit: Int) -> Int Never! {
 }
 
 patch_emit_cold_drop: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, slot: Int) Never! {
-    if slot < 0 -> return
+    if slot < 0 {
+        return
+    }
     trow: f.slot_type[slot]
-    if !fast.type_has_drop[trow] -> return
+    if !fast.type_has_drop[trow] {
+        return
+    }
     patch_load_slot(p, 7, slot)
     fid: fast.type_drop_fn[trow]
-    if fid >= 0 {
-        patch_call_out(p, f, x64_reloc_function(0, fid), false, -1)
-    } else {
+    if fid >= 0 -> patch_call_out(p, f, x64_reloc_function(0, fid), false, -1) else {
         patch_call_out(p, f, patch_make_rt(fast, 0, fast.type_drop_rt_id[trow]), false, -1)
     }
 }
@@ -3515,8 +3560,8 @@ patch_emit_colds: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
             }
             .Unique -> {
                 at: cold.left
-                q0 := -1
-                q1 := -1
+                ^q0: -1
+                ^q1: -1
                 if cold.right >= 0 {
                     q0 = patch_jcc(p, 8)
                     patch_load_slot(p, 0, cold.right)
@@ -3591,8 +3636,8 @@ patch_stack_grow: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, row: Int, entere
 // Main entry point for copy-and-patch O0 function compilation.
 
 ir_x64_patch_function: fn(m: IRModule, row: Int, poll: Int, trap: Int, turn: Int) -> IRX64FunctionResult Never! {
-    p := ir_patch_emitter_new()
-    fast := ir_x64_fast_module_new(m, false)
+    ^p: ir_patch_emitter_new()
+    ^fast: ir_x64_fast_module_new(m, false)
     ir_x64_patch_function_in(m, fast, row, poll, trap, turn, p)
 }
 
@@ -3603,9 +3648,7 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     patch_emitter_reset(p, op_count, slot_count)
     // 1. O(slots) direct home assignment: skip Unit slots; slots 0..15 fit disp8.
     loop slot in 0..<slot_count {
-        if fast.type_class[f.slot_type[slot]] == O0_CLS_EMPTY {
-            p.homes[slot] = 0
-        } else {
+        if fast.type_class[f.slot_type[slot]] == O0_CLS_EMPTY -> p.homes[slot] = 0 else {
             p.depth += 8
             p.homes[slot] = 0 - p.depth
         }
@@ -3615,17 +3658,15 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
         p.result_home = 0 - p.depth
     }
     // Zero-allocation early-drop planning (+ the frame bytes emission adds, for G3).
-    if !m.dropped_early {
-        ir_drop_plan_into(p.drop, m, fast, f, poll, trap, turn)
-    } else {
+    if !m.dropped_early -> ir_drop_plan_into(p.drop, m, fast, f, poll, trap, turn) else {
         p.drop.has_moves = false
         p.drop.frame_bytes = 0
         loop at in 0..<op_count -> p.drop.frame_bytes += ir_drop_frame_bytes(fast, f, at, f.op[at])
     }
     if f.line > 0 -> p.lines.push(X64LineRow{at: 0, line: f.line})
     // 2. Stack check prefix (G3: f.stack_check OR the frame bound > 32768).
-    stack_frame_site := -1
-    grow_site := -1
+    ^stack_frame_site: -1
+    ^grow_site: -1
     if f.stack_check || p.depth + p.drop.frame_bytes > 32768 {
         patch_ensure(p, 28)
         sb: p.pos
@@ -3642,9 +3683,9 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     based: pro_base + 4
     sub_rsp_site: pro_base + 7
     // 4. Import parameters into their fixed frame homes.
-    general := 0
-    floats := 0
-    stacked := 0
+    ^general: 0
+    ^floats: 0
+    ^stacked: 0
     if p.result_home != 0 {
         patch_store_rbp(p, p.result_home, 7)
         general = 1
@@ -3675,11 +3716,11 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     body: p.pos
     if f.line > 0 -> ir_x64_debug_line(p.lines, body, f.line)
     // 5. Single forward pass over all IR instructions.
-    traps := 0
-    at := 0
+    ^traps: 0
+    ^at: 0
     loop at < op_count {
         if p.drop.has_moves {
-            dk := p.drop.head[at]
+            ^dk: p.drop.head[at]
             if dk >= 0 {
                 p.fused_slot = -1
                 p.fused_cc = -1
@@ -3718,8 +3759,8 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     epilogue: p.pos
     p.pos = if p.has_stream -> o0_st_epilogue_sfence(p.code, p.pos) else -> o0_st_epilogue(p.code, p.pos)
     ret_at: p.pos - 1
-    exit := epilogue
-    need_exit := p.stop_returns.len() > 0 || (m.stop_points && p.stop_edges.len() > 0)
+    ^exit: epilogue
+    ^need_exit: p.stop_returns.len() > 0 || (m.stop_points && p.stop_edges.len() > 0)
     if !need_exit && m.stop_points {
         loop cold in p.colds {
             if cold.kind == .Stop || cold.kind == .ShiftStop || cold.kind == .LocatedRoute || cold.kind == .Poll {
@@ -3753,21 +3794,21 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     // 8. Back-patch frame size & optional stack grow path.
     frame_bytes: ir_x64_align(p.depth, 16)
     o0_patch_i32(p.code, sub_rsp_site, frame_bytes)
-    grow := IRX64Grow{start: -1, pushed: -1, based: -1, returned: -1, resumed: -1, left: -1}
+    ^grow: IRX64Grow{start: -1, pushed: -1, based: -1, returned: -1, resumed: -1, left: -1}
     if grow_site >= 0 {
         o0_patch_i32(p.code, stack_frame_site, 0 - (16 + frame_bytes))
         grow = patch_stack_grow(p, fast, row, entered, 16 + frame_bytes + p.below, stacked)
         patch_rel32(p.code, grow_site, grow.start)
     }
     // 9. Zone site opcodes (stamped as off-by-default `test eax, imm32`).
-    zones := [Int]{}
+    ^zones: [Int]{}
     loop site in p.zone_sites -> zones.push(site - 1)
     // 10. Merge call rows into line table if any.
     if !p.call_rows.is_empty() {
-        merged := [X64LineRow]{}
+        ^merged: [X64LineRow]{}
         merged.try_reserve(p.lines.len() + p.call_rows.len() * 2) ?? ()
-        next_row := 0
-        statement := 0
+        ^next_row: 0
+        ^statement: 0
         loop (k, call) in p.call_rows {
             loop next_row < p.lines.len() && p.lines[next_row].at <= call.at {
                 statement = p.lines[next_row].line
@@ -3789,13 +3830,13 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
         p.lines = merged.move()
     }
     // 11. Standard frame CFI (+ tail jumps + ret + optional grow path).
-    cfi := [U8]{}
+    ^cfi: [U8]{}
     dwarf_cfa_advance(cfi, 0, pushed)
     dwarf_cfa_def_cfa_offset(cfi, 16)
     dwarf_cfa_offset(cfi, x64_dwarf_register(X64_RBP), 2)
     dwarf_cfa_advance(cfi, pushed, based)
     dwarf_cfa_def_cfa_register(cfi, x64_dwarf_register(X64_RBP))
-    cfa_at := based
+    ^cfa_at: based
     loop jump in p.tails {
         dwarf_cfa_advance(cfi, cfa_at, jump)
         dwarf_cfa_remember_state(cfi)
@@ -3831,8 +3872,8 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
         dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBP))
     }
     // 12. Flat fixed-frame debug variables over [body..epilogue] (no O0 call sites).
-    variables := [X64DebugVariable]{}
-    ranges := [X64VariableRange]{}
+    ^variables: [X64DebugVariable]{}
+    ^ranges: [X64VariableRange]{}
     loop slot in 0..<slot_count {
         name_id: f.slot_name[slot]
         if name_id < 0 -> next
@@ -3854,7 +3895,7 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     }
     allocs: loop (k, reloc) in p.alloc_relocs -> X64AllocSite{at: p.relocs[reloc].at + 4, ty: p.alloc_rows[k]}
     // Materialize exact code bytes from reusable worker buffer in one memcpy.
-    code_out := [U8]{}
+    ^code_out: [U8]{}
     code_out.try_reserve(p.pos) ?? ()
     code_out.extend(p.code[0..<p.pos])
     name: if {
@@ -3896,25 +3937,25 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
 }
 
 #Test("copy-and-patch O0 stencils compile arithmetic, control flow, and folded constants cleanly") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     m.fast_o0 = true
     i64_row: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     bool_row: ir_scalar_type_row(m, Type.Bool)
-    f := ir_function_new("sum", "test:patch.jet.sum", "", "patch.jet", 1)
+    ^f: ir_function_new("sum", "test:patch.jet.sum", "", "patch.jet", 1)
     a: ir_slot(f, i64_row, IRSlotKind.Param, ir_intern_name(m, "a"), 1)
     b: ir_slot(f, i64_row, IRSlotKind.Param, ir_intern_name(m, "b"), 1)
     f.result = i64_row
     one: ir_slot(f, i64_row, IRSlotKind.Temp, -1, 0)
     out: ir_slot(f, i64_row, IRSlotKind.Temp, -1, 0)
     cond: ir_slot(f, bool_row, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_emit(f, IROp.Add, out, a, one, IR_OVERFLOW_WRAP, 2)
-    _ := ir_emit(f, IROp.Lt, cond, a, b, IR_OVERFLOW_WRAP, 3)
+    ^_: ir_emit(f, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_emit(f, IROp.Add, out, a, one, IR_OVERFLOW_WRAP, 2)
+    ^_: ir_emit(f, IROp.Lt, cond, a, b, IR_OVERFLOW_WRAP, 3)
     if_at: ir_open_if(f, cond, 3)
-    _ := ir_emit(f, IROp.Sub, out, out, b, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(f, IROp.Sub, out, out, b, IR_OVERFLOW_WRAP, 4)
     ir_end(f, 5)
-    _ := ir_emit(f, IROp.Return, -1, out, -1, -1, 6)
-    _ := if_at
+    ^_: ir_emit(f, IROp.Return, -1, out, -1, -1, 6)
+    ^_: if_at
     row: m.functions.len()
     m.functions.push(f)
     compiled: ir_x64_patch_function(m, row, -1, -1, -1)

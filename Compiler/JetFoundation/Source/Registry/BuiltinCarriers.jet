@@ -27,9 +27,9 @@ BUILTIN_CARRIERS: #run builtin_carrier_rows(embed_file("toolchain:{BUILTIN_CARRI
 // runs to the next `}` line, and each `name: fn(^^self` line inside it
 // consumes the carrier.
 builtin_carrier_rows: fn(text: String) -> [BuiltinCarrier] Never! {
-    rows := [BuiltinCarrier]{}
-    hooks := [MarkerHook]{}
-    in_block := false
+    ^rows: [BuiltinCarrier]{}
+    ^hooks: [MarkerHook]{}
+    ^in_block: false
     loop line in text.split("\n").to_list() {
         if in_block {
             if line == "}}" {
@@ -37,7 +37,9 @@ builtin_carrier_rows: fn(text: String) -> [BuiltinCarrier] Never! {
                 next
             }
             method: line.find(": fn(^^self")
-            if method > 4 && line.starts_with("    ") -> rows[rows.len() - 1].consumes.push(line.slice(4..<method))
+            if method > 4 && line.starts_with("    ") {
+                rows[rows.len() - 1].consumes.push(line.slice(4..<method))
+            }
             next
         }
         if line.starts_with("#[") && line.ends_with("]") {
@@ -47,10 +49,12 @@ builtin_carrier_rows: fn(text: String) -> [BuiltinCarrier] Never! {
             next
         }
         if line.starts_with("#") {
-            if marker_hook_of_declaration(line.slice(1..<line.len())) == .Val(hook) -> hooks.push(hook)
+            if marker_hook_of_declaration(line.slice(1..<line.len())) == .Val(hook) {
+                hooks.push(hook)
+            }
             next
         }
-        colon := line.find(": struct<")
+        ^colon: line.find(": struct<")
         if colon < 0 -> colon = line.find(": struct {{")
         opens: line.ends_with(" {{")
         if colon > 0 && line.starts_with("priv ") && (opens || line.ends_with(" {{}}")) {
@@ -86,7 +90,7 @@ builtin_carrier_named: fn(name: String) -> Bool Never! {
 // The methods that consume the carrier `name` (`join`, `detach`); empty for
 // a carrier that declares none, or a name that is no carrier.
 builtin_carrier_consumes: fn(name: String) -> [String] Never! {
-    methods := [String]{}
+    ^methods: [String]{}
     loop row in BUILTIN_CARRIERS {
         if row.name == name {
             loop method in row.consumes -> methods.push(method)
@@ -122,7 +126,8 @@ builtin_carrier_declaration: fn(module_name: String, visibility: NameVisibility)
     assert(builtin_carrier_declares("Atomic", MarkerHook.MoveOnly) && !builtin_carrier_declares("Atomic", MarkerHook.Local))
     assert(builtin_carrier_declares("ViewMut", MarkerHook.MoveOnly))
     assert(builtin_carrier_declares("CellReadGuard", MarkerHook.Local) && builtin_carrier_declares("SharedGuard", MarkerHook.MoveOnly))
-    assert(builtin_carrier_consumes("Atomic").len() == 0)
+    assert(builtin_carrier_declares("Task", MarkerHook.SingleUse) && builtin_carrier_consumes("Task") == [String]{"join", "detach"})
+    assert(builtin_carrier_named("Receiver") && builtin_carrier_named("Sender") && builtin_carrier_named("ProcessChild"))
     assert(builtin_carrier_declaration(CORE_BUILTINS_MODULE, NameVisibility.Private))
     assert(!builtin_carrier_declaration(CORE_BUILTINS_MODULE, NameVisibility.Public) && !builtin_carrier_declaration(CORE_BUILTINS_MODULE, NameVisibility.Package))
     assert(!builtin_carrier_declaration("core.process", NameVisibility.Private))

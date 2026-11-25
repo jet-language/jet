@@ -55,12 +55,12 @@ require_proxy: fn(request: HTTPRequest) {
 }
 
 check_pre_response_errors: fn() {
-    listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    ^listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     url: "http://{address}/"
     { sender: stop_tx, receiver: stop_rx }: channel<Int>()
     peer: task {
-        requests := [String]{}
+        ^requests: [String]{}
         // Original nonblocking accept + stop atomic: zero-deadline accepts queued
         // sockets; Timeout alone = WouldBlock, any other failure panics.
         loop stop_rx.try_receive() == None {

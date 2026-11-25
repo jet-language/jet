@@ -33,7 +33,7 @@ C_BASE53_FLOAT: 9007199254740992.0
 // holds the bounded draw's full 64-by-64 product without a new scalar carrier.
 seeded_next: fn(state: ^U64) -> U64 Never! {
     state = wrapping(state + U64{11400714819323198485})
-    word := U64{state}
+    ^word: U64{state}
     word = wrapping((word ~ (word >> 30)) * U64{13787848793156543929})
     word = wrapping((word ~ (word >> 27)) * U64{10723151780598845931})
     word ~ (word >> 31)
@@ -59,7 +59,7 @@ priv __seeded_int: fn(state: ^U64, low: Int, high: Int) -> Int? Never! {
     if high == low -> return Val(low)
     width: U64{(high - low + 1) & 18446744073709551615}
     offset: Int{seeded_bounded(state, width)}
-    value := (low + offset) & 18446744073709551615
+    ^value: (low + offset) & 18446744073709551615
     if value > C_MASK63 -> value -= 18446744073709551616
     Val(value)
 }
@@ -112,7 +112,7 @@ RNG: struct {
 
     bytes: fn(^self, count: Int) -> [U8] Never! {
         length: Int{I64{count}}
-        out := [U8]{}
+        ^out: [U8]{}
         loop _ in 0..<length -> out.push(U8{seeded_next(self.state) & U64{255}})
         out
     }
@@ -126,14 +126,14 @@ RNG: struct {
 
     weighted_pick: fn<T>(^self, items: [T], weights: [Float]) -> T? Never! {
         if items.len() == 0 || items.len() != weights.len() -> return None
-        total := Float{0.0}
+        ^total: Float{0.0}
         loop weight in weights {
             if math.is_finite(weight) && weight > 0.0 -> total += weight
         }
         if total <= 0.0 -> return None
-        needle := self.float_range(0.0, total)
+        ^needle: self.float_range(0.0, total)
         loop index in 0..<items.len() {
-            weight := Float{0.0}
+            ^weight: Float{0.0}
             if math.is_finite(weights[index]) && weights[index] > 0.0 -> weight = weights[index]
             if needle < weight -> return Val(items[index].copy())
             needle -= weight
@@ -142,23 +142,23 @@ RNG: struct {
     }
 
     sample: fn<T>(^self, items: [T], count: Int) -> [T] Never! {
-        want := Int{I64{count}}
+        ^want: Int{I64{count}}
         if want < 0 -> want = 0
         if want > items.len() -> want = items.len()
         if want == 0 -> return [T]{}
-        pool := items.copy()
+        ^pool: items.copy()
         loop index in 0..<want {
             picked: self.int(index, pool.len() - 1)
             pool.__swap(index, picked)
         }
         // Clone excludes Close owners; discard excess values without a second
         // buffer or a new List truncation/growth seam.
-        loop pool.len() > want -> _ := pool.pop()
+        loop pool.len() > want -> ^_: pool.pop()
         pool
     }
 
     shuffle: fn<T>(^self, items: ^[T]) Never! {
-        index := items.len() - 1
+        ^index: items.len() - 1
         loop index > 0 {
             picked: self.int(0, index)
             items.__swap(index, picked)
@@ -176,7 +176,7 @@ RNG: struct {
 priv __word: fn() -[Rand]> Int Never! {
     loop {
         previous: rt.rng_state()
-        word := Int{previous}
+        ^word: Int{previous}
         word = (word ~ (word << 7)) & 18446744073709551615
         word ~= (word >> 9)
         word = (word * 11400714819323198485) & 18446744073709551615
@@ -213,12 +213,12 @@ bounded: fn(span: Int) -[Rand]> Int Never! {
             if draw < limit -> return draw %% span
         }
     }
-    space := C_BASE63
+    ^space: C_BASE63
     loop space < span -> space *= C_BASE63
     limit: space - (space %% span)
     loop {
-        draw := 0
-        factor := 1
+        ^draw: 0
+        ^factor: 1
         loop factor < space {
             draw += next_bits63() * factor
             factor *= C_BASE63
@@ -248,7 +248,7 @@ split: fn(seed_value: Int) -[Rand]> RNG Never! {
     word: __word()
     rotated: ((word << 17) | (word >> 47)) & 18446744073709551615
     mixed: (seed_value & 18446744073709551615) ~ rotated
-    signed := mixed
+    ^signed: mixed
     if signed > C_MASK63 -> signed -= 18446744073709551616
     rng(signed)
 }
@@ -290,7 +290,7 @@ bool: fn() -[Rand]> Bool Never! { (next_bits63() % 2) == 1 }
 
 /// Seeded pseudo-random bytes. Negative lengths are an empty request.
 bytes: fn(n: Int) -[Rand]> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     if n <= 0 -> return out
     loop {
         if out.len() >= n -> return out
@@ -311,18 +311,18 @@ pick: fn<T>(items: [T]) -[Rand]> T? Never! {
 /// zero total are absent. Zero weights remain valid and are never selected.
 weighted_pick: fn<T>(items: [T], weights: [Float]) -[Rand]> T? Never! {
     if items.len() == 0 || items.len() != weights.len() -> return None
-    maximum := Float{0.0}
+    ^maximum: Float{0.0}
     loop w in weights {
         if nonfinite(w) || w < (Float{0.0}) -> return None
         if w > maximum -> maximum = w
     }
     if maximum <= (Float{0.0}) -> return None
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop w in weights -> total += w / maximum
     if nonfinite(total) || total <= (Float{0.0}) -> return None
     draw: unit() * total
-    acc := Float{0.0}
-    last := -1
+    ^acc: Float{0.0}
+    ^last: -1
     loop i in 0..<items.len() {
         w: weights[i]
         if w <= (Float{0.0}) -> next
@@ -341,7 +341,7 @@ shuffle: fn(items: ^[Int]) -[Rand]> Never! {
     if n < 2 {
         return
     }
-    i := n - 1
+    ^i: n - 1
     loop i > 0 {
         j: int(0, i)
         tmp: Int{items[i]}
@@ -355,13 +355,13 @@ shuffle: fn(items: ^[Int]) -[Rand]> Never! {
 /// requested prefix is shuffled, so asking for a small sample is O(n) memory
 /// and O(k) draws.
 sample: fn(items: [Int], n: Int) -[Rand]> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     if n <= 0 || items.len() == 0 -> return out
-    pool := [Int]{}
+    ^pool: [Int]{}
     loop x in items -> pool.push(x)
-    want := n
+    ^want: n
     if want > pool.len() -> want = pool.len()
-    i := 0
+    ^i: 0
     loop i < want {
         j: int(i, pool.len() - 1)
         tmp: Int{pool[i]}
@@ -405,10 +405,10 @@ randbytes: fn(n: Int) -[Rand]> [U8] Never! { bytes(n) }
 /// Draw `k` low-order random bits. Non-positive widths return zero.
 getrandbits: fn(k: Int) -[Rand]> Int Never! {
     if k <= 0 -> return 0
-    out := 0
-    remaining := k
+    ^out: 0
+    ^remaining: k
     loop remaining > 0 {
-        chunk := remaining
+        ^chunk: remaining
         if chunk > 63 -> chunk = 63
         out = ((out << chunk)) ~ ((next_bits63()) & ((1 << chunk) - 1))
         remaining -= chunk
@@ -427,7 +427,7 @@ choice: fn(items: [Int]) -[Rand]> Int? Never! {
 }
 
 choices: fn(items: [Int], n: Int) -[Rand]> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     if items.len() == 0 || n <= 0 -> return out
     loop _ in 0..<n {
         value: choice(items) ?? return out
@@ -439,11 +439,11 @@ choices: fn(items: [Int], n: Int) -[Rand]> [Int] Never! {
 triangular: fn(low: Float, high: Float, mode: Float) -[Rand]> Float Never! {
     if nonfinite(low) || nonfinite(high) -> return (Float{0.0})
     if high <= low -> return low
-    peak := mode
+    ^peak: mode
     if peak != peak || nonfinite(peak) -> peak = low / (Float{2.0}) + high / (Float{2.0})
     if peak < low -> peak = low
     if peak > high -> peak = high
-    scale := math.fabs(low)
+    ^scale: math.fabs(low)
     if math.fabs(high) > scale -> scale = math.fabs(high)
     if scale <= (Float{0.0}) -> return low
     lower: low / scale
@@ -487,7 +487,7 @@ betavariate: fn(alpha: Float, beta: Float) -[Rand]> Float Never! {
     }
     a: gammavariate(alpha, (Float{1.0}))
     b: gammavariate(beta, (Float{1.0}))
-    scale := a
+    ^scale: a
     if b > scale -> scale = b
     if scale <= (Float{0.0}) || nonfinite(scale) -> return (Float{0.0})
     an: a / scale
@@ -528,7 +528,7 @@ vonmisesvariate: fn(mu: Float, kappa: Float) -[Rand]> Float Never! {
         c: kappa * (r - f)
         u2: unit()
         if u2 >= c * ((Float{2.0}) - c) && u2 > c * math.exp((Float{1.0}) - c) -> next
-        angle := mu
+        ^angle: mu
         if unit() > (Float{0.5}) -> angle += math.acos(f) else -> angle -= math.acos(f)
         return normalize_angle(angle)
     }
@@ -537,7 +537,7 @@ vonmisesvariate: fn(mu: Float, kappa: Float) -[Rand]> Float Never! {
 binomialvariate: fn(n: Int, p: Float) -[Rand]> Int Never! {
     if n <= 0 || nonfinite(p) || p <= (Float{0.0}) -> return 0
     if p >= (Float{1.0}) -> return n
-    successes := 0
+    ^successes: 0
     loop _ in 0..<n {
         if unit() < p -> successes += 1
     }
@@ -576,7 +576,7 @@ RNGAnswer: struct {
         {seed: 2026, small: 86, unit: 0.4716273839414571, wide: 3006104596945961618, rejection: 8789964955130764502, full: 5617894074692985389, state: U64{17418742259747383442}},
         {seed: 2026, small: 34, unit: 0.2300639741778534, wide: 16249629742343769, rejection: 8318266638105301999, full: -3344658828763956456, state: U64{635340061525169403}},
     }
-    stream := rng(0)
+    ^stream: rng(0)
     loop index in 0..<answers.len() {
         answer: answers[index]
         if index %% 2 == 0 -> stream = rng(answer.seed)
@@ -590,7 +590,7 @@ RNGAnswer: struct {
 }
 
 #Test("caller-owned equal and backwards intervals do not advance state") {
-    state := U64{99}
+    ^state: U64{99}
     assert_eq(__seeded_int(state, 7, 7), Val(7))
     assert_eq(state, U64{99})
     assert_eq(__seeded_int(state, 9, 3), None)
@@ -599,7 +599,7 @@ RNGAnswer: struct {
 }
 
 #Test("caller-owned generic methods and split match fixed Rust known answers") {
-    stream := rng(42)
+    ^stream: rng(42)
     assert_eq(stream.bool(), true)
     assert_eq(stream.state, U64{11400714819323198527})
     assert_eq(stream.__bool_p(0.25), true)
@@ -612,11 +612,11 @@ RNGAnswer: struct {
     assert_eq(stream.state, U64{3326683750974675196})
     assert_eq(stream.sample([String]{"a", "b", "c", "d", "e"}, 3), [String]{"b", "c", "d"})
     assert_eq(stream.state, U64{635340061525167419})
-    items := [String]{"a", "b", "c", "d", "e"}
+    ^items: [String]{"a", "b", "c", "d", "e"}
     stream.shuffle(items)
     assert_eq(items, [String]{"b", "d", "a", "e", "c"})
     assert_eq(stream.state, U64{9344711191398858127})
-    child := stream.split()
+    ^child: stream.split()
     assert_eq(child.state, U64{9140336935745592861})
     assert_eq(stream.state, U64{2298681937012504996})
     assert_eq(child.int(1, 100), 91)
@@ -626,7 +626,7 @@ RNGAnswer: struct {
 }
 
 #Test("caller-owned empty or invalid draws preserve the stream") {
-    stream := rng(99)
+    ^stream: rng(99)
     assert_eq(stream.int(7, 7), 7)
     assert_eq(stream.__bool_p(0.0), false)
     assert_eq(stream.__bool_p(1.0), true)
@@ -642,8 +642,8 @@ RNGAnswer: struct {
     assert_eq(stream.weighted_pick([String]{"a", "b", "c"}, [Float]{math.INFINITY, math.NAN, -1.0}), None)
     assert_eq(stream.sample([String]{"a", "b"}, -1), [String]{})
     assert_eq(stream.sample([String]{}, 5), [String]{})
-    empty := [String]{}
-    single := [String]{"only"}
+    ^empty: [String]{}
+    ^single: [String]{"only"}
     stream.shuffle(empty)
     stream.shuffle(single)
     assert_eq(single, [String]{"only"})
@@ -652,7 +652,7 @@ RNGAnswer: struct {
 }
 
 #Test("caller-owned normal draws twice even for negative or NaN deviation") {
-    stream := rng(0)
+    ^stream: rng(0)
     assert_eq(stream.normal(7.0, -1.0), 7.0)
     assert_eq(stream.state, U64{4354685564936845354})
     assert_eq(stream.normal(7.0, math.NAN), 7.0)
@@ -660,8 +660,8 @@ RNGAnswer: struct {
 }
 
 #Test("caller-owned explicit copies have independent streams") {
-    first := rng(42)
-    second := first.copy()
+    ^first: rng(42)
+    ^second: first.copy()
     assert_eq(first.bool(), true)
     assert_eq(first.state, U64{11400714819323198527})
     assert_eq(second.state, U64{42})
@@ -680,7 +680,7 @@ RNGAnswer: struct {
     wide: [Int]{3674083908946410616, -1560806464107718934, -492589827703751123, 97716448712738216, -2657728483137783600, 4814052688918791390, -1034353256590340050, 4205686890421530943}
     rejection: [Int]{1474913046063446144, 8007990562831494530, 2014432356388812461, 7384525663493887953, 3135310438806241001, 5704490196125334486, 1889885825713147102, 4735243383115555698}
     full: [Int]{4456085495900499605, -6273545944727883517, -4084088288392011950, -2874173976596520044, -8521839250712812558, 6792609088808213254, -5194507324077150883, 5545679290133000100}
-    stream := rng(42)
+    ^stream: rng(42)
     loop expected in small -> assert_eq(stream.int(1, 100), expected)
     assert_eq(stream.state, U64{17418742259747381458})
     stream = rng(42)
@@ -721,7 +721,7 @@ RNGAnswer: struct {
         [Int]{4, 3, 2, 1, 0},
         [Int]{0, 1, 3, 2, 4},
     }
-    stream := rng(42)
+    ^stream: rng(42)
     loop expected in picks -> assert_eq(stream.pick(items), Val(expected))
     assert_eq(stream.state, U64{17418742259747381458})
     stream = rng(42)
@@ -729,7 +729,7 @@ RNGAnswer: struct {
     assert_eq(stream.state, U64{15362738631823041058})
     stream = rng(42)
     loop expected in shuffles {
-        shuffled := items.copy()
+        ^shuffled: items.copy()
         stream.shuffle(shuffled)
         assert_eq(shuffled, expected)
     }

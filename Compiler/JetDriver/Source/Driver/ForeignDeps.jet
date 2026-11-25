@@ -14,13 +14,13 @@ JetDriverCDependency: struct {
 }
 
 jet_driver_c_dependencies: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverCDependency] {
-    declarations := [JetDriverCDependency]{}
-    diagnostics := [Diagnostic]{}
+    ^declarations: [JetDriverCDependency]{}
+    ^diagnostics: [Diagnostic]{}
     loop index in 0..<snapshot.roots.len() {
         package: jet_driver_parse_package_root(snapshot, index, diagnostics)
         loop dependency in package.dependencies {
             if !dependency.source.starts_with("c@") -> next
-            target := dependency.source.removeprefix("c@").trim()
+            ^target: dependency.source.removeprefix("c@").trim()
             lexed: lex_config(target.bytes())
             tokens: lexed.tokens
             if tokens.len() > 0 && (tokens[0].kind == TOKEN_STRING || tokens[0].kind == TOKEN_RAW_STRING) {
@@ -101,8 +101,8 @@ jet_driver_foreign_link_empty: fn() -> JetDriverForeignLinkFacts Never! {
 // providers' links, and the inline C bodies called. Only a live C or Rust
 // row needs the program's C platform. No live declaration leaves no closure.
 jet_driver_foreign_link_live: fn(facts: JetDriverForeignLinkFacts, live: [String:Bool]) -> JetDriverForeignLinkFacts Never! {
-    kept := jet_driver_foreign_link_empty()
-    modules := [U32:Bool]{}
+    ^kept: jet_driver_foreign_link_empty()
+    ^modules: [U32:Bool]{}
     loop declaration in facts.declarations {
         if live.get(declaration.symbol) == None -> next
         if declaration.language == "c" || declaration.language == "rust" {
@@ -111,8 +111,8 @@ jet_driver_foreign_link_live: fn(facts: JetDriverForeignLinkFacts, live: [String
         modules[declaration.module_identity.id] = true
         kept.declarations.push(declaration.copy())
     }
-    direct := [String]{}
-    transitive := [String]{}
+    ^direct: [String]{}
+    ^transitive: [String]{}
     loop provider in facts.providers {
         if modules.get(provider.module_identity.id) == None -> next
         jet_driver_foreign_push_unique(kept.libraries, provider.library)
@@ -160,8 +160,8 @@ jet_driver_inline_c_body: fn(source_files: [SourceFile], path: String, start: In
         if source_file.path != path -> next
         bytes: source_file.source.bytes()
         if start < 0 || end < start || end > bytes.len() -> return None
-        open := -1
-        at := start
+        ^open: -1
+        ^at: start
         loop at + 2 < end {
             if bytes[at] == (U8{34}) && bytes[at + 1] == (U8{34}) && bytes[at + 2] == (U8{34}) {
                 if open < 0 {
@@ -190,7 +190,7 @@ JetDriverForeignLines: struct {
 // file's newlines are scanned into `lines` the first time a row names it, so
 // each row is a binary search instead of a scan from the file's start.
 jet_driver_foreign_line: fn(lines: ^JetDriverForeignLines, source_files: [SourceFile], path: String, offset: Int) -> Int Never! {
-    slot := lines.files.get(path) ?? -1
+    ^slot: lines.files.get(path) ?? -1
     if slot < 0 {
         found: loop (index, source_file) in source_files {
             if source_file.path == path {
@@ -198,7 +198,7 @@ jet_driver_foreign_line: fn(lines: ^JetDriverForeignLines, source_files: [Source
             }
         } ?? -1
         if found < 0 -> return 0
-        positions := [Int]{}
+        ^positions: [Int]{}
         bytes: source_files[found].source.bytes()
         loop at in 0..<bytes.len() {
             if bytes[at] == (U8{10}) -> positions.push(at)
@@ -209,8 +209,8 @@ jet_driver_foreign_line: fn(lines: ^JetDriverForeignLines, source_files: [Source
     }
     // The newlines before `offset`: every newline is inside the file, so
     // an offset past its end counts them all.
-    low := 0
-    high := lines.newlines[slot].len()
+    ^low: 0
+    ^high: lines.newlines[slot].len()
     loop low < high {
         middle: (low + high) /% 2
         if lines.newlines[slot][middle] < offset {
@@ -232,11 +232,11 @@ JetDriverForeignEntry: struct {
 }
 
 jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files: [SourceFile]) -> JetDriverForeignLinkFacts Never! {
-    facts := jet_driver_foreign_link_empty()
-    direct := [String]{}
-    transitive := [String]{}
+    ^facts: jet_driver_foreign_link_empty()
+    ^direct: [String]{}
+    ^transitive: [String]{}
     // Foreign identity order: (identity, key) of every checked foreign row, stored columnarly.
-    entries := Rows<JetDriverForeignEntry>{}
+    ^entries: Rows<JetDriverForeignEntry>{}
     loop (module_index, semantic_module) in modules {
         loop provider in semantic_module.foreign_providers {
             jet_driver_foreign_push_unique(facts.libraries, provider.library)
@@ -249,7 +249,7 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
         loop (row_index, row) in semantic_module.foreign_functions {
             head: jet_driver_foreign_language_head(row.language)
             if head == "c" || head == "rust" -> facts.c_or_rust_rows = true
-            _ := entries.add(JetDriverForeignEntry{id: stable_id("foreign", row.key), key: row.key, row: row_index, module: module_index})
+            ^_: entries.add(JetDriverForeignEntry{id: stable_id("foreign", row.key), key: row.key, row: row_index, module: module_index})
         }
     }
     facts.libraries.sort()
@@ -263,10 +263,10 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
     keys: entries.key
     rows: entries.row
     modules_of: entries.module
-    order := [Int]{}
+    ^order: [Int]{}
     loop position in 0..<ids.len() -> order.push(position)
     order.sort_by(fn(left: Int, right: Int) { if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right] })
-    lines := JetDriverForeignLines{}
+    ^lines: JetDriverForeignLines{}
     loop (index, position) in order {
         row: modules[modules_of[position]].foreign_functions[rows[position]]
         facts.declarations.push(

@@ -171,7 +171,7 @@ env_hook_render_unload: fn(kind: ShellKind, base_path: String) -> String Never! 
 }
 
 env_hook_render_vars: fn(kind: ShellKind, vars: [String:String]) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop name in envmodel_sorted_keys(vars) {
         line: if kind == {
             .Bash | .Zsh -> "export {name}={env_hook_sh_quote(vars[name])}\n"
@@ -183,7 +183,7 @@ env_hook_render_vars: fn(kind: ShellKind, vars: [String:String]) -> String Never
 }
 
 env_hook_render_unset: fn(kind: ShellKind, names: [String]) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop name in names {
         line: if kind == {
             .Bash | .Zsh -> "unset {name}\n"

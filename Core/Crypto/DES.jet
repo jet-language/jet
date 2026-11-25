@@ -47,7 +47,7 @@ DESKey: struct {
 
     impl Close {
         close: fn(^^self) {
-            sk := self.sk.move()
+            ^sk: self.sk.move()
             loop i in 0..<sk.len() -> sk[i] = U32{0}
         }
     }
@@ -622,7 +622,7 @@ des_key_check_key_parity: fn(key: [U8]) -> Bool Never! {
 des_key_check_weak: fn(key: [U8]) -> Bool Never! {
     if key.len() != DES_KEY_SIZE -> return false
     loop w in 0..<16 {
-        same := true
+        ^same: true
         loop i in 0..<DES_KEY_SIZE {
             if WEAK_KEYS[8 * w + i] != key[i] -> same = false
         }
@@ -658,10 +658,10 @@ rhs: fn(x: U32, shift: Int) -> U32 Never! {
 // The 32 subkey words of one 8-byte key at key[off..], into sk[at..]
 // (mbedtls_des_setkey).
 setkey: fn(sk: ^[U32], at: Int, key: [U8], off: Int) Never! {
-    x := get_be32(key, off)
-    y := get_be32(key, off + 4)
+    ^x: get_be32(key, off)
+    ^y: get_be32(key, off + 4)
     // Permuted Choice 1.
-    t := ((y >> 4) ~ x) & U32{0x0F0F0F0F}
+    ^t: ((y >> 4) ~ x) & U32{0x0F0F0F0F}
     x ~= t
     y ~= t << 4
     t = (y ~ x) & U32{0x10101010}
@@ -684,7 +684,7 @@ setkey: fn(sk: ^[U32], at: Int, key: [U8], off: Int) Never! {
 }
 
 subkeys: fn(count: Int) -> [U32] Never! {
-    sk := [U32]{}
+    ^sk: [U32]{}
     loop _ in 0..<count -> sk.push(U32{0})
     sk
 }
@@ -696,7 +696,7 @@ check_key: fn(key: [U8], size: Int) DESError! {
 /// A DES key schedule for encryption (mbedtls_des_setkey_enc).
 des_setkey_enc: fn(key: [U8]) -> DESKey DESError! {
     check_key(key, DES_KEY_SIZE)
-    sk := subkeys(32)
+    ^sk: subkeys(32)
     setkey(sk, 0, key, 0)
     Ok(DESKey{sk: sk})
 }
@@ -705,7 +705,7 @@ des_setkey_enc: fn(key: [U8]) -> DESKey DESError! {
 /// round order (mbedtls_des_setkey_dec).
 des_setkey_dec: fn(key: [U8]) -> DESKey DESError! {
     check_key(key, DES_KEY_SIZE)
-    sk := subkeys(32)
+    ^sk: subkeys(32)
     setkey(sk, 0, key, 0)
     loop i in 0..<8 {
         j: 2 * i
@@ -758,8 +758,8 @@ set3key: fn(esk: ^[U32], dsk: ^[U32], key: [U8]) Never! {
 // other half is wiped.
 des3_key: fn(key: [U8], size: Int, mode: DESMode) -> DESKey DESError! {
     check_key(key, size)
-    esk := subkeys(96)
-    dsk := subkeys(96)
+    ^esk: subkeys(96)
+    ^dsk: subkeys(96)
     if size == 16 -> set2key(esk, dsk, key) else -> set3key(esk, dsk, key)
     if mode == .Decrypt {
         loop i in 0..<96 -> esk[i] = U32{0}
@@ -789,8 +789,8 @@ expanded_sbox: fn(table: [U64], t: U32, shift: Int) -> U32 Never! {
 
 // DES_ROUND(X, Y) with subkeys sk[at], sk[at + 1]: the new Y.
 des_round: fn(sk: [U32], at: Int, x: U32, y: U32) -> U32 Never! {
-    t := sk[at] ~ x
-    r := y ~ expanded_sbox(SB8, t, 0) ~ expanded_sbox(SB6, t, 8) ~ expanded_sbox(SB4, t, 16) ~ expanded_sbox(SB2, t, 24)
+    ^t: sk[at] ~ x
+    ^r: y ~ expanded_sbox(SB8, t, 0) ~ expanded_sbox(SB6, t, 8) ~ expanded_sbox(SB4, t, 16) ~ expanded_sbox(SB2, t, 24)
     t = sk[at + 1] ~ ((x << 28) | x >> 4)
     r ~ expanded_sbox(SB7, t, 0) ~ expanded_sbox(SB5, t, 8) ~ expanded_sbox(SB3, t, 16) ~ expanded_sbox(SB1, t, 24)
 }
@@ -798,10 +798,10 @@ des_round: fn(sk: [U32], at: Int, x: U32, y: U32) -> U32 Never! {
 // The 8-byte block src[off..] through every pass of the key into out[at..]
 // (mbedtls_des_crypt_ecb, mbedtls_des3_crypt_ecb).
 crypt_block: fn(k: DESKey, src: [U8], off: Int, out: ^[U8], at: Int) Never! {
-    x := get_be32(src, off)
-    y := get_be32(src, off + 4)
+    ^x: get_be32(src, off)
+    ^y: get_be32(src, off + 4)
     // The initial permutation (DES_IP).
-    t := ((x >> 4) ~ y) & U32{0x0F0F0F0F}
+    ^t: ((x >> 4) ~ y) & U32{0x0F0F0F0F}
     y ~= t
     x ~= t << 4
     t = ((x >> 16) ~ y) & U32{0x0000FFFF}
@@ -859,7 +859,7 @@ crypt_block: fn(k: DESKey, src: [U8], off: Int, out: ^[U8], at: Int) Never! {
 /// (mbedtls_des_crypt_ecb, mbedtls_des3_crypt_ecb).
 des_crypt_ecb: fn(k: DESKey, block: [U8]) -> [U8] DESError! {
     if block.len() != DES_BLOCK_SIZE -> return Err(.InvalidInputLength)
-    out := cipher.zero_bytes(DES_BLOCK_SIZE)
+    ^out: cipher.zero_bytes(DES_BLOCK_SIZE)
     crypt_block(k, block, 0, out, 0)
     Ok(out)
 }
@@ -871,8 +871,8 @@ des_crypt_cbc: fn(k: DESKey, mode: DESMode, iv: ^[U8], input: [U8]) -> [U8] DESE
     if input.len() %% DES_BLOCK_SIZE != 0 || iv.len() != DES_BLOCK_SIZE {
         return Err(.InvalidInputLength)
     }
-    out := cipher.zero_bytes(input.len())
-    block := cipher.zero_bytes(DES_BLOCK_SIZE)
+    ^out: cipher.zero_bytes(input.len())
+    ^block: cipher.zero_bytes(DES_BLOCK_SIZE)
     loop b in 0..<(input.len() /% DES_BLOCK_SIZE) {
         at: DES_BLOCK_SIZE * b
         if mode == .Encrypt {
@@ -926,18 +926,18 @@ des_crypt_cbc: fn(k: DESKey, mode: DESMode, iv: ^[U8], input: [U8]) -> [U8] DESE
     assert((des_crypt_ecb(dec, des_crypt_ecb(enc, plain) ?? panic("ecb")) ?? panic("ecb")) == plain)
     e3: des3_set3key_enc(key) ?? panic("key")
     d3: des3_set3key_dec(key) ?? panic("key")
-    iv := [U8]{0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF}
-    two := plain.copy()
+    ^iv: [U8]{0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF}
+    ^two: plain.copy()
     loop b in plain -> two.push(b)
     sealed: des_crypt_cbc(e3, .Encrypt, iv, two) ?? panic("cbc")
-    iv2 := [U8]{0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF}
+    ^iv2: [U8]{0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF}
     assert((des_crypt_cbc(d3, .Decrypt, iv2, sealed) ?? panic("cbc")) == two)
     assert(iv == iv2)
     assert(des_crypt_cbc(e3, .Encrypt, iv, [U8]{1, 2, 3}) == .Err(.InvalidInputLength))
     assert(des3_set2key_enc(single) == .Err(.InvalidKeyLength))
     assert(des_key_check_weak([U8]{0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}))
     assert(!des_key_check_weak(single))
-    odd := [U8]{0, 2, 4, 6, 8, 10, 12, 14}
+    ^odd: [U8]{0, 2, 4, 6, 8, 10, 12, 14}
     des_key_set_parity(odd)
     assert(des_key_check_key_parity(odd))
 }

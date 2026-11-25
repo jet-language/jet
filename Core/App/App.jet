@@ -201,8 +201,8 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
             crypto.constant_time_equal_bytes(expected.bytes(), sent.bytes())
         }
         .Stripe -> {
-            stamp := ""
-            macs := [String]{}
+            ^stamp: ""
+            ^macs: [String]{}
             loop part in sent.split(",") {
                 entry: part.trim()
                 if entry.starts_with("t=") -> stamp = entry.slice(2, entry.len())
@@ -210,7 +210,7 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
             }
             if stamp == "" -> return false
             expected: crypto.hex_encode(crypto.hmac_sha256(key.bytes(), "{stamp}.{body}".bytes()))
-            matched := false
+            ^matched: false
             loop mac in macs {
                 if crypto.constant_time_equal_bytes(expected.bytes(), mac.bytes()) -> matched = true
             }
@@ -293,7 +293,7 @@ Remote: struct<S> {
         queues: queue_on() && !held
         if !queues && links_cut(self.client) -> return fail(links_unreachable(self.client, method))
         if self.service == .Val(service) -> return remote_direct(service, direct, fail)
-        reply := ""
+        ^reply: ""
         if queues {
             reply = queue_post(self.client, self.address, self.local, method, args) ?? return fail(err)
         } else { reply = remote_post(self.address, self.local, method, args) ?? return fail(err) }
@@ -309,7 +309,7 @@ Remote: struct<S> {
         queues: queue_on() && !held
         if !queues && links_cut(self.client) -> return Err(links_unreachable(self.client, method))
         if self.service == .Val(service) -> return remote_direct_value(service, direct)
-        reply := ""
+        ^reply: ""
         if queues {
             reply = queue_post(self.client, self.address, self.local, method, args) ?? return Err(err)
         } else { reply = remote_post(self.address, self.local, method, args) }
@@ -390,7 +390,7 @@ field_error: fn(at: String, reason: String) -> FieldError Never! {
 // made later sort after it. It stops the task when the system has no
 // random source.
 new_id: fn() -[Rand, Time]> String Never! {
-    clock := time.Clock.new(time.now_utc().to_unix_ms())
+    ^clock: time.Clock.new(time.now_utc().to_unix_ms())
     uuid.v7(clock) ?? panic("app.new_id: {err}")
 }
 
@@ -404,7 +404,7 @@ new_id: fn() -[Rand, Time]> String Never! {
     assert_eq(first.slice(14, 15), "7")
     assert(first.slice(19, 20) == "8" || first.slice(19, 20) == "9" || first.slice(19, 20) == "a" || first.slice(19, 20) == "b")
     assert_eq(uuid.parse(first) ?? panic("the ID parses"), first)
-    made := 0
+    ^made: 0
     loop b in "{first.slice(0, 8)}{first.slice(9, 13)}".bytes() {
         digit: if b >= 97 -> Int{b} - 87 else -> Int{b} - 48
         made = made * 16 + digit
@@ -457,7 +457,7 @@ priv device_cell_replace: fn(store: String, cell: Shared<LiveCell>, expected: [U
         return replaced
     }
     if rt_web.device_replace(store, expected, replacement) == .Val(replaced) -> return replaced
-    held := cell.guard_edit()
+    ^held: cell.guard_edit()
     if held.value.bytes != expected -> return false
     held.value.bytes = replacement.move()
     true
@@ -468,7 +468,7 @@ priv device_cell_replace: fn(store: String, cell: Shared<LiveCell>, expected: [U
 priv __keep_notice: fn(notice: Notice) {
     loop {
         seen: notice_cell_load()
-        kept := seen.copy()
+        ^kept: seen.copy()
         live_put(kept, notice.text)
         live_put(kept, if notice.retry -> "1" else -> "0")
         if notice_cell_replace(seen, kept) {
@@ -491,7 +491,7 @@ priv __dismiss: fn(at: Int) {
         if at < 0 || at >= listed.len() {
             return
         }
-        kept := [U8]{}
+        ^kept: [U8]{}
         loop index in 0..<listed.len() {
             if index == at -> next
             live_put(kept, listed[index].text)
@@ -506,8 +506,8 @@ priv __dismiss: fn(at: Int) {
 // The notices of an encoded list; malformed bytes are an empty list.
 priv notice_decode: fn(raw: [U8]) -> [Notice] {
     fields: live_fields(raw) ?? return [Notice]{}
-    listed := [Notice]{}
-    at := 0
+    ^listed: [Notice]{}
+    ^at: 0
     loop at + 1 < fields.len() {
         listed.push(Notice{text: fields[at], retry: fields[at + 1] == "1"})
         at += 2
@@ -583,7 +583,7 @@ priv links_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool Never! {
     if world_rt.world_store_replace("app.links", expected, replacement) == .Val(replaced) {
         return replaced
     }
-    cell := LINKS_CELL.guard_edit()
+    ^cell: LINKS_CELL.guard_edit()
     if cell.value.bytes != expected -> return false
     cell.value.bytes = replacement.move()
     true
@@ -610,7 +610,7 @@ priv links_set: fn(client: String, cut: Bool) Never! {
     }
     loop {
         seen: links_load()
-        names := [String]{}
+        ^names: [String]{}
         loop name in links_names(seen) {
             if name != client -> names.push(name)
         }
@@ -677,8 +677,8 @@ priv queue_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool Never! {
 // The writes of an encoded queue; malformed bytes are an empty queue.
 priv queue_decode: fn(raw: [U8]) -> [QueuedWrite] Never! {
     fields: live_fields(raw) ?? return [QueuedWrite]{}
-    writes := [QueuedWrite]{}
-    at := 0
+    ^writes: [QueuedWrite]{}
+    ^at: 0
     loop at + 5 < fields.len() {
         writes.push(QueuedWrite{client: fields[at], address: fields[at + 1], local: fields[at + 2] == "1", method: fields[at + 3], body: fields[at + 4], key: fields[at + 5]})
         at += 6
@@ -699,7 +699,7 @@ priv queue_put: fn(out: ^[U8], write: QueuedWrite) Never! {
 priv queue_add: fn(write: QueuedWrite) Never! {
     loop {
         seen: queue_load()
-        kept := seen.copy()
+        ^kept: seen.copy()
         queue_put(kept, write)
         if queue_replace(seen, kept) {
             return
@@ -711,7 +711,7 @@ priv queue_add: fn(write: QueuedWrite) Never! {
 priv queue_remove: fn(key: String) Never! {
     loop {
         seen: queue_load()
-        kept := [U8]{}
+        ^kept: [U8]{}
         loop write in queue_decode(seen) {
             if write.key != key -> queue_put(kept, write)
         }
@@ -744,7 +744,7 @@ pending: fn() -> Int Never! { queue_decode(queue_load()).len() }
 priv QUEUE_SENDERS: Shared{[String]{}}
 
 priv queue_claim: fn(client: String) -> Bool Never! {
-    senders := QUEUE_SENDERS.guard_edit()
+    ^senders: QUEUE_SENDERS.guard_edit()
     loop name in senders.value {
         if name == client -> return false
     }
@@ -753,8 +753,8 @@ priv queue_claim: fn(client: String) -> Bool Never! {
 }
 
 priv queue_release: fn(client: String) Never! {
-    senders := QUEUE_SENDERS.guard_edit()
-    kept := [String]{}
+    ^senders: QUEUE_SENDERS.guard_edit()
+    ^kept: [String]{}
     loop name in senders.value {
         if name != client -> kept.push(name.copy())
     }
@@ -780,7 +780,7 @@ priv queue_drain: fn(client: String) -[Net, Time]> Bool Never! {
 // order, when the app comes back (`app_resume_run`): the link they waited
 // on may be back.
 priv queue_resume: fn() -[Net, Time]> Never! {
-    clients := [String]{}
+    ^clients: [String]{}
     loop write in queue_decode(queue_load()) {
         if !clients.contains(write.client) -> clients.push(write.client.copy())
     }
@@ -791,7 +791,7 @@ priv queue_send: fn(client: String) -[Net, Time]> Bool Never! {
     loop {
         if links_cut(client) -> return false
         write: queue_first(client) ?? return true
-        refusal := String?{None}
+        ^refusal: String?{None}
         if remote_send(write.address, write.local, write.method, write.body, write.key) == {
             .Ok(reply) -> { refusal = queue_refusal(reply) }
             .Err(failure) -> {
@@ -816,7 +816,7 @@ priv queue_refusal: fn(reply: String) -> String? Never! {
 }
 
 priv queue_invalid: fn(fields: [FieldError]) -> String Never! {
-    reasons := [String]{}
+    ^reasons: [String]{}
     loop field in fields {
         reasons.push(if field.path == "" -> field.reason.copy() else -> "{field.path}: {field.reason}")
     }
@@ -933,13 +933,13 @@ priv remote_send: fn(address: String, local: Bool, method: String, body: String,
 priv remote_send_as: fn(address: String, method: String, body: String, key: String, bearer: String) -[Net, Time]> String CallError! {
     seed: "{rt.clock_mono_ns()}:{trace_next()}:{key}"
     trace: make_trace_id("trace:{seed}", 16)
-    headers := [http.Header]{
+    ^headers: [http.Header]{
         http.Header{name: "traceparent", value: "00-{trace}-{make_trace_id("span:{seed}", 8)}-01"},
         http.Header{name: "x-request-id", value: trace},
         http.Header{name: "idempotency-key", value: key},
     }
     if bearer != "" -> headers.push(http.Header{name: "authorization", value: "Bearer {bearer}"})
-    lost := ""
+    ^lost: ""
     loop sends in 0..<REMOTE_SENDS {
         if sends > 0 -> time.sleep(time.duration_ms(REMOTE_RESEND_MS * sends))
         reply: remote_send_once("{address}/{method}", headers, body)
@@ -982,7 +982,7 @@ priv remote_send_once: fn(url: String, headers: [http.Header], body: String) -[N
 }
 
 priv remote_send_http: fn(url: String, headers: [http.Header], body: String) -[Net, Time]> RemoteReply Never! {
-    sent := http.__request("POST", url).__with_body(body)
+    ^sent: http.__request("POST", url).__with_body(body)
     loop header in headers -> sent = sent.__with_header(header.name, header.value)
     response: sent.send() ?? return RemoteReply{status: 0, retry_after: None, text: "{err}"}
     text: response.body.text(REMOTE_MAX_REPLY) ?? return RemoteReply{status: 0, retry_after: None, text: "{err}"}
@@ -995,7 +995,7 @@ priv remote_send_http: fn(url: String, headers: [http.Header], body: String) -[N
 // reply came. A reply over `REMOTE_MAX_REPLY` bytes is lost, as core.http
 // loses it.
 priv remote_send_page: fn(url: String, headers: [http.Header], body: String) -> RemoteReply Never! {
-    lines := [String]{url}
+    ^lines: [String]{url}
     loop header in headers -> lines.push("{header.name}: {header.value}")
     fields: app_page_answer(WEB_DEVICE_POST, "{lines.join("\n")}\n\n{body}")
     if fields.len() < 3 {
@@ -1136,8 +1136,8 @@ priv session_held: fn(origin: String) -> AppSession? Never! {
 
 // Holds `session` in place of the one held with its origin.
 priv session_put: fn(session: AppSession) Never! {
-    held := APP_SESSIONS.guard_edit()
-    kept := [AppSession]{}
+    ^held: APP_SESSIONS.guard_edit()
+    ^kept: [AppSession]{}
     loop i in 0..<held.value.len() {
         if held.value[i].origin != session.origin -> kept.push(held.value[i])
     }
@@ -1147,8 +1147,8 @@ priv session_put: fn(session: AppSession) Never! {
 
 // Drops the session held with `origin`.
 priv session_drop: fn(origin: String) Never! {
-    held := APP_SESSIONS.guard_edit()
-    kept := [AppSession]{}
+    ^held: APP_SESSIONS.guard_edit()
+    ^kept: [AppSession]{}
     loop i in 0..<held.value.len() {
         if held.value[i].origin != origin -> kept.push(held.value[i])
     }
@@ -1193,7 +1193,7 @@ priv session_renew: fn(origin: String) -[Net, Time]> String CallError! {
 // Service, then the access token in memory.
 priv session_keep: fn(held: AppSession, tokens: AppSessionTokens) -[Net, Time]> CallError! {
     _: session_secret(held, .Store(tokens.refresh)) ?? return Err(err)
-    next := held.copy()
+    ^next: held.copy()
     next.access = tokens.access.copy()
     next.access_until_ns = rt.clock_mono_ns() + tokens.expires_in_ms * 1000000
     session_put(next)
@@ -1222,8 +1222,8 @@ priv session_secret: fn(held: AppSession, change: AppSessionSecret) -[Net, Time]
 
 // `session_secret` on Linux, over the session bus `held` names.
 priv session_secret_linux: fn(held: AppSession, change: AppSessionSecret) -[Net, Time]> String CallError! {
-    stream := net.unix_connect(held.bus) ?? return Err(.Unreachable("the Secret Service: the session bus at {held.bus}: {err}"))
-    c := dbus.start(stream.move(), held.uid, SESSION_WAIT_NS) ?? return Err(.Unreachable("the Secret Service: {err}"))
+    ^stream: net.unix_connect(held.bus) ?? return Err(.Unreachable("the Secret Service: the session bus at {held.bus}: {err}"))
+    ^c: dbus.start(stream.move(), held.uid, SESSION_WAIT_NS) ?? return Err(.Unreachable("the Secret Service: {err}"))
     attributes: [String:String]{"xdg:schema": SESSION_SCHEMA, "server": held.origin}
     if change == {
         .Store(refresh) -> {
@@ -1289,7 +1289,7 @@ priv make_trace_id: fn(seed: String, n: Int) -> String Never! {
 TRACE_SEEDS: Shared{0}
 
 priv trace_next: fn() -> Int Never! {
-    guard := TRACE_SEEDS.guard_edit()
+    ^guard: TRACE_SEEDS.guard_edit()
     guard.value += 1
     guard.value
 }
@@ -1298,8 +1298,8 @@ priv trace_next: fn() -> Int Never! {
 // …}, …]}`; a reply that is not that shape is one error with its text.
 priv remote_invalid: fn(text: String) -> [FieldError] Never! {
     tree: live_json.parse(text) ?? return [FieldError]{FieldError{path: "", reason: "{text}"}}
-    errors := [FieldError]{}
-    index := 0
+    ^errors: [FieldError]{}
+    ^index: 0
     loop {
         reason: live_json.at<String>(tree, "/invalid/{index}/reason") ?? break
         path: live_json.at<String>(tree, "/invalid/{index}/path") ?? ""
@@ -1452,7 +1452,7 @@ live_stats: fn() -> String Never! {
 
 // The live bindings of `registry`; sync's session records are not queries.
 live_query_count: fn(registry: LiveRegistry) -> Int {
-    count := 0
+    ^count: 0
     loop record in registry.records {
         if record.source != LIVE_SYNC_SOURCE -> count += 1
     }
@@ -1468,7 +1468,7 @@ live_query_count: fn(registry: LiveRegistry) -> Int {
 
 // `subscribe(source, args..., every:)`: a binding polled every `every`.
 #Builtin.Role(.LivePoll) priv __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^^fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
-    every_ns := 0
+    ^every_ns: 0
     if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
     acting: acting_now(tasks.current_task())
     Live<T, E>{id: live_register(source, live_key(args), acting_tag(acting), every_ns), run: run, acting: acting}
@@ -1491,12 +1491,16 @@ live_query_count: fn(registry: LiveRegistry) -> Int {
 }
 
 // `invalidate(source)`: every binding of `source` re-runs.
-#Builtin.Role(.LiveInvalidateAll) priv __live_invalidate_all: fn(source: String) Never! { live_invalidate(Val(source), None, None, 0) }
+#Builtin.Role(.LiveInvalidateAll) priv __live_invalidate_all: fn(source: String) Never! {
+    live_invalidate(Val(source), None, None, 0)
+}
 
 // One argument's part of a binding's identity, and one argument of a queued
 // job's call: the argument encoded, or `_`, which no JSON reads, when it
 // doesn't encode, so a job given it fails each run.
-#Builtin.Role(.LiveArg) priv __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
+#Builtin.Role(.LiveArg) priv __live_arg: fn<A: Encode>(value: A) -> String Never! {
+    live_json.to_string<A>(value) ?? "_"
+}
 
 // A binding's read set, for core.db: while a task runs a binding's source,
 // each table it reads joins that binding's read set, so a write to the table
@@ -1518,7 +1522,7 @@ priv(package) live_reads: module {
     // `values` bound to its `?`s in order, to the read set of the binding
     // this task runs, unless it read all of `source` already.
     record_where: fn(source: String, condition: String, values: [String]) Never! {
-        fields := [String]{condition.copy()}
+        ^fields: [String]{condition.copy()}
         fields.extend(values.copy())
         encoded: live_json.to_string<[String]>(fields) ?? return live_read_record(source, source)
         live_read_record(source, "{source}?{encoded}")
@@ -1527,10 +1531,10 @@ priv(package) live_reads: module {
     // The narrowed reads of `source` in the bindings' read sets, each once:
     // its read-set entry, its condition and the values it binds.
     narrowed: fn(source: String) -> [{entry: String, condition: String, values: [String]}] Never! {
-        out := [{entry: String, condition: String, values: [String]}]{}
+        ^out: [{entry: String, condition: String, values: [String]}]{}
         registry: live_decode(live_cell_load()) ?? return out
         prefix: "{source}?"
-        seen := [String]{}
+        ^seen: [String]{}
         loop record in registry.records {
             loop read in record.reads {
                 if !read.starts_with(prefix) || seen.contains(read) -> next
@@ -1538,7 +1542,7 @@ priv(package) live_reads: module {
                 tree: live_json.parse(read.slice(prefix.len(), read.len())) ?? next
                 fields: tree.decode<[String]>() ?? next
                 if fields.len() == 0 -> next
-                values := [String]{}
+                ^values: [String]{}
                 loop at in 1..<fields.len() -> values.push(fields[at].copy())
                 out.push({entry: read.copy(), condition: fields[0].copy(), values: values})
             }
@@ -1561,7 +1565,7 @@ priv live_read_record: fn(source: String, entry: String) {
     id: live_running(tasks.current_task()) ?? return
     loop {
         seen: live_cell_load()
-        registry := live_decode(seen) ?? return
+        ^registry: live_decode(seen) ?? return
         index: live_index(registry, id) ?? return
         reads: registry.records[index].reads
         if registry.records[index].source == source || reads.contains(source) || reads.contains(entry) {
@@ -1590,14 +1594,14 @@ LiveRunning: struct {
 LIVE_RUNNING: Shared{LiveRunning{runs: [LiveRun]{}}}
 
 priv live_run_begin: fn(task: TaskID, id: Int) {
-    running := LIVE_RUNNING.guard_edit()
+    ^running: LIVE_RUNNING.guard_edit()
     running.value.runs.push(LiveRun{task: task, id: id, asked: [String]{}})
 }
 
 // Ends `task`'s innermost run and gives the addresses it asked `presence` of.
 priv live_run_end: fn(task: TaskID) -> [String] {
-    running := LIVE_RUNNING.guard_edit()
-    at := running.value.runs.len()
+    ^running: LIVE_RUNNING.guard_edit()
+    ^at: running.value.runs.len()
     loop at > 0 {
         at -= 1
         if task == running.value.runs[at].task {
@@ -1612,8 +1616,8 @@ priv live_run_end: fn(task: TaskID) -> [String] {
 // Adds `address` to what the run of `task`'s innermost binding asked
 // `presence` of; false when `task` runs no binding.
 priv live_presence_ask: fn(task: TaskID, address: String) -> Bool {
-    running := LIVE_RUNNING.guard_edit()
-    at := running.value.runs.len()
+    ^running: LIVE_RUNNING.guard_edit()
+    ^at: running.value.runs.len()
     loop at > 0 {
         at -= 1
         if task == running.value.runs[at].task {
@@ -1658,10 +1662,10 @@ priv live_presence_settle: fn(id: Int, acting: Acting?, asked: [String]) {
 // (none when `account` is ""), and gives each address whose accounts that
 // changes.
 priv live_presence_keep: fn(id: Int, account: String, asked: [String]) -> [String] {
-    changed := [String]{}
-    had := [String]{}
-    held := APP_PRESENT.guard_edit()
-    kept := [AppPresent]{}
+    ^changed: [String]{}
+    ^had: [String]{}
+    ^held: APP_PRESENT.guard_edit()
+    ^kept: [AppPresent]{}
     loop entry in held.value {
         mine: entry.binding == id
         if mine && (account == "" || entry.account != account || !asked.contains(entry.address)) {
@@ -1686,7 +1690,7 @@ priv live_presence_keep: fn(id: Int, account: String, asked: [String]) -> [Strin
 // whose last watching connection closed is not among them (__live_left_settle).
 priv live_present: fn(address: String, asking: String) -> [auth.AccountID] {
     __live_left_settle()
-    names := [String]{}
+    ^names: [String]{}
     if asking != "" -> names.push(asking.copy())
     registry: live_decode(live_cell_load())
     held: APP_PRESENT.guard_read()
@@ -1696,7 +1700,7 @@ priv live_present: fn(address: String, asking: String) -> [auth.AccountID] {
         names.push(entry.account.copy())
     }
     names.sort()
-    out := [auth.AccountID]{}
+    ^out: [auth.AccountID]{}
     loop name in names -> out.push(auth.AccountID.from_string(name))
     out
 }
@@ -1726,8 +1730,8 @@ priv live_left: fn(topics: String) Never! {
 
 // The binding `task` is running now, the innermost when it runs several.
 priv live_running: fn(task: TaskID) -> Int? {
-    running := LIVE_RUNNING.guard_edit()
-    at := running.value.runs.len()
+    ^running: LIVE_RUNNING.guard_edit()
+    ^at: running.value.runs.len()
     loop at > 0 {
         at -= 1
         if running.value.runs[at].task == task -> return Val(running.value.runs[at].id)
@@ -1765,7 +1769,7 @@ priv(package) resume: module {
         if script.sep == "" -> return 0
         reads: live_json.decode<[AppResumed]>(script.head) ?? return 0
         caller: acting_tag(acting_now(tasks.current_task()))
-        stored := 0
+        ^stored: 0
         loop read in reads {
             id: live_register(read.source, read.key, caller, 0)
             if id == 0 -> next
@@ -1796,14 +1800,14 @@ priv AppResumeReads: struct {
 priv APP_RESUME_READS: Shared{[AppResumeReads]{}}
 
 priv resume_begin: fn(task: TaskID) Never! {
-    held := APP_RESUME_READS.guard_edit()
+    ^held: APP_RESUME_READS.guard_edit()
     held.value.push(AppResumeReads{task: task, ids: [Int]{}})
 }
 
 // Ends `task`'s innermost page and gives the bindings its view read.
 priv resume_end: fn(task: TaskID) -> [Int] Never! {
-    held := APP_RESUME_READS.guard_edit()
-    at := held.value.len()
+    ^held: APP_RESUME_READS.guard_edit()
+    ^at: held.value.len()
     loop at > 0 {
         at -= 1
         if task == held.value[at].task {
@@ -1825,8 +1829,8 @@ priv resume_note: fn(id: Int) Never! {
     if live_running(me) != None {
         return
     }
-    held := APP_RESUME_READS.guard_edit()
-    at := held.value.len()
+    ^held: APP_RESUME_READS.guard_edit()
+    ^at: held.value.len()
     loop at > 0 {
         at -= 1
         if held.value[at].task != me -> next
@@ -1845,7 +1849,7 @@ priv resume_rendering: fn() -> Bool Never! {
 // The resume script of the bindings `ids`: each one's stored result, when
 // it has one and no write made it stale.
 priv resume_script: fn(ids: [Int]) -> String Never! {
-    reads := [AppResumed]{}
+    ^reads: [AppResumed]{}
     registry: live_decode(live_cell_load()) ?? return "{RESUME_OPEN}[]</script>"
     loop id in ids {
         index: live_index(registry, id) ?? next
@@ -1917,13 +1921,13 @@ priv acting_within: fn<R, E>(acting: Acting?, run: fn() -> R E!) -> R E! {
 }
 
 priv acting_begin: fn(task: TaskID, acting: Acting?) {
-    runs := ACTING.guard_edit()
+    ^runs: ACTING.guard_edit()
     runs.value.runs.push(ActingRun{task: task, acting: acting})
 }
 
 priv acting_end: fn(task: TaskID) {
-    runs := ACTING.guard_edit()
-    at := runs.value.runs.len()
+    ^runs: ACTING.guard_edit()
+    ^at: runs.value.runs.len()
     loop at > 0 {
         at -= 1
         if task == runs.value.runs[at].task {
@@ -1935,8 +1939,8 @@ priv acting_end: fn(task: TaskID) {
 
 // The caller `task` acts for now: None for no one.
 priv acting_now: fn(task: TaskID) -> Acting? {
-    runs := ACTING.guard_edit()
-    at := runs.value.runs.len()
+    ^runs: ACTING.guard_edit()
+    ^at: runs.value.runs.len()
     loop at > 0 {
         at -= 1
         if runs.value.runs[at].task == task -> return runs.value.runs[at].acting.copy()
@@ -2158,7 +2162,7 @@ priv(package) transactions: module {
     // runs one already, which the new call then belongs to.
     begin: fn() -> Int? Never! {
         me: tasks.current_task()
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop run in runs.value.runs {
             if run.task == me -> return None
         }
@@ -2180,7 +2184,7 @@ priv(package) transactions: module {
     // Joins one store's transaction, which `end` finishes, and that store's
     // outbox to call `call`.
     join: fn(call: Int, end: ^^fn(Bool) -[]> Bool Never!, outbox: ^^CallOutbox) Never! {
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call {
                 runs.value.runs[index].joins.push(CallJoin{end: end.move(), outbox: outbox.move()})
@@ -2191,7 +2195,7 @@ priv(package) transactions: module {
 
     // Queues `job` in call `call`, to run once the call commits.
     enqueue: fn(call: Int, job: ^^CallJob) Never! {
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call {
                 runs.value.runs[index].jobs.push(job.move())
@@ -2202,7 +2206,7 @@ priv(package) transactions: module {
 
     // Marks call `call` refused: a store it uses was busy.
     refuse: fn(call: Int) Never! {
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call -> runs.value.runs[index].refused = true
         }
@@ -2219,7 +2223,7 @@ priv(package) transactions: module {
 
     // Gives call `call` the webhook delivery it runs.
     deliver: fn(call: Int, delivery: CallDelivery) Never! {
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call {
                 runs.value.runs[index].delivery = Val(delivery.copy())
@@ -2238,7 +2242,7 @@ priv(package) transactions: module {
 
     // Gives call `call` the schedule's run it is.
     schedule: fn(call: Int, tick: CallTick) Never! {
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call -> runs.value.runs[index].tick = Val(tick.copy())
         }
@@ -2255,7 +2259,7 @@ priv(package) transactions: module {
 
     // Gives call `call` the request key it carries.
     ask: fn(call: Int, request: CallRequest) Never! {
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call {
                 runs.value.runs[index].request = Val(request.copy())
@@ -2277,7 +2281,7 @@ priv(package) transactions: module {
     // its run gave, which `end` keeps under that key. The first reply the
     // call is given stands.
     answer: fn(call: Int, reply: String) Never! {
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call && runs.value.runs[index].reply == None {
                 runs.value.runs[index].reply = Val(reply.copy())
@@ -2297,7 +2301,7 @@ priv(package) transactions: module {
     // Marks call `call` repeated: a store it uses has run its delivery or
     // its schedule's run, or keeps a reply under its request key.
     repeat: fn(call: Int) Never! {
-        runs := CALLS.guard_edit()
+        ^runs: CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call -> runs.value.runs[index].repeated = true
         }
@@ -2325,13 +2329,13 @@ priv(package) transactions: module {
     // commit can't undo it, so the call stands, and its jobs run. A call
     // that joined no store runs its jobs as it ends, and keeps no reply.
     end: fn(call: Int, commit: Bool) -> Bool Never! {
-        ended := calls_take(call) ?? return true
+        ^ended: calls_take(call) ?? return true
         if ended.refused || ended.repeated || !commit {
             loop joined in ended.joins -> _: joined.end(false)
             if !ended.refused && !ended.repeated -> _: calls_answered(ended, 0)
             return !ended.refused
         }
-        keys := [String]{}
+        ^keys: [String]{}
         if ended.joins.len() > 0 {
             loop job in ended.jobs {
                 key: ended.joins[0].outbox.keep(job.name, job.args, ended.joins[0].outbox.now() + JOB_HOLD_MS)
@@ -2358,9 +2362,9 @@ priv(package) transactions: module {
             return true
         }
         // The jobs' runs share the first store's outbox.
-        first := ended.joins.remove(0, .Slot) ?? return true
+        ^first: ended.joins.remove(0, .Slot) ?? return true
         outbox: jobs_store(first.outbox.move(), false)
-        at := 0
+        ^at: 0
         loop job in ended.jobs.move() {
             job_start(job, keys[at].copy(), Val(outbox.copy()), 0)
             at += 1
@@ -2371,7 +2375,7 @@ priv(package) transactions: module {
 
 // Removes call `call` from the open calls and gives it.
 priv calls_take: fn(call: Int) -> CallRun? Never! {
-    runs := CALLS.guard_edit()
+    ^runs: CALLS.guard_edit()
     loop index in 0..<runs.value.runs.len() {
         if runs.value.runs[index].id == call -> return runs.value.runs.remove(index, .Slot)
     }
@@ -2431,7 +2435,7 @@ priv PUSH_REGISTRY: Shared{PushRegistry{stores: [Shared<PushDevices>]{}}}
 priv(package) push: module {
     // Names a store; a store named again replaces the one of its name.
     store: fn(devices: ^^PushDevices) Never! {
-        registry := PUSH_REGISTRY.guard_edit()
+        ^registry: PUSH_REGISTRY.guard_edit()
         loop index in 0..<registry.value.stores.len() {
             if push_store_name(registry.value.stores[index]) == devices.store {
                 registry.value.stores[index] = Shared{devices.move()}
@@ -2453,7 +2457,7 @@ priv(package) push: module {
 
     // The devices the account `account` registered, each once.
     devices: fn(account: String) -> [PushDevice] Never! {
-        found := [PushDevice]{}
+        ^found: [PushDevice]{}
         loop devices in push_stores() {
             held: devices.guard_read()
             listed: held.value.of(account.copy()) ?? next
@@ -2535,7 +2539,7 @@ App: struct {
     // `{path}/{method}`, a body of at most `max_upload` bytes; a graph that
     // mounts `S` answers its calls in this process (`__remote`).
     __api: fn<S>(self, path: String, service: String, max_upload: Int) -> App Never! {
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.apis[service] = AppAPI{path: path, max_upload: max_upload}
         self.copy()
     }
@@ -2545,7 +2549,7 @@ App: struct {
     // method that replies a `V` is answered under `policy`
     // (`reply_cache.policy`). The last policy set for `V` holds.
     __cache: fn<V>(self, reply: String, policy: CachePolicy) -> App Never! {
-        held := APP_CACHE.guard_edit()
+        ^held: APP_CACHE.guard_edit()
         held.value[reply.copy()] = policy
         self.copy()
     }
@@ -2559,12 +2563,12 @@ App: struct {
         graph: self.copy()
         opens: state.copy()
         fields: names.copy()
-        listed := APP_SITEMAPS.guard_edit()
+        ^listed: APP_SITEMAPS.guard_edit()
         listed.value.push(
             Shared{AppSitemap{
                 state: state.copy(),
                 addresses: fn() {
-                    found := [String]{}
+                    ^found: [String]{}
                     loop view in list() {
                         found.push(App.__url_of<V>(opens, fields, address(graph, view)))
                     }
@@ -2578,7 +2582,7 @@ App: struct {
     // Whether a device queues the writes it can't send (`.Queue`) or fails
     // them at once (`.Off`, the start).
     offline: fn(self, mode: Offline) -> App Never! {
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.offline = mode
         self.copy()
     }
@@ -2598,7 +2602,7 @@ App: struct {
         if color < 0 || color > 0xFFFFFF {
             panic("`.installable(color: {color})` is no color: write it as 0xRRGGBB, as 0x2a5bd7")
         }
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.install = Val(AppInstall{name: name, icon: icon, color: color})
         self.copy()
     }
@@ -2617,7 +2621,7 @@ App: struct {
         if scheme == "http" || scheme == "https" || scheme == "file" {
             panic("`.url_scheme(\"{name}\")` names a scheme the system's browser and files own: give the app its own, as \"crewboard\", and its web links with `.app_links(domain:)`")
         }
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         if !held.value.schemes.contains(scheme) -> held.value.schemes.push(scheme)
         self.copy()
     }
@@ -2632,7 +2636,7 @@ App: struct {
         if host == "" || host.contains("/") || host.contains(":") || host.contains("@") || host.contains(" ") {
             panic("`.app_links(domain: \"{domain}\")` is no host name: write the domain alone, as \"crew.example.com\"")
         }
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         if !held.value.link_domains.contains(host) -> held.value.link_domains.push(host)
         self.copy()
     }
@@ -2730,7 +2734,7 @@ App: struct {
         if every.ns <= 0 {
             panic("background work runs every positive duration, not every {every.ns}ns")
         }
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.backgrounds.push(AppBackground{every_ns: every.ns, at_login: at_login, run: Shared{AppBackgroundRun{run: run.move()}}})
         self.copy()
     }
@@ -2746,7 +2750,7 @@ App: struct {
     // `quit_item`). A desktop with no tray leaves a notice in the app's
     // notice list (`notices`). Gives back the graph.
     tray: fn(self, icon: String, menu: ^^fn() -> [MenuItem] Notice!) -> App Never! {
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.tray = Val(AppTray{icon: icon, menu: Shared{AppTrayMenu{menu: menu.move()}}})
         self.copy()
     }
@@ -2764,7 +2768,7 @@ App: struct {
     // item. Choosing an item runs it (`item`, `quit_item`); the Edit and
     // Window menus' items act on the window. Gives back the graph.
     menu_bar: fn(self, menus: ^^fn() -> [Menu] Notice!) -> App Never! {
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.menu_bar = Val(Shared{AppMenuBar{menus: menus.move()}})
         self.copy()
     }
@@ -2785,7 +2789,7 @@ App: struct {
     // notice list (`notices`). Gives back the graph.
     lifecycle: fn(self, on_resume: ^^fn() Notice!) -> App Never! {
         resume: Shared{AppResume{run: on_resume.move()}}
-        held := APP_LIFECYCLE.guard_edit()
+        ^held: APP_LIFECYCLE.guard_edit()
         if held.value.scope == None -> held.value.scope = Val(event.scope())
         held.value.adapted = true
         if held.value.scope == .Val(scope) {
@@ -2807,12 +2811,12 @@ App: struct {
     // devices is skipped. A second `.push` on the graph refuses the start,
     // naming both places. Gives back the graph.
     push: fn(self, *, apns: APNs?{None}, fcm: FCM?{None}, web: WebPush?{None}, at: SourceLocation{#caller}) -[Env]> App Never! {
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         if held.value.push == .Val(first) {
             held.value.push = Val(AppPush{settings: first.settings.copy(), refused: first.refused.copy(), at: first.at.copy(), again: Val(at)})
             return self.copy()
         }
-        named := AppPush{settings: push_wire.PushSettings{apns: None, fcm: None, web: None}, refused: "", at: at, again: None}
+        ^named: AppPush{settings: push_wire.PushSettings{apns: None, fcm: None, web: None}, refused: "", at: at, again: None}
         if app_push_read(apns, fcm, web) == {
             .Ok(settings) -> { named.settings = settings }
             .Err(problem) -> named.refused = problem.reason
@@ -2839,7 +2843,7 @@ App: struct {
             sign_in: fn(account: String, password: String, device: String, now_ms: Int, access_ms: Int, refresh_ms: Int) { auth.tokens_login(account, password, device, now_ms, access_ms, refresh_ms) },
             refresh: fn(token: String, now_ms: Int, access_ms: Int, refresh_ms: Int) { auth.tokens_refresh(token, now_ms, access_ms, refresh_ms) },
         }
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.sessions = Val(AppSessions{access_ms: access.ns /% 1000000, refresh_ms: refresh.ns /% 1000000, mint: Shared{mint}})
         self.copy()
     }
@@ -2855,7 +2859,7 @@ App: struct {
         if width < 1 || height < 1 {
             panic("a window is at least one pixel on each side, not {width}x{height}")
         }
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.window = Val(AppWindow{width: width, height: height})
         self.copy()
     }
@@ -2864,8 +2868,8 @@ App: struct {
     // `title` that `exec` runs with the link it opens (`%u`), handling the
     // links of each scheme the graph has (`x-scheme-handler/{scheme}`).
     desktop_entry: fn(self, exec: String) -> String Never! {
-        lines := [String]{"[Desktop Entry]", "Type=Application", "Name={app_desktop_value(self.title)}", "Exec={app_desktop_exec(exec)} %u", "Terminal=false"}
-        handlers := ""
+        ^lines: [String]{"[Desktop Entry]", "Type=Application", "Name={app_desktop_value(self.title)}", "Exec={app_desktop_exec(exec)} %u", "Terminal=false"}
+        ^handlers: ""
         loop scheme in app_graph_schemes() -> handlers = "{handlers}x-scheme-handler/{scheme};"
         if handlers != "" -> lines.push("MimeType={handlers}")
         "{lines.join("\n")}\n"
@@ -2882,7 +2886,7 @@ App: struct {
     // `__url_of` finds its address, `__go` opens it, and a renderer walks it
     // (`screens`).
     __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: ^^fn(App, [String:String]) -[Net, FS.Read]> UINode? Never!) -> App Never! {
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.screens.push(AppScreen{path: path, state: state, query: query, signed_in: signed_in, open: Shared{AppOpen{run: open.move()}}})
         self.copy()
     }
@@ -2894,7 +2898,7 @@ App: struct {
     // no network address, so the endpoint's limit of `limit` calls per
     // `window_ns` from one address, which a server keeps, doesn't apply.
     __remote_public: fn(self, path: String, answer: ^^fn(RemoteArgs) -> String [FieldError]!, limit: Int, window_ns: Int) -> App Never! {
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.endpoints[path] = AppEndpoint{answer: Val(Shared{AppAnswer{run: answer.move()}})}
         self.copy()
     }
@@ -2902,7 +2906,7 @@ App: struct {
     // An `#App.SignedIn` method of a mounted service: its call answers
     // `SignedOut`, as a server's does, until the graph signs a caller in.
     __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int) -> App Never! {
-        held := APP_GRAPH.guard_edit()
+        ^held: APP_GRAPH.guard_edit()
         held.value.endpoints[path] = AppEndpoint{answer: None}
         self.copy()
     }
@@ -2948,7 +2952,7 @@ App: struct {
     // (`__address_json`), in order; None when a value is missing or the
     // values make no `V`.
     __address_state: fn<V: Decode>(self, names: [String], values: [String?]) -> V? Never! {
-        parts := [String]{}
+        ^parts: [String]{}
         loop index in 0..<names.len() {
             value: values[index] ?? return None
             name: live_json.to_string<String>(names[index]) ?? return None
@@ -2973,7 +2977,7 @@ App: struct {
     // state that no screen of the program's graph opens, so a state with no
     // screen here is one whose graph this process has not built.
     __go: fn<V>(state: String, names: [String], values: [String]) -[Net, FS.Read]> Never! {
-        fields := [String:String]{}
+        ^fields: [String:String]{}
         loop index in 0..<names.len() -> fields[names[index].copy()] = values[index].copy()
         screen: app_screen(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before opening a screen")
         graph: app_graph_open(state, fields.copy())
@@ -3014,7 +3018,7 @@ App: struct {
     // none when it doesn't.
     __queued_apis: fn(self) -> [String] Never! {
         held: APP_GRAPH.guard_read()
-        paths := [String]{}
+        ^paths: [String]{}
         if held.value.offline != .Queue -> return paths
         loop service in held.value.apis.keys() -> paths.push(held.value.apis[service].path.copy())
         paths.sort()
@@ -3035,7 +3039,7 @@ App: struct {
     // texts, as `__current`'s does. The last head given for `V` holds; a
     // page asks it for the address it shows (`heads.of`).
     __head: fn<V>(self, state: String, decode: ^^fn(App, [String:String]) -> V? Never!, head: ^^fn(V) -> Head Never!) -> App Never! {
-        held := APP_HEADS.guard_edit()
+        ^held: APP_HEADS.guard_edit()
         held.value[state.copy()] = Shared{AppHead{
             run: fn(graph: App, fields: [String:String]) {
                 shown: decode(graph, fields) ?? return Head?{None}
@@ -3055,7 +3059,7 @@ App: struct {
     // graph this process has not built.
     __url_of: fn<V>(state: String, names: [String], values: [String]) -> String Never! {
         screen: app_screen(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before taking an address")
-        parts := [String]{}
+        ^parts: [String]{}
         loop segment in screen.path.split("/") {
             if !segment.starts_with(":") {
                 parts.push(segment)
@@ -3065,8 +3069,8 @@ App: struct {
             index: names.index_of(name) ?? panic("`{state}` has no field `{name}` for the path `{screen.path}`")
             parts.push(url.percent_encode(values[index]))
         }
-        address := parts.join("/")
-        separator := "?"
+        ^address: parts.join("/")
+        ^separator: "?"
         loop field in screen.query {
             index: names.index_of(field) ?? next
             if values[index] == "" -> next
@@ -3098,7 +3102,7 @@ App: struct {
     // accounts present change, as a live query does; asked elsewhere, it only
     // reads them.
     __presence: fn(address: String) -> [auth.AccountID] Never! {
-        asking := ""
+        ^asking: ""
         if maybe_caller() == .Val(account) && live_presence_ask(tasks.current_task(), address) {
             asking = account.raw()
             source: "{LIVE_PRESENCE_SOURCE}{address}"
@@ -3179,9 +3183,9 @@ Query: struct {
 // Starts the app graph, titled `title`: a graph with no services, screens,
 // heads, queue, links or lifecycle listeners of its own yet.
 new: fn(title: String) -> App Never! {
-    held := APP_GRAPH.guard_edit()
+    ^held: APP_GRAPH.guard_edit()
     held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, push: None, sessions: None}
-    heads := APP_HEADS.guard_edit()
+    ^heads: APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     app_lifecycle_graph()
     App{title: title}
@@ -3316,7 +3320,7 @@ priv app_sessions_refresh: fn(mint: fn(String, Int, Int, Int) -> auth.Tokens Err
 // variables its maker names, read once here: a variable that is unset,
 // empty or holds no key its service takes fails, naming it.
 priv app_push_read: fn(apns: APNs?, fcm: FCM?, web: WebPush?) -[Env]> push_wire.PushSettings push_wire.PushError! {
-    settings := push_wire.PushSettings{apns: None, fcm: None, web: None}
+    ^settings: push_wire.PushSettings{apns: None, fcm: None, web: None}
     if apns == .Val(given) {
         key: app_push_variable(given.key_env, "app.apns", "key_env") ?? return Err(err)
         key_id: app_push_variable(given.key_id_env, "app.apns", "key_id_env") ?? return Err(err)
@@ -3451,7 +3455,7 @@ priv(package) reply_cache: module {
 
     // Names a store; a store named again replaces the one of its name.
     store: fn(replies: ^^KeptReplies) Never! {
-        registry := KEPT_REGISTRY.guard_edit()
+        ^registry: KEPT_REGISTRY.guard_edit()
         loop index in 0..<registry.value.len() {
             if kept_store_name(registry.value[index]) == replies.store {
                 registry.value[index] = Shared{replies.move()}
@@ -3485,7 +3489,7 @@ priv(package) reply_cache: module {
     // this process keeps for itself is fresh only while the count is the one
     // its run began at (`writes`).
     written: fn() Never! {
-        held := KEPT_WRITES.guard_edit()
+        ^held: KEPT_WRITES.guard_edit()
         held.value += 1
     }
 
@@ -3532,7 +3536,7 @@ priv(package) sitemap: module {
     // in the order given. A list whose state no screen opens, or whose
     // screen only a signed-in caller opens, gives none.
     addresses: fn() -> [String] Never! {
-        found := [String]{}
+        ^found: [String]{}
         loop listed in app_sitemaps() {
             held: listed.guard_read()
             if !app_screen_public(held.value.state) -> next
@@ -3548,10 +3552,10 @@ priv(package) sitemap: module {
     // the path, so a public page under it stays open to crawlers.
     signed_in_paths: fn() -> [String] Never! {
         held: APP_GRAPH.guard_read()
-        paths := [String]{}
+        ^paths: [String]{}
         loop screen in held.value.screens {
             if !screen.signed_in -> next
-            segments := [String]{}
+            ^segments: [String]{}
             loop segment in screen.path.split("/") {
                 segments.push(if segment.starts_with(":") -> "*" else -> segment)
             }
@@ -3723,7 +3727,7 @@ priv head_test_inbox: fn(_: App, fields: [String:String]) -> HeadTestInbox? Neve
             Val(KeptReply{reply: reply.copy(), age_ms: 0})
         },
         keep: fn(key: String, reply: String, _: Int, _: Int) {
-            guard := kept.guard_edit()
+            ^guard: kept.guard_edit()
             guard.value[key] = reply
             true
         },
@@ -3748,7 +3752,7 @@ priv RESUME_TEST_RUNS: Shared{ResumeTestRuns{runs: 0}}
 
 // The resume test's source: 7 squared, each run counted.
 priv resume_test_square: fn() -> Int AppError! {
-    held := RESUME_TEST_RUNS.guard_edit()
+    ^held: RESUME_TEST_RUNS.guard_edit()
     held.value.runs += 1
     Ok(49)
 }
@@ -3988,7 +3992,7 @@ priv app_menu_shortcut: fn(key: String) -> UIShortcut? Never! {
     if name == "" {
         panic("a menu item's key equivalent ends with a key, like Cmd+Shift+E, not {key}")
     }
-    bits := 0
+    ^bits: 0
     loop at in 0..<last {
         part: parts[at]
         bit: if part == {
@@ -4009,7 +4013,7 @@ priv app_menu_shortcut: fn(key: String) -> UIShortcut? Never! {
 priv app_menu_key_names: fn(key: String) -> [String] Never! {
     shortcut: app_menu_shortcut(key) ?? return [String]{}
     bits: shortcut.modifiers.bits
-    names := [String]{}
+    ^names: [String]{}
     if bits & 17 != 0 -> names.push("Control")
     if bits & 2 != 0 -> names.push("Alt")
     if bits & 4 != 0 -> names.push("Shift")
@@ -4029,7 +4033,7 @@ priv __api_max_upload: fn(service: String) -> Int? Never! {
 // Makes the screen of `state`, at the address of the field texts `fields`,
 // the current one, and gives the graph.
 priv app_graph_open: fn(state: String, fields: [String:String]) -> App Never! {
-    held := APP_GRAPH.guard_edit()
+    ^held: APP_GRAPH.guard_edit()
     held.value.current = Val(AppCurrent{state: state, fields: fields})
     App{title: held.value.title.copy()}
 }
@@ -4041,8 +4045,8 @@ priv app_graph_open: fn(state: String, fields: [String:String]) -> App Never! {
 // arguments; a write that meets a binding's read set makes it stale, and
 // the screen's next read runs its source again (`state`).
 priv app_graph_route_data: fn(reads: [Int]) -> [Int] Never! {
-    held := APP_GRAPH.guard_edit()
-    left := [Int]{}
+    ^held: APP_GRAPH.guard_edit()
+    ^left: [Int]{}
     loop id in held.value.route_data {
         if !reads.contains(id) -> left.push(id)
     }
@@ -4077,7 +4081,7 @@ priv C_APP_LOST_LINK: "link"
 // and the bindings the screen before it read are dropped. False, for
 // `App.open_link`: no screen opened.
 priv app_link_lost: fn(link: String) -> Bool Never! {
-    fields := [String:String]{}
+    ^fields: [String:String]{}
     fields[C_APP_LOST_LINK] = link.copy()
     _: app_graph_open("", fields)
     live_drop(app_graph_route_data([Int]{}))
@@ -4096,7 +4100,7 @@ priv app_graph_schemes: fn() -> [String] Never! {
 priv app_link_scheme_valid: fn(scheme: String) -> Bool Never! {
     if scheme == "" -> return false
     letters: "abcdefghijklmnopqrstuvwxyz"
-    first := true
+    ^first: true
     loop scalar in unicode.scalars(scheme) {
         if !letters.contains(scalar) && (first || !"0123456789+-.".contains(scalar)) -> return false
         first = false
@@ -4123,8 +4127,8 @@ priv app_link_address: fn(link: String) -> String? Never! {
         return Val("/{tail}")
     }
     if scheme != "https" -> return None
-    authority := app_link_authority(after) ?? return None
-    path := "/"
+    ^authority: app_link_authority(after) ?? return None
+    ^path: "/"
     loop index in 0..<authority.len() {
         mark: authority.slice(index, index + 1)
         if mark != "/" && mark != "?" -> next
@@ -4157,7 +4161,7 @@ priv app_link_fields: fn(screen: AppScreen, path: String, query: String) -> [Str
     want: screen.path.split("/").to_list()
     have: path.split("/").to_list()
     if want.len() != have.len() -> return None
-    fields := [String:String]{}
+    ^fields: [String:String]{}
     loop index in 0..<want.len() {
         if !want[index].starts_with(":") {
             if want[index] != have[index] -> return None
@@ -4204,7 +4208,7 @@ C_APP_HANDOFF_WAIT_NS: 5000000000
 // `App.launch` on a desktop: hands the launch's link to the running copy
 // and is false, or becomes that copy, starts its run and opens its window.
 priv app_launch_desktop: fn(graph: App) -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
-    link := ""
+    ^link: ""
     loop given in process.args() {
         if app_link_address(given) == None -> next
         link = given.copy()
@@ -4266,10 +4270,12 @@ priv app_page_redraw: fn() -[Browser, FS.Read, Net]> Never! {
 // which it then takes as drawn. From the first call on, a change to the
 // data the screen shows marks it due (`app_window_wake`).
 priv app_page_due: fn(now: AppCurrent?) -> Bool Never! {
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     held.value.page = true
     saved_ver: ui.saved_version()
-    if !held.value.stale && held.value.drawn == now && held.value.saved_version == saved_ver -> return false
+    if !held.value.stale && held.value.drawn == now && held.value.saved_version == saved_ver {
+        return false
+    }
     held.value.stale = false
     held.value.drawn = now.copy()
     held.value.saved_version = saved_ver
@@ -4308,7 +4314,7 @@ priv app_runtime_dir: fn() -[Env]> String Never! {
 // `socket` (`App.launch`), as one JSON line `[link, token]`, and waits for
 // it to take them. True once they are sent; false when no copy listens.
 priv app_launch_hand: fn(socket: String, link: String, token: String) -[Net, Time.Wait]> Bool Never! {
-    stream := net.unix_connect(socket) ?? return false
+    ^stream: net.unix_connect(socket) ?? return false
     message: live_json.to_string<[String]>([String]{link, token}) ?? return false
     net.unix_write(stream, "{message}\n") ?? return false
     _: app_launch_line(stream)
@@ -4333,11 +4339,11 @@ priv app_launch_listen: fn(graph: App, socket: String) -[FS.Read, Net, Time.Wait
 // the link it hands over and keeps its activation token, then answers `ok`.
 priv app_launch_serve: fn(graph: App, listener: UnixListener) -[Net, FS.Read, Time.Wait]> Never! {
     loop {
-        peer := net.unix_accept(listener) ?? return
+        ^peer: net.unix_accept(listener) ?? return
         given: live_json.decode<[String]>(app_launch_line(peer)) ?? [String]{}
         if given.len() == 2 {
             if given[0] != "" -> _: graph.open_link(given[0])
-            held := APP_GRAPH.guard_edit()
+            ^held: APP_GRAPH.guard_edit()
             held.value.activations.push(given[1].copy())
         }
         net.unix_write(peer, "ok\n") ?? next
@@ -4348,7 +4354,7 @@ priv app_launch_serve: fn(graph: App, listener: UnixListener) -[Net, FS.Read, Ti
 // The next line `stream` gives, without its end; what came when it ends or
 // goes quiet first.
 priv app_launch_line: fn(stream: ^UnixStream) -[Net, Time.Wait]> String Never! {
-    text := ""
+    ^text: ""
     loop !text.contains("\n") {
         if !(net.unix_wait(stream, C_APP_HANDOFF_WAIT_NS) ?? false) -> break
         part: net.unix_read(stream) ?? break
@@ -4363,7 +4369,7 @@ priv app_launch_line: fn(stream: ^UnixStream) -[Net, Time.Wait]> String Never! {
 // runs it on its timer. The app's autostart entry is installed when a
 // piece asks to run at login, and removed otherwise.
 priv app_background_start: fn(title: String) -[Env, FS.Read, FS.Write, Time.Wait]> Never! {
-    at_login := false
+    ^at_login: false
     loop work in app_graph_backgrounds() {
         if work.at_login -> at_login = true
         runner: task { app_background_run(work.every_ns, work.run) }
@@ -4525,7 +4531,7 @@ priv APP_LIFECYCLE: Shared{AppLifecycle{runs: 0, observed: None, published: None
 // A new graph (`new`) resumes through listeners of its own: the ones an
 // earlier graph subscribed stop.
 priv app_lifecycle_graph: fn() Never! {
-    held := APP_LIFECYCLE.guard_edit()
+    ^held: APP_LIFECYCLE.guard_edit()
     held.value.scope = Val(event.scope())
     held.value.adapted = false
 }
@@ -4535,7 +4541,7 @@ priv app_lifecycle_graph: fn() Never! {
 // with no window. A graph without `App.lifecycle` still resumes when the
 // app comes back, with no code of its own (`app_resume_run`).
 priv app_lifecycle_start: fn(windowed: Bool) -[Net, Time]> Never! {
-    held := APP_LIFECYCLE.guard_edit()
+    ^held: APP_LIFECYCLE.guard_edit()
     held.value.runs += 1
     visibility: if windowed -> Visibility.Unknown else -> Visibility.Hidden
     first: Phase{instance: held.value.runs, sequence: 0, visibility: visibility, execution: .Running}
@@ -4568,7 +4574,7 @@ priv app_moment: fn(moment: AppMoment) -[Net, Time]> Never! {
 // leaves the phase as it was other than a focus regained or a wake, is
 // not heard.
 priv app_observe: fn(moment: AppMoment) -> Bool Never! {
-    held := APP_LIFECYCLE.guard_edit()
+    ^held: APP_LIFECYCLE.guard_edit()
     before: held.value.observed.copy() ?? return false
     was_away: held.value.away
     unfocused: held.value.unfocused
@@ -4623,7 +4629,7 @@ priv app_observe: fn(moment: AppMoment) -> Bool Never! {
 // order they arrived. A listener's own observation waits for the one it
 // hears.
 priv app_lifecycle_hand: fn() -[Net, Time]> Never! {
-    handing := false
+    ^handing: false
     loop {
         heard: app_lifecycle_next(handing) ?? return
         handing = true
@@ -4635,7 +4641,7 @@ priv app_lifecycle_hand: fn() -[Net, Time]> Never! {
 // app's phase (`phase`), when `handing` or no other task hands them out;
 // `None` once none waits, when the phase of a closed window's run goes too.
 priv app_lifecycle_next: fn(handing: Bool) -> LifecycleEvent? Never! {
-    held := APP_LIFECYCLE.guard_edit()
+    ^held: APP_LIFECYCLE.guard_edit()
     if held.value.handing && !handing -> return None
     if held.value.waiting.len() == 0 {
         held.value.handing = false
@@ -4706,7 +4712,7 @@ priv app_sleep_start: fn() -[Env, Net, Time]> Never! {
 }
 
 priv app_sleep_watch: fn() -[Env, Net, Time]> Never! {
-    bus := dbus.system(ASK_BUS_WAIT_NS) ?? return
+    ^bus: dbus.system(ASK_BUS_WAIT_NS) ?? return
     dbus.add_match(bus, "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep',path='/org/freedesktop/login1'", ASK_BUS_WAIT_NS) ?? return
     loop {
         got: dbus.signals(bus, APP_SLEEP_WAIT_NS) ?? return
@@ -4745,8 +4751,8 @@ priv app_xdg_dir: fn(name: String, home: String, fallback: String) -[Env]> Strin
 // in lowercase, each run of anything else one `-` between them; `app` when
 // it has none.
 priv app_desktop_id: fn(title: String) -> String Never! {
-    id := ""
-    gap := false
+    ^id: ""
+    ^gap: false
     loop scalar in unicode.scalars(title.lower()) {
         if !"abcdefghijklmnopqrstuvwxyz0123456789".contains(scalar) {
             gap = true
@@ -4771,7 +4777,7 @@ priv app_desktop_value: fn(text: String) -> String Never! {
 // backslash and `%` doubled, then written as a string value
 // (`app_desktop_value`), as the Desktop Entry Specification says.
 priv app_desktop_exec: fn(path: String) -> String Never! {
-    quoted := ""
+    ^quoted: ""
     loop scalar in unicode.scalars(path) {
         if scalar == "\"" || scalar == "`" || scalar == "$" || scalar == "\\" {
             quoted = "{quoted}\\{scalar}"
@@ -4786,20 +4792,20 @@ priv app_desktop_exec: fn(path: String) -> String Never! {
 // `x-scheme-handler/{scheme}` first, and any handler it named for one
 // before is gone. Every other line stays as it was.
 priv app_mimeapps_with: fn(text: String, schemes: [String], id: String) -> String Never! {
-    handlers := [String]{}
-    keys := [String]{}
+    ^handlers: [String]{}
+    ^keys: [String]{}
     loop scheme in schemes {
         keys.push("x-scheme-handler/{scheme}")
         handlers.push("x-scheme-handler/{scheme}={id}")
     }
     lines: text.split("\n").to_list()
-    end := 0
+    ^end: 0
     loop index in 0..<lines.len() {
         if lines[index].trim() != "" -> end = index + 1
     }
-    out := [String]{}
-    group := false
-    added := false
+    ^out: [String]{}
+    ^group: false
+    ^added: false
     loop line in lines[0..<end] {
         trimmed: line.trim()
         if trimmed.starts_with("[") {
@@ -4874,7 +4880,7 @@ ask: fn(permission: Permission) -[Env, Net, Time]> Grant {
 }
 
 priv app_remember: fn(permission: Permission, grant: Grant) Never! {
-    held := ASKED.guard_edit()
+    ^held: ASKED.guard_edit()
     held.value.push(AppAsked{permission: permission, grant: grant})
 }
 
@@ -4890,7 +4896,7 @@ priv app_ask_system: fn(permission: Permission) -[Env, Net, Time]> Grant Never! 
     #if #build.target.os == {
         .Linux -> {
             if permission == .Notifications -> return Grant.Granted
-            bus := dbus.session(ASK_BUS_WAIT_NS) ?? return Grant.Restricted
+            ^bus: dbus.session(ASK_BUS_WAIT_NS) ?? return Grant.Restricted
             said: app_portal_ask(bus, permission) ?? return Grant.Restricted
             return app_grant(said)
         }
@@ -4964,7 +4970,7 @@ open_settings: fn() -[Env, Exec]> Bool {
     #if #build.target.os == {
         .Linux -> {
             page: process.cmd([String]{"gnome-control-center", "applications", app_desktop_id(app_graph_title())})
-            _ := page.stdout(.Inherit).stderr(.Inherit).detached().spawn() ?? return false
+            ^_: page.stdout(.Inherit).stderr(.Inherit).detached().spawn() ?? return false
             return true
         }
         .MacOS -> { return false }
@@ -5032,14 +5038,14 @@ PickedStream: struct {
 
     impl Reader {
         read_bytes: fn(^self, limit: Int) -[Time.Wait]> [U8] IOError! {
-            if ^self.file == .Val(reader) -> return reader.read_bytes(limit)
+            if self.file.in_place() == .Val(reader) -> return reader.read_bytes(limit)
             part: app_page_read(self.page, self.name, self.at, limit) ?? return Err(err)
             self.at += part.len()
             Ok(part)
         }
 
         read_into: fn(^self, buffer: ^[U8], limit: Int) -[Time.Wait]> Int IOError! {
-            if ^self.file == .Val(reader) -> return reader.read_into(buffer, limit)
+            if self.file.in_place() == .Val(reader) -> return reader.read_into(buffer, limit)
             part: app_page_read(self.page, self.name, self.at, limit) ?? return Err(err)
             loop byte in part -> buffer.push(byte)
             self.at += part.len()
@@ -5172,8 +5178,8 @@ priv app_page_listed: fn(number: Int, name: String) -> [PickedFile] IOError! {
     if app_page_first(fields) != .Val("listed") {
         return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("the browser no longer lets the page list the folder")}))
     }
-    found := [PickedFile]{}
-    at := 1
+    ^found: [PickedFile]{}
+    ^at: 1
     loop at + 3 <= fields.len() {
         found.push(app_page_file(fields, at) ?? return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("the page listed a file without its number and size")})))
         at += 3
@@ -5287,8 +5293,8 @@ priv OPEN_UNBUILT: "this system's open dialog is not built yet"
 // `open_file` on Linux: the portal's dialog, then the chosen file's size
 // and what its first bytes show it holds.
 priv app_open_linux: fn(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFile? Never! {
-    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_unopened("{err}")
-    filters := [dbus.FileFilter]{}
+    ^bus: dbus.session(ASK_BUS_WAIT_NS) ?? return app_unopened("{err}")
+    ^filters: [dbus.FileFilter]{}
     loop kind in types -> filters.push(app_file_filter(kind))
     uri: if dbus.portal_open_file(bus, "Open File", filters, ASK_WAIT_NS) == {
         .Err(err) -> {
@@ -5320,7 +5326,7 @@ priv app_open_web: fn(types: [FileType]) -> PickedFile? Never! {
 // type=file>`'s accept says it: each kind's name endings, then its media
 // types, comma-separated.
 priv app_file_accept: fn(types: [FileType]) -> String Never! {
-    offered := [String]{}
+    ^offered: [String]{}
     loop kind in types {
         filter: app_file_filter(kind)
         loop glob in filter.globs -> offered.push(glob.removeprefix("*"))
@@ -5396,7 +5402,7 @@ PickedFolder: struct {
 
 // The files directly in the folder at `path`, in name order.
 priv app_folder_files: fn(path: String) -[FS.Read]> [PickedFile] IOError! {
-    found := [PickedFile]{}
+    ^found: [PickedFile]{}
     loop entry in files.list_dir(path) ?? return Err(err) {
         if entry.is_dir -> next
         found.push(app_picked(entry.path) ?? return Err(err))
@@ -5411,8 +5417,8 @@ priv app_keep_folder: fn(key: String, path: String) -[Env]> Never! {
     loop {
         seen: device_cell_load(FOLDER_STORE, FOLDER_CELL)
         listed: live_fields(seen) ?? [String]{}
-        kept := [U8]{}
-        at := 0
+        ^kept: [U8]{}
+        ^at: 0
         loop at + 1 < listed.len() {
             if listed[at] != key {
                 live_put(kept, listed[at])
@@ -5452,7 +5458,7 @@ kept_folder: fn(key: String) -[Env, FS.Read]> PickedFolder? {
 // `kept_folder` on this device: the folder's form in the device store.
 priv app_kept_folder: fn(key: String) -[Env, FS.Read]> PickedFolder? Never! {
     listed: live_fields(device_cell_load(FOLDER_STORE, FOLDER_CELL)) ?? return None
-    at := 0
+    ^at: 0
     loop at + 1 < listed.len() {
         if listed[at] == key {
             path: app_folder_path(listed[at + 1], sys.get("XDG_RUNTIME_DIR") ?? "") ?? return None
@@ -5522,7 +5528,7 @@ priv app_open_folder_web: fn() -> PickedFolder? Never! {
 
 // `open_folder` on Linux: the portal's dialog, asked for a directory.
 priv app_open_folder_linux: fn() -[Env, FS.Read, Net, Time]> PickedFolder? Never! {
-    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_no_folder("{err}")
+    ^bus: dbus.session(ASK_BUS_WAIT_NS) ?? return app_no_folder("{err}")
     uri: if dbus.portal_open_folder(bus, "Open Folder", ASK_WAIT_NS) == {
         .Err(err) -> {
             return app_no_folder("{err}")
@@ -5710,8 +5716,8 @@ priv app_drop_web: fn(body: UINode, types: [FileType], on_drop: ^^fn([PickedFile
 // calls nothing.
 priv app_drop_web_run: fn(target: AppDrop) Never! {
     fields: app_page_answer(WEB_DEVICE_DROPPED, "")
-    dropped := [PickedFile]{}
-    at := 0
+    ^dropped: [PickedFile]{}
+    ^at: 0
     loop at + 3 <= fields.len() {
         if app_file_kind(fields[at + 2], target.types) {
             if app_page_file(fields, at) == .Val(file) -> dropped.push(file)
@@ -5746,7 +5752,7 @@ priv app_drop: fn(id: Int) -> AppDrop? Never! {
 // app's notices.
 priv app_window_drop: fn(id: Int, items: [UIDropItem]) -[FS.Read]> Never! {
     target: app_drop(id) ?? return
-    dropped := [PickedFile]{}
+    ^dropped: [PickedFile]{}
     loop item in items {
         if item == .URI(uri) {
             path: app_chosen_path(uri) ?? next
@@ -5838,7 +5844,7 @@ priv app_no_context_menu: fn(body: UINode) -> UINode Never! {
 // and Window menus' items, which a page can't act on, show but can't be
 // chosen.
 priv app_context_web: fn(body: UINode, items: [MenuItem]) -> UINode Never! {
-    entries := [UINode]{}
+    ^entries: [UINode]{}
     loop item in items {
         if item.kind == .Separator -> entries.push(ui.node("", 0.0, 0.0)) else if item.kind == .Item && item.enabled {
             run: item.run.copy()
@@ -5872,7 +5878,7 @@ priv app_context_items: fn(id: Int) -> [MenuItem] Never! {
 // as far as it must be to fit in the window; None when it has no items.
 priv app_context_open: fn(frame: ui.Frame, items: [MenuItem]) -> AppOpenMenu? Never! {
     if items.len() == 0 -> return None
-    widest := 0
+    ^widest: 0
     loop item in items {
         length: item.label.chars().len()
         if length > widest -> widest = length
@@ -5910,8 +5916,8 @@ priv app_context_chosen: fn(frame: ui.Frame, open: AppOpenMenu?) -> MenuItem? Ne
 // (`Frame.__draw_menu`): a separator is a row with no label, and an item
 // that can't be chosen shows in gray.
 priv app_context_draw: fn(frame: ui.Frame, menu: AppOpenMenu) Never! {
-    labels := [String]{}
-    enabled := [Bool]{}
+    ^labels: [String]{}
+    ^enabled: [Bool]{}
     loop item in menu.items {
         labels.push(if item.kind == .Separator -> "" else -> item.label.copy())
         enabled.push(item.enabled && item.kind != .Separator && item.kind != .Notice)
@@ -6084,7 +6090,7 @@ priv app_zone_web: fn(body: UINode, label: String, kind: Type, run: ^^fn(Dyn) No
 
 // Picks up what a page moves.
 priv app_web_pick: fn(moved: AppDrag) Never! {
-    held := APP_WEB_PICKED.guard_edit()
+    ^held: APP_WEB_PICKED.guard_edit()
     held.value.moved = Val(moved.copy())
 }
 
@@ -6099,7 +6105,7 @@ priv app_web_take: fn(target: AppZone) Never! {
 // What the move picked up, which no longer is; None for nothing. Its guard
 // ends before the drop zone's `on_drop` runs.
 priv app_web_taken: fn() -> AppDrag? Never! {
-    held := APP_WEB_PICKED.guard_edit()
+    ^held: APP_WEB_PICKED.guard_edit()
     picked: held.value.moved.copy()
     held.value.moved = None
     picked
@@ -6178,7 +6184,7 @@ priv app_refuse: fn(target: AppZone) Never! {
 // each drop zone, which moves it there.
 priv app_drag_items: fn(drag: Int) -> [MenuItem] Never! {
     moved: app_drag(drag) ?? return [MenuItem]{}
-    items := [MenuItem]{}
+    ^items: [MenuItem]{}
     loop index in 0..<app_zones() {
         zone: index + 1
         target: app_zone(zone) ?? next
@@ -6308,8 +6314,8 @@ priv SAVE_UNBUILT: "this system's save dialog is not built yet"
 // `save_file` on Linux: the portal's dialog, then the chosen file written
 // in one step, so a failed write leaves any file that was there whole.
 priv app_save_linux: fn(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool Never! {
-    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_unsaved(suggested, "{err}")
-    filters := [dbus.FileFilter]{}
+    ^bus: dbus.session(ASK_BUS_WAIT_NS) ?? return app_unsaved(suggested, "{err}")
+    ^filters: [dbus.FileFilter]{}
     loop kind in types -> filters.push(app_file_filter(kind))
     uri: if dbus.portal_save_file(bus, "Save File", suggested, filters, ASK_WAIT_NS) == {
         .Err(err) -> {
@@ -6468,7 +6474,7 @@ location_updates: fn() -[Env, Net, Time]> Stream<Place> {
     loop {
         #if #build.target.os == {
             .Linux -> {
-                bus := app_location_bus() ?? break
+                ^bus: app_location_bus() ?? break
                 session: dbus.open_location(bus, true, ASK_WAIT_NS) ?? dbus.PortalSession{answer: .Absent, path: ""}
                 app_settle(Permission.Location, app_grant(session.answer))
                 if session.path == "" -> break
@@ -6520,11 +6526,11 @@ orientation_updates: fn() -[Env, Net, Time]> Stream<Orientation> {
     loop {
         #if #build.target.os == {
             .Linux -> {
-                bus := app_sensor_bus() ?? break
+                ^bus: app_sensor_bus() ?? break
                 // No accelerometer, or no answer: nothing to give back.
                 first: dbus.claim_sensor(bus, dbus.Sensor.Accelerometer, ASK_BUS_WAIT_NS) ?? break
                 defer dbus.release_sensor(bus, dbus.Sensor.Accelerometer)
-                reading := dbus.DbusValue?{Val(first)}
+                ^reading: dbus.DbusValue?{Val(first)}
                 loop {
                     held: app_orientation(reading)
                     if held == .Val(way) {
@@ -6571,11 +6577,11 @@ heading_updates: fn() -[Env, Net, Time]> Stream<Float> {
     loop {
         #if #build.target.os == {
             .Linux -> {
-                bus := app_sensor_bus() ?? break
+                ^bus: app_sensor_bus() ?? break
                 // No compass, or no answer: nothing to give back.
                 first: dbus.claim_sensor(bus, dbus.Sensor.Compass, ASK_BUS_WAIT_NS) ?? break
                 defer dbus.release_sensor(bus, dbus.Sensor.Compass)
-                reading := dbus.DbusValue?{Val(first)}
+                ^reading: dbus.DbusValue?{Val(first)}
                 loop {
                     if reading == .Val(value) {
                         if value == .Double(degrees) {
@@ -6616,7 +6622,7 @@ priv app_settle: fn(permission: Permission, grant: Grant) Never! {
 
 // The camera portal's answer; no session bus or portal is `.Absent`.
 priv app_linux_camera: fn() -[Env, Net, Time]> dbus.PortalAnswer Never! {
-    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return dbus.PortalAnswer.Absent
+    ^bus: dbus.session(ASK_BUS_WAIT_NS) ?? return dbus.PortalAnswer.Absent
     dbus.portal_camera(bus, ASK_WAIT_NS) ?? dbus.PortalAnswer.Absent
 }
 
@@ -6624,7 +6630,7 @@ priv app_linux_camera: fn() -[Env, Net, Time]> dbus.PortalAnswer Never! {
 // portal is `.Absent`.
 priv app_linux_place: fn() -[Env, Net, Time]> dbus.PortalFix Never! {
     nothing: dbus.PortalFix{answer: .Absent, place: None}
-    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return nothing
+    ^bus: dbus.session(ASK_BUS_WAIT_NS) ?? return nothing
     dbus.portal_place(bus, ASK_WAIT_NS) ?? nothing
 }
 
@@ -6636,7 +6642,7 @@ priv app_location_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
     if app_location_refused() -> return None
     #if #build.target.os == {
         .Linux -> {
-            bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_no_location_bus()
+            ^bus: dbus.session(ASK_BUS_WAIT_NS) ?? return app_no_location_bus()
             return Val(bus)
         }
         .MacOS -> { return None }
@@ -6663,7 +6669,7 @@ priv app_no_location_bus: fn() -> dbus.DbusConnection? Never! {
 priv app_sensor_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
     #if #build.target.os == {
         .Linux -> {
-            bus := dbus.system(ASK_BUS_WAIT_NS) ?? return None
+            ^bus: dbus.system(ASK_BUS_WAIT_NS) ?? return None
             return Val(bus)
         }
         .MacOS -> { return None }
@@ -6711,7 +6717,7 @@ priv app_notify_linux: fn(title: String, body: String, open_route: String) -[Env
 // Shows the notification and waits until the person clicks it or it
 // closes; a click opens `open_route` (`open_link`).
 priv app_notify_show: fn(title: String, body: String, open_route: String) -[Env, FS.Read, Net, Time]> Never! {
-    bus := dbus.session(ASK_BUS_WAIT_NS) ?? {
+    ^bus: dbus.session(ASK_BUS_WAIT_NS) ?? {
         app_notify_unshown(title, "{err}")
         return
     }
@@ -6763,10 +6769,10 @@ priv app_graph_tray: fn() -> AppTray? Never! {
 // Choosing an item runs it (`app_menu_choose`). A desktop with no tray, or
 // a bus that goes away, leaves a notice.
 priv app_tray_run: fn(title: String, icon: String, menu: Shared<AppTrayMenu>) -[Env, Exec.Exit, Net, Time]> Never! {
-    bus := dbus.session(TRAY_WAIT_NS) ?? return app_tray_lost("{err}")
-    tray := dbus.tray_start(bus, title, icon, sys.getpid(), TRAY_WAIT_NS) ?? return app_tray_lost("{err}")
-    shown := [MenuItem]{}
-    loaded := [MenuItem]{}
+    ^bus: dbus.session(TRAY_WAIT_NS) ?? return app_tray_lost("{err}")
+    ^tray: dbus.tray_start(bus, title, icon, sys.getpid(), TRAY_WAIT_NS) ?? return app_tray_lost("{err}")
+    ^shown: [MenuItem]{}
+    ^loaded: [MenuItem]{}
     loop {
         held: menu.guard_read()
         failed: if app_tray_menu_make(held.value.menu) == {
@@ -6800,7 +6806,7 @@ priv app_tray_run: fn(title: String, icon: String, menu: Shared<AppTrayMenu>) -[
 // The menu entries for `items`: a notice, or an item that is not enabled,
 // shows but can't be chosen. `keys` shows each item's key equivalent.
 priv app_menu_entries: fn(items: [MenuItem], keys: Bool) -> [dbus.MenuEntry] Never! {
-    entries := [dbus.MenuEntry]{}
+    ^entries: [dbus.MenuEntry]{}
     loop item in items {
         shortcut: if keys -> app_menu_key_names(item.key) else -> [String]{}
         entries.push(dbus.MenuEntry{label: item.label.copy(), enabled: item.enabled && item.kind != .Notice, separator: item.kind == .Separator, shortcut: shortcut, children: [dbus.MenuEntry]{}})
@@ -6863,17 +6869,17 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
     app_window_keep(window)
     bar: app_graph_menu_bar()
     if bar == .Val(menus) -> app_menu_bar_start(window, menus)
-    tree := ui.box([UINode]{})
-    focused := -1
-    drawn := false
-    saved_seen := -1
-    shown := AppCurrent?{None}
-    open := AppOpenMenu?{None}
-    back := Notice?{None}
-    pressed := AppPress?{None}
-    picked := AppPicked?{None}
+    ^tree: ui.box([UINode]{})
+    ^focused: -1
+    ^drawn: false
+    ^saved_seen: -1
+    ^shown: AppCurrent?{None}
+    ^open: AppOpenMenu?{None}
+    ^back: Notice?{None}
+    ^pressed: AppPress?{None}
+    ^picked: AppPicked?{None}
     loop frame in window.frames() {
-        stale := !drawn
+        ^stale: !drawn
         loop event in frame.events() {
             if event == .Resize(_, _) -> stale = true
             if event == .Focus(on) {
@@ -7087,10 +7093,10 @@ priv app_menu_bar_start: fn(window: ui.Window, menus: Shared<AppMenuBar>) -[Env,
 // (`app_menu_choose`). Without a session bus it ends at once, and a bus
 // that goes away leaves a notice.
 priv app_menu_bar_run: fn(named: Sender<String>, menus: Shared<AppMenuBar>) -[Env, Exec.Exit, Net, Time]> Never! {
-    connection := dbus.session(TRAY_WAIT_NS) ?? return
-    bar := dbus.menu_start(connection)
+    ^connection: dbus.session(TRAY_WAIT_NS) ?? return
+    ^bar: dbus.menu_start(connection)
     named.send(connection.name.copy()) ?? return
-    loaded := [Menu]{}
+    ^loaded: [Menu]{}
     loop {
         held: menus.guard_read()
         failed: if app_menu_bar_make(held.value.menus) == {
@@ -7128,8 +7134,8 @@ priv app_menu_bar_run: fn(named: Sender<String>, menus: Shared<AppMenuBar>) -[En
 // menus failed; and the items in the order the bar numbers its entries
 // (`dbus.menu_entries`), a menu standing for its own entry.
 priv app_menu_bar_shown: fn(menus: [Menu], failed: String?) -> {entries: [dbus.MenuEntry], items: [MenuItem]} Never! {
-    entries := [dbus.MenuEntry]{}
-    items := [MenuItem]{}
+    ^entries: [dbus.MenuEntry]{}
+    ^items: [MenuItem]{}
     if failed == .Val(text) {
         entries.push(dbus.MenuEntry{label: text.copy(), enabled: false, separator: false, shortcut: [String]{}, children: [dbus.MenuEntry]{}})
         items.push(app_menu_entry(text, .Notice, ""))
@@ -7190,10 +7196,10 @@ priv app_window_tree: fn(now: AppCurrent?) -[FS.Read, Net]> UINode Never! {
 // state stays bound to the screen (for example, each task's comment box).
 priv app_saved_scope_key: fn(current: AppCurrent) -> String Never! {
     if current.fields.len() == 0 -> return current.state.copy()
-    names := [String]{}
+    ^names: [String]{}
     loop name in current.fields.keys() -> names.push(name.copy())
     names.sort()
-    parts := [String]{}
+    ^parts: [String]{}
     loop name in names {
         value: current.fields.get(name) ?? ""
         parts.push("{name}={value}")
@@ -7239,7 +7245,7 @@ priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false,
 // Keeps `window`, whose frames run in this task, for the clipboard
 // (`copy_text`, `paste_text`).
 priv app_window_keep: fn(window: ui.Window) Never! {
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     held.value.window = Val(window.copy())
     held.value.task = Val(tasks.current_task())
 }
@@ -7251,7 +7257,7 @@ priv app_window_keep: fn(window: ui.Window) Never! {
 priv app_window_watch: fn(waker: ^^sys.Fd?) -[Env, Time.Wait]> Never! {
     fd: waker ?? return
     pair: channel<Int>()
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     held.value.wakes = [Sender<Int>]{pair.sender}
     relaying: task { app_window_relay(pair.receiver, fd) }
     relaying.detach()
@@ -7274,7 +7280,7 @@ priv app_window_relay: fn(changes: Receiver<Int>, waker: sys.Fd) -[Env, Time.Wai
 // it shared it, the pastes other tasks wait on, and the newest notice a
 // resume failed with.
 priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem], copied: String?, shared: Bool, pastes: [Sender<String?>], resumed: Notice?} Never! {
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     stale: held.value.stale
     noticed: held.value.noticed
     acts: held.value.acts.copy()
@@ -7297,7 +7303,7 @@ priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem], cop
 // (`__keep_notice`) without opening the screen again, which may keep
 // the notice anew. Without a window it does nothing.
 priv app_window_noticed: fn() Never! {
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     if held.value.wakes.len() == 0 {
         return
     }
@@ -7309,7 +7315,7 @@ priv app_window_noticed: fn() Never! {
 // (`App.lifecycle`), at the top of the window. Whether there is a window
 // to show it.
 priv app_window_resumed: fn(notice: Notice) -> Bool Never! {
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     if held.value.wakes.len() == 0 -> return false
     held.value.resumed = Val(notice.copy())
     app_window_rouse(held.value)
@@ -7337,7 +7343,7 @@ priv app_window_share: fn(url: String) Never! {
 // Whether the window takes `text` to copy, `shared` or not; false without
 // one.
 priv app_window_copied: fn(text: String, shared: Bool) -> Bool Never! {
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     if held.value.wakes.len() == 0 -> return false
     held.value.copied = Val(text.copy())
     held.value.shared = shared
@@ -7380,7 +7386,7 @@ priv app_window_shown: fn() -> {window: ui.Window?, mine: Bool} Never! {
 // Asks the window's frames for the clipboard's text; where it comes. None
 // without a window.
 priv app_window_ask_paste: fn() -> Receiver<String?>? Never! {
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     if held.value.wakes.len() == 0 -> return None
     pair: channel<String?>()
     held.value.pastes.push(pair.sender)
@@ -7408,7 +7414,7 @@ priv app_window_wake: fn(ids: [Int]) Never! {
     if !app_graph_shows(ids) {
         return
     }
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     if held.value.page {
         held.value.stale = true
         return
@@ -7424,7 +7430,7 @@ priv app_window_wake: fn(ids: [Int]) Never! {
 // Window menu the person chose from the menu bar. Without a window it
 // does nothing.
 priv app_window_act: fn(chosen: MenuItem) Never! {
-    held := APP_WINDOW_WAKE.guard_edit()
+    ^held: APP_WINDOW_WAKE.guard_edit()
     if held.value.wakes.len() == 0 {
         return
     }
@@ -7473,7 +7479,7 @@ priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
 // What LIFECYCLE's listeners hear of `moment`, one line per observation:
 // its reason, sequence, phase after and whether it resumes the app.
 priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
-    heard := [String]{}
+    ^heard: [String]{}
     if !app_observe(moment) -> return heard
     loop {
         event: app_lifecycle_next(true) ?? return heard
@@ -7545,7 +7551,7 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     _: drop_zone<Int>(ui.text("doing"), label: "Doing", on_drop: fn(task: Int) Notice! { Err(Notice{text: "Doing took {task}"}) })
     _: drop_zone<String>(ui.text("notes"), label: "Notes", on_drop: fn(text: String) Notice! { Err(Notice{text: "Notes took {text}"}) })
     app_drag_drop(1, 1)
-    shown := notices()
+    ^shown: notices()
     assert_eq(shown[shown.len() - 1].text, "Doing took 7")
     app_drag_drop(2, 1)
     shown = notices()
@@ -7554,7 +7560,7 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     shown = notices()
     assert_eq(shown[shown.len() - 1].text, "Couldn't drop that on Notes: it takes only what you move there in this app")
     // A long press lists only the zones that take the value.
-    labels := [String]{}
+    ^labels: [String]{}
     loop entry in app_drag_items(1) -> labels.push(entry.label.copy())
     assert_eq(labels.join("|"), "Move Ship it to Doing")
     app_menu_choose(app_drag_items(2)[0])
@@ -7582,7 +7588,7 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     doing: AppZone{label: "Doing", kind: Type{Int}, run: Shared{AppZoneRun{run: app_zone_decoding<Int>(fn(task: Int) Notice! { Err(Notice{text: "Doing took {task}"}) })}}}
     app_web_pick(AppDrag{label: "Ship it", kind: Type{Int}, value: 7.encode()})
     app_web_take(doing)
-    shown := notices()
+    ^shown: notices()
     assert_eq(shown[shown.len() - 1].text, "Doing took 7")
     app_web_take(doing)
     shown = notices()
@@ -7602,10 +7608,10 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     assert_eq(shown.entries[0].children[1].shortcut, [String]{"Control", "Shift", "e"})
     assert(!shown.entries[0].children[1].enabled)
     assert(shown.entries[0].children[2].separator)
-    labels := [String]{}
+    ^labels: [String]{}
     loop entry in dbus.menu_entries(shown.entries) -> labels.push(entry.label.copy())
     assert_eq(labels.join("|"), "File|New Task|Export||Quit|Edit|Cut|Copy|Paste|Window|Minimize|Close")
-    kinds := [String]{}
+    ^kinds: [String]{}
     loop chosen in shown.items -> kinds.push(chosen.label.copy())
     assert_eq(kinds.join("|"), labels.join("|"))
     assert_eq(shown.items[10].kind, MenuItemKind.Minimize)
@@ -7631,7 +7637,7 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     assert_eq(file.media, Val(Media.Text))
     assert_eq(file.text() ?? panic("text: {err}"), "title,notes\nGate repair,hinge\n")
     assert_eq(file.read() ?? panic("read: {err}"), "title,notes\nGate repair,hinge\n".bytes())
-    parts := file.stream() ?? panic("stream: {err}")
+    ^parts: file.stream() ?? panic("stream: {err}")
     assert_eq(parts.read_bytes(12) ?? panic("part: {err}"), "title,notes\n".bytes())
     assert_eq(parts.read_bytes(100) ?? panic("rest: {err}"), "Gate repair,hinge\n".bytes())
     assert_eq(parts.read_bytes(100) ?? panic("end: {err}"), [U8]{})
@@ -7649,7 +7655,7 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
         ui.box([UINode]{}),
         [FileType]{.CSV},
         fn(dropped: [PickedFile]) Notice! {
-            names := [String]{}
+            ^names: [String]{}
             loop file in dropped -> names.push("{file.name} {file.bytes}")
             Err(Notice{text: names.join(", ")})
         },
@@ -7678,26 +7684,26 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     }
     window: ui.headless(width: 40, height: 24, script: script) ?? panic("headless: {err}")
     seen: Shared{AppHandlerRows{rows: [String]{}}}
-    tree := ui.box([
-        ui.text_input(
-            "ab",
-            UIIMEMode.Native,
-            on_change: fn(text: String) { seen.rows.push("change {text}") },
-            on_drop: fn(item: UIDropItem) {
-                if item == {
-                    .Text(value) -> seen.rows.push("drop text {value}")
-                    .URI(value) -> seen.rows.push("drop uri {value}")
-                    .File(_) -> seen.rows.push("drop file")
-                }
-            },
-        ),
-        ui.button("Go", fn() { seen.rows.push("click") }),
-    ])
-    focused := -1
+    ^tree: ui.box(
+        [
+            ui.text_input(
+                "ab",
+                UIIMEMode.Native,
+                on_change: fn(text: String) { seen.rows.push("change {text}") },
+                on_drop: fn(item: UIDropItem) {
+                    if item == {
+                        .Text(value) -> seen.rows.push("drop text {value}")
+                        .URI(value) -> seen.rows.push("drop uri {value}")
+                        .File(_) -> seen.rows.push("drop file")
+                    }
+                },
+            ),
+            ui.button("Go", fn() { seen.rows.push("click") }),
+        ],
+    )
+    ^focused: -1
     loop frame in window.frames() {
-        loop event in frame.events() {
-            _: tree.__input(frame, event, focused)
-        }
+        loop event in frame.events() -> _: tree.__input(frame, event, focused)
     }
     assert_eq(seen.rows, [String]{"click", "change abc", "drop text dropped", "drop uri https://example.test/"})
     assert(!ui_rt.web_attached())
@@ -7722,7 +7728,7 @@ priv AppHandlerRows: struct {
     kept: kept_folder("exports") ?? panic("the folder kept as `exports` is found")
     assert_eq(kept.name, "Exports")
     kept.write("board.csv", "title\nFix the gate\n".bytes()) ?? panic("write: {err}")
-    refused := false
+    ^refused: false
     if kept.write("../board.csv", [U8]{}) == .Err(_) -> refused = true
     assert(refused, "a name with a `/` would leave the folder")
     listed: kept.files() ?? panic("files: {err}")
@@ -7735,7 +7741,7 @@ priv AppHandlerRows: struct {
 
 // The name of the process's next photo: `photo-1.jpg` for its first.
 priv app_photo_name: fn() -> String Never! {
-    held := PHOTOS.guard_edit()
+    ^held: PHOTOS.guard_edit()
     held.value += 1
     "photo-{held.value}.jpg"
 }
@@ -7764,7 +7770,7 @@ priv app_photo: fn() -[Env, Exec, FS, Time]> PickedFile? Never! {
 
 #Test("the place stream is empty once the person refused the location") {
     app_remember(Permission.Location, Grant.Denied)
-    places := 0
+    ^places: 0
     loop _ in location_updates() -> places += 1
     assert_eq(places, 0)
 }
@@ -7781,14 +7787,14 @@ priv graph_post: fn(path: String, key: String, body: String) -[Time]> String Cal
     endpoint: graph_endpoint(path) ?? return Err(.Unreachable("no service the app graph mounts answers `{path}`"))
     answer: endpoint.answer ?? return Err(.SignedOut)
     tree: live_json.parse(body) ?? return Err(.Invalid([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
-    account := ""
+    ^account: ""
     if maybe_caller() == .Val(who) -> account = who.raw()
     asked: CallRequest{account: account, key: key, at: time.now_utc().to_timestamp()}
     held: answer.guard_read()
     loop _ in 0..<transactions.attempts() {
         call: transactions.begin() ?? return graph_answered(graph_run(held.value.run, tree))
         transactions.ask(call, asked.copy())
-        failed := CallError?{None}
+        ^failed: CallError?{None}
         given: graph_run(held.value.run, tree) ?? {
             failed = Val(CallError.Invalid(err))
             ""
@@ -7940,7 +7946,7 @@ priv presence_test_bind: fn(account: String) -> Live<String, AppError> {
             if PRESENCE_TEST_REFUSED.guard_read().value.contains(who.raw()) {
                 return Err(AppError.Unsupported)
             }
-            names := [String]{}
+            ^names: [String]{}
             loop present in App.__presence("/tasks/7") -> names.push(present.raw())
             Ok(names.join(","))
         })
@@ -7956,7 +7962,7 @@ priv presence_test_read: fn(binding: Live<String, AppError>) -> String {
 }
 
 priv presence_test_refuse: fn(account: String) {
-    refused := PRESENCE_TEST_REFUSED.guard_edit()
+    ^refused: PRESENCE_TEST_REFUSED.guard_edit()
     refused.value.push(account.copy())
 }
 
@@ -7974,7 +7980,7 @@ priv presence_test_refuse: fn(account: String) {
     __live_invalidate("app.test.presence", [String]{"ben"})
     assert_eq(presence_test_read(ben), "refused")
     assert_eq(presence_test_read(ann), "ann")
-    asked := [String]{}
+    ^asked: [String]{}
     loop present in App.__presence("/tasks/7") -> asked.push(present.raw())
     assert_eq(asked.join(","), "ann")
 }
@@ -7983,7 +7989,7 @@ priv presence_test_refuse: fn(account: String) {
 priv presence_left_test_bind: fn(account: String) -> Live<String, AppError> {
     as_caller(auth.AccountID.from_string(account), fn() {
         __live_bind<String, AppError>("app.test.presence_left", [String]{account.copy()}, fn() {
-            names := [String]{}
+            ^names: [String]{}
             loop present in App.__presence("/tasks/8") -> names.push(present.raw())
             Ok(names.join(","))
         })
@@ -7999,7 +8005,7 @@ priv presence_left_test_bind: fn(account: String) -> Live<String, AppError> {
     // The hub's leave signal: ben's only connection closed. A line that
     // names no binding is passed over.
     live_left("chat\nlive:{ben.id}\nlive:none")
-    asked := [String]{}
+    ^asked: [String]{}
     loop present in App.__presence("/tasks/8") -> asked.push(present.raw())
     assert_eq(asked.join(","), "ann")
     assert_eq(presence_test_read(ann), "ann")
@@ -8023,7 +8029,7 @@ priv push_run_key: fn() -> String Never! {
 // `account`, and keeps why.
 priv push_note: fn(skipped: Bool, service: String, account: String, reason: String) Never! {
     kind: if skipped -> "skipped" else -> "failed"
-    held := PUSH_NOTES.guard_edit()
+    ^held: PUSH_NOTES.guard_edit()
     if held.value.last.len() == C_PUSH_NOTES_KEPT -> _: held.value.last.remove(0, .Slot)
     held.value.last.push("{kind} {service} {account}: {reason}")
     if skipped {
@@ -8130,7 +8136,7 @@ Blobs: struct {
 // The blob store `name`. A served app answers GET `{BLOB_PATH}/<id>` with a
 // blob from any store made so far (`blob_url`).
 blobs: fn(name: String) -> Blobs Never! {
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     if !held.value.stores.contains(name) -> held.value.stores.push(name.copy())
     Blobs{name: name.copy()}
 }
@@ -8226,7 +8232,7 @@ priv uploads_open: fn() -[FS.Write]> builtin.FileDone Never! {
     path: "{UPLOAD_STAGING}/{name}"
     files.write_bytes(path, [U8]{}) ?? return file_done(500)
     staged: StagedUpload{task: tasks.current_task(), path: path, bytes: 0, head: [U8]{}, kept: [KeptBlob]{}, refused: false}
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     held.value.staged.push(staged)
     builtin.FileDone{status: 200, body: [U8]{}, media: "", staged: name}
 }
@@ -8236,10 +8242,10 @@ priv uploads_open: fn() -[FS.Write]> builtin.FileDone Never! {
 priv uploads_write: fn(name: String, piece: [U8]) -[FS.Write]> builtin.FileDone Never! {
     if !blob_id_valid(name) -> return file_done(404)
     path: "{UPLOAD_STAGING}/{name}"
-    writer := files.append(path) ?? return file_done(500)
+    ^writer: files.append(path) ?? return file_done(500)
     writer.write_bytes(piece) ?? return file_done(500)
     writer.flush() ?? return file_done(500)
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     loop index in 0..<held.value.staged.len() {
         if held.value.staged[index].path == path {
             held.value.staged[index].bytes += piece.len()
@@ -8257,7 +8263,7 @@ priv uploads_write: fn(name: String, piece: [U8]) -[FS.Write]> builtin.FileDone 
 priv uploads_abandon: fn(name: String) -[FS.Write]> builtin.FileDone Never! {
     if !blob_id_valid(name) -> return file_done(404)
     path: "{UPLOAD_STAGING}/{name}"
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     loop index in 0..<held.value.staged.len() {
         if held.value.staged[index].path == path {
             _: held.value.staged.remove(index, .Slot)
@@ -8272,7 +8278,7 @@ priv uploads_abandon: fn(name: String) -[FS.Write]> builtin.FileDone Never! {
 // its size.
 priv uploads_claim: fn(name: String) -> builtin.FileDone Never! {
     path: "{UPLOAD_STAGING}/{name}"
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     loop index in 0..<held.value.staged.len() {
         if held.value.staged[index].path == path {
             held.value.staged[index].task = tasks.current_task()
@@ -8284,7 +8290,7 @@ priv uploads_claim: fn(name: String) -> builtin.FileDone Never! {
 
 // Removes the files a stopped server left staged, once per process.
 priv uploads_clean: fn() -[FS]> Never! {
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     if held.value.cleaned {
         return
     }
@@ -8312,7 +8318,7 @@ priv uploads_finish: fn() -[FS.Write]> builtin.FileDone Never! {
 // Removes the upload staged for the request the task `task` answers, and
 // gives it.
 priv uploads_take: fn(task: TaskID) -> StagedUpload? Never! {
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     loop index in 0..<held.value.staged.len() {
         if held.value.staged[index].task == task -> return held.value.staged.remove(index, .Slot)
     }
@@ -8330,7 +8336,7 @@ priv uploads_staged: fn(task: TaskID) -> StagedUpload? Never! {
 
 // Marks the upload staged for the task `task` as one `keep` refused.
 priv uploads_refused: fn(task: TaskID) Never! {
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     loop index in 0..<held.value.staged.len() {
         if held.value.staged[index].task == task -> held.value.staged[index].refused = true
     }
@@ -8341,7 +8347,7 @@ priv uploads_refused: fn(task: TaskID) Never! {
 priv uploads_kept: fn(owner: TaskID, path: String) Never! {
     call: transactions.current()
     kept: KeptBlob{path: path.copy(), call: call ?? 0, committed: call == .None}
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     loop index in 0..<held.value.staged.len() {
         if held.value.staged[index].task == owner {
             held.value.staged[index].kept.push(kept)
@@ -8352,7 +8358,7 @@ priv uploads_kept: fn(owner: TaskID, path: String) Never! {
 
 // Marks the blobs that call `call` kept as committed (`transactions.end`).
 priv uploads_committed: fn(call: Int) Never! {
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     loop staged in 0..<held.value.staged.len() {
         loop kept in 0..<held.value.staged[staged].kept.len() {
             if held.value.staged[staged].kept[kept].call == call {
@@ -8444,9 +8450,9 @@ priv blob_at: fn(head: [U8], at: Int, sign: [U8]) -> Bool Never! {
 // and no `<` as its first byte past white space, so a browser told it is
 // text never takes it for HTML.
 priv blob_text: fn(head: [U8], cut: Bool) -> Bool Never! {
-    end := head.len()
+    ^end: head.len()
     if cut {
-        back := 0
+        ^back: 0
         loop back < 3 && back < end && (blob_byte(head, end - 1 - back) & 192) == 128 -> back += 1
         if back < end && blob_byte(head, end - 1 - back) >= 192 -> end = end - 1 - back
     }
@@ -8501,7 +8507,7 @@ priv __blob_reader_wanted: fn(store: String, table: String, guarded: Bool) -> Bo
 // table is never replaced by one that isn't.
 priv __blob_reader: fn(store: String, table: String, guarded: Bool, read: ^^fn(String) -[DB.Read]> Int Never!) Never! {
     key: "{store} {table}"
-    held := BLOBS.guard_edit()
+    ^held: BLOBS.guard_edit()
     if (held.value.guarded.get(key) ?? false) && !guarded {
         return
     }
@@ -8522,7 +8528,7 @@ priv blobs_admitted: fn(id: String) -[DB.Read]> Bool Never! {
 
 priv blob_readers: fn() -> [Shared<BlobReader>] Never! {
     held: BLOBS.guard_read()
-    readers := [Shared<BlobReader>]{}
+    ^readers: [Shared<BlobReader>]{}
     loop key in held.value.readers.keys() {
         reader: held.value.readers.get(key) ?? next
         readers.push(reader.copy())
@@ -8597,7 +8603,7 @@ JOB_BACKOFF_FIRST_MS: 500
 JOB_BACKOFF_MOST_MS: 3600000
 
 priv job_backoff_ms: fn(failures: Int) -> Int Never! {
-    wait := JOB_BACKOFF_FIRST_MS
+    ^wait: JOB_BACKOFF_FIRST_MS
     loop _ in 1..<failures {
         wait *= 2
         if wait >= JOB_BACKOFF_MOST_MS -> return JOB_BACKOFF_MOST_MS
@@ -8662,7 +8668,7 @@ priv(package) jobs: module {
     // serving server takes its rows by its name. The first declaration of a
     // name stands.
     know: fn(name: String, retries: Int, run: ^^fn(RemoteArgs) -> String [FieldError]!) Never! {
-        runtime := JOBS.guard_edit()
+        ^runtime: JOBS.guard_edit()
         loop known in runtime.value.runners {
             if known.name == name {
                 return
@@ -8678,7 +8684,7 @@ priv(package) jobs: module {
     // A server began serving an App that declares jobs: from now on, each
     // tick takes the rows no server holds from each store.
     serve: fn() Never! {
-        runtime := JOBS.guard_edit()
+        ^runtime: JOBS.guard_edit()
         runtime.value.serving += 1
         jobs_tend_start(runtime.value)
     }
@@ -8701,7 +8707,7 @@ priv(package) jobs: module {
 
 // One server less serves an App that declares jobs: whether none does now.
 priv jobs_unserve: fn() -> Bool Never! {
-    runtime := JOBS.guard_edit()
+    ^runtime: JOBS.guard_edit()
     if runtime.value.serving > 0 -> runtime.value.serving -= 1
     runtime.value.serving == 0
 }
@@ -8718,7 +8724,7 @@ priv jobs_busy: fn() -> Bool Never! {
 // Leaves each job the process runs from a store: it no longer holds its
 // row, and its run neither deletes the row nor records a failure there.
 priv jobs_leave: fn() Never! {
-    runtime := JOBS.guard_edit()
+    ^runtime: JOBS.guard_edit()
     loop index in 0..<runtime.value.stores.len() {
         loop key in runtime.value.stores[index].running {
             runtime.value.stores[index].left.push(key.copy())
@@ -8742,7 +8748,7 @@ priv jobs_left: fn(outbox: Shared<CallOutbox>?, key: String) -> Bool Never! {
 // one it has, or `outbox`, which it then has; `named` when core.db names
 // the store.
 priv jobs_store: fn(outbox: ^^CallOutbox, named: Bool) -> Shared<CallOutbox> Never! {
-    runtime := JOBS.guard_edit()
+    ^runtime: JOBS.guard_edit()
     loop index in 0..<runtime.value.stores.len() {
         if runtime.value.stores[index].store != outbox.store -> next
         if named -> runtime.value.stores[index].named = true
@@ -8778,12 +8784,12 @@ priv JobTick: struct {
 // no job runs and no server serves an App that declares jobs, and then the
 // task that tends the stores ends (`tended` is false again).
 priv jobs_ticks: fn() -> [JobTick]? Never! {
-    runtime := JOBS.guard_edit()
-    names := [String]{}
+    ^runtime: JOBS.guard_edit()
+    ^names: [String]{}
     if runtime.value.serving > 0 {
         loop known in runtime.value.runners -> names.push(known.name.copy())
     }
-    ticks := [JobTick]{}
+    ^ticks: [JobTick]{}
     loop store in runtime.value.stores {
         if store.running.len() == 0 && names.len() == 0 -> next
         ticks.push(JobTick{store: store.store.copy(), outbox: store.outbox.copy(), running: store.running.copy(), names: names.copy()})
@@ -8840,7 +8846,7 @@ priv jobs_declared: fn(queued: CallQueued) -> CallJob? Never! {
 
 // Forgets store `store`, which has closed.
 priv jobs_forget: fn(store: String) Never! {
-    runtime := JOBS.guard_edit()
+    ^runtime: JOBS.guard_edit()
     loop index in 0..<runtime.value.stores.len() {
         if runtime.value.stores[index].store == store {
             _: runtime.value.stores.remove(index, .Slot)
@@ -8853,7 +8859,7 @@ priv jobs_forget: fn(store: String) Never! {
 // as no longer running, whether a stop left it or not; a store core.db
 // didn't name is forgotten once no job of it runs.
 priv jobs_running: fn(store: String, key: String, running: Bool) Never! {
-    runtime := JOBS.guard_edit()
+    ^runtime: JOBS.guard_edit()
     loop index in 0..<runtime.value.stores.len() {
         if runtime.value.stores[index].store != store -> next
         if running {
@@ -8902,7 +8908,7 @@ priv job_start: fn(job: ^^CallJob, key: ^^String, outbox: ^^Shared<CallOutbox>?,
 // keeps the last failure, and no server takes it again. A job a stop left
 // (`jobs.stop`) runs no more, and records nothing on its row.
 priv job_run: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?, runs: Int) Never! {
-    failures := runs
+    ^failures: runs
     loop !jobs_left(outbox, key) {
         failures += 1
         failure: job_attempt(job, key, outbox)
@@ -8936,7 +8942,7 @@ priv job_attempt: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?) -> 
     })
     failed: reply.starts_with("{{\"err\":")
     left: jobs_left(outbox, key)
-    removed := 1
+    ^removed: 1
     if !failed && !left {
         if outbox == .Val(store) {
             kept: store.guard_read()
@@ -8996,13 +9002,13 @@ priv(package) schedules: module {
 // after its next minute has passed is followed by the latest minute that
 // passed, once.
 priv schedule_run: fn(name: String, line: CronLine, run: fn(RemoteArgs) -> String [FieldError]!) Never! {
-    due := schedule_minute()
+    ^due: schedule_minute()
     if cron_due_by(line, due) == .Val(missed) {
         schedule_tick(name, missed, run)
         due = missed
     }
     loop {
-        next := cron_due_after(line, due) ?? return
+        ^next: cron_due_after(line, due) ?? return
         now: schedule_minute()
         if next < now -> next = cron_due_by(line, now) ?? next
         loop {
@@ -9057,12 +9063,12 @@ CRON_SEARCH_DAYS: 2928
 
 // `text` as a cron line; None when it isn't one.
 priv cron_parse: fn(text: String) -> CronLine? {
-    fields := [String]{}
+    ^fields: [String]{}
     loop part in text.split(" ") {
         if part != "" -> fields.push(part)
     }
     if fields.len() != 5 -> return None
-    weekdays := cron_field(fields[4], 0, 7) ?? return None
+    ^weekdays: cron_field(fields[4], 0, 7) ?? return None
     if weekdays[7] -> weekdays[0] = true
     _: weekdays.pop()
     Val(CronLine{
@@ -9079,7 +9085,7 @@ priv cron_parse: fn(text: String) -> CronLine? {
 // The values from `low` to `high` that the cron field `text` allows, by
 // value (each below `low` false); None when it isn't a field of that range.
 priv cron_field: fn(text: String, low: Int, high: Int) -> [Bool]? {
-    allowed := [Bool]{}
+    ^allowed: [Bool]{}
     loop _ in 0..<(high + 1) -> allowed.push(false)
     loop item in text.split(",") {
         stepped: item.split("/").to_list()
@@ -9089,8 +9095,8 @@ priv cron_field: fn(text: String, low: Int, high: Int) -> [Bool]? {
             else -> 1
         }
         if step < 1 -> return None
-        first := low
-        last := high
+        ^first: low
+        ^last: high
         if stepped[0] != "*" {
             bounds: stepped[0].split("-").to_list()
             if bounds.len() > 2 -> return None
@@ -9103,7 +9109,7 @@ priv cron_field: fn(text: String, low: Int, high: Int) -> [Bool]? {
             }
         }
         if first < low || last > high || first > last -> return None
-        at := first
+        ^at: first
         loop {
             if at > last -> break
             allowed[at] = true
@@ -9242,7 +9248,7 @@ priv outbox_unused: fn() -> CallOutbox Never! {
     seen: Shared{[String]{}}
     note: fn(name: String, commits: Bool) -> fn(Bool) -[]> Bool Never! {
         fn(commit: Bool) {
-            log := seen.guard_edit()
+            ^log: seen.guard_edit()
             log.value.push(if commit -> "commit {name}" else -> "roll back {name}")
             commits || !commit
         }
@@ -9293,7 +9299,7 @@ priv outbox_unused: fn() -> CallOutbox Never! {
             hold: fn(_: [String], _: Int) { false },
             answered: fn(call: Int, request: CallRequest, reply: String) {
                 at: if call == 0 -> "on its own" else -> "in its call"
-                log := seen.guard_edit()
+                ^log: seen.guard_edit()
                 log.value.push("{name} keeps {request.account}/{request.key} {reply} {at}")
                 true
             },
@@ -9301,7 +9307,7 @@ priv outbox_unused: fn() -> CallOutbox Never! {
     }
     ends: fn(name: String) -> fn(Bool) -[]> Bool Never! {
         fn(commit: Bool) {
-            log := seen.guard_edit()
+            ^log: seen.guard_edit()
             log.value.push(if commit -> "commit {name}" else -> "roll back {name}")
             true
         }
@@ -9358,17 +9364,17 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
             store: "app.Test outbox",
             now: fn() { 0 },
             keep: fn(name: String, args: String, _: Int) {
-                log := seen.guard_edit()
+                ^log: seen.guard_edit()
                 log.value.push("keep {name} {args}")
                 "key {name}"
             },
             done: fn(key: String) {
-                log := seen.guard_edit()
+                ^log: seen.guard_edit()
                 log.value.push("done {key}")
                 1
             },
             failed: fn(key: String, runs: Int, error: String, _: Int) {
-                log := seen.guard_edit()
+                ^log: seen.guard_edit()
                 log.value.push("failed {key} after {runs}: {error}")
                 true
             },
@@ -9379,7 +9385,7 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
     }
     tries: Shared{0}
     flaky: fn(args: RemoteArgs) -> String [FieldError]! {
-        count := tries.guard_edit()
+        ^count: tries.guard_edit()
         count.value += 1
         taken: args.__take<Int>(0)
         if count.value == 1 -> return Ok(args.__reply_err<String>("once"))
@@ -9388,7 +9394,7 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
     failing: fn(args: RemoteArgs) -> String [FieldError]! { Ok(args.__reply_err<String>("always")) }
     dropped: Shared{0}
     never: fn(args: RemoteArgs) -> String [FieldError]! {
-        count := dropped.guard_edit()
+        ^count: dropped.guard_edit()
         count.value += 1
         Ok(args.__reply_value<Int>(0))
     }
@@ -9405,7 +9411,7 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
         if jobs_seen(seen).len() >= 6 -> break
         time.sleep(10ms)
     }
-    log := jobs_seen(seen)
+    ^log: jobs_seen(seen)
     log.sort()
     assert_eq(log.join(", "), "done key app.Test.flaky, failed key app.Test.failing after 1: {{\"err\":\"always\"}}, failed key app.Test.failing after 2: {{\"err\":\"always\"}}, failed key app.Test.flaky after 1: {{\"err\":\"once\"}}, keep app.Test.failing [], keep app.Test.flaky [2]")
     assert_eq(job_backoff_ms(1), 500)
@@ -9460,7 +9466,7 @@ live_cell_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool {
     if world_rt.world_store_replace("app.live", expected, replacement) == .Val(replaced) {
         return replaced
     }
-    cell := LIVE_CELL.guard_edit()
+    ^cell: LIVE_CELL.guard_edit()
     if cell.value.bytes != expected -> return false
     cell.value.bytes = replacement.move()
     true
@@ -9475,8 +9481,8 @@ live_key: fn(args: [String]) -> String { "[{args.join(",")}]" }
 live_register: fn(source: String, key: String, caller: String, every_ns: Int) -> Int {
     loop {
         seen: live_cell_load()
-        registry := live_decode(seen) ?? return 0
-        found := 0
+        ^registry: live_decode(seen) ?? return 0
+        ^found: 0
         loop index in 0..<registry.records.len() {
             if registry.records[index].source != source || registry.records[index].key != key || registry.records[index].caller != caller {
                 next
@@ -9490,8 +9496,8 @@ live_register: fn(source: String, key: String, caller: String, every_ns: Int) ->
             found = registry.next_id + 1
             registry.next_id = found
             if live_query_count(registry) >= LIVE_MAX_QUERIES {
-                kept := [LiveRecord]{}
-                evicted := false
+                ^kept: [LiveRecord]{}
+                ^evicted: false
                 loop record in registry.records {
                     if !evicted && record.source != LIVE_SYNC_SOURCE {
                         evicted = true
@@ -9518,8 +9524,8 @@ priv live_drop: fn(ids: [Int]) {
     }
     loop {
         seen: live_cell_load()
-        registry := live_decode(seen) ?? return
-        kept := [LiveRecord]{}
+        ^registry: live_decode(seen) ?? return
+        ^kept: [LiveRecord]{}
         loop record in registry.records {
             if record.source == LIVE_SYNC_SOURCE || !ids.contains(record.id) -> kept.push(record)
         }
@@ -9540,7 +9546,7 @@ priv live_drop: fn(ids: [Int]) {
 live_current: fn(id: Int, now: Int) -> LiveCurrent {
     loop {
         seen: live_cell_load()
-        registry := live_decode(seen) ?? return LiveCurrent{value: None, generation: 0}
+        ^registry: live_decode(seen) ?? return LiveCurrent{value: None, generation: 0}
         index: live_index(registry, id) ?? return LiveCurrent{value: None, generation: 0}
         generation: registry.records[index].generation
         if registry.records[index].value == "" {
@@ -9557,7 +9563,7 @@ live_current: fn(id: Int, now: Int) -> LiveCurrent {
             registry.window_ns = now
             registry.window_runs = 0
         }
-        event := ""
+        ^event: ""
         if registry.window_runs < LIVE_MAX_RERUNS_PER_SECOND -> registry.window_runs += 1 else {
             ends: registry.window_ns + LIVE_RERUN_WINDOW_NS
             registry.records[index].held_ns = ends
@@ -9604,19 +9610,19 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
     }
     loop {
         seen: live_cell_load()
-        registry := live_decode(seen) ?? return
+        ^registry: live_decode(seen) ?? return
         index: live_index(registry, id) ?? return
         changed: registry.records[index].value != value
         if changed {
             registry.records[index].value = value.copy()  // copy: a lost race retries with the same value
             registry.changes += 1
         }
-        overtaken := false
+        ^overtaken: false
         if started == .Val(generation) && registry.records[index].generation != generation {
             overtaken = true
         }
         // The hub event this store publishes: a hold's start or its end.
-        event := ""
+        ^event: ""
         if overtaken {
             registry.records[index].overtaken += 1
             if registry.records[index].overtaken >= LIVE_HOLD_AFTER && now >= 0 {
@@ -9656,10 +9662,10 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 live_invalidate: fn(source: String?, key: String?, reached: [String]?, skip: Int) {
     loop {
         seen: live_cell_load()
-        registry := live_decode(seen) ?? return
+        ^registry: live_decode(seen) ?? return
         now: rt.clock_mono_ns()
-        hits := [Int]{}
-        events := [String]{}
+        ^hits: [Int]{}
+        ^events: [String]{}
         loop index in 0..<registry.records.len() {
             if registry.records[index].id == skip -> next
             if source == .Val(named) {
@@ -9730,7 +9736,7 @@ live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
 // re-run window's start and count, then twelve fields per binding, the
 // eleventh its read set joined by newlines and the last its caller.
 live_encode: fn(registry: LiveRegistry) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     live_put(out, "{registry.next_id}")
     live_put(out, "{registry.invalidations}")
     live_put(out, "{registry.changes}")
@@ -9776,8 +9782,8 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
     capped: Int.parse(fields[5]) ?? return None
     window_ns: Int.parse(fields[6]) ?? return None
     window_runs: Int.parse(fields[7]) ?? return None
-    records := [LiveRecord]{}
-    at := 8
+    ^records: [LiveRecord]{}
+    ^at: 8
     loop at < fields.len() {
         id: Int.parse(fields[at]) ?? return None
         generation: Int.parse(fields[at + 5]) ?? return None
@@ -9794,10 +9800,10 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
 
 // The length-prefixed fields (`<decimal byte length>:<bytes>`) of `raw`.
 live_fields: fn(raw: [U8]) -> [String]? {
-    fields := [String]{}
-    at := 0
+    ^fields: [String]{}
+    ^at: 0
     loop at < raw.len() {
-        length := 0
+        ^length: 0
         loop {
             if at >= raw.len() -> return None
             n: Int{raw[at]}
@@ -9828,22 +9834,22 @@ sync: fn(doc_show: String, over: String) -> String Never! {
     document: sync_document_parse(doc_show) ?? return "SyncError(document is not a canonical CRDT value)"
     loop {
         seen: live_cell_load()
-        registry := live_decode(seen) ?? return "SyncError(session registry is unavailable)"
-        found := -1
-        sessions := 0
+        ^registry: live_decode(seen) ?? return "SyncError(session registry is unavailable)"
+        ^found: -1
+        ^sessions: 0
         loop index in 0..<registry.records.len() {
             if registry.records[index].source != LIVE_SYNC_SOURCE -> next
             sessions += 1
             if registry.records[index].key == over -> found = index
         }
-        generation := 0
-        current := document.copy()
+        ^generation: 0
+        ^current: document.copy()
         if found >= 0 {
             stored: sync_session_decode(registry.records[found].value) ?? return "SyncError(session registry is unavailable)"
             generation = stored.generation
             current = stored.document.copy()
         } else if sessions >= SYNC_MAX_ENTRIES { return "SyncError(session limit exceeded)" }
-        changed := false
+        ^changed: false
         if current != document {
             merged: sync_document_merge(current, document) ?? return "SyncError(document merge denied)"
             if merged != current {
@@ -9888,7 +9894,7 @@ sync_document_parse: fn(value: String) -> String? {
     }
     if !value.ends_with(")") -> return None
     if value.starts_with("SyncText(") -> return Val(value.copy())
-    canonical := ""
+    ^canonical: ""
     if value.starts_with("SyncMap(") {
         canonical = sync_map_show(sync_map_entries(value) ?? return None)
     } else if value.starts_with("SyncList(") {
@@ -9902,9 +9908,9 @@ sync_document_parse: fn(value: String) -> String? {
 
 sync_document_merge: fn(left: String, right: String) -> String? {
     if left == right -> return Val(left.copy())
-    merged := ""
+    ^merged: ""
     if left.starts_with("SyncMap(") && right.starts_with("SyncMap(") {
-        entries := sync_map_entries(left) ?? return None
+        ^entries: sync_map_entries(left) ?? return None
         other: sync_map_entries(right) ?? return None
         loop key in other.keys() {
             value: other.get(key) ?? next
@@ -9915,14 +9921,14 @@ sync_document_merge: fn(left: String, right: String) -> String? {
         if entries.len() > SYNC_MAX_ENTRIES -> return None
         merged = sync_map_show(entries)
     } else if left.starts_with("SyncList(") && right.starts_with("SyncList(") {
-        items := sync_list_items(left) ?? return None
+        ^items: sync_list_items(left) ?? return None
         loop item in sync_list_items(right) ?? return None {
             items = sync_pair_insert(items, item) ?? items
         }
         if items.len() > SYNC_MAX_ENTRIES -> return None
         merged = sync_list_show(items)
     } else if left.starts_with("PNCounter(") && right.starts_with("PNCounter(") {
-        counts := sync_counter_entries(left) ?? return None
+        ^counts: sync_counter_entries(left) ?? return None
         other: sync_counter_entries(right) ?? return None
         loop replica in other.keys() {
             count: other.get(replica) ?? next
@@ -9949,7 +9955,7 @@ SyncCount: struct {
 
 sync_map_entries: fn(value: String) -> [String:String]? {
     body: sync_document_body(value, "SyncMap(") ?? return None
-    entries := [String:String]{}
+    ^entries: [String:String]{}
     if body == "" -> return Val(entries)
     loop entry in sync_split(body, ",") ?? return None {
         pair: sync_split_once(entry, "=") ?? return None
@@ -9964,10 +9970,10 @@ sync_map_entries: fn(value: String) -> [String:String]? {
 }
 
 sync_map_show: fn(entries: [String:String]) -> String {
-    keys := [String]{}
+    ^keys: [String]{}
     loop key in entries.keys() -> keys.push(key)
     keys.sort()
-    shown := [String]{}
+    ^shown: [String]{}
     loop key in keys {
         value: entries.get(key) ?? next
         shown.push("{sync_escape(key)}={sync_escape(value)}")
@@ -9977,7 +9983,7 @@ sync_map_show: fn(entries: [String:String]) -> String {
 
 sync_list_items: fn(value: String) -> [SyncPair]? {
     body: sync_document_body(value, "SyncList(") ?? return None
-    items := [SyncPair]{}
+    ^items: [SyncPair]{}
     if body == "" -> return Val(items)
     loop raw in sync_split(body, "|") ?? return None {
         pair: sync_split_once(raw, ":") ?? return None
@@ -9992,8 +9998,8 @@ sync_list_items: fn(value: String) -> [SyncPair]? {
 
 // `items` with `item` in (first, second) order; None when already present.
 sync_pair_insert: fn(items: [SyncPair], item: SyncPair) -> [SyncPair]? {
-    out := [SyncPair]{}
-    placed := false
+    ^out: [SyncPair]{}
+    ^placed: false
     loop existing in items {
         if existing.first == item.first && existing.second == item.second -> return None
         later: if existing.first == item.first -> existing.second > item.second else -> existing.first > item.first
@@ -10008,14 +10014,14 @@ sync_pair_insert: fn(items: [SyncPair], item: SyncPair) -> [SyncPair]? {
 }
 
 sync_list_show: fn(items: [SyncPair]) -> String {
-    shown := [String]{}
+    ^shown: [String]{}
     loop item in items -> shown.push("{sync_escape(item.first)}:{sync_escape(item.second)}")
     "SyncList({shown.join("|")})"
 }
 
 sync_counter_entries: fn(value: String) -> [String:SyncCount]? {
     body: sync_document_body(value, "PNCounter(") ?? return None
-    counts := [String:SyncCount]{}
+    ^counts: [String:SyncCount]{}
     if body == "" -> return Val(counts)
     loop entry in sync_split(body, ",") ?? return None {
         pair: sync_split_once(entry, "=") ?? return None
@@ -10028,7 +10034,7 @@ sync_counter_entries: fn(value: String) -> [String:SyncCount]? {
     }
     if counts.len() > SYNC_MAX_REPLICAS -> return None
     // The checked total of positive minus negative counts must stay an Int.
-    total := 0
+    ^total: 0
     loop replica in counts.keys() {
         count: counts.get(replica) ?? next
         if total > 0 && count.positive > SYNC_MAX_INT - total -> return None
@@ -10040,10 +10046,10 @@ sync_counter_entries: fn(value: String) -> [String:SyncCount]? {
 }
 
 sync_counter_show: fn(counts: [String:SyncCount]) -> String {
-    replicas := [String]{}
+    ^replicas: [String]{}
     loop replica in counts.keys() -> replicas.push(replica)
     replicas.sort()
-    shown := [String]{}
+    ^shown: [String]{}
     loop replica in replicas {
         count: counts.get(replica) ?? next
         shown.push("{sync_escape(replica)}=+{count.positive}/-{count.negative}")
@@ -10078,7 +10084,7 @@ sync_is_separator: fn(scalar: String) -> Bool {
 }
 
 sync_escape: fn(value: String) -> String {
-    out := ""
+    ^out: ""
     loop scalar in unicode.scalars(value) {
         if scalar == "\\" || sync_is_separator(scalar) -> out = "{out}\\"
         out = "{out}{scalar}"
@@ -10089,8 +10095,8 @@ sync_escape: fn(value: String) -> String {
 // None when an escape is dangling or names no separator, or when a separator
 // appears unescaped.
 sync_unescape: fn(value: String) -> String? {
-    out := ""
-    escaped := false
+    ^out: ""
+    ^escaped: false
     loop scalar in unicode.scalars(value) {
         if escaped {
             if scalar != "\\" && !sync_is_separator(scalar) -> return None
@@ -10106,9 +10112,9 @@ sync_unescape: fn(value: String) -> String? {
 
 // The parts of `value` between unescaped `separator`s, escapes kept.
 sync_split: fn(value: String, separator: String) -> [String]? {
-    parts := [String]{}
-    current := ""
-    escaped := false
+    ^parts: [String]{}
+    ^current: ""
+    ^escaped: false
     loop scalar in unicode.scalars(value) {
         if escaped {
             current = "{current}\\{scalar}"
@@ -10125,9 +10131,9 @@ sync_split: fn(value: String, separator: String) -> [String]? {
 
 // `value` split at its first unescaped `separator`; None without one.
 sync_split_once: fn(value: String, separator: String) -> SyncPair? {
-    before := ""
-    escaped := false
-    at := 0
+    ^before: ""
+    ^escaped: false
+    ^at: 0
     loop scalar in unicode.scalars(value) {
         at += scalar.len()
         if escaped -> escaped = false else if scalar == "\\" -> escaped = true else if scalar == separator {

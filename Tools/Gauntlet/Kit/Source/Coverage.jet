@@ -176,11 +176,11 @@ load_corpus: fn(repo: String) -[FS, IO]> [CoverageProgram] CoverageError! {
     manifest: read_manifest(repo, "Tools/Gauntlet/measurement-manifest.json")
     bench: read_manifest(repo, "Tools/Perf/Scriptbench/manifest.json")
     catalog: load_entries(files.join(repo, "Tools/Gauntlet/Entries"), None)
-    programs := [CoverageProgram]{}
+    ^programs: [CoverageProgram]{}
     loop name in texts_at(manifest, "corpus/entry_names") {
         dir: corpus_entry_dir(catalog, name) ?? return Err(CoverageError{message: "the coverage corpus names no entry: {name}"})
         entry: read_manifest(dir, "entry.json")
-        peers := [Twin]{}
+        ^peers: [Twin]{}
         loop language in texts_at(entry, "languages") {
             if language == "jet" || language == "jet-expert" || truthy_at(entry, "non_applicable/{language}") {
                 next
@@ -188,7 +188,7 @@ load_corpus: fn(repo: String) -[FS, IO]> [CoverageProgram] CoverageError! {
             path: files.join(dir, language_source_dir(language))
             peers.push(Twin{peer: language.move(), path: Val(path)})
         }
-        owners := [OwnerCard]{}
+        ^owners: [OwnerCard]{}
         if member(manifest, "loss_owners/{name}") == .Val(.Object(rows)) {
             loop row in rows {
                 if int_at(row.value, "") == .Val(card) {
@@ -201,7 +201,7 @@ load_corpus: fn(repo: String) -[FS, IO]> [CoverageProgram] CoverageError! {
     peer_files: items_at(bench, "peers")
     loop workload in items_at(bench, "workloads") {
         dir: files.join(repo, "Tools/Perf/Scriptbench/{text_at(workload, "dir") ?? ""}")
-        peers := [Twin]{}
+        ^peers: [Twin]{}
         loop peer in texts_at(workload, "peers") {
             wanted: peer.copy()
             file: peer_files.find(fn(known) { text_at(known, "name") == Val((wanted)) }).map(fn(known) { text_at(known, "file") })
@@ -215,11 +215,11 @@ load_corpus: fn(repo: String) -[FS, IO]> [CoverageProgram] CoverageError! {
 // Why `programs` is not a coverage corpus: too few programs, a repeated
 // one, or one without a peer twin on disk.
 corpus_issues: fn(programs: [CoverageProgram]) -[FS]> [String] {
-    issues := [String]{}
+    ^issues: [String]{}
     if programs.len() < COVERAGE_MINIMUM_PROGRAMS {
         issues.push("the corpus has {programs.len()} programs, fewer than {COVERAGE_MINIMUM_PROGRAMS}")
     }
-    seen := [String]{}
+    ^seen: [String]{}
     loop program in programs {
         id: "{program.source}/{program.name}"
         if seen.contains(id) -> issues.push("{id} is listed twice")
@@ -236,7 +236,7 @@ corpus_issues: fn(programs: [CoverageProgram]) -[FS]> [String] {
 // ScriptBench's cells.tsv, each row read by its header.
 parse_cells: fn(text: String) -> [ScriptBenchCell] {
     lines: text.split("\n").filter(fn(line) { line != "" }).to_list()
-    rows := [ScriptBenchCell]{}
+    ^rows: [ScriptBenchCell]{}
     if lines.len() == 0 -> return rows
     columns: lines[0].split("\t").to_list()
     loop at in 1..<lines.len() {
@@ -310,10 +310,10 @@ cell_number: fn(text: String?) -> Float { Float.parse(text ?? "") ?? math.NAN }
 // gauntlet report and ScriptBench cells, with the losses grouped by owner.
 build_census: fn(programs: [CoverageProgram], report: Dyn, cells: [ScriptBenchCell]) -> CoverageCensus {
     results: items_at(report, "entries")
-    losses := [CoverageLoss]{}
-    uncovered := [CoverageGap]{}
-    measured := 0
-    gauntlet := 0
+    ^losses: [CoverageLoss]{}
+    ^uncovered: [CoverageGap]{}
+    ^measured: 0
+    ^gauntlet: 0
     loop program in programs {
         if program.source == "gauntlet" -> gauntlet += 1
         name: program.name.copy()
@@ -340,7 +340,7 @@ build_census: fn(programs: [CoverageProgram], report: Dyn, cells: [ScriptBenchCe
     }
     // The roots hold the losses again, so the census file lists each loss under its owner.
     grouped: losses.copy().group_by(.owner)
-    owners := grouped.keys().to_list()
+    ^owners: grouped.keys().to_list()
     owners.sort()
     CoverageCensus{
         programs: programs.len(),
@@ -403,7 +403,7 @@ TEST_HEADER: "workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcar
 
 #Test("a corpus under 30 programs, a repeated program and a missing twin are corpus issues") {
     here: files.cwd()
-    programs := [CoverageProgram]{}
+    ^programs: [CoverageProgram]{}
     loop index in 0..<(COVERAGE_MINIMUM_PROGRAMS - 1) {
         programs.push(test_gauntlet_program("p{index}", here))
     }

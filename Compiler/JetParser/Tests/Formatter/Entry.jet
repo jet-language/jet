@@ -127,9 +127,9 @@ run: fn() {
     source: "load: fn() -> Int IOError! {{ read() }}\n"
     lexed: lex(source.bytes())
     assert(lexed.diagnostics.len() == 0)
-    program := parse_source(source.bytes()).program
+    ^program: parse_source(source.bytes()).program
     if program.items[0] == .Func(function) {
-        updated := function
+        ^updated: function
         if updated.body[0] == .Expr(inner) {
             updated.body[0] = Stmt.Expr{expr: Expr.Try{value: inner, span: expr_span(inner), conversion: TryConvert.NoConversion, context: None, id: AST_NODE_GENERATED}}
         } else { panic("expected expression body") }
@@ -293,7 +293,7 @@ run: fn() {
     assert_eq(library.text, source)
     user: jet_format_source(source, false)
     assert(!user.ok, "a user source may not spell a reserved name")
-    reserved := false
+    ^reserved: false
     loop diagnostic in user.diagnostics {
         if diagnostic.code == "E0067" -> reserved = true
     }
@@ -338,7 +338,7 @@ g: fn() -> String {
     // Each level once rendered its whole tail twice, compact then expanded:
     // at 48 levels the format never finished.
     depth: 48
-    line := ""
+    ^line: ""
     loop _ in 0..<depth -> line = "{line}if {{ flag -> print(\"stop\") else -> "
     line = "{line}if {{ flag -> print(\"stop\") else -> print(\"deep-tail\") }}"
     loop _ in 0..<depth -> line = "{line} }}"

@@ -322,8 +322,8 @@ set_option: fn(options: ^Options, option: String, value: String) {
 }
 
 parse_args: fn(argv: [String], workloads: [Workload]) -> Options Refusal! {
-    options := Options{}
-    pending := ""
+    ^options: Options{}
+    ^pending: ""
     loop arg in argv {
         if {
             pending != "" && (arg == "" || arg.starts_with("--")) -> return Err(Refusal{message: "{pending} requires a value"})
@@ -402,7 +402,7 @@ fresh_workspace: fn(source: String, workspace: String) -> String (IOError | Refu
 
 // Every file below `root`, sorted; a symlink is refused.
 collect_files: fn(root: String) -> [String] (IOError | Refusal)! {
-    found := [String]{}
+    ^found: [String]{}
     loop entry in files.list_dir(root) {
         refuse_link(entry.path)
         if entry.is_dir -> found.extend(collect_files(entry.path)) else -> found.push(entry.path)
@@ -413,8 +413,8 @@ collect_files: fn(root: String) -> [String] (IOError | Refusal)! {
 
 identity_for: fn(directory: String) -> Dyn (IOError | Refusal)! {
     nul: String.from_bytes_lossy([U8]{U8{0}})
-    rows := [Dyn]{}
-    keys := [String]{}
+    ^rows: [Dyn]{}
+    ^keys: [String]{}
     loop path in collect_files(directory) {
         name: files.relative(path, directory)
         bytes: files.read_bytes(path)
@@ -429,8 +429,8 @@ identity_for: fn(directory: String) -> Dyn (IOError | Refusal)! {
 complexity_for: fn(directory: String) -> Dyn (IOError | Refusal | RegexError)! {
     multiline: RegexFlags{ignore_case: false, multiline: true, dot_matches_newline: false}
     declaration: regex.compile_with(DECLARATION, multiline)
-    shapes := [Dyn]{}
-    total := Totals{bytes: 0, lines: 0, comments: 0, declarations: 0, control_forms: 0}
+    ^shapes: [Dyn]{}
+    ^total: Totals{bytes: 0, lines: 0, comments: 0, declarations: 0, control_forms: 0}
     loop path in collect_files(directory) {
         if !path.ends_with(".jet") -> next
         source: files.read(path)
@@ -495,8 +495,8 @@ command_environment: fn(root: String) -> [Setting] IOError! {
 
 run_command: fn(command: String, args: [String], cwd: String, env: [Setting], timeout: Int) -> Ran IOError! {
     started: time.unix_ns()
-    ran := Ran{status: "unavailable", command: command, identity: command_identity(command), args: args.copy(), exit_code: None, signal: None, stdout: "", stderr: "", latency_ms: 0.0, peak_rss_bytes: None}
-    spec := process.cmd([command].concat(args)).cwd(cwd).timeout(time.duration_ms(timeout)).output_limit(OUTPUT_LIMIT)
+    ^ran: Ran{status: "unavailable", command: command, identity: command_identity(command), args: args.copy(), exit_code: None, signal: None, stdout: "", stderr: "", latency_ms: 0.0, peak_rss_bytes: None}
+    ^spec: process.cmd([command].concat(args)).cwd(cwd).timeout(time.duration_ms(timeout)).output_limit(OUTPUT_LIMIT)
     loop setting in env -> spec = spec.env(setting.name, setting.value)
     if spec.run() == {
         .Err(failure) -> { ran.stderr = "{failure}" }
@@ -564,7 +564,7 @@ same_file: fn(seen: SeenSpan?, want: String) -> Bool {
 
 diagnostic_matches: fn(actual: Dyn?, want: ExpectedDiagnostic) -> Bool {
     seen: (actual ?? return false).decode<SeenDiagnostic>() ?? return false
-    fixed := false
+    ^fixed: false
     edits: seen.fix_edits ?? [FixEdit]{}
     loop edit in edits {
         fixed = fixed || (edit.new_text == Val(want.fix_text) && same_span(edit.span, want.span))
@@ -625,7 +625,7 @@ native_provider: fn(study: Study, workload: Workload, workspace: String, env: [S
     identity: if files.exists(native_root) -> identity_for(native_root) else -> Dyn.Null
     artifact: file_digest(artifact_path, files.relative(artifact_path, workspace))
     status: if ran.status == "completed" && artifact == Dyn.Null -> "failed" else -> ran.status.copy()
-    tree := ran_tree(ran)
+    ^tree: ran_tree(ran)
     tree["status"] = status
     tree["toolchain"] = Dyn{[String:Dyn]{"command": "/bin/sh", "script": plan.build, "target": workload.targets}}
     tree["artifact"] = artifact
@@ -634,7 +634,7 @@ native_provider: fn(study: Study, workload: Workload, workspace: String, env: [S
 }
 
 jet_cases: fn(study: Study, workload: Workload, mode: String, workspace: String, env: [Setting]) -> [CaseRun] (IOError | [FieldError])! {
-    runs := [CaseRun]{}
+    ^runs: [CaseRun]{}
     loop case in workload.cases {
         diagnostic: case.kind == Val("check")
         if mode != "check" && diagnostic {
@@ -682,7 +682,7 @@ jet_mode: fn(study: Study, workload: Workload, mode: String, workspace: String, 
 // program held to the workload's run case.
 jet_build: fn(study: Study, workload: Workload, mode: String, workspace: String, env: [Setting]) -> Record (IOError | Refusal | [FieldError])! {
     built: native_provider(study, workload, workspace, env) ?? Record{status: "completed", tree: Dyn.Null}
-    build := Dyn{[String:Dyn]{"native": built.tree}}
+    ^build: Dyn{[String:Dyn]{"native": built.tree}}
     if built.status != "completed" {
         build["compiler"] = Dyn.Null
         build["artifact"] = Dyn.Null
@@ -719,7 +719,7 @@ run_rust: fn(study: Study, workload: Workload, workspace: String, env: [Setting]
     source: files.resolve(files.join(workspace, workload.oracle))
     binary: files.join(workspace, "oracle-bin")
     build: run_command("rustc", [String]{"--edition", "2021", source, "-O", "-o", binary}, workspace, env, timeout_ms(study, workload, "build"))
-    oracle := Dyn{[String:Dyn]{"build": ran_tree(build), "run": Dyn.Null, "matches": false, "comparison": Dyn.Null}}
+    ^oracle: Dyn{[String:Dyn]{"build": ran_tree(build), "run": Dyn.Null, "matches": false, "comparison": Dyn.Null}}
     if build.status == "completed" && build.exit_code == Val(0) {
         ran: run_command(binary, [String]{}, workspace, env, timeout_ms(study, workload, "run"))
         compared: compare(ran, run_case(workload).expected, "run")
@@ -732,7 +732,7 @@ run_rust: fn(study: Study, workload: Workload, workspace: String, env: [Setting]
 }
 
 reasoning_template: fn(workload: Workload) -> Dyn {
-    tasks := [Dyn]{}
+    ^tasks: [Dyn]{}
     loop id in REASONING_TASKS {
         wanted: id.copy()
         task: workload.reasoning.find(fn(candidate) { candidate.id == wanted }) ?? Task{id: id, prompt: None, expected_observations: None}
@@ -764,7 +764,7 @@ validate_capture: fn(capture: Dyn, study: Study, workload: Workload) -> Record {
     loop id in REASONING_TASKS {
         if ids.count(Dyn.Text(id.copy())) != 1 -> return verdict("rejected", ONE_EACH)
     }
-    tasks := [Dyn]{}
+    ^tasks: [Dyn]{}
     loop id in REASONING_TASKS {
         entry: entries[ids.index_of(Dyn.Text(id.copy())) ?? 0]
         observation: at(entry, "observation").decode<String>() ?? ""
@@ -845,9 +845,9 @@ modes_to_run: fn(workload: Workload, options: Options) -> [String] {
 }
 
 evidence_tree: fn(workload: Workload, identity: Dyn, complexity: Dyn, rows: [ModeRow], records: [Dyn]) -> Dyn {
-    modes := [Dyn]{}
+    ^modes: [Dyn]{}
     loop row in rows {
-        tree := Dyn{[String:Dyn]{"mode": row.mode, "status": row.status}}
+        ^tree: Dyn{[String:Dyn]{"mode": row.mode, "status": row.status}}
         if row.record == .Val(record) -> tree["record"] = record
         modes.push(tree)
     }
@@ -880,12 +880,12 @@ evaluate: fn(study: Study, workload: Workload, options: Options, run_root: Strin
     identity: identity_for(source)
     complexity: complexity_for(source)
     reasoning: load_reasoning(options.reasoning_file.map(fn(file) { files.resolve(file) ?? file }), study, workload)
-    rows := workload.supported_modes.map(fn(mode) { ModeRow{mode: mode, status: "unrun", record: None} })
-    records := [Dyn]{}
-    jet := [Dyn]{}
-    status := if requested(options, "complexity") || requested(options, "identity") -> "specified" else -> "unrun"
+    ^rows: workload.supported_modes.map(fn(mode) { ModeRow{mode: mode, status: "unrun", record: None} })
+    ^records: [Dyn]{}
+    ^jet: [Dyn]{}
+    ^status: if requested(options, "complexity") || requested(options, "identity") -> "specified" else -> "unrun"
     to_run: modes_to_run(workload, options)
-    passed := to_run.len() > 0
+    ^passed: to_run.len() > 0
     loop mode in to_run {
         if !workload.supported_modes.contains(mode) {
             jet.push(Dyn{[String:Dyn]{"mode": mode, "status": "unsupported"}})
@@ -908,7 +908,7 @@ evaluate: fn(study: Study, workload: Workload, options: Options, run_root: Strin
         passed = passed && outcome.status == "observed"
     }
     if passed -> status = "observed"
-    oracle := Dyn.Null
+    ^oracle: Dyn.Null
     if requested(options, "all") {
         oracle_root: files.join(files.join(run_root, workload.id), "oracle")
         oracle_workspace: fresh_workspace(source, files.join(oracle_root, "workspace"))
@@ -917,7 +917,7 @@ evaluate: fn(study: Study, workload: Workload, options: Options, run_root: Strin
             status = "oracle-observed"
         }
     }
-    repair := Dyn.Null
+    ^repair: Dyn.Null
     if requested(options, "repair") {
         repair_root: files.join(files.join(run_root, workload.id), "repair")
         repair_workspace: fresh_workspace(source, files.join(repair_root, "workspace"))
@@ -951,7 +951,7 @@ failed_workload: fn(id: String, error: String) -> Evaluated {
 
 // How many workloads ended in each status, in the order statuses first appear.
 summarize: fn(items: [Evaluated]) -> Dyn {
-    counts := Dyn.object()
+    ^counts: Dyn.object()
     loop item in items {
         status: at(item.tree, "status").text() ?? ""
         counts[status] = Dyn.Int((at(counts, status).int() ?? 0) + 1)
@@ -989,8 +989,8 @@ receipt_for: fn(study: Study, options: Options) -> Dyn (IOError | Refusal)! {
     }
     run_root: files.join(scratch_root, "run-{time.unix_ns()}")
     files.create_dir_all(run_root)
-    items := [Evaluated]{}
-    ids := [String]{}
+    ^items: [Evaluated]{}
+    ^ids: [String]{}
     loop workload in study.manifest.workloads {
         if options.workloads.len() > 0 && !options.workloads.contains(workload.id) -> next
         ids.push(workload.id.copy())

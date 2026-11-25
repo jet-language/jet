@@ -40,7 +40,7 @@ counted_ticket_payload: fn(ticket: ^^Ticket, calls: ^Int) -> {value: Int, tag: I
 }
 
 taking_variant_subject_once: fn() -> Int Never! {
-    calls := 0
+    ^calls: 0
     ticket: Ticket{message: "once"}
     value: if counted_ticket_payload(ticket, calls) == {
         .Err(_) -> 0
@@ -57,5 +57,5 @@ run: fn() {
     print(outer_ticket(false, second))
     print(local_ticket(true))
     print(local_ticket(false))
-    _ := taking_variant_subject_once()
+    ^_: taking_variant_subject_once()
 }

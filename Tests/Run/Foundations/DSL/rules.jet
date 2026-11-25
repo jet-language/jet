@@ -54,7 +54,7 @@ parse_rule: fn(source: String) -> Rule? {
 }
 
 parse: fn(source: String) -> [Rule]? {
-    rules := [Rule]{}
+    ^rules: [Rule]{}
     loop item in source.split(";") {
         line: item.trim()
         if line != "" {
@@ -93,7 +93,7 @@ apply: fn(facts: ^[String:Int], fact: String, action: Action) -> String {
 }
 
 fire: fn(facts: ^[String:Int], rules: [Rule]) -> [String] {
-    events := [String]{}
+    ^events: [String]{}
     loop rule in rules {
         value: facts.get(rule.fact.copy()) ?? 0
         event: if matches(rule.condition.copy(), value) -> apply(facts, rule.fact.copy(), rule.action.copy()) else -> "skip"

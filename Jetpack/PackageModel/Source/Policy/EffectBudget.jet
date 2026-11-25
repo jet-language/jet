@@ -139,7 +139,7 @@ pkg_dependency_boundary_span: fn(program: EffectBudgetProgram, dependency: Strin
 // within a collapsed root other than `.` starts with that root's text, so
 // only those roots take the exact test (pkg_authority_path_within).
 pkg_effect_module_owners: fn(program: EffectBudgetProgram) -> [String] Never! {
-    names := program.dep_roots.keys().to_list()
+    ^names: program.dep_roots.keys().to_list()
     names.sort()
     roots: loop name in names -> files.collapse(program.dep_roots[name])
     loop loaded in program.modules -> pkg_effect_owner_among(program, names, roots, loaded.path)
@@ -164,16 +164,16 @@ pkg_compute_package_effects: fn(program: EffectBudgetProgram, solved: [String:[S
     reachable: pkg_effect_entry_reachable_keys(program, summaries, "run")
     module_owners: pkg_effect_module_owners(program)
     // Each program function's package, by its key.
-    owners := [String:String]{}
+    ^owners: [String:String]{}
     loop (index, loaded) in program.modules {
         loop function_key in loaded.function_keys {
             owners["{loaded.alias}.{function_key}"] = module_owners[index]
         }
     }
-    by_package := [String:PackageEffects]{}
+    ^by_package: [String:PackageEffects]{}
     loop (index, loaded) in program.modules {
         owner: module_owners[index]
-        aggregate := by_package.get(owner) ?? PackageEffects{name: owner.copy(), effects: [String]{}, effect_chains: [String:[String]]{}, effect_witnesses: [String:EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: None}
+        ^aggregate: by_package.get(owner) ?? PackageEffects{name: owner.copy(), effects: [String]{}, effect_chains: [String:[String]]{}, effect_witnesses: [String:EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: None}
         if aggregate.boundary_span == None && owner != EFFECT_ROOT_PACKAGE {
             aggregate.boundary_span = pkg_dependency_boundary_span(program, owner)
         }
@@ -182,11 +182,11 @@ pkg_compute_package_effects: fn(program: EffectBudgetProgram, solved: [String:[S
         }
         by_package[owner] = aggregate
     }
-    names := by_package.keys().to_list()
+    ^names: by_package.keys().to_list()
     names.sort()
-    out := [PackageEffects]{}
+    ^out: [PackageEffects]{}
     loop name in names {
-        entry := by_package[name]
+        ^entry: by_package[name]
         entry.effects = authority_holds(entry.effects)
         entry.panic_sites = authority_holds(entry.panic_sites)
         loop chain in entry.effect_chains.values() {
@@ -235,7 +235,7 @@ pkg_effect_entry_candidates: fn(program: EffectBudgetProgram, summaries: [String
         return [String]{}
     }
     entry_module: program.modules[program.entry]
-    candidates := [String]{"{entry_module.alias}.{default_entry}", default_entry}
+    ^candidates: [String]{"{entry_module.alias}.{default_entry}", default_entry}
     if default_entry == "run" && entry_module.has_build_entry {
         candidates.push("{entry_module.alias}.{EFFECT_BUILD_ENTRY}")
         candidates.push(EFFECT_BUILD_ENTRY)
@@ -247,8 +247,8 @@ pkg_effect_entry_candidates: fn(program: EffectBudgetProgram, summaries: [String
 }
 
 pkg_effect_entry_reachable_keys: fn(program: EffectBudgetProgram, summaries: [String:PackageEffectSummary], default_entry: String) -> [String:Bool] Never! {
-    pending := pkg_effect_entry_candidates(program, summaries, default_entry)
-    reachable := [String:Bool]{}
+    ^pending: pkg_effect_entry_candidates(program, summaries, default_entry)
+    ^reachable: [String:Bool]{}
     loop pending.len() > 0 {
         key: pending.pop() ?? break
         summary: summaries.get(key) ?? next
@@ -274,13 +274,13 @@ pkg_collect_effects_for_key: fn(key: String, reachable: [String:Bool], solved: [
     loop effect_name in set {
         aggregate.effects.push(effect_name.copy())
         if !aggregate.effect_chains.has_key(effect_name) {
-            seen := [String:Bool]{}
-            chain := [String]{}
+            ^seen: [String:Bool]{}
+            ^chain: [String]{}
             pkg_effect_chain(key, effect_name, solved, summaries, owners, seen, chain)
             aggregate.effect_chains[effect_name] = chain.move()
         }
     }
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     site: pkg_panic_site(key, summaries, seen) ?? return
     aggregate.panic_sites.push(site)
 }
@@ -341,13 +341,13 @@ pkg_panic_site: fn(key: String, summaries: [String:PackageEffectSummary], seen: 
 
 // The always-on one-line `jet build` summary.
 pkg_effect_summary_line: fn(entries: [PackageEffects]) -> String Never! {
-    all := [String]{}
+    ^all: [String]{}
     loop entry in entries {
         loop effect_name in entry.effects -> all.push(effect_name.copy())
     }
     all = authority_holds(all)
     if all.len() == 0 -> return "effects: none"
-    dependency_count := 0
+    ^dependency_count: 0
     loop entry in entries {
         if entry.name != EFFECT_ROOT_PACKAGE && entry.effects.len() > 0 -> dependency_count += 1
     }
@@ -394,7 +394,7 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
     }
     deny: pkg_effect_budget_rights(manifest.authority.deny ?? [String]{})
     empty: [String]{}
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop package in entries {
         root: package.name == EFFECT_ROOT_PACKAGE
         granted: if root -> None else -> pkg_effect_grant_for(manifest, package.name)
@@ -420,9 +420,9 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
                 next
             }
             chain: package.effect_chains.get(effect_name) ?? [String]{}
-            site := String?{None}
+            ^site: String?{None}
             if chain.len() > 0 -> site = Val(chain[chain.len() - 1].copy())
-            diagnostic := if root -> pkg_e0749_outside_allow(effect_name, chain) else if granted != None -> pkg_e1220_grant(package.name, effect_name, site, chain) else -> pkg_e1220_path(package.name, effect_name, site, chain)
+            ^diagnostic: if root -> pkg_e0749_outside_allow(effect_name, chain) else if granted != None -> pkg_e1220_grant(package.name, effect_name, site, chain) else -> pkg_e1220_path(package.name, effect_name, site, chain)
             if site == .Val(function) {
                 if package.effect_witnesses.get(function) == .Val(witness) {
                     diagnostic.span = Val(witness.span)
@@ -438,7 +438,7 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
 // `rights` without its library grants (`FFI.C("c")`): the rights the root's
 // `allow` row lends a dependency, whose library keys are its own.
 pkg_effect_without_library_grants: fn(rights: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop right in rights {
         if authority_root(right) == "FFI" && effect_scope_is_scoped(right) -> next
         // copy: the borrowed manifest row stays the root's limit.
@@ -487,20 +487,20 @@ PackageEffectGain: struct {
 // nothing: `jet fetch` writes the lock, and `jet fetch --locked` refuses one
 // it can't read.
 pkg_lock_record_effect_rows: fn(project_root: String, entries: [PackageEffects], locked: Bool) -[FS, Env, Time]> [PackageEffectGain] LockError! {
-    lock := pkg_lock_load(project_root) ?? return Ok([PackageEffectGain]{})
+    ^lock: pkg_lock_load(project_root) ?? return Ok([PackageEffectGain]{})
     grants: if lock.authority == {
         .Val(authority) -> authority.grants.copy()
         .None -> [PackageGrant]{}
     }
-    gains := [PackageEffectGain]{}
-    changed := false
+    ^gains: [PackageEffectGain]{}
+    ^changed: false
     loop index in 0..<lock.packages.len() {
-        package := lock.packages[index]
+        ^package: lock.packages[index]
         if package.is_root() -> next
         entry: pkg_effect_entry_for(entries, package.name) ?? next
         recorded: package.required_effect_roles()
-        gained := [String]{}
-        reaches := [PackageEffectReach]{}
+        ^gained: [String]{}
+        ^reaches: [PackageEffectReach]{}
         loop effect_name in entry.effects {
             // A deny-only right (`Panic`, `Mem`, `Time.Wait`) is never
             // granted, so the lock records none: a stop is refused by a
@@ -509,16 +509,16 @@ pkg_lock_record_effect_rows: fn(project_root: String, entries: [PackageEffects],
             if authority_covers_any(recorded, effect_name) -> next
             gained.push(effect_name.copy())
             chain: entry.effect_chains.get(effect_name) ?? [String]{}
-            witness := EffectBudgetWitness?{None}
+            ^witness: EffectBudgetWitness?{None}
             if chain.len() > 0 -> witness = entry.effect_witnesses.get(chain[chain.len() - 1])
             reaches.push(PackageEffectReach{effect_name: effect_name.copy(), chain: chain, witness: witness})
         }
         first: package.effect_authority == None
         if !first && gained.len() == 0 -> next
         if !first -> gains.push(PackageEffectGain{name: package.name.copy(), reaches: reaches})
-        row := recorded.copy()
+        ^row: recorded.copy()
         loop effect_name in gained -> row.push(effect_name)
-        granted := [String]{}
+        ^granted: [String]{}
         loop grant in grants {
             if grant.package == package.name -> granted = grant.rights.copy()
         }
@@ -549,7 +549,7 @@ pkg_lock_record_effect_rows: fn(project_root: String, entries: [PackageEffects],
 // effect the project lock doesn't record for it, at the function that
 // performs it, with the call path into the dependency.
 pkg_lock_e3513: fn(dependency: String, reach: PackageEffectReach) -> Diagnostic Never! {
-    diagnostic := diagnostic_from_registry(
+    ^diagnostic: diagnostic_from_registry(
         "E3513",
         None,
         "dependency `{dependency}` now reaches `{reach.effect_name}`, which `.jet/lock` doesn't record for it",

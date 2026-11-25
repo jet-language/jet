@@ -57,13 +57,13 @@ owned: fn(s: Shared<Context>) {
 }
 
 loops: fn(s: Shared<Context>) {
-    total := 0
+    ^total: 0
     loop i in 0..<5 -> total += read_it(make(s, i)) + own_it(make(s, i))
     print("loops {total} live {s.strong_count()}")
 }
 
 run: fn() {
-    s := Shared{Context{_id: 1}}
+    ^s: Shared{Context{_id: 1}}
     read(s)
     print("read dropped {s.strong_count()}")
     owned(s)

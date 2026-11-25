@@ -35,7 +35,7 @@ test_scope_push: fn(list: I64, width: I64) -> I64 {
 test_scope_remove: fn(list: I64, index: I64, width: I64) {
     count: trap_word(list)
     data: trap_word(wrapping(list + I64{16}))
-    at := index
+    ^at: index
     loop at < count - width {
         trap_store(wrapping(data + at * I64{8}), trap_word(wrapping(data + (at + width) * I64{8})))
         at += I64{1}
@@ -44,7 +44,7 @@ test_scope_remove: fn(list: I64, index: I64, width: I64) {
 }
 
 test_scope_frame_drop: fn(row: I64) {
-    at := I64{8}
+    ^at: I64{8}
     loop at < (I64{40}) {
         test_text_drop(trap_word(wrapping(row + at)))
         at += I64{8}
@@ -62,7 +62,7 @@ test_scope_expect_clear: fn(state: I64) {
     list: wrapping(state + I64{32})
     count: trap_word(list)
     data: trap_word(wrapping(list + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         test_scope_frame_drop(wrapping(data + at * I64{8}))
         at += I64{5}
@@ -143,7 +143,7 @@ test_scope_pending_failure: fn() -> I64 {
     state: test_capture_state()
     if (state == I64{0}) { return I64{0} }
     completed: wrapping(state + I64{56})
-    at := trap_word(completed)
+    ^at: trap_word(completed)
     loop at > (I64{0}) {
         at -= I64{2}
         row: trap_word(wrapping(completed + I64{16})) + at * I64{8}
@@ -177,7 +177,7 @@ test_scope_pending_failure: fn() -> I64 {
         return
     }
     frames: wrapping(state + I64{32})
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(frames) {
         row: wrapping(trap_word(wrapping(frames + I64{16})) + at * I64{8})
         if (trap_word(wrapping(row + I64{24})) == I64{0}) {
@@ -191,7 +191,7 @@ test_scope_pending_failure: fn() -> I64 {
 // Installed with the test capture (TestCapture.jet jet_rt_test_capture_init):
 // only a thread with test state records stops into its frames, so a program
 // that never runs a test links no recorder.
-test_scope_stop_code := I64{0}
+^test_scope_stop_code: I64{0}
 
 // RuntimeLower resolves this checked function-address entry, never the body.
 rt_test_scope_record_stop_address: fn() -> I64 {
@@ -203,7 +203,7 @@ test_scope_record_raw_stop: fn(code_word: I64, code_length: I64, message: I64, l
     if (code == I64{0}) {
         return
     }
-    _ := coll_call4(code, code_word, code_length, message, length)
+    ^_: coll_call4(code, code_word, code_length, message, length)
 }
 
 // Raw publication paths already own code/message bytes. Copy once into each
@@ -212,7 +212,7 @@ test_scope_record_raw_stop: fn(code_word: I64, code_length: I64, message: I64, l
     state: test_capture_state()
     if (state == I64{0}) { return I64{0} }
     frames: wrapping(state + I64{32})
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(frames) {
         row: wrapping(trap_word(wrapping(frames + I64{16})) + at * I64{8})
         if (trap_word(wrapping(row + I64{24})) == I64{0}) {
@@ -238,7 +238,7 @@ test_scope_record_coded_stop: fn(code: I64, message: I64, length: I64) {
 
 test_scope_stopped_index: fn(state: I64) -> I64 {
     frames: wrapping(state + I64{32})
-    at := trap_word(frames)
+    ^at: trap_word(frames)
     loop at > (I64{0}) {
         at -= I64{5}
         row: wrapping(trap_word(wrapping(frames + I64{16})) + at * I64{8})
@@ -264,8 +264,8 @@ test_scope_stopped_index: fn(state: I64) -> I64 {
 test_scope_code_word: fn(code: I64) -> I64 {
     if (trap_word(wrapping(code + I64{8})) != I64{5}) { return I64{0} }
     bytes: trap_word(code)
-    word := I64{0}
-    at := I64{0}
+    ^word: I64{0}
+    ^at: I64{0}
     loop at < (I64{5}) {
         word |= trap_byte(wrapping(bytes + at)) << (at * I64{8})
         at += I64{1}
@@ -313,7 +313,7 @@ test_scope_code_word: fn(code: I64) -> I64 {
         return
     }
     completed: wrapping(state + I64{56})
-    at := trap_word(completed)
+    ^at: trap_word(completed)
     loop at > (I64{0}) {
         at -= I64{2}
         row: wrapping(trap_word(wrapping(completed + I64{16})) + at * I64{8})
@@ -395,7 +395,7 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
     if (!met && native) { scheduler_control_discard_stop(scheduler_control_current()) }
     error: if met -> I64{0} else -> jet_rt_test_expect_fail_error(expected, expected_message, code, message)
     trap_store(wrapping(row + I64{24}), I64{0})
-    at := index
+    ^at: index
     loop at < trap_word(frames) {
         test_scope_frame_drop(wrapping(data + at * I64{8}))
         at += I64{5}
@@ -461,19 +461,19 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
     state: test_capture_state()
     if (state == I64{0}) { return false }
     list: wrapping(state + I64{88})
-    at := trap_word(list)
+    ^at: trap_word(list)
     loop at > (I64{0}) {
         at -= I64{5}
         row: wrapping(trap_word(wrapping(list + I64{16})) + at * I64{8})
         if (trap_word(row) == scope) {
             sample: time_clock_read(I64{1})
-            seconds := trap_word(sample) - trap_word(wrapping(row + I64{8}))
-            nanos := trap_word(wrapping(sample + I64{8})) - trap_word(wrapping(row + I64{16}))
+            ^seconds: trap_word(sample) - trap_word(wrapping(row + I64{8}))
+            ^nanos: trap_word(wrapping(sample + I64{8})) - trap_word(wrapping(row + I64{16}))
             if (nanos < I64{0}) {
                 seconds -= I64{1}
                 nanos += I64{1000000000}
             }
-            elapsed := I64{0}
+            ^elapsed: I64{0}
             if (seconds >= I64{0}) {
                 if (seconds > I64{9223372036} || (seconds == I64{9223372036} && nanos > I64{854775807})) {
                     elapsed = I64{9223372036854775807}

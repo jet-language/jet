@@ -166,7 +166,7 @@ reflect_sequence_clone: fn(sequence: I64) -> I64 {
     length: scalar_reflect_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     result: jet_rt_record_seq_list_rec_jet_reflect_field_new(length)
     data: scalar_reflect_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         field: jet_rt_handle_clone_jet_reflect_field(scalar_reflect_word(wrapping(data + at * REFLECT_SEQUENCE_STRIDE)))
         jet_rt_record_seq_list_rec_jet_reflect_field_push(result, field)
@@ -179,7 +179,7 @@ reflect_sequence_drop: fn(sequence: I64) {
     length: scalar_reflect_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     capacity: scalar_reflect_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
     data: scalar_reflect_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         jet_rt_handle_drop_jet_reflect_field(scalar_reflect_word(wrapping(data + at * REFLECT_SEQUENCE_STRIDE)))
         at += I64{1}

@@ -8,8 +8,8 @@ use {
 
 // The whole text of a pinned member.
 store_test_read_pinned_member: fn(directory: PinnedLifecycleDirectory, name: String) -> String Never! {
-    reader := directory.open_read(name) ?? panic("open {name}")
-    bytes := [U8]{}
+    ^reader: directory.open_read(name) ?? panic("open {name}")
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(4096) ?? panic("read {name}")
         if chunk.len() == 0 -> break
@@ -33,7 +33,7 @@ store_test_is_already_exists: fn(error: StoreError) -> Bool Never! {
     directory: PinnedLifecycleDirectory.open_or_create(original) ?? panic("open pinned directory")
     files.rename(files.join(roots.root, "a"), files.join(roots.root, "held")) ?? panic("move component")
     files.create_dir_all(original) ?? panic("replace component")
-    file := directory.create_new("proof.partial") ?? panic("create member")
+    ^file: directory.create_new("proof.partial") ?? panic("create member")
     file.write_bytes("held".bytes()) ?? panic("write member")
     file.fsync() ?? panic("sync member")
     directory.rename_open(file, "proof.partial", "proof.txn", false) ?? panic("publish member")
@@ -55,10 +55,10 @@ store_test_is_already_exists: fn(error: StoreError) -> Bool Never! {
 #Test("pinned directory no replace publication is atomic") {
     roots: store_test_temp_roots()
     directory: PinnedLifecycleDirectory.open_or_create(roots.root) ?? panic("open pinned directory")
-    source := directory.create_new("source.partial") ?? panic("create source")
+    ^source: directory.create_new("source.partial") ?? panic("create source")
     source.write_bytes("source".bytes()) ?? panic("write source")
     source.fsync() ?? panic("sync source")
-    destination := directory.create_new("destination.txn") ?? panic("create destination")
+    ^destination: directory.create_new("destination.txn") ?? panic("create destination")
     destination.write_bytes("destination".bytes()) ?? panic("write destination")
     destination.fsync() ?? panic("sync destination")
     if directory.rename_open(source, "source.partial", "destination.txn", false) == {

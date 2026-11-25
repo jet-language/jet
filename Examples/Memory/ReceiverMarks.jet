@@ -24,13 +24,13 @@ inspect: fn(buffer: Buffer) { print("inspect {buffer.text}") }
 edit: fn(buffer: ^Buffer) { buffer.append(" edited") }
 
 run: fn() {
-    buf := Buffer{text: "hello"}
+    ^buf: Buffer{text: "hello"}
     buf.append(" world")
     print(buf.len())
     // The mark binds `buf` for `grow`; the fresh result passes unmarked.
     inspect(buf.grow())
     edit(buf)
-    items := [Buffer{text: "a"}, Buffer{text: "b"}]
+    ^items: [Buffer{text: "a"}, Buffer{text: "b"}]
     items[1].append("!")
     print(items[1].text)
     // A marked element receiver may replace the whole element.
@@ -38,10 +38,10 @@ run: fn() {
     print(items[0].text)
     // A fresh receiver takes no mark.
     print(make_buffer().len())
-    total := 6
-    mask := total & 3
+    ^total: 6
+    ^mask: total & 3
     print(mask)
-    values := [3, 1, 2]
+    ^values: [3, 1, 2]
     values.push(values.len())
     print(values)
     buf.seal()

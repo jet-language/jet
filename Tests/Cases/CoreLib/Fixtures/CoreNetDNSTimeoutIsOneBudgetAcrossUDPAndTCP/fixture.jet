@@ -29,13 +29,13 @@ fixture_u16: fn(out: ^[U8], n: Int) {
 }
 
 fixture_question_end: fn(query: [U8]) -> Int {
-    pos := 12
+    ^pos: 12
     loop pos < query.len() && query[pos] != (U8{0}) -> pos += Int{query[pos]} + 1
     pos + 5
 }
 
 fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, additional: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     fixture_copy(out, query, 0, 2)
     fixture_u16(out, flags)
     fixture_u16(out, 1)
@@ -47,7 +47,7 @@ fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, addi
 }
 
 fixture_truncated: fn(query: [U8]) -> [U8] {
-    out := fixture_header(query, 0x8380, 1, 0, 0)
+    ^out: fixture_header(query, 0x8380, 1, 0, 0)
     out.push(U8{0xc0})
     out
 }
@@ -58,7 +58,7 @@ fixture_send: fn(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
 }
 
 fixture_read_exact: fn(stream: net.TCPStream, n: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop out.len() < n {
         chunk: net.tcp_read_bytes(stream, n - out.len()) ?? panic("read exact")
         assert(chunk.len() != 0, "unexpected EOF reading DNS TCP frame")

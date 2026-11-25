@@ -24,14 +24,14 @@ CLICK: 101
 run: fn() -[FS, Net, Time]> {
     listener: net.unix_listen("bus.sock") ?? panic("listen on bus.sock: {err}")
     files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
-    stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
-    said := [U8]{}
-    authenticated := false
-    sent := 0
-    layouts := 0
-    heard := "nothing"
-    clicking := false
-    idle := 0
+    ^stream: net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+    ^said: [U8]{}
+    ^authenticated: false
+    ^sent: 0
+    ^layouts: 0
+    ^heard: "nothing"
+    ^clicking: false
+    ^idle: 0
     loop idle < 6000 {
         if clicking && files.exists("first.frame") {
             clicking = false
@@ -63,11 +63,11 @@ run: fn() -[FS, Net, Time]> {
             m: said[0..<n].copy()
             said = said[n..<said.len()].copy()
             kind: Int{m[1]}
-            out := [U8]{}
+            ^out: [U8]{}
             if kind == 1 {
                 sent += 1
-                body := [U8]{}
-                signature := ""
+                ^body: [U8]{}
+                ^signature: ""
                 if text_field(m, 3) == "Hello" {
                     put_text(body, APP)
                     signature = "s"
@@ -77,7 +77,7 @@ run: fn() -[FS, Net, Time]> {
                 layouts += 1
                 if layouts == 1 -> out = get_layout(READ)
             } else if kind == 2 && word_field(m, 5) == READ {
-                r := Reader{bytes: body_of(m), at: 4}
+                ^r: Reader{bytes: body_of(m), at: 4}
                 heard = entry_of(r).below
                 clicking = true
             }
@@ -92,7 +92,7 @@ run: fn() -[FS, Net, Time]> {
 // The id of the entry labeled `label` in the menu `heard` shows: its
 // place, from 1, counting each entry before the entries of its submenu.
 id_of: fn(heard: String, label: String) -> Int {
-    id := 0
+    ^id: 0
     loop part in heard.replace("(", " | ").replace(")", "").split(" | ") {
         id += 1
         shown: part.split("[").to_list()[0]
@@ -135,8 +135,8 @@ read_signature: fn(r: ^Reader) -> String {
 entry_of: fn(r: ^Reader) -> {head: String, below: String} {
     align(r, 8)
     _: read_word(r)
-    label := ""
-    keys := ""
+    ^label: ""
+    ^keys: ""
     length: read_word(r)
     align(r, 8)
     end: r.at + length
@@ -149,14 +149,14 @@ entry_of: fn(r: ^Reader) -> {head: String, below: String} {
             if name == "label" -> label = value
             if name == "type" && value == "separator" -> label = "-"
         } else if signature == "aas" {
-            chords := [String]{}
+            ^chords: [String]{}
             all: read_word(r)
             align(r, 4)
             stop: r.at + all
             loop r.at < stop {
                 count: read_word(r)
                 last: r.at + count
-                names := [String]{}
+                ^names: [String]{}
                 loop r.at < last -> names.push(read_text(r))
                 chords.push(names.join("+"))
             }
@@ -180,7 +180,7 @@ shown: fn(entry: {head: String, below: String}) -> String {
 children_of: fn(r: ^Reader) -> String {
     length: read_word(r)
     end: r.at + length
-    parts := [String]{}
+    ^parts: [String]{}
     loop r.at < end {
         _: read_signature(r)
         parts.push(shown(entry_of(r)))
@@ -190,7 +190,7 @@ children_of: fn(r: ^Reader) -> String {
 
 // The bus's answer `serial` to the app's call `to`.
 reply: fn(serial: Int, to: Int, signature: String, body: [U8]) -> [U8] {
-    out := start(2, serial)
+    ^out: start(2, serial)
     field_word(out, 5, to)
     field_text(out, 6, 115, APP)
     field_text(out, 7, 115, "org.freedesktop.DBus")
@@ -201,7 +201,7 @@ reply: fn(serial: Int, to: Int, signature: String, body: [U8]) -> [U8] {
 
 // The desktop's call `serial` to the app's menu.
 menu_call: fn(serial: Int, member: String, signature: String, body: [U8]) -> [U8] {
-    out := start(1, serial)
+    ^out: start(1, serial)
     field_text(out, 1, 111, "/MenuBar")
     field_text(out, 2, 115, "com.canonical.dbusmenu")
     field_text(out, 3, 115, member)
@@ -215,7 +215,7 @@ menu_call: fn(serial: Int, member: String, signature: String, body: [U8]) -> [U8
 // GetLayout of the whole menu: the root (0), every depth (-1), every
 // property (none named).
 get_layout: fn(serial: Int) -> [U8] {
-    body := [U8]{}
+    ^body: [U8]{}
     put_word(body, 0)
     put_word(body, -1)
     put_word(body, 0)
@@ -224,7 +224,7 @@ get_layout: fn(serial: Int) -> [U8] {
 
 // A click on the menu item `id`: an Event "clicked" with data 0 at time 0.
 click: fn(serial: Int, id: Int) -> [U8] {
-    body := [U8]{}
+    ^body: [U8]{}
     put_word(body, id)
     put_text(body, "clicked")
     // A variant holding an int32: its signature "i", then the number.
@@ -240,7 +240,7 @@ click: fn(serial: Int, id: Int) -> [U8] {
 // A message's fixed header: little-endian, `kind`, no flags, version 1;
 // `finish` fills in the lengths.
 start: fn(kind: Int, serial: Int) -> [U8] {
-    out := [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
+    ^out: [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
     put_word(out, 0)
     put_word(out, serial)
     put_word(out, 0)
@@ -303,8 +303,8 @@ set_word: fn(out: ^[U8], at: Int, n: Int) {
 }
 
 word_bytes: fn(n: Int) -> [U8] {
-    v := if n < 0 -> n + 4294967296 else -> n
-    bytes := [U8]{}
+    ^v: if n < 0 -> n + 4294967296 else -> n
+    ^bytes: [U8]{}
     loop _ in 0..<4 {
         bytes.push(U8{v % 256})
         v = v /% 256
@@ -337,7 +337,7 @@ word_field: fn(m: [U8], code: Int) -> Int {
 // -1.
 field_at: fn(m: [U8], code: Int) -> Int {
     end: 16 + word(m, 12)
-    at := 16
+    ^at: 16
     loop at < end {
         found: Int{m[at]}
         kind: Int{m[at + 2]}

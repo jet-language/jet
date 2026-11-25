@@ -35,10 +35,10 @@ sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, meth
         }
         return failed
     }
-    value := TExpr?{None}
+    ^value: TExpr?{None}
     if method == "reload" {
         // `.Restart` or `.Hot`: the reload mode, carried as its variant name.
-        mode := ""
+        ^mode: ""
         if argument.expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
             if leading_dot && enum_args.len() == 0 && (variant == "Restart" || variant == "Hot") {
                 mode = variant.copy()
@@ -60,7 +60,7 @@ sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, meth
         value = Val(checked)
     }
     params: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
-    ordinary := [CallArg]{argument}
+    ^ordinary: [CallArg]{argument}
     ownership: sema_ownership_check_method_call(check, "Dev.{method}", receiver, AccessConvention.Read, params, ordinary, span)
     if !ownership.accepted || !ownership.complete -> return failed
     result: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{value ?? return failed}}}, span)

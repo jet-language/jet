@@ -10,7 +10,7 @@ use time: core.time
 LIMIT: 2000000000
 
 busy: fn(counter: Atomic<Int>, done: Atomic<Bool>) -> Int {
-    n := 0
+    ^n: 0
     loop n < LIMIT && !done.load() {
         n += 1
         if n % 4096 == 0 -> counter.store(n)
@@ -39,10 +39,10 @@ run: fn() {
     first: Atomic<Int>.try_new(0) ?? return
     second: Atomic<Int>.try_new(0) ?? return
     task.group carriers {
-        handles := [Task<Int>]{}
+        ^handles: [Task<Int>]{}
         handles.push(task busy(first, done))
         handles.push(task busy(second, done))
-        tries := 0
+        ^tries: 0
         loop !counting(first, second) && tries < 5000 {
             time.sleep(1ms)
             tries += 1
@@ -51,7 +51,7 @@ run: fn() {
         one: task quick(first, second, done)
         most: one.join() ?? LIMIT
         latency: time.instant() - start
-        stopped := 0
+        ^stopped: 0
         loop handle in handles {
             if (handle.join() ?? LIMIT) < LIMIT -> stopped += 1
         }

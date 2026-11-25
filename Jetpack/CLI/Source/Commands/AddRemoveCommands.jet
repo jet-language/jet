@@ -6,7 +6,7 @@
 // `.jet` source into `./components/` instead; source names are always
 // lowercase, so an exact-case `Button`-style name can only be a component.
 cli_cmd_add: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if parsed.flags.offline -> return cli_offline_refusal(theme, "add")
     raw: parsed.positional.get(0) ?? {
         theme.error("add what?", "`jetpack add` needs a ref or a starter component to add.", "try `jetpack add ripgrep@jetpack` or `jetpack add Button`.")
@@ -17,7 +17,7 @@ cli_cmd_add: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed
     dir: cli_current_dir()
     // Classify against the env's declared sources so `add fd@unstable` works
     // when `unstable` is already declared.
-    table := if EnvFile.load(dir) == {
+    ^table: if EnvFile.load(dir) == {
         .Val(env) -> env.source_table()
         .None -> SourceTable.empty()
     }
@@ -30,7 +30,7 @@ cli_cmd_add: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed
     // quiet `✓ package version` row is a verified package fact. A failed
     // resolution leaves env.jet intact.
     roots: pkg_resolve_roots()
-    no_live := LiveRegion?{None}
+    ^no_live: LiveRegion?{None}
     name_w: if spec.package.len() > 8 -> spec.package.len() else -> 8
     lease: if cli_realize_ref_outcome(verification, theme, roots, parsed.flags, table, spec, name_w, RowStyle.Ready, no_live, RealizeScope.Project) == {
         .Realized(_, _, _, realized_lease) -> realized_lease
@@ -89,8 +89,8 @@ cli_adapter_source: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, raw: Str
         cli_ref_error(theme, err)
         return None
     }
-    why := ""
-    fix := ""
+    ^why: ""
+    ^fix: ""
     if spec.source == {
         .Path -> return Val(spec.package)
         .Github -> return Val("{spec.package}@github")
@@ -130,7 +130,7 @@ cli_adapter_source: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, raw: Str
 
 // Strip every trailing copy.
 cli_trim_end_matches: fn(text: String, suffix: String) -> String Never! {
-    rest := text
+    ^rest: text
     loop suffix != "" && rest.ends_with(suffix) -> rest = rest.removesuffix(suffix)
     rest
 }
@@ -139,8 +139,8 @@ cli_trim_end_matches: fn(text: String, suffix: String) -> String Never! {
 cli_add_adapt: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
     source: cli_adapter_source(cache, theme, raw) ?? return EXIT_USAGE
     // The last non-empty `/ : @ #` segment names the adapter.
-    last := ""
-    current := ""
+    ^last: ""
+    ^current: ""
     loop scalar in source.chars() {
         text: "{scalar}"
         if text == "/" || text == ":" || text == "@" || text == "#" {
@@ -186,7 +186,7 @@ cli_cmd_remove: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Ti
         return EXIT_USAGE
     }
     dir: cli_current_dir()
-    table := if EnvFile.load(dir) == {
+    ^table: if EnvFile.load(dir) == {
         .Val(env) -> env.source_table()
         .None -> SourceTable.empty()
     }

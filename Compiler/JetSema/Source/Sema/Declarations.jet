@@ -106,7 +106,7 @@ sema_callable_policy_argument_text: fn(expr: Expr) -> String Never! {
 }
 
 sema_callable_policies: fn(func: Func) -> CallablePolicyChain Never! {
-    policies := [CallablePolicy]{}
+    ^policies: [CallablePolicy]{}
     loop marker in func.markers {
         if marker.name == MARKER_POLICY {
             loop argument in marker.args {
@@ -123,7 +123,7 @@ sema_callable_policies: fn(func: Func) -> CallablePolicyChain Never! {
 }
 
 sema_function_param_types: fn(func: Func) -> [Type] Never! {
-    params := [Type]{}
+    ^params: [Type]{}
     loop parameter_index in 0..<func.params.len() {
         ty: type_with_effective_parameter_fn_return(func.params[parameter_index].ty)
         if func.params[parameter_index].variadic -> params.push(Type.List{element: ty}) else {
@@ -134,10 +134,10 @@ sema_function_param_types: fn(func: Func) -> [Type] Never! {
 }
 
 sema_function_param_contract: fn(func: Func) -> [CallContractRow]? {
-    contract := [CallContractRow]{}
-    has_contract := false
+    ^contract: [CallContractRow]{}
+    ^has_contract: false
     loop parameter_index in 0..<func.params.len() {
-        label := func.params[parameter_index].name
+        ^label: func.params[parameter_index].name
         implicit_local_label: func.params[parameter_index].zone == ParamZone.Either && func.params[parameter_index].public_label == None
         if func.params[parameter_index].public_label != None {
             label = (func.params[parameter_index].public_label ?? CallLabel{name: "", span: func.params[parameter_index].name_span}).name
@@ -154,10 +154,10 @@ sema_function_param_contract: fn(func: Func) -> [CallContractRow]? {
 }
 
 sema_function_call_metadata: fn(func: Func, owner_key: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> FunctionCallMetadata {
-    names := [String]{}
-    defaults := [FunctionDefaultRef?]{}
-    variadic := [Bool]{}
-    conventions := [AccessConvention]{}
+    ^names: [String]{}
+    ^defaults: [FunctionDefaultRef?]{}
+    ^variadic: [Bool]{}
+    ^conventions: [AccessConvention]{}
     loop (index, parameter) in func.params {
         names.push(parameter.name)
         variadic.push(parameter.variadic)
@@ -209,7 +209,7 @@ sema_signature_view_provenance: fn(inferred: ViewProvenanceMap?, declared_map: V
     mutable: if return_type == .Val(ret) -> sema_ownership_is_window_type(ret) else -> false
     // copy: `published` gets its mutable flags rewritten, while the declared map stays on
     // the caller's registered declaration.
-    published := declared.copy()
+    ^published: declared.copy()
     loop index in 0..<published.entries.len() {
         if published.entries[index].slot.len() == 0 {
             published.entries[index].value.mutable = mutable

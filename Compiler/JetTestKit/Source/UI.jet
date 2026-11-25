@@ -3,7 +3,7 @@ use files: core.files
 // Ordered exactly like uiInvocation: the first invocation row wins. Hook-only
 // rows never change the plain check; unavailable facts are never substituted.
 kit_ui_directives: fn() -> [KitUIDirective] {
-    rows := [KitUIDirective]{
+    ^rows: [KitUIDirective]{
         {name: "check_cli", argv: ["check", "$base"], parent: true, exit: "any", streams: "check", capability: ""},
         {name: "all_diags", argv: ["check", "$file"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
         {name: "typed_settings_cli", argv: ["check", "$file", "--set", "cli_only=true"], parent: false, exit: "any", streams: "check", capability: ""},
@@ -113,8 +113,8 @@ kit_ui_directives: fn() -> [KitUIDirective] {
 }
 
 kit_ui_arg: fn(source: String, name: String) -> String? {
-    found := ""
-    present := false
+    ^found: ""
+    ^present: false
     loop raw in source.split("\n") {
         line: raw.trim().copy()
         if !line.starts_with("//") -> next
@@ -138,7 +138,7 @@ kit_ui_arg: fn(source: String, name: String) -> String? {
 // Every `// @requires REQUIREMENT` line, in order. A requirement is spelled as
 // in a case's `requires:` (`tool:cargo`, `os-name:linux`, `env:NAME=VALUE`, ...).
 kit_ui_requirements: fn(source: String) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     loop raw in source.split("\n") {
         line: raw.trim().copy()
         if !line.starts_with("//") -> next
@@ -162,7 +162,7 @@ kit_ui_host: fn(source: String, ctx: KitCtx) -> KitVerdict? {
 }
 
 kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
-    call := KitUICall{argv: if lint -> ["check", "--verbose", file] else -> ["check", file], parent: false, exit: "any", streams: if lint -> "lint" else -> "rendered", stdin: "", extension: kit_ui_arg(source, "compiler_extension") ?? "", refused: "", org_policy: kit_ui_arg(source, "org_policy") ?? ""}
+    ^call: KitUICall{argv: if lint -> ["check", "--verbose", file] else -> ["check", file], parent: false, exit: "any", streams: if lint -> "lint" else -> "rendered", stdin: "", extension: kit_ui_arg(source, "compiler_extension") ?? "", refused: "", org_policy: kit_ui_arg(source, "org_policy") ?? ""}
     rows: kit_ui_directives()
     loop raw in source.split("\n") {
         line: raw.trim().copy()
@@ -170,7 +170,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         body: kit_steps_byte_slice(line, 2, line.count_bytes()).trim().copy()
         if !body.starts_with("@") -> next
         name: kit_steps_byte_slice(body, 1, body.count_bytes()).replace("\t", " ").split(" ").to_list()[0]
-        known := false
+        ^known: false
         loop row in rows {
             if row.name == name {
                 known = true
@@ -180,7 +180,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         if !known -> call.refused = "unported fixture directive: {name}"
     }
     if call.refused != "" -> return call
-    selected := false
+    ^selected: false
     loop row in rows {
         if row.argv.len() == 0 || kit_ui_arg(source, row.name) == None -> next
         selected = true
@@ -252,7 +252,7 @@ kit_ui_loose: fn(path: String, name: String) -> Bool {
 }
 
 kit_ui_collect: fn(root: String, directory: String, lint: Bool) -> [KitEntry] {
-    entries := [KitEntry]{}
+    ^entries: [KitEntry]{}
     if !files.exists(files.join(root, directory)) -> return entries
     loop child in
         (files.list_dir(files.join(root, directory)) ?? panic("discover UI {directory}: {err}")) {
@@ -282,7 +282,7 @@ kit_ui_discover: fn(ctx: KitCtx) -> [KitEntry] {
     if ctx.options.coverage {
         return [KitEntry{path: KIT_UI_ALLOWLIST, expected: KIT_UI_ALLOWLIST, project: "", suite: "ui", mode: "coverage"}]
     }
-    entries := [KitEntry]{}
+    ^entries: [KitEntry]{}
     loop corpus in ctx.options.ui_corpora {
         loop entry in kit_ui_collect(ctx.root, corpus, kit_ui_lint_corpus(corpus)) {
             entries.push(entry)
@@ -318,13 +318,13 @@ kit_ui_primary_source_headers: fn(shown: String, text: String) -> String {
 }
 
 kit_ui_normalize: fn(shown: String, actual: String, root: String) -> String {
-    text := actual.replace("{root}/", "")
+    ^text: actual.replace("{root}/", "")
     if shown.ends_with("/workspace.jet") {
         text = text.replace(kit_steps_byte_slice(shown, 0, shown.count_bytes() - 14), "/tmp")
     }
     crlf: "\r\n"
     lines: text.replace(crlf, "\n").split("\n").to_list()
-    out := ""
+    ^out: ""
     loop (index, line) in lines {
         if index == lines.len() - 1 && line == "" -> next
         if line.contains("Blocking waiting for file lock on package cache") -> next
@@ -357,7 +357,7 @@ kit_ui_lint_compiled: fn(code: Int, actual: String, root: String) -> Bool {
     }
     registry: files.read(files.join(root, "Compiler/Prelude/Diagnostics.jet")) ?? return false
     rows: kit_ui_registry(registry)
-    reports := 0
+    ^reports: 0
     loop line in actual.split("\n") {
         name: kit_expect_heading_name(line) ?? next
         if !rows.any(fn(row) { row.lint && row.name == name }) -> return false
@@ -384,7 +384,7 @@ kit_ui_snapshot: fn(entry: KitEntry, call: KitUICall, result: KitRun, actual: St
 }
 
 kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> [KitOutcome] {
-    outcomes := [KitOutcome]{}
+    ^outcomes: [KitOutcome]{}
     fixed: kit_ui_fixed_path(entry.path)
     if !files.exists(files.join(ctx.root, fixed)) -> return outcomes
     fixed_source: files.read(files.join(ctx.root, fixed)) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "read fixed companion: {err}"), run: kit_exec_failed("read fixed companion"), tier: "fixed-check"}]
@@ -397,9 +397,9 @@ kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvV
         return [KitOutcome{verdict: verdict, run: checked, tier: "fixed-check"}]
     }
     loop tier in ctx.options.tiers {
-        row := kit_golden_tier(tier)
+        ^row: kit_golden_tier(tier)
         direct: row.direct
-        args := [String]{ctx.env.jet, if direct -> "run" else -> "build", fixed.copy()}
+        ^args: [String]{ctx.env.jet, if direct -> "run" else -> "build", fixed.copy()}
         loop flag in row.flags.move() -> args.push(flag.move())
         built: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, [U8]{}, overlay)
         failure: kit_exec_process_failure(built) ?? kit_expect_verdict(if built.code == 0 -> "PASS" else -> "FAIL", "fixed companion build/run exit {built.code}")
@@ -452,7 +452,7 @@ kit_ui_stage_support: fn(root: String, directory: String, scratch: String) -> Bo
     files.create_dir_all(support) ?? panic("mkdir {support}: {err}")
     children: files.list_dir(files.join(root, directory)) ?? panic("stage UI {directory}: {err}")
     owned: kit_ui_sidecars(children)
-    holds := owned.len() > 0
+    ^holds: owned.len() > 0
     loop child in children {
         if child.name == ".git" || child.name == ".jet" -> next
         name: if child.name == "state" || child.name == "fixture-state" -> ".jet" else -> child.name
@@ -473,7 +473,7 @@ kit_ui_stage_support: fn(root: String, directory: String, scratch: String) -> Bo
 // source, its fixed companion and its snapshots. A map, so a directory of n
 // entries stages in O(n), not O(n²).
 kit_ui_sidecars: fn(children: [DirEntry]) -> [String:Bool] {
-    owned := [String:Bool]{}
+    ^owned: [String:Bool]{}
     loop child in children {
         if child.is_dir || child.name.starts_with(".") || !kit_ui_loose(child.path, child.name) {
             next
@@ -540,7 +540,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         kit_exec_write(files.join(source, "package.jet"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: \"a0.9\"\n")
         kit_exec_copy_file(original, files.join(source, "main.jet"))
     }
-    overlay := [KitEnvVar]{KitEnvVar{name: ENV_JET_SCHEMA_CACHE_DIR, value: None}}
+    ^overlay: [KitEnvVar]{KitEnvVar{name: ENV_JET_SCHEMA_CACHE_DIR, value: None}}
     if entry.path == "Tests/UI/ffi_no_cargo.jet" {
         // Invoke absolute Jet/trace executables with no Cargo or rustup shims.
         unavailable: files.join(ctx.scratch, "no-cargo-path")
@@ -559,7 +559,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     }
     published: "{kit_steps_byte_slice(original, 0, original.count_bytes() - 4)}.published.snapshot"
     if kit_exec_optional(published) == .Val(snapshot) {
-        name := "Unknown"
+        ^name: "Unknown"
         loop line in snapshot.split("\n") {
             if line.starts_with("type = ") {
                 name = kit_steps_byte_slice(line, 7, line.count_bytes()).trim()
@@ -570,7 +570,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         kit_exec_write(files.join(schema, "{name}.snapshot"), snapshot)
         overlay.push(KitEnvVar{name: ENV_JET_SCHEMA_CACHE_DIR, value: Val(schema)})
     }
-    args := [String]{if call.hangar_tamper -> ctx.env.jetpack else -> ctx.env.jet}
+    ^args: [String]{if call.hangar_tamper -> ctx.env.jetpack else -> ctx.env.jet}
     loop arg in call.argv -> args.push(arg)
     if call.hangar_tamper {
         if ctx.env.jetpack == "" {
@@ -585,7 +585,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
             return [KitOutcome{verdict: kit_expect_verdict("ERROR", "jet fetch exited {fetched.code}: {fetched.stderr}"), run: fetched, tier: "-"}]
         }
     }
-    cwd := if call.parent -> work else -> source
+    ^cwd: if call.parent -> work else -> source
     if call.check_core {
         cwd = kit_ui_stage_core(ctx, text, work, call.core_top, call.core_after) ?? {
             return [KitOutcome{verdict: kit_expect_verdict("ERROR", "{err}"), run: kit_exec_failed("{err}"), tier: "-"}]
@@ -596,7 +596,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     result: kit_exec_run(ctx.env, args, cwd, ctx.scratch, call.stdin.bytes(), overlay, None, call.signal_child)
     actual: kit_ui_normalize(entry.path, kit_ui_actual(call, result), if call.check_core -> cwd else -> source)
     verdict: kit_ui_snapshot(entry, call, result, actual, ctx)
-    outcomes := [KitOutcome]{KitOutcome{verdict: verdict, run: result, tier: "-"}}
+    ^outcomes: [KitOutcome]{KitOutcome{verdict: verdict, run: result, tier: "-"}}
     if verdict.status == "PASS" {
         loop outcome in kit_ui_fixed(entry, ctx, source, overlay) -> outcomes.push(outcome)
     }
@@ -634,9 +634,9 @@ kit_ui_core_insert: fn(text: String, below: String, top: String, after: String) 
         return Err("@check_core {top} after {after}: the anchor must be one line of Core/{top} in double quotes")
     }
     anchor: kit_steps_byte_slice(after, 1, after.count_bytes() - 1)
-    found := -1
-    end := 0
-    offset := 0
+    ^found: -1
+    ^end: 0
+    ^offset: 0
     loop (index, line) in below.split("\n").to_list() {
         offset += line.count_bytes() + 1
         if line != anchor -> next
@@ -679,10 +679,10 @@ kit_ui_hangar_tamper: fn(ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> S
 // `Jet.X`. Tools/Agent/DiagnosticRows.jet owns the rows' other facts and the
 // repair-coverage baseline it generates from them.
 kit_ui_registry: fn(text: String) -> [KitUIRegistryRow] {
-    rows := [KitUIRegistryRow]{}
-    row := KitUIRegistryRow{code: "", name: "", active: false, lint: false}
-    name := ""
-    open := false
+    ^rows: [KitUIRegistryRow]{}
+    ^row: KitUIRegistryRow{code: "", name: "", active: false, lint: false}
+    ^name: ""
+    ^open: false
     loop line in text.split("\n") {
         if line.ends_with(": struct {{") && !line.starts_with(" ") {
             name = kit_steps_byte_slice(line, 0, line.count_bytes() - 10)
@@ -742,12 +742,12 @@ kit_ui_name_byte: fn(byte: U8) -> Bool {
 // (`"Jet.EnvDecodeFailed: …"`, `"Error: Jet.UseAfterLifetime: …"`), as
 // Tools/Agent/DiagnosticRows.jet's source_codes reads them.
 kit_ui_extract_source: fn(text: String, rows: [KitUIRegistryRow]) -> [String] {
-    codes := [String]{}
+    ^codes: [String]{}
     bytes: text.bytes()
     loop (index, byte) in bytes {
         if byte != (U8{34}) && byte != (U8{91}) -> next
         close: if byte == (U8{34}) -> U8{34} else -> U8{93}
-        end := index + 1
+        ^end: index + 1
         loop end < bytes.len() {
             c: bytes[end]
             if !(c >= (U8{65}) && c <= (U8{90})) && !(c >= (U8{48}) && c <= (U8{57})) && c != (U8{45}) {
@@ -769,7 +769,7 @@ kit_ui_extract_source: fn(text: String, rows: [KitUIRegistryRow]) -> [String] {
             next
         }
         if bytes[index + 4] < (U8{65}) || bytes[index + 4] > (U8{90}) -> next
-        end := index + 5
+        ^end: index + 5
         loop end < bytes.len() && kit_ui_name_byte(bytes[end]) -> end += 1
         if end + 1 >= bytes.len() || bytes[end] != (U8{58}) || bytes[end + 1] != (U8{32}) -> next
         name: kit_steps_byte_slice(text, index, end)
@@ -822,7 +822,7 @@ KIT_UI_TRAIL_ROW: "Jet.FailureTrail"
 // in the compiler's shape that no row names; a trail section's header names
 // the trail row. Any other code is a build rule's own (`Error: ORG01: …`).
 kit_ui_extract_reports: fn(text: String, rows: [KitUIRegistryRow]) -> [String] {
-    codes := [String]{}
+    ^codes: [String]{}
     loop line in text.split("\n") {
         named: if line.starts_with(KIT_UI_TRAIL_HEADER) -> Val(KIT_UI_TRAIL_ROW) else -> kit_expect_heading_name(line)
         token: named ?? next
@@ -851,9 +851,9 @@ kit_ui_allowed: fn(rows: [KitUIAllowance], code: String, side: String) -> Bool {
 // The snapshot-coverage verdict. `kept` receives the allowlist's lines without
 // its stale allowances, the text a bless writes back.
 kit_ui_set_coverage: fn(rows: [KitUIRegistryRow], emitted: [String], rendered: [String], allowance_text: String, kept: ^[String]) -> KitVerdict {
-    registered := [String]{}
-    left := [String]{}
-    right := [String]{}
+    ^registered: [String]{}
+    ^left: [String]{}
+    ^right: [String]{}
     loop row in rows {
         if row.code == "" || !kit_ui_report_code(row.code) || kit_expect_named(registered, row.code) {
             return kit_expect_verdict("FAIL", "invalid or duplicate registry code: {row.code}")
@@ -866,9 +866,9 @@ kit_ui_set_coverage: fn(rows: [KitUIRegistryRow], emitted: [String], rendered: [
     loop code in rendered {
         if !kit_ui_excluded(code) -> kit_ui_add_code(right, code)
     }
-    allowances := [KitUIAllowance]{}
-    seen := [String]{}
-    errors := [String]{}
+    ^allowances: [KitUIAllowance]{}
+    ^seen: [String]{}
+    ^errors: [String]{}
     loop raw in allowance_text.split("\n") {
         line: raw.trim().copy()
         if line == "" || line.starts_with("#") {
@@ -917,11 +917,11 @@ kit_ui_coverage: fn(root: String, bless: Bool) -> KitVerdict {
     allowance: files.read(allowlist) ?? return kit_expect_verdict("ERROR", "read coverage allowlist: {err}")
     rows: kit_ui_registry(registry)
     if rows.len() == 0 -> return kit_expect_verdict("ERROR", "diagnostic registry contains no rows")
-    emitted := [String]{}
+    ^emitted: [String]{}
     loop directory in ["Compiler", "Jetpack", "Core"] {
         kit_ui_emitted(root, directory, rows, emitted)
     }
-    snapshots := [String]{}
+    ^snapshots: [String]{}
     loop entry in kit_ui_collect(root, "Tests/UI", false) {
         snapshots.push(files.join(root, entry.expected))
     }
@@ -937,18 +937,18 @@ kit_ui_coverage: fn(root: String, bless: Bool) -> KitVerdict {
             if !child.is_dir && child.name.ends_with(fields[1]) -> snapshots.push(child.path)
         }
     }
-    rendered := [String]{}
+    ^rendered: [String]{}
     loop path in snapshots {
         if kit_exec_optional(path) == .Val(text) {
             loop code in kit_ui_extract_reports(text, rows) -> kit_ui_add_code(rendered, code)
         }
     }
-    kept := [String]{}
+    ^kept: [String]{}
     verdict: kit_ui_set_coverage(rows, emitted, rendered, allowance, kept)
     pruned: kept.join("\n")
     if !bless || pruned == allowance -> return verdict
     files.write_atomic(allowlist, pruned.bytes()) ?? return kit_expect_verdict("ERROR", "write coverage allowlist: {err}")
-    after := [String]{}
+    ^after: [String]{}
     rechecked: kit_ui_set_coverage(rows, emitted, rendered, pruned, after)
     if rechecked.status != "PASS" -> return rechecked
     kit_expect_verdict("PASS", "blessed {KIT_UI_ALLOWLIST}: stale allowances dropped")

@@ -146,11 +146,11 @@ Regex: struct {
     /// `replacer` is this call's, unchanged.
     replace_all_with: fn<E>(self, text: String, replacer: fn(Match) -> String E!) -> String E! {
         raw: text.bytes()
-        out := [U8]{}
-        cur := 0
-        chars := CharCursor{byte: 0, count: 0}
+        ^out: [U8]{}
+        ^cur: 0
+        ^chars: CharCursor{byte: 0, count: 0}
         loop run in scan(self, raw, false, false, self.groups > 0, false, -1) {
-            k := cur
+            ^k: cur
             loop k < run.start {
                 out.push(raw[k])
                 k += 1
@@ -233,7 +233,7 @@ flags: fn(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> Rege
 
 /// Quote regex metacharacters in `text` so it matches as a literal.
 escape: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         if is_meta(b) -> out.push(U8{92})
         out.push(b)
@@ -252,7 +252,7 @@ compile_with: fn(pattern: String, flags: RegexFlags) -> Regex RegexError! {
 /// `with_dfa` is false for a pattern used once, where building the DFA would
 /// cost more than the one scan it could speed up.
 compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex RegexError! {
-    p := PatternParser{
+    ^p: PatternParser{
         cps: decode_all(pattern.bytes()),
         i: 0,
         depth: 0,
@@ -272,7 +272,7 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     // Case folding lets other scalars stand for a literal, so the literal
     // pre-checks only run on case-sensitive patterns.
     facts: if flags.ignore_case -> no_facts() else -> literal_facts(p.nodes, p.kids, root)
-    c := PatternCompiler{
+    ^c: PatternCompiler{
         nodes: p.nodes,
         kids: p.kids,
         ops: [Int]{},
@@ -289,7 +289,7 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     c.patch(frag.outs, done)
     // Each lookaround's body is a program of its own after the main one,
     // ending in its own Match; a lookahead's body reads the text backward.
-    look_starts := [Int]{}
+    ^look_starts: [Int]{}
     loop look in 0..<p.looks.len() {
         c.reverse = !p.look_behind[look]
         body: c.compile(p.looks[look])
@@ -303,7 +303,7 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     first: frag.start
     // Only an absolute start anchor pins every match to position 0.
     anchored: c.ops[first] == OP_ASSERT && (c.args[first] == A_TEXT_START || (c.args[first] == A_LINE_START && !flags.multiline))
-    re := Regex{
+    ^re: Regex{
         pattern: pattern,
         flags: flags,
         ops: c.ops,
@@ -350,7 +350,7 @@ match_full: fn(pattern: Regex, text: String) -> Match? Never! {
     raw: text.bytes()
     runs: scan(pattern, raw, true, true, pattern.groups > 0, false, 1)
     if runs.len() == 0 -> return None
-    chars := CharCursor{byte: 0, count: 0}
+    ^chars: CharCursor{byte: 0, count: 0}
     Val(make_match(pattern, raw, runs[0], chars))
 }
 
@@ -430,7 +430,7 @@ find: fn(pattern: Regex, text: String) -> String? Never! {
 }
 
 find_all: fn(pattern: Regex, text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     word: literal_text(pattern)
     if word != "" {
         loop _ in 0..<text.count(word) -> out.push(word.copy())
@@ -460,10 +460,10 @@ literal_text: fn(re: Regex) -> String Never! {
 }
 
 matches: fn(pattern: Regex, text: String) -> [Match] Never! {
-    out := [Match]{}
+    ^out: [Match]{}
     if needle_absent(pattern, text) -> return out
     raw: text.bytes()
-    chars := CharCursor{byte: 0, count: 0}
+    ^chars: CharCursor{byte: 0, count: 0}
     loop run in scan(pattern, raw, false, false, pattern.groups > 0, false, -1) {
         m: make_match(pattern, raw, run, chars)
         out.push(m)
@@ -476,10 +476,10 @@ split: fn(pattern: Regex, text: String) -> [String] Never! { split_limit(pattern
 split_limit: fn(pattern: Regex, text: String, n: Int) -> [String] Never! {
     if n == 1 || needle_absent(pattern, text) -> return [String]{text}
     raw: text.bytes()
-    limit := -1
+    ^limit: -1
     if n > 1 -> limit = n - 1
-    out := [String]{}
-    cur := 0
+    ^out: [String]{}
+    ^cur: 0
     runs: scan(pattern, raw, false, false, false, false, limit)
     ascii: text.len() == raw.len()
     out.try_reserve(runs.len() + 1) ?? ()
@@ -510,8 +510,8 @@ replace: fn(pattern: Regex, text: String, replacement: String) -> String Never! 
 /// other `$` is literal text.
 expand: fn(m: Match, template: String) -> String Never! {
     raw: template.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < raw.len() {
         b: raw[i]
         i += 1
@@ -526,14 +526,14 @@ expand: fn(m: Match, template: String) -> String Never! {
             next
         }
         if n >= 48 && n <= 57 {
-            j := i
+            ^j: i
             loop j < raw.len() && raw[j] >= 48 && raw[j] <= 57 -> j += 1
             loop c in group_by_reference(m, raw, i, j).bytes() -> out.push(c)
             i = j
             next
         }
         if n == 123 {
-            j := i + 1
+            ^j: i + 1
             loop j < raw.len() && raw[j] != (U8{125}) -> j += 1
             if j < raw.len() {
                 loop c in group_by_reference(m, raw, i + 1, j).bytes() -> out.push(c)
@@ -550,8 +550,8 @@ expand: fn(m: Match, template: String) -> String Never! {
 /// all digits, otherwise a group name.
 group_by_reference: fn(m: Match, raw: [U8], from: Int, to: Int) -> String Never! {
     if from == to -> return ""
-    index := 0
-    k := from
+    ^index: 0
+    ^k: from
     loop k < to {
         d: Int{raw[k]}
         if d < 48 || d > 57 -> return m.name(slice(raw, from, to)) ?? ""
@@ -569,13 +569,13 @@ replace_first: fn(pattern: Regex, text: String, replacement: String) -> String N
 replace_n: fn(pattern: Regex, text: String, replacement: String, first_only: Bool) -> String Never! {
     if needle_absent(pattern, text) -> return text.copy()
     raw: text.bytes()
-    limit := -1
+    ^limit: -1
     if first_only -> limit = 1
-    out := [U8]{}
-    cur := 0
-    chars := CharCursor{byte: 0, count: 0}
+    ^out: [U8]{}
+    ^cur: 0
+    ^chars: CharCursor{byte: 0, count: 0}
     loop run in scan(pattern, raw, false, false, pattern.groups > 0, false, limit) {
-        k := cur
+        ^k: cur
         loop k < run.start {
             out.push(raw[k])
             k += 1
@@ -584,7 +584,7 @@ replace_n: fn(pattern: Regex, text: String, replacement: String, first_only: Boo
         loop b in expand(m, replacement).bytes() -> out.push(b)
         cur = run.end
     }
-    rest := cur
+    ^rest: cur
     loop rest < raw.len() {
         out.push(raw[rest])
         rest += 1
@@ -704,7 +704,7 @@ PatternParser: struct {
     /// Arms in priority order. `open` is the position of the group's `(`,
     /// or -1 for the whole pattern, whose stray `)` the caller reports.
     parse_alt: fn(^self, open: Int) -> Int RegexError! {
-        arms := [Int]{}
+        ^arms: [Int]{}
         first: self.parse_seq()
         arms.push(first)
         loop self.peek() == 124 {
@@ -721,7 +721,7 @@ PatternParser: struct {
     }
 
     parse_seq: fn(^self) -> Int RegexError! {
-        parts := [Int]{}
+        ^parts: [Int]{}
         loop {
             c: self.peek()
             if c < 0 || c == 124 || c == 41 -> break
@@ -757,8 +757,8 @@ PatternParser: struct {
         if self.depth >= MAX_NEST {
             return Err(fail(open, "groups may nest at most {MAX_NEST} deep"))
         }
-        capture := true
-        name := ""
+        ^capture: true
+        ^name: ""
         if self.peek() == 63 {
             self.i += 1
             kind: self.peek()
@@ -782,7 +782,7 @@ PatternParser: struct {
                 return Err(fail(open, "`(?{scalar_text(kind)}` is not a group kind; use `(?:…)` or `(?<name>…)`"))
             }
         }
-        index := 0
+        ^index: 0
         if capture {
             self.groups += 1
             index = self.groups
@@ -831,7 +831,7 @@ PatternParser: struct {
 
     parse_group_name: fn(^self, open: Int) -> String RegexError! {
         start: self.i
-        raw := [U8]{}
+        ^raw: [U8]{}
         loop {
             c: self.peek()
             if c < 0 -> return Err(fail(open, "the group name is never closed by a `>`"))
@@ -857,13 +857,13 @@ PatternParser: struct {
     parse_quant: fn(^self, atom: Int) -> Int RegexError! {
         at: self.i
         c: self.peek()
-        kind := N_STAR
+        ^kind: N_STAR
         if c == 43 -> kind = N_PLUS else if c == 63 -> kind = N_OPT else if c == 123 {
             kind = N_RANGE
         } else if c != 42 { return Ok(atom) }
         self.i += 1
-        lo := 0
-        hi := -1
+        ^lo: 0
+        ^hi: -1
         if kind == N_RANGE {
             lo = self.parse_count(at)
             hi = lo
@@ -883,7 +883,7 @@ PatternParser: struct {
                 return Err(fail(at, "the repetition maximum {hi} is below its minimum {lo}"))
             }
         }
-        lazy := false
+        ^lazy: false
         if self.peek() == 63 {
             self.i += 1
             lazy = true
@@ -898,8 +898,8 @@ PatternParser: struct {
     /// A repetition count. Counts past MAX_REPEAT saturate, so the caller
     /// reports the cap and never an overflow.
     parse_count: fn(^self, at: Int) -> Int RegexError! {
-        n := 0
-        got := false
+        ^n: 0
+        ^got: false
         loop {
             d: self.peek()
             if d < 48 || d > 57 -> break
@@ -917,7 +917,7 @@ PatternParser: struct {
     // `]` first (after an optional `^`) is a member, so `[]a]` and `[^]]`
     // are classes.
     parse_class: fn(^self, open: Int) -> Int RegexError! {
-        neg := false
+        ^neg: false
         if self.peek() == 94 {
             self.i += 1
             neg = true
@@ -962,7 +962,7 @@ PatternParser: struct {
 
     parse_escape_atom: fn(^self, at: Int) -> Int RegexError! {
         c: self.peek()
-        kind := -1
+        ^kind: -1
         if c == 98 -> kind = A_WORD
         if c == 66 -> kind = A_NOT_WORD
         if c == 65 -> kind = A_TEXT_START
@@ -1023,10 +1023,10 @@ PatternParser: struct {
     /// the `x` or `u`.
     parse_code_point: fn(^self, at: Int, letter: Int) -> Int RegexError! {
         escape: "\\{scalar_text(letter)}"
-        value := 0
+        ^value: 0
         if self.peek() == 123 {
             self.i += 1
-            digits := 0
+            ^digits: 0
             loop self.peek() != 125 {
                 h: hex_value(self.peek())
                 if h < 0 {
@@ -1045,7 +1045,7 @@ PatternParser: struct {
             }
         } else {
             width: if letter == 120 -> 2 else -> 4
-            k := 0
+            ^k: 0
             loop k < width {
                 h: hex_value(self.peek())
                 if h < 0 {
@@ -1064,7 +1064,7 @@ PatternParser: struct {
 
     /// The class after `\p`/`\P`: a braced name or a one-letter name.
     parse_unicode_class: fn(^self, at: Int) -> Int RegexError! {
-        raw := [U8]{}
+        ^raw: [U8]{}
         if self.peek() == 123 {
             self.i += 1
             loop {
@@ -1241,7 +1241,7 @@ priv PatternCompiler: struct {
         atom: self.compile(node)
         split: self.push(OP_SPLIT, 0, 0, false)
         exit: self.prefer(split, atom.start, lazy)
-        outs := atom.outs
+        ^outs: atom.outs
         outs.push(exit)
         Frag{start: split, outs: outs}
     }
@@ -1258,8 +1258,8 @@ priv PatternCompiler: struct {
         if n.kind == N_ASSERT -> return self.single(OP_ASSERT, n.a, 0, false)
         if n.kind == N_LOOK -> return self.single(OP_ASSERT, A_LOOK + n.a, 0, false)
         if n.kind == N_SEQ {
-            frag := Frag{start: -1, outs: [Int]{}}
-            k := 0
+            ^frag: Frag{start: -1, outs: [Int]{}}
+            ^k: 0
             loop k < n.hi - n.lo {
                 at: if self.reverse -> n.hi - 1 - k else -> n.lo + k
                 piece: self.compile(self.kids[at])
@@ -1270,15 +1270,15 @@ priv PatternCompiler: struct {
         }
         if n.kind == N_ALT {
             // A chain of Splits, each preferring its arm over the later ones.
-            outs := [Int]{}
-            start := -1
-            pending := -1
-            k := n.lo
+            ^outs: [Int]{}
+            ^start: -1
+            ^pending: -1
+            ^k: n.lo
             loop k < n.hi {
-                split := -1
+                ^split: -1
                 if k + 1 < n.hi -> split = self.push(OP_SPLIT, 0, 0, false)
                 arm: self.compile(self.kids[k])
-                entry := arm.start
+                ^entry: arm.start
                 if split >= 0 {
                     self.xs[split] = arm.start
                     entry = split
@@ -1310,8 +1310,8 @@ priv PatternCompiler: struct {
         if n.kind == N_RANGE {
             // `{min,max}`: min required copies, then max - min optional
             // copies, or one star when unbounded.
-            frag := Frag{start: -1, outs: [Int]{}}
-            k := 0
+            ^frag: Frag{start: -1, outs: [Int]{}}
+            ^k: 0
             loop k < n.a && !self.too_big {
                 piece: self.compile(n.left)
                 frag = self.then(frag, piece)
@@ -1371,11 +1371,11 @@ literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
     if n.kind == N_SEQ {
         // `run` holds the exact parts since the last inexact one; the run
         // and the next part's prefix are contiguous in every match.
-        run := [Int]{}
-        prefix := [Int]{}
-        all_exact := true
-        best := [Int]{}
-        k := n.lo
+        ^run: [Int]{}
+        ^prefix: [Int]{}
+        ^all_exact: true
+        ^best: [Int]{}
+        ^k: n.lo
         loop k < n.hi {
             part: literal_facts(nodes, kids, kids[k])
             k += 1
@@ -1383,7 +1383,7 @@ literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
                 loop c in part.text -> run.push(c)
                 next
             }
-            joined := run.copy()
+            ^joined: run.copy()
             loop c in part.prefix -> joined.push(c)
             if all_exact {
                 prefix = joined.copy()
@@ -1399,11 +1399,11 @@ literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
     }
     if n.kind == N_ALT {
         // Every match starts with the arms' common prefix.
-        common := literal_facts(nodes, kids, kids[n.lo]).prefix.copy()
-        k := n.lo + 1
+        ^common: literal_facts(nodes, kids, kids[n.lo]).prefix.copy()
+        ^k: n.lo + 1
         loop k < n.hi {
             other: literal_facts(nodes, kids, kids[k])
-            keep := [Int]{}
+            ^keep: [Int]{}
             loop keep.len() < common.len() && keep.len() < other.prefix.len() && common[keep.len()] == other.prefix[keep.len()] {
                 keep.push(common[keep.len()])
             }
@@ -1417,7 +1417,7 @@ literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
 }
 
 scalars_utf8: fn(cps: [Int]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop cp in cps {
         loop b in scalar_text(cp).bytes() -> out.push(b)
     }
@@ -1430,10 +1430,10 @@ find_bytes: fn(text: [U8], needle: [U8], from: Int) -> Int Never! {
     n: needle.len()
     last: text.len() - n
     lead: needle[0]
-    i := from
+    ^i: from
     loop i <= last {
         if text[i] == lead {
-            k := 1
+            ^k: 1
             loop k < n && text[i + k] == needle[k] -> k += 1
             if k == n -> return i
         }
@@ -1526,7 +1526,7 @@ DfaBuilder: struct {
     /// and the targets of `$` to `ends` (only `at_end`, which walks them
     /// too); returns whether a Match was reached.
     walk: fn(^self, re: Regex, text_start: Bool, line_start: Bool, at_end: Bool) -> Bool Never! {
-        matched := false
+        ^matched: false
         loop {
             p: self.stack.pop() ?? break
             if self.mark[p] == self.epoch -> next
@@ -1566,17 +1566,17 @@ DfaBuilder: struct {
         later: self.walk(re, text_start, line_start, true)
         end: now || later
         self.out.sort()
-        hash := 1
+        ^hash: 1
         if restart -> hash = 2
         if now -> hash += 4
         if end -> hash += 8
         loop pc in self.out -> hash = (hash * 31 + pc + 1) % 1000000007
-        id := self.buckets.get(hash) ?? -1
+        ^id: self.buckets.get(hash) ?? -1
         loop id >= 0 {
             lo: self.los[id]
             n: self.his[id] - lo
             if self.restarts[id] == restart && self.match_now[id] == now && self.match_end[id] == end && n == self.out.len() {
-                k := 0
+                ^k: 0
                 loop k < n && self.pcs[lo + k] == self.out[k] -> k += 1
                 self.work += k
                 if k == n -> return id
@@ -1602,8 +1602,8 @@ DfaBuilder: struct {
 
 build_dfa: fn(re: Regex) -> Dfa Never! {
     budget: DFA_WORK_PER_OP * re.ops.len()
-    consuming := [Int]{}
-    pc := 0
+    ^consuming: [Int]{}
+    ^pc: 0
     loop pc < re.ops.len() {
         op: re.ops[pc]
         if op == OP_ASSERT && (re.args[pc] == A_WORD || re.args[pc] == A_NOT_WORD || re.args[pc] >= A_LOOK) {
@@ -1615,14 +1615,14 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
     // Bytes that every consuming instruction takes or refuses alike share a
     // column: each instruction splits the columns by what it accepts. Under
     // multiline `\n` gets its own, since `^` holds after it.
-    class := filled(128, 0)
-    width := 1
+    ^class: filled(128, 0)
+    ^width: 1
     loop at in consuming {
-        split := filled(2 * width, -1)
-        grown := 0
-        byte := 0
+        ^split: filled(2 * width, -1)
+        ^grown: 0
+        ^byte: 0
         loop byte < 128 {
-            slot := 2 * class[byte]
+            ^slot: 2 * class[byte]
             if consumes(re, at, byte) -> slot += 1
             if split[slot] < 0 {
                 split[slot] = grown
@@ -1637,13 +1637,13 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
         class[10] = width
         width += 1
     }
-    reps := filled(width, -1)
-    byte := 127
+    ^reps: filled(width, -1)
+    ^byte: 127
     loop byte >= 0 {
         reps[class[byte]] = byte
         byte -= 1
     }
-    builder := DfaBuilder{
+    ^builder: DfaBuilder{
         buckets: [Int:Int]{},
         chain: [Int]{},
         pcs: [Int]{},
@@ -1664,15 +1664,15 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
     }
     search: builder.state(re, true, true, !re.anchored_start)
     pinned: builder.state(re, true, true, false)
-    next := [Int]{}
-    from := 0
+    ^next: [Int]{}
+    ^from: 0
     loop from < builder.restarts.len() && !builder.too_big {
         restart: builder.restarts[from]
-        column := 0
+        ^column: 0
         loop column < width && !builder.too_big {
             input: reps[column]
             builder.seeds.clear()
-            k := builder.los[from]
+            ^k: builder.los[from]
             loop k < builder.his[from] {
                 live: builder.pcs[k]
                 if consumes(re, live, input) -> builder.seeds.push(re.xs[live])
@@ -1687,8 +1687,8 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
         from += 1
     }
     if builder.too_big -> return no_dfa()
-    dead := [Bool]{}
-    s := 0
+    ^dead: [Bool]{}
+    ^s: 0
     loop s < builder.restarts.len() {
         dead.push(builder.los[s] == builder.his[s] && !builder.restarts[s])
         s += 1
@@ -1697,7 +1697,7 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
     // a step is one load. A byte above 127 has -1. Another entry is the
     // target's row offset, or `-2 - target` for a target that is dead or
     // matches now, so the scan checks those flags only on that entry.
-    table := [I64]{}
+    ^table: [I64]{}
     s = 0
     loop s < builder.restarts.len() {
         byte = 0
@@ -1711,7 +1711,7 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
         loop _ in 128..<256 -> table.push(I64{-1})
         s += 1
     }
-    dfa := Dfa{
+    ^dfa: Dfa{
         width: width,
         next: table,
         match_now: builder.match_now,
@@ -1756,7 +1756,7 @@ priv ScanDfaBuilder: struct {
 
     walk_now: fn(^self, re: Regex, text_start: Bool, line_start: Bool) -> Bool Never! {
         self.stack.clear()
-        k := self.seeds.len() - 1
+        ^k: self.seeds.len() - 1
         loop k >= 0 {
             self.stack.push(self.seeds[k])
             k -= 1
@@ -1775,7 +1775,7 @@ priv ScanDfaBuilder: struct {
                 if (kind == A_TEXT_START && text_start) || (kind == A_LINE_START && line_start) {
                     self.stack.push(re.xs[p])
                 }
-            } else if op == OP_MATCH -> return true else -> self.out.push(p)
+            } else if op == OP_MATCH { return true } else { self.out.push(p) }
         }
         false
     }
@@ -1783,7 +1783,7 @@ priv ScanDfaBuilder: struct {
     walk_end: fn(^self, re: Regex, text_start: Bool, line_start: Bool) -> Bool Never! {
         self.epoch += 1
         self.stack.clear()
-        k := self.seeds.len() - 1
+        ^k: self.seeds.len() - 1
         loop k >= 0 {
             self.stack.push(self.seeds[k])
             k -= 1
@@ -1802,7 +1802,7 @@ priv ScanDfaBuilder: struct {
                 if kind == A_TEXT_END || (kind == A_TEXT_START && text_start) || (kind == A_LINE_START && line_start) {
                     self.stack.push(re.xs[p])
                 }
-            } else if op == OP_MATCH -> return true
+            } else if op == OP_MATCH { return true }
         }
         false
     }
@@ -1816,16 +1816,16 @@ priv ScanDfaBuilder: struct {
         self.out.clear()
         now: self.walk_now(re, text_start, line_start)
         end: if now -> true else -> self.walk_end(re, text_start, line_start)
-        hash := 1
+        ^hash: 1
         if now -> hash += 2
         if end -> hash += 4
         loop pc in self.out -> hash = (hash * 31 + pc + 1) % 1000000007
-        id := self.buckets.get(hash) ?? -1
+        ^id: self.buckets.get(hash) ?? -1
         loop id >= 0 {
             lo: self.los[id]
             n: self.his[id] - lo
             if self.match_now[id] == now && self.match_end[id] == end && n == self.out.len() {
-                k := 0
+                ^k: 0
                 loop k < n && self.pcs[lo + k] == self.out[k] -> k += 1
                 self.work += k
                 if k == n -> return id
@@ -1849,7 +1849,7 @@ priv ScanDfaBuilder: struct {
 }
 
 priv build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget: Int, dfa: ^Dfa) Never! {
-    sb := ScanDfaBuilder{
+    ^sb: ScanDfaBuilder{
         buckets: [Int:Int]{},
         chain: [Int]{},
         pcs: [Int]{},
@@ -1869,14 +1869,14 @@ priv build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget
     start_0: sb.state(re, true, true)
     start_line: sb.state(re, false, re.flags.multiline)
     start_mid: sb.state(re, false, false)
-    next := [Int]{}
-    from := 0
+    ^next: [Int]{}
+    ^from: 0
     loop from < sb.match_now.len() && !sb.too_big {
-        column := 0
+        ^column: 0
         loop column < width && !sb.too_big {
             input: reps[column]
             sb.seeds.clear()
-            k := sb.los[from]
+            ^k: sb.los[from]
             loop k < sb.his[from] {
                 live: sb.pcs[k]
                 if consumes(re, live, input) -> sb.seeds.push(re.xs[live])
@@ -1889,10 +1889,12 @@ priv build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget
         }
         from += 1
     }
-    if sb.too_big -> return
+    if sb.too_big {
+        return
+    }
     n_states: sb.match_now.len()
-    dead := [Bool]{}
-    s := 0
+    ^dead: [Bool]{}
+    ^s: 0
     loop s < n_states {
         dead.push(sb.los[s] == sb.his[s])
         s += 1
@@ -1902,34 +1904,28 @@ priv build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget
     // - `-1`: non-ASCII byte (hand off to the VM);
     // - `-2`: dead state with neither `match_now` nor `match_end`;
     // - `-3 - to`: dead state with `match_now` or `match_end`.
-    table := [I64]{}
+    ^table: [I64]{}
     table.try_reserve(n_states * 256) ?? ()
     s = 0
     loop s < n_states {
-        byte := 0
+        ^byte: 0
         loop byte < 128 {
             to: next[s * width + class[byte]]
-            if !dead[to] {
-                table.push(I64{to * 256 + (if sb.match_now[to] -> 1 else -> 0)})
-            } else if !sb.match_now[to] && !sb.match_end[to] {
+            if !dead[to] -> table.push(I64{to * 256 + (if sb.match_now[to] -> 1 else -> 0)}) else if !sb.match_now[to] && !sb.match_end[to] {
                 table.push(I64{-2})
-            } else {
-                table.push(I64{-3 - to})
-            }
+            } else { table.push(I64{-3 - to}) }
             byte += 1
         }
         loop _ in 128..<256 -> table.push(I64{-1})
         s += 1
     }
-    first_byte := [U8]{}
+    ^first_byte: [U8]{}
     first_byte.try_reserve(128) ?? ()
-    byte := 0
+    ^byte: 0
     loop byte < 128 {
         if (re.flags.multiline && byte == 10) || table[start_mid * 256 + byte] != (I64{-2}) {
             first_byte.push(U8{1})
-        } else {
-            first_byte.push(U8{0})
-        }
+        } else { first_byte.push(U8{0}) }
         byte += 1
     }
     dfa.scan_next = table
@@ -1954,8 +1950,8 @@ priv dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: ^[
     start_mid: re.dfa.scan_start_mid
     can_skip_mid: !re.dfa.scan_match_now[start_mid] && !re.dfa.scan_match_end[start_mid]
     has_prefix: re.prefix.len() > 0 && !single_start
-    pos := 0
-    wasted := 0
+    ^pos: 0
+    ^wasted: 0
     loop {
         if has_prefix {
             found: find_bytes(text, re.prefix, pos)
@@ -1972,17 +1968,15 @@ priv dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: ^[
         }
         state: if pos == 0 -> start_0 else if multiline && text[pos - 1] == (U8{10}) -> start_line else -> start_mid
         if pos == hi {
-            if re.dfa.scan_match_end[state] {
-                out.push(Run{start: hi, end: hi, caps: [Int]{}})
-            }
+            if re.dfa.scan_match_end[state] -> out.push(Run{start: hi, end: hi, caps: [Int]{}})
             return hi + 1
         }
-        has_match := re.dfa.scan_match_now[state]
-        last_end := pos
-        cur := pos
+        ^has_match: re.dfa.scan_match_now[state]
+        ^last_end: pos
+        ^cur: pos
         if !re.dfa.scan_dead[state] {
-            row := I64{state * 256}
-            ended_live := true
+            ^row: I64{state * 256}
+            ^ended_live: true
             loop cur < hi {
                 entry: re.dfa.scan_next[Int{row + I64{text[cur]}}]
                 if entry >= (I64{0}) {
@@ -1991,9 +1985,7 @@ priv dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: ^[
                         has_match = true
                         last_end = cur
                         row = entry - I64{1}
-                    } else {
-                        row = entry
-                    }
+                    } else { row = entry }
                     next
                 }
                 if entry == (I64{-2}) {
@@ -2039,7 +2031,7 @@ priv dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: ^[
 dfa_verdict: fn(re: Regex, text: [U8], anchored: Bool, full: Bool) -> Int Never! {
     width: re.dfa.width
     if width == 0 -> return -1
-    state := re.dfa.search
+    ^state: re.dfa.search
     if anchored -> state = re.dfa.pinned
     hi: text.len()
     if hi > 0 {
@@ -2047,8 +2039,8 @@ dfa_verdict: fn(re: Regex, text: [U8], anchored: Bool, full: Bool) -> Int Never!
         if re.dfa.dead[state] -> return 0
     }
     // I64 rows keep the step free of Int's big-number checks.
-    row := I64{state * 256}
-    i := 0
+    ^row: I64{state * 256}
+    ^i: 0
     loop i < hi {
         to: re.dfa.next[Int{row + I64{text[i]}}]
         i += 1
@@ -2130,7 +2122,7 @@ VM: struct {
             self.seen[p] = self.epoch
             op: re.ops[p]
             if op == OP_SAVE {
-                head := c
+                ^head: c
                 if capture && re.args[p] >= 0 {
                     self.aslot.push(re.args[p])
                     self.apos.push(pos)
@@ -2175,7 +2167,7 @@ VM: struct {
         n: self.nt
         self.epoch += 1
         self.m_pc = -1
-        k := 0
+        ^k: 0
         loop k < n {
             pc: self.tpc[k].copy()
             start: self.tstart[k].copy()
@@ -2186,7 +2178,7 @@ VM: struct {
             self.add(re, text, re.xs[pc], start, caps, next_pos, capture)
         }
         m: self.nt - n
-        j := 0
+        ^j: 0
         loop j < m {
             self.tpc[j] = self.tpc[n + j]
             self.tstart[j] = self.tstart[n + j]
@@ -2198,8 +2190,8 @@ VM: struct {
 
     slots: fn(self, head: Int, start: Int, end: Int, groups: Int, capture: Bool) -> [Int] Never! {
         if !capture -> return [Int]{}
-        out := filled((groups + 1) * 2, -1)
-        at := head
+        ^out: filled((groups + 1) * 2, -1)
+        ^at: head
         loop at >= 0 {
             slot: self.aslot[at]
             if slot < out.len() && out[slot] < 0 -> out[slot] = self.apos[at]
@@ -2302,8 +2294,8 @@ assert_holds: fn(re: Regex, text: [U8], kind: Int, pos: Int, hi: Int, looks: [Bo
 /// boundaries == at_scalars // => true
 /// ```
 look_tables: fn(re: Regex, text: [U8]) -> [Bool] Never! {
-    looks := [Bool]{}
-    loop look in 0..<re.look_starts.len() -> _ := look_pass(re, text, look, looks)
+    ^looks: [Bool]{}
+    loop look in 0..<re.look_starts.len() -> ^_: look_pass(re, text, look, looks)
     looks
 }
 
@@ -2327,22 +2319,22 @@ look_tables: fn(re: Regex, text: [U8]) -> [Bool] Never! {
 look_pass: fn(re: Regex, text: [U8], look: Int, looks: ^[Bool]) -> Int Never! {
     hi: text.len()
     base: looks.len()
-    k := 0
+    ^k: 0
     loop k <= hi {
         looks.push(false)
         k += 1
     }
     behind: re.look_behind[look]
     last: if behind -> hi else -> 0
-    seen := filled(re.ops.len(), -1)
-    live := [Int]{}
-    moved := [Int]{}
-    stack := [Int]{}
-    steps := 0
-    pos := if behind -> 0 else -> hi
+    ^seen: filled(re.ops.len(), -1)
+    ^live: [Int]{}
+    ^moved: [Int]{}
+    ^stack: [Int]{}
+    ^steps: 0
+    ^pos: if behind -> 0 else -> hi
     loop {
         moved.clear()
-        matched := false
+        ^matched: false
         loop pc in live -> stack.push(pc)
         stack.push(re.look_starts[look])
         loop {
@@ -2386,13 +2378,13 @@ look_pass: fn(re: Regex, text: [U8], look: Int, looks: ^[Bool]) -> Int Never! {
 /// prev_boundary(text, 1) // => 0
 /// ```
 prev_boundary: fn(text: [U8], pos: Int) -> Int Never! {
-    at := pos - 1
+    ^at: pos - 1
     loop at > 0 && (Int{text[at]}) & 192 == 128 -> at -= 1
     at
 }
 
 filled: fn(n: Int, value: Int) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     loop out.len() < n -> out.push(value)
     out
 }
@@ -2415,13 +2407,13 @@ next_search_pos: fn(text: [U8], start: Int, end: Int, hi: Int) -> Int Never! {
 /// thread is live, the start skips to the next place the required prefix
 /// occurs. A pattern of literal scalars alone needs no VM (`literal_runs`).
 scan: fn(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_on_match: Bool, limit: Int) -> [Run] Never! {
-    out := [Run]{}
+    ^out: [Run]{}
     if !anchored && !full && literal_only(re) {
         return literal_runs(re, text, capture, stop_on_match, limit)
     }
     hi: text.len()
     single_start: anchored || re.anchored_start
-    pos := 0
+    ^pos: 0
     if !full && !capture && !stop_on_match && re.dfa.scan_next.len() > 0 {
         pos = dfa_scan(re, text, single_start, limit, out)
         if pos > hi -> return out
@@ -2436,11 +2428,11 @@ scan: fn(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_
     if pos == 0 && out.len() == 0 && limit == 1 && re.ops.len() * (hi + 1) <= BACKTRACK_CELLS {
         return backtrack(re, text, single_start, full, capture, looks)
     }
-    vm := new_vm(re.ops.len(), hi, full, looks)
-    has_last := false
-    last_start := 0
-    last_end := 0
-    last_caps := -1
+    ^vm: new_vm(re.ops.len(), hi, full, looks)
+    ^has_last: false
+    ^last_start: 0
+    ^last_end: 0
+    ^last_caps: -1
     loop {
         if vm.m_pc >= 0 {
             has_last = true
@@ -2510,15 +2502,15 @@ literal_only: fn(re: Regex) -> Bool Never! {
 /// of two bytes or more in a text of LITERAL_SKIP_TEXT bytes or more is
 /// searched with `find_skipping`.
 literal_runs: fn(re: Regex, text: [U8], capture: Bool, stop_on_match: Bool, limit: Int) -> [Run] Never! {
-    out := [Run]{}
+    ^out: [Run]{}
     n: re.prefix.len()
     skip: n >= 2 && text.len() >= LITERAL_SKIP_TEXT
-    shift := [Int]{}
+    ^shift: [Int]{}
     if skip {
         shift = filled(256, n)
         loop k in 0..<n - 1 -> shift[Int{re.prefix[k]}] = n - 1 - k
     }
-    found := if skip -> find_skipping(text, re.prefix, shift, 0) else -> find_bytes(text, re.prefix, 0)
+    ^found: if skip -> find_skipping(text, re.prefix, shift, 0) else -> find_bytes(text, re.prefix, 0)
     loop found >= 0 {
         end: found + n
         caps: if capture && !stop_on_match -> [Int]{found, end} else -> [Int]{}
@@ -2541,11 +2533,11 @@ LITERAL_SKIP_TEXT: 1024
 find_skipping: fn(text: [U8], needle: [U8], shift: [Int], from: Int) -> Int Never! {
     n: needle.len()
     last: needle[n - 1]
-    at := from
+    ^at: from
     loop at <= text.len() - n {
         b: text[at + n - 1]
         if b == last {
-            k := 0
+            ^k: 0
             loop k < n - 1 && text[at + k] == needle[k] -> k += 1
             if k == n - 1 -> return at
         }
@@ -2580,10 +2572,10 @@ BACKTRACK_CELLS: 32768
 /// ```
 backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool, looks: [Bool]) -> [Run] Never! {
     hi: text.len()
-    visited := filled((re.ops.len() * (hi + 1) + 31) >> 5, 0)
-    caps := if capture -> filled((re.groups + 1) * 2, -1) else -> [Int]{}
-    jobs := [Int]{}
-    pos := 0
+    ^visited: filled((re.ops.len() * (hi + 1) + 31) >> 5, 0)
+    ^caps: if capture -> filled((re.groups + 1) * 2, -1) else -> [Int]{}
+    ^jobs: [Int]{}
+    ^pos: 0
     loop {
         if re.prefix.len() > 0 && !single {
             pos = find_bytes(text, re.prefix, pos)
@@ -2626,8 +2618,8 @@ backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool, lo
 backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool, visited: ^[Int], jobs: ^[Int], caps: ^[Int], looks: [Bool]) -> Int Never! {
     hi: text.len()
     width: hi + 1
-    pc := re.start
-    pos := start
+    ^pc: re.start
+    ^pos: start
     loop {
         loop {
             cell: pc * width + pos
@@ -2691,8 +2683,8 @@ consumes: fn(re: Regex, pc: Int, cp: Int) -> Bool Never! {
         return re.flags.ignore_case && simple_fold(lit) == simple_fold(cp)
     }
     if op == OP_ANY -> return re.flags.dot_matches_newline || cp != 10
-    hit := false
-    k := re.args[pc]
+    ^hit: false
+    ^k: re.args[pc]
     loop k < re.ends[pc] {
         if member_matches(re.kinds[k], re.los[k], re.his[k], cp, re.flags.ignore_case) {
             hit = true
@@ -2760,7 +2752,7 @@ simple_upper: fn(cp: Int) -> Int Never! {
 }
 
 scalar_text: fn(cp: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     if cp < 128 -> out.push(U8{cp}) else if cp < 2048 {
         out.push(U8{Int{192} | cp >> 6})
         out.push(U8{Int{128} | cp & 63})
@@ -2790,10 +2782,10 @@ decode_at: fn(raw: [U8], i: Int) -> Int Never! {
     first: Int{raw[i]}
     if first < 128 -> return first
     width: lead_width(raw[i])
-    cp := first & 7
+    ^cp: first & 7
     if width == 2 -> cp = first & 31
     if width == 3 -> cp = first & 15
-    k := 1
+    ^k: 1
     loop k < width && i + k < raw.len() {
         cp = (cp << 6) | Int{raw[i + k]} & 63
         k += 1
@@ -2802,8 +2794,8 @@ decode_at: fn(raw: [U8], i: Int) -> Int Never! {
 }
 
 decode_all: fn(raw: [U8]) -> [Int] Never! {
-    out := [Int]{}
-    i := 0
+    ^out: [Int]{}
+    ^i: 0
     loop i < raw.len() {
         out.push(decode_at(raw, i))
         i += lead_width(raw[i])
@@ -2835,7 +2827,7 @@ find_match: fn(pattern: Regex, text: String) -> Match? Never! {
     raw: text.bytes()
     runs: scan(pattern, raw, false, false, pattern.groups > 0, false, 1)
     if runs.len() == 0 -> return None
-    chars := CharCursor{byte: 0, count: 0}
+    ^chars: CharCursor{byte: 0, count: 0}
     Val(make_match(pattern, raw, runs[0], chars))
 }
 
@@ -2844,13 +2836,13 @@ make_match: fn(re: Regex, raw: [U8], run: Run, chars: ^CharCursor) -> Match Neve
     caps: run.caps
     first: chars.at(raw, run.start)
     last: chars.at(raw, run.end)
-    groups := [String]{}
-    spans := [Int]{}
-    g := 0
+    ^groups: [String]{}
+    ^spans: [Int]{}
+    ^g: 0
     loop g < re.groups {
         g += 1
-        start := -1
-        end := -1
+        ^start: -1
+        ^end: -1
         if 2 * g + 1 < caps.len() {
             start = caps[2 * g]
             end = caps[2 * g + 1]
@@ -2871,8 +2863,8 @@ make_match: fn(re: Regex, raw: [U8], run: Run, chars: ^CharCursor) -> Match Neve
 
 /// The number of characters (Unicode scalars) in `raw[from..<to]`.
 char_count: fn(raw: [U8], from: Int, to: Int) -> Int Never! {
-    count := 0
-    i := from
+    ^count: 0
+    ^i: from
     loop i < to {
         b: Int{raw[i]}
         if b < 128 || b >= 192 -> count += 1
@@ -2978,13 +2970,13 @@ subn: fn(pattern: Regex, text: String, replacement: String) -> {text: String, co
     answers: [Bool]{false, false, true}
     loop k in 0..<patterns.len() {
         re: compile(patterns[k]) ?? panic("{patterns[k]} compiles")
-        last := 0
-        n := 1000
+        ^last: 0
+        ^n: 1000
         loop n <= 64000 {
             text: "a".repeat(n)
             raw: text.bytes()
-            looks := [Bool]{}
-            steps := 0
+            ^looks: [Bool]{}
+            ^steps: 0
             loop look in 0..<re.look_starts.len() -> steps += look_pass(re, raw, look, looks)
             if last > 0 && steps > 2 * last + 64 {
                 panic("{patterns[k]}: {n} scalars took {steps} steps, half as many took {last}")
@@ -3040,4 +3032,3 @@ subn: fn(pattern: Regex, text: String, replacement: String) -> {text: String, co
         }
     }
 }
-

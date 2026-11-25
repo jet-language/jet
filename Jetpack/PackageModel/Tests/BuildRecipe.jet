@@ -13,7 +13,7 @@ use {
 }
 
 pkg_test_staged_fragment: fn(platform: String) -> BuildPlanFragment {
-    action := PlanFragmentAction.new("compile", "planner")
+    ^action: PlanFragmentAction.new("compile", "planner")
     action.inputs = [String]{"manifest"}
     action.outputs = [String]{"result.bin"}
     action.effects = [BuildEffect]{BuildEffect.Exec}
@@ -44,29 +44,29 @@ pkg_test_staged_error: fn(action: StagedPlanAction, fragment: BuildPlanFragment)
     staged_lock: action.lock(fragment) ?? panic("staged lock should validate")
     assert_eq(staged_lock.canonical_identity(), identity)
 
-    changed_stage := action.copy()
+    ^changed_stage: action.copy()
     changed_stage.stage = 1
     changed_stage.stage_bound = 2
     assert(identity != pkg_test_staged_identity(changed_stage, fragment))
 
-    changed_input := action.copy()
+    ^changed_input: action.copy()
     changed_input.inputs[0].digest = "sha256-other"
     assert(identity != pkg_test_staged_identity(changed_input, fragment))
 
-    changed_authority := action.copy()
+    ^changed_authority: action.copy()
     changed_authority.authority.effects.push(BuildEffect.FS)
     assert(identity != pkg_test_staged_identity(changed_authority, fragment))
 
-    changed_fragment := fragment.copy()
+    ^changed_fragment: fragment.copy()
     changed_fragment.actions[0].outputs = [String]{"other.bin"}
     assert(identity != pkg_test_staged_identity(action, changed_fragment))
 }
 
 #Test("staged validation rejects cycles and overlapping outputs") {
     action: pkg_test_staged_action("linux-x86_64")
-    first := pkg_test_staged_fragment("linux-x86_64").actions[0]
+    ^first: pkg_test_staged_fragment("linux-x86_64").actions[0]
     first.dependencies = [String]{"second"}
-    second := PlanFragmentAction.new("second", "planner")
+    ^second: PlanFragmentAction.new("second", "planner")
     second.inputs = [String]{"manifest"}
     second.outputs = [String]{"other.bin"}
     second.dependencies = [String]{"compile"}
@@ -75,8 +75,8 @@ pkg_test_staged_error: fn(action: StagedPlanAction, fragment: BuildPlanFragment)
     cycle: pkg_test_staged_error(action, BuildPlanFragment{actions: [PlanFragmentAction]{first, second}})
     assert(cycle.message().contains("cycle"))
 
-    overlapping := pkg_test_staged_fragment("linux-x86_64")
-    nested := PlanFragmentAction.new("nested", "planner")
+    ^overlapping: pkg_test_staged_fragment("linux-x86_64")
+    ^nested: PlanFragmentAction.new("nested", "planner")
     nested.inputs = [String]{"manifest"}
     nested.outputs = [String]{"result.bin/child"}
     nested.effects = [BuildEffect]{BuildEffect.Exec}
@@ -84,7 +84,7 @@ pkg_test_staged_error: fn(action: StagedPlanAction, fragment: BuildPlanFragment)
     overlapping.actions.push(nested)
     assert(pkg_test_staged_error(action, overlapping).message().contains("overlap"))
 
-    windows_escape := pkg_test_staged_fragment("linux-x86_64")
+    ^windows_escape: pkg_test_staged_fragment("linux-x86_64")
     windows_escape.actions[0].outputs = [String]{"..\\escape"}
     assert(pkg_test_staged_error(action, windows_escape).message().contains("slash-separated"))
 }
@@ -93,18 +93,18 @@ pkg_test_staged_error: fn(action: StagedPlanAction, fragment: BuildPlanFragment)
 // (Recipe/Tests/EngineStagedPlan.jet).
 #Test("staged validation rejects undeclared tool effect platform and escaping output") {
     action: pkg_test_staged_action("linux-x86_64")
-    other_tool := pkg_test_staged_fragment("linux-x86_64")
+    ^other_tool: pkg_test_staged_fragment("linux-x86_64")
     other_tool.actions[0].tool = "other-tool"
     assert(pkg_test_staged_error(action, other_tool).message().contains("undeclared tool `other-tool`"))
 
-    other_effect := pkg_test_staged_fragment("linux-x86_64")
+    ^other_effect: pkg_test_staged_fragment("linux-x86_64")
     other_effect.actions[0].effects = [BuildEffect]{BuildEffect.FS}
     assert(pkg_test_staged_error(action, other_effect).message().contains("undeclared effect `fs`"))
 
     other_platform: pkg_test_staged_fragment("other-platform")
     assert(pkg_test_staged_error(action, other_platform).message().contains("not declared platform"))
 
-    escaping := pkg_test_staged_fragment("linux-x86_64")
+    ^escaping: pkg_test_staged_fragment("linux-x86_64")
     escaping.actions[0].outputs = [String]{"../escape"}
     assert(pkg_test_staged_error(action, escaping).message().contains("output `../escape`"))
 }
@@ -112,7 +112,7 @@ pkg_test_staged_error: fn(action: StagedPlanAction, fragment: BuildPlanFragment)
 #Test("staged lock and identity ignore authority declaration order") {
     platform: "linux-x86_64"
     action: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", "sha256-input")}, PlanAuthority{tools: [String]{"planner", "planner-alt"}, effects: [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}, platform: platform})
-    fragment := pkg_test_staged_fragment(platform)
+    ^fragment: pkg_test_staged_fragment(platform)
     fragment.actions[0].args = [String]{"--stable"}
     fragment.actions[0].env = [String:String]{"STAGED_INPUT": "manifest"}
     fragment.actions[0].effects = [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}

@@ -20,7 +20,7 @@ BrowserVerb: enum {
 }
 
 cli_cmd_browser: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     raw: parsed.positional.get(0) ?? {
         theme.error("`jetpack browser` needs a verb", "verbs are: {BROWSER_VERBS.join(", ")} — lock or provision a project-pinned browser binary.", "try `jetpack browser list` or `jetpack browser lock chromium --binary ./chromium`.")
         return EXIT_USAGE
@@ -51,7 +51,7 @@ cli_browser_flag_value: fn(parsed: CLIParsed, name: String) -> String? Never! {
         else -> None
     }
     if parsed_value != None -> return parsed_value
-    index := 0
+    ^index: 0
     loop index + 1 < parsed.positional.len() {
         if parsed.positional[index] == name -> return Val(parsed.positional[index + 1])
         index += 1
@@ -99,7 +99,7 @@ cli_browser_provision: fn(verification: StoreVerification, cache: ^WorkspaceDecl
     // An engine that serves BiDi only through a WebDriver driver provisions
     // that driver from the same source, so the two versions match.
     driver_package: env_browser_driver_package(engine) ?? ""
-    refs := [RefSpec]{spec}
+    ^refs: [RefSpec]{spec}
     if driver_package != "" {
         driver_spec: cli_classify_or_report(cache, theme, cli_browser_driver_ref(raw, driver_package)) ?? return EXIT_USAGE
         refs.push(driver_spec)
@@ -124,8 +124,8 @@ cli_browser_provision: fn(verification: StoreVerification, cache: ^WorkspaceDecl
     }
     // The lock pins durable binaries for later processes, so it names each
     // sealed output itself once its lease revalidates it.
-    binary := ""
-    driver := ""
+    ^binary: ""
+    ^driver: ""
     loop lease in env.cache_leases {
         lease.validate() ?? {
             store_report_integrity(theme, lease.consumption_failure(err))
@@ -164,8 +164,8 @@ cli_browser_provision: fn(verification: StoreVerification, cache: ^WorkspaceDecl
 // engine ref's source.
 cli_browser_driver_ref: fn(raw: String, driver_package: String) -> String Never! {
     pieces: raw.split("@").to_list()
-    out := driver_package.copy()
-    index := 1
+    ^out: driver_package.copy()
+    ^index: 1
     loop index < pieces.len() {
         out = "{out}@{pieces[index]}"
         index += 1

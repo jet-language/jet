@@ -43,11 +43,11 @@ trust_pin_identity_preparse: fn(text: String) -> JetPinIdentity Never! {
 
 // Drop `//` line comments outside string literals; every line keeps a `\n`.
 trust_pin_strip_line_comments: fn(text: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in trust_text_lines(text) {
         raw: line.bytes()
-        in_string := false
-        cut := raw.len()
+        ^in_string: false
+        ^cut: raw.len()
         loop index in 0..<raw.len() {
             code: Int{raw[index]}
             if code == TRUST_QUOTE {
@@ -74,7 +74,7 @@ trust_pin_is_ident_char: fn(code: Int) -> Bool Never! {
 
 // The end of the identifier starting at `start`.
 trust_pin_ident_end: fn(raw: [U8], start: Int) -> Int Never! {
-    index := start
+    ^index: start
     loop index < raw.len() && trust_pin_is_ident_char(Int{raw[index]}) -> index += 1
     index
 }
@@ -83,9 +83,9 @@ trust_pin_ident_end: fn(raw: [U8], start: Int) -> Int Never! {
 // skipped), or None. Nested occurrences never hijack the read.
 trust_pin_top_block_body: fn(text: String, key: String) -> String? Never! {
     raw: text.bytes()
-    depth := 0
-    in_string := false
-    index := 0
+    ^depth: 0
+    ^in_string: false
+    ^index: 0
     loop index < raw.len() {
         code: Int{raw[index]}
         if in_string {
@@ -129,8 +129,8 @@ trust_pin_top_block_body: fn(text: String, key: String) -> String? Never! {
 
 // The `}` closing the `{` at `open` (strings skipped), or -1.
 trust_pin_matching_brace: fn(raw: [U8], open: Int) -> Int Never! {
-    depth := 0
-    in_string := false
+    ^depth: 0
+    ^in_string: false
     loop index in open..<raw.len() {
         code: Int{raw[index]}
         if {
@@ -153,9 +153,9 @@ trust_pin_matching_brace: fn(raw: [U8], open: Int) -> Int Never! {
 // `,` or line end outside strings and unquoted; None when absent.
 trust_pin_simple_field: fn(body: String, key: String) -> String? Never! {
     raw: body.bytes()
-    depth := 0
-    in_string := false
-    index := 0
+    ^depth: 0
+    ^in_string: false
+    ^index: 0
     loop index < raw.len() {
         code: Int{raw[index]}
         if in_string {
@@ -189,8 +189,8 @@ trust_pin_simple_field: fn(body: String, key: String) -> String? Never! {
             next
         }
         value_start: colon + 1
-        end := value_start
-        quoted := false
+        ^end: value_start
+        ^quoted: false
         loop end < raw.len() {
             value_code: Int{raw[end]}
             if {
@@ -213,9 +213,9 @@ trust_pin_simple_field: fn(body: String, key: String) -> String? Never! {
 // not close strings here.
 trust_pin_top_level_simple_field: fn(text: String, key: String) -> String? Never! {
     raw: text.bytes()
-    depth := 0
-    in_string := false
-    index := 0
+    ^depth: 0
+    ^in_string: false
+    ^index: 0
     loop index < raw.len() {
         code: Int{raw[index]}
         if in_string {
@@ -250,8 +250,8 @@ trust_pin_top_level_simple_field: fn(text: String, key: String) -> String? Never
         colon: trust_text_skip_ascii_space(raw, index)
         if pkg_bytes_code(raw, colon) != TRUST_COLON -> next
         value_start: colon + 1
-        end := value_start
-        quoted := false
+        ^end: value_start
+        ^quoted: false
         loop end < raw.len() {
             value_code: Int{raw[end]}
             escaped: end > value_start && Int{raw[end - 1]} == TRUST_BACKSLASH
@@ -269,7 +269,7 @@ trust_pin_top_level_simple_field: fn(text: String, key: String) -> String? Never
 
 // Trim, drop one trailing `,`, and strip surrounding quotes.
 trust_pin_unquote: fn(value: String) -> String Never! {
-    trimmed := value.trim()
+    ^trimmed: value.trim()
     if trimmed.ends_with(",") -> trimmed = trimmed.removesuffix(",").trim()
     trust_text_trim_byte(trimmed, TRUST_QUOTE).trim()
 }
@@ -314,7 +314,7 @@ trust_pin_report: fn(root: String) -[FS, Env]> String {
         .None -> JetPinIdentity.empty()
     }
     pin: identity.jet ?? return "pin:      (none — unpinned, uses the running jet)\n"
-    out := [String]{"pin:      jet {pin}\n"}
+    ^out: [String]{"pin:      jet {pin}\n"}
     if trust_pin_locked_toolchain(root) == {
         .Val(toolchain) -> {
             out.push("locked:   {toolchain.version}\n")

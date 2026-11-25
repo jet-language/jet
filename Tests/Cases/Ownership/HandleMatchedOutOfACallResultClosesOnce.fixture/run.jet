@@ -23,10 +23,10 @@ maybe_reader: fn(path: String) -> FileReader? {
 
 // The arm closes the writer and falls through to the match's end.
 write_in_arm: fn(path: String, round: Int) -> Bool {
-    wrote := false
+    ^wrote: false
     if files.create(path, if_exists: .Refuse) == {
         .Ok(created) -> {
-            writer := created
+            ^writer: created
             writer.write_bytes("round {round}".bytes())
             close(writer)
             wrote = true
@@ -41,7 +41,7 @@ write_and_return: fn(path: String) -> Int {
     loop {
         if files.create(path, if_exists: .Refuse) == {
             .Ok(created) -> {
-                writer := created
+                ^writer: created
                 writer.write_bytes("returned".bytes())
                 close(writer)
                 return 1
@@ -54,10 +54,10 @@ write_and_return: fn(path: String) -> Int {
 
 // An Option payload consumed in the arm.
 read_in_arm: fn(path: String) -> Int {
-    count := 0
+    ^count: 0
     if maybe_reader(path) == {
         .Val(opened) -> {
-            reader := opened
+            ^reader: opened
             count = reader.read_bytes(64).len()
             consume(reader)
         }

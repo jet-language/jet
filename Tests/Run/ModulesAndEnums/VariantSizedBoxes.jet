@@ -36,7 +36,7 @@ total: fn(n: Node) -> Int {
         .Name(s) -> s.len()
         .Pair(left, right) -> total(left) + total(right)
         .Wide(a, b, c, d, e, f, label, items) -> {
-            sum := a + b + c + d + e + f + label.len()
+            ^sum: a + b + c + d + e + f + label.len()
             loop item in items -> sum += item
             sum
         }
@@ -52,45 +52,45 @@ swap_nodes: fn(a: ^Node, b: ^Node) {
 }
 
 widen_left: fn(n: ^Node) {
-    if ^n == {
+    if n.in_place() == {
         .Pair(left, _) -> left = make(9)
         .Leaf | .Num(_) | .Name(_) | .Wide(_, _, _, _, _, _, _, _) -> {}
     }
 }
 
 bump: fn(n: ^Node) {
-    if ^n == {
+    if n.in_place() == {
         .Num(v) -> v += 100
         .Leaf | .Name(_) | .Pair(_, _) | .Wide(_, _, _, _, _, _, _, _) -> {}
     }
 }
 
 paths: fn() -> Int {
-    small := Node.Leaf
+    ^small: Node.Leaf
     widen(small, 1)
-    other := Node.Num(3)
+    ^other: Node.Num(3)
     swap_nodes(small, other)
-    pair := make(3)
+    ^pair: make(3)
     widen_left(pair)
-    holder := Holder{node: Node.Leaf, tag: 2}
+    ^holder: Holder{node: Node.Leaf, tag: 2}
     wide: make(14)
     holder.node = wide
-    seeded := SEED
+    ^seeded: SEED
     bump(seeded)
     first: total(seeded)
     seeded = make(19)
-    list := [Node]{Node.Leaf, make(24)}
+    ^list: [Node]{Node.Leaf, make(24)}
     list.reverse()
     list[1] = make(29)
     first + total(small) + total(other) + total(pair) + total(holder.node) + total(seeded) + total(list[0]) + total(list[1]) + holder.tag
 }
 
 run: fn() {
-    nodes := [Node]{}
+    ^nodes: [Node]{}
     loop i in 0..<40 -> nodes.push(make(i))
     kept: nodes[3].copy()
     nodes[3] = make(4)
-    sum := 0
+    ^sum: 0
     loop node in nodes -> sum += total(node)
     print("{sum} {total(kept)}")
     print(paths())

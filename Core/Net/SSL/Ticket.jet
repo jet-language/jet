@@ -78,7 +78,7 @@ ssl_ticket_key_init: fn() -> SSLTicketKey Never! {
 
 /// A context with no keys (mbedtls_ssl_ticket_init).
 ssl_ticket_init: fn() -> SSLTicketContext Never! {
-    keys := [SSLTicketKey]{}
+    ^keys: [SSLTicketKey]{}
     keys.push(ssl_ticket_key_init())
     keys.push(ssl_ticket_key_init())
     SSLTicketContext{keys: keys, active: 0, ticket_lifetime: 0, rng: None}
@@ -87,8 +87,8 @@ ssl_ticket_init: fn() -> SSLTicketContext Never! {
 // `n` bytes of the context's random source (C's ctx->f_rng); BadInputData
 // before setup, as C's write and parse give for a NULL f_rng.
 ssl_ticket_random: fn(ctx: ^SSLTicketContext, n: Int) -> [U8] ssldefs.SSLError! {
-    out := ssldefs.ssl_zeros(n)
-    if ^ctx.rng == {
+    ^out: ssldefs.ssl_zeros(n)
+    if ctx.rng.in_place() == {
         .Val(r) -> {
             if !r.fill(out) -> return Err(.RandomFailed)
         }
@@ -103,7 +103,7 @@ ssl_ticket_gen_key: fn(ctx: ^SSLTicketContext, index: Int) ssldefs.SSLError! {
     ctx.keys[index].generation_time = ssldefs.ssl_time()
     ctx.keys[index].lifetime = ctx.ticket_lifetime
     ctx.keys[index].name = ssl_ticket_random(ctx, SSL_TICKET_KEY_NAME_BYTES) ?? return Err(err)
-    buf := ssl_ticket_random(ctx, SSL_TICKET_MAX_KEY_BYTES) ?? return Err(err)
+    ^buf: ssl_ticket_random(ctx, SSL_TICKET_MAX_KEY_BYTES) ?? return Err(err)
     failure: ssl_ticket_key_set(ctx.keys[index], buf)
     ssldefs.ssl_wipe(buf)
     if failure == {
@@ -126,8 +126,8 @@ ssl_ticket_key_bits: fn(key: SSLTicketKey) -> Int Never! {
 ssl_ticket_key_set: fn(key: ^SSLTicketKey, k: [U8]) -> ssldefs.SSLError? Never! {
     if ^key.cipher == {
         .Val(c) -> {
-            bytes := ssldefs.ssl_bytes_of(k, 0, c.info.key_bits /% 8)
-            failure := ssldefs.SSLError?{None}
+            ^bytes: ssldefs.ssl_bytes_of(k, 0, c.info.key_bits /% 8)
+            ^failure: ssldefs.SSLError?{None}
             if layer.cipher_setkey(c, bytes, .Encrypt) == {
                 .Ok(_) -> {}
                 .Err(e) -> failure = Val(ssldefs.SSLError.Cipher(e))
@@ -232,22 +232,22 @@ ssl_ticket_write: fn(ctx: ^SSLTicketContext, session: ssldefs.SSLSession) -> ssl
     ssl_ticket_update_keys(ctx) ?? return Err(err)
     a: ctx.active
     lifetime: ctx.keys[a].lifetime
-    iv := ssl_ticket_random(ctx, SSL_TICKET_IV_BYTES) ?? return Err(err)
+    ^iv: ssl_ticket_random(ctx, SSL_TICKET_IV_BYTES) ?? return Err(err)
     // Dump the session state.
-    state := sslser.ssl_session_save(session) ?? return Err(err)
+    ^state: sslser.ssl_session_save(session) ?? return Err(err)
     clear_len: state.len()
     if clear_len > 65535 {
         ssldefs.ssl_wipe(state)
         return Ok(ssldefs.SSLTicketWritten{ticket: [U8]{}, lifetime: lifetime})
     }
-    ticket := [U8]{}
+    ^ticket: [U8]{}
     ssldefs.ssl_push_all(ticket, ctx.keys[a].name)
     ssldefs.ssl_push_all(ticket, iv)
     ssldefs.ssl_push_u16(ticket, clear_len)
     // Encrypt and authenticate; the additional data is the key name, IV and
     // length.
     ad: ssldefs.ssl_bytes_of(ticket, 0, SSL_TICKET_ADD_DATA_LEN)
-    sealed := ssl_ticket_key_seal(ctx.keys[a], iv, ad, state) ?? {
+    ^sealed: ssl_ticket_key_seal(ctx.keys[a], iv, ad, state) ?? {
         ssldefs.ssl_wipe(state)
         return Err(err)
     }
@@ -283,13 +283,13 @@ ssl_ticket_parse: fn(ctx: ^SSLTicketContext, buf: [U8]) -> ssldefs.SSLSession ss
     iv: ssldefs.ssl_bytes_of(buf, SSL_TICKET_KEY_NAME_BYTES, SSL_TICKET_IV_BYTES)
     ad: ssldefs.ssl_bytes_of(buf, 0, SSL_TICKET_ADD_DATA_LEN)
     sealed: ssldefs.ssl_bytes_of(buf, SSL_TICKET_ADD_DATA_LEN, enc_len + SSL_TICKET_AUTH_TAG_BYTES)
-    plain := ssl_ticket_key_open(ctx.keys[k], iv, ad, sealed) ?? return Err(err)
+    ^plain: ssl_ticket_key_open(ctx.keys[k], iv, ad, sealed) ?? return Err(err)
     if plain.len() != enc_len {
         ssldefs.ssl_wipe(plain)
         return Err(.InternalError)
     }
     // Load the session.
-    session := ssldefs.SSLSession{}
+    ^session: ssldefs.SSLSession{}
     if sslser.ssl_session_load(session, plain) == {
         .Ok(_) -> {}
         .Err(e) -> {
@@ -326,12 +326,12 @@ ssl_ticket_free: fn(ctx: ^SSLTicketContext) Never! {
 }
 
 ssl_ticket_write_locked: fn(ctx: Shared<SSLTicketContext>, session: ssldefs.SSLSession) -> ssldefs.SSLTicketWritten ssldefs.SSLError! {
-    guard := ctx.guard_edit()
+    ^guard: ctx.guard_edit()
     ssl_ticket_write(guard.value, session)
 }
 
 ssl_ticket_parse_locked: fn(ctx: Shared<SSLTicketContext>, buf: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
-    guard := ctx.guard_edit()
+    ^guard: ctx.guard_edit()
     ssl_ticket_parse(guard.value, buf)
 }
 

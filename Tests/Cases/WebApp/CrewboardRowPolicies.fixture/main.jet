@@ -130,8 +130,8 @@ first_owner: fn(store: db.Store, row: Member, account: auth.AccountID) -[DB.Read
 // the stored row, where it is not an owner.
 member_policy: fn(row: Member, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
     account: account_of(who) ?? return Ok(false)
-    member := false
-    owner := false
+    ^member: false
+    ^owner: false
     if member_of(store, row.project, account) == {
         .Val(mine) -> {
             member = true
@@ -166,12 +166,12 @@ Stores: struct {
 STORE: Shared{Stores{store: None}}
 
 remember: fn(store: db.Store) {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     stores.value.store = Val(store.copy())
 }
 
 tables: fn() -> Tables {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     store: stores.value.store ?? panic("the store is open")
     Tables{
         store: store.copy(),
@@ -232,9 +232,9 @@ my_projects: fn() -[DB.Read]> String {
     crew: tables()
     projects: (crew.projects.query() ?? return "unreadable").collect() ?? return "uncollected"
     tasks: (crew.tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
-    cards := [String]{}
+    ^cards: [String]{}
     loop project in projects {
-        count := 0
+        ^count: 0
         loop task in tasks {
             if task.project == project.id -> count += 1
         }
@@ -246,7 +246,7 @@ my_projects: fn() -[DB.Read]> String {
 // The caller's tasks whose title holds `words`.
 search: fn(words: String) -[DB.Read]> String {
     tasks: (tables().tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
-    found := [String]{}
+    ^found: [String]{}
     loop task in tasks {
         if task.title.contains(words) -> found.push(task.title)
     }
@@ -255,7 +255,7 @@ search: fn(words: String) -[DB.Read]> String {
 
 members_read: fn(project: Int) -[DB.Read]> String {
     rows: (tables().members.query() ?? return "unreadable").collect() ?? return "uncollected"
-    names := [String]{}
+    ^names: [String]{}
     loop row in rows {
         if row.project == project {
             mark: if row.owner -> " (owner)" else -> ""
@@ -273,16 +273,16 @@ board: fn(project: Int) -[DB.Read]> String {
     crew: tables()
     query: crew.tasks.query() ?? return "unreadable"
     tasks: query.filter(fn(row: Task) { row.project == project }).collect() ?? return "uncollected"
-    keys := [MemberKey]{}
+    ^keys: [MemberKey]{}
     loop task in tasks {
         if task.assignee == .Val(account) {
             keys.push(MemberKey{project: project, account: account})
         }
     }
     assigned: crew.members.get_many(keys) ?? return "unreadable"
-    shown := [String]{}
+    ^shown: [String]{}
     loop task in tasks {
-        place := "unassigned"
+        ^place: "unassigned"
         loop member in assigned {
             if task.assignee == .Val(account) && account == member.account {
                 place = if member.owner -> "{account}, owner" else -> "{account}"

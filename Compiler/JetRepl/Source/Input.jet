@@ -37,7 +37,7 @@ repl_reanchor_span: fn(span: Span, offset: Int) -> Span Never! {
 
 // Every span a report renders (primary, labels, edit), shifted to the input.
 repl_reanchor: fn(diagnostic: ^^Diagnostic, offset: Int) -> Diagnostic Never! {
-    updated := diagnostic
+    ^updated: diagnostic
     if updated.span == .Val(span) -> updated.span = Val(repl_reanchor_span(span, offset))
     labels: loop label in updated.labels -> DiagnosticLabel{span: repl_reanchor_span(label.span, offset), message: label.message}
     updated.labels = labels
@@ -48,7 +48,7 @@ repl_reanchor: fn(diagnostic: ^^Diagnostic, offset: Int) -> Diagnostic Never! {
 }
 
 repl_reanchor_all: fn(diagnostics: [Diagnostic], offset: Int) -> [Diagnostic] Never! {
-    shifted := [Diagnostic]{}
+    ^shifted: [Diagnostic]{}
     loop diagnostic in diagnostics -> shifted.push(repl_reanchor(diagnostic.copy(), offset))
     shifted
 }
@@ -80,7 +80,7 @@ repl_classify: fn(source: String, step: Int) -> ReplInputParse {
     if text == "" -> return ReplInputParse.Accepted{input: ReplInput.Empty}
     if text.starts_with(":") {
         rest: text.slice(1..<text.len())
-        split := rest.len()
+        ^split: rest.len()
         bytes: rest.bytes()
         loop index in 0..<bytes.len() {
             if bytes[index] == 32 {
@@ -88,7 +88,7 @@ repl_classify: fn(source: String, step: Int) -> ReplInputParse {
                 break
             }
         }
-        argument := String?{None}
+        ^argument: String?{None}
         if split < rest.len() {
             tail: rest.slice(split + 1..<rest.len()).trim()
             if tail != "" -> argument = Val(tail)
@@ -107,8 +107,12 @@ repl_classify: fn(source: String, step: Int) -> ReplInputParse {
     // statements of one turn.
     top: parse_source("{header}{plain_input}\n".bytes())
     if repl_declarations_only(top) {
-        if top.program.items.len() == 0 -> return ReplInputParse.Accepted{input: ReplInput.Import{source: "{plain_input}\n"}}
-        if top.program.imports.len() == 0 -> return ReplInputParse.Accepted{input: ReplInput.Item{source: "{plain_input}\n"}}
+        if top.program.items.len() == 0 {
+            return ReplInputParse.Accepted{input: ReplInput.Import{source: "{plain_input}\n"}}
+        }
+        if top.program.imports.len() == 0 {
+            return ReplInputParse.Accepted{input: ReplInput.Item{source: "{plain_input}\n"}}
+        }
     }
     suppress: text.ends_with(";") && !text.ends_with("}};")
     wrapper: "{header}__repl__: fn() {{\n"
@@ -137,7 +141,9 @@ repl_classify: fn(source: String, step: Int) -> ReplInputParse {
     }
     // Input that reads as top-level declarations reports the declaration
     // parse; anything else reports the statement parse.
-    if top.diagnostics.len() > 0 && top.program.script_body.len() == 0 -> return repl_rejected(top.diagnostics, header.len())
+    if top.diagnostics.len() > 0 && top.program.script_body.len() == 0 {
+        return repl_rejected(top.diagnostics, header.len())
+    }
     if plain.diagnostics.len() > 0 -> return repl_rejected(plain.diagnostics, wrapper.len())
     ReplInputParse.Accepted{input: ReplInput.Empty}
 }

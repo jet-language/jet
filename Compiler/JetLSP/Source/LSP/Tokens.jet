@@ -87,7 +87,7 @@ lsp_definition_class: fn(kind: SemKind) -> LSPNameClass Never! {
 // at: a reference's span can cover a qualified path whose last segment is the
 // name token.
 lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
-    classes := [Int:LSPNameClass]{}
+    ^classes: [Int:LSPNameClass]{}
     index: view.checked.index ?? return classes
     module_path: view.module_path ?? return classes
     loop reference in index.references {
@@ -106,7 +106,7 @@ lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
     tokens: view.lexed.tokens
     loop node in index.nodes {
         if node.class != "type" || node.module_path != module_path -> next
-        at := lsp_first_token_from(tokens, node.span.start)
+        ^at: lsp_first_token_from(tokens, node.span.start)
         loop at < tokens.len() && tokens[at].span.start < node.span.end {
             token: tokens[at]
             following: if at + 1 < tokens.len() -> tokens[at + 1].kind else -> -1
@@ -130,8 +130,8 @@ lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
 
 // The index of the first of `tokens` that starts at or after `offset`.
 lsp_first_token_from: fn(tokens: [Token], offset: Int) -> Int Never! {
-    low := 0
-    high := tokens.len()
+    ^low: 0
+    ^high: tokens.len()
     loop low < high {
         middle: (low + high) /% 2
         if tokens[middle].span.start < offset -> low = middle + 1 else -> high = middle
@@ -186,7 +186,7 @@ LSP_COMPILER_WORDS: #run lsp_compiler_words(CORE_DECLARATIONS_SYNTAX_FILES)
 
 lsp_compiler_words: fn(syntax: [CoreDeclarationFile]) -> [String] Never! {
     constants: core_decl_syntax_constants(syntax) ?? panic("the Syntax registry does not read: {err.message}")
-    words := [String]{}
+    ^words: [String]{}
     loop (row, text) in constants.values {
         name: constants.names.texts[row]
         compiler: name.starts_with("PREP_") || name.starts_with("FACT_ROOT_") || name == "CODE_VALUE"
@@ -215,7 +215,7 @@ lsp_hash_forms: fn(view: LSPView, classes: [Int:LSPNameClass]) -> LSPHashForms N
     tokens: view.lexed.tokens
     bytes: view.doc.text.bytes()
     compiler: LSPNameClass{kind: LSP_TOKEN_KEYWORD, modifiers: LSP_MODIFIER_MACRO}
-    forms := LSPHashForms{spans: [LSPClassedSpan]{}, covered: [Bool]{}}
+    ^forms: LSPHashForms{spans: [LSPClassedSpan]{}, covered: [Bool]{}}
     loop _ in tokens -> forms.covered.push(false)
     loop (at, token) in tokens {
         // A paste is one identifier token that starts at its `#`; `#run` is
@@ -232,7 +232,7 @@ lsp_hash_forms: fn(view: LSPView, classes: [Int:LSPNameClass]) -> LSPHashForms N
         // `#if` and `#loop` are a request `#` and its keyword; a fact root
         // ends at its word, so `.target.os` after `#build` stays fields.
         compiled: token.kind == TOKEN_PREP || (word.kind == TOKEN_IDENT && LSP_COMPILER_WORDS.contains(token_text(view.lexed.tables, word)))
-        last := at + 1
+        ^last: at + 1
         if !compiled {
             if word.kind != TOKEN_IDENT -> next
             loop last + 2 < tokens.len() && tokens[last + 1].kind == TOKEN_DOT && tokens[last + 2].kind == TOKEN_IDENT && tokens[last + 1].span.start == tokens[last].span.end && tokens[last + 2].span.start == tokens[last + 1].span.end {
@@ -273,7 +273,7 @@ lsp_semantic_token_data: fn(view: LSPView, range: Span, hooked: [JetDriverToolSt
     bytes: view.doc.text.bytes()
     table: lsp_line_table_bytes(bytes)
     classes: lsp_name_classes(view)
-    given := [LSPClassedSpan]{}
+    ^given: [LSPClassedSpan]{}
     loop row in hooked {
         loop (kind, name) in LSP_SEMANTIC_TOKEN_TYPES {
             if name == row.kind {
@@ -282,7 +282,7 @@ lsp_semantic_token_data: fn(view: LSPView, range: Span, hooked: [JetDriverToolSt
         }
     }
     forms: lsp_hash_forms(view, classes)
-    spans := [LSPClassedSpan]{}
+    ^spans: [LSPClassedSpan]{}
     loop (at, token) in view.lexed.tokens {
         if forms.covered[at] -> next
         class: lsp_token_class(token, classes) ?? next
@@ -295,16 +295,16 @@ lsp_semantic_token_data: fn(view: LSPView, range: Span, hooked: [JetDriverToolSt
     }
     loop other in given -> spans.push(other)
     spans.sort_by(fn(left: LSPClassedSpan, right: LSPClassedSpan) { left.span.start <=> right.span.start })
-    data := [Int]{}
-    previous_line := 0
-    previous_start := 0
+    ^data: [Int]{}
+    ^previous_line: 0
+    ^previous_start: 0
     loop entry in spans {
         if entry.span.end <= range.start -> next
         if entry.span.start >= range.end -> break
         class: entry.class
         first: lsp_byte_offset_in_table(bytes, table, entry.span.start)
         last: lsp_byte_offset_in_table(bytes, table, entry.span.end)
-        line := first.line
+        ^line: first.line
         loop line <= last.line {
             content: table.lines[line]
             start: if line == first.line -> entry.span.start else -> content.start
@@ -334,7 +334,7 @@ LSPSemanticResult: struct {
 }
 
 lsp_semantic_ints: fn(data: [Int]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop value in data -> rows.push("{value}")
     "[{rows.join(",")}]"
 }
@@ -358,16 +358,14 @@ lsp_semantic_keep: fn(server: ^LSPServer, uri: String, data: ^^[Int]) -> String 
 // The one edit from `before` to `after`: the integers between their common
 // head and common tail; no edit when they are equal.
 lsp_semantic_tokens_edits: fn(before: [Int], after: [Int]) -> String Never! {
-    head := 0
-    loop head < before.len() && head < after.len() && before[head] == after[head] {
-        head += 1
-    }
+    ^head: 0
+    loop head < before.len() && head < after.len() && before[head] == after[head] -> head += 1
     if head == before.len() && head == after.len() -> return "[]"
-    tail := 0
+    ^tail: 0
     loop tail < before.len() - head && tail < after.len() - head && before[before.len() - 1 - tail] == after[after.len() - 1 - tail] {
         tail += 1
     }
-    inserted := [Int]{}
+    ^inserted: [Int]{}
     loop index in head..<after.len() - tail -> inserted.push(after[index])
     "[{{\"start\":{head},\"deleteCount\":{before.len() - head - tail},\"data\":{lsp_semantic_ints(inserted)}}}]"
 }
@@ -389,9 +387,11 @@ lsp_semantic_tokens_delta_response: fn(server: ^LSPServer, params: Dyn?, id: Dyn
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
     previous_id: lsp_text_member(params ?? return lsp_response(id, "null"), "previousResultId") ?? ""
     data: lsp_semantic_full_data(server, view)
-    body := String?{None}
+    ^body: String?{None}
     if server.semantic_results.get(view.uri) == .Val(previous) {
-        if previous.id == previous_id -> body = Val("\"edits\":{lsp_semantic_tokens_edits(previous.data, data)}")
+        if previous.id == previous_id {
+            body = Val("\"edits\":{lsp_semantic_tokens_edits(previous.data, data)}")
+        }
     }
     answer: body ?? "\"data\":{lsp_semantic_ints(data)}"
     result_id: lsp_semantic_keep(server, view.uri, data.move())

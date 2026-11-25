@@ -71,7 +71,7 @@ nixeval_replace_first: fn(text: String, needle: String, replacement: String) -> 
 nixeval_test_set_members: fn(value: Dyn, key: String, to: String) -> Dyn {
     if value == {
         .Object(pairs) -> {
-            out := [{key: String, value: Dyn}]{}
+            ^out: [{key: String, value: Dyn}]{}
             loop pair in pairs {
                 member: if pair.key == key -> Dyn.Text(to.copy()) else -> nixeval_test_set_members(pair.value, key, to)
                 out.push({key: pair.key.copy(), value: member})
@@ -227,9 +227,9 @@ nixeval_test_manifest_reason: fn(error: NixEvalError) -> String {
     assert_eq(nixeval_test_integer(document, nixeval_test_get(counts, "evaluable")), 10)
     assert_eq(nixeval_test_integer(document, nixeval_test_get(counts, "buildable")), 5)
     assert_eq(nixeval_test_integer(document, nixeval_test_get(counts, "skipped")), 2)
-    covered := 0
-    skipped := 0
-    devshells_covered := false
+    ^covered: 0
+    ^skipped: 0
+    ^devshells_covered: false
     loop index in 0..<inventory.len() {
         entry: inventory[index]
         if entry.status == {

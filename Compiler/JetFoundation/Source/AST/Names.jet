@@ -41,10 +41,10 @@ name_table: fn() -> NameTable Never! { name_table_sized(NAME_TABLE_INITIAL_SLOTS
 // Minimum capacity is 4 so id 0 (the empty spelling) never triggers an
 // immediate grow on construction.
 name_table_sized: fn(slots: Int) -> NameTable Never! {
-    capacity := 4
+    ^capacity: 4
     loop capacity < slots -> capacity *= 2
     mask: capacity - 1
-    initial := [Int]{}
+    ^initial: [Int]{}
     initial.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> initial.push(0)
     initial[NAME_EMPTY_HASH & mask] = (NAME_EMPTY_HASH << 32) | 1
@@ -66,9 +66,9 @@ name_start: fn(table: NameTable, id: Int) -> Int Never! {
 
 name_hash: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     len: I64{end - start}
-    hash := wrapping(len * I64{-7046029254386353131}) ~ I64{-3750763034362895579}
+    ^hash: wrapping(len * I64{-7046029254386353131}) ~ I64{-3750763034362895579}
     words: len & I64{-8}
-    at := I64{0}
+    ^at: I64{0}
     loop at < words {
         base: start + Int{at}
         word: I64{bytes[base]} | (I64{bytes[base + 1]} << I64{8}) | (I64{bytes[base + 2]} << I64{16}) | (I64{bytes[base + 3]} << I64{24}) | (I64{bytes[base + 4]} << I64{32}) | (I64{bytes[base + 5]} << I64{40}) | (I64{bytes[base + 6]} << I64{48}) | (I64{bytes[base + 7]} << I64{56})
@@ -77,8 +77,8 @@ name_hash: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
         at = wrapping(at + I64{8})
     }
     if at < len {
-        tail := I64{0}
-        pos := len
+        ^tail: I64{0}
+        ^pos: len
         loop pos > at {
             pos = wrapping(pos - I64{1})
             tail = (tail << I64{8}) | I64{bytes[start + Int{pos}]}
@@ -120,7 +120,7 @@ name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: I
 name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) -> Int Never! {
     mask: table.mask
     hash_tag: hash & 0x3fffffff
-    slot := hash & mask
+    ^slot: hash & mask
     loop {
         entry: table.slots[slot]
         if entry == 0 -> break
@@ -137,7 +137,7 @@ name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) ->
 name_slot_text: fn(table: NameTable, hash: Int, text: String) -> Int Never! {
     mask: table.mask
     hash_tag: hash & 0x3fffffff
-    slot := hash & mask
+    ^slot: hash & mask
     loop {
         entry: table.slots[slot]
         if entry == 0 -> break
@@ -173,9 +173,7 @@ name_intern_bytes: fn(table: ^NameTable, bytes: [U8], start: Int, end: Int) -> N
     name_insert(table, slot, hash, bytes, start, end, String.from_bytes(bytes.slice(start, end)) ?? "")
 }
 
-name_text_hash: fn(text: String) -> Int Never! {
-    Int{text.hash() & U64{0x3fffffff}}
-}
+name_text_hash: fn(text: String) -> Int Never! { Int{text.hash() & U64{0x3fffffff}} }
 
 // The id of `text` when the table holds it; never interns.
 name_find: fn(table: NameTable, text: String) -> Name? Never! {
@@ -231,12 +229,12 @@ name_pair_find_slot: fn(table: NameTable, first: String, second: String) -> Int?
 name_table_grow: fn(table: ^NameTable) Never! {
     capacity: (table.mask + 1) * 2
     mask: capacity - 1
-    slots := [Int]{}
+    ^slots: [Int]{}
     slots.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> slots.push(0)
     loop id in 0..<table.texts.len() {
         hash: table.hashes[id]
-        slot := hash & mask
+        ^slot: hash & mask
         loop slots[slot] != 0 -> slot = (slot + 1) & mask
         slots[slot] = ((hash & 0x3fffffff) << 32) | (id + 1)
     }
@@ -270,9 +268,11 @@ name_pool_adopt: fn(table: ^NameTable, shared: NameTable, own: ^NameTable) Never
         own_entry: own.slots[slot]
         if {
             own_entry == 0 -> {
-                _ := name_insert(own, slot, hash, table.bytes, start, end, name_text(table, Name{id: U32{id}}))
+                ^_: name_insert(own, slot, hash, table.bytes, start, end, name_text(table, Name{id: U32{id}}))
             }
-            else -> { table.texts[id] = name_text(own, Name{id: U32{(own_entry & 0xffffffff) - 1}}) }
+            else -> {
+                table.texts[id] = name_text(own, Name{id: U32{(own_entry & 0xffffffff) - 1}})
+            }
         }
     }
 }
@@ -285,7 +285,7 @@ name_pool_fold: fn(shared: ^NameTable, own: NameTable) Never! {
         end: own.ends[id]
         slot: name_slot(shared, own.hashes[id], own.bytes, start, end)
         if shared.slots[slot] == 0 {
-            _ := name_insert(shared, slot, own.hashes[id], own.bytes, start, end, name_text(own, Name{id: U32{id}}))
+            ^_: name_insert(shared, slot, own.hashes[id], own.bytes, start, end, name_text(own, Name{id: U32{id}}))
         }
     }
 }
@@ -297,7 +297,7 @@ name_pool_fold: fn(shared: ^NameTable, own: NameTable) Never! {
 // source's table into it in source-unit order (name_table_merge), so one
 // input always gets the same ids.
 name_table_compilation: fn() -> NameTable Never! {
-    table := name_table()
+    ^table: name_table()
     _: name_intern(table, "Unit")
     _: name_intern(table, "Never")
     _: name_intern(table, "Self")
@@ -329,7 +329,7 @@ NAME_POINTER: Name{id: U32{8}}
 // `from`'s id order, and returns each such id's id in `into`, by id - first:
 // the remap a merged source's rows are renumbered by.
 name_table_merge: fn(into: ^NameTable, from: NameTable, first: Int) -> [Name] Never! {
-    ids := [Name]{}
+    ^ids: [Name]{}
     count: from.texts.len() - first
     if count > 0 -> ids.try_reserve(count) ?? ()
     loop id in first..<from.texts.len() {
@@ -349,7 +349,7 @@ name_table_merge: fn(into: ^NameTable, from: NameTable, first: Int) -> [Name] Ne
 #Test("the compilation table's well-known names are their constants, and a merge renumbers a source's names") {
     assert_eq(NAME_EMPTY_HASH, name_hash([U8]{}, 0, 0))
     assert_eq(NAME_EMPTY_HASH, name_text_hash(""))
-    table := name_table_compilation()
+    ^table: name_table_compilation()
     assert_eq(name_text(table, NAME_NEVER), "Never")
     assert_eq(name_text(table, NAME_SELF), "Self")
     assert_eq(name_text(table, NAME_T), "T")
@@ -358,7 +358,7 @@ name_table_merge: fn(into: ^NameTable, from: NameTable, first: Int) -> [Name] Ne
     assert_eq(name_text(table, NAME_UNIT), "Unit")
     assert_eq(name_text(table, NAME_ERR), "Err")
     assert_eq(name_text(table, NAME_POINTER), "Pointer")
-    source := name_table()
+    ^source: name_table()
     point: name_intern(source, "Point")
     unit: name_intern(source, "Unit")
     ids: name_table_merge(table, source, 0)
@@ -366,7 +366,7 @@ name_table_merge: fn(into: ^NameTable, from: NameTable, first: Int) -> [Name] Ne
     assert_eq(name_text(table, ids[name_index(point)]), "Point")
     assert_eq(ids[0], name_empty())
     // A second source's same spelling gets the same id.
-    other := name_table()
+    ^other: name_table()
     again: name_intern(other, "Point")
     assert_eq(name_table_merge(table, other, 0)[name_index(again)], ids[name_index(point)])
 }
@@ -443,7 +443,7 @@ NAME_COLUMN_UNBOUND: -4611686018427387904
 
 // An empty column for a table expected to hold about `expected` keys.
 name_column: fn(expected: Int{0}) -> [Int] Never! {
-    rows := [Int]{}
+    ^rows: [Int]{}
     if expected > 0 -> rows.try_reserve(expected + 1) ?? ()
     rows.push(NAME_COLUMN_UNBOUND)
     rows
@@ -502,7 +502,7 @@ name_column_set_first: fn(names: ^NameTable, rows: ^[Int], text: String, row: In
 // The keys `rows` binds to a row >= 0 and their rows, in ascending key
 // order.
 name_column_sorted: fn(names: NameTable, rows: [Int]) -> [{key: String, local: Int}] Never! {
-    run := [{key: String, local: Int}]{}
+    ^run: [{key: String, local: Int}]{}
     loop id in 0..<rows.len() {
         if rows[id] >= 0 -> run.push({key: names.texts[id].copy(), local: rows[id]})
     }
@@ -511,8 +511,8 @@ name_column_sorted: fn(names: NameTable, rows: [Int]) -> [{key: String, local: I
 }
 
 #Test("a name column binds, replaces, keeps a first row and reads markers") {
-    names := name_column_table()
-    rows := name_column()
+    ^names: name_column_table()
+    ^rows: name_column()
     assert_eq(name_column_get(names, rows, ""), None)
     assert_eq(name_column_value(names, rows, "a"), None)
     name_column_set(names, rows, "b", 2)

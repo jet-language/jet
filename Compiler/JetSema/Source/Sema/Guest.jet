@@ -66,14 +66,14 @@ sema_function_is_guest_export: fn(function: Func) -> Bool Never! {
 // The one native spelling of an exported C symbol, shared by sema, Library
 // output and bindings.
 sema_guest_export_native_symbol: fn(name: String) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop byte in name.bytes() {
         n: Int{byte}
         if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 {
             bytes.push(byte)
         } else { bytes.push(U8{95}) }
     }
-    symbol := String.from_bytes(bytes) ?? ""
+    ^symbol: String.from_bytes(bytes) ?? ""
     if symbol == "" || (Int{bytes[0]} >= 48 && Int{bytes[0]} <= 57) -> symbol = "_{symbol}"
     symbol
 }
@@ -92,7 +92,7 @@ sema_guest_scalar: fn(ty: Type) -> JetLibScalar? Never! {
 
 // One scalar kind shared by every parameter and the return.
 sema_guest_scalar_shape: fn(params: [Param], return_type: Type?) -> JetLibScalar? Never! {
-    shape := JetLibScalar?{None}
+    ^shape: JetLibScalar?{None}
     loop parameter in params {
         next_shape: sema_guest_scalar(parameter.ty) ?? return None
         if shape == .Val(existing) && existing != next_shape -> return None
@@ -128,7 +128,7 @@ sema_guest_c_return_type: fn(return_type: Type?) -> Type? Never! {
 sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int, function: Func, diagnostics: ^[Diagnostic]) -> Bool {
     module_identity: graph.modules[module_index].module_identity
     handles: [SemaCheckedForeignHandle]{}
-    valid := true
+    ^valid: true
     loop parameter_index in 0..<function.params.len() {
         if !sema_checked_foreign_type(graph, function.params[parameter_index].ty, module_identity, true, false, handles, [SymbolID]{}) {
             diagnostics.push(sema_checked_foreign_type_error(function.params[parameter_index].ty, function.params[parameter_index].ty_span, true))
@@ -199,7 +199,7 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
     row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return false
     owner: graph.modules[row.module_index].module_identity
     seen[name] = true
-    safe := false
+    ^safe: false
     if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
         if item == {
             .Struct(definition) -> {
@@ -244,7 +244,7 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
 
 sema_guest_library_component_signature: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, function: Func) -> Bool {
     return_type: function.return_type ?? return false
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     if !sema_guest_library_component_type(graph, module_identity, return_type, seen) -> return false
     loop parameter_index in 0..<function.params.len() {
         if !sema_guest_library_component_type(graph, module_identity, function.params[parameter_index].ty, seen) {
@@ -325,7 +325,9 @@ sema_guest_runtime_scalar: fn(ty: Type) -> Bool Never! {
 // made for the call, a word record (Instant) as its word (IR
 // ir_route_carrier_of).
 sema_guest_runtime_handle: fn(ty: Type) -> Bool Never! {
-    if ty == .Named(name) -> return ir_runtime_handle_row(name) != None || ir_native_provider_handle_row(name) != None || sema_guest_core_leaf_handle(name)
+    if ty == .Named(name) {
+        return ir_runtime_handle_row(name) != None || ir_native_provider_handle_row(name) != None || sema_guest_core_leaf_handle(name)
+    }
     false
 }
 
@@ -471,7 +473,7 @@ sema_guest_runtime_tag: fn(ty: Type) -> Bool Never! {
 // E3203 for a runtime binding's parameter or result no runtime route carries;
 // true when every one is carried.
 sema_guest_check_runtime_binding: fn(function: Func, diagnostics: ^[Diagnostic]) -> Bool Never! {
-    valid := true
+    ^valid: true
     why: "a jet.runtime function crosses the runtime's route carriers"
     fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those or of such Lists, a View of a scalar, a payload-free Core enum or an Option of Int or of a handle (read only), a written (`^`) handle or List of scalars, a taken (`^^`) carried value, or a read or taken function whose parameters are read and that returns nothing; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, a `Receiver<T>` or `Event<T>`, `Never`, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
     loop param in function.params {
@@ -494,9 +496,9 @@ sema_guest_check_runtime_binding: fn(function: Func, diagnostics: ^[Diagnostic])
 // registration and before any body is checked.
 sema_guest_check_surfaces: fn(graph: ^SemaRegistrationGraph) {
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
-    failed := false
+    ^failed: false
     loop module_index in 0..<graph.modules.len() {
-        diagnostics := [Diagnostic]{}
+        ^diagnostics: [Diagnostic]{}
         loop item in graph.modules[module_index].program.items {
             if item == .Func(function) {
                 if sema_guest_runtime_binding(graph.modules[module_index].package_identity, function) {
@@ -535,10 +537,10 @@ sema_guest_check_surfaces: fn(graph: ^SemaRegistrationGraph) {
             sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
         }
     }
-    symbols := [String:String]{}
-    has_text_export := false
+    ^symbols: [String:String]{}
+    ^has_text_export: false
     loop module_index in 0..<graph.modules.len() {
-        diagnostics := [Diagnostic]{}
+        ^diagnostics: [Diagnostic]{}
         owner: graph.modules[module_index].module_name
         loop item in graph.modules[module_index].program.items {
             if item == {
@@ -569,7 +571,7 @@ sema_guest_check_surfaces: fn(graph: ^SemaRegistrationGraph) {
         }
     }
     if has_text_export {
-        diagnostics := [Diagnostic]{}
+        ^diagnostics: [Diagnostic]{}
         sema_guest_record_symbol(symbols, "jet_text_free", "<generated>", "generated C symbol", "jet_text_free", None, diagnostics)
         if diagnostics.len() > 0 -> failed = true
         loop diagnostic in diagnostics {
@@ -625,7 +627,7 @@ sema_guest_export_carrier_error: fn(function: Func, reason: String) -> Diagnosti
 sema_guest_check_export_failures: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: ^[Diagnostic]) -> Bool {
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return false
     if entry_index >= modules.len() -> return false
-    refused := false
+    ^refused: false
     loop item in graph.modules[entry_index].program.items {
         if item == .Func(function) {
             if !sema_function_is_guest_export(function) || sema_guest_declared_carrier(function.return_type) != None {

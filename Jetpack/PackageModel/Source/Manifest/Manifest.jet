@@ -415,7 +415,7 @@ pkg_version_rank: fn(text: String) -> [Int] Never! {
     trimmed: text.trim()
     alpha: trimmed.starts_with("a")
     parts: (if alpha -> trimmed.removeprefix("a") else -> trimmed).split(".").to_list()
-    out := [Int]{}
+    ^out: [Int]{}
     loop index in 0..<3 {
         if index >= parts.len() {
             out.push(0)
@@ -439,9 +439,9 @@ pkg_remove_dependency: fn(raw: String, name: String) -> String Never! { pkg_remo
 // metadata.
 pkg_manifest_diagnostic_from_row: fn(code: String, holes: [ManifestEntry], span: Span?) -> Diagnostic Never! {
     row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no typed row")
-    what := row.what
-    why := row.why
-    fix := row.fix
+    ^what: row.what
+    ^why: row.why
+    ^fix: row.fix
     loop hole in holes {
         marker: "{{{hole.key}}}"
         what = what.replace(marker, hole.value)

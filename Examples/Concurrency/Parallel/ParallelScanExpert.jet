@@ -36,7 +36,7 @@ gather_paths: fn() -> [String] {
 
 scan_parallel: fn(paths: [String]) -> [String] {
     { sender, receiver: ch }: channel<String>()
-    workers := [Task<()>]{}
+    ^workers: [Task<()>]{}
     loop file_path in paths {
         tx: sender.copy()
         file: file_path.copy()
@@ -51,7 +51,7 @@ scan_parallel: fn(paths: [String]) -> [String] {
         worker.join() ?? panic("worker failed")
     }
     sender.close()
-    results := [String]{}
+    ^results: [String]{}
     loop value in ch -> results.push(value)
     results.sort()
     return results

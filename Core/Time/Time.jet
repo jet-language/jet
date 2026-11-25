@@ -58,7 +58,9 @@ sleep: fn(duration: Duration) -[Time.Wait]> Never! {
 // `task.timeout(duration)` (Sema TaskGroups.jet, through the TaskTimeout
 // role): moves the task deadline to the earlier of the installed one and now
 // plus `duration`.
-#Builtin.Role(.TaskTimeout) priv __task_timeout: fn(duration: Duration) -[Time]> Never! { rt.task_timeout(duration.ns) }
+#Builtin.Role(.TaskTimeout) priv __task_timeout: fn(duration: Duration) -[Time]> Never! {
+    rt.task_timeout(duration.ns)
+}
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
 /// point for measuring; this is the timestamp for stamps, nonces, and expiry.
@@ -90,7 +92,7 @@ Clock: struct {
     }
 
     set: fn(^self, value: Int) Never! {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         if guard.value == {
             .Manual(_) -> { guard.value = ClockState.Manual(value) }
             .System(_, _) -> {
@@ -205,7 +207,9 @@ ExpiringForce: struct {
 
         what: fn(self) -> String { "`ExpiringValue.force` bypasses expiry checking" }
 
-        why: fn(self) -> String { "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly" }
+        why: fn(self) -> String {
+            "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly"
+        }
 
         fix: fn(self) -> String { "Use `.get(clock)` and handle `Expired`" }
     }
@@ -253,7 +257,7 @@ priv duration_whole_ms: fn(duration: Duration) -> Int Never! {
 }
 
 #Test("ExpiringValue observes original clocks and expires strictly after its deadline") {
-    clock := Clock.new(100)
+    ^clock: Clock.new(100)
     cached: ExpiringValue.new("fresh", Duration{ns: 2000000}, clock)
     clock.tick(2)
     assert_eq(cached.get(clock) ?? panic("equality must remain valid"), "fresh")
@@ -300,9 +304,9 @@ priv duration_whole_ms: fn(duration: Duration) -> Int Never! {
 }
 
 #Test("Clock manual forks are independent while observers retain identity") {
-    original := Clock.new(100)
+    ^original: Clock.new(100)
     observer: original.__observer()
-    fork := original.__fork()
+    ^fork: original.__fork()
     assert_eq(fork.tick(25), 125)
     assert_eq(original.now(), 100)
     assert_eq(observer.now(), 100)
@@ -406,8 +410,8 @@ strftime: fn(format: String, dt: DateTime) -> String Never! {
     day: date.weekday()
     day_of_year: date.day_of_year()
     raw: format.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < raw.len() {
         if raw[i] != (U8{37}) {
             start: i
@@ -516,7 +520,7 @@ compare_date: fn(a: LocalDate, b: LocalDate) -> Int Never! {
 date_equals: fn(a: LocalDate, b: LocalDate) -> Bool Never! { a == b }
 
 pad2: fn(n: Int, width: Int) -> String {
-    s := "{n}"
+    ^s: "{n}"
     loop s.bytes().len() < width -> s = "0{s}"
     s
 }
@@ -633,23 +637,31 @@ priv duration_unit_ns: fn(unit: DurationUnit) -> Int Never! {
     (d.ns - d.ns %% scale) /% scale
 }
 
-#Builtin.Role(.DurationIsZero) priv __duration_is_zero: fn(d: Duration) -> Bool Never! { duration_is_zero(d) }
+#Builtin.Role(.DurationIsZero) priv __duration_is_zero: fn(d: Duration) -> Bool Never! {
+    duration_is_zero(d)
+}
 
 // The whole seconds in the span, truncated toward zero.
 #Builtin.Role(.DurationTotalSeconds) priv __duration_total_seconds: fn(d: Duration) -> Int Never! {
     (d.ns - d.ns %% 1000000000) /% 1000000000
 }
 
-#Builtin.Role(.DurationDifference) priv __duration_difference: fn(d: Duration, other: Duration) -> Duration Never! { duration_sub(d, other) }
+#Builtin.Role(.DurationDifference) priv __duration_difference: fn(d: Duration, other: Duration) -> Duration Never! {
+    duration_sub(d, other)
+}
 
-#Builtin.Role(.DurationAbs) priv __duration_abs: fn(d: Duration) -> Duration Never! { duration_abs(d) }
+#Builtin.Role(.DurationAbs) priv __duration_abs: fn(d: Duration) -> Duration Never! {
+    duration_abs(d)
+}
 
 #Builtin.Role(.DurationNegated) priv __duration_negated: fn(d: Duration) -> Duration Never! {
     if d.ns == time_int_min() -> return duration_ns(time_int_max())
     duration_ns(0 - d.ns)
 }
 
-#Builtin.Role(.DurationSign) priv __duration_sign: fn(d: Duration) -> Int Never! { civil_sign(d.ns) }
+#Builtin.Role(.DurationSign) priv __duration_sign: fn(d: Duration) -> Int Never! {
+    civil_sign(d.ns)
+}
 
 // The span in `unit` (a civil_unit_ns name) as a Float; 0.0 for a unit
 // with no such name.
@@ -993,7 +1005,7 @@ DateTime: struct {
 
     time: fn(self) -> LocalTime Never! {
         seconds: civil_mod(self.secs, 86400)
-        t := civil_time(seconds /% 3600, (seconds /% 60) %% 60, seconds %% 60, self.nanos)
+        ^t: civil_time(seconds /% 3600, (seconds /% 60) %% 60, seconds %% 60, self.nanos)
         if self.leap_second -> t.second_value = 60
         t
     }
@@ -1332,7 +1344,7 @@ Zone: struct {
         // Past the table, the footer rule's shifts follow.
         rule: self.data.rule ?? return None
         year: civil_rule_year(utc_seconds, rule.standard.offset)
-        soonest := Int?{None}
+        ^soonest: Int?{None}
         loop y in year..<(year + 2) {
             loop shift in civil_rule_shifts(rule, y) {
                 if shift.at <= utc_seconds -> next
@@ -1346,7 +1358,7 @@ Zone: struct {
     previous_transition: fn(self, utc_seconds: Int) -> Int? Never! {
         if self.data.rule == .Val(rule) {
             year: civil_rule_year(utc_seconds, rule.standard.offset)
-            latest := Int?{None}
+            ^latest: Int?{None}
             loop y in (year - 1)..<(year + 1) {
                 loop shift in civil_rule_shifts(rule, y) {
                     if shift.at >= utc_seconds || !civil_rule_holds(self, shift.at - 1) -> next
@@ -1356,7 +1368,7 @@ Zone: struct {
             }
             if latest != None -> return latest
         }
-        i := self.data.transitions.len()
+        ^i: self.data.transitions.len()
         loop i > 0 {
             i -= 1
             if self.data.transitions[i].at < utc_seconds -> return Val(self.data.transitions[i].at)
@@ -1459,7 +1471,7 @@ ZonedDateTime: struct {
 
     format_rfc9557: fn(self) -> String Never! {
         parts: civil_zoned_parts(self)
-        fraction := ""
+        ^fraction: ""
         if self.instant.nanos != 0 -> fraction = ".{pad2(self.instant.nanos, 9)}"
         suffix: if parts.offset == 0 -> "Z" else -> civil_offset(parts.offset)
         "{parts.date.to_string()}T{pad2(parts.time.hour(), 2)}:{pad2(parts.time.minute(), 2)}:{pad2(parts.time.second(), 2)}{fraction}{suffix}[{self.zone_value.name()}]"
@@ -1635,11 +1647,11 @@ civil_day: fn(date: LocalDate) -> Int Never! {
 
 civil_from_day: fn(day: Int) -> LocalDate Never! {
     era: civil_floor(day, 146097)
-    year := era * 400 + 1 + civil_mod(day, 146097) /% 365
+    ^year: era * 400 + 1 + civil_mod(day, 146097) /% 365
     loop civil_day(new(year, 1, 1)) > day -> year -= 1
     loop civil_day(new(year + 1, 1, 1)) <= day -> year += 1
-    remaining := day - civil_day(new(year, 1, 1))
-    month := 1
+    ^remaining: day - civil_day(new(year, 1, 1))
+    ^month: 1
     loop month < 12 && remaining >= days_in_month(year, month) {
         remaining -= days_in_month(year, month)
         month += 1
@@ -1816,7 +1828,7 @@ civil_checked_epoch: fn(value: Int, unit: String) -> Int RangeError! {
 
 civil_integer: fn(value: String, label: String) -> Int TimeError! {
     raw: value.bytes()
-    start := 0
+    ^start: 0
     if raw.len() > 0 && (raw[0] == (U8{43}) || raw[0] == (U8{45})) -> start = 1
     if start >= raw.len() -> return Err(TimeError{reason: "bad {label}: {value}"})
     loop i in start..<raw.len() {
@@ -1853,7 +1865,7 @@ civil_find_byte: fn(raw: [U8], byte: U8, start: Int) -> Int Never! {
 }
 
 civil_slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(raw[i])
     String.from_bytes(out) ?? panic("civil-time string slice is not UTF-8")
 }
@@ -1867,10 +1879,10 @@ parse: fn(value: String) -> LocalDate TimeError! { civil_parse_date(value, true,
 
 civil_parse_date: fn(value: String, signed_year: Bool, require_fields: Bool) -> LocalDate TimeError! {
     raw: value.bytes()
-    start := 0
+    ^start: 0
     if signed_year && raw.len() > 0 && raw[0] == (U8{45}) -> start = 1
     first: civil_find_byte(raw, U8{45}, start)
-    second := -1
+    ^second: -1
     if first >= 0 -> second = civil_find_byte(raw, U8{45}, first + 1)
     if first < 0 || second < 0 -> return Err(TimeError{reason: "invalid date: {value}"})
     year_text: civil_slice(raw, 0, first)
@@ -1926,15 +1938,15 @@ civil_time_parts: fn(value: String, fractions: Bool) -> CivilTimeParts TimeError
     m: civil_split(h.tail, ":") ?? return Err(TimeError{reason: "invalid time: {value}"})
     hour: civil_integer(h.head, "hour")
     minute: civil_integer(m.head, "minute")
-    seconds := m.tail
-    nanos := 0
+    ^seconds: m.tail
+    ^nanos: 0
     if fractions {
         if civil_split(m.tail, ".") == {
             .Val(parts) -> {
                 if parts.tail.len() == 0 || parts.tail.bytes().len() > 9 || !civil_digits(parts.tail) {
                     return Err(TimeError{reason: "bad fractional second: {m.tail}"})
                 }
-                fraction := parts.tail
+                ^fraction: parts.tail
                 loop fraction.bytes().len() < 9 -> fraction = "{fraction}0"
                 nanos = Int.parse(fraction) ?? return Err(TimeError{reason: "bad fractional second: {parts.tail}"})
                 seconds = parts.head
@@ -1995,11 +2007,11 @@ civil_rfc3339_fixed: fn(value: String) -> DateTime Never! {
     if month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 {
         return civil_rfc3339_miss()
     }
-    at := 19
-    nanos := 0
+    ^at: 19
+    ^nanos: 0
     if raw[at] == (U8{46}) {
         at += 1
-        digits := 0
+        ^digits: 0
         loop at < n && raw[at] >= (U8{48}) && raw[at] <= (U8{57}) {
             if digits == 9 -> return civil_rfc3339_miss()
             nanos = nanos * 10 + Int{raw[at]} - 48
@@ -2012,7 +2024,7 @@ civil_rfc3339_fixed: fn(value: String) -> DateTime Never! {
             digits += 1
         }
     }
-    offset := 0
+    ^offset: 0
     if n - at == 1 && raw[at] == (U8{90}) -> offset = 0 else if n - at == 6 && (raw[at] == (U8{43}) || raw[at] == (U8{45})) && raw[at + 3] == (U8{58}) {
         offset_hour: civil_two_digits(raw, at + 1)
         offset_minute: civil_two_digits(raw, at + 4)
@@ -2104,11 +2116,11 @@ zone: fn(name: String) -[Env, FS.Read]> Zone TimeError! {
     if name.contains("..") || name.starts_with("/") || name.starts_with("\\") {
         return Err(TimeError{reason: "invalid time zone name: {name}"})
     }
-    rel := name.copy()
+    ^rel: name.copy()
     loop rel.starts_with("posix/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
     loop rel.starts_with("right/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
     if rt.embedded_zone_bytes(rel) == .Val(bytes) -> return civil_tzif(name, bytes)
-    roots := [String]{}
+    ^roots: [String]{}
     if rt.zone_env("JET_TZDB_DIR") == .Val(dir) -> roots.push(dir)
     if rt.zone_env("TZDIR") == .Val(dir) -> roots.push(dir)
     if rt.zone_env("JET_ROOT") == .Val(dir) -> roots.push("{dir}/Core/Time/Tzdb")
@@ -2143,10 +2155,10 @@ priv civil_zone_file: fn(name: String, path: String) -[FS.Read]> Zone Never! {
 
 civil_be: fn(bytes: [U8], start: Int, width: Int, signed: Bool) -> Int TimeError! {
     if start < 0 || start + width > bytes.len() -> return Err(TimeError{reason: "truncated tzif"})
-    value := 0
+    ^value: 0
     loop i in start..<(start + width) -> value = value * 256 + Int{bytes[i]}
     if signed && bytes[start] >= (U8{128}) {
-        modulus := 1
+        ^modulus: 1
         loop _ in 0..<width -> modulus *= 256
         value -= modulus
     }
@@ -2158,18 +2170,18 @@ civil_tzif_header: fn(bytes: [U8], base: Int) -> {version: Int, counts: [Int]} T
     if bytes[base] != (U8{84}) || bytes[base + 1] != (U8{90}) || bytes[base + 2] != (U8{105}) || bytes[base + 3] != (U8{102}) {
         return Err(TimeError{reason: "invalid tzif header"})
     }
-    version := 0
+    ^version: 0
     if base + 4 < bytes.len() -> version = Int{bytes[base + 4]}
-    counts := [Int]{}
+    ^counts: [Int]{}
     loop i in 0..<6 -> counts.push(civil_be(bytes, base + 20 + i * 4, 4, false))
     Ok({version: version, counts: counts})
 }
 
 civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
     header: civil_tzif_header(bytes, 0)
-    counts := header.counts
-    base := 44
-    width := 4
+    ^counts: header.counts
+    ^base: 44
+    ^width: 4
     if header.version == 50 || header.version == 51 || header.version == 52 {
         block: counts[3] * 5 + counts[4] * 6 + counts[5] + counts[2] * 8 + counts[0] + counts[1]
         base = 44 + block
@@ -2178,8 +2190,8 @@ civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
         base += 44
         width = 8
     }
-    times := [Int]{}
-    pos := base
+    ^times: [Int]{}
+    ^pos: base
     loop _ in 0..<counts[3] {
         times.push(civil_be(bytes, pos, width, true))
         pos += width
@@ -2187,20 +2199,20 @@ civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
     indices: pos
     if indices + counts[3] > bytes.len() -> return Err(TimeError{reason: "truncated tzif index"})
     pos += counts[3]
-    infos := [ZoneInfo]{}
+    ^infos: [ZoneInfo]{}
     type_count: if counts[4] < 1 -> 1 else -> counts[4]
     loop _ in 0..<type_count {
         offset: civil_be(bytes, pos, 4, true)
-        dst := false
+        ^dst: false
         if pos + 4 < bytes.len() -> dst = bytes[pos + 4] != (U8{0})
         infos.push(ZoneInfo{offset: offset, is_dst: dst})
         pos += 6
     }
-    transitions := [ZoneTransition]{}
+    ^transitions: [ZoneTransition]{}
     loop i in 0..<times.len() {
         transitions.push(ZoneTransition{at: times[i], info: civil_clamp(Int{bytes[indices + i]}, 0, infos.len() - 1)})
     }
-    rule := ZoneRule?{None}
+    ^rule: ZoneRule?{None}
     // A version 2+ file ends its 64-bit block with the footer rule.
     if width == 8 {
         rule = civil_tzif_footer(bytes, base + counts[3] * 9 + counts[4] * 6 + counts[5] + counts[2] * 12 + counts[1] + counts[0])
@@ -2214,11 +2226,11 @@ civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
 priv civil_tzif_footer: fn(bytes: [U8], at: Int) -> ZoneRule? TimeError! {
     if at >= bytes.len() -> return Ok(None)
     if bytes[at] != (U8{10}) -> return Err(TimeError{reason: "invalid tzif footer"})
-    end := at + 1
+    ^end: at + 1
     loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
     if end >= bytes.len() -> return Err(TimeError{reason: "invalid tzif footer"})
     if end == at + 1 -> return Ok(None)
-    raw := [U8]{}
+    ^raw: [U8]{}
     loop i in (at + 1)..<end -> raw.push(bytes[i])
     Ok(Val(civil_tz_rule(raw)))
 }
@@ -2238,8 +2250,8 @@ priv civil_tz_rule: fn(raw: [U8]) -> ZoneRule TimeError! {
     std_offset: civil_tz_time(raw, civil_tz_name(raw, 0))
     standard: ZoneInfo{offset: -std_offset.seconds, is_dst: false}
     if std_offset.end == raw.len() -> return Ok(ZoneRule{standard: standard, saving: None})
-    at := civil_tz_name(raw, std_offset.end)
-    saving_offset := standard.offset + 3600
+    ^at: civil_tz_name(raw, std_offset.end)
+    ^saving_offset: standard.offset + 3600
     if at < raw.len() && raw[at] != (U8{44}) {
         dst_offset: civil_tz_time(raw, at)
         saving_offset = -dst_offset.seconds
@@ -2264,7 +2276,7 @@ priv civil_tz_rule: fn(raw: [U8]) -> ZoneRule TimeError! {
 // The end of a zone abbreviation: three or more letters, or `<...>` quoting
 // letters, digits and signs.
 priv civil_tz_name: fn(raw: [U8], at: Int) -> Int TimeError! {
-    end := at
+    ^end: at
     if at < raw.len() && raw[at] == (U8{60}) {
         end += 1
         loop end < raw.len() && raw[end] != (U8{62}) {
@@ -2287,8 +2299,8 @@ priv civil_tz_name: fn(raw: [U8], at: Int) -> Int TimeError! {
 // A number of up to three digits.
 priv civil_tz_number: fn(raw: [U8], at: Int) -> {value: Int, end: Int} TimeError! {
     if !civil_tz_digit(raw, at) -> return Err(civil_tz_error(raw))
-    value := 0
-    end := at
+    ^value: 0
+    ^end: at
     loop civil_tz_digit(raw, end) {
         if end - at == 3 -> return Err(civil_tz_error(raw))
         value = value * 10 + Int{raw[end]} - 48
@@ -2299,17 +2311,17 @@ priv civil_tz_number: fn(raw: [U8], at: Int) -> {value: Int, end: Int} TimeError
 
 // `[+|-]hh[:mm[:ss]]` in seconds, hours at most 167 (RFC 8536's extension).
 priv civil_tz_time: fn(raw: [U8], at: Int) -> {seconds: Int, end: Int} TimeError! {
-    sign := 1
-    start := at
+    ^sign: 1
+    ^start: at
     if start < raw.len() && (raw[start] == (U8{43}) || raw[start] == (U8{45})) {
         if raw[start] == (U8{45}) -> sign = -1
         start += 1
     }
     hours: civil_tz_number(raw, start)
     if hours.value > 167 -> return Err(civil_tz_error(raw))
-    seconds := hours.value * 3600
-    end := hours.end
-    scale := 60
+    ^seconds: hours.value * 3600
+    ^end: hours.end
+    ^scale: 60
     loop scale > 0 && end < raw.len() && raw[end] == (U8{58}) {
         part: civil_tz_number(raw, end + 1)
         if part.value > 59 || part.end - end != 3 -> return Err(civil_tz_error(raw))
@@ -2323,8 +2335,8 @@ priv civil_tz_time: fn(raw: [U8], at: Int) -> {seconds: Int, end: Int} TimeError
 // `Jn`, `n` or `Mm.w.d`, then `/time`, which defaults to 02:00:00.
 priv civil_tz_edge: fn(raw: [U8], at: Int) -> {edge: ZoneRuleEdge, end: Int} TimeError! {
     if at >= raw.len() -> return Err(civil_tz_error(raw))
-    edge := ZoneRuleEdge{form: ZoneRuleForm.Ordinal, month: 0, week: 0, day: 0, at: 7200}
-    end := at
+    ^edge: ZoneRuleEdge{form: ZoneRuleForm.Ordinal, month: 0, week: 0, day: 0, at: 7200}
+    ^end: at
     if raw[at] == (U8{74}) {
         day: civil_tz_number(raw, at + 1)
         if day.value < 1 || day.value > 365 -> return Err(civil_tz_error(raw))
@@ -2371,7 +2383,7 @@ priv civil_rule_day: fn(edge: ZoneRuleEdge, year: Int) -> Int Never! {
         .Weekday -> {
             start: civil_day(new(year, edge.month, 1))
             // civil_day counts from a Monday, so `day + 1` mod 7 is 0 on a Sunday.
-            day := start + civil_mod(edge.day - civil_mod(start + 1, 7), 7) + (edge.week - 1) * 7
+            ^day: start + civil_mod(edge.day - civil_mod(start + 1, 7), 7) + (edge.week - 1) * 7
             loop day >= start + days_in_month(year, edge.month) -> day -= 7
             day
         }
@@ -2418,23 +2430,23 @@ civil_zone_info: fn(value: Zone, seconds: Int) -> ZoneInfo Never! {
     if value.data.rule == .Val(rule) && civil_rule_holds(value, seconds) {
         return civil_rule_info(rule, seconds)
     }
-    lo := 0
-    hi := value.data.transitions.len()
+    ^lo: 0
+    ^hi: value.data.transitions.len()
     loop lo < hi {
         mid: (lo + hi) /% 2
         if value.data.transitions[mid].at <= seconds -> lo = mid + 1 else -> hi = mid
     }
-    index := 0
+    ^index: 0
     if lo > 0 -> index = value.data.transitions[lo - 1].info
     value.data.infos[index]
 }
 
 // The table's shifts, then the rule's around `local` past the table's end.
 priv civil_zone_shifts: fn(value: Zone, local: Int) -> [ZoneShift] Never! {
-    shifts := [ZoneShift]{}
+    ^shifts: [ZoneShift]{}
     loop i in 0..<value.data.transitions.len() {
         transition: value.data.transitions[i]
-        before_index := 0
+        ^before_index: 0
         if i > 0 -> before_index = value.data.transitions[i - 1].info
         shifts.push(ZoneShift{at: transition.at, before: value.data.infos[before_index].offset, after: value.data.infos[transition.info].offset})
     }
@@ -2464,11 +2476,11 @@ civil_local_utc: fn(value: Zone, date: LocalDate, t: LocalTime, disambiguation: 
         return Err(TimeError{reason: "invalid disambiguation: {disambiguation}"})
     }
     local: civil_utc(date, t)
-    offsets := [Int]{}
-    first := Int?{None}
-    last := Int?{None}
+    ^offsets: [Int]{}
+    ^first: Int?{None}
+    ^last: Int?{None}
     // The rule's offsets count too: a footer may name one the table lacks.
-    candidates := value.data.infos.copy()
+    ^candidates: value.data.infos.copy()
     if value.data.rule == .Val(rule) {
         candidates.push(rule.standard)
         if rule.saving == .Val(saving) -> candidates.push(saving.info)
@@ -2533,7 +2545,7 @@ parse_zoned: fn(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
     if raw.len() == 0 || raw[raw.len() - 1] != (U8{93}) {
         return Err(TimeError{reason: "RFC9557 datetime needs a [zone]: {value}"})
     }
-    split := raw.len() - 1
+    ^split: raw.len() - 1
     loop split > 0 && raw[split] != (U8{91}) -> split -= 1
     if raw[split] != (U8{91}) {
         return Err(TimeError{reason: "RFC9557 datetime needs a [zone]: {value}"})
@@ -2548,7 +2560,7 @@ parse_zoned: fn(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
     offset: civil_parse_offset(suffix.tail)
     date: parse(parts.head)
     parsed: parse_rfc3339(dt)
-    t := parsed.time()
+    ^t: parsed.time()
     if !parsed.leap_second -> t = parse_time(suffix.head)
     seconds: saturating_sub_ns(civil_utc(date, t), offset)
     if !civil_local_matches(zone, date, t, offset, seconds) {
@@ -2586,8 +2598,8 @@ civil_format: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: St
     millis: pad2(t.millisecond(), 3)
     meridiem: if t.hour() < 12 -> "AM" else -> "PM"
     space_day: if date.day() < 10 -> " {date.day()}" else -> "{date.day()}"
-    name := ""
-    offset := ""
+    ^name: ""
+    ^offset: ""
     if zone == .Val(value) {
         name = value.name
         offset = civil_offset(value.offset)
@@ -2641,7 +2653,7 @@ civil_format: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: St
         {token: "SSSSSS", value: micros},
         {token: "SSS", value: millis},
     }
-    out := pattern.copy()
+    ^out: pattern.copy()
     loop pair in pairs -> out = out.replace(pair.token, pair.value)
     if zone != None -> out = out.replace("VV", name).replace("XXX", offset)
     out
@@ -2662,15 +2674,15 @@ civil_byte_character: fn(byte: U8) -> String Never! {
 civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: String, offset: Int}?) -> String TextError! {
     tokens: [String]{"SSSSSSSSS", "EEEE", "MMMM", "yyyy", "DDD", "XXX", "SSSSSS", "MMM", "EEE", "VV", "MM", "dd", "HH", "mm", "ss", "SSS"}
     raw: pattern.bytes()
-    normalized := ""
-    literals := [{marker: String, value: String}]{}
-    i := 0
+    ^normalized: ""
+    ^literals: [{marker: String, value: String}]{}
+    ^i: 0
     loop i < raw.len() {
         byte: raw[i]
         if byte == (U8{39}) {
             i += 1
-            literal := ""
-            closed := false
+            ^literal: ""
+            ^closed: false
             loop i < raw.len() {
                 if raw[i] == (U8{39}) {
                     if i + 1 < raw.len() && raw[i + 1] == (U8{39}) {
@@ -2728,7 +2740,7 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {
             next
         }
         if (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) {
-            token := ""
+            ^token: ""
             rest: civil_slice(raw, i, raw.len())
             loop candidate in tokens {
                 if rest.starts_with(candidate) {
@@ -2750,7 +2762,7 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {
         normalized = "{normalized}{civil_slice(raw, i, i + width)}"
         i += width
     }
-    out := civil_format(normalized, date, t, zone)
+    ^out: civil_format(normalized, date, t, zone)
     loop literal in literals -> out = out.replace(literal.marker, literal.value)
     Ok(out)
 }
@@ -2792,11 +2804,11 @@ civil_codec_day: fn(date: LocalDate) -> Int Never! {
 }
 
 civil_codec_date_from_day: fn(day: Int) -> LocalDate Never! {
-    year := day /% 365 + 1
+    ^year: day /% 365 + 1
     loop civil_codec_day(new(year, 1, 1)) > day -> year -= 1
     loop civil_codec_day(new(year + 1, 1, 1)) <= day -> year += 1
-    remaining := day - civil_codec_day(new(year, 1, 1))
-    month := 1
+    ^remaining: day - civil_codec_day(new(year, 1, 1))
+    ^month: 1
     loop month < 12 && remaining >= days_in_month(year, month) {
         remaining -= days_in_month(year, month)
         month += 1
@@ -2812,7 +2824,7 @@ civil_codec_datetime: fn(value: String) -> DateTime TimeError! {
     parts: civil_split(value, "T") ?? return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
     date: civil_parse_date(parts.head, false, false)
     raw: parts.tail.bytes()
-    zone_pos := civil_find_byte(raw, U8{90}, 0)
+    ^zone_pos: civil_find_byte(raw, U8{90}, 0)
     if zone_pos < 0 {
         loop i in 0..<raw.len() {
             if raw[i] == (U8{43}) -> zone_pos = i
@@ -2828,12 +2840,12 @@ civil_codec_datetime: fn(value: String) -> DateTime TimeError! {
     }
     time_text: civil_slice(raw, 0, zone_pos)
     zone_text: civil_slice(raw, zone_pos, raw.len())
-    clean := time_text.copy()
-    nanos := 0
+    ^clean: time_text.copy()
+    ^nanos: 0
     if civil_split(time_text, ".") == .Val(fraction) {
         clean = fraction.head
-        digits := ""
-        count := 0
+        ^digits: ""
+        ^count: 0
         loop scalar in fraction.tail.chars() {
             if count == 9 -> break
             count += 1
@@ -2850,7 +2862,7 @@ civil_codec_datetime: fn(value: String) -> DateTime TimeError! {
     if t.hour < 0 || t.hour > 23 || t.minute < 0 || t.minute > 59 || t.second < 0 || t.second > 60 || (leap && (t.hour != 23 || t.minute != 59)) {
         return Err(TimeError{reason: "time out of range: {clean}"})
     }
-    offset := 0
+    ^offset: 0
     if zone_text != "Z" {
         zone_raw: zone_text.bytes()
         rest: civil_slice(zone_raw, 1, zone_raw.len())
@@ -2868,7 +2880,7 @@ civil_codec_datetime: fn(value: String) -> DateTime TimeError! {
 
 // The decimal value of the ASCII digits raw[start..<end], None past a non-digit.
 civil_dyn_number: fn(raw: [U8], start: Int, end: Int) -> Int? Never! {
-    value := 0
+    ^value: 0
     loop i in start..<end {
         if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> return None
         value = value * 10 + Int{raw[i]} - 48
@@ -2896,21 +2908,21 @@ civil_dyn_datetime: fn(text: String) -> ZonedDateTime? Never! {
     if day < 1 || day > days_in_month(year, month) || hour > 23 || minute > 59 || second > 60 {
         return None
     }
-    at := 19
-    nanos := 0
+    ^at: 19
+    ^nanos: 0
     if raw[19] == (U8{46}) {
         at = 20
         loop at < raw.len() && raw[at] >= (U8{48}) && raw[at] <= (U8{57}) -> at += 1
         count: at - 20
         if count == 0 || count > 9 -> return None
         nanos = civil_dyn_number(raw, 20, at) ?? return None
-        scaled := count
+        ^scaled: count
         loop scaled < 9 {
             nanos *= 10
             scaled += 1
         }
     }
-    offset := 0
+    ^offset: 0
     rest: raw.len() - at
     if rest == 6 && (raw[at] == (U8{43}) || raw[at] == (U8{45})) && raw[at + 3] == (U8{58}) {
         hours: civil_dyn_number(raw, at + 1, at + 3) ?? return None

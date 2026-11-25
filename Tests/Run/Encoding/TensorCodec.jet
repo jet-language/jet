@@ -23,11 +23,11 @@ describe: fn(label: String, t: compute.Tensor) {
 
 // The explicit wire form: {"shape": [...], "data": [...], "profile": "..."}.
 to_tree: fn(t: compute.Tensor) -> Dyn {
-    shape := [Dyn]{}
+    ^shape: [Dyn]{}
     loop dim in compute.shape(t) -> shape.push(Dyn.Int(dim))
-    data := [Dyn]{}
+    ^data: [Dyn]{}
     loop value in compute.to_list(t) -> data.push(Dyn.Float(value))
-    fields := [String:Dyn]{}
+    ^fields: [String:Dyn]{}
     fields["shape"] = Dyn.Array(shape)
     fields["data"] = Dyn.Array(data)
     fields["profile"] = Dyn.Text(profile(t))
@@ -54,9 +54,9 @@ number: fn(item: Dyn) -> Float {
 }
 
 from_tree: fn(tree: Dyn) -> compute.Tensor {
-    shape := [Int]{}
+    ^shape: [Int]{}
     loop item in elements(tree, "shape") -> shape.push(item.int() ?? panic("dim"))
-    data := [Float]{}
+    ^data: [Float]{}
     loop item in elements(tree, "data") -> data.push(number(item))
     profile: (tree.field("profile") ?? panic("profile")).text() ?? panic("profile text")
     from_values(shape, data, profile)
@@ -69,7 +69,7 @@ from_values: fn(shape: [Int], data: [Float], profile: String) -> compute.Tensor 
     tensor: compute.reshape(flat, shape) ?? panic("reshape")
     fields: (compute.serialize(tensor) ?? panic("serialize")).split(";").to_list()
     body: "{fields[0]};{fields[1]};profile={profile}"
-    hash := U64{0xcbf29ce484222325}
+    ^hash: U64{0xcbf29ce484222325}
     prime: U64{0x100000001b3}
     loop byte in body.bytes() -> hash = wrapping((hash ~ U64{byte}) * prime)
     checksum: fmt.hex(Int{hash}, 16)
@@ -77,10 +77,10 @@ from_values: fn(shape: [Int], data: [Float], profile: String) -> compute.Tensor 
 }
 
 profile: fn(tensor: compute.Tensor) -> String {
-    fields := compute.placement(tensor).split("profile=")
+    ^fields: compute.placement(tensor).split("profile=")
     _: fields.next() ?? panic("placement prefix")
     value: fields.next() ?? panic("placement profile")
-    pieces := value.split(",")
+    ^pieces: value.split(",")
     pieces.next() ?? panic("profile")
 }
 

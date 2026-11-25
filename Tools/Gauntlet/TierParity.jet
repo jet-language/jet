@@ -117,12 +117,12 @@ load: fn(root: String, row: TierEntry) -> Entry {
     dir: "{root}/Tools/Gauntlet/Entries/{row.folder}"
     tree: json.parse(fs.read("{dir}/entry.json") ?? fail("can't read {dir}/entry.json")) ?? fail("{dir}/entry.json is not JSON")
     spec: member(tree, "spec")
-    args := [String]{}
+    ^args: [String]{}
     loop a in items(member(spec, "args")) {
         args.push(a.text() ?? fail("{name}: an argument is not text"))
     }
-    gen := ""
-    input := ""
+    ^gen: ""
+    ^input: ""
     if member(spec, "fixtureGen") == {
         .Null -> {}
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
@@ -138,9 +138,9 @@ load: fn(root: String, row: TierEntry) -> Entry {
     }
     s: member(tree, "service")
     ready: probe_of(member(s, "ready"))
-    probes := [Probe]{}
+    ^probes: [Probe]{}
     loop p in items(member(s, "probe")) -> probes.push(probe_of(p))
-    answers := ready.expect.copy()
+    ^answers: ready.expect.copy()
     loop p in probes -> answers = "{answers}{p.expect}"
     Entry{name: name.copy(), dir: dir, service: true, args: args, gen: gen, input: input, ready: ready, probes: probes, expected: answers}
 }
@@ -161,7 +161,7 @@ prepare: fn(opts: Options, e: Entry) -> String {
 }
 
 jet_argv: fn(opts: Options, level: Int, args: [String]) -> [String] {
-    argv := [String]{opts.jet.copy(), "run", "-O{level}", "run.jet"}
+    ^argv: [String]{opts.jet.copy(), "run", "-O{level}", "run.jet"}
     if args.len() > 0 -> argv.push("--")
     loop a in args -> argv.push(a.copy())
     argv
@@ -184,9 +184,9 @@ run_batch: fn(opts: Options, e: Entry, work: String, level: Int) -> Ran {
 // Sends one probe on its own connection and reads the answer to its end;
 // None when the service does not take the connection.
 ask: fn(address: String, send: String) -> String? {
-    stream := net.tcp_connect(address) ?? return None
+    ^stream: net.tcp_connect(address) ?? return None
     stream.write(send) ?? return None
-    answer := ""
+    ^answer: ""
     loop {
         part: stream.read(1024) ?? return None
         if part == "" -> break
@@ -201,8 +201,8 @@ run_service: fn(opts: Options, e: Entry, work: String, level: Int, port: Int) ->
     address: "127.0.0.1:{port}"
     started: time.instant()
     child: process.cmd(jet_argv(opts, level, [String]{"{port}"})).cwd(work.copy()).env("XDG_CACHE_HOME", "{opts.out}/cache").output_limit(1048576).spawn() ?? return Ran{output: "", ns: 0, error: "{opts.jet} could not start: {err}"}
-    answers := ""
-    ready := false
+    ^answers: ""
+    ^ready: false
     loop started.elapsed_millis() < RUN_TIMEOUT_MS {
         if ask(address, e.ready.send) == .Val(answer) {
             answers = answer
@@ -276,8 +276,8 @@ verdict: fn(expected: String, ran: Ran) -> String {
 
 options: fn() -> Options {
     argv: process.args()
-    opts := Options{out: "", jet: process.which("jet") ?? "", plant: ""}
-    i := 0
+    ^opts: Options{out: "", jet: process.which("jet") ?? "", plant: ""}
+    ^i: 0
     loop i < argv.len() {
         value: if i + 1 < argv.len() -> argv[i + 1].copy() else -> fail("`{argv[i]}` needs a value")
         if argv[i] == {
@@ -301,7 +301,7 @@ options: fn() -> Options {
 
 // The entries a run takes: all of them, or the one `plant` names.
 picked_entries: fn(plant: String) -> [TierEntry] {
-    picked := [TierEntry]{}
+    ^picked: [TierEntry]{}
     loop row in ENTRIES {
         if plant == "" || row.name == plant {
             picked.push(TierEntry{name: row.name.copy(), folder: row.folder.copy()})
@@ -316,9 +316,9 @@ run: fn() {
     fs.create_dir_all(opts.out) ?? fail("mkdir {opts.out}: {err}")
     fs.remove_all("{opts.out}/cache").drop("a cache left by an earlier run may be absent")
     picked: picked_entries(opts.plant)
-    rows := ["entry\tlevel\tstatus\trun_seconds"]
-    failures := 0
-    caught := 0
+    ^rows: ["entry\tlevel\tstatus\trun_seconds"]
+    ^failures: 0
+    ^caught: 0
     loop row in picked {
         name: row.name
         e: load(root, row)

@@ -34,21 +34,21 @@ evidence_put_optional: fn(out: ^[U8], value: String?) EvidenceCodecError! {
 }
 
 evidence_attachment_indices: fn(values: [EvidenceAttachment]) -> [Int] Never! {
-    indices := [Int]{}
+    ^indices: [Int]{}
     loop index in 0..<values.len() -> indices.push(index)
     indices.sort_by(fn(left: Int, right: Int) { evidence_attachment_order(values[left], values[right]) })
     indices
 }
 
 evidence_diagnostic_indices: fn(values: [EvidenceDiagnostic]) -> [Int] Never! {
-    indices := [Int]{}
+    ^indices: [Int]{}
     loop index in 0..<values.len() -> indices.push(index)
     indices.sort_by(fn(left: Int, right: Int) { evidence_diagnostic_order(values[left], values[right]) })
     indices
 }
 
 evidence_chain_indices: fn(values: [EvidenceChainLink]) -> [Int] Never! {
-    indices := [Int]{}
+    ^indices: [Int]{}
     loop index in 0..<values.len() -> indices.push(index)
     indices.sort_by(fn(left: Int, right: Int) { evidence_chain_order(values[left], values[right]) })
     indices
@@ -106,7 +106,7 @@ evidence_encode_record_body: fn(record: EvidenceRecord, out: ^[U8]) EvidenceCode
         evidence_put_string(out, value.relation)
     }
     evidence_put_string(out, evidence_completeness_reason(record.completeness) ?? "")
-    reference := ""
+    ^reference: ""
     if record.derivation == {
         .Val(value) -> { reference = value.id }
         .None -> {}
@@ -184,7 +184,7 @@ evidence_encode_derivation: fn(value: DerivationRecord, out: ^[U8]) EvidenceCode
 }
 
 evidence_report_encode: fn(report: EvidenceReport) -> [U8] EvidenceCodecError! {
-    out := EVIDENCE_REPORT_MAGIC.bytes()
+    ^out: EVIDENCE_REPORT_MAGIC.bytes()
     evidence_put_number(out, U64{EVIDENCE_REPORT_VERSION}, 2)
     loop record in report.records {
         if record.derivation == {
@@ -206,7 +206,7 @@ DERIVATION_STORE_MAGIC: "JETDRV01"
 // The derivation relation's bytes: the magic, the record count, then each
 // record in row order as `evidence_encode_derivation` writes one.
 derivation_store_encode: fn(store: DerivationStore) -> [U8] EvidenceCodecError! {
-    out := DERIVATION_STORE_MAGIC.bytes()
+    ^out: DERIVATION_STORE_MAGIC.bytes()
     evidence_put_number(out, U64{store.records.len()}, 4)
     loop record in store.records -> evidence_encode_derivation(record, out)
     Ok(out)

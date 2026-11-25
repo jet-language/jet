@@ -247,8 +247,8 @@ ExecutableLeaseProtocol: struct {
 
     recover_stale_leases_unlocked: fn(self) -[FS, Env, Rand]> Int IOError! {
         records: self.records_dir()
-        protected := [String]{}
-        preserve_containers := false
+        ^protected: [String]{}
+        ^preserve_containers: false
         if files.stat(records) == {
             .Ok(info) -> {
                 if info.is_symlink || !info.is_dir {
@@ -289,7 +289,7 @@ ExecutableLeaseProtocol: struct {
                     next
                 }
             }
-            unknown_state := false
+            ^unknown_state: false
             loop generation in generations {
                 number: store_lease_parse_decimal(generation.name, LEASE_U64_MAX) ?? {
                     if !store_lease_is_partial_name(generation.name) -> unknown_state = true
@@ -336,7 +336,7 @@ ExecutableLeaseProtocol: struct {
                     next
                 }
             }
-            reclaimable := true
+            ^reclaimable: true
             loop generation in generations {
                 generation_path: generation.path
                 number: store_lease_parse_decimal(generation.name, LEASE_U64_MAX) ?? {
@@ -416,7 +416,7 @@ ExecutableLeaseProtocol: struct {
         if info.is_symlink || !info.is_dir {
             return Err(store_lease_invalid("executable lease containers are not a real directory"))
         }
-        swept := 0
+        ^swept: 0
         entries: files.list_dir(leases)
         loop entry in entries {
             name: entry.name
@@ -475,7 +475,7 @@ ExecutableLeaseProtocol: struct {
     lease_container: fn(self, snapshot: String) -> String IOError! {
         leases: self.leases_dir()
         relative: store_lease_strip_prefix(snapshot, leases) ?? return Err(store_lease_invalid("executable lease snapshot is outside the lease root"))
-        parts := [String]{}
+        ^parts: [String]{}
         loop part in files.split_slash(relative) {
             if part != "" && part != "." -> parts.push(part)
         }
@@ -530,7 +530,7 @@ ExecutableLeaseProtocol: struct {
             return Err(store_lease_invalid("executable lease owner scope does not match the lease"))
         }
         canonical: store_lease_request_canonical(request, false)
-        signed := request
+        ^signed: request
         signed.mac = self.key.sign(canonical).sig_hex
         store_lease_request_canonical(signed, true)
     }
@@ -557,7 +557,7 @@ ExecutableLeaseProtocol: struct {
     // renamed generation directory. Rename never overwrites an older complete
     // generation, so a concurrent publisher leaves the last good one.
     publish_receipt: fn(self, input: LeaseReceipt) -[FS, Env, Rand]> LeaseReceipt IOError! {
-        receipt := input
+        ^receipt: input
         receipt.mac = self.key.sign(store_lease_receipt_canonical(receipt, false).bytes()).sig_hex
         record: self.record_dir(receipt.lease_id)
         generations: files.join(record, "generations")
@@ -585,8 +585,8 @@ ExecutableLeaseProtocol: struct {
         if info.is_symlink || !info.is_dir {
             return Err(store_lease_invalid("executable lease generations are not a real directory"))
         }
-        latest := LeaseReceipt?{None}
-        latest_generation := -1
+        ^latest: LeaseReceipt?{None}
+        ^latest_generation: -1
         entries: files.list_dir(generations)
         loop entry in entries {
             generation: store_lease_parse_decimal(entry.name, LEASE_U64_MAX) ?? next
@@ -781,7 +781,7 @@ store_lease_load_or_create_key: fn(service: String) -[FS, Env, Rand]> [U8] IOErr
     token: store_lease_random_id(8)
     partial: files.join(service, ".{LEASE_AUTH_KEY_FILE}.{sys.pid()}-{token}.partial")
     secret: random.bytes(LEASE_AUTH_KEY_BYTES) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("executable lease ids require a platform CSPRNG")}))
-    file := files.create(partial, if_exists: .Refuse, mode: Val(LEASE_KEY_MODE))
+    ^file: files.create(partial, if_exists: .Refuse, mode: Val(LEASE_KEY_MODE))
     file.write_bytes(secret)
     file.fsync()
     if files.hard_link(partial, path) == {
@@ -812,7 +812,7 @@ store_lease_ensure_real_directory: fn(path: String, label: String) -[FS]> IOErro
 }
 
 store_lease_write_new_synced: fn(path: String, bytes: [U8]) -[FS]> IOError! {
-    file := files.create(path, if_exists: .Refuse)
+    ^file: files.create(path, if_exists: .Refuse)
     file.write_bytes(bytes)
     file.fsync()
 }
@@ -861,7 +861,7 @@ store_lease_read_bounded: fn(path: String) -[FS]> String IOError! {
     if info.is_symlink || !info.is_file {
         return Err(store_lease_invalid("executable lease receipt artifact is not a regular file"))
     }
-    file := files.open(path, links: .Refuse)
+    ^file: files.open(path, links: .Refuse)
     held: file.stat()
     if !held.is_file {
         return Err(store_lease_invalid("executable lease receipt artifact is not a regular file"))
@@ -869,7 +869,7 @@ store_lease_read_bounded: fn(path: String) -[FS]> String IOError! {
     if held.size > LEASE_RECEIPT_BYTE_BOUND {
         return Err(store_lease_invalid("executable lease receipt exceeds the bound"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: file.read_bytes(65536)
         if chunk.len() == 0 -> break

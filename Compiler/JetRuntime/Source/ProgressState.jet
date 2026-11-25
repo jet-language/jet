@@ -4,8 +4,8 @@
 progress_bound: fn(text: I64) -> I64 {
     data: rt_text_data(text)
     length: rt_text_len(text)
-    at := I64{0}
-    count := I64{0}
+    ^at: I64{0}
+    ^count: I64{0}
     loop at < length {
         if (count >= I64{256}) { break }
         at += rt_text_width(wrapping(data + at))
@@ -17,8 +17,8 @@ progress_bound: fn(text: I64) -> I64 {
 progress_strip_ansi: fn(text: I64) -> I64 {
     output: jet_rt_string_builder_new()
     data: rt_text_data(text)
-    at := I64{0}
-    state := I64{0}
+    ^at: I64{0}
+    ^state: I64{0}
     loop at < rt_text_len(text) {
         width: rt_text_width(wrapping(data + at))
         character: rt_text_decode(wrapping(data + at))
@@ -80,7 +80,7 @@ progress_fixed2: fn(value: Float, suffix: I64) -> I64 {
     mantissa: (bits & I64{4503599627370495}) | (if (binary == I64{0}) -> I64{0} else -> I64{4503599627370496})
     shift: if (binary == I64{0}) -> I64{-1074} else -> binary - I64{1075}
     numerator: jet_int_mul(mantissa, I64{100})
-    rounded := I64{0}
+    ^rounded: I64{0}
     if {
         (shift >= I64{0}) -> { rounded = jet_int_shl(numerator, shift, I64{0}, I64{0}, I64{0}) }
         // mantissa*100 < 2^60: every smaller binary value rounds to zero.
@@ -131,9 +131,9 @@ progress_substitute: fn(template: I64, key: I64, value: I64) -> I64 {
 
 progress_render: fn(description: I64, format: I64, count: I64, total: I64, elapsed: Float, color: Bool) -> I64 {
     template: if (rt_text_len(format) == I64{0}) -> rt_static_text("{{description}} {{percent}}% {{count}}/{{total}} elapsed {{elapsed}} remaining {{remaining}} rate {{rate}}") else -> format
-    rendered := progress_bound(template)
+    ^rendered: progress_bound(template)
     rendered = progress_substitute(rendered, rt_static_text("{{description}}"), progress_bound(description))
-    percent := jet_rt_string_clone(rt_static_text("?"))
+    ^percent: jet_rt_string_clone(rt_static_text("?"))
     if (total >= I64{0}) {
         jet_rt_string_drop(percent)
         if (total == I64{0}) { percent = jet_rt_i64_to_string(I64{100}) } else {
@@ -185,8 +185,8 @@ progress_fail: fn(error: I64) {
 
 progress_write: fn(text: I64, newline: Bool) -> Bool {
     if !progress_enabled() -> return true
-    operation := HOST_IO_OP_WRITE
-    cause := I64{0}
+    ^operation: HOST_IO_OP_WRITE
+    ^cause: I64{0}
     if {
         jet_fault_should_fail(rt_static_text("IO.Write")) -> {
             cause = jet_rt_string_clone(rt_static_text("fault injected: IO.Write"))
@@ -198,7 +198,7 @@ progress_write: fn(text: I64, newline: Bool) -> Bool {
     }
     slot: jet_rt_alloc(I64{8}, I64{8})
     if {
-        (cause != I64{0}) -> { _ := host_io_other_take(operation, host_stderr_name(), cause, slot) }
+        (cause != I64{0}) -> { ^_: host_io_other_take(operation, host_stderr_name(), cause, slot) }
         else -> {
             frame: jet_rt_string_builder_new()
             if !newline -> rt_text_push_word(frame, I64{13}, I64{1})
@@ -236,7 +236,7 @@ progress_write: fn(text: I64, newline: Bool) -> Bool {
     }
     rt_text_store(wrapping(state + I64{56}), I64{1})
     if (rt_text_word(wrapping(state + I64{48})) != I64{0}) {
-        _ := progress_write(rt_static_text(""), true)
+        ^_: progress_write(rt_static_text(""), true)
     }
 }
 
@@ -245,13 +245,13 @@ progress_write: fn(text: I64, newline: Bool) -> Bool {
         return
     }
     previous: rt_text_word(wrapping(state + I64{40}))
-    count := if (previous == I64{-1}) -> previous else -> wrapping(previous + I64{1})
+    ^count: if (previous == I64{-1}) -> previous else -> wrapping(previous + I64{1})
     total: rt_text_word(state)
     if (total >= I64{0} && world_unsigned_before(total, count)) { count = total }
     rt_text_store(wrapping(state + I64{40}), count)
     instant: time_clock_read(I64{1})
-    seconds := sync_load(instant) - rt_text_word(wrapping(state + I64{24}))
-    nanos := sync_load(wrapping(instant + I64{8})) - rt_text_word(wrapping(state + I64{32}))
+    ^seconds: sync_load(instant) - rt_text_word(wrapping(state + I64{24}))
+    ^nanos: sync_load(wrapping(instant + I64{8})) - rt_text_word(wrapping(state + I64{32}))
     if (nanos < I64{0}) {
         seconds -= I64{1}
         nanos += I64{1000000000}

@@ -124,7 +124,7 @@ comparison_observation_failure: fn(raw: String, failure: String) -> ComparisonOb
 }
 
 comparison_observation_with_effects: fn(observation: ComparisonObservation, effects: [String]) -> ComparisonObservation Never! {
-    result := observation
+    ^result: observation
     result.ordered_effects = effects
     result
 }
@@ -181,11 +181,11 @@ comparison_sample_validate: fn(sample: ComparisonSample) ComparisonRecordError! 
 // The complete canonical payload.
 comparison_record_to_json: fn(record: ComparisonRecord) -> CanonicalJSON ComparisonRecordError! {
     comparison_record_validate(record)
-    samples := [CanonicalJSON]{}
+    ^samples: [CanonicalJSON]{}
     loop sample in record.samples -> samples.push(comparison_sample_json(sample))
-    reduced := CanonicalJSON.Null
+    ^reduced: CanonicalJSON.Null
     if record.reduced_counterexample == .Val(sample) -> reduced = comparison_sample_json(sample)
-    first_difference := CanonicalJSON.Null
+    ^first_difference: CanonicalJSON.Null
     if record.first_difference == .Val(index) -> first_difference = CanonicalJSON.Integer("{index}")
     canonical_json_object(
         [CanonicalJSONField]{
@@ -226,7 +226,7 @@ comparison_optional_string_json: fn(value: String?) -> CanonicalJSON Never! {
 }
 
 comparison_strings_json: fn(values: [String]) -> CanonicalJSON Never! {
-    items := [CanonicalJSON]{}
+    ^items: [CanonicalJSON]{}
     loop value in values -> items.push(CanonicalJSON.String(value))
     CanonicalJSON.Array(items)
 }
@@ -249,7 +249,7 @@ comparison_optional_observation_json: fn(observation: ComparisonObservation?) ->
 }
 
 comparison_identity_json: fn(identity: ComparisonIdentity) -> CanonicalJSON ComparisonRecordError! {
-    seed := CanonicalJSON.Null
+    ^seed: CanonicalJSON.Null
     if identity.seed == .Val(number) -> seed = CanonicalJSON.Integer("{number}")
     canonical_json_object(
         [CanonicalJSONField]{
@@ -264,7 +264,7 @@ comparison_identity_json: fn(identity: ComparisonIdentity) -> CanonicalJSON Comp
 }
 
 comparison_sample_json: fn(sample: ComparisonSample) -> CanonicalJSON ComparisonRecordError! {
-    declared_equal := CanonicalJSON.Null
+    ^declared_equal: CanonicalJSON.Null
     if sample.declared_equal == .Val(flag) -> declared_equal = CanonicalJSON.Bool(flag)
     canonical_json_object(
         [CanonicalJSONField]{

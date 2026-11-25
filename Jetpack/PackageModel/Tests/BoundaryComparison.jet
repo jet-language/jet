@@ -66,7 +66,7 @@ pkg_boundary_test_derivation: fn(contract: ForeignBoundaryContract) -> Derivatio
 
 pkg_boundary_test_evidence: fn(derivation: DerivationRecord) -> EvidenceRecord Never! {
     identity: EvidenceIdentity{report_id: "report", claim_id: "replacement", evidence_id: "observation"}
-    record := evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, EvidenceOutcome.Passed, U64{1}, EvidenceSource{path: "probe.jet", line: U32{1}, column: U32{1}}, EvidenceBuild{toolchain: "toolchain", target: "target", profile: "test"}, EvidenceRevision{source: "source", build: "build", revision: "run"})
+    ^record: evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, EvidenceOutcome.Passed, U64{1}, EvidenceSource{path: "probe.jet", line: U32{1}, column: U32{1}}, EvidenceBuild{toolchain: "toolchain", target: "target", profile: "test"}, EvidenceRevision{source: "source", build: "build", revision: "run"})
     record.derivation = Val(derivation_record_reference(derivation))
     record
 }
@@ -89,7 +89,7 @@ pkg_boundary_test_sample: fn(candidate: String, declared_equal: Bool) -> Compari
 }
 
 pkg_boundary_test_with_replays: fn(sample: ComparisonSample, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
-    replayed := sample
+    ^replayed: sample
     replayed.reference_replay = Val(reference)
     replayed.candidate_replay = Val(candidate)
     replayed
@@ -148,7 +148,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("boundary matched comparison preserves both raw sides evidence and replay assumptions") {
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     sample: pkg_boundary_test_with_replays(pkg_boundary_test_sample("42", true), pkg_boundary_test_observation("42"), pkg_boundary_test_observation("42"))
     record: pkg_boundary_test_compare(ObservationRelation.TypedEquality, [ComparisonSample]{sample})
     evidence: EvidenceIdentity{report_id: "report", claim_id: "claim", evidence_id: "evidence"}
@@ -168,7 +168,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 #Test("boundary terminals retain exact status relation reason and deduplicate assumptions") {
     statuses: [ComparisonStatus]{ComparisonStatus.Empty, ComparisonStatus.Unsupported, ComparisonStatus.Unavailable, ComparisonStatus.Timeout, ComparisonStatus.Canceled, ComparisonStatus.InvalidOracle, ComparisonStatus.Contaminated}
     loop status in statuses {
-        contract := pkg_boundary_test_contract("py")
+        ^contract: pkg_boundary_test_contract("py")
         record: pkg_boundary_test_terminal(ObservationRelation.Custom{name: "oracle"}, status, "terminal reason")
         contract.record_comparison(record, None) ?? panic("terminal")
         contract.record_comparison(record, None) ?? panic("terminal twice")
@@ -176,16 +176,16 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
         assert_eq(contract.assumptions, [String]{"comparison-relation:oracle", "comparison-terminal:{comparison_status_as_str(status)}:terminal reason"})
         assert(!contract.replacement_accepted())
     }
-    contract := pkg_boundary_test_contract("py")
-    record := pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Empty, "unused")
+    ^contract: pkg_boundary_test_contract("py")
+    ^record: pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Empty, "unused")
     record.reason = None
     contract.record_comparison(record, None) ?? panic("terminal without reason")
     assert(contract.assumptions.contains("comparison-terminal:empty:comparison produced no samples"))
 }
 
 #Test("boundary refuses unsupported schema and universal comparison proof without mutation") {
-    contract := pkg_boundary_test_contract("py")
-    record := pkg_boundary_test_comparison("42", true)
+    ^contract: pkg_boundary_test_contract("py")
+    ^record: pkg_boundary_test_comparison("42", true)
     record.schema_version = U16{3}
     error: if contract.record_comparison(record, None) == {
         .Ok(_) -> panic("schema")
@@ -204,7 +204,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("reasoned replacement creates canonical artifact receipt and selectable boundary") {
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     record: pkg_boundary_test_comparison("42", true)
     receipt: pkg_boundary_test_accept(contract, record) ?? panic("accept")
     contract.validate() ?? panic("accepted boundary")
@@ -239,7 +239,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 #Test("reasoned replacement refuses empty mismatched discarded and all terminal verdicts atomically") {
     records: [ComparisonRecord]{pkg_boundary_test_comparison("43", false), pkg_boundary_test_compare(ObservationRelation.TypedEquality, [ComparisonSample]{}), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample("42", true)}, 1), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 2), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unsupported, "unsupported"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unavailable, "unavailable"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Timeout, "timeout"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Canceled, "canceled"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.InvalidOracle, "invalid"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Contaminated, "contaminated")}
     loop record in records {
-        contract := pkg_boundary_test_contract("py")
+        ^contract: pkg_boundary_test_contract("py")
         before: contract.copy()
         expected: if comparison_record_assert_equal(record) == {
             .Ok(_) -> panic("refused comparison")
@@ -251,13 +251,13 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("reasoned replacement refuses each stale identity component and artifact coverage") {
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     derivation: pkg_boundary_test_derivation(contract)
     evidence: pkg_boundary_test_evidence(derivation)
     record: pkg_boundary_test_comparison("42", true)
     before: contract.copy()
     loop component in 0..<6 {
-        identity := contract.identity
+        ^identity: contract.identity
         if component == {
             0 -> identity.source = "changed"
             1 -> identity.overlay = "changed"
@@ -274,7 +274,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
         assert_eq(contract, before)
     }
     loop component in 0..<6 {
-        coverage := contract.artifact_coverage
+        ^coverage: contract.artifact_coverage
         if component == {
             0 -> coverage.loaded_artifact = "changed"
             1 -> coverage.transitive_dependencies = Val([String]{"changed"})
@@ -293,9 +293,9 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("reasoned replacement refuses blank replacement and failed incomplete unchecked evidence") {
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     derivation: pkg_boundary_test_derivation(contract)
-    evidence := pkg_boundary_test_evidence(derivation)
+    ^evidence: pkg_boundary_test_evidence(derivation)
     record: pkg_boundary_test_comparison("42", true)
     before: contract.copy()
     error: if contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, " \t") == {
@@ -316,10 +316,10 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("reasoned replacement requires canonical derivation and agreeing valid evidence") {
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     before: contract.copy()
-    derivation := pkg_boundary_test_derivation(contract)
-    evidence := pkg_boundary_test_evidence(derivation)
+    ^derivation: pkg_boundary_test_derivation(contract)
+    ^evidence: pkg_boundary_test_evidence(derivation)
     record: pkg_boundary_test_comparison("42", true)
     derivation.id = "forged"
     error: if contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, "replacement") == {
@@ -360,12 +360,12 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 #Test("unsupported family and bare matched observations never accept replacement") {
     languages: [String]{"c", "cpp", "com", "ada", "pascal"}
     loop language in languages {
-        contract := pkg_boundary_test_contract(language)
+        ^contract: pkg_boundary_test_contract(language)
         before: contract.copy()
         assert_eq(pkg_boundary_test_accept_error(contract, pkg_boundary_test_comparison("42", true)), "foreign source replacement is unavailable for {language}")
         assert_eq(contract, before)
     }
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     contract.record_comparison(pkg_boundary_test_comparison("42", true), None) ?? panic("sampled only")
     error: if contract.accept_replacement() == {
         .Ok(_) -> panic("bare replacement")
@@ -377,13 +377,13 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("receipt validation refuses every missing identity authority derivation and comparison field") {
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     receipt: pkg_boundary_test_accept(contract, pkg_boundary_test_comparison("42", true)) ?? panic("receipt")
-    invalid := receipt
+    ^invalid: receipt
     invalid.schema = "other"
     assert_eq(pkg_boundary_test_receipt_error(invalid), "unsupported foreign source receipt schema `other`")
     loop component in 0..<9 {
-        row := receipt
+        ^row: receipt
         if component == {
             0 -> row.boundary_digest = ""
             1 -> row.boundary_identity.source = ""
@@ -411,7 +411,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
     invalid.evidence = [EvidenceIdentity]{}
     assert_eq(pkg_boundary_test_receipt_error(invalid), "foreign source receipt requires checked derivation and evidence references")
     loop component in 0..<6 {
-        row := receipt
+        ^row: receipt
         if component == {
             0 -> row.comparison_schema_version = U16{3}
             1 -> row.comparison_status = "mismatch"
@@ -425,16 +425,16 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("accepted boundary rejects absent premature and stale receipts") {
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     receipt: pkg_boundary_test_accept(contract, pkg_boundary_test_comparison("42", true)) ?? panic("receipt")
-    missing := contract
+    ^missing: contract
     missing.source_receipt = None
     missing_error: if missing.validate() == {
         .Ok(_) -> panic("missing receipt")
         .Err(error) -> error.message
     }
     assert_eq(missing_error, "accepted foreign replacement is missing its source receipt")
-    premature := contract
+    ^premature: contract
     premature.source_authority = ForeignSourceAuthority.ForeignUntilAccepted
     premature_error: if premature.validate() == {
         .Ok(_) -> panic("premature receipt")
@@ -442,8 +442,8 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
     }
     assert_eq(premature_error, "foreign source receipt requires replacement acceptance")
     loop component in 0..<4 {
-        stale := contract
-        row := receipt
+        ^stale: contract
+        ^row: receipt
         if component == {
             0 -> row.boundary_digest = "changed"
             1 -> row.boundary_identity.overlay = "changed"
@@ -460,7 +460,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("boundary mismatched observations retain raw counterexample without accepting replacement") {
-    contract := pkg_boundary_test_contract("py")
+    ^contract: pkg_boundary_test_contract("py")
     record: pkg_boundary_test_comparison("43", false)
     contract.record_comparison(record, None) ?? panic("record counterexample")
     assert_eq(contract.observations.len(), 1)

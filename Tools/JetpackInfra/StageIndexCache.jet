@@ -203,14 +203,14 @@ usage: fn() -> String Never! {
 }
 
 parse_args: fn(argv: [String]) -[Env, FS]> Options StageError! {
-    mode := Mode.Stage
-    cursor := 0
+    ^mode: Mode.Stage
+    ^cursor: 0
     if argv.len() > 0 && argv[0] == "publish" {
         mode = .Publish
         cursor = 1
     }
-    names := [String]{}
-    values := [String]{}
+    ^names: [String]{}
+    ^values: [String]{}
     loop cursor < argv.len() {
         name: argv[cursor]
         cursor += 1
@@ -396,7 +396,7 @@ ensure_descriptor_fs: fn() -[Env, FS]> StageError! {
 repo_root: fn() -[Env, FS]> String Never! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return ""
+    ^dir: files.cwd() ?? return ""
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return ""
@@ -444,10 +444,10 @@ still_same: fn(parent: files.Directory, name: String, identity: files.Stat) -[FS
 // inspection and its open, is refused.
 open_directory_at: fn(parent: files.Directory, name: String, label: String, absent: Absent) -[FS]> files.Directory StageError! {
     validate_name(name, "path component") ?? return Err(err)
-    attempt := 0
+    ^attempt: 0
     loop attempt < 2 {
         attempt += 1
-        found := entry_at(parent, name, label) ?? return Err(err)
+        ^found: entry_at(parent, name, label) ?? return Err(err)
         if absent == .Create && found == .Missing {
             if parent.create_directory(name, mode: Val(0o755)) == {
                 .Ok(_) | .Err(.AlreadyExists(_)) | .Err(.NotFound(_)) -> {}
@@ -463,7 +463,7 @@ open_directory_at: fn(parent: files.Directory, name: String, label: String, abse
         }
         if before.is_symlink -> return Err(failed("{label} must not be a symlink"))
         if !before.is_dir -> return Err(failed("{label} is not a real directory"))
-        held := if parent.open_directory(name) == {
+        ^held: if parent.open_directory(name) == {
             .Ok(directory) -> directory
             .Err(.NotFound(_)) -> {
                 if absent == .Create -> next
@@ -487,7 +487,7 @@ open_directory_at: fn(parent: files.Directory, name: String, label: String, abse
 
 // Hold the absolute directory `path`, opening each component from `/`.
 open_directory_path: fn(path: String, label: String, absent: Absent) -[FS]> files.Directory StageError! {
-    current := files.open_directory("/") ?? return Err(failed("{label}: the filesystem root cannot be opened: {err}"))
+    ^current: files.open_directory("/") ?? return Err(failed("{label}: the filesystem root cannot be opened: {err}"))
     loop component in path.split("/") {
         if component == "" -> next
         child: open_directory_at(current, component, label, absent) ?? return Err(failed("{label}: {err.message}"))
@@ -508,7 +508,7 @@ open_regular_at: fn(parent: files.Directory, name: String, label: String, limit:
     }
     if before.is_symlink -> return Err(failed("{label} must not be a symlink"))
     check_regular(before, label, limit) ?? return Err(err)
-    reader := parent.open(name) ?? return Err(failed("{label} cannot be opened: {err}"))
+    ^reader: parent.open(name) ?? return Err(failed("{label} cannot be opened: {err}"))
     after: reader.stat() ?? return Err(failed("{label} cannot be inspected: {err}"))
     check_regular(after, label, limit) ?? return Err(err)
     if !same_snapshot(before, after) -> return Err(failed("{label} changed while it was opened"))
@@ -526,7 +526,7 @@ open_regular_path: fn(path: String, label: String, limit: Int) -[FS]> files.File
 read_bounded: fn(reader: ^files.FileReader, limit: Int, label: String) -[FS]> [U8] StageError! {
     start: reader.stat() ?? return Err(failed("{label} cannot be inspected: {err}"))
     if start.size > limit -> return Err(failed("{label} exceeds the {limit} byte bound"))
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(READ_CHUNK) ?? return Err(failed("{label} cannot be read: {err}"))
         if chunk.len() == 0 -> break
@@ -544,12 +544,12 @@ read_bounded: fn(reader: ^files.FileReader, limit: Int, label: String) -[FS]> [U
 }
 
 read_regular_at: fn(parent: files.Directory, name: String, label: String, limit: Int) -[FS]> [U8] StageError! {
-    reader := open_regular_at(parent, name, label, limit) ?? return Err(err)
+    ^reader: open_regular_at(parent, name, label, limit) ?? return Err(err)
     read_bounded(reader, limit, label)
 }
 
 read_regular_path: fn(path: String, label: String, limit: Int) -[FS]> [U8] StageError! {
-    reader := open_regular_path(path, label, limit) ?? return Err(err)
+    ^reader: open_regular_path(path, label, limit) ?? return Err(err)
     read_bounded(reader, limit, label)
 }
 
@@ -566,11 +566,11 @@ compare_files: fn(source: ^files.FileReader, destination: ^files.FileReader, lim
     if source_stat.size != destination_stat.size {
         return Err(failed("{label} immutable bytes changed"))
     }
-    total := 0
+    ^total: 0
     loop total < source_stat.size {
         chunk: source.read_bytes(wanted(source_stat.size, total)) ?? return Err(failed("{label} source cannot be read: {err}"))
         if chunk.len() == 0 -> return Err(failed("{label} source changed while it was read"))
-        other := [U8]{}
+        ^other: [U8]{}
         loop other.len() < chunk.len() {
             more: destination.read_bytes(chunk.len() - other.len()) ?? return Err(failed("{label} destination cannot be read: {err}"))
             if more.len() == 0 {
@@ -595,8 +595,8 @@ compare_files: fn(source: ^files.FileReader, destination: ^files.FileReader, lim
 
 // The regular files `left` and `right` in `parent` hold the same bytes.
 compare_named: fn(parent: files.Directory, left: String, right: String, limit: Int, label: String) -[FS]> StageError! {
-    temporary := open_regular_at(parent, left, "{label} temporary file", limit) ?? return Err(err)
-    current := open_regular_at(parent, right, label, limit) ?? return Err(err)
+    ^temporary: open_regular_at(parent, left, "{label} temporary file", limit) ?? return Err(err)
+    ^current: open_regular_at(parent, right, label, limit) ?? return Err(err)
     compare_files(temporary, current, limit, label)
 }
 
@@ -623,7 +623,7 @@ remove_owned: fn(parent: files.Directory, name: String, identity: files.Stat?) -
 // file's identity.
 fill_from: fn(source: ^files.FileReader, writer: ^files.FileWriter, limit: Int, label: String) -[FS]> files.Stat StageError! {
     start: source.stat() ?? return Err(failed("{label} source cannot be inspected: {err}"))
-    total := 0
+    ^total: 0
     loop total < start.size {
         chunk: source.read_bytes(wanted(start.size, total)) ?? return Err(failed("{label} source cannot be read: {err}"))
         if chunk.len() == 0 -> return Err(failed("{label} source changed while it was read"))
@@ -678,11 +678,11 @@ copy_open_file: fn(source: ^files.FileReader, destination: files.Directory, name
     if existing == .Present(found) {
         if found.is_symlink -> return Err(failed("{label} destination must not be a symlink"))
         check_regular(found, label, limit) ?? return Err(err)
-        current := open_regular_at(destination, name, label, limit) ?? return Err(err)
+        ^current: open_regular_at(destination, name, label, limit) ?? return Err(err)
         return compare_files(source, current, limit, label)
     }
     temporary: temporary_name(name) ?? return Err(err)
-    writer := destination.create(temporary, if_exists: .Refuse, mode: Val(0o644)) ?? return Err(failed("{label} temporary file cannot be created: {err}"))
+    ^writer: destination.create(temporary, if_exists: .Refuse, mode: Val(0o644)) ?? return Err(failed("{label} temporary file cannot be created: {err}"))
     if fill_from(source, writer, limit, label) == {
         .Ok(identity) -> { place(destination, temporary, name, identity, limit, label) }
         .Err(error) -> {
@@ -705,7 +705,7 @@ write_immutable_bytes: fn(destination: files.Directory, name: String, bytes: [U8
         return Ok()
     }
     temporary: temporary_name(name) ?? return Err(err)
-    writer := destination.create(temporary, if_exists: .Refuse, mode: Val(0o644)) ?? return Err(failed("{label} temporary file cannot be created: {err}"))
+    ^writer: destination.create(temporary, if_exists: .Refuse, mode: Val(0o644)) ?? return Err(failed("{label} temporary file cannot be created: {err}"))
     if fill_bytes(writer, bytes, label) == {
         .Ok(identity) -> { place(destination, temporary, name, identity, limit, label) }
         .Err(error) -> {
@@ -781,18 +781,18 @@ copy_index_tree: fn(source: files.Directory, destination: files.Directory, label
                 copy_index_tree(child_source, child_destination, "{label}/{name}", relative.concat([name]), channel) ?? return Err(err)
             }
             in_manifest && (name == "manifest.json" || name == "manifest.json.sig.json") -> {
-                manifest := open_regular_at(source, name, "index manifest {name}", manifest_limit(name)) ?? return Err(err)
+                ^manifest: open_regular_at(source, name, "index manifest {name}", manifest_limit(name)) ?? return Err(err)
                 copy_open_file(manifest, destination, name, manifest_limit(name), "index manifest {name}") ?? return Err(err)
             }
             name.ends_with(".json.zst") -> {
                 if !target_name_ok(name) {
                     return Err(failed("index target filename is not a lowercase SHA-256 object: {name}"))
                 }
-                target := open_regular_at(source, name, "index target {name}", MAX_COMPRESSED_BYTES) ?? return Err(err)
+                ^target: open_regular_at(source, name, "index target {name}", MAX_COMPRESSED_BYTES) ?? return Err(err)
                 copy_open_file(target, destination, name, MAX_COMPRESSED_BYTES, "index target {name}") ?? return Err(err)
                 signature_name: "{name}.sig.json"
                 signature_label: "index target signature {signature_name}"
-                signature := open_regular_at(source, signature_name, signature_label, MAX_SIGNATURE_BYTES) ?? return Err(err)
+                ^signature: open_regular_at(source, signature_name, signature_label, MAX_SIGNATURE_BYTES) ?? return Err(err)
                 copy_open_file(signature, destination, signature_name, MAX_SIGNATURE_BYTES, signature_label) ?? return Err(err)
             }
             name.ends_with(".json.zst.sig.json") -> {}
@@ -820,7 +820,7 @@ copy_cache_tree: fn(source: files.Directory, destination: files.Directory, label
                 copy_cache_tree(child_source, child_destination, "{label}/{name}") ?? return Err(err)
             }
             else -> {
-                file := open_regular_at(source, name, "cache object {name}", MAX_CACHE_BYTES) ?? return Err(err)
+                ^file: open_regular_at(source, name, "cache object {name}", MAX_CACHE_BYTES) ?? return Err(err)
                 copy_open_file(file, destination, name, MAX_CACHE_BYTES, "cache object {name}") ?? return Err(err)
             }
         }
@@ -927,8 +927,8 @@ compare_tree: fn(source: files.Directory, destination: files.Directory, kind: Ki
             return Err(failed("invalid immutable index target {name}"))
         }
         limit: file_limit(kind, name)
-        source_file := open_regular_at(source, name, "{label}/{name}", limit) ?? return Err(err)
-        destination_file := open_regular_at(destination, name, "{label}/{name} destination", limit) ?? return Err(err)
+        ^source_file: open_regular_at(source, name, "{label}/{name}", limit) ?? return Err(err)
+        ^destination_file: open_regular_at(destination, name, "{label}/{name} destination", limit) ?? return Err(err)
         compare_files(source_file, destination_file, limit, "{label}/{name}") ?? return Err(err)
     }
     unchanged(source, source_listing, "{label} changed while it was checked")
@@ -938,7 +938,7 @@ compare_tree: fn(source: files.Directory, destination: files.Directory, kind: Ki
 // characters escaped, everything else as is.
 json_string: fn(value: String) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{U8{34}}
+    ^out: [U8]{U8{34}}
     loop byte in value.bytes() {
         code: Int{byte}
         if code == {
@@ -968,7 +968,7 @@ json_string: fn(value: String) -> String Never! {
 keys_of: fn(value: Dyn) -> [String]? Never! {
     if value == {
         .Object(fields) -> {
-            out := [String]{}
+            ^out: [String]{}
             loop entry in fields -> out.push(entry.key)
             Val(out)
         }
@@ -1075,7 +1075,7 @@ validate_signature: fn(bytes: [U8], label: String) StageError! {
         return Err(failed("{label} has an unsupported signature shape"))
     }
     // The canonical text keeps the sidecar's own field order.
-    parts := [String]{}
+    ^parts: [String]{}
     keys: keys_of(value) ?? [String]{}
     loop key in keys {
         text: if key == "schema" -> "1" else -> json_string(text_field(value, key) ?? "")
@@ -1125,14 +1125,14 @@ validate_url: fn(value: String, label: String, suffix: String) StageError! {
 // The manifest's bytes as the publisher writes them: targets ordered by
 // revision then system, every field in its fixed order.
 canonical_manifest_bytes: fn(manifest: Manifest) -> [U8] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<manifest.targets.len() {
         target: manifest.targets[index]
-        at := order.len()
+        ^at: order.len()
         loop at > 0 && target_before(target, manifest.targets[order[at - 1]]) -> at -= 1
         order.insert(at, index)
     }
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in order {
         target: manifest.targets[index]
         parts.push("{{\"revision\":{json_string(target.revision)},\"system\":{json_string(target.system)},\"url\":{json_string(target.url)},\"signature_url\":{json_string(target.signature_url)},\"sha256\":{json_string(target.sha256)},\"compressed_length\":{target.compressed_length},\"decoded_length\":{target.decoded_length},\"record_count\":{target.record_count},\"index_signature_sha256\":{json_string(target.index_signature_sha256)},\"discoverable\":{target.discoverable}}}")
@@ -1161,8 +1161,8 @@ validate_manifest: fn(bytes: [U8], channel: String) -> Manifest StageError! {
     if items.len() > MAX_TARGETS {
         return Err(failed("index manifest targets are outside their bound"))
     }
-    seen := [String]{}
-    targets := [Target]{}
+    ^seen: [String]{}
+    ^targets: [Target]{}
     loop item in items {
         if keys_of(item) == None -> return Err(failed("index manifest target is malformed"))
         targets.push(validate_target(item, seen) ?? return Err(err))
@@ -1228,7 +1228,7 @@ validate_manifest_targets: fn(root: files.Directory, manifest: Manifest) -[FS]> 
         system: open_directory_at(revision, target.system, "index target system", .Refuse) ?? return Err(err)
         target_name: "{target.sha256}.json.zst"
         target_label: "index target {target_name}"
-        target_file := open_regular_at(system, target_name, target_label, MAX_COMPRESSED_BYTES) ?? return Err(err)
+        ^target_file: open_regular_at(system, target_name, target_label, MAX_COMPRESSED_BYTES) ?? return Err(err)
         opened: target_file.stat() ?? return Err(failed("{target_label} cannot be inspected: {err}"))
         if opened.size != target.compressed_length {
             return Err(failed("{target_label} length disagrees with manifest"))
@@ -1250,8 +1250,8 @@ validate_manifest_targets: fn(root: files.Directory, manifest: Manifest) -[FS]> 
 
 // The manifest and its signature in `directory`, both opened before either is read.
 read_manifest_pair: fn(directory: files.Directory, channel: String) -[FS]> ManifestInfo StageError! {
-    manifest := open_regular_at(directory, "manifest.json", "index manifest", MAX_MANIFEST_BYTES) ?? return Err(err)
-    signature := open_regular_at(directory, "manifest.json.sig.json", "index manifest signature", MAX_SIGNATURE_BYTES) ?? return Err(err)
+    ^manifest: open_regular_at(directory, "manifest.json", "index manifest", MAX_MANIFEST_BYTES) ?? return Err(err)
+    ^signature: open_regular_at(directory, "manifest.json.sig.json", "index manifest signature", MAX_SIGNATURE_BYTES) ?? return Err(err)
     bytes: read_bounded(manifest, MAX_MANIFEST_BYTES, "index manifest") ?? return Err(err)
     signature_bytes: read_bounded(signature, MAX_SIGNATURE_BYTES, "index manifest signature") ?? return Err(err)
     validate_signature(signature_bytes, "index manifest signature") ?? return Err(err)
@@ -1313,7 +1313,7 @@ generation_number: fn(name: String) -> Int StageError! {
 // with this number but other manifest bytes.
 inspect_generation_history: fn(generations: files.Directory, id: String, generation: Int) -[FS]> StageError! {
     listing: entries_at(generations, "publication generations") ?? return Err(err)
-    highest := 0
+    ^highest: 0
     loop entry in listing.entries {
         name: entry.name
         if name.starts_with(".") {
@@ -1360,7 +1360,7 @@ current_generation: fn(root: files.Directory, generations: files.Directory) -[FS
 // Take the publication root: create its lock file exclusively. The lock's
 // identity, so only this publisher's lock is removed.
 acquire_lock: fn(root: files.Directory) -[Env, FS]> files.Stat StageError! {
-    writer := if root.create(LOCK_NAME, if_exists: .Refuse, mode: Val(0o600)) == {
+    ^writer: if root.create(LOCK_NAME, if_exists: .Refuse, mode: Val(0o600)) == {
         .Ok(file) -> file
         .Err(.AlreadyExists(_)) -> {
             return Err(failed("publication root is busy"))
@@ -1550,7 +1550,7 @@ stage_index: fn(producer: files.Directory, output: files.Directory, info: Manife
 
 // A fresh private directory in `parent`; its name.
 create_private_directory: fn(parent: files.Directory, label: String) -[Env, FS, Rand]> String StageError! {
-    attempt := 0
+    ^attempt: 0
     loop attempt < 8 {
         attempt += 1
         name: temporary_name("cache-stage") ?? return Err(err)

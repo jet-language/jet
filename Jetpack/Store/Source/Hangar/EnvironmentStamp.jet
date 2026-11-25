@@ -24,7 +24,7 @@ EnvironmentSelection: struct {
 }
 
 store_environment_entry_selection: fn(entry: StoreEntry) -> EnvironmentSelection Never! {
-    stable := entry.copy()
+    ^stable: entry.copy()
     stable.realized_at = 0
     stable.last_used_at = 0
     EnvironmentSelection{
@@ -42,7 +42,7 @@ EnvironmentEntryIndex: struct {
     priv by_selection: [String:StoreEntry],
 
     from_entries: fn(entries: [StoreEntry]) -> EnvironmentEntryIndex Never! {
-        index := EnvironmentEntryIndex{by_selection: [String:StoreEntry]{}}
+        ^index: EnvironmentEntryIndex{by_selection: [String:StoreEntry]{}}
         loop entry in entries -> index.offer(store_environment_entry_selection(entry).key(), entry)
         index
     }
@@ -50,13 +50,13 @@ EnvironmentEntryIndex: struct {
     // Build only the receipt members that can be selected. Store metadata
     // hashes for unrelated entries cannot affect an environment stamp.
     from_entries_for_selections: fn(entries: [StoreEntry], selections: [EnvironmentSelection]) -> EnvironmentEntryIndex Never! {
-        wanted := [String:Bool]{}
-        base_keys := [String:Bool]{}
+        ^wanted: [String:Bool]{}
+        ^base_keys: [String:Bool]{}
         loop selection in selections {
             wanted[selection.key()] = true
             base_keys[selection.base_key()] = true
         }
-        index := EnvironmentEntryIndex{by_selection: [String:StoreEntry]{}}
+        ^index: EnvironmentEntryIndex{by_selection: [String:StoreEntry]{}}
         loop entry in entries {
             base: "{entry.reference}\t{entry.name}\t{entry.version}\t{entry.envelope.output_hash}"
             if !base_keys.has_key(base) -> next
@@ -92,7 +92,7 @@ store_append_environment_stamp_field: fn(stamp: ^[U8], field: [U8]) Never! {
 // paths and dependency files, which stay part of the activation witness.
 store_external_output_paths: fn(roots: HangarRoots, entries: [StoreEntry]) -> [String] Never! {
     hangar: roots.hangar_dir()
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries {
         if entry.out != "" && !store_path_starts_with(entry.out, hangar) -> paths.push(entry.out)
         producer: ProducerRecord.decode(entry.producer_record) ?? next
@@ -100,7 +100,7 @@ store_external_output_paths: fn(roots: HangarRoots, entries: [StoreEntry]) -> [S
         if producer.provider == "nix" -> next
         loop key in store_sorted_keys(producer.facts) {
             value: producer.facts[key]
-            path := ""
+            ^path: ""
             if {
                 key.starts_with("nix.output.") || key.starts_with("output.path.") -> path = value
                 key.starts_with("dependency.object.") -> {
@@ -192,13 +192,13 @@ store_append_stat_failure: fn(stamp: ^[U8], error: IOError, missing: String, fai
 // verified closure.
 store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String, definition_fingerprint: String, selections: [EnvironmentSelection], index: EnvironmentEntryIndex) -> String StoreError! {
     store_stamp: store_wal_state_stamp(roots)
-    canonical := "jetpack-env-entry-v5".bytes()
+    ^canonical: "jetpack-env-entry-v5".bytes()
     canonical.push(U8{0})
     header: [String]{store_stamp, definition_fingerprint, project}
     loop field in header -> store_append_environment_stamp_field(canonical, field.bytes())
-    ordered := selections.copy()
+    ^ordered: selections.copy()
     ordered.sort_by(fn(selection) { selection.key() })
-    selected := [StoreEntry]{}
+    ^selected: [StoreEntry]{}
     seals: files.join(roots.hangar_dir(), STORE_SEALS_DIR)
     loop selection in ordered {
         fields: [String]{selection.reference, selection.name, selection.version, selection.output_hash, selection.metadata}

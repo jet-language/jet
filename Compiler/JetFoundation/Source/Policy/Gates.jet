@@ -27,7 +27,7 @@ PolicyGateParseError: struct {
 // the main package names in its package file.
 policy_gate_parse: fn(spec: String) -> PolicyKey PolicyGateParseError! {
     raw: spec.bytes()
-    split := -1
+    ^split: -1
     loop (index, byte) in raw {
         if (Int{byte}) == 61 {
             split = index
@@ -59,7 +59,7 @@ policy_invocation_declaration: fn(key: PolicyKey) -> PolicyDeclaration Never! {
 // refuses its gate, whatever an inner rung or an invocation allowance says;
 // None when no declaration forbids it.
 policy_gate_forbidding: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> PolicyDeclaration? Never! {
-    selected := PolicyDeclaration?{None}
+    ^selected: PolicyDeclaration?{None}
     loop declaration in declarations {
         if declaration.key != key || declaration.value != PolicyValue.Forbid -> next
         if selected == .Val(outer) {
@@ -73,7 +73,7 @@ policy_gate_forbidding: fn(key: PolicyKey, declarations: [PolicyDeclaration]) ->
 policy_resolve_with_gates: fn(key: PolicyKey, declarations: [PolicyDeclaration], gates: GateSet) -> EffectivePolicy? PolicyError! {
     effective: policy_resolve(key, declarations)
     if gates.allowed.contains(key) {
-        chain := declarations
+        ^chain: declarations
         chain.push(policy_invocation_declaration(key))
         _: policy_resolve(key, chain)
     }

@@ -27,9 +27,9 @@ jet_cli_sem_op_names_fact: fn(operation: JetCLISemOp, fact: SemDefinitionFact) -
 
 // For each definition fact, the position of the first receipt naming it.
 jet_cli_semantic_blame: fn(facts: [SemDefinitionFact], receipts: [JetCLISemOp]) -> [Int?] Never! {
-    blamed := [Int?]{}
+    ^blamed: [Int?]{}
     loop fact in facts {
-        found := Int?{None}
+        ^found: Int?{None}
         loop (at, receipt) in receipts {
             if jet_cli_sem_op_names_fact(receipt, fact) {
                 found = Val(at)
@@ -71,7 +71,7 @@ jet_cli_semantic_blame_report: fn(file: String, source: String, index: SemIndex,
         payload: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("file", jet_cli_status_text(file)), jet_cli_status_field("definitions", jet_cli_status_array(rows))})
         return "{jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("blame", payload)})}\n"
     }
-    out := "Semantic blame\n  File: {file}\n"
+    ^out: "Semantic blame\n  File: {file}\n"
     if index.definition_facts.len() == 0 -> return "{out}  No definitions\n"
     loop (at, fact) in index.definition_facts {
         operation: if blamed[at] == .Val(receipt) -> jet_cli_semantic_blame_operation_text(receipts[receipt]) else -> "no recorded operation"

@@ -23,7 +23,7 @@ FAULT: "ir.build unlowered: "
 // The names of the Current rows of `receiver` (Map or Set) in the table text.
 row_names: fn(rows: String, receiver: String) -> [String] {
     marker: "receivers: CollectionReceivers.{receiver}, name: \""
-    names := [String]{}
+    ^names: [String]{}
     loop line in rows.split("\n") {
         if !line.contains(marker) || !line.contains("status: CollectionStatus.Current") -> next
         name: line.split(marker).to_list()[1].split("\"").to_list()[0]
@@ -34,7 +34,7 @@ row_names: fn(rows: String, receiver: String) -> [String] {
 
 // The rows of `names` that `code` never calls as `.name(`.
 uncalled: fn(names: [String], code: String, receiver: String) -> [String] {
-    missing := [String]{}
+    ^missing: [String]{}
     loop name in names {
         if !code.contains(".{name}(") -> missing.push("{receiver}.{name}")
     }
@@ -44,7 +44,7 @@ uncalled: fn(names: [String], code: String, receiver: String) -> [String] {
 // Each fault of a build's output once into `found`, as `<what> at <where>`
 // after the function that holds it; how many fault lines `text` holds.
 faults_in: fn(text: String, found: ^[String]) -> Int {
-    seen := 0
+    ^seen: 0
     loop line in text.split("\n") {
         if !line.contains(FAULT) -> next
         seen += 1
@@ -64,12 +64,12 @@ run: fn() {
     }
     map_names: row_names(rows, "Map")
     set_names: row_names(rows, "Set")
-    missing := uncalled(map_names, parts[0], "Map")
+    ^missing: uncalled(map_names, parts[0], "Map")
     missing.extend(uncalled(set_names, parts[1], "Set"))
     loop name in missing -> print("not called: {name}")
     jet: sys.get("JET") ?? "jet"
-    found := [String]{}
-    failed := [String]{}
+    ^found: [String]{}
+    ^failed: [String]{}
     loop level in LEVELS {
         ran: process.cmd([String]{jet.copy(), "run", "-{level}", EXAMPLE}).run() ?? process.fail(1, "collection lowering: {jet} cannot start: {err}")
         seen: faults_in(ran.output, found) + faults_in(ran.errors, found)

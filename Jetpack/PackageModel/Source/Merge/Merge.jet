@@ -32,7 +32,7 @@ Pkg: struct {
     // Lenient: empty items are skipped. The split is bracket-aware, so a nested
     // list value never splits mid-item.
     parse_list: fn(body: String) -> [Pkg] Never! {
-        out := [Pkg]{}
+        ^out: [Pkg]{}
         loop item in pkg_merge_split_top_level(body) {
             loop pkg in Pkg.parse_item(item.trim()) -> out.push(pkg)
         }
@@ -43,7 +43,7 @@ Pkg: struct {
         if item == "" -> return [Pkg]{}
         // Escape-hatch quoted string: keep verbatim, source unresolved.
         if item.starts_with("\"") {
-            inner := item
+            ^inner: item
             loop inner.starts_with("\"") -> inner = inner.removeprefix("\"")
             loop inner.ends_with("\"") -> inner = inner.removesuffix("\"")
             if inner == "" -> return [Pkg]{}
@@ -53,7 +53,7 @@ Pkg: struct {
             .Val(parts) -> {
                 rest: parts.after.trim()
                 if rest.starts_with("[") && rest.ends_with("]") {
-                    members := [Pkg]{}
+                    ^members: [Pkg]{}
                     loop name in rest.removeprefix("[").removesuffix("]").split(",") {
                         member: name.trim()
                         if member != "" -> members.push(Pkg.new(parts.before, member.copy()))
@@ -83,9 +83,9 @@ MergeError: enum {
 // item). Returns the raw, untrimmed pieces; a trailing comma adds no piece.
 pkg_merge_split_top_level: fn(body: String) -> [String] Never! {
     raw: body.bytes()
-    out := [String]{}
-    depth := 0
-    start := 0
+    ^out: [String]{}
+    ^depth: 0
+    ^start: 0
     loop index in 0..<raw.len() {
         code: Int{raw[index]}
         if code == {
@@ -107,7 +107,7 @@ pkg_merge_split_top_level: fn(body: String) -> [String] Never! {
 // Merge `sources` maps by key: identical refs de-duplicate; the same name with
 // different refs is a conflict (§6). Each map is read in key order.
 pkg_merge_sources: fn(contribs: [[String:String]]) -> [String:String] MergeError! {
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop map in contribs {
         loop name in pkg_merge_sorted_names(map) {
             reference: map[name]
@@ -125,7 +125,7 @@ pkg_merge_sources: fn(contribs: [[String:String]]) -> [String:String] MergeError
 }
 
 pkg_merge_sorted_names: fn(map: [String:String]) -> [String] Never! {
-    names := map.keys().to_list()
+    ^names: map.keys().to_list()
     names.sort()
     names
 }
@@ -133,7 +133,7 @@ pkg_merge_sorted_names: fn(map: [String:String]) -> [String] Never! {
 // Concatenate package lists, de-duplicate while preserving source identity,
 // and keep first-seen order (§6).
 pkg_merge_packages: fn(lists: [[Pkg]]) -> [Pkg] Never! {
-    out := [Pkg]{}
+    ^out: [Pkg]{}
     loop list in lists {
         loop pkg in list {
             if !out.contains(pkg) -> out.push(pkg.copy())
@@ -161,17 +161,17 @@ MergedEntry: struct {
 // de-duplicate, fact settings reconcile through the one resolver (§6). Only
 // text facts surface as settings.
 pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
-    lists := [[Pkg]]{}
+    ^lists: [[Pkg]]{}
     loop contribution in contribs -> lists.push(contribution.packages)
-    by_key := [String:[FactContribution]]{}
+    ^by_key: [String:[FactContribution]]{}
     loop contribution in contribs {
         loop key in pkg_merge_sorted_setting_keys(contribution.settings) {
-            writers := by_key.get(key) ?? [FactContribution]{}
+            ^writers: by_key.get(key) ?? [FactContribution]{}
             loop writer in contribution.settings[key] -> writers.push(writer.copy())
             by_key[key] = writers
         }
     }
-    settings := [String:String]{}
+    ^settings: [String:String]{}
     loop key in pkg_merge_sorted_setting_keys(by_key) {
         if pkg_fact_resolve(FactKey.new(key), by_key[key]) == {
             .Ok(resolved) -> {
@@ -192,7 +192,7 @@ pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
 }
 
 pkg_merge_sorted_setting_keys: fn(settings: [String:[FactContribution]]) -> [String] Never! {
-    names := settings.keys().to_list()
+    ^names: settings.keys().to_list()
     names.sort()
     names
 }

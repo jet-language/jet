@@ -188,11 +188,11 @@ provider_resolve_kind_in_context: fn(spec: RefSpec, table: SourceTable, ctx: Pro
 // release fixtures contribute their exact artifact length. Providers without
 // a byte-bearing metadata seam keep the total unknown instead of inventing it.
 provider_plan_downloads: fn(verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan ProviderError! {
-    kinds := [ProviderKind]{}
-    grouped := [[RefSpec]]{}
+    ^kinds: [ProviderKind]{}
+    ^grouped: [[RefSpec]]{}
     loop spec in specs {
         kind: provider_resolve_kind_in_context(spec, table, ctx)
-        position := -1
+        ^position: -1
         loop index in 0..<kinds.len() {
             if kinds[index] == kind -> position = index
         }
@@ -201,7 +201,7 @@ provider_plan_downloads: fn(verification: StoreVerification, specs: [RefSpec], t
             grouped.push([RefSpec]{spec})
         } else { grouped[position].push(spec.copy()) }
     }
-    plan := DownloadPlan.empty()
+    ^plan: DownloadPlan.empty()
     loop index in 0..<kinds.len() {
         plan.extend(provider_for(kinds[index]).plan_downloads(verification, grouped[index], table, ctx))
     }
@@ -235,7 +235,7 @@ provider_requires_acquisition: fn(spec: RefSpec, table: SourceTable, offline: Bo
 // Realize a ref through its provider. The resolver never knows which backend
 // runs; every result carries the refreshed shared provider facts.
 provider_realize: fn(verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
-    realized := provider_for_ref(spec, table, ctx).realize(verification, spec, table, ctx)
+    ^realized: provider_for_ref(spec, table, ctx).realize(verification, spec, table, ctx)
     provider_refresh_provider_facts(realized.producer, realized.reference)
     Ok(realized)
 }

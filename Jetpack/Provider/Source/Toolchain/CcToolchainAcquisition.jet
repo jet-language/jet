@@ -15,7 +15,7 @@ provider_cc_toolchain_cache_expectation: fn(verification: StoreVerification, spe
 // The download plan for toolchain refs: cached when Hangar already holds a
 // verified descriptor, new for a fixture bundle or a covered pack target.
 provider_cc_toolchain_plan_downloads: fn(verification: StoreVerification, specs: [RefSpec], ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
-    plan := DownloadPlan.empty()
+    ^plan: DownloadPlan.empty()
     loop spec in specs {
         target: provider_cc_toolchain_requested_target(spec) ?? {
             return Err(ProviderError.Unsupported(err.message()))
@@ -145,10 +145,10 @@ provider_cc_publish_fixture: fn(spec: RefSpec, ctx: ProviderCtx, manifest: CcBun
     files.rename(staging, output) ?? {
         return Err(CcToolchainError.Invalid("could not publish C toolchain bundle: {err}"))
     }
-    descriptor := manifest.descriptor(output, output)
+    ^descriptor: manifest.descriptor(output, output)
     descriptor.envelope = Envelope.for_output(output, spec.raw, CC_TOOLCHAIN_RECIPE_ID)
     identity: descriptor.cache_identity(ctx)
-    producer := descriptor.producer
+    ^producer: descriptor.producer
     producer.facts["cache.output"] = descriptor.bundle_sha256
     Ok(
         Realized{
@@ -234,7 +234,7 @@ provider_cc_copy_tree: fn(source: String, destination: String) -[FS]> CcToolchai
 }
 
 provider_cc_copy_tree_node: fn(source: String, destination: String, spent: CcCopyBudget) -[FS]> CcCopyBudget CcToolchainError! {
-    budget := spent
+    ^budget: spent
     budget.nodes += 1
     if budget.nodes > CC_TOOLCHAIN_MAX_BUNDLE_NODES {
         return Err(CcToolchainError.Invalid("C toolchain bundle has too many filesystem nodes"))
@@ -252,7 +252,7 @@ provider_cc_copy_tree_node: fn(source: String, destination: String, spent: CcCop
         children: files.list_dir(source) ?? {
             return Err(CcToolchainError.Invalid("read C toolchain bundle directory: {err}"))
         }
-        names := [String]{}
+        ^names: [String]{}
         loop child in children -> names.push(child.name)
         names.sort()
         loop name in names {

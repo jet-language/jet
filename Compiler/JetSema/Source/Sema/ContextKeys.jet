@@ -107,12 +107,18 @@ SemaContextFieldKey: struct {
 sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaContextFieldKey? {
     module_name: sema_context_field_module(name) ?? return None
     graph: program.registration_graph
-    if name == "on_stop" -> return sema_context_role_field_key(graph, "ContextOnStop", CONTEXT_ON_STOP_KEY, false)
-    if name == "print" -> return sema_context_role_field_key(graph, "ContextPrint", CONTEXT_PRINT_KEY, true)
+    if name == "on_stop" {
+        return sema_context_role_field_key(graph, "ContextOnStop", CONTEXT_ON_STOP_KEY, false)
+    }
+    if name == "print" {
+        return sema_context_role_field_key(graph, "ContextPrint", CONTEXT_PRINT_KEY, true)
+    }
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].module_name != module_name -> next
         loop constant in graph.modules[module_index].constants {
-            if constant.symbol.name != name || !sema_context_key_declared(constant.declaration) -> next
+            if constant.symbol.name != name || !sema_context_key_declared(constant.declaration) {
+                next
+            }
             declared: constant.symbol.ty ?? constant.ty ?? return None
             ty: sema_type_resolve_declared(graph, declared, graph.modules[module_index].module_identity)
             return Val(SemaContextFieldKey{key: SemaContextKey{key: symbol_table_key(graph.symbols, constant.symbol.id), ty: ty}, default: SemaContextDefault.Constant{symbol: constant.symbol.id.copy()}})
@@ -132,7 +138,9 @@ sema_context_role_field_key: fn(graph: SemaRegistrationGraph, role: String, key:
             if function.symbol.name != filler.name -> next
             id: sema_registration_callable_id(graph, function.symbol.id) ?? return None
             signature: sema_type_resolve_declared(graph, function.signature, module_row.module_identity)
-            if !call -> return Val(SemaContextFieldKey{key: SemaContextKey{key: key, ty: signature}, default: SemaContextDefault.Function{function: id}})
+            if !call {
+                return Val(SemaContextFieldKey{key: SemaContextKey{key: key, ty: signature}, default: SemaContextDefault.Function{function: id}})
+            }
             returned: sema_fn_return_success(sema_call_signature_return(signature) ?? return None)
             return Val(SemaContextFieldKey{key: SemaContextKey{key: key, ty: returned}, default: SemaContextDefault.Call{function: id}})
         }
@@ -202,9 +210,7 @@ sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool 
     graph: program.registration_graph
     module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return false
     loop constant in graph.modules[module_index].constants {
-        if constant.symbol.id == symbol.id {
-            return sema_context_key_declared(constant.declaration)
-        }
+        if constant.symbol.id == symbol.id -> return sema_context_key_declared(constant.declaration)
     }
     false
 }
@@ -214,7 +220,7 @@ sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool 
 // against `Context(allocator:, logger:)`.
 sema_context_marker_fields: fn(marker: Marker) -> Marker Never! {
     // copy: `marker` is the module's rule fact; the bound marker owns its parts.
-    kept := marker.copy()
+    ^kept: marker.copy()
     kept.args = [MarkerCallArg]{}
     kept.arg_labels = [CallLabel?]{}
     loop index in 0..<marker.args.len() {
@@ -251,8 +257,8 @@ sema_context_root: fn(root: String, root_span: Span, check: ^SemaBodyCheck) -> B
 // Unhandled unless the receiver names the task context (sema_context_root).
 sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
-    root := ""
-    root_span := Span{start: 0, end: 0}
+    ^root: ""
+    ^root_span: Span{start: 0, end: 0}
     if receiver == .Ident(name, name_span, _) {
         root = name
         root_span = name_span
@@ -268,7 +274,7 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
         check.diagnostics.push(sema_error("E0761", method_span, "`context.get` takes one context key", "`context.get(key)` reads the value a `#Context` block set for a `#ContextKey` constant", "write `context.get(frame_index)` for `#ContextKey frame_index: …`"))
         return failed
     }
-    name := ""
+    ^name: ""
     if args[0].expr == .Ident(written, _, _) -> name = written
     resolved: if name == "" -> SemaContextKey?{None} else -> sema_context_key_resolve(name, check)
     found: resolved ?? {
@@ -277,7 +283,7 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
         // the wait, and the check runs again once the value lands
         // (sema_check_comptime_function).
         if name != "" && sema_context_key_waits(name, check) {
-            _ := sema_check_expression(args[0].expr, None, check)
+            ^_: sema_check_expression(args[0].expr, None, check)
             return failed
         }
         check.diagnostics.push(sema_error("E0761", expr_span(args[0].expr), "`context.get` needs a context key", "only a constant declared with `#ContextKey` names a context value", "declare a snake_case key such as `#ContextKey frame_index: 0` and pass its name"))

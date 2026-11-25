@@ -28,7 +28,7 @@ HOST_READ_MAX: I64{16777216}
 // Header: +0 mutex, +8 entries, +16 capacity, +24 issued entries. Entry:
 // +0 descriptor (-1 when free), +8 mapping address (0 when unmapped),
 // +16 mapping size, +24 generation.
-host_descriptor_table := I64{0}
+^host_descriptor_table: I64{0}
 
 // runtime-init: 20 when host_descriptor_table
 #Export(c) jet_rt_descriptor_table_init: fn() {
@@ -60,7 +60,7 @@ host_descriptor_find: fn(token: I64) -> I64 {
 host_descriptor_insert: fn(descriptor: I64, address: I64, size: I64) -> I64 {
     sync_mutex_lock(host_descriptor_table)
     issued: net_word(host_descriptor_table, I64{24})
-    index := I64{0}
+    ^index: I64{0}
     loop index < issued && net_word(host_descriptor_entry_at(index), I64{0}) >= (I64{0}) {
         index += I64{1}
     }
@@ -120,9 +120,9 @@ host_descriptor_number: fn(token: I64) -> I64 {
 host_descriptor_release: fn(token: I64) {
     sync_mutex_lock(host_descriptor_table)
     entry: host_descriptor_find(token)
-    descriptor := I64{-1}
-    address := I64{0}
-    size := I64{0}
+    ^descriptor: I64{-1}
+    ^address: I64{0}
+    ^size: I64{0}
     if (entry != I64{0}) {
         descriptor = net_word(entry, I64{0})
         address = net_word(entry, I64{8})
@@ -138,7 +138,7 @@ host_descriptor_release: fn(token: I64) {
         alloc_unmap(address, size)
     }
     // close is not retried: Linux releases the descriptor even when it reports EINTR.
-    if (descriptor >= I64{0}) { _ := host_call(I64{3}, descriptor, I64{0}, I64{0}) }
+    if (descriptor >= I64{0}) { ^_: host_call(I64{3}, descriptor, I64{0}, I64{0}) }
 }
 
 host_descriptor_closed: fn(operation: I64, error: I64) -> I64 {
@@ -151,7 +151,7 @@ host_descriptor_range: fn(operation: I64, error: I64) -> I64 {
 
 // A syscall through host_call, retried while it reports EINTR.
 host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
-    result := I64{-4}
+    ^result: I64{-4}
     loop result == (I64{-4}) -> result = host_call(number, a1, a2, a3)
     result
 }
@@ -175,7 +175,7 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     if (descriptor < I64{0}) { return host_descriptor_closed(HOST_IO_OP_READ, error) }
     cap: if (requested < HOST_READ_MAX) -> requested else -> HOST_READ_MAX
     bytes: jet_rt_alloc_8(cap)
-    count := I64{-4}
+    ^count: I64{-4}
     loop count == (I64{-4}) {
         #Unsafe("bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open") {
             count = host_syscall(I64{17}, descriptor, bytes, cap, at, I64{0}, I64{0})
@@ -215,7 +215,7 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     if (copied < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -copied, error) }
     filed: host_descriptor_insert(copied, I64{0}, I64{0})
     if (filed < I64{0}) {
-        _ := host_call(I64{3}, copied, I64{0}, I64{0})
+        ^_: host_call(I64{3}, copied, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{24}, error)
     }
     rt_text_store(output, jet_int_owned_from_i64(filed))
@@ -305,7 +305,7 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
         jet_rt_free(scratch, I64{24}, I64{8})
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -primary, error)
     }
-    result := host_call(I64{16}, primary, I64{1074025521}, wrapping(scratch + I64{16}))
+    ^result: host_call(I64{16}, primary, I64{1074025521}, wrapping(scratch + I64{16}))
     if (result == I64{0}) {
         result = host_call(I64{16}, primary, I64{2147767344}, wrapping(scratch + I64{16}))
     }
@@ -313,7 +313,7 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     jet_rt_free(scratch, I64{24}, I64{8})
     secondary: if (result < I64{0}) -> result else -> host_call(I64{16}, primary, I64{21569}, I64{524546})
     if (secondary < I64{0}) {
-        _ := host_call(I64{3}, primary, I64{0}, I64{0})
+        ^_: host_call(I64{3}, primary, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -secondary, error)
     }
     host_descriptor_pair_take(primary, secondary, number, I64{3}, output, length, error)
@@ -325,14 +325,14 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 host_descriptor_pair_take: fn(first: I64, second: I64, extra: I64, words: I64, output: I64, length: I64, error: I64) -> I64 {
     first_token: host_descriptor_insert(first, I64{0}, I64{0})
     if (first_token < I64{0}) {
-        _ := host_call(I64{3}, first, I64{0}, I64{0})
-        _ := host_call(I64{3}, second, I64{0}, I64{0})
+        ^_: host_call(I64{3}, first, I64{0}, I64{0})
+        ^_: host_call(I64{3}, second, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{24}, error)
     }
     second_token: host_descriptor_insert(second, I64{0}, I64{0})
     if (second_token < I64{0}) {
         host_descriptor_release(first_token)
-        _ := host_call(I64{3}, second, I64{0}, I64{0})
+        ^_: host_call(I64{3}, second, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{24}, error)
     }
     size: words * I64{8}
@@ -352,15 +352,15 @@ host_descriptor_pair_take: fn(first: I64, second: I64, extra: I64, words: I64, o
 host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     // pollfd at 0, timespec at 8, clock sample at 24.
     scratch: jet_rt_alloc(I64{40}, I64{8})
-    end := I64{-1}
+    ^end: I64{-1}
     if (limit >= I64{0}) {
         sync_clock_read(I64{1}, wrapping(scratch + I64{24}))
         now: net_word(scratch, I64{24}) * I64{1000000000} + net_word(scratch, I64{32})
         end = if (limit > I64{9223372036854775807} - now) -> I64{9223372036854775807} else -> now + limit
     }
-    ready := I64{-4}
+    ^ready: I64{-4}
     loop ready == (I64{-4}) {
-        left := I64{-1}
+        ^left: I64{-1}
         if (end >= I64{0}) {
             sync_clock_read(I64{1}, wrapping(scratch + I64{24}))
             now: net_word(scratch, I64{24}) * I64{1000000000} + net_word(scratch, I64{32})
@@ -395,7 +395,7 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     if (ready == I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{110}, error) }
     cap: if (requested < HOST_READ_MAX) -> requested else -> HOST_READ_MAX
     bytes: jet_rt_alloc_8(cap)
-    count := I64{-4}
+    ^count: I64{-4}
     loop count == (I64{-4}) {
         #Unsafe("bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open") {
             count = host_syscall(I64{0}, descriptor, bytes, cap, I64{0}, I64{0}, I64{0})
@@ -431,7 +431,7 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     count: if (length < I64{4096}) -> length else -> I64{4096}
     packed: if (RT_HOST_U8_STRIDE == I64{1}) -> data else -> jet_rt_alloc(count, I64{8})
     if (RT_HOST_U8_STRIDE != I64{1}) { net_copy_packed(data, count, packed) }
-    wrote := I64{-4}
+    ^wrote: I64{-4}
     loop wrote == (I64{-4}) {
         #Unsafe("packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open") {
             wrote = host_syscall(I64{1}, descriptor, packed, count, I64{0}, I64{0}, I64{0})
@@ -465,11 +465,11 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     if (descriptor < I64{0}) {
         return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -descriptor, error)
     }
-    failure := host_call_restarting(I64{77}, descriptor, bytes, I64{0})
+    ^failure: host_call_restarting(I64{77}, descriptor, bytes, I64{0})
     if (failure >= I64{0}) {
         failure = host_call_restarting(I64{72}, descriptor, I64{1033}, I64{6})
     }
-    address := I64{0}
+    ^address: I64{0}
     if (failure >= I64{0}) {
         // A fresh shared mapping of this sealed memfd; host_descriptor_release
         // unmaps it exactly once with this size.
@@ -480,14 +480,14 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
         }
     }
     if (failure < I64{0}) {
-        _ := host_call(I64{3}, descriptor, I64{0}, I64{0})
+        ^_: host_call(I64{3}, descriptor, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -failure, error)
     }
     filed: host_descriptor_insert(descriptor, address, bytes)
     if (filed < I64{0}) {
         // The mapping made above was never filed, so this is its only owner.
         alloc_unmap(address, bytes)
-        _ := host_call(I64{3}, descriptor, I64{0}, I64{0})
+        ^_: host_call(I64{3}, descriptor, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, I64{24}, error)
     }
     rt_text_store(output, jet_int_owned_from_i64(filed))
@@ -497,7 +497,7 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
 // The mapping of `token` when offset..offset+count lies inside it, else 0.
 host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
     out: jet_rt_alloc(I64{24}, I64{8})
-    base := I64{0}
+    ^base: I64{0}
     if host_descriptor_read(token, out) {
         address: net_word(out, I64{8})
         size: net_word(out, I64{16})
@@ -551,10 +551,10 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
     base: host_shared_span(native, at, end)
     if (base == I64{0}) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
     span: width * I64{4}
-    row := y
+    ^row: y
     loop row < y + height {
         start: row * row_bytes + x * I64{4}
-        index := I64{0}
+        ^index: I64{0}
         // host_shared_span proved `end` bytes from `base` lie inside the live
         // mapping and end <= length bounds data's packed bytes; start + span <= end.
         loop wrapping(index + I64{8}) <= span {
@@ -613,7 +613,7 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
     base: host_shared_span(native, at, total * I64{4})
     if (base == I64{0}) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
     pair: pixel | pixel << I64{32}
-    index := I64{0}
+    ^index: I64{0}
     // host_shared_span proved count * 4 bytes from `base` lie inside the live
     // mapping.
     loop wrapping(index + I64{2}) <= total {

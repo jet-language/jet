@@ -134,12 +134,12 @@ NixCacheEndpoint: struct {
         if endpoint_present != key_present {
             return Err(NixCacheError.new(.Metadata, "Nix cache endpoint and trust key must be configured together"))
         }
-        endpoint := STORE_NIX_DEFAULT_ENDPOINT
+        ^endpoint: STORE_NIX_DEFAULT_ENDPOINT
         if endpoint_present -> endpoint = store_nix_read_config(endpoint_path).trim()
         store_nix_validate_endpoint(endpoint)
         store_nix_validate_endpoint_ports(endpoint)
-        key_text := STORE_NIX_DEFAULT_PUBLIC_KEY
-        label := "embedded Nix cache trust key"
+        ^key_text: STORE_NIX_DEFAULT_PUBLIC_KEY
+        ^label: "embedded Nix cache trust key"
         if key_present {
             key_text = store_nix_read_config(key_path)
             label = "Nix cache trust key"
@@ -157,7 +157,7 @@ NixCacheEndpoint: struct {
             }
         }
         text: String.from_bytes(bytes) ?? return Err(NixCacheError.new(.Metadata, "Nix cache-info is not UTF-8"))
-        store_dir := String?{None}
+        ^store_dir: String?{None}
         loop line in text.lines() {
             pair: line.split_once(": ") ?? return Err(NixCacheError.new(.Metadata, "Nix cache-info has a malformed line"))
             if pair.before == "StoreDir" {
@@ -190,7 +190,7 @@ NixCacheEndpoint: struct {
             return Err(NixCacheError.new(.Signature, "Nix narinfo StorePath disagrees with the requested path"))
         }
         fingerprint: info.fingerprint(store_dir) ?? return Err(NixCacheError.new(.Signature, "Nix narinfo fingerprint is invalid for {store_path}: {err.message()}"))
-        key_matches := false
+        ^key_matches: false
         loop signature in info.signatures {
             loop trusted in self.trusted_keys {
                 if trusted.key_id == signature.key_id -> key_matches = true
@@ -205,7 +205,7 @@ NixCacheEndpoint: struct {
 
     object_url: fn(self, relative: String) -> String NixCacheError! {
         store_nix_validate_relative_endpoint_url(relative)
-        base := self.endpoint
+        ^base: self.endpoint
         loop base.ends_with("/") -> base = base.removesuffix("/")
         Ok("{base}/{relative}")
     }
@@ -241,7 +241,7 @@ NixCacheEndpoint: struct {
         if response.status() != 200 {
             return Err(NixCacheError.new(.Transport, "Nix cache returned a non-success status"))
         }
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         loop part in response.body().chunks(65536) {
             chunk: part ?? return Err(NixCacheError.new(.Transport, "{err}"))
             bytes.extend(chunk)
@@ -258,11 +258,11 @@ NixCacheEndpoint: struct {
 // must match the signed FileSize when the narinfo has one. A server that
 // ignores the range answers the whole object at once.
 store_nix_download: fn(endpoint: NixCacheEndpoint, url: String, signed_size: Int?, path: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> {count: Int, digest: String} NixCacheError! {
-    output := files.create(path, if_exists: .Refuse) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
-    hasher := crypto.Hasher.new()
-    count := 0
-    size := Int?{None}
-    done := false
+    ^output: files.create(path, if_exists: .Refuse) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
+    ^hasher: crypto.Hasher.new()
+    ^count: 0
+    ^size: Int?{None}
+    ^done: false
     loop !done {
         response: if endpoint.open_range(url, count, count + STORE_NIX_DOWNLOAD_PIECE_BYTES - 1) == {
             .Ok(found) -> found ?? return Err(NixCacheError.new(.MissingReference, "Nix cache object is absent"))
@@ -390,7 +390,7 @@ store_nix_authority: fn(rest: String) -> String Never! {
 }
 
 store_nix_validate_endpoint: fn(endpoint: String) NixCacheError! {
-    rejected := endpoint == ""
+    ^rejected: endpoint == ""
     loop byte in endpoint.bytes() {
         code: Int{byte}
         if code == 63 || code == 35 || code == 64 || code == 92 || store_nix_is_ascii_whitespace(byte) {
@@ -457,13 +457,13 @@ store_nix_parse_cache_port: fn(port: String) -> Int NixCacheError! {
 }
 
 store_nix_validate_relative_endpoint_url: fn(relative: String) NixCacheError! {
-    path := relative
-    query := ""
+    ^path: relative
+    ^query: ""
     if relative.split_once("?") == .Val(parts) {
         path = parts.before
         query = parts.after
     }
-    rejected := path == "" || path.starts_with("/") || path.contains("//") || path.contains("\\")
+    ^rejected: path == "" || path.starts_with("/") || path.contains("//") || path.contains("\\")
     loop byte in path.bytes() {
         code: Int{byte}
         if store_nix_is_ascii_control(byte) || code == 37 || code == 35 -> rejected = true
@@ -492,7 +492,7 @@ store_nix_validate_store_path: fn(value: String, store_dir: String) NixCacheErro
     }
     basename: value.removeprefix(prefix)
     raw: basename.bytes()
-    rejected := basename.contains("/") || raw.len() < 34
+    ^rejected: basename.contains("/") || raw.len() < 34
     if !rejected && (Int{raw[32]}) != 45 -> rejected = true
     loop byte in raw {
         if (Int{byte}) == 92 || store_nix_is_ascii_control(byte) -> rejected = true
@@ -509,7 +509,7 @@ store_nix_validate_store_path: fn(value: String, store_dir: String) NixCacheErro
 }
 
 store_nix_store_basename: fn(value: String) -> String NixCacheError! {
-    basename := value
+    ^basename: value
     if value.cut_last("/") == .Val(split) -> basename = split.after
     raw: basename.bytes()
     if raw.len() < 34 || (Int{raw[32]}) != 45 {

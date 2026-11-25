@@ -95,11 +95,11 @@ JetCLIBudgetBuilt: struct {
 // the built program when a BuildArtifact budget sizes it, and `services`
 // the collected ServiceProbe readiness samples.
 jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: JetDriverBudgetFacts, toolchain: CanonicalJSON, sources: [JetCLIBudgetSource], measured_start: String, profile: String, artifact: JetCLIBudgetArtifact?, services: [JetCLIBudgetService]) -> JetCLIBudgetBuilt JetCLIBudgetFailure! {
-    providers := [CanonicalJSON]{}
+    ^providers: [CanonicalJSON]{}
     loop row in ordered -> providers.push(jet_cli_budget_provider(row.spec.provider))
     package: jet_cli_budget_package(root)
     prefix: jet_cli_entry_join(root, "")
-    measured := [JetCLIBudgetMeasured]{}
+    ^measured: [JetCLIBudgetMeasured]{}
     loop (index, row) in ordered {
         measured.push(jet_cli_budget_base(row, providers[index], package, prefix, profile))
     }
@@ -123,11 +123,11 @@ jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: Je
             },
         ),
     )
-    measurements := [CanonicalJSON]{}
-    results := [JetCLIBudgetResult]{}
-    pass := 0
-    warn := 0
-    fail := 0
+    ^measurements: [CanonicalJSON]{}
+    ^results: [JetCLIBudgetResult]{}
+    ^pass: 0
+    ^warn: 0
+    ^fail: 0
     loop row in measured {
         evaluation: perf_evaluate(evidence_id, row.context_key, [String]{}, row.samples, [PerfRational]{}, row.percentile, row.comparison, row.direction, row.enforcement, None) ?? return Err(jet_cli_budget_failure(err.message))
         if evaluation.outcome == {
@@ -320,7 +320,7 @@ jet_cli_budget_base: fn(located: JetDriverBudgetSpec, provider: CanonicalJSON, p
 // One measurement object: the base fields, the samples, the context key and
 // `decision` (Null in the evidence skeleton).
 jet_cli_budget_measurement: fn(row: JetCLIBudgetMeasured, decision: CanonicalJSON) -> CanonicalJSON Never! {
-    fields := row.fields.copy()  // copy: the skeleton and the measurement each take the base fields.
+    ^fields: row.fields.copy()  // copy: the skeleton and the measurement each take the base fields.
     fields.push(CanonicalJSONField{key: "context_key", value: CanonicalJSON.String(row.context_key.copy())})  // copy: the evaluation reads the key after the skeleton.
     fields.push(CanonicalJSONField{key: "decision", value: decision})
     fields.push(CanonicalJSONField{key: "samples", value: CanonicalJSON.Array(loop sample in row.samples -> perf_rational_to_json(sample))})
@@ -430,7 +430,7 @@ jet_cli_budget_provider: fn(provider: String) -> CanonicalJSON JetCLIBudgetFailu
         },
     )
     fingerprint: perf_stable_id(body)
-    fields := jet_cli_budget_fields(body)
+    ^fields: jet_cli_budget_fields(body)
     fields.push(CanonicalJSONField{key: "hardware_fingerprint", value: CanonicalJSON.String(fingerprint)})
     Ok(perf_report_object_new(fields))
 }
@@ -569,7 +569,7 @@ jet_cli_budget_count: fn(count: Int, one: String, many: String) -> String Never!
 // The report of a result that did not pass: its Diagnostic (a Warn result's
 // a lint), drawn at its spec's line and column in the file it is written in.
 jet_cli_budget_report: fn(row: JetCLIBudgetResult, code: String, message: String, fix: String) -> String {
-    diagnostic := Diagnostic{severity: if row.outcome == PerfPolicyOutcome.Warn -> DIAGNOSTIC_LINT else -> DIAGNOSTIC_ERROR, code: code, what: message, why: row.reason.copy(), fix: fix}  // copy: the result row keeps its reason.
+    ^diagnostic: Diagnostic{severity: if row.outcome == PerfPolicyOutcome.Warn -> DIAGNOSTIC_LINT else -> DIAGNOSTIC_ERROR, code: code, what: message, why: row.reason.copy(), fix: fix}  // copy: the result row keeps its reason.
     text: cli_files.read(row.path) ?? ""
     if text != "" {
         start: jet_cli_budget_offset(text, row.line, row.column)
@@ -583,13 +583,13 @@ jet_cli_budget_report: fn(row: JetCLIBudgetResult, code: String, message: String
 // `text`) when it is shorter.
 jet_cli_budget_offset: fn(text: String, line: Int, column: Int) -> Int Never! {
     bytes: text.bytes()
-    index := 0
-    at_line := 1
+    ^index: 0
+    ^at_line: 1
     loop at_line < line && index < bytes.len() {
         if bytes[index] == (U8{10}) -> at_line += 1
         index += 1
     }
-    at_column := 1
+    ^at_column: 1
     loop at_column < column && index < bytes.len() && bytes[index] != (U8{10}) {
         index += 1
         loop index < bytes.len() && bytes[index] >= (U8{128}) && bytes[index] < (U8{192}) {
@@ -606,10 +606,10 @@ jet_cli_budget_offset: fn(text: String, line: Int, column: Int) -> Int Never! {
 // budget failed.
 jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, report_path: String, created: Bool) -> JetDriverVerbOutput {
     exit_code: if built.fail > 0 -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
-    failed := 0
-    unavailable := 0
-    warn := 0
-    passed := 0
+    ^failed: 0
+    ^unavailable: 0
+    ^warn: 0
+    ^passed: 0
     loop row in built.results {
         if jet_cli_budget_result_rank(row) == {
             1 -> failed += 1
@@ -622,7 +622,7 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
         return jet_cli_budget_json(options, built, report_path, JetCLIStatusValue.Null, false, exit_code)
     }
     annotate: options.annotations == "github" || (options.annotations == "auto" && cli_sys.get("GITHUB_ACTIONS") == Val("true"))
-    stderr := ""
+    ^stderr: ""
     loop row in built.results {
         if row.outcome != PerfPolicyOutcome.Pass {
             parts: jet_cli_budget_diagnostic(row)
@@ -651,7 +651,7 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
         short: String.from_bytes(built.report_id.bytes().slice(0, 12)) ?? built.report_id.copy()  // copy: a fallback id when the bytes are not text.
         warnings: if warn > 0 -> " · {jet_cli_budget_count(warn, "warning", "warnings")}" else -> ""
         passing: if passed > 0 -> "{jet_cli_budget_count(passed, "budget", "budgets")} passed · " else -> ""
-        line := "budgets: {jet_cli_budget_count(passed, "budget", "budgets")} passed · report {short}"
+        ^line: "budgets: {jet_cli_budget_count(passed, "budget", "budgets")} passed · report {short}"
         if {
             failed > 0 -> {
                 line = "budgets failed: {jet_cli_budget_count(failed, "budget failed", "budgets failed")}{warnings} · report {short}"
@@ -671,8 +671,8 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
 // The `budget` status of a built report, with the update plan (Null for
 // `check`) and whether it was applied.
 jet_cli_budget_json: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, report_path: String, plan: JetCLIStatusValue, applied: Bool, exit_code: Int) -> JetDriverVerbOutput {
-    failed := false
-    unavailable := false
+    ^failed: false
+    ^unavailable: false
     loop row in built.results {
         if jet_cli_budget_result_rank(row) == {
             1 -> failed = true

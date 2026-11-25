@@ -19,8 +19,8 @@ net_unix_connect_job_drop: fn(job: I64) {
 
 #Export(c) jet_rt_net_unix_connect_worker: fn(job: I64) -> I64 {
     path: net_word(job, I64{16})
-    status := net_unix_path_status(path)
-    state := I64{0}
+    ^status: net_unix_path_status(path)
+    ^state: I64{0}
     // A pathname too long for sockaddr_un is tried through its directory
     // (net_socket_unix_call); the call reports when no alias fits.
     if (status == HOST_UNIX_PATH_TOO_LONG) { status = I64{0} }
@@ -63,12 +63,12 @@ net_unix_connect_run: fn(path: I64, output: I64, error: I64) -> I64 {
     net_put(job, I64{16}, jet_rt_string_clone(path))
     net_put(job, I64{40}, sync_park_new())
     worker: thread_spawn(rt_net_unix_connect_worker_address(), job)
-    result := I64{0}
+    ^result: I64{0}
     if (worker < I64{0}) {
-        _ := net_route_errno(operation, path, -worker, error)
+        ^_: net_route_errno(operation, path, -worker, error)
         net_unix_connect_job_drop(job)
     } else {
-        _ := thread_detach(worker)
+        ^_: thread_detach(worker)
         wait_kind: host_net_wait_kind()
         loop {
             // The seed receives a completed result before entering a wait:
@@ -83,12 +83,12 @@ net_unix_connect_run: fn(path: I64, output: I64, error: I64) -> I64 {
                     net_put(job, I64{24}, I64{0})
                     result = I64{1}
                 } else if (status == HOST_UNIX_PATH_NUL || status == HOST_UNIX_PATH_TOO_LONG) {
-                    _ := net_unix_path_refused(status, operation, path, error)
-                } else { _ := net_route_errno(operation, path, -status, error) }
+                    ^_: net_unix_path_refused(status, operation, path, error)
+                } else { ^_: net_route_errno(operation, path, -status, error) }
                 break
             }
             if (scheduler_yield(wait_kind, net_word(job, I64{40}), I64{5000000}) != I64{0}) {
-                _ := net_route_wait_stop(operation, error)
+                ^_: net_route_wait_stop(operation, error)
                 break
             }
         }

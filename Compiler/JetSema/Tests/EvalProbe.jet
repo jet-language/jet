@@ -44,22 +44,22 @@ EvalProbeRun: struct {
 }
 
 eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: ^[String]) -> EvalProbeRun {
-    run := EvalProbeRun{answers: [SemaEvalProbeAnswer]{}, facts: ""}
-    parsed := parse_source(source.bytes())
+    ^run: EvalProbeRun{answers: [SemaEvalProbeAnswer]{}, facts: ""}
+    ^parsed: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 {
         failures.push("the fixture did not parse: {parsed.diagnostics:Debug}")
         return run
     }
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, "module:10:eval-probe:main")
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
         failures.push("canonical effect module declares no effects")
         return run
     }
     canonical_id: canonical.module_identity
-    probes := [SemaEvalProbe]{}
+    ^probes: [SemaEvalProbe]{}
     loop ask in asks {
-        expressions := [Expr]{}
+        ^expressions: [Expr]{}
         loop text in ask.texts {
             parse: sema_eval_probe_parse(text, ask.offset)
             if {
@@ -76,21 +76,21 @@ eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: ^[String]) ->
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: "eval-probe", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
     threads: compiler_threads_single()
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "eval-probe", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, threads) ?? {
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "eval-probe", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, threads) ?? {
         failures.push("registration failed: {err}")
         return run
     }
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
     // Declaration checking loans the graph to its stage, which returns it.
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
-    declared := stage.graph.move()
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
+    ^declared: stage.graph.move()
     stage.graph = None
     graph = declared.move() ?? {
         failures.push("the declaration pass lost its registration graph")
         return run
     }
     if asks.len() > 0 -> graph.eval_probes = Val(eval_probes)
-    checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None)
+    ^checked: sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None)
     run.facts = "{checked.modules:Debug}\n{checked.diagnostics:Debug}"
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR {
@@ -158,7 +158,7 @@ eval_probe_report: fn(failures: [String]) {
 }
 
 #Test("eval_probe_answers") {
-    failures := [String]{}
+    ^failures: [String]{}
     source: `helper: fn(value: Int) -> Int Never! {
     print("helper ran")
     value + 1
@@ -202,7 +202,7 @@ run: fn() {
     // `xs` moved into `box` on the line before: the read is refused at its
     // use, with the move's site as a label.
     if eval_probe_answer(probed, 1, 0, failures) == .Val(answer) {
-        labeled := false
+        ^labeled: false
         loop refusal in answer.refusals {
             if refusal.code != "E0121" -> next
             loop label in refusal.labels {
@@ -221,7 +221,7 @@ run: fn() {
 }
 
 #Test("eval_probe_final_walk") {
-    failures := [String]{}
+    ^failures: [String]{}
     // The first check pass finds `xs` moved into `box`; the later use makes
     // that a share, and the pass after it is the one the program keeps.
     source: `Box: struct { items: [Int] }
@@ -241,7 +241,7 @@ run: fn() {
 }
 
 #Test("eval_probe_unsafe") {
-    failures := [String]{}
+    ^failures: [String]{}
     source: `poke: fn() -> Int Never! {
     #Unsafe("eval probe fixture") { 7 }
 }
@@ -259,7 +259,7 @@ run: fn() {
 }
 
 #Test("eval_probe_parse") {
-    failures := [String]{}
+    ^failures: [String]{}
     sum: sema_eval_probe_parse("total + 1", 40)
     if {
         sum.expression == .Val(value) -> {
@@ -296,7 +296,7 @@ eval_probe_function_checks: fn(source: String, run: EvalProbeRun, probe: Int, ex
 }
 
 #Test("eval_probe_function") {
-    failures := [String]{}
+    ^failures: [String]{}
     source: `Box: struct {
     items: [Int],
 
@@ -337,7 +337,7 @@ run: fn() {
 // return `Ok(…)` or `Err(…)`, whether the callee declares its failure or
 // the solve finds it.
 #Test("eval_probe_function_of_a_fallible_call") {
-    failures := [String]{}
+    ^failures: [String]{}
     source: `#Error
 ParseError: enum {
     Empty,
@@ -378,7 +378,7 @@ run: fn() {
 // or a loop's element, is lent: the probe checks it with no refusal, and the
 // function takes it (`^^`) and returns it as-is, so nothing copies it.
 #Test("eval_probe_function_takes_a_lent_name") {
-    failures := [String]{}
+    ^failures: [String]{}
     source: `size: fn(word: String) -> Int {
     word.len()
 }

@@ -132,7 +132,7 @@ PKG_TEST_REF_SOURCES: [RefSource]{
 }
 
 pkg_test_provider_kind_rows: fn(kind: ProviderKind) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop row in PROVIDER_ROWS {
         if row.kind == .Val(candidate) {
             if candidate == kind -> names.push(row.name)
@@ -142,7 +142,7 @@ pkg_test_provider_kind_rows: fn(kind: ProviderKind) -> [String] {
 }
 
 pkg_test_provider_family_rows: fn(family: ProviderFamily) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop row in PROVIDER_ROWS {
         if row.family == .Val(candidate) {
             if candidate == family -> names.push(row.name)
@@ -152,7 +152,7 @@ pkg_test_provider_family_rows: fn(family: ProviderFamily) -> [String] {
 }
 
 pkg_test_ref_source_rows: fn(source: RefSource) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop row in PROVIDER_ROWS {
         if row.source == .Val(candidate) {
             if candidate == source -> names.push(row.name)
@@ -173,7 +173,7 @@ pkg_test_kind_has_source: fn(kind: ProviderKind) -> Bool {
 }
 
 #Test("provider rows name each provider once and own every source, kind and family") {
-    names := [String]{}
+    ^names: [String]{}
     loop row in PROVIDER_ROWS {
         assert(!names.contains(row.name), "provider `{row.name}` has one row")
         names.push(row.name)
@@ -186,7 +186,7 @@ pkg_test_kind_has_source: fn(kind: ProviderKind) -> Bool {
     assert(!pkg_provider_is_external("gitlab"), "unknown providers are not external")
     assert(!RefSource.is_builtin("gitlab"), "unknown providers are not built-in sources")
 
-    seen := [Int]{}
+    ^seen: [Int]{}
     loop kind in PKG_TEST_PROVIDER_KINDS {
         ordinal: pkg_test_provider_kind_ordinal(kind)
         assert(!seen.contains(ordinal), "each kind is listed once")
@@ -205,7 +205,7 @@ pkg_test_kind_has_source: fn(kind: ProviderKind) -> Bool {
     assert_eq(seen.len(), 20)
 
     families: ProviderFamily.all()
-    family_seen := [Int]{}
+    ^family_seen: [Int]{}
     loop family in families {
         ordinal: pkg_test_provider_family_ordinal(family)
         assert(!family_seen.contains(ordinal), "each family is listed once")
@@ -216,7 +216,7 @@ pkg_test_kind_has_source: fn(kind: ProviderKind) -> Bool {
     }
     assert_eq(family_seen.len(), 21)
 
-    source_seen := [Int]{}
+    ^source_seen: [Int]{}
     loop source in PKG_TEST_REF_SOURCES {
         ordinal: pkg_test_ref_source_ordinal(source)
         assert(!source_seen.contains(ordinal), "each built-in source is listed once")
@@ -235,9 +235,9 @@ pkg_test_kind_has_source: fn(kind: ProviderKind) -> Bool {
 // a kind (or a kind inferred from the target), and a ref source that reaches
 // its kind.
 #Test("every provider resolves through a ref source, a provider kind and a federation family") {
-    no_source := [String]{}
-    no_kind := [String]{}
-    no_family := [String]{}
+    ^no_source: [String]{}
+    ^no_kind: [String]{}
+    ^no_family: [String]{}
     loop row in PROVIDER_ROWS {
         if row.source == None -> no_source.push(row.name)
         if row.kind == None -> no_kind.push(row.name)

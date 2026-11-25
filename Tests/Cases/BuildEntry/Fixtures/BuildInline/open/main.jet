@@ -2,19 +2,19 @@
 // small and unmarked. Every `inline` value inlines `mix`, `auto` `bump`
 // too; the output is the same under every value.
 #Inline(Always) mix: fn(a: Int, b: Int) -> Int {
-    x := (a * 31 + b) % 1000003
-    y := (x * 17 + a % 7) % 1000003
-    z := (y * 13 + x % 11) % 1000003
-    w := (z * 7 + y % 5) % 1000003
-    v := (w * 3 + z % 13) % 1000003
-    u := (v * 29 + w % 17) % 1000003
+    ^x: (a * 31 + b) % 1000003
+    ^y: (x * 17 + a % 7) % 1000003
+    ^z: (y * 13 + x % 11) % 1000003
+    ^w: (z * 7 + y % 5) % 1000003
+    ^v: (w * 3 + z % 13) % 1000003
+    ^u: (v * 29 + w % 17) % 1000003
     (u * 5 + v % 19) % 1000003
 }
 
 bump: fn(a: Int) -> Int { (a * 3 + 1) % 1000003 }
 
 stage_one: fn(t: Int) -> Int {
-    s := mix(t, 1)
+    ^s: mix(t, 1)
     s = bump(s)
     s = mix(s, 2)
     s = bump(s)
@@ -23,7 +23,7 @@ stage_one: fn(t: Int) -> Int {
 }
 
 stage_two: fn(t: Int) -> Int {
-    s := mix(t, 4)
+    ^s: mix(t, 4)
     s = bump(s)
     s = mix(s, 5)
     s = bump(s)
@@ -32,7 +32,7 @@ stage_two: fn(t: Int) -> Int {
 }
 
 stage_three: fn(t: Int) -> Int {
-    s := mix(t, 7)
+    ^s: mix(t, 7)
     s = bump(s)
     s = mix(s, 8)
     s = bump(s)
@@ -41,7 +41,7 @@ stage_three: fn(t: Int) -> Int {
 }
 
 run: fn() {
-    t := 1
+    ^t: 1
     loop round in 0..<3 -> t = stage_three(stage_two(stage_one(t + round)))
     print("mixed: {t}")
 }

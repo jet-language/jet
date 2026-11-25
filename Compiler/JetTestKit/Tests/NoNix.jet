@@ -45,7 +45,7 @@ no_nix_test_assets: fn(root: String) {
         // C locale it always has: an inherited LC_ALL=C.UTF-8 would add a
         // setlocale warning to the stderr this case pins empty.
         cases_test_source(root, name, "env: CASE_VALUE=value\nenv: LC_ALL=C\nstep: jetpack -c 'set -eu; test ! -e /nix/store; {relation} /proc/self/net/dev -ef /proc/{pid}/net/dev; read line; echo \"$line|$CASE_VALUE|$1\"' scenario 'argument with spaces'\nisolate: no-nix network={name}\nstdin: input.stdin\nstdout: = expected.out\nstderr: empty\n")
-        context := cases_test_context(root, files.join(root, "scratch-{name}"))
+        ^context: cases_test_context(root, files.join(root, "scratch-{name}"))
         context.env.jet = cases_test_real_jet("to build the no-nix launcher")
         outcome: kit_cases_run(cases_test_entry(name), context)[0]
         assert_eq(outcome.verdict.status, "PASS")
@@ -61,7 +61,7 @@ no_nix_test_assets: fn(root: String) {
     root: cases_test_root("no-nix-elf")
     cases_test_source(root, "image", "step: jetpack env\nisolate: no-nix network=disabled\n")
     plan: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("image").path)) ?? panic("read image case"))
-    context := cases_test_context(root, root)
+    ^context: cases_test_context(root, root)
     context.env.jet = cases_test_real_jet("to build the no-nix launcher")
     no_nix_test_assets(root)
     step: plan.steps[0]
@@ -74,7 +74,7 @@ no_nix_test_assets: fn(root: String) {
     // A NUL-free constant with a loader name ahead of the interpreter: only
     // the PT_INTERP path changes.
     decoy: "/nix/store/not-loader/ld-linux-in-a-string-pool".bytes()
-    bytes := no_nix_test_elf64(decoy)
+    ^bytes: no_nix_test_elf64(decoy)
     interpreter_offset: bytes.len()
     loop byte in "/nix/store/aaaaaaaa-glibc/lib/ld-linux-x86-64.so.2".bytes() -> bytes.push(byte)
     bytes.push(U8{0})
@@ -102,7 +102,7 @@ no_nix_test_assets: fn(root: String) {
 // A little-endian ELF64 header with one program header slot (PT_NULL until
 // no_nix_test_interp fills it), followed by `body`.
 no_nix_test_elf64: fn(body: [U8]) -> [U8] {
-    bytes := [U8]{127, 69, 76, 70, 2, 1, 1}
+    ^bytes: [U8]{127, 69, 76, 70, 2, 1, 1}
     loop bytes.len() < 120 -> bytes.push(U8{0})
     no_nix_test_put(bytes, 32, 8, 64)
     no_nix_test_put(bytes, 54, 2, 56)
@@ -119,7 +119,7 @@ no_nix_test_interp: fn(bytes: ^[U8], offset: Int, size: Int) {
 }
 
 no_nix_test_put: fn(bytes: ^[U8], offset: Int, width: Int, value: Int) {
-    rest := value
+    ^rest: value
     loop i in 0..<width {
         bytes[offset + i] = U8{rest % 256}
         rest = rest /% 256

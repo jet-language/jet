@@ -3,8 +3,8 @@
 use jet_foundation.[Program, Item, TComptimeValue, SymbolID, SymbolTable, symbol_find]
 
 sema_checked_shape_defaults: fn(program: ^^Program, registered: SemaRegistrationModule, symbols: SymbolTable, values: [SemaComptimeItemValue]) -> Program Never! {
-    updated_program := program.move()
-    defaults := [U32:TComptimeValue]{}
+    ^updated_program: program.move()
+    ^defaults: [U32:TComptimeValue]{}
     loop value in values {
         if value.module_identity != registered.module_identity || value.kind != SemaComptimeItemKind.FieldDefault {
             next
@@ -15,7 +15,7 @@ sema_checked_shape_defaults: fn(program: ^^Program, registered: SemaRegistration
     if defaults.len() == 0 -> return updated_program
     loop index in 0..<updated_program.items.len() {
         if updated_program.items[index] == .Struct(definition) {
-            nominal := SemaRegistrationNominal?{None}
+            ^nominal: SemaRegistrationNominal?{None}
             loop candidate in registered.nominals {
                 if candidate.symbol.name == definition.name -> nominal = Val(candidate)
             }
@@ -23,12 +23,12 @@ sema_checked_shape_defaults: fn(program: ^^Program, registered: SemaRegistration
             // copy: `definition` is a read view of updated_program.items[index], and the slot is
             // rewritten with `updated` only when a default changes. Jet has no writable binding for
             // an enum payload.
-            updated := definition.copy()
-            changed := false
+            ^updated: definition.copy()
+            ^changed: false
             loop field_index in 0..<updated.fields.len() {
                 field: updated.fields[field_index]
                 if field.default_ct != None -> next
-                destination := SymbolID?{None}
+                ^destination: SymbolID?{None}
                 loop checked in owner.fields {
                     if checked.symbol.name == field.name -> destination = Val(checked.symbol.id)
                 }

@@ -18,14 +18,14 @@ Samples: struct {
 }
 
 run: fn() {
-    text := json.to_string(Frame{pixels: [U8]{1, 2}, fixed: [U8#2]{3, 4}}) ?? panic("frame")
+    ^text: json.to_string(Frame{pixels: [U8]{1, 2}, fixed: [U8#2]{3, 4}}) ?? panic("frame")
     print(text)
-    back := Frame{json.decode<Frame>(text) ?? panic("frame back")}
+    ^back: Frame{json.decode<Frame>(text) ?? panic("frame back")}
     print(back.pixels)
     print(back.fixed)
-    samples := json.to_string(Samples{pixels: [I16]{-1, 2}, fixed: [I16#2]{-3, 4}}) ?? panic("samples")
+    ^samples: json.to_string(Samples{pixels: [I16]{-1, 2}, fixed: [I16#2]{-3, 4}}) ?? panic("samples")
     print(samples)
-    again := Samples{json.decode<Samples>(samples) ?? panic("samples back")}
+    ^again: Samples{json.decode<Samples>(samples) ?? panic("samples back")}
     print(again.pixels)
     print(again.fixed)
 }

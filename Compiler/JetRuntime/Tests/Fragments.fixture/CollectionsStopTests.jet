@@ -7,13 +7,13 @@
 // The budget stop's own records and texts belong to the session, not to the
 // iterator, so the host checks the totals only once comptime end and the
 // next begin have released them.
-coll_stop_snapshot := I64{0}
+^coll_stop_snapshot: I64{0}
 
 coll_stop_take_snapshot: fn() {
     coll_test_require(coll_stop_snapshot == I64{0})
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -27,8 +27,8 @@ coll_stop_take_snapshot: fn() {
 #Export(c) collections_stop_restored: fn() {
     snapshot: coll_stop_snapshot
     coll_test_require(snapshot != I64{0})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
         width *= I64{2}
@@ -44,7 +44,7 @@ coll_stop_take_snapshot: fn() {
 // environment read loads the process-wide environment table once. The host
 // loads it before any case snapshots, so the totals count only the case's
 // own blocks.
-#Export(c) collections_stop_warm: fn() { _ := terminal_color_enabled() }
+#Export(c) collections_stop_warm: fn() { ^_: terminal_color_enabled() }
 
 #Export(c) collections_stop_test: fn(family: I64, unary: I64, binary: I64, show: I64, release: I64, list_drop: I64) {
     coll_stop_take_snapshot()
@@ -56,7 +56,7 @@ coll_stop_take_snapshot: fn() {
     trap_store(list_meta + I64{16}, list_drop)
     source: coll_test_source()
     mapped: if (family == I64{6} || family == I64{7} || family == I64{8}) -> source else -> jet_rt_native_iter_map(source, I64{0}, unary, release, meta)
-    result := I64{0}
+    ^result: I64{0}
     if {
         (family == I64{0}) -> result = jet_rt_native_iter_cursor_init(mapped, I64{1}, I64{0})
         (family == I64{1}) -> result = jet_rt_native_iter_repeat(mapped, I64{2})
@@ -114,7 +114,7 @@ coll_stop_free: fn(address: I64, size: I64, align: I64) {
 coll_stop_owned_source: fn(meta: I64, length: I64) -> I64 {
     header: coll_list_new()
     slot: coll_slot_new(meta)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         payload: jet_rt_alloc(I64{8}, I64{8})
         trap_store(payload, at)
@@ -130,7 +130,7 @@ coll_stop_owned_source: fn(meta: I64, length: I64) -> I64 {
 
 #Export(c) collections_review_test: fn(family: I64, unary: I64, binary: I64, clone: I64, drop: I64, box_drop: I64) {
     coll_stop_take_snapshot()
-    at := I64{0}
+    ^at: I64{0}
     meta: coll_test_meta()
     trap_store(meta + I64{8}, clone)
     trap_store(meta + I64{16}, drop)
@@ -138,7 +138,7 @@ coll_stop_owned_source: fn(meta: I64, length: I64) -> I64 {
     trap_store(list_meta, I64{24})
     trap_store(list_meta + I64{48}, I64{6})
     trap_store(list_meta + I64{56}, coll_meta_copy(meta))
-    result := I64{0}
+    ^result: I64{0}
     if (family == I64{0}) {
         mapped: jet_rt_native_iter_map(coll_stop_owned_source(meta, I64{5}), I64{0}, unary, I64{0}, meta)
         pair: jet_rt_alloc(I64{48}, I64{8})
@@ -156,13 +156,13 @@ coll_stop_owned_source: fn(meta: I64, length: I64) -> I64 {
         result = jet_rt_native_iter_last_index_of(mapped, needle, meta, I64{1})
         jet_rt_free(needle, I64{8}, I64{8})
     } else if (family >= I64{2} && family <= I64{5}) {
-        a := coll_stop_owned_source(meta, I64{1})
-        b := coll_stop_owned_source(meta, I64{1})
+        ^a: coll_stop_owned_source(meta, I64{1})
+        ^b: coll_stop_owned_source(meta, I64{1})
         if (family == I64{2} || family == I64{4}) {
             a = jet_rt_native_iter_map(a, I64{0}, unary, I64{0}, meta)
         } else { b = jet_rt_native_iter_map(b, I64{0}, unary, I64{0}, meta) }
         text: jet_rt_string_builder_finish(jet_rt_string_builder_new())
-        zipped := I64{0}
+        ^zipped: I64{0}
         if (family <= I64{3}) {
             zipped = jet_rt_native_iter_zip_strict(a, b, I64{0}, binary, I64{0}, meta, text, text, I64{0}, text, text, I64{0}, I64{0})
         } else {

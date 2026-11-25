@@ -18,8 +18,8 @@
 use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_transfer_rows, name_intern]
 
 ir_opt_stops_after_calls: fn(f: ^IRFunction, m: IRModule, keys: [String]) Never! {
-    poll := ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
-    turn := ir_interned_name(m, IR_STOP_TURN_KEY) ?? -1
+    ^poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
+    ^turn: ir_interned_name(m, IR_STOP_TURN_KEY) ?? -1
     if poll < 0 && turn < 0 {
         poll = ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
         turn = ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1
@@ -29,12 +29,12 @@ ir_opt_stops_after_calls: fn(f: ^IRFunction, m: IRModule, keys: [String]) Never!
     }
     count: f.op.len()
     // A moved call's poll (-1: none), and the call whose drops follow each End.
-    poll_of := [Int]{}
-    after := [Int]{}
-    moved := false
+    ^poll_of: [Int]{}
+    ^after: [Int]{}
+    ^moved: false
     loop site in 0..<count {
         if f.op[site] != .Call && f.op[site] != .CallIndirect -> next
-        k := site + 1
+        ^k: site + 1
         loop k < count && f.op[k] == .Drop && ir_opt_stops_plain(m, f, f.a[k]) -> k += 1
         if k == site + 1 || !ir_opt_stops_any_poll(f, poll, turn, k) -> next
         if ir_opt_dead_end(f, k + 1) < 0 -> next
@@ -53,8 +53,8 @@ ir_opt_stops_after_calls: fn(f: ^IRFunction, m: IRModule, keys: [String]) Never!
     if !moved {
         return
     }
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    at := 0
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^at: 0
     loop at < count {
         ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
         if after[at] >= 0 -> ir_opt_stops_drops(code, f, after[at] + 1, poll_of[after[at]])
@@ -152,13 +152,13 @@ ir_opt_stops_hand_off: fn(f: ^IRFunction, m: IRModule) Never! {
     trap: ir_interned_name(m, IR_STOP_TRAP_KEY) ?? -1
     count: f.op.len()
     // The poll whose drops and edge replace each handing Br (-1: none).
-    into := [Int]{}
-    handed := false
+    ^into: [Int]{}
+    ^handed: false
     loop at in 0..<count {
         if !ir_opt_stops_any_poll(f, poll, turn, at) || ir_opt_dead_end(f, at + 1) < 0 -> next
         end: ir_opt_stops_before_drops(f, at)
         if end < 0 || f.op[end] != .End -> next
-        edge := f.a[end]
+        ^edge: f.a[end]
         loop edge < end {
             if f.op[edge] == .Loop {
                 edge = f.a[edge] + 1
@@ -179,7 +179,7 @@ ir_opt_stops_hand_off: fn(f: ^IRFunction, m: IRModule) Never! {
     if !handed {
         return
     }
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     loop at in 0..<count {
         target: into[at]
         if target < 0 {
@@ -200,7 +200,7 @@ ir_opt_stops_hand_off: fn(f: ^IRFunction, m: IRModule) Never! {
 
 // The last instruction before `at` that is no Drop, or -1.
 ir_opt_stops_before_drops: fn(f: IRFunction, at: Int) -> Int Never! {
-    k := at - 1
+    ^k: at - 1
     loop k >= 0 && f.op[k] == .Drop -> k -= 1
     k
 }
@@ -212,7 +212,7 @@ ir_opt_stops_before_drops: fn(f: IRFunction, at: Int) -> Int Never! {
 ir_opt_stops_edge_copy: fn(code: ^IROptCode, f: ^IRFunction, start: Int, end: Int) Never! {
     loop k in start..<end {
         op: f.op[k]
-        b := f.b[k]
+        ^b: f.b[k]
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
             b = f.args.len()
             loop index in f.b[k]..<(f.b[k] + f.c[k]) {
@@ -255,10 +255,10 @@ ir_opt_stops_handing: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, edge: I
 // calling thread, over the scans in function order.
 ir_opt_stop_facts: fn(m: IRModule, functions: ^[IRFunction], threads: CompilerThreads) Never! {
     count: functions.len()
-    keys := [String]{}
-    bodies := [Bool]{}
-    weights := [Int]{}
-    total := 0
+    ^keys: [String]{}
+    ^bodies: [Bool]{}
+    ^weights: [Int]{}
+    ^total: 0
     loop f in functions {
         keys.push(f.key.copy())
         bodies.push(f.asm == None && !ir_stop_key(f.key))
@@ -267,7 +267,7 @@ ir_opt_stop_facts: fn(m: IRModule, functions: ^[IRFunction], threads: CompilerTh
     }
     workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers <= 1 {
-        scan := ir_opt_stops_scan_new()
+        ^scan: ir_opt_stops_scan_new()
         loop id in 0..<count -> ir_opt_stops_scan(m, functions[id], id, keys, bodies, scan)
         reports: ir_opt_stops_reports(scan)
         loop id in 0..<count {
@@ -277,10 +277,10 @@ ir_opt_stop_facts: fn(m: IRModule, functions: ^[IRFunction], threads: CompilerTh
     }
     bounds: compiler_threads_partition(weights, workers)
     // Parts leave the list last-first: part `workers - 1` pops first.
-    parts := [IROptStopsPart]{}
-    part := workers - 1
+    ^parts: [IROptStopsPart]{}
+    ^part: workers - 1
     loop part >= 0 {
-        rows := [IRFunction]{}
+        ^rows: [IRFunction]{}
         loop functions.len() > bounds[part] {
             row: functions.pop() ?? break
             rows.push(row)
@@ -330,14 +330,14 @@ ir_opt_stops_scan: fn(m: IRModule, f: IRFunction, id: Int, keys: [String], bodie
 ir_opt_stops_reports: fn(scan: IROptStopsScan) -> [Bool] Never! {
     count: scan.starts.len()
     // Per body the bodies that call it.
-    callers := [[Int]]{}
-    reports := [Bool]{}
+    ^callers: [[Int]]{}
+    ^reports: [Bool]{}
     loop _ in 0..<count {
         callers.push([Int]{})
         reports.push(false)
     }
-    work := [Int]{}
-    from := 0
+    ^work: [Int]{}
+    ^from: 0
     loop id in 0..<count {
         loop k in from..<scan.ends[id] -> callers[scan.calls[k]].push(id)
         from = scan.ends[id]
@@ -370,13 +370,13 @@ IROptStopsPart: struct {
 // Walks `parts` (ir_opt_stops_part), in part order: the last part on its
 // own thread, the ones before it the same way, and the first on this one.
 ir_opt_stops_walks: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bool], parts: ^^[IROptStopsPart]) -> [IROptStopsPart] Never! {
-    rest := parts.move()
+    ^rest: parts.move()
     last: rest.pop() ?? return rest
     if rest.len() == 0 {
         rest.push(ir_opt_stops_part(m, keys, bodies, reports, last.move()))
         return rest
     }
-    done := [IROptStopsPart]{}
+    ^done: [IROptStopsPart]{}
     task.group ir_opt_stops_threads {
         head: task ir_opt_stops_part(m, keys, bodies, reports, last.move())
         done = ir_opt_stops_walks(m, keys, bodies, reports, rest.move())
@@ -388,7 +388,7 @@ ir_opt_stops_walks: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bo
 // One part's walk: its functions' scan while there are no reports, else
 // their removals.
 ir_opt_stops_part: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bool], part: ^^IROptStopsPart) -> IROptStopsPart Never! {
-    walked := part.move()
+    ^walked: part.move()
     start: walked.start
     scanning: reports.len() == 0
     loop row in 0..<walked.functions.len() {
@@ -407,7 +407,7 @@ ir_opt_stops_part: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Boo
 
 // The reports of every function, from the parts' scans in function order.
 ir_opt_stops_reported: fn(parts: ^[IROptStopsPart]) -> [Bool] Never! {
-    scan := ir_opt_stops_scan_new()
+    ^scan: ir_opt_stops_scan_new()
     loop at in 0..<parts.len() -> ir_opt_stops_scan_take(scan, parts[at].scan)
     ir_opt_stops_reports(scan)
 }
@@ -456,7 +456,7 @@ ir_opt_stops_checks_body: fn(f: IRFunction, bodies: [Bool], at: Int) -> Bool Nev
 // Whether only Drops, Moves and Copies lie between `start` and a Return or
 // another call: the shape of a tail call (TailCalls.jet ir_tail_site).
 ir_opt_stops_tail: fn(f: IRFunction, start: Int) -> Bool Never! {
-    at := start
+    ^at: start
     loop at < f.op.len() && (f.op[at] == .Drop || f.op[at] == .Move || f.op[at] == .Copy || f.op[at] == .Nop) {
         at += 1
     }
@@ -491,7 +491,7 @@ ir_opt_stops_kind: fn(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never
 // Removes from body `f` each stop point right after a call of a body that
 // reports no stop.
 ir_opt_stops_unreported: fn(f: ^IRFunction, keys: [String], bodies: [Bool], reports: [Bool]) Never! {
-    removed := false
+    ^removed: false
     loop at in 1..<f.op.len() {
         if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) || reports[f.a[at - 1]] {
             next
@@ -531,7 +531,7 @@ ir_opt_fold_polls: fn(f: ^IRFunction, m: IRModule) Never! {
     }
     trap: ir_interned_name(m, IR_STOP_TRAP_KEY) ?? -1
     widen: ir_interned_name(m, "jet_int_checked_widen") ?? -2
-    folded := false
+    ^folded: false
     loop at in 0..<f.op.len() {
         if !ir_opt_stops_any_poll(f, poll, turn, at) -> next
         if ir_opt_polls_checks_call(m, f, poll, trap, turn, at) && !ir_opt_polls_after_exact(m, f, poll, trap, turn, widen, at) {
@@ -576,7 +576,7 @@ ir_opt_widen_small: fn(value: Int) -> Bool Never! { value >= -(1 << 24) && value
 // none or more than one).
 ir_opt_only_write: fn(f: IRFunction, slot: Int) -> Int Never! {
     if slot < f.param_count -> return -1
-    writer := -1
+    ^writer: -1
     loop at in 0..<f.op.len() {
         if f.dst[at] != slot -> next
         if writer >= 0 -> return -1
@@ -602,7 +602,7 @@ ir_opt_polls_checks_call: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, t
 // stop edge hands one on; -1 when it checks none. X64Select.jet
 // ir_x64_zone_holds reads it too.
 ir_opt_polls_checked: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Int Never! {
-    k := at - 1
+    ^k: at - 1
     loop k >= 0 {
         op: f.op[k]
         if op == .End {
@@ -650,9 +650,9 @@ ir_opt_polls_hands_on: fn(f: IRFunction, start: Int, end: Int) -> Bool Never! {
 // Loop's head ends the search. Edges that never come back (ir_opt_dead_end:
 // a trap's or failure's cleanup) are passed over.
 ir_opt_polls_reach: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, start: Int) -> Int Never! {
-    depth := 0
-    past := -1
-    at := start
+    ^depth: 0
+    ^past: -1
+    ^at: start
     loop at < f.op.len() {
         exit: ir_opt_dead_end(f, at)
         if exit > at {
@@ -696,9 +696,9 @@ ir_opt_polls_after_call: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at: 
 // The End a Br at `at` with depth `level` lands after, or -1 when it
 // targets a Loop (a jump back to its head).
 ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
-    open := 0
-    left := level
-    k := at + 1
+    ^open: 0
+    ^left: level
+    ^k: at + 1
     loop k < f.op.len() {
         op: f.op[k]
         if op == .Block || op == .Loop || op == .If -> open += 1 else if op == .End {
@@ -745,7 +745,7 @@ ir_opt_strip_mine: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 
 ir_opt_strip_mine_with: fn(m: IRModule, f: ^IRFunction, poll: Int, trap: Int, turn: Int) -> Int Never! {
     if f.asm != None || f.cold || f.op.len() == 0 || turn < 0 -> return 0
-    has_turn := false
+    ^has_turn: false
     loop at in 0..<f.op.len() {
         if f.op[at] == .Call && f.a[at] == turn {
             has_turn = true
@@ -755,8 +755,8 @@ ir_opt_strip_mine_with: fn(m: IRModule, f: ^IRFunction, poll: Int, trap: Int, tu
     if !has_turn -> return 0
     ir_opt_compact(f)
     facts: ir_opt_facts(f)
-    plans := [IRStripMineLoop]{}
-    skip_until := -1
+    ^plans: [IRStripMineLoop]{}
+    ^skip_until: -1
     loop at in 0..<f.op.len() {
         if at <= skip_until || f.op[at] != .Loop -> next
         plan: ir_opt_strip_mine_find(m, f, facts, poll, trap, turn, at)
@@ -766,9 +766,9 @@ ir_opt_strip_mine_with: fn(m: IRModule, f: ^IRFunction, poll: Int, trap: Int, tu
         }
     }
     if plans.len() == 0 -> return 0
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    p := 0
-    at := 0
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^p: 0
+    ^at: 0
     loop at < f.op.len() {
         if p >= plans.len() || at != plans[p].loop_at {
             ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
@@ -799,7 +799,7 @@ ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: In
     if end <= at + 4 || end - at > 48 -> return none
     if f.op[end - 1] != .Br || f.a[end - 1] != 0 -> return none
     if ir_version_holds_loop(f, at, end) -> return none
-    head := at + 1
+    ^head: at + 1
     loop head < end && f.op[head] == .Nop -> head += 1
     if head + 1 >= end || f.dst[head] < 0 -> return none
     test: f.op[head]
@@ -808,8 +808,8 @@ ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: In
         return none
     }
     negated: exit_at == head + 2
-    idx := -1
-    limit := -1
+    ^idx: -1
+    ^limit: -1
     if negated {
         if test == .Lt {
             idx = f.a[head]
@@ -839,11 +839,11 @@ ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: In
     // Scan loop body (exit_at + 1)..<(end - 1): require exactly one
     // call-free stop_turn at depth 0, no other calls/IntBig/trapping ops,
     // no early loop back-edges, and exactly one constant positive step on idx.
-    poll_at := -1
-    poll_end := -1
-    step := -1
-    depth := 0
-    k := exit_at + 1
+    ^poll_at: -1
+    ^poll_end: -1
+    ^step: -1
+    ^depth: 0
+    ^k: exit_at + 1
     loop k < end - 1 {
         op: f.op[k]
         if op == .End {
@@ -857,7 +857,7 @@ ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: In
             p_end: f.c[k + 1]
             if p_end >= end - 1 -> return none
             // Stop edge must not branch back to the loop head.
-            p_depth := 0
+            ^p_depth: 0
             loop j in (k + 2)..<p_end {
                 jop: f.op[j]
                 if jop == .Block || jop == .Loop || jop == .If -> p_depth += 1
@@ -906,7 +906,7 @@ ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: In
     // Hoisting stop_turn above (exit_at + 1)..<poll_at is sound only if the
     // stop edge reads no slot written between exit_at + 1 and poll_at.
     if poll_at > exit_at + 1 {
-        reads := [Int]{}
+        ^reads: [Int]{}
         loop j in poll_at..<(poll_end + 1) {
             ir_x64_reads_into(f, j, reads)
             if f.op[j] == .If -> reads.push(f.a[j])
@@ -926,9 +926,9 @@ ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: In
 // cannot overflow (a List/String length for Word/8, or an Int guarded by a
 // dominating preheader `IntBig(limit, bits <= 61); BrIf` before `loop_at`).
 ir_opt_strip_mine_safe_limit: fn(m: IRModule, f: IRFunction, facts: OptFacts, loop_at: Int, limit: Int, is_int: Bool) -> Bool Never! {
-    slot := limit
-    k := loop_at - 1
-    steps := 0
+    ^slot: limit
+    ^k: loop_at - 1
+    ^steps: 0
     loop k >= 0 && steps < 32 {
         op: f.op[k]
         if op == .Loop || op == .If || op == .Else || op == .End || op == .Return || op == .Unreachable {
@@ -1006,8 +1006,8 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
     }
     // Inner Loop (bottom-tested; idx < chunk_end holds on entry): zero stop polls.
     ir_opt_code_put(code, .Loop, -1, -1, f.b[plan.loop_at], -1, line)
-    open := 0
-    k := plan.exit_at + 1
+    ^open: 0
+    ^k: plan.exit_at + 1
     loop k < plan.loop_end - 1 {
         if k == plan.poll_at {
             k = plan.poll_end + 1
@@ -1015,8 +1015,8 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
         }
         op: f.op[k]
         if op == .End -> open -= 1
-        a := f.a[k]
-        b := f.b[k]
+        ^a: f.a[k]
+        ^b: f.b[k]
         if op == .Br && a > open -> a += 1
         if op == .BrIf && b > open -> b += 1
         ir_opt_code_put(code, op, f.dst[k], a, b, f.c[k], f.code_line[k])
@@ -1037,7 +1037,7 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
 // so its widening may stop and the turn stays right after it.
 #Test("A loop's turn passes a widening that cannot fail") {
     loop proven in ([Bool]{true, false}) {
-        m := ir_module_new()
+        ^m: ir_module_new()
         int_row: ir_scalar_type_row(m, Type.Int)
         float: ir_scalar_type_row(m, Type.Float)
         flag: ir_scalar_type_row(m, Type.Bool)
@@ -1047,40 +1047,40 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
         turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
         widen: ir_intern_name(m, "jet_int_checked_widen")
         plot: ir_intern_name(m, "jet_perf_plot_float")
-        f := ir_function_new("spin", "test:spin.jet.spin", "", "spin.jet", 1)
+        ^f: ir_function_new("spin", "test:spin.jet.spin", "", "spin.jet", 1)
         total: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "total"), 1)
-        _ := ir_open(f, IROp.Loop, 2)
-        divisor := total
+        ^_: ir_open(f, IROp.Loop, 2)
+        ^divisor: total
         if proven {
             divisor = ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
-            _ := ir_emit(f, IROp.Const, divisor, 1000, -1, -1, 2)
+            ^_: ir_emit(f, IROp.Const, divisor, 1000, -1, -1, 2)
         }
         kept: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.Rem, kept, total, divisor, IR_OVERFLOW_NONNEG, 2)
+        ^_: ir_emit(f, IROp.Rem, kept, total, divisor, IR_OVERFLOW_NONNEG, 2)
         single: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.Const, single, 0, -1, -1, 2)
+        ^_: ir_emit(f, IROp.Const, single, 0, -1, -1, 2)
         file: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.ConstText, file, ir_intern_text(m, "spin.jet"), -1, -1, 2)
+        ^_: ir_emit(f, IROp.ConstText, file, ir_intern_text(m, "spin.jet"), -1, -1, 2)
         line: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.Const, line, 2, -1, -1, 2)
+        ^_: ir_emit(f, IROp.Const, line, 2, -1, -1, 2)
         value: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
         operands: ir_args(f, [Int]{kept, single, file, line})
         widened: ir_emit(f, IROp.CallRuntime, value, widen, operands, 4, 2)
         ir_x64_test_stop_edge(f, flag, turn, IROp.Return, 2)
-        _ := ir_open(f, IROp.Block, 3)
+        ^_: ir_open(f, IROp.Block, 3)
         name: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.ConstText, name, ir_intern_text(m, "total"), -1, -1, 3)
+        ^_: ir_emit(f, IROp.ConstText, name, ir_intern_text(m, "total"), -1, -1, 3)
         plotted: ir_args(f, [Int]{name, value})
-        _ := ir_emit(f, IROp.CallRuntime, -1, plot, plotted, 2, 3)
+        ^_: ir_emit(f, IROp.CallRuntime, -1, plot, plotted, 2, 3)
         ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 3)
         ir_end(f, 3)
         ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 4)
-        _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 4)
+        ^_: ir_emit(f, IROp.Br, -1, 0, -1, -1, 4)
         ir_end(f, 4)
-        _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 5)
+        ^_: ir_emit(f, IROp.Return, -1, -1, -1, -1, 5)
         view: ir_opt_view(m, [String]{})
         ir_opt_fold_polls(f, view)
-        turns := [Int]{}
+        ^turns: [Int]{}
         loop at in 0..<f.op.len() {
             if f.op[at] == .Call && f.a[at] == turn -> turns.push(at)
         }
@@ -1096,23 +1096,23 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
 // the later poll checks no call and the entry poll folds into it.
 #Test("A poll does not fold into the poll after a call through a function value") {
     loop indirect in ([Bool]{false, true}) {
-        m := ir_module_new()
+        ^m: ir_module_new()
         int_row: ir_scalar_type_row(m, Type.Int)
         flag: ir_scalar_type_row(m, Type.Bool)
         word: ir_word_row(m)
         poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
-        f := ir_function_new("f", "test:fold.jet.f", "", "fold.jet", 1)
+        ^f: ir_function_new("f", "test:fold.jet.f", "", "fold.jet", 1)
         x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 1)
         f.result = int_row
         r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
         ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 1)
         passed: ir_args(f, [Int]{x})
-        _ := if indirect -> ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2) else -> ir_emit(f, IROp.Add, r, x, x, 0, 2)
+        ^_: if indirect -> ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2) else -> ir_emit(f, IROp.Add, r, x, x, 0, 2)
         ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 2)
-        _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 3)
+        ^_: ir_emit(f, IROp.Return, -1, r, -1, -1, 3)
         ir_opt_fold_polls(f, ir_opt_view(m, [String]{}))
-        polls := 0
+        ^polls: 0
         loop (at, op) in f.op {
             if op == .Call && f.a[at] == poll -> polls += 1
         }
@@ -1126,29 +1126,29 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
 #Test("A stop or turn poll moves right after a direct or indirect call") {
     loop key in ([String]{IR_STOP_POLL_KEY, IR_STOP_TURN_KEY}) {
         loop indirect in ([Bool]{false, true}) {
-            m := ir_module_new()
+            ^m: ir_module_new()
             int_row: ir_scalar_type_row(m, Type.Int)
             flag: ir_scalar_type_row(m, Type.Bool)
             word: ir_word_row(m)
             poll: ir_stop_poll(m, key)
             m.functions.push(ir_function_new("g", "test:moves.jet.g", "", "moves.jet", 1))
-            f := ir_function_new("f", "test:moves.jet.f", "", "moves.jet", 2)
+            ^f: ir_function_new("f", "test:moves.jet.f", "", "moves.jet", 2)
             x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
             code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 2)
             f.result = int_row
             t: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
             r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
-            _ := ir_emit(f, IROp.Add, t, x, x, 0, 3)
+            ^_: ir_emit(f, IROp.Add, t, x, x, 0, 3)
             passed: ir_args(f, [Int]{t})
             call: if indirect -> ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 3) else -> ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 3)
-            _ := ir_emit(f, IROp.Drop, -1, t, -1, -1, 3)
+            ^_: ir_emit(f, IROp.Drop, -1, t, -1, -1, 3)
             ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 3)
-            _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+            ^_: ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
             keys: loop g in m.functions -> g.key
             ir_opt_stops_after_calls(f, m, keys)
             assert(f.op[call + 1] == .Call && f.a[call + 1] == poll)
             assert(f.op[call + 2] == .If && f.op[call + 3] == .Drop && f.a[call + 3] == t)
-            drops := 0
+            ^drops: 0
             loop (at, op) in f.op {
                 if op == .Drop && f.a[at] == t -> drops += 1
             }
@@ -1163,35 +1163,35 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
 // so no Br is left, each path drops t once, and the turn, which checked
 // the stop the body handed on, checks no call.
 #Test("An inlined body's stop edge takes the edge of the poll after the body") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     int_row: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
     word: ir_word_row(m)
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
-    f := ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
+    ^f: ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
     x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 1)
     f.result = int_row
     t: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
     r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(f, IROp.Add, t, x, x, 0, 2)
-    _ := ir_open(f, IROp.Block, 2)
+    ^_: ir_emit(f, IROp.Add, t, x, x, 0, 2)
+    ^_: ir_open(f, IROp.Block, 2)
     passed: ir_args(f, [Int]{x})
-    _ := ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
+    ^_: ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
     ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 2)
     ir_end(f, 2)
-    _ := ir_emit(f, IROp.Drop, -1, t, -1, -1, 3)
+    ^_: ir_emit(f, IROp.Drop, -1, t, -1, -1, 3)
     ir_x64_test_stop_edge(f, flag, turn, IROp.Return, 3)
-    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+    ^_: ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
     view: ir_opt_view(m, [String]{})
     // The turn's call: its If, the edge's Return, the End and the Return follow.
     assert(ir_opt_polls_checks_call(view, f, poll, -1, turn, f.op.len() - 5))
     ir_opt_stops_hand_off(f, view)
-    brs := 0
-    drops := 0
-    returns := 0
-    turns := [Int]{}
+    ^brs: 0
+    ^drops: 0
+    ^returns: 0
+    ^turns: [Int]{}
     loop (at, op) in f.op {
         if op == .Br -> brs += 1
         if op == .Drop && f.a[at] == t -> drops += 1
@@ -1209,7 +1209,7 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
 // back: the copy in the body's stop edge gets operands of its own, so the
 // SSA form reads each copy's token where that copy took it.
 #Test("A stop edge's copy of the later edge has call operands of its own") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     int_row: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
     word: ir_word_row(m)
@@ -1217,29 +1217,29 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
     turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
     enter: ir_intern_name(m, "jet_rt_cleanup_enter")
     leave: ir_intern_name(m, "jet_rt_cleanup_leave")
-    f := ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
+    ^f: ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
     x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 1)
     f.result = int_row
     r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
     stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
     token: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-    _ := ir_open(f, IROp.Block, 2)
+    ^_: ir_open(f, IROp.Block, 2)
     passed: ir_args(f, [Int]{x})
-    _ := ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
+    ^_: ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
     ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 2)
     ir_end(f, 2)
     none: ir_args(f, [Int]{})
-    _ := ir_emit(f, IROp.Call, stopped, turn, none, 0, 3)
-    _ := ir_open_if(f, stopped, 3)
-    _ := ir_emit(f, IROp.CallRuntime, token, enter, none, 0, 3)
+    ^_: ir_emit(f, IROp.Call, stopped, turn, none, 0, 3)
+    ^_: ir_open_if(f, stopped, 3)
+    ^_: ir_emit(f, IROp.CallRuntime, token, enter, none, 0, 3)
     handed: ir_args(f, [Int]{token})
-    _ := ir_emit(f, IROp.CallRuntime, -1, leave, handed, 1, 3)
-    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+    ^_: ir_emit(f, IROp.CallRuntime, -1, leave, handed, 1, 3)
+    ^_: ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
     ir_end(f, 3)
-    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+    ^_: ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
     ir_opt_stops_hand_off(f, ir_opt_view(m, [String]{}))
-    starts := [Int]{}
+    ^starts: [Int]{}
     loop (at, op) in f.op {
         if op != .CallRuntime || f.a[at] != leave -> next
         assert_eq(f.args[f.b[at]], token)
@@ -1253,36 +1253,36 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
 // The same body with its call in a loop: the stop edge branches out of the
 // loop to the body's End, and it keeps that branch.
 #Test("A stop edge inside a loop of an inlined body keeps its branch") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     int_row: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
     word: ir_word_row(m)
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
-    f := ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
+    ^f: ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
     x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 1)
     f.result = int_row
     r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
     stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_open(f, IROp.Block, 2)
-    _ := ir_open(f, IROp.Loop, 2)
+    ^_: ir_open(f, IROp.Block, 2)
+    ^_: ir_open(f, IROp.Loop, 2)
     passed: ir_args(f, [Int]{x})
-    _ := ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
+    ^_: ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
     none: ir_args(f, [Int]{})
-    _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 2)
-    _ := ir_open_if(f, stopped, 2)
+    ^_: ir_emit(f, IROp.Call, stopped, poll, none, 0, 2)
+    ^_: ir_open_if(f, stopped, 2)
     // Out of the If, the Loop and the Block.
-    _ := ir_emit(f, IROp.Br, -1, 2, -1, -1, 2)
+    ^_: ir_emit(f, IROp.Br, -1, 2, -1, -1, 2)
     ir_end(f, 2)
-    _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 2)
+    ^_: ir_emit(f, IROp.Br, -1, 0, -1, -1, 2)
     ir_end(f, 2)
     ir_end(f, 2)
     ir_x64_test_stop_edge(f, flag, turn, IROp.Return, 3)
-    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+    ^_: ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
     count: f.op.len()
     ir_opt_stops_hand_off(f, ir_opt_view(m, [String]{}))
-    brs := 0
+    ^brs: 0
     loop op in f.op {
         if op == .Br -> brs += 1
     }
@@ -1295,20 +1295,20 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
 // every route counts.
 #Test("A poll after a quiet runtime route checks no call") {
     loop quiet in ([Bool]{false, true}) {
-        m := ir_module_new()
+        ^m: ir_module_new()
         flag: ir_scalar_type_row(m, Type.Bool)
         word: ir_word_row(m)
         poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
         route: ir_intern_name(m, "jet_rt_alloc")
-        if quiet -> _ := name_intern(m.quiet_routes, "jet_rt_alloc")
-        f := ir_function_new("f", "test:quiet.jet.f", "", "quiet.jet", 1)
+        if quiet -> ^_: name_intern(m.quiet_routes, "jet_rt_alloc")
+        ^f: ir_function_new("f", "test:quiet.jet.f", "", "quiet.jet", 1)
         size: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "size"), 1)
         box: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
         sizes: ir_args(f, [Int]{size, size})
-        _ := ir_emit(f, IROp.CallRuntime, box, route, sizes, 2, 2)
+        ^_: ir_emit(f, IROp.CallRuntime, box, route, sizes, 2, 2)
         at: f.op.len()
         ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 2)
-        _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+        ^_: ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
         assert_eq(ir_opt_polls_checks_call(m, f, poll, -1, -1, at), !quiet)
         assert(ir_opt_polls_checks_call(ir_opt_view(m, [String]{}), f, poll, -1, -1, at))
     }
@@ -1318,44 +1318,44 @@ ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLo
 // into an outer chunked loop (containing the stop_turn) wrapping a bottom-tested
 // inner loop with zero stop_turn calls, and passes IR Lint cleanly.
 #Test("A counted inner loop's stop_turn poll is strip-mined into a chunked outer loop") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     flag: ir_scalar_type_row(m, Type.Bool)
     word: ir_word_row(m)
     turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
-    f := ir_function_new("scan", "test:strip.jet.scan", "", "strip.jet", 1)
+    ^f: ir_function_new("scan", "test:strip.jet.scan", "", "strip.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
     i: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     acc: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "acc"), 2)
     step: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
     done: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(f, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(f, IROp.Const, acc, 0, -1, -1, 2)
-    _ := ir_emit(f, IROp.Const, step, 3, -1, -1, 2)
-    _ := ir_open(f, IROp.Block, 3)
-    _ := ir_open(f, IROp.Loop, 3)
-    _ := ir_emit(f, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(f, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(f, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(f, IROp.Const, acc, 0, -1, -1, 2)
+    ^_: ir_emit(f, IROp.Const, step, 3, -1, -1, 2)
+    ^_: ir_open(f, IROp.Block, 3)
+    ^_: ir_open(f, IROp.Loop, 3)
+    ^_: ir_emit(f, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(f, IROp.BrIf, -1, done, 1, -1, 3)
     ir_x64_test_stop_edge(f, flag, turn, IROp.Return, 3)
-    _ := ir_emit(f, IROp.Add, acc, acc, i, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(f, IROp.Add, i, i, step, IR_OVERFLOW_WRAP, 5)
-    _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(f, IROp.Add, acc, acc, i, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(f, IROp.Add, i, i, step, IR_OVERFLOW_WRAP, 5)
+    ^_: ir_emit(f, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(f, 5)
     ir_end(f, 5)
-    _ := ir_emit(f, IROp.Return, -1, acc, -1, -1, 6)
+    ^_: ir_emit(f, IROp.Return, -1, acc, -1, -1, 6)
     lint: ir_lint_context(m)
-    report := ir_opt_report(2)
+    ^report: ir_opt_report(2)
     mined: ir_opt_strip_mine(m, f)
     assert_eq(mined, 1)
     assert(ir_opt_lint(m, lint, f, "stripmine", report))
-    loops := [Int]{}
+    ^loops: [Int]{}
     loop (at, op) in f.op {
         if op == .Loop -> loops.push(at)
     }
     assert_eq(loops.len(), 2)
     inner_at: loops[1]
     inner_end: f.a[inner_at]
-    inner_turns := 0
+    ^inner_turns: 0
     loop k in (inner_at + 1)..<inner_end {
         if f.op[k] == .Call && f.a[k] == turn -> inner_turns += 1
     }

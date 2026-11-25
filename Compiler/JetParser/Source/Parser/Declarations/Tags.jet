@@ -17,9 +17,9 @@ use jet_foundation.[
 parser_tag_struct: fn(state: ^JetParserState, value: StructDef) -> TagDef? {
     declaration: value.marker ?? return None
     if !parser_tag_sites(state, value.name, declaration) -> return None
-    from := [NamedSpan]{}
-    timing := NamedSpan?{None}
-    protects := NamedSpan?{None}
+    ^from: [NamedSpan]{}
+    ^timing: NamedSpan?{None}
+    ^protects: NamedSpan?{None}
     loop setting in declaration.params {
         written: setting.value ?? next
         if setting.name == {
@@ -52,7 +52,7 @@ parser_tag_sites: fn(state: ^JetParserState, name: String, declaration: MarkerDe
         if setting.name != "$sites" -> next
         written: setting.value ?? return false
         elements: parser_tag_list(written) ?? return false
-        type_use := false
+        ^type_use: false
         loop element in elements {
             if element == .EnumLit(_, variant, _, _, _, _, _) {
                 if variant == "TypeUse" -> type_use = true
@@ -73,7 +73,7 @@ parser_tag_sites: fn(state: ^JetParserState, name: String, declaration: MarkerDe
 // The tag's `#FX` row: each `!Effect` entry is a destination it denies. A
 // ceiling entry, or a row with no denial, is E0734.
 parser_tag_denials: fn(state: ^JetParserState, value: StructDef) -> [NamedSpan] {
-    deny := [NamedSpan]{}
+    ^deny: [NamedSpan]{}
     if value.cap == .Val(cap) {
         loop entry in cap.entries {
             if entry.name.starts_with("!") {
@@ -94,7 +94,7 @@ parser_tag_denials: fn(state: ^JetParserState, value: StructDef) -> [NamedSpan] 
 // `from: [Effect, module.function, …]`: the sources whose results carry the
 // tag, as written; sema resolves them (E0735).
 parser_tag_from: fn(state: ^JetParserState, name: String, written: Expr) -> [NamedSpan] {
-    from := [NamedSpan]{}
+    ^from: [NamedSpan]{}
     elements: parser_tag_list(written) ?? {
         parser_tag_error(state, expr_span(written), "`from` on the tag `{name}` is not a list", "`from` lists the effects or functions whose results carry the tag", "write `from: [Effect, module.function]`")
         return from

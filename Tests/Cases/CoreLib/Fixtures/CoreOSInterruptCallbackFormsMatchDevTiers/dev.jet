@@ -18,7 +18,7 @@ stop_callback: fn() {
 }
 
 run: fn() {
-    loop indirect := stop_callback, true {
+    loop ^indirect: stop_callback, true {
         named_alias: named_callback
         local_lambda: fn() {
             print("lambda")
@@ -32,7 +32,7 @@ run: fn() {
         print("ready")
         // A pipe stdout is written when its buffer fills (spec.md print); flush so
         // the parent sees ready before it signals.
-        ready_out := term.stdout()
+        ^ready_out: term.stdout()
         ready_out.flush() ?? panic("flush")
         loop -> tick: 0
     }

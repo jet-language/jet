@@ -128,14 +128,14 @@ jet_cli_perf_attach_syscalls: fn(command: ^^[String], counts: Bool, out: String?
     name: command[0]
     path: perf_process.which(name) ?? return jet_cli_perf_failed("Jet can't run `{name}`: no such program file{if name.contains("/") -> "" else -> " on PATH"}", color)
     started: perf_time.instant()
-    run := JetCLIPerfTracedRun{
+    ^run: JetCLIPerfTracedRun{
         counted: X64Counted{status: -1, failure: "", instructions: None, cycles: None, errno: 0, scaled: false, cpu_ns: 0, peak_rss_bytes: 0},
         calls: [JetCLIPerfTracedCall]{},
         processes: 0,
         left: 0,
         refused: 0,
     }
-    trace := x64_trace_command(path, command, None)
+    ^trace: x64_trace_command(path, command, None)
     if {
         trace.refused != 0 -> {
             // The program exited before its execve, so the command never ran:
@@ -164,18 +164,18 @@ jet_cli_perf_attach_syscalls: fn(command: ^^[String], counts: Bool, out: String?
     if run.counted.failure != "" {
         return jet_cli_perf_failed("Jet can't run `{name}`: {run.counted.failure}", color)
     }
-    capture := jet_cli_perf_command_capture("a traced command keeps its system calls, not samples: its `syscalls` receipt section", run.counted.cpu_ns, wall)
+    ^capture: jet_cli_perf_command_capture("a traced command keeps its system calls, not samples: its `syscalls` receipt section", run.counted.cpu_ns, wall)
     capture.policy.allowlist = allowlist
     scope: jet_cli_perf_ptrace_scope()
     traced: jet_cli_perf_traced_section(run.calls, run.processes, run.left, run.refused, scope)
-    said := jet_cli_perf_traced_header(traced.value)
+    ^said: jet_cli_perf_traced_header(traced.value)
     capture.receipts.push(traced)
     if counts {
         section: jet_cli_perf_counts_section(run.counted, wall, jet_cli_perf_counts_paranoid())
         said = "{said}\n{jet_cli_perf_counts_text(section.value)}"
         capture.receipts.push(section)
     }
-    argv := [String]{"attach", if counts -> "--lens=counts,syscalls" else -> "--lens=syscalls"}
+    ^argv: [String]{"attach", if counts -> "--lens=counts,syscalls" else -> "--lens=syscalls"}
     if allowlist.len() > 0 {
         argv.push("--capture")
         argv.push(allowlist.join(","))
@@ -192,18 +192,18 @@ jet_cli_perf_attach_syscalls: fn(command: ^^[String], counts: Bool, out: String?
 // signal for the command is delivered as it comes. Once the command ends,
 // each process it left running is stopped and let go, untraced.
 jet_cli_perf_syscalls_follow: fn(trace: X64Trace, run: ^JetCLIPerfTracedRun) -[FS.Read, FFI.Asm]> Never! {
-    tracees := [JetCLIPerfTracee]{jet_cli_perf_tracee(trace.pid, trace.pid, true, false)}
+    ^tracees: [JetCLIPerfTracee]{jet_cli_perf_tracee(trace.pid, trace.pid, true, false)}
     // Each thread's latest place in `tracees`.
-    places := [Int:Int]{}
+    ^places: [Int:Int]{}
     places[trace.pid] = 0
     // The call each place's thread is inside, by its place.
-    open_calls := [Int:JetCLIPerfCallEntry]{}
-    pids := [Int]{trace.pid}
-    left := [Int]{}
-    live := 1
-    ended := false
-    resume := trace.pid
-    signal := 0
+    ^open_calls: [Int:JetCLIPerfCallEntry]{}
+    ^pids: [Int]{trace.pid}
+    ^left: [Int]{}
+    ^live: 1
+    ^ended: false
+    ^resume: trace.pid
+    ^signal: 0
     loop {
         step: x64_trace_syscall_step(trace, resume, signal)
         resume = 0
@@ -213,7 +213,7 @@ jet_cli_perf_syscalls_follow: fn(trace: X64Trace, run: ^JetCLIPerfTracedRun) -[F
             break
         }
         thread: step.thread
-        at := places.get(thread) ?? -1
+        ^at: places.get(thread) ?? -1
         if at >= 0 && tracees[at].gone -> at = -1
         if step.status & 0xff != 0x7f {
             // The thread ended.
@@ -232,7 +232,7 @@ jet_cli_perf_syscalls_follow: fn(trace: X64Trace, run: ^JetCLIPerfTracedRun) -[F
                 loop index in 0..<tracees.len() {
                     if tracees[index].gone || tracees[index].leaving -> next
                     tracees[index].leaving = true
-                    _ := x64_trace_stop(x64_trace_of(trace, tracees[index].pid), tracees[index].tid)
+                    ^_: x64_trace_stop(x64_trace_of(trace, tracees[index].pid), tracees[index].tid)
                 }
             }
             if ended && live == 0 -> break
@@ -260,7 +260,7 @@ jet_cli_perf_syscalls_follow: fn(trace: X64Trace, run: ^JetCLIPerfTracedRun) -[F
                 former: x64_trace_event_message(x64_trace_of(trace, thread)) ?? thread
                 was: if former == thread -> -1 else -> places.get(former) ?? -1
                 if was >= 0 && !tracees[was].gone {
-                    _ := open_calls.pop(at)
+                    ^_: open_calls.pop(at)
                     if open_calls.pop(was) == .Val(entry) -> open_calls[at] = entry.move()
                     tracees[was].gone = true
                     live -= 1
@@ -271,7 +271,7 @@ jet_cli_perf_syscalls_follow: fn(trace: X64Trace, run: ^JetCLIPerfTracedRun) -[F
         }
         if stop == JET_CLI_PERF_SIGSTOP && (!tracees[at].started || tracees[at].leaving) {
             if tracees[at].leaving {
-                _ := x64_trace_detach(x64_trace_of(trace, thread), 0)
+                ^_: x64_trace_detach(x64_trace_of(trace, thread), 0)
                 if !left.contains(tracees[at].pid) -> left.push(tracees[at].pid)
                 tracees[at].gone = true
                 live -= 1
@@ -337,7 +337,7 @@ jet_cli_perf_syscall_stop: fn(trace: X64Trace, tracees: [JetCLIPerfTracee], at: 
 // each the kernel fills (jet_cli_perf_call_exit_kind).
 jet_cli_perf_call_entry: fn(view: X64Trace, number: Int, args: [Int]) -[FFI.Asm]> [String] Never! {
     kinds: jet_cli_perf_call_kinds(jet_cli_perf_syscall_shape(number).args)
-    shown := [String]{}
+    ^shown: [String]{}
     loop (index, kind) in kinds {
         if index >= args.len() || jet_cli_perf_call_exit_kind(kind) {
             shown.push("")
@@ -373,7 +373,7 @@ jet_cli_perf_call_finish: fn(trace: X64Trace, tracee: JetCLIPerfTracee, entry: ^
     view: x64_trace_of(trace, tracee.tid)
     value: result ?? 0
     failed: result != None && value < 0 && value >= -4095
-    parts := [String]{}
+    ^parts: [String]{}
     loop (index, shown) in entry.shown.move() {
         if index >= args.len() || index >= kinds.len() -> break
         kind: kinds[index]
@@ -446,7 +446,7 @@ jet_cli_perf_int32: fn(value: Int) -> Int Never! {
 // `value` in hex, its 64 bits unsigned.
 jet_cli_perf_call_hex: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop k in 0..<16 {
         nibble: (value >> (60 - 4 * k)) & 15
         if out.len() == 0 && nibble == 0 && k < 15 -> next
@@ -457,15 +457,15 @@ jet_cli_perf_call_hex: fn(value: Int) -> String Never! {
 
 // `value` in octal.
 jet_cli_perf_octal: fn(value: Int) -> String Never! {
-    reversed := [U8]{}
-    rest := value
+    ^reversed: [U8]{}
+    ^rest: value
     loop {
         reversed.push(U8{48 + rest % 8})
         rest /%= 8
         if rest <= 0 -> break
     }
-    out := [U8]{}
-    index := reversed.len() - 1
+    ^out: [U8]{}
+    ^index: reversed.len() - 1
     loop index >= 0 {
         out.push(reversed[index])
         index -= 1
@@ -476,7 +476,7 @@ jet_cli_perf_octal: fn(value: Int) -> String Never! {
 // A permission mode as strace shows one: `0700`.
 jet_cli_perf_call_mode: fn(value: Int) -> String Never! {
     digits: jet_cli_perf_octal(value & 0o7777)
-    padded := digits
+    ^padded: digits
     loop padded.len() < 3 -> padded = "0{padded}"
     "0{padded}"
 }
@@ -493,7 +493,7 @@ jet_cli_perf_file_mode: fn(mode: Int) -> String Never! {
         0o010000 -> "S_IFIFO|"
         else -> ""
     }
-    special := ""
+    ^special: ""
     if mode & 0o4000 != 0 -> special = "{special}S_ISUID|"
     if mode & 0o2000 != 0 -> special = "{special}S_ISGID|"
     if mode & 0o1000 != 0 -> special = "{special}S_ISVTX|"
@@ -504,9 +504,9 @@ jet_cli_perf_file_mode: fn(mode: Int) -> String Never! {
 // are all set names itself (`names`), in order, and takes its bits; bits no
 // mask took follow in hex. `zero` for no bits at all.
 jet_cli_perf_flags: fn(value: Int, masks: [Int], names: ^^[String], zero: ^^String) -> String Never! {
-    rest := value & 0xffffffff
+    ^rest: value & 0xffffffff
     if rest == 0 -> return zero.move()
-    parts := [String]{}
+    ^parts: [String]{}
     loop (index, name) in names.move() {
         mask: masks[index]
         if rest & mask == mask {
@@ -536,7 +536,7 @@ jet_cli_perf_open_flags: fn(value: Int) -> String Never! {
 jet_cli_perf_clone_flags: fn(value: Int) -> String Never! {
     exit_signal: value & 0xff
     flags: value & 0xffffff00
-    parts := [String]{}
+    ^parts: [String]{}
     if flags != 0 {
         parts.push(jet_cli_perf_flags(flags, [Int]{0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000, 0x400000, 0x800000, 0x1000000, 0x2000000, 0x4000000, 0x8000000, 0x10000000, 0x20000000, 0x40000000, 0x80000000}, [String]{"CLONE_VM", "CLONE_FS", "CLONE_FILES", "CLONE_SIGHAND", "CLONE_PIDFD", "CLONE_PTRACE", "CLONE_VFORK", "CLONE_PARENT", "CLONE_THREAD", "CLONE_NEWNS", "CLONE_SYSVSEM", "CLONE_SETTLS", "CLONE_PARENT_SETTID", "CLONE_CHILD_CLEARTID", "CLONE_DETACHED", "CLONE_UNTRACED", "CLONE_CHILD_SETTID", "CLONE_NEWCGROUP", "CLONE_NEWUTS", "CLONE_NEWIPC", "CLONE_NEWUSER", "CLONE_NEWPID", "CLONE_NEWNET", "CLONE_IO"}, "0"))
     }
@@ -562,7 +562,7 @@ jet_cli_perf_clone_args: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Nev
 // The little-endian word of `bytes` at `at`, its `width` bytes (8 unless
 // given).
 jet_cli_perf_word: fn(bytes: [U8], at: Int, width: Int{8}) -> Int Never! {
-    value := 0
+    ^value: 0
     loop k in 0..<width -> value = value | Int{bytes[at + k]} << (8 * k)
     value
 }
@@ -593,7 +593,7 @@ jet_cli_perf_call_pair: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Neve
 // it can be read.
 jet_cli_perf_call_string: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Never! {
     if address == 0 -> return "NULL"
-    held := [U8]{}
+    ^held: [U8]{}
     loop held.len() < JET_CLI_PERF_PATH_MAX {
         chunk: x64_trace_read(view, address + held.len(), 256) ?? break
         loop byte in chunk {
@@ -621,8 +621,8 @@ jet_cli_perf_call_bytes: fn(view: X64Trace, address: Int, length: Int) -[FFI.Asm
 jet_cli_perf_call_strings: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Never! {
     if address == 0 -> return "NULL"
     words: x64_trace_read(view, address, 8 * 33) ?? return jet_cli_perf_call_hex(address)
-    parts := [String]{}
-    more := true
+    ^parts: [String]{}
+    ^more: true
     loop k in 0..<(words.len() /% 8) {
         pointer: jet_cli_perf_word(words, 8 * k)
         if pointer == 0 {
@@ -640,7 +640,7 @@ jet_cli_perf_call_strings: fn(view: X64Trace, address: Int) -[FFI.Asm]> String N
 // itself, `"` and `\` escaped, the usual control escapes, and any other
 // byte in octal; `more` adds `...` for bytes left out.
 jet_cli_perf_call_quoted: fn(bytes: [U8], more: Bool) -> String Never! {
-    out := [U8]{U8{34}}
+    ^out: [U8]{U8{34}}
     loop (index, byte) in bytes {
         code: Int{byte}
         escape: if code == {
@@ -663,7 +663,7 @@ jet_cli_perf_call_quoted: fn(bytes: [U8], more: Bool) -> String Never! {
         }
         // A digit after the escape would read as part of it: three digits.
         after: if index + 1 < bytes.len() -> Int{bytes[index + 1]} else -> 0
-        digits := jet_cli_perf_octal(code)
+        ^digits: jet_cli_perf_octal(code)
         if after >= 48 && after <= 55 {
             loop digits.len() < 3 -> digits = "0{digits}"
         }
@@ -1251,12 +1251,12 @@ jet_cli_perf_syscall_shape: fn(number: Int) -> JetCLIPerfSyscallShape Never! {
 // the trace with `errno` under Yama's `ptrace_scope` (null without Yama),
 // `reason` says why, and the command ran untraced.
 jet_cli_perf_traced_section: fn(calls: ^^[JetCLIPerfTracedCall], processes: Int, left: Int, refused: Int, scope: Int?) -> TraceReceiptSection Never! {
-    sums := [JetCLIPerfTracedSum]{}
-    places := [String:Int]{}
-    rows := [CanonicalJSON]{}
+    ^sums: [JetCLIPerfTracedSum]{}
+    ^places: [String:Int]{}
+    ^rows: [CanonicalJSON]{}
     loop call in calls.move() {
         key: "{call.pid} {call.number}"
-        at := places.get(key) ?? -1
+        ^at: places.get(key) ?? -1
         if at < 0 {
             at = sums.len()
             places[key] = at
@@ -1278,7 +1278,7 @@ jet_cli_perf_traced_section: fn(calls: ^^[JetCLIPerfTracedCall], processes: Int,
         )
     }
     sums.sort_by(fn(one: JetCLIPerfTracedSum, other: JetCLIPerfTracedSum) { (one.pid <=> other.pid).then(other.count <=> one.count).then(one.name <=> other.name) })
-    totals := [CanonicalJSON]{}
+    ^totals: [CanonicalJSON]{}
     loop sum in sums.move() {
         totals.push(
             CanonicalJSON.Object(
@@ -1345,7 +1345,7 @@ jet_cli_perf_traced_header: fn(value: CanonicalJSON) -> String Never! {
 // order it returned, as strace shows one after its process:
 // `  4251 openat(AT_FDCWD, "main.jet", O_RDONLY|O_CLOEXEC) = 3`.
 jet_cli_perf_traced_lines: fn(value: CanonicalJSON) -> [String] Never! {
-    lines := [String]{jet_cli_perf_traced_header(value)}
+    ^lines: [String]{jet_cli_perf_traced_header(value)}
     fields: jettrace_object_view(value, "receipt syscalls") ?? return lines
     at: jet_cli_perf_key(fields, "calls") ?? return lines
     calls: jettrace_array(fields[at].value, "receipt syscalls.calls") ?? return lines

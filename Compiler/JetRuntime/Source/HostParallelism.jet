@@ -75,7 +75,7 @@ cpu_ctx_drop: fn(ctx: I64) {
 // components carry no meaning for Path.components, starts_with or pop.
 cpu_path_append: fn(ctx: I64, data: I64, length: I64) {
     path: cpu_word(wrapping(ctx + CPU_CTX_PATH))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         loop at < length && rt_text_byte(wrapping(data + at)) == (I64{47}) -> at += I64{1}
         start: at
@@ -115,7 +115,7 @@ cpu_path_set_text: fn(ctx: I64, text: I64) {
 // PathBuf.pop: drop the last component; the root itself cannot be popped.
 cpu_path_pop: fn(ctx: I64) -> Bool {
     path: cpu_word(wrapping(ctx + CPU_CTX_PATH))
-    at := cpu_word(wrapping(ctx + CPU_CTX_PATH_LEN))
+    ^at: cpu_word(wrapping(ctx + CPU_CTX_PATH_LEN))
     if (at == I64{0}) { return false }
     loop at > (I64{0}) {
         at -= I64{1}
@@ -165,8 +165,8 @@ cpu_read: fn(ctx: I64) -> Bool {
     if (cpu_word(wrapping(ctx + CPU_CTX_OVERFLOW)) != I64{0}) { return false }
     fd: host_call(I64{2}, cpu_path_terminate(ctx), I64{524288}, I64{0})
     if (fd < I64{0}) { return false }
-    used := I64{0}
-    ok := true
+    ^used: I64{0}
+    ^ok: true
     loop {
         capacity: cpu_word(wrapping(ctx + CPU_CTX_FILE_CAP))
         if (used == capacity) {
@@ -190,13 +190,13 @@ cpu_read: fn(ctx: I64) -> Bool {
         if (count == I64{0}) { break }
         used += count
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     cpu_put(wrapping(ctx + CPU_CTX_FILE_LEN), used)
     ok
 }
 
 cpu_find: fn(data: I64, from: I64, end: I64, byte: I64) -> I64 {
-    at := from
+    ^at: from
     loop at < end && rt_text_byte(wrapping(data + at)) != byte -> at += I64{1}
     at
 }
@@ -209,10 +209,10 @@ cpu_bytes_are: fn(data: I64, length: I64, text: I64) -> Bool {
 
 // usize.from_str: optional `+`, then one or more ASCII digits.
 cpu_parse: fn(data: I64, length: I64, out: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     if (length > I64{0} && rt_text_byte(data) == I64{43}) { at = I64{1} }
     if (at == length) { return false }
-    value := I64{0}
+    ^value: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         if (byte < I64{48} || byte > I64{57}) { return false }
@@ -228,7 +228,7 @@ cpu_parse: fn(data: I64, length: I64, out: I64) -> Bool {
 // A comma-separated list contains the exact element `cpu`.
 cpu_list_has_cpu: fn(data: I64, length: I64) -> Bool {
     cpu: rt_static_text("cpu")
-    at := I64{0}
+    ^at: I64{0}
     loop at <= length {
         end: cpu_find(data, at, length, I64{44})
         if cpu_bytes_are(wrapping(data + at), end - at, cpu) -> return true
@@ -241,13 +241,13 @@ cpu_list_has_cpu: fn(data: I64, length: I64) -> Bool {
 // A readable cpu.max without a first line or a second field ends the walk
 // (the try block's `?`), keeping the quota found so far.
 cpu_quota_v2: fn(ctx: I64) -> I64 {
-    quota := CPU_UNLIMITED
+    ^quota: CPU_UNLIMITED
     cpu_path_set_text(ctx, rt_static_text("/sys/fs/cgroup"))
     cpu_mount_capture(ctx)
     cpu_path_append(ctx, cpu_word(wrapping(ctx + CPU_CTX_GROUP)), cpu_word(wrapping(ctx + CPU_CTX_GROUP_LEN)))
     cpu_path_append_text(ctx, rt_static_text("cgroup.controllers"))
     if !cpu_exists(ctx) -> return CPU_UNLIMITED
-    _ := cpu_path_pop(ctx)
+    ^_: cpu_path_pop(ctx)
     values: cpu_word(wrapping(ctx + CPU_CTX_SCRATCH))
     loop cpu_path_within_mount(ctx) {
         cpu_path_append_text(ctx, rt_static_text("cpu.max"))
@@ -255,7 +255,7 @@ cpu_quota_v2: fn(ctx: I64) -> I64 {
             data: cpu_word(wrapping(ctx + CPU_CTX_FILE))
             length: cpu_word(wrapping(ctx + CPU_CTX_FILE_LEN))
             if (length == I64{0}) { return quota }
-            line := cpu_find(data, I64{0}, length, I64{10})
+            ^line: cpu_find(data, I64{0}, length, I64{10})
             if (line < length && line > I64{0} && rt_text_byte(wrapping(wrapping(data + line) - I64{1})) == I64{13}) {
                 line -= I64{1}
             }
@@ -267,8 +267,8 @@ cpu_quota_v2: fn(ctx: I64) -> I64 {
                 if (period > I64{0}) { quota = cpu_min(quota, cpu_word(values) / period) }
             }
         }
-        _ := cpu_path_pop(ctx)
-        _ := cpu_path_pop(ctx)
+        ^_: cpu_path_pop(ctx)
+        ^_: cpu_path_pop(ctx)
     }
     quota
 }
@@ -277,11 +277,11 @@ cpu_quota_v2: fn(ctx: I64) -> I64 {
 cpu_parse_file: fn(ctx: I64, name: I64, out: I64) -> Bool {
     cpu_path_append_text(ctx, name)
     read: cpu_read(ctx)
-    _ := cpu_path_pop(ctx)
+    ^_: cpu_path_pop(ctx)
     if !read -> return false
     data: cpu_word(wrapping(ctx + CPU_CTX_FILE))
-    start := I64{0}
-    end := cpu_word(wrapping(ctx + CPU_CTX_FILE_LEN))
+    ^start: I64{0}
+    ^end: cpu_word(wrapping(ctx + CPU_CTX_FILE_LEN))
     loop start < end && cpu_space(rt_text_byte(wrapping(data + start))) -> start += I64{1}
     loop end > start && cpu_space(rt_text_byte(wrapping(wrapping(data + end) - I64{1}))) {
         end -= I64{1}
@@ -299,20 +299,20 @@ cpu_find_mountpoint: fn(ctx: I64) -> Bool {
     group: cpu_word(wrapping(ctx + CPU_CTX_GROUP))
     group_len: cpu_word(wrapping(ctx + CPU_CTX_GROUP_LEN))
     fields: jet_rt_alloc(I64{80}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         newline: cpu_find(data, at, length, I64{10})
         next_line: newline + I64{1}
-        start := at
-        end := newline
+        ^start: at
+        ^end: newline
         at = next_line
         loop start < end && cpu_space(rt_text_byte(wrapping(data + start))) -> start += I64{1}
         loop end > start && cpu_space(rt_text_byte(wrapping(wrapping(data + end) - I64{1}))) {
             end -= I64{1}
         }
         // Field starts: 0..4 from the front; count every ' ' separated field.
-        count := I64{1}
-        cursor := start
+        ^count: I64{1}
+        ^cursor: start
         loop cursor < end {
             if (rt_text_byte(wrapping(data + cursor)) == I64{32}) { count += I64{1} }
             cursor += I64{1}
@@ -322,8 +322,8 @@ cpu_find_mountpoint: fn(ctx: I64) -> Bool {
             return false
         }
         // Record start offsets of fields 3, 4, n-3 and n-1 (with ends).
-        index := I64{0}
-        field := start
+        ^index: I64{0}
+        ^field: start
         loop index < count {
             stop: cpu_find(data, field, end, I64{32})
             if (index == I64{3}) {
@@ -359,8 +359,8 @@ cpu_find_mountpoint: fn(ctx: I64) -> Bool {
         // Normalize the bind-mount root into the mount buffer, then compare
         // components with the normalized group path.
         mount: cpu_word(wrapping(ctx + CPU_CTX_MOUNT))
-        normalized := I64{0}
-        part := sub
+        ^normalized: I64{0}
+        ^part: sub
         loop part < sub_end {
             loop part < sub_end && rt_text_byte(wrapping(data + part)) == (I64{47}) {
                 part += I64{1}
@@ -395,9 +395,9 @@ cpu_find_mountpoint: fn(ctx: I64) -> Bool {
 // quota_v1: the first mount guess whose group directory
 // exists is walked up to its mount; later guesses are not tried.
 cpu_quota_v1: fn(ctx: I64) -> I64 {
-    quota := CPU_UNLIMITED
+    ^quota: CPU_UNLIMITED
     values: cpu_word(wrapping(ctx + CPU_CTX_SCRATCH))
-    attempt := I64{0}
+    ^attempt: I64{0}
     loop attempt < (I64{3}) {
         if (attempt == I64{2}) {
             if !cpu_find_mountpoint(ctx) -> return quota
@@ -414,7 +414,7 @@ cpu_quota_v1: fn(ctx: I64) -> I64 {
             if (limit && period && cpu_word(wrapping(values + I64{8})) > I64{0}) {
                 quota = cpu_min(quota, cpu_word(values) / cpu_word(wrapping(values + I64{8})))
             }
-            _ := cpu_path_pop(ctx)
+            ^_: cpu_path_pop(ctx)
         }
         return quota
     }
@@ -429,10 +429,10 @@ cpu_quota: fn(ctx: I64) -> I64 {
     if !cpu_read(ctx) -> return CPU_UNLIMITED
     data: cpu_word(wrapping(ctx + CPU_CTX_FILE))
     length: cpu_word(wrapping(ctx + CPU_CTX_FILE_LEN))
-    version := I64{0}
-    group := I64{0}
-    group_len := I64{0}
-    at := I64{0}
+    ^version: I64{0}
+    ^group: I64{0}
+    ^group_len: I64{0}
+    ^at: I64{0}
     loop {
         end: cpu_find(data, at, length, I64{10})
         first: cpu_find(data, at, end, I64{58})
@@ -440,8 +440,8 @@ cpu_quota: fn(ctx: I64) -> I64 {
             second: cpu_find(data, first + I64{1}, end, I64{58})
             controllers: wrapping(wrapping(data + first) + I64{1})
             size: second - first - I64{1}
-            ascii := true
-            probe := I64{0}
+            ^ascii: true
+            ^probe: I64{0}
             loop probe < size {
                 if (rt_text_byte(wrapping(controllers + probe)) >= I64{128}) { ascii = false }
                 probe += I64{1}
@@ -481,15 +481,15 @@ cpu_quota: fn(ctx: I64) -> I64 {
 cpu_affinity_count: fn() -> I64 {
     mask: jet_rt_alloc(I64{128}, I64{8})
     thread_zero(mask, I64{128})
-    result := I64{0}
+    ^result: I64{0}
     #Unsafe("sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread") {
         result = host_syscall(I64{204}, I64{0}, I64{128}, mask, I64{0}, I64{0}, I64{0})
     }
-    count := I64{0}
+    ^count: I64{0}
     if (result > I64{0}) {
-        at := I64{0}
+        ^at: I64{0}
         loop at < result {
-            bits := rt_text_byte(wrapping(mask + at))
+            ^bits: rt_text_byte(wrapping(mask + at))
             loop bits != (I64{0}) {
                 bits &= bits - I64{1}
                 count += I64{1}
@@ -511,14 +511,14 @@ cpu_online_count: fn(ctx: I64) -> I64 {
     length: cpu_word(wrapping(ctx + CPU_CTX_FILE_LEN))
     end: cpu_find(data, I64{0}, length, I64{10})
     values: cpu_word(wrapping(ctx + CPU_CTX_SCRATCH))
-    total := I64{0}
-    at := I64{0}
+    ^total: I64{0}
+    ^at: I64{0}
     loop at < end {
         stop: cpu_find(data, at, end, I64{44})
         dash: cpu_find(data, at, stop, I64{45})
         if !cpu_parse(wrapping(data + at), dash - at, values) -> return I64{0}
         low: cpu_word(values)
-        high := low
+        ^high: low
         if (dash < stop) {
             if !cpu_parse(wrapping(wrapping(data + dash) + I64{1}), stop - dash - I64{1}, values) {
                 return I64{0}
@@ -554,7 +554,7 @@ cpu_available_parallelism: fn(root: I64, root_len: I64) -> I64 {
 // and the OS saving XMM and YMM state (XCR0 bits 1 and 2). 4 is SSE2
 // (CPUID.1:EDX bit 26). 1 is the scalar loop. The answer is fixed for the
 // process, so the first probe is kept; a racing probe stores the same word.
-compute_simd_lanes_word := I64{0}
+^compute_simd_lanes_word: I64{0}
 
 #Export(c) jet_compute_simd_lanes: fn() -> I64 {
     if (compute_simd_lanes_word == I64{0}) {
@@ -572,7 +572,7 @@ compute_simd_lanes_probe: fn() -> I64 {
     edx: host_cpuid(I64{1}, I64{0}, HOST_CPUID_EDX)
     xsave: I64{201326592}
     if (top >= I64{7} && ecx & xsave == xsave) {
-        enabled := I64{0}
+        ^enabled: I64{0}
         #Unsafe("xgetbv only reports the OS-enabled state, which CPUID.1:ECX has just shown the OS reports (OSXSAVE)") {
             enabled = os_xgetbv_i64(I64{0})
         }

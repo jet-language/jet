@@ -71,7 +71,7 @@ env_lock_path_for_scope: fn(root: String, scope: String) -> String Never! {
 
 // ASCII letters, digits, `-` and `_` survive; every other scalar becomes `_`.
 env_lock_sanitize_scope: fn(scope: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop scalar in scope.chars() {
         text: "{scalar}"
         bytes: text.bytes()
@@ -144,7 +144,7 @@ env_lock_open_scope: fn(authority: ^^FoundationDirectoryAuthority, scope: String
     name: "{env_lock_sanitize_scope(scope)}.lock"
     if marker_parent.create_exclusive(name, RUNTIME_LOCK_MARKER_MODE) == {
         .Ok(created) -> {
-            writer := created
+            ^writer: created
             writer.fsync()
             marker_parent.fsync()
         }
@@ -300,7 +300,7 @@ RuntimeLockSession: struct {
         if guard.lock == None {
             return
         }
-        at := self.held_roots.len() - 1
+        ^at: self.held_roots.len() - 1
         loop at >= 0 {
             if self.held_roots[at] == guard.identity {
                 _: self.held_roots.remove(at, .Slot)

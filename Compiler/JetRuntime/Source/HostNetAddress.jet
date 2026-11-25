@@ -14,7 +14,7 @@ net_copy: fn(value: I64, size: I64) -> I64 {
 }
 
 net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < size {
         if (net_word(a, at) != net_word(b, at)) { return false }
         at = wrapping(at + I64{8})
@@ -45,7 +45,7 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
     net_put(value, I64{0}, if (length == I64{4}) -> I64{4} else -> I64{6})
     net_put(value, I64{8}, I64{0})
     net_put(value, I64{16}, I64{0})
-    at := I64{0}
+    ^at: I64{0}
     // `value` owns sixteen octets; `bytes` lends `length` initialized U8 elements.
     loop at < length {
         rt_text_put(wrapping(value + I64{8} + at), host_u8_get(bytes, at))
@@ -57,7 +57,7 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
 #Export(c) jet_net_raw_ip_bytes: fn(value: I64, data_out: I64) -> I64 {
     length: if (net_word(value, I64{0}) == I64{4}) -> I64{4} else -> I64{16}
     data: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     // `value` lends IP24; `data` owns `length` native U8 elements; the output
     // receives ownership.
     loop at < length {
@@ -85,7 +85,9 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
 #Export(c) jet_net_raw_socket_ip: fn(value: I64) -> I64 { net_copy(value, I64{24}) }
 
 // The port and scope answer Ints: owned exact-Int carriers.
-#Export(c) jet_net_raw_socket_port: fn(value: I64) -> I64 { jet_int_owned_from_i64(net_word(value, I64{24})) }
+#Export(c) jet_net_raw_socket_port: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(net_word(value, I64{24}))
+}
 
 #Export(c) jet_net_raw_socket_scope: fn(value: I64, output: I64) -> I64 {
     if (net_word(value, I64{0}) == I64{4}) { return I64{0} }
@@ -95,8 +97,8 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
 
 // Linux sockaddr fields are packed, not naturally aligned eight-byte words.
 net_load_uint: fn(bytes: I64, width: I64) -> I64 {
-    result := I64{0}
-    at := I64{0}
+    ^result: I64{0}
+    ^at: I64{0}
     // `bytes` lends `width` initialized little-endian bytes (width <= 8).
     loop at < width {
         result |= (rt_text_byte(wrapping(bytes + at)) << (at * I64{8}))
@@ -106,7 +108,7 @@ net_load_uint: fn(bytes: I64, width: I64) -> I64 {
 }
 
 net_store_uint: fn(bytes: I64, width: I64, value: I64) {
-    at := I64{0}
+    ^at: I64{0}
     // `bytes` owns `width` writable little-endian bytes (width <= 8).
     loop at < width {
         rt_text_put(wrapping(bytes + at), (value >> (at * I64{8})) & I64{255})
@@ -145,7 +147,7 @@ net_socket_decode: fn(bytes: I64, length: I64, output: I64) -> Bool {
     if ((family == I64{2} && length < I64{16}) || (family == I64{10} && length < I64{28}) || (family != I64{2} && family != I64{10})) {
         return false
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{56}) {
         net_put(output, at, I64{0})
         at = wrapping(at + I64{8})

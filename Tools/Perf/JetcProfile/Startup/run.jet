@@ -103,7 +103,7 @@ real_path: fn(path: String) -[Env, FS]> String MeasureError! {
 
 // startupReceipt: one key=value per non-empty line, the last of a key kept.
 startup_receipt: fn(text: String) -> Receipt MeasureError! {
-    fields := [String:String]{}
+    ^fields: [String:String]{}
     loop line in text.split("\n") {
         if line == "" -> next
         parts: line.partition("=")
@@ -127,7 +127,7 @@ startup_receipt: fn(text: String) -> Receipt MeasureError! {
 // startupInputHash's walk: [name, sha256] of every regular file in name order.
 walk_inputs: fn(root: String, relative: String, out: ^[String]) -[FS]> MeasureError! {
     listed: files.list_dir(files.join(root, relative)) ?? return Err(measure_error("{err}"))
-    names := [String]{}
+    ^names: [String]{}
     loop entry in listed -> names.push(entry.name.copy())
     names.sort()
     loop name in names {
@@ -148,7 +148,7 @@ walk_inputs: fn(root: String, relative: String, out: ^[String]) -[FS]> MeasureEr
 }
 
 startup_input_hash: fn(root: String) -[FS]> String MeasureError! {
-    entries := [String]{}
+    ^entries: [String]{}
     walk_inputs(root, "", entries)
     if entries.len() == 0 -> return Err(measure_error("startup input snapshot is empty"))
     Ok(crypto.sha256("[{entries.join(",")}]").hex())
@@ -219,7 +219,7 @@ compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [{key: String, value:
         return Err(measure_error("require at least three matched startup trials"))
     }
     oracle: plain[0]
-    rows := plain.copy()  // copy: plain is read again below
+    ^rows: plain.copy()  // copy: plain is read again below
     rows.extend(optimized.copy())  // copy: optimized is read again below
     loop row in rows {
         receipt: row.receipt
@@ -238,20 +238,20 @@ compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [{key: String, value:
     }
     check_identity(plain)
     check_identity(optimized)
-    metrics := [{key: String, value: Dyn}]{}
-    wins := true
+    ^metrics: [{key: String, value: Dyn}]{}
+    ^wins: true
     loop name in METRICS {
         base: median_timing(plain, name) ?? return Err(measure_error("no startup trials"))
         candidate: median_timing(optimized, name) ?? return Err(measure_error("no startup trials"))
         verdict: if candidate < base -> "win" else -> "loss"
         if candidate >= base -> wins = false
-        row := [{key: String, value: Dyn}]{}
+        ^row: [{key: String, value: Dyn}]{}
         row.push({key: "plain_ns", value: Dyn.Text("{base}")})
         row.push({key: "optimized_ns", value: Dyn.Text("{candidate}")})
         row.push({key: "verdict", value: Dyn.Text(verdict)})
         metrics.push({key: name.copy(), value: Dyn.Object(row)})
     }
-    out := [{key: String, value: Dyn}]{}
+    ^out: [{key: String, value: Dyn}]{}
     out.push({key: "schema", value: Dyn.Text(SCHEMA)})
     out.push({key: "trials", value: Dyn.Int(plain.len())})
     out.push({key: "artifact_sha256", value: Dyn.Text(oracle.artifact_sha256.copy())})
@@ -263,7 +263,7 @@ compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [{key: String, value:
 // The arm's trial-N directories in name order.
 trial_names: fn(root: String, arm: String) -[FS]> [String] MeasureError! {
     listed: files.list_dir(files.join(root, arm)) ?? return Err(measure_error("{err}"))
-    names := listed.map(fn(entry) { entry.name.copy() }).filter(fn(name) { TRIAL.full_match(name) })
+    ^names: listed.map(fn(entry) { entry.name.copy() }).filter(fn(name) { TRIAL.full_match(name) })
     names.sort()
     Ok(names)
 }
@@ -302,7 +302,7 @@ read_trial: fn(dir: String, pair: Dyn, input_root: String, entry: String) -[Env,
 }
 
 read_arm: fn(root: String, arm: String, trials: [String], pair: Dyn, input_root: String, entry: String) -[Env, FS]> [Trial] MeasureError! {
-    out := [Trial]{}
+    ^out: [Trial]{}
     loop name in trials {
         out.push(read_trial(files.join(files.join(root, arm), name), pair, input_root, entry))
     }
@@ -330,7 +330,7 @@ compare_directory: fn(root: String) -[Env, FS]> Compared MeasureError! {
     }
     plain: read_arm(root, "plain", trials, pair, input_root, entry)
     optimized: read_arm(root, "optimized", trials, pair, input_root, entry)
-    out := compare_startup(plain, optimized)
+    ^out: compare_startup(plain, optimized)
     wins: out[4].value == Dyn.Text("win")
     out.push({key: "pair", value: pair})
     out.push({key: "trial_directories", value: Dyn.Array(trials.map(fn(name) { Dyn.Text(name.copy()) }))})

@@ -140,9 +140,9 @@ tier_steps: fn(tier: String) -> [[String]] Never! {
 // to replay. `$JET` names the compiler, as everywhere in the repo; a replay
 // without it uses `jet` from PATH.
 tier_command: fn(tier: String) -> String Never! {
-    shown := [String]{}
+    ^shown: [String]{}
     loop step in tier_steps(tier) {
-        words := [String]{}
+        ^words: [String]{}
         loop word in step {
             words.push(word.replace(JET_SLOT, "\"${{JET:-jet}}\"").replace(STEM_SLOT, "\"$(basename {SOURCE_SLOT} .jet)\""))
         }
@@ -167,15 +167,15 @@ seed_dyn: fn(seed: RegressionSeed) -> Dyn Never! {
 
 // The configuration a finding was found under: every seed and tier command.
 regression_config_hash: fn() -> String Never! {
-    seeds := [Dyn]{}
+    ^seeds: [Dyn]{}
     loop seed in regression_seeds() -> seeds.push(seed_dyn(seed))
-    commands := [Dyn]{}
+    ^commands: [Dyn]{}
     loop tier in regression_tiers() -> commands.push(Dyn.Text("{tier}: {tier_command(tier)}"))
     digest(json.canonical(Dyn.Object([String:Dyn]{"commands": Dyn.Array(commands), "seeds": Dyn.Array(seeds)})) ?? "")
 }
 
 failed_run: fn(run: TierRun, message: String) -> TierRun Never! {
-    out := run.copy()
+    ^out: run.copy()
     out.stderr = message.copy()
     out
 }
@@ -186,12 +186,12 @@ failed_run: fn(run: TierRun, message: String) -> TierRun Never! {
 // it by its file name, so no scratch path reaches the compiler's output; the
 // steps' output is joined in order.
 run_tier: fn(jet: String, tier: String, path: String, stdin: String) -[Exec, Time.Wait]> TierRun Never! {
-    out := TierRun{tier: tier.copy(), command: tier_command(tier), stdout: "", stderr: "", exit: None, signal: None, timeout: false}
+    ^out: TierRun{tier: tier.copy(), command: tier_command(tier), stdout: "", stderr: "", exit: None, signal: None, timeout: false}
     name: files.basename(path)
     stem: name.removesuffix(".jet")
     steps: tier_steps(tier)
     loop at in 0..<steps.len() {
-        argv := [String]{}
+        ^argv: [String]{}
         loop word in steps[at] {
             argv.push(word.replace(JET_SLOT, jet).replace(SOURCE_SLOT, name).replace(STEM_SLOT, stem))
         }
@@ -200,7 +200,7 @@ run_tier: fn(jet: String, tier: String, path: String, stdin: String) -[Exec, Tim
             stdin == "" || at + 1 < steps.len() -> spec.run() ?? return failed_run(out, "{argv[0]} did not start: {err}")
             else -> {
                 child: spec.stdin(.Stream).spawn() ?? return failed_run(out, "{argv[0]} did not start: {err}")
-                undelivered := ""
+                ^undelivered: ""
                 if child.stdin.write_bytes(stdin.bytes()) == {
                     .Ok(_) -> {}
                     .Err(failure) -> undelivered = "stdin was not delivered: {failure}"
@@ -230,11 +230,11 @@ run_seed: fn(seed: RegressionSeed, jet: String, scratch: String, invert: Bool{fa
     files.create_dir_all(dir) ?? return Err("cannot create {dir}: {err}")
     path: files.join(dir, "seed.jet")
     files.write(path, seed.source) ?? return Err("cannot write {path}: {err}")
-    runs := [TierRun]{}
+    ^runs: [TierRun]{}
     loop tier in regression_tiers() {
         inverted: invert && tier == seed.broken_tier
         withheld: inverted && seed.stdin != ""
-        run := run_tier(jet, tier, path, if withheld -> "" else -> seed.stdin)
+        ^run: run_tier(jet, tier, path, if withheld -> "" else -> seed.stdin)
         if inverted && !withheld -> run.stdout = seed.broken.copy()
         runs.push(run)
     }
@@ -277,7 +277,7 @@ severity: fn(run: TierRun) -> String Never! {
 // The finding for `seed` in `runs`: none when every tier printed exactly the
 // expected bytes and exited 0; otherwise the first tier that did not, sealed.
 seed_finding: fn(seed: RegressionSeed, runs: [TierRun], identity: RunIdentity, mutation_arm: String) -> [Dyn] Err! {
-    commands := [TierCommand]{}
+    ^commands: [TierCommand]{}
     loop run in runs {
         commands.push(TierCommand{tier: run.tier.copy(), command: run.command.copy()})
     }

@@ -41,7 +41,7 @@ pkg_tcl_bind: fn(source: String, lib: String, cache: String) -[FS, Env, Exec, Ti
     descriptor: pkg_binder_descriptor_for(TCL_MODULE_ROOT, "Tcl")
     archive_digest: pkg_bridge_sha_file(archive)
     target: pkg_bridge_foreign_host_target()
-    provenance := "schema=jet-tcl-bind-v1\nsha256={digest}\n"
+    ^provenance: "schema=jet-tcl-bind-v1\nsha256={digest}\n"
     identity: ForeignBoundaryIdentity.new("source:sha256-{pkg_sha256_hex(source.bytes())}", "none", descriptor.stamp(), "archive:{archive}:sha256-{archive_digest}", "tclsh={root};cc;ar", target)
     coverage: ForeignArtifactCoverage.new("{archive}:sha256-{archive_digest}", target, descriptor.stamp())
     pkg_bridge_append_boundary_provenance(provenance, descriptor, lib, identity, coverage)

@@ -82,7 +82,7 @@ store_admit_nix_closure_hangar_locked: fn(verification: StoreVerification, roots
 }
 
 store_nix_run_admission: fn(verification: StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?, hangar_locked: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
-    transaction := NixAdmission.new(verification, roots, expected_closure_receipt, hangar_locked)
+    ^transaction: NixAdmission.new(verification, roots, expected_closure_receipt, hangar_locked)
     admitted: transaction.admit(outputs, offline, progress) ?? {
         transaction.rollback()
         return Err(err)
@@ -114,27 +114,27 @@ NixAdmission: struct {
         download_started: time.start()
         requests: store_nix_validate_requests(requested)
         endpoint: NixCacheEndpoint.from_roots(self.roots)
-        store_dir := "/nix/store"
+        ^store_dir: "/nix/store"
         if !offline -> store_dir = endpoint.cache_info().store_dir
-        listed := [StoreEntry]{}
+        ^listed: [StoreEntry]{}
         if self.hangar_locked {
             listed = store_list_checked_unlocked(self.verification, self.roots) ?? return Err(store_nix_store_error(err))
         } else {
             listed = store_list_checked(self.verification, self.roots) ?? return Err(store_nix_store_error(err))
         }
         existing_entries: store_nix_entries_by_store_path(listed)
-        queue := Rank<String>.new()
+        ^queue: Rank<String>.new()
         loop request in requests.values() -> queue.add(request.store_path)
-        scheduled := queue.copy()
+        ^scheduled: queue.copy()
         planned: store_nix_planned_narinfos(self.verification, self.roots, endpoint)
         store_nix_expand_planned_closure(queue, scheduled, planned, store_dir)
-        fetched := [String:FetchedObject]{}
+        ^fetched: [String:FetchedObject]{}
         store_nix_progress_phase(progress, "Downloading")
         store_nix_progress_objects(progress, 0, scheduled.len())
 
         loop queue.len() > 0 {
             wave: store_nix_take_wave(queue, STORE_NIX_MAX_PARALLEL_FETCHES)
-            pending := [String]{}
+            ^pending: [String]{}
             loop store_path in wave {
                 if fetched.has_key(store_path) -> next
                 found: store_nix_existing_object(self.verification, self.roots, existing_entries, store_path, store_dir) ?? {
@@ -158,8 +158,8 @@ NixAdmission: struct {
             store_nix_progress_phase(progress, "Downloading")
             // Successful fetches are merged in path order before the first
             // failure is returned.
-            objects := [String:FetchedObject]{}
-            first_error := NixCacheError?{None}
+            ^objects: [String:FetchedObject]{}
+            ^first_error: NixCacheError?{None}
             loop store_path in pending {
                 if self.fetch_pending(endpoint, planned, store_path, store_dir, progress) == {
                     .Ok(object) -> { objects[store_path] = object }
@@ -168,7 +168,7 @@ NixAdmission: struct {
                     }
                 }
             }
-            names := objects.keys().to_list()
+            ^names: objects.keys().to_list()
             names.sort()
             loop store_path in names {
                 object: objects[store_path]
@@ -186,7 +186,7 @@ NixAdmission: struct {
 
         store_nix_progress_phase(progress, "Installing")
         store_nix_progress_objects(progress, 0, fetched.len())
-        downloaded_bytes := 0
+        ^downloaded_bytes: 0
         loop object in fetched.values() {
             if object.download_bytes > 0 && downloaded_bytes > STORE_NIX_INT_MAX - object.download_bytes {
                 return Err(NixCacheError.new(.Admission, "Nix downloaded byte count overflowed"))
@@ -194,7 +194,7 @@ NixAdmission: struct {
             downloaded_bytes += object.download_bytes
         }
         closure_receipt: self.publish(fetched, requests, store_dir, progress)
-        objects := [String:AdmittedNixObject]{}
+        ^objects: [String:AdmittedNixObject]{}
         loop store_path in fetched.keys() {
             object: fetched[store_path]
             objects[store_path] = AdmittedNixObject{
@@ -208,7 +208,7 @@ NixAdmission: struct {
                 compression: object.compression,
             }
         }
-        selected := [String:AdmittedNixObject]{}
+        ^selected: [String:AdmittedNixObject]{}
         loop name in requests.keys() {
             request: requests[name]
             object: objects.get(request.store_path) ?? return Err(NixCacheError.new(.Admission, "selected output is missing from the admitted closure"))
@@ -233,7 +233,7 @@ NixAdmission: struct {
     }
 
     fetch_object: fn(self, endpoint: NixCacheEndpoint, info: FetchedInfo, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
-        verification := self.verification.copy()
+        ^verification: self.verification.copy()
         compression: info.info.compression
         if compression == .Xz || compression == .Bzip2 {
             return Err(NixCacheError.new(.UnsupportedCompression, "Nix cache compression is not enabled for this admission path"))
@@ -267,7 +267,7 @@ NixAdmission: struct {
         // A signed narinfo lists a self-referencing path among its own
         // references; the signed fingerprint keeps that fact, and the closure
         // graph has no self edges.
-        references := [String]{}
+        ^references: [String]{}
         loop name in info.info.references {
             reference: "{store_dir}/{name}"
             if reference != store_path -> references.push(reference)
@@ -308,16 +308,16 @@ NixAdmission: struct {
         hangar: self.roots.hangar_dir()
         objects_dir: files.join(hangar, "objects")
         store_nix_ensure_dir(objects_dir, .Admission)
-        hangar_digests := [String:String]{}
+        ^hangar_digests: [String:String]{}
         loop store_path in fetched.keys() {
             hangar_digests[store_path] = fetched[store_path].hangar_digest
         }
-        names := fetched.keys().to_list()
+        ^names: fetched.keys().to_list()
         names.sort()
         total_objects: names.len()
-        admitted_objects := 0
+        ^admitted_objects: 0
         loop store_path in names {
-            refs := [String]{}
+            ^refs: [String]{}
             loop reference in fetched[store_path].references {
                 target: hangar_digests.get(reference) ?? return Err(NixCacheError.new(.MissingReference, "Nix closure edge has no fetched target"))
                 refs.push(target)
@@ -334,7 +334,7 @@ NixAdmission: struct {
         }
 
         _: AdmissionTransaction.recover_unlocked(self.roots) ?? return Err(store_nix_store_error(err))
-        transaction := AdmissionTransaction.new(self.verification, self.roots) ?? return Err(store_nix_store_error(err))
+        ^transaction: AdmissionTransaction.new(self.verification, self.roots) ?? return Err(store_nix_store_error(err))
         loop store_path in names {
             object: fetched[store_path]
             source: object.stage ?? files.join(objects_dir, object.hangar_digest)
@@ -349,7 +349,7 @@ NixAdmission: struct {
             ) ?? return Err(store_nix_store_error(err))
         }
 
-        entries := [StoreEntry]{}
+        ^entries: [StoreEntry]{}
         now: store_now_secs()
         loop store_path in names {
             object: fetched[store_path]
@@ -372,7 +372,7 @@ NixAdmission: struct {
                 "nix.output.out": object.store_path,
             }
             producer_bytes: store_canonical_producer("nix", object.store_path, object.proof, identity, facts) ?? return Err(store_nix_store_error(err))
-            producer := ProducerRecord.decode(producer_bytes) ?? return Err(store_nix_store_error(err))
+            ^producer: ProducerRecord.decode(producer_bytes) ?? return Err(store_nix_store_error(err))
             producer.bind_cache_provenance(reference, object.hangar_digest, identity, object.direct_reference_digests)
             // File-root and symlink-root NARs have no executable `bin` projection.
             candidate: files.join(object.hangar_path, "bin")
@@ -440,7 +440,7 @@ store_nix_validate_requests: fn(requested: [NixOutputRequest]) -> [String:NixOut
     if requested.len() == 0 {
         return Err(NixCacheError.new(.DuplicateEntry, "Nix closure admission has no outputs"))
     }
-    result := [String:NixOutputRequest]{}
+    ^result: [String:NixOutputRequest]{}
     loop request in requested {
         if request.name == "" || request.name.contains("/") || request.name == "." || request.name == ".." {
             return Err(NixCacheError.new(.PathTraversal, "Nix output name is not one safe component"))
@@ -456,7 +456,7 @@ store_nix_validate_requests: fn(requested: [NixOutputRequest]) -> [String:NixOut
 
 // The first listed Hangar entry for each recorded `nix.store-path`.
 store_nix_entries_by_store_path: fn(entries: [StoreEntry]) -> [String:StoreEntry] Never! {
-    by_store_path := [String:StoreEntry]{}
+    ^by_store_path: [String:StoreEntry]{}
     loop entry in entries {
         producer: ProducerRecord.decode(entry.producer_record) ?? next
         store_path: producer.facts.get("nix.store-path") ?? next
@@ -476,7 +476,7 @@ store_nix_existing_object: fn(verification: StoreVerification, roots: HangarRoot
     digest: store_verified_output_hash_persistent(verification, output, Val(roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.Admission, "existing Nix object {store_path} failed re-hash: {err.message()}"))
     if digest != entry.envelope.output_hash -> return Ok(None)
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(NixCacheError.new(.Admission, err.message()))
-    references := [String]{}
+    ^references: [String]{}
     recorded: producer.facts.get("nix.references") ?? ""
     loop reference in recorded.split(",") {
         if reference != "" -> references.push(reference)
@@ -517,8 +517,8 @@ store_nix_existing_object: fn(verification: StoreVerification, roots: HangarRoot
 // `nix-cache-closure-v1`: requested outputs, objects with their proofs, and
 // every edge with its resolved target digest, in store-path order.
 store_nix_closure_receipt_digest: fn(objects: [String:FetchedObject], outputs: [String:NixOutputRequest]) -> NixClosureReceipt Never! {
-    bytes := "nix-cache-closure-v1\n".bytes()
-    output_names := outputs.keys().to_list()
+    ^bytes: "nix-cache-closure-v1\n".bytes()
+    ^output_names: outputs.keys().to_list()
     output_names.sort()
     store_nix_push_u64(bytes, output_names.len())
     loop name in output_names {
@@ -527,10 +527,10 @@ store_nix_closure_receipt_digest: fn(objects: [String:FetchedObject], outputs: [
         store_nix_push_field(bytes, request.store_path)
         store_nix_push_field(bytes, objects[request.store_path].hangar_digest)
     }
-    store_paths := objects.keys().to_list()
+    ^store_paths: objects.keys().to_list()
     store_paths.sort()
     store_nix_push_u64(bytes, store_paths.len())
-    edge_count := 0
+    ^edge_count: 0
     loop store_path in store_paths {
         object: objects[store_path]
         store_nix_push_field(bytes, store_path)
@@ -553,7 +553,7 @@ store_nix_closure_receipt_digest: fn(objects: [String:FetchedObject], outputs: [
 
 // `nix-narinfo-proof-v1`: the signed upstream facts one object was admitted on.
 store_nix_proof_digest: fn(endpoint: String, info: NixNarInfo, fingerprint: [U8], key_id: String, signature: [U8], references: [String]) -> String Never! {
-    bytes := "nix-narinfo-proof-v1\n".bytes()
+    ^bytes: "nix-narinfo-proof-v1\n".bytes()
     store_nix_push_bytes(bytes, endpoint.bytes())
     store_nix_push_bytes(bytes, info.store_path.bytes())
     store_nix_push_bytes(bytes, fingerprint)
@@ -667,7 +667,7 @@ store_nix_admission_stage_pid: fn(name: String) -> Int? Never! {
 // An optional `+`, then at least one ASCII digit. The significant digits,
 // without the sign and leading zeros ("0" for zero).
 store_nix_decimal_digits: fn(text: String) -> String Never! {
-    digits := text.removeprefix("+")
+    ^digits: text.removeprefix("+")
     loop digits.bytes().len() > 1 && digits.starts_with("0") -> digits = digits.removeprefix("0")
     digits
 }

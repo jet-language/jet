@@ -15,7 +15,7 @@ HabitEdit: struct {
 // The source with every habit report's edits applied, last edit first.
 habit_fixed: fn(source: String) -> String {
     parsed: parse_source(source.bytes())
-    edits := [HabitEdit]{}
+    ^edits: [HabitEdit]{}
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity != 1 -> next
         assert(diagnostic.code == "E0003" || diagnostic.code == "E0002", "not a habit report: {diagnostic.code} {diagnostic.what}")
@@ -26,12 +26,12 @@ habit_fixed: fn(source: String) -> String {
         }
     }
     assert(edits.len() > 0, "no habit report for: {source}")
-    used := [Bool]{}
+    ^used: [Bool]{}
     loop _ in 0..<edits.len() -> used.push(false)
-    fixed := "{source}"
-    applied := 0
+    ^fixed: "{source}"
+    ^applied: 0
     loop applied < edits.len() {
-        best := -1
+        ^best: -1
         loop index in 0..<edits.len() {
             if !used[index] && (best < 0 || edits[index].start > edits[best].start) -> best = index
         }

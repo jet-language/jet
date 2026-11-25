@@ -49,7 +49,7 @@ host_parallelism_put_bytes: fn(root: I64, directory: I64, name: I64, data: I64, 
     host_parallelism_dirs(parent, error)
     path: host_parallelism_join(parent, rt_static_text("/"), name)
     bytes: jet_rt_alloc(length * RT_HOST_U8_STRIDE + I64{1}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         host_u8_put(bytes, at, rt_text_byte(data + at))
         at += I64{1}
@@ -87,12 +87,12 @@ host_parallelism_allowed: fn(root: I64, error: I64) -> I64 {
     data: cpu_word(wrapping(ctx + CPU_CTX_FILE))
     length: cpu_word(wrapping(ctx + CPU_CTX_FILE_LEN))
     key: rt_static_text("Cpus_allowed_list:")
-    count := I64{0}
-    at := I64{0}
+    ^count: I64{0}
+    ^at: I64{0}
     loop at < length {
         end: cpu_find(data, at, length, I64{10})
         if (end - at >= rt_text_len(key) && rt_text_equal_bytes(wrapping(data + at), rt_text_data(key), rt_text_len(key))) {
-            value := at + rt_text_len(key)
+            ^value: at + rt_text_len(key)
             loop value < end && cpu_space(rt_text_byte(wrapping(data + value))) -> value += I64{1}
             // Keep the newline so the list reads as the sysfs file does.
             host_parallelism_put_bytes(root, rt_static_text("sys/devices/system/cpu"), rt_static_text("online"), wrapping(data + value), end - value + I64{1}, error)
@@ -113,7 +113,7 @@ host_parallelism_tests: fn() {
     if (jet_std_fs_remove_all_raw(base, true, error) != I64{1}) {
         jet_rt_handle_drop_io_error(rt_text_word(error))
     }
-    root := I64{0}
+    ^root: I64{0}
 
     // v2: limits are read from the group and every ancestor; the minimum wins.
     root = host_parallelism_fresh(base, rt_static_text("v2"), error)
@@ -185,10 +185,10 @@ host_parallelism_tests: fn() {
 
     // Production probe: the real affinity count under the real cgroup quota.
     root = host_parallelism_fresh(base, rt_static_text("real"), error)
-    expected := host_parallelism_allowed(root, error)
+    ^expected: host_parallelism_allowed(root, error)
     host_parallelism_require(expected > I64{0}, rt_static_text("host parallelism: /proc/self/status has no Cpus_allowed_list"))
     empty: rt_static_text("")
-    real_quota := jet_rt_host_cpu_quota_fixture(rt_text_data(empty), I64{0})
+    ^real_quota: jet_rt_host_cpu_quota_fixture(rt_text_data(empty), I64{0})
     if (real_quota < I64{1}) { real_quota = I64{1} }
     if (real_quota < expected) { expected = real_quota }
     host_parallelism_expect(rt_static_text("real probe"), jet_rt_host_cpu_parallelism_fixture(rt_text_data(empty), I64{0}), expected)

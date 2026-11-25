@@ -348,9 +348,9 @@ PlugCx: struct {
 
     // The top `count` operands, in stack order.
     pops: fn(^self, count: Int) -> [Int] Never! {
-        out := [Int]{}
+        ^out: [Int]{}
         loop _ in 0..<count -> out.push(-1)
-        k := count
+        ^k: count
         loop k > 0 {
             k -= 1
             out[k] = self.pop()
@@ -365,11 +365,11 @@ PlugCx: struct {
     // Copies `values` into `slots`, through fresh temporaries when a value
     // is itself one of the slots.
     transfer: fn(^self, values: [Int], slots: [Int]) Never! {
-        overlap := false
+        ^overlap: false
         loop value in values {
             if slots.contains(value) -> overlap = true
         }
-        sources := values
+        ^sources: values
         if overlap {
             sources = [Int]{}
             loop value in values {
@@ -508,7 +508,7 @@ PlugCx: struct {
     branch: fn(^self, depth: Int) Never! {
         target: self.frames.len() - 1 - depth
         slots: if self.frames[target].kind == PLUG_FRAME_LOOP -> self.frames[target].param_slots else -> self.frames[target].result_slots
-        values := [Int]{}
+        ^values: [Int]{}
         loop k in (self.stack.len() - slots.len())..<self.stack.len() -> values.push(self.stack[k])
         self.transfer(values, slots)
         out: ir_depth(self.f, self.frames[target].opener)
@@ -563,13 +563,13 @@ PlugCx: struct {
 
     open: fn(^self, kind: Int, sig: WasmFuncType, test: Int) Never! {
         args: self.pops(sig.params.len())
-        params := [Int]{}
+        ^params: [Int]{}
         loop (k, arg) in args {
             slot: self.temp(plug_row(self.rows, sig.params[k]))
             self.emit(IROp.Copy, slot, arg, -1, -1)
             params.push(slot)
         }
-        results := [Int]{}
+        ^results: [Int]{}
         loop result in sig.results {
             slot: self.temp(plug_row(self.rows, result))
             results.push(slot)
@@ -601,7 +601,7 @@ plug_block_sig: fn(scope: PlugScope, block_type: Int) -> WasmFuncType Never! {
 // Guest function `fid` (`ty`, body `code`) as an IR function.
 plug_translate: fn(kit: PlugKit, scope: PlugScope, fid: Int, ty: WasmFuncType, code: WasmCode) -> IRFunction WasmError! {
     rows: kit.rows
-    cx := PlugCx{
+    ^cx: PlugCx{
         f: ir_hashed_function("plugin.wasm", "#plugin.wasm<{kit.artifact}>#{fid}", "jet_ir_plugin_", "", 0),
         rows: rows,
         names: kit.names,
@@ -706,7 +706,7 @@ plug_op: fn(cx: ^PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
         op == WASM_OP_CALL -> {
             ty: scope.callee_types[a]
             args: cx.pops(ty.params.len())
-            all := [Int]{cx.inst}
+            ^all: [Int]{cx.inst}
             area: cx.out_area(ty)
             if area >= 0 -> all.push(area)
             loop arg in args -> all.push(arg)
@@ -725,7 +725,7 @@ plug_op: fn(cx: ^PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             at: cx.word(cx.at)
             target: cx.rt("jet_plugin_table_fid", [Int]{cx.inst, table, index, sig, fid, at}, rows.word)
             cx.check(false)
-            all := [Int]{cx.inst, target}
+            ^all: [Int]{cx.inst, target}
             area: cx.out_area(ty)
             if area >= 0 -> all.push(area)
             loop arg in args -> all.push(arg)
@@ -864,8 +864,8 @@ plug_op: fn(cx: ^PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
 // Loads (0x28..0x35) and stores (0x36..0x3e) at offset `offset`.
 plug_memory_access: fn(cx: ^PlugCx, scope: PlugScope, op: Int, offset: Int) Never! {
     rows: cx.rows
-    narrow := rows.i32
-    width := 4
+    ^narrow: rows.i32
+    ^width: 4
     if {
         op == 0x29 || op == 0x37 -> {
             narrow = rows.word
@@ -926,8 +926,8 @@ plug_int_compare: fn(cx: ^PlugCx, index: Int, wide: Bool) Never! {
         result: cx.flag(test)
         return cx.push(result)
     }
-    right := cx.pop()
-    left := cx.pop()
+    ^right: cx.pop()
+    ^left: cx.pop()
     if index >= 4 && index % 2 == 0 {
         left = cx.unsigned(left, wide)
         right = cx.unsigned(right, wide)
@@ -965,7 +965,7 @@ plug_int_arith: fn(cx: ^PlugCx, index: Int, wide: Bool) Never! {
     }
     right: cx.pop()
     left: cx.pop()
-    result := -1
+    ^result: -1
     if {
         index == 3 || index == 4 || index == 5 || index == 10 || index == 11 || index == 12 -> {
             op: if {
@@ -1031,8 +1031,8 @@ plug_int_arith: fn(cx: ^PlugCx, index: Int, wide: Bool) Never! {
 
 // f32 (`narrow`) or f64 eq … ge by their index in the group.
 plug_float_compare: fn(cx: ^PlugCx, index: Int, narrow: Bool) Never! {
-    right := cx.pop()
-    left := cx.pop()
+    ^right: cx.pop()
+    ^left: cx.pop()
     if narrow {
         left = cx.promote(left)
         right = cx.promote(right)
@@ -1053,10 +1053,10 @@ plug_float_compare: fn(cx: ^PlugCx, index: Int, narrow: Bool) Never! {
 // f32 (`narrow`, computed in binary64 and rounded once) or f64 abs …
 // copysign by their index in the group.
 plug_float_arith: fn(cx: ^PlugCx, index: Int, narrow: Bool) Never! {
-    result := -1
+    ^result: -1
     if {
         index <= 6 -> {
-            value := cx.pop()
+            ^value: cx.pop()
             if narrow -> value = cx.promote(value)
             name: if {
                 index == 0 -> "jet_plugin_f64_abs"
@@ -1070,8 +1070,8 @@ plug_float_arith: fn(cx: ^PlugCx, index: Int, narrow: Bool) Never! {
             result = cx.rt(name, [Int]{value}, cx.rows.f64)
         }
         else -> {
-            right := cx.pop()
-            left := cx.pop()
+            ^right: cx.pop()
+            ^left: cx.pop()
             if narrow {
                 left = cx.promote(left)
                 right = cx.promote(right)
@@ -1126,7 +1126,7 @@ plug_convert: fn(cx: ^PlugCx, op: Int) Never! {
         n: op - 0xae
         return plug_trunc(cx, value, n < 2, (n % 2) + 2)
     }
-    result := -1
+    ^result: -1
     if {
         op == 0xa7 -> { result = cx.narrow32(value) }
         op == 0xac -> { result = cx.emit_copy(rows.word, value) }
@@ -1139,7 +1139,7 @@ plug_convert: fn(cx: ^PlugCx, op: Int) Never! {
         }
         (op >= 0xb2 && op <= 0xb3) || (op >= 0xb7 && op <= 0xba) -> {
             n: if op <= 0xb3 -> op - 0xb2 else -> op - 0xb7
-            wide := value
+            ^wide: value
             if n == 1 -> wide = cx.zext(value)
             widened: if n == 3 -> cx.rt("jet_plugin_f64_from_u64", [Int]{value}, rows.f64) else -> cx.convert(rows.f64, wide)
             result = if op <= 0xb3 -> cx.demote(widened) else -> widened
@@ -1257,12 +1257,12 @@ plug_cx: fn(kit: PlugKit, f: ^^IRFunction, fid: Int) -> PlugCx Never! {
 // (a lifted export, realloc or post-return has one result or none).
 plug_thunk: fn(kit: PlugKit, fid: Int, ty: WasmFuncType) -> IRFunction Never! {
     rows: kit.rows
-    cx := plug_cx(kit, ir_hashed_function("plugin.thunk", "#plugin.thunk<{kit.artifact}>#{fid}", "jet_ir_plugin_thunk_", "", 0), fid)
+    ^cx: plug_cx(kit, ir_hashed_function("plugin.thunk", "#plugin.thunk<{kit.artifact}>#{fid}", "jet_ir_plugin_thunk_", "", 0), fid)
     cx.f.result = rows.word
     cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     area: ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     cx.dummy = cx.word(0)
-    all := [Int]{cx.inst}
+    ^all: [Int]{cx.inst}
     extra: cx.out_area(ty)
     if extra >= 0 -> all.push(extra)
     loop (k, param) in ty.params {
@@ -1289,12 +1289,12 @@ plug_thunk: fn(kit: PlugKit, fid: Int, ty: WasmFuncType) -> IRFunction Never! {
 // of `targets` (functions of that signature) `target` names.
 plug_dispatcher: fn(kit: PlugKit, sig: Int, ty: WasmFuncType, targets: [Int]) -> IRFunction Never! {
     rows: kit.rows
-    cx := plug_cx(kit, ir_hashed_function("plugin.dispatch", "#plugin.dispatch<{kit.artifact}>#{sig}", "jet_ir_plugin_dispatch_", "", 0), -1)
+    ^cx: plug_cx(kit, ir_hashed_function("plugin.dispatch", "#plugin.dispatch<{kit.artifact}>#{sig}", "jet_ir_plugin_dispatch_", "", 0), -1)
     row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
     cx.f.result = row
     cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     target: ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
-    all := [Int]{cx.inst}
+    ^all: [Int]{cx.inst}
     if ty.results.len() > 1 {
         out: ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
         all.push(out)
@@ -1320,11 +1320,11 @@ plug_dispatcher: fn(kit: PlugKit, sig: Int, ty: WasmFuncType, targets: [Int]) ->
 // its flat arguments cross to the host in a frame area of words.
 plug_import_stub: fn(kit: PlugKit, fid: Int, import: Int, ty: WasmFuncType) -> IRFunction Never! {
     rows: kit.rows
-    cx := plug_cx(kit, ir_hashed_function("plugin.import", "#plugin.import<{kit.artifact}>#{fid}", "jet_ir_plugin_import_", "", 0), fid)
+    ^cx: plug_cx(kit, ir_hashed_function("plugin.import", "#plugin.import<{kit.artifact}>#{fid}", "jet_ir_plugin_import_", "", 0), fid)
     row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
     cx.f.result = row
     cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
-    params := [Int]{}
+    ^params: [Int]{}
     loop param in ty.params {
         slot: ir_slot(cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
         params.push(slot)

@@ -86,7 +86,7 @@ IRStaticField: struct {
 }
 
 ir_static_new: fn(s: ^IRStaticBuild, size: Int) -> Int Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<size -> bytes.push(U8{0})
     s.bytes.push(bytes)
     s.relocs.push([IRStaticReloc]{})
@@ -112,8 +112,8 @@ ir_static_box_word: fn(object: Int) -> IRStaticWord Never! {
 ir_static_big_int: fn(s: ^IRStaticBuild, value: Int) -> IRStaticWord? Never! {
     magnitude: if value < 0 -> -value else -> value
     digits: "{magnitude}"
-    limbs := [Int]{}
-    end := digits.len()
+    ^limbs: [Int]{}
+    ^end: digits.len()
     loop end > 0 {
         start: if end > 9 -> end - 9 else -> 0
         limbs.push(Int.parse(digits.slice(start, end)) ?? return None)
@@ -151,8 +151,8 @@ ir_static_constant: fn(m: ^IRModule, p: IRProgram, ty: Type, key: String, value:
     memo: "{key}|{ir_row_key(m, row)}"
     known: name_column_value(m.constant_rows_keys, m.constant_rows, memo) ?? -2
     if known != -2 -> return known
-    s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
-    root := -1
+    ^s: IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
+    ^root: -1
     if kind == .Aggregate {
         object: ir_static_new(s, m.types[row].size)
         if ir_static_fill(m, p, s, object, 0, ty, row, value) -> root = object
@@ -175,7 +175,7 @@ ir_static_constant: fn(m: ^IRModule, p: IRProgram, ty: Type, key: String, value:
 ir_static_commit: fn(m: ^IRModule, s: ^^IRStaticBuild) -> Int Never! {
     base: m.data.len()
     loop (object, bytes) in s.bytes {
-        relocs := [IRDataReloc]{}
+        ^relocs: [IRDataReloc]{}
         loop reloc in s.relocs[object] {
             target: if reloc.local -> base + reloc.target else -> reloc.target
             relocs.push(IRDataReloc{offset: reloc.offset, target: target, addend: reloc.addend, text: reloc.text})
@@ -215,7 +215,7 @@ ir_static_literal_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, 
 // literal's encoding (ir_static_literal_encode), by which a merge
 // (BuildMerge.jet) also shares one object between build threads.
 ir_static_literal_key: fn(value: TComptimeValue) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     ir_static_literal_encode(bytes, value)
     "literal:{sha256_hex_of_bytes(bytes)}"
 }
@@ -236,7 +236,7 @@ ir_static_literal_encode: fn(out: ^[U8], value: TComptimeValue) Never! {
             ir_static_literal_word(out, bits)
             ir_static_literal_word(out, ir_float_constant_bits(number, false))
         }
-        .Bool(flag) -> out.push(if flag -> U8{4} else -> U8{3})
+        .Bool(flag) -> { out.push(if flag -> U8{4} else -> U8{3}) }
         .Char(code) -> {
             out.push(U8{5})
             ir_static_literal_word(out, code)
@@ -305,7 +305,7 @@ ir_static_literal_encode: fn(out: ^[U8], value: TComptimeValue) Never! {
                 }
             }
         }
-        .Unit -> out.push(U8{16})
+        .Unit -> { out.push(U8{16}) }
         .Function(key) -> {
             out.push(U8{17})
             ir_static_literal_text(out, key)
@@ -329,7 +329,7 @@ ir_static_literal_key_encode: fn(out: ^[U8], key: TComptimeKey) Never! {
             out.push(U8{6})
             ir_static_literal_text(out, text)
         }
-        .Bool(flag) -> out.push(if flag -> U8{4} else -> U8{3})
+        .Bool(flag) -> { out.push(if flag -> U8{4} else -> U8{3}) }
         .Char(code) -> {
             out.push(U8{5})
             ir_static_literal_word(out, code)
@@ -414,9 +414,9 @@ ir_static_edge: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int, r
 // The address past its count word, -1 when the value does not freeze.
 ir_static_wrapper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, row: Int, key: String, value: TComptimeValue) -> Int Never! {
     memo: "wrapper:{key}|{ir_row_key(m, row)}"
-    object := name_column_value(m.constant_rows_keys, m.constant_rows, memo) ?? -2
+    ^object: name_column_value(m.constant_rows_keys, m.constant_rows, memo) ?? -2
     if object == -2 {
-        s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
+        ^s: IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
         wrapper: ir_static_box(s, m.types[row].size)
         object = if ir_static_into(m, p, s, wrapper, IR_STATIC_BOX_HEADER, ty, row, value) -> ir_static_commit(m, s.move()) + wrapper else -> -1
         name_column_set(m.constant_rows_keys, m.constant_rows, memo, object)
@@ -449,10 +449,10 @@ ir_storage_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition: TC
     }
     memo: "storage:{definition.key}"
     deferred: "storage-start:{definition.key}"
-    object := name_column_value(m.constant_rows_keys, m.constant_rows, memo) ?? -1
+    ^object: name_column_value(m.constant_rows_keys, m.constant_rows, memo) ?? -1
     if object < 0 {
         size: if kind == .Aggregate -> ir_align8(m.types[row].size) else -> 8
-        s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
+        ^s: IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
         cell: ir_static_new(s, size)
         // A `Shared{X}` binding's value is its payload, which a new cell
         // holds, and a declared point binding's is made at its first use. An
@@ -509,7 +509,7 @@ ir_storage_start_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definitio
     id: m.functions.len()
     m.functions.push(ir_hashed_function("storage.start", helper_key, "jet_ir_storage_start_", "", 0))
     ir_function_bind(m, helper_key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     word_row: ir_word_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     site: ir_shared_site_word(m, a, "storage:{definition.key}")
@@ -520,7 +520,7 @@ ir_storage_start_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definitio
     pointer_row: ir_pointer_row(m)
     address: ir_temp(m, a, pointer_row)
     ir_emit(a.f, IROp.DataAddress, address, object, -1, -1, a.line)
-    value := -1
+    ^value: -1
     if ir_untag(definition.ty) == .Shared(inner) {
         // A `Shared{X}` binding's value is its folded payload, which goes
         // into a new cell (ir_shared_holder_read).
@@ -651,8 +651,8 @@ ir_static_enum: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, ty: Type, slot
         if args.len() > 0 -> return None
         return Val(IRStaticWord{word: index})
     }
-    names := [String]{}
-    types := [Type]{}
+    ^names: [String]{}
+    ^types: [Type]{}
     if p.types[row].kind == .Enum(variants, _) {
         if variants[index].payload == {
             .Unit -> {}
@@ -676,7 +676,7 @@ ir_static_enum: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, ty: Type, slot
     boxed: ir_static_box(s, size)
     ir_static_put(s, boxed, IR_STATIC_BOX_HEADER, IRStaticWord{word: index}, 8)
     loop (position, arg) in args {
-        target := position
+        ^target: position
         if arg.name == .Val(name) {
             target = -1
             loop (candidate, member_name) in names {
@@ -788,7 +788,7 @@ ir_static_fill: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, object: Int, o
                 }
                 return true
             }
-            element_row := -1
+            ^element_row: -1
             if ir_untag(ty) == .List(element) -> element_row = ir_value_type(m, p, element) ?? -1
             if element_row < 0 || m.types[element_row].kind != .Word || m.types[element_row].size != 1 {
                 return false
@@ -809,7 +809,7 @@ ir_static_fill: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, object: Int, o
 // batch's heard calls) finds each type's members and field types once.
 ir_static_struct_at: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, object: Int, offset: Int, ty: Type, row: Int, fields: [TComptimeField]) -> Bool Never! {
     // A constant holds few struct types, so a layout is found by a scan.
-    layout := 0
+    ^layout: 0
     loop layout < s.layouts.len() && s.layouts[layout].row != row -> layout += 1
     if layout == s.layouts.len() {
         found: ir_static_members(m, p, row) ?? return false
@@ -817,15 +817,15 @@ ir_static_struct_at: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, object: I
     }
     if s.layouts[layout].busy {
         members: ir_static_members(m, p, row) ?? return false
-        plan := [IRStaticField]{}
+        ^plan: [IRStaticField]{}
         return ir_static_struct(m, p, s, object, offset, ty, members, plan, fields)
     }
     // The layout leaves `s` while its value is laid out, as the value writes
     // into `s`, and a busy row of the same type stands in its place.
-    taken := s.layouts.remove(layout, .Slot) ?? return false
+    ^taken: s.layouts.remove(layout, .Slot) ?? return false
     s.layouts.push(IRStaticLayout{row: row, members: [IRMember]{}, plan: [IRStaticField]{}, busy: true})
     laid: ir_static_struct(m, p, s, object, offset, ty, taken.members, taken.plan, fields)
-    back := 0
+    ^back: 0
     loop s.layouts[back].row != row || !s.layouts[back].busy -> back += 1
     s.layouts[back] = taken
     laid
@@ -841,7 +841,7 @@ ir_static_struct: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, object: Int,
     loop (position, field) in fields {
         if ir_comptime_answered_member(ty, field.name) -> return false
         if position >= plan.len() || plan[position].name != field.name {
-            found := -1
+            ^found: -1
             loop (index, member) in members {
                 if member.name == field.name -> found = index
             }
@@ -873,8 +873,8 @@ ir_static_map_order: fn(m: ^IRModule, p: IRProgram, shape: IRMapShape, entries: 
     // makes the last of a run the later duplicate. A key beyond 64 bits (an
     // Int's, or a uword's at 2^63 and above) is a BigInt decimal, ordered by
     // its exact value, so uword keys keep their unsigned order.
-    words := [{key: Int, at: Int}]{}
-    texts := [{key: String, at: Int}]{}
+    ^words: [{key: Int, at: Int}]{}
+    ^texts: [{key: String, at: Int}]{}
     loop (index, entry) in entries {
         if entry.key == {
             .Int(value) | .Char(value) -> words.push({key: value, at: index})
@@ -888,7 +888,7 @@ ir_static_map_order: fn(m: ^IRModule, p: IRProgram, shape: IRMapShape, entries: 
             .Tuple(_) | .Struct(_, _) -> return None
         }
     }
-    kept := [Int]{}
+    ^kept: [Int]{}
     if kind == "string" {
         if texts.len() != entries.len() -> return None
         texts.sort_by(fn(left, right) { (left.key <=> right.key).then(left.at <=> right.at) })
@@ -916,14 +916,14 @@ ir_static_map_order: fn(m: ^IRModule, p: IRProgram, shape: IRMapShape, entries: 
 // a key holds a member this does not order.
 ir_static_compound_order: fn(m: ^IRModule, p: IRProgram, key_row: Int, entries: [TComptimeMapEntry]) -> [Int]? Never! {
     if ir_static_own_order(m, p, key_row) -> return Val(loop index in 0..<entries.len() -> index)
-    keys := [{key: [{n: Int, s: String}], at: Int}]{}
+    ^keys: [{key: [{n: Int, s: String}], at: Int}]{}
     loop (index, entry) in entries {
-        atoms := [{n: Int, s: String}]{}
+        ^atoms: [{n: Int, s: String}]{}
         if !ir_static_key_atoms(m, p, key_row, entry.key, atoms) -> return None
         keys.push({key: atoms, at: index})
     }
     keys.sort_by(fn(left: {key: [{n: Int, s: String}], at: Int}, right: {key: [{n: Int, s: String}], at: Int}) { (left.key <=> right.key).then(left.at <=> right.at) })
-    kept := [Int]{}
+    ^kept: [Int]{}
     loop (index, pair) in keys {
         if index + 1 < keys.len() && keys[index + 1].key == pair.key -> next
         kept.push(pair.at)
@@ -946,7 +946,9 @@ ir_static_own_order: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     definition: ir_type_def(p, nominal) ?? return false
     if name_count(p.render_impls_keys) > 1 {
         type_key: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ir_row_ty(m, p, row))
-        if name_column_value(p.render_impls_keys, p.render_impls, "KeyBy|{type_key}") != None -> return true
+        if name_column_value(p.render_impls_keys, p.render_impls, "KeyBy|{type_key}") != None {
+            return true
+        }
         if name_column_value(p.render_impls_keys, p.render_impls, "Comparable|{type_key}") == .Val(index) && !p.functions[index].synthetic {
             return true
         }

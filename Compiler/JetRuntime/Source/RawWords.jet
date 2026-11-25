@@ -45,9 +45,9 @@ RT_MOVE_STRING_FROM: I64{2048}
 
 #Export(c) priv jet_rt_mem_move: fn(target: I64, source: I64, count: I64) {
     #Unsafe("native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires") {
-        to := target
-        from := source
-        left := count
+        ^to: target
+        ^from: source
+        ^left: count
         if (left > I64{128}) {
             if (from < to && to < wrapping(from + left)) {
                 loop left >= (I64{64}) {
@@ -97,8 +97,8 @@ RT_FILL_CHUNK: I64{16384}
             return
         }
         if (I64{8} % period == I64{0}) {
-            word := I64{0}
-            lane := I64{0}
+            ^word: I64{0}
+            ^lane: I64{0}
             loop lane < (I64{8}) {
                 byte: os_load_u8(wrapping(source + lane % period))
                 word |= byte << (lane << I64{3})
@@ -107,8 +107,8 @@ RT_FILL_CHUNK: I64{16384}
             words: total >> I64{3}
             if (words > I64{0}) { os_fill_words_i64(target, word, words) }
             // Every word starts on a period, so the tail is the word's low bytes.
-            at := words << I64{3}
-            shift := I64{0}
+            ^at: words << I64{3}
+            ^shift: I64{0}
             loop at < total {
                 os_store_u8(wrapping(target + at), (word >> shift) & I64{255})
                 at += I64{1}
@@ -116,7 +116,7 @@ RT_FILL_CHUNK: I64{16384}
             }
             return
         }
-        filled := if (period < total) -> period else -> total
+        ^filled: if (period < total) -> period else -> total
         os_copy_ascending_i64(target, source, filled)
         loop filled < total && filled < RT_FILL_CHUNK {
             moved: if (filled < total - filled) -> filled else -> total - filled
@@ -155,7 +155,7 @@ RT_FILL_STRING_FROM: I64{2048}
         } else {
             os_fill_64_i64(target, word)
             last: wrapping(target + count - I64{64})
-            to := wrapping(target + I64{64}) & I64{-64}
+            ^to: wrapping(target + I64{64}) & I64{-64}
             loop to < last {
                 os_fill_64_i64(to, word)
                 to = wrapping(to + I64{64})
@@ -196,7 +196,7 @@ RT_FILL_STRING_FROM: I64{2048}
 // Otherwise the bytes from the first differing word decide.
 #Export(c) priv memcmp: fn(left: I64, right: I64, count: I64) -> I64 {
     if (left == right) { return I64{0} }
-    at := I64{0}
+    ^at: I64{0}
     last_block: count - I64{64}
     last_word: count - I64{8}
     #Unsafe("the caller (C, or the List equality's lowering) holds count readable bytes at left and at right") {

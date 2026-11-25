@@ -28,7 +28,7 @@ NixProjectImportAuthority: struct {
         if components.len() == 0 -> return Err(NixError.ImportIO("import path is empty"))
         name: components[components.len() - 1]
         if components.len() == 1 -> return nix_import_read_file(self.root, name)
-        directory := nix_import_open_directory(self.root, components[0])
+        ^directory: nix_import_open_directory(self.root, components[0])
         loop index in 1..<components.len() - 1 {
             directory = nix_import_open_directory(directory, components[index])
         }
@@ -38,10 +38,10 @@ NixProjectImportAuthority: struct {
 
 // The admitted UTF-8 text of the regular file `name` inside `parent`.
 nix_import_read_file: fn(parent: Directory, name: String) -[FS]> String NixError! {
-    file := nix_import_open_file(parent, name)
+    ^file: nix_import_open_file(parent, name)
     info: file.stat() ?? return Err(NixError.ImportIO("{err}"))
     NixImportMetadata{regular_file: info.is_file && !info.is_symlink, length: info.size}.admit()
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop bytes.len() <= NIX_IMPORT_MAX_BYTES {
         chunk: file.read_bytes(NIX_IMPORT_READ_CHUNK) ?? return Err(NixError.ImportIO("{err}"))
         if chunk.len() == 0 -> break

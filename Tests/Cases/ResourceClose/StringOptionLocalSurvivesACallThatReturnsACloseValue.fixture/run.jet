@@ -65,7 +65,7 @@ strip_prefix: fn(path: String, prefix: String) -> String? Never! {
 }
 
 open_executables: fn(root: String, bin: String?) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     relative: bin ?? return names
     names.push("{root}/{relative}/tool")
     names.push("{root}/{relative}/helper")
@@ -79,16 +79,16 @@ bin_length: fn(bin: String?) -> Int Never! {
 
 create_wrappers: fn(snapshot_root: String, executables: [String]) -> Wrappers? {
     if executables.len() == 0 -> return None
-    mounts := [String]{}
+    ^mounts: [String]{}
     loop executable in executables -> mounts.push("{snapshot_root}.exec-mount/{executable}")
     directory: files.open_directory(".") ?? return None
     Val(Wrappers{root: "{snapshot_root}/wrappers/{mounts.len()}", held: Held{_tracer: Res{name: "wrappers"}, directory: Val(directory)}})
 }
 
 build_lease: fn(bin: String, outputs: [Output], direct: Bool) -> Lease {
-    bin_output_root := String?{None}
-    bin_relative := String?{None}
-    projected_bin_root := String?{None}
+    ^bin_output_root: String?{None}
+    ^bin_relative: String?{None}
+    ^projected_bin_root: String?{None}
     if bin != "" {
         loop output in outputs {
             if bin_output_root != None -> break
@@ -103,11 +103,11 @@ build_lease: fn(bin: String, outputs: [Output], direct: Bool) -> Lease {
         }
     }
     print("before: {bin_relative ?? "null"} ({bin_length(bin_relative)})")
-    executables := open_executables(projected_bin_root ?? "/snapshot", bin_relative)
+    ^executables: open_executables(projected_bin_root ?? "/snapshot", bin_relative)
     wrappers: if direct -> Wrappers?{None} else -> create_wrappers("/lease", executables)
     print("after: {bin_relative ?? "null"} ({bin_length(bin_relative)})")
-    wrapper_root := String?{None}
-    handle := Held?{None}
+    ^wrapper_root: String?{None}
+    ^handle: Held?{None}
     if wrappers == {
         .Val(found) -> {
             wrapper_root = Val(found.root)

@@ -30,7 +30,7 @@ task_screen: fn(view: TaskView) -> Int Never! { view.id }
 // may only read, so it declares the read it is allowed.
 viewers: fn(id: Int) -[DB.Read]> String ViewError! {
     if id != 1 -> return Err(ViewError.NotFound)
-    names := [String]{}
+    ^names: [String]{}
     loop account in app.presence(TaskView{id: id}) -> names.push("{account}")
     Ok("[{names.join(", ")}]")
 }
@@ -77,7 +77,7 @@ next_text: fn(client: WsConn) -> String {
 // Every text the client receives up to one that starts with `until`, in
 // order.
 texts_until: fn(client: WsConn, until: String) -> String {
-    out := [String]{}
+    ^out: [String]{}
     loop {
         text: next_text(client)
         done: text.starts_with(until)
@@ -110,7 +110,7 @@ run: fn() {
     print("ann received: {next_text(ann_client)}")
     ann_client.send_text("read") ?? panic("ann read")
     print("ann received: {texts_until(ann_client, "sees")}")
-    present := [String]{}
+    ^present: [String]{}
     loop account in app.as_system(fn() { app.presence(TaskView{id: 1}) }) {
         present.push("{account}")
     }

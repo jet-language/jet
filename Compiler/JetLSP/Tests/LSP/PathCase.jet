@@ -18,11 +18,11 @@ use {
     lsp_path_case_files.write("{root}/{PATH_CASE_LEXICON_PATH}", "// home\n") ?? panic("write the lexicon's home: {err}")
     lsp_path_case_files.write("{root}/Core/Net/Tls.jet", "tls: fn() {{}}\n") ?? panic("write Tls.jet: {err}")
     uri: "file://{root}/Core/Net/Tls.jet"
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, uri, "tls: fn() {{}}\n")
     lsp_test_publish(server, uri)
     checked: server.published.get(uri) ?? panic("{uri} was not published")
-    codes := [String]{}
+    ^codes: [String]{}
     loop diagnostic in checked.diagnostics -> codes.push(diagnostic.code)
     assert_eq(codes, [String]{"L0536"})
     params: "{{{lsp_test_text_document(uri)},\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":0,\"character\":0}}}},\"context\":{{\"diagnostics\":[]}}}}"

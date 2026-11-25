@@ -11,7 +11,7 @@ Tracked: struct {
 // Each way of reading a try_alloc's Ok yields a view: the value closes and
 // drops when the arena resets, latest allocation first, and never again.
 arms: fn() {
-    arena := mem.Arena.new()
+    ^arena: mem.Arena.new()
     if arena.try_alloc(Tracked{label: "t1"}) == {
         .Ok(value) -> { print("got {value.label}") }
         .Err(error) -> { print("refused {error.requested_bytes}") }
@@ -28,7 +28,7 @@ arms: fn() {
 
 // A propagating call hands on the view; the arena's close closes the value.
 tried: fn() AllocError! {
-    arena := mem.Arena.new()
+    ^arena: mem.Arena.new()
     value: arena.try_alloc(Tracked{label: "t4"})
     print("got {value.label}")
     print("close arena")

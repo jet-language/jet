@@ -67,7 +67,7 @@ cli_test_remove_catalog_tools: fn(root: String) -[FS, Env]> {
 // The catalog tool environment: the tool bin (and optionally the fake
 // systemd bin) with no variables or refs.
 cli_test_catalog_tool_env: fn(root: String, systemd_bin: String?) -> ShellEnv {
-    bin_dirs := [String]{files.join(root, "bin")}
+    ^bin_dirs: [String]{files.join(root, "bin")}
     if systemd_bin == {
         .Val(bin) -> { bin_dirs.push(bin.copy()) }
         .None -> {}
@@ -109,11 +109,11 @@ cli_test_catalog_worker: fn(claim: ServicesClaim, tools: String, fake: FakeSyste
     tools: files.tmpdir("jet-catalog-production-tools-") ?? panic("claim tool scratch")
     cli_test_install_catalog_tools(tools)
     fake: claim.fake ?? panic("Linux claims install the fake systemd")
-    env := cli_test_catalog_tool_env(tools, None)
+    ^env: cli_test_catalog_tool_env(tools, None)
     names: [String]{"redis", "postgres", "mysql", "mariadb", "nginx", "minio", "blackfire", "tideways"}
     loop name in names {
         plan: DevServicePlan{name: name, enable: true, ports: [Int]{0}}
-        supervisor := cli_test_catalog_worker(claim, tools, fake, name, 0).spawn() ?? panic("spawn catalog supervisor")
+        ^supervisor: cli_test_catalog_worker(claim, tools, fake, name, 0).spawn() ?? panic("spawn catalog supervisor")
         service_dir: claim.service_dir(name)
         cli_test_wait_for_file_contains(files.join(service_dir, "pid"), "pid=")
         assert(services_wait_healthy(claim.project, env, plan, time.duration_seconds(3)), "catalog service `{name}` did not pass its production readiness command")

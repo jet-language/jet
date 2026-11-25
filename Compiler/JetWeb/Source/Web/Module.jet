@@ -70,7 +70,7 @@ web_find_key: fn(m: IRModule, key: String) -> Int Never! {
 // An emitter for a function the module builds itself: `params` i64
 // parameters, `extra` more i64 locals, result `result`.
 web_plain_emitter: fn(params: Int, extra: Int, result: String) -> WebEmitter Never! {
-    types := [Int]{}
+    ^types: [Int]{}
     loop _ in 0..<(params + extra) -> types.push(WASM_I64)
     WebEmitter{
         code: [U8]{},
@@ -101,7 +101,7 @@ web_plain_emitter: fn(params: Int, extra: Int, result: String) -> WebEmitter Nev
 // copies and fill, a byte loop for memcmp.
 web_helper_body: fn(name: String) -> WebBody Never! {
     if name == "memcmp" {
-        e := web_plain_emitter(3, 2, "l")
+        ^e: web_plain_emitter(3, 2, "l")
         web_op(e, 0x02)
         web_op(e, WEB_VOID)
         web_op(e, 0x03)
@@ -137,7 +137,7 @@ web_helper_body: fn(name: String) -> WebBody Never! {
         web_i64(e, 0)
         return web_finish(e)
     }
-    e := web_plain_emitter(3, 0, "l")
+    ^e: web_plain_emitter(3, 0, "l")
     loop local in 0..<3 {
         web_get(e, local)
         web_wrap(e)
@@ -157,7 +157,7 @@ web_call_dropping: fn(e: ^WebEmitter, st: WebState, row: Int) Never! {
 // with its parameters and returns 0, the word web_slot_sig promises.
 web_adapter_body: fn(sig: String, row: Int) -> WebBody Never! {
     params: wasm_sig_side(sig, false)
-    e := web_plain_emitter(params.len(), 0, "l")
+    ^e: web_plain_emitter(params.len(), 0, "l")
     e.local_types = params.copy()
     loop k in 0..<params.len() -> web_get(e, k)
     web_call(e, row)
@@ -168,8 +168,8 @@ web_adapter_body: fn(sig: String, row: Int) -> WebBody Never! {
 // `jet_web_init` or `jet_web_fini`: the runtime's hooks of that kind, lowest
 // priority first, in export order within one priority.
 web_hooks_body: fn(st: ^WebState, hooks: [WebHook], fini: Bool) -> WebBody Never! {
-    e := web_plain_emitter(0, 0, "")
-    priorities := [Int]{}
+    ^e: web_plain_emitter(0, 0, "")
+    ^priorities: [Int]{}
     loop hook in hooks {
         if hook.fini == fini && !priorities.contains(hook.priority) {
             priorities.push(hook.priority)
@@ -202,7 +202,7 @@ web_hooks_body: fn(st: ^WebState, hooks: [WebHook], fini: Bool) -> WebBody Never
 // has passed the arguments (`jet_rt_host_arguments`): program start, the
 // entry by its table index, the stdout flush; the entry's exit code.
 web_run_body: fn(st: ^WebState, entry: Int) -> WebBody Never! {
-    e := web_plain_emitter(0, 1, "l")
+    ^e: web_plain_emitter(0, 1, "l")
     start: web_symbol(st, "jet_rt_host_program_start", ":")
     web_call(e, start.callee)
     if web_sig_result(start.sig) != "" -> web_op(e, 0x1a)
@@ -219,8 +219,8 @@ web_run_body: fn(st: ^WebState, entry: Int) -> WebBody Never! {
 
 // Places every data row from `base`: per row its address, at its alignment.
 web_place_data: fn(tables: IRX64Tables, base: Int) -> [Int] Never! {
-    at := base
-    places := [Int]{}
+    ^at: base
+    ^places: [Int]{}
     loop object in tables.data {
         align: if object.align > 1 -> object.align else -> 1
         at = web_align_up(at, align)
@@ -239,9 +239,9 @@ web_place_data: fn(tables: IRX64Tables, base: Int) -> [Int] Never! {
 // host provides.
 web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:String], armed: Int, hosts: [String:Bool], exports: [String:Int], hooks: [WebHook]) -> WebModule Never! {
     tables: ir_x64_tables(m)
-    places := web_place_data(tables, layout.data_base)
+    ^places: web_place_data(tables, layout.data_base)
     data_end: places.pop() ?? layout.data_base
-    st := WebState{
+    ^st: WebState{
         app: app,
         stop_points: m.stop_points,
         data_at: places,
@@ -268,12 +268,12 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
         if f.symbol != "" -> st.internal[f.symbol.copy()] = row
     }
     loop (symbol, row) in exports -> st.internal[symbol.copy()] = row
-    bodies := [WebBody]{}
+    ^bodies: [WebBody]{}
     loop row in 0..<m.functions.len() -> bodies.push(web_select_function(st, m, tables, row))
     // The module's own functions after the IR functions: the export glue,
     // then the helpers its calls named.
-    names := [String]{}
-    sigs := [String]{}
+    ^names: [String]{}
+    ^sigs: [String]{}
     if {
         app -> {
             if {
@@ -301,8 +301,8 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     // then the helpers.
     // Per ref: its import index, or -1 - (its helper's place after the IR
     // functions).
-    ref_index := [Int]{}
-    import_count := 0
+    ^ref_index: [Int]{}
+    ^import_count: 0
     loop ref in st.refs {
         if {
             ref.space != "" -> {
@@ -319,7 +319,7 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     }
     // Per table slot its function: the IR function, or the adapter of one
     // that returns nothing (web_adapter_body).
-    slot_callees := [Int]{}
+    ^slot_callees: [Int]{}
     loop row in st.slot_rows {
         sig: st.sigs[row].copy()
         if web_sig_result(sig) != "" {
@@ -333,27 +333,27 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     }
     defined_base: import_count
     // Every signature is a type before the type section is written.
-    func_types := [Int]{}
+    ^func_types: [Int]{}
     loop row in 0..<m.functions.len() {
         sig: st.sigs[row].copy()
         func_types.push(web_type_index(st, sig))
     }
     loop sig in sigs -> func_types.push(web_type_index(st, sig))
-    import_sigs := [String]{}
+    ^import_sigs: [String]{}
     loop ref in st.refs {
         if ref.space != "" -> import_sigs.push(ref.sig.copy())
     }
     import_types: loop sig in import_sigs -> web_type_index(st, sig)
-    out := [U8]{}
+    ^out: [U8]{}
     wasm_put_fixed(out, 0x6d736100, 4)
     wasm_put_fixed(out, 1, 4)
     // Types.
-    section := [U8]{}
+    ^section: [U8]{}
     loop key in st.types -> web_put_func_type(section, key)
     wat_put_vec_section(out, WEB_SECTION_TYPE, st.types.len(), section)
     // Imports: memory, table, the three globals, then the functions.
     section = [U8]{}
-    count := 5
+    ^count: 5
     wat_put_name(section, "env")
     wat_put_name(section, "memory")
     section.push(0x02)
@@ -374,8 +374,8 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
         section.push(U8{global_types[k]})
         section.push(0x01)
     }
-    imports := [String]{}
-    position := 0
+    ^imports: [String]{}
+    ^position: 0
     loop ref in st.refs {
         if ref.space == "" -> next
         wat_put_name(section, ref.space)
@@ -393,14 +393,14 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     wat_put_vec_section(out, WEB_SECTION_FUNCTION, func_types.len(), section)
     // Exports: the glue, and the runtime's symbols.
     section = [U8]{}
-    export_rows := [String]{}
+    ^export_rows: [String]{}
     loop k in 0..<glue {
         wat_put_name(section, names[k])
         section.push(0x00)
         wasm_put_unsigned(section, defined_base + m.functions.len() + k)
         export_rows.push("{names[k]}\t{sigs[k]}")
     }
-    symbols := loop (symbol, _) in exports -> symbol.copy()
+    ^symbols: loop (symbol, _) in exports -> symbol.copy()
     symbols.sort()
     loop symbol in symbols {
         row: exports.get(symbol) ?? next
@@ -423,9 +423,9 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     // module offsets: its code's place in the section, then the section's in
     // the module.
     section = [U8]{}
-    lines := [Int]{}
+    ^lines: [Int]{}
     loop (row, body) in bodies {
-        code := body.code.copy()
+        ^code: body.code.copy()
         loop pair in 0..<(body.fixups.len() /% 2) {
             web_patch_padded(code, body.fixups[2 * pair], web_function_index(body.fixups[2 * pair + 1], defined_base, ref_index))
         }
@@ -442,12 +442,12 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     loop pair in 0..<(lines.len() /% 3) -> lines[3 * pair] = lines[3 * pair] + code_at
     // Data: one active segment per row, its address words resolved.
     section = [U8]{}
-    segments := 0
+    ^segments: 0
     loop (row, object) in tables.data {
         if object.bytes.len() == 0 -> next
-        bytes := object.bytes.copy()
+        ^bytes: object.bytes.copy()
         loop reloc in object.relocs {
-            word := [U8]{}
+            ^word: [U8]{}
             wasm_put_fixed(word, st.data_at[reloc.target.value] + reloc.addend, 8)
             loop k in 0..<8 -> bytes[reloc.offset + k] = word[k]
         }
@@ -464,13 +464,13 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     section = [U8]{}
     wat_put_name(section, "name")
     if app {
-        module_name := [U8]{}
+        ^module_name: [U8]{}
         wat_put_name(module_name, WEB_APP_MODULE)
         section.push(0x00)
         wasm_put_unsigned(section, module_name.len())
         section.extend(module_name)
     }
-    entries := [U8]{}
+    ^entries: [U8]{}
     total: m.functions.len() + names.len()
     loop row in 0..<total {
         wasm_put_unsigned(entries, defined_base + row)
@@ -478,7 +478,7 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
             wat_put_name(entries, names[row - m.functions.len()])
         }
     }
-    names_body := [U8]{}
+    ^names_body: [U8]{}
     wasm_put_unsigned(names_body, total)
     names_body.extend(entries)
     section.push(0x01)
@@ -516,10 +516,10 @@ WEB_LOCATION_SECTION: "jet.lines"
 // (WebModule.lines). A function with no source file or declaration line is
 // left out, as the native table leaves it.
 web_location_table: fn(m: IRModule, lines: [Int], defined_base: Int) -> [U8] Never! {
-    files := [Int]{}
-    body := [U8]{}
-    count := 0
-    cursor := 0
+    ^files: [Int]{}
+    ^body: [U8]{}
+    ^count: 0
+    ^cursor: 0
     loop (row, f) in m.functions {
         first: cursor
         loop cursor < lines.len() && lines[cursor + 1] == row -> cursor += 3
@@ -529,8 +529,8 @@ web_location_table: fn(m: IRModule, lines: [Int], defined_base: Int) -> [U8] Nev
         wasm_put_unsigned(body, web_file_index(m, files, row))
         wasm_put_unsigned(body, f.line)
         wasm_put_unsigned(body, (cursor - first) /% 3)
-        offset := 0
-        line := 0
+        ^offset: 0
+        ^line: 0
         loop pair in (first /% 3)..<(cursor /% 3) {
             wasm_put_unsigned(body, lines[3 * pair] - offset)
             wasm_put_signed(body, lines[3 * pair + 2] - line)
@@ -539,7 +539,7 @@ web_location_table: fn(m: IRModule, lines: [Int], defined_base: Int) -> [U8] Nev
         }
         count += 1
     }
-    section := [U8]{}
+    ^section: [U8]{}
     wat_put_name(section, WEB_LOCATION_SECTION)
     wasm_put_unsigned(section, files.len())
     loop named in files -> wat_put_name(section, m.functions[named].source_file)

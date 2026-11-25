@@ -9,8 +9,8 @@ run: fn() {
     store: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     retention: Duration.seconds(86400) ?? panic("retention")
-    runtime := services.runtime(store, retention: retention)
-    tree := services.tree("cancel-restart")
+    ^runtime: services.runtime(store, retention: retention)
+    ^tree: services.tree("cancel-restart")
     endpoint: tree.worker("worker", worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
     if phase == "send" {

@@ -12,7 +12,7 @@ LSPChoicesFixtureChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             plain: LSPFixtureChecker{}
-            checked := plain.check(entry, overlays)
+            ^checked: plain.check(entry, overlays)
             checked.choices.push(LSPChoice{module_path: "/w/main.jet", line: 1, kind: "copies", choice: "`left` shared: a later read uses it after this move, so the move copies it"})
             checked.choices.push(LSPChoice{module_path: "/w/main.jet", line: 5, kind: "storage form", choice: "pending: Signal<Int> synchronized for task crossing"})
             checked.choices.push(LSPChoice{module_path: "/w/other.jet", line: 1, kind: "copies", choice: "in another module"})
@@ -34,7 +34,7 @@ LSPChoicesFixtureChecker: struct {
 }
 
 lsp_test_choices_server: fn() -> LSPServer Never! {
-    server := lsp_server(LSPChoicesFixtureChecker{})
+    ^server: lsp_server(LSPChoicesFixtureChecker{})
     lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN)
     server
 }
@@ -45,7 +45,7 @@ lsp_test_hover_text: fn(server: ^LSPServer, line: Int, character: Int) -> String
 }
 
 #Test("hover lists the automatic choices on its line after the signature") {
-    server := lsp_test_choices_server()
+    ^server: lsp_test_choices_server()
     declared: lsp_test_hover_text(server, 0, 1)
     assert(declared.contains("add"), "the signature still leads")
     assert(declared.contains("Automatic choices:\n- copies: `left` shared: a later read uses it after this move, so the move copies it"), "the copies choice and its reason follow")

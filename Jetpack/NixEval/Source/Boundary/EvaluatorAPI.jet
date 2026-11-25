@@ -214,7 +214,7 @@ nixeval_evaluate_devshell_output_with_import_authority: fn(source: String, syste
     if output == "" || nixeval_has_empty_segment(output) {
         return Err(NixEvalError.Invalid("devShell output selector must be a non-empty attribute path"))
     }
-    evaluator := NixEvaluator.new(system, authority)
+    ^evaluator: NixEvaluator.new(system, authority)
     evaluator.devshell(source, output)
 }
 
@@ -226,7 +226,7 @@ nixeval_evaluate_derivation: fn(source: String, system: String) -> NixEvalDeriva
 
 nixeval_evaluate_derivation_with_import_authority: fn(source: String, system: String, authority: ^^NixEvalAuthority?) -> NixEvalDerivation NixEvalError! {
     nixeval_check_request(source, system)
-    evaluator := NixEvaluator.new(system, authority)
+    ^evaluator: NixEvaluator.new(system, authority)
     evaluator.derivation(source)
 }
 
@@ -237,7 +237,7 @@ nixeval_evaluate_derivation_output: fn(source: String, system: String, attribute
 
 nixeval_evaluate_derivation_output_with_import_authority: fn(source: String, system: String, attribute: String, authority: ^^NixEvalAuthority?) -> NixEvalDerivation NixEvalError! {
     nixeval_check_request(source, system)
-    evaluator := NixEvaluator.new(system, authority)
+    ^evaluator: NixEvaluator.new(system, authority)
     evaluator.derivation_output(source, attribute)
 }
 

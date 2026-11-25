@@ -555,7 +555,7 @@ parse_new: fn(db: ^^conn.Conn, up: ^^Gen) -> Parse Never! {
 
 // Move the connection out of `db` for a Parse, leaving an empty Conn.
 take_conn: fn(db: ^conn.Conn) -> conn.Conn Never! {
-    out := db
+    ^out: db
     db = conn.conn_new()
     out
 }
@@ -563,7 +563,7 @@ take_conn: fn(db: ^conn.Conn) -> conn.Conn Never! {
 // Move the parse-tree arena out of the connection, for a Parse to work on
 // beside it.
 take_ast: fn(db: ^conn.Conn) -> ast.AST Never! {
-    out := db.ast
+    ^out: db.ast
     db.ast = ast.new_ast()
     out
 }
@@ -648,7 +648,7 @@ frame_push: fn(p: ^Parse) Never! {
 
 // End a sub-program: its frame comes back.
 frame_pop: fn(p: ^Parse) -> ParseFrame Never! {
-    sub := p.f
+    ^sub: p.f
     p.f = p.outer.pop() ?? frame_new()
     sub
 }
@@ -808,7 +808,7 @@ release_temp_reg: fn(p: ^Parse, i_reg: Int) Never! {
 // sqlite3GetTempRange.
 get_temp_range: fn(p: ^Parse, n_reg: Int) -> Int Never! {
     if n_reg == 1 -> return get_temp_reg(p)
-    i := p.f.i_range_reg
+    ^i: p.f.i_range_reg
     if n_reg <= p.f.n_range_reg {
         p.f.i_range_reg += n_reg
         p.f.n_range_reg -= n_reg
@@ -845,7 +845,7 @@ touch_register: fn(p: ^Parse, i_reg: Int) Never! {
 // sqlite3FirstAvailableRegister: the first register at or past i_min that
 // no factored constant uses; the temporary register caches empty.
 first_available_register: fn(p: ^Parse, a: ast.AST, i_min: Int) -> Int Never! {
-    m := i_min
+    ^m: i_min
     l: p.f.const_expr
     if l >= 0 {
         loop item in a.lists[l].items {
@@ -955,7 +955,7 @@ halt_constraint: fn(p: ^Parse, err_code: Int, on_error: Int, msg: [U8]?, p5: Int
 unique_constraint: fn(p: ^Parse, on_error: Int, idx: Int) Never! {
     ix: p.db.indexes[idx]
     tab: p.db.tables[ix.table]
-    msg := [U8]{}
+    ^msg: [U8]{}
     if ix.col_expr >= 0 -> msg = sql_mprintf(p, "index '%q'", [base.Mem]{pf.txt(ix.name)}) else {
         loop j in 0..<ix.n_key_col {
             if j > 0 -> aux.append_bytes(msg, ", ".bytes())
@@ -971,8 +971,8 @@ unique_constraint: fn(p: ^Parse, on_error: Int, idx: Int) Never! {
 // sqlite3RowidConstraint.
 rowid_constraint: fn(p: ^Parse, on_error: Int, t: Int) Never! {
     tab: p.db.tables[t]
-    msg := tab.name.copy()
-    rc := base.CONSTRAINT_ROWID
+    ^msg: tab.name.copy()
+    ^rc: base.CONSTRAINT_ROWID
     if tab.ipkey >= 0 {
         msg.push(U8{46})
         aux.append_bytes(msg, tab.cols[tab.ipkey].name)
@@ -996,8 +996,8 @@ auth_bad_return_code: fn(a: ^ast.AST) Never! {
 // sqlite3AuthCheck.
 auth_check: fn(p: ^Parse, a: ^ast.AST, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
     if !p.db.has_auth || p.db.init.busy || in_special_parse(a) -> return base.OK
-    g := p.up
-    rc := g.authorize(p, code, arg1, arg2, arg3)
+    ^g: p.up
+    ^rc: g.authorize(p, code, arg1, arg2, arg3)
     if rc == conn.AUTH_DENY {
         ast.error(a, "not authorized")
         a.ctx.rc = base.AUTH
@@ -1012,10 +1012,10 @@ auth_check: fn(p: ^Parse, a: ^ast.AST, code: Int, arg1: [U8]?, arg2: [U8]?, arg3
 auth_read_col: fn(p: ^Parse, a: ^ast.AST, tab: [U8], col: [U8], i_db: Int) -[DB]> Int Never! {
     if p.db.init.busy -> return base.OK
     z_db: p.db.dbs[i_db].name
-    g := p.up
+    ^g: p.up
     rc: g.authorize(p, conn.AUTH_READ, Val(tab), Val(col), Val(z_db))
     if rc == conn.AUTH_DENY {
-        z := "{ast.text(tab)}.{ast.text(col)}"
+        ^z: "{ast.text(tab)}.{ast.text(col)}"
         if p.db.dbs.len() > 2 || i_db != 0 -> z = "{ast.text(z_db)}.{z}"
         ast.error(a, "access to {z} is prohibited")
         a.ctx.rc = base.AUTH
@@ -1030,7 +1030,7 @@ auth_read: fn(p: ^Parse, a: ^ast.AST, e: Int, schema: Int, src: Int) -[DB]> Neve
     if i_db < 0 {
         return
     }
-    t := -1
+    ^t: -1
     if a.exprs[e].op == tk.TK_TRIGGER -> t = p.f.trigger_tab else if src >= 0 {
         loop si in a.srclists[src].items {
             if a.exprs[e].itable == a.items[si].cursor {
@@ -1091,7 +1091,7 @@ walk_top: fn(p: Parse) -> Int Never! { p.walks.len() - 1 }
 // sqlite3WalkExpr: the expression callback on each node, parents first.
 pwalk_expr: fn(p: ^Parse, a: ^ast.AST, e0: Int) -[DB]> Int Never! {
     if e0 < 0 -> return ast.WRC_CONTINUE
-    e := e0
+    ^e: e0
     loop {
         cb: p.walks[walk_top(p)].cb
         rc: cb.on_expr(p, a, e)
@@ -1121,7 +1121,7 @@ pwalk_expr: fn(p: ^Parse, a: ^ast.AST, e0: Int) -[DB]> Int Never! {
 
 // walkWindowList.
 pwalk_window_list: fn(p: ^Parse, a: ^ast.AST, list: Int, one_only: Bool) -[DB]> Int Never! {
-    win := list
+    ^win: list
     loop win >= 0 {
         if pwalk_expr_list(p, a, a.windows[win].order_by) != 0 -> return ast.WRC_ABORT
         if pwalk_expr_list(p, a, a.windows[win].partition) != 0 -> return ast.WRC_ABORT
@@ -1181,7 +1181,7 @@ pwalk_select: fn(p: ^Parse, a: ^ast.AST, s0: Int) -[DB]> Int Never! {
     if s0 < 0 -> return ast.WRC_CONTINUE
     cb: p.walks[walk_top(p)].cb
     if !cb.has_select() -> return ast.WRC_CONTINUE
-    s := s0
+    ^s: s0
     loop s >= 0 {
         rc: cb.on_select(p, a, s)
         if rc != 0 -> return rc & ast.WRC_ABORT
@@ -1245,8 +1245,8 @@ CodegenTestGen: struct {
 }
 
 #Test("temporary registers and ranges are reused as expr.c reuses them") {
-    g := CodegenTestGen{calls: 0}
-    p := parse_new(conn.conn_new(), g)
+    ^g: CodegenTestGen{calls: 0}
+    ^p: parse_new(conn.conn_new(), g)
     r1: get_temp_reg(p)
     r2: get_temp_reg(p)
     assert(r1 == 1 && r2 == 2 && p.f.n_mem == 2)
@@ -1263,11 +1263,11 @@ CodegenTestGen: struct {
 }
 
 #Test("the authorizer's answers become errors and NULL reads") {
-    g := CodegenTestGen{calls: 0}
-    db := conn.conn_new()
+    ^g: CodegenTestGen{calls: 0}
+    ^db: conn.conn_new()
     db.has_auth = true
-    p := parse_new(db, g)
-    a := ast.stmt_ast("")
+    ^p: parse_new(db, g)
+    ^a: ast.stmt_ast("")
     assert(auth_check(p, a, conn.AUTH_INSERT, Val("t".bytes()), None, None) == conn.AUTH_DENY)
     assert(a.ctx.errmsg == Val("not authorized") && a.ctx.rc == base.AUTH)
     saved: auth_context_push(p, Val("v".bytes()))

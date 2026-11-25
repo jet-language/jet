@@ -37,7 +37,7 @@ use {
 // of it is an error.
 src_list_lookup: fn(p: ^cg.Parse, a: ^ast.AST, src: Int) -[DB]> Int Never! {
     si: ast.src_item(a, src, 0)
-    t := cat.locate_table_item(p, a, 0, si)
+    ^t: cat.locate_table_item(p, a, 0, si)
     if a.items[si].tab >= 0 -> ast.tab_unref(a, a.items[si].tab)
     a.items[si].tab = t
     a.items[si].not_cte = true
@@ -99,17 +99,17 @@ is_read_only: fn(p: cg.Parse, a: ^ast.AST, t: Int) -> Bool Never! {
 open_table_and_indices: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, op: Int, p5_0: Int, i_base0: Int, to_open: [Bool]?) -> {n: Int, data_cur: Int, idx_cur: Int} Never! {
     if ex.is_virtual(p.db, t) -> return {n: 0, data_cur: -999, idx_cur: -999}
     i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
-    i_base := if i_base0 < 0 -> p.f.n_tab else -> i_base0
-    data_cur := i_base
+    ^i_base: if i_base0 < 0 -> p.f.n_tab else -> i_base0
+    ^data_cur: i_base
     i_base += 1
     has_rowid: ex.has_rowid(p.db, t)
-    open_tab := true
+    ^open_tab: true
     if to_open == .Val(o) -> open_tab = o[0]
     if has_rowid && open_tab -> ex.open_table(p, a, data_cur, i_db, t, op)
     idx_cur: i_base
-    p5 := p5_0
-    i := 0
-    ix := p.db.tables[t].index
+    ^p5: p5_0
+    ^i: 0
+    ^ix: p.db.tables[t].index
     loop ix >= 0 {
         cur: i_base
         i_base += 1
@@ -117,7 +117,7 @@ open_table_and_indices: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, op: Int, p5_0: Int
             data_cur = cur
             p5 = 0
         }
-        want := true
+        ^want: true
         if to_open == .Val(o) -> want = o[i + 1]
         if want {
             _: cg.op3(p, op, cur, p.db.indexes[ix].tnum, i_db)
@@ -139,7 +139,7 @@ op_list_item: fn(opcode: Int, p1: Int, p2: Int, p3: Int) -> aux.VdbeOpList Never
 // largest rowid back to sqlite_sequence when it grew. Coded at the end of
 // a top-level INSERT, UPDATE or DELETE.
 autoincrement_end: fn(p: ^cg.Parse, a: ^ast.AST) Never! {
-    x := p.f.ainc
+    ^x: p.f.ainc
     loop x >= 0 {
         info: p.aincs[x]
         mem_id: info.reg_ctr
@@ -171,10 +171,10 @@ autoincrement_end: fn(p: ^cg.Parse, a: ^ast.AST) Never! {
 // PRIMARY KEY index of a WITHOUT ROWID table or cursor i_idx_no_seek.
 generate_row_index_delete: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, a_reg_idx: [Int]?, i_idx_no_seek: Int) -[DB]> Never! {
     pk: if ex.has_rowid(p.db, t) -> -1 else -> cat.primary_key_index(p.db, t)
-    r1 := -1
-    prior := -1
-    i := 0
-    ix := p.db.tables[t].index
+    ^r1: -1
+    ^prior: -1
+    ^i: 0
+    ^ix: p.db.tables[t].index
     loop ix >= 0 {
         cur: ix
         k: i
@@ -235,8 +235,8 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
     if t < 0 {
         return
     }
-    b_complex := false
-    g := p.up
+    ^b_complex: false
+    ^g: p.up
     if g.view_get_column_names(p, a, t) != 0 {
         return
     }
@@ -254,8 +254,8 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
     i_tab_cur: p.f.n_tab
     a.items[si].cursor = i_tab_cur
     p.f.n_tab += 1
-    n_idx := 0
-    ix := p.db.tables[t].index
+    ^n_idx: 0
+    ^ix: p.db.tables[t].index
     loop ix >= 0 {
         p.f.n_tab += 1
         n_idx += 1
@@ -277,7 +277,7 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
     rs.nc_release(p, mark)
 
     // The counter of the rows deleted, when counting rows.
-    mem_cnt := 0
+    ^mem_cnt: 0
     if p.db.flags & conn.SQLITE_COUNT_ROWS != 0 && a.ctx.nested == 0 && p.f.trigger_tab < 0 && !p.f.b_returning {
         p.f.n_mem += 1
         mem_cnt = p.f.n_mem
@@ -292,7 +292,7 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
         if has_rowid {
             _: cg.op4_text(p, opc.OP_CLEAR, p.db.tables[t].tnum, i_db, cnt_arg, p.db.tables[t].name.copy())
         }
-        jx := p.db.tables[t].index
+        ^jx: p.db.tables[t].index
         loop jx >= 0 {
             if p.db.indexes[jx].idx_type == ast.IDXTYPE_PRIMARYKEY && !has_rowid {
                 _: cg.op3(p, opc.OP_CLEAR, p.db.indexes[jx].tnum, i_db, cnt_arg)
@@ -300,15 +300,15 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
             jx = p.db.indexes[jx].next
         }
     } else {
-        wcf := cg.WHERE_ONEPASS_DESIRED | cg.WHERE_DUPLICATES_OK
+        ^wcf: cg.WHERE_ONEPASS_DESIRED | cg.WHERE_DUPLICATES_OK
         if nc_flags & ast.NC_SUBQUERY != 0 -> b_complex = true
         if !b_complex -> wcf |= cg.WHERE_ONEPASS_MULTIROW
-        pk := -1
-        i_pk := 0
-        n_pk := 1
-        i_eph_cur := 0
-        i_row_set := 0
-        addr_eph_open := 0
+        ^pk: -1
+        ^i_pk: 0
+        ^n_pk: 1
+        ^i_eph_cur: 0
+        ^i_row_set: 0
+        ^addr_eph_open: 0
         if ex.has_rowid(p.db, t) {
             // A rowid table collects the rowids in a RowSet.
             p.f.n_mem += 1
@@ -329,9 +329,9 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
 
         // The loop that finds the rowid or primary key of every row to
         // delete; e_one_pass says how the rows are then deleted.
-        wr := wh.where_begin(p, a, src, where_expr, -1, -1, -1, wcf, i_tab_cur + 1)
+        ^wr: wh.where_begin(p, a, src, where_expr, -1, -1, -1, wcf, i_tab_cur + 1)
         if wr == .Val(wi0) {
-            wi := wi0
+            ^wi: wi0
             one: wh.where_ok_one_pass(wi)
             e_one_pass: one.e
             ai_cur: one.cur
@@ -340,7 +340,7 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
             if mem_cnt != 0 -> _: cg.op2(p, opc.OP_ADD_IMM, mem_cnt, 1)
 
             // The rowid or primary key of the current row.
-            i_key := 0
+            ^i_key: 0
             if pk >= 0 {
                 loop i in 0..<n_pk {
                     ex.expr_code_get_column_of_table(p, a, t, i_tab_cur, p.db.indexes[pk].ai_column[i], i_pk + i)
@@ -352,9 +352,9 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
                 ex.expr_code_get_column_of_table(p, a, t, i_tab_cur, -1, i_key)
             }
 
-            n_key := 0
-            to_open := [Bool]{}
-            addr_bypass := 0
+            ^n_key: 0
+            ^to_open: [Bool]{}
+            ^addr_bypass: 0
             if e_one_pass != we.ONEPASS_OFF {
                 // One pass: the key stays in its registers and the delete
                 // code follows inside the WHERE loop.
@@ -383,7 +383,7 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
             }
 
             // Open the table and its indices for writing.
-            addr_once := 0
+            ^addr_once: 0
             if e_one_pass == we.ONEPASS_MULTI -> addr_once = cg.op0(p, opc.OP_ONCE)
             opened: open_table_and_indices(p, a, t, opc.OP_OPEN_WRITE, conn.OPFLAG_FORDELETE, i_tab_cur, if e_one_pass != we.ONEPASS_OFF -> Val(to_open.copy()) else -> None)
             i_data_cur: opened.data_cur
@@ -391,7 +391,7 @@ delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Nev
             if e_one_pass == we.ONEPASS_MULTI -> cg.v_jump_here_or_pop_inst(p, addr_once)
 
             // The loop over the rowids or primary keys found above.
-            addr_loop := 0
+            ^addr_loop: 0
             if e_one_pass != we.ONEPASS_OFF {
                 if !ex.is_virtual(p.db, t) && to_open[i_data_cur - i_tab_cur] {
                     _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, addr_bypass, i_key, n_key)

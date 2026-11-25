@@ -50,7 +50,7 @@ query_ownership_case: fn(label: String, source: String, disk: Bool, parse_error:
     if result.complete || result.failed_stage != (Val(JetDriverStage.Collect)) {
         failures.push("{label}: authorization failure changed its collection-stage meaning")
     }
-    missing_entry := false
+    ^missing_entry: false
     loop diagnostic in result.diagnostics {
         if diagnostic.code == "E0603" -> missing_entry = true
     }
@@ -64,8 +64,8 @@ query_ownership_case: fn(label: String, source: String, disk: Bool, parse_error:
 }
 
 #Test("compiler_query_ownership_fixtures") {
-    failures := [String]{}
-    queries := jet_driver_compiler_queries_new()
+    ^failures: [String]{}
+    ^queries: jet_driver_compiler_queries_new()
     query_ownership_case("text owned request", "run: fn() {{}}\n", false, false, queries, failures)
     query_ownership_case("disk-to-text owned request", "helper: fn() {{}}\n", true, false, queries, failures)
     query_ownership_case("parse failure still retains actual document", "fn {{\n", false, true, queries, failures)

@@ -4,13 +4,13 @@
 PRIME: U64{1099511628211}
 
 fnv: fn(data: [U8]) -> U64 {
-    h := U64{14695981039346656037}
+    ^h: U64{14695981039346656037}
     loop b in data -> h = wrapping((h ~ U64{b}) * PRIME)
     h
 }
 
 polynomial: fn(data: [U8]) -> U64 {
-    h := U64{7}
+    ^h: U64{7}
     loop b in data {
         h = wrapping(h + U64{b})
         h = saturating(h * 31)

@@ -10,7 +10,7 @@ SCHEMA: #run compiler.schema()
 
 // The names of the snapshot's facts of `kind`.
 fact_names: fn(snapshot: compiler.SchemaSnapshot, kind: compiler.FactKind) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     rows: compiler.query(compiler.FactSource.Schema{snapshot: snapshot.copy()}, kind) ?? return names
     loop row in rows {
         if row == .Schema(fact) -> names.push(fact.name.copy())

@@ -37,8 +37,8 @@ once_ticket: fn(id: Int) -> Stream<Ticket> {
 }
 
 fibonacci: fn() -> Stream<Int> {
-    a := 0
-    b := 1
+    ^a: 0
+    ^b: 1
     loop {
         print("  fib step")
         yield a
@@ -49,7 +49,7 @@ fibonacci: fn() -> Stream<Int> {
 }
 
 doublings: fn(start: Int, limit: Int) -> Stream<Int> {
-    value := start
+    ^value: start
     loop value <= limit {
         yield value
         value *= 2
@@ -62,7 +62,7 @@ stamp: fn(n: Int) -> Int {
 }
 
 stamps: fn() -> Stream<Int> {
-    n := 0
+    ^n: 0
     loop {
         yield stamp(n)
         n += 1
@@ -72,7 +72,7 @@ stamps: fn() -> Stream<Int> {
 run: fn() {
     // empty
     print("empty lazy: {[Int]{}.lazy().to_list()}")
-    count := 0
+    ^count: 0
     loop _ in never() -> count += 1
     print("empty generator items: {count}")
 
@@ -87,7 +87,7 @@ run: fn() {
 
     // from_fn: stateful next, bounded by the consumer.
     print("from_fn:")
-    fibs := [Int]{}
+    ^fibs: [Int]{}
     loop f in fibonacci() {
         fibs.push(f)
         if fibs.len() == 6 -> break
@@ -95,13 +95,13 @@ run: fn() {
     print(fibs)
 
     // successors: each value is computed from the previous one.
-    chain := [Int]{}
+    ^chain: [Int]{}
     loop d in doublings(3, 100) -> chain.push(d)
     print("successors: {chain}")
 
     // repeat_with over an infinite source: exactly five producer calls.
     print("repeat_with:")
-    taken := [Int]{}
+    ^taken: [Int]{}
     loop s in stamps() {
         taken.push(s)
         if taken.len() == 5 -> break

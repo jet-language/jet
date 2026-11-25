@@ -44,9 +44,9 @@ trust_lock_escape: fn(value: String) -> String Never! {
 // Source maps in derived order: pattern, then sources. A stable insertion
 // keeps equal entries in their given order.
 trust_lock_sorted_source_maps: fn(maps: [SourceMapEntry]) -> [SourceMapEntry] Never! {
-    sorted := [SourceMapEntry]{}
+    ^sorted: [SourceMapEntry]{}
     loop map in maps {
-        at := sorted.len()
+        ^at: sorted.len()
         loop at > 0 && trust_lock_source_map_before(map, sorted[at - 1]) -> at -= 1
         sorted.insert(at, map.copy())
     }
@@ -60,11 +60,11 @@ trust_lock_source_map_before: fn(left: SourceMapEntry, right: SourceMapEntry) ->
 
 // The items of a `["a", "b"]` value.
 trust_lock_string_list: fn(raw: String) -> [String] Never! {
-    inner := raw.trim()
+    ^inner: raw.trim()
     loop inner.starts_with("[") -> inner = inner.removeprefix("[")
     loop inner.ends_with("]") -> inner = inner.removesuffix("]")
     if inner == "" -> return [String]{}
-    items := [String]{}
+    ^items: [String]{}
     loop piece in trust_text_split(inner, TRUST_COMMA) {
         item: trust_text_trim_byte(piece.trim(), TRUST_QUOTE)
         if item != "" -> items.push(item)
@@ -74,8 +74,8 @@ trust_lock_string_list: fn(raw: String) -> [String] Never! {
 
 // Strip the semantic sections so the machine lock keeps its own bytes.
 trust_strip_semantic_sections: fn(raw: String) -> String Never! {
-    out := [String]{}
-    skipping := false
+    ^out: [String]{}
+    ^skipping: false
     loop line in trust_text_lines(raw) {
         trimmed: line.trim()
         if trimmed.starts_with("[") {
@@ -260,7 +260,7 @@ SemanticLockReader: struct {
 // Blank and `#` lines are skipped, unknown lines ignored, and incomplete blocks
 // dropped.
 trust_parse_semantic_lock: fn(raw: String) -> SemanticLockFile Never! {
-    reader := SemanticLockReader.new()
+    ^reader: SemanticLockReader.new()
     loop raw_line in trust_text_lines(raw) {
         line: raw_line.trim()
         if line == "" || line.starts_with("#") -> next
@@ -282,12 +282,12 @@ trust_parse_semantic_lock: fn(raw: String) -> SemanticLockFile Never! {
 }
 
 trust_write_semantic_lock: fn(lock: SemanticLockFile) -> String Never! {
-    records := lock.records
+    ^records: lock.records
     records.sort_by(fn(record) { record.identity.semantic_key() })
-    inputs := lock.inputs
+    ^inputs: lock.inputs
     inputs.sort_by(fn(left: LockInput, right: LockInput) { (left.name <=> right.name).then(left.url <=> right.url).then(left.follows <=> right.follows) })
     source_maps: trust_lock_sorted_source_maps(lock.source_maps)
-    out := [String]{"{SEMANTIC_LOCK_VERSION_KEY} = 1\n"}
+    ^out: [String]{"{SEMANTIC_LOCK_VERSION_KEY} = 1\n"}
     loop input in inputs {
         out.push("\n{SEMANTIC_LOCK_INPUT_HEADER}\n")
         out.push(trust_lock_line("name", input.name))
@@ -297,7 +297,7 @@ trust_write_semantic_lock: fn(lock: SemanticLockFile) -> String Never! {
     loop map in source_maps {
         out.push("\n{SEMANTIC_LOCK_SOURCE_MAP_HEADER}\n")
         out.push(trust_lock_line("pattern", map.pattern))
-        quoted := [String]{}
+        ^quoted: [String]{}
         loop source in map.sources -> quoted.push("\"{trust_lock_escape(source)}\"")
         out.push("sources = [{quoted.join(", ")}]\n")
     }
@@ -308,7 +308,7 @@ trust_write_semantic_lock: fn(lock: SemanticLockFile) -> String Never! {
         out.push(trust_lock_line("exact", record.identity.exact))
         out.push(trust_lock_line("hash", record.identity.hash))
         out.push(trust_lock_line("platform", record.identity.platform))
-        future_keys := record.future_fields.keys().to_list()
+        ^future_keys: record.future_fields.keys().to_list()
         future_keys.sort()
         loop key in future_keys -> out.push(trust_lock_line(key, record.future_fields[key]))
         loop rationale in record.rationales {

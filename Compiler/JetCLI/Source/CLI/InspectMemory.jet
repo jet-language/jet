@@ -28,7 +28,7 @@ JetCLIMemorySema: struct {
 // (FnBody.stack), and on the program's entry `entry_key` its heap
 // (FnBody.heap).
 jet_cli_memory_sema: fn(functions: [FnBody], entry_key: String) -> [JetCLIMemorySema] Never! {
-    rows := [JetCLIMemorySema]{}
+    ^rows: [JetCLIMemorySema]{}
     loop function in functions {
         heap: if function.key == entry_key -> function.heap.copy() else -> ""
         if function.stack != "" || heap != "" {
@@ -67,7 +67,7 @@ jet_cli_memory_stack_text: fn(bound: IRX64StackBound) -> String Never! {
 // The report of each entry's `bounds` row, `keys` its function's key.
 jet_cli_memory_report: fn(bounds: [IRX64StackBound], keys: [String], sema: [JetCLIMemorySema], scope: String, file: String, profile: String, level: Int, json: Bool) -> String Never! {
     if !json {
-        text := "Memory: scope={scope} source={file} profile={profile} level=O{level}\n"
+        ^text: "Memory: scope={scope} source={file} profile={profile} level=O{level}\n"
         loop (index, bound) in bounds {
             name: bound.path[0]
             text = "{text}Entry {name}\n  {jet_cli_memory_stack_text(bound)}\n"
@@ -82,7 +82,7 @@ jet_cli_memory_report: fn(bounds: [IRX64StackBound], keys: [String], sema: [JetC
         }
         return text
     }
-    entries := [JetCLIStatusValue]{}
+    ^entries: [JetCLIStatusValue]{}
     loop (index, bound) in bounds {
         row: jet_cli_memory_sema_row(sema, keys[index])
         stack: if row >= 0 && sema[row].stack != "" -> jet_cli_status_text(sema[row].stack) else -> JetCLIStatusValue.Null
@@ -116,12 +116,12 @@ jet_cli_memory_report: fn(bounds: [IRX64StackBound], keys: [String], sema: [JetC
 // program's selection and its stack bounds. A fault on the way is the ICE
 // report `jet build` gives it.
 jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared: jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Program)
     if prepared == {
         .Refused(refusal) -> { output = refusal.move() }
         .Prepared(value, snapshot) -> {
-            request := value.move()
+            ^request: value.move()
             request.profile = job.profile
             sources: request.authorized_sources
             compiler_threads: request.compiler_threads.copy()
@@ -136,13 +136,13 @@ jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDri
             inputs: front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             entry_key: inputs.entry_key ?? jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", JetCLINativeFailure.NoEntry, job.color))
             sema: jet_cli_memory_sema(inputs.functions, entry_key)
-            build := build_options_stock("build")
+            ^build: build_options_stock("build")
             if job.build == .Val(given) -> build = given.copy()
             runtime: jet_cli_runtime_exports(jet_cli_runtime_dir())
             if runtime.failure == .Val(failure) {
                 jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", failure, job.color))
             }
-            census := [JetDriverIceRow]{}
+            ^census: [JetDriverIceRow]{}
             built: jet_cli_native_program(front.compile, inputs, None, build, runtime, census, job.file, jet_driver_entry_root_path(snapshot))
             if built.failure == .Val(failure) {
                 jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", failure, job.color))

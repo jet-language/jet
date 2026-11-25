@@ -13,10 +13,10 @@ WorkloadArgs: struct {
 run: fn(args: WorkloadArgs) {
     root: args.input
     entries: fs.walk(root).list() ?? panic("cannot walk input root")
-    rows := [String]{}
-    links := 0
-    rejects := 0
-    bytes := 0
+    ^rows: [String]{}
+    ^links: 0
+    ^rejects: 0
+    ^bytes: 0
     loop entry in entries {
         if entry.is_dir -> next
         if entry.relative == ".fixture-modes.tsv" -> next
@@ -42,7 +42,7 @@ run: fn(args: WorkloadArgs) {
         bytes += content.len()
     }
     rows.sort()
-    canonical := ""
+    ^canonical: ""
     loop row in rows -> canonical = "{canonical}{row}\n"
     index_hash: crypto.sha256(canonical.bytes()).hex()
     print("files={rows.len()}")

@@ -34,7 +34,7 @@ EnvReadyStats: struct {
         if self.realized.len() == 0 {
             return
         }
-        latest := [String:StoreEntry]{}
+        ^latest: [String:StoreEntry]{}
         loop entry in store_list_read_only(roots) {
             key: "{entry.reference}\t{entry.name}\t{entry.version}\t{entry.envelope.output_hash}"
             replace: if latest.get(key) == {
@@ -57,7 +57,7 @@ EnvReadyStats: struct {
 
     // The distinct realized `(name, version)` pairs in order.
     realized_set: fn(self) -> [{name: String, version: String}] Never! {
-        pairs := [{name: String, version: String}]{}
+        ^pairs: [{name: String, version: String}]{}
         loop selection in self.realized {
             version: if selection.version == "" -> cli_version_from_out(selection.name, selection.output_hash) ?? "" else -> selection.version
             pair: {name: selection.name, version: version}
@@ -68,7 +68,7 @@ EnvReadyStats: struct {
     }
 
     realized_entries: fn(self) -> [EnvironmentSelection] Never! {
-        entries := self.realized
+        ^entries: self.realized
         entries.sort_by(fn(left: EnvironmentSelection, right: EnvironmentSelection) { left.key() <=> right.key() })
         entries
     }
@@ -82,7 +82,7 @@ cli_seal_project_producer_records: fn(verification: StoreVerification, roots: Ha
     if lock_digest == "" {
         return
     }
-    references := [String]{}
+    ^references: [String]{}
     loop selection in ready_stats.realized {
         if !references.contains(selection.reference) -> references.push(selection.reference)
     }
@@ -101,10 +101,10 @@ cli_seal_project_producer_records: fn(verification: StoreVerification, roots: Ha
 // Warm verified realizations by their original reference, taken over from
 // the receipt's list.
 cli_index_warm_realizations: fn(warm: ^^[VerifiedRealization]) -> [String:[VerifiedRealization]] Never! {
-    indexed := [String:[VerifiedRealization]]{}
+    ^indexed: [String:[VerifiedRealization]]{}
     loop realized in warm.move() {
         reference: realized.original_reference()
-        bucket := indexed.remove(reference) ?? [VerifiedRealization]{}
+        ^bucket: indexed.remove(reference) ?? [VerifiedRealization]{}
         bucket.push(realized)
         indexed[reference] = bucket
     }
@@ -113,7 +113,7 @@ cli_index_warm_realizations: fn(warm: ^^[VerifiedRealization]) -> [String:[Verif
 
 // Take the last warm realization recorded for `reference`.
 cli_take_warm_realization: fn(warm: ^[String:[VerifiedRealization]], reference: String) -> VerifiedRealization? Never! {
-    bucket := warm.remove(reference) ?? return None
+    ^bucket: warm.remove(reference) ?? return None
     realized: bucket.pop() ?? return None
     if bucket.len() > 0 -> warm[reference] = bucket
     Val(realized)
@@ -178,13 +178,13 @@ NativeEnvironmentProjection: struct {
     activation: NativeActivation,
 
     from_realized: fn(project_root: String, realized: [{name: String, output: LeaseText}], dev_tools: [{command: String, binary: String}], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
-        native_bin_dirs := [String]{}
+        ^native_bin_dirs: [String]{}
         loop tool in dev_tools {
             directory: files.dirname(tool.binary)
             if !native_bin_dirs.contains(directory) -> native_bin_dirs.push(directory)
         }
-        tzdir := LeaseText?{None}
-        loader_paths := [LeaseText]{}
+        ^tzdir: LeaseText?{None}
+        ^loader_paths: [LeaseText]{}
         loop fact in CLI_NATIVE_OUTPUT_FACTS {
             path: cli_native_output_path(realized, fact) ?? next
             if fact.variable == {
@@ -207,7 +207,7 @@ NativeEnvironmentProjection: struct {
     bin_dirs: fn(self) -> [String] Never! { self.native_bin_dirs }
 
     env_vars: fn(self) -[Env]> [String:String] Never! {
-        vars := [String:String]{}
+        ^vars: [String:String]{}
         vars[ENV_JET_ROOT] = self.project_root
         if self.activation == {
             .Disabled -> vars[ENV_DISABLE_VAR] = "1"
@@ -217,7 +217,7 @@ NativeEnvironmentProjection: struct {
 
     // The variables naming paths inside realized outputs.
     lease_vars: fn(self) -[Env]> [String:LeaseText] Never! {
-        vars := [String:LeaseText]{}
+        ^vars: [String:LeaseText]{}
         if self.tzdir == .Val(tzdir) -> vars["TZDIR"] = tzdir
         if sys.name() == "linux" && self.loader_paths.len() > 0 {
             vars["LD_LIBRARY_PATH"] = LeaseText.join(self.loader_paths, pkg_path_separator_for_os(sys.name()))
@@ -237,7 +237,7 @@ cli_native_output_path: fn(realized: [{name: String, output: LeaseText}], fact: 
 // The admitted dev tool binaries among `bound` (variable -> binary); an unset
 // or empty variable projects nothing.
 cli_native_dev_tool_paths: fn(bound: [String:String]) -> [{command: String, binary: String}] Never! {
-    tools := [{command: String, binary: String}]{}
+    ^tools: [{command: String, binary: String}]{}
     loop tool in CLI_NATIVE_DEV_TOOLS {
         binary: bound.get(tool.variable) ?? next
         if binary != "" -> tools.push({command: tool.command, binary: binary})
@@ -247,7 +247,7 @@ cli_native_dev_tool_paths: fn(bound: [String:String]) -> [{command: String, bina
 
 // The dev tool variables as the host binds them.
 cli_native_dev_tool_bindings: fn() -[Env]> [String:String] Never! {
-    bound := [String:String]{}
+    ^bound: [String:String]{}
     loop tool in CLI_NATIVE_DEV_TOOLS {
         if sys.get(tool.variable) == .Val(binary) -> bound[tool.variable] = binary
     }
@@ -279,7 +279,7 @@ cli_compose_env_scoped_with_stats: fn(verification: StoreVerification, theme: Th
 
 // Whether the warm realizations cover every ref and adapter of the plan.
 cli_warm_complete: fn(warm: [String:[VerifiedRealization]], plan: RunPlan) -> Bool Never! {
-    required := [String:Int]{}
+    ^required: [String:Int]{}
     loop spec in plan.refs -> required[spec.raw] = (required.get(spec.raw) ?? 0) + 1
     loop adapter in plan.adapters {
         reference: "adapt:{adapter.name}:{adapter.source}"
@@ -296,14 +296,14 @@ cli_warm_complete: fn(warm: [String:[VerifiedRealization]], plan: RunPlan) -> Bo
 // for the receipt and producer sealing.
 cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: ^^[VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {env: ShellEnv, stats: EnvReadyStats} CLIError! {
     warm_given: warm != None
-    warm_pool := if warm.move() == {
+    ^warm_pool: if warm.move() == {
         .Val(list) -> cli_index_warm_realizations(list)
         .None -> [String:[VerifiedRealization]]{}
     }
     warm_complete: warm_given && cli_warm_complete(warm_pool, plan)
     project_scope: scope == RealizeScope.Project
     needs_stats: collect_stats || (project_scope && !warm_complete)
-    lock_diff := if project_scope && !warm_complete -> CLILockDiffGuard.new(theme, plan.project_root) else -> CLILockDiffGuard.inactive(theme)
+    ^lock_diff: if project_scope && !warm_complete -> CLILockDiffGuard.new(theme, plan.project_root) else -> CLILockDiffGuard.inactive(theme)
     if confirm_download && !warm_complete {
         if cli_reject_unprompted_acquisition(verification, theme, roots, flags, plan, scope) == {
             .Ok(download_plan) -> { lock_diff.set_sizes(cli_sizes_from_plan(download_plan)) }
@@ -323,7 +323,7 @@ cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: The
         }
         .Ok(_) -> {}
     }
-    bin_dirs := [String]{}
+    ^bin_dirs: [String]{}
     if project_scope {
         if cli_dev_shell_projection(verification, plan.project_root, plan.environment) == {
             .Val(path) -> { bin_dirs.push(path) }
@@ -334,24 +334,24 @@ cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: The
             }
         }
     }
-    provider_vars := [String:[LeaseText]]{}
-    provider_var_order := [String]{}
-    nix_vars := [String:String]{}
-    realized_refs := [String]{}
-    realized_outputs := [{name: String, output: LeaseText}]{}
-    holes := [NixBridgeNeed]{}
-    failed := false
-    unavailable := false
-    cache_leases := [CacheLease]{}
-    ready_stats := EnvReadyStats.empty()
+    ^provider_vars: [String:[LeaseText]]{}
+    ^provider_var_order: [String]{}
+    ^nix_vars: [String:String]{}
+    ^realized_refs: [String]{}
+    ^realized_outputs: [{name: String, output: LeaseText}]{}
+    ^holes: [NixBridgeNeed]{}
+    ^failed: false
+    ^unavailable: false
+    ^cache_leases: [CacheLease]{}
+    ^ready_stats: EnvReadyStats.empty()
     name_w: if warm_complete -> 0 else -> cli_name_column_width(plan.refs)
     // Multi-package realization gets one pinned aggregate on a TTY and one
     // settled row per package; plain output keeps only the settled rows.
     total_steps: plan.refs.len() + plan.adapters.len()
     live_mode: total_steps > 1 && !warm_complete
     live_tty: live_mode && theme.live_enabled()
-    live := theme.live_region()
-    completed_steps := 0
+    ^live: theme.live_region()
+    ^completed_steps: 0
     phase_timing: sys.get(ENV_JETPACK_TIMING) != None
     compose_started: time.start()
     if phase_timing -> term.eprint("TIMING compose-preamble: {time.elapsed(compose_started)}")
@@ -366,7 +366,7 @@ cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: The
             }
             .None -> {
                 step_started: time.start()
-                slot := if live_tty -> Val(live) else -> None
+                ^slot: if live_tty -> Val(live) else -> None
                 outcome: cli_realize_ref_outcome(verification, theme, roots, flags, plan.table, spec, name_w, style, slot, scope)
                 if slot == .Val(updated) -> live = updated
                 if phase_timing {
@@ -388,14 +388,14 @@ cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: The
                     failed = true
                     next
                 }
-                invalid_metadata := String?{None}
+                ^invalid_metadata: String?{None}
                 loop meta in CLI_PROVIDER_METADATA_FILES {
                     raw: lease.read_output(meta.file) ?? next
                     value: raw.trim()
                     if value == "" -> next
                     if cli_resolve_provider_paths(leased_output, meta.file, value.copy()) == {
                         .Val(resolved) -> {
-                            values := provider_vars.get(meta.variable) ?? [LeaseText]{}
+                            ^values: provider_vars.get(meta.variable) ?? [LeaseText]{}
                             if values.len() == 0 -> provider_var_order.push(meta.variable)
                             values.push(resolved)
                             provider_vars[meta.variable] = values
@@ -455,11 +455,11 @@ cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: The
     }
     if unavailable -> return Err(CLIError.Reported(EXIT_USAGE))
     if failed -> return Err(CLIError.Reported(EXIT_USER_ERROR))
-    missing_language_tools := [String]{}
+    ^missing_language_tools: [String]{}
     loop pack in plan.environment.language_packs {
         loop tool in pack.required_tools {
             command: pack.commands.get(tool) ?? next
-            present := false
+            ^present: false
             loop dir in bin_dirs {
                 if files.is_file(files.join(dir, command)) -> present = true
             }
@@ -478,7 +478,7 @@ cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: The
     if native_projection == .Val(projection) {
         loop dir in projection.bin_dirs() -> bin_dirs.push(dir)
     }
-    composed_vars := [String:String]{}
+    ^composed_vars: [String:String]{}
     // The Nix compatibility provider contributes the fixed builder facts it
     // recorded at realization; PATH stays composed from verified packages.
     loop entry in nix_vars -> composed_vars[entry.key] = entry.value
@@ -514,7 +514,7 @@ cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: The
     }
     // Provider metadata paths are the lowest layer: any declared value of
     // the same name replaces them.
-    lease_vars := [String:LeaseText]{}
+    ^lease_vars: [String:LeaseText]{}
     loop name in provider_var_order {
         if composed_vars.has_key(name) -> next
         values: provider_vars.get(name) ?? next
@@ -583,7 +583,7 @@ CLI_PROVIDER_METADATA_FILES: #run { [ProviderMetadataFile]{
 // `-y`. Existing Hangar entries pass so fully cached environments stay
 // silent; every missing package is refused before acquisition.
 cli_reject_unprompted_acquisition: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
-    specs := [RefSpec]{}
+    ^specs: [RefSpec]{}
     loop spec in plan.refs {
         if provider_requires_acquisition(spec, plan.table, flags.offline, roots.hangar_dir()) {
             specs.push(spec.copy())
@@ -599,7 +599,7 @@ cli_reject_unprompted_acquisition: fn(verification: StoreVerification, theme: Th
     }
     planning: specs.len() > 0 || plan.adapters.len() > 0
     planning_live: planning && theme.live_enabled()
-    live := theme.live_region()
+    ^live: theme.live_region()
     if {
         planning_live -> live.set_aggregate_status("Planning", 0, specs.len() + plan.adapters.len())
         planning -> theme.status("Resolving {label} package plan...")
@@ -611,7 +611,7 @@ cli_reject_unprompted_acquisition: fn(verification: StoreVerification, theme: Th
         return Err(err)
     }
     live.clear()
-    download := planned
+    ^download: planned
     adapter_probe: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), cli_scope_project_dir(scope), None, Val(roots))
     loop adapter in plan.adapters {
         download.add_item(cli_adapter_plan_item(roots, adapter_probe, adapter, plan.table))
@@ -655,7 +655,7 @@ cli_validate_integration_facts: fn(plan: RunPlan) -[Env]> CLIError! {
             return Err(CLIError.InvalidData("integration task `{fact.name}` is not disclosed by its fact projection"))
         }
         loop package in fact.packages {
-            kept := false
+            ^kept: false
             loop reference in plan.refs {
                 if reference.raw == package || reference.short_name() == package -> kept = true
             }
@@ -739,7 +739,7 @@ cli_read_dotenv_snapshot: fn(root: String, relative: String, allow: [String]) -[
     bytes: envmodel_checked_dotenv_snapshot(root, relative) ?? return Err(CLIError.InvalidData(err.message))
     values: cli_read_dotenv(bytes)
     if allow.len() == 0 -> return Ok(values)
-    kept := [String:String]{}
+    ^kept: [String:String]{}
     loop entry in values {
         if allow.contains(entry.key) -> kept[entry.key] = entry.value
     }
@@ -750,7 +750,7 @@ cli_read_dotenv_snapshot: fn(root: String, relative: String, allow: [String]) -[
 // pair of surrounding quotes is removed.
 cli_read_dotenv: fn(bytes: [U8]) -> [String:String] CLIError! {
     text: String.from_bytes(bytes) ?? return Err(CLIError.InvalidData("invalid utf-8 sequence"))
-    values := [String:String]{}
+    ^values: [String:String]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         // Line splitting drops a trailing `\r`; `trim` removes it too.
@@ -761,7 +761,7 @@ cli_read_dotenv: fn(bytes: [U8]) -> [String:String] CLIError! {
         if !cli_dotenv_valid_name(name) {
             return Err(CLIError.InvalidData("line {index + 1} has an invalid variable name"))
         }
-        value := pair.after.trim()
+        ^value: pair.after.trim()
         if value.len() >= 2 && ((value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))) {
             value = String.from_bytes(value.bytes()[1..<(value.len() - 1)]) ?? value
         }
@@ -788,14 +788,14 @@ cli_dotenv_valid_name: fn(name: String) -> Bool Never! {
 cli_resolve_provider_paths: fn(entry_out: LeaseText, file: String, value: String) -[Env]> LeaseText? Never! {
     if !cli_is_provider_metadata_file(file) -> return Val(LeaseText.plain(value))
     separator: if file == "lua-path" || file == "lua-cpath" -> ";" else -> pkg_path_separator_for_os(sys.name())
-    resolved := [LeaseText]{}
+    ^resolved: [LeaseText]{}
     loop path in value.split(separator) {
         if files.is_absolute(path) {
             resolved.push(LeaseText.plain(path))
             next
         }
         parts: path.split("/").to_list()
-        components := 0
+        ^components: 0
         loop part in parts {
             if part == ".." -> return None
             if part != "" -> components += 1
@@ -816,7 +816,7 @@ cli_is_provider_metadata_file: fn(file: String) -> Bool Never! {
 // The ledger's name-column width (at least 8, so one short name does not
 // collapse the table).
 cli_name_column_width: fn(refs: [RefSpec]) -> Int Never! {
-    width := 8
+    ^width: 8
     loop spec in refs {
         if spec.package.len() > width -> width = spec.package.len()
     }

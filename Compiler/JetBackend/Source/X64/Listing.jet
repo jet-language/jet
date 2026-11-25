@@ -41,24 +41,24 @@ X64ListingRow: struct {
 // row its mark by address. Bytes the code ends in the middle of an
 // instruction list as (bad), a byte each.
 x64_listing: fn(code: [U8], address: Int, lines: X64Jetline, function: Int, symbols: [X64ListingSymbol], marks: [Int:String]) -> [X64ListingRow] Never! {
-    rows := [X64ListingRow]{}
+    ^rows: [X64ListingRow]{}
     // The line table walks with the rows, which are in address order: `row`
     // is the last row read, `read` whether it is still to be passed, `line`
     // the last statement row's line at or before the instruction.
-    low := 0
-    high := 0
-    cursor := 0
-    end := 0
+    ^low: 0
+    ^high: 0
+    ^cursor: 0
+    ^end: 0
     if function >= 0 {
         low = lines.functions[function].low
         high = lines.functions[function].high
         cursor = lines.functions[function].rows
         end = lines.functions[function].rows_end
     }
-    row := X64LineRow{at: low, line: 1}
-    read := false
-    line := 0
-    at := 0
+    ^row: X64LineRow{at: low, line: 1}
+    ^read: false
+    ^line: 0
+    ^at: 0
     loop at < code.len() {
         here: address + at
         insn: x64_decode(code, at, here) ?? x64_decode_bad()
@@ -98,14 +98,14 @@ x64_listing: fn(code: [U8], address: Int, lines: X64Jetline, function: Int, symb
 // when none holds it. Of symbols at one address the first named wins.
 x64_listing_name: fn(symbols: [X64ListingSymbol], address: Int) -> String Never! {
     // The first symbol starting past `address`.
-    low := 0
-    high := symbols.len()
+    ^low: 0
+    ^high: symbols.len()
     loop low < high {
         middle: (low + high) >> 1
         if symbols[middle].address <= address -> low = middle + 1 else -> high = middle
     }
     // Back to the first of the symbols at the start that holds it.
-    found := low - 1
+    ^found: low - 1
     loop found > 0 && symbols[found - 1].address == symbols[found].address -> found -= 1
     if found < 0 -> return ""
     symbol: symbols[found]
@@ -134,7 +134,7 @@ x64_listing_text: fn(row: X64ListingRow, low: Int, high: Int) -> String Never! {
     // fib at 0x401000: push rbx; mov rbx,rdi; call fib; jl +1; pop rbx; ret;
     // mov rax,[rip+0x100], its lines 6, 7 (from the call) and 8 (from pop).
     code: [U8]{0x53, 0x48, 0x89, 0xfb, 0xe8, 0xf7, 0xff, 0xff, 0xff, 0x7c, 0x01, 0x5b, 0xc3, 0x48, 0x8b, 0x05, 0x00, 0x01, 0x00, 0x00}
-    table := [U8]{}
+    ^table: [U8]{}
     x64_jetline_rows(table, [X64LineRow]{X64LineRow{at: 0, line: 6}, X64LineRow{at: 4, line: 7}, X64LineRow{at: 11, line: 8}})
     end: table.len()
     lines: X64Jetline{table: table, functions: [X64JetlineFunction]{X64JetlineFunction{low: 0x401000, high: 0x401014, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: end}}, ascending: true}

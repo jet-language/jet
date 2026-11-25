@@ -67,7 +67,7 @@ NixEvalLexer: struct {
     tokens: [NixEvalToken],
 
     tokenize: fn(source: String) -> [NixEvalToken] NixEvalError! {
-        lexer := NixEvalLexer{bytes: source.bytes(), position: 0, tokens: [NixEvalToken]{}}
+        ^lexer: NixEvalLexer{bytes: source.bytes(), position: 0, tokens: [NixEvalToken]{}}
         loop lexer.position < lexer.bytes.len() {
             lexer.skip_space_and_comments()
             if lexer.position == lexer.bytes.len() -> break
@@ -170,9 +170,9 @@ NixEvalLexer: struct {
 
     string: fn(^self) -> NixEvalToken NixEvalError! {
         self.position += 1
-        literal := [U8]{}
-        parts := [NixEvalStringTokenPart]{}
-        interpolated := false
+        ^literal: [U8]{}
+        ^parts: [NixEvalStringTokenPart]{}
+        ^interpolated: false
         loop self.position < self.bytes.len() {
             byte: self.at(0)
             if byte == 34 {
@@ -203,7 +203,7 @@ NixEvalLexer: struct {
                     parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
                     literal = [U8]{}
                 }
-                position := self.position + 2
+                ^position: self.position + 2
                 expression: nixeval_capture_interpolation(self.bytes, position)
                 self.position = position
                 parts.push(NixEvalStringTokenPart.Expression(expression))
@@ -279,10 +279,10 @@ NixEvalLexer: struct {
 // result means the body has no interpolation.
 nixeval_interpolated_parts: fn(source: String) -> [NixEvalStringTokenPart] NixEvalError! {
     bytes: source.bytes()
-    position := 0
-    literal := [U8]{}
-    parts := [NixEvalStringTokenPart]{}
-    interpolated := false
+    ^position: 0
+    ^literal: [U8]{}
+    ^parts: [NixEvalStringTokenPart]{}
+    ^interpolated: false
     loop position < bytes.len() {
         if nixeval_byte(bytes, position) == 36 && nixeval_byte(bytes, position + 1) == 123 {
             interpolated = true
@@ -311,9 +311,9 @@ nixeval_interpolated_parts: fn(source: String) -> [NixEvalStringTokenPart] NixEv
 // Capture the source of one `${...}` body, leaving `position` after the `}`.
 nixeval_capture_interpolation: fn(bytes: [U8], position: ^Int) -> String NixEvalError! {
     start: position.copy()
-    braces := 0
-    parentheses := 0
-    brackets := 0
+    ^braces: 0
+    ^parentheses: 0
+    ^brackets: 0
     loop position < bytes.len() {
         byte: nixeval_byte(bytes, position)
         if byte == {
@@ -371,7 +371,7 @@ nixeval_capture_interpolation: fn(bytes: [U8], position: ^Int) -> String NixEval
 
 // Byte offset just past the double-quoted string that opens at `start`.
 nixeval_double_string_end: fn(bytes: [U8], start: Int) -> Int NixEvalError! {
-    position := start + 1
+    ^position: start + 1
     loop position < bytes.len() {
         byte: nixeval_byte(bytes, position)
         if byte == 92 {
@@ -389,7 +389,7 @@ nixeval_double_string_end: fn(bytes: [U8], start: Int) -> Int NixEvalError! {
 
 // Byte offset just past the indented string that opens at `start`.
 nixeval_indented_string_end: fn(bytes: [U8], start: Int) -> Int NixEvalError! {
-    position := start + 2
+    ^position: start + 2
     loop position + 1 < bytes.len() {
         if nixeval_byte(bytes, position) == 39 && nixeval_byte(bytes, position + 1) == 39 {
             return Ok(position + 2)
@@ -401,7 +401,7 @@ nixeval_indented_string_end: fn(bytes: [U8], start: Int) -> Int NixEvalError! {
 
 // The reference reports an unsupported byte as its Latin-1 character.
 nixeval_unsupported_character: fn(byte: Int) -> NixEvalError Never! {
-    shown := [U8]{}
+    ^shown: [U8]{}
     nixeval_push_scalar(shown, byte)
     character: String.from_bytes(shown) ?? "?"
     NixEvalError.Unsupported("character `{character}` is not supported")

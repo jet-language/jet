@@ -12,7 +12,7 @@ use {
 
 // Stdout bytes with no added newline.
 cli_print_raw: fn(text: String) -[IO]> Never! {
-    stdout_handle := term.stdout()
+    ^stdout_handle: term.stdout()
     stdout_handle.write(text).drop("a closed stdout cannot take the shell script")
 }
 
@@ -44,7 +44,7 @@ cli_cmd_env_export: fn(verification: StoreVerification, cache: ^WorkspaceDeclara
     target: if disabled -> String?{None} else -> env_hook_find_env_root(cli_current_dir())
     active: cli_nonempty_env(ENV_HOOK_ACTIVE_DIR_VAR)
     active_hash: cli_nonempty_env(ENV_HOOK_ACTIVE_HASH_VAR)
-    target_hash := String?{None}
+    ^target_hash: String?{None}
     if target == .Val(root) {
         target_hash = env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment)
     }
@@ -54,7 +54,7 @@ cli_cmd_env_export: fn(verification: StoreVerification, cache: ^WorkspaceDeclara
     // A changed definition does not always reload now. `Never` keeps the
     // current activation; `Watch` records the first changed hash and
     // coalesces prompt callbacks until its debounce window expires.
-    watched_reload_ready := false
+    ^watched_reload_ready: false
     if target == active && target_hash != active_hash {
         if target == .Val(root) && target_hash == .Val(hash) {
             if env_hook_reload_policy_with_environment(root, parsed.flags.environment) == {
@@ -82,7 +82,7 @@ cli_cmd_env_export: fn(verification: StoreVerification, cache: ^WorkspaceDeclara
     // No unload is emitted until the replacement environment is fully
     // realized, trusted, composed, and entered: a failed reload leaves the
     // previous activation usable.
-    script := ""
+    ^script: ""
     if target == .Val(root) {
         script = cli_env_export_activate(verification, cache, theme, parsed, kind, root, target_hash, active != None, base_path, watched_reload_ready) ?? return err.code
     } else if active != None { script = env_hook_render_unload(kind, base_path) }
@@ -114,7 +114,7 @@ cli_env_export_activate: fn(verification: StoreVerification, cache: ^WorkspaceDe
     sys.set_current_dir(root) ?? return Err(keep)
     roots: pkg_resolve_roots()
     // A malformed or foreign-only env keeps the previous activation.
-    plan := cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return Err(keep)
+    ^plan: cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return Err(keep)
     cli_apply_locked_channels(theme, root, plan.table, parsed.flags) ?? return Err(keep)
     // Trust law: the first activation of an untrusted,
     // trust-sensitive env prompts (interactive) or is refused with a hint
@@ -147,7 +147,7 @@ cli_env_export_activate: fn(verification: StoreVerification, cache: ^WorkspaceDe
         .None -> false
     }
     local_catalog: parsed.flags.local_nix_catalog != None
-    warm := [VerifiedRealization]?{None}
+    ^warm: [VerifiedRealization]?{None}
     if receipt_matches_plan {
         receipt: previous_receipt ?? panic("a matching receipt exists")
         warm = if store_reuse_verified_environment(verification, roots, receipt.stamp, root, fingerprints.definition, receipt.packages, local_catalog) == {
@@ -174,7 +174,7 @@ cli_env_export_activate: fn(verification: StoreVerification, cache: ^WorkspaceDe
         }
     }
     composed: cli_compose_env_scoped_with_warm(verification, theme, roots, parsed.flags, plan, RealizeScope.Project, false, warm, !warm_reused) ?? return Err(keep)
-    env := composed.env.move()
+    ^env: composed.env.move()
     // Reconcile the source graph after realization. If a prompt races an
     // edit, keep the prior activation and let the next prompt retry the new
     // hash instead of emitting a plan assembled from mixed revisions.
@@ -187,7 +187,7 @@ cli_env_export_activate: fn(verification: StoreVerification, cache: ^WorkspaceDe
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash {
         return Err(keep)
     }
-    script := ""
+    ^script: ""
     if active -> script = env_hook_render_unload(kind, base_path)
     composed_path: env.composed_path_for_parent(base_path) ?? {
         theme.detail("environment activation was not published because a package lease has no durable parent-shell path")

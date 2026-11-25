@@ -47,8 +47,10 @@ lsp_test_hierarchy_item: fn(server: ^LSPServer, line: Int) -> Dyn {
 
 // Each item as `name=kind`.
 lsp_test_hierarchy_names: fn(result: Dyn) -> [String] Never! {
-    names := [String]{}
-    loop item in lsp_test_rows(result) -> names.push("{lsp_test_text(item, "name")}={lsp_test_int(item, "kind")}")
+    ^names: [String]{}
+    loop item in lsp_test_rows(result) {
+        names.push("{lsp_test_text(item, "name")}={lsp_test_int(item, "kind")}")
+    }
     names
 }
 
@@ -59,7 +61,7 @@ lsp_test_hierarchy_params: fn(item: Dyn, identity: Bool{true}) -> String Never! 
 }
 
 #Test("a type's supertypes are the traits it implements and a trait's subtypes the types implementing it") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_HIERARCHY_URI, LSP_TEST_HIERARCHY)
     button: lsp_test_hierarchy_item(server, 4)
     assert_eq(lsp_test_text(button, "name"), "Button")
@@ -79,7 +81,7 @@ lsp_test_hierarchy_params: fn(item: Dyn, identity: Bool{true}) -> String Never! 
 }
 
 #Test("a type use prepares the type it names, and a built-in type stands at its name with no supertypes or subtypes") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_HIERARCHY_URI, LSP_TEST_HIERARCHY)
     // `Renderable` in `impl Renderable` on line 6.
     used: lsp_test_rows(lsp_test_result(server, "textDocument/prepareTypeHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, 6, 10)))
@@ -115,10 +117,10 @@ run: fn() -> Int {
 
 // Each group as `name=kind side ranges`, each range `line:start-end`.
 lsp_test_call_groups: fn(result: Dyn, side: String) -> [String] Never! {
-    groups := [String]{}
+    ^groups: [String]{}
     loop group in lsp_test_rows(result) {
         item: lsp_test_field(group, side)
-        ranges := [String]{}
+        ^ranges: [String]{}
         loop range in lsp_test_rows(lsp_test_field(group, "fromRanges")) {
             start: lsp_test_field(range, "start")
             ranges.push("{lsp_test_int(start, "line")}:{lsp_test_int(start, "character")}-{lsp_test_int(lsp_test_field(range, "end"), "character")}")
@@ -129,7 +131,7 @@ lsp_test_call_groups: fn(result: Dyn, side: String) -> [String] Never! {
 }
 
 #Test("the call hierarchy groups a function's incoming calls by caller and its outgoing calls by callee") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_CALLS_URI, LSP_TEST_CALLS)
     items: lsp_test_rows(lsp_test_result(server, "textDocument/prepareCallHierarchy", lsp_test_at(LSP_TEST_CALLS_URI, 0, 0)))
     assert_eq(items.len(), 1)

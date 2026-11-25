@@ -63,7 +63,7 @@ use {
 
 #Test("deep tree is rejected before discovery descent") {
     scratch: files.temp_dir("discovery-deep-tree") ?? panic("scratch")
-    current := scratch.path
+    ^current: scratch.path
     loop index in 0..<(MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
         files.create_dir_all(current) ?? panic("depth")
@@ -99,7 +99,7 @@ use {
 }
 
 #Test("workspace declaration probes share one owned session cache") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     source: "workspace: module {{ members: [] }}\n"
     assert(pkg_declares_workspace_module(cache, source))
     assert(pkg_declares_workspace_members(cache, source))
@@ -113,7 +113,7 @@ use {
     assert_eq(cache.lexes, 2)
     assert(pkg_declares_workspace_module(cache, "workspace /* the index */ : module {{ }}\n"))
     assert_eq(cache.lexes, 3)
-    independent := WorkspaceDeclarationCache.new()
+    ^independent: WorkspaceDeclarationCache.new()
     assert(pkg_declares_workspace_members(independent, source))
     assert_eq(independent.lexes, 1)
     assert_eq(cache.lexes, 3)

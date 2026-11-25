@@ -11,9 +11,9 @@ make_embedding: fn(id: Int) -> [Float] {
 }
 
 cosine: fn(left: [Float], right: [Float]) -> Float {
-    dot := Float{0.0}
-    left_norm := Float{0.0}
-    right_norm := Float{0.0}
+    ^dot: Float{0.0}
+    ^left_norm: Float{0.0}
+    ^right_norm: Float{0.0}
     loop i in 0..<4 {
         dot += left[i] * right[i]
         left_norm += left[i] * left[i]
@@ -23,14 +23,14 @@ cosine: fn(left: [Float], right: [Float]) -> Float {
 }
 
 build_embedding_index: fn() -> [Embedding] {
-    index := [Embedding]{}
+    ^index: [Embedding]{}
     loop id in 0..<5000 { index.push(Embedding{id: id, values: make_embedding(id)}) }
     return index
 }
 
 nearest: fn(index: [Embedding], query: [Float]) -> Int {
-    best_id := -2
-    best_score := Float{-2.0}
+    ^best_id: -2
+    ^best_score: Float{-2.0}
     loop item in index {
         score: cosine(item.values, query)
         if score > best_score {

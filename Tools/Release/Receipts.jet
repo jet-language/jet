@@ -39,7 +39,7 @@ MatrixRow: struct {
 }
 
 receipt_rows: fn(items: [Dyn], scope_key: String) -> [Row] Never! {
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop item in items {
         rows.push(Row{scope: text_field(item, scope_key), status: text_field(item, "status"), total: int_field(item, "total"), passed: int_field(item, "passed")})
     }
@@ -53,7 +53,7 @@ empty_receipt: fn(kind: String, file: String, bytes: [U8]) -> Receipt Never! {
 // A verify-full.json: its pin, the sha256 of the compiler it ran, its target,
 // its shard and its rows.
 parse_verify_full: fn(file: String, bytes: [U8]) -> Receipt Never! {
-    receipt := empty_receipt("verify-full", file, bytes)
+    ^receipt: empty_receipt("verify-full", file, bytes)
     tree: json.parse(String.from_bytes_lossy(bytes)) ?? {
         receipt.problems.push(problem(INPUT, "{file} is not JSON: {err}"))
         return receipt
@@ -81,7 +81,7 @@ parse_verify_full: fn(file: String, bytes: [U8]) -> Receipt Never! {
 // The RELEASE.json of an admitted release, read as the one receipt of its
 // runner: `admit` runs every suite itself, so it is shard 0 of 1.
 parse_admission_receipt: fn(file: String, bytes: [U8]) -> Receipt Never! {
-    receipt := empty_receipt("release-compiler", file, bytes)
+    ^receipt: empty_receipt("release-compiler", file, bytes)
     tree: json.parse(String.from_bytes_lossy(bytes)) ?? {
         receipt.problems.push(problem(INPUT, "{file} is not JSON: {err}"))
         return receipt
@@ -101,7 +101,7 @@ parse_admission_receipt: fn(file: String, bytes: [U8]) -> Receipt Never! {
 
 read_receipt: fn(dir: String, file: String, kind: String) -[FS]> Receipt Never! {
     bytes: files.read_bytes(files.join(dir, file)) ?? {
-        receipt := empty_receipt(kind, file, [U8]{})
+        ^receipt: empty_receipt(kind, file, [U8]{})
         receipt.problems.push(problem(MISSING_RUNNER, "the receipt {file} is missing: {err}"))
         return receipt
     }
@@ -111,7 +111,7 @@ read_receipt: fn(dir: String, file: String, kind: String) -[FS]> Receipt Never! 
 
 // support-matrix.tsv: one `target<TAB>name` row per supported target.
 parse_matrix: fn(text: String) -> [MatrixRow] Problem! {
-    rows := [MatrixRow]{}
+    ^rows: [MatrixRow]{}
     loop (index, raw) in text.split("\n").to_list() {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next

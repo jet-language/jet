@@ -32,14 +32,14 @@ describe: fn(n: Int) -> String {
 
 // An option test on a local that is filled in afterwards.
 filled: fn(n: Int) -> String {
-    label := label_for(n)
+    ^label: label_for(n)
     if label == None -> label = Val("small")
     label ?? "never"
 }
 
 // The bound payload keeps its value after the local is replaced.
 replaced: fn(n: Int) -> String {
-    shape := shape_for(n)
+    ^shape: shape_for(n)
     if shape == .Named(name) {
         shape = Shape.Empty
         if shape == .Empty -> return "was {name}, now empty"
@@ -48,7 +48,7 @@ replaced: fn(n: Int) -> String {
 }
 
 kept_after_reset: fn(n: Int) -> String {
-    label := label_for(n)
+    ^label: label_for(n)
     text: label ?? return "none"
     label = None
     if label == None -> return "kept {text}"
@@ -57,8 +57,8 @@ kept_after_reset: fn(n: Int) -> String {
 
 // Comparisons of owned strings, including inside a loop that rebinds them.
 ordered: fn(words: [String]) -> Int {
-    count := 0
-    previous := ""
+    ^count: 0
+    ^previous: ""
     loop word in words {
         current: "{word}"
         if previous < current -> count += 1
@@ -77,8 +77,8 @@ Segment: struct {
 // Indexing, lengths, and comparisons of an owned local's fields read the
 // fields in place; a write between two reads is still seen by the later one.
 field_reads: fn(n: Int) -> String {
-    segment := Segment{starts: [Int]{0, 3, n}, names: [String]{"a", "l"}, label: "l"}
-    total := 0
+    ^segment: Segment{starts: [Int]{0, 3, n}, names: [String]{"a", "l"}, label: "l"}
+    ^total: 0
     loop i in 0..<segment.starts.len() -> total += segment.starts[i]
     same: segment.names[1] == segment.label
     before: "{segment.starts[2]}"
@@ -89,7 +89,7 @@ field_reads: fn(n: Int) -> String {
 
 // The same reads through a loop item that aliases a list element.
 segment_sum: fn(segments: [Segment]) -> Int {
-    total := 0
+    ^total: 0
     loop segment in segments {
         if segment.starts.len() == 0 || segment.starts[0] != 0 -> total += 100
         loop i in 0..<segment.starts.len() -> total += segment.starts[i]

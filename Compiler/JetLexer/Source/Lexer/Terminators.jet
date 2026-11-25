@@ -90,9 +90,11 @@ arrow: fn(kind: Int) -> Bool Never! {
 newline_between: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
     if start < 0 || start >= end || end > source.len() -> return false
     if end - start == 1 -> return source[start] == (U8{10})
-    cursor := start
+    ^cursor: start
     loop cursor + 4 <= end {
-        if source[cursor] == (U8{10}) || source[cursor + 1] == (U8{10}) || source[cursor + 2] == (U8{10}) || source[cursor + 3] == (U8{10}) -> return true
+        if source[cursor] == (U8{10}) || source[cursor + 1] == (U8{10}) || source[cursor + 2] == (U8{10}) || source[cursor + 3] == (U8{10}) {
+            return true
+        }
         cursor += 4
     }
     loop cursor < end {
@@ -103,11 +105,13 @@ newline_between: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
 }
 
 scope_member_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
-    if kind_at(facts, index) != TOKEN_DOT || kind_at(facts, index + 1) != TOKEN_IDENT -> return false
-    cursor := index + 2
+    if kind_at(facts, index) != TOKEN_DOT || kind_at(facts, index + 1) != TOKEN_IDENT {
+        return false
+    }
+    ^cursor: index + 2
     if kind_at(facts, cursor) == TOKEN_LBRACE -> return true
     if kind_at(facts, cursor) != TOKEN_LPAREN -> return false
-    depth := 0
+    ^depth: 0
     loop cursor * 4 < facts.len() {
         kind: kind_at(facts, cursor)
         if kind == TOKEN_LPAREN -> depth += 1
@@ -131,7 +135,7 @@ leading_dot_variant: fn(facts: [Int], index: Int) -> Bool Never! {
 }
 
 skip_comment_tokens: fn(facts: [Int], index: Int) -> Int Never! {
-    cursor := index
+    ^cursor: index
     loop {
         kind: kind_at(facts, cursor)
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> cursor += 1 else -> break
@@ -146,11 +150,13 @@ skip_comment_tokens: fn(facts: [Int], index: Int) -> Int Never! {
 // launch line are not code `#` tokens followed by a number.
 lex_may_pin_inline_version: fn(source: [U8]) -> Bool Never! {
     facts: raw_token_facts(source, false)
-    index := 0
+    ^index: 0
     loop index * 4 < facts.len() {
         if kind_at(facts, index) == TOKEN_HASH {
             after: kind_at(facts, skip_comment_tokens(facts, index + 1))
-            if after == TOKEN_INT || after == TOKEN_FLOAT || after == TOKEN_UNIT_NUMBER -> return true
+            if after == TOKEN_INT || after == TOKEN_FLOAT || after == TOKEN_UNIT_NUMBER {
+                return true
+            }
         }
         index += 1
     }
@@ -159,9 +165,9 @@ lex_may_pin_inline_version: fn(source: [U8]) -> Bool Never! {
 
 dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, index) != TOKEN_DOT -> return false
-    cursor := skip_comment_tokens(facts, index + 1)
+    ^cursor: skip_comment_tokens(facts, index + 1)
     if kind_at(facts, cursor) == TOKEN_LBRACE {
-        depth := 0
+        ^depth: 0
         loop cursor * 4 < facts.len() {
             kind: kind_at(facts, cursor)
             if kind == TOKEN_LBRACE -> depth += 1
@@ -195,7 +201,7 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
         }
         cursor = skip_comment_tokens(facts, cursor)
         if kind_at(facts, cursor) == TOKEN_LPAREN {
-            depth := 0
+            ^depth: 0
             loop cursor * 4 < facts.len() {
                 kind: kind_at(facts, cursor)
                 if kind == TOKEN_LPAREN -> depth += 1
@@ -231,7 +237,7 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
     }
     if is_boolean_connector {
         guard_start: facts[cursor * 4 + 1]
-        depth := 0
+        ^depth: 0
         loop cursor * 4 < facts.len() {
             kind: kind_at(facts, cursor)
             is_open_delimiter: if kind == {
@@ -268,17 +274,19 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
 // type (`geo.`), the variant or type name, and the type arguments that name
 // one instance (`Box<Int, String>`); -1 when no arm name starts at `index`.
 arm_name_end: fn(facts: [Int], index: Int) -> Int Never! {
-    cursor := index
+    ^cursor: index
     loop kind_at(facts, cursor) == TOKEN_IDENT && facts[cursor * 4 + 3] != 1 && kind_at(facts, cursor + 1) == TOKEN_DOT {
         cursor += 2
     }
     if !leading_dot_variant(facts, cursor) -> return -1
     cursor += 1
     if kind_at(facts, cursor) != TOKEN_LT -> return cursor
-    depth := 0
+    ^depth: 0
     loop cursor * 4 < facts.len() {
         kind: kind_at(facts, cursor)
-        if kind == TOKEN_EOF || kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || arrow(kind) -> return -1
+        if kind == TOKEN_EOF || kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || arrow(kind) {
+            return -1
+        }
         if kind == TOKEN_LT -> depth += 1
         if kind == TOKEN_GT -> depth -= 1
         if kind == TOKEN_SHR -> depth -= 2
@@ -306,9 +314,11 @@ place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
 // line above.
 tuple_rename_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     first: kind_at(facts, index + 1)
-    if first != TOKEN_IDENT && !(first == TOKEN_CARET && kind_at(facts, index + 2) == TOKEN_IDENT) -> return false
-    depth := 0
-    at := index
+    if first != TOKEN_IDENT && !(first == TOKEN_CARET && kind_at(facts, index + 2) == TOKEN_IDENT) {
+        return false
+    }
+    ^depth: 0
+    ^at: index
     loop at * 4 < facts.len() {
         kind: kind_at(facts, at)
         if kind == TOKEN_EOF -> return false
@@ -333,8 +343,8 @@ record_value_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, index + 1) != TOKEN_IDENT -> return false
     first: kind_at(facts, index + 2)
     if first != TOKEN_COLON && first != TOKEN_COMMA -> return false
-    depth := 0
-    at := index
+    ^depth: 0
+    ^at: index
     loop at * 4 < facts.len() {
         kind: kind_at(facts, at)
         if kind == TOKEN_EOF -> return false
@@ -368,7 +378,9 @@ line_break_event: fn(source: [U8], facts: [Int], previous: Int, index: Int) -> I
     kind: kind_at(facts, index)
     previous_kind: kind_at(facts, previous)
     split: kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LBRACE
-    if kind == TOKEN_LBRACE && (tuple_rename_starts_at(facts, index) || (previous_kind != TOKEN_RBRACE && record_value_starts_at(facts, index))) -> return 1
+    if kind == TOKEN_LBRACE && (tuple_rename_starts_at(facts, index) || (previous_kind != TOKEN_RBRACE && record_value_starts_at(facts, index))) {
+        return 1
+    }
     if split && previous_kind == TOKEN_RPAREN -> return 2
     if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && kind != TOKEN_RPAREN && kind != TOKEN_RBRACKET {
         return 1
@@ -387,8 +399,10 @@ line_break_event: fn(source: [U8], facts: [Int], previous: Int, index: Int) -> I
 authored_semicolon_event: fn(source: [U8], facts: [Int], previous: Int, index: Int) -> Int Never! {
     if previous < 0 -> return 4
     if kind_at(facts, previous) == TOKEN_SEMI -> return 5
-    following := skip_comment_tokens(facts, index + 1)
-    loop kind_at(facts, following) == TOKEN_SEMI -> following = skip_comment_tokens(facts, following + 1)
+    ^following: skip_comment_tokens(facts, index + 1)
+    loop kind_at(facts, following) == TOKEN_SEMI {
+        following = skip_comment_tokens(facts, following + 1)
+    }
     kind: kind_at(facts, following)
     accepted: if kind == TOKEN_EOF || following * 4 >= facts.len() -> ends_statement_at(facts, previous) else -> line_break_event(source, facts, previous, following) == 1
     if accepted -> 3 else -> 4
@@ -396,10 +410,10 @@ authored_semicolon_event: fn(source: [U8], facts: [Int], previous: Int, index: I
 
 terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
     facts_len: facts.len()
-    events := [Int]{}
+    ^events: [Int]{}
     if facts_len > 64 -> events.try_reserve(facts_len /% 8) ?? ()
-    last_code := -1
-    index := 0
+    ^last_code: -1
+    ^index: 0
     loop index * 4 < facts_len {
         kind: facts[index * 4]
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT {
@@ -455,7 +469,7 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
 // Whether an event at fact `raw_index` stands for that fact itself: an
 // authored `;` (events 3 to 5) lands as its event, never as a token.
 terminator_events_take_fact: fn(events: [Int], event_index: Int, raw_index: Int) -> Bool Never! {
-    at_event := event_index
+    ^at_event: event_index
     event_count: events.len() /% 3
     loop at_event < event_count && events[at_event * 3 + 1] == raw_index {
         if events[at_event * 3] >= 3 -> return true
@@ -478,7 +492,7 @@ split_spelling: fn(kind: Int) -> String Never! {
 // E0986 diagnostic of a split header, or the E0447 diagnostic of a refused
 // `;`. Returns the index of the first later event.
 terminator_events_apply: fn(facts: [Int], events: [Int], event_index: Int, raw_index: Int, tokens: ^[Token], diagnostics: ^[Diagnostic]) -> Int {
-    at_event := event_index
+    ^at_event: event_index
     event_count: events.len() /% 3
     loop at_event < event_count && events[at_event * 3 + 1] == raw_index {
         event: events[at_event * 3]
@@ -520,15 +534,15 @@ terminator_events_apply: fn(facts: [Int], events: [Int], event_index: Int, raw_i
 }
 
 lex_with_terminators: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
-    tables := token_tables()
-    facts := [Int]{}
+    ^tables: token_tables()
+    ^facts: [Int]{}
     if source.len() > 16 -> facts.try_reserve(source.len()) ?? ()
     scanned: raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
     tables.has_paste = scanned.has_paste
     events: terminator_events(source, facts)
-    terminator_diagnostics := [Diagnostic]{}
+    ^terminator_diagnostics: [Diagnostic]{}
     lexed: lex_payload_from_facts(source, facts, events, config_surface, allow_reserved_identifiers, 0, 0, source.len(), tables, terminator_diagnostics)
-    diagnostics := lexed.diagnostics.move()
+    ^diagnostics: lexed.diagnostics.move()
     diagnostics.extend(terminator_diagnostics)
     Lexed{tokens: lexed.tokens.move(), tables: tables.move(), diagnostics: diagnostics.move()}
 }
@@ -546,9 +560,9 @@ lex_generated: fn(source: [U8]) -> Lexed { lex_with_terminators(source, false, t
 // with the statement before it. `jet eval` and the REPL part their one line
 // by these starts.
 statement_starts: fn(tokens: [Token]) -> [Int] Never! {
-    starts := [Int]{0}
-    depth := 0
-    ended := false
+    ^starts: [Int]{0}
+    ^depth: 0
+    ^ended: false
     loop token in tokens {
         if token.kind == TOKEN_EOF -> break
         if depth == 0 && token.kind == TOKEN_SEMI {

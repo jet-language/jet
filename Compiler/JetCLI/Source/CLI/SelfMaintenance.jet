@@ -32,7 +32,7 @@ jet_cli_devtools_new_ui: fn(args: [String], color: Bool, json: Bool) -> JetDrive
     cli_files.create_dir_all("Tests/UI") ?? return jet_cli_maintenance_error("E2105", "couldn't create `Tests/UI`: {jet_cli_io_error_text(err)}", None, color, json)
     source: jet_cli_new_ui_source()
     cli_files.write(file, source) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{file}`: {jet_cli_io_error_text(err)}", None, color, json)
-    actual := "(no errors)\n"
+    ^actual: "(no errors)\n"
     if jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> return output
         .Compiled(result, snapshot) -> {
@@ -45,7 +45,7 @@ jet_cli_devtools_new_ui: fn(args: [String], color: Bool, json: Bool) -> JetDrive
         }
     }
     cli_files.write(expected, actual) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{expected}`: {jet_cli_io_error_text(err)}", None, color, json)
-    stdout := "Wrote {file}\nWrote {expected}\n"
+    ^stdout: "Wrote {file}\nWrote {expected}\n"
     if actual == "(no errors)\n" {
         stdout = "{stdout}Note: scaffold compiled cleanly — edit `{file}` to trigger the diagnostic you want, then bless it with `jet test Compiler --profile ui -u --filter={file}`\n"
     }
@@ -58,7 +58,7 @@ jet_cli_devtools_new_ui: fn(args: [String], color: Bool, json: Bool) -> JetDrive
 jet_cli_case_fixture: fn(line: String) -> String? Never! {
     text: line.trim()
     if !text.starts_with("fixture:") -> return None
-    value := text.slice(8..<text.len()).trim()
+    ^value: text.slice(8..<text.len()).trim()
     value = value.split(" #").to_list()[0].trim()
     double: value.starts_with("\"") && value.ends_with("\"")
     single: value.starts_with("'") && value.ends_with("'")
@@ -76,9 +76,7 @@ jet_cli_collect_cases: fn(directory: String, files: ^[String]) -[FS]> Never! {
         path: "{directory}/{name}"
         if {
             cli_files.is_dir(path) -> jet_cli_collect_cases(path, files)
-            name.ends_with(".case") && name != ".case" -> {
-                files.push(path)
-            }
+            name.ends_with(".case") && name != ".case" -> { files.push(path) }
         }
     }
 }
@@ -87,10 +85,10 @@ jet_cli_devtools_fixture_paths: fn(color: Bool, json: Bool) -> JetDriverVerbOutp
     if !cli_files.is_dir("Tests/Cases") {
         return jet_cli_maintenance_error("E2104", "no `Tests/Cases/` directory here", Val("run from the repo root"), color, json)
     }
-    cases := [String]{}
+    ^cases: [String]{}
     jet_cli_collect_cases("Tests/Cases", cases)
-    checked := 0
-    missing := [String]{}
+    ^checked: 0
+    ^missing: [String]{}
     loop file in cases {
         source: cli_files.read(file) ?? ""
         directory: cli_files.dirname(file)

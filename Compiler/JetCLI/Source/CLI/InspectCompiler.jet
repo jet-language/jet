@@ -63,7 +63,7 @@ jet_cli_compiler_checked_value: fn(value: TComptimeValue) -> JetCLIStatusValue N
         .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_compiler_checked_value(entry))
         .Map(entries) -> jet_cli_status_object(loop entry in entries -> jet_cli_status_field(jet_cli_compiler_key_text(entry.key), jet_cli_compiler_checked_value(entry.value)))
         .Struct(_, fields) -> {
-            entries := [JetCLIStatusField]{}
+            ^entries: [JetCLIStatusField]{}
             loop field in fields {
                 if !ast_comptime_memo_storage_name(field.name) {
                     entries.push(jet_cli_status_field(field.name, jet_cli_compiler_checked_value(field.value)))
@@ -73,7 +73,7 @@ jet_cli_compiler_checked_value: fn(value: TComptimeValue) -> JetCLIStatusValue N
         }
         .Enum(_, variant, args) -> {
             if args.len() == 0 -> return jet_cli_status_text(variant)
-            named := true
+            ^named: true
             loop arg in args {
                 if arg.name == .None -> named = false
             }
@@ -108,7 +108,7 @@ jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVer
     // the file it was read from.
     result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), retain_projection: false, entry_path: Val(file)}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    value := JetCLIStatusValue.Null
+    ^value: JetCLIStatusValue.Null
     if result.product == {
         .CheckedCompilerValue(checked) -> { value = jet_cli_compiler_checked_value(checked.value) }
         .RetainedCheckedProjection(_) -> {

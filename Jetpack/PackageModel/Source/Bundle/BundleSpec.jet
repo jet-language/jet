@@ -99,7 +99,7 @@ IconFormat: enum {
     }
 
     parse: fn(value: String) -> IconFormat? Never! {
-        extension := value.trim()
+        ^extension: value.trim()
         loop extension.starts_with(".") -> extension = extension.removeprefix(".")
         if pkg_ascii_lower(extension) == {
             "png" -> Val(IconFormat.PNG)
@@ -137,7 +137,7 @@ BundleIcon: struct {
     }
 
     with_source: fn(self, source: String) -> BundleIcon Never! {
-        out := self
+        ^out: self
         out.source = Val(source)
         out
     }
@@ -383,7 +383,7 @@ BundleSpec: struct {
             if self.metadata.publisher.trim() == "" {
                 return Err(BundleError.EmptyField("metadata.publisher"))
             }
-            _ := pkg_bundle_windows_version(self.version)
+            ^_: pkg_bundle_windows_version(self.version)
         }
         loop icon in self.icons {
             pkg_bundle_validate_component("icon.name", icon.name)
@@ -422,7 +422,7 @@ BundleSpec: struct {
                 pkg_bundle_validate_component("game.crash_reporter", game.crash_reporter)
                 pkg_bundle_validate_component("game.crash_consent", game.crash_consent)
                 game.crash_runtime.validate(game.crash_reporter, game.crash_consent)
-                asset_paths := [String]{}
+                ^asset_paths: [String]{}
                 loop asset in game.assets {
                     pkg_bundle_validate_asset_path(asset.path)
                     if asset_paths.contains(asset.path) {
@@ -565,10 +565,10 @@ pkg_bundle_validate_source: fn(field: String, value: String) BundleError! {
 pkg_bundle_windows_version: fn(version: String) -> String BundleError! {
     parts: version.split(".").to_list()
     if parts.len() == 0 || parts.len() > 4 -> return Err(BundleError.InvalidWindowsVersion(version))
-    normalized := [String]{}
+    ^normalized: [String]{}
     loop part in parts {
         if part == "" -> return Err(BundleError.InvalidWindowsVersion(version))
-        value := 0
+        ^value: 0
         loop byte in part.bytes() {
             code: Int{byte}
             if code < 48 || code > 57 -> return Err(BundleError.InvalidWindowsVersion(version))

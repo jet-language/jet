@@ -26,7 +26,7 @@ LinkArchive: struct {
 LINK_AR_HEADER_SIZE: 60
 
 link_ar_decimal: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
-    value := 0
+    ^value: 0
     loop k in 0..<width {
         code: Int{bytes[at + k]}
         if code < 48 || code > 57 -> return value
@@ -36,7 +36,7 @@ link_ar_decimal: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
 }
 
 link_ar_be: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
-    value := 0
+    ^value: 0
     loop k in 0..<width -> value = (value << 8) | Int{bytes[at + k]}
     value
 }
@@ -44,7 +44,7 @@ link_ar_be: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
 // The text of `bytes[at..<end]` up to (not including) the first byte equal
 // to `stop`.
 link_ar_text: fn(bytes: [U8], at: Int, end: Int, stop: Int) -> String Never! {
-    last := at
+    ^last: at
     loop last < end && (Int{bytes[last]}) != stop -> last += 1
     String.from_bytes(bytes[at..<last]) ?? ""
 }
@@ -62,15 +62,15 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
             return link_ar_failure(path, "not an `ar` archive (thin and BSD archives are not supported)")
         }
     }
-    archive := LinkArchive{path: path, names: [String]{}, starts: [Int]{}, sizes: [Int]{}, symbol_names: [String]{}, symbol_members: [Int]{}, errors: [String]{}}
+    ^archive: LinkArchive{path: path, names: [String]{}, starts: [Int]{}, sizes: [Int]{}, symbol_names: [String]{}, symbol_members: [Int]{}, errors: [String]{}}
     // Header offset of every ordinary member, to translate index entries.
-    ordinals := [Int:Int]{}
-    index_at := -1
-    index_size := 0
-    index_word := 4
-    long_names_at := -1
-    long_names_end := -1
-    at := 8
+    ^ordinals: [Int:Int]{}
+    ^index_at: -1
+    ^index_size: 0
+    ^index_word: 4
+    ^long_names_at: -1
+    ^long_names_end: -1
+    ^at: 8
     loop at + LINK_AR_HEADER_SIZE <= bytes.len() {
         if (Int{bytes[at + 58]}) != 0x60 || (Int{bytes[at + 59]}) != 0x0a {
             archive.errors.push("{path}: malformed member header at offset {at}")
@@ -100,7 +100,7 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
                 long_names_end = start + size
             }
             else -> {
-                name := ""
+                ^name: ""
                 if {
                     first == 0x2f -> {
                         // `/<decimal>`: an offset into the long name table.
@@ -126,7 +126,7 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
         return archive
     }
     count: link_ar_be(bytes, index_at, index_word)
-    names_at := index_at + index_word * (count + 1)
+    ^names_at: index_at + index_word * (count + 1)
     index_end: index_at + index_size
     if names_at > index_end {
         archive.errors.push("{path}: the symbol index is truncated")
@@ -134,7 +134,7 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
     }
     loop k in 0..<count {
         header: link_ar_be(bytes, index_at + index_word * (k + 1), index_word)
-        end := names_at
+        ^end: names_at
         loop end < index_end && (Int{bytes[end]}) != 0 -> end += 1
         name: String.from_bytes(bytes[names_at..<end]) ?? ""
         names_at = end + 1
@@ -152,13 +152,13 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
 // member `name`) defines, in symbol table order. A member that is no 64-bit
 // little-endian relocatable object is a row in `errors`.
 link_ar_defined: fn(objects: [[U8]], b: Int, name: String, errors: ^[String]) -> [String] Never! {
-    defined := [String]{}
+    ^defined: [String]{}
     if objects[b].len() < 64 || link_u32(objects, b, 0) != 0x464c457f || link_u8(objects, b, 4) != 2 || link_u8(objects, b, 5) != 1 || link_u16(objects, b, 16) != 1 {
         errors.push("archive member `{name}` is not a 64-bit little-endian ELF relocatable object")
         return defined
     }
     shoff: link_u64(objects, b, 40)
-    count := link_u16(objects, b, 60)
+    ^count: link_u16(objects, b, 60)
     // Extended numbering: the real count lives in section header 0.
     if count == 0 -> count = link_u64(objects, b, shoff + 32)
     loop k in 1..<count {
@@ -216,13 +216,13 @@ link_ar_member: fn(out: ^[U8], name: String, bytes: [U8]) Never! {
 // so the archive needs no long name table. Each problem is a row in
 // `errors`, and then there are no bytes.
 x64_static_archive: fn(names: [String], objects: [[U8]]) -> X64ExecutableResult Never! {
-    errors := [String]{}
+    ^errors: [String]{}
     if names.len() != objects.len() {
         errors.push("an archive of {objects.len()} members has {names.len()} names")
         return X64ExecutableResult{bytes: [U8]{}, errors: errors}
     }
-    symbols := [String]{}
-    owners := [Int]{}
+    ^symbols: [String]{}
+    ^owners: [Int]{}
     loop (k, name) in names {
         if name.len() == 0 || name.len() > 15 || name.contains("/") {
             errors.push("archive member name `{name}` is not 1 to 15 bytes without a `/`")
@@ -235,22 +235,22 @@ x64_static_archive: fn(names: [String], objects: [[U8]]) -> X64ExecutableResult 
     if errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: errors}
     // The index: the symbol count, each symbol's member header offset, then
     // the names. Its size places the members.
-    index_size := 4 + 4 * symbols.len()
+    ^index_size: 4 + 4 * symbols.len()
     loop symbol in symbols -> index_size += symbol.len() + 1
-    starts := [Int]{}
-    at := 8 + LINK_AR_HEADER_SIZE + index_size + index_size % 2
+    ^starts: [Int]{}
+    ^at: 8 + LINK_AR_HEADER_SIZE + index_size + index_size % 2
     loop object in objects {
         starts.push(at)
         at += LINK_AR_HEADER_SIZE + object.len() + object.len() % 2
     }
-    index := [U8]{}
+    ^index: [U8]{}
     link_ar_be32(index, symbols.len())
     loop owner in owners -> link_ar_be32(index, starts[owner])
     loop symbol in symbols {
         index.extend(symbol.bytes())
         index.push(U8{0})
     }
-    out := [U8]{}
+    ^out: [U8]{}
     out.extend("!<arch>\n".bytes())
     link_ar_member(out, "/", index)
     loop (k, object) in objects -> link_ar_member(out, "{names[k]}/", object)

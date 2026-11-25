@@ -96,13 +96,13 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -164,7 +164,7 @@ fake_configure: fn(f: ^Fake, states: [Int]) {
     f.configures.push(serial)
     toplevel: f.toplevel
     xdg_surface: f.xdg_surface
-    args := fake_words([Int]{400, 300, states.len() * 4})
+    ^args: fake_words([Int]{400, 300, states.len() * 4})
     loop state in states -> fake_put(args, state)
     fake_event(f, toplevel, 0, args)
     fake_event(f, xdg_surface, 0, fake_words([Int]{serial}))
@@ -207,7 +207,7 @@ fake_commit: fn(f: ^Fake) -[Env, Net, Time]> {
     acked: f.acked
     f.acked = -1
     if acked >= 0 {
-        index := -1
+        ^index: -1
         loop k in 0..<f.configures.len() {
             if f.configures[k] == acked -> index = k
         }
@@ -254,7 +254,7 @@ fake_report: fn(f: ^Fake) {
     }
     m: 0 - f.shown_x
     names: [String]{"close", "maximize", "minimize"}
-    ringed := [String]{}
+    ^ringed: [String]{}
     loop k in 0..<3 {
         cx: 400 - 17 - k * 28
         pixel: fake_pixel(f, chrome, cx + 11 + m, 17 + m)
@@ -285,13 +285,13 @@ fake_mods: fn(f: ^Fake, serial: Int, depressed: Int) {
 // text and its NUL in shared memory, format 1 (XKB text v1).
 fake_keymap: fn(f: ^Fake) -[Env, Net, Time]> {
     fake_flush(f)
-    bytes := KEYMAP.bytes().copy()
+    ^bytes: KEYMAP.bytes().copy()
     bytes.push(U8{0})
     size: Int(1..1073741824).from_int(bytes.len()) ?? {
         fake_fail(f, "keymap of {bytes.len()} bytes")
         return
     }
-    memory := sys.shared_memory(size) ?? {
+    ^memory: sys.shared_memory(size) ?? {
         fake_fail(f, "keymap memory: {err}")
         return
     }
@@ -394,10 +394,10 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
-        names := 0
+        ^names: 0
         loop interface in GLOBALS {
             names += 1
-            args := fake_words([Int]{names})
+            ^args: fake_words([Int]{names})
             loop b in fake_text(interface) -> args.push(b)
             fake_put(args, fake_version(interface))
             fake_event(f, registry, 0, args)
@@ -521,7 +521,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
 
 // Handles every complete request in the inbox.
 fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -542,7 +542,7 @@ fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
 // Accepts one window and serves it until it disconnects.
 fake_serve: fn(listener: net.UnixListener, mode: FakeMode) -[Env, Net, Time, IO]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept: {err}")
-    f := Fake{
+    ^f: Fake{
         stream: stream,
         mode: mode,
         inbox: [U8]{},
@@ -585,7 +585,7 @@ fake_serve: fn(listener: net.UnixListener, mode: FakeMode) -[Env, Net, Time, IO]
         failures: [String]{},
         closing: false,
     }
-    idle := 0
+    ^idle: 0
     loop idle < 40 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("wait failed: {err}")
@@ -618,7 +618,7 @@ client: fn(label: String) -[Env, IO, Net, Time]> {
         return
     }
     loop frame in window.frames() {
-        closed := false
+        ^closed: false
         loop event in frame.events() {
             if event == .Close -> closed = true
             if event == .Focus(focused) -> print("{label}: focus {focused}")
@@ -627,8 +627,8 @@ client: fn(label: String) -[Env, IO, Net, Time]> {
             if event == .KeyUp(key) -> print("{label}: up {key}")
         }
         if closed -> break
-        pixels := [U8]{}
-        count := frame.width * frame.height * 4
+        ^pixels: [U8]{}
+        ^count: frame.width * frame.height * 4
         loop count > 0 {
             pixels.push(U8{255})
             count -= 1

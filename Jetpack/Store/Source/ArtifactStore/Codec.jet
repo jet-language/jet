@@ -26,7 +26,7 @@ store_artifact_action_magic: fn() -> [U8] Never! { store_artifact_magic("action"
 store_artifact_record_magic: fn() -> [U8] Never! { store_artifact_magic("artifact") }
 
 store_artifact_magic: fn(label: String) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     out.extend(STORE_ARTIFACT_VERSION.bytes())
     out.push(U8{0})
     out.extend(label.bytes())
@@ -36,7 +36,7 @@ store_artifact_magic: fn(label: String) -> [U8] Never! {
 
 // `value` as eight little-endian bytes (`u64::to_le_bytes`).
 store_artifact_push_le64: fn(out: ^[U8], value: Int) Never! {
-    shift := 0
+    ^shift: 0
     loop shift < 64 {
         out.push(U8{((value >> shift)) & 255})
         shift += 8
@@ -45,7 +45,7 @@ store_artifact_push_le64: fn(out: ^[U8], value: Int) Never! {
 
 // The little-endian u64 at `bytes[start..<start + 8]`.
 store_artifact_read_le64: fn(bytes: [U8], start: Int) -> Int Never! {
-    value := 0
+    ^value: 0
     loop offset in 0..<8 -> value = (value) | (Int{bytes[start + offset]} << (offset * 8))
     value
 }
@@ -58,7 +58,7 @@ store_artifact_slice: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
 // The action envelope: magic, action key digest, record length, record
 // digest, record.
 store_artifact_encode_action: fn(action: ActionHandle, record: [U8]) -> [U8] Never! {
-    out := store_artifact_action_magic()
+    ^out: store_artifact_action_magic()
     out.extend(action.digest().as_bytes())
     store_artifact_push_le64(out, record.len())
     out.extend(store_artifact_sha256(record))
@@ -106,7 +106,7 @@ store_artifact_action_for_key: fn(key: String) -> ActionHandle ArtifactStoreErro
 
 // The artifact record: magic, object digest, object length, executable flag.
 store_artifact_encode_record: fn(object: ObjectHandle, executable: Bool) -> [U8] Never! {
-    out := store_artifact_record_magic()
+    ^out: store_artifact_record_magic()
     out.extend(object.digest().as_bytes())
     store_artifact_push_le64(out, object.length())
     out.push(if executable -> U8{1} else -> U8{0})
@@ -167,7 +167,7 @@ store_artifact_read_file: fn(path: String) -[FS]> ArtifactRawRead ArtifactStoreE
     if metadata.is_symlink || !metadata.is_file {
         return Ok(ArtifactRawRead.Corrupt("entry is not a regular file"))
     }
-    reader := files.open(path) ?? {
+    ^reader: files.open(path) ?? {
         if store_artifact_io_missing(err) {
             return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
         }
@@ -178,7 +178,7 @@ store_artifact_read_file: fn(path: String) -[FS]> ArtifactRawRead ArtifactStoreE
     if !store_artifact_same_file(metadata, held) {
         return Ok(ArtifactRawRead.Corrupt("entry changed while opening"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
@@ -230,7 +230,7 @@ store_artifact_replace_file: fn(path: String, bytes: [U8], durable: Bool) -[FS, 
 
 // #3593: exclusive create Refuse and FileWriter.write_all/fsync are provider gates.
 store_artifact_replace_with: fn(temporary: String, path: String, parent: String, bytes: [U8], durable: Bool) -[FS]> ArtifactStoreError! {
-    writer := files.create(temporary, if_exists: .Refuse)
+    ^writer: files.create(temporary, if_exists: .Refuse)
     writer.write_bytes(bytes)
     if durable -> writer.fsync()
     close(writer)
@@ -248,7 +248,7 @@ store_artifact_set_executable: fn(path: String, executable: Bool) -[FS]> Artifac
 // Create `path`, refusing an existing one. Lock and lease files mean
 // something only while their owner runs, so their bytes are not synced.
 store_artifact_create_new: fn(path: String, bytes: [U8]) -[FS]> ArtifactStoreError! {
-    writer := files.create(path, if_exists: .Refuse)
+    ^writer: files.create(path, if_exists: .Refuse)
     writer.write_bytes(bytes)
     close(writer)
 }
@@ -264,7 +264,7 @@ store_artifact_append: fn(path: String, bytes: [U8], durable: Bool) -[FS]> Artif
         }
         .Err(_) -> {}
     }
-    writer := files.append(path)
+    ^writer: files.append(path)
     writer.write_bytes(bytes)
     if durable -> writer.fsync()
     close(writer)
@@ -321,7 +321,7 @@ store_artifact_sync_dir: fn(path: String) -[FS]> ArtifactStoreError! {
 
 // The children of `directory`, ordered by path.
 store_artifact_sorted_children: fn(directory: String) -[FS]> [String] ArtifactStoreError! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in files.list_dir(directory) -> paths.push(entry.path)
     paths.sort()
     Ok(paths)
@@ -345,7 +345,7 @@ store_artifact_filesystem_stats: fn(path: String) -[Exec, Time]> ArtifactDiskSta
     spec: process.cmd([String]{"df", "-Pk", path}).env("LC_ALL", "C").stdout(.Capture).stderr(.Capture)
     receipt: process.run_spec(spec) ?? return None
     if !receipt.success -> return None
-    line := ""
+    ^line: ""
     loop row in receipt.output.split("\n") {
         if row.trim() != "" -> line = row
     }
@@ -372,8 +372,8 @@ store_artifact_parse_count: fn(text: String) -> Int? Never! {
 // `str::split_whitespace` over ASCII whitespace.
 store_artifact_split_whitespace: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    fields := [String]{}
-    start := -1
+    ^fields: [String]{}
+    ^start: -1
     loop index in 0..<raw.len() {
         code: Int{raw[index]}
         space: code == 32 || (code >= 9 && code <= 13)

@@ -9,7 +9,7 @@ report_causes_require: fn(ok: Bool, name: String) Never! {
 }
 
 #Test("report_causes") {
-    one := Diagnostic{
+    ^one: Diagnostic{
         severity: DIAGNOSTIC_ERROR,
         code: "E0108",
         what: "first cause",
@@ -21,7 +21,7 @@ report_causes_require: fn(ok: Bool, name: String) Never! {
     report_causes_require(json.starts_with("{{\"schema\":\"jet.report/v4\""), "report schema is v4")
     report_causes_require(json.contains("\"cause\":[{{\"code\":\"E0109\",\"span\":null,\"origin\":null,\"line\":null,\"col\":null}}],\"clears\":1"), "single unlocated cause renders null fields")
 
-    two := Diagnostic{
+    ^two: Diagnostic{
         severity: DIAGNOSTIC_ERROR,
         code: "E0108",
         what: "first cause",

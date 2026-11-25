@@ -4795,28 +4795,22 @@ body_codec_get_toptionprobe: fn(bytes: [U8], input: ^BodyCodecIn) -> TOptionProb
 
 body_codec_put_tallocctor: fn(out: ^BodyCodecOut, value: TAllocCtor) Never! {
     if value == {
-        .Arena -> { body_codec_put_tag(out, 0) }
-        .Bump -> { body_codec_put_tag(out, 1) }
-        .Pool -> { body_codec_put_tag(out, 2) }
         .Fixed(p0) -> {
-            body_codec_put_tag(out, 3)
+            body_codec_put_tag(out, 0)
             body_codec_put_int(out, p0)
         }
-        .FixedOver -> body_codec_put_tag(out, 4)
+        .FixedOver -> body_codec_put_tag(out, 1)
     }
 }
 
 body_codec_get_tallocctor: fn(bytes: [U8], input: ^BodyCodecIn) -> TAllocCtor Never! {
-    position: body_codec_get_tag(bytes, input, 5, 0)
+    position: body_codec_get_tag(bytes, input, 2, 1)
     if position == {
-        1 -> TAllocCtor.Bump
-        2 -> TAllocCtor.Pool
-        3 -> {
+        0 -> {
             f0: body_codec_get_int(bytes, input)
             TAllocCtor.Fixed{size: f0}
         }
-        4 -> TAllocCtor.FixedOver
-        else -> TAllocCtor.Arena
+        else -> TAllocCtor.FixedOver
     }
 }
 

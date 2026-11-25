@@ -45,7 +45,7 @@ jet_cli_receipt_project_root: fn(cache: ^WorkspaceDeclarationCache, start: Strin
 // resolves a workspace declaration. Every failure is the workspace diagnostic,
 // as `find_workspace_root_with_error` maps it.
 jet_cli_find_workspace_root_checked: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
-    dir := AuthorityResolver.authority_walk_root(start) ?? return Err(ManifestError{diagnostic: err.workspace_diagnostic()})
+    ^dir: AuthorityResolver.authority_walk_root(start) ?? return Err(ManifestError{diagnostic: err.workspace_diagnostic()})
     loop {
         if AuthorityResolver.open_for_authority_walk(cache, dir) == {
             .Ok(found) -> {
@@ -67,7 +67,7 @@ jet_cli_find_workspace_root_checked: fn(cache: ^WorkspaceDeclarationCache, start
 // `find_repository_root`: the nearest real `.git` marker, never a link to one.
 // A worktree's `.git` file is a repository marker too.
 jet_cli_find_repository_root: fn(start: String) -[FS, Env]> String? Never! {
-    dir := AuthorityResolver.authority_walk_root(start) ?? return None
+    ^dir: AuthorityResolver.authority_walk_root(start) ?? return None
     loop {
         marker: if dir.ends_with("/") -> "{dir}.git" else -> "{dir}/.git"
         if cli_files.stat(marker) == .Ok(info) {

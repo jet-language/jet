@@ -25,7 +25,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     { sender: ready_tx, receiver: ready_rx }: channel<String>()
     addr_text: net.socket_to_string(local)
     tcp_task: task {
-        server_side := listener.move()
+        ^server_side: listener.move()
         ready_tx.send(addr_text) ?? panic("ready")
         stream: server_side.accept() ?? panic("accept")
         stream.write_bytes(C_PAYLOAD.bytes()) ?? panic("tcp write")
@@ -33,7 +33,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     }
     addr: ready_rx.receive() ?? panic("ready")
     client: net.tcp_connect(addr) ?? panic("connect")
-    tcp_buffer := [U8]{}
+    ^tcp_buffer: [U8]{}
     loop {
         count: client.read_into(tcp_buffer, 8, deadline: 5s) ?? panic("tcp read_into")
         if count == 0 -> break
@@ -57,15 +57,15 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     { sender: unix_tx, receiver: unix_rx }: channel<String>()
     unix_task: task {
         unix_tx.send("ready") ?? panic("unix ready")
-        peer := net.unix_accept(unix_listener) ?? panic("unix accept")
+        ^peer: net.unix_accept(unix_listener) ?? panic("unix accept")
         peer.set_timeout(5s) ?? panic("unix timeout")
         _: peer.ready(.Write, deadline: 5s) ?? panic("unix writable")
         peer.write_bytes(C_PAYLOAD.bytes(), deadline: 5s) ?? panic("unix write")
         net.unix_close(peer) ?? panic("unix close")
     }
     _ready: unix_rx.receive() ?? panic("unix ready")
-    unix_client := net.unix_connect(path) ?? panic("unix connect")
-    unix_buffer := "unix> ".bytes()
+    ^unix_client: net.unix_connect(path) ?? panic("unix connect")
+    ^unix_buffer: "unix> ".bytes()
     read_until_end(unix_client, unix_buffer)
     print(String.from_bytes(unix_buffer) ?? "?")
     net.unix_close(unix_client) ?? panic("unix close")
@@ -86,7 +86,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     secure: tls.client(net.tcp_connect(https_addr) ?? panic("connect loopback"), server_name: "localhost", config: config, deadline: 5s) ?? panic("TLS handshake")
     crlf: "\r\n"
     secure.write_bytes("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: 5s) ?? panic("request")
-    tls_buffer := [U8]{}
+    ^tls_buffer: [U8]{}
     loop {
         count: secure.read_into(tls_buffer, 64, deadline: 5s) ?? panic("tls read_into")
         if count == 0 -> break
@@ -104,9 +104,9 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     // A file reader: the buffer is cleared and reused for each chunk.
     file_path: "{os.temp_dir()}/jri-{os.pid()}.txt"
     files.write(file_path, C_PAYLOAD) ?? panic("write file")
-    reader := files.open(file_path) ?? panic("open file")
-    chunk := [U8]{}
-    chunks := [String]{}
+    ^reader: files.open(file_path) ?? panic("open file")
+    ^chunk: [U8]{}
+    ^chunks: [String]{}
     loop {
         chunk.clear()
         count: reader.read_into(chunk, 16) ?? panic("file read_into")

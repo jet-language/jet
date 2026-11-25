@@ -1,0 +1,107 @@
+// core.grammar keywords: the perfect hash of a grammar's word literals.
+//
+// A literal spelled as a word (an ASCII letter or `_`, then letters,
+// digits and `_`) is a keyword. The lexer scans a whole word and finds the
+// keyword it spells with one hash and one compare, as SQLite's
+// keywordhash.h does, so a keyword never matches the start of a longer
+// word. The table is built by hash and displace: a word's hash picks its
+// bucket, and the bucket's displacement sends each of its words to a slot
+// no other word takes. The largest buckets are placed first; when a bucket
+// finds no displacement, the table grows and is placed again.
+use {
+    core.grammar.plan.[GrammarKeywords]
+    core.grammar.runtime.[fold_text, keyword_hash, keyword_slot, word_shaped]
+    __core_grammar_analyze.[GrammarWork]
+}
+
+/// The most displacements tried for one bucket before the table grows.
+KEYWORD_TRIES: 4096
+
+/// The slot of each word, by hash and displace, in a table of `size`
+/// slots and `buckets` buckets: `displace` then the entry of each slot, or
+/// empty when some bucket finds no displacement.
+place_keywords: fn(work: ^GrammarWork, hashes: [Int], heads: [Int], buckets: Int, size: Int) -> [[Int]] Never! {
+    ^members: [[Int]]{}
+    loop _ in 0..<buckets -> members.push([Int]{})
+    ^largest: 0
+    loop (w, hash) in hashes {
+        b: hash % buckets
+        members[b].push(w)
+        if members[b].len() > largest -> largest = members[b].len()
+    }
+    ^displace: [Int]{}
+    loop _ in 0..<buckets -> displace.push(0)
+    ^slots: [Int]{}
+    loop _ in 0..<size -> slots.push(-1)
+    ^count: largest
+    loop count > 0 {
+        loop b in 0..<buckets {
+            if members[b].len() != count -> next
+            ^placed: false
+            ^shift: 1
+            loop !placed && shift <= KEYWORD_TRIES {
+                work.steps += 1
+                ^taken: [Int]{}
+                ^fits: true
+                loop w in members[b] {
+                    slot: keyword_slot(hashes[w], shift, size)
+                    if slots[slot] >= 0 -> fits = false
+                    loop have in taken {
+                        if have == slot -> fits = false
+                    }
+                    taken.push(slot)
+                }
+                if fits {
+                    loop (i, w) in members[b] -> slots[taken[i]] = heads[w]
+                    displace[b] = shift
+                    placed = true
+                }
+                shift += 1
+            }
+            if !placed -> return [[Int]]{}
+        }
+        count -= 1
+    }
+    [[Int]]{displace, slots}
+}
+
+/// The keyword table of the grammar's word literals.
+plan_keywords: fn(work: ^GrammarWork) -> GrammarKeywords Never! {
+    ^kinds: [Int]{}
+    ^texts: [String]{}
+    ^folds: [Bool]{}
+    ^chain: [Int]{}
+    ^heads: [Int]{}
+    ^hashes: [Int]{}
+    ^first: [String:Int]{}
+    ^last: [Int]{}
+    loop (k, token) in work.tokens {
+        if token.rule >= 0 || token.hole != "" || !word_shaped(token.text) -> next
+        entry: kinds.len()
+        kinds.push(k)
+        texts.push(token.text.copy())
+        folds.push(token.fold)
+        chain.push(-1)
+        last.push(entry)
+        key: fold_text(token.text)
+        head: first.get(key) ?? -1
+        if head >= 0 {
+            chain[last[head]] = entry
+            last[head] = entry
+        } else {
+            _: first.add(key, entry)
+            heads.push(entry)
+            bytes: token.text.bytes()
+            hashes.push(keyword_hash(bytes, 0, bytes.len()))
+        }
+    }
+    words: heads.len()
+    if words == 0 -> return GrammarKeywords{displace: [Int]{}, slots: [Int]{}, kinds: kinds, texts: texts, folds: folds, next: chain}
+    buckets: words /% 2 + 1
+    ^size: words + words /% 4 + 1
+    loop {
+        table: place_keywords(work, hashes, heads, buckets, size)
+        if table.len() == 2 -> return GrammarKeywords{displace: table[0].copy(), slots: table[1].copy(), kinds: kinds, texts: texts, folds: folds, next: chain}
+        size += size /% 4 + 1
+    }
+}

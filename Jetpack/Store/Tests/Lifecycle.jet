@@ -25,7 +25,7 @@ store_lifecycle_test_identity: fn(id: String, incarnation: Int, witness: String)
 // One writer preparing a replacement of `root` with its own verification
 // state, as a separate writer process would; true when the prepare succeeds.
 store_lifecycle_test_prepare_alone: fn(roots: HangarRoots, witness: String, digest_seed: String) -[FS, Env, Time]> Bool Never! {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_lifecycle_prepare(verification, roots, store_lifecycle_test_identity("root", 2, witness), [String]{store_lifecycle_test_digest(digest_seed)}, store_lifecycle_test_at(3)) == .Ok(_)
 }
 
@@ -33,7 +33,7 @@ store_lifecycle_test_prepare_alone: fn(roots: HangarRoots, witness: String, dige
 store_lifecycle_test_install_closure: fn(roots: HangarRoots, targets: [String]) Never! {
     journal: files.join(files.join(roots.hangar_dir(), "closure-db"), "journal")
     files.create_dir_all(journal) ?? panic("closure journal")
-    lines := [String]{"jet-closure-journal-v1\nkind\tdelta\n"}
+    ^lines: [String]{"jet-closure-journal-v1\nkind\tdelta\n"}
     loop target in targets {
         lines.push("object\t{store_lifecycle_hex(target)}\t{store_lifecycle_hex("/fixture/{target}")}\t1\n")
     }
@@ -53,7 +53,7 @@ store_lifecycle_test_fixture: fn() -> LifecycleTestFixture Never! {
 store_lifecycle_test_transaction_paths: fn(roots: HangarRoots) -> [String] Never! {
     journal: store_lifecycle_ensure_journal_dir(roots) ?? panic("journal")
     scan: store_lifecycle_scan_journal(journal) ?? panic("scan")
-    paths := [String]{}
+    ^paths: [String]{}
     loop name in scan.transaction_names -> paths.push(journal.member_path(name))
     paths
 }
@@ -68,7 +68,7 @@ store_lifecycle_test_prepare_controlled: fn(roots: HangarRoots, known: [String],
 // Persist under control, under the Hangar lock.
 store_lifecycle_test_persist_controlled: fn(roots: HangarRoots, known: [String], entry: LifecycleJournalEntry, control: LifecycleWriteControl) StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
-    state := store_lifecycle_load_state(roots, known)
+    ^state: store_lifecycle_load_state(roots, known)
     if store_lifecycle_entry_already_applied(state, entry) {
         return
     }
@@ -112,8 +112,8 @@ store_lifecycle_test_message: fn(result: LifecycleSnapshot StoreError!) -> Strin
 // `{index:064x}`.
 store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
-    rest := index
+    ^out: [U8]{}
+    ^rest: index
     loop _ in 0..<64 {
         out.insert(0, digits[rest % 16])
         rest = rest /% 16
@@ -122,7 +122,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle replacement recovery obeys the old union new law") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     a: store_lifecycle_test_digest("a")
@@ -138,7 +138,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle partial and enospc failures recover the old state") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     a: store_lifecycle_test_digest("a")
@@ -153,7 +153,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle published prepare survives a post rename failure as a union") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     a: store_lifecycle_test_digest("a")
@@ -165,7 +165,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle durable ambiguous prepare retry is witness bound and idempotent") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     a: store_lifecycle_test_digest("a")
@@ -182,7 +182,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle durable commit tombstone and legacy retries ignore the new timestamp") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     root: store_lifecycle_test_identity("root", 1, "w1")
@@ -204,7 +204,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
     legacy: LegacyRoot{identity: store_lifecycle_test_identity("legacy", 1, "legacy-witness"), targets: [String]{b}, observed_at: store_lifecycle_test_at(4)}
     entry: LifecycleJournalEntry.Legacy{identity: legacy.identity, targets: [String]{b}, at: legacy.observed_at}
     assert(store_lifecycle_test_persist_controlled(legacy_roots, legacy_fixture.known, entry, ambiguous) == .Err(_))
-    retry := legacy
+    ^retry: legacy
     retry.observed_at = store_lifecycle_test_at(40)
     imported: store_lifecycle_import_legacy_root(verification, legacy_roots, retry) ?? panic("legacy retry")
     durable: imported.roots[legacy.identity.id.as_str()]
@@ -214,7 +214,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle recover replays semantics and rejects a checksummed invalid transition") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     journal: files.join(files.join(roots.hangar_dir(), STORE_LIFECYCLE_DB_DIR), STORE_LIFECYCLE_JOURNAL_DIR)
@@ -231,7 +231,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle hostile corruption truncation duplicates and unknowns fail closed") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     id: store_lifecycle_test_identity("root", 1, "w1")
@@ -243,7 +243,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
     paths: store_lifecycle_test_transaction_paths(roots)
     path: paths[paths.len() - 1]
     original: files.read_bytes(path) ?? panic("read transaction")
-    bad_checksum := original
+    ^bad_checksum: original
     bad_checksum[0] = U8{88}
     files.write_bytes(path, bad_checksum) ?? panic("corrupt")
     if store_lifecycle_snapshot(verification, roots) == {
@@ -271,7 +271,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle fresh store snapshot is durable and deterministic") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     first: store_lifecycle_snapshot(verification, roots) ?? panic("first snapshot")
     second: store_lifecycle_snapshot(verification, roots) ?? panic("second snapshot")
@@ -283,10 +283,10 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle explicit byte member and target bounds fail closed") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
-    oversized := [String]{}
+    ^oversized: [String]{}
     loop _ in 0..<(STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT + 1) {
         oversized.push(store_lifecycle_test_digest("a"))
     }
@@ -294,7 +294,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 
     journal: files.join(files.join(roots.hangar_dir(), STORE_LIFECYCLE_DB_DIR), STORE_LIFECYCLE_JOURNAL_DIR)
     files.create_dir_all(journal) ?? panic("journal")
-    filler := "x"
+    ^filler: "x"
     loop _ in 0..<21 -> filler = "{filler}{filler}"
     files.write(files.join(journal, "00000000000000000001-0000000000000000.txn"), "{filler}x") ?? panic("oversized member")
     assert(store_lifecycle_test_message(store_lifecycle_snapshot(verification, roots)).contains("byte bound"))
@@ -308,12 +308,12 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle bounded recovery compacts long history without state drift") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     a: store_lifecycle_test_digest("a")
     b: store_lifecycle_test_digest("b")
-    current := store_lifecycle_test_identity("root", 1, "w1")
+    ^current: store_lifecycle_test_identity("root", 1, "w1")
     store_lifecycle_test_commit_root(verification, roots, current, a, 1, 2)
     loop incarnation in 2..<67 {
         current = store_lifecycle_test_identity("root", incarnation, "w{incarnation}")
@@ -331,7 +331,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle published snapshot supersedes lingering authenticated transactions") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     store_lifecycle_test_commit_root(verification, roots, store_lifecycle_test_identity("root", 1, "w1"), store_lifecycle_test_digest("a"), 1, 2)
@@ -348,13 +348,13 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle admission rejects state that cannot fit a future snapshot") {
-    targets := [String]{}
+    ^targets: [String]{}
     loop index in 0..<8 -> targets.push("sha256-{store_lifecycle_test_hex64(index)}")
     producer: "producer-{store_test_repeat("p", 503)}"
     witness: "witness-{store_test_repeat("w", 504)}"
-    state := [String:LifecycleRoot]{}
+    ^state: [String:LifecycleRoot]{}
     loop index in 0..<STORE_LIFECYCLE_MAX_ROOTS {
-        number := "{index}"
+        ^number: "{index}"
         loop number.bytes().len() < 4 -> number = "0{number}"
         prefix: "root-{number}-"
         identity: RootIdentity.new(RootKind.Manual, RootID.new("{prefix}{store_test_repeat("i", 512 - prefix.bytes().len())}") ?? panic("id"), ProducerID.new(producer) ?? panic("producer"), Incarnation.new(1) ?? panic("incarnation"), RootWitness.new(witness) ?? panic("witness"))
@@ -368,7 +368,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle invalid transitions and identity reuse fail closed") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     first: store_lifecycle_test_identity("root", 1, "w1")
@@ -384,7 +384,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle tombstone and legacy roots preserve audit and conservative protection") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     a: store_lifecycle_test_digest("a")
@@ -404,7 +404,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle revisions are deterministic and include the closure head") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     left: store_lifecycle_test_fixture()
     right: store_lifecycle_test_fixture()
     both: [HangarRoots]{left.roots, right.roots}
@@ -423,7 +423,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
 }
 
 #Test("lifecycle concurrent replacements serialize to one valid transition") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     store_lifecycle_test_commit_root(verification, roots, store_lifecycle_test_identity("root", 1, "w1"), store_lifecycle_test_digest("a"), 1, 2)

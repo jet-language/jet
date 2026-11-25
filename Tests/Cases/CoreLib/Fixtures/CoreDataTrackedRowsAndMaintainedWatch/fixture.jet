@@ -10,33 +10,36 @@ Sale: struct {
 }
 
 show: fn(rows: [Sale]) {
-    line := "rows:"
+    ^line: "rows:"
     loop row in rows -> line = "{line} {row.id}={row.cents}"
     print(line)
 }
 
 show_cents: fn(values: [Int]) {
-    line := "doubled:"
+    ^line: "doubled:"
     loop value in values -> line = "{line} {value}"
     print(line)
 }
 
-failure: fn(result: Unit data.DataError!) {
+failure: fn(result: data.DataError!) {
     if result == {
-        .Ok(_) -> print("ok")
+        .Ok(_) -> { print("ok") }
         .Err(err) -> print("{err}")
     }
 }
 
 run: fn() {
-    if data.track([Sale]{Sale{id: 1, cents: 1}, Sale{id: 1, cents: 2}}, fn(sale: Sale) { sale.id }) == .Err(err) -> print("{err}")
+    if data.track([Sale]{Sale{id: 1, cents: 1}, Sale{id: 1, cents: 2}}, fn(sale: Sale) { sale.id }) == .Err(err) {
+        print("{err}")
+    }
     sales: data.track([Sale]{Sale{id: 3, cents: 300}, Sale{id: 1, cents: 125}}, fn(sale: Sale) { sale.id }) ?? panic("track: {err}")
     calls: Shared{0}
     counted: calls.copy()
     big: sales.query().filter(fn(sale: Sale) {
         counted.guard_edit().value += 1
         sale.cents > 150
-    }).watch() ?? panic("watch: {err}")
+    })
+        .watch() ?? panic("watch: {err}")
     doubled: sales.query().map(fn(sale: Sale) { sale.cents * 2 }).watch() ?? panic("map watch: {err}")
     show(big.get() ?? panic("get: {err}"))
     show(big.get() ?? panic("get again: {err}"))

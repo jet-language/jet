@@ -244,18 +244,18 @@ sema_core_body_capture_open: fn(program: SemaProgramTables) {
 // (sema_check_drain_body), so every row ends where it was and none is
 // copied.
 sema_core_body_capture: fn(program: SemaProgramTables, owner_id: SymbolID, checked: ^^SemaFunctionResult, type_delta: [InternerDelta], diagnostics: ^[Diagnostic], diagnostic_start: Int, call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], bodies: ^[SemaCoreBody]) -> SemaFunctionResult {
-    own := [Diagnostic]{}
+    ^own: [Diagnostic]{}
     loop diagnostics.len() > diagnostic_start {
         diagnostic: diagnostics.pop() ?? break
         own.push(diagnostic)
     }
     own.reverse()
-    packet := SemaParallelBody{job_index: 0, checked: Val(checked.move()), diagnostics: own.move(), call_facts: compiler_take_rows<SemaCallSiteFact>(call_facts), comptime_requests: compiler_take_rows<SemaComptimeRequest>(comptime_requests), name_references: compiler_take_rows<SemaNameReferenceFact>(name_references), method_input: None, wanted_hooks: false}
+    ^packet: SemaParallelBody{job_index: 0, checked: Val(checked.move()), diagnostics: own.move(), call_facts: compiler_take_rows<SemaCallSiteFact>(call_facts), comptime_requests: compiler_take_rows<SemaComptimeRequest>(comptime_requests), name_references: compiler_take_rows<SemaNameReferenceFact>(name_references), method_input: None, wanted_hooks: false}
     graph: program.registration_graph
-    demand := sema_demand_capture_close(graph)
+    ^demand: sema_demand_capture_close(graph)
     packet.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
     packet.derive_demand = compiler_take_rows<String>(demand.derived)
-    out := body_codec_out()
+    ^out: body_codec_out()
     out.indexed = true
     body_codec_put_semaparallelbody(out, packet)
     entry: module_text(graph.module_table, graph.entry_module_identity)
@@ -263,7 +263,7 @@ sema_core_body_capture: fn(program: SemaProgramTables, owner_id: SymbolID, check
     decls: loop id in out.decls -> sema_core_body_capture_key(graph, decl_table_key(graph.decls, graph.symbols, id), entry)
     modules: loop id in out.modules -> "{module_text(graph.module_table, id)}"
     has_delta: type_delta.len() > 0
-    types := [Type]{}
+    ^types: [Type]{}
     loop tid in out.types {
         types.push(if has_delta -> delta_type_syntax(graph.interner, type_delta[0], tid) else -> type_syntax(graph.interner, tid))
     }
@@ -301,20 +301,20 @@ sema_core_body_builtin_name: fn(key: String, holder: String) -> String? Never! {
 // since; the record is the last capture's, the check the library keeps.
 // Each table entry's offsets are written once the key and the record are.
 sema_core_bodies_bytes: fn(bodies: ^^[SemaCoreBody], context: String) -> [U8] Never! {
-    sorted := bodies.move()
+    ^sorted: bodies.move()
     loop index in 0..<sorted.len() -> sorted[index].ordinal = index
     sorted.sort_by(fn(left: SemaCoreBody, right: SemaCoreBody) { if left.key == right.key -> left.ordinal <=> right.ordinal else -> left.key <=> right.key })
-    kept := 0
+    ^kept: 0
     loop index in 0..<sorted.len() {
         if !sema_core_bodies_recaptured(sorted, index) -> kept += 1
     }
-    out := body_codec_out()
+    ^out: body_codec_out()
     body_codec_put_string(out, SEMA_CORE_BODIES_HEADER)
     body_codec_put_string(out, context)
     body_codec_put_count(out, kept)
     table: out.bytes.len()
     loop _ in 0..<kept * SEMA_CORE_BODIES_ENTRY_BYTES -> out.bytes.push(U8{0})
-    entry := table
+    ^entry: table
     loop index in 0..<sorted.len() {
         if sema_core_bodies_recaptured(sorted, index) -> next
         sema_core_bodies_put_offset(out, entry)
@@ -359,7 +359,7 @@ sema_core_bodies_put_keys: fn(out: ^BodyCodecOut, keys: [String]) Never! {
 // The header of the bodies file `bytes`; None when it is not a bodies file
 // of this form or its table runs past its end.
 sema_core_bodies_head: fn(bytes: [U8]) -> SemaCoreBodiesHead? Never! {
-    input := BodyCodecIn{at: 0, end: bytes.len(), failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
+    ^input: BodyCodecIn{at: 0, end: bytes.len(), failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
     if body_codec_get_string(bytes, input) != SEMA_CORE_BODIES_HEADER -> return None
     context: body_codec_get_string(bytes, input)
     count: body_codec_get_count(bytes, input, SEMA_CORE_BODIES_ENTRY_BYTES)
@@ -380,14 +380,14 @@ sema_core_bodies_read: fn(bytes: ^^[U8]) -> SemaCoreBodies? Never! {
 // last record ending the file. None when nothing is.
 sema_core_bodies_problem: fn(bytes: [U8]) -> String? Never! {
     head: sema_core_bodies_head(bytes) ?? return Val("its header doesn't read")
-    previous := ""
-    expected := head.table + head.count * SEMA_CORE_BODIES_ENTRY_BYTES
+    ^previous: ""
+    ^expected: head.table + head.count * SEMA_CORE_BODIES_ENTRY_BYTES
     loop position in 0..<head.count {
         at: sema_core_bodies_key_at(bytes, head, position)
         if at != expected {
             return Val("the key of record {position} starts at byte {at}, not at byte {expected}, where the one before it ends")
         }
-        input := sema_core_bodies_record(bytes, at)
+        ^input: sema_core_bodies_record(bytes, at)
         key: body_codec_get_string(bytes, input)
         if input.failed -> return Val("the key of record {position} is cut short or malformed")
         if position > 0 && !(previous < key) {
@@ -401,7 +401,7 @@ sema_core_bodies_problem: fn(bytes: [U8]) -> String? Never! {
         if at != expected {
             return Val("record {position} starts at byte {at}, not at byte {expected}, where the one before it ends")
         }
-        input := sema_core_bodies_record(bytes, at)
+        ^input: sema_core_bodies_record(bytes, at)
         // Its keys' three lists, its packet's strings, and its types.
         loop _ in 0..<4 -> _: sema_core_bodies_keys(bytes, input)
         _: body_codec_get_list_type(bytes, input)
@@ -427,7 +427,7 @@ sema_core_bodies_offset: fn(bytes: [U8], head: SemaCoreBodiesHead, position: Int
 
 // The table offset at byte `at`.
 sema_core_bodies_word: fn(bytes: [U8], at: Int) -> Int Never! {
-    offset := 0
+    ^offset: 0
     loop byte in 0..<SEMA_CORE_BODIES_OFFSET_BYTES -> offset |= Int{bytes[at + byte]} << (8 * byte)
     offset
 }
@@ -453,9 +453,9 @@ sema_core_bodies_keys: fn(bytes: [U8], input: ^BodyCodecIn) -> [String] Never! {
 sema_core_bodies_position: fn(bodies: SemaCoreBodies?, key: String, from: Int{0}) -> Int? Never! {
     if bodies == .Val(file) {
         wanted: key.bytes()
-        low := from
-        high := file.head.count
-        step := if from > 0 -> 1 else -> high
+        ^low: from
+        ^high: file.head.count
+        ^step: if from > 0 -> 1 else -> high
         loop step < high - low {
             probe: low + step - 1
             order: sema_core_bodies_key_order(file.bytes, sema_core_bodies_key_at(file.bytes, file.head, probe), wanted)
@@ -487,9 +487,9 @@ sema_core_bodies_position: fn(bodies: SemaCoreBodies?, key: String, from: Int{0}
 // lookup's halving builds no String. The Core library's build read the
 // file back whole (sema_core_bodies_problem), so every key reads.
 sema_core_bodies_key_order: fn(bytes: [U8], at: Int, wanted: [U8]) -> Int Never! {
-    size := 0
-    shift := 0
-    start := at
+    ^size: 0
+    ^shift: 0
+    ^start: at
     loop {
         byte: Int{bytes[start]}
         start += 1
@@ -511,12 +511,12 @@ sema_core_bodies_key_order: fn(bytes: [U8], at: Int, wanted: [U8]) -> Int Never!
 // position in `bodies`, and each loaded record's key is read from the file
 // once.
 sema_core_bodies_loaded_keys: fn(bodies: SemaCoreBodies?, loaded: [Bool]) -> NameTable Never! {
-    keys := name_table_sized(loaded.len() + 1)
+    ^keys: name_table_sized(loaded.len() + 1)
     if bodies == .Val(file) {
         loop position in 0..<loaded.len() {
             if !loaded[position] || position >= file.head.count -> next
-            input := sema_core_bodies_record(file.bytes, sema_core_bodies_key_at(file.bytes, file.head, position))
-            _ := name_intern(keys, body_codec_get_string(file.bytes, input))
+            ^input: sema_core_bodies_record(file.bytes, sema_core_bodies_key_at(file.bytes, file.head, position))
+            ^_: name_intern(keys, body_codec_get_string(file.bytes, input))
         }
     }
     keys
@@ -574,7 +574,7 @@ sema_core_body_mark_loaded: fn(loaded: ^[Bool], position: Int) Never! {
 sema_core_body_ahead_take: fn(hooks: ^SemaRegistrationHostHooks, owner: SymbolID, type_delta: ^[InternerDelta]) -> SemaParallelBody? Never! {
     if !hooks.core_bodies_ahead.has_key(owner.id) -> return None
     displaced: hooks.core_bodies_ahead.add(owner.id, None) ?? return None
-    row := displaced.move() ?? return None
+    ^row: displaced.move() ?? return None
     hooks.core_bodies_read += row.size
     sema_core_body_mark_loaded(hooks.core_bodies_loaded, row.position)
     loop row.type_delta.len() > 0 {
@@ -625,7 +625,9 @@ sema_core_body_read: fn(bodies: SemaCoreBodies?, records: SemaCoreBodiesRecords?
 // once: a function a later Core demand wave checks again loads again.
 sema_core_bodies_note_unread: fn(unread: ^[String], row: ^^String) Never! {
     loop held in unread {
-        if held == row -> return
+        if held == row {
+            return
+        }
     }
     unread.push(row.move())
 }
@@ -639,7 +641,7 @@ sema_core_bodies_note_unread: fn(unread: ^[String], row: ^^String) Never! {
 // (sema_core_bodies_problem), so a record that does not read is jet's own
 // defect, which the driver reports (JetDriver Pipeline.jet).
 sema_core_bodies_unread: fn(graph: SemaRegistrationGraph, host_hooks: SemaHostHookAccess?) -> [String] {
-    rows := [String]{}
+    ^rows: [String]{}
     loop module_row in graph.modules {
         if module_row.derive_unread > 0 {
             rows.push("{module_row.derive_unread} derive expansions of the record of module `{module_text(graph.module_table, module_row.module_identity)}` do not read")
@@ -659,7 +661,7 @@ sema_core_bodies_unread: fn(graph: SemaRegistrationGraph, host_hooks: SemaHostHo
 // takes its strings from the list. None when a key does not resolve in this
 // compile, and when the record does not read, which is a row of `unread`.
 sema_core_body_decode: fn(bytes: [U8], at: Int, graph: SemaRegistrationGraph, position: Int, input: ^BodyCodecIn, type_delta: ^[InternerDelta], unread: ^[String]) -> SemaParallelBody? {
-    record := sema_core_bodies_record(bytes, at)
+    ^record: sema_core_bodies_record(bytes, at)
     symbol_keys: sema_core_bodies_keys(bytes, record)
     decl_keys: sema_core_bodies_keys(bytes, record)
     module_keys: sema_core_bodies_keys(bytes, record)
@@ -667,15 +669,15 @@ sema_core_body_decode: fn(bytes: [U8], at: Int, graph: SemaRegistrationGraph, po
         sema_core_bodies_note_unread(unread, "record {position} of the Core bodies file does not read")
         return None
     }
-    symbols := [SymbolID]{}
+    ^symbols: [SymbolID]{}
     loop symbol_key in symbol_keys {
         symbols.push(symbol_find(graph.symbols, symbol_key) ?? symbol_find(graph.symbols, sema_core_body_builtin_key(graph, symbol_key) ?? return None) ?? return None)
     }
-    decls := [DeclID]{}
+    ^decls: [DeclID]{}
     loop decl_key in decl_keys {
         decls.push(decl_table_find(graph.decls, graph.symbols, decl_key) ?? decl_table_find(graph.decls, graph.symbols, sema_core_body_builtin_key(graph, decl_key) ?? return None) ?? return None)
     }
-    modules := [ModuleID]{}
+    ^modules: [ModuleID]{}
     loop module_key in module_keys {
         modules.push(module_find(graph.module_table, module_key) ?? return None)
     }
@@ -690,13 +692,11 @@ sema_core_body_decode: fn(bytes: [U8], at: Int, graph: SemaRegistrationGraph, po
         sema_core_bodies_note_unread(unread, "record {position} of the Core bodies file does not read")
         return None
     }
-    resolved_types := [TypeID]{}
-    local_delta := [InternerDelta]{}
+    ^resolved_types: [TypeID]{}
+    ^local_delta: [InternerDelta]{}
     loop ty in type_list {
         found: type_find_syntax(graph.interner, ty)
-        if found.id != 0 {
-            resolved_types.push(found)
-        } else {
+        if found.id != 0 -> resolved_types.push(found) else {
             if local_delta.len() == 0 -> local_delta.push(interner_fork_delta(graph.interner))
             resolved_types.push(delta_type_intern_syntax(graph.interner, local_delta[0], ty))
         }
@@ -795,7 +795,7 @@ sema_core_bodies_ahead: fn(graph: SemaRegistrationGraph, wanted: ^^[SemaCoreBodi
         return
     }
     if access == .Callbacks(hooks) {
-        sorted := wanted.move()
+        ^sorted: wanted.move()
         // In key order, the bodies file's record order.
         sorted.sort_by(fn(left: SemaCoreBodiesAheadKey, right: SemaCoreBodiesAheadKey) { left.key <=> right.key })
         permit: hooks.guard_edit()
@@ -820,12 +820,12 @@ sema_core_bodies_ahead_drop: fn(host_hooks: SemaHostHookAccess?) {
 // `wanted` names twice is found once: its second lookup starts past its
 // record.
 sema_core_bodies_ahead_find: fn(hooks: SemaRegistrationHostHooks, graph: SemaRegistrationGraph, wanted: [SemaCoreBodiesAheadKey]) -> [SemaCoreBodyRecord] {
-    records := [SemaCoreBodyRecord]{}
+    ^records: [SemaCoreBodyRecord]{}
     if hooks.core_bodies == .Val(file) {
         if file.head.context != sema_core_bodies_context(graph) -> return records
         // The keys come in key order, so each lookup starts past the last
         // record found.
-        from := 0
+        ^from: 0
         loop entry in wanted {
             key: entry.key
             if !sema_core_body_module(graph.modules[entry.module_index]) || sema_core_body_stands_in(graph, key) {
@@ -854,7 +854,7 @@ sema_core_bodies_ahead_load: fn(graph: SemaRegistrationGraph, hooks: ^SemaRegist
     if records.len() == 0 {
         return
     }
-    work := 0
+    ^work: 0
     loop record in records -> work += record.size
     if work < SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD {
         return
@@ -862,7 +862,7 @@ sema_core_bodies_ahead_load: fn(graph: SemaRegistrationGraph, hooks: ^SemaRegist
     decoders: compiler_threads_admit(compiler_threads_beside(threads, 1), records.len(), work, SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD, 0, 0)
     held: SEMA_CORE_BODIES_AHEAD_HELD_BYTES * records.len() /% work
     { sender: feed, receiver: taken }: channel<SemaCoreBodyRecord>(capacity: if held < 1 -> 1 else -> held)
-    decoded := [SemaCoreBodyDecoded]{}
+    ^decoded: [SemaCoreBodyDecoded]{}
     sema_core_bodies_ahead_stream(graph, hooks, records.move(), feed.move(), taken.move(), decoders, decoded)
     loop {
         entry: decoded.pop() ?? break
@@ -901,11 +901,11 @@ sema_core_bodies_ahead_stream: fn(graph: SemaRegistrationGraph, hooks: SemaRegis
 // record that does not read is not read ahead: its function's turn reads it
 // again and notes it (sema_core_body_read).
 sema_core_bodies_ahead_feed: fn(hooks: SemaRegistrationHostHooks, found: ^^[SemaCoreBodyRecord], feed: ^^Sender<SemaCoreBodyRecord>) {
-    pending := found.move()
+    ^pending: found.move()
     // Popped from the end, so read in key order.
     pending.reverse()
     loop {
-        record := pending.pop() ?? break
+        ^record: pending.pop() ?? break
         record.bytes = sema_core_bodies_ahead_bytes(hooks, record.at, record.size) ?? next
         feed.send(record.move()) ?? break
     }
@@ -929,14 +929,14 @@ sema_core_bodies_ahead_bytes: fn(hooks: SemaRegistrationHostHooks, at: Int, size
 // function's turn, whose load notes it in the host hooks, which this thread
 // does not hold; the thread's own notes are dropped.
 sema_core_bodies_ahead_decoder: fn(graph: SemaRegistrationGraph, taken: ^^Receiver<SemaCoreBodyRecord>) -> [SemaCoreBodyDecoded] {
-    reader := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
-    decoded := [SemaCoreBodyDecoded]{}
-    unread := [String]{}
+    ^reader: BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
+    ^decoded: [SemaCoreBodyDecoded]{}
+    ^unread: [String]{}
     loop {
-        record := taken.receive() ?? break
+        ^record: taken.receive() ?? break
         bytes: record.bytes.move()
         record.bytes = [U8]{}
-        delta := [InternerDelta]{}
+        ^delta: [InternerDelta]{}
         packet: sema_core_body_decode(bytes, 0, graph, record.position, reader, delta, unread)
         decoded.push(SemaCoreBodyDecoded{record: record.move(), packet: packet.move(), type_delta: delta.move()})
     }
@@ -972,7 +972,7 @@ sema_core_derives_attach: fn(inputs: ^[SemaRegistrationModuleInput], table: Modu
     loop index in 0..<inputs.len() {
         if !sema_core_derive_module(inputs[index]) -> next
         if capture {
-            out := body_codec_out()
+            ^out: body_codec_out()
             out.indexed = true
             inputs[index].derive_memo.capture = Val(out.move())
             next
@@ -981,7 +981,7 @@ sema_core_derives_attach: fn(inputs: ^[SemaRegistrationModuleInput], table: Modu
             permit: shared.guard_edit()
             key: "{SEMA_CORE_DERIVE_KEY}{module_text(table, inputs[index].module_identity)}"
             position: sema_core_bodies_position(permit.value.core_bodies, key) ?? next
-            memo := sema_core_derive_read(permit.value.core_bodies, permit.value.core_bodies_records, table, position, permit.value.core_bodies_read, permit.value.core_bodies_unread) ?? next
+            ^memo: sema_core_derive_read(permit.value.core_bodies, permit.value.core_bodies_records, table, position, permit.value.core_bodies_read, permit.value.core_bodies_unread) ?? next
             inputs[index].derive_memo = memo.move()
         }
     }
@@ -1016,19 +1016,19 @@ sema_core_derive_read: fn(bodies: SemaCoreBodies?, records: SemaCoreBodiesRecord
 // as one with no record does, and the record is a row of `unread`
 // (sema_core_bodies_unread).
 sema_core_derive_decode: fn(bytes: ^^[U8], table: ModuleTable, position: Int, unread: ^[String]) -> SemaDeriveMemo? {
-    record := bytes.move()
-    input := sema_core_bodies_record(record, 0)
+    ^record: bytes.move()
+    ^input: sema_core_bodies_record(record, 0)
     symbol_keys: sema_core_bodies_keys(record, input)
     decl_keys: sema_core_bodies_keys(record, input)
     module_keys: sema_core_bodies_keys(record, input)
-    strings := sema_core_bodies_keys(record, input)
+    ^strings: sema_core_bodies_keys(record, input)
     _: body_codec_get_list_type(record, input)
     size: body_codec_get_count(record, input, 1)
     if input.failed || symbol_keys.len() > 0 || decl_keys.len() > 0 || input.at + size != record.len() {
         sema_core_bodies_note_unread(unread, "the derive record {position} of the Core bodies file does not read")
         return None
     }
-    modules := [ModuleID]{}
+    ^modules: [ModuleID]{}
     loop module_key in module_keys { modules.push(module_find(table, module_key) ?? return None) }
     at: input.at
     memo: sema_derive_memo_read(record, at, modules, strings) ?? {

@@ -1,0 +1,914 @@
+// Compiler-private part of core.grammar: the rule notation read into a
+// RuleTree.
+//
+// The notation is the one ANTLR 4 and Bison share: `name : alternatives ;`,
+// quoted literals in either quote style, character classes, `?` `*` `+`,
+// labels, `# Name` alternatives, `fragment`, `-> skip`, `import Name ;`,
+// `<assoc=right>` and `EOF`, plus `HOLE<slot=Name>`. Every malformed spot is
+// one `GrammarFault` of kind `.Notation`, and reading goes on at the next
+// rule, so one check reports every one.
+use {
+    core.grammar.error.[GrammarFault, GrammarFaults, grammar_fault, grammar_faults]
+    core.grammar.plan.[GrammarClass, GrammarImport, GrammarNode, GrammarNodeKind, GrammarRule, GrammarRuleKind, RuleTree, PROPERTY_ALPHABETIC, PROPERTY_NUMERIC, PROPERTY_WHITE_SPACE]
+    core.grammar.runtime.[code_point_at, code_point_width, push_code_point]
+}
+
+/// The tokens of the notation.
+NoteKind: enum {
+    Name,
+    Colon,
+    Semi,
+    Bar,
+    Open,
+    Close,
+    Question,
+    Star,
+    Plus,
+    LazyStar,
+    LazyPlus,
+    Equals,
+    PlusEquals,
+    Hash,
+    Arrow,
+    Option,
+    Literal,
+    Class,
+    Dot,
+    Comma,
+    End,
+}
+
+/// One notation token: `text` is a name, a literal's decoded text or an
+/// option's `name=value`; `class` is a class token's set.
+NoteToken: struct {
+    kind: NoteKind,
+    text: String,
+    at: Int,
+    end: Int,
+    fold: Bool,
+    class: GrammarClass,
+}
+
+empty_class: fn() -> GrammarClass Never! {
+    GrammarClass{ranges: [Int]{}, properties: [Int]{}, negated: false}
+}
+
+is_name_start: fn(c: Int) -> Bool Never! {
+    c == 95 || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
+}
+
+is_name_char: fn(c: Int) -> Bool Never! { is_name_start(c) || (c >= 48 && c <= 57) }
+
+hex_digit: fn(c: Int) -> Int Never! {
+    if c >= 48 && c <= 57 -> return c - 48
+    if c >= 97 && c <= 102 -> return c - 87
+    if c >= 65 && c <= 70 -> return c - 55
+    return -1
+}
+
+/// Adds the inclusive range `lo..hi` to sorted, disjoint `ranges`, merging
+/// it with every range it touches.
+add_range: fn(ranges: ^[Int], lo: Int, hi: Int) Never! {
+    ^out: [Int]{}
+    ^start: lo
+    ^end: hi
+    ^placed: false
+    ^k: 0
+    loop k < ranges.len() {
+        a: ranges[k]
+        b: ranges[k + 1]
+        if b + 1 < start {
+            out.push(a)
+            out.push(b)
+        } else if end + 1 < a {
+            if !placed {
+                out.push(start)
+                out.push(end)
+                placed = true
+            }
+            out.push(a)
+            out.push(b)
+        } else {
+            if a < start -> start = a
+            if b > end -> end = b
+        }
+        k += 2
+    }
+    if !placed {
+        out.push(start)
+        out.push(end)
+    }
+    ranges = out
+}
+
+/// The property `\p{name}` names, or -1.
+property_named: fn(name: String) -> Int Never! {
+    if name == "L" || name == "Letter" || name == "Alphabetic" -> return PROPERTY_ALPHABETIC
+    if name == "N" || name == "Number" || name == "Numeric" -> return PROPERTY_NUMERIC
+    if name == "White_Space" || name == "Whitespace" -> return PROPERTY_WHITE_SPACE
+    return -1
+}
+
+PROPERTY_FIX: "Use \\p{{L}} (Alphabetic), \\p{{N}} (Numeric) or \\p{{White_Space}}"
+
+/// Reads the notation's tokens. A malformed spot is a fault, and reading
+/// goes on after it.
+NoteLexer: struct {
+    bytes: [U8],
+    i: Int,
+    tokens: [NoteToken],
+    faults: [GrammarFault],
+
+    peek: fn(self, ahead: Int) -> Int Never! {
+        at: self.i + ahead
+        if at >= self.bytes.len() -> return -1
+        Int{self.bytes[at]}
+    }
+
+    fault: fn(^self, at: Int, message: String, fix: String) Never! {
+        self.faults.push(grammar_fault(.Notation, at, message, fix))
+    }
+
+    push: fn(^self, kind: NoteKind, text: String, at: Int) Never! {
+        self.tokens.push(NoteToken{kind: kind, text: text, at: at, end: self.i, fold: false, class: empty_class()})
+    }
+
+    text_between: fn(self, start: Int, end: Int) -> String Never! {
+        String.from_bytes(self.bytes[start..<end]) ?? ""
+    }
+
+    /// Whether the last token is `options`, `tokens` or `channels`: a block
+    /// after one is refused by the parser, as one fault.
+    after_block_word: fn(self) -> Bool Never! {
+        if self.tokens.len() == 0 -> return false
+        last: self.tokens[self.tokens.len() - 1]
+        last.kind == .Name && (last.text == "options" || last.text == "tokens" || last.text == "channels")
+    }
+
+    run: fn(^self) Never! {
+        loop self.i < self.bytes.len() {
+            at: self.i
+            c: self.peek(0)
+            if c == 32 || c == 9 || c == 10 || c == 13 {
+                self.i += 1
+                next
+            }
+            if c == 47 && self.peek(1) == 47 {
+                loop self.i < self.bytes.len() && self.peek(0) != 10 -> self.i += 1
+                next
+            }
+            if c == 47 && self.peek(1) == 42 {
+                self.i += 2
+                ^closed: false
+                loop self.i < self.bytes.len() {
+                    if self.peek(0) == 42 && self.peek(1) == 47 {
+                        self.i += 2
+                        closed = true
+                        break
+                    }
+                    self.i += 1
+                }
+                if !closed {
+                    self.fault(at, "this `/*` comment is never closed", "End the comment with `*/`")
+                }
+                next
+            }
+            if is_name_start(c) {
+                loop is_name_char(self.peek(0)) -> self.i += 1
+                self.push(.Name, self.text_between(at, self.i), at)
+                next
+            }
+            if c == 39 || c == 34 {
+                self.literal(at, c)
+                next
+            }
+            if c == 91 {
+                self.i += 1
+                class: self.class_body(at)
+                self.tokens.push(NoteToken{kind: .Class, text: "", at: at, end: self.i, fold: false, class: class})
+                next
+            }
+            if c == 92 {
+                self.escape_class(at)
+                next
+            }
+            if c == 60 {
+                self.option(at)
+                next
+            }
+            self.i += 1
+            if c == 58 {
+                if self.peek(0) == 58 && self.peek(1) == 61 {
+                    self.i += 2
+                    self.fault(at, "`::=` does not define a rule here", "Write the rule as `name : alternatives ;`")
+                    next
+                }
+                self.push(.Colon, ":", at)
+                next
+            }
+            if c == 59 {
+                self.push(.Semi, ";", at)
+                next
+            }
+            if c == 124 {
+                self.push(.Bar, "|", at)
+                next
+            }
+            if c == 40 {
+                self.push(.Open, "(", at)
+                next
+            }
+            if c == 41 {
+                self.push(.Close, ")", at)
+                next
+            }
+            if c == 63 {
+                self.push(.Question, "?", at)
+                next
+            }
+            if c == 42 {
+                if self.peek(0) == 63 {
+                    self.i += 1
+                    self.push(.LazyStar, "*?", at)
+                } else { self.push(.Star, "*", at) }
+                next
+            }
+            if c == 43 {
+                if self.peek(0) == 61 {
+                    self.i += 1
+                    self.push(.PlusEquals, "+=", at)
+                } else if self.peek(0) == 63 {
+                    self.i += 1
+                    self.push(.LazyPlus, "+?", at)
+                } else { self.push(.Plus, "+", at) }
+                next
+            }
+            if c == 61 {
+                self.push(.Equals, "=", at)
+                next
+            }
+            if c == 35 {
+                self.push(.Hash, "#", at)
+                next
+            }
+            if c == 44 {
+                self.push(.Comma, ",", at)
+                next
+            }
+            if c == 45 && self.peek(0) == 62 {
+                self.i += 1
+                self.push(.Arrow, "->", at)
+                next
+            }
+            if c == 46 {
+                if self.peek(0) == 46 {
+                    self.i += 1
+                    self.fault(at, "`..` ranges are not part of the notation", "Write the range as a class, as in `[a-z]`")
+                    next
+                }
+                self.push(.Dot, ".", at)
+                next
+            }
+            if c == 123 {
+                // An action `{…}`, or the block of `options {…}`: skip to
+                // its closing brace so one fault covers it.
+                ^depth: 1
+                loop self.i < self.bytes.len() && depth > 0 {
+                    d: self.peek(0)
+                    if d == 123 -> depth += 1
+                    if d == 125 -> depth -= 1
+                    self.i += 1
+                }
+                if self.peek(0) == 63 {
+                    self.i += 1
+                    self.fault(at, "semantic predicates `{{…}}?` are not supported", "Decide with the grammar itself, or check the parsed tree")
+                } else if !self.after_block_word() {
+                    self.fault(at, "actions `{{…}}` are not supported: `{{` opens a hole in a checked body", "Use code over the parsed tree, or a GrammarSink; write a literal brace as '{{{{'")
+                }
+                next
+            }
+            if c == 126 {
+                self.fault(at, "`~` negation is not part of the notation", "Write a negated class, as in `[^\"\\\\]`")
+                next
+            }
+            if c == 33 || c == 38 {
+                self.fault(at, "PEG predicates `!` and `&` are not supported", "Every choice is decided by lookahead; factor the rules instead")
+                next
+            }
+            if c == 37 {
+                self.fault(at, "`%` separators are not supported", "Spell a separated list as `items+=x (',' items+=x)*`")
+                next
+            }
+            if c >= 128 {
+                width: code_point_width(c)
+                self.i = at + width
+                self.fault(at, "`{self.text_between(at, self.i)}` is not part of the notation", "Quote it as a literal, as in '{self.text_between(at, self.i)}'")
+                next
+            }
+            self.fault(at, "`{self.text_between(at, self.i)}` is not part of the notation", "Quote it as a literal, as in '{self.text_between(at, self.i)}'")
+        }
+        self.push(.End, "", self.i)
+    }
+
+    /// A literal whose opening quote `quote` is at `at`.
+    literal: fn(^self, at: Int, quote: Int) Never! {
+        self.i += 1
+        ^out: [U8]{}
+        ^closed: false
+        ^broken: false
+        loop self.i < self.bytes.len() {
+            c: self.peek(0)
+            if c == quote {
+                self.i += 1
+                closed = true
+                break
+            }
+            if c == 10 -> break
+            if c == 92 {
+                escaped: self.literal_escape()
+                if escaped >= 0 -> push_code_point(out, escaped) else -> broken = true
+                next
+            }
+            out.push(self.bytes[self.i])
+            self.i += 1
+        }
+        if !closed {
+            self.fault(at, "this literal is never closed", "End it with the quote it starts with, on the same line")
+            return
+        }
+        ^fold: false
+        if self.peek(0) == 105 && !is_name_char(self.peek(1)) {
+            self.i += 1
+            fold = true
+        }
+        if broken {
+            return
+        }
+        if out.len() == 0 {
+            self.fault(at, "an empty literal matches nothing", "Drop it, or make the element optional with `?`")
+            return
+        }
+        text: String.from_bytes(out) ?? ""
+        self.tokens.push(NoteToken{kind: .Literal, text: text, at: at, end: self.i, fold: fold, class: empty_class()})
+    }
+
+    /// The code point of the escape at the `\`, or -1 after a fault.
+    literal_escape: fn(^self) -> Int Never! {
+        at: self.i
+        self.i += 1
+        c: self.peek(0)
+        if c < 0 {
+            self.fault(at, "a `\\` at the end escapes nothing", "Write `\\\\` for a backslash")
+            return -1
+        }
+        self.i += 1
+        if c == 110 -> return 10
+        if c == 114 -> return 13
+        if c == 116 -> return 9
+        if c == 92 || c == 39 || c == 34 -> return c
+        if c == 117 -> return self.code_point_escape(at)
+        self.i = at + 1 + code_point_width(c)
+        self.fault(at, "`\\{self.text_between(at + 1, self.i)}` is not an escape the notation knows", "Use \\n, \\r, \\t, \\\\, \\', \\\" or \\u{{…}}")
+        return -1
+    }
+
+    /// The `{…}` of a `\u{…}` escape that starts at `at`; the `u` is read.
+    code_point_escape: fn(^self, at: Int) -> Int Never! {
+        if self.peek(0) != 123 {
+            self.fault(at, "`\\u` needs braces, as in `\\u{{41}}`", "Write the code point in hexadecimal inside braces")
+            return -1
+        }
+        self.i += 1
+        ^value: 0
+        ^digits: 0
+        loop self.peek(0) != 125 {
+            h: hex_digit(self.peek(0))
+            if h < 0 || digits == 6 {
+                self.fault(at, "`\\u{{…}}` needs one to six hexadecimal digits closed by `}}`", "Write the code point in hexadecimal, as in `\\u{{1F600}}`")
+                return -1
+            }
+            value = value * 16 + h
+            digits += 1
+            self.i += 1
+        }
+        self.i += 1
+        if digits == 0 || value > 1114111 || (value >= 55296 && value <= 57343) {
+            self.fault(at, "`\\u{{…}}` names no Unicode scalar value", "Write a code point from 0 to 10FFFF that is not a surrogate")
+            return -1
+        }
+        value
+    }
+
+    /// `\p{…}` or `\P{…}` outside a class.
+    escape_class: fn(^self, at: Int) Never! {
+        letter: self.peek(1)
+        if letter != 112 && letter != 80 {
+            self.i += 1
+            if self.i < self.bytes.len() -> self.i += code_point_width(self.peek(0))
+            self.fault(at, "`{self.text_between(at, self.i)}` is not part of the notation", "Escapes belong inside a literal or a class; only `\\p{{…}}` stands alone")
+            return
+        }
+        self.i += 2
+        property: self.property_name(at)
+        if property < 0 {
+            return
+        }
+        ^class: empty_class()
+        class.properties.push(property)
+        class.negated = letter == 80
+        self.tokens.push(NoteToken{kind: .Class, text: "", at: at, end: self.i, fold: false, class: class})
+    }
+
+    /// The property of the `{name}` after `\p`, or -1 after a fault.
+    property_name: fn(^self, at: Int) -> Int Never! {
+        if self.peek(0) != 123 {
+            self.fault(at, "`\\p` needs a property name in braces", PROPERTY_FIX)
+            return -1
+        }
+        self.i += 1
+        start: self.i
+        loop is_name_char(self.peek(0)) -> self.i += 1
+        name: self.text_between(start, self.i)
+        if self.peek(0) != 125 {
+            self.fault(at, "the property name is never closed by `}}`", PROPERTY_FIX)
+            return -1
+        }
+        self.i += 1
+        property: property_named(name)
+        if property < 0 {
+            self.fault(at, "the Unicode property `{name}` is not supported", PROPERTY_FIX)
+        }
+        property
+    }
+
+    /// The body of a class after its `[`.
+    class_body: fn(^self, at: Int) -> GrammarClass Never! {
+        ^class: empty_class()
+        if self.peek(0) == 94 {
+            self.i += 1
+            class.negated = true
+        }
+        ^members: 0
+        loop {
+            c: self.peek(0)
+            if c < 0 || c == 10 {
+                self.fault(at, "this class is never closed by `]`", "End the class with `]`; write `\\]` for a `]` inside it")
+                return class
+            }
+            if c == 93 {
+                self.i += 1
+                break
+            }
+            item_at: self.i
+            lo: self.class_char(at)
+            if lo == -1 -> next
+            members += 1
+            if lo < -1 {
+                class.properties.push(-lo - 2)
+                next
+            }
+            if self.peek(0) == 45 && self.peek(1) != 93 && self.peek(1) >= 0 {
+                self.i += 1
+                hi: self.class_char(at)
+                if hi == -1 -> next
+                if hi < -1 {
+                    self.fault(item_at, "a range ends at a code point, not a property", "Write the property as its own member of the class")
+                    next
+                }
+                if hi < lo {
+                    self.fault(item_at, "this range runs backward", "Write the smaller end first")
+                    next
+                }
+                add_range(class.ranges, lo, hi)
+            } else { add_range(class.ranges, lo, lo) }
+        }
+        if members == 0 && !class.negated {
+            self.fault(at, "an empty class matches nothing", "List the members, as in `[a-z]`")
+        }
+        class
+    }
+
+    /// One class member: a code point (>= 0), a property `-(property + 2)`,
+    /// or -1 after a fault.
+    class_char: fn(^self, class_at: Int) -> Int Never! {
+        at: self.i
+        c: self.peek(0)
+        if c != 92 {
+            cp: code_point_at(self.bytes, self.i)
+            self.i += code_point_width(c)
+            return cp
+        }
+        e: self.peek(1)
+        if e < 0 {
+            self.i += 1
+            return -1
+        }
+        self.i += 2
+        if e == 110 -> return 10
+        if e == 114 -> return 13
+        if e == 116 -> return 9
+        if e == 117 -> return self.code_point_escape(at)
+        if e == 112 {
+            property: self.property_name(at)
+            if property < 0 -> return -1
+            return -(property + 2)
+        }
+        if e == 80 {
+            self.property_name(at)
+            self.fault(at, "a negated property cannot share a class", "Write `\\P{{…}}` on its own, outside the class")
+            return -1
+        }
+        if e < 128 && !is_name_char(e) -> return e
+        self.i = at + 1 + code_point_width(e)
+        self.fault(at, "`{self.text_between(at, self.i)}` is not an escape a class knows", "Use \\n, \\r, \\t, \\\\, \\], \\-, \\^, \\u{{…}} or \\p{{…}}")
+        return -1
+    }
+
+    /// An element option `<name=value>`.
+    option: fn(^self, at: Int) Never! {
+        self.i += 1
+        start: self.i
+        loop self.i < self.bytes.len() && self.peek(0) != 62 && self.peek(0) != 10 -> self.i += 1
+        if self.peek(0) != 62 {
+            self.fault(at, "this `<` option is never closed by `>`", "Write the option as `<name=value>`, as in `<assoc=right>`")
+            return
+        }
+        raw: self.text_between(start, self.i)
+        self.i += 1
+        parts: raw.split("=").to_list()
+        if parts.len() != 2 || parts[0].trim() == "" || parts[1].trim() == "" {
+            self.fault(at, "`<{raw}>` is not an option", "Write the option as `<name=value>`, as in `<assoc=right>`")
+            return
+        }
+        self.push(.Option, "{parts[0].trim()}={parts[1].trim()}", at)
+    }
+}
+
+/// Builds the rule tree from the tokens. A fault ends the rule it is in;
+/// reading goes on after that rule's `;`. The first `lexed` faults are the
+/// lexer's: a rule with one of them gets no fault of its own, since a
+/// broken token breaks the rule's shape after it.
+NoteParser: struct {
+    tokens: [NoteToken],
+    p: Int,
+    tree: RuleTree,
+    faults: [GrammarFault],
+    lexed: Int,
+    start: Int,
+    failed: Bool,
+    token_rule: Bool,
+
+    kind: fn(self) -> NoteKind Never! { self.tokens[self.p].kind }
+
+    ahead: fn(self, n: Int) -> NoteKind Never! {
+        at: self.p + n
+        if at >= self.tokens.len() -> return .End
+        self.tokens[at].kind
+    }
+
+    at: fn(self) -> Int Never! { self.tokens[self.p].at }
+
+    text: fn(self) -> String Never! { self.tokens[self.p].text.copy() }
+
+    advance: fn(^self) Never! {
+        if self.p < self.tokens.len() - 1 -> self.p += 1
+    }
+
+    fail: fn(^self, at: Int, message: String, fix: String) Never! {
+        if self.failed {
+            return
+        }
+        self.failed = true
+        loop k in 0..<self.lexed {
+            offset: self.faults[k].at.offset
+            if offset >= self.start && offset <= at {
+                return
+            }
+        }
+        self.faults.push(grammar_fault(.Notation, at, message, fix))
+    }
+
+    shown: fn(self) -> String Never! {
+        token: self.tokens[self.p]
+        if token.kind == .End -> return "the end of the grammar"
+        if token.kind == .Literal -> return "the literal '{token.text}'"
+        if token.kind == .Class -> return "a class"
+        if token.kind == .Option -> return "`<{token.text}>`"
+        "`{token.text}`"
+    }
+
+    node: fn(^self, kind: GrammarNodeKind, at: Int, text: String) -> Int Never! {
+        self.tree.nodes.push(GrammarNode{kind: kind, at: at, text: text, children: [Int]{}, label: "", append: false, fold: false, lazy: false, right: false, class: -1, rule: -1, token: -1})
+        self.tree.nodes.len() - 1
+    }
+
+    /// Skips past the `;` that ends the rule a fault is in.
+    recover: fn(^self) Never! {
+        loop self.kind() != .End && self.kind() != .Semi -> self.advance()
+        if self.kind() == .Semi -> self.advance()
+        self.failed = false
+    }
+
+    run: fn(^self) Never! {
+        loop self.kind() != .End {
+            self.start = self.at()
+            if self.kind() != .Name {
+                self.fail(self.at(), "expected a rule name, found {self.shown()}", "Start each rule with its name, as in `name : alternatives ;`")
+            } else {
+                word: self.text()
+                if word == {
+                    "import" -> self.import()
+                    "options" | "tokens" | "channels" -> self.refuse_block(word)
+                    "mode" -> {
+                        self.fail(self.at(), "lexer modes are not supported", "Tokens are lexed by context: only the tokens viable at each spot are tried, so no mode is needed")
+                    }
+                    "grammar" | "lexer" | "parser" -> {
+                        self.fail(self.at(), "a `{word}` header is not part of a grammar literal", "Drop the header: the binding's name names the grammar")
+                    }
+                    else -> self.rule()
+                }
+            }
+            if self.failed -> self.recover()
+        }
+    }
+
+    /// `options {…}` and its kin: the lexer drops the block itself, so the
+    /// fault ends nothing else.
+    refuse_block: fn(^self, word: String) Never! {
+        self.faults.push(grammar_fault(.Notation, self.at(), "`{word} {{…}}` is not supported", "Drop the block: a grammar literal takes no options, and its tokens are its token rules"))
+        self.advance()
+    }
+
+    import: fn(^self) Never! {
+        self.advance()
+        loop {
+            if self.kind() != .Name {
+                self.fail(self.at(), "expected the name of a grammar to import, found {self.shown()}", "Write `import Name ;` with the binding name of another grammar in this module")
+                return
+            }
+            self.tree.imports.push(GrammarImport{name: self.text(), at: self.at()})
+            self.advance()
+            if self.kind() != .Comma -> break
+            self.advance()
+        }
+        if self.kind() != .Semi {
+            self.fail(self.at(), "expected `;` after the import, found {self.shown()}", "End the import with `;`")
+            return
+        }
+        self.advance()
+    }
+
+    rule: fn(^self) Never! {
+        ^fragment: false
+        if self.text() == "fragment" && self.ahead(1) == .Name {
+            fragment = true
+            self.advance()
+        }
+        at: self.at()
+        name: self.text()
+        token: first_letter_upper(name)
+        if fragment && !token {
+            self.fail(at, "`fragment` marks a token helper, but `{name}` is a parser rule", "Drop `fragment`, or name the helper in ALL_CAPS")
+            return
+        }
+        self.advance()
+        if self.kind() != .Colon {
+            self.fail(self.at(), "expected `:` after the rule name `{name}`, found {self.shown()}", "Write the rule as `{name} : alternatives ;`")
+            return
+        }
+        self.advance()
+        self.token_rule = token
+        body: self.alternatives()
+        if self.failed {
+            return
+        }
+        ^skip: false
+        if self.kind() == .Arrow {
+            self.advance()
+            if self.kind() != .Name || self.text() != "skip" {
+                self.fail(self.at(), "only `-> skip` may follow a rule's alternatives", "Write `-> skip` to drop the token between parts of parser rules")
+                return
+            }
+            if !token {
+                self.fail(self.at(), "`-> skip` belongs on token rules, but `{name}` is a parser rule", "Move the text it skips into an ALL_CAPS token rule")
+                return
+            }
+            skip = true
+            self.advance()
+        }
+        if self.kind() != .Semi {
+            self.fail(self.at(), "expected `;` at the end of the rule `{name}`, found {self.shown()}", "End each rule with `;`")
+            return
+        }
+        self.advance()
+        kind: if fragment -> GrammarRuleKind.Fragment else if token -> GrammarRuleKind.Token else -> GrammarRuleKind.Parser
+        self.tree.rules.push(GrammarRule{name: name, kind: kind, skip: skip, body: body, at: at, source: ""})
+    }
+
+    alternatives: fn(^self) -> Int Never! {
+        choice: self.node(.Choice, self.at(), "")
+        loop {
+            alt: self.alternative()
+            if self.failed -> return choice
+            self.tree.nodes[choice].children.push(alt)
+            if self.kind() != .Bar -> break
+            self.advance()
+        }
+        choice
+    }
+
+    alternative: fn(^self) -> Int Never! {
+        alt: self.node(.Alt, self.at(), "")
+        if self.kind() == .Option {
+            option: self.text()
+            if option == "assoc=right" -> self.tree.nodes[alt].right = true else if option != "assoc=left" {
+                self.fail(self.at(), "`<{option}>` is not an option an alternative takes", "Only `<assoc=right>` may start an alternative")
+                return alt
+            }
+            if self.token_rule {
+                self.fail(self.at(), "`<{option}>` belongs on parser rules", "Associativity orders operators; drop it from the token rule")
+                return alt
+            }
+            self.advance()
+        }
+        loop self.starts_element() {
+            element: self.element()
+            if self.failed -> return alt
+            self.tree.nodes[alt].children.push(element)
+        }
+        if self.kind() == .Hash {
+            self.advance()
+            if self.kind() != .Name {
+                self.fail(self.at(), "expected the alternative's name after `#`, found {self.shown()}", "Name the alternative in PascalCase, as in `# Add`")
+                return alt
+            }
+            if self.token_rule {
+                self.fail(self.at(), "`# {self.text()}` names a case of a parser rule's type, but this is a token rule", "Drop the name")
+                return alt
+            }
+            self.tree.nodes[alt].text = self.text()
+            self.advance()
+        }
+        kind: self.kind()
+        if kind == .Option {
+            self.fail(self.at(), "`<{self.text()}>` can only start an alternative", "Put `<assoc=right>` first in the alternative")
+        } else if kind != .Bar && kind != .Semi && kind != .Close && kind != .Arrow {
+            self.fail(self.at(), "expected an element, `|`, `)` or `;`, found {self.shown()}", "Check the rule against `name : alternatives ;`")
+        }
+        alt
+    }
+
+    starts_element: fn(self) -> Bool Never! {
+        kind: self.kind()
+        kind == .Name || kind == .Literal || kind == .Class || kind == .Dot || kind == .Open
+    }
+
+    element: fn(^self) -> Int Never! {
+        ^label: ""
+        ^append: false
+        ^label_at: 0
+        if self.kind() == .Name && (self.ahead(1) == .Equals || self.ahead(1) == .PlusEquals) {
+            label_at = self.at()
+            label = self.text()
+            append = self.ahead(1) == .PlusEquals
+            if self.token_rule {
+                self.fail(label_at, "the label `{label}` captures a field, but token rules have no fields", "Drop the label; label the token where a parser rule uses it")
+                return -1
+            }
+            self.advance()
+            self.advance()
+        }
+        atom: self.atom()
+        if self.failed -> return atom
+        if label != "" {
+            self.tree.nodes[atom].label = label
+            self.tree.nodes[atom].append = append
+        }
+        self.suffixed(atom)
+    }
+
+    atom: fn(^self) -> Int Never! {
+        at: self.at()
+        kind: self.kind()
+        if kind == .Name {
+            name: self.text()
+            self.advance()
+            if name == "EOF" -> return self.node(.End, at, "")
+            if name == "HOLE" -> return self.hole(at)
+            if self.token_rule && !first_letter_upper(name) {
+                self.fail(at, "the token rule refers to the parser rule `{name}`", "A token rule may use only literals, classes and other token rules")
+                return -1
+            }
+            return self.node(.Ref, at, name)
+        }
+        if kind == .Literal {
+            token: self.tokens[self.p]
+            self.advance()
+            id: self.node(.Literal, at, token.text)
+            self.tree.nodes[id].fold = token.fold
+            return id
+        }
+        if kind == .Class {
+            token: self.tokens[self.p]
+            self.advance()
+            id: self.node(.Class, at, "")
+            self.tree.classes.push(token.class)
+            self.tree.nodes[id].class = self.tree.classes.len() - 1
+            return id
+        }
+        if kind == .Dot {
+            self.advance()
+            if !self.token_rule {
+                self.fail(at, "`.` matches any character, so it belongs in token rules", "Write a token rule for the text, and use it here")
+                return -1
+            }
+            return self.node(.Any, at, "")
+        }
+        if kind == .Open {
+            self.advance()
+            group: self.alternatives()
+            if self.failed -> return group
+            if self.kind() != .Close {
+                self.fail(self.at(), "expected `)` to close the group, found {self.shown()}", "Close the group that starts here with `)`")
+                return group
+            }
+            self.advance()
+            return group
+        }
+        self.fail(at, "expected an element, found {self.shown()}", "An element is a rule name, a literal, a class, `.` or a group `( … )`")
+        return -1
+    }
+
+    hole: fn(^self, at: Int) -> Int Never! {
+        if self.token_rule {
+            self.fail(at, "a `HOLE` sits between tokens, so it belongs in parser rules", "Move the hole into the parser rule that uses this token")
+            return -1
+        }
+        option: self.text()
+        if self.kind() != .Option || !option.starts_with("slot=") {
+            self.fail(at, "`HOLE` needs its slot, as in `HOLE<slot=Value>`", "Name the kind of position the hole fills: `HOLE<slot=Name>`")
+            return -1
+        }
+        bytes: option.bytes()
+        slot: String.from_bytes(bytes[5..<bytes.len()]) ?? ""
+        self.advance()
+        self.node(.Hole, at, slot)
+    }
+
+    suffixed: fn(^self, atom: Int) -> Int Never! {
+        at: self.at()
+        token: self.kind()
+        if !is_suffix(token) -> return atom
+        kind: if token == .Question -> GrammarNodeKind.Optional else if token == .Star || token == .LazyStar -> GrammarNodeKind.Star else -> GrammarNodeKind.Plus
+        lazy: token == .LazyStar || token == .LazyPlus
+        if lazy && !self.token_rule {
+            self.fail(at, "non-greedy repeats belong in token rules", "Parser rules decide by lookahead; drop the `?` after the repeat")
+            return atom
+        }
+        self.advance()
+        id: self.node(kind, at, "")
+        self.tree.nodes[id].children.push(atom)
+        self.tree.nodes[id].lazy = lazy
+        if is_suffix(self.kind()) {
+            self.fail(self.at(), "an element takes one suffix", "Group the element to repeat it, as in `(x?)*`")
+        }
+        id
+    }
+}
+
+is_suffix: fn(kind: NoteKind) -> Bool Never! {
+    kind == .Question || kind == .Star || kind == .LazyStar || kind == .Plus || kind == .LazyPlus
+}
+
+/// Whether the first letter of `name` (after any `_`) is uppercase: a token
+/// rule's name.
+first_letter_upper: fn(name: String) -> Bool Never! {
+    loop b in name.bytes() {
+        c: Int{b}
+        if c == 95 -> next
+        return c >= 65 && c <= 90
+    }
+    false
+}
+
+/// The notation's tokens and the faults met reading them.
+NoteTokens: struct {
+    tokens: [NoteToken],
+    faults: [GrammarFault],
+}
+
+notation_tokens: fn(text: String) -> NoteTokens Never! {
+    ^lexer: NoteLexer{bytes: text.bytes(), i: 0, tokens: [NoteToken]{}, faults: [GrammarFault]{}}
+    lexer.run()
+    NoteTokens{tokens: lexer.tokens, faults: lexer.faults}
+}
+
+/// Reads `text` as rule notation: its tree, or every fault in it.
+read_notation: fn(text: String) -> RuleTree GrammarFaults! {
+    lexed: notation_tokens(text)
+    tree: RuleTree{rules: [GrammarRule]{}, nodes: [GrammarNode]{}, classes: [GrammarClass]{}, imports: [GrammarImport]{}}
+    ^parser: NoteParser{tokens: lexed.tokens, p: 0, tree: tree, faults: lexed.faults, lexed: lexed.faults.len(), start: 0, failed: false, token_rule: false}
+    parser.run()
+    if parser.faults.len() > 0 -> return Err(grammar_faults(parser.faults))
+    Ok(parser.tree)
+}

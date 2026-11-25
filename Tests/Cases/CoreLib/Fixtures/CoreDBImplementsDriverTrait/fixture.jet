@@ -9,7 +9,7 @@ count_people: fn<T: Driver>(conn: T) -> Int DBError! {
 }
 
 run: fn() {
-    conn := db.open_memory()
+    ^conn: db.open_memory()
     policy: db.policy("person", "true") ?? panic("policy")
     scoped: conn.with_policy(policy, "owner")
     _: db.migrate(

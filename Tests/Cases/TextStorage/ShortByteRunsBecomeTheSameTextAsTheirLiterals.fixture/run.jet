@@ -28,9 +28,9 @@ fill: fn(token: ^[U8], bytes: [U8]) {
 }
 
 run: fn() {
-    counts := [String:Int]{}
-    token := [U8]{}
-    mismatches := 0
+    ^counts: [String:Int]{}
+    ^token: [U8]{}
+    ^mismatches: 0
     passes: 3
     loop _ in 0..<passes {
         loop word in WORDS {
@@ -49,7 +49,7 @@ run: fn() {
     }
     // Not UTF-8: a lone 0xff after ASCII, a lead byte with no continuation,
     // and a continuation byte with no lead, under and over 8 bytes.
-    bad := [U8]{}
+    ^bad: [U8]{}
     fill(bad, "abc".bytes())
     bad.push(U8{255})
     first: String.from_bytes(bad) ?? "error"

@@ -29,7 +29,7 @@ package_key_byte_order: fn(names: [String]) -> [Int] Never! {
 // each as its path and the SHA-256 of its exact bytes, then the manifest's
 // SHA-256 (empty when the package has no manifest).
 package_key_source_digest: fn(files: [PackageKeySourceFile], manifest: String?) -> String Never! {
-    fields := [String]{"jet.pkg-source/v1", "files", "{files.len()}"}
+    ^fields: [String]{"jet.pkg-source/v1", "files", "{files.len()}"}
     paths: loop file in files -> file.relative_path
     loop index in package_key_byte_order(paths) {
         fields.push(files[index].relative_path)
@@ -46,7 +46,7 @@ package_key_source_digest: fn(files: [PackageKeySourceFile], manifest: String?) 
 
 // SHA-256 over the target facts sema reads, sorted by name.
 package_key_target_facts_digest: fn(facts: [PackageKeyTargetFact]) -> String Never! {
-    fields := [String]{"jet.target-facts/v1", "{facts.len()}"}
+    ^fields: [String]{"jet.target-facts/v1", "{facts.len()}"}
     names: loop fact in facts -> fact.name
     loop index in package_key_byte_order(names) {
         fields.push(facts[index].name)
@@ -59,7 +59,7 @@ package_key_target_facts_digest: fn(facts: [PackageKeyTargetFact]) -> String Nev
 // facts, package identity, source digest, and the interface digest of each
 // direct dependency, sorted by dependency identity.
 package_key_check_key: fn(compiler_identity: String, target_facts_digest: String, package_identity: String, source_digest: String, dependencies: [PackageKeyDependency]) -> String Never! {
-    fields := [String]{"jet.pkg-check-key/v1", compiler_identity, target_facts_digest, package_identity, source_digest, "{dependencies.len()}"}
+    ^fields: [String]{"jet.pkg-check-key/v1", compiler_identity, target_facts_digest, package_identity, source_digest, "{dependencies.len()}"}
     identities: loop dependency in dependencies -> dependency.identity
     loop index in package_key_byte_order(identities) {
         fields.push(dependencies[index].identity)

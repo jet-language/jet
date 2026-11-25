@@ -13,7 +13,7 @@ process_execution_flags_add: fn(child: I64, flag: I64) {
 process_execution_first_error: fn(child: I64, operation: I64, path: I64, cause: I64) {
     sync_mutex_lock(child)
     if (fd_word(child, I64{56}) == I64{0}) {
-        _ := host_io_other_take(operation, process_optional_text_clone(path), cause, wrapping(child + I64{56}))
+        ^_: host_io_other_take(operation, process_optional_text_clone(path), cause, wrapping(child + I64{56}))
     } else { jet_rt_string_drop(cause) }
     sync_mutex_unlock(child)
 }
@@ -37,7 +37,7 @@ process_execution_reap_stopped: fn(child: I64) {
 
 process_execution_await_cleanup: fn(child: I64) {
     loop sync_load(wrapping(child + I64{40})) == (I64{0}) {
-        _ := sync_wait(child + I64{40}, I64{0}, sync_deadline(I64{1000000}))
+        ^_: sync_wait(child + I64{40}, I64{0}, sync_deadline(I64{1000000}))
     }
 }
 
@@ -79,7 +79,7 @@ process_execution_wake_reader: fn(child: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_process_child: fn(child: I64) -> I64 {
-    _ := sync_add(wrapping(child + I64{8}), I64{1})
+    ^_: sync_add(wrapping(child + I64{8}), I64{1})
     child
 }
 
@@ -112,7 +112,7 @@ process_execution_collect_start: fn(child: I64, err: I64) -> Bool {
         sync_mutex_unlock(child)
         return true
     }
-    _ := sync_add(wrapping(child + I64{8}), I64{1})
+    ^_: sync_add(wrapping(child + I64{8}), I64{1})
     fd_put(child, I64{32}, I64{1})
     handle: thread_spawn(rt_process_execution_worker_address(), child)
     if (handle < I64{0}) {
@@ -121,10 +121,10 @@ process_execution_collect_start: fn(child: I64, err: I64) -> Bool {
         process_execution_stop(child)
         process_execution_reap_stopped(child)
         process_execution_release(child)
-        _ := process_execution_error(fd_word(child, I64{24}), HOST_IO_OP_RESOLVE, host_errno_cause(-handle), err)
+        ^_: process_execution_error(fd_word(child, I64{24}), HOST_IO_OP_RESOLVE, host_errno_cause(-handle), err)
         return false
     }
-    _ := thread_detach(handle)
+    ^_: thread_detach(handle)
     sync_mutex_unlock(child)
     true
 }
@@ -133,7 +133,7 @@ process_execution_collect_start: fn(child: I64, err: I64) -> Bool {
 // timeout stops waiting for an EOF a lingering descendant would never send.
 process_execution_drain_stop: fn(native: I64) {
     sync_mutex_lock(native)
-    stream := I64{1}
+    ^stream: I64{1}
     loop stream <= (I64{2}) {
         offset: spawn_stream_offset(native, stream)
         spawn_close(fd_word(native, offset))
@@ -171,7 +171,7 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
             process_execution_wake_reader(child)
             return true
         }
-        kept := count
+        ^kept: count
         if (limit != I64{0}) {
             maximum: fd_word(limit, I64{0})
             remaining: maximum - fd_word(child, I64{96})
@@ -194,7 +194,7 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
     native: process_execution_native(child)
     spec: fd_word(child, I64{24})
     scratch: jet_rt_alloc(I64{8280}, I64{8})
-    stream := I64{1}
+    ^stream: I64{1}
     loop stream <= (I64{2}) {
         number: fd_word(native, spawn_stream_offset(native, stream))
         if (number >= I64{0}) {
@@ -216,11 +216,11 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
     // The child's exit wakes the idle collector through its pidfd (Linux
     // 5.3+); without one the collector polls the exit every millisecond.
     pidfd: host_call(I64{434}, fd_word(native, I64{8}), I64{0}, I64{0})
-    exited := false
-    output_done := false
-    errors_done := false
-    status := I64{0}
-    resource_limit := I64{-1}
+    ^exited: false
+    ^output_done: false
+    ^errors_done: false
+    ^status: I64{0}
+    ^resource_limit: I64{-1}
     loop {
         if !output_done -> output_done = process_execution_capture(child, native, I64{1}, scratch)
         if !errors_done -> errors_done = process_execution_capture(child, native, I64{2}, scratch)
@@ -310,12 +310,12 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
 // timeout and a live resource limit still need their 1 ms check; otherwise
 // the 50 ms timeout only bounds an event that never comes.
 process_execution_idle: fn(child: I64, native: I64, pidfd: I64, exited: Bool, output_done: Bool, errors_done: Bool, fds: I64) {
-    count := I64{0}
+    ^count: I64{0}
     if (!exited && pidfd >= I64{0}) {
         fd_put(fds, I64{0}, pidfd | I64{4294967296})
         count = I64{1}
     }
-    stream := I64{1}
+    ^stream: I64{1}
     loop stream <= (I64{2}) {
         done: if (stream == I64{1}) -> output_done else -> errors_done
         number: fd_word(native, spawn_stream_offset(native, stream))
@@ -327,7 +327,7 @@ process_execution_idle: fn(child: I64, native: I64, pidfd: I64, exited: Bool, ou
     }
     spec: fd_word(child, I64{24})
     periodic: !exited && (pidfd < I64{0} || fd_word(spec, PROCESS_SPEC_TIMEOUT) != I64{0} || fd_word(spec, PROCESS_SPEC_MEMORY_LIMIT) != I64{0} || fd_word(spec, PROCESS_SPEC_OPEN_FILE_LIMIT) != I64{0})
-    _ := host_call(I64{7}, fds, count, if periodic -> I64{1} else -> I64{50})
+    ^_: host_call(I64{7}, fds, count, if periodic -> I64{1} else -> I64{50})
 }
 
 process_execution_wait: fn(child: I64, ok: I64, err: I64) -> I64 {
@@ -348,7 +348,7 @@ process_execution_wait: fn(child: I64, ok: I64, err: I64) -> I64 {
     // (or its cancellation or deadline). An aliased waiter behind it keeps
     // the seed's 10ms scheduler poll on its own slot: under `jet perf run`
     // each of its polls is a `process wait` its timeout ended.
-    lent := false
+    ^lent: false
     if (fd_word(child, I64{64}) == I64{0} && sync_load(wrapping(child + I64{40})) == I64{0}) {
         sync_park_retain(park)
         fd_put(child, I64{64}, park)
@@ -525,7 +525,7 @@ process_execution_stream_bytes: fn(child: I64, stream: I64, maximum: I64, line: 
     native: process_execution_native(child)
     capture: if (stream == I64{1}) -> I64{80} else -> I64{88}
     consumed: if (stream == I64{1}) -> I64{144} else -> I64{152}
-    park := I64{0}
+    ^park: I64{0}
     loop {
         // Read before the capture: the collector appends a stream's last
         // bytes before it marks that stream closed.
@@ -537,8 +537,8 @@ process_execution_stream_bytes: fn(child: I64, stream: I64, maximum: I64, line: 
         data: rt_text_data(text)
         filled: rt_text_len(text)
         at: fd_word(child, consumed)
-        end := at
-        found := false
+        ^end: at
+        ^found: false
         loop end < filled && end - at < maximum {
             // The child mutex holds the capture builder's initialized bytes.
             byte: rt_text_byte(wrapping(data + end))
@@ -588,8 +588,8 @@ process_stdin_write_bytes: fn(stdin: I64, data: I64, length: I64, err: I64) -> I
     if (packed == I64{-9}) { return process_stdin_closed(err) }
     if (packed < I64{0}) { return process_stdin_failure(-packed, err) }
     native: packed & I64{4294967295}
-    offset := I64{0}
-    failure := I64{0}
+    ^offset: I64{0}
+    ^failure: I64{0}
     loop offset < length {
         written: host_call(I64{1}, native, wrapping(data + offset), length - offset)
         if (written == I64{-4}) { next }
@@ -615,7 +615,7 @@ process_stdin_write_bytes: fn(stdin: I64, data: I64, length: I64, err: I64) -> I
     if (packed == I64{-9}) { return process_stdin_closed(err) }
     if (packed < I64{0}) { return process_stdin_failure(-packed, err) }
     native: packed & I64{4294967295}
-    written := host_call(I64{1}, native, data, length)
+    ^written: host_call(I64{1}, native, data, length)
     loop written == (I64{-4}) -> written = host_call(I64{1}, native, data, length)
     spawn_close(native)
     if (written < I64{0}) { return process_stdin_failure(-written, err) }

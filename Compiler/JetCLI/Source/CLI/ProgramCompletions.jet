@@ -21,18 +21,18 @@ jet_cli_program_zsh_bracket: fn(value: String) -> String Never! {
 
 jet_cli_program_zsh_standard: fn(standard: Bool, version: Bool) -> [String] Never! {
     if !standard -> return [String]{}
-    specs := [String]{"    '(-v --verbose){{-v,--verbose}}[print extra detail]'", "    '(-q --quiet){{-q,--quiet}}[suppress normal output]'", "    '--color[control terminal color]:MODE:(auto always never)'"}
+    ^specs: [String]{"    '(-v --verbose){{-v,--verbose}}[print extra detail]'", "    '(-q --quiet){{-q,--quiet}}[suppress normal output]'", "    '--color[control terminal color]:MODE:(auto always never)'"}
     if version -> specs.push("    '--version[show version]'")
     specs
 }
 
 jet_cli_program_zsh_inputs: fn(inputs: [CLIInputSchema]) -> [String] Never! {
-    specs := [String]{}
-    positions := [Int]{}
+    ^specs: [String]{}
+    ^positions: [Int]{}
     loop index in 0..<inputs.len() {
         if inputs[index].positional == None -> next
         positions.push(index)
-        slot := positions.len() - 1
+        ^slot: positions.len() - 1
         loop slot > 0 && (inputs[positions[slot - 1]].positional ?? U16{0}) > (inputs[index].positional ?? U16{0}) {
             positions[slot] = positions[slot - 1]
             slot -= 1
@@ -63,7 +63,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
             if schema.commands.len() == 0 {
                 return Val("# bash completion from JetCommandSchema v{RECORD_VERSION}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {root} -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- {command_name}\n")
             }
-            cases := [String]{}
+            ^cases: [String]{}
             loop command in schema.commands {
                 cases.push("        {jet_cli_program_shell_quote(command.name)}) flags={jet_cli_program_shell_quote(schema.command_completion_words(command).join(" "))} ;;")
             }
@@ -71,7 +71,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
             Val("# bash completion from JetCommandSchema v{RECORD_VERSION}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {root} -- \"$cur\") )\n        return 0\n    fi\n    flags={flags}\n    case \"${{COMP_WORDS[1]}}\" in\n{cases.join("\n")}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {command_name}\n")
         }
         "zsh" -> {
-            specs := jet_cli_program_zsh_standard(schema.standard, schema.version != None)
+            ^specs: jet_cli_program_zsh_standard(schema.standard, schema.version != None)
             loop spec in jet_cli_program_zsh_inputs(schema.inputs) -> specs.push(spec)
             command_name: jet_cli_program_shell_quote(name)
             if schema.commands.len() == 0 {
@@ -79,7 +79,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
             }
             commands: (loop command in schema.commands -> command.name).join(" ")
             specs.push("    '1:command:({commands})'")
-            cases := [String]{}
+            ^cases: [String]{}
             loop command in schema.commands {
                 command_specs: jet_cli_program_zsh_inputs(schema.command_inputs(command))
                 cases.push("        {jet_cli_program_shell_quote(command.name)}) _arguments \\\n{command_specs.join(" \\\n")} ;;")
@@ -87,7 +87,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
             Val("#compdef {command_name}\n# zsh completion from JetCommandSchema v{RECORD_VERSION}\nif (( CURRENT == 2 )); then\n_arguments \\\n{specs.join(" \\\n")}\nelse\n    case $words[2] in\n{cases.join("\n")}\n    esac\nfi\n")
         }
         "fish" -> {
-            out := "# fish completion from JetCommandSchema v{RECORD_VERSION}\n"
+            ^out: "# fish completion from JetCommandSchema v{RECORD_VERSION}\n"
             command_name: jet_cli_program_shell_quote(name)
             condition: if schema.commands.len() == 0 -> "" else -> " -n '__fish_use_subcommand'"
             out = "{out}complete -c {command_name}{condition} -l help -d 'show help'\n"
@@ -119,7 +119,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
                 return Val("# PowerShell completion from JetCommandSchema v{RECORD_VERSION}\nRegister-ArgumentCompleter -Native -CommandName {command_name} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({root}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n")
             }
             flags: (loop word in root_inputs -> jet_cli_program_ps_quote(word)).join(",")
-            command_flags := [String]{}
+            ^command_flags: [String]{}
             loop command in schema.commands {
                 words: (loop word in schema.command_completion_words(command) -> jet_cli_program_ps_quote(word)).join(",")
                 command_flags.push("{jet_cli_program_ps_quote(command.name)} = @({words})")
@@ -133,7 +133,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
 // Unix Path.file_name components: trailing slash/dot disappear, while a
 // trailing parent component has no filename. Backslash is a filename byte.
 jet_cli_program_completion_name: fn(program: String) -> String? Never! {
-    name := ""
+    ^name: ""
     loop component in program.split("/") {
         if component == "" || component == "." -> next
         name = component
@@ -148,9 +148,9 @@ jet_cli_program_completion_name_control: fn(name: String) -> Bool Never! {
 
 // This diagnostic is direct stderr even under --json, like run_completions.
 jet_cli_program_completion_error: fn(program: String, why: String) -> JetCLIPlan Never! {
-    escaped := ""
+    ^escaped: ""
     bytes: program.bytes()
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
         first: Int{bytes[index]}
         width: if {
@@ -159,7 +159,7 @@ jet_cli_program_completion_error: fn(program: String, why: String) -> JetCLIPlan
             first < 240 -> 3
             else -> 4
         }
-        code := if {
+        ^code: if {
             width == 1 -> first
             width == 2 -> first - 192
             width == 3 -> first - 224

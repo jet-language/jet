@@ -33,12 +33,12 @@ view_field_case: fn(parameter: Bool, access: AccessConvention, expected: String)
     view_type: Type.Apply{name: "View", args: [Type]{Type.Named{name: "Int"}}}
     list_type: Type.List{element: Type.Named{name: "Int"}}
     owner_kind: if parameter -> SymbolKind.Parameter else -> SymbolKind.Local
-    context := sema_check_context_init()
+    ^context: sema_check_context_init()
     owner: view_field_symbol(context.arena.tree.symbols, "values", owner_kind, list_type, span)
     selected: view_field_symbol(context.arena.tree.symbols, "selected", SymbolKind.Local, view_type, use_span)
-    scopes := sema_scope_init(module_none())
-    state := sema_ownership_state_init()
-    diagnostics := [Diagnostic]{}
+    ^scopes: sema_scope_init(module_none())
+    ^state: sema_ownership_state_init()
+    ^diagnostics: [Diagnostic]{}
     owner_key: view_field_key("values", owner_kind)
     selected_key: view_field_key("selected", SymbolKind.Local)
     view_field_require(sema_scope_declare_local(scopes, owner, owner_key, false, access, None, false), "owner is declared")
@@ -72,22 +72,22 @@ view_field_case: fn(parameter: Bool, access: AccessConvention, expected: String)
 // direct call and a payload pattern resolve against the registered
 // declarations, so no check without a graph reaches the bodies.
 view_pattern_checked: fn(name: String, source: ^^String) -> SemaGraphResult Never! {
-    parsed := parse_source(source.bytes())
+    ^parsed: parse_source(source.bytes())
     view_field_require(!sema_has_error_since(parsed.diagnostics, 0), "{name} parses: {parsed.diagnostics:Debug}")
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, "view-pattern.main")
     effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
     effects_id: effects.module_identity
     facts: SemaBuildFacts{package_name: "view-pattern", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "view-pattern.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: "view-pattern", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "view-pattern.jet", source_file: "view-pattern.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.move()}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "view-pattern", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("{name}: registration {err}")
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "view-pattern", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("{name}: registration {err}")
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
     // Declaration checking loans the graph to its stage, which returns it.
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("{name}: declaration checking {err}")
-    declared := stage.graph.move()
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("{name}: declaration checking {err}")
+    ^declared: stage.graph.move()
     stage.graph = None
-    registration := declared.move() ?? panic("{name}: the declaration pass lost its registration graph")
+    ^registration: declared.move() ?? panic("{name}: the declaration pass lost its registration graph")
     sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("{name}: finalization {err}")
 }
 
@@ -96,7 +96,7 @@ view_pattern_checked: fn(name: String, source: ^^String) -> SemaGraphResult Neve
 // must preserve the matched owner's return provenance.
 view_pattern_case: fn(name: String, source: ^^String, expected: String) {
     checked: view_pattern_checked(name, source.move())
-    codes := [String]{}
+    ^codes: [String]{}
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR && !codes.contains(diagnostic.code) {
             codes.push(diagnostic.code)
@@ -108,7 +108,7 @@ view_pattern_case: fn(name: String, source: ^^String, expected: String) {
     }
     view_field_require(checked.complete && codes.len() == 0, "{name} checks: {checked.diagnostics:Debug}")
     if name.starts_with("read-payload") {
-        found := false
+        ^found: false
         loop checked_module in checked.modules {
             loop function in checked_module.functions {
                 if function.name != "select" -> next
@@ -163,10 +163,10 @@ view_pattern_reinitialization: fn() {
     // The state hook itself must retain the whole moved ancestor even when a
     // caller has already admitted the descendant assignment.
     span: Span{start: 10, end: 20}
-    locals := symbol_local_keys()
+    ^locals: symbol_local_keys()
     owner: view_field_symbol(locals, "pair", SymbolKind.Local, Type.Named{name: "Pair"}, span)
-    scopes := sema_scope_init(module_none())
-    state := sema_ownership_state_init()
+    ^scopes: sema_scope_init(module_none())
+    ^state: sema_ownership_state_init()
     view_field_require(sema_scope_declare_local(scopes, owner, view_field_key("pair", SymbolKind.Local), true, AccessConvention.Read, None, false), "reinit owner declared")
     base: Expr.Field{base: Expr.Ident{name: "pair", span: span, id: AST_NODE_GENERATED}, member: "inner", span: span, id: AST_NODE_GENERATED}
     place: sema_ownership_place_from_expr_inner(base, scopes) ?? panic("missing ancestor place")

@@ -102,14 +102,14 @@ IROptInlined: struct {
 // else (ir_opt_inline_marked_module).
 ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, inline: IROptInline, report: ^IROptReport) -> IRFunction? Never! {
     limit: if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
-    budget := if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
-    growth := if level >= 2 -> IR_OPT_INLINE_GROWTH_O2 else -> IR_OPT_INLINE_GROWTH_O1
-    grown := ir_opt_size(caller)
-    selected_sites := [Bool]{}
-    any := false
+    ^budget: if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
+    ^growth: if level >= 2 -> IR_OPT_INLINE_GROWTH_O2 else -> IR_OPT_INLINE_GROWTH_O1
+    ^grown: ir_opt_size(caller)
+    ^selected_sites: [Bool]{}
+    ^any: false
     loop at in 0..<caller.op.len() {
-        selected := false
-        reason := ""
+        ^selected: false
+        ^reason: ""
         if inline == .Marked {
             selected = caller.op[at] == .Call && ir_opt_inline_marked(bodies, caller.a[at]) && ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_MARKED) >= 0
             if selected -> reason = "marked #Inline(Always)"
@@ -140,7 +140,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
         selected_sites.push(selected)
     }
     if !any -> return None
-    out := ir_function_new(caller.name, caller.key, caller.symbol, caller.source_file, caller.line)
+    ^out: ir_function_new(caller.name, caller.key, caller.symbol, caller.source_file, caller.line)
     out.inline_always = caller.inline_always
     out.symbol_hash = caller.symbol_hash
     out.cold = caller.cold
@@ -152,7 +152,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     // The rows are shared, not copied: no pass writes them.
     out.call_sites = caller.call_sites
     loop slot in 0..<caller.slot_type.len() {
-        _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+        ^_: ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
         out.slot_site[slot] = caller.slot_site[slot]
         out.slot_formal[slot] = caller.slot_formal[slot]
     }
@@ -163,14 +163,14 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     loop value in caller.scattered -> out.scattered.push(value)
     poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -2
     // The stop point after a quiet site goes (its poll through its If's End).
-    skip_from := -1
-    skip_to := -1
+    ^skip_from: -1
+    ^skip_to: -1
     loop at in 0..<caller.op.len() {
         if at >= skip_from && at <= skip_to -> next
         if selected_sites[at] {
             ir_opt_splice(m, out, caller, at, bodies[caller.a[at]][0])
             report.inlined_calls += 1
-            after := at + 1
+            ^after: at + 1
             loop after < caller.op.len() && caller.op[after] == .Drop -> after += 1
             callee: caller.a[at]
             if ir_opt_stops_any_poll(caller, poll, poll, after) && ir_opt_inline_quiet(m, bodies[callee][0]) && !ir_opt_glue_site(m, caller, bodies[callee][0].key, at) {
@@ -178,7 +178,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
                 skip_to = caller.c[after + 1]
             }
         } else {
-            _ := ir_emit(out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
+            ^_: ir_emit(out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
         }
     }
     ir_opt_compact(out)
@@ -257,8 +257,8 @@ ir_opt_inline_cost: fn(m: IRModule, f: IRFunction) -> Int Never! {
     poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -2
     trap: ir_interned_name(m, IR_STOP_TRAP_KEY) ?? -2
     turn: ir_interned_name(m, IR_STOP_TURN_KEY) ?? -2
-    cost := 0
-    at := 0
+    ^cost: 0
+    ^at: 0
     loop at < f.op.len() {
         if f.op[at] != .Nop && f.op[at] != .End -> cost += 1
         cold: f.op[at] == .If && f.b[at] < 0 && f.c[at] > at + 1 && (f.op[f.c[at] - 1] == .Unreachable || (at > 0 && f.op[at - 1] == .Call && (f.a[at - 1] == poll || f.a[at - 1] == trap || f.a[at - 1] == turn) && f.dst[at - 1] >= 0 && f.a[at] == f.dst[at - 1]))
@@ -300,12 +300,12 @@ ir_opt_inline_marked_module: fn(m: ^IRModule, report: ^IROptReport, threads: Com
     }
     m.marked_inlined = true
     count: m.functions.len()
-    marked := [Bool]{}
+    ^marked: [Bool]{}
     marked.try_reserve(count) ?? ()
-    marked_ids := [Int]{}
-    weights := [Int]{}
+    ^marked_ids: [Int]{}
+    ^weights: [Int]{}
     weights.try_reserve(count) ?? ()
-    total := 0
+    ^total: 0
     loop (id, f) in m.functions {
         marked.push(f.inline_always)
         if f.inline_always -> marked_ids.push(id)
@@ -317,20 +317,20 @@ ir_opt_inline_marked_module: fn(m: ^IRModule, report: ^IROptReport, threads: Com
         return
     }
     // Only marked callees are ever read from `bodies` under IROptInline.Marked.
-    bodies := [[IRFunction]]{}
+    ^bodies: [[IRFunction]]{}
     bodies.try_reserve(count) ?? ()
     loop _ in 0..<count -> bodies.push([IRFunction]{})
     loop id in marked_ids -> bodies[id].push(m.functions[id])
-    view := ir_opt_view(m, [String]{})
-    state := [Int]{}
-    recursive := [Bool]{}
+    ^view: ir_opt_view(m, [String]{})
+    ^state: [Int]{}
+    ^recursive: [Bool]{}
     state.try_reserve(count) ?? ()
     recursive.try_reserve(count) ?? ()
     loop _ in 0..<count {
         state.push(0)
         recursive.push(false)
     }
-    marked_order := [Int]{}
+    ^marked_order: [Int]{}
     loop id in marked_ids {
         if state[id] == 0 {
             ir_opt_inline_marked_walk(bodies, marked, id, state, recursive, marked_order)
@@ -346,7 +346,7 @@ ir_opt_inline_marked_module: fn(m: ^IRModule, report: ^IROptReport, threads: Com
     // Find unmarked callers that directly call any marked callee, in parallel
     // when the module admits threads, reading m.functions in place.
     workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
-    callers := [Int]{}
+    ^callers: [Int]{}
     if workers <= 1 {
         loop id in 0..<count {
             if !marked[id] && ir_opt_inline_marked_calls(m.functions[id], marked) {
@@ -371,12 +371,12 @@ ir_opt_inline_marked_module: fn(m: ^IRModule, report: ^IROptReport, threads: Com
             }
         }
     } else {
-        caller_weights := [Int]{}
+        ^caller_weights: [Int]{}
         caller_weights.try_reserve(callers.len()) ?? ()
         loop id in callers -> caller_weights.push(weights[id])
         cworkers: if workers > callers.len() -> callers.len() else -> workers
         cbounds: compiler_threads_partition(caller_weights, cworkers)
-        rebuilt_parts := ir_opt_marked_build_ranges(view, bodies, m.functions, callers, recursive, cbounds, 0)
+        ^rebuilt_parts: ir_opt_marked_build_ranges(view, bodies, m.functions, callers, recursive, cbounds, 0)
         loop part in rebuilt_parts.move() {
             loop item in part.move() {
                 if item.body == .Val(out) -> m.functions[item.id] = out.move()
@@ -396,7 +396,7 @@ IROptMarkedRebuilt: struct {
 }
 
 ir_opt_marked_find_range: fn(functions: [IRFunction], marked: [Bool], start: Int, end: Int) -> [Int] Never! {
-    found := [Int]{}
+    ^found: [Int]{}
     loop id in start..<end {
         if !marked[id] && ir_opt_inline_marked_calls(functions[id], marked) -> found.push(id)
     }
@@ -404,7 +404,7 @@ ir_opt_marked_find_range: fn(functions: [IRFunction], marked: [Bool], start: Int
 }
 
 ir_opt_marked_find_ranges: fn(functions: [IRFunction], marked: [Bool], bounds: [Int], at: Int) -> [[Int]] Never! {
-    done := [[Int]]{}
+    ^done: [[Int]]{}
     last: bounds.len() - 2
     if at > last -> return done
     if at == last {
@@ -421,11 +421,11 @@ ir_opt_marked_find_ranges: fn(functions: [IRFunction], marked: [Bool], bounds: [
 }
 
 ir_opt_marked_build_range: fn(view: IRModule, bodies: [[IRFunction]], functions: [IRFunction], callers: [Int], recursive: [Bool], start: Int, end: Int) -> [IROptMarkedRebuilt] Never! {
-    built := [IROptMarkedRebuilt]{}
+    ^built: [IROptMarkedRebuilt]{}
     built.try_reserve(end - start) ?? ()
     loop at in start..<end {
         id: callers[at]
-        local := ir_opt_report(0)
+        ^local: ir_opt_report(0)
         out: ir_opt_inline_build(view, bodies, functions[id], recursive, [Int]{}, false, 0, IROptInline.Marked, local)
         built.push(IROptMarkedRebuilt{id: id, body: out, inlines: local.inlines.move(), inlined_calls: local.inlined_calls})
     }
@@ -433,7 +433,7 @@ ir_opt_marked_build_range: fn(view: IRModule, bodies: [[IRFunction]], functions:
 }
 
 ir_opt_marked_build_ranges: fn(view: IRModule, bodies: [[IRFunction]], functions: [IRFunction], callers: [Int], recursive: [Bool], bounds: [Int], at: Int) -> [[IROptMarkedRebuilt]] Never! {
-    done := [[IROptMarkedRebuilt]]{}
+    ^done: [[IROptMarkedRebuilt]]{}
     last: bounds.len() - 2
     if at > last -> return done
     if at == last {
@@ -454,9 +454,9 @@ ir_opt_marked_build_ranges: fn(view: IRModule, bodies: [[IRFunction]], functions
 ir_opt_runtime_called: fn(m: IRModule, threads: CompilerThreads) -> [Bool] Never! {
     name_count: m.names.len()
     fn_count: m.functions.len()
-    weights := [Int]{}
+    ^weights: [Int]{}
     weights.try_reserve(fn_count) ?? ()
-    total := 0
+    ^total: 0
     loop f in m.functions {
         w: 1 + f.op.len()
         weights.push(w)
@@ -466,7 +466,7 @@ ir_opt_runtime_called: fn(m: IRModule, threads: CompilerThreads) -> [Bool] Never
     if workers <= 1 -> return ir_opt_runtime_called_range(m.functions, 0, fn_count, name_count)
     bounds: compiler_threads_partition(weights, workers)
     parts: ir_opt_runtime_called_ranges(m.functions, bounds, name_count, 0)
-    called := [Bool]{}
+    ^called: [Bool]{}
     called.try_reserve(name_count) ?? ()
     loop _ in 0..<name_count -> called.push(false)
     loop part in parts {
@@ -478,7 +478,7 @@ ir_opt_runtime_called: fn(m: IRModule, threads: CompilerThreads) -> [Bool] Never
 }
 
 ir_opt_runtime_called_range: fn(functions: [IRFunction], start: Int, end: Int, name_count: Int) -> [Bool] Never! {
-    called := [Bool]{}
+    ^called: [Bool]{}
     called.try_reserve(name_count) ?? ()
     loop _ in 0..<name_count -> called.push(false)
     loop index in start..<end {
@@ -491,7 +491,7 @@ ir_opt_runtime_called_range: fn(functions: [IRFunction], start: Int, end: Int, n
 }
 
 ir_opt_runtime_called_ranges: fn(functions: [IRFunction], bounds: [Int], name_count: Int, at: Int) -> [[Bool]] Never! {
-    done := [[Bool]]{}
+    ^done: [[Bool]]{}
     last: bounds.len() - 2
     if at > last -> return done
     if at == last {
@@ -514,15 +514,15 @@ ir_opt_runtime_called_ranges: fn(functions: [IRFunction], bounds: [Int], name_co
 // `ir.opt.marked_calls` (JetCLI Host.jet jet_cli_native_program).
 ir_opt_marked_calls: fn(m: IRModule) -> Int Never! {
     fn_count: m.functions.len()
-    marked := [Bool]{}
+    ^marked: [Bool]{}
     marked.try_reserve(fn_count) ?? ()
-    any := false
+    ^any: false
     loop f in m.functions {
         marked.push(f.inline_always)
         if f.inline_always -> any = true
     }
     if !any -> return 0
-    count := 0
+    ^count: 0
     loop f in m.functions {
         loop (at, code) in f.op {
             if code != .Call -> next
@@ -605,7 +605,7 @@ ir_opt_divisor: fn(f: IRFunction, at: Int) -> Int? Never! {
     if slot < f.param_count || slot >= f.slot_kind.len() || f.slot_kind[slot] != .Temp {
         return None
     }
-    found := Int?{None}
+    ^found: Int?{None}
     loop k in 0..<f.op.len() {
         if ir_x64_write(f, k) != slot -> next
         if found != None || f.op[k] != .Const -> return None
@@ -627,14 +627,14 @@ ir_opt_splice: fn(m: IRModule, f: ^IRFunction, caller: IRFunction, at: Int, call
     site_line: caller.code_line[at]
     f.frame_bound = ir_frame_bound_add(f.frame_bound, callee.frame_bound)
     same_file: callee.source_file == caller.source_file
-    written := (loop _ in 0..<callee.param_count -> false)
+    ^written: (loop _ in 0..<callee.param_count -> false)
     loop k in 0..<callee.op.len() {
         slot: ir_x64_write(callee, k)
         if slot >= 0 && slot < callee.param_count -> written[slot] = true
     }
     // This body is a new inline site in the call's own one; the callee's
     // sites nest in it, renumbered as `f`'s (`sites`: by callee site).
-    sites := [Int]{f.inline_sites.len() /% IR_INLINE_SITE_WORDS + 1}
+    ^sites: [Int]{f.inline_sites.len() /% IR_INLINE_SITE_WORDS + 1}
     f.inline_sites.push(caller.a[at])
     f.inline_sites.push(ir_code_line_site(site_line))
     f.inline_sites.push(ir_code_line_source(site_line))
@@ -645,7 +645,7 @@ ir_opt_splice: fn(m: IRModule, f: ^IRFunction, caller: IRFunction, at: Int, call
         f.inline_sites.push(sites[callee.inline_sites[word + 1]])
         f.inline_sites.push(callee.inline_sites[word + 2])
     }
-    map := [Int]{}
+    ^map: [Int]{}
     loop slot in 0..<callee.slot_type.len() {
         // A body from another file has the call's lines, which a local's
         // own line would be read against: only its parameters keep names.
@@ -669,7 +669,7 @@ ir_opt_splice: fn(m: IRModule, f: ^IRFunction, caller: IRFunction, at: Int, call
             f.slot_site[own] = sites[0]
             f.slot_formal[own] = true
             transfer: if m.types[callee.slot_type[slot]].drop == "" -> IROp.Copy else -> IROp.Move
-            _ := ir_emit(f, transfer, own, argument, -1, -1, site_line)
+            ^_: ir_emit(f, transfer, own, argument, -1, -1, site_line)
             map.push(own)
             next
         }
@@ -690,8 +690,8 @@ ir_opt_splice: fn(m: IRModule, f: ^IRFunction, caller: IRFunction, at: Int, call
     }
     dst: caller.dst[at]
     callee_facts: ir_opt_facts(callee)
-    _ := ir_emit(f, IROp.Block, -1, -1, -1, -1, site_line)
-    depth := 0
+    ^_: ir_emit(f, IROp.Block, -1, -1, -1, -1, site_line)
+    ^depth: 0
     loop k in 0..<callee.op.len() {
         op: callee.op[k]
         line: ir_code_line_at(if same_file -> callee.code_line[k] else -> site_line, sites[ir_code_line_site(callee.code_line[k])])
@@ -703,14 +703,14 @@ ir_opt_splice: fn(m: IRModule, f: ^IRFunction, caller: IRFunction, at: Int, call
                 own: value >= callee.param_count && callee_facts.defs[value] == 1 && callee.op[callee_facts.def_at[value]] == .StackAddress
                 ir_opt_result(m, f, dst, map[value], own, line)
             }
-            _ := ir_emit(f, IROp.Br, -1, depth, -1, -1, line)
+            ^_: ir_emit(f, IROp.Br, -1, depth, -1, -1, line)
             next
         }
         if op == .End -> depth -= 1
         ir_opt_emit_mapped(f, callee, k, map, line)
         if op == .Block || op == .Loop || op == .If -> depth += 1
     }
-    _ := ir_emit(f, IROp.End, -1, -1, -1, -1, site_line)
+    ^_: ir_emit(f, IROp.End, -1, -1, -1, -1, site_line)
 }
 
 // The call's result slot `dst` takes the returned `value`: a move, or for an
@@ -719,11 +719,11 @@ ir_opt_splice: fn(m: IRModule, f: ^IRFunction, caller: IRFunction, at: Int, call
 ir_opt_result: fn(m: IRModule, f: ^IRFunction, dst: Int, value: Int, own: Bool, line: Int) Never! {
     ty: ir_x64_type(m, f, dst)
     if ty.kind == .Aggregate && !own {
-        _ := ir_emit(f, IROp.StackAddress, dst, ty.size, ty.align, -1, line)
-        _ := ir_emit(f, IROp.CopyBytes, -1, dst, value, ty.size, line)
+        ^_: ir_emit(f, IROp.StackAddress, dst, ty.size, ty.align, -1, line)
+        ^_: ir_emit(f, IROp.CopyBytes, -1, dst, value, ty.size, line)
         return
     }
-    _ := ir_emit(f, IROp.Move, dst, value, -1, -1, line)
+    ^_: ir_emit(f, IROp.Move, dst, value, -1, -1, line)
 }
 
 // Callee instruction `k` with its slots through `map` (its argument list
@@ -731,9 +731,9 @@ ir_opt_result: fn(m: IRModule, f: ^IRFunction, dst: Int, value: Int, own: Bool, 
 ir_opt_emit_mapped: fn(f: ^IRFunction, callee: IRFunction, k: Int, map: [Int], line: Int) Never! {
     op: callee.op[k]
     dst: if callee.dst[k] >= 0 -> map[callee.dst[k]] else -> -1
-    a := callee.a[k]
-    b := callee.b[k]
-    c := callee.c[k]
+    ^a: callee.a[k]
+    ^b: callee.b[k]
+    ^c: callee.c[k]
     if op == {
         .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf | .CallIndirect -> {
             a = map[a]
@@ -753,38 +753,38 @@ ir_opt_emit_mapped: fn(f: ^IRFunction, callee: IRFunction, k: Int, map: [Int], l
         loop index in b..<(b + c) -> f.args.push(map[callee.args[index]])
         b = start
     }
-    _ := ir_emit(f, op, dst, a, b, c, line)
+    ^_: ir_emit(f, op, dst, a, b, c, line)
 }
 
 #Test("The inline cost leaves out fail arms and stop edges, not other Ifs") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
     int: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    f := ir_function_new("f", "test:cost.jet.f", "", "cost.jet", 1)
+    ^f: ir_function_new("f", "test:cost.jet.f", "", "cost.jet", 1)
     n: ir_slot(f, int, IRSlotKind.Param, -1, 1)
     f.result = int
     bad: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
     zero: ir_slot(f, int, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(f, IROp.Lt, bad, n, n, -1, 2)
+    ^_: ir_emit(f, IROp.Lt, bad, n, n, -1, 2)
     // A fail arm: its four instructions count as its If.
-    _ := ir_open_if(f, bad, 2)
-    loop _ in 0..<3 -> _ := ir_emit(f, IROp.Const, zero, 0, -1, -1, 2)
-    _ := ir_emit(f, IROp.Unreachable, -1, -1, -1, -1, 2)
+    ^_: ir_open_if(f, bad, 2)
+    loop _ in 0..<3 -> ^_: ir_emit(f, IROp.Const, zero, 0, -1, -1, 2)
+    ^_: ir_emit(f, IROp.Unreachable, -1, -1, -1, -1, 2)
     ir_end(f, 2)
     // A stop edge after the poll: its Return counts as its If.
     stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
     none: ir_args(f, [Int]{})
-    _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 3)
-    _ := ir_open_if(f, stopped, 3)
-    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+    ^_: ir_emit(f, IROp.Call, stopped, poll, none, 0, 3)
+    ^_: ir_open_if(f, stopped, 3)
+    ^_: ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
     ir_end(f, 3)
     // An If whose arm falls through counts in full.
-    _ := ir_open_if(f, bad, 4)
-    _ := ir_emit(f, IROp.Const, zero, 1, -1, -1, 4)
+    ^_: ir_open_if(f, bad, 4)
+    ^_: ir_emit(f, IROp.Const, zero, 1, -1, -1, 4)
     ir_end(f, 4)
-    _ := ir_emit(f, IROp.Return, -1, n, -1, -1, 5)
+    ^_: ir_emit(f, IROp.Return, -1, n, -1, -1, 5)
     assert_eq(ir_opt_size(f), 12)
     assert_eq(ir_opt_inline_cost(m, f), 7)
 }
@@ -793,34 +793,34 @@ ir_opt_emit_mapped: fn(f: ^IRFunction, callee: IRFunction, k: Int, map: [Int], l
 // Int parameter with itself, returned) is inlined into it: the call is
 // followed by its stop point. None when `g` was not inlined.
 ir_opt_inline_test_calls_left: fn(op: IROp) -> Int? Never! {
-    m := ir_module_new()
+    ^m: ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
     int: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("g", "test:quiet.jet.g", "", "quiet.jet", 1)
+    ^g: ir_function_new("g", "test:quiet.jet.g", "", "quiet.jet", 1)
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
     g.result = int
     v: ir_slot(g, int, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, op, v, n, n, -1, 2)
-    _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
-    f := ir_function_new("f", "test:quiet.jet.f", "", "quiet.jet", 4)
+    ^_: ir_emit(g, op, v, n, n, -1, 2)
+    ^_: ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
+    ^f: ir_function_new("f", "test:quiet.jet.f", "", "quiet.jet", 4)
     x: ir_slot(f, int, IRSlotKind.Param, -1, 4)
     f.result = int
     r: ir_slot(f, int, IRSlotKind.Temp, -1, 0)
     stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
     passed: ir_args(f, [Int]{x})
-    _ := ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 5)
+    ^_: ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 5)
     none: ir_args(f, [Int]{})
-    _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 5)
-    _ := ir_open_if(f, stopped, 5)
-    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 5)
+    ^_: ir_emit(f, IROp.Call, stopped, poll, none, 0, 5)
+    ^_: ir_open_if(f, stopped, 5)
+    ^_: ir_emit(f, IROp.Return, -1, -1, -1, -1, 5)
     ir_end(f, 5)
-    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 6)
+    ^_: ir_emit(f, IROp.Return, -1, r, -1, -1, 6)
     bodies: [[IRFunction]]{[IRFunction]{}, [IRFunction]{g.move()}, [IRFunction]{}}
-    report := ir_opt_report(1)
+    ^report: ir_opt_report(1)
     out: ir_opt_inline_build(m, bodies, f, [Bool]{false, false, false}, [Int]{0, 1, 0}, false, 1, IROptInline.Auto, report) ?? return None
-    calls := 0
+    ^calls: 0
     loop code in out.op {
         if code == .Call -> calls += 1
     }
@@ -839,36 +839,36 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int? Never! {
 // then polls: h's stop point, past z's drop. The glue is quiet and is
 // inlined, and the poll that delivers h's stop stays.
 #Test("An inlined glue leaves the stop point after it to the call before the Drop") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
     text: ir_scalar_type_row(m, Type.String)
     flag: ir_scalar_type_row(m, Type.Bool)
     zone_tid: ir_module_intern_tid(m, Type.Named{name: "Zone"})
     zone: ir_intern_type(m, "Zone", ir_layout(IRTypeKind.Aggregate, zone_tid, 8, 8, IRClass.Memory, false, 0, "#drop<Zone>"))
-    glue := ir_hashed_function("drop", "#drop<Zone>", "jet_ir_drop_", "", 0)
+    ^glue: ir_hashed_function("drop", "#drop<Zone>", "jet_ir_drop_", "", 0)
     held: ir_slot(glue, zone, IRSlotKind.Param, ir_intern_name(m, "value"), 0)
     name: ir_slot(glue, text, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(glue, IROp.Load, name, held, 0, -1, 0)
-    _ := ir_emit(glue, IROp.Drop, -1, name, -1, -1, 0)
-    _ := ir_emit(glue, IROp.Return, -1, -1, -1, -1, 0)
-    keep := ir_function_new("keep", "test:glue.jet.keep", "", "glue.jet", 1)
+    ^_: ir_emit(glue, IROp.Load, name, held, 0, -1, 0)
+    ^_: ir_emit(glue, IROp.Drop, -1, name, -1, -1, 0)
+    ^_: ir_emit(glue, IROp.Return, -1, -1, -1, -1, 0)
+    ^keep: ir_function_new("keep", "test:glue.jet.keep", "", "glue.jet", 1)
     z: ir_slot(keep, zone, IRSlotKind.Param, ir_intern_name(m, "z"), 1)
     stopped: ir_slot(keep, flag, IRSlotKind.Temp, -1, 0)
     none: ir_args(keep, [Int]{})
-    _ := ir_emit(keep, IROp.Call, -1, poll + 1, none, 0, 2)
+    ^_: ir_emit(keep, IROp.Call, -1, poll + 1, none, 0, 2)
     dropped: ir_args(keep, [Int]{z})
-    _ := ir_emit(keep, IROp.Call, -1, poll + 2, dropped, 1, 2)
-    _ := ir_emit(keep, IROp.Call, stopped, poll, none, 0, 2)
-    _ := ir_open_if(keep, stopped, 2)
-    _ := ir_emit(keep, IROp.Return, -1, -1, -1, -1, 2)
+    ^_: ir_emit(keep, IROp.Call, -1, poll + 2, dropped, 1, 2)
+    ^_: ir_emit(keep, IROp.Call, stopped, poll, none, 0, 2)
+    ^_: ir_open_if(keep, stopped, 2)
+    ^_: ir_emit(keep, IROp.Return, -1, -1, -1, -1, 2)
     ir_end(keep, 2)
-    _ := ir_emit(keep, IROp.Return, -1, -1, -1, -1, 3)
+    ^_: ir_emit(keep, IROp.Return, -1, -1, -1, -1, 3)
     bodies: [[IRFunction]]{[IRFunction]{}, [IRFunction]{}, [IRFunction]{glue.move()}}
-    report := ir_opt_report(1)
+    ^report: ir_opt_report(1)
     out: ir_opt_inline_build(m, bodies, keep, [Bool]{false, false, false}, [Int]{0, 1, 1}, false, 1, IROptInline.Auto, report) ?? panic("the glue was not inlined")
     assert_eq(report.inlined_calls, 1)
-    polls := 0
+    ^polls: 0
     loop at in 0..<out.op.len() {
         if out.op[at] == .Call && out.a[at] == poll -> polls += 1
     }
@@ -878,19 +878,19 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int? Never! {
 // Function `name` of marked.jet, marked `#Inline(Always)`: its Int
 // parameter passed to function `callee`, whose result it returns.
 ir_opt_inline_test_caller: fn(name: String, callee: Int, int: Int) -> IRFunction Never! {
-    f := ir_function_new(name, "test:marked.jet.{name}", "", "marked.jet", 4)
+    ^f: ir_function_new(name, "test:marked.jet.{name}", "", "marked.jet", 4)
     f.inline_always = true
     x: ir_slot(f, int, IRSlotKind.Param, -1, 4)
     f.result = int
     r: ir_slot(f, int, IRSlotKind.Temp, -1, 0)
     passed: ir_args(f, [Int]{x})
-    _ := ir_emit(f, IROp.Call, r, callee, passed, 1, 5)
-    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 6)
+    ^_: ir_emit(f, IROp.Call, r, callee, passed, 1, 5)
+    ^_: ir_emit(f, IROp.Return, -1, r, -1, -1, 6)
     f
 }
 
 ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
-    calls := 0
+    ^calls: 0
     loop code in f.op {
         if code == .Call -> calls += 1
     }
@@ -898,25 +898,25 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
 }
 
 #Test("Every marked call is inlined, each marked callee first; a cycle of marked calls stays a call") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     int: ir_scalar_type_row(m, Type.Int)
-    g := ir_function_new("g", "test:marked.jet.g", "", "marked.jet", 1)
+    ^g: ir_function_new("g", "test:marked.jet.g", "", "marked.jet", 1)
     g.inline_always = true
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
     g.result = int
     v: ir_slot(g, int, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Add, v, n, n, -1, 2)
-    _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Add, v, n, n, -1, 2)
+    ^_: ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
     m.functions.push(g)
     // Marked h calls marked g, unmarked f calls h, and marked a and b call
     // each other.
     m.functions.push(ir_opt_inline_test_caller("h", 0, int))
-    f := ir_opt_inline_test_caller("f", 1, int)
+    ^f: ir_opt_inline_test_caller("f", 1, int)
     f.inline_always = false
     m.functions.push(f)
     m.functions.push(ir_opt_inline_test_caller("a", 4, int))
     m.functions.push(ir_opt_inline_test_caller("b", 3, int))
-    report := ir_opt_report(0)
+    ^report: ir_opt_report(0)
     // h calls g, f calls h, and a and b call each other.
     assert_eq(ir_opt_marked_calls(m), 4)
     ir_opt_inline_marked_module(m, report)
@@ -930,7 +930,7 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
     assert_eq(ir_opt_inline_test_calls(m.functions[4]), 1)
     // IR Lint stops a build on each one, naming the call site in source,
     // the inlined copy's too.
-    marked_rows := 0
+    ^marked_rows: 0
     loop finding in ir_lint_module(m, "ir.opt", compiler_threads_single()) {
         if finding.rule == IR_LINT_CALL_MARKED {
             marked_rows += 1
@@ -962,23 +962,23 @@ IROptInlineTestSplice: struct {
 
 ir_opt_inline_test_splice: fn(m: ^IRModule) -> IROptInlineTestSplice? Never! {
     f: m.functions.pop() ?? return None
-    g := m.functions.pop() ?? return None
-    at := -1
+    ^g: m.functions.pop() ?? return None
+    ^at: -1
     loop k in 0..<f.op.len() {
         if f.op[k] == .Call -> at = k
     }
     g.inline_always = false
-    bodies := [[IRFunction]]{[IRFunction]{g.move()}, [IRFunction]{}}
+    ^bodies: [[IRFunction]]{[IRFunction]{g.move()}, [IRFunction]{}}
     recursive: [Bool]{false, false}
     unmarked: ir_opt_inline_size(m, bodies, f, at, recursive, 1000)
     bodies[0][0].inline_always = true
     marked: ir_opt_inline_size(m, bodies, f, at, recursive, 1000)
-    report := ir_opt_report(0)
+    ^report: ir_opt_report(0)
     out: ir_opt_inline_build(m, bodies, f, recursive, [Int]{}, false, 0, IROptInline.Marked, report) ?? return None
     assert_eq(report.inlined_calls, 1)
-    param_moves := 0
-    param_writes := 0
-    lines := [Int]{}
+    ^param_moves: 0
+    ^param_writes: 0
+    ^lines: [Int]{}
     loop k in 0..<out.op.len() {
         if out.op[k] == .Move && out.a[k] == 0 -> param_moves += 1
         if ir_x64_write(out, k) == 0 -> param_writes += 1
@@ -992,24 +992,24 @@ ir_opt_inline_test_splice: fn(m: ^IRModule) -> IROptInlineTestSplice? Never! {
 // whose parameter and result have row `arg`, which returns g's result for
 // its parameter. None when `param` or `arg` has no type row.
 ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param: Type, arg: Type) -> IRModule? Never! {
-    m := ir_module_new()
+    ^m: ir_module_new()
     row: ir_type_row(m, param) ?? return None
     passed: ir_type_row(m, arg) ?? return None
-    g := ir_function_new("g", "test:{file}.g", "", file, 1)
+    ^g: ir_function_new("g", "test:{file}.g", "", file, 1)
     n: ir_slot(g, row, IRSlotKind.Param, -1, 1)
     g.result = row
     v: ir_slot(g, row, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, body, if write_param -> n else -> v, n, n, -1, 2)
-    _ := ir_emit(g, IROp.Return, -1, if write_param -> n else -> v, -1, -1, 3)
+    ^_: ir_emit(g, body, if write_param -> n else -> v, n, n, -1, 2)
+    ^_: ir_emit(g, IROp.Return, -1, if write_param -> n else -> v, -1, -1, 3)
     m.functions.push(g)
-    f := ir_opt_inline_test_caller("f", 0, passed)
+    ^f: ir_opt_inline_test_caller("f", 0, passed)
     f.inline_always = false
     m.functions.push(f)
     Val(m)
 }
 
 #Test("A marked callee is inlined though it writes its parameter") {
-    m := ir_opt_inline_test_module("marked.jet", IROp.Add, true, Type.Int, Type.Int) ?? panic("no type rows")
+    ^m: ir_opt_inline_test_module("marked.jet", IROp.Add, true, Type.Int, Type.Int) ?? panic("no type rows")
     splice: ir_opt_inline_test_splice(m) ?? panic("g was not inlined")
     // Unmarked, the written parameter refuses it.
     assert_eq(splice.unmarked, -1)
@@ -1023,7 +1023,7 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 
 #Test("A marked callee is inlined though it can stop in another file") {
     // g of other.jet divides its parameter by itself, a stop located there.
-    m := ir_opt_inline_test_module("other.jet", IROp.FloorDiv, false, Type.Int, Type.Int) ?? panic("no type rows")
+    ^m: ir_opt_inline_test_module("other.jet", IROp.FloorDiv, false, Type.Int, Type.Int) ?? panic("no type rows")
     splice: ir_opt_inline_test_splice(m) ?? panic("g was not inlined")
     // Unmarked, the stop in another file refuses it.
     assert_eq(splice.unmarked, -1)
@@ -1037,7 +1037,7 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 #Test("A marked callee is inlined though its argument has another type row of the same layout") {
     // g takes and returns an I64; f passes and returns a U64, a word of the
     // same size.
-    m := ir_opt_inline_test_module("marked.jet", IROp.BitOr, false, Type.IntN{signed: true, bits: 64}, Type.IntN{signed: false, bits: 64}) ?? panic("no type rows")
+    ^m: ir_opt_inline_test_module("marked.jet", IROp.BitOr, false, Type.IntN{signed: true, bits: 64}, Type.IntN{signed: false, bits: 64}) ?? panic("no type rows")
     splice: ir_opt_inline_test_splice(m) ?? panic("g was not inlined")
     // Unmarked, only the same row may stand for the parameter.
     assert_eq(splice.unmarked, -1)
@@ -1046,22 +1046,22 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 }
 
 #Test("A last-owner routine is never marked, and a marked caller of it is still inlined") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     int: ir_scalar_type_row(m, Type.Int)
     // Made as BuildOwn.jet makes every last-owner routine: one shared copy
     // the drop sites call, unmarked.
-    last := ir_hashed_function(IR_LAST_OWNER, "#box.last<test>", "jet_ir_last_", "", 0)
+    ^last: ir_hashed_function(IR_LAST_OWNER, "#box.last<test>", "jet_ir_last_", "", 0)
     assert(!last.inline_always)
     n: ir_slot(last, int, IRSlotKind.Param, -1, 0)
     last.result = int
-    _ := ir_emit(last, IROp.Return, -1, n, -1, -1, 0)
+    ^_: ir_emit(last, IROp.Return, -1, n, -1, -1, 0)
     m.functions.push(last)
     // Marked h calls the routine, and unmarked f calls h.
     m.functions.push(ir_opt_inline_test_caller("h", 0, int))
-    f := ir_opt_inline_test_caller("f", 1, int)
+    ^f: ir_opt_inline_test_caller("f", 1, int)
     f.inline_always = false
     m.functions.push(f)
-    report := ir_opt_report(0)
+    ^report: ir_opt_report(0)
     ir_opt_inline_marked_module(m, report)
     // f holds h's body, and with it the one call of the shared routine.
     assert_eq(report.inlined_calls, 1)
@@ -1074,19 +1074,19 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 // Whether the FloorDiv of an Int parameter by `divisor` (a constant, or the
 // parameter itself when None) is located.
 ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
-    m := ir_module_new()
+    ^m: ir_module_new()
     int: ir_scalar_type_row(m, Type.Int)
-    g := ir_function_new("g", "test:kernel.jet.g", "", "kernel.jet", 1)
+    ^g: ir_function_new("g", "test:kernel.jet.g", "", "kernel.jet", 1)
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
     g.result = int
-    by := n
+    ^by: n
     if divisor == .Val(value) {
         by = ir_slot(g, int, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(g, IROp.Const, by, value, -1, -1, 2)
+        ^_: ir_emit(g, IROp.Const, by, value, -1, -1, 2)
     }
     v: ir_slot(g, int, IRSlotKind.Temp, -1, 0)
     at: ir_emit(g, IROp.FloorDiv, v, n, by, -1, 2)
-    _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
     ir_opt_located(m, g, at)
 }
 
@@ -1105,37 +1105,37 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
 // and the inlined two are locals of the inline site, not of run.
 #Test("An inlined body's parameter and folded locals are located in its inline site") {
     loop level in 1..<3 {
-        m := ir_module_new()
+        ^m: ir_module_new()
         word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
-        g := ir_function_new("bump", "test:bump.jet.bump", "", "bump.jet", 1)
+        ^g: ir_function_new("bump", "test:bump.jet.bump", "", "bump.jet", 1)
         by: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "by"), 1)
         g.result = word
         eight: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(g, IROp.Const, eight, 8, -1, -1, 2)
+        ^_: ir_emit(g, IROp.Const, eight, 8, -1, -1, 2)
         sum: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(g, IROp.Add, sum, eight, by, IR_OVERFLOW_WRAP, 2)
+        ^_: ir_emit(g, IROp.Add, sum, eight, by, IR_OVERFLOW_WRAP, 2)
         total: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
-        _ := ir_emit(g, IROp.Move, total, sum, -1, -1, 2)
-        _ := ir_emit(g, IROp.Return, -1, total, -1, -1, 3)
-        f := ir_function_new("run", "test:bump.jet.run", "", "bump.jet", 5)
+        ^_: ir_emit(g, IROp.Move, total, sum, -1, -1, 2)
+        ^_: ir_emit(g, IROp.Return, -1, total, -1, -1, 3)
+        ^f: ir_function_new("run", "test:bump.jet.run", "", "bump.jet", 5)
         n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 5)
         f.result = word
         one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 6)
+        ^_: ir_emit(f, IROp.Const, one, 1, -1, -1, 6)
         more: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.Add, more, n, one, IR_OVERFLOW_WRAP, 6)
+        ^_: ir_emit(f, IROp.Add, more, n, one, IR_OVERFLOW_WRAP, 6)
         mine: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "by"), 6)
-        _ := ir_emit(f, IROp.Move, mine, more, -1, -1, 6)
+        ^_: ir_emit(f, IROp.Move, mine, more, -1, -1, 6)
         got: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
         passed: ir_args(f, [Int]{mine})
-        _ := ir_emit(f, IROp.Call, got, 0, passed, 1, 7)
-        _ := ir_emit(f, IROp.Return, -1, got, -1, -1, 7)
+        ^_: ir_emit(f, IROp.Call, got, 0, passed, 1, 7)
+        ^_: ir_emit(f, IROp.Return, -1, got, -1, -1, 7)
         m.entry = 1
         ir_function_bind(m, g.key, 0)
         ir_function_bind(m, f.key, 1)
         m.functions.push(g)
         m.functions.push(f)
-        options := ir_opt_options(level)
+        ^options: ir_opt_options(level)
         options.verify = true
         report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
@@ -1144,7 +1144,7 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
         assert(compiled.errors.is_empty())
         names: [String]{"by", "by", "total", "total"}
         loop (row, site) in ([Int]{0, 1, 1, 0}) {
-            located := false
+            ^located: false
             loop range in compiled.debug.ranges {
                 variable: compiled.variables[range.variable]
                 if variable.name == names[row] && variable.site == site -> located = true
@@ -1161,16 +1161,16 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
 // local of sum.
 #Test("An inlined parameter bound to a variable written again is located only in its site") {
     loop level in 1..<3 {
-        m := ir_module_new()
+        ^m: ir_module_new()
         word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
         truth: ir_scalar_type_row(m, Type.Bool)
-        g := ir_function_new("square", "test:sum.jet.square", "", "sum.jet", 1)
+        ^g: ir_function_new("square", "test:sum.jet.square", "", "sum.jet", 1)
         i: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
         g.result = word
         product: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(g, IROp.Mul, product, i, i, IR_OVERFLOW_WRAP, 1)
-        _ := ir_emit(g, IROp.Return, -1, product, -1, -1, 1)
-        f := ir_function_new("sum", "test:sum.jet.sum", "", "sum.jet", 3)
+        ^_: ir_emit(g, IROp.Mul, product, i, i, IR_OVERFLOW_WRAP, 1)
+        ^_: ir_emit(g, IROp.Return, -1, product, -1, -1, 1)
+        ^f: ir_function_new("sum", "test:sum.jet.sum", "", "sum.jet", 3)
         n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 3)
         f.result = word
         total: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "total"), 4)
@@ -1178,35 +1178,35 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
         done: ir_slot(f, truth, IRSlotKind.Temp, -1, 0)
         got: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
         one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.Const, total, 0, -1, -1, 4)
-        _ := ir_emit(f, IROp.Const, counter, 0, -1, -1, 5)
-        _ := ir_emit(f, IROp.Block, -1, 12, -1, -1, 5)
-        _ := ir_emit(f, IROp.Loop, -1, 11, -1, -1, 5)
-        _ := ir_emit(f, IROp.Ge, done, counter, n, -1, 5)
-        _ := ir_emit(f, IROp.BrIf, -1, done, 1, -1, 5)
+        ^_: ir_emit(f, IROp.Const, total, 0, -1, -1, 4)
+        ^_: ir_emit(f, IROp.Const, counter, 0, -1, -1, 5)
+        ^_: ir_emit(f, IROp.Block, -1, 12, -1, -1, 5)
+        ^_: ir_emit(f, IROp.Loop, -1, 11, -1, -1, 5)
+        ^_: ir_emit(f, IROp.Ge, done, counter, n, -1, 5)
+        ^_: ir_emit(f, IROp.BrIf, -1, done, 1, -1, 5)
         passed: ir_args(f, [Int]{counter})
-        _ := ir_emit(f, IROp.Call, got, 0, passed, 1, 6)
-        _ := ir_emit(f, IROp.Add, total, total, got, IR_OVERFLOW_WRAP, 7)
-        _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 5)
-        _ := ir_emit(f, IROp.Add, counter, counter, one, IR_OVERFLOW_WRAP, 5)
-        _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 5)
-        _ := ir_emit(f, IROp.End, -1, 3, -1, -1, 5)
-        _ := ir_emit(f, IROp.End, -1, 2, -1, -1, 5)
-        _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 9)
+        ^_: ir_emit(f, IROp.Call, got, 0, passed, 1, 6)
+        ^_: ir_emit(f, IROp.Add, total, total, got, IR_OVERFLOW_WRAP, 7)
+        ^_: ir_emit(f, IROp.Const, one, 1, -1, -1, 5)
+        ^_: ir_emit(f, IROp.Add, counter, counter, one, IR_OVERFLOW_WRAP, 5)
+        ^_: ir_emit(f, IROp.Br, -1, 0, -1, -1, 5)
+        ^_: ir_emit(f, IROp.End, -1, 3, -1, -1, 5)
+        ^_: ir_emit(f, IROp.End, -1, 2, -1, -1, 5)
+        ^_: ir_emit(f, IROp.Return, -1, total, -1, -1, 9)
         m.entry = 1
         ir_function_bind(m, g.key, 0)
         ir_function_bind(m, f.key, 1)
         m.functions.push(g)
         m.functions.push(f)
-        options := ir_opt_options(level)
+        ^options: ir_opt_options(level)
         options.verify = true
         report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
         assert_eq(report.inlined_calls, 1)
         compiled: ir_x64_compile_function(m, ir_x64_tables(m), 1)
         assert(compiled.errors.is_empty())
-        formal := false
-        local := false
+        ^formal: false
+        ^local: false
         loop variable in compiled.variables {
             if variable.name != "i" -> next
             if variable.site == 1 -> formal = variable.parameter
@@ -1214,15 +1214,15 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
         }
         assert(formal, "O{level}: square's i is a parameter of its site")
         assert(local, "O{level}: sum's i is a local")
-        low := -1
-        high := -1
+        ^low: -1
+        ^high: -1
         loop run in compiled.debug.inlines {
             if run.site != 1 -> next
             if low < 0 || run.start < low -> low = run.start
             if run.end > high -> high = run.end
         }
         assert(low >= 0, "O{level}: the inline site has code")
-        located := false
+        ^located: false
         loop range in compiled.debug.ranges {
             variable: compiled.variables[range.variable]
             if variable.name != "i" || variable.site != 1 -> next

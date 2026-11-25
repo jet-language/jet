@@ -6,18 +6,18 @@ use {
 }
 
 sketch_edges: fn() -> String {
-    cardinality := hll.new()
+    ^cardinality: hll.new()
     empty_count: cardinality.count()
     cardinality.add("same")
     cardinality.add("same")
-    distribution := tdigest.new()
+    ^distribution: tdigest.new()
     empty_quantile: distribution.quantile(0.5)
     distribution.add(-1.0)
     distribution.add(1.0)
-    frequencies := cms.new()
+    ^frequencies: cms.new()
     missing: frequencies.count("missing")
     frequencies.add("seen")
-    sample := reservoir.new(0)
+    ^sample: reservoir.new(0)
     sample.add("first")
     sample.add("second")
     return "{empty_count}|{cardinality.count()}|{empty_quantile}|{distribution.quantile(0.0)}|{distribution.quantile(1.0)}|{missing}|{frequencies.count("seen")}|{sample.sample().len()}"

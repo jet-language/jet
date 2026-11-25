@@ -17,13 +17,13 @@ STRIDE: 816
 
 // A running checksum of `bytes` on top of `h`.
 mix: fn(h: Int, bytes: [U8]) -> Int {
-    out := h
+    ^out: h
     loop byte in bytes -> out = (out * 31 + Int{byte} + 1) % 2147483647
     out
 }
 
 canvas: fn() -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<HEIGHT {
         loop col in 0..<WIDTH {
             value: if col < WIDTH /% 2 -> U8{255} else -> U8{0}
@@ -35,8 +35,8 @@ canvas: fn() -> [U8] {
 }
 
 masks: fn(name: String, face: font.Face) {
-    h := 0
-    inked := 0
+    ^h: 0
+    ^inked: 0
     loop quarter in 0..<4 {
         loop id in 0..<face.glyph_count() {
             mask: face.raster(id, 13.0, Float{quarter} / 4.0)
@@ -53,8 +53,8 @@ masks: fn(name: String, face: font.Face) {
 run: fn() {
     regular: font.regular()
     bold: font.bold()
-    pixels := canvas()
-    kept := font.cache()
+    ^pixels: canvas()
+    ^kept: font.cache()
     whole: ui.UIRect{x: 0, y: 0, width: WIDTH, height: HEIGHT}
     one: font.draw_text(pixels, WIDTH, HEIGHT, STRIDE, kept, regular, "Hamburgefonstiv AV To 0123", 13.0, 2, 14, 0xFF202020, whole)
     two: font.draw_text(pixels, WIDTH, HEIGHT, STRIDE, kept, bold, "Wayland & X11 — ÆØÅ café", 17.5, 3, 33, 0xFF1060C0, whole)
@@ -62,7 +62,7 @@ run: fn() {
     print("advances {one} {two} {three}")
     // A cache held to 64 KiB keeps evicting as every glyph passes through
     // it, and `blend` paints one of its masks, a 40 px "g", over the seam.
-    small := font.cache_within(65536)
+    ^small: font.cache_within(65536)
     loop id in 0..<regular.glyph_count() -> _: small.glyph(regular, id, 13.0, 0.5)
     g: small.glyph(regular, regular.glyph(103), 40.0, 0.25)
     font.blend(pixels, WIDTH, HEIGHT, STRIDE, g, 90, 40, 0xC0008000, whole)
@@ -70,7 +70,7 @@ run: fn() {
     first: regular.layout("Hamburgefonstiv AV To 0123", 13.0).advance
     second: bold.layout("Wayland & X11 — ÆØÅ café", 17.5).advance
     print("layout advances {first} {second}")
-    padding := 0
+    ^padding: 0
     loop row in 0..<HEIGHT {
         loop k in (WIDTH * 4)..<STRIDE {
             if (Int{pixels[row * STRIDE + k]}) != 7 -> padding += 1

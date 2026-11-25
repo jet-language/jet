@@ -45,7 +45,7 @@ journey_hop_new: fn(file: I64, line: I64, column: I64, function: I64, source: I6
 journey_hops_clear: fn(value: I64) {
     count: rt_text_word(wrapping(value + JOURNEY_HOPS))
     data: rt_text_word(wrapping(wrapping(value + JOURNEY_HOPS) + I64{16}))
-    row := I64{0}
+    ^row: I64{0}
     loop row < count {
         journey_hop_drop(rt_text_word(wrapping(data + row * I64{8})))
         row += I64{1}
@@ -86,7 +86,7 @@ journey_hops_clear: fn(value: I64) {
     rt_text_store(wrapping(wrapping(result + JOURNEY_HOPS) + I64{8}), count)
     rt_text_store(wrapping(wrapping(result + JOURNEY_HOPS) + I64{16}), data)
     source: rt_text_word(wrapping(wrapping(value + JOURNEY_HOPS) + I64{16}))
-    row := I64{0}
+    ^row: I64{0}
     loop row < count {
         rt_text_store(wrapping(data + row * I64{8}), journey_hop_clone(rt_text_word(wrapping(source + row * I64{8}))))
         row += I64{1}
@@ -141,11 +141,11 @@ journey_same_site: fn(hop: I64, file: I64, line: I64, function: I64) -> Bool {
     }
     count: rt_text_word(wrapping(carried + JOURNEY_HOPS))
     source: rt_text_word(wrapping(wrapping(carried + JOURNEY_HOPS) + I64{16}))
-    row := I64{0}
+    ^row: I64{0}
     loop row < count {
         hop: rt_text_word(wrapping(source + row * I64{8}))
         length: rt_text_word(wrapping(value + JOURNEY_HOPS))
-        collapsed := false
+        ^collapsed: false
         if (length != I64{0}) {
             last: rt_text_word(wrapping(rt_text_word(wrapping(wrapping(value + JOURNEY_HOPS) + I64{16})) + (length - I64{1}) * I64{8}))
             if journey_same_site(last, rt_text_word(wrapping(hop + HOP_FILE)), rt_text_word(wrapping(hop + HOP_LINE)), rt_text_word(wrapping(hop + HOP_FUNCTION))) {

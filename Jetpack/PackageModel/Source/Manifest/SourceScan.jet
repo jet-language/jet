@@ -18,7 +18,7 @@ ParsedSource: struct {
 // package carriers masked); None when any file fails to read, lex, or parse.
 // A listing's `package.jet` is the manifest, not a source, and is skipped.
 pkg_parse_sources: fn(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
-    out := [ParsedSource]{}
+    ^out: [ParsedSource]{}
     loop file in source_files {
         if pkg_path_file_name(file.relative) == PACKAGE_FILE -> next
         text: file.text() ?? return None
@@ -34,7 +34,7 @@ pkg_parse_sources: fn(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
 
 // The one top-level function named `wanted`, or None when absent or repeated.
 pkg_unique_top_level_function: fn(program: Program, wanted: String) -> Func? Never! {
-    found := Func?{None}
+    ^found: Func?{None}
     loop item in program.items {
         if item == .Func(function) {
             if function.name != wanted -> next
@@ -85,7 +85,7 @@ pkg_path_join: fn(base: String, tail: String) -> String Never! {
 // Lexical normalization: drop `.`, resolve `..` by popping.
 pkg_normalize_discovery_path: fn(path: String) -> String Never! {
     absolute: path.starts_with("/")
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -105,7 +105,7 @@ pkg_normalize_safe_import_path: fn(root: String, path: String) -> String? Never!
     prefix: if base.ends_with("/") -> base else -> "{base}/"
     if path != base && !path.starts_with(prefix) -> return None
     relative: if path == base -> "" else -> path.removeprefix(prefix)
-    normalized := base
+    ^normalized: base
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
         if part.contains("..") -> return None
@@ -124,12 +124,12 @@ pkg_import_target_paths: fn(root: String, importer: String, kind: ImportKind) ->
             return [String]{}
         }
     }
-    paths := [String]{base}
+    ^paths: [String]{base}
     if !pkg_path_file_name(base).ends_with(".jet") {
         paths.push("{pkg_path_without_extension(base)}.jet")
     }
     paths.push(pkg_path_join(base, "module.jet"))
-    out := [String]{}
+    ^out: [String]{}
     loop path in pkg_manifest_sorted(paths) {
         if !out.contains(path) -> out.push(path)
     }
@@ -146,7 +146,7 @@ pkg_path_without_extension: fn(path: String) -> String Never! {
 }
 
 pkg_resolved_import_targets: fn(root: String, source: ParsedSource, kind: ImportKind, sources: [ParsedSource]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop candidate in pkg_import_target_paths(root, source.path, kind) {
         safe: pkg_normalize_safe_import_path(root, candidate) ?? next
         loop other in sources {
@@ -162,12 +162,12 @@ pkg_resolved_import_targets: fn(root: String, source: ParsedSource, kind: Import
 // Every import target whose alias is `wanted`, following the in-project
 // import graph from root-level files.
 pkg_reachable_import_module_targets: fn(root: String, wanted: String, sources: [ParsedSource]) -> [String] Never! {
-    pending := [String]{}
+    ^pending: [String]{}
     loop source in sources {
         if pkg_path_parent(source.path) == root -> pending.push(source.path)
     }
-    visited := [String]{}
-    targets := [String]{}
+    ^visited: [String]{}
+    ^targets: [String]{}
     loop pending.len() > 0 {
         path: pending[pending.len() - 1].copy()
         pending = pending[0..<pending.len() - 1]
@@ -184,7 +184,7 @@ pkg_reachable_import_module_targets: fn(root: String, wanted: String, sources: [
             loop target in resolved -> pending.push(target)
         }
     }
-    out := [String]{}
+    ^out: [String]{}
     loop target in pkg_manifest_sorted(targets) {
         if !out.contains(target) -> out.push(target)
     }
@@ -200,9 +200,9 @@ pkg_find_parsed_source: fn(sources: [ParsedSource], path: String) -> ParsedSourc
 
 // Every file transitively imported by `source`, normalized and sorted.
 pkg_imported_source_paths: fn(root: String, source: ParsedSource, sources: [ParsedSource]) -> [String] Never! {
-    pending := [String]{source.path}
-    visited := [String]{}
-    imported := [String]{}
+    ^pending: [String]{source.path}
+    ^visited: [String]{}
+    ^imported: [String]{}
     loop pending.len() > 0 {
         path: pending[pending.len() - 1].copy()
         pending = pending[0..<pending.len() - 1]
@@ -228,20 +228,20 @@ pkg_imported_source_paths: fn(root: String, source: ParsedSource, sources: [Pars
 // comments.
 pkg_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Never! {
     raw: "{source} ".bytes()
-    depth := 0
-    token_start := -1
-    token_line := 1
-    candidate := false
-    candidate_line := 1
-    colon_seen := false
-    in_string := false
-    escaped := false
-    line_comment := false
-    block_comment := false
-    previous := -1
-    line := 1
-    matches := [Int]{}
-    index := 0
+    ^depth: 0
+    ^token_start: -1
+    ^token_line: 1
+    ^candidate: false
+    ^candidate_line: 1
+    ^colon_seen: false
+    ^in_string: false
+    ^escaped: false
+    ^line_comment: false
+    ^block_comment: false
+    ^previous: -1
+    ^line: 1
+    ^matches: [Int]{}
+    ^index: 0
     loop index < raw.len() {
         width: pkg_scalar_width(raw, index)
         code: Int{raw[index]}
@@ -340,7 +340,7 @@ pkg_real_build_entry_lines: fn(source: String, candidates: [Int]) -> [Int]? Neve
     lexed: lex(text.bytes())
     if lexed.diagnostics.len() > 0 -> return None
     parsed: parse_lexed(lexed)
-    real := [Int]{}
+    ^real: [Int]{}
     loop item in parsed.program.items {
         if item == .Func(function) {
             if pkg_is_build_entry(function) {
@@ -348,7 +348,7 @@ pkg_real_build_entry_lines: fn(source: String, candidates: [Int]) -> [Int]? Neve
             }
         }
     }
-    out := [Int]{}
+    ^out: [Int]{}
     loop line in candidates {
         if real.contains(line) -> out.push(line)
     }
@@ -357,7 +357,7 @@ pkg_real_build_entry_lines: fn(source: String, candidates: [Int]) -> [Int]? Neve
 
 pkg_source_line_at: fn(source: String, offset: Int) -> Int Never! {
     raw: source.bytes()
-    count := 1
+    ^count: 1
     loop index in 0..<offset {
         if index < raw.len() && (Int{raw[index]}) == 10 -> count += 1
     }

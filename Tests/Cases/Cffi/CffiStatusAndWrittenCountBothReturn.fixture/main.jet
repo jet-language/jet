@@ -12,10 +12,10 @@ use {
 run: fn() {
     input: [U8]{1, 2, 3}
     #Unsafe("both blocks are live for the calls, C writes at most `output_cap` bytes and keeps no pointer, and each is released once") {
-        from := mem.alloc_raw(3, 1) ?? panic("no memory")
+        ^from: mem.alloc_raw(3, 1) ?? panic("no memory")
         mem.list_copy<U8>(from, input, 0, 3)
-        to := mem.alloc_raw(3, 1) ?? panic("no memory")
-        written := U32{0}
+        ^to: mem.alloc_raw(3, 1) ?? panic("no memory")
+        ^written: U32{0}
         print(status.decode_status(from, U32{3}, to, U32{3}, written))
         print("{written} {to.byte_offset(0).*} {to.byte_offset(1).*} {to.byte_offset(2).*}")
         print(status.decode_status(from, U32{3}, to, U32{1}, written))

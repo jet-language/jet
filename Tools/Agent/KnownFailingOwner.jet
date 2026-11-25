@@ -41,11 +41,15 @@ run: fn() {
         process.fail(64, "usage: jet Tools/Agent/KnownFailingOwner.jet --check")
     }
     board_path: board_path()
-    if !files.is_file(board_path) -> process.fail(64, "known-failing-owner: the Tower board {board_path} is missing")
+    if !files.is_file(board_path) {
+        process.fail(64, "known-failing-owner: the Tower board {board_path} is missing")
+    }
     open: open_cards(board_path)
-    if open.len() == 0 -> process.fail(64, "known-failing-owner: the Tower board {board_path} lists no open card")
+    if open.len() == 0 {
+        process.fail(64, "known-failing-owner: the Tower board {board_path} lists no open card")
+    }
     ledger: files.read(LEDGER) ?? process.fail(64, "known-failing-owner: read {LEDGER}: {err}")
-    problems := ledger_problems(ledger, open)
+    ^problems: ledger_problems(ledger, open)
     problems.extend(annotation_problems(annotations(), open))
     if problems.len() > 0 {
         process.fail(65, problems.map(fn(line) { "known-failing-owner: {line}" }).join("\n"))
@@ -74,9 +78,7 @@ board_choice: fn(data: String?, common_dir: String?, common_has_board: Bool) -> 
 }
 
 // The board of the checkout that owns the git common directory `common`.
-common_board: fn(common: String) -> String {
-    "{files.dirname(common)}/{BOARD}"
-}
+common_board: fn(common: String) -> String { "{files.dirname(common)}/{BOARD}" }
 
 // The absolute git common directory of this tree, or None outside git.
 common_dir: fn() -> String? {
@@ -97,10 +99,12 @@ board_path: fn() -> String {
 open_cards: fn(path: String) -> [Int] {
     text: files.read(path) ?? process.fail(64, "known-failing-owner: read the Tower board {path}: {err}")
     board: json.parse(text) ?? process.fail(64, "known-failing-owner: the Tower board {path} is not JSON: {err}")
-    open := [Int]{}
+    ^open: [Int]{}
     if field(board, "cards") == .Array(cards) {
         loop card in cards {
-            if field(card, "archived") == .Bool(true) || field(card, "phase") == .Text("done") -> next
+            if field(card, "archived") == .Bool(true) || field(card, "phase") == .Text("done") {
+                next
+            }
             if field(card, "num") == .Int(num) -> open.push(num)
             if field(card, "num") == .Number(lexeme) {
                 number: Int.parse(lexeme) ?? next
@@ -135,10 +139,8 @@ cite_at: fn(bytes: [U8], start: Int) -> Bool {
             return false
         }
     }
-    end := start + 1
-    loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 {
-        end += 1
-    }
+    ^end: start + 1
+    loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 -> end += 1
     digits: end - start - 1
     digits >= 3 && digits <= 5
 }
@@ -155,14 +157,16 @@ reason_cites: fn(reason: String) -> Bool {
 
 // The problems of one owner (`id`) naming `cell` as its card for `reason`.
 owner_problems: fn(where: String, id: String, cell: String, reason: String, open: [Int]) -> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     if card(cell) == .Val(num) {
-        if !open.contains(num) -> problems.push("{where}: {id} names #{num}, which is not open on the board; move it to the open card that owns the remaining work")
-    } else {
-        problems.push("{where}: {id} names `{cell}` where one card, `#N`, belongs")
-    }
+        if !open.contains(num) {
+            problems.push("{where}: {id} names #{num}, which is not open on the board; move it to the open card that owns the remaining work")
+        }
+    } else { problems.push("{where}: {id} names `{cell}` where one card, `#N`, belongs") }
     if reason.trim() == "" -> problems.push("{where}: {id} gives no reason")
-    if reason_cites(reason) -> problems.push("{where}: {id}'s reason names a card; only the card does")
+    if reason_cites(reason) {
+        problems.push("{where}: {id}'s reason names a card; only the card does")
+    }
     problems
 }
 
@@ -176,7 +180,7 @@ row_problems: fn(line: String, where: String, open: [Int]) -> [String] {
 }
 
 ledger_problems: fn(ledger: String, open: [Int]) -> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     loop (index, line) in ledger.lines() {
         if line == "" || line.starts_with("#") -> next
         problems.extend(row_problems(line, "{LEDGER}:{index + 1}", open))
@@ -196,8 +200,10 @@ Annotation: struct {
 annotations: fn() -> [Annotation] {
     ran: process.cmd([String]{"git", "grep", "-n", "-I", "-E", "^[[:space:]]*# KNOWN-FAILING ", "--", "Tests/*.case", "Tests/*.jet"}).stdout(.Capture).stderr(.Capture).run() ?? process.fail(64, "known-failing-owner: run git grep: {err}")
     // git grep exits 1 when nothing matches.
-    if ran.code > 1 -> process.fail(64, "known-failing-owner: git grep: {process.combined_output(ran).trim()}")
-    found := [Annotation]{}
+    if ran.code > 1 {
+        process.fail(64, "known-failing-owner: git grep: {process.combined_output(ran).trim()}")
+    }
+    ^found: [Annotation]{}
     loop line in process.stdout_lines(ran) {
         parts: line.split(":").to_list()
         if parts.len() < 3 -> next
@@ -209,7 +215,7 @@ annotations: fn() -> [Annotation] {
 }
 
 annotation_problems: fn(found: [Annotation], open: [Int]) -> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     loop annotation in found {
         words: annotation.text.split(" ").to_list()
         reason: annotation.text.slice(words[0].len(), annotation.text.len())

@@ -60,7 +60,7 @@ imported: fn(crew: app.Remote<logic.Crew>) -[DB.Read, Env, FS.Read, Net, Time]> 
             }
             if crew.my_projects() == {
                 .Ok(cards) -> {
-                    lines := [String]{added}
+                    ^lines: [String]{added}
                     loop card in cards -> lines.push("{card.name}: {card.open_tasks} open")
                     lines.join("\n")
                 }
@@ -82,8 +82,8 @@ media_name: fn(media: app.Media?) -> String {
 
 // The file's bytes read through its stream, a few at a time.
 streamed: fn(file: app.PickedFile) -[FS.Read, Time.Wait]> [U8] IOError! {
-    stream := file.stream() ?? return Err(err)
-    out := [U8]{}
+    ^stream: file.stream() ?? return Err(err)
+    ^out: [U8]{}
     loop {
         part: stream.read_bytes(7) ?? return Err(err)
         if part.len() == 0 -> break

@@ -110,8 +110,8 @@ valid_hash: fn(text: String) -> Bool Never! {
 // a final line without a newline is not read.
 read_lines: fn(text: String) -> [String] Never! {
     bytes: text.bytes()
-    lines := [String]{}
-    start := 0
+    ^lines: [String]{}
+    ^start: 0
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) {
             lines.push(byte_text(bytes, start, index))
@@ -123,7 +123,7 @@ read_lines: fn(text: String) -> [String] Never! {
 
 // The bytes `sed -n '1,COUNTp'` prints: through the COUNTth newline.
 first_lines: fn(bytes: [U8], count: Int) -> [U8] Never! {
-    seen := 0
+    ^seen: 0
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) {
             seen += 1
@@ -136,8 +136,8 @@ first_lines: fn(bytes: [U8], count: Int) -> [U8] Never! {
 // Line `number` (1-based) as `sed -n 'NUMBERp'` prints it, without its newline.
 line_at: fn(text: String, number: Int) -> String Never! {
     bytes: text.bytes()
-    line := 1
-    start := 0
+    ^line: 1
+    ^start: 0
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) {
             if line == number -> return byte_text(bytes, start, index)
@@ -153,8 +153,8 @@ line_at: fn(text: String, number: Int) -> String Never! {
 // separate, edge tabs are dropped, and the tenth name takes the rest of the line.
 row_fields: fn(line: String) -> Row Never! {
     bytes: line.bytes()
-    fields := [String]{}
-    at := 0
+    ^fields: [String]{}
+    ^at: 0
     loop at < bytes.len() && bytes[at] == (U8{9}) -> at += 1
     loop at < bytes.len() && fields.len() < 9 {
         start: at
@@ -162,7 +162,7 @@ row_fields: fn(line: String) -> Row Never! {
         fields.push(byte_text(bytes, start, at))
         loop at < bytes.len() && bytes[at] == (U8{9}) -> at += 1
     }
-    end := bytes.len()
+    ^end: bytes.len()
     loop end > at && bytes[end - 1] == (U8{9}) -> end -= 1
     if at < end -> fields.push(byte_text(bytes, at, end))
     loop fields.len() < 10 -> fields.push("")
@@ -182,7 +182,7 @@ field: fn(tree: Dyn, name: String) -> Dyn Never! {
 // partition's module.
 manifest_files: fn(text: String) -> [String] Err! {
     tree: json.parse(text) ?? return Err("not JSON: {err}")
-    named := [String]{}
+    ^named: [String]{}
     loop key in MANIFEST_SCRIPTS {
         if field(tree, key) == {
             .Text(name) -> named.push(name.copy())
@@ -202,9 +202,9 @@ manifest_files: fn(text: String) -> [String] Err! {
 }
 
 passthrough: fn(receipt: ProcessReceipt) -[IO]> Never! {
-    out := term.stdout()
+    ^out: term.stdout()
     out.write(receipt.output).drop("web bundle stdout")
-    errors := term.stderr()
+    ^errors: term.stderr()
     errors.write(receipt.errors).drop("web bundle stderr")
 }
 
@@ -235,9 +235,9 @@ check_size: fn(workload: String, metric: String, baseline: Int, current: Int, pe
 }
 
 check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
-    failures := 0
-    rows := 0
-    seen := [String]{}
+    ^failures: 0
+    ^rows: 0
+    ^seen: [String]{}
     loop line in read_lines(text) {
         row: row_fields(line)
         if row.version == "" || row.version.starts_with("#") -> next
@@ -289,8 +289,8 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
             .env("JET_ROOT", root)
             .env("TMPDIR", scratch)
             .output_limit(16777216)
-        built := false
-        log := [U8]{}
+        ^built: false
+        ^log: [U8]{}
         if build.run() == {
             .Ok(receipt) -> {
                 built = receipt.code == 0 && receipt.signal == None
@@ -300,7 +300,7 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         }
         files.write_bytes("{case_dir}/build.log", log).drop("build.log is only a record of the build")
         if !built {
-            errors := term.stderr()
+            ^errors: term.stderr()
             errors.write(String.from_bytes_lossy(first_lines(log, 120))).drop("web bundle stderr")
             return fail("build failed: {row.workload}")
         }

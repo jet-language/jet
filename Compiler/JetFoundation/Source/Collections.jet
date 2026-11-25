@@ -39,15 +39,15 @@ compiler_apply_order: fn<T>(rows: ^[T], order: [Int]) Never! {
     if count < 2 {
         return
     }
-    changed := false
+    ^changed: false
     loop index in 0..<count {
         if order[index] != index -> changed = true
     }
     if !changed {
         return
     }
-    destinations := [Int]{}
-    slots := [T?]{}
+    ^destinations: [Int]{}
+    ^slots: [T?]{}
     loop _ in 0..<count {
         destinations.push(0)
         slots.push(None)
@@ -71,7 +71,7 @@ compiler_apply_order: fn<T>(rows: ^[T], order: [Int]) Never! {
 // is reversed in place, so no owning payload is copied; reading a list field
 // of a borrowed owner into a binding would copy every row.
 compiler_take_rows: fn<T>(rows: ^[T]) -> [T] Never! {
-    taken := [T]{}
+    ^taken: [T]{}
     taken.try_reserve(rows.len()) ?? ()
     loop {
         row: rows.pop() ?? break
@@ -799,7 +799,9 @@ sema_collection_method_contract_fast: fn(receiver: Type, kind: SemaCollectionKin
             method == "slice" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "slice", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.ListSlice}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current})
             else -> None
         }
-        if row == .Val(found) -> return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        if row == .Val(found) {
+            return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        }
         return None
     }
     if family == CollectionReceivers.Map {
@@ -815,7 +817,9 @@ sema_collection_method_contract_fast: fn(receiver: Type, kind: SemaCollectionKin
             method == "values" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "values", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementIter, op: CollectionOp.Builtin{op: TBuiltinOp.Values}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current})
             else -> None
         }
-        if row == .Val(found) -> return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        if row == .Val(found) {
+            return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        }
         return None
     }
     if family == CollectionReceivers.Set {
@@ -827,7 +831,9 @@ sema_collection_method_contract_fast: fn(receiver: Type, kind: SemaCollectionKin
             method == "remove" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Set, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current})
             else -> None
         }
-        if row == .Val(found) -> return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        if row == .Val(found) {
+            return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        }
         return None
     }
     None
@@ -850,9 +856,9 @@ sema_collection_method_contract_in: fn(rows: [CollectionOperationRow], receiver:
     family: sema_collection_family(kind)
     loop row in rows {
         if row.name == method && row.status != CollectionStatus.Proposed && (collection_receivers_accept(row.receivers, family) || collection_window_write(receiver, row)) {
-            callbacks := [Int]{}
-            seeds := [Int]{}
-            comparator := false
+            ^callbacks: [Int]{}
+            ^seeds: [Int]{}
+            ^comparator: false
             loop (index, arg) in row.args {
                 if collection_arg_is_callback(arg) -> callbacks.push(index)
                 if arg == CollectionArg.Seed -> seeds.push(index)

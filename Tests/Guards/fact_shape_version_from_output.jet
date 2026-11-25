@@ -39,7 +39,7 @@ fsv_int: fn(value: Dyn) -> Int? {
 }
 
 fsv_keys: fn(tree: Dyn) -> [String] {
-    keys := [String]{}
+    ^keys: [String]{}
     if tree == .Object(entries) {
         loop entry in entries -> keys.push(entry.key.copy())
     }
@@ -48,7 +48,7 @@ fsv_keys: fn(tree: Dyn) -> [String] {
 
 // The JSON document `jet <args>` writes on stdout.
 fsv_emitted: fn(jet: String, args: [String]) -> Dyn {
-    command := [String]{jet}
+    ^command: [String]{jet}
     loop arg in args -> command.push(arg.copy())
     ran: fsv_process.cmd(command).stdout(.Capture).stderr(.Capture).run() ?? panic("run jet {args.join(" ")}: {err}")
     assert(ran.code == 0, "jet {args.join(" ")} failed: {fsv_process.combined_output(ran).trim()}")
@@ -73,7 +73,7 @@ fsv_row_version: fn(line: String) -> Int? {
 
 // The decimal number `text` starts with.
 fsv_leading_int: fn(text: String) -> Int? {
-    digits := [String]{}
+    ^digits: [String]{}
     loop scalar in text.chars() {
         ch: "{scalar}"
         if ch < "0" || ch > "9" -> break
@@ -99,11 +99,11 @@ fsv_leading_int: fn(text: String) -> Int? {
     nested_members: fsv_keys(nested)
 
     page: fsv_files.read(FSV_REFERENCE) ?? panic("read {FSV_REFERENCE}: {err}")
-    recorded := Int?{None}
-    table := [String]{}
-    facade_table := [String]{}
-    newest := 0
-    section := ""
+    ^recorded: Int?{None}
+    ^table: [String]{}
+    ^facade_table: [String]{}
+    ^newest: 0
+    ^section: ""
     loop line in page.lines() {
         if line.starts_with("## ") -> section = line.slice(3, line.len()).trim()
         if line.starts_with(FSV_VERSION_LINE) {
@@ -111,7 +111,9 @@ fsv_leading_int: fn(text: String) -> Int? {
             recorded = Val(number)
         }
         if section == "Fact shape" && fsv_row_member(line) == .Val(member) -> table.push(member)
-        if section == "Compiler facade projection" && fsv_row_member(line) == .Val(member) -> facade_table.push(member)
+        if section == "Compiler facade projection" && fsv_row_member(line) == .Val(member) {
+            facade_table.push(member)
+        }
         if section == "History" && fsv_row_version(line) == .Val(version) -> newest = version
     }
     current: recorded ?? panic("{FSV_REFERENCE} has no `{FSV_VERSION_LINE}` line")
@@ -120,15 +122,17 @@ fsv_leading_int: fn(text: String) -> Int? {
     assert(table == members, "{FSV_REFERENCE} records the members {table.join(", ")}, but jet inspect semindex writes {members.join(", ")}")
     assert(facade_table == nested_members, "{FSV_REFERENCE} records the facade members {facade_table.join(", ")}, but jet inspect compiler check writes {nested_members.join(", ")}")
 
-    stale := [String]{}
+    ^stale: [String]{}
     loop path in s3_truth_md_paths("Docs/Spec") {
         text: fsv_files.read(path) ?? panic("read {path}: {err}")
-        number := 0
+        ^number: 0
         loop line in text.lines() {
             number += 1
             parts: line.split_once(FSV_SPELLED_VERSION) ?? next
             spelled: fsv_leading_int(parts.after) ?? next
-            if spelled != emitted -> stale.push("{path}:{number} spells semindex_schema_version {spelled}")
+            if spelled != emitted {
+                stale.push("{path}:{number} spells semindex_schema_version {spelled}")
+            }
         }
     }
     assert(stale.len() == 0, "pages spell another semantic-index version than jet writes ({emitted}):\n{stale.join("\n")}")

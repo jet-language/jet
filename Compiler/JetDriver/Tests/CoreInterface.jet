@@ -49,7 +49,7 @@ interface_test_fixture_rows: fn() -> [JetDriverCoreSource] {
 // The interface rows of each Core unit of `rows`
 // (jet_driver_core_interface_units), each made.
 interface_test_units: fn(rows: ^^[JetDriverCoreSource], threads: CompilerThreads) -> [JetDriverCoreInterfaceUnit] {
-    made := jet_driver_core_interface_units(rows.move(), threads)
+    ^made: jet_driver_core_interface_units(rows.move(), threads)
     if made.problem == .Val(problem) -> panic("the Core interface rows were not made: {problem}")
     made.units.move()
 }
@@ -131,16 +131,16 @@ interface_test_fragments_read: fn(bytes: [U8], path: String, at: Int, fragments:
 }
 
 #Test("every built-in Core unit's interface reads back as written") {
-    rows := [JetDriverCoreSource]{}
-    texts := [String]{}
+    ^rows: [JetDriverCoreSource]{}
+    ^texts: [String]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         text: fs.read(row.path) ?? panic("cannot read {row.path}: {err}")
         rows.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text(text)})
         texts.push(rows[rows.len() - 1].source())
     }
     units: interface_test_units(rows.move(), compiler_threads_single())
-    bodies := 0
-    headless := [String]{}
+    ^bodies: 0
+    ^headless: [String]{}
     loop unit in units {
         bodies += unit.bodies.len()
         if unit.heads.len() == 0 -> headless.push(unit.path)
@@ -167,7 +167,7 @@ interface_test_fragments_read: fn(bytes: [U8], path: String, at: Int, fragments:
 // Every built-in Core unit, read from the tree, with the jet.runtime
 // interface units that ride with Core.
 interface_test_core_rows: fn() -> [JetDriverCoreSource] {
-    rows := [JetDriverCoreSource]{}
+    ^rows: [JetDriverCoreSource]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         text: fs.read(row.path) ?? panic("cannot read {row.path}: {err}")
         rows.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text(text)})
@@ -240,7 +240,7 @@ interface_test_request: fn(source: String, rows: [JetDriverCoreSource], interfac
         entry_root_identity: "interface-root",
         entry_path: "/interface-fixture/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(threads), JetDriverCompileMode.Check)
+    ^request: jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(threads), JetDriverCompileMode.Check)
     request.core_sources = rows
     request.core_interface = if interface.len() > 0 -> Val(InterfaceTestReader{bytes: interface}) else -> None
     request.trace_sink = Val(interface_test_sink(InterfaceTestTrace{path: path}))
@@ -269,7 +269,7 @@ interface_test_load_on: fn(source: String, rows: [JetDriverCoreSource], interfac
     fs.write(path, "") ?? panic("cannot start the trace: {err}")
     load: jet_driver_load(interface_test_request(source, rows, interface, threads, path))
     trace: fs.read(path) ?? panic("cannot read the trace: {err}")
-    counters := [String:Int]{}
+    ^counters: [String:Int]{}
     loop line in trace.split("\n") {
         parts: line.split(" = ").to_list()
         if parts.len() == 2 {
@@ -282,9 +282,9 @@ interface_test_load_on: fn(source: String, rows: [JetDriverCoreSource], interfac
 
 // The end of each function and trait method of `items` with a body.
 interface_test_body_ends: fn(items: [Item]) -> [Int:Bool] {
-    ends := [Int:Bool]{}
+    ^ends: [Int:Bool]{}
     loop item in items {
-        methods := [Func]{}
+        ^methods: [Func]{}
         if item == .Func(value) && value.body.len() > 0 -> ends[value.span.end] = true
         if item == .Struct(value) {
             methods.extend(value.methods)
@@ -312,7 +312,7 @@ interface_test_body_ends: fn(items: [Item]) -> [Int:Bool] {
 // The interiors of the bodies `bodies` a program without the bodies ending
 // in `ends` no longer holds: reach stripped them.
 interface_test_stripped: fn(bodies: [Span], ends: [Int:Bool]) -> [Span] {
-    stripped := [Span]{}
+    ^stripped: [Span]{}
     loop body in bodies {
         if ends.get(body.end) == None {
             stripped.push(Span{start: body.start + 1, end: body.end - 1})
@@ -332,7 +332,7 @@ interface_test_inside: fn(start: Int, end: Int, stripped: [Span]) -> Bool {
 // A program's side tables, each row as written, but for the rows of code
 // inside the `stripped` interiors.
 interface_test_tables: fn(program: Program, stripped: [Span]) -> [String] {
-    rows := [String]{}
+    ^rows: [String]{}
     loop span in program.block_spans {
         if !interface_test_inside(span.start, span.end, stripped) -> rows.push("block {span:Debug}")
     }
@@ -377,7 +377,7 @@ interface_test_tables: fn(program: Program, stripped: [Span]) -> [String] {
 // each Core module's bodies), which only the eager load parsed. Each name a
 // lazy module spells outside its imports the eager one spells too.
 interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult, units: [JetDriverCoreInterfaceUnit]) -> [String] {
-    differ := [String]{}
+    ^differ: [String]{}
     if eager.complete != lazy.complete -> differ.push("complete {eager.complete} {lazy.complete}")
     eager_diagnostics: loop diagnostic in eager.diagnostics -> "{diagnostic.code} {diagnostic.what}"
     lazy_diagnostics: loop diagnostic in lazy.diagnostics -> "{diagnostic.code} {diagnostic.what}"
@@ -388,7 +388,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
         differ.push("modules {eager.modules.len()} {lazy.modules.len()}")
         return differ
     }
-    bodies := [String:[Span]]{}
+    ^bodies: [String:[Span]]{}
     loop unit in units -> bodies[unit.module_name] = unit.bodies
     loop (index, module_row) in eager.modules {
         other: lazy.modules[index]
@@ -451,15 +451,15 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
         assert(module_row.units_mentions == None, module_row.module_name)
     }
     catalog: sema_units_catalog_names(SEMA_UNITS_CATALOG)
-    carried := 0
+    ^carried: 0
     loop module_row in lazy.load.modules {
         if module_row.units_mentions == None -> next
         path: lazy.load.source_units[module_row.source_unit_index].path
         loop file in lazy.load.source_files {
             if file.path != path -> next
-            scanned := [U8]{}
+            ^scanned: [U8]{}
             jet_driver_core_interface_put_mentions(scanned, Val(sema_units_source_mentions(file.source, catalog)))
-            held := [U8]{}
+            ^held: [U8]{}
             jet_driver_core_interface_put_mentions(held, module_row.units_mentions)
             assert(held == scanned, path)
             carried += 1
@@ -491,7 +491,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 
 #Test("the Core interface made on several threads is the bytes of one made on one") {
     rows: interface_test_core_rows()
-    text_bytes := 0
+    ^text_bytes: 0
     loop row in rows -> text_bytes += row.source().bytes().len()
     // Enough Core text for the interface to admit more than one thread.
     assert(text_bytes >= 2 * JET_DRIVER_CORE_INTERFACE_BYTES_PER_THREAD)
@@ -505,7 +505,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 // declaration, never parsing the text again.
 #Test("a Core unit whose ready parses are cut off stops the load as an internal problem") {
     source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
-    units := interface_test_units(interface_test_fixture_rows(), compiler_threads_single())
+    ^units: interface_test_units(interface_test_fixture_rows(), compiler_threads_single())
     assert(units[0].fragments.len() > 0)
     units[0].fragments = [U8]{}
     cut: interface_test_load(source, interface_test_fixture_rows(), jet_driver_core_interface_bytes(units))
@@ -537,7 +537,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 // its text, still lazily.
 #Test("a Core unit whose interface heads don't read back parses its heads from its text") {
     source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
-    units := interface_test_units(interface_test_fixture_rows(), compiler_threads_single())
+    ^units: interface_test_units(interface_test_fixture_rows(), compiler_threads_single())
     units[0].heads = units[0].heads[0..<units[0].heads.len() - 1]
     cut: interface_test_load(source, interface_test_fixture_rows(), jet_driver_core_interface_bytes(units))
     assert(cut.load.complete)

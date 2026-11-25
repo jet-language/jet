@@ -105,7 +105,7 @@ file_close: fn(f: ^SQLFile) -[DB]> Never! {
 // memjrnlCreateFile: move the content to a real file. On failure the
 // handle stays the in-memory journal it was.
 mem_create_file: fn(f: ^SQLFile) -[DB]> Int Never! {
-    real := os.os_open(f.name, f.open_flags) ?? return err.code
+    ^real: os.os_open(f.name, f.open_flags) ?? return err.code
     n: f.data.len()
     if n > 0 {
         rc: file_rc(os.os_write(real, f.data, n, 0))
@@ -145,7 +145,7 @@ file_write: fn(f: ^SQLFile, data: [U8], amt: Int, offset: Int) -[DB]> Int Never!
     if offset == 0 && f.data.len() > 0 {
         // The header rewrite: into the first chunk, past the end point
         // only where a later append overwrites it.
-        n := amt
+        ^n: amt
         if n > f.data.len() -> n = f.data.len()
         loop i in 0..<n -> f.data[i] = data[i]
         return base.OK
@@ -293,21 +293,21 @@ file_shm_unmap: fn(f: ^SQLFile, delete: Bool) -[DB]> Never! {
 }
 
 #Test("an in-memory journal appends, rewrites its header and truncates") {
-    f := file_closed()
+    ^f: file_closed()
     mem_journal_open(f)
     assert(file_is_open(f) && file_in_memory(f))
     assert(file_write(f, [U8]{1, 2, 3, 4}, 4, 0) == base.OK)
     assert(file_write(f, [U8]{5, 6}, 2, 4) == base.OK)
     assert(file_write(f, [U8]{9, 9}, 2, 0) == base.OK)
     assert(f.data == [U8]{9, 9, 3, 4, 5, 6})
-    buf := [U8]{0, 0, 0}
+    ^buf: [U8]{0, 0, 0}
     assert(file_read(f, buf, 3, 3) == base.OK)
     assert(buf == [U8]{4, 5, 6})
     assert(file_read(f, buf, 3, 4) == base.IOERR_SHORT_READ)
     // A write behind the end point truncates there first.
     assert(file_write(f, [U8]{7}, 1, 2) == base.OK)
     assert(f.data == [U8]{9, 9, 7})
-    size := 0
+    ^size: 0
     assert(file_size(f, size) == base.OK && size == 3)
     assert(file_truncate(f, 1) == base.OK && f.data == [U8]{9})
     file_close(f)

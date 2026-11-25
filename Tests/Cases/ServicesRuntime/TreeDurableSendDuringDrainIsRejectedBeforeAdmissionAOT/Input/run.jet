@@ -6,9 +6,9 @@ use {
 worker: fn() {}
 
 run: fn() {
-    temp := testing.temp_dir("tree-drain-reject")
+    ^temp: testing.temp_dir("tree-drain-reject")
     store: Path.from(temp).join("authority.log").to_string()
-    tree := service.tree("tree-drain-reject")
+    ^tree: service.tree("tree-drain-reject")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(store) ?? panic("state")
     tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")

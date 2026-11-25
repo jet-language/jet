@@ -204,7 +204,7 @@ web_result_letter: fn(m: IRModule, f: IRFunction) -> String Never! {
 
 // The signature of IR function `f`.
 web_function_sig: fn(m: IRModule, f: IRFunction) -> String Never! {
-    params := if web_returns_aggregate(m, f) -> "l" else -> ""
+    ^params: if web_returns_aggregate(m, f) -> "l" else -> ""
     loop slot in 0..<f.param_count {
         ty: web_slot_type(m, f, slot)
         if ty != 0 -> params = "{params}{web_type_letter(ty)}"
@@ -241,9 +241,9 @@ web_unsigned: fn(ty: IRType) -> Bool Never! {
 // The emitter.
 
 web_emitter: fn(m: IRModule, f: IRFunction) -> WebEmitter Never! {
-    locals := [Int]{}
-    types := [Int]{}
-    sret := -1
+    ^locals: [Int]{}
+    ^types: [Int]{}
+    ^sret: -1
     if web_returns_aggregate(m, f) {
         sret = 0
         types.push(WASM_I64)
@@ -267,7 +267,7 @@ web_emitter: fn(m: IRModule, f: IRFunction) -> WebEmitter Never! {
     base: types.len()
     scratch: [Int]{WASM_I64, WASM_I64, WASM_I64, WASM_I64, WASM_F64, WASM_F32, WASM_I64, WASM_I32, WASM_I32}
     loop ty in scratch -> types.push(ty)
-    areas := [Int]{}
+    ^areas: [Int]{}
     loop _ in 0..<f.op.len() -> areas.push(-1)
     WebEmitter{
         code: [U8]{},
@@ -297,11 +297,11 @@ web_emitter: fn(m: IRModule, f: IRFunction) -> WebEmitter Never! {
 // The function's code: its local declarations (runs of one type), its
 // instructions and `end`, with the fixups moved past the declarations.
 web_finish: fn(e: WebEmitter) -> WebBody Never! {
-    runs := [Int]{}
-    at := e.params
+    ^runs: [Int]{}
+    ^at: e.params
     loop at < e.local_types.len() {
         ty: e.local_types[at]
-        count := 0
+        ^count: 0
         loop at < e.local_types.len() && e.local_types[at] == ty {
             count += 1
             at += 1
@@ -309,7 +309,7 @@ web_finish: fn(e: WebEmitter) -> WebBody Never! {
         runs.push(count)
         runs.push(ty)
     }
-    code := [U8]{}
+    ^code: [U8]{}
     wasm_put_unsigned(code, runs.len() /% 2)
     loop index in 0..<(runs.len() /% 2) {
         wasm_put_unsigned(code, runs[2 * index])
@@ -318,12 +318,12 @@ web_finish: fn(e: WebEmitter) -> WebBody Never! {
     shift: code.len()
     code.extend(e.code)
     code.push(0x0b)
-    fixups := [Int]{}
+    ^fixups: [Int]{}
     loop index in 0..<(e.fixups.len() /% 2) {
         fixups.push(e.fixups[2 * index] + shift)
         fixups.push(e.fixups[2 * index + 1])
     }
-    lines := [Int]{}
+    ^lines: [Int]{}
     loop index in 0..<(e.lines.len() /% 2) {
         lines.push(e.lines[2 * index] + shift)
         lines.push(e.lines[2 * index + 1])

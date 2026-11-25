@@ -57,7 +57,7 @@ JetCLIToolStageValues: struct {
 }
 
 jet_cli_tool_stage_values: fn(document: String, overlays: ^^[JetDriverSourceDocument], program: ^^String) -> JetCLIToolStageValues Never! {
-    given := overlays.move()
+    ^given: overlays.move()
     given.push(JetDriverSourceDocument{path: jet_cli_tool_stage_file(document), source: program.move()})
     if jet_cli_prepare_overlays(document, jet_cli_tool_stage_file(document), given, false, None, JetDriverCompileMode.Comptime) == {
         .Refused(output) -> jet_cli_tool_stage_stopped(output.stderr.trim())
@@ -97,9 +97,9 @@ jet_cli_moment_hooks_run: fn(file: String, hooks: [JetDriverMomentHook], records
     if plan.calls.len() == 0 -> return None
     ran: jet_cli_tool_stage_values(file, [JetDriverSourceDocument]{}, plan.program.move())
     if ran.stop == .Val(stop) {
-        named := "a moment hook of `{file}`"
+        ^named: "a moment hook of `{file}`"
         if stop.span == .Val(span) && (stop.source_path ?? JET_CLI_TOOL_STAGE_FILE).ends_with(JET_CLI_TOOL_STAGE_FILE) {
-            at := -1
+            ^at: -1
             loop (index, start) in plan.starts {
                 if start <= span.start -> at = index
             }
@@ -163,13 +163,13 @@ jet_cli_fmt_block_hooks: fn(text: ^^String, origin: String, color: Bool, memo: ^
     if blocks.len() == 0 || !jet_cli_tool_stage_imports_package(text) || !cli_files.is_file(origin) {
         return jet_cli_fmt_formatted(text.move())
     }
-    overlays := [JetDriverSourceDocument]{JetDriverSourceDocument{path: jet_cli_overlay_path(origin), source: text.move()}}
+    ^overlays: [JetDriverSourceDocument]{JetDriverSourceDocument{path: jet_cli_overlay_path(origin), source: text.move()}}
     if !jet_driver_tool_stage_hooked(blocks, jet_cli_tool_stage_markers(origin, overlays, TOOL_STAGE_FMT_BLOCK, memo)) {
         unhooked: overlays.pop() ?? return jet_cli_fmt_formatted("")
         return jet_cli_fmt_formatted(unhooked.source)
     }
-    bodies := [Span]{}
-    program := ""
+    ^bodies: [Span]{}
+    ^program: ""
     if jet_cli_prepare_overlays(origin, origin, overlays, false, None, JetDriverCompileMode.Doc) == {
         .Refused(_) -> {}
         .Prepared(request, _) -> {
@@ -192,10 +192,10 @@ jet_cli_fmt_block_hooks: fn(text: ^^String, origin: String, color: Bool, memo: ^
     }
     // The first answer of each body, latest body first; a body inside one
     // already replaced keeps the outer answer.
-    answered := [JetDriverToolStageItem]{}
+    ^answered: [JetDriverToolStageItem]{}
     loop rows in run.answers.move() {
         loop row in rows.move() {
-            taken := false
+            ^taken: false
             loop body in answered {
                 if body.at == row.at -> taken = true
             }
@@ -204,8 +204,8 @@ jet_cli_fmt_block_hooks: fn(text: ^^String, origin: String, color: Bool, memo: ^
     }
     answered.sort_by(fn(left: JetDriverToolStageItem, right: JetDriverToolStageItem) { right.at <=> left.at })
     bytes: formatted.source.bytes()
-    spliced := ""
-    cursor := bytes.len()
+    ^spliced: ""
+    ^cursor: bytes.len()
     loop body in answered {
         if body.at + body.length > cursor -> next
         spliced = "{body.label}{foundation_byte_text(bytes, body.at + body.length, cursor)}{spliced}"

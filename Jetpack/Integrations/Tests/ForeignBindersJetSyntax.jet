@@ -20,7 +20,7 @@ use {
 
 // Every lexer and parser error in `source`, one line each.
 pkg_test_binder_syntax_errors: fn(source: String) -> [String] Never! {
-    errors := [String]{}
+    ^errors: [String]{}
     lexed: lex_generated(source.bytes())
     loop diagnostic in lexed.diagnostics { errors.push("lex {diagnostic.code}: {diagnostic.what}") }
     if errors.len() != 0 -> return errors
@@ -46,7 +46,7 @@ pkg_test_binder_syntax_errors: fn(source: String) -> [String] Never! {
         {name: "com", source: pkg_com_render_jet("office", com)},
     }
     // Report every binder that fails, not only the first.
-    failures := [String]{}
+    ^failures: [String]{}
     loop binder in rendered {
         errors: pkg_test_binder_syntax_errors(binder.source)
         if errors.len() != 0 {

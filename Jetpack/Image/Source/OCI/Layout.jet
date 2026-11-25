@@ -91,7 +91,7 @@ OCILayerDescriptor: struct {
     size: Int,
 
     tree: fn(self) -> Dyn Never! {
-        fields := [String:Dyn]{}
+        ^fields: [String:Dyn]{}
         fields["mediaType"] = Dyn.Text(self.media_type.copy())
         fields["digest"] = Dyn.Text(self.digest.copy())
         fields["size"] = Dyn.Int(self.size)
@@ -145,8 +145,8 @@ image_build_with_base: fn(spec: OCIBuildSpec, out_dir: String, ref_name: String,
             return Err(image_invalid("OCI base platform `{loaded.platform}` does not match image platform `{spec.platform}`"))
         }
     }
-    layers := [OCILayerDescriptor]{}
-    diff_ids := [String]{}
+    ^layers: [OCILayerDescriptor]{}
+    ^diff_ids: [String]{}
     if base_layout == .Val(loaded) {
         layers.extend(loaded.layers)
         diff_ids.extend(loaded.diff_ids)
@@ -247,7 +247,7 @@ image_publish_staged_copy: fn(source: String, stage: String, destination: String
 }
 
 image_copy_layout_tree: fn(source: String, destination: String) -[FS, Env]> ImageError! {
-    names := [String]{}
+    ^names: [String]{}
     loop entry in files.list_dir(source) -> names.push(entry.name)
     names.sort()
     loop name in names {
@@ -295,9 +295,9 @@ image_same_layout: fn(left: String, right: String) -[FS]> Bool ImageError! {
     if left_node != OCINode.Directory {
         return Err(image_invalid("OCI layout contains an unsupported filesystem node"))
     }
-    left_names := [String]{}
+    ^left_names: [String]{}
     loop entry in files.list_dir(left) -> left_names.push(entry.name)
-    right_names := [String]{}
+    ^right_names: [String]{}
     loop entry in files.list_dir(right) -> right_names.push(entry.name)
     left_names.sort()
     right_names.sort()
@@ -347,14 +347,14 @@ image_link_new_blob: fn(temporary: String, path: String, digest: String, data: [
 }
 
 image_write_index: fn(out_dir: String, manifest_digest: String, manifest_size: Int, ref_name: String) -[FS, Env]> ImageError! {
-    annotations := [String:Dyn]{}
+    ^annotations: [String:Dyn]{}
     annotations["org.opencontainers.image.ref.name"] = Dyn.Text(ref_name.copy())
-    descriptor := [String:Dyn]{}
+    ^descriptor: [String:Dyn]{}
     descriptor["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
     descriptor["digest"] = Dyn.Text("sha256:{manifest_digest}")
     descriptor["size"] = Dyn.Int(manifest_size)
     descriptor["annotations"] = Dyn.Object(annotations)
-    index := [String:Dyn]{}
+    ^index: [String:Dyn]{}
     index["schemaVersion"] = Dyn.Int(2)
     index["manifests"] = Dyn.Array([Dyn]{Dyn.Object(descriptor)})
     text: image_json_text(Dyn.Object(index)) ?? return Err(err)
@@ -364,30 +364,30 @@ image_write_index: fn(out_dir: String, manifest_digest: String, manifest_size: I
 // The OCI image config: `architecture`/`os`/`config`/`rootfs` only. No
 // `created` or `history`, because an embedded timestamp breaks determinism.
 image_config_json: fn(spec: OCIBuildSpec, diff_ids: [String], architecture: String) -> String ImageError! {
-    env := [Dyn]{}
+    ^env: [Dyn]{}
     loop entry in image_sorted_env(spec.env) -> env.push(Dyn.Text("{entry.key}={entry.value}"))
-    entrypoint := [Dyn]{}
+    ^entrypoint: [Dyn]{}
     loop argument in spec.entrypoint -> entrypoint.push(Dyn.Text(argument))
-    exposed := [String:Dyn]{}
+    ^exposed: [String:Dyn]{}
     loop port in image_sorted_unique_ints(spec.expose) {
         exposed["{port}/tcp"] = Dyn.Object([String:Dyn]{})
     }
-    container := [String:Dyn]{}
+    ^container: [String:Dyn]{}
     container["Env"] = Dyn.Array(env)
     container["ExposedPorts"] = Dyn.Object(exposed)
     container["Entrypoint"] = Dyn.Array(entrypoint)
     container["User"] = Dyn.Text("{spec.user}")
     if spec.healthcheck == .Val(command) {
-        health := [String:Dyn]{}
+        ^health: [String:Dyn]{}
         health["Test"] = Dyn.Array([Dyn]{Dyn.Text("CMD-SHELL"), Dyn.Text(command)})
         container["Healthcheck"] = Dyn.Object(health)
     }
-    ids := [Dyn]{}
+    ^ids: [Dyn]{}
     loop digest in diff_ids -> ids.push(Dyn.Text(digest))
-    rootfs := [String:Dyn]{}
+    ^rootfs: [String:Dyn]{}
     rootfs["type"] = Dyn.Text("layers")
     rootfs["diff_ids"] = Dyn.Array(ids)
-    document := [String:Dyn]{}
+    ^document: [String:Dyn]{}
     document["architecture"] = Dyn.Text(architecture.copy())
     document["os"] = Dyn.Text(IMAGE_OS)
     document["config"] = Dyn.Object(container)
@@ -396,13 +396,13 @@ image_config_json: fn(spec: OCIBuildSpec, diff_ids: [String], architecture: Stri
 }
 
 image_manifest_json: fn(config_digest: String, config_size: Int, layers: [OCILayerDescriptor]) -> String ImageError! {
-    config := [String:Dyn]{}
+    ^config: [String:Dyn]{}
     config["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_CONFIG)
     config["digest"] = Dyn.Text("sha256:{config_digest}")
     config["size"] = Dyn.Int(config_size)
-    descriptors := [Dyn]{}
+    ^descriptors: [Dyn]{}
     loop layer in layers -> descriptors.push(layer.tree())
-    manifest := [String:Dyn]{}
+    ^manifest: [String:Dyn]{}
     manifest["schemaVersion"] = Dyn.Int(2)
     manifest["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
     manifest["config"] = Dyn.Object(config)
@@ -455,7 +455,7 @@ image_load_base: fn(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
     }
     manifest_text: String.from_bytes(manifest_bytes) ?? return Err(image_invalid("OCI manifest is not UTF-8"))
     manifest: image_object(json.parse(manifest_text), "OCI manifest")
-    layers := [OCILayerDescriptor]{}
+    ^layers: [OCILayerDescriptor]{}
     loop value in image_array(manifest.get("layers"), "OCI manifest layers") {
         layer: image_object(value, "OCI layer descriptor")
         digest: image_string_field(layer, "digest")
@@ -483,7 +483,7 @@ image_load_base: fn(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
     platform: image_platform_for(image_string_field(config, "os"), image_string_field(config, "architecture"))
     rootfs_value: config.get("rootfs") ?? return Err(image_invalid("OCI config has no rootfs"))
     rootfs: image_object(rootfs_value, "OCI config rootfs")
-    diff_ids := [String]{}
+    ^diff_ids: [String]{}
     loop value in image_array(rootfs.get("diff_ids"), "OCI config diff_ids") {
         if value == {
             .Text(digest) -> {
@@ -501,9 +501,9 @@ image_load_base: fn(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
 
 // Sort by path so declaration order never affects the layer (stable).
 image_sorted_layer_files: fn(input: [LayerFile]) -> [LayerFile] Never! {
-    sorted := [LayerFile]{}
+    ^sorted: [LayerFile]{}
     loop file in input {
-        at := sorted.len()
+        ^at: sorted.len()
         loop at > 0 && sorted[at - 1].path > file.path -> at -= 1
         sorted.insert(at, file.copy())
     }
@@ -511,7 +511,7 @@ image_sorted_layer_files: fn(input: [LayerFile]) -> [LayerFile] Never! {
 }
 
 image_validate_layer_files: fn(layer_files: [LayerFile]) ImageError! {
-    seen := [String]{}
+    ^seen: [String]{}
     loop file in layer_files {
         raw: file.path.bytes()
         if raw.len() == 0 || raw.len() > IMAGE_MAX_LAYER_PATH_BYTES || file.path.starts_with("/") || file.path.contains("\\") || image_has_ascii_control(raw) {
@@ -553,7 +553,7 @@ image_read_blob: fn(root: String, digest: String) -[FS]> [U8] ImageError! {
         return Err(image_invalid("OCI layout root is not a real directory"))
     }
     hex: image_digest_hex(digest)
-    cursor := root.copy()
+    ^cursor: root.copy()
     components: [String]{"blobs", "sha256", hex}
     loop component in components {
         cursor = files.join(cursor, component)
@@ -578,7 +578,7 @@ image_object: fn(value: Dyn, label: String) -> [String:Dyn] ImageError! {
     if value == {
         // The object's ordered pairs, indexed by name.
         .Object(fields) -> {
-            members := [String:Dyn]{}
+            ^members: [String:Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value
             Ok(members)
         }
@@ -636,8 +636,8 @@ image_read_regular_bounded: fn(path: String, limit: Int) -[FS]> [U8] ImageError!
     if info.is_symlink || !info.is_file || info.size > limit {
         return Err(image_invalid("OCI input is not a bounded regular file"))
     }
-    reader := files.open(path, links: .Refuse)
-    bytes := [U8]{}
+    ^reader: files.open(path, links: .Refuse)
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
@@ -689,7 +689,7 @@ image_remove_stale_temporary: fn(path: String) -[FS]> ImageError! {
 
 // Create `path`, refusing an existing entry or a final link, and sync it.
 image_write_new_file: fn(path: String, bytes: [U8]) -[FS]> ImageError! {
-    writer := files.create(path, if_exists: .Refuse, links: .Refuse)
+    ^writer: files.create(path, if_exists: .Refuse, links: .Refuse)
     writer.write_bytes(bytes)
     writer.fsync()
 }
@@ -717,7 +717,7 @@ image_replace_through: fn(temporary: String, path: String, bytes: [U8]) -[FS]> I
 image_with_extension: fn(path: String, extension: String) -> String Never! {
     name: files.basename(path)
     raw: name.bytes()
-    dot := raw.len() - 1
+    ^dot: raw.len() - 1
     loop dot > 0 && (Int{raw[dot]}) != 46 -> dot -= 1
     stem: if dot > 0 -> pkg_bytes_text(raw, 0, dot) else -> name.copy()
     files.with_name(path, "{stem}.{extension}")
@@ -732,7 +732,7 @@ image_path_starts_with: fn(path: String, prefix: String) -> Bool Never! {
 
 // Refuse `..` components and any existing symlink along `path`.
 image_validate_real_path: fn(path: String) -[FS, Env]> ImageError! {
-    current := if files.is_abs(path) -> "/" else -> sys.current_dir()
+    ^current: if files.is_abs(path) -> "/" else -> sys.current_dir()
     loop component in files.split_slash(path) {
         if component == "" || component == "." -> next
         if component == ".." -> return Err(image_invalid("OCI path contains a parent component"))
@@ -760,17 +760,17 @@ image_ensure_real_layout_directory: fn(path: String) -[FS, Env]> ImageError! {
 
 // Key-sorted, with the last value for a repeated key.
 image_sorted_env: fn(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
-    by_key := [String:String]{}
+    ^by_key: [String:String]{}
     loop entry in entries -> by_key[entry.key] = entry.value
-    keys := by_key.keys().to_list()
+    ^keys: by_key.keys().to_list()
     keys.sort()
     loop key in keys -> ImageEnvVar{key: key.copy(), value: by_key[key]}
 }
 
 image_sorted_unique_ints: fn(values: [Int]) -> [Int] Never! {
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort()
-    unique := [Int]{}
+    ^unique: [Int]{}
     loop value in sorted {
         if unique.len() == 0 || unique[unique.len() - 1] != value -> unique.push(value)
     }

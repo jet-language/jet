@@ -17,15 +17,15 @@ Envelope: struct {
 }
 
 owned_local_nested_field_remains_reusable: fn() {
-    local := Envelope{inner: Inner{note: Val("local")}}
+    ^local: Envelope{inner: Inner{note: Val("local")}}
     if local.inner.note == Val(value) -> print(value)
     if local.inner.note == Val(value) -> print(value)
 }
 
 run: fn() {
-    borrowed := Envelope{inner: Inner{note: Val("borrowed")}}
+    ^borrowed: Envelope{inner: Inner{note: Val("borrowed")}}
     print(borrowed.borrowed())
-    owned := Envelope{inner: Inner{note: Val("owned")}}
+    ^owned: Envelope{inner: Inner{note: Val("owned")}}
     print(owned.owned())
     owned_local_nested_field_remains_reusable()
 }

@@ -19,7 +19,7 @@ ParseError: struct {
 }
 
 guarded: fn(name: String) -> Stream<Int> {
-    marker := CleanupMarker{name: name}
+    ^marker: CleanupMarker{name: name}
     defer close(marker)
     yield 1
     yield 2
@@ -32,13 +32,13 @@ check: fn(name: String, value: Int) -> Int ParseError! {
 }
 
 consume: fn(name: String) -> Int ParseError! {
-    total := 0
+    ^total: 0
     loop value in guarded(name) -> total += check(name, value)
     Ok(total)
 }
 
 consume_until_cancel: fn(started: Sender<Int>, gate: Receiver<Int>) -> Int {
-    total := 0
+    ^total: 0
     loop value in guarded("task") {
         total += value
         started.send(value)
@@ -91,7 +91,7 @@ run: fn() {
     gate_tx.close()
 
     // (e) dropping a borrowed adapter early leaves the owner intact.
-    items := [1, 2, 3]
+    ^items: [1, 2, 3]
     loop scaled in items.lazy().map(fn(n: Int) { n * 10 }) {
         print("borrowed: first {scaled}")
         break

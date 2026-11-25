@@ -22,12 +22,12 @@ mappings: fn() -[FS]> Int {
 
 run: fn() {
     { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
-    handles := [Task<Int>]{}
+    ^handles: [Task<Int>]{}
     loop _ in 0..<TASKS -> handles.push(task waiter(rx))
     time.sleep(500ms)
     parked_maps: mappings()
     loop _ in 0..<TASKS -> tx.send(1)
-    total := 0
+    ^total: 0
     loop handle in handles -> total += handle.join() ?? 0
     print("{total} of {TASKS} tasks completed")
     print("mappings while parked under 10000 {parked_maps < 10000}")

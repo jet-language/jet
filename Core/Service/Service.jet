@@ -158,7 +158,7 @@ priv __authority_signing_key: fn(authority: String) -> [U8] ServiceError! {
     if raw.len() != 67 || raw[0] != (U8{115}) || raw[1] != (U8{97}) || raw[2] != (U8{45}) {
         return Err(ServiceError.Revoked("service authority proof is malformed"))
     }
-    key := [U8]{}
+    ^key: [U8]{}
     loop i in 0..<32 {
         high: authority_hex_digit(Int{raw[3 + i * 2]}) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
         low: authority_hex_digit(Int{raw[4 + i * 2]}) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
@@ -261,7 +261,7 @@ endpoint_state_fixture: fn(authority: String, tree: String, worker: String, gene
             .Ok(_) | .Err(_) -> false
         },
     )
-    peers := [EndpointState]{}
+    ^peers: [EndpointState]{}
     peers.push(endpoint_state_fixture(token, "tree", "worker", 3, true, false))
     assert(
         if authority_validate_snapshot(identity, Val(stopped), peers) == {
@@ -443,7 +443,7 @@ priv replay_events: fn(tree: ServiceTree) -> String Never! {
         .Val(value) -> value.version
         .None -> 1
     }
-    events := [String]{}
+    ^events: [String]{}
     loop record in tree.event_log {
         event: read_state_record("v{version}:", record) ?? return "StateReplayError(invalid_record)"
         events.push(event)
@@ -457,15 +457,15 @@ read_state_record: fn(prefix: String, record: String) -> String ServiceError! {
     }
     raw: record.bytes()
     start: prefix.bytes().len()
-    separator := start
+    ^separator: start
     loop separator < raw.len() && raw[separator] != (U8{58}) -> separator += 1
     if separator == raw.len() -> return Err(ServiceError.Policy("state record is truncated"))
-    digits_start := start
+    ^digits_start: start
     if digits_start < separator && raw[digits_start] == (U8{43}) -> digits_start += 1
     if digits_start == separator {
         return Err(ServiceError.Policy("state record length is invalid"))
     }
-    length := 0
+    ^length: 0
     maximum: service_sys.usize_max()
     loop i in digits_start..<separator {
         digit: Int{raw[i]} - 48
@@ -490,7 +490,7 @@ priv __upgrade_receipt_display: fn(receipt: ServiceUpgradeReceipt) -> String Nev
 }
 
 priv tree_show: fn(tree: ServiceTree) -> String Never! {
-    handlers := [String]{}
+    ^handlers: [String]{}
     loop worker in tree.workers -> handlers.push("{worker.name}:{worker.handler_name}")
     restart: if tree.restart == {
         .OneForOne -> "OneForOne"
@@ -525,14 +525,14 @@ priv workflow_outcome: fn(tree: ServiceTree, run: Int | ServiceWorkflow) -> Task
 }
 
 priv observe: fn(tree: ServiceTree) -> String Never! {
-    running := 0
-    paused := 0
-    cancel_requested := 0
-    pending := 0
-    finished := 0
-    panicked := 0
-    canceled := 0
-    deadline_blown := 0
+    ^running: 0
+    ^paused: 0
+    ^cancel_requested: 0
+    ^pending: 0
+    ^finished: 0
+    ^panicked: 0
+    ^canceled: 0
+    ^deadline_blown: 0
     loop workflow in tree.workflows {
         if workflow.status == {
             .Running -> { running += 1 }
@@ -624,15 +624,21 @@ ServiceRuntime: struct {
     store: String,
     retention_ms: Int,
 
-    send: fn(self, endpoint: ServiceEndpoint, message: String, *, key: String) -> Delivery ServiceError! { runtime_send(self, endpoint, message, key) }
+    send: fn(self, endpoint: ServiceEndpoint, message: String, *, key: String) -> Delivery ServiceError! {
+        runtime_send(self, endpoint, message, key)
+    }
 
     commit: fn(self, delivery: Delivery) ServiceError! { runtime_commit(self, delivery) }
 
     retry: fn(self, delivery: Delivery) -> Delivery ServiceError! { runtime_retry(self, delivery) }
 
-    dead_letter: fn(self, delivery: Delivery) -> Delivery ServiceError! { runtime_dead_letter(self, delivery) }
+    dead_letter: fn(self, delivery: Delivery) -> Delivery ServiceError! {
+        runtime_dead_letter(self, delivery)
+    }
 
-    retain: fn(self, delivery: Delivery) -> Delivery ServiceError! { runtime_retain(self, delivery) }
+    retain: fn(self, delivery: Delivery) -> Delivery ServiceError! {
+        runtime_retain(self, delivery)
+    }
 }
 
 ServiceStateStore: struct {
@@ -666,32 +672,53 @@ ServiceTree: struct {
 
     set_restart: fn(^self, restart: ServiceRestart) ServiceError! { set_restart(self, restart) }
 
-    set_delivery: fn(^self, delivery: ServiceDelivery) ServiceError! { set_delivery(self, delivery) }
+    set_delivery: fn(^self, delivery: ServiceDelivery) ServiceError! {
+        set_delivery(self, delivery)
+    }
 
-    #ServiceGroupShape
-    group: fn(^self, name: String, workers: [String]) ServiceError! { group(self, name, workers) }
+    #ServiceGroupShape group: fn(^self, name: String, workers: [String]) ServiceError! {
+        group(self, name, workers)
+    }
 
     start: fn(^self) ServiceError! { start(self) }
 
     stop: fn(^self) ServiceError! { stop(self) }
 
-    send: fn(self, endpoint: ServiceEndpoint, message: String) ServiceError! { send(self, endpoint, message) }
+    send: fn(self, endpoint: ServiceEndpoint, message: String) ServiceError! {
+        send(self, endpoint, message)
+    }
 
-    send_durable: fn(^self, endpoint: ServiceEndpoint, message: String, *, key: String) -> Delivery ServiceError! { send_durable(self, endpoint, message, key) }
+    send_durable: fn(^self, endpoint: ServiceEndpoint, message: String, *, key: String) -> Delivery ServiceError! {
+        send_durable(self, endpoint, message, key)
+    }
 
-    receive: fn(^self, endpoint: ServiceEndpoint) -> String ServiceError! { receive(self, endpoint) }
+    receive: fn(^self, endpoint: ServiceEndpoint) -> String ServiceError! {
+        receive(self, endpoint)
+    }
 
-    mailbox_depth: fn<W: ServiceWorkerRef>(self, endpoint: W) -> Int ServiceError! { mailbox_depth(self, endpoint.__service_endpoint()) }
+    mailbox_depth: fn<W: ServiceWorkerRef>(self, endpoint: W) -> Int ServiceError! {
+        mailbox_depth(self, endpoint.__service_endpoint())
+    }
 
-    restarts: fn<W: ServiceWorkerRef>(self, endpoint: W) -> Int ServiceError! { restarts(self, endpoint.__service_endpoint()) }
+    restarts: fn<W: ServiceWorkerRef>(self, endpoint: W) -> Int ServiceError! {
+        restarts(self, endpoint.__service_endpoint())
+    }
 
-    fail_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! { fail_worker(self, endpoint.__service_endpoint()) }
+    fail_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! {
+        fail_worker(self, endpoint.__service_endpoint())
+    }
 
-    drain_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! { drain_worker(self, endpoint.__service_endpoint()) }
+    drain_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! {
+        drain_worker(self, endpoint.__service_endpoint())
+    }
 
-    partition_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! { partition_worker(self, endpoint.__service_endpoint()) }
+    partition_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! {
+        partition_worker(self, endpoint.__service_endpoint())
+    }
 
-    reconcile_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! { reconcile_worker(self, endpoint.__service_endpoint()) }
+    reconcile_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! {
+        reconcile_worker(self, endpoint.__service_endpoint())
+    }
 
     dead_letter_count: fn(self) -> Int Never! { dead_letter_count(self) }
 
@@ -703,9 +730,13 @@ ServiceTree: struct {
 
     set_state_empty: fn(^self) ServiceError! { set_state_empty(self) }
 
-    set_state_snapshot: fn(^self, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! { set_state_snapshot(self, store, schema, version, migration) }
+    set_state_snapshot: fn(^self, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+        set_state_snapshot(self, store, schema, version, migration)
+    }
 
-    set_state_event_log: fn(^self, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! { set_state_event_log(self, store, schema, version, migration) }
+    set_state_event_log: fn(^self, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+        set_state_event_log(self, store, schema, version, migration)
+    }
 
     commit_snapshot: fn(^self, payload: String) ServiceError! { commit_snapshot(self, payload) }
 
@@ -717,26 +748,41 @@ ServiceTree: struct {
 
     observe: fn(self) -> String Never! { observe(self) }
 
-    #ServiceWorkflowShape
-    workflow_start: fn(^self, id: String, version: Int) -> ServiceWorkflow ServiceError! { workflow_start(self, id, version) }
+    #ServiceWorkflowShape workflow_start: fn(^self, id: String, version: Int) -> ServiceWorkflow ServiceError! {
+        workflow_start(self, id, version)
+    }
 
-    workflow_step: fn(^self, run: Int | ServiceWorkflow, step: String) ServiceError! { workflow_step(self, run, step) }
+    workflow_step: fn(^self, run: Int | ServiceWorkflow, step: String) ServiceError! {
+        workflow_step(self, run, step)
+    }
 
-    workflow_activity: fn(^self, run: Int | ServiceWorkflow, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! { workflow_activity(self, run, activity, key, max_attempts) }
+    workflow_activity: fn(^self, run: Int | ServiceWorkflow, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! {
+        workflow_activity(self, run, activity, key, max_attempts)
+    }
 
-    workflow_activity_retry: fn(^self, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! { workflow_activity_retry(self, run, key, outcome) }
+    workflow_activity_retry: fn(^self, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! {
+        workflow_activity_retry(self, run, key, outcome)
+    }
 
-    workflow_activity_complete: fn(^self, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! { workflow_activity_complete(self, run, key, outcome) }
+    workflow_activity_complete: fn(^self, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! {
+        workflow_activity_complete(self, run, key, outcome)
+    }
 
-    workflow_history: fn(self, run: Int | ServiceWorkflow) -> String ServiceError! { workflow_history(self, run) }
+    workflow_history: fn(self, run: Int | ServiceWorkflow) -> String ServiceError! {
+        workflow_history(self, run)
+    }
 
-    workflow_outcome: fn(self, run: Int | ServiceWorkflow) -> TaskOutcome ServiceError! { workflow_outcome(self, run) }
+    workflow_outcome: fn(self, run: Int | ServiceWorkflow) -> TaskOutcome ServiceError! {
+        workflow_outcome(self, run)
+    }
 
-    #ServiceDirectoryName
-    directory_register: fn<W: ServiceWorkerRef>(^self, name: String, endpoint: W) ServiceError! { directory_register(self, name, endpoint.__service_endpoint()) }
+    #ServiceDirectoryName directory_register: fn<W: ServiceWorkerRef>(^self, name: String, endpoint: W) ServiceError! {
+        directory_register(self, name, endpoint.__service_endpoint())
+    }
 
-    #ServiceDirectoryName
-    directory_resolve: fn(self, name: String) -> ServiceEndpoint ServiceError! { directory_resolve(self, name) }
+    #ServiceDirectoryName directory_resolve: fn(self, name: String) -> ServiceEndpoint ServiceError! {
+        directory_resolve(self, name)
+    }
 
     handoff_generation: fn(^self) -> Int ServiceError! { handoff_generation(self) }
 
@@ -956,8 +1002,7 @@ priv ServiceDirectoryName: struct {
     }
 }
 
-#ServiceTreeName
-tree: fn(name: String) -> ServiceTree Never! {
+#ServiceTreeName tree: fn(name: String) -> ServiceTree Never! {
     ServiceTree{
         name: name,
         authority: "",
@@ -1012,7 +1057,7 @@ channel_new: fn(capacity: Int, values: [String]) -> Shared<ServiceChannel>? Neve
 }
 
 channel_try_send: fn(channel: Shared<ServiceChannel>, value: String) -> ChannelSend Never! {
-    guard := channel.guard_edit()
+    ^guard: channel.guard_edit()
     if guard.value.closed -> return ChannelSend.Closed
     if guard.value.values.len() - guard.value.head >= guard.value.capacity {
         return ChannelSend.Full
@@ -1022,7 +1067,7 @@ channel_try_send: fn(channel: Shared<ServiceChannel>, value: String) -> ChannelS
 }
 
 channel_try_receive: fn(channel: Shared<ServiceChannel>) -> ChannelReceive Never! {
-    guard := channel.guard_edit()
+    ^guard: channel.guard_edit()
     head: guard.value.head
     if head < guard.value.values.len() {
         value: guard.value.values[head].copy()  // copy: the slot is released by compaction below
@@ -1051,13 +1096,13 @@ channel_depth: fn(channel: Shared<ServiceChannel>) -> Int Never! {
 }
 
 channel_clear: fn(channel: Shared<ServiceChannel>) Never! {
-    guard := channel.guard_edit()
+    ^guard: channel.guard_edit()
     guard.value.values.clear()
     guard.value.head = 0
 }
 
 channel_close: fn(channel: Shared<ServiceChannel>) Never! {
-    guard := channel.guard_edit()
+    ^guard: channel.guard_edit()
     guard.value.closed = true
 }
 
@@ -1202,7 +1247,7 @@ service_current_dir: fn() -> String? Never! {
 
 // Absolute, lexically normalized store path: `.` dropped, `..` pops.
 authority_store_identity: fn(store: String) -> String Never! {
-    absolute := store.copy()  // copy: the caller keeps its store text
+    ^absolute: store.copy()  // copy: the caller keeps its store text
     if !store.starts_with("/") {
         if service_current_dir() == {
             .Val(directory) -> {
@@ -1211,7 +1256,7 @@ authority_store_identity: fn(store: String) -> String Never! {
             .None -> {}
         }
     }
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in absolute.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -1245,7 +1290,7 @@ authority_validate_store_path: fn(store: String) ServiceError! {
         .Err(.NotFound(_)) -> {}
         .Err(error) -> return Err(ServiceError.Unavailable("could not inspect service authority store: {error}"))
     }
-    parent := state_parent_lex(store, false)
+    ^parent: state_parent_lex(store, false)
     loop {
         directory: parent ?? break
         if directory != "" {
@@ -1422,7 +1467,7 @@ endpoint_new: fn(tree: String, worker: String, generation: Int, authority: Strin
 
 authority_register: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<ServiceChannel>?) ServiceError! {
     validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
-    registry := service_registry().guard_edit()
+    ^registry: service_registry().guard_edit()
     index: registry_index(registry.value.endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
     if index < 0 {
         loop state in registry.value.endpoints {
@@ -1482,7 +1527,7 @@ registry_row: fn(endpoints: [EndpointState], endpoint: ServiceEndpoint) -> Int S
 
 authority_update: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<ServiceChannel>?) ServiceError! {
     validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
-    registry := service_registry().guard_edit()
+    ^registry: service_registry().guard_edit()
     index: registry_row(registry.value.endpoints, endpoint)
     if started && registry.value.endpoints[index].partitioned {
         return Err(ServiceError.Partitioned("service endpoint authority is partitioned"))
@@ -1507,10 +1552,12 @@ priv init_feed_registry: fn() -> Shared<FeedRegistry> Never! {
     Shared{FeedRegistry{feeds: [EndpointFeed]{}}}
 }
 
-priv feed_registry: fn() -> Shared<FeedRegistry> Never! { core.mem.__process_shared(init_feed_registry) }
+priv feed_registry: fn() -> Shared<FeedRegistry> Never! {
+    core.mem.__process_shared(init_feed_registry)
+}
 
 priv feed_register: fn(endpoint: ServiceEndpoint, wake: service_tasks.Semaphore) Never! {
-    registry := feed_registry().guard_edit()
+    ^registry: feed_registry().guard_edit()
     registry.value.feeds.push(EndpointFeed{endpoint: endpoint, wake: wake})
 }
 
@@ -1518,7 +1565,7 @@ priv feed_register: fn(endpoint: ServiceEndpoint, wake: service_tasks.Semaphore)
 // A handoff or a rollback moves a worker to another generation, so the
 // feeder is found by its worker, not by the generation it was declared at.
 priv feed_wake: fn(endpoint: ServiceEndpoint) Never! {
-    registry := feed_registry().guard_read()
+    ^registry: feed_registry().guard_read()
     loop feed in registry.value.feeds {
         if feed.endpoint.authority == endpoint.authority && feed.endpoint.tree == endpoint.tree && feed.endpoint.worker == endpoint.worker {
             feed.wake.release()
@@ -1530,7 +1577,7 @@ priv feed_wake: fn(endpoint: ServiceEndpoint) Never! {
 // now: its started row that is not partitioned, at any generation. None
 // while the worker takes none.
 priv feed_current: fn(endpoint: ServiceEndpoint) -> ServiceEndpoint? Never! {
-    registry := service_registry().guard_read()
+    ^registry: service_registry().guard_read()
     loop state in registry.value.endpoints {
         if state.authority == endpoint.authority && state.tree == endpoint.tree && state.worker == endpoint.worker && state.started && !state.partitioned {
             return Val(ServiceEndpoint{tree: state.tree, worker: state.worker, generation: state.generation, authority: state.authority})
@@ -1541,7 +1588,7 @@ priv feed_current: fn(endpoint: ServiceEndpoint) -> ServiceEndpoint? Never! {
 
 authority_update_partitioned: fn(endpoint: ServiceEndpoint, partitioned: Bool) ServiceError! {
     validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
-    registry := service_registry().guard_edit()
+    ^registry: service_registry().guard_edit()
     index: registry_row(registry.value.endpoints, endpoint)
     registry.value.endpoints[index].partitioned = partitioned
     if partitioned -> registry.value.endpoints[index].started = false
@@ -1549,7 +1596,7 @@ authority_update_partitioned: fn(endpoint: ServiceEndpoint, partitioned: Bool) S
 
 authority_update_draining: fn(endpoint: ServiceEndpoint, draining: Bool) ServiceError! {
     validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
-    registry := service_registry().guard_edit()
+    ^registry: service_registry().guard_edit()
     index: registry_row(registry.value.endpoints, endpoint)
     registry.value.endpoints[index].draining = draining
 }
@@ -1710,7 +1757,7 @@ package_authority: fn(path: String) -[Env, FS, Rand]> String ServiceError! {
 }
 
 package_authority_write: fn(path: String, authority: String) -[FS]> IOError! {
-    writer := service_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(err)
+    ^writer: service_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(err)
     writer.write_bytes(authority.bytes()) ?? return Err(err)
     writer.fsync()
 }
@@ -1762,7 +1809,7 @@ authority_bind_store: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint) -> 
     authority_validate_runtime(runtime)
     __authority_validate(endpoint)
     store: authority_store_identity(runtime.store)
-    registry := service_registry().guard_edit()
+    ^registry: service_registry().guard_edit()
     index: registry_row(registry.value.endpoints, endpoint)
     if registry.value.endpoints[index].store == {
         .Val(bound) -> {
@@ -1785,7 +1832,7 @@ authority_bind_store: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint) -> 
 authority_adopt_alias: fn(source: ServiceEndpoint, authority: String) -> ServiceEndpoint ServiceError! {
     __authority_validate(source)
     alias: endpoint_new(source.tree, source.worker, source.generation, authority)
-    registry := service_registry().guard_edit()
+    ^registry: service_registry().guard_edit()
     source_index: registry_index(registry.value.endpoints, source.authority, source.worker, source.generation)
     if source_index < 0 {
         return Err(ServiceError.Partitioned("service endpoint authority is not registered"))
@@ -1804,7 +1851,7 @@ authority_adopt_alias: fn(source: ServiceEndpoint, authority: String) -> Service
             return Err(ServiceError.Revoked("service authority alias is already bound to another worker"))
         }
     } else {
-        alias_state := source_state.copy()  // copy: the alias row shares route facts and channel with its source
+        ^alias_state: source_state.copy()  // copy: the alias row shares route facts and channel with its source
         alias_state.authority = alias.authority.copy()  // copy: the returned endpoint keeps its authority
         registry.value.endpoints.push(alias_state)
     }
@@ -1821,7 +1868,7 @@ authority_rotate: fn(old: ServiceEndpoint, next: ServiceEndpoint, started: Bool,
     if old.tree != next.tree || old.worker != next.worker || old.authority != next.authority || old.generation == next.generation {
         return Err(ServiceError.Policy("service authority rotation must stay within one worker and change generation"))
     }
-    registry := service_registry().guard_edit()
+    ^registry: service_registry().guard_edit()
     old_index: registry_index(registry.value.endpoints, old.authority, old.worker, old.generation)
     if old_index < 0 {
         return Err(ServiceError.Partitioned("service endpoint authority is not registered"))
@@ -1840,7 +1887,7 @@ authority_rotate: fn(old: ServiceEndpoint, next: ServiceEndpoint, started: Bool,
             return Err(ServiceError.Partitioned("new service endpoint authority is partitioned"))
         }
     }
-    route := old_state.channel
+    ^route: old_state.channel
     if channel == .Val(fresh) -> route = Val(fresh)
     registry.value.endpoints[old_index].started = false
     registry.value.endpoints[old_index].draining = false
@@ -1875,7 +1922,7 @@ authority_has_uncommitted: fn(endpoint: ServiceEndpoint) -> Bool ServiceError! {
     bound: registry_store(endpoint)
     store: bound ?? return Ok(false)
     runtime: ServiceRuntime{store: store, retention_ms: 0}
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     entries: authority_entries(runtime, authority_read(runtime))
     now: service_now()
     loop entry in entries {
@@ -1916,7 +1963,7 @@ state_store: fn(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
         .Err(error) -> return Err(state_error("cannot inspect service state store: {stat_cause(error)}"))
     }
     windows: state_path_windows()
-    parent := state_parent_lex(path, windows)
+    ^parent: state_parent_lex(path, windows)
     loop {
         ancestor: parent ?? break
         if state_path_kind(ancestor) == {
@@ -1938,9 +1985,7 @@ state_store: fn(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
 
 // Metadata-only raw read: Windows identity acquisition would add failures that
 // the constructor's native symlink_metadata contract never had.
-state_path_kind: fn(path: String) -[FS.Read]> Int IOError! {
-    service_files_rt.path_kind(path)
-}
+state_path_kind: fn(path: String) -[FS.Read]> Int IOError! { service_files_rt.path_kind(path) }
 
 restart_one_for_one: fn() -> ServiceRestart Never! { ServiceRestart.OneForOne }
 
@@ -2026,7 +2071,7 @@ state_parent_lex: fn(path: String, windows: Bool) -> String? Never! {
     physical_root: prefix.length < raw.len() && state_separator(raw[prefix.length], windows, false)
     rooted: physical_root || prefix.implicit_root
     curdir: !rooted && prefix.length < raw.len() && raw[prefix.length] == (U8{46}) && (raw.len() == prefix.length + 1 || state_separator(raw[prefix.length + 1], windows, prefix.verbatim))
-    floor := prefix.length
+    ^floor: prefix.length
     if physical_root -> floor += 1
     if curdir -> floor += 1
     end: state_trim_suffix(raw, raw.len(), floor, windows, prefix.verbatim)
@@ -2035,7 +2080,7 @@ state_parent_lex: fn(path: String, windows: Bool) -> String? Never! {
         return None
     }
     begin: state_component_begin(raw, end, floor, windows, prefix.verbatim)
-    remaining := begin
+    ^remaining: begin
     if begin > floor -> remaining = begin - 1
     Val(state_path_slice(raw, state_trim_suffix(raw, remaining, floor, windows, prefix.verbatim)))
 }
@@ -2046,13 +2091,13 @@ state_separator: fn(value: U8, windows: Bool, verbatim: Bool) -> Bool Never! {
 }
 
 state_component_begin: fn(raw: [U8], end: Int, floor: Int, windows: Bool, verbatim: Bool) -> Int Never! {
-    start := end
+    ^start: end
     loop start > floor && !state_separator(raw[start - 1], windows, verbatim) -> start -= 1
     start
 }
 
 state_trim_suffix: fn(raw: [U8], limit: Int, floor: Int, windows: Bool, verbatim: Bool) -> Int Never! {
-    end := limit
+    ^end: limit
     loop end > floor {
         begin: state_component_begin(raw, end, floor, windows, verbatim)
         skipped: begin == end || (!verbatim && end == begin + 1 && raw[begin] == (U8{46}))
@@ -2064,13 +2109,13 @@ state_trim_suffix: fn(raw: [U8], limit: Int, floor: Int, windows: Bool, verbatim
 }
 
 state_path_slice: fn(raw: [U8], end: Int) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop i in 0..<end -> bytes.push(raw[i])
     String.from_bytes(bytes) ?? panic("path component boundary is not UTF-8")
 }
 
 state_next_separator: fn(raw: [U8], start: Int, verbatim: Bool) -> Int Never! {
-    i := start
+    ^i: start
     loop i < raw.len() && !state_separator(raw[i], true, verbatim) -> i += 1
     i
 }
@@ -2087,10 +2132,10 @@ state_prefix: fn(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
         if raw.len() >= 4 && raw[0] == (U8{92}) && raw[1] == (U8{92}) && raw[2] == (U8{63}) && raw[3] == (U8{92}) {
             if raw.len() >= 8 && raw[4] == (U8{85}) && raw[5] == (U8{78}) && raw[6] == (U8{67}) && state_separator(raw[7], true, false) {
                 server_end: state_next_separator(raw, 8, true)
-                share_start := server_end
+                ^share_start: server_end
                 if server_end < raw.len() -> share_start = server_end + 1
                 share_end: state_next_separator(raw, share_start, true)
-                length := server_end
+                ^length: server_end
                 if share_end > share_start -> length = share_end
                 return StatePathPrefix{length: length, verbatim: true, implicit_root: true}
             }
@@ -2103,7 +2148,7 @@ state_prefix: fn(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
             return StatePathPrefix{length: state_next_separator(raw, 4, false), verbatim: false, implicit_root: true}
         }
         server_end: state_next_separator(raw, 2, false)
-        share_start := server_end
+        ^share_start: server_end
         if server_end < raw.len() -> share_start = server_end + 1
         share_end: state_next_separator(raw, share_start, false)
         if server_end > 2 && share_end > share_start {
@@ -2166,8 +2211,8 @@ state_encode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, recor
     }
     prefix: "v{authority.version}:"
     header: "{SERVICE_STATE_MAGIC}\nadapter:{state_adapter_name(adapter)}\nschema:{workflow_frame(authority.schema)}\nversion:{authority.version}\nmigration:{workflow_frame(authority.migration)}\n"
-    parts := [String]{header}
-    size := header.bytes().len()
+    ^parts: [String]{header}
+    ^size: header.bytes().len()
     loop record in records {
         read_state_record(prefix, record)
         if record.bytes().len() > 1048576 || !valid_record_payload(record) {
@@ -2196,7 +2241,7 @@ service_parse_count: fn(text: String) -> Int? Never! {
 
 state_read_line: fn(cursor: ^StateCursor, label: String) -> String ServiceError! {
     if cursor.offset > cursor.bytes.len() -> return Err(state_error("{label} is truncated"))
-    end := cursor.offset
+    ^end: cursor.offset
     loop end < cursor.bytes.len() && cursor.bytes[end] != (U8{10}) -> end += 1
     if end == cursor.bytes.len() -> return Err(state_error("{label} is truncated"))
     line: String.from_bytes(cursor.bytes.slice(cursor.offset, end)) ?? return Err(state_error("{label} is not valid UTF-8"))
@@ -2207,7 +2252,7 @@ state_read_line: fn(cursor: ^StateCursor, label: String) -> String ServiceError!
 state_read_frame: fn(cursor: ^StateCursor, label: String) -> String ServiceError! {
     start: cursor.offset
     if start > cursor.bytes.len() -> return Err(state_error("{label} is truncated"))
-    colon := start
+    ^colon: start
     loop colon < cursor.bytes.len() && cursor.bytes[colon] != (U8{58}) -> colon += 1
     if colon == cursor.bytes.len() -> return Err(state_error("{label} length is missing"))
     length_text: String.from_bytes(cursor.bytes.slice(start, colon)) ?? return Err(state_error("{label} length is invalid"))
@@ -2224,7 +2269,7 @@ state_decode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, bytes
     if bytes.len() > 134217728 {
         return Err(state_error("service state store exceeds its byte limit"))
     }
-    cursor := StateCursor{bytes: bytes, offset: 0}
+    ^cursor: StateCursor{bytes: bytes, offset: 0}
     magic: state_read_line(cursor, "state magic")
     if magic == "JET-SERVICE-STATE/1" {
         return Err(state_error("service state store is version 1, an older format this runtime no longer reads; the american-tokens1 migration converts it"))
@@ -2266,7 +2311,7 @@ state_decode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, bytes
         return Err(state_error("state migration policy does not match the authority"))
     }
     prefix: "v{authority.version}:"
-    records := [String]{}
+    ^records: [String]{}
     loop cursor.offset < cursor.bytes.len() {
         if records.len() >= 100000 -> return Err(state_error("service state record limit exceeded"))
         record: state_read_frame(cursor, "state record")
@@ -2291,7 +2336,7 @@ state_validate_path: fn(path: String) ServiceError! {
         .Err(error) -> return Err(state_error("cannot inspect service state store: {stat_cause(error)}"))
     }
     windows: state_path_windows()
-    parent := state_parent_lex(path, windows)
+    ^parent: state_parent_lex(path, windows)
     loop {
         ancestor: parent ?? break
         if service_path_kind(ancestor) == {
@@ -2312,7 +2357,7 @@ state_validate_path: fn(path: String) ServiceError! {
 
 state_read_unlocked: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter) -> [String] ServiceError! {
     state_validate_path(authority.store)
-    row := [Int]{}
+    ^row: [Int]{}
     if service_stat(authority.store) == {
         .Ok(value) -> row = value
         .Err(.NotFound(_)) -> return Ok([String]{})
@@ -2324,7 +2369,7 @@ state_read_unlocked: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter
 }
 
 state_load: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter) -> [String] ServiceError! {
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     lock: authority_file_lock(authority.store, "state")
     state_read_unlocked(authority, adapter)
 }
@@ -2336,7 +2381,7 @@ priv StateSequence: struct {
 init_state_sequence: fn() -> Shared<StateSequence> Never! { Shared{StateSequence{next: 0}} }
 
 state_temp_sequence: fn() -> Int Never! {
-    sequence := core.mem.__process_shared(init_state_sequence).guard_edit()
+    ^sequence: core.mem.__process_shared(init_state_sequence).guard_edit()
     value: sequence.value.next
     sequence.value.next = value + 1
     value
@@ -2385,11 +2430,11 @@ state_write: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, record
 }
 
 state_append: fn(authority: TreeStateAuthority, record: String) ServiceError! {
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     lock: authority_file_lock(authority.store, "state")
     records: state_read_unlocked(authority, TreeStateAdapter.EventLog)
     if records.len() >= 100000 -> return Err(ServiceError.Policy("event-log record limit exceeded"))
-    row := [Int]{}
+    ^row: [Int]{}
     if service_stat(authority.store) == {
         .Ok(value) -> row = value
         .Err(.NotFound(_)) -> return state_write_unlocked(authority, TreeStateAdapter.EventLog, [String]{record})
@@ -2434,11 +2479,11 @@ priv RolloutState: struct {
 }
 
 rollout_snapshot: fn(tree: ServiceTree) -> RolloutState Never! {
-    workers := [RolloutWorker]{}
+    ^workers: [RolloutWorker]{}
     loop worker in tree.workers {
         workers.push(RolloutWorker{name: worker.name, generation: worker.endpoint.generation})
     }
-    directory := [RolloutDirectory]{}
+    ^directory: [RolloutDirectory]{}
     loop record in tree.directory {
         directory.push(RolloutDirectory{name: record.name, worker: record.endpoint.worker, generation: record.endpoint.generation})
     }
@@ -2457,7 +2502,7 @@ rollout_frame: fn(lines: ^[String], label: String, value: String) ServiceError! 
 }
 
 rollout_encode: fn(tree_name: String, state: RolloutState) -> [U8] ServiceError! {
-    lines := [String]{"JET-SERVICE-ROLLOUT/1\n"}
+    ^lines: [String]{"JET-SERVICE-ROLLOUT/1\n"}
     rollout_frame(lines, "tree", tree_name)
     rollout_scalar(lines, "generation", "{state.generation}")
     rollout_scalar(lines, "previous", "{state.previous_generation}")
@@ -2551,9 +2596,9 @@ rollout_name: fn(value: String, label: String) ServiceError! {
 // The start of the last `\nchecksum:` in `bytes`.
 rollout_checksum_marker: fn(bytes: [U8]) -> Int? Never! {
     marker: "\nchecksum:".bytes()
-    start := bytes.len() - marker.len()
+    ^start: bytes.len() - marker.len()
     loop start >= 0 {
-        matched := true
+        ^matched: true
         loop offset in 0..<marker.len() {
             if bytes[start + offset] != marker[offset] {
                 matched = false
@@ -2590,12 +2635,12 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> RolloutState ServiceError!
     }
     text: String.from_bytes(content) ?? return Err(state_error("rollout journal is not valid UTF-8"))
     pieces: text.split("\n").to_list()
-    collected := [String]{}
+    ^collected: [String]{}
     loop index in 0..<pieces.len() - 1 {
         piece: pieces[index]
         collected.push(if piece.ends_with("\r") -> piece.removesuffix("\r") else -> piece)
     }
-    lines := RolloutLines{lines: collected, next: 0}
+    ^lines: RolloutLines{lines: collected, next: 0}
     if lines.lines.len() == 0 || lines.lines[0] != "JET-SERVICE-ROLLOUT/1" {
         return Err(state_error("rollout journal magic is invalid"))
     }
@@ -2609,7 +2654,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> RolloutState ServiceError!
         return Err(state_error("rollout journal generation order is invalid"))
     }
     marker_text: rollout_read_line(lines, "upgrade")
-    last_upgrade := ServiceUpgradeReceipt?{None}
+    ^last_upgrade: ServiceUpgradeReceipt?{None}
     if marker_text == "present" {
         from_generation: rollout_read_scalar(lines, "upgrade_from")
         to_generation: rollout_read_scalar(lines, "upgrade_to")
@@ -2617,7 +2662,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> RolloutState ServiceError!
         rollback_store: rollout_read_frame(lines, "upgrade_store")
         rollback_available: rollout_read_bool(lines, "upgrade_available")
         pinned_count: rollout_read_count(lines, "pinned_count")
-        pinned := [String]{}
+        ^pinned: [String]{}
         loop _ in 0..<pinned_count {
             name: rollout_read_frame(lines, "pinned")
             rollout_name(name, "pinned shard")
@@ -2643,7 +2688,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> RolloutState ServiceError!
         return Err(state_error("rollout journal has a previous generation without a receipt"))
     }
     worker_count: rollout_read_count(lines, "worker_count")
-    workers := [RolloutWorker]{}
+    ^workers: [RolloutWorker]{}
     loop _ in 0..<worker_count {
         name: rollout_read_frame(lines, "worker")
         rollout_name(name, "worker")
@@ -2663,7 +2708,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> RolloutState ServiceError!
         workers.push(RolloutWorker{name: name, generation: worker_generation})
     }
     draining_count: rollout_read_count(lines, "draining_count")
-    draining := [String]{}
+    ^draining: [String]{}
     loop _ in 0..<draining_count {
         name: rollout_read_frame(lines, "draining")
         rollout_name(name, "draining worker")
@@ -2673,7 +2718,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> RolloutState ServiceError!
         draining.push(name)
     }
     partitioned_count: rollout_read_count(lines, "partitioned_count")
-    partitioned := [String]{}
+    ^partitioned: [String]{}
     loop _ in 0..<partitioned_count {
         name: rollout_read_frame(lines, "partitioned")
         rollout_name(name, "partitioned worker")
@@ -2683,14 +2728,14 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> RolloutState ServiceError!
         partitioned.push(name)
     }
     directory_count: rollout_read_count(lines, "directory_count")
-    directory := [RolloutDirectory]{}
+    ^directory: [RolloutDirectory]{}
     loop _ in 0..<directory_count {
         name: rollout_read_frame(lines, "directory_name")
         worker: rollout_read_frame(lines, "directory_worker")
         rollout_name(name, "directory name")
         rollout_name(worker, "directory worker")
         worker_generation: rollout_read_scalar(lines, "directory_generation")
-        duplicate := false
+        ^duplicate: false
         loop seen in directory {
             if seen.name == name -> duplicate = true
         }
@@ -2732,9 +2777,9 @@ rollout_operation_lock: fn(tree: ServiceTree) -> ServiceFileLock ServiceError! {
 rollout_store_load: fn(tree: ServiceTree) -> RolloutState? ServiceError! {
     authority: tree.state_authority ?? return Ok(None)
     path: rollout_path(authority)
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     lock: authority_file_lock(path, "rollout")
-    row := [Int]{}
+    ^row: [Int]{}
     if service_stat(path) == {
         .Ok(value) -> row = value
         .Err(_) -> return Ok(None)
@@ -2748,7 +2793,7 @@ rollout_store_write: fn(tree: ServiceTree) ServiceError! {
     authority: tree.state_authority ?? return Ok()
     path: rollout_path(authority)
     bytes: rollout_encode(tree.name, rollout_snapshot(tree))
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     lock: authority_file_lock(path, "rollout")
     state_create_parent(path, "rollout")
     state_validate_path(path)
@@ -2794,9 +2839,9 @@ restore_rollout_state: fn(tree: ^ServiceTree) ServiceError! {
         }
         .None -> {}
     }
-    generations := [Int]{}
+    ^generations: [Int]{}
     loop worker in tree.workers {
-        found := 0
+        ^found: 0
         loop entry in state.workers {
             if entry.name == worker.name {
                 found = entry.generation
@@ -2807,7 +2852,7 @@ restore_rollout_state: fn(tree: ^ServiceTree) ServiceError! {
         generations.push(found)
     }
     loop entry in state.directory {
-        recorded := 0
+        ^recorded: 0
         loop candidate in state.workers {
             if candidate.name == entry.worker {
                 recorded = candidate.generation
@@ -2872,7 +2917,9 @@ ServiceWorkflow: struct {
 
     sleep: fn(self, duration: Duration) ServiceError! { workflow_sleep(self, duration) }
 
-    activity: fn(self, activity: String, argument: String) -> String ServiceError! { workflow_activity_wait(self, activity, argument) }
+    activity: fn(self, activity: String, argument: String) -> String ServiceError! {
+        workflow_activity_wait(self, activity, argument)
+    }
 
     all: fn(self, values: [String]) -> [String] ServiceError! { workflow_all(self, values) }
 
@@ -2925,7 +2972,7 @@ workflow_handle: fn(tree: ServiceTree, run_id: Int) -> ServiceWorkflow ServiceEr
 workflow_replay_authority: fn(authority: TreeStateAuthority) -> [TreeWorkflowState] ServiceError! {
     records: state_load(authority, TreeStateAdapter.EventLog)
     prefix: "v{authority.version}:"
-    workflows := [TreeWorkflowState]{}
+    ^workflows: [TreeWorkflowState]{}
     loop record in records { workflow_apply(workflows, read_state_record(prefix, record)) }
     if workflows.len() > 100000 -> return Err(state_error("workflow run limit exceeded"))
     Ok(workflows)
@@ -2937,7 +2984,7 @@ workflow_replay: fn(tree: ServiceTree) -> [TreeWorkflowState] ServiceError! {
 
 // Reload from the durable log, keeping each run's in-memory replay cursor.
 workflow_sync_tree: fn(tree: ^ServiceTree) ServiceError! {
-    workflows := workflow_replay(tree)
+    ^workflows: workflow_replay(tree)
     loop index in 0..<workflows.len() {
         workflows[index].replay_cursor = workflow_cursor(tree.workflows, workflows[index].run_id)
     }
@@ -3025,7 +3072,7 @@ workflow_index_of: fn(workflows: [TreeWorkflowState], run_id: Int, label: String
 // After every activity has completed, the first failed activity outcome is
 // the run's outcome, otherwise Finished.
 workflow_refresh_outcome: fn(workflow: ^TreeWorkflowState) Never! {
-    keys := 0
+    ^keys: 0
     loop step in workflow.steps {
         definition: workflow_activity_parts(step) ?? next
         keys += 1
@@ -3134,8 +3181,8 @@ workflow_apply: fn(workflows: ^[TreeWorkflowState], payload: String) ServiceErro
         if run_id < 1 || count > 100000 {
             return Err(state_error("workflow all wait count is outside the bounded range"))
         }
-        values := [String]{}
-        rest := count_field.rest
+        ^values: [String]{}
+        ^rest: count_field.rest
         loop _ in 0..<count {
             field: workflow_take_field(rest, "all wait value")
             if field.value.bytes().len() > 1048576 {
@@ -3236,7 +3283,7 @@ workflow_last_is_sleep: fn(history: [String]) -> Bool Never! {
 workflow_append: fn(tree: ^ServiceTree, payload: String) ServiceError! {
     authority: workflow_authority(tree)
     lock: authority_file_lock(authority.store, "workflow")
-    applied := workflow_replay_authority(authority)
+    ^applied: workflow_replay_authority(authority)
     loop index in 0..<applied.len() {
         loop current in tree.workflows {
             if current.run_id == applied[index].run_id {
@@ -3266,7 +3313,7 @@ priv workflow_start: fn(tree: ^ServiceTree, id: String, version: Int) -> Service
             return workflow_handle(tree, tree.workflows[index].run_id)
         }
     }
-    maximum := 0
+    ^maximum: 0
     loop workflow in tree.workflows {
         if workflow.id == id && workflow.version != version && workflow.outcome == None {
             return Err(ServiceError.Policy("workflow `{id}` already has a different active version"))
@@ -3311,7 +3358,7 @@ priv workflow_step: fn(tree: ^ServiceTree, run: Int | ServiceWorkflow, step: Str
 // Wait points on a detached handle. Replay consumes the recorded decision;
 // a live wait records itself before it waits.
 workflow_handle_replay: fn(workflow: ServiceWorkflow, expected: String) -> Bool ServiceError! {
-    state := workflow.state.guard_edit()
+    ^state: workflow.state.guard_edit()
     cursor: state.value.replay_cursor
     if cursor == 0 {
         state.value.replay_cursor = state.value.history.len()
@@ -3330,8 +3377,8 @@ workflow_handle_replay: fn(workflow: ServiceWorkflow, expected: String) -> Bool 
 // handle's history must still match the log it extends.
 workflow_append_handle: fn(workflow: ServiceWorkflow, payload: String) ServiceError! {
     lock: authority_file_lock(workflow.authority.store, "workflow")
-    applied := workflow_replay_authority(workflow.authority)
-    state := workflow.state.guard_edit()
+    ^applied: workflow_replay_authority(workflow.authority)
+    ^state: workflow.state.guard_edit()
     index: workflow_find_run(applied, state.value.run_id) ?? return Err(ServiceError.Unknown("workflow run {state.value.run_id} not found"))
     applied[index].replay_cursor = state.value.replay_cursor
     if applied[index] != state.value {
@@ -3356,7 +3403,7 @@ workflow_find_run: fn(workflows: [TreeWorkflowState], run_id: Int) -> Int? Never
 priv workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! {
     nanos: duration.ns
     if workflow_handle_replay(workflow, "sleep:{nanos}") {
-        state := workflow.state.guard_edit()
+        ^state: workflow.state.guard_edit()
         cursor: state.value.replay_cursor
         if cursor < state.value.history.len() {
             if state.value.history[cursor] == "sleep-canceled" {
@@ -3411,7 +3458,7 @@ priv workflow_all: fn(workflow: ServiceWorkflow, values: [String]) -> [String] S
     }
     joined: values.join(",")
     if workflow_handle_replay(workflow, "all:{joined}") -> return Ok(values)
-    frames := [String]{"workflow-wait-all:{workflow.run_id}:{values.len()}:"}
+    ^frames: [String]{"workflow-wait-all:{workflow.run_id}:{values.len()}:"}
     loop value in values -> frames.push(workflow_frame(value))
     workflow_append_handle(workflow, frames.join(""))
     Ok(values)
@@ -3603,7 +3650,7 @@ workflow_activity_parts: fn(step: String) -> WorkflowActivityDefinition? Never! 
 
 workflow_activity_definition: fn(workflow: TreeWorkflowState, key: String) -> WorkflowActivityDefinition? Never! {
     loop step_index in 0..<workflow.steps.len() {
-        definition := workflow_activity_parts(workflow.steps[step_index]) ?? next
+        ^definition: workflow_activity_parts(workflow.steps[step_index]) ?? next
         if definition.key == key {
             definition.index = step_index
             return Val(definition)
@@ -3622,8 +3669,8 @@ workflow_activity_outcome: fn(outcomes: [ActivityOutcome], key: String) -> TaskO
 workflow_i64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return None
-    start := 0
-    negative := false
+    ^start: 0
+    ^negative: false
     if raw[0] == (U8{43}) -> start = 1
     if raw[0] == (U8{45}) {
         start = 1
@@ -3631,7 +3678,7 @@ workflow_i64: fn(text: String) -> Int? Never! {
     }
     if start == raw.len() -> return None
     limit: if negative -> 9223372036854775808 else -> 9223372036854775807
-    value := 0
+    ^value: 0
     loop i in start..<raw.len() {
         digit: Int{raw[i]} - 48
         if digit < 0 || digit > 9 || value > (limit - digit) /% 10 -> return None
@@ -3678,9 +3725,9 @@ workflow_replay_retry: fn(tree: ^ServiceTree, index: Int, key: String, maximum: 
 
 priv group: fn(tree: ^ServiceTree, name: String, workers: [String]) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot add groups after start"))
-    known := [String]{}
+    ^known: [String]{}
     loop worker in tree.workers -> known.push(worker.name)
-    groups := [{name: String, workers: [String]}]{}
+    ^groups: [{name: String, workers: [String]}]{}
     loop existing in tree.groups -> groups.push({name: existing.name, workers: existing.workers})
     validate_group(name, workers, known, groups)
     tree.groups.push(TreeGroup{name: name, restart: tree.restart, budget_max: tree.budget_max, budget_per_ms: tree.budget_per_ms, workers: workers})
@@ -3694,7 +3741,7 @@ validate_group: fn(name: String, workers: [String], known: [String], groups: [{n
         if existing.name == name -> return Err(ServiceError.Policy("group `{name}` already exists"))
     }
     loop worker in workers {
-        found := false
+        ^found: false
         loop existing in known {
             if existing == worker -> found = true
         }
@@ -3727,7 +3774,7 @@ priv chaos_fail: fn(tree: ^ServiceTree) -> Int ServiceError! {
         return Err(ServiceError.Policy("chaos failure counter exhausted"))
     }
     tree.chaos_fails += 1
-    endpoint := ServiceEndpoint?{None}
+    ^endpoint: ServiceEndpoint?{None}
     loop worker in tree.workers {
         if worker.running {
             endpoint = Val(worker.endpoint)
@@ -3767,7 +3814,7 @@ priv commit_snapshot: fn(tree: ^ServiceTree, payload: String) ServiceError! {
         return Err(ServiceError.Policy("snapshot record exceeds the state record limit"))
     }
     record: state_record("v{authority.version}:", payload)
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     state_write(authority, TreeStateAdapter.Snapshot, [String]{record})
     tree.snapshot = Val(record)
 }
@@ -3815,7 +3862,7 @@ valid_record_payload: fn(text: String) -> Bool Never! {
 }
 
 #Test("mutating service operations borrow the tree and preserve pre-start policy") {
-    fresh := tree("mutation-contract")
+    ^fresh: tree("mutation-contract")
     assert(
         if group(fresh, "g", [String]{"missing"}) == {
             .Err(.Unknown(message)) -> message == "group `g` references unknown worker `missing`"
@@ -3923,7 +3970,7 @@ directory_validate: fn(authority: String, tree_name: String, name: String, endpo
 
 // Exact lookup, then generation, proof, authority, running and draining.
 priv directory_resolve: fn(tree: ServiceTree, name: String) -> ServiceEndpoint ServiceError! {
-    entry := DirectoryRecord?{None}
+    ^entry: DirectoryRecord?{None}
     loop record in tree.directory {
         if record.name == name {
             entry = Val(record)
@@ -3959,7 +4006,7 @@ priv send: fn(tree: ServiceTree, endpoint: ServiceEndpoint, message: String) Ser
     if !valid_record_payload(message) {
         return Err(ServiceError.Policy("service message exceeds the 1 MiB limit"))
     }
-    draining := false
+    ^draining: false
     loop name in tree.draining {
         if name == endpoint.worker -> draining = true
     }
@@ -4051,7 +4098,7 @@ DeliveryEvent: struct {
 authority_error: fn(message: String) -> ServiceError Never! { ServiceError.Unavailable(message) }
 
 authority_record: fn(op: String, fields: [String]) -> String Never! {
-    parts := [String]{op}
+    ^parts: [String]{op}
     loop field in fields {
         parts.push("|{field.bytes().len()}:{service_encoding.bytes_to_hex(field.bytes())}")
     }
@@ -4064,7 +4111,7 @@ authority_unhex: fn(text: String) -> [U8]? Never! {
     raw: text.bytes()
     count: raw.len() /% 2
     if count * 2 != raw.len() -> return None
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop index in 0..<count {
         high: authority_hex_digit(Int{raw[index * 2]}) ?? return None
         low: authority_hex_digit(Int{raw[index * 2 + 1]}) ?? return None
@@ -4079,7 +4126,7 @@ authority_parse_record: fn(line: String) -> DeliveryRecord ServiceError! {
     if head.len() == 0 -> return Err(authority_error("service authority record has no operation"))
     // A non-ASCII lead is never a known operation.
     op: String.from_bytes(head.slice(0, 1)) ?? "?"
-    fields := [String]{}
+    ^fields: [String]{}
     loop index in 1..<parts.len() {
         field: parts[index].split_once(":") ?? return Err(authority_error("service authority field is malformed"))
         length: service_parse_count(field.before) ?? return Err(authority_error("service authority field length is malformed"))
@@ -4096,7 +4143,7 @@ authority_parse_record: fn(line: String) -> DeliveryRecord ServiceError! {
 // One line without its terminator; a trailing carriage return is not part
 // of the record.
 authority_parse_line: fn(raw: [U8]) -> DeliveryRecord ServiceError! {
-    end := raw.len()
+    ^end: raw.len()
     if end > 0 && raw[end - 1] == (U8{13}) -> end -= 1
     line: String.from_bytes(raw.slice(0, end)) ?? return Err(authority_error("service authority field is not UTF-8"))
     authority_parse_record(line)
@@ -4104,7 +4151,7 @@ authority_parse_line: fn(raw: [U8]) -> DeliveryRecord ServiceError! {
 
 // Offset just past the last newline, or 0.
 authority_complete_end: fn(bytes: [U8]) -> Int Never! {
-    index := bytes.len()
+    ^index: bytes.len()
     loop index > 0 {
         if bytes[index - 1] == (U8{10}) -> return index
         index -= 1
@@ -4131,7 +4178,7 @@ authority_tail_is_record: fn(bytes: [U8], complete_end: Int) -> Bool Never! {
 authority_read: fn(runtime: ServiceRuntime) -> [DeliveryRecord] ServiceError! {
     authority_validate_store_path(runtime.store)
     lock: authority_file_lock(runtime.store, "store")
-    row := [Int]{}
+    ^row: [Int]{}
     if service_stat(runtime.store) == {
         .Ok(value) -> row = value
         .Err(.NotFound(_)) -> return Ok([DeliveryRecord]{})
@@ -4145,7 +4192,7 @@ authority_read: fn(runtime: ServiceRuntime) -> [DeliveryRecord] ServiceError! {
         return Err(authority_error("could not read service store: stream did not contain valid UTF-8"))
     }
     complete_end: authority_complete_end(bytes)
-    lines := 0
+    ^lines: 0
     loop byte in bytes {
         if byte == (U8{10}) -> lines += 1
     }
@@ -4154,12 +4201,12 @@ authority_read: fn(runtime: ServiceRuntime) -> [DeliveryRecord] ServiceError! {
     if authority_tail_is_record(bytes, complete_end) {
         return Err(authority_error("service authority log ends with a truncated record"))
     }
-    records := [DeliveryRecord]{}
+    ^records: [DeliveryRecord]{}
     if complete_end == 0 -> return Ok(records)
     // Lines of the complete prefix without its final newline; a last empty
     // line before that newline is not a record.
     end: complete_end - 1
-    start := 0
+    ^start: 0
     loop index in 0..<end {
         if bytes[index] == (U8{10}) {
             records.push(authority_parse_line(bytes.slice(start, index)))
@@ -4174,7 +4221,7 @@ authority_append: fn(runtime: ServiceRuntime, op: String, fields: [String]) Serv
     authority_validate_store_path(runtime.store)
     lock: authority_file_lock(runtime.store, "store")
     record: authority_record(op, fields).bytes()
-    existing := [U8]{}
+    ^existing: [U8]{}
     if service_read_bytes(runtime.store) == {
         .Ok(value) -> existing = value
         .Err(.NotFound(_)) -> {
@@ -4200,7 +4247,7 @@ authority_append: fn(runtime: ServiceRuntime, op: String, fields: [String]) Serv
             return Err(authority_error("service authority log ends with a truncated record"))
         }
         // Drop the incomplete tail and add the record in one atomic replacement.
-        repaired := existing.slice(0, complete_end)
+        ^repaired: existing.slice(0, complete_end)
         loop byte in record -> repaired.push(byte)
         temporary: "{runtime.store}.jet-repair-{service_pid()}-{service_now()}-{state_temp_sequence()}"
         if service_replace_private(runtime.store, temporary, repaired) == {
@@ -4270,7 +4317,7 @@ delivery_entry_index: fn(entries: [DeliveryEntry], id: String) -> Int? Never! {
 // Replay the log: acceptances, retention extensions and signed lifecycle
 // events, each validated before it changes an entry.
 authority_entries: fn(runtime: ServiceRuntime, records: [DeliveryRecord]) -> [DeliveryEntry] ServiceError! {
-    entries := [DeliveryEntry]{}
+    ^entries: [DeliveryEntry]{}
     loop record in records {
         fields: record.fields
         if record.op == "S" && fields.len() == 10 {
@@ -4361,9 +4408,9 @@ pending_queue_slot: fn(pending: ^PendingRegistry, store: String, endpoint: Servi
 
 pending_remove: fn(store: String, id: String) Never! {
     identity: authority_store_identity(store)
-    pending := pending_registry().guard_edit()
+    ^pending: pending_registry().guard_edit()
     loop slot in 0..<pending.value.queues.len() {
-        kept := [PendingEntry]{}
+        ^kept: [PendingEntry]{}
         loop entry in pending.value.queues[slot].entries {
             if entry.id != id || authority_store_identity(entry.store) != identity {
                 kept.push(entry)
@@ -4390,7 +4437,7 @@ pending_contains: fn(entries: [PendingEntry], candidate: PendingEntry) -> Bool N
 }
 
 authority_cleanup_expired: fn(runtime: ServiceRuntime, entries: [DeliveryEntry], now: Int) -> Bool ServiceError! {
-    cleaned := false
+    ^cleaned: false
     loop entry in entries {
         if delivery_entry_expired(entry, now) {
             authority_append_event(runtime, entry, DeliveryState.DeadLettered, entry.attempts, now)
@@ -4416,7 +4463,7 @@ authority_enqueue: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint, id: St
     store: authority_bind_store(runtime, endpoint)
     authority_validate_text(id, "service id", 1024, false)
     authority_validate_text(message, "service message", 1048576, true)
-    pending := pending_registry().guard_edit()
+    ^pending: pending_registry().guard_edit()
     slot: pending_queue_slot(pending.value, store, endpoint)
     loop entry in pending.value.queues[slot].entries {
         if entry.id == id && entry.store == store -> return Ok()
@@ -4447,7 +4494,7 @@ priv RouteScan: struct {
 // A stopped replacement never revokes a running source generation.
 authority_route_scan: fn(entry: DeliveryEntry) -> RouteScan Never! {
     registry: service_registry().guard_read()
-    scan := RouteScan{exact: None, newer_exact: None, candidates: [RouteCandidate]{}, exact_stopped: false, newer_generation: false}
+    ^scan: RouteScan{exact: None, newer_exact: None, candidates: [RouteCandidate]{}, exact_stopped: false, newer_generation: false}
     loop state in registry.value.endpoints {
         if state.tree != entry.tree || state.worker != entry.worker || state.partitioned -> next
         if state.generation > entry.generation && state.started -> scan.newer_generation = true
@@ -4479,7 +4526,7 @@ authority_route_select: fn(scan: RouteScan, store: String, entry: DeliveryEntry)
         .Val(newer) -> return Ok(newer)
         .None -> {}
     }
-    bound := [RouteCandidate]{}
+    ^bound: [RouteCandidate]{}
     loop candidate in scan.candidates {
         if candidate.store == {
             .Val(value) -> {
@@ -4551,13 +4598,13 @@ authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [
     bound: authority_bound_store(endpoint)
     store: bound ?? return Ok([PendingEntry]{})
     runtime: ServiceRuntime{store: store, retention_ms: 0}
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     entries: authority_load(runtime)
-    pending := pending_registry().guard_edit()
+    ^pending: pending_registry().guard_edit()
     slot: pending_queue_slot(pending.value, store, endpoint)
     identity: authority_store_identity(store)
     loop entry in entries {
-        queued := false
+        ^queued: false
         loop queued_entry in pending.value.queues[slot].entries {
             if queued_entry.id == entry.id && authority_store_identity(queued_entry.store) == identity {
                 queued = true
@@ -4581,8 +4628,8 @@ authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [
         }
         pending.value.queues[slot].entries.push(PendingEntry{id: entry.id, message: entry.message, store: store})
     }
-    selected := [PendingEntry]{}
-    retained := [PendingEntry]{}
+    ^selected: [PendingEntry]{}
+    ^retained: [PendingEntry]{}
     loop entry in pending.value.queues[slot].entries {
         if selected.len() < capacity && !pending_skipped(skip_ids, entry.id) -> selected.push(entry) else {
             retained.push(entry)
@@ -4600,9 +4647,9 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [PendingEntry]
     bound: authority_bound_store(endpoint)
     store: bound ?? return Err(ServiceError.Partitioned("service endpoint has no bound authority store for pending delivery"))
     runtime: ServiceRuntime{store: store, retention_ms: 0}
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     receipts: authority_load(runtime)
-    normalized := [PendingEntry]{}
+    ^normalized: [PendingEntry]{}
     loop entry in entries {
         authority_validate_text(entry.id, "service id", 1024, false)
         authority_validate_text(entry.message, "service message", 1048576, true)
@@ -4626,13 +4673,13 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [PendingEntry]
         }
         normalized.push(PendingEntry{id: entry.id, message: entry.message, store: store})
     }
-    pending := pending_registry().guard_edit()
+    ^pending: pending_registry().guard_edit()
     slot: pending_queue_slot(pending.value, store, endpoint)
     queue: pending.value.queues[slot].entries
     if queue.len() > 100000 - normalized.len() {
         return Err(ServiceError.Full("service authority pending delivery queue is full"))
     }
-    restored := [PendingEntry]{}
+    ^restored: [PendingEntry]{}
     loop entry in normalized {
         if !pending_contains(queue, entry) && !pending_contains(restored, entry) {
             restored.push(entry)
@@ -4649,7 +4696,7 @@ authority_mark_delivered: fn(store: String, id: String) ServiceError! {
     runtime: ServiceRuntime{store: store, retention_ms: 0}
     authority_validate_runtime(runtime)
     operation: authority_operation_lock(runtime, id)
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     entries: authority_entries(runtime, authority_read(runtime))
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
@@ -4680,9 +4727,9 @@ delivery_entry: fn(delivery: Delivery) -> DeliveryRead ServiceError! {
     runtime: ServiceRuntime{store: delivery.store, retention_ms: 0}
     authority_validate_runtime(runtime)
     operation: authority_operation_lock(runtime, delivery.id)
-    _gate := authority_gate().guard_edit()
-    records := authority_read(runtime)
-    entries := authority_entries(runtime, records)
+    ^_gate: authority_gate().guard_edit()
+    ^records: authority_read(runtime)
+    ^entries: authority_entries(runtime, records)
     if authority_cleanup_expired(runtime, entries, service_now()) {
         records = authority_read(runtime)
         entries = authority_entries(runtime, records)
@@ -4710,7 +4757,9 @@ priv delivery_status: fn(delivery: Delivery) -> DeliveryState ServiceError! {
 }
 
 // A single status sample, not polling or a scheduler wait.
-priv delivery_wait: fn(delivery: Delivery) -> DeliveryState ServiceError! { delivery_status(delivery) }
+priv delivery_wait: fn(delivery: Delivery) -> DeliveryState ServiceError! {
+    delivery_status(delivery)
+}
 
 priv delivery_receipt: fn(delivery: Delivery) -> DeliveryReceipt ServiceError! {
     entry: delivery_entry(delivery).entry
@@ -4721,7 +4770,7 @@ priv delivery_receipt: fn(delivery: Delivery) -> DeliveryReceipt ServiceError! {
 priv delivery_events: fn(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
     read: delivery_entry(delivery)
     entry: read.entry
-    events := [DeliveryEvent]{}
+    ^events: [DeliveryEvent]{}
     loop record in read.records {
         fields: record.fields
         if record.op == "S" && fields.len() == 10 && fields[0] == delivery.id {
@@ -4764,7 +4813,7 @@ priv delivery_cancel: fn(delivery: Delivery) -> Delivery ServiceError! {
     runtime: ServiceRuntime{store: delivery.store, retention_ms: 0}
     authority_validate_runtime(runtime)
     operation: authority_operation_lock(runtime, delivery.id)
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     entries: authority_entries(runtime, authority_read(runtime))
     index: delivery_entry_index(entries, delivery.id) ?? return Err(ServiceError.Unknown("delivery `{delivery.id}` is unknown"))
     entry: entries[index]
@@ -4791,8 +4840,8 @@ priv runtime_send: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint, messag
     authority_validate_text(key, "idempotency key", 1024, false)
     authority_validate_text(message, "service message", 1048576, true)
     operation: authority_operation_lock(runtime, key)
-    _gate := authority_gate().guard_edit()
-    entries := authority_entries(runtime, authority_read(runtime))
+    ^_gate: authority_gate().guard_edit()
+    ^entries: authority_entries(runtime, authority_read(runtime))
     now: service_now()
     if authority_cleanup_expired(runtime, entries, now) {
         entries = authority_entries(runtime, authority_read(runtime))
@@ -4838,8 +4887,8 @@ priv retry_accept: fn(runtime: ServiceRuntime, delivery: Delivery) -> DeliveryEn
     id: delivery.id
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
-    _gate := authority_gate().guard_edit()
-    entries := authority_entries(runtime, authority_read(runtime))
+    ^_gate: authority_gate().guard_edit()
+    ^entries: authority_entries(runtime, authority_read(runtime))
     now: service_now()
     if authority_cleanup_expired(runtime, entries, now) {
         entries = authority_entries(runtime, authority_read(runtime))
@@ -4870,7 +4919,7 @@ priv runtime_dead_letter: fn(runtime: ServiceRuntime, delivery: Delivery) -> Del
 priv authority_dead_letter: fn(runtime: ServiceRuntime, id: String) -> DeliveryEntry ServiceError! {
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     entries: authority_load(runtime)
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
@@ -4886,7 +4935,7 @@ priv runtime_retain: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery
     id: delivery.id
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
-    _gate := authority_gate().guard_edit()
+    ^_gate: authority_gate().guard_edit()
     entries: authority_load(runtime)
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
@@ -4911,10 +4960,10 @@ priv runtime_commit: fn(runtime: ServiceRuntime, delivery: Delivery) ServiceErro
 priv authority_commit: fn(runtime: ServiceRuntime, id: String) ServiceError! {
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
-    _gate := authority_gate().guard_edit()
-    entries := authority_entries(runtime, authority_read(runtime))
+    ^_gate: authority_gate().guard_edit()
+    ^entries: authority_entries(runtime, authority_read(runtime))
     now: service_now()
-    target_expired := false
+    ^target_expired: false
     if delivery_entry_index(entries, id) == {
         .Val(found) -> { target_expired = delivery_entry_expired(entries[found], now) }
         .None -> {}
@@ -4967,7 +5016,7 @@ delivery_generation_key: fn(authority: String, generation: Int) -> [U8] ServiceE
 }
 
 delivery_signature_payload: fn(fields: [String]) -> [U8] Never! {
-    payload := [U8]{}
+    ^payload: [U8]{}
     loop field in fields {
         bytes: field.bytes()
         length: bytes.len()
@@ -5042,13 +5091,13 @@ worker_restore_mailbox: fn(tree: ^ServiceTree, index: Int, messages: [String], d
 local_delivery_ids: fn(tree: ServiceTree, endpoint: ServiceEndpoint, store: String) -> [String] Never! {
     index: worker_slot(tree, endpoint) ?? return [String]{}
     messages: channel_snapshot(tree.workers[index].channel)
-    ids := [String]{}
+    ^ids: [String]{}
     loop record in tree.idempotency {
         recorded: record.endpoint
         if recorded.tree != endpoint.tree || recorded.worker != endpoint.worker || recorded.authority != endpoint.authority {
             next
         }
-        queued := false
+        ^queued: false
         loop message in messages {
             if message == record.message -> queued = true
         }
@@ -5112,7 +5161,7 @@ priv send_durable: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint, message: St
         .Ok(_) -> {}
     }
     if tree.idempotency.len() < 100000 {
-        seen := false
+        ^seen: false
         loop record in tree.idempotency {
             if record.key == idempotency_key -> seen = true
         }
@@ -5128,14 +5177,14 @@ priv receive: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) -> String Servic
     validate_tree_endpoint(tree, endpoint)
     draining: worker_contains(tree.draining, endpoint.worker)
     slot: worker_slot(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree"))
-    available := 0
+    ^available: 0
     if tree.workers[slot].running || draining {
         available = tree.workers[slot].capacity - channel_depth(tree.workers[slot].channel)
     }
     // A drain closes new endpoint sends but still consumes durable receipts
     // already in flight; otherwise a retried receipt pins the shard forever.
     if available > 0 {
-        local_ids := [String]{}
+        ^local_ids: [String]{}
         if tree.delivery == ServiceDelivery.DurableAtLeastOnce {
             if tree.state_authority == {
                 .Val(authority) -> {
@@ -5169,7 +5218,7 @@ priv receive: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) -> String Servic
         return Err(ServiceError.NotStarted("worker `{name}` is not running"))
     }
     before: channel_snapshot(channel)
-    message := ""
+    ^message: ""
     if channel_try_receive(channel) == {
         .Value(value) -> message = value
         .Empty -> return Err(ServiceError.Ambiguous("mailbox for `{name}` is empty"))
@@ -5202,12 +5251,12 @@ worker_exact: fn(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int? Never! {
 // Requeue the undelivered suffix, then restore the mailbox; each runs once
 // even when the other fails.
 pending_delivery_rollback: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: [PendingEntry], before: [String], draining: Bool, error: ServiceError) -> ServiceError Never! {
-    authority_error := ServiceError?{None}
+    ^authority_error: ServiceError?{None}
     if authority_requeue_pending(endpoint, remaining) == {
         .Err(failure) -> { authority_error = Val(failure) }
         .Ok(_) -> {}
     }
-    mailbox_error := ServiceError?{None}
+    ^mailbox_error: ServiceError?{None}
     if worker_restore_mailbox(tree, index, before, draining) == {
         .Err(failure) -> { mailbox_error = Val(failure) }
         .Ok(_) -> {}
@@ -5377,7 +5426,7 @@ priv batched_declare: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q])
     timer_inbox: Shared<service_actor.Actor<Job<Q, ()>>?>{None}
     attempts: tree.budget_max + 1
     step: fn(state: BatchState<Q>, job: Job<Q, ()>) -> BatchState<Q> Err! {
-        current := state
+        ^current: state
         if job == {
             .Message(message, _, receipt) -> {
                 room_free(room, starved, wake)
@@ -5396,7 +5445,7 @@ priv batched_declare: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q])
         current
     }
     inbox: service_actor.spawn(BatchState<Q>{pending: [Q]{}, receipts: [PendingEntry]{}, round: 0}, step) ?? return Err(worker_task_failed(name))
-    slot := timer_inbox.guard_edit()
+    ^slot: timer_inbox.guard_edit()
     slot.value = Val(inbox)
     feed_start(id, inbox, room, starved, wake, decoder)
     Ok(Endpoint<Q, ()>{id: id, inbox: inbox, room: room})
@@ -5416,7 +5465,7 @@ priv typed_declare: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler_name: 
     starved: Shared<Bool>{false}
     wake: service_tasks.Semaphore.new(0)
     step: fn(held: S, job: Job<Q, R>) -> S Err! {
-        current := held
+        ^current: held
         if job == {
             .Message(message, reply, receipt) -> {
                 room_free(room, starved, wake)
@@ -5441,7 +5490,7 @@ priv receipt_commit: fn(entry: PendingEntry) Never! {
 
 // Frees a mailbox place, and wakes the feeder when it waits for one.
 priv room_free: fn(room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore) Never! {
-    flag := starved.guard_edit()
+    ^flag: starved.guard_edit()
     room.release()
     if flag.value {
         flag.value = false
@@ -5452,7 +5501,7 @@ priv room_free: fn(room: service_tasks.Semaphore, starved: Shared<Bool>, wake: s
 // Takes a mailbox place for the feeder; with none free, the next freed
 // place wakes it.
 priv room_take: fn(room: service_tasks.Semaphore, starved: Shared<Bool>) -> Bool Never! {
-    flag := starved.guard_edit()
+    ^flag: starved.guard_edit()
     if room.try_acquire() -> return true
     flag.value = true
     false
@@ -5519,7 +5568,7 @@ priv feed_one: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R
 // `attempts` runs, then starts the next batch. A handled batch commits its
 // durable receipts.
 priv hand_over: fn<Q>(state: ^BatchState<Q>, handler: fn([Q]) Err!, attempts: Int) {
-    handled := false
+    ^handled: false
     loop _ in 1..attempts {
         task.group group {
             attempt: task handler(state.pending)
@@ -5614,12 +5663,12 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
 
 #Test("a typed worker runs its handler once per message in send order and answers a call") {
     seen: Shared<[Int]>{[Int]{}}
-    services := tree("typed")
+    ^services: tree("typed")
     record: typed_worker(
         services,
         "record",
         fn(n: Int) -> Int Err! {
-            log := seen.guard_edit()
+            ^log: seen.guard_edit()
             log.value.push(n)
             n * 10
         },
@@ -5635,7 +5684,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
 }
 
 #Test("a stateful worker keeps its state and a failed call is Ambiguous, then begins again from state") {
-    services := tree("stateful")
+    ^services: tree("stateful")
     total: stateful_worker(
         services,
         "total",
@@ -5659,7 +5708,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
 #Test("a typed send past the mailbox capacity is Full") {
     entered: service_tasks.Semaphore.new(0)
     gate: service_tasks.Semaphore.new(0)
-    services := tree("bounded")
+    ^services: tree("bounded")
     slow: typed_worker(
         services,
         "slow",
@@ -5689,17 +5738,17 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     sizes: Shared<[Int]>{[Int]{}}
     failed: Shared<Bool>{false}
     done: service_tasks.Semaphore.new(0)
-    services := tree("batched")
+    ^services: tree("batched")
     bulk: batched_worker(
         services,
         "bulk",
         fn(items: [Int]) Err! {
-            flag := failed.guard_edit()
+            ^flag: failed.guard_edit()
             if !flag.value {
                 flag.value = true
                 return Err("first batch fails once")
             }
-            log := sizes.guard_edit()
+            ^log: sizes.guard_edit()
             log.value.push(items.len())
             done.release()
         },
@@ -5724,7 +5773,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     seen: Shared<[Int]>{[Int]{}}
     failed: Shared<Bool>{false}
     done: service_tasks.Semaphore.new(0)
-    services := tree("typed-durable")
+    ^services: tree("typed-durable")
     set_delivery(services, delivery_durable()) ?? panic("durable delivery")
     store: state_store(path) ?? panic("state store")
     set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
@@ -5732,13 +5781,13 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         services,
         "record",
         fn(n: Int) -> Int Err! {
-            flag := failed.guard_edit()
+            ^flag: failed.guard_edit()
             if n == 2 && !flag.value {
                 flag.value = true
                 done.release()
                 return Err("the first try fails")
             }
-            log := seen.guard_edit()
+            ^log: seen.guard_edit()
             log.value.push(n)
             done.release()
             n
@@ -5768,7 +5817,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     path: "{dir}/state.log"
     seen: Shared<[Int]>{[Int]{}}
     done: service_tasks.Semaphore.new(0)
-    services := tree("typed-durable-handoff")
+    ^services: tree("typed-durable-handoff")
     set_delivery(services, delivery_durable()) ?? panic("durable delivery")
     store: state_store(path) ?? panic("state store")
     set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
@@ -5776,7 +5825,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         services,
         "record",
         fn(n: Int) -> Int Err! {
-            log := seen.guard_edit()
+            ^log: seen.guard_edit()
             log.value.push(n)
             done.release()
             n
@@ -5806,7 +5855,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     path: "{dir}/state.log"
     seen: Shared<[Int]>{[Int]{}}
     failed: Shared<Bool>{false}
-    services := tree("typed-durable-handoff-retry")
+    ^services: tree("typed-durable-handoff-retry")
     set_delivery(services, delivery_durable()) ?? panic("durable delivery")
     store: state_store(path) ?? panic("state store")
     set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
@@ -5814,12 +5863,12 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         services,
         "record",
         fn(n: Int) -> Int Err! {
-            flag := failed.guard_edit()
+            ^flag: failed.guard_edit()
             if n == 2 && !flag.value {
                 flag.value = true
                 return Err("the first try fails")
             }
-            log := seen.guard_edit()
+            ^log: seen.guard_edit()
             log.value.push(n)
             n
         },
@@ -5859,7 +5908,7 @@ priv delivery_settle: fn(delivery: Delivery) -> DeliveryState ServiceError! {
 #Test("a typed worker's mailbox depth counts its waiting messages, and a drain and a handoff wait for them") {
     gate: service_tasks.Semaphore.new(0)
     ran: service_tasks.Semaphore.new(0)
-    services := tree("typed-depth")
+    ^services: tree("typed-depth")
     slow: typed_worker(
         services,
         "slow",
@@ -5920,13 +5969,13 @@ worker_index: fn(names: [String], name: String) -> Int? Never! {
 }
 
 worker_names: fn(tree: ServiceTree) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop worker in tree.workers -> names.push(worker.name)
     names
 }
 
 group_members: fn(tree: ServiceTree) -> [[String]] Never! {
-    members := [[String]]{}
+    ^members: [[String]]{}
     loop group in tree.groups -> members.push(group.workers)
     members
 }
@@ -5942,7 +5991,7 @@ worker_supervisor: fn(groups: [[String]], worker: String) -> Int Never! {
 worker_scope: fn(names: [String], groups: [[String]], worker: String) -> {supervisor: Int, scope: [Int]} Never! {
     supervisor: worker_supervisor(groups, worker)
     if supervisor < groups.len() {
-        scope := [Int]{}
+        ^scope: [Int]{}
         loop member in groups[supervisor] {
             if worker_index(names, member) == {
                 .Val(index) -> { scope.push(index) }
@@ -5951,9 +6000,9 @@ worker_scope: fn(names: [String], groups: [[String]], worker: String) -> {superv
         }
         return {supervisor: supervisor, scope: scope}
     }
-    scope := [Int]{}
+    ^scope: [Int]{}
     loop i in 0..<names.len() {
-        grouped := false
+        ^grouped: false
         loop group in groups {
             if worker_contains(group, names[i]) -> grouped = true
         }
@@ -5964,7 +6013,7 @@ worker_scope: fn(names: [String], groups: [[String]], worker: String) -> {superv
 
 worker_targets: fn(restart: ServiceRestart, scope: [Int], failed: Int) -> [Int] Never! {
     if restart == ServiceRestart.OneForOne -> return [Int]{failed}
-    begin := 0
+    ^begin: 0
     if restart == ServiceRestart.RestForOne {
         loop i in 0..<scope.len() {
             if scope[i] == failed {
@@ -5973,7 +6022,7 @@ worker_targets: fn(restart: ServiceRestart, scope: [Int], failed: Int) -> [Int] 
             }
         }
     }
-    out := [Int]{}
+    ^out: [Int]{}
     loop i in begin..<scope.len() -> out.push(scope[i])
     out
 }
@@ -5992,7 +6041,7 @@ worker_window_start: fn(now: Int, per: Int) -> Int Never! {
 
 worker_spent: fn(restarts: [Int], now: Int, per: Int) -> Int Never! {
     start: worker_window_start(now, per)
-    spent := 0
+    ^spent: 0
     loop at in restarts {
         if at > start -> spent += 1
     }
@@ -6002,7 +6051,7 @@ worker_spent: fn(restarts: [Int], now: Int, per: Int) -> Int Never! {
 // Record a restart at `now`, keeping only the instants the budget counts.
 worker_pruned: fn(restarts: [Int], now: Int, per: Int) -> [Int] Never! {
     start: worker_window_start(now, per)
-    out := [Int]{}
+    ^out: [Int]{}
     loop at in restarts {
         if at > start -> out.push(at)
     }
@@ -6017,9 +6066,9 @@ priv fail_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError
     validate_tree_endpoint(tree, endpoint)
     names: worker_names(tree)
     scope: worker_scope(names, group_members(tree), endpoint.worker)
-    restart := tree.restart
-    max := tree.budget_max
-    per := tree.budget_per_ms
+    ^restart: tree.restart
+    ^max: tree.budget_max
+    ^per: tree.budget_per_ms
     if scope.supervisor < tree.groups.len() {
         restart = tree.groups[scope.supervisor].restart
         max = tree.groups[scope.supervisor].budget_max
@@ -6045,14 +6094,14 @@ priv fail_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError
             return Err(ServiceError.Unavailable(reason))
         }
     }
-    desired := [Bool]{}
+    ^desired: [Bool]{}
     loop i in 0..<tree.workers.len() {
         desired.push(if index_listed(targets, i) -> !worker_contains(tree.partitioned, tree.workers[i].name) else -> tree.workers[i].running)
     }
     loop i in 0..<tree.workers.len() {
         if authority_update(tree.workers[i].endpoint, desired[i], None) == {
             .Err(error) -> {
-                rollback := ServiceError?{None}
+                ^rollback: ServiceError?{None}
                 loop k in 0..<i {
                     undo: i - 1 - k
                     if authority_update(tree.workers[undo].endpoint, tree.workers[undo].running, None) == {
@@ -6139,7 +6188,7 @@ names_remove: fn(names: ^[String], name: String) Never! {
 }
 
 receipt_unpinned: fn(receipt: ServiceUpgradeReceipt?, name: String) -> ServiceUpgradeReceipt? Never! {
-    current := receipt ?? return None
+    ^current: receipt ?? return None
     names_remove(current.pinned_shards, name)
     Val(current)
 }
@@ -6173,7 +6222,7 @@ promote_worker_generation: fn(tree: ^ServiceTree, name: String) -> Bool ServiceE
     if running {
         if bind_delivery_endpoint(tree, next) == {
             .Err(error) -> {
-                recovery := ServiceError?{None}
+                ^recovery: ServiceError?{None}
                 if authority_rotate(next, old, running, old_draining, Val(tree.workers[index].channel)) == {
                     .Err(failure) -> { recovery = Val(failure) }
                     .Ok(_) -> {}
@@ -6205,13 +6254,13 @@ promote_worker_generation: fn(tree: ^ServiceTree, name: String) -> Bool ServiceE
 // The durable records a restart resumes from, when the tree has an authority.
 start_load_state: fn(tree: ^ServiceTree) ServiceError! {
     authority: tree.state_authority ?? return Ok()
-    records := state_load(authority, tree.state_adapter)
+    ^records: state_load(authority, tree.state_adapter)
     if tree.state_adapter == TreeStateAdapter.Snapshot {
         tree.snapshot = if records.len() == 0 -> None else -> Val(records[0])
     } else if tree.state_adapter == TreeStateAdapter.EventLog { tree.event_log = records }
-    materialized := tree.workflows.copy()  // copy: the comparison must not move the live cursors
+    ^materialized: tree.workflows.copy()  // copy: the comparison must not move the live cursors
     loop index in 0..<materialized.len() -> materialized[index].replay_cursor = 0
-    durable := workflow_replay(tree)
+    ^durable: workflow_replay(tree)
     loop index in 0..<durable.len() -> durable[index].replay_cursor = 0
     if materialized.len() != 0 && materialized != durable {
         return Err(state_error("in-memory workflow history does not match the durable workflow log"))
@@ -6250,7 +6299,7 @@ priv start: fn(tree: ^ServiceTree) ServiceError! {
         }
         tree.workers[index].channel = channel_new(tree.workers[index].capacity, messages) ?? return Err(ServiceError.Policy("mailbox channel could not restore its queued messages"))
     }
-    activated := [Int]{}
+    ^activated: [Int]{}
     loop index in 0..<tree.workers.len() {
         draining: worker_contains(tree.draining, tree.workers[index].name)
         partitioned: worker_contains(tree.partitioned, tree.workers[index].name)
@@ -6259,7 +6308,7 @@ priv start: fn(tree: ^ServiceTree) ServiceError! {
         if start_activate(tree, index, !partitioned && (running || draining), running) == {
             .Err(error) -> {
                 authority_update(tree.workers[index].endpoint, false, None).drop("the activation failure is the reported error")
-                rollback := ServiceError?{None}
+                ^rollback: ServiceError?{None}
                 loop done in activated {
                     if authority_update(tree.workers[done].endpoint, false, None) == {
                         .Err(failure) -> {
@@ -6298,7 +6347,7 @@ priv stop: fn(tree: ^ServiceTree) ServiceError! {
     lock: rollout_operation_lock(tree)
     preserve: tree.delivery == ServiceDelivery.DurableAtLeastOnce
     reset: tree.state_adapter == TreeStateAdapter.Empty
-    first := ServiceError?{None}
+    ^first: ServiceError?{None}
     loop index in 0..<tree.workers.len() {
         tree.workers[index].running = false
         if reset {
@@ -6353,7 +6402,7 @@ priv directory_register: fn(tree: ^ServiceTree, name: String, endpoint: ServiceE
     if !tree.workers[index].running {
         return Err(ServiceError.NotStarted("worker `{tree.workers[index].name}` is not running"))
     }
-    existing := Int?{None}
+    ^existing: Int?{None}
     loop entry in 0..<tree.directory.len() {
         if tree.directory[entry].name == name -> existing = Val(entry)
     }
@@ -6361,7 +6410,7 @@ priv directory_register: fn(tree: ^ServiceTree, name: String, endpoint: ServiceE
         return Err(ServiceError.Policy("service directory entry limit exceeded"))
     }
     proof: directory_sign(tree.authority, tree.name, name, endpoint)
-    previous := DirectoryRecord?{None}
+    ^previous: DirectoryRecord?{None}
     if existing == .Val(at) -> previous = tree.directory.remove(at, .Slot)
     tree.directory.push(DirectoryRecord{name: name, endpoint: endpoint, proof: proof})
     if rollout_store_write(tree) == {
@@ -6397,7 +6446,7 @@ priv drain_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceErro
     if rollout_store_write(tree) == {
         .Err(error) -> {
             names_remove(tree.draining, endpoint.worker)
-            recovery := ServiceError?{None}
+            ^recovery: ServiceError?{None}
             if empty {
                 if drain_reopen(tree.workers[index].endpoint) == {
                     .Err(failure) -> { recovery = Val(failure) }
@@ -6428,7 +6477,7 @@ priv partition_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) Service
     index: find_worker(tree, endpoint)
     was_running: tree.workers[index].running
     tree.workers[index].running = false
-    added := false
+    ^added: false
     if !worker_contains(tree.partitioned, endpoint.worker) {
         if tree.partitioned.len() >= 4096 {
             tree.workers[index].running = was_running
@@ -6448,7 +6497,7 @@ priv partition_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) Service
     if rollout_store_write(tree) == {
         .Err(error) -> {
             names_remove(tree.partitioned, endpoint.worker)
-            recovery := ServiceError?{None}
+            ^recovery: ServiceError?{None}
             if partition_reopen(tree.workers[index].endpoint, was_running) == {
                 .Err(failure) -> { recovery = Val(failure) }
                 .Ok(_) -> {}
@@ -6485,7 +6534,7 @@ priv reconcile_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) Service
     index: worker_slot(tree, endpoint) ?? return Err(ServiceError.Unknown("reconciled worker disappeared"))
     generation: tree.workers[index].endpoint.generation
     tree.workers[index].running = true
-    saved := tree.partitioned.copy()  // copy: restored verbatim when the rejoin fails
+    ^saved: tree.partitioned.copy()  // copy: restored verbatim when the rejoin fails
     _: tree.partitioned.remove(position, .Slot)
     if reconcile_rejoin(tree, endpoint, generation) == {
         .Err(error) -> {
@@ -6527,7 +6576,7 @@ discard_rollback_store: fn(path: String) -> ServiceError? Never! {
 }
 
 rollout_failure: fn(primary: ^^ServiceError, authority: ServiceError?, cleanup: ServiceError?) -> ServiceError Never! {
-    failures := [String]{}
+    ^failures: [String]{}
     if authority == .Val(error) {
         failures.push("authority rollback failed: {service_error_show(error)}")
     }
@@ -6548,7 +6597,7 @@ restore_route: fn(tree: ServiceTree, index: Int, running: Bool) ServiceError! {
 }
 
 restore_handoff_authority: fn(tree: ServiceTree, next_endpoints: [ServiceEndpoint], running: [Bool], pinned: [String]) -> ServiceError? Never! {
-    first := ServiceError?{None}
+    ^first: ServiceError?{None}
     loop index in 0..<tree.workers.len() {
         if worker_contains(pinned, tree.workers[index].name) -> next
         authority_update(next_endpoints[index], false, None).drop("the restored old route supersedes the new one")
@@ -6584,7 +6633,7 @@ priv handoff_generation: fn(tree: ^ServiceTree) -> Int ServiceError! {
             _: promote_worker_generation(tree, name)
         }
     }
-    blocked := false
+    ^blocked: false
     if tree.last_upgrade == {
         .Val(receipt) -> { blocked = receipt.pinned_shards.len() != 0 }
         .None -> {}
@@ -6597,7 +6646,7 @@ priv handoff_generation: fn(tree: ^ServiceTree) -> Int ServiceError! {
         return Err(ServiceError.Policy("service generation exhausted"))
     }
     to: from + 1
-    pinned := [String]{}
+    ^pinned: [String]{}
     loop worker in tree.workers {
         uncommitted: authority_has_uncommitted(worker.endpoint)
         if worker_contains(tree.partitioned, worker.name) || (worker_contains(tree.draining, worker.name) && worker_depth(worker) > 0) || uncommitted {
@@ -6605,22 +6654,22 @@ priv handoff_generation: fn(tree: ^ServiceTree) -> Int ServiceError! {
         }
     }
     rollback: prepare_rollback(tree)
-    running := [Bool]{}
-    next_running := [Bool]{}
-    next_endpoints := [ServiceEndpoint]{}
+    ^running: [Bool]{}
+    ^next_running: [Bool]{}
+    ^next_endpoints: [ServiceEndpoint]{}
     loop worker in tree.workers {
         held: worker_contains(pinned, worker.name)
         running.push(worker.running)
         next_running.push(worker.running || (!held && worker_contains(tree.draining, worker.name)))
         next_endpoints.push(endpoint_new(worker.endpoint.tree, worker.endpoint.worker, if held -> worker.endpoint.generation else -> to, worker.endpoint.authority))
     }
-    next_directory := tree.directory.copy()  // copy: the live directory stays intact until every route rotates
+    ^next_directory: tree.directory.copy()  // copy: the live directory stays intact until every route rotates
     loop entry in 0..<next_directory.len() {
         if worker_contains(pinned, next_directory[entry].endpoint.worker) -> next
         next_directory[entry].endpoint.generation = to
         next_directory[entry].proof = directory_sign(tree.authority, tree.name, next_directory[entry].name, next_directory[entry].endpoint)
     }
-    next_idempotency := tree.idempotency.copy()  // copy: as above, for the idempotency records
+    ^next_idempotency: tree.idempotency.copy()  // copy: as above, for the idempotency records
     loop record in 0..<next_idempotency.len() {
         if !worker_contains(pinned, next_idempotency[record].endpoint.worker) {
             next_idempotency[record].endpoint.generation = to
@@ -6647,7 +6696,7 @@ priv handoff_generation: fn(tree: ^ServiceTree) -> Int ServiceError! {
     }
     tree.directory = next_directory
     tree.idempotency = next_idempotency
-    at := tree.draining.len()
+    ^at: tree.draining.len()
     loop at > 0 {
         at -= 1
         if !worker_contains(pinned, tree.draining[at]) -> _: tree.draining.remove(at, .Slot)
@@ -6661,7 +6710,7 @@ restore_rollback_authority: fn(tree: ServiceTree, rollback_endpoints: [ServiceEn
     loop endpoint in rollback_endpoints {
         authority_update(endpoint, false, None).drop("the restored current route supersedes the rollback one")
     }
-    first := ServiceError?{None}
+    ^first: ServiceError?{None}
     loop index in 0..<tree.workers.len() {
         if restore_route(tree, index, running[index]) == {
             .Err(error) -> {
@@ -6720,8 +6769,8 @@ priv rollback_generation: fn(tree: ^ServiceTree) -> Int ServiceError! {
     }
     from: receipt.from_generation
     plan: RollbackPlan{store: receipt.rollback_store.copy(), available: receipt.rollback_available, migration: receipt.migration.copy()}  // copy: the receipt is cleared below
-    rollback_endpoints := [ServiceEndpoint]{}
-    running := [Bool]{}
+    ^rollback_endpoints: [ServiceEndpoint]{}
+    ^running: [Bool]{}
     loop worker in tree.workers {
         rollback_endpoints.push(endpoint_new(worker.endpoint.tree, worker.endpoint.worker, from, worker.endpoint.authority))
         running.push(worker.running)

@@ -90,7 +90,7 @@ env_hook_path_within: fn(path: String, root: String) -> Bool Never! {
 // This keeps an env active across `cd` into a project subdirectory (direnv
 // semantics): the whole subtree under an `env.jet` root is inside that env.
 env_hook_find_env_root: fn(start: String) -[FS]> String? Never! {
-    dir := start
+    ^dir: start
     loop {
         if files.is_file(files.join(dir, ENV_FILE)) -> return Val(dir)
         parent: files.dirname(dir)
@@ -116,8 +116,8 @@ env_hook_definition_fingerprint_with_selections: fn(root: String, requested_pres
     // Keep malformed or legacy files observable without letting an unrelated
     // `.jet` file join a valid environment graph; activation still rejects
     // the malformed plan itself.
-    budget := FingerprintBudget.new()
-    inputs := [DefinitionInput]{}
+    ^budget: FingerprintBudget.new()
+    ^inputs: [DefinitionInput]{}
     env_hook_collect_definition_files(root, root, budget, inputs, 0)
     env_hook_finish_definition_fingerprint(root, requested_preset, requested_environment, budget, inputs)
 }
@@ -132,8 +132,8 @@ env_hook_definition_fingerprint_from_facts: fn(root: String, requested_preset: S
 }
 
 env_hook_fingerprint_from_inputs: fn(root: String, requested_preset: String?, requested_environment: String?, source_files: [String], lifecycle: EnvironmentLifecycle, managed: [ManagedFile], package_profiles: [PackageProfileSpec], presets: [PresetSpec], languages: [LanguageSpec]) -[FS, Env]> String? Never! {
-    budget := FingerprintBudget.new()
-    inputs := [DefinitionInput]{}
+    ^budget: FingerprintBudget.new()
+    ^inputs: [DefinitionInput]{}
     loop relative in source_files -> env_hook_add_input(root, relative, "source", budget, inputs)
     loop dotenv in lifecycle.dotenv {
         env_hook_add_input(root, dotenv.file, "dotenv", budget, inputs)
@@ -153,7 +153,7 @@ env_hook_fingerprint_from_inputs: fn(root: String, requested_preset: String?, re
     // `--env` selects an environment module, not a package generation; shell
     // activation always observes the canonical `profile.dev` root.
     profile_name: "dev"
-    declares_profile := false
+    ^declares_profile: false
     loop profile in package_profiles {
         if profile.name == profile_name -> declares_profile = true
     }
@@ -165,7 +165,7 @@ env_hook_fingerprint_from_inputs: fn(root: String, requested_preset: String?, re
         text: "{preset.extends:Debug}|{preset.packages:Debug}|{preset.variables:Debug}|{preset.hostname:Debug}|{preset.user:Debug}|{requested_preset:Debug}"
         budget.push(inputs, "preset:{preset.name}", text.bytes())
     }
-    language_lines := [String]{}
+    ^language_lines: [String]{}
     loop language in languages -> language_lines.push(language.fingerprint())
     budget.push(inputs, "languages", language_lines.join("\n").bytes())
     env_hook_finish_definition_fingerprint(root, requested_preset, requested_environment, budget, inputs)
@@ -179,9 +179,9 @@ env_hook_finish_definition_fingerprint: fn(root: String, requested_preset: Strin
     selection: "preset={requested_preset ?? ""};environment={requested_environment ?? ""};host={host};user={user}"
     budget.push(inputs, "selection", selection.bytes())
     if budget.exceeded -> return None
-    ordered := inputs
+    ^ordered: inputs
     ordered.sort_by(fn(left: DefinitionInput, right: DefinitionInput) { (left.name <=> right.name).then(left.bytes <=> right.bytes) })
-    hasher := StreamingSHA256.new()
+    ^hasher: StreamingSHA256.new()
     loop input in ordered {
         hasher.update(input.name.bytes())
         hasher.update([U8]{U8{0}})
@@ -193,8 +193,8 @@ env_hook_finish_definition_fingerprint: fn(root: String, requested_preset: Strin
 
 // Little-endian bytes of a u64 length.
 env_hook_u64_le: fn(value: Int) -> [U8] Never! {
-    out := [U8]{}
-    remaining := value
+    ^out: [U8]{}
+    ^remaining: value
     loop _ in 0..<8 {
         out.push(U8{(remaining) & 255})
         remaining = remaining >> 8
@@ -205,13 +205,13 @@ env_hook_u64_le: fn(value: Int) -> [U8] Never! {
 // The bytes of a regular file opened without following a final link, or None
 // when the file exceeds `limit`.
 env_hook_read_nofollow: fn(path: String, limit: Int) -[FS]> [U8]? IOError! {
-    reader := files.open(path, links: .Refuse)
+    ^reader: files.open(path, links: .Refuse)
     info: reader.stat()
     if !info.is_file {
         return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("not a regular file")}))
     }
     if info.size > limit -> return Ok(None)
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
@@ -223,7 +223,7 @@ env_hook_read_nofollow: fn(path: String, limit: Int) -[FS]> [U8]? IOError! {
 
 // Normal parts and whether `..` appears.
 env_hook_normal_component_count: fn(path: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop part in path.split("/") {
         if part == "" || part == "." || part == ".." -> next
         count += 1
@@ -245,7 +245,7 @@ env_hook_add_input: fn(root: String, relative: String, kind: String, budget: ^Fi
     }
     path: files.join(root, relative)
     root_real: files.canonicalize(root) ?? root
-    visited := [String:Bool]{}
+    ^visited: [String:Bool]{}
     env_hook_add_input_path(root_real, path, relative, kind, budget, inputs, visited, 0)
 }
 

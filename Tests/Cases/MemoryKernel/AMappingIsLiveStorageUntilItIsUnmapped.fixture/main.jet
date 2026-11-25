@@ -8,10 +8,10 @@ Shelf: struct {
 }
 
 run: fn() {
-    shelf := Shelf{blocks: [mem.Block]{}}
-    region := mem.Region.reserve(8192) ?? panic("reserve")
+    ^shelf: Shelf{blocks: [mem.Block]{}}
+    ^region: mem.Region.reserve(8192) ?? panic("reserve")
     block: region.claim(24, 8) ?? panic("claim")
-    values := [Int]{3, 4, 5}
+    ^values: [Int]{3, 4, 5}
     #Unsafe("the block holds three Ints of the open region's fresh pages") {
         to: mem.Ptr<Int>.from_addr(block.address())
         mem.list_copy<Int>(to, values, 0, 3)

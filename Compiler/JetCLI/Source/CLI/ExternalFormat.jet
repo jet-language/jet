@@ -16,8 +16,8 @@ jet_cli_external_fmt_diff: fn(path: String, before: [U8], after: [U8]) -> String
 // writes originals; ordinary mode publishes changed bytes in input order and
 // retains preceding writes if a subsequent write fails.
 jet_cli_external_fmt_finish: fn(project_dir: String, files: [String], staged: [String], befores: [[U8]], check_only: Bool, show_diff: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
-    changed := [Int]{}
-    afters := [[U8]]{}
+    ^changed: [Int]{}
+    ^afters: [[U8]]{}
     loop index in 0..<files.len() {
         after: cli_files.read_bytes(staged[index]) ?? return jet_cli_external_fmt_fail("E1340", "environment formatter did not produce readable output", jet_cli_io_error_text(err), "check the formatter package and retry", color, JET_DRIVER_EXIT_USER_ERROR)
         if befores[index] != after -> changed.push(index)
@@ -25,8 +25,8 @@ jet_cli_external_fmt_finish: fn(project_dir: String, files: [String], staged: [S
     }
     if changed.len() == 0 -> return jet_cli_external_fmt_ok(json)
     if check_only {
-        stdout := ""
-        entries := [JetCLIStatusValue]{}
+        ^stdout: ""
+        ^entries: [JetCLIStatusValue]{}
         loop index in changed {
             path: jet_cli_fmt_relative(files[index], project_dir)
             if {

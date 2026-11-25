@@ -61,6 +61,8 @@ run: fn() -> Never Err! {
 // on PATH when "".
 dev_root: fn(jet: String, root: String, name: String) -> String Err! {
     ran: process.cmd([String]{if jet != "" -> jet else -> "jet", files.join(root, "Tools/Agent/Roots.jet"), name}).run()
-    if ran.code != 0 -> return Err("{name}: Tools/Agent/Roots.jet exited {ran.code}: {ran.errors.trim()}")
+    if ran.code != 0 {
+        return Err("{name}: Tools/Agent/Roots.jet exited {ran.code}: {ran.errors.trim()}")
+    }
     ran.output.trim().remove_prefix("{name}=")
 }

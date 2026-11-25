@@ -4,9 +4,9 @@ use {
 }
 
 kit_steps_condition_colon: fn(text: String) -> Int? {
-    quote := 0
-    escaped := false
-    depth := 0
+    ^quote: 0
+    ^escaped: false
+    ^depth: 0
     loop (index, byte) in text.bytes() {
         c: Int{byte}
         if quote != 0 {
@@ -71,7 +71,7 @@ kit_steps_condition_host_problem: fn(text: String) -> String {
 // process. Stream, exit and elapsed assertions still need a process owner.
 kit_steps_independent_assertion: fn(key: String, original: String) -> Bool {
     if key == "entries" || key == "tree" -> return true
-    selector := key
+    ^selector: key
     if key == "json" {
         words: kit_steps_words(kit_steps_body(original)) ?? return false
         if words.len() == 0 -> return false
@@ -82,7 +82,7 @@ kit_steps_independent_assertion: fn(key: String, original: String) -> Bool {
 }
 
 kit_steps_attach_conditions: fn(original: KitPlan, before_steps: Int, before_assertions: Int, conditions: [String]) -> KitPlan {
-    plan := original
+    ^plan: original
     if conditions.len() == 0 -> return plan
     if plan.steps.len() > before_steps {
         loop index in before_steps..<plan.steps.len() -> plan.steps[index].conditions = conditions
@@ -110,7 +110,7 @@ kit_steps_condition_atom: fn(text: String, context: KitStepCtx, state: KitStepSt
         return present != negative
     }
     if kind == "captured" {
-        present := false
+        ^present: false
         loop capture in state.captures {
             if capture.name == words[1] {
                 if capture.value == {
@@ -150,8 +150,8 @@ kit_steps_condition_atom: fn(text: String, context: KitStepCtx, state: KitStepSt
         if words[1] == "^=" -> return actual.starts_with(expected)
         return (actual == expected) == (words[1] == "=")
     }
-    reference := kind
-    subject := "stdout"
+    ^reference: kind
+    ^subject: "stdout"
     if kind.ends_with(".stdout+stderr") {
         reference = kit_steps_byte_slice(kind, 0, kind.count_bytes() - 14)
         subject = "stdout+stderr"
@@ -165,7 +165,7 @@ kit_steps_condition_atom: fn(text: String, context: KitStepCtx, state: KitStepSt
         return false
     }
     tokens: kit_steps_tokens(text) ?? return false
-    value := kit_steps_runtime_expand(words[2], context, state) ?? return false
+    ^value: kit_steps_runtime_expand(words[2], context, state) ?? return false
     raw: kit_steps_byte_slice(text, tokens[2].start, tokens[2].end)
     if !raw.starts_with("\"") && !raw.starts_with("'") {
         value = files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)) ?? return false
@@ -196,7 +196,7 @@ kit_steps_condition_tree_atom: fn(text: String, tokens: [KitWord], start: Int, c
         }
         return KitLinePredicate{valid: true, value: inner.value, next: inner.next + 1}
     }
-    end := start
+    ^end: start
     loop end < tokens.len() && !kit_expect_named(["&&", "||", ")"], kit_steps_byte_slice(text, tokens[end].start, tokens[end].end)) {
         end += 1
     }
@@ -206,7 +206,7 @@ kit_steps_condition_tree_atom: fn(text: String, tokens: [KitWord], start: Int, c
     if !kit_steps_condition_atom_valid(atom) {
         return KitLinePredicate{valid: false, value: false, next: end}
     }
-    value := false
+    ^value: false
     if context == {
         .Val(current) -> {
             if state == {
@@ -220,7 +220,7 @@ kit_steps_condition_tree_atom: fn(text: String, tokens: [KitWord], start: Int, c
 }
 
 kit_steps_condition_tree_and: fn(text: String, tokens: [KitWord], start: Int, context: KitStepCtx?, state: KitStepState?) -> KitLinePredicate {
-    result := kit_steps_condition_tree_atom(text, tokens, start, context, state)
+    ^result: kit_steps_condition_tree_atom(text, tokens, start, context, state)
     loop result.valid && result.next < tokens.len() && tokens[result.next].text == "&&" {
         active: if result.value -> context else -> None
         right: kit_steps_condition_tree_atom(text, tokens, result.next + 1, active, state)
@@ -230,7 +230,7 @@ kit_steps_condition_tree_and: fn(text: String, tokens: [KitWord], start: Int, co
 }
 
 kit_steps_condition_tree_or: fn(text: String, tokens: [KitWord], start: Int, context: KitStepCtx?, state: KitStepState?) -> KitLinePredicate {
-    result := kit_steps_condition_tree_and(text, tokens, start, context, state)
+    ^result: kit_steps_condition_tree_and(text, tokens, start, context, state)
     loop result.valid && result.next < tokens.len() && tokens[result.next].text == "||" {
         active: if result.value -> None else -> context
         right: kit_steps_condition_tree_and(text, tokens, result.next + 1, active, state)

@@ -31,7 +31,7 @@ ProviderSelector: struct {
             {field: ProviderSelectorField.Revision, value: self.revision},
             {field: ProviderSelectorField.Digest, value: self.digest},
         }
-        exact := false
+        ^exact: false
         loop identity in identities {
             if {
                 identity.field.is_exact_value(identity.value) -> exact = true
@@ -68,7 +68,7 @@ ProviderSelector: struct {
     // `version=…&revision=…&baseline=…&features=a+b&digest=…&platform=…`,
     // empty facts omitted.
     canonical: fn(self) -> String Never! {
-        parts := [String]{}
+        ^parts: [String]{}
         if self.version != "" -> parts.push("version={self.version}")
         if self.revision != "" -> parts.push("revision={self.revision}")
         if self.baseline != "" -> parts.push("baseline={self.baseline}")
@@ -80,9 +80,9 @@ ProviderSelector: struct {
 
     // The carrier's `selector` object, fields in schema order.
     to_json_tree: fn(self) -> Dyn Never! {
-        features := [Dyn]{}
+        ^features: [Dyn]{}
         loop feature in self.features -> features.push(Dyn.Text(feature))
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["raw"] = Dyn.Text(self.raw.copy())
         object["version"] = Dyn.Text(self.version.copy())
         object["revision"] = Dyn.Text(self.revision.copy())
@@ -98,7 +98,7 @@ ProviderSelector: struct {
         object: pkg_json_object(value ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `selector` is not an object"})
         raw_features: object.get("features") ?? return Err(ProviderFactsError{message: "provider selector lacks `features`"})
         feature_values: pkg_json_array(raw_features) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_ARRAY})
-        features := [String]{}
+        ^features: [String]{}
         loop feature in feature_values {
             features.push(pkg_json_text(feature) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING}))
         }
@@ -182,7 +182,7 @@ ProviderSelectorDetails: struct {
     // Facts separate on `^`, and on a `,` that starts another known
     // `key=value` fact; a fact without `=` is a version.
     parse: fn(raw: String) -> ProviderSelectorDetails Never! {
-        details := ProviderSelectorDetails{selector: ProviderSelector.empty(raw), unknown: [String]{}, conflicts: [{key: String, left: String, right: String}]{}, duplicates: [String]{}}
+        ^details: ProviderSelectorDetails{selector: ProviderSelector.empty(raw), unknown: [String]{}, conflicts: [{key: String, left: String, right: String}]{}, duplicates: [String]{}}
         body: raw.removeprefix("#")
         if raw != "" && body.trim() == "" {
             details.unknown.push("empty selector")
@@ -190,7 +190,7 @@ ProviderSelectorDetails: struct {
         }
         loop group in body.split("&") {
             bytes: group.bytes()
-            start := 0
+            ^start: 0
             loop offset in 0..<bytes.len() {
                 if (Int{bytes[offset]}) == 44 && pkg_provider_is_selector_assignment(pkg_bytes_text(bytes, offset + 1, bytes.len()).trim_start()) {
                     details.add_part(pkg_bytes_text(bytes, start, offset).trim())

@@ -275,7 +275,7 @@ run: fn() {
 repo_root: fn() -[Env, FS]> String Never! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return ""
+    ^dir: files.cwd() ?? return ""
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return ""
@@ -286,12 +286,12 @@ repo_root: fn() -[Env, FS]> String Never! {
 // `Core/Net/HttpServer.jet` is `core.net.http_server`: path parts in
 // snake_case, and a file named for its directory is that directory's module.
 module_name: fn(path: String) -> String Never! {
-    rest := path.replace("\\", "/")
+    ^rest: path.replace("\\", "/")
     if rest.starts_with("Core/") -> rest = rest.remove_prefix("Core/")
     if rest.ends_with(".jet") -> rest = rest.removesuffix(".jet")
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in rest.split("/") -> parts.push(snake_case(part))
-    if parts.len() > 1 && parts[parts.len() - 1] == parts[parts.len() - 2] -> _ := parts.pop()
+    if parts.len() > 1 && parts[parts.len() - 1] == parts[parts.len() - 2] -> ^_: parts.pop()
     joined: parts.join(".")
     if joined == "app" -> return "app"
     "core.{joined}"
@@ -299,7 +299,7 @@ module_name: fn(path: String) -> String Never! {
 
 snake_case: fn(part: String) -> String Never! {
     raw: part.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop at in 0..<raw.len() {
         byte: Int{raw[at]}
         if byte < 65 || byte > 90 {
@@ -350,7 +350,7 @@ starts_at: fn(source: [U8], index: Int, end: Int, word: String) -> Bool Never! {
 
 // The first `word` at or after `from` before `end`, or -1.
 find_at: fn(source: [U8], from: Int, end: Int, word: String) -> Int Never! {
-    at := from
+    ^at: from
     loop at < end {
         if starts_at(source, at, end, word) -> return at
         at += 1
@@ -369,8 +369,8 @@ span: fn(source: [U8], start: Int, end: Int) -> String Never! {
 
 // One past the `*/` closing the nested block comment whose body starts at `at`.
 block_comment_end: fn(source: [U8], start: Int, end: Int) -> Int Never! {
-    at := start
-    depth := 1
+    ^at: start
+    ^depth: 1
     loop at < end && depth > 0 {
         if {
             starts_at(source, at, end, "/*") -> {
@@ -389,9 +389,9 @@ block_comment_end: fn(source: [U8], start: Int, end: Int) -> Int Never! {
 
 // One past the `}` closing the interpolation whose expression starts at `start`.
 interpolation_end: fn(source: [U8], start: Int, end: Int) -> Int Never! {
-    at := start
-    depth := 1
-    inner := 0
+    ^at: start
+    ^depth: 1
+    ^inner: 0
     loop at < end && depth > 0 {
         ch: byte_at(source, at, end)
         at += 1
@@ -412,7 +412,7 @@ interpolation_end: fn(source: [U8], start: Int, end: Int) -> Int Never! {
 // operator, one UTF-8 scalar, or one byte.
 token_width: fn(source: [U8], at: Int, end: Int, c: Int) -> Int Never! {
     follow: byte_at(source, at + 1, end)
-    width := 1
+    ^width: 1
     if {
         is_word_start(c) -> {
             loop is_word(byte_at(source, at + width, end)) -> width += 1
@@ -430,8 +430,8 @@ token_width: fn(source: [U8], at: Int, end: Int, c: Int) -> Int Never! {
 }
 
 lex_range: fn(source: [U8], start: Int, end: Int) -> [Token] Never! {
-    tokens := [Token]{}
-    i := start
+    ^tokens: [Token]{}
+    ^i: start
     loop i < end {
         c: byte_at(source, i, end)
         if is_space(c) {
@@ -481,7 +481,7 @@ token: fn(tokens: [Token], index: Int) -> String Never! {
 
 // The byte offsets of each newline, for line numbers.
 newlines: fn(source: [U8]) -> [Int] Never! {
-    found := [Int]{}
+    ^found: [Int]{}
     loop at in 0..<source.len() {
         if (Int{source[at]}) == NEWLINE -> found.push(at)
     }
@@ -490,8 +490,8 @@ newlines: fn(source: [U8]) -> [Int] Never! {
 
 // The 1-based line of `offset`: one more than the newlines before it.
 line_of: fn(lines: [Int], offset: Int) -> Int Never! {
-    low := 0
-    high := lines.len()
+    ^low: 0
+    ^high: lines.len()
     loop low < high {
         middle: (low + high) /% 2
         if lines[middle] < offset {
@@ -507,8 +507,8 @@ chain: fn(tokens: [Token], start: Int) -> Chain Never! {
     if !is_identifier(token(tokens, start)) {
         return Chain{found: false, parts: [String]{}, end: start}
     }
-    parts := [String]{token(tokens, start)}
-    end := start + 1
+    ^parts: [String]{token(tokens, start)}
+    ^end: start + 1
     loop token(tokens, end) == "." && is_identifier(token(tokens, end + 1)) {
         parts.push(token(tokens, end + 1))
         end += 2
@@ -518,7 +518,7 @@ chain: fn(tokens: [Token], start: Int) -> Chain Never! {
 
 after_generics: fn(tokens: [Token], at: Int) -> Int Never! {
     if token(tokens, at) != "<" -> return at
-    depth := 0
+    ^depth: 0
     loop index in at..<tokens.len() {
         value: tokens[index].value
         if value == "<" -> depth += 1
@@ -537,15 +537,15 @@ declares_body: fn(source: [U8], close: Int) -> Bool Never! { body_kind(source, c
 // What the head line closing at `close` declares: "block" for a body (`{`),
 // "extern" for an extern member (`= "path"`), "" for neither.
 body_kind: fn(source: [U8], close: Int) -> String Never! {
-    end := close
+    ^end: close
     loop end < source.len() && (Int{source[end]}) != NEWLINE -> end += 1
-    at := close
+    ^at: close
     loop at < end {
         b: Int{source[at]}
         if b == SLASH && byte_at(source, at + 1, end) == SLASH -> return ""
         if b == OPEN_BRACE -> return "block"
         if b == EQUALS {
-            after := at + 1
+            ^after: at + 1
             loop after < end && is_space(Int{source[after]}) -> after += 1
             if byte_at(source, after, end) == QUOTE -> return "extern"
         }
@@ -567,9 +567,9 @@ outside_surface: fn(row: Function) -> Bool Never! {
 
 // Generics and parameters as written, with comments and layout removed.
 signature_text: fn(raw: [U8]) -> String Never! {
-    collapsed := [U8]{}
-    pending := false
-    at := 0
+    ^collapsed: [U8]{}
+    ^pending: false
+    ^at: 0
     loop at < raw.len() {
         b: Int{raw[at]}
         if b == SLASH && byte_at(raw, at + 1, raw.len()) == SLASH {
@@ -587,7 +587,7 @@ signature_text: fn(raw: [U8]) -> String Never! {
         at += 1
     }
     if pending -> collapsed.push(U8{32})
-    opened := [U8]{}
+    ^opened: [U8]{}
     loop index in 0..<collapsed.len() {
         b: Int{collapsed[index]}
         if b == SPACE && index > 0 {
@@ -596,8 +596,8 @@ signature_text: fn(raw: [U8]) -> String Never! {
         }
         opened.push(collapsed[index])
     }
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < opened.len() {
         b: Int{opened[index]}
         one: byte_at(opened, index + 1, opened.len())
@@ -623,7 +623,7 @@ signature_text: fn(raw: [U8]) -> String Never! {
 // The spelling of the result type starting at token `start`, or "".
 result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_types: [String:Bool]) -> String Never! {
     if start >= tokens.len() -> return ""
-    at := start
+    ^at: start
     loop token(tokens, at) == "^" -> at += 1
     first: token(tokens, at)
     if {
@@ -651,7 +651,7 @@ result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_t
 
 // Whether a `{` token follows token `at` on the line of token `at - 1`.
 brace_follows: fn(source: [U8], tokens: [Token], at: Int) -> Bool Never! {
-    from := tokens[at - 1].offset
+    ^from: tokens[at - 1].offset
     loop index in at..<tokens.len() {
         loop byte in source[from..<tokens[index].offset] {
             if (Int{byte}) == NEWLINE -> return false
@@ -667,15 +667,15 @@ brace_follows: fn(source: [U8], tokens: [Token], at: Int) -> Bool Never! {
 result_start: fn(tokens: [Token], at: Int) -> Int Never! {
     if token(tokens, at) == "->" -> return at + 1
     if token(tokens, at) != "-" || token(tokens, at + 1) != "[" -> return -1
-    close := at
+    ^close: at
     loop close < tokens.len() && tokens[close].value != "]" -> close += 1
     if token(tokens, close + 1) == ">" -> close + 2 else -> -1
 }
 
 // One past the bracketed type starting at token `start`.
 compound_end: fn(tokens: [Token], start: Int) -> Int Never! {
-    at := start
-    closers := [String]{}
+    ^at: start
+    ^closers: [String]{}
     loop {
         value: token(tokens, at)
         at += 1
@@ -684,7 +684,7 @@ compound_end: fn(tokens: [Token], start: Int) -> Int Never! {
             value == "(" -> closers.push(")")
             value == "{{" -> closers.push("}}")
             value == "<" -> closers.push(">")
-            closers.len() > 0 && value == closers[closers.len() - 1] -> _ := closers.pop()
+            closers.len() > 0 && value == closers[closers.len() - 1] -> ^_: closers.pop()
         }
         if at >= tokens.len() || closers.len() == 0 -> break
     }
@@ -731,19 +731,19 @@ public_functions_in: fn(unit: String, path: String, source_text: String) -> [Fun
     source: source_text.bytes()
     tokens: lex(source)
     lines: newlines(source)
-    local_types := [String:Bool]{}
-    private_types := [String:Bool]{}
+    ^local_types: [String:Bool]{}
+    ^private_types: [String:Bool]{}
     loop index in 0..<tokens.len() {
         if is_owner_kind(tokens[index].value) && token(tokens, index - 1) == ":" {
             local_types[token(tokens, index - 2)] = true
             if declared_priv(tokens, index - 2) -> private_types[token(tokens, index - 2)] = true
         }
     }
-    rows := [Function]{}
-    seen := [String:Bool]{}
-    scopes := [Owner]{}
-    pending := Owner{name: "", kind: ""}
-    parens := 0
+    ^rows: [Function]{}
+    ^seen: [String:Bool]{}
+    ^scopes: [Owner]{}
+    ^pending: Owner{name: "", kind: ""}
+    ^parens: 0
     loop i in 0..<tokens.len() {
         value: tokens[i].value
         parens += paren_step(value)
@@ -756,7 +756,7 @@ public_functions_in: fn(unit: String, path: String, source_text: String) -> [Fun
             // or dotted, is named by that trait too: its methods are that trait's,
             // outside the surface.
             "impl" -> {
-                owner := token(tokens, i + 1)
+                ^owner: token(tokens, i + 1)
                 if scopes.len() > 0 {
                     enclosing: scopes[scopes.len() - 1]
                     if token(tokens, i + 2) != "." && (enclosing.kind == "struct" || enclosing.kind == "enum") {
@@ -773,7 +773,7 @@ public_functions_in: fn(unit: String, path: String, source_text: String) -> [Fun
             }
             // `priv name: module {` or `priv(scope) name: module {`; the name may be dotted.
             "module" -> {
-                start := if token(tokens, i - 1) == ":" -> i - 2 else -> i
+                ^start: if token(tokens, i - 1) == ":" -> i - 2 else -> i
                 loop token(tokens, start - 1) == "." && is_identifier(token(tokens, start - 2)) {
                     start -= 2
                 }
@@ -784,7 +784,7 @@ public_functions_in: fn(unit: String, path: String, source_text: String) -> [Fun
                 pending = Owner{name: "", kind: ""}
             }
             "}}" -> {
-                if scopes.len() > 0 -> _ := scopes.pop()
+                if scopes.len() > 0 -> ^_: scopes.pop()
             }
             else -> {}
         }
@@ -798,15 +798,15 @@ public_functions_in: fn(unit: String, path: String, source_text: String) -> [Fun
         if inside_private(scopes) -> next
         // A `priv` or `priv(scope)` declaration is no user-callable surface.
         if declared_priv(tokens, i - 2) -> next
-        owner := ""
+        ^owner: ""
         if scopes.len() > 0 {
             scope: scopes[scopes.len() - 1]
             if scope.kind == "" || scope.kind == "trait" -> next
             owner = scope.name.copy()
         }
         name: tokens[i - 2].value
-        at := after_generics(tokens, i + 1)
-        depth := 0
+        ^at: after_generics(tokens, i + 1)
+        ^depth: 0
         loop {
             depth += paren_step(token(tokens, at))
             at += 1
@@ -848,7 +848,7 @@ public_functions_in: fn(unit: String, path: String, source_text: String) -> [Fun
 
 // Call resolution's view of the inventory.
 table_of: fn(functions: [Function]) -> Table Never! {
-    table := Table{ids: [String]{}, by_id: [String:Int]{}, returns: [String]{}, types: [String:Bool]{}, tails: [String:String]{}, units: [String]{}, names: [String]{}, lowered: [String:Bool]{}, sizes: [String:String]{}}
+    ^table: Table{ids: [String]{}, by_id: [String:Int]{}, returns: [String]{}, types: [String:Bool]{}, tails: [String:String]{}, units: [String]{}, names: [String]{}, lowered: [String:Bool]{}, sizes: [String:String]{}}
     loop index in 0..<functions.len() {
         row: functions[index]
         table.ids.push(row.id.copy())
@@ -870,10 +870,12 @@ table_of: fn(functions: [Function]) -> Table Never! {
 // Table.lowered: each excluded `Owner.__name` method that returns Owner, as
 // `Owner.name`.
 lowered_builders: fn(excluded: [Function]) -> [String:Bool] Never! {
-    found := [String:Bool]{}
+    ^found: [String:Bool]{}
     loop row in excluded {
         split: row.id.rpartition(".")
-        if !row.name.contains(".") || !split.tail.starts_with("__") || !row.signature.ends_with(" -> {split.head}") -> next
+        if !row.name.contains(".") || !split.tail.starts_with("__") || !row.signature.ends_with(" -> {split.head}") {
+            next
+        }
         found["{split.head}.{split.tail.remove_prefix("__")}"] = true
     }
     found
@@ -885,23 +887,25 @@ lowered_builders: fn(excluded: [Function]) -> [String:Bool] Never! {
 // sizes are the aliases `NAME: Family<sizes>` at the margin of `prelude`
 // (Core/Prelude/Prelude.jet).
 with_family_sizes: fn(table: Table, prelude: String) -> Table Never! {
-    families := [String:[String]]{}
+    ^families: [String:[String]]{}
     loop line in prelude.split("\n") {
         if line.starts_with(" ") || !line.ends_with(">") -> next
         name: line.partition(": ").head
         written: line.partition(": ").tail
         family: written.partition("<").head
-        if name == line || family == written || !is_identifier(name) || !is_identifier(family) -> next
-        numbers := true
+        if name == line || family == written || !is_identifier(name) || !is_identifier(family) {
+            next
+        }
+        ^numbers: true
         loop part in written.partition("<").tail.partition(">").head.split(", ") {
             if (Int.parse(part) ?? -1) < 0 -> numbers = false
         }
         if !numbers -> next
-        sizes := families.get(family) ?? [String]{}
+        ^sizes: families.get(family) ?? [String]{}
         sizes.push(name.copy())
         families[family.copy()] = sizes
     }
-    out := table.copy()
+    ^out: table.copy()
     loop index in 0..<table.ids.len() {
         name: table.names[index]
         family: first_part(name)
@@ -925,15 +929,15 @@ first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() 
 // even when the scalar's alias is core.encoding.F32, which `impl F32.Decode`
 // gives `decode`.
 with_scalar_owners: fn(table: Table) -> Table Never! {
-    owners := [String:[String]]{}
+    ^owners: [String:[String]]{}
     loop (owner, _) in table.types {
         scalar: owner.rpartition(".").tail
         if !BUILTIN_SCALARS.contains(scalar) -> next
-        known := owners.get(scalar) ?? [String]{}
+        ^known: owners.get(scalar) ?? [String]{}
         known.push(owner.copy())
         owners[scalar.copy()] = known
     }
-    out := table.copy()
+    ^out: table.copy()
     loop (id, index) in table.by_id {
         split: id.rpartition(".")
         known: owners.get(split.head.rpartition(".").tail) ?? [String]{}
@@ -952,7 +956,7 @@ with_scalar_owners: fn(table: Table) -> Table Never! {
 // methods (a user names them unqualified) and, for a doctest, the names of its
 // own module.
 initial_aliases: fn(table: Table, context: String) -> [String:String] Never! {
-    aliases := [String:String]{"core": "core", "app": "app"}
+    ^aliases: [String:String]{"core": "core", "app": "app"}
     loop kind in LITERAL_KINDS {
         if table.types.has_key(kind) -> aliases[kind.rpartition(".").tail.copy()] = kind.copy()
     }
@@ -971,9 +975,7 @@ initial_aliases: fn(table: Table, context: String) -> [String:String] Never! {
     // module's `impl Signed.HexFormat` gives it.
     loop (size, owner) in table.sizes {
         own: "{context}.{size}"
-        if context != "" && table.types.has_key(own) {
-            aliases[size.copy()] = own
-        } else if !aliases.has_key(size) {
+        if context != "" && table.types.has_key(own) -> aliases[size.copy()] = own else if !aliases.has_key(size) {
             aliases[size.copy()] = owner.copy()
         }
     }
@@ -1016,11 +1018,11 @@ bound_type: fn(table: Table, row: Int) -> String Never! {
 // first call's type `typed`; "" when a chained method is not a method of the
 // type before it.
 chained_type: fn(tokens: [Token], table: Table, typed: String, open: Int) -> String Never! {
-    current := typed.copy()
-    at := open
+    ^current: typed.copy()
+    ^at: open
     loop {
-        close := at + 1
-        depth := 1
+        ^close: at + 1
+        ^depth: 1
         loop close < tokens.len() && depth > 0 {
             depth += paren_step(tokens[close].value)
             close += 1
@@ -1058,11 +1060,11 @@ restore: fn(aliases: ^[String:String], receivers: ^[String:String], undo: ^[Undo
 // index after the `use`. A row is `path`, `path.[a, b]` or `alias: path`;
 // `use { row row … }` holds several.
 read_use: fn(tokens: [Token], start: Int, aliases: ^[String:String], undo: ^[Undo]) -> Int Never! {
-    at := start
+    ^at: start
     block: token(tokens, at) == "{{"
     if block -> at += 1
     loop {
-        alias := ""
+        ^alias: ""
         if is_identifier(token(tokens, at)) && token(tokens, at + 1) == ":" {
             alias = token(tokens, at)
             at += 2
@@ -1097,26 +1099,26 @@ read_use: fn(tokens: [Token], start: Int, aliases: ^[String:String], undo: ^[Und
 
 call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [Call] Never! {
     tokens: lex(source_text.bytes())
-    aliases := initial.copy()
-    receivers := [String:String]{}
-    undo := [Undo]{}
-    marks := [Int]{}
-    calls := [Call]{}
+    ^aliases: initial.copy()
+    ^receivers: [String:String]{}
+    ^undo: [Undo]{}
+    ^marks: [Int]{}
+    ^calls: [Call]{}
     // Each call's closing paren and the type it returns, in first-seen order.
-    return_at := [Int:Int]{}
-    return_closes := [Int]{}
-    return_types := [String]{}
+    ^return_at: [Int:Int]{}
+    ^return_closes: [Int]{}
+    ^return_types: [String]{}
     // The result type each function the program declares spells (`next_of:
     // fn(…) -> browser.BrowserEvent`), so a binding to its call is typed too.
-    results := [String:[String]]{}
+    ^results: [String:[String]]{}
     loop at in 0..<tokens.len() {
         if !is_identifier(tokens[at].value) || token(tokens, at + 1) != ":" || token(tokens, at + 2) != "fn" {
             next
         }
         open: after_generics(tokens, at + 3)
         if token(tokens, open) != "(" -> next
-        close := open + 1
-        depth := 1
+        ^close: open + 1
+        ^depth: 1
         loop close < tokens.len() && depth > 0 {
             depth += paren_step(tokens[close].value)
             close += 1
@@ -1124,7 +1126,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         spelled: chain(tokens, result_start(tokens, close))
         if spelled.found -> results[tokens[at].value.copy()] = spelled.parts.copy()  // copy: the map keeps its own parts
     }
-    i := 0
+    ^i: 0
     loop i < tokens.len() {
         value: tokens[i].value
         if value == {
@@ -1161,7 +1163,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         follow: token(tokens, i + 1)
         listed: token(tokens, i - 1) == "(" || token(tokens, i - 1) == ","
         if is_identifier(value) && (follow == ":" || follow == ":=") {
-            at := i + 2
+            ^at: i + 2
             loop token(tokens, at) == "^" || token(tokens, at) == "~" || token(tokens, at) == "comptime" {
                 at += 1
             }
@@ -1171,7 +1173,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
                 // resolved through the receiver's type, as a call is below.
                 owner: receivers.get(rhs.parts[0]) ?? ""
                 target: if owner != "" && rhs.parts.len() > 1 -> with_head(owner, rhs.parts) else -> expand(rhs.parts, aliases)
-                typed := ""
+                ^typed: ""
                 open: after_generics(tokens, rhs.end)
                 called: token(tokens, open) == "("
                 // A function the program declares, called, holds its declared
@@ -1208,8 +1210,8 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         // on it is that type's.
         kind: expand(candidate.parts, aliases)
         if token(tokens, candidate.end) == "{{" && table.types.has_key(kind) {
-            close := candidate.end + 1
-            depth := 1
+            ^close: candidate.end + 1
+            ^depth: 1
             loop close < tokens.len() && depth > 0 {
                 if tokens[close].value == "{{" -> depth += 1
                 if tokens[close].value == "}}" -> depth -= 1
@@ -1231,13 +1233,13 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         target: if receiver != "" && parts.len() > 1 -> with_head(receiver, parts) else -> expand(parts, aliases)
         row: table.by_id.get(target) ?? -1
         if row >= 0 -> calls.push(Call{index: row, offset: tokens[i].offset})
-        close := at + 1
-        depth := 1
+        ^close: at + 1
+        ^depth: 1
         loop close < tokens.len() && depth > 0 {
             depth += paren_step(tokens[close].value)
             close += 1
         }
-        returned := ""
+        ^returned: ""
         if {
             row >= 0 && table.returns[row] != "" -> returned = table.returns[row].copy()
             table.types.has_key(target) -> returned = target.copy()
@@ -1256,7 +1258,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         i = candidate.end
     }
     loop slot in 0..<return_closes.len() {
-        close := return_closes[slot]
+        ^close: return_closes[slot]
         // A call an interpolation ends with displays what it returns.
         if token(tokens, close + 1) == INTERPOLATION_END {
             shown: table.by_id.get("{return_types[slot]}.display") ?? -1
@@ -1266,7 +1268,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         // Each method chained on the result (`args.spec().flag(…).repeat(…)`)
         // is a method of the type the call before it returns; a builder a
         // reserved method lowers keeps that type and credits no row.
-        current := return_types[slot].copy()
+        ^current: return_types[slot].copy()
         loop token(tokens, close + 1) == "." {
             member: "{current}.{token(tokens, close + 2)}"
             at: after_generics(tokens, close + 3)
@@ -1277,7 +1279,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
                 current = bound_type(table, row)
             }
             close = at + 1
-            depth := 1
+            ^depth: 1
             loop close < tokens.len() && depth > 0 {
                 depth += paren_step(tokens[close].value)
                 close += 1
@@ -1291,13 +1293,13 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
 // The fenced ```jet (or bare ```) programs of one doc block.
 fenced_programs: fn(block: String, programs: ^[String]) {
     raw: block.bytes()
-    at := 0
+    ^at: 0
     loop at < raw.len() {
         if !starts_at(raw, at, raw.len(), "```") {
             at += 1
             next
         }
-        body := at + 3
+        ^body: at + 3
         if starts_at(raw, body, raw.len(), "jet") -> body += 3
         loop byte_at(raw, body, raw.len()) == SPACE || byte_at(raw, body, raw.len()) == TAB {
             body += 1
@@ -1315,11 +1317,11 @@ fenced_programs: fn(block: String, programs: ^[String]) {
 
 // A `/** … */` body without each line's leading `*`.
 strip_stars: fn(raw: [U8]) -> String Never! {
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < raw.len() {
         if at == 0 || (Int{raw[at - 1]}) == NEWLINE || (Int{raw[at - 1]}) == CARRIAGE_RETURN {
-            after := at
+            ^after: at
             loop after < raw.len() && is_space(Int{raw[after]}) -> after += 1
             if byte_at(raw, after, raw.len()) == STAR {
                 after += 1
@@ -1337,10 +1339,10 @@ strip_stars: fn(raw: [U8]) -> String Never! {
 // The fenced Jet programs of `///` doc blocks (consecutive doc lines, blank
 // lines between them allowed) and of `/** … */` blocks.
 doctest_programs: fn(source: String) -> [String] Never! {
-    programs := [String]{}
-    block := ""
-    open := false
-    gap := false
+    ^programs: [String]{}
+    ^block: ""
+    ^open: false
+    ^gap: false
     loop line in source.split("\n") {
         trimmed: line.trim_start()
         if trimmed.starts_with("///") {
@@ -1348,7 +1350,7 @@ doctest_programs: fn(source: String) -> [String] Never! {
                 fenced_programs(block, programs)
                 block = ""
             }
-            content := trimmed.remove_prefix("///")
+            ^content: trimmed.remove_prefix("///")
             if content.starts_with(" ") -> content = content.remove_prefix(" ")
             if content.contains("\r") -> content = content.partition("\r").head.copy()
             block = "{block}{content}\n"
@@ -1360,7 +1362,7 @@ doctest_programs: fn(source: String) -> [String] Never! {
     }
     fenced_programs(block, programs)
     raw: source.bytes()
-    at := 0
+    ^at: 0
     loop {
         opener: find_at(raw, at, raw.len(), "/**")
         if opener < 0 -> break
@@ -1375,7 +1377,7 @@ doctest_programs: fn(source: String) -> [String] Never! {
 // The end of the quoted literal opening at `start` (one past its closing
 // quote), or -1. An escape takes any byte but a line break.
 quoted_end: fn(raw: [U8], start: Int, quote: Int) -> Int Never! {
-    at := start + 1
+    ^at: start + 1
     loop at < raw.len() {
         b: Int{raw[at]}
         if b == quote -> return at + 1
@@ -1396,8 +1398,8 @@ quoted_end: fn(raw: [U8], start: Int, quote: Int) -> Int Never! {
 // strings and template literals are candidates.
 embedded_programs: fn(source: String) -> [String] Never! {
     raw: source.bytes()
-    programs := [String]{}
-    at := 0
+    ^programs: [String]{}
+    ^at: 0
     loop at < raw.len() {
         b: Int{raw[at]}
         if b == SLASH && byte_at(raw, at + 1, raw.len()) == SLASH {
@@ -1412,7 +1414,7 @@ embedded_programs: fn(source: String) -> [String] Never! {
             }
         }
         if b == LOWER_R {
-            hashes := 0
+            ^hashes: 0
             loop byte_at(raw, at + 1 + hashes, raw.len()) == HASH -> hashes += 1
             body: at + 2 + hashes
             if byte_at(raw, body - 1, raw.len()) == QUOTE {
@@ -1456,8 +1458,8 @@ candidate: fn(program: String, programs: ^[String]) {
 // `expected`, `node_modules`, `target` and symbolic links are skipped.
 files_under: fn(root: String, path: String, found: ^[String]) -[FS]> CoverageError! {
     listed: files.list_dir("{root}/{path}") ?? return Err(fail("`{path}` cannot be listed: {err}"))
-    names := [String]{}
-    directories := [String:Bool]{}
+    ^names: [String]{}
+    ^directories: [String:Bool]{}
     loop entry in listed {
         if entry.name.starts_with(".") || SKIPPED_NAMES.contains(entry.name) -> next
         names.push(entry.name.copy())
@@ -1494,10 +1496,10 @@ read_source: fn(root: String, path: String) -[FS]> String CoverageError! {
 // each PARTS row.
 part_paths: fn(root: String) -[FS]> [String:Bool] CoverageError! {
     source: read_source(root, PARTS) ?? return Err(err)
-    paths := [String:Bool]{}
+    ^paths: [String:Bool]{}
     loop line in source.split("\n") {
         if line == "" || line.starts_with("#") -> next
-        columns := [String]{}
+        ^columns: [String]{}
         loop column in line.split("\t") -> columns.push(column.copy())
         if columns.len() < 3 || columns[2] == "" {
             return Err(fail("`{PARTS}`: a part row names no path: {line}"))
@@ -1529,7 +1531,7 @@ routed: fn(root: String, functions: ^[Function], table: Table) -[FS]> CoverageEr
     source: read_source(root, ROUTES) ?? return Err(err)
     loop line in source.split("\n") {
         if line == "" || line.starts_with("#") -> next
-        columns := [String]{}
+        ^columns: [String]{}
         loop column in line.split("\t") -> columns.push(column.copy())
         if columns.len() != 3 || columns[1] == "" {
             return Err(fail("`{ROUTES}`: a row is not `id<TAB>construct<TAB>witness`: {line}"))
@@ -1549,9 +1551,9 @@ routed: fn(root: String, functions: ^[Function], table: Table) -[FS]> CoverageEr
 // declaration it stands for (`Path` is core.files.Path, `Date` is
 // core.time.LocalDate). A tree without that table (a fixture) has none.
 bare_spellings: fn(root: String) -[FS]> [Alias] Never! {
-    found := [Alias]{}
+    ^found: [Alias]{}
     source: files.read("{root}/{BARE_SPELLINGS}") ?? return found
-    inside := false
+    ^inside: false
     loop line in source.split("\n") {
         if line.starts_with("CORE_BARE_SOURCE_MODULES:") {
             inside = true
@@ -1559,7 +1561,7 @@ bare_spellings: fn(root: String) -[FS]> [Alias] Never! {
         }
         if !inside -> next
         if line.starts_with("}}") -> break
-        pieces := [String]{}
+        ^pieces: [String]{}
         loop piece in line.split("\"") -> pieces.push(piece.copy())
         if pieces.len() < 5 || !pieces[0].contains("name:") -> next
         declared: if pieces.len() >= 7 && pieces[4].contains("declared:") -> pieces[5] else -> pieces[1]
@@ -1571,11 +1573,11 @@ bare_spellings: fn(root: String) -[FS]> [Alias] Never! {
 // Each Core file's module as CORE_ROWS names it. A tree without that table (a
 // fixture) names none, and module_name spells each module from its path.
 source_modules: fn(root: String) -[FS]> [String:String] Never! {
-    found := [String:String]{}
+    ^found: [String:String]{}
     source: files.read("{root}/{CORE_ROWS}") ?? return found
     loop line in source.split("\n") {
         if !line.starts_with("source_module ") -> next
-        words := [String]{}
+        ^words: [String]{}
         loop word in line.split(" ") -> words.push(word.copy())
         if words.len() >= 4 && words[2] == "path" -> found[words[3].copy()] = words[1].copy()
     }
@@ -1584,7 +1586,7 @@ source_modules: fn(root: String) -[FS]> [String:String] Never! {
 
 // `aliases` with every bare spelling it does not already bind.
 with_bare: fn(aliases: [String:String], bare: [Alias]) -> [String:String] Never! {
-    out := aliases.copy()
+    ^out: aliases.copy()
     loop alias in bare {
         if !out.has_key(alias.name) -> out[alias.name.copy()] = alias.target.copy()
     }
@@ -1593,21 +1595,21 @@ with_bare: fn(aliases: [String:String], bare: [Alias]) -> [String:String] Never!
 
 census: fn(root: String) -[FS]> Report CoverageError! {
     parts: part_paths(root) ?? return Err(err)
-    listed := [String]{}
+    ^listed: [String]{}
     files_under(root, "Core", listed) ?? return Err(err)
     named: source_modules(root)
-    paths := [String]{}
-    path_units := [String]{}
-    sources := [String]{}
-    functions := [Function]{}
-    excluded := [Function]{}
+    ^paths: [String]{}
+    ^path_units: [String]{}
+    ^sources: [String]{}
+    ^functions: [Function]{}
+    ^excluded: [Function]{}
     loop path in listed {
         if !path.ends_with(".jet") -> next
         source: read_source(root, path) ?? return Err(err)
         part: parts.has_key(path)
         unit: named.get(path) ?? module_name(path)
         loop found in public_functions_in(unit, path, source) {
-            row := found.copy()
+            ^row: found.copy()
             row.part = part
             if outside_surface(row) -> excluded.push(row) else -> functions.push(row)
         }
@@ -1615,20 +1617,20 @@ census: fn(root: String) -[FS]> Report CoverageError! {
         path_units.push(unit.copy())
         sources.push(source.copy())
     }
-    inventory := table_of(functions)
+    ^inventory: table_of(functions)
     inventory.lowered = lowered_builders(excluded)
-    unique := 0
+    ^unique: 0
     loop _ in inventory.by_id -> unique += 1
     if functions.len() == 0 || unique != functions.len() {
         return Err(fail("Core census is empty or contains duplicate public function identities"))
     }
-    prelude := ""
+    ^prelude: ""
     loop index in 0..<paths.len() {
         if paths[index] == "Core/Prelude/Prelude.jet" -> prelude = sources[index].copy()
     }
     table: with_scalar_owners(with_family_sizes(inventory, prelude))
     bare: bare_spellings(root)
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     loop index in 0..<paths.len() {
         programs: doctest_programs(sources[index])
         if programs.len() == 0 -> next
@@ -1639,9 +1641,9 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     }
     plain: with_bare(initial_aliases(table, ""), bare)
     kinds: [Int]{EXAMPLES, TESTS}
-    written := [String:Bool]{}
+    ^written: [String:Bool]{}
     loop kind in kinds {
-        found := [String]{}
+        ^found: [String]{}
         files_under(root, if kind == EXAMPLES -> "Examples" else -> "Tests", found) ?? return Err(err)
         loop path in found {
             suffix: extension(path)
@@ -1668,21 +1670,21 @@ census: fn(root: String) -[FS]> Report CoverageError! {
         }
     }
     routed(root, functions, table) ?? return Err(err)
-    units := [String]{}
-    known := [String:Bool]{}
+    ^units: [String]{}
+    ^known: [String:Bool]{}
     loop row in functions {
         if known.has_key(row.unit) -> next
         known[row.unit.copy()] = true
         units.push(row.unit.copy())
     }
     units.sort()
-    at_unit := [String:Int]{}
-    modules := [ModuleRow]{}
+    ^at_unit: [String:Int]{}
+    ^modules: [ModuleRow]{}
     loop unit in units {
         at_unit[unit.copy()] = modules.len()
         modules.push(ModuleRow{unit: unit.copy(), public: 0, doctests: 0, examples: 0, tests: 0, uncovered: 0})
     }
-    uncovered := 0
+    ^uncovered: 0
     loop row in functions {
         slot: at_unit.get(row.unit) ?? 0
         modules[slot].public += 1
@@ -1703,15 +1705,19 @@ census: fn(root: String) -[FS]> Report CoverageError! {
 // exists.
 case_templates: fn(path: String, source: String) -> [String] Never! {
     dir: path.rpartition("/").head
-    fixtures := [String]{}
-    sources := [String]{}
+    ^fixtures: [String]{}
+    ^sources: [String]{}
     loop line in source.split("\n") {
-        if line.starts_with("fixture: ") -> fixtures.push(line.remove_prefix("fixture: ").trim().copy())
+        if line.starts_with("fixture: ") {
+            fixtures.push(line.remove_prefix("fixture: ").trim().copy())
+        }
         if !line.starts_with("write: ") -> next
         words: line.remove_prefix("write: ").trim().split(" ").to_list()
-        if words.len() == 2 && words[0].ends_with(".jet") && words[1].ends_with(".template") -> sources.push(words[1].copy())
+        if words.len() == 2 && words[0].ends_with(".jet") && words[1].ends_with(".template") {
+            sources.push(words[1].copy())
+        }
     }
-    out := [String]{}
+    ^out: [String]{}
     loop template in sources {
         out.push("{dir}/{template}")
         loop fixture in fixtures -> out.push("{dir}/{fixture}/{template}")
@@ -1725,7 +1731,7 @@ is_untested: fn(row: Function) -> Bool Never! {
 
 // Each untested public function: its module, name and signature.
 untested: fn(report: Report) -> [Untested] Never! {
-    rows := [Untested]{}
+    ^rows: [Untested]{}
     loop row in report.functions {
         if is_untested(row) {
             rows.push(Untested{unit: row.unit.copy(), name: row.name.copy(), signature: row.signature.copy(), file: row.file.copy(), line: row.line})
@@ -1752,7 +1758,7 @@ ratchet_entries: fn(tree: Dyn) -> [Entry] CoverageError! {
         .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> -1
     }
     if version != 2 -> return Err(invalid)
-    entries := [Entry]{}
+    ^entries: [Entry]{}
     listed: if field(tree, "modules") == {
         .Object(object) -> object.copy()
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
@@ -1803,10 +1809,10 @@ Keyed: struct {
 // signature in another module, which `next` re-files under the row's module.
 // `next` keeps only listed rows, so writing it only removes names.
 ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
-    owns := [String]{}
-    keys := [String]{}
-    alive := [Bool]{}
-    position := [String:Int]{}
+    ^owns: [String]{}
+    ^keys: [String]{}
+    ^alive: [Bool]{}
+    ^position: [String:Int]{}
     loop entry in previous.entries {
         own: "{entry.unit}\t{entry_key(entry.name, entry.signature)}"
         if position.has_key(own) -> next
@@ -1815,10 +1821,10 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
         keys.push(entry_key(entry.name, entry.signature))
         alive.push(true)
     }
-    removable := owns.len()
-    kept_at := [String:Int]{}
-    kept := [Untested]{}
-    pending := [Untested]{}
+    ^removable: owns.len()
+    ^kept_at: [String:Int]{}
+    ^kept: [Untested]{}
+    ^pending: [Untested]{}
     loop row in rows {
         own: "{row.unit}\t{entry_key(row.name, row.signature)}"
         slot: position.get(own) ?? -1
@@ -1831,10 +1837,10 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
             else -> pending.push(row.copy())
         }
     }
-    unlisted := [Untested]{}
+    ^unlisted: [Untested]{}
     loop row in pending {
         key: entry_key(row.name, row.signature)
-        moved := -1
+        ^moved: -1
         loop slot in 0..<owns.len() {
             if alive[slot] && keys[slot] == key {
                 moved = slot
@@ -1851,7 +1857,7 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
         }
     }
     listed: if previous.present -> kept.copy() else -> rows.copy()
-    keyed := [Keyed]{}
+    ^keyed: [Keyed]{}
     loop row in listed {
         keyed.push(
             Keyed{
@@ -1869,7 +1875,7 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
         if by_name != Ordering.Equal -> return by_name
         compare_bytes(left.signature_key, right.signature_key)
     })
-    next_entries := [Entry]{}
+    ^next_entries: [Entry]{}
     loop row in keyed -> next_entries.push(row.entry.copy())
     Decision{passes: previous.present && unlisted.len() == 0, unlisted: unlisted.copy(), removable: removable, next: next_entries.copy()}
 }
@@ -1887,7 +1893,7 @@ keep_row: fn(kept_at: ^[String:Int], kept: ^[Untested], own: String, row: Untest
 
 // A JSON string literal spelled as JavaScript's JSON.stringify spells it.
 quote: fn(value: String) -> String Never! {
-    out := [U8]{34}
+    ^out: [U8]{34}
     loop byte in value.bytes() {
         code: Int{byte}
         if {
@@ -1912,11 +1918,11 @@ hex_digit: fn(value: Int) -> String Never! { "0123456789abcdef".slice(value..<va
 
 // One entry per line, so a removal is a one-line diff.
 ratchet_text: fn(entries: [Entry]) -> String Never! {
-    blocks := [String]{}
-    at := 0
+    ^blocks: [String]{}
+    ^at: 0
     loop at < entries.len() {
         unit: entries[at].unit
-        rows := [String]{}
+        ^rows: [String]{}
         loop at < entries.len() && entries[at].unit == unit {
             rows.push("      {{\"name\":{quote(entries[at].name)},\"signature\":{quote(entries[at].signature)}}}")
             at += 1
@@ -1932,7 +1938,7 @@ texts: fn(items: [String]) -> Dyn Never! {
 }
 
 report_json: fn(report: Report) -> Dyn Never! {
-    modules := [Dyn]{}
+    ^modules: [Dyn]{}
     loop row in report.modules {
         modules.push(
             Dyn.Object(
@@ -1947,7 +1953,7 @@ report_json: fn(report: Report) -> Dyn Never! {
             ),
         )
     }
-    functions := [Dyn]{}
+    ^functions: [Dyn]{}
     loop row in report.functions {
         functions.push(
             Dyn.Object(
@@ -1966,7 +1972,7 @@ report_json: fn(report: Report) -> Dyn Never! {
             ),
         )
     }
-    excluded := [Dyn]{}
+    ^excluded: [Dyn]{}
     loop row in report.excluded {
         excluded.push(
             Dyn.Object(
@@ -1995,8 +2001,8 @@ report_json: fn(report: Report) -> Dyn Never! {
 // The excluded count line: how many declarations the census leaves out, by
 // kind (an extern first, then a part member, then a reserved name).
 excluded_line: fn(report: Report) -> String Never! {
-    externs := 0
-    parts := 0
+    ^externs: 0
+    ^parts: 0
     loop row in report.excluded {
         if {
             row.foreign -> externs += 1
@@ -2044,7 +2050,7 @@ coverage_main: fn(args: [String], root: String) -[FS, IO]> Int CoverageError! {
     }
     if !check && !write -> return Ok(0)
     path: "{root}/{RATCHET}"
-    previous := Previous{present: false, entries: [Entry]{}}
+    ^previous: Previous{present: false, entries: [Entry]{}}
     if files.exists(path) {
         source: files.read(path) ?? return Err(fail("`{RATCHET}` cannot be read: {err}"))
         tree: json.parse(source) ?? return Err(fail("`{RATCHET}` is not JSON: {err}"))
@@ -2076,7 +2082,7 @@ coverage_main: fn(args: [String], root: String) -[FS, IO]> Int CoverageError! {
 // Tests.
 
 fixture_rows: fn() -> [Function] Never! {
-    rows := [Function]{}
+    ^rows: [Function]{}
     rows.extend(public_functions("Core/Text/Text.jet", "trim: fn(x: String) -> String Never! {{ x }}\n    split: fn<T>(x: T) -> String Never! {{ \"\" }}\n    unused: fn() {{}}"))
     rows.extend(public_functions("Core/Math/Math.jet", "trim: fn() -> Int Never! {{ 1 }}\n    impl Float.Roundable {{ rounded: fn(self) -> Float Never! {{ self }} }}"))
     rows.extend(public_functions("Core/Crypto/Crypto.jet", "Hasher: struct {{\n    new: fn() -> Hasher Never! {{ {{}} }}\n    digest: fn(self) -> String Never! {{ \"\" }}\n  }}\n  new: fn() -> Hasher Never! {{ Hasher.new() }}"))
@@ -2087,7 +2093,7 @@ fixture_rows: fn() -> [Function] Never! {
 
 ids: fn(source: String, context: String) -> [String] Never! {
     table: table_of(fixture_rows())
-    found := [String]{}
+    ^found: [String]{}
     loop call in call_sites(source, table, initial_aliases(table, context)) {
         found.push(table.ids[call.index].copy())
     }
@@ -2099,7 +2105,7 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 #Test("a number family's methods are the methods of each of its sizes") {
     rows: public_functions("Core/Math/Math.jet", "impl Signed.Roundable {{ rounded: fn(self) -> Self Never! {{ self }} }}")
     table: with_family_sizes(table_of(rows), "Signed: struct<bits: Int> {{\n    raw: builtin.Word<bits>,\n}}\n\nI8: Signed<8>\nI16: Signed<16>\nBox: Pair<Int>\n")
-    found := [String]{}
+    ^found: [String]{}
     loop call in call_sites("run: fn() {{ print(I16{{3}}.rounded()) }}", table, initial_aliases(table, "")) {
         found.push(table.ids[call.index].copy())
     }
@@ -2107,11 +2113,11 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("a doctest names its own module's copy of a family size") {
-    rows := public_functions("Core/Math/Math.jet", "impl Signed.Roundable {{ rounded: fn(self) -> Self Never! {{ self }} }}")
+    ^rows: public_functions("Core/Math/Math.jet", "impl Signed.Roundable {{ rounded: fn(self) -> Self Never! {{ self }} }}")
     rows.extend(public_functions("Core/Text/Fmt.jet", "impl Signed.HexFormat {{ hex: fn(self, digits: Int) -> String Never! {{ \"\" }} }}"))
     table: with_family_sizes(table_of(rows), "I8: Signed<8>\nI16: Signed<16>\n")
     source: "run: fn() {{ print(I8{{3}}.hex(2)) }}"
-    found := [String]{}
+    ^found: [String]{}
     loop call in call_sites(source, table, initial_aliases(table, "core.text.fmt")) {
         found.push(table.ids[call.index].copy())
     }
@@ -2189,8 +2195,8 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 
 #Test("a binding holds the type a method chain, a local function or an imported result gives") {
     found: ids("use mem: core.mem\n    use process: core.process\n    local: fn(n: Int) -[FS]> mem.Region Never! {{ mem.reserve() }}\n    run: fn() {{\n      chained := mem.reserve().next().claim() ?? panic(\"none\")\n      chained.address()\n      made := local(1)\n      made.claim()\n      imported := process.block()\n      imported.address()\n    }}", "")
-    addressed := 0
-    claimed := 0
+    ^addressed: 0
+    ^claimed: 0
     loop id in found {
         if id == "core.mem.Block.address" -> addressed += 1
         if id == "core.mem.Region.claim" -> claimed += 1
@@ -2212,10 +2218,10 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("a built-in scalar that two modules give methods has the methods of both") {
-    rows := public_functions("Core/Encoding/Encoding.jet", "impl F32.Decode {{ decode: fn(tree: Dyn) -> F32 Never! {{ F32{{0.0}} }} }}")
+    ^rows: public_functions("Core/Encoding/Encoding.jet", "impl F32.Decode {{ decode: fn(tree: Dyn) -> F32 Never! {{ F32{{0.0}} }} }}")
     rows.extend(public_functions("Core/Math/Math.jet", "impl F32.Roundable {{ rounded: fn(self) -> F32 Never! {{ self }} }}"))
     table: with_scalar_owners(table_of(rows))
-    found := [String]{}
+    ^found: [String]{}
     loop call in call_sites("run: fn(x: F32) {{\n      F32{{2.5}}.rounded()\n      x.rounded()\n      F32.decode(tree)\n    }}", table, initial_aliases(table, "")) {
         found.push(table.ids[call.index].copy())
     }
@@ -2233,7 +2239,7 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 #Test("embedded host programs isolate alias environments and ignore host comments") {
     programs: embedded_programs("// r#\"use t: core.text; t.unused()\"#\n    let first = r#\"use t: core.text\n      run: fn() {{ t.trim(\"a\") }}\"#;\n    let second = r##\"use t: core.math\n      run: fn() {{ t.trim() }}\"##;\n    let third = \"use t: core.text\\nrun: fn() {{ t.split<Int>(1) }}\";\n    let message = \"core.text.unused()\";\n    let fourth = r\"run: fn() {{ core.text.trim() }}\";\n  ")
     assert_eq(programs.len(), 4)
-    found := [String]{}
+    ^found: [String]{}
     loop program in programs -> found.extend(ids(program, ""))
     assert_eq(found, [String]{"core.text.trim", "core.math.trim", "core.text.split", "core.text.trim"})
 }
@@ -2340,7 +2346,7 @@ find_function: fn(report: Report, name: String) -> Function Never! {
     assert_eq(report.functions.map(fn(row) { row.name.copy() }), [String]{"plain"})
     assert_eq(report.total_public, 1)
     assert_eq(report.total_uncovered, 1)
-    excluded := report.excluded.map(fn(row) { "{row.name} {row.foreign} {row.part}" })
+    ^excluded: report.excluded.map(fn(row) { "{row.name} {row.foreign} {row.part}" })
     excluded.sort()
     assert_eq(excluded, [String]{"Shape.__area false false", "__Tape.depth false false", "__hook false false", "helper false true", "owned false true", "symbol true false"})
     assert_eq(excluded_line(report), "excluded: 6 declarations outside the user-callable surface (1 extern, 2 in compiler-private parts, 3 reserved `__` names)")

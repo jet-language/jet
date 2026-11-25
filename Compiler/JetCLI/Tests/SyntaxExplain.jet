@@ -39,7 +39,9 @@ use {
         panic("one token's multiple meanings")
     }
     and_index: jet_cli_syntax_lookup("&&") ?? panic("logical and lookup")
-    if JET_CLI_SYNTAX_ROWS[and_index].kind != JetCLISyntaxKind.Operator -> panic("`&&` is only the logical and")
+    if JET_CLI_SYNTAX_ROWS[and_index].kind != JetCLISyntaxKind.Operator {
+        panic("`&&` is only the logical and")
+    }
     if !jet_cli_syntax_query("#Inlin") || !jet_cli_syntax_query(":>") || !jet_cli_syntax_query("é") {
         panic("syntax typo classification")
     }
@@ -145,8 +147,8 @@ syntax_explain_row_problem: fn(row: JetCLISyntaxRow) -> String Never! {
     }
     constants: jet_cli_grammar_constants(root) ?? panic("read the syntax registry: {err.message}")
     tokens: jet_cli_grammar_tokens(root, constants) ?? panic("read the highlight tokens: {err.message}")
-    problems := [String]{}
-    walked := 0
+    ^problems: [String]{}
+    ^walked: 0
     loop token in tokens {
         if token.class != "Sigil" && token.class != "Operator" && token.class != "TakeMark" -> next
         walked += 1

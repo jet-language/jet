@@ -32,7 +32,7 @@ status_kb: fn(field: String) -[FS.Read]> Int {
 }
 
 run: fn() {
-    made := 0
+    ^made: 0
     _first: files.temp_dir("lent-path") ?? panic("temp_dir: {err}")
     start: status_kb("VmRSS:")
     loop _ in 0..<TEMP_CALLS {
@@ -40,10 +40,12 @@ run: fn() {
         if dir.path.len() > 0 -> made += 1
     }
     temp_grown: status_kb("VmRSS:") - start
-    if temp_grown > GROWTH_LIMIT_KB -> panic("the resident set grew {temp_grown} kB over {TEMP_CALLS} temp_dir calls")
+    if temp_grown > GROWTH_LIMIT_KB {
+        panic("the resident set grew {temp_grown} kB over {TEMP_CALLS} temp_dir calls")
+    }
     print("{made} temp_dir calls: the paths freed")
 
-    ports := 0
+    ^ports: 0
     _warm: net.socket_addr_parse("192.168.1.20:8080") ?? panic("socket_addr_parse: {err}")
     begin: status_kb("VmRSS:")
     loop _ in 0..<ADDRESS_CALLS {
@@ -51,6 +53,8 @@ run: fn() {
         ports += net.socket_port(address)
     }
     address_grown: status_kb("VmRSS:") - begin
-    if address_grown > GROWTH_LIMIT_KB -> panic("the resident set grew {address_grown} kB over {ADDRESS_CALLS} socket_addr_parse calls")
+    if address_grown > GROWTH_LIMIT_KB {
+        panic("the resident set grew {address_grown} kB over {ADDRESS_CALLS} socket_addr_parse calls")
+    }
     print("{ADDRESS_CALLS} socket_addr_parse calls: port total {ports}, the octets and addresses freed")
 }

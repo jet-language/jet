@@ -49,7 +49,7 @@ LockRegeneration: struct {
 
     // Each argument in backticks, space separated.
     display: fn(self) -> String Never! {
-        quoted := [String]{}
+        ^quoted: [String]{}
         loop arg in self.argv -> quoted.push("`{arg}`")
         quoted.join(" ")
     }
@@ -92,7 +92,7 @@ LockCompletenessError: struct {
 
 // The manifest's dependency names in key order.
 pkg_lock_manifest_dependency_names: fn(manifest: Manifest) -> [String] Never! {
-    names := manifest.dependencies.keys().to_list()
+    ^names: manifest.dependencies.keys().to_list()
     names.sort()
     names
 }
@@ -202,9 +202,9 @@ pkg_lock_record_generated_inputs: fn(project_root: String, generated: [ComptimeI
 // `locked` checks the `.jet/generated/` rows alone; the rows of the files a
 // compile read are the compile's own.
 pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp, lock_was_present: Bool) -[FS, Env, Time]> LockError! {
-    lock := pkg_lock_load_or_empty(project_root)
+    ^lock: pkg_lock_load_or_empty(project_root)
     if locked {
-        managed := [ComptimeInput]{}
+        ^managed: [ComptimeInput]{}
         loop input in lock.comptime_inputs {
             if input.path.starts_with(".jet/generated/") -> managed.push(input.copy())
         }
@@ -213,8 +213,8 @@ pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, gener
         if expected == actual {
             return
         }
-        path := "<unknown>"
-        drifted := false
+        ^path: "<unknown>"
+        ^drifted: false
         loop input in actual {
             if !drifted && !expected.contains(input) {
                 path = input.path
@@ -252,7 +252,7 @@ pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, gener
     }
     if lock.build_stamp == None -> lock.build_stamp = Val(stamp)
     loop input in generated {
-        replaced := false
+        ^replaced: false
         loop index in 0..<lock.comptime_inputs.len() {
             if !replaced && lock.comptime_inputs[index].path == input.path {
                 lock.comptime_inputs[index] = input.copy()
@@ -283,7 +283,7 @@ pkg_lock_locked_build_contribution: fn(package: String, contribution: FactContri
 }
 
 pkg_lock_locked_build_contribution_set: fn(package: String, contributions: [FactContribution]) -> [LockedBuildContribution] Never! {
-    records := [LockedBuildContribution]{}
+    ^records: [LockedBuildContribution]{}
     loop contribution in contributions {
         records.push(pkg_lock_locked_build_contribution(package, contribution))
     }
@@ -301,7 +301,7 @@ pkg_lock_verify_locked_build_contributions: fn(project_root: String, package: St
         return Err(LockError.Reported(pkg_lock_e3512("locked build contributions for `{package}` are not recorded", "a locked build must replay every computed fact writer from `.jet/lock`", "rerun without `--locked` to record the computed contribution chain")))
     }
     lock: loaded
-    recorded := [LockedBuildContribution]{}
+    ^recorded: [LockedBuildContribution]{}
     loop contribution in lock.build_contributions {
         if contribution.package == package -> recorded.push(contribution)
     }
@@ -317,11 +317,11 @@ pkg_lock_record_build_contributions: fn(project_root: String, package: String, c
     if locked {
         return pkg_lock_verify_locked_build_contributions(project_root, package, contributions)
     }
-    lock := pkg_lock_load_or_empty(project_root)
+    ^lock: pkg_lock_load_or_empty(project_root)
     // Explicit foreign-build selections are project-level activation state,
     // not computed package facts; a later native package build must not
     // erase the reviewed plan that ordinary `jet build` consumes.
-    kept := [LockedBuildContribution]{}
+    ^kept: [LockedBuildContribution]{}
     loop contribution in lock.build_contributions {
         if contribution.package == "__jet_foreign_build__" || contribution.package != package {
             kept.push(contribution)
@@ -348,10 +348,10 @@ pkg_lock_write_error: fn(path: String, error: String) -> Diagnostic Never! {
 // public-fn capability digest when one exists, each NUL-terminated. An
 // empty `cap_digest` (first publish) leaves the tree+deps form unchanged.
 pkg_lock_compute_fingerprint: fn(tree_hash: String, dep_fingerprints: [String], cap_digest: String) -> String Never! {
-    data := [U8]{}
+    ^data: [U8]{}
     loop byte in tree_hash.bytes() -> data.push(byte)
     data.push(U8{0})
-    sorted := dep_fingerprints
+    ^sorted: dep_fingerprints
     sorted.sort()
     loop fingerprint in sorted {
         loop byte in fingerprint.bytes() -> data.push(byte)
@@ -433,7 +433,7 @@ pkg_diagnostic_from_row: fn(code: String, args: [{name: String, value: String}],
 }
 
 pkg_diagnostic_fill_row: fn(template: String, args: [{name: String, value: String}]) -> String Never! {
-    text := template
+    ^text: template
     loop arg in args -> text = text.replace("{{{arg.name}}}", arg.value)
     text
 }

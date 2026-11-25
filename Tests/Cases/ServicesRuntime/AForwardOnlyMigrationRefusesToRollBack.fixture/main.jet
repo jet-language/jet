@@ -8,7 +8,7 @@ rollback_worker: fn() {}
 run: fn() {
     store_path: env.get("JET_SERVICE_ROLLBACK_STORE") ?? panic("store")
     policy: env.get("JET_SERVICE_ROLLBACK_POLICY") ?? panic("policy")
-    tree := services.tree("cluster")
+    ^tree: services.tree("cluster")
     store: services.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "cluster-events", 1, policy) ?? panic("state")
     endpoint: tree.worker("api", rollback_worker, capacity: 1) ?? panic("worker")

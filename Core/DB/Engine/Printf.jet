@@ -222,7 +222,7 @@ str_accum_enlarge: fn(p: ^StrAccum, n: Int) -> Int Never! {
         str_accum_set_error(p, base.TOOBIG)
         return p.n_alloc - p.text.len() - 1
     }
-    sz := p.text.len() + n + 1
+    ^sz: p.text.len() + n + 1
     if sz + p.text.len() <= p.mx_alloc -> sz += p.text.len()
     if sz > p.mx_alloc {
         str_reset(p)
@@ -236,7 +236,7 @@ str_accum_enlarge: fn(p: ^StrAccum, n: Int) -> Int Never! {
 
 // sqlite3_str_appendchar: n copies of byte c.
 str_append_char: fn(p: ^StrAccum, n_in: Int, c: Int) Never! {
-    n := n_in
+    ^n: n_in
     if p.text.len() + n >= p.n_alloc {
         n = str_accum_enlarge(p, n)
         if n <= 0 {
@@ -248,7 +248,7 @@ str_append_char: fn(p: ^StrAccum, n_in: Int, c: Int) Never! {
 
 // sqlite3_str_append: the n bytes of z from z[at].
 str_append: fn(p: ^StrAccum, z: [U8], at: Int, n_in: Int) Never! {
-    n := n_in
+    ^n: n_in
     if p.text.len() + n >= p.n_alloc {
         n = str_accum_enlarge(p, n)
         if n <= 0 {
@@ -263,7 +263,7 @@ str_append_all: fn(p: ^StrAccum, z: [U8]) Never! { str_append(p, z, 0, c_len(z))
 
 // strlen of a C string: the bytes before the first 0x00.
 c_len: fn(z: [U8]) -> Int Never! {
-    n := 0
+    ^n: 0
     loop n < z.len() && z[n] != (U8{0}) -> n += 1
     n
 }
@@ -292,9 +292,9 @@ to_c_int: fn(v: Int) -> Int Never! {
 // sqlite3_str_vappendf: the format fmt rendered into p.
 str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
     arg_list: p.printf_flags & PRINTF_SQLFUNC != 0
-    at := 0
+    ^at: 0
     loop at < fmt.len() && fmt[at] != (U8{0}) {
-        c := sql_byte(fmt, at)
+        ^c: sql_byte(fmt, at)
         if c != 37 {
             start: at
             loop at < fmt.len() && fmt[at] != (U8{0}) && fmt[at] != (U8{37}) -> at += 1
@@ -308,16 +308,16 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
             break
         }
         // The flags, width and precision.
-        flag_leftjustify := false
-        flag_prefix := 0
-        thousand := 0
-        flag_alternateform := false
-        flag_altform2 := false
-        flag_zeropad := false
-        flag_long := 0
-        width := 0
-        precision := -1
-        done := false
+        ^flag_leftjustify: false
+        ^flag_prefix: 0
+        ^thousand: 0
+        ^flag_alternateform: false
+        ^flag_altform2: false
+        ^flag_zeropad: false
+        ^flag_long: 0
+        ^width: 0
+        ^precision: -1
+        ^done: false
         loop {
             if c == 45 -> flag_leftjustify = true else if c == 43 -> flag_prefix = 43 else if c == 32 {
                 flag_prefix = 32
@@ -334,7 +334,7 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
                 }
                 done = true
             } else if c >= 49 && c <= 57 {
-                wx := c - 48
+                ^wx: c - 48
                 at += 1
                 c = sql_byte(fmt, at)
                 loop c >= 48 && c <= 57 {
@@ -367,7 +367,7 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
                     at += 1
                     c = sql_byte(fmt, at)
                 } else {
-                    px := 0
+                    ^px: 0
                     loop c >= 48 && c <= 57 {
                         px = (px * 10 + c - 48) & 4294967295
                         at += 1
@@ -383,8 +383,8 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
             if c == 0 -> break
         }
         // The fmtinfo entry of the conversion.
-        info := FMT_INFO[0]
-        xtype := ET_INVALID
+        ^info: FMT_INFO[0]
+        ^xtype: ET_INVALID
         loop idx in 0..<FMT_INFO.len() {
             if c == FMT_INFO[idx].fmttype {
                 info = FMT_INFO[idx]
@@ -397,7 +397,7 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
         }
         // The conversion text and its length; for %c the leading copies are
         // already appended.
-        out := [U8]{}
+        ^out: [U8]{}
         if xtype == ET_POINTER || xtype == ET_ORDINAL || xtype == ET_RADIX || xtype == ET_DECIMAL {
             if xtype == ET_POINTER -> flag_long = 2
             if xtype != ET_DECIMAL -> thousand = 0
@@ -414,12 +414,12 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
             width = 0
         } else if xtype == ET_PERCENT { out.push(U8{37}) } else if xtype == ET_CHARX {
             if arg_list {
-                z := [U8]{}
+                ^z: [U8]{}
                 if args.next_text(z) {
                     first: sql_byte(z, 0)
                     out.push(U8{first})
                     if first & 192 == 192 {
-                        k := 1
+                        ^k: 1
                         loop out.len() < 4 && sql_byte(z, k) & 192 == 128 {
                             out.push(z[k])
                             k += 1
@@ -437,13 +437,13 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
             }
             flag_altform2 = true
         } else if xtype == ET_STRING || xtype == ET_DYNSTRING {
-            z := [U8]{}
+            ^z: [U8]{}
             _: args.next_text(z)
-            length := 0
+            ^length: 0
             if precision >= 0 {
                 if flag_altform2 {
                     // The bytes of the first `precision` characters.
-                    k := precision
+                    ^k: precision
                     loop k > 0 && sql_byte(z, length) != 0 {
                         k -= 1
                         lead: sql_byte(z, length)
@@ -460,12 +460,12 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
         } else {
             // %q, %Q and %w.
             q: if xtype == ET_SQLESCAPE3 -> 34 else -> 39
-            esc := [U8]{}
+            ^esc: [U8]{}
             isnull: !args.next_text(esc)
             if isnull -> esc = if xtype == ET_SQLESCAPE2 -> "NULL".bytes() else -> "(NULL)".bytes()
-            k := precision
-            i := 0
-            nq := 0
+            ^k: precision
+            ^i: 0
+            ^nq: 0
             loop k != 0 && sql_byte(esc, i) != 0 {
                 ch: sql_byte(esc, i)
                 if ch == q -> nq += 1
@@ -505,10 +505,10 @@ str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
 // The etDECIMAL/etRADIX/etORDINAL/etPOINTER conversion into out; false
 // when the temporary buffer it needs is refused.
 render_int: fn<A: PrintfArgs>(p: ^StrAccum, args: ^A, arg_list: Bool, info: PrintfInfo, xtype: Int, flag_long: Int, flag_prefix: Int, alt_in: Bool, flag_zeropad: Bool, thousand: Int, width: Int, precision_in: Int, out: ^[U8]) -> Bool Never! {
-    longvalue := 0
-    prefix := 0
+    ^longvalue: 0
+    ^prefix: 0
     if info.flags & FLAG_SIGNED != 0 {
-        v := args.int_arg()
+        ^v: args.int_arg()
         if !arg_list && flag_long == 0 -> v = to_c_int(v)
         if v < 0 {
             longvalue = 0 - v
@@ -521,41 +521,41 @@ render_int: fn<A: PrintfArgs>(p: ^StrAccum, args: ^A, arg_list: Bool, info: Prin
         v: args.int_arg()
         longvalue = if !arg_list && flag_long == 0 -> util.as_u64(v) & 4294967295 else -> util.as_u64(v)
     }
-    flag_alternateform := alt_in
+    ^flag_alternateform: alt_in
     if longvalue == 0 -> flag_alternateform = false
     has_prefix: if prefix != 0 -> 1 else -> 0
-    precision := precision_in
+    ^precision: precision_in
     if flag_zeropad && precision < width - has_prefix -> precision = width - has_prefix
     if precision >= PRINT_BUF_SIZE - 10 - PRINT_BUF_SIZE /% 3 {
-        n := precision + 10
+        ^n: precision + 10
         if thousand != 0 -> n += precision /% 3
         if !temp_buf_ok(p, n) -> return false
     }
     // The digits, least significant first.
-    rev := [U8]{}
+    ^rev: [U8]{}
     if xtype == ET_ORDINAL {
         ord: "thstndrd".bytes()
-        x := longvalue % 10
+        ^x: longvalue % 10
         if x >= 4 || (longvalue /% 10) % 10 == 1 -> x = 0
         rev.push(ord[x * 2 + 1])
         rev.push(ord[x * 2])
     }
     suffix: rev.len()
     cset: DIGITS.bytes()
-    lv := longvalue
+    ^lv: longvalue
     loop {
         rev.push(cset[info.charset + lv % info.radix])
         lv = lv /% info.radix
         if lv <= 0 -> break
     }
-    length := rev.len() - suffix
+    ^length: rev.len() - suffix
     loop precision > length {
         rev.push(U8{48})
         length += 1
     }
     // aPrefix ("0", "0x", "0X") goes in front of the sign.
     if flag_alternateform && info.prefix != 0 {
-        k := info.prefix
+        ^k: info.prefix
         loop PREFIX[k] != 0 -> k += 1
         loop k > info.prefix {
             k -= 1
@@ -564,8 +564,8 @@ render_int: fn<A: PrintfArgs>(p: ^StrAccum, args: ^A, arg_list: Bool, info: Prin
     }
     if prefix != 0 -> out.push(U8{prefix})
     // The digits most significant first, grouped by three under ",".
-    ix := (length - 1) % 3 + 1
-    k := rev.len()
+    ^ix: (length - 1) % 3 + 1
+    ^k: rev.len()
     loop k > suffix {
         k -= 1
         out.push(rev[k])
@@ -582,13 +582,13 @@ render_int: fn<A: PrintfArgs>(p: ^StrAccum, args: ^A, arg_list: Bool, info: Prin
 // The etFLOAT/etEXP/etGENERIC conversion of realvalue into out; false
 // when the temporary buffer it needs is refused.
 render_float: fn(p: ^StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int, flag_prefix: Int, flag_alternateform: Bool, flag_altform2: Bool, flag_zeropad: Bool, flag_leftjustify: Bool, thousand: Int, width: Int, precision_in: Int, out: ^[U8]) -> Bool Never! {
-    precision := precision_in
+    ^precision: precision_in
     if precision < 0 -> precision = 6
     if precision > FP_PRECISION_LIMIT -> precision = FP_PRECISION_LIMIT
-    xtype := xtype_in
-    iround := precision + 1
+    ^xtype: xtype_in
+    ^iround: precision + 1
     if xtype == ET_FLOAT -> iround = 0 - precision else if xtype == ET_GENERIC -> iround = precision
-    s := fp_decode(realvalue, iround, if flag_altform2 -> 26 else -> 16)
+    ^s: fp_decode(realvalue, iround, if flag_altform2 -> 26 else -> 16)
     if s.is_special != 0 {
         if s.is_special == 2 {
             nan: if flag_zeropad -> "null".bytes() else -> "NaN".bytes()
@@ -608,9 +608,9 @@ render_float: fn(p: ^StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
         }
     }
     prefix: if s.sign == 45 -> 45 else -> flag_prefix
-    exp := s.i_dp - 1
+    ^exp: s.i_dp - 1
     if xtype == ET_GENERIC && precision > 0 -> precision -= 1
-    flag_rtz := flag_altform2
+    ^flag_rtz: flag_altform2
     if xtype == ET_GENERIC {
         flag_rtz = !flag_alternateform
         if exp < -4 || exp > precision -> xtype = ET_EXP else {
@@ -618,14 +618,14 @@ render_float: fn(p: ^StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
             xtype = ET_FLOAT
         }
     }
-    e2 := if xtype == ET_EXP -> 0 else -> s.i_dp - 1
-    need := (if e2 > 0 -> e2 else -> 0) + precision + width + 15
+    ^e2: if xtype == ET_EXP -> 0 else -> s.i_dp - 1
+    ^need: (if e2 > 0 -> e2 else -> 0) + precision + width + 15
     if thousand != 0 && e2 > 0 -> need += (e2 + 2) /% 3
     if need > PRINT_BUF_SIZE && !temp_buf_ok(p, need) -> return false
     flag_dp: precision > 0 || flag_alternateform || flag_altform2
     if prefix != 0 -> out.push(U8{prefix})
     // Digits before the decimal point.
-    j := 0
+    ^j: 0
     if e2 < 0 -> out.push(U8{48}) else {
         loop e2 >= 0 {
             if j < s.n {
@@ -661,7 +661,7 @@ render_float: fn(p: ^StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
     }
     // The "eNNN" suffix.
     if xtype == ET_EXP {
-        ex := s.i_dp - 1
+        ^ex: s.i_dp - 1
         out.push(DIGITS.bytes()[info.charset])
         if ex < 0 {
             out.push(U8{45})
@@ -679,7 +679,7 @@ render_float: fn(p: ^StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
         pad: width - out.len()
         at: if prefix != 0 -> 1 else -> 0
         loop _k in 0..<pad -> out.push(U8{48})
-        k := out.len() - 1
+        ^k: out.len() - 1
         loop k >= at + pad {
             out[k] = out[k - pad]
             k -= 1
@@ -695,8 +695,8 @@ render_float: fn(p: ^StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
 // sqlite3MPrintf / sqlite3_mprintf: fmt rendered with the given arguments
 // under the length limit mx; None on SQLITE_TOOBIG.
 mprintf: fn(fmt: [U8], args: [Mem], mx: Int) -> [U8]? Never! {
-    acc := str_accum_init(PRINT_BUF_SIZE, mx)
-    list := new_mem_list(args)
+    ^acc: str_accum_init(PRINT_BUF_SIZE, mx)
+    ^list: new_mem_list(args)
     str_vappendf(acc, fmt, list)
     if acc.acc_error != 0 -> return None
     acc.text.copy()
@@ -706,8 +706,8 @@ mprintf: fn(fmt: [U8], args: [Mem], mx: Int) -> [U8]? Never! {
 // bytes of it.
 snprintf: fn(n: Int, fmt: [U8], args: [Mem]) -> [U8] Never! {
     if n <= 0 -> return [U8]{}
-    acc := str_accum_init(n, 0)
-    list := new_mem_list(args)
+    ^acc: str_accum_init(n, 0)
+    ^list: new_mem_list(args)
     str_vappendf(acc, fmt, list)
     acc.text.copy()
 }
@@ -717,9 +717,9 @@ txt: fn(z: [U8]) -> Mem Never! { base.mem_text(z, base.UTF8) }
 
 // The SQL printf() rendering of fmt over args.
 sql_printf_test: fn(fmt: String, args: [Mem]) -> String Never! {
-    acc := str_new(MAX_LENGTH)
+    ^acc: str_new(MAX_LENGTH)
     acc.printf_flags = PRINTF_SQLFUNC
-    list := new_mem_list(args)
+    ^list: new_mem_list(args)
     str_vappendf(acc, fmt.bytes(), list)
     String.from_bytes(acc.text) ?? "<bad utf8>"
 }
@@ -767,7 +767,7 @@ sql_printf_test: fn(fmt: String, args: [Mem]) -> String Never! {
 
 #Test("a fixed buffer truncates and the limit is SQLITE_TOOBIG") {
     assert(snprintf(6, "%s".bytes(), [Mem]{txt("abcdefgh".bytes())}) == "abcde".bytes())
-    acc := str_new(10)
+    ^acc: str_new(10)
     str_append_all(acc, "0123456789".bytes())
     assert(acc.acc_error == base.TOOBIG && acc.text.len() == 0)
     assert(mprintf("%.2000000000d".bytes(), [Mem]{base.mem_int(1)}, MAX_LENGTH) == None)

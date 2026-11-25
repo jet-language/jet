@@ -27,7 +27,7 @@ dt_starts_token: fn(bytes: [U8], at: Int) -> Bool { at == 0 || !dt_is_word(bytes
 
 // The end of the digit run that starts at `at`.
 dt_digits_end: fn(bytes: [U8], at: Int) -> Int {
-    end := at
+    ^end: at
     loop {
         if end >= bytes.len() || !dt_is_digit(bytes[end]) -> return end
         end += 1
@@ -42,7 +42,7 @@ dt_ends_token: fn(bytes: [U8], at: Int) -> Bool { at >= bytes.len() || !dt_is_wo
 // digit; `c` and two or more digits.
 dt_ids: fn(text: String) -> [String] {
     bytes: text.bytes()
-    found := [String]{}
+    ^found: [String]{}
     loop at in 0..<bytes.len() {
         byte: bytes[at]
         if byte == (U8{35}) {
@@ -67,8 +67,8 @@ dt_ids: fn(text: String) -> [String] {
             next
         }
         if byte == (U8{68}) && at + 2 < bytes.len() && bytes[at + 1] == (U8{45}) && dt_is_upper(bytes[at + 2]) {
-            end := at + 2
-            digit := false
+            ^end: at + 2
+            ^digit: false
             loop {
                 if end >= bytes.len() -> break
                 following: bytes[end]
@@ -97,7 +97,7 @@ dt_has_at: fn(bytes: [U8], at: Int, needle: String) -> Bool {
 // digits, `..` and digits; `source-root:`; `(os error ` and a digit.
 dt_leaks: fn(text: String) -> [String] {
     bytes: text.bytes()
-    found := [String]{}
+    ^found: [String]{}
     loop at in 0..<bytes.len() {
         byte: bytes[at]
         if byte == (U8{92}) && dt_has_at(bytes, at, "\\\\n") {
@@ -141,10 +141,10 @@ dt_row_value: fn(line: String, keys: [String]) -> String {
 // line that is not a comment.
 dt_file_violations: fn(path: String, keys: [String], marker: String, scan: fn(String) -> [String]) -> [String] {
     text: id_files.read(path) ?? panic("read {path}: {err}")
-    violations := [String]{}
+    ^violations: [String]{}
     loop (index, line) in text.split("\n").to_list() {
         if line.trim().starts_with("//") -> next
-        value := dt_row_value(line, keys)
+        ^value: dt_row_value(line, keys)
         if marker != "" {
             at: s5_grammar_find(line, marker, 0)
             if at >= 0 {
@@ -166,7 +166,7 @@ dt_file_violations: fn(path: String, keys: [String], marker: String, scan: fn(St
 
 #Test("diagnostic_text_names_no_internal_ids") {
     guards_enter_root()
-    violations := dt_file_violations("Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", [String]{"meaning", "what", "why", "fix", "next"}, "", dt_ids)
+    ^violations: dt_file_violations("Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", [String]{"meaning", "what", "why", "fix", "next"}, "", dt_ids)
     loop violation in dt_file_violations("Compiler/JetRuntime/Source/TrapMessages.jet", [String]{}, "rt_static_text(\"", dt_ids) {
         violations.push(violation)
     }
@@ -181,7 +181,7 @@ dt_file_violations: fn(path: String, keys: [String], marker: String, scan: fn(St
 
 #Test("diagnostic_and_runtime_stop_text_shows_no_internal_leaks") {
     guards_enter_root()
-    violations := dt_file_violations("Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", [String]{"what", "why", "fix", "next"}, "", dt_leaks)
+    ^violations: dt_file_violations("Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", [String]{"what", "why", "fix", "next"}, "", dt_leaks)
     runtime_files: [String]{"Trap", "TrapDefect", "Services", "Observe", "Scheduler", "Test"}
     loop file in runtime_files {
         loop violation in dt_file_violations("Compiler/JetRuntime/Source/{file}Messages.jet", [String]{}, "rt_static_text(\"", dt_leaks) {

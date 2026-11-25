@@ -47,7 +47,7 @@ PublicationRegistryConfig: struct {
 }
 
 publication_parse_registries_from_env: fn(env: [String:String]) -> [PublicationRegistryConfig] Never! {
-    result := [PublicationRegistryConfig]{}
+    ^result: [PublicationRegistryConfig]{}
     loop entry in env {
         if !entry.key.starts_with(ENV_PREFIX_JET_REGISTRY) -> next
         suffix: entry.key.removeprefix(ENV_PREFIX_JET_REGISTRY)
@@ -61,7 +61,7 @@ publication_parse_registries_from_env: fn(env: [String:String]) -> [PublicationR
 }
 
 publication_resolve_publish_registry: fn() -[Env]> PublicationRegistryConfig Never! {
-    registry := PublicationRegistryConfig.public_default()
+    ^registry: PublicationRegistryConfig.public_default()
     url: sys.get(ENV_JET_REGISTRY_URL) ?? ""
     if url != "" -> registry.url = url
     registry.tier = publication_tier_from_environment()
@@ -72,7 +72,7 @@ publication_resolve_publish_registry: fn() -[Env]> PublicationRegistryConfig Nev
 // The LAST `@` of the authority ends its userinfo; query and fragment text
 // never survives.
 publication_redact_registry_url: fn(value: String) -> String Never! {
-    safe := value.copy()
+    ^safe: value.copy()
     loop delimiter in ([String]{"?", "#"}) {
         if safe.split_once(delimiter) == .Val(pair) -> safe = pair.before
     }

@@ -7,9 +7,9 @@ use {
 // Core's #Error types DBError and TimeError derive their codecs: the JSON
 // encode and decode of each lower whenever a program asks for them.
 run: fn() [FieldError]! {
-    conn := db.open_memory()
+    ^conn: db.open_memory()
     policy: db.policy("tasks", "true") ?? panic("policy")
-    scoped := conn.with_policy(policy, "attacker")
+    ^scoped: conn.with_policy(policy, "attacker")
     if scoped.query(SQL{"SELECT nope FROM missing"}) == {
         .Ok(_rows) -> { print("accepted") }
         .Err(error) -> { print(json.to_string(error) ?? panic("db json")) }

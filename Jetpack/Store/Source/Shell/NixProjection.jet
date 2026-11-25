@@ -85,7 +85,7 @@ env_shell_nix_projection_command: fn(env: ShellEnv, program: String, rest: [Stri
         }
         return Ok(None)
     }
-    projections := [String:LeaseText]{}
+    ^projections: [String:LeaseText]{}
     loop lease in env.cache_leases {
         loop path in lease.nix_store_projection() {
             if projections.get(path.logical) == .Val(existing) {
@@ -131,9 +131,9 @@ env_shell_projection_fstab: fn(projections: [String:String], scratch: ^ShellScra
     empty_store: env_shell_unique_tmp("jetpack-nix-store")
     files.create_dir_all(empty_store) ?? return Err(EnvironmentError.InvalidData("{err}"))
     scratch.scratch_dirs.push(empty_store.copy())
-    fstab := "jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir 0 0\n"
+    ^fstab: "jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir 0 0\n"
     fstab = "{fstab}{env_shell_fstab_field(empty_store)} /nix/store none bind,ro,x-mount.mkdir 0 0\n"
-    bound_logicals := [String]{}
+    ^bound_logicals: [String]{}
     loop logical in envmodel_sorted_keys(projections) {
         source: projections[logical]
         env_shell_validate_projection_path(logical)
@@ -164,7 +164,7 @@ env_shell_projection_fstab: fn(projections: [String:String], scratch: ^ShellScra
         bound_logicals.push(logical)
     }
     fstab_path: env_shell_unique_tmp("jetpack-nix-fstab")
-    writer := files.create(fstab_path, if_exists: .Refuse) ?? return Err(EnvironmentError.InvalidData("{err}"))
+    ^writer: files.create(fstab_path, if_exists: .Refuse) ?? return Err(EnvironmentError.InvalidData("{err}"))
     scratch.scratch_files.push(fstab_path.copy())
     writer.write_bytes(fstab.bytes()) ?? return Err(EnvironmentError.InvalidData("{err}"))
     Ok(ShellProjectionMounts{fstab_path: fstab_path, bound_logicals: bound_logicals})
@@ -185,7 +185,7 @@ env_shell_logical_executable_path: fn(projections: [String:String], binary: Stri
 }
 
 env_shell_check_rootless_namespace: fn(unshare: String, shell: String) -[Exec, Time.Wait]> EnvironmentError! {
-    argv := [String]{unshare}
+    ^argv: [String]{unshare}
     loop flag in ENV_SHELL_NAMESPACE_FLAGS -> argv.push(flag)
     probe: [String]{shell, "-c", ":"}
     loop part in probe -> argv.push(part)

@@ -34,7 +34,7 @@ word: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
 
 // Every way the asset departs from the retired decision tree; empty when it matches.
 asset_failures: fn(bytes: [U8]) -> [String] Never! {
-    failures := [String]{}
+    ^failures: [String]{}
     if bytes.len() < 40 {
         return [String]{"UNICODE_NAME_INDEX header is truncated ({bytes.len()} bytes)"}
     }
@@ -54,8 +54,8 @@ asset_failures: fn(bytes: [U8]) -> [String] Never! {
     records: word(bytes, 24, 4)
     pool: word(bytes, 28, 4)
     if count != TREE_ROWS -> failures.push("{count} rows, expected {TREE_ROWS}")
-    rows := [String]{}
-    previous := -1
+    ^rows: [String]{}
+    ^previous: -1
     loop row in 0..<count {
         at: records + row * RECORD_STRIDE
         if at + RECORD_STRIDE > bytes.len() {

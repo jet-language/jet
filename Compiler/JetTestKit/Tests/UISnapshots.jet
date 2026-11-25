@@ -11,7 +11,7 @@ kit_ui_test_scratch: fn(label: String) -> String {
 }
 
 kit_ui_test_context: fn(root: String, label: String) -> KitCtx {
-    options := kit_test_checkout_options(root)
+    ^options: kit_test_checkout_options(root)
     options.tiers = ["o0", "o1"]
     limits: kit_test_run_limits()
     env: KitEnv{root: root, scratch: root, jet: files.join(sys.current_dir(), "Compiler/JetTestKit/Tests/Fixtures/UI/compiler.jet"), jetpack: "", timeout: limits.wall, cpu_limit: Val(limits.cpu), memory_limit: 0}
@@ -156,7 +156,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
 // fixture's folder never leaves its directive behind.
 #Test("UI fixtures name only directives the table has") {
     root: sys.current_dir()
-    unported := [String]{}
+    ^unported: [String]{}
     loop directory in ["Tests/UI", "Tests/UILint"] {
         loop entry in kit_ui_collect(root, directory, directory == "Tests/UILint") {
             source: files.read(files.join(root, entry.path)) ?? panic("read UI fixture {entry.path}: {err}")
@@ -236,7 +236,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert(!entries.any(fn(entry) { entry.path.ends_with("helper.jet") || entry.path.ends_with(".fixed.jet") || entry.path.contains("member") }))
     assert(!entries.any(fn(entry) { entry.path.ends_with("support.jet") || entry.path.ends_with("route.jet") }))
     assert(entries.any(fn(entry) { entry.path == "Tests/UI/group/nested.jet" }))
-    coverage := kit_ui_test_context(root, "coverage")
+    ^coverage: kit_ui_test_context(root, "coverage")
     coverage.options.coverage = true
     assert_eq(kit_ui_discover(coverage)[0].mode, "coverage")
     files.remove_all(root) ?? panic("remove UI scratch: {err}")
@@ -444,7 +444,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     root: kit_ui_test_scratch("bless")
     entry: KitEntry{path: "Tests/UILint/lint.jet", expected: "Tests/UILint/lint.warn", project: "Tests/UILint", suite: "ui", mode: "lint"}
     call: kit_ui_invocation("", entry.path, true)
-    ctx := kit_ui_test_context(root, "scratch")
+    ^ctx: kit_ui_test_context(root, "scratch")
     ctx.bless.ids = [entry.path]
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, ""), "", ctx).status, "FAIL")
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, "Warning: Jet.SameEnumGuardTable: lint\n"), "Warning: Jet.SameEnumGuardTable: lint\n", ctx).status, "FAIL")
@@ -476,14 +476,14 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
 
 #Test("UI coverage independently derives source codes report openers and allowances") {
     row: KitUIRegistryRow{code: "E0109", name: "Jet.OperatorTypeMismatch", active: true, lint: false}
-    kept := [String]{}
+    ^kept: [String]{}
     assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "", kept).status, "FAIL")
     assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "E0109\tleft-only\tTower #2093\n", kept).status, "PASS")
     assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "E0109\tleft-only\tTower #2093\n", kept).status, "FAIL")
     assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "", kept).status, "PASS")
     assert_eq(kit_ui_set_coverage([row], [], ["FFI01"], "FFI01\tright-only\tTower #6752\n", kept).status, "PASS")
     assert_eq(kit_ui_set_coverage([row], ["FFI01"], [], "FFI01\tleft-only\tTower #6752\n", kept).status, "FAIL")
-    over := ""
+    ^over: ""
     loop _ in 0..<153 -> over = "{over}E0109\tleft-only\tTower #2093\n"
     assert(kit_ui_set_coverage([row], ["E0109"], [], over, kept).detail.contains("ceiling 152"))
     stop: KitUIRegistryRow{code: "E3003", name: "Jet.DeadlineExceeded", active: true, lint: false}
@@ -507,12 +507,12 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     row: KitUIRegistryRow{code: "E0109", name: "Jet.OperatorTypeMismatch", active: true, lint: false}
     other: KitUIRegistryRow{code: "E0001", name: "Jet.StrayCharacter", active: true, lint: false}
     allowlist: "# code\tside\tcard\nE0109\tleft-only\tTower #2093\nE0001\tleft-only\tTower #1\n"
-    kept := [String]{}
+    ^kept: [String]{}
     verdict: kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], allowlist, kept)
     assert_eq(verdict.status, "FAIL")
     assert(verdict.detail.contains("stale coverage allowance: E0001"))
     assert_eq(kept.join("\n"), "# code\tside\tcard\nE0109\tleft-only\tTower #2093\n")
-    again := [String]{}
+    ^again: [String]{}
     assert_eq(kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], kept.join("\n"), again).status, "PASS")
     assert_eq(again.join("\n"), kept.join("\n"))
 }

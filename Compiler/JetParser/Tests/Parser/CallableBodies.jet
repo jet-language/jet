@@ -16,7 +16,7 @@ use {
     initializer: parser_test_binding(parser_test_function(parsed, "run")).init
     initializer == .Lambda(lambda, _) ?? panic("stored lambda")
     effects: lambda.effects ?? panic("lambda effect row")
-    names := [String]{}
+    ^names: [String]{}
     loop entry in effects -> names.push(entry.name)
     assert_eq(names, [String]{"IO"})
 }
@@ -34,7 +34,7 @@ use {
 }
 `,
     ] {
-        codes := [String]{}
+        ^codes: [String]{}
         loop diagnostic in parser_test_errors(source) {
             if diagnostic.severity == 1 -> codes.push(diagnostic.code)
         }
@@ -89,18 +89,18 @@ run: fn() {
 #Test("standard_units_source_parses_with_unique_members_and_provenance") {
     parsed: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     assert(parsed.diagnostics.is_empty())
-    families := [UnitFamilyDef]{}
+    ^families: [UnitFamilyDef]{}
     loop item in parsed.program.items {
         if item == .UnitFamily(family) -> families.push(family)
     }
     assert_eq(families.len(), 34)
-    degree := false
-    dalton := false
-    mmhg := false
-    square := false
-    cubic := false
+    ^degree: false
+    ^dalton: false
+    ^mmhg: false
+    ^square: false
+    ^cubic: false
     loop family in families {
-        names := [String]{}
+        ^names: [String]{}
         loop member in family.members {
             assert(!names.contains(member.name))
             names.push(member.name)

@@ -42,7 +42,7 @@ core_guard_declared: fn() -[FS]> CoreDeclarations CoreDeclarationError! {
 // The text of every source `declared` names (its source rows and parts, and
 // the encoding source), as the checkout has it.
 core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] {
-    paths := [String]{}
+    ^paths: [String]{}
     loop row in declared.source_rows {
         if !paths.contains(row.path) -> paths.push(row.path.copy())
     }
@@ -75,7 +75,7 @@ core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] 
 #Test("core.testing's Test has one method per jet test setting row") {
     guards_enter_root()
     source: core_guard_files.read("Core/Testing/Testing.jet") ?? ""
-    missing := ""
+    ^missing: ""
     loop row in JET_TEST_SETTINGS {
         if !source.contains("\n    {row.name}: fn(self") || !source.contains("test_setting(self, \"{row.name}\", ") {
             missing = "{missing} {row.name}"
@@ -87,7 +87,7 @@ core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] 
 #Test("an enum list carries its payloads into the Core enum payload rows") {
     guards_enter_root()
     declared: core_guard_declared() ?? panic("Core.rows was refused: {err.message}")
-    payloads := [String]{}
+    ^payloads: [String]{}
     loop entry in declared.modules {
         if entry.name != "core.term" -> next
         loop leaf in entry.types {

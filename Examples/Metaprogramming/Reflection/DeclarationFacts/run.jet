@@ -40,7 +40,7 @@ helper: fn(count: Int) -> Int {
 
 build: fn(b: Build) {
     shown: [String]{"run.LIMIT", "run.Shape", "run.Shape.Circle", "run.Shape.Square", "run.Point", "run.Point.x", "run.Point.y", "run.Point.norm", "run.Meters", "run.Named", "run.Named.label", "run.helper", "run.helper.count", "run.helper.total"}
-    records := [String:String]{}
+    ^records: [String:String]{}
     loop info in b.program.types() {
         kind: if info.identity.kind == {
             .Struct -> "struct"
@@ -69,7 +69,7 @@ build: fn(b: Build) {
     loop info in b.program.constants() {
         records[info.identity] = "ConstantInfo in {info.scope}, value {info.value ?? "unknown"}"
     }
-    rows := [String]{}
+    ^rows: [String]{}
     loop definition in b.program.definitions() {
         if !shown.contains(definition.path) -> next
         word: if definition.kind.kind == {
@@ -92,9 +92,9 @@ build: fn(b: Build) {
         if package.name != "declaration_facts" -> next
         loop setting in package.settings {
             if setting.name == "report" -> next
-            value := "a value"
+            ^value: "a value"
             if setting.selected == .String(text) -> value = "\"{text}\""
-            origin := "no writer"
+            ^origin: "no writer"
             loop contribution in setting.contributions {
                 if !contribution.selected -> next
                 origin = if contribution.kind == {

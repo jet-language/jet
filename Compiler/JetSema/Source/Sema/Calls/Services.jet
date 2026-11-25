@@ -63,15 +63,15 @@ sema_services_literal_int: fn(expression: Expr) -> Int? {
 
 sema_services_valid_name: fn(value: String) -> Bool Never! {
     if value.trim() == "" -> return false
-    bytes := value.bytes()
+    ^bytes: value.bytes()
     if bytes.len() > 256 -> return false
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
-        code := Int{bytes[index]}
+        ^code: Int{bytes[index]}
         if code < 32 || code == 127 -> return false
         // The control range includes the C1 range U+0080..U+009F.
         if code == 194 && index + 1 < bytes.len() {
-            next_code := Int{bytes[index + 1]}
+            ^next_code: Int{bytes[index + 1]}
             if next_code >= 128 && next_code <= 159 -> return false
         }
         index += 1
@@ -100,15 +100,15 @@ sema_services_report_arity: fn(api: String, actual: Int, expected: Int, span: Sp
 }
 
 sema_services_check_untyped_args: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+    loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
 }
 
 sema_services_bind_labels: fn(api: String, args: ^[CallArg], labels: [String], span: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if labels.len() != args.len() -> return false
-    params := [SemaCallParam]{}
-    index := 0
+    ^params: [SemaCallParam]{}
+    ^index: 0
     loop index < labels.len() {
-        label := labels[index]
+        ^label: labels[index]
         params.push(
             SemaCallParam{
                 label: label.copy(),
@@ -123,7 +123,7 @@ sema_services_bind_labels: fn(api: String, args: ^[CallArg], labels: [String], s
         )
         index += 1
     }
-    _ := sema_call_bind_args(api, params, args, span, diagnostics) ?? return false
+    ^_: sema_call_bind_args(api, params, args, span, diagnostics) ?? return false
     true
 }
 
@@ -139,15 +139,15 @@ sema_services_apply_access: fn(value: TExpr, access: AccessConvention) -> TExpr 
 // `resolved_accesses` marks `fallback_accesses` as the call's final accesses
 // (a method contract already applied its explicit and record accesses).
 sema_services_core_call: fn(record: CoreCallRecord, arguments: [TExpr], fallback_accesses: [AccessConvention], method_receiver: Bool, resolved_accesses: Bool, result_type: Type, expected: Type?, span: Span, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
-    call_arguments := [TExpr]{}
-    index := 0
+    ^call_arguments: [TExpr]{}
+    ^index: 0
     loop index < arguments.len() {
-        fallback := if index < fallback_accesses.len() -> fallback_accesses[index] else -> AccessConvention.Read
-        access := if resolved_accesses || (method_receiver && index == 0) -> fallback else -> sema_call_core_access(record, index) ?? fallback
+        ^fallback: if index < fallback_accesses.len() -> fallback_accesses[index] else -> AccessConvention.Read
+        ^access: if resolved_accesses || (method_receiver && index == 0) -> fallback else -> sema_call_core_access(record, index) ?? fallback
         call_arguments.push(sema_services_apply_access(arguments[index], access))
         index += 1
     }
-    failure := sema_services_result_carrier(result_type)
+    ^failure: sema_services_result_carrier(result_type)
     value: sema_call_core_tree(record, call_arguments, span, [Type]{}, [Bool]{}, result_type, failure, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_services_record_call_effects(record, value, span, result_type, failure, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -179,10 +179,10 @@ sema_services_record_call_effects: fn(record: CoreCallRecord, value: TExpr, span
 }
 
 sema_services_method_params: fn(types: [Type], accesses: [AccessConvention]) -> [SemaCallParam] Never! {
-    params := [SemaCallParam]{}
-    index := 0
+    ^params: [SemaCallParam]{}
+    ^index: 0
     loop index < types.len() {
-        access := if index < accesses.len() -> accesses[index] else -> AccessConvention.Read
+        ^access: if index < accesses.len() -> accesses[index] else -> AccessConvention.Read
         params.push(
             SemaCallParam{
                 label: "",
@@ -211,11 +211,11 @@ sema_services_source_call: fn(api: String, member: String, type_args: [Type], re
         check.diagnostics.push(sema_error("E0003", span, "service source receiver target is missing", "`{api}` requires its canonical source function", "load the registered Core source function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    source_args := [CallArg]{CallArg{convention: receiver_access, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
-    written := args
+    ^source_args: [CallArg]{CallArg{convention: receiver_access, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
+    ^written: args
     loop argument in written -> source_args.push(argument)
     check.scopes.ownership_call_depth += 1
-    value := sema_call_core_check_source_owned(target, api, type_args, source_args, span, expected, check)
+    ^value: sema_call_core_check_source_owned(target, api, type_args, source_args, span, expected, check)
     check.scopes.ownership_call_depth -= 1
     SemaMethodSpecialCheck{handled: true, value: value}
 }
@@ -236,7 +236,7 @@ sema_services_receiver_is: fn(ty: Type, owner: String) -> Bool Never! {
 // a positive literal capacity and a top-level function handler. Returns the
 // handler's name, or None once a diagnostic reports the shape.
 sema_services_worker_shape: fn(name: Expr, handler: Expr, capacity: Expr, check: ^SemaBodyCheck) -> String? {
-    valid := true
+    ^valid: true
     literal: sema_services_literal_string(name)
     if literal == None || !sema_services_valid_name(literal ?? "") {
         check.diagnostics.push(sema_error("E0112", expr_span(name), "service worker name is outside the checked builder shape", "worker names must be non-empty visible literals of at most 256 bytes", "use a literal visible worker name"))
@@ -246,7 +246,7 @@ sema_services_worker_shape: fn(name: Expr, handler: Expr, capacity: Expr, check:
         check.diagnostics.push(sema_error("E0112", expr_span(capacity), "service worker capacity is outside the checked builder shape", "a service worker needs a positive mailbox capacity", "use a positive integer capacity"))
         valid = false
     }
-    handler_name := ""
+    ^handler_name: ""
     if {
         handler == .Ident(identifier, _, _) -> {
             handler_name = identifier
@@ -305,7 +305,7 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
         stateful -> [String]{"", "", "state", "capacity"}
         else -> [String]{"", "", "capacity"}
     }
-    updated_args := args
+    ^updated_args: args
     if updated_args.len() != labels.len() {
         sema_services_report_arity(api, updated_args.len(), labels.len(), span, check.diagnostics)
         sema_services_check_untyped_args(updated_args, check)
@@ -343,7 +343,7 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
         return failed
     }
     handler_name: shaped ?? ""
-    registered := false
+    ^registered: false
     graph: check.program.registration_graph
     resolved: sema_registration_lookup_name(graph, check.environment.module_identity, handler_name)
     if resolved == .Val(function) && sema_resolved_kind(graph, function) == SymbolKind.Function {
@@ -369,7 +369,7 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
         else -> "typed_worker"
     }
     // The handler's name follows the handler, as Core's declaration takes it.
-    source_args := [CallArg]{}
+    ^source_args: [CallArg]{}
     loop (index, argument) in updated_args {
         source_args.push(argument)
         if index == 1 {
@@ -416,7 +416,7 @@ sema_services_typed_delivery: fn(method: String, receiver: Expr, receiver_ty: Ty
             member: if method == "send" -> "typed_send" else -> "call"
             return Val(sema_services_source_call("ServiceTree.{method}", member, endpoint_args, receiver, AccessConvention.Write, args, span, expected, check))
         }
-        updated_args := args
+        ^updated_args: args
         if !sema_services_bind_labels("ServiceTree.send_durable", updated_args, [String]{"", "", "key"}, span, check.diagnostics) {
             sema_services_check_untyped_args(updated_args, check)
             return Val(rejected)
@@ -436,7 +436,7 @@ sema_services_typed_delivery: fn(method: String, receiver: Expr, receiver_ty: Ty
 // ServiceTree method Core declares.
 sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck? {
     if !sema_services_receiver_is(receiver_value.ty, "ServiceTree") -> return None
-    updated_args := args
+    ^updated_args: args
     if method == "worker" {
         // A handler that takes its message declares a typed worker.
         if updated_args.len() > 1 && sema_expr_probe_type(updated_args[1].expr, false, check) == .Val(probed) {
@@ -453,25 +453,25 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
             sema_services_check_untyped_args(updated_args, check)
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
-        values := [TExpr]{}
-        valid := true
-        name_value := sema_check_expression(updated_args[0].expr, Val(Type.String), check)
+        ^values: [TExpr]{}
+        ^valid: true
+        ^name_value: sema_check_expression(updated_args[0].expr, Val(Type.String), check)
         if name_value == .Val(item) -> values.push(item) else -> valid = false
-        handler_type := Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-        handler_value := sema_check_expression(updated_args[1].expr, Val(handler_type), check)
+        ^handler_type: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+        ^handler_value: sema_check_expression(updated_args[1].expr, Val(handler_type), check)
         if handler_value == .Val(item) -> values.push(item) else -> valid = false
-        capacity_value := sema_check_expression(updated_args[2].expr, Val(Type.Int), check)
+        ^capacity_value: sema_check_expression(updated_args[2].expr, Val(Type.Int), check)
         if capacity_value == .Val(item) -> values.push(item) else -> valid = false
         shaped: sema_services_worker_shape(updated_args[0].expr, updated_args[1].expr, updated_args[2].expr, check)
         if !valid || shaped == None {
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
         handler_name: shaped ?? ""
-        handler := values[1]
+        ^handler: values[1]
         handler_symbol: sema_services_const_symbol(handler, check.context)
-        registered_function := false
+        ^registered_function: false
         graph: check.program.registration_graph
-        resolved := sema_registration_lookup_name(graph, check.environment.module_identity, handler_name)
+        ^resolved: sema_registration_lookup_name(graph, check.environment.module_identity, handler_name)
         if resolved == .Val(function) && sema_resolved_kind(graph, function) == SymbolKind.Function {
             if handler_symbol == .Val(symbol) && symbol == sema_resolved_id(graph, function) {
                 registered_function = true
@@ -481,17 +481,17 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
             check.diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "service worker handler has no checked top-level function identity", "service handlers must resolve to registered top-level function bodies", "pass a registered top-level function"))
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
-        core_args := [TExpr]{receiver_value, values[0], handler, sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: handler_name}}}, span), values[2]}
-        record: sema_call_core_record("core.service", "worker", core_args.len(), span, check.diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        ^core_args: [TExpr]{receiver_value, values[0], handler, sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: handler_name}}}, span), values[2]}
+        record: sema_call_core_function_record("core.service", "worker", None, [Type]{}, span, check) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
         // The handler is a checked top-level function identity, not storage
         // the caller owns: naming it lends nothing and moves nothing.
-        params := sema_services_method_params([Type]{Type.String, handler_type, Type.Int}, [AccessConvention]{sema_call_core_access(record, 1) ?? AccessConvention.Read, AccessConvention.Read, sema_call_core_access(record, 4) ?? AccessConvention.Read})
+        ^params: sema_services_method_params([Type]{Type.String, handler_type, Type.Int}, [AccessConvention]{sema_call_core_access(record, 1) ?? AccessConvention.Read, AccessConvention.Read, sema_call_core_access(record, 4) ?? AccessConvention.Read})
         sema_call_note_route_implicit_takes(params, updated_args, values, check)
-        ownership := sema_ownership_check_method_call(check, "ServiceTree.worker", receiver, AccessConvention.Write, params, updated_args, span)
+        ^ownership: sema_ownership_check_method_call(check, "ServiceTree.worker", receiver, AccessConvention.Write, params, updated_args, span)
         if !ownership.accepted || !ownership.complete {
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
-        fallbacks := [AccessConvention]{AccessConvention.Write, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read}
+        ^fallbacks: [AccessConvention]{AccessConvention.Write, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read}
         return Val(sema_services_core_call(record, core_args, fallbacks, true, false, sema_services_result_type(Type.Named{name: "ServiceEndpoint"}), expected, span, check))
     }
     None
@@ -581,7 +581,7 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
         sema_services_check_untyped_args(args, check)
         return failed
     }
-    updated_args := args
+    ^updated_args: args
     if args.len() == 3 && !sema_services_bind_labels("JobQueue.{method}", updated_args, [String]{"", "", if method == "enqueue" -> "key" else -> "for"}, span, check.diagnostics) {
         return failed
     }

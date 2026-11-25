@@ -18,19 +18,19 @@ Point: struct {
 }
 
 run: fn() {
-    point := Point{x: 3, y: 4}
+    ^point: Point{x: 3, y: 4}
     print("x: msgpack key {point.msgpack_key_x()}")
     print("y: msgpack key {point.msgpack_key_y()}")
     tree: Dyn.Array([Dyn]{point.encode(), Point{x: -1, y: 200}.encode()})
     bytes: Codec.write(tree) ?? panic(err.reason)
     print("{bytes.len()} MessagePack bytes")
-    feed := data.url_as<Point, Codec>("https://example.test/points", "network", data.DataLimits.safe()) ?? panic(err.reason)
+    ^feed: data.url_as<Point, Codec>("https://example.test/points", "network", data.DataLimits.safe()) ?? panic(err.reason)
     loader.bind<Point>(feed, bytes) ?? panic(err.reason)
     if loader.stream_as<Point, json.Codec>(feed.copy()) == {
         .Ok(_) -> { print("a MessagePack loader read as JSON") }
         .Err(failure) -> print(failure.reason)
     }
-    stream := loader.stream_as<Point, Codec>(feed) ?? panic(err.reason)
+    ^stream: loader.stream_as<Point, Codec>(feed) ?? panic(err.reason)
     loop row in rows.collect<Point>(stream) ?? panic(err.reason) {
         print("Point x={row.x} y={row.y}")
     }

@@ -16,22 +16,22 @@ use {
 // The runtime object of the compiler under test, never this test binary's.
 runtime_lines_object_path: fn() -> String {
     jet: lines_sys.get("JET") ?? (lines_process.which("jet") ?? panic("set JET to the compiler under test"))
-    parts := jet.split("/").to_list()
-    _ := parts.pop()
+    ^parts: jet.split("/").to_list()
+    ^_: parts.pop()
     "{parts.join("/")}/jet-runtime/jet_runtime_jet.o"
 }
 
 #Test("the runtime image linked from a pack names each runtime function's source") {
     path: runtime_lines_object_path()
-    object := lines_files.read_bytes(path) ?? panic("the compiler under test has no runtime object at {path}")
-    pack := x64_link_runtime_pack([String]{path}, [[U8]]{object.move()}, [String]{})
+    ^object: lines_files.read_bytes(path) ?? panic("the compiler under test has no runtime object at {path}")
+    ^pack: x64_link_runtime_pack([String]{path}, [[U8]]{object.move()}, [String]{})
     assert(pack.errors.len() == 0, "the runtime object packs: {pack.errors.join("; ")}")
-    image := x64_link_runtime_image(path, pack.bytes.move(), compiler_threads_single())
+    ^image: x64_link_runtime_image(path, pack.bytes.move(), compiler_threads_single())
     assert(image.errors.len() == 0, "the pack prelinks: {image.errors.join("; ")}")
     lines: x64_jetline_read(image.bytes) ?? panic("the runtime image has no Jet line table")
     read: x64_image_functions(image.bytes)
     assert(read.failure == "", "the runtime image names its functions: {read.failure}")
-    named := 0
+    ^named: 0
     loop function in read.functions {
         found: x64_jetline_find(lines, function.start)
         if found < 0 -> next
@@ -42,7 +42,7 @@ runtime_lines_object_path: fn() -> String {
         named += 1
     }
     loop name in ([String]{"jet_rt_string_eq", "jet_rt_alloc"}) {
-        index := -1
+        ^index: -1
         loop (k, function) in read.functions {
             if function.name == name -> index = k
         }

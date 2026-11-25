@@ -8,7 +8,7 @@ store_hex_text: fn(value: String) -> String Never! { store_hex_bytes(value.bytes
 // Lowercase hex of `bytes`.
 store_hex_bytes: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in bytes {
         code: Int{byte}
         out.push(digits[code >> 4])
@@ -58,8 +58,8 @@ StoreUnhex: enum {
 store_unhex_text: fn(value: String) -> StoreUnhex Never! {
     raw: value.bytes()
     if raw.len() % 2 != 0 -> return StoreUnhex.OddLength
-    bytes := [U8]{}
-    index := 0
+    ^bytes: [U8]{}
+    ^index: 0
     loop index < raw.len() {
         high: store_lower_hex_value(Int{raw[index]})
         low: store_lower_hex_value(Int{raw[index + 1]})
@@ -76,7 +76,7 @@ store_text_lines: fn(raw: String) -> [String] Never! {
     if raw == "" -> return [String]{}
     segments: raw.split("\n").to_list()
     count: if raw.ends_with("\n") -> segments.len() - 1 else -> segments.len()
-    lines := [String]{}
+    ^lines: [String]{}
     loop index in 0..<count {
         segment: segments[index]
         bytes: segment.bytes()
@@ -93,7 +93,7 @@ store_text_split_last: fn(text: String, needle: String) -> {before: String, afte
     raw: text.bytes()
     pattern: needle.bytes()
     if pattern.len() > raw.len() -> return None
-    at := raw.len() - pattern.len()
+    ^at: raw.len() - pattern.len()
     loop at >= 0 {
         if pkg_bytes_starts_with(raw, at, pattern) {
             return Val({before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + pattern.len(), raw.len())})
@@ -105,7 +105,7 @@ store_text_split_last: fn(text: String, needle: String) -> {before: String, afte
 
 // Append `value` as 8 big-endian bytes.
 store_push_u64_be: fn(out: ^[U8], value: Int) Never! {
-    shift := 56
+    ^shift: 56
     loop shift >= 0 {
         out.push(U8{((value >> shift)) & 255})
         shift -= 8
@@ -137,9 +137,9 @@ store_push_frame: fn(out: ^[U8], field: [U8]) Never! {
 
 // Sorted, de-duplicated copy of `values`.
 store_sorted_unique: fn(values: [String]) -> [String] Never! {
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop value in sorted {
         if out.len() > 0 && out[out.len() - 1] == value -> next
         out.push(value)
@@ -149,7 +149,7 @@ store_sorted_unique: fn(values: [String]) -> [String] Never! {
 
 // The keys of `map` in key order.
 store_sorted_keys: fn(map: [String:String]) -> [String] Never! {
-    keys := map.keys().to_list()
+    ^keys: map.keys().to_list()
     keys.sort()
     keys
 }
@@ -169,7 +169,7 @@ store_path_starts_with: fn(path: String, prefix: String) -> Bool Never! {
 
 // The normal components of `path`.
 store_path_components: fn(path: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         out.push(part)
@@ -182,7 +182,7 @@ store_path_strip_prefix: fn(path: String, prefix: String) -> String? Never! {
     if !store_path_starts_with(path, prefix) -> return None
     left: store_path_components(path)
     right: store_path_components(prefix)
-    rest := [String]{}
+    ^rest: [String]{}
     loop index in right.len()..<left.len() -> rest.push(left[index])
     Val(rest.join("/"))
 }

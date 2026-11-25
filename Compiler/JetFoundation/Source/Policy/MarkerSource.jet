@@ -83,9 +83,9 @@ marker_source_scan_step: fn(scan: ^MarkerSourceScan, byte: Int) -> Bool Never! {
 
 // Comma-separated entries at nesting depth zero, outside string literals.
 marker_source_split_top_level: fn(text: String) -> [String] Never! {
-    entries := [String]{}
-    start := 0
-    scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
+    ^entries: [String]{}
+    ^start: 0
+    ^scan: MarkerSourceScan{depth: 0, in_string: false, escaped: false}
     bytes: text.bytes()
     loop (index, byte) in bytes {
         value: Int{byte}
@@ -103,11 +103,11 @@ marker_source_split_top_level: fn(text: String) -> [String] Never! {
 // to the value, as do commas and braces inside strings.
 marker_source_split_default: fn(value: String) -> MarkerSourceDefault? Never! {
     bytes: value.bytes()
-    scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
+    ^scan: MarkerSourceScan{depth: 0, in_string: false, escaped: false}
     loop (index, byte) in bytes {
         current: Int{byte}
         if scan.depth == 0 && !scan.in_string && current == 123 {
-            default_scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
+            ^default_scan: MarkerSourceScan{depth: 0, in_string: false, escaped: false}
             loop end in index..<bytes.len() {
                 inner: Int{bytes[end]}
                 marker_source_scan_step(default_scan, inner)
@@ -153,19 +153,25 @@ marker_source_unprefixed: fn(written: String) -> String Never! {
 
 marker_source_site: fn(written: String, line: String) -> String Never! {
     name: marker_source_unprefixed(written)
-    if !MARKER_SOURCE_SITES.contains(name) -> build_time_refused("`{written}` is not a marker site, in {line}")
+    if !MARKER_SOURCE_SITES.contains(name) {
+        build_time_refused("`{written}` is not a marker site, in {line}")
+    }
     name
 }
 
 marker_source_scope: fn(written: String, line: String) -> String Never! {
     name: marker_source_unprefixed(written)
-    if !MARKER_SOURCE_SCOPES.contains(name) -> build_time_refused("`{name}` is not a policy scope, in {line}")
+    if !MARKER_SOURCE_SCOPES.contains(name) {
+        build_time_refused("`{name}` is not a policy scope, in {line}")
+    }
     name
 }
 
 marker_source_resolution: fn(written: String, line: String) -> String Never! {
     name: marker_source_unprefixed(written)
-    if !MARKER_SOURCE_RESOLUTIONS.contains(name) -> build_time_refused("`{name}` is not a resolution, in {line}")
+    if !MARKER_SOURCE_RESOLUTIONS.contains(name) {
+        build_time_refused("`{name}` is not a resolution, in {line}")
+    }
     name
 }
 
@@ -197,7 +203,7 @@ marker_source_byte_index: fn(text: String, byte: Int) -> Int? Never! {
 }
 
 marker_source_last_byte_index: fn(text: String, byte: Int) -> Int? Never! {
-    found := Int?{None}
+    ^found: Int?{None}
     loop (index, value) in text.bytes() {
         if (Int{value}) == byte -> found = Val(index)
     }
@@ -208,10 +214,10 @@ marker_source_last_byte_index: fn(text: String, byte: Int) -> Int? Never! {
 // a string literal is text.
 marker_source_strip_comments: fn(source: String) -> String Never! {
     bytes: source.bytes()
-    out := [U8]{}
-    in_string := false
-    escaped := false
-    index := 0
+    ^out: [U8]{}
+    ^in_string: false
+    ^escaped: false
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         following: if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> 0
@@ -249,9 +255,9 @@ marker_source_strip_comments: fn(source: String) -> String Never! {
 // The members of a declaration body: entries at nesting depth zero, outside
 // string literals, separated by line ends, commas or semicolons.
 marker_source_members: fn(text: String) -> [String] Never! {
-    entries := [String]{}
-    start := 0
-    scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
+    ^entries: [String]{}
+    ^start: 0
+    ^scan: MarkerSourceScan{depth: 0, in_string: false, escaped: false}
     bytes: text.bytes()
     loop (index, byte) in bytes {
         value: Int{byte}
@@ -305,8 +311,8 @@ marker_source_struct_name: fn(member: String) -> String? Never! {
 // (`sites: [.TypeUse]`), which the parser reads as a tag.
 marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never! {
     context: "{name}: struct"
-    fields := [String]{}
-    settings := String?{None}
+    ^fields: [String]{}
+    ^settings: String?{None}
     loop member in marker_source_members(body) {
         if marker_source_is_function(member) -> next
         if member.starts_with("impl Marker") {
@@ -316,14 +322,14 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
         fields.push(member)
     }
     block: settings ?? return None
-    sites := [String]{}
-    scopes := [String]{}
-    repeatable := false
-    owns_menu := false
-    inherits := false
-    resolution := "SiteBound"
-    companion_site := TAppliedRuleCompanionSite?{None}
-    group := false
+    ^sites: [String]{}
+    ^scopes: [String]{}
+    ^repeatable: false
+    ^owns_menu: false
+    ^inherits: false
+    ^resolution: "SiteBound"
+    ^companion_site: TAppliedRuleCompanionSite?{None}
+    ^group: false
     loop entry in marker_source_members(block) {
         if marker_source_is_function(entry) -> next
         separator: marker_source_setting_separator(entry) ?? build_time_refused("a marker setting reads `name: value`, found `{entry}` in {context}")
@@ -342,7 +348,9 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
             "resolution" -> resolution = marker_source_resolution(value, context)
             "companion" -> {
                 parts: marker_source_list(value)
-                if parts.len() != 2 -> build_time_refused("`companion` reads `[Rule, .Site]` in {context}")
+                if parts.len() != 2 {
+                    build_time_refused("`companion` reads `[Rule, .Site]` in {context}")
+                }
                 companion_site = Val(TAppliedRuleCompanionSite{rule: parts[0], site: marker_source_site(parts[1], context)})
             }
             "group" -> group = true
@@ -351,17 +359,17 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
         }
     }
     if group || sites.contains("TypeUse") -> return None
-    params := [TAppliedRuleParameter]{}
-    variadic := TAppliedRuleArgKind?{None}
-    variadic_source_type := String?{None}
-    variadic_name := String?{None}
+    ^params: [TAppliedRuleParameter]{}
+    ^variadic: TAppliedRuleArgKind?{None}
+    ^variadic_source_type: String?{None}
+    ^variadic_name: String?{None}
     loop index in 0..<fields.len() {
         entry: fields[index]
         colon: marker_source_byte_index(entry, 58) ?? build_time_refused("marker field without `:` in {context}: {entry}")
         label: foundation_byte_text(entry.bytes(), 0, colon).trim()
         value: foundation_byte_text(entry.bytes(), colon + 1, entry.count_bytes()).trim()
-        type_text := value.copy()
-        default := String?{None}
+        ^type_text: value.copy()
+        ^default: String?{None}
         if marker_source_split_default(value) == .Val(split) {
             type_text = split.type_text
             default = Val(split.default)
@@ -401,7 +409,7 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
 // (RegistrationFacts.jet REGISTRATION_TABLE), so a compile never scans the
 // marker text.
 marker_source_read: fn(source: String) -> [TAppliedRule] Never! {
-    rows := [TAppliedRule]{}
+    ^rows: [TAppliedRule]{}
     loop member in marker_source_members(marker_source_strip_comments(source)) {
         name: marker_source_struct_name(member) ?? next
         if marker_source_declaration(name, marker_source_block(member, "{name}: struct")) == .Val(row) {
@@ -413,7 +421,7 @@ marker_source_read: fn(source: String) -> [TAppliedRule] Never! {
 
 // `RuleSignature.render`: `(name: Type{default}, …, Variadic...)`.
 applied_rule_signature_render: fn(signature: TAppliedRuleSignature) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in signature.params {
         default: if param.default_source == .Val(value) -> "{{{value}}}" else -> ""
         parts.push("{param.name}: {param.source_type}{default}")
@@ -426,8 +434,8 @@ applied_rule_signature_render: fn(signature: TAppliedRuleSignature) -> String Ne
 // fields, then the `impl Marker` settings. `source` is the declaring file,
 // which spells the defaults and setting values.
 marker_decl_signature: fn(declaration: MarkerDecl, source: String) -> String Never! {
-    parts := [String]{}
-    settings := [String]{}
+    ^parts: [String]{}
+    ^settings: [String]{}
     loop parameter in declaration.params {
         value: if parameter.value == .Val(expression) -> marker_decl_signature_source(source, expr_span(expression)) else -> "…"
         if {
@@ -464,9 +472,7 @@ marker_registered_signature: fn(name: String) -> String Never! {
 
 // Whether the shared registry has an applied rule row named `name`. Marker
 // declarations in scope are not visible here; sema resolves those.
-marker_registered: fn(name: String) -> Bool Never! {
-    registration_marker_rule(name) != None
-}
+marker_registered: fn(name: String) -> Bool Never! { registration_marker_rule(name) != None }
 
 // Whether `name` is a registered applied rule that stays at its own site: it
 // takes no part in lexical policy inheritance, so no policy scope can hold it.

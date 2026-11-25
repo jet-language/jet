@@ -95,14 +95,14 @@ store_live_roots_unlocked: fn(verification: StoreVerification, roots: HangarRoot
 
 // Lock and lifecycle roots expanded through the closure graph.
 store_live_roots_from_graph: fn(roots: HangarRoots, start: String, graph: ClosureGraph) -[FS, Env, Time]> LiveRoots StoreError! {
-    live := store_lock_roots_from(start)
+    ^live: store_lock_roots_from(start)
     lifecycle: store_lifecycle_protected_targets_unlocked(roots, graph)
-    targets := live.output_hashes
-    record_ids := graph.records.keys().to_list()
+    ^targets: live.output_hashes
+    ^record_ids: graph.records.keys().to_list()
     record_ids.sort()
     loop pair in live.receipt_packages {
-        known := false
-        matching := [String]{}
+        ^known: false
+        ^matching: [String]{}
         loop id in record_ids {
             record: graph.records[id]
             meta: pkg_parse_meta(record.package_meta) ?? next
@@ -158,7 +158,7 @@ store_gc_parent: fn(path: String) -> String? Never! {
 // its first lock is serialized too).
 store_current_project_root: fn() -[FS, Env]> String? StoreError! {
     cwd: files.cwd()
-    current := cwd
+    ^current: cwd
     loop {
         managed: pkg_managed_dir(current)
         found: store_node_stat(managed)
@@ -195,7 +195,7 @@ store_lock_roots_from: fn(start: String) -[FS]> LiveRoots StoreError! {
             return Err(StoreError.InvalidData("could not parse project lock `{lock_path}`: {error.message()}"))
         }
     }
-    roots := LiveRoots.empty()
+    ^roots: LiveRoots.empty()
     loop pkg in lock.packages {
         name_version: LockNameVersion{name: pkg.name, version: pkg.version}
         if !roots.name_versions.contains(name_version) -> roots.name_versions.push(name_version)
@@ -239,7 +239,7 @@ store_gc_io_context: fn(error: IOError, message: String) -> StoreError Never! {
 // The first `.jet/lock` at or above `start`. A managed directory or lock that
 // is a link or the wrong kind fails closed.
 store_nearest_lock_path: fn(start: String) -[FS]> String? StoreError! {
-    current := start
+    ^current: start
     loop {
         managed: pkg_managed_dir(current)
         found: store_node_stat(managed)
@@ -291,7 +291,7 @@ store_gc_age: fn(now: Int, then: Int) -> Int Never! {
 // Unreadable metadata fails closed; an empty record directory left by closure
 // deletion is not live.
 store_retained_receipts: fn(roots: HangarRoots, live: LiveRoots, now: Int, retired: [String]) -[FS, Env]> [String] StoreError! {
-    retained := live.receipts
+    ^retained: live.receipts
     entries: store_object_dirs(roots.hangar_dir())
     loop entry in entries {
         if retired.contains(entry.name) -> next
@@ -336,8 +336,8 @@ store_collect_orphaned_canonical_objects: fn(verification: StoreVerification, ro
 // root, or unretired package output reaches, in path order. Unknown names
 // stay for Hangar doctor; a link root counts as the link itself.
 store_collect_orphaned_canonical_objects_with_graph: fn(roots: HangarRoots, live: LiveRoots, retired: [String], graph: ClosureGraph) -[FS, Env]> [OrphanedCanonicalObject] StoreError! {
-    protected := live.output_hashes
-    record_ids := graph.records.keys().to_list()
+    ^protected: live.output_hashes
+    ^record_ids: graph.records.keys().to_list()
     record_ids.sort()
     loop id in record_ids {
         if retired.contains(id) -> next
@@ -356,7 +356,7 @@ store_collect_orphaned_canonical_objects_with_graph: fn(roots: HangarRoots, live
     if pool.is_symlink || !pool.is_dir {
         return Err(StoreError.InvalidData("Hangar object pool is not a real directory: {objects}"))
     }
-    orphaned := [OrphanedCanonicalObject]{}
+    ^orphaned: [OrphanedCanonicalObject]{}
     items: files.list_dir(objects)
     loop item in items {
         metadata: files.stat(item.path)
@@ -421,8 +421,8 @@ store_sweep_receipts: fn(hangar: String, retained: [String], apply: Bool) -[FS]>
     if directory.is_symlink || !directory.is_dir {
         return Err(StoreError.InvalidData("Hangar receipt directory is not a real directory: {receipts}"))
     }
-    report := CleanReport.empty()
-    changed := false
+    ^report: CleanReport.empty()
+    ^changed: false
     items: files.list_dir(receipts)
     loop item in items {
         metadata: files.stat(item.path)
@@ -458,12 +458,12 @@ store_clean_plan: fn(verification: StoreVerification, roots: HangarRoots) -[FS, 
 store_clean_plan_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     store: roots.hangar_dir()
     malformed: store_malformed_objects(store)
-    retired := [String]{}
+    ^retired: [String]{}
     loop object in malformed -> store_gc_add(retired, object.id)
     graph: if retired.len() == 0 -> store_lifecycle_closure_graph_unlocked(verification, roots) else -> store_lifecycle_closure_graph_unlocked_ignoring(verification, roots, retired)
     cwd: files.cwd()
     live: store_live_roots_from_graph(roots, cwd, graph)
-    report := store_gc_sweep_scratch(store, false)
+    ^report: store_gc_sweep_scratch(store, false)
     report.quarantined_objects = malformed.len()
     now: store_now_secs()
     entries: store_object_dirs(store)
@@ -507,10 +507,10 @@ store_clean_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -[
     graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     cwd: files.cwd()
     live: store_live_roots_from_graph(roots, cwd, graph)
-    report := store_gc_sweep_scratch(store, true)
+    ^report: store_gc_sweep_scratch(store, true)
     report.quarantined_objects = quarantined
     now: store_now_secs()
-    retired := [String]{}
+    ^retired: [String]{}
     entries: store_object_dirs(store)
     loop entry in entries {
         meta: store_read_meta(entry.path) ?? next
@@ -573,7 +573,7 @@ store_sweep_build_scratch: fn(hangar: String) -[FS, Env, Time]> CleanReport Stor
 // Sweep the build scratch: the same walk, counting (apply false) or removing
 // (apply true).
 store_gc_sweep_scratch: fn(hangar: String, apply: Bool) -[FS, Env, Time]> CleanReport StoreError! {
-    report := CleanReport.empty()
+    ^report: CleanReport.empty()
     scratch_names: [String]{STORE_BUILD_SCRATCH_DIR, STORE_FAILED_SCRATCH_DIR}
     loop scratch_name in scratch_names {
         root: files.join(hangar, scratch_name)
@@ -607,8 +607,8 @@ store_gc_sweep_scratch: fn(hangar: String, apply: Bool) -[FS, Env, Time]> CleanR
 store_active_tmp_marker_is_live: fn(path: String) -[FS, Env, Time]> Bool Never! {
     contents: files.read(files.join(path, STORE_ACTIVE_TMP_MARKER)) ?? return false
     if contents.trim() == "" -> return true
-    pid := Int?{None}
-    started := Int?{None}
+    ^pid: Int?{None}
+    ^started: Int?{None}
     lines: store_lifecycle_lines(contents)
     loop line in lines {
         if {
@@ -629,7 +629,7 @@ store_active_tmp_marker_is_live: fn(path: String) -[FS, Env, Time]> Bool Never! 
 // Package record directories under the Hangar root in name order, skipping
 // reserved and dot names. A record that is a link fails closed.
 store_object_dirs: fn(hangar: String) -[FS]> [DirEntry] StoreError! {
-    out := [DirEntry]{}
+    ^out: [DirEntry]{}
     entries: files.list_dir(hangar)
     loop entry in entries {
         metadata: files.stat(entry.path)
@@ -655,7 +655,7 @@ store_gc_reserved_name: fn(name: String) -> Bool Never! {
 // Every regular file below `root`, never following a link; unreadable
 // directories are skipped.
 store_files_under: fn(root: String) -[FS]> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     entries: files.list_dir(root) ?? return out
     loop entry in entries {
         metadata: files.stat(entry.path) ?? next

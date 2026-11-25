@@ -142,7 +142,7 @@ sema_name_add_display_paths: fn(facts: ^NameFacts, module_index: Int, module_ali
 sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, paths: ^[String:String]) Never! {
     type_prefix: sema_inline_type_prefix(scope)
     loop item in items {
-        name := ""
+        ^name: ""
         if item == {
             .Struct(definition) -> { name = definition.name }
             .Enum(definition) -> { name = definition.name }
@@ -273,7 +273,7 @@ sema_name_module_paths: fn(items: [Item], prefix: String, paths: ^[String]) Neve
 // by re-encoding, never decoded: a module name such as `my_data` keeps its
 // underscores unescaped there, so decoding it would misread `_d` as `.`.
 sema_name_lifted_function_paths: fn(items: [Item], paths: ^[String:String]) Never! {
-    modules := [String]{}
+    ^modules: [String]{}
     sema_name_module_paths(items, "", modules)
     if modules.len() == 0 {
         return
@@ -295,7 +295,7 @@ sema_name_lifted_function_paths: fn(items: [Item], paths: ^[String:String]) Neve
 // Whether the identifier at `bytes[start..<end]` has the shape of a
 // generated type name: `M` (after an optional `_`) and a digit.
 sema_name_generated_shape: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
-    at := start
+    ^at: start
     if at >= end -> return false
     if (Int{bytes[at]}) == 95 -> at += 1
     if at + 1 >= end || (Int{bytes[at]}) != 77 -> return false
@@ -307,9 +307,9 @@ sema_name_generated_shape: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! 
 // lifted member identity replaced by its source path.
 sema_name_display_text: fn(text: String, paths: [String:String]) -> String Never! {
     bytes: text.bytes()
-    out := ""
-    copied := 0
-    index := 0
+    ^out: ""
+    ^copied: 0
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if !sema_inline_is_alphanumeric(code) && code != 95 {
@@ -342,7 +342,7 @@ sema_name_display_diagnostics: fn(graph: SemaRegistrationGraph, diagnostics: ^[D
     if diagnostics.len() == 0 {
         return
     }
-    paths := [String:String]{}
+    ^paths: [String:String]{}
     loop source_module in graph.modules {
         sema_name_generated_type_paths(source_module.program.items, paths)
         sema_name_lifted_function_paths(source_module.program.items, paths)
@@ -422,12 +422,14 @@ sema_name_template_first_span: fn(items: [Item], definition_id: String) -> Span?
 // first instance.
 sema_name_at_instance: fn(diagnostic: ^^Diagnostic, instance: SemaNameInstance) -> Diagnostic? Never! {
     original: diagnostic.span ?? return Val(diagnostic)
-    if original.start >= instance.span.start && original.end <= instance.span.end -> return Val(diagnostic)
+    if original.start >= instance.span.start && original.end <= instance.span.end {
+        return Val(diagnostic)
+    }
     if diagnostic.edit != None {
         if !instance.first && diagnostic.severity != DIAGNOSTIC_ERROR -> return None
         return Val(diagnostic)
     }
-    updated := diagnostic
+    ^updated: diagnostic
     updated.span = Val(instance.span)
     updated.labels.push(DiagnosticLabel{span: original, message: "in the template body this instance expands"})
     Val(updated)

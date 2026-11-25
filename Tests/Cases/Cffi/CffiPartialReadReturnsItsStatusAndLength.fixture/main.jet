@@ -12,10 +12,10 @@ use {
 run: fn() {
     input: [U8]{1, 2, 3, 4}
     #Unsafe("both blocks are live for the call, C writes at most `output_cap` bytes and keeps no pointer, and each is released once") {
-        from := mem.alloc_raw(4, 1) ?? panic("no memory")
+        ^from: mem.alloc_raw(4, 1) ?? panic("no memory")
         mem.list_copy<U8>(from, input, 0, 4)
-        to := mem.alloc_raw(2, 1) ?? panic("no memory")
-        read_len := U32{0}
+        ^to: mem.alloc_raw(2, 1) ?? panic("no memory")
+        ^read_len: U32{0}
         print(stream.read_chunk(from, U32{4}, to, U32{2}, read_len))
         print("{read_len} {to.byte_offset(0).*} {to.byte_offset(1).*}")
         mem.free_raw(to)

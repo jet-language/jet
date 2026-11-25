@@ -84,7 +84,7 @@ cli_cc_main: fn(verification: StoreVerification, verb: String, args: [String]) -
         return EXIT_OK
     }
 
-    invocation := cli_cc_build_invocation(project_root, verb, options) ?? {
+    ^invocation: cli_cc_build_invocation(project_root, verb, options) ?? {
         cli_cc_report_usage_error(verb, err.message)
         return EXIT_USAGE
     }
@@ -97,16 +97,16 @@ cli_cc_main: fn(verification: StoreVerification, verb: String, args: [String]) -
         cli_cc_report_provider_error(err)
         return EXIT_USER_ERROR
     }
-    build := HermeticBuildContext.new()
+    ^build: HermeticBuildContext.new()
     toolchain: build.toolchain("cc-toolchain", cli_cc_toolchain_spec(descriptor)) ?? {
         cli_cc_report_operational_error("C/C++ toolchain could not enter the build graph", err.debug_text(), "repair the pinned Hangar descriptor and retry")
         return EXIT_USER_ERROR
     }
-    action_argv := [String]{verb}
+    ^action_argv: [String]{verb}
     static_link: options.argv.contains("-static") || options.argv.contains("-static-pie")
     action_argv.extend(cli_cc_toolchain_argv(descriptor, verb, options.compile_only, static_link))
     action_argv.extend(invocation.argv.slice(1, invocation.argv.len()))
-    action := ActionSpec.new(action_argv)
+    ^action: ActionSpec.new(action_argv)
         .with_inputs(invocation.inputs)
         .with_outputs(invocation.outputs)
         .with_env("PATH", descriptor.virtual_bin())
@@ -124,7 +124,7 @@ cli_cc_main: fn(verification: StoreVerification, verb: String, args: [String]) -
         cli_cc_report_operational_error("C/C++ invocation could not enter the build graph", err.debug_text(), "check the declared source and output paths")
         return EXIT_USER_ERROR
     }
-    target_spec := TargetSpec.new().with_action(action_handle).with_toolchain(toolchain)
+    ^target_spec: TargetSpec.new().with_action(action_handle).with_toolchain(toolchain)
     loop source in invocation.sources -> target_spec = target_spec.with_source(source)
     loop input in invocation.inputs -> target_spec = target_spec.with_input(input)
     loop output in invocation.outputs -> target_spec = target_spec.with_output(output)
@@ -170,7 +170,7 @@ cli_cc_main: fn(verification: StoreVerification, verb: String, args: [String]) -
 cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverOptions) -[FS, Env]> CcInvocation CLIToolError! {
     build_root: cli_cc_resolve_build_root(project_root, options)
     explicit_build_root: options.build_root != None
-    sources := [String]{}
+    ^sources: [String]{}
     loop source in options.sources {
         sources.push(cli_cc_validate_source(project_root, options.working_dir, source))
     }
@@ -204,7 +204,7 @@ cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverO
         }
         .None -> {}
     }
-    outputs := [String]{}
+    ^outputs: [String]{}
     if options.compile_only {
         if output != None && sources.len() != 1 {
             return Err(CLIToolError.new("`-c -o` needs exactly one source"))
@@ -231,7 +231,7 @@ cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverO
         link_default: if sys.is_windows() -> "a.exe" else -> "a.out"
         outputs.push(output ?? cli_cc_normalize_output_path(link_default, project_root, build_root, options.working_dir, explicit_build_root, "link output"))
     }
-    unique_outputs := [String]{}
+    ^unique_outputs: [String]{}
     loop declared in outputs {
         cli_cc_validate_relative_path(declared, "output")
         if unique_outputs.contains(declared) {
@@ -248,7 +248,7 @@ cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverO
     }
     ignored_build_root: if explicit_build_root && build_root != project_root -> Val(build_root) else -> None
 
-    normalized_argv := options.argv
+    ^normalized_argv: options.argv
     loop i in 0..<sources.len() {
         slot: options.source_indices.get(i) ?? next
         if slot >= normalized_argv.len() {
@@ -281,7 +281,7 @@ cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverO
         normalized: cli_cc_normalize_working_path(raw, project_root, options.working_dir, "include/library path")
         normalized_argv[operand.index] = "{operand.prefix}{normalized}"
     }
-    argv := [String]{verb}
+    ^argv: [String]{verb}
     loop index in 0..<normalized_argv.len() {
         if (options.separator_index ?? -1) == index -> argv.push("--")
         argv.push(normalized_argv[index])
@@ -303,10 +303,10 @@ cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverO
 
 // The project input set and the sources, sorted and without duplicates.
 cli_cc_declared_inputs: fn(project_inputs: [String], sources: [String]) -> [String] Never! {
-    inputs := project_inputs.copy()
+    ^inputs: project_inputs.copy()
     inputs.extend(sources.copy())
     inputs.sort()
-    deduplicated := [String]{}
+    ^deduplicated: [String]{}
     loop input in inputs {
         if deduplicated.len() == 0 || deduplicated[deduplicated.len() - 1] != input {
             deduplicated.push(input)
@@ -429,7 +429,7 @@ CcProjectInputError: struct {
 // Every regular project file except declared outputs, VCS/build directories
 // and the explicit build root, in name order, within the input bounds.
 cli_cc_collect_project_inputs: fn(root: String, excluded: [String], ignored_root: String?) -[FS]> [String] CcProjectInputError! {
-    walk := CcProjectInputWalk{root: root, excluded: excluded, ignored_root: ignored_root, inputs: [String]{}, bytes: 0}
+    ^walk: CcProjectInputWalk{root: root, excluded: excluded, ignored_root: ignored_root, inputs: [String]{}, bytes: 0}
     walk.visit(root)
     Ok(walk.inputs)
 }
@@ -442,7 +442,7 @@ CcProjectInputWalk: struct {
     bytes: Int,
 
     visit: fn(^self, directory: String) -[FS]> CcProjectInputError! {
-        entries := files.list_dir(directory) ?? return Err(CcProjectInputError.unreadable("read project inputs in `{directory}`: {err}"))
+        ^entries: files.list_dir(directory) ?? return Err(CcProjectInputError.unreadable("read project inputs in `{directory}`: {err}"))
         entries.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { left.name <=> right.name })
         loop entry in entries {
             path: entry.path
@@ -527,7 +527,7 @@ cli_cc_compiler_version: fn(descriptor: CcToolchainDescriptor) -> String Never! 
 // loader, which the pack's (Nix) clang leaves out; a `-static` or
 // `-static-pie` link (`static_link`) names none.
 cli_cc_toolchain_argv: fn(descriptor: CcToolchainDescriptor, verb: String, compile_only: Bool, static_link: Bool) -> [String] Never! {
-    argv := [String]{}
+    ^argv: [String]{}
     if !descriptor.is_pack_layout() {
         if !sys.is_windows() -> argv.push("--sysroot={descriptor.sysroot_path()}")
         return argv
@@ -634,7 +634,7 @@ cli_cc_report_operational_error: fn(headline: String, reason: String, fix: Strin
 // (for a pack target, the pack and the target's sysroot).
 cli_cc_toolchain_spec: fn(descriptor: CcToolchainDescriptor) -> ToolchainSpec Never! {
     provenance: BuildProvenance.jetpack_dependency("{CC_TOOLCHAIN_PACKAGE}@{CC_TOOLCHAIN_SOURCE}", LockRecord.new("hangar", descriptor.bundle_sha256))
-    spec := ToolchainSpec.target(descriptor.target, provenance)
+    ^spec: ToolchainSpec.target(descriptor.target, provenance)
     spec = spec.with_host_triple(descriptor.host)
     spec = spec.with_sdk(SDKIdentity.new("jet-cc", descriptor.version, provenance))
     spec = spec.with_linker(LinkerIdentity.new("{descriptor.linker}@{descriptor.linker_sha256}", provenance))

@@ -32,7 +32,7 @@ JetCLIWriteSite: struct {
 jet_cli_audit_writes: fn(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     entry: jet_cli_audit_entry_modules(file, source, color, json)
     if entry.refusal == .Val(refusal) -> return refusal
-    sites := jet_cli_audit_write_sites(file, entry.modules, color)
+    ^sites: jet_cli_audit_write_sites(file, entry.modules, color)
     sites.sort_by(fn(left: JetCLIWriteSite, right: JetCLIWriteSite) { (left.path <=> right.path).then(left.start <=> right.start) })
     if json {
         rows: loop site in sites -> jet_cli_status_object(
@@ -47,7 +47,7 @@ jet_cli_audit_writes: fn(file: String, source: String, color: Bool, json: Bool) 
         )
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("audit.writes", true, [JetCLIStatusField]{jet_cli_status_field("writes", jet_cli_status_array(rows))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    lines := "Calls that change or take a named value: {sites.len()}\n"
+    ^lines: "Calls that change or take a named value: {sites.len()}\n"
     loop site in sites {
         lines = "{lines}  {site.path}:{site.line}:{site.column}  span={site.start}..{site.end}  mark={site.mark}  access={jet_cli_audit_write_access(site.mark)}\n"
     }
@@ -64,7 +64,7 @@ jet_cli_audit_write_access: fn(mark: String) -> String Never! {
 jet_cli_audit_write_sites: fn(file: String, modules: [JetDriverAuthorizedSourceFile], color: Bool) -> [JetCLIWriteSite] {
     shift: JET_CLI_AUDIT_WRITES_POLICY.len()
     overlays: loop member in modules -> JetDriverSourceDocument{path: member.path, source: "{JET_CLI_AUDIT_WRITES_POLICY}{member.source}"}
-    sites := [JetCLIWriteSite]{}
+    ^sites: [JetCLIWriteSite]{}
     if jet_cli_compile_overlays(file, file, overlays, color, None, JetDriverCompileMode.Check, None) == .Compiled(result, snapshot) {
         loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
             if diagnostic.code != "E0228" -> next
@@ -74,8 +74,8 @@ jet_cli_audit_write_sites: fn(file: String, modules: [JetDriverAuthorizedSourceF
                 next
             }
             span: diagnostic.span ?? next
-            source := ""
-            found := false
+            ^source: ""
+            ^found: false
             loop member in modules {
                 if member.path == owner.path {
                     source = member.source
@@ -86,7 +86,7 @@ jet_cli_audit_write_sites: fn(file: String, modules: [JetDriverAuthorizedSourceF
             start: span.start - shift
             end: span.end - shift
             if start < 0 || end < start || end > source.len() -> next
-            duplicate := false
+            ^duplicate: false
             loop site in sites {
                 if site.path == owner.path && site.start == start -> duplicate = true
             }

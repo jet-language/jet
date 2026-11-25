@@ -196,7 +196,7 @@ jet_cli_repl_out: fn(text: String) {
     if text == "" {
         return
     }
-    out := repl_term.stdout()
+    ^out: repl_term.stdout()
     out.write(text).drop("jet stdout")
     out.flush().drop("jet stdout")
 }
@@ -205,7 +205,7 @@ jet_cli_repl_err: fn(text: String) {
     if text == "" {
         return
     }
-    err_handle := repl_term.stderr()
+    ^err_handle: repl_term.stderr()
     err_handle.write(text).drop("jet stderr")
     err_handle.flush().drop("jet stderr")
 }
@@ -233,7 +233,7 @@ jet_cli_repl_after: fn(text: String, needle: String) -> String? Never! {
 }
 
 jet_cli_repl_line_count: fn(text: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop byte in text.bytes() {
         if byte == (U8{10}) -> count += 1
     }
@@ -244,7 +244,7 @@ jet_cli_repl_line_count: fn(text: String) -> Int Never! {
 // `normalize_input`: the line without its terminator, with terminal control
 // bytes (other than tab) removed.
 jet_cli_repl_normalize: fn(line: String) -> String Never! {
-    kept := [U8]{}
+    ^kept: [U8]{}
     loop byte in line.bytes() {
         if byte == (U8{9}) || (byte >= (U8{32}) && byte != (U8{127})) -> kept.push(byte)
     }
@@ -253,10 +253,10 @@ jet_cli_repl_normalize: fn(line: String) -> String Never! {
 
 // `bracket_balance`: open brackets outside string and char literals.
 jet_cli_repl_balance: fn(text: String) -> Int Never! {
-    balance := 0
-    in_string := false
-    in_char := false
-    escaped := false
+    ^balance: 0
+    ^in_string: false
+    ^in_char: false
+    ^escaped: false
     loop raw in text.bytes() {
         byte: Int{raw}
         if escaped {
@@ -322,7 +322,7 @@ jet_cli_repl_help: fn(color: Bool) -> String Never! {
         [String]{"^R", "              edit and rerun a prior turn"},
         [String]{"^B", "              open or close live bindings"},
     }
-    text := "{diagnostic_theme_bold(color, "REPL meta-commands")}\n"
+    ^text: "{diagnostic_theme_bold(color, "REPL meta-commands")}\n"
     loop row in rows -> text = "{text}  {diagnostic_theme_bold(color, row[0])}{row[1]}\n"
     text = "{text}\n{diagnostic_theme_bold(color, "Interactive terminal only")}\n"
     loop row in keys -> text = "{text}  {diagnostic_theme_bold(color, row[0])}{row[1]}\n"
@@ -353,8 +353,8 @@ jet_cli_repl_rename_run: fn(source: String, replacement: String?) -> String {
     name: replacement ?? return source.copy()
     lexed: lex(source.bytes())
     bytes: source.bytes()
-    renamed := [U8]{}
-    cursor := 0
+    ^renamed: [U8]{}
+    ^cursor: 0
     loop (index, token) in lexed.tokens {
         if token.kind != TOKEN_IDENT || token.span.start < cursor || token.span.end > bytes.len() {
             next
@@ -373,13 +373,13 @@ jet_cli_repl_rename_run: fn(source: String, replacement: String?) -> String {
 // statements (when `replay`) before `statements`; `reports` print the values
 // this turn shows behind the session marker.
 jet_cli_repl_source: fn(session: JetCLIReplSession, extra_import: String, extra_item: String, replay: Bool, marked: Bool, statements: String, reports: [JetCLIReplReport]) -> JetCLIReplSource {
-    imports := session.imports.join("")
+    ^imports: session.imports.join("")
     import_at: imports.count_bytes()
     imports = "{imports}{extra_import}"
     existing: session.items.join("\n")
     all_items: if extra_item == "" -> existing.copy() else -> "{existing}\n{extra_item}"
     rename: if jet_cli_repl_declares_run(all_items) -> Val("jet_repl_run_{session.nonce}") else -> String?{None}
-    text := "{imports}{jet_cli_repl_rename_run(existing, rename)}\n"
+    ^text: "{imports}{jet_cli_repl_rename_run(existing, rename)}\n"
     item_at: text.count_bytes()
     if extra_item != "" -> text = "{text}{jet_cli_repl_rename_run(extra_item, rename)}\n"
     text = "{text}\nrun: fn() {{\n"
@@ -410,7 +410,7 @@ jet_cli_repl_unwritable: fn(session: JetCLIReplSession, error: String) -> String
 // The options every turn compiles under: a run's, keeping the session's deep
 // checks.
 jet_cli_repl_options: fn(session: JetCLIReplSession) -> BuildOptions Never! {
-    options := build_options_stock("run")
+    ^options: build_options_stock("run")
     options.deep_checks = session.deep_checks.copy()
     options
 }
@@ -419,7 +419,7 @@ jet_cli_repl_check: fn(session: JetCLIReplSession, source: String, input_start: 
     repl_files.write(session.anchor, source) ?? return JetCLIReplChecked.Refused{report: jet_cli_repl_unwritable(session, "{err}")}
     prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetDriverSourceDocument]{JetDriverSourceDocument{path: session.anchor, source: source}}, session.color, None, JetDriverCompileMode.Program)
     compiled: jet_cli_compile_executable(prepared, None, jet_cli_repl_options(session), None, None, session.color)
-    checked := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
+    ^checked: JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
     if compiled.move() == {
         .Refused(output) -> { checked = JetCLIReplChecked.Refused{report: output.stderr} }
         .Checked(result, _, snapshot) -> {
@@ -452,7 +452,7 @@ jet_cli_repl_build: fn(session: ^JetCLIReplSession, program: JetCLIReplSource, i
     prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetDriverSourceDocument]{JetDriverSourceDocument{path: session.anchor, source: program.text}}, session.color, None, JetDriverCompileMode.Program)
     options: jet_cli_repl_options(session)
     compiled: jet_cli_compile_executable(prepared, None, options, None, None, session.color)
-    built := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
+    ^built: JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
     if compiled.move() == {
         .Refused(output) -> { built = JetCLIReplChecked.Refused{report: output.stderr} }
         .Checked(result, inputs, snapshot) -> {
@@ -464,8 +464,8 @@ jet_cli_repl_build: fn(session: ^JetCLIReplSession, program: JetCLIReplSource, i
 
 jet_cli_repl_built: fn(session: ^JetCLIReplSession, program: JetCLIReplSource, input_start: Int, gate: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: ^^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIReplChecked {
     errors: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
-    placed := [Diagnostic]{}
-    unshown := [Diagnostic]{}
+    ^placed: [Diagnostic]{}
+    ^unshown: [Diagnostic]{}
     loop diagnostic in errors {
         if {
             jet_cli_repl_in_reports(session, diagnostic, program.reports_at) -> {
@@ -511,7 +511,7 @@ jet_cli_repl_written: fn(session: JetCLIReplSession, executable: X64Executable, 
 
 // The `let` locals of the session program's `run`, with their checked types.
 jet_cli_repl_locals: fn(inputs: JetDriverLoweringInputs?) -> [JetCLIReplLocal] {
-    locals := [JetCLIReplLocal]{}
+    ^locals: [JetCLIReplLocal]{}
     if inputs == .Val(checked) {
         entry: checked.entry_key ?? ""
         loop function in checked.functions {
@@ -555,9 +555,9 @@ jet_cli_repl_discard: fn(binary: String) {
 // Problems in the session file are shown against the user's input; problems in
 // other files keep their origin.
 jet_cli_repl_localize: fn(session: JetCLIReplSession, diagnostics: [Diagnostic], input_start: Int) -> [Diagnostic] {
-    localized := [Diagnostic]{}
+    ^localized: [Diagnostic]{}
     loop diagnostic in diagnostics {
-        foreign := false
+        ^foreign: false
         if diagnostic.origin == .Val(origin) {
             foreign = origin.path != session.anchor && origin.path != session.anchor_real && origin.display != session.anchor
         }
@@ -565,7 +565,7 @@ jet_cli_repl_localize: fn(session: JetCLIReplSession, diagnostics: [Diagnostic],
             localized.push(diagnostic.copy())
             next
         }
-        shifted := repl_reanchor(diagnostic.copy(), input_start)
+        ^shifted: repl_reanchor(diagnostic.copy(), input_start)
         shifted.origin = None
         shifted.source_path = None
         shifted.source_offset = None
@@ -576,7 +576,7 @@ jet_cli_repl_localize: fn(session: JetCLIReplSession, diagnostics: [Diagnostic],
 }
 
 jet_cli_repl_local_type: fn(locals: [JetCLIReplLocal], name: String) -> Type? Never! {
-    found := Type?{None}
+    ^found: Type?{None}
     loop local in locals {
         if local.name == name -> found = Val(local.ty)
     }
@@ -590,10 +590,10 @@ jet_cli_repl_local_type: fn(locals: [JetCLIReplLocal], name: String) -> Type? Ne
 // session's effects never widen silently. IO is the REPL's own console and
 // never refused.
 jet_cli_repl_refusal: fn(session: ^JetCLIReplSession, required: [String]) -> Diagnostic? {
-    authority := jet_cli_policy_authority(required, None)
+    ^authority: jet_cli_policy_authority(required, None)
     jet_cli_with_invocation(authority, session.invocation)
     if jet_cli_authority_refusal(authority) == .Val(refusal) -> return Val(refusal)
-    fresh := [String]{}
+    ^fresh: [String]{}
     loop right in jet_cli_unacknowledged(authority) {
         if !jet_cli_covers_any(session.noticed, right) -> fresh.push(right)
     }
@@ -607,7 +607,7 @@ jet_cli_repl_refusal: fn(session: ^JetCLIReplSession, required: [String]) -> Dia
 // REPL's own console, so IO rows are dropped from the deny list.
 jet_cli_repl_rows: fn(invocation: JetCLIInvocationAuthority?) -> JetCLIInvocationAuthority? Never! {
     rows: invocation ?? return None
-    deny := [String]{}
+    ^deny: [String]{}
     loop right in rows.deny {
         if right == "IO" || right.starts_with("IO.") -> next
         deny.push(right)
@@ -663,7 +663,7 @@ jet_cli_repl_moves_in_expr: fn(session: JetCLIReplSession, tables: ASTTables, ex
 }
 
 jet_cli_repl_moves: fn(session: JetCLIReplSession, tables: ASTTables, body: [StmtNode]) -> [String] {
-    moved := [String]{}
+    ^moved: [String]{}
     loop stmt in body {
         if ast_stmt(tables, stmt) == {
             .Val(binding) -> {
@@ -691,7 +691,7 @@ jet_cli_repl_moves: fn(session: JetCLIReplSession, tables: ASTTables, body: [Stm
 // --- the child ----------------------------------------------------------------
 
 jet_cli_repl_child_argv: fn(session: JetCLIReplSession) -> [String] {
-    argv := [String]{repl_sys.executable(), JET_CLI_REPL_CHILD_VERB, "--session={session.nonce}"}
+    ^argv: [String]{repl_sys.executable(), JET_CLI_REPL_CHILD_VERB, "--session={session.nonce}"}
     if session.invocation == .Val(rows) {
         if rows.all -> argv.push("-A")
         if rows.allow.len() > 0 -> argv.push("--allow={rows.allow.join(",")}")
@@ -708,7 +708,7 @@ jet_cli_repl_unstarted: fn(error: String) -> JetCLIReplOutcome Never! {
 // (`<byte length>\n<path>`), in the session's base directory. The binary is
 // gone once the child ended.
 jet_cli_repl_run_child: fn(session: JetCLIReplSession, binary: String) -> JetCLIReplOutcome {
-    spec := repl_process.cmd(jet_cli_repl_child_argv(session)).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture)
+    ^spec: repl_process.cmd(jet_cli_repl_child_argv(session)).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture)
     if repl_files.is_dir(session.base_dir) -> spec = spec.cwd(session.base_dir)
     child: spec.spawn() ?? {
         jet_cli_repl_discard(binary)
@@ -733,14 +733,14 @@ jet_cli_repl_parse_outcome: fn(session: JetCLIReplSession, stdout: String, stder
         return JetCLIReplOutcome.Stopped{stdout: "", report: "{stdout}{stderr}"}
     }
     value_header: "{mark}value "
-    records_at := -1
+    ^records_at: -1
     if turn_out.starts_with(value_header) -> records_at = 0 else {
         found: turn_out.find("\n{value_header}")
         if found >= 0 -> records_at = found + 1
     }
     user_out: if records_at < 0 -> turn_out.copy() else -> jet_cli_repl_bytes(turn_out, 0, records_at)
-    records := if records_at < 0 -> "" else -> jet_cli_repl_bytes(turn_out, records_at, turn_out.count_bytes())
-    values := [JetCLIReplValue]{}
+    ^records: if records_at < 0 -> "" else -> jet_cli_repl_bytes(turn_out, records_at, turn_out.count_bytes())
+    ^values: [JetCLIReplValue]{}
     loop records.starts_with(value_header) {
         rest: jet_cli_repl_bytes(records, value_header.count_bytes(), records.count_bytes())
         newline: rest.find("\n")
@@ -788,8 +788,8 @@ jet_cli_repl_child_failed: fn(what: String) -> JetDriverVerbOutput Never! {
 // `jet __jet_repl_run_stdin ...`: the child's plan. Without `--session` it is
 // no REPL turn and is refused once.
 jet_cli_repl_child_plan: fn(raw: [String]) -> JetCLIPlan Never! {
-    session := ""
-    rows := [String]{}
+    ^session: ""
+    ^rows: [String]{}
     loop (index, argument) in raw {
         if index == 0 -> next
         if {
@@ -893,11 +893,11 @@ jet_cli_repl_stmts: fn(session: ^JetCLIReplSession, tables: ASTTables, body: [St
     moved: jet_cli_repl_moves(session, tables, body)
     // This turn's new bindings, the last of a name winning; the compile gives
     // their types.
-    fresh := [JetCLIReplReport]{}
+    ^fresh: [JetCLIReplReport]{}
     loop stmt in body {
         if ast_stmt(tables, stmt) == .Val(binding) {
             if binding.name == "__repl_echo__" || moved.contains(binding.name) -> next
-            kept := [JetCLIReplReport]{}
+            ^kept: [JetCLIReplReport]{}
             loop earlier in fresh {
                 if earlier.name != binding.name -> kept.push(earlier)
             }
@@ -906,38 +906,38 @@ jet_cli_repl_stmts: fn(session: ^JetCLIReplSession, tables: ASTTables, body: [St
         }
     }
     // Earlier mutable bindings this turn may have changed, by name.
-    live_names := [String]{}
+    ^live_names: [String]{}
     loop binding in session.bindings {
         if !binding.mutable || moved.contains(binding.name) -> next
-        fresh_name := false
+        ^fresh_name: false
         loop report in fresh {
             if report.name == binding.name -> fresh_name = true
         }
         if !fresh_name -> live_names.push(binding.name)
     }
     live_names.sort()
-    live := [JetCLIReplReport]{}
+    ^live: [JetCLIReplReport]{}
     loop name in live_names {
         index: jet_cli_repl_binding_index(session.bindings, name) ?? next
         live.push(JetCLIReplReport{name: name, ty: session.bindings[index].ty, mutable: true})
     }
-    bindings := [JetCLIReplReport]{}
+    ^bindings: [JetCLIReplReport]{}
     loop report in fresh -> bindings.push(report.copy())
     loop report in live -> bindings.push(report.copy())
     // An echo `;` doesn't suppress shows its value first, then each binding's.
-    echoed := echo && !suppress
-    reports := [JetCLIReplReport]{}
+    ^echoed: echo && !suppress
+    ^reports: [JetCLIReplReport]{}
     if echoed -> reports.push(JetCLIReplReport{name: echo_name, ty: None, mutable: false})
     loop report in bindings -> reports.push(report.copy())
     program: jet_cli_repl_source(session, "", "", true, true, statement, reports)
-    built := jet_cli_repl_build(session, program, program.statements_at + prefix.count_bytes(), true)
+    ^built: jet_cli_repl_build(session, program, program.statements_at + prefix.count_bytes(), true)
     // A binding whose type has no `Display` (`cell := Shared{...}`) still
     // binds: when only the value lines fail, the turn is built again showing
     // only the echo, and each binding keeps its type with no shown text.
-    unshown := false
+    ^unshown: false
     if built == .Failed(_, only_reports) -> unshown = only_reports && bindings.len() > 0
     if unshown {
-        echo_only := [JetCLIReplReport]{}
+        ^echo_only: [JetCLIReplReport]{}
         if echoed -> echo_only.push(JetCLIReplReport{name: echo_name, ty: None, mutable: false})
         quiet: jet_cli_repl_source(session, "", "", true, true, statement, echo_only)
         rebuilt: jet_cli_repl_build(session, quiet, quiet.statements_at + prefix.count_bytes(), true)
@@ -949,40 +949,45 @@ jet_cli_repl_stmts: fn(session: ^JetCLIReplSession, tables: ASTTables, body: [St
     // only the value lines fail, the turn is built again without the echo's.
     // A value of another type with no `Display` (`data.query(rows)`) still
     // runs and shows its type with no shown text.
-    retry := false
+    ^retry: false
     if built == .Failed(_, only_reports) -> retry = echoed && only_reports
-    echo_unshown := false
+    ^echo_unshown: false
     if retry {
         bare: jet_cli_repl_source(session, "", "", true, true, statement, shown_bindings)
         rebuilt: jet_cli_repl_build(session, bare, bare.statements_at + prefix.count_bytes(), true)
-        unit := true
-        if rebuilt == .Checked(_, locals) -> unit = jet_cli_repl_is_unit(jet_cli_repl_local_type(locals, echo_name))
+        ^unit: true
+        if rebuilt == .Checked(_, locals) {
+            unit = jet_cli_repl_is_unit(jet_cli_repl_local_type(locals, echo_name))
+        }
         built = rebuilt
-        if unit { echoed = false } else { echo_unshown = true }
+        if unit -> echoed = false else -> echo_unshown = true
     }
     if built == {
         .Refused(report) -> JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{}, report: report}
         .Failed(diagnostics, _) -> JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: diagnostics, report: ""}
         .Checked(binary, locals) -> {
             echo_ty: if echoed -> jet_cli_repl_local_type(locals, echo_name) else -> Type?{None}
-            shown := [JetCLIReplReport]{}
-            if echoed && !echo_unshown -> shown.push(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false})
+            ^shown: [JetCLIReplReport]{}
+            if echoed && !echo_unshown {
+                shown.push(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false})
+            }
             // Under `unshown` this turn's bindings keep their types and no
             // shown text; otherwise each one's value line follows the echo's.
-            unshown_bindings := [JetCLIReplReport]{}
+            ^unshown_bindings: [JetCLIReplReport]{}
             loop report in fresh {
                 typed: JetCLIReplReport{name: report.name, ty: jet_cli_repl_local_type(locals, report.name), mutable: report.mutable}
-                if unshown { unshown_bindings.push(typed) } else { shown.push(typed) }
+                if unshown -> unshown_bindings.push(typed) else -> shown.push(typed)
             }
-            if unshown { unshown_bindings.extend(live) } else { shown.extend(live) }
+            if unshown -> unshown_bindings.extend(live) else -> shown.extend(live)
             outcome: jet_cli_repl_run_child(session, binary)
+            // A Unit value has nothing to show.
             if outcome == {
                 .Interrupted -> JetCLIReplTurnResult.Interrupted
                 .Unstarted(diagnostic) -> JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{diagnostic}, report: ""}
                 .Stopped(stdout, report) -> JetCLIReplTurnResult.Failed{stdout: stdout, stderr: "", diagnostics: [Diagnostic]{}, report: report}
                 .Done(stdout, stderr, values) -> {
                     session.statements.push(statement)
-                    echo_shown := if echo_unshown -> JET_CLI_REPL_UNSHOWN else -> ""
+                    ^echo_shown: if echo_unshown -> JET_CLI_REPL_UNSHOWN else -> ""
                     loop value in values {
                         if value.index < 0 || value.index >= shown.len() -> next
                         report: shown[value.index]
@@ -992,13 +997,14 @@ jet_cli_repl_stmts: fn(session: ^JetCLIReplSession, tables: ASTTables, body: [St
                         }
                         jet_cli_repl_bind(session, report, value.shown)
                     }
-                    loop report in unshown_bindings -> jet_cli_repl_bind(session, report, JET_CLI_REPL_UNSHOWN)
-                    kept := [JetCLIReplBinding]{}
+                    loop report in unshown_bindings {
+                        jet_cli_repl_bind(session, report, JET_CLI_REPL_UNSHOWN)
+                    }
+                    ^kept: [JetCLIReplBinding]{}
                     loop binding in session.bindings {
                         if !moved.contains(binding.name) -> kept.push(binding.copy())
                     }
                     session.bindings = kept
-                    // A Unit value has nothing to show.
                     shows_echo: echoed && !jet_cli_repl_is_unit(echo_ty)
                     echo_report: if shows_echo -> Val(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false}) else -> JetCLIReplReport?{None}
                     JetCLIReplTurnResult.Done{stdout: stdout, stderr: stderr, echo: echo_report, shown: echo_shown}
@@ -1082,7 +1088,7 @@ jet_cli_repl_turn: fn(session: ^JetCLIReplSession, text: String, tables: ASTTabl
         .Done(stdout, stderr, echo_report, shown) -> {
             jet_cli_repl_out(stdout)
             jet_cli_repl_err(stderr)
-            line := ""
+            ^line: ""
             if echo_report == .Val(report) -> line = "{jet_cli_repl_echo(shown, report.ty)}\n"
             jet_cli_repl_out(line)
             output: "{stdout}{stderr}{line}"
@@ -1102,7 +1108,7 @@ jet_cli_repl_turn: fn(session: ^JetCLIReplSession, text: String, tables: ASTTabl
 // --- meta-commands -----------------------------------------
 
 jet_cli_repl_functions: fn(items: [String]) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop item in items {
         parsed: parse_source(item.bytes())
         loop declared in parsed.program.items {
@@ -1145,7 +1151,7 @@ jet_cli_repl_load: fn(session: ^JetCLIReplSession, path: String, run_entry: Bool
         jet_cli_repl_err("{problems} parse error(s) in `{path}`\n")
         return
     }
-    has_run := false
+    ^has_run: false
     loop item in parsed.program.items {
         if item == .Func(function) {
             if function.name == "run" -> has_run = true
@@ -1161,14 +1167,14 @@ jet_cli_repl_load: fn(session: ^JetCLIReplSession, path: String, run_entry: Bool
 // not sources.
 jet_cli_repl_load_dir: fn(session: ^JetCLIReplSession, dir: String) -> Int {
     entries: repl_files.list_dir(dir) ?? return 0
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries {
         if !entry.is_dir && entry.name.ends_with(".jet") && !JET_CLI_RESERVED_SOURCE_NAMES.contains(entry.name) {
             paths.push(entry.path)
         }
     }
     paths.sort()
-    count := 0
+    ^count: 0
     loop path in paths {
         source: repl_files.read(path) ?? next
         parsed: parse_source(source.bytes())
@@ -1238,7 +1244,7 @@ jet_cli_repl_docs: fn(session: JetCLIReplSession, name: String) {
 // A page of docs: the signature, the summary, where the name comes from and
 // each example.
 jet_cli_repl_docs_page: fn(signature: String, summary: String, source: String, examples: [String]) -> String Never! {
-    page := "{signature}\n"
+    ^page: "{signature}\n"
     if summary != "" -> page = "{page}{summary}\n"
     page = "{page}Source: {source}\n"
     loop example in examples -> page = "{page}Example: {example}\n"
@@ -1247,9 +1253,11 @@ jet_cli_repl_docs_page: fn(signature: String, summary: String, source: String, e
 
 // The language catalog's row for `name` (its last, as the symbol index keeps).
 jet_cli_repl_language_docs: fn(name: String) -> String? Never! {
-    docs := String?{None}
+    ^docs: String?{None}
     loop symbol in semindex_language_symbols() {
-        if symbol.qualified_name == name -> docs = Val(jet_cli_repl_docs_page(symbol.signature, symbol.summary, symbol.module_path, symbol.examples))
+        if symbol.qualified_name == name {
+            docs = Val(jet_cli_repl_docs_page(symbol.signature, symbol.summary, symbol.module_path, symbol.examples))
+        }
     }
     docs
 }
@@ -1264,7 +1272,7 @@ jet_cli_repl_core_docs: fn(session: JetCLIReplSession, name: String) -> String? 
     bytes: name.bytes()
     prefix: foundation_byte_text(bytes, 0, dot)
     member: foundation_byte_text(bytes, dot + 1, bytes.len())
-    aliased := String?{None}
+    ^aliased: String?{None}
     loop import in session.imports {
         loop declared in parse_source(import.bytes()).program.imports {
             if declared.alias != prefix -> next
@@ -1272,7 +1280,7 @@ jet_cli_repl_core_docs: fn(session: JetCLIReplSession, name: String) -> String? 
         }
     }
     module_name: aliased ?? prefix
-    exported := false
+    ^exported: false
     loop core_module in CORE_MODULE_DECLARATIONS {
         if core_module.module_name == module_name -> exported = core_module.members.contains(member)
     }
@@ -1295,8 +1303,8 @@ jet_cli_repl_core_docs: fn(session: JetCLIReplSession, name: String) -> String? 
 // the first `{` outside the parameter list, or the end of a record return type.
 jet_cli_repl_core_signature: fn(text: String, start: Int, return_span: Span?) -> String Never! {
     bytes: text.bytes()
-    end := bytes.len()
-    depth := 0
+    ^end: bytes.len()
+    ^depth: 0
     loop index in start..<bytes.len() {
         byte: bytes[index]
         if byte == (U8{40}) -> depth += 1
@@ -1317,7 +1325,7 @@ jet_cli_repl_turns: fn(session: JetCLIReplSession) {
         jet_cli_repl_out("No turns yet\n")
         return
     }
-    text := ""
+    ^text: ""
     loop turn in session.turns {
         status: if turn.status == {
             .Ok -> "ok"
@@ -1418,10 +1426,10 @@ jet_cli_repl_meta: fn(session: ^JetCLIReplSession, command: String, argument: St
 jet_cli_repl_read: fn(session: JetCLIReplSession) -> String? {
     prompt: "{diagnostic_theme_dim(session.color, "{session.turns.len() + 1}")} {diagnostic_theme_accent(session.color, "user>")} "
     jet_cli_repl_out(diagnostic_theme_bold(session.color, prompt))
-    input := repl_term.stdin()
+    ^input: repl_term.stdin()
     // End of input and a read error both end the session.
     first: input.read_line() ?? return None
-    line := jet_cli_repl_normalize(first)
+    ^line: jet_cli_repl_normalize(first)
     loop jet_cli_repl_balance(line) > 0 {
         jet_cli_repl_out(diagnostic_theme_dim(session.color, "...  "))
         next_line: input.read_line() ?? break
@@ -1475,18 +1483,18 @@ jet_cli_repl_no_session: fn(color: Bool) -> JetDriverVerbOutput Never! {
 // `jet repl [file.jet] [--project <dir>]`: the line-based session. Input that
 // is not a terminal reads the same way.
 jet_cli_repl: fn(project: String?, preload: String?, options: JetCLIReplOptions, color: Bool) -> JetDriverVerbOutput {
-    preload_file := String?{None}
+    ^preload_file: String?{None}
     if preload == .Val(file) {
         preload_file = jet_cli_repl_preload(file)
         if preload_file == None {
             return jet_cli_report_output("", "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
         }
     }
-    session := jet_cli_repl_session(project, options, color) ?? return jet_cli_repl_no_session(color)
+    ^session: jet_cli_repl_session(project, options, color) ?? return jet_cli_repl_no_session(color)
     jet_cli_repl_banner(color)
     session.history = jet_cli_repl_history_open()
     if project == .Val(dir) {
-        loaded := jet_cli_repl_load_dir(session, "{dir}/src")
+        ^loaded: jet_cli_repl_load_dir(session, "{dir}/src")
         if loaded == 0 -> loaded = jet_cli_repl_load_dir(session, dir)
         if loaded > 0 -> jet_cli_repl_out("Project: loaded {loaded} source file(s)\n")
     }
@@ -1515,7 +1523,7 @@ jet_cli_repl: fn(project: String?, preload: String?, options: JetCLIReplOptions,
 // flag the registry does not give `repl` is refused, so a misspelled `--deny`
 // never leaves the session with authority it was meant to drop.
 jet_cli_repl_plan: fn(jet_argv: [String], args: [String], color: Bool) -> JetCLIPlan Never! {
-    console := false
+    ^console: false
     loop argument in jet_argv {
         if argument == "--console" || argument == "--console-ttl" || argument.starts_with("--console-ttl=") || argument == "--sandbox" || argument.starts_with("--sandbox=") {
             console = true
@@ -1529,7 +1537,7 @@ jet_cli_repl_plan: fn(jet_argv: [String], args: [String], color: Bool) -> JetCLI
     if jet_cli_check_flags(jet_argv, "repl", color) == .Val(refusal) -> return refusal
     project: jet_cli_option_value(jet_argv, "--project")
     preload: if args.len() > 1 -> Val(args[1]) else -> String?{None}
-    deep_checks := DeepChecks{}
+    ^deep_checks: DeepChecks{}
     if deep_checks_read(jet_argv) == {
         .Refused(argument) -> return JetCLIPlan.Refused{report: deep_checks_malformed(argument), color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
         .Read(request) -> deep_checks = request.copy()
@@ -1559,13 +1567,13 @@ jet_cli_repl_eval_json: fn(shown: String, ty: Type?) -> JetCLIStatusValue {
 // `jet eval <expression>` (`run_eval_expression`, `eval_once`): one REPL turn
 // with no granted authority.
 jet_cli_eval_expression: fn(source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    session := jet_cli_repl_session(None, JetCLIReplOptions{}, color) ?? return jet_cli_repl_no_session(color)
+    ^session: jet_cli_repl_session(None, JetCLIReplOptions{}, color) ?? return jet_cli_repl_no_session(color)
     session.step = 1
     trimmed: source.trim()
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    failure := JetCLIReplTurnResult?{None}
-    value_line := "()"
-    json_value := JetCLIStatusValue.Null
+    ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^failure: JetCLIReplTurnResult?{None}
+    ^value_line: "()"
+    ^json_value: JetCLIStatusValue.Null
     if repl_classify(trimmed, 1) == {
         .Rejected(diagnostics) -> {
             failure = Val(JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: diagnostics, report: ""})

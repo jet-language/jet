@@ -253,7 +253,7 @@ enabled: fn(level: LogLevel, at: SourceLocation{#caller}) -[Log]> Bool Never! {
 }
 
 normalize_fields: fn(fields: [LogField]) -> [LogField] {
-    needs_normalization := false
+    ^needs_normalization: false
     loop i in 0..<fields.len() {
         if fields[i].redacted || (fields[i].kind != "string" && fields[i].kind != "int" && fields[i].kind != "float" && fields[i].kind != "bool" && fields[i].kind != "counter") {
             needs_normalization = true
@@ -261,7 +261,7 @@ normalize_fields: fn(fields: [LogField]) -> [LogField] {
         }
     }
     if !needs_normalization -> return fields.copy()
-    out := [LogField]{}
+    ^out: [LogField]{}
     loop field in fields {
         if field.redacted {
             out.push(LogField{key: field.key, value: "[redacted]", kind: "redacted", redacted: true})
@@ -304,7 +304,7 @@ priv internal: module {
         if level != .Fatal && !enabled_for(level_rank(level), path) {
             return
         }
-        tagged := [LogField]{LogField{key: "module", value: path, kind: "string", redacted: false}}
+        ^tagged: [LogField]{LogField{key: "module", value: path, kind: "string", redacted: false}}
         loop item in normalize_fields(fields) -> tagged.push(item)
         // The runtime keeps sink selection, sampling, timestamps and
         // telemetry fan-out.
@@ -371,7 +371,7 @@ priv internal: module {
     // Every source's pairs, the stock `info` first; a later source's pair
     // replaces an earlier pair for the same path.
     merged_filter: fn() -[Log]> [FilterPair] Never! {
-        pairs := [FilterPair]{FilterPair{path: "", rank: 2}}
+        ^pairs: [FilterPair]{FilterPair{path: "", rank: 2}}
         texts: [String]{rt.config_load(CONFIG_PACKAGE), rt.filter_load(), rt.config_load(CONFIG_ENV), rt.config_load(CONFIG_FLAG)}
         loop text in texts {
             loop pair in parse_filter(text) -> put_pair(pairs, pair.path, pair.rank)
@@ -382,8 +382,8 @@ priv internal: module {
     // The rank of the longest pair path that covers `path`: the path itself or
     // a dotted prefix of it, and "" covers every path.
     covering_rank: fn(pairs: [FilterPair], path: String) -> Int Never! {
-        best := -1
-        rank := 2
+        ^best: -1
+        ^rank: 2
         loop pair in pairs {
             if pair.path.len() > best && path_covers(pair.path, path) {
                 best = pair.path.len()
@@ -420,7 +420,7 @@ priv internal: module {
     // checked each source; a pair that is not `level` or `module=level` is
     // skipped.
     parse_filter: fn(text: String) -> [FilterPair] Never! {
-        pairs := [FilterPair]{}
+        ^pairs: [FilterPair]{}
         if text == "" -> return pairs
         loop raw in split_csv(text) {
             item: trim(raw)
@@ -439,7 +439,7 @@ priv internal: module {
     }
 
     render_filter: fn(pairs: [FilterPair]) -> String Never! {
-        text := ""
+        ^text: ""
         loop pair in pairs {
             item: if pair.path == "" -> rank_name(pair.rank) else -> "{pair.path}={rank_name(pair.rank)}"
             text = if text == "" -> item else -> "{text},{item}"
@@ -450,7 +450,7 @@ priv internal: module {
     // A dotted module path: identifier segments joined by `.`.
     module_path_valid: fn(path: String) -> Bool Never! {
         if path.len() == 0 -> return false
-        start := true
+        ^start: true
         loop b in path.bytes() {
             n: Int{b}
             if n == 46 {
@@ -473,7 +473,7 @@ priv internal: module {
         if path != "" && !module_path_valid(path) {
             return reject_setting("log.set_level: `{path}` is not a dotted module path; the level is unchanged")
         }
-        pairs := parse_filter(rt.filter_load())
+        ^pairs: parse_filter(rt.filter_load())
         put_pair(pairs, path, rank)
         rt.filter_store(render_filter(pairs))
         rt.level_store(0)
@@ -500,7 +500,7 @@ canon_mode: fn(mode: String) -> String {
 }
 
 escape: fn(text: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
         if n == 92 {
@@ -521,7 +521,7 @@ escape: fn(text: String) -> String {
                 10 -> out.push(U8{110})
                 12 -> out.push(U8{102})
                 13 -> out.push(U8{114})
-                else -> { _ := 0 }
+                else -> { ^_: 0 }
             }
             next
         }
@@ -547,8 +547,8 @@ hex_digit: fn(value: Int) -> U8 {
 
 trim: fn(text: String) -> String {
     raw: text.bytes()
-    a := 0
-    b := raw.len()
+    ^a: 0
+    ^b: raw.len()
     loop {
         if a >= b -> return ""
         if !is_space(raw[a]) -> break
@@ -559,8 +559,8 @@ trim: fn(text: String) -> String {
         if !is_space(raw[b - 1]) -> break
         b -= 1
     }
-    out := [U8]{}
-    i := a
+    ^out: [U8]{}
+    ^i: a
     loop {
         if i >= b -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
@@ -574,8 +574,8 @@ is_space: fn(b: U8) -> Bool {
 }
 
 split_csv: fn(text: String) -> [String] {
-    out := [String]{}
-    cur := [U8]{}
+    ^out: [String]{}
+    ^cur: [U8]{}
     loop b in text.bytes() {
         if {
             b == (U8{44}) -> {
@@ -644,9 +644,9 @@ handle: fn(target: Handler, event: LogRecord, at: SourceLocation{#caller}) -[Log
 }
 
 render_text: fn(event: LogRecord) -> String {
-    line := "{level_name(event.level)}: {event.message}"
+    ^line: "{level_name(event.level)}: {event.message}"
     loop field in event.fields {
-        value := field.value
+        ^value: field.value
         if field.redacted -> value = "[redacted]"
         line = "{line} {field.key}={value}"
     }
@@ -654,7 +654,7 @@ render_text: fn(event: LogRecord) -> String {
 }
 
 render_json: fn(event: LogRecord) -> String {
-    line := "{{\"level\":\"{level_name(event.level)}\",\"msg\":\"{escape(event.message)}\""
+    ^line: "{{\"level\":\"{level_name(event.level)}\",\"msg\":\"{escape(event.message)}\""
     loop field in event.fields {
         if field.redacted -> line = "{line},\"{escape(field.key)}\":\"[redacted]\"" else if field.kind == "int" || field.kind == "float" || field.kind == "bool" || field.kind == "counter" {
             line = "{line},\"{escape(field.key)}\":{field.value}"
@@ -689,8 +689,8 @@ matches_at: fn(hay: [U8], needle: [U8], offset: Int) -> Bool {
 }
 
 slice_ascii: fn(raw: [U8], start: Int, end: Int) -> String {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
@@ -699,7 +699,7 @@ slice_ascii: fn(raw: [U8], start: Int, end: Int) -> String {
 }
 
 ascii_lower: fn(text: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: b
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
@@ -708,8 +708,8 @@ ascii_lower: fn(text: String) -> String {
 }
 
 parse_int: fn(text: String) -> Int? {
-    n := 0
-    any := false
+    ^n: 0
+    ^any: false
     loop b in text.bytes() {
         d: b
         if d < 48 || d > 57 -> return None
@@ -722,13 +722,13 @@ parse_int: fn(text: String) -> Int? {
 }
 
 add: fn(event: LogRecord, field: LogField) -> LogRecord Never! {
-    fields := event.fields
+    ^fields: event.fields
     fields.push(field.copy())
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 
 group: fn(event: LogRecord, prefix: String) -> LogRecord Never! {
-    fields := [LogField]{}
+    ^fields: [LogField]{}
     loop field in event.fields {
         fields.push(LogField{key: "{prefix}.{field.key}", value: field.value, kind: field.kind, redacted: field.redacted})
     }
@@ -777,7 +777,7 @@ TraceSpan: struct {
 /// carries `spans` for the service named `service`: one resource, one
 /// instrumentation scope, the spans in the order given.
 otlp_traces_json: fn(service: String, spans: [TraceSpan]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop item in spans -> rows.push(otlp_span_json(item))
     "{{\"resourceSpans\":[{{\"resource\":{{\"attributes\":[{otlp_attribute_json(field("service.name", service))}]}},\"scopeSpans\":[{{\"scope\":{{\"name\":\"core.log\"}},\"spans\":[{rows.join(",")}]}}]}}]}}"
 }
@@ -786,7 +786,7 @@ otlp_traces_json: fn(service: String, spans: [TraceSpan]) -> String Never! {
 // as decimal strings and enums as their numbers.
 priv otlp_span_json: fn(item: TraceSpan) -> String Never! {
     parent: if item.parent_span_id == "" -> "" else -> ",\"parentSpanId\":\"{escape(item.parent_span_id)}\""
-    attributes := [String]{}
+    ^attributes: [String]{}
     loop attribute in item.attributes -> attributes.push(otlp_attribute_json(attribute))
     "{{\"traceId\":\"{escape(item.trace_id)}\",\"spanId\":\"{escape(item.span_id)}\"{parent},\"name\":\"{escape(item.name)}\",\"kind\":{otlp_kind(item.kind)},\"startTimeUnixNano\":\"{item.start_ns}\",\"endTimeUnixNano\":\"{item.end_ns}\",\"attributes\":[{attributes.join(",")}],\"status\":{otlp_status_json(item.status)}}}"
 }

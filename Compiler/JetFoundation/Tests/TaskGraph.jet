@@ -31,7 +31,7 @@ use {
 // Five nodes: 3 waits on 0 and 1, 4 on 3 (the edge added twice), node 1
 // weighs 9 and node 2 weighs 5.
 graph_small: fn() -> CompilerTaskGraph Never! {
-    graph := compiler_task_graph(5)
+    ^graph: compiler_task_graph(5)
     compiler_task_graph_wait(graph, 3, 0)
     compiler_task_graph_wait(graph, 3, 1)
     compiler_task_graph_wait(graph, 4, 3)
@@ -44,8 +44,8 @@ graph_small: fn() -> CompilerTaskGraph Never! {
 // The nodes one slot runs `graph`, which it takes, in, until the run is done
 // or stuck.
 graph_order: fn(graph: ^^CompilerTaskGraph) -> [Int] Never! {
-    schedule := compiler_task_schedule(graph, compiler_threads_single())
-    order := [Int]{}
+    ^schedule: compiler_task_schedule(graph, compiler_threads_single())
+    ^order: [Int]{}
     loop compiler_task_schedule_next(schedule) == .Val(start) {
         order.push(start.node)
         compiler_task_schedule_finish(schedule, start)
@@ -57,9 +57,9 @@ graph_order: fn(graph: ^^CompilerTaskGraph) -> [Int] Never! {
     counted: graph_small()
     assert_eq(counted.waits[4], 1)
     assert_eq(graph_order(graph_small()), [Int]{1, 2, 0, 3, 4})
-    cycle := graph_small()
+    ^cycle: graph_small()
     compiler_task_graph_wait(cycle, 0, 4)
-    schedule := compiler_task_schedule(cycle, compiler_threads_single())
+    ^schedule: compiler_task_schedule(cycle, compiler_threads_single())
     assert(!compiler_task_schedule_stuck(schedule))
     loop compiler_task_schedule_next(schedule) == .Val(start) {
         compiler_task_schedule_finish(schedule, start)
@@ -79,7 +79,7 @@ GraphTestCase: struct {
 // on the node 50 before it; weights cycle through 0..<11.
 graph_wide: fn() -> GraphTestCase Never! {
     count: 300
-    case := GraphTestCase{graph: compiler_task_graph(count), base: [Int]{}, waits_on: [[Int]]{}}
+    ^case: GraphTestCase{graph: compiler_task_graph(count), base: [Int]{}, waits_on: [[Int]]{}}
     loop node in 0..<count {
         case.base.push(node % 7)
         case.waits_on.push([Int]{})
@@ -99,7 +99,7 @@ graph_wide: fn() -> GraphTestCase Never! {
 // 40 nodes, each from node 1 waiting on half of itself.
 graph_halves: fn() -> GraphTestCase Never! {
     count: 40
-    case := GraphTestCase{graph: compiler_task_graph(count), base: [Int]{}, waits_on: [[Int]]{}}
+    ^case: GraphTestCase{graph: compiler_task_graph(count), base: [Int]{}, waits_on: [[Int]]{}}
     loop node in 0..<count {
         case.base.push(node)
         case.waits_on.push([Int]{})
@@ -122,7 +122,7 @@ GraphTestRan: struct {
 // nodes it waits on.
 graph_test_node: fn(start: CompilerTaskStart, base: Int, inputs: [Int], clock: CompilerTaskClock, done: Sender<GraphTestRan>) {
     started: compiler_task_clock_start(clock)
-    total := base
+    ^total: base
     loop value in inputs -> total += value
     done.send(GraphTestRan{start: start, value: total, span: compiler_task_clock_stop(started)}) ?? panic("the test run closed before node {start.node} finished")
 }
@@ -130,14 +130,14 @@ graph_test_node: fn(start: CompilerTaskStart, base: Int, inputs: [Int], clock: C
 // The values a run over `case`, which it takes, leaves, in node order: the
 // coordinator a phase keeps, as TaskGraph.jet lays it out.
 graph_test_run: fn(case: ^^GraphTestCase, threads: CompilerThreads, trace_sink: CompilerTaskTraceSink?) -> [Int] {
-    values := [Int?]{}
+    ^values: [Int?]{}
     loop _ in 0..<case.base.len() -> values.push(None)
-    schedule := compiler_task_schedule(case.graph, threads)
+    ^schedule: compiler_task_schedule(case.graph, threads)
     { sender: done, receiver: finished }: channel<GraphTestRan>()
     task.group nodes(limit: schedule.workers) {
         loop !compiler_task_schedule_done(schedule) {
             if compiler_task_schedule_next(schedule) == .Val(start) {
-                inputs := [Int]{}
+                ^inputs: [Int]{}
                 loop on in case.waits_on[start.node] {
                     inputs.push(values[on] ?? panic("node {start.node} started before node {on} finished"))
                 }
@@ -152,7 +152,7 @@ graph_test_run: fn(case: ^^GraphTestCase, threads: CompilerThreads, trace_sink: 
             compiler_task_trace(trace_sink, "test.node", "node {ran.start.node}", ran.start, ran.span)
         }
     }
-    out := [Int]{}
+    ^out: [Int]{}
     loop value in values -> out.push(value ?? panic("a node left no value"))
     out
 }
@@ -191,11 +191,11 @@ graph_test_sink: fn(sink: ^^GraphTestSink) -> CompilerTaskTraceSink Never! { sin
     count: 40
     path: "{graph_sys.temp_dir()}/jet-task-graph-{graph_process.current_pid()}.txt"
     graph_files.write(path, "") ?? panic("start the trace: {err}")
-    _ := graph_test_run(graph_halves(), graph_threads(4), Val(graph_test_sink(GraphTestSink{path: path})))
+    ^_: graph_test_run(graph_halves(), graph_threads(4), Val(graph_test_sink(GraphTestSink{path: path})))
     rows: (graph_files.read(path) ?? panic("read the trace: {err}")).lines()
     graph_files.remove(path).drop("the test's trace file")
     assert_eq(rows.len(), count)
-    seen := [Bool]{}
+    ^seen: [Bool]{}
     loop _ in 0..<count -> seen.push(false)
     loop row in rows {
         parts: row.split(" ").to_list()

@@ -28,9 +28,9 @@ FenceTestExpansion: struct {
 }
 
 fence_test_expand: fn(source: String) -> FenceTestExpansion {
-    lexed := lex(source.bytes())
+    ^lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    expanded := parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
+    ^expanded: parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
     assert(expanded.diagnostics.is_empty())
     FenceTestExpansion{tokens: expanded.tokens.move(), fenced_statements: expanded.fenced_statements.move(), diagnostics: expanded.diagnostics.move(), tables: lexed.tables.move()}
 }
@@ -44,7 +44,7 @@ fence_test_expand: fn(source: String) -> FenceTestExpansion {
     )
     assert(lexed.diagnostics.is_empty())
     assert_eq(lexed.tokens[0].kind, TOKEN_FENCE_OPEN)
-    found := false
+    ^found: false
     loop index in 1..<lexed.tokens.len() {
         if lexed.tokens[index].kind == TOKEN_FENCE_CLOSE {
             found = true
@@ -63,7 +63,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 }
 `,
     )
-    names := [String]{}
+    ^names: [String]{}
     loop token in expanded.tokens {
         name: token_decoded(expanded.tables, token)
         if token.kind == TOKEN_IDENT && name.starts_with("t") -> names.push(name)
@@ -87,7 +87,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
         {source: `run: fn() { f() :> 1 }`, code: "E0371"},
     ] {
         code: testcase.code
-        lexed := lex(testcase.source.bytes())
+        ^lexed: lex(testcase.source.bytes())
         assert(lexed.diagnostics.is_empty())
         _: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens.move(), lexed.tables).diagnostics, code)
     }
@@ -95,10 +95,10 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 
 // (`seen.insert` is true for a new name)
 #Test("binding_fence_accepts_distinct_names_and_rejects_only_a_repeat") {
-    distinct := lex(`run: fn() { <: first, second, third :> := 0 }`.bytes())
+    ^distinct: lex(`run: fn() { <: first, second, third :> := 0 }`.bytes())
     assert(distinct.diagnostics.is_empty())
     assert(parser_prepare_tokens(distinct.tokens.move(), distinct.tables).diagnostics.is_empty())
-    repeated := lex(`run: fn() { <: first, second, first :> := 0 }`.bytes())
+    ^repeated: lex(`run: fn() { <: first, second, first :> := 0 }`.bytes())
     assert(repeated.diagnostics.is_empty())
     _: parser_test_diagnostic(parser_prepare_tokens(repeated.tokens.move(), repeated.tables).diagnostics, "E0369")
 }
@@ -171,8 +171,8 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     )
     assert_eq(expanded.fenced_statements.len(), 1)
     assert_eq(expanded.fenced_statements[0].copies, 3)
-    prints := 0
-    totals := 0
+    ^prints: 0
+    ^totals: 0
     loop token in expanded.tokens {
         if token.kind == TOKEN_IDENT && token_decoded(expanded.tables, token) == "print" {
             prints += 1
@@ -192,7 +192,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     )
     assert_eq(expanded.fenced_statements.len(), 1)
     assert_eq(expanded.fenced_statements[0].copies, 4)
-    values := [Int]{}
+    ^values: [Int]{}
     loop token in expanded.tokens {
         if token.kind == TOKEN_INT {
             values.push(token_integer(expanded.tables, token) ?? panic("integer payload"))
@@ -222,7 +222,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
         `run: fn() { <: task1..task1000000000 :>: work() }`,
         "run: fn() {{ <: task{padding}..task4095 :>: work() }}\n",
     ] {
-        lexed := lex(source.bytes())
+        ^lexed: lex(source.bytes())
         assert(lexed.diagnostics.is_empty())
         _: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens.move(), lexed.tables).diagnostics, "E0371")
     }
@@ -231,7 +231,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 #Test("hostile_explicit_fence_lists_are_rejected_by_the_shared_budget") {
     names: loop index in 0..<(PARSER_FENCE_MAX_BUDGET_ENTRIES + 1) -> "name{index}"
     source: "run: fn() {{ <: {names.join(", ")} :>: work() }}\n"
-    lexed := lex(source.bytes())
+    ^lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
     _: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens.move(), lexed.tables).diagnostics, "E0371")
 }
@@ -239,7 +239,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 #Test("hostile_expanded_statement_bytes_are_rejected_by_the_shared_budget") {
     body: "x".repeat(PARSER_FENCE_MAX_EXPANSION_BYTES.div_euclid(PARSER_FENCE_MAX_EXPANSION) + 1)
     source: "run: fn() {{ print(<:0..4095:>, \"{body}\") }}\n"
-    lexed := lex(source.bytes())
+    ^lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
     _: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens.move(), lexed.tables).diagnostics, "E0371")
 }

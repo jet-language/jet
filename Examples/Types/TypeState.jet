@@ -107,19 +107,19 @@ Unseeded: struct {
 }
 
 run_terminal_outcomes: fn() {
-    success := Workflow.begin()
+    ^success: Workflow.begin()
     success = success.succeed()
     print(success.success_report())
 
-    failure := Workflow.begin()
+    ^failure: Workflow.begin()
     failure = failure.fail()
     print(failure.failure_report())
 
-    canceled := Workflow.begin()
+    ^canceled: Workflow.begin()
     canceled = canceled.cancel()
     print(canceled.cancel_report())
 
-    session := Session.open()
+    ^session: Session.open()
     session = session.heartbeat()
     session = session.close()
     session = session.reopen()
@@ -129,7 +129,7 @@ run_terminal_outcomes: fn() {
 run: fn() {
     // The correct lifecycle: book -> pay -> check_in -> use. `:=` so `r` can be
     // rebound as it advances through its states.
-    r := Reservation.book("Ada")  // r: Pending
+    ^r: Reservation.book("Ada")  // r: Pending
     r = r.pay()  // r: Confirmed
     r = r.check_in()  // r: CheckedIn
     print(r.room_key())  // valid: r is CheckedIn

@@ -17,7 +17,7 @@ impl NixEvaluator {
             .Integer(number) -> return Ok(nixeval_json_integer_text(number))
             .Str(text) | .Path(text) | .Package(text) | .Contextual(text, _) -> return Ok(nixeval_json_quote(text))
             .List(items) -> {
-                parts := [String]{}
+                ^parts: [String]{}
                 loop item in items {
                     forced: self.force(item)
                     parts.push(self.encode_json(forced, depth + 1))
@@ -26,7 +26,7 @@ impl NixEvaluator {
                 return Ok("[{joined}]")
             }
             .AttrSet(fields) -> {
-                parts := [String]{}
+                ^parts: [String]{}
                 loop name in nixeval_sorted(fields.keys().to_list()) {
                     forced: self.force(fields[name])
                     encoded: self.encode_json(forced, depth + 1)
@@ -50,7 +50,7 @@ impl NixEvaluator {
             .Num(number) -> NixEvalValue.Integer(nixeval_json_integer(number))
             .Str(text) -> NixEvalValue.Str(text)
             .Array(items) -> {
-                values := [Int]{}
+                ^values: [Int]{}
                 loop item in items {
                     converted: self.json_to_value(document, item, depth + 1)
                     values.push(self.value_thunk(converted))
@@ -58,7 +58,7 @@ impl NixEvaluator {
                 NixEvalValue.List(values)
             }
             .Object(members) -> {
-                fields := [String:Int]{}
+                ^fields: [String:Int]{}
                 loop entry in members {
                     converted: self.json_to_value(document, entry.value, depth + 1)
                     fields[entry.key] = self.value_thunk(converted)
@@ -87,7 +87,7 @@ nixeval_json_integer_text: fn(value: Int) -> String Never! {
 }
 
 nixeval_json_quote: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     nixeval_push_byte(out, 34)
     hex: "0123456789abcdef".bytes()
     loop byte in text.bytes() {

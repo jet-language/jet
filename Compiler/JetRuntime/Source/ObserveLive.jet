@@ -30,11 +30,11 @@
 // feature.
 OBSERVE_RAW_MAGIC: I64{3622396348102624586}
 
-observe_values_code := I64{0}
+^observe_values_code: I64{0}
 
-observe_events_code := I64{0}
+^observe_events_code: I64{0}
 
-observe_games_code := I64{0}
+^observe_games_code: I64{0}
 
 observe_text_clone: fn(value: I64) -> I64 {
     if value == (I64{0}) -> return I64{0}
@@ -44,7 +44,7 @@ observe_text_clone: fn(value: I64) -> I64 {
 observe_text_cmp: fn(a: I64, b: I64) -> I64 {
     al: rt_text_len(a)
     bl: rt_text_len(b)
-    at := I64{0}
+    ^at: I64{0}
     loop at < al && at < bl {
         av: trap_byte(wrapping(rt_text_data(a) + at))
         bv: trap_byte(wrapping(rt_text_data(b) + at))
@@ -56,7 +56,7 @@ observe_text_cmp: fn(a: I64, b: I64) -> I64 {
 
 observe_text_controls: fn(value: I64) -> Bool {
     if value == (I64{0}) -> return false
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(value) {
         cp: rt_text_decode(wrapping(rt_text_data(value) + at))
         if cp < (I64{32}) || (cp >= I64{127} && cp <= I64{159}) -> return true
@@ -66,7 +66,7 @@ observe_text_controls: fn(value: I64) -> Bool {
 }
 
 observe_value_drop: fn(node: I64) {
-    at := I64{8}
+    ^at: I64{8}
     loop at <= (I64{40}) {
         text: sync_load(wrapping(node + at))
         if text != (I64{0}) -> jet_rt_string_drop(text)
@@ -85,9 +85,9 @@ observe_value_drop: fn(node: I64) {
         }
     }
     sync_mutex_lock(observe_root)
-    link := observe_root + I64{112}
+    ^link: observe_root + I64{112}
     id: sync_load(source)
-    previous := I64{0}
+    ^previous: I64{0}
     loop sync_load(link) != (I64{0}) {
         node: sync_load(link)
         order: observe_text_cmp(sync_load(wrapping(node + I64{8})), id)
@@ -103,13 +103,13 @@ observe_value_drop: fn(node: I64) {
     }
     node: jet_rt_alloc(I64{48}, I64{8})
     sync_store(node, if previous == (I64{0}) -> sync_load(link) else -> sync_load(previous))
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{40}) {
         sync_store(wrapping(wrapping(node + at) + I64{8}), observe_text_clone(sync_load(wrapping(source + at))))
         at += I64{8}
     }
     sync_store(link, node)
-    if previous == (I64{0}) -> _ := sync_add(wrapping(observe_root + I64{120}), I64{1})
+    if previous == (I64{0}) -> ^_: sync_add(wrapping(observe_root + I64{120}), I64{1})
     sync_mutex_unlock(observe_root)
     if previous != (I64{0}) -> observe_value_drop(previous)
 }
@@ -119,7 +119,7 @@ observe_event_text_field: fn(offset: I64) -> Bool {
 }
 
 observe_event_drop: fn(node: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{120}) {
         if observe_event_text_field(at) {
             jet_rt_string_drop(sync_load(wrapping(wrapping(node + at) + I64{8})))
@@ -133,7 +133,7 @@ observe_event_drop: fn(node: I64) {
 // same lock as append.
 #Export(c) jet_observe_event: fn(source: I64) {
     node: jet_rt_alloc(I64{128}, I64{8})
-    at := I64{8}
+    ^at: I64{8}
     loop at < (I64{120}) {
         word: sync_load(wrapping(source + at))
         sync_store(wrapping(wrapping(node + at) + I64{8}), if observe_event_text_field(at) -> observe_text_clone(word) else -> word)
@@ -191,13 +191,13 @@ observe_event_append: fn(node: I64) {
         sync_store(tail, node)
     }
     sync_store(wrapping(observe_root + I64{96}), node)
-    retired := I64{0}
+    ^retired: I64{0}
     if {
         sync_load(wrapping(observe_root + I64{104})) == (I64{256}) -> {
             retired = sync_load(wrapping(observe_root + I64{88}))
             sync_store(wrapping(observe_root + I64{88}), sync_load(retired))
         }
-        else -> _ := sync_add(wrapping(observe_root + I64{104}), I64{1})
+        else -> ^_: sync_add(wrapping(observe_root + I64{104}), I64{1})
     }
     sync_mutex_unlock(observe_root)
     if retired != (I64{0}) -> observe_event_drop(retired)
@@ -249,13 +249,13 @@ observe_game_record: fn(kind: I64, index: I64, start: I64, ns: I64, code: I64, o
         sync_store(tail, node)
     }
     sync_store(wrapping(observe_root + I64{152}), node)
-    retired := I64{0}
+    ^retired: I64{0}
     if {
         sync_load(wrapping(observe_root + I64{160})) == OBSERVE_GAME_RECORDS -> {
             retired = sync_load(wrapping(observe_root + I64{144}))
             sync_store(wrapping(observe_root + I64{144}), sync_load(retired))
         }
-        else -> _ := sync_add(wrapping(observe_root + I64{160}), I64{1})
+        else -> ^_: sync_add(wrapping(observe_root + I64{160}), I64{1})
     }
     sync_mutex_unlock(observe_root)
     if retired != (I64{0}) -> observe_game_drop(retired)
@@ -270,8 +270,8 @@ observe_raw_text: fn(builder: I64, value: I64) {
     }
     data: rt_text_data(value)
     length: rt_text_len(value)
-    at := I64{0}
-    scalars := I64{0}
+    ^at: I64{0}
+    ^scalars: I64{0}
     loop at < length && scalars < (I64{160}) {
         at += rt_text_width(wrapping(data + at))
         scalars += I64{1}
@@ -284,9 +284,9 @@ observe_raw_text: fn(builder: I64, value: I64) {
 observe_raw_tasks: fn(builder: I64) {
     observe_raw_word(builder, I64{1})
     observe_raw_word(builder, sync_load(wrapping(observe_root + I64{32})))
-    node := sync_load(wrapping(observe_root + I64{24}))
+    ^node: sync_load(wrapping(observe_root + I64{24}))
     loop node != (I64{0}) {
-        at := I64{8}
+        ^at: I64{8}
         loop at <= (I64{72}) {
             if at != (I64{32}) && at != (I64{48}) {
                 observe_raw_word(builder, sync_load(wrapping(node + at)))
@@ -319,8 +319,8 @@ rt_observe_raw_games_address: fn() -> I64 {
 }
 
 #Export(c) jet_rt_observe_raw_channels: fn(builder: I64) -> I64 {
-    count := I64{0}
-    node := sync_load(wrapping(observe_root + I64{40}))
+    ^count: I64{0}
+    ^node: sync_load(wrapping(observe_root + I64{40}))
     loop node != (I64{0}) {
         count += I64{1}
         node = sync_load(node)
@@ -329,7 +329,7 @@ rt_observe_raw_games_address: fn() -> I64 {
     observe_raw_word(builder, count)
     node = sync_load(wrapping(observe_root + I64{40}))
     loop node != (I64{0}) {
-        at := I64{8}
+        ^at: I64{8}
         loop at <= (I64{56}) {
             observe_raw_word(builder, sync_load(wrapping(node + at)))
             at += I64{8}
@@ -342,9 +342,9 @@ rt_observe_raw_games_address: fn() -> I64 {
 #Export(c) jet_rt_observe_raw_values: fn(builder: I64) -> I64 {
     observe_raw_word(builder, I64{3})
     observe_raw_word(builder, sync_load(wrapping(observe_root + I64{120})))
-    node := sync_load(wrapping(observe_root + I64{112}))
+    ^node: sync_load(wrapping(observe_root + I64{112}))
     loop node != (I64{0}) {
-        at := I64{8}
+        ^at: I64{8}
         loop at <= (I64{40}) {
             observe_raw_text(builder, sync_load(wrapping(node + at)))
             at += I64{8}
@@ -357,9 +357,9 @@ rt_observe_raw_games_address: fn() -> I64 {
 #Export(c) jet_rt_observe_raw_events: fn(builder: I64) -> I64 {
     observe_raw_word(builder, I64{4})
     observe_raw_word(builder, sync_load(wrapping(observe_root + I64{104})))
-    node := sync_load(wrapping(observe_root + I64{88}))
+    ^node: sync_load(wrapping(observe_root + I64{88}))
     loop node != (I64{0}) {
-        at := I64{8}
+        ^at: I64{8}
         loop at <= (I64{120}) {
             if at != (I64{8}) && observe_event_text_field(at - I64{8}) {
                 observe_raw_text(builder, sync_load(wrapping(node + at)))
@@ -374,9 +374,9 @@ rt_observe_raw_games_address: fn() -> I64 {
 #Export(c) jet_rt_observe_raw_games: fn(builder: I64) -> I64 {
     observe_raw_word(builder, I64{5})
     observe_raw_word(builder, sync_load(wrapping(observe_root + I64{160})))
-    node := sync_load(wrapping(observe_root + I64{144}))
+    ^node: sync_load(wrapping(observe_root + I64{144}))
     loop node != (I64{0}) {
-        at := I64{8}
+        ^at: I64{8}
         loop at <= (I64{56}) {
             observe_raw_word(builder, sync_load(wrapping(node + at)))
             at += I64{8}
@@ -411,7 +411,7 @@ observe_snapshot: fn(writer: I64, exit: I64) -> I64 {
     observe_raw_word(text, OBSERVE_RAW_MAGIC)
     observe_raw_word(text, sync_load(wrapping(writer + I64{16})))
     observe_raw_word(text, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
-    captured := I64{0}
+    ^captured: I64{0}
     if observe_syscall(I64{228}, I64{0}, scratch, I64{0}, I64{0}) == (I64{0}) {
         captured = sync_load(scratch) * I64{1000} + sync_load(wrapping(scratch + I64{8})) /% I64{1000000}
     }
@@ -431,16 +431,16 @@ observe_snapshot: fn(writer: I64, exit: I64) -> I64 {
     sync_mutex_lock(observe_root)
     observe_raw_word(text, sync_load(wrapping(observe_root + I64{48})))
     observe_raw_word(text, sync_load(wrapping(observe_root + I64{56})))
-    at := I64{56}
+    ^at: I64{56}
     loop at <= (I64{88}) {
         observe_raw_text(text, sync_load(wrapping(writer + at)))
         at += I64{8}
     }
     observe_raw_tasks(text)
-    if observe_channels_code != (I64{0}) -> _ := coll_call1(observe_channels_code, text)
-    if observe_values_code != (I64{0}) -> _ := coll_call1(observe_values_code, text)
-    if observe_events_code != (I64{0}) -> _ := coll_call1(observe_events_code, text)
-    if observe_games_code != (I64{0}) -> _ := coll_call1(observe_games_code, text)
+    if observe_channels_code != (I64{0}) -> ^_: coll_call1(observe_channels_code, text)
+    if observe_values_code != (I64{0}) -> ^_: coll_call1(observe_values_code, text)
+    if observe_events_code != (I64{0}) -> ^_: coll_call1(observe_events_code, text)
+    if observe_games_code != (I64{0}) -> ^_: coll_call1(observe_games_code, text)
     sync_mutex_unlock(observe_root)
     observe_raw_word(text, I64{0})
     text
@@ -480,7 +480,7 @@ observe_publish: fn(writer: I64, exit: I64) {
     if rt_text_len(snapshot) <= (I64{1048576}) {
         fd: observe_syscall(I64{257}, I64{-100}, name, I64{524481}, I64{384})
         if fd >= (I64{0}) {
-            at := I64{0}
+            ^at: I64{0}
             loop at < rt_text_len(snapshot) {
                 written: observe_syscall(I64{1}, fd, rt_text_data(snapshot) + at, rt_text_len(snapshot) - at, I64{0})
                 if written == (I64{-4}) -> next
@@ -489,13 +489,13 @@ observe_publish: fn(writer: I64, exit: I64) {
             }
             if at == rt_text_len(snapshot) && observe_syscall(I64{74}, fd, I64{0}, I64{0}, I64{0}) == (I64{0}) {
                 target: observe_cstring(sync_load(wrapping(writer + I64{104})))
-                _ := observe_syscall(I64{82}, name, target, I64{0}, I64{0})
+                ^_: observe_syscall(I64{82}, name, target, I64{0}, I64{0})
                 jet_rt_free(target, rt_text_len(sync_load(wrapping(writer + I64{104}))) + I64{1}, I64{1})
             }
-            _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+            ^_: observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
         }
     }
-    _ := observe_syscall(I64{87}, name, I64{0}, I64{0}, I64{0})
+    ^_: observe_syscall(I64{87}, name, I64{0}, I64{0}, I64{0})
     jet_rt_free(name, rt_text_len(stage) + I64{1}, I64{1})
     jet_rt_string_drop(stage)
     jet_rt_string_drop(snapshot)
@@ -512,7 +512,7 @@ observe_publish_exit: fn() {
 // fields, not an inferred identity. Directory is the host's actual temp_dir.
 // The caller performs JET_OBSERVE=1/environment identity agreement before entry.
 observe_live_start: fn(identity: I64, directory: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{40}) {
         value: sync_load(wrapping(identity + at))
         if value == (I64{0}) || rt_text_len(value) == (I64{0}) || observe_text_controls(value) {
@@ -524,11 +524,11 @@ observe_live_start: fn(identity: I64, directory: I64) -> I64 {
     // ticks so far (times(2) counts the clock that file shows; AT_CLKTCK
     // below) and the boot clock, which bounds the process start time.
     facts: jet_rt_alloc(I64{32}, I64{8})
-    _ := observe_syscall(I64{100}, facts, I64{0}, I64{0}, I64{0})
+    ^_: observe_syscall(I64{100}, facts, I64{0}, I64{0}, I64{0})
     cpu: wrapping(sync_load(facts) + sync_load(wrapping(facts + I64{8})))
     boot: if observe_syscall(I64{228}, I64{7}, facts, I64{0}, I64{0}) == (I64{0}) -> wrapping(sync_load(facts) * I64{1000000000} + sync_load(wrapping(facts + I64{8}))) else -> I64{0}
     sync_mutex_lock(observe_root)
-    writer := sync_load(wrapping(observe_root + I64{72}))
+    ^writer: sync_load(wrapping(observe_root + I64{72}))
     fresh: writer == I64{0}
     if fresh {
         writer = jet_rt_alloc(I64{120}, I64{8})
@@ -546,7 +546,7 @@ observe_live_start: fn(identity: I64, directory: I64) -> I64 {
         observe_decimal_unsigned(path, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
         observe_msg_path_tail(path)
         sync_store(wrapping(writer + I64{104}), path)
-        root := observe_task_find(I64{1})
+        ^root: observe_task_find(I64{1})
         if root == (I64{0}) {
             root = jet_rt_alloc(OBSERVE_TASK_BYTES, I64{8})
             thread_zero(root, OBSERVE_TASK_BYTES)
@@ -567,7 +567,7 @@ observe_live_start: fn(identity: I64, directory: I64) -> I64 {
     // clock yet: each publication's elapsed time is then the clock that
     // zones, waits and log spans are timed on. A resident host's next run
     // starts now.
-    if fresh -> _ := time_host_monotonic_i64()
+    if fresh -> ^_: time_host_monotonic_i64()
     sync_store(wrapping(writer + I64{24}), if fresh -> time_host_epoch_ns(time_host_root) else -> sync_now_ns())
     sync_store(wrapping(writer + I64{32}), cpu)
     sync_store(wrapping(writer + I64{40}), host_getauxval(I64{17}))
@@ -634,8 +634,8 @@ observe_env_key: fn(index: I64) -> I64 {
     perf_samples_start()
     inputs: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(inputs, I64{56})
-    at := I64{0}
-    valid := true
+    ^at: I64{0}
+    ^valid: true
     loop at < (I64{5}) {
         name: observe_env_key(at)
         value: jet_rt_logical_env_get(name)
@@ -656,7 +656,7 @@ observe_env_key: fn(index: I64) -> I64 {
         observe_msg_env_tmpdir(name)
         present: jet_rt_logical_env_get_os(name, wrapping(inputs + I64{40}), wrapping(inputs + I64{48}))
         jet_rt_string_drop(name)
-        directory := I64{0}
+        ^directory: I64{0}
         if {
             present == (I64{0}) -> {
                 directory = jet_rt_string_builder_new()
@@ -680,7 +680,7 @@ observe_env_key: fn(index: I64) -> I64 {
         if writer != (I64{0}) && sync_cas(wrapping(writer + I64{112}), I64{0}, I64{1}) == (I64{0}) {
             handle: thread_spawn(rt_observe_writer_address(), writer)
             if handle < (I64{0}) -> scheduler_start_failed()
-            _ := thread_detach(handle)
+            ^_: thread_detach(handle)
         }
     }
     at = I64{0}
@@ -699,7 +699,7 @@ observe_env_key: fn(index: I64) -> I64 {
 // event (the snapshot's section code words), or one built by
 // `jet run --observe` (jet_rt_observe_link). Any other program links no
 // writer, no thread spawn and no environment read for it.
-observe_start_code := I64{0}
+^observe_start_code: I64{0}
 
 // runtime-init: 4 when observe_task_linked,observe_channels_code,observe_values_code,observe_events_code,observe_games_code
 #Export(c) jet_rt_observe_start_init: fn() {

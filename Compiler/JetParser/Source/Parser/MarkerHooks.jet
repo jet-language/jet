@@ -32,7 +32,7 @@ ParserMarkerBrace: struct {
 // a struct body opens after `struct Name` and a code module body after
 // `module name`, with the moved `:` as trivia between.
 parser_marker_scopes: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerScope] Never! {
-    scopes := parser_marker_scopes_chunk(tokens, tables)
+    ^scopes: parser_marker_scopes_chunk(tokens, tables)
     if scopes.len() == 0 -> return scopes
     // A file-scope declaration (and one whose module never closed) resolves
     // to the end of the file.
@@ -48,11 +48,11 @@ parser_marker_scopes: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerS
 // `end = -1` so the join fills in the whole file's end.
 parser_marker_scopes_chunk: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerScope] Never! {
     if name_find(tables.names, "Marker") == None -> return [ParserMarkerScope]{}
-    scopes := [ParserMarkerScope]{}
-    braces := [ParserMarkerBrace]{}
+    ^scopes: [ParserMarkerScope]{}
+    ^braces: [ParserMarkerBrace]{}
     // The two code tokens before the current one (-1 = none yet).
-    before := -1
-    last := -1
+    ^before: -1
+    ^last: -1
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if parser_is_trivia(kind) -> next
@@ -73,7 +73,7 @@ parser_marker_scopes_chunk: fn(tokens: [Token], tables: TokenTables) -> [ParserM
                 }
             }
             opens_marker -> {
-                start := 0
+                ^start: 0
                 loop at in 0..<(braces.len() - 1) {
                     if braces[at].module -> start = braces[at].start
                 }

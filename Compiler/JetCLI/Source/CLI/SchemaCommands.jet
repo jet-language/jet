@@ -9,7 +9,7 @@ jet_cli_schema_status_text: fn(snapshots: [SchemaSnapshot], pending: [String]) -
     if snapshots.len() == 0 {
         return "No published schemas yet.\nNote: a `#Codable(published)` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.\n"
     }
-    out := "Published schemas in this project:\n\n"
+    ^out: "Published schemas in this project:\n\n"
     loop snapshot in snapshots {
         out = "{out}  {snapshot.type_name} — published {snapshot.published_version}"
         if snapshot.squashed_before == .Val(before) -> out = "{out} (squashed before {before})"
@@ -28,7 +28,7 @@ jet_cli_schema_status_text: fn(snapshots: [SchemaSnapshot], pending: [String]) -
 // that advisory failure, but still lists valid canonical snapshots.
 jet_cli_schema_status_host: fn(root: String, request: JetDriverCompileRequest?) -> JetDriverVerbOutput {
     snapshots: load_all_snapshots(root)
-    pending := [String]{}
+    ^pending: [String]{}
     if snapshots.len() > 0 && request == .Val(prepared) {
         loaded: jet_driver_source_query(prepared)
         if loaded.complete {
@@ -53,15 +53,15 @@ jet_cli_schema_squash_host: fn(root: String, request: JetDriverCompileRequest?, 
     // This public loader fact is supplied by SolSema2's source-query seam;
     // do not infer a version from syntax, display paths, or identity strings.
     version: loaded.entry_package_version ?? "0.0.0"
-    count := 0
-    out := ""
+    ^count: 0
+    ^out: ""
     loop source_module in loaded.modules {
         loop item in source_module.program.items {
             if item == .Struct(definition) {
                 // Squash uses the legacy single-marker flag, not the
                 // full-build grouped-marker registry's broader predicate.
                 if !definition.is_published_schema -> next
-                snapshot := snapshot_from_struct(definition, version)
+                ^snapshot: snapshot_from_struct(definition, version)
                 snapshot.squashed_before = Val(before)
                 if save_snapshot(root, snapshot) == {
                     .Ok(_) -> {

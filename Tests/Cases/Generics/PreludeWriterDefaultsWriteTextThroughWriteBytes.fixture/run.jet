@@ -28,18 +28,18 @@ greet: fn<W: Writer>(out: ^W, name: String) IOError! {
 }
 
 run: fn() {
-    sink := Sink{bytes: [U8]{}, flushes: 0}
+    ^sink: Sink{bytes: [U8]{}, flushes: 0}
     sink.write("a") ?? panic("sink write")
     sink.write_line("b") ?? panic("sink write_line")
     greet(sink, "sink") ?? panic("greet sink")
     print("sink {sink.flushes}: {(String.from_bytes(sink.bytes) ?? "?").replace("\n", "/")}")
 
-    file := files.create("out.txt") ?? panic("create out.txt")
+    ^file: files.create("out.txt") ?? panic("create out.txt")
     file.write("one ") ?? panic("file write")
     file.write_line("two") ?? panic("file write_line")
     greet(file, "file") ?? panic("greet file")
     print("file: {(files.read("out.txt") ?? "<unread>").replace("\n", "/")}")
 
-    screen := term.stdout()
+    ^screen: term.stdout()
     greet(screen, "screen") ?? panic("greet screen")
 }

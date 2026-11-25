@@ -15,8 +15,8 @@ use {
 run: fn() {
     request: client.request("GET", "http://127.0.0.1/")
     print("access:{server.access_log(request, 200)}")
-    root := testing.temp_dir("http-static")
-    path := Path.from(root).join("index.txt").to_string()
+    ^root: testing.temp_dir("http-static")
+    ^path: Path.from(root).join("index.txt").to_string()
     files.write(path, "hello") ?? return
     if server.static_file(path, "text/plain") == {
         .Ok(_) -> { print("static:ok") }

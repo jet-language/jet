@@ -84,9 +84,9 @@ store_closure_graph_structure_read_only: fn(verification: StoreVerification, roo
 store_lifecycle_inputs_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -> {known: [String], closure_head: String} StoreError! {
     _: store_recover_closure_journal_unlocked(verification, roots)
     graph: store_load_graph_mode(verification, roots, true)
-    paths := store_journal_transaction_paths(store_journal_dir(roots))
+    ^paths: store_journal_transaction_paths(store_journal_dir(roots))
     paths.sort()
-    canonical := "jet-closure-head-v1".bytes()
+    ^canonical: "jet-closure-head-v1".bytes()
     canonical.push(U8{0})
     loop path in paths {
         name: files.basename(path)
@@ -94,7 +94,7 @@ store_lifecycle_inputs_unlocked: fn(verification: StoreVerification, roots: Hang
         store_push_frame(canonical, name.bytes())
         store_push_frame(canonical, bytes)
     }
-    known := graph.objects.keys().to_list()
+    ^known: graph.objects.keys().to_list()
     known.sort()
     Ok({known: known, closure_head: "sha256-{store_sha256_hex(canonical)}"})
 }
@@ -110,7 +110,7 @@ store_load_graph_structure_mode: fn(verification: StoreVerification, roots: Hang
 store_load_graph_mode_with_proofs: fn(verification: StoreVerification, roots: HangarRoots, allow_legacy: Bool, validate_store_proofs: Bool) -> ClosureGraph StoreError! {
     journal: store_journal_dir(roots)
     entries: files.list_dir(journal) ?? return Ok(ClosureGraph.empty())
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries {
         if !entry.name.ends_with(STORE_JOURNAL_TXN_SUFFIX) -> next
         if paths.len() >= STORE_MAX_CLOSURE_TRANSACTIONS {
@@ -119,7 +119,7 @@ store_load_graph_mode_with_proofs: fn(verification: StoreVerification, roots: Ha
         paths.push(entry.path)
     }
     paths.sort()
-    graph := ClosureGraph.empty()
+    ^graph: ClosureGraph.empty()
     loop path in paths {
         entry: store_parse_journal_entry(files.read(path)) ?? return Err(StoreError.InvalidData("closure journal `{path}`: {err.message()}"))
         store_apply_entry(graph, entry) ?? return Err(StoreError.InvalidData(err.message()))
@@ -143,18 +143,18 @@ store_apply_entry: fn(graph: ^ClosureGraph, entry: ClosureJournalEntry) StoreErr
         return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
     }
     if entry.kind != ClosureJournalKind.Snapshot {
-        new_objects := 0
+        ^new_objects: 0
         loop object in entry.objects {
             if !graph.objects.has_key(object.digest) -> new_objects += 1
         }
         if graph.objects.len() + new_objects > STORE_MAX_CLOSURE_OBJECTS {
             return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
         }
-        deleted_count := 0
+        ^deleted_count: 0
         loop id in entry.deleted_records {
             if graph.records.has_key(id) -> deleted_count += 1
         }
-        record_count := graph.records.len() - deleted_count
+        ^record_count: graph.records.len() - deleted_count
         if record_count < 0 -> record_count = 0
         loop record in entry.records {
             if !graph.records.has_key(record.id) || entry.deleted_records.contains(record.id) {
@@ -169,7 +169,7 @@ store_apply_entry: fn(graph: ^ClosureGraph, entry: ClosureJournalEntry) StoreErr
         }
     }
     if entry.kind == ClosureJournalKind.Snapshot -> graph = ClosureGraph.empty()
-    deleted := graph.deleted_records.copy()
+    ^deleted: graph.deleted_records.copy()
     loop id in entry.deleted_records {
         graph.records.remove(id).drop("a tombstone may name an already removed record")
         deleted.push(id.copy())
@@ -185,11 +185,11 @@ store_apply_entry: fn(graph: ^ClosureGraph, entry: ClosureJournalEntry) StoreErr
             .None -> graph.objects[object.digest] = object
         }
     }
-    actions := [String:CanonicalActionRecord]{}
+    ^actions: [String:CanonicalActionRecord]{}
     loop record in graph.sorted_records() -> store_merge_action_record(actions, record)
     loop record in entry.records {
         store_merge_action_record(actions, record)
-        remaining := [String]{}
+        ^remaining: [String]{}
         loop id in graph.deleted_records {
             if id != record.id -> remaining.push(id.copy())
         }
@@ -270,7 +270,7 @@ store_validate_graph_structure_mode: fn(roots: HangarRoots, graph: ClosureGraph,
             return Err(StoreError.Other("invalid deleted closure record `{id}`"))
         }
     }
-    actions := [String:CanonicalActionRecord]{}
+    ^actions: [String:CanonicalActionRecord]{}
     loop record in graph.sorted_records() {
         if record.id == "" || record.action_key == "" {
             return Err(StoreError.Other("invalid closure record `{record.id}`"))
@@ -371,7 +371,7 @@ store_merge_action_record: fn(actions: ^[String:CanonicalActionRecord], record: 
     projection: store_canonical_action_projection(record)
     if actions.get(record.action_key) == {
         .Val(existing) -> {
-            action := existing
+            ^action: existing
             store_merge_action_projection(action, projection, record.action_key)
             actions[record.action_key] = action
         }
@@ -384,7 +384,7 @@ store_canonical_action_projection: fn(record: ClosureRecord) -> CanonicalActionR
         return Ok(CanonicalActionRecord{outputs: record.outputs, references: record.references})
     }
     producer: ProducerRecord.decode(record.producer_record) ?? return Err(StoreError.Other("closure record `{record.id}` has invalid producer record: {err.message()}"))
-    outputs := [String:String]{}
+    ^outputs: [String:String]{}
     if {
         producer.provider == "nix" -> outputs = store_nix_action_outputs(producer, record)
         else -> outputs = record.outputs
@@ -397,7 +397,7 @@ store_canonical_action_projection: fn(record: ClosureRecord) -> CanonicalActionR
 
 // The canonical outputs of a Nix record: only outputs its producer names.
 store_nix_action_outputs: fn(producer: ProducerRecord, record: ClosureRecord) -> [String:String] Never! {
-    outputs := [String:String]{}
+    ^outputs: [String:String]{}
     loop key in store_sorted_keys(producer.facts) {
         if !key.starts_with("nix.output.") -> next
         name: key.removeprefix("nix.output.")
@@ -497,9 +497,9 @@ store_append_entry: fn(roots: HangarRoots, entry: ClosureJournalEntry) -> String
 
 store_compact_if_needed: fn(verification: StoreVerification, roots: HangarRoots) StoreError! {
     journal: store_journal_dir(roots)
-    paths := store_journal_transaction_paths(journal)
+    ^paths: store_journal_transaction_paths(journal)
     if paths.len() <= STORE_JOURNAL_COMPACT_AFTER {
-        total_bytes := 0
+        ^total_bytes: 0
         loop path in paths {
             info: files.stat(path) ?? next
             total_bytes += info.size
@@ -509,7 +509,7 @@ store_compact_if_needed: fn(verification: StoreVerification, roots: HangarRoots)
         }
     }
     graph: store_load_graph_structure_mode(verification, roots, false)
-    objects := [ClosureObject]{}
+    ^objects: [ClosureObject]{}
     loop digest in store_sorted_object_keys(graph.objects) -> objects.push(graph.objects[digest])
     snapshot: ClosureJournalEntry{kind: ClosureJournalKind.Snapshot, objects: objects, records: graph.sorted_records(), deleted_records: graph.deleted_records}
     sequence: store_journal_next_sequence(journal)
@@ -533,7 +533,7 @@ store_journal_write_entry: fn(journal: String, sequence: Int, entry: ClosureJour
 }
 
 store_journal_pad_sequence: fn(sequence: Int) -> String Never! {
-    text := "{sequence}"
+    ^text: "{sequence}"
     loop text.len() < 20 -> text = "0{text}"
     text
 }
@@ -570,14 +570,14 @@ store_render_journal_entry: fn(entry: ClosureJournalEntry) -> String Never! {
         .Delta -> "kind\tdelta\n"
         .Snapshot -> "kind\tsnapshot\n"
     }
-    out := "{STORE_JOURNAL_HEADER}\n{kind}"
-    objects := entry.objects.copy()
+    ^out: "{STORE_JOURNAL_HEADER}\n{kind}"
+    ^objects: entry.objects.copy()
     objects.sort_by(fn(object) { object.digest })
     loop object in objects {
         external: if object.external -> "1" else -> "0"
         out = "{out}object\t{store_hex_text(object.digest)}\t{store_hex_text(object.path)}\t{external}\n"
     }
-    records := entry.records.copy()
+    ^records: entry.records.copy()
     records.sort_by(fn(record) { record.id })
     loop record in records {
         id: store_hex_text(record.id)
@@ -589,7 +589,7 @@ store_render_journal_entry: fn(entry: ClosureJournalEntry) -> String Never! {
             out = "{out}reference\t{id}\t{store_hex_text(reference)}\n"
         }
     }
-    deleted := entry.deleted_records.copy()
+    ^deleted: entry.deleted_records.copy()
     deleted.sort()
     loop id in deleted -> out = "{out}delete\t{store_hex_text(id)}\n"
     out
@@ -610,9 +610,9 @@ store_parse_journal_entry: fn(raw: String) -> ClosureJournalEntry StoreError! {
     }
     if lines.len() < 2 -> return Err(StoreError.Other("missing journal kind"))
     kind: store_journal_kind(lines[1]) ?? return Err(StoreError.Other("missing journal kind"))
-    objects := [ClosureObject]{}
-    records := [String:ClosureRecord]{}
-    deleted_records := [String]{}
+    ^objects: [ClosureObject]{}
+    ^records: [String:ClosureRecord]{}
+    ^deleted_records: [String]{}
     loop index in 2..<lines.len() {
         line: lines[index]
         fields: line.split("\t").to_list()
@@ -640,7 +640,7 @@ store_parse_journal_entry: fn(raw: String) -> ClosureJournalEntry StoreError! {
             }
             field_kind == "output" && fields.len() == 4 -> {
                 id: store_journal_unhex(fields[1])
-                record := records.get(id) ?? return Err(StoreError.Other("output precedes record `{id}`"))
+                ^record: records.get(id) ?? return Err(StoreError.Other("output precedes record `{id}`"))
                 name: store_journal_unhex(fields[2])
                 if record.outputs.has_key(name) {
                     return Err(StoreError.Other("duplicate output `{name}` in closure record `{id}`"))
@@ -650,8 +650,8 @@ store_parse_journal_entry: fn(raw: String) -> ClosureJournalEntry StoreError! {
             }
             field_kind == "reference" && fields.len() == 3 -> {
                 id: store_journal_unhex(fields[1])
-                record := records.get(id) ?? return Err(StoreError.Other("reference precedes record `{id}`"))
-                references := record.references.copy()
+                ^record: records.get(id) ?? return Err(StoreError.Other("reference precedes record `{id}`"))
+                ^references: record.references.copy()
                 references.push(store_journal_unhex(fields[2]))
                 record.references = store_sorted_unique(references)
                 records[id] = record
@@ -665,8 +665,8 @@ store_parse_journal_entry: fn(raw: String) -> ClosureJournalEntry StoreError! {
             else -> return Err(StoreError.Other("invalid journal line `{line}`"))
         }
     }
-    ordered := [ClosureRecord]{}
-    ids := records.keys().to_list()
+    ^ordered: [ClosureRecord]{}
+    ^ids: records.keys().to_list()
     ids.sort()
     loop id in ids -> ordered.push(records[id])
     Ok(ClosureJournalEntry{kind: kind, objects: objects, records: ordered, deleted_records: deleted_records})
@@ -683,7 +683,7 @@ store_journal_unhex: fn(value: String) -> String StoreError! {
 }
 
 store_journal_next_sequence: fn(journal: String) -> Int StoreError! {
-    highest := 0
+    ^highest: 0
     loop path in store_journal_transaction_paths(journal) {
         name: files.basename(path)
         if name.bytes().len() < 20 -> next
@@ -695,7 +695,7 @@ store_journal_next_sequence: fn(journal: String) -> Int StoreError! {
 
 store_journal_transaction_paths: fn(journal: String) -> [String] StoreError! {
     entries: files.list_dir(journal) ?? return Ok([String]{})
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries {
         if !entry.name.ends_with(STORE_JOURNAL_TXN_SUFFIX) -> next
         if paths.len() >= STORE_MAX_CLOSURE_TRANSACTIONS {

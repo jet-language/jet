@@ -70,7 +70,7 @@ dn_offends: fn(line: String) -> Bool {
 
 // `path:line: text` for each offending line git finds under DN_ROOTS.
 dn_offenders: fn() -> [String] {
-    argv := [String]{"git", "grep", "-n", "-I", "-E", "-e", "jet\\.[A-Z]"}
+    ^argv: [String]{"git", "grep", "-n", "-I", "-E", "-e", "jet\\.[A-Z]"}
     loop label in DN_LABELS {
         argv.push("-e")
         argv.push("{label} \\[")
@@ -80,7 +80,7 @@ dn_offenders: fn() -> [String] {
     loop path in DN_EXCLUDED -> argv.push(":(exclude,glob){path}")
     listed: dn_process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run git grep: {err}")
     assert(listed.code == 0 || listed.code == 1, "git grep failed: {dn_process.combined_output(listed).trim()}")
-    found := [String]{}
+    ^found: [String]{}
     loop line in dn_process.stdout_lines(listed) {
         path_end: line.find(":")
         if path_end < 0 -> next

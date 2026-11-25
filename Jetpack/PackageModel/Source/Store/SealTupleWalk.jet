@@ -24,12 +24,12 @@ SealTupleTable: struct {
 
 // Stat-walk `path` and hash the sorted identity-tuple table.
 pkg_seal_tuple_table: fn(path: String) -[FS]> SealTupleTable IOError! {
-    tuples := [SealTuple]{}
+    ^tuples: [SealTuple]{}
     pkg_seal_collect_tuples(path, "", tuples)
     // Stable passes from the least significant key: (relative, kind).
     tuples.sort_by(fn(tuple) { tuple.kind })
     tuples.sort_by(fn(tuple) { tuple.relative })
-    table := [U8]{}
+    ^table: [U8]{}
     loop tuple in tuples {
         table.push(tuple.kind)
         table.push(U8{9})
@@ -49,7 +49,7 @@ pkg_seal_collect_tuples: fn(path: String, relative: String, tuples: ^[SealTuple]
     if !info.is_dir {
         return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("Hangar object contains an unsupported node: {path}")}))
     }
-    entries := files.list_dir(path)
+    ^entries: files.list_dir(path)
     entries.sort_by(fn(entry) { entry.name })
     loop entry in entries {
         child: if relative == "" -> entry.name else -> "{relative}/{entry.name}"

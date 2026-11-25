@@ -55,9 +55,9 @@ nested: fn() {
 // The subject itself moves into the match: the binding owns its payload and
 // `secret.move()` is an ordinary move; the label closes with the match.
 moved_subject: fn() {
-    slot := Slot.Full{secret: Secret{id: 6, _token: "owned"}, label: "moved"}
+    ^slot: Slot.Full{secret: Secret{id: 6, _token: "owned"}, label: "moved"}
     if slot.move() == .Full(secret, label) {
-        taken := secret.move()
+        ^taken: secret.move()
         print("label {label}")
         consume(taken)
     }

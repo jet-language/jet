@@ -22,11 +22,11 @@ receipt_kind: fn(receipt: ^^Delivery) -> String {
 }
 
 run: fn() {
-    temp := testing.temp_dir("service-authority")
+    ^temp: testing.temp_dir("service-authority")
     store: Path.from(temp).join("authority.log").to_string()
     retention: Duration.seconds(86400) ?? panic("retention")
-    runtime := services.runtime(store, retention: retention)
-    tree := services.tree("orders")
+    ^runtime: services.runtime(store, retention: retention)
+    ^tree: services.tree("orders")
     endpoint: tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
     tree.group("orders-supervisor", ["orders"]) ?? panic("group")
     tree.start() ?? panic("start")
@@ -37,7 +37,7 @@ run: fn() {
     history: (first.copy()).events() ?? panic("events")
     print("audit:{receipt.show().contains("DeliveryReceipt")}:{history.len()}")
     print("first:accepted")
-    recovered := services.runtime(store, retention: retention)
+    ^recovered: services.runtime(store, retention: retention)
     recovered_duplicate: recovered.retry(id.copy()) ?? panic("recover")
     print("recovered:{receipt_kind(recovered_duplicate)}")
     delivered: tree.receive(endpoint) ?? panic("deliver")

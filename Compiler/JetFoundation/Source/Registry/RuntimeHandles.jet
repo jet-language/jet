@@ -9,8 +9,8 @@
 // each key's first row, frozen at build time, searched by halving instead of
 // a scan of every row.
 ir_key_row: fn(keys: [String], rows: [Int], key: String) -> Int? Never! {
-    low := I64{0}
-    high := I64{keys.len()}
+    ^low: I64{0}
+    ^high: I64{keys.len()}
     loop low < high {
         middle: (low + high) >> I64{1}
         mid: Int{middle}
@@ -27,17 +27,17 @@ ir_key_row: fn(keys: [String], rows: [Int], key: String) -> Int? Never! {
 // The rows of `keys` ordered by key (ascending bytes; stable merge sort,
 // preserving duplicate keys in table order).
 ir_key_order: fn(keys: [String]) -> [Int] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<keys.len() -> order.push(index)
-    width := 1
+    ^width: 1
     loop width < order.len() {
-        merged := [Int]{}
-        start := 0
+        ^merged: [Int]{}
+        ^start: 0
         loop start < order.len() {
             middle: if start + width < order.len() -> start + width else -> order.len()
             end: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
                 if {
                     right >= end || (left < middle && !(keys[order[right]] < keys[order[left]])) -> {
@@ -60,8 +60,8 @@ ir_key_order: fn(keys: [String]) -> [Int] Never! {
 
 // First position in sorted `keys` equal to `key`, or -1 when absent.
 ir_key_first_at: fn(keys: [String], key: String) -> Int Never! {
-    low := I64{0}
-    high := I64{keys.len()}
+    ^low: I64{0}
+    ^high: I64{keys.len()}
     loop low < high {
         middle: (low + high) >> I64{1}
         if keys[Int{middle}] < key -> low = wrapping(middle + I64{1}) else -> high = middle
@@ -75,7 +75,7 @@ ir_key_first_at: fn(keys: [String], key: String) -> Int Never! {
 // merge sort, so equal keys keep table order), keeping each key's first row.
 ir_key_index: fn(keys: [String]) -> [Int] Never! {
     order: ir_key_order(keys)
-    rows := [Int]{}
+    ^rows: [Int]{}
     loop row in order {
         if rows.len() > 0 && keys[rows[rows.len() - 1]] == keys[row] -> next
         rows.push(row)
@@ -226,7 +226,7 @@ IR_RUNTIME_HANDLES: #run { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "<corelib>/core.net.TCPListener", runtime: "JetTCPListener", clone: true, display: false, show: true, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.net.TCPStream", runtime: "JetTCPStream", clone: false, display: false, show: true, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.net.UDPPacket", runtime: "JetUDPPacket", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "<corelib>/core.net.UDPSocket", runtime: "JetUDPSocket", clone: true, display: false, show: true, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "<corelib>/core.net.UDPSocket", runtime: "JetUDPSocket", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.net.UnixListener", runtime: "JetUnixListener", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.net.UnixStream", runtime: "JetUnixStream", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.net.url.URL", runtime: "CoreURL", clone: true, display: false, show: false, debug: false, eq: false},
@@ -482,7 +482,7 @@ IR_RUNTIME_HANDLES: #run { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "TextWidthControls", runtime: "TextWidthControls", clone: true, display: false, show: false, debug: false, eq: true},
     IRRuntimeHandle{jet_name: "Transaction", runtime: "JetTransaction", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "UDPPacket", runtime: "JetUDPPacket", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "UdpSocket", runtime: "JetUDPSocket", clone: true, display: false, show: true, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "UdpSocket", runtime: "JetUDPSocket", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "UnixStream", runtime: "JetUnixStream", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "UTF8Error", runtime: "UTF8Error", clone: true, display: true, show: true, debug: true, eq: true},
     IRRuntimeHandle{jet_name: "Value", runtime: "JetReflectValue", clone: true, display: true, show: true, debug: false, eq: false},
@@ -517,7 +517,7 @@ IR_RUNTIME_HANDLES: #run { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "XMLRenderOptions", runtime: "XMLRenderOptions", clone: true, display: false, show: false, debug: false, eq: true},
     IRRuntimeHandle{jet_name: "XMLWriter", runtime: "XMLWriter", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "UnixListener", runtime: "JetUnixListener", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "UDPSocket", runtime: "JetUDPSocket", clone: true, display: false, show: true, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "UDPSocket", runtime: "JetUDPSocket", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "Condition", runtime: "JetCondition", clone: true, display: false, show: false, debug: false, eq: false},
 } }
 

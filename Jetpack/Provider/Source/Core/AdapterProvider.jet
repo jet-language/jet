@@ -34,7 +34,7 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
         fetch_cache: files.join(ctx.store_dir, "fetch-cache"),
         offline: ctx.offline,
     }
-    attempt := BuildAttempt.new(plan.name, reference, "adapter", recipe_hash, source_hash)
+    ^attempt: BuildAttempt.new(plan.name, reference, "adapter", recipe_hash, source_hash)
     run_report: if recipe_run_logged(recipe, build_ctx, None, attempt) == {
         .Ok(report) -> report
         .Err(diagnostic) -> {
@@ -53,7 +53,7 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
     sandbox_policy: run_report.sandbox_policy
 
     lowered: recipe_lower_to_plan(recipe, plan.name, build_ctx.tools) ?? return Err(ProviderError.Adapter(err.what))
-    plan_facts := lowered.provider_plan_facts()
+    ^plan_facts: lowered.provider_plan_facts()
     plan_facts["adapter.build.dependencies"] = declared_dependencies
     plan_facts["adapter.build.identity"] = build_identity
     plan_facts["adapter.build.authority"] = declared_authority
@@ -61,7 +61,7 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
     plan_facts["adapter.build.sandbox_policy"] = sandbox_policy
     if private_untrusted -> plan_facts["adapter.build.trust"] = "private-untrusted"
     provider_plan_facts: ProviderPlanFacts.from_facts(plan_facts) ?? return Err(ProviderError.Adapter(err.message()))
-    producer_facts := [String:String]{
+    ^producer_facts: [String:String]{
         "adapter.source": plan.source,
         "build.identity": build_identity,
         "build.capabilities": declared_capabilities,
@@ -73,7 +73,7 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
     toolchain_facts: "declared-tools={declared_dependencies}\nbuild-identity={build_identity}\ncapabilities={declared_capabilities}\ndependencies={declared_dependencies}\nauthority={declared_authority}\nsandbox={sandbox_class}\nsandbox-policy={sandbox_policy}"
     policy_facts: "policy={identity.policy_fingerprint}\nplatform={identity.platform}"
     producer: ProducerRecord.new("adapter", "cas:{source_fingerprint}", source_fingerprint, provider_plan_facts, toolchain_facts, policy_facts, producer_facts) ?? return Err(ProviderError.Adapter(err.message()))
-    realized := Realized{
+    ^realized: Realized{
         name: plan.name,
         version: "",
         reference: reference,

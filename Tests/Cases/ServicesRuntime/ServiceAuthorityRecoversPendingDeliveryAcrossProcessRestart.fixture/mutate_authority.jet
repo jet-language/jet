@@ -7,8 +7,8 @@ use {
 
 run: fn() {
     path: process.args().get(0) ?? panic("missing store path")
-    corrupt := files.read_bytes(path) ?? panic("read authority store")
-    pipes := [Int]{}
+    ^corrupt: files.read_bytes(path) ?? panic("read authority store")
+    ^pipes: [Int]{}
     pipe_byte: U8{0x7c}
     colon_byte: U8{0x3a}
     zero_byte: U8{0x30}
@@ -18,7 +18,7 @@ run: fn() {
     }
     expires_start: pipes[8] + 1
     expires_end: pipes[9]
-    expires_colon := -1
+    ^expires_colon: -1
     loop index in expires_start..expires_end {
         if corrupt[index] == colon_byte {
             expires_colon = index - expires_start

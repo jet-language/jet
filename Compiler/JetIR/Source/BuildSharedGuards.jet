@@ -15,7 +15,7 @@ ir_shared_guard_wait: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, gu
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     string_row: ir_value_type(m, p, Type.String) ?? return ir_type_fail(b, span, Type.String)
     predicate_ty: ir_lambda_function_type(predicate)
-    backs := [IRWriteBack]{}
+    ^backs: [IRWriteBack]{}
     token: ir_place_address(m, p, b, guard, backs, span)
     if ir_failed(b) || token < 0 -> return -1
     wake: ir_expr(m, p, b, condition)
@@ -78,8 +78,8 @@ ir_shared_guard_inner: fn(ty: Type) -> Type? Never! {
 // -1 when a step is no inline field.
 ir_shared_guard_path_offset: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, guard: Int, path: [TFieldRef]) -> Int Never! {
     inner: ir_shared_guard_inner(ir_ty(m, p, b, guard)) ?? return -1
-    row := ir_value_type(m, p, inner) ?? return -1
-    offset := 0
+    ^row: ir_value_type(m, p, inner) ?? return -1
+    ^offset: 0
     loop field in path {
         member: ir_member_of_row(m, p, row, field.name) ?? return -1
         if member.boxed -> return -1

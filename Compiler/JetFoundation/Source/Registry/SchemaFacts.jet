@@ -42,7 +42,7 @@ CORE_COMPILER_SCOPE_ID: "<corelib>/core.compiler.ScopeID"
 // Every schema row in canonical order: each marker rule with its sites, then
 // each readable `$` member with its planes.
 schema_fact_rows: fn() -> [SchemaFactRow] Never! {
-    rows := [SchemaFactRow]{}
+    ^rows: [SchemaFactRow]{}
     loop rule in REGISTRATION_TABLE.markers {
         rows.push(SchemaFactRow{kind: SCHEMA_FACT_KIND_MARKER, name: rule.name.copy(), scope: rule.sites.copy()})
     }
@@ -57,7 +57,7 @@ schema_fact_rows: fn() -> [SchemaFactRow] Never! {
 // The snapshot identity of `rows`: the digest of every row in order, so equal
 // schemas share an identity and any changed row changes it.
 schema_fact_digest: fn(rows: [SchemaFactRow]) -> String Never! {
-    fields := [String]{"jet-schema-facts-v1"}
+    ^fields: [String]{"jet-schema-facts-v1"}
     loop row in rows {
         fields.push(row.kind.copy())
         fields.push(row.name.copy())

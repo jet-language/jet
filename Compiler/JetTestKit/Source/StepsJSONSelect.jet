@@ -5,7 +5,7 @@ use {
 
 kit_steps_json_projection_valid: fn(part: String) -> Bool {
     if !part.starts_with("{{") || !part.ends_with("}}") -> return false
-    names := [String]{}
+    ^names: [String]{}
     loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
         name: raw.trim().copy()
         if name == "" || name.contains(".") || name.contains("[") || name.contains(" ") || kit_expect_named(names, name) {
@@ -18,9 +18,9 @@ kit_steps_json_projection_valid: fn(part: String) -> Bool {
 
 kit_steps_json_filter: fn(part: String) -> KitJSONFilter? {
     if !part.starts_with("?") -> return None
-    quoted := false
-    escaped := false
-    depth := 0
+    ^quoted: false
+    ^escaped: false
+    ^depth: 0
     loop (index, byte) in part.bytes() {
         if index == 0 -> next
         code: Int{byte}
@@ -38,8 +38,8 @@ kit_steps_json_filter: fn(part: String) -> KitJSONFilter? {
         if code == 93 -> depth -= 1
         if depth != 0 -> next
         rest: kit_steps_byte_slice(part, index, part.count_bytes())
-        operator := ""
-        width := 0
+        ^operator: ""
+        ^width: 0
         loop candidate in ["!~=", "~=", "!=", ">=", "<=", "^=", "$=", "!~", "~", ">", "<", "="] {
             if operator == "" && rest.starts_with(candidate) {
                 operator = candidate.copy()
@@ -67,7 +67,7 @@ kit_steps_json_filter: fn(part: String) -> KitJSONFilter? {
 kit_steps_json_filter_matches: fn(value: Dyn, filter: KitJSONFilter) -> Bool {
     parts: kit_steps_json_path("$.{filter.key}") ?? return false
     values: kit_steps_json_select(value, parts, 0) ?? return filter.op == "!=" || filter.op == "!~" || filter.op == "!~="
-    expected := filter.expected
+    ^expected: filter.expected
     if filter.reference != "" {
         other: kit_steps_json_select(value, kit_steps_json_path("${filter.reference}") ?? return false, 0) ?? return false
         if other.len() != 1 -> return false
@@ -90,7 +90,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
     if depth == parts.len() -> return Val([value])
     part: parts[depth]
     if part.starts_with(".") || part.starts_with("\"") {
-        key := if part.starts_with(".") -> kit_steps_byte_slice(part, 1, part.count_bytes()) else -> ""
+        ^key: if part.starts_with(".") -> kit_steps_byte_slice(part, 1, part.count_bytes()) else -> ""
         if part.starts_with("\"") {
             decoded: json.parse(part) ?? return None
             key = if decoded == {
@@ -111,7 +111,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
     if part.starts_with("{{") {
         if value == {
             .Object(_) -> {
-                projected := [String:Dyn]{}
+                ^projected: [String:Dyn]{}
                 loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
                     name: raw.trim().copy()
                     child: value.get(name) ?? return None
@@ -126,7 +126,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
         .Array(items) -> {
             if part.starts_with("?") {
                 filter: kit_steps_json_filter(part) ?? return None
-                selected := [Dyn]{}
+                ^selected: [Dyn]{}
                 loop item in items {
                     if kit_steps_json_filter_matches(item, filter) -> selected.push(item.copy())
                 }
@@ -135,7 +135,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
                 // `[*]`; an index, `*` or another filter reads the matched array.
                 following: if depth + 1 < parts.len() -> parts[depth + 1] else -> ""
                 if following.starts_with(".") || following.starts_with("\"") || following.starts_with("{{") {
-                    values := [Dyn]{}
+                    ^values: [Dyn]{}
                     loop item in selected {
                         children: kit_steps_json_select(item, parts, depth + 1) ?? return None
                         loop child in children -> values.push(child)
@@ -146,7 +146,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
             }
             if part == "*" {
                 if items.len() == 0 -> return Val([Dyn]{})
-                selected := [Dyn]{}
+                ^selected: [Dyn]{}
                 loop item in items {
                     values: kit_steps_json_select(item, parts, depth + 1) ?? return None
                     loop child in values -> selected.push(child)
@@ -164,11 +164,11 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
 
 kit_steps_json_values: fn(text: String, mode: String, path: String) -> [Dyn]? {
     parts: kit_steps_json_path(path) ?? return None
-    tree := Dyn.Null
+    ^tree: Dyn.Null
     if mode == "doc" || mode.starts_with("doc[zero ") -> tree = json.parse(text) ?? return None else if mode == "toml" {
         tree = toml.parse(text) ?? return None
     } else if mode == "ndjson" {
-        records := [Dyn]{}
+        ^records: [Dyn]{}
         loop raw in text.split("\n") {
             line: raw.trim().copy()
             if line == "" -> next
@@ -199,8 +199,8 @@ kit_steps_json_relation: fn(actual: String, assertion: KitAssertion, history: [K
     label: kit_steps_relation_label(reference)
     stream: kit_steps_relation_stream(reference, assertion.stream)
     factor: if target == "" -> 1 else -> Int.parse(kit_steps_byte_slice(assertion.value, 0, kit_steps_byte_index(assertion.value, "*") ?? 0)) ?? 0
-    previous := String?{None}
-    index := history.len()
+    ^previous: String?{None}
+    ^index: history.len()
     loop index > 0 {
         index -= 1
         capture: history[index]

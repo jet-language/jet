@@ -20,8 +20,8 @@ use ui: core.ui
 SIDE: 48
 
 run: fn() {
-    window := ui.headless(width: 96, height: 64, script: [[ui.UIEvent]{}, [ui.UIEvent]{.PointerDown(.Left)}, [ui.UIEvent]{}]) ?? return
-    native := false
+    ^window: ui.headless(width: 96, height: 64, script: [[ui.UIEvent]{}, [ui.UIEvent]{.PointerDown(.Left)}, [ui.UIEvent]{}]) ?? return
+    ^native: false
     if ui.open(width: 640, height: 400, title: "Jet") == {
         .Ok(opened) -> {
             window = opened
@@ -35,17 +35,17 @@ run: fn() {
             print("no display: running headless")
         }
     }
-    width := window.width()
-    height := window.height()
-    pixels := background(width, height)
-    full := true
-    lit := true
-    drawn_x := 0
-    drawn_y := 0
-    frames := 0
+    ^width: window.width()
+    ^height: window.height()
+    ^pixels: background(width, height)
+    ^full: true
+    ^lit: true
+    ^drawn_x: 0
+    ^drawn_y: 0
+    ^frames: 0
     seconds: Float{15.0}
     loop frame in window.frames() {
-        quit := false
+        ^quit: false
         loop event in frame.events() {
             if event == {
                 .KeyDown(.Escape) -> { quit = true }
@@ -110,7 +110,7 @@ shade: fn(x: Int, y: Int, width: Int, height: Int) -> {r: Int, g: Int, b: Int} {
 }
 
 background: fn(width: Int, height: Int) -> [U8] {
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop y in 0..<height {
         loop x in 0..<width {
             c: shade(x, y, width, height)

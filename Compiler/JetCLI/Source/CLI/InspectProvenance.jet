@@ -93,20 +93,20 @@ jet_cli_lock_partial: fn() -> JetCLILockPartial Never! {
 
 jet_cli_lock_trim_quotes: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    start := 0
-    end := bytes.len()
+    ^start: 0
+    ^end: bytes.len()
     loop start < end && bytes[start] == (U8{34}) -> start += 1
     loop end > start && bytes[end - 1] == (U8{34}) -> end -= 1
     foundation_byte_text(bytes, start, end)
 }
 
 jet_cli_lock_unescape: fn(raw: String) -> String Never! {
-    text := raw.trim()
+    ^text: raw.trim()
     if text.len() >= 2 && text.starts_with("\"") && text.ends_with("\"") {
         text = text.slice(1..<text.len() - 1)
     }
-    out := [U8]{}
-    escaped := false
+    ^out: [U8]{}
+    ^escaped: false
     loop byte in text.bytes() {
         code: Int{byte}
         if {
@@ -133,12 +133,12 @@ jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
     if !value.starts_with("[") || !value.ends_with("]") || value.len() < 2 -> return None
     inner: value.slice(1..<value.len() - 1)
     if inner.trim() == "" -> return Val([String]{})
-    values := [String]{}
-    current := [U8]{}
-    quoted := false
-    escaped := false
-    item_started := false
-    item_quoted := false
+    ^values: [String]{}
+    ^current: [U8]{}
+    ^quoted: false
+    ^escaped: false
+    ^item_started: false
+    ^item_quoted: false
     loop byte in inner.bytes() {
         code: Int{byte}
         if {
@@ -182,19 +182,17 @@ jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
 // inline table. The first part that starts with `key` but has no `=` ends the
 // search with None.
 jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
-    parts := [String]{}
-    start := 0
-    quoted := false
-    escaped := false
+    ^parts: [String]{}
+    ^start: 0
+    ^quoted: false
+    ^escaped: false
     bytes: inline.bytes()
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if {
             escaped -> escaped = false
             quoted && code == 92 -> escaped = true
-            code == 34 -> {
-                quoted = !quoted
-            }
+            code == 34 -> { quoted = !quoted }
             code == 44 && !quoted -> {
                 parts.push(foundation_byte_text(bytes, start, index))
                 start = index + 1
@@ -218,8 +216,8 @@ jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
 jet_cli_lock_inline: fn(raw: String) -> String Never! {
     text: raw.trim()
     bytes: text.bytes()
-    start := 0
-    end := bytes.len()
+    ^start: 0
+    ^end: bytes.len()
     loop start < end && bytes[start] == (U8{123}) -> start += 1
     loop end > start && bytes[end - 1] == (U8{125}) -> end -= 1
     foundation_byte_text(bytes, start, end).trim()
@@ -255,8 +253,8 @@ jet_cli_lock_source: fn(raw: String) -> JetCLILockSource Never! {
 jet_cli_lock_finish: fn(partial: JetCLILockPartial, packages: ^[JetCLILockPackage]) -> JetCLILockStep Never! {
     name: partial.name ?? return JetCLILockStep.Missing
     version: partial.version ?? return JetCLILockStep.Missing
-    root := false
-    source_hash := String?{None}
+    ^root: false
+    ^source_hash: String?{None}
     if jet_cli_lock_source(partial.source_raw ?? "") == {
         .Parsed(is_root, hash) -> {
             root = is_root
@@ -265,11 +263,11 @@ jet_cli_lock_finish: fn(partial: JetCLILockPartial, packages: ^[JetCLILockPackag
         .Missing -> return JetCLILockStep.Missing
         .Unported(shape) -> return JetCLILockStep.Unported{shape: shape}
     }
-    tree_hash := String?{None}
+    ^tree_hash: String?{None}
     if partial.locked_raw == .Val(locked) {
         tree_hash = Val(jet_cli_lock_kv_field(jet_cli_lock_inline(locked), "tree-hash") ?? "")
     }
-    envelope_provenance := String?{None}
+    ^envelope_provenance: String?{None}
     if partial.envelope -> envelope_provenance = Val(partial.envelope_provenance)
     packages.push(
         JetCLILockPackage{
@@ -296,9 +294,9 @@ jet_cli_lock_finish: fn(partial: JetCLILockPartial, packages: ^[JetCLILockPackag
 
 // `canonicalize_lock` for one list: sorted, duplicates dropped.
 jet_cli_lock_canonical: fn(values: [String]) -> [String] Never! {
-    sorted := values
+    ^sorted: values
     sorted.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop value in sorted {
         if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
     }
@@ -307,10 +305,10 @@ jet_cli_lock_canonical: fn(values: [String]) -> [String] Never! {
 
 jet_cli_lock_u32: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
-    start := 0
+    ^start: 0
     if bytes.len() > 0 && bytes[0] == (U8{43}) -> start = 1
     if start >= bytes.len() -> return None
-    value := 0
+    ^value: 0
     loop index in start..<bytes.len() {
         digit: Int{bytes[index]} - 48
         if digit < 0 || digit > 9 -> return None
@@ -325,12 +323,12 @@ jet_cli_lock_u32: fn(text: String) -> Int? Never! {
 jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
     raw: cli_files.read(jet_cli_entry_join(root, ".jet/lock")) ?? return JetCLILockLoad.Missing
     if raw.len() > JET_CLI_LOCK_MAX_BYTES -> return JetCLILockLoad.Missing
-    packages := [JetCLILockPackage]{}
-    version := Int?{None}
-    section := ""
-    partial := jet_cli_lock_partial()
-    in_root := false
-    in_build_stamp := false
+    ^packages: [JetCLILockPackage]{}
+    ^version: Int?{None}
+    ^section: ""
+    ^partial: jet_cli_lock_partial()
+    ^in_root: false
+    ^in_build_stamp: false
     loop raw_line in raw.split("\n").to_list() {
         if raw_line.len() > JET_CLI_LOCK_MAX_BYTES -> return JetCLILockLoad.Missing
         line: raw_line.trim()
@@ -364,7 +362,7 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
             next
         }
         line_bytes: line.copy().bytes()
-        equals := -1
+        ^equals: -1
         loop (index, byte) in line_bytes {
             if byte == (U8{61}) {
                 equals = index
@@ -454,7 +452,7 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
     if version != Val(1) -> return JetCLILockLoad.Missing
     // `canonicalize_last_preserving_order`: a replayed record replaces the
     // earlier one of the same name.
-    kept := [JetCLILockPackage]{}
+    ^kept: [JetCLILockPackage]{}
     loop (index, package) in packages {
         replaced: loop later in index + 1..<packages.len() {
             if packages[later].name == package.name {
@@ -492,14 +490,14 @@ jet_cli_provenance_present: fn(value: String?) -> String? Never! {
 
 jet_cli_provenance_report: fn(package: JetCLILockPackage) -> JetCLIProvenanceReport Never! {
     absent: "not recorded"
-    locked_hash := package.content_hash
+    ^locked_hash: package.content_hash
     if locked_hash == None -> locked_hash = package.tree_hash
     if locked_hash == None -> locked_hash = package.source_hash
     integrity: jet_cli_provenance_present(locked_hash) ?? absent
     integrity_status: if integrity == absent -> "recorded" else -> "enforced"
     transparency: jet_cli_provenance_present(package.transparency)
     publisher: jet_cli_provenance_present(package.publisher)
-    build := jet_cli_provenance_present(package.build)
+    ^build: jet_cli_provenance_present(package.build)
     if build == None -> build = jet_cli_provenance_present(package.envelope_provenance)
     JetCLIProvenanceReport{
         name: package.name,
@@ -518,7 +516,7 @@ jet_cli_provenance_report: fn(package: JetCLILockPackage) -> JetCLIProvenanceRep
 // The reports of the non-root packages (only `target`'s when named), by
 // name, then version.
 jet_cli_provenance_reports: fn(packages: [JetCLILockPackage], target: String?) -> [JetCLIProvenanceReport] Never! {
-    reports := [JetCLIProvenanceReport]{}
+    ^reports: [JetCLIProvenanceReport]{}
     loop package in packages {
         if package.root -> next
         if target == .Val(name) {
@@ -536,7 +534,7 @@ jet_cli_provenance_effects: fn(effects: [String]) -> String Never! {
 }
 
 jet_cli_provenance_text: fn(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
-    out := "Provenance\nRequire: {requirement}\n"
+    ^out: "Provenance\nRequire: {requirement}\n"
     loop (index, report) in reports {
         if index > 0 -> out = "{out}\n"
         evidence: if report.integrity.status == "enforced" -> ", Jet.StoreEntryTampered" else -> ""
@@ -551,7 +549,7 @@ jet_cli_provenance_text: fn(requirement: String, reports: [JetCLIProvenanceRepor
 }
 
 jet_cli_provenance_field_value: fn(field: JetCLIProvenanceField, evidence: Bool) -> JetCLIStatusValue Never! {
-    fields := [JetCLIStatusField]{jet_cli_status_field("value", jet_cli_status_text(field.value)), jet_cli_status_field("status", jet_cli_status_text(field.status))}
+    ^fields: [JetCLIStatusField]{jet_cli_status_field("value", jet_cli_status_text(field.value)), jet_cli_status_field("status", jet_cli_status_text(field.status))}
     if evidence -> fields.push(jet_cli_status_field("evidence", jet_cli_status_text("E1204")))
     jet_cli_status_object(fields)
 }
@@ -590,15 +588,15 @@ jet_cli_inspect_provenance: fn(args: [String], color: Bool, json: Bool, threads:
         .Unported(shape) -> return jet_cli_not_ported("inspect provenance <{shape}>", color)
         .Loaded(_) -> {}
     }
-    notices := [String]{}
-    entry := ""
+    ^notices: [String]{}
+    ^entry: ""
     found_entry: jet_cli_find_project_entry(root, "inspect provenance", color, notices)
     if found_entry == {
         .Entry(found) -> entry = found.path
         .Refused(plan) -> return jet_cli_with_notices(notices, plan)
         .Absent -> return jet_cli_with_notices(notices, jet_cli_not_ported("inspect provenance <project without an entry>", color))
     }
-    target := String?{None}
+    ^target: String?{None}
     loop argument in args {
         if !argument.starts_with("-") {
             target = Val(argument)
@@ -616,7 +614,7 @@ jet_cli_inspect_provenance_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOutpu
     if !cli_files.is_file(job.file) {
         return jet_cli_not_ported_output("inspect provenance <unreadable project entry>", job.color)
     }
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(job.file, job.color, job.threads, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(_) -> {
@@ -646,7 +644,7 @@ jet_cli_provenance_requirement: fn(snapshot: JetDriverAuthorizedSourceSnapshot) 
 
 // The locked dependencies' provenance of a project that checked.
 jet_cli_inspect_provenance_report: fn(job: JetCLIInspectJob, requirement: String) -> JetDriverVerbOutput {
-    packages := [JetCLILockPackage]{}
+    ^packages: [JetCLILockPackage]{}
     if jet_cli_lock_load(job.root) == {
         .Loaded(loaded) -> packages = loaded
         .Missing | .Unported(_) -> return jet_cli_not_ported_output("inspect provenance <lock changed during the check>", job.color)

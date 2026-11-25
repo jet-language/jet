@@ -44,7 +44,7 @@ cli_test_formatter_run: fn(tree: FormatterTree, fail: Bool) -[FS, Env, Exec, Tim
     files.write(files.join(tree.repo, "package.jet"), "name: \"formatter-repo\"\nversion: \"0.1.0\"\npackages: {{ nixfmt: executable }}\n") ?? panic("write formatter package.jet")
     files.write(files.join(tree.project, "env.jet"), "env.dev: module {{\n    sources: {{ local: {tree.repo} }}\n    formatter: \"nixfmt@local\"\n}}\n") ?? panic("write env.jet")
     files.write(files.join(tree.project, "flake.nix"), "unformatted\n") ?? panic("write flake.nix")
-    spec := cli_test_jetpack([String]{"env", "--trust", "--offline", "--no-color", "--", "nixfmt", "flake.nix"}).cwd(tree.project).env("JETPACK_ROOT", tree.root).env("HOME", files.join(tree.root, "home")).env("TMPDIR", tree.scratch)
+    ^spec: cli_test_jetpack([String]{"env", "--trust", "--offline", "--no-color", "--", "nixfmt", "flake.nix"}).cwd(tree.project).env("JETPACK_ROOT", tree.root).env("HOME", files.join(tree.root, "home")).env("TMPDIR", tree.scratch)
     if fail -> spec = spec.env("JET_FMT_FAIL", "1")
     spec.run() ?? panic("run jetpack env -- nixfmt")
 }

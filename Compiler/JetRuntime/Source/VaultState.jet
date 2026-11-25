@@ -56,7 +56,7 @@ vault_unsigned_less: fn(left: I64, right: I64) -> Bool {
 }
 
 vault_bytes_zero: fn(data: I64, length: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(data + at)) != I64{0}) { return false }
         at += I64{1}
@@ -65,7 +65,7 @@ vault_bytes_zero: fn(data: I64, length: I64) -> Bool {
 }
 
 vault_put_u64: fn(target: I64, value: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop {
         if (at == I64{8}) { break }
         rt_text_put(wrapping(target + at), (value >> (at * I64{8})) & I64{255})
@@ -88,7 +88,7 @@ vault_validate_text: fn(text: I64, reason: Bool) -> Bool {
     same: jet_rt_string_eq(text, normalized)
     jet_rt_string_drop(normalized)
     if !same -> return false
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         cp: rt_text_decode(wrapping(data + at))
         width: rt_text_width(wrapping(data + at))
@@ -167,7 +167,7 @@ vault_record_equal: fn(left: I64, right: I64) -> Bool {
     if !jet_rt_string_eq(rt_text_word(wrapping(left + VAULT_RECORD_NAME)), rt_text_word(wrapping(right + VAULT_RECORD_NAME))) {
         return false
     }
-    at := VAULT_RECORD_TYPE
+    ^at: VAULT_RECORD_TYPE
     loop at < VAULT_RECORD_ORIGIN {
         if rt_text_word(wrapping(left + at)) != rt_text_word(wrapping(right + at)) -> return false
         at += I64{8}
@@ -204,7 +204,7 @@ vault_records_drop: fn(records: I64) {
     }
     count: rt_text_word(wrapping(records + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         vault_record_drop(rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
         at += I64{1}
@@ -236,7 +236,7 @@ vault_store_equal: fn(left: I64, right: I64) -> Bool {
     if count != rt_text_word(wrapping(bp + DATA_SEQUENCE_LENGTH)) -> return false
     ad: rt_text_word(wrapping(ap + DATA_SEQUENCE_DATA))
     bd: rt_text_word(wrapping(bp + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         if !jet_rt_string_eq(rt_text_word(wrapping(ad + at * VAULT_PAIR_BYTES)), rt_text_word(wrapping(bd + at * VAULT_PAIR_BYTES))) {
             return false
@@ -274,7 +274,7 @@ vault_push_u64: fn(target: I64, value: I64) {
 
 vault_debug_bytes: fn(target: I64, bytes: I64, length: I64) {
     rt_text_push_word(target, I64{91}, I64{1})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (at != I64{0}) { rt_text_push_word(target, I64{8236}, I64{2}) }  // ", "
         vault_push_u64(target, rt_text_byte(wrapping(bytes + at)))
@@ -427,7 +427,7 @@ vault_record_hash: fn(record: I64, digest: I64, scratch: I64) {
     rt_text_store(buffer, I64{7883868023223506506})  // "JVLT2 im"
     rt_text_store(wrapping(buffer + I64{8}), I64{2334391151659087213})  // "mutable "
     rt_text_store(wrapping(buffer + I64{16}), I64{110442657834354})  // "record"
-    cursor := I64{22}
+    ^cursor: I64{22}
     rt_text_put(wrapping(buffer + cursor), rt_text_word(wrapping(record + VAULT_RECORD_TYPE)))
     rt_text_put(wrapping(wrapping(buffer + cursor) + I64{1}), rt_text_word(wrapping(record + VAULT_RECORD_PROVENANCE)))
     cursor += I64{2}
@@ -526,7 +526,7 @@ vault_canonical_pairs: fn(pairs: I64, out: I64) -> I64 {
     indices: if (index_bytes == I64{0}) -> I64{8} else -> jet_rt_alloc(index_bytes, I64{8})
     second: indices + index_bytes /% I64{2}
     sorted: vault_sorted_indices(data, count, false, indices, second)
-    at := I64{1}
+    ^at: I64{1}
     loop at < count {
         previous: rt_text_word(rt_text_word(wrapping(sorted + (at - I64{1}) * DYN_ELEMENT_BYTES)))
         name: rt_text_word(rt_text_word(wrapping(sorted + at * DYN_ELEMENT_BYTES)))
@@ -536,7 +536,7 @@ vault_canonical_pairs: fn(pairs: I64, out: I64) -> I64 {
         }
         at += I64{1}
     }
-    length := I64{4}
+    ^length: I64{4}
     at = I64{0}
     loop at < count {
         pair: rt_text_word(wrapping(sorted + at * DYN_ELEMENT_BYTES))
@@ -556,7 +556,7 @@ vault_canonical_pairs: fn(pairs: I64, out: I64) -> I64 {
     canonical: data_sequence_new(length, RT_HOST_U8_STRIDE)
     encoded: rt_text_word(wrapping(canonical + DATA_SEQUENCE_DATA))
     vault_put_u32(encoded, count)
-    cursor := I64{4}
+    ^cursor: I64{4}
     at = I64{0}
     loop at < count {
         pair: rt_text_word(wrapping(sorted + at * DYN_ELEMENT_BYTES))
@@ -576,7 +576,7 @@ vault_canonical_pairs: fn(pairs: I64, out: I64) -> I64 {
     }
     visited: if sorted == indices -> second else -> indices
     if (count != I64{0}) { thread_zero(visited, count * DYN_ELEMENT_BYTES) }
-    first := I64{0}
+    ^first: I64{0}
     loop first < count {
         if (rt_text_word(wrapping(visited + first * DYN_ELEMENT_BYTES)) == I64{0}) {
             source_first: (rt_text_word(wrapping(sorted + first * DYN_ELEMENT_BYTES)) - data) /% VAULT_PAIR_BYTES
@@ -587,7 +587,7 @@ vault_canonical_pairs: fn(pairs: I64, out: I64) -> I64 {
             }
             saved_name: rt_text_word(wrapping(data + first * VAULT_PAIR_BYTES))
             saved_value: rt_text_word(wrapping(wrapping(data + first * VAULT_PAIR_BYTES) + I64{8}))
-            destination := first
+            ^destination: first
             loop {
                 rt_text_store(wrapping(visited + destination * DYN_ELEMENT_BYTES), I64{1})
                 source: (rt_text_word(wrapping(sorted + destination * DYN_ELEMENT_BYTES)) - data) /% VAULT_PAIR_BYTES
@@ -819,11 +819,11 @@ vault_lifecycle_unix_ms: fn(store: I64, out: I64) -> I64 {
         jet_rt_free(scratch, I64{80}, I64{8})
         return vault_error_new(I64{7}, I64{0}, I64{0})
     }
-    latest := rt_text_word(wrapping(scratch + I64{64}))
+    ^latest: rt_text_word(wrapping(scratch + I64{64}))
     records: rt_text_word(wrapping(store + VAULT_STORE_RECORDS))
     count: rt_text_word(wrapping(records + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         record: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))
         created: rt_text_word(wrapping(record + VAULT_RECORD_CREATED))
@@ -992,7 +992,7 @@ vault_ref_display: fn(reference: I64, debug: Bool) -> I64 {
     vault_push_u64(target, rt_text_word(wrapping(reference + VAULT_REF_GENERATION)))
     if debug {
         rt_text_push_word(target, I64{35}, I64{1})
-        at := I64{0}
+        ^at: I64{0}
         loop at < (I64{8}) {
             byte: rt_text_byte(wrapping(wrapping(reference + VAULT_REF_OPAQUE) + at /% I64{2}))
             nibble: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
@@ -1016,7 +1016,7 @@ vault_find: fn(store: I64, reference: I64, key_type: I64, out: I64) -> I64 {
     records: rt_text_word(wrapping(store + VAULT_STORE_RECORDS))
     count: rt_text_word(wrapping(records + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         record: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))
         if vault_ref_matches(record, reference) {
@@ -1040,7 +1040,7 @@ vault_find: fn(store: I64, reference: I64, key_type: I64, out: I64) -> I64 {
 vault_refs_drop: fn(references: I64) {
     count: rt_text_word(wrapping(references + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(references + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         vault_ref_drop(rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
         at += I64{1}
@@ -1055,9 +1055,9 @@ vault_key_query_inner: fn(store: I64, name: I64, key_type: I64, versions: Bool, 
     records: rt_text_word(wrapping(store + VAULT_STORE_RECORDS))
     count: rt_text_word(wrapping(records + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
-    at := I64{0}
-    matches := I64{0}
-    active := I64{0}
+    ^at: I64{0}
+    ^matches: I64{0}
+    ^active: I64{0}
     loop at < count {
         record: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))
         if jet_rt_string_eq(rt_text_word(wrapping(record + VAULT_RECORD_NAME)), name) {
@@ -1082,7 +1082,7 @@ vault_key_query_inner: fn(store: I64, name: I64, key_type: I64, versions: Bool, 
         // decoded rows have unique generations (seed1108-1113); reverse yields seed order.
         index_bytes: matches * I64{24}
         indices: jet_rt_alloc(index_bytes, I64{8})
-        cursor := I64{0}
+        ^cursor: I64{0}
         at = I64{0}
         loop at < count {
             record: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))
@@ -1203,7 +1203,7 @@ vault_key_access_at_root: fn(root: I64, reference: I64, key_type: I64, load: Boo
     }
     record: rt_text_word(wrapping(scratch + I64{48}))
     status: rt_text_word(wrapping(record + VAULT_RECORD_STATUS))
-    result := I64{0}
+    ^result: I64{0}
     if !load -> rt_text_store(out, vault_status_core(status)) else if (status == I64{3}) {
         result = vault_error_new(I64{3}, I64{0}, I64{0})
     } else {
@@ -1337,7 +1337,7 @@ vault_plan_operation: fn(plan: I64, key_type: I64, buffer: I64, scratch: I64) {
     rt_text_put(wrapping(buffer + I64{104}), key_type)
     vault_put_u16(wrapping(buffer + I64{105}), rt_text_len(name))
     rt_text_bytes_copy(wrapping(buffer + I64{107}), rt_text_data(name), rt_text_len(name))
-    at := I64{107} + rt_text_len(name)
+    ^at: I64{107} + rt_text_len(name)
     target: rt_text_word(wrapping(plan + VAULT_PLAN_TARGET))
     rt_text_put(wrapping(buffer + at), if (target == I64{0}) -> I64{0} else -> I64{1})
     at += I64{1}
@@ -1381,10 +1381,10 @@ vault_prepare_inner: fn(root: I64, name: I64, key_type: I64, action: I64, target
     records: rt_text_word(wrapping(store + VAULT_STORE_RECORDS))
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
     count: rt_text_word(wrapping(records + DATA_SEQUENCE_LENGTH))
-    any_name := false
-    active := I64{0}
-    maximum := I64{0}
-    at := I64{0}
+    ^any_name: false
+    ^active: I64{0}
+    ^maximum: I64{0}
+    ^at: I64{0}
     loop at < count {
         record: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))
         if jet_rt_string_eq(rt_text_word(wrapping(record + VAULT_RECORD_NAME)), name) {
@@ -1456,7 +1456,7 @@ vault_prepare_inner: fn(root: I64, name: I64, key_type: I64, action: I64, target
 // Adopts target/imported/reason, exactly once, whether preparation succeeds or
 // fails. Name is borrowed. Final plan allocation follows all seed checks.
 vault_prepare_at_root: fn(root: I64, name: I64, key_type: I64, action: I64, target: I64, imported: I64, reason: I64, out: I64) -> I64 {
-    error := I64{0}
+    ^error: I64{0}
     if !vault_validate_text(name, false) -> error = vault_error_new(I64{0}, I64{0}, I64{0}) else if ((action == I64{3} || action == I64{4} || action == I64{5}) && !vault_validate_text(reason, true)) {
         error = vault_error_new(I64{0}, I64{0}, I64{0})
     } else {
@@ -1497,7 +1497,7 @@ vault_preview_hash: fn(plan: I64, key_type: I64, reason: I64, out: I64, buffer: 
     vault_put_u64(wrapping(buffer + I64{73}), rt_text_word(wrapping(plan + VAULT_PLAN_REVISION)))
     vault_put_u16(wrapping(buffer + I64{81}), rt_text_len(name))
     rt_text_bytes_copy(wrapping(buffer + I64{83}), rt_text_data(name), rt_text_len(name))
-    at := I64{83} + rt_text_len(name)
+    ^at: I64{83} + rt_text_len(name)
     vault_put_u64(wrapping(buffer + at), rt_text_word(wrapping(plan + VAULT_PLAN_FROM)))
     vault_put_u64(wrapping(wrapping(buffer + at) + I64{8}), rt_text_word(wrapping(plan + VAULT_PLAN_TO)))
     vault_put_u16(wrapping(wrapping(buffer + at) + I64{16}), rt_text_len(lifecycle_reason))
@@ -1547,7 +1547,7 @@ vault_preview_text: fn(plan: I64, key_type: I64, reason: I64) -> I64 {
     vault_push_u64(target, rt_text_word(wrapping(plan + VAULT_PLAN_TO)))
     rt_text_push_word(target, I64{8030029676446378272}, I64{8})
     rt_text_push_word(target, I64{9140731657873779}, I64{7})
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{32}) {
         byte: rt_text_byte(wrapping(wrapping(plan + VAULT_PLAN_UUID) + at /% I64{2}))
         nibble: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
@@ -1669,7 +1669,7 @@ vault_commit_inner: fn(root: I64, plan: I64, write: I64, expected: I64, key_type
     length: rt_text_word(wrapping(records + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
     name: rt_text_word(wrapping(plan + VAULT_PLAN_NAME))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         record: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))
         if (jet_rt_string_eq(rt_text_word(wrapping(record + VAULT_RECORD_NAME)), name) && rt_text_word(wrapping(record + VAULT_RECORD_TYPE)) == key_type && rt_text_word(wrapping(record + VAULT_RECORD_STATUS)) == I64{1}) {
@@ -1696,7 +1696,7 @@ vault_commit_inner: fn(root: I64, plan: I64, write: I64, expected: I64, key_type
                 at += I64{1}
             }
         }
-        bytes := rt_text_word(wrapping(plan + VAULT_PLAN_IMPORTED))
+        ^bytes: rt_text_word(wrapping(plan + VAULT_PLAN_IMPORTED))
         if (bytes != I64{0}) {
             rt_text_store(wrapping(plan + VAULT_PLAN_IMPORTED), I64{0})
             if (rt_text_word(wrapping(bytes + DATA_SEQUENCE_LENGTH)) != I64{32}) {
@@ -1722,7 +1722,7 @@ vault_commit_inner: fn(root: I64, plan: I64, write: I64, expected: I64, key_type
         if (action != I64{1} && action != I64{3} && (!rt_text_equal_bytes(wrapping(scratch + I64{8304}), wrapping(plan + VAULT_PLAN_PUBLIC_HASH), I64{32}) || !rt_text_equal_bytes(wrapping(scratch + I64{8336}), wrapping(plan + VAULT_PLAN_KEY_DIGEST), I64{32}))) {
             return vault_error_new(I64{6}, I64{0}, I64{0})
         }
-        maximum := I64{0}
+        ^maximum: I64{0}
         at = I64{0}
         loop at < length {
             record: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))
@@ -1763,7 +1763,7 @@ vault_commit_inner: fn(root: I64, plan: I64, write: I64, expected: I64, key_type
     } else {
         target: rt_text_word(wrapping(plan + VAULT_PLAN_TARGET))
         if (target == I64{0}) { return vault_error_new(I64{1}, I64{0}, I64{0}) }
-        found := I64{0}
+        ^found: I64{0}
         at = I64{0}
         loop at < length {
             record: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))

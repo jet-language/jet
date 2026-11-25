@@ -285,7 +285,7 @@ queue_state: fn(delivery: ^^Delivery) -[Env, FS.Read, FS.Write, Time]> String {
 backend_worker: fn() { log.info_fields("backend.worker", [log.counter("invocations", 1)]) }
 
 durable_queue: fn(state_path: String, payload: String, key: String) -> QueueReceipt {
-    tree := service.tree("backend-battery")
+    ^tree: service.tree("backend-battery")
     tree.set_delivery(service.delivery_durable()) ?? panic("service.delivery_durable")
     store: service.state_store(state_path) ?? panic("service.state_store")
     tree.set_state_event_log(store, "backend-events", 1, "reversible") ?? panic("service.event_log")
@@ -386,7 +386,7 @@ load_one: fn(address: String) -> LoadSample {
 }
 
 load_worker: fn(address: String, count: Int, sender: Sender<LoadSample>) {
-    index := 0
+    ^index: 0
     loop index < count {
         sender.send(load_one(address))
         index += 1
@@ -395,20 +395,20 @@ load_worker: fn(address: String, count: Int, sender: Sender<LoadSample>) {
 
 percentile: fn(samples: [Int], percent: Int) -> Int {
     if samples.len() == 0 -> return 0
-    ordered := samples.copy()
+    ^ordered: samples.copy()
     ordered.sort()
     index: (ordered.len() - 1) * percent /% 100
     return ordered[index]
 }
 
 load_test: fn(address: String) -> LoadSummary {
-    users := 1000
-    worker_limit := 32
+    ^users: 1000
+    ^worker_limit: 32
     {sender, receiver}: channel<LoadSample>(capacity: users)
-    workers := [Task<()>]{}
-    worker := 0
+    ^workers: [Task<()>]{}
+    ^worker: 0
     loop worker < worker_limit {
-        count := users /% worker_limit
+        ^count: users /% worker_limit
         if worker < users % worker_limit -> count += 1
         tx: sender.copy()
         addr: address.copy()
@@ -424,12 +424,12 @@ load_test: fn(address: String) -> LoadSummary {
         handle.join() ?? panic("load worker join")
     }
     sender.close()
-    raw := [LoadSample]{}
+    ^raw: [LoadSample]{}
     loop sample in receiver -> raw.push(sample)
-    samples := [Int]{}
-    ok := 0
-    errors := 0
-    transport_errors := 0
+    ^samples: [Int]{}
+    ^ok: 0
+    ^errors: 0
+    ^transport_errors: 0
     loop sample in raw {
         samples.push(sample.latency_ms)
         if sample.status >= 200 && sample.status < 300 -> ok += 1

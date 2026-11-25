@@ -104,11 +104,11 @@ x509_crl_get_ext: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf x509.X509Err
     ext: x509.x509_get_ext(data, p, end, 0)
     exts_end: ext.p + ext.len
     loop p < exts_end {
-        len := asn1.get_tag(data, p, exts_end, X509CRL_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+        ^len: asn1.get_tag(data, p, exts_end, X509CRL_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
         end_ext_data: p + len
         len = asn1.get_tag(data, p, end_ext_data, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
         p += len
-        is_critical := false
+        ^is_critical: false
         if asn1.get_bool(data, p, end_ext_data) == {
             .Ok(b) -> { is_critical = b }
             .Err(e) -> {
@@ -128,7 +128,7 @@ x509_crl_get_ext: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf x509.X509Err
 // Extension only checked to be a SEQUENCE.
 x509_crl_get_entry_ext: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
     if end <= p -> return Ok(asn1.asn1_none())
-    ext := asn1.ASN1Buf{tag_id: Int{data[p]}, p: p, len: 0}
+    ^ext: asn1.ASN1Buf{tag_id: Int{data[p]}, p: p, len: 0}
     if asn1.get_tag(data, p, end, X509CRL_SEQUENCE) == {
         .Ok(len) -> { ext.len = len }
         .Err(e) -> {
@@ -148,7 +148,7 @@ x509_crl_get_entry_ext: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf x509.X
 // x509_get_entries: the optional revokedCertificates. A malformed SEQUENCE
 // fails with the bare ASN.1 code, as mbedtls returns it.
 x509_crl_get_entries: fn(data: [U8], p: ^Int, end: Int) -> [X509CrlEntry] x509.X509Error! {
-    entries := [X509CrlEntry]{}
+    ^entries: [X509CrlEntry]{}
     if p == end -> return Ok(entries)
     entry_len: if asn1.get_tag(data, p, end, X509CRL_SEQUENCE) == {
         .Ok(len) -> len
@@ -174,11 +174,11 @@ x509_crl_get_entries: fn(data: [U8], p: ^Int, end: Int) -> [X509CrlEntry] x509.X
 // mbedtls_x509_crl_parse_der's body: one CRL filling all of buf.
 x509_crl_parse_der_core: fn(buf: [U8]) -> X509Crl x509.X509Error! {
     if buf.len() == 0 -> return Err(.InvalidFormat(None))
-    crl := x509_crl_new()
+    ^crl: x509_crl_new()
     data: buf.copy()
-    p := 0
+    ^p: 0
     raw_end: data.len()
-    len := asn1.get_tag(data, p, raw_end, X509CRL_SEQUENCE) ?? return Err(.InvalidFormat(None))
+    ^len: asn1.get_tag(data, p, raw_end, X509CRL_SEQUENCE) ?? return Err(.InvalidFormat(None))
     if len != raw_end - p -> return Err(.InvalidFormat(Val(.LengthMismatch)))
     crl.tbs.p = p
     len = asn1.get_tag(data, p, raw_end, X509CRL_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
@@ -238,8 +238,8 @@ x509_crl_parse_der: fn(chain: ^[X509Crl], buf: [U8]) x509.X509Error! {
 /// and parse until no text is left, the CRLs before a failure staying in
 /// the chain.
 x509_crl_parse: fn(chain: ^[X509Crl], buf: [U8]) x509.X509Error! {
-    is_pem := false
-    rest := buf.copy()
+    ^is_pem: false
+    ^rest: buf.copy()
     loop {
         if pem.pem_read_buffer(X509CRL_PEM_BEGIN, X509CRL_PEM_END, rest, None) == {
             .Ok(block) -> {
@@ -263,7 +263,7 @@ x509_crl_parse: fn(chain: ^[X509Crl], buf: [U8]) x509.X509Error! {
 /// (mbedtls_x509_crl_info).
 x509_crl_info: fn(prefix: String, crl: X509Crl) -> [U8] x509.X509Error! {
     data: crl.raw
-    out := [U8]{}
+    ^out: [U8]{}
     out.extend("{prefix}CRL version   : {crl.version}".bytes())
     out.extend("\n{prefix}issuer name   : ".bytes())
     out.extend(x509.x509_dn_gets(crl.issuer))

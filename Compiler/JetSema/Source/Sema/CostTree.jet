@@ -33,7 +33,7 @@ tree_expr_known_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
         .Local(local) -> return local.integer_bounds
         .Unary(op, operand) -> {
             if op != TUnaryOp.Neg -> return None
-            literal := tree_expr_literal_integer(operand)
+            ^literal: tree_expr_literal_integer(operand)
             if operand.kind == .NumericMethod(receiver, operation) {
                 if operation == .CheckedIntToFixed(_, _) {
                     literal = tree_expr_literal_integer(receiver)
@@ -51,7 +51,7 @@ tree_expr_known_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
 checked_cost_integer_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
     known: tree_expr_known_bounds(expression)
     if known != None -> return known
-    bounds := TIntegerBounds?{None}
+    ^bounds: TIntegerBounds?{None}
     if expression.kind == {
         .CtLit(value) -> {
             if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
@@ -78,7 +78,7 @@ checked_cost_integer_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
             }
         }
         .OrFallback(value, fallback, _) -> {
-            success := TIntegerBounds?{None}
+            ^success: TIntegerBounds?{None}
             if value.ty == {
                 .Option(inner) -> { success = checked_cost_type_bounds(inner) }
                 .Result(ok, _) -> success = checked_cost_type_bounds(ok)

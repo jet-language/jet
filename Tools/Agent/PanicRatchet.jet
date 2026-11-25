@@ -58,11 +58,13 @@ ProvenRow: struct {
 }
 
 phase_sources: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
-    argv := [String]{"git", "ls-files", "--"}
+    ^argv: [String]{"git", "ls-files", "--"}
     loop phase in PHASES -> argv.push("Compiler/{phase}/Source")
     receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(RatchetError{message: "cannot run git ls-files: {err}"})
-    if receipt.code != 0 -> return Err(RatchetError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
-    paths := [String]{}
+    if receipt.code != 0 {
+        return Err(RatchetError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
+    }
+    ^paths: [String]{}
     loop path in receipt.output.split("\n") {
         if path.ends_with(".jet") -> paths.push(path.copy())
     }
@@ -96,8 +98,8 @@ fence_at: fn(bytes: [U8], at: Int, fence: Int) -> Bool Never! {
 // `\` escapes the byte after it; a triple-quoted string and a backtick fence
 // run to their close.
 code_bytes: fn(source: String) -> [U8] Never! {
-    out := source.bytes()
-    at := 0
+    ^out: source.bytes()
+    ^at: 0
     loop at < out.len() {
         code: byte_at(out, at)
         if {
@@ -107,7 +109,7 @@ code_bytes: fn(source: String) -> [U8] Never! {
                 blank(out, start, at)
             }
             code == 96 -> {
-                fence := 0
+                ^fence: 0
                 loop byte_at(out, at + fence) == 96 -> fence += 1
                 start: at + fence
                 at = start
@@ -166,8 +168,8 @@ name_byte: fn(code: Int) -> Bool Never! {
 // unescaped quote, or "" when the first argument is no string literal.
 stop_message: fn(line: [U8], open: Int) -> String Never! {
     if byte_at(line, open) != 34 -> return ""
-    message := [U8]{}
-    escaped := false
+    ^message: [U8]{}
+    ^escaped: false
     first: open + 1
     loop at in first..<line.len() {
         byte: line[at]
@@ -183,11 +185,15 @@ stop_message: fn(line: [U8], open: Int) -> String Never! {
 line_stops: fn(code: [U8], line: [U8]) -> [String] Never! {
     panic_word: "panic(".bytes()
     unreachable_word: "unreachable(".bytes()
-    messages := [String]{}
+    ^messages: [String]{}
     loop at in 0..<code.len() {
         if name_byte(byte_at(code, at - 1)) -> next
-        if spells_at(code, at, panic_word) -> messages.push(stop_message(line, at + panic_word.len()))
-        if spells_at(code, at, unreachable_word) -> messages.push(stop_message(line, at + unreachable_word.len()))
+        if spells_at(code, at, panic_word) {
+            messages.push(stop_message(line, at + panic_word.len()))
+        }
+        if spells_at(code, at, unreachable_word) {
+            messages.push(stop_message(line, at + unreachable_word.len()))
+        }
     }
     messages
 }
@@ -198,8 +204,8 @@ line_stops: fn(code: [U8], line: [U8]) -> [String] Never! {
 stop_messages: fn(source: String) -> [String] Never! {
     lines: source.split("\n").to_list()
     codes: (String.from_bytes(code_bytes(source)) ?? "").split("\n").to_list()
-    messages := [String]{}
-    in_test := false
+    ^messages: [String]{}
+    ^in_test: false
     loop index in 0..<lines.len() {
         code: if index < codes.len() -> codes[index] else -> ""
         if in_test {
@@ -217,7 +223,7 @@ stop_messages: fn(source: String) -> [String] Never! {
 
 // Each phase file's stop messages, for the files that have any.
 live_stops: fn() -[Exec, FS, IO, Time.Wait]> [String:[String]] RatchetError! {
-    stops := [String:[String]]{}
+    ^stops: [String:[String]]{}
     loop path in phase_sources() ?? return Err(err) {
         source: files.read(path) ?? return Err(RatchetError{message: "cannot read {path}: {err}"})
         messages: stop_messages(source)
@@ -228,7 +234,7 @@ live_stops: fn() -[Exec, FS, IO, Time.Wait]> [String:[String]] RatchetError! {
 
 // The BASELINE rows of `text`; a line is `path<TAB>count`.
 parse_baseline: fn(text: String) -> [String:Int] RatchetError! {
-    rows := [String:Int]{}
+    ^rows: [String:Int]{}
     loop line in text.split("\n") {
         if line.trim() == "" -> next
         cells: line.partition("\t")
@@ -239,7 +245,7 @@ parse_baseline: fn(text: String) -> [String:Int] RatchetError! {
 }
 
 render_baseline: fn(counts: [String:Int]) -> String Never! {
-    paths := counts.keys().to_list()
+    ^paths: counts.keys().to_list()
     paths.sort()
     lines: loop path in paths -> "{path}\t{counts.get(path) ?? 0}"
     if lines.len() == 0 -> return ""
@@ -249,7 +255,7 @@ render_baseline: fn(counts: [String:Int]) -> String Never! {
 // The PROVEN rows of `text`; a line that is no four-cell row with a reason
 // is a problem.
 parse_proven: fn(text: String, problems: ^[String]) -> [ProvenRow] Never! {
-    rows := [ProvenRow]{}
+    ^rows: [ProvenRow]{}
     loop line in text.split("\n") {
         if line.trim() == "" || line.starts_with("#") -> next
         cells: line.split("\t").to_list()
@@ -273,7 +279,7 @@ declares: fn(source: String, symbol: String) -> Bool Never! {
 // How many of `path`'s stops in `stops` say `message`.
 stops_saying: fn(stops: [String:[String]], path: String, message: String) -> Int Never! {
     found: stops.get(path) ?? return 0
-    count := 0
+    ^count: 0
     loop said in found {
         if said == message -> count += 1
     }
@@ -283,8 +289,8 @@ stops_saying: fn(stops: [String:[String]], path: String, message: String) -> Int
 // A line per PROVEN row whose stop or citation does not hold. `cited` maps
 // each cited file that exists to its text.
 proven_problems: fn(rows: [ProvenRow], stops: [String:[String]], cited: [String:String]) -> [String] Never! {
-    problems := [String]{}
-    seen := [String]{}
+    ^problems: [String]{}
+    ^seen: [String]{}
     loop row in rows {
         key: "{row.path}\t{row.message}"
         if seen.contains(key) {
@@ -293,8 +299,12 @@ proven_problems: fn(rows: [ProvenRow], stops: [String:[String]], cited: [String:
         }
         seen.push(key)
         named: stops_saying(stops, row.path, row.message)
-        if named == 0 -> problems.push("{PROVEN}: no stop in {row.path} says `{row.message}`; delete the row")
-        if named > 1 -> problems.push("{PROVEN}: {named} stops in {row.path} say `{row.message}`; give each its own message and row")
+        if named == 0 {
+            problems.push("{PROVEN}: no stop in {row.path} says `{row.message}`; delete the row")
+        }
+        if named > 1 {
+            problems.push("{PROVEN}: {named} stops in {row.path} say `{row.message}`; give each its own message and row")
+        }
         target: row.citation.partition(":")
         if target.head == "" || target.tail == "" {
             problems.push("{PROVEN}: `{row.message}` in {row.path} cites `{row.citation}`, not the `file:symbol` of the check that rules it out")
@@ -313,13 +323,13 @@ proven_problems: fn(rows: [ProvenRow], stops: [String:[String]], cited: [String:
 
 // Each file's count of the stops in `stops` that no PROVEN row names.
 unproven_counts: fn(stops: [String:[String]], rows: [ProvenRow]) -> [String:Int] Never! {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     paths: stops.keys().to_list()
     loop path in paths {
-        count := 0
+        ^count: 0
         found: stops.get(path) ?? [String]{}
         loop message in found {
-            proven := false
+            ^proven: false
             loop row in rows {
                 if row.path == path && row.message == message -> proven = true
             }
@@ -332,9 +342,9 @@ unproven_counts: fn(stops: [String:[String]], rows: [ProvenRow]) -> [String:Int]
 
 // A line per file over its baseline row.
 over_rows: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
-    paths := counts.keys().to_list()
+    ^paths: counts.keys().to_list()
     paths.sort()
-    over := [String]{}
+    ^over: [String]{}
     loop path in paths {
         count: counts.get(path) ?? 0
         limit: baseline.get(path) ?? 0
@@ -347,9 +357,9 @@ over_rows: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
 
 // A line per baseline row above its file's live count.
 under_rows: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
-    paths := baseline.keys().to_list()
+    ^paths: baseline.keys().to_list()
     paths.sort()
-    under := [String]{}
+    ^under: [String]{}
     loop path in paths {
         count: counts.get(path) ?? 0
         limit: baseline.get(path) ?? 0
@@ -362,13 +372,13 @@ under_rows: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! 
 
 panic_ratchet_main: fn(write: Bool) -[Exec, FS, IO, Time.Wait]> Int RatchetError! {
     stops: live_stops() ?? return Err(err)
-    problems := [String]{}
-    proven := [ProvenRow]{}
+    ^problems: [String]{}
+    ^proven: [ProvenRow]{}
     if files.is_file(PROVEN) {
         text: files.read(PROVEN) ?? return Err(RatchetError{message: "cannot read {PROVEN}: {err}"})
         proven = parse_proven(text, problems)
     }
-    cited := [String:String]{}
+    ^cited: [String:String]{}
     loop row in proven {
         file: row.citation.partition(":").head
         if file == "" || cited.get(file) != None || !files.is_file(file) -> next
@@ -377,20 +387,18 @@ panic_ratchet_main: fn(write: Bool) -[Exec, FS, IO, Time.Wait]> Int RatchetError
     problems.extend(proven_problems(proven, stops, cited))
     counts: unproven_counts(stops, proven)
     seeded: files.is_file(BASELINE)
-    baseline := [String:Int]{}
+    ^baseline: [String:Int]{}
     if seeded {
         text: files.read(BASELINE) ?? return Err(RatchetError{message: "cannot read {BASELINE}: {err}"})
         baseline = parse_baseline(text) ?? return Err(err)
     }
     over: if seeded || !write -> over_rows(counts, baseline) else -> [String]{}
-    under := [String]{}
+    ^under: [String]{}
     if write && over.len() == 0 && problems.len() == 0 {
         files.write(BASELINE, render_baseline(counts)) ?? return Err(RatchetError{message: "cannot write {BASELINE}: {err}"})
-    } else {
-        under = under_rows(counts, baseline)
-    }
+    } else { under = under_rows(counts, baseline) }
     if over.len() == 0 && under.len() == 0 && problems.len() == 0 {
-        total := 0
+        ^total: 0
         loop path in counts.keys() -> total += counts.get(path) ?? 0
         print("panic-ratchet: ok ({total} panic or unreachable call(s) in {counts.len()} compiler phase file(s) remain in {BASELINE}; {proven.len()} proven unreachable in {PROVEN})")
         return Ok(0)
@@ -438,7 +446,7 @@ run: fn() {
 #Test("the baseline only falls") {
     baseline: parse_baseline("Compiler/JetSema/Source/A.jet\t2\n") ?? panic("parse: {err.message}")
     assert_eq(render_baseline(baseline), "Compiler/JetSema/Source/A.jet\t2\n")
-    live := [String:Int]{}
+    ^live: [String:Int]{}
     live["Compiler/JetSema/Source/A.jet"] = 3
     live["Compiler/JetIR/Source/B.jet"] = 1
     assert_eq(over_rows(live, baseline).len(), 2)
@@ -449,14 +457,14 @@ run: fn() {
 }
 
 #Test("a proven row names one live stop, cites a declared check, and leaves the count") {
-    problems := [String]{}
+    ^problems: [String]{}
     text: "# a note\nA.jet\tleft\tB.jet:rule\tthe rule rejects it first\nA.jet\tgone\tB.jet:rule\twhy\nA.jet\ttwice\tB.jet:rule\twhy\nA.jet\tleft\tB.jet:rule\twhy\nA.jet\tunknown\tB.jet:missing\twhy\nA.jet\tmoved\tC.jet:rule\twhy\nA.jet\tbare\tB.jet\twhy\nA.jet\tsilent\tB.jet:rule\t \n"
     rows: parse_proven(text, problems)
     assert_eq(problems.len(), 1)
     assert_eq(rows.len(), 7)
-    stops := [String:[String]]{}
+    ^stops: [String:[String]]{}
     stops["A.jet"] = [String]{"left", "twice", "twice", "unknown", "moved", "bare", "open"}
-    cited := [String:String]{}
+    ^cited: [String:String]{}
     cited["B.jet"] = "// rule: a comment\npriv rule: fn() {{}}\n"
     // gone, twice, listed twice, missing symbol, missing file, no symbol.
     assert_eq(proven_problems(rows, stops, cited).len(), 6)

@@ -87,7 +87,7 @@ ARIAKey: struct {
 
     impl Close {
         close: fn(^^self) {
-            rk := self.rk.move()
+            ^rk: self.rk.move()
             loop i in 0..<rk.len() -> rk[i] = U32{0}
         }
     }
@@ -138,18 +138,18 @@ aria_p3: fn(x: U32) -> U32 Never! {
 
 // The affine diffusion layer A on the four words at s[at..] (aria_a).
 aria_a: fn(s: ^[U32], at: Int) Never! {
-    a := s[at]
-    b := s[at + 1]
-    c := s[at + 2]
-    d := s[at + 3]
-    ta := b
+    ^a: s[at]
+    ^b: s[at + 1]
+    ^c: s[at + 2]
+    ^d: s[at + 3]
+    ^ta: b
     b = a
     a = aria_p2(ta)
-    tb := aria_p2(d)
+    ^tb: aria_p2(d)
     d = aria_p1(c)
     c = aria_p1(tb)
     ta ~= d
-    tc := aria_p2(b)
+    ^tc: aria_p2(b)
     ta = aria_p1(ta) ~ tc ~ c
     tb ~= aria_p2(d)
     tc ~= aria_p1(a)
@@ -210,8 +210,8 @@ aria_fe_xor: fn(w: ^[U32], r: Int, p: Int, ck: Int, x: Int, t: ^[U32]) Never! {
 aria_rot128: fn(rk: ^[U32], r: Int, w: [U32], a: Int, b: Int, n: Int) Never! {
     n1: n %% 32
     n2: if n1 != 0 -> 32 - n1 else -> 0
-    j := (n /% 32) %% 4
-    t := aria_p3(w[b + j])
+    ^j: (n /% 32) %% 4
+    ^t: aria_p3(w[b + j])
     loop i in 0..<4 {
         j = (j + 1) %% 4
         u: aria_p3(w[b + j])
@@ -225,18 +225,18 @@ aria_rot128: fn(rk: ^[U32], r: Int, w: [U32], a: Int, b: Int, n: Int) Never! {
 aria_setkey_enc: fn(key: [#Secret U8]) -> ARIAKey BlockError! {
     bits: 8 * key.len()
     if bits != 128 && bits != 192 && bits != 256 -> return Err(.BadInputData)
-    w := des.subkeys(16)
+    ^w: des.subkeys(16)
     loop i in 0..<4 -> w[i] = get_le32(key, 4 * i)
     loop i in 0..<((bits - 128) /% 32) -> w[4 + i] = get_le32(key, 16 + 4 * i)
-    t := des.subkeys(4)
-    i := (bits - 128) >> 6
+    ^t: des.subkeys(4)
+    ^i: (bits - 128) >> 6
     nr: 12 + 2 * i
     aria_fo_xor(w, 4, 0, i, 4, t)
     i = if i < 2 -> i + 1 else -> 0
     aria_fe_xor(w, 8, 4, i, 0, t)
     i = if i < 2 -> i + 1 else -> 0
     aria_fo_xor(w, 12, 8, i, 4, t)
-    rk := des.subkeys(68)
+    ^rk: des.subkeys(68)
     loop k in 0..<4 {
         next_w: 4 * ((k + 1) %% 4)
         aria_rot128(rk, 4 * k, w, 4 * k, next_w, 128 - 19)
@@ -254,9 +254,9 @@ aria_setkey_enc: fn(key: [#Secret U8]) -> ARIAKey BlockError! {
 /// An ARIA key schedule for decryption: the encryption round keys in
 /// reverse order, the middle ones through A (mbedtls_aria_setkey_dec).
 aria_setkey_dec: fn(key: [U8]) -> ARIAKey BlockError! {
-    k := aria_setkey_enc(key)
-    i := 0
-    j := k.nr
+    ^k: aria_setkey_enc(key)
+    ^i: 0
+    ^j: k.nr
     loop i < j {
         loop c in 0..<4 {
             t: k.rk[4 * i + c]
@@ -277,7 +277,7 @@ aria_add_key: fn(s: ^[U32], rk: [U32], round: Int) Never! {
 // One block in place through the key's rounds (mbedtls_aria_crypt_ecb).
 aria_block: fn(k: ARIAKey, s: ^[U32], b: ^[U8]) Never! {
     loop c in 0..<4 -> s[c] = get_le32(b, 4 * c)
-    i := 0
+    ^i: 0
     loop {
         aria_add_key(s, k.rk, i)
         i += 1
@@ -305,7 +305,7 @@ CamelliaKey: struct {
 
     impl Close {
         close: fn(^^self) {
-            rk := self.rk.move()
+            ^rk: self.rk.move()
             loop i in 0..<rk.len() -> rk[i] = U32{0}
         }
     }
@@ -577,8 +577,8 @@ rotl1: fn(x: U32) -> U32 Never! { (x << 1) | x >> 31 }
 
 // s[z..z + 2] ^= F(s[x..x + 2], k0 k1) (camellia_feistel).
 camellia_feistel: fn(s: ^[U32], x: Int, k0: U32, k1: U32, z: Int) Never! {
-    a := s[x] ~ k0
-    b := s[x + 1] ~ k1
+    ^a: s[x] ~ k0
+    ^b: s[x + 1] ~ k1
     a = (sbox(CAMELLIA_SB1, a, 24) << 24) | sbox(CAMELLIA_SB2, a, 16) << 16 | sbox(CAMELLIA_SB3, a, 8) << 8 | sbox(CAMELLIA_SB4, a, 0)
     b = (sbox(CAMELLIA_SB2, b, 24) << 24) | sbox(CAMELLIA_SB3, b, 16) << 16 | sbox(CAMELLIA_SB4, b, 8) << 8 | sbox(CAMELLIA_SB1, b, 0)
     a ~= (b << 8) | b >> 24
@@ -597,13 +597,13 @@ camellia_setkey_enc: fn(key: [#Secret U8]) -> CamelliaKey BlockError! {
     if bits != 128 && bits != 192 && bits != 256 -> return Err(.BadInputData)
     nr: if bits == 128 -> 3 else -> 4
     idx: if bits == 128 -> 0 else -> 1
-    t := cipher.zero_bytes(32)
+    ^t: cipher.zero_bytes(32)
     loop i in 0..<key.len() -> t[i] = key[i]
     if bits == 192 {
         loop i in 0..<8 -> t[24 + i] = ~t[16 + i]
     }
     // KL, KR, KA, KB.
-    kc := des.subkeys(16)
+    ^kc: des.subkeys(16)
     loop i in 0..<8 -> kc[i] = des.get_be32(t, 4 * i)
     loop i in 0..<4 -> kc[8 + i] = kc[i] ~ kc[4 + i]
     camellia_feistel(kc, 8, sigma(0), sigma(1), 10)
@@ -616,8 +616,8 @@ camellia_setkey_enc: fn(key: [#Secret U8]) -> CamelliaKey BlockError! {
         camellia_feistel(kc, 12, sigma(8), sigma(9), 14)
         camellia_feistel(kc, 14, sigma(10), sigma(11), 12)
     }
-    rk := des.subkeys(68)
-    tk := des.subkeys(20)
+    ^rk: des.subkeys(68)
+    ^tk: des.subkeys(20)
     loop part in 0..<4 {
         // KR and KB exist only for the longer keys (SHIFT_AND_PLACE).
         if bits == 128 && (part == 1 || part == 3) -> next
@@ -650,9 +650,9 @@ camellia_setkey_enc: fn(key: [#Secret U8]) -> CamelliaKey BlockError! {
 camellia_setkey_dec: fn(key: [U8]) -> CamelliaKey BlockError! {
     enc: camellia_setkey_enc(key)
     idx: if enc.nr == 4 -> 1 else -> 0
-    rk := des.subkeys(68)
-    r := 0
-    sk := 48 + 16 * idx
+    ^rk: des.subkeys(68)
+    ^r: 0
+    ^sk: 48 + 16 * idx
     loop _ in 0..<4 {
         rk[r] = enc.rk[sk]
         r += 1
@@ -678,8 +678,8 @@ camellia_setkey_dec: fn(key: [U8]) -> CamelliaKey BlockError! {
 // the direction is the schedule's).
 camellia_block: fn(k: CamelliaKey, s: ^[U32], b: ^[U8]) Never! {
     loop c in 0..<4 -> s[c] = des.get_be32(b, 4 * c) ~ k.rk[c]
-    r := 4
-    groups := k.nr
+    ^r: 4
+    ^groups: k.nr
     loop groups > 0 {
         groups -= 1
         loop _ in 0..<3 {
@@ -709,8 +709,8 @@ camellia_block: fn(k: CamelliaKey, s: ^[U32], b: ^[U8]) Never! {
 /// (mbedtls_aria_crypt_ecb, mbedtls_camellia_crypt_ecb).
 block_crypt_ecb: fn<K: Block128>(k: K, block: [U8]) -> [U8] BlockError! {
     if block.len() != BLOCK_SIZE -> return Err(.InvalidInputLength)
-    s := des.subkeys(4)
-    out := block.copy()
+    ^s: des.subkeys(4)
+    ^out: block.copy()
     k.crypt_block(s, out)
     wipe_u32s(s)
     Ok(out)
@@ -721,9 +721,9 @@ block_crypt_ecb: fn<K: Block128>(k: K, block: [U8]) -> [U8] BlockError! {
 /// mbedtls_camellia_crypt_cbc).
 block_crypt_cbc: fn<K: Block128>(k: K, mode: BlockMode, iv: ^[U8], input: [U8]) -> [U8] BlockError! {
     if input.len() %% BLOCK_SIZE != 0 || iv.len() != BLOCK_SIZE -> return Err(.InvalidInputLength)
-    s := des.subkeys(4)
-    out := cipher.zero_bytes(input.len())
-    buf := cipher.zero_bytes(BLOCK_SIZE)
+    ^s: des.subkeys(4)
+    ^out: cipher.zero_bytes(input.len())
+    ^buf: cipher.zero_bytes(BLOCK_SIZE)
     loop b in 0..<(input.len() /% BLOCK_SIZE) {
         at: BLOCK_SIZE * b
         if mode == {
@@ -754,10 +754,10 @@ block_crypt_cbc: fn<K: Block128>(k: K, mode: BlockMode, iv: ^[U8], input: [U8]) 
 /// are used, and it ends holding the new offset (mbedtls_aria_crypt_cfb128,
 /// mbedtls_camellia_crypt_cfb128).
 block_crypt_cfb128: fn<K: Block128>(k: K, mode: BlockMode, iv_off: ^Int, iv: ^[U8], input: [U8]) -> [U8] BlockError! {
-    n := iv_off
+    ^n: iv_off
     if n < 0 || n >= BLOCK_SIZE || iv.len() != BLOCK_SIZE -> return Err(.BadInputData)
-    s := des.subkeys(4)
-    out := cipher.zero_bytes(input.len())
+    ^s: des.subkeys(4)
+    ^out: cipher.zero_bytes(input.len())
     loop i in 0..<input.len() {
         if n == 0 -> k.crypt_block(s, iv)
         c: input[i]
@@ -775,12 +775,12 @@ block_crypt_cfb128: fn<K: Block128>(k: K, mode: BlockMode, iv_off: ^Int, iv: ^[U
 /// `nc_off` the bytes of it used; it ends holding the new offset
 /// (mbedtls_aria_crypt_ctr, mbedtls_camellia_crypt_ctr).
 block_crypt_ctr: fn<K: Block128>(k: K, nc_off: ^Int, nonce_counter: ^[U8], stream_block: ^[U8], input: [U8]) -> [U8] BlockError! {
-    n := nc_off
+    ^n: nc_off
     if n < 0 || n >= BLOCK_SIZE || nonce_counter.len() != BLOCK_SIZE || stream_block.len() != BLOCK_SIZE {
         return Err(.BadInputData)
     }
-    s := des.subkeys(4)
-    out := cipher.zero_bytes(input.len())
+    ^s: des.subkeys(4)
+    ^out: cipher.zero_bytes(input.len())
     loop i in 0..<input.len() {
         if n == 0 {
             loop c in 0..<BLOCK_SIZE -> stream_block[c] = nonce_counter[c]
@@ -801,7 +801,7 @@ block_crypt_ctr: fn<K: Block128>(k: K, nc_off: ^Int, nonce_counter: ^[U8], strea
 // must hold an encryption schedule (aria_setkey_enc, camellia_setkey_enc).
 
 forward_one: fn<K: Block128>(k: K, b: ^[U8]) Never! {
-    s := des.subkeys(4)
+    ^s: des.subkeys(4)
     k.crypt_block(s, b)
     wipe_u32s(s)
 }
@@ -811,8 +811,8 @@ forward_ctr32: fn<K: Block128>(k: K, ctr: ^[U8], src: [U8], off: Int, count: Int
         return
     }
     cipher.reserve(out, count * BLOCK_SIZE)
-    s := des.subkeys(4)
-    ks := cipher.zero_bytes(BLOCK_SIZE)
+    ^s: des.subkeys(4)
+    ^ks: cipher.zero_bytes(BLOCK_SIZE)
     loop b in 0..<count {
         loop i in 0..<BLOCK_SIZE -> ks[i] = ctr[i]
         k.crypt_block(s, ks)
@@ -829,7 +829,7 @@ forward_cbc: fn<K: Block128>(k: K, iv: ^[U8], src: [U8], off: Int, count: Int, o
         return
     }
     cipher.reserve(out, count * BLOCK_SIZE)
-    s := des.subkeys(4)
+    ^s: des.subkeys(4)
     loop b in 0..<count {
         at: off + BLOCK_SIZE * b
         loop i in 0..<BLOCK_SIZE -> iv[i] = iv[i] ~ src[at + i]
@@ -1220,36 +1220,36 @@ CAMELLIA_SIGMA: [U8]{
     c_dec: camellia_setkey_dec(c_key) ?? panic("key")
     assert((block_crypt_ecb(c_dec, c_ct) ?? panic("ecb")) == c_key)
     // CBC, CFB128 and CTR round trips, with the streams split mid-block.
-    two := plain.copy()
+    ^two: plain.copy()
     loop b in key -> two.push(b)
-    iv := c_key.copy()
+    ^iv: c_key.copy()
     sealed: block_crypt_cbc(c_enc, .Encrypt, iv, two) ?? panic("cbc")
-    iv2 := c_key.copy()
+    ^iv2: c_key.copy()
     assert((block_crypt_cbc(c_dec, .Decrypt, iv2, sealed) ?? panic("cbc")) == two)
     assert(iv == iv2)
     assert(block_crypt_cbc(a_enc, .Encrypt, iv, [U8]{1, 2, 3}) == .Err(.InvalidInputLength))
-    off := 0
-    civ := c_key.copy()
+    ^off: 0
+    ^civ: c_key.copy()
     head: block_crypt_cfb128(a_enc, .Encrypt, off, civ, cipher.bytes_of(two, 0, 5)) ?? panic("cfb")
     tail: block_crypt_cfb128(a_enc, .Encrypt, off, civ, cipher.bytes_of(two, 5, two.len() - 5)) ?? panic("cfb")
     assert(off == (two.len() %% 16))
-    whole := head.copy()
+    ^whole: head.copy()
     loop b in tail -> whole.push(b)
-    doff := 0
-    div := c_key.copy()
+    ^doff: 0
+    ^div: c_key.copy()
     assert((block_crypt_cfb128(a_enc, .Decrypt, doff, div, whole) ?? panic("cfb")) == two)
-    bad := 16
+    ^bad: 16
     assert(block_crypt_cfb128(a_enc, .Encrypt, bad, div, two) == .Err(.BadInputData))
-    n := 0
-    ctr := cipher.zero_bytes(16)
-    stream := cipher.zero_bytes(16)
+    ^n: 0
+    ^ctr: cipher.zero_bytes(16)
+    ^stream: cipher.zero_bytes(16)
     first: block_crypt_ctr(c_enc, n, ctr, stream, cipher.bytes_of(two, 0, 7)) ?? panic("ctr")
     rest: block_crypt_ctr(c_enc, n, ctr, stream, cipher.bytes_of(two, 7, two.len() - 7)) ?? panic("ctr")
-    joined := first.copy()
+    ^joined: first.copy()
     loop b in rest -> joined.push(b)
-    n2 := 0
-    ctr2 := cipher.zero_bytes(16)
-    stream2 := cipher.zero_bytes(16)
+    ^n2: 0
+    ^ctr2: cipher.zero_bytes(16)
+    ^stream2: cipher.zero_bytes(16)
     assert((block_crypt_ctr(c_enc, n2, ctr2, stream2, joined) ?? panic("ctr")) == two)
     assert(camellia_setkey_enc([U8]{1, 2, 3}) == .Err(.BadInputData))
 }

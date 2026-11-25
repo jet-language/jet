@@ -92,11 +92,11 @@ JetCLIFactsStore: struct {
 }
 
 jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{false}) -> JetCLIPlan Never! {
-    store := ""
-    kind := ""
-    sources := [String]{}
+    ^store: ""
+    ^kind: ""
+    ^sources: [String]{}
     words: jet_cli_tail(jet_argv, 1)
-    index := 0
+    ^index: 0
     loop index < words.len() {
         argument: words[index]
         value: if index + 1 < words.len() -> words[index + 1].copy() else -> ""
@@ -152,8 +152,8 @@ jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{fal
     if store == "program" {
         return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "facts", file: sources[0].copy(), subject: Val(kind), json: json, color: color, threads: None, notice: "", project: false}}
     }
-    origin := JetCLIFactsStore{store: store, field: "snapshot", snapshot: "", identity_field: "", identity: ""}
-    outcome := JetCLIFactsOutcome.Failed{reason: ""}
+    ^origin: JetCLIFactsStore{store: store, field: "snapshot", snapshot: "", identity_field: "", identity: ""}
+    ^outcome: JetCLIFactsOutcome.Failed{reason: ""}
     if {
         store == "run" -> {
             origin = JetCLIFactsStore{store: store, field: "receipt", snapshot: sources[0].copy(), identity_field: "digest", identity: ""}
@@ -179,13 +179,13 @@ jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{fal
 // check reports its diagnostics, as every inspect projection does. Like every
 // job that holds a compile result, it ends inside the scope that owns it.
 jet_cli_inspect_facts_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     kind: job.subject ?? "marker"
     prepared: jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Check)
     if prepared.move() == {
         .Refused(refused) -> { output = refused }
         .Prepared(request, snapshot) -> {
-            checking := request
+            ^checking: request
             checking.capture_build_program = true
             checking.read_build_program = true
             result: jet_driver_compile(checking)
@@ -231,7 +231,7 @@ jet_cli_facts_error_output: fn(code: String, what: String, color: Bool{false}, j
 jet_cli_facts_render: fn(origin: JetCLIFactsStore, kind: String, answer: JetCLIFactsAnswer, color: Bool{false}, json: Bool{false}) -> JetDriverVerbOutput Never! {
     complete: answer.failure_text == ""
     if json {
-        fields := [JetCLIStatusField]{
+        ^fields: [JetCLIStatusField]{
             jet_cli_status_field("schema_version", jet_cli_status_int(1)),
             jet_cli_status_field("store", jet_cli_status_text(origin.store)),
             jet_cli_status_field("kind", jet_cli_status_text(kind)),
@@ -273,9 +273,9 @@ jet_cli_facts_count: fn(rows: TComptimeValue) -> Int Never! {
 
 // The `--kind` spellings, in FactKind's order: `MarkerArg` is `marker-arg`.
 jet_cli_facts_kinds: fn() -> [String] Never! {
-    kinds := [String]{}
+    ^kinds: [String]{}
     loop variant in JET_CLI_FACT_KINDS {
-        spelling := ""
+        ^spelling: ""
         loop index in 0..<variant.len() {
             letter: variant.slice(index..<index + 1)
             lower: letter.to_lower()
@@ -289,7 +289,7 @@ jet_cli_facts_kinds: fn() -> [String] Never! {
 
 // `FactKind`'s variant for a `--kind` spelling: `marker-arg` is `MarkerArg`.
 jet_cli_facts_variant: fn(kind: String) -> String Never! {
-    variant := ""
+    ^variant: ""
     loop word in kind.split("-") {
         variant = "{variant}{word.slice(0..<1).to_upper()}{word.slice(1..<word.len())}"
     }
@@ -422,9 +422,9 @@ jet_cli_facts_answer: fn(kind: String) -> JetCLIFactsOutcome Never! {
             return JetCLIFactsOutcome.Failed{reason: diagnostic_headline(diagnostic.code, diagnostic.what)}
         }
     }
-    snapshot := ""
-    answer := JetCLIFactsAnswer{rows: TComptimeValue.Unit, lines: "", failure: TComptimeValue.Unit, failure_text: ""}
-    found := 0
+    ^snapshot: ""
+    ^answer: JetCLIFactsAnswer{rows: TComptimeValue.Unit, lines: "", failure: TComptimeValue.Unit, failure_text: ""}
+    ^found: 0
     loop value in result.comptime_values {
         if value.kind != SemaComptimeItemKind.Constant -> next
         key: value.key
@@ -476,7 +476,7 @@ jet_cli_facts_run_answer: fn(path: String, kind: String) -> JetCLIFactsOutcome N
 // and read the answer it returns. The run is a build's: the same checked
 // invocation and evaluator.
 jet_cli_facts_invoke: fn(program: String, args: [TComptimeValue], core_sources: [JetDriverCoreSource], base: String) -> JetCLIFactsOutcome {
-    request := jet_cli_driver_request(jet_cli_facts_snapshot(program, base), core_sources, None, JetDriverCompileMode.RootRun)
+    ^request: jet_cli_driver_request(jet_cli_facts_snapshot(program, base), core_sources, None, JetDriverCompileMode.RootRun)
     selection: jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, None, Val(JET_CLI_FACTS_ENTRY), false, false, None)
     compiled: selection.compile.move()
     if compiled.internal_problem == .Val(problem) {
@@ -504,9 +504,9 @@ jet_cli_facts_invoke: fn(program: String, args: [TComptimeValue], core_sources: 
 // the snapshot it read.
 jet_cli_facts_record: fn(value: TComptimeValue) -> JetCLIFactsOutcome Never! {
     if value == .Present(inner) -> return jet_cli_facts_record(inner)
-    answer := JetCLIFactsAnswer{rows: TComptimeValue.Unit, lines: "", failure: TComptimeValue.Unit, failure_text: ""}
-    identity := ""
-    found := 0
+    ^answer: JetCLIFactsAnswer{rows: TComptimeValue.Unit, lines: "", failure: TComptimeValue.Unit, failure_text: ""}
+    ^identity: ""
+    ^found: 0
     if value == .Struct(_, fields) {
         loop field in fields {
             if {

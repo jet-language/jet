@@ -105,7 +105,7 @@ SemaComptimeModulePoint: struct {
 sema_comptime_module_point: fn(program: SemaProgramTables, tree: BodyTree, expression: Int) -[]> SemaComptimeModulePoint? {
     point_ty: type_syntax(program.registration_graph.interner, body_type_id(tree, expression))
     if !sema_comptime_point_type(point_ty) -> return None
-    call := expression
+    ^call: expression
     if tree.nodes[body_node_index(tree, expression)].kind == .TryWithContext(inner, _, _, _, _, _) {
         call = inner
     }
@@ -194,7 +194,7 @@ sema_comptime_fold_node: fn(interner: Interner, tree: BodyTree, expression: Int,
         .Clone(value, _) | .ExplicitCopy(value) -> return sema_comptime_fold(interner, tree, value, values, symbols, type_delta)
         .StructLit(fields) -> {
             type_name: sema_comptime_fold_type_name(expression_ty) ?? return None
-            folded := [TComptimeField]{}
+            ^folded: [TComptimeField]{}
             loop field in fields {
                 folded.push(TComptimeField{name: field.field.name, value: sema_comptime_fold(interner, tree, field.value, values, symbols, type_delta) ?? return None})
             }
@@ -266,7 +266,9 @@ sema_comptime_fold_node: fn(interner: Interner, tree: BodyTree, expression: Int,
             return sema_comptime_fold_binary(op, expression_ty, left, right)
         }
         .List(elements, coercion) -> {
-            if coercion == None -> return sema_comptime_fold_list(interner, tree, elements, values, symbols, type_delta)
+            if coercion == None {
+                return sema_comptime_fold_list(interner, tree, elements, values, symbols, type_delta)
+            }
         }
         .ListLit(elements) -> return sema_comptime_fold_list(interner, tree, elements, values, symbols, type_delta)
         .Map(entries) | .MapLit(entries) -> {
@@ -293,16 +295,16 @@ sema_comptime_fold_node: fn(interner: Interner, tree: BodyTree, expression: Int,
 sema_comptime_fold_decimal: fn(text: String) -> TComptimeValue? Never! {
     bytes: text.trim().bytes()
     if bytes.len() == 0 -> return None
-    index := 0
-    negative := false
+    ^index: 0
+    ^negative: false
     if (Int{bytes[0]}) == 45 || (Int{bytes[0]}) == 43 {
         negative = Int{bytes[0]} == 45
         index = 1
     }
-    magnitude := 0
-    digits := 0
-    fractional := 0
-    point := false
+    ^magnitude: 0
+    ^digits: 0
+    ^fractional: 0
+    ^point: false
     loop index < bytes.len() && (Int{bytes[index]}) != 101 && (Int{bytes[index]}) != 69 {
         code: Int{bytes[index]}
         if code == 46 {
@@ -318,10 +320,10 @@ sema_comptime_fold_decimal: fn(text: String) -> TComptimeValue? Never! {
         index += 1
     }
     if digits == 0 -> return None
-    exponent := 0
+    ^exponent: 0
     if index < bytes.len() {
         index += 1
-        exponent_negative := false
+        ^exponent_negative: false
         if index < bytes.len() && (Int{bytes[index]} == 45 || Int{bytes[index]} == 43) {
             exponent_negative = Int{bytes[index]} == 45
             index += 1
@@ -337,7 +339,7 @@ sema_comptime_fold_decimal: fn(text: String) -> TComptimeValue? Never! {
         if index == start -> return None
         if exponent_negative -> exponent = 0 - exponent
     }
-    places := fractional - exponent
+    ^places: fractional - exponent
     if places < 0 {
         magnitude *= (10).pow(0 - places)
         places = 0
@@ -409,7 +411,7 @@ sema_comptime_fold_from_bytes: fn(interner: Interner, tree: BodyTree, value: Int
     if tree.nodes[body_node_index(tree, value)].kind == .BuiltinMethod(receiver, operation, args) {
         if operation != TBuiltinOp.StringFromBytes || args.len() != 0 -> return None
         folded: sema_comptime_fold(interner, tree, receiver, values, symbols, type_delta) ?? return None
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         if folded == {
             // A checked `[U8]{"…"}` byte value folds to its bytes.
             // copy: `values_bytes` is a payload of `folded`, which keeps the original
@@ -430,7 +432,7 @@ sema_comptime_fold_from_bytes: fn(interner: Interner, tree: BodyTree, value: Int
 }
 
 sema_comptime_fold_list: fn(interner: Interner, tree: BodyTree, elements: [Int], values: [SemaComptimeItemValue], symbols: SymbolTable, type_delta: [InternerDelta]) -> TComptimeValue? Never! {
-    folded := [TComptimeValue]{}
+    ^folded: [TComptimeValue]{}
     loop element in elements {
         folded.push(sema_comptime_fold(interner, tree, element, values, symbols, type_delta) ?? return None)
     }
@@ -441,10 +443,10 @@ sema_comptime_fold_list: fn(interner: Interner, tree: BodyTree, elements: [Int],
 // payload-free enum case, or a struct of keys; a repeated key is not folded,
 // so the evaluator's later-entry-wins insert decides it.
 sema_comptime_fold_map: fn(interner: Interner, tree: BodyTree, entries: [BodyMapEntry], values: [SemaComptimeItemValue], symbols: SymbolTable, type_delta: [InternerDelta]) -> TComptimeValue? Never! {
-    folded := [TComptimeMapEntry]{}
+    ^folded: [TComptimeMapEntry]{}
     // Each key's spelling by name id, and whether an entry wrote it.
-    spellings := name_table()
-    taken := [Bool]{false}
+    ^spellings: name_table()
+    ^taken: [Bool]{false}
     loop entry in entries {
         key: sema_comptime_fold_key(sema_comptime_fold(interner, tree, entry.key, values, symbols, type_delta) ?? return None) ?? return None
         id: name_index(name_intern(spellings, sema_comptime_fold_key_text(key)))
@@ -469,7 +471,7 @@ sema_comptime_fold_key: fn(value: TComptimeValue) -> TComptimeKey? Never! {
             Val(TComptimeKey.Enum{type_name: type_name, variant: variant})
         }
         .Struct(type_name, fields) -> {
-            keys := [TComptimeKeyField]{}
+            ^keys: [TComptimeKeyField]{}
             loop field in fields {
                 keys.push(TComptimeKeyField{name: field.name, key: sema_comptime_fold_key(field.value) ?? return None})
             }
@@ -501,7 +503,7 @@ sema_comptime_fold_key_fields: fn(fields: [TComptimeKeyField]) -> String Never! 
 }
 
 sema_comptime_fold_enum: fn(interner: Interner, tree: BodyTree, type_name: String, variant: String, payload: BodyEnumPayload, values: [SemaComptimeItemValue], symbols: SymbolTable, type_delta: [InternerDelta]) -> TComptimeValue? Never! {
-    args := [TComptimeEnumArg]{}
+    ^args: [TComptimeEnumArg]{}
     if payload == {
         .Unit -> {}
         .Positional(positional) -> {
@@ -552,8 +554,8 @@ sema_comptime_fold_int: fn(value: Int, ty: Type) -> TComptimeValue? Never! {
     }
     if ty == .IntN(signed, bits) {
         if bits < 8 || bits > 64 -> return None
-        low := 0
-        high := 18446744073709551615
+        ^low: 0
+        ^high: 18446744073709551615
         if bits < 64 {
             high = (1 << bits) - 1
             if signed {

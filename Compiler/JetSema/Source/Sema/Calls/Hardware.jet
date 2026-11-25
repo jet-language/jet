@@ -66,7 +66,7 @@ sema_hardware_empty_use: fn() -> TargetHardwareUse Never! {
 }
 
 sema_hardware_use_snapshot: fn(source: TargetHardwareUse) -> TargetHardwareUse Never! {
-    result := sema_hardware_empty_use()
+    ^result: sema_hardware_empty_use()
     loop fact in source.register_accesses -> result.register_accesses.push(fact.copy())
     loop fact in source.interrupt_handlers -> result.interrupt_handlers.push(fact.copy())
     loop fact in source.dma_operations -> result.dma_operations.push(fact.copy())
@@ -86,7 +86,7 @@ sema_hardware_result: fn(check: SemaMethodSpecialCheck) -> SemaHardwareMethodChe
 }
 
 sema_hardware_place_key: fn(expression: Expr, check: ^SemaBodyCheck) -> String? {
-    places := sema_ownership_places_from_expr_in_state(expression, check.scopes, check.state)
+    ^places: sema_ownership_places_from_expr_in_state(expression, check.scopes, check.state)
     if places.len() != 1 -> return None
     if symbol_is_none(places[0].root_id) -> return None
     slot: sema_scope_name_slot(check.scopes, places[0].root) ?? return None
@@ -145,7 +145,7 @@ sema_hardware_expr_is_dma_start: fn(expression: Expr) -> Bool Never! {
         }
         .MethodCall(receiver, method, _, _, _, _, _) -> {
             if method != "start" -> return false
-            is_dma_receiver := if receiver == {
+            ^is_dma_receiver: if receiver == {
                 .Ident(name, _, _) -> name == "dma"
                 .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
             }
@@ -160,18 +160,18 @@ sema_hardware_expr_is_dma_start: fn(expression: Expr) -> Bool Never! {
 
 sema_hardware_bind_pending_dma_transfer: fn(init: Expr, symbol: Symbol, key: String, scopes: ^SemaScopeTable) -> Bool {
     if !sema_hardware_expr_is_dma_start(init) -> return false
-    init_span := expr_span(init)
-    found := -1
+    ^init_span: expr_span(init)
+    ^found: -1
     loop index in 0..<scopes.hardware_pending_transfers.len() {
-        fact := scopes.hardware_pending_transfers[index]
+        ^fact: scopes.hardware_pending_transfers[index]
         if fact.start_span.start >= init_span.start && fact.start_span.start <= init_span.end && fact.scope_frame == scopes.current {
             if found >= 0 -> return false
             found = index
         }
     }
     if found < 0 -> return false
-    fact := scopes.hardware_pending_transfers[found]
-    _ := scopes.hardware_pending_transfers.remove(found, .Slot)
+    ^fact: scopes.hardware_pending_transfers[found]
+    ^_: scopes.hardware_pending_transfers.remove(found, .Slot)
     fact = sema_hardware_bind_dma_transfer_identity(fact, symbol.name, key, scopes.current)
     scopes.hardware_transfers.push(fact.copy())
     scopes.hardware_definite_transfers.push(fact)
@@ -179,10 +179,10 @@ sema_hardware_bind_pending_dma_transfer: fn(init: Expr, symbol: Symbol, key: Str
 }
 
 sema_hardware_consume_dma_transfer: fn(transfer_key: String, scopes: ^SemaScopeTable) Never! {
-    index := scopes.hardware_transfers.len() - 1
+    ^index: scopes.hardware_transfers.len() - 1
     loop index >= 0 {
         if scopes.hardware_transfers[index].transfer_key == transfer_key {
-            _ := scopes.hardware_transfers.remove(index, .Slot)
+            ^_: scopes.hardware_transfers.remove(index, .Slot)
             break
         }
         index -= 1
@@ -190,7 +190,7 @@ sema_hardware_consume_dma_transfer: fn(transfer_key: String, scopes: ^SemaScopeT
     index = scopes.hardware_definite_transfers.len() - 1
     loop index >= 0 {
         if scopes.hardware_definite_transfers[index].transfer_key == transfer_key {
-            _ := scopes.hardware_definite_transfers.remove(index, .Slot)
+            ^_: scopes.hardware_definite_transfers.remove(index, .Slot)
             return
         }
         index -= 1
@@ -198,18 +198,18 @@ sema_hardware_consume_dma_transfer: fn(transfer_key: String, scopes: ^SemaScopeT
 }
 
 sema_hardware_ascii_lower: fn(value: String) -> String Never! {
-    bytes := value.bytes()
+    ^bytes: value.bytes()
     loop index in 0..<bytes.len() {
-        code := Int{bytes[index]}
+        ^code: Int{bytes[index]}
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
     }
     String.from_bytes(bytes) ?? value
 }
 
 sema_hardware_ascii_upper: fn(value: String) -> String Never! {
-    bytes := value.bytes()
+    ^bytes: value.bytes()
     loop index in 0..<bytes.len() {
-        code := Int{bytes[index]}
+        ^code: Int{bytes[index]}
         if code >= 97 && code <= 122 -> bytes[index] = U8{code - 32}
     }
     String.from_bytes(bytes) ?? value
@@ -221,7 +221,7 @@ sema_hardware_expr_path: fn(expression: Expr) -> [String]? {
             return Val([String]{name})
         }
         .Field(base, member, _, _) -> {
-            path := sema_hardware_expr_path(base) ?? return None
+            ^path: sema_hardware_expr_path(base) ?? return None
             path.push(member.copy())
             return Val(path)
         }
@@ -257,9 +257,9 @@ sema_hardware_board_path: fn(expression: Expr, check: SemaBodyCheck) -> SemaHard
     if path.len() < 1 -> return None
     graph: check.program.registration_graph
     module_index: sema_scope_caller_index(check.environment.*, graph) ?? return None
-    alias := path[0]
+    ^alias: path[0]
     visible_index: sema_scope_resolve_index(check.scopes, alias) ?? return None
-    visible := check.scopes.bindings[visible_index].symbol
+    ^visible: check.scopes.bindings[visible_index].symbol
     if visible.kind != SymbolKind.Import -> return None
     registered_module: graph.modules[module_index]
     loop import in registered_module.imports {
@@ -267,7 +267,7 @@ sema_hardware_board_path: fn(expression: Expr, check: SemaBodyCheck) -> SemaHard
             if binding.local != alias || binding.symbol.id != visible.id || binding.symbol.kind != SymbolKind.Import {
                 next
             }
-            profile_id := sema_hardware_import_module(graph, binding)
+            ^profile_id: sema_hardware_import_module(graph, binding)
             if !profile_id.starts_with("board.") -> return None
             return Val(SemaHardwareBoardPath{profile_id: profile_id, segments: path})
         }
@@ -276,7 +276,7 @@ sema_hardware_board_path: fn(expression: Expr, check: SemaBodyCheck) -> SemaHard
 }
 
 sema_hardware_bind_dma_transfer_identity: fn(fact: ^^SemaHardwareDMATransferFact, name: String, key: String, scope_frame: Int) -> SemaHardwareDMATransferFact Never! {
-    updated := fact
+    ^updated: fact
     updated.transfer_name = name
     updated.transfer_key = key
     updated.scope_frame = scope_frame
@@ -301,7 +301,7 @@ sema_hardware_target_machine: fn(environment: SemaScopeEnvironment, program: Sem
 }
 
 sema_hardware_register_block_fact: fn(machine: TargetMachine, block_name: String) -> TargetRegisterBlockFact? {
-    wanted := sema_hardware_ascii_lower(block_name)
+    ^wanted: sema_hardware_ascii_lower(block_name)
     loop block in machine.hardware.register_blocks {
         if sema_hardware_ascii_lower(block.name) == wanted -> return Val(block)
     }
@@ -309,7 +309,7 @@ sema_hardware_register_block_fact: fn(machine: TargetMachine, block_name: String
 }
 
 sema_hardware_register_fact: fn(block: TargetRegisterBlockFact, register_name: String) -> TargetRegisterFact? {
-    wanted := sema_hardware_ascii_lower(register_name)
+    ^wanted: sema_hardware_ascii_lower(register_name)
     loop register in block.registers {
         if register.name == register_name || sema_hardware_ascii_lower(register.name) == wanted {
             return Val(register)
@@ -319,7 +319,7 @@ sema_hardware_register_fact: fn(block: TargetRegisterBlockFact, register_name: S
 }
 
 sema_hardware_dma_channel_fact: fn(machine: TargetMachine, first: String, second: String) -> String? {
-    wanted := sema_hardware_ascii_lower("{first}_{second}")
+    ^wanted: sema_hardware_ascii_lower("{first}_{second}")
     loop channel in machine.hardware.dma_channels {
         if sema_hardware_ascii_lower(channel.name) == wanted -> return Val(channel.name)
     }
@@ -327,12 +327,12 @@ sema_hardware_dma_channel_fact: fn(machine: TargetMachine, first: String, second
 }
 
 sema_hardware_discard_arguments: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+    loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
 }
 
 sema_hardware_missing_fact: fn(reference: TargetHardwareUnresolvedReference, description: String, span: Span, diagnostics: ^[Diagnostic]) -> SemaHardwareMethodCheck {
-    check := SemaMethodSpecialCheck{handled: true, value: None}
-    result := sema_hardware_result(check)
+    ^check: SemaMethodSpecialCheck{handled: true, value: None}
+    ^result: sema_hardware_result(check)
     result.hardware_use.unresolved_references.push(reference.copy())
     diagnostics.push(sema_error("E0904", span, "the selected board profile has no checked {description} fact", "hardware calls must carry the exact profile fact into the checked tree; path spelling cannot supply an address, width, or channel", "select a board profile that registers this hardware resource"))
     result
@@ -342,14 +342,14 @@ sema_hardware_register_method: fn(receiver: Expr, receiver_value: TExpr, method:
     if method != "read" && method != "write" && method != "set" && method != "clear" -> return None
     path: sema_hardware_board_path(receiver, check) ?? return None
     if path.segments.len() < 3 -> return None
-    expected_arity := if method == "read" -> 0 else -> 1
+    ^expected_arity: if method == "read" -> 0 else -> 1
     if args.len() != expected_arity {
         check.diagnostics.push(sema_call_arity_diagnostic("hardware.{method}", expected_arity, args.len(), false, span))
         sema_hardware_discard_arguments(args, check)
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }
-    values := [TExpr]{}
-    valid := true
+    ^values: [TExpr]{}
+    ^valid: true
     loop argument in args {
         if sema_check_expression(argument.expr, None, check) == {
             .Val(value) -> { values.push(value) }
@@ -365,9 +365,9 @@ sema_hardware_register_method: fn(receiver: Expr, receiver_value: TExpr, method:
     }
     block: sema_hardware_register_block_fact(machine, path.segments[1]) ?? return Val(sema_hardware_missing_fact(TargetHardwareUnresolvedReference.RegisterBlock{block: sema_hardware_ascii_upper(path.segments[1])}, "register block `{path.segments[1]}`", span, check.diagnostics))
     fact: sema_hardware_register_fact(block, path.segments[2]) ?? return Val(sema_hardware_missing_fact(TargetHardwareUnresolvedReference.Register{block: block.name, register: path.segments[2]}, "register `{block.name}.{path.segments[2]}`", span, check.diagnostics))
-    operation := if method == "read" -> THardwareCall.RegisterRead{profile_id: path.profile_id, block: block.name, register: fact.name, width: fact.width} else -> THardwareCall.RegisterWrite{profile_id: path.profile_id, block: block.name, register: fact.name, width: fact.width}
-    built := sema_tree_node(if method == "read" -> Type.Int else -> Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: values}, span)
-    result := sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
+    ^operation: if method == "read" -> THardwareCall.RegisterRead{profile_id: path.profile_id, block: block.name, register: fact.name, width: fact.width} else -> THardwareCall.RegisterWrite{profile_id: path.profile_id, block: block.name, register: fact.name, width: fact.width}
+    ^built: sema_tree_node(if method == "read" -> Type.Int else -> Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: values}, span)
+    ^result: sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
     result.hardware_use.register_accesses.push(
         TargetRegisterAccessFact{
             block: block.name,
@@ -380,7 +380,7 @@ sema_hardware_register_method: fn(receiver: Expr, receiver_value: TExpr, method:
 }
 
 sema_hardware_dma_start: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaHardwareMethodCheck? {
-    is_dma_receiver := if receiver == {
+    ^is_dma_receiver: if receiver == {
         .Ident(name, _, _) -> name == "dma"
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
@@ -415,10 +415,10 @@ sema_hardware_dma_start: fn(receiver: Expr, receiver_value: TExpr, args: [CallAr
     if args[1].convention == AccessConvention.Move && !sema_ownership_mark_move(check.state, args[1].expr, check.scopes, "`dma.start`", check.diagnostics) {
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }
-    operation := THardwareCall.DMAStart{profile_id: channel_path.profile_id, channel: channel_name, buffer_ty: buffer.ty}
-    built := sema_tree_node(Type.Named{name: "__JetDmaTransfer"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: [TExpr]{sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: channel_name}}}, args[0].span), buffer}}, span)
-    result := sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
-    owner := if args[1].convention == AccessConvention.Move -> TargetDMAOwner.CPU else -> TargetDMAOwner.Device
+    ^operation: THardwareCall.DMAStart{profile_id: channel_path.profile_id, channel: channel_name, buffer_ty: buffer.ty}
+    ^built: sema_tree_node(Type.Named{name: "__JetDmaTransfer"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: [TExpr]{sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: channel_name}}}, args[0].span), buffer}}, span)
+    ^result: sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
+    ^owner: if args[1].convention == AccessConvention.Move -> TargetDMAOwner.CPU else -> TargetDMAOwner.Device
     result.hardware_use.dma_operations.push(TargetDMAOperationFact{channel: channel_name, buffer: buffer_name, operation: TargetDMAOperation.Start, owner: owner})
     result.dma_transfer = Val(SemaHardwareDMATransferFact{transfer_name: "", transfer_key: "", profile_id: channel_path.profile_id, channel: channel_name, buffer_name: buffer_name, buffer_key: buffer_key, buffer_type: buffer.ty, start_span: span, scope_frame: check.scopes.current, buffer_frame: sema_hardware_place_frame(args[1].expr, check.scopes) ?? check.scopes.current})
     Val(result)
@@ -446,9 +446,9 @@ sema_hardware_dma_wait: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg
         check.diagnostics.push(sema_error("E0904", span, "DMA wait fact does not belong to `{transfer_name}`", "wait must consume the exact transfer binding that owns the in-flight buffer", "pass the matching checked DMA transfer fact"))
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }
-    operation := THardwareCall.DMAWait{profile_id: transfer.profile_id, channel: transfer.channel, buffer_ty: transfer.buffer_type}
-    built := sema_tree_node(Type.Named{name: "__JetDmaBuffer"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: [TExpr]{}}, span)
-    result := sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
+    ^operation: THardwareCall.DMAWait{profile_id: transfer.profile_id, channel: transfer.channel, buffer_ty: transfer.buffer_type}
+    ^built: sema_tree_node(Type.Named{name: "__JetDmaBuffer"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: [TExpr]{}}, span)
+    ^result: sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
     result.hardware_use.dma_operations.push(TargetDMAOperationFact{channel: transfer.channel, buffer: transfer.buffer_name, operation: TargetDMAOperation.Wait, owner: TargetDMAOwner.Device})
     if result.check.value != None {
         sema_hardware_consume_dma_transfer(transfer.transfer_key, check.scopes)
@@ -470,7 +470,7 @@ sema_hardware_method_receiver_name: fn(ty: Type) -> String Never! {
 // Explicit DMA transfer metadata is an input because the opaque language-level
 // `__JetDmaTransfer` type alone cannot prove profile/channel/buffer ownership.
 sema_call_try_hardware_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaHardwareMethodCheck? {
-    is_dma_receiver := if receiver == {
+    ^is_dma_receiver: if receiver == {
         .Ident(name, _, _) -> name == "dma"
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
@@ -484,13 +484,13 @@ sema_call_try_hardware_method: fn(receiver: Expr, receiver_value: TExpr, method:
 }
 
 sema_call_try_hardware_pre_receiver: fn(receiver: Expr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaHardwareMethodCheck? {
-    is_dma_receiver := if receiver == {
+    ^is_dma_receiver: if receiver == {
         .Ident(name, _, _) -> name == "dma"
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
-    is_dma_start := method == "start" && is_dma_receiver
-    is_register := (method == "read" || method == "write" || method == "set" || method == "clear") && sema_hardware_board_path(receiver, check) != None
+    ^is_dma_start: method == "start" && is_dma_receiver
+    ^is_register: (method == "read" || method == "write" || method == "set" || method == "clear") && sema_hardware_board_path(receiver, check) != None
     if !is_dma_start && !is_register -> return None
-    synthetic := sema_node(check.context, Type.Named{name: "__JetHardwareReceiver"}, NodeKind.Unit, expr_span(receiver))
+    ^synthetic: sema_node(check.context, Type.Named{name: "__JetHardwareReceiver"}, NodeKind.Unit, expr_span(receiver))
     sema_call_try_hardware_method(receiver, synthetic, method, args, transfer_fact, span, expected, check)
 }

@@ -31,9 +31,9 @@ SIG_ARROW_PARAMS_REACH: 4000
 sig_arrow1_file: fn(path: String, text: String, source: Bool) -> MigrationOutcome {
     bytes: text.bytes()
     markdown: path.ends_with(".md")
-    edits := [SigArrowEdit]{}
-    plain_tick := -1
-    at := 0
+    ^edits: [SigArrowEdit]{}
+    ^plain_tick: -1
+    ^at: 0
     loop at < bytes.len() {
         if markdown && bytes[at] == 96 && at != plain_tick {
             close: sig_arrow1_span_close(bytes, at) ?? {
@@ -61,8 +61,8 @@ sig_arrow1_file: fn(path: String, text: String, source: Bool) -> MigrationOutcom
         edits.push(edit)
     }
     if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
-    out := [String]{}
-    cursor := 0
+    ^out: [String]{}
+    ^cursor: 0
     loop edit in edits {
         out.push(sig_arrow1_text(bytes, cursor, edit.start))
         out.push(sig_arrow1_text(bytes, edit.contract_end + 1, edit.end))
@@ -101,7 +101,7 @@ sig_arrow1_site: fn(bytes: [U8], close: Int) -> SigArrowEdit? {
 // at `open` opens; a run of backticks opens no span here.
 sig_arrow1_span_close: fn(bytes: [U8], open: Int) -> Int? {
     if open > 0 && bytes[open - 1] == 96 -> return None
-    at := open + 1
+    ^at: open + 1
     if at < bytes.len() && bytes[at] == 96 -> return None
     loop at < bytes.len() {
         if bytes[at] == 10 -> return None
@@ -116,8 +116,8 @@ sig_arrow1_span_close: fn(bytes: [U8], open: Int) -> Int? {
 // span's text after a call's `name(…) `, or the whole text before the row.
 sig_arrow1_span_site: fn(bytes: [U8], start: Int, close: Int) -> SigArrowEdit? {
     if close - start < 5 || bytes[close - 1] != 62 || bytes[close - 2] != 93 -> return None
-    row_start := -1
-    index := start
+    ^row_start: -1
+    ^index: start
     loop index + 2 < close {
         if bytes[index] == 32 && bytes[index + 1] == 45 && bytes[index + 2] == 91 && (sig_arrow1_row_end(bytes, index + 1) ?? -1) == close {
             row_start = index + 1
@@ -126,7 +126,7 @@ sig_arrow1_span_site: fn(bytes: [U8], start: Int, close: Int) -> SigArrowEdit? {
         index += 1
     }
     if row_start < 0 -> return None
-    contract_start := start
+    ^contract_start: start
     index = row_start - 2
     loop index > start {
         if bytes[index] == 41 && bytes[index + 1] == 32 {
@@ -146,8 +146,8 @@ sig_arrow1_span_site: fn(bytes: [U8], start: Int, close: Int) -> SigArrowEdit? {
 
 // The `(` that the `)` at `close` closes.
 sig_arrow1_opener: fn(bytes: [U8], close: Int) -> Int? {
-    depth := 0
-    at := close
+    ^depth: 0
+    ^at: close
     loop at >= 0 && close - at < SIG_ARROW_PARAMS_REACH {
         if bytes[at] == 41 -> depth += 1
         if bytes[at] == 40 {
@@ -162,7 +162,7 @@ sig_arrow1_opener: fn(bytes: [U8], close: Int) -> Int? {
 // Whether the `(` at `open` starts a callable's parameters: `fn(`, `fn<…>(`
 // or, in an API snapshot's row, `fn name(` and `fn name<…>(`.
 sig_arrow1_fn_head: fn(bytes: [U8], open: Int) -> Bool {
-    at := sig_arrow1_skip_type_params(bytes, open)
+    ^at: sig_arrow1_skip_type_params(bytes, open)
     if sig_arrow1_keyword_ends(bytes, at) -> return true
     name_end: at
     loop at > 0 && sig_arrow1_name_byte(bytes[at - 1]) -> at -= 1
@@ -174,8 +174,8 @@ sig_arrow1_fn_head: fn(bytes: [U8], open: Int) -> Bool {
 // right before `at`, if any.
 sig_arrow1_skip_type_params: fn(bytes: [U8], at: Int) -> Int {
     if at < 1 || bytes[at - 1] != 62 -> return at
-    depth := 0
-    index := at - 1
+    ^depth: 0
+    ^index: at - 1
     loop index >= 0 && at - index < SIG_ARROW_PARAMS_REACH {
         if bytes[index] == 62 -> depth += 1
         if bytes[index] == 60 {
@@ -205,8 +205,8 @@ sig_arrow1_name_byte: fn(byte: U8) -> Bool {
 // bare `,`.
 sig_arrow1_contract_end: fn(bytes: [U8], start: Int) -> Int? {
     if start >= bytes.len() || bytes[start] == 32 || bytes[start] == 45 -> return None
-    depth := 0
-    at := start
+    ^depth: 0
+    ^at: start
     loop at < bytes.len() {
         byte: bytes[at]
         if byte == 32 && depth == 0 && at > start && at + 2 < bytes.len() && bytes[at + 1] == 45 && bytes[at + 2] == 91 {
@@ -229,8 +229,8 @@ sig_arrow1_contract_end: fn(bytes: [U8], start: Int) -> Int? {
 // The end of the effect row `-[…]>` that starts at `start`, past its `>`.
 sig_arrow1_row_end: fn(bytes: [U8], start: Int) -> Int? {
     if start + 1 >= bytes.len() || bytes[start] != 45 || bytes[start + 1] != 91 -> return None
-    depth := 0
-    at := start + 1
+    ^depth: 0
+    ^at: start + 1
     loop at < bytes.len() {
         if bytes[at] == {
             10 -> return None

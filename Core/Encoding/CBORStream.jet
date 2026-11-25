@@ -19,7 +19,7 @@ error: fn(kind: EncodingErrorKind, offset: Int, path: String, reason: String) ->
 }
 
 io_error: fn(offset: Int, path: String, cause: EncodingCause) -> EncodingError Never! {
-    out := error(.IO, offset, path, "file IO failed")
+    ^out: error(.IO, offset, path, "file IO failed")
     out.cause = Val(cause)
     out
 }
@@ -49,7 +49,7 @@ release: fn<T>(allocation: ^stream.AllocationBudget, values: ^[T]) Never! {
 
 limits_checked: fn(limits: EncodingLimits) EncodingError! {
     stream.validate_limits(limits) ?? {
-        out := err
+        ^out: err
         out.format = .CBOR
         out.line = None
         out.column = None
@@ -85,7 +85,7 @@ CBORPull: struct<R: Reader> {
     allocation: stream.AllocationBudget,
 
     discard: fn(^self) Never! {
-        nested := 0
+        ^nested: 0
         loop frame in self.frames -> nested += (Int{frame.keys_heap})
         self.allocation.release(nested)
         release<ReadFrame>(self.allocation, self.frames)
@@ -100,7 +100,7 @@ CBORPull: struct<R: Reader> {
     }
 
     path: fn(self) -> String Never! {
-        out := "$"
+        ^out: "$"
         loop frame in self.frames {
             if !frame.object -> out = "{out}[{frame.index}]" else if !frame.expecting_key && frame.key == .Val(key) {
                 out = "{out}[{frame.keys[Int{key}]:Debug}]"
@@ -151,7 +151,7 @@ CBORPull: struct<R: Reader> {
         if width == 0 {
             return Err(error(.Syntax, start, self.path(), "reserved CBOR additional value {additional}"))
         }
-        value := U64{0}
+        ^value: U64{0}
         loop _ in 0..<width {
             byte: self.required(start, "CBOR argument ended before all bytes were present") ?? return Err(err)
             value = (value << 8) | U64{Int{byte}}
@@ -173,7 +173,7 @@ CBORPull: struct<R: Reader> {
         if length > (U64{self.limits.max_item_bytes}) || (Int{length}) + self.retained > self.limits.max_item_bytes {
             return Err(error(.Limit, start, self.path(), "max_item_bytes {self.limits.max_item_bytes} exceeded"))
         }
-        out := [U8]{}
+        ^out: [U8]{}
         loop _ in 0..<(Int{length}) {
             self.grow_payload(out) ?? return Err(err)
             byte: self.required(start, "CBOR payload ended before its declared length") ?? {
@@ -192,7 +192,7 @@ CBORPull: struct<R: Reader> {
         if self.frames.len() + 1 > self.limits.max_depth {
             return Err(error(.Limit, start, self.path(), "max_depth {self.limits.max_depth} exceeded"))
         }
-        out := [U8]{}
+        ^out: [U8]{}
         loop {
             chunk: self.total
             head: self.required(chunk, "indefinite CBOR string ended before break") ?? {
@@ -240,11 +240,11 @@ CBORPull: struct<R: Reader> {
                 return Err(error(.Unsupported, start, self.path(), "duplicate CBOR text map key"))
             }
         }
-        stored := [U8]{}
+        ^stored: [U8]{}
         _: reserve<U8>(self.allocation, stored, text.count_bytes(), start, self.path(), "CBOR map key allocation failed") ?? return Err(err)
         capacity: mem.__list_capacity<U8>(stored)
         loop i in 0..<text.count_bytes() -> stored.push(stream.byte_at(text, i))
-        key := ""
+        ^key: ""
         #Unsafe("the retained key copies exactly the already validated text bytes") {
             key = rt.bytes_into_text(stored)
         }
@@ -280,7 +280,7 @@ CBORPull: struct<R: Reader> {
         at: self.frames.len() - 1
         eligible: !self.frames[at].object || self.frames[at].expecting_key
         if !eligible -> return Ok(None)
-        close := self.frames[at].remaining == (Val(U64{0}))
+        ^close: self.frames[at].remaining == (Val(U64{0}))
         if self.frames[at].remaining == None {
             byte: self.read_byte()
             if byte == (Val(U8{255})) -> close = true else -> self.lookahead = byte
@@ -288,7 +288,7 @@ CBORPull: struct<R: Reader> {
         if !close -> return Ok(None)
         frame: self.frames.pop() ?? panic("checked CBOR frame")
         if frame.object {
-            bytes := 0
+            ^bytes: 0
             loop key in frame.keys -> bytes += key.count_bytes()
             self.retained -= bytes
             self.allocation.release(Int{frame.keys_heap})
@@ -301,7 +301,7 @@ CBORPull: struct<R: Reader> {
     float: fn(^self, additional: Int, start: Int) -[IO, Time.Wait]> Float EncodingError! {
         width: if additional == 25 -> 2 else if additional == 26 -> 4 else -> 8
         name: if width == 2 -> "Float16" else if width == 4 -> "Float32" else -> "Float64"
-        bits := 0
+        ^bits: 0
         loop i in 0..<width {
             raw_byte: self.required(start, "truncated CBOR {name}") ?? return Err(err)
             byte: Int{raw_byte}
@@ -343,7 +343,7 @@ CBORPull: struct<R: Reader> {
         if key_expected && major != 3 {
             return Err(error(.Unsupported, start, self.path(), "CBOR map key must be text"))
         }
-        event := DataEvent.Null
+        ^event: DataEvent.Null
         if major == 0 || major == 1 {
             value: self.argument(additional, start)
             n: value ?? return Err(error(.Syntax, start, self.path(), "indefinite CBOR integer"))
@@ -353,7 +353,7 @@ CBORPull: struct<R: Reader> {
             bytes: self.string(major, additional, start) ?? return Err(err)
             if major == 2 -> event = DataEvent.Bytes(bytes) else {
                 rt.utf8_validate(bytes) ?? return Err(error(.Syntax, start, self.path(), "CBOR text is not UTF-8"))
-                text := ""
+                ^text: ""
                 #Unsafe("the exact CBOR text allocation passed strict UTF-8 validation") {
                     text = rt.bytes_into_text(bytes)
                 }
@@ -400,7 +400,7 @@ CBORPull: struct<R: Reader> {
 
     next: fn(^self) -[IO, Time.Wait]> DataEvent? EncodingError! {
         if self.terminal == .Val(first) -> return Err(first.copy())
-        value := DataEvent?{None}
+        ^value: DataEvent?{None}
         if self.next_inner() == {
             .Ok(event) -> { value = event }
             .Err(failure) -> { return Err(self.fail(failure)) }
@@ -468,9 +468,9 @@ byte_before: fn(left: [U8], right: [U8]) -> Bool Never! {
 // In-place heapsort: native close_object sorts its existing entry table
 // without allocating a second key/index table or copying encoded payloads.
 sift_entries: fn(entries: ^[{key: [U8], value: [U8]}], root: Int, end: Int) Never! {
-    at := root
+    ^at: root
     loop at * 2 + 1 < end {
-        child := at * 2 + 1
+        ^child: at * 2 + 1
         if child + 1 < end && byte_before(entries[child].key, entries[child + 1].key) -> child += 1
         if !byte_before(entries[at].key, entries[child].key) {
             return
@@ -481,13 +481,13 @@ sift_entries: fn(entries: ^[{key: [U8], value: [U8]}], root: Int, end: Int) Neve
 }
 
 sort_entries: fn(entries: ^[{key: [U8], value: [U8]}]) Never! {
-    start := entries.len() /% 2
+    ^start: entries.len() /% 2
     loop start > 0 {
         start -= 1
         end: entries.len()
         sift_entries(entries, start, end)
     }
-    end := entries.len()
+    ^end: entries.len()
     loop end > 1 {
         end -= 1
         entries.__swap(0, end)
@@ -496,7 +496,7 @@ sort_entries: fn(entries: ^[{key: [U8], value: [U8]}]) Never! {
 }
 
 frame_heap: fn(frame: WriteFrame) -> Int Never! {
-    total := 0
+    ^total: 0
     if frame.object {
         total = mem.__list_capacity<{key: [U8], value: [U8]}>(frame.entries) * mem.__type_size<{key: [U8], value: [U8]}>()
         loop entry in frame.entries {
@@ -522,7 +522,7 @@ CBORPush: struct<W: Writer> {
     allocation: stream.AllocationBudget,
 
     discard: fn(^self) Never! {
-        nested := 0
+        ^nested: 0
         loop frame in self.frames -> nested += frame_heap(frame)
         self.allocation.release(nested)
         release<WriteFrame>(self.allocation, self.frames)
@@ -543,14 +543,14 @@ CBORPush: struct<W: Writer> {
     }
 
     allocate: fn(^self, size: Int) -> [U8] EncodingError! {
-        out := [U8]{}
+        ^out: [U8]{}
         _: reserve<U8>(self.allocation, out, size, self.total, "$", "CBOR item allocation failed") ?? return Err(err)
         Ok(out)
     }
 
     scalar: fn(^self, event: DataEvent) -> [U8] EncodingError! {
-        payload := 0
-        header := 1
+        ^payload: 0
+        ^header: 1
         if event == {
             .Text(text) -> {
                 payload = text.count_bytes()
@@ -575,7 +575,7 @@ CBORPush: struct<W: Writer> {
         }
         size: header + payload
         self.replacement(0, size) ?? return Err(err)
-        out := self.allocate(size) ?? return Err(err)
+        ^out: self.allocate(size) ?? return Err(err)
         if event == {
             .Null -> { out.push(U8{246}) }
             .Bool(value) -> { out.push(if value -> U8{245} else -> U8{244}) }
@@ -599,7 +599,7 @@ CBORPush: struct<W: Writer> {
     }
 
     accept: fn(^self, input: ^^[U8]) -[IO, Time.Wait]> EncodingError! {
-        bytes := input.move()
+        ^bytes: input.move()
         size: bytes.len()
         self.replacement(0, size) ?? {
             release<U8>(self.allocation, bytes)
@@ -616,7 +616,7 @@ CBORPush: struct<W: Writer> {
                     release<U8>(self.allocation, bytes)
                     return Err(err)
                 }
-                frame := self.frames.pop() ?? panic("checked CBOR object")
+                ^frame: self.frames.pop() ?? panic("checked CBOR object")
                 key: frame.key.move() ?? panic("checked CBOR key")
                 frame.key = None
                 frame.entries.push({key: key, value: bytes})
@@ -657,7 +657,7 @@ CBORPush: struct<W: Writer> {
         }
         size: length_size(text.count_bytes()) + text.count_bytes()
         self.replacement(0, size) ?? return Err(err)
-        encoded := self.allocate(size) ?? return Err(err)
+        ^encoded: self.allocate(size) ?? return Err(err)
         length(encoded, 3, text.count_bytes())
         loop i in 0..<text.count_bytes() -> encoded.push(stream.byte_at(text, i))
         loop entry in self.frames[at].entries {
@@ -671,9 +671,9 @@ CBORPush: struct<W: Writer> {
     }
 
     close_frame: fn(^self, input: ^^WriteFrame) -[IO, Time.Wait]> EncodingError! {
-        frame := input.move()
+        ^frame: input.move()
         heap: frame_heap(frame)
-        old := 0
+        ^old: 0
         if frame.object {
             loop entry in frame.entries -> old += entry.key.len() + entry.value.len()
         } else {
@@ -688,7 +688,7 @@ CBORPush: struct<W: Writer> {
             return Err(err)
         }
         if frame.object -> sort_entries(frame.entries)
-        out := self.allocate(size) ?? {
+        ^out: self.allocate(size) ?? {
             frame = WriteFrame{object: false, items: [[U8]]{}, entries: [{key: [U8], value: [U8]}]{}, key: None}
             self.retained -= old
             self.allocation.release(heap)
@@ -783,8 +783,8 @@ writer: fn<W: Writer>(output: ^^W, limits: EncodingLimits) -> CBORPush<W> Encodi
 }
 
 #Test("CBOR buffer release resets borrowed storage and returns its heap charge") {
-    allocation := stream.budget(EncodingLimits.safe())
-    values := [U8]{}
+    ^allocation: stream.budget(EncodingLimits.safe())
+    ^values: [U8]{}
     _: reserve<U8>(allocation, values, 8, 0, "$", "test allocation failed") ?? panic("reserve")
     values.push(U8{7})
     release<U8>(allocation, values)
@@ -794,7 +794,7 @@ writer: fn<W: Writer>(output: ^^W, limits: EncodingLimits) -> CBORPush<W> Encodi
 }
 
 #Test("CBOR preferred float and definite length wire known answers") {
-    out := [U8]{}
+    ^out: [U8]{}
     preferred_float(out, 1.5)
     assert_eq(out, [U8]{249, 62, 0})
     out = [U8]{}
@@ -809,7 +809,7 @@ writer: fn<W: Writer>(output: ^^W, limits: EncodingLimits) -> CBORPush<W> Encodi
 }
 
 #Test("CBOR entry heapsort preserves key order and paired payloads") {
-    entries := [{key: [U8], value: [U8]}]{
+    ^entries: [{key: [U8], value: [U8]}]{
         {key: [U8]{3}, value: [U8]{30}},
         {key: [U8]{1}, value: [U8]{10}},
         {key: [U8]{2}, value: [U8]{20}},

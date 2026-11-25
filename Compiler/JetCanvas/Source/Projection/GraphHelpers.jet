@@ -20,13 +20,13 @@ span_through_closing_parens: fn(src: String, span: Span) -> Span Never! {
     if span.start < 0 || span.end > bytes.len() || span.start > span.end {
         return Span{start: span.start, end: span.end}
     }
-    opens := 0
-    closes := 0
+    ^opens: 0
+    ^closes: 0
     loop i in span.start..<span.end {
         if bytes[i] == 40 -> opens += 1
         if bytes[i] == 41 -> closes += 1
     }
-    end := span.end
+    ^end: span.end
     loop closes < opens && end < bytes.len() && bytes[end] == 41 {
         end += 1
         closes += 1
@@ -51,14 +51,14 @@ insert_offset: fn(src: String, f: Func) -> Int Never! {
 // Source offsets are Span bytes, so lines are found by byte.
 line_start: fn(src: String, offset: Int) -> Int Never! {
     bytes: src.bytes()
-    at := if offset < bytes.len() -> offset else -> bytes.len()
+    ^at: if offset < bytes.len() -> offset else -> bytes.len()
     loop at > 0 && bytes[at - 1] != (U8{10}) -> at -= 1
     at
 }
 
 line_after: fn(src: String, offset: Int) -> Int Never! {
     bytes: src.bytes()
-    at := if offset < bytes.len() -> offset else -> bytes.len()
+    ^at: if offset < bytes.len() -> offset else -> bytes.len()
     loop at < bytes.len() {
         if bytes[at] == (U8{10}) -> return at + 1
         at += 1

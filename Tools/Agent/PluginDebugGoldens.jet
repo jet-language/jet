@@ -31,8 +31,8 @@ hex_pairs: fn(text: String) -> Bool {
 }
 
 c_literal: fn(hex: String) -> String {
-    out := [String]{"\""}
-    at := 0
+    ^out: [String]{"\""}
+    ^at: 0
     loop at < hex.len() {
         out.push("\\x{hex[at..<at + 2]}")
         at += 2
@@ -42,8 +42,8 @@ c_literal: fn(hex: String) -> String {
 }
 
 render: fn(tsv: String) -> String GoldenError! {
-    rows := [String]{}
-    index := 0
+    ^rows: [String]{}
+    ^index: 0
     loop line in tsv.trim_end().split("\n") {
         parts: line.split("\t").to_list()
         valid: parts.len() == 5 && (["0", "1", "2", "3"]).contains(parts[0]) && (["0", "1", "2", "3", "4"]).contains(parts[1]) && (parts[2] == "0" || parts[2] == "2") && hex_pairs(parts[3]) && hex_pairs(parts[4])

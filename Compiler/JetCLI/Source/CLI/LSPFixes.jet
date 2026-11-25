@@ -68,7 +68,7 @@ JetCLIFixSkip: struct {
 // actions. A fix sema left pending is no fix. A fix's home is its
 // diagnostic's file.
 jet_cli_fixes_from_diagnostics: fn(diagnostics: ^^[Diagnostic]) -> [JetCLIFix] Never! {
-    fixes := [JetCLIFix]{}
+    ^fixes: [JetCLIFix]{}
     loop diagnostic in diagnostics.move() {
         applicability: diagnostic.applicability ?? next
         safety: diagnostic.safety ?? next
@@ -86,7 +86,7 @@ jet_cli_fix_origin_path: fn(origin: ^^DiagnosticOrigin?) -> String? Never! {
 }
 
 jet_cli_safe_fixes: fn(fixes: [JetCLIFix]) -> [JetCLIFix] Never! {
-    selected := [JetCLIFix]{}
+    ^selected: [JetCLIFix]{}
     loop fix in fixes {
         if fix.applicability == .Safe && (fix.safety == .Formatting || fix.safety == .BehaviorPreserving) {
             selected.push(fix.copy())
@@ -97,7 +97,7 @@ jet_cli_safe_fixes: fn(fixes: [JetCLIFix]) -> [JetCLIFix] Never! {
 
 // Every fix of `fixes`, by index.
 jet_cli_fix_all: fn(fixes: [JetCLIFix]) -> [Int] Never! {
-    all := [Int]{}
+    ^all: [Int]{}
     loop index in 0..<fixes.len() -> all.push(index)
     all
 }
@@ -109,19 +109,19 @@ jet_cli_fix_all: fn(fixes: [JetCLIFix]) -> [Int] Never! {
 // other, or that edits a file that can't be read, is refused. An edit equal
 // to a kept one applies once.
 jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fixes: [JetCLIFix], chosen: [Int]) -> JetCLIFixApply Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in chosen -> order.push(index)
-    width := 1
+    ^width: 1
     loop width < order.len() {
-        merged := [Int]{}
-        start := 0
+        ^merged: [Int]{}
+        ^start: 0
         loop start < order.len() {
             middle: if start + width < order.len() -> start + width else -> order.len()
             end: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
-                take_left := right >= end
+                ^take_left: right >= end
                 if !take_left && left < middle {
                     a: fixes[order[left]].edit.span
                     b: fixes[order[right]].edit.span
@@ -143,19 +143,19 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
         order = merged
         width *= 2
     }
-    kept := [JetCLIFixEditRef]{}
-    applied := 0
-    applied_fixes := [Int]{}
-    deferred := 0
-    refused := [JetCLIFixRefusal]{}
+    ^kept: [JetCLIFixEditRef]{}
+    ^applied: 0
+    ^applied_fixes: [Int]{}
+    ^deferred: 0
+    ^refused: [JetCLIFixRefusal]{}
     loop index in order {
         unusable: jet_cli_fix_unusable(fixes, index, files)
         if unusable.move() == .Val(why) {
             refused.push(JetCLIFixRefusal{fix: index, reason: why.move()})
             next
         }
-        fresh := [JetCLIFixEditRef]{}
-        clash := false
+        ^fresh: [JetCLIFixEditRef]{}
+        ^clash: false
         loop at in -1..<fixes[index].edits.len() {
             edit: JetCLIFixEditRef{fix: index, at: at}
             if jet_cli_fix_edit_kept(fixes, kept, edit) -> next
@@ -173,7 +173,7 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
         applied += 1
         applied_fixes.push(index)
     }
-    texts := [String?]{}
+    ^texts: [String?]{}
     loop row in 0..<files.len() {
         if {
             files[row].source == .Val(current) -> {
@@ -222,10 +222,10 @@ jet_cli_fix_edited_file: fn(text: String, fixes: [JetCLIFix], kept: [JetCLIFixEd
 // jet_driver_apply_edits does: original UTF-8 spans, insertions at one point
 // in the order kept.
 jet_cli_fix_edited: fn(text: String, fixes: [JetCLIFix], kept: [JetCLIFixEditRef], row: Int) -> String Never! {
-    mine := [JetCLIFixEditRef]{}
+    ^mine: [JetCLIFixEditRef]{}
     loop edit in kept {
         if jet_cli_fix_edit_row(fixes, edit) != row -> next
-        at := mine.len()
+        ^at: mine.len()
         mine.push(JetCLIFixEditRef{fix: edit.fix, at: edit.at})
         loop at > 0 && jet_cli_fix_edit_before(fixes, mine[at], mine[at - 1]) {
             later: JetCLIFixEditRef{fix: mine[at - 1].fix, at: mine[at - 1].at}
@@ -235,8 +235,8 @@ jet_cli_fix_edited: fn(text: String, fixes: [JetCLIFix], kept: [JetCLIFixEditRef
         }
     }
     bytes: text.bytes()
-    out := [U8]{}
-    cursor := 0
+    ^out: [U8]{}
+    ^cursor: 0
     loop edit in mine {
         span: jet_cli_fix_edit_span(fixes, edit)
         start: if span.start < bytes.len() -> span.start else -> bytes.len()

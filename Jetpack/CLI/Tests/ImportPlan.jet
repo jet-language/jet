@@ -1,7 +1,7 @@
 #Test("cargo import keeps commented root identity and reports missing lock") {
     plan: cli_import_cargo("[package]\nname = \"app\" # package name\nversion = \"1.0.0\" # package version\n", "")
     assert(plan.provider_facts.has_key("app@cargo#version=1.0.0"))
-    reported := false
+    ^reported: false
     loop todo in plan.todos {
         if todo.source_path == "Cargo.lock" && todo.message.contains("missing") -> reported = true
     }
@@ -21,12 +21,12 @@
     plan: cli_import_nix_facts("flake.nix", "{{\"name\":\"app\",\"packages\":[\"ripgrep\"]}}")
     assert(!plan.emit_pkg_jet().contains("ripgrep: ripgrep@nixpkgs"))
     facts: plan.provider_facts.get("ripgrep@nixpkgs") ?? panic("mutable Nix import is retained")
-    inexact := false
+    ^inexact: false
     loop loss in facts.losses {
         if loss.reason.contains("no exact version") -> inexact = true
     }
     assert(inexact)
-    unresolved := false
+    ^unresolved: false
     loop todo in plan.todos {
         if todo.message.contains("migration remains unresolved") -> unresolved = true
     }

@@ -66,7 +66,7 @@ recipe_admit: fn(recipe: BuildRecipe, ctx: RecipeBuildContext) -[FS, Env, Rand]>
 recipe_run: fn(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
     admission: recipe_admit(recipe, ctx)
     staged: PrivateStage.new(ctx.output_root)
-    report := if recipe_run_steps(recipe, admission.order, staged.context(ctx), transport) == {
+    ^report: if recipe_run_steps(recipe, admission.order, staged.context(ctx), transport) == {
         .Ok(report) -> report
         .Err(error) -> {
             staged.discard()
@@ -84,7 +84,7 @@ recipe_run_logged: fn(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: R
     admission: recipe_admit(recipe, ctx)
     staged: PrivateStage.new(ctx.output_root)
     staged_ctx: staged.context(ctx)
-    report := RunReport.new()
+    ^report: RunReport.new()
     total: recipe.steps.len()
     if recipe_ensure_directory(staged_ctx.output_root) == {
         .Ok(_) -> {}
@@ -123,7 +123,7 @@ recipe_run_steps: fn(recipe: BuildRecipe, order: [Int], ctx: RecipeBuildContext,
             return Err(RecipeDiagnostic.recipe_io("could not create staged recipe output", error))
         }
     }
-    report := RunReport.new()
+    ^report: RunReport.new()
     loop step_index in order {
         if step_index < 0 || step_index >= recipe.steps.len() {
             return Err(RecipeDiagnostic.e1238_plan("admitted stage refers to a missing recipe step"))

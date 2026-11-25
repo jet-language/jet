@@ -11,7 +11,7 @@ run: fn() {
     given: args()
     if given.len() != 1 -> panic("gen.jet takes one branch count")
     count: Int.parse(given[0]) ?? panic("gen.jet takes one branch count, not `{given[0]}`")
-    links := [String]{}
+    ^links: [String]{}
     loop k in 0..<count -> links.push("if n == {k} {{\n        out = {(7 * k) % 13}\n    }} else ")
     chain: links.join("")
     source: "chain: fn(n: Int) -> Int {{\n    out := 0\n    {chain}{{\n        out = -1\n    }}\n    out\n}}\n\nrun: fn() {{\n    total := 0\n    loop i in 0..<{count + 76} -> total += chain(i)\n    print(\"{{total}}\")\n}}\n"

@@ -79,7 +79,7 @@ Entity: struct {
             current: self.version
             impl #{tname} {
                 diff: fn(self, after: #{tname}) -> engine.Patch {
-                    changes := [engine.Change]{}
+                    ^changes: [engine.Change]{}
                     #loop f in target.fields {
                         if self.#{f} != after.#{f} {
                             changes.push(engine.Change{field: f.name, before: "{self.#{f}}", after: "{after.#{f}}"})
@@ -89,7 +89,7 @@ Entity: struct {
                 }
 
                 save: fn(self) -> String {
-                    lines := ["{tname} {current}"]
+                    ^lines: ["{tname} {current}"]
                     #loop f in target.fields {
                         lines.push("{self.#{f}}")
                     }
@@ -103,8 +103,8 @@ Entity: struct {
                     if head.len() != 2 || head[0] != "{tname}" -> return None
                     file_version: engine.parse_int(head[1]) ?? return None
                     if file_version > #{current} -> return None
-                    out := #{tname}{}
-                    at := 1
+                    ^out: #{tname}{}
+                    ^at: 1
                     #loop f in target.fields {
                         if file_version >= (f.marker(Since)?.version ?? 1) {
                             if at >= lines.len() -> return None
@@ -120,7 +120,7 @@ Entity: struct {
             impl #{tname}.engine.Inspect {
                 inspect: fn(self) -> [engine.Row] Never! {
                     fresh: #{tname}{}
-                    rows := [engine.Row]{}
+                    ^rows: [engine.Row]{}
                     #loop f in target.fields {
                         #if f.marker(Hidden) == None {
                             rows.push(engine.Row{name: f.name, type: f.type.name, value: "{self.#{f}}", gray: self.#{f} == fresh.#{f}})

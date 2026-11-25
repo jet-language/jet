@@ -29,19 +29,19 @@ derivation_store_premise: fn() -> DerivationRecord Never! {
 }
 
 #Test("derivation_relation") {
-    store := derivation_store_new()
+    ^store: derivation_store_new()
     first: derivation_store_add(store, derivation_store_fact()) ?? panic("add the fact")
     again: derivation_store_add(store, derivation_store_fact()) ?? panic("add an equal fact")
     derivation_store_require(first == again && store.records.len() == 1, "an equal record is interned once")
     _: derivation_store_add(store, derivation_store_premise()) ?? panic("add the premise")
-    forged := derivation_store_fact()
+    ^forged: derivation_store_fact()
     forged.claim = "fn:main.b"
     refused: if derivation_store_add(store, forged) == {
         .Ok(_) -> false
         .Err(_) -> true
     }
     derivation_store_require(refused, "a record whose id is not its hash is refused")
-    stale := derivation_store_fact()
+    ^stale: derivation_store_fact()
     stale.disposition = DerivationDisposition.Stale
     conflict: if derivation_store_add(store, stale) == {
         .Ok(_) -> false
@@ -53,7 +53,7 @@ derivation_store_premise: fn() -> DerivationRecord Never! {
     derivation_store_require(chain.len() == 2 && chain[0].depth == 0 && chain[0].record.subject == "def:a" && chain[1].depth == 1 && chain[1].record.subject == "sig:a", "the chain follows a premise to the record that concludes it")
     derivation_store_sort(store)
     bytes: derivation_store_encode(store) ?? panic("encode")
-    decoded := derivation_store_decode(bytes, U64.MAX) ?? panic("decode")
+    ^decoded: derivation_store_decode(bytes, U64.MAX) ?? panic("decode")
     derivation_store_sort(decoded)
     derivation_store_require(decoded.records == store.records, "the relation round-trips losslessly")
     truncated: if derivation_store_decode(bytes.slice(0, bytes.len() - 1), U64.MAX) == {
@@ -64,7 +64,7 @@ derivation_store_premise: fn() -> DerivationRecord Never! {
 }
 
 #Test("a build fact's writer chain round-trips in its rank order") {
-    store := derivation_store_new()
+    ^store: derivation_store_new()
     writers: [String]{"[shadowed] declaration / package true at package.jet:settings.tls (default):0..0", "[effective] command line / package false at command line:--set tls=false:0..0"}
     record: derivation_record("Build.Settings.tls", "Build.Settings.tls = false", "jet-driver", DerivationMethod.StaticDerivation, "build-fact-chain", [String]{"command line:--set tls=false", "declaration:package.jet:settings.tls (default)"}, derivation_identity("", "release", "", "x86_64-unknown-linux-gnu"))
     _: derivation_store_add(store, derivation_record_with_payload(record, DerivationPayload.BuildFactChain{writers: writers})) ?? panic("add the build fact")

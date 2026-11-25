@@ -55,12 +55,12 @@ PresetSet: struct {
     }
 
     resolve_many: fn(self, names: [String]) -> ResolvedPreset PresetError! {
-        selected := [String]{}
+        ^selected: [String]{}
         loop name in names {
             if !selected.contains(name) -> selected.push(name.copy())
         }
-        resolved := ResolvedPreset{name: selected.join("+"), selected_presets: selected}
-        stack := [String]{}
+        ^resolved: ResolvedPreset{name: selected.join("+"), selected_presets: selected}
+        ^stack: [String]{}
         loop name in selected -> self.resolve_into(name, stack, resolved)
         Ok(resolved)
     }
@@ -75,7 +75,7 @@ PresetSet: struct {
     // matches merge before all user matches; `default` is the last resort.
     auto_select_many: fn(self, hostname: String, user: String) -> [String] Never! {
         names: envmodel_sorted_keys(self.presets)
-        selected := [String]{}
+        ^selected: [String]{}
         loop name in names {
             if envmodel_optional_is(self.presets[name].hostname, hostname) -> selected.push(name)
         }
@@ -91,8 +91,8 @@ PresetSet: struct {
 
     resolve_into: fn(self, name: String, stack: ^[String], resolved: ^ResolvedPreset) PresetError! {
         if stack.contains(name) {
-            cycle := [String]{}
-            started := false
+            ^cycle: [String]{}
+            ^started: false
             loop item in stack {
                 if item == name -> started = true
                 if started -> cycle.push(item.copy())
@@ -116,6 +116,6 @@ PresetSet: struct {
                 .None -> resolved.variables[key] = value
             }
         }
-        _ := stack.pop()
+        ^_: stack.pop()
     }
 }

@@ -12,20 +12,27 @@ use {
 }
 
 PANEL_X: 150
+
 PANEL_Y: 10
+
 FRAMES_PER_STEP: 6
 
 ONE: [U8]{204, 153, 0, 255}
+
 TWO: [U8]{51, 153, 51, 255}
 
 KEY_TAB: 15
+
 KEY_H: 35
+
 KEY_I: 23
+
 KEY_BACKSPACE: 14
 
 CLOSED: 2
 
 FORMAT_ARGB8888: 0
+
 FORMAT_XRGB8888: 1
 
 FakeBuffer: struct {
@@ -78,7 +85,7 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
@@ -89,7 +96,7 @@ fake_u32: fn(bytes: [U8], at: Int) -> Int {
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -257,7 +264,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
         f.registry = fake_u32(body, 0)
         registry: f.registry
         loop (index, interface) in GLOBALS {
-            args := fake_words([Int]{index + 1})
+            ^args: fake_words([Int]{index + 1})
             loop b in fake_text(interface) -> args.push(b)
             version: if interface == "wl_compositor" -> 6 else if interface == "wl_seat" -> 5 else if interface == "xdg_wm_base" -> 2 else -> 1
             fake_put(args, version)
@@ -341,7 +348,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
 }
 
 fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -361,7 +368,7 @@ fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
 
 fake_serve: fn(listener: net.UnixListener, run_number: Int) -[Env, Net, Time]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept on wl.sock: {err}")
-    f := Fake{
+    ^f: Fake{
         run_number: run_number,
         stream: stream,
         inbox: [U8]{},
@@ -390,7 +397,7 @@ fake_serve: fn(listener: net.UnixListener, run_number: Int) -[Env, Net, Time]> F
         records: [String]{},
         failures: [String]{},
     }
-    idle := 0
+    ^idle: 0
     loop idle < 1200 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("run {run_number} wait failed: {err}")

@@ -76,7 +76,7 @@ is_digits: fn(text: String) -> Bool Never! {
 }
 
 digits_value: fn(text: String) -> Int Never! {
-    value := 0
+    ^value: 0
     loop byte in text.bytes() -> value = value * 10 + (Int{byte}) - 48
     value
 }
@@ -86,14 +86,14 @@ two_digits: fn(value: Int) -> String Never! { if value < 10 -> "0{value}" else -
 // The items `shard_index` of `shard_count` receives, and the load summary
 // (which names the shard as its arguments spelled it).
 weighted_shards: fn(items: [WeightedItem], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
-    ordered := items
+    ^ordered: items
     ordered.sort_by(fn(left: WeightedItem, right: WeightedItem) { (right.weight <=> left.weight).then(left.item <=> right.item) })
-    loads := [Int]{}
+    ^loads: [Int]{}
     loop _ in 0..<shard_count -> loads.push(0)
-    selected := [String]{}
-    selected_seconds := 0
+    ^selected: [String]{}
+    ^selected_seconds: 0
     loop row in ordered {
-        lightest := 0
+        ^lightest: 0
         loop shard in 1..<shard_count {
             if loads[shard] < loads[lightest] -> lightest = shard
         }
@@ -103,18 +103,18 @@ weighted_shards: fn(items: [WeightedItem], shard_index: Int, shard_count: Int, i
             selected_seconds += row.weight
         }
     }
-    heaviest := loads[0]
-    lightest_load := loads[0]
+    ^heaviest: loads[0]
+    ^lightest_load: loads[0]
     loop load in loads {
         if load > heaviest -> heaviest = load
         if load < lightest_load -> lightest_load = load
     }
-    spread := "n/a"
+    ^spread: "n/a"
     if lightest_load > 0 {
         hundredths: heaviest * 100 /% lightest_load
         spread = "{hundredths /% 100}.{two_digits(hundredths % 100)}x"
     }
-    load_words := [String]{}
+    ^load_words: [String]{}
     loop load in loads -> load_words.push("{load}")
     summary: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {items.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
     ShardPlan{selected: selected, summary: summary}
@@ -140,10 +140,10 @@ shard_plan: fn(args: [String]) -> ShardPlan ShardError! {
     if shard_index >= shard_count {
         return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
     }
-    items := [WeightedItem]{}
+    ^items: [WeightedItem]{}
     loop suite in SUITES -> items.push(WeightedItem{weight: DEFAULT_WEIGHT, item: suite})
     plan: weighted_shards(items, shard_index, shard_count, index_text, count_text)
-    selected := plan.selected
+    ^selected: plan.selected
     selected.sort()
     Ok(ShardPlan{selected: selected, summary: plan.summary})
 }
@@ -172,9 +172,9 @@ run: fn() {
 // `NAME: TestProfile{ suites: [A, B], ... }` entry, on one line or spread
 // over several, by name.
 test_profiles: fn(text: String) -> [String:[String]] Never! {
-    out := [String:[String]]{}
-    name := ""
-    held := ""
+    ^out: [String:[String]]{}
+    ^name: ""
+    ^held: ""
     loop line in text.split("\n").to_list() {
         if {
             name == "" -> {
@@ -186,7 +186,7 @@ test_profiles: fn(text: String) -> [String:[String]] Never! {
             else -> held = "{held} {line.trim()}"
         }
         // The entry ends where its braces close.
-        depth := 0
+        ^depth: 0
         loop byte in held.bytes() {
             if byte == 123 -> depth += 1
             if byte == 125 -> depth -= 1
@@ -195,7 +195,7 @@ test_profiles: fn(text: String) -> [String:[String]] Never! {
         opened: held.split("suites: [").to_list()
         if opened.len() >= 2 {
             closed: opened[1].split("]").to_list()
-            suites := [String]{}
+            ^suites: [String]{}
             loop part in closed[0].split(",").to_list() {
                 if part.trim() != "" -> suites.push(part.trim().copy())
             }
@@ -210,7 +210,7 @@ test_profiles: fn(text: String) -> [String:[String]] Never! {
 kit_suite_names: fn(text: String) -> [String] Never! {
     loop line in text.split("\n").to_list() {
         if !line.starts_with(KIT_SUITES_DECL) -> next
-        names := [String]{}
+        ^names: [String]{}
         loop (index, part) in line.split("\"").to_list() {
             if index % 2 == 1 -> names.push(part.copy())
         }
@@ -222,8 +222,8 @@ kit_suite_names: fn(text: String) -> [String] Never! {
 // Why SUITES and its readers disagree (`--check`): `package` is PACKAGE's
 // text, `self_text` this script's, `kit` KIT's.
 suite_problems: fn(package: String, self_text: String, kit: String) -> [String] Never! {
-    problems := [String]{}
-    quoted := [String]{}
+    ^problems: [String]{}
+    ^quoted: [String]{}
     loop suite in SUITES -> quoted.push("\"{suite}\"")
     open: "SUITES: [String]{{"
     close: "}}"
@@ -237,7 +237,7 @@ suite_problems: fn(package: String, self_text: String, kit: String) -> [String] 
     if corpora.len() == 0 {
         problems.push("{PACKAGE} declares no `{CORPORA_PROFILE}` test profile with suites")
     }
-    covered := [String]{}
+    ^covered: [String]{}
     loop suite in SUITES {
         held: profiles.get(suite) ?? {
             problems.push("native suite `{suite}` is no test profile of {PACKAGE}")

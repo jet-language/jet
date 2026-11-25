@@ -198,7 +198,7 @@ american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
     bytes: text.bytes()
     members: american_tokens1_members(bytes) ?? return american_tokens1_unknown(path, text)
     if american_tokens1_is_trace(bytes, members) -> return american_tokens1_trace(path, text)
-    edits := [AmericanTokensEdit]{}
+    ^edits: [AmericanTokensEdit]{}
     if american_tokens1_is_record(members) {
         if american_tokens1_value(bytes, members, "schema_version") != Val("1") {
             return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
@@ -215,8 +215,8 @@ american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
     }
     american_tokens1_status_edit(bytes, members, edits)
     if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
-    out := [String]{}
-    cursor := 0
+    ^out: [String]{}
+    ^cursor: 0
     loop edit in edits {
         out.push(String.from_bytes(bytes[cursor..<edit.start]) ?? "")
         out.push(edit.text)
@@ -297,9 +297,9 @@ american_tokens1_trace: fn(path: String, text: String) -[]> MigrationOutcome {
         return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
     }
     content: american_tokens1_field(fields, "content") ?? return american_tokens1_unknown(path, text)
-    renamed := 0
+    ^renamed: 0
     moved: american_tokens1_trace_tasks(content, AMERICAN_TOKENS1_TRACE_CANCELED_V1, AMERICAN_TOKENS1_TRACE_CANCELED, renamed)
-    out := [CanonicalJSONField]{}
+    ^out: [CanonicalJSONField]{}
     loop field in fields {
         value: if field.key == {
             "content" -> moved
@@ -331,7 +331,7 @@ american_tokens1_trace_same_meaning: fn(old_bytes: [U8], new_bytes: [U8]) -[]> S
     new: verify_jettrace(new_bytes) ?? return Val("the current reader refuses the rewrite: {err.message}")
     new_fields: american_tokens1_object(new) ?? return Val("the rewrite is not a JSON object")
     new_content: american_tokens1_field(new_fields, "content") ?? return Val("the rewrite has no content")
-    restored := 0
+    ^restored: 0
     if american_tokens1_trace_tasks(new_content, AMERICAN_TOKENS1_TRACE_CANCELED, AMERICAN_TOKENS1_TRACE_CANCELED_V1, restored) != old_content {
         return Val("the trace content changed beyond its task rows' canceled key")
     }
@@ -342,14 +342,14 @@ american_tokens1_trace_same_meaning: fn(old_bytes: [U8], new_bytes: [U8]) -[]> S
 // counting the renamed keys in `renamed`.
 american_tokens1_trace_tasks: fn(content: CanonicalJSON, from: String, to: String, renamed: ^Int) -[]> CanonicalJSON {
     fields: american_tokens1_object(content) ?? return content
-    out := [CanonicalJSONField]{}
+    ^out: [CanonicalJSONField]{}
     loop field in fields {
         rows: american_tokens1_array(field.value) ?? [CanonicalJSON]{}
         if field.key != "tasks" || rows.len() == 0 {
             out.push(field)
             next
         }
-        moved := [CanonicalJSON]{}
+        ^moved: [CanonicalJSON]{}
         loop row in rows -> moved.push(american_tokens1_rename(row, from, to, renamed))
         out.push(CanonicalJSONField{key: field.key, value: CanonicalJSON.Array(moved)})
     }
@@ -359,7 +359,7 @@ american_tokens1_trace_tasks: fn(content: CanonicalJSON, from: String, to: Strin
 // `row` with its `from` key named `to`, its keys in canonical order.
 american_tokens1_rename: fn(row: CanonicalJSON, from: String, to: String, renamed: ^Int) -[]> CanonicalJSON {
     fields: american_tokens1_object(row) ?? return row
-    out := [CanonicalJSONField]{}
+    ^out: [CanonicalJSONField]{}
     loop field in fields {
         if field.key != from {
             out.push(field)
@@ -398,7 +398,7 @@ american_tokens1_field: fn(fields: [CanonicalJSONField], key: String) -[]> Canon
 // converted stamp that is not that one is reported and left alone.
 american_tokens1_binding: fn(path: String, text: String) -[]> MigrationOutcome {
     line: american_tokens1_first_line(text)
-    renamed := 0
+    ^renamed: 0
     stamp: american_tokens1_stamp(line.removeprefix(AMERICAN_TOKENS1_DESCRIPTOR_LINE), AMERICAN_TOKENS1_MARSHALED_V1, AMERICAN_TOKENS1_MARSHALED, "1", "{FOREIGN_ADAPTER_CONTRACT_VERSION}", renamed)
     if renamed == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
     if !american_tokens1_current_stamp(stamp) {
@@ -424,7 +424,7 @@ american_tokens1_binding_same_meaning: fn(before: String, after: String) -[]> St
     if !american_tokens1_current_stamp(stamp) {
         return Val("the current reader refuses the rewrite's descriptor stamp: no binder writes it")
     }
-    restored := 0
+    ^restored: 0
     if american_tokens1_stamp(stamp, AMERICAN_TOKENS1_MARSHALED, AMERICAN_TOKENS1_MARSHALED_V1, "{FOREIGN_ADAPTER_CONTRACT_VERSION}", "1", restored) != old_line.removeprefix(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
         return Val("the descriptor stamp changed beyond its marshaled models and contract version")
     }
@@ -435,9 +435,9 @@ american_tokens1_binding_same_meaning: fn(before: String, after: String) -[]> St
 // `to`, counting them in `renamed`, and, when one was, its contract version
 // `from_version` set to `to_version`.
 american_tokens1_stamp: fn(stamp: String, from: String, to: String, from_version: String, to_version: String, renamed: ^Int) -[]> String {
-    fields := stamp.split(";").to_list()
+    ^fields: stamp.split(";").to_list()
     old_version: "version={from_version}"
-    version := -1
+    ^version: -1
     loop index in 0..<fields.len() {
         if index > 0 && fields[index] == old_version && fields[index - 1].starts_with("contract=") {
             version = index
@@ -477,7 +477,7 @@ american_tokens1_store: fn(path: String, text: String) -[]> MigrationOutcome {
     if store.header[0] == AMERICAN_TOKENS1_SERVICE_STATE {
         return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
     }
-    renamed := 0
+    ^renamed: 0
     moved: american_tokens1_store_text(store, path.ends_with(".workflows"), AMERICAN_TOKENS1_SERVICE_STATE, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, renamed) ?? {
         return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a workflow record that does not parse; not converted"}}
     }
@@ -497,10 +497,10 @@ american_tokens1_store_same_meaning: fn(path: String, before: String, after: Str
         return Val("the rewrite is not a version 2 store")
     }
     workflows: path.ends_with(".workflows")
-    left := 0
+    ^left: 0
     _: american_tokens1_store_text(new, workflows, AMERICAN_TOKENS1_SERVICE_STATE, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, left) ?? return Val("a record of the rewrite does not parse")
     if left > 0 -> return Val("the rewrite still holds {left} version 1 tokens")
-    restored := 0
+    ^restored: 0
     back: american_tokens1_store_text(new, workflows, AMERICAN_TOKENS1_SERVICE_STATE_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, restored) ?? return Val("a record of the rewrite does not parse")
     if back != before -> return Val("the store changed beyond its first line and canceled tokens")
     None
@@ -510,18 +510,18 @@ american_tokens1_store_same_meaning: fn(path: String, before: String, after: Str
 // header line or a record's frame is cut short.
 american_tokens1_store_parse: fn(text: String) -[]> AmericanTokensStore? {
     bytes: text.bytes()
-    header := [String]{}
-    at := 0
+    ^header: [String]{}
+    ^at: 0
     loop header.len() < 5 {
-        end := at
+        ^end: at
         loop end < bytes.len() && bytes[end] != 10 -> end += 1
         if end == bytes.len() -> return None
         header.push(String.from_bytes(bytes[at..<end]) ?? return None)
         at = end + 1
     }
-    records := [String]{}
+    ^records: [String]{}
     loop at < bytes.len() {
-        colon := at
+        ^colon: at
         loop colon < bytes.len() && bytes[colon] != 58 -> colon += 1
         if colon == bytes.len() -> return None
         length: american_tokens1_count(String.from_bytes(bytes[at..<colon]) ?? return None) ?? return None
@@ -538,7 +538,7 @@ american_tokens1_store_parse: fn(text: String) -[]> AmericanTokensStore? {
 // and `wire_to`, counting them in `renamed`; None when a record does not
 // parse.
 american_tokens1_store_text: fn(store: AmericanTokensStore, workflows: Bool, magic: String, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: ^Int) -[]> String? {
-    parts := [String]{"{magic}\n"}
+    ^parts: [String]{"{magic}\n"}
     loop index in 1..<store.header.len() -> parts.push("{store.header[index]}\n")
     version: store.header[3].removeprefix("version:")
     prefix: "v{version}:"
@@ -563,8 +563,8 @@ american_tokens1_workflow: fn(payload: String, workflows: Bool, sleep_from: Stri
     }
     retry: "workflow-activity-retry:"
     done: "workflow-activity-done:"
-    head := ""
-    rest := ""
+    ^head: ""
+    ^rest: ""
     if payload.starts_with(retry) {
         run: payload.removeprefix(retry).split_once(":") ?? return None
         attempt: run.after.split_once(":") ?? return None
@@ -601,7 +601,7 @@ american_tokens1_frame: fn(text: String) -[]> String { "{text.bytes().len()}:{te
 american_tokens1_count: fn(text: String) -[]> Int? {
     digits: text.bytes()
     if digits.len() == 0 || digits.len() > 18 -> return None
-    count := 0
+    ^count: 0
     loop digit in digits {
         if digit < 48 || digit > 57 -> return None
         count = count * 10 + Int{digit} - 48
@@ -615,8 +615,8 @@ american_tokens1_count: fn(text: String) -[]> Int? {
 // version 2's label is kept, and one that validates under neither leaves
 // the log alone.
 american_tokens1_log: fn(path: String, text: String, records: [AmericanTokensRecord]) -[]> MigrationOutcome {
-    out := [String]{}
-    renamed := 0
+    ^out: [String]{}
+    ^renamed: 0
     loop (index, record) in records {
         if record.op != "E" {
             out.push("{record.line}\n")
@@ -659,12 +659,12 @@ american_tokens1_log_same_meaning: fn(old: [AmericanTokensRecord], after: String
 // fields, the first is an acceptance, and the last is complete.
 american_tokens1_log_parse: fn(text: String) -[]> [AmericanTokensRecord]? {
     if !text.starts_with("S|") || !text.ends_with("\n") -> return None
-    records := [AmericanTokensRecord]{}
+    ^records: [AmericanTokensRecord]{}
     loop line in text.removesuffix("\n").split("\n") {
         parts: line.split("|").to_list()
         op: "{parts[0]}"
         if op != "S" && op != "K" && op != "E" -> return None
-        fields := [String]{}
+        ^fields: [String]{}
         loop at in 1..<parts.len() {
             field: parts[at].split_once(":") ?? return None
             length: american_tokens1_count(field.before) ?? return None
@@ -690,7 +690,7 @@ american_tokens1_event: fn(records: [AmericanTokensRecord], event: AmericanToken
     }
     if signature != american_tokens1_event_signature(key, from_label, event.fields) -> return None
     state: if event.fields[2] == from_state -> "{to_state}" else -> "{event.fields[2]}"
-    fields := [String]{"{event.fields[0]}", "{event.fields[1]}", state, "{event.fields[3]}", "{event.fields[4]}"}
+    ^fields: [String]{"{event.fields[0]}", "{event.fields[1]}", state, "{event.fields[3]}", "{event.fields[4]}"}
     fields.push(tokens_encoding.bytes_to_hex(american_tokens1_event_signature(key, to_label, fields)))
     Val(american_tokens1_record("E", fields))
 }
@@ -698,7 +698,7 @@ american_tokens1_event: fn(records: [AmericanTokensRecord], event: AmericanToken
 // An authority log line, without its line break: `op`, then each field as
 // `|{length}:{hex}`.
 american_tokens1_record: fn(op: String, fields: [String]) -[]> String {
-    parts := [String]{"{op}"}
+    ^parts: [String]{"{op}"}
     loop field in fields {
         bytes: field.bytes()
         parts.push("|{bytes.len()}:{tokens_encoding.bytes_to_hex(bytes)}")
@@ -729,7 +729,7 @@ american_tokens1_event_signature: fn(key: [U8], label: String, fields: [String])
 // The signed bytes of `fields`: each one's length in bytes as a big-endian
 // 64-bit count, then its bytes.
 american_tokens1_signed: fn(fields: [String]) -[]> [U8] {
-    signed := [U8]{}
+    ^signed: [U8]{}
     loop field in fields {
         bytes: field.bytes()
         length: bytes.len()
@@ -792,10 +792,10 @@ american_tokens1_value: fn(bytes: [U8], members: [AmericanTokensMember], key: St
 
 // The members of the JSON object `bytes` holds, or None when it holds none.
 american_tokens1_members: fn(bytes: [U8]) -[]> [AmericanTokensMember]? {
-    at := american_tokens1_space(bytes, 0)
+    ^at: american_tokens1_space(bytes, 0)
     if at >= bytes.len() || bytes[at] != 123 -> return None
     at += 1
-    members := [AmericanTokensMember]{}
+    ^members: [AmericanTokensMember]{}
     loop {
         at = american_tokens1_space(bytes, at)
         if at >= bytes.len() -> return None
@@ -823,9 +823,9 @@ american_tokens1_members: fn(bytes: [U8]) -[]> [AmericanTokensMember]? {
 // bracket, or at the byte that ends a number or a literal.
 american_tokens1_value_end: fn(bytes: [U8], start: Int) -[]> Int? {
     if start >= bytes.len() -> return None
-    depth := 0
-    quoted := false
-    at := start
+    ^depth: 0
+    ^quoted: false
+    ^at: start
     loop at < bytes.len() {
         byte: bytes[at]
         at += 1
@@ -851,7 +851,7 @@ american_tokens1_value_end: fn(bytes: [U8], start: Int) -[]> Int? {
 }
 
 american_tokens1_space: fn(bytes: [U8], from: Int) -[]> Int {
-    at := from
+    ^at: from
     loop at < bytes.len() && american_tokens1_blank(bytes[at]) -> at += 1
     at
 }
@@ -937,7 +937,7 @@ american_tokens1_database_skip: fn(why: String) -[]> MigrationOutcome {
 // it holds no queue.
 american_tokens1_queue_version: fn(scope: DBScope) -[DB]> Int DBError! {
     tables: scope.query(SQL.raw("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('jet_job_queue_format', 'jet_job_queue_jobs')")) ?? return Err(err)
-    names := [String]{}
+    ^names: [String]{}
     loop row in tables {
         if row.get("name") == .Val(.Text(name)) -> names.push("{name}")
     }
@@ -1040,7 +1040,7 @@ american_tokens1_table_compare: fn(old: DBScope, new: DBScope, table: String) -[
 
 #Test("a binding's version 1 adapter stamp becomes the one its binder writes now") {
     current: (pkg_binder_descriptor("js") ?? panic("the js binder")).stamp()
-    restored := 0
+    ^restored: 0
     old_stamp: american_tokens1_stamp(current, AMERICAN_TOKENS1_MARSHALED, AMERICAN_TOKENS1_MARSHALED_V1, "{FOREIGN_ADAPTER_CONTRACT_VERSION}", "1", restored)
     assert_eq(restored, 3)
     assert(old_stamp.contains(";version=1;calling=HostMessage;") && old_stamp.contains(";tasks=AdapterMarshalled;"))
@@ -1084,7 +1084,7 @@ american_tokens1_table_compare: fn(old: DBScope, new: DBScope, table: String) -[
     accept: american_tokens1_record("S", [String]{"d1", "k1", authority, "tree", "worker", "7", "payload", "0", "1700000000999", "00"})
     key: american_tokens1_delivery_key([AmericanTokensRecord]{AmericanTokensRecord{line: "", op: "S", fields: [String]{"d1", "k1", authority, "tree", "worker", "7", "payload", "0", "1700000000999", "00"}}}, "d1") ?? panic("the generation key")
     delivered: american_tokens1_record("E", [String]{"d1", "4", "Delivered", "3", "1700000000123", "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6"})
-    canceled := [String]{"d1", "5", "Cancelled", "3", "1700000000200"}
+    ^canceled: [String]{"d1", "5", "Cancelled", "3", "1700000000200"}
     canceled.push(tokens_encoding.bytes_to_hex(american_tokens1_event_signature(key, AMERICAN_TOKENS1_DELIVERY_EVENT_V1, canceled)))
     old: "{accept}\n{delivered}\n{american_tokens1_record("E", canceled)}\n"
     outcome: american_tokens1_file("authority.log", old)

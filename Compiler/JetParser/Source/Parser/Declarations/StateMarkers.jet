@@ -50,19 +50,19 @@ StateMarkerSite: struct {
 }
 
 parser_state_marker_migration: fn(program: Program, source: [U8], diagnostics: ^[Diagnostic]) Never! {
-    sites := [StateMarkerSite]{}
+    ^sites: [StateMarkerSite]{}
     parser_state_marker_sites(program.items, sites)
     parser_state_marker_migration_from_sites(program, sites.move(), source, diagnostics)
 }
 
 parser_state_marker_migration_from_sites: fn(program: Program, sites_input: ^^[StateMarkerSite], source: [U8], diagnostics: ^[Diagnostic]) Never! {
-    sites := sites_input.move()
+    ^sites: sites_input.move()
     if sites.len() == 0 {
         return
     }
-    owners := StateMarkerOwners{names: name_table(), rows: [StateMarkerOwner?]{}}
+    ^owners: StateMarkerOwners{names: name_table(), rows: [StateMarkerOwner?]{}}
     parser_state_marker_owners(program.items, owners)
-    order := [String]{}
+    ^order: [String]{}
     loop index in 0..<sites.len() {
         if sites[index].free {
             sites[index].owner = parser_state_marker_free_owner(sites[index].function, owners)
@@ -206,7 +206,7 @@ parser_state_marker_edit: fn(owner: String, info: StateMarkerOwner?, group: [Sta
         return None
     }
     // Each state's moves, at the state's index of `state.states`.
-    moves := [[String]]{}
+    ^moves: [[String]]{}
     loop _ in state.states -> moves.push([String]{})
     loop arrow in state.arrows {
         from: parser_state_marker_state_at(state, arrow.from.name) ?? return None
@@ -214,13 +214,13 @@ parser_state_marker_edit: fn(owner: String, info: StateMarkerOwner?, group: [Sta
             if !moves[from].contains(target.name) -> moves[from].push(target.name)
         }
     }
-    edits := [TextEdit]{}
+    ^edits: [TextEdit]{}
     loop site in group {
         if site.marker.inside || !parser_state_marker_text_is(source, site.marker.span.start, "#") {
             return None
         }
         edits.push(TextEdit{span: Span{start: site.marker.span.start, end: parser_state_marker_skip_space(source, site.marker.span.end)}, new_text: ""})
-        from := String?{None}
+        ^from: String?{None}
         if site.paths.len() == 1 || site.paths[0] != "_" {
             from = Val(parser_state_marker_leaf(site.paths[0]))
         }
@@ -254,12 +254,12 @@ parser_state_marker_param_edit: fn(function: Func, owner: String, state: String,
         if param.name != "self" || end < 4 || foundation_byte_text(source, end - 4, end) != "self" {
             return None
         }
-        start := end - 4
+        ^start: end - 4
         loop start > 0 && parser_state_marker_mark_byte(source[start - 1]) -> start -= 1
         caps: foundation_byte_text(source, start, end - 4)
         return Val(TextEdit{span: Span{start: start, end: end}, new_text: "self: {caps}{owner}.{state}"})
     }
-    start := param.ty_span.start
+    ^start: param.ty_span.start
     loop start < param.ty_span.end && (parser_state_marker_mark_byte(source[start]) || parser_state_marker_blank(source[start])) {
         start += 1
     }
@@ -300,14 +300,14 @@ parser_state_marker_state_at: fn(state: StateDecl, name: String) -> Int? Never! 
 // state with moves, closed at the indentation of the line it starts on.
 // `moves` holds each state's moves at its index (parser_state_marker_state_at).
 parser_state_marker_list: fn(state: StateDecl, moves: [[String]], source: [U8]) -> String Never! {
-    line_start := state.span.start
+    ^line_start: state.span.start
     loop line_start > 0 && (Int{source[line_start - 1]}) != 10 -> line_start -= 1
-    indent_end := line_start
+    ^indent_end: line_start
     loop indent_end < state.span.start && parser_state_marker_blank(source[indent_end]) {
         indent_end += 1
     }
     indent: foundation_byte_text(source, line_start, indent_end)
-    lines := [String]{"state {{"}
+    ^lines: [String]{"state {{"}
     loop member in state.states {
         at: parser_state_marker_state_at(state, member.name) ?? 0
         targets: moves[at]
@@ -321,16 +321,16 @@ parser_state_marker_list: fn(state: StateDecl, moves: [[String]], source: [U8]) 
 // The edits as one replacement of the source from the first to the last;
 // None when two of them overlap.
 parser_state_marker_combine: fn(edits: [TextEdit], source: [U8]) -> TextEdit? Never! {
-    sorted := [TextEdit]{}
+    ^sorted: [TextEdit]{}
     loop edit in edits {
-        at := sorted.len()
+        ^at: sorted.len()
         loop at > 0 && sorted[at - 1].span.start > edit.span.start -> at -= 1
         sorted.insert(at, edit.copy())
     }
     if sorted.len() == 0 -> return None
     start: sorted[0].span.start
-    cursor := start
-    parts := [String]{}
+    ^cursor: start
+    ^parts: [String]{}
     loop edit in sorted {
         if edit.span.start < cursor -> return None
         parts.push(foundation_byte_text(source, cursor, edit.span.start))
@@ -350,7 +350,7 @@ parser_state_marker_text_is: fn(source: [U8], at: Int, word: String) -> Bool Nev
 }
 
 parser_state_marker_skip_space: fn(source: [U8], at: Int) -> Int Never! {
-    end := at
+    ^end: at
     loop end < source.len() && (parser_state_marker_blank(source[end]) || Int{source[end]} == 10 || Int{source[end]} == 13) {
         end += 1
     }

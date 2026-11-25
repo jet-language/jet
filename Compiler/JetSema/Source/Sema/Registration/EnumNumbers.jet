@@ -55,13 +55,13 @@ sema_enum_numbers_expand: fn(items: ^[Item], source: String, diagnostics: ^[Diag
             layout: sema_enum_numbers_marker(definition.type_markers, "Layout") ?? next
             numbers: sema_enum_numbers_checked(definition, layout, backing, source, diagnostics) ?? next
             methods: sema_enum_numbers_methods(definition, backing, numbers, diagnostics) ?? next
-            updated := definition.copy()
+            ^updated: definition.copy()
             // The methods are the compiler's: they report at the enum, and
             // their bodies' spans index the generated fragment, not the
             // user's file, so a refused number is no journey site (JetIR
             // ir_generated_fragment_function).
             loop method in methods {
-                generated := method
+                ^generated: method
                 generated.span = definition.span
                 generated.name_span = definition.name_span
                 generated.compiler_generated = true
@@ -80,7 +80,7 @@ sema_enum_numbers_check_specified: fn(definition: EnumDef, diagnostics: ^[Diagno
         diagnostics.push(sema_enum_numbers_unnumbered_specified(specified, "enum `{definition.name}`, whose cases have no numbers"))
         return
     }
-    next_number := 0
+    ^next_number: 0
     loop variant in definition.variants {
         if variant.discriminant_expr == .Val(expression) {
             if sema_enum_numbers_literal(expression) == .Val(written) {
@@ -109,7 +109,7 @@ sema_enum_numbers_marker: fn(markers: [Marker], name: String) -> Marker? {
 sema_enum_numbers_checked: fn(definition: EnumDef, marker: Marker, backing: String, source: String, diagnostics: ^[Diagnostic]) -> [Int]? {
     loop variant in definition.variants {
         if !(variant.payload == .Unit) {
-            diagnostic := sema_error("E1120", marker.span, "`#Layout({backing})` backs only a payload-free enum, and case `{variant.name}` of `{definition.name}` carries a payload", "a backing type gives each case one number; a case with fields is more than a number", "remove the payload from `{variant.name}`, or remove `#Layout({backing})` and convert with your own methods")
+            ^diagnostic: sema_error("E1120", marker.span, "`#Layout({backing})` backs only a payload-free enum, and case `{variant.name}` of `{definition.name}` carries a payload", "a backing type gives each case one number; a case with fields is more than a number", "remove the payload from `{variant.name}`, or remove `#Layout({backing})` and convert with your own methods")
             if sema_enum_numbers_marker_removal(marker, source) == .Val(edit) {
                 diagnostic = diagnostic_with_edit(diagnostic, edit)
             }
@@ -119,13 +119,13 @@ sema_enum_numbers_checked: fn(definition: EnumDef, marker: Marker, backing: Stri
     }
     least: jet_layout_integer_backing_min(backing)
     greatest: jet_layout_integer_backing_max(backing)
-    numbers := [Int]{}
-    valid := true
+    ^numbers: [Int]{}
+    ^valid: true
     // The first E1121, which carries the edit that widens the backing.
-    first_range := -1
-    next_number := 0
+    ^first_range: -1
+    ^next_number: 0
     loop variant in definition.variants {
-        number := next_number
+        ^number: next_number
         if variant.discriminant_expr == .Val(expression) {
             if sema_enum_numbers_literal(expression) == .Val(written) {
                 number = written
@@ -169,8 +169,8 @@ sema_enum_numbers_checked: fn(definition: EnumDef, marker: Marker, backing: Stri
 // None when no backing type holds them all.
 sema_enum_numbers_widened: fn(marker: Marker, backing: String, numbers: [Int]) -> TextEdit? {
     written: jet_target_layout_marker_expression(marker, 0) ?? return None
-    least := 0
-    greatest := 0
+    ^least: 0
+    ^greatest: 0
     loop number in numbers {
         if number < least -> least = number
         if number > greatest -> greatest = number
@@ -193,12 +193,12 @@ sema_enum_numbers_marker_removal: fn(marker: Marker, source: String) -> TextEdit
     start: marker.span.start
     end: marker.span.end
     if start < 0 || end > raw.len() || start >= end || raw[start] != (U8{35}) -> return None
-    line_start := start
+    ^line_start: start
     loop line_start > 0 && (raw[line_start - 1] == (U8{32}) || raw[line_start - 1] == (U8{9})) {
         line_start -= 1
     }
     if line_start > 0 && raw[line_start - 1] != (U8{10}) -> return None
-    line_end := end
+    ^line_end: end
     loop line_end < raw.len() && (raw[line_end] == (U8{32}) || raw[line_end] == (U8{9}) || raw[line_end] == (U8{13})) {
         line_end += 1
     }
@@ -239,7 +239,7 @@ sema_enum_numbers_methods: fn(definition: EnumDef, backing: String, numbers: [In
     } ?? false
     if has_to_int && has_from_int -> return Val([Func]{})
     name: definition.name
-    out := [String]{}
+    ^out: [String]{}
     out.push("impl {name} {{\n")
     if !has_to_int {
         out.push("    to_int: fn(self) -> Int Never! {{\n        if self == {{\n")
@@ -250,7 +250,7 @@ sema_enum_numbers_methods: fn(definition: EnumDef, backing: String, numbers: [In
     }
     if !has_from_int {
         out.push("    from_int: fn(value: Int) -> {name} Err! {{\n")
-        outside := [String]{}
+        ^outside: [String]{}
         least: jet_layout_integer_backing_min(backing)
         greatest: jet_layout_integer_backing_max(backing)
         if least > -9223372036854775807 - 1 -> outside.push("value < {least}")

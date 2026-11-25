@@ -53,7 +53,7 @@ field: fn(line: String, name: String) -> String? {
 rsp_lines: fn(name: String) -> [String] {
     path: "vectors/nist/{name}.rsp"
     text: files.read(path) ?? panic("read {path}")
-    out := [String]{}
+    ^out: [String]{}
     loop line in text.lines() -> out.push(line.trim())
     out
 }
@@ -62,9 +62,9 @@ rsp_lines: fn(name: String) -> [String] {
 // zero byte for Len 0) and `MD`.
 run_digest: fn(algorithm: String) {
     name: "{algorithm}ShortMsg"
-    t := Counts{pass: 0, fail: 0}
-    bits := 0
-    msg := [U8]{}
+    ^t: Counts{pass: 0, fail: 0}
+    ^bits: 0
+    ^msg: [U8]{}
     loop line in rsp_lines(name) {
         if field(line, "Len") == .Val(v) -> bits = int_field(v)
         if field(line, "Msg") == .Val(v) {
@@ -81,11 +81,11 @@ run_digest: fn(algorithm: String) {
 
 // HMACVS, the SHA-256 section ([L=32]): the MAC is the first Tlen bytes.
 run_hmac: fn() {
-    t := Counts{pass: 0, fail: 0}
-    count := ""
-    key := [U8]{}
-    msg := [U8]{}
-    tlen := 0
+    ^t: Counts{pass: 0, fail: 0}
+    ^count: ""
+    ^key: [U8]{}
+    ^msg: [U8]{}
+    ^tlen: 0
     loop line in rsp_lines("HMAC_L32") {
         if field(line, "Count") == .Val(v) -> count = v
         if field(line, "Tlen") == .Val(v) -> tlen = int_field(v)
@@ -94,7 +94,7 @@ run_hmac: fn() {
         if field(line, "Mac") == .Val(v) {
             mac: crypto.hmac_sha256(key, msg)
             want: unhex(v)
-            same := want.len() == tlen && tlen <= mac.len()
+            ^same: want.len() == tlen && tlen <= mac.len()
             if same {
                 loop i in 0..<tlen {
                     if mac[i] != want[i] -> same = false

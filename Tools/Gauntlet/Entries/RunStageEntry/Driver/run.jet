@@ -68,7 +68,7 @@ masked: fn(value: Dyn, key: String, reading: Reading) -> Dyn {
         .Array(items) -> Dyn.Array(items.map(fn(item) { masked(item, key, reading) }))
         .Object(_) -> {
             numeric_comparison: reading == .Measured && is_number(value.get("jet")) && is_number(value.get("peer"))
-            out := Dyn.object()
+            ^out: Dyn.object()
             loop field in members(value) {
                 if numeric_comparison && (field.key == "verdict" || field.key == "evidence" || field.key == "reason") {
                     out[field.key] = Dyn.Text("<measured>")
@@ -88,7 +88,7 @@ masked: fn(value: Dyn, key: String, reading: Reading) -> Dyn {
 // to its escaped newline or to the end of its string.
 without_notes: fn(text: String) -> String {
     parts: text.split("note: ").to_list()
-    out := parts[0].copy()
+    ^out: parts[0].copy()
     loop part in parts[1..<parts.len()] {
         line: part.find("\\n")
         quote: part.find("\"")

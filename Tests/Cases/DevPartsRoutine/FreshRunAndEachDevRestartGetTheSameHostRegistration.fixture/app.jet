@@ -29,10 +29,10 @@ descriptor: fn(name: String) -> String {
 }
 
 registration: fn() -> [String] {
-    lines := [String]{}
+    ^lines: [String]{}
     lines.push("arguments {process.args().len()}")
     all_names: sys.vars() ?? [String]{}
-    names := [String]{}
+    ^names: [String]{}
     loop name in all_names {
         // `jet dev` marks each start it runs with JET_DEV=1 (core.web serves
         // live reload on it), the one variable meant to differ from `jet run`.
@@ -42,7 +42,7 @@ registration: fn() -> [String] {
     loop name in names -> lines.push("set {name}")
     lines.push("passed CASE_MARK={sys.get("CASE_MARK") ?? "unset"}")
     entries: files.list_dir("/proc/self/fd") ?? [DirEntry]{}
-    numbers := [Int]{}
+    ^numbers: [Int]{}
     loop entry in entries {
         number: Int.parse(entry.name) ?? next
         if number > 2 -> numbers.push(number)
@@ -61,7 +61,7 @@ run: fn() {
         print("fresh: registered {record.split("\n").to_list().len()} lines")
         return
     }
-    start := 1
+    ^start: 1
     loop files.exists("dev-{start}.reg") -> start += 1
     label: "dev-{start}"
     files.write("{label}.reg", record) ?? panic("write {label}.reg")

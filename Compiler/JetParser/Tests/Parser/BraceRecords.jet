@@ -8,7 +8,7 @@ use jet_foundation.[Func]
 
 brace_records_result_names: fn(function: Func) -> String {
     if function.return_type == .Val(.Tuple(fields)) {
-        names := ""
+        ^names: ""
         loop field in fields {
             names = if names == "" -> "{field.name}" else -> "{names},{field.name}"
         }
@@ -50,7 +50,7 @@ run: fn() {
     )
     assert_eq(brace_records_result_names(parser_test_function(program, "bounds")), "min,max")
     assert_eq(brace_records_result_names(parser_test_function(program, "read")), "size,ok")
-    alias := false
+    ^alias: false
     loop item in program.items {
         if item == .TypeAlias(value) && value.name == "Bounds" && value.target == .Tuple(_) {
             alias = true
@@ -68,7 +68,7 @@ run: fn() {
 
 #Test("a_record_value_binding_stays_a_constant") {
     program: parser_test_program("Origin: {{x: 0, y: 0}}\n")
-    alias := false
+    ^alias: false
     loop item in program.items {
         if item == .TypeAlias(_) -> alias = true
     }
@@ -117,7 +117,7 @@ run: fn() {
 
 #Test("an_empty_record_type_is_refused") {
     diagnostics: parser_test_errors("f: fn(p: {{}}) {{}}\n")
-    found := false
+    ^found: false
     loop diagnostic in diagnostics {
         if diagnostic.what == "A record type names no members" -> found = true
     }

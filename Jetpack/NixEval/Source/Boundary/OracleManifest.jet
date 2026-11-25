@@ -120,7 +120,7 @@ NixEvalOracleDraft: struct {
         nix: nixeval_oracle_child_object(document, root, "nix")
         nixeval_oracle_exact_keys(nix, [String]{"version", "tag_object", "source_commit", "builds"}, "nix")
         builds_object: nixeval_oracle_child_object(document, nix, "builds")
-        builds := [String:NixEvalOracleDraftBuild]{}
+        ^builds: [String:NixEvalOracleDraftBuild]{}
         loop system in nixeval_sorted(builds_object.keys().to_list()) {
             path: "nix.builds.{system}"
             build: nixeval_oracle_object(document, builds_object[system], path)
@@ -160,7 +160,7 @@ NixEvalOracleDraft: struct {
         if systems != nixeval_required_systems() {
             return Err(NixEvalError.Manifest("oracle systems must be exactly {nixeval_debug_strings(nixeval_required_systems())}, got {nixeval_debug_strings(systems)}"))
         }
-        builds := [String:NixEvalOracleBuild]{}
+        ^builds: [String:NixEvalOracleBuild]{}
         loop entry in self.builds {
             status: NixEvalOracleBuildStatus.parse(entry.value.status) ?? return Err(NixEvalError.Manifest("nix.builds.{entry.key}.status must be `blocked` or `ready`"))
             builds[entry.key] = NixEvalOracleBuild{build_nar_hash: entry.value.build_nar_hash, executable_nar_hash: entry.value.executable_nar_hash, status: status}
@@ -316,7 +316,7 @@ nixeval_oracle_optional_sri: fn(document: NixEvalJSON, parent: [String:Int], key
 
 nixeval_oracle_exact_keys: fn(parent: [String:Int], expected: [String], path: String) NixEvalError! {
     actual: nixeval_sorted(parent.keys().to_list())
-    wanted := expected.copy()
+    ^wanted: expected.copy()
     wanted.sort()
     if actual != wanted {
         return Err(NixEvalError.Manifest("`{path}` keys must be exactly {nixeval_debug_strings(wanted)}, got {nixeval_debug_strings(actual)}"))
@@ -360,14 +360,14 @@ nixeval_base64_value: fn(byte: Int) -> Int Never! {
 
 // The `{:?}` rendering of a string list, used by manifest diagnostics.
 nixeval_debug_strings: fn(values: [String]) -> String Never! {
-    rendered := [String]{}
+    ^rendered: [String]{}
     loop value in values -> rendered.push(nixeval_debug_string(value))
     joined: rendered.join(", ")
     "[{joined}]"
 }
 
 nixeval_debug_string: fn(value: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     nixeval_push_byte(out, 34)
     hex: "0123456789abcdef".bytes()
     loop byte in value.bytes() {

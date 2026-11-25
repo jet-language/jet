@@ -67,7 +67,7 @@ closed_list_upper_byte: fn(byte: U8) -> Bool { Int{byte} >= 65 && Int{byte} <= 9
 // The identifier that starts `text`, or "" when it does not start with one.
 closed_list_ident_prefix: fn(text: String) -> String {
     bytes: text.bytes()
-    end := 0
+    ^end: 0
     loop {
         if end >= bytes.len() || !closed_list_ident_byte(bytes[end]) -> break
         end += 1
@@ -78,7 +78,7 @@ closed_list_ident_prefix: fn(text: String) -> String {
 // The string literals on `line`, lower-cased.
 closed_list_string_members: fn(line: String, out: ^[String]) {
     bytes: line.bytes()
-    index := 0
+    ^index: 0
     loop {
         if index >= bytes.len() -> break
         if (Int{bytes[index]}) == 47 && index + 1 < bytes.len() && (Int{bytes[index + 1]}) == 47 {
@@ -89,7 +89,7 @@ closed_list_string_members: fn(line: String, out: ^[String]) {
             next
         }
         start: index + 1
-        end := start
+        ^end: start
         loop {
             if end >= bytes.len() -> break
             if (Int{bytes[end]}) == 92 {
@@ -133,8 +133,8 @@ CLOSED_LIST_HEADER_BYTES: 1024
 // generated tables are most of the bytes under the roots.
 closed_list_header: fn(path: String) -> String {
     bytes: closed_list_files.read_at(path, 0, CLOSED_LIST_HEADER_BYTES) ?? return ""
-    cut := 0
-    lines := 0
+    ^cut: 0
+    ^lines: 0
     loop index in 0..<bytes.len() {
         if (Int{bytes[index]}) != 10 -> next
         cut = index
@@ -142,14 +142,14 @@ closed_list_header: fn(path: String) -> String {
         if lines == 5 -> break
     }
     if lines < 5 && bytes.len() < CLOSED_LIST_HEADER_BYTES -> cut = bytes.len()
-    head := [U8]{}
+    ^head: [U8]{}
     loop index in 0..<cut -> head.push(bytes[index])
     String.from_bytes(head) ?? ""
 }
 
 closed_list_unique: fn(members: [String]) -> [String] {
-    seen := [String:Bool]{}
-    out := [String]{}
+    ^seen: [String:Bool]{}
+    ^out: [String]{}
     loop member in members {
         if member == "" || (seen.get(member) ?? false) -> next
         seen[member] = true
@@ -202,9 +202,9 @@ closed_list_word_byte: fn(value: Int) -> Bool { value >= 128 || closed_list_iden
 
 // The index after the raw string whose backtick fence starts at `start`.
 closed_list_raw_end: fn(bytes: [U8], start: Int) -> Int {
-    fence := 0
+    ^fence: 0
     loop closed_list_at(bytes, start + fence) == 96 -> fence += 1
-    cursor := start + fence
+    ^cursor: start + fence
     loop cursor < bytes.len() {
         if closed_list_at(bytes, cursor) != 96 {
             cursor += 1
@@ -221,8 +221,8 @@ closed_list_raw_end: fn(bytes: [U8], start: Int) -> Int {
 // plain string; its nested strings, fences and braces are skipped. One left
 // open at its line end ends there.
 closed_list_interpolation_end: fn(bytes: [U8], open: Int) -> Int {
-    cursor := open + 1
-    depth := 1
+    ^cursor: open + 1
+    ^depth: 1
     loop cursor < bytes.len() {
         value: closed_list_at(bytes, cursor)
         if value == 34 {
@@ -249,7 +249,7 @@ closed_list_interpolation_end: fn(bytes: [U8], open: Int) -> Int {
 // interpolations, and ends at its closing quote or its line end.
 closed_list_string_end: fn(bytes: [U8], start: Int) -> Int {
     triple: closed_list_at(bytes, start + 1) == 34 && closed_list_at(bytes, start + 2) == 34
-    cursor := if triple -> start + 3 else -> start + 1
+    ^cursor: if triple -> start + 3 else -> start + 1
     loop cursor < bytes.len() {
         value: closed_list_at(bytes, cursor)
         if value == 92 {
@@ -281,7 +281,7 @@ closed_list_string_end: fn(bytes: [U8], start: Int) -> Int {
 // The index after the character literal whose quote is at `start`, or just
 // past the quote when no literal closes on its line within a scalar's width.
 closed_list_char_end: fn(bytes: [U8], start: Int) -> Int {
-    cursor := start + 1
+    ^cursor: start + 1
     loop cursor < bytes.len() && cursor <= start + 12 {
         value: closed_list_at(bytes, cursor)
         if value == 10 -> break
@@ -298,7 +298,7 @@ closed_list_char_end: fn(bytes: [U8], start: Int) -> Int {
 // The next token at or after `from`; blank space and `/* … */` comments are
 // skipped.
 closed_list_token: fn(bytes: [U8], from: Int) -> ClosedListToken {
-    cursor := from
+    ^cursor: from
     loop cursor < bytes.len() {
         value: closed_list_at(bytes, cursor)
         if value == 32 || value == 9 || value == 10 || value == 13 {
@@ -306,13 +306,13 @@ closed_list_token: fn(bytes: [U8], from: Int) -> ClosedListToken {
             next
         }
         if value == 47 && closed_list_at(bytes, cursor + 1) == 47 {
-            end := cursor
+            ^end: cursor
             loop end < bytes.len() && closed_list_at(bytes, end) != 10 -> end += 1
             return ClosedListToken{kind: CLOSED_LIST_TOKEN_COMMENT, start: cursor, end: end}
         }
         if value == 47 && closed_list_at(bytes, cursor + 1) == 42 {
             cursor += 2
-            depth := 1
+            ^depth: 1
             loop cursor < bytes.len() && depth > 0 {
                 if closed_list_at(bytes, cursor) == 47 && closed_list_at(bytes, cursor + 1) == 42 {
                     depth += 1
@@ -334,7 +334,7 @@ closed_list_token: fn(bytes: [U8], from: Int) -> ClosedListToken {
             return ClosedListToken{kind: CLOSED_LIST_TOKEN_CHAR, start: cursor, end: closed_list_char_end(bytes, cursor)}
         }
         if closed_list_word_byte(value) {
-            end := cursor + 1
+            ^end: cursor + 1
             loop end < bytes.len() && closed_list_word_byte(closed_list_at(bytes, end)) -> end += 1
             return ClosedListToken{kind: CLOSED_LIST_TOKEN_WORD, start: cursor, end: end}
         }
@@ -345,7 +345,7 @@ closed_list_token: fn(bytes: [U8], from: Int) -> ClosedListToken {
 
 // The next token after `from` that is not a comment.
 closed_list_code_token: fn(bytes: [U8], from: Int) -> ClosedListToken {
-    token := closed_list_token(bytes, from)
+    ^token: closed_list_token(bytes, from)
     loop token.kind == CLOSED_LIST_TOKEN_COMMENT -> token = closed_list_token(bytes, token.end)
     token
 }
@@ -361,13 +361,13 @@ closed_list_is_word: fn(text: String, token: ClosedListToken, word: String) -> B
 // The index just past the `// END GENERATED` line that closes the generated
 // block whose opening comment ends at `from`, or the end of `text`.
 closed_list_block_end: fn(text: String, bytes: [U8], from: Int) -> Int {
-    start := from
+    ^start: from
     loop start < bytes.len() {
         if closed_list_at(bytes, start) == 10 {
             start += 1
             next
         }
-        end := start
+        ^end: start
         loop end < bytes.len() && closed_list_at(bytes, end) != 10 -> end += 1
         if policy_slice_bytes(text, start, end) == CLOSED_LIST_BLOCK_END -> return end
         start = end
@@ -396,15 +396,15 @@ CLOSED_LIST_IN_DISCRIMINANT: 5
 // `G`. Each variant that carries a payload keys its bracket text in
 // `payloads`. Returns the index just past the body's closing `}`.
 closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String], payloads: ^[String:String]) -> Int {
-    cursor := from
-    depth := 1
-    state := CLOSED_LIST_AT_START
+    ^cursor: from
+    ^depth: 1
+    ^state: CLOSED_LIST_AT_START
     // Whether a member may follow the bracket open at the body's depth: it
     // holds a variant's payload, a group or a marker's arguments.
-    resume := false
-    variant := ""
+    ^resume: false
+    ^variant: ""
     // Where the payload of `variant` opens, or -1 outside one.
-    payload_start := -1
+    ^payload_start: -1
     loop {
         token: closed_list_token(bytes, cursor)
         if token.kind == CLOSED_LIST_TOKEN_END -> return cursor
@@ -423,7 +423,9 @@ closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String
             depth -= 1
             if depth == 0 -> return cursor
             if depth == 1 {
-                if payload_start >= 0 -> payloads[variant.copy()] = policy_slice_bytes(text, payload_start, cursor)
+                if payload_start >= 0 {
+                    payloads[variant.copy()] = policy_slice_bytes(text, payload_start, cursor)
+                }
                 payload_start = -1
                 state = if resume -> CLOSED_LIST_AFTER_VARIANT else -> CLOSED_LIST_AFTER_ITEM
             }
@@ -468,8 +470,8 @@ closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String
 // at `from`, pushed to `out` lower-cased. Returns the index just past the
 // body's closing `}`.
 closed_list_string_body: fn(text: String, bytes: [U8], from: Int, out: ^[String]) -> Int {
-    cursor := from
-    depth := 1
+    ^cursor: from
+    ^depth: 1
     loop {
         token: closed_list_token(bytes, cursor)
         if token.kind == CLOSED_LIST_TOKEN_END -> return cursor
@@ -502,16 +504,16 @@ closed_list_declaration: fn(path: String, text: String, bytes: [U8], name: Close
     colon: closed_list_code_token(bytes, name.end)
     if !closed_list_is_punct(bytes, colon, 58) -> return -1
     head: closed_list_code_token(bytes, colon.end)
-    members := [String]{}
+    ^members: [String]{}
     if closed_list_is_word(text, head, "enum") {
         open: closed_list_code_token(bytes, head.end)
         if !closed_list_is_punct(bytes, open, 123) -> return -1
-        payloads := [String:String]{}
+        ^payloads: [String:String]{}
         end: closed_list_enum_members(text, bytes, open.end, members, payloads)
         closed_list_record(path, policy_slice_bytes(text, name.start, name.end), members, out)
         return end
     }
-    bracket := head
+    ^bracket: head
     if closed_list_is_punct(bytes, head, 35) {
         run: closed_list_code_token(bytes, head.end)
         if !closed_list_is_word(text, run, "run") -> return -1
@@ -541,11 +543,11 @@ closed_list_findings_in: fn(path: String, text: String, out: ^[ClosedListFinding
         return
     }
     bytes: text.bytes()
-    depth := 0
+    ^depth: 0
     // Whether the depth-0 token before keeps the next word from naming a
     // declaration: `priv`, `pub` or a `.`.
-    held := false
-    cursor := 0
+    ^held: false
+    ^cursor: 0
     loop {
         token: closed_list_token(bytes, cursor)
         if token.kind == CLOSED_LIST_TOKEN_END -> break
@@ -604,7 +606,7 @@ closed_list_scan: fn(path: String, out: ^[ClosedListFinding]) {
 }
 
 closed_list_findings: fn() -> [ClosedListFinding] {
-    found := [ClosedListFinding]{}
+    ^found: [ClosedListFinding]{}
     loop root in CLOSED_LIST_ROOTS {
         assert(closed_list_files.is_dir(root), "the closed-list root {root} must exist")
         closed_list_scan(root, found)
@@ -655,7 +657,7 @@ closed_list_host_symbol: fn(literal: String) -> Bool {
 
 // The index of the last byte before `index` that is not whitespace, or -1.
 closed_list_back: fn(bytes: [U8], index: Int) -> Int {
-    cursor := index - 1
+    ^cursor: index - 1
     loop cursor >= 0 {
         value: closed_list_at(bytes, cursor)
         if value != 32 && value != 9 && value != 10 && value != 13 -> return cursor
@@ -677,7 +679,7 @@ closed_list_dispatch_key: fn(text: String, bytes: [U8], token: ClosedListToken) 
         if operator == 61 || operator == 33 -> return true
     }
     if value == 40 {
-        word_start := before
+        ^word_start: before
         loop word_start > 0 && closed_list_word_byte(closed_list_at(bytes, word_start - 1)) {
             word_start -= 1
         }
@@ -696,9 +698,9 @@ closed_list_dispatch_key: fn(text: String, bytes: [U8], token: ClosedListToken) 
 // Returns the index just past its body, or the start of the next top-level
 // line when it has none.
 closed_list_function_members: fn(text: String, bytes: [U8], from: Int, keys_only: Bool, out: ^[String]) -> Int {
-    cursor := from
-    depth := 0
-    opened := false
+    ^cursor: from
+    ^depth: 0
+    ^opened: false
     loop {
         token: closed_list_token(bytes, cursor)
         if token.kind == CLOSED_LIST_TOKEN_END -> return cursor
@@ -729,8 +731,8 @@ closed_list_function_members: fn(text: String, bytes: [U8], from: Int, keys_only
 // function.
 closed_list_dispatch_in: fn(path: String, text: String, keys_only: Bool, out: ^[ClosedListFinding]) {
     bytes: text.bytes()
-    depth := 0
-    cursor := 0
+    ^depth: 0
+    ^cursor: 0
     loop {
         token: closed_list_token(bytes, cursor)
         if token.kind == CLOSED_LIST_TOKEN_END -> break
@@ -746,14 +748,14 @@ closed_list_dispatch_in: fn(path: String, text: String, keys_only: Bool, out: ^[
         if !closed_list_is_punct(bytes, colon, 58) -> next
         head: closed_list_code_token(bytes, colon.end)
         if !closed_list_is_word(text, head, "fn") -> next
-        members := [String]{}
+        ^members: [String]{}
         cursor = closed_list_function_members(text, bytes, head.end, keys_only, members)
         closed_list_record(path, policy_slice_bytes(text, token.start, token.end), members, out)
     }
 }
 
 closed_list_dispatch_findings: fn() -> [ClosedListFinding] {
-    found := [ClosedListFinding]{}
+    ^found: [ClosedListFinding]{}
     loop path in CLOSED_LIST_ROUTE_PATHS {
         text: closed_list_files.read(path) ?? panic("read {path}")
         closed_list_dispatch_in(path, text, false, found)
@@ -768,7 +770,7 @@ closed_list_dispatch_findings: fn() -> [ClosedListFinding] {
 // The rows of a ledger file: tab-separated fields; `#` lines are comments.
 closed_list_rows: fn(path: String) -> [[String]] {
     text: closed_list_files.read(path) ?? panic("read {path}")
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop line in text.lines() {
         if line == "" || line.starts_with("#") -> next
         rows.push(line.split("\t").to_list())
@@ -792,9 +794,9 @@ closed_list_duplicate_problem: fn(pair: String) -> String {
 // members in the home's order, so editing the copy alone fails; edit the home
 // and copy it, or generate the copy. Returns the copies' keys.
 closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]], problems: ^[String]) -> [String] {
-    at := [String:Int]{}
+    ^at: [String:Int]{}
     loop (index, finding) in findings -> at[closed_list_key(finding.path, finding.name)] = index
-    copies := [String]{}
+    ^copies: [String]{}
     loop row in rows {
         if row.len() != 4 {
             problems.push("mirror ledger row needs copy file, copy name, home file and home name: {row.join("\t")}")
@@ -824,9 +826,9 @@ closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]],
 // duplicate pairs are the vocabulary's, and it leaves the baseline. `texts`
 // holds each view or check file's source. Returns the views' keys.
 closed_list_subset_problems: fn(findings: [ClosedListFinding], rows: [[String]], texts: [String:String], problems: ^[String]) -> [String] {
-    known := [String:Bool]{}
+    ^known: [String:Bool]{}
     loop finding in findings -> known[closed_list_key(finding.path, finding.name)] = true
-    views := [String]{}
+    ^views: [String]{}
     loop row in rows {
         if (row.len() != 4 && row.len() != 5) || row[2].trim() == "" || row[3].trim() == "" {
             problems.push("subset ledger row needs view file, view name, check constant, vocabulary constant and an optional check file: {row.join("\t")}")
@@ -851,8 +853,8 @@ closed_list_subset_problems: fn(findings: [ClosedListFinding], rows: [[String]],
 // keys of both) or the baseline does not hold, every stale or malformed ledger
 // row, and a baseline that grew or shrank past its ceiling.
 closed_list_home_problems: fn(findings: [ClosedListFinding], copies: [String], problems: ^[String]) {
-    kernel := [String:Bool]{}
-    kernel_keys := [String]{}
+    ^kernel: [String:Bool]{}
+    ^kernel_keys: [String]{}
     loop row in closed_list_rows(CLOSED_LIST_KERNEL_PATH) {
         if row.len() != 4 || row[3].trim() == "" {
             problems.push("kernel ledger row needs file, name, reason class and way out: {row.join("\t")}")
@@ -864,8 +866,8 @@ closed_list_home_problems: fn(findings: [ClosedListFinding], copies: [String], p
         kernel[closed_list_key(row[0], row[1])] = true
         kernel_keys.push(closed_list_key(row[0], row[1]))
     }
-    baseline := [String:Bool]{}
-    baseline_keys := [String]{}
+    ^baseline: [String:Bool]{}
+    ^baseline_keys: [String]{}
     loop row in closed_list_rows(CLOSED_LIST_BASELINE_PATH) {
         if row.len() != 2 {
             problems.push("baseline row needs file and name: {row.join("\t")}")
@@ -888,7 +890,7 @@ closed_list_home_problems: fn(findings: [ClosedListFinding], copies: [String], p
     if baseline_keys.len() < CLOSED_LIST_BASELINE {
         problems.push("the closed-list baseline shrank to {baseline_keys.len()} rows; lower CLOSED_LIST_BASELINE to {baseline_keys.len()}")
     }
-    hand := [String:Bool]{}
+    ^hand: [String:Bool]{}
     loop finding in findings {
         key: closed_list_key(finding.path, finding.name)
         hand[key] = true
@@ -913,7 +915,7 @@ closed_list_home_problems: fn(findings: [ClosedListFinding], copies: [String], p
 closed_list_pair_key: fn(a: ClosedListFinding, b: ClosedListFinding) -> String {
     first: closed_list_key(a.path, a.name)
     second: closed_list_key(b.path, b.name)
-    ordered := [String]{first, second}
+    ^ordered: [String]{first, second}
     ordered.sort()
     "{ordered[0]}\t{ordered[1]}"
 }
@@ -934,13 +936,13 @@ ClosedListPair: struct {
 // Each member chains the lists that hold it, so only lists that share a
 // member are ever compared.
 closed_list_shared_pairs: fn(findings: [ClosedListFinding]) -> [ClosedListPair] {
-    ids := [String:Int]{}
-    chain_head := [Int]{}
-    posting_list := [Int]{}
-    posting_next := [Int]{}
+    ^ids: [String:Int]{}
+    ^chain_head: [Int]{}
+    ^posting_list: [Int]{}
+    ^posting_next: [Int]{}
     loop position in 0..<findings.len() {
         loop member in findings[position].members {
-            id := ids.get(member) ?? -1
+            ^id: ids.get(member) ?? -1
             if id < 0 {
                 id = chain_head.len()
                 ids[member] = id
@@ -951,16 +953,16 @@ closed_list_shared_pairs: fn(findings: [ClosedListFinding]) -> [ClosedListPair] 
             chain_head[id] = posting_list.len() - 1
         }
     }
-    pair_index := [Int:Int]{}
-    pair_left := [Int]{}
-    pair_right := [Int]{}
-    pair_count := [Int]{}
+    ^pair_index: [Int:Int]{}
+    ^pair_left: [Int]{}
+    ^pair_right: [Int]{}
+    ^pair_count: [Int]{}
     loop head in chain_head {
         // Chains run from the latest list back, so `later` always exceeds `earlier`.
-        later := head
+        ^later: head
         loop {
             if later < 0 -> break
-            earlier := posting_next[later]
+            ^earlier: posting_next[later]
             loop {
                 if earlier < 0 -> break
                 key: posting_list[earlier] * CLOSED_LIST_SPAN + posting_list[later]
@@ -976,7 +978,7 @@ closed_list_shared_pairs: fn(findings: [ClosedListFinding]) -> [ClosedListPair] 
             later = posting_next[later]
         }
     }
-    pairs := [ClosedListPair]{}
+    ^pairs: [ClosedListPair]{}
     loop slot in 0..<pair_count.len() {
         left: pair_left[slot]
         right: pair_right[slot]
@@ -992,7 +994,7 @@ closed_list_shared_pairs: fn(findings: [ClosedListFinding]) -> [ClosedListPair] 
 // Pairs of hand-written lists in different files sharing at least 80% of the
 // smaller list's members.
 closed_list_duplicate_pairs: fn(findings: [ClosedListFinding]) -> [String] {
-    pairs := [String]{}
+    ^pairs: [String]{}
     loop pair in closed_list_shared_pairs(findings) {
         if pair.duplicate -> pairs.push(pair.key)
     }
@@ -1026,8 +1028,8 @@ CLOSED_LIST_CORE: "Core"
 // `{ value: I64, }` both read `(I64)`.
 closed_list_payload_type: fn(payload: String) -> String {
     bytes: payload.bytes()
-    out := [String]{}
-    cursor := 0
+    ^out: [String]{}
+    ^cursor: 0
     loop {
         token: closed_list_code_token(bytes, cursor)
         if token.kind == CLOSED_LIST_TOKEN_END -> break
@@ -1038,7 +1040,9 @@ closed_list_payload_type: fn(payload: String) -> String {
             next
         }
         value: if token.kind == CLOSED_LIST_TOKEN_PUNCT -> closed_list_at(bytes, token.start) else -> 0
-        if value == 44 && (closed_list_is_punct(bytes, after, 41) || closed_list_is_punct(bytes, after, 125)) -> next
+        if value == 44 && (closed_list_is_punct(bytes, after, 41) || closed_list_is_punct(bytes, after, 125)) {
+            next
+        }
         piece: if value == 123 -> "(" else if value == 125 -> ")" else -> policy_slice_bytes(payload, token.start, token.end)
         out.push(piece)
     }
@@ -1054,11 +1058,13 @@ closed_list_enum_payloads: fn(text: String, name: String) -> [String:String]? {
     before: text.split("\n{head}").to_list()
     from: if text.starts_with(head) -> head.bytes().len() else if before.len() > 1 -> before[0].bytes().len() + 1 + head.bytes().len() else -> bytes.len()
     if from >= bytes.len() -> return None
-    members := [String]{}
-    payloads := [String:String]{}
+    ^members: [String]{}
+    ^payloads: [String:String]{}
     closed_list_enum_members(text, bytes, from, members, payloads)
-    out := [String:String]{}
-    loop member in members -> out[member.copy()] = closed_list_payload_type(payloads.get(member) ?? "")
+    ^out: [String:String]{}
+    loop member in members {
+        out[member.copy()] = closed_list_payload_type(payloads.get(member) ?? "")
+    }
     Val(out)
 }
 
@@ -1068,7 +1074,7 @@ closed_list_enum_payloads: fn(text: String, name: String) -> [String:String]? {
 closed_list_value_model: fn(left_text: String, left_name: String, right_text: String, right_name: String) -> Bool {
     left: closed_list_enum_payloads(left_text, left_name) ?? return false
     right: closed_list_enum_payloads(right_text, right_name) ?? return false
-    shared := 0
+    ^shared: 0
     loop (member, payload) in left {
         other: right.get(member) ?? next
         if payload == "" || other == "" || payload == other -> return false
@@ -1079,13 +1085,13 @@ closed_list_value_model: fn(left_text: String, left_name: String, right_text: St
 
 closed_list_parent: fn(path: String) -> String {
     parts: path.split("/").to_list()
-    keep := [String]{}
+    ^keep: [String]{}
     loop index in 0..<(parts.len() - 1) -> keep.push(parts[index])
     keep.join("/")
 }
 
 closed_list_normalize: fn(path: String) -> String {
-    stack := [String]{}
+    ^stack: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -1100,7 +1106,7 @@ closed_list_normalize: fn(path: String) -> String {
 // The package that holds `path`: the nearest directory above it with a
 // package.jet, or "" when none does.
 closed_list_package: fn(path: String) -> String {
-    directory := closed_list_parent(path)
+    ^directory: closed_list_parent(path)
     loop directory != "" {
         if closed_list_files.is_file("{directory}/package.jet") -> return directory
         directory = closed_list_parent(directory)
@@ -1112,8 +1118,8 @@ closed_list_package: fn(path: String) -> String {
 // resolved from its relative paths, or None when an entry is not a relative
 // path the guard can follow.
 closed_list_package_deps: fn(package: String, text: String) -> [String]? {
-    deps := [String]{}
-    inside := false
+    ^deps: [String]{}
+    ^inside: false
     loop line in text.lines() {
         if !inside {
             if line.starts_with("deps: {{") && !line.ends_with("}}") -> inside = true
@@ -1134,8 +1140,8 @@ closed_list_package_deps: fn(package: String, text: String) -> [String]? {
 // closure holds Core.
 closed_list_package_reaches: fn(package: String, target: String) -> Bool? {
     if target == CLOSED_LIST_CORE -> return Val(true)
-    seen := [String:Bool]{}
-    pending := [String]{package.copy()}
+    ^seen: [String:Bool]{}
+    ^pending: [String]{package.copy()}
     loop {
         current: pending.pop() ?? break
         if current == target -> return Val(true)
@@ -1187,16 +1193,16 @@ closed_list_pair_reason_problem: fn(row: [String], reason: String) -> String {
 // matches its home and a subset view is checked against its vocabulary, so
 // their pairs are their homes' pairs.
 closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [String], problems: ^[String]) {
-    pairs := [String:ClosedListPair]{}
-    pair_keys := [String]{}
+    ^pairs: [String:ClosedListPair]{}
+    ^pair_keys: [String]{}
     loop pair in closed_list_shared_pairs(findings) {
         if closed_list_mirror_pair(pair.key, copies) -> next
         pair_keys.push(pair.key)
         pairs[pair.key] = pair
     }
-    known := [String:Bool]{}
-    rows := 0
-    reasoned := 0
+    ^known: [String:Bool]{}
+    ^rows: 0
+    ^reasoned: 0
     loop row in closed_list_rows(CLOSED_LIST_DUPLICATES_PATH) {
         count: if row.len() == 5 || row.len() == 6 -> Int.parse(row[4]) ?? -1 else -> -1
         if count < 0 {
@@ -1243,10 +1249,10 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
 #Test("every closed list is generated, kept closed by the kernel ledger, a checked copy or subset, or in the shrinking baseline, and no two files duplicate one") {
     guards_enter_root()
     findings: closed_list_findings()
-    problems := [String]{}
-    copies := closed_list_mirror_problems(findings, closed_list_rows(CLOSED_LIST_MIRRORS_PATH), problems)
+    ^problems: [String]{}
+    ^copies: closed_list_mirror_problems(findings, closed_list_rows(CLOSED_LIST_MIRRORS_PATH), problems)
     subset_rows: closed_list_rows(CLOSED_LIST_SUBSETS_PATH)
-    texts := [String:String]{}
+    ^texts: [String:String]{}
     loop row in subset_rows {
         if row.len() > 0 -> texts[row[0]] = closed_list_files.read(row[0]) ?? ""
         if row.len() == 5 -> texts[row[4]] = closed_list_files.read(row[4]) ?? ""
@@ -1256,7 +1262,7 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     }
     // A dispatch function's names are held by the same ledgers; its member
     // literals are route keys, not a vocabulary another list may duplicate.
-    held := findings.copy()
+    ^held: findings.copy()
     loop finding in closed_list_dispatch_findings() -> held.push(finding)
     closed_list_home_problems(held, copies, problems)
     // CORE_LEVELS is a checked copy of the `optimize` build option's values
@@ -1271,27 +1277,27 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     view: ClosedListFinding{path: "v.jet", name: "View", members: [String]{"net", "fs", "db"}}
     rows: [[String]]{[String]{"v.jet", "View", "VIEW_COUNT", "ROOTS"}}
     checked: [String:String]{"v.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run {{ view_count(embed_file(\"v.jet\"), ROOTS) }}\n"}
-    clean := [String]{}
+    ^clean: [String]{}
     assert_eq(closed_list_subset_problems([ClosedListFinding]{view.copy()}, rows, checked, clean).join(","), "v.jet\tView")
     assert_eq(clean.len(), 0)
     // The operand form `NAME: #run call(...)` is the same check.
     operand: [String:String]{"v.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run view_count(embed_file(\"v.jet\"), ROOTS)\n"}
     assert_eq(closed_list_subset_problems([ClosedListFinding]{view.copy()}, rows, operand, clean).join(","), "v.jet\tView")
     assert_eq(clean.len(), 0)
-    unchecked := [String]{}
+    ^unchecked: [String]{}
     assert_eq(closed_list_subset_problems([ClosedListFinding]{view.copy()}, rows, [String:String]{"v.jet": "View: enum {{ Net, FS, DB }}\n"}, unchecked).len(), 0)
     assert(unchecked[0].contains("v.jet has no `VIEW_COUNT: #run …` check of View reading ROOTS"))
-    gone := [String]{}
+    ^gone: [String]{}
     closed_list_subset_problems([ClosedListFinding]{}, rows, checked, gone)
     assert(gone[0].contains("names a list that is gone"))
     // A check above the view's directory holds only while it names the view.
     above: [[String]]{[String]{"a/v.jet", "View", "VIEW_COUNT", "ROOTS", "c.jet"}}
     held: [String:String]{"c.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run x(\"a/v.jet\", embed_file(\"a/v.jet\"), \"View\", ROOTS)\n"}
-    placed := [String]{}
+    ^placed: [String]{}
     housed: ClosedListFinding{path: "a/v.jet", name: "View", members: [String]{"net", "fs", "db"}}
     assert_eq(closed_list_subset_problems([ClosedListFinding]{housed.copy()}, above, held, placed).join(","), "a/v.jet\tView")
     assert_eq(placed.len(), 0)
-    unnamed := [String]{}
+    ^unnamed: [String]{}
     closed_list_subset_problems([ClosedListFinding]{housed.copy()}, above, [String:String]{"c.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run x(ROOTS)\n"}, unnamed)
     assert(unnamed[0].contains("c.jet has no `VIEW_COUNT: #run …` check of View reading ROOTS"))
     // A view's duplicate pairs are its vocabulary's, so they leave the duplicate ledger.
@@ -1331,14 +1337,14 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     twin: ClosedListFinding{path: "c.jet", name: "COPY", members: [String]{"abi", "cli", "ffi"}}
     edited: ClosedListFinding{path: "c.jet", name: "COPY", members: [String]{"abi", "cli", "ffi", "gpu"}}
     rows: [[String]]{[String]{"c.jet", "COPY", "h.jet", "HOME"}}
-    clean := [String]{}
+    ^clean: [String]{}
     assert_eq(closed_list_mirror_problems([ClosedListFinding]{home.copy(), twin.copy()}, rows, clean).join(","), "c.jet\tCOPY")
     assert_eq(clean.len(), 0)
-    drift := [String]{}
+    ^drift: [String]{}
     closed_list_mirror_problems([ClosedListFinding]{home.copy(), edited.copy()}, rows, drift)
     assert_eq(drift.len(), 1)
     assert(drift[0].contains("c.jet COPY is a copy of h.jet HOME and no longer matches it"))
-    gone := [String]{}
+    ^gone: [String]{}
     closed_list_mirror_problems([ClosedListFinding]{home.copy()}, rows, gone)
     assert(gone[0].contains("names a list that is gone"))
     // A copy's duplicate pairs are its home's, so they leave the duplicate ledger.
@@ -1360,7 +1366,7 @@ closed_list_build_option_values: fn(text: String, name: String) -> [String]? {
     loop line in text.lines() {
         if !line.trim().starts_with("{{name: \"{name}\",") -> next
         rest: policy_slice_bytes(line, closed_list_after(line, "values: [String]{{"), line.bytes().len())
-        values := [String]{}
+        ^values: [String]{}
         closed_list_string_members(rest.split("}}").to_list()[0], values)
         return Val(values)
     }
@@ -1371,9 +1377,9 @@ closed_list_build_option_values: fn(text: String, name: String) -> [String]? {
 // the `optimize` row's values in `options_text`, naming both files; "" when
 // it is.
 closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -> String {
-    found := [ClosedListFinding]{}
+    ^found: [ClosedListFinding]{}
     closed_list_findings_in(CLOSED_LIST_CORE_LEVELS_PATH, levels_text, found)
-    levels := [String]{}
+    ^levels: [String]{}
     loop finding in found {
         if finding.name == "CORE_LEVELS" -> levels = finding.members.copy()
     }
@@ -1395,7 +1401,7 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
 
 #Test("the closed list scanner reads enums, string lists and generated headers") {
     guards_enter_root()
-    found := [ClosedListFinding]{}
+    ^found: [ClosedListFinding]{}
     closed_list_findings_in("a.jet", "Color: enum {{\n    Red, Green,\n    Blue(Int),\n    Custom{{ name: String }},\n\n    name: fn(self) -> String {{ \"x\" }}\n}}\nNAMES: #run {{ [String]{{\n    \"go\", \"Java\", // \"cobol\"\n    \"r\",\n}} }}\nSHORT: [String]{{\"a\", \"b\"}}\nInline: enum {{ A, B, C }}\nlocal: fn() {{ x: [String]{{\"p\", \"q\", \"r\"}} }}\n", found)
     assert_eq(found.len(), 3)
     assert_eq(found[0].name, "Color")
@@ -1427,7 +1433,7 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
 
 #Test("a route or dispatch file's functions are closed lists of the Core names they hold") {
     guards_enter_root()
-    found := [ClosedListFinding]{}
+    ^found: [ClosedListFinding]{}
     source: "route: fn(name: String, method: String) -> String? {{\n    if name == \"Signal\" && method == {{\n        \"get\" | \"set\" -> return Val(\"jet_std.JetSignal.{{method}}\")\n        else -> panic(\"no route for this member\")\n    }}\n    None\n}}\nkeyed: fn(symbol: SymbolID) -> Int {{ symbol.id }}\nwords: fn(detail: String) -> Bool {{ detail.contains(\"tls\") || detail.contains(\"alert\") || fail(\"E3414\", \"handshake\") }}\nbuild: fn(member: String) -> Bool {{ member == \"BuildPlan.graph\" || member.starts_with(\"Build.\") || member == \"Code.pasted\" }}\n"
     closed_list_dispatch_in("r.jet", source, true, found)
     // `words` tests text and passes call arguments; it dispatches on nothing.
@@ -1437,7 +1443,7 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
     assert_eq(found[1].name, "build")
     assert_eq(found[1].members.join(","), "buildplan.graph,build.,code.pasted")
     // A route file holds no Core name at all, dispatched on or not.
-    held := [ClosedListFinding]{}
+    ^held: [ClosedListFinding]{}
     closed_list_dispatch_in("r.jet", source, false, held)
     assert_eq(held.len(), 3)
     assert_eq(held[1].name, "words")
@@ -1471,7 +1477,7 @@ CLOSED_LIST_MARKER_SYNTAX_PATH: "Compiler/JetFoundation/Data/Syntax/Markers.jet"
 // The marker names `text` (a MARKER_SOURCE file) declares: its top-level
 // `Name: struct` lines.
 closed_list_marker_names: fn(text: String) -> [String:Int] {
-    names := [String:Int]{}
+    ^names: [String:Int]{}
     loop line in text.lines() {
         ident: closed_list_ident_prefix(line)
         if ident == "" || !policy_slice_bytes(line, ident.bytes().len(), line.bytes().len()).starts_with(": struct") {
@@ -1485,7 +1491,7 @@ closed_list_marker_names: fn(text: String) -> [String:Int] {
 // Every spelling (of the marker syntax file) that is a registered marker
 // name: a second list of the registry's names.
 closed_list_marker_syntax_copies: fn(spellings: [ClosedListSpelling], markers: [String:Int]) -> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     loop spelling in spellings {
         if markers.get(spelling.text) == None -> next
         problems.push("{spelling.path} {spelling.name} copies the marker name `{spelling.text}`; markers are named only by their struct in {CLOSED_LIST_MARKER_REGISTRY_PATH}, so delete the constant and read the registry")
@@ -1506,7 +1512,7 @@ ClosedListSpelling: struct {
 closed_list_literal_at: fn(text: String, start: Int) -> String? {
     bytes: text.bytes()
     if start >= bytes.len() || (Int{bytes[start]}) != 34 -> return None
-    end := start + 1
+    ^end: start + 1
     loop {
         if end >= bytes.len() -> return None
         if (Int{bytes[end]}) == 92 {
@@ -1542,9 +1548,9 @@ closed_list_row_field: fn(line: String, name: String) -> String? {
 // spelling it names, or that names no spelling. A MARKER_SOURCE row's token
 // is one of `markers`, the marker registry's names.
 closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [ClosedListSpelling], markers: [String:Int]) -> [String] {
-    by_name := [String:Int]{}
+    ^by_name: [String:Int]{}
     loop (index, spelling) in spellings -> by_name[spelling.name] = index
-    problems := [String]{}
+    ^problems: [String]{}
     loop line in dictionary.lines() {
         if !line.starts_with("    {{token: \"") -> next
         token: closed_list_row_field(line, "token") ?? next
@@ -1571,7 +1577,7 @@ closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [Close
 
 #Test("each syntax dictionary token is the registry spelling it names") {
     guards_enter_root()
-    spellings := [ClosedListSpelling]{}
+    ^spellings: [ClosedListSpelling]{}
     entries: closed_list_files.list_dir(CLOSED_LIST_SYNTAX_REGISTRY_DIR) ?? panic("list {CLOSED_LIST_SYNTAX_REGISTRY_DIR}")
     loop entry in entries {
         if !entry.name.ends_with(".jet") -> next
@@ -1586,7 +1592,7 @@ closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [Close
     assert_eq(problems.len(), 0)
     // Editing a copied token alone fails, naming the home; so does a row
     // that names no spelling, or a marker the registry doesn't declare.
-    home := [ClosedListSpelling]{}
+    ^home: [ClosedListSpelling]{}
     closed_list_spellings_in("h.jet", "KW_BREAK: \"break\"\nKW_IF: \"if\" // the `if` keyword\n", home)
     assert_eq(home.len(), 2)
     assert_eq(home[1].text, "if")
@@ -1604,14 +1610,14 @@ closed_list_syntax_dictionary_problems: fn(dictionary: String, spellings: [Close
 #Test("the marker syntax file copies no marker name") {
     guards_enter_root()
     markers: closed_list_marker_names(closed_list_files.read(CLOSED_LIST_MARKER_REGISTRY_PATH) ?? panic("read {CLOSED_LIST_MARKER_REGISTRY_PATH}"))
-    spellings := [ClosedListSpelling]{}
+    ^spellings: [ClosedListSpelling]{}
     closed_list_spellings_in(CLOSED_LIST_MARKER_SYNTAX_PATH, closed_list_files.read(CLOSED_LIST_MARKER_SYNTAX_PATH) ?? panic("read {CLOSED_LIST_MARKER_SYNTAX_PATH}"), spellings)
     assert(spellings.len() > 0, "{CLOSED_LIST_MARKER_SYNTAX_PATH} declares no syntax")
     problems: closed_list_marker_syntax_copies(spellings, markers)
     loop problem in problems -> print(problem)
     assert_eq(problems.len(), 0)
     // A name copied back into the syntax file fails, naming the registry.
-    copied := [ClosedListSpelling]{}
+    ^copied: [ClosedListSpelling]{}
     closed_list_spellings_in("m.jet", "RULE_PREFIX: \"#\"\nMARKER_PRE: \"Pre\"\n", copied)
     found: closed_list_marker_syntax_copies(copied, closed_list_marker_names("Pre: struct {{\n}}\n"))
     assert_eq(found.len(), 1)
@@ -1636,7 +1642,7 @@ closed_list_marker_name_case: fn(name: String) -> Bool {
 // Every marker the registry declares, and every marker row of `dictionary`,
 // whose name is not in the marker NameCase.
 closed_list_marker_case_problems: fn(markers: [String:Int], dictionary: String) -> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     loop name in markers.keys() {
         if !closed_list_marker_name_case(name) {
             problems.push("{CLOSED_LIST_MARKER_REGISTRY_PATH} declares the marker `{name}`; a marker name is PascalCase")

@@ -105,8 +105,8 @@ UtcLiteral: struct {
 // The index just past the `}` that closes the interpolation opened before
 // `start`, skipping nested braces and string literals.
 utc_hole_end: fn(bytes: [U8], start: Int) -> Int Never! {
-    depth := 1
-    at := start
+    ^depth: 1
+    ^at: start
     loop at < bytes.len() {
         code: Int{bytes[at]}
         if code == 34 {
@@ -125,9 +125,9 @@ utc_hole_end: fn(bytes: [U8], start: Int) -> Int Never! {
 
 // The literal whose text starts at `start`, one past its opening quote.
 utc_literal: fn(bytes: [U8], start: Int) -> UtcLiteral Never! {
-    lines := [String]{}
-    current := [U8]{}
-    at := start
+    ^lines: [String]{}
+    ^current: [U8]{}
+    ^at: start
     loop at < bytes.len() {
         code: Int{bytes[at]}
         if code == 34 -> break
@@ -173,9 +173,9 @@ utc_lower: fn(code: Int) -> Bool Never! { code >= 97 && code <= 122 }
 // that an indent of two or more spaces follows (`{out}  word`).
 utc_opening: fn(line: String) -> UtcOpening Never! {
     bytes: line.bytes()
-    start := 0
+    ^start: 0
     loop start < bytes.len() && (Int{bytes[start]}) == 32 -> start += 1
-    extended := false
+    ^extended: false
     if start + 1 < bytes.len() && (Int{bytes[start]}) == 123 && (Int{bytes[start + 1]}) == 125 {
         hole_end: start + 2
         start = hole_end
@@ -185,7 +185,7 @@ utc_opening: fn(line: String) -> UtcOpening Never! {
         }
         extended = start == hole_end
     }
-    end := start
+    ^end: start
     loop end < bytes.len() && utc_lower(Int{bytes[end]}) -> end += 1
     if end == start || (extended && end - start < 2) -> return .Other
     if UTC_NAMES.contains(String.from_bytes(bytes[start..<end]) ?? "") -> return .Other
@@ -194,7 +194,7 @@ utc_opening: fn(line: String) -> UtcOpening Never! {
     if after != 58 && after != 32 -> return .Other
     // A label is lowercase words and spaces up to a `:` that ends the line or
     // precedes a space.
-    at := end
+    ^at: end
     loop at < bytes.len() && (utc_lower(Int{bytes[at]}) || (Int{bytes[at]}) == 32) -> at += 1
     if at < bytes.len() && (Int{bytes[at]}) == 58 && (at + 1 == bytes.len() || (Int{bytes[at + 1]}) == 32) {
         return .Label
@@ -213,7 +213,7 @@ utc_continues: fn(previous: String) -> Bool Never! {
 // The lines of one literal that open lowercase. `whole` reads every line;
 // otherwise only the first.
 utc_literal_flags: fn(lines: [String], whole: Bool) -> [String] Never! {
-    flagged := [String]{}
+    ^flagged: [String]{}
     loop (index, line) in lines {
         if index > 0 && !whole -> break
         opening: utc_opening(line)
@@ -231,8 +231,8 @@ utc_literal_flags: fn(lines: [String], whole: Bool) -> [String] Never! {
 // `area` reads them. A `//` outside a string ends the code of the line.
 utc_line_flags: fn(line: String, area: UtcArea) -> [String] Never! {
     bytes: line.bytes()
-    flagged := [String]{}
-    at := 0
+    ^flagged: [String]{}
+    ^at: 0
     loop at < bytes.len() {
         code: Int{bytes[at]}
         if code == 47 && at + 1 < bytes.len() && (Int{bytes[at + 1]}) == 47 -> break
@@ -243,7 +243,7 @@ utc_line_flags: fn(line: String, area: UtcArea) -> [String] Never! {
         before: String.from_bytes(bytes[0..<at]) ?? ""
         literal: utc_literal(bytes, at + 1)
         at = literal.end + 1
-        labeled := false
+        ^labeled: false
         loop field in area.fields {
             if before.ends_with(field) -> labeled = true
         }
@@ -259,8 +259,8 @@ utc_line_flags: fn(line: String, area: UtcArea) -> [String] Never! {
 
 // Each line of `source` that opens lowercase, as `path:line: text`.
 utc_source_flags: fn(path: String, source: String, area: UtcArea) -> [String] Never! {
-    flagged := [String]{}
-    testing := false
+    ^flagged: [String]{}
+    ^testing: false
     loop (index, line) in source.lines() {
         if testing {
             if line == "}}" -> testing = false
@@ -290,8 +290,8 @@ utc_walk: fn(path: String, out: ^[String]) {
 // The census against the closed list: each file whose count differs, with
 // its lowercase lines.
 utc_findings: fn(found: [String:[String]], allowed_rows: [UserTextRow]) -> [String] Never! {
-    findings := [String]{}
-    allowed := [String:Int]{}
+    ^findings: [String]{}
+    ^allowed: [String:Int]{}
     loop row in allowed_rows -> allowed[row.path] = row.count
     loop path in found.keys() {
         flagged: found[path]
@@ -317,10 +317,10 @@ utc_findings: fn(found: [String:[String]], allowed_rows: [UserTextRow]) -> [Stri
 
 // Every lowercase line of the sources of each area, by file.
 utc_census: fn(areas: [UtcArea]) -> [String:[String]] {
-    found := [String:[String]]{}
-    read := 0
+    ^found: [String:[String]]{}
+    ^read: 0
     loop area in areas {
-        sources := [String]{}
+        ^sources: [String]{}
         loop root in area.roots -> utc_walk(root, sources)
         read += sources.len()
         loop path in sources {
@@ -355,7 +355,7 @@ utc_census: fn(areas: [UtcArea]) -> [String:[String]] {
     }.join("\n")
     flagged: utc_source_flags("a.jet", source, UTC_AREAS[0])
     assert_eq(flagged.join("|"), "a.jet:1: usage: jet x|a.jet:2: {{}}ready now|a.jet:4: shows the plan|a.jet:5: {{}}two words: z|a.jet:6: lone|a.jet:7: {{}}  indented: x|a.jet:8: no file here")
-    found := [String:[String]]{}
+    ^found: [String:[String]]{}
     found["a.jet"] = flagged
     rows: [UserTextRow]{UserTextRow{path: "b.jet", count: 1, reason: "test"}}
     assert_eq(utc_findings(found, rows).len(), 2)

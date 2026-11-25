@@ -13,7 +13,7 @@ Person: struct {
 
 // 220,000 records in one array: about 17.9 MB, past the 16 MiB safe item size.
 wire: fn() -> String {
-    parts := ["["]
+    ^parts: ["["]
     loop i in 0..<220000 {
         comma: if i == 0 -> "" else -> ","
         active: if i %% 3 != 0 -> "true" else -> "false"
@@ -27,14 +27,14 @@ run: fn() {
     text: wire()
     print("over 16 MiB: {text.bytes().len() > 16777216}")
     print("untyped parse keeps its limit: {json.parse(text) == .Err(_)}")
-    limits := encoding.EncodingLimits.safe()
+    ^limits: encoding.EncodingLimits.safe()
     limits.max_item_bytes = 268435456
     tree: json.parse_with_limits(text, limits) ?? panic("Dyn parse")
     through_dyn: tree.decode<[Person]>() ?? panic("Dyn decode")
     typed: json.decode<[Person]>(text) ?? panic("typed decode")
     print("records={typed.len()} equal={typed == through_dyn}")
-    active := 0
-    salary := 0
+    ^active: 0
+    ^salary: 0
     loop person in typed {
         if !person.active -> next
         active += 1

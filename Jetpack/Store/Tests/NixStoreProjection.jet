@@ -28,10 +28,10 @@ store_test_find_entry: fn(entries: [StoreEntry], store_path: String) -> StoreEnt
 
 // Re-register every admitted record with complete Nix build facts.
 store_test_canonicalize_admitted_records: fn(verification: StoreVerification, roots: HangarRoots, admitted: AdmittedNixClosure) -> [StoreEntry] Never! {
-    canonical := [StoreEntry]{}
+    ^canonical: [StoreEntry]{}
     loop original in store_list_checked(verification, roots) ?? panic("listing") {
-        entry := original
-        producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+        ^entry: original
+        ^producer: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
         store_path: producer.facts.get("nix.store-path") ?? next
         if !admitted.objects.has_key(store_path) -> next
         loop fact in provider_nix_build_facts_record() -> producer.facts[fact.key] = fact.value
@@ -47,7 +47,7 @@ store_test_canonicalize_admitted_records: fn(verification: StoreVerification, ro
 store_test_register_canonical: fn(verification: StoreVerification, roots: HangarRoots, entries: ^[StoreEntry]) Never! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     loop index in 0..<entries.len() {
-        entry := entries[index]
+        ^entry: entries[index]
         store_prepare_entry_receipt(roots, entry) ?? panic("receipt")
         entries[index] = entry
     }
@@ -57,7 +57,7 @@ store_test_register_canonical: fn(verification: StoreVerification, roots: Hangar
 // One signed standard narinfo for `store_path` over `nar`.
 store_test_signed_narinfo: fn(store_path: String, nar_name: String, nar: [U8], references: [String], key_id: String, seed: [U8]) -> String Never! {
     hash: "sha256:{store_sha256_hex(nar)}"
-    names := [String]{}
+    ^names: [String]{}
     loop reference in references -> names.push(files.basename(reference))
     info: NixNarInfo{
         store_path: store_path,
@@ -119,7 +119,7 @@ store_test_admit_signed_closure: fn(verification: StoreVerification, roots: Hang
     files.write(files.join(source, "leaf/payload"), "leaf") ?? panic("leaf payload")
     root_nar: (store_write_nar(files.join(source, "root")) ?? panic("root nar")).bytes
     leaf_nar: (store_write_nar(files.join(source, "leaf")) ?? panic("leaf nar")).bytes
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(U8{9})
     key_id: "jetpack-projection-test-1"
     routes: [String:[U8]]{
@@ -141,26 +141,26 @@ store_test_admit_signed_closure: fn(verification: StoreVerification, roots: Hang
 }
 
 #Test("store nix store projection includes every hangar closure object") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     admitted: store_test_admit_signed_closure(verification, roots)
     entries: store_test_canonicalize_admitted_records(verification, roots, admitted)
     root_path: (admitted.outputs.get("out") ?? panic("out output")).store_path
     entry: store_test_find_entry(entries, root_path)
     lease: store_snapshot_lease(verification, roots, entry) ?? panic("lease")
-    projected := [String:String]{}
+    ^projected: [String:String]{}
     loop item in
         store_nix_store_projection_for_entry(verification, roots, entry, lease.snapshot_root) ?? panic("projection") {
         assert(!store_path_starts_with(item.source, "/nix/store"))
         projected[item.logical] = item.source
     }
     // The lease hands the child exactly those objects, by held descriptor.
-    leased := [String]{}
+    ^leased: [String]{}
     loop pair in lease.nix_store_projection() -> leased.push(pair.logical)
     assert_eq(store_sorted_unique(leased), store_sorted_unique(projected.keys().to_list()))
-    expected := [String]{}
+    ^expected: [String]{}
     loop object in admitted.objects -> expected.push(object.key.removeprefix("/nix/store/"))
-    actual := [String]{}
+    ^actual: [String]{}
     loop pair in projected -> actual.push(pair.key.removeprefix("/nix/store/"))
     assert_eq(store_sorted_unique(actual), store_sorted_unique(expected))
     objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
@@ -172,13 +172,13 @@ store_test_admit_signed_closure: fn(verification: StoreVerification, roots: Hang
 }
 
 #Test("store nix store projection rejects a missing closure object") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     admitted: store_test_admit_signed_closure(verification, roots)
     entries: store_test_canonicalize_admitted_records(verification, roots, admitted)
     root_path: (admitted.outputs.get("out") ?? panic("out output")).store_path
     entry: store_test_find_entry(entries, root_path)
-    leaf := ""
+    ^leaf: ""
     loop object in admitted.objects {
         if object.value.store_path != root_path -> leaf = object.value.hangar_path
     }
@@ -194,21 +194,21 @@ store_test_admit_signed_closure: fn(verification: StoreVerification, roots: Hang
 }
 
 #Test("store nix store projection rejects a conflicting closure owner at registration") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     admitted: store_test_admit_signed_closure(verification, roots)
     entries: store_test_canonicalize_admitted_records(verification, roots, admitted)
     root_path: (admitted.outputs.get("out") ?? panic("out output")).store_path
     root_entry: store_test_find_entry(entries, root_path)
-    leaf_path := ""
+    ^leaf_path: ""
     loop object in admitted.objects {
         if object.key != root_path -> leaf_path = object.key
     }
-    conflict := store_test_find_entry(entries, leaf_path)
+    ^conflict: store_test_find_entry(entries, leaf_path)
     conflict.name = "nix-projection-conflict"
     conflict.reference = "nix-projection-conflict@nixpkgs"
     conflict.id = store_entry_id(conflict.name, conflict.version, conflict.reference, conflict.out)
-    producer := ProducerRecord.decode(conflict.producer_record) ?? panic("producer")
+    ^producer: ProducerRecord.decode(conflict.producer_record) ?? panic("producer")
     producer.facts["nix.output.out"] = "/nix/store/conflicting-leaf"
     conflict.producer_record = producer.encode()
     conflict.receipt = ""
@@ -227,19 +227,19 @@ store_test_admit_signed_closure: fn(verification: StoreVerification, roots: Hang
 
 store_test_register_conflict: fn(verification: StoreVerification, roots: HangarRoots, original: StoreEntry) -> Bool StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
-    entry := original
+    ^entry: original
     store_prepare_entry_receipt(roots, entry)
     store_register_entry_unlocked(verification, roots, entry)
 }
 
 #Test("store nix closure verification rejects an escaped leaf object") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     admitted: store_test_admit_signed_closure(verification, roots)
     entries: store_test_canonicalize_admitted_records(verification, roots, admitted)
     root_path: (admitted.outputs.get("out") ?? panic("out output")).store_path
     entry: store_test_find_entry(entries, root_path)
-    leaf := ""
+    ^leaf: ""
     loop object in admitted.objects {
         if object.value.store_path != root_path -> leaf = object.value.hangar_path
     }

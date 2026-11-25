@@ -24,7 +24,7 @@ ReservoirSampler: struct {
             self.state.items.push(item.copy())
             return
         }
-        state := self.state.rng
+        ^state: self.state.rng
         state ~= (state << 13)
         state ~= (state >> 7)
         state ~= (state << 17)
@@ -46,21 +46,21 @@ ReservoirState: struct {
 new: fn(capacity: Int) -> ReservoirSampler Never! { ReservoirSampler.new(capacity) }
 
 #Test("reservoir keeps filled slots and native minimum capacity") {
-    sampler := new(3)
+    ^sampler: new(3)
     sampler.add("x")
-    clone := sampler.copy()
+    ^clone: sampler.copy()
     clone.add("y")
     clone.add("z")
     assert_eq(sampler.sample(), [String]{"x"})
     assert_eq(clone.sample(), [String]{"x", "y", "z"})
-    minimum := new(-1)
+    ^minimum: new(-1)
     minimum.add("only")
     assert_eq(minimum.sample(), [String]{"only"})
 }
 
 #Test("reservoir replacement is replayable") {
-    left := new(3)
-    right := new(3)
+    ^left: new(3)
+    ^right: new(3)
     loop i in 0..<20 {
         left.add("{i}")
         right.add("{i}")

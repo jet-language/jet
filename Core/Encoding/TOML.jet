@@ -88,7 +88,7 @@ Codec: struct {
 }
 
 priv parse_toml: fn(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
-    p := TOMLParser{
+    ^p: TOMLParser{
         bytes: text.bytes(),
         index: 0,
         line: 1,
@@ -202,7 +202,7 @@ TOMLParser: struct {
     }
 
     document: fn(^self) -> Bool EncodingError! {
-        current := [String]{}
+        ^current: [String]{}
         self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
         loop self.eof() == false {
             self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
@@ -220,7 +220,7 @@ TOMLParser: struct {
             line: self.line
             column: self.column
             keys: self.parse_dotted_key()
-            path := [String]{}
+            ^path: [String]{}
             loop k in current -> path.push(k.copy())
             loop k in keys -> path.push(k.copy())
             self.__define(path, at, line, column) ?? return Err(err)
@@ -237,13 +237,13 @@ TOMLParser: struct {
 
     parse_header: fn(^self) -> [String] EncodingError! {
         _: self.bump()
-        array := false
+        ^array: false
         b0: self.peek() ?? (U8{0})
         if b0 == (U8{91}) {
             array = true
             _: self.bump()
         }
-        keys := [String]{}
+        ^keys: [String]{}
         key: self.parse_key()
         keys.push(key)
         loop {
@@ -272,7 +272,7 @@ TOMLParser: struct {
         self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         b: self.peek() ?? return Err(self.fail("expected a key"))
         if b == (U8{34}) -> return self.parse_basic_string()
-        out := [U8]{}
+        ^out: [U8]{}
         loop {
             c: self.peek() ?? break
             n: c
@@ -286,7 +286,7 @@ TOMLParser: struct {
     }
 
     parse_dotted_key: fn(^self) -> [String] EncodingError! {
-        keys := [String]{}
+        ^keys: [String]{}
         key: self.parse_key()
         keys.push(key)
         loop {
@@ -338,7 +338,7 @@ TOMLParser: struct {
 
     parse_basic_string: fn(^self) -> String EncodingError! {
         _: self.bump()
-        out := [U8]{}
+        ^out: [U8]{}
         loop {
             b: self.bump() ?? return Err(self.fail("unterminated TOML string"))
             if b == (U8{34}) {
@@ -365,7 +365,7 @@ TOMLParser: struct {
 
     parse_literal_string: fn(^self) -> String EncodingError! {
         _: self.bump()
-        out := [U8]{}
+        ^out: [U8]{}
         loop {
             b: self.bump() ?? return Err(self.fail("unterminated literal string"))
             if b == (U8{39}) {
@@ -379,7 +379,7 @@ TOMLParser: struct {
     parse_array: fn(^self) -> Dyn EncodingError! {
         _: self.bump()
         enter_nesting(self) ?? return Err(err)
-        items := [Dyn]{}
+        ^items: [Dyn]{}
         loop {
             self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0: self.peek() ?? (U8{0})
@@ -409,8 +409,8 @@ TOMLParser: struct {
         enter_nesting(self) ?? return Err(err)
         // Dyn objects retain insertion order; `names` holds where each key
         // is first defined, for a repeat's report.
-        entries := Dyn.object()
-        names := [String:{line: Int, column: Int}]{}
+        ^entries: Dyn.object()
+        ^names: [String:{line: Int, column: Int}]{}
         loop {
             self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0: self.peek() ?? (U8{0})
@@ -463,7 +463,7 @@ TOMLParser: struct {
         }
         if self.index <= start -> return Err(self.fail("expected a TOML value"))
         spelling: String.from_bytes(self.bytes[start..self.index - 1]) ?? ""
-        normalized := spelling.bytes()
+        ^normalized: spelling.bytes()
         if normalized.len() >= 19 {
             if normalized[10] == (U8{32}) || normalized[10] == (U8{116}) -> normalized[10] = U8{84}
             if normalized[normalized.len() - 1] == (U8{122}) {
@@ -474,27 +474,27 @@ TOMLParser: struct {
         clean: remove_underscores(token)
         raw: token.bytes()
         if raw.len() >= 28 && (raw[raw.len() - 9] == (U8{43}) || raw[raw.len() - 9] == (U8{45})) && raw[raw.len() - 6] == (U8{58}) && raw[raw.len() - 3] == (U8{58}) {
-            error := self.fail("date-time offsets with seconds are unsupported")
+            ^error: self.fail("date-time offsets with seconds are unsupported")
             error.kind = EncodingErrorKind.Unsupported
             return Err(error)
         }
         if parse_radix_int(clean) == {
             .Val(n) -> return Ok(stream.typed_number("{n}"))
-            .None -> { _ := 0 }
+            .None -> { ^_: 0 }
         }
         if Int.parse(clean) == {
             .Ok(n) -> return Ok(stream.typed_number("{n}"))
-            .Err(_) -> { _ := 0 }
+            .Err(_) -> { ^_: 0 }
         }
         if Float.parse(clean) == {
             .Ok(n) -> return Ok(number_tree(clean, n))
-            .Err(_) -> { _ := 0 }
+            .Err(_) -> { ^_: 0 }
         }
         if looks_toml_datetime(token) {
             stamp: Dyn.Text(token)
             if stamp.decode<ZonedDateTime>() == {
                 .Ok(z) -> return Ok(Dyn.DateTime(z))
-                .Err(_) -> { _ := 0 }
+                .Err(_) -> { ^_: 0 }
             }
             if raw.len() > 19 && (raw[raw.len() - 1] == (U8{90}) || raw[raw.len() - 1] == (U8{122}) || (raw.len() >= 25 && raw[raw.len() - 3] == (U8{58}))) {
                 return Err(self.fail("invalid TOML offset date-time"))
@@ -530,7 +530,7 @@ TOMLParser: struct {
         if self.allow_duplicates {
             return
         }
-        count := path.len()
+        ^count: path.len()
         loop count > 0 {
             if self.defined.get(defined_key(self.root, path, count, 0)) == .Val(first) {
                 return Err(self.__repeated(path.join("."), at, line, column, first))
@@ -547,7 +547,7 @@ TOMLParser: struct {
     }
 
     assign: fn(^self, table: [String], key: [String], value: Dyn) -> Bool EncodingError! {
-        path := [String]{}
+        ^path: [String]{}
         loop k in table -> path.push(k.copy())
         loop k in key -> path.push(k.copy())
         self.root = put_path(self.root, path, 0, value)
@@ -569,7 +569,7 @@ priv nesting: module {
 }
 
 remove_underscores: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         if b != (U8{95}) -> out.push(b)
     }
@@ -583,10 +583,10 @@ looks_toml_datetime: fn(text: String) -> Bool Never! {
     if raw.len() < 19 || !valid_toml_date(raw, 0, 10) -> return false
     if raw[10] != (U8{84}) && raw[10] != (U8{116}) -> return false
 
-    time_end := 19
+    ^time_end: 19
     if raw.len() > time_end && raw[time_end] == (U8{46}) {
         time_end += 1
-        fraction_start := time_end
+        ^fraction_start: time_end
         loop time_end < raw.len() {
             n: raw[time_end]
             if n < 48 || n > 57 -> break
@@ -612,7 +612,7 @@ valid_toml_date: fn(raw: [U8], start: Int, end: Int) -> Bool Never! {
     month: toml_two_digits(raw, start + 5, end) ?? return false
     day: toml_two_digits(raw, start + 8, end) ?? return false
     if month < 1 || month > 12 || day < 1 -> return false
-    max_day := 31
+    ^max_day: 31
     if month == 4 || month == 6 || month == 9 || month == 11 -> max_day = 30
     if month == 2 {
         max_day = 28
@@ -646,7 +646,7 @@ toml_two_digits: fn(raw: [U8], start: Int, end: Int) -> Int? {
 
 toml_four_digits: fn(raw: [U8], start: Int, end: Int) -> Int? {
     if start < 0 || end > raw.len() || start + 4 > end -> return None
-    value := 0
+    ^value: 0
     loop i in start..<(start + 4) {
         n: raw[i]
         if n < 48 || n > 57 -> return None
@@ -658,21 +658,21 @@ toml_four_digits: fn(raw: [U8], start: Int, end: Int) -> Int? {
 parse_radix_int: fn(text: String) -> Int? {
     raw: text.bytes()
     if raw.len() < 3 -> return None
-    sign := 1
-    start := 0
+    ^sign: 1
+    ^start: 0
     if raw[0] == (U8{43}) || raw[0] == (U8{45}) {
         if raw[0] == (U8{45}) -> sign = -1
         start = 1
     }
     if start + 2 > raw.len() || raw[start] != (U8{48}) -> return None
-    base := 0
+    ^base: 0
     if raw[start + 1] == (U8{120}) -> base = 16
     if raw[start + 1] == (U8{111}) -> base = 8
     if raw[start + 1] == (U8{98}) -> base = 2
     if base == 0 -> return None
     if start + 2 >= raw.len() -> return None
-    n := 0
-    i := start + 2
+    ^n: 0
+    ^i: start + 2
     loop i < raw.len() {
         d: radix_digit(raw[i], base)
         if d < 0 -> return None
@@ -684,7 +684,7 @@ parse_radix_int: fn(text: String) -> Int? {
 
 radix_digit: fn(b: U8, base: Int) -> Int Never! {
     n: Int{b}
-    d := -1
+    ^d: -1
     if n >= 48 && n <= 57 -> d = n - 48
     if n >= 65 && n <= 70 -> d = n - 55
     if n >= 97 && n <= 102 -> d = n - 87
@@ -697,16 +697,16 @@ radix_digit: fn(b: U8, base: Int) -> Int Never! {
 
 ensure_table_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
     if i >= path.len() -> return entries.copy()
-    out := entries.copy()
+    ^out: entries.copy()
     key: path[i]
     if i == path.len() - 1 {
         if !out.has(key) -> out[key] = Dyn.object()
         return out
     }
-    child := out.get(key) ?? Dyn.object()
+    ^child: out.get(key) ?? Dyn.object()
     if child == {
         .Array(items) -> {
-            mutable := items.copy()
+            ^mutable: items.copy()
             if mutable.len() == 0 -> mutable.push(ensure_table_path(Dyn.object(), path, i + 1)) else {
                 last: mutable.len() - 1
                 mutable[last] = ensure_table_path(mutable[last], path, i + 1)
@@ -714,7 +714,7 @@ ensure_table_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
             out[key] = Dyn.Array(mutable)
             return out
         }
-        .Object(_) -> { _ := 0 }
+        .Object(_) -> { ^_: 0 }
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
             child = Dyn.object()
         }
@@ -725,13 +725,13 @@ ensure_table_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
 
 ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
     if i >= path.len() -> return entries.copy()
-    out := entries.copy()
+    ^out: entries.copy()
     key: path[i]
-    child := out.get(key) ?? Dyn.object()
+    ^child: out.get(key) ?? Dyn.object()
     if i == path.len() - 1 {
         if child == {
             .Array(items) -> {
-                mutable := items.copy()
+                ^mutable: items.copy()
                 mutable.push(Dyn.object())
                 out[key] = Dyn.Array(mutable)
             }
@@ -748,7 +748,7 @@ ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
     }
     if child == {
         .Array(items) -> {
-            mutable := items.copy()
+            ^mutable: items.copy()
             if mutable.len() == 0 -> mutable.push(ensure_array_path(Dyn.object(), path, i + 1)) else {
                 last: mutable.len() - 1
                 mutable[last] = ensure_array_path(mutable[last], path, i + 1)
@@ -756,7 +756,7 @@ ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
             out[key] = Dyn.Array(mutable)
             return out
         }
-        .Object(_) -> { _ := 0 }
+        .Object(_) -> { ^_: 0 }
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
             child = Dyn.object()
         }
@@ -806,17 +806,17 @@ has_path: fn(entries: Dyn, path: [String], i: Int) -> Bool Never! {
 }
 
 put_path: fn(entries: Dyn, path: [String], i: Int, value: Dyn) -> Dyn Never! {
-    out := entries.copy()
+    ^out: entries.copy()
     key: path[i]
     if i == path.len() - 1 {
         out[key] = value
         return out
     }
-    child := out.get(key) ?? Dyn.object()
+    ^child: out.get(key) ?? Dyn.object()
     if child == {
         .Array(items) -> {
             if items.len() > 0 {
-                mutable := items.copy()
+                ^mutable: items.copy()
                 last: mutable.len() - 1
                 if mutable[last] == {
                     .Object(_) -> {
@@ -825,13 +825,13 @@ put_path: fn(entries: Dyn, path: [String], i: Int, value: Dyn) -> Dyn Never! {
                         return out
                     }
                     .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
-                        _ := 0
+                        ^_: 0
                     }
                 }
             }
             child = Dyn.object()
         }
-        .Object(_) -> { _ := 0 }
+        .Object(_) -> { ^_: 0 }
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
             child = Dyn.object()
         }
@@ -848,7 +848,7 @@ render_toml_table: fn(value: Dyn, prefix: String) -> String Never! {
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return ""
     }
     entries: stream.object_entries(value)
-    out := ""
+    ^out: ""
     loop pair in entries {
         if pair.value == .Object(_) -> next
         if pair.value == .Array(items) && all_objects(items) -> next
@@ -894,7 +894,7 @@ toml_leaf: fn(value: Dyn) -> String Never! {
             json.to_string(Dyn.Text(text)) ?? panic("Bytes text always has a JSON string representation")
         }
         .Array(items) -> {
-            out := "["
+            ^out: "["
             loop i in 0..<items.len() {
                 if i > 0 -> out = "{out}, "
                 out = "{out}{toml_leaf(items[i])}"
@@ -902,8 +902,8 @@ toml_leaf: fn(value: Dyn) -> String Never! {
             "{out}]"
         }
         .Object(_) -> {
-            out := "{{ "
-            first := true
+            ^out: "{{ "
+            ^first: true
             loop pair in stream.object_entries(value) {
                 if !first -> out = "{out}, "
                 first = false
@@ -991,20 +991,20 @@ toml_leaf: fn(value: Dyn) -> String Never! {
 // else its shortest decimal spelling; `inf` and `nan` have no lexeme and stay
 // `Float`. Jet-foundation.
 number_tree: fn(clean: ^^String, value: Float) -> Dyn Never! {
-    unsigned := clean.move()
+    ^unsigned: clean.move()
     raw: unsigned.bytes()
     if raw.len() > 0 && raw[0] == (U8{43}) {
         unsigned = String.from_bytes(raw[1..<raw.len()]) ?? panic("removing an ASCII prefix preserves UTF-8")
     }
     if is_json_number_token(unsigned) -> return stream.typed_number(unsigned)
-    shown := "{value}"
+    ^shown: "{value}"
     if is_json_number_token(shown) -> return stream.typed_number(shown)
     Dyn.Float(value)
 }
 
 is_json_number_token: fn(text: String) -> Bool Never! {
     b: text.bytes()
-    i := 0
+    ^i: 0
     if i < b.len() && b[i] == (U8{45}) -> i += 1
     if i >= b.len() -> return false
     if b[i] == (U8{48}) -> i += 1 else {

@@ -27,11 +27,11 @@ run: fn(args: Args) {
     white: Color{r: 255, g: 255, b: 255, a: 255}
     gold: Color{r: 255, g: 220, b: 120, a: 200}
     title: "JET RASTER"
-    tiles := 0
-    sprites := 0
-    glyphs := 0
+    ^tiles: 0
+    ^sprites: 0
+    ^glyphs: 0
     // One empty event list per frame; the headless window closes after the last.
-    script := [[ui.UIEvent]]{}
+    ^script: [[ui.UIEvent]]{}
     loop _ in 0..<frames -> script.push([ui.UIEvent]{})
     window: ui.headless(width: 320, height: 200, script: script) ?? panic("a 320x200 window")
     loop frame in window.frames() {
@@ -63,7 +63,7 @@ run: fn(args: Args) {
     capture: env.get("JET_FRAME_CAPTURE") ?? ""
     if capture != "" {
         image: window.load_image_from_screen()
-        bytes := "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
+        ^bytes: "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
         bytes.extend(image.pixels())
         files.write_bytes(capture, bytes) ?? panic("write {capture}: {err}")
     }
@@ -553,13 +553,13 @@ FONT5X7: [Int]{
 // ASCII text in the 5x7 font at a whole-pixel scale, one rectangle per
 // vertical run of a glyph column; a byte outside the font draws as "?".
 bitmap_text: fn(frame: ui.Frame, text: String, x: Int, y: Int, scale: Int, color: Color) {
-    pen := x
+    ^pen: x
     loop byte in text.bytes() {
         code: Int{byte}
         glyph: if code >= 32 && code <= 126 -> code - 32 else -> 31
         loop column in 0..<5 {
             bits: FONT5X7[glyph * 5 + column]
-            row := 0
+            ^row: 0
             loop row < 7 {
                 if (bits >> row) & 1 == 0 {
                     row += 1

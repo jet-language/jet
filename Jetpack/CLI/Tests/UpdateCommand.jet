@@ -21,8 +21,8 @@ cli_update_test_scope: fn(args: [String]) -> {deps: Bool, tools: Bool} {
     dir: files.tmpdir("jetpack-update-sources-") ?? panic("claim scratch dir")
     plan: envmodel_evaluate_env(source, dir) ?? panic("evaluate env")
     sources: cli_channel_sources(plan.table)
-    names := [String]{}
-    channels := [String]{}
+    ^names: [String]{}
+    ^channels: [String]{}
     loop channel_source in sources {
         names.push(channel_source.name)
         channels.push(channel_source.lock_channel)
@@ -38,7 +38,7 @@ cli_update_test_scope: fn(args: [String]) -> {deps: Bool, tools: Bool} {
     files.create_dir_all(files.join(roots.hangar_dir(), "failed-scratch/pkg-1")) ?? panic("create failed scratch")
     outside: files.join(root, "outside")
     files.create_dir_all(outside) ?? panic("create outside")
-    attempt := BuildAttempt.new("pkg", "pkg@1", "fixture", "recipe", "source")
+    ^attempt: BuildAttempt.new("pkg", "pkg@1", "fixture", "recipe", "source")
     attempt.id = "pkg-1"
     attempt.scratch_dir = outside
     assert(cli_verified_failed_scratch(roots, attempt, "pkg") == None)

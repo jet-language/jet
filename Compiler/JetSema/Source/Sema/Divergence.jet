@@ -66,7 +66,7 @@ SemaDivergenceRow: struct {
 // (sema_graph_scan), and the functions a wave finds diverging join the set
 // after it. The set is the same for any thread count.
 sema_divergence_solve: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
-    owned := graph.move()
+    ^owned: graph.move()
     loop module_index in 0..<owned.modules.len() {
         loop row in 0..<owned.modules[module_index].functions.len() {
             if sema_function_promises_never(owned.modules[module_index].functions[row].declaration) {
@@ -74,8 +74,8 @@ sema_divergence_solve: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThrea
             }
         }
     }
-    rows := [SemaDivergenceRow]{}
-    weights := [Int]{}
+    ^rows: [SemaDivergenceRow]{}
+    ^weights: [Int]{}
     loop module_index in 0..<owned.modules.len() {
         if module_is_core(owned.modules[module_index].module_identity) -> next
         loop row in 0..<owned.modules[module_index].functions.len() {
@@ -85,20 +85,20 @@ sema_divergence_solve: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThrea
         }
     }
     // The rows (by index into `rows`) waiting on each callee symbol.
-    waiting_by_callee := [U32:Int]{}
-    waiting := [[Int]]{}
-    queued := loop _ in rows -> false
-    wave := [Int]{}
+    ^waiting_by_callee: [U32:Int]{}
+    ^waiting: [[Int]]{}
+    ^queued: loop _ in rows -> false
+    ^wave: [Int]{}
     loop slot in 0..<rows.len() {
         if !owned.modules[rows[slot].module_index].functions[rows[slot].row].declaration.diverges {
             wave.push(slot)
         }
     }
     loop wave.len() > 0 {
-        modules := [Int]{}
-        functions := [Int]{}
-        wave_weights := [Int]{}
-        work := 0
+        ^modules: [Int]{}
+        ^functions: [Int]{}
+        ^wave_weights: [Int]{}
+        ^work: 0
         loop slot in wave {
             modules.push(rows[slot].module_index)
             functions.push(rows[slot].row)
@@ -106,9 +106,9 @@ sema_divergence_solve: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThrea
             work += weights[slot]
         }
         workers: compiler_threads_admit(threads, wave.len(), work, SEMA_DIVERGENCE_MIN_BYTES_PER_THREAD, 0, 0)
-        scan := sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, modules, compiler_threads_heaviest_first(wave_weights))
+        ^scan: sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, modules, compiler_threads_heaviest_first(wave_weights))
         scan.divergence = Val(SemaDivergenceWave{functions: functions.move()})
-        done := sema_graph_scan(scan, workers)
+        ^done: sema_graph_scan(scan, workers)
         owned = done.graph.move()
         walks: sema_divergence_take(done.found)
         // A walk that found a callee not yet diverging waits on it before
@@ -130,7 +130,7 @@ sema_divergence_solve: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThrea
                 waiting[group].push(slot)
             }
         }
-        next_wave := [Int]{}
+        ^next_wave: [Int]{}
         loop (position, walked) in walks {
             if !walked.diverges -> next
             module_index: rows[wave[position]].module_index
@@ -173,19 +173,19 @@ SemaDivergenceWalked: struct {
 
 // Walks function `row` of graph module `module_index` against the set so far.
 sema_divergence_walk: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaDivergenceWalked Never! {
-    scope := SemaDivergenceScope{module_index: module_index, locals: sema_divergence_param_names(graph.modules[module_index].functions[row].declaration.params), consulted: [U32]{}}
+    ^scope: SemaDivergenceScope{module_index: module_index, locals: sema_divergence_param_names(graph.modules[module_index].functions[row].declaration.params), consulted: [U32]{}}
     flow: sema_divergence_body(graph, scope, sema_registration_function_body(graph.modules[module_index], graph.modules[module_index].functions[row]))
     SemaDivergenceWalked{diverges: sema_divergence_definitely(flow), consulted: scope.consulted.move()}
 }
 
 // A graph scan's walks, by position.
 sema_divergence_take: fn(found: ^^[SemaGraphScanFound?]) -> [SemaDivergenceWalked] {
-    slots := found.move()
+    ^slots: found.move()
     slots.reverse()
-    taken := [SemaDivergenceWalked]{}
+    ^taken: [SemaDivergenceWalked]{}
     loop slots.len() > 0 {
-        slot := slots.pop() ?? break
-        row := compiler_threads_slot_taken(slot)
+        ^slot: slots.pop() ?? break
+        ^row: compiler_threads_slot_taken(slot)
         taken.push(compiler_threads_slot_taken(row.divergence.move()))
     }
     taken
@@ -257,7 +257,7 @@ sema_divergence_infinite_loop: fn(body: SemaDivergenceFlow) -> SemaDivergenceFlo
 }
 
 sema_divergence_body: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceScope, body: [Stmt]) -> SemaDivergenceFlow Never! {
-    flow := sema_divergence_normal()
+    ^flow: sema_divergence_normal()
     loop statement in body {
         if !flow.normal -> return flow
         flow = sema_divergence_then(flow, sema_divergence_stmt(graph, scope, statement))
@@ -266,7 +266,7 @@ sema_divergence_body: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
 }
 
 sema_divergence_exprs: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceScope, values: [Expr]) -> SemaDivergenceFlow Never! {
-    flow := sema_divergence_normal()
+    ^flow: sema_divergence_normal()
     loop value in values {
         flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, value))
     }
@@ -274,7 +274,7 @@ sema_divergence_exprs: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSc
 }
 
 sema_divergence_args: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceScope, args: [CallArg]) -> SemaDivergenceFlow Never! {
-    flow := sema_divergence_normal()
+    ^flow: sema_divergence_normal()
     loop arg in args {
         flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, arg.expr))
     }
@@ -328,11 +328,11 @@ sema_divergence_switch: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceS
     if arms.len() == 0 {
         return sema_divergence_then(head, sema_divergence_optional_body(graph, scope, else_body))
     }
-    branches := sema_divergence_none()
+    ^branches: sema_divergence_none()
     loop arm in arms {
         branches = sema_divergence_union(branches, sema_divergence_then(sema_divergence_expr(graph, scope, arm.cond), sema_divergence_body(graph, scope, arm.body)))
     }
-    fallback := sema_divergence_none()
+    ^fallback: sema_divergence_none()
     if else_body == .Val(body) -> fallback = sema_divergence_body(graph, scope, body) else if sema_stmt_refutable_is_subjectless_guard(subject, span) {
         fallback = sema_divergence_normal()
     }
@@ -369,7 +369,7 @@ sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
         .While(cond, body, _, _, _) -> sema_divergence_then(sema_divergence_expr(graph, scope, cond), sema_divergence_conditional_loop(cond, sema_divergence_body(graph, scope, body)))
         .For(_, _, _, kind, body, _, _, _, _) -> sema_divergence_then(sema_divergence_for_kind(graph, scope, kind), sema_divergence_finite_loop(sema_divergence_body(graph, scope, body)))
         .CountedLoop(init, cond, step, body, _, _, _) -> {
-            iteration := sema_divergence_body(graph, scope, body)
+            ^iteration: sema_divergence_body(graph, scope, body)
             if step == .Val(each) {
                 iteration = sema_divergence_then(iteration, sema_divergence_stmt(graph, scope, each))
             }
@@ -387,7 +387,7 @@ sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
             .None -> sema_divergence_union(sema_divergence_body(graph, scope, then_body), sema_divergence_optional_body(graph, scope, else_body))
         }
         .ContextBlock(fields, body, _) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop field in fields {
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
             }
@@ -405,7 +405,7 @@ sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
 sema_divergence_typed_lit: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceScope, body: TypedLitBody) -> SemaDivergenceFlow Never! {
     if body == {
         .Fields(fields) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop field in fields {
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
             }
@@ -413,7 +413,7 @@ sema_divergence_typed_lit: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergen
         }
         .Elements(elements) -> sema_divergence_exprs(graph, scope, elements)
         .Entries(entries) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop entry in entries {
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, entry.key))
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, entry.value))
@@ -428,7 +428,7 @@ sema_divergence_typed_lit: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergen
 sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceScope, value: Expr) -> SemaDivergenceFlow Never! {
     if value == {
         .Str(parts, _, _) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop part in parts {
                 if part == .Interp(inner, _) {
                     flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, inner))
@@ -440,7 +440,7 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
         .ListLit(elements, _, _) -> sema_divergence_exprs(graph, scope, elements)
         .MemberSpread(base, _, _, _) | .Spread(base, _, _) -> sema_divergence_expr(graph, scope, base)
         .MapLit(entries, _, _) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop entry in entries {
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, entry.key))
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, entry.value))
@@ -481,7 +481,7 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
         }
         // A comparison can stop the chain before a later operand.
         .CompareChain(operands, _, _, _, _) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop index in 0..<operands.len() {
                 reached: flow.normal
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, operands[index]))
@@ -490,7 +490,7 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
             flow
         }
         .StructLit(_, _, _, _, fields, _, _, _) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop field in fields {
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
             }
@@ -498,7 +498,7 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
         }
         .TypedLit(_, body, _, _) -> sema_divergence_typed_lit(graph, scope, body)
         .EnumLit(_, _, _, args, _, _, _) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop arg in args {
                 if arg == {
                     .Positional(inner) | .Named(_, inner) -> {
@@ -523,7 +523,7 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
             sema_divergence_then(sema_divergence_expr(graph, scope, cond), sema_divergence_union(then_flow, else_flow))
         }
         .TupleLit(fields, _, _, _) -> {
-            flow := sema_divergence_normal()
+            ^flow: sema_divergence_normal()
             loop field in fields {
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
             }
@@ -532,7 +532,7 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
         .CallValue(callee, args, _, _) -> sema_divergence_then(sema_divergence_expr(graph, scope, callee), sema_divergence_args(graph, scope, args))
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_divergence_expr(graph, scope, addr)
         .Pipe(head, steps, _, _) -> {
-            flow := sema_divergence_expr(graph, scope, head)
+            ^flow: sema_divergence_expr(graph, scope, head)
             loop step in steps {
                 flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, step.value))
             }

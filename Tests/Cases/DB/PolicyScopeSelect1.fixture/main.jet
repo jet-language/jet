@@ -5,7 +5,7 @@
 use db: core.db
 
 run: fn() {
-    c := db.open_memory()
+    ^c: db.open_memory()
     _: db.migrate(c.all_rows(), "notes-v1", [SQL{"CREATE TABLE notes (owner TEXT, title TEXT)"}, SQL{"CREATE TABLE tags (tag TEXT)"}]) ?? panic("migrate: {err}")
     _: c.execute(SQL{"INSERT INTO notes (owner, title) VALUES ('ann', 'plan'), ('ben', 'diary')"}) ?? panic("notes: {err}")
     _: c.execute(SQL{"INSERT INTO tags (tag) VALUES ('work')"}) ?? panic("tags: {err}")

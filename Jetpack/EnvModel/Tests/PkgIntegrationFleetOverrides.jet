@@ -28,7 +28,7 @@ use {
             .Platform(_) | .Packages(_) | .Services(_) | .Options(_) -> false
         },
     )
-    found := false
+    ^found: false
     loop region in override_plan.provenance {
         if region.field == "region" {
             assert_eq(region.dependencies, [String]{"base"})
@@ -56,7 +56,7 @@ use {
     assert_eq(options[1].value, "\"UTC\"")
     assert_eq(options[2].key, "tuning.retries")
     assert_eq(options[2].value, "5")
-    found := false
+    ^found: false
     loop retries in override_plan.provenance {
         if retries.field == "options" {
             assert_eq(retries.dependencies, [String]{"base"})

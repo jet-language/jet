@@ -22,18 +22,18 @@ COUNT: 1_250_000
 reserve: fn(count: Int) -> [Int] AllocError! { List.try_with_capacity(count) }
 
 filled: fn(count: Int) -> [Int] AllocError! {
-    values := reserve(count)
+    ^values: reserve(count)
     loop n in 0..<count -> values.push(n)
     values
 }
 
 // A struct payload: the result owns the batch's buffers alone.
 batch_rounds: fn() -> Int {
-    written := 0
+    ^written: 0
     loop round in 0..<6 {
-        values := filled(COUNT) ?? return written
-        held := Batch?{Val(Batch{values: values.move(), label: "round {round}"})}
-        got := held.move() ?? return written
+        ^values: filled(COUNT) ?? return written
+        ^held: Batch?{Val(Batch{values: values.move(), label: "round {round}"})}
+        ^got: held.move() ?? return written
         got.values[0] = -1
         got.values[COUNT - 1] = round
         if got.values[0] == -1 && got.values[COUNT - 1] == round -> written += 1
@@ -43,11 +43,11 @@ batch_rounds: fn() -> Int {
 
 // A list payload moves out the same way.
 list_rounds: fn() -> Int {
-    written := 0
+    ^written: 0
     loop round in 0..<6 {
-        values := filled(COUNT) ?? return written
-        held := [Int]?{Val(values.move())}
-        got := held.move() ?? return written
+        ^values: filled(COUNT) ?? return written
+        ^held: [Int]?{Val(values.move())}
+        ^got: held.move() ?? return written
         got[0] = round
         if got[0] == round -> written += 1
     }
@@ -56,18 +56,18 @@ list_rounds: fn() -> Int {
 
 // The None branch: the fallback is the result.
 absent: fn() {
-    held := Batch?{None}
-    got := held.move() ?? Batch{values: [1, 2, 3], label: "fallback"}
+    ^held: Batch?{None}
+    ^got: held.move() ?? Batch{values: [1, 2, 3], label: "fallback"}
     got.values[0] = 9
     print("none: {got.label} {got.values[0]} {got.values.len()}")
 }
 
 tickets: fn() {
-    some := Ticket?{Val(Ticket{id: 1})}
-    taken := some.move() ?? return
+    ^some: Ticket?{Val(Ticket{id: 1})}
+    ^taken: some.move() ?? return
     print("took {taken.id}")
-    none := Ticket?{None}
-    fallback := none.move() ?? Ticket{id: 2}
+    ^none: Ticket?{None}
+    ^fallback: none.move() ?? Ticket{id: 2}
     print("fell back to {fallback.id}")
 }
 
@@ -76,6 +76,6 @@ run: fn() {
     print("list: {list_rounds()} of 6 rounds wrote in place")
     absent()
     tickets()
-    after := filled(COUNT) ?? [Int]{}
+    ^after: filled(COUNT) ?? [Int]{}
     print("held at the end: {after.len()}")
 }

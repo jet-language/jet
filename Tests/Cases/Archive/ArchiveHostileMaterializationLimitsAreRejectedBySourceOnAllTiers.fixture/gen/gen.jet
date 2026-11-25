@@ -29,7 +29,7 @@ put32: fn(out: ^[U8], n: Int) Never! {
 }
 
 repeated: fn(b: Int, count: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<count -> out.push(byte(b))
     out
 }
@@ -46,8 +46,8 @@ bits_write: fn(bits: ^BitWriter, value: Int, count: Int) Never! {
 }
 
 reverse_bits: fn(code: Int, count: Int) -> Int Never! {
-    c := code
-    reversed := 0
+    ^c: code
+    ^reversed: 0
     loop _ in 0..<count {
         reversed = (reversed << 1) | c & 1
         c = c >> 1
@@ -76,28 +76,28 @@ length_code: fn(length: Int) -> [Int] Never! {
 }
 
 crc32_repeated: fn(b: Int, length: Int) -> Int Never! {
-    table := [Int]{}
+    ^table: [Int]{}
     loop index in 0..<256 {
-        crc := index
+        ^crc: index
         loop _ in 0..<8 {
             if crc & 1 != 0 -> crc = (crc >> 1) ~ 0xedb88320 else -> crc = crc >> 1
         }
         table.push(crc)
     }
-    crc := 0xffffffff
+    ^crc: 0xffffffff
     loop _ in 0..<length -> crc = (crc >> 8) ~ table[crc & 255 ~ b]
     crc ~ 0xffffffff
 }
 
 // A compact fixed-DEFLATE stream that expands through the shared codec cap.
 gzip_fixed_repeat_bomb: fn(output_len: Int, b: Int) -> [U8] Never! {
-    frame := [U8]{U8{31}, U8{139}, U8{8}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{255}}
-    bits := BitWriter{bytes: [U8]{}, bit: 0}
+    ^frame: [U8]{U8{31}, U8{139}, U8{8}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{255}}
+    ^bits: BitWriter{bytes: [U8]{}, bit: 0}
     bits_write(bits, 1, 1)
     bits_write(bits, 1, 2)
     literal: fixed_code(b)
     bits_write(bits, literal[0], literal[1])
-    remaining := output_len - 1
+    ^remaining: output_len - 1
     loop remaining >= 3 {
         length: if remaining < 258 -> remaining else -> 258
         symbol: length_code(length)
@@ -117,9 +117,9 @@ gzip_fixed_repeat_bomb: fn(output_len: Int, b: Int) -> [U8] Never! {
 }
 
 zstd_rle_frame: fn(output_len: Int, b: Int) -> [U8] Never! {
-    frame := [U8]{U8{40}, U8{181}, U8{47}, U8{253}, U8{224}}
+    ^frame: [U8]{U8{40}, U8{181}, U8{47}, U8{253}, U8{224}}
     loop k in 0..<8 -> frame.push(byte(output_len >> (8 * k)))
-    remaining := output_len
+    ^remaining: output_len
     loop remaining > 0 {
         block: if remaining < 131072 -> remaining else -> 131072
         last: if block == remaining -> 1 else -> 0
@@ -134,8 +134,8 @@ zstd_rle_frame: fn(output_len: Int, b: Int) -> [U8] Never! {
 }
 
 zip_limit_bomb: fn(name: [U8], entry_count: Int, method: Int, compressed: [U8], uncompressed_len: Int, checksum: Int) -> [U8] Never! {
-    archive := [U8]{}
-    central := [U8]{}
+    ^archive: [U8]{}
+    ^central: [U8]{}
     loop _ in 0..<entry_count {
         local_offset: archive.len()
         put32(archive, 0x04034b50)
@@ -187,7 +187,7 @@ zip_limit_bomb: fn(name: [U8], entry_count: Int, method: Int, compressed: [U8], 
 
 // The deflate body of a gzip member: no 10-byte header, no 8-byte trailer.
 gzip_body: fn(gzip: [U8]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 10..<(gzip.len() - 8) -> out.push(gzip[index])
     out
 }
@@ -198,10 +198,10 @@ gzip_crc: fn(gzip: [U8]) -> Int Never! {
 }
 
 tar_bomb_octal: fn(header: ^[U8], start: Int, width: Int, value: Int) Never! {
-    n := value
+    ^n: value
     loop index in start..<(start + width - 1) -> header[index] = U8{48}
     header[start + width - 1] = U8{0}
-    index := start + width - 2
+    ^index: start + width - 2
     loop n > 0 {
         header[index] = byte(48 + (n & 7))
         n = n >> 3
@@ -210,7 +210,7 @@ tar_bomb_octal: fn(header: ^[U8], start: Int, width: Int, value: Int) Never! {
 }
 
 append_tar_bomb_record: fn(output: ^[U8], name: [U8], payload: [U8], kind: Int) Never! {
-    header := repeated(0, 512)
+    ^header: repeated(0, 512)
     loop index in 0..<name.len() -> header[index] = name[index]
     tar_bomb_octal(header, 100, 8, 420)
     tar_bomb_octal(header, 124, 12, payload.len())
@@ -221,7 +221,7 @@ append_tar_bomb_record: fn(output: ^[U8], name: [U8], payload: [U8], kind: Int) 
     header[262] = U8{0}
     header[263] = U8{48}
     header[264] = U8{48}
-    checksum := 0
+    ^checksum: 0
     loop item in header -> checksum += int(item)
     // format!("{checksum:06o}"), last six digits.
     loop k in 0..<6 -> header[153 - k] = byte(48 + ((checksum >> (3 * k)) & 7))
@@ -254,8 +254,8 @@ run: fn() {
         write("zip_output.bin", zip_limit_bomb("x".bytes(), 1, 8, gzip_body(declared), output_limit + 1, gzip_crc(declared)))
         materialized: gzip_fixed_repeat_bomb(output_limit - 512 + 1, 120)
         write("zip_materialization.bin", zip_limit_bomb(repeated(110, 512), 1, 8, gzip_body(materialized), output_limit - 512 + 1, gzip_crc(materialized)))
-        tar_names := [U8]{}
-        long_name := repeated(1, 8192)
+        ^tar_names: [U8]{}
+        ^long_name: repeated(1, 8192)
         long_name.push(U8{0})
         loop _ in 0..<2048 {
             append_tar_bomb_record(tar_names, "././#LongLink".bytes(), long_name, 76)
@@ -263,7 +263,7 @@ run: fn() {
         }
         tar_end(tar_names)
         write("tar_names.bin", tar_names)
-        tar_entries := [U8]{}
+        ^tar_entries: [U8]{}
         loop index in 0..<4097 {
             append_tar_bomb_record(tar_entries, "entry-{index}".bytes(), "x".bytes(), 48)
         }

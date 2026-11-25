@@ -163,14 +163,14 @@ run: fn() -> Never Err! {
     // The dev tool roots (Tools/Agent/roots.env): the state root and the
     // scratch root.
     state: roots.value("JET_STATE_ROOT")
-    args := [String:String]{
+    ^args: [String:String]{
         "jet": files.join(state, "safe-jet.sh"),
         "out": files.join(roots.value("JET_SCRATCH_ROOT"), "core-activation.json"),
         "work": files.join(state, "core-activation"),
         "samples": "20",
         "batteries": "json,regex,time,data,http",
     }
-    i := 0
+    ^i: 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
         if !args.has_key(key) || i + 1 >= argv.len() {
@@ -190,10 +190,10 @@ run: fn() -> Never Err! {
     files.create_dir_all(work)
     lib: build_alloc_counter(work, root)
     version: timed(process.cmd([jet, "--version"]))
-    rows := [Row]{}
-    deltas := [Delta]{}
+    ^rows: [Row]{}
+    ^deltas: [Delta]{}
     loop name in names {
-        arms := [Dyn]{}
+        ^arms: [Dyn]{}
         loop arm in ARMS {
             row: measure_arm(jet, work, samples, name, table[name], arm, lib)
             term.eprint("{name}/{arm}: {row.status}")
@@ -263,7 +263,7 @@ last_chars: fn(text: String, n: Int) -> String Never! {
 
 // The middle sample, or the rounded mean of the middle two.
 median: fn(values: [Int]) -> Int Never! {
-    sorted := values.copy()  // copy: the samples keep their run order
+    ^sorted: values.copy()  // copy: the samples keep their run order
     sorted.sort()
     m: sorted.len() /% 2
     if sorted.len() % 2 == 1 -> return sorted[m]
@@ -282,7 +282,7 @@ program: fn(battery: Battery, arm: String) -> String Never! {
 sections: fn(jet: String, dir: String, stem: String) -> Dyn {
     ran: timed(process.cmd([jet, "debug", ".jet/build/{stem}", "--do", "sections"]).cwd(dir))
     if ran.status != Val(0) -> return "unavailable".encode()
-    out := [{key: String, value: Dyn}]{}
+    ^out: [{key: String, value: Dyn}]{}
     loop line in ran.stdout.split("\n") {
         found: regex.match(Regex{"^(\S+)\s+\S+\s+offset \S+\s+address \S+\s+size (\d+)"}, line) ?? next
         out.push({key: found.groups[0].copy(), value: (Int.parse(found.groups[1]) ?? 0).encode()})  // copy: the match keeps its groups
@@ -303,7 +303,7 @@ symbol_count: fn(jet: String, dir: String, stem: String) -> Dyn {
 
 reachable_core_modules: fn(rust_path: String) -> Dyn Err! {
     if !files.exists(rust_path) -> return Ok("unavailable".encode())
-    modules := regex.matches(Regex{"corelib_x3e_sCore_s([a-z0-9_]+?)_s"}, files.read(rust_path)).map(fn(hit) { hit.groups[0].copy() }).to_set().to_list()  // copy: the match keeps its groups
+    ^modules: regex.matches(Regex{"corelib_x3e_sCore_s([a-z0-9_]+?)_s"}, files.read(rust_path)).map(fn(hit) { hit.groups[0].copy() }).to_set().to_list()  // copy: the match keeps its groups
     modules.sort()
     Ok(Reach{generated_rust_bytes: files.stat(rust_path).size, modules: modules}.encode())
 }
@@ -335,7 +335,7 @@ allocations: fn(binary: String, lib: String, dir: String) -> Dyn Err! {
     if ran.status != Val(0) || !files.exists(out_file) {
         return Ok(unavailable("exit {shown(ran.status)}"))
     }
-    fields := [{key: String, value: Dyn}]{{key: "status", value: "measured".encode()}}
+    ^fields: [{key: String, value: Dyn}]{{key: "status", value: "measured".encode()}}
     loop pair in files.read(out_file).trim().split(" ") {
         parts: pair.split("=").to_list()
         fields.push({key: parts[0].copy(), value: number(parts.get(1))})  // copy: the split keeps its parts
@@ -356,7 +356,7 @@ measure_arm: fn(jet: String, work: String, samples: Int, name: String, battery: 
     binary: files.join_all([dir, ".jet/build", stem])
     files.remove(binary).drop("rm -f: a first build has no binary")
     build: timed(process.cmd([jet, "build", "--release", "{stem}.jet"]).cwd(dir))
-    row := Row{
+    ^row: Row{
         battery: name.copy(),  // copy: the battery names every arm
         arm: arm.copy(),  // copy: the arm list names every battery's arms
         source: program(battery, arm),
@@ -379,8 +379,8 @@ measure_arm: fn(jet: String, work: String, samples: Int, name: String, battery: 
     bytes: files.read_bytes(binary)
     row.binary = Val(Binary{bytes: bytes.len(), sha256: crypto.sha256(bytes).hex(), sections: sections(jet, dir, stem), defined_symbols: symbol_count(jet, dir, stem)})
     row.reach = Val(reachable_core_modules("{binary}.rs"))
-    walls := [Int]{}
-    stdout := ""
+    ^walls: [Int]{}
+    ^stdout: ""
     loop _ in 0..<samples {
         ran: timed(process.cmd([binary.copy()]))
         if ran.status != Val(0) {

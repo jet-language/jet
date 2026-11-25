@@ -115,7 +115,7 @@ impl NixEvaluator {
             "name" -> NixEvalValue.Str(request.name)
             "system" -> NixEvalValue.Str(request.system)
             "args" -> {
-                items := [Int]{}
+                ^items: [Int]{}
                 loop argument in request.args {
                     items.push(self.value_thunk(NixEvalValue.Str(argument)))
                 }
@@ -149,8 +149,8 @@ impl NixEvaluator {
         nixeval_validate_derivation_name(name)
         system: self.required_string_field(fields, "system")
         builder: self.required_string_field(fields, "builder")
-        input_sources := [String]{}
-        args := [String]{}
+        ^input_sources: [String]{}
+        ^args: [String]{}
         args_value: self.field_value(fields, "args")
         if args_value == {
             .Val(value) -> {
@@ -173,7 +173,7 @@ impl NixEvaluator {
         }
 
         outputs_declared: fields.get("outputs") != None
-        output_names := [String]{"out"}
+        ^output_names: [String]{"out"}
         outputs_value: self.field_value(fields, "outputs")
         if outputs_value == {
             .Val(value) -> {
@@ -193,7 +193,7 @@ impl NixEvaluator {
         if output_names.len() == 0 || output_names.len() > NIXEVAL_MAX_DERIVATION_OUTPUTS {
             return Err(NixEvalError.ResourceLimit("derivation must declare between one and {NIXEVAL_MAX_DERIVATION_OUTPUTS} outputs"))
         }
-        seen := [String]{}
+        ^seen: [String]{}
         loop output_name in output_names {
             nixeval_validate_derivation_output_name(output_name)
             if nixeval_contains_text(seen, output_name) {
@@ -205,8 +205,8 @@ impl NixEvaluator {
         output_hash: self.optional_string_field(fields, "outputHash")
         output_hash_algo: self.optional_string_field(fields, "outputHashAlgo")
         output_hash_mode: self.optional_string_field(fields, "outputHashMode")
-        method_algo := ""
-        hash_hex := ""
+        ^method_algo: ""
+        ^hash_hex: ""
         if output_hash == {
             .Val(hash) -> {
                 if output_names.len() != 1 || output_names[0] != "out" {
@@ -230,7 +230,7 @@ impl NixEvaluator {
 
         ignore_value: self.field_value(fields, "__ignoreNulls")
         ignore_nulls: (ignore_value ?? NixEvalValue.Null) == NixEvalValue.Bool(true)
-        env := [String:String]{}
+        ^env: [String:String]{}
         reserved: nixeval_derivation_reserved_fields()
         loop field in nixeval_sorted(fields.keys().to_list()) {
             if nixeval_contains_text(reserved, field) || nixeval_contains_text(output_names, field) {
@@ -262,7 +262,7 @@ impl NixEvaluator {
         if input_sources.len() > NIXEVAL_MAX_DERIVATION_INPUTS {
             return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_INPUTS} source inputs"))
         }
-        outputs := [NixEvalDerivationOutput]{}
+        ^outputs: [NixEvalDerivationOutput]{}
         loop output_name in output_names {
             outputs.push(NixEvalDerivationOutput{name: output_name, method_algo: method_algo.copy(), hash_hex: hash_hex.copy()})
         }
@@ -273,7 +273,7 @@ impl NixEvaluator {
 // Coerce a derivation string field; its contexts must still be canonical.
 nixeval_derivation_string: fn(value: NixEvalValue) -> String NixEvalError! {
     text: value.stringify()
-    discarded := [String]{}
+    ^discarded: [String]{}
     nixeval_record_derivation_contexts(text.contexts, discarded)
     Ok(text.value)
 }

@@ -26,11 +26,11 @@ run: fn() {
     skew_expiry: now_secs - 60
     token: clock_jwt("{expires_at}")
     skew_token: clock_jwt("{skew_expiry}")
-    invalid_bytes := token.bytes()
+    ^invalid_bytes: token.bytes()
     last: invalid_bytes[invalid_bytes.len() - 1]
     invalid_bytes[invalid_bytes.len() - 1] = if last == (U8{65}) -> U8{66} else -> U8{65}
     invalid: String.from_bytes(invalid_bytes) ?? panic("invalid token UTF-8")
-    source := files.read("clock.template") ?? panic("clock source")
+    ^source: files.read("clock.template") ?? panic("clock source")
     // Longest placeholder first: SKEW_TOKEN contains TOKEN, ABOVE_UPPER contains UPPER,
     // and BELOW_LOWER contains LOWER.
     source = source.replace("SKEW_TOKEN", skew_token)

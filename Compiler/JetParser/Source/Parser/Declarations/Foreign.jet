@@ -45,7 +45,7 @@ parser_foreign_plain_string: fn(state: ^JetParserState, context: String) -> Name
         if token.kind != TOKEN_EOF -> parser_bump(state)
         return NamedSpan{name: "", span: token.span}
     }
-    _ := parser_take_text(state, false)
+    ^_: parser_take_text(state, false)
     if parser_interpolations(state, token) > 0 {
         parser_add_error(state, token.span, "foreign strings cannot interpolate", "FFI paths must be known before semantic checking", "write a plain string literal")
     }
@@ -60,7 +60,7 @@ parser_parse_extern_rust: fn(state: ^JetParserState) -> Item {
     }
     crate_value: parser_foreign_plain_string(state, "after `extern rust`")
     parser_expect(state, TOKEN_LBRACE, "`{{` before foreign declarations")
-    functions := [ExternFn]{}
+    ^functions: [ExternFn]{}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
@@ -81,9 +81,9 @@ parser_parse_c_module: fn(state: ^JetParserState) -> Item {
     }
     parser_expect(state, TOKEN_DOT, "after `c` in a C module path")
     lib: parser_expect_name(state, "as the C library name")
-    path_end := lib.span
-    has_suffix := false
-    has_bindgen_segment := false
+    ^path_end: lib.span
+    ^has_suffix: false
+    ^has_bindgen_segment: false
     if parser_current_kind(state) == TOKEN_DOT {
         parser_bump(state)
         segment: parser_expect_name(state, "after `.` in a C module path")
@@ -105,7 +105,7 @@ parser_parse_c_module: fn(state: ^JetParserState) -> Item {
         parser_add_error(state, path_span, "a `#Bindgen` module path must end with `.__bindgen__`", "generated C binding caches live under the reserved `__bindgen__` module", "write `#Bindgen c.<lib>.__bindgen__: module`")
     }
     parser_expect(state, TOKEN_LBRACE, "to open the C module body")
-    functions := [ExternFn]{}
+    ^functions: [ExternFn]{}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE || parser_current_kind(state) == TOKEN_EOF {
@@ -126,8 +126,8 @@ parser_parse_c_module: fn(state: ^JetParserState) -> Item {
 }
 
 parser_c_module_callback_metadata: fn(function: ^^ExternFn, lib: String) -> ExternFn Never! {
-    updated := function
-    has_function_parameter := false
+    ^updated: function
+    ^has_function_parameter: false
     loop parameter in updated.params {
         if parameter.ty == {
             .Fn(_, _, _, _, _, _) -> has_function_parameter = true
@@ -149,7 +149,7 @@ parser_c_module_callback_metadata: fn(function: ^^ExternFn, lib: String) -> Exte
     }
     if transport == "" -> return updated
     identity: "{lib}.{updated.name}"
-    digest_bytes := "jet-ffi-callback-plan-v1".bytes()
+    ^digest_bytes: "jet-ffi-callback-plan-v1".bytes()
     digest_bytes.push(U8{0})
     loop byte in identity.bytes() -> digest_bytes.push(byte)
     updated.callback_transport = Val(transport)
@@ -167,10 +167,10 @@ parser_foreign_marker_name: fn(marker: Marker, index: Int) -> NamedSpan? {
 }
 
 parser_parse_extern_fn: fn(state: ^JetParserState, allow_missing_semicolon: Bool) -> ExternFn {
-    abi := NamedSpan?{None}
-    undo := NamedSpan?{None}
-    close_name := NamedSpan?{None}
-    markers := [Marker]{}
+    ^abi: NamedSpan?{None}
+    ^undo: NamedSpan?{None}
+    ^close_name: NamedSpan?{None}
+    ^markers: [Marker]{}
     loop parser_current_kind(state) == TOKEN_HASH {
         if {
             parser_kind_at(state, 1) == TOKEN_LBRACKET -> {
@@ -219,8 +219,8 @@ parser_parse_extern_fn: fn(state: ^JetParserState, allow_missing_semicolon: Bool
     parser_expect(state, TOKEN_KW_FN, "to declare a foreign function")
     name: parser_expect_name(state, "after `fn`")
     params: parser_parse_param_list(state)
-    return_type := Type?{None}
-    return_span := Span?{None}
+    ^return_type: Type?{None}
+    ^return_span: Span?{None}
     if {
         parser_current_kind(state) == TOKEN_UNIFIED_ARROW -> {
             parser_bump(state)
@@ -238,7 +238,7 @@ parser_parse_extern_fn: fn(state: ^JetParserState, allow_missing_semicolon: Bool
     parser_expect(state, TOKEN_EQ, if allow_missing_semicolon -> "`=` before the C symbol" else -> "`=` before the Rust path")
     path_context: if allow_missing_semicolon -> "after `=` in a C binding" else -> "after `=` in a foreign function"
     path: parser_foreign_plain_string(state, path_context)
-    end := path.span
+    ^end: path.span
     if {
         parser_current_kind(state) == TOKEN_SEMI -> {
             close: parser_bump(state)

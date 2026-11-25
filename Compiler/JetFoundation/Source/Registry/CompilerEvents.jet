@@ -196,12 +196,12 @@ compiler_event_payload_name: fn(name: String) -> String Never! {
 // The value of payload struct `payload`: its row's fields, in row order,
 // holding the values of `values` in turn.
 compiler_event_payload: fn(payload: String, values: ^^[TComptimeValue]) -> TComptimeValue Never! {
-    at := -1
+    ^at: -1
     loop (index, row) in COMPILER_EVENT_PAYLOADS {
         if row.name == payload -> at = index
     }
-    fields := [TComptimeField]{}
-    home := "core.compiler"
+    ^fields: [TComptimeField]{}
+    ^home: "core.compiler"
     if at >= 0 {
         home = COMPILER_EVENT_PAYLOADS[at].home
         loop value in values.move() {
@@ -221,7 +221,7 @@ compiler_event_record: fn(name: String, values: ^^[TComptimeValue]) -> CompilerE
 // The `core.compiler.Event` of the moment `name` with payload `data`: the
 // variant its row names, carrying `data` as its one field.
 compiler_event_stage: fn(name: String, data: ^^TComptimeValue) -> TComptimeValue Never! {
-    variant := ""
+    ^variant: ""
     loop row in COMPILER_EVENTS {
         if row.name == name -> variant = row.variant
     }
@@ -245,7 +245,7 @@ compiler_event_value_json: fn(value: TComptimeValue) -> String Never! {
         .Int(number) -> "{number}"
         .Bool(flag) -> if flag -> "true" else -> "false"
         .List(values) -> {
-            items := [String]{}
+            ^items: [String]{}
             loop item in values -> items.push(compiler_event_value_json(item))
             "[{items.join(",")}]"
         }
@@ -266,16 +266,16 @@ compiler_event_value_json: fn(value: TComptimeValue) -> String Never! {
 // T, and any other type the payload of that name. `jet inspect events
 // --schema` prints it.
 compiler_event_schema: fn() -> String Never! {
-    refs := [String]{}
-    defs := [String]{}
+    ^refs: [String]{}
+    ^defs: [String]{}
     loop row in COMPILER_EVENTS {
         refs.push("    {{\"$ref\": {foundation_json_quote("#/$defs/{row.name}")}}}")
         properties: "        \"event\": {{\"const\": {foundation_json_quote(row.name)}}},\n        \"data\": {{\"$ref\": {foundation_json_quote("#/$defs/{row.payload}")}}}"
         defs.push(compiler_event_schema_object(row.name, properties, [String]{"\"event\"", "\"data\""}))
     }
     loop payload in COMPILER_EVENT_PAYLOADS {
-        properties := [String]{}
-        required := [String]{}
+        ^properties: [String]{}
+        ^required: [String]{}
         loop field in payload.fields {
             properties.push("        {foundation_json_quote(field.name)}: {compiler_event_schema_type(field.ty)}")
             required.push(foundation_json_quote(field.name))

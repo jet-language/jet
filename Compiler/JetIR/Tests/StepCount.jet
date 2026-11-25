@@ -10,18 +10,18 @@ use {
 
 // A function whose body starts with a turn poll that returns when it stops.
 step_module: fn(counted: Bool, fast: Bool) -> IRModule {
-    m := ir_module_new()
+    ^m: ir_module_new()
     m.stop_points = true
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
     turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
-    f := ir_function_new("spin", "test:spin.jet.spin", "", "spin.jet", 1)
+    ^f: ir_function_new("spin", "test:spin.jet.spin", "", "spin.jet", 1)
     stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
     none: ir_args(f, [Int]{})
-    _ := ir_emit(f, IROp.Call, stopped, turn, none, 0, 1)
-    _ := ir_open_if(f, stopped, 1)
-    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Call, stopped, turn, none, 0, 1)
+    ^_: ir_open_if(f, stopped, 1)
+    ^_: ir_emit(f, IROp.Return, -1, -1, -1, -1, 1)
     ir_end(f, 1)
-    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 2)
+    ^_: ir_emit(f, IROp.Return, -1, -1, -1, -1, 2)
     m.entry = m.functions.len()
     m.functions.push(f)
     m.step_count = counted
@@ -34,10 +34,10 @@ step_module: fn(counted: Bool, fast: Bool) -> IRModule {
 step_accesses: fn(counted: Bool, fast: Bool) -> {body: Int, poll: Int} {
     m: step_module(counted, fast)
     spin: m.entry
-    compiled := ir_x64_compile_module(m, compiler_threads_single())
+    ^compiled: ir_x64_compile_module(m, compiler_threads_single())
     assert(compiled.errors.len() == 0, "the module compiles: {compiled.errors.join("; ")}")
-    body := 0
-    poll := 0
+    ^body: 0
+    ^poll: 0
     loop function in compiled.functions {
         loop reloc in function.relocs {
             if x64_reloc_symbol(reloc, compiled.tables.runtime_symbols) == IR_X64_COMPTIME_STEPS_SYMBOL {

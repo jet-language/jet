@@ -29,10 +29,10 @@ jet_cli_cache_size: fn(value: String) -> Int JetCLIUsageError! {
 }
 
 jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIUsageError! {
-    command := String?{None}
-    option := String?{None}
-    value := ""
-    index := 0
+    ^command: String?{None}
+    ^option: String?{None}
+    ^value: ""
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         if arg == "--json" || arg == "--quiet" || arg == "--no-color" || arg.starts_with("--color=") {
@@ -104,8 +104,8 @@ jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIUsageError! 
 jet_cli_cache_format_size: fn(bytes: Int) -> String Never! {
     if bytes < 1024 -> return "{bytes} B"
     units: [String]{"B", "KiB", "MiB", "GiB", "TiB"}
-    value := Float.from_int(bytes)
-    unit := 0
+    ^value: Float.from_int(bytes)
+    ^unit: 0
     loop value >= 1024.0 && unit < units.len() - 1 {
         value /= 1024.0
         unit += 1
@@ -134,9 +134,9 @@ jet_cli_cache_store_error: fn(operation: String, error: ArtifactStoreError, json
 }
 
 jet_cli_cache_status: fn(store: ArtifactStore, status: ArtifactStoreStatus, json: Bool) -> JetDriverVerbOutput Never! {
-    blobs := 0
-    records := 0
-    lto := 0
+    ^blobs: 0
+    ^records: 0
+    ^lto: 0
     loop entry in status.entries {
         if entry.kind == {
             .Blob -> { blobs += 1 }
@@ -191,7 +191,7 @@ jet_cli_cache_prune: fn(report: ArtifactPruneReport, json: Bool) -> JetDriverVer
         )
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("cache.prune", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n", stderr: "", exit_code: 0}
     }
-    out := "Prune      {jet_cli_cache_format_size(report.before_bytes)} -> {jet_cli_cache_format_size(report.after_bytes)} (target {jet_cli_cache_format_size(report.target_bytes)})\nRemoved    {report.removed.len()} entries · freed {jet_cli_cache_format_size(freed)}\nPinned     {jet_cli_cache_format_size(report.pinned_bytes)}\n"
+    ^out: "Prune      {jet_cli_cache_format_size(report.before_bytes)} -> {jet_cli_cache_format_size(report.after_bytes)} (target {jet_cli_cache_format_size(report.target_bytes)})\nRemoved    {report.removed.len()} entries · freed {jet_cli_cache_format_size(freed)}\nPinned     {jet_cli_cache_format_size(report.pinned_bytes)}\n"
     if report.blocked -> out = "{out}Result     target blocked by live leases\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
 }

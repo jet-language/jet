@@ -30,7 +30,7 @@ debug_place_wire: fn(number: Int, kind: String, from: String, to: String, start:
 }
 
 debug_place_run_graph: fn() -> String {
-    nodes := [String]{}
+    ^nodes: [String]{}
     nodes.push(debug_place_node("entry", 49, 52))
     nodes.push(debug_place_node("stmt:1:binding", 65, 76))
     nodes.push(debug_place_node("value:1:init:70-71", 70, 71))
@@ -40,7 +40,7 @@ debug_place_run_graph: fn() -> String {
     nodes.push(debug_place_node("stmt:3:branch", 98, 100))
     nodes.push(debug_place_node("stmt:311:assign", 121, 126))
     nodes.push(debug_place_node("expr:4:call:print", 142, 147))
-    wires := [String]{}
+    ^wires: [String]{}
     wires.push(debug_place_wire(2, "data", "value:get:n:output:n", "expr:2:call:scale:input:arg1", 91, 92))
     wires.push(debug_place_wire(9, "control", "stmt:1:binding:output:then", "stmt:2:binding:input:exec", 76, 91))
     wires.push(debug_place_wire(10, "control", "stmt:3:branch:output:then", "stmt:311:assign:input:exec", 121, 126))
@@ -90,11 +90,11 @@ debug_place_state: fn(graph: String) -> Shared<CanvasHostState> {
 #Test("a step with two ways through the line it left takes no wire") {
     // `if ready -> count += 1` on one line, then `print(count)`: the step
     // went through the arm or past it, and the graph can't tell which.
-    nodes := [String]{}
+    ^nodes: [String]{}
     nodes.push(debug_place_node("stmt:1:branch", 10, 12))
     nodes.push(debug_place_node("stmt:101:assign", 20, 25))
     nodes.push(debug_place_node("expr:2:call:print", 31, 36))
-    wires := [String]{}
+    ^wires: [String]{}
     wires.push(debug_place_wire(1, "control", "stmt:1:branch:output:then", "stmt:101:assign:input:exec", 20, 25))
     wires.push(debug_place_wire(2, "control", "stmt:1:branch:output:else", "expr:2:call:print:input:exec", 31, 36))
     wires.push(debug_place_wire(3, "control", "stmt:101:assign:output:then", "expr:2:call:print:input:exec", 31, 36))

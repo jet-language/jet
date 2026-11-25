@@ -22,7 +22,7 @@ kind: fn(error: IOError) -> String {
 run: fn() {
     scratch: files.temp_dir("reserve")
     path: files.join(scratch.path, "journal.bin")
-    out := files.create(path)
+    ^out: files.create(path)
     out.write_line("head")
     out.flush()
     out.allocate(4096)
@@ -34,7 +34,7 @@ run: fn() {
         .Err(error) -> print("negative size: {kind(error)}")
     }
 
-    input := files.open(path)
+    ^input: files.open(path)
     input.advise(.Sequential)
     first: input.read_line()
     print("first line: {first ?? "none"}")

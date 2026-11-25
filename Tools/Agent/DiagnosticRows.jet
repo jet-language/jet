@@ -82,7 +82,7 @@ SPEC_DIR: "Docs/Spec"
 // The codes registered before the letter law whose letter disagrees with
 // their severity (Docs/Spec/diagnostics.md: codes are never renumbered).
 // Lints with a non-`L` code: E2818, E2930, E2931, E2934, JT0101 and the
-// reserved W0410; a blocking row with an `L` code: L1101. The list only
+// reserved W0410; a non-lint row with an `L` code: the retired L1101. The list only
 // shrinks: a code whose letter matches again, or whose row is gone, fails the
 // check until it is removed here, and a new mismatch can't be added.
 LETTER_LAW_EXCEPTIONS: [String]{"E2818", "E2930", "E2931", "E2934", "JT0101", "L1101", "W0410"}
@@ -244,8 +244,8 @@ literal_body: fn(text: String, context: String) -> String DiagnosticRowsError! {
 // and `{{`/`}}` stay escaped braces.
 registry_text: fn(body: String, fields: [String], context: String) -> String DiagnosticRowsError! {
     bytes: body.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         // `\`, `{{` and `}}` copy two bytes as written.
@@ -261,7 +261,7 @@ registry_text: fn(body: String, fields: [String], context: String) -> String Dia
             index += 1
             next
         }
-        close := index + 1
+        ^close: index + 1
         loop close < bytes.len() && (Int{bytes[close]}) != 125 -> close += 1
         if close >= bytes.len() -> return Err(rows_fail("{context}: an unclosed `{{` hole"))
         hole: String.from_bytes(bytes.slice(index + 1, close)) ?? return Err(rows_fail("{context}: a hole is not UTF-8"))
@@ -283,8 +283,8 @@ registry_text: fn(body: String, fields: [String], context: String) -> String Dia
 // the backslash, and `\n`, `\t` and `\r` their control bytes.
 display_text: fn(text: String, context: String) -> String DiagnosticRowsError! {
     bytes: text.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         paired: index + 1 < bytes.len() && (byte == 92 || ((byte == 123 || byte == 125) && Int{bytes[index + 1]} == byte))
@@ -306,14 +306,14 @@ display_text: fn(text: String, context: String) -> String DiagnosticRowsError! {
 
 read_sources: fn(source_text: String) -> [DiagnosticSource] DiagnosticRowsError! {
     lines: source_text.split("\n").to_list()
-    sources := [DiagnosticSource]{}
-    index := 0
+    ^sources: [DiagnosticSource]{}
+    ^index: 0
     loop index < lines.len() {
         line: lines[index]
         if STRUCT_OPEN.match(line) == .Val(struct_open) {
             name: struct_open.groups[0].copy()
             context: "{name}: struct"
-            declared := [String]{}
+            ^declared: [String]{}
             index += 1
             loop index < lines.len() {
                 if STRUCT_FIELD.match(lines[index]) == .Val(field) {
@@ -327,8 +327,8 @@ read_sources: fn(source_text: String) -> [DiagnosticSource] DiagnosticRowsError!
             if index >= lines.len() || lines[index] != IMPL_OPEN {
                 return Err(rows_fail("{context}: expected its `String` fields, then `impl Diagnostic {{`"))
             }
-            constants := [DiagnosticEntry]{}
-            texts := [DiagnosticEntry]{}
+            ^constants: [DiagnosticEntry]{}
+            ^texts: [DiagnosticEntry]{}
             index += 1
             loop index < lines.len() && lines[index] != IMPL_CLOSE {
                 body: lines[index]
@@ -390,14 +390,14 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         return Err(rows_fail("{context}: a compiler diagnostic states its `code`"))
     }
     code_text: constant_literal(source, "code", "") ?? return Err(err)
-    texts := [String]{}
+    ^texts: [String]{}
     parts: [String]{"what", "why", "fix"}
     loop part in parts {
         literal: entry(source.texts, part) ?? return Err(rows_fail("{context}: `{part}: fn` is missing"))
         body: literal_body(literal, "{context}.{part}") ?? return Err(err)
         texts.push(registry_text(body, source.fields, "{context}.{part}") ?? return Err(err))
     }
-    rubric := [String]{}
+    ^rubric: [String]{}
     if PLACEHOLDER_WHY.is_match(texts[1]) -> rubric.push("{code_text} why is a placeholder")
     loop (index, part) in parts {
         if DECISION_ID.find(texts[index]) == .Val(id) {
@@ -429,7 +429,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     status: constant_case(entry(source.constants, "status") ?? ".Active", "{context}.status") ?? return Err(err)
     // A retired or reserved row runs in no stage, so it states none and its
     // row's stage is empty; an active row without one runs in sema.
-    stages := if status == "Active" -> "sema" else -> ""
+    ^stages: if status == "Active" -> "sema" else -> ""
     if entry(source.constants, "stage") == .Val(stage_list) {
         if status != "Active" {
             return Err(rows_fail("{context}: a `.{status}` row runs in no stage, so it states no `stage`"))
@@ -460,8 +460,8 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         return Err(rows_fail("{context}: `detail` is `true` or `false`"))
     }
     written_fix: entry(source.constants, "structured_fix") ?? ""
-    edit := ""
-    structured := "None"
+    ^edit: ""
+    ^structured: "None"
     if REPLACE_FIX.match(written_fix) == .Val(replace) {
         edit = "Replace"
         from: literal_body(replace.groups[0], "{context}.structured_fix") ?? return Err(err)
@@ -489,12 +489,12 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     }
     no_fix_kind: if written_no_fix == "None" -> "" else -> constant_case(written_no_fix, "{context}.no_fix") ?? return Err(err)
     no_fix: if no_fix_kind == "" -> "None" else -> "Val(DiagnosticNoFixReason{{kind: DiagnosticNoFixReasonKind.{no_fix_kind}, next: \"{next_text}\"}})"
-    safety := "None"
+    ^safety: "None"
     if entry(source.constants, "fix_safety") == .Val(written_safety) {
         grade: constant_case(written_safety, "{context}.fix_safety") ?? return Err(err)
         safety = "Val(DiagnosticFixSafety.{grade})"
     }
-    class := ""
+    ^class: ""
     if entry(source.constants, "safety_class") == .Val(written_class) {
         class = constant_case(written_class, "{context}.safety_class") ?? return Err(err)
         if class != "Soundness" && class != "Opinion" {
@@ -547,7 +547,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         "        no_fix_reason: {no_fix},{fmt_line}",
         "    }},",
     }.join("\n")
-    shown := [String]{}
+    ^shown: [String]{}
     loop (index, part) in parts {
         shown.push(display_text(texts[index], "{context}.{part}") ?? return Err(err))
     }
@@ -585,10 +585,10 @@ in_safety_ranges: fn(code: String) -> Bool Never! {
 
 render_rows: fn(source: String) -> RenderedRows DiagnosticRowsError! {
     rows: read_sources(source) ?? return Err(err)
-    codes := [String]{}
-    rendered := [String]{}
-    facts := [RowFacts]{}
-    rubric := [String]{}
+    ^codes: [String]{}
+    ^rendered: [String]{}
+    ^facts: [RowFacts]{}
+    ^rubric: [String]{}
     loop row in rows {
         one: render_row(row) ?? return Err(err)
         if codes.contains(one.facts.code) {
@@ -609,8 +609,8 @@ render_rows: fn(source: String) -> RenderedRows DiagnosticRowsError! {
 // no longer name a breaking row. A lint takes an `L` code and no other row
 // does; `exceptions` names the frozen older codes that keep their letter.
 letter_law_problems: fn(rows: [RowFacts], exceptions: [String]) -> [String] Never! {
-    problems := [String]{}
-    breaking := [String]{}
+    ^problems: [String]{}
+    ^breaking: [String]{}
     loop row in rows {
         if row.lint == row.code.starts_with("L") -> next
         breaking.push(row.code.copy())  // copy: the row keeps its code
@@ -630,14 +630,14 @@ letter_law_problems: fn(rows: [RowFacts], exceptions: [String]) -> [String] Neve
 // The active rows' counts per plane, in plane order. An active row may carry a
 // structured edit or a no-fix reason, never both.
 plane_counts: fn(facts: [RowFacts]) -> [PlaneCount] DiagnosticRowsError! {
-    slots := [String:Int]{}
-    counts := [PlaneCount]{}
+    ^slots: [String:Int]{}
+    ^counts: [PlaneCount]{}
     loop row in facts {
         if !row.active -> next
         if row.edit && row.reason {
             return Err(rows_fail("{row.code}: an active row has a `structured_fix` or a `no_fix` reason, not both; write `no_fix: None` beside the fix"))
         }
-        slot := counts.len()
+        ^slot: counts.len()
         if slots.get(row.plane) == .Val(found) -> slot = found else {
             slots[row.plane] = slot
             counts.push(PlaneCount{plane: row.plane, edits: 0, reasons: 0, total: 0})
@@ -652,7 +652,7 @@ plane_counts: fn(facts: [RowFacts]) -> [PlaneCount] DiagnosticRowsError! {
 
 // The rows with neither an edit nor a reason, per plane, in a baseline text.
 uncovered_in: fn(baseline: String) -> [String:Int] DiagnosticRowsError! {
-    uncovered := [String:Int]{}
+    ^uncovered: [String:Int]{}
     loop line in baseline.split("\n") {
         if line == "" || line.starts_with("#") -> next
         fields: line.split(" ").to_list()
@@ -670,7 +670,7 @@ uncovered_in: fn(baseline: String) -> [String:Int] DiagnosticRowsError! {
 render_baseline: fn(facts: [RowFacts], committed: String) -> String DiagnosticRowsError! {
     counts: plane_counts(facts) ?? return Err(err)
     before: uncovered_in(committed) ?? return Err(err)
-    lines := [String]{}
+    ^lines: [String]{}
     loop count in counts {
         now: count.total - count.edits - count.reasons
         floor: before.get(count.plane) ?? 0
@@ -758,7 +758,7 @@ source_codes: fn(facts: [RowFacts], text: String, codes: ^[String]) {
         byte: Int{raw}
         if byte != 34 && byte != 91 -> next
         close: if byte == 34 -> 34 else -> 93
-        end := index + 1
+        ^end: index + 1
         loop end < bytes.len() && code_byte(Int{bytes[end]}) -> end += 1
         if end == index + 1 || end >= bytes.len() || (Int{bytes[end]}) != close -> next
         code: String.from_bytes(bytes.slice(index + 1, end)) ?? next
@@ -811,7 +811,7 @@ report_codes: fn(facts: [RowFacts], text: String, codes: ^[String]) {
 // The codes every rendered report the coverage entry reads names: the ui
 // corpora's snapshots and the report files of COVERAGE_REPORTS.
 rendered_codes: fn(facts: [RowFacts]) -[FS]> [String] DiagnosticRowsError! {
-    codes := [String]{}
+    ^codes: [String]{}
     loop directory in SNAPSHOT_DIRS {
         loop snapshot in
             (ui_snapshots("", directory, directory == LINT_SNAPSHOT_DIR) ?? return Err(err)) {
@@ -838,7 +838,7 @@ excluded_codes: fn(kit: String) -> [String] DiagnosticRowsError! {
         return Err(rows_fail("{KIT_UI_PATH} no longer opens kit_ui_excluded with `{KIT_UI_EXCLUDED.replace("\n", "\\n")}`"))
     }
     listed: text_before(text_after(kit, KIT_UI_EXCLUDED), "]")
-    codes := [String]{}
+    ^codes: [String]{}
     loop part in listed.split(",") {
         quoted: part.trim()
         code: if quoted.starts_with("\"") && quoted.ends_with("\"") && quoted.count_bytes() > 2 -> text_before(text_after(quoted.copy(), "\""), "\"") else -> ""
@@ -855,41 +855,41 @@ excluded_codes: fn(kit: String) -> [String] DiagnosticRowsError! {
 // side in code order, leaving out `excluded`. `committed` is the allowlist on
 // disk: no row may join it.
 render_allowlist: fn(facts: [RowFacts], emitted: [String], rendered: [String], excluded: [String], committed: String) -> String DiagnosticRowsError! {
-    left := [String]{}
+    ^left: [String]{}
     loop row in facts {
         if row.active && emitted.contains(row.code) && !excluded.contains(row.code) {
             add_code(left, row.code)
         }
     }
-    right := [String]{}
+    ^right: [String]{}
     loop code in rendered {
         if !excluded.contains(code) -> add_code(right, code)
     }
-    rows := [String]{}
-    ordered_left := left.copy()
+    ^rows: [String]{}
+    ^ordered_left: left.copy()
     ordered_left.sort()
     loop code in ordered_left {
         if !right.contains(code) -> rows.push("{code}\tleft-only")
     }
-    ordered_right := right.copy()
+    ^ordered_right: right.copy()
     ordered_right.sort()
     loop code in ordered_right {
         if !left.contains(code) -> rows.push("{code}\tright-only")
     }
-    before := [String]{}
+    ^before: [String]{}
     loop line in committed.split("\n") {
         if line == "" || line.starts_with("#") -> next
         fields: line.split("\t").to_list()
         if fields.len() >= 2 -> before.push("{fields[0]}\t{fields[1]}")
     }
-    added := [String]{}
+    ^added: [String]{}
     loop row in rows {
         if !before.contains(row) -> added.push(row.replace("\t", " "))
     }
     if added.len() > 0 {
         return Err(rows_fail("{ALLOWLIST_PATH} would gain {added.len()} uncovered codes ({added.join(", ")}); give each a snapshot under Tests/UI"))
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop row in rows -> lines.push("{row}\t{ALLOWLIST_CARD}")
     if lines.len() == 0 -> return Ok(ALLOWLIST_HEADER.copy())
     Ok("{ALLOWLIST_HEADER}{lines.join("\n")}\n")
@@ -899,7 +899,7 @@ render_allowlist: fn(facts: [RowFacts], emitted: [String], rendered: [String], e
 allowlist: fn(facts: [RowFacts]) -[FS]> String DiagnosticRowsError! {
     kit: files.read(KIT_UI_PATH) ?? return Err(rows_fail("cannot read {KIT_UI_PATH}: {err}"))
     excluded: excluded_codes(kit) ?? return Err(err)
-    emitted := [String]{}
+    ^emitted: [String]{}
     loop root in COVERAGE_ROOTS -> emitted_codes(facts, root, emitted) ?? return Err(err)
     rendered: rendered_codes(facts) ?? return Err(err)
     committed: if files.exists(ALLOWLIST_PATH) -> files.read(ALLOWLIST_PATH) ?? return Err(rows_fail("cannot read {ALLOWLIST_PATH}: {err}")) else -> ""
@@ -923,7 +923,7 @@ fixture_module: fn(source: String) -> Bool Never! {
 // The snapshot a row owns at `path` (relative to `root`): none when the row
 // has none, else that one file.
 owned_snapshot: fn(root: String, path: String) -[FS]> [TextFile] DiagnosticRowsError! {
-    found := [TextFile]{}
+    ^found: [TextFile]{}
     disk: if root == "" -> path.copy() else -> "{root}/{path}"
     if !files.exists(disk) -> return Ok(found)
     text: files.read(disk) ?? return Err(rows_fail("cannot read {path}: {err}"))
@@ -941,18 +941,18 @@ owned_snapshot: fn(root: String, path: String) -[FS]> [TextFile] DiagnosticRowsE
 // dot-directory such as a build's `.jet`, is not a snapshot the suite owns,
 // so a checkout's leftovers never move a page. Paths are relative to `root`.
 ui_snapshots: fn(root: String, directory: String, lint: Bool) -[FS]> [TextFile] DiagnosticRowsError! {
-    found := [TextFile]{}
+    ^found: [TextFile]{}
     at: if root == "" -> directory.copy() else -> "{root}/{directory}"
     if !files.exists(at) -> return Ok(found)
-    children := files.list_dir(at) ?? return Err(rows_fail("cannot list {directory}: {err}"))
+    ^children: files.list_dir(at) ?? return Err(rows_fail("cannot list {directory}: {err}"))
     children.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { folded_name_order(left.name, right.name) })
     loop child in children {
         if child.name.starts_with(".") -> next
         shown: "{directory}/{child.name}"
-        owned := ""
+        ^owned: ""
         if child.is_dir {
             entries: [String]{"run.jet", "main.jet", "workspace.jet"}
-            entry := ""
+            ^entry: ""
             loop name in entries {
                 if entry == "" && files.exists("{child.path}/{name}") -> entry = name.copy()
             }
@@ -980,10 +980,10 @@ ui_snapshots: fn(root: String, directory: String, lint: Bool) -[FS]> [TextFile] 
 // The `.warn` snapshots directly under a case directory, sorted by name: each
 // is the rendered report a case there compares with `stderr: =`.
 case_snapshots: fn(root: String, directory: String) -[FS]> [TextFile] DiagnosticRowsError! {
-    found := [TextFile]{}
+    ^found: [TextFile]{}
     at: if root == "" -> directory.copy() else -> "{root}/{directory}"
     if !files.exists(at) -> return Ok(found)
-    children := files.list_dir(at) ?? return Err(rows_fail("cannot list {directory}: {err}"))
+    ^children: files.list_dir(at) ?? return Err(rows_fail("cannot list {directory}: {err}"))
     children.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { folded_name_order(left.name, right.name) })
     loop child in children {
         if child.is_dir || !child.name.ends_with(".warn") -> next
@@ -1005,7 +1005,7 @@ folded_name_order: fn(left: String, right: String) -> Ordering Never! {
 
 // Each heading's `Jet.Name` first snapshot, as an index into `snapshots`.
 first_snapshots: fn(snapshots: [TextFile]) -> [String:Int] Never! {
-    first := [String:Int]{}
+    ^first: [String:Int]{}
     loop (at, snapshot) in snapshots {
         loop line in snapshot.text.split("\n") {
             name: line_name(line) ?? (heading_name(line.trim_start()) ?? next)
@@ -1037,7 +1037,7 @@ line_name: fn(line: String) -> String? Never! {
 }
 
 html_escape: fn(value: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         entity: if {
             byte == (U8{38}) -> "&amp;"
@@ -1150,9 +1150,9 @@ render_redirect: fn(row: RowFacts) -> String Never! {
 // sends a reader there.
 render_pages: fn(facts: [RowFacts], snapshots: [TextFile]) -> [TextFile] Never! {
     first: first_snapshots(snapshots)
-    pages := [TextFile]{}
+    ^pages: [TextFile]{}
     loop row in facts {
-        example := TextFile?{None}
+        ^example: TextFile?{None}
         if first.get(row.name) == .Val(at) -> example = Val(snapshots[at].copy())
         pages.push(TextFile{path: page_path(row.name), text: render_page(row, example)})
         pages.push(TextFile{path: page_path(row.code), text: render_redirect(row)})
@@ -1162,7 +1162,7 @@ render_pages: fn(facts: [RowFacts], snapshots: [TextFile]) -> [TextFile] Never! 
 
 // The `.html` files under `directory`.
 html_under: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
-    found := [String]{}
+    ^found: [String]{}
     loop child in
         (files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))) {
         if child.is_dir {
@@ -1174,9 +1174,9 @@ html_under: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
 
 // The pages under PAGES_DIR that no row owns, beside its hand-written index.
 stale_pages: fn(pages: [TextFile]) -[FS]> [String] DiagnosticRowsError! {
-    stale := [String]{}
+    ^stale: [String]{}
     if !files.exists(PAGES_DIR) -> return Ok(stale)
-    owned := [String:Bool]{}
+    ^owned: [String:Bool]{}
     loop page in pages -> owned[page.path] = true
     loop path in (html_under(PAGES_DIR) ?? return Err(err)) {
         if path != "{PAGES_DIR}/index.html" && owned.get(path) == None -> stale.push(path)
@@ -1191,7 +1191,7 @@ stale_pages: fn(pages: [TextFile]) -[FS]> [String] DiagnosticRowsError! {
 generated_files: fn(rows: RenderedRows) -[FS]> [TextFile] DiagnosticRowsError! {
     committed: if files.exists(BASELINE_PATH) -> files.read(BASELINE_PATH) ?? return Err(rows_fail("cannot read {BASELINE_PATH}: {err}")) else -> ""
     baseline: render_baseline(rows.facts, committed) ?? return Err(err)
-    snapshots := [TextFile]{}
+    ^snapshots: [TextFile]{}
     loop directory in SNAPSHOT_DIRS {
         loop snapshot in
             (ui_snapshots("", directory, directory == LINT_SNAPSHOT_DIR) ?? return Err(err)) {
@@ -1204,7 +1204,7 @@ generated_files: fn(rows: RenderedRows) -[FS]> [TextFile] DiagnosticRowsError! {
         }
     }
     covered: allowlist(rows.facts) ?? return Err(err)
-    generated := [TextFile]{TextFile{path: ROWS_PATH, text: rows.text}, TextFile{path: BASELINE_PATH, text: baseline}, TextFile{path: ALLOWLIST_PATH, text: covered}}
+    ^generated: [TextFile]{TextFile{path: ROWS_PATH, text: rows.text}, TextFile{path: BASELINE_PATH, text: baseline}, TextFile{path: ALLOWLIST_PATH, text: covered}}
     loop page in render_pages(rows.facts, snapshots) -> generated.push(page)
     generated.push(TextFile{path: PAGES_MARKER, text: PAGES_MARKER_TEXT})
     Ok(generated)
@@ -1224,14 +1224,14 @@ hex_digit: fn(byte: Int) -> Int Never! {
 // own quotes split a literal; each part keeps the text on its side.
 line_literals: fn(line: String, jet: Bool) -> [String] Never! {
     bytes: line.bytes()
-    found := [String]{}
-    index := 0
+    ^found: [String]{}
+    ^index: 0
     loop index < bytes.len() {
         if (Int{bytes[index]}) != 34 {
             index += 1
             next
         }
-        out := [U8]{}
+        ^out: [U8]{}
         index += 1
         loop index < bytes.len() && (Int{bytes[index]}) != 34 {
             byte: Int{bytes[index]}
@@ -1248,7 +1248,7 @@ line_literals: fn(line: String, jet: Bool) -> [String] Never! {
             }
             after: Int{bytes[index + 1]}
             index += 2
-            value := -1
+            ^value: -1
             if after == 110 -> value = 10 else if after == 116 -> value = 9 else if after == 114 {
                 value = 13
             } else if after == 34 || after == 92 { value = after } else if after == 120 && index + 1 < bytes.len() && hex_digit(Int{bytes[index]}) >= 0 && hex_digit(Int{bytes[index + 1]}) >= 0 {
@@ -1256,7 +1256,7 @@ line_literals: fn(line: String, jet: Bool) -> [String] Never! {
                 index += 2
             } else if after >= 48 && after <= 55 {
                 value = after - 48
-                digits := 1
+                ^digits: 1
                 loop digits < 3 && index < bytes.len() && (Int{bytes[index]}) >= 48 && (Int{bytes[index]}) <= 55 {
                     value = value * 8 + Int{bytes[index]} - 48
                     index += 1
@@ -1310,9 +1310,9 @@ ReportSites: struct {
 // compiler under test prints; it builds none), each directory's entries sorted
 // by name.
 report_sources: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
-    children := files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
+    ^children: files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
     children.sort_by(fn(child) { child.name })
-    found := [String]{}
+    ^found: [String]{}
     loop child in children {
         if child.is_dir {
             skipped: child.name.starts_with(".") || child.name == "Tests" || child.name == "tests" || child.name == "Fixtures" || child.name == "fixtures" || child.name.ends_with(".fixture") || child.name == "JetTestKit"
@@ -1351,7 +1351,7 @@ text_before: fn(text: String, marker: String) -> String Never! {
 // must agree with its row's What up to the What's first hole, and the Why and
 // Fix before a More link must be that row's own.
 copy_problems: fn(rows: [RowFacts], text: String, at: String) -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     loop heading in COPY_HEADING.matches(text) {
         name: heading.groups[0]
         row: row_named(rows, name) ?? {
@@ -1392,7 +1392,7 @@ file_report_problems: fn(rows: [RowFacts], path: String, text: String) -> Report
     lines: text.split("\n").to_list()
     assembly: path.ends_with(".S")
     copied: assembly || (lines.len() > 0 && lines[0].lower().contains("generated by"))
-    found := ReportSites{files: 1, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
+    ^found: ReportSites{files: 1, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
     loop (index, line) in lines {
         loop literal in line_literals(line, !assembly) {
             at: "{path}:{index + 1}"
@@ -1426,7 +1426,7 @@ file_report_problems: fn(rows: [RowFacts], path: String, text: String) -> Report
 // and the line that best shows where each quoted code is reported. A copy's
 // heading names its row, so it reports that row's code.
 report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
-    sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
+    ^sites: ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
     loop root in REPORT_ROOTS {
         loop path in (report_sources(root) ?? return Err(err)) {
             if REPORT_HOMES.contains(path) -> next
@@ -1439,7 +1439,7 @@ report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
                 next
             }
             loop (index, line) in text.split("\n").to_list() {
-                codes := [String]{}
+                ^codes: [String]{}
                 loop quoted in QUOTED_CODE.matches(line) -> codes.push(quoted.groups[0].copy())
                 loop named in MESSAGE_NAME.matches(line) {
                     if row_named(rows, named.groups[0]) == .Val(row) -> codes.push(row.code.copy())
@@ -1472,11 +1472,11 @@ site_rank: fn(path: String, line: String, code: String) -> Int Never! {
 // the listed codes that no longer need it: one a line reports, or one that
 // names no active row. `listed` may hold no more than `ceiling` codes.
 unreported_problems: fn(facts: [RowFacts], sites: ReportSites, listed: [String], ceiling: Int) -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     if listed.len() > ceiling {
         problems.push("UNREPORTED_CODES holds {listed.len()} codes, more than its ceiling of {ceiling}; the list only shrinks")
     }
-    active := [String]{}
+    ^active: [String]{}
     loop row in facts {
         if !row.active -> next
         active.push(row.code.copy())  // copy: the row keeps its code
@@ -1500,13 +1500,13 @@ audit_cell: fn(text: String) -> String Never! { text.replace("|", "\\|") }
 // soundness rows an expert opt-in lifts, and the sealed floors, each floor
 // with the first place the compiler reports it.
 render_audit: fn(facts: [RowFacts], sites: ReportSites) -> String Never! {
-    soundness := 0
-    opinion := 0
-    pending := 0
-    floors := [String]{}
-    unreported := [String]{}
-    lifted := [String]{}
-    classified := [String]{}
+    ^soundness: 0
+    ^opinion: 0
+    ^pending: 0
+    ^floors: [String]{}
+    ^unreported: [String]{}
+    ^lifted: [String]{}
+    ^classified: [String]{}
     loop row in facts {
         if !row.active || !row.error -> next
         if row.safety_class == "" {
@@ -1535,7 +1535,7 @@ render_audit: fn(facts: [RowFacts], sites: ReportSites) -> String Never! {
     unreported.sort()
     lifted.sort()
     classified.sort()
-    ranges := [String]{}
+    ^ranges: [String]{}
     loop range in SAFETY_RANGES -> ranges.push("{range}xx")
     [String]{
         "# Diagnostic safety audit",
@@ -1595,13 +1595,13 @@ word_byte: fn(byte: Int) -> Bool Never! {
 // whole word. A `#L1234` link anchor names a line, not a code.
 cited_codes: fn(line: String) -> [String] Never! {
     bytes: line.bytes()
-    found := [String]{}
+    ^found: [String]{}
     loop (index, byte) in bytes {
         head: Int{byte}
         if (head != 69 && head != 76) || index + 5 > bytes.len() -> next
         if index > 0 && (word_byte(Int{bytes[index - 1]}) || Int{bytes[index - 1]} == 35) -> next
         if index + 5 < bytes.len() && word_byte(Int{bytes[index + 5]}) -> next
-        digits := true
+        ^digits: true
         loop at in (index + 1)..<(index + 5) {
             digit: Int{bytes[at]}
             if digit < 48 || digit > 57 -> digits = false
@@ -1613,9 +1613,9 @@ cited_codes: fn(line: String) -> [String] Never! {
 
 // The `.md` files under `directory`, each directory's entries sorted by name.
 spec_pages: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
-    children := files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
+    ^children: files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
     children.sort_by(fn(child) { child.name })
-    found := [String]{}
+    ^found: [String]{}
     loop child in children {
         if child.name.starts_with(".") -> next
         if child.is_dir {
@@ -1627,7 +1627,7 @@ spec_pages: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
 
 // The codes one page cites, and each that names no row as `path:line`.
 page_citations: fn(known: [String:Bool], path: String, text: String) -> SpecCitations Never! {
-    found := SpecCitations{pages: 1, cited: 0, problems: [String]{}}
+    ^found: SpecCitations{pages: 1, cited: 0, problems: [String]{}}
     loop (index, line) in text.split("\n").to_list() {
         loop code in cited_codes(line) {
             found.cited += 1
@@ -1641,9 +1641,9 @@ page_citations: fn(known: [String:Bool], path: String, text: String) -> SpecCita
 
 // Every spec page's cited codes, checked against the rows.
 spec_citations: fn(rows: [RowFacts]) -[FS]> SpecCitations DiagnosticRowsError! {
-    known := [String:Bool]{}
+    ^known: [String:Bool]{}
     loop row in rows -> known[row.code] = true
-    found := SpecCitations{pages: 0, cited: 0, problems: [String]{}}
+    ^found: SpecCitations{pages: 0, cited: 0, problems: [String]{}}
     loop path in (spec_pages(SPEC_DIR) ?? return Err(err)) {
         text: files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
         one: page_citations(known, path, text)
@@ -1674,7 +1674,7 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
     citations: spec_citations(rows.facts) ?? return Err(err)
     citations_failure: "{citations.problems.len()} spec citations name no diagnostic row:\n{citations.problems.join("\n")}"
     if mode == "--safety" -> return Ok(render_audit(rows.facts, sites))
-    differing := [String]{}
+    ^differing: [String]{}
     loop file in generated {
         current: if files.exists(file.path) -> files.read(file.path) ?? return Err(rows_fail("cannot read {file.path}: {err}")) else -> ""
         if current == file.text -> next
@@ -1689,7 +1689,7 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
         loop path in stale {
             files.remove(path) ?? return Err(rows_fail("cannot remove {path}: {err}"))
         }
-        written := [String]{}
+        ^written: [String]{}
         if sites.problems.len() > 0 -> written.push(sites_failure)
         if unreported.len() > 0 -> written.push(unreported_failure)
         if citations.problems.len() > 0 -> written.push(citations_failure)
@@ -1697,9 +1697,9 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
         return Ok("diagnostic copies written: {differing.len()} rewritten, {stale.len()} stale pages removed, {generated.len()} in all")
     }
     loop path in stale -> differing.push("{path} (no diagnostic row owns this page)")
-    failures := [String]{}
+    ^failures: [String]{}
     if differing.len() > 0 {
-        first := [String]{}
+        ^first: [String]{}
         loop path in differing {
             if first.len() == 10 -> break
             first.push(path.copy())
@@ -1893,7 +1893,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert(diagnostic_rows_error(row.replace(code, sound)).contains("only one, states its `expert_path`"))
     assert(diagnostic_rows_error(row.replace(code, "{code}        safety_class: .Maybe,\n        safety_reason: \"x\",\n")).contains("`.Soundness` or `.Opinion`"))
     assert(diagnostic_rows_error(row.replace(code, "{opinion}        status: .Retired,\n")).contains("only an active `.Error` row"))
-    sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
+    ^sites: ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
     floor: (render_rows(row.replace(code, "{sound}        expert_path: \"none: nothing reaches it\",\n")) ?? panic(err.message)).facts
     assert(render_audit(floor, sites).contains("| E0299 | BadPath | nothing reaches it |"))
     sites.code_sites["E0299"] = "Compiler/JetSema/b.jet:7"
@@ -1904,7 +1904,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert_eq(site_rank("Compiler/JetParser/a.jet", "    parse_error(\"E0299\", span)", "E0299"), 1)
     assert_eq(site_rank("Compiler/JetSema/b.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 2)
     assert_eq(site_rank("Compiler/JetCLI/c.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 3)
-    quoted := [String]{}
+    ^quoted: [String]{}
     lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"Jet.EnvDecodeFailed: env var \"))", "    rt_static_text(\"Trail [R0801] (\")", "    row(\"JT0198\")", "    lint(\"L0530\", span)", "    codes: [\"W0410\"]", "    x: \"Error\" + \"E-mail\"", "    y: \"core.Jet.Thing: z\""}
     loop line in lines {
         loop found in QUOTED_CODE.matches(line) -> quoted.push(found.groups[0].copy())
@@ -1919,7 +1919,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
 
 #Test("an active row needs a report site, and the unreported codes only shrink") {
     facts: (render_rows(MINIMAL_ROW) ?? panic(err.message)).facts
-    sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
+    ^sites: ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
     assert_eq(unreported_problems(facts, sites, [String]{}, 0), [String]{"E9999 (Jet.BadPath) is an active row that no line under Compiler, Core, Jetpack reports; add the check that reports it, or retire the row"})
     assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 1), [String]{})
     assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 0), [String]{"UNREPORTED_CODES holds 1 codes, more than its ceiling of 0; the list only shrinks"})
@@ -1968,7 +1968,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
 }
 
 #Test("a spec page may cite only a code that has a row") {
-    known := [String:Bool]{}
+    ^known: [String:Bool]{}
     known["E0107"] = true
     known["L0103"] = true
     assert_eq(cited_codes("E0107, `L0103` and (E0108); not XE0109, E01090, E010 or [line 12](#L1234)").join("|"), "E0107|L0103|E0108")
@@ -2015,7 +2015,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
 
 #Test("a page's example search orders names with case set aside") {
     names: [String]{"CffiEnumBoundaries", "caret_is_not_power.jet", "bare_error_mark.jet", "Bare_error_mark.jet"}
-    ordered := names.copy()
+    ^ordered: names.copy()
     ordered.sort_by(fn(left: String, right: String) { folded_name_order(left, right) })
     assert_eq(ordered, [String]{"Bare_error_mark.jet", "bare_error_mark.jet", "caret_is_not_power.jet", "CffiEnumBoundaries"})
 }
@@ -2074,7 +2074,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
         path: text_before(row, "\t")
         files.write("{root}/{path}", "report: \"{text_after(row, "\t")}\"\n") ?? panic("{path}: {err}")
     }
-    codes := [String]{}
+    ^codes: [String]{}
     emitted_codes([RowFacts]{}, "{root}/src", codes) ?? panic(err.message)
     assert_eq(codes, [String]{"E9991"})
     files.remove_all(root) ?? panic("remove scratch: {err}")
@@ -2097,10 +2097,10 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
 
 #Test("the coverage allowlist lists each uncovered code and never gains one") {
     rows: render_rows(MINIMAL_ROW) ?? panic(err.message)
-    codes := [String]{}
+    ^codes: [String]{}
     source_codes(rows.facts, "x: \"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\" \"E-X\" \"E01090\" [W0001 \"Stop: Jet.BadPath: x\" \"Error: Jet.Unknown: y\"", codes)
     assert_eq(codes, [String]{"E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001", "E9999"})
-    rendered := [String]{}
+    ^rendered: [String]{}
     report_codes(rows.facts, "Error: E9999: an Err message\nError: Jet.BadPath: x\n Warning: E0001: indented\nStop: FFI01: meta\nStop: E0002: unregistered\nLint: Jet.Unknown: y\nError: couldn't read: x\n", rendered)
     assert_eq(rendered, [String]{"E9999", "E0002"})
     assert_eq(line_name(" Trail (2 calls passed it up, origin first):") ?? "", TRAIL_ROW)

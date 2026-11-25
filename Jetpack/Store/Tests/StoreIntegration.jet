@@ -8,7 +8,7 @@ store_test_signed_entry: fn(roots: HangarRoots, label: String, reference: String
     out: files.join(roots.root, label)
     files.create_dir_all(out) ?? panic("fixture dir")
     files.write(files.join(out, "payload"), "signed") ?? panic("fixture payload")
-    envelope := Envelope.for_output(out, reference, "remote-cache")
+    ^envelope: Envelope.for_output(out, reference, "remote-cache")
     envelope.signature = signature
     StoreEntry{
         id: store_entry_id("demo", "1", reference, out),
@@ -35,13 +35,13 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
 }
 
 #Test("store record and list roundtrip") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     out: files.join(roots.root, "fastfetch-output")
     files.create_dir_all(files.join(out, "bin")) ?? panic("fixture dir")
     files.write(files.join(out, "bin/fastfetch"), "fixture") ?? panic("fixture file")
     envelope: Envelope.for_output(out, "fastfetch@nixpkgs", "nix")
-    recorded := store_record_verified(verification, roots, "fastfetch", "2.1.0", "fastfetch@nixpkgs", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
+    ^recorded: store_record_verified(verification, roots, "fastfetch", "2.1.0", "fastfetch@nixpkgs", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
     recorded.named_outputs["out"] = envelope.output_hash
     // Name-and-version first, fingerprint last.
     assert(recorded.id.starts_with("fastfetch-2.1.0-"))
@@ -63,7 +63,7 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
 }
 
 #Test("store verified cache rejects deleted and tampered outputs") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_ingest_fixture(verification, roots, "verified-cache", [String:String]{"out": "trusted"}, [String]{})
     entry: ingested.entry
@@ -105,7 +105,7 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
 }
 
 #Test("store nix external output projects into hangar without mutating source") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     source: files.join(roots.root, "external-nix-output")
     files.create_dir_all(files.join(source, "bin")) ?? panic("fixture dir")
@@ -123,7 +123,7 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
     roots: store_test_temp_roots()
     entry: store_test_signed_entry(roots, "signed-output", "cache:demo", "ed25519:abcd")
     expectation: store_test_remote_expectation()
-    called := false
+    ^called: false
     assert(
         !store_verify_configured_signature_with(roots, entry, expectation, fn(key: String, message: String, signature: String) {
             called = true
@@ -139,9 +139,9 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
 
 #Test("store configured ed25519 signature verifies the cache receipt") {
     roots: store_test_temp_roots()
-    entry := store_test_signed_entry(roots, "signed-output-real", "cache:demo", "")
+    ^entry: store_test_signed_entry(roots, "signed-output-real", "cache:demo", "")
     expectation: store_test_remote_expectation()
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(U8{7})
     signing_key: crypto.SigningKey{bytes: seed}
     public_key: signing_key.public_key().bytes
@@ -158,7 +158,7 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
 }
 
 #Test("store mutable replaced crypto helper is never a trust root") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
     files.write(files.join(roots.root, "trust/cache.ed25519.pub"), "attacker-key") ?? panic("key file")

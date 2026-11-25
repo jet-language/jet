@@ -17,7 +17,7 @@ Board: struct {
 BOARD: Shared{Board{resumes: 0}}
 
 refresh: fn() app.Notice! {
-    held := BOARD.guard_edit()
+    ^held: BOARD.guard_edit()
     held.value.resumes += 1
     print("resumed {held.value.resumes}")
     if held.value.resumes == 2 -> return Err(app.Notice{text: "The board is offline"})
@@ -41,7 +41,7 @@ run: fn() {
             loop notice in app.notices() -> print("notice: {notice.text}")
         }
     })
-    held := LISTENING.guard_edit()
+    ^held: LISTENING.guard_edit()
     held.value._scope = Val(listening)
     print(if graph.launch() -> "launched" else -> "not launched")
 }

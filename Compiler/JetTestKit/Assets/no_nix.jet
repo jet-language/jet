@@ -46,7 +46,7 @@ run: fn() {
 }
 
 no_nix_say: fn(text: String) {
-    errors := term.stderr()
+    ^errors: term.stderr()
     errors.write(text).drop("no-nix stderr")
 }
 
@@ -138,7 +138,7 @@ no_nix_real: fn(path: String) -> String { files.canonicalize(path) ?? "" }
 // reports "not a dynamic executable" for scripts (ldd itself is one) and
 // static binaries, and that report must not reach the subject's stderr.
 no_nix_ldd: fn(ldd: String, path: String, host_path: String) -> [String] {
-    words := [String]{}
+    ^words: [String]{}
     spec: process.cmd([ldd, path]).env("PATH", host_path).stdout(.Capture).stderr(.Capture)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return words
     if results[0] == {
@@ -217,7 +217,7 @@ no_nix_inner: fn(args: [String]) -> Never {
     mount_real: no_nix_real(mount)
     umount_real: no_nix_real(umount)
 
-    roots := [String]{}
+    ^roots: [String]{}
     loop i in 0..<count -> no_nix_roots_of(ldd, pairs[2 * i], host_path, roots)
     loop path in ["/bin", "/bin/sh", "/run/current-system/sw"] {
         no_nix_roots_of(ldd, path, host_path, roots)
@@ -227,7 +227,7 @@ no_nix_inner: fn(args: [String]) -> Never {
     }
     roots.sort()
 
-    candidates := [String]{}
+    ^candidates: [String]{}
     loop i in 0..<count -> candidates.push(pairs[2 * i].copy())
     loop tool in [mount_real, umount_real, shell] -> candidates.push(tool.copy())
     loader: no_nix_loader(ldd, candidates, host_path)
@@ -236,7 +236,7 @@ no_nix_inner: fn(args: [String]) -> Never {
     // /proc/self/fd/9/LOADER, so the subject's own children still start.
     loader_real: if loader == "" -> "" else -> no_nix_real(loader)
     if loader != "" && loader_real == "" -> no_nix_fail("the loader {loader} does not resolve")
-    held := [Directory]{}
+    ^held: [Directory]{}
     if loader_real != "" {
         held.push(files.open_directory(files.dirname(loader_real)) ?? no_nix_fail("hold the loader directory: {err}"))
     }
@@ -252,7 +252,7 @@ no_nix_inner: fn(args: [String]) -> Never {
         files.create_dir_all(staged) ?? no_nix_fail("mkdir {staged}: {err}")
         no_nix_rbind(mount_real, files.join(files.join(host_nix, "store"), name), staged, host_path)
     }
-    library_dirs := [String]{}
+    ^library_dirs: [String]{}
     loop root in roots {
         loop libdir in ["lib", "lib64"] {
             path: files.join(files.join(files.join(stage, "store"), files.basename(root)), libdir)
@@ -287,12 +287,12 @@ no_nix_inner: fn(args: [String]) -> Never {
     // The step's own environment (PATH included) is the subject's; only the
     // staged library path is added, and it stays visible to nested children.
     subject: no_nix_stage_path(stage, subject_real)
-    argv := [String]{}
+    ^argv: [String]{}
     if subject_format == "elf" && subject_dynamic && loader_real != "" {
         argv = no_nix_via(staged_loader, library_path, [subject.copy()])
     } else { argv.push(subject.copy()) }
     loop argument in rest.slice(2, rest.len()) -> argv.push(argument.copy())
-    spec := process.cmd(argv).env("LD_LIBRARY_PATH", if previous == "" -> library_path else -> "{library_path}:{previous}")
+    ^spec: process.cmd(argv).env("LD_LIBRARY_PATH", if previous == "" -> library_path else -> "{library_path}:{previous}")
         .stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     if held.pop() == .Val(directory) -> spec = spec.keep_open(directory, at: 9)
     no_nix_exit(no_nix_wait(spec, subject))
@@ -311,7 +311,7 @@ no_nix_dynamic: fn(ldd: String, path: String, host_path: String) -> Bool {
 // `argv` through the staged loader, or as it is on a host without one.
 no_nix_via: fn(loader: String, library_path: String, argv: [String]) -> [String] {
     if loader == "" -> return argv.copy()
-    result := [String]{loader.copy()}
+    ^result: [String]{loader.copy()}
     if library_path != "" {
         result.push("--library-path")
         result.push(library_path.copy())
@@ -329,7 +329,7 @@ no_nix_trust_store: fn(bootstrap: String, mount_real: String, host_path: String)
         return
     }
     entries: files.list_dir(trust_store) ?? return
-    from_nix := false
+    ^from_nix: false
     loop entry in entries {
         if !entry.name.starts_with(".") && no_nix_real(entry.path).starts_with("/nix/store/") {
             from_nix = true
@@ -344,7 +344,7 @@ no_nix_trust_store: fn(bootstrap: String, mount_real: String, host_path: String)
         if entry.name.starts_with(".") -> next
         resolved: no_nix_real(entry.path)
         if resolved == "" || !files.is_file(resolved) -> next
-        bytes := files.read_bytes(resolved) ?? no_nix_fail("read {resolved}: {err}")
+        ^bytes: files.read_bytes(resolved) ?? no_nix_fail("read {resolved}: {err}")
         if bytes.len() > 0 && bytes[bytes.len() - 1] != (U8{10}) -> bytes.push(U8{10})
         files.write_bytes(files.join(trust_stage, entry.name), bytes) ?? no_nix_fail("copy {resolved}: {err}")
     }

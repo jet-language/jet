@@ -32,9 +32,13 @@ priv __measurement_from_relative: fn(value: Float, relative: Float) -> Measureme
     __measurement_new(value, math.abs_float(value) * math.abs_float(relative))
 }
 
-#Builtin.Role(.MeasurementValue) priv __measurement_value: fn(value: Measurement<Float>) -> Float Never! { value.value }
+#Builtin.Role(.MeasurementValue) priv __measurement_value: fn(value: Measurement<Float>) -> Float Never! {
+    value.value
+}
 
-#Builtin.Role(.MeasurementUncertainty) priv __measurement_uncertainty: fn(value: Measurement<Float>) -> Float Never! { value.uncertainty }
+#Builtin.Role(.MeasurementUncertainty) priv __measurement_uncertainty: fn(value: Measurement<Float>) -> Float Never! {
+    value.uncertainty
+}
 
 #Builtin.Role(.MeasurementAdd) priv __measurement_add: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     __measurement_new(left.value + right.value, math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
@@ -123,7 +127,7 @@ convert: fn(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> Never!
     if !math.is_finite(new_unit) || new_unit == (Float{0.0}) -> return m.copy()
     factor: Float{1.0} / new_unit
     if !math.is_finite(factor) -> return m.copy()
-    converted := scale(m, factor)
+    ^converted: scale(m, factor)
     if !math.is_finite(converted.value) || !math.is_finite(converted.uncertainty) -> return m.copy()
     converted
 }
@@ -170,7 +174,7 @@ kibibytes: fn(n: Float) -> Measurement<Float> Never! { from(n, 1024.0) }
 equals: fn(a: Measurement<Float>, b: Measurement<Float>) -> Bool Never! {
     left: to_si(a)
     right: to_si(b)
-    d := left - right
+    ^d: left - right
     if d < 0.0 -> d = -d
     d < 0.000000001
 }

@@ -15,14 +15,14 @@ use {
 
 jet_driver_plugin_facts: fn(request: JetDriverCompileRequest, inputs: [SemaRegistrationModuleInput], package_identity: String) -[FS]> SemaPluginInterfaceFacts {
     root: jet_driver_entry_root_path(request.authorized_sources)
-    artifacts := [String]{}
+    ^artifacts: [String]{}
     loop input in inputs {
         if input.package_identity == package_identity {
             jet_driver_plugin_artifacts(artifacts, input.program)
         }
     }
     artifacts.sort()
-    components := [SemaPluginComponent]{}
+    ^components: [SemaPluginComponent]{}
     loop artifact in artifacts {
         path: if root == "" || artifact.starts_with("/") -> artifact else -> plugin_facts_files.join(root, artifact)
         bytes: plugin_facts_files.read_bytes(path) ?? next
@@ -70,7 +70,7 @@ jet_driver_note_plugin_artifact: fn(tables: ASTTables, artifacts: ^[String], exp
             return
         }
         if ast_expr(tables, args[0].expr) == .Str(parts, _, _) {
-            text := ""
+            ^text: ""
             loop part in parts {
                 if part == .Lit(value) -> text = "{text}{value}" else {
                     return

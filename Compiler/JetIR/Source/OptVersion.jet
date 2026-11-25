@@ -146,13 +146,13 @@ ir_opt_version_loops: fn(m: IRModule, f: ^IRFunction, body: Int, report: ^IROptR
     ir_opt_compact(f)
     facts: ir_opt_facts(f)
     // Per slot the first and last instruction naming it.
-    first := [Int]{}
-    latest := [Int]{}
+    ^first: [Int]{}
+    ^latest: [Int]{}
     loop _ in 0..<f.slot_type.len() {
         first.push(f.op.len())
         latest.push(-1)
     }
-    reads := [Int]{}
+    ^reads: [Int]{}
     loop k in 0..<f.op.len() {
         ir_x64_reads_into(f, k, reads)
         written: ir_x64_write(f, k)
@@ -164,27 +164,27 @@ ir_opt_version_loops: fn(m: IRModule, f: ^IRFunction, body: Int, report: ^IROptR
         }
     }
     bool_row: ir_version_bool_row(m, f)
-    starts := [Int]{}
-    lasts := [Int]{}
-    bounds := [Int]{}
-    word_indices := [Int]{}
-    word_limits := [Int]{}
-    word_maxes := [Int]{}
+    ^starts: [Int]{}
+    ^lasts: [Int]{}
+    ^bounds: [Int]{}
+    ^word_indices: [Int]{}
+    ^word_limits: [Int]{}
+    ^word_maxes: [Int]{}
     // The IntBig guards of the guarded loops: the region each guards, its
     // slot, whether it tests at the head of every pass, and for a stepped
     // index the step it is tested to grow by and the bound slot its head
     // tests it against (ir_version_step; -1 for none), whether that head
     // is a range Loop's test, and the width it passes.
-    guard_region := [Int]{}
-    guard_slot := [Int]{}
-    guard_head := [Bool]{}
-    guard_step := [Int]{}
-    guard_limit := [Int]{}
-    guard_range := [Bool]{}
-    guard_bits := [Int]{}
-    budget := IR_VERSION_COPIES * body
+    ^guard_region: [Int]{}
+    ^guard_slot: [Int]{}
+    ^guard_head: [Bool]{}
+    ^guard_step: [Int]{}
+    ^guard_limit: [Int]{}
+    ^guard_range: [Bool]{}
+    ^guard_bits: [Int]{}
+    ^budget: IR_VERSION_COPIES * body
     // The End of the last loop met that an earlier versioning copied.
-    versioned := -1
+    ^versioned: -1
     loop at in 0..<f.op.len() {
         if f.op[at] != .Loop -> next
         // A loop inside one already copied goes with it.
@@ -204,7 +204,7 @@ ir_opt_version_loops: fn(m: IRModule, f: ^IRFunction, body: Int, report: ^IROptR
         last: if wrapped -> end + 1 else -> end
         size: last - start + 1
         bound: ir_version_bound(m, f, facts, at)
-        guards := [Int]{}
+        ^guards: [Int]{}
         if bound < 0 && bool_row >= 0 {
             guards = ir_version_guarded(m, f, facts, first, start, at, end)
         }
@@ -213,11 +213,11 @@ ir_opt_version_loops: fn(m: IRModule, f: ^IRFunction, body: Int, report: ^IROptR
         budget -= size
         // The Ints guarded once before the loop: those it never writes, and
         // an index it steps up by one of them.
-        others := [Int]{}
+        ^others: [Int]{}
         loop slot in guards {
             if !ir_version_writes(f, at, end, slot) -> others.push(slot)
         }
-        stepping := [IRVersionStep]{}
+        ^stepping: [IRVersionStep]{}
         loop slot in guards {
             stepped: if others.contains(slot) -> IRVersionStep{step: -1, bound: -1, range_head: false, reason: "-"} else -> ir_version_step(m, f, facts, at, end, slot, others)
             if stepped.reason == "" {
@@ -235,7 +235,7 @@ ir_opt_version_loops: fn(m: IRModule, f: ^IRFunction, body: Int, report: ^IROptR
             stepped: stepping[k]
             step: stepped.step
             promoted: accum.promoted.contains(slot)
-            bits := if narrow.contains(slot) -> IR_VERSION_PRODUCT_BITS else -> IR_VERSION_GUARD_BITS
+            ^bits: if narrow.contains(slot) -> IR_VERSION_PRODUCT_BITS else -> IR_VERSION_GUARD_BITS
             loop j in 0..<accum.narrow_slots.len() {
                 if accum.narrow_slots[j] == slot && accum.narrow_bits[j] < bits {
                     bits = accum.narrow_bits[j]
@@ -257,21 +257,21 @@ ir_opt_version_loops: fn(m: IRModule, f: ^IRFunction, body: Int, report: ^IROptR
         word_maxes.push(accum.word_max)
     }
     if starts.len() == 0 -> return 0
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    region := 0
-    at := 0
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^region: 0
+    ^at: 0
     loop at < f.op.len() {
         if region >= starts.len() || at != starts[region] {
             ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
             at += 1
             next
         }
-        pre := [Int]{}
-        pre_bits := [Int]{}
-        head := [Int]{}
-        signs := [Int]{}
-        limits := [Int]{}
-        range_head := false
+        ^pre: [Int]{}
+        ^pre_bits: [Int]{}
+        ^head: [Int]{}
+        ^signs: [Int]{}
+        ^limits: [Int]{}
+        ^range_head: false
         loop k in 0..<guard_slot.len() {
             if guard_region[k] != region -> next
             if guard_head[k] -> head.push(guard_slot[k]) else -> pre.push(guard_slot[k])
@@ -323,13 +323,13 @@ ir_opt_version_loops: fn(m: IRModule, f: ^IRFunction, body: Int, report: ^IROptR
 // invalid SSA form clears `checking`.
 ir_opt_version_function: fn(m: IRModule, f: ^IRFunction, body: Int, options: IROptOptions, lint: IRLintContext, checking: ^Bool, report: ^IROptReport) -> Bool Never! {
     if (options.verify && !checking) || !f.op.contains(IROp.Loop) {
-        _ := ir_opt_version_loops(m, f, body, report)
+        ^_: ir_opt_version_loops(m, f, body, report)
         if checking -> checking = ir_opt_lint(m, lint, f, "version", report)
         return false
     }
-    plain := f.copy()
+    ^plain: f.copy()
     slots: f.slot_type.len()
-    versioned := ir_opt_report(report.level)
+    ^versioned: ir_opt_report(report.level)
     copies: ir_opt_version_loops(m, f, body, versioned)
     if checking -> checking = ir_opt_lint(m, lint, f, "version", versioned)
     if copies == 0 || (options.verify && !checking) {
@@ -347,7 +347,7 @@ ir_opt_version_function: fn(m: IRModule, f: ^IRFunction, body: Int, options: IRO
         ir_opt_report_add(report, versioned)
         return true
     }
-    trial := ir_opt_report(report.level)
+    ^trial: ir_opt_report(report.level)
     ir_opt_ssa(m, plain, options, lint, trial)
     if trial.lint.len() == 0 && (!profitable || ir_version_gains(m, plain, slots) == 0) {
         f = plain.move()
@@ -363,8 +363,8 @@ ir_opt_version_function: fn(m: IRModule, f: ^IRFunction, body: Int, options: IRO
 // remains (e.g., constant guards folded one copy away).
 ir_version_profitable: fn(m: IRModule, f: IRFunction, slots: Int) -> Bool Never! {
     count: f.op.len()
-    new_pairs := 0
-    profitable := false
+    ^new_pairs: 0
+    ^profitable: false
     loop fall in 0..<count {
         if f.op[fall] != .Loop || f.b[fall] != IR_LOOP_VERSIONED -> next
         fall_loop_end: f.a[fall]
@@ -372,34 +372,32 @@ ir_version_profitable: fn(m: IRModule, f: IRFunction, slots: Int) -> Bool Never!
         wrapped: fall > 0 && f.op[fall - 1] == .Block && f.a[fall - 1] == fall_loop_end + 1
         fall_start: if wrapped -> fall - 1 else -> fall
         fall_end: if wrapped -> fall_loop_end + 1 else -> fall_loop_end
-        outer_end := fall_end + 1
+        ^outer_end: fall_end + 1
         loop outer_end < count && f.op[outer_end] == .Nop -> outer_end += 1
         if outer_end >= count || f.op[outer_end] != .End -> next
         outer: f.a[outer_end]
         if outer < 0 || outer >= fall_start || f.op[outer] != .Block -> next
-        fast := -1
-        is_new := false
+        ^fast: -1
+        ^is_new: false
         loop k in (outer + 1)..<fall_start {
             w: ir_x64_write(f, k)
             if w >= slots -> is_new = true
-            if fast < 0 && f.op[k] == .Loop && f.b[k] == IR_LOOP_VERSIONED {
-                fast = k
-            }
+            if fast < 0 && f.op[k] == .Loop && f.b[k] == IR_LOOP_VERSIONED -> fast = k
         }
         if fast < 0 || !is_new -> next
         fast_end: f.a[fast]
         if fast_end <= fast || fast_end >= fall_start -> next
         new_pairs += 1
-        fast_traps := 0
-        head_bigs := 0
-        fast_ifs := 0
+        ^fast_traps: 0
+        ^head_bigs: 0
+        ^fast_ifs: 0
         loop k in (fast + 1)..<fast_end {
             if ir_version_gain(m, f, k) -> fast_traps += 1
             if f.op[k] == .IntBig -> head_bigs += 1
             if f.op[k] == .If -> fast_ifs += 1
         }
-        fall_traps := 0
-        fall_ifs := 0
+        ^fall_traps: 0
+        ^fall_ifs: 0
         loop k in (fall + 1)..<fall_loop_end {
             if ir_version_gain(m, f, k) -> fall_traps += 1
             if f.op[k] == .If -> fall_ifs += 1
@@ -417,10 +415,10 @@ ir_version_profitable: fn(m: IRModule, f: IRFunction, slots: Int) -> Bool Never!
 // body's own, before versioning made more). Code outside every loop runs
 // once a call, so what a guard would gain there does not pay for its tests.
 ir_version_gains: fn(m: IRModule, f: IRFunction, slots: Int) -> Int Never! {
-    count := 0
+    ^count: 0
     // The open regions, true for a Loop.
-    open := [Bool]{}
-    loops := 0
+    ^open: [Bool]{}
+    ^loops: 0
     loop k in 0..<f.op.len() {
         if f.op[k] == {
             .Block | .If -> { open.push(false) }
@@ -460,7 +458,7 @@ ir_version_counted: fn(f: ^IRFunction, code: ^IROptCode, first: [Int], latest: [
     // The bound, then the index the loop starts from when it is named
     // before the loop (a constant start the ranges decide, and simplify
     // drops its two Ifs).
-    guarded := [Int]{bound}
+    ^guarded: [Int]{bound}
     if index < f.param_count || first[index] < start -> guarded.push(index)
     loop value in guarded {
         below: ir_slot(f, bool_row, .Temp, -1, line)
@@ -474,7 +472,7 @@ ir_version_counted: fn(f: ^IRFunction, code: ^IROptCode, first: [Int], latest: [
     // The first copy reads the inline bound and has slots of its own for
     // the values that live only in the loop, so that each copy's values
     // stay in it (a register each, and a constant stays one).
-    names := [Int]{}
+    ^names: [Int]{}
     loop slot in 0..<first.len() {
         own: slot >= f.param_count && slot != bound && first[slot] >= start && latest[slot] <= last
         names.push(if own -> -2 else -> -1)
@@ -521,7 +519,7 @@ ir_version_guarded_copy: fn(f: ^IRFunction, code: ^IROptCode, facts: OptFacts, f
     // The constructs of the region open at the loop's head: a head guard
     // leaves them and goes to the inner block's End.
     inner: loop_at - start + 1
-    names := ir_version_locals(f, facts, first, latest, start, last)
+    ^names: ir_version_locals(f, facts, first, latest, start, last)
     ir_opt_code_put(code, .Block, -1, -1, -1, -1, line)
     ir_opt_code_put(code, .Block, -1, -1, -1, -1, line)
     loop (k, slot) in pre -> ir_version_guard(f, code, slot, pre_bits[k], 0, bool_row, line)
@@ -585,8 +583,8 @@ ir_version_entry: fn(m: IRModule, f: ^IRFunction, bool_row: Int) -> Int Never! {
     count: f.op.len()
     if bool_row < 0 || count == 0 || count > IR_VERSION_BODY -> return 0
     if f.op[count - 1] != .Return && f.op[count - 1] != .Unreachable -> return 0
-    params := [Int]{}
-    reads := [Int]{}
+    ^params: [Int]{}
+    ^reads: [Int]{}
     loop k in 0..<count {
         if !ir_version_gain(m, f, k) -> next
         ir_x64_reads_into(f, k, reads)
@@ -601,11 +599,11 @@ ir_version_entry: fn(m: IRModule, f: ^IRFunction, bool_row: Int) -> Int Never! {
     line: f.code_line[0]
     // Both copies run from the entry to a return, so the first has every
     // slot but the parameters its own.
-    names := [Int]{}
+    ^names: [Int]{}
     loop _ in 0..<f.param_count -> names.push(-1)
     total: f.slot_type.len()
     loop slot in f.param_count..<total -> names.push(ir_version_slot(f, slot))
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     ir_opt_code_put(code, .Block, -1, -1, -1, -1, line)
     loop slot in params -> ir_version_guard(f, code, slot, IR_VERSION_GUARD_BITS, 0, bool_row, line)
     ir_version_copy(f, code, 0, count - 1, 1, names, 0)
@@ -659,10 +657,10 @@ ir_version_gain: fn(m: IRModule, f: IRFunction, k: Int) -> Bool Never! {
 // none when the loop holds another.
 ir_version_guarded: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: [Int], start: Int, at: Int, end: Int) -> [Int] Never! {
     // Per slot: 0 not yet named in the body, 1 first read, 2 first written.
-    state := [Int]{}
+    ^state: [Int]{}
     loop _ in 0..<f.slot_type.len() -> state.push(0)
-    out := [Int]{}
-    reads := [Int]{}
+    ^out: [Int]{}
+    ^reads: [Int]{}
     if ir_version_holds_loop(f, at, end) -> return [Int]{}
     loop k in (at + 1)..<end {
         ir_x64_reads_into(f, k, reads)
@@ -712,7 +710,7 @@ ir_version_not_stepped: fn(reason: String) -> IRVersionStep Never! {
 // `s <= 2`, while the copy's own slot of it, inline below its guard, keeps
 // it so for any step the guards pass.
 ir_version_step: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int, others: [Int]) -> IRVersionStep Never! {
-    step := -1
+    ^step: -1
     loop k in (at + 1)..<end {
         if ir_x64_write(f, k) != slot -> next
         add: ir_version_step_add(f, facts, at, k, slot)
@@ -771,7 +769,7 @@ ir_version_step_add: fn(f: IRFunction, facts: OptFacts, at: Int, k: Int, slot: I
 // (`<=` and `>=` for an inclusive range), which leaves at `slot >= n` (or
 // `slot > n`) once `step > 0`.
 ir_version_exit: fn(f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int, step: Int) -> Int Never! {
-    head := at + 1
+    ^head: at + 1
     loop head < end && (f.op[head] == .Load || f.op[head] == .Offset) -> head += 1
     if head + 1 >= end -> return -1
     test: f.op[head]
@@ -843,12 +841,12 @@ ir_version_length: fn(m: IRModule, f: IRFunction, facts: OptFacts, value: Int, s
 // past it. One row in `report` per factor that has limits or that the loop
 // carries.
 ir_version_narrow: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: Int, guards: [Int], others: [Int], stepping: [IRVersionStep], report: ^IROptReport) -> [Int] Never! {
-    narrow := [Int]{}
+    ^narrow: [Int]{}
     // Per factor (`seen`): whether some Mul narrows it, and whether the
     // loop carries it.
-    seen := [Int]{}
-    used := [Bool]{}
-    carried := [Bool]{}
+    ^seen: [Int]{}
+    ^used: [Bool]{}
+    ^carried: [Bool]{}
     loop k in (at + 1)..<end {
         if f.op[k] != .Mul || !ir_version_gain(m, f, k) -> next
         left: ir_version_factor(m, f, facts, at, end, f.a[k], guards, others, stepping)
@@ -857,7 +855,7 @@ ir_version_narrow: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end:
         sides: [IRVersionFactor]{left, right}
         loop side in sides {
             if !side.carried && side.limits.len() == 0 -> next
-            row := -1
+            ^row: -1
             loop (r, slot) in seen {
                 if slot == side.slot -> row = r
             }
@@ -907,8 +905,8 @@ ir_version_factor: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end:
     if others.contains(slot) {
         return IRVersionFactor{slot: slot, limits: [Int]{slot}, carried: false}
     }
-    stepped := ir_version_not_stepped("-")
-    guarded := false
+    ^stepped: ir_version_not_stepped("-")
+    ^guarded: false
     loop (g, other) in guards {
         if other == slot -> guarded = true
         if other == slot -> stepped = stepping[g]
@@ -921,7 +919,7 @@ ir_version_factor: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end:
         stepped = ir_version_step(m, f, facts, at, end, slot, others)
     }
     if stepped.reason != "" -> return IRVersionFactor{slot: slot, limits: [Int]{}, carried: true}
-    limits := [Int]{}
+    ^limits: [Int]{}
     if guarded -> limits.push(slot)
     if stepped.step >= 0 && others.contains(stepped.step) -> limits.push(stepped.step)
     if stepped.bound >= 0 && others.contains(stepped.bound) -> limits.push(stepped.bound)
@@ -950,8 +948,8 @@ ir_version_accum_none: fn() -> IRVersionAccum Never! {
 ir_version_accumulators: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: [Int], start: Int, at: Int, end: Int, guards: [Int], others: [Int], stepping: [IRVersionStep]) -> IRVersionAccum Never! {
     // First look for an Int stepped index whose bound is a constant or guarded
     // before the loop (`others`).
-    int_index := -1
-    int_limit := -1
+    ^int_index: -1
+    ^int_limit: -1
     loop (k, slot) in guards {
         if stepping[k].reason == "" && stepping[k].step >= 0 && stepping[k].bound >= 0 {
             int_index = slot
@@ -961,21 +959,21 @@ ir_version_accumulators: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: 
     }
     // Otherwise look for a signed 64-bit Word counted index whose bound is
     // invariant and defined before the loop.
-    word_index := -1
-    word_limit := -1
+    ^word_index: -1
+    ^word_limit: -1
     if int_index < 0 {
         found: ir_version_word_counter(m, f, facts, first, start, at, end)
         word_index = found.index
         word_limit = found.limit
     }
     if int_index < 0 && word_index < 0 -> return ir_version_accum_none()
-    out := ir_version_accum_none()
+    ^out: ir_version_accum_none()
     loop (k, slot) in guards {
         if others.contains(slot) || stepping[k].step >= 0 -> next
         max_delta: ir_version_accum_bound(m, f, facts, at, end, slot)
         if max_delta <= 0 -> next
-        delta_bits := 0
-        span := 1
+        ^delta_bits: 0
+        ^span: 1
         loop span < max_delta {
             span *= 2
             delta_bits += 1
@@ -1014,7 +1012,7 @@ IRVersionWordCounter: struct {
 // bound defined before `start`.
 ir_version_word_counter: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: [Int], start: Int, at: Int, end: Int) -> IRVersionWordCounter Never! {
     none: IRVersionWordCounter{index: -1, limit: -1}
-    head := at + 1
+    ^head: at + 1
     loop head < end && (f.op[head] == .Load || f.op[head] == .Offset) -> head += 1
     if head + 1 >= end || f.dst[head] < 0 -> return none
     test: f.op[head]
@@ -1029,12 +1027,16 @@ ir_version_word_counter: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: 
     if idx < 0 || limit < 0 || idx == limit -> return none
     idx_row: f.slot_type[idx]
     lim_row: f.slot_type[limit]
-    if m.types[idx_row].kind != .Word || !m.types[idx_row].signed || m.types[idx_row].size != 8 -> return none
-    if m.types[lim_row].kind != .Word || !m.types[lim_row].signed || m.types[lim_row].size != 8 -> return none
+    if m.types[idx_row].kind != .Word || !m.types[idx_row].signed || m.types[idx_row].size != 8 {
+        return none
+    }
+    if m.types[lim_row].kind != .Word || !m.types[lim_row].signed || m.types[lim_row].size != 8 {
+        return none
+    }
     if ir_version_writes(f, at, end, limit) -> return none
     if limit >= f.param_count && first[limit] >= start -> return none
     if idx >= f.param_count && first[idx] >= start -> return none
-    step := -1
+    ^step: -1
     loop k in (at + 1)..<end {
         if ir_x64_write(f, k) != idx -> next
         if step >= 0 || f.op[k] != .Add -> return none
@@ -1050,8 +1052,8 @@ ir_version_word_counter: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: 
 // when every write is an Add or Sub to `slot` by a statically bounded value;
 // -1 otherwise.
 ir_version_accum_bound: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int) -> Int Never! {
-    writes := 0
-    total := 0
+    ^writes: 0
+    ^total: 0
     cap: 1 << 30
     loop k in (at + 1)..<end {
         if ir_x64_write(f, k) != slot -> next
@@ -1142,7 +1144,7 @@ ir_version_writes: fn(f: IRFunction, at: Int, end: Int, slot: Int) -> Bool Never
 // Whether the loop `at` (its End `end`) holds another Loop outside its exit
 // arms (ir_version_exit_arm).
 ir_version_holds_loop: fn(f: IRFunction, at: Int, end: Int) -> Bool Never! {
-    k := at + 1
+    ^k: at + 1
     loop k < end {
         op: f.op[k]
         if op == .Loop -> return true
@@ -1162,7 +1164,7 @@ ir_version_holds_loop: fn(f: IRFunction, at: Int, end: Int) -> Bool Never! {
 // control that enters it never comes back out.
 ir_version_exit_arm: fn(f: IRFunction, from: Int, to: Int) -> Bool Never! {
     if to <= from || (f.op[to - 1] != .Return && f.op[to - 1] != .Unreachable) -> return false
-    open := 0
+    ^open: 0
     loop k in from..<to {
         op: f.op[k]
         if op == .Block || op == .Loop || op == .If -> open += 1
@@ -1177,11 +1179,11 @@ ir_version_exit_arm: fn(f: IRFunction, from: Int, to: Int) -> Bool Never! {
 // their first naming there and reaches every read (ir_opt_reaching_def):
 // values that live within one pass of the region (-1: kept).
 ir_version_locals: fn(f: ^IRFunction, facts: OptFacts, first: [Int], latest: [Int], start: Int, last: Int) -> [Int] Never! {
-    own := [Bool]{}
+    ^own: [Bool]{}
     loop slot in 0..<first.len() {
         own.push(slot >= f.param_count && first[slot] >= start && latest[slot] <= last && facts.defs[slot] == 1 && facts.def_at[slot] == first[slot])
     }
-    reads := [Int]{}
+    ^reads: [Int]{}
     loop k in start..<(last + 1) {
         ir_x64_reads_into(f, k, reads)
         loop slot in reads {
@@ -1190,7 +1192,7 @@ ir_version_locals: fn(f: ^IRFunction, facts: OptFacts, first: [Int], latest: [In
             }
         }
     }
-    names := [Int]{}
+    ^names: [Int]{}
     loop slot in 0..<own.len() { names.push(if own[slot] -> ir_version_slot(f, slot) else -> -1) }
     names
 }
@@ -1219,8 +1221,8 @@ ir_version_bound: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int) -> In
         return -1
     }
     if ir_version_holds_loop(f, at, end) -> return -1
-    left_written := false
-    right_written := false
+    ^left_written: false
+    ^right_written: false
     loop k in head..<end {
         written: ir_x64_write(f, k)
         if written == left -> left_written = true
@@ -1243,7 +1245,7 @@ ir_version_bound: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int) -> In
 // other value is unbounded, so a loop with only those has nothing to gain
 // from the test.)
 ir_version_derives: fn(m: IRModule, f: IRFunction, facts: OptFacts, head: Int, end: Int, index: Int) -> Bool Never! {
-    derived := [Int]{index}
+    ^derived: [Int]{index}
     loop k in head..<end {
         op: f.op[k]
         dst: f.dst[k]
@@ -1278,14 +1280,14 @@ ir_version_constant: fn(f: IRFunction, facts: OptFacts, slot: Int) -> Bool Never
 // Renamed call arguments go to fresh `args` rows (a row is read by one
 // instruction).
 ir_version_copy: fn(f: ^IRFunction, code: ^IROptCode, start: Int, last: Int, shift: Int, names: [Int], open_in: Int) Never! {
-    open := open_in
+    ^open: open_in
     loop k in start..<(last + 1) {
         op: f.op[k]
         if op == .End -> open -= 1
-        dst := f.dst[k]
-        a := f.a[k]
-        b := f.b[k]
-        c := f.c[k]
+        ^dst: f.dst[k]
+        ^a: f.a[k]
+        ^b: f.b[k]
+        ^c: f.c[k]
         if op == .Br && a >= open -> a += shift
         if op == .BrIf && b >= open -> b += shift
         if names.len() > 0 {
@@ -1319,10 +1321,10 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // loop's guards pass Ints of IR_VERSION_GUARD_BITS bits, so in the copy
 // 3x + 1 and t + 1 stay inline and wrap, with no overflow test.
 #Test("A guarded loop's arithmetic on its guarded Ints wraps") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("steps", "test:steps.jet.steps", "", "steps.jet", 1)
+    ^g: ir_function_new("steps", "test:steps.jet.steps", "", "steps.jet", 1)
     x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     g.result = exact
     t: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "t"), 2)
@@ -1330,24 +1332,24 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     three: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     tripled: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, t, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, three, 3, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Eq, done, x, one, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Mul, tripled, three, x, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, x, tripled, one, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, t, t, one, IR_OVERFLOW_TRAP, 5)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Const, t, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, three, 3, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Eq, done, x, one, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Mul, tripled, three, x, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, x, tripled, one, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, t, t, one, IR_OVERFLOW_TRAP, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, t, -1, -1, 6)
+    ^_: ir_emit(g, IROp.Return, -1, t, -1, -1, 6)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
@@ -1357,8 +1359,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     assert_eq(report.factors_declined, 1)
     assert_eq(report.steps[report.steps.len() - 1], "factor steps: declined (the Loop writes it other than as a stepped index)")
     f: m.functions[0]
-    guards := 0
-    wrapped := 0
+    ^guards: 0
+    ^wrapped: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .IntBig {
             assert_eq(f.b[at], IR_VERSION_GUARD_BITS)
@@ -1374,10 +1376,10 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // as in a caller that inlined the versioned body, copies neither again: not
 // the guarded loop of steps(x), nor the counted loop of count(n).
 #Test("A versioned loop is not versioned again") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("steps", "test:steps.jet.steps", "", "steps.jet", 1)
+    ^g: ir_function_new("steps", "test:steps.jet.steps", "", "steps.jet", 1)
     x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     g.result = exact
     t: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "t"), 2)
@@ -1385,43 +1387,43 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     three: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     tripled: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, t, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, three, 3, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Eq, done, x, one, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Mul, tripled, three, x, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, x, tripled, one, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, t, t, one, IR_OVERFLOW_TRAP, 5)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Const, t, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, three, 3, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Eq, done, x, one, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Mul, tripled, three, x, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, x, tripled, one, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, t, t, one, IR_OVERFLOW_TRAP, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, t, -1, -1, 6)
-    h := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
+    ^_: ir_emit(g, IROp.Return, -1, t, -1, -1, 6)
+    ^h: ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     n: ir_slot(h, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     h.result = exact
     i: ir_slot(h, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     step: ir_slot(h, exact, IRSlotKind.Temp, -1, 0)
     over: ir_slot(h, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(h, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(h, IROp.Const, step, 1, -1, -1, 2)
-    _ := ir_open(h, IROp.Block, 3)
-    _ := ir_open(h, IROp.Loop, 3)
-    _ := ir_emit(h, IROp.Ge, over, i, n, -1, 3)
-    _ := ir_emit(h, IROp.BrIf, -1, over, 1, -1, 3)
-    _ := ir_emit(h, IROp.Add, i, i, step, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(h, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(h, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(h, IROp.Const, step, 1, -1, -1, 2)
+    ^_: ir_open(h, IROp.Block, 3)
+    ^_: ir_open(h, IROp.Loop, 3)
+    ^_: ir_emit(h, IROp.Ge, over, i, n, -1, 3)
+    ^_: ir_emit(h, IROp.BrIf, -1, over, 1, -1, 3)
+    ^_: ir_emit(h, IROp.Add, i, i, step, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(h, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(h, 4)
     ir_end(h, 4)
-    _ := ir_emit(h, IROp.Return, -1, i, -1, -1, 5)
-    notes := ir_opt_report(2)
+    ^_: ir_emit(h, IROp.Return, -1, i, -1, -1, 5)
+    ^notes: ir_opt_report(2)
     bodies: [IRFunction]{g, h}
     loop body in bodies {
-        versioned := body.copy()
+        ^versioned: body.copy()
         assert_eq(ir_opt_version_loops(m, versioned, IR_VERSION_BODY, notes), 1)
-        loops := 0
+        ^loops: 0
         loop (at, op) in versioned.op {
             if op != .Loop -> next
             assert_eq(versioned.b[at], IR_LOOP_VERSIONED)
@@ -1437,37 +1439,37 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // walk(x, n, p) steps x by p until x >= n: x is a stepped index, guarded
 // once before the loop with n and p, so no pass tests it and x + p wraps.
 #Test("A stepped index is guarded once, before its loop") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("walk", "test:walk.jet.walk", "", "walk.jet", 1)
+    ^g: ir_function_new("walk", "test:walk.jet.walk", "", "walk.jet", 1)
     x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     p: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
     g.result = exact
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_open(g, IROp.Block, 2)
-    _ := ir_open(g, IROp.Loop, 2)
-    _ := ir_emit(g, IROp.Ge, done, x, n, -1, 2)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 2)
-    _ := ir_emit(g, IROp.Add, x, x, p, IR_OVERFLOW_TRAP, 3)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 3)
+    ^_: ir_open(g, IROp.Block, 2)
+    ^_: ir_open(g, IROp.Loop, 2)
+    ^_: ir_emit(g, IROp.Ge, done, x, n, -1, 2)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 2)
+    ^_: ir_emit(g, IROp.Add, x, x, p, IR_OVERFLOW_TRAP, 3)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 3)
     ir_end(g, 3)
     ir_end(g, 3)
-    _ := ir_emit(g, IROp.Return, -1, x, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Return, -1, x, -1, -1, 4)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     assert_eq(report.stepped, 1)
     assert_eq(report.steps[0], "stepped index walk: guarded before the Loop")
     f: m.functions[0]
-    guards := 0
-    in_loops := 0
-    wrapped := 0
+    ^guards: 0
+    ^in_loops: 0
+    ^wrapped: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .IntBig -> guards += 1
         if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_WRAP -> wrapped += 1
@@ -1488,14 +1490,14 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // before the loop with no bound of its own, so no pass tests it and i + 1
 // wraps.
 #Test("An index stepped up to a List's length is guarded once, before its loop") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
     list_tid: ir_module_intern_tid(m, Type.List{element: Type.Int})
     list: ir_intern_type(m, "test [Int]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Pointer, false, 64, ""))
     holder_tid: ir_module_intern_tid(m, Type.Named{name: "Holder"})
     holder: ir_intern_type(m, "test Holder", ir_layout(IRTypeKind.Aggregate, holder_tid, 48, 8, IRClass.Memory, false, 64, ""))
-    g := ir_function_new("sum", "test:sum.jet.sum", "", "sum.jet", 1)
+    ^g: ir_function_new("sum", "test:sum.jet.sum", "", "sum.jet", 1)
     h: ir_slot(g, holder, IRSlotKind.Param, ir_intern_name(m, "h"), 1)
     from: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "from"), 1)
     g.result = exact
@@ -1506,35 +1508,35 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     below: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
     sum: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Copy, i, from, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Offset, xs, h, 24, -1, 3)
-    _ := ir_emit(g, IROp.Load, n, xs, 0, -1, 3)
-    _ := ir_emit(g, IROp.Lt, below, i, n, -1, 3)
-    _ := ir_emit(g, IROp.Not, done, below, -1, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Add, sum, i, one, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Drop, -1, i, -1, -1, 4)
-    _ := ir_emit(g, IROp.Move, i, sum, -1, -1, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Copy, i, from, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Offset, xs, h, 24, -1, 3)
+    ^_: ir_emit(g, IROp.Load, n, xs, 0, -1, 3)
+    ^_: ir_emit(g, IROp.Lt, below, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.Not, done, below, -1, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Add, sum, i, one, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Drop, -1, i, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Move, i, sum, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(g, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     assert_eq(report.stepped, 1)
     assert(report.steps.contains("stepped index sum: guarded before the Loop"))
     f: m.functions[0]
-    lengths := 0
-    in_loops := 0
-    wrapped := 0
+    ^lengths: 0
+    ^in_loops: 0
+    ^wrapped: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .Load && f.c[at] == IR_LOAD_LENGTH -> lengths += 1
         if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_WRAP -> wrapped += 1
@@ -1553,10 +1555,10 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // IR_VERSION_PRODUCT_BITS before the loop, and in the copy i * w is at
 // most 2^60 and wraps. The total, written by the loop, keeps its test.
 #Test("A loop's Mul factors are guarded to the product width") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("rows", "test:rows.jet.rows", "", "rows.jet", 1)
+    ^g: ir_function_new("rows", "test:rows.jet.rows", "", "rows.jet", 1)
     i: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     w: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "w"), 1)
@@ -1565,31 +1567,31 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     product: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, t, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Mul, product, i, w, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, t, t, product, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 5)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Const, t, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Mul, product, i, w, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, t, t, product, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, t, -1, -1, 6)
+    ^_: ir_emit(g, IROp.Return, -1, t, -1, -1, 6)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     assert_eq(report.factors, 2)
     assert_eq(report.factors_declined, 0)
     f: m.functions[0]
-    narrow := 0
-    wrapped := 0
+    ^narrow: 0
+    ^wrapped: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .IntBig && f.b[at] == IR_VERSION_PRODUCT_BITS -> narrow += 1
         if f.op[at] == .Mul && f.c[at] == IR_OVERFLOW_WRAP -> wrapped += 1
@@ -1603,10 +1605,10 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // once p >= 1 and keeps i < n alone, so i + p wraps there; the loop as it
 // was keeps both tests and the overflow test.
 #Test("A range Loop's stepped index is guarded once, before its loop") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("walk", "test:walk.jet.walk", "", "walk.jet", 1)
+    ^g: ir_function_new("walk", "test:walk.jet.walk", "", "walk.jet", 1)
     x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     p: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
@@ -1616,35 +1618,35 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     t: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
     u: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
     i: ir_slot(g, exact, IRSlotKind.Local, -1, 0)
-    _ := ir_emit(g, IROp.Const, zero, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Gt, d, p, zero, -1, 2)
-    _ := ir_emit(g, IROp.Copy, i, x, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 2)
-    _ := ir_open(g, IROp.Loop, 2)
+    ^_: ir_emit(g, IROp.Const, zero, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Gt, d, p, zero, -1, 2)
+    ^_: ir_emit(g, IROp.Copy, i, x, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 2)
+    ^_: ir_open(g, IROp.Loop, 2)
     ir_open_if(g, d, 2)
-    _ := ir_emit(g, IROp.Lt, t, i, n, -1, 2)
+    ^_: ir_emit(g, IROp.Lt, t, i, n, -1, 2)
     ir_else(g, 2)
-    _ := ir_emit(g, IROp.Gt, t, i, n, -1, 2)
+    ^_: ir_emit(g, IROp.Gt, t, i, n, -1, 2)
     ir_end(g, 2)
-    _ := ir_emit(g, IROp.Not, u, t, -1, -1, 2)
-    _ := ir_emit(g, IROp.BrIf, -1, u, 1, -1, 2)
-    _ := ir_emit(g, IROp.Add, i, i, p, IR_OVERFLOW_TRAP, 3)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 3)
+    ^_: ir_emit(g, IROp.Not, u, t, -1, -1, 2)
+    ^_: ir_emit(g, IROp.BrIf, -1, u, 1, -1, 2)
+    ^_: ir_emit(g, IROp.Add, i, i, p, IR_OVERFLOW_TRAP, 3)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 3)
     ir_end(g, 3)
     ir_end(g, 3)
-    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Return, -1, i, -1, -1, 4)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     assert_eq(report.stepped, 1)
     f: m.functions[0]
-    wrapped := 0
-    trapped := 0
-    ifs := 0
+    ^wrapped: 0
+    ^trapped: 0
+    ^ifs: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_WRAP -> wrapped += 1
         if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_TRAP -> trapped += 1
@@ -1660,12 +1662,12 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // `n` is narrowed to 51 bits before the loop, so inside the fast loop there is
 // zero IntBig and both `total += delta` and `m += 3` wrap.
 #Test("A bounded U8 accumulator in a strided loop has no per-iteration IntBig guard") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
     byte_row: ir_scalar_type_row(m, Type.IntN{signed: false, bits: 8})
     word: ir_word_row(m)
-    g := ir_function_new("stride_accum", "test:stride.jet.stride_accum", "", "stride.jet", 1)
+    ^g: ir_function_new("stride_accum", "test:stride.jet.stride_accum", "", "stride.jet", 1)
     ptr: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "ptr"), 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     g.result = exact
@@ -1677,34 +1679,34 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     addr: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     b: ir_slot(g, byte_row, IRSlotKind.Temp, -1, 0)
     widen: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, i, 9, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, step, 3, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Move, raw_i, i, -1, -1, 4)
-    _ := ir_emit(g, IROp.Add, addr, ptr, raw_i, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Load, b, addr, 0, -1, 4)
-    _ := ir_emit(g, IROp.Copy, widen, b, -1, -1, 4)
-    _ := ir_emit(g, IROp.Add, total, total, widen, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, i, i, step, IR_OVERFLOW_TRAP, 5)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, i, 9, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, step, 3, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Move, raw_i, i, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Add, addr, ptr, raw_i, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Load, b, addr, 0, -1, 4)
+    ^_: ir_emit(g, IROp.Copy, widen, b, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Add, total, total, widen, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, i, i, step, IR_OVERFLOW_TRAP, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
+    ^_: ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     f: m.functions[0]
-    in_loops := 0
-    narrow51 := 0
-    wrapped_int_adds := 0
+    ^in_loops: 0
+    ^narrow51: 0
+    ^wrapped_int_adds: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .IntBig && f.b[at] == 51 -> narrow51 += 1
         if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_WRAP && m.types[f.slot_type[f.dst[at]]].kind == .Int {
@@ -1723,7 +1725,7 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // A counted loop with a conditional +1 accumulator (`if b == 111 -> count += 1`)
 // bounded by a List length proves `count` inline in OptRange without any IntBig guard.
 #Test("A conditional +1 accumulator bounded by a List length wraps without IntBig") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
     byte_ty: Type.IntN{signed: false, bits: 8}
@@ -1731,7 +1733,7 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     word: ir_word_row(m)
     list_tid: ir_module_intern_tid(m, Type.List{element: byte_ty})
     list: ir_intern_type(m, "test [U8]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Pointer, false, 64, ""))
-    g := ir_function_new("cond_count", "test:count.jet.cond_count", "", "count.jet", 1)
+    ^g: ir_function_new("cond_count", "test:count.jet.cond_count", "", "count.jet", 1)
     xs: ir_slot(g, list, IRSlotKind.Param, ir_intern_name(m, "xs"), 1)
     g.result = exact
     count: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "count"), 2)
@@ -1745,38 +1747,38 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     addr: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     b: ir_slot(g, byte_row, IRSlotKind.Temp, -1, 0)
     hit: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, count, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Load, n, xs, 0, -1, 2)
-    _ := ir_emit(g, IROp.Load, data, xs, 16, -1, 2)
-    _ := ir_emit(g, IROp.Const, one_w, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one_i, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, target, 111, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Add, addr, data, i, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Load, b, addr, 0, -1, 4)
-    _ := ir_emit(g, IROp.Eq, hit, b, target, -1, 4)
+    ^_: ir_emit(g, IROp.Const, count, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Load, n, xs, 0, -1, 2)
+    ^_: ir_emit(g, IROp.Load, data, xs, 16, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one_w, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one_i, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, target, 111, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Add, addr, data, i, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Load, b, addr, 0, -1, 4)
+    ^_: ir_emit(g, IROp.Eq, hit, b, target, -1, 4)
     ir_open_if(g, hit, 4)
-    _ := ir_emit(g, IROp.Add, count, count, one_i, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, count, count, one_i, IR_OVERFLOW_TRAP, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Add, i, i, one_w, IR_OVERFLOW_WRAP, 5)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Add, i, i, one_w, IR_OVERFLOW_WRAP, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, count, -1, -1, 6)
+    ^_: ir_emit(g, IROp.Return, -1, count, -1, -1, 6)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     f: m.functions[0]
-    int_bigs := 0
-    wrapped_counts := 0
+    ^int_bigs: 0
+    ^wrapped_counts: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .IntBig -> int_bigs += 1
         if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_WRAP && m.types[f.slot_type[f.dst[at]]].kind == .Int {
@@ -1791,11 +1793,11 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // at the head with IntBig cannot make `total + elem` wrap because `elem` is
 // loaded from memory, so OptVersion reverts to the plain unversioned loop.
 #Test("A loop whose loaded operand prevents wrapping is not unprofitably versioned") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
     word: ir_word_row(m)
-    g := ir_function_new("load_accum", "test:load.jet.load_accum", "", "load.jet", 1)
+    ^g: ir_function_new("load_accum", "test:load.jet.load_accum", "", "load.jet", 1)
     ptr: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "ptr"), 1)
     n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     g.result = exact
@@ -1807,33 +1809,33 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     off: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     addr: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     elem: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, eight, 8, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Mul, off, i, eight, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Add, addr, ptr, off, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Load, elem, addr, 0, -1, 4)
-    _ := ir_emit(g, IROp.Add, total, total, elem, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 5)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, eight, 8, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Mul, off, i, eight, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Add, addr, ptr, off, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Load, elem, addr, 0, -1, 4)
+    ^_: ir_emit(g, IROp.Add, total, total, elem, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
+    ^_: ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     f: m.functions[0]
-    loops := 0
-    int_bigs := 0
+    ^loops: 0
+    ^int_bigs: 0
     loop op in f.op {
         if op == .Loop -> loops += 1
         if op == .IntBig -> int_bigs += 1
@@ -1841,4 +1843,3 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     assert_eq(loops, 1)
     assert_eq(int_bigs, 0)
 }
-

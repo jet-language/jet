@@ -59,7 +59,7 @@ ParsedStateList: struct {
 //   `Open: Draft | Confirmed`     a named group of states
 // After `->`, commas join the targets until the line ends.
 parser_state_list: fn(state: ^JetParserState) -> ParsedStateList {
-    list := ParsedStateList{states: [NamedSpan]{}, arrows: [StateArrow]{}, groups: [StateGroup]{}}
+    ^list: ParsedStateList{states: [NamedSpan]{}, arrows: [StateArrow]{}, groups: [StateGroup]{}}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
         if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
             parser_bump(state)
@@ -70,7 +70,7 @@ parser_state_list: fn(state: ^JetParserState) -> ParsedStateList {
         if {
             parser_current_kind(state) == TOKEN_COLON -> {
                 parser_bump(state)
-                members := [NamedSpan]{parser_state_name(state, "for a state in a group")}
+                ^members: [NamedSpan]{parser_state_name(state, "for a state in a group")}
                 loop parser_current_kind(state) == TOKEN_PIPE {
                     parser_bump(state)
                     members.push(parser_state_name(state, "after `|` in a state group"))
@@ -79,7 +79,7 @@ parser_state_list: fn(state: ^JetParserState) -> ParsedStateList {
                 list.groups.push(StateGroup{name: head, members: members, span: span})
             }
             else -> {
-                targets := [NamedSpan]{}
+                ^targets: [NamedSpan]{}
                 if parser_current_kind(state) == TOKEN_UNIFIED_ARROW {
                     parser_bump(state)
                     targets.push(parser_state_name(state, "after `->` in a state list"))
@@ -106,8 +106,8 @@ parser_state_name: fn(state: ^JetParserState, context: String) -> NamedSpan {
 
 parser_state_dotted_name: fn(state: ^JetParserState, context: String) -> NamedSpan {
     first: parser_expect_name(state, context)
-    name := parser_value(state, first)
-    end := first.span
+    ^name: parser_value(state, first)
+    ^end: first.span
     loop parser_current_kind(state) == TOKEN_DOT {
         parser_bump(state)
         part: parser_expect_name(state, "after `.` in a declaration type name")

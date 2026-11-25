@@ -69,7 +69,7 @@ listed: fn(paths: [String]) -> String { paths.map(fn(path) { "{path}\n" }).join(
 
 // Ends job `job` with exit status `code` and output `text`.
 finish: fn(job: String, code: Int, text: String) {
-    done := files.best_effort()
+    ^done: files.best_effort()
     done.remove("{job}/applied")
     files.write("{job}/out", "{text}\n")
     files.write("{job}/rc", "{code}\n")
@@ -77,20 +77,20 @@ finish: fn(job: String, code: Int, text: String) {
 }
 
 revert_job: fn(l: Lander, job: String) {
-    _ := command(l, Sh{"git apply -R {"{job}/patch"}"}).run()
+    ^_: command(l, Sh{"git apply -R {"{job}/patch"}"}).run()
     loop path in files.read("{job}/files").lines() {
         target: "{l.worktree}/{path}"
         if path != "" && files.exists(target) && !quiet(l, Sh{"git ls-files --error-unmatch -- {path}"}) {
             files.remove(target)
         }
     }
-    done := files.best_effort()
+    ^done: files.best_effort()
     done.remove("{job}/applied")
 }
 
 // The queue's job directories, sorted.
 jobs_in: fn(queue: String) -> [String] {
-    names := files.list_dir_or(queue, []).map(fn(entry) { entry.name })
+    ^names: files.list_dir_or(queue, []).map(fn(entry) { entry.name })
     names.sort()
     names.filter(fn(name) { !name.starts_with(".") }).map(fn(name) { "{queue}/{name}" }).filter(fn(job) { files.is_dir(job) })
 }
@@ -102,11 +102,11 @@ interrupted: fn(l: Lander) {
     if !files.is_dir(l.worktree) {
         return
     }
-    queued := jobs_in(l.queue)
+    ^queued: jobs_in(l.queue)
     queued.reverse()
     loop job in queued.filter(fn(job) { files.exists("{job}/applied") }) {
         paths: files.read("{job}/files").lines()
-        _ := quiet(l, Sh{"git reset -q --"}.extend(paths.copy()))
+        ^_: quiet(l, Sh{"git reset -q --"}.extend(paths.copy()))
         if !quiet(l, Sh{"git diff --quiet HEAD --"}.extend(paths.copy())) || command(l, Sh{"git ls-files --others --exclude-standard --"}.extend(paths)).run().output != "" {
             revert_job(l, job)
         }
@@ -162,12 +162,12 @@ pre_failed: fn(pre: ProcessReceipt) -> String {
 commit_job: fn(l: Lander, stop: Shared<Interrupt>, job: String) {
     checkpoint(l, stop)
     paths: files.read("{job}/files").lines()
-    _ := command(l, Sh{"git add -A -f --"}.extend(paths.copy())).run()
+    ^_: command(l, Sh{"git add -A -f --"}.extend(paths.copy())).run()
     if command(l, Sh{"git commit -q -F {"{job}/msg"} --"}.extend(paths.copy())).run().code == 0 {
         finish(job, 0, "lane-commit: {short_head(l)} by {files.read("{job}/lane").trim()}")
         return
     }
-    _ := command(l, Sh{"git reset -q --"}.extend(paths)).run()
+    ^_: command(l, Sh{"git reset -q --"}.extend(paths)).run()
     revert_job(l, job)
     finish(job, 6, "lane-commit: commit failed; reverted")
 }
@@ -231,8 +231,8 @@ drain: fn(l: Lander, stop: Shared<Interrupt>) {
     if !files.is_dir(l.worktree) {
         return
     }
-    batch := [String]{}
-    union := [String]{}
+    ^batch: [String]{}
+    ^union: [String]{}
     loop job in jobs_in(l.queue) {
         if !files.exists("{job}/ready") || files.exists("{job}/result") -> next
         // A job whose caller died is dropped, never landed.
@@ -287,7 +287,7 @@ drain_trapped: fn(l: Lander) {
     // Copies of a shared value share its cell.
     seen: stop.copy()
     watcher: task {
-        _ := arrivals.receive() ?? return
+        ^_: arrivals.receive() ?? return
         edit: seen.guard_edit()
         edit.value.signaled = true
         halt(edit.value)

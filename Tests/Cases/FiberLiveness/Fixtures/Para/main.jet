@@ -40,9 +40,9 @@ busy: fn(n: Int) -> Int {
 // The most spans open at one instant: at each span's start, those that
 // began no later and have not ended.
 overlap: fn(spans: [Span]) -> Int {
-    most := 0
+    ^most: 0
     loop span in spans {
-        open := 0
+        ^open: 0
         loop other in spans {
             if other.start <= span.start && span.start < other.end -> open += 1
         }
@@ -52,7 +52,7 @@ overlap: fn(spans: [Span]) -> Int {
 }
 
 run: fn() {
-    values := [Int]{}
+    ^values: [Int]{}
     loop i in 0..<64 -> values.push(i)
     few: [Int]{0, 1, 2, 3, 4, 5, 6, 7}
     origin: time.instant()
@@ -65,10 +65,10 @@ run: fn() {
     // 128 ms of CPU on at most two carriers: 64 ms of wall time or more,
     // less 4 ms for the clock reads around the items.
     unlimited: time.instant()
-    _ := values.para_map(fn(n: Int) { busy(n) })
+    ^_: values.para_map(fn(n: Int) { busy(n) })
     worked: time.instant().difference(unlimited).ns
     limited: time.instant()
-    _ := values.para_map(fn(n: Int) { busy(n) }, limit: 16)
+    ^_: values.para_map(fn(n: Int) { busy(n) }, limit: 16)
     capped: time.instant().difference(limited).ns
     print("busy items: at most 2 at once {worked >= 60_000_000 && capped >= 60_000_000}")
 

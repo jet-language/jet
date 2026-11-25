@@ -61,24 +61,24 @@ ssl_get_mode_from_transform: fn(t: ssldefs.SSLTransform) -> SSLMode Never! {
 /// its timing (mbedtls_ct_hmac). The secret length is a word, compared
 /// under masks only.
 ssl_ct_hmac: fn(key: hashes.HMACKey, add_data: [U8], data: [#Secret U8], doff: Int, data_len_secret: #Secret U64, min_len: Int, max_len: Int) -> [U8] Never! {
-    ctx := hashes.hash_clone(key.inner)
+    ^ctx: hashes.hash_clone(key.inner)
     hashes.hash_update(ctx, add_data)
     hashes.hash_update_range(ctx, data, doff, min_len)
     size: hashes.md_size(key.md)
-    output := [U8]{}
+    ^output: [U8]{}
     loop _ in 0..<size -> output.push(U8{0x21})
     loop offset in min_len..max_len {
-        aux := hashes.hash_clone(ctx)
-        aux_out := hashes.hash_finish(aux)
+        ^aux: hashes.hash_clone(ctx)
+        ^aux_out: hashes.hash_finish(aux)
         ctime.memcpy_if(ctime.uint_eq(U64{offset}, data_len_secret), output, 0, aux_out, 0, size)
         ssldefs.ssl_wipe(aux_out)
         if offset < max_len -> hashes.hash_update_range(ctx, data, doff + offset, 1)
     }
     // The context finishes, which wipes it, before the outer hash; the
     // inner hash is wiped once absorbed.
-    rest := hashes.hash_finish(ctx)
+    ^rest: hashes.hash_finish(ctx)
     ssldefs.ssl_wipe(rest)
-    outer := hashes.hash_clone(key.outer)
+    ^outer: hashes.hash_clone(key.outer)
     hashes.hash_update(outer, output)
     ssldefs.ssl_wipe(output)
     hashes.hash_finish(outer)
@@ -87,7 +87,7 @@ ssl_ct_hmac: fn(key: hashes.HMACKey, add_data: [U8], data: [#Secret U8], doff: I
 /// HMAC(key, a || buf[off..<off+len]): the record MAC of a non-CBC-decrypt
 /// path (mbedtls_md_hmac_update twice, then hmac_finish).
 ssl_record_mac: fn(key: hashes.HMACKey, add_data: [U8], buf: [U8], off: Int, len: Int) -> [U8] Never! {
-    inner := hashes.hash_clone(key.inner)
+    ^inner: hashes.hash_clone(key.inner)
     hashes.hash_update(inner, add_data)
     hashes.hash_update_range(inner, buf, off, len)
     hashes.hmac_finish(key, inner)
@@ -154,7 +154,7 @@ ssl_build_inner_plaintext: fn(buf: ^[U8], off: Int, len: Int, remaining: Int, re
 /// zeros.
 ssl_parse_inner_plaintext: fn(rec: ^ssldefs.SSLRecord, buf: [U8]) -> Bool Never! {
     data: rec.buf_start + rec.data_offset
-    remaining := rec.data_len
+    ^remaining: rec.data_len
     loop {
         if remaining == 0 -> return false
         remaining -= 1
@@ -169,8 +169,8 @@ ssl_parse_inner_plaintext: fn(rec: ^ssldefs.SSLRecord, buf: [U8]) -> Bool Never!
 /// (ssl_extract_add_data_from_record), in RFC 9146's form when the
 /// record carries a CID (MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT 0).
 ssl_extract_add_data_from_record: fn(rec: ssldefs.SSLRecord, tls_version: Int, taglen: Int) -> [U8] Never! {
-    out := [U8]{}
-    ad_len_field := rec.data_len
+    ^out: [U8]{}
+    ^ad_len_field: rec.data_len
     if tls_version == ssldefs.SSL_VERSION_TLS1_3 -> ad_len_field += taglen else if rec.cid_len != 0 {
         loop _ in 0..<8 -> out.push(U8{0xFF})
         out.push(ssldefs.ssl_byte(rec.rtype))
@@ -193,7 +193,7 @@ ssl_transform_aead_dynamic_iv_is_explicit: fn(t: ssldefs.SSLTransform) -> Bool N
 /// IV := (fixed_iv || 0) XOR (0 || dynamic_iv) over 12 bytes
 /// (ssl_build_record_nonce).
 ssl_build_record_nonce: fn(fixed_iv: [U8], fixed_iv_len: Int, dynamic_iv: [U8], doff: Int, dynamic_iv_len: Int) -> [U8] Never! {
-    iv := ssldefs.ssl_zeros(12)
+    ^iv: ssldefs.ssl_zeros(12)
     loop i in 0..<fixed_iv_len -> iv[i] = fixed_iv[i]
     base: 12 - dynamic_iv_len
     loop i in 0..<dynamic_iv_len -> iv[base + i] = iv[base + i] ~ dynamic_iv[doff + i]
@@ -213,8 +213,8 @@ ssl_encrypt_buf: fn<R: RNG>(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, b
         return Err(.InternalError)
     }
     mode: ssl_get_mode_from_transform(t)
-    data := rec.buf_start + rec.data_offset
-    post_avail := rec.buf_len - (rec.data_len + rec.data_offset)
+    ^data: rec.buf_start + rec.data_offset
+    ^post_avail: rec.buf_len - (rec.data_len + rec.data_offset)
     if rec.data_len > ssldefs.SSL_OUT_CONTENT_LEN -> return Err(.BadInputData)
     if t.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
         padding: ssl_compute_padding_length(rec.data_len, ssldefs.SSL_CID_TLS1_3_PADDING_GRANULARITY)
@@ -233,11 +233,11 @@ ssl_encrypt_buf: fn<R: RNG>(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, b
         rec.rtype = ssldefs.SSL_MSG_CID
     }
     post_avail = rec.buf_len - (rec.data_len + rec.data_offset)
-    auth_done := 0
+    ^auth_done: 0
     if mode == .Stream || mode == .CBC {
         if post_avail < t.maclen -> return Err(.BufferTooSmall)
         add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
-        mac := ssl_mac_of(t.md_enc, add_data, buf, data, rec.data_len) ?? return Err(.InternalError)
+        ^mac: ssl_mac_of(t.md_enc, add_data, buf, data, rec.data_len) ?? return Err(.InternalError)
         ssldefs.ssl_copy_into(buf, data + rec.data_len, mac, 0, t.maclen)
         ssldefs.ssl_wipe(mac)
         rec.data_len += t.maclen
@@ -251,11 +251,11 @@ ssl_encrypt_buf: fn<R: RNG>(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, b
             if post_avail < t.taglen -> return Err(.BufferTooSmall)
             explicit: ssl_transform_aead_dynamic_iv_is_explicit(t)
             // The dynamic IV is the record sequence number in every case.
-            iv := ssl_build_record_nonce(t.iv_enc, t.fixed_ivlen, rec.ctr, 0, 8)
+            ^iv: ssl_build_record_nonce(t.iv_enc, t.fixed_ivlen, rec.ctr, 0, 8)
             add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
-            plain := ssldefs.ssl_bytes_of(buf, data, rec.data_len)
-            sealed := [U8]{}
-            if ^t.cipher_enc == {
+            ^plain: ssldefs.ssl_bytes_of(buf, data, rec.data_len)
+            ^sealed: [U8]{}
+            if t.cipher_enc.in_place() == {
                 .Val(c) -> sealed = layer.cipher_auth_encrypt_ext(c, ssldefs.ssl_bytes_of(iv, 0, t.ivlen), add_data, plain, t.taglen) ?? return Err(.Cipher(err))
                 None -> return Err(.InternalError)
             }
@@ -272,7 +272,7 @@ ssl_encrypt_buf: fn<R: RNG>(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, b
             auth_done += 1
         }
         .CBC | .CBCETM -> {
-            padlen := t.ivlen - (rec.data_len + 1) %% t.ivlen
+            ^padlen: t.ivlen - (rec.data_len + 1) %% t.ivlen
             if padlen == t.ivlen -> padlen = 0
             if post_avail < padlen + 1 -> return Err(.BufferTooSmall)
             ssldefs.ssl_fill(buf, data + rec.data_len, padlen + 1, ssldefs.ssl_byte(padlen))
@@ -282,9 +282,9 @@ ssl_encrypt_buf: fn<R: RNG>(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, b
             if rec.data_offset < t.ivlen -> return Err(.BufferTooSmall)
             if !rng.fill(t.iv_enc) -> return Err(.RandomFailed)
             ssldefs.ssl_copy_into(buf, data - t.ivlen, t.iv_enc, 0, t.ivlen)
-            plain := ssldefs.ssl_bytes_of(buf, data, rec.data_len)
-            enc := [U8]{}
-            if ^t.cipher_enc == {
+            ^plain: ssldefs.ssl_bytes_of(buf, data, rec.data_len)
+            ^enc: [U8]{}
+            if t.cipher_enc.in_place() == {
                 .Val(c) -> enc = layer.cipher_crypt(c, ssldefs.ssl_bytes_of(t.iv_enc, 0, t.ivlen), plain) ?? return Err(.Cipher(err))
                 None -> return Err(.InternalError)
             }
@@ -298,7 +298,7 @@ ssl_encrypt_buf: fn<R: RNG>(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, b
                 // MAC(MAC_write_key, add_data, IV, ENC(content + padding + padding_length)).
                 if post_avail < t.maclen -> return Err(.BufferTooSmall)
                 add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
-                mac := ssl_mac_of(t.md_enc, add_data, buf, data, rec.data_len) ?? return Err(.InternalError)
+                ^mac: ssl_mac_of(t.md_enc, add_data, buf, data, rec.data_len) ?? return Err(.InternalError)
                 ssldefs.ssl_copy_into(buf, data + rec.data_len, mac, 0, t.maclen)
                 ssldefs.ssl_wipe(mac)
                 rec.data_len += t.maclen
@@ -318,25 +318,25 @@ ssl_decrypt_buf: fn(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, buf: ^[U8
     if rec.buf_len < rec.data_offset || rec.buf_len - rec.data_offset < rec.data_len {
         return Err(.InternalError)
     }
-    data := rec.buf_start + rec.data_offset
+    ^data: rec.buf_start + rec.data_offset
     mode: ssl_get_mode_from_transform(t)
     if rec.cid_len != t.in_cid.len() || !ssldefs.ssl_range_eq(rec.cid, 0, t.in_cid, 0, rec.cid_len) {
         return Err(.UnexpectedCID)
     }
-    auth_done := 0
+    ^auth_done: 0
     // A CBC record's length before the padding comes off: public, where
     // the padding length and the content length after it (`content_len`)
     // are secret until the MAC verdict. They are words under masks: an
     // Int's arithmetic tests its range.
-    cbc := false
-    cbc_len := 0
-    content_len := U64{0}
-    correct := ctime.ct_true()
+    ^cbc: false
+    ^cbc_len: 0
+    ^content_len: U64{0}
+    ^correct: ctime.ct_true()
     if mode == {
         // The only stream cipher is NULL, off in this configuration.
         .Stream -> return Err(.InternalError)
         .AEAD -> {
-            dynamic_iv := rec.ctr.copy()
+            ^dynamic_iv: rec.ctr.copy()
             if ssl_transform_aead_dynamic_iv_is_explicit(t) {
                 if rec.data_len < 8 -> return Err(.InvalidMac)
                 dynamic_iv = ssldefs.ssl_bytes_of(buf, data, 8)
@@ -346,11 +346,11 @@ ssl_decrypt_buf: fn(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, buf: ^[U8
             }
             if rec.data_len < t.taglen -> return Err(.InvalidMac)
             rec.data_len -= t.taglen
-            iv := ssl_build_record_nonce(t.iv_dec, t.fixed_ivlen, dynamic_iv, 0, 8)
+            ^iv: ssl_build_record_nonce(t.iv_dec, t.fixed_ivlen, dynamic_iv, 0, 8)
             add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
-            sealed := ssldefs.ssl_bytes_of(buf, data, rec.data_len + t.taglen)
-            plain := [U8]{}
-            if ^t.cipher_dec == {
+            ^sealed: ssldefs.ssl_bytes_of(buf, data, rec.data_len + t.taglen)
+            ^plain: [U8]{}
+            if t.cipher_dec.in_place() == {
                 .Val(c) -> {
                     if layer.cipher_auth_decrypt_ext(c, ssldefs.ssl_bytes_of(iv, 0, t.ivlen), add_data, sealed, t.taglen) == {
                         .Ok(p) -> { plain = p }
@@ -376,7 +376,7 @@ ssl_decrypt_buf: fn(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, buf: ^[U8
             if mode == .CBCETM {
                 rec.data_len -= t.maclen
                 add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
-                mac_expect := ssl_mac_of(t.md_dec, add_data, buf, data, rec.data_len) ?? return Err(.InternalError)
+                ^mac_expect: ssl_mac_of(t.md_dec, add_data, buf, data, rec.data_len) ?? return Err(.InternalError)
                 differs: ctime.memcmp(buf, data + rec.data_len, mac_expect, 0, t.maclen) != 0
                 ssldefs.ssl_wipe(mac_expect)
                 if differs -> return Err(.InvalidMac)
@@ -387,9 +387,9 @@ ssl_decrypt_buf: fn(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, buf: ^[U8
             data += t.ivlen
             rec.data_offset += t.ivlen
             rec.data_len -= t.ivlen
-            enc := ssldefs.ssl_bytes_of(buf, data, rec.data_len)
-            dec := [U8]{}
-            if ^t.cipher_dec == {
+            ^enc: ssldefs.ssl_bytes_of(buf, data, rec.data_len)
+            ^dec: [U8]{}
+            if t.cipher_dec.in_place() == {
                 .Val(c) -> dec = layer.cipher_crypt(c, ssldefs.ssl_bytes_of(t.iv_dec, 0, t.ivlen), enc) ?? return Err(.Cipher(err))
                 None -> return Err(.InternalError)
             }
@@ -406,7 +406,7 @@ ssl_decrypt_buf: fn(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, buf: ^[U8
             padlen: wrapping(ctime.if_else_0(ge, pad) + U64{1})
             // Always read min(256, plaintext length) bytes at the end of
             // the plaintext, counting only the last padlen for the check.
-            pad_count := U64{0}
+            ^pad_count: U64{0}
             padding_idx: wrapping(len - padlen)
             num_checks: if cbc_len <= 256 -> cbc_len else -> 256
             start_idx: cbc_len - num_checks
@@ -431,16 +431,16 @@ ssl_decrypt_buf: fn(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, buf: ^[U8
         // The additional data's length field is the secret length, its
         // two bytes written from the word.
         rec.data_len = max_len
-        add_data := ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
+        ^add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
         at: add_data.len() - 2
         add_data[at] = wrapping(U8{content_len >> 8})
         add_data[at + 1] = wrapping(U8{content_len})
-        mac_expect := [U8]{}
+        ^mac_expect: [U8]{}
         if t.md_dec == {
             .Val(key) -> mac_expect = ssl_ct_hmac(key, add_data, buf, data, content_len, min_len, max_len)
             None -> return Err(.InternalError)
         }
-        mac_peer := ssldefs.ssl_zeros(ssldefs.SSL_MAC_ADD)
+        ^mac_peer: ssldefs.ssl_zeros(ssldefs.SSL_MAC_ADD)
         ctime.memcpy_offset(mac_peer, 0, buf, data, content_len, min_len, max_len, t.maclen)
         if ctime.memcmp(mac_peer, 0, mac_expect, 0, t.maclen) != 0 -> correct = ctime.ct_false()
         auth_done += 1
@@ -530,7 +530,7 @@ ssl_set_in_hsfraglen: fn(ssl: ^ssldefs.SSLContext, in_hsfraglen: Int) ssldefs.SS
 /// transport's form; DTLS versions are the one's complement of their
 /// offset from 1.0 (mbedtls_ssl_write_version).
 ssl_write_version: fn(buf: ^[U8], off: Int, transport: Int, tls_version: Int) Never! {
-    formatted := tls_version
+    ^formatted: tls_version
     if transport == ssldefs.SSL_TRANSPORT_DATAGRAM {
         sub: if tls_version == 0x0302 -> 0x0202 else -> 0x0201
         formatted = ((tls_version - sub) ~ 0xFFFF) & 0xFFFF
@@ -541,7 +541,7 @@ ssl_write_version: fn(buf: ^[U8], off: Int, transport: Int, tls_version: Int) Ne
 /// The protocol version of the record version at buf[off]
 /// (mbedtls_ssl_read_version).
 ssl_read_version: fn(buf: [U8], off: Int, transport: Int) -> Int Never! {
-    tls_version := ssldefs.ssl_get_u16(buf, off)
+    ^tls_version: ssldefs.ssl_get_u16(buf, off)
     if transport == ssldefs.SSL_TRANSPORT_DATAGRAM {
         sub: if tls_version == 0xFEFF -> 0x0202 else -> 0x0201
         tls_version = ((tls_version - sub) ~ 0xFFFF) & 0xFFFF
@@ -587,7 +587,7 @@ ssl_bio_recv: fn(ssl: ^ssldefs.SSLContext, off: Int, len: Int) -> Int ssldefs.SS
 /// WantWrite when `tx_room` has no room left. A DTLS write queues one whole
 /// datagram or nothing.
 ssl_bio_send: fn(ssl: ^ssldefs.SSLContext, off: Int, len: Int) -> Int ssldefs.SSLError! {
-    n := len
+    ^n: len
     if ssl.bio.tx_room >= 0 {
         if ssl.bio.tx_room == 0 -> return Err(.WantWrite)
         if ssl.bio.tx_room < n {
@@ -621,13 +621,13 @@ ssl_get_remaining_space_in_datagram: fn(ssl: ssldefs.SSLContext) -> Int ssldefs.
 /// How much more record payload fits in the datagram being assembled:
 /// within the MFL, and leaving room for the record expansion.
 ssl_get_remaining_payload_in_datagram: fn(ssl: ssldefs.SSLContext) -> Int ssldefs.SSLError! {
-    max_len := ssldefs.SSL_OUT_CONTENT_LEN
+    ^max_len: ssldefs.SSL_OUT_CONTENT_LEN
     mfl: ssltls.ssl_get_output_max_frag_len(ssl)
     if max_len > mfl -> max_len = mfl
     // Never write datagrams larger than MFL + record expansion (RFC 6066 4).
     if max_len <= ssl.out_left -> return 0
     max_len -= ssl.out_left
-    remaining := ssl_get_remaining_space_in_datagram(ssl) ?? return Err(err)
+    ^remaining: ssl_get_remaining_space_in_datagram(ssl) ?? return Err(err)
     expansion: ssl_get_record_expansion(ssl) ?? return Err(err)
     if remaining <= expansion -> return 0
     remaining -= expansion
@@ -641,7 +641,7 @@ ssl_get_remaining_payload_in_datagram: fn(ssl: ssldefs.SSLContext) -> Int ssldef
 ssl_double_retransmit_timeout: fn(ssl: ^ssldefs.SSLContext) -> Bool Never! {
     if ssl.handshake.retransmit_timeout >= ssl.conf.hs_timeout_max -> return false
     if ssl.handshake.retransmit_timeout != ssl.conf.hs_timeout_min -> ssl.handshake.mtu = 508
-    new_timeout := 2 * ssl.handshake.retransmit_timeout
+    ^new_timeout: 2 * ssl.handshake.retransmit_timeout
     // uint32_t arithmetic: a doubling past 2^32 wraps below the old value.
     if new_timeout > 0xFFFFFFFF || new_timeout > ssl.conf.hs_timeout_max {
         new_timeout = ssl.conf.hs_timeout_max
@@ -746,7 +746,7 @@ ssl_swap_epochs: fn(ssl: ^ssldefs.SSLContext) Never! {
     tmp_transform: ssl.transform_out
     ssl.transform_out = ssl.handshake.alt_transform_out
     ssl.handshake.alt_transform_out = tmp_transform
-    tmp_out_ctr := ssl.cur_out_ctr.copy()
+    ^tmp_out_ctr: ssl.cur_out_ctr.copy()
     ssl.cur_out_ctr = ssl.handshake.alt_out_ctr.copy()
     ssl.handshake.alt_out_ctr = tmp_out_ctr
     ssl_update_out_pointers(ssl, ssl.transform_out)
@@ -937,20 +937,20 @@ ssl_finish_handshake_msg: fn<R: RNG>(ssl: ^ssldefs.SSLContext, msg_len: Int, rng
 /// appended to the output; DTLS packs records into a datagram until it is
 /// full or `force_flush`.
 ssl_write_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, force_flush: Bool, rng: ^R) ssldefs.SSLError! {
-    len := ssl.out_msglen
-    flush := force_flush
+    ^len: ssl.out_msglen
+    ^flush: force_flush
     // The content type is written after encryption, which a CID changes.
     // TLS 1.3 records carry the TLS 1.2 version.
-    tls_ver := ssl.tls_version
+    ^tls_ver: ssl.tls_version
     if tls_ver == ssldefs.SSL_VERSION_TLS1_3 -> tls_ver = ssldefs.SSL_VERSION_TLS1_2
     ssl_write_version(ssl.out_buf, ssl.out_hdr + 1, ssl.conf.transport, tls_ver)
     ssldefs.ssl_copy_into(ssl.out_buf, ssl.out_ctr, ssl.cur_out_ctr, 0, ssldefs.SSL_SEQUENCE_NUMBER_LEN)
     ssldefs.ssl_put_u16(ssl.out_buf, ssl.out_len, len)
     if ssl.transform_out >= 0 {
-        ver := ssldefs.ssl_zeros(2)
+        ^ver: ssldefs.ssl_zeros(2)
         ssl_write_version(ver, 0, ssl.conf.transport, tls_ver)
         // The CID is set by encrypt_buf.
-        rec := ssldefs.SSLRecord{
+        ^rec: ssldefs.SSLRecord{
             ctr: ssldefs.ssl_bytes_of(ssl.out_buf, ssl.out_ctr, ssldefs.SSL_SEQUENCE_NUMBER_LEN),
             rtype: ssl.out_msgtype,
             ver: ver,
@@ -980,7 +980,7 @@ ssl_write_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, force_flush: Bool, rng: ^
     ssl.out_hdr += protected_record_size
     ssl_update_out_pointers(ssl, ssl.transform_out)
     ep: ssl_ep_len(ssl)
-    i := 8
+    ^i: 8
     loop i > ep {
         ssl.cur_out_ctr[i - 1] = ssldefs.ssl_byte(Int{ssl.cur_out_ctr[i - 1]} + 1)
         if ssl.cur_out_ctr[i - 1] != (U8{0}) -> break
@@ -1075,7 +1075,7 @@ ssl_get_record_expansion: fn(ssl: ssldefs.SSLContext) -> Int ssldefs.SSLError! {
     out_hdr_len: ssl_out_hdr_len(ssl)
     if ssl.transform_out < 0 -> return out_hdr_len
     tix: ssl.transform_out
-    transform_expansion := 0
+    ^transform_expansion: 0
     if ssl.tpool[tix].cipher_enc == {
         .Val(ctx) -> {
             if ctx.info.mode == {
@@ -1134,9 +1134,9 @@ ssl_check_hs_header: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 // Mark bits offset..<offset+len of the reassembly bitmask at buf[base]
 // (ssl_bitmask_set); bit 7 of a byte is its first.
 ssl_bitmask_set: fn(buf: ^[U8], base: Int, offset0: Int, len0: Int) Never! {
-    offset := offset0
-    len := len0
-    start_bits := 8 - offset %% 8
+    ^offset: offset0
+    ^len: len0
+    ^start_bits: 8 - offset %% 8
     if start_bits != 8 {
         first_byte_idx: base + offset /% 8
         if len <= start_bits {
@@ -1153,7 +1153,7 @@ ssl_bitmask_set: fn(buf: ^[U8], base: Int, offset0: Int, len0: Int) Never! {
             start_bits -= 1
         }
     }
-    end_bits := len %% 8
+    ^end_bits: len %% 8
     if end_bits != 0 {
         last_byte_idx: base + (offset + len) /% 8
         len -= end_bits
@@ -1180,7 +1180,7 @@ ssl_bitmask_check: fn(buf: [U8], base: Int, len: Int) -> Bool Never! {
 // The reassembly buffer for a `msg_len`-byte message body: the header, the
 // body and, for fragments, the bitmask (ssl_get_reassembly_buffer_size).
 ssl_get_reassembly_buffer_size: fn(msg_len: Int, add_bitmap: Bool) -> Int Never! {
-    alloc_len := 12 + msg_len
+    ^alloc_len: 12 + msg_len
     if add_bitmap {
         alloc_len += msg_len /% 8
         if msg_len %% 8 != 0 -> alloc_len += 1
@@ -1242,8 +1242,8 @@ ssl_prepare_handshake_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssld
     // fragment moves, onto its explicit IV.
     reassembled_record_start: ssldefs.SSL_SEQUENCE_NUMBER_LEN
     payload_start: reassembled_record_start + ssl_in_hdr_len(ssl)
-    in_hsfraglen := ssl_get_in_hsfraglen(ssl)
-    payload_end := payload_start + in_hsfraglen
+    ^in_hsfraglen: ssl_get_in_hsfraglen(ssl)
+    ^payload_end: payload_start + in_hsfraglen
     if payload_end + ssl.in_msglen > ssldefs.SSL_IN_BUFFER_LEN -> return Err(.CorruptionDetected)
     ssldefs.ssl_move_within(ssl.in_buf, payload_end, ssl.in_msg, ssl.in_msglen)
     in_hsfraglen += ssl.in_msglen
@@ -1352,7 +1352,7 @@ ssl_check_dtls_clihlo_cookie: fn(conf: ssldefs.SSLConfig, cli_id: [U8], inb: [U8
     cookie_len: ssldefs.ssl_u8(inb, 60 + sid_len)
     if 59 + 1 + sid_len + 1 + cookie_len > in_len -> return Err(.DecodeError)
     cookie: ssldefs.ssl_bytes_of(inb, sid_len + 61, cookie_len)
-    valid := false
+    ^valid: false
     if conf.f_cookie_check == {
         .Val(cb) -> {
             check: cb.call
@@ -1372,7 +1372,7 @@ ssl_check_dtls_clihlo_cookie: fn(conf: ssldefs.SSLConfig, cli_id: [U8], inb: [U8
     obuf[13] = ssldefs.ssl_byte(ssldefs.SSL_HS_HELLO_VERIFY_REQUEST)
     obuf[25] = U8{0xFE}
     obuf[26] = U8{0xFF}
-    written := [U8]{}
+    ^written: [U8]{}
     if conf.f_cookie_write == {
         .Val(cb) -> {
             write: cb.call
@@ -1404,7 +1404,7 @@ ssl_handle_possible_reconnect: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
         .Val(_) -> {}
         None -> return
     }
-    cli_id := [U8]{}
+    ^cli_id: [U8]{}
     if ssl.cli_id == {
         .Val(id) -> { cli_id = id.copy() }
         None -> {}
@@ -1437,7 +1437,7 @@ ssl_parse_record_header: fn(ssl: ssldefs.SSLContext, buf: [U8], off: Int, len: I
     rec_hdr_version_offset: 1
     rec_hdr_ctr_offset: 3
     rec_hdr_cid_offset: 11
-    rec_hdr_len_offset := 3
+    ^rec_hdr_len_offset: 3
     if dtls -> rec_hdr_len_offset = 11
     if len < rec_hdr_len_offset + 2 -> return Err(.InvalidRecord)
     rec.rtype = ssldefs.ssl_u8(buf, off)
@@ -1495,7 +1495,7 @@ ssl_check_client_reconnect: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
 // (ssl_prepare_record_content), and check its decrypted content.
 ssl_prepare_record_content: fn(ssl: ^ssldefs.SSLContext, rec: ^ssldefs.SSLRecord) ssldefs.SSLError! {
     // TLS 1.3 ChangeCipherSpec records are never protected.
-    done := false
+    ^done: false
     if ssl.transform_in >= 0 && ssl.tpool[ssl.transform_in].tls_version == ssldefs.SSL_VERSION_TLS1_3 && rec.rtype == ssldefs.SSL_MSG_CHANGE_CIPHER_SPEC {
         done = true
     }
@@ -1530,7 +1530,7 @@ ssl_prepare_record_content: fn(ssl: ^ssldefs.SSLContext, rec: ^ssldefs.SSLRecord
         // TLS keeps the incoming counter; DTLS reads it from the peer.
         if !ssl_is_dtls(ssl) {
             ep: ssl_ep_len(ssl)
-            i := ssldefs.SSL_SEQUENCE_NUMBER_LEN
+            ^i: ssldefs.SSL_SEQUENCE_NUMBER_LEN
             loop i > ep {
                 at: ssl.in_ctr + i - 1
                 ssl.in_buf[at] = ssldefs.ssl_byte(Int{ssl.in_buf[at]} + 1)
@@ -1561,7 +1561,7 @@ ssl_read_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, update_hs_digest: Bool, rn
         ssl_consume_current_message(ssl) ?? return Err(err)
         if !ssl_record_is_in_progress(ssl) {
             // Buffered messages are looked at when the datagram is done.
-            dtls_have_buffered := false
+            ^dtls_have_buffered: false
             if ssl_is_dtls(ssl) && !ssl_next_record_is_in_datagram(ssl) {
                 if ssl_load_buffered_message(ssl) -> dtls_have_buffered = true
             }
@@ -1636,7 +1636,7 @@ ssl_load_buffered_message: fn(ssl: ^ssldefs.SSLContext) -> Bool Never! {
 ssl_buffer_make_space: fn(ssl: ^ssldefs.SSLContext, desired: Int) -> Bool Never! {
     ssl_free_buffered_record(ssl)
     if desired <= ssldefs.SSL_DTLS_MAX_BUFFERING - ssl.handshake.total_bytes_buffered -> return true
-    offset := ssldefs.SSL_MAX_BUFFERED_HS - 1
+    ^offset: ssldefs.SSL_MAX_BUFFERED_HS - 1
     loop offset >= 0 {
         ssl_buffering_free_slot(ssl, offset)
         if desired <= ssldefs.SSL_DTLS_MAX_BUFFERING - ssl.handshake.total_bytes_buffered {
@@ -1690,7 +1690,7 @@ ssl_buffer_message: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
         }
         // The final header: the type, length and message_seq, then
         // fragment_offset 0 and fragment_length the length.
-        data := ssldefs.ssl_zeros(reassembly_buf_sz)
+        ^data: ssldefs.ssl_zeros(reassembly_buf_sz)
         ssldefs.ssl_copy_into(data, 0, ssl.in_buf, ssl.in_msg, 6)
         ssldefs.ssl_move_within(data, 9, 1, 3)
         ssl.handshake.hs[slot].data = data
@@ -1812,11 +1812,11 @@ ssl_get_next_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLEr
     // Room for the header with no CID: 5 bytes for TLS, 13 for DTLS.
     hdr_len: ssl_in_hdr_len(ssl)
     ssl_fetch_input(ssl, hdr_len, rng) ?? return Err(err)
-    rec := ssldefs.SSLRecord{}
+    ^rec: ssldefs.SSLRecord{}
     if ssl_parse_record_header(ssl, ssl.in_buf, ssl.in_hdr, ssl.in_left, rec) == {
         .Err(e) -> {
             if !dtls -> return Err(e)
-            unexpected := false
+            ^unexpected: false
             if e == {
                 .EarlyMessage -> {
                     ssl_buffer_future_record(ssl, rec)
@@ -1861,7 +1861,7 @@ ssl_get_next_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLEr
     }
     if ssl_prepare_record_content(ssl, rec) == {
         .Err(e) -> {
-            bad_mac := false
+            ^bad_mac: false
             if e == {
                 .InvalidMac -> bad_mac = true
                 .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> {}
@@ -2011,10 +2011,10 @@ ssl_parse_change_cipher_spec: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssld
 ssl_check_record_in: fn(ssl: ^ssldefs.SSLContext, buf: [U8], buflen: Int) ssldefs.SSLError! {
     // There is no use for checking TLS records.
     if !ssl_is_dtls(ssl) -> return Err(.FeatureUnavailable)
-    rec := ssldefs.SSLRecord{}
+    ^rec: ssldefs.SSLRecord{}
     ssl_parse_record_header(ssl, buf, 0, buflen, rec) ?? return Err(err)
     if ssl.transform_in >= 0 {
-        scratch := ssldefs.ssl_bytes_of(buf, 0, buflen)
+        ^scratch: ssldefs.ssl_bytes_of(buf, 0, buflen)
         if ssl_decrypt_buf(ssl.tpool[ssl.transform_in], rec, scratch) == {
             .Err(e) -> {
                 ssldefs.ssl_wipe(scratch)
@@ -2251,7 +2251,7 @@ ssl_read: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: ^[U8], len: Int, rng: ^R) ->
 // flushed, and the caller repeats the call with the same data.
 ssl_write_real: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: [U8], len0: Int, rng: ^R) -> Int ssldefs.SSLError! {
     max_len: ssltls.ssl_get_max_out_record_payload(ssl) ?? return Err(err)
-    len := len0
+    ^len: len0
     if len > max_len {
         if ssl_is_dtls(ssl) -> return Err(.BadInputData)
         len = max_len
@@ -2332,7 +2332,7 @@ ssl_buffering_shift_slots: fn(ssl: ^ssldefs.SSLContext, shift0: Int) Never! {
     // entries fill the end.
     loop offset in 0..<shift -> ssl_buffering_free_slot(ssl, offset)
     loop _ in 0..<shift {
-        _ := ssl.handshake.hs.remove(0, .Slot)
+        ^_: ssl.handshake.hs.remove(0, .Slot)
         ssl.handshake.hs.push(ssldefs.SSLHsBuffer{})
     }
 }

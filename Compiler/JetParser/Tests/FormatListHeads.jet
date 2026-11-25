@@ -6,7 +6,7 @@ fmt_list_require: fn(ok: Bool, name: String) Never! {
 }
 
 #Test("format_list_heads") {
-    source := "Point: struct {{\n    x: Int,\n}}\n\nrun: fn() {{\n    compact := [Point{{x: 1}}, Point{{x: 2}}]\n    spread := [\n        Point{{x: 3}},\n        Point{{x: 4}},\n    ]\n}}\n"
+    ^source: "Point: struct {{\n    x: Int,\n}}\n\nrun: fn() {{\n    compact := [Point{{x: 1}}, Point{{x: 2}}]\n    spread := [\n        Point{{x: 3}},\n        Point{{x: 4}},\n    ]\n}}\n"
     plain: jet_format_source(source, false)
     fmt_list_require(plain.ok, "plain format succeeds")
     fmt_list_require(plain.text.contains("compact := [Point{{x: 1}}, Point{{x: 2}}]"), "plain keeps explicit list heads")

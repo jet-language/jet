@@ -30,9 +30,9 @@ pkg_effect_names_or_none: fn(effects: [String]) -> String Never! {
 
 // Every effect reachable from `entry` through statically known calls.
 pkg_entry_effects: fn(summaries: [String:PackageEffectSummary], entry: String) -> [String] Never! {
-    effects := [String]{}
-    seen := [String:Bool]{}
-    pending := [String]{entry}
+    ^effects: [String]{}
+    ^seen: [String:Bool]{}
+    ^pending: [String]{entry}
     loop pending.len() > 0 {
         key: pending.pop() ?? break
         if seen.has_key(key) -> next
@@ -56,7 +56,7 @@ pkg_render_effect_line: fn(effects: [String]) -> String Never! {
 }
 
 pkg_effect_texts: fn(effects: [String]) -> Dyn Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop effect_name in effects -> items.push(Dyn.Text(effect_name))
     Dyn.Array(items)
 }

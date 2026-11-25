@@ -63,7 +63,7 @@ account_of: fn(who: db.Who) -> auth.AccountID? {
 
 note: fn(op: db.Op, who: db.Who, row: String) {
     caller: if account_of(who) == .Val(account) -> account.raw() else -> "no account"
-    judged := JUDGED.guard_edit()
+    ^judged: JUDGED.guard_edit()
     judged.value.push("{op_name(op)} {row} as {caller}")
 }
 
@@ -115,8 +115,8 @@ first_owner: fn(store: db.Store, project: Int, account: auth.AccountID) -[DB.Rea
 member_policy: fn(row: Member, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
     note(op, who, member_text(row.copy()))
     account: account_of(who) ?? return Ok(false)
-    member := false
-    owner := false
+    ^member: false
+    ^owner: false
     if member_of(store, row.project, account) == {
         .Val(mine) -> {
             member = true
@@ -136,7 +136,7 @@ member_policy: fn(row: Member, op: db.Op, who: db.Who, store: db.Store) -[DB.Rea
 
 step: fn(label: String, outcome: String) {
     print("{label}: {outcome}")
-    judged := JUDGED.guard_edit()
+    ^judged: JUDGED.guard_edit()
     loop line in judged.value -> print("  judged {line}")
     judged.value = [String]{}
 }
@@ -165,7 +165,7 @@ project_read: fn(table: db.Table<Int, Project>, id: Int) -[DB.Read]> String {
 
 members_read: fn(table: db.Table<MemberKey, Member>) -[DB.Read]> String {
     rows: (table.query() ?? return "unreadable").collect() ?? return "uncollected"
-    names := [String]{}
+    ^names: [String]{}
     loop row in rows -> names.push(member_text(row))
     "[{names.join(", ")}]"
 }
@@ -186,18 +186,18 @@ Stores: struct {
 STORE: Shared{Stores{store: None}}
 
 remember: fn(store: db.Store) {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     stores.value.store = Val(store.copy())
 }
 
 projects: fn() -> db.Table<Int, Project> {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     store: stores.value.store ?? panic("the store is open")
     projects_in(store).guard(project_policy)
 }
 
 members: fn() -> db.Table<MemberKey, Member> {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     store: stores.value.store ?? panic("the store is open")
     members_in(store).guard(member_policy)
 }

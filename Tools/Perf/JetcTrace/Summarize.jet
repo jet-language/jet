@@ -83,15 +83,15 @@ row: fn(rows: ^[Row], at: ^[String:Int], kind: String, ts: Int) -> Int {
 }
 
 render: fn(file: String) -> String IOError! {
-    rows := [Row]{}
-    at := [String:Int]{}
-    threads := [Thread]{}
-    thread_at := [Int:Int]{}
-    progress := [String:Counter]{}
-    start := Int?{None}
-    last := 0
-    rss := Int?{None}
-    peak := Int?{None}
+    ^rows: [Row]{}
+    ^at: [String:Int]{}
+    ^threads: [Thread]{}
+    ^thread_at: [Int:Int]{}
+    ^progress: [String:Counter]{}
+    ^start: Int?{None}
+    ^last: 0
+    ^rss: Int?{None}
+    ^peak: Int?{None}
     // One event per line; the array may be unterminated and its last line may be
     // half written by a running compiler.
     loop raw in files.read(file).split("\n") {
@@ -141,7 +141,7 @@ render: fn(file: String) -> String IOError! {
         }
     }
     width: max(14, rows.map(fn(r) { r.kind.len() }).max() ?? 0)
-    lines := ["{"span".pad_end(width, " ")} {"count":PadLeft(7)} {"total s":PadLeft(9)} {"max s":PadLeft(8)} {"items":PadLeft(9)} {"peak MB":PadLeft(8)}"]
+    ^lines: ["{"span".pad_end(width, " ")} {"count":PadLeft(7)} {"total s":PadLeft(9)} {"max s":PadLeft(8)} {"items":PadLeft(9)} {"peak MB":PadLeft(8)}"]
     rows.sort_by(fn(r) { r.first })
     loop r in rows {
         // `+N`: N spans of this kind are still open; their time so far is included.
@@ -150,7 +150,7 @@ render: fn(file: String) -> String IOError! {
     lines.push("")
     stale: start.map(fn(s) { ", last event {(Float.from_int(time.now().to_unix_ms() - s) - Float.from_int(last) / 1000.0) / 1000.0:Fixed(0)} s ago" }) ?? ""
     lines.push("trace time {seconds(Float.from_int(last))} s{stale}, rss {mb(rss)} MB, peak {mb(peak)} MB")
-    any_open := false
+    ^any_open: false
     loop thread in threads {
         if thread.spans.len() == 0 -> next
         any_open = true
@@ -158,7 +158,7 @@ render: fn(file: String) -> String IOError! {
         loop depth in 0..<thread.spans.len() {
             span: thread.spans[depth]
             index: span.args?.index ?? -1
-            line := "{"  ".repeat(depth + 1)}{if span.label == span.kind -> span.kind else -> "{span.kind} {span.label}"}{if index >= 0 -> " [{index + 1}/{span.args?.total ?? 0}]" else -> ""} running {seconds(Float.from_int(last - span.ts))} s"
+            ^line: "{"  ".repeat(depth + 1)}{if span.label == span.kind -> span.kind else -> "{span.kind} {span.label}"}{if index >= 0 -> " [{index + 1}/{span.args?.total ?? 0}]" else -> ""} running {seconds(Float.from_int(last - span.ts))} s"
             if progress.get(span.kind) == .Val(c) && c.ts >= span.ts && c.total > 0 {
                 line = "{line}, {c.done}/{c.total} ({Float{100.0} * Float.from_int(c.done) / Float.from_int(c.total):Fixed(1)}%)"
                 since: c.done - c.first_done

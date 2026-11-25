@@ -12,10 +12,10 @@ draw: fn(stream: ^random.RNG) {
     print(stream.weighted_pick([String]{"a", "b", "c", "d"}, [Float]{math.NAN, -1.0, 0.25, 1.75}) ?? "empty")
     sample: stream.sample([String]{"a", "b", "c", "d", "e"}, 3)
     loop value in sample -> print(value)
-    items := [String]{"a", "b", "c", "d", "e"}
+    ^items: [String]{"a", "b", "c", "d", "e"}
     stream.shuffle(items)
     loop value in items -> print(value)
-    child := stream.split()
+    ^child: stream.split()
     print(child.int(1, 100))
     print(stream.bool(0.0))
     print(stream.bool(1.0))
@@ -24,6 +24,6 @@ draw: fn(stream: ^random.RNG) {
 }
 
 run: fn() {
-    stream := random.rng(42)
+    ^stream: random.rng(42)
     draw(stream)
 }

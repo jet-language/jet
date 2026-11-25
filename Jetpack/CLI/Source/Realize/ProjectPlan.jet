@@ -86,10 +86,10 @@ cli_load_project_plan_with_selections: fn(cache: ^WorkspaceDeclarationCache, the
         return Err(CLIError.Reported(EXIT_USAGE))
     }
     env_file: EnvFile.parse(src)
-    table := env_file.source_table()
+    ^table: env_file.source_table()
     cli_ensure_builtin_sources(table)
     refs: cli_classify_all(theme, env_file.refs(), table)
-    plan := RunPlan.empty(dir, table)
+    ^plan: RunPlan.empty(dir, table)
     plan.refs = refs
     plan.label = env_file.prompt_label()
     Ok(plan)
@@ -108,7 +108,7 @@ cli_typed_plan: fn(theme: Theme, src: String, dir: String, requested_preset: Str
         term.eprint(diagnostic_render_all(ENV_FILE, src, [Diagnostic]{err.diagnostic}, false))
         return Err(CLIError.Reported(EXIT_USAGE))
     }
-    table := plan.table
+    ^table: plan.table
     cli_ensure_builtin_sources(table)
     // A formatter package, the selected preset's packages, the language
     // expansion's packages, integration packages, and the catalog package of
@@ -116,7 +116,7 @@ cli_typed_plan: fn(theme: Theme, src: String, dir: String, requested_preset: Str
     // author's own `packages:`. `evaluate_env_with_selections` already
     // expanded the typed selections; re-expanding here could make planning,
     // trust, and activation disagree if the catalog changes.
-    package_refs := plan.package_refs
+    ^package_refs: plan.package_refs
     if plan.lifecycle.formatter == .Val(formatter) {
         cli_push_package_ref(package_refs, formatter.package)
     }
@@ -173,7 +173,7 @@ cli_typed_plan: fn(theme: Theme, src: String, dir: String, requested_preset: Str
 // Classify a sequence of `package@source` refs against `table`, printing the
 // first failure and exiting 2.
 cli_classify_all: fn(theme: Theme, raws: [String], table: SourceTable) -[IO, Time.Wait]> [RefSpec] CLIError! {
-    refs := [RefSpec]{}
+    ^refs: [RefSpec]{}
     loop raw in raws {
         spec: RefSpec.classify_in(raw, table) ?? {
             cli_ref_error(theme, err)

@@ -39,8 +39,8 @@ use jet_foundation.[
 // derives each of its traits, `#Codable(only: …)` the one it names; a
 // refused auto-derive (`!Debug`) derives nothing.
 parser_split_type_markers: fn(markers: [Marker]) -> {derives: [NamedSpan], serde_markers: [Marker]} Never! {
-    serde := [Marker]{}
-    derives := [NamedSpan]{}
+    ^serde: [Marker]{}
+    ^derives: [NamedSpan]{}
     loop marker in markers {
         if marker.negated && owned_trait_auto_derive_marker(marker.name) -> next
         family: owned_trait_family(marker.name)
@@ -118,13 +118,13 @@ parser_layout_marker_fact: fn(state: ^JetParserState, markers: [Marker], grouped
     }
     kind_expr: values[0] ?? return None
     if kind_expr == .Ident(variant, variant_span, _) {
-        tag_width := false
-        tag_name := ""
-        tag_span := marker.span
-        alignment := Int?{None}
-        alignment_span := Span?{None}
-        alignment_target := false
-        has_alignment := false
+        ^tag_width: false
+        ^tag_name: ""
+        ^tag_span: marker.span
+        ^alignment: Int?{None}
+        ^alignment_span: Span?{None}
+        ^alignment_target: false
+        ^has_alignment: false
         if values[1] == .Val(value) {
             if {
                 value == .Ident(name, name_span, _) -> {
@@ -170,7 +170,7 @@ parser_layout_marker_fact: fn(state: ^JetParserState, markers: [Marker], grouped
             }
             return None
         }
-        layout := StructLayout?{None}
+        ^layout: StructLayout?{None}
         if variant == {
             "c" -> {
                 layout = Val(if alignment == .Val(bytes) -> StructLayout.CAligned{alignment: bytes, target: alignment_target} else -> StructLayout.C)
@@ -248,9 +248,9 @@ parser_layout_grouped_fact: fn(state: ^JetParserState, marker: Marker, is_enum: 
     }
     first: parser_marker_expression(marker, 0) ?? return None
     if first == .Ident(variant, variant_span, _) {
-        has_alignment := false
-        alignment_target := false
-        alignment := Int?{None}
+        ^has_alignment: false
+        ^alignment_target: false
+        ^alignment: Int?{None}
         if second == .Val(value) {
             if {
                 parser_layout_align_call(value) == .Val(call) -> {
@@ -258,10 +258,10 @@ parser_layout_grouped_fact: fn(state: ^JetParserState, marker: Marker, is_enum: 
                     alignment_target = call.args.len() == 2
                     argument: call.args[if alignment_target -> 1 else -> 0].expr
                     if {
-                        parser_layout_align_bytes(argument) == .Val(number) -> alignment = Val(number)
-                        argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) -> {
-
+                        parser_layout_align_bytes(argument) == .Val(number) -> {
+                            alignment = Val(number)
                         }
+                        argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) -> {}
                         else -> {
                             parser_add_error_code(state, "E1105", expr_span(argument), "`align` requires one integer byte value or `#build.cpu.cache_line` (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)`, `align(#build.cpu.cache_line)` or `align(target, 2097152)`")
                         }
@@ -360,18 +360,18 @@ parser_layout_alignment_span: fn(markers: [Marker]) -> Span? {
 // written. None when the arguments do not fit the parameter list; no diagnostic
 // is reported here.
 parser_marker_binding_slots: fn(marker: Marker, names: [String], flags: [String]) -> [Int]? {
-    taken := [Bool]{}
+    ^taken: [Bool]{}
     loop _ in 0..<names.len() -> taken.push(false)
-    slots := [Int]{}
-    positional := 0
-    saw_named := false
+    ^slots: [Int]{}
+    ^positional: 0
+    ^saw_named: false
     loop index in 0..<marker.args.len() {
-        label := parser_marker_label(marker, index)
+        ^label: parser_marker_label(marker, index)
         // copy: the flag word is read from the marker; the label owns its text.
         if label == "" && parser_marker_expression(marker, index) == .Val(value) && value == .Ident(word, _, _) && flags.contains(word) {
             label = word.copy()
         }
-        parameter := -1
+        ^parameter: -1
         if {
             label != "" -> {
                 saw_named = true
@@ -402,7 +402,7 @@ parser_marker_binding_slots: fn(marker: Marker, names: [String], flags: [String]
 // fit the parameter list.
 parser_marker_bindings: fn(marker: Marker, names: [String]) -> [Expr?]? {
     slots: parser_marker_binding_slots(marker, names, [String]{}) ?? return None
-    values := [Expr?]{}
+    ^values: [Expr?]{}
     loop _ in 0..<names.len() -> values.push(None)
     loop (index, parameter) in slots -> values[parameter] = parser_marker_expression(marker, index)
     Val(values)
@@ -413,7 +413,7 @@ parser_bind_marker_arguments: fn(state: ^JetParserState, marker: Marker, names: 
         parser_marker_shape_error(state, marker)
         return None
     }
-    index := 0
+    ^index: 0
     loop index < required {
         if values[index] == None {
             parser_marker_shape_error(state, marker)
@@ -452,8 +452,8 @@ parser_marker_ident_path: fn(value: Expr) -> String? {
 parser_marker_target_path: fn(target: Expr) -> String? {
     written: parser_marker_ident_path(target) ?? return None
     segments: written.split(".").to_list()
-    kept := [String]{}
-    stripped := false
+    ^kept: [String]{}
+    ^stripped: false
     loop (index, segment) in segments {
         if !stripped && segment == "Target" && index + 1 < segments.len() {
             stripped = true
@@ -490,7 +490,7 @@ parser_meta_attr_from_marker: fn(state: ^JetParserState, marker: Marker) -> Meta
         parser_marker_shape_fatal(state, marker)
         return None
     }
-    fields := [MetaField]{}
+    ^fields: [MetaField]{}
     loop (index, parameter) in slots {
         value: parser_marker_expression(marker, index) ?? next
         value_span: expr_span(value)
@@ -499,8 +499,8 @@ parser_meta_attr_from_marker: fn(state: ^JetParserState, marker: Marker) -> Meta
             fields.push(MetaField.Tunable{span: value_span})
             next
         }
-        name := names[parameter]
-        field_span := value_span
+        ^name: names[parameter]
+        ^field_span: value_span
         if written == .Val(label) {
             name = label.name
             field_span = label.span
@@ -517,7 +517,9 @@ parser_meta_attr_from_marker: fn(state: ^JetParserState, marker: Marker) -> Meta
             name == "tunable" && value == .Bool(flag, _, _) -> {
                 if flag -> fields.push(MetaField.Tunable{span: span})
             }
-            else -> { fields.push(MetaField.Unknown{name: name, value: Val(value), span: field_span}) }
+            else -> {
+                fields.push(MetaField.Unknown{name: name, value: Val(value), span: field_span})
+            }
         }
     }
     Val(MetaAttr{fields: fields, span: marker.span})
@@ -562,7 +564,7 @@ parser_job_string_list: fn(state: ^JetParserState, marker: Marker, field: String
     expression: value ?? return Val([String]{})
     if expression == {
         .ListLit(values, _, _) -> {
-            result := [String]{}
+            ^result: [String]{}
             loop item in values {
                 word: parser_job_word(item) ?? {
                     parser_job_metadata_error(state, field, "a list of strings or names", expr_span(item))
@@ -583,7 +585,7 @@ parser_job_string_list: fn(state: ^JetParserState, marker: Marker, field: String
 }
 
 parser_job_skip: fn(state: ^JetParserState, marker: Marker, expression: Expr) -> JobSkip? {
-    word := parser_job_word(expression)
+    ^word: parser_job_word(expression)
     if word != None {
         reason: word ?? ""
         if reason == "none" || reason == "None" -> return None
@@ -595,7 +597,7 @@ parser_job_skip: fn(state: ^JetParserState, marker: Marker, expression: Expr) ->
                 parser_job_metadata_error(state, "skip", "a reason string or .Unless(.Platform(.Linux))", marker.span)
                 return None
             }
-            platform_expr := Expr?{None}
+            ^platform_expr: Expr?{None}
             if args[0] == {
                 .Positional(value) -> { platform_expr = Val(value) }
                 .Named(_, _) -> {}
@@ -610,7 +612,7 @@ parser_job_skip: fn(state: ^JetParserState, marker: Marker, expression: Expr) ->
                         parser_job_metadata_error(state, "skip", ".Unless(.Platform(.Linux))", marker.span)
                         return None
                     }
-                    platform_value := Expr?{None}
+                    ^platform_value: Expr?{None}
                     if platform_args[0] == {
                         .Positional(platform) -> { platform_value = Val(platform) }
                         .Named(_, _) -> {}
@@ -645,7 +647,7 @@ parser_job_skip: fn(state: ^JetParserState, marker: Marker, expression: Expr) ->
 parser_job_limits: fn(state: ^JetParserState, marker: Marker, expression: Expr) -> [StringMapEntry]? {
     if expression == {
         .MapLit(entries, _, _) -> {
-            limits := [StringMapEntry]{}
+            ^limits: [StringMapEntry]{}
             loop entry in entries {
                 key: parser_job_word(entry.key) ?? {
                     parser_job_metadata_error(state, "limits", "a map of names to static values", expr_span(entry.key))
@@ -663,10 +665,10 @@ parser_job_limits: fn(state: ^JetParserState, marker: Marker, expression: Expr) 
                 }
                 limits.push(StringMapEntry{key: key, value: value})
             }
-            index := 1
+            ^index: 1
             loop index < limits.len() {
                 current: limits[index]
-                insertion := index - 1
+                ^insertion: index - 1
                 loop insertion >= 0 && limits[insertion].key > current.key {
                     limits[insertion + 1] = limits[insertion]
                     insertion -= 1
@@ -684,7 +686,7 @@ parser_job_limits: fn(state: ^JetParserState, marker: Marker, expression: Expr) 
 }
 
 parser_job_parallel: fn(state: ^JetParserState, _marker: Marker, expression: Expr) -> Int? {
-    word := parser_job_word(expression)
+    ^word: parser_job_word(expression)
     if word != None {
         reason: word ?? ""
         if reason == "none" || reason == "None" -> return None
@@ -706,7 +708,7 @@ PARSER_JOB_PARAMETERS: ["scope", "packages", "cwd", "inputs", "outputs", "skip",
 parser_job_metadata_from_marker: fn(state: ^JetParserState, marker: Marker) -> JobMetadata? {
     if marker.args.len() == 0 -> return None
     values: parser_bind_marker_arguments(state, marker, PARSER_JOB_PARAMETERS, 0) ?? return None
-    metadata := ast_job_metadata()
+    ^metadata: ast_job_metadata()
 
     if values[0] == .Val(scope_expr) {
         scope: parser_job_word(scope_expr) ?? {
@@ -786,7 +788,7 @@ parser_job_every_from_marker: fn(marker: Marker) -> EveryMarker? {
 }
 
 parser_project_function_job_markers: fn(state: ^JetParserState, function: ^Func, markers: [Marker]) -> Bool {
-    valid := true
+    ^valid: true
     loop marker in markers {
         if marker.name == MARKER_JOB {
             function.is_job = true

@@ -35,7 +35,7 @@ describe: fn(node: Node) -> String {
 
 // A whole local descends into its own payload on every turn.
 descend: fn(depth: Int, steps: Int) -> String {
-    cursor := nest(depth, "d{depth}")
+    ^cursor: nest(depth, "d{depth}")
     loop _ in 0..<steps {
         if cursor == {
             .Wrap(inner) -> cursor = inner
@@ -52,7 +52,7 @@ paren: fn(depth: Int) -> Expr {
 
 // The subject is a field of the local the payload refills.
 unwrap_parens: fn(depth: Int) -> String {
-    current := paren(depth)
+    ^current: paren(depth)
     loop _ in 0..<depth + 1 {
         if current.kind == {
             .Paren(inner) -> current = inner
@@ -67,8 +67,8 @@ unwrap_parens: fn(depth: Int) -> String {
 
 // Rejected: the payload is read after the refill, so it is a value of its own.
 read_after: fn(depth: Int) -> String {
-    cursor := nest(depth, "r")
-    seen := ""
+    ^cursor: nest(depth, "r")
+    ^seen: ""
     if cursor == {
         .Wrap(inner) -> {
             cursor = inner
@@ -81,8 +81,8 @@ read_after: fn(depth: Int) -> String {
 
 // Rejected: a sibling payload of the same subject is read after the refill.
 sibling_after: fn() -> String {
-    cursor := Node.Pair{left: Node.Leaf{name: "a"}, right: Node.Leaf{name: "b"}}
-    seen := ""
+    ^cursor: Node.Pair{left: Node.Leaf{name: "a"}, right: Node.Leaf{name: "b"}}
+    ^seen: ""
     if cursor == {
         .Pair(left, right) -> {
             cursor = left
@@ -95,15 +95,15 @@ sibling_after: fn() -> String {
 
 // Rejected: a payload stored under another name leaves the subject whole.
 other_target: fn(depth: Int) -> String {
-    cursor := nest(depth, "o")
-    other := Node.Leaf{name: "none"}
+    ^cursor: nest(depth, "o")
+    ^other: Node.Leaf{name: "none"}
     if cursor == .Wrap(inner) -> other = inner
     "{describe(cursor)} / {describe(other)}"
 }
 
 // Rejected: a read parameter's payload is copied, never taken.
 from_param: fn(node: Node) -> String {
-    cursor := Node.Leaf{name: "start"}
+    ^cursor: Node.Leaf{name: "start"}
     if node == .Wrap(inner) -> cursor = inner
     "{describe(cursor)} {describe(node)}"
 }

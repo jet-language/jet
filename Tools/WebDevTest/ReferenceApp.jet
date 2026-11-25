@@ -102,9 +102,9 @@ Timing: struct {
 run: fn() {
     r: setup(process.args()) ?? fail(err.message)
     original: files.read(r.source) ?? fail("cannot read {r.source}: {err}")
-    live := Live{server: None, driver: None}
-    timing := Timing{value_ms: 0, diagnosis_ms: None, repair_ms: None}
-    failure := ""
+    ^live: Live{server: None, driver: None}
+    ^timing: Timing{value_ms: 0, diagnosis_ms: None, repair_ms: None}
+    ^failure: ""
     if measure(r, live) == {
         .Ok(found) -> { timing = found }
         .Err(error) -> failure = error.message
@@ -129,7 +129,7 @@ setup: fn(args: [String]) -> Run Failure! {
     jet_env: option(args, "--jet-env") ?? ""
     raw: files.read(manifest_path) ?? return Err(Failure{message: "cannot read {manifest_path}: {err}"})
     manifest: json.parse(raw) ?? return Err(Failure{message: "{manifest_path} is not JSON: {err}"})
-    app := Dyn.Null
+    ^app: Dyn.Null
     loop candidate in items(field(manifest, "reference_apps")) {
         if text(field(candidate, "id")) == app_id -> app = candidate.copy()
     }
@@ -216,7 +216,7 @@ start_dev: fn(r: Run, live: ^Live) Failure! {
 
 // A `jet` command line, through the development environment when one is named.
 jet_argv: fn(r: Run, rest: [String]) -> [String] {
-    argv := if r.jet_env == "" -> [String]{"jet"} else -> [String]{"jet", r.jet_env.copy(), "jet"}
+    ^argv: if r.jet_env == "" -> [String]{"jet"} else -> [String]{"jet", r.jet_env.copy(), "jet"}
     loop part in rest -> argv.push(part.copy())
     argv
 }

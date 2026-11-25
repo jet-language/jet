@@ -100,16 +100,16 @@ parse_invocation: fn(args: [String]) -[FS]> Invocation LaunchError! {
     if args.len() == 0 {
         return Err(launch_error("missing execution arguments; use --contract for the capability probe"))
     }
-    task_id := String?{None}
-    root := String?{None}
-    cwd := String?{None}
-    network := NetworkPolicy?{None}
-    external_write := false
-    host := false
-    command := String?{None}
-    command_args := [String]{}
-    separator := false
-    index := 0
+    ^task_id: String?{None}
+    ^root: String?{None}
+    ^cwd: String?{None}
+    ^network: NetworkPolicy?{None}
+    ^external_write: false
+    ^host: false
+    ^command: String?{None}
+    ^command_args: [String]{}
+    ^separator: false
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         if separator {
@@ -135,7 +135,7 @@ parse_invocation: fn(args: [String]) -[FS]> Invocation LaunchError! {
             }
             return Err(launch_error("expected `--` before command, found `{name}`"))
         }
-        value := ""
+        ^value: ""
         if equals >= 0 -> value = text_from(option, equals + 1)
         if equals < 0 {
             index += 1
@@ -252,7 +252,7 @@ text_from: fn(value: String, start: Int) -> String Never! {
 
 digits_value: fn(text: String) -> Int? Never! {
     if text == "" -> return None
-    value := 0
+    ^value: 0
     loop byte in text.bytes() {
         code: Int{byte}
         if code < 48 || code > 57 || value > 100000000 -> return None
@@ -263,8 +263,8 @@ digits_value: fn(text: String) -> Int? Never! {
 
 // PATH entries as the host splits them: an empty entry is the current directory.
 path_entries: fn(value: String) -> [String] Never! {
-    entries := [String]{}
-    start := 0
+    ^entries: [String]{}
+    ^start: 0
     raw: value.bytes()
     loop index in 0..<raw.len() + 1 {
         if index == raw.len() || (Int{raw[index]}) == 58 {
@@ -323,7 +323,7 @@ launcher_path: fn() -[FS, Env]> String LaunchError! {
 }
 
 clean_probe_stderr: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         code: Int{byte}
         if code == 13 || code == 10 || code == 9 -> out.push(U8{32}) else -> out.push(byte)
@@ -362,7 +362,7 @@ probe_policies: fn(bwrap: String, ip: String, launcher: String, filter: [U8], ro
     files.write_bytes(filter_path, filter) ?? return Err(launch_error("Linux peer isolation unavailable: seccomp socket filter cannot be staged at `{filter_path}`: {err}"))
     loop choice in ([NetworkPolicy]{NetworkPolicy.Disabled, NetworkPolicy.LoopbackOnly}) {
         mode: if choice == .LoopbackOnly -> "--internal-loopback" else -> "--internal-disabled"
-        inner := [String]{launcher.copy(), mode}
+        ^inner: [String]{launcher.copy(), mode}
         if choice == .LoopbackOnly -> inner.push(ip.copy())
         // The probe workload is the launcher itself: `--version` exits 0.
         inner.push(launcher.copy())
@@ -379,7 +379,9 @@ probe_policies: fn(bwrap: String, ip: String, launcher: String, filter: [U8], ro
 
 probe_root: fn() -[FS, Env, Time]> String LaunchError! {
     base: process.env_get("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT") ?? roots.value("JET_SCRATCH_ROOT")
-    if base == "" -> return Err(launch_error("cannot locate a disk-backed capability probe directory"))
+    if base == "" {
+        return Err(launch_error("cannot locate a disk-backed capability probe directory"))
+    }
     files.create_dir_all(base) ?? return Err(launch_error("capability probe root `{base}` cannot be created: {err}"))
     root: "{base}/compiled-workload-peer-probe-{sys.pid()}-{time.unix_ns()}"
     if files.exists(root) {
@@ -442,7 +444,7 @@ socket_syscall: fn(arch: String) -> Int? Never! {
 // ---- Bubblewrap ----
 
 linux_base_args: fn(root: String, cwd: String, network: NetworkPolicy) -> [String] Never! {
-    args := [String]{
+    ^args: [String]{
         "--die-with-parent",
         "--unshare-all",
         "--ro-bind",
@@ -477,7 +479,7 @@ linux_base_args: fn(root: String, cwd: String, network: NetworkPolicy) -> [Strin
 // program open in bwrap as descriptor 3 for `--seccomp 3`; bwrap is the
 // launcher's direct child, so its `--die-with-parent` parent is the launcher.
 sandbox_spec: fn(bwrap: String, filter_path: String, root: String, cwd: String, network: NetworkPolicy, inner: [String]) -[FS, Exec]> ProcessSpec LaunchError! {
-    argv := [String]{bwrap.copy()}
+    ^argv: [String]{bwrap.copy()}
     loop word in linux_base_args(root, cwd, network) -> argv.push(word)
     if network == .Disabled {
         argv.push("--seccomp")
@@ -502,7 +504,7 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
     filter_path: "{invocation.root}/.compiled-workload-peer-seccomp-{stamp}"
     files.create(status_file, if_exists: .Refuse) ?? return Err(launch_error("Linux peer isolation signal status cannot be created at `{status_file}`: {err}"))
     if invocation.network == .Disabled {
-        staged := files.create(filter_path, if_exists: .Refuse) ?? {
+        ^staged: files.create(filter_path, if_exists: .Refuse) ?? {
             files.remove(status_file).drop("the signal status file is scratch")
             return Err(launch_error("Linux peer isolation seccomp socket filter cannot be created at `{filter_path}`: {err}"))
         }
@@ -515,15 +517,15 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
             return Err(launch_error("Linux peer isolation seccomp socket filter cannot be written to `{filter_path}`: {err}"))
         }
     }
-    inner := [String]{launcher.copy()}
+    ^inner: [String]{launcher.copy()}
     inner.push(if invocation.network == .LoopbackOnly -> "--internal-loopback" else -> "--internal-disabled")
     inner.push("--status-file")
     inner.push(status_file.copy())
     if invocation.network == .LoopbackOnly -> inner.push(ip.copy())
     inner.push(command.copy())
     loop item in invocation.args -> inner.push(item.copy())
-    result := ChildEnd{code: 0, signal: 0}
-    failure := ""
+    ^result: ChildEnd{code: 0, signal: 0}
+    ^failure: ""
     if sandbox_spec(bwrap, filter_path, invocation.root, invocation.cwd, invocation.network, inner) == {
         .Ok(spec) -> {
             if run_child(spec) == {
@@ -536,7 +538,7 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
     if invocation.network == .Disabled {
         files.remove(filter_path) ?? return Err(launch_error("Linux peer isolation seccomp socket filter cannot be removed from `{filter_path}`: {err}"))
     }
-    reported := 0
+    ^reported: 0
     if read_linux_signal(status_file) == {
         .Ok(number) -> { reported = number }
         .Err(error) -> {
@@ -580,8 +582,8 @@ child_end: fn(receipt: ProcessReceipt) -> ChildEnd Never! {
 // The supervisor inside the sandbox.
 internal_main: fn(args: [String], loopback: Bool) -[FS, Env, Exec, IO, Time, Time.Wait]> Never {
     if sys.name() != "linux" -> fail("internal runner is Linux-only")
-    rest := args.copy()
-    status_file := ""
+    ^rest: args.copy()
+    ^status_file: ""
     if rest.len() > 0 && rest[0] == "--status-file" {
         if rest.len() < 2 -> fail("internal runner status file is missing")
         value: rest[1].copy()
@@ -624,8 +626,8 @@ loopback_command: fn(args: [String]) -[Exec, IO, Time.Wait]> [String] Never! {
 // Seccomp filter mode with no_new_privs, as `bwrap --seccomp` leaves it.
 require_socket_filter: fn() -[FS]> LaunchError! {
     status: files.read("/proc/self/status") ?? return Err(launch_error("disabled-network internal runner cannot read its seccomp status: {err}"))
-    filtered := false
-    no_new_privs := false
+    ^filtered: false
+    ^no_new_privs: false
     loop line in status.split("\n") {
         if line.starts_with("Seccomp:") && text_from(line, 8).trim() == "2" -> filtered = true
         if line.starts_with("NoNewPrivs:") && text_from(line, 11).trim() == "1" {
@@ -644,7 +646,7 @@ sweep_namespace: fn(signal: Int) -[FS, Env]> LaunchError! {
     loop entry in entries {
         pid: digits_value(entry.name) ?? next
         if pid <= 1 || pid == own -> next
-        signaled := true
+        ^signaled: true
         #Unsafe("posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command") {
             if sys.kill(pid, signal) == .Err(_) -> signaled = false
         }

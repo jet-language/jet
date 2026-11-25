@@ -93,7 +93,7 @@ priv __InputLines: struct {
 
     read_line: fn(^self) -[IO, FS.Read, Time.Wait]> String? IOError! {
         if self.paths.is_empty() {
-            handle := stdin()
+            ^handle: stdin()
             return handle.read_line()
         }
         loop true {
@@ -209,7 +209,7 @@ PrintStyle: struct {
 #Builtin.Role(.ContextPrint) priv __print_style: fn() -> PrintStyle Never! { PrintStyle{} }
 
 print: fn(text: String) -[IO, Time.Wait]> Never! {
-    out := stdout()
+    ^out: stdout()
     out.write_line(text).drop("stdout write")
 }
 
@@ -366,7 +366,7 @@ stdin: fn() -> StdinHandle Never! { StdinHandle{fd: 0} }
 
 // `text` with each line replaced by `change(line)`; the line endings stay.
 priv input_edit_text: fn(text: String, change: fn(String) -> String Never!) -> String Never! {
-    edited := ""
+    ^edited: ""
     pieces: text.split("\n").to_list()
     loop at in 0..<pieces.len() {
         piece: pieces[at]
@@ -594,17 +594,17 @@ terminal_secret_read: fn() -[IO, Time.Wait]> {eof: Bool, line: String, cause: St
 }
 
 choose_menu: fn(prompt: String, options: [String]) -> String Never! {
-    menu := "{prompt}\n"
+    ^menu: "{prompt}\n"
     loop i in 0..<options.len() -> menu = "{menu}  {i + 1}) {options[i]}\n"
     menu
 }
 
 choose_index: fn(answer: String) -> Int? Never! {
     raw: answer.trim().bytes()
-    start := 0
+    ^start: 0
     if raw.len() > 0 && raw[0] == (U8{43}) -> start = 1
     if start >= raw.len() -> return None
-    n := 0
+    ^n: 0
     loop i in start..<raw.len() {
         d: Int{raw[i]} - 48
         if d < 0 || d > 9 -> return None
@@ -674,8 +674,8 @@ confirm_answer: fn(answer: String) -> Bool Never! {
 }
 
 sgr: fn(spec: String) -> String {
-    parts := [String]{}
-    cur := [U8]{}
+    ^parts: [String]{}
+    ^cur: [U8]{}
     loop b in spec.bytes() {
         if b == (U8{32}) || b == (U8{44}) || b == (U8{59}) {
             token: ascii_lower(String.from_bytes(cur) ?? "")
@@ -687,7 +687,7 @@ sgr: fn(spec: String) -> String {
     token: ascii_lower(String.from_bytes(cur) ?? "")
     code: token_code(token)
     if code.len() > 0 -> parts.push(code)
-    out := ""
+    ^out: ""
     loop i in 0..<parts.len() {
         if i > 0 -> out = "{out};"
         out = "{out}{parts[i]}"
@@ -728,14 +728,14 @@ token_code: fn(token: String) -> String {
 
 chomp: fn(text: String) -> String {
     raw: text.bytes()
-    n := raw.len()
+    ^n: raw.len()
     loop n > 0 && (raw[n - 1] == (U8{10}) || raw[n - 1] == (U8{13})) -> n -= 1
     slice_bytes(raw, 0, n)
 }
 
 slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
@@ -753,7 +753,7 @@ ends_with_bytes: fn(hay: [U8], needle: [U8]) -> Bool {
 }
 
 ascii_lower: fn(text: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: b
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
@@ -762,8 +762,8 @@ ascii_lower: fn(text: String) -> String {
 }
 
 parse_int: fn(text: String) -> Int? {
-    n := 0
-    any := false
+    ^n: 0
+    ^any: false
     loop b in text.bytes() {
         d: b
         if d < 48 || d > 57 -> return None

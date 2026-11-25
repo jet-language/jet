@@ -48,8 +48,8 @@ TrustRootExportRequest: struct {
 
     parse: fn(args: [String]) -> TrustRootExportRequest CLIToolError! {
         if (args.get(0) ?? "") != "export" -> return Err(CLIToolError.new(cli_trust_root_usage()))
-        request := TrustRootExportRequest{output: None, bootstrap: None, index_key: None, cache_key: None, toolchain_key: None}
-        i := 1
+        ^request: TrustRootExportRequest{output: None, bootstrap: None, index_key: None, cache_key: None, toolchain_key: None}
+        ^i: 1
         loop i < args.len() {
             option: TrustRootExportOption.parse(args[i]) ?? return Err(CLIToolError.new("unknown option `{args[i]}`\n\n{cli_trust_root_usage()}"))
             value: args.get(i + 1) ?? return Err(CLIToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
@@ -70,7 +70,7 @@ TrustRootExportRequest: struct {
 
     // The requested key files in role order: index, cache, toolchain.
     key_paths: fn(self) -> [{role: String, path: String}] Never! {
-        paths := [{role: String, path: String}]{}
+        ^paths: [{role: String, path: String}]{}
         if self.index_key == .Val(path) -> paths.push({role: "index", path: path})
         if self.cache_key == .Val(path) -> paths.push({role: "cache", path: path})
         if self.toolchain_key == .Val(path) -> paths.push({role: "toolchain", path: path})
@@ -93,7 +93,7 @@ cli_trust_root_main: fn(args: [String]) -[FS, IO]> Int {
 cli_trust_root_run: fn(args: [String]) -[FS, IO]> CLIToolError! {
     request: TrustRootExportRequest.parse(args)
     output: request.output ?? return Err(CLIToolError.new("--output is required\n\n{cli_trust_root_usage()}"))
-    keys := [PublicTrustKey]{}
+    ^keys: [PublicTrustKey]{}
     loop entry in request.key_paths() {
         value: cli_trust_root_read_public_key(entry.path) ?? return Err(CLIToolError.new("read {entry.role} public trust key `{entry.path}`: {err.message}"))
         key: PublicTrustKey.from_nix_line(entry.role, value) ?? return Err(CLIToolError.new("{entry.role} public trust key `{entry.path}`: {err.message()}"))
@@ -153,7 +153,7 @@ cli_trust_root_write_immutable: fn(path: String, body: [U8]) -[FS]> CLIToolError
             if !store_io_is_not_found(error) {
                 return Err(CLIToolError.new("inspect {path}: {error}"))
             }
-            writer := files.create(path, if_exists: .Refuse) ?? return Err(CLIToolError.new("create {path}: {err}"))
+            ^writer: files.create(path, if_exists: .Refuse) ?? return Err(CLIToolError.new("create {path}: {err}"))
             writer.write_bytes(body) ?? return Err(CLIToolError.new("write {path}: {err}"))
             writer.fsync() ?? return Err(CLIToolError.new("write {path}: {err}"))
         }
@@ -163,7 +163,7 @@ cli_trust_root_write_immutable: fn(path: String, body: [U8]) -[FS]> CLIToolError
 // The publication README. The prose is byte-stable; its line continuations
 // join some words without a space.
 cli_trust_root_readme: fn(keys: [PublicTrustKey]) -> String Never! {
-    out := "# Jet public trust root\n\nThis directory contains publication-safe trust metadata. It contains publickeys only. `TrustKey` HMAC secrets and signing keys stay in the offlinepublisher or host trust stores and must never be copied here.\n\nThe stable index public-key document is published at\n`https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`. Review its one-line\nvalue, then install it as `<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub`.\nThe signed index URL is configured separately in\n`<JETPACK_ROOT>/config/nix-index-v1.endpoint`; a host-returned key is never\ntrusted automatically.\n\n## Files\n\n- `trust-manifest.json` records the domain, root pin, role, algorithm, key id,and exact client trust-file path.\n"
+    ^out: "# Jet public trust root\n\nThis directory contains publication-safe trust metadata. It contains publickeys only. `TrustKey` HMAC secrets and signing keys stay in the offlinepublisher or host trust stores and must never be copied here.\n\nThe stable index public-key document is published at\n`https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`. Review its one-line\nvalue, then install it as `<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub`.\nThe signed index URL is configured separately in\n`<JETPACK_ROOT>/config/nix-index-v1.endpoint`; a host-returned key is never\ntrusted automatically.\n\n## Files\n\n- `trust-manifest.json` records the domain, root pin, role, algorithm, key id,and exact client trust-file path.\n"
     loop key in keys {
         out = "{out}- `{key.path_for_publication()}` is the `{key.role}` role's public key.\n"
     }

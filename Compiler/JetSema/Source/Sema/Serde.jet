@@ -45,7 +45,7 @@ sema_serde_type_definition_in: fn(environment: SemaScopeEnvironment, program: Se
 // The checked type whose key (the qualified `module.Name` spelling) is
 // `name`, or whose name is the unqualified `name`.
 sema_serde_checked_type_named: fn(program: SemaProgramTables, name: String) -> TTypeDef? {
-    leaf := sema_serde_named_leaf(name)
+    ^leaf: sema_serde_named_leaf(name)
     loop definition in program.checked_types {
         if definition.key == name || (definition.name == leaf && name == leaf) {
             return Val(definition)
@@ -141,7 +141,7 @@ sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaPr
         loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
             trait_name: graph.modules[module_row_index].impls[implementation_index].trait_name ?? next
             if sema_serde_named_leaf(trait_name) != wanted -> next
-            target_module := graph.modules[module_row_index].impls[implementation_index].target_module_identity
+            ^target_module: graph.modules[module_row_index].impls[implementation_index].target_module_identity
             if module_is_none(target_module) {
                 target_module = graph.modules[module_row_index].impls[implementation_index].source_module_identity
             }
@@ -168,7 +168,7 @@ sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaPr
 sema_serde_generic_bound: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String, direction: SemaSerdeDirection) -> Bool Never! {
     loop parameter in environment.generic_params {
         if parameter.name != name -> next
-        codec := sema_serde_codec_name(direction)
+        ^codec: sema_serde_codec_name(direction)
         if parameter.bounds.len() > 0 {
             loop bound in parameter.bounds {
                 if symbol_key_names(sema_program_symbol_key(program, bound), codec) -> return true
@@ -285,7 +285,7 @@ sema_serde_stored_is_admissible: fn(check: SemaBodyCheck, ty: Type, direction: S
 // Whether `ty`, as module `module_identity` names it, has the `direction`
 // codec; generic parameters are `environment`'s.
 sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
-    resolved := ty
+    ^resolved: ty
     graph: program.registration_graph
     resolved = sema_type_resolve_declared_with_generics(graph, ty, module_identity, environment.generic_params)
     // Demand: a data codec call requires the codecs of the

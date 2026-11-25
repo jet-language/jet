@@ -452,11 +452,11 @@ sema_loop_value_set_pending_type: fn(context: ^SemaCheckContext, kind: SemaLoopV
 }
 
 sema_loop_value_push_frame: fn(context: ^SemaCheckContext, label: String?, entry: SemaOwnershipFork) Never! {
-    pending := context.pending_loop_value
+    ^pending: context.pending_loop_value
     context.pending_loop_value = None
-    kind := SemaLoopValueKind.Effect
-    resolved_label := label
-    result_type := Type?{None}
+    ^kind: SemaLoopValueKind.Effect
+    ^resolved_label: label
+    ^result_type: Type?{None}
     if pending == .Val(value) {
         kind = value.kind
         if value.label != None -> resolved_label = value.label
@@ -471,12 +471,12 @@ sema_loop_value_pop_frame: fn(context: ^SemaCheckContext) Never! {
         return
     }
     frame: context.loop_value_frames.pop() ?? return
-    if context.loop_break_flows.len() > 0 -> _ := context.loop_break_flows.pop()
+    if context.loop_break_flows.len() > 0 -> ^_: context.loop_break_flows.pop()
     if frame.kind == SemaLoopValueKind.Result -> context.last_loop_result_type = frame.ty
 }
 
 sema_loop_value_resolve_frame: fn(context: SemaCheckContext, label: String?) -> Int? {
-    index := context.loop_value_frames.len() - 1
+    ^index: context.loop_value_frames.len() - 1
     if label != None {
         loop index >= 0 {
             if context.loop_value_frames[index].label == label -> return Val(index)
@@ -558,7 +558,7 @@ sema_statement_tail_store_init: fn() -> SemaStatementTailStore Never! {
 }
 
 sema_statement_tail_store_add_body: fn(store: ^SemaStatementTailStore, statements: [Stmt]) -> Int Never! {
-    body_id := store.bodies.len()
+    ^body_id: store.bodies.len()
     // copy: the checker's statement lists are read parameters (the program
     // keeps them), and live-after queries outlive this frame's borrow of them.
     // Row 0 is the empty spelling, which no statement reads.
@@ -1410,14 +1410,18 @@ sema_intern_type_force: fn(program: SemaProgramTables, context: ^SemaCheckContex
 // Written form of `id` in `(program, context.type_delta)`.
 sema_type_syntax_in: fn(program: SemaProgramTables, context: SemaCheckContext, id: TypeID) -> Type Never! {
     graph: program.registration_graph
-    if context.type_delta.len() > 0 -> return delta_type_syntax(graph.interner, context.type_delta[0], id)
+    if context.type_delta.len() > 0 {
+        return delta_type_syntax(graph.interner, context.type_delta[0], id)
+    }
     type_syntax(graph.interner, id)
 }
 
 // Kind byte of `id` in `(program, context.type_delta)` without allocating a Type.
 sema_type_kind_in: fn(program: SemaProgramTables, context: SemaCheckContext, id: TypeID) -> TypeKind Never! {
     graph: program.registration_graph
-    if context.type_delta.len() > 0 -> return delta_type_kind(graph.interner, context.type_delta[0], id)
+    if context.type_delta.len() > 0 {
+        return delta_type_kind(graph.interner, context.type_delta[0], id)
+    }
     type_kind(graph.interner, id)
 }
 
@@ -1425,7 +1429,9 @@ sema_type_kind_in: fn(program: SemaProgramTables, context: SemaCheckContext, id:
 sema_type_id_equal: fn(program: SemaProgramTables, context: SemaCheckContext, left: TypeID, right: TypeID) -> Bool Never! {
     if left.id == right.id -> return true
     graph: program.registration_graph
-    if context.type_delta.len() > 0 -> return delta_type_id_identity_equal(graph.interner, context.type_delta[0], left, right)
+    if context.type_delta.len() > 0 {
+        return delta_type_id_identity_equal(graph.interner, context.type_delta[0], left, right)
+    }
     type_id_identity_equal(graph.interner, left, right)
 }
 
@@ -1490,8 +1496,8 @@ sema_program_decl_key: fn(program: SemaProgramTables, id: DeclID) -> String Neve
 }
 
 sema_program_tables_init: fn(graph: ^^SemaRegistrationGraph, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
-    boxed_edges := sema_checked_program_boxed_edges(graph)
-    copy_facts := sema_copy_facts_table(graph)
+    ^boxed_edges: sema_checked_program_boxed_edges(graph)
+    ^copy_facts: sema_copy_facts_table(graph)
     sema_program_tables_with(graph, checked_types, boxed_edges, copy_facts)
 }
 
@@ -1499,7 +1505,7 @@ sema_program_tables_init: fn(graph: ^^SemaRegistrationGraph, checked_types: [TTy
 // (sema_registration_graph_snapshot) and no checked types. With no
 // registered struct to rule one out, any struct may have a computed field.
 sema_program_tables_snapshot: fn() -> SemaProgramTables Never! {
-    tables := sema_program_tables_init(sema_registration_graph_snapshot(), [TTypeDef]{})
+    ^tables: sema_program_tables_init(sema_registration_graph_snapshot(), [TTypeDef]{})
     tables.has_computed_fields = true
     tables
 }
@@ -1507,9 +1513,9 @@ sema_program_tables_snapshot: fn() -> SemaProgramTables Never! {
 // The tables over `graph` whose boxed edges and copy facts were already
 // computed from it (sema_checked_program_boxed_edges, sema_copy_facts_table).
 sema_program_tables_with: fn(graph: ^^SemaRegistrationGraph, checked_types: [TTypeDef], boxed_edges: ^^[U32:[String]], copy_facts: ^^SemaCopyFactsTable) -> SemaProgramTables Never! {
-    names := name_table_sized(checked_types.len() * 2 + 2)
-    name_rows := [[Int]]{[Int]{}}
-    has_computed := false
+    ^names: name_table_sized(checked_types.len() * 2 + 2)
+    ^name_rows: [[Int]]{[Int]{}}
+    ^has_computed: false
     loop (index, definition) in checked_types {
         id: name_index(name_intern(names, definition.name))
         if id == name_rows.len() -> name_rows.push([Int]{})
@@ -1712,9 +1718,9 @@ sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program
 }
 
 sema_loop_break_flows_snapshot: fn(source: [SemaLoopBreakFlows]) -> [SemaLoopBreakFlows] Never! {
-    result := [SemaLoopBreakFlows]{}
+    ^result: [SemaLoopBreakFlows]{}
     loop frame in source {
-        paths := [SemaOwnershipState]{}
+        ^paths: [SemaOwnershipState]{}
         loop path in frame.paths -> paths.push(sema_ownership_state_snapshot(path))
         result.push(SemaLoopBreakFlows{paths: paths})
     }
@@ -1841,7 +1847,7 @@ sema_body_check_swap_tail_store: fn(check: ^SemaBodyCheck, tail_store: ^SemaStat
 }
 
 sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Never! {
-    snapshot := SemaCheckContext{
+    ^snapshot: SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
         unsafe_depth: source.unsafe_depth,
         duty_scope_depth: source.duty_scope_depth,
@@ -1956,7 +1962,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
 // tree, sema_publish_expression) names the same row in the enclosing check.
 // A snapshot that forked a delta of its own hands that one back.
 sema_check_delta_pass: fn(from: ^[InternerDelta], to: ^[InternerDelta]) Never! {
-    delta := from.pop() ?? return
+    ^delta: from.pop() ?? return
     to.push(delta)
 }
 
@@ -2169,53 +2175,53 @@ sema_scope_commit: fn(table: ^SemaScopeTable, mark: SemaScopeMark) Never! {
 // except the number-name refusals, which stay (number_retypes_found). The mark
 // is spent, so its saved fields move back.
 sema_check_context_rollback: fn(context: ^SemaCheckContext, mark: ^^SemaCheckContextMark) Never! {
-    loop context.call_facts.len() > mark.call_facts -> _ := context.call_facts.pop()
-    loop context.module_writes.len() > mark.module_writes -> _ := context.module_writes.pop()
+    loop context.call_facts.len() > mark.call_facts -> ^_: context.call_facts.pop()
+    loop context.module_writes.len() > mark.module_writes -> ^_: context.module_writes.pop()
     loop context.call_return_views.len() > mark.call_return_views {
-        _ := context.call_return_views.pop()
+        ^_: context.call_return_views.pop()
     }
     loop context.local_view_provenance.len() > mark.local_view_provenance {
-        _ := context.local_view_provenance.pop()
+        ^_: context.local_view_provenance.pop()
     }
-    loop context.name_references.len() > mark.name_references -> _ := context.name_references.pop()
+    loop context.name_references.len() > mark.name_references -> ^_: context.name_references.pop()
     loop context.comptime_requests.len() > mark.comptime_requests {
-        _ := context.comptime_requests.pop()
+        ^_: context.comptime_requests.pop()
     }
     sema_comptime_body_sources_truncate(context, mark.comptime_body_sources)
-    loop context.compute_calls.len() > mark.compute_calls -> _ := context.compute_calls.pop()
+    loop context.compute_calls.len() > mark.compute_calls -> ^_: context.compute_calls.pop()
     loop context.autodiff_obligations.len() > mark.autodiff_obligations {
-        _ := context.autodiff_obligations.pop()
+        ^_: context.autodiff_obligations.pop()
     }
     loop context.generic_crossings.len() > mark.generic_crossings {
-        _ := context.generic_crossings.pop()
+        ^_: context.generic_crossings.pop()
     }
-    loop context.generic_calls.len() > mark.generic_calls -> _ := context.generic_calls.pop()
-    loop context.copy_events.len() > mark.copy_events -> _ := context.copy_events.pop()
-    loop context.origin_facts.len() > mark.origin_facts -> _ := context.origin_facts.pop()
-    loop context.typed_goals.len() > mark.typed_goals -> _ := context.typed_goals.pop()
-    loop context.index_proofs.len() > mark.index_proofs -> _ := context.index_proofs.pop()
+    loop context.generic_calls.len() > mark.generic_calls -> ^_: context.generic_calls.pop()
+    loop context.copy_events.len() > mark.copy_events -> ^_: context.copy_events.pop()
+    loop context.origin_facts.len() > mark.origin_facts -> ^_: context.origin_facts.pop()
+    loop context.typed_goals.len() > mark.typed_goals -> ^_: context.typed_goals.pop()
+    loop context.index_proofs.len() > mark.index_proofs -> ^_: context.index_proofs.pop()
     loop context.filed_expr_ids.len() > mark.filed_expr_ids {
-        dropped := context.filed_expr_ids.pop()
-        if dropped == .Val(id) -> _ := context.filed_expr_id_set.remove(id)
+        ^dropped: context.filed_expr_ids.pop()
+        if dropped == .Val(id) -> ^_: context.filed_expr_id_set.remove(id)
     }
     context.next_expr_id = mark.next_expr_id
     loop context.noelse_chain_starts.len() > mark.noelse_chain_starts {
-        _ := context.noelse_chain_starts.pop()
+        ^_: context.noelse_chain_starts.pop()
     }
-    loop context.failure_edges.len() > mark.failure_edges -> _ := context.failure_edges.pop()
+    loop context.failure_edges.len() > mark.failure_edges -> ^_: context.failure_edges.pop()
     loop context.failure_union_members.len() > mark.failure_union_members {
-        _ := context.failure_union_members.pop()
+        ^_: context.failure_union_members.pop()
     }
     loop context.failure_union_cases.len() > mark.failure_union_cases {
-        _ := context.failure_union_cases.pop()
+        ^_: context.failure_union_cases.pop()
     }
     loop context.failure_union_edges.len() > mark.failure_union_edges {
-        _ := context.failure_union_edges.pop()
+        ^_: context.failure_union_edges.pop()
     }
     loop context.incomplete_reasons.len() > mark.incomplete_reasons {
-        _ := context.incomplete_reasons.pop()
+        ^_: context.incomplete_reasons.pop()
     }
-    saved := mark.saved.move()
+    ^saved: mark.saved.move()
     context.comptime_body_values = saved.comptime_body_values.move()
     context.exact_int_reachable = saved.exact_int_reachable
     context.unsafe_depth = saved.unsafe_depth
@@ -2290,7 +2296,7 @@ sema_check_record_expr_id: fn(expr: Expr, value: ^TExpr, context: ^SemaCheckCont
     if value.id != AST_NODE_GENERATED {
         return
     }
-    id := expr_node_id(expr)
+    ^id: expr_node_id(expr)
     if id == AST_NODE_GENERATED || context.fresh_expr_ids || context.filed_expr_id_set.get(id) != None {
         id = context.next_expr_id
         context.next_expr_id -= 1
@@ -2341,7 +2347,7 @@ sema_check_context_rollback_keep_expr_ids: fn(context: ^SemaCheckContext, mark: 
 // the deep check runs where `--deep-checks` selects it, and the effect pass
 // reads what each of its calls reaches (E0713) from them.
 sema_check_context_rollback_keep_calls: fn(context: ^SemaCheckContext, mark: ^^SemaCheckContextMark) Never! {
-    calls := [SemaCallSiteFact]{}
+    ^calls: [SemaCallSiteFact]{}
     loop context.call_facts.len() > mark.call_facts {
         fact: context.call_facts.pop() ?? break
         calls.push(fact)
@@ -2352,7 +2358,7 @@ sema_check_context_rollback_keep_calls: fn(context: ^SemaCheckContext, mark: ^^S
 }
 
 sema_scope_hardware_transfers_snapshot: fn(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
-    result := [SemaHardwareDMATransferFact]{}
+    ^result: [SemaHardwareDMATransferFact]{}
     loop fact in source -> result.push(fact.copy())
     result
 }
@@ -2436,36 +2442,40 @@ sema_scope_rollback: fn(table: ^SemaScopeTable, mark: SemaScopeMark) Never! {
     // Newest edit first: each undo row is popped and its saved binding moves
     // back into place.
     loop table.binding_undo.len() > mark.undo {
-        undo := table.binding_undo.pop() ?? break
+        ^undo: table.binding_undo.pop() ?? break
         if undo.index < mark.bindings -> table.bindings[undo.index] = undo.binding.move()
     }
     loop table.bindings.len() > mark.bindings {
         last: table.bindings.len() - 1
         if last >= table.base_binding_count {
             if sema_scope_name_slot(table, table.bindings[last].symbol.name) == .Val(slot) {
-                _ := table.name_positions[slot].pop()
+                ^_: table.name_positions[slot].pop()
             }
         }
-        _ := table.bindings.pop()
+        ^_: table.bindings.pop()
     }
-    loop table.frames.len() > mark.frames -> _ := table.frames.pop()
+    loop table.frames.len() > mark.frames -> ^_: table.frames.pop()
     if mark.loop_labels.len() == 0 {
         if table.loop_labels.len() > 0 -> table.loop_labels = [SemaScopeLoopLabel]{}
-    } else {
-        table.loop_labels = mark.loop_labels.copy()
-    }
+    } else { table.loop_labels = mark.loop_labels.copy() }
     if mark.hardware_transfers.len() == 0 {
-        if table.hardware_transfers.len() > 0 -> table.hardware_transfers = [SemaHardwareDMATransferFact]{}
+        if table.hardware_transfers.len() > 0 {
+            table.hardware_transfers = [SemaHardwareDMATransferFact]{}
+        }
     } else {
         table.hardware_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_transfers)
     }
     if mark.hardware_definite_transfers.len() == 0 {
-        if table.hardware_definite_transfers.len() > 0 -> table.hardware_definite_transfers = [SemaHardwareDMATransferFact]{}
+        if table.hardware_definite_transfers.len() > 0 {
+            table.hardware_definite_transfers = [SemaHardwareDMATransferFact]{}
+        }
     } else {
         table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_definite_transfers)
     }
     if mark.hardware_pending_transfers.len() == 0 {
-        if table.hardware_pending_transfers.len() > 0 -> table.hardware_pending_transfers = [SemaHardwareDMATransferFact]{}
+        if table.hardware_pending_transfers.len() > 0 {
+            table.hardware_pending_transfers = [SemaHardwareDMATransferFact]{}
+        }
     } else {
         table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_pending_transfers)
     }
@@ -2534,14 +2544,14 @@ sema_scope_init: fn(module_identity: ModuleID) -> SemaScopeTable Never! {
 
 sema_scope_function_owner_key: fn(table: SemaScopeTable) -> String Never! {
     if table.current <= 0 -> return ""
-    frame := table.current
+    ^frame: table.current
     loop table.frames[frame].parent > 0 -> frame = table.frames[frame].parent
     table.frames[frame].owner
 }
 
 // Whether the current scope is lexically inside an `#Impure` block.
 sema_scope_inside_impure: fn(table: SemaScopeTable) -> Bool Never! {
-    frame := table.current
+    ^frame: table.current
     loop frame > 0 {
         if table.frames[frame].owner.starts_with("impure@") -> return true
         frame = table.frames[frame].parent
@@ -2552,8 +2562,8 @@ sema_scope_inside_impure: fn(table: SemaScopeTable) -> Bool Never! {
 // A local identity is rooted at its enclosing function/lambda and includes
 // every lexical frame owner; frame indices are traversal-order artifacts.
 sema_scope_local_owner_key: fn(table: SemaScopeTable) -> String Never! {
-    owner := ""
-    frame := table.current
+    ^owner: ""
+    ^frame: table.current
     loop frame > 0 {
         frame_owner: table.frames[frame].owner
         owner = if owner == "" -> frame_owner else -> "{frame_owner}/{owner}"
@@ -2575,26 +2585,26 @@ sema_scope_leave: fn(table: ^SemaScopeTable, state: ^SemaOwnershipState) Never! 
     if table.current <= 0 {
         return
     }
-    leaving := table.current
-    index := table.hardware_transfers.len()
+    ^leaving: table.current
+    ^index: table.hardware_transfers.len()
     loop index > 0 {
         index -= 1
         if table.hardware_transfers[index].buffer_frame == leaving {
-            _ := table.hardware_transfers.remove(index, .Slot)
+            ^_: table.hardware_transfers.remove(index, .Slot)
         }
     }
     index = table.hardware_definite_transfers.len()
     loop index > 0 {
         index -= 1
         if table.hardware_definite_transfers[index].scope_frame == leaving || table.hardware_definite_transfers[index].buffer_frame == leaving {
-            _ := table.hardware_definite_transfers.remove(index, .Slot)
+            ^_: table.hardware_definite_transfers.remove(index, .Slot)
         }
     }
     index = table.hardware_pending_transfers.len()
     loop index > 0 {
         index -= 1
         if table.hardware_pending_transfers[index].buffer_frame == leaving {
-            _ := table.hardware_pending_transfers.remove(index, .Slot)
+            ^_: table.hardware_pending_transfers.remove(index, .Slot)
         }
     }
     sema_ownership_leave_scope(state)
@@ -2606,7 +2616,7 @@ sema_scope_hardware_fact_equal: fn(left: SemaHardwareDMATransferFact, right: Sem
 }
 
 sema_scope_hardware_intersection: fn(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
-    result := [SemaHardwareDMATransferFact]{}
+    ^result: [SemaHardwareDMATransferFact]{}
     loop candidate in left {
         loop other in right {
             if sema_scope_hardware_fact_equal(candidate, other) {
@@ -2619,9 +2629,9 @@ sema_scope_hardware_intersection: fn(left: [SemaHardwareDMATransferFact], right:
 }
 
 sema_scope_hardware_union: fn(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
-    result := sema_scope_hardware_transfers_snapshot(left)
+    ^result: sema_scope_hardware_transfers_snapshot(left)
     loop candidate in right {
-        found := false
+        ^found: false
         loop existing in result {
             if sema_scope_hardware_fact_equal(candidate, existing) -> found = true
         }
@@ -2631,9 +2641,9 @@ sema_scope_hardware_union: fn(left: [SemaHardwareDMATransferFact], right: [SemaH
 }
 
 sema_scope_hardware_join: fn(before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) -> SemaScopeHardwareFacts Never! {
-    transfers := sema_scope_hardware_union(before.transfers, then_path.transfers)
-    definite := sema_scope_hardware_intersection(before.definite, then_path.definite)
-    pending := sema_scope_hardware_union(before.pending, then_path.pending)
+    ^transfers: sema_scope_hardware_union(before.transfers, then_path.transfers)
+    ^definite: sema_scope_hardware_intersection(before.definite, then_path.definite)
+    ^pending: sema_scope_hardware_union(before.pending, then_path.pending)
     if has_else {
         transfers = sema_scope_hardware_union(transfers, else_path.transfers)
         definite = sema_scope_hardware_intersection(definite, else_path.definite)
@@ -2777,7 +2787,7 @@ sema_scope_require_knowledge_gate: fn(check: ^SemaBodyCheck, plane: SemaKnowledg
 
 sema_scope_module_policy: fn(table: ^SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID) -> Int Never! {
     if table.policy_modules.get(module_identity.id) == .Val(position) -> return position
-    policy := SemaScopeModulePolicy{
+    ^policy: SemaScopeModulePolicy{
         unit_explicit_units: false,
         copies_explicit: false,
         writes_explicit: false,
@@ -2792,7 +2802,7 @@ sema_scope_module_policy: fn(table: ^SemaScopeTable, graph: SemaRegistrationGrap
                 next
             }
             target: graph.modules[module_index].program.policy_declarations[declaration_index].target ?? next
-            slot := policy.function_unit_starts.get(target.start) ?? -1
+            ^slot: policy.function_unit_starts.get(target.start) ?? -1
             if slot < 0 {
                 slot = policy.function_unit_ends.len()
                 policy.function_unit_starts.add(target.start, slot).drop("a new function span start has no slot")
@@ -2867,7 +2877,7 @@ sema_scope_name_blocks_binding: fn(kind: SymbolKind) -> Bool Never! {
 }
 
 sema_scope_has_loop_label: fn(table: SemaScopeTable, name: String) -> Bool Never! {
-    index := table.loop_labels.len() - 1
+    ^index: table.loop_labels.len() - 1
     loop index >= 0 {
         if table.loop_labels[index].name == name -> return true
         index -= 1
@@ -2876,7 +2886,7 @@ sema_scope_has_loop_label: fn(table: SemaScopeTable, name: String) -> Bool Never
 }
 
 sema_scope_push_loop_label: fn(table: ^SemaScopeTable, name: String) -> Bool Never! {
-    duplicate := sema_scope_has_loop_label(table, name)
+    ^duplicate: sema_scope_has_loop_label(table, name)
     if sema_scope_resolve_index(table, name) == .Val(binding_index) {
         binding: table.bindings[binding_index]
         if sema_scope_name_blocks_binding(binding.symbol.kind) -> duplicate = true
@@ -2886,7 +2896,7 @@ sema_scope_push_loop_label: fn(table: ^SemaScopeTable, name: String) -> Bool Nev
 }
 
 sema_scope_pop_loop_label: fn(table: ^SemaScopeTable) Never! {
-    if table.loop_labels.len() > 0 -> _ := table.loop_labels.pop()
+    if table.loop_labels.len() > 0 -> ^_: table.loop_labels.pop()
 }
 
 // Appends one binding and records its position under its name.
@@ -2924,7 +2934,7 @@ sema_scope_name_slot: fn(table: SemaScopeTable, name: String) -> Int? Never! {
 // counts, and returns `found`.
 sema_scope_counted: fn(table: SemaScopeTable, compares: Int, found: ^^Int?) -> Int? {
     if table.lookup_counters == .Val(handle) {
-        counters := handle.counters
+        ^counters: handle.counters
         permit: counters.guard_read()
         _: permit.value.scope_lookups.add(1)
         _: permit.value.scope_compares.add(compares)
@@ -2944,7 +2954,9 @@ sema_scope_build_time: fn(table: SemaScopeTable, environment: SemaScopeEnvironme
     graph: program.registration_graph
     module_index: sema_scope_caller_index(environment, graph) ?? return false
     loop item in graph.modules[module_index].program.items {
-        if item == .Func(function) && function.name == "build" -> return sema_function_is_build_entry(function)
+        if item == .Func(function) && function.name == "build" {
+            return sema_function_is_build_entry(function)
+        }
     }
     false
 }
@@ -2965,7 +2977,7 @@ sema_scope_resolve_in_positions: fn(table: SemaScopeTable, positions: [Int]) -> 
         b_frame: table.bindings[index].frame
         if b_frame == table.current -> return Val(index)
         if b_frame == 0 && table.current >= 0 && table.frames[0].parent < 0 -> return Val(index)
-        frame := table.frames[table.current].parent
+        ^frame: table.frames[table.current].parent
         loop frame >= 0 {
             if frame == b_frame -> return Val(index)
             frame = table.frames[frame].parent
@@ -2974,9 +2986,9 @@ sema_scope_resolve_in_positions: fn(table: SemaScopeTable, positions: [Int]) -> 
     }
     last_index: positions[pos_len - 1]
     if table.bindings[last_index].frame == table.current -> return Val(last_index)
-    frame := table.current
+    ^frame: table.current
     loop frame >= 0 {
-        cursor := pos_len - 1
+        ^cursor: pos_len - 1
         loop cursor >= 0 {
             index: positions[cursor]
             if table.bindings[index].frame == frame -> return Val(index)
@@ -3005,11 +3017,11 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
             if table.lookup_counters == None {
                 return sema_scope_resolve_in_positions(table, table.base_table[0].name_positions[bs])
             }
-            compares := 0
+            ^compares: 0
             pos_len: table.base_table[0].name_positions[bs].len()
-            frame := table.current
+            ^frame: table.current
             loop frame >= 0 {
-                cursor := pos_len - 1
+                ^cursor: pos_len - 1
                 loop cursor >= 0 {
                     compares += 1
                     index: table.base_table[0].name_positions[bs][cursor]
@@ -3026,11 +3038,11 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
             if table.lookup_counters == None {
                 return sema_scope_resolve_in_positions(table, table.name_positions[local_slot])
             }
-            compares := 0
+            ^compares: 0
             pos_len: table.name_positions[local_slot].len()
-            frame := table.current
+            ^frame: table.current
             loop frame >= 0 {
-                cursor := pos_len - 1
+                ^cursor: pos_len - 1
                 loop cursor >= 0 {
                     compares += 1
                     index: table.name_positions[local_slot][cursor]
@@ -3046,15 +3058,15 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
         local_len: table.name_positions[local_slot].len()
         base_len: table.base_table[0].name_positions[base_slot].len()
         if table.lookup_counters == None {
-            frame := table.current
+            ^frame: table.current
             loop frame >= 0 {
-                cursor := local_len - 1
+                ^cursor: local_len - 1
                 loop cursor >= 0 {
                     index: table.name_positions[local_slot][cursor]
                     if table.bindings[index].frame == frame -> return Val(index)
                     cursor -= 1
                 }
-                b_cursor := base_len - 1
+                ^b_cursor: base_len - 1
                 loop b_cursor >= 0 {
                     index: table.base_table[0].name_positions[base_slot][b_cursor]
                     if table.bindings[index].frame == frame -> return Val(index)
@@ -3064,10 +3076,10 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
             }
             return None
         }
-        compares := 0
-        frame := table.current
+        ^compares: 0
+        ^frame: table.current
         loop frame >= 0 {
-            cursor := local_len - 1
+            ^cursor: local_len - 1
             loop cursor >= 0 {
                 compares += 1
                 index: table.name_positions[local_slot][cursor]
@@ -3076,7 +3088,7 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
                 }
                 cursor -= 1
             }
-            b_cursor := base_len - 1
+            ^b_cursor: base_len - 1
             loop b_cursor >= 0 {
                 compares += 1
                 index: table.base_table[0].name_positions[base_slot][b_cursor]
@@ -3094,10 +3106,10 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
         return sema_scope_resolve_in_positions(table, table.name_positions[slot])
     }
     pos_len: table.name_positions[slot].len()
-    compares := 0
-    frame := table.current
+    ^compares: 0
+    ^frame: table.current
     loop frame >= 0 {
-        cursor := pos_len - 1
+        ^cursor: pos_len - 1
         loop cursor >= 0 {
             compares += 1
             index: table.name_positions[slot][cursor]
@@ -3117,9 +3129,9 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
 sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [String] {
     name_len: name.count_bytes()
     limit: if name_len <= 2 -> 1 else -> 2
-    found := [String]{}
-    distances := [Int]{}
-    frame := table.current
+    ^found: [String]{}
+    ^distances: [Int]{}
+    ^frame: table.current
     loop frame >= 0 {
         loop index in 0..<table.bindings.len() {
             if table.bindings[index].frame != frame || table.bindings[index].compiler_builtin {
@@ -3135,15 +3147,15 @@ sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [Strin
             }
             distance: sema_taint_edit_distance(name, candidate)
             if distance > max_dist -> next
-            at := found.len()
+            ^at: found.len()
             loop at > 0 && distances[at - 1] > distance -> at -= 1
             if at == 3 -> next
             // copy: the name outlives the scope table it is read from.
             found.insert(at, candidate.copy())
             distances.insert(at, distance)
             if found.len() > 3 {
-                _ := found.pop()
-                _ := distances.pop()
+                ^_: found.pop()
+                ^_: distances.pop()
             }
         }
         frame = table.frames[frame].parent
@@ -3162,7 +3174,7 @@ sema_scope_resolve_at_in_positions: fn(table: SemaScopeTable, positions: [Int], 
             if table.frames[b_frame].parent >= 0 -> return None
         }
         if b_frame == table.current -> return Val(index)
-        frame := table.frames[table.current].parent
+        ^frame: table.frames[table.current].parent
         loop frame >= 0 {
             if frame == b_frame -> return Val(index)
             frame = table.frames[frame].parent
@@ -3173,10 +3185,10 @@ sema_scope_resolve_at_in_positions: fn(table: SemaScopeTable, positions: [Int], 
     if table.bindings[last_index].frame == table.current && (table.frames[table.current].parent < 0 || table.position_free || table.bindings[last_index].symbol.span.start <= use_span.start) {
         return Val(last_index)
     }
-    frame := table.current
+    ^frame: table.current
     loop frame >= 0 {
         module_frame: table.frames[frame].parent < 0
-        cursor := pos_len - 1
+        ^cursor: pos_len - 1
         loop cursor >= 0 {
             index: positions[cursor]
             if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
@@ -3213,12 +3225,12 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
             if table.lookup_counters == None {
                 return sema_scope_resolve_at_in_positions(table, table.base_table[0].name_positions[bs], use_span)
             }
-            compares := 0
+            ^compares: 0
             pos_len: table.base_table[0].name_positions[bs].len()
-            frame := table.current
+            ^frame: table.current
             loop frame >= 0 {
                 module_frame: table.frames[frame].parent < 0
-                cursor := pos_len - 1
+                ^cursor: pos_len - 1
                 loop cursor >= 0 {
                     compares += 1
                     index: table.base_table[0].name_positions[bs][cursor]
@@ -3235,12 +3247,12 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
             if table.lookup_counters == None {
                 return sema_scope_resolve_at_in_positions(table, table.name_positions[local_slot], use_span)
             }
-            compares := 0
+            ^compares: 0
             pos_len: table.name_positions[local_slot].len()
-            frame := table.current
+            ^frame: table.current
             loop frame >= 0 {
                 module_frame: table.frames[frame].parent < 0
-                cursor := pos_len - 1
+                ^cursor: pos_len - 1
                 loop cursor >= 0 {
                     compares += 1
                     index: table.name_positions[local_slot][cursor]
@@ -3256,10 +3268,10 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
         local_len: table.name_positions[local_slot].len()
         base_len: table.base_table[0].name_positions[base_slot].len()
         if table.lookup_counters == None {
-            frame := table.current
+            ^frame: table.current
             loop frame >= 0 {
                 module_frame: table.frames[frame].parent < 0
-                cursor := local_len - 1
+                ^cursor: local_len - 1
                 loop cursor >= 0 {
                     index: table.name_positions[local_slot][cursor]
                     if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
@@ -3267,7 +3279,7 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
                     }
                     cursor -= 1
                 }
-                b_cursor := base_len - 1
+                ^b_cursor: base_len - 1
                 loop b_cursor >= 0 {
                     index: table.base_table[0].name_positions[base_slot][b_cursor]
                     if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
@@ -3279,11 +3291,11 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
             }
             return None
         }
-        compares := 0
-        frame := table.current
+        ^compares: 0
+        ^frame: table.current
         loop frame >= 0 {
             module_frame: table.frames[frame].parent < 0
-            cursor := local_len - 1
+            ^cursor: local_len - 1
             loop cursor >= 0 {
                 compares += 1
                 index: table.name_positions[local_slot][cursor]
@@ -3292,7 +3304,7 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
                 }
                 cursor -= 1
             }
-            b_cursor := base_len - 1
+            ^b_cursor: base_len - 1
             loop b_cursor >= 0 {
                 compares += 1
                 index: table.base_table[0].name_positions[base_slot][b_cursor]
@@ -3310,11 +3322,11 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
         return sema_scope_resolve_at_in_positions(table, table.name_positions[slot], use_span)
     }
     pos_len: table.name_positions[slot].len()
-    compares := 0
-    frame := table.current
+    ^compares: 0
+    ^frame: table.current
     loop frame >= 0 {
         module_frame: table.frames[frame].parent < 0
-        cursor := pos_len - 1
+        ^cursor: pos_len - 1
         loop cursor >= 0 {
             compares += 1
             index: table.name_positions[slot][cursor]
@@ -3388,8 +3400,8 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         }
     }
     count: source.bindings.len()
-    bindings := [SemaScopeBinding]{}
-    light := [Bool]{}
+    ^bindings: [SemaScopeBinding]{}
+    ^light: [Bool]{}
     if count > 0 {
         bindings.try_reserve(count) ?? ()
         light.try_reserve(count) ?? ()
@@ -3414,9 +3426,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
                     place_alias: source.bindings[i].place_alias,
                 },
             )
-        } else {
-            bindings.push(source.bindings[i])
-        }
+        } else { bindings.push(source.bindings[i]) }
         light.push(function_type)
     }
     SemaScopeTable{
@@ -3492,7 +3502,7 @@ sema_scope_binding_symbol: fn(environment: SemaScopeEnvironment, table: SemaScop
 sema_scope_binding_row: fn(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> SemaScopeBinding {
     // copy: the returned row may get its checked type filled in, while `table` is the caller's
     // scope table (a read parameter) and keeps its light row.
-    row := table.bindings[index].copy()
+    ^row: table.bindings[index].copy()
     if sema_scope_binding_is_light(table, index) {
         row.symbol.ty = sema_scope_binding_type(environment, table, index)
     }
@@ -3712,8 +3722,8 @@ sema_scope_declaration_site: fn(environment: SemaScopeEnvironment, program: Sema
     graph: program.registration_graph
     // The first function and nominal rows by key replace the module scan
     // (earlier modules first, functions before nominals in one module).
-    function_module := -1
-    function_row := -1
+    ^function_module: -1
+    ^function_row: -1
     if sema_registration_callable_row_of(graph, id) == .Val(callable) {
         if callable == .Function(module_index, row) {
             function_module = module_index

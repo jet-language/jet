@@ -39,7 +39,7 @@ Screen: struct {
 
     // Erase the cursor's row from the cursor to its end.
     erase_right: fn(^self) {
-        kept := [String]{}
+        ^kept: [String]{}
         loop at in 0..<self.rows[self.row].len() {
             if at < self.col -> kept.push(self.rows[self.row][at].copy())
         }
@@ -65,14 +65,14 @@ Screen: struct {
     }
 
     render: fn(self) -> String {
-        lines := [String]{}
+        ^lines: [String]{}
         loop cells in self.rows {
-            line := ""
+            ^line: ""
             loop cell in cells -> line = "{line}{cell}"
             lines.push(line.trim_end())
         }
         loop lines.len() > 0 && lines[lines.len() - 1] == "" -> _: lines.pop()
-        text := ""
+        ^text: ""
         loop line in lines -> text = "{text}{line}\n"
         text
     }
@@ -101,13 +101,13 @@ screen_sequence: fn(raw: [U8], index: Int) -> ScreenSequence {
     if second != 0x5B {
         // ESC ] ... BEL is an operating-system command; ESC x is two bytes.
         if second == 0x5D {
-            at := index + 2
+            ^at: index + 2
             loop at < raw.len() && (Int{raw[at]}) != 7 -> at += 1
             return ScreenSequence{end: at + 1, final: "", parameter: ""}
         }
         return ScreenSequence{end: index + 2, final: "ESC {String.from_bytes([U8]{raw[index + 1]}) ?? "?"}", parameter: ""}
     }
-    at := index + 2
+    ^at: index + 2
     loop at < raw.len() && ((Int{raw[at]}) < 0x40 || (Int{raw[at]}) > 0x7E) -> at += 1
     if at >= raw.len() -> return ScreenSequence{end: raw.len(), final: "", parameter: ""}
     parameter: String.from_bytes(raw[index + 2..<at]) ?? ""
@@ -116,8 +116,8 @@ screen_sequence: fn(raw: [U8], index: Int) -> ScreenSequence {
 }
 
 screen_controls: fn(raw: [U8]) -> Int {
-    count := 0
-    index := 0
+    ^count: 0
+    ^index: 0
     loop index < raw.len() {
         byte: Int{raw[index]}
         if byte == ESC {
@@ -135,8 +135,8 @@ screen_controls: fn(raw: [U8]) -> Int {
 }
 
 screen_replay: fn(raw: [U8]) -> String {
-    screen := Screen.new()
-    index := 0
+    ^screen: Screen.new()
+    ^index: 0
     loop index < raw.len() {
         byte: Int{raw[index]}
         if byte == ESC {
@@ -161,7 +161,7 @@ screen_replay: fn(raw: [U8]) -> String {
         }
         end: index + screen_utf8_length(byte)
         stop: if end > raw.len() -> raw.len() else -> end
-        cell := [U8]{}
+        ^cell: [U8]{}
         loop at in index..<stop -> cell.push(raw[at])
         screen.put(String.from_bytes(cell) ?? "?")
         index = stop

@@ -100,13 +100,13 @@ derive_record_file: fn(bodies: ^^[SemaCoreBody]) -> SemaCoreBodies {
 // library's check records a Core module's, written to a bodies file and
 // read back as a compile handed that file reads it.
 derive_record_memo: fn(source: String) -> SemaDeriveMemo {
-    items := derive_record_items(source)
-    diagnostics := [Diagnostic]{}
-    out := body_codec_out()
+    ^items: derive_record_items(source)
+    ^diagnostics: [Diagnostic]{}
+    ^out: body_codec_out()
     out.indexed = true
-    memo := SemaDeriveMemo{capture: Val(out.move())}
+    ^memo: SemaDeriveMemo{capture: Val(out.move())}
     sema_derive_expand_builtin_items_with(items, diagnostics, memo)
-    captures := [SemaDeriveCapture]{}
+    ^captures: [SemaDeriveCapture]{}
     sema_derive_memo_capture(memo.move(), captures)
     capture: captures.pop() ?? panic("DeriveRecord: the expansion made no record: {diagnostics:Debug}")
     if !"{items:Debug}".contains("Equatable") || !"{items:Debug}".contains("Comparable") {
@@ -115,8 +115,8 @@ derive_record_memo: fn(source: String) -> SemaDeriveMemo {
     key: "{SEMA_CORE_DERIVE_KEY}fixture"
     file: derive_record_file([SemaCoreBody]{SemaCoreBody{key: key, bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: [String]{}, strings: capture.strings.move()}})
     position: sema_core_bodies_position(Val(file), key) ?? panic("DeriveRecord: the bodies file has no record keyed `{key}`")
-    read := 0
-    unread := [String]{}
+    ^read: 0
+    ^unread: [String]{}
     record: sema_core_derive_read(Val(file), None, module_table(), position, read, unread) ?? panic("DeriveRecord: the record does not read: {unread:Debug}")
     if read == 0 -> panic("DeriveRecord: reading the record counted no bytes")
     record
@@ -125,10 +125,10 @@ derive_record_memo: fn(source: String) -> SemaDeriveMemo {
 // How many expansions the items of `source` take from `memo`, whose
 // expansion must give the items expanding without it gives.
 derive_record_apply: fn(source: String, memo: ^SemaDeriveMemo) -> Int {
-    diagnostics := [Diagnostic]{}
-    items := derive_record_items(source)
+    ^diagnostics: [Diagnostic]{}
+    ^items: derive_record_items(source)
     sema_derive_expand_builtin_items_with(items, diagnostics, memo)
-    expected := derive_record_items(source)
+    ^expected: derive_record_items(source)
     sema_derive_expand_builtin_items(expected, diagnostics)
     if diagnostics.len() > 0 -> panic("DeriveRecord: the expansion reported {diagnostics:Debug}")
     if "{items:Debug}" != "{expected:Debug}" {
@@ -139,14 +139,14 @@ derive_record_apply: fn(source: String, memo: ^SemaDeriveMemo) -> Int {
 
 #Test("a derive record read back from a bodies file gives the items the expansion gives") {
     source: derive_record_source(DERIVE_RECORD_POINT, "")
-    memo := derive_record_memo(source)
+    ^memo: derive_record_memo(source)
     count: memo.keys.len()
     assert(count >= 3)
     assert_eq(derive_record_apply(source, memo), count)
 }
 
 #Test("a module whose items a load cut takes the expansions of the types it keeps") {
-    memo := derive_record_memo(derive_record_source(DERIVE_RECORD_POINT, DERIVE_RECORD_EXTRA))
+    ^memo: derive_record_memo(derive_record_source(DERIVE_RECORD_POINT, DERIVE_RECORD_EXTRA))
     kept: derive_record_source(DERIVE_RECORD_POINT, "")
     count: derive_record_memo(kept).keys.len()
     assert(count < memo.keys.len())
@@ -154,7 +154,7 @@ derive_record_apply: fn(source: String, memo: ^SemaDeriveMemo) -> Int {
 }
 
 #Test("a type that differs from the one a derive record was made from expands its own") {
-    memo := derive_record_memo(derive_record_source(DERIVE_RECORD_POINT, ""))
+    ^memo: derive_record_memo(derive_record_source(DERIVE_RECORD_POINT, ""))
     taken: derive_record_apply(derive_record_source("    x: Int,\n    y: Int,\n    z: Int,", ""), memo)
     assert(taken > 0)
     assert(taken < memo.keys.len())
@@ -166,7 +166,7 @@ derive_record_apply: fn(source: String, memo: ^SemaDeriveMemo) -> Int {
 // (CoreBodies.jet sema_core_bodies_unread).
 #Test("a derive record expansion that does not read expands from its template and is counted") {
     source: derive_record_source(DERIVE_RECORD_POINT, "")
-    memo := derive_record_memo(source)
+    ^memo: derive_record_memo(source)
     count: memo.keys.len()
     assert(count >= 3)
     memo.bytes = memo.bytes.slice(0, memo.starts[0])
@@ -184,7 +184,7 @@ derive_record_graph: fn(hooks: SemaHostHookAccess?, capture: Bool{false}) -> Sem
     if sema_has_error_since(parsed.diagnostics, 0) {
         panic("DeriveRecord: the source does not parse: {parsed.diagnostics:Debug}")
     }
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, "<corelib>/derive-record")
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("DeriveRecord: the canonical effect module declares no effects")
     canonical_id: canonical.module_identity
@@ -195,8 +195,8 @@ derive_record_graph: fn(hooks: SemaHostHookAccess?, capture: Bool{false}) -> Sem
 }
 
 #Test("a Core module registered with its recorded derive expansions registers as one that expands them") {
-    captured := derive_record_graph(None, capture: true)
-    bodies := [SemaCoreBody]{}
+    ^captured: derive_record_graph(None, capture: true)
+    ^bodies: [SemaCoreBody]{}
     sema_core_derive_bodies(captured, bodies)
     assert(bodies.len() > 0)
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(derive_record_file(bodies.move()))}}
@@ -204,7 +204,7 @@ derive_record_graph: fn(hooks: SemaHostHookAccess?, capture: Bool{false}) -> Sem
     assert(hooks.guard_read().value.core_bodies_read > 0)
     expanded: derive_record_graph(None, capture: false)
     assert_eq(loaded.modules.len(), expanded.modules.len())
-    failures := [String]{}
+    ^failures: [String]{}
     loop (position, row) in expanded.modules {
         taken: loaded.modules[position]
         if "{taken.program.items:Debug}" != "{row.program.items:Debug}" {

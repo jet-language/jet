@@ -10,7 +10,7 @@ use jobs: core.jobs
 #Job(.Dev) process: fn(payload: String) { print("job:{payload}") }
 
 run: fn() {
-    queue := jobs.queue() ?? return
+    ^queue: jobs.queue() ?? return
 
     first: queue.enqueue(process, "now", key: "first") ?? return
     _failed: queue.enqueue(process, "fail", key: "failed") ?? return

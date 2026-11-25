@@ -9,11 +9,11 @@ worker: fn() {}
 receipt_id: fn(receipt: ^^Delivery) -> Delivery { return receipt }
 
 run: fn() {
-    temp := testing.temp_dir("drain-durable")
+    ^temp: testing.temp_dir("drain-durable")
     store: Path.from(temp).join("authority.log").to_string()
     retention: Duration.seconds(86400) ?? panic("retention")
-    runtime := service.runtime(store, retention: retention)
-    tree := service.tree("drain-durable")
+    ^runtime: service.runtime(store, retention: retention)
+    ^tree: service.tree("drain-durable")
     endpoint: tree.worker("api", worker, capacity: 2) ?? panic("worker")
     tree.start() ?? panic("start")
     tree.send(endpoint, "before") ?? panic("before")

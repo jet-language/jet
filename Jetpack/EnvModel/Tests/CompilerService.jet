@@ -27,8 +27,8 @@ use {
 envmodel_service_test_constant: fn(source: String) -> {expr: Expr, funcs: [String:Func]} {
     parsed: parse_source(source.bytes())
     assert_eq(parsed.diagnostics.len(), 0)
-    funcs := [String:Func]{}
-    found := Expr?{None}
+    ^funcs: [String:Func]{}
+    ^found: Expr?{None}
     loop item in parsed.program.items {
         if item == {
             .Func(function) -> { funcs[function.name] = function }
@@ -44,7 +44,7 @@ envmodel_service_test_constant: fn(source: String) -> {expr: Expr, funcs: [Strin
 #Test("compiler service comptime request carries the config value program") {
     source: "double: fn(x: Int) -> Int {{ x * 2 }}\nVALUE: double(PORT)\n"
     fixture: envmodel_service_test_constant(source)
-    globals := [String:CtValue]{}
+    ^globals: [String:CtValue]{}
     globals["PORT"] = CtValue.Int{value: 21}
     program: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds")
     assert(program.contains("double: fn(x: Int) -> Int {{ x * 2 }}"), program)
@@ -69,7 +69,7 @@ envmodel_service_test_constant: fn(source: String) -> {expr: Expr, funcs: [Strin
 #Test("config value program closes a nested call past a string paren") {
     source: "g: fn(x: Int) -> Int {{ x }}\nf: fn(x: Int, label: String) -> Int {{ x }}\nVALUE: f(g(X), \")\")\n"
     fixture: envmodel_service_test_constant(source)
-    globals := [String:CtValue]{}
+    ^globals: [String:CtValue]{}
     globals["X"] = CtValue.Int{value: 1}
     program: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds: {err.diagnostic.what}")
     assert(program.contains("JET_CONFIG_GLOBAL_0: 1"), program)
@@ -79,7 +79,7 @@ envmodel_service_test_constant: fn(source: String) -> {expr: Expr, funcs: [Strin
 #Test("config value program ends a call at its paren, not at a comment") {
     source: "double: fn(x: Int) -> Int {{ x * 2 }}\nVALUE: double(PORT /* ) */) // (twice)\n"
     fixture: envmodel_service_test_constant(source)
-    globals := [String:CtValue]{}
+    ^globals: [String:CtValue]{}
     globals["PORT"] = CtValue.Int{value: 21}
     program: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds: {err.diagnostic.what}")
     assert(program.contains("{JET_CONFIG_VALUE_NAME}: #run {{ double(JET_CONFIG_GLOBAL_0 /* ) */) }}\n"), program)

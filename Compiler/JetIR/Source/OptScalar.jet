@@ -35,7 +35,7 @@
 use jet_foundation.[compiler_threads_single]
 
 ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Never! {
-    has_stack := false
+    ^has_stack: false
     loop op in f.op {
         if op == .StackAddress {
             has_stack = true
@@ -45,7 +45,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
     if !has_stack -> return 0
     facts: ir_opt_facts(f)
     count: f.slot_type.len()
-    candidate := [Bool]{}
+    ^candidate: [Bool]{}
     loop slot in 0..<count {
         def: if slot >= f.param_count && facts.defs[slot] == 1 -> facts.def_at[slot] else -> -1
         candidate.push(def >= 0 && f.op[def] == .StackAddress)
@@ -53,7 +53,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
     // Aliases: a slot written once, by a Move of a candidate's address or of
     // another alias (an inlined call's result, a variable bound to it). Its
     // Loads and Stores are the storage's own; any other use refuses it.
-    root := [Int]{}
+    ^root: [Int]{}
     loop _ in 0..<count -> root.push(-1)
     loop at in 0..<f.op.len() {
         if f.op[at] != .Move -> next
@@ -66,9 +66,9 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
             root[dst] = root[source]
         }
     }
-    offsets := [[Int]]{}
-    rows := [[Int]]{}
-    lent := [Bool]{}
+    ^offsets: [[Int]]{}
+    ^rows: [[Int]]{}
+    ^lent: [Bool]{}
     loop _ in 0..<count {
         offsets.push([Int]{})
         rows.push([Int]{})
@@ -76,19 +76,19 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
     }
     // CopyBytes with a candidate's storage on a side, at its address or
     // through a view: an Offset of it that only CopyBytes read.
-    copies := [OptScalarCopy]{}
-    view_slot := [Int]{}
-    view_offset := [Int]{}
-    view_reads := [Int]{}
+    ^copies: [OptScalarCopy]{}
+    ^view_slot: [Int]{}
+    ^view_offset: [Int]{}
+    ^view_reads: [Int]{}
     loop _ in 0..<count {
         view_slot.push(-1)
         view_offset.push(0)
         view_reads.push(0)
     }
     // Open Loops around each instruction.
-    depth := 0
-    open := [IROp]{}
-    reads := [Int]{}
+    ^depth: 0
+    ^open: [IROp]{}
+    ^reads: [Int]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .End || op == .Else {
@@ -156,7 +156,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
             candidate[slot] = false
         }
     }
-    rewrite := [Bool]{}
+    ^rewrite: [Bool]{}
     loop _ in copies -> rewrite.push(true)
     if copies.len() > 0 {
         extras: ir_opt_resolve_copies(m, copies, rewrite, candidate, lent, offsets, rows)
@@ -170,11 +170,11 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
             }
         }
     }
-    replaced := 0
+    ^replaced: 0
     // fields[slot][k]: offsets[slot][k]'s new slot; distinct[slot]: each
     // new slot once, as (offset, slot) pairs.
-    fields := [[Int]]{}
-    distinct := [[Int]]{}
+    ^fields: [[Int]]{}
+    ^distinct: [[Int]]{}
     loop slot in 0..<count {
         fields.push([Int]{})
         distinct.push([Int]{})
@@ -185,7 +185,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
             next
         }
         // One new slot per distinct offset, in first-access order.
-        seen := [Int:Int]{}
+        ^seen: [Int:Int]{}
         loop k in 0..<offsets[slot].len() {
             offset: offsets[slot][k]
             found: seen.get(offset) ?? -1
@@ -214,10 +214,10 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
     }
     // Rewrite the accesses in the order they were recorded; lent storage
     // gets its fields back around each loan.
-    cursor := [Int]{}
+    ^cursor: [Int]{}
     loop _ in 0..<count -> cursor.push(0)
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    next_copy := 0
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^next_copy: 0
     loop at in 0..<f.op.len() {
         op: f.op[at]
         line: f.code_line[at]
@@ -249,13 +249,13 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
         }
         // Loans: the fields go back before, and come back after.
         ir_x64_reads_into(f, at, reads)
-        loans := [Int]{}
+        ^loans: [Int]{}
         loop slot in reads {
             if slot < 0 || !candidate[slot] || offsets[slot].len() == 0 || loans.contains(slot) {
                 next
             }
             loans.push(slot)
-            k := 0
+            ^k: 0
             loop k < distinct[slot].len() {
                 ir_opt_code_put(code, .Store, -1, slot, distinct[slot][k], distinct[slot][k + 1], line)
                 k += 2
@@ -264,7 +264,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
         ir_opt_code_put(code, op, f.dst[at], f.a[at], f.b[at], f.c[at], line)
         if op == .Drop -> next
         loop slot in loans {
-            k := 0
+            ^k: 0
             loop k < distinct[slot].len() {
                 ir_opt_code_put(code, .Load, distinct[slot][k + 1], slot, distinct[slot][k], -1, line)
                 k += 2
@@ -307,8 +307,8 @@ OptScalarSide: struct {
 
 ir_opt_copy_side: fn(f: IRFunction, facts: OptFacts, candidate: [Bool], view_slot: [Int], view_offset: [Int], slot: Int, size: Int) -> OptScalarSide Never! {
     if slot < 0 -> return OptScalarSide{slot: -1, offset: 0}
-    storage := slot
-    offset := 0
+    ^storage: slot
+    ^offset: 0
     if !candidate[slot] {
         if view_slot[slot] < 0 || !candidate[view_slot[slot]] {
             return OptScalarSide{slot: -1, offset: 0}
@@ -335,16 +335,16 @@ OptScalarExtras: struct {
 // changes. Returns the fields the rewritten copies bring.
 ir_opt_resolve_copies: fn(m: IRModule, copies: [OptScalarCopy], rewrite: ^[Bool], candidate: ^[Bool], lent: ^[Bool], offsets: [[Int]], rows: [[Int]]) -> OptScalarExtras Never! {
     loop {
-        extras := OptScalarExtras{offsets: [[Int]]{}, rows: [[Int]]{}}
+        ^extras: OptScalarExtras{offsets: [[Int]]{}, rows: [[Int]]{}}
         loop _ in 0..<candidate.len() {
             extras.offsets.push([Int]{})
             extras.rows.push([Int]{})
         }
-        clash := [Bool]{}
+        ^clash: [Bool]{}
         loop _ in copies -> clash.push(false)
         // Between two candidates, a field of either side inside the copied
         // range is a field of the other at the same place in it.
-        grown := true
+        ^grown: true
         loop grown {
             grown = false
             loop k in 0..<copies.len() {
@@ -377,7 +377,7 @@ ir_opt_resolve_copies: fn(m: IRModule, copies: [OptScalarCopy], rewrite: ^[Bool]
                 }
             }
         }
-        changed := false
+        ^changed: false
         loop k in 0..<copies.len() {
             if !rewrite[k] -> next
             entry: copies[k]
@@ -387,7 +387,7 @@ ir_opt_resolve_copies: fn(m: IRModule, copies: [OptScalarCopy], rewrite: ^[Bool]
                 rewrite[k] = false
                 next
             }
-            ok := !clash[k]
+            ^ok: !clash[k]
             if ok && target {
                 covered: ir_opt_range_covered(m, offsets[entry.target], rows[entry.target], extras.offsets[entry.target], extras.rows[entry.target], entry.target_offset, entry.size)
                 ok = covered >= 0 && (!lent[entry.target] || covered == entry.size)
@@ -430,8 +430,8 @@ ir_opt_row_at: fn(offsets: [Int], rows: [Int], extra_offsets: [Int], extra_rows:
 // extra) cover, when they do not overlap or disagree on a type and none
 // straddles the range's edge; -1 otherwise.
 ir_opt_range_covered: fn(m: IRModule, offsets: [Int], rows: [Int], extra_offsets: [Int], extra_rows: [Int], start: Int, size: Int) -> Int Never! {
-    all_offsets := offsets.copy()  // copy: the candidate keeps its own accesses
-    all_rows := rows.copy()  // copy: as above
+    ^all_offsets: offsets.copy()  // copy: the candidate keeps its own accesses
+    ^all_rows: rows.copy()  // copy: as above
     loop k in 0..<extra_offsets.len() {
         all_offsets.push(extra_offsets[k])
         all_rows.push(extra_rows[k])
@@ -442,8 +442,8 @@ ir_opt_range_covered: fn(m: IRModule, offsets: [Int], rows: [Int], extra_offsets
     if !ir_opt_fields_fit(m, all_offsets, all_rows, ir_opt_fields_end(m, all_offsets, all_rows)) {
         return -1
     }
-    seen := [Int]{}
-    covered := 0
+    ^seen: [Int]{}
+    ^covered: 0
     loop k in 0..<all_offsets.len() {
         offset: all_offsets[k]
         if seen.contains(offset) -> next
@@ -458,7 +458,7 @@ ir_opt_range_covered: fn(m: IRModule, offsets: [Int], rows: [Int], extra_offsets
 
 // One past the last byte any of the fields reaches.
 ir_opt_fields_end: fn(m: IRModule, offsets: [Int], rows: [Int]) -> Int Never! {
-    end := 0
+    ^end: 0
     loop k in 0..<offsets.len() {
         reach: offsets[k] + ir_x64_value_width(ir_x64_shape(m.types[rows[k]]))
         if reach > end -> end = reach
@@ -474,7 +474,7 @@ ir_opt_fields_end: fn(m: IRModule, offsets: [Int], rows: [Int]) -> Int Never! {
 ir_opt_copy_fields: fn(code: ^IROptCode, f: IRFunction, candidate: [Bool], distinct: [[Int]], entry: OptScalarCopy, line: Int) Never! {
     target: entry.target >= 0 && candidate[entry.target]
     source: entry.source >= 0 && candidate[entry.source]
-    k := 0
+    ^k: 0
     if target {
         pairs: distinct[entry.target]
         loop k < pairs.len() {
@@ -501,7 +501,7 @@ ir_opt_copy_fields: fn(code: ^IROptCode, f: IRFunction, candidate: [Bool], disti
 
 // The field slot at `offset` among (offset, slot) pairs.
 ir_opt_field_at: fn(pairs: [Int], offset: Int) -> Int Never! {
-    k := 0
+    ^k: 0
     loop k < pairs.len() {
         if pairs[k] == offset -> return pairs[k + 1]
         k += 2
@@ -572,20 +572,20 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
 #Test("Lent storage split into fields leaves its address and aliases scattered") {
     cases: [Bool]{true, false}
     loop lent in cases {
-        m := ir_module_new()
+        ^m: ir_module_new()
         word: ir_word_row(m)
-        f := ir_function_new("rec", "test:rec.jet.rec", "", "rec.jet", 1)
+        ^f: ir_function_new("rec", "test:rec.jet.rec", "", "rec.jet", 1)
         base: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
         items: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "items"), 2)
         v: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
         got: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(f, IROp.StackAddress, base, 16, -1, -1, 1)
-        _ := ir_emit(f, IROp.Move, items, base, -1, -1, 2)
-        _ := ir_emit(f, IROp.Const, v, 7, -1, -1, 2)
-        _ := ir_emit(f, IROp.Store, -1, items, 0, v, 2)
-        _ := ir_emit(f, IROp.Load, got, items, 0, -1, 3)
-        if lent -> _ := ir_emit(f, IROp.Drop, -1, base, -1, -1, 4)
-        _ := ir_emit(f, IROp.Return, -1, got, -1, -1, 4)
+        ^_: ir_emit(f, IROp.StackAddress, base, 16, -1, -1, 1)
+        ^_: ir_emit(f, IROp.Move, items, base, -1, -1, 2)
+        ^_: ir_emit(f, IROp.Const, v, 7, -1, -1, 2)
+        ^_: ir_emit(f, IROp.Store, -1, items, 0, v, 2)
+        ^_: ir_emit(f, IROp.Load, got, items, 0, -1, 3)
+        if lent -> ^_: ir_emit(f, IROp.Drop, -1, base, -1, -1, 4)
+        ^_: ir_emit(f, IROp.Return, -1, got, -1, -1, 4)
         assert_eq(ir_opt_scalar_replace(m, f, true), 1)
         if lent {
             assert(f.scattered.contains(base), "the lent storage's address")
@@ -600,36 +600,36 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
 
 #Test("Disjoint field borrows of one local survive &self calls across O0, O1, and O2") {
     loop level in ([Int]{0, 1, 2}) {
-        m := ir_module_new()
+        ^m: ir_module_new()
         word: ir_word_row(m)
         ptr: ir_pointer_row(m)
         // Callee 0: record_log(^self, delta) mutates field at offset 0 only.
-        callee := ir_function_new("record_log", "test:disjoint.jet.record_log", "", "disjoint.jet", 1)
+        ^callee: ir_function_new("record_log", "test:disjoint.jet.record_log", "", "disjoint.jet", 1)
         p_self: ir_slot(callee, ptr, IRSlotKind.Param, ir_intern_name(m, "self"), 1)
         p_delta: ir_slot(callee, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
         callee.param_count = 2
         cur: ir_slot(callee, word, IRSlotKind.Temp, -1, 0)
         next_val: ir_slot(callee, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(callee, IROp.Load, cur, p_self, 0, -1, 2)
-        _ := ir_emit(callee, IROp.Add, next_val, cur, p_delta, IR_OVERFLOW_WRAP, 2)
-        _ := ir_emit(callee, IROp.Store, -1, p_self, 0, next_val, 2)
-        _ := ir_emit(callee, IROp.Return, -1, -1, -1, -1, 3)
+        ^_: ir_emit(callee, IROp.Load, cur, p_self, 0, -1, 2)
+        ^_: ir_emit(callee, IROp.Add, next_val, cur, p_delta, IR_OVERFLOW_WRAP, 2)
+        ^_: ir_emit(callee, IROp.Store, -1, p_self, 0, next_val, 2)
+        ^_: ir_emit(callee, IROp.Return, -1, -1, -1, -1, 3)
         callee_id: m.functions.len()
         ir_function_bind(m, callee.key, callee_id)
         m.functions.push(callee)
 
         // Callee 1: bump(&x) mutates the disjoint field passed by address.
-        bump := ir_function_new("bump", "test:disjoint.jet.bump", "", "disjoint.jet", 5)
+        ^bump: ir_function_new("bump", "test:disjoint.jet.bump", "", "disjoint.jet", 5)
         b_ptr: ir_slot(bump, ptr, IRSlotKind.Param, ir_intern_name(m, "x"), 5)
         bump.param_count = 1
         b_cur: ir_slot(bump, word, IRSlotKind.Temp, -1, 0)
         b_one: ir_slot(bump, word, IRSlotKind.Temp, -1, 0)
         b_out: ir_slot(bump, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(bump, IROp.Load, b_cur, b_ptr, 0, -1, 6)
-        _ := ir_emit(bump, IROp.Const, b_one, 7, -1, -1, 6)
-        _ := ir_emit(bump, IROp.Add, b_out, b_cur, b_one, IR_OVERFLOW_WRAP, 6)
-        _ := ir_emit(bump, IROp.Store, -1, b_ptr, 0, b_out, 6)
-        _ := ir_emit(bump, IROp.Return, -1, -1, -1, -1, 7)
+        ^_: ir_emit(bump, IROp.Load, b_cur, b_ptr, 0, -1, 6)
+        ^_: ir_emit(bump, IROp.Const, b_one, 7, -1, -1, 6)
+        ^_: ir_emit(bump, IROp.Add, b_out, b_cur, b_one, IR_OVERFLOW_WRAP, 6)
+        ^_: ir_emit(bump, IROp.Store, -1, b_ptr, 0, b_out, 6)
+        ^_: ir_emit(bump, IROp.Return, -1, -1, -1, -1, 7)
         bump_id: m.functions.len()
         ir_function_bind(m, bump.key, bump_id)
         m.functions.push(bump)
@@ -637,7 +637,7 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
         // Caller: 24-byte local struct `s` (log@0, hits@8, tag@16); holds two
         // disjoint field borrows `h = ^s.hits` and `t = ^s.tag` across
         // `^self.log` calls `record_log(s, 5)` and `record_log(s, 3)` plus `bump(h)`.
-        run := ir_function_new("run", "test:disjoint.jet.run", "", "disjoint.jet", 10)
+        ^run: ir_function_new("run", "test:disjoint.jet.run", "", "disjoint.jet", 10)
         run.result = word
         s: ir_slot(run, ptr, IRSlotKind.Local, ir_intern_name(m, "s"), 10)
         c0: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
@@ -655,45 +655,45 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
         r_t: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
         sum1: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
         sum2: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(run, IROp.StackAddress, s, 24, 8, -1, 10)
-        _ := ir_emit(run, IROp.Const, c0, 0, -1, -1, 10)
-        _ := ir_emit(run, IROp.Const, c10, 10, -1, -1, 10)
-        _ := ir_emit(run, IROp.Const, c100, 100, -1, -1, 10)
-        _ := ir_emit(run, IROp.Store, -1, s, 0, c0, 10)
-        _ := ir_emit(run, IROp.Store, -1, s, 8, c10, 10)
-        _ := ir_emit(run, IROp.Store, -1, s, 16, c100, 10)
-        _ := ir_emit(run, IROp.Offset, h, s, 8, -1, 11)
-        _ := ir_emit(run, IROp.Offset, t, s, 16, -1, 12)
-        _ := ir_emit(run, IROp.Const, d5, 5, -1, -1, 13)
+        ^_: ir_emit(run, IROp.StackAddress, s, 24, 8, -1, 10)
+        ^_: ir_emit(run, IROp.Const, c0, 0, -1, -1, 10)
+        ^_: ir_emit(run, IROp.Const, c10, 10, -1, -1, 10)
+        ^_: ir_emit(run, IROp.Const, c100, 100, -1, -1, 10)
+        ^_: ir_emit(run, IROp.Store, -1, s, 0, c0, 10)
+        ^_: ir_emit(run, IROp.Store, -1, s, 8, c10, 10)
+        ^_: ir_emit(run, IROp.Store, -1, s, 16, c100, 10)
+        ^_: ir_emit(run, IROp.Offset, h, s, 8, -1, 11)
+        ^_: ir_emit(run, IROp.Offset, t, s, 16, -1, 12)
+        ^_: ir_emit(run, IROp.Const, d5, 5, -1, -1, 13)
         a1: ir_args(run, [Int]{s, d5})
-        _ := ir_emit(run, IROp.Call, -1, callee_id, a1, 2, 13)
+        ^_: ir_emit(run, IROp.Call, -1, callee_id, a1, 2, 13)
         a_bump: ir_args(run, [Int]{h})
-        _ := ir_emit(run, IROp.Call, -1, bump_id, a_bump, 1, 14)
-        _ := ir_emit(run, IROp.Const, d3, 3, -1, -1, 15)
+        ^_: ir_emit(run, IROp.Call, -1, bump_id, a_bump, 1, 14)
+        ^_: ir_emit(run, IROp.Const, d3, 3, -1, -1, 15)
         a2: ir_args(run, [Int]{s, d3})
-        _ := ir_emit(run, IROp.Call, -1, callee_id, a2, 2, 15)
-        _ := ir_emit(run, IROp.Load, tv, t, 0, -1, 16)
-        _ := ir_emit(run, IROp.Const, c20, 20, -1, -1, 16)
-        _ := ir_emit(run, IROp.Add, tv2, tv, c20, IR_OVERFLOW_WRAP, 16)
-        _ := ir_emit(run, IROp.Store, -1, t, 0, tv2, 16)
-        _ := ir_emit(run, IROp.Load, r_log, s, 0, -1, 17)
-        _ := ir_emit(run, IROp.Load, r_h, h, 0, -1, 17)
-        _ := ir_emit(run, IROp.Load, r_t, t, 0, -1, 17)
-        _ := ir_emit(run, IROp.Add, sum1, r_log, r_h, IR_OVERFLOW_WRAP, 17)
-        _ := ir_emit(run, IROp.Add, sum2, sum1, r_t, IR_OVERFLOW_WRAP, 17)
-        _ := ir_emit(run, IROp.Return, -1, sum2, -1, -1, 17)
+        ^_: ir_emit(run, IROp.Call, -1, callee_id, a2, 2, 15)
+        ^_: ir_emit(run, IROp.Load, tv, t, 0, -1, 16)
+        ^_: ir_emit(run, IROp.Const, c20, 20, -1, -1, 16)
+        ^_: ir_emit(run, IROp.Add, tv2, tv, c20, IR_OVERFLOW_WRAP, 16)
+        ^_: ir_emit(run, IROp.Store, -1, t, 0, tv2, 16)
+        ^_: ir_emit(run, IROp.Load, r_log, s, 0, -1, 17)
+        ^_: ir_emit(run, IROp.Load, r_h, h, 0, -1, 17)
+        ^_: ir_emit(run, IROp.Load, r_t, t, 0, -1, 17)
+        ^_: ir_emit(run, IROp.Add, sum1, r_log, r_h, IR_OVERFLOW_WRAP, 17)
+        ^_: ir_emit(run, IROp.Add, sum2, sum1, r_t, IR_OVERFLOW_WRAP, 17)
+        ^_: ir_emit(run, IROp.Return, -1, sum2, -1, -1, 17)
         run_id: m.functions.len()
         ir_function_bind(m, run.key, run_id)
         m.functions.push(run)
         m.entry = run_id
 
-        opts := ir_opt_options(level)
+        ^opts: ir_opt_options(level)
         opts.verify = true
         opts.inline = IROptInline.Marked
         report: ir_optimize_module(m, opts, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
         // Because `h` escapes to the non-inlined `bump`, `s` must remain stack-backed at every O-level.
-        has_stack := false
+        ^has_stack: false
         loop op in m.functions[run_id].op {
             if op == .StackAddress -> has_stack = true
         }

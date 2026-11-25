@@ -137,13 +137,13 @@ rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, thir
         rt_text_store(wrapping(scratch + I64{56}), I64{0x5be0cd19})
     }
     schedule: wrapping(scratch + I64{64})
-    off := I64{0}
+    ^off: I64{0}
     loop off < end {
-        t := I64{0}
+        ^t: I64{0}
         loop {
             if (t >= I64{16}) { break }
-            word := I64{0}
-            j := I64{0}
+            ^word: I64{0}
+            ^j: I64{0}
             loop {
                 if (j >= I64{4}) { break }
                 word = (word << I64{8}) | rt_sha256_byte(left, left_len, right, right_len, third, third_len, fourth, length, off + t * I64{4} + j, end)
@@ -161,14 +161,14 @@ rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, thir
             rt_text_store(wrapping(schedule + t * I64{8}), (rt_text_word(wrapping(schedule + (t - I64{16}) * I64{8})) + s0 + rt_text_word(wrapping(schedule + (t - I64{7}) * I64{8})) + s1) & I64{0xffffffff})
             t += I64{1}
         }
-        a := rt_text_word(scratch)
-        b := rt_text_word(wrapping(scratch + I64{8}))
-        c := rt_text_word(wrapping(scratch + I64{16}))
-        d := rt_text_word(wrapping(scratch + I64{24}))
-        e := rt_text_word(wrapping(scratch + I64{32}))
-        f := rt_text_word(wrapping(scratch + I64{40}))
-        g := rt_text_word(wrapping(scratch + I64{48}))
-        h := rt_text_word(wrapping(scratch + I64{56}))
+        ^a: rt_text_word(scratch)
+        ^b: rt_text_word(wrapping(scratch + I64{8}))
+        ^c: rt_text_word(wrapping(scratch + I64{16}))
+        ^d: rt_text_word(wrapping(scratch + I64{24}))
+        ^e: rt_text_word(wrapping(scratch + I64{32}))
+        ^f: rt_text_word(wrapping(scratch + I64{40}))
+        ^g: rt_text_word(wrapping(scratch + I64{48}))
+        ^h: rt_text_word(wrapping(scratch + I64{56}))
         t = I64{0}
         loop {
             if (t >= I64{64}) { break }
@@ -197,7 +197,7 @@ rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, thir
         rt_text_store(wrapping(scratch + I64{56}), (rt_text_word(wrapping(scratch + I64{56})) + h) & I64{0xffffffff})
         off += I64{64}
     }
-    at := I64{0}
+    ^at: I64{0}
     output_length: if short -> I64{28} else -> I64{32}
     loop {
         if (at >= output_length) { break }
@@ -236,7 +236,7 @@ rt_sha256_parts: fn(left: I64, left_len: I64, right: I64, right_len: I64, digest
 // shuffle mask (16 bytes), then the 64 round constants as U32s (256 bytes).
 // Set up only on a host whose cpuid reports SHA, SSSE3 and SSE4.1; the table
 // lives for the process.
-sha256_ni_table := I64{0}
+^sha256_ni_table: I64{0}
 
 // runtime-init: 4 when sha256_ni_table
 #Export(c) jet_rt_sha256_ni_init: fn() {
@@ -247,7 +247,7 @@ sha256_ni_table := I64{0}
     rt_text_store(table, I64{0x0405060700010203})
     rt_text_store(wrapping(table + I64{8}), I64{0x0c0d0e0f08090a0b})
     rounds: I64{64}
-    round := I64{0}
+    ^round: I64{0}
     loop round < rounds {
         rt_text_store(wrapping(table + (I64{16} + round * I64{4})), rt_crypto_word64(rt_sha256_k(round + I64{1}), rt_sha256_k(round)))
         round += I64{2}
@@ -277,7 +277,7 @@ sha256_ni_present: fn() -> Bool {
         return false
     }
     state: rt_text_word(wrapping(header + I64{16}))
-    at := start
+    ^at: start
     end: start + blocks * I64{64}
     loop at < end {
         #Unsafe("the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes") {

@@ -24,14 +24,14 @@ is_evidence: fn(entry: Entry) -> Bool Never! {
 }
 
 run: fn() {
-    entries := [Entry]{Entry{kind: "evidence", path: ".jet/evidence/b-{2}.json"}, Entry{kind: "evidence", path: ".jet/evidence/a-{1}.json"}, Entry{kind: "comparison", path: ".jet/receipts/c-{3}.json"}}
-    names := [String]{"delta-{4}", "alpha-{1}", "charlie-{3}", "bravo-{2}"}
-    parts := 0
+    ^entries: [Entry]{Entry{kind: "evidence", path: ".jet/evidence/b-{2}.json"}, Entry{kind: "evidence", path: ".jet/evidence/a-{1}.json"}, Entry{kind: "comparison", path: ".jet/receipts/c-{3}.json"}}
+    ^names: [String]{"delta-{4}", "alpha-{1}", "charlie-{3}", "bravo-{2}"}
+    ^parts: 0
     loop round in 0..<64 {
-        ordered := [Entry]{}
+        ^ordered: [Entry]{}
         loop entry in entries -> ordered.push(entry)
         ordered.sort_by(entry_order)
-        sorted := [String]{}
+        ^sorted: [String]{}
         loop name in names -> sorted.push(name)
         sorted.sort_by(text_order)
         files: ordered.map(file_name)

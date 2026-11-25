@@ -97,14 +97,14 @@ pkg_cobol_bind: fn(source_path: String, source: String, copybook_path: String, c
     }
     program: pkg_cobol_parse_program_id(source)
     layout: pkg_cobol_parse_copybook(copybook)
-    packed := [CobolFieldLayout]{}
+    ^packed: [CobolFieldLayout]{}
     loop field in layout.fields {
         if field.kind.is_packed() -> packed.push(field)
     }
     if packed.len() != 1 {
         return Err(ForeignBindError.Source("the callable v1 bridge requires exactly one COMP-3 field"))
     }
-    input := CobolFieldLayout?{None}
+    ^input: CobolFieldLayout?{None}
     loop field in layout.fields {
         if field.kind.is_native_int() {
             input = Val(field)
@@ -127,14 +127,14 @@ pkg_cobol_bind: fn(source_path: String, source: String, copybook_path: String, c
     runtime_flags: pkg_binder_words(String.from_bytes_lossy(libs.stdout))
     runtime_dir: pkg_cobol_runtime_dir_from_flags(runtime_flags) ?? return Err(ForeignBindError.Source("cob-config did not report an absolute libcob directory"))
     pkg_binder_write(bridge_c, pkg_cobol_render_bridge(program, layout, packed[0], input, lib), "could not write the COBOL C bridge")
-    compile := [String]{"cc", "-c", "-fPIC"}
+    ^compile: [String]{"cc", "-c", "-fPIC"}
     loop flag in cflags -> compile.push(flag)
     compile.push(bridge_c.copy())
     compile.push("-o")
     compile.push(bridge_o.copy())
     pkg_cobol_run(compile, "cc")
     pkg_binder_write(probe_c, "int main(void) {{ return 0; }}\n", "could not write the COBOL link probe")
-    link := [String]{"cc", "-Wl,--no-undefined", object, bridge_o, probe_c}
+    ^link: [String]{"cc", "-Wl,--no-undefined", object, bridge_o, probe_c}
     loop flag in runtime_flags -> link.push(flag)
     tail: [String]{"-pthread", "-ldl", "-lm", "-o", probe}
     loop flag in tail -> link.push(flag)
@@ -159,10 +159,10 @@ pkg_cobol_remove_scratch: fn(paths: [String]) -[FS]> {
 // Parse the closed copybook subset: one level 01 record of level 05 PIC
 // fields laid out back to back.
 pkg_cobol_parse_copybook: fn(source: String) -> CobolRecordLayout ForeignBindError! {
-    record := String?{None}
-    fields := [CobolFieldLayout]{}
-    names := [String]{}
-    offset := 0
+    ^record: String?{None}
+    ^fields: [CobolFieldLayout]{}
+    ^names: [String]{}
+    ^offset: 0
     loop raw in pkg_binder_lines(source) {
         line: pkg_cobol_copybook_line(raw) ?? next
         words: pkg_binder_words(line)
@@ -198,7 +198,7 @@ pkg_cobol_parse_copybook: fn(source: String) -> CobolRecordLayout ForeignBindErr
             return Err(ForeignBindError.Source("copybook field `{words[1]}` has no PIC shape"))
         }
         pic: pkg_binder_ascii_upper(words[3])
-        clauses := [String]{}
+        ^clauses: [String]{}
         loop index in 4..<words.len() -> clauses.push(pkg_binder_ascii_upper(words[index]))
         kind: pkg_cobol_parse_pic(pic, clauses)
         width: kind.width()
@@ -256,7 +256,7 @@ pkg_cobol_parse_pic: fn(pic: String, clauses: [String]) -> CobolFieldKind Foreig
 // `9`, `999`, or `9(n)`; the empty shape has no digits.
 pkg_cobol_pic_digits: fn(shape: String) -> Int? Never! {
     if shape == "" -> return Val(0)
-    all_nines := true
+    ^all_nines: true
     loop byte in shape.bytes() {
         if (Int{byte}) != 57 -> all_nines = false
     }
@@ -305,7 +305,7 @@ pkg_cobol_code_text: fn(line: String) -> String Never! {
 pkg_cobol_runtime_dir_from_flags: fn(flags: [String]) -> String? Never! {
     loop index in 0..<flags.len() {
         flag: flags[index]
-        found := String?{None}
+        ^found: String?{None}
         if flag.starts_with("-L") && flag != "-L" -> found = Val(flag.removeprefix("-L"))
         if flag == "-L" && index + 1 < flags.len() -> found = Val(flags[index + 1])
         if found == {
@@ -335,12 +335,12 @@ pkg_cobol_prove_link: fn(argv: [String]) -[Exec, Time.Wait]> ForeignBindError! {
 pkg_cobol_render_provenance: fn(source_path: String, foreign_source: String, generated_source: String, copybook_path: String, copybook: String, program: String, layout: CobolRecordLayout, runtime_dir: String, archive: String, lib: String) -[FS, Env, Exec]> String ForeignBindError! {
     descriptor: pkg_cobol_descriptor_stamp()
     program_symbol: pkg_cobol_c_symbol(program)
-    facts := [String]{}
+    ^facts: [String]{}
     loop field in layout.fields {
         facts.push("{field.name}:{field.offset}:{field.width}:{field.kind.debug()}")
     }
     layout_facts: facts.join(",")
-    identity := ForeignIdentityBuilder.new(COBOL_BIND_SCHEMA)
+    ^identity: ForeignIdentityBuilder.new(COBOL_BIND_SCHEMA)
     identity.field("descriptor", descriptor.bytes())
     identity.field("source", foreign_source.bytes())
     identity.field("generated", generated_source.bytes())
@@ -350,7 +350,7 @@ pkg_cobol_render_provenance: fn(source_path: String, foreign_source: String, gen
     identity.field("layout", layout_facts.bytes())
     identity.field("runtime", runtime_dir.bytes())
     archive_bytes: pkg_binder_read_bytes(archive, "could not read the COBOL archive for provenance")
-    provenance := "schema={COBOL_BIND_SCHEMA}\nidentity={identity.finish()}\ndescriptor={descriptor}\nabi=C\nprogram={program}\nprogram_symbol={program_symbol}\nsource_path={source_path}\nsource_sha256={pkg_sha256_hex(foreign_source.bytes())}\ngenerated_sha256={pkg_sha256_hex(generated_source.bytes())}\ncopybook_path={copybook_path}\ncopybook_sha256={pkg_sha256_hex(copybook.bytes())}\nrecord={layout.name}\nrecord_width={layout.width}\nfields={layout_facts}\nruntime={runtime_dir}\narchive_sha256={pkg_sha256_hex(archive_bytes)}\n"
+    ^provenance: "schema={COBOL_BIND_SCHEMA}\nidentity={identity.finish()}\ndescriptor={descriptor}\nabi=C\nprogram={program}\nprogram_symbol={program_symbol}\nsource_path={source_path}\nsource_sha256={pkg_sha256_hex(foreign_source.bytes())}\ngenerated_sha256={pkg_sha256_hex(generated_source.bytes())}\ncopybook_path={copybook_path}\ncopybook_sha256={pkg_sha256_hex(copybook.bytes())}\nrecord={layout.name}\nrecord_width={layout.width}\nfields={layout_facts}\nruntime={runtime_dir}\narchive_sha256={pkg_sha256_hex(archive_bytes)}\n"
     pkg_binder_append_artifact_boundary(provenance, COBOL_MODULE_ROOT, "COBOL", lib, source_path, archive, "cobc/cc/ar")
     Ok(provenance)
 }
@@ -386,7 +386,7 @@ pkg_cobol_is_program_name: fn(name: String) -> Bool Never! {
 pkg_cobol_render_jet: fn(lib: String, layout: CobolRecordLayout, packed: CobolFieldLayout, input: CobolFieldLayout?) -> String Never! {
     abi: "jet_cobol_{lib}"
     descriptor: pkg_cobol_descriptor_stamp()
-    out := "// jet-ffi-descriptor={descriptor}\n// cobol-layout {layout.name}: {layout.width} bytes\n"
+    ^out: "// jet-ffi-descriptor={descriptor}\n// cobol-layout {layout.name}: {layout.width} bytes\n"
     loop field in layout.fields {
         encoding: if field.kind == {
             .PackedDecimal(_, scale, _) -> " scale={scale} encoding=COMP-3"
@@ -431,7 +431,7 @@ pkg_cobol_render_jet: fn(lib: String, layout: CobolRecordLayout, packed: CobolFi
 // A field holds 1 to 18 digits (pkg_cobol_parse_pic), so the power fits an
 // I64.
 pkg_cobol_max_digits: fn(digits: Int) -> Int Never! {
-    value := I64{1}
+    ^value: I64{1}
     loop _ in 0..<digits -> value *= I64{10}
     Int{value} - 1
 }
@@ -439,7 +439,7 @@ pkg_cobol_max_digits: fn(digits: Int) -> Int Never! {
 pkg_cobol_render_bridge: fn(program: String, layout: CobolRecordLayout, packed: CobolFieldLayout, input: CobolFieldLayout?, lib: String) -> String Never! {
     args: if input != None -> "int64_t record_id, int64_t minor" else -> "int64_t minor"
     program_symbol: pkg_cobol_c_symbol(program)
-    pre := ""
+    ^pre: ""
     if input == {
         .Val(field) -> {
             cty: if field.width == {
@@ -520,11 +520,11 @@ pkg_cobol_jet_name: fn(word: String) -> String Never! {
 
 // Each `_`-separated part with its first character ASCII-uppercased.
 pkg_cobol_upper_camel: fn(name: String) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in name.split("_") {
         if part == "" -> next
-        first := ""
-        rest := [String]{}
+        ^first: ""
+        ^rest: [String]{}
         loop scalar in part.chars() {
             if {
                 first == "" && rest.len() == 0 -> first = pkg_binder_ascii_upper("{scalar}")

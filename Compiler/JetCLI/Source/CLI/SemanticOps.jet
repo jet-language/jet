@@ -67,7 +67,7 @@ jet_cli_sem_normalize: fn(path: String) -> String {
 
 jet_cli_sem_parse_op: fn(value: Dyn, files: [JetCLISemOpFile]) -> JetCLISemOp? Never! {
     kind: jet_cli_sem_json_text(value, "kind") ?? return None
-    targets := [JetCLISemOpTarget]{}
+    ^targets: [JetCLISemOpTarget]{}
     loop row in (jet_cli_sem_json_array(value, "targets") ?? [Dyn]{}) {
         stable: jet_cli_sem_json_text(row, "stable_id") ?? next
         before: jet_cli_sem_json_text(row, "before") ?? next
@@ -81,12 +81,12 @@ jet_cli_sem_parse_op: fn(value: Dyn, files: [JetCLISemOpFile]) -> JetCLISemOp? N
 
 jet_cli_sem_ops_for_file: fn(raw: String, source_hash: String) -> [JetCLISemOp] {
     path: jet_cli_sem_normalize(raw)
-    directory := jet_cli_parent(path)
-    output := [JetCLISemOp]{}
+    ^directory: jet_cli_parent(path)
+    ^output: [JetCLISemOp]{}
     loop {
         root: directory ?? break
         receipts: "{root}/.jet/codemods"
-        names := [String]{}
+        ^names: [String]{}
         loop entry in (cli_files.list_dir(receipts) ?? [cli_files.DirEntry]{}) {
             names.push(entry.name)
         }
@@ -97,8 +97,8 @@ jet_cli_sem_ops_for_file: fn(raw: String, source_hash: String) -> [JetCLISemOp] 
             text: cli_files.read(receipt) ?? next
             value: cli_sem_json.parse(text) ?? next
             rows: jet_cli_sem_json_array(value, "files") ?? next
-            files := [JetCLISemOpFile]{}
-            matches := false
+            ^files: [JetCLISemOpFile]{}
+            ^matches: false
             loop row in rows {
                 file_path: jet_cli_sem_json_text(row, "path") ?? next
                 before: jet_cli_sem_json_text(row, "before_hash") ?? next
@@ -167,25 +167,31 @@ jet_cli_rename_order: fn(left: SemDefinitionFact, right: SemDefinitionFact) -> O
 // group, never with every fact of the program; the renames come out in the
 // order of the facts before.
 jet_cli_semantic_rename_ops: fn(before: [SemDefinitionFact], after: [SemDefinitionFact]) -> [JetCLISemOp] Never! {
-    olds := loop index in 0..<before.len() -> index
+    ^olds: loop index in 0..<before.len() -> index
     olds.sort_by(fn(left: Int, right: Int) { jet_cli_rename_order(before[left], before[right]).then(left <=> right) })
-    news := loop index in 0..<after.len() -> index
+    ^news: loop index in 0..<after.len() -> index
     news.sort_by(fn(left: Int, right: Int) { jet_cli_rename_order(after[left], after[right]).then(left <=> right) })
-    used := loop _ in 0..<after.len() -> false
-    pairs := [JetCLIRenamePair]{}
-    start := 0
-    group := 0
+    ^used: loop _ in 0..<after.len() -> false
+    ^pairs: [JetCLIRenamePair]{}
+    ^start: 0
+    ^group: 0
     loop group < olds.len() {
         key: before[olds[group]]
-        end := group + 1
-        loop end < olds.len() && jet_cli_rename_order(before[olds[end]], key) == Ordering.Equal -> end += 1
-        loop start < news.len() && jet_cli_rename_order(after[news[start]], key) == Ordering.Less -> start += 1
-        stop := start
-        loop stop < news.len() && jet_cli_rename_order(after[news[stop]], key) == Ordering.Equal -> stop += 1
+        ^end: group + 1
+        loop end < olds.len() && jet_cli_rename_order(before[olds[end]], key) == Ordering.Equal {
+            end += 1
+        }
+        loop start < news.len() && jet_cli_rename_order(after[news[start]], key) == Ordering.Less {
+            start += 1
+        }
+        ^stop: start
+        loop stop < news.len() && jet_cli_rename_order(after[news[stop]], key) == Ordering.Equal {
+            stop += 1
+        }
         loop slot in group..<end {
             old: before[olds[slot]]
-            found := -1
-            count := 0
+            ^found: -1
+            ^count: 0
             loop at in start..<stop {
                 index: news[at]
                 if !used[index] && after[index].name != old.name {
@@ -194,7 +200,7 @@ jet_cli_semantic_rename_ops: fn(before: [SemDefinitionFact], after: [SemDefiniti
                 }
             }
             if count != 1 -> next
-            reverse := 0
+            ^reverse: 0
             loop other in group..<end {
                 if other == slot || before[olds[other]].name != after[found].name -> reverse += 1
             }

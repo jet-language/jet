@@ -39,7 +39,7 @@ sema_host_hook_callbacks: fn(access: SemaHostHookAccess?) -> Shared<SemaRegistra
     if row == {
         .Callbacks(hooks) -> Val(hooks)
         .Withheld(wanted) -> {
-            cell := wanted
+            ^cell: wanted
             permit: cell.guard_edit()
             permit.value.wanted = true
             None
@@ -62,8 +62,8 @@ sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: St
     // `value` is exactly `top / bottom`, `bottom` a power of two.
     bits: math.to_bits(value)
     exponent: (bits >> 52) & 2047
-    top := bits & 4503599627370495
-    power := -1074
+    ^top: bits & 4503599627370495
+    ^power: -1074
     if exponent != 0 {
         top |= 4503599627370496
         power = exponent - 1075
@@ -71,8 +71,8 @@ sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: St
     if power > 0 -> top = top << power
     bottom: if power < 0 -> 1 << (0 - power) else -> 1
     if value < 0.0 -> top = -top
-    numerator := top * sema_numeric_ratio_part(scale_numerator) * sema_numeric_ratio_part(offset_denominator) + sema_numeric_ratio_part(offset_numerator) * bottom * sema_numeric_ratio_part(scale_denominator)
-    denominator := bottom * sema_numeric_ratio_part(scale_denominator) * sema_numeric_ratio_part(offset_denominator)
+    ^numerator: top * sema_numeric_ratio_part(scale_numerator) * sema_numeric_ratio_part(offset_denominator) + sema_numeric_ratio_part(offset_numerator) * bottom * sema_numeric_ratio_part(scale_denominator)
+    ^denominator: bottom * sema_numeric_ratio_part(scale_denominator) * sema_numeric_ratio_part(offset_denominator)
     if denominator == 0 -> return None
     if denominator < 0 {
         numerator = -numerator
@@ -82,20 +82,20 @@ sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: St
     converted: numerator /% denominator
     if converted == 0 -> return Val(0.0)
     // A Float holds the integer when its odd part fits 53 bits below 2^1024.
-    odd := if converted < 0 -> -converted else -> converted
-    shift := 0
+    ^odd: if converted < 0 -> -converted else -> converted
+    ^shift: 0
     loop odd %% 2 == 0 {
         odd = odd /% 2
         shift += 1
     }
-    width := 0
-    remaining := odd
+    ^width: 0
+    ^remaining: odd
     loop remaining > 0 {
         remaining = remaining /% 2
         width += 1
     }
     if width > 53 || shift + width > 1024 -> return None
-    result := Float.from_int(odd)
+    ^result: Float.from_int(odd)
     loop shift > 0 {
         result *= 2.0
         shift -= 1
@@ -104,8 +104,8 @@ sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: St
 }
 
 sema_numeric_ratio_part: fn(text: String) -[]> Int {
-    negative := false
-    total := 0
+    ^negative: false
+    ^total: 0
     loop byte in text.bytes() {
         code: Int{byte}
         if code == 45 -> negative = true else -> total = total * 10 + (code - 48)

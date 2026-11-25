@@ -1,57 +1,59 @@
-use jet_foundation.[
-    AppliedRuleApplication,
-    CallArg,
-    Call,
-    Diagnostic,
-    Expr,
-    Func,
-    Item,
-    MARKER_ON,
-    Marker,
-    MarkerDecl,
-    MarkerDeclParam,
-    MarkerHook,
-    Program,
-    RuleSite,
-    STATE_ARROW_LABEL,
-    Span,
-    Stmt,
-    SymbolKind,
-    TAppliedRule,
-    TAppliedRuleArgKind,
-    TAppliedRuleArgumentMenu,
-    TAppliedRuleCatalog,
-    TAppliedRuleCompanionSite,
-    TAppliedRuleParameter,
-    TAppliedRuleSignature,
-    TComptimeValue,
-    TGenericParam,
-    TextEdit,
-    Type,
-    UnOp,
-    COMPILER_EVENTS,
-    TOOL_STAGES,
-    diagnostic_from_registry,
-    diagnostic_with_edit,
-    diagnostic_with_label,
-    expr_span,
-    marker_hook_of_declaration,
-    stage_hook,
-    symbol_find,
-    symbol_key_text,
-    symbol_table_key,
-    type_name,
-    module_text,
-    NameTable,
-    name_column,
-    name_column_get,
-    name_column_set_first,
-    name_column_table,
-    name_find,
-    name_intern,
-    name_table_sized,
-]
-use jet_parser.[parser_marker_spells_service_import, parser_service_import]
+use {
+    jet_foundation.[
+        AppliedRuleApplication,
+        CallArg,
+        Call,
+        Diagnostic,
+        Expr,
+        Func,
+        Item,
+        MARKER_ON,
+        Marker,
+        MarkerDecl,
+        MarkerDeclParam,
+        MarkerHook,
+        Program,
+        RuleSite,
+        STATE_ARROW_LABEL,
+        Span,
+        Stmt,
+        SymbolKind,
+        TAppliedRule,
+        TAppliedRuleArgKind,
+        TAppliedRuleArgumentMenu,
+        TAppliedRuleCatalog,
+        TAppliedRuleCompanionSite,
+        TAppliedRuleParameter,
+        TAppliedRuleSignature,
+        TComptimeValue,
+        TGenericParam,
+        TextEdit,
+        Type,
+        UnOp,
+        COMPILER_EVENTS,
+        TOOL_STAGES,
+        diagnostic_from_registry,
+        diagnostic_with_edit,
+        diagnostic_with_label,
+        expr_span,
+        marker_hook_of_declaration,
+        stage_hook,
+        symbol_find,
+        symbol_key_text,
+        symbol_table_key,
+        type_name,
+        module_text,
+        NameTable,
+        name_column,
+        name_column_get,
+        name_column_set_first,
+        name_column_table,
+        name_find,
+        name_intern,
+        name_table_sized,
+    ]
+    jet_parser.[parser_marker_spells_service_import, parser_service_import]
+}
 
 SemaMarkerRuleArgumentObservation: struct {
     ty: Type?,
@@ -157,10 +159,10 @@ sema_marker_rules_type_kind: fn(ty: Type) -> TAppliedRuleArgKind Never! {
         if element == (Type.Named{name: "Effect"}) -> return TAppliedRuleArgKind.EffectRoots
     }
     if ty == .Union(members) {
-        has_string := false
-        has_duration := false
-        has_instant := false
-        has_naming_case := false
+        ^has_string: false
+        ^has_duration: false
+        ^has_instant: false
+        ^has_naming_case: false
         loop member in members {
             if member == Type.String -> has_string = true
             if member == (Type.Named{name: "Duration"}) -> has_duration = true
@@ -200,7 +202,7 @@ sema_marker_rules_metadata_expr: fn(declaration: MarkerDecl, name: String) -> Ex
 }
 
 sema_marker_rules_bool_fact: fn(declaration: MarkerDecl, name: String) -> Bool? {
-    found := false
+    ^found: false
     loop parameter_index in 0..<declaration.params.len() {
         if declaration.params[parameter_index].name != name -> next
         found = true
@@ -213,15 +215,15 @@ sema_marker_rules_bool_fact: fn(declaration: MarkerDecl, name: String) -> Bool? 
 }
 
 sema_marker_rules_metadata_names: fn(declaration: MarkerDecl, name: String, sites: Bool) -> [String]? {
-    found := false
+    ^found: false
     loop parameter_index in 0..<declaration.params.len() {
         if declaration.params[parameter_index].name != name -> next
         found = true
         value: declaration.params[parameter_index].value ?? return None
         if value == .ListLit(values, _, _) {
-            names := [String]{}
+            ^names: [String]{}
             loop item in values {
-                name_value := if sites -> sema_marker_rules_site_value(item) else -> sema_marker_rules_expr_name(item)
+                ^name_value: if sites -> sema_marker_rules_site_value(item) else -> sema_marker_rules_expr_name(item)
                 value_name: name_value ?? return None
                 sema_marker_rules_append_name(names, value_name)
             }
@@ -261,7 +263,7 @@ sema_marker_rules_resolution: fn(declaration: MarkerDecl) -> String? {
 
 sema_marker_rules_source_slice: fn(source: String, span: Span) -> String? {
     if span.start < 0 || span.end < span.start -> return None
-    bytes := source.bytes()
+    ^bytes: source.bytes()
     if span.end > bytes.len() -> return None
     text: String.from_bytes(bytes[span.start..<span.end]) ?? return None
     Val(text)
@@ -269,7 +271,7 @@ sema_marker_rules_source_slice: fn(source: String, span: Span) -> String? {
 
 sema_marker_rules_applied_parameter: fn(parameter: MarkerDeclParam, source: String) -> TAppliedRuleParameter? {
     ty: parameter.ty ?? return None
-    default_source := String?{None}
+    ^default_source: String?{None}
     if parameter.value != None {
         default_expr: parameter.value ?? return None
         default_source = Val(sema_marker_rules_source_slice(source, expr_span(default_expr)) ?? return None)
@@ -290,10 +292,10 @@ sema_marker_rules_applied_row: fn(declaration: MarkerDecl, source: String) -> TA
     inherits: sema_marker_rules_bool_fact(declaration, "$inherits") ?? return None
     resolution: sema_marker_rules_resolution(declaration) ?? return None
     companion: sema_marker_rules_companion(declaration) ?? return None
-    params := [TAppliedRuleParameter]{}
-    variadic := TAppliedRuleArgKind?{None}
-    variadic_source_type := String?{None}
-    variadic_name := String?{None}
+    ^params: [TAppliedRuleParameter]{}
+    ^variadic: TAppliedRuleArgKind?{None}
+    ^variadic_source_type: String?{None}
+    ^variadic_name: String?{None}
     loop parameter_index in 0..<declaration.params.len() {
         if declaration.params[parameter_index].name.starts_with("$") -> next
         ty: declaration.params[parameter_index].ty ?? return None
@@ -344,7 +346,7 @@ sema_marker_rules_catalog_has_menu: fn(menus: [TAppliedRuleArgumentMenu], name: 
 // Core.rows's specialized `types { … }` metadata, not marker sites or Program
 // policy declarations.
 sema_marker_rules_build_catalog: fn(rows: [TAppliedRule], argument_menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleCatalog? {
-    menus := [TAppliedRuleArgumentMenu]{}
+    ^menus: [TAppliedRuleArgumentMenu]{}
     loop menu in argument_menus {
         loop existing in menus {
             if existing.name == menu.name -> return None
@@ -442,24 +444,24 @@ sema_marker_rules_label: fn(marker: Marker, index: Int) -> String? {
 // takes any such label, for a caller that reads only the bound parameters.
 sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppliedRuleSignature, formats: [String]?) -> [SemaMarkerRuleArgumentBinding]? {
     if marker.args.len() != marker.arg_labels.len() -> return None
-    bindings := [SemaMarkerRuleArgumentBinding]{}
+    ^bindings: [SemaMarkerRuleArgumentBinding]{}
     // A bare `#Unsafe` binds nothing; its missing reason is E3112's, not
     // E0930's.
     if sema_marker_is_hook(marker, MarkerHook.Unsafe) && marker.args.len() == 0 {
         return Val(bindings)
     }
-    supplied := [Bool]{}
+    ^supplied: [Bool]{}
     loop _ in signature.params { supplied.push(false) }
     meta: sema_marker_is_hook(marker, MarkerHook.Meta)
     if meta && marker.arg_labels.len() == marker.args.len() {
-        all_named := true
+        ^all_named: true
         loop label in marker.arg_labels {
             if label == None -> all_named = false
         }
         if all_named {
             loop source_index in 0..<marker.args.len() {
                 label: sema_marker_rules_label(marker, source_index) ?? return None
-                selected := Int?{None}
+                ^selected: Int?{None}
                 loop (index, parameter) in signature.params {
                     if parameter.name == label -> selected = Val(index)
                 }
@@ -472,7 +474,7 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
     if sema_marker_is_hook(marker, MarkerHook.Policy) {
         kind: signature.variadic ?? return None
         loop source_index in 0..<marker.args.len() {
-            label := sema_marker_rules_label(marker, source_index)
+            ^label: sema_marker_rules_label(marker, source_index)
             if label != None {
                 name: label ?? return None
                 if name != "copies" && name != "writes" && name != "failures" && name != "sentries" {
@@ -484,18 +486,18 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
         return Val(bindings)
     }
     rename: sema_marker_is_hook(marker, MarkerHook.Rename)
-    format_labels := [String]{}
-    next_positional := 0
-    saw_named := false
+    ^format_labels: [String]{}
+    ^next_positional: 0
+    ^saw_named: false
     loop source_index in 0..<marker.args.len() {
-        label := sema_marker_rules_label(marker, source_index)
+        ^label: sema_marker_rules_label(marker, source_index)
         if label == None -> label = sema_marker_rules_flag_label(marker, source_index, signature)
-        parameter_index := Int?{None}
+        ^parameter_index: Int?{None}
         if {
             label != None -> {
                 name: label ?? return None
                 saw_named = true
-                selected := Int?{None}
+                ^selected: Int?{None}
                 loop (index, parameter) in signature.params {
                     if parameter.name == name -> selected = Val(index)
                 }
@@ -519,7 +521,7 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
                 }
                 if {
                     next_positional < supplied.len() -> {
-                        selected := next_positional
+                        ^selected: next_positional
                         supplied[selected] = true
                         parameter_index = Val(selected)
                         next_positional += 1
@@ -528,7 +530,7 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
                 }
             }
         }
-        kind := if parameter_index == {
+        ^kind: if parameter_index == {
             .Val(index) -> signature.params[index].kind
             .None -> signature.variadic ?? return None
         }
@@ -561,17 +563,17 @@ sema_marker_rules_bare_flag: fn(argument: Expr, parameter_index: Int?, signature
 }
 
 sema_marker_rules_signature_text: fn(name: String, signature: TAppliedRuleSignature) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop parameter in signature.params {
-        default := ""
-        default_value_option := parameter.default_source
+        ^default: ""
+        ^default_value_option: parameter.default_source
         if default_value_option != None {
             default_value: default_value_option ?? ""
             default = "{{{default_value}}}"
         }
         parts.push("{parameter.name}: {parameter.source_type}{default}")
     }
-    variadic_type_option := signature.variadic_source_type
+    ^variadic_type_option: signature.variadic_source_type
     if variadic_type_option != None {
         variadic_type: variadic_type_option ?? ""
         parts.push("{variadic_type}...")
@@ -588,8 +590,8 @@ sema_marker_rules_signature_error: fn(marker: Marker, signature: TAppliedRuleSig
         diagnostic: sema_error("E0943", marker.span, "`#{marker.name}: true` gives `#{marker.name}` no arguments, but it needs a Bool", "`true` alone on a marker line applies the marker with its defaults, so a Bool argument is written in parentheses", "write `#{marker.name}: (true)`")
         return diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: marker.span.end - 4, end: marker.span.end}, new_text: "(true)"})
     }
-    expected := sema_marker_rules_signature_text(marker.name, signature)
-    fix := if declared -> "match the declared signature `{expected}`" else -> "match the registered signature `{expected}`"
+    ^expected: sema_marker_rules_signature_text(marker.name, signature)
+    ^fix: if declared -> "match the declared signature `{expected}`" else -> "match the registered signature `{expected}`"
     sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", fix)
 }
 
@@ -684,9 +686,9 @@ sema_marker_rules_staged_argument_value: fn(values: [SemaComptimeItemValue], che
 
 // `key` is the constant's key (a body's own constant has its body's key).
 sema_marker_rules_constant_for_reference: fn(symbol: SemaNameReferent, key: String, references: [SemaNameReferenceFact], reference_start: Int, check: SemaBodyCheck, values: [SemaComptimeItemValue]) -> TComptimeValue? {
-    found := false
+    ^found: false
     loop index in reference_start..<references.len() {
-        reference := references[index]
+        ^reference: references[index]
         if reference.symbol.id == symbol.id && reference.symbol.kind == SymbolKind.Constant {
             found = true
             break
@@ -735,7 +737,7 @@ sema_marker_rules_comptime_source: fn(marker: Marker, source_index: Int, express
     if check.program.registration_graph.mode == .Snapshot -> return None
     graph: check.program.registration_graph
     destination_key: "{marker.name}.marker.{marker.name_span.start}.arg.{source_index}"
-    source := SemaComptimeItemSource{
+    ^source: SemaComptimeItemSource{
         module_identity: check.environment.module_identity,
         key: "{module_text(graph.module_table, check.environment.module_identity)}.{destination_key}",
         destination_key: destination_key,
@@ -754,8 +756,8 @@ sema_marker_rules_comptime_source: fn(marker: Marker, source_index: Int, express
 }
 
 sema_marker_rules_observe_argument: fn(marker: Marker, source_index: Int, expected_type: Type?, capture_constant: Bool, argument: Expr, check: ^SemaBodyCheck, values: [SemaComptimeItemValue]) -> SemaMarkerRuleArgumentObservation {
-    diagnostics := [Diagnostic]{}
-    checked_expected := expected_type
+    ^diagnostics: [Diagnostic]{}
+    ^checked_expected: expected_type
     graph: check.program.registration_graph
     if checked_expected == .Val(required) {
         checked_expected = Val(sema_type_resolve_declared_with_generics(graph, required, check.environment.module_identity, check.environment.generic_params))
@@ -764,22 +766,22 @@ sema_marker_rules_observe_argument: fn(marker: Marker, source_index: Int, expect
     probe_scope_mark: sema_scope_mark(check.scopes)
     probe_fork: sema_ownership_fork(check.state)
     probe_context_mark: sema_check_context_mark(check.context)
-    reference_start := check.context.name_references.len()
-    request_start := check.context.comptime_requests.len()
+    ^reference_start: check.context.name_references.len()
+    ^request_start: check.context.comptime_requests.len()
     sema_body_check_swap_diagnostics(check, diagnostics)
-    checked := sema_check_expression(argument, checked_expected, check)
+    ^checked: sema_check_expression(argument, checked_expected, check)
     sema_body_check_swap_diagnostics(check, diagnostics)
     sema_ownership_fork_rollback(check.state, probe_fork)
     sema_ownership_fork_close(check.state, probe_fork)
-    checked_value := false
-    constant := TComptimeValue?{None}
-    staged_source := SemaComptimeItemSource?{None}
-    observed_type := Type?{None}
+    ^checked_value: false
+    ^constant: TComptimeValue?{None}
+    ^staged_source: SemaComptimeItemSource?{None}
+    ^observed_type: Type?{None}
     if checked == .Val(value) {
-        required := checked_expected
+        ^required: checked_expected
         if required != None {
             required_type: required ?? value.ty
-            assignable := Val(sema_type_assignable(required_type, value.ty))
+            ^assignable: Val(sema_type_assignable(required_type, value.ty))
             assignable = sema_type_assignable_in_graph_with_generics(graph, required_type, value.ty, check.environment.module_identity, check.environment.generic_params)
             if {
                 assignable == (Val(false)) -> {
@@ -900,8 +902,8 @@ sema_marker_rules_append_comptime_requests: fn(requests: ^[SemaComptimeRequest],
 }
 
 sema_marker_rules_menu_candidate: fn(path: String, menu: TAppliedRuleArgumentMenu) -> String Never! {
-    segments := path.split(".").to_list()
-    start := 0
+    ^segments: path.split(".").to_list()
+    ^start: 0
     loop index in 0..<segments.len() {
         if segments[index] == menu.name && index + 1 < segments.len() {
             start = index + 1
@@ -914,8 +916,8 @@ sema_marker_rules_menu_candidate: fn(path: String, menu: TAppliedRuleArgumentMen
 // A `.Variant` argument is underlined from the rule name; a bare or labeled
 // argument from the `#`.
 sema_marker_rules_unknown_variant_error: fn(marker: Marker, menu: TAppliedRuleArgumentMenu, written: String, argument: Expr) -> Diagnostic {
-    variants := (loop variant in menu.variants -> "`{variant}`")
-    choices := variants.join(", ")
+    ^variants: (loop variant in menu.variants -> "`{variant}`")
+    ^choices: variants.join(", ")
     start: if argument == .EnumLit(_, _, _, _, _, _, _) -> marker.name_span.start else -> marker.span.start
     sema_error("E0930", Span{start: start, end: marker.span.end}, "`#{marker.name}` has no `{menu.name}` called `{written}`", "`{menu.name}` is a closed menu: {choices}", "pick one of {choices}")
 }
@@ -926,9 +928,9 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
         check.diagnostics.push(failure)
         return false
     }
-    valid := true
-    had_declared_expression_error := false
-    pending_facts := [SemaMarkerRuleArgumentFact]{}
+    ^valid: true
+    ^had_declared_expression_error: false
+    ^pending_facts: [SemaMarkerRuleArgumentFact]{}
     loop binding in bindings {
         expression: sema_marker_rules_marker_expression(marker, binding.source_index)
         if expression == None {
@@ -940,7 +942,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
             return false
         }
         argument: expression
-        source_type := ""
+        ^source_type: ""
         if binding.parameter_index == {
             .Val(index) -> {
                 if index < signature.params.len() {
@@ -953,11 +955,11 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
             // A `[Menu]` parameter checks each written element against the menu.
             list_menu: source_type.starts_with("[") && source_type.ends_with("]")
             menu_type: if list_menu -> source_type.slice(1, source_type.len() - 1) else -> source_type
-            menu_index_option := sema_marker_rules_menu_index(registry.argument_menus, menu_type)
+            ^menu_index_option: sema_marker_rules_menu_index(registry.argument_menus, menu_type)
             if menu_index_option != None {
                 menu_index: menu_index_option ?? return false
-                menu := registry.argument_menus[menu_index]
-                elements := [Expr]{argument.copy()}
+                ^menu: registry.argument_menus[menu_index]
+                ^elements: [Expr]{argument.copy()}
                 if list_menu {
                     elements = if argument == .ListLit(items, _, _) -> items else -> [Expr]{}
                 }
@@ -965,7 +967,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
                     loop element in elements {
                         path: sema_marker_rules_effect_path(element, menu_type)
                         if path == .Val(value) {
-                            candidate := sema_marker_rules_menu_candidate(value, menu)
+                            ^candidate: sema_marker_rules_menu_candidate(value, menu)
                             if candidate != "" && !menu.variants.contains(candidate) {
                                 // An unknown effect root is the effect vocabulary's own E0119, reported once.
                                 unknown: if menu.name == "Effect" -> sema_effect_unknown(candidate, sema_marker_rules_root_span(element)) else -> sema_marker_rules_unknown_variant_error(marker, menu, candidate, element)
@@ -977,14 +979,14 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
                 }
             }
         }
-        expected_type := Type?{None}
+        ^expected_type: Type?{None}
         if binding.parameter_index == {
             .Val(index) -> {
                 if index < expected_types.len() -> expected_type = expected_types[index]
             }
             .None -> { expected_type = variadic_expected_type.copy() }
         }
-        observation := SemaMarkerRuleArgumentObservation{
+        ^observation: SemaMarkerRuleArgumentObservation{
             ty: None,
             constant: None,
             checked: false,
@@ -992,8 +994,8 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
             comptime_source: None,
             diagnostics: [Diagnostic]{},
         }
-        observe := true
-        unit_argument := argument == .UnitLit(_, _, _, _, _, _, _)
+        ^observe: true
+        ^unit_argument: argument == .UnitLit(_, _, _, _, _, _, _)
         if {
             !declared && (binding.kind == TAppliedRuleArgKind.Ident || binding.kind == TAppliedRuleArgKind.Any || (binding.kind == TAppliedRuleArgKind.DurationOrString && unit_argument) || (binding.kind == TAppliedRuleArgKind.StringOrMenu && sema_marker_rules_names_menu_word(argument)) || binding.kind == TAppliedRuleArgKind.EffectRoots) -> {
                 observe = false
@@ -1004,7 +1006,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
             }
         }
         if observe {
-            capture_constant := declared || binding.kind == TAppliedRuleArgKind.String || binding.kind == TAppliedRuleArgKind.Bool || binding.kind == TAppliedRuleArgKind.Int
+            ^capture_constant: declared || binding.kind == TAppliedRuleArgKind.String || binding.kind == TAppliedRuleArgKind.Bool || binding.kind == TAppliedRuleArgKind.Int
             observation = sema_marker_rules_observe_argument(marker, binding.source_index, if declared -> expected_type else -> None, capture_constant, argument, check, values)
             loop diagnostic in observation.diagnostics { check.diagnostics.push(diagnostic) }
             if declared && observation.diagnostics.len() > 0 -> had_declared_expression_error = true
@@ -1013,7 +1015,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
             }
             sema_marker_rules_append_comptime_requests(comptime_requests, observation.comptime_requests)
         }
-        matches := if {
+        ^matches: if {
             declared -> observation.checked
             else -> if binding.kind == {
                 .Any -> true
@@ -1065,9 +1067,9 @@ sema_marker_rules_check_rule_signature: fn(marker: Marker, check: ^SemaBodyCheck
     if graph.marker_catalog == .Val(registry) {
         rule_index: sema_marker_rules_builtin_index(registry, marker) ?? return true
         expected_types: (loop _ in registry.applied_rules[rule_index].signature.params -> Type?{None})
-        facts := [SemaMarkerRuleArgumentFact]{}
-        sources := [SemaComptimeItemSource]{}
-        requests := [SemaComptimeRequest]{}
+        ^facts: [SemaMarkerRuleArgumentFact]{}
+        ^sources: [SemaComptimeItemSource]{}
+        ^requests: [SemaComptimeRequest]{}
         return sema_marker_rules_validate_argument_signature(marker, registry.applied_rules[rule_index].signature, expected_types, None, false, registry.applied_rules[rule_index].owns_menu, registry, check, [SemaComptimeItemValue]{}, facts, sources, requests)
     }
     true
@@ -1087,7 +1089,7 @@ sema_marker_rules_line_needs_bool: fn(marker: Marker, signature: TAppliedRuleSig
 // Every marker of `markers` through sema_marker_rules_check_rule_signature;
 // true when all of them bind.
 sema_marker_rules_check_rule_signatures: fn(markers: [Marker], check: ^SemaBodyCheck) -> Bool {
-    valid := true
+    ^valid: true
     loop marker in markers {
         if !sema_marker_rules_check_rule_signature(marker, check) -> valid = false
     }
@@ -1100,7 +1102,7 @@ sema_marker_rules_check_rule_signatures: fn(markers: [Marker], check: ^SemaBodyC
 // stage and the hook's shape are checked, not the statement site's `build`
 // condition. True when all of them bind.
 sema_marker_rules_check_function_markers: fn(func: Func, check: ^SemaBodyCheck) -> Bool {
-    valid := true
+    ^valid: true
     loop marker in func.markers {
         bound: if marker.name == MARKER_ON && marker.declaration_module == None -> sema_marker_rules_check_stage_hook(func, marker, check.diagnostics) else -> sema_marker_rules_check_rule_signature(marker, check)
         if !bound -> valid = false
@@ -1119,7 +1121,7 @@ sema_marker_rules_check_stage_hook: fn(func: Func, marker: Marker, diagnostics: 
         return sema_marker_rules_check_moment_hook(func, marker, hook.stage, diagnostics)
     }
     stages: (loop row in TOOL_STAGES -> "`{row.name}`").join(", ")
-    known := -1
+    ^known: -1
     loop (index, row) in TOOL_STAGES {
         if row.name == hook.stage -> known = index
     }
@@ -1143,8 +1145,8 @@ sema_marker_rules_check_stage_hook: fn(func: Func, marker: Marker, diagnostics: 
 // the row's answer when it has one: a `build.link` or `build.before_write`
 // hook returns the `BuildAction` Jet runs at that moment (E0930).
 sema_marker_rules_check_moment_hook: fn(func: Func, marker: Marker, moment: String, diagnostics: ^[Diagnostic]) -> Bool {
-    payload := ""
-    answer := ""
+    ^payload: ""
+    ^answer: ""
     loop row in COMPILER_EVENTS {
         if row.name == moment {
             payload = row.payload
@@ -1174,8 +1176,8 @@ sema_marker_rules_check_moment_hook: fn(func: Func, marker: Marker, moment: Stri
 // A written type with its module qualifiers dropped: `[core.compiler.Token]`
 // and `[compiler.Token]` are both `[Token]`.
 sema_marker_rules_unqualified_type: fn(text: String) -> String Never! {
-    out := [U8]{}
-    word := [U8]{}
+    ^out: [U8]{}
+    ^word: [U8]{}
     loop byte in text.bytes() {
         code: Int{byte}
         if code == 46 {
@@ -1223,7 +1225,7 @@ sema_marker_rules_check_statement_facts: fn(target: Span, check: ^SemaBodyCheck)
             if graph.modules[row].program.rule_facts[index].site == (Val(RuleSite.Block)) && sema_marker_rules_block_form_is_bare(registry, graph.modules[row].program.rule_facts[index].marker) {
                 next
             }
-            _ := sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, check)
+            ^_: sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, check)
         }
     }
 }
@@ -1267,14 +1269,14 @@ sema_marker_rules_check_static_sites: fn(environment: SemaScopeEnvironment, prog
     if graph.marker_catalog == None {
         return
     }
-    check := sema_body_check_init(@program, @environment)
+    ^check: sema_body_check_init(@program, @environment)
     sema_body_check_swap_diagnostics(check, diagnostics)
     sema_body_check_swap_scopes(check, scopes)
     loop index in 0..<graph.modules[module_index].program.rule_facts.len() {
         if graph.modules[module_index].program.rule_facts[index].site != (Val(RuleSite.File)) {
             next
         }
-        _ := sema_marker_rules_check_rule_signature(graph.modules[module_index].program.rule_facts[index].marker, check)
+        ^_: sema_marker_rules_check_rule_signature(graph.modules[module_index].program.rule_facts[index].marker, check)
     }
     loop item_index in 0..<graph.modules[module_index].program.items.len() {
         sema_marker_rules_check_static_item(graph.modules[module_index].program.items[item_index], check)
@@ -1286,29 +1288,29 @@ sema_marker_rules_check_static_sites: fn(environment: SemaScopeEnvironment, prog
 sema_marker_rules_check_static_item: fn(item: Item, check: ^SemaBodyCheck) {
     if item == {
         .Struct(definition) -> {
-            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, check)
-            _ := sema_marker_rules_check_rule_signatures(definition.serde_markers, check)
+            ^_: sema_marker_rules_check_rule_signatures(definition.type_markers, check)
+            ^_: sema_marker_rules_check_rule_signatures(definition.serde_markers, check)
             loop field in definition.fields {
-                _ := sema_marker_rules_check_rule_signatures(field.serde_markers, check)
+                ^_: sema_marker_rules_check_rule_signatures(field.serde_markers, check)
             }
         }
         .Enum(definition) -> {
-            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, check)
-            _ := sema_marker_rules_check_rule_signatures(definition.serde_markers, check)
+            ^_: sema_marker_rules_check_rule_signatures(definition.type_markers, check)
+            ^_: sema_marker_rules_check_rule_signatures(definition.serde_markers, check)
             loop variant in definition.variants {
-                _ := sema_marker_rules_check_rule_signatures(variant.serde_markers, check)
+                ^_: sema_marker_rules_check_rule_signatures(variant.serde_markers, check)
             }
         }
         .Distinct(definition) -> {
-            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, check)
+            ^_: sema_marker_rules_check_rule_signatures(definition.type_markers, check)
         }
         .Const(definition) -> {
-            _ := sema_marker_rules_check_rule_signatures(definition.markers, check)
+            ^_: sema_marker_rules_check_rule_signatures(definition.markers, check)
             sema_context_key_check_declaration(definition, check.environment.module_name, check.diagnostics)
         }
         .Test(test) -> {
-            args := [MarkerCallArg]{}
-            labels := [CallLabel?]{}
+            ^args: [MarkerCallArg]{}
+            ^labels: [CallLabel?]{}
             if test.name_expr == .Val(expression) {
                 args.push(MarkerCallArg.Expr{value: expression})
                 labels.push(None)
@@ -1325,7 +1327,7 @@ sema_marker_rules_check_static_item: fn(item: Item, check: ^SemaBodyCheck) {
                 return
             }
             marker: Marker{name: "Test", negated: false, name_span: test.span, args: args, arg_labels: labels, span: test.span, ct: None}
-            _ := sema_marker_rules_check_rule_signature(marker, check)
+            ^_: sema_marker_rules_check_rule_signature(marker, check)
         }
         .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
@@ -1337,12 +1339,12 @@ sema_marker_rules_check_static_item: fn(item: Item, check: ^SemaBodyCheck) {
 // may name a comptime constant is left alone, and only an interpolated string
 // is certainly not plain text.
 sema_marker_rules_check_local_meta: fn(marker: Marker, diagnostics: ^[Diagnostic]) {
-    seen := name_table_sized(2)
+    ^seen: name_table_sized(2)
     loop index in 0..<marker.args.len() {
         expression: sema_marker_rules_marker_expression(marker, index) ?? next
         value_span: expr_span(expression)
-        name := ""
-        field_span := value_span
+        ^name: ""
+        ^field_span: value_span
         if index < marker.arg_labels.len() && marker.arg_labels[index] == .Val(label) {
             name = label.name
             field_span = Span{start: label.span.start, end: value_span.end}
@@ -1380,7 +1382,7 @@ sema_marker_rules_note_meta_field: fn(name: String, expression: Expr, field_span
             else -> {}
         }
     }
-    _ := name_intern(seen, name)
+    ^_: name_intern(seen, name)
     if name != "category" {
         return
     }
@@ -1399,16 +1401,16 @@ sema_marker_rules_note_meta_field: fn(name: String, expression: Expr, field_span
 }
 
 sema_marker_rules_declared_signature: fn(rule: SemaScopeMembersMarkerRule) -> {signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?} Never! {
-    params := [TAppliedRuleParameter]{}
-    expected_types := [Type?]{}
-    variadic := TAppliedRuleArgKind?{None}
-    variadic_source_type := String?{None}
-    variadic_expected_type := Type?{None}
+    ^params: [TAppliedRuleParameter]{}
+    ^expected_types: [Type?]{}
+    ^variadic: TAppliedRuleArgKind?{None}
+    ^variadic_source_type: String?{None}
+    ^variadic_expected_type: Type?{None}
     loop parameter in rule.params {
         if parameter.name.starts_with("$") -> next
-        source_type := sema_marker_rules_type_name_for_parameter(parameter) ?? "Value"
-        kind := sema_marker_rules_parameter_kind(parameter)
-        default_source := if parameter.value != None -> Val("…") else -> None
+        ^source_type: sema_marker_rules_type_name_for_parameter(parameter) ?? "Value"
+        ^kind: sema_marker_rules_parameter_kind(parameter)
+        ^default_source: if parameter.value != None -> Val("…") else -> None
         if parameter.variadic {
             variadic = Val(kind)
             variadic_source_type = Val(source_type)
@@ -1422,18 +1424,18 @@ sema_marker_rules_declared_signature: fn(rule: SemaScopeMembersMarkerRule) -> {s
 }
 
 sema_marker_rules_declared_site_error: fn(marker: Marker, rule: SemaScopeMembersMarkerRule) -> Diagnostic {
-    sites := (loop site in rule.sites -> ".{site}")
-    allowed := if sites.len() == 0 -> "no sites" else -> sites.join(", ")
+    ^sites: (loop site in rule.sites -> ".{site}")
+    ^allowed: if sites.len() == 0 -> "no sites" else -> sites.join(", ")
     sema_error("E0355", marker.name_span, "`#{marker.name}` cannot attach at this site", "the declared rule allows only these sites: {allowed}", "remove the marker or move it to one of its declared sites")
 }
 
 sema_marker_rules_applied_site_error: fn(marker: Marker, rule: TAppliedRule, site: RuleSite) -> Diagnostic {
-    legal := (loop allowed_site in rule.sites -> "`{allowed_site}`")
+    ^legal: (loop allowed_site in rule.sites -> "`{allowed_site}`")
     if rule.companion_site == .Val(companion) {
         legal.push("{companion.site} with companion `#{companion.rule}`")
     }
-    allowed := if legal.len() == 0 -> "no active attachment sites" else -> legal.join(", ")
-    fix := if rule.companion_site == None && rule.sites.len() == 1 && rule.sites[0] == "Constant" -> "write `#{marker.name} NAME: #run value` — a storage marker precedes a module constant" else -> "move `#{marker.name}` to one of its registered sites"
+    ^allowed: if legal.len() == 0 -> "no active attachment sites" else -> legal.join(", ")
+    ^fix: if rule.companion_site == None && rule.sites.len() == 1 && rule.sites[0] == "Constant" -> "write `#{marker.name} NAME: #run value` — a storage marker precedes a module constant" else -> "move `#{marker.name}` to one of its registered sites"
     sema_error("E0355", marker.span, "`#{marker.name}` cannot attach at the {sema_marker_rules_site_name(site)} site", "the registry allows `#{marker.name}` only at: {allowed}", fix)
 }
 
@@ -1507,7 +1509,7 @@ sema_marker_rules_function_applications: fn(function: Func, site: RuleSite, appl
 // An impl's markers that are rule applications: the parser owns
 // `#Target(OS.…)` on an impl as its OS gate.
 sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Marker] Never! {
-    kept := [Marker]{}
+    ^kept: [Marker]{}
     loop marker in markers {
         if sema_marker_is_hook(marker, MarkerHook.Target) && os_target != None -> next
         kept.push(marker.copy())
@@ -1518,7 +1520,7 @@ sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Ma
 // The parser owns `#FX` on a module, a struct, an enum or a trait as its
 // effect cap, so it is no rule application there.
 sema_marker_rules_without_cap: fn(markers: [Marker]) -> [Marker] Never! {
-    kept := [Marker]{}
+    ^kept: [Marker]{}
     loop marker in markers {
         if !sema_marker_is_hook(marker, MarkerHook.FX) -> kept.push(marker.copy())
     }
@@ -1589,21 +1591,21 @@ sema_marker_rules_item_applications: fn(item: Item, applications: ^[AppliedRuleA
 }
 
 sema_marker_rules_applications: fn(program: Program) -> [AppliedRuleApplication] Never! {
-    applications := program.rule_facts
-    keys := SemaKeyRows{}
-    recorded := [Int:Bool]{}
+    ^applications: program.rule_facts
+    ^keys: SemaKeyRows{}
+    ^recorded: [Int:Bool]{}
     loop fact in program.rule_facts {
         key: sema_marker_rules_application_key(keys, fact)
         recorded[key] = true
     }
-    collected := [AppliedRuleApplication]{}
+    ^collected: [AppliedRuleApplication]{}
     loop item in program.items -> sema_marker_rules_item_applications(item, collected)
     loop application in collected {
         key: sema_marker_rules_application_key(keys, application)
         if !recorded.has_key(key) -> applications.push(application)
     }
     if program.applied_rules.len() == 0 -> return applications
-    loop application in applications -> _ := sema_marker_rules_first_application(keys, application)
+    loop application in applications -> ^_: sema_marker_rules_first_application(keys, application)
     loop application in program.applied_rules {
         if !sema_marker_rules_first_application(keys, application) -> next
         applications.push(application.copy())
@@ -1619,7 +1621,7 @@ SemaMarkerApplicationRows: struct {
 }
 
 sema_marker_rules_application_rows: fn(applications: [AppliedRuleApplication]) -> SemaMarkerApplicationRows Never! {
-    rows := SemaMarkerApplicationRows{}
+    ^rows: SemaMarkerApplicationRows{}
     loop (index, application) in applications {
         key: sema_marker_rules_application_row_key(rows.keys, application.marker)
         if !rows.rows.has_key(key) -> rows.rows[key] = index
@@ -1696,20 +1698,20 @@ sema_marker_c_argument: fn(marker: Marker) -> Bool Never! {
 }
 
 sema_marker_rules_edit_distance: fn(left: String, right: String) -> Int Never! {
-    a := left.bytes()
-    b := right.bytes()
-    previous := [Int]{0}
+    ^a: left.bytes()
+    ^b: right.bytes()
+    ^previous: [Int]{0}
     loop index in 0..<b.len() { previous.push(index + 1) }
-    i := 0
+    ^i: 0
     loop i < a.len() {
-        current := [Int]{i + 1}
-        j := 0
+        ^current: [Int]{i + 1}
+        ^j: 0
         loop j < b.len() {
-            cost := if a[i] == b[j] -> 0 else -> 1
-            deletion := previous[j + 1] + 1
-            insertion := current[j] + 1
-            substitution := previous[j] + cost
-            distance := deletion
+            ^cost: if a[i] == b[j] -> 0 else -> 1
+            ^deletion: previous[j + 1] + 1
+            ^insertion: current[j] + 1
+            ^substitution: previous[j] + cost
+            ^distance: deletion
             if insertion < distance -> distance = insertion
             if substitution < distance -> distance = substitution
             current.push(distance)
@@ -1722,14 +1724,14 @@ sema_marker_rules_edit_distance: fn(left: String, right: String) -> Int Never! {
 }
 
 sema_marker_rules_unknown_error: fn(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Diagnostic {
-    names := [String]{}
+    ^names: [String]{}
     loop rule in registry.applied_rules { sema_marker_rules_append_name(names, rule.name) }
     loop name in registry.marker_rules { sema_marker_rules_append_name(names, name.name) }
-    nearest := ""
-    nearest_distance := 3
-    ambiguous := false
+    ^nearest: ""
+    ^nearest_distance: 3
+    ^ambiguous: false
     loop candidate in names {
-        distance := sema_marker_rules_edit_distance(marker.name, candidate)
+        ^distance: sema_marker_rules_edit_distance(marker.name, candidate)
         if distance == 0 || distance > 2 -> next
         if {
             distance < nearest_distance -> {
@@ -1740,18 +1742,18 @@ sema_marker_rules_unknown_error: fn(registry: SemaScopeMembersMarkerRegistry, ma
             distance == nearest_distance && nearest != candidate -> { ambiguous = true }
         }
     }
-    fix := if nearest != "" && !ambiguous -> "did you mean `#{nearest}`?" else -> "check the spelling, or see Docs/Spec/syntax-decisions.md for the full applied-rule list."
-    diagnostic := sema_error("E0927", marker.name_span, "`#{marker.name}` isn't a known applied rule", "`{marker.name}` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary, not any PascalCase word.", fix)
+    ^fix: if nearest != "" && !ambiguous -> "did you mean `#{nearest}`?" else -> "check the spelling, or see Docs/Spec/syntax-decisions.md for the full applied-rule list."
+    ^diagnostic: sema_error("E0927", marker.name_span, "`#{marker.name}` isn't a known applied rule", "`{marker.name}` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary, not any PascalCase word.", fix)
     if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
 
 // The one repeated-rule diagnostic, named for the target it repeats on.
 sema_marker_rules_repeated_error: fn(marker: Marker, first: Marker, site: RuleSite?) -> Diagnostic {
-    noun := "target"
+    ^noun: "target"
     if site == .Val(value) {
         noun = if value == RuleSite.Function || value == RuleSite.Method -> "function" else -> sema_marker_rules_site_name(value).lower()
     }
-    diagnostic := sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this {noun}", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+    ^diagnostic: sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this {noun}", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
     diagnostic.detail = Val("second application span: the copy this report points at\nfirst application span: the earlier copy on the same target")
     diagnostic_with_label(diagnostic, first.span, "first application span")
 }
@@ -1814,10 +1816,10 @@ sema_marker_rules_collect_item: fn(item: Item, markers: ^[Marker]) Never! {
 }
 
 sema_marker_rules_collect_program: fn(program: Program) -> [Marker] Never! {
-    markers := [Marker]{}
+    ^markers: [Marker]{}
     loop item in program.items { sema_marker_rules_collect_item(item, markers) }
-    keys := SemaKeyRows{}
-    loop existing in markers -> _ := sema_marker_rules_first_occurrence(keys, existing)
+    ^keys: SemaKeyRows{}
+    loop existing in markers -> ^_: sema_marker_rules_first_occurrence(keys, existing)
     loop application in sema_marker_rules_applications(program) {
         if application.target == None -> next
         if sema_marker_rules_first_occurrence(keys, application.marker) {
@@ -1835,14 +1837,14 @@ sema_marker_rules_marker_is_known: fn(registry: SemaScopeMembersMarkerRegistry, 
 }
 
 sema_marker_rules_validate_vocabulary: fn(registry: SemaScopeMembersMarkerRegistry, program: Program, markers: [Marker], diagnostics: ^[Diagnostic]) {
-    seen := SemaKeyRows{}
+    ^seen: SemaKeyRows{}
     applications: sema_marker_rules_applications(program)
-    application_rows := sema_marker_rules_application_rows(applications)
+    ^application_rows: sema_marker_rules_application_rows(applications)
     loop marker in markers {
         if !sema_marker_rules_first_occurrence(seen, marker) -> next
         row_key: sema_marker_rules_application_row_key(application_rows.keys, marker)
         application_row: application_rows.rows.get(row_key) ?? -1
-        site := if application_row >= 0 -> applications[application_row].site else -> None
+        ^site: if application_row >= 0 -> applications[application_row].site else -> None
         if sema_marker_rules_is_guest_marker(marker, site) -> next
         if sema_marker_rules_builtin_index(registry, marker) == None && !sema_marker_rules_marker_is_known(registry, marker) {
             diagnostics.push(sema_marker_rules_unknown_error(registry, marker))
@@ -1890,9 +1892,9 @@ sema_marker_rules_validate_sites: fn(registry: SemaScopeMembersMarkerRegistry, p
     loop application in applications {
         sema_marker_rules_allow_checks(application.marker, diagnostics)
         site: application.site ?? next
-        builtin_index := sema_marker_rules_builtin_index(registry, application.marker)
+        ^builtin_index: sema_marker_rules_builtin_index(registry, application.marker)
         if builtin_index != None {
-            rule := registry.applied_rules[builtin_index ?? 0]
+            ^rule: registry.applied_rules[builtin_index ?? 0]
             if !sema_marker_rules_fact_allows(rule, application, applications) {
                 diagnostics.push(sema_marker_rules_applied_site_error(application.marker, rule, site))
             }
@@ -1943,7 +1945,7 @@ sema_marker_rules_user_argument_error: fn(registry: SemaScopeMembersMarkerRegist
     bindings: sema_marker_rules_marker_signature_bindings(marker, declared.signature, Val(registry.format_names)) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
     loop binding in bindings {
         argument: sema_marker_rules_marker_expression(marker, binding.source_index) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
-        expected := declared.variadic_expected_type.copy()
+        ^expected: declared.variadic_expected_type.copy()
         if binding.parameter_index == .Val(index) {
             expected = if index < declared.expected_types.len() -> declared.expected_types[index] else -> None
         }
@@ -1988,19 +1990,19 @@ sema_marker_rules_declared_kind: fn(ty: Type?) -> String? Never! {
 sema_marker_rules_validate_repeatability: fn(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: ^[Diagnostic]) {
     // Declaration, site and target span -> the first marker applied there,
     // a row of `seen_markers`, by the key's row in `keys`.
-    keys := SemaKeyRows{}
-    firsts := [Int:Int]{}
-    seen_markers := [Marker]{}
+    ^keys: SemaKeyRows{}
+    ^firsts: [Int:Int]{}
+    ^seen_markers: [Marker]{}
     loop application in sema_marker_rules_applications(program) {
-        builtin_index := sema_marker_rules_builtin_index(registry, application.marker)
-        repeatable := false
+        ^builtin_index: sema_marker_rules_builtin_index(registry, application.marker)
+        ^repeatable: false
         if builtin_index == {
             .Val(index) -> {
-                rule := registry.applied_rules[index]
+                ^rule: registry.applied_rules[index]
                 repeatable = rule.repeatable
             }
             .None -> {
-                user_index_option := sema_marker_rules_user_rule_index(registry, application.marker)
+                ^user_index_option: sema_marker_rules_user_rule_index(registry, application.marker)
                 if {
                     user_index_option != None -> {
                         user_index: user_index_option ?? next
@@ -2034,20 +2036,20 @@ sema_marker_rules_validate_repeatability: fn(registry: SemaScopeMembersMarkerReg
 }
 
 sema_marker_rules_validate_arguments: fn(registry: SemaScopeMembersMarkerRegistry, source_program: Program, markers: [Marker], check: ^SemaBodyCheck, values: [SemaComptimeItemValue], result: ^SemaMarkerRulesCheckResult) {
-    seen := SemaKeyRows{}
+    ^seen: SemaKeyRows{}
     loop marker in markers {
         if !sema_marker_rules_first_occurrence(seen, marker) -> next
-        builtin_index := sema_marker_rules_builtin_index(registry, marker)
+        ^builtin_index: sema_marker_rules_builtin_index(registry, marker)
         if builtin_index != None {
-            rule := registry.applied_rules[builtin_index ?? 0]
+            ^rule: registry.applied_rules[builtin_index ?? 0]
             expected_types: (loop _ in rule.signature.params -> Type?{None})
             sema_body_check_swap_diagnostics(check, result.diagnostics)
             sema_marker_rules_validate_argument_signature(marker, rule.signature, expected_types, None, false, rule.owns_menu, registry, check, values, result.argument_facts, result.comptime_sources, result.comptime_requests)
             sema_body_check_swap_diagnostics(check, result.diagnostics)
         }
-        user_index := sema_marker_rules_user_rule_index(registry, marker)
+        ^user_index: sema_marker_rules_user_rule_index(registry, marker)
         if user_index != None {
-            rule := registry.marker_rules[user_index ?? 0]
+            ^rule: registry.marker_rules[user_index ?? 0]
             signature: sema_marker_rules_declared_signature(rule)
             sema_body_check_swap_diagnostics(check, result.diagnostics)
             sema_marker_rules_validate_argument_signature(marker, signature.signature, signature.expected_types, signature.variadic_expected_type, true, false, registry, check, values, result.argument_facts, result.comptime_sources, result.comptime_requests)
@@ -2057,13 +2059,13 @@ sema_marker_rules_validate_arguments: fn(registry: SemaScopeMembersMarkerRegistr
 }
 
 sema_marker_rules_check: fn(registry: SemaScopeMembersMarkerRegistry, source_program: Program, check: ^SemaBodyCheck, values: [SemaComptimeItemValue]) -> SemaMarkerRulesCheckResult {
-    result := SemaMarkerRulesCheckResult{
+    ^result: SemaMarkerRulesCheckResult{
         diagnostics: [Diagnostic]{},
         argument_facts: [SemaMarkerRuleArgumentFact]{},
         comptime_sources: [SemaComptimeItemSource]{},
         comptime_requests: [SemaComptimeRequest]{},
     }
-    markers := sema_marker_rules_collect_program(source_program)
+    ^markers: sema_marker_rules_collect_program(source_program)
     sema_marker_rules_validate_vocabulary(registry, source_program, markers, result.diagnostics)
     sema_marker_rules_validate_sites(registry, source_program, result.diagnostics)
     sema_marker_rules_validate_repeatability(registry, source_program, result.diagnostics)
@@ -2365,7 +2367,7 @@ sema_inline_always_check_function: fn(function: Func, imports: [ImportDecl], dia
     if !function.is_inline_always {
         return
     }
-    scan := SemaInlineAlwaysScan{target: function.name, stmt_count: 0, self_recursive: false, imports: imports, method: method}
+    ^scan: SemaInlineAlwaysScan{target: function.name, stmt_count: 0, self_recursive: false, imports: imports, method: method}
     sema_inline_always_scan_body(function.body, scan)
     span: function.inline_span ?? function.name_span
     name: function.name
@@ -2417,10 +2419,10 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
     // The marked functions, as module and function indexes into `modules`,
     // and each marked key's first position in that list, at the key's id in
     // `marked_names`.
-    marked_modules := [Int]{}
-    marked_functions := [Int]{}
-    marked_names := name_column_table()
-    marked_rows := name_column()
+    ^marked_modules: [Int]{}
+    ^marked_functions: [Int]{}
+    ^marked_names: name_column_table()
+    ^marked_rows: name_column()
     loop (module_index, module_result) in modules {
         loop (function_index, function) in module_result.functions {
             if function.is_inline_always {
@@ -2431,8 +2433,8 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
         }
     }
     if marked_modules.len() == 0 -> return false
-    found := false
-    edges := [SemaInlineAlwaysEdge]{}
+    ^found: false
+    ^edges: [SemaInlineAlwaysEdge]{}
     loop (module_index, module_result) in modules {
         segments_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
         start: diagnostics.len()
@@ -2458,10 +2460,10 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
     }
     // Each marked function's call edges, in edge order, so the walk reads
     // only its own.
-    calls := (loop _ in marked_modules -> [Int]{})
+    ^calls: (loop _ in marked_modules -> [Int]{})
     loop (index, edge) in edges -> calls[edge.caller].push(index)
-    state := (loop _ in marked_modules -> 0)
-    back := [Int]{}
+    ^state: (loop _ in marked_modules -> 0)
+    ^back: [Int]{}
     loop node in 0..<marked_modules.len() {
         if state[node] == 0 -> sema_inline_always_walk(node, edges, calls, state, back)
     }
@@ -2487,7 +2489,9 @@ sema_inline_always_walk: fn(node: Int, edges: [SemaInlineAlwaysEdge], calls: [[I
     loop index in calls[node] {
         edge: edges[index]
         if state[edge.callee] == 1 -> back.push(index)
-        if state[edge.callee] == 0 -> sema_inline_always_walk(edge.callee, edges, calls, state, back)
+        if state[edge.callee] == 0 {
+            sema_inline_always_walk(edge.callee, edges, calls, state, back)
+        }
     }
     state[node] = 2
 }
@@ -2497,7 +2501,7 @@ sema_inline_always_walk: fn(node: Int, edges: [SemaInlineAlwaysEdge], calls: [[I
 // call facts for the calls half (sema_inline_always_check_calls). Methods
 // cannot be read as bare values, so E0918 applies to top-level functions.
 sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: ^[Diagnostic]) -> Bool Never! {
-    address_taken := [U32:Bool]{}
+    ^address_taken: [U32:Bool]{}
     loop module_result in modules {
         loop reference in module_result.name_references {
             if reference.kind == Val(SymbolKind.Function) {
@@ -2505,7 +2509,7 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
             }
         }
     }
-    found := false
+    ^found: false
     loop source_module_index in 0..<graph.modules.len() {
         start: diagnostics.len()
         imports: graph.modules[source_module_index].program.imports
@@ -2550,7 +2554,7 @@ sema_marker_rules_no_prelude_call: fn(call: Call, check: ^SemaBodyCheck) -> Bool
     fix: if call.name == "print" -> "write `use io: core.term` and call `io.print(…)`, or remove `#NoPrelude`" else -> "write `use io: core.term` and read a line with `io.readline(…)`, or remove `#NoPrelude`"
     check.diagnostics.push(sema_marker_rules_no_prelude_error(call.name, call.name_span, fix))
     loop argument_index in 0..<call.args.len() {
-        _ := sema_check_expression(call.args[argument_index].expr, None, check)
+        ^_: sema_check_expression(call.args[argument_index].expr, None, check)
     }
     true
 }

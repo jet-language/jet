@@ -138,7 +138,7 @@ stage: fn(root: String, arm: Int, dir: String) {
 // One arm built at one level into `dir`, its binary.
 build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> String {
     stage(root, arm, dir)
-    argv := jet.copy()
+    ^argv: jet.copy()
     argv.extend([String]{"build", "--release", level, "main.jet"})
     built: process.cmd(argv).cwd(dir).run() ?? fail("{argv.join(" ")}: {err}")
     binary: files.join(dir, ".jet/build/main")
@@ -152,8 +152,8 @@ build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> 
 // first stdout ns, peak KiB, user us, system us, exec errno) and its
 // `cycles` line (-1 when the counter could not open).
 run_of: fn(report: String) -> Run {
-    end := [String]{}
-    cycles := -1
+    ^end: [String]{}
+    ^cycles: -1
     loop line in report.split("\n") {
         fields: line.split(" ").to_list()
         if fields[0] == "end" -> end = fields.copy()
@@ -166,9 +166,9 @@ run_of: fn(report: String) -> Run {
 
 // One timed run of `argv` in `dir` with `env`, which must print `expected`.
 timed: fn(launch: String, report: String, argv: [String], dir: String, env: [String:String], expected: String) -> Run {
-    words := [String]{launch, report}
+    ^words: [String]{launch, report}
     loop word in argv -> words.push(word.copy())
-    spec := process.cmd(words).cwd(dir)
+    ^spec: process.cmd(words).cwd(dir)
     loop (name, value) in env -> spec = spec.env(name, value)
     ran: spec.run() ?? fail("{argv.join(" ")}: {err}")
     if ran.output != expected {
@@ -182,11 +182,11 @@ timed: fn(launch: String, report: String, argv: [String], dir: String, env: [Str
 // BOOTSTRAP_SEED picks each resample's indices; the bounds are nearest ranks.
 // A loss is a lower bound above `budget`.
 metric: fn(zoned: [Int], plain: [Int], budget: Float) -> Metric {
-    state := BOOTSTRAP_SEED
-    ratios := [Float]{}
+    ^state: BOOTSTRAP_SEED
+    ^ratios: [Float]{}
     loop _ in 0..<BOOTSTRAP_RESAMPLES {
-        picked_zoned := [Int]{}
-        picked_plain := [Int]{}
+        ^picked_zoned: [Int]{}
+        ^picked_plain: [Int]{}
         loop _ in 0..<zoned.len() {
             state = (state * 1664525 + 1013904223) %% 4294967296
             selected: state * zoned.len() /% 4294967296
@@ -214,12 +214,12 @@ metric: fn(zoned: [Int], plain: [Int], budget: Float) -> Metric {
 // trials. `zoned` and `plain` are each arm's argv, run in its directory.
 state_of: fn(launch: String, scratch: String, name: String, zoned: [String], zoned_dir: String, plain: [String], plain_dir: String, env: [String:String], trials: Int, budget: Float) -> State {
     report: files.join(scratch, "report")
-    first := process.cmd(plain).cwd(plain_dir)
+    ^first: process.cmd(plain).cwd(plain_dir)
     loop (key, value) in env -> first = first.env(key, value)
     expected: first.run() ?? fail("{plain.join(" ")}: {err}")
     if !expected.success -> fail("plain {name} exited {expected.code}:\n{expected.errors}")
-    zoned_runs := [Run]{}
-    plain_runs := [Run]{}
+    ^zoned_runs: [Run]{}
+    ^plain_runs: [Run]{}
     loop trial in 0..<trials {
         if trial %% 2 == 0 {
             zoned_runs.push(timed(launch, report, zoned, zoned_dir, env, expected.output))
@@ -276,8 +276,8 @@ run: fn() {
     scratch_dir: files.temp_dir("profile-overhead-pair") ?? fail("cannot make a scratch directory: {err}")
     scratch: scratch_dir.path
     launch: launcher(root, scratch)
-    states := [State]{}
-    loss := false
+    ^states: [State]{}
+    ^loss: false
     loop level in LEVELS {
         zoned_dir: files.join(scratch, "zoned{level}")
         plain_dir: files.join(scratch, "plain{level}")
@@ -289,7 +289,7 @@ run: fn() {
     plain_on: files.join(scratch, "plain-on")
     stage(root, 0, zoned_on)
     stage(root, 1, plain_on)
-    observed := jet.copy()
+    ^observed: jet.copy()
     observed.extend([String]{"run", "--observe", "main.jet", "--", "--n", n_text})
     samples: [String:String]{"JET_PERF_SAMPLES": files.join(scratch, "on.samples")}
     states.push(state_of(launch, scratch, "on", observed, zoned_on, observed, plain_on, samples, trials, ON_BUDGET))

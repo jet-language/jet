@@ -29,7 +29,7 @@ schema_baseline: fn(fields: [SnapshotField]) -> [String:SchemaSnapshot] Never! {
 }
 
 schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
-    found := false
+    ^found: false
     loop diagnostic in diagnostics {
         schema_require(diagnostic.code == "E0910" && diagnostic.why != "" && diagnostic.fix != "" && diagnostic.span != None, "complete registered diagnostic")
         if diagnostic.what.contains(text) -> found = true
@@ -47,7 +47,7 @@ schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
     loose: SchemaSnapshot.parse(" schema_version = +0004294967295\ntype = Old\ntype = New\npublished_version = 2\nfield : \n") ?? panic("permissive snapshot grammar")
     schema_require(loose.schema_version == (U32{4294967295}) && loose.type_name == "New" && loose.fields[0].ty == "", "permissive parser grammar")
     loop version in ([String]{"", "+", "-1", "1_0", "4294967296", "１２"}) {
-        invalid := false
+        ^invalid: false
         if SchemaSnapshot.parse("schema_version = {version}\ntype = A\npublished_version = 1\n") == .Err(_) {
             invalid = true
         }
@@ -55,7 +55,7 @@ schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
     }
     loop raw in
         ([String]{"type = A\npublished_version = 1\n", "schema_version = 1\npublished_version = 1\n", "schema_version = 1\ntype = A\n", "schema_version = 1\ntype = A\npublished_version = 1\nfield missing\n", "unknown = line\n"}) {
-        invalid := false
+        ^invalid: false
         if SchemaSnapshot.parse(raw) == .Err(_) -> invalid = true
         schema_require(invalid, "malformed snapshot")
     }

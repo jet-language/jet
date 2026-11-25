@@ -5,7 +5,7 @@
 job: fn(n: Int) -> Int Never! { n * 2 }
 
 joined: fn() -> Int {
-    total := 0
+    ^total: 0
     task.group pool(limit: 2) {
         numbers: [Int]{1, 2, 3}
         handles: loop n in numbers -> task job(n)
@@ -18,7 +18,7 @@ joined: fn() -> Int {
 }
 
 indexed: fn() -> Int {
-    total := 0
+    ^total: 0
     task.group pool(limit: 2) {
         numbers: [Int]{4, 5, 6}
         handles: loop n in numbers -> task job(n)
@@ -31,7 +31,7 @@ indexed: fn() -> Int {
 }
 
 fixed: fn() -> Int {
-    total := 0
+    ^total: 0
     task.group pool(limit: 2) {
         handles: [Task<Int>#2]{task job(7), task job(8)}
         loop handle in handles {
@@ -43,9 +43,9 @@ fixed: fn() -> Int {
 }
 
 mapped: fn() -> Int {
-    total := 0
+    ^total: 0
     task.group pool(limit: 2) {
-        handles := [String:Task<Int>]{}
+        ^handles: [String:Task<Int>]{}
         handles["a"] = task job(1)
         handles["b"] = task job(2)
         handles["c"] = task job(3)
@@ -59,9 +59,9 @@ mapped: fn() -> Int {
 }
 
 keyed: fn() -> Int {
-    total := 0
+    ^total: 0
     task.group pool(limit: 2) {
-        handles := [Int:Task<Int>]{}
+        ^handles: [Int:Task<Int>]{}
         handles[7] = task job(10)
         handles[9] = task job(11)
         loop (key, handle) in handles.move() -> total += key + (handle.join() ?? 0)

@@ -62,10 +62,10 @@ parser_distinct_ahead: fn(state: ^JetParserState) -> Bool Never! {
 // the ineligible state section (E0158).
 parser_type_alias_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool {
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return false
-    after := offset + 1
+    ^after: offset + 1
     generic: parser_kind_at(state, after) == TOKEN_LT
     if generic {
-        depth := 1
+        ^depth: 1
         after += 1
         loop depth > 0 {
             if parser_kind_at(state, after) == {
@@ -110,8 +110,8 @@ parser_path_binding_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Ne
 // (parser_parse_const), not a type.
 parser_parenthesized_value_path_at: fn(state: ^JetParserState, offset: Int) -[]> Bool {
     if parser_kind_at(state, offset) != TOKEN_LPAREN -> return false
-    at := offset + 1
-    words := 0
+    ^at: offset + 1
+    ^words: 0
     loop {
         if parser_kind_at(state, at) != TOKEN_IDENT || !parser_reexport_value_word(parser_value_at(state, at)) {
             return false
@@ -126,7 +126,7 @@ parser_parenthesized_value_path_at: fn(state: ^JetParserState, offset: Int) -[]>
 
 // `IDENT (. IDENT)*` ending the item: a path that may name a type or a value.
 parser_bare_path_rhs_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
-    at := offset
+    ^at: offset
     loop {
         if parser_kind_at(state, at) != TOKEN_IDENT -> return false
         at += 1
@@ -165,7 +165,7 @@ parser_unit_family_ahead: fn(state: ^JetParserState) -> Bool Never! {
 // The traits a distinct type's bundle markers re-expose from its base type.
 // `#Codable` codes the type as its base, in the directions its `only:` keeps.
 parser_distinct_marker_derives: fn(markers: [Marker]) -> [NamedSpan] Never! {
-    derives := [NamedSpan]{}
+    ^derives: [NamedSpan]{}
     loop marker in markers {
         if marker.name == MARKER_CODABLE {
             if marker.negated -> next
@@ -195,7 +195,7 @@ parser_parse_distinct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
     // The type grammar owns the `Int(lo..hi)` spelling of every type
     // position; a named distinct keeps that interval in its declaration, so
     // its base is never already an inline range.
-    range_value := IntegerRange?{None}
+    ^range_value: IntegerRange?{None}
     base: if parsed.ty == {
         .InlineRange(inner, lo, hi) -> {
             range_value = Val(IntegerRange{lo: lo, hi: hi, span: parsed.span})
@@ -261,7 +261,7 @@ parser_parse_unit_family: fn(state: ^JetParserState, modifiers: ParsedItemModifi
     marker: if {
         parser_current_kind(state) == TOKEN_HASH -> parser_parse_marker(state)
         else -> {
-            found := Marker?{None}
+            ^found: Marker?{None}
             loop candidate in modifiers.markers {
                 if candidate.name == "UnitFamily" {
                     found = Val(candidate)
@@ -273,7 +273,7 @@ parser_parse_unit_family: fn(state: ^JetParserState, modifiers: ParsedItemModifi
     }
     // Arguments bind by label first (`base: meter, family: Length` keeps its
     // written order), then by position: family, dimension, base.
-    family_index := 0
+    ^family_index: 0
     loop index in 0..<marker.args.len() {
         if parser_marker_label(marker, index) == "family" {
             family_index = index
@@ -281,8 +281,8 @@ parser_parse_unit_family: fn(state: ^JetParserState, modifiers: ParsedItemModifi
         }
     }
     family_expr: parser_marker_expression(marker, family_index)
-    family := ""
-    family_span := marker.span
+    ^family: ""
+    ^family_span: marker.span
     if family_expr == {
         .Val(value) -> {
             if value == {
@@ -298,8 +298,8 @@ parser_parse_unit_family: fn(state: ^JetParserState, modifiers: ParsedItemModifi
     if family == "" {
         parser_type_declaration_error(state, "E0003", marker.span, "`UnitFamily` needs a family name", "the first UnitFamily argument names the nominal unit family", "write `#UnitFamily(Time)`")
     }
-    dimension := UnitDimensionDecl?{None}
-    base := NamedSpan?{None}
+    ^dimension: UnitDimensionDecl?{None}
+    ^base: NamedSpan?{None}
     loop index in 0..<marker.args.len() {
         if index == family_index -> next
         value: parser_marker_expression(marker, index)
@@ -350,17 +350,17 @@ parser_parse_unit_family: fn(state: ^JetParserState, modifiers: ParsedItemModifi
         parser_type_declaration_error(state, "E0003", family_span, "Derived dimension `{family}` has no canonical base", "Every derived dimension needs one member whose scale is exactly one", "Add `base: member_name` and keep that member's scale at 1 with offset 0")
     }
     parser_expect(state, TOKEN_LBRACE, "`{{` before unit-family members")
-    members := [UnitFamilyMember]{}
-    has_conversion := false
+    ^members: [UnitFamilyMember]{}
+    ^has_conversion: false
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
         member: parser_expect_name(state, "as a unit-family member")
-        scale := UnitRatio{numerator: 1, denominator: 1}
-        scale_provenance := UnitScaleProvenance.Rational
-        offset := UnitRatio{numerator: 0, denominator: 1}
-        saw_scale := false
-        saw_offset := false
+        ^scale: UnitRatio{numerator: 1, denominator: 1}
+        ^scale_provenance: UnitScaleProvenance.Rational
+        ^offset: UnitRatio{numerator: 0, denominator: 1}
+        ^saw_scale: false
+        ^saw_offset: false
         if parser_current_kind(state) == TOKEN_LPAREN {
             parser_bump(state)
             loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
@@ -409,7 +409,7 @@ parser_parse_unit_family: fn(state: ^JetParserState, modifiers: ParsedItemModifi
     }
     if base == {
         .Val(base_value) -> {
-            found := false
+            ^found: false
             loop member in members {
                 if member.name == base_value.name {
                     found = true
@@ -481,7 +481,7 @@ UnitText: struct {
 }
 
 parser_unit_decimal: fn(state: ^JetParserState, context: String) -> UnitText {
-    sign := ""
+    ^sign: ""
     start: parser_current(state).span
     if parser_current_kind(state) == TOKEN_MINUS {
         parser_bump(state)
@@ -498,7 +498,7 @@ parser_unit_decimal: fn(state: ^JetParserState, context: String) -> UnitText {
 }
 
 parser_unit_integer: fn(state: ^JetParserState, context: String) -> UnitText {
-    sign := ""
+    ^sign: ""
     start: parser_current(state).span
     if parser_current_kind(state) == TOKEN_MINUS {
         parser_bump(state)
@@ -516,7 +516,7 @@ parser_unit_integer: fn(state: ^JetParserState, context: String) -> UnitText {
 
 parser_unit_ratio: fn(state: ^JetParserState) -> UnitRatio {
     numerator: parser_unit_integer(state, "as conversion metadata")
-    denominator := UnitText{text: "1", span: numerator.span}
+    ^denominator: UnitText{text: "1", span: numerator.span}
     if parser_current_kind(state) == TOKEN_SLASH {
         parser_bump(state)
         denominator = parser_unit_integer(state, "as a ratio denominator")
@@ -534,7 +534,7 @@ parser_unit_plain_string: fn(state: ^JetParserState, context: String) -> String 
         if token.kind != TOKEN_EOF -> parser_bump(state)
         return ""
     }
-    _ := parser_take_text(state, false)
+    ^_: parser_take_text(state, false)
     if parser_interpolations(state, token) > 0 {
         parser_add_error(state, token.span, "unit provenance strings cannot interpolate", "conversion provenance must be stable source text", "write a plain string")
     }
@@ -553,18 +553,18 @@ parser_unit_ratio_from_text: fn(numerator_text: String, denominator_text: String
 parser_unit_decimal_to_ratio: fn(text: String) -> UnitRatio Never! {
     clean: text.replace("_", "")
     bytes: clean.bytes()
-    sign := 1
-    index := 0
+    ^sign: 1
+    ^index: 0
     if bytes.len() > 0 && (Int{bytes[0]} == 45 || Int{bytes[0]} == 43) {
         if (Int{bytes[0]}) == 45 -> sign = -1
         index = 1
     }
-    whole := 0
-    fraction := 0
-    fraction_digits := 0
-    saw_dot := false
-    exponent := 0
-    exponent_sign := 1
+    ^whole: 0
+    ^fraction: 0
+    ^fraction_digits: 0
+    ^saw_dot: false
+    ^exponent: 0
+    ^exponent_sign: 1
     loop index < bytes.len() {
         value: Int{bytes[index]}
         if value == 101 || value == 69 {
@@ -594,8 +594,8 @@ parser_unit_decimal_to_ratio: fn(text: String) -> UnitRatio Never! {
         }
         index += 1
     }
-    denominator := (10).pow(fraction_digits)
-    numerator := sign * (whole * denominator + fraction)
+    ^denominator: (10).pow(fraction_digits)
+    ^numerator: sign * (whole * denominator + fraction)
     power: exponent_sign * exponent
     if power >= 0 -> numerator *= (10).pow(power) else -> denominator *= (10).pow(0 - power)
     UnitRatio{numerator: numerator, denominator: denominator}

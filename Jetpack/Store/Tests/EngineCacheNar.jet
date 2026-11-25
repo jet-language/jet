@@ -20,7 +20,7 @@ engine_cache_nar_regular_entry: fn(out: ^[U8], name: String) {
 }
 
 #Test("binary_cache_nar_codec_rejects_noncanonical_and_malicious_input") {
-    nar := [U8]{}
+    ^nar: [U8]{}
     fields: [String]{"nix-archive-1", "(", "type", "regular", "contents", "payload", "executable", "", ")"}
     loop field in fields -> engine_cache_nar_string(nar, field)
     assert(store_validate_nar(nar) == .Err(_))
@@ -28,14 +28,14 @@ engine_cache_nar_regular_entry: fn(out: ^[U8], name: String) {
     output: files.join(destination, "out")
     assert(store_read_nar(nar, output) == .Err(_))
     assert(!files.exists(output))
-    unordered_nar := [U8]{}
+    ^unordered_nar: [U8]{}
     head: [String]{"nix-archive-1", "(", "type", "directory"}
     loop field in head -> engine_cache_nar_string(unordered_nar, field)
     engine_cache_nar_regular_entry(unordered_nar, "z")
     engine_cache_nar_regular_entry(unordered_nar, "a")
     engine_cache_nar_string(unordered_nar, ")")
     assert(store_validate_nar(unordered_nar) == .Err(_))
-    escape_nar := [U8]{}
+    ^escape_nar: [U8]{}
     escape_fields: [String]{"nix-archive-1", "(", "type", "directory", "entry", "(", "name", "escape", "node", "(", "type", "symlink", "target", "../outside", ")", ")", ")"}
     loop field in escape_fields -> engine_cache_nar_string(escape_nar, field)
     assert(store_validate_nar(escape_nar) == .Err(_))

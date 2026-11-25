@@ -120,7 +120,7 @@ build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> 
     files.create_dir_all(dir) ?? fail("{dir}: {err}")
     source: files.read(files.join(root, PROGRAM)) ?? fail("{PROGRAM}: {err}")
     files.write(files.join(dir, "main.jet"), source) ?? fail("{dir}/main.jet: {err}")
-    argv := jet.copy()
+    ^argv: jet.copy()
     argv.extend([String]{"build", "--release", level, "main.jet"})
     built: process.cmd(argv).cwd(dir).run() ?? fail("{argv.join(" ")}: {err}")
     binary: files.join(dir, ".jet/build/main")
@@ -134,8 +134,8 @@ build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> 
 // first stdout ns, peak KiB, user us, system us, exec errno) and its
 // `cycles` line (-1 when the counter could not open).
 run_of: fn(report: String) -> Run {
-    end := [String]{}
-    cycles := -1
+    ^end: [String]{}
+    ^cycles: -1
     loop line in report.split("\n") {
         fields: line.split(" ").to_list()
         if fields[0] == "cycles" && fields.len() == 2 -> cycles = Int.parse(fields[1]) ?? -1
@@ -159,11 +159,11 @@ timed: fn(launch: String, report: String, binary: String, n: String, expected: S
 // median(rows): a 32-bit linear congruential draw seeded with BOOTSTRAP_SEED
 // picks each resample's indices; the bounds are nearest ranks.
 metric: fn(bodies: [Int], rows: [Int]) -> Metric {
-    state := BOOTSTRAP_SEED
-    ratios := [Float]{}
+    ^state: BOOTSTRAP_SEED
+    ^ratios: [Float]{}
     loop _ in 0..<BOOTSTRAP_RESAMPLES {
-        picked_bodies := [Int]{}
-        picked_rows := [Int]{}
+        ^picked_bodies: [Int]{}
+        ^picked_rows: [Int]{}
         loop _ in 0..<bodies.len() {
             state = (state * 1664525 + 1013904223) %% 4294967296
             selected: state * bodies.len() /% 4294967296
@@ -193,8 +193,8 @@ level_of: fn(launch: String, scratch: String, bodies: String, rows: String, leve
     report: files.join(scratch, "report")
     expected: process.cmd([String]{rows, "--n", n}).run() ?? fail("{rows}: {err}")
     if !expected.success -> fail("rows {level} --n {n} exited {expected.code}")
-    bodies_runs := [Run]{}
-    rows_runs := [Run]{}
+    ^bodies_runs: [Run]{}
+    ^rows_runs: [Run]{}
     loop trial in 0..<trials {
         if trial %% 2 == 0 -> bodies_runs.push(timed(launch, report, bodies, n, expected.output))
         rows_runs.push(timed(launch, report, rows, n, expected.output))
@@ -240,7 +240,9 @@ run: fn() {
     given: argument(argv, "--jet", "")
     jet: if given == "" -> [String]{files.join(root, JET_ENV), "jet"} else -> [String]{given}
     rows_jet: argument(argv, "--rows", "")
-    if rows_jet == "" -> fail("--rows names the compiler that still routes core.math's Float leaves through its rows")
+    if rows_jet == "" {
+        fail("--rows names the compiler that still routes core.math's Float leaves through its rows")
+    }
     n_text: argument(argv, "--n", DEFAULT_N)
     n: count(n_text, "--n")
     trials: count(argument(argv, "--trials", DEFAULT_TRIALS), "--trials")
@@ -248,8 +250,8 @@ run: fn() {
     scratch_dir: files.temp_dir("core-math-pair") ?? fail("cannot make a scratch directory: {err}")
     scratch: scratch_dir.path
     launch: launcher(root, scratch)
-    levels := [Level]{}
-    loss := false
+    ^levels: [Level]{}
+    ^loss: false
     loop level in LEVELS {
         bodies: build(root, jet, 0, level, files.join(scratch, "bodies{level}"))
         rows: build(root, [String]{rows_jet}, 1, level, files.join(scratch, "rows{level}"))

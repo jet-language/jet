@@ -17,7 +17,7 @@ s5_explain_token: fn(word: String) {
     what: files.read("what.txt") ?? panic("captured JSON what")
     assert(plain.contains("Example:"))
     bytes: plain.bytes()
-    start := 0
+    ^start: 0
     // The scan walks bytes, so each word is cut from the bytes: an
     // explanation may hold non-ASCII text such as `…`.
     loop index in 0..<bytes.len() {
@@ -27,10 +27,10 @@ s5_explain_token: fn(word: String) {
         }
     }
     s5_explain_token(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
-    positioned := 0
-    examples := 0
-    in_example := false
-    nonempty := false
+    ^positioned: 0
+    ^examples: 0
+    ^in_example: false
+    ^nonempty: false
     loop line in what.lines() {
         if !line.starts_with(" ") && line.ends_with(":") {
             assert(line.len() > 1, "meaning position must be nonempty")

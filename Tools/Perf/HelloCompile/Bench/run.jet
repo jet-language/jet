@@ -90,7 +90,7 @@ run: fn() -> Never Err! {
         "jet": {file: "main.jet", text: "run: fn() {{\n    print(\"hello\")\n}}\n"},
         "asm": {file: "hello.S", text: files.read(files.join(files.dirname(files.dirname(sys.executable())), "hello.S"))},
     }
-    results := [Row]{}
+    ^results: [Row]{}
     loop toolchain in toolchains(vars["JET"]) {
         label: toolchain.label.copy()  // copy: the ONLY filter captures the label
         if vars["ONLY"] != "" && !vars["ONLY"].split(",").any(fn(item) { label.contains(item) }) {
@@ -145,8 +145,8 @@ timed: fn(argv: [String], dir: String) -> Phase Err! {
     started: time.instant()
     child: process.cmd(argv).cwd(dir).stdout(.Capture).stderr(.Stdout).spawn()
     group: child.id()
-    peak := 0
-    sample_at := 0
+    ^peak: 0
+    ^sample_at: 0
     loop {
         if started.elapsed().ns >= sample_at {
             peak = max(peak, group_resident(group))
@@ -169,7 +169,7 @@ timed: fn(argv: [String], dir: String) -> Phase Err! {
 
 // The resident bytes of every process whose process group is `group`.
 group_resident: fn(group: Int) -> Int {
-    total := 0
+    ^total: 0
     loop entry in files.list_dir("/proc") ?? return 0 -> total += resident(entry.name, group) ?? 0
     total
 }
@@ -199,7 +199,7 @@ size: fn(binary: String?, strip: String) -> {built: Int?, stripped: Int?} Err! {
 runtime: fn(binary: String?) -> Float? Err! {
     path: binary ?? return Ok(None)
     if !files.exists(path) -> return Ok(None)
-    best := 1000000000.0
+    ^best: 1000000000.0
     loop _ in 0..<5 {
         started: time.instant()
         _: process.cmd([path.copy()]).run()
@@ -212,8 +212,8 @@ runtime: fn(binary: String?) -> Float? Err! {
 // The newest executable ELF file under `dir` that is not a library, a
 // dependency, a build script or a stripped copy: what `jet build` wrote.
 jet_binary: fn(dir: String) -> String? Err! {
-    best := String?{None}
-    newest := -1
+    ^best: String?{None}
+    ^newest: -1
     loop entry in files.walk_files(dir).list() ?? return Ok(None) {
         path: entry.path
         if !files.can_execute(path) || regex.is_match(Regex{"\.(?:so|d|rlib|stripped)$|/deps/|build-script"}, path) {

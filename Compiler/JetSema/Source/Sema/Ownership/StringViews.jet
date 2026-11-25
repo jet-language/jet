@@ -84,7 +84,7 @@ sema_string_view_push_copies_policy: fn(table: ^SemaScopeTable, declarations: [P
 // The owner places of a `trim`/`after`/`before`/`slice` call on a plain local
 // or parameter `String` name; empty for any other initializer.
 sema_string_view_call_sources: fn(init: Expr, scopes: SemaScopeTable, state: SemaOwnershipState) -> [SemaOwnershipPlace] {
-    none := [SemaOwnershipPlace]{}
+    ^none: [SemaOwnershipPlace]{}
     if init == {
         .MethodCall(receiver, method, _, _, _, args, _) -> {
             arity_ok: ((method == "trim" || method == "trim_start" || method == "trim_end") && args.len() == 0) || ((method == "after" || method == "before") && args.len() == 1) || (method == "slice" && (args.len() == 1 || args.len() == 2))
@@ -132,7 +132,7 @@ sema_string_view_lower_init: fn(init: TExpr) -> TExpr? {
         }
         .Slice(base, _, _, _, _) -> {
             if base.ty != Type.String -> return None
-            viewed := init
+            ^viewed: init
             tree_expr_retype(viewed, view_type)
             return Val(viewed)
         }
@@ -142,7 +142,7 @@ sema_string_view_lower_init: fn(init: TExpr) -> TExpr? {
 
 // A read view fact from the binding into its owner.
 sema_string_view_record_binding: fn(check: ^SemaBodyCheck, name: String, name_span: Span, places: [SemaOwnershipPlace]) -> Bool Never! {
-    fact := SemaOwnershipCallViewFact{output_path: [String]{}, access: AccessConvention.Read, places: places}
+    ^fact: SemaOwnershipCallViewFact{output_path: [String]{}, access: AccessConvention.Read, places: places}
     sema_ownership_record_call_view_batch(check.state, name, name_span, [SemaOwnershipCallViewFact]{fact}, check.scopes)
 }
 
@@ -190,7 +190,7 @@ sema_string_view_borrowing_result: fn(ty: Type) -> Bool Never! {
 sema_string_view_owner: fn(check: SemaBodyCheck, name: String) -> String Never! {
     index: sema_scope_resolve_index(check.scopes, name) ?? return "its owner"
     id: check.scopes.bindings[index].symbol.id
-    owner := "its owner"
+    ^owner: "its owner"
     loop fact_index in 0..<check.state.views.len() {
         if check.state.views[fact_index].active && check.state.views[fact_index].carrier_id == id {
             owner = check.state.views[fact_index].source.root
@@ -218,15 +218,15 @@ sema_string_view_check_read: fn(name: String, span: Span, check: ^SemaBodyCheck)
 // A string view, or a read view local, read at an owning destination is
 // materialized into an owned copy.
 sema_string_view_materialize: fn(name: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    previous_borrow := check.context.borrow_ctx
-    previous_read := check.context.allow_string_view_read
+    ^previous_borrow: check.context.borrow_ctx
+    ^previous_read: check.context.allow_string_view_read
     check.context.borrow_ctx = true
     check.context.allow_string_view_read = true
-    checked_value := sema_expr_check_identifier(name, span, None, check)
+    ^checked_value: sema_expr_check_identifier(name, span, None, check)
     check.context.borrow_ctx = previous_borrow
     check.context.allow_string_view_read = previous_read
     checked: checked_value ?? return None
-    facts := sema_copy_classify(checked.ty, SemaCopyIntent.Materialize, check.environment.*, check.program.*, check.context.generic_params, true)
+    ^facts: sema_copy_classify(checked.ty, SemaCopyIntent.Materialize, check.environment.*, check.program.*, check.context.generic_params, true)
     if !facts.accepted {
         return sema_expr_expected(checked, expected, check.environment.*, check.program.*, check.diagnostics)
     }
@@ -275,14 +275,14 @@ sema_string_view_stable_owner: fn(check: SemaBodyCheck, name: String) -> Bool Ne
 // owner, or a `trim`/`after`/`before` call on a `String` name. An owned
 // `String` is not a view.
 sema_string_view_check_field: fn(value: Expr, field_ty: Type, check: ^SemaBodyCheck) -> TExpr? {
-    previous_read := check.context.allow_string_view_read
+    ^previous_read: check.context.allow_string_view_read
     check.context.allow_string_view_read = true
-    checked_value := sema_check_expression_with_lambda_escapes(value, None, check, Val(true))
+    ^checked_value: sema_check_expression_with_lambda_escapes(value, None, check, Val(true))
     check.context.allow_string_view_read = previous_read
     checked: checked_value ?? return None
     if checked.ty != Type.String -> return Val(checked)
     span: expr_span(value)
-    view_name := ""
+    ^view_name: ""
     if value == .Ident(name, _, _) {
         if sema_string_view_binding(check.scopes, name) -> view_name = name
     }
@@ -292,7 +292,7 @@ sema_string_view_check_field: fn(value: Expr, field_ty: Type, check: ^SemaBodyCh
         if !sema_string_view_stable_owner(check, view_name) {
             sema_string_view_unsupported_use(view_name, "be stored in a struct field", span, check)
         }
-        viewed := checked
+        ^viewed: checked
         tree_expr_retype(viewed, field_ty)
         return Val(viewed)
     }
@@ -317,15 +317,15 @@ sema_string_view_return_source: fn(value: Expr, check: SemaBodyCheck) -> Bool {
 }
 
 sema_string_view_return_value: fn(value: Expr, success: Type, check: ^SemaBodyCheck) -> TExpr? {
-    previous_read := check.context.allow_string_view_read
+    ^previous_read: check.context.allow_string_view_read
     check.context.allow_string_view_read = true
-    checked_value := sema_check_expression(value, None, check)
+    ^checked_value: sema_check_expression(value, None, check)
     check.context.allow_string_view_read = previous_read
     checked: checked_value ?? return None
     if checked.ty != Type.String -> return Val(checked)
-    lowered := sema_string_view_lower_init(checked)
+    ^lowered: sema_string_view_lower_init(checked)
     if lowered != None -> return lowered
-    viewed := checked
+    ^viewed: checked
     tree_expr_retype(viewed, success)
     Val(viewed)
 }
@@ -335,7 +335,7 @@ sema_string_view_return_value: fn(value: Expr, success: Type, check: ^SemaBodyCh
 // provenance.
 sema_string_view_record_return: fn(value: Expr, check: ^SemaBodyCheck) -> Bool {
     span: expr_span(value)
-    places := [SemaOwnershipPlace]{}
+    ^places: [SemaOwnershipPlace]{}
     if value == .Ident(name, name_span, _) {
         if !sema_string_view_binding(check.scopes, name) {
             sema_string_view_return_boundary(span, check.diagnostics)
@@ -358,8 +358,8 @@ sema_string_view_record_return: fn(value: Expr, check: ^SemaBodyCheck) -> Bool {
         sema_string_view_return_boundary(span, check.diagnostics)
         return false
     }
-    provenance := check.context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
-    valid := sema_ownership_record_view_returns(check.state, places, AccessConvention.Read, [String]{}, check.context.return_view_receiver_key, check.context.return_view_parameter_keys, check.scopes, provenance, span, check.diagnostics)
+    ^provenance: check.context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+    ^valid: sema_ownership_record_view_returns(check.state, places, AccessConvention.Read, [String]{}, check.context.return_view_receiver_key, check.context.return_view_parameter_keys, check.scopes, provenance, span, check.diagnostics)
     check.context.return_view_provenance = Val(provenance)
     valid
 }

@@ -3,9 +3,9 @@
 compiler_file_fixture_bytes: fn(slots: I64, expected: I64, size: I64) -> Bool {
     data: rt_text_word(slots)
     count: rt_text_word(slots + I64{8})
-    same := count == size
+    ^same: count == size
     if same {
-        at := I64{0}
+        ^at: I64{0}
         loop at < size {
             if (host_u8_get(data, at) != rt_text_byte(rt_text_data(expected) + at)) { same = false }
             at += I64{1}
@@ -18,7 +18,7 @@ compiler_file_fixture_bytes: fn(slots: I64, expected: I64, size: I64) -> Bool {
 #Export(c) jet_rt_compiler_file_leaves_fixture: fn(path: I64) -> I64 {
     slots: jet_rt_alloc(I64{80}, I64{8})
     data: jet_rt_alloc(I64{20010} * RT_HOST_U8_STRIDE, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{20000}) {
         host_u8_put(data, at, I64{97})
         at += I64{1}

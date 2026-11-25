@@ -57,14 +57,14 @@ kit_steps_edits: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> 
     offset: if subject == "file" || subject == "file?" -> 1 else -> 0
     source: kit_steps_capture_subject(selector, if offset == 1 -> step.argv[1] else -> "", context, state) ?? return kit_steps_action_error(state, "apply-edits input: {err}")
     values: kit_steps_json_values(source, "doc", step.argv[2 + offset]) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits document or path is invalid")}
-    edits := [KitSourceEdit]{}
+    ^edits: [KitSourceEdit]{}
     loop value in values {
         rows: if value == {
             .Array(items) -> items
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [value]
         }
         loop row in rows {
-            edit := kit_steps_edit(row) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits needs span.file, span.start/end integers and new_text")}
+            ^edit: kit_steps_edit(row) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits needs span.file, span.start/end integers and new_text")}
             edit.file = kit_steps_work_path(edit.file, context.env, context.work, context.scratch, state.built) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits file escapes work directory")}
             edits.push(edit)
         }
@@ -72,18 +72,18 @@ kit_steps_edits: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> 
     if values.len() == 0 {
         return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits selection is empty")}
     }
-    paths := [String]{}
+    ^paths: [String]{}
     loop edit in edits {
         if !kit_expect_named(paths, edit.file) -> paths.push(edit.file)
     }
     loop path in paths {
-        changes := [KitSourceEdit]{}
+        ^changes: [KitSourceEdit]{}
         loop edit in edits {
             if edit.file == path -> changes.push(edit)
         }
         changes.sort_by(fn(edit) { -edit.start })
         original: files.read_bytes(path) ?? return kit_steps_action_error(state, "apply-edits read: {err}")
-        prior := original.len()
+        ^prior: original.len()
         loop edit in changes {
             if edit.end > prior || !kit_steps_edit_boundary(original, edit.start) || !kit_steps_edit_boundary(original, edit.end) {
                 return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits span out of range, overlapping, or not a UTF-8 boundary")}
@@ -92,9 +92,9 @@ kit_steps_edits: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> 
         }
         // Descending spans refer to original bytes. Build the equivalent final
         // file in one forward pass, avoiding a full copy per replacement.
-        result := [U8]{}
-        cursor := 0
-        index := changes.len()
+        ^result: [U8]{}
+        ^cursor: 0
+        ^index: changes.len()
         loop index > 0 {
             index -= 1
             edit: changes[index]
@@ -105,7 +105,7 @@ kit_steps_edits: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> 
         loop at in cursor..<original.len() -> result.push(original[at])
         files.write_bytes(path, result) ?? return kit_steps_action_error(state, "apply-edits write: {err}")
     }
-    result := state
+    ^result: state
     result.last = kit_steps_action_run()
     KitStepResult{state: result, verdict: kit_expect_verdict("PASS", "")}
 }

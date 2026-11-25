@@ -17,7 +17,7 @@ run: fn() {
     web: files.join(root, "Examples/Apps/Web")
     reference: "Docs/Spec/Reference/web-backend-wasm.md"
     docs: files.read(files.join(root, reference)) ?? panic("read {reference}: {err}")
-    names := [String]{}
+    ^names: [String]{}
     loop entry in files.list_dir(web) ?? panic("list Examples/Apps/Web: {err}") {
         if entry.name.ends_with(".jet") -> names.push(entry.name)
     }
@@ -26,7 +26,7 @@ run: fn() {
     loop name in names {
         if !docs.contains(name) -> web_examples_missing("{name} missing from {reference}")
         stem: files.stem(name)
-        golden := false
+        ^golden: false
         loop suffix in ["out", "web.out", "harness.out", "case"] {
             if files.is_file(files.join(web, "{stem}.{suffix}")) -> golden = true
         }

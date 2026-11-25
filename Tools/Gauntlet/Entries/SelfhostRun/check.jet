@@ -20,12 +20,12 @@ steady: fn(value: Dyn, root: String, here: String) -> Dyn {
         return Dyn.Text(if text.starts_with(BROKEN) -> BROKEN else -> text.replace(root, "<runRoot>").replace(here, "<cwd>"))
     }
     if value == .Array(list) {
-        out := [Dyn]{}
+        ^out: [Dyn]{}
         loop item in list -> out.push(steady(item, root, here))
         return Dyn.Array(out)
     }
     if value == .Object(entries) {
-        out := Dyn.object()
+        ^out: Dyn.object()
         loop entry in entries {
             out[entry.key] = if MEASURED.contains(entry.key) -> Dyn.Text("<measured>") else -> steady(entry.value, root, here)
         }
@@ -43,7 +43,7 @@ run: fn(check: Check) {
     printed: files.read(check.stdout) ?? panic("no output file: {err}")
     receipt: json.parse(printed) ?? panic("the output is not JSON: {err}")
     root: (receipt.get("runRoot") ?? Dyn.Null).text() ?? panic("the receipt names no run root")
-    shown := steady(receipt, root, files.cwd() ?? panic("no working directory: {err}"))
+    ^shown: steady(receipt, root, files.cwd() ?? panic("no working directory: {err}"))
     shown["generatedAt"] = Dyn.Text("<time>")
     print(json.stringify(shown, 2))
     // With --output out/receipt.json the program writes the receipt there too.

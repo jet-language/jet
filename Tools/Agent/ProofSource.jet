@@ -53,7 +53,7 @@ is_full_sha: fn(text: String) -> Bool Never! {
 }
 
 git: fn(repository: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
-    argv := [String]{"git", "-C", repository}
+    ^argv: [String]{"git", "-C", repository}
     loop arg in args -> argv.push(arg.copy())
     ran: process.cmd(argv).output_limit(67108864).run() ?? return None
     if ran.code != 0 || ran.signal != None -> return None
@@ -92,7 +92,7 @@ export_source: fn(repository: String, expected: String, candidates: String) -[En
 
 publish: fn(repository: String, commit: String, temporary: String, destination: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never! {
     listing: git(repository, [String]{"ls-tree", "-r", "-z", "--full-tree", commit}) ?? return false
-    tracked := [Dyn]{}
+    ^tracked: [Dyn]{}
     loop row in listing.split(String.from_bytes([U8]{U8{0}}) ?? "") {
         if row == "" -> next
         if !row.contains("\t") -> return false
@@ -161,7 +161,7 @@ executable: fn(mode: Int) -> Bool Never! {
 
 // Git's blob id: sha1 of `blob <length>\0<bytes>`.
 blob_hash: fn(bytes: [U8]) -> String Never! {
-    framed := "blob {bytes.len()}".bytes()
+    ^framed: "blob {bytes.len()}".bytes()
     framed.push(U8{0})
     framed.extend(bytes.copy())
     crypto.sha1(framed)
@@ -238,7 +238,7 @@ guard_fixture: fn(name: String) -[Env, FS, Time]> String {
 }
 
 #Test("an export extracts a completed tar file and publishes once with no archive left behind") {
-    checkout := files.cwd() ?? panic("working directory")
+    ^checkout: files.cwd() ?? panic("working directory")
     loop {
         if files.exists("{checkout}/Tools/Agent/ProofSource.jet") -> break
         if checkout == "/" || checkout == "" -> panic("run the test from inside the Jet checkout")
@@ -260,7 +260,7 @@ guard_fixture: fn(name: String) -[Env, FS, Time]> String {
     files.symlink("entry.jet", "{input}/alias.jet") ?? panic("alias: {err}")
     // A command fixture: no Git branch or ref is created for this proof.
     rows: "'100755 blob {blob_hash(text.bytes())}\\tentry.jet' '120000 blob {blob_hash("entry.jet".bytes())}\\talias.jet'"
-    fake := "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' \"$3\" >> '{log}'\n"
+    ^fake: "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' \"$3\" >> '{log}'\n"
     fake = "{fake}case \"$3\" in\n  rev-parse) case \"$4\" in *'^{{tree}}') echo {tree} ;; *) echo {commit} ;; esac ;;\n"
     fake = "{fake}  ls-tree) printf '%b\\0' {rows} ;;\n"
     fake = "{fake}  archive) [ \"$4\" = --format=tar ] || exit 9; tar -cf \"${{5#--output=}}\" -C '{input}' entry.jet alias.jet ;;\n  *) exit 9 ;;\nesac\n"

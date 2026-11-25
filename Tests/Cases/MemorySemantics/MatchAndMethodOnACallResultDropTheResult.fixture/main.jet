@@ -45,7 +45,7 @@ status_kb: fn(field: String) -> Int {
 }
 
 make_rows: fn(n: Int) -> [Row] {
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop i in 0..<n -> rows.push(Row{_name: "row {i}", _items: [String]{"a {i}", "b {i}"}})
     rows
 }
@@ -57,7 +57,7 @@ make_option: fn(n: Int) -> Table? { Val(make_table(n)) }
 make_shape: fn(n: Int) -> Shape { Shape.Rows{rows: make_rows(n)} }
 
 make_text: fn(n: Int) -> String {
-    parts := [String]{}
+    ^parts: [String]{}
     loop i in 0..<n -> parts.push("part {i}")
     parts.join(",")
 }
@@ -100,7 +100,7 @@ compared_and_interpolated: fn() -> Int {
 }
 
 measure: fn(name: String, scenario: fn() -> Int) {
-    total := scenario()
+    ^total: scenario()
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
     grown: status_kb("VmRSS:") - start

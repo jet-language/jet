@@ -62,13 +62,13 @@ try_service_request: fn(core_sources: [JetDriverCoreSource]) -> JetDriverCompile
         entry_root_identity: "try-service-root",
         entry_path: "/try-service-fixture/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, core_sources, Val(1), JetDriverCompileMode.Program)
+    ^request: jet_cli_driver_request(snapshot, core_sources, Val(1), JetDriverCompileMode.Program)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
 
 try_service_ownership: fn(request: ^^JetDriverCompileRequest, expected_source_rows: Int) {
-    session := jet_driver_compiler_queries_new()
+    ^session: jet_driver_compiler_queries_new()
     source: request.authorized_sources.roots[0].files[0].source
     parsed: jet_cli_try_parse(source) ?? panic("actual service input")
     checked: jet_driver_compiler_queries_check_disk(session, parsed, request)
@@ -83,7 +83,7 @@ try_service_ownership: fn(request: ^^JetDriverCompileRequest, expected_source_ro
             assert(projection.compile.doc_modules.len() >= expected_source_rows)
             assert(projection.schema_ingress != None && projection.entry_module != None)
             index: jet_cli_checked_semindex(projection.compile)
-            baseline := JetCLITryChecked{checked: checked, index: Val(index), sources: [String:String]{"/try-service-fixture/main.jet": source}, entry_source: source}
+            ^baseline: JetCLITryChecked{checked: checked, index: Val(index), sources: [String:String]{"/try-service-fixture/main.jet": source}, entry_source: source}
             plan: JetCLITryPlan{name: "Ownership", entry: "/try-service-fixture/main.jet", action: JetCLITryAction.Rename{from: "serve", to: "renamed"}}
             changes: jet_cli_try_stage(plan, baseline) ?? panic("actual catalog rename")
             operations: jet_cli_try_semantic_ops(plan, baseline) ?? panic("actual catalog semantic operation")
@@ -120,7 +120,7 @@ try_service_ownership: fn(request: ^^JetDriverCompileRequest, expected_source_ro
     json: jet_cli_try_output(plan, verdict, receipt, false, true, "run: fn() {{ 2 }}\n")
     assert(json.stdout == "{{\"schema\":\"jet.status/v1\",\"action\":\"try\",\"ok\":true,\"reports\":[],\"name\":\"Sample\",\"kept\":false,\"receipt_id\":\"try-83940884ca27\"}}\n")
     assert(json.stderr == "" && json.exit_code == JET_DRIVER_EXIT_OK)
-    queries := jet_driver_compiler_queries_new()
+    ^queries: jet_driver_compiler_queries_new()
     jet_driver_compiler_queries_set_document(queries, "/project/z.jet", "old")
     jet_driver_compiler_queries_set_document(queries, "/project/a.jet", "first")
     jet_driver_compiler_queries_set_document(queries, "/project/z.jet", "new")
@@ -139,13 +139,13 @@ try_service_ownership: fn(request: ^^JetDriverCompileRequest, expected_source_ro
     if at < 0 -> panic("fixture edit")
     cli_files.write(plan_file, "{{\"version\":1,\"name\":\"Body\",\"entry\":\"run.jet\",\"edits\":[{{\"path\":\"run.jet\",\"start\":{at + 2},\"end\":{at + 3},\"new_text\":\"2\"}}]}}") ?? panic("try plan")
     parsed: jet_cli_try_read_plan(plan_file) ?? panic("try plan parsing")
-    text_session := jet_driver_compiler_queries_new()
+    ^text_session: jet_driver_compiler_queries_new()
     text_baseline: jet_cli_try_check(text_session, entry, false) ?? panic("actual text query branch")
     assert(text_baseline.checked.complete && text_baseline.checked.internal_problem == None)
     assert(text_baseline.index == None && text_baseline.sources.len() == 0)
     assert(text_baseline.entry_source == original)
-    session := jet_driver_compiler_queries_new()
-    baseline := jet_cli_try_check(session, entry, true) ?? panic("actual retained baseline")
+    ^session: jet_driver_compiler_queries_new()
+    ^baseline: jet_cli_try_check(session, entry, true) ?? panic("actual retained baseline")
     assert(baseline.checked.complete && baseline.checked.internal_problem == None)
     assert(baseline.index != None && baseline.sources[jet_cli_try_canonical(entry)] == original)
     staged: jet_cli_try_stage(parsed, baseline) ?? panic("try stage")
@@ -167,7 +167,7 @@ try_service_ownership: fn(request: ^^JetDriverCompileRequest, expected_source_ro
     assert(same_rename[0].before == renamed[0].before && same_rename[0].after == renamed[0].after)
     assert(same_ops[0].targets[0].stable_id == rename_ops[0].targets[0].stable_id)
     assert(same_ops[0].targets[0].before == rename_ops[0].targets[0].before)
-    broken := baseline
+    ^broken: baseline
     broken.sources = [String:String]{}
     if jet_cli_try_stage(rename, broken) == {
         .Ok(_) -> { panic("missing checked ownership must not reread the changed disk") }
@@ -214,7 +214,7 @@ try_service_ownership: fn(request: ^^JetDriverCompileRequest, expected_source_ro
         .Ok(_) -> { panic("empty UTF-8 is valid text, not a valid JSON plan") }
         .Err(problem) -> assert(problem.message.starts_with("invalid try plan JSON: "))
     }
-    bom := [U8]{239, 187, 191}
+    ^bom: [U8]{239, 187, 191}
     bom.extend("{{\"entry\":\"run.jet\",\"edits\":[]}}".bytes())
     cli_files.write_bytes(plan_file, bom) ?? panic("actual BOM plan")
     if jet_cli_try_read_plan(plan_file) == {

@@ -67,20 +67,20 @@ jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool
     if errors.len() > 0 -> return jet_cli_emit_check_failure(file, source, errors, color, json)
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
-    lints := [Diagnostic]{}
+    ^lints: [Diagnostic]{}
     loop diagnostic in diagnostics {
         if !jet_driver_is_a11y_lint(diagnostic.code) -> lints.push(diagnostic)
     }
     stderr: if lints.len() > 0 -> diagnostic_render_all(file, source, lints, color) else -> ""
-    checked := inputs.move() ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
+    ^checked: inputs.move() ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
     declarations: jet_driver_checked_declarations(checked)
     // A stop poll follows the runtime routes `jet build` polls after: those
     // the runtime's stops receipt does not prove quiet.
-    checks := ir_checks_stock()
+    ^checks: ir_checks_stock()
     checks.quiet_routes = jet_cli_runtime_quiet_routes(jet_cli_runtime_exports(jet_cli_runtime_dir()))
-    built := if checked.entry_key == .Val(entry_key) -> ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), checked.interner.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), entry_key, checks, result.compiler_threads, None) else -> ir_build_all(checked.functions.move(), checked.decls, checked.symbols.move(), checked.interner.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), result.compiler_threads)
+    ^built: if checked.entry_key == .Val(entry_key) -> ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), checked.interner.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), entry_key, checks, result.compiler_threads, None) else -> ir_build_all(checked.functions.move(), checked.decls, checked.symbols.move(), checked.interner.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), result.compiler_threads)
     if built.failures.len() > 0 {
-        census := [JetDriverIceRow]{}
+        ^census: [JetDriverIceRow]{}
         loop failure in built.failures {
             jet_driver_ice_record(census, "{failure.name} [{failure.key}]", "ir.build", "unlowered", "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
         }
@@ -96,7 +96,7 @@ jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool
     printed: jet_cli_emit_printed("ir", file, function, json, nodes, stderr)
     found: ir_lint_module(built.program, "ir.build", result.compiler_threads)
     if found.len() == 0 -> return printed
-    census := [JetDriverIceRow]{}
+    ^census: [JetDriverIceRow]{}
     loop finding in found {
         jet_driver_ice_record(census, finding.function, finding.pass, finding.rule, finding.message)
     }
@@ -111,8 +111,8 @@ jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool
 // (jet_driver_module_identity under the package identity).
 jet_cli_emit_ir_selected: fn(built: IRBuildResult, package: String, function: String?) -> [Int] Never! {
     prefix: "function:module:{package.len()}:{package}:"
-    selected := [Int]{}
-    others := [Int]{}
+    ^selected: [Int]{}
+    ^others: [Int]{}
     loop (row, candidate) in built.program.functions {
         if function == .Val(name) {
             // The function's own name or the last segment of its key
@@ -129,7 +129,7 @@ jet_cli_emit_ir_selected: fn(built: IRBuildResult, package: String, function: St
 // (the tree's two-space indent is the text's own first level).
 jet_cli_emit_ir_function: fn(built: IRBuildResult, ir_function: IRFunction) -> JetCLIEmitNode Never! {
     lines: ir_function_text(built.program, ir_function).split("\n").to_list()
-    children := [JetCLIEmitNode]{}
+    ^children: [JetCLIEmitNode]{}
     loop index in 1..<lines.len() {
         line: lines[index]
         children.push(jet_cli_emit_leaf("ir", if line.starts_with("  ") -> String.from_bytes_lossy(line.bytes()[2..<line.bytes().len()]) else -> line))

@@ -9,7 +9,7 @@ debug_snapshot_test_text: fn(bytes: [U8]) -> String Never! {
 }
 
 debug_snapshot_test_repeat: fn(byte: U8, count: Int) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<count -> bytes.push(byte)
     debug_snapshot_test_text(bytes)
 }
@@ -51,7 +51,7 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
 }
 
 #Test("snapshot_identities_hash_exact_frame_and_local_fact_material") {
-    snapshot := debug_snapshot_test_run()
+    ^snapshot: debug_snapshot_test_run()
     // sha256("run:3|run:3") and sha256("run:3|run:3|total:Int=1"), first 24 hex.
     assert_eq(snapshot.frame_id(), "frame-4ee716030c9071d2e49ccbe1")
     assert_eq(snapshot.pause_id(), "pause-ae7d14661f6b17fe5bd7287c")

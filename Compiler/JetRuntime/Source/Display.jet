@@ -29,9 +29,11 @@ display_literal: fn(word: I64, length: I64) -> I64 {
 // The `length` low bytes of `word`, low first, into `sink`.
 display_sink_literal: fn(sink: I64, word: I64, length: I64) {
     data: rt_sink_reserve(sink, length)
-    if (data == I64{0}) { return }
-    value := word
-    i := I64{0}
+    if (data == I64{0}) {
+        return
+    }
+    ^value: word
+    ^i: I64{0}
     loop i < length {
         display_put(wrapping(data + i), value & I64{255})
         value >>= I64{8}
@@ -48,8 +50,8 @@ display_sink_literal: fn(sink: I64, word: I64, length: I64) {
 // the digits are written in pairs from a 00..99 table, one division a pair.
 display_integer_length: fn(value: I64) -> I64 Never! {
     n: if (value > I64{0}) -> -value else -> value
-    length := I64{1}
-    bound := I64{-10}
+    ^length: I64{1}
+    ^bound: I64{-10}
     // i64 has at most 19 digits; the bound stops at -10^18.
     loop n <= bound && length < (I64{19}) {
         length += I64{1}
@@ -62,8 +64,8 @@ display_integer_length: fn(value: I64) -> I64 Never! {
 // past the value's own are zeros.
 display_integer_digits: fn(data: I64, end: I64, value: I64, width: I64) {
     pairs: display_word(rt_static_text("00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899"))
-    n := if (value > I64{0}) -> -value else -> value
-    i := end
+    ^n: if (value > I64{0}) -> -value else -> value
+    ^i: end
     first: end - width
     loop i - first >= (I64{2}) {
         quotient: n /% I64{-100}
@@ -90,7 +92,9 @@ display_sink_i64: fn(sink: I64, value: I64) {
     digits: display_integer_length(value)
     length: digits + (if (value < I64{0}) -> I64{1} else -> I64{0})
     data: rt_sink_reserve(sink, length)
-    if (data == I64{0}) { return }
+    if (data == I64{0}) {
+        return
+    }
     display_integer_digits(data, length, value, digits)
     if (value < I64{0}) { display_put(data, I64{45}) }
     rt_sink_commit(sink, length)
@@ -115,7 +119,9 @@ display_sink_u64: fn(sink: I64, value: I64) {
     }
     length: display_integer_length(quotient) + I64{1}
     data: rt_sink_reserve(sink, length)
-    if (data == I64{0}) { return }
+    if (data == I64{0}) {
+        return
+    }
     display_integer_digits(data, length - I64{1}, quotient, length - I64{1})
     display_put(wrapping(wrapping(data + length) - I64{1}), I64{48} + remainder)
     rt_sink_commit(sink, length)
@@ -140,7 +146,7 @@ display_sink_bool: fn(sink: I64, value: U8) {
 }
 
 display_sink_char: fn(sink: I64, value: I64) {
-    scalar := value
+    ^scalar: value
     if (scalar < I64{0} || scalar > I64{1114111} || (scalar >= I64{55296} && scalar <= I64{57343})) {
         scalar = I64{65533}
     }
@@ -151,10 +157,12 @@ display_sink_char: fn(sink: I64, value: I64) {
         else -> I64{4}
     }
     data: rt_sink_reserve(sink, length)
-    if (data == I64{0}) { return }
+    if (data == I64{0}) {
+        return
+    }
     if (length == I64{1}) { display_put(data, scalar) } else {
-        rest := scalar
-        i := length
+        ^rest: scalar
+        ^i: length
         loop i > (I64{1}) {
             i -= I64{1}
             display_put(wrapping(data + i), I64{128} | (rest & I64{63}))
@@ -196,15 +204,19 @@ display_sink_int: fn(sink: I64, value: I64) {
     leading: display_integer_length(top)
     first: leading + (if negative -> I64{1} else -> I64{0})
     data: rt_sink_reserve(sink, first)
-    if (data == I64{0}) { return }
+    if (data == I64{0}) {
+        return
+    }
     if negative -> display_put(data, I64{45})
     display_integer_digits(data, first, top, leading)
     rt_sink_commit(sink, first)
-    i := count - I64{1}
+    ^i: count - I64{1}
     loop i > (I64{0}) {
         i -= I64{1}
         chunk: rt_sink_reserve(sink, I64{9})
-        if (chunk == I64{0}) { return }
+        if (chunk == I64{0}) {
+            return
+        }
         display_integer_digits(chunk, I64{9}, display_int_limb(limbs, i), I64{9})
         rt_sink_commit(sink, I64{9})
     }
@@ -212,20 +224,22 @@ display_sink_int: fn(sink: I64, value: I64) {
 
 display_float_decimal: fn(sink: I64, raw: I64, digits: I64, count: I64, exponent: I64, debug: Bool) {
     negative: raw < I64{0}
-    fraction := if exponent < count -> count - exponent else -> I64{0}
+    ^fraction: if exponent < count -> count - exponent else -> I64{0}
     if (debug && fraction < I64{1}) { fraction = I64{1} }
     integer: if (exponent > I64{0}) -> exponent else -> I64{1}
     length: integer + fraction + (if (fraction > I64{0}) -> I64{1} else -> I64{0}) + (if negative -> I64{1} else -> I64{0})
     data: rt_sink_reserve(sink, length)
-    if (data == I64{0}) { return }
-    at := I64{0}
+    if (data == I64{0}) {
+        return
+    }
+    ^at: I64{0}
     if negative {
         display_put(data, I64{45})
         at += I64{1}
     }
-    i := I64{0}
+    ^i: I64{0}
     loop i < integer {
-        digit := I64{48}
+        ^digit: I64{48}
         if (exponent > I64{0} && i < count) { digit = display_byte(wrapping(digits + i)) }
         display_put(wrapping(data + at), digit)
         at += I64{1}
@@ -237,7 +251,7 @@ display_float_decimal: fn(sink: I64, raw: I64, digits: I64, count: I64, exponent
         i = I64{0}
         loop i < fraction {
             source: exponent + i
-            digit := I64{48}
+            ^digit: I64{48}
             if (source >= I64{0} && source < count) {
                 digit = display_byte(wrapping(digits + source))
             }
@@ -254,8 +268,10 @@ display_float_exponential: fn(sink: I64, raw: I64, digits: I64, count: I64, expo
     width: display_integer_length(power)
     length: count + (if (count > I64{1}) -> I64{1} else -> I64{0}) + I64{1} + width + (if (power < I64{0}) -> I64{1} else -> I64{0}) + (if (raw < I64{0}) -> I64{1} else -> I64{0})
     data: rt_sink_reserve(sink, length)
-    if (data == I64{0}) { return }
-    at := I64{0}
+    if (data == I64{0}) {
+        return
+    }
+    ^at: I64{0}
     if (raw < I64{0}) {
         display_put(data, I64{45})
         at += I64{1}
@@ -265,7 +281,7 @@ display_float_exponential: fn(sink: I64, raw: I64, digits: I64, count: I64, expo
     if (count > I64{1}) {
         display_put(wrapping(data + at), I64{46})
         at += I64{1}
-        i := I64{1}
+        ^i: I64{1}
         loop i < count {
             display_put(wrapping(data + at), display_byte(wrapping(digits + i)))
             at += I64{1}
@@ -285,7 +301,9 @@ display_float_exponential: fn(sink: I64, raw: I64, digits: I64, count: I64, expo
 display_sink_float_special: fn(sink: I64, raw: I64, magnitude: I64, exponent_all: I64, fraction_bits: I64, debug: Bool) -> Bool {
     if ((magnitude & exponent_all) == exponent_all) {
         if {
-            ((magnitude & fraction_bits) != I64{0}) -> display_sink_literal(sink, I64{5136718}, I64{3})
+            ((magnitude & fraction_bits) != I64{0}) -> {
+                display_sink_literal(sink, I64{5136718}, I64{3})
+            }
             (raw < I64{0}) -> display_sink_literal(sink, I64{1718511917}, I64{4})
             else -> display_sink_literal(sink, I64{6712937}, I64{3})
         }
@@ -334,7 +352,9 @@ display_sink_float: fn(sink: I64, value: Float, debug: Bool) {
     exponent: display_word(wrapping(scratch + I64{2664}))
     digits: wrapping(scratch + I64{2624})
     if {
-        debug && (magnitude < I64{4547007122018943789} || magnitude >= I64{4846369599423283200}) -> display_float_exponential(sink, raw, digits, count, exponent)
+        debug && (magnitude < I64{4547007122018943789} || magnitude >= I64{4846369599423283200}) -> {
+            display_float_exponential(sink, raw, digits, count, exponent)
+        }
         else -> display_float_decimal(sink, raw, digits, count, exponent, debug)
     }
     display_scratch_free(sink, scratch)
@@ -374,7 +394,9 @@ display_sink_float32: fn(sink: I64, bits: I64, debug: Bool) {
     exponent: display_word(wrapping(scratch + I64{2664}))
     digits: wrapping(scratch + I64{2624})
     if {
-        debug && (magnitude < I64{953267991} || magnitude >= I64{1510874058}) -> display_float_exponential(sink, raw, digits, count, exponent)
+        debug && (magnitude < I64{953267991} || magnitude >= I64{1510874058}) -> {
+            display_float_exponential(sink, raw, digits, count, exponent)
+        }
         else -> display_float_decimal(sink, raw, digits, count, exponent, debug)
     }
     display_scratch_free(sink, scratch)
@@ -396,16 +418,30 @@ display_sink_float32: fn(sink: I64, bits: I64, debug: Bool) {
 // (Text.jet rt_sink_reserve): a String's interpolation and a print's line
 // (JetIR BuildTypes.jet ir_render_scalar_route) make no String of the
 // number first. Each spells what the matching `_to_string` makes.
-#Export(c) jet_rt_string_builder_push_int: fn(target: I64, value: I64) { display_sink_int(target, value) }
+#Export(c) jet_rt_string_builder_push_int: fn(target: I64, value: I64) {
+    display_sink_int(target, value)
+}
 
-#Export(c) jet_rt_string_builder_push_i64: fn(target: I64, value: I64) { display_sink_i64(target, value) }
+#Export(c) jet_rt_string_builder_push_i64: fn(target: I64, value: I64) {
+    display_sink_i64(target, value)
+}
 
-#Export(c) jet_rt_string_builder_push_u64: fn(target: I64, value: I64) { display_sink_u64(target, value) }
+#Export(c) jet_rt_string_builder_push_u64: fn(target: I64, value: I64) {
+    display_sink_u64(target, value)
+}
 
-#Export(c) jet_rt_string_builder_push_bool: fn(target: I64, value: U8) { display_sink_bool(target, value) }
+#Export(c) jet_rt_string_builder_push_bool: fn(target: I64, value: U8) {
+    display_sink_bool(target, value)
+}
 
-#Export(c) jet_rt_string_builder_push_char: fn(target: I64, value: I64) { display_sink_char(target, value) }
+#Export(c) jet_rt_string_builder_push_char: fn(target: I64, value: I64) {
+    display_sink_char(target, value)
+}
 
-#Export(c) jet_rt_string_builder_push_float: fn(target: I64, value: Float) { display_sink_float(target, value, true) }
+#Export(c) jet_rt_string_builder_push_float: fn(target: I64, value: Float) {
+    display_sink_float(target, value, true)
+}
 
-#Export(c) jet_rt_string_builder_push_float32: fn(target: I64, bits: I64) { display_sink_float32(target, bits, true) }
+#Export(c) jet_rt_string_builder_push_float32: fn(target: I64, bits: I64) {
+    display_sink_float32(target, bits, true)
+}

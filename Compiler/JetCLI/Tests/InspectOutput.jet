@@ -20,7 +20,7 @@ inspect_output_require: fn(ok: Bool, message: String) Never! {
 
 inspect_output_request: fn(source: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/inspect-output", identity: "output-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/inspect-output/run.jet", relative_path: "run.jet", identity: "output-source", source: source}}, foreign_cache_files: []}}, entry_root_identity: "output-root", entry_path: "/inspect-output/run.jet"}
-    request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+    ^request: jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
     request.host_facts.target_triple = Val("x86_64-unknown-linux-gnu")
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
@@ -37,7 +37,7 @@ inspect_output_request: fn(source: String) -> JetDriverCompileRequest {
     inspect_output_require(machine == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.output\",\"ok\":true,\"reports\":[],\"output\":{{\"binding\":\"APP\",\"kind\":\"Executable\",\"name\":\"demo\",\"entry\":\"start\",\"source_path\":\"/inspect-output/run.jet\",\"callable_identity\":\"fn:run.start\",\"failure_contract\":\"Never!\",\"failure_source\":\"explicit Never! (proven unreachable)\",\"effects\":[],\"required_effects\":[],\"granted_effects\":[\"Exec.Args\",\"IO\",\"Mem.Alloc\"],\"denied_effects\":[],\"authority\":\"application default\",\"selection_reason\":\"sole compatible Output\"}}}}\n", "selected checked callable exact JSON output")
     layout: query.target_layout ?? panic("explicit target lost its checked layout")
     inspect_output_require(query.target_triple == "x86_64-unknown-linux-gnu" && layout.triple == query.target_triple && layout.pointer_size == 8 && layout.pointer_alignment == 8, "layout is the explicit 64-bit target fact")
-    portable := inspect_output_request(source)
+    ^portable: inspect_output_request(source)
     portable.host_facts.target_triple = Val("wasm32-unknown-unknown")
     portable_query: jet_driver_output_query(portable, None)
     portable_layout: portable_query.target_layout ?? panic("explicit portable target lost its checked layout")

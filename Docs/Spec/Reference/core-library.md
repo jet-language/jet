@@ -2817,10 +2817,11 @@ See [`args_spec.jet`](../../../Examples/Systems/CLI/ArgsSpec.jet) and
 
 ### `core.reflect` — runtime structural reflection (D-ANY-JAI1)
 
-`reflect.of(x)` is the compiler-owned intrinsic for values that can be rendered
-by `"{x}"`; the `core.reflect` source module itself owns the explicit text
-classifier `inspect`. Runtime reflection is read-only and retains typed field
-values rather than pre-rendering them.
+`reflect.of(x)` reflects values that can be rendered by `"{x}"`. The
+`core.reflect` source module declares both `of`, a builder intrinsic the
+compiler builds from the value's checked type at each call, and the explicit
+text classifier `inspect`. Runtime reflection is read-only and retains typed
+field values rather than pre-rendering them.
 
 ```jet
 use reflect: core.reflect
@@ -7420,9 +7421,9 @@ run: fn() {
 
 | Signature | Result | Description |
 |---|---|---|
-| `Arena.new()` / `Arena.new(capacity: Int)` | arena | Create a grow-only arena. |
-| `Bump.new(capacity: Int)` | allocator | Create a contiguous monotonic allocator. |
-| `Pool.new<T>(slots: Int)` | pool | Reuse fixed-size slots by alignment class. |
+| `Arena.new()` / `Arena.new(capacity: Int)` | arena | Create a grow-only arena; `capacity` defaults to 4096 bytes. |
+| `Bump.new()` / `Bump.new(capacity: Int)` | allocator | Create a contiguous monotonic allocator; `capacity` defaults to 65536 bytes. |
+| `Pool.new(slots: Int)` | pool | Reuse fixed-size slots by alignment class. |
 | `Fixed.new(size: Int)` | allocator | Create positive-comptime inline backing storage. |
 | `Fixed.over(bytes)` | allocator | Borrow one mutable byte buffer for the handle's scope. |
 | `allocator.alloc(value)` | view | Store a value and return a scope-bound view. |
@@ -7842,10 +7843,10 @@ failure precedence and caller-name context. Public signatures and unsupported
 tier behavior are unchanged; raw leaves keep the same `Net` and `Time.Wait`
 requirements as their public operations.
 
-`unix_connect` retains the native entry so its ratified `deadline:` overload is
-not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
-the native access contract: reads and writes borrow the named stream with `^`,
-not a copied local handle.
+`unix_connect(path, deadline: d)` is the same Core function as
+`unix_connect(path)`: its `deadline:` parameter defaults to no deadline. Unix
+and TLS byte/text wrappers use the native access contract: reads and writes
+borrow the named stream with `^`, not a copied local handle.
 
 ### `core.net.ip` — IPv4/IPv6 values and address classes
 

@@ -99,7 +99,7 @@ store_nix_cas_import_with_expectation: fn(verification: StoreVerification, proje
     archive.verify_signature(roots, None, true)
     store_nix_cas_validate_bundle(archive, expectation)
     manifest: archive.nix_manifest ?? return Err(StoreError.InvalidData("project Nix CAS bundle has no closure manifest"))
-    digests := [String]{}
+    ^digests: [String]{}
     loop member in manifest.members -> digests.push(member.key)
     report: store_archive_import_verified(verification, roots, archive, true)
     Ok({report: report, digests: digests})
@@ -131,8 +131,8 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
         return Err(StoreError.InvalidData("Nix closure manifest has an invalid member count"))
     }
 
-    object_keys := [String]{}
-    objects := [String:HangarArchiveObject]{}
+    ^object_keys: [String]{}
+    ^objects: [String:HangarArchiveObject]{}
     loop object in archive.objects {
         if object.meta != "" {
             return Err(StoreError.InvalidData("project Nix CAS bundle contains package metadata"))
@@ -147,7 +147,7 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
         }
         objects[object.digest] = object
     }
-    member_keys := [String]{}
+    ^member_keys: [String]{}
     loop member in manifest.members -> member_keys.push(member.key)
     if !store_nix_cas_is_sorted_unique(object_keys) || !store_nix_cas_is_sorted_unique(member_keys) {
         return Err(StoreError.InvalidData("Nix closure manifest members must be sorted and unique"))
@@ -156,7 +156,7 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
         return Err(StoreError.InvalidData("Nix closure manifest member set disagrees with archive objects"))
     }
 
-    edges := [String:[String]]{}
+    ^edges: [String:[String]]{}
     loop member in manifest.members {
         store_nix_cas_validate_cas(member.key, "Nix closure member key")
         store_nix_cas_validate_cas(member.hash, "Nix closure member hash")
@@ -196,10 +196,10 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
         .None -> {}
     }
 
-    visiting := [String:Bool]{}
-    reachable := [String:Bool]{}
+    ^visiting: [String:Bool]{}
+    ^reachable: [String:Bool]{}
     store_nix_cas_visit(manifest.output, edges, visiting, reachable)
-    unreachable := reachable.len() != member_keys.len()
+    ^unreachable: reachable.len() != member_keys.len()
     loop key in member_keys {
         if reachable.get(key) == None -> unreachable = true
     }
@@ -255,7 +255,7 @@ store_nix_cas_validate_hex: fn(value: String, digits: Int, label: String) StoreE
 
 store_nix_cas_validate_platform: fn(value: String) StoreError! {
     raw: value.bytes()
-    ascii := true
+    ^ascii: true
     loop byte in raw {
         if (Int{byte}) >= 128 -> ascii = false
     }
@@ -288,8 +288,8 @@ store_nix_cas_build_unlocked: fn(verification: StoreVerification, roots: HangarR
     graph: store_closure_graph_structure_unlocked(verification, roots)
     root_digest: entry.envelope.output_hash
     full: store_archive_build_unlocked(verification, roots, target, true, true)
-    objects := [HangarArchiveObject]{}
-    has_output := false
+    ^objects: [HangarArchiveObject]{}
+    ^has_output: false
     loop object in full.objects {
         if object.meta != "" -> next
         if object.digest == root_digest -> has_output = true
@@ -305,9 +305,9 @@ store_nix_cas_build_unlocked: fn(verification: StoreVerification, roots: HangarR
 }
 
 store_nix_cas_build_manifest: fn(objects: [HangarArchiveObject], graph: ClosureGraph, output: String, platform: String, revision: String, cache_key: String) -> NixClosureManifest StoreError! {
-    object_keys := [String]{}
+    ^object_keys: [String]{}
     loop object in objects -> object_keys.push(object.digest)
-    members := [NixClosureMember]{}
+    ^members: [NixClosureMember]{}
     loop object in objects {
         bytes: store_nix_cas_canonical_object_bytes(object)
         references: graph.direct_references(object.digest)
@@ -332,7 +332,7 @@ store_nix_cas_build_manifest: fn(objects: [HangarArchiveObject], graph: ClosureG
 // The canonical bytes a manifest member hashes: the root mode and every
 // node in archive encoding, without identity or metadata.
 store_nix_cas_canonical_object_bytes: fn(object: HangarArchiveObject) -> [U8] StoreError! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     store_archive_put_raw_u32(bytes, object.root_mode)
     loop node in object.nodes -> node.encode_into(bytes)
     Ok(bytes)

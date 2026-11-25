@@ -10,9 +10,9 @@ s5_trickle_reset: fn(error: NetError) -> Bool {
     crlf: s5_web_crlf()
     net.tcp_write_all_bytes(client, "GET /__jet_dev_version HTTP/1.1{crlf}Host: localhost".bytes()) ?? panic("incomplete header")
     started: time.start()
-    sent := 0
-    response_bytes := 0
-    closed := false
+    ^sent: 0
+    ^response_bytes: 0
+    ^closed: false
     loop index in 0..<32 {
         net.tcp_write_all_bytes(client, "x".bytes()) ?? panic("every trickle write must succeed")
         sent += 1

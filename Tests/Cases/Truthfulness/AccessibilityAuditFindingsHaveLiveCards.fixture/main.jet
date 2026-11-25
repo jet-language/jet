@@ -33,9 +33,9 @@ policy_space_width: fn(bytes: [U8], index: Int) -> Int {
 
 policy_split_whitespace: fn(text: String) -> [String] {
     bytes: text.bytes()
-    words := [String]{}
-    index := 0
-    start := -1
+    ^words: [String]{}
+    ^index: 0
+    ^start: -1
     loop index < bytes.len() {
         width: policy_space_width(bytes, index)
         if width > 0 {
@@ -53,20 +53,20 @@ policy_split_whitespace: fn(text: String) -> [String] {
 
 // Strip one leading/trailing pipe, not all pipes
 audit_table_cells: fn(raw: String) -> [String] {
-    line := raw.trim()
+    ^line: raw.trim()
     if line.starts_with("|") -> line = policy_slice_bytes(line, 1, line.bytes().len())
     if line.ends_with("|") -> line = policy_slice_bytes(line, 0, line.bytes().len() - 1)
-    result := [String]{}
+    ^result: [String]{}
     loop cell in audit_parse.split(line, "|") -> result.push(cell.trim())
     result
 }
 
 audit_card_refs: fn(cell: String) -> [String] {
-    result := [String]{}
+    ^result: [String]{}
     loop token in policy_split_whitespace(cell) {
         raw: token.bytes()
         if raw.len() <= 1 || raw[0] != (U8{35}) -> next
-        digits := true
+        ^digits: true
         loop i in 1..<raw.len() {
             if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> digits = false
         }
@@ -77,7 +77,7 @@ audit_card_refs: fn(cell: String) -> [String] {
 
 audit_card_number: fn(card: String) -> Int {
     // Rust parse::<i64>() rejects overflow; do not wrap an oversized card reference.
-    number := 0
+    ^number: 0
     raw: card.bytes()
     loop i in 1..<raw.len() {
         digit: Int{raw[i]} - 48
@@ -94,7 +94,7 @@ audit_board_cards: fn(path: String) -> [Int] {
     raw: audit_files.read(path) ?? panic("read board {path}")
     board: audit_json.parse(raw) ?? panic("parse board {path}: {err.reason}")
     entries: audit_json.pointer(board, "/cards") ?? panic("board {path} must list cards")
-    nums := [Int]{}
+    ^nums: [Int]{}
     if entries == .Array(cards) {
         loop card in cards {
             value: audit_json.pointer(card, "/num") ?? panic("board card must contain a numeric num")
@@ -116,7 +116,7 @@ run: fn() {
     text: audit_files.read("Docs/Audits/cli-diagnostics-accessibility.md") ?? panic("CLI accessibility audit is readable")
     lines: text.lines()
     expected: [String]{"id", "surface", "screen_reader", "state", "card"}
-    header := -1
+    ^header: -1
     loop i in 0..<lines.len() {
         if audit_table_cells(lines[i]) == expected {
             header = i
@@ -130,8 +130,8 @@ run: fn() {
     loop cell in separator {
         assert(cell == "---", "accessibility findings table needs a Markdown separator for every column")
     }
-    rows := [[String]]{}
-    finding_ids := [String]{}
+    ^rows: [[String]]{}
+    ^finding_ids: [String]{}
     loop i in (header + 2)..<lines.len() {
         line: lines[i]
         if !line.trim_start().starts_with("|") -> break
@@ -153,7 +153,7 @@ run: fn() {
         }
         cards: audit_card_refs(row[4])
         assert(!cards.is_empty(), "non-pass accessibility finding {row[0]} must name a live Tower card")
-        unique_cards := [String]{}
+        ^unique_cards: [String]{}
         loop card in cards {
             assert(!unique_cards.contains(card), "accessibility finding {row[0]} must list each Tower card once: {card}")
             unique_cards.push(card.copy())

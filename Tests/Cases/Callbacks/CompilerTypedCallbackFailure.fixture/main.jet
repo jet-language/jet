@@ -47,7 +47,7 @@ routes: fn(pattern: String) -> Int (KeyError | WebRouterError)! {
 }
 
 replays: fn(key: String) -> Int (KeyError | WebQueryError)! {
-    created := query.new(key, query.WebQuerySeed{data: "data", generation: 1, subscribers: 0})
+    ^created: query.new(key, query.WebQuerySeed{data: "data", generation: 1, subscribers: 0})
     query.retry(created, replay)
 }
 
@@ -63,14 +63,14 @@ validates: fn(value: String) -> String (KeyError | WebFormError)! {
         wire_name: "name",
     }
     input: forms.input("Profile", [field])
-    typed := forms.typed<Profile>(input, "save")
+    ^typed: forms.typed<Profile>(input, "save")
     forms.typed_set(typed, "name", value)
     chain: forms.typed_validate_field(typed, "name", .Blur, named)
     forms.typed_validation_render(chain)
 }
 
 updates: fn(key: String) -> Int (KeyError | WebTableError)! {
-    rows := table.new("Rows", [Int]{0, 1, 2})
+    ^rows: table.new("Rows", [Int]{0, 1, 2})
     table.update_row(rows, key, doubled)
     table.remove_row(rows, key)
 }
@@ -81,10 +81,10 @@ lent: fn(strict: Bool) -> Int KeyError! {
 }
 
 lends: fn(strict: Bool) -> Int (Expired | KeyError)! {
-    clock := Clock.new(100)
-    ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.new_random() ?? panic("key")
-    secret := vault.ExpiringSecret.new(key, ttl, clock)
+    ^clock: Clock.new(100)
+    ^ttl: Duration.seconds(1) ?? panic("duration")
+    ^key: crypto.SigningKey.new_random() ?? panic("key")
+    ^secret: vault.ExpiringSecret.new(key, ttl, clock)
     secret.with(fn(borrowed) {
         _: borrowed.public_key()
         lent(strict)

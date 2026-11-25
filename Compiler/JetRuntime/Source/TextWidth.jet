@@ -8,12 +8,12 @@
 // and the regional-indicator run the next window continues from.
 text_grapheme_next: fn(data: I64, length: I64, start: I64, carried: I64) -> {end: I64, ri: I64} {
     first: rt_text_decode(wrapping(data + start))
-    at := start + rt_text_width(wrapping(data + start))
-    previous := first
-    ri := if (unicode_grapheme_class(first) == I64{6}) -> wrapping(carried + I64{1}) else -> I64{0}
-    saw_pic := unicode_is_extended_pictographic(first)
-    incb_pending := unicode_incb_class(first) == I64{2}
-    incb_linker := false
+    ^at: start + rt_text_width(wrapping(data + start))
+    ^previous: first
+    ^ri: if (unicode_grapheme_class(first) == I64{6}) -> wrapping(carried + I64{1}) else -> I64{0}
+    ^saw_pic: unicode_is_extended_pictographic(first)
+    ^incb_pending: unicode_incb_class(first) == I64{2}
+    ^incb_linker: false
     loop at < length {
         current: rt_text_decode(wrapping(data + at))
         pc: unicode_grapheme_class(previous)
@@ -68,14 +68,14 @@ text_cluster_width: fn(data: I64, start: I64, end: I64) -> I64 {
     if (start >= end) { return I64{0} }
     base: rt_text_decode(wrapping(data + start))
     if unicode_is_control(base) -> return I64{0}
-    count := I64{0}
-    second := I64{-1}
-    third := I64{-1}
-    variation := false
-    emoji := false
-    wide := false
-    visible := false
-    at := start
+    ^count: I64{0}
+    ^second: I64{-1}
+    ^third: I64{-1}
+    ^variation: false
+    ^emoji: false
+    ^wide: false
+    ^visible: false
+    ^at: start
     loop at < end {
         cp: rt_text_decode(wrapping(data + at))
         if (count == I64{1}) { second = cp }
@@ -99,9 +99,9 @@ text_cluster_width: fn(data: I64, start: I64, end: I64) -> I64 {
 text_display_width: fn(value: I64) -> I64 {
     data: rt_text_data(value)
     length: rt_text_len(value)
-    total := I64{0}
-    at := I64{0}
-    ri := I64{0}
+    ^total: I64{0}
+    ^at: I64{0}
+    ^ri: I64{0}
     loop at < length {
         window: text_grapheme_next(data, length, at, ri)
         total += text_cluster_width(data, at, window.end)
@@ -137,7 +137,7 @@ text_fill_columns: fn(target: I64, fill: I64, columns: I64) {
     if (rt_text_reserve_extra(target, rt_text_data(target), used, repeats * unit + remainder) == I64{0}) {
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < repeats {
         rt_text_append(target, data, unit)
         at += I64{1}
@@ -152,7 +152,7 @@ text_pad: fn(value: I64, width: I64, fill: I64, side: I64) -> I64 {
         text_route_panic(rt_static_text("text padding width does not fit native i64"))
         return I64{0}
     }
-    gap := wrapping(text_route_native(width) - text_display_width(value))
+    ^gap: wrapping(text_route_native(width) - text_display_width(value))
     if (gap < I64{0}) { gap = I64{0} }
     before: if {
         (side == I64{0}) -> gap

@@ -111,7 +111,7 @@ BuildEffect: enum {
 
     // The effects in canonical table order, keeping repeats.
     sorted: fn(effects: [BuildEffect]) -> [BuildEffect] Never! {
-        out := effects
+        ^out: effects
         out = loop fresh_item in out -> fresh_item
         out.sort_by(fn(written) { written.rank() })
         out
@@ -136,7 +136,7 @@ build_effect_problem: fn(text: String, roots: [String]) -> String {
     if strays.len() > 0 {
         return "BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [{strays.join(", ")}]"
     }
-    unread := [String]{}
+    ^unread: [String]{}
     loop case_name in cases {
         if (BuildEffect.parse(case_name)?.name() ?? "") != case_name {
             unread.push(case_name.copy())

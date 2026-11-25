@@ -320,9 +320,13 @@ FormActionInputMismatch: struct {
 
         what: fn(self) -> String { "Form action `{self.action}` does not accept `{self.form}`" }
 
-        why: fn(self) -> String { "The form derives its fields from the model and the one server-function action must receive that exact input type" }
+        why: fn(self) -> String {
+            "The form derives its fields from the model and the one server-function action must receive that exact input type"
+        }
 
-        fix: fn(self) -> String { "Change `{self.action}` to accept `{self.form}` as its only parameter" }
+        fix: fn(self) -> String {
+            "Change `{self.action}` to accept `{self.form}` as its only parameter"
+        }
     }
 }
 
@@ -338,7 +342,7 @@ App: struct {
         target: self.copy()
         page: path.copy()
         http_server.route_add(app_table(self), "GET", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_page_response(target, page, request)) }), "", at)
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         if guard.value.image_handler == None {
             guard.value.image_handler = Val(app_image_handler(self))
         }
@@ -369,7 +373,7 @@ App: struct {
     // to the route registered just before it; not-found answers every
     // unmatched navigation.
     __boundary: fn(self, kind: String, handler: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         boundary: app_handler(handler)
         if kind == "not_found" {
             guard.value.not_found = Val(boundary)
@@ -377,7 +381,7 @@ App: struct {
         }
         last: guard.value.routes.len() - 1
         if last < 0 -> panic("app boundary `{identity}` has no preceding route")
-        route := guard.value.routes[last].copy()
+        ^route: guard.value.routes[last].copy()
         if kind == "pending" {
             route.pending = Val(boundary)
             route.pending_identity = identity
@@ -395,10 +399,10 @@ App: struct {
         reply: app_handler(handler)
         served: reply.copy()
         http_server.route_add(app_table(self), "POST", "/actions/{name}", http_server.__handler(fn(request: HTTPRequest) { Ok(app_action_response(served, request)) }), "", at)
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         last: guard.value.routes.len() - 1
         if last >= 0 && (kind == "action" || kind == "form") && guard.value.routes[last].form == "" {
-            route := guard.value.routes[last].copy()
+            ^route: guard.value.routes[last].copy()
             route.form = name.copy()
             guard.value.routes[last] = route
         }
@@ -409,10 +413,10 @@ App: struct {
     // `loader(route_handler, loader, preload)`: the route registered just
     // before it loads its data through `handler` first.
     __loader: fn(self, handler: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, data_type: String, preload: Bool) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         last: guard.value.routes.len() - 1
         if last < 0 -> panic("app loader `{identity}` has no preceding route")
-        route := guard.value.routes[last].copy()
+        ^route: guard.value.routes[last].copy()
         route.loader = Val(app_handler(handler))
         route.loader_identity = identity
         route.loader_data_type = data_type
@@ -426,13 +430,13 @@ App: struct {
     // `mount(prefix, handler[, effect[, policy]])`: the handler answers GET
     // and POST under `prefix`; "" is an absent effect or policy.
     __mount: fn(self, prefix: String, handler: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String, at: SourceLocation{#caller}) -> App Never! {
-        effects := [String]{}
+        ^effects: [String]{}
         if effect_name != "" -> effects.push(effect_name.copy())
-        security := [String]{}
+        ^security: [String]{}
         if policy != "" -> security.push(policy.copy())
         mounted: app_handler(handler)
         app_service_add(self, AppService{path: app_trim_slashes(prefix), at: at, remote: None, signed_in: false, hook: None, mounted: Val(mounted.copy()), upload: None})
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.mounts.push(AppMount{prefix: prefix, handler: mounted, effects: effects, security: security})
         self.copy()
     }
@@ -487,7 +491,7 @@ App: struct {
     // `#App.SigningKey` method on them, and `answer` runs the webhook on them
     // and the delivery's body (`app_webhook_response`).
     __webhook: fn(self, path: String, signature: Signature, params: String, key: ^^fn(RemoteArgs) -[Net, FS.Read]> String? [FieldError]!, answer: ^^fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, at: SourceLocation{#caller}) -> App Never! {
-        names := [String]{}
+        ^names: [String]{}
         if params != "" -> names = params.split(",").to_list()
         hook: AppWebhook{signature: signature, params: names, key: key, answer: answer}
         app_traced(self, path, "")
@@ -568,7 +572,7 @@ App: struct {
     }
 
     routes: fn(self, from: String) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.routes_from.push(from.copy())
         self.copy()
     }
@@ -586,19 +590,19 @@ App: struct {
     island: fn(self) -> App Never! { app_mode(self, "island") }
 
     hydration_dev: fn(self) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.hydration = "dev-overlay"
         self.copy()
     }
 
     hydration_release: fn(self) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.hydration = "release-keep-server"
         self.copy()
     }
 
     security: fn(self, policy: String) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.security.push(policy.copy())
         self.copy()
     }
@@ -606,7 +610,7 @@ App: struct {
     // The first assets root answers GET `/assets/*`, each file under its own
     // name and its hashed name (immutable); pages link the hashed name.
     assets: fn(self, path: String, at: SourceLocation{#caller}) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         if guard.value.assets.len() == 0 {
             http_server.mount_static_files(guard.value.table, "/assets", path, None, None, None, at)
         }
@@ -615,7 +619,7 @@ App: struct {
     }
 
     split: fn(self, name: String) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.split.push(name.copy())
         self.copy()
     }
@@ -623,19 +627,19 @@ App: struct {
     code_split: fn(self, name: String) -> App Never! { self.split(name) }
 
     cache: fn(self, policy: String) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.cache.push(policy.copy())
         self.copy()
     }
 
     a11y: fn(self, policy: String) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.a11y.push(policy.copy())
         self.copy()
     }
 
     adapter: fn(self, name: String) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.adapters.push(name.copy())
         self.copy()
     }
@@ -646,9 +650,9 @@ App: struct {
     // on libjpeg's 1..100 scale, and `enabled: false` serves each original
     // alone. An option left out keeps its setting.
     images: fn(self, *, formats: [ImageFormat]?{None}, widths: [Int]?{None}, quality: Int?{None}, enabled: Bool?{None}) -> App Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         if formats == .Val(chosen) {
-            kept := [ImageFormat]{}
+            ^kept: [ImageFormat]{}
             loop format in chosen {
                 if format == .GIF {
                     panic("app.images: variants are PNG or JPEG; core.image does not write GIF")
@@ -658,7 +662,7 @@ App: struct {
             guard.value.image_settings.formats = kept
         }
         if widths == .Val(chosen) {
-            kept := [Int]{}
+            ^kept: [Int]{}
             loop width in chosen {
                 if width < 1 {
                     panic("app.images: width {width} is no pixel count; a width is 1 or more")
@@ -691,15 +695,15 @@ App: struct {
         route: if pattern != "" -> app_route(self, pattern) else -> AppRoute?{None}
         screen: if pattern != "" && route == None -> app_screen_at(pattern) else -> calls.AppScreen?{None}
         call: __AppCall{request: pick.request.copy(), data: ""}
-        shown := app_navigation(self).settled
-        loaded := __AppReply?{None}
+        ^shown: app_navigation(self).settled
+        ^loaded: __AppReply?{None}
         if route == .Val(row) {
             if row.preload && row.loader == .Val(loader) -> loaded = Val(loader.run(call))
             if row.pending != None {
                 shown = app_response_text(app_boundary(200, row.pending, "Loading", "", call))
             }
         }
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         settled: guard.value.navigation.settled.copy()
         guard.value.navigation = AppNavigation{path: path, request: Val(pick.request), route: route, screen: screen, loaded: loaded, shown: shown, settled: settled}
     }
@@ -715,7 +719,7 @@ App: struct {
         request: moving.request ?? return 0
         answered: app_navigation_answer(self, moving, request)
         shown: app_response_text(answered)
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         guard.value.navigation = AppNavigation{path: "", request: None, route: None, screen: None, loaded: None, shown: shown.copy(), settled: shown}
         answered.status
     }
@@ -724,7 +728,7 @@ App: struct {
     // loaded is dropped, its page never shows, and the page of the last
     // settled navigation shows again. False when none is in flight.
     abort: fn(self) -> Bool Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         if guard.value.navigation.path == "" -> return false
         settled: guard.value.navigation.settled.copy()
         guard.value.navigation = AppNavigation{path: "", request: None, route: None, screen: None, loaded: None, shown: settled.copy(), settled: settled}
@@ -860,7 +864,7 @@ priv app_request_route: fn(app: App) -[Net, FS.Read]> Never! {
 
 // Marks the app's `web.requests` layer as placed: true the first time.
 priv app_request_layer_claimed: fn(app: App) -> Bool Never! {
-    guard := app.__state.guard_edit()
+    ^guard: app.__state.guard_edit()
     if guard.value.requests_layered -> return false
     guard.value.requests_layered = true
     true
@@ -938,13 +942,13 @@ priv app_stop: fn(code: String, what: String, details: String, at: SourceLocatio
 // The E2416 stop's detail lines for the settings that did not decode, one
 // per failure.
 priv app_settings_failures: fn(errors: [FieldError]) -> String Never! {
-    report := ""
+    ^report: ""
     loop error in errors -> report = "{report}\n  {error.reason}"
     report
 }
 
 priv app_mode: fn(app: App, mode: String) -> App Never! {
-    guard := app.__state.guard_edit()
+    ^guard: app.__state.guard_edit()
     guard.value.mode = mode
     guard.value.explicit_mode = true
     app.copy()
@@ -964,7 +968,7 @@ priv app_table: fn(app: App) -> HTTPMux Never! {
 // (`app_service_routes`).
 priv app_service_add: fn(app: App, service: ^^AppService) Never! {
     held: app_services(app)
-    guard := held.guard_edit()
+    ^guard: held.guard_edit()
     guard.value.push(service)
 }
 
@@ -977,8 +981,8 @@ priv app_services: fn(app: App) -> Shared<[AppService]> Never! {
 // served, last first, and leaves none, so each adds its rows once.
 priv app_services_taken: fn(app: App) -> [AppService] Never! {
     held: app_services(app)
-    guard := held.guard_edit()
-    taken := [AppService]{}
+    ^guard: held.guard_edit()
+    ^taken: [AppService]{}
     loop {
         service: guard.value.pop() ?? break
         taken.push(service)
@@ -995,8 +999,8 @@ priv app_services_taken: fn(app: App) -> [AppService] Never! {
 // (`app_uploads_clean`).
 priv app_service_routes: fn(app: App) -> [Shared<AppUploadEndpoint>] Never! {
     table: app_table(app)
-    services := app_services_taken(app)
-    uploads := [Shared<AppUploadEndpoint>]{}
+    ^services: app_services_taken(app)
+    ^uploads: [Shared<AppUploadEndpoint>]{}
     loop {
         service: services.pop() ?? return uploads
         path: service.path.copy()
@@ -1066,7 +1070,7 @@ C_APP_DEFAULT_PORT: 8080
 priv app_serve: fn(app: App, chosen: AppPort, at: SourceLocation) -[Env, IO, Net, FS.Read, Time]> Never! {
     dev: __app_dev()
     if dev {
-        guard := app.__state.guard_edit()
+        ^guard: app.__state.guard_edit()
         guard.value.dev = true
     }
     table: app_table(app)
@@ -1109,7 +1113,7 @@ priv __app_listen: fn(mux: HTTPMux, port: Int, dev: Bool, at: SourceLocation) -[
     if port < 1 || port > 65535 {
         app_stop("E2809", "The web app can't listen on 127.0.0.1:{port}: a TCP port is a number from 1 to 65535.", "", at)
     }
-    candidate := port
+    ^candidate: port
     loop {
         address: "127.0.0.1:{candidate}"
         if core.net.tcp_listen(address) == {
@@ -1165,7 +1169,7 @@ priv app_dev_layer: fn(next: HTTPHandler) -> HTTPHandler Never! {
 
 // An HTML page gets the live-reload script before its closing body tag.
 priv app_dev_page: fn(next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
-    answered := next.handle(request) ?? return Err(err)
+    ^answered: next.handle(request) ?? return Err(err)
     kind: answered.header("content-type") ?? return Ok(answered)
     if !kind.starts_with("text/html") -> return Ok(answered)
     // A response built in the program holds its body, so reading it takes
@@ -1199,7 +1203,7 @@ priv app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, 
 // when either fails.
 priv app_page_answer: fn(app: App, route: AppRoute, request: HTTPRequest, loaded: __AppReply?) -[Net, FS.Read]> HTTPResponse Never! {
     path: route.path
-    call := __AppCall{request: request, data: ""}
+    ^call: __AppCall{request: request, data: ""}
     if loaded == .Val(reply) {
         if reply == {
             .JSON(text) -> call.data = text
@@ -1233,7 +1237,7 @@ priv app_asset_links: fn(app: App, body: String) -[FS.Read]> String Never! {
     if guard.value.assets.len() == 0 -> return body.copy()
     root: guard.value.assets[0].copy()
     pieces: body.split("\"/assets/").to_list()
-    out := [String]{}
+    ^out: [String]{}
     loop (at, piece) in pieces {
         if at == 0 {
             out.push("{piece}")
@@ -1269,7 +1273,7 @@ priv app_response_text: fn(answered: HTTPResponse) -[Net]> String Never! {
 priv app_navigation_answer: fn(app: App, moving: AppNavigation, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     if moving.screen == .Val(screen) -> return app_screen_response(app, screen, request)
     row: moving.route ?? return app_not_found_response(app, request)
-    loaded := moving.loaded
+    ^loaded: moving.loaded
     if loaded == None && row.loader == .Val(loader) {
         loaded = Val(loader.run(__AppCall{request: request.copy(), data: ""}))
     }
@@ -1397,7 +1401,7 @@ priv app_crawl_routes: fn(app: App) Never! {
         return
     }
     table: app_table(app)
-    taken := [String]{}
+    ^taken: [String]{}
     loop route in http_server.mux_routes(table) {
         if route.method == "GET" -> taken.push(route.pattern.copy())
     }
@@ -1415,7 +1419,7 @@ priv app_crawl_routes: fn(app: App) Never! {
 // answers it.
 priv app_screen_routes: fn(app: App) Never! {
     table: app_table(app)
-    taken := [String]{}
+    ^taken: [String]{}
     loop route in http_server.mux_routes(table) {
         if route.method == "GET" -> taken.push(route.pattern.copy())
     }
@@ -1439,7 +1443,7 @@ priv app_screen_routes: fn(app: App) Never! {
 // page's `<head>` holds the metadata the graph's head of the state gives
 // there (`app_screen_head`).
 priv app_screen_response: fn(app: App, screen: calls.AppScreen, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    fields := [String:String]{}
+    ^fields: [String:String]{}
     loop segment in screen.path.split("/") {
         if !segment.starts_with(":") -> next
         name: segment.removeprefix(":")
@@ -1474,8 +1478,8 @@ priv app_screen_head: fn(app: App, screen: calls.AppScreen, fields: [String:Stri
     graph: calls.App.__graph()
     head: calls.heads.of(graph, screen.state, fields)
     origin: app_crawl_origin(request)
-    names := [String]{}
-    values := [String]{}
+    ^names: [String]{}
+    ^values: [String]{}
     loop name in fields.keys() {
         names.push(name.copy())  // copy: the address keeps the field's name
         values.push(fields.get(name) ?? "")
@@ -1493,7 +1497,7 @@ priv app_screen_page: fn(screen: calls.AppScreen, fields: [String:String]) -[Net
     marked: opened.copy()
     page: calls.resume.render(fn() {
         shown: calls.App.__graph().__open(screen, fields) ?? return ""
-        held := marked.guard_edit()
+        ^held: marked.guard_edit()
         held.value = true
         shown.__html()
     })
@@ -1521,7 +1525,7 @@ priv app_crawl_origin: fn(request: HTTPRequest) -> String Never! {
 // reached. A page only a signed-in caller opens is never one of them.
 priv app_sitemap_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
     origin: app_crawl_origin(request)
-    entries := [String]{}
+    ^entries: [String]{}
     loop address in calls.sitemap.addresses() {
         entries.push("<url><loc>{app_html_attr("{origin}{address}")}</loc></url>")
     }
@@ -1534,7 +1538,7 @@ priv app_sitemap_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
 // caller opens (`calls.sitemap.signed_in_paths`) and may crawl the rest,
 // and finds the sitemap when the graph gave one.
 priv app_robots_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
-    lines := [String]{"User-agent: *"}
+    ^lines: [String]{"User-agent: *"}
     left: calls.sitemap.signed_in_paths()
     if left.len() == 0 -> lines.push("Disallow:")
     loop path in left -> lines.push("Disallow: {path}")
@@ -1589,7 +1593,7 @@ priv app_install_routes: fn(app: App) -[Net, FS.Read]> Never! {
         panic("the app's icon `{install.icon}` is no icon `.installable` can use: {install_icon_problem(problem)}")
     }
     table: app_table(app)
-    taken := [String]{}
+    ^taken: [String]{}
     loop route in http_server.mux_routes(table) {
         if route.method == "GET" -> taken.push(route.pattern.copy())
     }
@@ -1631,7 +1635,7 @@ priv install_color: fn(color: Int) -> Color Never! {
 // them.
 priv install_icons: fn(install: calls.AppInstall, data: [U8]) -> [InstallIcon] Never! {
     digest: crypto.sha256(data).hex()
-    icons := [InstallIcon]{}
+    ^icons: [InstallIcon]{}
     icons.push(install_icon(digest, 192, None))
     icons.push(install_icon(digest, 512, None))
     icons.push(install_icon(digest, 512, Val(install.color)))
@@ -1661,7 +1665,7 @@ priv install_icon_bytes: fn(data: [U8], icon: InstallIcon) -> [U8] ImageError! {
     back: [Int]{(shade >> 16) & 255, (shade >> 8) & 255, shade & 255, opaque}
     left: (icon.size - width) /% 2
     top: (icon.size - height) /% 2
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop y in 0..<icon.size {
         loop x in 0..<icon.size {
             if x < left || x >= left + width || y < top || y >= top + height {
@@ -1698,7 +1702,7 @@ priv app_manifest_response: fn(request: HTTPRequest) -[FS.Read]> HTTPResponse Ne
     data: core.files.read_bytes(install.icon) ?? return http_server.response_body(404, core.http.body_text(""), core.http.headers())
     color: app_json_string(install_color(install.color).to_hex())
     name: app_json_string(install.name)
-    icons := [String]{}
+    ^icons: [String]{}
     loop icon in install_icons(install, data) {
         purpose: if icon.fill == None -> "" else -> ",\"purpose\":\"maskable\""
         icons.push("{{\"src\":{app_json_string(icon.path)},\"sizes\":\"{icon.size}x{icon.size}\",\"type\":\"image/png\"{purpose}}}")
@@ -1729,13 +1733,13 @@ priv app_worker_response: fn(app: App) -[FS.Read]> HTTPResponse Never! {
 // the next write, on each navigation, and on GET `/__jet/queue`, which
 // answers the number still waiting.
 priv app_worker_script: fn(app: App) -[FS.Read]> String Never! {
-    shell := [String]{"/", C_APP_MANIFEST}
+    ^shell: [String]{"/", C_APP_MANIFEST}
     if calls.App.__graph().__install() == .Val(install) {
         if core.files.read_bytes(install.icon) == .Ok(data) {
             loop icon in install_icons(install, data) -> shell.push(icon.path)
         }
     }
-    assets := [String]{}
+    ^assets: [String]{}
     guard: app.__state.guard_read()
     if guard.value.assets.len() > 0 {
         root: guard.value.assets[0].copy()
@@ -1745,7 +1749,7 @@ priv app_worker_script: fn(app: App) -[FS.Read]> String Never! {
             }
         }
     }
-    queued := [String]{}
+    ^queued: [String]{}
     loop path in calls.App.__graph().__queued_apis() {
         queued.push(if path.ends_with("/") -> path.copy() else -> "{path}/")
     }
@@ -1756,7 +1760,7 @@ priv app_worker_script: fn(app: App) -[FS.Read]> String Never! {
 // The files under the folder `under` of `root` ("" for `root` itself) and
 // under the folders in it, by their paths from `root`, sorted.
 priv app_asset_files: fn(root: String, under: String) -[FS.Read]> [String] Never! {
-    found := [String]{}
+    ^found: [String]{}
     at: if under == "" -> root.copy() else -> "{root}/{under}"
     entries: core.files.list_dir(at) ?? return found
     loop entry in entries {
@@ -1859,7 +1863,7 @@ priv app_icon_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTP
         if icon.path != path -> next
         bytes: install_icon_bytes(data, icon) ?? return app_not_found_response(app, request)
         answer: image_response(bytes, .PNG)
-        guard := app.__state.guard_edit()
+        ^guard: app.__state.guard_edit()
         guard.value.image_bytes[path] = bytes
         return answer
     }
@@ -1867,7 +1871,7 @@ priv app_icon_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTP
 }
 
 #Test("an installable graph's pages link its manifest, and its icons fit the image in their square, a maskable one inside the safe zone on the app's color") {
-    red := [U8]{}
+    ^red: [U8]{}
     loop _ in 0..<8 {
         red.push(U8{255})
         red.push(U8{0})
@@ -1944,7 +1948,7 @@ priv crawl_test_open: fn(_graph: calls.App, _fields: [String:String]) -> UINode?
     served: app()
     app_crawl_routes(served)
     table: app_table(served)
-    fields := web_http.headers_set(web_http.headers(), "host", "crew.example")
+    ^fields: web_http.headers_set(web_http.headers(), "host", "crew.example")
     fields = web_http.headers_set(fields, "x-forwarded-proto", "https")
     listed: http_server.__dispatch(table, web_http.server_request("GET", "/sitemap.xml", web_http.body_text(""), fields.copy()))
     assert_eq(listed.status, 200)
@@ -2004,8 +2008,8 @@ priv screen_test_inbox_open: fn(graph: calls.App, fields: [String:String]) -> UI
     auth.register_user("web-screen-ben", "ben's hash") ?? panic("ben registers: {err}")
     now: core.time.now_utc().to_timestamp()
     session: auth.password_login("web-screen-ben", "ben's hash", now * 1000, 60000) ?? panic("ben signs in: {err}")
-    fields := web_http.headers_set(web_http.headers(), "authorization", "Bearer {auth.session_id(session)}")
-    request := web_http.server_request("GET", "/mail/mine", web_http.body_text(""), fields)
+    ^fields: web_http.headers_set(web_http.headers(), "authorization", "Bearer {auth.session_id(session)}")
+    ^request: web_http.server_request("GET", "/mail/mine", web_http.body_text(""), fields)
     request.__received = now
     opened: http_server.__dispatch(table, request)
     assert_eq(opened.status, 200)
@@ -2209,7 +2213,7 @@ priv image_extension: fn(format: ImageFormat) -> String Never! {
 // that is absolute, climbs out, names a hidden part, or has no stem.
 priv image_url_stem: fn(source: String) -> String? Never! {
     parts: source.split("/").to_list()
-    kept := [String]{}
+    ^kept: [String]{}
     loop (index, part) in parts {
         if part == "" || part.starts_with(".") || part.contains("\\") || part.contains("%") || part.contains("?") || part.contains("#") {
             return None
@@ -2220,7 +2224,7 @@ priv image_url_stem: fn(source: String) -> String? Never! {
         }
         pieces: part.split(".").to_list()
         if pieces.len() < 2 -> return None
-        stem := [String]{}
+        ^stem: [String]{}
         loop (at, piece) in pieces {
             if at + 1 < pieces.len() -> stem.push("{piece}")
         }
@@ -2240,10 +2244,10 @@ priv image_node: fn(source: String, data: [U8], settings: ImageSettings) -> Imag
     info: codec.inspect(data, C_IMAGE_LIMITS) ?? return Err(err)
     if info.format == .GIF -> return Err(.Unsupported)
     digest: crypto.sha256(data).hex()
-    formats := [ImageFormat]{}
+    ^formats: [ImageFormat]{}
     loop format in settings.formats { formats.push(format.copy()) }
     if formats.len() == 0 -> formats.push(info.format.copy())
-    variants := [ImageVariant]{}
+    ^variants: [ImageVariant]{}
     if settings.enabled {
         loop format in formats {
             quality: if format == .JPEG -> settings.quality else -> 0
@@ -2270,7 +2274,7 @@ priv image_variant_bytes: fn(data: [U8], node: ImageNode, variant: ImageVariant)
     quality: if variant.format == .JPEG -> variant.quality else -> C_IMAGE_QUALITY
     encoded: codec.encode_quality(scaled, variant.format, quality, C_IMAGE_LIMITS) ?? return Err(err)
     if variant.format != node.format || encoded.len() < data.len() -> return Ok(encoded)
-    original := [U8]{}
+    ^original: [U8]{}
     loop byte in data { original.push(byte) }
     Ok(original)
 }
@@ -2281,13 +2285,13 @@ priv image_variant_bytes: fn(data: [U8], node: ImageNode, variant: ImageVariant)
 priv image_picture: fn(node: ImageNode, alt: String) -> String Never! {
     fallback: "<img src=\"{app_html_attr(node.path)}\" alt=\"{app_html_attr(alt)}\" width=\"{node.width}\" height=\"{node.height}\">"
     if node.variants.len() == 0 -> return fallback
-    formats := [ImageFormat]{}
+    ^formats: [ImageFormat]{}
     loop variant in node.variants {
         if !formats.contains(variant.format) -> formats.push(variant.format.copy())
     }
-    sources := [String]{}
+    ^sources: [String]{}
     loop format in formats {
-        candidates := [String]{}
+        ^candidates: [String]{}
         loop variant in node.variants {
             if variant.format == format -> candidates.push("{variant.path} {variant.width}w")
         }
@@ -2313,7 +2317,7 @@ priv image_unescape: fn(value: String) -> String Never! {
 // `body` with each `web.image` placeholder replaced by its markup.
 priv app_images: fn(app: App, body: String) -[FS.Read]> ImagePage Never! {
     pieces: body.split(C_IMAGE_MARK).to_list()
-    out := [String]{}
+    ^out: [String]{}
     loop (index, piece) in pieces {
         if index == 0 {
             out.push("{piece}")
@@ -2327,7 +2331,7 @@ priv app_images: fn(app: App, body: String) -[FS.Read]> ImagePage Never! {
         placed: app_image(app, image_unescape(parts[0]), image_unescape(parts[2]))
         if placed.failure != "" -> return placed
         out.push(placed.body)
-        rest := [String]{}
+        ^rest: [String]{}
         loop (at, part) in parts {
             if at >= 3 -> rest.push("{part}")
         }
@@ -2353,10 +2357,10 @@ priv app_image: fn(app: App, source: String, alt: String) -[FS.Read]> ImagePage 
         return ImagePage{body: "", failure: "web.image can't use `{source}`: name a file with an extension under the working directory, through no hidden part and no `..`"}
     }
     data: core.files.read_bytes(source) ?? return ImagePage{body: "", failure: "web.image can't read `{source}`: {err}"}
-    guard := app.__state.guard_edit()
+    ^guard: app.__state.guard_edit()
     node: image_node(source, data, guard.value.image_settings) ?? return ImagePage{body: "", failure: "web.image can't use `{source}`: {image_problem(err)}"}
     markup: image_picture(node, alt)
-    known := false
+    ^known: false
     loop existing in guard.value.images {
         if existing.path == node.path -> known = true
     }
@@ -2382,7 +2386,7 @@ priv app_image_answer: fn(app: App, path: String) -[FS.Read]> HTTPResponse? Neve
     // `stem.digest.ext` names an original, `stem.key.width.ext` a variant.
     loop dropped in ([Int]{2, 3}) {
         if pieces.len() <= dropped -> next
-        stem := [String]{}
+        ^stem: [String]{}
         loop (at, piece) in pieces {
             if at + dropped < pieces.len() -> stem.push("{piece}")
         }
@@ -2398,7 +2402,7 @@ priv app_image_answer: fn(app: App, path: String) -[FS.Read]> HTTPResponse? Neve
 // The answer to GET `path` when the source at `source` makes it.
 priv app_image_from: fn(app: App, source: String, path: String) -[FS.Read]> HTTPResponse? Never! {
     data: core.files.read_bytes(source) ?? return None
-    guard := app.__state.guard_edit()
+    ^guard: app.__state.guard_edit()
     node: image_node(source, data, guard.value.image_settings) ?? return None
     if node.path == path -> return Val(image_response(data, node.format))
     loop variant in node.variants {
@@ -2458,7 +2462,7 @@ priv app_document: fn(status: Int, head: String, body: String) -> HTTPResponse N
 // Open Graph and Twitter card tags a shared link shows. `image` is the
 // head's share image as an absolute URL (app_head_image).
 priv app_head_tags: fn(title: String, head: calls.Head?, url: String, image: String?, indexed: Bool) -> String Never! {
-    tags := [String]{"<meta charset=\"utf-8\">"}
+    ^tags: [String]{"<meta charset=\"utf-8\">"}
     shown: if head == .Val(given) -> given.title.copy() else -> title.copy()
     tags.push("<title>{app_html_attr(shown)}</title>")
     if !indexed -> tags.push("<meta name=\"robots\" content=\"noindex\">")
@@ -2589,9 +2593,9 @@ priv app_keep_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, reply
         return
     }
     fresh_ns: if max_age.ns > 9223372036854775807 - now_ns -> 9223372036854775807 else -> now_ns + max_age.ns
-    guard := kept.guard_edit()
+    ^guard: kept.guard_edit()
     if guard.value.len() >= APP_KEPT_REPLIES {
-        fresh := [String:AppKeptReply]{}
+        ^fresh: [String:AppKeptReply]{}
         loop key in guard.value.keys() {
             held: guard.value.get(key) ?? next
             if now_ns <= held.fresh_ns -> fresh[key] = held
@@ -2676,13 +2680,13 @@ priv app_cookie_session: fn(request: HTTPRequest) -> String Never! {
 priv app_remote_limited: fn(limit: AppRemoteLimit, who: String) -> Int? Never! {
     if limit.calls <= 0 -> return None
     now: rt.clock_mono_ns()
-    guard := limit.windows.guard_edit()
-    window := guard.value.get(who) ?? AppRemoteWindow{start_ns: now, calls: 0}
+    ^guard: limit.windows.guard_edit()
+    ^window: guard.value.get(who) ?? AppRemoteWindow{start_ns: now, calls: 0}
     if now - window.start_ns >= limit.window_ns -> window = AppRemoteWindow{start_ns: now, calls: 0}
     if window.calls >= limit.calls -> return Val(window.start_ns + limit.window_ns - now)
     window.calls += 1
     if guard.value.len() >= APP_REMOTE_LIMIT_ADDRESSES {
-        kept := [String:AppRemoteWindow]{}
+        ^kept: [String:AppRemoteWindow]{}
         loop address in guard.value.keys() {
             held: guard.value.get(address) ?? next
             if now - held.start_ns < limit.window_ns -> kept[address] = held
@@ -2747,10 +2751,10 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
     if key.len() > APP_REQUEST_KEY_MAX {
         return app_json(400, app_error_json("an `Idempotency-Key` is at most {APP_REQUEST_KEY_MAX} bytes"))
     }
-    account := ""
+    ^account: ""
     if calls.maybe_caller() == .Val(who) -> account = who.raw()
     asked: if key == "" -> calls.CallRequest?{None} else -> Val(calls.CallRequest{account: account, key: key, at: request.__received})
-    text := query ?? ""
+    ^text: query ?? ""
     if query == None {
         text = request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
     }
@@ -2776,7 +2780,7 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
     answered: app_transacted(None, asked, fn() {
         reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return {response: app_json(422, app_invalid_json(err)), commit: false}
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
-        guard := ran.guard_edit()
+        ^guard: ran.guard_edit()
         guard.value = [String]{reply.copy()}
         {response: app_remote_reply(answering, request, reply, None), commit: !app_reply_failed(reply)}
     })
@@ -2804,7 +2808,7 @@ priv app_remote_reply: fn(policy: calls.CachePolicy?, request: HTTPRequest, repl
     kept: policy ?? return answered
     if kept == .Public(max_age) && !app_reply_failed(reply) {
         etag: "\"{http_server.static_hash(reply.bytes())}\""
-        fields := core.http.headers_set(core.http.headers(), "etag", etag)
+        ^fields: core.http.headers_set(core.http.headers(), "etag", etag)
         fields = core.http.headers_set(fields, "cache-control", "public, max-age={max_age.ns /% 1000000000}")
         if age_ns == .Val(elapsed) {
             fields = core.http.headers_set(fields, "age", "{elapsed /% 1000000000}")
@@ -2812,7 +2816,7 @@ priv app_remote_reply: fn(policy: calls.CachePolicy?, request: HTTPRequest, repl
         if request.method == "GET" && http_server.etag_matches(request.header("if-none-match") ?? "", etag) {
             return http_server.response_body(304, core.http.body_empty(), fields)
         }
-        cached := answered
+        ^cached: answered
         loop field in fields.fields -> cached = cached.__with_header(field.name, field.value)
         return cached
     }
@@ -2947,7 +2951,7 @@ priv app_upload_response: fn(held: Shared<AppUploadEndpoint>, request: HTTPReque
     if !entry.value.upload.signed_in {
         return app_upload_call(entry.value, request).__with_header("cache-control", "private, no-store")
     }
-    answered := app_json(401, app_error_json("`{request.path}` needs a signed-in caller"))
+    ^answered: app_json(401, app_error_json("`{request.path}` needs a signed-in caller"))
     if app_session_account(request) == .Val(account) {
         calls.callers.begin_account(account)
         answered = app_upload_call(entry.value, request)
@@ -2984,7 +2988,7 @@ priv app_upload_run: fn(endpoint: AppUploadEndpoint, request: HTTPRequest, bytes
     args: app_upload_query(request, "args", "[]") ?? return app_json(422, app_invalid_json(err))
     name: app_upload_query(request, "name", "upload") ?? return app_json(422, app_invalid_json(err))
     given: live_json.parse(args) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     if given == .Array(list) -> items = list.copy() else {
         return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not a JSON array"}}))
     }
@@ -2993,7 +2997,7 @@ priv app_upload_run: fn(endpoint: AppUploadEndpoint, request: HTTPRequest, bytes
         return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call has {items.len()} arguments besides its upload, short of {at}"}}))
     }
     file: live_json.parse("{{\"name\":{app_json_string(name)},\"bytes\":{bytes}}}") ?? return app_json(500, app_error_json("the upload can't be described: {err}"))
-    spliced := [Dyn]{}
+    ^spliced: [Dyn]{}
     loop index in 0..<items.len() {
         if index == at -> spliced.push(file.copy())
         spliced.push(items[index].copy())
@@ -3004,7 +3008,7 @@ priv app_upload_run: fn(endpoint: AppUploadEndpoint, request: HTTPRequest, bytes
     app_transacted(None, None, fn() {
         reply: endpoint.remote.answer(RemoteArgs{tree: tree.copy()}) ?? return {response: app_json(422, app_invalid_json(err)), commit: false}
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
-        kept := ran.guard_edit()
+        ^kept: ran.guard_edit()
         kept.value = reply.copy()
         {response: app_json(200, reply), commit: !app_reply_failed(reply)}
     })
@@ -3059,7 +3063,7 @@ priv app_blob_served: fn(upload: AppUpload, id: String) -[Net, FS.Read]> HTTPRes
     missing: app_json(404, app_error_json("no blob `{id}` is here for this caller"))
     served: upload.files(calls.FileJob{step: .Serve(id)}) ?? return missing
     if served.status != 200 -> return missing
-    fields := web_http.headers_set(web_http.headers(), "content-type", served.media)
+    ^fields: web_http.headers_set(web_http.headers(), "content-type", served.media)
     fields = web_http.headers_set(fields, "content-disposition", "attachment")
     fields = web_http.headers_set(fields, "x-content-type-options", "nosniff")
     fields = web_http.headers_set(fields, "cache-control", "private, no-store")
@@ -3112,7 +3116,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
     second: runs.copy()
     // Refused by its store until its third run.
     flaky: app_transacted(None, None, fn() {
-        count := first.guard_edit()
+        ^count: first.guard_edit()
         count.value += 1
         if count.value < 3 {
             calls.transactions.refuse(calls.transactions.current() ?? panic("the call is open"))
@@ -3122,7 +3126,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
     assert_eq(flaky.status, 200)
     assert_eq(flaky.text(), "{{\"ok\":3}}")
     refused: app_transacted(None, None, fn() {
-        count := second.guard_edit()
+        ^count: second.guard_edit()
         count.value += 1
         calls.transactions.refuse(calls.transactions.current() ?? panic("the call is open"))
         {response: app_json(200, "{{\"ok\":0}}"), commit: true}
@@ -3197,11 +3201,11 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
 // `origin`, the `Authorization` `authorization` and the `Cookie` `cookie`
 // ("" sends none of each).
 priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorization: String, cookie: String) -[Net, FS.Read]> String Never! {
-    fields := web_http.headers_set(web_http.headers(), "host", "app.example")
+    ^fields: web_http.headers_set(web_http.headers(), "host", "app.example")
     if origin != "" -> fields = web_http.headers_set(fields, "origin", origin)
     if authorization != "" -> fields = web_http.headers_set(fields, "authorization", authorization)
     if cookie != "" -> fields = web_http.headers_set(fields, "cookie", cookie)
-    request := web_http.server_request("POST", "/api/me", web_http.body_text("[]"), fields)
+    ^request: web_http.server_request("POST", "/api/me", web_http.body_text("[]"), fields)
     request.__received = at
     answer: http_server.__dispatch(table, request)
     "{answer.status} {answer.text() ?? "unreadable"}"
@@ -3247,7 +3251,7 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
         "/api/kept",
         fn(args: RemoteArgs) {
             kind: args.__take<Int>(0) ?? return Err(err)
-            guard := counted.guard_edit()
+            ^guard: counted.guard_edit()
             guard.value += 1
             if kind == 0 -> return Ok(args.__reply_value<Bool>(false))
             if kind == 1 -> return Ok(args.__reply_value<Int>(0))
@@ -3311,7 +3315,7 @@ priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.
     calls.callers.begin_system()
     defer calls.callers.end()
     unsigned: app_json(401, app_error_json("`{request.path}` takes only deliveries signed with its key"))
-    values := [String]{}
+    ^values: [String]{}
     loop name in hook.params { values.push(app_json_string(request.param(name) ?? "")) }
     params: live_json.parse("[{values.join(",")}]") ?? return unsigned
     // A path parameter the key method can't take, or no key: either is 401.
@@ -3373,7 +3377,7 @@ priv AppTraced: struct {
 }
 
 priv app_traced: fn(app: App, pattern: String, method: String) Never! {
-    guard := app.__state.guard_edit()
+    ^guard: app.__state.guard_edit()
     guard.value.traced.push(AppTraced{pattern: pattern, method: method})
 }
 
@@ -3390,7 +3394,7 @@ priv AppSchedule: struct {
 // the order they were left: it takes each out, so a later start finds none,
 // and starts them after letting `waiting` go.
 priv app_schedules_start: fn(waiting: Shared<[AppSchedule]>) Never! {
-    schedules := app_schedules_taken(waiting)
+    ^schedules: app_schedules_taken(waiting)
     loop {
         schedule: schedules.pop() ?? return
         calls.schedules.start(schedule.name, schedule.cron, schedule.run)
@@ -3399,8 +3403,8 @@ priv app_schedules_start: fn(waiting: Shared<[AppSchedule]>) Never! {
 
 // Takes the schedules `waiting` holds, last first, and leaves none.
 priv app_schedules_taken: fn(waiting: Shared<[AppSchedule]>) -> [AppSchedule] Never! {
-    guard := waiting.guard_edit()
-    taken := [AppSchedule]{}
+    ^guard: waiting.guard_edit()
+    ^taken: [AppSchedule]{}
     loop {
         schedule: guard.value.pop() ?? break
         taken.push(schedule)
@@ -3410,7 +3414,7 @@ priv app_schedules_taken: fn(waiting: Shared<[AppSchedule]>) -> [AppSchedule] Ne
 
 // An endpoint's method: the last segment of its row's path.
 priv app_endpoint_method: fn(path: String) -> String Never! {
-    parts := path.split("/").to_list()
+    ^parts: path.split("/").to_list()
     parts.pop() ?? ""
 }
 
@@ -3433,7 +3437,7 @@ C_APP_TRACE_BATCH: 512
 
 // The OTEL_* variables the export reads, by name; an unset one is absent.
 #Builtin.Role(.AppTraceEnv) priv __app_trace_env: fn() -> [String:String] Never! {
-    values := [String:String]{}
+    ^values: [String:String]{}
     app_trace_env_put(values, "OTEL_SDK_DISABLED")
     app_trace_env_put(values, "OTEL_TRACES_EXPORTER")
     app_trace_env_put(values, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
@@ -3454,20 +3458,20 @@ priv app_trace_env_put: fn(values: ^[String:String], name: String) Never! {
 // export off. A count that is not a whole number in range keeps its default.
 priv app_trace_settings: fn(values: [String:String]) -> AppTraceSettings? Never! {
     if (values.get("OTEL_SDK_DISABLED") ?? "").trim().to_lower() == "true" -> return None
-    exporters := (values.get("OTEL_TRACES_EXPORTER") ?? "").trim().to_lower()
+    ^exporters: (values.get("OTEL_TRACES_EXPORTER") ?? "").trim().to_lower()
     if exporters == "" -> exporters = "otlp"
-    chosen := false
+    ^chosen: false
     loop name in exporters.split(",") {
         if name.trim() == "otlp" -> chosen = true
     }
     if !chosen -> return None
-    url := (values.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") ?? "").trim()
+    ^url: (values.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") ?? "").trim()
     if url == "" {
         base: (values.get("OTEL_EXPORTER_OTLP_ENDPOINT") ?? "").trim()
         if base == "" -> return None
         url = if base.ends_with("/") -> "{base}v1/traces" else -> "{base}/v1/traces"
     }
-    service := (values.get("OTEL_SERVICE_NAME") ?? "").trim()
+    ^service: (values.get("OTEL_SERVICE_NAME") ?? "").trim()
     if service == "" -> service = "unknown_service"
     max_queue: app_trace_count(values, "OTEL_BSP_MAX_QUEUE_SIZE", C_APP_TRACE_MAX_QUEUE, 1)
     batch: app_trace_count(values, "OTEL_BSP_MAX_EXPORT_BATCH_SIZE", C_APP_TRACE_BATCH, 1)
@@ -3531,7 +3535,7 @@ priv app_trace_start: fn(app: App) -[Env, Net, FS.Read, Time]> AppTraceExport? N
 priv app_trace_install: fn(app: App, settings: AppTraceSettings, epoch_ns: Int) -> AppTraceExport Never! {
     table: app_table(app)
     guard: app.__state.guard_read()
-    rows := [AppTraceRow]{}
+    ^rows: [AppTraceRow]{}
     loop route in http_server.mux_routes(table) {
         if route.method != "POST" -> next
         loop item in guard.value.traced {
@@ -3556,7 +3560,7 @@ priv app_trace_handler: fn(export: AppTraceExport, next: HTTPHandler) -> HTTPHan
 priv app_trace_apply: fn(export: AppTraceExport, next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
     row: app_trace_row(export.rows, request) ?? return next.handle(request)
     start: rt.clock_mono_ns()
-    answered := next.handle(request) ?? return app_trace_failed(export, export.rows[row], request, start, err)
+    ^answered: next.handle(request) ?? return app_trace_failed(export, export.rows[row], request, start, err)
     app_trace_push(export, app_trace_span(export, export.rows[row], request, start, rt.clock_mono_ns(), answered.status))
     Ok(answered)
 }
@@ -3586,7 +3590,7 @@ priv app_trace_row: fn(rows: [AppTraceRow], request: HTTPRequest) -> Int? Never!
 // `x-request-id` when that is valid, else the server's own.
 priv app_trace_span: fn(export: AppTraceExport, row: AppTraceRow, request: HTTPRequest, start: Int, end: Int, status: Int) -> TraceSpan Never! {
     caller: app_traceparent(request.header("traceparent") ?? "")
-    attributes := [LogField]{
+    ^attributes: [LogField]{
         log.field("jet.request_id", request.header("x-request-id") ?? ""),
         log.field("http.request.method", "POST"),
         log.field("http.route", row.pattern),
@@ -3646,10 +3650,10 @@ priv app_lower_hex: fn(text: String, size: Int) -> Bool Never! {
 // `jet.trace.dropped_spans` metric counts the loss.
 priv app_trace_push: fn(export: AppTraceExport, span: ^^TraceSpan) Never! {
     capacity: export.settings.max_queue
-    guard := export.queue.guard_edit()
+    ^guard: export.queue.guard_edit()
     guard.value.ids += 1
     seed: "{export.epoch_ns}:{guard.value.ids}"
-    held := span.move()
+    ^held: span.move()
     held.span_id = make_trace_id("span:{seed}", 8)
     if held.trace_id == "" -> held.trace_id = make_trace_id("trace:{seed}", 16)
     slot: (guard.value.first + guard.value.count) %% capacity
@@ -3668,9 +3672,9 @@ priv app_trace_push: fn(export: AppTraceExport, span: ^^TraceSpan) Never! {
 // Takes up to one batch of the oldest queued spans.
 priv app_trace_take: fn(export: AppTraceExport) -> [TraceSpan] Never! {
     capacity: export.settings.max_queue
-    guard := export.queue.guard_edit()
+    ^guard: export.queue.guard_edit()
     size: if guard.value.count < export.settings.batch -> guard.value.count else -> export.settings.batch
-    taken := [TraceSpan]{}
+    ^taken: [TraceSpan]{}
     loop index in 0..<size {
         taken.push(guard.value.spans[(guard.value.first + index) %% capacity].copy())
     }
@@ -3698,7 +3702,7 @@ priv app_trace_flush: fn(export: AppTraceExport) -[Net, Time.Wait]> Never! {
             return
         }
         if !app_trace_post(export.settings, batch) {
-            guard := export.queue.guard_edit()
+            ^guard: export.queue.guard_edit()
             guard.value.dropped += size
             log_rt.metric_publish("jet.trace.dropped_spans", guard.value.dropped)
         }
@@ -3718,7 +3722,7 @@ priv app_trace_post: fn(settings: AppTraceSettings, batch: [TraceSpan]) -[Net, T
 // `{"invalid": [{"path": …, "reason": …}, …]}`, the 422 body a Remote reads
 // back as `CallError.Invalid`.
 priv app_invalid_json: fn(errors: [FieldError]) -> String Never! {
-    entries := [String]{}
+    ^entries: [String]{}
     loop error in errors {
         entries.push("{{\"path\":{app_json_string(error.path)},\"reason\":{app_json_string(error.reason)}}}")
     }
@@ -3748,7 +3752,7 @@ priv app_same_origin: fn(request: HTTPRequest) -> Bool Never! {
 
 priv app_trim_slashes: fn(prefix: String) -> String Never! {
     raw: prefix.bytes()
-    end := raw.len()
+    ^end: raw.len()
     loop end > 0 && raw[end - 1] == (U8{47}) -> end -= 1
     String.from_bytes(raw.slice(0, end)) ?? ""
 }
@@ -3763,7 +3767,7 @@ priv app_hex_digit: fn(value: Int) -> U8 Never! {
 }
 
 priv app_json_string: fn(value: String) -> String Never! {
-    out := [U8]{34}
+    ^out: [U8]{34}
     loop byte in value.bytes() {
         n: Int{byte}
         if n == 34 || n == 92 {
@@ -3782,7 +3786,7 @@ priv app_json_string: fn(value: String) -> String Never! {
 }
 
 priv app_html_attr: fn(value: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         n: Int{byte}
         if n == 38 -> app_push(out, "&amp;") else if n == 60 -> app_push(out, "&lt;") else if n == 62 {
@@ -3794,7 +3798,7 @@ priv app_html_attr: fn(value: String) -> String Never! {
 
 // JSON inside a `<script>` element: every `<` as `\u003c`.
 priv app_script_safe: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         if byte == (U8{60}) -> app_push(out, "\\u003c") else -> out.push(byte)
     }
@@ -3802,14 +3806,14 @@ priv app_script_safe: fn(text: String) -> String Never! {
 }
 
 priv app_json_list: fn(values: [String]) -> String Never! {
-    items := [String]{}
+    ^items: [String]{}
     loop value in values -> items.push(app_json_string(value))
     "[{items.join(",")}]"
 }
 
 // The debug spelling of a string list (`["a", "b"]`) the policy rows use.
 priv app_debug_list: fn(values: [String]) -> String Never! {
-    items := [String]{}
+    ^items: [String]{}
     loop value in values -> items.push(app_json_string(value))
     "[{items.join(", ")}]"
 }
@@ -3821,12 +3825,12 @@ priv app_json_or_null: fn(value: String) -> String Never! {
 
 // FNV-1a 64 of `path\0handler`: the route's cache identity.
 priv app_route_identity: fn(path: String, handler: String) -> String Never! {
-    hash := U64{14695981039346656037}
-    bytes := path.bytes()
+    ^hash: U64{14695981039346656037}
+    ^bytes: path.bytes()
     bytes.push(U8{0})
     loop byte in handler.bytes() -> bytes.push(byte)
     loop byte in bytes -> hash = wrapping((hash ~ U64{Int{byte}}) * U64{1099511628211})
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<16 { out.push(app_hex_digit(Int{(hash >> (60 - index * 4)) & U64{15}})) }
     "route-{String.from_bytes(out) ?? ""}"
 }
@@ -3848,9 +3852,9 @@ priv app_search_field_json: fn(item: String, codec: String) -> String Never! {
 }
 
 priv app_route_facts_json: fn(route: AppRoute) -> String Never! {
-    path_params := [String]{}
-    search_params := [String]{}
-    search_codec := "query"
+    ^path_params: [String]{}
+    ^search_params: [String]{}
+    ^search_codec: "query"
     loop item in route.binding.split(";") {
         if item == "" || item == "d" -> next
         if item.starts_with("p:") {
@@ -3877,11 +3881,11 @@ priv app_route_facts_json: fn(route: AppRoute) -> String Never! {
 
 priv app_facts_json: fn(app: App) -> String Never! {
     state: app_state(app)
-    routes := [String]{}
+    ^routes: [String]{}
     loop route in state.routes {
         routes.push("    {{\"path\": {app_json_string(route.path)}, \"handler\": {app_json_string(route.identity)}, \"provenance\": \"runtime\", \"render_facts\": {app_route_facts_json(route)}}}")
     }
-    actions := [String]{}
+    ^actions: [String]{}
     loop action in state.actions {
         server: if action.handler == None -> "null" else -> "{{\"name\":{app_json_string(action.name)},\"endpoint\":{app_json_string("/actions/{action.name}")},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[]}}"
         actions.push("    {{\"name\": {app_json_string(action.name)}, \"handler\": \"callable\", \"kind\": {app_json_string(action.kind)}, \"preload\": {action.preload}, \"server_function\": {server}}}")
@@ -3911,7 +3915,7 @@ Mount: struct {
 // The OpenAPI document of a router's route table or an App's handler rows;
 // an App's pages, server functions and static files carry no endpoint
 // contract and are not API operations.
-openapi: fn(source: HTTPRouter | App) -> String OpenAPIError! {
+openapi: fn(source: App | HTTPRouter) -> String OpenAPIError! {
     if source == {
         .HTTPRouter(router) -> openapi_mux(web_http.router_mux(router))
         .App(app) -> openapi_mux(app_table(app))
@@ -3924,7 +3928,7 @@ openapi: fn(source: HTTPRouter | App) -> String OpenAPIError! {
 // the routes are canonicalized and checked as one document
 // (JetOpenApiDocument::with_openapi) and rendered (::json).
 priv openapi_mux: fn(mux: HTTPMux) -> String OpenAPIError! {
-    routes := [OpenAPIRoute]{}
+    ^routes: [OpenAPIRoute]{}
     loop route in http_server.mux_routes(mux) {
         if route.contract == "" -> next
         routes.push(openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
@@ -4060,9 +4064,9 @@ priv openapi_pattern: fn(pattern: String) -> OpenAPIPattern OpenAPIError! {
     if parsed.problem != "" {
         return Err(openapi_fault("invalid HTTP route `{pattern}`: {parsed.problem}"))
     }
-    key := ""
-    names := [String]{}
-    catch_alls := [String]{}
+    ^key: ""
+    ^names: [String]{}
+    ^catch_alls: [String]{}
     loop segment in parsed.segments {
         if segment == {
             .Static(text) -> { key = "{key}/s{text.bytes().len()}:{text}" }
@@ -4167,7 +4171,7 @@ priv openapi_schema: fn(value: Dyn, path: String, errors: ^[String]) -> String O
             }
         }
         if items.len() == 2 && openapi_is_object(items[1]) {
-            probe := [String]{}
+            ^probe: [String]{}
             second: openapi_schema(items[1], path, probe) ?? return Err(err)
             if second == "{{\"type\":\"null\"}}" {
                 inner: openapi_schema(items[0], path, errors) ?? return Err(err)
@@ -4183,7 +4187,7 @@ priv openapi_schema: fn(value: Dyn, path: String, errors: ^[String]) -> String O
             }
         }
         if items.len() == 0 -> errors.push(openapi_problem(path, "oneOf needs at least one schema"))
-        rendered := [String]{}
+        ^rendered: [String]{}
         loop item in items { rendered.push(openapi_schema(item, path, errors) ?? return Err(err)) }
         return Ok("{{\"oneOf\":[{rendered.join(",")}]}}")
     }
@@ -4209,13 +4213,13 @@ priv openapi_typed_schema: fn(kind: Dyn, fields: [{key: String, value: Dyn}], pa
     }
     if name != "object" -> return Err(openapi_fault("unsupported OpenAPI schema type `{name}`"))
     declared: openapi_field(fields, "properties") ?? return Err(err)
-    properties := if declared == {
+    ^properties: if declared == {
         .Object(members) -> members
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
             return Err(openapi_fault("OpenAPI object schema `properties` must be an object"))
         }
     }
-    required := [String]{}
+    ^required: [String]{}
     if openapi_member(fields, "required") == .Val(listed) {
         entries: if listed == {
             .Array(items) -> items
@@ -4238,14 +4242,14 @@ priv openapi_typed_schema: fn(kind: Dyn, fields: [{key: String, value: Dyn}], pa
         }
     }
     properties.sort_by(fn(left: {key: String, value: Dyn}, right: {key: String, value: Dyn}) { left.key <=> right.key })
-    rendered := [String]{}
-    required_names := [String]{}
+    ^rendered: [String]{}
+    ^required_names: [String]{}
     loop property in properties {
         schema: openapi_schema(property.value, "{path}.{property.key}", errors) ?? return Err(err)
         rendered.push("{app_json_string(property.key)}:{schema}")
         if required.contains(property.key) -> required_names.push(app_json_string(property.key))
     }
-    out := "{{\"type\":\"object\",\"properties\":{{{rendered.join(",")}}},\"additionalProperties\":{open}"
+    ^out: "{{\"type\":\"object\",\"properties\":{{{rendered.join(",")}}},\"additionalProperties\":{open}"
     if required_names.len() > 0 -> out = "{out},\"required\":[{required_names.join(",")}]"
     Ok("{out}}}")
 }
@@ -4256,7 +4260,7 @@ priv openapi_parameter: fn(value: Dyn) -> OpenAPIParameter OpenAPIError! {
     location: openapi_index(openapi_locations(), location_text) ?? return Err(openapi_fault("unsupported OpenAPI parameter location `{location_text}`"))
     name: openapi_text(fields, "name") ?? return Err(err)
     schema_value: openapi_field(fields, "schema") ?? return Err(err)
-    schema_errors := [String]{}
+    ^schema_errors: [String]{}
     schema: openapi_schema(schema_value, name, schema_errors) ?? return Err(err)
     required: openapi_bool(fields, "required") ?? return Err(err)
     catch_all: openapi_bool(fields, "catch_all") ?? return Err(err)
@@ -4268,7 +4272,7 @@ priv openapi_body: fn(value: Dyn) -> OpenAPIBody OpenAPIError! {
     required: openapi_bool(fields, "required") ?? return Err(err)
     content_type: openapi_text(fields, "content_type") ?? return Err(err)
     schema_value: openapi_field(fields, "schema") ?? return Err(err)
-    schema_errors := [String]{}
+    ^schema_errors: [String]{}
     schema: openapi_schema(schema_value, "requestBody", schema_errors) ?? return Err(err)
     Ok(OpenAPIBody{required: required, content_type: content_type, schema: schema, schema_errors: schema_errors})
 }
@@ -4280,8 +4284,8 @@ priv openapi_response: fn(value: Dyn) -> OpenAPIResponse OpenAPIError! {
         return Err(openapi_fault("OpenAPI response status is outside the u16 range"))
     }
     schema_value: openapi_field(fields, "schema") ?? return Err(err)
-    schema_errors := [String]{}
-    schema := String?{None}
+    ^schema_errors: [String]{}
+    ^schema: String?{None}
     if !(schema_value == Dyn.Null) {
         schema = Val(openapi_schema(schema_value, "response", schema_errors) ?? return Err(err))
     }
@@ -4298,7 +4302,7 @@ priv openapi_response: fn(value: Dyn) -> OpenAPIResponse OpenAPIError! {
 priv openapi_security: fn(value: Dyn) -> OpenAPISecurity OpenAPIError! {
     fields: openapi_object(value) ?? return Err(err)
     listed: openapi_array(fields, "scopes") ?? return Err(err)
-    scopes := [String]{}
+    ^scopes: [String]{}
     loop scope in listed {
         if scope == {
             .Text(text) -> scopes.push(text)
@@ -4324,20 +4328,20 @@ priv openapi_route_input: fn(contract: String, method: String, pattern: String) 
         return Err(openapi_fault("checked OpenAPI route path does not match its route pattern"))
     }
     parameter_values: openapi_array(fields, "parameters") ?? return Err(err)
-    parameters := [OpenAPIParameter]{}
+    ^parameters: [OpenAPIParameter]{}
     loop item in parameter_values { parameters.push(openapi_parameter(item) ?? return Err(err)) }
     response_values: openapi_array(fields, "responses") ?? return Err(err)
-    responses := [OpenAPIResponse]{}
+    ^responses: [OpenAPIResponse]{}
     loop item in response_values { responses.push(openapi_response(item) ?? return Err(err)) }
     if responses.len() == 0 {
         return Err(openapi_fault("checked OpenAPI route contract has no responses"))
     }
     security_values: openapi_array(fields, "security") ?? return Err(err)
-    security := [OpenAPISecurity]{}
+    ^security: [OpenAPISecurity]{}
     loop item in security_values { security.push(openapi_security(item) ?? return Err(err)) }
     operation_id: openapi_text(fields, "operation_id") ?? return Err(err)
     body_value: openapi_field(fields, "request_body") ?? return Err(err)
-    body := OpenAPIBody?{None}
+    ^body: OpenAPIBody?{None}
     if !(body_value == Dyn.Null) -> body = Val(openapi_body(body_value) ?? return Err(err))
     _: openapi_text(fields, "provenance") ?? return Err(err)
     summary: if openapi_optional_text(fields, "summary") == {
@@ -4350,7 +4354,7 @@ priv openapi_route_input: fn(contract: String, method: String, pattern: String) 
     if method != method_text || registered.key != parsed.key {
         return Err(openapi_fault("checked OpenAPI contract does not match route `{method} {pattern}`"))
     }
-    route := OpenAPIRoute{method: rank, token: token, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: operation_id, summary: summary, parameters: parameters, body: body, responses: responses, security: security}
+    ^route: OpenAPIRoute{method: rank, token: token, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: operation_id, summary: summary, parameters: parameters, body: body, responses: responses, security: security}
     if route.operation_id == "" {
         route.operation_id = openapi_operation_id(__openapi_operation_method(route), route.path)
     }
@@ -4361,13 +4365,13 @@ priv openapi_route_input: fn(contract: String, method: String, pattern: String) 
 // `jet-openapi-operation-v1:<method>\0<path>`, the method as
 // __openapi_operation_method names it.
 priv openapi_operation_id: fn(name: String, path: String) -> String Never! {
-    bytes := "jet-openapi-operation-v1:".bytes()
+    ^bytes: "jet-openapi-operation-v1:".bytes()
     loop byte in name.bytes() -> bytes.push(byte)
     bytes.push(U8{0})
     loop byte in path.bytes() -> bytes.push(byte)
-    hash := U64{14695981039346656037}
+    ^hash: U64{14695981039346656037}
     loop byte in bytes -> hash = wrapping((hash ~ U64{Int{byte}}) * U64{1099511628211})
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<16 { out.push(app_hex_digit(Int{(hash >> (60 - index * 4)) & U64{15}})) }
     "jet_{name}_{String.from_bytes(out) ?? ""}"
 }
@@ -4381,7 +4385,7 @@ priv openapi_compare_lists: fn(left: [String], right: [String]) -> Ordering Neve
 }
 
 priv openapi_canonical: fn(route: OpenAPIRoute) -> OpenAPIRoute Never! {
-    out := route
+    ^out: route
     out.parameters.sort_by(fn(left: OpenAPIParameter, right: OpenAPIParameter) {
         if left.location != right.location -> return left.location <=> right.location
         left.name <=> right.name
@@ -4390,9 +4394,9 @@ priv openapi_canonical: fn(route: OpenAPIRoute) -> OpenAPIRoute Never! {
         if left.status != right.status -> return left.status <=> right.status
         left.description <=> right.description
     })
-    security := [OpenAPISecurity]{}
+    ^security: [OpenAPISecurity]{}
     loop requirement in out.security {
-        scopes := requirement.scopes.copy()
+        ^scopes: requirement.scopes.copy()
         scopes.sort()
         security.push(OpenAPISecurity{scheme: requirement.scheme.copy(), scopes: scopes})
     }
@@ -4407,7 +4411,7 @@ priv openapi_canonical: fn(route: OpenAPIRoute) -> OpenAPIRoute Never! {
 // JetOpenApiDocument::with_openapi then ::json, with no security schemes: a mux
 // declares none.
 priv openapi_document: fn(inputs: [OpenAPIRoute], title: String, version: String) -> String OpenAPIError! {
-    routes := [OpenAPIRoute]{}
+    ^routes: [OpenAPIRoute]{}
     loop input in inputs -> routes.push(openapi_canonical(input))
     routes.sort_by(fn(left: OpenAPIRoute, right: OpenAPIRoute) {
         if left.path != right.path -> return left.path <=> right.path
@@ -4418,9 +4422,9 @@ priv openapi_document: fn(inputs: [OpenAPIRoute], title: String, version: String
     if title == "" || version == "" {
         return Err(openapi_fault("OpenAPI info title and version must not be empty"))
     }
-    errors := [String]{}
-    keys := [String]{}
-    operation_ids := [String]{}
+    ^errors: [String]{}
+    ^keys: [String]{}
+    ^operation_ids: [String]{}
     loop route in routes {
         if !route.path.starts_with("/") || route.path.contains("?") || route.path.contains("#") {
             errors.push("invalid OpenAPI route path `{route.path}` for canonical pattern `{route.path}`")
@@ -4435,9 +4439,9 @@ priv openapi_document: fn(inputs: [OpenAPIRoute], title: String, version: String
         if keys.contains(key) -> errors.push("duplicate OpenAPI route `{key}`") else {
             keys.push(key.copy())
         }
-        schema_errors := [String]{}
-        parameter_keys := [String]{}
-        declared := [String]{}
+        ^schema_errors: [String]{}
+        ^parameter_keys: [String]{}
+        ^declared: [String]{}
         loop parameter in route.parameters {
             location: openapi_locations()[parameter.location]
             parameter_key: "{location}:{parameter.name}"
@@ -4461,7 +4465,7 @@ priv openapi_document: fn(inputs: [OpenAPIRoute], title: String, version: String
                 schema_errors.push(openapi_problem(parameter.name, "path parameters are always required"))
             }
         }
-        template := route.names.copy()
+        ^template: route.names.copy()
         template.sort()
         loop name in template {
             if !declared.contains(name) {
@@ -4474,7 +4478,7 @@ priv openapi_document: fn(inputs: [OpenAPIRoute], title: String, version: String
                 schema_errors.push("requestBody: request body content type must not be empty")
             }
         }
-        statuses := [Int]{}
+        ^statuses: [Int]{}
         loop response in route.responses {
             if response.status < 100 || response.status > 599 {
                 errors.push("response status {response.status} is out of range")
@@ -4493,13 +4497,13 @@ priv openapi_document: fn(inputs: [OpenAPIRoute], title: String, version: String
         loop problem in schema_errors -> errors.push(problem.copy())
     }
     if errors.len() > 0 -> return Err(openapi_fault(errors.join("; ")))
-    paths := [String]{}
-    additional_operations := false
-    index := 0
+    ^paths: [String]{}
+    ^additional_operations: false
+    ^index: 0
     loop index < routes.len() {
         path: routes[index].path.copy()
-        methods := [String]{}
-        additional := [String]{}
+        ^methods: [String]{}
+        ^additional: [String]{}
         loop index < routes.len() && routes[index].path == path {
             if openapi_additional_method(routes[index]) {
                 // Keyed by the method as sent: CONNECT, or the custom token.
@@ -4521,10 +4525,10 @@ priv openapi_document: fn(inputs: [OpenAPIRoute], title: String, version: String
 
 // jet_openapi_route_json and jet_openapi_parameter_json.
 priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
-    out := "{{\"operationId\":{app_json_string(route.operation_id)}"
+    ^out: "{{\"operationId\":{app_json_string(route.operation_id)}"
     if route.summary == .Val(summary) -> out = "{out},\"summary\":{app_json_string(summary)}"
     if route.parameters.len() > 0 {
-        rendered := [String]{}
+        ^rendered: [String]{}
         loop parameter in route.parameters {
             required: parameter.required || parameter.location == 0
             rendered.push("{{\"name\":{app_json_string(parameter.name)},\"in\":{app_json_string(openapi_locations()[parameter.location])},\"required\":{required},\"schema\":{parameter.schema}}}")
@@ -4534,9 +4538,9 @@ priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
     if route.body == .Val(body) {
         out = "{out},\"requestBody\":{{\"required\":{body.required},\"content\":{{{app_json_string(body.content_type)}:{{\"schema\":{body.schema}}}}}}}"
     }
-    responses := [String]{}
+    ^responses: [String]{}
     loop response in route.responses {
-        rendered := "\"{response.status}\":{{\"description\":{app_json_string(response.description)}"
+        ^rendered: "\"{response.status}\":{{\"description\":{app_json_string(response.description)}"
         if response.schema == .Val(schema) {
             if response.content_type == .Val(content_type) {
                 rendered = "{rendered},\"content\":{{{app_json_string(content_type)}:{{\"schema\":{schema}}}}}"
@@ -4546,9 +4550,9 @@ priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
     }
     out = "{out},\"responses\":{{{responses.join(",")}}}"
     if route.security.len() > 0 {
-        rendered := [String]{}
+        ^rendered: [String]{}
         loop requirement in route.security {
-            scopes := [String]{}
+            ^scopes: [String]{}
             loop scope in requirement.scopes -> scopes.push(app_json_string(scope))
             rendered.push("{{{app_json_string(requirement.scheme)}:[{scopes.join(",")}]}}")
         }
@@ -4607,9 +4611,9 @@ priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
 // The status `hook` answers a delivery of `body` to `/hooks/{project}`
 // signed `sent` ("" sends no signature).
 priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String, body: String) -[Net, FS.Read]> Int Never! {
-    fields := web_http.headers()
+    ^fields: web_http.headers()
     if sent != "" -> fields = web_http.headers_set(fields, "X-Hub-Signature-256", sent)
-    request := web_http.server_request("POST", "/hooks/{project}", web_http.body_text(body), fields)
+    ^request: web_http.server_request("POST", "/hooks/{project}", web_http.body_text(body), fields)
     request.__params = [web_http.Header]{web_http.Header{name: "project", value: project}}
     app_webhook_response(hook, request).status
 }
@@ -4619,7 +4623,7 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
     devices: calls.PushDevices{
         store: "web.Test push devices",
         add: fn(device: calls.PushDevice) {
-            held := kept.guard_edit()
+            ^held: kept.guard_edit()
             held.value.push(device.copy())
             true
         },
@@ -4682,7 +4686,7 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
         web: Val(push_wire.PushWeb{contact: "mailto:push@example.com", key: push_wire.push_test_apns_key(), key_from: "the test key"}),
     }
     calls.push.configure(settings) ?? panic("configure: {err}")
-    rng := push_wire.push_test_rng()
+    ^rng: push_wire.push_test_rng()
     ua: push_wire.push_key_pair(push_wire.push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
     subscription: calls.PushDevice{account: "acct_ann", service: "web", token: "http://127.0.0.1:{web_port}/push/ann", key: core.encoding.base64.encode_url(ua.public), auth: "BTBZMqHH6r4Tts7J_aSIgg"}
     // ann has a device on each service; ben has an iPhone.
@@ -4761,9 +4765,9 @@ priv app_push_test_between: fn(seen: String, start: String, end: String) -> Stri
 // read at the second `at`, with the `Authorization` `authorization` ("" for
 // none).
 priv app_push_test_status: fn(authorization: String, at: Int, body: String) -[Net]> Int Never! {
-    fields := web_http.headers()
+    ^fields: web_http.headers()
     if authorization != "" -> fields = web_http.headers_set(fields, "authorization", authorization)
-    request := web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), fields)
+    ^request: web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), fields)
     request.__received = at
     app_push_register(request).status
 }
@@ -4804,14 +4808,14 @@ priv AppSessionTokens: struct {
 // What `table` answers a POST of `body` to the session route `step`,
 // received at the Unix second `at`.
 priv app_session_test: fn(table: HTTPMux, step: String, at: Int, body: String) -[Net, FS.Read]> HTTPResponse Never! {
-    request := web_http.server_request("POST", "/__jet/session/{step}", web_http.body_text(body), web_http.headers())
+    ^request: web_http.server_request("POST", "/__jet/session/{step}", web_http.body_text(body), web_http.headers())
     request.__received = at
     http_server.__dispatch(table, request)
 }
 
 #Test("trace settings follow the OpenTelemetry SDK variables") {
     assert(!(app_trace_settings([String:String]{}) == .Val(_)))
-    base := [String:String]{}
+    ^base: [String:String]{}
     base["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
     chosen: app_trace_settings(base) ?? panic("an endpoint names a collector")
     assert_eq(chosen.url, "http://127.0.0.1:4318/v1/traces")
@@ -4819,7 +4823,7 @@ priv app_session_test: fn(table: HTTPMux, step: String, at: Int, body: String) -
     assert_eq(chosen.delay_ms, 5000)
     assert_eq(chosen.max_queue, 2048)
     assert_eq(chosen.batch, 512)
-    tuned := base.copy()
+    ^tuned: base.copy()
     tuned["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "http://collector/traces"
     tuned["OTEL_SERVICE_NAME"] = "crew"
     tuned["OTEL_BSP_SCHEDULE_DELAY"] = "50"
@@ -4831,16 +4835,16 @@ priv app_session_test: fn(table: HTTPMux, step: String, at: Int, body: String) -
     assert_eq(traces.delay_ms, 50)
     assert_eq(traces.max_queue, 8)
     assert_eq(traces.batch, 8)
-    wrong := base.copy()
+    ^wrong: base.copy()
     wrong["OTEL_BSP_MAX_QUEUE_SIZE"] = "0"
     assert_eq((app_trace_settings(wrong) ?? panic("a bad size keeps its default")).max_queue, 2048)
-    off := base.copy()
+    ^off: base.copy()
     off["OTEL_SDK_DISABLED"] = "TRUE"
     assert(!(app_trace_settings(off) == .Val(_)))
-    other := base.copy()
+    ^other: base.copy()
     other["OTEL_TRACES_EXPORTER"] = "none"
     assert(!(app_trace_settings(other) == .Val(_)))
-    listed := base.copy()
+    ^listed: base.copy()
     listed["OTEL_TRACES_EXPORTER"] = "console, otlp"
     assert(app_trace_settings(listed) == .Val(_))
 }
@@ -4849,7 +4853,7 @@ priv app_session_test: fn(table: HTTPMux, step: String, at: Int, body: String) -
     taken: app_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
     assert_eq(taken.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736")
     assert_eq(taken.span_id, "00f067aa0ba902b7")
-    refused := [String]{
+    ^refused: [String]{
         "",
         "00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01",
         "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
@@ -4869,11 +4873,11 @@ priv app_session_test: fn(table: HTTPMux, step: String, at: Int, body: String) -
     // No collector named: nothing is installed, so a request runs no layer.
     assert(!(app_trace_settings([String:String]{}) == .Val(_)))
     assert_eq(http_server.mux_layers(table).len(), 0)
-    named := [String:String]{}
+    ^named: [String:String]{}
     named["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
     export: app_trace_install(served, app_trace_settings(named) ?? panic("an endpoint names a collector"), 1000)
     assert_eq(http_server.mux_layers(table).len(), 1)
-    fields := web_http.headers_set(web_http.headers(), "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+    ^fields: web_http.headers_set(web_http.headers(), "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
     fields = web_http.headers_set(fields, "x-request-id", "4bf92f3577b34da6a3ce929d0e0e4736")
     answer: http_server.__dispatch(table, web_http.server_request("POST", "/api/status", web_http.body_text("[]"), fields))
     assert_eq(answer.status, 200)
@@ -4887,13 +4891,13 @@ priv app_session_test: fn(table: HTTPMux, step: String, at: Int, body: String) -
     assert_eq(spans[0].span_id.len(), 16)
     assert_eq(spans[0].name, "POST /api/status")
     assert(spans[0].start_ns >= 1000 && spans[0].end_ns >= spans[0].start_ns)
-    pairs := [String]{}
+    ^pairs: [String]{}
     loop field in spans[0].attributes -> pairs.push("{field.key}={field.value}")
     assert_eq(pairs.join(" "), "jet.request_id=4bf92f3577b34da6a3ce929d0e0e4736 http.request.method=POST http.route=/api/status http.response.status_code=200 jet.method=status")
 }
 
 #Test("a full trace queue drops its oldest span and counts the loss") {
-    named := [String:String]{}
+    ^named: [String:String]{}
     named["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
     named["OTEL_BSP_MAX_QUEUE_SIZE"] = "2"
     export: app_trace_install(app(), app_trace_settings(named) ?? panic("an endpoint names a collector"), 0)
@@ -4914,7 +4918,7 @@ priv app_trace_test_span: fn(name: String) -> TraceSpan Never! {
 
 // The names of the spans one take gives, in order.
 priv app_trace_test_names: fn(export: AppTraceExport) -> String Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop span in app_trace_take(export) -> names.push(span.name.copy())
     names.join(",")
 }

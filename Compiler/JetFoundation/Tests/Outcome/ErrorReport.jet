@@ -121,7 +121,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
 }
 
 #Test("error report typed tree decode preserves all carrier facts") {
-    root := [String:Dyn]{"schema": Dyn.Text("jet.err/v1"), "message": Dyn.Text("typed"), "code": Dyn.Text("E3502"), "cause": Dyn.Array([Dyn]{outcome_test_tree(), outcome_test_tree()}), "typed_identity": Dyn.Text("BuildError.DuplicateTargetName")}
+    ^root: [String:Dyn]{"schema": Dyn.Text("jet.err/v1"), "message": Dyn.Text("typed"), "code": Dyn.Text("E3502"), "cause": Dyn.Array([Dyn]{outcome_test_tree(), outcome_test_tree()}), "typed_identity": Dyn.Text("BuildError.DuplicateTargetName")}
     frame: Dyn.Object([String:Dyn]{"fn_name": Dyn.Text("build"), "file": Dyn.Text("package.jet"), "line": Dyn.Int(4294967295), "column": Dyn.Int(4294967295), "note": Dyn.Text("origin"), "hops": Dyn.Int(4294967295)})
     root["origin"] = frame
     root["source_journey"] = Dyn.Array([Dyn]{frame, frame})
@@ -151,7 +151,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     changes: [String]{"message", "code", "cause", "typed_identity", "context_frames", "origin", "source_journey", "conversion_history", "details"}
     expected: [String]{"error report message is not text", "error report code is not text", "error report cause is not null, an object, or an array", "error report typed_identity is not text", "error report context_frames is not an array", "error report journey frame is not an object", "error report source_journey is not an array", "error report conversion_history is not an array", "error report details is not an object"}
     loop index in 0..<changes.len() {
-        fields := base.copy()
+        ^fields: base.copy()
         fields[changes[index]] = Dyn.Int(1)
         outcome_test_decode_refusal(Dyn.Object(fields), expected[index])
     }
@@ -190,14 +190,14 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
 }
 
 #Test("error report protocol nested causes raw details and max u32 roundtrip") {
-    report := outcome_test_report()
+    ^report: outcome_test_report()
     report.causes = [JetErrorReport]{outcome_test_report(), JetErrorReport{message: "second"}}
     report.details = Val(JetErrorDetails{variant: "Typed", fields: [JetErrorField]{JetErrorField{name: "ordered", value: "{{\"z\":null,\"a\":[false,1.25,9223372036854775808]}}"}}, source_span: Val(JetErrorSpan{start: 4294967295, end: 0})})
     report.origin = Val(JetErrorJourneyFrame{fn_name: "max", file: "max.jet", line: 4294967295, column: 4294967295, note: "note", hops: 4294967295})
     wire: report.to_json()
     restored: JetErrorReport.from_json(wire) ?? panic("rich canonical report rejected")
     assert(restored == report)
-    fields := [String:Dyn]{"variant": Dyn.Text("Typed"), "fields": Dyn.Object([String:Dyn]{}), "source_span": Dyn.Object([String:Dyn]{"start": Dyn.Int(4294967296), "end": Dyn.Int(0)})}
+    ^fields: [String:Dyn]{"variant": Dyn.Text("Typed"), "fields": Dyn.Object([String:Dyn]{}), "source_span": Dyn.Object([String:Dyn]{"start": Dyn.Int(4294967296), "end": Dyn.Int(0)})}
     message: if jet_error_details_from_json(Dyn.Object(fields)) == {
         .Ok(_) -> panic("u32 span overflow accepted")
         .Err(error) -> error.message
@@ -219,7 +219,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     keys: [String]{"fn_name", "file", "line", "column", "note", "hops"}
     reasons: [String]{"journey function is not text", "journey file is not text", "journey line is not an integer", "journey column is not an integer", "journey note is not text", "journey hops is not an integer"}
     loop index in 0..<keys.len() {
-        fields := journey.copy()
+        ^fields: journey.copy()
         fields[keys[index]] = Dyn.Null
         reason: if jet_error_journey_from_json(Dyn.Object(fields)) == {
             .Ok(_) -> panic("bad journey accepted")
@@ -255,13 +255,13 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
 }
 
 #Test("error report protocol depth64 strict syntax and no protocol byte ceiling") {
-    nested := [U8]{}
+    ^nested: [U8]{}
     loop _ in 0..<65 -> nested.push(U8{91})
     nested.push(U8{48})
     loop _ in 0..<65 -> nested.push(U8{93})
     hostile: String.from_bytes(nested) ?? panic("bad depth fixture")
     outcome_test_wire_refusal(hostile, "invalid error report: JSON value is nested too deeply")
-    text := [U8]{}
+    ^text: [U8]{}
     loop _ in 0..<1048577 -> text.push(U8{120})
     message: String.from_bytes(text) ?? panic("bad long fixture")
     report: JetErrorReport{message: message}

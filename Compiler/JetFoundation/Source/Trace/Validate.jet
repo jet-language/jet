@@ -2,7 +2,7 @@
 jettrace_keys_match: fn(fields: View<CanonicalJSONField>, keys: [String]) -> Bool Never! {
     if fields.len() != keys.len() -> return false
     loop key in keys {
-        found := false
+        ^found: false
         loop field in fields {
             if field.key == key -> found = true
         }
@@ -70,11 +70,11 @@ jettrace_unsigned: fn(value: CanonicalJSON, label: String) -> U64 JetTraceError!
     text: jettrace_integer_text(value, label)
     raw: text.bytes()
     if raw.len() == 0 -> return Err(jettrace_error("{label} is not an unsigned integer"))
-    at := 0
+    ^at: 0
     // A leading plus is accepted here, although canonical JSON does not take it.
     if raw[0] == (U8{43}) -> at = 1
     if at == raw.len() -> return Err(jettrace_error("{label} is not an unsigned integer"))
-    result := U64{0}
+    ^result: U64{0}
     loop at < raw.len() {
         byte: Int{raw[at]}
         if byte < 48 || byte > 57 {
@@ -147,7 +147,7 @@ JetTraceCaptureLimits: struct {
 // Main greenfield ruling: schemas 1–4 are retired; exactly schema 5 is readable.
 jettrace_validate_capture_policy: fn(value: CanonicalJSON) -> JetTraceCaptureLimits JetTraceError! {
     items: jettrace_object_view(value, "capture_policy")
-    schema := CanonicalJSON.Null
+    ^schema: CanonicalJSON.Null
     loop field in items {
         if field.key == "schema" -> schema = field.value.copy()
     }
@@ -161,7 +161,7 @@ jettrace_validate_capture_policy: fn(value: CanonicalJSON) -> JetTraceCaptureLim
     }
     fields: jettrace_object_keys(value, "capture_policy", [String]{"allowlist", "browser_row_limit", "browser_rows_truncated", "default_exclusions", "io_row_limit", "io_rows_truncated", "native_row_limit", "native_rows_truncated", "schema", "span_row_limit", "span_rows_truncated", "task_row_limit", "task_rows_truncated"})
     exclusions: jettrace_array(fields[jettrace_get(fields, "default_exclusions")].value, "capture_policy.default_exclusions")
-    expected := [CanonicalJSON]{}
+    ^expected: [CanonicalJSON]{}
     loop item in DEFAULT_EXCLUSIONS -> expected.push(.String(item.copy()))
     if exclusions.len() != expected.len() {
         return Err(jettrace_error("capture_policy.default_exclusions does not match the default exclusions"))
@@ -191,7 +191,7 @@ jettrace_validate_capture_policy: fn(value: CanonicalJSON) -> JetTraceCaptureLim
     }
     _: jettrace_bool(fields[jettrace_get(fields, "span_rows_truncated")].value, "capture_policy.span_rows_truncated")
     allowlist: jettrace_array(fields[jettrace_get(fields, "allowlist")].value, "capture_policy.allowlist")
-    prior := String?{None}
+    ^prior: String?{None}
     loop item in allowlist {
         text: jettrace_text(item, "capture_policy.allowlist item")
         if prior == {
@@ -301,21 +301,21 @@ jettrace_validate_game_draw_events: fn(value: CanonicalJSON) JetTraceError! {
 jettrace_validate_game_identity: fn(frames_value: CanonicalJSON, draws_value: CanonicalJSON) JetTraceError! {
     frames: jettrace_array(frames_value, "content.game_frames")
     keys: [String]{"scene", "build", "revision", "trace_id"}
-    identities := [U64:String]{}
+    ^identities: [U64:String]{}
     loop index in 0..<frames.len() {
         fields: jettrace_object_view(frames[index], "content.game_frames[{index}]")
         frame_id: jettrace_unsigned(fields[jettrace_get(fields, "frame_id")].value, "content.game_frames[{index}].frame_id")
         if identities.has_key(frame_id) {
             return Err(jettrace_error("content.game_frames[{index}].frame_id {frame_id} repeats a frame"))
         }
-        identity := "{jettrace_unsigned(fields[jettrace_get(fields, "frame_index")].value, "content.game_frames[{index}].frame_index")}"
+        ^identity: "{jettrace_unsigned(fields[jettrace_get(fields, "frame_index")].value, "content.game_frames[{index}].frame_index")}"
         loop key in keys {
             identity = "{identity}\n{jettrace_text(fields[jettrace_get(fields, key)].value, "content.game_frames[{index}].{key}")}"
         }
         identities[frame_id] = identity
     }
     draws: jettrace_array(draws_value, "content.game_draw_events")
-    events := [U64:Bool]{}
+    ^events: [U64:Bool]{}
     loop index in 0..<draws.len() {
         label: "content.game_draw_events[{index}]"
         fields: jettrace_object_view(draws[index], label)
@@ -326,7 +326,7 @@ jettrace_validate_game_identity: fn(frames_value: CanonicalJSON, draws_value: Ca
         events[event_id] = true
         frame_id: jettrace_unsigned(fields[jettrace_get(fields, "frame_id")].value, "{label}.frame_id")
         frame: identities.get(frame_id) ?? return Err(jettrace_error("{label}.frame_id {frame_id} names no captured frame"))
-        identity := "{jettrace_unsigned(fields[jettrace_get(fields, "frame_index")].value, "{label}.frame_index")}"
+        ^identity: "{jettrace_unsigned(fields[jettrace_get(fields, "frame_index")].value, "{label}.frame_index")}"
         loop key in keys {
             identity = "{identity}\n{jettrace_text(fields[jettrace_get(fields, key)].value, "{label}.{key}")}"
         }
@@ -419,7 +419,7 @@ trace_receipt_section_from_json_at: fn(value: CanonicalJSON, label: String) -> T
 
 jettrace_validate_receipt_sections: fn(value: CanonicalJSON) JetTraceError! {
     items: jettrace_array(value, "content.receipt_sections")
-    prior := String?{None}
+    ^prior: String?{None}
     loop index in 0..<items.len() {
         label: "content.receipt_sections[{index}]"
         name: jettrace_validate_receipt_section(items[index], label)
@@ -454,8 +454,8 @@ jettrace_validate_source_identity: fn(value: CanonicalJSON) JetTraceError! {
             return Err(jettrace_error("{label}.sha256 is not lowercase Hex64"))
         }
         symbols: jettrace_array(fields[jettrace_get(fields, "symbols")].value, "{label}.symbols")
-        prior_name := ""
-        prior_kind := ""
+        ^prior_name: ""
+        ^prior_kind: ""
         loop j in 0..<symbols.len() {
             slabel: "{label}.symbols[{j}]"
             sfields: jettrace_object_keys(symbols[j], slabel, [String]{"kind", "name"})
@@ -473,7 +473,7 @@ jettrace_validate_source_identity: fn(value: CanonicalJSON) JetTraceError! {
 
 jettrace_validate_source_maps: fn(value: CanonicalJSON) JetTraceError! {
     items: jettrace_array(value, "content.source_maps")
-    prior := String?{None}
+    ^prior: String?{None}
     loop index in 0..<items.len() {
         label: "content.source_maps[{index}]"
         fields: jettrace_object_keys(items[index], label, [String]{"kind", "map", "path", "sha256"})
@@ -514,7 +514,7 @@ jettrace_validate_source_maps: fn(value: CanonicalJSON) JetTraceError! {
 jettrace_validate_toolchain: fn(value: CanonicalJSON) JetTraceError! {
     fields: jettrace_object_keys(value, "toolchain", [String]{"compiler_build_id", "digest", "jet_version", "runner_id", "stdlib_id"})
     keys: [String]{"compiler_build_id", "jet_version", "runner_id", "stdlib_id"}
-    body_fields := [CanonicalJSONField]{}
+    ^body_fields: [CanonicalJSONField]{}
     loop key in keys {
         text: jettrace_text(fields[jettrace_get(fields, key)].value, "toolchain.{key}")
         body_fields.push(jettrace_field(key.copy(), .String(text.move())))

@@ -20,7 +20,7 @@ publication_sbom_test_package: fn(name: String, version: String, fingerprint: St
 }
 
 publication_sbom_test_lock: fn(packages: [LockedPackage]) -> LockFile Never! {
-    lock := LockFile.empty()
+    ^lock: LockFile.empty()
     lock.packages = packages
     lock
 }
@@ -97,7 +97,7 @@ publication_sbom_test_cdx: fn(digest: String, root_name: String, root_version: S
 
 #Test("publication SBOM sbom_emits_foreign_rust_bridge_packages exact bytes") {
     digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    package := publication_sbom_test_package("base64", "0.22.1", "sha256-aabb")
+    ^package: publication_sbom_test_package("base64", "0.22.1", "sha256-aabb")
     package.content_hash = Val("sha256-{digest}")
     package.source = LockSource.Foreign{language: "rust", reference: "base64@0.22.1", output: "sha256-bridge"}
     lock: publication_sbom_test_lock([LockedPackage]{package})
@@ -117,7 +117,7 @@ publication_sbom_test_cdx: fn(digest: String, root_name: String, root_version: S
 #Test("publication SBOM escaped JSON and raw SPDX exact bytes") {
     name: "é\"\\\n\t"
     version: "1\"\\\n"
-    package := publication_sbom_test_package(name, version, "sha256-old")
+    ^package: publication_sbom_test_package(name, version, "sha256-old")
     package.content_hash = Val("sha256-h\"\\\n\t")
     lock: publication_sbom_test_lock([LockedPackage]{package})
     component: publication_sbom_test_component(0, name, version, "h\"\\\n\t")
@@ -138,7 +138,7 @@ publication_sbom_test_cdx: fn(digest: String, root_name: String, root_version: S
 
 #Test("publication SBOM content hash refusal precedence") {
     loop content in ([String?]{None, Val("sha256-new"), Val("opaque"), Val("")}) {
-        package := publication_sbom_test_package("root", "1", "sha256-old")
+        ^package: publication_sbom_test_package("root", "1", "sha256-old")
         package.content_hash = content
         lock: publication_sbom_test_lock([LockedPackage]{package})
         expected: if content == {
@@ -157,7 +157,7 @@ publication_sbom_test_cdx: fn(digest: String, root_name: String, root_version: S
 }
 
 #Test("publication SBOM first root match and original package order") {
-    first := publication_sbom_test_package("root", "first", "sha256-first")
+    ^first: publication_sbom_test_package("root", "first", "sha256-first")
     first.content_hash = Val("not-sha")
     second: publication_sbom_test_package("root", "second", "sha256-second")
     lock: publication_sbom_test_lock([LockedPackage]{first, second})
@@ -172,7 +172,7 @@ publication_sbom_test_cdx: fn(digest: String, root_name: String, root_version: S
 
 #Test("publication SBOM lock identity changes and deterministic fixed timestamps") {
     before: publication_sbom_test_lock([LockedPackage]{publication_sbom_test_package("logger", "1.2.3", "sha256-abcd")})
-    after := before
+    ^after: before
     after.root_dependencies = [String]{"logger"}
     assert(publication_lock_digest(before) != publication_lock_digest(after))
     assert(publication_emit_spdx(before, "app", "1") != publication_emit_spdx(after, "app", "1"))

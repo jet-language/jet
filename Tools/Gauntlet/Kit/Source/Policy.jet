@@ -186,7 +186,7 @@ strict_performance_policy_issues: fn(matrix: Dyn) -> [String] {
     cells: items_at(matrix, "cells")
     matrix_ids: cells.map(fn(cell) { value_at(cell, "id") ?? Dyn.Null })
     same: fn(name: String) -> Bool { json.stringify(value_at(policy, name) ?? Dyn.Null) == json.stringify(value_at(ratified, name) ?? Dyn.Null) }
-    issues := [String]{}
+    ^issues: [String]{}
     if !same("schema") {
         issues.push("matrix strict performance policy schema is {json.stringify(value_at(policy, "schema") ?? Dyn.Null)}")
     }
@@ -208,7 +208,7 @@ strict_performance_policy_issues: fn(matrix: Dyn) -> [String] {
             issues.push("matrix strict performance policy {category} are missing")
             next
         }
-        ids := [String]{}
+        ^ids: [String]{}
         loop area in items_at(areas, "") {
             id: text_at(area, "id") ?? ""
             if !(area == .Object(_)) || id == "" {
@@ -278,8 +278,8 @@ ceiling_reference_issues: fn(matrix: Dyn, references: Dyn, repo: String) -[FS]> 
     }
     matrix_ids: items_at(matrix, "cells").map(fn(cell) { value_at(cell, "id") ?? Dyn.Null })
     reference_dir: files.dirname(files.join(repo, CEILING_REFERENCES))
-    issues := [String]{}
-    names := [String]{}
+    ^issues: [String]{}
+    ^names: [String]{}
     loop reference in items_at(references, "") {
         name: text_at(reference, "name") ?? ""
         if name == "" {
@@ -314,7 +314,7 @@ ceiling_reference_issues: fn(matrix: Dyn, references: Dyn, repo: String) -[FS]> 
 matrix_peer_languages: fn(matrix: Dyn, cell: Dyn?) -> [String] {
     rails: member(matrix, "rails") ?? Dyn.Null
     incumbents: member(rails, "incumbents") ?? Dyn.Null
-    named := texts_at(rails, "always").concat(texts_at(rails, "perf"))
+    ^named: texts_at(rails, "always").concat(texts_at(rails, "perf"))
     if cell == {
         .Val(one) -> {
             domain: text_at(one, "domain") ?? ""
@@ -336,7 +336,7 @@ matrix_peer_languages: fn(matrix: Dyn, cell: Dyn?) -> [String] {
         None -> true
     }
     run: if run_tier -> texts_at(rails, "run") else -> [String]{}
-    languages := combinatorics.unique<String>((if peers.len() > 0 -> peers else -> ["rust"]).concat(run))
+    ^languages: combinatorics.unique<String>((if peers.len() > 0 -> peers else -> ["rust"]).concat(run))
     languages.sort()
     languages
 }
@@ -405,12 +405,12 @@ ratio_verdict: fn(ratio: Float?) -> String? {
 #Test("the ratified policy passes, and each departure from it is an issue once") {
     ids: ["numerics.float-kernel", "numerics.fft", "numerics.tensor-map", "numerics.int-kernel", "text.kernel", "text.regex-kernel", "text.regex-find-all-large", "text.report-cli", "text.script", "files.script", "files.orchestration", "concurrency.app", "concurrency.service", "netserv.client", "netserv.service", "webfront.widget", "webfront.app", "cli.app", "cli.hello", "formats.csv-cli", "numerics.script", "numerics.notebook", "embedded.kernel", "embedded.data"]
     cells: Dyn.Array(ids.map(fn(id) { Dyn{[String:Dyn]{"id": id}} }))
-    matrix := Dyn.object()
+    ^matrix: Dyn.object()
     matrix["cells"] = cells
     matrix["strict_performance_policy"] = strict_performance_policy()
     assert_eq(strict_performance_policy_issues(matrix), [String]{})
-    tampered := matrix.copy()
-    policy := strict_performance_policy()
+    ^tampered: matrix.copy()
+    ^policy: strict_performance_policy()
     policy["version"] = 2
     policy["text"] = "shorter"
     tampered["strict_performance_policy"] = policy

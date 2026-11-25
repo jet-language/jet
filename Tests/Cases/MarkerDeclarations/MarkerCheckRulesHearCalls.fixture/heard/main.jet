@@ -34,7 +34,9 @@ LongLog: struct {
 
         what: fn(self) -> String { "this `log` call writes a long line" }
 
-        why: fn(self) -> String { "the logging rule keeps each message under twenty bytes of source" }
+        why: fn(self) -> String {
+            "the logging rule keeps each message under twenty bytes of source"
+        }
 
         fix: fn(self) -> String { "shorten the message" }
     }
@@ -46,7 +48,9 @@ Logged: struct {
 
         check: fn(self, call: CompilerCall) {
             if call.args.len() == 0 -> reject(EmptyLog{}, at: call.name)
-            if call.args[0].type.name != "String" -> reject(NotText{shown: call.args[0].type.name}, at: call.args[0])
+            if call.args[0].type.name != "String" {
+                reject(NotText{shown: call.args[0].type.name}, at: call.args[0])
+            }
             if call.args[0].span.end - call.args[0].span.start > 20 -> reject(LongLog{})
         }
     }

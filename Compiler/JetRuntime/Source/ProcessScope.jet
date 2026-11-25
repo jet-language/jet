@@ -22,13 +22,13 @@ PROCESS_SCOPE_DRAIN_NS: I64{1000000}
 // A cgroup interface file (or /proc file) as an owned text, or 0.
 process_scope_read: fn(path: I64) -> I64 {
     name: fd_c_path(path)
-    file := I64{-4}
+    ^file: I64{-4}
     loop file == (I64{-4}) -> file = host_call(I64{2}, name, PROCESS_SCOPE_READ, I64{0})
     fd_c_path_drop(name, path)
     if (file < I64{0}) { return I64{0} }
     scratch: jet_rt_alloc(I64{4096}, I64{1})
     text: jet_rt_string_builder_new()
-    good := true
+    ^good: true
     loop {
         count: host_call(I64{0}, file, scratch, I64{4096})
         if (count == I64{-4}) { next }
@@ -50,12 +50,12 @@ process_scope_read: fn(path: I64) -> I64 {
 process_scope_write: fn(dir: I64, file: I64, value: I64) -> I64 {
     path: scheduler_text_concat(dir, file)
     name: fd_c_path(path)
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, PROCESS_SCOPE_WRITE, I64{0})
     fd_c_path_drop(name, path)
     jet_rt_string_drop(path)
     if (fd < I64{0}) { return fd }
-    written := I64{-4}
+    ^written: I64{-4}
     loop written == (I64{-4}) {
         written = host_call(I64{1}, fd, rt_text_data(value), rt_text_len(value))
     }
@@ -79,8 +79,8 @@ process_scope_mkdir: fn(dir: I64, leaf: I64) -> I64 {
 process_scope_parent: fn() -> I64 {
     rows: process_scope_read(rt_static_text("/proc/self/cgroup"))
     if (rows == I64{0}) { return I64{0} }
-    at := I64{0}
-    found := I64{-1}
+    ^at: I64{0}
+    ^found: I64{-1}
     loop at < rt_text_len(rows) {
         if (rt_text_find(rows, rt_static_text("0::"), at, false) == at) {
             found = at + I64{3}
@@ -94,7 +94,7 @@ process_scope_parent: fn() -> I64 {
         jet_rt_string_drop(rows)
         return I64{0}
     }
-    end := rt_text_find(rows, rt_static_text("\n"), found, false)
+    ^end: rt_text_find(rows, rt_static_text("\n"), found, false)
     if (end < I64{0}) { end = rt_text_len(rows) }
     // The parent: everything before the path's last `/`.
     slash: rt_text_find_byte(rt_text_data(rows), end, I64{47}, found, true)
@@ -136,8 +136,8 @@ process_scope_open: fn(bytes: I64, procs: I64, failed: I64) -> I64 {
     limit: jet_rt_string_builder_new()
     rt_text_push_number(limit, bytes)
     max: jet_rt_string_builder_finish(limit)
-    step := rt_static_text("/memory.max")
-    result := process_scope_write(dir, step, max)
+    ^step: rt_static_text("/memory.max")
+    ^result: process_scope_write(dir, step, max)
     jet_rt_string_drop(max)
     // No swap file to cap means no swap accounting: nothing to turn off.
     if (result == I64{0}) {
@@ -161,7 +161,7 @@ process_scope_open: fn(bytes: I64, procs: I64, failed: I64) -> I64 {
         step = rt_static_text("/main/cgroup.procs")
         path: scheduler_text_concat(dir, step)
         c_path: fd_c_path(path)
-        fd := I64{-4}
+        ^fd: I64{-4}
         loop fd == (I64{-4}) -> fd = host_call(I64{2}, c_path, PROCESS_SCOPE_WRITE, I64{0})
         fd_c_path_drop(c_path, path)
         jet_rt_string_drop(path)
@@ -182,12 +182,12 @@ process_scope_open: fn(bytes: I64, procs: I64, failed: I64) -> I64 {
 // interface files go with their directory. 0, or -errno (EBUSY while a
 // process is still in it).
 process_scope_remove_tree: fn(parent: I64, name: I64) -> I64 {
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{257}, parent, name, FILES_TREE_OPEN)
     if (fd == I64{-2}) { return I64{0} }
     if (fd < I64{0}) { return fd }
     buffer: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
-    failure := I64{0}
+    ^failure: I64{0}
     loop failure == (I64{0}) {
         count: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
         if (count == I64{-4}) { next }
@@ -196,7 +196,7 @@ process_scope_remove_tree: fn(parent: I64, name: I64) -> I64 {
             failure = count
             break
         }
-        at := I64{0}
+        ^at: I64{0}
         loop at < count {
             record: wrapping(buffer + at)
             at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
@@ -220,9 +220,9 @@ process_scope_remove_tree: fn(parent: I64, name: I64) -> I64 {
 // Kills every process left in the scope, waits for them to exit, and removes
 // the scope with every cgroup a nested Jet process left inside it.
 process_scope_remove: fn(dir: I64) {
-    _ := process_scope_write(dir, rt_static_text("/cgroup.kill"), rt_static_text("1"))
+    ^_: process_scope_write(dir, rt_static_text("/cgroup.kill"), rt_static_text("1"))
     name: fd_c_path(dir)
-    tries := I64{0}
+    ^tries: I64{0}
     loop {
         removed: process_scope_remove_tree(FILES_AT_FDCWD, name)
         if (removed != I64{-16} || tries >= PROCESS_SCOPE_DRAIN_TRIES) { break }
@@ -238,8 +238,8 @@ process_scope_peak: fn(dir: I64) -> I64 {
     text: process_scope_read(path)
     jet_rt_string_drop(path)
     if (text == I64{0}) { return I64{-1} }
-    value := I64{0}
-    digits := I64{0}
+    ^value: I64{0}
+    ^digits: I64{0}
     loop digits < rt_text_len(text) {
         byte: rt_text_byte(wrapping(rt_text_data(text) + digits))
         if (byte < I64{48} || byte > I64{57}) { break }

@@ -55,7 +55,7 @@ sema_call_compute_tensor_window: fn(base: Expr, tensor: TExpr, range: TExpr, spa
         check.diagnostics.push(sema_error("E0003", span, "a Tensor window needs the core.compute source module", "a Tensor range selects first-axis slabs through core.compute", "load the registered core.compute source module"))
         return None
     }
-    owner := "Tensor"
+    ^owner: "Tensor"
     if sema_expr_unwrap_tag(tensor.ty) == .Named(name) -> owner = name
     data_ty: core_record_field(owner, "data") ?? Type.List{element: Type.Float}
     data: sema_tree_node(data_ty, TExprKind.Field{receiver: tensor.copy(), field: TFieldRef{owner: None, name: "data", ty: data_ty, boxed: false}}, span)
@@ -148,19 +148,19 @@ sema_call_compute_literal_int: fn(expression: Expr) -> Int? {
 // The Tensor result type of `compute.vec` (member "vec") or `compute.matrix`
 // (any other member: sema_call_try_compute_alias admits only these two).
 sema_call_compute_alias_type: fn(member: String, args: [CallArg]) -> Type {
-    error := Type.Named{name: "ComputeError"}
+    ^error: Type.Named{name: "ComputeError"}
     if member == "vec" {
-        length := Int?{None}
+        ^length: Int?{None}
         if args.len() > 0 -> length = sema_call_compute_literal_int(args[0].expr)
-        output := Type.Apply{name: "Vec", args: [Type]{Type.Int}}
+        ^output: Type.Apply{name: "Vec", args: [Type]{Type.Int}}
         if length == .Val(value) && value >= 0 -> output = compute_shape_type("Vec", [Int]{value})
         return Type.Result{ok: output, err: error}
     }
-    rows := Int?{None}
-    cols := Int?{None}
+    ^rows: Int?{None}
+    ^cols: Int?{None}
     if args.len() > 0 -> rows = sema_call_compute_literal_int(args[0].expr)
     if args.len() > 1 -> cols = sema_call_compute_literal_int(args[1].expr)
-    output := Type.Apply{name: "Matrix", args: [Type]{Type.Int, Type.Int}}
+    ^output: Type.Apply{name: "Matrix", args: [Type]{Type.Int, Type.Int}}
     if rows == .Val(row) && cols == .Val(col) && row >= 0 && col >= 0 {
         output = compute_shape_type("Matrix", [Int]{row, col})
     }
@@ -188,16 +188,16 @@ sema_call_try_compute_alias: fn(module_name: String, member: String, target: Sem
     if !sema_call_compute_explicit_type_args(member, type_args, 0, span, check.diagnostics) {
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
-    arity := if member == "vec" -> 2 else -> 3
+    ^arity: if member == "vec" -> 2 else -> 3
     if args.len() != arity {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
         sema_call_compute_arity_error(member, arity, args.len(), span, check.diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     check.scopes.ownership_call_depth += 1
-    value := sema_call_core_check_source_owned(target, "core.compute.{member}", [Type]{}, args, span, None, check)
+    ^value: sema_call_core_check_source_owned(target, "core.compute.{member}", [Type]{}, args, span, None, check)
     check.scopes.ownership_call_depth -= 1
-    checked := value ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    ^checked: value ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     checked.ty = sema_call_compute_alias_type(member, args)
     checked.type_id = type_none()
     return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, check.environment.*, check.program.*, check.diagnostics)}
@@ -214,7 +214,7 @@ sema_call_compute_wrt_name: fn(item: Expr) -> String? {
 sema_call_compute_wrt_names: fn(expression: Expr) -> [String]? {
     if expression == {
         .ListLit(items, _, _) -> {
-            names := [String]{}
+            ^names: [String]{}
             loop item in items {
                 name: sema_call_compute_wrt_name(item) ?? return None
                 names.push(name)
@@ -245,7 +245,7 @@ sema_call_compute_function_names: fn(expression: Expr, ty: Type, scopes: SemaSco
     if expression == {
         .Paren(inner, _, _) -> return sema_call_compute_function_names(inner, ty, scopes)
         .Lambda(lambda, _) -> {
-            params := [String]{}
+            ^params: [String]{}
             loop parameter in lambda.params -> params.push(parameter.name)
             if ty == {
                 .Fn(types, _, _, _, _, _) -> {
@@ -302,23 +302,23 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         sema_call_compute_arity_error(member, 1, 0, span, check.diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
-    value_indexes := [Int]{}
-    wrt_expression := Expr?{None}
+    ^value_indexes: [Int]{}
+    ^wrt_expression: Expr?{None}
     loop (index, argument) in args {
         if index == 0 -> next
         if argument.label == .Val(label) && label.name == "wrt" {
             wrt_expression = Val(argument.expr)
         } else { value_indexes.push(index) }
     }
-    direct := value_indexes.len() > 0
+    ^direct: value_indexes.len() > 0
     if member == "jvp" && direct {
-        _ := sema_check_expression_with_lambda_escapes(args[0].expr, None, check, Val(false))
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
+        ^_: sema_check_expression_with_lambda_escapes(args[0].expr, None, check, Val(false))
+        loop index in value_indexes -> ^_: sema_check_expression(args[index].expr, None, check)
         check.diagnostics.push(sema_error("E0112", span, "`compute.jvp` is a function transform, not a direct call", "the ratified JVP surface returns a callable that accepts primal and tangent values", "bind `d_f: compute.jvp(f)`, then call `d_f(primal..., tangent...)`"))
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
-    valid := true
-    wrt_names := [String]?{None}
+    ^valid: true
+    ^wrt_names: [String]?{None}
     if wrt_expression == .Val(expression) -> wrt_names = sema_call_compute_wrt_names(expression)
     if wrt_expression != None && member != "gradient" && member != "value_and_gradient" {
         check.diagnostics.push(sema_error("E0112", span, "`wrt:` is not supported by `compute.{member}`", "`wrt:` selects named gradients on `compute.gradient` and `compute.value_and_gradient`", "remove `wrt:` and provide the full VJP or JVP inputs"))
@@ -329,23 +329,23 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         valid = false
     }
     function_value: sema_check_expression_with_lambda_escapes(args[0].expr, None, check, Val(!direct)) ?? {
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
+        loop index in value_indexes -> ^_: sema_check_expression(args[index].expr, None, check)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
-    is_function := if function_value.ty == {
+    ^is_function: if function_value.ty == {
         .Fn(_, _, _, _, _, _) -> true
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !is_function {
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` expects a function value", "autodiff transforms differentiate a function over Tensor arguments", "bind a Tensor function before passing it to the transform"))
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
+        loop index in value_indexes -> ^_: sema_check_expression(args[index].expr, None, check)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
-    params := [Type]{}
-    ret := Type?{None}
-    effect_bound := [EffectRowEntry]?{None}
-    param_contract := [CallContractRow]?{None}
-    call_metadata := FunctionCallMetadata?{None}
+    ^params: [Type]{}
+    ^ret: Type?{None}
+    ^effect_bound: [EffectRowEntry]?{None}
+    ^param_contract: [CallContractRow]?{None}
+    ^call_metadata: FunctionCallMetadata?{None}
     if function_value.ty == {
         .Fn(found_params, found_ret, found_effects, found_contract, found_metadata, _) -> {
             params = found_params
@@ -356,7 +356,7 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    target_identity := sema_call_compute_function_identity(args[0].expr, check.scopes)
+    ^target_identity: sema_call_compute_function_identity(args[0].expr, check.scopes)
     if target_identity == .Val(target) {
         sema_compute_record_autodiff_obligation(member, target, span, check.context)
     }
@@ -364,18 +364,18 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a pure Tensor function", "autodiff records only pure Tensor operations and cannot carry an effectful callable", "remove the effect row from the differentiated function or differentiate a pure Tensor function"))
         valid = false
     }
-    output := ret.map(fn(value) { value }) ?? Type.Named{name: "Unit"}
+    ^output: ret.map(fn(value) { value }) ?? Type.Named{name: "Unit"}
     output = if output == {
         .Result(ok, _) -> ok
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> output
     }
-    gradient_value_type := sema_call_compute_gradient_value_type(output)
-    gradient_output := member == "gradient" && gradient_value_type != None
+    ^gradient_value_type: sema_call_compute_gradient_value_type(output)
+    ^gradient_output: member == "gradient" && gradient_value_type != None
     if !is_compute_tensor_family(output) && !gradient_output {
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a function returning `Tensor`", "the reverse and forward transforms have one Tensor output and keep Tensor storage law", "return a Tensor from the differentiated function"))
         valid = false
     }
-    invalid_parameter := false
+    ^invalid_parameter: false
     loop parameter in params {
         if !is_compute_tensor_family(parameter) -> invalid_parameter = true
     }
@@ -383,21 +383,21 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs Tensor function arguments", "autodiff records only pure Tensor operations", "use a function whose parameters are all `Tensor`"))
         valid = false
     }
-    names_value := sema_call_compute_function_names(args[0].expr, function_value.ty, check.scopes)
+    ^names_value: sema_call_compute_function_names(args[0].expr, function_value.ty, check.scopes)
     if names_value == None {
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a named Tensor function or lambda"))
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
+        loop index in value_indexes -> ^_: sema_check_expression(args[index].expr, None, check)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     names: names_value ?? [String]{}
     if names.len() != params.len() {
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a callable with named Tensor parameters"))
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
+        loop index in value_indexes -> ^_: sema_check_expression(args[index].expr, None, check)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     if direct {
-        expected_values := if member == "jvp" -> params.len() * 2 else -> params.len()
-        expected_arguments := expected_values + 1
+        ^expected_values: if member == "jvp" -> params.len() * 2 else -> params.len()
+        ^expected_arguments: expected_values + 1
         if value_indexes.len() != expected_values {
             sema_call_compute_arity_error(member, expected_arguments, args.len(), span, check.diagnostics)
             valid = false
@@ -408,12 +408,12 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
             if sema_call_compute_tensor_value(args[index], check) == None -> valid = false
         }
     }
-    selected := [Int]{}
+    ^selected: [Int]{}
     if {
         wrt_expression != None -> {
             if wrt_names == .Val(target_names) {
                 loop target_name in target_names {
-                    index := Int?{None}
+                    ^index: Int?{None}
                     loop (parameter_index, parameter_name) in names {
                         if parameter_name == target_name {
                             index = Val(parameter_index)
@@ -443,37 +443,37 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         loop index in 0..<params.len() -> selected.push(index)
     }
     if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    gradient_names := (loop index in selected -> names[index])
+    ^gradient_names: (loop index in selected -> names[index])
     gradient_value: gradient_value_type ?? Type.Named{name: "Tensor"}
     gradient_fields: loop name in gradient_names -> TypeTupleField{name: name, ty: gradient_value.copy()}
     // The members are in the order the expanded transforms' tuple literals
     // write them.
-    gradient_type := Type.Tuple{fields: gradient_fields}
+    ^gradient_type: Type.Tuple{fields: gradient_fields}
     value_and_gradient_type: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "gradients", ty: gradient_type}}}
     jvp_type: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "tangent", ty: Type.Named{name: "Tensor"}}}}
-    run_type := Type.Apply{name: "VJPRun", args: [Type]{gradient_type}}
-    direct_return := if {
+    ^run_type: Type.Apply{name: "VJPRun", args: [Type]{gradient_type}}
+    ^direct_return: if {
         member == "gradient" -> gradient_type
         member == "value_and_gradient" -> value_and_gradient_type
         member == "vjp" -> run_type
         else -> jvp_type
     }
-    result_type := direct_return
+    ^result_type: direct_return
     if !direct {
-        transform_params := params
-        transform_contract := param_contract
-        transform_metadata := call_metadata
+        ^transform_params: params
+        ^transform_contract: param_contract
+        ^transform_metadata: call_metadata
         if member == "jvp" {
             transform_params = [Type]{}
             loop parameter in params -> transform_params.push(parameter)
             loop parameter in params -> transform_params.push(parameter)
             if param_contract == .Val(contract) {
-                doubled := contract
+                ^doubled: contract
                 loop row in contract -> doubled.push(row)
                 transform_contract = Val(doubled)
             }
             if call_metadata == .Val(metadata) {
-                doubled := FunctionCallMetadata{
+                ^doubled: FunctionCallMetadata{
                     names: metadata.names,
                     defaults: metadata.defaults,
                     variadic: metadata.variadic,
@@ -487,7 +487,7 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
                 transform_metadata = Val(doubled)
             }
         }
-        transform_return := if {
+        ^transform_return: if {
             member == "gradient" -> gradient_type
             member == "value_and_gradient" -> value_and_gradient_type
             member == "vjp" -> run_type
@@ -496,11 +496,11 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         result_type = Type.Fn{params: transform_params, ret: Val(transform_return), effect_bound: effect_bound, param_contract: transform_contract, call_metadata: transform_metadata, return_view_provenance: None}
     }
     fallible: if ret == .Val(.Result(_, _)) -> true else -> false
-    output_fields := [String]{}
+    ^output_fields: [String]{}
     if gradient_output && output == .Tuple(fields) {
         loop field in fields -> output_fields.push(field.name)
     }
-    values := [CallArg]{}
+    ^values: [CallArg]{}
     loop index in value_indexes -> values.push(args[index])
     helpers: sema_call_compute_tape_roles(span, check) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     tape: sema_call_compute_tape(member, alias, helpers, args[0].expr, params, names, selected, output_fields, gradient_type, fallible, values, span)
@@ -549,9 +549,9 @@ sema_call_try_compute_transform: fn(module_name: String, member: String, alias: 
 // tangent helper. `vjp` returns a `VJPRun` whose `pull` replays `f` on its
 // own tape over copies of the primals, since the run outlives this one.
 sema_call_compute_tape: fn(member: String, alias: String, helpers: SemaComputeTape, function: Expr, params: [Type], names: [String], selected: [Int], output_fields: [String], gradient_type: Type, fallible: Bool, values: [CallArg], span: Span) -> Expr Never! {
-    body := sema_call_compute_tape_forward(member, alias, helpers, function, params.len(), selected, "__ad_", "__ad_p", fallible, span)
+    ^body: sema_call_compute_tape_forward(member, alias, helpers, function, params.len(), selected, "__ad_", "__ad_p", fallible, span)
     out: sema_call_compute_tape_ident("__ad_out", span)
-    gradients := [TupleField]{}
+    ^gradients: [TupleField]{}
     if member != "jvp" {
         loop index in selected {
             gradient: sema_call_compute_tape_gradient(alias, helpers, "__ad_l{index}", output_fields, span)
@@ -560,8 +560,8 @@ sema_call_compute_tape: fn(member: String, alias: String, helpers: SemaComputeTa
         }
     }
     if member == "jvp" {
-        leaves := [Expr]{}
-        tangents := [Expr]{}
+        ^leaves: [Expr]{}
+        ^tangents: [Expr]{}
         loop index in 0..<params.len() {
             leaves.push(sema_call_compute_tape_copy("__ad_l{index}", span))
             tangents.push(sema_call_compute_tape_copy("__ad_t{index}", span))
@@ -594,7 +594,7 @@ sema_call_compute_tape: fn(member: String, alias: String, helpers: SemaComputeTa
     // the outermost transform clears it.
     body.push(Stmt.Expr{expr: sema_call_compute_tape_member(alias, helpers.exit, [Expr]{}, span)})
     body.push(Stmt.Expr{expr: result})
-    lambda_params := [LambdaParam]{}
+    ^lambda_params: [LambdaParam]{}
     loop (index, ty) in params {
         lambda_params.push(LambdaParam{name: "__ad_p{index}", name_span: span, ty: Val(ty), ty_span: None, convention: AccessConvention.Read})
     }
@@ -611,17 +611,17 @@ sema_call_compute_tape: fn(member: String, alias: String, helpers: SemaComputeTa
 // The tape's forward half: enter it, make each selected input `{source}<i>`
 // a leaf `{prefix}l<i>`, and bind `f` of them as `{prefix}out`.
 sema_call_compute_tape_forward: fn(member: String, alias: String, helpers: SemaComputeTape, function: Expr, count: Int, selected: [Int], prefix: String, source: String, fallible: Bool, span: Span) -> [Stmt] Never! {
-    body := [Stmt]{Stmt.Expr{expr: sema_call_compute_tape_member(alias, helpers.enter, [Expr]{}, span)}}
+    ^body: [Stmt]{Stmt.Expr{expr: sema_call_compute_tape_member(alias, helpers.enter, [Expr]{}, span)}}
     loop index in selected {
         leaf: sema_call_compute_tape_member(alias, helpers.leaf, [Expr]{sema_call_compute_tape_ident("{source}{index}", span)}, span)
         body.push(Stmt.Val{binding: ast_binding("{prefix}l{index}", span, false, leaf, None)})
     }
-    inputs := [CallArg]{}
+    ^inputs: [CallArg]{}
     loop index in 0..<count {
         name: if selected.contains(index) -> "{prefix}l{index}" else -> "{source}{index}"
         inputs.push(sema_call_compute_tape_arg(sema_call_compute_tape_ident(name, span), span))
     }
-    called := sema_call_compute_tape_call(function, inputs, span)
+    ^called: sema_call_compute_tape_call(function, inputs, span)
     if fallible {
         message: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "compute.{member}: the differentiated function failed"}}, span: span, id: AST_NODE_GENERATED}
         stop: Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{sema_call_compute_tape_arg(message, span)}}, id: AST_NODE_GENERATED}
@@ -642,9 +642,9 @@ sema_call_compute_tape_forward: fn(member: String, alias: String, helpers: SemaC
 //         (p0: __ad_pull_g0, ...)
 //     }
 sema_call_compute_tape_pull: fn(alias: String, helpers: SemaComputeTape, function: Expr, count: Int, names: [String], fallible: Bool, span: Span) -> Expr Never! {
-    every := (loop index in 0..<count -> index)
-    body := sema_call_compute_tape_forward("vjp", alias, helpers, function, count, every, "__ad_pull_", "__ad_k", fallible, span)
-    gradients := [TupleField]{}
+    ^every: (loop index in 0..<count -> index)
+    ^body: sema_call_compute_tape_forward("vjp", alias, helpers, function, count, every, "__ad_pull_", "__ad_k", fallible, span)
+    ^gradients: [TupleField]{}
     loop index in every {
         gradient: sema_call_compute_tape_member(alias, helpers.pull, [Expr]{sema_call_compute_tape_ident("__ad_pull_out", span), sema_call_compute_tape_ident("__ad_pull_l{index}", span), sema_call_compute_tape_ident("__ad_seed", span)}, span)
         body.push(Stmt.Val{binding: ast_binding("__ad_pull_g{index}", span, false, gradient, None)})
@@ -652,7 +652,7 @@ sema_call_compute_tape_pull: fn(alias: String, helpers: SemaComputeTape, functio
     }
     body.push(Stmt.Expr{expr: sema_call_compute_tape_member(alias, helpers.exit, [Expr]{}, span)})
     body.push(Stmt.Expr{expr: Expr.TupleLit{fields: gradients, span: span, ty: None, id: AST_NODE_GENERATED}})
-    takes := (loop index in every -> NamedSpan{name: "__ad_k{index}", span: span})
+    ^takes: (loop index in every -> NamedSpan{name: "__ad_k{index}", span: span})
     seed: LambdaParam{name: "__ad_seed", name_span: span, ty: Val(Type.Named{name: "Tensor"}), ty_span: None, convention: AccessConvention.Read}
     Expr.Lambda{lambda: Lambda{take_names: takes, params: [LambdaParam]{seed}, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
 }
@@ -668,7 +668,7 @@ sema_call_compute_tape_gradient: fn(alias: String, helpers: SemaComputeTape, lea
     if output_fields.len() == 0 {
         return sema_call_compute_tape_member(alias, helpers.gradient, [Expr]{sema_call_compute_tape_ident("__ad_out", span), sema_call_compute_tape_ident(leaf, span)}, span)
     }
-    fields := [TupleField]{}
+    ^fields: [TupleField]{}
     loop field in output_fields {
         part: Expr.Field{base: sema_call_compute_tape_ident("__ad_out", span), member: field, span: span, id: AST_NODE_GENERATED}
         fields.push(TupleField{name: field, value: sema_call_compute_tape_member(alias, helpers.gradient, [Expr]{part, sema_call_compute_tape_ident(leaf, span)}, span)})
@@ -688,7 +688,7 @@ sema_call_compute_tape_call: fn(function: Expr, inputs: [CallArg], span: Span) -
 }
 
 sema_call_compute_tape_member: fn(alias: String, member: String, args: [Expr], span: Span) -> Expr Never! {
-    call_args := [CallArg]{}
+    ^call_args: [CallArg]{}
     loop argument in args -> call_args.push(sema_call_compute_tape_arg(argument, span))
     Expr.MethodCall{receiver: sema_call_compute_tape_ident(alias, span), method: member, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
 }

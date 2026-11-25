@@ -13,7 +13,7 @@ S5ReadEnd: struct {
 }
 
 s5_read_end: fn(stream: net.TCPStream) -> S5ReadEnd {
-    count := 0
+    ^count: 0
     loop {
         if stream.read_bytes(8192, deadline: 200ms) == {
             .Ok(part) -> {
@@ -34,14 +34,14 @@ s5_probe_write: fn(probe: net.TCPStream) -> Bool {
 #Test("original sixty-fifth connection is dropped at admission") {
     port: s5_web_port()
     s5_web_wait_up(port, 30000)
-    holders := [net.TCPStream]{}
+    ^holders: [net.TCPStream]{}
     loop index in 0..<64 {
         holder: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect holder")
         holder.write_bytes("G".bytes(), deadline: 1s) ?? panic("holder write")
         holders.push(holder)
     }
     started: time.start()
-    dropped := false
+    ^dropped: false
     loop time.elapsed(started).ns < 5000000000 {
         probe: net.tcp_connect("127.0.0.1:{port}") ?? {
             dropped = true

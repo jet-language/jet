@@ -39,7 +39,7 @@ pkg_python_bind: fn(source_path: String, source: String, lib: String, cache: Str
     provenance_path: pkg_bridge_write_scalar_provenance_with_functions(cache, lib, descriptor, PKG_PYTHON_RUNTIME, path, worker, archive, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
     provenance: pkg_binder_read_text(provenance_path, "could not read binding provenance")
     rendered: pkg_bridge_render_scalar_jet(abi, descriptor, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
-    bound := [String]{}
+    ^bound: [String]{}
     loop function in functions -> bound.push(function.name)
     Ok(ScalarBindResult{source: rendered, bound: bound, archive: archive, worker: worker, provenance: provenance})
 }
@@ -65,7 +65,7 @@ pkg_python_check: fn(path: String) -[Exec, Time.Wait]> ForeignBindError! {
 // Top-level `def name(p: scalar, ...) -> scalar:` declarations.
 pkg_python_parse: fn(source: String) -> [ScalarBridgeFunction] ForeignBindError! {
     lines: pkg_binder_lines(source)
-    functions := [ScalarBridgeFunction]{}
+    ^functions: [ScalarBridgeFunction]{}
     loop index in 0..<lines.len() {
         number: index + 1
         line: lines[index].trim_end()
@@ -108,7 +108,7 @@ pkg_python_parse: fn(source: String) -> [ScalarBridgeFunction] ForeignBindError!
 }
 
 pkg_python_parse_params: fn(source: String, line: Int) -> [ForeignScalar] ForeignBindError! {
-    out := [ForeignScalar]{}
+    ^out: [ForeignScalar]{}
     if source.trim() == "" -> return Ok(out)
     loop raw in source.split(",") {
         param: raw.trim()
@@ -140,9 +140,9 @@ pkg_python_scalar: fn(name: String) -> ForeignScalar? Never! {
 }
 
 pkg_python_render_worker: fn(functions: [ScalarBridgeFunction]) -> String Never! {
-    out := [String]{"import contextlib\nimport importlib.util\nimport math\nimport sys\n\nKINDS = {{\n"}
+    ^out: [String]{"import contextlib\nimport importlib.util\nimport math\nimport sys\n\nKINDS = {{\n"}
     loop function in functions {
-        kinds := [String]{}
+        ^kinds: [String]{}
         loop scalar in function.params {
             kinds.push(pkg_binder_debug_quote(pkg_binder_scalar_kind(scalar)))
         }

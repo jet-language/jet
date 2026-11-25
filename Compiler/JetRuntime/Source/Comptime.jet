@@ -7,7 +7,7 @@
 // (65ba90e97).
 COMPTIME_ROOT_BYTES: I64{48}
 
-comptime_root := I64{0}
+^comptime_root: I64{0}
 
 // runtime-init: 3 when comptime_root
 #Export(c) jet_rt_comptime_init: fn() {
@@ -35,7 +35,7 @@ comptime_site: fn(owner: I64, start: I64, end: I64) {
 // only stores record/status, unlocks, then drops the old owned text; it never
 // invokes callbacks, waits or charges a budget. No control -> request edge.
 comptime_publish_locked: fn(kind: I64, status: I64) {
-    record := sync_load(wrapping(comptime_root + I64{32}))
+    ^record: sync_load(wrapping(comptime_root + I64{32}))
     if (record == I64{0}) {
         record = scheduler_stop_new(kind, scheduler_text_new(I64{0}))
         base: thread_base()
@@ -53,7 +53,7 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     sync_store(wrapping(published + I64{16}), sync_load(wrapping(record + I64{16})))
     sync_store(wrapping(published + I64{24}), sync_load(wrapping(record + I64{24})))
     sync_store(wrapping(published + I64{32}), sync_load(wrapping(record + I64{32})))
-    _ := scheduler_native_publish(published)
+    ^_: scheduler_native_publish(published)
 }
 
 // Extern "C" jet_rt_comptime_begin(fuel: u64,max_depth: u64)->bool. Raw I64
@@ -102,7 +102,7 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     sync_mutex_lock(comptime_root)
     if (sync_load(wrapping(comptime_root + I64{8})) != I64{0}) {
         base: thread_base()
-        depth := sync_load(wrapping(base + I64{256}))
+        ^depth: sync_load(wrapping(base + I64{256}))
         if (depth != I64{-1}) { depth = wrapping(depth + I64{1}) }
         sync_store(wrapping(base + I64{256}), depth)
         comptime_site(owner, start, end)
@@ -209,8 +209,8 @@ comptime_json_number: fn(at: I64, value: I64, present: Bool) -> I64 {
 }
 
 comptime_json_message_size: fn(data: I64, length: I64) -> I64 {
-    size := I64{0}
-    index := I64{0}
+    ^size: I64{0}
+    ^index: I64{0}
     loop index < length {
         byte: trap_byte(wrapping(data + index))
         if (byte == I64{34} || byte == I64{92} || byte == I64{10} || byte == I64{13} || byte == I64{9}) {
@@ -226,8 +226,8 @@ comptime_json_hex: fn(value: I64) -> I64 {
 }
 
 comptime_json_message: fn(begin: I64, data: I64, length: I64) -> I64 {
-    at := begin
-    index := I64{0}
+    ^at: begin
+    ^index: I64{0}
     loop index < length {
         byte: trap_byte(wrapping(data + index))
         if (byte == I64{34} || byte == I64{92}) {
@@ -263,7 +263,7 @@ comptime_stop_frame: fn(record: I64, budget_site: Bool) -> I64 {
     capacity: I64{208} + comptime_json_message_size(data, length)
     frame: jet_rt_alloc(capacity, I64{8})
     sync_store(wrapping(frame + I64{8}), capacity)
-    at := comptime_json_word(wrapping(frame + I64{16}), I64{4189021028785791611}, I64{8})
+    ^at: comptime_json_word(wrapping(frame + I64{16}), I64{4189021028785791611}, I64{8})
     at = comptime_json_word(at, I64{34}, I64{1})
     kind: sync_load(record)
     if {
@@ -320,7 +320,7 @@ comptime_frame_write: fn(frame: I64) {
     if (fd >= I64{0}) {
         comptime_channel_write(fd, header, digits + I64{1})
         comptime_channel_write(fd, frame + I64{16}, length)
-        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        ^_: trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     jet_rt_free(frame, capacity, I64{8})
 }
@@ -330,7 +330,7 @@ comptime_frame_write: fn(frame: I64) {
 comptime_stop_frame_write: fn(status: I64, owner: I64, start: I64, end: I64) -> U32 {
     scratch: jet_rt_alloc(I64{192}, I64{8})
     sync_store(scratch, I64{4189021028785791611})
-    at := I64{0}
+    ^at: I64{0}
     if (status == I64{2}) {
         sync_store(wrapping(scratch + I64{8}), I64{5076794174694834722})
         sync_store(wrapping(scratch + I64{16}), I64{7163575730237629813})
@@ -369,14 +369,14 @@ comptime_stop_frame_write: fn(status: I64, owner: I64, start: I64, end: I64) -> 
     if (fd >= I64{0}) {
         comptime_channel_write(fd, header, digits + I64{1})
         comptime_channel_write(fd, scratch, at)
-        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        ^_: trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     jet_rt_free(scratch, I64{192}, I64{8})
     wrapping(U32{status})
 }
 
 comptime_channel_write: fn(fd: I64, data: I64, length: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         written: trap_syscall(I64{1}, fd, data + at, length - at, I64{0}, I64{0}, I64{0})
         if (written == I64{-4}) { next }

@@ -34,11 +34,11 @@ label_of: fn(handle: Shared<Node>) -> String {
 }
 
 run: fn() {
-    a := Shared{Node{label: "a", peer: None}}
-    b := Shared{Node{label: "b", peer: None}}
+    ^a: Shared{Node{label: "a", peer: None}}
+    ^b: Shared{Node{label: "b", peer: None}}
     // Downgrade before the writes so the strong handles are not moved.
-    wa := a.downgrade()
-    wb := b.downgrade()
+    ^wa: a.downgrade()
+    ^wb: b.downgrade()
     a.peer = Val(wb.copy())
     b.peer = Val(wa.copy())
     alive: label_of(a)
@@ -46,7 +46,7 @@ run: fn() {
     count: a.strong_count()
     print("strong:{count}")
     // Fresh weak — wa/wb were moved into the back-edges above.
-    up := a.downgrade()
+    ^up: a.downgrade()
     if up.upgrade() == .Val(_) -> print("upgrade-ok")
     if up.upgrade() == .None -> print("upgrade-gone")
 }

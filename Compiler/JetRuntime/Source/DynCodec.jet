@@ -33,8 +33,8 @@ codec_encode_word: fn(value: I64) -> I64 { dyn_new(DYN_INT, jet_int_owned_from_i
     // The C word carries unsigned bits, not a signed value or an exact-Int tag.
     // Build its positive base-1e9 magnitude without text or a second Int owner.
     node: int_new(I64{3})
-    half := (value >> I64{1}) & I64{9223372036854775807}
-    at := I64{0}
+    ^half: (value >> I64{1}) & I64{9223372036854775807}
+    ^at: I64{0}
     loop half != (I64{0}) {
         int_set(node, at, half % I64{1000000000})
         half = half /% I64{1000000000}
@@ -76,7 +76,7 @@ codec_under_path: fn(segment: I64, path: I64) -> I64 {
 
 #Export(c) jet_rt_codec_under: fn(segment: I64, errors: I64, length: I64, output: I64) -> I64 {
     data: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         source: text_glue_word(wrapping(errors + at * I64{8}))
         value: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
@@ -128,7 +128,7 @@ codec_fail: fn(reason: I64, err: I64, err_len: I64) -> I64 {
 // The thread-local text-cell scope a text-native source (CSV cells,
 // environment) decodes inside. The scalar word is the active flag; a fresh
 // attached thread starts outside the scope.
-codec_text_cells_key := I64{0}
+^codec_text_cells_key: I64{0}
 
 // runtime-init: 3 when codec_text_cells_key
 #Export(c) jet_rt_codec_text_cells_init: fn() {
@@ -158,7 +158,7 @@ codec_text_cells: fn() -> Bool { jet_rt_tls_get(codec_text_cells_key) != I64{0} 
 // String target reads strict UTF-8 from a Bytes leaf in mode 1 (StringEncoding
 // UTF8Binary) or from a list of byte Ints in mode 2 (UTF8ByteList); 0 is
 // outside the scope, where a String reads only Text.
-codec_etf_strings_key := I64{0}
+^codec_etf_strings_key: I64{0}
 
 // runtime-init: 3 when codec_etf_strings_key
 #Export(c) jet_rt_codec_etf_strings_init: fn() {
@@ -191,10 +191,10 @@ codec_etf_string: fn(tree: I64, mode: I64, ok: I64, err: I64, err_len: I64) -> I
     sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
     length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    text := I64{0}
+    ^text: I64{0}
     if bytes -> text = rt_text_copy(data, length) else {
         target: jet_rt_string_builder_new()
-        at := I64{0}
+        ^at: I64{0}
         loop at < length {
             item: dyn_word(wrapping(data + at * DYN_ELEMENT_BYTES))
             if (dyn_word(wrapping(item + DYN_TAG)) != DYN_INT || !codec_fixed_fits(dyn_word(wrapping(item + DYN_PAYLOAD)), I64{4})) {
@@ -224,7 +224,7 @@ codec_trimmed_is: fn(text: I64, literal: I64) -> Bool {
     if (end - start != length) { return false }
     data: rt_text_data(text)
     expected: rt_text_data(literal)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(wrapping(data + start) + at)) != rt_text_byte(wrapping(expected + at))) {
             return false
@@ -279,28 +279,28 @@ codec_lexeme_digit: fn(data: I64, start: I64, int_end: I64, frac_start: I64, ind
 // text into `out`; status 0 writes the owned reason, checks in a fixed order.
 codec_integer_text: fn(lexeme: I64, out: I64) -> I64 {
     data: rt_text_data(lexeme)
-    start := numeric_trim_start(lexeme)
+    ^start: numeric_trim_start(lexeme)
     end: numeric_trim_end(lexeme, start)
     if (start == end) {
         return codec_reason(out, jet_rt_string_clone(rt_static_text("empty decimal number")))
     }
-    negative := false
+    ^negative: false
     sign: rt_text_byte(wrapping(data + start))
     if (sign == I64{45} || sign == I64{43}) {
         negative = sign == I64{45}
         start += I64{1}
     }
-    mark := start
+    ^mark: start
     loop mark < end && rt_text_byte(wrapping(data + mark)) != (I64{101}) && rt_text_byte(wrapping(data + mark)) != (I64{69}) {
         mark += I64{1}
     }
     // The exponent is an i64: one optional sign, then at least one digit,
     // within i64. Its exact value matters only up to the limit.
-    exponent := I64{0}
-    exponent_large := false
+    ^exponent: I64{0}
+    ^exponent_large: false
     if (mark < end) {
-        at := mark + I64{1}
-        exponent_negative := false
+        ^at: mark + I64{1}
+        ^exponent_negative: false
         if (at < end && (rt_text_byte(wrapping(data + at)) == I64{43} || rt_text_byte(wrapping(data + at)) == I64{45})) {
             exponent_negative = rt_text_byte(wrapping(data + at)) == I64{45}
             at += I64{1}
@@ -309,7 +309,7 @@ codec_integer_text: fn(lexeme: I64, out: I64) -> I64 {
             return codec_reason(out, jet_rt_string_clone(rt_static_text("decimal exponent is out of range")))
         }
         limit: if exponent_negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
-        magnitude := U64{0}
+        ^magnitude: U64{0}
         loop at < end {
             digit: rt_text_byte(wrapping(data + at)) - I64{48}
             if (digit < I64{0} || digit > I64{9} || magnitude > (limit - wrapping(U64{digit})) /% U64{10}) {
@@ -324,11 +324,11 @@ codec_integer_text: fn(lexeme: I64, out: I64) -> I64 {
         if (exponent > I64{1000000}) { exponent_large = true }
         if exponent_negative -> exponent = -exponent
     }
-    dot := start
+    ^dot: start
     loop dot < mark && rt_text_byte(wrapping(data + dot)) != (I64{46}) -> dot += I64{1}
     frac_start: if (dot < mark) -> dot + I64{1} else -> mark
-    valid := !(dot == start && frac_start == mark)
-    at := start
+    ^valid: !(dot == start && frac_start == mark)
+    ^at: start
     loop at < mark {
         byte: rt_text_byte(wrapping(data + at))
         if (at != dot && (byte < I64{48} || byte > I64{57})) { valid = false }
@@ -348,14 +348,14 @@ codec_integer_text: fn(lexeme: I64, out: I64) -> I64 {
     if (scale < I64{0} && raw - scale > I64{1000000}) {
         return codec_reason(out, jet_rt_string_clone(rt_static_text("decimal number exceeds the 1000000-digit limit")))
     }
-    first := I64{0}
+    ^first: I64{0}
     loop first < raw && codec_lexeme_digit(data, start, dot, frac_start, first) == (I64{0}) {
         first += I64{1}
     }
     if (first == raw) { return codec_integral(out, jet_rt_string_clone(rt_static_text("0"))) }
-    keep := raw
+    ^keep: raw
     if (scale > I64{0}) {
-        check := if (raw - first < scale) -> first else -> raw - scale
+        ^check: if (raw - first < scale) -> first else -> raw - scale
         loop check < raw {
             if (codec_lexeme_digit(data, start, dot, frac_start, check) != I64{0}) {
                 return codec_reason(out, codec_framed(rt_static_text("JSON number `"), lexeme, rt_static_text("` is not an exact integer")))
@@ -368,7 +368,7 @@ codec_integer_text: fn(lexeme: I64, out: I64) -> I64 {
     zeros: if (scale < I64{0}) -> -scale else -> I64{0}
     target: rt_text_builder_with_capacity(keep - first + zeros + I64{1})
     if negative -> rt_text_push_word(target, I64{45}, I64{1})
-    index := first
+    ^index: first
     loop index < keep {
         rt_text_push_word(target, codec_lexeme_digit(data, start, dot, frac_start, index) + I64{48}, I64{1})
         index += I64{1}
@@ -398,7 +398,7 @@ codec_i128: fn(value: I64) -> Bool {
 codec_fixed_fits: fn(value: I64, kind: I64) -> Bool {
     negative: int_negative(value)
     if (kind >= I64{4} && negative) { return false }
-    bound := U64{18446744073709551615}
+    ^bound: U64{18446744073709551615}
     if {
         (kind == I64{0}) -> bound = if negative -> U64{128} else -> U64{127}
         (kind == I64{1}) -> bound = if negative -> U64{32768} else -> U64{32767}
@@ -453,7 +453,7 @@ codec_float_whole: fn(bits: I64) -> CodecWhole {
 codec_decode_integer: fn(tree: I64, kind: I64, range: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     kind_tag: dyn_word(wrapping(tree + DYN_TAG))
     payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
-    value := I64{0}
+    ^value: I64{0}
     if (kind_tag == DYN_INT) {
         if (kind >= I64{0} && !codec_i128(payload)) {
             return codec_fail(jet_rt_string_clone(rt_static_text("exact Int is outside i128")), err, err_len)

@@ -131,7 +131,7 @@ QueryEngine: struct<T> {
         _: self.inputs.remove(key)
         self.revision += 1
         self.prune_invalid_memos(true)
-        dead := [QueryKey]{}
+        ^dead: [QueryKey]{}
         loop (query, _) in self.recompute_by_key {
             if query.subject == key.subject -> dead.push(query.copy())
         }
@@ -155,7 +155,7 @@ QueryEngine: struct<T> {
     // Always record the parent edge, including a child served from its memo.
     query: fn(^self, key: QueryKey, expected_result_kind: String) -> T? Never! {
         self.record_dep(QueryDepKey{is_input: false, kind: key.kind, subject: key.subject})
-        visiting := [QueryKey:Bool]{}
+        ^visiting: [QueryKey:Bool]{}
         if self.memo.get(key) == .Val(entry) {
             if entry.result_kind == expected_result_kind && self.memo_entry_valid(entry, visiting) {
                 self.hits += 1
@@ -172,15 +172,15 @@ QueryEngine: struct<T> {
     finish_query: fn(^self, key: QueryKey, result_kind: String, value: ^^T) -> T Never! {
         frame: (self.dep_stack.pop()) ?? panic("query computation has no frame")
         assert(frame.key == key && frame.result_kind == result_kind)
-        seen := [QueryDepKey:Bool]{}
-        deps := [QueryDep]{}
+        ^seen: [QueryDepKey:Bool]{}
+        ^deps: [QueryDep]{}
         loop dep in frame.deps {
             if seen.has_key(dep) -> next
             seen[dep] = true
             if {
                 dep.is_input -> {
                     input: InputKey{subject: dep.subject}
-                    revision := Int?{None}
+                    ^revision: Int?{None}
                     if self.inputs.get(input) == .Val(cell) -> revision = Val(cell.revision)
                     deps.push(QueryDep.Input{key: input, revision: revision})
                 }
@@ -203,7 +203,7 @@ QueryEngine: struct<T> {
     recompute_count: fn(self, key: QueryKey) -> Int Never! { self.recompute_by_key.get(key) ?? 0 }
 
     stats: fn(self) -> QueryStats Never! {
-        bytes := 0
+        ^bytes: 0
         loop (_, cell) in self.inputs -> bytes += cell.byte_count
         QueryStats{
             hits: self.hits,
@@ -217,7 +217,7 @@ QueryEngine: struct<T> {
 
     // Invalidating a kind does NOT eagerly prune dependent memos/counters.
     invalidate_kind: fn(^self, kind: String) Never! {
-        dead := [QueryKey]{}
+        ^dead: [QueryKey]{}
         loop (key, _) in self.memo {
             if key.kind == kind -> dead.push(key.copy())
         }
@@ -251,7 +251,7 @@ QueryEngine: struct<T> {
         loop dep in entry.deps {
             if dep == {
                 .Input(key, revision) -> {
-                    current := Int?{None}
+                    ^current: Int?{None}
                     if self.inputs.get(key) == .Val(cell) -> current = Val(cell.revision)
                     if current != revision -> return false
                 }
@@ -269,7 +269,7 @@ QueryEngine: struct<T> {
     memo_key_valid: fn(self, key: QueryKey, visiting: ^[QueryKey:Bool]) -> Bool Never! {
         if visiting.has_key(key) -> return true
         visiting[key] = true
-        valid := false
+        ^valid: false
         if self.memo.get(key) == .Val(entry) -> valid = self.memo_entry_valid(entry, visiting)
         _: visiting.remove(key)
         valid
@@ -278,9 +278,9 @@ QueryEngine: struct<T> {
     // Discover all dead keys against the same graph before removing any
     // entries; normal edits keep cumulative key counters.
     prune_invalid_memos: fn(^self, purge_counters: Bool) Never! {
-        dead := [QueryKey]{}
+        ^dead: [QueryKey]{}
         loop (key, _) in self.memo {
-            visiting := [QueryKey:Bool]{}
+            ^visiting: [QueryKey:Bool]{}
             if !self.memo_key_valid(key, visiting) -> dead.push(key.copy())
         }
         loop key in dead {

@@ -50,7 +50,7 @@ print_runs: fn(dir: String) {
 // `text` without the `note:` lines of the reasons it shows as JSON.
 without_notes: fn(text: String) -> String {
     parts: text.split("note: ").to_list()
-    out := parts[0].copy()
+    ^out: parts[0].copy()
     loop part in parts[1..<parts.len()] {
         cut: part.partition("\\n")
         out = if cut.sep == "" -> "{out}note: {part}" else -> "{out}{cut.tail}"

@@ -13,7 +13,7 @@ GIGABYTE_KB: 1048576
 peak_kb: fn(path: String) -> Int {
     text: files.read(path) ?? panic("budget.jet: read {path}: {err}")
     field: regex.compile("\"peak_rss_kb\":[0-9]+") ?? panic("budget.jet: peak_rss_kb pattern")
-    peak := 0
+    ^peak: 0
     loop found in regex.find_all(field, text) {
         value: Int.parse(found.removeprefix("\"peak_rss_kb\":")) ?? next
         if value > peak -> peak = value

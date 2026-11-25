@@ -37,20 +37,20 @@ NixDerivationStore: struct {
     // One digest shared by every output, over the ATerm whose input
     // derivations are replaced by their own modulo digests.
     input_modulo_hashes: fn(^self, drv: NixDerivation, mask_outputs: Bool) -> [String:[U8]] NixError! {
-        inputs := [String:[String]]{}
+        ^inputs: [String:[String]]{}
         loop input in drv.input_drvs {
             child: self.read(input.path)
             child_hashes: self.hash_modulo(input.path, child, false)
             loop output_name in input.outputs {
                 digest: child_hashes.get(output_name) ?? return Err(NixError.DrvPath("no hash for output `{output_name}` of `{input.path}`"))
                 hex: nix_hex(digest)
-                names := inputs.get(hex) ?? [String]{}
+                ^names: inputs.get(hex) ?? [String]{}
                 names.push(output_name.copy())
                 inputs[hex] = nixeval_sorted_unique(names)
             }
         }
         digest: nix_sha256_digest(drv.unparse(mask_outputs, Val(inputs)).bytes())
-        hashes := [String:[U8]]{}
+        ^hashes: [String:[U8]]{}
         loop name in drv.output_names() -> hashes[name] = digest.copy()
         Ok(hashes)
     }
@@ -93,7 +93,7 @@ nix_derivation_store: fn(derivations: [String:NixDerivation]) -> NixDerivationSt
 // A fixed-output derivation's digests: every output must be fixed and hashes
 // only its own method, content hash and path.
 nix_fixed_modulo_hashes: fn(drv: NixDerivation) -> [String:[U8]] NixError! {
-    hashes := [String:[U8]]{}
+    ^hashes: [String:[U8]]{}
     loop name in drv.output_names() {
         output: drv.outputs[name]
         if !output.is_fixed() {
@@ -123,7 +123,7 @@ nix_verify_aterm_roundtrip: fn(aterm: String, drv: NixDerivation) NixError! {
 }
 
 nix_leading_scalars: fn(text: String, limit: Int) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop scalar in text.chars() {
         if out.len() == limit -> break
         out.push("{scalar}")

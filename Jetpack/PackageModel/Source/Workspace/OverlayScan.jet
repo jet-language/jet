@@ -32,8 +32,8 @@ pkg_overlay_is_close: fn(code: Int) -> Bool Never! { code == 41 || code == 93 ||
 
 // The offset just past the string literal whose opening quote precedes `at`.
 pkg_overlay_skip_quoted: fn(raw: [U8], at: Int) -> Int Never! {
-    cursor := at
-    escaped := false
+    ^cursor: at
+    ^escaped: false
     loop cursor < raw.len() {
         code: Int{raw[cursor]}
         cursor += 1
@@ -49,7 +49,7 @@ pkg_overlay_skip_quoted: fn(raw: [U8], at: Int) -> Int Never! {
 
 // The offset just past a `//` line comment whose body starts at `at`.
 pkg_overlay_skip_line_comment: fn(raw: [U8], at: Int) -> Int Never! {
-    cursor := at
+    ^cursor: at
     loop cursor < raw.len() {
         code: Int{raw[cursor]}
         cursor += 1
@@ -60,8 +60,8 @@ pkg_overlay_skip_line_comment: fn(raw: [U8], at: Int) -> Int Never! {
 
 // The offset just past a `/* … */` comment whose body starts at `at`.
 pkg_overlay_skip_block_comment: fn(raw: [U8], at: Int) -> Int Never! {
-    cursor := at
-    previous := -1
+    ^cursor: at
+    ^previous: -1
     loop cursor < raw.len() {
         code: Int{raw[cursor]}
         cursor += 1
@@ -80,7 +80,7 @@ pkg_overlay_word_boundary_before: fn(raw: [U8], at: Int) -> Bool Never! {
 // outside string literals and comments.
 pkg_overlay_find_word: fn(raw: [U8], word: String, start: Int) -> Int? Never! {
     needle: word.bytes()
-    cursor := start
+    ^cursor: start
     loop cursor < raw.len() {
         at: cursor.copy()
         code: Int{raw[at]}
@@ -100,7 +100,7 @@ pkg_overlay_find_word: fn(raw: [U8], word: String, start: Int) -> Int? Never! {
 // The first offset at or after `start` holding `wanted` outside string
 // literals and comments.
 pkg_overlay_find_char: fn(raw: [U8], start: Int, wanted: Int) -> Int? Never! {
-    cursor := start
+    ^cursor: start
     loop cursor < raw.len() {
         at: cursor.copy()
         code: Int{raw[at]}
@@ -122,13 +122,13 @@ pkg_overlay_find_char: fn(raw: [U8], start: Int, wanted: Int) -> Int? Never! {
 // kept in the body and never close the block. An unclosed block consumes
 // the rest of the input.
 pkg_overlay_balanced: fn(raw: [U8], start: Int) -> {body: String, consumed: Int} Never! {
-    depth := 1
-    out := [U8]{}
-    quoted := false
-    escaped := false
-    line_comment := false
-    block_comment := false
-    cursor := start
+    ^depth: 1
+    ^out: [U8]{}
+    ^quoted: false
+    ^escaped: false
+    ^line_comment: false
+    ^block_comment: false
+    ^cursor: start
     loop cursor < raw.len() {
         byte: raw[cursor]
         code: Int{byte}
@@ -184,11 +184,11 @@ pkg_overlay_balanced_with_len: fn(text: String) -> {body: String, consumed: Int}
 // The brace depth at `stop`, or None when `stop` is inside a string literal
 // or a `//` comment.
 pkg_overlay_code_depth_at: fn(raw: [U8], stop: Int) -> Int? Never! {
-    depth := 0
-    quoted := false
-    escaped := false
-    comment := false
-    cursor := 0
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
+    ^comment: false
+    ^cursor: 0
     loop cursor < raw.len() && cursor < stop {
         code: Int{raw[cursor]}
         peek: pkg_bytes_code(raw, cursor + 1)
@@ -221,9 +221,9 @@ pkg_overlay_code_depth_at: fn(raw: [U8], stop: Int) -> Int? Never! {
 // Split on the first `:` outside string literals and brackets.
 pkg_overlay_split_colon: fn(value: String) -> {before: String, after: String}? Never! {
     raw: value.bytes()
-    depth := 0
-    quoted := false
-    escaped := false
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
     loop index in 0..<raw.len() {
         code: Int{raw[index]}
         if quoted {
@@ -251,14 +251,14 @@ pkg_overlay_split_colon: fn(value: String) -> {before: String, after: String}? N
 // spaces with their line breaks kept. Blank pieces are dropped.
 pkg_overlay_top_level_commas: fn(body: String) -> [String] Never! {
     raw: body.bytes()
-    out := [String]{}
-    current := [U8]{}
-    depth := 0
-    quoted := false
-    escaped := false
-    line_comment := false
-    block_depth := 0
-    cursor := 0
+    ^out: [String]{}
+    ^current: [U8]{}
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
+    ^line_comment: false
+    ^block_depth: 0
+    ^cursor: 0
     loop cursor < raw.len() {
         byte: raw[cursor]
         code: Int{byte}
@@ -339,14 +339,14 @@ pkg_overlay_top_level_commas: fn(body: String) -> [String] Never! {
 // Comments are dropped; a blank statement keeps accumulating.
 pkg_overlay_top_level_statements: fn(source: String) -> [String] Never! {
     raw: source.bytes()
-    out := [String]{}
-    current := [U8]{}
-    depth := 0
-    quoted := false
-    escaped := false
-    line_comment := false
-    block_comment := false
-    cursor := 0
+    ^out: [String]{}
+    ^current: [U8]{}
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
+    ^line_comment: false
+    ^block_comment: false
+    ^cursor: 0
     loop cursor < raw.len() {
         byte: raw[cursor]
         code: Int{byte}
@@ -419,14 +419,14 @@ pkg_overlay_read_ident: fn(raw: [U8], at: Int) -> {ident: String, end: Int}? Nev
     first: pkg_bytes_code(raw, at)
     starts: (first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95
     if !starts -> return None
-    end := at + 1
+    ^end: at + 1
     loop end < raw.len() && (pkg_bytes_is_word(Int{raw[end]}) || Int{raw[end]} == 45) -> end += 1
     Val({end: end, ident: pkg_bytes_text(raw, at, end)})
 }
 
 // Trim, drop trailing commas, and strip one pair of surrounding quotes.
 pkg_overlay_unquote: fn(text: String) -> String Never! {
-    value := text.trim()
+    ^value: text.trim()
     loop value.ends_with(",") -> value = value.removesuffix(",")
     if value.bytes().len() >= 2 && value.starts_with("\"") && value.ends_with("\"") {
         return value.removeprefix("\"").removesuffix("\"")
@@ -436,7 +436,7 @@ pkg_overlay_unquote: fn(text: String) -> String Never! {
 
 // Remove every trailing `suffix` repetition.
 pkg_overlay_trim_end_all: fn(text: String, suffix: String) -> String Never! {
-    value := text
+    ^value: text
     loop value.ends_with(suffix) -> value = value.removesuffix(suffix)
     value
 }
@@ -454,7 +454,7 @@ pkg_overlay_strip_wrapped: fn(text: String, prefix: String, suffix: String) -> S
 pkg_overlay_find_workspace_body_start: fn(src: String) -> Int? Never! {
     raw: src.bytes()
     namespace: NS_WORKSPACE.bytes()
-    search := 0
+    ^search: 0
     keyword: KW_MODULE.bytes()
     loop {
         at: pkg_overlay_find_word(raw, NS_WORKSPACE, search) ?? return None

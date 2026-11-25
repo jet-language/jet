@@ -50,8 +50,8 @@ usage: fn() -> String Never! {
 }
 
 parse_args: fn(args: [String]) -> Options Err! {
-    options := Options{root: ".", command: "", path: "", tier: "", source_out: "", commit: "", invert: false, seed: GENERATOR_SEED, cases: GENERATOR_CASES}
-    index := 0
+    ^options: Options{root: ".", command: "", path: "", tier: "", source_out: "", commit: "", invert: false, seed: GENERATOR_SEED, cases: GENERATOR_CASES}
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         has_value: index + 1 < args.len() && !args[index + 1].starts_with("--")
@@ -106,7 +106,7 @@ parse_args: fn(args: [String]) -> Options Err! {
 }
 
 summary: fn(manifest: Manifest) -> String Never! {
-    counts := [String]{}
+    ^counts: [String]{}
     loop status in STATUSES -> counts.push("{status} {count_where(manifest, "status", status)}")
     "{manifest.rows.len()} rows ({counts.join(", ")}), {manifest.orphans.len()} orphan witnesses, source snapshot {manifest.snapshot.hash}"
 }
@@ -178,8 +178,8 @@ write_bundle: fn(bundle: Dyn, path: String) -[FS]> Bool Err! {
 // misses fails it.
 regressions: fn(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err! {
     jet: compiler_path() ?? return Err(err)
-    identity := run_identity(options, jet, "regressions") ?? return Err(err)
-    passed := true
+    ^identity: run_identity(options, jet, "regressions") ?? return Err(err)
+    ^passed: true
     loop seed in regression_seeds() {
         runs: run_seed(seed, jet, files.join(options.path, "seeds"), invert: options.invert) ?? return Err(err)
         identity.finished = time.isoformat(time.now())
@@ -215,10 +215,10 @@ generation: fn(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err
     }
     programs: generate_programs(options.seed, options.cases) ?? return Err(err)
     jet: compiler_path() ?? return Err(err)
-    identity := run_identity(options, jet, "generate") ?? return Err(err)
+    ^identity: run_identity(options, jet, "generate") ?? return Err(err)
     scratch: files.join(options.path, "cases")
-    passed := true
-    stable := [String]{}
+    ^passed: true
+    ^stable: [String]{}
     loop program in programs {
         construct: primary_instance(program).construct_id
         plant: if options.invert -> plant_for(program.index) else -> ""

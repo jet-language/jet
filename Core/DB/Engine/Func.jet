@@ -184,7 +184,7 @@ read_utf8: fn(z: [U8], at: Int) -> UTFChar Never! {
 
 // SQLITE_SKIP_UTF8: the offset past the character at z[at].
 skip_utf8: fn(z: [U8], at: Int) -> Int Never! {
-    i := at + 1
+    ^i: at + 1
     if util.sql_byte(z, at) >= 192 {
         loop util.sql_byte(z, i) & 192 == 128 -> i += 1
     }
@@ -207,7 +207,7 @@ bytes_equal: fn(a: [U8], i: Int, b: [U8], j: Int, n: Int) -> Bool Never! {
 minmax_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     is_max: v.fctx.user_data != 0
     coll: v.fctx.coll
-    best := 0
+    ^best: 0
     if arg_type(v, 0) == base.SQL_NULL {
         return
     }
@@ -245,8 +245,8 @@ length_func: fn(v: ^conn.Vdbe) Never! {
         api.result_int(v, n)
     } else if t == base.SQL_TEXT {
         z: arg_text(v, 0) ?? return
-        n := 0
-        i := 0
+        ^n: 0
+        ^i: 0
         loop i < z.len() && z[i] != (U8{0}) {
             c: Int{z[i]}
             i += 1
@@ -301,13 +301,13 @@ instr_func: fn(v: ^conn.Vdbe) Never! {
     if type_h == base.SQL_NULL || type_n == base.SQL_NULL {
         return
     }
-    n_h := arg_bytes(v, 0)
-    n_n := arg_bytes(v, 1)
-    found := 1
+    ^n_h: arg_bytes(v, 0)
+    ^n_n: arg_bytes(v, 1)
+    ^found: 1
     if n_n > 0 {
-        h := [U8]{}
-        needle := [U8]{}
-        is_text := true
+        ^h: [U8]{}
+        ^needle: [U8]{}
+        ^is_text: true
         if type_h == base.SQL_BLOB && type_n == base.SQL_BLOB {
             h = arg_blob(v, 0) ?? [U8]{}
             needle = arg_blob(v, 1) ?? [U8]{}
@@ -316,17 +316,17 @@ instr_func: fn(v: ^conn.Vdbe) Never! {
             h = arg_text(v, 0) ?? [U8]{}
             needle = arg_text(v, 1) ?? [U8]{}
         } else {
-            c1 := mem.mem_copy(v.mem[arg_reg(v, 0)])
+            ^c1: mem.mem_copy(v.mem[arg_reg(v, 0)])
             _: mem.value_text(c1, base.UTF8)
             h = c1.z.copy()
             n_h = h.len()
-            c2 := mem.mem_copy(v.mem[arg_reg(v, 1)])
+            ^c2: mem.mem_copy(v.mem[arg_reg(v, 1)])
             _: mem.value_text(c2, base.UTF8)
             needle = c2.z.copy()
             n_n = needle.len()
         }
         first: util.sql_byte(needle, 0)
-        at := 0
+        ^at: 0
         loop n_n <= n_h && (util.sql_byte(h, at) != first || !bytes_equal(h, at, needle, 0, n_n)) {
             found += 1
             loop {
@@ -346,7 +346,7 @@ printf_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
         return
     }
     fmt: arg_text(v, 0) ?? return
-    args := [Mem]{}
+    ^args: [Mem]{}
     loop i in 1..<v.fctx.argc -> args.push(mem.mem_copy(v.mem[arg_reg(v, i)]))
     if mem.sql_printf(fmt, args, db.limits[ast.LIMIT_LENGTH]) == .Val(text) {
         api.result_text(db, v, text, text.len())
@@ -362,24 +362,24 @@ substr_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
         return
     }
     p0type: arg_type(v, 0)
-    p1 := arg_int(v, 1)
-    z := [U8]{}
-    len := 0
+    ^p1: arg_int(v, 1)
+    ^z: [U8]{}
+    ^len: 0
     if p0type == base.SQL_BLOB {
         len = arg_bytes(v, 0)
         z = arg_blob(v, 0) ?? return
     } else {
         z = arg_text(v, 0) ?? return
         if p1 < 0 {
-            at := 0
+            ^at: 0
             loop util.sql_byte(z, at) != 0 {
                 at = skip_utf8(z, at)
                 len += 1
             }
         }
     }
-    p2 := 0
-    neg_p2 := false
+    ^p2: 0
+    ^neg_p2: false
     if argc == 3 {
         p2 = arg_int(v, 2)
         if p2 < 0 {
@@ -403,12 +403,12 @@ substr_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
         }
     }
     if p0type != base.SQL_BLOB {
-        at := 0
+        ^at: 0
         loop util.sql_byte(z, at) != 0 && p1 > 0 {
             at = skip_utf8(z, at)
             p1 -= 1
         }
-        end := at
+        ^end: at
         loop util.sql_byte(z, end) != 0 && p2 > 0 {
             end = skip_utf8(z, end)
             p2 -= 1
@@ -426,7 +426,7 @@ substr_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
 
 // roundFunc: x to n (0 ..= 30) decimal places, halves away from zero.
 round_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
-    n := 0
+    ^n: 0
     if v.fctx.argc == 2 {
         if arg_type(v, 1) == base.SQL_NULL {
             return
@@ -438,7 +438,7 @@ round_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
     if arg_type(v, 0) == base.SQL_NULL {
         return
     }
-    r := arg_double(v, 0)
+    ^r: arg_double(v, 0)
     if r < -4503599627370496.0 || r > 4503599627370496.0 {
 
     } else if // No fractional part to round.
@@ -462,7 +462,7 @@ case_func: fn(db: conn.Conn, v: ^conn.Vdbe, upper: Bool) Never! {
     if !context_size_ok(db, v, n + 1) {
         return
     }
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in z {
         c: Int{b}
         out.push(U8{if upper -> util.upper_byte(c) else -> util.lower_byte(c)})
@@ -473,7 +473,7 @@ case_func: fn(db: conn.Conn, v: ^conn.Vdbe, upper: Bool) Never! {
 // randomFunc: a random integer, never -9223372036854775808.
 random_func: fn(v: ^conn.Vdbe) -[DB]> Never! {
     b: os.os_random_bytes(8)
-    u := 0
+    ^u: 0
     loop k in 0..<8 -> u += (Int{b[k]}) << (8 * k)
     // A negative r becomes -(r & LARGEST_INT64).
     r: if u >= 9223372036854775808 -> 9223372036854775808 - u else -> u
@@ -482,7 +482,7 @@ random_func: fn(v: ^conn.Vdbe) -[DB]> Never! {
 
 // randomBlob: N random bytes, at least one.
 random_blob: fn(db: conn.Conn, v: ^conn.Vdbe) -[DB]> Never! {
-    n := arg_int64(v, 0)
+    ^n: arg_int64(v, 0)
     if n < 1 -> n = 1
     if !context_size_ok(db, v, n) {
         return
@@ -515,12 +515,12 @@ like_info: fn(user_data: Int) -> LikeInfo Never! {
 pattern_compare: fn(pat: [U8], p_in: Int, str: [U8], s_in: Int, info: LikeInfo, match_other: Int) -> Int Never! {
     match_one: info.match_one
     match_all: info.match_all
-    p := p_in
-    s := s_in
-    escaped := -1
+    ^p: p_in
+    ^s: s_in
+    ^escaped: -1
     loop {
-        rc := read_utf8(pat, p)
-        c := rc.c
+        ^rc: read_utf8(pat, p)
+        ^c: rc.c
         p = rc.next
         if c == 0 -> break
         if c == match_all {
@@ -588,15 +588,15 @@ pattern_compare: fn(pat: [U8], p_in: Int, str: [U8], s_in: Int, info: LikeInfo, 
                 if c == 0 -> return NOMATCH
                 escaped = p
             } else {
-                prior_c := 0
-                seen := false
-                invert := false
+                ^prior_c: 0
+                ^seen: false
+                ^invert: false
                 rs: read_utf8(str, s)
                 c = rs.c
                 s = rs.next
                 if c == 0 -> return NOMATCH
-                r := read_utf8(pat, p)
-                c2 := r.c
+                ^r: read_utf8(pat, p)
+                ^c2: r.c
                 p = r.next
                 if c2 == 94 {
                     invert = true
@@ -653,13 +653,13 @@ str_like: fn(pattern: [U8], str: [U8], esc: Int) -> Int Never! {
 
 // likeFunc: like(pattern, string[, escape]) and glob(pattern, string).
 like_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
-    info := like_info(v.fctx.user_data)
+    ^info: like_info(v.fctx.user_data)
     n_pat: arg_bytes(v, 0)
     if n_pat > db.limits[ast.LIMIT_LIKE_PATTERN_LENGTH] {
         api.result_error(db, v, "LIKE or GLOB pattern too complex".bytes(), -1)
         return
     }
-    escape := info.match_set
+    ^escape: info.match_set
     if v.fctx.argc == 3 {
         esc: arg_text(v, 2) ?? return
         if util.utf8_char_len(esc, -1) != 1 {
@@ -709,18 +709,18 @@ quote_value: fn(acc: ^printf.StrAccum, m: ^Mem) Never! {
     t: base.value_type(m)
     if t == base.SQL_FLOAT {
         r1: mem.real_value(m)
-        list := printf.new_mem_list([Mem]{base.mem_real(r1)})
+        ^list: printf.new_mem_list([Mem]{base.mem_real(r1)})
         printf.str_vappendf(acc, "%!.15g".bytes(), list)
         if acc.text.len() > 0 {
             r2: util.atof(acc.text, base.UTF8).value
             if r1 != r2 {
                 printf.str_reset(acc)
-                again := printf.new_mem_list([Mem]{base.mem_real(r1)})
+                ^again: printf.new_mem_list([Mem]{base.mem_real(r1)})
                 printf.str_vappendf(acc, "%!.20e".bytes(), again)
             }
         }
     } else if t == base.SQL_INTEGER {
-        list := printf.new_mem_list([Mem]{base.mem_int(mem.int_value(m))})
+        ^list: printf.new_mem_list([Mem]{base.mem_int(mem.int_value(m))})
         printf.str_vappendf(acc, "%lld".bytes(), list)
     } else if t == base.SQL_BLOB {
         _: mem.value_blob(m)
@@ -740,14 +740,14 @@ quote_value: fn(acc: ^printf.StrAccum, m: ^Mem) Never! {
         }
     } else if t == base.SQL_TEXT {
         _: mem.value_text(m, base.UTF8)
-        list := printf.new_mem_list([Mem]{base.mem_text(m.z.copy(), base.UTF8)})
+        ^list: printf.new_mem_list([Mem]{base.mem_text(m.z.copy(), base.UTF8)})
         printf.str_vappendf(acc, "%Q".bytes(), list)
     } else { printf.str_append(acc, "NULL".bytes(), 0, 4) }
 }
 
 // quoteFunc.
 quote_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
-    acc := printf.str_new(db.limits[ast.LIMIT_LENGTH])
+    ^acc: printf.str_new(db.limits[ast.LIMIT_LENGTH])
     quote_value(acc, v.mem[arg_reg(v, 0)])
     if acc.acc_error != 0 {
         api.result_null(v)
@@ -766,9 +766,9 @@ unicode_func: fn(v: ^conn.Vdbe) Never! {
 // charFunc: the text of the code points of the arguments; one out of
 // range is U+FFFD.
 char_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<v.fctx.argc {
-        x := arg_int64(v, i)
+        ^x: arg_int64(v, i)
         if x < 0 || x > 1114111 -> x = 65533
         c: x & 2097151
         if c < 128 -> out.push(U8{c}) else if c < 2048 {
@@ -798,7 +798,7 @@ hex_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
         return
     }
     digits: HEX_DIGITS.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in blob {
         c: Int{b}
         out.push(digits[(c >> 4) & 15])
@@ -809,7 +809,7 @@ hex_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
 
 // strContainsChar: whether the n bytes of UTF-8 z hold character ch.
 str_contains_char: fn(z: [U8], n: Int, ch: Int) -> Bool Never! {
-    at := 0
+    ^at: 0
     loop at < n {
         r: read_utf8(z, at)
         if r.c == ch -> return true
@@ -821,10 +821,10 @@ str_contains_char: fn(z: [U8], n: Int, ch: Int) -> Bool Never! {
 // The blob unhexFunc decodes from text hex, a character of pass allowed
 // between the digit pairs; None (a NULL result) for any other character.
 unhex_decode: fn(hex: [U8], pass: [U8]) -> [U8]? Never! {
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop {
-        c := util.sql_byte(hex, at)
+        ^c: util.sql_byte(hex, at)
         if c == 0 -> break
         loop !util.is_xdigit(c) {
             r: read_utf8(hex, at)
@@ -856,7 +856,7 @@ unhex_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
 
 // zeroblobFunc.
 zeroblob_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
-    n := arg_int64(v, 0)
+    ^n: arg_int64(v, 0)
     if n < 0 -> n = 0
     rc: api.result_zeroblob64(db, v, n)
     if rc != 0 -> api.result_error_code(db, v, rc)
@@ -876,13 +876,13 @@ replace_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     rep: arg_text(v, 2) ?? return
     n_rep: rep.len()
     limit: db.limits[ast.LIMIT_LENGTH]
-    n_out := n_str + 1
+    ^n_out: n_str + 1
     if !context_size_ok(db, v, n_out) {
         return
     }
     loop_limit: n_str - n_pat
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i <= loop_limit {
         if z[i] != pattern[0] || !bytes_equal(z, i, pattern, 0, n_pat) -> out.push(z[i]) else {
             if n_rep > n_pat {
@@ -908,16 +908,16 @@ trim_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
         return
     }
     z: arg_text(v, 0) ?? return
-    chars := [U8]{}
-    starts := [Int]{}
-    lens := [Int]{}
+    ^chars: [U8]{}
+    ^starts: [Int]{}
+    ^lens: [Int]{}
     if v.fctx.argc == 1 {
         chars.push(U8{32})
         starts.push(0)
         lens.push(1)
     } else {
         chars = arg_text(v, 1) ?? return
-        at := 0
+        ^at: 0
         loop util.sql_byte(chars, at) != 0 {
             next: skip_utf8(chars, at)
             starts.push(at)
@@ -925,13 +925,13 @@ trim_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
             at = next
         }
     }
-    s := 0
-    n := z.len()
+    ^s: 0
+    ^n: z.len()
     if starts.len() > 0 {
         flags: v.fctx.user_data
         if flags & 1 != 0 {
             loop n > 0 {
-                len := -1
+                ^len: -1
                 loop ci in 0..<starts.len() {
                     l: lens[ci]
                     if l <= n && bytes_equal(z, s, chars, starts[ci], l) {
@@ -946,7 +946,7 @@ trim_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
         }
         if flags & 2 != 0 {
             loop n > 0 {
-                len := -1
+                ^len: -1
                 loop ci in 0..<starts.len() {
                     l: lens[ci]
                     if l <= n && bytes_equal(z, s + n - l, chars, starts[ci], l) {
@@ -965,7 +965,7 @@ trim_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
 // concatFuncCore: the non-NULL arguments first ..< first + argc joined by
 // sep.
 concat_core: fn(db: conn.Conn, v: ^conn.Vdbe, first: Int, argc: Int, sep: [U8]) Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in first..<(first + argc) {
         k: arg_bytes(v, i)
         if k > 0 {
@@ -1113,14 +1113,14 @@ soundex_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
         0,
     }
     z: arg_text(v, 0) ?? [U8]{}
-    i := 0
+    ^i: 0
     loop util.sql_byte(z, i) != 0 && !util.is_alpha(util.sql_byte(z, i)) -> i += 1
     if util.sql_byte(z, i) == 0 {
         api.result_text(db, v, "?000".bytes(), 4)
         return
     }
-    prev := codes[util.sql_byte(z, i) & 127]
-    out := [U8]{U8{util.upper_byte(util.sql_byte(z, i))}}
+    ^prev: codes[util.sql_byte(z, i) & 127]
+    ^out: [U8]{U8{util.upper_byte(util.sql_byte(z, i))}}
     loop out.len() < 4 && util.sql_byte(z, i) != 0 {
         code: codes[util.sql_byte(z, i) & 127]
         if code > 0 {
@@ -1151,7 +1151,7 @@ load_ext: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     }
     n: printf.c_len(file)
     shown: if n > os.MAX_PATHLEN -> os.MAX_PATHLEN else -> n
-    msg := "unable to open shared library [".bytes()
+    ^msg: "unable to open shared library [".bytes()
     loop k in 0..<shown -> msg.push(file[k])
     msg.push(U8{93})
     api.result_error(db, v, msg, -1)
@@ -1163,7 +1163,7 @@ invalid_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     i_op: v.fctx.i_op
     def: vs.p4_func(v, i_op)
     name: if def == .Val(f) -> f.name else -> [U8]{}
-    msg := "unable to use function ".bytes()
+    ^msg: "unable to use function ".bytes()
     loop b in name -> msg.push(b)
     loop b in " in the requested context".bytes() -> msg.push(b)
     api.result_error(db, v, msg, -1)
@@ -1299,7 +1299,7 @@ avg_finalize: fn(v: ^conn.Vdbe) Never! {
 // totalFinalize.
 total_finalize: fn(v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 0)
-    r := Float{0.0}
+    ^r: Float{0.0}
     if k >= 0 {
         r = if v.aggs[k].approx -> sum_approx(v.aggs[k]) else -> util.int_to_double(v.aggs[k].i)
     }
@@ -1380,7 +1380,7 @@ gc_append: fn(p: ^conn.AggState, z: [U8], n: Int, mx: Int) Never! {
     }
     len: p.acc.len()
     if len + n >= p.ints[GC_N_ALLOC] {
-        sz := len + n + 1
+        ^sz: len + n + 1
         if sz + len <= mx -> sz += len
         if sz > mx {
             p.acc = [U8]{}
@@ -1413,7 +1413,7 @@ group_concat_step: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     if v.fctx.argc == 1 {
         if !first_term -> gc_append(v.aggs[k], ",".bytes(), 1, limit) else -> v.aggs[k].i = 1
     } else if !first_term {
-        n_sep := arg_bytes(v, 1)
+        ^n_sep: arg_bytes(v, 1)
         if arg_text(v, 1) == .Val(sep) -> gc_append(v.aggs[k], sep, n_sep, limit) else -> n_sep = 0
         if n_sep != v.aggs[k].i || v.aggs[k].overflow {
             if !v.aggs[k].overflow {
@@ -1445,7 +1445,7 @@ group_concat_inverse: fn(v: ^conn.Vdbe) Never! {
         v.aggs[k].ints.push(0)
     }
     _: arg_text(v, 0)
-    n_vs := arg_bytes(v, 0)
+    ^n_vs: arg_bytes(v, 0)
     v.aggs[k].n -= 1
     if v.aggs[k].overflow {
         if v.aggs[k].n > 0 {
@@ -1646,21 +1646,21 @@ json_match: fn(z: [U8], at: Int, lit: String) -> Bool Never! {
 
 // json5Whitespace: the bytes of JSON5 whitespace and comments at z[at].
 json5_whitespace: fn(z: [U8], at: Int) -> Int Never! {
-    n := 0
+    ^n: 0
     loop {
         c: util.sql_byte(z, at + n)
         c1: util.sql_byte(z, at + n + 1)
         c2: util.sql_byte(z, at + n + 2)
         if c == 9 || c == 10 || c == 11 || c == 12 || c == 13 || c == 32 -> n += 1 else if c == 47 {
             if c1 == 42 && c2 != 0 {
-                j := at + n + 3
+                ^j: at + n + 3
                 loop util.sql_byte(z, j) != 47 || util.sql_byte(z, j - 1) != 42 {
                     if util.sql_byte(z, j) == 0 -> return n
                     j += 1
                 }
                 n = j + 1 - at
             } else if c1 == 47 {
-                j := at + n + 2
+                ^j: at + n + 2
                 loop util.sql_byte(z, j) != 0 {
                     cj: util.sql_byte(z, j)
                     if cj == 10 || cj == 13 -> break
@@ -1721,17 +1721,17 @@ json_blob_append_text: fn(p: ^JSONParse, e_type: Int, from: Int, sz: Int) Never!
 // a payload of sz bytes, growing or shrinking the header as it needs.
 json_blob_change_payload_size: fn(p: ^JSONParse, i: Int, sz: Int) Never! {
     sz_type: Int{p.blob[i]} >> 4
-    n_extra := 4
+    ^n_extra: 4
     if sz_type <= 11 -> n_extra = 0 else if sz_type == 12 -> n_extra = 1 else if sz_type == 13 {
         n_extra = 2
     }
-    n_needed := 4
+    ^n_needed: 4
     if sz <= 11 -> n_needed = 0 else if sz <= 255 -> n_needed = 1 else if sz <= 65535 {
         n_needed = 2
     }
     delta: n_needed - n_extra
     if delta != 0 {
-        out := p.blob[0..<(i + 1)].copy()
+        ^out: p.blob[0..<(i + 1)].copy()
         if delta > 0 {
             loop _ in 0..<delta -> out.push(U8{0})
             loop k in (i + 1)..<p.blob.len() -> out.push(p.blob[k])
@@ -1762,7 +1762,7 @@ json_blob_change_payload_size: fn(p: ^JSONParse, i: Int, sz: Int) Never! {
 // the input; -1 for a syntax error; -2, -3, -4 and -5 for a '}', ']', ','
 // or ':' seen, with i_err at it.
 json_translate_text_to_blob: fn(p: ^JSONParse, i_in: Int) -> Int Never! {
-    i := i_in
+    ^i: i_in
     loop {
         w: json_byte(p, i)
         if json_is_space(w) {
@@ -1822,10 +1822,10 @@ json_parse_object: fn(p: ^JSONParse, i: Int) -> Int Never! {
         return -1
     }
     i_start: p.blob.len()
-    j := i + 1
+    ^j: i + 1
     loop {
         i_blob: p.blob.len()
-        x := json_translate_text_to_blob(p, j)
+        ^x: json_translate_text_to_blob(p, j)
         if x <= 0 {
             if x == -2 {
                 j = p.i_err
@@ -1833,9 +1833,9 @@ json_parse_object: fn(p: ^JSONParse, i: Int) -> Int Never! {
                 break
             }
             j += json5_whitespace(p.json, j)
-            op := JSONB_TEXT
+            ^op: JSONB_TEXT
             c: json_byte(p, j)
-            is_label := json_id1(c)
+            ^is_label: json_id1(c)
             if !is_label && c == 92 && json_is_4hex_b(p.json, j + 1) {
                 op = JSONB_TEXTJ
                 is_label = true
@@ -1844,7 +1844,7 @@ json_parse_object: fn(p: ^JSONParse, i: Int) -> Int Never! {
                 if x != -1 -> p.i_err = j
                 return -1
             }
-            k := j + 1
+            ^k: j + 1
             loop {
                 ck: json_byte(p, k)
                 if json_id2(ck) && json5_whitespace(p.json, k) == 0 -> k += 1 else if ck == 92 && json_is_4hex_b(p.json, k + 1) {
@@ -1864,7 +1864,7 @@ json_parse_object: fn(p: ^JSONParse, i: Int) -> Int Never! {
         j = x
         if json_byte(p, j) == 58 -> j += 1 else {
             // A ':' after whitespace skips to parse_object_value.
-            colon := false
+            ^colon: false
             if json_is_space(json_byte(p, j)) {
                 j += 1
                 loop json_is_space(json_byte(p, j)) -> j += 1
@@ -1931,9 +1931,9 @@ json_parse_array: fn(p: ^JSONParse, i: Int) -> Int Never! {
         p.i_err = i
         return -1
     }
-    j := i + 1
+    ^j: i + 1
     loop {
-        x := json_translate_text_to_blob(p, j)
+        ^x: json_translate_text_to_blob(p, j)
         if x <= 0 {
             if x == -3 {
                 j = p.i_err
@@ -1983,8 +1983,8 @@ json_parse_array: fn(p: ^JSONParse, i: Int) -> Int Never! {
 json_parse_string: fn(p: ^JSONParse, i: Int) -> Int Never! {
     c_delim: json_byte(p, i)
     if c_delim == 39 -> p.has_nonstd = true
-    opcode := JSONB_TEXT
-    j := i + 1
+    ^opcode: JSONB_TEXT
+    ^j: i + 1
     loop {
         if json_is_ok(json_byte(p, j)) {
             if !json_is_ok(json_byte(p, j + 1)) -> j += 1 else if !json_is_ok(json_byte(p, j + 2)) {
@@ -1994,7 +1994,7 @@ json_parse_string: fn(p: ^JSONParse, i: Int) -> Int Never! {
                 next
             }
         }
-        c := json_byte(p, j)
+        ^c: json_byte(p, j)
         if c == c_delim -> break
         if c == 92 {
             j += 1
@@ -2026,13 +2026,13 @@ json_parse_string: fn(p: ^JSONParse, i: Int) -> Int Never! {
 // The number case of jsonTranslateTextToBlob, its '+', '-', '.' or digit
 // at json[i_in]. t's 0x01 bit marks JSON5, its 0x02 bit a float.
 json_parse_number: fn(p: ^JSONParse, i_in: Int) -> Int Never! {
-    i := i_in
+    ^i: i_in
     c0: json_byte(p, i)
-    t := 0
-    seen_e := false
-    j := 0
+    ^t: 0
+    ^seen_e: false
+    ^j: 0
     // 1: parse_number, 2: parse_number_2, 3: parse_number_finish.
-    stage := 1
+    ^stage: 1
     if c0 == 43 -> p.has_nonstd = true else if c0 == 46 {
         if !util.is_digit(json_byte(p, i + 1)) {
             p.i_err = i
@@ -2091,7 +2091,7 @@ json_parse_number: fn(p: ^JSONParse, i_in: Int) -> Int Never! {
     if stage != 3 {
         j = i + 1
         loop {
-            c := json_byte(p, j)
+            ^c: json_byte(p, j)
             if util.is_digit(c) {
                 j += 1
                 next
@@ -2174,7 +2174,7 @@ json_parse_nan_inf: fn(p: ^JSONParse, i: Int) -> Int Never! {
 // jsonConvertTextToBlob: parse the whole of json into blob; true after an
 // error, the call's result then "malformed JSON".
 json_convert_text_to_blob: fn(db: conn.Conn, v: ^conn.Vdbe, p: ^JSONParse) -> Bool Never! {
-    i := json_translate_text_to_blob(p, 0)
+    ^i: json_translate_text_to_blob(p, 0)
     if i > 0 {
         loop json_is_space(json_byte(p, i)) -> i += 1
         if json_byte(p, i) != 0 {
@@ -2200,8 +2200,8 @@ jsonb_payload_size: fn(a: [U8], i: Int) -> {n: Int, sz: Int} Never! {
     n_blob: a.len()
     if i >= n_blob -> return {n: 0, sz: 0}
     x: Int{a[i]} >> 4
-    sz := 0
-    n := 0
+    ^sz: 0
+    ^n: 0
     if x <= 11 {
         sz = x
         n = 1
@@ -2249,7 +2249,7 @@ json_append_string: fn(out: ^JSONString, a: [U8], from: Int, n: Int) Never! {
             out.buf.push(U8{c})
         } else if c >= 32 { out.buf.push(U8{c}) } else {
             // aSpecial.
-            e := 0
+            ^e: 0
             if c == 8 -> e = 98 else if c == 9 -> e = 116 else if c == 10 -> e = 110 else if c == 12 {
                 e = 102
             } else if c == 13 { e = 114 }
@@ -2292,14 +2292,14 @@ json_translate_blob_to_text: fn(a: [U8], i: Int, out: ^JSONString) -> Int Never!
     }
     if typ == JSONB_INT || typ == JSONB_FLOAT -> json_append_raw(out, a, at, sz) else if typ == JSONB_INT5 {
         // An integer in hexadecimal.
-        k := 2
+        ^k: 2
         c0: util.sql_byte(a, at)
         if c0 == 45 {
             out.buf.push(U8{45})
             k += 1
         } else if c0 == 43 { k += 1 }
-        u := 0
-        overflow := false
+        ^u: 0
+        ^overflow: false
         loop k < sz {
             d: util.sql_byte(a, at + k)
             if !util.is_xdigit(d) {
@@ -2311,7 +2311,7 @@ json_translate_blob_to_text: fn(a: [U8], i: Int, out: ^JSONString) -> Int Never!
         if overflow -> json_append_lit(out, "9.0e999") else -> json_append_lit(out, "{u}")
     } else if typ == JSONB_FLOAT5 {
         // A float missing the digits beside its '.'.
-        k := 0
+        ^k: 0
         if util.sql_byte(a, at) == 45 {
             out.buf.push(U8{45})
             k += 1
@@ -2333,7 +2333,7 @@ json_translate_blob_to_text: fn(a: [U8], i: Int, out: ^JSONString) -> Int Never!
         json_append_string(out, a, at, sz)
     } else if typ == JSONB_ARRAY {
         out.buf.push(U8{91})
-        j := at
+        ^j: at
         i_end: at + sz
         loop j < i_end {
             j = json_translate_blob_to_text(a, j, out)
@@ -2342,9 +2342,9 @@ json_translate_blob_to_text: fn(a: [U8], i: Int, out: ^JSONString) -> Int Never!
         if sz > 0 -> _: out.buf.pop()
         out.buf.push(U8{93})
     } else if typ == JSONB_OBJECT {
-        x := 0
+        ^x: 0
         out.buf.push(U8{123})
-        j := at
+        ^j: at
         i_end: at + sz
         loop j < i_end {
             j = json_translate_blob_to_text(a, j, out)
@@ -2362,10 +2362,10 @@ json_translate_blob_to_text: fn(a: [U8], i: Int, out: ^JSONString) -> Int Never!
 // string at a[from] with its escapes made JSON.
 json_text5_to_text: fn(a: [U8], from: Int, sz: Int, out: ^JSONString) Never! {
     out.buf.push(U8{34})
-    at := from
-    sz2 := sz
+    ^at: from
+    ^sz2: sz
     loop sz2 > 0 {
-        k := 0
+        ^k: 0
         loop k < sz2 && a[at + k] != (U8{92}) && a[at + k] != (U8{34}) -> k += 1
         if k > 0 {
             json_append_raw(out, a, at, k)
@@ -2426,7 +2426,7 @@ json_parse_func_arg: fn(db: conn.Conn, v: ^conn.Vdbe, i: Int) -> [U8]? Never! {
     if e_type == base.SQL_NULL -> return None
     if e_type == base.SQL_BLOB {
         blob: arg_blob(v, i) ?? [U8]{}
-        ok := blob.len() > 0 && Int{blob[0]} & 15 <= JSONB_OBJECT
+        ^ok: blob.len() > 0 && Int{blob[0]} & 15 <= JSONB_OBJECT
         if ok {
             r: jsonb_payload_size(blob, 0)
             ok = r.n != 0 && r.sz + r.n == blob.len() && !(Int{blob[0]} & 15 <= JSONB_FALSE && r.sz > 0)
@@ -2442,7 +2442,7 @@ json_parse_func_arg: fn(db: conn.Conn, v: ^conn.Vdbe, i: Int) -> [U8]? Never! {
         api.result_error(db, v, "malformed JSON".bytes(), -1)
         return None
     }
-    p := JSONParse{blob: [U8]{}, json: text, i_err: 0, i_depth: 0, has_nonstd: false}
+    ^p: JSONParse{blob: [U8]{}, json: text, i_err: 0, i_depth: 0, has_nonstd: false}
     if json_convert_text_to_blob(db, v, p) -> return None
     Val(p.blob)
 }
@@ -2455,7 +2455,7 @@ json_return_parse: fn(db: conn.Conn, v: ^conn.Vdbe, blob: [U8]) Never! {
         api.result_blob(db, v, blob, blob.len())
         return
     }
-    out := JSONString{buf: [U8]{}, err: 0}
+    ^out: JSONString{buf: [U8]{}, err: 0}
     _: json_translate_blob_to_text(blob, 0, out)
     if out.err == 0 -> api.result_text64(db, v, out.buf, out.buf.len(), base.UTF8) else if out.err & JSTRING_MALFORMED != 0 {
         api.result_error(db, v, "malformed JSON".bytes(), -1)
@@ -2484,7 +2484,7 @@ json_remove_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
 not_supported: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     def: vs.p4_func(v, v.fctx.i_op)
     name: if def == .Val(f) -> f.name else -> [U8]{}
-    msg := "The SQL function ".bytes()
+    ^msg: "The SQL function ".bytes()
     loop b in name -> msg.push(b)
     loop b in "() is not supported in this build".bytes() -> msg.push(b)
     api.result_error(db, v, msg, -1)
@@ -2605,14 +2605,14 @@ pragma: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, valu
     // SQLITE_NOTFOUND for every pragma, so that step is left out.
     loop b in 0..<p.db.btrees.len() -> p.db.btrees[b].pager.busy.n_busy = 0
     // pragmaLocate.
-    i_arg := 0
+    ^i_arg: 0
     if util.str_icmp(z_left, "table_info".bytes()) == 0 -> i_arg = 0 else if util.str_icmp(z_left, "table_xinfo".bytes()) == 0 {
         i_arg = 1
     } else {
         return
     }
     // PragFlg_NeedSchema.
-    g := p.up
+    ^g: p.up
     if g.read_schema(p, a) != base.OK {
         return
     }
@@ -2637,13 +2637,13 @@ pragma_table_info: fn(p: ^cg.Parse, a: ^ast.AST, table_name: [U8], z_db: [U8]?, 
     }
     pk: cat.primary_key_index(p.db, t)
     p.f.n_mem = 7
-    g := p.up
+    ^g: p.up
     _: g.view_get_column_names(p, a, t)
-    n_hidden := 0
+    ^n_hidden: 0
     n_tab_col: p.db.tables[t].cols.len()
     loop i in 0..<n_tab_col {
         col: p.db.tables[t].cols[i]
-        is_hidden := 0
+        ^is_hidden: 0
         if col.col_flags & conn.COLFLAG_NOINSERT != 0 {
             if i_arg == 0 {
                 n_hidden += 1
@@ -2657,7 +2657,7 @@ pragma_table_info: fn(p: ^cg.Parse, a: ^ast.AST, table_name: [U8], z_db: [U8]?, 
                 is_hidden = 3
             } else { is_hidden = 1 }
         }
-        k := 0
+        ^k: 0
         if col.col_flags & conn.COLFLAG_PRIMKEY != 0 {
             k = 1
             if pk >= 0 {
@@ -2666,11 +2666,11 @@ pragma_table_info: fn(p: ^cg.Parse, a: ^ast.AST, table_name: [U8], z_db: [U8]?, 
             }
         }
         ce: cat.column_expr(p.db, a, t, i)
-        dflt := base.mem_null()
+        ^dflt: base.mem_null()
         if is_hidden < 2 && ce >= 0 {
             if a.exprs[ce].token == .Val(z) -> dflt = printf.txt(z)
         }
-        vals := [Mem]{base.mem_int(i - n_hidden), printf.txt(col.name), printf.txt(cat.column_decl_type(col, [U8]{})), base.mem_int(if col.not_null != 0 -> 1 else -> 0), dflt, base.mem_int(k)}
+        ^vals: [Mem]{base.mem_int(i - n_hidden), printf.txt(col.name), printf.txt(cat.column_decl_type(col, [U8]{})), base.mem_int(if col.not_null != 0 -> 1 else -> 0), dflt, base.mem_int(k)}
         if i_arg != 0 -> vals.push(base.mem_int(is_hidden))
         cg.v_multi_load(p, 1, vals, true)
     }
@@ -2682,7 +2682,7 @@ pragma_table_info: fn(p: ^cg.Parse, a: ^ast.AST, table_name: [U8], z_db: [U8]?, 
 // A call context: register 0 is the result, 1 the accumulator and the
 // arguments follow.
 func_test_vdbe: fn(id: Int, user_data: Int, args: [Mem]) -> conn.Vdbe Never! {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_null())
     v.mem.push(base.mem_null())
     loop m in args -> v.mem.push(m.copy())
@@ -2697,8 +2697,8 @@ func_test_vdbe: fn(id: Int, user_data: Int, args: [Mem]) -> conn.Vdbe Never! {
 
 // The text result of scalar function id on args.
 func_test_text: fn(id: Int, user_data: Int, args: [Mem]) -[DB]> String Never! {
-    db := conn.conn_new()
-    v := func_test_vdbe(id, user_data, args)
+    ^db: conn.conn_new()
+    ^v: func_test_vdbe(id, user_data, args)
     builtin_call(db, v, aux.FN_SFUNC)
     if base.value_type(v.mem[0]) == base.SQL_NULL -> return "<null>"
     _: mem.value_text(v.mem[0], base.UTF8)
@@ -2735,8 +2735,8 @@ t: fn(s: String) -> Mem Never! { base.mem_text(s.bytes(), base.UTF8) }
     assert_eq(func_test_text(cat.FI_HEX, 0, [Mem]{base.mem_real(12.5)}), "31322E35")
     assert_eq(func_test_text(cat.FI_HEX, 0, [Mem]{base.mem_null()}), "")
     assert_eq(func_test_text(cat.FI_UNHEX, 0, [Mem]{t("AB CD")}), "<null>")
-    db := conn.conn_new()
-    u := func_test_vdbe(cat.FI_UNHEX, 0, [Mem]{t("AB CD"), t(" ")})
+    ^db: conn.conn_new()
+    ^u: func_test_vdbe(cat.FI_UNHEX, 0, [Mem]{t("AB CD"), t(" ")})
     builtin_call(db, u, aux.FN_SFUNC)
     assert_eq(u.mem[0].z.len(), 2)
     assert_eq(Int{u.mem[0].z[0]}, 171)
@@ -2757,8 +2757,8 @@ t: fn(s: String) -> Mem Never! { base.mem_text(s.bytes(), base.UTF8) }
     assert_eq(func_test_text(cat.FI_ROUND, 0, [Mem]{base.mem_real(1.23456), base.mem_int(2)}), "1.23")
     assert_eq(func_test_text(cat.FI_ABS, 0, [Mem]{base.mem_int(-3)}), "3")
     assert_eq(func_test_text(cat.FI_ABS, 0, [Mem]{t("x")}), "0.0")
-    db := conn.conn_new()
-    o := func_test_vdbe(cat.FI_ABS, 0, [Mem]{base.mem_int(base.I64_MIN)})
+    ^db: conn.conn_new()
+    ^o: func_test_vdbe(cat.FI_ABS, 0, [Mem]{base.mem_int(base.I64_MIN)})
     builtin_call(db, o, aux.FN_SFUNC)
     assert_eq(o.fctx.is_error, base.ERROR)
     assert_eq(String.from_bytes(o.mem[0].z) ?? "", "integer overflow")
@@ -2781,8 +2781,8 @@ t: fn(s: String) -> Mem Never! { base.mem_text(s.bytes(), base.UTF8) }
     assert_eq(func_test_text(cat.FI_LIKE, cat.LIKE_INFO_GLOB, [Mem]{t("[^a-c]"), t("x")}), "1")
     assert_eq(func_test_text(cat.FI_LIKE, cat.LIKE_INFO_GLOB, [Mem]{t("*[ab]"), t("b")}), "1")
     assert_eq(str_glob("a*?".bytes(), "a".bytes()), NOWILDCARDMATCH)
-    db := conn.conn_new()
-    e := func_test_vdbe(cat.FI_LIKE, norm, [Mem]{t("a"), t("a"), t("xy")})
+    ^db: conn.conn_new()
+    ^e: func_test_vdbe(cat.FI_LIKE, norm, [Mem]{t("a"), t("a"), t("xy")})
     builtin_call(db, e, aux.FN_SFUNC)
     assert_eq(String.from_bytes(e.mem[0].z) ?? "", "ESCAPE expression must be a single character")
 }
@@ -2799,7 +2799,7 @@ t: fn(s: String) -> Mem Never! { base.mem_text(s.bytes(), base.UTF8) }
 
 // Runs the steps of aggregate id over values, then method `last`.
 agg_run: fn(db: ^conn.Conn, id: Int, user_data: Int, rows: [[Mem]], last: Int) -[DB]> conn.Vdbe Never! {
-    v := func_test_vdbe(id, user_data, rows[0])
+    ^v: func_test_vdbe(id, user_data, rows[0])
     loop row in rows {
         loop j in 0..<row.len() -> v.mem[2 + j] = row[j].copy()
         v.fctx.argc = row.len()
@@ -2810,7 +2810,7 @@ agg_run: fn(db: ^conn.Conn, id: Int, user_data: Int, rows: [[Mem]], last: Int) -
 }
 
 #Test("sum, total, avg, count, min, max and group_concat aggregate as SQLite") {
-    db := conn.conn_new()
+    ^db: conn.conn_new()
     rows: [[Mem]]{[Mem]{base.mem_int(1)}, [Mem]{base.mem_real(2.5)}, [Mem]{base.mem_null()}, [Mem]{base.mem_int(4)}}
     assert_eq(agg_run(db, cat.FI_SUM, 0, rows, aux.FN_FINAL).mem[0].r, 7.5)
     assert_eq(agg_run(db, cat.FI_TOTAL, 0, rows, aux.FN_FINAL).mem[0].r, 7.5)
@@ -2834,8 +2834,8 @@ agg_run: fn(db: ^conn.Conn, id: Int, user_data: Int, rows: [[Mem]], last: Int) -
 }
 
 #Test("group_concat as a window drops its oldest value with its separator") {
-    db := conn.conn_new()
-    v := func_test_vdbe(cat.FI_GROUP_CONCAT, 0, [Mem]{base.mem_int(1), t("-")})
+    ^db: conn.conn_new()
+    ^v: func_test_vdbe(cat.FI_GROUP_CONCAT, 0, [Mem]{base.mem_int(1), t("-")})
     builtin_call(db, v, aux.FN_STEP)
     builtin_call(db, v, aux.FN_VALUE)
     assert_eq(String.from_bytes(v.mem[0].z) ?? "", "1")
@@ -2863,7 +2863,7 @@ agg_run: fn(db: ^conn.Conn, id: Int, user_data: Int, rows: [[Mem]], last: Int) -
 }
 
 #Test("case_sensitive_like makes like() the connection's own") {
-    db := conn.conn_new()
+    ^db: conn.conn_new()
     register_like_functions(db, true)
     def: cat.find_function(db, "like".bytes(), 2, base.UTF8) ?? panic("like() is missing")
     assert_eq(def.user_data, cat.LIKE_INFO_ALT)
@@ -2877,11 +2877,11 @@ agg_run: fn(db: ^conn.Conn, id: Int, user_data: Int, rows: [[Mem]], last: Int) -
 
 // The hex of the result of jsonb() on JSON text s.
 jsonb_test_hex: fn(s: String) -[DB]> String Never! {
-    db := conn.conn_new()
-    v := func_test_vdbe(cat.FI_JSON_REMOVE, cat.JSON_BLOB, [Mem]{t(s)})
+    ^db: conn.conn_new()
+    ^v: func_test_vdbe(cat.FI_JSON_REMOVE, cat.JSON_BLOB, [Mem]{t(s)})
     builtin_call(db, v, aux.FN_SFUNC)
     digits: HEX_DIGITS.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in v.mem[0].z {
         c: Int{b}
         out.push(digits[c >> 4])
@@ -2892,8 +2892,8 @@ jsonb_test_hex: fn(s: String) -[DB]> String Never! {
 
 // json() of jsonb() of JSON text s.
 json_test_round_trip: fn(s: String) -[DB]> String Never! {
-    db := conn.conn_new()
-    b := func_test_vdbe(cat.FI_JSON_REMOVE, cat.JSON_BLOB, [Mem]{t(s)})
+    ^db: conn.conn_new()
+    ^b: func_test_vdbe(cat.FI_JSON_REMOVE, cat.JSON_BLOB, [Mem]{t(s)})
     builtin_call(db, b, aux.FN_SFUNC)
     func_test_text(cat.FI_JSON_REMOVE, 0, [Mem]{base.mem_blob(b.mem[0].z.copy())})
 }
@@ -2933,9 +2933,9 @@ json_test_text: fn(s: String) -[DB]> String Never! {
 }
 
 #Test("a built-in whose C code is not ported fails by name") {
-    db := conn.conn_new()
+    ^db: conn.conn_new()
     def: cat.find_function(db, "json_array".bytes(), 1, base.UTF8) ?? panic("json_array() is missing")
-    v := func_test_vdbe(def.impl_id, def.user_data, [Mem]{base.mem_int(1)})
+    ^v: func_test_vdbe(def.impl_id, def.user_data, [Mem]{base.mem_int(1)})
     v.fctx.i_op = aux.add_op4(db, v, opc.OP_FUNCTION, 0, 0, 0, conn.P4.FuncDef(def))
     builtin_call(db, v, aux.FN_SFUNC)
     assert_eq(v.fctx.is_error, base.ERROR)
@@ -2943,17 +2943,17 @@ json_test_text: fn(s: String) -[DB]> String Never! {
 }
 
 #Test("PRAGMA table_info names its columns and other pragmas do nothing") {
-    g := cg.CodegenTestGen{calls: 0}
-    p := cg.parse_new(conn.conn_new(), g)
-    a := ast.stmt_ast("PRAGMA table_info")
+    ^g: cg.CodegenTestGen{calls: 0}
+    ^p: cg.parse_new(conn.conn_new(), g)
+    ^a: ast.stmt_ast("PRAGMA table_info")
     none: ast.SQLTok{z: -1, n: 0}
     pragma(p, a, ast.SQLTok{z: 7, n: 10}, ast.SQLTok{z: 0, n: 0}, none, 0)
     assert_eq(p.f.v.n_res_column, 6)
     assert_eq(String.from_bytes(p.f.v.col_names[0].z) ?? "", "cid")
     assert_eq(String.from_bytes(p.f.v.col_names[5].z) ?? "", "pk")
-    h := cg.CodegenTestGen{calls: 0}
-    q := cg.parse_new(conn.conn_new(), h)
-    b := ast.stmt_ast("PRAGMA foreign_keys")
+    ^h: cg.CodegenTestGen{calls: 0}
+    ^q: cg.parse_new(conn.conn_new(), h)
+    ^b: ast.stmt_ast("PRAGMA foreign_keys")
     pragma(q, b, ast.SQLTok{z: 7, n: 12}, ast.SQLTok{z: 0, n: 0}, none, 0)
     assert_eq(q.f.v.n_res_column, 0)
     assert(a.ctx.nerr == 0 && b.ctx.nerr == 0)
@@ -2967,8 +2967,8 @@ pragma_test_col: fn(name: String, typ: String, not_null: Int, flags: Int) -> con
 // The rows a pragma's program loads, a line each: its integer and text
 // cells, NULL as nothing, with '|' between them.
 pragma_test_rows: fn(v: conn.Vdbe) -> String Never! {
-    out := [U8]{}
-    cells := 0
+    ^out: [U8]{}
+    ^cells: 0
     loop op in v.ops {
         if op.opcode == opc.OP_RESULT_ROW {
             out.push(U8{10})
@@ -2990,11 +2990,11 @@ pragma_test_rows: fn(v: conn.Vdbe) -> String Never! {
 }
 
 #Test("PRAGMA table_info lists a table's columns as SQLite does") {
-    db := conn.conn_new()
+    ^db: conn.conn_new()
     main: conn.schema_alloc(db)
     db.dbs.push(conn.DBSlot{name: "main".bytes(), bt: -1, safety_level: 0, b_sync_set: false, schema: main})
     db.dbs.push(conn.DBSlot{name: "temp".bytes(), bt: -1, safety_level: 0, b_sync_set: false, schema: conn.schema_alloc(db)})
-    t := conn.table_new()
+    ^t: conn.table_new()
     t.name = "t".bytes()
     t.schema = main
     t.ipkey = 0
@@ -3003,9 +3003,9 @@ pragma_test_rows: fn(v: conn.Vdbe) -> String Never! {
     t.cols.push(pragma_test_col("v", "", 0, 0))
     db.tables.push(t)
     _: conn.hash_insert(db.schemas[main].tbl_hash, "t".bytes(), 0)
-    g := cg.CodegenTestGen{calls: 0}
-    p := cg.parse_new(db, g)
-    a := ast.stmt_ast("PRAGMA table_info(t)")
+    ^g: cg.CodegenTestGen{calls: 0}
+    ^p: cg.parse_new(db, g)
+    ^a: ast.stmt_ast("PRAGMA table_info(t)")
     pragma(p, a, ast.SQLTok{z: 7, n: 10}, ast.SQLTok{z: 0, n: 0}, ast.SQLTok{z: 18, n: 1}, 0)
     assert(a.ctx.nerr == 0)
     assert_eq(pragma_test_rows(p.f.v), "0|id|INTEGER|0||1\n1|name|TEXT|1||0\n2|v||0||0\n")

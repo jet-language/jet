@@ -25,9 +25,9 @@ ManifestComment: struct {
 // kinds TOKEN_IDENT through TOKEN_FALSE; punctuation the formatter may add
 // or drop, such as a trailing comma, is not an anchor.
 pm_comments: fn(source: String) -> [ManifestComment] {
-    found := [ManifestComment]{}
-    open := [Int]{}
-    last := ""
+    ^found: [ManifestComment]{}
+    ^open: [Int]{}
+    ^last: ""
     loop token in lex(source.bytes()).tokens {
         text: policy_slice_bytes(source, token.span.start, token.span.end)
         if {
@@ -81,7 +81,7 @@ pm_round_trip: fn(path: String, source: String) -> String? {
 pm_tracked_manifests: fn() -> [String] {
     listed: pm_process.cmd([String]{"git", "ls-files", "--", "package.jet", "*/package.jet"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
     assert(listed.code == 0, "git ls-files failed: {pm_process.combined_output(listed).trim()}")
-    paths := [String]{}
+    ^paths: [String]{}
     loop line in pm_process.stdout_lines(listed) {
         if line != "" -> paths.push(line.copy())
     }
@@ -107,7 +107,7 @@ pm_tracked_manifests: fn() -> [String] {
     guards_enter_root()
     paths: pm_tracked_manifests()
     assert(paths.len() > 1000, "the tracked manifests must be readable, found {paths.len()}")
-    problems := [String]{}
+    ^problems: [String]{}
     loop path in paths {
         source: pm_files.read(path) ?? panic("read {path}: {err}")
         if pm_round_trip(path, source) == .Val(problem) -> problems.push(problem)

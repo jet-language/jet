@@ -141,7 +141,7 @@ sema_comptime_body_value_from_item: fn(value: SemaComptimeItemValue) -> SemaComp
 }
 
 sema_comptime_body_values_from_items: fn(values: [SemaComptimeItemValue]) -> [SemaComptimeBodyValue] Never! {
-    result := [SemaComptimeBodyValue]{}
+    ^result: [SemaComptimeBodyValue]{}
     loop value in values {
         if value.kind != SemaComptimeItemKind.BodyExpression -> next
         result.push(sema_comptime_body_value_from_item(value))
@@ -240,9 +240,9 @@ sema_comptime_find_checked_function: fn(functions: [SemaComptimeFunctionResult],
 
 // The functions of `functions` but those whose keys `keys` holds.
 sema_comptime_functions_without: fn(functions: [SemaComptimeFunctionResult], keys: [String]) -> [SemaComptimeFunctionResult] Never! {
-    dropped := name_table_sized(keys.len() + 1)
-    loop key in keys -> _ := name_intern(dropped, key)
-    kept := [SemaComptimeFunctionResult]{}
+    ^dropped: name_table_sized(keys.len() + 1)
+    loop key in keys -> ^_: name_intern(dropped, key)
+    ^kept: [SemaComptimeFunctionResult]{}
     loop function in functions {
         if name_find(dropped, function.function_key) == None -> kept.push(function.copy())
     }
@@ -262,8 +262,8 @@ SemaComptimeFunctionRows: struct {
 }
 
 sema_comptime_checked_function_rows: fn(functions: [SemaComptimeFunctionResult]) -> SemaComptimeFunctionRows Never! {
-    rows := SemaComptimeFunctionRows{keys: name_table_sized(functions.len() * 2 + 2), first: [Int]{-1}, next: [Int]{}, modules: [U32]{}}
-    last := [Int]{-1}
+    ^rows: SemaComptimeFunctionRows{keys: name_table_sized(functions.len() * 2 + 2), first: [Int]{-1}, next: [Int]{}, modules: [U32]{}}
+    ^last: [Int]{-1}
     loop (row, checked) in functions {
         id: name_index(name_intern(rows.keys, checked.function_key))
         if id == rows.first.len() {
@@ -281,7 +281,7 @@ sema_comptime_checked_function_rows: fn(functions: [SemaComptimeFunctionResult])
 // The first row of `module_identity`'s function `function_key`, if any.
 sema_comptime_function_row: fn(rows: SemaComptimeFunctionRows, module_identity: ModuleID, function_key: String) -> Int? Never! {
     id: name_find(rows.keys, function_key) ?? return None
-    row := rows.first[name_index(id)]
+    ^row: rows.first[name_index(id)]
     loop row >= 0 {
         if rows.modules[row] == module_identity.id -> return Val(row)
         row = rows.next[row]
@@ -346,7 +346,7 @@ SemaComptimeFunctionSource: struct {
 }
 
 sema_comptime_method_kind: fn(function: Func, owner_type: Type, trait_symbol: Symbol?) -> TFuncKind Never! {
-    self_convention := AccessConvention?{None}
+    ^self_convention: AccessConvention?{None}
     if function.params.len() > 0 && function.params[0].name == "self" {
         self_convention = Val(function.params[0].convention)
     }
@@ -373,8 +373,8 @@ sema_comptime_foreign_row: fn(graph: SemaRegistrationGraph, function_key: String
         if sema_function_is_guest_import(graph.modules[declaring].functions[index].declaration) {
             return sema_checked_guest_import_foreign_row(graph, graph.modules[declaring], graph.modules[declaring].functions[index])
         }
-        reported := [Diagnostic]{}
-        source := [U8]{}
+        ^reported: [Diagnostic]{}
+        ^source: [U8]{}
         return sema_checked_inline_foreign_row(graph, graph.modules[declaring], graph.modules[declaring].functions[index], source, reported)
     }
     None
@@ -392,7 +392,7 @@ sema_comptime_indexed_function_source: fn(graph: SemaRegistrationGraph, module_i
         }
         .NominalMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
-            declaration := sema_registration_function_with_body(graph.modules[declaring], graph.modules[declaring].nominals[owner].methods[index])
+            ^declaration: sema_registration_function_with_body(graph.modules[declaring], graph.modules[declaring].nominals[owner].methods[index])
             if declaration.body.len() == 0 && sema_codec_method_body(graph, graph.modules[declaring].nominals[owner].symbol.name, graph.modules[declaring].nominals[owner].methods[index].symbol.id) == .Val(body) {
                 declaration.body = body
             }
@@ -400,7 +400,7 @@ sema_comptime_indexed_function_source: fn(graph: SemaRegistrationGraph, module_i
         }
         .ImplMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
-            declaration := sema_registration_function_with_body(graph.modules[declaring], graph.modules[declaring].impls[owner].methods[index])
+            ^declaration: sema_registration_function_with_body(graph.modules[declaring], graph.modules[declaring].impls[owner].methods[index])
             if sema_codec_pending_body(graph, declaring, owner, declaration.name) == .Val(body) {
                 declaration.body = body
             }
@@ -452,7 +452,7 @@ sema_comptime_function_unresolved: fn(module_identity: ModuleID, function_key: S
 // `comptime_scopes` are the run's module scopes (sema_comptime_scopes_init),
 // lent to every item and function check of the run.
 sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^SemaScopeEnvironment, program: SemaProgramTables, comptime_scopes: ^SemaComptimeScopes, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: ModuleID, function_key: String) -> SemaComptimeFunctionResult {
-    unresolved := sema_comptime_function_unresolved(module_identity, function_key, "`{function_key}` has no registered comptime function source in module `{module_text(graph.module_table, module_identity)}`")
+    ^unresolved: sema_comptime_function_unresolved(module_identity, function_key, "`{function_key}` has no registered comptime function source in module `{module_text(graph.module_table, module_identity)}`")
     source: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
     if source.declaration.inline_foreign != None || sema_function_is_guest_import(source.declaration) {
         unresolved.incomplete_reasons = [String]{}
@@ -477,13 +477,13 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
     // from its single owner in `program`.
     // copy: a handle copy (Shared facts plus length and frontier ints): this check reads a frozen
     // prefix while environment.comptime_body_publication keeps advancing.
-    body_values := environment.comptime_body_publication.copy()
+    ^body_values: environment.comptime_body_publication.copy()
     entered: sema_scope_environment_enter_comptime_module(environment, program, module_identity, body_values)
     if !entered -> return unresolved
-    diagnostics := [Diagnostic]{}
-    memory_row := sema_function_memory_position(memory_plan, module_identity, sema_function_memory_owner(source.kind), source.declaration.name, source.declaration.span)
-    memory_func := source.declaration
-    memory_complete := true
+    ^diagnostics: [Diagnostic]{}
+    ^memory_row: sema_function_memory_position(memory_plan, module_identity, sema_function_memory_owner(source.kind), source.declaration.name, source.declaration.span)
+    ^memory_func: source.declaration
+    ^memory_complete: true
     if memory_row == {
         .Val(position) -> {
             // A pending codec's planned row is its header: the body the
@@ -504,16 +504,16 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
             diagnostics.push(diagnostic.copy())
         }
         sema_attach_diagnostic_source_locations(diagnostics, 0, environment.source_segments)
-        failed := sema_comptime_function_unresolved(module_identity, function_key, "the scope of module `{module_text(graph.module_table, module_identity)}` could not be applied")
+        ^failed: sema_comptime_function_unresolved(module_identity, function_key, "the scope of module `{module_text(graph.module_table, module_identity)}` could not be applied")
         failed.diagnostics = diagnostics
         return failed
     }
-    call_facts := [SemaCallSiteFact]{}
-    calls := [SemaComptimeRequest]{}
-    name_references := [SemaNameReferenceFact]{}
-    owner_generic_complete := true
-    function_kind := source.kind
-    owner_type := sema_function_kind_owner_type(source.kind)
+    ^call_facts: [SemaCallSiteFact]{}
+    ^calls: [SemaComptimeRequest]{}
+    ^name_references: [SemaNameReferenceFact]{}
+    ^owner_generic_complete: true
+    ^function_kind: source.kind
+    ^owner_type: sema_function_kind_owner_type(source.kind)
     if owner_type != None {
         owner: owner_type ?? Type.Named{name: "Unit"}
         normalized_owner_type: sema_comptime_normalize_owner(environment, program, owner, module_identity) ?? return unresolved
@@ -535,8 +535,8 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
     module_index: sema_registration_module_index(graph, module_identity) ?? -1
     comptime_scopes.slots[comptime_scopes.current].table.type_delta = [InternerDelta]{}
     loaded: if module_index >= 0 -> sema_core_body_loaded(program, comptime_scopes.host_hooks, module_index, source.symbol.id, comptime_scopes.slots[comptime_scopes.current].table.type_delta, diagnostics, call_facts, calls, name_references) else -> None
-    checked := loaded ?? sema_function_check(memory_func, sema_program_symbol_key(program, source.symbol.id), function_kind, source.raw_protocol_return, environment, program, comptime_scopes.slots[comptime_scopes.current].table, comptime_scopes.host_hooks, diagnostics, call_facts, calls, name_references)
-    fn_delta := [InternerDelta]{}
+    ^checked: loaded ?? sema_function_check(memory_func, sema_program_symbol_key(program, source.symbol.id), function_kind, source.raw_protocol_return, environment, program, comptime_scopes.slots[comptime_scopes.current].table, comptime_scopes.host_hooks, diagnostics, call_facts, calls, name_references)
+    ^fn_delta: [InternerDelta]{}
     sema_drain_scope_delta(program, fn_delta, comptime_scopes.slots[comptime_scopes.current].table, checked.value, calls, 0)
     // A propagation site that reaches `Err` from a Core error family member
     // converts through its module's Prelude routine, which a module check
@@ -545,19 +545,17 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
     // builds them beside it. The body moves into a one-row list for the
     // injection's demand walk and back. The routines' own facts stay out of
     // the body's, which a module check that reuses this result records.
-    conversions := [FnBody]{}
-    conversion_reasons := [String]{}
-    conversion_call_facts := [SemaCallSiteFact]{}
-    taken := checked.value.move()
+    ^conversions: [FnBody]{}
+    ^conversion_reasons: [String]{}
+    ^conversion_call_facts: [SemaCallSiteFact]{}
+    ^taken: checked.value.move()
     checked.value = None
     if taken.move() == .Val(checked_function) {
-        bodies := [FnBody]{checked_function}
-        conversion_requests := [SemaComptimeRequest]{}
-        conversion_references := [SemaNameReferenceFact]{}
-        _ := sema_inject_prelude_error_conversions(sema_scope_environment_module_text(environment, program), environment, program, comptime_scopes.slots[comptime_scopes.current].table, comptime_scopes.host_hooks, bodies, [Int:[SemaPreludeConversionDemand]]{}, fn_delta, diagnostics, conversion_call_facts, conversion_requests, conversion_references, conversion_reasons, false)
-        loop bodies.len() > 1 {
-            conversions.push(bodies.pop() ?? break)
-        }
+        ^bodies: [FnBody]{checked_function}
+        ^conversion_requests: [SemaComptimeRequest]{}
+        ^conversion_references: [SemaNameReferenceFact]{}
+        ^_: sema_inject_prelude_error_conversions(sema_scope_environment_module_text(environment, program), environment, program, comptime_scopes.slots[comptime_scopes.current].table, comptime_scopes.host_hooks, bodies, [Int:[SemaPreludeConversionDemand]]{}, fn_delta, diagnostics, conversion_call_facts, conversion_requests, conversion_references, conversion_reasons, false)
+        loop bodies.len() > 1 { conversions.push(bodies.pop() ?? break) }
         conversions.reverse()
         checked.value = bodies.pop()
     }
@@ -575,22 +573,22 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
     }
     demand: sema_demand_capture_close(graph)
     sema_scope_rollback(comptime_scopes.slots[comptime_scopes.current].table, mark)
-    waiting := [String]{}
+    ^waiting: [String]{}
     if available.counted_values >= values.len() {
-        seen_wait := name_table()
+        ^seen_wait: name_table()
         loop reference in name_references {
             if reference.symbol.kind != SymbolKind.Constant -> next
             key: symbol_table_key(graph.symbols, reference.symbol.id)
             if name_find(available.keys, key) != None || name_find(seen_wait, key) != None -> next
-            _ := name_intern(seen_wait, key)
+            ^_: name_intern(seen_wait, key)
             waiting.push(key)
         }
     } else {
-        dependencies := sema_comptime_environment_dependencies(environment, program, name_references, values) ?? return unresolved
+        ^dependencies: sema_comptime_environment_dependencies(environment, program, name_references, values) ?? return unresolved
         waiting = sema_comptime_waiting_dependencies(available, dependencies)
     }
     sema_attach_diagnostic_source_locations(diagnostics, 0, environment.source_segments)
-    incomplete_reasons := [String]{}
+    ^incomplete_reasons: [String]{}
     if !memory_complete -> incomplete_reasons.push("its memory plan row is missing or incomplete")
     if !owner_generic_complete {
         incomplete_reasons.push("its owner's generic parameters could not be resolved")
@@ -609,7 +607,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
     // bound from its value, an obligation its callees' rows would settle) is
     // a consequence of the wait, never a finding.
     if waiting.len() > 0 -> diagnostics = [Diagnostic]{}
-    reachable := sema_comptime_environment_reachable_function_keys(environment, program, call_facts)
+    ^reachable: sema_comptime_environment_reachable_function_keys(environment, program, call_facts)
     loop key in sema_comptime_environment_reachable_function_keys(environment, program, conversion_call_facts) {
         if !reachable.contains(key) -> reachable.push(key)
     }
@@ -663,7 +661,7 @@ sema_comptime_environment_reachable_function_keys: fn(environment: SemaScopeEnvi
 // (sema_comptime_push_obligations).
 sema_comptime_function_diagnostics: fn(comptime_functions: [SemaComptimeFunctionResult], diagnostics: ^[Diagnostic]) -> Bool Never! {
     mark: sema_failure_obligation_mark()
-    complete := true
+    ^complete: true
     loop result in comptime_functions {
         loop diagnostic in result.diagnostics {
             if result.obligations_pending && sema_failure_obligation_callee(diagnostic, mark) != None {

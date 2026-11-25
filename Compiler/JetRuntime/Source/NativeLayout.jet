@@ -31,7 +31,7 @@
 #Export(c) jet_rt_layout_variable: fn(handle: I64, box_name: I64, anchor: I64) -> I64 {
     inner: layout_word(handle)
     vars: wrapping(inner + I64{16})
-    index := I64{0}
+    ^index: I64{0}
     loop index < layout_word(vars) {
         slot: layout_word(wrapping(vars + I64{16})) + index * I64{24}
         if jet_rt_string_eq(layout_word(slot), box_name) && jet_rt_string_eq(layout_word(wrapping(slot + I64{8})), anchor) {
@@ -62,12 +62,12 @@
 
 layout_combine: fn(left: I64, right: I64, sign: Float) -> I64 {
     result: layout_expr_copy(left)
-    count := layout_word(wrapping(result + I64{256}))
-    at := I64{0}
+    ^count: layout_word(wrapping(result + I64{256}))
+    ^at: I64{0}
     loop at < layout_word(wrapping(right + I64{256})) {
         source: wrapping(right + at * I64{16})
         index: layout_word(source)
-        slot := I64{0}
+        ^slot: I64{0}
         loop slot < count {
             if (layout_word(wrapping(result + slot * I64{16})) == index) { break }
             slot += I64{1}
@@ -110,7 +110,7 @@ layout_normalize: fn(row: I64) {
         return
     }
     layout_float_put(wrapping(row + I64{264}), -rhs)
-    at := I64{0}
+    ^at: I64{0}
     loop at < layout_word(wrapping(row + I64{256})) {
         address: wrapping(wrapping(row + at * I64{16}) + I64{8})
         layout_float_put(address, -layout_float(address))
@@ -124,7 +124,7 @@ layout_normalize: fn(row: I64) {
 #Export(c) jet_rt_layout_compare: fn(left: I64, right: I64, op: I64) -> I64 {
     combined: layout_combine(left, right, Float{-1.0})
     if (combined == I64{0}) { return I64{0} }
-    id := layout_word(wrapping(combined + I64{280}))
+    ^id: layout_word(wrapping(combined + I64{280}))
     if (layout_word(wrapping(combined + I64{272})) == I64{0}) {
         empty: jet_rt_string_builder_new()
         handle: jet_rt_layout_new(empty)
@@ -174,14 +174,14 @@ layout_normalize: fn(row: I64) {
     inner: layout_word(handle)
     edits: wrapping(inner + I64{64})
     index: layout_word(expression)
-    at := I64{0}
+    ^at: I64{0}
     loop at < layout_word(edits) {
         if (layout_word(wrapping(layout_word(wrapping(edits + I64{16})) + at * I64{16})) == index) {
             break
         }
         at += I64{1}
     }
-    slot := I64{0}
+    ^slot: I64{0}
     if (at == layout_word(edits)) {
         slot = data_sequence_reserve(edits, I64{16})
         layout_put(slot, index)
@@ -214,7 +214,7 @@ layout_resolve: fn(inner: I64) {
     layout_resolve(inner)
     source: wrapping(inner + I64{112})
     result: data_sequence_new(layout_word(source), I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < layout_word(source) {
         layout_put(data_sequence_reserve(result, I64{8}), jet_rt_string_clone(layout_word(wrapping(layout_word(wrapping(source + I64{16})) + at * I64{8}))))
         layout_list_publish(result)
@@ -244,7 +244,7 @@ layout_resolve: fn(inner: I64) {
         jet_rt_string_builder_push_static(message, rt_text_data(name), rt_text_len(name))
         layout_append_literal(message, I64{9})
         conflicts: wrapping(inner + I64{112})
-        at := I64{0}
+        ^at: I64{0}
         loop at < layout_word(conflicts) {
             if (at != I64{0}) { layout_append_literal(message, I64{10}) }
             text: layout_word(wrapping(layout_word(wrapping(conflicts + I64{16})) + at * I64{8}))
@@ -255,8 +255,8 @@ layout_resolve: fn(inner: I64) {
         return Float{0.0}
     }
     solution: wrapping(inner + I64{88})
-    value := layout_float(wrapping(expression + I64{264}))
-    at := I64{0}
+    ^value: layout_float(wrapping(expression + I64{264}))
+    ^at: I64{0}
     loop at < layout_word(wrapping(expression + I64{256})) {
         term: wrapping(expression + at * I64{16})
         index: layout_word(term)

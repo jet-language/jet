@@ -11,22 +11,22 @@ run: fn() {
     typed_address: net.listener_local_socket_addr(listener) ?? panic("address")
     address: net.socket_to_string(typed_address)
     server: task {
-        first := net.tcp_accept(listener) ?? return
+        ^first: net.tcp_accept(listener) ?? return
         time.sleep(100ms)
         first.close() ?? return
-        second := net.tcp_accept(listener) ?? return
+        ^second: net.tcp_accept(listener) ?? return
         time.sleep(100ms)
         second.close() ?? return
     }
 
-    first := net.tcp_connect(address) ?? panic("first connect")
+    ^first: net.tcp_connect(address) ?? panic("first connect")
     if first.read_bytes(1, deadline: 0ms) == {
         .Ok(_) -> { print("unexpected first read") }
         .Err(error) -> print(net.error_message(error))
     }
     first.close() ?? panic("first close")
 
-    second := net.tcp_connect(address) ?? panic("second connect")
+    ^second: net.tcp_connect(address) ?? panic("second connect")
     #Deadline(0ms) {
         if second.read_bytes(1) == {
             .Ok(_) -> { print("unexpected second read") }

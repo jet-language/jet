@@ -25,11 +25,11 @@ run: fn() {
 
     // The walk opts into the ignore file; omission means no ignore rules.
     entries: fs.walk(root, ignore: ".gitignore").list()
-    listing := [String]{}
+    ^listing: [String]{}
     loop entry in entries -> listing.push("{entry.relative}:{entry.is_dir}:{entry.depth}")
     listing.sort()
 
-    matches := [String]{}
+    ^matches: [String]{}
     needle: Regex{"needle"}
     loop entry in entries {
         if !entry.is_dir {

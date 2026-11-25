@@ -199,7 +199,7 @@ gate_failed: fn(failure: Problem) -[IO]> Int {
 repo_root: fn() -[Env, FS]> String Problem! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return Err(problem("the working directory cannot be read: {err}"))
+    ^dir: files.cwd() ?? return Err(problem("the working directory cannot be read: {err}"))
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return Err(problem("run from inside the Jet checkout"))
@@ -236,16 +236,16 @@ first_line: fn(text: String) -> String Never! { text.partition("\n").head.copy()
 // one separator, missing fields are empty.
 read_rows: fn(text: String, width: Int) -> [[String]] Never! {
     lines: text.split("\n").to_list()
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop index in 0..<lines.len() - 1 {
-        fields := [String]{}
+        ^fields: [String]{}
         loop part in lines[index].split("\t").to_list() {
             if part != "" -> fields.push(part.copy())
         }
         loop fields.len() < width -> fields.push("")
         if fields.len() > width {
             rest: fields[width - 1..<fields.len()].join("\t")
-            kept := fields[0..<width - 1].copy()
+            ^kept: fields[0..<width - 1].copy()
             kept.push(rest)
             rows.push(kept)
             next
@@ -258,13 +258,13 @@ read_rows: fn(text: String, width: Int) -> [[String]] Never! {
 // awk records: newline-separated, a final newline ends the last one.
 records: fn(text: String) -> [String] Never! {
     if text == "" -> return [String]{}
-    lines := text.split("\n").to_list()
-    if text.ends_with("\n") -> _ := lines.pop()
+    ^lines: text.split("\n").to_list()
+    if text.ends_with("\n") -> ^_: lines.pop()
     lines
 }
 
 width_ok: fn(text: String, expected: Int, skip_header: Bool) -[IO]> Bool Never! {
-    ok := true
+    ^ok: true
     rows: records(text)
     loop index in 0..<rows.len() {
         if skip_header && index == 0 -> next
@@ -358,7 +358,7 @@ reviewer_is_independent: fn(raw: String) -> Bool Never! {
 
 // An octal digit string's value; None for any non-octal digit.
 from_octal: fn(text: String) -> Int? Never! {
-    value := 0
+    ^value: 0
     loop digit in text.chars() {
         place: "01234567".find("{digit}")
         if place < 0 -> return None
@@ -369,8 +369,8 @@ from_octal: fn(text: String) -> Int? Never! {
 
 octal: fn(value: Int) -> String Never! {
     if value == 0 -> return "0"
-    digits := ""
-    rest := value
+    ^digits: ""
+    ^rest: value
     loop rest > 0 {
         digits = "{rest % 8}{digits}"
         rest = rest /% 8
@@ -411,10 +411,10 @@ collect_files: fn(root: String, relative: String, out: ^[String]) -[FS]> Problem
 
 // SHA-256 over `path NUL bytes NUL` of every file under the named roots, by path.
 hash_relative_files: fn(root: String, roots: [String]) -[FS]> String Problem! {
-    found := [String]{}
+    ^found: [String]{}
     loop relative in roots -> collect_files(root, relative, found) ?? return Err(err)
     found.sort()
-    buffer := [U8]{}
+    ^buffer: [U8]{}
     loop relative in found {
         put_text(buffer, relative)
         put(buffer, files.read_bytes("{root}/{relative}") ?? return Err(problem("`{relative}` cannot be read: {err}")))
@@ -424,9 +424,9 @@ hash_relative_files: fn(root: String, roots: [String]) -[FS]> String Problem! {
 }
 
 hash_report_files: fn(dir: String) -[FS]> String Problem! {
-    names := report_files()
+    ^names: report_files()
     names.sort()
-    buffer := [U8]{}
+    ^buffer: [U8]{}
     loop name in names {
         path: "{dir}/{name}"
         if !files.is_file(path) -> return Err(problem("`{name}` is not a file"))
@@ -476,15 +476,15 @@ FixtureModes: struct {
 
 fixture_modes: fn(input: String) -[FS]> FixtureModes Problem! {
     sidecar: "{input}/.fixture-modes.tsv"
-    found := FixtureModes{sidecar: sidecar.copy(), present: false, bytes: [U8]{}, keys: [String]{}, modes: [String:String]{}}
+    ^found: FixtureModes{sidecar: sidecar.copy(), present: false, bytes: [U8]{}, keys: [String]{}, modes: [String:String]{}}
     if !path_exists(sidecar) -> return found
     meta: files.stat(sidecar) ?? return Err(problem("`{sidecar}` cannot be read: {err}"))
     if !meta.is_file -> return Err(problem("`{sidecar}` is not a file"))
     found.bytes = files.read_bytes(sidecar) ?? return Err(problem("`{sidecar}` cannot be read: {err}"))
     found.present = true
     text: String.from_bytes(found.bytes.copy()) ?? return Err(problem("`{sidecar}` is not UTF-8"))
-    lines := text.split("\n").to_list()
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
+    ^lines: text.split("\n").to_list()
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> ^_: lines.pop()
     loop raw in lines {
         line: raw.removesuffix("\r")
         fields: line.split("\t").to_list()
@@ -516,10 +516,10 @@ hash_input_path: fn(input: String) -[FS]> String Problem! {
     sidecar_bytes: spec.bytes
     override_keys: spec.keys
     overrides: spec.modes
-    entries := [TreeEntry]{}
+    ^entries: [TreeEntry]{}
     walk_tree(".", input, entries) ?? return Err(err)
     loop relative in override_keys {
-        kind := ""
+        ^kind: ""
         loop entry in entries {
             if entry.relative == relative -> kind = entry.kind.copy()
         }
@@ -527,7 +527,7 @@ hash_input_path: fn(input: String) -[FS]> String Problem! {
         if kind != "file" && kind != "dir" -> return Err(problem("`{sidecar}` names a link"))
     }
     entries.sort_by(fn(left: TreeEntry, right: TreeEntry) { left.relative <=> right.relative })
-    buffer := [U8]{}
+    ^buffer: [U8]{}
     loop entry in entries {
         link: if entry.kind == "symlink" -> files.read_link(entry.path) ?? return Err(problem("`{entry.path}` cannot be read: {err}")) else -> ""
         mode: if has(overrides, entry.relative) -> at(overrides, entry.relative) else -> entry.mode.copy()
@@ -545,7 +545,7 @@ hash_input_path: fn(input: String) -[FS]> String Problem! {
         put_text(buffer, "control")
         put(buffer, sidecar_bytes)
         buffer.push(U8{0})
-        sorted := override_keys.copy()
+        ^sorted: override_keys.copy()
         sorted.sort()
         loop relative in sorted {
             put_text(buffer, "mode")
@@ -561,7 +561,7 @@ hash_input_path: fn(input: String) -[FS]> String Problem! {
 // `board` is the Tower store the owners are read from: this tree's own board
 // for a real report, a fixture board for the self-check.
 tower: fn(root: String, board: String, args: [String]) -[Env, Exec, FS, Time, Time.Wait]> Dyn? {
-    argv := [String]{process.env_get_or("JET", "jet"), "{root}/{TOWER_BOARD_TOOL}"}
+    ^argv: [String]{process.env_get_or("JET", "jet"), "{root}/{TOWER_BOARD_TOOL}"}
     loop arg in args -> argv.push(arg.copy())
     ran: process.cmd(argv).cwd(root).env("TOWER_DATA", board).run() ?? return None
     if ran.code != 0 || ran.signal != None -> return None
@@ -607,7 +607,7 @@ Owners: struct {
 
 require_live_loss_owner: fn(contract: Contract, owners: ^Owners, owner: String, context: String) -[Env, Exec, FS, Time, Time.Wait]> Problem! {
     if full("#[0-9]+", owner) {
-        live := false
+        ^live: false
         if owners.live.get(owner) == .Val(known) -> live = known else {
             live = live_tower_card(contract.root, owners.board, owner)
             owners.live[owner.copy()] = live
@@ -702,15 +702,15 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         }
     }
 
-    tasks := [String]{}
-    task_domain := [String:String]{}
-    task_input := [String:String]{}
-    task_expected := [String:String]{}
-    task_outcome := [String:String]{}
-    task_adapter := [String:String]{}
-    task_loss := [String:String]{}
-    task_authority := [String:String]{}
-    task_network := [String:String]{}
+    ^tasks: [String]{}
+    ^task_domain: [String:String]{}
+    ^task_input: [String:String]{}
+    ^task_expected: [String:String]{}
+    ^task_outcome: [String:String]{}
+    ^task_adapter: [String:String]{}
+    ^task_loss: [String:String]{}
+    ^task_authority: [String:String]{}
+    ^task_network: [String:String]{}
     corpus: "{root}/{CORPUS}"
     loop row in read_rows(manifest, 13) {
         if row[0] == "" || row[0] == "version" -> next
@@ -752,14 +752,14 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
     if tasks.len() != 7 -> return Err(problem("manifest task count drifted: {tasks.len()}"))
     required_domains: [String]{"systems", "service", "cli", "library", "compute", "embedded", "cross-platform-application"}
     loop required in required_domains {
-        found := false
+        ^found: false
         loop id in tasks {
             if at(task_domain, id) == required -> found = true
         }
         if !found -> return Err(problem("manifest lacks domain: {required}"))
     }
 
-    domain_seen := [String:String]{}
+    ^domain_seen: [String:String]{}
     loop row in read_rows(domain_contract, 6) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -776,7 +776,7 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         domain_seen[id.copy()] = "1"
     }
 
-    toolchain_prefix := [String:String]{}
+    ^toolchain_prefix: [String:String]{}
     loop row in read_rows(toolchains, 4) {
         if row[0] == "" || row[0] == "version" -> next
         language: row[1]
@@ -793,20 +793,20 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         if !has(domain_seen, id) -> return Err(problem("domain contract missing task: {id}"))
     }
 
-    selected_language := [String:String]{}
-    selected_program := [String:String]{}
-    selected_dependency := [String:String]{}
-    selected_boundary := [String:String]{}
-    selected_targets := [String:String]{}
-    selected_revision := [String:String]{}
-    peers := [String]{}
-    peer_task := [String:String]{}
-    peer_selection := [String:String]{}
-    peer_language := [String:String]{}
-    peer_program := [String:String]{}
-    peer_targets := [String:String]{}
-    peer_revision := [String:String]{}
-    languages_seen := [String:String]{}
+    ^selected_language: [String:String]{}
+    ^selected_program: [String:String]{}
+    ^selected_dependency: [String:String]{}
+    ^selected_boundary: [String:String]{}
+    ^selected_targets: [String:String]{}
+    ^selected_revision: [String:String]{}
+    ^peers: [String]{}
+    ^peer_task: [String:String]{}
+    ^peer_selection: [String:String]{}
+    ^peer_language: [String:String]{}
+    ^peer_program: [String:String]{}
+    ^peer_targets: [String:String]{}
+    ^peer_revision: [String:String]{}
+    ^languages_seen: [String:String]{}
     loop row in read_rows(peer_ledger, 13) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -863,8 +863,8 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         }
     }
 
-    peer_adapter_source := [String:String]{}
-    peer_adapter_hostile := [String:String]{}
+    ^peer_adapter_source: [String:String]{}
+    ^peer_adapter_hostile: [String:String]{}
     loop row in read_rows(peer_adapters, 8) {
         if row[0] == "" || row[0] == "version" -> next
         key: row[1]
@@ -894,10 +894,10 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         if !has(peer_adapter_source, key) -> return Err(problem("peer adapter missing: {key}"))
     }
 
-    adapter_jet_source := [String:String]{}
-    adapter_jet_hostile := [String:String]{}
-    adapter_peer_source := [String:String]{}
-    adapter_peer_hostile := [String:String]{}
+    ^adapter_jet_source: [String:String]{}
+    ^adapter_jet_hostile: [String:String]{}
+    ^adapter_peer_source: [String:String]{}
+    ^adapter_peer_hostile: [String:String]{}
     loop row in read_rows(adapter_ledger, 7) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -930,7 +930,7 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         if !has(adapter_jet_source, id) -> return Err(problem("adapter ledger missing task: {id}"))
     }
 
-    metric_unit := [String:String]{}
+    ^metric_unit: [String:String]{}
     loop row in read_rows(metric_contract, 5) {
         if row[0] == "" || row[0] == "version" -> next
         metric: row[1]
@@ -947,12 +947,12 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         if !has(metric_unit, metric) -> return Err(problem("required metric missing: {metric}"))
     }
 
-    policy_tolerance := [String:String]{}
-    policy_samples := [String:String]{}
-    policy_min_value := [String:String]{}
-    policy_mad := [String:String]{}
-    policy_max_relative := [String:String]{}
-    policy_max_outliers := [String:String]{}
+    ^policy_tolerance: [String:String]{}
+    ^policy_samples: [String:String]{}
+    ^policy_min_value: [String:String]{}
+    ^policy_mad: [String:String]{}
+    ^policy_max_relative: [String:String]{}
+    ^policy_max_outliers: [String:String]{}
     loop row in read_rows(policy, 9) {
         if row[0] == "" || row[0] == "version" -> next
         metric: row[1]
@@ -985,13 +985,13 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         }
     }
 
-    tier_keys := [String]{}
-    tier_requirement := [String:String]{}
-    tier_availability := [String:String]{}
-    tier_reason := [String:String]{}
-    tier_rationale := [String:String]{}
-    platforms_seen := [String:String]{}
-    tiers_seen := [String:String]{}
+    ^tier_keys: [String]{}
+    ^tier_requirement: [String:String]{}
+    ^tier_availability: [String:String]{}
+    ^tier_reason: [String:String]{}
+    ^tier_rationale: [String:String]{}
+    ^platforms_seen: [String:String]{}
+    ^tiers_seen: [String:String]{}
     loop row in read_rows(tier_matrix, 9) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -1091,7 +1091,7 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         return Err(problem("cross-platform web tier must remain required"))
     }
 
-    canary_seen := [String:String]{}
+    ^canary_seen: [String:String]{}
     loop row in read_rows(canaries, 4) {
         if row[0] == "" || row[0] == "version" -> next
         if row[0] != "1" || row[1] == "" || row[2] == "" || row[3] == "" {
@@ -1196,7 +1196,7 @@ head_commit: fn(root: String) -[Env, Exec, FS, Time, Time.Wait]> String Problem!
 // The awk statistics law: median, extremes, relative standard deviation and
 // MAD outliers recomputed from the samples must equal the reported values.
 statistics_agree: fn(csv: String, median: String, minimum_text: String, maximum: String, relative_text: String, outliers_text: String, policy_min: String, multiplier_text: String, max_relative_text: String, max_outliers_text: String) -> Bool Never! {
-    values := [Float]{}
+    ^values: [Float]{}
     loop part in csv.split(",").to_list() {
         if part != "" -> values.push(num(part))
     }
@@ -1206,18 +1206,18 @@ statistics_agree: fn(csv: String, median: String, minimum_text: String, maximum:
     med: median_of(values)
     low: values[0]
     high: values[count - 1]
-    sum := Float{0.0}
+    ^sum: Float{0.0}
     loop value in values -> sum += value
     mean: sum / Float{count}
-    variance := Float{0.0}
+    ^variance: Float{0.0}
     loop value in values -> variance += (value - mean) * (value - mean)
     relative: if mean == (Float{0.0}) -> Float{0.0} else -> math.sqrt(variance / Float{count}) / absf(mean)
-    deviations := [Float]{}
+    ^deviations: [Float]{}
     loop value in values -> deviations.push(absf(value - med))
     sort_floats(deviations)
     mad: median_of(deviations)
     limit: if mad == (Float{0.0}) -> Float{0.0} else -> mad * num(multiplier_text)
-    outliers := 0
+    ^outliers: 0
     loop value in values {
         outside: if mad == (Float{0.0}) -> value != med else -> absf(value - med) > limit
         if outside -> outliers += 1
@@ -1240,7 +1240,7 @@ near: fn(actual: Float, expected: Float) -> Bool Never! {
 sort_floats: fn(values: ^[Float]) {
     loop index in 1..<values.len() {
         current: values[index]
-        at := index
+        ^at: index
         loop at > 0 && values[at - 1] > current {
             values[at] = values[at - 1]
             at -= 1
@@ -1262,7 +1262,7 @@ read_report: fn(dir: String, name: String) -[FS]> String Never! { files.read("{d
 check_report: fn(contract: Contract, given: String, candidate: String, board: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     dir: under(contract.root, given)
     corpus: "{contract.root}/{CORPUS}"
-    owners := Owners{board: board.copy(), live: [String:Bool]{}}
+    ^owners: Owners{board: board.copy(), live: [String:Bool]{}}
     if !files.is_dir(dir) -> return Err(problem("missing report directory: {given}"))
     loop name in report_files() {
         if !files.is_file("{dir}/{name}") {
@@ -1327,9 +1327,9 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         }
     }
 
-    identity_keys := [String]{}
-    identity_seen := [String:String]{}
-    toolchain_seen := [String:String]{}
+    ^identity_keys: [String]{}
+    ^identity_seen: [String:String]{}
+    ^toolchain_seen: [String:String]{}
     loop row in read_rows(identity, 3) {
         if row[0] == "" || row[0] == "version" -> next
         key: row[1]
@@ -1357,7 +1357,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
     loop key in required_keys {
         if !has(identity_seen, key) -> return Err(problem("report identity is missing: {key}"))
     }
-    toolchain_languages := [String]{"jet"}
+    ^toolchain_languages: [String]{"jet"}
     loop id in contract.tasks {
         language: at(contract.selected_language, id)
         if !toolchain_languages.contains(language) -> toolchain_languages.push(language)
@@ -1435,12 +1435,12 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
     if at(identity_seen, "source_closure_sha256") != source_hash {
         return Err(problem("report source identity is stale"))
     }
-    entries := at(identity_seen, "peer_commits").split(",").to_list()
-    if entries.len() > 0 && entries[entries.len() - 1] == "" -> _ := entries.pop()
+    ^entries: at(identity_seen, "peer_commits").split(",").to_list()
+    if entries.len() > 0 && entries[entries.len() - 1] == "" -> ^_: entries.pop()
     if entries.len() != contract.tasks.len() {
         return Err(problem("report peer identity denominator drifted"))
     }
-    peer_seen := [String:String]{}
+    ^peer_seen: [String:String]{}
     loop entry in entries {
         if !entry.contains(":") -> return Err(problem("report peer identity is malformed"))
         pair: entry.partition(":")
@@ -1456,12 +1456,12 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         if !has(peer_seen, id) -> return Err(problem("report peer identity is incomplete: {id}"))
     }
 
-    outcome_jet_version := [String:String]{}
-    outcome_peer_version := [String:String]{}
-    outcome_jet_status := [String:String]{}
-    outcome_loss_owner := [String:String]{}
-    report_platform := ""
-    report_candidate := ""
+    ^outcome_jet_version: [String:String]{}
+    ^outcome_peer_version: [String:String]{}
+    ^outcome_jet_status: [String:String]{}
+    ^outcome_loss_owner: [String:String]{}
+    ^report_platform: ""
+    ^report_candidate: ""
     loop row in read_rows(outcomes, 17) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -1541,9 +1541,9 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         return Err(problem("outcome report does not cover frozen manifest"))
     }
 
-    sample_seen := [String:String]{}
-    group_count := [String:Int]{}
-    group_values := [String:String]{}
+    ^sample_seen: [String:String]{}
+    ^group_count: [String:Int]{}
+    ^group_values: [String:String]{}
     loop row in read_rows(samples, 11) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -1588,9 +1588,9 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         }
     }
 
-    metric_value := [String:String]{}
-    metric_status := [String:String]{}
-    metric_owner := [String:String]{}
+    ^metric_value: [String:String]{}
+    ^metric_status: [String:String]{}
+    ^metric_owner: [String:String]{}
     loop row in read_rows(measurements, 13) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -1634,8 +1634,8 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         metric_status[key.copy()] = status.copy()
         metric_owner[key.copy()] = row[9].copy()
     }
-    loss_tasks := [String]{}
-    loss_metrics := [String:String]{}
+    ^loss_tasks: [String]{}
+    ^loss_metrics: [String:String]{}
     loop id in contract.tasks {
         peer: at(contract.selected_language, id)
         loop language in ([String]{"jet", peer.copy()}) {
@@ -1675,9 +1675,9 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         }
     }
 
-    statistics_median := [String:String]{}
-    statistics_status := [String:String]{}
-    statistics_owner := [String:String]{}
+    ^statistics_median: [String:String]{}
+    ^statistics_status: [String:String]{}
+    ^statistics_owner: [String:String]{}
     loop row in read_rows(statistics, 18) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -1741,7 +1741,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         }
     }
 
-    coverage_seen := [String:String]{}
+    ^coverage_seen: [String:String]{}
     loop row in read_rows(peer_coverage, 20) {
         if row[0] == "" || row[0] == "version" -> next
         key: row[1]
@@ -1802,8 +1802,8 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         coverage_seen[key.copy()] = "1"
     }
 
-    peer_median := [String:String]{}
-    peer_measured := [String:String]{}
+    ^peer_median: [String:String]{}
+    ^peer_measured: [String:String]{}
     loop row in read_rows(peer_measurements, 17) {
         if row[0] == "" || row[0] == "version" -> next
         key: row[1]
@@ -1860,12 +1860,12 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         }
     }
 
-    tier_seen := [String:String]{}
-    tier_status := [String:String]{}
-    tier_artifact := [String:String]{}
-    tier_output := [String:String]{}
-    tier_loss_tasks := [String]{}
-    tier_loss_rows := [String:String]{}
+    ^tier_seen: [String:String]{}
+    ^tier_status: [String:String]{}
+    ^tier_artifact: [String:String]{}
+    ^tier_output: [String:String]{}
+    ^tier_loss_tasks: [String]{}
+    ^tier_loss_rows: [String:String]{}
     loop row in read_rows(tiers, 9) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -1983,7 +1983,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         }
     }
 
-    receipt_seen := [String:String]{}
+    ^receipt_seen: [String:String]{}
     loop row in read_rows(receipts, 20) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -2055,7 +2055,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         }
     }
 
-    tier_receipt_status := [String:String]{}
+    ^tier_receipt_status: [String:String]{}
     loop row in read_rows(tier_receipts, 10) {
         if row[0] == "" || row[0] == "version" -> next
         id: row[1]
@@ -2143,7 +2143,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
 
     if first_line(review) != REVIEW_HEADER -> return Err(problem("external review schema drifted"))
     if !width_ok(review, 18, false) -> return Err(problem("external review row width drifted"))
-    review_rows := 0
+    ^review_rows: 0
     loop row in read_rows(review, 18) {
         if row[0] == "" || row[0] == "version" -> next
         review_rows += 1
@@ -2183,7 +2183,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
     }
     if review_rows != 1 -> return Err(problem("external review must contain exactly one row"))
     if loss_tasks.len() > 0 || tier_loss_tasks.len() > 0 {
-        parts := [String]{}
+        ^parts: [String]{}
         loop id in loss_tasks {
             parts.push("{id}:metrics={at(loss_metrics, id).removesuffix(",")}:owner={at(outcome_loss_owner, id)}")
         }
@@ -2220,7 +2220,7 @@ cell: fn(table: Table, row: [String], name: String) -> String Never! {
 }
 
 table_lines: fn(text: String) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.split("\n").to_list() {
         trimmed: line.removesuffix("\r")
         if trimmed != "" -> lines.push(trimmed.copy())
@@ -2238,7 +2238,7 @@ read_table: fn(dir: String, name: String, width: Int) -[FS]> Table Problem! {
     if header.len() != width {
         return Err(problem("{name} header width is {header.len()}, expected {width}"))
     }
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop index in 1..<lines.len() {
         values: lines[index].split("\t").to_list()
         if values.len() != width {
@@ -2254,7 +2254,7 @@ read_ledger: fn(root: String, name: String, label: String) -[FS]> Table Problem!
     lines: table_lines(text)
     if lines.len() == 0 -> return Err(problem("{label} cannot be read"))
     header: lines[0].split("\t").to_list()
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop index in 1..<lines.len() {
         values: lines[index].split("\t").to_list()
         if values.len() != header.len() {
@@ -2273,7 +2273,7 @@ require_sha: fn(value: String, label: String) Problem! {
 }
 
 split_targets: fn(targets: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop value in targets.split(",").to_list() -> out.push(value.trim().copy())
     out
 }
@@ -2300,7 +2300,7 @@ review_inputs: fn() -[Env]> ReviewInputs Never! {
 // with loss owners read from `board`.
 review_main: fn(root: String, dir: String, inputs: ReviewInputs, board: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
     provenance_file: inputs.provenance_file
-    provenance := Dyn.Null
+    ^provenance: Dyn.Null
     if provenance_file != "" {
         text: files.read(provenance_file) ?? return Err(problem("review provenance cannot be read: {err}"))
         provenance = json.parse(text) ?? return Err(problem("review provenance cannot be read: {err}"))
@@ -2314,7 +2314,7 @@ review_main: fn(root: String, dir: String, inputs: ReviewInputs, board: String) 
         }
     }
     identity_table: read_table(dir, "identity.tsv", 3) ?? return Err(err)
-    identity := [String:String]{}
+    ^identity: [String:String]{}
     loop row in identity_table.rows {
         key: cell(identity_table, row, "key")
         if has(identity, key) -> return Err(problem("duplicate identity key: {key}"))
@@ -2361,7 +2361,7 @@ review_main: fn(root: String, dir: String, inputs: ReviewInputs, board: String) 
     if outcomes.rows.len() != 7 {
         return Err(problem("expected seven workload outcomes, got {outcomes.rows.len()}"))
     }
-    outcome_ids := [String]{}
+    ^outcome_ids: [String]{}
     loop row in outcomes.rows {
         id: cell(outcomes, row, "task_id")
         if !outcome_ids.contains(id) -> outcome_ids.push(id)
@@ -2391,15 +2391,15 @@ review_main: fn(root: String, dir: String, inputs: ReviewInputs, board: String) 
             return Err(problem("statistics row is not independently reviewable: {cell(statistics, row, "task_id")}/{cell(statistics, row, "language")}/{cell(statistics, row, "metric")}"))
         }
     }
-    peer_keys := [String]{}
-    peer_rows := [String:Int]{}
+    ^peer_keys: [String]{}
+    ^peer_rows: [String:Int]{}
     loop index in 0..<ledger.rows.len() {
         row: ledger.rows[index]
         key: "{cell(ledger, row, "task_id")}|{cell(ledger, row, "selection")}|{cell(ledger, row, "language")}|{cell(ledger, row, "program")}"
         peer_keys.push(key.copy())
         peer_rows[key.copy()] = index
     }
-    adapter_rows := [String:Int]{}
+    ^adapter_rows: [String:Int]{}
     loop index in 0..<adapters.rows.len() {
         adapter_rows[cell(adapters, adapters.rows[index], "peer_key")] = index
     }
@@ -2407,7 +2407,7 @@ review_main: fn(root: String, dir: String, inputs: ReviewInputs, board: String) 
         return Err(problem("peer ledger identities are not unique or complete"))
     }
     corpus: "{root}/{CORPUS}"
-    coverage_rows := [String:Int]{}
+    ^coverage_rows: [String:Int]{}
     loop index in 0..<peer_coverage.rows.len() {
         row: peer_coverage.rows[index]
         key: cell(peer_coverage, row, "peer_key")
@@ -2464,7 +2464,7 @@ review_main: fn(root: String, dir: String, inputs: ReviewInputs, board: String) 
             return Err(problem("peer coverage status is incomplete: {key}"))
         }
     }
-    measured_rows := [String:Int]{}
+    ^measured_rows: [String:Int]{}
     loop index in 0..<peer_measurements.rows.len() {
         row: peer_measurements.rows[index]
         key: "{cell(peer_measurements, row, "peer_key")}|{cell(peer_measurements, row, "metric")}"
@@ -2505,14 +2505,14 @@ review_main: fn(root: String, dir: String, inputs: ReviewInputs, board: String) 
             }
         }
     }
-    jet_values := [String:String]{}
+    ^jet_values: [String:String]{}
     loop row in measurements.rows {
         if cell(measurements, row, "language") != "jet" -> next
         key: "{cell(measurements, row, "task_id")}|{cell(measurements, row, "metric")}"
         if has(jet_values, key) -> return Err(problem("duplicate Jet measurement: {key}"))
         jet_values[key.copy()] = cell(measurements, row, "value")
     }
-    tolerance_by_metric := [String:String]{}
+    ^tolerance_by_metric: [String:String]{}
     loop row in policy.rows {
         tolerance_by_metric[cell(policy, row, "metric")] = cell(policy, row, "tolerance_ratio")
     }
@@ -2625,7 +2625,7 @@ dyn_text: fn(value: Dyn) -> String Never! {
 js_number: fn(text: String) -> String Never! {
     head: text.partition(".").head
     whole: Int.parse(head) ?? return text.copy()
-    tail := text.partition(".").tail.copy()
+    ^tail: text.partition(".").tail.copy()
     loop tail.ends_with("0") -> tail = tail.removesuffix("0")
     if tail == "" -> "{whole}" else -> "{whole}.{tail}"
 }
@@ -2674,8 +2674,8 @@ self_check: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int {
 // The self-check's own Tower store: every manifest loss card is a live card,
 // so a measured loss reaches the superiority verdict whatever the real board holds.
 write_fixture_board: fn(state: SelfCheck) -[FS]> Problem! {
-    cards := [Dyn]{}
-    seen := [String]{}
+    ^cards: [Dyn]{}
+    ^seen: [String]{}
     loop id in state.contract.tasks {
         owner: at(state.contract.task_loss, id)
         if !full("#[0-9]+", owner) || seen.contains(owner) -> next
@@ -2775,14 +2775,14 @@ canaries: fn(state: SelfCheck) -[FS]> [Canary] Never! {
     ledger: read_rows(files.read("{corpus}/peer_ledger.tsv") ?? "", 13)
     loss_owner: at(state.contract.task_loss, state.contract.tasks[0])
     tiers: read_rows(files.read("{state.report}/tiers.tsv") ?? "", 9)
-    loss_task := ""
+    ^loss_task: ""
     loop row in tiers {
         if row[0] == "1" && row[2] == "jet" && row[6] == "pass" && loss_task == "" {
             loss_task = row[1].copy()
         }
     }
     peer_key: fn(selection: String, language: String) -> String {
-        found := ""
+        ^found: ""
         loop row in ledger {
             if found == "" && row[0] == "1" && row[2] == selection && row[3] == language {
                 found = "{row[1]}|{row[2]}|{row[3]}|{row[4]}"
@@ -2790,7 +2790,7 @@ canaries: fn(state: SelfCheck) -[FS]> [Canary] Never! {
         }
         found
     }
-    rust_task := ""
+    ^rust_task: ""
     loop row in ledger {
         if rust_task == "" && row[0] == "1" && row[2] == "best-applicable" && row[3] == "rust" {
             rust_task = row[1].copy()
@@ -2805,7 +2805,7 @@ canaries: fn(state: SelfCheck) -[FS]> [Canary] Never! {
         set("outcomes.tsv", 13, "loss", "task={loss_task}"),
         set("outcomes.tsv", 15, loss_owner, "task={loss_task}"),
     }
-    list := [Canary]{
+    ^list: [Canary]{
         canary("missing-review", "report must contain external review.tsv", false, remove("review.tsv")),
         canary("stale-external-review", "external review candidate is stale or invalid", false, [Edit]{set("review.tsv", 3, zero_commit, "row2")}),
         canary("mismatched-external-review", "external review report digest disagrees", false, [Edit]{set("review.tsv", 7, zero_sha, "row2")}),
@@ -2867,15 +2867,15 @@ apply_edit: fn(dir: String, edit: Edit) -[FS]> Problem! {
     }
     text: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
     rows: records(text)
-    out := [String]{}
-    changed := false
+    ^out: [String]{}
+    ^changed: false
     loop index in 0..<rows.len() {
         line: rows[index]
         if edit.action == "drop-last" {
             if index == 0 || index < rows.len() - 1 -> out.push(line.copy())
             next
         }
-        fields := line.split("\t").to_list()
+        ^fields: line.split("\t").to_list()
         if edit.action == "drop-key" {
             if fields.len() < 2 || fields[1] != edit.value -> out.push(line.copy())
             next
@@ -2945,22 +2945,22 @@ write_synthetic_report: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wai
     launcher_path: "/usr/bin/validator-peer-launcher"
     launcher_sha: "2222222222222222222222222222222222222222222222222222222222222222"
     toolchains: read_rows(read_contract_file(state.root, "toolchain_contract.tsv"), 4)
-    tool := [String:String]{}
-    command_of := [String:String]{}
+    ^tool: [String:String]{}
+    ^command_of: [String:String]{}
     loop row in toolchains {
         if row[0] == "" || row[0] == "version" -> next
         tool[row[1].copy()] = "{row[3]}-self-check"
         command_of[row[1].copy()] = row[2].copy()
     }
     ledger: read_rows(read_contract_file(state.root, "peer_ledger.tsv"), 13)
-    commits := [String]{}
+    ^commits: [String]{}
     loop row in ledger {
         if row[0] != "1" || row[2] != "best-applicable" -> next
         commits.push("{row[1]}:{row[6]}")
     }
     contract_hash: hash_relative_files(state.root, contract_paths()) ?? return Err(err)
     source_hash: hash_relative_files(state.root, source_paths()) ?? return Err(err)
-    identity := [String]{
+    ^identity: [String]{
         IDENTITY_HEADER,
         "1\tcandidate_commit\t{candidate}",
         "1\tplatform\tlinux",
@@ -2986,16 +2986,16 @@ write_synthetic_report: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wai
 
     metric_rows: read_rows(read_contract_file(state.root, "metric_contract.tsv"), 5).filter(fn(row) { row[0] == "1" })
     policy_rows: read_rows(read_contract_file(state.root, "measurement_policy.tsv"), 9).filter(fn(row) { row[0] == "1" })
-    sample_count := [String:Int]{}
-    tolerance := [String:String]{}
+    ^sample_count: [String:Int]{}
+    ^tolerance: [String:String]{}
     loop row in policy_rows {
         sample_count[row[1].copy()] = Int.parse(row[2]) ?? 0
         tolerance[row[1].copy()] = row[8].copy()
     }
-    outcomes := [String]{OUTCOME_HEADER}
-    measurements := [String]{MEASUREMENT_HEADER}
-    samples := [String]{SAMPLE_HEADER}
-    statistics := [String]{STATISTICS_HEADER}
+    ^outcomes: [String]{OUTCOME_HEADER}
+    ^measurements: [String]{MEASUREMENT_HEADER}
+    ^samples: [String]{SAMPLE_HEADER}
+    ^statistics: [String]{STATISTICS_HEADER}
     loop id in contract.tasks {
         peer: at(contract.selected_language, id)
         outcomes.push(
@@ -3039,8 +3039,8 @@ write_synthetic_report: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wai
     write_lines("{report}/samples.tsv", samples) ?? return Err(err)
     write_lines("{report}/statistics.tsv", statistics) ?? return Err(err)
 
-    tiers := [String]{TIER_REPORT_HEADER}
-    tier_receipts := [String]{TIER_RECEIPT_HEADER}
+    ^tiers: [String]{TIER_REPORT_HEADER}
+    ^tier_receipts: [String]{TIER_RECEIPT_HEADER}
     loop row in read_rows(read_contract_file(state.root, "tier_matrix.tsv"), 9) {
         if row[0] != "1" -> next
         id: row[1]
@@ -3080,8 +3080,8 @@ write_synthetic_report: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wai
     write_lines("{report}/tiers.tsv", tiers) ?? return Err(err)
     write_lines("{report}/tier_receipts.tsv", tier_receipts) ?? return Err(err)
 
-    receipts := [String]{RECEIPT_HEADER}
-    last_receipt := [String:[String]]{}
+    ^receipts: [String]{RECEIPT_HEADER}
+    ^last_receipt: [String:[String]]{}
     loop id in contract.tasks {
         input_sha: hash_input_path("{corpus}/{at(contract.task_input, id)}") ?? ""
         expected_sha: file_sha256("{corpus}/{at(contract.task_expected, id)}")
@@ -3120,8 +3120,8 @@ write_synthetic_report: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wai
     }
     write_lines("{report}/receipts.tsv", receipts) ?? return Err(err)
 
-    coverage := [String]{PEER_COVERAGE_HEADER}
-    peer_measurements := [String]{PEER_MEASUREMENT_HEADER}
+    ^coverage: [String]{PEER_COVERAGE_HEADER}
+    ^peer_measurements: [String]{PEER_MEASUREMENT_HEADER}
     loop key in contract.peers {
         task: at(contract.peer_task, key)
         language: at(contract.peer_language, key)
@@ -3390,10 +3390,10 @@ Setup: struct {
 }
 
 producer_main: fn(root: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int {
-    platform := process.env_nonempty("JET_COMPILED_WORKLOAD_PLATFORM") ?? ""
-    report := ""
-    registry := false
-    index := 0
+    ^platform: process.env_nonempty("JET_COMPILED_WORKLOAD_PLATFORM") ?? ""
+    ^report: ""
+    ^registry: false
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         if arg == {
@@ -3485,7 +3485,7 @@ producer_setup: fn(root: String, platform: String, report: String) -[Env, FS]> S
 // A fresh `compiled-workload-runner-*` directory under the scratch root.
 producer_work: fn(scratch: String) -[Env, FS]> String Problem! {
     files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
-    attempt := 0
+    ^attempt: 0
     loop {
         work: "{scratch}/compiled-workload-runner-{sys.pid()}-{attempt}"
         if !path_exists(work) {
@@ -3499,8 +3499,8 @@ producer_work: fn(scratch: String) -[Env, FS]> String Problem! {
 // --- producer helpers
 
 clean_text: fn(value: String) -> String Never! {
-    out := [U8]{}
-    gap := false
+    ^out: [U8]{}
+    ^gap: false
     loop byte in value.bytes() {
         if byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) {
             gap = true
@@ -3522,7 +3522,7 @@ failure_text: fn(result: Measured) -> String Never! {
 
 // Each argument as a JSON string, space-separated.
 command_text: fn(argv: [String]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop value in argv -> parts.push(json.to_string(Dyn.Text(value.copy())) ?? "\"\"")
     parts.join(" ")
 }
@@ -3541,7 +3541,7 @@ all_digits: fn(text: String) -> Bool Never! {
 }
 
 words: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop part in text.replace("\t", " ").split(" ").to_list() {
         if part != "" -> out.push(part.copy())
     }
@@ -3549,13 +3549,13 @@ words: fn(text: String) -> [String] Never! {
 }
 
 repeated: fn(value: Int, count: Int) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     loop _ in 0..<count -> out.push(value)
     out
 }
 
 distinct_count: fn(values: [String]) -> Int Never! {
-    seen := [String]{}
+    ^seen: [String]{}
     loop value in values {
         if !seen.contains(value) -> seen.push(value.copy())
     }
@@ -3597,9 +3597,9 @@ file_size: fn(file: String) -[FS]> Int Never! {
 
 ledger_rows: fn(root: String, name: String) -[FS]> [[String:String]] Problem! {
     table: read_ledger(root, name, "{CORPUS}/{name}") ?? return Err(err)
-    rows := [[String:String]]{}
+    ^rows: [[String:String]]{}
     loop row in table.rows {
-        map := [String:String]{}
+        ^map: [String:String]{}
         loop index in 0..<table.header.len() -> map[table.header[index].copy()] = row[index].copy()
         rows.push(map)
     }
@@ -3641,7 +3641,7 @@ version_args: fn(language: String) -> [String] Never! {
 }
 
 tool_version: fn(command: String, args: [String]) -[Env, Exec, FS, Time, Time.Wait]> String Problem! {
-    argv := [String]{command.copy()}
+    ^argv: [String]{command.copy()}
     loop arg in args -> argv.push(arg.copy())
     ran: process.cmd(argv).run() ?? return Err(problem("tool version failed: {command}"))
     if ran.code != 0 || ran.signal != None -> return Err(problem("tool version failed: {command}"))
@@ -3678,10 +3678,10 @@ measurement_timeout: fn() -[Env]> Int Problem! {
 // Wall time and peak process-tree RSS of one command. A host without a
 // working RSS collector fails: a missing memory measurement is not a zero.
 run_measured: fn(state: Producer, command: String, args: [String], cwd: String, extra: [EnvVar]) -[Env, Exec, FS, IO, Time, Time.Wait]> Measured Problem! {
-    argv := [String]{command.copy()}
+    ^argv: [String]{command.copy()}
     loop arg in args -> argv.push(arg.copy())
     shown: command_text(argv)
-    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(state.timeout_ms)).output_limit(MEASURED_OUTPUT_LIMIT)
+    ^spec: process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(state.timeout_ms)).output_limit(MEASURED_OUTPUT_LIMIT)
     loop pair in extra -> spec = spec.env(pair.name, pair.value)
     spec = spec.env("LC_ALL", "C").env("LANG", "C")
     watch: time.start()
@@ -3694,7 +3694,7 @@ run_measured: fn(state: Producer, command: String, args: [String], cwd: String, 
     sampler: task { peak_rss_until_stopped(platform, pid, receiver) }
     receipt: child.wait() ?? {
         stop_sampler(stop.sender).drop("a sampler that ended reads no stop")
-        _ := sampler.join() ?? 0
+        ^_: sampler.join() ?? 0
         return Err(problem("could not measure {shown}: {err}"))
     }
     duration: time.elapsed(watch).ns
@@ -3704,7 +3704,7 @@ run_measured: fn(state: Producer, command: String, args: [String], cwd: String, 
     if peak <= 0 {
         return Err(problem("RSS measurement failed for {shown}: RSS collector produced no measurement"))
     }
-    stderr := receipt.errors.copy()
+    ^stderr: receipt.errors.copy()
     if receipt.timed_out -> stderr = "{stderr}measurement timed out after {state.timeout_ms}ms"
     status: if receipt.timed_out || receipt.signal != None -> 124 else -> receipt.code
     Measured{status: status, stdout: receipt.output.copy(), stderr: stderr, duration: duration, rss: peak, command: shown}
@@ -3715,7 +3715,7 @@ stop_sampler: fn(sender: Sender<Int>) Err! { sender.send(1) }
 
 // Samples every 5 ms until the measured command has closed.
 peak_rss_until_stopped: fn(platform: String, pid: Int, stop: Receiver<Int>) -[Env, Exec, FS, Time, Time.Wait]> Int Never! {
-    peak := 0
+    ^peak: 0
     loop {
         value: tree_rss(platform, pid)
         if value > peak -> peak = value
@@ -3739,8 +3739,8 @@ tree_rss: fn(platform: String, root: Int) -[Env, Exec, FS, Time, Time.Wait]> Int
 
 // The summed RSS of `root` and its descendants; 0 when none was measured.
 rss_of_tree: fn(root: Int, processes: [ProcessRss]) -> Int Never! {
-    tree := [Int]{root}
-    changed := true
+    ^tree: [Int]{root}
+    ^changed: true
     loop changed {
         changed = false
         loop entry in processes {
@@ -3750,7 +3750,7 @@ rss_of_tree: fn(root: Int, processes: [ProcessRss]) -> Int Never! {
             }
         }
     }
-    total := 0
+    ^total: 0
     loop entry in processes {
         if entry.rss >= 0 && tree.contains(entry.pid) -> total += entry.rss
     }
@@ -3759,13 +3759,13 @@ rss_of_tree: fn(root: Int, processes: [ProcessRss]) -> Int Never! {
 
 // `/proc/*/status`: PPid and the larger of VmHWM and VmRSS.
 linux_processes: fn() -[FS]> [ProcessRss] Never! {
-    out := [ProcessRss]{}
+    ^out: [ProcessRss]{}
     listed: files.list_dir("/proc") ?? return out
     loop entry in listed {
         if !all_digits(entry.name) -> next
         text: files.read("/proc/{entry.name}/status") ?? next
-        ppid := -1
-        rss := -1
+        ^ppid: -1
+        ^rss: -1
         loop line in text.split("\n").to_list() {
             pair: line.partition(":")
             if pair.sep != ":" -> next
@@ -3785,7 +3785,7 @@ linux_processes: fn() -[FS]> [ProcessRss] Never! {
 }
 
 ps_processes: fn() -[Env, Exec, FS, Time, Time.Wait]> [ProcessRss] Never! {
-    out := [ProcessRss]{}
+    ^out: [ProcessRss]{}
     ran: process.cmd([String]{"ps", "-axo", "pid=,ppid=,rss="}).run() ?? return out
     if ran.code != 0 || ran.signal != None -> return out
     loop line in ran.output.split("\n").to_list() {
@@ -3801,7 +3801,7 @@ ps_processes: fn() -[Env, Exec, FS, Time, Time.Wait]> [ProcessRss] Never! {
 powershell_processes: fn(shell: String) -[Env, Exec, FS, Time, Time.Wait]> [ProcessRss]? Never! {
     ran: process.cmd([String]{shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_RSS_SCRIPT}).run() ?? return None
     if ran.code != 0 || ran.signal != None -> return None
-    out := [ProcessRss]{}
+    ^out: [ProcessRss]{}
     loop line in ran.output.split("\n").to_list() {
         fields: line.trim().split("|").to_list()
         if fields.len() != 3 || !all_digits(fields[0]) || !all_digits(fields[1]) || !all_digits(fields[2]) {
@@ -3876,7 +3876,7 @@ peer_launcher: fn(root: String, jet: String, suffix: String) -[Env, Exec, FS, Ti
 }
 
 authority_fields: fn(authority: String) -> AuthorityFields Problem! {
-    found := AuthorityFields{keys: [String]{}, values: [String:String]{}}
+    ^found: AuthorityFields{keys: [String]{}, values: [String:String]{}}
     loop part in authority.split(";").to_list() {
         if part.find("=") < 1 -> return Err(problem("malformed task authority: {authority}"))
         pair: part.partition("=")
@@ -3902,7 +3902,7 @@ peer_measured: fn(state: Producer, task: [String:String], command: String, args:
     allowed: [String]{"argv", "build-input", "cwd", "host", "network", "external-write"}
     inputs: (if has(values, "argv") -> 1 else -> 0) + (if has(values, "build-input") -> 1 else -> 0)
     input_key: if has(values, "argv") -> "argv" else -> "build-input"
-    known := true
+    ^known: true
     loop key in authority.keys {
         if !allowed.contains(key) -> known = false
     }
@@ -3910,7 +3910,7 @@ peer_measured: fn(state: Producer, task: [String:String], command: String, args:
     if authority.keys.len() != 5 || inputs != 1 || !known || at(values, input_key) != "input-root" || at(values, "cwd") != "scratch" || at(values, "host") != "ambient" || (network != "disabled" && network != "loopback-only") || at(values, "external-write") != "disabled" {
         return Err(problem("peer isolation authority is missing or unsupported: {task_id}"))
     }
-    launch := [String]{
+    ^launch: [String]{
         "--contract={PEER_LAUNCHER_CONTRACT}",
         "--task-id={task_id}",
         "--root={cwd}",
@@ -3922,7 +3922,7 @@ peer_measured: fn(state: Producer, task: [String:String], command: String, args:
         command.copy(),
     }
     loop arg in args -> launch.push(arg.copy())
-    env := [EnvVar]{env_var("TMPDIR", temporary), env_var("TMP", temporary), env_var("TEMP", temporary)}
+    ^env: [EnvVar]{env_var("TMPDIR", temporary), env_var("TMP", temporary), env_var("TEMP", temporary)}
     loop pair in extra -> env.push(pair.copy())
     env.push(env_var("JET_COMPILED_WORKLOAD_PEER_CONTRACT", PEER_LAUNCHER_CONTRACT))
     run_measured(state, launcher.path, launch, cwd, env)
@@ -4029,9 +4029,9 @@ stage_path: fn(source: String, destination: String) -[Env, FS]> Problem! {
         if !target.is_file && !target.is_dir -> return Err(problem("`{spec.sidecar}` names a link"))
     }
     copy_path(source, destination, true) ?? return Err(err)
-    ordered := spec.keys.copy()
+    ^ordered: spec.keys.copy()
     ordered.sort()
-    depth := 0
+    ^depth: 0
     loop relative in ordered {
         parts: relative.split("/").to_list().len()
         if parts > depth -> depth = parts
@@ -4104,7 +4104,7 @@ source_closure_files: fn(source: String) -[FS]> [String] Problem! {
     meta: files.stat(source) ?? return Err(problem("source is not a file or directory: {source}"))
     if meta.is_file -> return [String]{source.copy()}
     if !meta.is_dir -> return Err(problem("source is not a file or directory: {source}"))
-    found := [String]{}
+    ^found: [String]{}
     closure_walk(source, found) ?? return Err(err)
     found.sort()
     found
@@ -4133,12 +4133,12 @@ stage_source: fn(source: String, destination: String, language: String) -[Env, F
 // Source text with comments and string contents blanked, newlines kept.
 scrub_code: fn(text: String) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     space: U8{32}
     newline: U8{10}
-    state := 0
-    quote := U8{0}
-    index := 0
+    ^state: 0
+    ^quote: U8{0}
+    ^index: 0
     loop index < raw.len() {
         byte: raw[index]
         ahead: if index + 1 < raw.len() -> raw[index + 1] else -> U8{0}
@@ -4180,7 +4180,7 @@ scrub_code: fn(text: String) -> String Never! {
 }
 
 source_effort: fn(source: String) -[FS]> Int Problem! {
-    lines := 0
+    ^lines: 0
     loop file in source_closure_files(source) ?? return Err(err) {
         meta: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
         if !meta.is_file -> next
@@ -4204,7 +4204,7 @@ unsafe_pattern: fn(language: String) -> String Never! {
 unsafe_inventory: fn(source: String, language: String) -[FS]> UnsafeSites Problem! {
     pattern: regex.compile(unsafe_pattern(language)) ?? return Err(problem("unsafe pattern: {err}"))
     breaks: regex.compile("\n") ?? return Err(problem("line pattern: {err}"))
-    sites := [String]{}
+    ^sites: [String]{}
     loop file in source_closure_files(source) ?? return Err(err) {
         meta: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
         if !meta.is_file -> next
@@ -4213,7 +4213,7 @@ unsafe_inventory: fn(source: String, language: String) -[FS]> UnsafeSites Proble
         newlines: breaks.matches(scrubbed)
         lines: scrubbed.split("\n").to_list()
         loop found in pattern.matches(scrubbed) {
-            line := 1
+            ^line: 1
             loop mark in newlines {
                 if mark.start < found.start -> line += 1
             }
@@ -4227,14 +4227,14 @@ unsafe_inventory: fn(source: String, language: String) -[FS]> UnsafeSites Proble
 // The package authority a Jet adapter needs, read from its scrubbed source.
 jet_authority: fn(task: [String:String], source: String) -[FS]> String Problem! {
     fields: authority_fields(at(task, "authority")) ?? return Err(err)
-    texts := [String]{}
+    ^texts: [String]{}
     loop file in source_closure_files(source) ?? return Err(err) {
         meta: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
         if !meta.is_file -> next
         texts.push(scrub_code(files.read(file) ?? return Err(problem("`{file}` cannot be read: {err}"))))
     }
     code: texts.join("\n")
-    allow := [String]{}
+    ^allow: [String]{}
     if has(fields.values, "argv") || has(fields.values, "build-input") || code.contains("core.files") {
         allow.push("FS")
     }
@@ -4268,7 +4268,7 @@ write_workload_package: fn(project: String, task: [String:String], source: Strin
 // --- builds
 
 hash_closure: fn(entries: [ClosureFile]) -[FS]> String Never! {
-    buffer := [U8]{}
+    ^buffer: [U8]{}
     loop entry in entries {
         put_text(buffer, entry.name)
         put_text(buffer, file_sha256(entry.file))
@@ -4277,7 +4277,7 @@ hash_closure: fn(entries: [ClosureFile]) -[FS]> String Never! {
 }
 
 closure_size: fn(entries: [ClosureFile]) -[FS]> Int Never! {
-    total := 0
+    ^total: 0
     loop entry in entries -> total += file_size(entry.file)
     total
 }
@@ -4300,7 +4300,7 @@ artifact_closure: fn(state: Producer, language: String, artifact: String, source
     if language != "domain" -> return program_closure(artifact)
     entry: relative_inside(artifact, root)
     if entry == "" -> return Err(problem("domain artifact escaped source root: {artifact}"))
-    entries := [ClosureFile]{}
+    ^entries: [ClosureFile]{}
     loop file in sources {
         relative: relative_inside(file, root)
         if relative == "" -> return Err(problem("domain source closure escaped root: {file}"))
@@ -4356,10 +4356,10 @@ jet_build: fn(state: Producer, task: [String:String], project: String, source: S
         destination: if files.is_dir(embedded) && !files.is_symlink(embedded) -> "{project}/input-root" else -> "{project}/input.tsv"
         stage_path(embedded, destination) ?? return Err(err)
     }
-    args := [String]{"build", "--profile=release"}
+    ^args: [String]{"build", "--profile=release"}
     if target != "" -> args.push("--target={target}")
     args.push(files.relative(staged.entry, project))
-    env := [EnvVar]{env_var("JET_STORE_DIR", "{project}/.jet-store"), env_var("JET_FFI_CACHE_DIR", "{project}/.jet-ffi-cache"), env_var("CARGO_NET_OFFLINE", "true")}
+    ^env: [EnvVar]{env_var("JET_STORE_DIR", "{project}/.jet-store"), env_var("JET_FFI_CACHE_DIR", "{project}/.jet-ffi-cache"), env_var("CARGO_NET_OFFLINE", "true")}
     if target == "aarch64-unknown-linux-gnu" {
         linker: process.env_nonempty("RUSTC_LINKER_CROSS") ?? "aarch64-linux-gnu-gcc"
         env.push(env_var("RUSTC_LINKER", linker))
@@ -4384,9 +4384,9 @@ peer_build: fn(state: Producer, task: [String:String], ledger: [String:String], 
     staged: stage_source("{state.corpus}/{source}", dir, language) ?? return Err(err)
     entry: files.relative(staged.entry, dir)
     output: "{dir}/peer{state.suffix}"
-    command := ""
-    args := [String]{}
-    env := [EnvVar]{}
+    ^command: ""
+    ^args: [String]{}
+    ^env: [EnvVar]{}
     if language == "rust" {
         command = process.env_nonempty("RUSTC") ?? at(state.toolchain_command, "rust")
         args = [String]{"--edition=2021", "-O"}
@@ -4457,7 +4457,7 @@ peer_run: fn(state: Producer, task: [String:String], ledger: [String:String], la
 // diagnostic-rubric-v1: classification, location, cause, action and source.
 rubric_passed: fn(text: String) -> Int Never! {
     insensitive: regex.flags(true, false, false)
-    passed := 0
+    ^passed: 0
     loop pattern in
         ([String]{
         "\\b(?:error|fatal|syntax|parse|diagnostic)\\b",
@@ -4479,8 +4479,8 @@ diagnostic_probe: fn(state: Producer, task: [String:String], language: String, s
     files.append_all(staged.entry, invalid) ?? return Err(problem("`{staged.entry}` cannot be written: {err}"))
     entry: files.relative(staged.entry, dir)
     binary: "{dir}/diagnostic{state.suffix}"
-    command := ""
-    args := [String]{}
+    ^command: ""
+    ^args: [String]{}
     if jet {
         command = state.jet.copy()
         args = [String]{"check", entry.copy()}
@@ -4517,7 +4517,7 @@ deploy_closure: fn(state: Producer, task: [String:String], language: String, clo
     watch: time.start()
     remove_tree(destination) ?? return Err(err)
     files.create_dir_all(destination) ?? return Err(problem("`{destination}` cannot be created: {err}"))
-    deployed := [ClosureFile]{}
+    ^deployed: [ClosureFile]{}
     loop entry in closure.entries {
         target: "{destination}/{entry.name}"
         copy_path(entry.file, target, false) ?? return Err(err)
@@ -4634,7 +4634,7 @@ peer_web_build: fn(state: Producer, source: String, input: String, dir: String) 
 // --- the run
 
 ledger_index: fn(rows: [[String:String]], key: String) -> [String:[String:String]] Never! {
-    out := [String:[String:String]]{}
+    ^out: [String:[String:String]]{}
     loop row in rows -> out[at(row, key)] = row.copy()
     out
 }
@@ -4669,7 +4669,7 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
         files.create_dir_all(report) ?? return Err(problem("`{report}` cannot be created: {err}"))
     }
     files.create_dir_all("{work}/runs") ?? return Err(problem("`{work}/runs` cannot be created: {err}"))
-    _ := static_contract(root) ?? return Err(problem("frozen contract rejected: {err.message}"))
+    ^_: static_contract(root) ?? return Err(problem("frozen contract rejected: {err.message}"))
     timeout_ms: measurement_timeout() ?? return Err(err)
     manifest: ledger_rows(root, "manifest.tsv") ?? return Err(err)
     peers: ledger_rows(root, "peer_ledger.tsv") ?? return Err(err)
@@ -4679,9 +4679,9 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
     policy_rows: ledger_rows(root, "measurement_policy.tsv") ?? return Err(err)
     tier_rows: ledger_rows(root, "tier_matrix.tsv") ?? return Err(err)
     toolchains: ledger_rows(root, "toolchain_contract.tsv") ?? return Err(err)
-    commands := [String:String]{}
-    prefixes := [String:String]{}
-    languages := [String]{}
+    ^commands: [String:String]{}
+    ^prefixes: [String:String]{}
+    ^languages: [String]{}
     loop row in toolchains {
         language: at(row, "language")
         commands[language.copy()] = at(row, "command")
@@ -4691,14 +4691,14 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
     if distinct_count(languages) != 6 {
         return Err(problem("frozen toolchain contract is incomplete"))
     }
-    counts := [String]{}
+    ^counts: [String]{}
     loop row in policy_rows -> counts.push(js_float(num(at(row, "samples"))))
     sample_count: if counts.len() == 0 -> 0 else -> Int.parse(counts[0]) ?? 0
     if distinct_count(counts) != 1 || sample_count < 1 {
         return Err(problem("measurement policy must use one positive sample count"))
     }
-    selected := [String:[String:String]]{}
-    selected_ids := [String]{}
+    ^selected: [String:[String:String]]{}
+    ^selected_ids: [String]{}
     loop row in peers {
         if at(row, "selection") != "best-applicable" -> next
         selected[at(row, "task_id")] = row.copy()
@@ -4766,7 +4766,7 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
     source_hash: hash_relative_files(root, source_paths()) ?? return Err(err)
     launcher: peer_launcher(root, jet, setup.suffix) ?? return Err(err)
     node_found: resolve_executable(if platform == "windows" -> "node.exe" else -> "node")
-    node := ""
+    ^node: ""
     if node_found != "" -> node = files.canonicalize(node_found) ?? node_found.copy()
     state: Producer{
         root: root.copy(),
@@ -4784,12 +4784,12 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
         toolchain_command: commands,
         toolchain_prefix: prefixes,
     }
-    commits := [String]{}
+    ^commits: [String]{}
     loop row in manifest {
         peer: selected.get(at(row, "task_id")) ?? return Err(problem("missing selected adapter or peer: {at(row, "task_id")}"))
         commits.push("{at(row, "task_id")}:{at(peer, "source_revision")}")
     }
-    identity := [String]{
+    ^identity: [String]{
         IDENTITY_HEADER,
         "1\tcandidate_commit\t{candidate}",
         "1\tplatform\t{platform}",
@@ -4805,7 +4805,7 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
         "1\tsource_closure_sha256\t{source_hash}",
         "1\tpeer_commits\t{commits.join(",")}",
     }
-    rows := Rows{
+    ^rows: Rows{
         samples: [[String]]{},
         receipts: [String]{},
         tier_receipts: [String]{},
@@ -4830,8 +4830,8 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
     }
     stats: sample_statistics(rows.samples, policies, selected) ?? return Err(err)
     loss_rows: stat_losses(stats, selected, task_by_id) ?? return Err(err)
-    statistics := [String]{STATISTICS_HEADER}
-    measurements := [String]{MEASUREMENT_HEADER}
+    ^statistics: [String]{STATISTICS_HEADER}
+    ^measurements: [String]{MEASUREMENT_HEADER}
     loop index in 0..<stats.len() {
         stat: stats[index]
         owner: loss_rows[index]
@@ -4841,15 +4841,15 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
         tool: rows.toolchain_by_key.get("{stat.task}\t{stat.language}") ?? return Err(problem("toolchain identity missing: {stat.task}/{stat.language}"))
         measurements.push("1\t{stat.task}\t{stat.language}\t{stat.metric}\t{js_float(stat.median)}\t{stat.unit}\t{tool}\t{evidence}\t{status}\t{owner}\t{stat.platform}\t{stat.target}\t{stat.tier}")
     }
-    outcomes := [String]{OUTCOME_HEADER}
+    ^outcomes: [String]{OUTCOME_HEADER}
     loop outcome in rows.outcomes {
-        owner := "-"
+        ^owner: "-"
         loop index in 0..<stats.len() {
             if stats[index].task == outcome[1] && stats[index].language == "jet" && loss_rows[index] != "-" {
                 owner = loss_rows[index].copy()
             }
         }
-        cells := outcome.copy()
+        ^cells: outcome.copy()
         if owner != "-" {
             cells[12] = "loss"
             cells[14] = owner.copy()
@@ -4865,17 +4865,17 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
     if file_sha256(launcher.path) != launcher.sha256 {
         return Err(problem("peer isolation launcher changed during run"))
     }
-    samples := [String]{SAMPLE_HEADER}
+    ^samples: [String]{SAMPLE_HEADER}
     loop row in rows.samples -> samples.push(row.join("\t"))
-    tier_reports := [String]{TIER_REPORT_HEADER}
+    ^tier_reports: [String]{TIER_REPORT_HEADER}
     loop row in rows.tier_reports -> tier_reports.push(row.copy())
-    receipts := [String]{RECEIPT_HEADER}
+    ^receipts: [String]{RECEIPT_HEADER}
     loop row in rows.receipts -> receipts.push(row.copy())
-    tier_receipts := [String]{TIER_RECEIPT_HEADER}
+    ^tier_receipts: [String]{TIER_RECEIPT_HEADER}
     loop row in rows.tier_receipts -> tier_receipts.push(row.copy())
-    coverage := [String]{PEER_COVERAGE_HEADER}
+    ^coverage: [String]{PEER_COVERAGE_HEADER}
     loop row in rows.peer_coverage -> coverage.push(row.copy())
-    peer_measurements := [String]{PEER_MEASUREMENT_HEADER}
+    ^peer_measurements: [String]{PEER_MEASUREMENT_HEADER}
     loop row in rows.peer_measurements -> peer_measurements.push(row.copy())
     write_lines("{report}/peer_coverage.tsv", coverage) ?? return Err(err)
     write_lines("{report}/peer_measurements.tsv", peer_measurements) ?? return Err(err)
@@ -5116,7 +5116,7 @@ no_tier_evidence: fn() -> TierEvidence Never! {
 }
 
 tier_evidence: fn(state: Producer, task: [String:String], peer: [String:String], adapter: [String:String], paths: TaskPaths) -[Env, Exec, FS, IO, Time, Time.Wait]> TierEvidence Problem! {
-    found := no_tier_evidence()
+    ^found: no_tier_evidence()
     if state.platform != "linux" -> return found
     task_id: at(task, "task_id")
     authority: at(task, "authority")
@@ -5131,7 +5131,7 @@ tier_evidence: fn(state: Producer, task: [String:String], peer: [String:String],
     targets: at(peer, "applicable_targets")
     if task_id == "cross-platform-notes" {
         web_project: "{paths.work}/jet-web"
-        _ := jet_build(state, task, web_project, at(adapter, "jet_source"), "web", paths.input) ?? return Err(err)
+        ^_: jet_build(state, task, web_project, at(adapter, "jet_source"), "web", paths.input) ?? return Err(err)
         build: "{web_project}/build"
         require_file("{build}/app.js", "Jet web JavaScript") ?? return Err(err)
         require_file("{build}/app.wasm", "Jet web Wasm") ?? return Err(err)
@@ -5155,7 +5155,7 @@ tier_evidence: fn(state: Producer, task: [String:String], peer: [String:String],
             web: peer_web_build(state, at(adapter, "peer_source"), paths.input, peer_project) ?? return Err(err)
             peer_browser: web_browser_run(state, task, peer_project, paths.expected, true) ?? return Err(err)
             closure: artifact_closure(state, "domain", web.entry, web.source.files, web.source.root) ?? return Err(err)
-            entries := closure.entries.copy()
+            ^entries: closure.entries.copy()
             entries.push(ClosureFile{name: "build/index.html", file: web.index.copy()})
             entries.push(ClosureFile{name: "runtime/chromium", file: peer_browser.chromium.copy()})
             found.peer_web_proof = "format=browser-js;target=web;entry={files.basename(web.entry)};index={files.basename(web.index)}"
@@ -5208,10 +5208,10 @@ tier_rows_for: fn(state: Producer, rows: ^Rows, task: [String:String], peer: [St
         active: !excluded && in_scope
         loop jet in ([Bool]{true, false}) {
             language: if jet -> "jet" else -> at(peer, "language")
-            status := "not-applicable"
-            artifact := "-"
-            output := "-"
-            command := "not-run:{prefix};{authority}"
+            ^status: "not-applicable"
+            ^artifact: "-"
+            ^output: "-"
+            ^command: "not-run:{prefix};{authority}"
             if active && kind == "jit" && jet {
                 status = "pass"
                 output = evidence.jit_output.copy()
@@ -5252,7 +5252,7 @@ measure_task: fn(state: Producer, rows: ^Rows, task: [String:String], adapter: [
     expected: "{state.corpus}/{at(task, "expected")}"
     language: at(peer, "language")
     command: at(state.toolchain_command, language)
-    executable := command.copy()
+    ^executable: command.copy()
     if language == "rust" -> executable = process.env_nonempty("RUSTC") ?? command
     if language == "domain" -> executable = node_path(state) ?? return Err(err)
     peer_tool: toolchain_identity(state.toolchain_prefix, language, executable, version_args(language)) ?? return Err(err)
@@ -5267,9 +5267,9 @@ measure_task: fn(state: Producer, rows: ^Rows, task: [String:String], adapter: [
         hostile_expected: "{state.corpus}/Expected/{task_id}.hostile.out",
     }
     expected_hash: file_sha256(expected)
-    jet_side := new_side(state, "jet", "jet", at(adapter, "jet_source"), at(adapter, "jet_hostile"), true) ?? return Err(err)
-    peer_side := new_side(state, "peer", language, at(adapter, "peer_source"), at(adapter, "peer_hostile"), false) ?? return Err(err)
-    order := [String]{}
+    ^jet_side: new_side(state, "jet", "jet", at(adapter, "jet_source"), at(adapter, "jet_hostile"), true) ?? return Err(err)
+    ^peer_side: new_side(state, "peer", language, at(adapter, "peer_source"), at(adapter, "peer_hostile"), false) ?? return Err(err)
+    ^order: [String]{}
     loop sample in 1..<(state.sample_count + 1) {
         order.push("jet:{sample}")
         measure_sample(state, task, peer, jet_side, sample, paths) ?? return Err(err)
@@ -5311,14 +5311,14 @@ measure_task: fn(state: Producer, rows: ^Rows, task: [String:String], adapter: [
 // --- all-peer coverage
 
 coverage_numbers: fn(values: [Int]) -> String Never! {
-    sorted := [Float]{}
+    ^sorted: [Float]{}
     loop value in values -> sorted.push(Float{value})
     sort_floats(sorted)
     count: sorted.len()
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop value in sorted -> total += value
     mean: total / Float{count}
-    spread := Float{0.0}
+    ^spread: Float{0.0}
     loop value in sorted -> spread += (value - mean) * (value - mean)
     relative: if mean == (Float{0.0}) -> Float{0.0} else -> math.sqrt(spread / Float{count}) / mean
     "{js_float(median_of(sorted))}\t{js_float(sorted[0])}\t{js_float(sorted[count - 1])}\t{js_float(relative)}"
@@ -5350,26 +5350,26 @@ run_peer_coverage: fn(state: Producer, rows: ^Rows, peer: [String:String], task:
     }
     command: at(state.toolchain_command, language)
     if command == "" -> return Err(problem("peer coverage toolchain missing: {language}"))
-    executable := command.copy()
+    ^executable: command.copy()
     if language == "domain" -> executable = node_path(state) ?? return Err(err)
     tool: toolchain_identity(state.toolchain_prefix, language, executable, version_args(language)) ?? return Err(err)
     remember_tool(rows, tool.copy())
     lines: source_effort(adapter_path) ?? return Err(err)
     sites: unsafe_inventory(adapter_path, language) ?? return Err(err)
-    build_values := [Int]{}
-    edit_values := [Int]{}
-    runtime_values := [Int]{}
-    memory_values := [Int]{}
-    diagnostic_values := [Int]{}
-    debugging_values := [Int]{}
-    deployment_values := [Int]{}
-    artifact_sizes := [Int]{}
-    first_output := ""
-    hostile_output := ""
-    first_build := ""
-    first_run := ""
-    first_hostile := ""
-    first_diagnostic := ""
+    ^build_values: [Int]{}
+    ^edit_values: [Int]{}
+    ^runtime_values: [Int]{}
+    ^memory_values: [Int]{}
+    ^diagnostic_values: [Int]{}
+    ^debugging_values: [Int]{}
+    ^deployment_values: [Int]{}
+    ^artifact_sizes: [Int]{}
+    ^first_output: ""
+    ^hostile_output: ""
+    ^first_build: ""
+    ^first_run: ""
+    ^first_hostile: ""
+    ^first_diagnostic: ""
     path_key: coverage_key_path(key)
     loop sample in 1..<(state.sample_count + 1) {
         run_root: "{state.work}/coverage-{path_key}-{sample}"
@@ -5456,15 +5456,15 @@ Stat: struct {
 // One statistic per task, language and metric, in first-sample order; a
 // group outside its measurement policy fails the run.
 sample_statistics: fn(samples: [[String]], policies: [String:[String:String]], selected: [String:[String:String]]) -> [Stat] Problem! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop row in samples {
         key: "{row[1]}\t{row[2]}\t{row[3]}"
         if !keys.contains(key) -> keys.push(key)
     }
-    stats := [Stat]{}
+    ^stats: [Stat]{}
     loop key in keys {
-        values := [Float]{}
-        first := [String]{}
+        ^values: [Float]{}
+        ^first: [String]{}
         loop row in samples {
             if "{row[1]}\t{row[2]}\t{row[3]}" != key -> next
             if first.len() == 0 -> first = row.copy()
@@ -5474,28 +5474,28 @@ sample_statistics: fn(samples: [[String]], policies: [String:[String:String]], s
         policy: policies.get(first[3]) ?? return Err(problem("measurement policy missing: {first[3]}"))
         threshold: num(at(policy, "min_value"))
         count: values.len()
-        below := false
+        ^below: false
         loop value in values {
             if value < threshold -> below = true
         }
         if (Float{count}) != num(at(policy, "samples")) || (Float{count}) < num(at(policy, "min_samples")) || below {
             return Err(problem("sample threshold failed: {label}"))
         }
-        sorted := values.copy()
+        ^sorted: values.copy()
         sort_floats(sorted)
         med: median_of(sorted)
-        total := Float{0.0}
+        ^total: Float{0.0}
         loop value in values -> total += value
         mean: total / Float{count}
-        spread := Float{0.0}
+        ^spread: Float{0.0}
         loop value in values -> spread += (value - mean) * (value - mean)
         relative: if mean == (Float{0.0}) -> Float{0.0} else -> math.sqrt(spread / Float{count}) / absf(mean)
-        deviations := [Float]{}
+        ^deviations: [Float]{}
         loop value in values -> deviations.push(absf(value - med))
         sort_floats(deviations)
         mad: median_of(deviations)
         limit: if mad == (Float{0.0}) -> Float{0.0} else -> mad * num(at(policy, "outlier_mad_multiplier"))
-        outliers := 0
+        ^outliers: 0
         loop value in values {
             outside: if mad == (Float{0.0}) -> value != med else -> absf(value - med) > limit
             if outside -> outliers += 1
@@ -5531,7 +5531,7 @@ sample_statistics: fn(samples: [[String]], policies: [String:[String:String]], s
 // Each statistic's loss owner: the task's loss cards when Jet's median is at
 // or above the peer's times the tolerance, else "-".
 stat_losses: fn(stats: [Stat], selected: [String:[String:String]], tasks: [String:[String:String]]) -> [String] Problem! {
-    owners := [String]{}
+    ^owners: [String]{}
     loop stat in stats {
         if stat.language != "jet" {
             owners.push("-")
@@ -5539,8 +5539,8 @@ stat_losses: fn(stats: [Stat], selected: [String:[String:String]], tasks: [Strin
         }
         peer: selected.get(stat.task) ?? return Err(problem("peer statistic missing: {stat.task}/{stat.metric}"))
         peer_language: at(peer, "language")
-        peer_median := Float{0.0}
-        found := false
+        ^peer_median: Float{0.0}
+        ^found: false
         loop other in stats {
             if other.task == stat.task && other.language == peer_language && other.metric == stat.metric {
                 peer_median = other.median

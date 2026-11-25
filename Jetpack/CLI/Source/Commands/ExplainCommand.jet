@@ -18,14 +18,14 @@ cli_optional_text: fn(value: String?) -> Dyn Never! {
 }
 
 cli_cmd_explain: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     query: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <NAME>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
     if query.starts_with("package-overlay:") {
         return cli_cmd_explain_overlay(cache, theme, parsed, query)
     }
     if jet_cli_syntax_explanation(query) == .Val(explanation) {
         if parsed.flags.json {
-            fields := StatusFields.new()
+            ^fields: StatusFields.new()
             fields = fields.with("code", Dyn.Text(explanation.code))
             fields = fields.with("stage", Dyn.Text(explanation.stage))
             fields = fields.with("what", Dyn.Text(explanation.what ?? explanation.meaning))
@@ -35,7 +35,7 @@ cli_cmd_explain: fn(verification: StoreVerification, theme: Theme, parsed: CLIPa
             text: StatusEnvelope.new("explain", true).with_field("explain", report_status_object(fields)).json() ?? return cli_status_encoding_error(err)
             print(text)
         } else {
-            stdout_handle := term.stdout()
+            ^stdout_handle: term.stdout()
             stdout_handle.write(diagnostic_explanation_render(explanation, theme.color)).drop("explain output is best-effort")
         }
         return EXIT_OK
@@ -45,8 +45,8 @@ cli_cmd_explain: fn(verification: StoreVerification, theme: Theme, parsed: CLIPa
         rendered: pkg_manifest_diagnostic_from_row("E2106", [ManifestEntry]{ManifestEntry{key: "token", value: query}, ManifestEntry{key: "closest", value: closest}}, None)
         return cli_explain_error(theme, parsed, rendered.code, rendered.what, rendered.why, rendered.fix)
     }
-    lens := ExplainLens.All
-    package := query
+    ^lens: ExplainLens.All
+    ^package: query
     if ExplainLens.parse(query) == .Val(parsed_lens) {
         lens = parsed_lens
         package = parsed.positional.get(1) ?? return cli_explain_error(theme, parsed, "E1274", "explain lens `{query}` needs a package ref", "causal package explanations need the lens and the package ref.", "write `jet explain {query} <ref>`.")
@@ -58,7 +58,7 @@ cli_cmd_explain: fn(verification: StoreVerification, theme: Theme, parsed: CLIPa
             if parsed.flags.json {
                 print(explanation.to_json() ?? return cli_status_encoding_error(err))
             } else {
-                stdout_handle := term.stdout()
+                ^stdout_handle: term.stdout()
                 stdout_handle.write(explanation.text()).drop("explain output is best-effort")
             }
             loop report in explanation.reports {
@@ -85,11 +85,11 @@ cli_cmd_explain_overlay: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, par
     lock: SemanticLockFile.with_records(records)
     fact: trust_explain_semantic_lock(lock, query) ?? return cli_explain_error(theme, parsed, "E1274", "no overlay record for `{query}`", "`workspace.jet` has overlay policy, but not that overlay/package key.", "query `package-overlay:<overlay>:<package>`.")
     if parsed.flags.json {
-        owners := [Dyn]{}
+        ^owners: [Dyn]{}
         loop owner in fact.owners -> owners.push(Dyn.Text(owner))
-        contenders := [Dyn]{}
+        ^contenders: [Dyn]{}
         loop contender in fact.contenders {
-            contender_fields := StatusFields.new()
+            ^contender_fields: StatusFields.new()
             contender_fields = contender_fields.with("owner", Dyn.Text(contender.owner_package))
             contender_fields = contender_fields.with("provider", Dyn.Text(contender.provider))
             contender_fields = contender_fields.with("exact", Dyn.Text(contender.exact_output))
@@ -104,7 +104,7 @@ cli_cmd_explain_overlay: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, par
             contender_fields = contender_fields.with("update", Dyn.Text(contender.update_command))
             contenders.push(report_status_object(contender_fields))
         }
-        fields := StatusFields.new()
+        ^fields: StatusFields.new()
         fields = fields.with("query", Dyn.Text(query.copy()))
         fields = fields.with("lens", Dyn.Text("overlay"))
         fields = fields.with("semantic_key", Dyn.Text(fact.semantic_key))
@@ -142,7 +142,7 @@ cli_explain_workspace_failure: fn(parsed: CLIParsed, diagnostic: Diagnostic) -[I
     if parsed.flags.json {
         report: cli_diagnostic_to_report(diagnostic, ReportPath.from_process(WORKSPACE_FILE))
         line: StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
-        stdout_handle := term.stdout()
+        ^stdout_handle: term.stdout()
         stdout_handle.write(line).drop("status output is best-effort")
     } else {
         terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}, false))

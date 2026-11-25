@@ -29,7 +29,7 @@ parser_parse_protocol: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
     start: parser_bump(state)
     name: parser_expect_name(state, "for a protocol name")
     parser_expect(state, TOKEN_LBRACE, "`{{` before protocol messages")
-    messages := [ProtocolMessage]{}
+    ^messages: [ProtocolMessage]{}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
@@ -76,7 +76,7 @@ parser_protocol_message: fn(state: ^JetParserState) -> ProtocolMessage {
     parser_expect(state, TOKEN_COLON, "after a protocol message sender")
     message: parser_expect_name(state, "for a protocol message name")
     parser_expect(state, TOKEN_LPAREN, "`(` before a protocol message payload")
-    fields := [TypedNamedField]{}
+    ^fields: [TypedNamedField]{}
     loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
         field: parser_expect_name(state, "for a protocol message field")
         parser_expect(state, TOKEN_COLON, "after a protocol message field")

@@ -112,13 +112,13 @@ ScriptRegistryProvider: struct {
         project: ctx.project_dir ?? return None
         locked: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return None
         authority: provider_script_registry_cache_authority(self.kind, ctx) ?? return None
-        identity := provider_cache_identity(locked.source_hash, self.kind.recipe, ctx, authority.provenance())
+        ^identity: provider_cache_identity(locked.source_hash, self.kind.recipe, ctx, authority.provenance())
         identity.platform = provider_registry_locked_platform(locked.envelope)
         Val(CacheExpectation{identity: identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
 
     plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
-        plan := DownloadPlan.empty()
+        ^plan: DownloadPlan.empty()
         loop spec in specs {
             plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
         }
@@ -149,10 +149,10 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
     repository: authority.registry()
     fetch_authority: authority.provenance()
     scratch: provider_registry_scratch(ctx.store_dir, kind.label(), "could not create provider scratch")
-    guard := RegistryScratch{path: scratch}
+    ^guard: RegistryScratch{path: scratch}
     defer close(guard)
     packages: provider_script_resolve_closure(kind, authority, scratch, root_ref.name, root_ref.version, [String:[RegistryPackage]]{})
-    artifacts := [RegistryArtifact]{}
+    ^artifacts: [RegistryArtifact]{}
     loop package in packages {
         path: files.join(scratch, "{provider_script_safe_filename(package.name)}-{provider_script_safe_filename(package.version)}{kind.archive_suffix}")
         authority.to_path(package.url, path, scratch)
@@ -190,7 +190,7 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
     provider_registry_seal(out_dir, "could not seal provider output")
 
     envelope: Envelope.for_output(out_dir, spec.raw, kind.recipe)
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop index in 0..<(artifacts.len() - 1) {
         dependencies.push("{artifacts[index].package.name}#version={artifacts[index].package.version}")
     }
@@ -201,12 +201,12 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
         .None -> {}
     }
     identity: provider_cache_identity(source_hash, kind.recipe, ctx, fetch_authority)
-    objects := [RegistrySourceObject]{}
+    ^objects: [RegistrySourceObject]{}
     loop artifact in artifacts {
         objects.push(RegistrySourceObject{name: artifact.package.name, sha256: artifact.sha256, file_name: files.basename(artifact.path)})
     }
     edges: provider_registry_dependency_objects(root.package.name, objects)
-    facts := edges.facts
+    ^facts: edges.facts
     facts["repository"] = repository
     facts["fetch.authority"] = fetch_authority
     extra: [String:String]{"scripts": "disabled", "plugins": "disabled"}
@@ -257,12 +257,12 @@ provider_script_parse_ref: fn(kind: ScriptRegistryKind, raw: String) -> {name: S
 // lists already in solver order (`provider_script_sorted_candidates`);
 // missing names are fetched from the registry.
 provider_script_resolve_closure: fn(kind: ScriptRegistryKind, authority: RegistryAuthority, scratch: String, root: String, version: String, candidates: [String:[RegistryPackage]]) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
-    solver := ScriptRegistrySolver{kind: kind, authority: authority, scratch: scratch, candidates: candidates}
-    constraints := [String:[String]]{}
+    ^solver: ScriptRegistrySolver{kind: kind, authority: authority, scratch: scratch, candidates: candidates}
+    ^constraints: [String:[String]]{}
     constraints[root] = [String]{"={version}"}
     solution: solver.solve(constraints, [String:RegistryPackage]{})
     selected: solution ?? return Err(RegistryError.Reason("no complete dependency solution exists for `{root}` {version}"))
-    walk := ScriptRegistryOrderWalk{selected: selected, active: [String]{}, done: [String]{}, out: [RegistryPackage]{}}
+    ^walk: ScriptRegistryOrderWalk{selected: selected, active: [String]{}, done: [String]{}, out: [RegistryPackage]{}}
     walk.visit(root)
     Ok(walk.out)
 }
@@ -283,10 +283,10 @@ ScriptRegistrySolver: struct {
                 return Ok(None)
             }
         }
-        names := constraints.keys().to_list()
+        ^names: constraints.keys().to_list()
         names.sort()
-        pending := ""
-        found := false
+        ^pending: ""
+        ^found: false
         loop name in names {
             if !selected.has_key(name) {
                 pending = name
@@ -303,13 +303,13 @@ ScriptRegistrySolver: struct {
         options: self.candidates.get(pending) ?? [RegistryPackage]{}
         loop package in options {
             if !provider_script_meets_all(self.kind, package.version, requirements) -> next
-            next_constraints := constraints
+            ^next_constraints: constraints
             loop dependency in package.dependencies {
-                listed := next_constraints.get(dependency.name) ?? [String]{}
+                ^listed: next_constraints.get(dependency.name) ?? [String]{}
                 listed.push(dependency.requirement)
                 next_constraints[dependency.name] = listed
             }
-            next_selected := selected
+            ^next_selected: selected
             next_selected[pending] = package
             solution: self.solve(next_constraints, next_selected)
             if solution != None -> return Ok(solution)
@@ -320,7 +320,7 @@ ScriptRegistrySolver: struct {
 
 // Candidate releases in solver order: newest version first, then by URL.
 provider_script_sorted_candidates: fn(packages: [RegistryPackage]) -> [RegistryPackage] Never! {
-    sorted := packages
+    ^sorted: packages
     sorted.sort_by(fn(left: RegistryPackage, right: RegistryPackage) { provider_script_compare_versions(right.version, left.version).then(left.url <=> right.url) })
     sorted
 }
@@ -349,7 +349,7 @@ ScriptRegistryOrderWalk: struct {
         self.active.push(name.copy())
         package: self.selected.get(name) ?? return Err(RegistryError.Reason("resolved package `{name}` disappeared"))
         loop dependency in package.dependencies -> self.visit(dependency.name)
-        _ := self.active.pop()
+        ^_: self.active.pop()
         self.done.push(name.copy())
         self.out.push(package)
     }
@@ -394,7 +394,7 @@ provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts
 // anywhere below an installed root.
 provider_script_reject_tree_features: fn(kind: ScriptRegistryKind, root: String, forbidden: [String]) -[FS]> RegistryError! {
     entries: files.list_dir(root) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
-    markers := forbidden
+    ^markers: forbidden
     loop suffix in kind.native_suffixes -> markers.push(suffix.copy())
     loop entry in entries {
         stat: files.stat(entry.path) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
@@ -457,7 +457,7 @@ provider_script_check_digest: fn(algorithm: String, package: RegistryPackage, ex
 
 // The closure identity: every archive's package name, version, and SHA-256.
 provider_script_closure_hash: fn(kind: ScriptRegistryKind, artifacts: [RegistryArtifact]) -> String Never! {
-    values := [String]{}
+    ^values: [String]{}
     loop artifact in artifacts {
         values.push(artifact.package.name)
         values.push(artifact.package.version)
@@ -467,7 +467,7 @@ provider_script_closure_hash: fn(kind: ScriptRegistryKind, artifacts: [RegistryA
 }
 
 provider_script_render_provenance: fn(kind: ScriptRegistryKind, repository: String, fetch_authority: String, source_hash: String, artifacts: [RegistryArtifact]) -> String Never! {
-    lines := [String]{"schema=jet-{kind.label()}-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nscripts=disabled\nplugins=disabled\n"}
+    ^lines: [String]{"schema=jet-{kind.label()}-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nscripts=disabled\nplugins=disabled\n"}
     loop artifact in artifacts {
         lines.push("package={artifact.package.name}:{artifact.package.version}:{artifact.sha256}\n")
     }
@@ -488,7 +488,7 @@ provider_script_safe_piece: fn(value: String, punctuation: String) -> Bool Never
 
 // Every scalar that is not an ASCII letter, digit, `-`, `_`, or `.` as `-`.
 provider_script_safe_filename: fn(value: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop scalar in value.chars() {
         text: "{scalar}"
         raw: text.bytes()
@@ -501,9 +501,9 @@ provider_script_safe_filename: fn(value: String) -> String Never! {
 // A registry-relative URL joined to the repository; absolute URLs stay.
 provider_script_absolutize: fn(repository: String, url: String) -> String Never! {
     if url.contains("://") -> return url.copy()
-    base := repository
+    ^base: repository
     loop base.ends_with("/") -> base = base.removesuffix("/")
-    path := url
+    ^path: url
     loop path.starts_with("/") -> path = path.removeprefix("/")
     "{base}/{path}"
 }
@@ -511,7 +511,7 @@ provider_script_absolutize: fn(repository: String, url: String) -> String Never!
 // Percent-encode every byte outside the RFC 3986 unreserved set.
 provider_script_url_piece: fn(value: String) -> String Never! {
     digits: "0123456789ABCDEF".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
         if provider_registry_is_ascii_alnum(code) || code == 45 || code == 95 || code == 46 || code == 126 {
@@ -527,14 +527,14 @@ provider_script_url_piece: fn(value: String) -> String Never! {
 
 // `value` with every leading `v` removed.
 provider_script_trim_v: fn(value: String) -> String Never! {
-    out := value
+    ^out: value
     loop out.starts_with("v") -> out = out.removeprefix("v")
     out
 }
 
 // `value` with every leading and trailing `/` removed.
 provider_script_trim_slashes: fn(value: String) -> String Never! {
-    out := value
+    ^out: value
     loop out.starts_with("/") -> out = out.removeprefix("/")
     loop out.ends_with("/") -> out = out.removesuffix("/")
     out
@@ -610,8 +610,8 @@ provider_script_basic_satisfies: fn(actual: String, raw_requirement: String) -> 
     alternatives: requirement.split("||").to_list()
     loop alternative in alternatives {
         tokens: provider_registry_words(alternative.replace(",", " "))
-        index := 0
-        matched := true
+        ^index: 0
+        ^matched: true
         loop index < tokens.len() {
             constraint: provider_script_constraint_at(tokens, index, SCRIPT_REGISTRY_OPERATORS) ?? {
                 matched = false
@@ -640,8 +640,8 @@ provider_script_composer_satisfies: fn(actual: String, raw_requirement: String) 
             if provider_script_composer_hyphen(actual, tokens[0], tokens[2]) -> return true
             next
         }
-        index := 0
-        matched := true
+        ^index: 0
+        ^matched: true
         loop index < tokens.len() {
             constraint: provider_script_constraint_at(tokens, index, SCRIPT_REGISTRY_COMPOSER_OPERATORS) ?? {
                 matched = false
@@ -687,7 +687,7 @@ provider_script_has_wildcard: fn(wanted: String) -> Bool Never! {
 provider_script_composer_wildcard: fn(raw_actual: String, wanted: String) -> Bool Never! {
     wanted_parts: wanted.split(".").to_list()
     actual: provider_registry_split_any(provider_script_trim_v(raw_actual), ".-+")
-    wildcard := -1
+    ^wildcard: -1
     loop index in 0..<wanted_parts.len() {
         part: wanted_parts[index]
         if part == "*" || part == "x" || part == "X" {
@@ -721,7 +721,7 @@ provider_script_composer_hyphen: fn(actual: String, raw_lower: String, raw_upper
 }
 
 provider_script_partial_upper_bound: fn(version: String) -> String? Never! {
-    parts := provider_script_numeric_parts(version) ?? return None
+    ^parts: provider_script_numeric_parts(version) ?? return None
     if parts.len() == 0 -> return None
     parts[parts.len() - 1] = parts[parts.len() - 1] + 1
     Val(provider_script_join_parts(parts))
@@ -769,7 +769,7 @@ provider_script_satisfies_one: fn(raw_actual: String, operator: String, wanted: 
 
 // Every `.`/`-`/`+` component as a number, or None.
 provider_script_numeric_parts: fn(version: String) -> [Int]? Never! {
-    parts := [Int]{}
+    ^parts: [Int]{}
     pieces: provider_registry_split_any(version, ".-+")
     loop piece in pieces {
         value: provider_registry_parse_u64(piece) ?? return None
@@ -779,7 +779,7 @@ provider_script_numeric_parts: fn(version: String) -> [Int]? Never! {
 }
 
 provider_script_join_parts: fn(parts: [Int]) -> String Never! {
-    texts := [String]{}
+    ^texts: [String]{}
     loop part in parts -> texts.push("{part}")
     texts.join(".")
 }
@@ -787,15 +787,15 @@ provider_script_join_parts: fn(parts: [Int]) -> String Never! {
 // The exclusive upper bound of `~`/`~>`: bump the first component, or the
 // second-to-last for a pessimistic multi-component version.
 provider_script_upper_bound: fn(version: String, pessimistic: Bool) -> String? Never! {
-    parts := provider_script_numeric_parts(version) ?? return None
+    ^parts: provider_script_numeric_parts(version) ?? return None
     index: if pessimistic && parts.len() > 1 -> parts.len() - 2 else -> 0
     provider_script_bump(parts, index)
 }
 
 // The exclusive upper bound of `^`: bump the first non-zero component.
 provider_script_caret_upper_bound: fn(version: String) -> String? Never! {
-    parts := provider_script_numeric_parts(version) ?? return None
-    index := -1
+    ^parts: provider_script_numeric_parts(version) ?? return None
+    ^index: -1
     loop position in 0..<parts.len() {
         if parts[position] != 0 {
             index = position
@@ -808,7 +808,7 @@ provider_script_caret_upper_bound: fn(version: String) -> String? Never! {
 
 provider_script_bump: fn(parts: [Int], index: Int) -> String? Never! {
     if index >= parts.len() -> return None
-    bumped := [Int]{}
+    ^bumped: [Int]{}
     loop position in 0..<parts.len() {
         bumped.push(
             if {

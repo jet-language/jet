@@ -26,10 +26,10 @@ SPELLINGS: [{from: String, to: String}]{
 run: fn() {
     here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
     printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
-    receipt := ""
-    progress := [String]{}
+    ^receipt: ""
+    ^progress: [String]{}
     loop line in printed.lines() {
-        text := line.replace(here, "<case>")
+        ^text: line.replace(here, "<case>")
         loop spelling in SPELLINGS -> text = text.replace(spelling.from, spelling.to)
         if line.starts_with("Receipt: ") {
             receipt = line.removeprefix("Receipt: ")
@@ -75,12 +75,12 @@ run: fn() {
 // in the order it measured them, the twin by name).
 point: fn(value: Dyn, here: String) -> String Never! {
     if value == Dyn.Null -> return "null"
-    parts := [String]{}
+    ^parts: [String]{}
     loop key in
         ["n", "x", "code_lines", "source_sha256", "ok", "exit", "problems", "open_phases", "timeout_phase", "dir"] {
         parts.push("{key}={show(field(value, key), here)}")
     }
-    metrics := [String]{}
+    ^metrics: [String]{}
     if field(value, "metrics") == .Object(entries) {
         loop entry in entries {
             if entry.key.starts_with("counter.") || entry.key.starts_with("trace.") || entry.key == "diagnostics" {
@@ -102,7 +102,7 @@ list: fn(value: Dyn) -> [Dyn] Never! {
 
 show: fn(value: Dyn, here: String) -> String Never! {
     if value == .Object(entries) {
-        shown := [String]{}
+        ^shown: [String]{}
         loop entry in entries {
             if entry.value != Dyn.Null -> shown.push("{entry.key}: {show(entry.value, here)}")
         }

@@ -11,7 +11,7 @@ package: {
 use os: core.sys
 
 spin: fn(done: Atomic<Bool>) -> Int {
-    turns := 0
+    ^turns: 0
     loop !done.load() -> turns += 1
     turns
 }
@@ -27,11 +27,11 @@ run: fn() {
     done: Atomic<Bool>.try_new(false) ?? panic("no flag")
     busy: os.cpu_count() * 2 + 2
     task.group turns {
-        handles := [Task<Int>]{}
+        ^handles: [Task<Int>]{}
         loop _ in 0..<busy -> handles.push(task spin(done))
         last: task finish(done)
         print(last.join() ?? panic("the last task failed"))
-        stopped := 0
+        ^stopped: 0
         loop handle in handles {
             if (handle.join() ?? -1) >= 0 -> stopped += 1
         }

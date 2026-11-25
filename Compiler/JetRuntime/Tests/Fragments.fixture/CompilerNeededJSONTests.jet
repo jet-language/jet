@@ -6,7 +6,7 @@ compiler_json_fixture_error: fn(text: I64, reason: I64, line: I64) -> Bool {
     rt_text_store(slots, I64{723})
     rt_text_store(slots + I64{8}, I64{724})
     status: jet_std_json_parse(text, slots, slots + I64{8})
-    result := false
+    ^result: false
     if (status == I64{0}) {
         error: rt_text_word(slots + I64{8})
         result = rt_text_word(slots) == I64{723} && encoding_word(error + ENCODING_ERROR_FORMAT) == I64{0} && encoding_word(error + ENCODING_ERROR_KIND) == I64{0} && encoding_word(error + ENCODING_ERROR_BYTE_OFFSET) == I64{0} && encoding_word(error + ENCODING_ERROR_LINE_PRESENT) == I64{1} && encoding_word(error + ENCODING_ERROR_LINE) == line && encoding_word(error + ENCODING_ERROR_COLUMN_PRESENT) == I64{0} && rt_text_len(encoding_word(error + ENCODING_ERROR_PATH)) == I64{0} && jet_rt_string_eq(encoding_word(error + ENCODING_ERROR_REASON), reason) && encoding_word(error + ENCODING_ERROR_CAUSE) == I64{0}
@@ -21,7 +21,7 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
     rt_text_store(slots, I64{723})
     rt_text_store(slots + I64{8}, I64{724})
     status: jet_std_json_parse(text, slots, slots + I64{8})
-    result := false
+    ^result: false
     if (status == I64{1}) {
         tree: rt_text_word(slots)
         show: jet_rt_handle_debug_dyn(tree)
@@ -166,7 +166,7 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
         return I64{42}
     }
     nested: jet_rt_string_builder_new()
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{64}) {
         rt_text_push_scalar(nested, I64{91})
         at += I64{1}

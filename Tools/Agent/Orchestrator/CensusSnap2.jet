@@ -73,7 +73,7 @@ row_key: fn(cells: [String]) -> String {
 build_rows: fn(tsv: String) {
     records: files.read_or(tsv, "").tsv_records()
     // Ranked by a fixed-width count first, so byte order is count order.
-    ranked := loop (key, count) in records.slice(1, records.len()).map(fn(cells) { row_key(cells) }).counts() -> "{1000000000 + count} {count} {key}"
+    ^ranked: loop (key, count) in records.slice(1, records.len()).map(fn(cells) { row_key(cells) }).counts() -> "{1000000000 + count} {count} {key}"
     ranked.sort_desc()
     ranked.take(10).each(fn(row) { print(row.partition(" ").tail) })
 }
@@ -81,7 +81,7 @@ build_rows: fn(tsv: String) {
 // The runtime pass: the pack the build wrote beside the compiler just built,
 // else the packager's.
 runtime: fn(g: String, self_jet: String, out: String, id: String) {
-    resolved := files.best_effort()
+    ^resolved: files.best_effort()
     beside: "{files.dirname(resolved.canonicalize(self_jet))}/jet-runtime"
     built: "Compiler/JetCLI/.jet/build/jet-runtime"
     if files.is_file("Compiler/Toolchain/RuntimePack.jet") {
@@ -124,7 +124,7 @@ jetpack: fn(g: String, self_jet: String, out: String, id: String) {
 // a named file the worktree no longer has is a deletion.
 snapshot: fn(worktree: String, tree: String, named: [String]) {
     // `rm -rf` and `rm -f`: a path already gone is no failure.
-    done := files.best_effort()
+    ^done: files.best_effort()
     done.remove_all(tree)
     files.create_dir_all(tree)
     exported: if process.pipeline([Sh{"git -C {worktree} archive HEAD"}.spec(), Sh{"tar -x -C {tree}"}.spec()]) == {
@@ -160,7 +160,7 @@ run: fn() {
     compiler: files.canonicalize(process.env_nonempty("CENSUS_JET_DIR") ?? r["JET_SEED"])
     id: process.env_nonempty("CENSUS_JET_IDENTITY") ?? files.read_or("{compiler}/IDENTITY", "").trim()
     at: process.env_nonempty("CENSUS_OUT") ?? "{r["JET_SCRATCH_ROOT"]}/discovery/r14p/census"
-    done := files.best_effort()
+    ^done: files.best_effort()
     done.remove_all(at)
     files.create_dir_all(at)
     if prepared == "" -> snapshot(r["JET_DEV_WORKTREE"], tree, named)
@@ -180,7 +180,7 @@ run: fn() {
     build_rows("{at}/build-keep-going.tsv")
     if build_rc != 0 || build_rows_count != 0 {
         // The head of the build's stderr, about 600 bytes of it.
-        shown := 0
+        ^shown: 0
         loop line in files.read_or("{at}/build.err", "").lines() {
             if shown >= 600 -> break
             print(line)

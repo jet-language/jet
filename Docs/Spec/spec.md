@@ -3840,13 +3840,16 @@ while reading the View it gives is not. See
 ### Allocator families
 
 `core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using
-these allocators does not require `#Unsafe`. `Arena.new()` or
-`Arena.new(capacity: N)` grows aligned heterogeneous chunks; `Bump` places
-monotonically in one caller-capacity buffer; `Pool` owns a caller-bounded slot
-count and reuses compatible size/alignment classes after reset. Values are
-dropped in reverse allocation order before storage is reused. Each allocator
-type is declared `#Local`, so move plain owned data across a task or channel
-rather than moving the allocator itself.
+these allocators does not require `#Unsafe`. `Arena`, `Bump`, and `Pool` are
+ordinary `core.mem` declarations whose `new` reserves the runtime storage.
+`Arena.new()` or `Arena.new(capacity: N)` grows aligned heterogeneous chunks;
+`Bump` places monotonically in one caller-capacity buffer; `Pool` owns a
+caller-bounded slot count and reuses compatible size/alignment classes after
+reset. A negative capacity or slot count stops the program as an out-of-range
+index does. A literal capacity is the bound `!Mem.Alloc(above: N)` checks
+against. Values are dropped in reverse allocation order before storage is
+reused. Each allocator type is declared `#Local`, so move plain owned data
+across a task or channel rather than moving the allocator itself.
 
 `arena.reset()` retains backing storage for reuse. Terminal release uses the
 universal resource operation `close(allocator)`; `.free()` is not the
@@ -4504,15 +4507,17 @@ and `freeze_capture.out`; UI fixtures are
 
 ### Task completion and cancellation
 
-`handle.join()` consumes a task handle and returns `T TaskFailure!`. Calling
-`join()` twice is **E0121**. Dropping a bound `Task` without joining, using its
-result, or detaching it is the compile error **L1101**. A failure is `.Panicked(reason)`,
+`Task<T>` is `#SingleUse`: a bound handle owes `join` or `detach`, and its type
+declares both as the consuming methods. `handle.join()` consumes the handle and
+returns `T TaskFailure!`. Calling `join()` twice is **E0121**. Dropping a bound
+`Task` without joining, using its result, or detaching it is **E0140**, whose
+text names `join` and `detach`. A failure is `.Panicked(reason)`,
 `.Canceled`, or `.DeadlineBlown`. An error that leaves a task body whose element
 is not a `Result` or `Option` stops the task as a panic does: its join reports
 `.Panicked(reason)` with the error's text.
 
 `handle.detach()` consumes the handle and lets the task run in the background;
-it suppresses **L1101**. Detach is sound only when the child owns all data it
+it discharges the same duty. Detach is sound only when the child owns all data it
 can use. A detached child that captures or returns a `view` borrow reports
 **E1106**; another sendability failure reports **E1103** (D-DETACH1).
 

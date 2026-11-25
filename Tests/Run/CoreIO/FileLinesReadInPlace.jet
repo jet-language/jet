@@ -13,23 +13,23 @@ use files: core.files
 run: fn() {
     dir: files.tmpdir("jet-file-lines-") ?? panic("tmpdir")
     path: files.join(dir, "lines.txt")
-    long := ""
+    ^long: ""
     loop _ in 0..<10000 -> long += "x"
     files.write(path, "alpha\r\n\n\r\nbeta\r\r\n{long}\nhéllo wörld\ntail") ?? panic("write")
-    count := 0
+    ^count: 0
     loop line in (files.open(path) ?? panic("open")).lines() {
         shown: if line.len() > 16 -> "{line.len()} bytes of x" else -> "[{line}]"
         print("{count}: {shown}")
         count += 1
     }
-    reader := files.open(path) ?? panic("open kept")
+    ^reader: files.open(path) ?? panic("open kept")
     loop line in reader.lines() {
         print("kept: [{line}]")
         if line == "beta" -> break
     }
     after: reader.read_line() ?? "none"
     print("after the break: {after.len()} bytes")
-    rest := 0
+    ^rest: 0
     loop _ in reader.lines() -> rest += 1
     print("lines left: {rest}")
     print("at the end: {reader.read_line() ?? "none"}")

@@ -421,11 +421,11 @@ H2Exchange: struct {
 /// body `body`. A header name is sent lower case; the fields HTTP/2 has no
 /// place for (connection-specific ones and `host`) are left out.
 h2_start: fn(method: String, scheme: String, authority: String, path: String, headers: [H2Header], body: [U8]) -> H2Exchange Never! {
-    out := H2_PREFACE.bytes()
-    settings := [U8]{}
+    ^out: H2_PREFACE.bytes()
+    ^settings: [U8]{}
     h2_setting(settings, H2_SETTING_ENABLE_PUSH, 0)
     h2_frame(out, H2_SETTINGS, 0, 0, settings)
-    fields := [H2Header]{
+    ^fields: [H2Header]{
         H2Header{name: ":method", value: method.copy()},
         H2Header{name: ":scheme", value: scheme.copy()},
         H2Header{name: ":authority", value: authority.copy()},
@@ -437,7 +437,7 @@ h2_start: fn(method: String, scheme: String, authority: String, path: String, he
             fields.push(H2Header{name: name, value: field.value.copy()})
         }
     }
-    x := H2Exchange{
+    ^x: H2Exchange{
         out: out,
         done: false,
         status: 0,
@@ -558,7 +558,7 @@ priv h2_data: fn(x: ^H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error
         return Ok()
     }
     if payload.len() > 0 {
-        increment := [U8]{}
+        ^increment: [U8]{}
         h2_put_u32(increment, payload.len())
         h2_frame(x.out, H2_WINDOW_UPDATE, 0, 0, increment)
         h2_frame(x.out, H2_WINDOW_UPDATE, 0, H2_STREAM, increment)
@@ -592,7 +592,7 @@ priv h2_block_end: fn(x: ^H2Exchange) H2Error! {
     x.block_stream = 0
     x.block = [U8]{}
     if x.status == 0 {
-        status := 0
+        ^status: 0
         loop field in fields {
             if field.name == ":status" -> status = h2_status(field.value) ?? return Err(err)
         }
@@ -625,7 +625,7 @@ priv h2_settings: fn(x: ^H2Exchange, flags: Int, stream: Int, payload: [U8]) H2E
     if payload.len() %% 6 != 0 {
         return Err(h2_fail("the server sent SETTINGS of {payload.len()} bytes, no multiple of 6"))
     }
-    at := 0
+    ^at: 0
     loop at < payload.len() {
         id: Int{payload[at]} * 256 + Int{payload[at + 1]}
         value: h2_u32(payload, at + 2)
@@ -675,7 +675,7 @@ priv h2_window_update: fn(x: ^H2Exchange, stream: Int, payload: [U8]) H2Error! {
 priv h2_send_body: fn(x: ^H2Exchange) Never! {
     total: x.request_body.len()
     loop x.sent < total && x.connection_window > 0 && x.stream_window > 0 {
-        size := total - x.sent
+        ^size: total - x.sent
         if size > x.connection_window -> size = x.connection_window
         if size > x.stream_window -> size = x.stream_window
         if size > x.max_frame -> size = x.max_frame
@@ -710,7 +710,7 @@ priv h2_unpad: fn(flags: Int, payload: [U8], skip: Int) -> [U8] H2Error! {
 priv h2_status: fn(value: String) -> Int H2Error! {
     raw: value.bytes()
     if raw.len() != 3 -> return Err(h2_fail("the server sent the :status `{value}`"))
-    status := 0
+    ^status: 0
     loop byte in raw {
         digit: Int{byte} - 48
         if digit < 0 || digit > 9 -> return Err(h2_fail("the server sent the :status `{value}`"))
@@ -741,7 +741,7 @@ h2_headers: fn(out: ^[U8], stream: Int, block: [U8], end_stream: Bool, max_frame
         return
     }
     h2_frame(out, H2_HEADERS, end, stream, block.slice(0, max_frame))
-    at := max_frame
+    ^at: max_frame
     loop at < block.len() {
         next: if block.len() - at > max_frame -> at + max_frame else -> block.len()
         h2_frame(out, H2_CONTINUATION, if next == block.len() -> H2_END_HEADERS else -> 0, stream, block.slice(at, next))
@@ -768,7 +768,7 @@ priv h2_u32: fn(raw: [U8], at: Int) -> Int Never! {
 }
 
 priv h2_lower: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         n: Int{byte}
         out.push(if n >= 65 && n <= 90 -> U8{n + 32} else -> byte)
@@ -789,7 +789,7 @@ priv h2_fail: fn(reason: String) -> H2Error Never! { H2Error{reason: reason} }
 /// indexed, with a literal name (RFC 7541 section 6.2.2), so the block
 /// never changes the peer's dynamic table.
 hpack_encode: fn(fields: [H2Header]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop field in fields {
         out.push(U8{16})
         hpack_string(out, field.name.bytes())
@@ -813,7 +813,7 @@ hpack_integer: fn(out: ^[U8], high: Int, prefix: Int, value: Int) Never! {
         return
     }
     out.push(U8{high + mask})
-    rest := value - mask
+    ^rest: value - mask
     loop rest >= 128 {
         out.push(U8{(rest & 127) + 128})
         rest = rest >> 7
@@ -829,8 +829,8 @@ hpack_decoder: fn(limit: Int) -> HpackDecoder Never! {
 /// The header fields of the header block `block`, read in order; the
 /// dynamic table changes as the block says.
 hpack_decode: fn(d: ^HpackDecoder, block: [U8]) -> [H2Header] H2Error! {
-    fields := [H2Header]{}
-    at := 0
+    ^fields: [H2Header]{}
+    ^at: 0
     loop at < block.len() {
         first: Int{block[at]}
         if first >= 128 {
@@ -883,10 +883,10 @@ priv HpackString: struct {
 /// Reads the integer with a `prefix`-bit prefix at `at`.
 priv hpack_read_integer: fn(block: [U8], at: Int, prefix: Int) -> HpackInteger H2Error! {
     mask: (1 << prefix) - 1
-    value := Int{block[at]} & mask
-    next := at + 1
+    ^value: Int{block[at]} & mask
+    ^next: at + 1
     if value < mask -> return Ok(HpackInteger{value: value, next: next})
-    shift := 0
+    ^shift: 0
     loop {
         if next >= block.len() -> return Err(h2_fail("a header block ends inside an integer"))
         if shift > 21 -> return Err(h2_fail("a header block has an integer past 2^28"))
@@ -902,8 +902,8 @@ priv hpack_read_integer: fn(block: [U8], at: Int, prefix: Int) -> HpackInteger H
 /// a name from the tables (index above 0) or a literal one, then a value.
 priv hpack_literal: fn(d: HpackDecoder, block: [U8], at: Int, prefix: Int) -> HpackLiteral H2Error! {
     index: hpack_read_integer(block, at, prefix) ?? return Err(err)
-    next := index.next
-    name := ""
+    ^next: index.next
+    ^name: ""
     if index.value == 0 {
         literal: hpack_read_string(d, block, next) ?? return Err(err)
         name = literal.text
@@ -921,7 +921,7 @@ priv hpack_read_string: fn(d: HpackDecoder, block: [U8], at: Int) -> HpackString
     end: length.next + length.value
     if end > block.len() -> return Err(h2_fail("a header block ends inside a string"))
     raw: block.slice(length.next, end)
-    bytes := raw
+    ^bytes: raw
     if huffman -> bytes = hpack_huffman_decode(d.huffman, raw) ?? return Err(err)
     text: String.from_bytes(bytes) ?? return Err(h2_fail("a header block has a string that is not UTF-8"))
     Ok(HpackString{text: text, next: end})
@@ -952,7 +952,7 @@ priv hpack_add: fn(d: ^HpackDecoder, field: H2Header) Never! {
 /// Evicts the oldest entries until `room` bytes fit within the table's
 /// maximum size.
 priv hpack_evict: fn(d: ^HpackDecoder, room: Int) Never! {
-    drop := 0
+    ^drop: 0
     loop drop < d.dynamic.len() && d.size + room > d.max {
         d.size -= hpack_size(d.dynamic[drop])
         drop += 1
@@ -964,11 +964,11 @@ priv hpack_size: fn(field: H2Header) -> Int Never! { field.name.len() + field.va
 
 /// The canonical Huffman code that HPACK_HUFFMAN_BITS gives.
 priv hpack_huffman: fn() -> HpackHuffman Never! {
-    first := [Int]{}
-    count := [Int]{}
-    at := [Int]{}
-    symbols := [Int]{}
-    code := 0
+    ^first: [Int]{}
+    ^count: [Int]{}
+    ^at: [Int]{}
+    ^symbols: [Int]{}
+    ^code: 0
     loop length in 0..<HPACK_HUFFMAN_LONGEST + 1 {
         first.push(code)
         at.push(symbols.len())
@@ -984,10 +984,10 @@ priv hpack_huffman: fn() -> HpackHuffman Never! {
 /// The bytes of the Huffman-coded string `raw` (RFC 7541 section 5.2):
 /// its padding is under 8 bits, all ones, and it holds no EOS.
 hpack_huffman_decode: fn(h: HpackHuffman, raw: [U8]) -> [U8] H2Error! {
-    out := [U8]{}
-    code := 0
-    length := 0
-    ones := true
+    ^out: [U8]{}
+    ^code: 0
+    ^length: 0
+    ^ones: true
     loop byte in raw {
         loop bit in 0..<8 {
             set: (Int{byte} >> (7 - bit)) & 1
@@ -1097,7 +1097,7 @@ priv hpack_static_table: fn() -> [H2Header] Never! {
         "",
         "gzip, deflate",
     }
-    table := [H2Header]{}
+    ^table: [H2Header]{}
     loop index in 0..<names.len() {
         value: if index < values.len() -> values[index].copy() else -> ""
         table.push(H2Header{name: names[index].copy(), value: value})
@@ -1106,7 +1106,7 @@ priv hpack_static_table: fn() -> [H2Header] Never! {
 }
 
 priv h2_test_hex: fn(text: String) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     raw: text.bytes()
     loop at in 0..<raw.len() /% 2 {
         out.push(U8{h2_test_nibble(Int{raw[2 * at]}) * 16 + h2_test_nibble(Int{raw[2 * at + 1]})})
@@ -1117,7 +1117,7 @@ priv h2_test_hex: fn(text: String) -> [U8] Never! {
 priv h2_test_nibble: fn(n: Int) -> Int Never! { if n >= 97 -> n - 87 else -> n - 48 }
 
 priv h2_test_fields: fn(fields: [H2Header]) -> String Never! {
-    out := ""
+    ^out: ""
     loop field in fields -> out += "{field.name}: {field.value}\n"
     out
 }
@@ -1125,8 +1125,8 @@ priv h2_test_fields: fn(fields: [H2Header]) -> String Never! {
 /// The frames of `bytes` after `skip` bytes, as `type flags stream size`
 /// lines.
 priv h2_test_frames: fn(bytes: [U8], skip: Int) -> String Never! {
-    out := ""
-    at := skip
+    ^out: ""
+    ^at: skip
     loop at + 9 <= bytes.len() {
         size: Int{bytes[at]} * 65536 + Int{bytes[at + 1]} * 256 + Int{bytes[at + 2]}
         out += "{Int{bytes[at + 3]}} {Int{bytes[at + 4]}} {h2_u32(bytes, at + 5)} {size}\n"
@@ -1137,7 +1137,7 @@ priv h2_test_frames: fn(bytes: [U8], skip: Int) -> String Never! {
 
 /// A server's response head and body as frames on stream 1.
 priv h2_test_response: fn(status: String, body: String) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     h2_frame(out, H2_SETTINGS, 0, 0, [U8]{})
     block: hpack_encode([H2Header]{H2Header{name: ":status", value: status}, H2Header{name: "apns-id", value: "a-1"}})
     h2_frame(out, H2_HEADERS, H2_END_HEADERS, H2_STREAM, block)
@@ -1146,8 +1146,8 @@ priv h2_test_response: fn(status: String, body: String) -> [U8] Never! {
 }
 
 #Test("HPACK decodes the requests of RFC 7541 C.3 and C.4 into the same fields and table") {
-    plain := hpack_decoder(H2_TABLE_SIZE)
-    coded := hpack_decoder(H2_TABLE_SIZE)
+    ^plain: hpack_decoder(H2_TABLE_SIZE)
+    ^coded: hpack_decoder(H2_TABLE_SIZE)
     first: ":method: GET\n:scheme: http\n:path: /\n:authority: www.example.com\n"
     assert_eq(h2_test_fields(hpack_decode(plain, h2_test_hex("828684410f7777772e6578616d706c652e636f6d")) ?? panic("C.3.1")), first)
     assert_eq(h2_test_fields(hpack_decode(coded, h2_test_hex("828684418cf1e3c2e5f23a6ba0ab90f4ff")) ?? panic("C.4.1")), first)
@@ -1163,7 +1163,7 @@ priv h2_test_response: fn(status: String, body: String) -> [U8] Never! {
 }
 
 #Test("HPACK decodes the responses of RFC 7541 C.6, evicting the oldest entries of a 256-byte table") {
-    d := hpack_decoder(256)
+    ^d: hpack_decoder(256)
     first: hpack_decode(d, h2_test_hex("488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a62d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3")) ?? panic("C.6.1")
     assert_eq(h2_test_fields(first), ":status: 302\ncache-control: private\ndate: Mon, 21 Oct 2013 20:13:21 GMT\nlocation: https://www.example.com\n")
     assert_eq(d.size, 222)
@@ -1177,15 +1177,15 @@ priv h2_test_response: fn(status: String, body: String) -> [U8] Never! {
 }
 
 #Test("HPACK integers and literals round-trip, and malformed blocks fail") {
-    small := [U8]{}
+    ^small: [U8]{}
     hpack_integer(small, 0, 5, 10)
     assert_eq(small, [U8]{U8{10}})
-    large := [U8]{}
+    ^large: [U8]{}
     hpack_integer(large, 0, 5, 1337)
     assert_eq(large, [U8]{U8{31}, U8{154}, U8{10}})
     assert_eq((hpack_read_integer(large, 0, 5) ?? panic("1337")).value, 1337)
     fields: [H2Header]{H2Header{name: "apns-topic", value: "com.example.app"}, H2Header{name: "x-empty", value: ""}}
-    d := hpack_decoder(H2_TABLE_SIZE)
+    ^d: hpack_decoder(H2_TABLE_SIZE)
     assert_eq(h2_test_fields(hpack_decode(d, hpack_encode(fields)) ?? panic("round trip")), "apns-topic: com.example.app\nx-empty: \n")
     assert_eq(d.size, 0)
     if hpack_decode(d, [U8]{U8{128}}) == .Ok(_) -> panic("index 0 names no entry")
@@ -1203,12 +1203,12 @@ priv h2_test_response: fn(status: String, body: String) -> [U8] Never! {
 }
 
 #Test("an exchange sends its preface, settings and request, acks the server's settings and gathers the response") {
-    x := h2_start("GET", "https", "api.example.com", "/3/device/abc", [H2Header]{H2Header{name: "Apns-Topic", value: "com.example"}, H2Header{name: "Connection", value: "close"}}, [U8]{})
+    ^x: h2_start("GET", "https", "api.example.com", "/3/device/abc", [H2Header]{H2Header{name: "Apns-Topic", value: "com.example"}, H2Header{name: "Connection", value: "close"}}, [U8]{})
     preface: H2_PREFACE.bytes()
     assert_eq(x.out.slice(0, preface.len()), preface)
     assert_eq(h2_test_frames(x.out, preface.len()), "4 0 0 6\n1 5 1 {x.out.len() - preface.len() - 15 - 9}\n")
     block: x.out.slice(preface.len() + 15 + 9, x.out.len())
-    server := hpack_decoder(H2_TABLE_SIZE)
+    ^server: hpack_decoder(H2_TABLE_SIZE)
     assert_eq(h2_test_fields(hpack_decode(server, block) ?? panic("the request block")), ":method: GET\n:scheme: https\n:authority: api.example.com\n:path: /3/device/abc\napns-topic: com.example\n")
     x.out = [U8]{}
     response: h2_test_response("200", "ok")
@@ -1224,18 +1224,18 @@ priv h2_test_response: fn(status: String, body: String) -> [U8] Never! {
 }
 
 #Test("an exchange sends its body within the windows, and the rest once they open") {
-    body := [U8]{}
+    ^body: [U8]{}
     loop _ in 0..<70000 -> body.push(U8{120})
-    x := h2_start("POST", "http", "127.0.0.1:9", "/v1/send", [H2Header]{}, body)
+    ^x: h2_start("POST", "http", "127.0.0.1:9", "/v1/send", [H2Header]{}, body)
     preface: H2_PREFACE.bytes().len()
     assert_eq(h2_test_frames(x.out, preface).split("\n").len(), 7)
     assert_eq(x.sent, 65535)
     x.out = [U8]{}
-    open := [U8]{}
+    ^open: [U8]{}
     h2_frame(open, H2_WINDOW_UPDATE, 0, 0, [U8]{U8{0}, U8{0}, U8{39}, U8{16}})
     _: h2_feed(x, open) ?? panic("the connection's window")
     assert_eq(x.out.len(), 0)
-    stream := [U8]{}
+    ^stream: [U8]{}
     h2_frame(stream, H2_WINDOW_UPDATE, 0, H2_STREAM, [U8]{U8{0}, U8{0}, U8{39}, U8{16}})
     _: h2_feed(x, stream) ?? panic("the stream's window")
     assert_eq(h2_test_frames(x.out, 0), "0 1 1 4465\n")
@@ -1243,26 +1243,26 @@ priv h2_test_response: fn(status: String, body: String) -> [U8] Never! {
 }
 
 #Test("an exchange answers a PING and fails on a reset, an early GOAWAY, a push and a frame too large") {
-    x := h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
+    ^x: h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
     x.out = [U8]{}
-    ping := [U8]{}
+    ^ping: [U8]{}
     h2_frame(ping, H2_PING, 0, 0, "12345678".bytes())
     _: h2_feed(x, ping) ?? panic("ping")
     assert_eq(h2_test_frames(x.out, 0), "6 1 0 8\n")
-    reset := [U8]{}
+    ^reset: [U8]{}
     h2_frame(reset, H2_RST_STREAM, 0, H2_STREAM, [U8]{U8{0}, U8{0}, U8{0}, U8{7}})
     if h2_feed(x, reset) == .Err(failure) {
         assert_eq(failure.reason, "the server reset the stream (error code 7)")
     } else { panic("a reset stream fails") }
-    gone := h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
-    away := [U8]{}
+    ^gone: h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
+    ^away: [U8]{}
     h2_frame(away, H2_GOAWAY, 0, 0, [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{2}})
     if h2_feed(gone, away) == .Ok(_) -> panic("a GOAWAY before the stream fails")
-    pushed := h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
-    promise := [U8]{}
+    ^pushed: h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
+    ^promise: [U8]{}
     h2_frame(promise, H2_PUSH_PROMISE, H2_END_HEADERS, H2_STREAM, [U8]{U8{0}, U8{0}, U8{0}, U8{2}})
     if h2_feed(pushed, promise) == .Ok(_) -> panic("a push fails")
-    large := h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
+    ^large: h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
     if h2_feed(large, [U8]{U8{0}, U8{64}, U8{1}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{1}}) == .Ok(_) {
         panic("a frame past 16384 bytes fails")
     }

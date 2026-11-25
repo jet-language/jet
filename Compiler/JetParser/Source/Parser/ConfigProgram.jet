@@ -48,28 +48,28 @@ jet_config_program: fn(expr: Expr, source: String, funcs: [String:Func], globals
     if span.start < 0 || span.end > bytes.len() || span.start > span.end {
         return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
     }
-    sites := [ComptimeNameSite]{}
+    ^sites: [ComptimeNameSite]{}
     loop site in comptime_walk_identifiers(expr) {
         if globals.get(site.name) == None -> next
         if site.span.start < span.start || site.span.end > span.end {
             return Err(jet_config_eval_error(expr, "`{site.name}` is read outside this config value's source text"))
         }
-        index := sites.len()
+        ^index: sites.len()
         loop index > 0 && sites[index - 1].span.start > site.span.start -> index -= 1
         sites.insert(index, site)
     }
     // Per global read, by id in a table of their names: the number of the
     // constant it became, or -1 before its first read.
-    globals_read := name_table_sized(16)
-    constant_of := [Int]{}
-    constants := 0
-    lines := [String]{}
+    ^globals_read: name_table_sized(16)
+    ^constant_of: [Int]{}
+    ^constants: 0
+    ^lines: [String]{}
     loop name in funcs.keys() {
         if funcs[name].span.start < 0 || funcs[name].span.end > bytes.len() -> next
         lines.push(String.from_bytes(bytes.slice(funcs[name].span.start, funcs[name].span.end)) ?? return Err(jet_config_eval_error(expr, "the function `{name}` is not valid text")))
     }
-    text := [String]{}
-    cursor := span.start
+    ^text: [String]{}
+    ^cursor: span.start
     loop site in sites {
         if site.span.start < cursor -> next
         read: name_index(name_intern(globals_read, site.name))
@@ -146,14 +146,14 @@ jet_config_value_end: fn(expr: Expr, tokens: [Token]) -> Int? Never! {
 // where the next `(` opens them (depth 0). Tokens before `from` are skipped by
 // binary search; comment and string tokens never count as parentheses.
 jet_config_call_close: fn(callee_end: Int, args: [CallArg], tokens: [Token]) -> Int? Never! {
-    from := callee_end
-    depth := 0
+    ^from: callee_end
+    ^depth: 0
     if args.len() > 0 {
         from = jet_config_value_end(args[args.len() - 1].expr, tokens) ?? return None
         depth = 1
     }
-    low := 0
-    high := tokens.len()
+    ^low: 0
+    ^high: tokens.len()
     loop low < high {
         middle: (low + high) /% 2
         if tokens[middle].span.start < from -> low = middle + 1 else -> high = middle
@@ -181,11 +181,11 @@ jet_config_call_close: fn(callee_end: Int, args: [CallArg], tokens: [Token]) -> 
 // names the program's module among the values the check computes.
 jet_config_module_values_program: fn(items: [Item], source: String, environment: [NamedCtValue]) -> String ComptimeEvalError! {
     bytes: source.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     newline: U8{10}
     blank: U8{32}
     loop byte in bytes -> out.push(if byte == newline -> newline else -> blank)
-    kept := [Span]{}
+    ^kept: [Span]{}
     loop item in items {
         span: jet_config_module_values_item_span(item) ?? next
         if span.start < 0 || span.end > bytes.len() || span.start > span.end -> next
@@ -194,16 +194,16 @@ jet_config_module_values_program: fn(items: [Item], source: String, environment:
     }
     lexed: lex_config(bytes)
     // Every identifier the source spells.
-    spelled := name_table_sized(64)
-    reads := [Span]{}
+    ^spelled: name_table_sized(64)
+    ^reads: [Span]{}
     jet_config_module_values_names(lexed.tokens, lexed.tables, spelled, reads)
     // Per environment read, by id in a table of the names read: the letter
     // that stands for its `$` in the program (its first byte there), `unread`
     // before its first read.
-    declared := name_table_sized(16)
+    ^declared: name_table_sized(16)
     unread: U8{0}
-    letters := [U8]{unread}
-    lines := [String]{}
+    ^letters: [U8]{unread}
+    ^lines: [String]{}
     loop read in reads {
         if !jet_config_module_values_kept(kept, read) -> next
         name: source.slice(read.start..<read.end)
@@ -214,7 +214,7 @@ jet_config_module_values_program: fn(items: [Item], source: String, environment:
             next
         }
         rest: name.removeprefix("$")
-        chosen := ""
+        ^chosen: ""
         prefixes: [String]{"Q", "X", "Z", "J", "K", "V", "W", "Y"}
         loop prefix in prefixes {
             candidate: "{prefix}{rest}"
@@ -231,7 +231,7 @@ jet_config_module_values_program: fn(items: [Item], source: String, environment:
         first: chosen.bytes()[0]
         out[read.start] = first
         letters[id] = first
-        _ := name_intern(spelled, chosen)
+        ^_: name_intern(spelled, chosen)
     }
     lines.push("{JET_CONFIG_VALUE_NAME}: 0")
     lines.push("")
@@ -261,7 +261,7 @@ jet_config_module_values_names: fn(tokens: [Token], tables: TokenTables, spelled
         if token.kind == TOKEN_IDENT {
             name: token_decoded(tables, token)
             if name.starts_with("$") -> reads.push(token.span)
-            _ := name_intern(spelled, name)
+            ^_: name_intern(spelled, name)
         }
         if token.kind == TOKEN_STRING {
             loop part in token_string_parts(tables, token) {

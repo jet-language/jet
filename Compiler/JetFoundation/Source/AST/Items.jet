@@ -67,10 +67,9 @@ Program: struct {
     entry_locals: [String]{[String]{}},
     // The file's AST tables: its nodes' handles index them (Nodes.jet).
     tables: ASTTables{ASTTables{}},
-    // Parser summary flags (default true for manually constructed Programs):
-    // set to false when the parser saw zero `Stmt.ScopeMember` or `task` spawns.
+    // Parser summary flag (default true for manually constructed Programs):
+    // set to false when the parser saw zero `Stmt.ScopeMember`.
     has_scope_member: Bool{true},
-    has_task_spawn: Bool{true},
 }
 
 // One `debug(…)` call as written. `name_start` keys it to the call's
@@ -239,7 +238,7 @@ import_alias: fn(declaration: ImportDecl) -> String Never! {
 // Every binding a declaration introduces, in source order. A file import binds
 // through its program, not through a name here.
 import_walk_bindings: fn(declaration: ImportDecl) -> [ImportBinding] Never! {
-    bindings := [ImportBinding]{}
+    ^bindings: [ImportBinding]{}
     if declaration.kind == {
         .Module(name, path_span) -> {
             alias: if declaration.alias == "" -> None else -> Val(declaration.alias)
@@ -1305,7 +1304,7 @@ UnitScaleProvenance: enum {
 // The type a unit member declares: each `_`-separated segment with its first
 // character uppercased.
 unit_family_type_name: fn(member: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop segment in member.split("_") {
         if segment.len() > 0 {
             out = "{out}{segment.slice(0, 1).to_upper()}{segment.slice(1, segment.len())}"
@@ -1321,9 +1320,9 @@ unit_family_type_name: fn(member: String) -> String Never! {
 // Every generated name and derive keeps the member's span. The canonical
 // core.units Time family declares none.
 unit_family_distinct_defs: fn(family: UnitFamilyDef) -> [DistinctDef] Never! {
-    definitions := [DistinctDef]{}
+    ^definitions: [DistinctDef]{}
     if family.family == "Time" && family.resolved_owner == Val("core.units") -> return definitions
-    affine := false
+    ^affine: false
     if family.base != None {
         loop member in family.members {
             if member.offset.numerator != 0 -> affine = true
@@ -1334,8 +1333,8 @@ unit_family_distinct_defs: fn(family: UnitFamilyDef) -> [DistinctDef] Never! {
         names: if affine -> [String]{"{base_name}Point", "{base_name}Delta"} else -> [String]{base_name}
         loop (index, name) in names {
             point: affine && index == 0
-            derives := [NamedSpan]{NamedSpan{name: if point -> "Comparable" else -> "Numeric", span: member.name_span}}
-            quantity := QuantityInfo?{None}
+            ^derives: [NamedSpan]{NamedSpan{name: if point -> "Comparable" else -> "Numeric", span: member.name_span}}
+            ^quantity: QuantityInfo?{None}
             if family.resolved_dimension == .Val(dimension) {
                 loop codec in owned_trait_codec_names() {
                     derives.push(NamedSpan{name: codec.copy(), span: member.name_span})

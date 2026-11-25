@@ -74,9 +74,9 @@ millis: fn(ns: Int) -> Float { Float{ns} / 1000000.0 }
 
 redraw: fn() -[Env, Exec.Args, IO, Net, Time]> Int Never! {
     args: process.args()
-    frames := 40
-    limit := Float{6}
-    at := 0
+    ^frames: 40
+    ^limit: Float{6}
+    ^at: 0
     loop at < args.len() {
         if at + 1 >= args.len() -> return usage()
         if {
@@ -87,13 +87,13 @@ redraw: fn() -[Env, Exec.Args, IO, Net, Time]> Int Never! {
         at += 2
     }
     if frames < 2 -> return usage()
-    script := [[ui.UIEvent]]{}
+    ^script: [[ui.UIEvent]]{}
     loop _ in 0..<frames -> script.push([ui.UIEvent]{})
     window: ui.headless(width: WIDTH, height: HEIGHT, script: script) ?? {
         term.eprint("redraw: no headless window: {err}")
         return 1
     }
-    times := [Int]{}
+    ^times: [Int]{}
     loop frame in window.frames() {
         if frame.index >= frames -> break
         started: time.instant()
@@ -101,7 +101,7 @@ redraw: fn() -[Env, Exec.Args, IO, Net, Time]> Int Never! {
         times.push(started.elapsed().ns)
     }
     first: times[0]
-    steady := times.slice(1, times.len())
+    ^steady: times.slice(1, times.len())
     steady.sort()
     median: steady[steady.len() /% 2]
     print("full redraw {WIDTH}x{HEIGHT}, {steady.len()} frames after the first")

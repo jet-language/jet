@@ -88,7 +88,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
 }
 
 #Test("cc pack beside jet is verified, recorded, then reused offline from the Hangar") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: files.tmpdir("jet-cc-pack-beside-") ?? panic("scratch")
     roots: HangarRoots.at(files.join(base, "home"))
     archive: provider_cc_pack_test_archive()
@@ -106,11 +106,11 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
 }
 
 #Test("cc pack with the wrong hash is refused, deleted and named") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: files.tmpdir("jet-cc-pack-hash-") ?? panic("scratch")
     roots: HangarRoots.at(files.join(base, "home"))
     archive: provider_cc_pack_test_archive()
-    asset := provider_cc_pack_test_asset(archive)
+    ^asset: provider_cc_pack_test_asset(archive)
     expected: pkg_sha256_hex("another pack".bytes())
     asset.sha256 = expected
     beside: provider_cc_pack_test_beside(base, "seed", asset, Val(archive))
@@ -122,7 +122,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
             assert(message.contains(pkg_sha256_hex(archive)))
         }
     }
-    leftovers := 0
+    ^leftovers: 0
     loop entry in files.list_dir(roots.hangar_dir()) ?? panic("list the Hangar") {
         if entry.name.contains(".tar.zst.partial") -> leftovers += 1
     }
@@ -131,7 +131,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
 }
 
 #Test("cc pack missing offline names both fixes") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: files.tmpdir("jet-cc-pack-offline-") ?? panic("scratch")
     roots: HangarRoots.at(files.join(base, "home"))
     asset: provider_cc_pack_test_asset(provider_cc_pack_test_archive())
@@ -150,7 +150,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
 }
 
 #Test("cc pack is fetched from the release named by RELEASE") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: files.tmpdir("jet-cc-pack-release-") ?? panic("scratch")
     roots: HangarRoots.at(files.join(base, "home"))
     archive: provider_cc_pack_test_archive()
@@ -165,7 +165,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
 }
 
 #Test("cc pack JET_CC_PACK_URL takes a file:// double offline and refuses a wrong hash") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     base: files.tmpdir("jet-cc-pack-url-") ?? panic("scratch")
     roots: HangarRoots.at(files.join(base, "home"))
     archive: provider_cc_pack_test_archive()
@@ -173,14 +173,14 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     double: provider_cc_pack_test_beside(base, "double", asset, Val(archive))
     previous: sys.get(CC_PACK_URL_ENV)
     sys.set(CC_PACK_URL_ENV, "file://{files.join(double, asset.file)}")
-    sources := provider_cc_pack_default_sources()
+    ^sources: provider_cc_pack_default_sources()
     if previous == {
         .Val(value) -> { sys.set(CC_PACK_URL_ENV, value) }
         .None -> { sys.unset(CC_PACK_URL_ENV) ?? panic("restore {CC_PACK_URL_ENV}") }
     }
     assert_eq(sources.url, Val("file://{files.join(double, asset.file)}"))
     sources.beside = Val(provider_cc_pack_test_beside(base, "seed", asset, None))
-    wrong := provider_cc_pack_test_asset(archive)
+    ^wrong: provider_cc_pack_test_asset(archive)
     expected: pkg_sha256_hex("another pack".bytes())
     wrong.sha256 = expected
     if provider_cc_pack_ensure(verification, roots, wrong, sources, true) == {

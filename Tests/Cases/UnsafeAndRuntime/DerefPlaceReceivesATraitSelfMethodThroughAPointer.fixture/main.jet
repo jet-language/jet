@@ -19,14 +19,14 @@ Bumps: trait {
 
 bump_at: fn<A: Bumps>(address: Int, by: Int) -> Int {
     #Unsafe("address is the address of a live A that outlives this call") {
-        pointer := mem.from_addr<A>(address)
+        ^pointer: mem.from_addr<A>(address)
         return pointer.*.bump(by)
     }
 }
 
 run: fn() {
-    c := Counter{n: 1}
-    address := 0
+    ^c: Counter{n: 1}
+    ^address: 0
     #Unsafe("c lives in place until `run` returns") { address = mem.address_of(c) }
     f: fn(at: Int, by: Int) -> Int { bump_at<Counter>(at, by) }
     print(f(address, 2))

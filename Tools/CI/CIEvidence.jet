@@ -79,7 +79,7 @@ is_hex: fn(text: String) -> Bool Never! {
 }
 
 pad: fn(value: Int, width: Int) -> String Never! {
-    text := "{value}"
+    ^text: "{value}"
     loop text.len() < width -> text = "0{text}"
     text
 }
@@ -105,11 +105,11 @@ system_name: fn() -[Env]> String Never! {
 shell_quote: fn(arg: String) -> String Never! {
     if arg == "" -> return "''"
     safe: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,._+:@%/-="
-    control := false
+    ^control: false
     loop ch in arg.chars() {
         if "{ch}" == "\n" || "{ch}" == "\t" || "{ch}" == "\r" -> control = true
     }
-    out := ""
+    ^out: ""
     if control {
         loop ch in arg.chars() {
             piece: "{ch}"
@@ -148,9 +148,9 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
     github: (process.env_nonempty("GITHUB_ACTIONS") ?? "") == "true" || (process.env_nonempty("GITHUB_ACTIONS") ?? "") == "1"
     checkout: run_text([String]{"git", "-C", root, "rev-parse", "--verify", "HEAD"}, root)
     candidate: process.env_nonempty("JET_CI_CANDIDATE_COMMIT") ?? (process.env_nonempty("GITHUB_SHA") ?? checkout)
-    runner_os := process.env_nonempty("RUNNER_OS") ?? (process.env_nonempty("GITHUB_RUNNER_OS") ?? "")
-    runner_arch := process.env_nonempty("RUNNER_ARCH") ?? (process.env_nonempty("GITHUB_RUNNER_ARCH") ?? "")
-    problems := [String]{}
+    ^runner_os: process.env_nonempty("RUNNER_OS") ?? (process.env_nonempty("GITHUB_RUNNER_OS") ?? "")
+    ^runner_arch: process.env_nonempty("RUNNER_ARCH") ?? (process.env_nonempty("GITHUB_RUNNER_ARCH") ?? "")
+    ^problems: [String]{}
 
     // A reused report directory can otherwise leave a previous pass beside a
     // new failed command. Refuse stale or non-regular evidence paths before
@@ -234,9 +234,9 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
     code: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
     files.write(stdout_file, receipt.output) ?? ()
     files.write(stderr_file, receipt.errors) ?? ()
-    out := term.stdout()
+    ^out: term.stdout()
     out.write(receipt.output).drop("gate stdout")
-    errors := term.stderr()
+    ^errors: term.stderr()
     errors.write(receipt.errors).drop("gate stderr")
     status: if code == 0 && candidate != "" && candidate != "unknown" -> "pass" else -> "fail"
     if !finalize(evidence, status, "{code}") {
@@ -269,9 +269,9 @@ finalize: fn(e: Evidence, status: String, command_exit: String) -[Env, FS, IO]> 
     manifest: "schema=jet.ci-candidate.v1\ncandidate_commit={e.candidate}\n{bindings}source_revision={if e.checkout == "" -> "unknown" else -> e.checkout}\nsource_manifest_sha256={e.source_hash}\nworkflow_sha256={e.workflow_hash}\ntoolchain_sha256={e.toolchain_hash}\nartifact_name={e.artifact_name}\nsignature=not-required-for-ci-test-gate\nsupport_matrix={matrix}\nprovenance=github-actions:{run_id}/{attempt}\nrelease_ref={ref}\n"
     candidate_path: "{e.dir}/candidate.txt"
     if !replace(candidate_path, manifest) -> return false
-    quoted := ""
+    ^quoted: ""
     loop arg in e.command -> quoted = "{quoted}{shell_quote(arg)} "
-    receipt := "schema=jet.ci-evidence.v1\nstatus={status}\ncandidate_commit={shown}\ncandidate_manifest={candidate_path}\n{bindings}"
+    ^receipt: "schema=jet.ci-evidence.v1\nstatus={status}\ncandidate_commit={shown}\ncandidate_manifest={candidate_path}\n{bindings}"
     receipt = "{receipt}runner_os={e.runner_os}\nrunner_arch={e.runner_arch}\nworkflow={process.env_nonempty("GITHUB_WORKFLOW") ?? "CI"}\njob={process.env_nonempty("GITHUB_JOB") ?? "local"}\nrun_id={run_id}\nrun_attempt={attempt}\nevent={process.env_nonempty("GITHUB_EVENT_NAME") ?? "local"}\nref={ref}\n"
     receipt = "{receipt}test_shard={process.env_nonempty("JET_TEST_SHARD") ?? "not-applicable"}\ntest_shard_count={process.env_nonempty("JET_TEST_SHARD_COUNT") ?? "not-applicable"}\nsupport_matrix={matrix}\nartifact_name={e.artifact_name}\nprovenance=github-actions:{run_id}/{attempt}\nrelease_ref={ref}\n"
     receipt = "{receipt}source_manifest_sha256={e.source_hash}\nworkflow_sha256={e.workflow_hash}\ntoolchain_sha256={e.toolchain_hash}\nstarted_at={e.started_at}\ncommand_exit={command_exit}\ncommand={quoted}\nstdout={e.dir}/command.stdout\nstderr={e.dir}/command.stderr\nsignature=not-required-for-ci-test-gate\npublication=github-actions-artifact\n"

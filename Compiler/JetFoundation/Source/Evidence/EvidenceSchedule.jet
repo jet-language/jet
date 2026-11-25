@@ -5,7 +5,7 @@ use evidence_payload_json: core.encoding.json
 evidence_schedule_object: fn(value: Dyn, what: String) -> [String:Dyn] EvidenceCodecError! {
     if value == {
         .Object(fields) -> {
-            values := [String:Dyn]{}
+            ^values: [String:Dyn]{}
             loop field in fields {
                 if values.get(field.key) == .Val(_) {
                     return Err(evidence_codec_error("duplicate {what} field `{field.key}`"))
@@ -153,12 +153,12 @@ evidence_decode_frame_schedule: fn(text: String) -> FrameSchedule EvidenceCodecE
     if schema != "jet.frame_schedule/v1" {
         return Err(evidence_codec_error("unsupported frame schedule schema `{schema}`"))
     }
-    operations := [FrameOperation]{}
-    dependencies := [FrameDependency]{}
-    transfers := [FrameTransfer]{}
-    reuse := [FrameReuse]{}
-    retentions := [FrameRetention]{}
-    conservative := [String]{}
+    ^operations: [FrameOperation]{}
+    ^dependencies: [FrameDependency]{}
+    ^transfers: [FrameTransfer]{}
+    ^reuse: [FrameReuse]{}
+    ^retentions: [FrameRetention]{}
+    ^conservative: [String]{}
     loop value in evidence_schedule_array(evidence_schedule_field(fields, "operations"), "operations") {
         operations.push(evidence_schedule_operation(value))
     }

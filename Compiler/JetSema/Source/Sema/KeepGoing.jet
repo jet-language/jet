@@ -26,16 +26,16 @@ use jet_foundation.[
 // are discarded: the real check's reports and reasons already name the
 // failure. None when even the signature does not check.
 sema_keep_going_stub: fn(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
-    stub := func
+    ^stub: func
     stub.pre = [ContractClause]{}
     stub.post = [ContractClause]{}
     stub.body = [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None, id: AST_NODE_GENERATED}}}
     stub.return_type_span = sema_keep_going_trap_return_span(func)
-    discarded_diagnostics := [Diagnostic]{}
-    discarded_call_facts := [SemaCallSiteFact]{}
-    discarded_comptime_requests := [SemaComptimeRequest]{}
-    discarded_name_references := [SemaNameReferenceFact]{}
-    checked := sema_function_check(stub, sema_program_symbol_key(program, owner_id), function_kind, raw_protocol_return, environment, program, scopes, host_hooks, discarded_diagnostics, discarded_call_facts, discarded_comptime_requests, discarded_name_references)
+    ^discarded_diagnostics: [Diagnostic]{}
+    ^discarded_call_facts: [SemaCallSiteFact]{}
+    ^discarded_comptime_requests: [SemaComptimeRequest]{}
+    ^discarded_name_references: [SemaNameReferenceFact]{}
+    ^checked: sema_function_check(stub, sema_program_symbol_key(program, owner_id), function_kind, raw_protocol_return, environment, program, scopes, host_hooks, discarded_diagnostics, discarded_call_facts, discarded_comptime_requests, discarded_name_references)
     if !checked.complete || checked.value == None -> return None
     Val(checked)
 }
@@ -54,7 +54,7 @@ sema_keep_going_trap_return_span: fn(func: Func) -> Span? Never! {
 // reports are settled away. A trap that could not be built or recorded is
 // that row's outcome instead.
 sema_keep_going_push_stub: fn(stub: ^^SemaFunctionResult?, label: String, cause: String, functions: ^[FnBody], reasons: ^[String]) Never! {
-    checked := stub.move() ?? {
+    ^checked: stub.move() ?? {
         reasons.push("{label}: its keep-going trap did not check (the declared signature fails): {cause}")
         return
     }
@@ -77,7 +77,7 @@ sema_keep_going_push_stub: fn(stub: ^^SemaFunctionResult?, label: String, cause:
 // no body) every local reference from `start` on is dropped: no body holds
 // their keys. Returns `trap`.
 sema_keep_going_trap_references: fn(references: ^[SemaNameReferenceFact], start: Int, failed: SemaFunctionResult, trap: ^^SemaFunctionResult?) -> SemaFunctionResult? Never! {
-    stubbed := trap.move() ?? {
+    ^stubbed: trap.move() ?? {
         sema_keep_going_drop_local_references(references, start, None)
         return None
     }
@@ -86,7 +86,7 @@ sema_keep_going_trap_references: fn(references: ^[SemaNameReferenceFact], start:
         sema_keep_going_drop_local_references(references, start, None)
         return Val(stubbed)
     }
-    body := stubbed.value.move() ?? return None
+    ^body: stubbed.value.move() ?? return None
     if failed.value == .Val(failed_body) {
         sema_keep_going_rekey_references(references, start, body.key, failed_body.tree.symbols, body.tree.symbols)
     } else if failed.failed_locals == .Val(locals) {
@@ -99,13 +99,13 @@ sema_keep_going_trap_references: fn(references: ^[SemaNameReferenceFact], start:
 // Drops the local references from `start` on that body `owner` recorded,
 // every one when `owner` is None (sema_keep_going_trap_references).
 sema_keep_going_drop_local_references: fn(references: ^[SemaNameReferenceFact], start: Int, owner: String?) Never! {
-    kept := [SemaNameReferenceFact]{}
+    ^kept: [SemaNameReferenceFact]{}
     loop index in start..<references.len() {
-        dropped := symbol_is_local(references[index].symbol.id)
+        ^dropped: symbol_is_local(references[index].symbol.id)
         if owner == .Val(key) -> dropped = dropped && references[index].body == key
         if !dropped -> kept.push(references[index].copy())
     }
-    loop references.len() > start -> _ := references.pop()
+    loop references.len() > start -> ^_: references.pop()
     references.extend(kept)
 }
 
@@ -124,7 +124,7 @@ sema_keep_going_rekey_references: fn(references: ^[SemaNameReferenceFact], start
 // error reports it made since `start`.
 sema_keep_going_cause: fn(causes: [String], diagnostics: [Diagnostic], start: Int) -> String Never! {
     if causes.len() > 0 -> return causes.join("; ")
-    reported := [String]{}
+    ^reported: [String]{}
     loop index in start..<diagnostics.len() {
         if diagnostics[index].severity == DIAGNOSTIC_ERROR {
             reported.push("{diagnostics[index].code} {diagnostics[index].what}")
@@ -201,12 +201,12 @@ sema_keep_going_registered_stub_source: fn(declaration: Func, memory_plan: SemaF
 }
 
 sema_keep_going_registered_stub: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
-    stub := sema_keep_going_registered_stub_source(declaration, memory_plan, memory_position)
-    discarded_diagnostics := [Diagnostic]{}
-    discarded_call_facts := [SemaCallSiteFact]{}
-    discarded_comptime_requests := [SemaComptimeRequest]{}
-    discarded_name_references := [SemaNameReferenceFact]{}
-    checked := sema_function_check(stub, sema_program_symbol_key(program, owner_id), function_kind, raw_protocol_return, environment, program, scopes, host_hooks, discarded_diagnostics, discarded_call_facts, discarded_comptime_requests, discarded_name_references)
+    ^stub: sema_keep_going_registered_stub_source(declaration, memory_plan, memory_position)
+    ^discarded_diagnostics: [Diagnostic]{}
+    ^discarded_call_facts: [SemaCallSiteFact]{}
+    ^discarded_comptime_requests: [SemaComptimeRequest]{}
+    ^discarded_name_references: [SemaNameReferenceFact]{}
+    ^checked: sema_function_check(stub, sema_program_symbol_key(program, owner_id), function_kind, raw_protocol_return, environment, program, scopes, host_hooks, discarded_diagnostics, discarded_call_facts, discarded_comptime_requests, discarded_name_references)
     if !checked.complete || checked.value == None -> return None
     Val(checked)
 }
@@ -216,7 +216,7 @@ sema_check_registered_method_stub: fn(declaration: Func, memory_plan: SemaFuncti
     // it. Jet has no exchange on a field of the write-borrowed table.
     previous_location: scopes.location_function.copy()
     sema_function_check_registered_location(declaration, memory_plan, None, scopes)
-    stub := sema_keep_going_registered_stub(declaration, memory_plan, None, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks)
+    ^stub: sema_keep_going_registered_stub(declaration, memory_plan, None, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks)
     scopes.location_function = previous_location
     stub
 }

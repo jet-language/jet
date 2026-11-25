@@ -22,17 +22,17 @@ LSPFileRename: struct {
 // of every saved `.jet` file below a workspace folder, or null when no
 // import names a renamed file.
 lsp_will_rename_files_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
-    renames := [LSPFileRename]{}
+    ^renames: [LSPFileRename]{}
     loop row in lsp_member_rows(params ?? Dyn.Null, "files") {
         from: lsp_text_member(row, "oldUri") ?? next
         to: lsp_text_member(row, "newUri") ?? next
         renames.push(LSPFileRename{from: lsp_folder_path(from), to: lsp_folder_path(to)})
     }
-    files := [String]{}
+    ^files: [String]{}
     loop source in lsp_rename_sources(server) {
         own: lsp_rename_row(renames, source.path)
         if own == None && !lsp_may_name_renamed(source.source, renames) -> next
-        edits := [String]{}
+        ^edits: [String]{}
         loop import in lsp_source_imports(source.source) {
             if import.kind == .File(written, span) {
                 new_text: lsp_file_import_text(source, import, written, span, renames, own) ?? next
@@ -51,13 +51,15 @@ lsp_will_rename_files_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> 
 // The open documents, then each saved file below a workspace folder that no
 // editor holds, each once.
 lsp_rename_sources: fn(server: LSPServer) -> [JetDriverSourceDocument] {
-    sources := server.overlays()
+    ^sources: server.overlays()
     loop root in server.workspace_roots {
         saved: server.checker.sources(root)
         loop file in saved.move() {
             if lsp_path_open(server, file.path) -> next
             seen: loop source in sources {
-                if source.path == file.path -> break true
+                if source.path == file.path {
+                    break true
+                }
             } ?? false
             if !seen -> sources.push(file)
         }
@@ -106,12 +108,16 @@ lsp_source_imports: fn(text: String) -> [ImportDecl] Never! {
 // rewritten. `own` is the row of the rename that moves the importing file.
 lsp_file_import_text: fn(source: JetDriverSourceDocument, import: ImportDecl, written: String, span: Span, renames: [LSPFileRename], own: Int?) -> String? Never! {
     bytes: source.source.bytes()
-    if span.end > bytes.len() || foundation_byte_text(bytes, span.start, span.end) != "\"{written}\"" -> return None
+    if span.end > bytes.len() || foundation_byte_text(bytes, span.start, span.end) != "\"{written}\"" {
+        return None
+    }
     target: lsp_file_import_target(source.path, written) ?? return None
     moved: lsp_rename_row(renames, target)
     if own == None && moved == None -> return None
     if moved == .Val(row) {
-        if target == renames[row].from -> return lsp_file_import_from(import, written, span, renames, own, source.path, renames[row].to)
+        if target == renames[row].from {
+            return lsp_file_import_from(import, written, span, renames, own, source.path, renames[row].to)
+        }
         return lsp_file_import_from(import, written, span, renames, own, source.path, lsp_moved_path(renames[row], target))
     }
     lsp_file_import_from(import, written, span, renames, own, source.path, target)
@@ -121,7 +127,9 @@ lsp_file_import_text: fn(source: JetDriverSourceDocument, import: ImportDecl, wr
 // or from where the rename at row `own` moves that file.
 lsp_file_import_from: fn(import: ImportDecl, written: String, span: Span, renames: [LSPFileRename], own: Int?, path: String, to: String) -> String? Never! {
     if own == .Val(row) {
-        if path == renames[row].from -> return lsp_file_import_path(import, written, span, renames[row].to, to)
+        if path == renames[row].from {
+            return lsp_file_import_path(import, written, span, renames[row].to, to)
+        }
         return lsp_file_import_path(import, written, span, lsp_moved_path(renames[row], path), to)
     }
     lsp_file_import_path(import, written, span, path, to)
@@ -133,9 +141,11 @@ lsp_file_import_from: fn(import: ImportDecl, written: String, span: Span, rename
 // is no longer imported, and is left to the user.
 lsp_file_import_path: fn(import: ImportDecl, written: String, span: Span, from: String, to: String) -> String? Never! {
     if !to.ends_with(".jet") -> return None
-    path := lsp_relative_import(from, to, extension: written.ends_with(".jet"))
+    ^path: lsp_relative_import(from, to, extension: written.ends_with(".jet"))
     if written.starts_with("./") && !path.starts_with("../") -> path = "./{path}"
-    if path == written || path.contains("\"") || path.contains("\\") || path.contains("{") || path.contains("}") -> return None
+    if path == written || path.contains("\"") || path.contains("\\") || path.contains("{") || path.contains("}") {
+        return None
+    }
     implicit: import.alias_span.start == span.start && import.alias_span.end == span.end
     if implicit && !lsp_import_basename_is(path, import.alias) && lsp_valid_identifier(import.alias) {
         return Val("{import.alias}: \"{path}\"")
@@ -158,10 +168,12 @@ lsp_file_import_target: fn(importer: String, written: String) -> String? Never! 
 lsp_relative_import: fn(from: String, to: String, extension: Bool{false}) -> String Never! {
     from_parts: from.split("/").to_list()
     to_parts: to.split("/").to_list()
-    common := 0
-    loop common < from_parts.len() - 1 && common < to_parts.len() - 1 && from_parts[common] == to_parts[common] -> common += 1
-    parts := [String]{}
-    ups := from_parts.len() - 1 - common
+    ^common: 0
+    loop common < from_parts.len() - 1 && common < to_parts.len() - 1 && from_parts[common] == to_parts[common] {
+        common += 1
+    }
+    ^parts: [String]{}
+    ^ups: from_parts.len() - 1 - common
     loop ups > 0 {
         parts.push("..")
         ups -= 1

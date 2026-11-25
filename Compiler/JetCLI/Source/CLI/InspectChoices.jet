@@ -103,7 +103,7 @@ jet_cli_function_choice: fn(kind: String, function: FnBody, choice: String) -> J
 // The storage form choices of `functions`: one per reactive upgrade, at the
 // function's line.
 jet_cli_storage_choices: fn(functions: [FnBody]) -> [JetCLIChoice] Never! {
-    out := [JetCLIChoice]{}
+    ^out: [JetCLIChoice]{}
     loop function in functions {
         if function.synthetic -> next
         loop upgrade in function.reactive_upgrades {
@@ -134,7 +134,7 @@ jet_cli_collection_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never!
         if function.synthetic -> next
         loop statement in function.tree.stmts {
             if statement == .Let(local, _, _, promotion, transferred, _) {
-                text := ""
+                ^text: ""
                 if promotion == .Val(promoted) {
                     text = "`{local.name}` collected under the {promoted.scope} `#Policy(gc)`: {promoted.reason}"
                 }
@@ -158,7 +158,7 @@ jet_cli_copy_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
         loop node in function.tree.nodes {
             if node.kind == .Clone(value, fact) {
                 copied: body_node(function.tree, value)
-                name := "a value"
+                ^name: "a value"
                 if copied.kind == .Local(local) -> name = "`{local.name}`"
                 text: if fact == {
                     .Share -> "{name} shared: a later read uses it after this move, so the move copies it"
@@ -225,7 +225,7 @@ jet_cli_rights_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
 jet_cli_context_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
     loop function in functions {
         if function.synthetic || module_is_core(function.module_identity) -> next
-        read := [String]{}
+        ^read: [String]{}
         loop node in function.tree.nodes {
             if node.kind == .HostCall(call) {
                 named: if call == {
@@ -251,7 +251,7 @@ jet_cli_context_key_name: fn(key: String) -> String Never! { "`{symbol_key_leaf(
 // reads the whole table. A filter is a call of the Core function that fills
 // the `QueryFilter` role, whose declaration `decls` names by its function key.
 jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, out: ^[JetCLIChoice]) Never! {
-    filters := [String]{}
+    ^filters: [String]{}
     loop function in functions {
         if function.role == "QueryFilter" && module_is_core(function.module_identity) {
             filters.push("{function.key}")
@@ -264,13 +264,13 @@ jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: Sy
         if function.synthetic || module_is_core(function.module_identity) -> next
         loop node in function.tree.nodes {
             if node.kind == .Call(callee, _, args) && args.len() == 4 && filters.contains(decl_table_key(decls, symbols, callee)) {
-                condition := ""
+                ^condition: ""
                 if body_node(function.tree, args[1].value).kind == .StrLit(parts) {
                     loop part in parts {
                         if part == .Literal(text) -> condition = "{condition}{text}"
                     }
                 }
-                text := "filter reads by SQL `{condition}`: a table reads only the rows it holds for, and a live query over it re-runs only for a write that changes one"
+                ^text: "filter reads by SQL `{condition}`: a table reads only the rows it holds for, and a live query over it re-runs only for a write that changes one"
                 if condition == "" {
                     text = "filter reads the whole table: its predicate is not comparisons of a `#Codable` row's `Int`, `String` or `Bool` fields with values joined by `&&` and `||`, so a live query over it re-runs for every write to the table"
                 }
@@ -282,7 +282,7 @@ jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: Sy
 }
 
 jet_cli_str_literal: fn(function: FnBody, node_id: Int) -> String Never! {
-    text := ""
+    ^text: ""
     if body_node(function.tree, node_id).kind == .StrLit(parts) {
         loop part in parts {
             if part == .Literal(piece) -> text = "{text}{piece}"
@@ -296,7 +296,7 @@ jet_cli_policy_choice_text: fn(policy_name: String, join_spec: String) -> String
     if lines.len() > 0 {
         head: lines[0].split("\t").to_list()
         if head.len() >= 2 && head[0] == "join" {
-            tables := [String]{}
+            ^tables: [String]{}
             loop i in 1..<lines.len() {
                 parts: lines[i].split("\t").to_list()
                 if parts.len() == 2 && parts[0] == "table" && !tables.contains(parts[1]) {
@@ -335,10 +335,10 @@ jet_cli_policy_choices: fn(functions: [FnBody], _decls: DeclTable, _symbols: Sym
 
 jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String, profile: String, json: Bool) -> String Never! {
     if !json {
-        text := "Choices: scope={scope} source={file} profile={profile}\n"
+        ^text: "Choices: scope={scope} source={file} profile={profile}\n"
         loop kind in JET_CLI_CHOICE_KINDS {
             label: kind.capitalize()
-            count := 0
+            ^count: 0
             loop choice in choices {
                 if choice.kind != kind -> next
                 text = "{text}{label}: {choice.file}:{choice.line} in {choice.function}: {choice.choice}\n"
@@ -348,7 +348,7 @@ jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String,
         }
         return text
     }
-    rows := [JetCLIStatusValue]{}
+    ^rows: [JetCLIStatusValue]{}
     loop choice in choices {
         rows.push(
             jet_cli_status_object(
@@ -377,12 +377,12 @@ jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String,
 // its checked functions record and, for a program with a `run: fn`, those
 // its optimization makes. The rows go in file and line order.
 jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared: jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Program)
     if prepared == {
         .Refused(refusal) -> { output = refusal.move() }
         .Prepared(value, _) -> {
-            request := value.move()
+            ^request: value.move()
             request.profile = job.profile
             sources: request.authorized_sources
             compiler_threads: request.compiler_threads.copy()
@@ -395,7 +395,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
                 jet_cli_inspect_finish(job, jet_cli_ice(problem))
             }
             inputs: front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
-            choices := jet_cli_storage_choices(inputs.functions)
+            ^choices: jet_cli_storage_choices(inputs.functions)
             jet_cli_collection_choices(inputs.functions, choices)
             jet_cli_copy_choices(inputs.functions, choices)
             jet_cli_placement_choices(inputs.functions, choices)
@@ -406,7 +406,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             jet_cli_policy_choices(inputs.functions, inputs.decls, inputs.symbols, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
-                build := build_options_stock("build")
+                ^build: build_options_stock("build")
                 if job.build == .Val(given) -> build = given.copy()
                 decisions: jet_cli_decisions(inputs, build, threads, job.profile, front.compile.harden, false)
                 jet_cli_inline_choices(decisions.report.inlines, choices)

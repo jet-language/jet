@@ -21,7 +21,7 @@ state_label: fn(delivery: ^^Delivery) -> String {
 run: fn() {
     temp: testing.temp_dir("service-authority")
     store: Path.from(temp).join("authority.log").to_string()
-    tree := service.tree("orders")
+    ^tree: service.tree("orders")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(store) ?? panic("state store")
     tree.set_state_event_log(state, "authority-events", 1, "reversible") ?? panic("state")

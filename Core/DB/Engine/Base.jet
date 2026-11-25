@@ -285,7 +285,7 @@ mem_null: fn() -> Mem Never! { mem_init(MEM_NULL) }
 
 // sqlite3VdbeMemSetInt64.
 mem_int: fn(v: Int) -> Mem Never! {
-    m := mem_init(MEM_INT)
+    ^m: mem_init(MEM_INT)
     m.i = v
     m
 }
@@ -293,21 +293,21 @@ mem_int: fn(v: Int) -> Mem Never! {
 // sqlite3VdbeMemSetDouble; a NaN is NULL.
 mem_real: fn(r: Float) -> Mem Never! {
     if r != r -> return mem_null()
-    m := mem_init(MEM_REAL)
+    ^m: mem_init(MEM_REAL)
     m.r = r
     m
 }
 
 // A text value in encoding enc.
 mem_text: fn(z: [U8], enc: Int) -> Mem Never! {
-    m := mem_init(MEM_STR)
+    ^m: mem_init(MEM_STR)
     m.z = z
     m.enc = enc
     m
 }
 
 mem_blob: fn(z: [U8]) -> Mem Never! {
-    m := mem_init(MEM_BLOB)
+    ^m: mem_init(MEM_BLOB)
     m.z = z
     m
 }

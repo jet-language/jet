@@ -6,11 +6,11 @@ write_into: fn(out: ^FileWriter, text: String) -[FS.Write]> IOError! {
 }
 
 run: fn() -[FS, IO]> IOError! {
-    out := files.create("written.txt")
+    ^out: files.create("written.txt")
     write_into(out, "hello\n")
     write_into(out, "again\n")
     close(out.move())
-    reader := files.open("written.txt")
+    ^reader: files.open("written.txt")
     print(reader.read_line() ?? "missing")
     print(reader.read_line() ?? "missing")
 }

@@ -6,13 +6,13 @@ package: {
 use time: core.time
 
 csr_matvec: fn(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: Int) -> [Float] {
-    out := [Float]{}
-    row := 0
+    ^out: [Float]{}
+    ^row: 0
     loop row < rows {
         start: indptr[row]
         finish: indptr[row + 1]
-        acc := Float{0.0}
-        p := start
+        ^acc: Float{0.0}
+        ^p: start
         loop p < finish {
             acc += data[p] * x[indices[p]]
             p += 1
@@ -24,7 +24,7 @@ csr_matvec: fn(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: I
 }
 
 sum_values: fn(values: [Float]) -> Float {
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop value in values -> total += value
     return total
 }
@@ -35,13 +35,13 @@ run: fn() {
     entries_per_row: 10
     nnz: rows * entries_per_row
 
-    data := [Float]{}
-    indices := [Int]{}
-    indptr := [Int]{}
-    x := [Float]{}
+    ^data: [Float]{}
+    ^indices: [Int]{}
+    ^indptr: [Int]{}
+    ^x: [Float]{}
     loop _i in 0..<cols -> x.push(Float{1.0})
 
-    offset := 0
+    ^offset: 0
     indptr.push(offset)
     loop _row in 0..<rows {
         loop k in 0..<entries_per_row {

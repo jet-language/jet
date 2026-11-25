@@ -97,7 +97,7 @@ cli_read_only_command: fn(verb: String, parsed: CLIParsed) -> Bool Never! {
 
 // Process entry after invocation setup. Returns the process exit code.
 cli_main: fn(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     // Bare `jetpack` is the keyboard-first dashboard; its own TTY guard keeps
     // the status-summary floor for pipes, CI, and redirected output.
     verb: args.get(0) ?? return cli_run_dashboard(verification)
@@ -121,7 +121,7 @@ cli_main: fn(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Ex
     }
     if checks_flags {
         if cli_unknown_flag(verb, rest) == .Val(flag) {
-            legal := [String]{}
+            ^legal: [String]{}
             loop spelling in cli_verb_flags(verb) -> legal.push("`{spelling}`")
             theme.error_coded("E2102", "`{flag}` isn't a flag `{verb}` understands.", "Jet ignores no flags silently, so a typo cannot quietly change a command.", "`{verb}` takes {legal.join(", ")}.")
             return EXIT_USAGE

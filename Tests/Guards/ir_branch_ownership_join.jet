@@ -52,14 +52,16 @@ IRBranchJoinFunction: struct {
 // function starts at a top-level `ir_…: fn(` line and runs to the next
 // top-level line.
 ir_branch_join_functions: fn(path: String, text: String, out: ^[IRBranchJoinFunction]) {
-    name := ""
-    start := 0
-    signature := ""
-    calls := [IRBranchJoinCall]{}
+    ^name: ""
+    ^start: 0
+    ^signature: ""
+    ^calls: [IRBranchJoinCall]{}
     loop (index, line) in text.lines() {
         bytes: line.bytes()
         if bytes.len() > 0 && as_word_byte(Int{bytes[0]}) {
-            if name != "" -> out.push(IRBranchJoinFunction{path: path.copy(), line: start, name: name, signature: signature, calls: calls})
+            if name != "" {
+                out.push(IRBranchJoinFunction{path: path.copy(), line: start, name: name, signature: signature, calls: calls})
+            }
             name = ""
             signature = ""
             calls = [IRBranchJoinCall]{}
@@ -71,23 +73,25 @@ ir_branch_join_functions: fn(path: String, text: String, out: ^[IRBranchJoinFunc
             next
         }
         if name == "" -> next
-        mask := [Bool]{}
+        ^mask: [Bool]{}
         loop _ in 0..<bytes.len() -> mask.push(false)
         as_jet_code(bytes, mask)
-        at := 0
+        ^at: 0
         loop at < bytes.len() {
             if !mask[at] || !as_word_byte(Int{bytes[at]}) {
                 at += 1
                 next
             }
-            first := at
+            ^first: at
             loop at < bytes.len() && as_word_byte(Int{bytes[at]}) -> at += 1
             if as_byte_at(bytes, at) != 40 || as_byte_at(bytes, first - 1) == 46 -> next
             word: String.from_bytes(bytes.slice(first, at)) ?? ""
             if word.starts_with("ir_") -> calls.push(IRBranchJoinCall{name: word, line: index + 1})
         }
     }
-    if name != "" -> out.push(IRBranchJoinFunction{path: path.copy(), line: start, name: name, signature: signature, calls: calls})
+    if name != "" {
+        out.push(IRBranchJoinFunction{path: path.copy(), line: start, name: name, signature: signature, calls: calls})
+    }
 }
 
 // Whether `signature` takes the program and a body node.
@@ -108,13 +112,15 @@ ir_branch_join_takes_node: fn(signature: String) -> Bool Never! {
 
 // The builders of user code among `functions`.
 ir_branch_join_builders: fn(functions: [IRBranchJoinFunction]) -> [String:Bool] Never! {
-    builders := [String:Bool]{}
+    ^builders: [String:Bool]{}
     loop name in IR_BRANCH_JOIN_BUILDERS -> builders[name] = true
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop function in functions {
-            if builders.get(function.name) != None || !ir_branch_join_takes_node(function.signature) -> next
+            if builders.get(function.name) != None || !ir_branch_join_takes_node(function.signature) {
+                next
+            }
             loop call in function.calls {
                 if builders.get(call.name) != None {
                     builders[function.name] = true
@@ -131,12 +137,12 @@ ir_branch_join_builders: fn(functions: [IRBranchJoinFunction]) -> [String:Bool] 
 // outside `reviewed`, and each row of `reviewed` that names no such function.
 ir_branch_join_problems: fn(functions: [IRBranchJoinFunction], reviewed: [IRBranchJoinReviewed]) -> [String] Never! {
     builders: ir_branch_join_builders(functions)
-    problems := [String]{}
-    unjoined := [String:Bool]{}
+    ^problems: [String]{}
+    ^unjoined: [String:Bool]{}
     loop function in functions {
-        opened := [Bool]{}
-        inside := [String]{}
-        joined := false
+        ^opened: [Bool]{}
+        ^inside: [String]{}
+        ^joined: false
         loop call in function.calls {
             if {
                 call.name == "ir_open_if" || call.name == "ir_open_condition" -> opened.push(true)
@@ -144,12 +150,14 @@ ir_branch_join_problems: fn(functions: [IRBranchJoinFunction], reviewed: [IRBran
                 call.name == "ir_end" && opened.len() > 0 -> _: opened.pop()
                 call.name == "ir_end" -> {}
                 IR_BRANCH_JOIN_HELPERS.contains(call.name) -> joined = true
-                opened.contains(true) && builders.get(call.name) != None -> inside.push("{call.name} at line {call.line}")
+                opened.contains(true) && builders.get(call.name) != None -> {
+                    inside.push("{call.name} at line {call.line}")
+                }
             }
         }
         if joined || inside.is_empty() -> next
         unjoined[function.name] = true
-        listed := false
+        ^listed: false
         loop row in reviewed {
             if row.function == function.name -> listed = true
         }
@@ -195,7 +203,7 @@ ir_branch_join_problems: fn(functions: [IRBranchJoinFunction], reviewed: [IRBran
         `    ir_end(b.f, b.line)`,
         `}`,
     }
-    functions := [IRBranchJoinFunction]{}
+    ^functions: [IRBranchJoinFunction]{}
     ir_branch_join_functions("JetIR/a.jet", source.join("\n"), functions)
     assert_eq(functions.len(), 4)
     problems: ir_branch_join_problems(functions, [IRBranchJoinReviewed]{IRBranchJoinReviewed{function: "ir_gone", reason: "x"}})
@@ -207,8 +215,9 @@ ir_branch_join_problems: fn(functions: [IRBranchJoinFunction], reviewed: [IRBran
 
 #Test("every IR lowering that builds user code inside a branch joins the ownership of its paths") {
     guards_enter_root()
-    functions := [IRBranchJoinFunction]{}
-    loop child in (ir_branch_join_files.list_dir(IR_BRANCH_JOIN_ROOT) ?? panic("list {IR_BRANCH_JOIN_ROOT}: {err}")) {
+    ^functions: [IRBranchJoinFunction]{}
+    loop child in
+        (ir_branch_join_files.list_dir(IR_BRANCH_JOIN_ROOT) ?? panic("list {IR_BRANCH_JOIN_ROOT}: {err}")) {
         if !child.name.ends_with(".jet") -> next
         path: "{IR_BRANCH_JOIN_ROOT}/{child.name}"
         text: ir_branch_join_files.read(path) ?? panic("read {path}: {err}")

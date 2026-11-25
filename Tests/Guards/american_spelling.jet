@@ -609,7 +609,7 @@ as_code_tree: fn(path: String) -> Bool Never! {
 
 // The American spelling of each British word, keyed in lower case.
 as_word_map: fn() -> [String:String] Never! {
-    map := [String:String]{}
+    ^map: [String:String]{}
     loop row in AS_WORDS -> map[row.british] = row.american
     map
 }
@@ -629,8 +629,8 @@ as_lower_byte: fn(code: Int) -> Bool Never! { code >= 97 && code <= 122 }
 // run that starts a capitalized word (`HTTPServer` is `HTTP` and `Server`).
 as_word_parts: fn(word: String) -> [String] Never! {
     bytes: word.bytes()
-    parts := [String]{}
-    start := -1
+    ^parts: [String]{}
+    ^start: -1
     loop at in 0..<bytes.len() {
         code: Int{bytes[at]}
         if !as_upper_byte(code) && !as_lower_byte(code) {
@@ -661,7 +661,7 @@ as_byte_at: fn(bytes: [U8], at: Int) -> Int Never! {
 // first letter, or lower case.
 as_cased: fn(word: String, american: String) -> String Never! {
     if word == word.to_upper() -> return american.to_upper()
-    bytes := american.bytes()
+    ^bytes: american.bytes()
     first: Int{word.bytes()[0]}
     if first >= 65 && first <= 90 -> bytes[0] = U8{Int{bytes[0]} - 32}
     String.from_bytes(bytes) ?? ""
@@ -670,9 +670,9 @@ as_cased: fn(word: String, american: String) -> String Never! {
 // Which bytes of a Jet source line are code: outside a `//` comment and
 // outside string text, where an interpolation's braces hold code again.
 as_jet_code: fn(bytes: [U8], mask: ^[Bool]) {
-    in_string := false
-    depth := 0
-    at := 0
+    ^in_string: false
+    ^depth: 0
+    ^at: 0
     loop at < bytes.len() {
         code: Int{bytes[at]}
         next_code: if at + 1 < bytes.len() -> Int{bytes[at + 1]} else -> 0
@@ -712,10 +712,10 @@ as_output_line: fn(path: String, line: String) -> Bool Never! {
 // Which bytes of `line` of the file at `path` are code (see AS_IDENTIFIERS).
 as_code_mask: fn(path: String, line: String) -> [Bool] Never! {
     bytes: line.bytes()
-    mask := [Bool]{}
+    ^mask: [Bool]{}
     loop _ in 0..<bytes.len() -> mask.push(false)
     if path.ends_with(".jet") -> as_jet_code(bytes, mask)
-    quoted := false
+    ^quoted: false
     loop at in 0..<bytes.len() {
         if (Int{bytes[at]}) == 96 -> quoted = !quoted
         if quoted -> mask[at] = true
@@ -735,7 +735,7 @@ AmericanHit: struct {
 // `step`, or 0 at the edge of the line. A line or tab escape such as `\n`
 // ends the text before it.
 as_token_edge: fn(bytes: [U8], at: Int, step: Int) -> Int Never! {
-    index := at
+    ^index: at
     loop index >= 0 && index < bytes.len() {
         code: Int{bytes[index]}
         if code == 32 || code == 9 || code == 34 || code == 39 -> return code
@@ -754,13 +754,13 @@ as_line_hits: fn(path: String, line: String, text: String, words: [String:String
     bytes: text.bytes()
     mask: as_code_mask(path, text)
     output: as_output_line(path, text)
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         if !as_word_byte(Int{bytes[at]}) {
             at += 1
             next
         }
-        start := at
+        ^start: at
         loop at < bytes.len() && as_word_byte(Int{bytes[at]}) -> at += 1
         // The letter of an escape before the word (`\ncancelled`) is not part
         // of it: the escape ends the text before the word.
@@ -768,7 +768,7 @@ as_line_hits: fn(path: String, line: String, text: String, words: [String:String
         if escaped -> start += 1
         word: String.from_bytes(bytes.slice(start, at)) ?? ""
         parts: if as_code_tree(path) -> as_word_parts(word) else -> [String]{word}
-        british := [String]{}
+        ^british: [String]{}
         loop part in parts {
             if words.get(part.to_lower()) != None -> british.push(part.copy())
         }
@@ -794,11 +794,11 @@ as_line_hits: fn(path: String, line: String, text: String, words: [String:String
 
 // The British words of `git grep -n` output lines (`path:line:text`).
 as_hits: fn(lines: [String], words: [String:String]) -> [AmericanHit] Never! {
-    hits := [AmericanHit]{}
+    ^hits: [AmericanHit]{}
     loop line in lines {
         parts: line.split(":").to_list()
         if parts.len() < 3 -> next
-        text := parts[2]
+        ^text: parts[2]
         loop index in 3..<parts.len() -> text = "{text}:{parts[index]}"
         as_line_hits(parts[0], parts[1], text, words, hits)
     }
@@ -808,10 +808,10 @@ as_hits: fn(lines: [String], words: [String:String]) -> [AmericanHit] Never! {
 // The hits against the closed lists: each hit no row keeps, and each row
 // that keeps nothing or a different count.
 as_findings: fn(hits: [AmericanHit], words: [String:String]) -> [String] Never! {
-    findings := [String]{}
-    identifiers := [String:Int]{}
+    ^findings: [String]{}
+    ^identifiers: [String:Int]{}
     loop row in AS_IDENTIFIERS -> identifiers[row.spelling] = 0
-    quoted := [String:Int]{}
+    ^quoted: [String:Int]{}
     loop row in AS_QUOTED -> quoted["{row.path}\t{row.word}"] = 0
     loop hit in hits {
         if hit.code && identifiers.get(hit.word) != None {
@@ -843,15 +843,15 @@ as_findings: fn(hits: [AmericanHit], words: [String:String]) -> [String] Never! 
 // AS_SKIPPED: anywhere in a word, so a line with a British part of an
 // identifier reaches as_line_hits.
 as_grep: fn() -> [String] {
-    pattern := ""
+    ^pattern: ""
     loop row in AS_WORDS {
         pattern = if pattern == "" -> row.british else -> "{pattern}|{row.british}"
     }
-    argv := [String]{"git", "-c", "core.quotePath=false", "grep", "-I", "-n", "-P", "(?i)(?:{pattern})", "--", "."}
+    ^argv: [String]{"git", "-c", "core.quotePath=false", "grep", "-I", "-n", "-P", "(?i)(?:{pattern})", "--", "."}
     loop row in AS_SKIPPED -> argv.push(":(exclude,glob){row.path}")
     listed: as_process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run git grep: {err}")
     assert(listed.code == 0 || listed.code == 1, "git grep failed: {as_process.combined_output(listed).trim()}")
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in as_process.stdout_lines(listed) {
         if line.len() > 0 -> lines.push(line)
     }
@@ -860,7 +860,7 @@ as_grep: fn() -> [String] {
 
 // Each AS_SKIPPED row that no tracked file matches any more.
 as_stale_skips: fn() -> [String] {
-    stale := [String]{}
+    ^stale: [String]{}
     loop row in AS_SKIPPED {
         listed: as_process.cmd([String]{"git", "ls-files", "--", ":(glob){row.path}"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
         assert(listed.code == 0, "git ls-files failed: {as_process.combined_output(listed).trim()}")
@@ -893,17 +893,17 @@ as_stale_skips: fn() -> [String] {
 
 #Test("a Jet line's code is outside its comments and string text") {
     words: as_word_map()
-    hits := [AmericanHit]{}
+    ^hits: [AmericanHit]{}
     as_line_hits("a.jet", "1", "colour: \"{{colour}} colour\" // colour", words, hits)
     assert_eq(hits.len(), 4)
     assert(hits[0].code && hits[1].code && !hits[2].code && !hits[3].code)
-    quoted := [AmericanHit]{}
+    ^quoted: [AmericanHit]{}
     as_line_hits("a.md", "1", "the `colour` field, \"colour\", x.colour and colour", words, quoted)
     assert(quoted[0].code && quoted[1].code && quoted[2].code && !quoted[3].code)
-    tokens := [AmericanHit]{}
+    ^tokens: [AmericanHit]{}
     as_line_hits("a.md", "1", "\"Red,colour\", 'sleep-colour', \"the colour\"", words, tokens)
     assert(tokens[0].code && tokens[1].code && !tokens[2].code)
-    output := [AmericanHit]{}
+    ^output: [AmericanHit]{}
     as_line_hits("a.case", "1", "# the colour", words, output)
     as_line_hits("a.case", "2", "stdout: colour", words, output)
     as_line_hits("a.case", "3", "stdout: = \"state=colour\\nColour\\n\"", words, output)
@@ -923,7 +923,7 @@ as_stale_skips: fn() -> [String] {
 }
 
 #Test("each word list row is lower case, listed once, and changes the word") {
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     loop row in AS_WORDS {
         assert(row.british == row.british.to_lower(), "{row.british}: list the word in lower case")
         assert(row.british != row.american, "{row.british}: the American spelling must differ")
@@ -935,7 +935,7 @@ as_stale_skips: fn() -> [String] {
 #Test("no tracked text spells a word the British way") {
     guards_enter_root()
     words: as_word_map()
-    findings := as_findings(as_hits(as_grep(), words), words)
+    ^findings: as_findings(as_hits(as_grep(), words), words)
     loop line in as_stale_skips() -> findings.push(line)
     assert_eq(findings.join("\n"), "")
 }

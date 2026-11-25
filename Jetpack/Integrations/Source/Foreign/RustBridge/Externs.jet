@@ -157,7 +157,7 @@ FFILink: struct {
 
     // Cargo's dependency search paths, target artifacts first, no duplicates.
     dependency_dirs: fn(self) -> [String] Never! {
-        dirs := [String]{self.target_deps_dir}
+        ^dirs: [String]{self.target_deps_dir}
         if self.host_deps_dir != self.target_deps_dir -> dirs.push(self.host_deps_dir)
         dirs
     }
@@ -200,7 +200,7 @@ CRecordDefinitions: struct {
     }
 
     is_record_type: fn(self, ty: Type) -> Bool Never! {
-        stack := [String]{}
+        ^stack: [String]{}
         self.is_record_type_with_stack(ty, stack)
     }
 
@@ -211,12 +211,12 @@ CRecordDefinitions: struct {
         if stack.contains(name) -> return false
         stack.push(name)
         result: self.is_record_type_with_stack(base, stack)
-        _ := stack.pop()
+        ^_: stack.pop()
         result
     }
 
     rust_type: fn(self, ty: Type) -> String? Never! {
-        stack := [String]{}
+        ^stack: [String]{}
         self.rust_type_with_stack(ty, stack)
     }
 
@@ -251,7 +251,7 @@ CRecordDefinitions: struct {
         if stack.contains(name) -> return None
         stack.push(name.copy())
         resolved: self.rust_type_with_stack(base, stack)
-        _ := stack.pop()
+        ^_: stack.pop()
         resolved
     }
 }
@@ -303,7 +303,7 @@ pkg_ffi_builtin_rust_name: fn(name: String) -> String? Never! {
 // `Syntax::generated_path`): alphanumerics stay, `_ . : / \ -` take a
 // one-letter escape, every other byte a fixed-width hex escape.
 pkg_ffi_mangle_path: fn(name: String) -> String Never! {
-    encoded := [U8]{}
+    ^encoded: [U8]{}
     loop byte in name.bytes() {
         code: Int{byte}
         if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) {
@@ -346,13 +346,13 @@ pkg_ffi_path_escape: fn(code: Int) -> String Never! {
 }
 
 pkg_ffi_param_names: fn(params: [Param]) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop param in params -> names.push(param.name)
     names
 }
 
 pkg_ffi_param_shapes: fn(params: [Param]) -> [{convention: AccessConvention, ty: Type}] Never! {
-    shapes := [{convention: AccessConvention, ty: Type}]{}
+    ^shapes: [{convention: AccessConvention, ty: Type}]{}
     loop param in params -> shapes.push({convention: param.convention, ty: param.ty})
     shapes
 }
@@ -365,7 +365,7 @@ pkg_ffi_close_name: fn(close: NamedSpan?) -> String? Never! {
 // Gather every foreign function across all modules. Inline assembly carries
 // its operand contract checked for `target`, the bridge's selected triple.
 pkg_ffi_collect_externs: fn(program: RustBridgeProgram, target: String) -> [ExternEntry] Never! {
-    out := [ExternEntry]{}
+    ^out: [ExternEntry]{}
     loop program_module in program.modules {
         items: program_module.items
         loop item in items {
@@ -391,7 +391,7 @@ pkg_ffi_collect_externs: fn(program: RustBridgeProgram, target: String) -> [Exte
 // `guest_import_wrapper_name` (`jet_ffi_guest.<owner|root>.<name>`, mangled).
 pkg_ffi_collect_function: fn(function: Func, owner: String, target: String, out: ^[ExternEntry]) Never! {
     if parser_guest_import_symbol(function) == .Val(symbol) {
-        names := [String]{}
+        ^names: [String]{}
         loop index in 0..<function.params.len() -> names.push("arg{index}")
         wrapper_owner: if owner == "" -> "root" else -> owner
         out.push(
@@ -536,7 +536,7 @@ pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: ^[CRec
     rust_name: pkg_ffi_c_record_rust_name(key)
     names[key] = rust_name
     if !names.has_key(definition.name) -> names[definition.name] = rust_name
-    fields := [{name: String, ty: Type}]{}
+    ^fields: [{name: String, ty: Type}]{}
     declared: definition.fields
     loop field in declared -> fields.push({name: field.name, ty: field.ty})
     records.push(CRecordDecl{rust_name: rust_name, fields: fields, alignment: pkg_ffi_struct_layout_alignment(layout)})
@@ -551,19 +551,19 @@ pkg_ffi_record_alias: fn(owner: String, name: String, base: Type, aliases: ^[Str
 // The checked `#Layout(c)` records, their aliases, and the generated Rust
 // declarations the trampoline refers to.
 pkg_ffi_collect_c_record_definitions: fn(program: RustBridgeProgram) -> CRecordDefinitions Never! {
-    records := [CRecordDecl]{}
-    names := [String:String]{}
-    aliases := [String:Type]{}
+    ^records: [CRecordDecl]{}
+    ^names: [String:String]{}
+    ^aliases: [String:Type]{}
     loop program_module in program.modules {
         pkg_ffi_collect_record_items(program_module.items, program_module.alias, records, names, aliases)
     }
-    handle_names := [String]{}
+    ^handle_names: [String]{}
     facts: program.cffi.handle_facts
     loop fact in facts {
         if !handle_names.contains(fact.jet_name) -> handle_names.push(fact.jet_name)
     }
-    definitions := CRecordDefinitions{source: "", names: names, aliases: aliases, handle_names: handle_names}
-    source := ""
+    ^definitions: CRecordDefinitions{source: "", names: names, aliases: aliases, handle_names: handle_names}
+    ^source: ""
     loop record in records {
         repr: if record.alignment == {
             .Val(alignment) -> "#[repr(C, align({alignment}))]"
@@ -621,7 +621,7 @@ pkg_ffi_inline_asm_entry_diagnostic: fn(asm: ExternEntry, inline: InlineEntry, t
     if !inline_assembly_target_supported(target) {
         return Val(pkg_ffi_asm_error("{asm.line_hint} has no audited inline-assembly register set for target `{target}`", "inline assembly needs a target-specific register namespace before native bridge generation", "select a supported native target or provide a target-specific assembly body"))
     }
-    returns_value := false
+    ^returns_value: false
     if asm.return_type == .Val(ty) -> returns_value = pkg_ffi_inline_rust_type(ty) != "()"
     if contract.output == None && returns_value {
         return Val(pkg_ffi_asm_error("{asm.line_hint} has no checked output destination", "a value-returning assembly body must identify its result with the sema-checked output operand", "mark one named output or explicit target register with `; -> return`"))
@@ -634,7 +634,7 @@ pkg_ffi_inline_asm_entry_diagnostic: fn(asm: ExternEntry, inline: InlineEntry, t
         if problem != None -> return problem
     }
     output_register: pkg_ffi_asm_output_register(contract)
-    seen_clobbers := [String]{}
+    ^seen_clobbers: [String]{}
     clobbers: contract.clobbers
     loop clobber in clobbers {
         normalized: pkg_ffi_normalize_register(clobber)
@@ -689,7 +689,7 @@ pkg_ffi_foreign_descriptor_stamp: fn(language: String) -> String Never! {
 
 // The sorted, deduplicated descriptor stamps of every entry.
 pkg_ffi_foreign_descriptor_stamps: fn(entries: [ExternEntry]) -> [String] Never! {
-    stamps := [String]{}
+    ^stamps: [String]{}
     loop entry in entries {
         language: pkg_ffi_foreign_language_for_entry(entry) ?? next
         stamp: pkg_ffi_foreign_descriptor_stamp(language)
@@ -702,7 +702,7 @@ pkg_ffi_foreign_descriptor_stamps: fn(entries: [ExternEntry]) -> [String] Never!
 // The entries' language roots in declaration order (the Rust `BTreeSet`
 // order).
 pkg_ffi_entry_languages: fn(entries: [ExternEntry]) -> [String] Never! {
-    languages := [String]{}
+    ^languages: [String]{}
     loop language in pkg_foreign_language_roots() {
         loop entry in entries {
             if pkg_ffi_foreign_language_for_entry(entry) == .Val(entry_language) {
@@ -738,7 +738,7 @@ pkg_ffi_tag_marker_text: fn(marker: TagMarker) -> String Never! {
 }
 
 pkg_ffi_join_type_keys: fn(types: [Type], separator: String) -> String Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop ty in types -> keys.push(pkg_ffi_type_key(ty))
     keys.join(separator)
 }
@@ -749,7 +749,7 @@ pkg_ffi_optional_type_key: fn(ty: Type?) -> String Never! {
 }
 
 pkg_ffi_tuple_type_key: fn(fields: [TypeTupleField]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop field in fields -> rows.push("{field.name}:{pkg_ffi_type_key(field.ty)}")
     "({rows.join(",")})"
 }
@@ -801,7 +801,7 @@ pkg_ffi_convention_debug: fn(convention: AccessConvention) -> String Never! {
 
 // Every non-`std` `name@version` crate the entries name.
 pkg_ffi_collect_crate_deps: fn(entries: [ExternEntry]) -> [String:String] Never! {
-    deps := [String:String]{}
+    ^deps: [String:String]{}
     loop entry in entries {
         if entry.crate_spec == "std" -> next
         spec: pkg_ffi_parse_crate_spec(entry.crate_spec) ?? next
@@ -820,7 +820,7 @@ pkg_ffi_parse_crate_spec: fn(spec: String) -> {name: String, version: String}? N
 
 // A map's keys in sorted order (the Rust `BTreeMap` iteration order).
 pkg_ffi_sorted_keys: fn(map: [String:String]) -> [String] Never! {
-    keys := map.keys().to_list()
+    ^keys: map.keys().to_list()
     keys.sort()
     keys
 }

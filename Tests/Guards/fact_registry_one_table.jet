@@ -51,7 +51,9 @@ frt_constant: fn(line: String) -[]> Bool {
 // as `path:line`, except the one table in its home. Symbolic links, hidden
 // entries and build output are skipped, and so are files that are not Jet.
 frt_tables: fn(path: String, out: ^[String]) -[FS]> {
-    if frt_files.is_symlink(path) -> return
+    if frt_files.is_symlink(path) {
+        return
+    }
     if frt_files.is_dir(path) {
         loop child in (frt_files.list_dir(path) ?? panic("list {path}: {err}")) {
             if child.name.starts_with(".") || FRT_SKIPPED.contains(child.name) -> next
@@ -59,7 +61,9 @@ frt_tables: fn(path: String, out: ^[String]) -[FS]> {
         }
         return
     }
-    if !path.ends_with(".jet") || path == FRT_GUARD -> return
+    if !path.ends_with(".jet") || path == FRT_GUARD {
+        return
+    }
     text: frt_files.read(path) ?? return
     loop (index, line) in text.lines() {
         if !frt_constant(line) -> next
@@ -77,7 +81,7 @@ frt_tables: fn(path: String, out: ^[String]) -[FS]> {
     guards_enter_root()
     home: frt_files.read(FRT_HOME) ?? panic("read {FRT_HOME}: {err}")
     assert(home.lines().contains(FRT_TABLE), "{FRT_HOME} must hold the one registration table")
-    found := [String]{}
+    ^found: [String]{}
     loop root in FRT_ROOTS {
         assert(frt_files.exists(root), "the root {root} must exist")
         frt_tables(root, found)

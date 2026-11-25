@@ -138,7 +138,7 @@ jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAut
     // copy: `presented` is the shifted copy returned for display, while `diagnostic` stays the
     // caller's raw row (a read parameter). Its source_start/offset/span/edit are read below to
     // compute the shift.
-    presented := diagnostic.copy()
+    ^presented: diagnostic.copy()
     path: diagnostic.source_path ?? return jet_driver_present_unplaced(presented)
     if presented.origin == None {
         presented.origin = jet_driver_present_origin_once(path, snapshot, generated, origins)
@@ -146,7 +146,7 @@ jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAut
     }
     shift: (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
     if diagnostic.span == .Val(span) -> presented.span = Val(jet_driver_shift_span(span, shift))
-    placed := true
+    ^placed: true
     if diagnostic.edit == .Val(edit) {
         if jet_driver_present_edit(edit, shift, snapshot, generated, origins) == .Val(moved) {
             presented.edit = Val(moved)
@@ -179,7 +179,7 @@ jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAut
 
 // A diagnostic with no file of its own keeps no fix that names another one.
 jet_driver_present_unplaced: fn(diagnostic: ^^Diagnostic) -> Diagnostic Never! {
-    named := diagnostic.fix_edits.len() > 0
+    ^named: diagnostic.fix_edits.len() > 0
     if diagnostic.edit == .Val(edit) && edit.path != None -> named = true
     if named -> return diagnostic_without_fix(diagnostic)
     diagnostic
@@ -194,7 +194,7 @@ jet_driver_present_edit: fn(edit: TextEdit, shift: Int, snapshot: JetDriverAutho
 }
 
 jet_driver_present_diagnostics: fn(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> [Diagnostic] Never! {
-    origins := [String:DiagnosticOrigin]{}
+    ^origins: [String:DiagnosticOrigin]{}
     presented: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated, origins)
     presented
 }
@@ -218,7 +218,7 @@ jet_driver_plural: fn(count: Int) -> String Never! { if count == 1 -> "" else ->
 // and `test` hide ordinary advisory lints unless `--verbose` asks
 // pass `show_advisories` accordingly.
 jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, show_advisories: Bool) -> String Never! {
-    shown := [Diagnostic]{}
+    ^shown: [Diagnostic]{}
     loop diagnostic in diagnostics {
         if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT {
             shown.push(diagnostic.copy())
@@ -233,11 +233,11 @@ jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagn
 // tidy error is only reported once the errors are fixed, and a run, a dev
 // session or a test never stops for one.
 jet_driver_check_failures: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
-    has_error := false
+    ^has_error: false
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> has_error = true
     }
-    failures := [Diagnostic]{}
+    ^failures: [Diagnostic]{}
     loop diagnostic in diagnostics {
         failing: if has_error -> diagnostic.severity == DIAGNOSTIC_ERROR else -> diagnostic_is_tidy(diagnostic)
         if failing -> failures.push(diagnostic.copy())
@@ -247,7 +247,7 @@ jet_driver_check_failures: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! 
 
 // What a check shows: every diagnostic but the accessibility lints.
 jet_driver_check_shown: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
-    shown := [Diagnostic]{}
+    ^shown: [Diagnostic]{}
     loop diagnostic in diagnostics {
         if !jet_driver_is_a11y_lint(diagnostic.code) -> shown.push(diagnostic.copy())
     }
@@ -284,7 +284,7 @@ jet_driver_check_outcome: fn(file: String, source: String, diagnostics: [Diagnos
     }
     shown: jet_driver_check_shown(diagnostics)
     count: shown.len()
-    stderr := ""
+    ^stderr: ""
     if {
         count > 0 -> {
             stderr = jet_driver_problem_report(file, source, shown, "OK: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)

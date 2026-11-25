@@ -62,7 +62,7 @@ jet_cli_doctor_problem: fn(section: String, label: String, detail: String, fix: 
 
 // Every check in report order.
 jet_cli_doctor_run: fn(online: Bool, cross_target: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [JetCLIDoctorCheck] Never! {
-    out := [JetCLIDoctorCheck]{}
+    ^out: [JetCLIDoctorCheck]{}
     out.push(jet_cli_doctor_artifact_store())
     out.push(jet_cli_doctor_cache_dir("ffi cache", jet_cli_doctor_ffi_cache_dir()))
     out.push(jet_cli_doctor_cache_dir("package store", pkg_source_store_dir()))
@@ -171,7 +171,7 @@ jet_cli_doctor_check_registry: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorChe
         }
         return jet_cli_doctor_problem("registry", registry.name, "{safe_url} (local index is missing)", "create the configured local registry or set JET_REGISTRY_URL to a reachable index", false)
     }
-    git := doctor_process.cmd([String]{"git", "-c", "credential.useHttpPath=true", "ls-remote", "--", registry.url}).env("GIT_TERMINAL_PROMPT", "0")
+    ^git: doctor_process.cmd([String]{"git", "-c", "credential.useHttpPath=true", "ls-remote", "--", registry.url}).env("GIT_TERMINAL_PROMPT", "0")
     names: doctor_sys.vars() ?? [String]{}
     loop name in names {
         if name.starts_with(ENV_PREFIX_JET_REGISTRY) -> git = git.env_remove(name)
@@ -212,7 +212,7 @@ jet_cli_doctor_first_line: fn(output: String?) -> String? Never! {
 }
 
 jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] Never! {
-    out := [JetCLIDoctorCheck]{}
+    ^out: [JetCLIDoctorCheck]{}
     out.push(jet_cli_doctor_check_c_compiler())
     // pkg-config discovers C libraries that are not in the hangar.
     if {
@@ -241,7 +241,7 @@ jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] 
         .Err(error) -> {
             if {
                 error == .NotFound(_) -> {
-                    source := String?{None}
+                    ^source: String?{None}
                     loop candidate in ([String]{pkg_legacy_user_hangar_dir(), HANGAR_DIR}) {
                         if doctor_files.stat(candidate) == .Ok(_) {
                             source = Val(candidate)
@@ -273,7 +273,7 @@ jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] 
 // Apply the auto-fixable problems; the labels that were fixed. The only
 // auto-fix: a cache path that is a stray file.
 jet_cli_doctor_apply_fixes: fn(checks: [JetCLIDoctorCheck]) -[FS]> [String] Never! {
-    fixed := [String]{}
+    ^fixed: [String]{}
     loop check in checks {
         if check.health != .Problem || !check.auto_fixable || check.section != "cache" -> next
         // The detail is "<path> exists but is not a directory".
@@ -313,15 +313,15 @@ jet_cli_doctor_check_cross_target: fn(name: String) -> JetCLIDoctorCheck Never! 
 // The report; `apply` first prints what `--fix` changed, then the report of
 // the world after the fixes.
 jet_cli_doctor: fn(online: Bool, apply: Bool, cross_target: String?, color: Bool) -[FS, Env, Exec, Time, Time.Wait, Rand]> JetDriverVerbOutput Never! {
-    prefix := ""
+    ^prefix: ""
     if apply {
         fixed: jet_cli_doctor_apply_fixes(jet_cli_doctor_run(online, cross_target))
         if fixed.len() == 0 -> prefix = "Doctor: nothing to auto-fix\n"
         loop label in fixed -> prefix = "{prefix}Fixed: {label}\n"
     }
     checks: jet_cli_doctor_run(online, cross_target)
-    out := "{prefix}{diagnostic_theme_paint(color, "1", "{JET_CLI_BINARY} doctor")}\n"
-    last_section := ""
+    ^out: "{prefix}{diagnostic_theme_paint(color, "1", "{JET_CLI_BINARY} doctor")}\n"
+    ^last_section: ""
     loop check in checks {
         if check.section != last_section {
             out = "{out}\n{diagnostic_theme_paint(color, "1", check.section)}\n"
@@ -352,7 +352,7 @@ jet_cli_doctor: fn(online: Bool, apply: Bool, cross_target: String?, color: Bool
 // `jet self doctor [--online] [--fix] [--target <machine>]`: a name that is not a
 // declared target machine is refused.
 jet_cli_doctor_plan: fn(raw: [String], jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
-    cross_target := String?{None}
+    ^cross_target: String?{None}
     if jet_cli_target_flag(jet_argv) == {
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<machine>` or `--target <machine>`", color, JET_DRIVER_EXIT_USAGE)

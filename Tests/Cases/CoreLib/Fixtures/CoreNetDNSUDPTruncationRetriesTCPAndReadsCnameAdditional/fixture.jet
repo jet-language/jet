@@ -28,13 +28,13 @@ fixture_u16: fn(out: ^[U8], n: Int) {
 }
 
 fixture_question_end: fn(query: [U8]) -> Int {
-    pos := 12
+    ^pos: 12
     loop pos < query.len() && query[pos] != (U8{0}) -> pos += Int{query[pos]} + 1
     pos + 5
 }
 
 fixture_name: fn(name: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop label in name.split(".") {
         out.push(U8{label.bytes().len()})
         fixture_copy(out, label.bytes(), 0, label.bytes().len())
@@ -44,7 +44,7 @@ fixture_name: fn(name: String) -> [U8] {
 }
 
 fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, additional: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     fixture_copy(out, query, 0, 2)
     fixture_u16(out, flags)
     fixture_u16(out, 1)
@@ -56,14 +56,14 @@ fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, addi
 }
 
 fixture_truncated: fn(query: [U8]) -> [U8] {
-    out := fixture_header(query, 0x8380, 1, 0, 0)
+    ^out: fixture_header(query, 0x8380, 1, 0, 0)
     out.push(U8{0xc0})
     out
 }
 
 fixture_cname: fn(query: [U8]) -> [U8] {
     alias: fixture_name("alias.example.test")
-    out := fixture_header(query, 0x8180, 1, 0, 1)
+    ^out: fixture_header(query, 0x8180, 1, 0, 1)
     out.push(U8{0xc0})
     out.push(U8{0x0c})
     fixture_u16(out, 5)
@@ -86,7 +86,7 @@ fixture_send: fn(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
 }
 
 fixture_read_exact: fn(stream: net.TCPStream, n: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop out.len() < n {
         chunk: net.tcp_read_bytes(stream, n - out.len()) ?? panic("read exact")
         assert(chunk.len() != 0, "unexpected EOF reading DNS TCP frame")
@@ -108,7 +108,7 @@ fixture_read_exact: fn(stream: net.TCPStream, n: Int) -> [U8] {
         n: Int{prefix[0]} * 256 + Int{prefix[1]}
         query: fixture_read_exact(stream, n)
         response: fixture_cname(query)
-        frame := [U8]{}
+        ^frame: [U8]{}
         fixture_u16(frame, response.len())
         fixture_copy(frame, response, 0, response.len())
         net.tcp_write_all_bytes(stream, frame) ?? panic("TCP response")

@@ -41,7 +41,7 @@ picker_test_within: fn(frame: String, width: Int) Never! {
 }
 
 picker_test_keys: fn(state: ^JetCLIPickerState, keys: [JetCLIPickerKey]) -> JetCLIPickerAction Never! {
-    last := JetCLIPickerAction.Continue
+    ^last: JetCLIPickerAction.Continue
     loop key in keys -> last = jet_cli_picker_apply(state, key)
     last
 }
@@ -68,7 +68,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 
 #Test("picker index lists every palette command once under its palette category") {
     state: jet_cli_picker_state(72, 24, false)
-    seen := [String]{}
+    ^seen: [String]{}
     loop entry in state.index {
         assert(!seen.contains(entry.name), "`{entry.name}` is listed twice")
         seen.push("{entry.name}")
@@ -77,13 +77,13 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
     }
     assert(seen.contains("run") && seen.contains("check") && seen.contains("test"))
     assert_eq(state.categories[state.categories.len() - 1], "Errors")
-    listed := 0
+    ^listed: 0
     loop at in 0..<state.categories.len() -> listed += jet_cli_picker_members(state, at).len()
     assert_eq(listed, state.index.len())
 }
 
 #Test("categorized frame opens only the selected category and keeps its box") {
-    state := jet_cli_picker_state(72, 24, false)
+    ^state: jet_cli_picker_state(72, 24, false)
     closed: jet_cli_picker_categorized(state, false, None)
     picker_test_boxed(closed, 72)
     assert(closed.contains("> ▸ Build & Run"), closed)
@@ -99,7 +99,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 }
 
 #Test("color frames style the selection without changing the width") {
-    state := jet_cli_picker_state(64, 24, true)
+    ^state: jet_cli_picker_state(64, 24, true)
     state.cat_entry = Val(0)
     frame: jet_cli_picker_categorized(state, true, None)
     assert(frame.contains("{jet_cli_picker_esc()}["), frame)
@@ -107,7 +107,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 }
 
 #Test("short categorized frame keeps the selected command in view") {
-    state := jet_cli_picker_state(60, 8, false)
+    ^state: jet_cli_picker_state(60, 8, false)
     members: jet_cli_picker_members(state, 0)
     state.cat_entry = Val(members.len() - 1)
     frame: jet_cli_picker_categorized(state, true, Val(8))
@@ -117,10 +117,10 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 }
 
 #Test("fuzzy match is an in-order subsequence that ranks a tight prefix first") {
-    positions := [Int]{}
+    ^positions: [Int]{}
     assert(jet_cli_picker_fuzzy("rn", "run", positions) != None)
     assert_eq(positions, [Int]{0, 2})
-    scratch := [Int]{}
+    ^scratch: [Int]{}
     assert(jet_cli_picker_fuzzy("nr", "run", scratch) == None)
     assert(jet_cli_picker_fuzzy("xyz", "run", scratch) == None)
     exact: jet_cli_picker_fuzzy("run", "jet run", scratch) ?? panic("run matches")
@@ -129,7 +129,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 }
 
 #Test("search ranks the exact command first and brackets its match without color") {
-    state := jet_cli_picker_state(72, 24, false)
+    ^state: jet_cli_picker_state(72, 24, false)
     found: jet_cli_picker_search(state.index, "run")
     assert(found.code == None)
     assert(found.commands.len() > 0)
@@ -143,7 +143,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 }
 
 #Test("a diagnostic name or code query shows its explain page verbatim") {
-    state := jet_cli_picker_state(72, 24, false)
+    ^state: jet_cli_picker_state(72, 24, false)
     explanation: diagnostic_explanation("Jet.UnknownFunction") ?? panic("Jet.UnknownFunction is registered")
     loop query in ([String]{"Jet.UnknownFunction", "  Jet.UnknownFunction ", "E0102", "e0102"}) {
         found: jet_cli_picker_search(state.index, query)
@@ -157,7 +157,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 }
 
 #Test("short results frame drops optional rows and keeps the selection") {
-    state := jet_cli_picker_state(60, 6, false)
+    ^state: jet_cli_picker_state(60, 6, false)
     picker_test_keys(state, [JetCLIPickerKey]{JetCLIPickerKey.Text{text: "e"}})
     hits: state.found.commands.len()
     assert(hits > 4, "`e` matches {hits} commands")
@@ -184,7 +184,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 }
 
 #Test("F1 reference keeps a later selection in a short frame") {
-    state := jet_cli_picker_state(60, 8, false)
+    ^state: jet_cli_picker_state(60, 8, false)
     assert(picker_test_keys(state, [JetCLIPickerKey]{JetCLIPickerKey.F1}) == JetCLIPickerAction.EnterReference)
     members: jet_cli_picker_members(state, 0)
     loop _ in 0..<(members.len() - 1) -> jet_cli_picker_apply(state, JetCLIPickerKey.Down)
@@ -200,17 +200,17 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 }
 
 #Test("enter opens a category then picks; alt-enter picks the example") {
-    state := jet_cli_picker_state(72, 24, false)
+    ^state: jet_cli_picker_state(72, 24, false)
     assert(jet_cli_picker_apply(state, JetCLIPickerKey.Enter) == JetCLIPickerAction.Continue)
     assert((state.cat_entry ?? -1) == 0)
     assert((picker_test_submitted(jet_cli_picker_apply(state, JetCLIPickerKey.Enter)) ?? "") == "jet run")
     assert((picker_test_submitted(jet_cli_picker_apply(state, JetCLIPickerKey.AltEnter)) ?? "") == "jet run")
-    typed := jet_cli_picker_state(72, 24, false)
+    ^typed: jet_cli_picker_state(72, 24, false)
     assert(picker_test_keys(typed, [JetCLIPickerKey]{JetCLIPickerKey.Text{text: "q"}}) == JetCLIPickerAction.Quit)
 }
 
 #Test("key bytes decode arrows, F1, alt-enter and cut-off sequences") {
-    rest := [U8]{}
+    ^rest: [U8]{}
     keys: jet_cli_picker_keys([U8]{27, 79, 80, 27, 91, 66, 27, 91, 49, 49, 126, 27, 13, 114, 27, 27, 3}, rest)
     picker_test_same_keys(
         keys,

@@ -337,7 +337,7 @@ web_leaf: fn(e: ^WebEmitter, st: ^WebState, name: String, args: [Int], result: B
             web_set(e, old)
             output: args[2]
             moves: [Int]{0, 0, 8, 8, 16, 24, 24, 16, 32, 24, 40, 32, 48, 40, 56, 48, 64, 72, 72, 80, 80, 88, 88, 96, 96, 104, 104, 112, 112, 64, 120, 56}
-            index := 0
+            ^index: 0
             loop index < moves.len() {
                 web_scratch_out(e, output, moves[index], moves[index + 1])
                 index += 2
@@ -383,7 +383,7 @@ web_leaf: fn(e: ^WebEmitter, st: ^WebState, name: String, args: [Int], result: B
 // table function returns a word (web_slot_sig); a call without a result drops it.
 web_leaf_call: fn(e: ^WebEmitter, st: ^WebState, args: [Int], result: Bool) -> Bool Never! {
     if args.len() == 0 -> return false
-    letters := ""
+    ^letters: ""
     loop index in 1..<args.len() {
         web_get(e, args[index])
         letters = "{letters}l"
@@ -397,8 +397,8 @@ web_leaf_call: fn(e: ^WebEmitter, st: ^WebState, args: [Int], result: Bool) -> B
 // An asm leaf's own body, for its address or a call the selector does not
 // inline: the leaf over its parameters.
 web_leaf_body: fn(st: ^WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
-    e := web_emitter(m, f)
-    args := [Int]{}
+    ^e: web_emitter(m, f)
+    ^args: [Int]{}
     loop slot in 0..<f.param_count -> args.push(e.locals[slot])
     if !web_leaf(e, st, f.name, args, f.result >= 0) {
         st.errors.push("{f.name}: the web target has no form of this asm leaf")
@@ -415,7 +415,7 @@ web_leaf_body: fn(st: ^WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
 // ir_stop_attention), its routine's (ir_stop_routine) delivered stop as a
 // Bool, else 0.
 web_poll_body: fn(st: ^WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
-    e := web_emitter(m, f)
+    ^e: web_emitter(m, f)
     web_global_get(e, WEB_GLOBAL_TLS)
     web_wrap(e)
     web_mem(e, 0x29, 0)
@@ -459,13 +459,13 @@ web_poll_quiet_unless: fn(e: ^WebEmitter, word: Int) Never! {
 // read at offsets 0, 8, ..., 56 and xor'd, the xors or'd together, then
 // `i64.eqz` and `i64.extend_i32_u`, so the result is 1 or 0 as on x64.
 #Test("The 64-byte equality leaf answers 1 or 0 from the eight word pairs' xors") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
-    f := ir_function_new("os_equal_64_i64", "test:leaf.jet.os_equal_64_i64", "", "leaf.jet", 1)
+    ^f: ir_function_new("os_equal_64_i64", "test:leaf.jet.os_equal_64_i64", "", "leaf.jet", 1)
     left: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "left"), 1)
     right: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "right"), 1)
-    e := web_emitter(m, f)
-    st := WebState{
+    ^e: web_emitter(m, f)
+    ^st: WebState{
         app: false,
         stop_points: false,
         data_at: [Int]{},
@@ -489,7 +489,7 @@ web_poll_quiet_unless: fn(e: ^WebEmitter, word: Int) Never! {
     assert(web_leaf(e, st, f.name, [Int]{e.locals[left], e.locals[right]}, true))
     a: U8{e.locals[left]}
     b: U8{e.locals[right]}
-    expected := [U8]{}
+    ^expected: [U8]{}
     loop k in 0..<8 {
         offset: U8{8 * k}
         expected.extend([U8]{0x20, a, 0xa7, 0x29, 0x00, offset, 0x20, b, 0xa7, 0x29, 0x00, offset, 0x85})

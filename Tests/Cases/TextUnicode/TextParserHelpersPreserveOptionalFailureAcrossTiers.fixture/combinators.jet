@@ -48,7 +48,7 @@ tag: fn(src: Input, lit: String) -> Took? Never! {
 
 take_while: fn(src: Input, predicate: fn(String) -> Bool Never!) -> Took Never! {
     raw: src.text.bytes()
-    i := src.pos
+    ^i: src.pos
     loop i < raw.len() {
         width: utf8_width(raw, i)
         scalar: String.from_bytes(slice_range(raw, i, i + width)) ?? break
@@ -71,16 +71,16 @@ digit: fn(src: Input) -> Digit? Never! {
 }
 
 int_dec: fn(src: Input) -> Digit? Never! {
-    cur := skip_ws(src) ?? return None
-    sign := 1
+    ^cur: skip_ws(src) ?? return None
+    ^sign: 1
     b: peek(cur) ?? return None
     if b == 45 || b == 43 {
         if b == 45 -> sign = -1
         taken: take_n(cur, 1) ?? return None
         cur = taken.next
     }
-    acc := 0
-    saw := false
+    ^acc: 0
+    ^saw: false
     loop {
         d: digit(cur) ?? break
         saw = true
@@ -108,13 +108,13 @@ utf8_width: fn(raw: [U8], at: Int) -> Int {
 }
 
 slice_range: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    lo := start
-    hi := end
+    ^out: [U8]{}
+    ^lo: start
+    ^hi: end
     if lo < 0 -> lo = 0
     if hi > raw.len() -> hi = raw.len()
     if hi < lo -> hi = lo
-    i := lo
+    ^i: lo
     loop {
         if i >= hi -> return out
         out.push(raw[i])

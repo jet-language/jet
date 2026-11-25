@@ -226,7 +226,7 @@ imul: fn(a: Int, b: Int) -> Int Never! { (a * b) & MASK }
 // The next 32-bit draw; a draw `u` stands for the double u / 2^32.
 draw: fn(g: ^Gen) -> Int Never! {
     g.state = (g.state + 1831565813) & MASK
-    t := g.state
+    ^t: g.state
     t = imul(t ~ t >> 15, t | 1)
     t ~= (t + imul(t ~ t >> 7, t | 61)) & MASK
     t ~ t >> 14
@@ -247,12 +247,12 @@ choice: fn(name: String, weight: Float) -> Choice Never! {
 live: fn(count: Int, weight: Float) -> Float Never! { if count > 0 -> weight else -> 0.0 }
 
 weighted: fn(g: ^Gen, pairs: [Choice]) -> String Never! {
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop pair in pairs {
         if pair.weight > 0.0 -> total += pair.weight
     }
-    x := real(g) * total
-    last := ""
+    ^x: real(g) * total
+    ^last: ""
     loop pair in pairs {
         if pair.weight <= 0.0 -> next
         last = pair.name.copy()
@@ -291,7 +291,7 @@ fresh: fn(g: ^Gen, prefix: String) -> String Never! {
 // The live bindings of `ty` in scope order. A moved String binding is gone
 // for the rest of the program.
 vars_of: fn(g: Gen, ty: String) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     loop scope in g.scopes {
         loop at in scope {
             if !g.vars[at].moved && g.vars[at].ty == ty -> out.push(at)
@@ -342,19 +342,19 @@ bin_int: fn(g: ^Gen, op: String, l: Int, k: Int) -> Int Never! {
 }
 
 int_node: fn(g: ^Gen, v: Int) -> Int Never! {
-    e := blank_expr("int")
+    ^e: blank_expr("int")
     e.v = v
     add_expr(g, e)
 }
 
 named_node: fn(g: ^Gen, k: String, s: String) -> Int Never! {
-    e := blank_expr(k)
+    ^e: blank_expr(k)
     e.s = s.copy()
     add_expr(g, e)
 }
 
 bin: fn(g: ^Gen, op: String, l: Int, r: Int) -> Int Never! {
-    e := blank_expr("bin")
+    ^e: blank_expr("bin")
     e.op = op.copy()
     e.l = l
     e.r = r
@@ -362,13 +362,13 @@ bin: fn(g: ^Gen, op: String, l: Int, r: Int) -> Int Never! {
 }
 
 unary: fn(g: ^Gen, k: String, inner: Int) -> Int Never! {
-    e := blank_expr(k)
+    ^e: blank_expr(k)
     e.l = inner
     add_expr(g, e)
 }
 
 field_node: fn(g: ^Gen, base: String, f: String) -> Int Never! {
-    e := blank_expr("field")
+    ^e: blank_expr("field")
     e.s = base.copy()
     e.op = f.copy()
     add_expr(g, e)
@@ -435,7 +435,7 @@ leaf: fn(g: ^Gen, index_weight: Float) -> Int Never! {
 // `xs[0]` or `xs[e % xs.len()]`, so the index is always in range.
 index_node: fn(g: ^Gen, list: String) -> Int Never! {
     idx: list_index(g, list)
-    e := blank_expr("index")
+    ^e: blank_expr("index")
     e.s = list.copy()
     e.l = idx
     add_expr(g, e)
@@ -456,7 +456,7 @@ divisor: fn(g: ^Gen, depth: Int) -> Int Never! {
 }
 
 callable: fn(g: Gen) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     loop at in 0..<g.fns.len() {
         if g.fns[at].params.all(fn(p) { g.vars[p].ty == "Int" || vars_of(g, g.vars[p].ty).len() > 0 }) {
             out.push(at)
@@ -468,7 +468,7 @@ callable: fn(g: Gen) -> [Int] Never! {
 call: fn(g: ^Gen, f: Int, depth: Int) -> Int Never! {
     params: g.fns[f].params.copy()
     guard: g.fns[f].guard
-    args := [Int]{}
+    ^args: [Int]{}
     loop i in 0..<params.len() {
         ty: g.vars[params[i]].ty.copy()
         if ty != "Int" {
@@ -485,7 +485,7 @@ call: fn(g: ^Gen, f: Int, depth: Int) -> Int Never! {
         }
         args.push(arg)
     }
-    e := blank_expr("call")
+    ^e: blank_expr("call")
     e.s = g.fns[f].name.copy()
     e.args = args
     add_expr(g, e)
@@ -562,7 +562,7 @@ bool_leaf: fn(g: ^Gen, bools: [Int], strs: [Int]) -> Int Never! {
     kind: weighted(g, [Choice]{choice("lit", 1.0), choice("var", live(bools.len(), 3.0)), choice("cmp", 4.0), choice("scmp", live(strs.len(), 1.0))})
     if kind == {
         "lit" -> {
-            e := blank_expr("bool")
+            ^e: blank_expr("bool")
             e.b = chance(g, 0.5)
             return add_expr(g, e)
         }
@@ -582,7 +582,7 @@ bool_leaf: fn(g: ^Gen, bools: [Int], strs: [Int]) -> Int Never! {
 }
 
 if_value: fn(g: ^Gen) -> Int Never! {
-    e := blank_expr("ifx")
+    ^e: blank_expr("ifx")
     count: 1 + rand_int(g, 3)
     loop _ in 0..<count {
         e.conds.push(bool_expr(g, 2))
@@ -596,7 +596,7 @@ if_value: fn(g: ^Gen) -> Int Never! {
 // explicit copies (`s.copy()`). Moves (`t: s`) are generated as bindings.
 text: fn(g: ^Gen) -> String Never! {
     count: rand_int(g, 6)
-    out := ""
+    ^out: ""
     loop _ in 0..<count -> out = "{out}{LETTERS[rand_int(g, LETTERS.len())]}"
     out
 }
@@ -616,7 +616,7 @@ hole_node: fn(g: ^Gen, hole: Hole) -> Int Never! {
 
 str_expr: fn(g: ^Gen) -> Int Never! {
     strs: vars_of(g, "Str")
-    holes := [Hole]{}
+    ^holes: [Hole]{}
     loop at in vars_of(g, "Int") -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
     loop at in strs -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
     loop at in strs -> holes.push(Hole{k: "len", name: g.vars[at].name.copy(), f: ""})
@@ -626,7 +626,7 @@ str_expr: fn(g: ^Gen) -> Int Never! {
         "lit" -> return text_node(g)
         else -> {}
     }
-    e := blank_expr("strfmt")
+    ^e: blank_expr("strfmt")
     count: 1 + rand_int(g, 3)
     loop _ in 0..<count {
         e.args.push(text_part(g, "text"))
@@ -667,14 +667,14 @@ add_stmt: fn(g: ^Gen, s: Stmt) -> [Int] Never! {
 }
 
 decl: fn(g: ^Gen, at: Int, init: Int) -> [Int] Never! {
-    s := blank_stmt("decl")
+    ^s: blank_stmt("decl")
     s.binding = at
     s.e = init
     add_stmt(g, s)
 }
 
 assign: fn(g: ^Gen, name: String, op: String, e: Int) -> [Int] Never! {
-    s := blank_stmt("assign")
+    ^s: blank_stmt("assign")
     s.name = name.copy()
     s.op = op.copy()
     s.e = e
@@ -683,7 +683,7 @@ assign: fn(g: ^Gen, name: String, op: String, e: Int) -> [Int] Never! {
 
 // `if cond -> <one statement>`.
 guarded: fn(g: ^Gen, cond: Int, body: [Int]) -> [Int] Never! {
-    s := blank_stmt("if")
+    ^s: blank_stmt("if")
     s.conds.push(cond)
     s.bodies.push(body.copy())
     add_stmt(g, s)
@@ -691,7 +691,7 @@ guarded: fn(g: ^Gen, cond: Int, body: [Int]) -> [Int] Never! {
 
 block: fn(g: ^Gen, count: Int, ctx: Ctx) -> [Int] Never! {
     g.scopes.push([Int]{})
-    out := [Int]{}
+    ^out: [Int]{}
     loop _ in 0..<count -> out.extend(stmt(g, ctx))
     drop_scope(g)
     out
@@ -756,7 +756,7 @@ stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
             // `v: xs[i]` and `v: p.f` bind a read view that blocks later writes
             // to the owner (E0212); `:=` binds an owned copy.
             owned: g.exprs[init].k == "index" || g.exprs[init].k == "field"
-            v := local_var(fresh(g, "v"), "Int", 0)
+            ^v: local_var(fresh(g, "v"), "Int", 0)
             v.mutated = owned
             return declare_new(g, v, init)
         }
@@ -805,7 +805,7 @@ stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
         "range" -> return range_stmt(g, inner)
         "while" -> return while_stmt(g, ctx)
         "list" -> {
-            e := blank_expr("list")
+            ^e: blank_expr("list")
             count: 1 + rand_int(g, 4)
             loop _ in 0..<count -> e.args.push(int_expr(g, 1))
             init: add_expr(g, e)
@@ -813,13 +813,13 @@ stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
             return declare_new(g, v, init)
         }
         "push" -> {
-            s := blank_stmt("push")
+            ^s: blank_stmt("push")
             s.name = mark_mutated(g, open)
             s.e = int_expr(g, 2)
             return add_stmt(g, s)
         }
         "setidx" -> {
-            s := blank_stmt("setidx")
+            ^s: blank_stmt("setidx")
             s.name = mark_mutated(g, open)
             // Compound assignment cannot target an indexed slot (E0164).
             s.op = "="
@@ -829,7 +829,7 @@ stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
         }
         "foreach" -> return foreach_stmt(g, lists, ctx)
         "struct" -> {
-            e := blank_expr("struct")
+            ^e: blank_expr("struct")
             e.s = g.sname.copy()
             loop _ in g.fields.copy() -> e.args.push(int_expr(g, 1))
             init: add_expr(g, e)
@@ -837,7 +837,7 @@ stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
             return declare_new(g, v, init)
         }
         "setfield" -> {
-            s := blank_stmt("setfield")
+            ^s: blank_stmt("setfield")
             s.name = mark_mutated(g, structs)
             s.f = pick_field(g)
             s.op = pick_text(g, [String]{"=", "+=", "-="})
@@ -853,7 +853,7 @@ stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
         else -> {}
     }
     cond: bool_expr(g, 1)
-    s := blank_stmt("return")
+    ^s: blank_stmt("return")
     s.e = int_expr(g, 2)
     body: add_stmt(g, s)
     guarded(g, cond, body)
@@ -875,15 +875,15 @@ mark_mutated: fn(g: ^Gen, items: [Int]) -> String Never! {
 
 while_stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
     name: fresh(g, "c")
-    c := fixed_var(name, "Int")
+    ^c: fixed_var(name, "Int")
     c.mutated = true
     counter: add_var(g, c)
     declare(g, counter)
     count: 1 + rand_int(g, 4)
     body: block(g, count, loop_ctx(ctx))
     zero: int_node(g, 0)
-    out := decl(g, counter, zero)
-    s := blank_stmt("while")
+    ^out: decl(g, counter, zero)
+    ^s: blank_stmt("while")
     s.name = name.copy()
     s.body = body
     s.limit = 1 + rand_int(g, 6)
@@ -892,7 +892,7 @@ while_stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
 }
 
 if_stmt: fn(g: ^Gen, inner: Ctx) -> [Int] Never! {
-    s := blank_stmt("if")
+    ^s: blank_stmt("if")
     count: 1 + rand_int(g, 3)
     loop _ in 0..<count {
         s.conds.push(bool_expr(g, 2))
@@ -908,7 +908,7 @@ if_stmt: fn(g: ^Gen, inner: Ctx) -> [Int] Never! {
 }
 
 range_stmt: fn(g: ^Gen, inner: Ctx) -> [Int] Never! {
-    s := blank_stmt("range")
+    ^s: blank_stmt("range")
     s.lo = if chance(g, 0.7) -> int_node(g, 0) else -> random_node(g, 4)
     s.hi = if chance(g, 0.6) -> random_node(g, 6) else -> range_bound(g)
     s.name = fresh(g, "i")
@@ -935,9 +935,9 @@ range_bound: fn(g: ^Gen) -> Int Never! {
 
 foreach_stmt: fn(g: ^Gen, lists: [Int], ctx: Ctx) -> [Int] Never! {
     list: pick_index(g, lists)
-    s := blank_stmt("foreach")
+    ^s: blank_stmt("foreach")
     s.name = g.vars[list].name.copy()
-    scope := [Int]{}
+    ^scope: [Int]{}
     if chance(g, 0.4) {
         s.index = fresh(g, "i")
         scope.push(add_var(g, fixed_var(s.index, "Int")))
@@ -960,7 +960,7 @@ print_stmt: fn(g: ^Gen) -> [Int] Never! {
     structs: vars_of(g, "Struct")
     strs: vars_of(g, "Str")
     kind: weighted(g, [Choice]{choice("interp", 4.0), choice("expr", 2.0), choice("bool", 1.0), choice("list", live(lists.len(), 1.0)), choice("struct", live(structs.len(), 0.7)), choice("str", live(strs.len(), 1.0))})
-    s := blank_stmt("print")
+    ^s: blank_stmt("print")
     if kind == {
         "str" -> s.e = var_ref(g, "var", strs)
         "expr" -> s.e = int_expr(g, 2)
@@ -973,7 +973,7 @@ print_stmt: fn(g: ^Gen) -> [Int] Never! {
 }
 
 interp_stmt: fn(g: ^Gen, ints: [Int], bools: [Int], strs: [Int], structs: [Int]) -> Stmt Never! {
-    holes := [Hole]{}
+    ^holes: [Hole]{}
     loop at in ints -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
     loop at in bools -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
     loop at in strs -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
@@ -982,7 +982,7 @@ interp_stmt: fn(g: ^Gen, ints: [Int], bools: [Int], strs: [Int], structs: [Int])
             holes.push(Hole{k: "field", name: g.vars[at].name.copy(), f: f.copy()})
         }
     }
-    s := blank_stmt("interp")
+    ^s: blank_stmt("interp")
     title: fresh(g, "t")
     s.parts.push(named_node(g, "text", title))
     count: if holes.len() > 0 -> 1 + rand_int(g, 3) else -> 0
@@ -995,10 +995,10 @@ interp_stmt: fn(g: ^Gen, ints: [Int], bools: [Int], strs: [Int], structs: [Int])
 }
 
 helper: fn(g: ^Gen, index: Int) -> Fun Never! {
-    types := [String]{"Int", "Int", "Int", "Int", "List", "Str"}
+    ^types: [String]{"Int", "Int", "Int", "Int", "List", "Str"}
     if g.has_struct -> types.push("Struct")
     count: 1 + rand_int(g, 3)
-    params := [Int]{}
+    ^params: [Int]{}
     loop i in 0..<count {
         ty: pick_text(g, types)
         params.push(add_var(g, fixed_var("a{index}_{i}", ty)))
@@ -1007,8 +1007,8 @@ helper: fn(g: ^Gen, index: Int) -> Fun Never! {
     prints: chance(g, 0.3)
     ctx: Ctx{loops: 0, in_loop: false, in_fn: true, prints: prints, nest: 1}
     size: 1 + rand_int(g, 5)
-    body := block(g, size, ctx)
-    s := blank_stmt("return")
+    ^body: block(g, size, ctx)
+    ^s: blank_stmt("return")
     s.e = int_expr(g, 2)
     body.extend(add_stmt(g, s))
     Fun{name: "h{index}", params: params, guard: 0, body: body}
@@ -1020,22 +1020,22 @@ recursive: fn(g: ^Gen, index: Int) -> Fun Never! {
     name: "r{index}"
     g.scopes = [[Int]]{[Int]{n, acc}}
     ctx: Ctx{loops: 0, in_loop: false, in_fn: true, prints: false, nest: 2}
-    back := blank_stmt("return")
+    ^back: blank_stmt("return")
     back.e = named_node(g, "var", "acc")
     base_case: add_stmt(g, back)
     n_ref: named_node(g, "var", "n")
     bottom: bin_int(g, "<=", n_ref, 0)
-    body := guarded(g, bottom, base_case)
+    ^body: guarded(g, bottom, base_case)
     size: rand_int(g, 3)
     body.extend(block(g, size, ctx))
-    step := blank_expr("call")
+    ^step: blank_expr("call")
     step.s = name.copy()
     n_next: named_node(g, "var", "n")
     step.args.push(bin_int(g, "-", n_next, 1))
     step.args.push(int_expr(g, 2))
     stepped: add_expr(g, step)
     tail: if chance(g, 0.5) -> stepped else -> recursive_tail(g, stepped)
-    s := blank_stmt("return")
+    ^s: blank_stmt("return")
     s.e = tail
     body.extend(add_stmt(g, s))
     Fun{name: name, params: [Int]{n, acc}, guard: 12, body: body}
@@ -1070,11 +1070,11 @@ program: fn(g: ^Gen) -> () {
     g.scopes = [[Int]]{[Int]{}}
     ctx: Ctx{loops: 0, in_loop: false, in_fn: false, prints: true, nest: 0}
     count: 10 + rand_int(g, 20)
-    run := [Int]{}
+    ^run: [Int]{}
     loop _ in 0..<count -> run.extend(stmt(g, ctx))
     loop at in g.scopes[0].copy() {
         if g.vars[at].moved -> next
-        s := blank_stmt("print")
+        ^s: blank_stmt("print")
         name: g.vars[at].name.copy()
         s.e = named_node(g, "var", name)
         run.extend(add_stmt(g, s))
@@ -1147,7 +1147,7 @@ grouped: fn(g: Gen, at: Int) -> String Never! {
 
 // Format parts: literal text as written, every other part as `{expr}`.
 parts_text: fn(g: Gen, parts: [Int]) -> String Never! {
-    out := ""
+    ^out: ""
     loop part in parts {
         piece: if g.exprs[part].k == "text" -> g.exprs[part].s.copy() else -> "{{{expr(g, part)}}}"
         out = "{out}{piece}"
@@ -1179,7 +1179,7 @@ single: fn(g: Gen, body: [Int]) -> String? Never! {
 
 lines: fn(g: Gen, stmts: [Int], depth: Int) -> [String] Never! {
     pad: "    ".repeat(depth)
-    out := [String]{}
+    ^out: [String]{}
     loop at in stmts {
         if simple(g, at) == .Val(one) {
             out.push("{pad}{one}")
@@ -1211,7 +1211,7 @@ lines: fn(g: Gen, stmts: [Int], depth: Int) -> [String] Never! {
 
 nested: fn(g: Gen, head: String, body: [Int], pad: String, depth: Int) -> [String] Never! {
     if single(g, body) == .Val(one) -> return [String]{"{pad}{head} -> {one}"}
-    out := [String]{"{pad}{head} {{"}
+    ^out: [String]{"{pad}{head} {{"}
     out.extend(lines(g, body, depth + 1))
     out.push("{pad}}}")
     out
@@ -1224,7 +1224,7 @@ decl_lines: fn(g: Gen, s: Stmt, pad: String) -> [String] Never! {
     if init.k == {
         "list" -> return [String]{"{bind}[{init.args.map(fn(arg) { expr(g, arg) }).join(", ")}]"}
         "struct" -> {
-            fields := [String]{}
+            ^fields: [String]{}
             loop i in 0..<init.args.len() -> fields.push("{g.fields[i]}: {expr(g, init.args[i])}")
             return [String]{"{bind}{init.s}{{{fields.join(", ")}}}"}
         }
@@ -1232,7 +1232,7 @@ decl_lines: fn(g: Gen, s: Stmt, pad: String) -> [String] Never! {
             if init.conds.len() == 1 {
                 return [String]{"{bind}if {expr(g, init.conds[0])} -> {expr(g, init.vals[0])} else -> {expr(g, init.r)}"}
             }
-            out := [String]{"{bind}if {{"}
+            ^out: [String]{"{bind}if {{"}
             loop i in 0..<init.conds.len() {
                 out.push("{pad}    {expr(g, init.conds[i])} -> {expr(g, init.vals[i])}")
             }
@@ -1251,7 +1251,7 @@ if_lines: fn(g: Gen, s: Stmt, pad: String, depth: Int) -> [String] Never! {
             return [String]{"{pad}if {expr(g, s.conds[0])} -> {one}"}
         }
     }
-    out := [String]{"{pad}if {{"}
+    ^out: [String]{"{pad}if {{"}
     loop i in 0..<s.conds.len() {
         out.push("{pad}    {expr(g, s.conds[i])} -> {{")
         out.extend(lines(g, s.bodies[i], depth + 2))
@@ -1276,7 +1276,7 @@ type_name: fn(g: Gen, ty: String) -> String Never! {
 }
 
 source: fn(g: Gen, header: String) -> String Never! {
-    out := [String]{"// {header}"}
+    ^out: [String]{"// {header}"}
     if g.has_struct {
         out.push("")
         out.push("{g.sname}: struct {{")
@@ -1404,13 +1404,13 @@ show: fn(g: Gen, v: Value) -> String Never! {
 }
 
 struct_text: fn(g: Gen, v: Value) -> String Never! {
-    fields := [String]{}
+    ^fields: [String]{}
     loop i in 0..<v.items.len() -> fields.push("{g.fields[i]}: {v.items[i]}")
     "{g.sname} {{ {fields.join(", ")} }}"
 }
 
 slot: fn(m: Machine, name: String) -> Int Never! {
-    at := m.names.len() - 1
+    ^at: m.names.len() - 1
     loop at >= m.base {
         if m.names[at] == name -> return at
         at -= 1
@@ -1491,13 +1491,13 @@ eval_bin: fn(m: ^Machine, g: Gen, e: Expr) -> Value Reject! {
 }
 
 eval_all: fn(m: ^Machine, g: Gen, args: [Int]) -> [Int] Reject! {
-    out := [Int]{}
+    ^out: [Int]{}
     loop arg in args -> out.push((eval(m, g, arg) ?? return Err(err)).i)
     Ok(out)
 }
 
 format: fn(m: ^Machine, g: Gen, parts: [Int]) -> String Reject! {
-    out := ""
+    ^out: ""
     loop part in parts {
         if g.exprs[part].k == "text" {
             out = "{out}{g.exprs[part].s}"
@@ -1517,13 +1517,13 @@ field_index: fn(g: Gen, f: String) -> Int Never! {
 }
 
 call_fn: fn(m: ^Machine, g: Gen, e: Expr) -> Value Reject! {
-    found := -1
+    ^found: -1
     loop i in 0..<g.fns.len() {
         if g.fns[i].name == e.s -> found = i
     }
     if found < 0 -> panic("model: no function {e.s}")
     f: g.fns[found]
-    args := [Value]{}
+    ^args: [Value]{}
     loop arg in e.args -> args.push(eval(m, g, arg) ?? return Err(err))
     m.depth += 1
     if m.depth > 64 -> return Err(reject("depth"))
@@ -1633,7 +1633,7 @@ run_range: fn(m: ^Machine, g: Gen, s: Stmt) -> Signal Reject! {
     lo: (eval(m, g, s.lo) ?? return Err(err)).i
     top: (eval(m, g, s.hi) ?? return Err(err)).i
     hi: if s.inclusive -> top + 1 else -> top
-    i := lo
+    ^i: lo
     loop i < hi {
         tick(m) ?? return Err(err)
         open_scope(m)
@@ -1690,9 +1690,9 @@ new_machine: fn() -> Machine Never! {
 // A program and its expected stdout, redrawn until the model accepts it.
 generate_case: fn(seed: Int, index: Int) -> Case GateError! {
     loop attempt in 0..<ATTEMPTS {
-        g := new_gen(seed_state("jet-safety-fuzz:{seed}:{index}:{attempt}"))
+        ^g: new_gen(seed_state("jet-safety-fuzz:{seed}:{index}:{attempt}"))
         program(g)
-        m := new_machine()
+        ^m: new_machine()
         if exec(m, g, g.run) == .Err(_) -> next
         stdout: m.out.map(fn(line) { "{line}\n" }).join("")
         header: "Generated by Tools/Agent/SafetyGate.jet: seed {seed}, case {index}, attempt {attempt}."
@@ -1712,11 +1712,11 @@ pad4: fn(index: Int) -> String Never! {
 // Jet. Keeps all indexes valid; invalid UTF-8 is a defined fallible decode,
 // not UB.
 generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
-    rng := new_gen(seed_state("jet-core-safety-fuzz:{seed}:{index}"))
-    statements := [String]{"m := [String:Int]{{}}", "xs := [Int]{{}}"}
-    output := [String]{}
-    map := [String:Int]{}
-    list := [Int]{}
+    ^rng: new_gen(seed_state("jet-core-safety-fuzz:{seed}:{index}"))
+    ^statements: [String]{"m := [String:Int]{{}}", "xs := [Int]{{}}"}
+    ^output: [String]{}
+    ^map: [String:Int]{}
+    ^list: [Int]{}
     loop step in 0..<64 {
         key: "k{(draw(rng) * 8) /% WORD}"
         value: (draw(rng) * 1000) /% WORD
@@ -1751,7 +1751,7 @@ generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
         }
     }
     count: 1 + (draw(rng) * 32) /% WORD
-    bytes := [Int]{}
+    ^bytes: [Int]{}
     loop _ in 0..<count -> bytes.push(65 + (draw(rng) * 26) /% WORD)
     statements.push("print(String.from_bytes([U8]{{{bytes.map(fn(b) { "{b}" }).join(", ")}}}) ?? \"bad\")")
     output.push(String.from_bytes(bytes.map(fn(b) { checked(U8{b}) ?? U8{0} })) ?? "")
@@ -1799,8 +1799,8 @@ Entry: struct {
 hash: fn(bytes: [U8]) -> String Never! { crypto.sha256(bytes).hex() }
 
 slug: fn(stem: String) -> String Never! {
-    out := [U8]{}
-    open := false
+    ^out: [U8]{}
+    ^open: false
     loop byte in stem.bytes() {
         code: Int{byte}
         word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45
@@ -1818,8 +1818,8 @@ slug: fn(stem: String) -> String Never! {
 prepare_corpus: fn(out: String, seed: Int, count: Int) -[FS]> Corpus GateError! {
     if count < 1 -> return Err(gate_fail("seed/count must be integers; count must be positive"))
     features: "{out}/corpus/Examples/features"
-    cases := [Case]{}
-    digest := [U8]{}
+    ^cases: [Case]{}
+    ^digest: [U8]{}
     loop kind in ([String]{"fuzz", "core"}) {
         files.create_dir_all("{features}/{kind}") ?? return Err(gate_fail("`{features}/{kind}` cannot be created: {err}"))
         files.create_dir_all("{features}/expected/{kind}") ?? return Err(gate_fail("`{features}/expected/{kind}` cannot be created: {err}"))
@@ -1847,14 +1847,14 @@ prepare_corpus: fn(out: String, seed: Int, count: Int) -[FS]> Corpus GateError! 
 // entry, a `run.jet` folder is one entry, and a package or workspace folder
 // without `run.jet` is not an entry.
 collect_golden_entries: fn(examples: String) -[FS]> [Entry] Never! {
-    entries := [Entry]{}
+    ^entries: [Entry]{}
     if files.is_dir(examples) -> visit(examples, examples, entries)
     entries.sort_by(fn(left: Entry, right: Entry) { left.stem <=> right.stem })
     entries
 }
 
 visit: fn(root: String, dir: String, entries: ^[Entry]) -[FS]> () {
-    children := files.list_dir(dir) ?? return
+    ^children: files.list_dir(dir) ?? return
     children.sort_by(fn(left: DirEntry, right: DirEntry) { left.name <=> right.name })
     loop child in children {
         if child.name.starts_with(".") -> next
@@ -1879,7 +1879,7 @@ relative: fn(root: String, path: String) -> String Never! { path.removeprefix("{
 
 // The first two tab-separated columns of each nonempty line.
 columns: fn(text: String) -> [String:String] Never! {
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop line in text.trim().split("\n").to_list() {
         if line == "" -> next
         cells: line.split("\t").to_list()
@@ -1909,7 +1909,7 @@ has_outputs: fn(base: String) -[FS]> Bool Never! {
 
 compare_native: fn(directory: String, cases: [Case]) -[FS]> [Verdict] Never! {
     rows: columns(files.read("{directory}/results.tsv") ?? "")
-    out := [Verdict]{}
+    ^out: [Verdict]{}
     loop c in cases {
         base: "{directory}/run/{slug(c.stem)}"
         result: rows.get(c.stem) ?? "absent"
@@ -2033,7 +2033,7 @@ golden_area: fn(stem: String) -> Bool Never! {
 }
 
 golden_cases: fn(repo: String) -[FS]> [Case] Never! {
-    out := [Case]{}
+    ^out: [Case]{}
     loop entry in collect_golden_entries("{repo}/Examples") {
         if !golden_area(entry.stem) -> next
         expected: files.read("{repo}/Examples/{entry.stem}.out") ?? next
@@ -2046,7 +2046,7 @@ golden_cases: fn(repo: String) -[FS]> [Case] Never! {
 // JSON.stringify's string form: quotes, backslashes and control characters
 // escaped, everything else as is.
 json_text: fn(value: String) -> String Never! {
-    out := [U8]{U8{34}}
+    ^out: [U8]{U8{34}}
     loop byte in value.bytes() {
         code: Int{byte}
         escape: if code == {
@@ -2091,7 +2091,7 @@ run_gate: fn(out: String, artifacts: String, seed: Int, count: Int, mode: String
     manifest: json.parse(String.from_bytes(bytes) ?? return Err(gate_fail("`{artifacts}` is not UTF-8"))) ?? return Err(gate_fail("`{artifacts}` is not JSON"))
     head: text_field(manifest, "dev_head")
     if !admitted_head(head) -> return Err(gate_fail("artifacts must name an admitted dev_head"))
-    gate := Gate{out: out.copy(), repo: repo.copy(), checks: [Check]{}, gaps: [String]{}}
+    ^gate: Gate{out: out.copy(), repo: repo.copy(), checks: [Check]{}, gaps: [String]{}}
     pin: command(gate, "source-pin", [String]{"git", "rev-parse", "HEAD"})
     if pin.code != 0 -> return Err(gate_fail("cannot identify safety source tree"))
     source_head: pin.output.trim()
@@ -2099,7 +2099,7 @@ run_gate: fn(out: String, artifacts: String, seed: Int, count: Int, mode: String
         gate.gaps.push("artifact head {head} differs from audited source {source_head}")
     }
     corpus: prepare_corpus(out, seed, count) ?? return Err(err)
-    summary := [String:Dyn]{
+    ^summary: [String:Dyn]{
         "schema": Dyn.Text("jet-native-safety-v1"),
         "head": Dyn.Text(head.copy()),
         "artifacts_sha256": Dyn.Text(hash(bytes)),
@@ -2164,7 +2164,7 @@ run_gate: fn(out: String, artifacts: String, seed: Int, count: Int, mode: String
     summary["exit_code"] = Dyn.Int(code)
     document: json.to_string_pretty(Dyn.Object(summary.copy())) ?? return Err(gate_fail("the summary cannot be encoded: {err}"))
     files.write("{out}/safety-summary.json", "{document}\n") ?? return Err(gate_fail("the summary cannot be written: {err}"))
-    report := [String]{"gate: {verdict}", "head: {head}", "seed: {seed}; generated cases: {count * 2}; goldens: {goldens.len()}"}
+    ^report: [String]{"gate: {verdict}", "head: {head}", "seed: {seed}; generated cases: {count * 2}; goldens: {goldens.len()}"}
     loop c in failures -> report.push("FAIL {c.name}: {c.detail}")
     loop gap in gate.gaps -> report.push("GAP {gap}")
     files.write("{out}/safety-summary.txt", "{report.join("\n")}\n") ?? return Err(gate_fail("the summary text cannot be written: {err}"))
@@ -2246,13 +2246,13 @@ run_source: fn(out: String, jet: String, seed: Int, count: Int) -[Env, Exec, FS,
     if files.exists("{out}/safety-summary.txt") {
         return Err(gate_fail("receipt already exists: {out}"))
     }
-    gate := Gate{out: out.copy(), repo: repo_root(), checks: [Check]{}, gaps: [String]{}}
+    ^gate: Gate{out: out.copy(), repo: repo_root(), checks: [Check]{}, gaps: [String]{}}
     wrapper_fixtures(gate, jet, "", "")
     corpus: prepare_corpus(out, seed, count) ?? return Err(err)
     add(gate, "corpus", "pass", "{corpus.cases.len()} model-defined cases; sha256 {corpus.sha256}")
     failures: gate.checks.filter(fn(c) { c.verdict != "pass" })
     verdict: if failures.len() > 0 -> "FAIL" else -> "PASS"
-    report := [String]{"gate: {verdict} (source)", "seed: {seed}; generated cases: {count * 2}"}
+    ^report: [String]{"gate: {verdict} (source)", "seed: {seed}; generated cases: {count * 2}"}
     loop c in gate.checks -> report.push("{c.verdict.upper()} {c.name}: {c.detail}")
     text: "{report.join("\n")}\n"
     files.write("{out}/safety-summary.txt", text) ?? return Err(gate_fail("the summary text cannot be written: {err}"))
@@ -2264,7 +2264,7 @@ run_source: fn(out: String, jet: String, seed: Int, count: Int) -[Env, Exec, FS,
 repo_root: fn() -[Env, FS]> String Never! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return ""
+    ^dir: files.cwd() ?? return ""
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return ""
@@ -2356,7 +2356,7 @@ native_result: fn(dir: String, stem: String, verdict: String, stdout: String, st
 }
 
 #Test("the generator draws mulberry32 from the sha256 key and keeps exact i64 bounds") {
-    rng := new_gen(seed_state("a"))
+    ^rng: new_gen(seed_state("a"))
     assert_eq(rng.state, 310482890)
     first: draw(rng)
     assert(first >= 0 && first <= MASK)

@@ -1,7 +1,7 @@
 use cbor: core.encoding.cbor
 
 wire: fn(values: [Int]) -> [U8] {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop value in values { bytes.push(checked(U8{value}) ?? panic("corpus byte outside U8")) }
     return bytes
 }
@@ -23,7 +23,7 @@ rejected: fn(values: [Int], offset: Int, path: String, reason: String) -> Bool {
 }
 
 canonical_rejected: fn(values: [Int], offset: Int, path: String, reason: String) -> Bool {
-    strict := cbor.CBOROptions{
+    ^strict: cbor.CBOROptions{
         max_depth: 256,
         max_items: 1000000,
         max_bytes: 1073741824,
@@ -37,7 +37,7 @@ canonical_rejected: fn(values: [Int], offset: Int, path: String, reason: String)
 }
 
 run: fn() {
-    empty := [Int]{}
+    ^empty: [Int]{}
     // RFC 8949 argument widths, scalar families, nested containers, preferred
     // floats, and every supported normal-mode indefinite family.
     print(accepted([0]))

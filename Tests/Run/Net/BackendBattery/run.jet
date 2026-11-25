@@ -59,7 +59,7 @@ create_order: fn(req: HTTPRequest, session_id: String, queue_path: String, metri
 }
 
 run: fn() {
-    temp := testing.temp_dir("backend-battery")
+    ^temp: testing.temp_dir("backend-battery")
     process.on_signal(.Term)
     db_report: backend.sqlite_fixture()
     pool_path: Path.from(temp).join("pool.sqlite").to_string()
@@ -78,7 +78,7 @@ run: fn() {
     print("session-policy:{policy.session_header}/{policy.role_header}/{policy.cookie_name}")
     if session_id == "" -> panic("auth login")
 
-    router := http.router()
+    ^router: http.router()
     router.get("/health", fn(req: HTTPRequest) {
         Ok(
             http_server.json(

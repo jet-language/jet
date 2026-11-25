@@ -6,7 +6,7 @@ run: fn() {
     { sender: go_sender, receiver: go }: channel<Int>()
     { sender: ack_sender, receiver: ack }: channel<Int>()
     worker: task {
-        _ := go.receive() ?? panic("closed")
+        ^_: go.receive() ?? panic("closed")
         ack_sender.send(1)
     }
     worker.cancel()

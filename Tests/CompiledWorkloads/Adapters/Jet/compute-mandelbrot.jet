@@ -15,8 +15,8 @@ reject_case: fn(label: String, named: Bool) {
 }
 
 escape_count: fn(cx: Float, cy: Float, maximum: Int) -> Int {
-    zx := Float{0.0}
-    zy := Float{0.0}
+    ^zx: Float{0.0}
+    ^zy: Float{0.0}
     loop i in 0..<maximum {
         zx_squared: zx * zx
         zy_squared: zy * zy
@@ -52,8 +52,8 @@ emit_case: fn(label: String, named: Bool, width: Int, height: Int, stride: Int, 
         return
     }
     expected_samples: samples_x * samples_y
-    samples := 0
-    checksum := 0
+    ^samples: 0
+    ^checksum: 0
     loop y in 0..<height, stride {
         cy_ratio: Float.from_int(y) / Float.from_int(height)
         cy: cy_ratio * Float{2.0} - Float{1.0}
@@ -75,15 +75,15 @@ emit_case: fn(label: String, named: Bool, width: Int, height: Int, stride: Int, 
 }
 
 run_single: fn(raw: String) {
-    width := 0
-    height := 0
-    stride := 0
-    iterations := 0
-    width_seen := false
-    height_seen := false
-    stride_seen := false
-    iterations_seen := false
-    parse_failed := false
+    ^width: 0
+    ^height: 0
+    ^stride: 0
+    ^iterations: 0
+    ^width_seen: false
+    ^height_seen: false
+    ^stride_seen: false
+    ^iterations_seen: false
+    ^parse_failed: false
     loop line in raw.lines() {
         trimmed: line.trim().copy()
         if trimmed == "" -> next
@@ -119,17 +119,17 @@ run_single: fn(raw: String) {
 }
 
 run_batch: fn(raw: String) {
-    width := 0
-    height := 0
-    stride := 0
-    iterations := 0
-    width_seen := false
-    height_seen := false
-    stride_seen := false
-    iterations_seen := false
-    parse_failed := false
-    active := false
-    label := ""
+    ^width: 0
+    ^height: 0
+    ^stride: 0
+    ^iterations: 0
+    ^width_seen: false
+    ^height_seen: false
+    ^stride_seen: false
+    ^iterations_seen: false
+    ^parse_failed: false
+    ^active: false
+    ^label: ""
     loop line in raw.lines() {
         trimmed: line.trim().copy()
         if trimmed == "" || trimmed.starts_with("#") -> next

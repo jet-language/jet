@@ -40,9 +40,9 @@ jet_cli_comparison_evidence_outcome: fn(status: ComparisonStatus) -> EvidenceOut
 
 jet_cli_comparison_evidence: fn(run: JetCLIComparisonRun, target: String, artifact_id: String) -> EvidenceReport JetCLIReadError! {
     record: run.record
-    source := "jet.test-compare"
-    tool := "jet"
-    comparison_target := target
+    ^source: "jet.test-compare"
+    ^tool: "jet"
+    ^comparison_target: target
     if record.samples.len() > 0 {
         identity: record.samples[0].identity
         source = identity.source
@@ -56,7 +56,7 @@ jet_cli_comparison_evidence: fn(run: JetCLIComparisonRun, target: String, artifa
     revision: EvidenceRevision{source: artifact_id, build: "jet-comparison-v1", revision: artifact_id}
     report_id: "test-compare-{artifact_id}"
     identity: evidence_identity_for_record(report_id, "comparison", EvidenceProducerKind.Test, EvidenceKind.Unit, source_ref, count, detail)
-    evidence := evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, jet_cli_comparison_evidence_outcome(record.status), count, source_ref, build, revision)
+    ^evidence: evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, jet_cli_comparison_evidence_outcome(record.status), count, source_ref, build, revision)
     binding: run.binding
     evidence.attachments = [EvidenceAttachment]{
         {name: "boundary", value: binding.boundary_digest},
@@ -71,7 +71,7 @@ jet_cli_comparison_evidence: fn(run: JetCLIComparisonRun, target: String, artifa
     }
     evidence.attachments.push(EvidenceAttachment{name: "comparison-artifact", value: artifact_id})
     derivation: evidence_record_checked_derivation(evidence)
-    report := evidence_report_new(report_id, EvidenceProducerKind.Test, source_ref, build, revision)
+    ^report: evidence_report_new(report_id, EvidenceProducerKind.Test, source_ref, build, revision)
     evidence_report_add_record_with_derivation(report, evidence, derivation) ?? return Err(jet_cli_read_error(evidence_merge_error_text(err)))
     Ok(report)
 }
@@ -102,7 +102,7 @@ jet_cli_evidence_persist_at: fn(root: String, report: EvidenceReport, bytes: [U8
     }
     held: JetCLIRootedDirectory.open_cache(root, [String]{".jet", "evidence"}, true) ?? return Err(err)
     _: held.publish_immutable("{name}.json", bytes, Val(0o600), 268435456) ?? return Err(err)
-    index := jet_cli_record_index_load(root)
+    ^index: jet_cli_record_index_load(root)
     identity: JetCLIRecordIdentity{target_inputs_sha256: target_inputs_sha256, tool_version: report.build.toolchain, engine: evidence_producer_name(report.producer)}
     entry: jet_cli_comparison_index_entry(index, identity, "evidence", name, ".jet/evidence/{name}.json", bytes.len(), [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, protected)
     jet_cli_record_index_publish_and_store(index, root, entry)
@@ -116,7 +116,7 @@ jet_cli_comparison_persist: fn(run: JetCLIComparisonRun, target: String, argv: [
     artifact_id: receipt_crypto.sha256(bytes).hex()
     report: jet_cli_comparison_evidence(run, target, artifact_id)
     evidence_bytes: evidence_report_encode(report) ?? return Err(jet_cli_read_error(err.message))
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     report_id: report.identity.report_id
     jet_cli_evidence_persist(cache, report, evidence_bytes, report_id, artifact_id, true) ?? return Err(err)
 
@@ -148,7 +148,7 @@ jet_cli_comparison_persist: fn(run: JetCLIComparisonRun, target: String, argv: [
         }
     }
     target_digest: jet_cli_receipt_target_identity(cache, target, claim.inputs)
-    index := jet_cli_record_index_load(receipt_root)
+    ^index: jet_cli_record_index_load(receipt_root)
     path: ".jet/receipts/objects/{claim.key}"
     comparison_identity: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_VERSION, engine: "jet-comparison-v1"}
     comparison_entry: jet_cli_comparison_index_entry(index, comparison_identity, "comparison", artifact_id, path, bytes.len(), consumed, [JetDriverRecordLink]{}, false)

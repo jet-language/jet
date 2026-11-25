@@ -23,7 +23,7 @@ kind_name: fn(kind: data.DataErrorKind) -> String { "{kind:Debug}" }
 
 // Bind `bytes` as the payload of a pinned URL loader and read its rows.
 read: fn(bytes: [U8], limits: data.DataLimits) -> [Dyn] data.DataError! {
-    loader := data.url<[Dyn]>("https://example.invalid/fixture.parquet", "parquet", "network", limits) ?? return Err(err)
+    ^loader: data.url<[Dyn]>("https://example.invalid/fixture.parquet", "parquet", "network", limits) ?? return Err(err)
     data_loader.bind(loader, bytes) ?? return Err(err)
     snapshot: data.snapshot<[Dyn]>(loader) ?? return Err(err)
     Ok(snapshot.value)
@@ -40,7 +40,7 @@ report: fn(label: String, result: [Dyn] data.DataError!) {
 // header opens with Thrift field 1 (0x15) and the zigzag page type: 0 data
 // page, 4 dictionary page, 6 DATA_PAGE_V2, 14 an undefined type 7.
 with_page_type: fn(bytes: [U8], zigzag: U8) -> [U8] {
-    out := bytes.copy()
+    ^out: bytes.copy()
     out[5] = zigzag
     out
 }
@@ -54,11 +54,11 @@ run: fn() {
 
     report("int32 pages", read(INT32_PAGES, safe))
 
-    few_rows := data.DataLimits.safe()
+    ^few_rows: data.DataLimits.safe()
     few_rows.max_output_rows = 10
     report("max_output_rows 10", read(INT32_PAGES, few_rows))
 
-    few_bytes := data.DataLimits.safe()
+    ^few_bytes: data.DataLimits.safe()
     few_bytes.encoding.max_item_bytes = 1024
     report("max_item_bytes 1024", read(INT32_PAGES, few_bytes))
 

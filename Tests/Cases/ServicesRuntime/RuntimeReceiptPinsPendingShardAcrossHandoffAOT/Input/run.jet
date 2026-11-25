@@ -22,11 +22,11 @@ receipt_kind: fn(receipt: ^^Delivery) -> String {
 }
 
 run: fn() {
-    temp := testing.temp_dir("runtime-handoff-pending")
+    ^temp: testing.temp_dir("runtime-handoff-pending")
     store: Path.from(temp).join("authority.log").to_string()
     retention: Duration.seconds(86400) ?? panic("retention")
-    runtime := service.runtime(store, retention: retention)
-    tree := service.tree("runtime-handoff-pending")
+    ^runtime: service.runtime(store, retention: retention)
+    ^tree: service.tree("runtime-handoff-pending")
     endpoint: tree.worker("api", worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
 

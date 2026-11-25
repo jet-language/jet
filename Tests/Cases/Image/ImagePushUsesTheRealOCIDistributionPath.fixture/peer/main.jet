@@ -16,7 +16,7 @@ use {
 }
 
 registry_slice: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
@@ -24,7 +24,7 @@ registry_slice: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
 registry_find: fn(bytes: [U8], needle: [U8]) -> Int {
     if needle.len() == 0 || needle.len() > bytes.len() -> return -1
     loop i in 0..<(bytes.len() - needle.len() + 1) {
-        same := true
+        ^same: true
         loop j in 0..<needle.len() {
             if bytes[i + j] != needle[j] -> same = false
         }
@@ -34,8 +34,8 @@ registry_find: fn(bytes: [U8], needle: [U8]) -> Int {
 }
 
 registry_words: fn(value: String) -> [String] {
-    words := [String]{}
-    word := ""
+    ^words: [String]{}
+    ^word: ""
     loop scalar in text.scalars(value) {
         if text.is_whitespace(scalar) {
             if word != "" {
@@ -49,11 +49,11 @@ registry_words: fn(value: String) -> [String] {
 }
 
 run: fn() {
-    listener := net.tcp_listen("127.0.0.1:0") ?? panic("registry listen")
+    ^listener: net.tcp_listen("127.0.0.1:0") ?? panic("registry listen")
     address: net.listener_local_socket_addr(listener) ?? panic("registry address")
     files.write("registry.port", "{net.socket_port(address)}") ?? panic("write registry port")
     deadline: time.instant() + 20s
-    requests := [String]{}
+    ^requests: [String]{}
     loop requests.len() < 7 && time.instant() < deadline {
         stream: if listener.accept(deadline: 0s) == {
             .Ok(stream) -> stream
@@ -63,8 +63,8 @@ run: fn() {
                 next
             }
         }
-        request := [U8]{}
-        header_end := -1
+        ^request: [U8]{}
+        ^header_end: -1
         loop {
             chunk: stream.read_bytes(4096, deadline: 2s) ?? panic("read registry headers")
             if chunk.len() == 0 -> break
@@ -85,7 +85,7 @@ run: fn() {
         parts: registry_words(if lines.len() == 0 -> "" else -> lines[0])
         method: if parts.len() > 0 -> parts[0] else -> ""
         path: if parts.len() > 1 -> parts[1] else -> ""
-        content_length := 0
+        ^content_length: 0
         loop line in lines {
             field: parse.split_once(line, ":")
             if field.found && parse.lower(field.head) == "content-length" {
@@ -105,8 +105,8 @@ run: fn() {
         method_json: json.to_string(Dyn.Text(method))
         path_json: json.to_string(Dyn.Text(path))
         requests.push("{{\"method\":{method_json},\"path\":{path_json},\"body_has_schema_version\":{has_schema}}}")
-        status := 404
-        extra := ""
+        ^status: 404
+        ^extra: ""
         if method == "HEAD" -> status = 404 else if method == "POST" {
             status = 202
             extra = "Location: /test-upload\r\n"

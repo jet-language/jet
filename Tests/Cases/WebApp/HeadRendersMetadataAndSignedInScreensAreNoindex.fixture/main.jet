@@ -42,7 +42,7 @@ inbox_head: fn(view: InboxView) -> app.Head Never! {
 // status and the page's `<head>`, with the address the server listens at
 // written HOST.
 query: fn(addr: String, path: String, name: String, value: String) HTTPError! {
-    fields := http.headers()
+    ^fields: http.headers()
     if name != "" -> fields = http.headers_set(fields, name, value)
     answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", fields, http.body_text("")))
     page: answer.text()

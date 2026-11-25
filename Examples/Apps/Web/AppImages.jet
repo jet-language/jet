@@ -22,9 +22,9 @@ gallery: fn() -> WebPage {
 
 // The body of the answer to `GET path`, read until the server closes.
 get_body: fn(addr: String, path: String) -> [U8] {
-    stream := net.tcp_connect(addr) ?? panic("connect: {err}")
+    ^stream: net.tcp_connect(addr) ?? panic("connect: {err}")
     stream.write_bytes("GET {path} HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes()) ?? panic("request: {err}")
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         part: net.tcp_read_bytes(stream, 65536) ?? panic("read: {err}")
         if part.len() == 0 -> break
@@ -40,7 +40,7 @@ get_body: fn(addr: String, path: String) -> [U8] {
 
 // Every `/a/` address on `page`, in the order it names them.
 addresses: fn(page: String) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     loop (index, piece) in page.split("\"/a/").to_list() {
         if index == 0 -> next
         loop candidate in piece.split("\"").to_list()[0].split(", /a/") {
@@ -53,7 +53,7 @@ addresses: fn(page: String) -> [String] {
 
 // The `<source>` types on `page`, in order.
 source_types: fn(page: String) -> String {
-    types := [String]{}
+    ^types: [String]{}
     loop (index, piece) in page.split("<source type=\"").to_list() {
         if index == 0 -> next
         types.push(piece.split("\"").to_list()[0].copy())

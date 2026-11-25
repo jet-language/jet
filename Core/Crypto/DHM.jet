@@ -199,7 +199,7 @@ dhm_make_params: fn<R: RNG>(ctx: ^DHMContext, x_size: Int, rng: ^R) -> [U8] DHME
     if make_common(ctx, x_size, rng) == .Err(e) {
         return Err(if e == .Mpi(m) -> DHMError.MakeParamsFailed(Val(m)) else -> e.copy())
     }
-    out := [U8]{}
+    ^out: [U8]{}
     push_number(out, ctx.p) ?? return Err(.MakeParamsFailed(Val(err)))
     push_number(out, ctx.g) ?? return Err(.MakeParamsFailed(Val(err)))
     push_number(out, ctx.gx) ?? return Err(.MakeParamsFailed(Val(err)))
@@ -289,8 +289,8 @@ dhm_calc_secret: fn<R: RNG>(ctx: ^DHMContext, rng: ^R) -> [U8] DHMError! {
 /// INTEGER, privateValueLength INTEGER OPTIONAL }, the optional length read
 /// and dropped (mbedtls_dhm_parse_dhm on DER input).
 dhm_parse_der: fn(der: [U8]) -> DHMContext DHMError! {
-    ctx := dhm_new()
-    p := 0
+    ^ctx: dhm_new()
+    ^p: 0
     len: asn1.get_tag(der, p, der.len(), asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.InvalidFormat(err))
     end: p + len
     prime: asn1.get_mpi(der, p, end) ?? return Err(.InvalidFormat(err))
@@ -4485,16 +4485,16 @@ FFDHE8192_G: [U8]{
 }
 
 #Test("Two FFDHE2048 contexts agree on the secret, and out-of-range public values are refused") {
-    rng := drbg.hmac_drbg_new(.SHA256)
+    ^rng: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(rng, "Dhm.jet self-test".bytes())
-    server := dhm_new()
+    ^server: dhm_new()
     p: bn.read_binary(FFDHE2048_P) ?? panic("P")
     g: bn.read_binary(FFDHE2048_G) ?? panic("G")
     dhm_set_group(server, p, g) ?? panic("set_group")
     assert(dhm_get_bitlen(server) == 2048)
     params: dhm_make_params(server, 256, rng) ?? panic("make_params")
-    client := dhm_new()
-    at := 0
+    ^client: dhm_new()
+    ^at: 0
     dhm_read_params(client, params, at, params.len()) ?? panic("read_params")
     assert(at == params.len())
     client_public: dhm_make_public(client, 256, 256, rng) ?? panic("make_public")

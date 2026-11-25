@@ -151,7 +151,7 @@ env_hook_test_fingerprint: fn(root: String) -> String {
 #Test("malformed env fingerprint fails closed on deep tree") {
     root: env_hook_test_root("jpk-envhook-deep-")
     files.write(files.join(root, ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
-    current := root
+    ^current: root
     loop index in 0..<(MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
         files.create_dir_all(current) ?? panic("create deep dir")
@@ -186,7 +186,7 @@ env_hook_test_fingerprint: fn(root: String) -> String {
 }
 
 #Test("activation rejects shell tokens at render boundary") {
-    activation := env_hook_test_activation()
+    ^activation: env_hook_test_activation()
     activation.unset.push("BAD; echo injected")
     assert(activation.render_activate(ShellKind.Bash) == .Err(_))
 }

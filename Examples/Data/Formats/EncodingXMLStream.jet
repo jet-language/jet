@@ -24,7 +24,7 @@ xml_name: fn(local: String) -> Dyn {
 
 write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
     output: files.create(path) ?? return Err(err)
-    writer := xml.writer(output, encoding.EncodingLimits.safe()) ?? return Err(err)
+    ^writer: xml.writer(output, encoding.EncodingLimits.safe()) ?? return Err(err)
     writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_start"), "encoding": Dyn.Null, "bom": Dyn.Array([])])) ?? return Err(err)
     semantic: Dyn.Object(
         [

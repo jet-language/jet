@@ -251,8 +251,8 @@ JetCLITableCluster: struct {
 // other starts absorb Extend* and repeated ZWJ + next scalar, taking max width.
 jet_cli_table_cluster: fn(source: [U8], start: Int, limit: Int) -> JetCLITableCluster Never! {
     first: foundation_read_bytes_scalar_at(source, start)
-    end := first.next_byte
-    width := jet_cli_table_scalar_width(first.codepoint)
+    ^end: first.next_byte
+    ^width: jet_cli_table_scalar_width(first.codepoint)
     if {
         jet_cli_table_regional(first.codepoint) -> {
             if end < limit {
@@ -288,9 +288,9 @@ jet_cli_table_cluster: fn(source: [U8], start: Int, limit: Int) -> JetCLITableCl
 // literal facts. Scan scalars, so an ESC followed by non-ASCII consumes the
 // whole scalar.
 jet_cli_table_strip_ansi: fn(source: [U8]) -> [U8] Never! {
-    out := [U8]{}
-    state := 0
-    index := 0
+    ^out: [U8]{}
+    ^state: 0
+    ^index: 0
     loop index < source.len() {
         scalar: foundation_read_bytes_scalar_at(source, index)
         code: scalar.codepoint
@@ -300,10 +300,12 @@ jet_cli_table_strip_ansi: fn(source: [U8]) -> [U8] Never! {
                     foundation_append_read_bytes(out, source, index, scalar.next_byte)
                 }
             }
-            1 -> state = if {
-                code == 91 -> 2
-                code == 93 -> 3
-                else -> 0
+            1 -> {
+                state = if {
+                    code == 91 -> 2
+                    code == 93 -> 3
+                    else -> 0
+                }
             }
             2 -> {
                 if code >= 64 && code <= 126 -> state = 0
@@ -327,8 +329,8 @@ jet_cli_table_strip_ansi: fn(source: [U8]) -> [U8] Never! {
 // clusters are skipped, and later fitting clusters are retained (not prefix
 // truncation). Text truncation does not set the table's structural flag.
 jet_cli_table_bound_text: fn(input: ^^[U8]) -> [U8] Never! {
-    text := input.move()
-    ansi := false
+    ^text: input.move()
+    ^ansi: false
     loop byte in text {
         if byte == (U8{27}) {
             ansi = true
@@ -337,8 +339,8 @@ jet_cli_table_bound_text: fn(input: ^^[U8]) -> [U8] Never! {
     }
     if ansi -> text = jet_cli_table_strip_ansi(text)
     if text.len() <= JET_CLI_TABLE_MAX_CELL_BYTES -> return text.move()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < text.len() {
         cluster: jet_cli_table_cluster(text, index, text.len())
         if out.len() + cluster.end - index <= JET_CLI_TABLE_MAX_CELL_BYTES {
@@ -352,13 +354,13 @@ jet_cli_table_bound_text: fn(input: ^^[U8]) -> [U8] Never! {
 // Normalized table facts have already had ANSI removed and the byte bound
 // applied. Width is the maximum logical line, not the sum across newlines.
 jet_cli_table_text_width: fn(text: [U8]) -> Int Never! {
-    maximum := 0
-    start := 0
+    ^maximum: 0
+    ^start: 0
     loop start <= text.len() {
-        end := start
+        ^end: start
         loop end < text.len() && text[end] != (U8{10}) -> end += 1
-        width := 0
-        index := start
+        ^width: 0
+        ^index: start
         loop index < end {
             cluster: jet_cli_table_cluster(text, index, end)
             width += cluster.width
@@ -372,16 +374,16 @@ jet_cli_table_text_width: fn(text: [U8]) -> Int Never! {
 }
 
 jet_cli_table_wrap_span: fn(lines: ^[[U8]], text: [U8], start: Int, stop: Int, width: Int) Never! {
-    end := stop
+    ^end: stop
     if end > start && text[end - 1] == (U8{13}) -> end -= 1
     if start == end {
         lines.push([U8]{})
         return
     }
-    line := [U8]{}
-    line_width := 0
-    emitted := false
-    index := start
+    ^line: [U8]{}
+    ^line_width: 0
+    ^emitted: false
+    ^index: start
     loop index < end {
         cluster: jet_cli_table_cluster(text, index, end)
         if {
@@ -416,10 +418,10 @@ jet_cli_table_wrap_span: fn(lines: ^[[U8]], text: [U8], start: Int, stop: Int, w
 
 jet_cli_table_wrap: fn(text: [U8], budget: Int) -> [[U8]] Never! {
     width: jet_cli_table_max(budget, 1)
-    lines := [[U8]]{}
-    start := 0
+    ^lines: [[U8]]{}
+    ^start: 0
     loop start <= text.len() {
-        end := start
+        ^end: start
         loop end < text.len() && text[end] != (U8{10}) -> end += 1
         jet_cli_table_wrap_span(lines, text, start, end, width)
         if end == text.len() -> break
@@ -439,7 +441,7 @@ jet_cli_table_clip: fn(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
     // copy: `text` stays with the caller (`text` is a read parameter: no move out of it, E0201) and
     // the new value owns its own.
     if jet_cli_table_text_width(text) <= width -> return text.copy()
-    out := [U8]{}
+    ^out: [U8]{}
     suffix_width: if unicode -> 1 else -> 3
     if width <= suffix_width {
         if unicode -> return [U8]{226, 128, 166}
@@ -447,8 +449,8 @@ jet_cli_table_clip: fn(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
         return out
     }
     keep: width - suffix_width
-    used := 0
-    index := 0
+    ^used: 0
+    ^index: 0
     loop index < text.len() && used < keep {
         cluster: jet_cli_table_cluster(text, index, text.len())
         if cluster.width > keep - used -> break

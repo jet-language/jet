@@ -51,8 +51,8 @@ BuildOptions: struct {
 
 // The options of `build`; every problem is collected at once.
 parse_build_args: fn(args: [String]) -> BuildOptions Never! {
-    options := BuildOptions{commit: "", seed: "", out: "", threads: 8, check_gate: false, errors: [String]{}}
-    index := 0
+    ^options: BuildOptions{commit: "", seed: "", out: "", threads: 8, check_gate: false, errors: [String]{}}
+    ^index: 0
     loop index < args.len() {
         flag: args[index]
         if flag == "--seed" || flag == "--out" || flag == "--threads" {
@@ -157,7 +157,7 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
         return build_fail(2, "{short(sha, 10)} is not on dev")
     }
     seed: absolute_or(options.seed)
-    missing := [String]{}
+    ^missing: [String]{}
     loop name in STAGE_FILES {
         if !files.exists(files.join(seed, name)) -> missing.push(name.copy())
     }
@@ -250,12 +250,12 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     )
     if failed == .Val(why) -> return build_fail(1, why)
     files.write(files.join(out, "SHA256SUMS"), sums_text(shipped_artifacts(out))) ?? return build_fail(1, "cannot write SHA256SUMS: {err}")
-    literals := [String]{root.copy(), files.realpath(root) ?? root.copy(), out.copy(), real_out.copy(), seed.copy(), files.realpath(seed) ?? seed.copy()}
+    ^literals: [String]{root.copy(), files.realpath(root) ?? root.copy(), out.copy(), real_out.copy(), seed.copy(), files.realpath(seed) ?? seed.copy()}
     seed_jet: [String]{"env", "JET_COMPILER_IDENTITY={seed_identity}", "JET_TOOLCHAIN_ROOT={root}", files.join(seed, "jet")}
     findings: personal_problems(root, out, shipped_names(out), literals, Programs{gh: [String]{"gh"}, jet: seed_jet})
     remove_tree(work)
     if findings.len() > 0 {
-        shown := [String]{}
+        ^shown: [String]{}
         loop found in findings {
             if shown.len() < 8 -> shown.push(found.text.copy())
         }

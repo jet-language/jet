@@ -17,7 +17,9 @@ lsp_handle_request: fn(server: ^LSPServer, method: String, params: Dyn?, id: Dyn
             text_document: lsp_member(capabilities, "textDocument") ?? Dyn.Null
             resolve_support: lsp_member(lsp_member(text_document, "codeAction") ?? Dyn.Null, "resolveSupport") ?? Dyn.Null
             server.code_action_resolve = loop property in lsp_member_rows(resolve_support, "properties") {
-                if property == .Text(name) && name == "edit" -> break true
+                if property == .Text(name) && name == "edit" {
+                    break true
+                }
             } ?? false
             server.pull_diagnostics = lsp_member(text_document, "diagnostic") != None
             lsp_initial_workspace_folders(server, params)
@@ -87,10 +89,10 @@ lsp_handle_notification: fn(server: ^LSPServer, method: String, params: Dyn?, in
                 return
             }
             lsp_publish_document_diagnostics(server, uri, stdout) ?? return Err(err)
-            _ := server.diagnostic_state.dirty.remove(uri)
+            ^_: server.diagnostic_state.dirty.remove(uri)
         }
         "textDocument/didChange" -> {
-            _ := lsp_update_document(server.diagnostic_state, params, is_open: false)
+            ^_: lsp_update_document(server.diagnostic_state, params, is_open: false)
         }
         "textDocument/didClose" -> {
             uri: lsp_params_uri(params) ?? return
@@ -106,13 +108,13 @@ LSP_SEMANTIC_TOKEN_TYPES: [String]{"keyword", "type", "function", "variable", "p
 LSP_SEMANTIC_TOKEN_MODIFIERS: [String]{"declaration", "readonly", "modification", "macro"}
 
 lsp_json_strings: fn(values: [String]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop value in values -> rows.push(foundation_json_quote(value))
     "[{rows.join(",")}]"
 }
 
 lsp_initialize_response: fn(id: Dyn) -> String Never! {
-    capabilities := [String]{
+    ^capabilities: [String]{
         // TextDocumentSyncKind.Incremental; the number form implies open and close.
         "\"textDocumentSync\":2",
         "\"documentFormattingProvider\":true",

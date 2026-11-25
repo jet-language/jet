@@ -58,14 +58,14 @@ status_kb: fn(field: String) -> Int {
 }
 
 chain: fn(depth: Int) -> Chain {
-    link := Chain.End
+    ^link: Chain.End
     loop _ in 0..<depth -> link = Chain.Link{next: link.move()}
     link
 }
 
 chain_depth: fn(link: Chain) -> Int {
-    n := 0
-    cursor := link
+    ^n: 0
+    ^cursor: link
     loop cursor == .Link(next) {
         n += 1
         cursor = next
@@ -76,10 +76,10 @@ chain_depth: fn(link: Chain) -> Int {
 one_allocation_per_link: fn() {
     warm: chain(CHAIN_DEPTH)
     before: status_kb("VmRSS:")
-    chains := [Chain]{}
+    ^chains: [Chain]{}
     loop _ in 0..<CHAINS { chains.push(chain(CHAIN_DEPTH)) }
     grown: status_kb("VmRSS:") - before
-    links := 0
+    ^links: 0
     loop link in chains -> links += chain_depth(link)
     if links != CHAINS * CHAIN_DEPTH -> panic("built {links} links")
     per_link: grown * 1024 /% links
@@ -98,17 +98,17 @@ eval: fn(expr: Expr) -> Int {
 
 // Rewrites the left operand of an Add in place through a write window.
 rewrite_left: fn(expr: ^Expr, value: Int) {
-    if ^expr == .Add(left, _) -> left = Expr.Num{value: value}
+    if expr.in_place() == .Add(left, _) -> left = Expr.Num{value: value}
 }
 
 expressions: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         leaf: Expr.Maybe{inner: Val(Expr.Neg{inner: Expr.Num{value: i % 13}})}
         a: Expr.Add{left: Expr.Num{value: i % 7}, right: Expr.Add{left: leaf, right: Expr.Maybe{inner: None}}}
-        b := a.copy()
+        ^b: a.copy()
         rewrite_left(b, 100)
-        c := b.copy()
+        ^c: b.copy()
         rewrite_left(c, 1000)
         if eval(a) != i % 7 - i % 13 + 7 {
             panic("a write through a copy's edge showed in the original")
@@ -130,11 +130,11 @@ scope_depth: fn(scope: Scope) -> Int {
 detach: fn(scope: ^Scope) { scope.parent = None }
 
 scopes: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         root: Scope{name: "r{i}", parent: None, body: Body.Empty}
         child: Scope{name: "c", parent: Val(root.copy()), body: Body.Nested{scope: Scope{name: "n{i}", parent: None, body: Body.Empty}}}
-        other := child.copy()
+        ^other: child.copy()
         detach(other)
         other.body = Body.Empty
         if scope_depth(child) != scope_depth(root) + 2 + scope_depth(Scope{name: "n{i}", parent: None, body: Body.Empty}) {

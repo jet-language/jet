@@ -30,12 +30,12 @@ use {
 // when the source doesn't check.
 deprecated_inline_results: fn(failures: ^[String], source: String) -> [String]? {
     raw: source.bytes()
-    parsed := parse_source(raw)
+    ^parsed: parse_source(raw)
     if parsed.diagnostics.len() != 0 {
         failures.push("parse failed: {source}")
         return None
     }
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, "deprecated-inline.main")
     effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
         failures.push("canonical effect module declares no effects")
@@ -45,26 +45,26 @@ deprecated_inline_results: fn(failures: ^[String], source: String) -> [String]? 
     facts: SemaBuildFacts{package_name: "deprecated-inline", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: raw.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: "deprecated-inline", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: "{source}"}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "deprecated-inline", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "deprecated-inline", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
         failures.push("registration failed {err}: {source}")
         return None
     }
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? {
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? {
         failures.push("declaration checking failed {err}: {source}")
         return None
     }
-    declared := stage.graph.move()
+    ^declared: stage.graph.move()
     stage.graph = None
-    registration := declared.move() ?? {
+    ^registration: declared.move() ?? {
         failures.push("the declaration pass lost its registration graph: {source}")
         return None
     }
-    checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? {
+    ^checked: sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? {
         failures.push("finalization failed {err}: {source}")
         return None
     }
-    results := [String]{}
+    ^results: [String]{}
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR {
             failures.push("unexpected {diagnostic.code}: {diagnostic.what} in {source}")
@@ -105,7 +105,7 @@ deprecated_inline_expect: fn(failures: ^[String], call: String, wanted: String) 
 DEPRECATED_INLINE_LIBRARY: "scaled: fn(n: Int, by: Int) -> Int {{\n    n * by\n}}\n\n#Deprecated(since: \"1.2\", use: \"scaled\", inline: true)\ndouble: fn(n: Int) -> Int {{\n    scaled(n, 2)\n}}\n\n#Deprecated(since: \"1.2\", use: \"scaled\", inline: true)\ntwice: fn(n: Int) -> Int {{\n    n + n\n}}\n\n#Deprecated(since: \"1.2\", use: \"scaled\", inline: true)\nafter: fn(n: Int) -> Int {{\n    scaled(2, 3) + n\n}}\n\n#Deprecated(since: \"1.2\", use: \"scaled\", inline: true)\nless: fn(n: Int) -> Int {{\n    n - 1\n}}\n\n#Deprecated(since: \"1.2\", use: \"scaled\", inline: true)\nswapped: fn(n: Int, by: Int) -> Int {{\n    scaled(by, n)\n}}\n\n"
 
 #Test("deprecated_inline_fixtures") {
-    failures := [String]{}
+    ^failures: [String]{}
     // A name or literal argument goes in place of every read.
     deprecated_inline_expect(failures, "double(4)", "scaled(4, 2)")
     deprecated_inline_expect(failures, "twice(4)", "(4 + 4)")

@@ -60,11 +60,11 @@ AnalysisReceipt: struct {
 }
 
 fit: fn(rows: [Observation]) -> Regression {
-    n := 0
-    sum_x := Float{0.0}
-    sum_y := Float{0.0}
-    sum_xx := Float{0.0}
-    sum_xy := Float{0.0}
+    ^n: 0
+    ^sum_x: Float{0.0}
+    ^sum_y: Float{0.0}
+    ^sum_xx: Float{0.0}
+    ^sum_xy: Float{0.0}
     loop row in rows {
         n += 1
         sum_x += row.x
@@ -77,8 +77,8 @@ fit: fn(rows: [Observation]) -> Regression {
     slope: (nf * sum_xy - sum_x * sum_y) / denominator
     intercept: (sum_y - slope * sum_x) / nf
     mean_y: sum_y / nf
-    total := Float{0.0}
-    residual := Float{0.0}
+    ^total: Float{0.0}
+    ^residual: Float{0.0}
     loop row in rows {
         predicted: intercept + slope * row.x
         total += (row.y - mean_y) * (row.y - mean_y)
@@ -92,7 +92,7 @@ fit: fn(rows: [Observation]) -> Regression {
 }
 
 join_summaries: fn(rows: [Summary], owners: [Owner]) -> [Joined] {
-    out := [Joined]{}
+    ^out: [Joined]{}
     loop row in rows {
         loop owner in owners {
             if row.team == owner.team {
@@ -105,8 +105,8 @@ join_summaries: fn(rows: [Summary], owners: [Owner]) -> [Joined] {
 }
 
 labeled_cell: fn(values: [[Float]], row_labels: [String], col_labels: [String], row: String, column: String) -> Float {
-    ri := 0
-    ci := 0
+    ^ri: 0
+    ^ci: 0
     loop label in row_labels {
         if label == row -> break
         ri += 1
@@ -128,8 +128,8 @@ run: fn() {
     rows: data.csv<Observation>(raw) ?? panic("decode csv")
     print("stage=loaded")
     mark("loaded")
-    row_count := data.count(rows)
-    column_count := data.schema(rows).len()
+    ^row_count: data.count(rows)
+    ^column_count: data.schema(rows).len()
 
     filtered: data.query(rows)
         .filter(fn(row) { row.value >= Float{50.0} })
@@ -145,14 +145,14 @@ run: fn() {
     pivot: data.pivot_sum(filtered, fn(row) { row.team }, fn(row) { row.segment }, fn(row) { row.value }) ?? panic("pivot")
     print("stage=aggregated")
     mark("aggregated")
-    values := [Float]{}
+    ^values: [Float]{}
     loop row in filtered { values.push(row.value) }
     rolling: data.rolling_mean(values, 8) ?? panic("rolling mean")
     summary: data.describe(values) ?? panic("describe")
     print("stage=windowed")
     mark("windowed")
 
-    summaries := [Summary]{}
+    ^summaries: [Summary]{}
     loop group in groups { summaries.push(Summary{team: group.key, mean: group.value}) }
     owners: [Owner]{{team: "team0", owner: "Ada"}, {team: "team1", owner: "Grace"}, {team: "team2", owner: "Lin"}, {team: "team3", owner: "Mina"}, {team: "team4", owner: "Noor"}, {team: "team5", owner: "Omar"}, {team: "team6", owner: "Priya"}, {team: "team7", owner: "Quinn"}, {team: "team8", owner: "Rae"}, {team: "team9", owner: "Sol"}}
     joined: join_summaries(summaries, owners)

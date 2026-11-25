@@ -81,7 +81,7 @@ type_id_map_spanned: fn(table: ^Interner, key: TypeID, key_span: Span?, value: T
 }
 
 type_id_apply_id: fn(table: ^Interner, name: Name, args: [TypeID]) -> TypeID Never! {
-    children := [U32]{}
+    ^children: [U32]{}
     loop arg in args -> children.push(arg.id)
     type_intern(table, TypeKind.Apply, name.id, U32{0}, U32{0}, children)
 }
@@ -96,13 +96,13 @@ type_id_link: fn(table: ^Interner, inner: TypeID) -> TypeID Never! {
 }
 
 type_id_trait_object: fn(table: ^Interner, bounds: [String]) -> TypeID Never! {
-    children := [U32]{}
+    ^children: [U32]{}
     loop bound in bounds -> children.push(name_intern(table.names, bound).id)
     type_intern(table, TypeKind.TraitObject, U32{0}, U32{0}, U32{0}, children)
 }
 
 type_id_tuple: fn(table: ^Interner, field_names: [String], field_types: [TypeID]) -> TypeID Never! {
-    children := [U32]{}
+    ^children: [U32]{}
     loop i in 0..<field_types.len() {
         fname: if i < field_names.len() -> field_names[i] else -> ""
         children.push(name_intern(table.names, fname).id)
@@ -145,7 +145,7 @@ type_id_tagged: fn(table: ^Interner, marker: TagMarker, inner: TypeID) -> TypeID
 }
 
 type_id_union: fn(table: ^Interner, members: [TypeID]) -> TypeID Never! {
-    children := [U32]{}
+    ^children: [U32]{}
     loop member in members -> children.push(member.id)
     type_intern(table, TypeKind.Union, U32{0}, U32{0}, U32{0}, children)
 }
@@ -177,7 +177,7 @@ type_id_compute_shape: fn(table: ^Interner, name: String, dimensions: [Int]) -> 
 // Plain Fn type with no effect_bound / param_contract / call_metadata / return_view_provenance.
 // Pass `ret = type_none()` when the function type has no return slot.
 type_id_fn_plain: fn(table: ^Interner, params: [TypeID], ret: TypeID) -> TypeID Never! {
-    children := [U32]{}
+    ^children: [U32]{}
     loop param in params -> children.push(param.id)
     type_intern(table, TypeKind.Fn, ret.id, U32{0}, U32{0}, children)
 }
@@ -194,8 +194,8 @@ type_id_fn_meta: fn(
     if effect_bound == None && param_contract == None && call_metadata == None && return_view_provenance == None {
         return type_id_fn_plain(table, params, ret)
     }
-    children := [U32]{}
-    syntax_params := [Type]{}
+    ^children: [U32]{}
+    ^syntax_params: [Type]{}
     loop param in params {
         children.push(param.id)
         syntax_params.push(type_syntax(table, param))
@@ -240,13 +240,9 @@ type_id_named_text: fn(table: Interner, id: TypeID) -> String Never! {
     name_text(table.names, type_a_name(table, id))
 }
 
-type_id_int_signed: fn(table: Interner, id: TypeID) -> Bool Never! {
-    type_a(table, id) != U32{0}
-}
+type_id_int_signed: fn(table: Interner, id: TypeID) -> Bool Never! { type_a(table, id) != U32{0} }
 
-type_id_int_bits: fn(table: Interner, id: TypeID) -> Int Never! {
-    Int{type_b(table, id)}
-}
+type_id_int_bits: fn(table: Interner, id: TypeID) -> Int Never! { Int{type_b(table, id)} }
 
 type_id_tuple_count: fn(table: Interner, id: TypeID) -> Int Never! {
     type_child_count(table, id) >> 1
@@ -280,7 +276,9 @@ type_id_link_inner: fn(table: Interner, id: TypeID) -> TypeID? Never! {
 }
 
 type_id_number_argument_value: fn(table: Interner, id: TypeID) -> Int? Never! {
-    if type_kind(table, id) == TypeKind.Measure -> return measure_literal_value(type_id_measure_value(table, id))
+    if type_kind(table, id) == TypeKind.Measure {
+        return measure_literal_value(type_id_measure_value(table, id))
+    }
     None
 }
 
@@ -298,7 +296,7 @@ type_id_compute_shape_measures: fn(table: Interner, id: TypeID) -> [Measure]? Ne
     }
     count: type_child_count(table, id)
     if expected == 0 || count != expected -> return None
-    measures := [Measure]{}
+    ^measures: [Measure]{}
     loop i in 0..<count {
         arg: type_child_type(table, id, i)
         if type_kind(table, arg) != TypeKind.Measure -> return None
@@ -311,7 +309,7 @@ type_id_compute_shape_measures: fn(table: Interner, id: TypeID) -> [Measure]? Ne
 
 type_id_compute_shape_dimensions: fn(table: Interner, id: TypeID) -> [Int]? Never! {
     measures: type_id_compute_shape_measures(table, id) ?? return None
-    dimensions := [Int]{}
+    ^dimensions: [Int]{}
     loop m in measures {
         value: measure_literal_value(m) ?? return None
         dimensions.push(value)
@@ -371,9 +369,11 @@ type_id_carrier_identity: fn(table: Interner, id: TypeID) -> String Never! {
         .Result -> "{type_id_carrier_identity_grouped(table, type_a_type(table, id))} ! {type_id_carrier_identity_grouped(table, type_b_type(table, id))}"
         .Fn -> {
             names: loop i in 0..<type_child_count(table, id) -> type_id_carrier_identity(table, type_child_type(table, id, i))
-            signature := "fn({names.join(", ")})"
+            ^signature: "fn({names.join(", ")})"
             ret: type_a_type(table, id)
-            if !type_is_none(ret) -> signature = "{signature} => {type_id_carrier_identity(table, ret)}"
+            if !type_is_none(ret) {
+                signature = "{signature} => {type_id_carrier_identity(table, ret)}"
+            }
             signature
         }
         .Named -> type_id_named_text(table, id)
@@ -382,8 +382,10 @@ type_id_carrier_identity: fn(table: Interner, id: TypeID) -> String Never! {
             "{type_id_named_text(table, id)}<{names.join(", ")}>"
         }
         .TraitObject -> {
-            bounds := [String]{}
-            loop i in 0..<type_child_count(table, id) -> bounds.push(type_id_trait_bound(table, id, i))
+            ^bounds: [String]{}
+            loop i in 0..<type_child_count(table, id) {
+                bounds.push(type_id_trait_bound(table, id, i))
+            }
             bounds.join(" + ")
         }
         .Tuple -> {
@@ -447,13 +449,17 @@ type_id_name: fn(table: Interner, id: TypeID) -> String Never! {
         }
         .Measure -> measure_expression(type_id_measure_value(table, id))
         .TraitObject -> {
-            bounds := [String]{}
-            loop i in 0..<type_child_count(table, id) -> bounds.push(type_id_trait_bound(table, id, i))
+            ^bounds: [String]{}
+            loop i in 0..<type_child_count(table, id) {
+                bounds.push(type_id_trait_bound(table, id, i))
+            }
             bounds.join(" + ")
         }
         .Union -> {
-            names := [String]{}
-            loop i in 0..<type_child_count(table, id) -> names.push(type_id_name(table, type_child_type(table, id, i)))
+            ^names: [String]{}
+            loop i in 0..<type_child_count(table, id) {
+                names.push(type_id_name(table, type_child_type(table, id, i)))
+            }
             names.join(" | ")
         }
         .Case -> "{type_id_named_text(table, id)}({type_id_name(table, type_b_type(table, id))})"
@@ -469,8 +475,10 @@ type_id_name: fn(table: Interner, id: TypeID) -> String Never! {
                         dims: loop d in values -> "{d}"
                         return "{name}<{dims.join(", ")}>"
                     }
-                    names := [String]{}
-                    loop i in 0..<count -> names.push(type_id_name(table, type_child_type(table, id, i)))
+                    ^names: [String]{}
+                    loop i in 0..<count {
+                        names.push(type_id_name(table, type_child_type(table, id, i)))
+                    }
                     "{name}<{names.join(", ")}>"
                 }
             }
@@ -491,9 +499,11 @@ type_id_name: fn(table: Interner, id: TypeID) -> String Never! {
         .Result -> type_id_result_surface_name(table, type_a_type(table, id), type_b_type(table, id))
         .Fn -> {
             if type_id_fn_row(table, id) == .Val(fn_ty) -> return type_name(fn_ty)
-            names := [String]{}
-            loop i in 0..<type_child_count(table, id) -> names.push(type_id_name(table, type_child_type(table, id, i)))
-            out := "fn({names.join(", ")})"
+            ^names: [String]{}
+            loop i in 0..<type_child_count(table, id) {
+                names.push(type_id_name(table, type_child_type(table, id, i)))
+            }
+            ^out: "fn({names.join(", ")})"
             ret: type_a_type(table, id)
             shown_ret: if !type_is_none(ret) && !type_id_is_unit_callable_return(table, ret) -> ret else -> type_none()
             unit_fallible: !type_is_none(shown_ret) && type_kind(table, shown_ret) == TypeKind.Result && type_a_type(table, shown_ret).id == TYPE_ID_UNIT.id
@@ -508,7 +518,9 @@ type_id_result_surface_name: fn(table: Interner, ok: TypeID, err: TypeID) -> Str
     default_error: type_id_is_named_text(table, err, "Err")
     unit_success: ok.id == TYPE_ID_UNIT.id
     if unit_success -> return "{type_id_marked_name(table, err)}!"
-    if !default_error -> return "{type_id_marked_name(table, ok)} {type_id_marked_name(table, err)}!"
+    if !default_error {
+        return "{type_id_marked_name(table, ok)} {type_id_marked_name(table, err)}!"
+    }
     type_id_name(table, ok)
 }
 
@@ -538,14 +550,20 @@ type_id_unqualified_name_text: fn(table: Interner, id: TypeID) -> String Never! 
         .Apply -> {
             name: type_unqualified_text(type_id_named_text(table, id), false)
             count: type_child_count(table, id)
-            if name == "Ptr" && count == 1 -> return "*{type_id_unqualified_name_text(table, type_child_type(table, id, 0))}"
-            if name == "@" && count == 1 -> return "@{type_id_unqualified_name_text(table, type_child_type(table, id, 0))}"
+            if name == "Ptr" && count == 1 {
+                return "*{type_id_unqualified_name_text(table, type_child_type(table, id, 0))}"
+            }
+            if name == "@" && count == 1 {
+                return "@{type_id_unqualified_name_text(table, type_child_type(table, id, 0))}"
+            }
             if type_id_compute_shape_dimensions(table, id) == .Val(values) {
                 dims: loop d in values -> "{d}"
                 return "{name}<{dims.join(", ")}>"
             }
-            names := [String]{}
-            loop i in 0..<count -> names.push(type_id_unqualified_name_text(table, type_child_type(table, id, i)))
+            ^names: [String]{}
+            loop i in 0..<count {
+                names.push(type_id_unqualified_name_text(table, type_child_type(table, id, i)))
+            }
             "{name}<{names.join(", ")}>"
         }
         .List -> "[{type_id_unqualified_name_text(table, type_a_type(table, id))}]"
@@ -556,7 +574,9 @@ type_id_unqualified_name_text: fn(table: Interner, id: TypeID) -> String Never! 
             ok: type_a_type(table, id)
             err: type_b_type(table, id)
             if ok.id == TYPE_ID_UNIT.id -> return "{type_id_unqualified_marked_name(table, err)}!"
-            if !type_id_is_named_text(table, err, "Err") -> return "{type_id_unqualified_marked_name(table, ok)} {type_id_unqualified_marked_name(table, err)}!"
+            if !type_id_is_named_text(table, err, "Err") {
+                return "{type_id_unqualified_marked_name(table, ok)} {type_id_unqualified_marked_name(table, err)}!"
+            }
             type_id_unqualified_name_text(table, ok)
         }
         .FixedList -> "[{type_id_unqualified_name_text(table, type_a_type(table, id))}#{measure_expression(type_id_measure_value(table, id))}]"
@@ -568,8 +588,10 @@ type_id_unqualified_name_text: fn(table: Interner, id: TypeID) -> String Never! 
             }
         }
         .Union -> {
-            names := [String]{}
-            loop i in 0..<type_child_count(table, id) -> names.push(type_id_unqualified_name_text(table, type_child_type(table, id, i)))
+            ^names: [String]{}
+            loop i in 0..<type_child_count(table, id) {
+                names.push(type_id_unqualified_name_text(table, type_child_type(table, id, i)))
+            }
             names.join(" | ")
         }
         .Case -> "{type_id_named_text(table, id)}({type_id_unqualified_name_text(table, type_b_type(table, id))})"
@@ -600,7 +622,7 @@ type_id_union_member_tag: fn(table: Interner, id: TypeID) -> String Never! {
 
 type_id_union_member_identity_tag: fn(table: Interner, id: TypeID) -> String Never! {
     hex: "0123456789abcdef".bytes()
-    bytes := [U8]{73, 95}
+    ^bytes: [U8]{73, 95}
     loop byte in type_id_name(table, id).bytes() {
         value: Int{byte}
         if {
@@ -619,11 +641,13 @@ type_id_union_member_identity_tag: fn(table: Interner, id: TypeID) -> String Nev
 
 type_id_union_member_tag_in: fn(table: Interner, members: [TypeID], id: TypeID) -> String Never! {
     own: type_id_union_member_tag(table, id)
-    first := -1
+    ^first: -1
     loop (index, member) in members {
         if type_id_union_member_tag(table, member) != own -> next
         if first < 0 -> first = index
-        if !type_id_identity_equal(table, members[first], member) -> return type_id_union_member_identity_tag(table, id)
+        if !type_id_identity_equal(table, members[first], member) {
+            return type_id_union_member_identity_tag(table, id)
+        }
     }
     own
 }
@@ -649,13 +673,15 @@ type_id_union_order_key: fn(table: Interner, id: TypeID) -> String Never! {
 }
 
 type_id_union_sort: fn(table: Interner, members: ^[TypeID]) Never! {
-    if members.len() < 2 -> return
-    keys := loop m in members -> type_id_union_order_key(table, m)
-    index := 1
+    if members.len() < 2 {
+        return
+    }
+    ^keys: loop m in members -> type_id_union_order_key(table, m)
+    ^index: 1
     loop index < members.len() {
         current: members[index]
         current_key: keys[index]
-        insertion := index - 1
+        ^insertion: index - 1
         loop insertion >= 0 && (keys[insertion] > current_key || (keys[insertion] == current_key && type_id_name(table, members[insertion]) > type_id_name(table, current))) {
             members[insertion + 1] = members[insertion]
             keys[insertion + 1] = keys[insertion]
@@ -688,9 +714,9 @@ type_id_nominals_unqualified: fn(table: ^Interner, id: TypeID, identities_only: 
         .Apply -> {
             old: type_id_named_text(table, id)
             next_name: type_unqualified_text(old, identities_only)
-            changed := next_name != old
+            ^changed: next_name != old
             count: type_child_count(table, id)
-            args := [TypeID]{}
+            ^args: [TypeID]{}
             loop i in 0..<count {
                 orig: type_child_type(table, id, i)
                 mapped: type_id_nominals_unqualified(table, orig, identities_only)
@@ -750,8 +776,8 @@ type_id_nominals_unqualified: fn(table: ^Interner, id: TypeID, identities_only: 
             type_intern_scalar(table, TypeKind.Tagged, mapped.id, U32{0}, side)
         }
         .Union -> {
-            changed := false
-            members := [TypeID]{}
+            ^changed: false
+            ^members: [TypeID]{}
             loop i in 0..<type_child_count(table, id) {
                 orig: type_child_type(table, id, i)
                 mapped: type_id_nominals_unqualified(table, orig, identities_only)
@@ -769,9 +795,9 @@ type_id_nominals_unqualified: fn(table: ^Interner, id: TypeID, identities_only: 
             type_intern_scalar(table, TypeKind.Case, name_word, mapped.id, U32{0})
         }
         .Tuple -> {
-            changed := false
+            ^changed: false
             count: type_child_count(table, id)
-            children := [U32]{}
+            ^children: [U32]{}
             loop i in 0..<count {
                 word: type_child(table, id, i)
                 if {
@@ -780,9 +806,7 @@ type_id_nominals_unqualified: fn(table: ^Interner, id: TypeID, identities_only: 
                         if mapped.id != word -> changed = true
                         children.push(mapped.id)
                     }
-                    else -> {
-                        children.push(word)
-                    }
+                    else -> { children.push(word) }
                 }
             }
             if !changed -> return TypeID{id: id.id}
@@ -803,7 +827,7 @@ type_id_effective_callable_return: fn(table: ^Interner, id: TypeID) -> TypeID Ne
 type_id_with_effective_parameter_fn_return: fn(table: ^Interner, id: TypeID) -> TypeID Never! {
     if type_kind(table, id) == {
         .Fn -> {
-            params := [TypeID]{}
+            ^params: [TypeID]{}
             loop i in 0..<type_child_count(table, id) {
                 child: type_child_type(table, id, i)
                 params.push(type_id_with_effective_parameter_fn_return(table, child))
@@ -813,11 +837,15 @@ type_id_with_effective_parameter_fn_return: fn(table: ^Interner, id: TypeID) -> 
             side: type_side(table, id)
             if side == 0 -> return type_id_fn_plain(table, params, norm_ret)
             row: table.functions.rows[Int{side} - 1]
-            if row == .Fn(_, _, eb, pc, cm, rvp) -> return type_id_fn_meta(table, params, norm_ret, eb, pc, cm, rvp)
+            if row == .Fn(_, _, eb, pc, cm, rvp) {
+                return type_id_fn_meta(table, params, norm_ret, eb, pc, cm, rvp)
+            }
             type_id_fn_plain(table, params, norm_ret)
         }
         .Tagged -> {
-            if type_id_tag(table, id) == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> return TypeID{id: id.id}
+            if type_id_tag(table, id) == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) {
+                return TypeID{id: id.id}
+            }
             inner: type_a_type(table, id)
             mapped: type_id_with_effective_parameter_fn_return(table, inner)
             if mapped.id == inner.id -> return TypeID{id: id.id}
@@ -866,13 +894,13 @@ type_id_with_effective_fn_returns: fn(table: ^Interner, id: TypeID) -> TypeID Ne
             type_id_result(table, mok, merr)
         }
         .Fn -> {
-            params := [TypeID]{}
+            ^params: [TypeID]{}
             loop i in 0..<type_child_count(table, id) {
                 child: type_child_type(table, id, i)
                 params.push(type_id_with_effective_fn_returns(table, child))
             }
             ret: type_a_type(table, id)
-            norm_ret := type_none()
+            ^norm_ret: type_none()
             if !type_is_none(ret) {
                 mapped_ret: type_id_with_effective_fn_returns(table, ret)
                 norm_ret = type_id_effective_callable_return(table, mapped_ret)
@@ -880,12 +908,14 @@ type_id_with_effective_fn_returns: fn(table: ^Interner, id: TypeID) -> TypeID Ne
             side: type_side(table, id)
             if side == 0 -> return type_id_fn_plain(table, params, norm_ret)
             row: table.functions.rows[Int{side} - 1]
-            if row == .Fn(_, _, eb, pc, cm, rvp) -> return type_id_fn_meta(table, params, norm_ret, eb, pc, cm, rvp)
+            if row == .Fn(_, _, eb, pc, cm, rvp) {
+                return type_id_fn_meta(table, params, norm_ret, eb, pc, cm, rvp)
+            }
             type_id_fn_plain(table, params, norm_ret)
         }
         .Apply -> {
-            changed := false
-            children := [U32]{}
+            ^changed: false
+            ^children: [U32]{}
             loop i in 0..<type_child_count(table, id) {
                 orig: type_child_type(table, id, i)
                 mapped: type_id_with_effective_fn_returns(table, orig)
@@ -897,8 +927,8 @@ type_id_with_effective_fn_returns: fn(table: ^Interner, id: TypeID) -> TypeID Ne
             type_intern(table, TypeKind.Apply, name_word, U32{0}, U32{0}, children)
         }
         .Tuple -> {
-            changed := false
-            children := [U32]{}
+            ^changed: false
+            ^children: [U32]{}
             loop i in 0..<type_child_count(table, id) {
                 word: type_child(table, id, i)
                 if {
@@ -907,9 +937,7 @@ type_id_with_effective_fn_returns: fn(table: ^Interner, id: TypeID) -> TypeID Ne
                         if mapped.id != word -> changed = true
                         children.push(mapped.id)
                     }
-                    else -> {
-                        children.push(word)
-                    }
+                    else -> { children.push(word) }
                 }
             }
             if !changed -> return TypeID{id: id.id}
@@ -924,7 +952,9 @@ type_id_with_effective_fn_returns: fn(table: ^Interner, id: TypeID) -> TypeID Ne
             type_intern_scalar(table, k, mapped.id, U32{0}, side)
         }
         .Tagged -> {
-            if type_id_tag(table, id) == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> return TypeID{id: id.id}
+            if type_id_tag(table, id) == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) {
+                return TypeID{id: id.id}
+            }
             orig: type_a_type(table, id)
             mapped: type_id_with_effective_fn_returns(table, orig)
             if mapped.id == orig.id -> return TypeID{id: id.id}
@@ -932,8 +962,8 @@ type_id_with_effective_fn_returns: fn(table: ^Interner, id: TypeID) -> TypeID Ne
             type_intern_scalar(table, TypeKind.Tagged, mapped.id, U32{0}, side)
         }
         .Union -> {
-            changed := false
-            children := [U32]{}
+            ^changed: false
+            ^children: [U32]{}
             loop i in 0..<type_child_count(table, id) {
                 orig: type_child_type(table, id, i)
                 mapped: type_id_with_effective_fn_returns(table, orig)
@@ -958,22 +988,26 @@ type_id_with_effective_fn_returns: fn(table: ^Interner, id: TypeID) -> TypeID Ne
 
 type_id_flatten_union: fn(table: Interner, id: TypeID, out: ^[TypeID]) Never! {
     if type_kind(table, id) == TypeKind.Union {
-        loop i in 0..<type_child_count(table, id) -> type_id_flatten_union(table, type_child_type(table, id, i), out)
+        loop i in 0..<type_child_count(table, id) {
+            type_id_flatten_union(table, type_child_type(table, id, i), out)
+        }
         return
     }
     loop existing in out {
-        if type_id_identity_equal(table, existing, id) -> return
+        if type_id_identity_equal(table, existing, id) {
+            return
+        }
     }
     out.push(TypeID{id: id.id})
 }
 
 type_id_failure_union_canonical: fn(table: ^Interner, members: [TypeID]) -> TypeID Never! {
-    flat := [TypeID]{}
+    ^flat: [TypeID]{}
     loop m in members -> type_id_flatten_union(table, m, flat)
-    idx := flat.len()
+    ^idx: flat.len()
     loop idx > 0 {
         idx -= 1
-        if flat[idx].id == TYPE_ID_NEVER.id -> _ := flat.remove(idx, .Slot)
+        if flat[idx].id == TYPE_ID_NEVER.id -> ^_: flat.remove(idx, .Slot)
     }
     if flat.len() == 0 -> return TYPE_ID_NEVER
     if flat.len() == 1 -> return flat[0]
@@ -1035,8 +1069,8 @@ type_id_substitute: fn(table: ^Interner, id: TypeID, names: [String], actuals: [
             type_intern_scalar(table, TypeKind.Case, name_word, mapped.id, U32{0})
         }
         .Apply -> {
-            changed := false
-            children := [U32]{}
+            ^changed: false
+            ^children: [U32]{}
             loop i in 0..<type_child_count(table, id) {
                 orig: type_child_type(table, id, i)
                 mapped: type_id_substitute(table, orig, names, actuals)
@@ -1048,8 +1082,8 @@ type_id_substitute: fn(table: ^Interner, id: TypeID, names: [String], actuals: [
             type_intern(table, TypeKind.Apply, name_word, U32{0}, U32{0}, children)
         }
         .Tuple -> {
-            changed := false
-            children := [U32]{}
+            ^changed: false
+            ^children: [U32]{}
             loop i in 0..<type_child_count(table, id) {
                 word: type_child(table, id, i)
                 if {
@@ -1058,9 +1092,7 @@ type_id_substitute: fn(table: ^Interner, id: TypeID, names: [String], actuals: [
                         if mapped.id != word -> changed = true
                         children.push(mapped.id)
                     }
-                    else -> {
-                        children.push(word)
-                    }
+                    else -> { children.push(word) }
                 }
             }
             if !changed -> return TypeID{id: id.id}
@@ -1070,7 +1102,7 @@ type_id_substitute: fn(table: ^Interner, id: TypeID, names: [String], actuals: [
             orig_elem: type_a_type(table, id)
             mapped_elem: type_id_substitute(table, orig_elem, names, actuals)
             orig_side: type_side(table, id)
-            new_side := orig_side
+            ^new_side: orig_side
             length: type_id_measure_value(table, id)
             if length == .Symbol(kind, sym_name) {
                 loop i in 0..<limit {
@@ -1099,9 +1131,9 @@ type_id_substitute: fn(table: ^Interner, id: TypeID, names: [String], actuals: [
             type_intern_scalar(table, k, mapped.id, U32{0}, side)
         }
         .Union -> {
-            changed := false
-            bound_param := false
-            mapped_members := [TypeID]{}
+            ^changed: false
+            ^bound_param: false
+            ^mapped_members: [TypeID]{}
             loop i in 0..<type_child_count(table, id) {
                 orig: type_child_type(table, id, i)
                 mapped: type_id_substitute(table, orig, names, actuals)
@@ -1118,8 +1150,8 @@ type_id_substitute: fn(table: ^Interner, id: TypeID, names: [String], actuals: [
             type_id_union(table, mapped_members)
         }
         .Fn -> {
-            changed := false
-            params := [TypeID]{}
+            ^changed: false
+            ^params: [TypeID]{}
             loop i in 0..<type_child_count(table, id) {
                 orig: type_child_type(table, id, i)
                 mapped: type_id_substitute(table, orig, names, actuals)
@@ -1133,7 +1165,9 @@ type_id_substitute: fn(table: ^Interner, id: TypeID, names: [String], actuals: [
             side: type_side(table, id)
             if side == 0 -> return type_id_fn_plain(table, params, mapped_ret)
             row: table.functions.rows[Int{side} - 1]
-            if row == .Fn(_, _, eb, pc, cm, rvp) -> return type_id_fn_meta(table, params, mapped_ret, eb, pc, cm, rvp)
+            if row == .Fn(_, _, eb, pc, cm, rvp) {
+                return type_id_fn_meta(table, params, mapped_ret, eb, pc, cm, rvp)
+            }
             type_id_fn_plain(table, params, mapped_ret)
         }
         .Int | .Float | .Bool | .String | .Char | .TraitObject | .IntN | .Float32 | .Measure -> TypeID{id: id.id}
@@ -1167,7 +1201,7 @@ delta_type_id_named_text: fn(shared: Interner, delta: InternerDelta, id: TypeID)
 }
 
 delta_type_id_unwrap_tagged: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> TypeID Never! {
-    cur := id
+    ^cur: id
     loop {
         code: Int{delta_type_kind_code(shared, delta, cur)}
         if code != 20 -> break
@@ -1179,9 +1213,7 @@ delta_type_id_unwrap_tagged: fn(shared: Interner, delta: InternerDelta, id: Type
 delta_type_id_base_name: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> String? Never! {
     plain: delta_type_id_unwrap_tagged(shared, delta, id)
     code: Int{delta_type_kind_code(shared, delta, plain)}
-    if code == 12 || code == 13 {
-        return Val(delta_type_id_named_text(shared, delta, plain))
-    }
+    if code == 12 || code == 13 -> return Val(delta_type_id_named_text(shared, delta, plain))
     None
 }
 
@@ -1214,13 +1246,13 @@ delta_type_id_named: fn(shared: Interner, delta: ^InternerDelta, name: String) -
 
 delta_type_id_apply: fn(shared: Interner, delta: ^InternerDelta, name: String, args: [TypeID]) -> TypeID Never! {
     name_id: delta_name_intern(shared, delta, name)
-    children := [U32]{}
+    ^children: [U32]{}
     loop arg in args -> children.push(arg.id)
     delta_type_intern(shared, delta, TypeKind.Apply, name_id.id, U32{0}, U32{0}, children)
 }
 
 delta_type_id_union: fn(shared: Interner, delta: ^InternerDelta, members: [TypeID]) -> TypeID Never! {
-    children := [U32]{}
+    ^children: [U32]{}
     loop member in members -> children.push(member.id)
     delta_type_intern(shared, delta, TypeKind.Union, U32{0}, U32{0}, U32{0}, children)
 }
@@ -1236,7 +1268,7 @@ delta_type_id_tagged: fn(shared: Interner, delta: ^InternerDelta, marker: TagMar
 }
 
 delta_type_id_fn_plain: fn(shared: Interner, delta: ^InternerDelta, params: [TypeID], ret: TypeID) -> TypeID Never! {
-    children := [U32]{}
+    ^children: [U32]{}
     loop param in params -> children.push(param.id)
     delta_type_intern(shared, delta, TypeKind.Fn, ret.id, U32{0}, U32{0}, children)
 }
@@ -1244,12 +1276,12 @@ delta_type_id_fn_plain: fn(shared: Interner, delta: ^InternerDelta, params: [Typ
 // Moves `from`'s own side rows into `into` (both forked from `shared`),
 // returning each own row's 1-based side index in `(shared, into)`.
 delta_sides_merge: fn<T: Equatable>(shared: TypeSides<T>, into: ^TypeSides<T>, from: ^TypeSides<T>, base_mark: Int) -> [U32] Never! {
-    own := [T]{}
+    ^own: [T]{}
     loop {
         value: from.rows.pop() ?? break
         own.push(value)
     }
-    rows := [U32]{}
+    ^rows: [U32]{}
     loop {
         value: own.pop() ?? break
         hash: from.hashes[rows.len()]
@@ -1272,7 +1304,7 @@ delta_sides_merge: fn<T: Equatable>(shared: TypeSides<T>, into: ^TypeSides<T>, f
 delta_merge_delta: fn(shared: Interner, into: ^InternerDelta, from: ^InternerDelta) -> InternerRemap Never! {
     marks: from.base
     remapped_names: loop idx in 1..<from.names.texts.len() -> delta_name_intern(shared, into, from.names.texts[idx])
-    remap := InternerRemap{marks: marks, names: remapped_names, types: [TypeID]{}}
+    ^remap: InternerRemap{marks: marks, names: remapped_names, types: [TypeID]{}}
     key_spans: delta_sides_merge(shared.key_spans, into.key_spans, from.key_spans, marks.key_spans)
     ranges: delta_sides_merge(shared.ranges, into.ranges, from.ranges, marks.ranges)
     measures: delta_sides_merge(shared.measures, into.measures, from.measures, marks.measures)
@@ -1300,7 +1332,7 @@ delta_merge_delta: fn(shared: Interner, into: ^InternerDelta, from: ^InternerDel
                 remap.types.push(delta_type_intern_scalar(shared, into, kind, a, b, merged_side))
             }
             else -> {
-                children := [U32]{}
+                ^children: [U32]{}
                 first: from.types.first[row]
                 loop index in 0..<count {
                     child: from.types.children[first + index]
@@ -1322,7 +1354,7 @@ type_id_remap: fn(id: TypeID, remap: InternerRemap) -> TypeID Never! {
 }
 
 #Test("type_id_name and type_id_carrier_identity match Type formatting across all variants") {
-    table := interner()
+    ^table: interner()
     shapes: [Type]{
         Type.Int,
         Type.Float,
@@ -1367,7 +1399,7 @@ type_id_remap: fn(id: TypeID, remap: InternerRemap) -> TypeID Never! {
 }
 
 #Test("type_id_substitute replaces type params, length measures, and canonicalizes failure unions") {
-    table := interner()
+    ^table: interner()
     t_param: type_id_named(table, "T")
     n_param: type_id_named(table, "N")
     e_param: type_id_named(table, "E")
@@ -1394,10 +1426,10 @@ type_id_remap: fn(id: TypeID, remap: InternerRemap) -> TypeID Never! {
 }
 
 #Test("hierarchical delta_merge_delta then interner_merge_delta matches serial interning") {
-    shared := interner()
+    ^shared: interner()
     base_pt: type_id_named(shared, "Point")
-    worker_a := interner_fork_delta(shared)
-    worker_b := interner_fork_delta(shared)
+    ^worker_a: interner_fork_delta(shared)
+    ^worker_b: interner_fork_delta(shared)
     a_list: delta_type_id_list(shared, worker_a, base_pt)
     a_alpha: delta_type_id_named(shared, worker_a, "Alpha")
     a_opt: delta_type_id_option(shared, worker_a, a_alpha)
@@ -1405,7 +1437,7 @@ type_id_remap: fn(id: TypeID, remap: InternerRemap) -> TypeID Never! {
     b_beta: delta_type_id_named(shared, worker_b, "Beta")
     b_opt: delta_type_id_option(shared, worker_b, b_beta)
     // Merge worker A then worker B into a module delta, then into shared.
-    module_delta := interner_fork_delta(shared)
+    ^module_delta: interner_fork_delta(shared)
     remap_a: delta_merge_delta(shared, module_delta, worker_a)
     remap_b: delta_merge_delta(shared, module_delta, worker_b)
     mid_a_list: interner_remap_type(remap_a, a_list)
@@ -1422,7 +1454,7 @@ type_id_remap: fn(id: TypeID, remap: InternerRemap) -> TypeID Never! {
     assert_eq(type_id_name(shared, fin_a_opt), "Alpha?")
     assert_eq(type_id_name(shared, fin_b_opt), "Beta?")
     // Exact equality with serial interning in the same order!
-    serial := interner()
+    ^serial: interner()
     s_pt: type_id_named(serial, "Point")
     s_list: type_id_list(serial, s_pt)
     s_alpha: type_id_named(serial, "Alpha")
@@ -1435,7 +1467,7 @@ type_id_remap: fn(id: TypeID, remap: InternerRemap) -> TypeID Never! {
 }
 
 #Test("a well-known TypeID reads its written type and kind without an interner, as interner() holds them") {
-    table := interner()
+    ^table: interner()
     loop row in type_row(TYPE_ID_INT)..<type_row(TYPE_ID_POINTER) + 1 {
         id: TypeID{id: U32{row}}
         written: type_id_well_known_syntax(id) ?? panic("no written type for {row}")

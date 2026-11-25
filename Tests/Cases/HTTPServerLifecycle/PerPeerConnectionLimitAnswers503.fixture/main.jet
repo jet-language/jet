@@ -17,7 +17,7 @@ use {
 crlf: fn() -> String { "\r\n" }
 
 read_all: fn(stream: TCPStream) -> String {
-    parts := [String]{}
+    ^parts: [String]{}
     loop {
         part: stream.read(8192) ?? panic("response read")
         if part == "" -> break
@@ -38,7 +38,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     serving: task {
         listening.serve() ?? panic("serve")
     }
-    held := [TCPStream]{}
+    ^held: [TCPStream]{}
     loop _ in 0..<256 {
         stream: net.tcp_connect(addr)
         stream.write_bytes("GET /hi HTTP/1.1{crlf()}".bytes())

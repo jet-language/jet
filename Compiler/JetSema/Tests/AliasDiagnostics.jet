@@ -43,14 +43,14 @@ FILE_MODULE_PACKAGE: "source-root:user"
 // file module `geo_source` beside it. Both sit in a source root, whose
 // modules keep their `priv` declarations to themselves.
 file_module_diagnostics: fn(main_source: ^^String, geo_source: ^^String) -> [Diagnostic] {
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, "user/main")
     geo_id: module_intern(table, "user/geo")
-    main_parsed := parse_generated_source(main_source.bytes())
-    geo_parsed := parse_generated_source(geo_source.bytes())
+    ^main_parsed: parse_generated_source(main_source.bytes())
+    ^geo_parsed: parse_generated_source(geo_source.bytes())
     // Each import edge owns its declaration, as the loader's do; a second
     // parse of `main_source` gives them.
-    imports_parsed := parse_generated_source(main_source.bytes())
+    ^imports_parsed: parse_generated_source(main_source.bytes())
     if main_parsed.diagnostics.len() != 0 || geo_parsed.diagnostics.len() != 0 {
         panic("fixture did not parse")
     }
@@ -62,13 +62,13 @@ file_module_diagnostics: fn(main_source: ^^String, geo_source: ^^String) -> [Dia
     effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
     effects_id: effects.module_identity
     facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main_input, geo_input, effects}, edges, FILE_MODULE_PACKAGE, main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}")
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{main_input, geo_input, effects}, edges, FILE_MODULE_PACKAGE, main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}")
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed {err}")
-    declared := stage.graph.move()
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed {err}")
+    ^declared: stage.graph.move()
     stage.graph = None
-    registration := declared.move() ?? panic("the declaration pass lost its registration graph")
-    checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("finalization failed {err}")
+    ^registration: declared.move() ?? panic("the declaration pass lost its registration graph")
+    ^checked: sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("finalization failed {err}")
     checked.diagnostics.move()
 }
 
@@ -76,7 +76,7 @@ file_module_diagnostics: fn(main_source: ^^String, geo_source: ^^String) -> [Dia
 // declaration pass's reports beside its own (`jet check` shows each once), so
 // a row repeated is listed once.
 file_module_reports: fn(main_source: ^^String, geo_source: ^^String) -> String {
-    rows := [String]{}
+    ^rows: [String]{}
     loop diagnostic in file_module_diagnostics(main_source.move(), geo_source.move()) {
         row: "{diagnostic.code}: {diagnostic.what}"
         if diagnostic.code.starts_with("E") && !rows.contains(row) -> rows.push(row)
@@ -86,7 +86,7 @@ file_module_reports: fn(main_source: ^^String, geo_source: ^^String) -> String {
 
 // Where each E0605 of file_module_diagnostics points, as `start..end`.
 file_module_private_spans: fn(main_source: ^^String) -> String {
-    rows := [String]{}
+    ^rows: [String]{}
     loop diagnostic in file_module_diagnostics(main_source.move(), secret_geo_source()) {
         if diagnostic.code != "E0605" -> next
         span: diagnostic.span ?? panic("E0605 without a span")

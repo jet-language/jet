@@ -32,8 +32,8 @@ use s6_output_files: core.files
 // body (a method, a nested binding) and text in strings or comments are not
 // declarations.
 package_outputs_top_level_callables: fn(source: String) -> [String] {
-    names := [String]{}
-    depth := 0
+    ^names: [String]{}
+    ^depth: 0
     loop line in source.lines() {
         if depth == 0 && package_outputs_declared_callable(line) == .Val(name) -> names.push(name)
         depth += package_outputs_brace_delta(line)
@@ -50,11 +50,11 @@ package_outputs_names: fn(names: [String], wanted: String) -> Bool {
 
 // The callable `line` declares at its start, if it declares one.
 package_outputs_declared_callable: fn(line: String) -> String? {
-    head := line.trim_start().copy()
+    ^head: line.trim_start().copy()
     loop head.starts_with("#") {
         marker: head.bytes()
-        end := 1
-        nesting := 0
+        ^end: 1
+        ^nesting: 0
         loop end < marker.len() && (nesting > 0 || marker[end] != (U8{32})) {
             if marker[end] == (U8{40}) || marker[end] == (U8{91}) -> nesting += 1
             if marker[end] == (U8{41}) || marker[end] == (U8{93}) -> nesting -= 1
@@ -66,7 +66,7 @@ package_outputs_declared_callable: fn(line: String) -> String? {
         head = policy_slice_bytes(head, 4, head.bytes().len()).trim_start().copy()
     }
     bytes: head.bytes()
-    end := 0
+    ^end: 0
     loop end < bytes.len() && s3_truth_ascii_word_byte(bytes[end]) -> end += 1
     if end == 0 -> return None
     rest: policy_slice_bytes(head, end, bytes.len()).trim_start().copy()
@@ -80,9 +80,9 @@ package_outputs_declared_callable: fn(line: String) -> String? {
 // `//` comment do not count.
 package_outputs_brace_delta: fn(line: String) -> Int {
     bytes: line.bytes()
-    delta := 0
-    quoted := false
-    at := 0
+    ^delta: 0
+    ^quoted: false
+    ^at: 0
     loop at < bytes.len() {
         b: bytes[at]
         if {

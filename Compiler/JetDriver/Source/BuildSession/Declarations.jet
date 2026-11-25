@@ -20,8 +20,8 @@ build_session_add_run: fn(state: ^BuildSessionState, args: [BuildSessionValue], 
     if file.kind == "folder" {
         return build_session_fail(state, "folder `{file.path}` is not a tool; run a file in it, and pass the folder with `.file(dir)`")
     }
-    probes := [Int]{}
-    inputs := [String]{}
+    ^probes: [Int]{}
+    ^inputs: [String]{}
     if file.probe == .Val(probe) -> probes.push(probe)
     if file.kind == "output" || file.kind == "host" || file.kind == "image" || file.kind == "dependency" {
         inputs.push(file.path.copy())
@@ -131,7 +131,9 @@ build_session_target_built: fn(state: ^BuildSessionState, value: BuildSessionVal
     call: if image -> "b.image" else -> "b.host"
     target: build_session_handle(state, value, "BuildTarget") ?? return build_session_fail(state, "the target does not belong to this build")
     row: state.targets[target]
-    if build_session_executable_refusal(row, call) == .Val(refusal) -> return build_session_fail(state, refusal)
+    if build_session_executable_refusal(row, call) == .Val(refusal) {
+        return build_session_fail(state, refusal)
+    }
     kind: if image -> "image" else -> "host"
     folder: if image -> BUILD_SESSION_IMAGE_DIR else -> BUILD_SESSION_HOST_DIR
     build_session_new_file(state, BuildSessionFile{kind: kind, path: "{folder}/{row.name}", probe: None, action: None, target: Val(target)})
@@ -161,8 +163,12 @@ build_session_jet_built_from: fn(state: ^BuildSessionState, call: BuildSessionCa
     if args.len() != 2 -> return build_session_fail(state, "`b.jet_built_from` takes one target")
     tree: build_session_text(args, 1) ?? return build_session_fail(state, "`b.jet_built_from` lost the source key of its toolchain tree")
     target: build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "the target does not belong to this build")
-    if build_session_executable_refusal(state.targets[target], "b.jet_built_from") == .Val(refusal) -> return build_session_fail(state, refusal)
-    if state.jet_source == "" || state.jet_source != tree -> return build_session_target_built(state, args[0])
+    if build_session_executable_refusal(state.targets[target], "b.jet_built_from") == .Val(refusal) {
+        return build_session_fail(state, refusal)
+    }
+    if state.jet_source == "" || state.jet_source != tree {
+        return build_session_target_built(state, args[0])
+    }
     build_session_new_file(state, BuildSessionFile{kind: "jet", path: "jet", probe: None, action: None})
 }
 
@@ -189,7 +195,7 @@ build_session_dependency: fn(state: ^BuildSessionState, call: BuildSessionCall) 
     if args.len() != 1 -> return build_session_fail(state, "`b.dependency` takes one package name")
     name: build_session_text(args, 0) ?? return build_session_fail(state, "a package name must be a string")
     if !state.dependencies.has_key(name) {
-        names := state.dependencies.keys().to_list()
+        ^names: state.dependencies.keys().to_list()
         names.sort()
         listed: if names.len() == 0 -> "package.jet lists none" else -> "package.jet lists {names.join(", ")}"
         return build_session_fail(state, "`b.dependency(\"{name}\")` names no package of this build's package.jet; {listed}")
@@ -322,7 +328,7 @@ build_session_step_reads: fn(state: ^BuildSessionState, call: BuildSessionCall) 
 // A file the step reads (`.{written}`), and its argument when `passed`.
 build_session_step_read: fn(state: ^BuildSessionState, args: [BuildSessionValue], written: String, passed: Bool{false}) -> BuildSessionReply {
     id: build_session_step_id(state, args) ?? return build_session_step_refused(state, args)
-    step := state.actions[id]
+    ^step: state.actions[id]
     path: build_session_text(args, 1) ?? return build_session_fail(state, "`.{written}` takes a path")
     if build_session_path_error(path) == .Val(error) {
         return build_session_error_fail(state, error)
@@ -348,7 +354,7 @@ build_session_step_writes: fn(state: ^BuildSessionState, call: BuildSessionCall)
 // `passed`.
 build_session_step_write: fn(state: ^BuildSessionState, args: [BuildSessionValue], written: String, passed: Bool{false}) -> BuildSessionReply {
     id: build_session_step_id(state, args) ?? return build_session_step_refused(state, args)
-    step := state.actions[id]
+    ^step: state.actions[id]
     path: build_session_text(args, 1) ?? return build_session_fail(state, "`.{written}` takes a path")
     if build_session_path_error(path) == .Val(error) {
         return build_session_error_fail(state, error)
@@ -380,7 +386,7 @@ build_session_step_write: fn(state: ^BuildSessionState, args: [BuildSessionValue
 build_session_step_file: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     args: call.args
     id: build_session_step_id(state, args) ?? return build_session_step_refused(state, args)
-    step := state.actions[id]
+    ^step: state.actions[id]
     flag: build_session_text(args, 2) ?? ""
     unit: BuildSessionReply.Value{value: BuildSessionValue.Unit}
     file_id: build_session_handle(state, args[1], "BuildFile") ?? return build_session_fail(state, "the file does not belong to this build")
@@ -409,7 +415,7 @@ build_session_step_file: fn(state: ^BuildSessionState, call: BuildSessionCall) -
         return build_session_fail(state, "step `{step.name}` makes `{file.path}`, so it can't also read it")
     }
     if file.kind == "package" || file.kind == "folder" {
-        folder_id := file_id
+        ^folder_id: file_id
         if file.kind == "package" {
             root: state.dependencies.get(file.path) ?? return build_session_fail(state, "package `{file.path}` lost its folder")
             folder_id = state.files.len()
@@ -439,7 +445,7 @@ build_session_step_file: fn(state: ^BuildSessionState, call: BuildSessionCall) -
 // `.arg(text)`: one argument of the tool.
 build_session_step_arg: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     id: build_session_step_id(state, call.args) ?? return build_session_step_refused(state, call.args)
-    step := state.actions[id]
+    ^step: state.actions[id]
     text: build_session_text(call.args, 1) ?? return build_session_fail(state, "`.arg` takes text")
     if text.trim() == "" {
         return build_session_error_fail(state, BuildSessionError.EmptyActionArgv{value: step.name})
@@ -453,8 +459,10 @@ build_session_step_arg: fn(state: ^BuildSessionState, call: BuildSessionCall) ->
 build_session_step_timeout: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     args: call.args
     id: build_session_step_id(state, args) ?? return build_session_step_refused(state, args)
-    step := state.actions[id]
-    ns: if args.len() > 1 && args[1] == .Int(value) -> value else -> return build_session_fail(state, "`.timeout` takes a Duration")
+    ^step: state.actions[id]
+    ns: if args.len() > 1 && args[1] == .Int(value) -> value else -> {
+        return build_session_fail(state, "`.timeout` takes a Duration")
+    }
     if ns < 1_000_000 || ns % 1_000_000 != 0 {
         return build_session_fail(state, "step `{step.name}`'s time limit must be a positive Duration of whole milliseconds, 1ms or more")
     }
@@ -466,7 +474,7 @@ build_session_step_timeout: fn(state: ^BuildSessionState, call: BuildSessionCall
 // `.toolchain(t)`: the toolchain the step runs on.
 build_session_step_toolchain: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     id: build_session_step_id(state, call.args) ?? return build_session_step_refused(state, call.args)
-    step := state.actions[id]
+    ^step: state.actions[id]
     if state.files[step.tool].kind == "jet" || step.jets.len() > 0 {
         return build_session_fail(state, "step `{step.name}` runs or is passed `b.jet()`, which runs on the toolchain it was built with")
     }
@@ -478,7 +486,7 @@ build_session_step_toolchain: fn(state: ^BuildSessionState, call: BuildSessionCa
 // `.sign(identity)`: the identity that signs what the step makes.
 build_session_step_sign: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     id: build_session_step_id(state, call.args) ?? return build_session_step_refused(state, call.args)
-    step := state.actions[id]
+    ^step: state.actions[id]
     step.signing = Val(build_session_handle(state, call.args[1], "BuildSigningIdentity") ?? return build_session_fail(state, "the step's signing identity does not belong to this build"))
     state.actions[id] = step
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
@@ -505,9 +513,9 @@ build_session_add_target: fn(state: ^BuildSessionState, method: String, kind: St
     name: build_session_text(args, 0) ?? return build_session_fail(state, "target name must be a string")
     sources: build_session_strings(args, 1) ?? return build_session_fail(state, "target sources must be strings")
     actions: build_session_handles(state, args, 2, "BuildStepHandle") ?? return build_session_fail(state, "target actions do not belong to this build")
-    deps := [Int]{}
-    probes := [Int]{}
-    toolchain := 0
+    ^deps: [Int]{}
+    ^probes: [Int]{}
+    ^toolchain: 0
     signing: if args.len() >= 7 && args[6] != .Unit -> Val(build_session_handle(state, args[6], "BuildSigningIdentity") ?? return build_session_fail(state, "target signing identity does not belong to this build")) else -> None
     if args.len() >= 4 {
         deps = build_session_handles(state, args, 3, "BuildTarget") ?? return build_session_fail(state, "target dependencies do not belong to this build")
@@ -518,7 +526,7 @@ build_session_add_target: fn(state: ^BuildSessionState, method: String, kind: St
     if args.len() >= 6 && args[5] != .Unit {
         toolchain = build_session_handle(state, args[5], "BuildToolchain") ?? return build_session_fail(state, "target toolchain does not belong to this build")
     }
-    settings := [BuildSettingOverride]{}
+    ^settings: [BuildSettingOverride]{}
     loop at in 7..<args.len() {
         if (at - 7) % 2 == 1 -> next
         key: build_session_text(args, at) ?? return build_session_fail(state, "a setting of `b.{method}` must be named by text")

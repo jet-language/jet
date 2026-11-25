@@ -87,7 +87,7 @@ run: fn() {
 
     // ORDER BY on the TEXT column sorts by name, not declaration order.
     ordered: scope.query(SQL{"SELECT status FROM task WHERE status != {unknown} ORDER BY status"}) ?? panic("order")
-    names := ""
+    ^names: ""
     loop row in ordered -> names = "{names} {db.row_text(row, "status") ?? "?"}"
     print("ORDER BY status:{names}")
 

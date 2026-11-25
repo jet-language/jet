@@ -4,14 +4,14 @@
 // outer loop's test, and a loop exit followed by more work. Every loop must
 // run the same passes on every tier.
 count_below: fn(n: Int) -> Int {
-    i := 0
+    ^i: 0
     loop i < n -> i += 1
     i
 }
 
 both_tests: fn(n: Int, limit: Int) -> Int {
-    i := 0
-    sum := 0
+    ^i: 0
+    ^sum: 0
     loop i < n && i * i < limit {
         sum += i
         i += 1
@@ -20,8 +20,8 @@ both_tests: fn(n: Int, limit: Int) -> Int {
 }
 
 either_test: fn(n: Int) -> Int {
-    i := 0
-    passes := 0
+    ^i: 0
+    ^passes: 0
     loop i % 7 != 6 || passes < n {
         passes += 1
         i += 1
@@ -30,8 +30,8 @@ either_test: fn(n: Int) -> Int {
 }
 
 steps: fn(start: Int) -> Int {
-    x := start
-    taken := 0
+    ^x: start
+    ^taken: 0
     loop x != 1 {
         x = if x % 2 == 0 -> x /% 2 else -> 3 * x + 1
         taken += 1
@@ -40,10 +40,10 @@ steps: fn(start: Int) -> Int {
 }
 
 grid: fn(rows: Int, cols: Int) -> Int {
-    total := 0
-    r := 0
+    ^total: 0
+    ^r: 0
     loop r < rows {
-        c := 0
+        ^c: 0
         loop c < cols {
             total += r * cols + c
             c += 1
@@ -54,9 +54,9 @@ grid: fn(rows: Int, cols: Int) -> Int {
 }
 
 first_square_over: fn(limit: Int) -> Int {
-    found := -1
+    ^found: -1
     outer: loop a in 1..<100 {
-        b := a
+        ^b: a
         loop b * b <= limit {
             if b * a * a > limit {
                 found = b

@@ -115,7 +115,7 @@ reg_set: fn(v: ^conn.Vdbe, i: Int, m: base.Mem) Never! {
 // value only (an aggregate context or RowSet stays with `from`).
 reg_copy: fn(v: ^conn.Vdbe, to: Int, from: Int) Never! {
     release_dyn(v, to)
-    m := v.mem[from].copy()
+    ^m: v.mem[from].copy()
     if m.flags & (base.MEM_AGG | conn.MEM_DYN) != 0 -> m.flags = base.MEM_NULL
     v.mem[to] = m
 }
@@ -126,7 +126,7 @@ reg_copy: fn(v: ^conn.Vdbe, to: Int, from: Int) Never! {
 alloc_cursor: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, p: Int, n_field: Int, cur_type: Int) -[DB]> Int Never! {
     ci: v.csr_base + p
     if v.csr[ci].live -> aux.free_cursor<H>(h, db, v, ci)
-    c := conn.vdbe_cursor_closed()
+    ^c: conn.vdbe_cursor_closed()
     c.live = true
     c.cur_type = cur_type
     c.n_field = n_field
@@ -173,7 +173,7 @@ set_p4: fn(v: ^conn.Vdbe, pc: Int, p4: conn.P4) Never! { v.ops[pc].p4 = p4 }
 // OP_Filter, as an unsigned 64-bit value. Every text hashes alike and so
 // does every blob.
 filter_hash: fn(v: conn.Vdbe, p3: Int, n: Int) -> Int Never! {
-    h := 0
+    ^h: 0
     loop i in p3..<p3 + n {
         f: v.mem[i].flags
         if f & (base.MEM_INT | base.MEM_INT_REAL) != 0 -> h = util.wrap_i64(h + v.mem[i].i) else if f & base.MEM_REAL != 0 {
@@ -193,7 +193,7 @@ mem_type_name: fn(m: base.Mem) -> [U8] Never! {
 
 // A test's Run on op pc of v with operands p1, p2, p3.
 test_run: fn(v: conn.Vdbe, pc: Int, p1: Int, p2: Int, p3: Int) -> Run Never! {
-    r := run_new(base.UTF8)
+    ^r: run_new(base.UTF8)
     r.pc = pc
     r.op = v.ops[pc].opcode
     r.p1 = p1
@@ -314,7 +314,7 @@ TestHost: struct {
 }
 
 #Test("filterHash sums integers and buckets text and blobs") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_int(5))
     v.mem.push(base.mem_text("a".bytes(), base.UTF8))
     v.mem.push(base.mem_real(2.5))
@@ -324,7 +324,7 @@ TestHost: struct {
 }
 
 #Test("out2 makes the register an integer and frees a RowSet") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_text("x".bytes(), base.UTF8))
     out2(v, 0)
     assert_eq(v.mem[0].flags, base.MEM_INT)

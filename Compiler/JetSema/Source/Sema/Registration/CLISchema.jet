@@ -33,7 +33,7 @@ sema_cli_command_record: fn(graph: SemaRegistrationGraph) -> [U8] {
 }
 
 sema_cli_command_schema: fn(graph: SemaRegistrationGraph) -> CLICommandSchema {
-    schema := CLICommandSchema{entry_type: "", description: None, inputs: [CLIInputSchema]{}, commands: [CLISubcommandSchema]{}, jobs: [JobFact]{}, standard: false, version: None}
+    ^schema: CLICommandSchema{entry_type: "", description: None, inputs: [CLIInputSchema]{}, commands: [CLISubcommandSchema]{}, jobs: [JobFact]{}, standard: false, version: None}
     loop module_row in graph.modules {
         if module_row.module_identity != graph.entry_module_identity -> next
         items: module_row.declarations
@@ -70,14 +70,14 @@ sema_cli_schema_struct: fn(graph: SemaRegistrationGraph, entry_items: [Item], ty
 // sema_cli_entry_spec): a required value fills the next position unless
 // `#Arg(flag_only: true)` keeps it a flag.
 sema_cli_schema_fields: fn(definition: StructDef) -> [CLIInputSchema] {
-    inputs := [CLIInputSchema]{}
-    positional := 0
+    ^inputs: [CLIInputSchema]{}
+    ^positional: 0
     loop field in definition.fields {
         if field.computed != None -> next
         kind: sema_registration_cli_field_kind(field) ?? next
         flag: sema_checked_field_shape_names(definition, field).args
         flag_only: sema_registration_cli_arg_flag_only(field.serde_markers)
-        at := U16?{None}
+        ^at: U16?{None}
         shape: if kind == {
             .Flag -> CLIInputShape.Flag
             .OptionalOption -> CLIInputShape.Value{kind: sema_cli_schema_kind(if field.ty == .Option(inner) -> inner else -> field.ty), optional: true, default: None}
@@ -119,7 +119,7 @@ sema_cli_schema_field_default: fn(field: Field) -> CLIDefault {
 // `items` (CliEntry.jet sema_cli_entry_spec). None when one has no
 // command shape, as the generated parser has none.
 sema_cli_schema_commands: fn(definition: StructDef, items: [Item]) -> [CLISubcommandSchema]? {
-    commands := [CLISubcommandSchema]{}
+    ^commands: [CLISubcommandSchema]{}
     loop function in definition.methods {
         if sema_computed_field_getter_function(function) -> next
         inputs: sema_cli_schema_params(function.params, "") ?? return None
@@ -137,21 +137,21 @@ sema_cli_schema_commands: fn(definition: StructDef, items: [Item]) -> [CLISubcom
 // sema_cli_entry_command): a bound function's first parameter of the program
 // type `shared_type` takes the shared program value, not an input.
 sema_cli_schema_params: fn(params: [Param], shared_type: String) -> [CLIInputSchema]? {
-    inputs := [CLIInputSchema]{}
-    positional := 0
+    ^inputs: [CLIInputSchema]{}
+    ^positional: 0
     loop (index, param) in params {
         if param.name == "self" -> next
         leaf: sema_registration_cli_named_leaf(param.ty) ?? ""
         if shared_type.bytes().len() > 0 && index == 0 && leaf == shared_type -> next
-        label := param.name
+        ^label: param.name
         if param.public_label == .Val(public) && public.name != "_" -> label = public.name
         flag: label.replace("_", "-")
-        at := U16?{None}
-        shape := CLIInputShape.Flag
+        ^at: U16?{None}
+        ^shape: CLIInputShape.Flag
         if param.ty == .Option(inner) {
             shape = CLIInputShape.Value{kind: sema_cli_schema_kind(inner), optional: true, default: None}
         } else if param.ty != .Bool {
-            default := CLIDefault?{None}
+            ^default: CLIDefault?{None}
             if param.default == .Val(expr) {
                 text: sema_cli_entry_default(expr) ?? return None
                 default = Val(CLIDefault.Recorded{value: text})

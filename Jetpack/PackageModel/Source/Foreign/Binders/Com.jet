@@ -141,7 +141,7 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     cc: files.canonicalize(cc_found) ?? return Err(ForeignBindError.ToolMissing("cc"))
     ar_found: pkg_bridge_tool_path("ar") ?? return Err(ForeignBindError.ToolMissing("ar"))
     ar: files.canonicalize(ar_found) ?? return Err(ForeignBindError.ToolMissing("ar"))
-    file_input := String?{None}
+    ^file_input: String?{None}
     if input == {
         .File(path) -> {
             file_input = Val(pkg_binder_canonicalize(path, "could not resolve the COM type library"))
@@ -151,13 +151,13 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     pkg_binder_create_dir_all(cache, "could not create COM binding cache")
     build: files.join(cache, ".com-build-{lib}-{sys.pid()}-{pkg_com_unique_suffix()}")
     pkg_binder_create_dir_all(build, "could not create COM build directory")
-    scratch := ComBuildDirectory{path: build}
+    ^scratch: ComBuildDirectory{path: build}
     defer close(scratch)
     inspect_c: files.join(build, "inspect.c")
     inspect_exe: files.join(build, "inspect.exe")
     pkg_binder_write(inspect_c, COM_DISCOVERY_C, "could not write COM type-library inspector")
     pkg_com_run([String]{cc, "-std=c11", "-municode", inspect_c, "-loleaut32", "-lole32", "-o", inspect_exe}, "cc")
-    command := [String]{inspect_exe}
+    ^command: [String]{inspect_exe}
     if input == {
         .File(_) -> {
             command.push("file")
@@ -191,7 +191,7 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     ar_identity: pkg_bridge_tool_identity("ar")
     record: pkg_com_input_record(input, file_input)
     identity: pkg_com_identity(lib, descriptor.stamp(), metadata_digest, generated_digest, record, cc_identity, ar_identity)
-    fields := [{name: String, value: String}]{
+    ^fields: [{name: String, value: String}]{
         {name: "language", value: "com"},
         {name: "abi", value: "jet_com_{lib}"},
         {name: "transport", value: COM_TRANSPORT},
@@ -223,7 +223,7 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     }
     artifacts: [{name: String, digest: String}]{{name: files.basename(archive), digest: archive_digest}}
     provenance: pkg_bridge_render_provenance(identity, fields, artifacts)
-    methods := [String]{}
+    ^methods: [String]{}
     loop method in schema.methods -> methods.push(method.name())
     Ok(ComBindResult{source: source, archive: archive, provenance: provenance, methods: methods})
 }
@@ -407,7 +407,7 @@ pkg_com_input_record: fn(input: ComTypeLibraryInput, file: String?) -[FS]> Strin
 }
 
 pkg_com_identity: fn(lib: String, descriptor: String, metadata_digest: String, generated_digest: String, input_record: String, cc: String, ar: String) -> String Never! {
-    identity := ForeignIdentityBuilder.new(COM_BINDER_SCHEMA)
+    ^identity: ForeignIdentityBuilder.new(COM_BINDER_SCHEMA)
     identity.field("language", "com".bytes())
     identity.field("library", lib.bytes())
     identity.field("abi", "jet_com_{lib}".bytes())
@@ -452,11 +452,11 @@ pkg_com_rename_quiet: fn(from: String, to: String) -[FS]> { files.rename(from, t
 // Parse the inspector's tab-separated LIB/CLASS/METHOD/SKIP records.
 pkg_com_parse_schema: fn(bytes: [U8]) -> ComSchema ForeignBindError! {
     text: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("the COM inspector returned non-UTF-8 metadata"))
-    name := String?{None}
-    guid := String?{None}
-    class := String?{None}
-    root := String?{None}
-    methods := [ComMethod]{}
+    ^name: String?{None}
+    ^guid: String?{None}
+    ^class: String?{None}
+    ^root: String?{None}
+    ^methods: [ComMethod]{}
     loop line in pkg_binder_lines(text) {
         fields: line.split("\t").to_list()
         record_tag: fields[0]
@@ -509,7 +509,7 @@ pkg_com_parse_method: fn(fields: [String], methods: [ComMethod]) -> ComMethod Fo
     if flags != 1 && flags != 2 && flags != 4 && flags != 8 {
         return Err(ForeignBindError.Source("COM member `{raw}` has unsupported invocation flags `{flags}`"))
     }
-    jet := pkg_com_project(raw)
+    ^jet: pkg_com_project(raw)
     if pkg_com_member_taken(methods, interface, jet) {
         suffix: if {
             flags == 2 -> "_get"
@@ -522,8 +522,8 @@ pkg_com_parse_method: fn(fields: [String], methods: [ComMethod]) -> ComMethod Fo
         return Err(ForeignBindError.Source("COM member `{raw}` collides with generated Jet member `{interface}.{jet}`"))
     }
     result: ComKind.parse(fields[5]) ?? return Err(ForeignBindError.Source("COM member `{raw}` has unsupported result type `{fields[5]}`"))
-    params := [ComParam]{}
-    names := [String]{}
+    ^params: [ComParam]{}
+    ^names: [String]{}
     loop index in 6..<fields.len() {
         value: fields[index]
         pair: value.split_once(":") ?? return Err(ForeignBindError.Source("COM member `{raw}` has malformed parameter metadata"))
@@ -552,10 +552,10 @@ pkg_com_member_taken: fn(methods: [ComMethod], interface: String, jet: String) -
 // The root interface, every method's interface, and every object type in
 // results and parameters, first-seen order.
 pkg_com_interfaces: fn(schema: ComSchema) -> [String] Never! {
-    out := [String]{schema.root_interface}
+    ^out: [String]{schema.root_interface}
     loop method in schema.methods {
         if !out.contains(method.interface) -> out.push(method.interface)
-        kinds := [ComKind]{method.result}
+        ^kinds: [ComKind]{method.result}
         loop param in method.params -> kinds.push(param.kind)
         loop kind in kinds {
             if kind == {
@@ -573,9 +573,9 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
     abi: "jet_com_{lib}"
     descriptor: pkg_com_descriptor_stamp()
     root: schema.root_interface
-    out := "// jet-ffi-descriptor={descriptor}\n#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    close: fn(handle: Int) = \"{abi}_close\"\n    dynamic: fn(handle: Int, name: String, args: String, flags: Int) -> String = \"{abi}_dynamic\"\n"
+    ^out: "// jet-ffi-descriptor={descriptor}\n#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    close: fn(handle: Int) = \"{abi}_close\"\n    dynamic: fn(handle: Int, name: String, args: String, flags: Int) -> String = \"{abi}_dynamic\"\n"
     loop method in schema.methods {
-        params := ""
+        ^params: ""
         loop param in method.params -> params = "{params}, {param.name}: {param.kind.abi_jet()}"
         result: if method.result == ComKind.Unit -> "" else -> " -> {method.result.abi_jet()}"
         out = "{out}    {method.name()}: fn(handle: Int{params}){result} = \"{abi}_{method.name()}\"\n"
@@ -593,8 +593,8 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
     out = "{out}error: fn(code: Int) -[]> ComError Never! {{\n    if code == 1 {{ return ComError.WrongApartment }}\n    if code == 2 {{ return ComError.InvalidHandle }}\n    if code == 3 {{ return ComError.InvalidArgument }}\n    if code == 5 {{ return ComError.TypeMismatch }}\n    if code == 6 {{ return ComError.Limit }}\n    return ComError.MemberFailed\n}}\n\n"
     loop method in schema.methods {
         name: method.name()
-        params := ""
-        args := ""
+        ^params: ""
+        ^args: ""
         loop param in method.params {
             params = "{params}, {param.name}: {param.kind.jet()}"
             args = "{args}, {pkg_com_abi_call_arg(param)}"
@@ -625,12 +625,12 @@ pkg_com_abi_call_arg: fn(param: ComParam) -> String Never! {
 pkg_com_render_c: fn(lib: String, schema: ComSchema) -> String Never! {
     abi: "jet_com_{lib}"
     clear: "clear_args(args,sizeof(args)/sizeof(args[0]));"
-    wrappers := ""
+    ^wrappers: ""
     loop method in schema.methods {
         name: method.name()
         count: method.params.len()
         slots: if count > 1 -> count else -> 1
-        params := ""
+        ^params: ""
         loop param in method.params -> params = "{params},{param.kind.c()} {param.name}"
         wrappers = "{wrappers}{method.result.c()} {abi}_{name}(int64_t handle{params}){{failed=0;VARIANT args[{slots}];for(size_t i=0;i<sizeof(args)/sizeof(args[0]);i++)VariantInit(&args[i]);VARIANT result;VariantInit(&result);"
         loop index in 0..<count {

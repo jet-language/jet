@@ -146,13 +146,13 @@ rt_sha512_parts3_byte: fn(left: I64, left_len: I64, right: I64, right_len: I64, 
     }
     end: ((length + I64{16}) / I64{128} + I64{1}) * I64{128}
     schedule: scratch + I64{64}
-    off := I64{0}
+    ^off: I64{0}
     loop off < end {
-        t := I64{0}
+        ^t: I64{0}
         loop {
             if (t >= I64{16}) { break }
-            word := I64{0}
-            j := I64{0}
+            ^word: I64{0}
+            ^j: I64{0}
             loop {
                 if (j >= I64{8}) { break }
                 word = (word << I64{8}) | rt_sha512_parts3_byte(input, left_len, right, right_len, third, length, off + t * I64{8} + j, end)
@@ -170,14 +170,14 @@ rt_sha512_parts3_byte: fn(left: I64, left_len: I64, right: I64, right_len: I64, 
             rt_text_store(schedule + t * I64{8}, rt_text_word(schedule + (t - I64{16}) * I64{8}) + s0 + rt_text_word(schedule + (t - I64{7}) * I64{8}) + s1)
             t += I64{1}
         }
-        a := rt_text_word(scratch)
-        b := rt_text_word(scratch + I64{8})
-        c := rt_text_word(scratch + I64{16})
-        d := rt_text_word(scratch + I64{24})
-        e := rt_text_word(scratch + I64{32})
-        f := rt_text_word(scratch + I64{40})
-        g := rt_text_word(scratch + I64{48})
-        h := rt_text_word(scratch + I64{56})
+        ^a: rt_text_word(scratch)
+        ^b: rt_text_word(scratch + I64{8})
+        ^c: rt_text_word(scratch + I64{16})
+        ^d: rt_text_word(scratch + I64{24})
+        ^e: rt_text_word(scratch + I64{32})
+        ^f: rt_text_word(scratch + I64{40})
+        ^g: rt_text_word(scratch + I64{48})
+        ^h: rt_text_word(scratch + I64{56})
         t = I64{0}
         loop {
             if (t >= I64{80}) { break }
@@ -206,7 +206,7 @@ rt_sha512_parts3_byte: fn(left: I64, left_len: I64, right: I64, right_len: I64, 
         rt_text_store(scratch + I64{56}, rt_text_word(scratch + I64{56}) + h)
         off += I64{128}
     }
-    at := I64{0}
+    ^at: I64{0}
     output_length: if short -> I64{48} else -> I64{64}
     loop {
         if (at >= output_length) { break }

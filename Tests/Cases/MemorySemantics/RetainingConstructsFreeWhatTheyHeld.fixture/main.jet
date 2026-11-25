@@ -41,12 +41,12 @@ Node: struct {
 }
 
 weak_cycle: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
-        a := Shared{Node{_label: "a {i}", _peer: None}}
-        b := Shared{Node{_label: "b {i}", _peer: None}}
-        wa := a.downgrade()
-        wb := b.downgrade()
+        ^a: Shared{Node{_label: "a {i}", _peer: None}}
+        ^b: Shared{Node{_label: "b {i}", _peer: None}}
+        ^wa: a.downgrade()
+        ^wb: b.downgrade()
         a._peer = Val(wb.copy())
         b._peer = Val(wa.copy())
         total += a.strong_count() + b.strong_count() + i % 7
@@ -55,7 +55,7 @@ weak_cycle: fn(from: Int, to: Int) -> Int {
 }
 
 channel_left_full: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         { sender: tx, receiver: rx }: channel<String>(capacity: 4)
         loop k in 0..<4 -> tx.send("value {i} {k}")
@@ -71,7 +71,7 @@ words: fn(seed: Int) -> Stream<String> {
 }
 
 generator_broken_off: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         loop word in words(i) {
             total += word.len()
@@ -82,7 +82,7 @@ generator_broken_off: fn(from: Int, to: Int) -> Int {
 }
 
 task_results: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         handle: task { [String]{"one {i}", "two {i}"} }
         total += (handle.join() ?? [String]{}).len()
@@ -93,7 +93,7 @@ task_results: fn(from: Int, to: Int) -> Int {
 #Memo label: fn(n: Int) -[]> String { "label {n}" }
 
 memo_bounded: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to -> total += label(i).len()
     total
 }

@@ -121,9 +121,9 @@ ir_move_binding: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int) Never!
     if slot < 0 || !m.user_values || ir_failed(b) || !ir_move_needs(m, p, b.f.slot_type[slot]) {
         return
     }
-    index := 0
+    ^index: 0
     loop index < b.bindings.len() && b.bindings[index].slot != slot -> index += 1
-    save := -1
+    ^save: -1
     loop frame in b.transactions {
         if save < 0 && frame.allocator >= 0 && index < frame.bindings -> save = frame.allocator
     }
@@ -141,7 +141,7 @@ ir_move_leaving: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, loops
     if value < 0 || !m.user_values || ir_failed(b) || !ir_move_needs(m, p, b.f.slot_type[value]) {
         return
     }
-    save := -1
+    ^save: -1
     loop frame in b.transactions {
         if save < 0 && frame.allocator >= 0 && frame.loops >= loops -> save = frame.allocator
     }
@@ -200,7 +200,7 @@ ir_move_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int N
     id: m.functions.len()
     m.functions.push(ir_hashed_function("move", helper_key, "jet_ir_move_", "", 0))
     ir_function_bind(m, helper_key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     boxed: m.types[row].kind != .Aggregate
     if boxed {
@@ -260,7 +260,7 @@ ir_move_box_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, row: Int, boxed:
     ir_emit(a.f, IROp.Drop, -1, boxed, -1, -1, a.line)
     ir_emit(a.f, IROp.Move, boxed, replica, -1, -1, a.line)
     loop shape in shapes {
-        moves := false
+        ^moves: false
         loop member in shape.members {
             if member.boxed || ir_move_needs(m, p, member.ty) -> moves = true
         }

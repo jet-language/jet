@@ -51,7 +51,7 @@ GateInputs: struct {
 // newline leaves.
 records: fn(text: String) -> [String] Never! {
     if text == "" -> return [String]{}
-    lines := pieces(text, "\n")
+    ^lines: pieces(text, "\n")
     if text.ends_with("\n") -> _: lines.pop()
     lines
 }
@@ -113,11 +113,11 @@ adapter_status: fn(value: String) -> Bool Never! {
 
 // Every problem of `report` against `inputs`, in the order they are found.
 report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
-    problems := [String]{}
-    baseline_tasks := [String]{}
-    baseline_status := [String:String]{}
-    baseline_owner := [String:String]{}
-    baseline_seen := [String:Bool]{}
+    ^problems: [String]{}
+    ^baseline_tasks: [String]{}
+    ^baseline_status: [String:String]{}
+    ^baseline_owner: [String:String]{}
+    ^baseline_seen: [String:Bool]{}
     baseline_lines: records(inputs.baseline ?? "")
     if inputs.baseline == None || baseline_lines.len() == 0 || baseline_lines[0] != BASELINE_HEADER {
         problems.push("baseline schema drifted")
@@ -139,9 +139,9 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
         baseline_status[id.copy()] = fields[2].copy()
         baseline_owner[id] = fields[3].copy()
     }
-    matrix_requirement := [String:String]{}
-    matrix_arch := [String:String]{}
-    matrix_count := 0
+    ^matrix_requirement: [String:String]{}
+    ^matrix_arch: [String:String]{}
+    ^matrix_count: 0
     matrix_lines: records(inputs.matrix ?? "")
     if inputs.matrix == None || matrix_lines.len() == 0 || matrix_lines[0] != MATRIX_HEADER {
         problems.push("native OS matrix schema drifted")
@@ -164,10 +164,10 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
         matrix_arch[os] = fields[2].copy()
         matrix_count += 1
     }
-    manifest_domain := [String:String]{}
-    manifest_case := [String:String]{}
-    manifest_owner := [String:String]{}
-    manifest_count := 0
+    ^manifest_domain: [String:String]{}
+    ^manifest_case: [String:String]{}
+    ^manifest_owner: [String:String]{}
+    ^manifest_count: 0
     manifest_lines: records(inputs.manifest ?? "")
     if inputs.manifest == None || manifest_lines.len() == 0 || manifest_lines[0] != MANIFEST_HEADER {
         problems.push("corpus manifest schema drifted")
@@ -191,14 +191,14 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
     if matrix_count == 0 -> problems.push("native OS matrix is empty or missing")
     if manifest_count == 0 -> problems.push("corpus manifest is empty or missing")
 
-    header_seen := false
-    host_os := ""
-    host_arch := ""
-    report_digest := ""
-    seen := [String:Bool]{}
-    current := [String:String]{}
-    current_tasks := [String]{}
-    current_owner := [String:String]{}
+    ^header_seen: false
+    ^host_os: ""
+    ^host_arch: ""
+    ^report_digest: ""
+    ^seen: [String:Bool]{}
+    ^current: [String:String]{}
+    ^current_tasks: [String]{}
+    ^current_owner: [String:String]{}
     loop line in records(report) {
         if line.starts_with("#") || is_blank(line) -> next
         if !header_seen {
@@ -317,7 +317,7 @@ repository_root: fn() -[FS, Env]> String Never! {
 // The frozen inputs under `root`; the policy digest covers its text without
 // the final newline.
 frozen_inputs: fn(root: String, policy_text: String) -[FS, Env]> GateInputs Never! {
-    policy := policy_text
+    ^policy: policy_text
     if policy.ends_with("\n") {
         policy = String.from_bytes_lossy(policy.bytes()[0..<policy.bytes().len() - 1])
     }
@@ -370,9 +370,9 @@ uncovered: fn(reason: String) -[IO, Time.Wait]> Int Never! {
 }
 
 passthrough: fn(receipt: ProcessReceipt) -[IO]> Never! {
-    out := term.stdout()
+    ^out: term.stdout()
     out.write(receipt.output).drop("corpus stdout")
-    errors := term.stderr()
+    ^errors: term.stderr()
     errors.write(receipt.errors).drop("corpus stderr")
 }
 
@@ -461,11 +461,11 @@ report_row: fn(os: String, jet: String, score: String, owner: String) -> String 
 // The frozen corpus as one passing linux report row per manifest task, as
 // fields; row `target` (or every row when "") gets `value` in 1-based `column`.
 corpus_rows: fn(manifest: String, digest: String, target: String, column: Int, value: String) -> [[String]] Never! {
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop (index, line) in records(manifest) {
         if index == 0 -> next
         source: pieces(line, "\t")
-        row := [String]{"1", "linux", "x86_64", source[1].copy(), source[2].copy(), source[3].copy(), "pass", "pass", "pass", "pass", "pass", source[12].copy(), "0"}
+        ^row: [String]{"1", "linux", "x86_64", source[1].copy(), source[2].copy(), source[3].copy(), "pass", "pass", "pass", "pass", "pass", source[12].copy(), "0"}
         loop _ in 0..<12 -> row.push("1")
         row.push(digest.copy())
         if column > 0 && (target == "" || row[3] == target) -> row[column - 1] = value.copy()
@@ -475,7 +475,7 @@ corpus_rows: fn(manifest: String, digest: String, target: String, column: Int, v
 }
 
 corpus_report: fn(rows: [[String]]) -> String Never! {
-    lines := [String]{"# generated by the AgentWorkloads #Test", REPORT_HEADER}
+    ^lines: [String]{"# generated by the AgentWorkloads #Test", REPORT_HEADER}
     loop row in rows -> lines.push(row.join("\t"))
     body: lines.join("\n")
     "{body}\n"
@@ -506,7 +506,7 @@ corpus_problems: fn(target: String, column: Int, value: String) -[FS, Env]> Stri
     inputs: frozen_inputs(".", read_text(POLICY_PATH) ?? "")
     manifest: read_text(MANIFEST_PATH) ?? ""
     files.write("{directory}/linux.tsv", corpus_report(corpus_rows(manifest, inputs.policy_digest, "", 0, ""))) ?? panic("cannot write the linux report")
-    mac_rows := corpus_rows(manifest, inputs.policy_digest, "", 2, "macos")
+    ^mac_rows: corpus_rows(manifest, inputs.policy_digest, "", 2, "macos")
     loop index in 0..<mac_rows.len() -> mac_rows[index][2] = "any"
     files.write("{directory}/macos.tsv", corpus_report(mac_rows)) ?? panic("cannot write the macos report")
     code: matrix_main([String]{directory.copy()})
@@ -529,7 +529,7 @@ MatrixRow: struct {
 
 // Every `separator`-separated piece of `text`, the piece after the last one included.
 pieces: fn(text: String, separator: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop piece in text.split(separator) -> out.push(piece)
     out
 }
@@ -537,12 +537,12 @@ pieces: fn(text: String, separator: String) -> [String] Never! {
 // The rows a shell `while IFS=$'\t' read -r ...` loop sees: complete lines
 // only, fields split on runs of tabs.
 matrix_rows: fn(text: String) -> [MatrixRow] Never! {
-    rows := [MatrixRow]{}
+    ^rows: [MatrixRow]{}
     lines: pieces(text, "\n")
     complete: lines.len() - 1
     loop (index, line) in lines {
         if index >= complete -> break
-        fields := [String]{}
+        ^fields: [String]{}
         loop field in line.split("\t") {
             if field != "" -> fields.push(field)
         }
@@ -587,7 +587,7 @@ matrix_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
         return 64
     }
     report_dir: absolute_dir(args[0])
-    matrix := ""
+    ^matrix: ""
     if files.read(MATRIX_PATH) == {
         .Ok(text) -> { matrix = text }
         .Err(error) -> {
@@ -595,8 +595,8 @@ matrix_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
             return 1
         }
     }
-    failed := false
-    required := 0
+    ^failed: false
+    ^required: 0
     loop row in matrix_rows(matrix) {
         if row.version != "1" || row.requirement != "required" -> next
         required += 1
@@ -606,7 +606,7 @@ matrix_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
             failed = true
             next
         }
-        report_text := ""
+        ^report_text: ""
         if files.read(report) == {
             .Ok(text) -> { report_text = text }
             .Err(_) -> {}

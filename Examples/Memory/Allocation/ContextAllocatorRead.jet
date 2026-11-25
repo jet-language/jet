@@ -39,7 +39,7 @@ current: fn() -[]> mem.Allocator { context.allocator }
 // Takes a block of `size` bytes at a multiple of 16 from the current
 // allocator, and gives it back.
 take_and_give: fn(size: Int) -> Bool {
-    allocator := current()
+    ^allocator: current()
     block: allocator.allocate(size, 16) ?? return false
     fits: block.address() & 15 == 0 && block.size() == size
     allocator.release(block)
@@ -49,7 +49,7 @@ take_and_give: fn(size: Int) -> Bool {
 run: fn() {
     print("from the heap: {take_and_give(64)}")
     region: mem.Region.reserve(1 << 20) ?? panic("reserve")
-    counter := Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    ^counter: Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
     #Context(allocator: counter) { print("from the counter: {take_and_give(64)}") }
     print("served by the counter: {counter.taken > 0}")
     print("all given back: {counter.taken == counter.given}")

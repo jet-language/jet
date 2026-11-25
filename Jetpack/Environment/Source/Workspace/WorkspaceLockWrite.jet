@@ -46,7 +46,7 @@ env_workspace_lock_invalid: fn(text: String) -> EnvironmentError Never! {
 env_workspace_lock_write_locked: fn(cache: ^WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) -[FS, Env, Exec, Time, Time.Wait]> EnvironmentError! {
     guard: env_runtime_project_lock(workspace_root, "workspace-lock")
     resolver: AuthorityResolver.open(workspace_root) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be opened: {err.message()}"))
-    existing_lock := CheckedFile?{None}
+    ^existing_lock: CheckedFile?{None}
     if resolver.checked_file(PKG_WORKSPACE_LOCK) == {
         .Ok(file) -> { existing_lock = Val(file.move()) }
         .Err(error) -> {
@@ -55,7 +55,7 @@ env_workspace_lock_write_locked: fn(cache: ^WorkspaceDeclarationCache, workspace
             }
         }
     }
-    lock := LockFile.empty()
+    ^lock: LockFile.empty()
     if existing_lock == .Val(file) {
         raw: file.text() ?? return Err(env_workspace_lock_invalid("existing lock is not valid text: {err.message()}"))
         resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed during read: {err.message()}"))
@@ -90,7 +90,7 @@ env_workspace_lock_write_locked: fn(cache: ^WorkspaceDeclarationCache, workspace
         source == .Val(checked) -> pkg_sha256_hex(checked.source.bytes())
         else -> PKG_NO_WORKSPACE_SOURCE
     }
-    members := [LockedWorkspaceMember]{}
+    ^members: [LockedWorkspaceMember]{}
     loop member in plan.members {
         members.push(env_workspace_lock_member(resolver, member, source_digest))
     }
@@ -104,7 +104,7 @@ env_workspace_lock_write_locked: fn(cache: ^WorkspaceDeclarationCache, workspace
     // keeping inputs other call sites recorded; dedup by path so re-writing
     // the lock is idempotent.
     loop input in plan.comptime_inputs {
-        recorded := false
+        ^recorded: false
         loop existing in lock.comptime_inputs {
             if existing.path == input.path -> recorded = true
         }

@@ -16,17 +16,17 @@ reading: fn(value: time.Clock | Int) -> Int {
 
 run: fn() {
     original: Slot{value: time.Clock.new(4)}
-    copied := original.value.copy()
+    ^copied: original.value.copy()
     if copied == {
         .Clock(clock) -> {
-            ticking := clock
+            ^ticking: clock
             assert_eq(ticking.advance(11), 11)
         }
         .Int(_) -> {}
     }
     assert_eq(reading(copied), 11)
     assert_eq(reading(original.value), 4)
-    whole := original.copy()
+    ^whole: original.copy()
     assert_eq(reading(whole.value), 4)
     number: Slot{value: 7}
     assert_eq(reading(number.value.copy()), 7)

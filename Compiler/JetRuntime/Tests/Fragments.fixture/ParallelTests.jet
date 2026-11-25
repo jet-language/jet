@@ -16,14 +16,14 @@ parallel_test_require: fn(ok: Bool) {
     sync_store(slot, start)
     sync_store(slot + I64{8}, end)
     sync_store(slot + I64{16}, sync_load(thread_base() + I64{8}))
-    _ := sync_add(env + I64{8}, I64{1})
+    ^_: sync_add(env + I64{8}, I64{1})
     if (sync_load(env + I64{16}) != I64{0} && (start == I64{0} || start == I64{128})) {
         // Multiple chunk failures must not stop later chunks or choose by time.
         message: scheduler_text_new(I64{1})
         trap_put(sync_load(message), if (start == I64{0}) -> I64{65} else -> I64{66})
         record: scheduler_stop_new(I64{5}, message)
         sync_store(record + I64{48}, I64{1})
-        _ := scheduler_native_publish(record)
+        ^_: scheduler_native_publish(record)
     }
     I64{0}
 }
@@ -34,8 +34,8 @@ parallel_test_live: fn(width: I64) -> I64 { alloc_live_blocks(width) }
 
 // The live payloads of every class from 32 to 4096 bytes, one word each.
 parallel_test_census: fn(out: I64) {
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop width <= (I64{4096}) {
         sync_store(out + at, parallel_test_live(width))
         width *= I64{2}
@@ -68,7 +68,7 @@ parallel_test_walk: fn(env: I64, invoke: I64, length: I64, limit: I64, size: I64
     scheduler_body_leave(body)
     chunks: length / size + (if (length % size == I64{0}) -> I64{0} else -> I64{1})
     parallel_test_require(sync_load(env + I64{8}) == chunks)
-    at := I64{0}
+    ^at: I64{0}
     loop at < chunks {
         start: sync_load(env + I64{32} + at * I64{24})
         end: sync_load(env + I64{40} + at * I64{24})
@@ -116,12 +116,12 @@ parallel_test_pass: fn(env: I64, invoke: I64) {
     // to their bounds; a leaked payload grows the census on every pass. So
     // passes repeat until two in a row end on the same census.
     parallel_test_census(previous)
-    passes := I64{0}
+    ^passes: I64{0}
     loop {
         parallel_test_pass(env, invoke)
         parallel_test_census(current)
-        same := true
-        at := I64{0}
+        ^same: true
+        ^at: I64{0}
         loop at < (I64{64}) {
             if (sync_load(current + at) != sync_load(previous + at)) { same = false }
             sync_store(previous + at, sync_load(current + at))

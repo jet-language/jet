@@ -5,7 +5,7 @@ err_append: fn(out: I64, text: I64) {
 }
 
 err_spaces: fn(out: I64, depth: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < depth {
         rt_text_push_word(out, I64{8224}, I64{2})
         at += I64{1}
@@ -38,7 +38,7 @@ err_root: fn(out: I64, error: I64, depth: I64) {
     }
     count: rt_text_word(wrapping(error + ERR_CONTEXT))
     data: rt_text_word(wrapping(wrapping(error + ERR_CONTEXT) + I64{16}))
-    row := I64{0}
+    ^row: I64{0}
     loop row < count {
         frame: data + row * ERR_CONTEXT_BYTES
         rt_text_push_scalar(out, I64{10})
@@ -79,7 +79,7 @@ err_json_quote: fn(out: I64, text: I64) {
     rt_text_push_scalar(out, I64{34})
     data: rt_text_data(text)
     length: rt_text_len(text)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         scalar: rt_text_decode(wrapping(data + at))
         at += rt_text_width(wrapping(data + at))
@@ -91,7 +91,7 @@ err_json_quote: fn(out: I64, text: I64) {
         } else if (scalar == I64{9}) { rt_text_push_word(out, I64{29788}, I64{2}) } else if (scalar < I64{32} || (scalar >= I64{127} && scalar <= I64{159})) {
             // Unicode controls use exactly four lowercase hex digits, C1 too.
             rt_text_push_word(out, I64{30044}, I64{2})
-            shift := I64{12}
+            ^shift: I64{12}
             loop shift >= (I64{0}) {
                 digit: (scalar >> shift) & I64{15}
                 rt_text_push_scalar(out, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
@@ -131,7 +131,7 @@ err_json_details: fn(out: I64, details: I64) {
     rt_text_push_word(out, I64{8314889994848576044}, I64{8})
     rt_text_push_word(out, I64{8075810}, I64{3})
     data: rt_text_word(wrapping(wrapping(details + ERR_DETAILS_FIELDS) + I64{16}))
-    row := I64{0}
+    ^row: I64{0}
     loop row < rt_text_word(wrapping(details + ERR_DETAILS_FIELDS)) {
         if (row != I64{0}) { rt_text_push_scalar(out, I64{44}) }
         field: wrapping(data + row * ERR_FIELD_BYTES)
@@ -168,7 +168,7 @@ err_json: fn(out: I64, error: I64, journey: I64) {
         jet_rt_string_builder_push(out, rt_static_text(",\"typed_identity\":"))
         err_json_quote(out, identity)
     }
-    row := I64{0}
+    ^row: I64{0}
     if (rt_text_word(wrapping(error + ERR_CONTEXT)) != I64{0}) {
         jet_rt_string_builder_push(out, rt_static_text(",\"context_frames\":["))
         data: rt_text_word(wrapping(wrapping(error + ERR_CONTEXT) + I64{16}))

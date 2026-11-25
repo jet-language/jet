@@ -179,7 +179,7 @@ registers: fn() -> RegisterBlock {
 // not dereference it. The single unsafe audit writes a stack cell instead;
 // a target MMIO provider will replace this boundary.
 mmio_replay: fn(_documented_address: Int, value: Int) -> Int {
-    cell := 0
+    ^cell: 0
     #Unsafe("host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address") {
         pointer: mem.Ptr<Int>.from_addr(mem.address_of(cell))
         mem.volatile_write(pointer, value)
@@ -204,7 +204,7 @@ timer_init: fn(registers: ^RegisterBlock, period: Int) {
 }
 
 timer_advance: fn(registers: ^RegisterBlock) -> Bool {
-    counter := registers.timer.counter
+    ^counter: registers.timer.counter
     counter += U32{1}
     registers.timer.counter = counter
     if registers.timer.counter >= registers.timer.compare {
@@ -491,7 +491,7 @@ ReleaseReceipt: struct {
 }
 
 release_receipt: fn(target: String, image: String, build_output: String, flash_output: String, debug_output: String) -> ReleaseReceipt {
-    captured := build_output != "" && flash_output != "" && debug_output != ""
+    ^captured: build_output != "" && flash_output != "" && debug_output != ""
     return ReleaseReceipt{
         target: target,
         image: image,

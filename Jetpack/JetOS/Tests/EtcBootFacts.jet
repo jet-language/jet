@@ -138,7 +138,7 @@ jetos_identity_test_realized: fn(verification: StoreVerification, root: String, 
 }
 
 #Test("JetOS kernel source provenance uses durable output and exact missing policy") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: files.tmpdir("jetos-kernel-provenance-") ?? panic("kernel scratch")
     original: files.join(root, "durable")
     projection: files.join(root, "projection")
@@ -146,14 +146,14 @@ jetos_identity_test_realized: fn(verification: StoreVerification, root: String, 
     files.create_dir_all(files.join(projection, "source")) ?? panic("projected source")
     files.write(files.join(original, "source/recipe.jet"), "abc") ?? panic("durable recipe")
     files.write(files.join(projection, "source/recipe.jet"), "not the durable recipe") ?? panic("projected recipe")
-    package := jetos_identity_test_realized(verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, original, Val(projection))
+    ^package: jetos_identity_test_realized(verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, original, Val(projection))
     assert_eq(package.original_output(), original)
     assert_eq(package.original_reference(), "original@jetpack")
     expected: "{{\"mode\":\"source-built\",\"files\":[{{\"name\":\"recipe\",\"path\":\"{original}/source/recipe.jet\",\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}},{{\"name\":\"builder\",\"path\":\"{original}/source/build.sh\",\"sha256\":\"<missing>\"}},{{\"name\":\"config\",\"path\":\"{original}/source/config\",\"sha256\":\"<missing>\"}},{{\"name\":\"patches\",\"path\":\"{original}/source/patches.manifest\",\"sha256\":\"<missing>\"}},{{\"name\":\"initrd_inputs\",\"path\":\"{original}/source/initrd-inputs.manifest\",\"sha256\":\"<missing>\"}}]}}"
     assert_eq(pkg_json_render(jetos_kernel_source_dyn(package)), expected)
     expected_package: "{{\"name\":\"cachyos-kernel\",\"reference\":\"kernel@jetpack\",\"out\":\"{package.entry.out}\",\"output_hash\":\"\",\"provenance\":\"\",\"bootstrap\":\"source-built\",\"source_recipe\":{expected}}}"
     assert_eq(pkg_json_render(jetos_kernel_package_dyn(package)), expected_package)
-    packages := [JetOSRealizedPackage]{package}
+    ^packages: [JetOSRealizedPackage]{package}
     assert_eq(jetos_render_boot_facts(jetos_identity_test_system([OptionPlan]{}), packages), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":{expected_package}}}")
     held: packages.pop() ?? panic("one kernel package")
     held.lease.release()
@@ -161,7 +161,7 @@ jetos_identity_test_realized: fn(verification: StoreVerification, root: String, 
 }
 
 #Test("JetOS kernel artifact consumption respects override candidate and missing source order") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: files.tmpdir("jetos-kernel-consumption-") ?? panic("kernel scratch")
     projection: files.join(root, "projection")
     files.create_dir_all(files.join(projection, "boot")) ?? panic("projected boot")
@@ -169,7 +169,7 @@ jetos_identity_test_realized: fn(verification: StoreVerification, root: String, 
     files.write(files.join(projection, "vmlinuz"), "last") ?? panic("last candidate")
     files.write(files.join(projection, "bzImage"), "second") ?? panic("second candidate")
     files.write(files.join(projection, "boot/vmlinuz-cachyos"), "first") ?? panic("first candidate")
-    package := jetos_identity_test_realized(verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, "/durable", Val(projection))
+    ^package: jetos_identity_test_realized(verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, "/durable", Val(projection))
     assert_eq(package.consumption_path(package.entry.out) ?? panic("projected consumption"), projection)
     assert_eq(package.consumption_path(files.join(package.entry.out, "boot")) ?? panic("projected member"), files.join(projection, "boot"))
     if package.consumption_path("{package.entry.out}-other/boot") == {
@@ -188,21 +188,21 @@ jetos_identity_test_realized: fn(verification: StoreVerification, root: String, 
         files.write(files.join(projection, relative), "") ?? panic("source input")
     }
     assert_eq(jetos_missing_kernel_source_files(package), None)
-    packages := [JetOSRealizedPackage]{package}
+    ^packages: [JetOSRealizedPackage]{package}
     selected: jetos_cachyos_kernel_index(packages) ?? panic("selected CachyOS")
     assert_eq(packages[selected].entry.reference, "kernel@jetpack")
     if jetos_cachyos_kernel_index([JetOSRealizedPackage]{}) == {
         .None -> {}
         .Val(_) -> panic("empty realization has no CachyOS entry")
     }
-    unprojected := jetos_identity_test_realized(verification, root, "not-a-kernel", "/durable", None)
+    ^unprojected: jetos_identity_test_realized(verification, root, "not-a-kernel", "/durable", None)
     if unprojected.consumption_path(unprojected.entry.out) == {
         .Err(_) -> {}
         .Ok(_) -> panic("non-consumable package accepted")
     }
     assert_eq(jetos_boot_artifact(unprojected, [String]{"vmlinuz"}), None)
     assert_eq(jetos_missing_kernel_source_files(unprojected), None)
-    unprojected_packages := [JetOSRealizedPackage]{unprojected}
+    ^unprojected_packages: [JetOSRealizedPackage]{unprojected}
     if jetos_cachyos_kernel_index(unprojected_packages) == {
         .None -> {}
         .Val(_) -> panic("other package is not the CachyOS kernel")
@@ -229,7 +229,7 @@ jetos_identity_test_realized: fn(verification: StoreVerification, root: String, 
 // Mandatory native copy contract #3593: replace existing destinations, preserve
 // executable bits, set readonly(false), do NOT create nonexistent parents.
 #Test("JetOS native projected kernel initrd and every boot module are copied") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: files.tmpdir("jetos-boot-copy-") ?? panic("boot scratch")
     projection: files.join(root, "projection")
     generation: files.join(root, "generation")
@@ -246,8 +246,8 @@ jetos_identity_test_realized: fn(verification: StoreVerification, root: String, 
     loop module_name in modules {
         files.write(files.join(projection, "boot/modules/{module_name}"), module_name) ?? panic("module source")
     }
-    package := jetos_identity_test_realized(verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, files.join(root, "durable"), Val(projection))
-    packages := [JetOSRealizedPackage]{package}
+    ^package: jetos_identity_test_realized(verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, files.join(root, "durable"), Val(projection))
+    ^packages: [JetOSRealizedPackage]{package}
     jetos_write_boot_facts(generation, jetos_identity_test_system([OptionPlan]{}), packages) ?? panic("boot projected copy")
     assert_eq(files.read_bytes(files.join(generation, "boot/kernel")) ?? panic("kernel copy"), [U8]{127, 69, 76, 70, 0})
     assert_eq(files.read_bytes(files.join(generation, "boot/initrd")) ?? panic("initrd copy"), [U8]{31, 139, 0})

@@ -17,11 +17,11 @@ s6_browser_env: fn(name: String) -> String {
 }
 
 s6_browser_request: fn(port: String, method: String, path: String, body: String) -> S6BrowserReply? {
-    stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
+    ^stream: net.tcp_connect("127.0.0.1:{port}") ?? return None
     crlf: "\r\n"
     request: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Content-Type: application/x-www-form-urlencoded{crlf}Content-Length: {body.bytes().len()}{crlf}Connection: close{crlf}{crlf}{body}"
     stream.write_bytes(request.bytes()) ?? return None
-    raw := [U8]{}
+    ^raw: [U8]{}
     loop {
         chunk: stream.read_bytes(8192, deadline: 5s) ?? return None
         if chunk.len() == 0 -> break
@@ -52,7 +52,7 @@ s6_browser_wait: fn(port: String, path: String, condition: String, previous: Str
             .Val(value) -> {
                 if value.status == 200 {
                     body: value.body.copy()
-                    accepted := false
+                    ^accepted: false
                     if condition == "any" -> accepted = true
                     if condition == "nonempty" -> accepted = body.trim().copy() != ""
                     if condition == "different" -> accepted = body != previous
@@ -61,13 +61,13 @@ s6_browser_wait: fn(port: String, path: String, condition: String, previous: Str
                         nonce: s6_browser_nonce(body)
                         if nonce == {
                             .Val(next) -> { accepted = next != previous }
-                            .None -> { _ := 0 }
+                            .None -> { ^_: 0 }
                         }
                     }
                     if accepted -> return body
                 }
             }
-            .None -> { _ := 0 }
+            .None -> { ^_: 0 }
         }
         assert(time.instant() - started < 30s, "GET {path} did not reach expected state")
         time.sleep(25ms)

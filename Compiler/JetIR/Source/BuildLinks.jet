@@ -232,7 +232,7 @@ ir_link_alloc: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [Bo
     pointer_row: ir_pointer_row(m)
     block_ptr: ir_copy_word(m, b, block_word, pointer_row)
     if val >= 0 -> ir_store_at(m, p, b, block_ptr, IR_LINK_HEADER_BYTES, val)
-    tagged := block_word
+    ^tagged: block_word
     if shared {
         one: ir_word_const(m, b, IR_LINK_SHARED_TAG)
         tagged = ir_word_op(m, b, IROp.BitOr, block_word, one)
@@ -284,8 +284,8 @@ ir_link_brief_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: Int,
             base: ir_link_brief_address(m, p, b, receiver, span)
             if ir_failed(b) || base < 0 -> return -1
             member: ir_member_of(m, p, b, base, field.name) ?? return ir_fail_slot(b, span, "brief link to field {field.name}")
-            holder := base
-            offset := member.offset
+            ^holder: base
+            ^offset: member.offset
             pointer_row: ir_pointer_row(m)
             if member.boxed {
                 holder = ir_temp(m, b, pointer_row)
@@ -297,7 +297,7 @@ ir_link_brief_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: Int,
             return address
         }
     }
-    backs := [IRWriteBack]{}
+    ^backs: [IRWriteBack]{}
     address: ir_place_address(m, p, b, place, backs, span)
     if ir_failed(b) || address < 0 -> return -1
     // Release any dynamic link write locks if a nested place took one; a brief
@@ -335,7 +335,7 @@ ir_link_deref_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, valu
     if ir_failed(b) || link < 0 -> return -1
     ir_link_read_enter(m, b, link)
     data: ir_link_data_ptr(m, b, link)
-    loaded := ir_load_at(m, b, data, 0, row)
+    ^loaded: ir_load_at(m, b, data, 0, row)
     temp_link: b.fresh[link]
     if temp_link && loaded >= 0 {
         if m.types[row].kind == .Aggregate || ir_copy_needs(m, p, row) {
@@ -379,7 +379,7 @@ ir_link_write_deref_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: 
 }
 
 #Test("live link type row layout and share/drop metadata") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     link_ty: Type.Apply{name: "@", args: [Type]{Type.Int}}
     row: ir_value_type(m, p, link_ty) ?? -1
@@ -394,7 +394,7 @@ ir_link_write_deref_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: 
 }
 
 #Test("live link drop glue builds cleanly and passes IR lint") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     link_ty: Type.Apply{name: "@", args: [Type]{Type.String}}
     row: ir_value_type(m, p, link_ty) ?? -1
@@ -405,16 +405,16 @@ ir_link_write_deref_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: 
 }
 
 #Test("live link retain, data pointer, and dynamic exclusivity ops pass IR lint") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     link_ty: Type.Apply{name: "@", args: [Type]{Type.Int}}
     row: ir_value_type(m, p, link_ty) ?? -1
     assert(row >= 0)
-    a := ir_builder_new(ir_hashed_function("link_ops_check", "#test.link_ops", "jet_ir_test_", "", 0))
+    ^a: ir_builder_new(ir_hashed_function("link_ops_check", "#test.link_ops", "jet_ir_test_", "", 0))
     h: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "h"))
     kept: ir_link_retain(m, a, h, row)
     ir_link_read_enter(m, a, kept)
-    _ := ir_link_data_ptr(m, a, kept)
+    ^_: ir_link_data_ptr(m, a, kept)
     ir_link_read_leave(m, a, kept)
     ir_link_write_enter(m, a, kept)
     ir_link_write_leave(m, a, kept)

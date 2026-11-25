@@ -25,7 +25,7 @@ Phase: enum {
 parse_manifest: fn(name: String) -> #ParsedManifest String { name.copy() }
 
 phase_kind: fn(phase: Phase) -> String {
-    label := "unknown"
+    ^label: "unknown"
     if phase == {
         .Draft -> { label = "pending" }
         .Active -> { label = "working" }
@@ -62,7 +62,7 @@ run: fn() {
     parsed: parse_manifest("manifest")
     print("tagged:{parsed}")
 
-    build := Build.queue("compile")
+    ^build: Build.queue("compile")
     build = build.start()
     build = build.finish()
     print(build.report())

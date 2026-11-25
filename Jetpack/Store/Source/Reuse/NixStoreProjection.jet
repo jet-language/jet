@@ -21,21 +21,21 @@ NixProjectionIndex: struct {
     priv by_digest: [String:[StoreEntry]],
 
     from_entries: fn(entries: [StoreEntry]) -> NixProjectionIndex Never! {
-        by_digest := [String:[StoreEntry]]{}
+        ^by_digest: [String:[StoreEntry]]{}
         loop entry in entries {
             producer: ProducerRecord.decode(entry.producer_record) ?? next
             if producer.provider != "nix" -> next
-            digests := [String]{entry.envelope.output_hash}
+            ^digests: [String]{entry.envelope.output_hash}
             names: store_sorted_keys(entry.named_outputs)
             loop name in names -> digests.push(entry.named_outputs[name])
             loop digest in digests {
                 if digest == "" -> next
-                owners := by_digest.get(digest) ?? [StoreEntry]{}
+                ^owners: by_digest.get(digest) ?? [StoreEntry]{}
                 owners.push(entry.copy())
                 by_digest[digest] = owners
             }
         }
-        sorted := [String:[StoreEntry]]{}
+        ^sorted: [String:[StoreEntry]]{}
         loop pair in by_digest -> sorted[pair.key] = store_reuse_entries_by_id(pair.value)
         NixProjectionIndex{by_digest: sorted}
     }
@@ -43,9 +43,9 @@ NixProjectionIndex: struct {
 
 // Stable insertion sort by id.
 store_reuse_entries_by_id: fn(entries: [StoreEntry]) -> [StoreEntry] Never! {
-    sorted := [StoreEntry]{}
+    ^sorted: [StoreEntry]{}
     loop entry in entries {
-        at := sorted.len()
+        ^at: sorted.len()
         loop at > 0 && entry.id < sorted[at - 1].id -> at -= 1
         sorted.insert(at, entry.copy())
     }
@@ -60,11 +60,11 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
     if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) {
         return Ok([NixStoreProjection]{})
     }
-    pending := [String]{entry.envelope.output_hash}
+    ^pending: [String]{entry.envelope.output_hash}
     loop pair in entry.named_outputs -> pending.push(pair.value)
     pending = store_sorted_unique(pending)
-    visited := [String]{}
-    logical_digests := [String:String]{}
+    ^visited: [String]{}
+    ^logical_digests: [String:String]{}
     loop pending.len() > 0 {
         digest: pending[0]
         _: pending.remove(0, .Slot)
@@ -76,7 +76,7 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
             if candidate_producer.provider != "nix" {
                 return Err(StoreError.Other("Nix closure object `{digest}` is owned by `{candidate_producer.provider}`"))
             }
-            output_fact := false
+            ^output_fact: false
             fact_keys: store_sorted_keys(candidate_producer.facts)
             loop key in fact_keys {
                 if !key.starts_with("nix.output.") -> next
@@ -112,7 +112,7 @@ store_nix_store_projection_for_entry: fn(verification: StoreVerification, roots:
     if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) {
         return Ok([NixStoreProjection]{})
     }
-    logical_digests := [String:String]{}
+    ^logical_digests: [String:String]{}
     fact_keys: store_sorted_keys(producer.facts)
     loop key in fact_keys {
         if !key.starts_with("nix.output.") -> next
@@ -142,13 +142,13 @@ store_nix_store_projection_for_entry: fn(verification: StoreVerification, roots:
 // Every object in the closure of every named root, each with exactly one
 // canonical store path among its owning Nix records.
 store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, record: ClosureRecord, entry: StoreEntry, logical_digests: ^[String:String]) StoreError! {
-    expected_outputs := entry.named_outputs
+    ^expected_outputs: entry.named_outputs
     expected_outputs["out"] = entry.envelope.output_hash
     if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs || record.references != store_sorted_unique(entry.references) {
         return Err(StoreError.Other("Nix closure record `{entry.id}` disagrees with the verified entry"))
     }
     // Every named root may have references not shared by `out`.
-    closure := [String]{}
+    ^closure: [String]{}
     loop pair in expected_outputs {
         members: graph.closure(pair.value)
         loop member in members -> closure.push(member)
@@ -166,7 +166,7 @@ store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, rec
         if !info.is_symlink && !info.is_dir && !info.is_file {
             return Err(StoreError.Other("Nix closure object `{digest}` is not a regular Hangar node"))
         }
-        paths := [String]{}
+        ^paths: [String]{}
         loop owner_id in owner_ids {
             owner: graph.records[owner_id]
             output_names: store_sorted_keys(owner.outputs)
@@ -189,7 +189,7 @@ store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, rec
 }
 
 store_sorted_keys_of_records: fn(records: [String:ClosureRecord]) -> [String] Never! {
-    keys := records.keys().to_list()
+    ^keys: records.keys().to_list()
     keys.sort()
     keys
 }
@@ -198,7 +198,7 @@ store_sorted_keys_of_records: fn(records: [String:ClosureRecord]) -> [String] Ne
 // `out`, else `bin`, output) maps to the lease snapshot; every other path
 // to its canonical Hangar object.
 store_reuse_projection_list: fn(roots: HangarRoots, producer: ProducerRecord, logical_digests: [String:String], snapshot_root: String) -> [NixStoreProjection] StoreError! {
-    primary_logical := String?{None}
+    ^primary_logical: String?{None}
     primary_names: [String]{"out", "bin"}
     loop name in primary_names {
         if primary_logical != None -> break
@@ -207,7 +207,7 @@ store_reuse_projection_list: fn(roots: HangarRoots, producer: ProducerRecord, lo
             .Err(_) -> {}
         }
     }
-    projection := [NixStoreProjection]{}
+    ^projection: [NixStoreProjection]{}
     logicals: store_sorted_keys(logical_digests)
     loop logical in logicals {
         digest: logical_digests[logical]
@@ -315,8 +315,8 @@ OpenedNixProjection: struct {
 // symlink root, whose target is the witness, project as their canonical source.
 // Other hosts project the verified sources directly.
 store_reuse_open_nix_projection_sources: fn(projections: [NixStoreProjection]) -> OpenedNixProjection StoreError! {
-    stable := [NixProjectionPath]{}
-    bindings := [NixProjectionBinding]{}
+    ^stable: [NixProjectionPath]{}
+    ^bindings: [NixProjectionBinding]{}
     if sys.name() != "linux" {
         loop projection in projections {
             stable.push(NixProjectionPath{logical: projection.logical, source: LeaseText.plain(projection.source)})

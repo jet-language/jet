@@ -62,8 +62,8 @@ md_jet: fn() -[Env, FS]> String {
 md_hex_run: fn(run: [String]) -> String { if run.len() >= 16 -> "<hash>" else -> run.join("") }
 
 md_mask_digests: fn(text: String) -> String {
-    out := [String]{}
-    run := [String]{}
+    ^out: [String]{}
+    ^run: [String]{}
     loop scalar in text.chars() {
         ch: "{scalar}"
         if MD_HEX_DIGITS.contains(ch) -> run.push(ch) else {
@@ -83,7 +83,7 @@ md_after_scalar: fn(rest: String) -> String {
         if rest.slice(1, rest.len()).split_once("\"") == .Val(parts) -> return parts.after
         return ""
     }
-    width := 0
+    ^width: 0
     loop scalar in rest.chars() {
         ch: "{scalar}"
         if ch == "," || ch == "}}" || ch == "]" || ch == "\n" -> break
@@ -94,7 +94,7 @@ md_after_scalar: fn(rest: String) -> String {
 
 md_mask_key: fn(text: String, key: String) -> String {
     parts: text.split("\"{key}\":").to_list()
-    out := [String]{parts[0]}
+    ^out: [String]{parts[0]}
     loop part in parts.slice(1, parts.len()) {
         if part.starts_with("{{") || part.starts_with("[") -> out.push("\"{key}\":{part}") else {
             out.push("\"{key}\":\"<volatile>\"{md_after_scalar(part)}")
@@ -104,7 +104,7 @@ md_mask_key: fn(text: String, key: String) -> String {
 }
 
 md_mask: fn(text: String) -> String {
-    masked := md_mask_digests(text)
+    ^masked: md_mask_digests(text)
     loop key in MD_VOLATILE_KEYS -> masked = md_mask_key(masked, key)
     md_sort_premises(masked)
 }
@@ -112,10 +112,10 @@ md_mask: fn(text: String) -> String {
 // Every `"premises":[...]` list with its masked values sorted.
 md_sort_premises: fn(text: String) -> String {
     parts: text.split("\"premises\":[").to_list()
-    out := [String]{parts[0]}
+    ^out: [String]{parts[0]}
     loop part in parts.slice(1, parts.len()) {
         if part.split_once("]") == .Val(list) {
-            values := if list.before == "" -> [String]{} else -> list.before.split(",").to_list()
+            ^values: if list.before == "" -> [String]{} else -> list.before.split(",").to_list()
             values.sort()
             out.push("\"premises\":[{values.join(",")}]{list.after}")
         } else { out.push("\"premises\":[{part}") }
@@ -125,9 +125,9 @@ md_sort_premises: fn(text: String) -> String {
 
 // A door's recording: its exit code, its stdout, and its stderr JSON lines.
 md_record: fn(jet: String, door: MachineDoor) -[Env, Exec, Time.Wait]> String {
-    argv := [String]{jet}
+    ^argv: [String]{jet}
     loop arg in door.args -> argv.push(arg.copy())
-    spec := md_process.cmd(argv).cwd(MD_CORPUS).env("NO_COLOR", "1")
+    ^spec: md_process.cmd(argv).cwd(MD_CORPUS).env("NO_COLOR", "1")
     // The outer test run's switches (its filter, its update mode) are not the door's.
     loop name in (md_process.env_keys() ?? panic("read the environment: {err}")) {
         if name.starts_with("JET_TEST") || name == "JET_UPDATE_SNAPSHOTS" {
@@ -135,7 +135,7 @@ md_record: fn(jet: String, door: MachineDoor) -[Env, Exec, Time.Wait]> String {
         }
     }
     ran: spec.stdout(.Capture).stderr(.Capture).run() ?? panic("run `jet {door.args.join(" ")}`: {err}")
-    json := [String]{}
+    ^json: [String]{}
     loop line in md_process.stderr_lines(ran) {
         if line.starts_with("{{") -> json.push(line)
     }

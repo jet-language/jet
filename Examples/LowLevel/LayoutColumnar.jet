@@ -24,21 +24,21 @@ PlainParticle: struct {
 }
 
 total_mass: fn(ps: [Particle]) -> Float {
-    sum := Float{0.0}
+    ^sum: Float{0.0}
     loop p in ps -> sum += p.mass
     return sum
 }
 
 // Indexed field arithmetic keeps the physical column access contiguous.
 particle_energy: fn(ps: [Particle]) -> Float {
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop i in 0..<ps.len() -> total += ps[i].x * ps[i].y + ps[i].mass
     return total
 }
 
 run: fn() {
     // Construct a columnar list with an ordinary list literal.
-    ps := [Particle]{Particle{x: 0.0, y: 0.0, mass: 1.0}, Particle{x: 1.0, y: 2.0, mass: 3.0}}
+    ^ps: [Particle]{Particle{x: 0.0, y: 0.0, mass: 1.0}, Particle{x: 1.0, y: 2.0, mass: 3.0}}
     // Push grows every column together.
     ps.push(Particle{x: 4.0, y: 5.0, mass: 6.0})
     print(ps.len())  // 3

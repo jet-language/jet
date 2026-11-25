@@ -119,12 +119,12 @@ Row: struct {
 fail: fn(message: String) -> Never { process.fail(1, "build-system: {message}") }
 
 parse_options: fn(args: [String]) -> Options {
-    jet := String?{None}
-    work_dir := String?{None}
-    receipt := String?{None}
-    samples := Int?{None}
-    warmups := Int?{None}
-    at := 0
+    ^jet: String?{None}
+    ^work_dir: String?{None}
+    ^receipt: String?{None}
+    ^samples: Int?{None}
+    ^warmups: Int?{None}
+    ^at: 0
     loop at < args.len() {
         flag: args[at]
         value: args.get(at + 1)
@@ -179,7 +179,7 @@ machine: fn() -> Machine {
 // of its middle two, rounded.
 summary: fn(values: [Int]) -> Summary? {
     if values.len() == 0 -> return None
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort()
     mid: sorted.len() /% 2
     median: if sorted.len() % 2 == 1 -> sorted[mid] else -> Int{math.round(Float.from_int(sorted[mid - 1] + sorted[mid]) / 2.0)}
@@ -217,7 +217,7 @@ Workspace: struct {
     // Each cell word with the workspace's {jet}, {flake}, {nix_store} and
     // {nix_cache} in place.
     expand: fn(self, argv: [String]) -> [String] {
-        words := [String]{}
+        ^words: [String]{}
         loop word in argv {
             words.push(word.replace("{{jet}}", self.jet).replace("{{flake}}", self.flake).replace("{{nix_store}}", self.nix_store).replace("{{nix_cache}}", self.nix_cache))
         }
@@ -375,10 +375,10 @@ measure_build_system: fn(axis: Dyn, options: Options, work_dir: String, repo: St
     found: machine()
     version: run_step(process.cmd([options.jet, "--version"])).output.trim()
     cells: items_at(axis, "cells")
-    space := open_workspace(work_dir, options.jet, repo, cells)
-    failures := [String]{}
+    ^space: open_workspace(work_dir, options.jet, repo, cells)
+    ^failures: [String]{}
     if space.rounds(cells, samples, warmups) == .Err(error) -> failures.push(error.message)
-    measured := [CellReceipt]{}
+    ^measured: [CellReceipt]{}
     loop row in space.rows {
         complete: row.jet.len() == samples && row.nix.len() == samples
         jet: summary(row.jet)
@@ -405,7 +405,7 @@ measure_build_system: fn(axis: Dyn, options: Options, work_dir: String, repo: St
 }
 
 table: fn(receipt: Receipt) -> String {
-    lines := ["cell\tjet_ms\tnix_ms\tjet/nix\ttarget\tverdict"]
+    ^lines: ["cell\tjet_ms\tnix_ms\tjet/nix\ttarget\tverdict"]
     loop cell in receipt.cells {
         bound: if number_at(cell.target, "ratio_max") == .Val(max) -> "<= {max:Fixed(2)}" else -> "< {(number_at(cell.target, "ratio_lt") ?? 0.0):Fixed(2)}"
         ratio: if cell.ratio == .Val(value) -> "{value}" else -> "-"

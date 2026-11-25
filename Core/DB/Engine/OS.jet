@@ -308,22 +308,22 @@ os_file_lock: fn(fd: Int, kind: Int, start: Int, len: Int) -[DB]> Int Never! {
 // filename. The temporary-file name uses `temp_dir` (sqlite3_temp_directory)
 // first.
 os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None}, readonly_shm: Bool{false}) -[DB]> DBFile SQLError! {
-    flags := flags_in & OPEN_VFS_MASK
+    ^flags: flags_in & OPEN_VFS_MASK
     e_type: flags & OPEN_TYPE_MASK
     is_exclusive: flags & OPEN_EXCLUSIVE != 0
     is_delete: flags & OPEN_DELETEONCLOSE != 0
     is_create: flags & OPEN_CREATE != 0
-    is_readonly := flags & OPEN_READONLY != 0
+    ^is_readonly: flags & OPEN_READONLY != 0
     is_readwrite: flags & OPEN_READWRITE != 0
     // A new super journal, main journal or WAL file syncs its directory on
     // the first xSync.
     is_new_jrnl: is_create && (e_type == OPEN_SUPER_JOURNAL || e_type == OPEN_MAIN_JOURNAL || e_type == OPEN_WAL)
-    name := ""
+    ^name: ""
     if path == {
         .Val(given) -> { name = given }
         .None -> name = os_get_tempname() ?? return Err(err)
     }
-    open_flags := 0
+    ^open_flags: 0
     if is_readonly -> open_flags |= OS_O_RDONLY
     if is_readwrite -> open_flags |= OS_O_RDWR
     if is_create -> open_flags |= OS_O_CREAT
@@ -331,11 +331,11 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
     open_flags |= OS_O_NOFOLLOW
     // findCreateFileMode: a journal or WAL file takes its database's
     // permissions (and, for root, its owner); a delete-on-close file is 0600.
-    open_mode := 0
-    owner_of := ""
+    ^open_mode: 0
+    ^owner_of: ""
     if flags & (OPEN_WAL | OPEN_MAIN_JOURNAL) != 0 {
         bytes: name.bytes()
-        n := bytes.len() - 1
+        ^n: bytes.len() - 1
         loop n > 0 && bytes[n] != OS_DOT {
             if bytes[n] == OS_DASH {
                 db: os_bytes_text(bytes, n)
@@ -354,8 +354,8 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
             open_mode = mode
         }
     }
-    fd := rt.vfs_open(name, open_flags, open_mode)
-    rc := base.OK
+    ^fd: rt.vfs_open(name, open_flags, open_mode)
+    ^rc: base.OK
     if fd < 0 {
         errno: 0 - fd
         if is_new_jrnl && errno == OS_EACCES && rt.vfs_access(name, OS_F_OK) != 0 {
@@ -378,7 +378,7 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
         _: rt.vfs_chown_like(fd, owner_of)
     }
     if is_delete -> _: rt.vfs_unlink(name)
-    ctrl := 0
+    ^ctrl: 0
     if is_delete -> ctrl |= UNIXFILE_DELETE
     if is_readonly -> ctrl |= UNIXFILE_RDONLY
     no_lock: e_type != OPEN_MAIN_DB
@@ -387,7 +387,7 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
     if flags & OPEN_URI != 0 -> ctrl |= UNIXFILE_URI
     // fillInUnixFile.
     if psow -> ctrl |= UNIXFILE_PSOW
-    file := os_closed_file()
+    ^file: os_closed_file()
     file.fd = fd
     file.path = path ?? ""
     file.ctrl = ctrl
@@ -408,7 +408,7 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
 
 // The text of bytes[0..<n].
 os_bytes_text: fn(bytes: [U8], n: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<n -> out.push(bytes[i])
     String.from_bytes(out) ?? ""
 }
@@ -457,7 +457,7 @@ os_write: fn(file: ^DBFile, data: [U8], amt: Int, offset: Int) -[DB]> SQLError! 
 
 // sqlite3OsTruncate: unixTruncate, rounded up to a whole chunk.
 os_truncate: fn(file: ^DBFile, size: Int) -[DB]> SQLError! {
-    n := size
+    ^n: size
     if file.chunk > 0 -> n = ((n + file.chunk - 1) /% file.chunk) * file.chunk
     got: rt.vfs_truncate(file.fd, n)
     if got < 0 {
@@ -494,10 +494,10 @@ os_sync: fn(file: ^DBFile, flags: Int) -[DB]> SQLError! {
 os_open_directory: fn(path: String) -[DB]> Int Never! {
     bytes: path.bytes()
     // sqlite3_snprintf(MAX_PATHNAME, ...) keeps at most MAX_PATHNAME-1 bytes.
-    n := if bytes.len() < MAX_PATHNAME -> bytes.len() else -> MAX_PATHNAME - 1
-    ii := n
+    ^n: if bytes.len() < MAX_PATHNAME -> bytes.len() else -> MAX_PATHNAME - 1
+    ^ii: n
     loop ii > 0 && (ii == n || bytes[ii] != OS_SLASH) -> ii -= 1
-    dir := ""
+    ^dir: ""
     if ii > 0 -> dir = os_bytes_text(bytes, ii) else if n > 0 && bytes[0] == OS_SLASH -> dir = "/" else {
         dir = "."
     }
@@ -539,8 +539,8 @@ os_lock: fn(file: ^DBFile, level: Int) -[DB]> SQLError! {
         if level == LOCK_EXCLUSIVE -> file.lock = LOCK_PENDING
     }
     if level == LOCK_SHARED {
-        rc := base.OK
-        errno := 0
+        ^rc: base.OK
+        ^errno: 0
         got: os_file_lock(file.fd, OS_F_RDLCK, SHARED_FIRST, SHARED_SIZE)
         if got < 0 {
             errno = 0 - got
@@ -638,7 +638,7 @@ os_size_hint: fn(file: ^DBFile, size: Int) -[DB]> SQLError! {
     target: ((size + file.chunk - 1) /% file.chunk) * file.chunk
     if target <= current -> return Ok()
     zero: [U8]{U8{0}}
-    at := (current /% SIZE_HINT_BLOCK) * SIZE_HINT_BLOCK + SIZE_HINT_BLOCK - 1
+    ^at: (current /% SIZE_HINT_BLOCK) * SIZE_HINT_BLOCK + SIZE_HINT_BLOCK - 1
     loop at < target + SIZE_HINT_BLOCK - 1 {
         if at >= target -> at = target - 1
         wrote: rt.vfs_write(file.fd, at, zero, 0, 1)
@@ -686,7 +686,7 @@ os_has_moved: fn(file: DBFile) -[DB]> Bool Never! {
 // SQLITE_FCNTL_MMAP_SIZE: set the mmap limit to `limit` (capped at
 // SQLITE_MAX_MMAP_SIZE; a negative limit only asks) and answer the old one.
 os_mmap_size: fn(file: ^DBFile, limit: Int) -> Int Never! {
-    new_limit := limit
+    ^new_limit: limit
     if new_limit > MAX_MMAP_SIZE -> new_limit = MAX_MMAP_SIZE
     old: file.mmap_size_max
     if new_limit >= 0 && new_limit != old -> file.mmap_size_max = new_limit
@@ -809,12 +809,12 @@ os_path_append_one: fn(p: ^DBPath, name: [U8]) -[DB]> Never! {
 
 // appendAllPathElements: append each '/'-separated element of path.
 os_path_append_all: fn(p: ^DBPath, path: [U8]) -[DB]> Never! {
-    i := 0
-    j := 0
+    ^i: 0
+    ^j: 0
     loop {
         loop i < path.len() && path[i] != OS_SLASH -> i += 1
         if i > j {
-            name := [U8]{}
+            ^name: [U8]{}
             loop k in j..<i -> name.push(path[k])
             os_path_append_one(p, name)
         }
@@ -829,7 +829,7 @@ os_path_append_all: fn(p: ^DBPath, path: [U8]) -[DB]> Never! {
 // followed (at most SQLITE_MAX_SYMLINK of them). CANTOPEN when the result
 // is too long, a step fails, or the result is shorter than two bytes.
 os_full_pathname: fn(path: String) -[DB]> FullPath SQLError! {
-    p := DBPath{rc: base.OK, symlinks: 0, out: [U8]{}, capacity: MAX_PATHNAME + 1}
+    ^p: DBPath{rc: base.OK, symlinks: 0, out: [U8]{}, capacity: MAX_PATHNAME + 1}
     bytes: path.bytes()
     if bytes.len() == 0 || bytes[0] != OS_SLASH {
         cwd: rt.vfs_cwd()
@@ -908,16 +908,14 @@ os_shm_system_lock: fn(file: DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int Ne
 // write lock held elsewhere (another connection initializing) is BUSY.
 os_shm_lock_dms: fn(file: ^DBFile) -[DB]> Int Never! {
     got: rt.vfs_lock(file.shm.fd, OS_F_OFD_GETLK, OS_F_WRLCK, SHM_DMS, 1)
-    rc := base.OK
+    ^rc: base.OK
     if got < 0 -> rc = base.IOERR_LOCK else if got == OS_F_UNLCK {
         if file.shm.readonly {
             file.shm.unlocked = true
             rc = base.READONLY_CANTINIT
         } else {
             rc = os_shm_system_lock(file, OS_F_WRLCK, SHM_DMS, 1)
-            if rc == base.OK && rt.vfs_truncate(file.shm.fd, 3) < 0 {
-                rc = base.IOERR_SHMOPEN
-            }
+            if rc == base.OK && rt.vfs_truncate(file.shm.fd, 3) < 0 -> rc = base.IOERR_SHMOPEN
         }
     } else if got == OS_F_WRLCK { rc = base.BUSY }
     if rc == base.OK -> rc = os_shm_system_lock(file, OS_F_RDLCK, SHM_DMS, 1)
@@ -932,11 +930,9 @@ os_shm_open: fn(file: ^DBFile) -[DB]> Int Never! {
     mode: rt.vfs_mode(file.path)
     if mode < 0 -> return base.IOERR_FSTAT
     name: "{file.path}-shm"
-    fd := -1
-    readonly := false
-    if !file.readonly_shm {
-        fd = rt.vfs_open(name, OS_O_RDWR | OS_O_CREAT | OS_O_NOFOLLOW, mode)
-    }
+    ^fd: -1
+    ^readonly: false
+    if !file.readonly_shm -> fd = rt.vfs_open(name, OS_O_RDWR | OS_O_CREAT | OS_O_NOFOLLOW, mode)
     if fd < 0 {
         fd = rt.vfs_open(name, OS_O_RDONLY | OS_O_NOFOLLOW, mode)
         if fd < 0 -> return base.CANTOPEN
@@ -970,7 +966,7 @@ os_shm_map: fn(file: ^DBFile, region: Int, sz_region: Int, extend: Bool, mapped:
         if rc != base.OK -> return rc
         file.shm.unlocked = false
     }
-    rc := base.OK
+    ^rc: base.OK
     n_req: region + 1
     if file.shm.n_region < n_req {
         n_byte: n_req * sz_region
@@ -1057,12 +1053,12 @@ os_shm_unmap: fn(file: ^DBFile, delete: Bool) -[DB]> Never! {
 // source. If that fails, the first 12 bytes are the time in seconds and a
 // zero process id, the rest zero.
 os_randomness: fn(n: Int) -[DB]> [U8] Never! {
-    buf := [U8]{}
+    ^buf: [U8]{}
     loop _i in 0..<n -> buf.push(U8{0})
     got: rt.vfs_random(buf)
     if got == n -> return buf
     loop i in 0..<n -> buf[i] = U8{0}
-    t := rt.vfs_now_ms() /% 1000
+    ^t: rt.vfs_now_ms() /% 1000
     loop i in 0..<8 {
         if i < n -> buf[i] = U8{t & 255}
         t = t >> 8
@@ -1097,23 +1093,21 @@ os_temp_directory: fn() -> String? Never! {
 
 // Set sqlite3_temp_directory (None clears it).
 os_set_temp_directory: fn(dir: String?) Never! {
-    guard := core.mem.__process_shared(init_os_temp_directory).guard_edit()
+    ^guard: core.mem.__process_shared(init_os_temp_directory).guard_edit()
     guard.value.dir = dir
 }
 
 // unixTempFileDir: the first of sqlite3_temp_directory, /var/tmp, /usr/tmp,
 // /tmp and "." that is a directory this process can write and search.
 os_temp_file_dir: fn() -[DB]> String? Never! {
-    candidates := [String]{}
+    ^candidates: [String]{}
     if os_temp_directory() == .Val(dir) -> candidates.push(dir)
     candidates.push("/var/tmp")
     candidates.push("/usr/tmp")
     candidates.push("/tmp")
     candidates.push(".")
     loop dir in candidates {
-        if rt.vfs_exists(dir, true) && rt.vfs_access(dir, OS_X_OK_W_OK) == 0 {
-            return Val(dir)
-        }
+        if rt.vfs_exists(dir, true) && rt.vfs_access(dir, OS_X_OK_W_OK) == 0 -> return Val(dir)
     }
     None
 }
@@ -1123,12 +1117,12 @@ os_temp_file_dir: fn() -[DB]> String? Never! {
 // collided.
 os_get_tempname: fn() -[DB]> String SQLError! {
     dir: os_temp_file_dir() ?? return Err(base.fail(base.IOERR_GETTEMPPATH))
-    limit := 0
+    ^limit: 0
     loop {
         r: os_random_bytes(8)
         // "%llx" of the eight bytes read as a little-endian u64.
         digits: "0123456789abcdef".bytes()
-        hex := [U8]{}
+        ^hex: [U8]{}
         loop i in 0..<8 {
             b: Int{r[7 - i]}
             loop half in 0..<2 {
@@ -1154,9 +1148,9 @@ OSPrng: struct {
 }
 
 init_os_prng: fn() -> Shared<OSPrng> Never! {
-    s := [Int]{}
+    ^s: [Int]{}
     loop _i in 0..<16 -> s.push(0)
-    out := [U8]{}
+    ^out: [U8]{}
     loop _i in 0..<64 -> out.push(U8{0})
     Shared{OSPrng{s: s, out: out, n: 0}}
 }
@@ -1164,8 +1158,8 @@ init_os_prng: fn() -> Shared<OSPrng> Never! {
 // sqlite3_randomness(N, pBuf): `n` bytes. `n` <= 0 resets the generator,
 // which reseeds from the VFS on its next use.
 os_random_bytes: fn(n: Int) -[DB]> [U8] Never! {
-    result := [U8]{}
-    guard := core.mem.__process_shared(init_os_prng).guard_edit()
+    ^result: [U8]{}
+    ^guard: core.mem.__process_shared(init_os_prng).guard_edit()
     if n <= 0 {
         guard.value.s[0] = 0
         return result
@@ -1186,7 +1180,7 @@ os_random_bytes: fn(n: Int) -[DB]> [U8] Never! {
         guard.value.s[12] = 0
         guard.value.n = 0
     }
-    need := n
+    ^need: n
     loop {
         if need <= guard.value.n {
             start: guard.value.n - need
@@ -1209,7 +1203,7 @@ os_random_bytes: fn(n: Int) -[DB]> [U8] Never! {
 // rounds over the 16-word state, added back to the input, as 64
 // little-endian bytes.
 chacha_block: fn(input: [Int]) -> [U8] Never! {
-    x := input.copy()
+    ^x: input.copy()
     loop _i in 0..<10 {
         chacha_qr(x, 0, 4, 8, 12)
         chacha_qr(x, 1, 5, 9, 13)
@@ -1220,7 +1214,7 @@ chacha_block: fn(input: [Int]) -> [U8] Never! {
         chacha_qr(x, 2, 7, 8, 13)
         chacha_qr(x, 3, 4, 9, 14)
     }
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<16 {
         w: (x[i] + input[i]) & U32_MASK
         out.push(U8{w & 255})
@@ -1247,7 +1241,7 @@ chacha_qr: fn(x: ^[Int], a: Int, b: Int, c: Int, d: Int) Never! {
 chacha_rotl: fn(v: Int, n: Int) -> Int Never! { ((v << n) | v >> (32 - n)) & U32_MASK }
 
 #Test("chacha_block matches the RFC 7539 2.3.2 test vector") {
-    state := [Int]{1634760805, 857760878, 2036477234, 1797285236}
+    ^state: [Int]{1634760805, 857760878, 2036477234, 1797285236}
     loop w in 0..<8 {
         k: w * 4
         state.push(k | (k + 1) << 8 | (k + 2) << 16 | (k + 3) << 24)

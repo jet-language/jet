@@ -74,8 +74,8 @@ EnvValueProgram: struct {
 }
 
 envmodel_value_program: fn(source: String, environment: [String:CtValue]) -> EnvValueProgram Never! {
-    prefix := "ENVMODEL_VALUE_"
-    tries := 0
+    ^prefix: "ENVMODEL_VALUE_"
+    ^tries: 0
     loop source.contains(prefix) {
         tries += 1
         prefix = "ENVMODEL_VALUE{tries}_"
@@ -250,9 +250,9 @@ envmodel_value_known: fn(plan: EnvValueProgram, expr: Expr, siblings: [String:St
 // right after the expression's own span.
 envmodel_value_extent: fn(plan: EnvValueProgram, expr: Expr) -> Span Never! {
     start: expr_source_start(expr)
-    end := expr_span(expr).end
-    low := 0
-    high := plan.tokens.len()
+    ^end: expr_span(expr).end
+    ^low: 0
+    ^high: plan.tokens.len()
     loop low < high {
         middle: (low + high) /% 2
         if {
@@ -260,7 +260,7 @@ envmodel_value_extent: fn(plan: EnvValueProgram, expr: Expr) -> Span Never! {
             else -> high = middle
         }
     }
-    depth := 0
+    ^depth: 0
     loop index in low..<plan.tokens.len() {
         kind: plan.tokens[index].kind
         if depth == 0 && kind != TOKEN_LPAREN && kind != TOKEN_LBRACKET {
@@ -294,20 +294,20 @@ envmodel_value_reads_as_type: fn(expr: Expr) -> Bool Never! {
 envmodel_value_leaf: fn(plan: ^EnvValueProgram, expr: Expr, expect: String, name: String, label_span: Span, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     span: expr_span(expr)
     extent: envmodel_value_extent(plan, expr)
-    known := CtValue?{None}
+    ^known: CtValue?{None}
     if expect == "" -> known = envmodel_value_known(plan, expr, siblings, globals)
     if known == {
         .Val(value) -> { plan.known[span.start] = value }
         .None -> plan.needed = true
     }
     generated: if name == "" -> envmodel_value_name(plan) else -> name
-    wrap := expect
+    ^wrap: expect
     if wrap == "" && (expr == .ListLit(_, _, _) || expr == .MapLit(_, _, _)) && envmodel_value_reads_as_type(expr) {
         wrap = ENVMODEL_VALUE_WHOLE
     }
     head: if wrap == "" -> "{generated}: " else -> "{generated}: {wrap}("
     envmodel_value_append(plan, head, label_span)
-    sites := [{span: Span, text: String}]{}
+    ^sites: [{span: Span, text: String}]{}
     loop site in comptime_walk_identifiers(expr) {
         if site.name.starts_with("$") {
             value: plan.environment.get(site.name) ?? CtValue.Str{value: ""}
@@ -327,7 +327,7 @@ envmodel_value_leaf: fn(plan: ^EnvValueProgram, expr: Expr, expect: String, name
         }
     }
     sites.sort_by(fn(site) { site.span.start })
-    cursor := extent.start
+    ^cursor: extent.start
     loop site in sites {
         envmodel_value_copy(plan, cursor, site.span.start)
         envmodel_value_append(plan, site.text, site.span)
@@ -343,8 +343,8 @@ envmodel_value_leaf: fn(plan: ^EnvValueProgram, expr: Expr, expect: String, name
 
 // The source span a span of the generated text stands for.
 envmodel_value_place: fn(plan: EnvValueProgram, span: Span) -> Span? Never! {
-    start := -1
-    end := -1
+    ^start: -1
+    ^end: -1
     last: if span.end > span.start -> span.end - 1 else -> span.end
     loop segment in plan.segments {
         if span.start >= segment.start && span.start < segment.end {
@@ -361,11 +361,11 @@ envmodel_value_place: fn(plan: EnvValueProgram, span: Span) -> Span? Never! {
 // `diagnostic` from the program, placed at `span`, with each generated name
 // in its text replaced by the source text it stands for.
 envmodel_value_diagnostic: fn(plan: EnvValueProgram, diagnostic: Diagnostic, span: Span) -> Diagnostic Never! {
-    what := diagnostic.what
-    why := diagnostic.why
-    fix := diagnostic.fix
+    ^what: diagnostic.what
+    ^why: diagnostic.why
+    ^fix: diagnostic.fix
     // The longest names first, so `…_1` doesn't cut `…_12`.
-    index := plan.count - 1
+    ^index: plan.count - 1
     loop index >= 0 {
         generated: "{plan.prefix}{index}"
         label: plan.labels.get(generated) ?? generated
@@ -384,14 +384,14 @@ envmodel_value_of: fn(expr: Expr, scope: ModuleEvalScope) -> CtValue EnvModelEva
     span: expr_span(current)
     if scope.values.get(span.start) == .Val(value) -> return Ok(value)
     if current == .StructLit(type_name, _, _, _, fields, _, _, _) {
-        lowered := [NamedCtValue]{}
+        ^lowered: [NamedCtValue]{}
         loop field in fields {
             lowered.push(NamedCtValue{name: field.name, value: envmodel_value_of(field.value, scope)})
         }
         return Ok(CtValue.Struct{type_name: type_name, fields: lowered})
     }
     if current == .EnumLit(type_name, variant, _, args, _, _, _) {
-        lowered := [CtEnumArg]{}
+        ^lowered: [CtEnumArg]{}
         loop arg in args {
             if arg == {
                 .Positional(value) -> {
@@ -405,12 +405,12 @@ envmodel_value_of: fn(expr: Expr, scope: ModuleEvalScope) -> CtValue EnvModelEva
         return Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
     }
     if current == .ListLit(values, _, _) {
-        items := [CtValue]{}
+        ^items: [CtValue]{}
         loop value in values -> items.push(envmodel_value_of(value, scope))
         return Ok(CtValue.List{values: items})
     }
     if current == .MapLit(entries, _, _) {
-        lowered := [CtMapEntry]{}
+        ^lowered: [CtMapEntry]{}
         loop entry in entries {
             key_value: envmodel_value_of(entry.key, scope)
             key: ast_comptime_key_from_value(key_value) ?? return Err(envmodel_error("E1333", "module map keys must be deterministic scalar values", "named module facts become stable plan keys", "use a string, integer, boolean, or character key", Val(expr_span(entry.key))))

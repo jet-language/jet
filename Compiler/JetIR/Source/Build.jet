@@ -708,10 +708,10 @@ IRSourceTexts: struct {
 
 // The texts of `files`, the first file's of each path.
 ir_source_texts: fn(files: [SourceFile]) -> IRSourceTexts Never! {
-    sources := IRSourceTexts{keys: name_column_table(files.len()), texts: [String]{""}}
+    ^sources: IRSourceTexts{keys: name_column_table(files.len()), texts: [String]{""}}
     loop file in files {
         if name_find(sources.keys, file.path) != None -> next
-        _ := name_intern(sources.keys, file.path)
+        ^_: name_intern(sources.keys, file.path)
         sources.texts.push(file.source)
     }
     sources
@@ -740,9 +740,9 @@ IR_SOURCE_INDEX_MIN_BYTES: 262144
 
 ir_source_index: fn(sources: IRSourceTexts) -> IRSourceIndex Never! {
     count: sources.texts.len()
-    index := IRSourceIndex{bytes: [[U8]]{}, lines: [[Int]]{}, keys: name_column_table(count), rows: name_column(count)}
+    ^index: IRSourceIndex{bytes: [[U8]]{}, lines: [[Int]]{}, keys: name_column_table(count), rows: name_column(count)}
     loop id in 1..<count {
-        bytes := sources.texts[id].bytes()
+        ^bytes: sources.texts[id].bytes()
         name_column_set(index.keys, index.rows, sources.keys.texts[id], index.bytes.len())
         index.lines.push(ir_source_line_starts(bytes))
         index.bytes.push(bytes)
@@ -751,11 +751,13 @@ ir_source_index: fn(sources: IRSourceTexts) -> IRSourceIndex Never! {
 }
 
 // The `source_bytes` / `source_lines` row of checked source `path`.
-ir_source_row: fn(p: IRProgram, path: String) -> Int? Never! { name_column_get(p.source_rows_keys, p.source_rows, path) }
+ir_source_row: fn(p: IRProgram, path: String) -> Int? Never! {
+    name_column_get(p.source_rows_keys, p.source_rows, path)
+}
 
 // The byte offset each line of `bytes` starts at.
 ir_source_line_starts: fn(bytes: [U8]) -> [Int] Never! {
-    starts := [Int]{0}
+    ^starts: [Int]{0}
     loop (at, byte) in bytes {
         if byte == (U8{10}) -> starts.push(at + 1)
     }
@@ -766,8 +768,8 @@ ir_source_line_starts: fn(bytes: [U8]) -> [Int] Never! {
 // a checked source.
 ir_source_line_of: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     row: ir_source_row(p, path) ?? return None
-    low := I64{0}
-    high := I64{p.source_lines[row].len()}
+    ^low: I64{0}
+    ^high: I64{p.source_lines[row].len()}
     loop low < high {
         middle: Int{(low + high) >> I64{1}}
         if p.source_lines[row][middle] <= offset -> low = I64{middle} + I64{1} else {
@@ -782,8 +784,8 @@ ir_source_line_of: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
 ir_source_column: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     row: ir_source_row(p, path) ?? return Val(1)
     if offset < 0 || offset > p.source_bytes[row].len() -> return None
-    column := I64{1}
-    at := I64{offset}
+    ^column: I64{1}
+    ^at: I64{offset}
     zero: I64{0}
     loop at > zero {
         at -= I64{1}
@@ -800,10 +802,10 @@ ir_source_line_text: fn(p: IRProgram, path: String, line: Int) -> String? Never!
     row: ir_source_row(p, path) ?? return Val("")
     if line < 1 || line > p.source_lines[row].len() -> return None
     start: p.source_lines[row][line - 1]
-    end := start
+    ^end: start
     loop end < p.source_bytes[row].len() && p.source_bytes[row][end] != (U8{10}) -> end += 1
     if end > start && p.source_bytes[row][end - 1] == (U8{13}) -> end -= 1
-    text := [U8]{}
+    ^text: [U8]{}
     loop at in start..<end -> text.push(p.source_bytes[row][at])
     Val(String.from_bytes(text) ?? return None)
 }
@@ -866,23 +868,23 @@ ir_program_standalone: fn() -> IRProgram Never! {
 
 ir_program_new: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], sources: ^^IRSourceTexts, constant_defs: ^^[TConstantDef], threads: CompilerThreads{compiler_threads_single()}) -> IRProgram Never! {
     owned_sources: sources.move()
-    programs := [IRProgram]{}
+    ^programs: [IRProgram]{}
     // Past IR_SOURCE_INDEX_MIN_BYTES the sources are indexed on their own
     // thread while the declarations bind; fewer are indexed here first.
-    total := 0
+    ^total: 0
     loop text in owned_sources.texts -> total += text.count_bytes()
     if total < IR_SOURCE_INDEX_MIN_BYTES {
-        index := ir_source_index(owned_sources)
-        p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
+        ^index: ir_source_index(owned_sources)
+        ^p: ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
         ir_program_bind(p, functions, decls, threads, skip_signature_unions: true)
         ir_program_take_sources(p, index.move())
         return p
     }
     task.group ir_program_sources {
         indexing: task ir_source_index(owned_sources)
-        p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
+        ^p: ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
         ir_program_bind(p, functions, decls, threads, skip_signature_unions: true)
-        index := compiler_threads_joined(indexing)
+        ^index: compiler_threads_joined(indexing)
         ir_program_take_sources(p, index.move())
         programs.push(p)
     }
@@ -908,13 +910,17 @@ IRFunctionRows: struct {
 // Each function key of `functions` to its first row, filled in one pass in
 // row order. Its readers only look keys up, so no String sort orders it.
 ir_first_function_rows: fn(functions: [FnBody]) -> IRFunctionRows Never! {
-    table := IRFunctionRows{keys: name_column_table(functions.len()), rows: name_column(functions.len())}
-    loop (index, function) in functions -> name_column_set_first(table.keys, table.rows, function.key, index)
+    ^table: IRFunctionRows{keys: name_column_table(functions.len()), rows: name_column(functions.len())}
+    loop (index, function) in functions {
+        name_column_set_first(table.keys, table.rows, function.key, index)
+    }
     table
 }
 
 // The first row of function `key` in `table`.
-ir_function_rows_get: fn(table: IRFunctionRows, key: String) -> Int? Never! { name_column_get(table.keys, table.rows, key) }
+ir_function_rows_get: fn(table: IRFunctionRows, key: String) -> Int? Never! {
+    name_column_get(table.keys, table.rows, key)
+}
 
 // The first row of the checked function `key` (IRProgram.rows).
 ir_function_row: fn(p: IRProgram, key: String) -> Int? Never! { ir_function_rows_get(p.rows, key) }
@@ -936,7 +942,7 @@ ir_body_symbol_key: fn(p: IRProgram, b: IRBuilder, id: SymbolID) -> String Never
 // signatures name, the host target's trait implementations, and the run's
 // `symbols`.
 ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], constant_defs: ^^[TConstantDef], functions: [FnBody], symbols: ^^SymbolTable, interner: ^^Interner) -> IRProgram Never! {
-    types := type_defs.move()
+    ^types: type_defs.move()
     ir_add_compiler_owned_types(types)
     ir_add_union_types(types, functions, interner)
     // A type row by its key, then by its name where no key names one. A
@@ -958,12 +964,12 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
     // compiler was built is skipped too.
     builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}."
     families: ir_unit_family_rows(types)
-    type_rows_keys := name_column_table(types.len() * 2)
-    type_rows := name_column(types.len() * 2)
-    tier1 := [Int]{}
-    tier2 := [Int]{}
-    tier3 := [Int]{}
-    tier4 := [Int]{}
+    ^type_rows_keys: name_column_table(types.len() * 2)
+    ^type_rows: name_column(types.len() * 2)
+    ^tier1: [Int]{}
+    ^tier2: [Int]{}
+    ^tier3: [Int]{}
+    ^tier4: [Int]{}
     loop (index, definition) in types {
         name_column_set_first(type_rows_keys, type_rows, definition.key, index)
         if ir_host_value_name(definition.name) -> next
@@ -984,16 +990,24 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
             else -> tier4.push(index)
         }
     }
-    loop index in tier1 -> name_column_set_first(type_rows_keys, type_rows, types[index].name, index)
-    loop index in tier2 -> name_column_set_first(type_rows_keys, type_rows, types[index].name, index)
-    loop index in tier3 -> name_column_set_first(type_rows_keys, type_rows, types[index].name, index)
-    loop index in tier4 -> name_column_set_first(type_rows_keys, type_rows, types[index].name, index)
+    loop index in tier1 {
+        name_column_set_first(type_rows_keys, type_rows, types[index].name, index)
+    }
+    loop index in tier2 {
+        name_column_set_first(type_rows_keys, type_rows, types[index].name, index)
+    }
+    loop index in tier3 {
+        name_column_set_first(type_rows_keys, type_rows, types[index].name, index)
+    }
+    loop index in tier4 {
+        name_column_set_first(type_rows_keys, type_rows, types[index].name, index)
+    }
     impls: impl_defs.move()
     // A constant by its key, then by the symbol key a ConstRef names
     // (TConstantDef.symbol_key); the first definition of a key holds it.
     // Each trait constant of an implementation is one more constant, keyed
     // by ir_trait_constant_key alone.
-    defs := constant_defs.move()
+    ^defs: constant_defs.move()
     loop implementation in impls {
         trait_name: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
         if trait_name == "" || implementation.constants.len() == 0 -> next
@@ -1006,11 +1020,13 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
         }
     }
     // Each constant's key and name to its first row.
-    constants_keys := name_column_table(defs.len() * 2)
-    constants := name_column(defs.len() * 2)
+    ^constants_keys: name_column_table(defs.len() * 2)
+    ^constants: name_column(defs.len() * 2)
     loop (index, definition) in defs {
         name_column_set_first(constants_keys, constants, definition.key, index)
-        if definition.symbol_key != "" -> name_column_set_first(constants_keys, constants, definition.symbol_key, index)
+        if definition.symbol_key != "" {
+            name_column_set_first(constants_keys, constants, definition.symbol_key, index)
+        }
     }
     // The Display, Printable, Close and KeyBy implementations of the host
     // target, and the user Comparable ones (a derived Comparable orders
@@ -1019,16 +1035,16 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
     // (ir_trait_key_table). Every trait implementation of the host target
     // also names its methods' traits for ir_trait_methods, and one that
     // declares no method names its owner for ir_trait_implementers.
-    impl_slots_keys := name_column_table()
-    impl_slots := name_column()
-    impl_traits := [[String]]{}
-    impl_methods := [IRImplMethod]{}
-    implementers := [{identity: String, first: Int}]{}
-    empty_impls := [IREmptyImpl]{}
+    ^impl_slots_keys: name_column_table()
+    ^impl_slots: name_column()
+    ^impl_traits: [[String]]{}
+    ^impl_methods: [IRImplMethod]{}
+    ^implementers: [{identity: String, first: Int}]{}
+    ^empty_impls: [IREmptyImpl]{}
     loop implementation in impls.move() {
         trait_name: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
         if trait_name == "" -> next
-        identity := ir_type_identity(type_rows_keys, type_rows, types, implementation.self_type)
+        ^identity: ir_type_identity(type_rows_keys, type_rows, types, implementation.self_type)
         first: ir_trait_key_hash(identity, 0)
         implementers.push({identity: identity.move(), first: first})
         if implementation.target_os == .Val(os) {
@@ -1038,7 +1054,7 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
         owner_key: ir_render_type_key(type_rows_keys, type_rows, types, implementation.self_type)
         loop key in implementation.methods {
             slot_key: "{implementation.module_identity.id}|{owner_key}|{ir_impl_method_leaf(key)}"
-            slot := name_column_value(impl_slots_keys, impl_slots, slot_key) ?? -1
+            ^slot: name_column_value(impl_slots_keys, impl_slots, slot_key) ?? -1
             if slot < 0 {
                 slot = impl_traits.len()
                 name_column_set(impl_slots_keys, impl_slots, slot_key, slot)
@@ -1065,14 +1081,14 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
 
 #Test("a type jet_builtins declares priv claims no bare name") {
     builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}."
-    carrier := ir_rows_test_struct("Handle", [String]{}, [TypeTupleField]{})
+    ^carrier: ir_rows_test_struct("Handle", [String]{}, [TypeTupleField]{})
     carrier.key = "{builtins}Handle"
     carrier.public = false
-    record := ir_rows_test_struct("Plain", [String]{}, [TypeTupleField]{})
+    ^record: ir_rows_test_struct("Plain", [String]{}, [TypeTupleField]{})
     record.key = "{builtins}Plain"
-    core_handle := ir_rows_test_struct("Handle", [String]{}, [TypeTupleField]{TypeTupleField{name: "stdin", ty: Type.Int}})
+    ^core_handle: ir_rows_test_struct("Handle", [String]{}, [TypeTupleField]{TypeTupleField{name: "stdin", ty: Type.Int}})
     core_handle.key = "{MODULE_CORE_PREFIX}core.process.Handle"
-    core_plain := ir_rows_test_struct("Plain", [String]{}, [TypeTupleField]{})
+    ^core_plain: ir_rows_test_struct("Plain", [String]{}, [TypeTupleField]{})
     core_plain.key = "{MODULE_CORE_PREFIX}core.process.Plain"
     p: ir_program_declared([TTypeDef]{carrier, record, core_handle, core_plain}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     handle: ir_type_def(p, "Handle") ?? panic("a bare `Handle` names Core's declaration")
@@ -1097,20 +1113,20 @@ ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, w
     impl_slots_keys_ref: p.impl_slots_keys
     impl_slots_ref: p.impl_slots
     impl_traits_ref: p.impl_traits
-    owner_methods_keys := name_column_table()
-    owner_methods := name_column()
-    render_impls_keys := name_column_table()
-    render_impls := name_column()
-    close_methods_keys := name_column_table()
-    close_methods := name_column()
-    core_roles := [Int]{}
-    decl_parts := [IRBindDeclPart]{}
-    check_boxed := [Bool]{}
+    ^owner_methods_keys: name_column_table()
+    ^owner_methods: name_column()
+    ^render_impls_keys: name_column_table()
+    ^render_impls: name_column()
+    ^close_methods_keys: name_column_table()
+    ^close_methods: name_column()
+    ^core_roles: [Int]{}
+    ^decl_parts: [IRBindDeclPart]{}
+    ^check_boxed: [Bool]{}
     check_boxed.try_reserve(owned.len()) ?? ()
     loop index in 0..<owned.len() {
         check_boxed.push(owned[index].generic_params.len() == 0 && ir_owner_binders(p, owned[index]).len() == 0)
     }
-    scanned := IRBodyScanPart{spawns: [IRBodyScanSpawn]{}, boxed: [IRBodyScanBoxed]{}}
+    ^scanned: IRBodyScanPart{spawns: [IRBodyScanSpawn]{}, boxed: [IRBodyScanBoxed]{}}
     task.group ir_program_bind_tasks {
         t_rows: task ir_first_function_rows(owned)
         t_traits: task ir_trait_methods(owned, symbols_ref, type_rows_keys_ref, type_rows_ref, types_ref, impl_slots_keys_ref, impl_slots_ref, impl_traits_ref)
@@ -1157,7 +1173,7 @@ ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, w
         p.intrinsics = compiler_threads_joined(t_intrinsics)
         scanned = compiler_threads_joined(t_scan)
     }
-    decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
+    ^decl_rows: (loop _ in 0..<decls.rows.len() -> -1)
     loop part in decl_parts {
         loop i in 0..<part.decl_indices.len() {
             d: part.decl_indices[i]
@@ -1195,12 +1211,14 @@ ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, w
 }
 
 ir_program_bind: fn(p: ^IRProgram, functions: ^^[FnBody], decls: DeclTable, threads: CompilerThreads{compiler_threads_single()}, skip_signature_unions: Bool{false}) Never! {
-    owned := functions.move()
+    ^owned: functions.move()
     ir_declared_owners(owned, p.types)
-    if !skip_signature_unions -> ir_add_signature_union_types(p.types, p.type_rows_keys, p.type_rows, owned, p.interner)
+    if !skip_signature_unions {
+        ir_add_signature_union_types(p.types, p.type_rows_keys, p.type_rows, owned, p.interner)
+    }
     workers: compiler_threads_admit(threads, owned.len(), owned.len(), 1024, 0, 0)
     if workers > 1 {
-        scanned := ir_program_bind_parallel(p, owned, decls, workers, threads)
+        ^scanned: ir_program_bind_parallel(p, owned, decls, workers, threads)
         p.functions = owned.move()
         p.quiet_points = ir_quiet_points(p)
         ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed, scanned.print)
@@ -1210,10 +1228,10 @@ ir_program_bind: fn(p: ^IRProgram, functions: ^^[FnBody], decls: DeclTable, thre
     // An implementation method is checked as its owner's method of that name
     // (a TraitMethod when its trait resolves in the implementing module,
     // else a plain Method).
-    owner_methods_keys := name_column_table()
-    owner_methods := name_column()
-    render_impls_keys := name_column_table()
-    render_impls := name_column()
+    ^owner_methods_keys: name_column_table()
+    ^owner_methods: name_column()
+    ^render_impls_keys: name_column_table()
+    ^render_impls: name_column()
     loop (index, function) in owned {
         if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" && function.name != "key" {
             next
@@ -1237,8 +1255,8 @@ ir_program_bind: fn(p: ^IRProgram, functions: ^^[FnBody], decls: DeclTable, thre
             }
         }
     }
-    close_methods_keys := name_column_table()
-    close_methods := name_column()
+    ^close_methods_keys: name_column_table()
+    ^close_methods: name_column()
     loop implementation in p.impl_methods {
         row: name_column_value(owner_methods_keys, owner_methods, "{implementation.method}|{implementation.trait_short}|{implementation.owner_key}") ?? name_column_value(owner_methods_keys, owner_methods, "{implementation.method}||{implementation.owner_key}") ?? -1
         if row < 0 -> next
@@ -1270,7 +1288,7 @@ ir_program_bind: fn(p: ^IRProgram, functions: ^^[FnBody], decls: DeclTable, thre
             }
         }
     }
-    core_roles := [Int]{}
+    ^core_roles: [Int]{}
     loop (index, function) in owned {
         if function.role != "" -> core_roles.push(index)
     }
@@ -1316,7 +1334,13 @@ ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
 // unbounded or bounded, and a timer Receiver; the core.event rows
 // (Core/Event/Event.jet) make an Event under a policy, a Hook, a
 // DecisionHook and an AsyncEvent: each at the type arguments of the call's
-// result, which the runtime provider is handed descriptors of.
+// result, which the runtime provider is handed descriptors of. The
+// core.plugin load (Core/Plugin/Plugin.jet) is the load route over the
+// call's own artifact argument, so a literal artifact's guest is linked at
+// that call, the core.crypto.vault current key (Core/Crypto/Vault.jet)
+// the provider's route tagged by the call's key type, and the core.reflect
+// `of` (Core/Reflect/Reflect.jet) the Value built from the checked names
+// its call carries after the value.
 IRCoreIntrinsicRow: struct {
     role: String,
     intrinsic: IRRuntimeIntrinsic,
@@ -1359,12 +1383,15 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{role: "InlineDecisionHookNew", intrinsic: IRRuntimeIntrinsic.DecisionHookNew},
     IRCoreIntrinsicRow{role: "InlineAsyncEventNew", intrinsic: IRRuntimeIntrinsic.AsyncEventNew},
     IRCoreIntrinsicRow{role: "InlineIterProgress", intrinsic: IRRuntimeIntrinsic.IterProgress},
+    IRCoreIntrinsicRow{role: "InlinePluginLoad", intrinsic: IRRuntimeIntrinsic.PluginLoad},
+    IRCoreIntrinsicRow{role: "InlineVaultCurrent", intrinsic: IRRuntimeIntrinsic.VaultCurrent},
+    IRCoreIntrinsicRow{role: "InlineReflectOf", intrinsic: IRRuntimeIntrinsic.ReflectOf},
 }
 
 // The checked Core functions that fill an IR_CORE_INTRINSICS role, by
 // function key, each of its operation's shape.
 ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
-    intrinsics := ir_intrinsics()
+    ^intrinsics: ir_intrinsics()
     loop function in functions {
         if !ir_core_inline_role(function.role) -> next
         loop row in IR_CORE_INTRINSICS {
@@ -1387,7 +1414,10 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
 // generic over its element, an Event's over its payload, and a Hook's,
 // DecisionHook's or AsyncEvent's over its payload and result or failure
 // type, and a described progress source over its items' element; each reads
-// the arguments its lowering does.
+// the arguments its lowering does. A plugin load reads its artifact,
+// authority and limits, and a vault's current key, generic over the key
+// type, its name; a reflect.of, generic over the value's type, reads that
+// value and then the checked names its call carries.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
@@ -1407,6 +1437,8 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
         .HookNew | .DecisionHookNew -> ir_intrinsic_generic_shape(function, 2, 1)
         .AsyncEventNew -> ir_intrinsic_generic_shape(function, 2, 2)
         .IterProgress -> ir_intrinsic_generic_shape(function, 1, 3)
+        .PluginLoad -> ir_intrinsic_generic_shape(function, 0, 3)
+        .VaultCurrent | .ReflectOf -> ir_intrinsic_generic_shape(function, 1, 1)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
 }
@@ -1426,7 +1458,7 @@ ir_operator_hook_key: fn(p: IRProgram, render_impls_keys: ^NameTable, render_imp
 // The bound functions' DeclID rows over `decls` (IRProgram.decl_rows): a
 // key's first function row, as `rows` holds it.
 ir_program_bind_decls: fn(p: ^IRProgram, decls: DeclTable) Never! {
-    decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
+    ^decl_rows: (loop _ in 0..<decls.rows.len() -> -1)
     loop (row, function) in p.functions {
         if decl_table_find(decls, p.symbols, function.key) == .Val(id) {
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = row
@@ -1445,8 +1477,8 @@ IRBindDeclPart: struct {
 }
 
 ir_bind_decl_range: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, start: Int, end: Int) -> IRBindDeclPart Never! {
-    decl_indices := [Int]{}
-    fn_rows := [Int]{}
+    ^decl_indices: [Int]{}
+    ^fn_rows: [Int]{}
     loop row in start..<end {
         if decl_table_find(decls, symbols, functions[row].key) == .Val(id) {
             decl_indices.push(id.row.index())
@@ -1461,10 +1493,10 @@ ir_bind_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolT
     if at + 1 == starts.len() {
         return [IRBindDeclPart]{ir_bind_decl_range(functions, decls, symbols, starts[at], ends[at])}
     }
-    out := [IRBindDeclPart]{}
+    ^out: [IRBindDeclPart]{}
     task.group ir_bind_decl_group {
         head: task ir_bind_decl_range(functions, decls, symbols, starts[at], ends[at])
-        rest := ir_bind_decl_threads(functions, decls, symbols, starts, ends, at + 1)
+        ^rest: ir_bind_decl_threads(functions, decls, symbols, starts, ends, at + 1)
         out.push(compiler_threads_joined(head))
         compiler_transfer_rows<IRBindDeclPart>(out, rest)
     }
@@ -1473,8 +1505,8 @@ ir_bind_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolT
 
 ir_bind_decl_parts: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, workers: Int) -> [IRBindDeclPart] Never! {
     count: functions.len()
-    starts := [Int]{}
-    ends := [Int]{}
+    ^starts: [Int]{}
+    ^ends: [Int]{}
     loop w in 0..<workers {
         s: (w * count) /% workers
         e: ((w + 1) * count) /% workers
@@ -1511,10 +1543,10 @@ ir_decl_foreign: fn(p: IRProgram, id: DeclID) -> Int Never! {
 ir_declared_owners: fn(functions: ^[FnBody], types: [TTypeDef]) Never! {
     // Only a name some method's owner spells is ever looked up, so only the
     // types of those names are keyed.
-    owners := name_table_sized(64)
+    ^owners: name_table_sized(64)
     loop index in 0..<functions.len() {
         name: ir_declared_owner_name(functions[index].kind) ?? next
-        _ := name_intern(owners, name)
+        ^_: name_intern(owners, name)
     }
     if name_count(owners) == 0 {
         return
@@ -1526,8 +1558,8 @@ ir_declared_owners: fn(functions: ^[FnBody], types: [TTypeDef]) Never! {
 // ir_declared_owners for the one function `function`.
 ir_declared_function_owner: fn(function: ^FnBody, types: [TTypeDef]) Never! {
     name: ir_declared_owner_name(function.kind) ?? return
-    owners := name_table_sized(4)
-    _ := name_intern(owners, name)
+    ^owners: name_table_sized(4)
+    ^_: name_intern(owners, name)
     ir_declared_owner_rekey(function, ir_declared_owner_rows(owners, types), types)
 }
 
@@ -1539,8 +1571,8 @@ IRDeclaredOwnerRows: struct {
 }
 
 ir_declared_owner_rows: fn(owners: NameTable, types: [TTypeDef]) -> IRDeclaredOwnerRows Never! {
-    declared_keys := name_column_table()
-    declared := name_column()
+    ^declared_keys: name_column_table()
+    ^declared: name_column()
     loop (index, definition) in types {
         if name_find(owners, definition.name) == None -> next
         scoped: "{definition.module_identity.id}|{definition.name}"
@@ -1598,7 +1630,7 @@ ir_declared_owner: fn(declared_keys: NameTable, declared: [Int], types: [TTypeDe
 // handler is ever attached: each Hook run returns its own fallback, and each
 // DecisionHook run continues with its own payload.
 ir_quiet_points: fn(p: IRProgram) -[]> [Int:Bool] {
-    has_point := false
+    ^has_point: false
     loop definition in p.constant_defs {
         if !definition.is_storage && ir_point_type(p, definition.ty) {
             has_point = true
@@ -1607,10 +1639,10 @@ ir_quiet_points: fn(p: IRProgram) -[]> [Int:Bool] {
     }
     if !has_point -> return [Int:Bool]{}
     // Constant rows read as a `run`'s receiver, and read any other way.
-    run := [Int:Bool]{}
-    other := [Int:Bool]{}
+    ^run: [Int:Bool]{}
+    ^other: [Int:Bool]{}
     loop function in p.functions {
-        receivers := [Int:Bool]{}
+        ^receivers: [Int:Bool]{}
         loop node in function.tree.nodes {
             if node.kind == .HandleMethod(receiver, operation, _) {
                 if operation == .EventMethod(route) && (route == "jet_std.JetHook.run" || route == "jet_std.JetDecisionHook.run") {
@@ -1626,7 +1658,7 @@ ir_quiet_points: fn(p: IRProgram) -[]> [Int:Bool] {
             }
         }
     }
-    quiet := [Int:Bool]{}
+    ^quiet: [Int:Bool]{}
     loop (row, _) in run {
         if other.get(row) != None -> next
         definition: p.constant_defs[row]
@@ -1644,9 +1676,9 @@ IRBodyScanPart: struct {
 }
 
 ir_body_scan_range: fn(functions: [FnBody], check_boxed: [Bool], interner: Interner, start: Int, end: Int) -> IRBodyScanPart Never! {
-    spawns := [IRBodyScanSpawn]{}
-    boxed := [IRBodyScanBoxed]{}
-    print := IRPrintStyle?{None}
+    ^spawns: [IRBodyScanSpawn]{}
+    ^boxed: [IRBodyScanBoxed]{}
+    ^print: IRPrintStyle?{None}
     loop row in start..<end {
         ir_scan_function_nodes(row, functions[row], check_boxed[row], interner, spawns, boxed, print)
     }
@@ -1657,10 +1689,10 @@ ir_body_scan_parts: fn(functions: [FnBody], check_boxed: [Bool], interner: Inter
     if part >= bounds.len() - 2 {
         return [IRBodyScanPart]{ir_body_scan_range(functions, check_boxed, interner, bounds[part], bounds[part + 1])}
     }
-    parts := [IRBodyScanPart]{}
+    ^parts: [IRBodyScanPart]{}
     task.group ir_body_scan_threads {
         head: task ir_body_scan_range(functions, check_boxed, interner, bounds[part], bounds[part + 1])
-        rest := ir_body_scan_parts(functions, check_boxed, interner, bounds, part + 1)
+        ^rest: ir_body_scan_parts(functions, check_boxed, interner, bounds, part + 1)
         first: compiler_threads_joined(head)
         parts.push(first)
         loop row in rest.move() -> parts.push(row)
@@ -1679,25 +1711,25 @@ ir_type_identity: fn(type_rows_keys: NameTable, type_rows: [Int], types: [TTypeD
 
 ir_body_scan_collect: fn(functions: [FnBody], check_boxed: [Bool], interner: Interner, threads: CompilerThreads) -> IRBodyScanPart Never! {
     count: functions.len()
-    weights := [Int]{}
+    ^weights: [Int]{}
     weights.try_reserve(count) ?? ()
-    total := 0
+    ^total: 0
     loop index in 0..<count {
         nodes: 1 + functions[index].tree.nodes.len()
         weights.push(nodes)
         total += nodes
     }
     workers: compiler_threads_admit(threads, count, total, IR_BODY_SCAN_MIN_NODES_PER_THREAD, 0, 0)
-    spawns := [IRBodyScanSpawn]{}
-    candidates := [IRBodyScanBoxed]{}
-    print := IRPrintStyle?{None}
+    ^spawns: [IRBodyScanSpawn]{}
+    ^candidates: [IRBodyScanBoxed]{}
+    ^print: IRPrintStyle?{None}
     if workers <= 1 {
         loop row in 0..<count {
             ir_scan_function_nodes(row, functions[row], check_boxed[row], interner, spawns, candidates, print)
         }
     } else {
         bounds: compiler_threads_partition(weights, workers)
-        parts := ir_body_scan_parts(functions, check_boxed, interner, bounds, 0)
+        ^parts: ir_body_scan_parts(functions, check_boxed, interner, bounds, 0)
         loop part in parts.move() {
             loop s in part.spawns -> spawns.push(s)
             loop c in part.boxed.move() -> candidates.push(c)
@@ -1712,18 +1744,18 @@ ir_body_scan_collect: fn(functions: [FnBody], check_boxed: [Bool], interner: Int
 // start (the checker's site is the `task` word, which a `task.all` shares).
 // `print` is where a block sets a print style (p.print_style).
 ir_program_scan_bodies_apply: fn(p: ^IRProgram, spawns: [IRBodyScanSpawn], candidates: ^^[IRBodyScanBoxed], print: IRPrintStyle?) Never! {
-    files := name_column_table()
-    starts := [[Int]]{[Int]{}}
+    ^files: name_column_table()
+    ^starts: [[Int]]{[Int]{}}
     loop s in spawns {
         id: name_index(name_intern(files, p.functions[s.fn_row].source_file))
         loop starts.len() <= id -> starts.push([Int]{})
         starts[id].push(s.start)
     }
-    sites_keys := name_column_table(spawns.len())
-    sites := name_column(spawns.len())
+    ^sites_keys: name_column_table(spawns.len())
+    ^sites: name_column(spawns.len())
     loop (id, file) in files.texts {
         starts[id].sort()
-        ordinal := 0
+        ^ordinal: 0
         loop start in starts[id] {
             key: "{file}:{start}"
             if name_column_get(sites_keys, sites, key) != None -> next
@@ -1733,8 +1765,8 @@ ir_program_scan_bodies_apply: fn(p: ^IRProgram, spawns: [IRBodyScanSpawn], candi
     }
     p.spawn_sites_keys = sites_keys
     p.spawn_sites = sites
-    boxed := IRTraitBoxed{}
-    seen := name_table_sized(8)
+    ^boxed: IRTraitBoxed{}
+    ^seen: name_table_sized(8)
     loop c in candidates.move() { ir_trait_boxed_put_short(p, boxed, seen, c.concrete, c.short) }
     p.trait_boxed = boxed
     p.print_style = print
@@ -1744,12 +1776,12 @@ ir_program_scan_bodies_apply: fn(p: ^IRProgram, spawns: [IRBodyScanSpawn], candi
 // function's AST nodes for both `p.spawn_sites` and `p.trait_boxed`.
 ir_program_scan_bodies: fn(p: ^IRProgram, threads: CompilerThreads) Never! {
     count: p.functions.len()
-    check_boxed := [Bool]{}
+    ^check_boxed: [Bool]{}
     check_boxed.try_reserve(count) ?? ()
     loop index in 0..<count {
         check_boxed.push(p.functions[index].generic_params.len() == 0 && ir_owner_binders(p, p.functions[index]).len() == 0)
     }
-    scanned := ir_body_scan_collect(p.functions, check_boxed, p.interner, threads)
+    ^scanned: ir_body_scan_collect(p.functions, check_boxed, p.interner, threads)
     ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed, scanned.print)
 }
 
@@ -1760,7 +1792,7 @@ ir_program_scan_bodies: fn(p: ^IRProgram, threads: CompilerThreads) Never! {
 // (TConstantDef.item_function) stands only for its build and joins no
 // `taken`: its constant's value takes over once it lands.
 ir_program_put_constant: fn(p: ^IRProgram, definition: ^^TConstantDef, taken_keys: ^NameTable, taken: ^[Int]) Never! {
-    owned := definition.move()
+    ^owned: definition.move()
     computed: owned.item_function != ""
     by_name: owned.symbol_key != "" && name_column_get(taken_keys, taken, owned.symbol_key) == None
     by_key: name_column_get(taken_keys, taken, owned.key) == None
@@ -1780,11 +1812,13 @@ ir_program_put_constant: fn(p: ^IRProgram, definition: ^^TConstantDef, taken_key
 }
 
 // The `constant_defs` row of constant `key` (its key or its name).
-ir_constant_row: fn(p: IRProgram, key: String) -> Int? Never! { name_column_get(p.constants_keys, p.constants, key) }
+ir_constant_row: fn(p: IRProgram, key: String) -> Int? Never! {
+    name_column_get(p.constants_keys, p.constants, key)
+}
 
 // An empty module ready to build `p`'s functions (no function queued yet).
 ir_module_for: fn(p: IRProgram) -> IRModule Never! {
-    m := ir_module_new()
+    ^m: ir_module_new()
     loop _ in 0..<p.functions.len() -> m.ids.push(-1)
     m.stop_points = p.stop_points
     m.user_values = p.user_values
@@ -1821,9 +1855,9 @@ ir_trait_method_slot: fn(methods: IRTraitMethods, trait_name: String, method: St
 // which `impl_slots` (by "<module>|<owner key>|<method>") and `impl_traits`
 // name the traits of; `symbols` holds the TraitMethods' trait keys.
 ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows_keys: NameTable, type_rows: [Int], types: [TTypeDef], impl_slots_keys: NameTable, impl_slots: [Int], impl_traits: [[String]]) -> IRTraitMethods Never! {
-    methods := IRTraitMethods{}
+    ^methods: IRTraitMethods{}
     loop (index, function) in functions {
-        traits := [String]{}
+        ^traits: [String]{}
         if function.kind == {
             .TraitMethod(_, _, _, trait_name, _) -> {
                 traits.push(ir_short_name(symbol_table_key(symbols, trait_name)))
@@ -1854,7 +1888,7 @@ ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows_keys: 
 // what follows its last `.` or `:`.
 ir_short_name: fn(key: String) -> String Never! {
     bytes: key.bytes()
-    at := bytes.len()
+    ^at: bytes.len()
     loop at > 0 {
         byte: bytes[at - 1]
         if byte == (U8{46}) || byte == (U8{58}) -> break
@@ -1865,7 +1899,9 @@ ir_short_name: fn(key: String) -> String Never! {
 }
 
 // The declaration a nominal type name or key names.
-ir_type_def: fn(p: IRProgram, name: String) -> Int? Never! { name_column_value(p.type_rows_keys, p.type_rows, name) }
+ir_type_def: fn(p: IRProgram, name: String) -> Int? Never! {
+    name_column_value(p.type_rows_keys, p.type_rows, name)
+}
 
 // `ty` with each nominal head spelled by its identity key (ir_identity_key): a
 // type named by its key (`module.Name`) and by its name (`Name`) is one type,
@@ -1928,7 +1964,7 @@ ir_function_row_id: fn(m: ^IRModule, p: IRProgram, row: Int, type_args: [Type]) 
     if type_args.len() == 0 || (p.functions[row].generic_params.len() == 0 && ir_owner_binders(p, p.functions[row]).len() == 0) {
         if m.ids[row] >= 0 -> return Val(m.ids[row])
         id: m.functions.len()
-        made := ir_function_new(p.functions[row].name, p.functions[row].key, ir_symbol_name(p.functions[row]), p.functions[row].source_file, p.functions[row].line)
+        ^made: ir_function_new(p.functions[row].name, p.functions[row].key, ir_symbol_name(p.functions[row]), p.functions[row].source_file, p.functions[row].line)
         made.inline_always = p.functions[row].is_inline_always
         made.frame_bound = p.functions[row].frame_bound
         made.max_depth = p.functions[row].max_depth
@@ -1943,9 +1979,11 @@ ir_function_row_id: fn(m: ^IRModule, p: IRProgram, row: Int, type_args: [Type]) 
     spelled: loop arg in type_args -> type_carrier_identity(arg)
     concrete: type_args.copy()
     instance: "{p.functions[row].key}<{spelled.join(", ")}>"
-    if name_column_value(m.instances_keys, m.instances, instance) == .Val(known) -> return Val(known)
+    if name_column_value(m.instances_keys, m.instances, instance) == .Val(known) {
+        return Val(known)
+    }
     id: m.functions.len()
-    made := ir_hashed_function(p.functions[row].name, instance, "{ir_symbol_name(p.functions[row])}__", p.functions[row].source_file, p.functions[row].line)
+    ^made: ir_hashed_function(p.functions[row].name, instance, "{ir_symbol_name(p.functions[row])}__", p.functions[row].source_file, p.functions[row].line)
     made.inline_always = p.functions[row].is_inline_always
     made.max_depth = p.functions[row].max_depth
     m.functions.push(made)
@@ -1959,7 +1997,7 @@ ir_function_row_id: fn(m: ^IRModule, p: IRProgram, row: Int, type_args: [Type]) 
 // owner's pattern binds (a method of a generic type, `Pair<T>`), then its
 // own.
 ir_generic_names: fn(p: IRProgram, function: FnBody) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop binder in ir_owner_binders(p, function) -> names.push(binder.name)
     loop parameter in function.generic_params -> names.push(parameter.name)
     names
@@ -1978,7 +2016,7 @@ IROwnerBinder: struct {
 // binds none). A structural impl's method (`impl [T#N].Trait`) binds each
 // parameter of its head. None for any other function.
 ir_owner_binders: fn(p: IRProgram, function: FnBody) -> [IROwnerBinder] Never! {
-    binders := [IROwnerBinder]{}
+    ^binders: [IROwnerBinder]{}
     owner: if function.kind == {
         .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> ir_untag(owner_type)
         .TopLevel -> {
@@ -2023,7 +2061,7 @@ ir_declares: fn(params: [TGenericParam], name: String) -> Bool Never! {
 // `owner` (`[Int]` for `Pair<T>` at `Pair<Int>`, `[Int, 4]` for `[T#N]` at
 // `[Int#4]`): None when `owner` does not spell them.
 ir_owner_args: fn(p: IRProgram, function: FnBody, owner: Type) -> [Type]? Never! {
-    args := [Type]{}
+    ^args: [Type]{}
     binders: ir_owner_binders(p, function)
     if binders.len() == 0 -> return Val(args)
     actual: type_structural_args(ir_untag(owner)) ?? ir_type_args(owner)
@@ -2107,7 +2145,7 @@ ir_callee_fact: fn(p: IRProgram, b: IRBuilder, row: Int, args: [Type], ty: Type,
 // perf, gdb) show Jet names, and `fib_sum` in `prog` stays apart from `sum`
 // in `prog_fib`. A byte that is no letter, digit, `_` or `.` becomes `_`.
 ir_symbol_name: fn(function: FnBody) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop byte in "{function.module_name}.{function.name}".bytes() {
         kept: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 || byte == 46
         bytes.push(if kept -> byte else -> U8{95})
@@ -2135,7 +2173,7 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // `ir.build.core_cells`.
 ir_build_program: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impls: ^^[TImplDef], sources: ^^IRSourceTexts, constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
     if trace_sink == .Val(sink) -> sink.begin("ir.build.program", "", -1, -1)
-    p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
+    ^p: ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
     p.checks = checks
     p.zone_table = true
     p.sentries = ir_checks_sentries(checks)
@@ -2144,12 +2182,12 @@ ir_build_program: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
     ir_foreign_index(p, foreign, decls)
     row: ir_function_row(p, entry_key) ?? {
         if trace_sink == .Val(sink) -> sink.end("ir.build.program", -1)
-        failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
+        ^failures: [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
         return IRBuildResult{program: ir_module_for(p), failures: failures}
     }
     p.entry = row
-    roots := [IRWaveJob]{IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}}
-    kept_rows := [Int]{}
+    ^roots: [IRWaveJob]{IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}}
+    ^kept_rows: [Int]{}
     if p.checks.keep {
         loop kept in 0..<p.functions.len() {
             if kept != row && p.checks.modules.get(p.functions[kept].module_identity.id) != None {
@@ -2171,7 +2209,7 @@ ir_build_program: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
         root_row: ir_function_row(p, key) ?? next
         if root_row != row && !kept_rows.contains(root_row) -> kept_rows.push(root_row)
     }
-    kept_keys := [String]{}
+    ^kept_keys: [String]{}
     loop kept in kept_rows {
         if p.functions[kept].generic_params.len() > 0 || ir_owner_binders(p, p.functions[kept]).len() > 0 || ir_intrinsic_of(p, p.functions[kept].key) != None {
             next
@@ -2182,7 +2220,7 @@ ir_build_program: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
     if trace_sink == .Val(sink) -> sink.end("ir.build.program", p.functions.len())
     release_program: !p.checks.debug_views
     waves: ir_build_waves_kept(p, roots, true, threads, trace_sink, release_program: release_program)
-    built := waves.result.move()
+    ^built: waves.result.move()
     loop key in kept_keys {
         at: name_column_get(built.program.function_rows_keys, built.program.function_rows, key) ?? next
         built.program.kept.push(at)
@@ -2211,9 +2249,9 @@ ir_build_program: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
 // ir_program_declared and ir_program_bind) and every function they reach,
 // as ir_build_root_rows does.
 ir_build_roots_in: fn(program: ^^IRProgram, root_keys: [String], threads: CompilerThreads) -> IRBuildKept Never! {
-    p := program.move()
-    rows := [Int]{}
-    failures := [IRBuildFailure]{}
+    ^p: program.move()
+    ^rows: [Int]{}
+    ^failures: [IRBuildFailure]{}
     loop key in root_keys {
         row: ir_function_row(p, key) ?? {
             failures.push(IRBuildFailure{key: key.copy(), name: key.copy(), message: "the root function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
@@ -2222,7 +2260,7 @@ ir_build_roots_in: fn(program: ^^IRProgram, root_keys: [String], threads: Compil
         rows.push(row)
     }
     if failures.len() > 0 {
-        empty := ir_module_for(p)
+        ^empty: ir_module_for(p)
         return IRBuildKept{result: IRBuildResult{program: empty.move(), failures: failures}, program: p.move()}
     }
     ir_build_root_rows(p, rows, threads)
@@ -2249,7 +2287,7 @@ ir_build_root_jobs: fn(program: IRProgram, rows: [Int]) -> [IRWaveJob] Never! {
 // a held function the image holds calls the image's code (IRChecks.held,
 // ir_held_symbols).
 ir_held_program: fn(program: ^^IRProgram, decls: DeclTable, foreign: ^^[SemaCheckedForeignFunction], checks: IRChecks, bind: Bool{false}) -> IRProgram Never! {
-    p := program.move()
+    ^p: program.move()
     p.checks = checks
     p.sentries = ir_checks_sentries(p.checks)
     p.user_values = true
@@ -2265,18 +2303,18 @@ ir_held_program: fn(program: ^^IRProgram, decls: DeclTable, foreign: ^^[SemaChec
 ir_held_symbols: fn(functions: [FnBody]) -> NameTable Never! {
     names: loop function in functions -> if function.generic_params.len() > 0 -> "" else -> ir_symbol_name(function)
     // How many of the functions have each symbol, by its id in `symbols`.
-    symbols := name_table_sized(names.len() + 1)
-    counts := [Int]{0}
+    ^symbols: name_table_sized(names.len() + 1)
+    ^counts: [Int]{0}
     loop name in names {
         if name == "" -> next
         row: name_index(name_intern(symbols, name))
         if row == counts.len() -> counts.push(1) else -> counts[row] = counts[row] + 1
     }
-    held := name_table_sized(names.len() + 1)
+    ^held: name_table_sized(names.len() + 1)
     loop (index, name) in names {
         if name == "" -> next
         id: name_find(symbols, name) ?? next
-        if counts[name_index(id)] == 1 -> _ := name_intern(held, functions[index].key)
+        if counts[name_index(id)] == 1 -> ^_: name_intern(held, functions[index].key)
     }
     held
 }
@@ -2302,9 +2340,9 @@ IR_HELD_ROOT_SOURCE: "<eval>"
 // in its own `text`, which no checked file holds, so its file is
 // IR_HELD_ROOT_SOURCE, whose source is `text`.
 ir_build_held_root: fn(program: ^^IRProgram, root: ^^FnBody, text: String, threads: CompilerThreads) -> IRBuildKept Never! {
-    p := program.move()
+    ^p: program.move()
     ir_held_source_put(p, IR_HELD_ROOT_SOURCE, text)
-    function := root.move()
+    ^function: root.move()
     ir_declared_function_owner(function, p.types)
     ir_add_function_union_types(p.types, p.type_rows_keys, p.type_rows, function, p.interner)
     function.source_file = IR_HELD_ROOT_SOURCE
@@ -2321,7 +2359,7 @@ ir_build_held_root: fn(program: ^^IRProgram, root: ^^FnBody, text: String, threa
     // this thread, not on the threads the program's size admits
     // (ir_build_waves_kept).
     roots: ir_build_root_jobs(p, [Int]{row})
-    kept := if ir_held_binds(p.checks) -> ir_build_waves_parted(p, roots, false, 1, None) else -> ir_build_waves_kept(p, roots, false, threads, None)
+    ^kept: if ir_held_binds(p.checks) -> ir_build_waves_parted(p, roots, false, 1, None) else -> ir_build_waves_kept(p, roots, false, threads, None)
     if kept.program.checks.core == .Val(image) -> ir_core_cells_bind(kept.result.program, image)
     // The program's own cells are the running image's (a debuggable image
     // exports them, ir_debug_cell_exports), not copies placed beside the
@@ -2360,18 +2398,18 @@ ir_held_source_put: fn(program: ^IRProgram, file: String, text: String) Never! {
 // own `text`, which no checked file holds, so its file is
 // IR_HELD_ROOT_SOURCE followed by its key, whose source is `text`. Its row.
 ir_held_append: fn(program: ^IRProgram, function: ^^FnBody, decl: DeclID, text: String) -> Int Never! {
-    appended := function.move()
+    ^appended: function.move()
     ir_declared_function_owner(appended, program.types)
     ir_add_function_union_types(program.types, program.type_rows_keys, program.type_rows, appended, program.interner)
     appended.source_file = "{IR_HELD_ROOT_SOURCE}{appended.key}"
     ir_held_source_put(program, appended.source_file, text)
     if ir_held_binds(program.checks) {
         symbol: ir_symbol_name(appended)
-        alone := true
+        ^alone: true
         loop other in program.functions {
             if ir_symbol_name(other) == symbol -> alone = false
         }
-        if alone -> _ := name_intern(program.checks.held, appended.key)
+        if alone -> ^_: name_intern(program.checks.held, appended.key)
     }
     row: program.functions.len()
     name_column_set(program.rows.keys, program.rows.rows, appended.key, row)
@@ -2408,7 +2446,7 @@ ir_entry_function: fn(m: ^IRModule, p: IRProgram, entry: Int, failures: ^[IRBuil
     id: m.functions.len()
     m.functions.push(ir_function_new("entry", key, "{m.functions[entry].symbol}__entry", m.functions[entry].source_file, m.functions[entry].line))
     ir_function_bind(m, key, id)
-    b := ir_builder_new(m.functions[id].copy())
+    ^b: ir_builder_new(m.functions[id].copy())
     b.line = m.functions[entry].line
     span: Span{start: 0, end: 0}
     ir_sentry_release_link(m, p, b)
@@ -2428,7 +2466,7 @@ ir_entry_function: fn(m: ^IRModule, p: IRProgram, entry: Int, failures: ^[IRBuil
         _: ir_runtime(m, b, "jet_rt_program_allocator_configure", [Int]{counting, limit}, -1)
     }
     loop job in p.checks.jobs -> ir_entry_job(m, p, b, job, p.checks.declared_jobs, span)
-    selectable := false
+    ^selectable: false
     loop job in p.checks.jobs {
         if !job.stripped -> selectable = true
     }
@@ -2533,7 +2571,7 @@ ir_entry_job: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, job: IRJob, declared
     } else {
         returned: if function.ret == .Val(written) -> Val(ir_fact(p, b, written, function.source_span)) else -> Type?{None}
         job_ty: ir_executable_return_in(function, returned) ?? Type.Named{name: "Unit"}
-        job_result := -1
+        ^job_result: -1
         if !ir_unit_type(job_ty) && !ir_never_type(job_ty) {
             job_result = ir_value_type(m, p, job_ty) ?? return ir_fail(b, function.source_span, "job result type {ir_type_name(job_ty)}")
         }
@@ -2572,7 +2610,7 @@ ir_entry_passthrough: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, name: String
 ir_entry_unknown_job: fn(m: ^IRModule, b: ^IRBuilder, declared: [String]) Never! {
     prefix: ir_static_text(m, b, "Jet.UnknownJob: no job named `")
     suffix: ir_static_text(m, b, "`; the first program word must name a `#Job fn`; declared jobs: {declared.join(", ")}")
-    operands := [Int]{}
+    ^operands: [Int]{}
     loop operand in prefix -> operands.push(operand)
     loop operand in suffix -> operands.push(operand)
     _: ir_runtime(m, b, "jet_rt_entry_job_unknown", operands, -1)
@@ -2633,9 +2671,9 @@ ir_entry_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, callee: Int, row: I
 // census) on up to `threads` threads; generic functions are built per
 // instance their callers reach.
 ir_build_all: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impls: ^^[TImplDef], sources: ^^IRSourceTexts, constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
-    p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants)
+    ^p: ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants)
     ir_foreign_index(p, foreign, decls)
-    roots := [IRWaveJob]{}
+    ^roots: [IRWaveJob]{}
     loop row in 0..<p.functions.len() {
         if p.functions[row].generic_params.len() > 0 || ir_owner_binders(p, p.functions[row]).len() > 0 {
             next
@@ -2648,7 +2686,7 @@ ir_build_all: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable
 
 // Builds the queued functions from queue row `from` on; returns the queue's end.
 ir_build_queue: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], from: Int) -> Int Never! {
-    cursor := from
+    ^cursor: from
     loop cursor < m.queue.len() {
         queued: m.queue[cursor].copy()
         cursor += 1
@@ -2660,7 +2698,7 @@ ir_build_queue: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], from
 // Builds the body of one queued function (a checked function or instance,
 // or a lambda job) into its row.
 ir_build_queued: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], queued: IRQueued) Never! {
-    b := ir_builder_new(m.functions[queued.id].copy())
+    ^b: ir_builder_new(m.functions[queued.id].copy())
     if queued.lambda >= 0 {
         job: m.lambdas[queued.lambda].copy()
         b.instance = job.instance
@@ -2809,9 +2847,7 @@ ir_body_node_is_local: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
 }
 
 ir_body_node_is_int_lit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if id <= IR_FIRST_NODE_ID {
-        return b.made.nodes[ir_made_node_index(id)].kind == .IntLit(_, _)
-    }
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(id)].kind == .IntLit(_, _)
     tree: ir_builder_body(p, b.row)[0].tree
     tree.nodes[body_node_index(tree, id)].kind == .IntLit(_, _)
 }
@@ -2822,9 +2858,7 @@ ir_body_node_int_lit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
         return None
     }
     tree: ir_builder_body(p, b.row)[0].tree
-    if tree.nodes[body_node_index(tree, id)].kind == .IntLit(value, _) {
-        return Val(value)
-    }
+    if tree.nodes[body_node_index(tree, id)].kind == .IntLit(value, _) -> return Val(value)
     None
 }
 
@@ -2854,9 +2888,7 @@ ir_body_node_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never
         return None
     }
     tree: ir_builder_body(p, b.row)[0].tree
-    if tree.nodes[body_node_index(tree, id)].kind == .Borrow(inner, _) {
-        return Val(inner)
-    }
+    if tree.nodes[body_node_index(tree, id)].kind == .Borrow(inner, _) -> return Val(inner)
     None
 }
 
@@ -2999,7 +3031,9 @@ ir_cond_is_pure_no_binds: fn(p: IRProgram, b: IRBuilder, cond: BodyIfCond) -> Bo
 // builder's body (in an instance, sema's row at the instance: IRInstance), or
 // of the nodes the builder made (ir_node).
 ir_ty: fn(m: IRModule, p: IRProgram, b: IRBuilder, value: Int) -> Type Never! {
-    if value <= IR_FIRST_NODE_ID -> return ir_tid_syntax(m, p, b.made.expr_types[ir_made_node_index(value)].ty)
+    if value <= IR_FIRST_NODE_ID {
+        return ir_tid_syntax(m, p, b.made.expr_types[ir_made_node_index(value)].ty)
+    }
     ty: body_type(p.interner, ir_builder_body(p, b.row)[0].tree, value)
     if b.instance.names.len() == 0 -> return ty
     sema_inference_substitute_type(ty, b.instance.names, b.instance.args)
@@ -3119,7 +3153,7 @@ ir_bind_pending: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder) Never! {
 // Marks the pending payload bindings from `from` on, those of a test on
 // `subject`, as write windows when the subject is one (`^place`).
 ir_pending_windows: fn(p: IRProgram, b: ^IRBuilder, subject: Int, from: Int) Never! {
-    write := false
+    ^write: false
     if ir_body_node(p, b, subject).kind == .Borrow(_, access) -> write = access == .Write
     if !write {
         return
@@ -3172,7 +3206,7 @@ ir_emit_return: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) Never! {
     ir_close_disarm(b, slot)
     ir_exit_statement_guards(b, 0)
     ir_entry_ending(m, b)
-    result := slot
+    ^result: slot
     if slot >= 0 && ir_defers_open(b) {
         result = ir_temp(m, b, b.f.slot_type[slot])
         ir_emit(b.f, IROp.Copy, result, slot, -1, -1, b.line)
@@ -3213,7 +3247,7 @@ ir_hold_statement_guard: fn(b: ^IRBuilder, held: Int, glue: Int, drops: Bool) Ne
 // latest first. One taken on a branch the exit is not on is not held there.
 // The statements keep them for the paths that go on.
 ir_exit_statement_guards: fn(b: ^IRBuilder, mark: Int) Never! {
-    index := b.statement_guards.len() - 1
+    ^index: b.statement_guards.len() - 1
     loop index >= mark {
         guard: b.statement_guards[index]
         index -= 1
@@ -3239,7 +3273,7 @@ ir_statement_guard_held: fn(f: IRFunction, guard: IRStatementGuard) -> Bool Neve
 // `defer` body runs in its entry's place among the drops (ir_run_defer).
 ir_drop_bindings: fn(m: ^IRModule, b: ^IRBuilder, mark: Int) Never! {
     ir_close_deferred(b, mark)
-    index := b.bindings.len() - 1
+    ^index: b.bindings.len() - 1
     loop index >= mark {
         binding: b.bindings[index]
         alias: ir_binding_is_alias(b, index)
@@ -3341,7 +3375,7 @@ ir_own: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int) -> Int Never! {
 // the box on this path, so neither its drop nor its closing parts reach the
 // payload. -1 when `slot` is no such binding.
 ir_payload_take: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int) -> Int Never! {
-    index := b.bindings.len() - 1
+    ^index: b.bindings.len() - 1
     loop index >= 0 && b.bindings[index].slot != slot -> index -= 1
     if index < 0 -> return -1
     binding: b.bindings[index]
@@ -3382,7 +3416,7 @@ ir_move_member: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: Int, span: 
         read: ir_member_read(m, b, base, member)
         ir_close_note(m, p, b, read, base, IRPartStep{selector: -1, offset: member.offset})
         ir_close_disarm(b, read)
-        taken := read
+        ^taken: read
         if m.types[row].kind == .Aggregate {
             taken = ir_temp(m, b, row)
             ir_emit(b.f, IROp.StackAddress, taken, m.types[row].size, 8, -1, b.line)
@@ -3486,7 +3520,7 @@ ir_owned_binding: fn(b: IRBuilder, slot: Int) -> Bool Never! {
 }
 
 ir_owned_binding_index: fn(b: IRBuilder, slot: Int) -> Int Never! {
-    index := b.bindings.len() - 1
+    ^index: b.bindings.len() - 1
     loop index >= 0 {
         binding: b.bindings[index]
         if binding.slot == slot && binding.indirect < 0 && binding.owned && binding.live < 0 {
@@ -3500,7 +3534,7 @@ ir_owned_binding_index: fn(b: IRBuilder, slot: Int) -> Int Never! {
 // The live flag of the variable owning `slot` where only some paths kept
 // its value (-1: none).
 ir_live_flag: fn(b: IRBuilder, slot: Int) -> Int Never! {
-    index := b.bindings.len() - 1
+    ^index: b.bindings.len() - 1
     loop index >= 0 {
         binding: b.bindings[index]
         if binding.slot == slot && binding.indirect < 0 && binding.owned -> return binding.live
@@ -3531,7 +3565,7 @@ ir_disown: fn(b: ^IRBuilder, slot: Int) Never! {
 // The variable `binding` names owns the value in its slot again (a move
 // out of it was followed by an assignment), on every path.
 ir_reown: fn(b: ^IRBuilder, binding: IRBinding) Never! {
-    index := b.bindings.len() - 1
+    ^index: b.bindings.len() - 1
     loop index >= 0 {
         row: b.bindings[index]
         if row.slot == binding.slot && row.indirect < 0 && row.name == binding.name {
@@ -3586,7 +3620,7 @@ ir_meet_paths: fn(m: ^IRModule, b: ^IRBuilder, test: Int, then_states: [IROwnSta
 // A variable one path moved and the other kept still owns its value
 // through a live flag each path sets, which its drop tests.
 ir_join_owned: fn(m: ^IRModule, b: ^IRBuilder, test: Int, then_states: [IROwnState], else_states: [IROwnState]) Never! {
-    joined := [Int]{}
+    ^joined: [Int]{}
     loop index in 0..<then_states.len() {
         if index >= b.bindings.len() -> break
         kept: then_states[index]
@@ -3599,7 +3633,7 @@ ir_join_owned: fn(m: ^IRModule, b: ^IRBuilder, test: Int, then_states: [IROwnSta
         return
     }
     bool_row: ir_type_row(m, Type.Bool) ?? 0
-    lives := [Int]{}
+    ^lives: [Int]{}
     loop _ in joined -> lives.push(ir_temp(m, b, bool_row))
     ir_open_if(b.f, test, b.line)
     loop (at, index) in joined -> ir_live_set(b, lives[at], then_states[index])
@@ -3620,7 +3654,7 @@ ir_join_owned: fn(m: ^IRModule, b: ^IRBuilder, test: Int, then_states: [IROwnSta
 // it. Where the then path changed nothing, this is the If's end alone.
 ir_end_tested: fn(m: ^IRModule, b: ^IRBuilder, before: [IROwnState]) Never! {
     then_states: ir_own_states(b, before.len())
-    joined := [Int]{}
+    ^joined: [Int]{}
     loop index in 0..<before.len() {
         kept: then_states[index]
         other: before[index]
@@ -3632,7 +3666,7 @@ ir_end_tested: fn(m: ^IRModule, b: ^IRBuilder, before: [IROwnState]) Never! {
     }
     if joined.len() == 0 -> return ir_end(b.f, b.line)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
-    lives := [Int]{}
+    ^lives: [Int]{}
     loop _ in joined -> lives.push(ir_temp(m, b, bool_row))
     loop (at, index) in joined -> ir_live_set(b, lives[at], then_states[index])
     ir_else(b.f, b.line)
@@ -3667,14 +3701,14 @@ ir_loop_join: fn(m: ^IRModule, b: ^IRBuilder, edge: Int, tested: Bool) Never! {
     if edge < 0 {
         return
     }
-    rows := [Int]{}
+    ^rows: [Int]{}
     loop at in 0..<b.loop_edges.len() {
         if b.loop_edges[at].edge == edge -> rows.push(at)
     }
     if rows.len() == 0 {
         return
     }
-    first := 0
+    ^first: 0
     if !tested {
         loop index in 0..<b.loop_edges[rows[0]].states.len() {
             if index >= b.bindings.len() -> break
@@ -3688,8 +3722,8 @@ ir_loop_join: fn(m: ^IRModule, b: ^IRBuilder, edge: Int, tested: Bool) Never! {
     loop index in 0..<count {
         if index >= b.bindings.len() -> break
         base: IROwnState{owned: b.bindings[index].owned, live: b.bindings[index].live}
-        differs := false
-        held := base.owned
+        ^differs: false
+        ^held: base.owned
         loop at in first..<rows.len() {
             state: b.loop_edges[rows[at]].states[index]
             if state.owned != base.owned || state.live != base.live -> differs = true
@@ -3832,7 +3866,7 @@ ir_scope_close: fn(m: ^IRModule, b: ^IRBuilder) Never! {
 }
 
 ir_lookup_binding: fn(b: IRBuilder, name: String) -> IRBinding? Never! {
-    index := b.bindings.len() - 1
+    ^index: b.bindings.len() - 1
     loop index >= 0 {
         if b.bindings[index].name == name -> return Val(b.bindings[index].copy())
         index -= 1
@@ -3845,7 +3879,7 @@ ir_lookup_binding: fn(b: IRBuilder, name: String) -> IRBinding? Never! {
 // under the parameter's name), else the latest of its name.
 ir_lookup_local: fn(b: IRBuilder, local: TLocal) -> IRBinding? Never! {
     if local.symbol_id == .Val(symbol) {
-        index := b.bindings.len() - 1
+        ^index: b.bindings.len() - 1
         loop index >= 0 {
             if b.bindings[index].symbol == symbol -> return Val(b.bindings[index].copy())
             index -= 1
@@ -3933,15 +3967,15 @@ ir_route_can_stop: fn(m: IRModule, symbol: String) -> Bool Never! {
 // Whether `row` is a line in newline-separated sorted `bytes` (zero-alloc
 // binary search over byte slices).
 ir_sorted_lines_contains: fn(bytes: [U8], row: [U8]) -> Bool Never! {
-    low := 0
-    high := bytes.len()
+    ^low: 0
+    ^high: bytes.len()
     loop low < high {
-        start := low + (high - low).div_euclid(2)
+        ^start: low + (high - low).div_euclid(2)
         loop start > low && bytes[start - 1] != (U8{10}) -> start -= 1
-        end := start
+        ^end: start
         loop end < high && bytes[end] != (U8{10}) -> end += 1
-        at := 0
-        order := 0
+        ^at: 0
+        ^order: 0
         loop start + at < end && at < row.len() {
             if bytes[start + at] != row[at] {
                 order = if bytes[start + at] < row[at] -> -1 else -> 1
@@ -4029,9 +4063,9 @@ ir_entry_check: fn(m: ^IRModule, b: ^IRBuilder) Never! {
 // (compiler_threads_partition by size), at most `workers` of at least
 // IR_OPT_MIN_INSTRUCTIONS_PER_THREAD instructions each.
 ir_recursion_checks: fn(m: ^IRModule, workers: Int) Never! {
-    total := 0
+    ^total: 0
     loop f in m.functions -> total += 1 + f.op.len()
-    admitted := if workers < 1 -> 1 else -> workers
+    ^admitted: if workers < 1 -> 1 else -> workers
     loop admitted > 1 && admitted * IR_OPT_MIN_INSTRUCTIONS_PER_THREAD > total -> admitted -= 1
     ir_recursion_checks_parted(m, admitted)
 }
@@ -4042,8 +4076,8 @@ ir_recursion_checks: fn(m: ^IRModule, workers: Int) Never! {
 // on the parts' threads (or in place when single-threaded or no entry checks).
 ir_recursion_checks_parted: fn(m: ^IRModule, workers: Int) Never! {
     count: m.functions.len()
-    checked := false
-    weights := [Int]{}
+    ^checked: false
+    ^weights: [Int]{}
     weights.try_reserve(count) ?? ()
     loop f in m.functions {
         if f.entry_check >= 0 -> checked = true
@@ -4052,10 +4086,10 @@ ir_recursion_checks_parted: fn(m: ^IRModule, workers: Int) Never! {
     if !checked && !m.stop_points {
         return
     }
-    calls := OptCalls{start: [Int]{}, to: [Int]{}}
+    ^calls: OptCalls{start: [Int]{}, to: [Int]{}}
     calls.start.try_reserve(count + 2) ?? ()
-    taken := [Int]{}
-    bounds := [Int]{}
+    ^taken: [Int]{}
+    ^bounds: [Int]{}
     if workers <= 1 {
         loop row in 0..<count {
             calls.start.push(calls.to.len())
@@ -4063,13 +4097,13 @@ ir_recursion_checks_parted: fn(m: ^IRModule, workers: Int) Never! {
         }
     } else {
         bounds = compiler_threads_partition(weights, workers)
-        scans := ir_recursion_scan_ranges(m.functions, bounds, count, 0)
-        total_to := 0
+        ^scans: ir_recursion_scan_ranges(m.functions, bounds, count, 0)
+        ^total_to: 0
         loop at in 0..<scans.len() -> total_to += scans[at].calls.len()
         calls.to.try_reserve(total_to) ?? ()
         loop at in 0..<scans.len() {
             base: calls.to.len()
-            from := 0
+            ^from: 0
             loop end in scans[at].ends {
                 calls.start.push(base + from)
                 from = end
@@ -4089,10 +4123,10 @@ ir_recursion_checks_parted: fn(m: ^IRModule, workers: Int) Never! {
         return
     }
     // Parts leave the list last-first: part `workers - 1` pops first.
-    parts := [IRRecursionPart]{}
-    part := workers - 1
+    ^parts: [IRRecursionPart]{}
+    ^part: workers - 1
     loop part >= 0 {
-        rows := [IRFunction]{}
+        ^rows: [IRFunction]{}
         loop m.functions.len() > bounds[part] {
             row: m.functions.pop() ?? break
             rows.push(row)
@@ -4115,10 +4149,10 @@ IRRecursionScan: struct {
 }
 
 ir_recursion_scan_range: fn(functions: [IRFunction], start: Int, end: Int, count: Int) -> IRRecursionScan Never! {
-    calls := [Int]{}
-    ends := [Int]{}
+    ^calls: [Int]{}
+    ^ends: [Int]{}
     ends.try_reserve(end - start) ?? ()
-    taken := [Int]{}
+    ^taken: [Int]{}
     loop row in start..<end {
         ir_recursion_calls(functions[row], count, calls, taken)
         ends.push(calls.len())
@@ -4131,7 +4165,7 @@ ir_recursion_scan_ranges: fn(functions: [IRFunction], bounds: [Int], count: Int,
     if at + 1 >= bounds.len() {
         return [IRRecursionScan]{ir_recursion_scan_range(functions, bounds[at], end, count)}
     }
-    scans := [IRRecursionScan]{}
+    ^scans: [IRRecursionScan]{}
     task.group ir_recursion_scan_threads {
         head: task ir_recursion_scan_range(functions, bounds[at], end, count)
         rest: ir_recursion_scan_ranges(functions, bounds, count, at + 1)
@@ -4159,13 +4193,13 @@ IRRecursionPart: struct {
 // Walks `parts` (ir_recursion_part), in part order: the last part on its
 // own thread, the ones before it the same way, and the first on this one.
 ir_recursion_walks: fn(count: Int, recursive: [Bool], parts: ^^[IRRecursionPart]) -> [IRRecursionPart] Never! {
-    rest := parts.move()
+    ^rest: parts.move()
     last: rest.pop() ?? return rest
     if rest.len() == 0 {
         rest.push(ir_recursion_part(count, recursive, last.move()))
         return rest
     }
-    done := [IRRecursionPart]{}
+    ^done: [IRRecursionPart]{}
     task.group ir_recursion_threads {
         head: task ir_recursion_part(count, recursive, last.move())
         done = ir_recursion_walks(count, recursive, rest.move())
@@ -4177,7 +4211,7 @@ ir_recursion_walks: fn(count: Int, recursive: [Bool], parts: ^^[IRRecursionPart]
 // One part's walk: its functions' calls while `recursive` is empty, else
 // their stack checks and the removal of their entry checks.
 ir_recursion_part: fn(count: Int, recursive: [Bool], part: ^^IRRecursionPart) -> IRRecursionPart Never! {
-    walked := part.move()
+    ^walked: part.move()
     start: walked.start
     scanning: recursive.len() == 0
     loop row in 0..<walked.functions.len() {
@@ -4194,7 +4228,7 @@ ir_recursion_part: fn(count: Int, recursive: [Bool], part: ^^IRRecursionPart) ->
 // Appends the functions `f` calls to `calls` (`count` once for its calls
 // through a function value) and those whose address it takes to `taken`.
 ir_recursion_calls: fn(f: IRFunction, count: Int, calls: ^[Int], taken: ^[Int]) Never! {
-    indirect := false
+    ^indirect: false
     loop at in 0..<f.op.len() {
         op: f.op[at]
         callee: f.a[at]
@@ -4221,7 +4255,7 @@ ir_recursion_entry: fn(f: ^IRFunction, recursive: [Bool], id: Int, stacks: Bool)
         return
     }
     end: f.c[at + 1]
-    written := [Int]{}
+    ^written: [Int]{}
     loop k in at..<(end + 1) {
         row: IR_LINT_OPS[ir_op_code(f.op[k])]
         if ir_role_is_slot(row.dst) && f.dst[k] >= 0 -> written.push(f.dst[k])
@@ -4241,12 +4275,12 @@ ir_role_is_slot: fn(role: IRLintRole) -> Bool Never! { role == .Slot || role == 
 // holds and numbers its slots as if the check had never been built.
 ir_recursion_drop_slots: fn(f: ^IRFunction, written: [Int]) Never! {
     count: f.slot_type.len()
-    dropped := [Bool]{}
+    ^dropped: [Bool]{}
     dropped.try_reserve(count) ?? ()
     loop _ in 0..<count -> dropped.push(false)
-    any := false
-    min_w := count
-    max_w := -1
+    ^any: false
+    ^min_w: count
+    ^max_w: -1
     loop slot in written {
         if slot >= f.param_count && slot < count {
             dropped[slot] = true
@@ -4314,9 +4348,9 @@ ir_recursion_drop_slots: fn(f: ^IRFunction, written: [Int]) Never! {
     loop slot in f.scattered {
         if slot >= min_w && slot <= max_w -> dropped[slot] = false
     }
-    renamed := [Int]{}
+    ^renamed: [Int]{}
     renamed.try_reserve(count) ?? ()
-    kept := 0
+    ^kept: 0
     loop slot in 0..<count {
         if dropped[slot] {
             renamed.push(-1)
@@ -4394,7 +4428,7 @@ ir_recursion_drop_slots: fn(f: ^IRFunction, written: [Int]) Never! {
         s: f.scattered[k]
         if s >= min_w -> f.scattered[k] = renamed[s]
     }
-    write := 0
+    ^write: 0
     loop slot in 0..<count {
         if dropped[slot] -> next
         if write != slot {
@@ -4409,13 +4443,13 @@ ir_recursion_drop_slots: fn(f: ^IRFunction, written: [Int]) Never! {
         write += 1
     }
     loop f.slot_type.len() > kept {
-        _ := f.slot_type.pop()
-        _ := f.slot_kind.pop()
-        _ := f.slot_name.pop()
-        _ := f.slot_line.pop()
-        _ := f.slot_fixed.pop()
-        _ := f.slot_site.pop()
-        _ := f.slot_formal.pop()
+        ^_: f.slot_type.pop()
+        ^_: f.slot_kind.pop()
+        ^_: f.slot_name.pop()
+        ^_: f.slot_line.pop()
+        ^_: f.slot_fixed.pop()
+        ^_: f.slot_site.pop()
+        ^_: f.slot_formal.pop()
     }
 }
 
@@ -4437,10 +4471,10 @@ ir_slot_renamed: fn(renamed: [Int], role: IRLintRole, value: Int) -> Int Never! 
 #Test("recursion checks keep the entry checks of recursive bodies only, on any number of parts") {
     loop stops in ([Bool]{false, true}) {
         loop workers in 1..<5 {
-            m := ir_module_new()
+            ^m: ir_module_new()
             m.stop_points = stops
             loop id in 0..<5 {
-                f := ir_function_new("f{id}", "test:recursion.jet.f{id}", "f{id}", "recursion.jet", 1)
+                ^f: ir_function_new("f{id}", "test:recursion.jet.f{id}", "f{id}", "recursion.jet", 1)
                 if id < 4 {
                     f.entry_check = ir_emit(f, IROp.Call, 0, 4, -1, 0, 1)
                     _: ir_emit(f, IROp.If, -1, 0, -1, 2, 1)
@@ -4474,13 +4508,13 @@ ir_slot_renamed: fn(renamed: [Int], role: IRLintRole, value: Int) -> Int Never! 
 // f1 is the poll. Without the check the sum is s1, reading the parameter.
 // f2 calls itself, so it keeps its check and its slots.
 #Test("a removed entry check leaves no slot of its own behind") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     loop id in 0..<3 {
         if id == 1 {
             m.functions.push(ir_function_new("f1", "test:slots.jet.f1", "f1", "slots.jet", 1))
             next
         }
-        f := ir_function_new("f{id}", "test:slots.jet.f{id}", "f{id}", "slots.jet", 1)
+        ^f: ir_function_new("f{id}", "test:slots.jet.f{id}", "f{id}", "slots.jet", 1)
         param: ir_slot(f, 0, IRSlotKind.Param, -1, 1)
         stopped: ir_slot(f, 0, IRSlotKind.Temp, -1, 2)
         status: ir_slot(f, 0, IRSlotKind.Temp, -1, 3)
@@ -4517,9 +4551,9 @@ ir_slot_renamed: fn(renamed: [Int], role: IRLintRole, value: Int) -> Int Never! 
 // callee whose address the module takes calls back into it: `apply` calls
 // the value it takes from `leaf`, which calls nothing.
 #Test("a call through a function value takes the stack check only on a cycle") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     m.stop_points = true
-    caller := ir_function_new("apply", "test:apply.jet.apply", "apply", "apply.jet", 1)
+    ^caller: ir_function_new("apply", "test:apply.jet.apply", "apply", "apply.jet", 1)
     _: ir_emit(caller, IROp.FunctionAddress, 0, 1, -1, -1, 1)
     _: ir_emit(caller, IROp.CallIndirect, -1, 0, -1, 0, 1)
     m.functions.push(caller)
@@ -4587,7 +4621,7 @@ ir_stop_catches: fn(m: ^IRModule, b: ^IRBuilder) Never! {
     b.stopping = true
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     word_row: ir_word_row(m)
-    index := b.catches.len() - 1
+    ^index: b.catches.len() - 1
     loop index >= 0 {
         frame: b.catches[index]
         index -= 1
@@ -4622,7 +4656,7 @@ ir_stop_poll: fn(m: ^IRModule, key: String) -> Int Never! {
         key == IR_STOP_TURN_KEY -> "jet_ir_stop_turn"
         else -> "jet_ir_stop_poll"
     }
-    f := ir_function_new(name, key, name, "", 0)
+    ^f: ir_function_new(name, key, name, "", 0)
     f.result = ir_type_row(m, Type.Bool) ?? 0
     // An asm leaf with no template: never inlined.
     f.asm = Val(IRAsmLeaf{code: [U8]{}, regs: [Int]{}, result: 0})
@@ -4638,12 +4672,12 @@ ir_stop_poll: fn(m: ^IRModule, key: String) -> Int Never! {
 // once it has read the result the function left in `cell`, so the
 // references the result holds are given back.
 ir_cell_drop: fn(m: ^IRModule, name: String, ty: Int) -> Int Never! {
-    d := ir_function_new(name, name, name, "", 0)
+    ^d: ir_function_new(name, name, name, "", 0)
     cell: ir_slot(d, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "cell"), 0)
     value: ir_slot(d, ty, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(d, if m.types[ty].kind == .Aggregate -> IROp.Offset else -> IROp.Load, value, cell, 0, -1, 0)
-    _ := ir_emit(d, IROp.Drop, -1, value, -1, -1, 0)
-    _ := ir_emit(d, IROp.Return, -1, -1, -1, -1, 0)
+    ^_: ir_emit(d, if m.types[ty].kind == .Aggregate -> IROp.Offset else -> IROp.Load, value, cell, 0, -1, 0)
+    ^_: ir_emit(d, IROp.Drop, -1, value, -1, -1, 0)
+    ^_: ir_emit(d, IROp.Return, -1, -1, -1, -1, 0)
     id: m.functions.len()
     ir_function_bind(m, name, id)
     m.functions.push(d)
@@ -4660,7 +4694,7 @@ ir_stack_mark: fn(m: ^IRModule) -> Int Never! {
     found: ir_keyed_function(m, IR_STACK_MARK_KEY) ?? -1
     if found >= 0 -> return found
     name: "jet_ir_stack_mark"
-    f := ir_function_new(name, IR_STACK_MARK_KEY, name, "", 0)
+    ^f: ir_function_new(name, IR_STACK_MARK_KEY, name, "", 0)
     f.result = ir_word_row(m)
     f.asm = Val(IRAsmLeaf{code: [U8]{U8{72}, U8{141}, U8{69}, U8{16}}, regs: [Int]{}, result: -1})
     id: m.functions.len()
@@ -4685,12 +4719,12 @@ ir_stop_return: fn(m: ^IRModule, b: ^IRBuilder) Never! {
         open: b.transactions
         b.transactions = [IRTxFrame]{}
         program: b.program.copy()
-        index := open.len() - 1
+        ^index: open.len() - 1
         loop index >= 0 {
             frame: open[index]
             index -= 1
             if frame.snapshots.len() > 0 && program == .Val(p) {
-                position := frame.snapshots.len() - 1
+                ^position: frame.snapshots.len() - 1
                 loop position >= 0 {
                     ir_tx_restore(m, p, b, frame.snapshots[position], Span{start: 0, end: 0})
                     position -= 1
@@ -4766,7 +4800,7 @@ ir_alloc_row: fn(m: ^IRModule, p: IRProgram, row: Int, ty: Type) -> Int Never! {
 // (IRModule.alloc_held).
 ir_alloc_row_holding: fn(m: ^IRModule, p: IRProgram, row: Int, ty: Type, held: Int) -> Int Never! {
     if !m.alloc_types -> return row
-    layout := m.types[row].copy()
+    ^layout: m.types[row].copy()
     layout.ty = ir_intern_tid(m, p, Type.Apply{name: IR_ALLOC_TYPE, args: [Type]{ir_untag(ty)}})
     interned: ir_intern_type(m, "{IR_ALLOC_TYPE}:{type_carrier_identity(ty)}", layout)
     if held >= 0 && m.alloc_held.get(interned) == None -> m.alloc_held[interned] = held
@@ -4817,7 +4851,7 @@ ir_alloc_served: fn(m: IRModule, row: Int) -> IRAllocServed? Never! {
 // Only a `--checked-alloc` module's allocation words name what they serve,
 // each laid out as the plain row it stands for.
 #Test("an allocation word names the type its storage serves only in a checked-alloc module") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     p: ir_program_standalone()
     word: ir_word_row(m)
     pointer: ir_pointer_row(m)
@@ -4827,7 +4861,7 @@ ir_alloc_served: fn(m: IRModule, row: Int) -> IRAllocServed? Never! {
     buffer: ir_list_alloc_row(m, p, word)
     assert(buffer != word && ir_list_alloc_row(m, p, word) == buffer)
     assert(m.types[buffer].kind == m.types[word].kind && m.types[buffer].size == 8 && m.types[buffer].bits == m.types[word].bits)
-    served := ""
+    ^served: ""
     if ir_module_row_ty(m, buffer) == .Apply(name, args) && args.len() == 1 && args[0] == .List(element) {
         served = "{name} {ir_type_name(element)}"
     }
@@ -4845,7 +4879,7 @@ ir_string_row: fn(m: ^IRModule) -> Int Never! { ir_type_row(m, Type.String) ?? 0
 // A source location argument triple: (path address, path length, line).
 ir_location: fn(m: ^IRModule, b: ^IRBuilder, line: Int) -> [Int] Never! {
     path: b.f.source_file
-    args := ir_static_text(m, b, path)
+    ^args: ir_static_text(m, b, path)
     word_row: ir_word_row(m)
     slot: ir_temp(m, b, word_row)
     ir_emit(b.f, IROp.Const, slot, line, -1, -1, b.line)
@@ -4857,8 +4891,8 @@ ir_location: fn(m: ^IRModule, b: ^IRBuilder, line: Int) -> [Int] Never! {
 // a scalar a load (not owned: the aggregate keeps it); a recursive edge is
 // read through its wrapper box.
 ir_member_read: fn(m: ^IRModule, b: ^IRBuilder, base: Int, member: IRMember) -> Int Never! {
-    holder := base
-    offset := member.offset
+    ^holder: base
+    ^offset: member.offset
     if member.boxed {
         pointer_row: ir_pointer_row(m)
         holder = ir_temp(m, b, pointer_row)
@@ -4879,8 +4913,8 @@ ir_member_read: fn(m: ^IRModule, b: ^IRBuilder, base: Int, member: IRMember) -> 
 // aggregate closes it.
 ir_member_write: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, member: IRMember, value: Int, place: Int) Never! {
     ir_close_disarm(b, value)
-    holder := base
-    offset := member.offset
+    ^holder: base
+    ^offset: member.offset
     if member.boxed {
         size: m.types[member.ty].size
         holder = ir_wrapper_alloc(m, p, b, if size < 8 -> 8 else -> size, place, member.ty)
@@ -4907,7 +4941,7 @@ ir_member_of: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, base: Int, name: Stri
 // The member `name` of the struct (or tuple) of type row `row`.
 ir_member_of_row: fn(m: ^IRModule, p: IRProgram, row: Int, name: String) -> IRMember? Never! {
     ty: ir_untag(ir_row_ty(m, p, row))
-    members := [IRMember]{}
+    ^members: [IRMember]{}
     if ty == .Tuple(fields) -> members = ir_tuple_members(m, p, fields) ?? return None else {
         nominal: ir_nominal_name(ty) ?? return None
         definition: ir_type_def(p, nominal) ?? return None
@@ -5106,7 +5140,7 @@ ir_load_at: fn(m: IRModule, b: ^IRBuilder, base: Int, offset: Int, row: Int) -> 
 ir_result_box: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, success: Bool, payload: Int) -> Int Never! {
     line: b.line
     row: ir_value_type(m, p, ty) ?? ir_pointer_row(m)
-    widest := 0
+    ^widest: 0
     if ir_untag(ty) == .Result(ok_ty, err_ty) {
         ok_size: ir_type_size(m, p, ok_ty)
         err_size: ir_type_size(m, p, err_ty)
@@ -5166,7 +5200,9 @@ ir_adapt: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, row: Int, spa
     }
     if have_box && !want_box {
         // A view Result's Ok is a view of its allocator's storage.
-        if ir_view_result(ir_row_ty(m, p, have)) -> return ir_view_result_payload(m, p, b, slot, row)
+        if ir_view_result(ir_row_ty(m, p, have)) {
+            return ir_view_result_payload(m, p, b, slot, row)
+        }
         // A fresh Result box hands its payload over (ir_box_take).
         if b.fresh[slot] -> return ir_box_take(m, p, b, slot, 8, row)
         return ir_load_at(m, b, slot, 8, row)
@@ -5253,8 +5289,8 @@ ir_result_rebox: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, row: I
     want_raw: ir_row_ty(m, p, row)
     have_ty: ir_untag(have_raw)
     want_ty: ir_untag(want_raw)
-    from := [Type]{}
-    to := [Type]{}
+    ^from: [Type]{}
+    ^to: [Type]{}
     if have_ty == .Result(ok, err) -> from = [Type]{ok.copy(), err.copy()}
     if want_ty == .Result(ok, err) -> to = [Type]{ok.copy(), err.copy()}
     if from.len() != 2 || to.len() != 2 {
@@ -5386,7 +5422,7 @@ ir_option_set: fn(m: IRModule, b: ^IRBuilder, result: Int, made: Int) Never! {
 ir_option_unbox: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, boxed: Int, row: Int) -> Int Never! {
     out: ir_fresh_temp(m, b, row)
     ir_option_none(m, b, out)
-    item_row := row
+    ^item_row: row
     if m.types[row].drop == "" && ir_untag(ir_row_ty(m, p, row)) == .Option(inner) {
         item_row = ir_value_type(m, p, inner) ?? row
     }

@@ -80,7 +80,7 @@ sema_loop_range_facts: fn(tree: BodyTree, local: String, start: Int, end: Int, s
     high: sema_loop_int_literal(tree, end) ?? return None
     if low < 0 || high >= SEMA_LOOP_EXTENT_LIMIT -> return None
     extent: if exclusive -> high else -> high + 1
-    scan := SemaLoopScan{local: local, extent: extent, readable: true, early_exit: false, effect_free: true, independent: true, aliasing_free: true, element: None, proven: [Int]{}, written: [String]{}, read_elsewhere: [String]{}}
+    ^scan: SemaLoopScan{local: local, extent: extent, readable: true, early_exit: false, effect_free: true, independent: true, aliasing_free: true, element: None, proven: [Int]{}, written: [String]{}, read_elsewhere: [String]{}}
     loop row in body -> sema_loop_scan_stmt(tree, row, scan, program, context)
     if !scan.readable -> return None
     loop name in scan.read_elsewhere {
@@ -103,7 +103,9 @@ sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: ^SemaLoopScan, program: 
     if statement == {
         .Assign(place, op, value, _, _) -> {
             // A compound write of anything but a Float can overflow or divide by zero.
-            if op != None && body_type_id(tree, value).id != TYPE_ID_FLOAT.id -> scan.effect_free = false
+            if op != None && body_type_id(tree, value).id != TYPE_ID_FLOAT.id {
+                scan.effect_free = false
+            }
             if place == {
                 .Local(target) -> {
                     if target.name == scan.local -> scan.readable = false
@@ -127,7 +129,9 @@ sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: ^SemaLoopScan, program: 
         }
         .Return(value, _) -> {
             scan.early_exit = true
-            if value == .Val(returned) -> sema_loop_scan_expr(tree, returned, scan, program, context)
+            if value == .Val(returned) {
+                sema_loop_scan_expr(tree, returned, scan, program, context)
+            }
         }
         .Break(_, _) | .Continue(_, _) -> { scan.early_exit = true }
         .Inline(rows, _) -> {
@@ -154,7 +158,9 @@ sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: ^SemaL
 // the rounds independent; any other place does not.
 sema_loop_scan_write: fn(tree: BodyTree, target: Int, scan: ^SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     if body_node(tree, target).kind == .Index(base, index, _, _, _, _) {
-        if scan.element == None -> scan.element = Val(sema_type_syntax_in(program, context, body_type_id(tree, target)))
+        if scan.element == None {
+            scan.element = Val(sema_type_syntax_in(program, context, body_type_id(tree, target)))
+        }
         name: sema_loop_local_name(tree, base) ?? ""
         if sema_loop_scan_access(tree, base, index, scan, program, context) && name != "" {
             if !scan.written.contains(name) -> scan.written.push(name)
@@ -202,7 +208,9 @@ sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: ^SemaLoopScan, program: S
             // Float arithmetic and comparisons cannot stop; integer
             // arithmetic can overflow or divide by zero.
             tid: body_type_id(tree, id)
-            if overflow || (tid.id != TYPE_ID_FLOAT.id && tid.id != TYPE_ID_BOOL.id) -> scan.effect_free = false
+            if overflow || (tid.id != TYPE_ID_FLOAT.id && tid.id != TYPE_ID_BOOL.id) {
+                scan.effect_free = false
+            }
             sema_loop_scan_expr(tree, lhs, scan, program, context)
             sema_loop_scan_expr(tree, rhs, scan, program, context)
         }
@@ -220,7 +228,9 @@ sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: ^SemaLoopScan, program: S
         }
         .Field(receiver, _) -> { sema_loop_scan_expr(tree, receiver, scan, program, context) }
         .Index(base, index, _, _, _, _) -> {
-            if scan.element == None -> scan.element = Val(sema_type_syntax_in(program, context, body_type_id(tree, id)))
+            if scan.element == None {
+                scan.element = Val(sema_type_syntax_in(program, context, body_type_id(tree, id)))
+            }
             if !sema_loop_scan_access(tree, base, index, scan, program, context) {
                 name: sema_loop_local_name(tree, base) ?? ""
                 if name != "" -> scan.read_elsewhere.push(name)

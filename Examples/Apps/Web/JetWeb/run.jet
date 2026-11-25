@@ -54,7 +54,7 @@ order_for: fn(id: Int) -> Order {
 }
 
 order_rows: fn() -> [Order] {
-    rows := [Order]{}
+    ^rows: [Order]{}
     loop id in 0..<100000 -> rows.push(order_for(id + 1))
     return rows
 }
@@ -118,13 +118,13 @@ error_page: fn() -> WebPage {
 }
 
 add_order_to_cart: fn(cart: Cart) -> Cart {
-    ids := cart.ids.copy()
+    ^ids: cart.ids.copy()
     ids.push(41)
     return Cart{ids: ids}
 }
 
 cart_seed: fn(search: OrderSearch) -> Cart {
-    ids := [Int]{}
+    ^ids: [Int]{}
     if search.cart > 0 -> ids.push(41)
     return Cart{ids: ids}
 }
@@ -152,7 +152,7 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
     refresh_link: url.percent_encode(json.to_string(refresh_search) ?? panic("JSON encode"))
     cart_link: url.percent_encode(json.to_string(cart_search) ?? panic("JSON encode"))
     ship_data: ShipForm{id: id, carrier: "Parcel", tracking: "PX-41"}
-    typed_form := web.form(ShipForm, action: submit_ship_order)
+    ^typed_form: web.form(ShipForm, action: submit_ship_order)
     typed_form.set(.id, "{ship_data.id}") ?? panic("typed id value")
     typed_form.set(.carrier, ship_data.carrier) ?? panic("typed carrier value")
     typed_form.set(.tracking, ship_data.tracking) ?? panic("typed tracking value")
@@ -161,7 +161,7 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
 
     // query.load seeds the cache with route data and reuses its loader for
     // refreshes. Marking it stale exposes stale → fetching → fresh to the panel.
-    orders_query := query.load<OrderError>(
+    ^orders_query: query.load<OrderError>(
         "orders.list",
         "orders",
         json.to_string(loaded) ?? panic("JSON encode"),
@@ -179,13 +179,13 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
     form0: forms.new("/actions/ship-order-progressive")
     form1: forms.field(form0, "id", "Int", true) ?? panic("id field")
     form2: forms.field(form1, "carrier", "String", true) ?? panic("carrier field")
-    form3 := forms.field(form2, "tracking", "String", true) ?? panic("tracking field")
+    ^form3: forms.field(form2, "tracking", "String", true) ?? panic("tracking field")
     forms.set(form3, "id", "{ship_data.id}") ?? panic("id value")
     forms.set(form3, "carrier", ship_data.carrier) ?? panic("carrier value")
     forms.set(form3, "tracking", ship_data.tracking) ?? panic("tracking value")
     forms.blur(form3, "carrier") ?? panic("carrier blur")
     forms.validate(form3) ?? panic("form validation")
-    async_form := forms.validate_async(form3)
+    ^async_form: forms.validate_async(form3)
     submission: forms.submit(async_form) ?? panic("form submission")
     no_script_body: forms.no_script(async_form) ?? panic("no-script body")
     form_html: "<link rel=\"stylesheet\" href=\"/assets/App.css\">{forms.html(async_form)}"
@@ -196,7 +196,7 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
     // surface, even though the source dataset has 100,000 rows.
     rows: order_rows()
     row_count: rows.len()
-    orders_table := table.new_keyed("OrdersTable", rows, order_id)
+    ^orders_table: table.new_keyed("OrdersTable", rows, order_id)
     orders_table.with_column(table.column("id", "Int", fn(order) { order_id(order) }))
     orders_table.with_column(table.column("customer", "String", order_customer))
     orders_table.with_column(table.column("shipped", "Bool", order_shipped))
@@ -217,7 +217,7 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
     // A named store uses bounded history; a write publishes one recorded
     // transaction and one typed diff that survives a compatible development
     // reload.
-    cart := store.with_history("Cart", cart_seed(search), 8)
+    ^cart: store.with_history("Cart", cart_seed(search), 8)
     transaction: cart.set(add_order_to_cart(cart.value()))
     store_text: cart.facts_json()
 

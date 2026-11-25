@@ -59,8 +59,10 @@ jet_driver_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? N
             if args.len() == 0 -> return Val(BuildSessionValue.Enum{variant: variant})
         }
         .List(values) -> {
-            output := [BuildSessionValue]{}
-            loop value in values -> output.push(jet_driver_build_session_input(value) ?? return None)
+            ^output: [BuildSessionValue]{}
+            loop value in values {
+                output.push(jet_driver_build_session_input(value) ?? return None)
+            }
             return Val(BuildSessionValue.List{values: output})
         }
         // A [U8] reads back as its bytes (Values.jet); the session takes its
@@ -125,14 +127,14 @@ jet_driver_build_session_diagnostic: fn(error: BuildSessionDiagnostic) -> Diagno
     // through the build-rule row's metadata. Its prose is the project's,
     // reported as written.
     if diagnostic_registry_row(error.code) == None {
-        rule := diagnostic_from_registry("E3530", span, error.what, error.why, error.fix)
+        ^rule: diagnostic_from_registry("E3530", span, error.what, error.why, error.fix)
         rule.code = error.code
         rule.what = error.what
         rule.why = error.why
         rule.fix = error.fix
         return rule
     }
-    diagnostic := diagnostic_from_registry(error.code, span, error.what, error.why, error.fix)
+    ^diagnostic: diagnostic_from_registry(error.code, span, error.what, error.why, error.fix)
     if error.error == .Val(typed) {
         projection: build_session_error_projection(typed)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{
@@ -216,7 +218,7 @@ jet_driver_build_field_present: fn(data: TComptimeValue, name: String) -> TCompt
 jet_driver_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
     if value == .Failed(.Told(told)) {
         // An error union member keeps its record as the union case's payload.
-        error := told
+        ^error: told
         if told == .Enum(_, _, cases) && cases.len() == 1 -> error = cases[0].value
         if error == .Struct(name, _) {
             if name != "Err" -> return None
@@ -240,13 +242,13 @@ jet_driver_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) ->
                 return None
             }
         }
-        fields := [DiagnosticErrorField]{}
+        ^fields: [DiagnosticErrorField]{}
         loop field in rows {
             name: jet_driver_build_field_text(field, "name") ?? return None
             data: jet_driver_build_field_text(field, "value") ?? return None
             fields.push(DiagnosticErrorField{name: name, value: data})
         }
-        span := fallback
+        ^span: fallback
         if jet_driver_build_field_present(details, "source_span") == .Val(source) {
             first: jet_driver_build_field_int(source, "start") ?? return None
             last: jet_driver_build_field_int(source, "end") ?? return None
@@ -255,11 +257,11 @@ jet_driver_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) ->
         report: build_session_plan_report(message, span.start, span.end)
         // The structured code is the one the typed error carries (E3502),
         // whichever row the message's report reads.
-        code := report.code.copy()
+        ^code: report.code.copy()
         if jet_driver_build_field_present(error, "code") == .Val(carried) {
             if carried == .String(text) -> code = text
         }
-        diagnostic := diagnostic_from_registry(report.code, Val(span), report.what, report.why, report.fix)
+        ^diagnostic: diagnostic_from_registry(report.code, Val(span), report.what, report.why, report.fix)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{
             report: DiagnosticBuildError{
                 code: Val(code),
@@ -336,7 +338,7 @@ jet_driver_build_graph_file: fn(value: BuildGraphFile) -> TComptimeValue Never! 
 }
 
 jet_driver_build_graph_value: fn(graph: BuildGraph) -> TComptimeValue Never! {
-    targets := [TComptimeValue]{}
+    ^targets: [TComptimeValue]{}
     loop row in graph.targets {
         targets.push(
             TComptimeValue.Struct{
@@ -353,7 +355,7 @@ jet_driver_build_graph_value: fn(graph: BuildGraph) -> TComptimeValue Never! {
             },
         )
     }
-    keys := [TComptimeValue]{}
+    ^keys: [TComptimeValue]{}
     loop row in graph.action_keys {
         keys.push(
             TComptimeValue.Struct{
@@ -365,9 +367,9 @@ jet_driver_build_graph_value: fn(graph: BuildGraph) -> TComptimeValue Never! {
             },
         )
     }
-    nodes := [TComptimeValue]{}
+    ^nodes: [TComptimeValue]{}
     loop row in graph.nodes {
-        digests := [TComptimeValue]{}
+        ^digests: [TComptimeValue]{}
         loop digest in row.input_digests {
             digests.push(
                 TComptimeValue.Struct{

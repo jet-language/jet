@@ -72,7 +72,7 @@ byte_tail: fn(text: String, start: Int) -> String Never! { byte_slice(text, star
 
 // The comma-separated names of a list body, trimmed, empty ones dropped.
 names: fn(list: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop name in list.split(",") {
         trimmed: name.trim()
         if trimmed != "" -> out.push(trimmed.copy())
@@ -185,7 +185,7 @@ marked_lines: fn(source: String, table: String) -> [String] CoreRowsError! {
     if start < 0 || finish < 0 {
         return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: generated section markers are missing or out of order"))
     }
-    out := [String]{}
+    ^out: [String]{}
     loop line in byte_slice(source, start, start + finish).split("\n") {
         row: line.trim()
         if row.starts_with("{{") || row.starts_with("Collection") -> out.push(row.copy())
@@ -196,7 +196,7 @@ marked_lines: fn(source: String, table: String) -> [String] CoreRowsError! {
 
 // The collection-operation reference tables of core-library.md.
 render_operation_tables: fn(source: String) -> String CoreRowsError! {
-    laws := [CollectionLawRow]{}
+    ^laws: [CollectionLawRow]{}
     loop line in marked_lines(source, "COLLECTION LAWS") ?? return Err(err) {
         found: LAW_ROW.match(line) ?? return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: unreadable law row: {line}"))
         law: found.group(1) ?? ""
@@ -208,8 +208,8 @@ render_operation_tables: fn(source: String) -> String CoreRowsError! {
         cells: loop group in 2..<8 -> found.group(group) ?? ""
         laws.push(CollectionLawRow{law: law, cells: cells})
     }
-    operations := [CollectionOperation]{}
-    keys := [String]{}
+    ^operations: [CollectionOperation]{}
+    ^keys: [String]{}
     loop line in marked_lines(source, "COLLECTION OPERATIONS") ?? return Err(err) {
         found: OPERATION_ROW.match(line) ?? return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: unreadable operation row: {line}"))
         receivers: found.group(1) ?? ""
@@ -226,7 +226,7 @@ render_operation_tables: fn(source: String) -> String CoreRowsError! {
         if access_text(access) == "" {
             return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: {receivers}.{name} has unknown access {access}"))
         }
-        known := false
+        ^known: false
         loop seen in laws {
             if seen.law == law -> known = true
         }
@@ -241,7 +241,7 @@ render_operation_tables: fn(source: String) -> String CoreRowsError! {
             }
             keys.push(key)
         }
-        args := [String]{}
+        ^args: [String]{}
         loop arg in names(found.group(6) ?? "") {
             shape: if arg.starts_with("CollectionArg.") -> byte_tail(arg, byte_len("CollectionArg.")) else -> arg.copy()
             if arg_text(shape) == "" {
@@ -253,7 +253,7 @@ render_operation_tables: fn(source: String) -> String CoreRowsError! {
         operations.push(CollectionOperation{receivers: receivers, name: name, minimum: minimum, args: args, access: access, law: law, empty: found.group(10) ?? "", status: status})
     }
     loop facts in laws {
-        used := false
+        ^used: false
         loop row in operations {
             if row.law == facts.law -> used = true
         }
@@ -261,7 +261,7 @@ render_operation_tables: fn(source: String) -> String CoreRowsError! {
             return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: law {facts.law} has no operation row"))
         }
     }
-    lines := [String]{
+    ^lines: [String]{
         OPERATIONS_BEGIN,
         "<!-- Source: {OPERATIONS_SOURCE_PATH}; regenerate with jet Tools/Agent/CoreSourceRows.jet -->",
         "",
@@ -310,18 +310,18 @@ replace_operation_section: fn(doc: String, section: String) -> String CoreRowsEr
 // become the `kernel` of its rows; a bare `#FX` lists none, so a row naming
 // the type admits no machine effect.
 effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectRow] CoreRowsError! {
-    rows := [EffectRow]{}
+    ^rows: [EffectRow]{}
     lines: source.split("\n").to_list()
-    type_name := ""
-    family := false
-    cases := [String]{}
-    body := String?{None}
-    expert_body := String?{None}
-    parent := String?{None}
-    impl_seen := false
-    in_impl := false
-    kernel := [String]{}
-    listed := false
+    ^type_name: ""
+    ^family: false
+    ^cases: [String]{}
+    ^body: String?{None}
+    ^expert_body: String?{None}
+    ^parent: String?{None}
+    ^impl_seen: false
+    ^in_impl: false
+    ^kernel: [String]{}
+    ^listed: false
     loop index in 0..<lines.len() {
         raw: lines[index]
         comment: raw.find("//")
@@ -414,8 +414,8 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
             if family && cases.len() == 0 {
                 return Err(rows_fail("{place}: the effect family `{type_name}` has no cases"))
             }
-            case_rows := [EffectRow]{}
-            any := false
+            ^case_rows: [EffectRow]{}
+            ^any: false
             // A family under a parent case names its cases below that case.
             prefix: parent ?? type_name
             loop member in cases {
@@ -423,7 +423,7 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
                 if irreversible -> any = true
                 case_rows.push(EffectRow{name: "{prefix}.{member}", irreversible: irreversible})
             }
-            root := any
+            ^root: any
             if !family {
                 root = effect_fact(body, cases, None) ?? return Err(rows_fail("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`"))
             }
@@ -455,7 +455,7 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
 // The machine effects of a `#FX(…)` line above a Core effect: each entry a
 // root or leaf of `machine`, listed once, none denied.
 effect_kernel_list: fn(line: String, machine: [EffectRow], place: String) -> [String] CoreRowsError! {
-    kernel := [String]{}
+    ^kernel: [String]{}
     loop part in byte_slice(line, "#FX(".len(), line.len() - 1).split(",") {
         entry: part.trim().copy()
         known: loop row in machine {
@@ -479,7 +479,7 @@ effect_kernel_list: fn(line: String, machine: [EffectRow], place: String) -> [St
 // when the body is not the effect fact form. No body is `false`.
 effect_fact: fn(body: String?, cases: [String], member: String?) -> Bool? Never! {
     written: body ?? return Val(false)
-    holds := false
+    ^holds: false
     loop part in written.split("||") {
         term: part.trim()
         if {
@@ -498,7 +498,7 @@ effect_fact: fn(body: String?, cases: [String], member: String?) -> Bool? Never!
 
 // The effect names that are leaves (`Root.Member`) or, with `leaf` false, roots.
 effect_names: fn(rows: [EffectRow], leaf: Bool) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop row in rows {
         if row.name.contains(".") == leaf -> out.push(row.name)
     }
@@ -508,7 +508,7 @@ effect_names: fn(rows: [EffectRow], leaf: Bool) -> [String] Never! {
 // Lang.jet's generated block: the `Effect` enum of `roots`, from
 // LANG_BLOCK_BEGIN through LANG_BLOCK_END.
 render_lang_block: fn(roots: [String]) -> String Never! {
-    lines := [String]{
+    ^lines: [String]{
         LANG_BLOCK_BEGIN,
         "/// Effect roots that may appear in an `effect_name` row: the machine roots",
         "/// of {EFFECTS_PATH}, then Core's service effects of",
@@ -548,7 +548,7 @@ read_core_source_views: fn() -[FS]> CoreSourceViews CoreRowsError! {
     meta_effects: read_source(META_EFFECTS_PATH) ?? return Err(err)
     lang: read_source(LANG_PATH) ?? return Err(err)
     machine: effect_rows(effects, EFFECTS_PATH, None) ?? return Err(err)
-    declared := machine.copy()
+    ^declared: machine.copy()
     loop row in effect_rows(core_effects, CORE_EFFECTS_PATH, Val(machine)) ?? return Err(err) {
         declared.push(row)
     }

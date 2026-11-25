@@ -137,7 +137,7 @@ CLIParsed: struct {
 
 // `args[start..]` as an owned list.
 cli_tail: fn(args: [String], start: Int) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop index in start..<args.len() -> out.push(args[index])
     out
 }
@@ -145,7 +145,7 @@ cli_tail: fn(args: [String], start: Int) -> [String] Never! {
 // Strip every leading copy of `prefix`.
 cli_trim_start_matches: fn(text: String, prefix: String) -> String Never! {
     if prefix == "" -> return text.copy()
-    rest := text
+    ^rest: text
     loop rest.starts_with(prefix) -> rest = rest.removeprefix(prefix)
     rest
 }
@@ -163,10 +163,10 @@ cli_parse_args: fn(args: [String]) -> CLIParsed Never! { cli_parse_args_for("", 
 cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
     lock_verb: verb == JETPACK_LOCK_VERB
     lock_against_prefix: "{LOCK_DIFF_FLAG_AGAINST}="
-    flags := CLIFlags.empty()
-    positional := [String]{}
-    command := [String]?{None}
-    index := 0
+    ^flags: CLIFlags.empty()
+    ^positional: [String]{}
+    ^command: [String]?{None}
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         if arg == "--" {
@@ -312,7 +312,7 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
 // The arguments before the first `--`; invocation checks never read the
 // child command.
 cli_before_argument_separator: fn(args: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop arg in args {
         if arg == "--" -> break
         out.push(arg.copy())
@@ -352,7 +352,7 @@ cli_verb_flags: fn(verb: String) -> [String] Never! {
         TRANSITION_SPLIT_VERB | TRANSITION_FOLD_VERB -> [String]{TRANSITION_FLAG_CHECK}
         else -> [String]{}
     }
-    out := [String]{}
+    ^out: [String]{}
     loop flag in own -> out.push(flag)
     if scoped {
         loop flag in CLI_SCOPE_FLAGS -> out.push(flag)
@@ -377,14 +377,14 @@ cli_flag_spelling_head: fn(spelling: String) -> String Never! {
 // consumes it; only `--scope` leaves a following flag in place.
 cli_unknown_flag: fn(verb: String, args: [String]) -> String? Never! {
     legal: cli_verb_flags(verb)
-    index := 0
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         if arg == "--" -> break
         index += 1
         if !arg.starts_with("-") || arg == "-" -> next
-        takes_value := false
-        matched := false
+        ^takes_value: false
+        ^matched: false
         loop spelling in legal {
             head: cli_flag_spelling_head(spelling)
             if head.ends_with("=") -> matched = arg.starts_with(head) else {

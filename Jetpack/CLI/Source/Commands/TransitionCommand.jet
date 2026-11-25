@@ -49,7 +49,7 @@ cli_cmd_fold: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait
 cli_transition_result: fn(verb: String, result: TransitionResult, check_only: Bool, json: Bool) -[IO]> Int Never! {
     summary: result.summary
     if json {
-        changes := [Dyn]{}
+        ^changes: [Dyn]{}
         loop change in summary.changes {
             changes.push(report_status_object(StatusFields.new().with("path", Dyn.Text(change.path)).with("action", Dyn.Text(change.action.as_str()))))
         }

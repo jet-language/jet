@@ -32,13 +32,13 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
     // The block's `#Context` or `#Deadline` application binds first; fields
     // that do not bind (E0930) get no E0762 of their own.
     signature_valid: sema_marker_rules_check_context_fact(span, check)
-    complete := signature_valid
-    guards := [TContextGuard]{}
+    ^complete: signature_valid
+    ^guards: [TContextGuard]{}
     loop field in fields {
         if !sema_context_field_settable(field.name) {
             name_span: Span{start: field.span.start, end: field.span.start + field.name.len()}
             found: sema_context_label_key(field.name, check) ?? {
-                _ := sema_check_expression(field.value, None, check)
+                ^_: sema_check_expression(field.value, None, check)
                 check.diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field or key", "`#Context` sets `allocator`, `logger` and `on_stop`, and the constants a package declares with `#ContextKey`", "declare `#ContextKey {field.name}: …` or write `#Context(allocator: …)`, `#Context(logger: …)` or `#Context(on_stop: …)`"))
                 complete = false
                 next
@@ -57,7 +57,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             next
         }
         if field.name == "allocator" && sema_stmt_context_scratch(field.value, check) {
-            guards.push(TContextGuard{field: field.name, value: sema_tree_node(Type.Named{name: "Arena"}, TExprKind.HostCall{call: THostCall.ContextRead{field: "scratch"}}, field.span)})
+            guards.push(TContextGuard{field: field.name, value: sema_tree_node(Type.Named{name: SEMA_MEMORY_ARENA}, TExprKind.HostCall{call: THostCall.ContextRead{field: "scratch"}}, field.span)})
             next
         }
         checked: sema_check_expression(field.value, None, check) ?? {
@@ -92,7 +92,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
     // Each open block's allocator stays in place while the block runs
     // (Ownership/Checks.jet SemaOwnershipBlockAllocator).
     open_allocators: check.state.block_allocators.len()
-    names_allocator := false
+    ^names_allocator: false
     loop field in fields {
         if field.name != "allocator" -> next
         names_allocator = true
@@ -107,7 +107,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
     check.scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else if deadline_only -> previous_allocation else -> 1
     nested: sema_stmt_check_block(body, return_type, check, "context@{span.start}", loop_depth)
     loop check.state.block_allocators.len() > open_allocators {
-        _ := check.state.block_allocators.pop()
+        ^_: check.state.block_allocators.pop()
     }
     check.scopes.context_allocation = previous_allocation
     if !nested.complete -> return false
@@ -147,11 +147,10 @@ sema_stmt_deadline_instant: fn(ty: Type) -> Bool Never! {
     false
 }
 
+// Whether `ty` is a core.mem allocator (sema_call_memory_allocator_name),
+// not a view of one.
 sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Named(name) -> name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed"
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    }
+    ty == .Named(_) && sema_call_memory_allocator_name(ty) != None
 }
 
 // Whether `ty` names a type that implements core.mem's `Allocator`, as the
@@ -185,9 +184,9 @@ sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, check: ^S
         check.diagnostics.push(sema_error("E0003", field.span, "core.mem's allocator handler is missing", "a `#Context(allocator:)` block over a user allocator calls the core.mem function that fills the AllocatorHandler role", "load the registered Core source module"))
         return None
     }
-    args := [CallArg]{CallArg{convention: AccessConvention.Write, expr: field.value, span: field.span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
+    ^args: [CallArg]{CallArg{convention: AccessConvention.Write, expr: field.value, span: field.span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     check.scopes.ownership_call_depth += 1
-    value := sema_call_core_check_source_owned(target, "#Context(allocator:)", [Type]{ty}, args, field.span, None, check)
+    ^value: sema_call_core_check_source_owned(target, "#Context(allocator:)", [Type]{ty}, args, field.span, None, check)
     check.scopes.ownership_call_depth -= 1
     value
 }

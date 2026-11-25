@@ -42,9 +42,9 @@ SemaProgramEntrySite: struct {
 // A file-scope `name: value` binding is a module global the parser already
 // registers as a declaration.
 sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) -> Bool {
-    statements := [SemaProgramEntrySite]{}
-    runs := [SemaProgramEntrySite]{}
-    entry := -1
+    ^statements: [SemaProgramEntrySite]{}
+    ^runs: [SemaProgramEntrySite]{}
+    ^entry: -1
     loop index in 0..<graph.modules.len() {
         if module_is_core(graph.modules[index].module_identity) -> next
         if graph.modules[index].module_identity == graph.entry_module_identity -> entry = index
@@ -58,7 +58,7 @@ sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagn
         separate: graph.modules[index].module_identity != graph.entry_module_identity && graph.modules[index].namespace_private.contains("run")
         sema_program_entry_sites(index, graph.modules[index].program.imports, graph.modules[index].program.items, statements, runs, separate_entry: separate)
     }
-    found := false
+    ^found: false
     loop site in statements {
         if runs.len() == 0 && site.row == entry -> next
         chosen: sema_program_entry_run(runs, site.row)
@@ -150,18 +150,16 @@ sema_script_entry: fn(program: ^Program) {
             }
         }
     }
-    statements := [Stmt]{}
+    ^statements: [Stmt]{}
     compiler_transfer_rows<Stmt>(statements, program.script_body)
     // Popped twice, the items come back in source order.
-    reversed := [Item]{}
-    loop program.items.len() > 0 {
-        reversed.push(program.items.pop() ?? break)
-    }
-    locals := [Stmt]{}
+    ^reversed: [Item]{}
+    loop program.items.len() > 0 { reversed.push(program.items.pop() ?? break) }
+    ^locals: [Stmt]{}
     loop {
-        item := reversed.pop() ?? break
+        ^item: reversed.pop() ?? break
         if item == .Const(definition) && sema_script_entry_local(definition) {
-            binding := ast_binding(definition.name.copy(), definition.name_span, definition.mutable, definition.value.copy(), None)
+            ^binding: ast_binding(definition.name.copy(), definition.name_span, definition.mutable, definition.value.copy(), None)
             binding.ty = definition.ty
             binding.meta = definition.meta
             binding.markers = definition.markers
@@ -173,7 +171,7 @@ sema_script_entry: fn(program: ^Program) {
     }
     // `statements` and `locals` are each in source order: take the later of
     // the two tails into `order`, which then pops in source order.
-    order := [Stmt]{}
+    ^order: [Stmt]{}
     loop {
         local_last: locals.len() > 0 && (statements.len() == 0 || sema_compiler_index_stmt_span(locals[locals.len() - 1]).start > sema_compiler_index_stmt_span(statements[statements.len() - 1]).start)
         // With both lists empty `statements` pops nothing, which ends it.
@@ -182,10 +180,8 @@ sema_script_entry: fn(program: ^Program) {
     }
     start: sema_compiler_index_stmt_span(order[order.len() - 1]).start
     end: sema_compiler_index_stmt_span(order[0]).end
-    entry := ast_func("run", Span{start: start, end: start}, Span{start: start, end: end})
-    loop order.len() > 0 {
-        entry.body.push(order.pop() ?? break)
-    }
+    ^entry: ast_func("run", Span{start: start, end: start}, Span{start: start, end: end})
+    loop order.len() > 0 { entry.body.push(order.pop() ?? break) }
     program.items.push(Item.Func{value: entry})
 }
 

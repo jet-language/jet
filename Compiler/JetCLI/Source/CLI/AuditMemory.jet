@@ -83,7 +83,7 @@ jet_cli_memory_parse_row: fn(value: JetCLIStatusValue, line: Int) -> JetCLIMemor
     start: jet_cli_memory_uint(value, "span_start", line)
     end: jet_cli_memory_uint(value, "span_end", line)
     if start > end -> return Err(jet_cli_read_error("memory ledger row {line} has a reversed span"))
-    expected := String?{None}
+    ^expected: String?{None}
     if jet_cli_status_get(value, "expected") == .Val(field) {
         if field != JetCLIStatusValue.Null {
             text: jet_cli_status_string(Val(field)) ?? return Err(jet_cli_read_error("memory ledger row {line} has invalid expected text"))
@@ -97,7 +97,7 @@ jet_cli_memory_parse_row: fn(value: JetCLIStatusValue, line: Int) -> JetCLIMemor
     if repair_values.len() > 16 {
         return Err(jet_cli_read_error("memory ledger row {line} has invalid repairs"))
     }
-    repairs := [String]{}
+    ^repairs: [String]{}
     loop repair in repair_values {
         text: jet_cli_status_string(Val(repair)) ?? return Err(jet_cli_read_error("memory ledger row {line} has an invalid repair"))
         if text == "" || text.len() > 4096 {
@@ -153,8 +153,8 @@ jet_cli_memory_read: fn(path: String) -[FS]> [JetCLIMemoryRow] JetCLIReadError! 
         return Err(jet_cli_read_error("memory ledger exceeds its 4 MiB safety limit"))
     }
     raw: cli_files.read(path) ?? return Err(jet_cli_read_error("cannot read memory ledger `{path}`: {jet_cli_io_error_text(err)}"))
-    rows := [JetCLIMemoryRow]{}
-    line := 0
+    ^rows: [JetCLIMemoryRow]{}
+    ^line: 0
     loop text in raw.lines() {
         if text.trim() == "" -> next
         if rows.len() >= 65536 {
@@ -166,15 +166,15 @@ jet_cli_memory_read: fn(path: String) -[FS]> [JetCLIMemoryRow] JetCLIReadError! 
     }
     // Stable merge sort by the same tuple; avoid quadratic insertion when the
     // bounded ledger contains its full 65,536 rows.
-    width := 1
+    ^width: 1
     loop width < rows.len() {
-        merged := [JetCLIMemoryRow]{}
-        start := 0
+        ^merged: [JetCLIMemoryRow]{}
+        ^start: 0
         loop start < rows.len() {
             middle: if start + width < rows.len() -> start + width else -> rows.len()
             end: if start + width * 2 < rows.len() -> start + width * 2 else -> rows.len()
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
                 if {
                     right >= end || (left < middle && !jet_cli_memory_before(rows[right], rows[left])) -> {
@@ -213,7 +213,7 @@ jet_cli_audit_memory_at: fn(root: String, args: [String], color: Bool, json: Boo
     path: jet_cli_control_path("memory_ledger", "audit memory", args, "{root}/.jet/memory/ledger-v1.jsonl")
     rows: jet_cli_memory_read(path) ?? return jet_cli_memory_fail(err.message, color, json)
     if json {
-        values := [JetCLIStatusValue]{}
+        ^values: [JetCLIStatusValue]{}
         loop row in rows {
             values.push(
                 jet_cli_status_object(
@@ -242,7 +242,7 @@ jet_cli_audit_memory_at: fn(root: String, args: [String], color: Bool, json: Boo
         return jet_cli_done("{jet_cli_status_render("audit.memory", true, [JetCLIStatusField]{jet_cli_status_field("memory", memory)})}\n", "", JET_DRIVER_EXIT_OK)
     }
     title: diagnostic_theme_paint(color, "1;36", "jet audit memory")
-    out := "{title}\nCoverage: exercised runs only\nWitnesses: {rows.len()}\n"
+    ^out: "{title}\nCoverage: exercised runs only\nWitnesses: {rows.len()}\n"
     if rows.len() == 0 -> out = "{out}\nNo runtime memory witnesses recorded.\n"
     loop row in rows {
         out = "{out}\n{row.source}:{row.span_start}..{row.span_end}  {row.kind} {diagnostic_display_name(row.code)}\n  Scope: {row.scope}\n  Provenance: {row.provenance}\n  Witness: {row.detail}\n"

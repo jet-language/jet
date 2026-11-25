@@ -8,7 +8,7 @@ run: fn() {
     child.stdin.write("hello, ") ?? panic("text write failed")
     taken: child.stdin.write_some("pipe\n".bytes()) ?? panic("byte write failed")
     child.stdin.close()
-    received := [U8]{}
+    ^received: [U8]{}
     loop {
         chunk: child.stdout.read_bytes(64) ?? panic("read_bytes failed")
         if chunk.len() == 0 -> break

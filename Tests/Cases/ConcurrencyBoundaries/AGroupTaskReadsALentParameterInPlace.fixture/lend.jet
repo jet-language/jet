@@ -6,7 +6,7 @@ Graph: struct {
 }
 
 where_is: fn(graph: Graph) -> Int {
-    at := 0
+    ^at: 0
     #Unsafe("reads the address of the graph's storage, not its bytes") {
         at = mem.address_of(graph)
     }
@@ -14,7 +14,7 @@ where_is: fn(graph: Graph) -> Int {
 }
 
 total: fn(graph: Graph, from: Int, to: Int) -> Int {
-    sum := 0
+    ^sum: 0
     loop index in from..<to {
         loop value in graph.rows[index] -> sum += value
         sum += graph.names[index].len()
@@ -25,14 +25,14 @@ total: fn(graph: Graph, from: Int, to: Int) -> Int {
 // Three children read the graph the caller lends: two sum its halves, one
 // reports where it reads it.
 halves: fn(graph: Graph) -> Int {
-    home := 0
+    ^home: 0
     #Unsafe("reads the address of the graph's storage, not its bytes") {
         home = mem.address_of(graph)
     }
     print("a read parameter passes its place: {where_is(graph) == home}")
     mid: graph.rows.len()  // 2
-    out := 0
-    in_place := false
+    ^out: 0
+    ^in_place: false
     task.group g {
         left: task total(graph, 0, mid)
         right: task total(graph, mid, graph.rows.len())
@@ -45,7 +45,7 @@ halves: fn(graph: Graph) -> Int {
 }
 
 run: fn() {
-    graph := Graph{names: [String]{}, rows: [[Int]]{}}
+    ^graph: Graph{names: [String]{}, rows: [[Int]]{}}
     loop index in 0..<200 {
         graph.names.push("row {index}")
         graph.rows.push([Int]{index, index + 1})

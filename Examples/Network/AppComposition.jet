@@ -61,7 +61,7 @@ get: fn(addr: String, path: String) -> String NetError! {
     client: net.tcp_connect(addr) ?? return Err(err)
     crlf: "\r\n"
     client.write_bytes("GET {path} HTTP/1.1{crlf}Host: local{crlf}Connection: close{crlf}{crlf}".bytes()) ?? return Err(err)
-    parts := [String]{}
+    ^parts: [String]{}
     loop {
         part: client.read(8192) ?? break
         if part == "" -> break

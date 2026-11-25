@@ -84,8 +84,8 @@ JetCLITransactionFixtureRoot: struct {
     use_site: "run: fn() {{\n    value: 1\n    print(".len()
     keep: JetCLIFix{title: "change the value", edit: TextEdit{span: Span{start: literal, end: literal + 1}, new_text: "2"}, applicability: .Safe, safety: .BehaviorPreserving}
     breaks: JetCLIFix{title: "rename the use", edit: TextEdit{span: Span{start: use_site, end: use_site + "value".len()}, new_text: "missing"}, applicability: .Safe, safety: .BehaviorPreserving}
-    rejected := [JetCLIFixSkip]{}
-    refused := [JetCLIFixSkip]{}
+    ^rejected: [JetCLIFixSkip]{}
+    ^refused: [JetCLIFixSkip]{}
     checked: jet_cli_fix_checked(file, source, [JetCLIFixFile]{}, [JetCLIFix]{keep, breaks}, baseline, rejected, refused, "")
     assert(checked.source == "run: fn() {{\n    value: 2\n    print(value)\n}}\n")
     assert(checked.applied == 1)
@@ -105,7 +105,7 @@ JetCLITransactionFixtureRoot: struct {
     defer close(owner)
     file: "{root}/run.jet"
     head: "helper: fn(x: Int) -> Int {{ x }}\n\nrun: fn() {{\n"
-    body := ""
+    ^body: ""
     loop index in 0..<27 -> body = "{body}    print(gone_{index})\n"
     source: "{head}{body}}}\n"
     cli_files.write(file, source) ?? panic("run source")
@@ -114,8 +114,8 @@ JetCLITransactionFixtureRoot: struct {
     trade: JetCLIFix{title: "trade the errors", edit: TextEdit{span: Span{start: head.len(), end: head.len() + body.len()}, new_text: "    print(helpr(1))\n    print(helpr(2))\n"}, applicability: .Safe, safety: .BehaviorPreserving}
     traded: jet_cli_fix_errors(file, "{head}    print(helpr(1))\n    print(helpr(2))\n}}\n", [JetCLIFixFile]{}, [String?]{}, "")
     assert(traded.len() == 2 && (jet_cli_fix_added(traded, baseline) ?? -1) == 0)
-    rejected := [JetCLIFixSkip]{}
-    refused := [JetCLIFixSkip]{}
+    ^rejected: [JetCLIFixSkip]{}
+    ^refused: [JetCLIFixSkip]{}
     checked: jet_cli_fix_checked(file, source, [JetCLIFixFile]{}, [JetCLIFix]{trade}, baseline, rejected, refused, "")
     assert(checked.source == source && checked.applied == 0)
     assert(rejected.len() == 1 && rejected[0].reason.contains("helpr"))
@@ -139,7 +139,7 @@ JetCLITransactionFixtureRoot: struct {
     source: "{helpers}run: fn() {{\n    free: os_load_i64(1)\n    print(\"{{slab_unlnk(free)}}\")\n    print(\"{{slab_return(free)}}\")\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
     if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
-        .Refused(_) -> panic("the compiler refused the fixture")
+        .Refused(_) -> { panic("the compiler refused the fixture") }
         .Fixes(fixes, errors, _, _) -> {
             assert(errors.len() >= 2)
             loop fix in fixes {
@@ -161,11 +161,13 @@ JetCLITransactionFixtureRoot: struct {
     source: "run: fn() {{\n    print(\"{{same(2, 3)}} {{count(4)}}\")\n}}\n\nsame: fn(left: Int, right: Int) -> Bool {{\n    (left + MISSING_OFFSET) == (right + MISSING_OFFSET)\n}}\n\ncount: fn(limit: Int) -> Int {{\n    at := 0\n    loop at < limit {{\n        at += 1\n    }}\n    seen := false\n    seen = (at + MISSING_OFFSET) == limit && seen\n    at\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
     if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
-        .Refused(_) -> panic("the compiler refused the fixture")
+        .Refused(_) -> { panic("the compiler refused the fixture") }
         .Fixes(fixes, errors, _, _) -> {
             assert(errors.len() >= 2)
             loop fix in fixes {
-                if fix.edit.new_text.starts_with("_") || fix.edit.new_text == ":" -> panic("a fix rewrites a binding: {fix.title}")
+                if fix.edit.new_text.starts_with("_") || fix.edit.new_text == ":" {
+                    panic("a fix rewrites a binding: {fix.title}")
+                }
             }
         }
     }
@@ -185,11 +187,11 @@ JetCLITransactionFixtureRoot: struct {
     source: "{slot}\nrun: fn() {{\n    owners := [Slot:String]{{}}\n    owners[Slot{{start_ns: 10, label: \"a\"}}] = \"ann\"\n    print(owners.len())\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
     if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
-        .Refused(_) -> panic("the compiler refused the fixture")
+        .Refused(_) -> { panic("the compiler refused the fixture") }
         .Fixes(_, errors, repairs, _) -> {
             assert(errors.len() >= 1 && repairs.len() >= 1)
-            rejected := [JetCLIFixSkip]{}
-            refused := [JetCLIFixSkip]{}
+            ^rejected: [JetCLIFixSkip]{}
+            ^refused: [JetCLIFixSkip]{}
             checked: jet_cli_fix_checked(file, source, [JetCLIFixFile]{}, repairs, errors, rejected, refused, "")
             assert(rejected.len() == 0 && refused.len() == 0)
             assert(checked.applied == 2)

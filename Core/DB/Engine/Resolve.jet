@@ -68,9 +68,9 @@ nc_clear: fn(p: ^cg.Parse, nc: Int, f: Int) Never! {
 
 // sqlite3ExprCanBeNull: false only when expression `e0` cannot be NULL.
 expr_can_be_null: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Bool Never! {
-    e := e0
+    ^e: e0
     loop a.exprs[e].op == tk.TK_UPLUS || a.exprs[e].op == tk.TK_UMINUS -> e = a.exprs[e].left
-    op := a.exprs[e].op
+    ^op: a.exprs[e].op
     if op == tk.TK_REGISTER -> op = a.exprs[e].op2
     if op == tk.TK_INTEGER || op == tk.TK_STRING || op == tk.TK_FLOAT || op == tk.TK_BLOB {
         return false
@@ -163,7 +163,7 @@ RefSrcWalker: struct {
 
         // selectRefLeave.
         walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {
-            n := ast.src_len(a, a.selects[s].src)
+            ^n: ast.src_len(a, a.selects[s].src)
             loop n > 0 && self.exclude.len() > 0 {
                 _: self.exclude.pop()
                 n -= 1
@@ -178,9 +178,9 @@ RefSrcWalker: struct {
 // list `src`, 0 when it refers to a table neither there nor in its own
 // subqueries, -1 when it refers to no table outside its subqueries.
 references_src_list: fn(a: ^ast.AST, e: Int, src: Int) -> Int Never! {
-    refs := [Int]{}
+    ^refs: [Int]{}
     loop i in 0..<ast.src_len(a, src) -> refs.push(a.items[ast.src_item(a, src, i)].cursor)
-    w := RefSrcWalker{refs: refs, exclude: [Int]{}, code: 0}
+    ^w: RefSrcWalker{refs: refs, exclude: [Int]{}, code: 0}
     _: ast.walk_expr_list<RefSrcWalker>(w, a, a.exprs[e].x)
     left: a.exprs[e].left
     if left >= 0 -> _: ast.walk_expr_list<RefSrcWalker>(w, a, a.exprs[left].x)
@@ -219,9 +219,9 @@ window_update: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, win: Int, d: conn.FuncDe
             ast.error(a, "FILTER clause may only be used with aggregate window functions")
         } else {
             // The aUp table, matched by function identity.
-            f := -1
-            st := 0
-            et := 0
+            ^f: -1
+            ^st: 0
+            ^et: 0
             id: d.impl_id
             if id == cat.FI_ROW_NUMBER {
                 f = tk.TK_ROWS
@@ -301,7 +301,7 @@ incr_agg_function_depth: fn(a: ^ast.AST, e: Int, n: Int) Never! {
     if n <= 0 {
         return
     }
-    w := IncrAggDepthWalker{n: n}
+    ^w: IncrAggDepthWalker{n: n}
     _: ast.walk_expr<IncrAggDepthWalker>(w, a, e)
 }
 
@@ -310,7 +310,7 @@ incr_agg_function_depth: fn(a: ^ast.AST, e: Int, n: Int) Never! {
 // `n_subquery` levels out.
 resolve_alias: fn(a: ^ast.AST, elist: Int, i_col: Int, e: Int, n_subquery: Int) Never! {
     orig: ast.list_expr(a, elist, i_col)
-    dup := ast.expr_dup(a, orig, 0)
+    ^dup: ast.expr_dup(a, orig, 0)
     incr_agg_function_depth(a, dup, n_subquery)
     if a.exprs[e].op == tk.TK_COLLATE {
         coll: a.exprs[e].token ?? [U8]{}
@@ -336,10 +336,10 @@ span_matches: fn(span: [U8], at: Int, n: Int, z: [U8]) -> Bool Never! {
 // Whether NUL-terminated `z` from byte `at` on is `w`, folding ASCII case
 // when `fold` (sqlite3StrICmp(z+at, w)==0, else strcmp).
 tail_eq: fn(z: [U8], at: Int, w: [U8], fold: Bool) -> Bool Never! {
-    i := 0
+    ^i: 0
     loop {
-        c := util.sql_byte(z, at + i)
-        d := util.sql_byte(w, i)
+        ^c: util.sql_byte(z, at + i)
+        ^d: util.sql_byte(w, i)
         if fold {
             c = util.lower_byte(c)
             d = util.lower_byte(d)
@@ -353,7 +353,7 @@ tail_eq: fn(z: [U8], at: Int, w: [U8], fold: Bool) -> Bool Never! {
 
 // The end of the span segment starting at `at`: its '.' or its end.
 span_seg_end: fn(span: [U8], at: Int) -> Int Never! {
-    n := at
+    ^n: at
     loop n < span.len() && span[n] != (U8{46}) -> n += 1
     n
 }
@@ -391,7 +391,7 @@ dqs_enabled: fn(db: conn.Conn, top_flags: Int) -> Bool Never! {
 
 // sqlite3ExprColUsed: the colUsed bits TK_COLUMN `e` sets.
 expr_col_used: fn(db: conn.Conn, a: ast.AST, e: Int) -> Int Never! {
-    n := a.exprs[e].icolumn
+    ^n: a.exprs[e].icolumn
     t: a.exprs[e].y
     ncol: db.tables[t].cols.len()
     if db.tables[t].tab_flags & ast.TF_HAS_GENERATED != 0 && db.tables[t].cols[n].col_flags & conn.COLFLAG_GENERATED != 0 {
@@ -435,21 +435,21 @@ mask32: fn(i_col: Int) -> Int Never! { if i_col >= 32 -> 4294967295 else -> 1 <<
 // a TK_COLUMN, TK_TRIGGER, TK_REGISTER, a copy of a result-set alias, or
 // (with an error) TK_NULL. WRC_PRUNE on success, WRC_ABORT on failure.
 lookup_name: fn(p: ^cg.Parse, a: ^ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col: [U8], nc0: Int, e: Int) -[DB]> Int Never! {
-    z_db := db_name0
-    cnt := 0
-    cnt_tab := 0
-    n_subquery := 0
-    match_si := -1
+    ^z_db: db_name0
+    ^cnt: 0
+    ^cnt_tab: 0
+    ^n_subquery: 0
+    ^match_si: -1
     top_nc: nc0
-    nc := nc0
-    schema := -1
-    new_op := tk.TK_COLUMN
-    fj := -1
+    ^nc: nc0
+    ^schema: -1
+    ^new_op: tk.TK_COLUMN
+    ^fj: -1
     a.exprs[e].itable = -1
 
     if z_db == .Val(zdb) {
         if nc_has(p, nc, ast.NC_PART_IDX | ast.NC_IS_CHECK) -> z_db = None else {
-            found := false
+            ^found: false
             loop i in 0..<p.db.dbs.len() {
                 if util.str_icmp(p.db.dbs[i].name, zdb) == 0 {
                     schema = p.db.dbs[i].schema
@@ -471,7 +471,7 @@ lookup_name: fn(p: ^cg.Parse, a: ^ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
                 si: ast.src_item(a, src, i)
                 t: a.items[si].tab
                 if a.items[si].is_nested_from {
-                    hit := false
+                    ^hit: false
                     el: a.selects[a.items[si].select].elist
                     loop j in 0..<ast.list_len(a, el) {
                         m: match_ename(a.lists[el].items[j], Val(z_col), z_tab, z_db, true)
@@ -551,7 +551,7 @@ lookup_name: fn(p: ^cg.Parse, a: ^ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
         // new.* and old.* in a trigger, excluded.* in an upsert, or a
         // RETURNING reference to the table being changed.
         if cnt == 0 && z_db == None {
-            t := -1
+            ^t: -1
             has_tab: z_tab != None
             tab_name: z_tab ?? [U8]{}
             if p.f.trigger_tab >= 0 {
@@ -581,7 +581,7 @@ lookup_name: fn(p: ^cg.Parse, a: ^ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
                 schema = p.db.tables[t].schema
                 cnt_tab += 1
                 ncol: p.db.tables[t].cols.len()
-                i_col := 0
+                ^i_col: 0
                 loop i_col < ncol {
                     if p.db.tables[t].cols[i_col].h_name == h_col && util.str_icmp(p.db.tables[t].cols[i_col].name, z_col) == 0 {
                         if i_col == p.db.tables[t].ipkey -> i_col = -1
@@ -729,7 +729,7 @@ lookup_name_end: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, schema: Int, nc: Int, top
         src: p.ncs[nc].src
         cg.auth_read(p, a, e, schema, src)
     }
-    q := top_nc
+    ^q: top_nc
     loop {
         p.ncs[q].n_ref += 1
         if q == nc -> break
@@ -763,7 +763,7 @@ create_column_expr: fn(db: conn.Conn, a: ^ast.AST, src: Int, i_src: Int, i_col: 
 // `e`, when given, becomes NULL; expression `at` locates the error.
 not_valid_impl: fn(p: cg.Parse, a: ^ast.AST, nc: Int, msg: String, e: Int, at: Int) Never! {
     f: p.ncs[nc].nc_flags
-    z_in := "partial index WHERE clauses"
+    ^z_in: "partial index WHERE clauses"
     if f & ast.NC_IDX_EXPR != 0 -> z_in = "index expressions" else if f & ast.NC_IS_CHECK != 0 {
         z_in = "CHECK constraints"
     } else if f & ast.NC_GEN_COL != 0 { z_in = "generated columns" }
@@ -788,7 +788,7 @@ expr_probability: fn(a: ast.AST, e: Int) -> Int Never! {
 // The row-value size check of resolveExprStep's comparison operators.
 check_row_value: fn(a: ^ast.AST, e: Int) Never! {
     n_left: ast.vector_size(a, a.exprs[e].left)
-    n_right := 0
+    ^n_right: 0
     if a.exprs[e].op == tk.TK_BETWEEN {
         x: a.exprs[e].x
         n_right = ast.vector_size(a, ast.list_expr(a, x, 0))
@@ -815,8 +815,8 @@ resolve_expr_step: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
     } else if op == tk.TK_NOTNULL || op == tk.TK_ISNULL {
         // The NOT NULL strength reduction: x IS NULL is FALSE when x can
         // never be NULL, and the references it made are forgotten.
-        saved := [Int]{}
-        q := nc
+        ^saved: [Int]{}
+        ^q: nc
         loop q >= 0 && saved.len() < 8 {
             saved.push(p.ncs[q].n_ref)
             q = p.ncs[q].next
@@ -827,7 +827,7 @@ resolve_expr_step: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             ast.set_flags(a, e, ast.EP_INT_VALUE)
             a.exprs[e].op = tk.TK_INTEGER
             q = nc
-            i := 0
+            ^i: 0
             loop q >= 0 && i < saved.len() {
                 p.ncs[q].n_ref = saved[i]
                 q = p.ncs[q].next
@@ -840,9 +840,9 @@ resolve_expr_step: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
     } else if op == tk.TK_ID {
         return lookup_name(p, a, None, None, a.exprs[e].token ?? [U8]{}, nc, e)
     } else if op == tk.TK_DOT {
-        left := a.exprs[e].left
+        ^left: a.exprs[e].left
         resolve_not_valid(p, a, nc, "the \".\" operator", ast.NC_IDX_EXPR | ast.NC_GEN_COL, -1, e)
-        right := a.exprs[e].right
+        ^right: a.exprs[e].right
         z_db: if a.exprs[right].op != tk.TK_ID -> a.exprs[left].token else -> None
         if a.exprs[right].op != tk.TK_ID {
             left = a.exprs[right].left
@@ -890,14 +890,14 @@ resolve_expr_step: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
 resolve_function: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, e: Int) -[DB]> Int Never! {
     list: a.exprs[e].x
     n: ast.list_len(a, list)
-    no_such_func := false
-    wrong_num_args := false
-    is_agg := false
+    ^no_such_func: false
+    ^wrong_num_args: false
+    ^is_agg: false
     enc: p.db.enc
     saved_allow: p.ncs[nc].nc_flags & (ast.NC_ALLOW_AGG | ast.NC_ALLOW_WIN)
     win: if ast.is_window_func(a, e) -> a.exprs[e].y else -> -1
     z_id: a.exprs[e].token ?? [U8]{}
-    def := cat.find_function(p.db, z_id, n, enc)
+    ^def: cat.find_function(p.db, z_id, n, enc)
     if def == None {
         def = cat.find_function(p.db, z_id, -2, enc)
         if def == None -> no_such_func = true else -> wrong_num_args = true
@@ -999,7 +999,7 @@ resolve_function: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, e: Int) -[DB]> Int Neve
             if ast.has(a, e, ast.EP_WIN_FUNC) {
                 _: cg.pwalk_expr(p, a, a.windows[a.exprs[e].y].filter)
             }
-            nc2 := nc
+            ^nc2: nc
             loop nc2 >= 0 && references_src_list(a, e, p.ncs[nc2].src) == 0 {
                 a.exprs[e].op2 = a.exprs[e].op2 + 1 + p.ncs[nc2].n_nested_select
                 nc2 = p.ncs[nc2].next
@@ -1034,7 +1034,7 @@ resolve_as_name: fn(a: ast.AST, elist: Int, e: Int) -> Int Never! {
 resolve_order_by_term_to_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, e: Int) -[DB]> Int Never! {
     elist: a.selects[sel].elist
     mark: p.ncs.len()
-    ctx := nc_new(a.selects[sel].src, ast.NC_ALLOW_AGG | ast.NC_UELIST | ast.NC_NO_SELECT)
+    ^ctx: nc_new(a.selects[sel].src, ast.NC_ALLOW_AGG | ast.NC_UELIST | ast.NC_NO_SELECT)
     ctx.u = elist
     nc: nc_push(p, ctx)
     saved_a: a.suppress_err
@@ -1055,7 +1055,7 @@ resolve_order_by_term_to_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, e: I
 
 // printf's %r: the English ordinal of `v`.
 ordinal: fn(v: Int) -> String Never! {
-    x := v % 10
+    ^x: v % 10
     if x >= 4 || (v /% 10) % 10 == 1 -> x = 0
     suffix: if x == 1 -> "st" else if x == 2 -> "nd" else if x == 3 -> "rd" else -> "th"
     "{v}{suffix}"
@@ -1078,14 +1078,14 @@ resolve_compound_order_by: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) -[DB]> Int Nev
         return 1
     }
     loop i in 0..<ast.list_len(a, ob) -> a.lists[ob].items[i].done = false
-    s := s0
+    ^s: s0
     a.selects[s].next_sel = -1
     loop a.selects[s].prior >= 0 {
         pr: a.selects[s].prior
         a.selects[pr].next_sel = s
         s = pr
     }
-    more_to_do := true
+    ^more_to_do: true
     loop s >= 0 && more_to_do {
         more_to_do = false
         elist: a.selects[s].elist
@@ -1094,7 +1094,7 @@ resolve_compound_order_by: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) -[DB]> Int Nev
             item_e: a.lists[ob].items[i].expr
             pe: ast.skip_collate_and_likely(a, item_e)
             if pe < 0 -> next
-            i_col := -1
+            ^i_col: -1
             if ast.expr_is_integer(a, pe) == .Val(iv) {
                 i_col = iv
                 if i_col <= 0 || i_col > ast.list_len(a, elist) {
@@ -1122,7 +1122,7 @@ resolve_compound_order_by: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) -[DB]> Int Nev
                     ast.set_flags(a, nw, ast.EP_INT_VALUE)
                     a.exprs[nw].ivalue = i_col
                     if item_e == pe -> a.lists[ob].items[i].expr = nw else {
-                        parent := item_e
+                        ^parent: item_e
                         loop a.exprs[a.exprs[parent].left].op == tk.TK_COLLATE {
                             parent = a.exprs[parent].left
                         }
@@ -1197,7 +1197,7 @@ window_remove_expr_from_select: fn(a: ^ast.AST, sel: Int, e: Int) Never! {
     if a.selects[sel].win < 0 {
         return
     }
-    w := RemoveWindowsWalker{sel: sel}
+    ^w: RemoveWindowsWalker{sel: sel}
     _: ast.walk_expr<RemoveWindowsWalker>(w, a, e)
 }
 
@@ -1247,7 +1247,7 @@ resolve_select_step: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) -[DB]> Int Never! {
     if a.selects[s0].sel_flags & ast.SF_EXPANDED == 0 {
         // A subquery of an expression: sqlite3SelectPrep expands it and
         // comes back here.
-        g := p.up
+        ^g: p.up
         g.select_prep(p, a, s0, outer)
         return if cg.n_err(a) > 0 -> ast.WRC_ABORT else -> ast.WRC_PRUNE
     }
@@ -1261,8 +1261,8 @@ resolve_select_step: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) -[DB]> Int Never! {
 // resolveSelectStep's loop over the compound's terms, with sNC context `nc`.
 resolve_select_body: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int, outer: Int, nc: Int) -[DB]> Int Never! {
     is_compound: if a.selects[s0].prior >= 0 -> 1 else -> 0
-    n_compound := 0
-    s := s0
+    ^n_compound: 0
+    ^s: s0
     loop s >= 0 {
         a.selects[s].sel_flags = a.selects[s].sel_flags | ast.SF_RESOLVED
 
@@ -1334,7 +1334,7 @@ resolve_select_body: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int, outer: Int, nc: Int)
         }
 
         if ast.in_rename(a) {
-            w := a.selects[s].win_defn
+            ^w: a.selects[s].win_defn
             loop w >= 0 {
                 if resolve_expr_list_names(p, a, nc, a.windows[w].order_by) != 0 || resolve_expr_list_names(p, a, nc, a.windows[w].partition) != 0 {
                     return ast.WRC_ABORT
@@ -1422,7 +1422,7 @@ resolve_expr_names: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, e: Int) -[DB]> Int Ne
     height: a.exprs[e].height
     p.f.n_height += height
     if ast.check_height(a, p.f.n_height) != base.OK -> return base.ERROR
-    w := ResolveWalker{select: !nc_has(p, nc, ast.NC_NO_SELECT)}
+    ^w: ResolveWalker{select: !nc_has(p, nc, ast.NC_NO_SELECT)}
     cg.walk_push(p, w, nc)
     _: cg.pwalk_expr(p, a, e)
     _: cg.walk_pop(p)
@@ -1435,7 +1435,7 @@ resolve_expr_names: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, e: Int) -[DB]> Int Ne
 // sqlite3ResolveExprListNames: resolve every expression of `list`.
 resolve_expr_list_names: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, list: Int) -[DB]> Int Never! {
     if list < 0 -> return ast.WRC_CONTINUE
-    saved := 0
+    ^saved: 0
     nc_clear(p, nc, NC_AGG_FLAGS)
     loop i in 0..<ast.list_len(a, list) {
         e: ast.list_expr(a, list, i)
@@ -1443,7 +1443,7 @@ resolve_expr_list_names: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, list: Int) -[DB]
         height: a.exprs[e].height
         p.f.n_height += height
         if ast.check_height(a, p.f.n_height) != base.OK -> return ast.WRC_ABORT
-        w := ResolveWalker{select: true}
+        ^w: ResolveWalker{select: true}
         cg.walk_push(p, w, nc)
         _: cg.pwalk_expr(p, a, e)
         _: cg.walk_pop(p)
@@ -1462,7 +1462,7 @@ resolve_expr_list_names: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, list: Int) -[DB]
 // sqlite3ResolveSelectNames: resolve SELECT `s`, its compound terms and
 // its subqueries, inside context `outer_nc` (-1 for none).
 resolve_select_names: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {
-    w := ResolveWalker{select: true}
+    ^w: ResolveWalker{select: true}
     cg.walk_push(p, w, outer_nc)
     _: cg.pwalk_select(p, a, s)
     _: cg.walk_pop(p)
@@ -1473,11 +1473,11 @@ resolve_select_names: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, outer_nc: Int) -[DB]
 // expression or generated column as `typ` says (NC_IsCheck, NC_PartIdx,
 // NC_IdxExpr, NC_GenCol), or a VACUUM INTO argument (0).
 resolve_self_reference: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, typ: Int, e: Int, list: Int) -[DB]> Int Never! {
-    flags := typ
+    ^flags: typ
     // The fake one-item SrcList over the table (an empty one without).
     src: ast.new_src_list(a)
     if t >= 0 {
-        item := ast.new_src_item()
+        ^item: ast.new_src_item()
         item.name = Val(p.db.tables[t].name.copy())
         item.tab = t
         item.cursor = -1
@@ -1487,7 +1487,7 @@ resolve_self_reference: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, typ: Int, e: Int, 
     }
     mark: p.ncs.len()
     nc: nc_push(p, nc_new(src, flags | ast.NC_IS_DDL))
-    rc := resolve_expr_names(p, a, nc, e)
+    ^rc: resolve_expr_names(p, a, nc, e)
     if rc == base.OK && list >= 0 -> rc = resolve_expr_list_names(p, a, nc, list)
     nc_release(p, mark)
     rc
@@ -1545,23 +1545,23 @@ resolve_test_col: fn(name: String, not_null: Int) -> conn.Column Never! {
 
 // A Parse over a connection with table t(a, b NOT NULL) and u(b).
 resolve_test_parse: fn() -> cg.Parse Never! {
-    db := conn.conn_new()
-    t := conn.table_new()
+    ^db: conn.conn_new()
+    ^t: conn.table_new()
     t.name = "t".bytes()
     t.cols.push(resolve_test_col("a", 0))
     t.cols.push(resolve_test_col("b", 1))
     db.tables.push(t)
-    u := conn.table_new()
+    ^u: conn.table_new()
     u.name = "u".bytes()
     u.cols.push(resolve_test_col("b", 0))
     db.tables.push(u)
-    g := ResolveTestGen{calls: 0}
+    ^g: ResolveTestGen{calls: 0}
     cg.parse_new(db, g)
 }
 
 // The FROM list "t, u" over resolve_test_parse's tables (cursors 0 and 1).
 resolve_test_src: fn(a: ^ast.AST) -> Int Never! {
-    src := ast.src_list_append(a, -1, Val("t".bytes()), None)
+    ^src: ast.src_list_append(a, -1, Val("t".bytes()), None)
     src = ast.src_list_append(a, src, Val("u".bytes()), None)
     loop i in 0..<2 {
         si: ast.src_item(a, src, i)
@@ -1572,8 +1572,8 @@ resolve_test_src: fn(a: ^ast.AST) -> Int Never! {
 }
 
 #Test("names resolve to columns, the rowid and their cursors") {
-    a := ast.stmt_ast("")
-    p := resolve_test_parse()
+    ^a: ast.stmt_ast("")
+    ^p: resolve_test_parse()
     src: resolve_test_src(a)
     nc: nc_push(p, nc_new(src, 0))
     e1: ast.expr(a, tk.TK_ID, "a".bytes())
@@ -1601,16 +1601,16 @@ resolve_test_src: fn(a: ^ast.AST) -> Int Never! {
 }
 
 #Test("unknown and ambiguous names are errors") {
-    a := ast.stmt_ast("")
-    p := resolve_test_parse()
+    ^a: ast.stmt_ast("")
+    ^p: resolve_test_parse()
     src: resolve_test_src(a)
     nc: nc_push(p, nc_new(src, 0))
     e1: ast.expr(a, tk.TK_ID, "b".bytes())
     assert(resolve_expr_names(p, a, nc, e1) != 0)
     assert(a.ctx.errmsg == Val("ambiguous column name: b"))
     assert(a.exprs[e1].op == tk.TK_NULL && p.f.check_schema)
-    a2 := ast.stmt_ast("")
-    p2 := resolve_test_parse()
+    ^a2: ast.stmt_ast("")
+    ^p2: resolve_test_parse()
     src2: resolve_test_src(a2)
     nc2: nc_push(p2, nc_new(src2, 0))
     e2: ast.expr(a2, tk.TK_ID, "zz".bytes())
@@ -1619,8 +1619,8 @@ resolve_test_src: fn(a: ^ast.AST) -> Int Never! {
 }
 
 #Test("IS NULL on a NOT NULL column folds to FALSE, and aliases substitute") {
-    a := ast.stmt_ast("")
-    p := resolve_test_parse()
+    ^a: ast.stmt_ast("")
+    ^p: resolve_test_parse()
     src: resolve_test_src(a)
     nc: nc_push(p, nc_new(src, 0))
     tq: ast.expr(a, tk.TK_ID, "t".bytes())
@@ -1636,7 +1636,7 @@ resolve_test_src: fn(a: ^ast.AST) -> Int Never! {
     el: ast.expr_list_append(a, -1, five)
     a.lists[el].items[0].ename = Val("x".bytes())
     a.lists[el].items[0].eename = ast.ENAME_NAME
-    ctx := nc_new(src, ast.NC_UELIST)
+    ^ctx: nc_new(src, ast.NC_UELIST)
     ctx.u = el
     nc2: nc_push(p, ctx)
     ref: ast.expr(a, tk.TK_ID, "x".bytes())
@@ -1647,7 +1647,7 @@ resolve_test_src: fn(a: ^ast.AST) -> Int Never! {
 // A call of function `name` with `n_args` arguments, each column a of
 // resolve_test_src's tables.
 resolve_test_call: fn(a: ^ast.AST, name: String, n_args: Int) -> Int Never! {
-    list := -1
+    ^list: -1
     loop _ in 0..<n_args {
         col: ast.expr(a, tk.TK_ID, "a".bytes())
         list = ast.expr_list_append(a, list, col)
@@ -1658,8 +1658,8 @@ resolve_test_call: fn(a: ^ast.AST, name: String, n_args: Int) -> Int Never! {
 }
 
 #Test("functions resolve by name and arity, and aggregates where they may be") {
-    a := ast.stmt_ast("")
-    p := resolve_test_parse()
+    ^a: ast.stmt_ast("")
+    ^p: resolve_test_parse()
     src: resolve_test_src(a)
     nc: nc_push(p, nc_new(src, ast.NC_ALLOW_AGG))
     e1: resolve_test_call(a, "length", 1)
@@ -1674,15 +1674,15 @@ resolve_test_call: fn(a: ^ast.AST, name: String, n_args: Int) -> Int Never! {
     e3: resolve_test_call(a, "count", 1)
     assert(resolve_expr_names(p, a, nc0, e3) != 0)
     assert(a.ctx.errmsg == Val("misuse of aggregate function count()"))
-    a2 := ast.stmt_ast("")
-    p2 := resolve_test_parse()
+    ^a2: ast.stmt_ast("")
+    ^p2: resolve_test_parse()
     src2: resolve_test_src(a2)
     nc2: nc_push(p2, nc_new(src2, 0))
     e4: resolve_test_call(a2, "length", 2)
     assert(resolve_expr_names(p2, a2, nc2, e4) != 0)
     assert(a2.ctx.errmsg == Val("wrong number of arguments to function length()"))
-    a3 := ast.stmt_ast("")
-    p3 := resolve_test_parse()
+    ^a3: ast.stmt_ast("")
+    ^p3: resolve_test_parse()
     src3: resolve_test_src(a3)
     nc3: nc_push(p3, nc_new(src3, 0))
     e5: resolve_test_call(a3, "nosuch", 1)
@@ -1691,8 +1691,8 @@ resolve_test_call: fn(a: ^ast.AST, name: String, n_args: Int) -> Int Never! {
 }
 
 #Test("a CHECK constraint resolves against its own table and refuses parameters") {
-    a := ast.stmt_ast("")
-    p := resolve_test_parse()
+    ^a: ast.stmt_ast("")
+    ^p: resolve_test_parse()
     p.db.dbs.push(conn.DBSlot{name: "main".bytes(), bt: -1, safety_level: 0, b_sync_set: false, schema: 0})
     p.db.dbs.push(conn.DBSlot{name: "temp".bytes(), bt: -1, safety_level: 0, b_sync_set: false, schema: 1})
     e1: ast.expr(a, tk.TK_ID, "b".bytes())
@@ -1710,7 +1710,7 @@ resolve_test_call: fn(a: ^ast.AST, name: String, n_args: Int) -> Int Never! {
 }
 
 #Test("result-set spans match database, table and column") {
-    item := ast.zero_item(-1)
+    ^item: ast.zero_item(-1)
     item.ename = Val("main.t1.x".bytes())
     item.eename = ast.ENAME_TAB
     assert(match_ename(item, Val("X".bytes()), Val("T1".bytes()), Val("main".bytes()), false) == 1)

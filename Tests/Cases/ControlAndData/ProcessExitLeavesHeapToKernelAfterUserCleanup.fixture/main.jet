@@ -18,7 +18,7 @@ Key: struct {
 
     impl Close {
         close: fn(^^self) {
-            secret := self.secret.move()
+            ^secret: self.secret.move()
             close(secret)
             print("key wiped")
         }
@@ -31,7 +31,7 @@ room: fn(count: Int) -> [U8] AllocError! { List.try_with_capacity(count) }
 // growing buffer frees each smaller mapping it leaves, and those frees would
 // show as munmap calls before the exit.
 fill: fn() -> [U8] {
-    bytes := room(67108864) ?? panic("no room for 64 MiB")
+    ^bytes: room(67108864) ?? panic("no room for 64 MiB")
     loop at in 0..<67108864 -> bytes.push(U8{at & 255})
     bytes
 }
@@ -39,11 +39,11 @@ fill: fn() -> [U8] {
 run: fn() {
     #Unsafe("the exit callback has no captured state") { os.atexit(fn() { print("atexit") }) }
     _guard: scope.guard(fn() { print("guard") })
-    key := Key{secret: crypto.Secret.from_text("hunter2")}
+    ^key: Key{secret: crypto.Secret.from_text("hunter2")}
     defer close(key)
     // `drop`: a first buffer dies inside the run, so its free is seen.
     if process.args().contains("drop") -> print("dropped {fill().len()}")
-    rows := [String]{}
+    ^rows: [String]{}
     loop at in 0..<400000 -> rows.push("row {at}")
     bytes: fill()
     print("body {rows.len()} {bytes.len()}")

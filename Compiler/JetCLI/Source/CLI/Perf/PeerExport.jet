@@ -38,7 +38,7 @@ jet_cli_perf_pb_text: fn(out: ^[U8], field: Int, text: String) Never! {
 
 // A packed repeated varint field.
 jet_cli_perf_pb_packed: fn(out: ^[U8], field: Int, values: [Int]) Never! {
-    body := [U8]{}
+    ^body: [U8]{}
     loop value in values -> record_put_uvarint(body, value)
     jet_cli_perf_pb_message(out, field, body)
 }
@@ -55,7 +55,7 @@ jet_cli_perf_pprof_string: fn(strings: ^[String], text: ^^String) -> Int Never! 
 
 // A pprof `ValueType`: its type and unit.
 jet_cli_perf_pprof_value_type: fn(strings: ^[String], kind: ^^String, unit: ^^String) -> [U8] Never! {
-    body := [U8]{}
+    ^body: [U8]{}
     jet_cli_perf_pb_int(body, 1, jet_cli_perf_pprof_string(strings, kind))
     jet_cli_perf_pb_int(body, 2, jet_cli_perf_pprof_string(strings, unit))
     body
@@ -70,15 +70,15 @@ jet_cli_perf_pprof_value_type: fn(strings: ^[String], kind: ^^String, unit: ^^St
 // jet_cli_perf_sample_us) in nanoseconds; none when the trace says none.
 jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
     totals: jet_cli_perf_line_totals(trace)
-    samples := [U8]{}
+    ^samples: [U8]{}
     // Each total is its own location.
-    locations := [U8]{}
-    location := 0
-    functions := [U8]{}
+    ^locations: [U8]{}
+    ^location: 0
+    ^functions: [U8]{}
     // Each function's name and file, as places in the totals' names.
-    known := [{name: Int, path: Int}]{}
+    ^known: [{name: Int, path: Int}]{}
     loop row in totals.rows {
-        function := 0
+        ^function: 0
         loop (index, seen) in known {
             if seen.name == row.function && seen.path == row.path {
                 function = index + 1
@@ -86,7 +86,7 @@ jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
             }
         }
         if function == 0 {
-            body := [U8]{}
+            ^body: [U8]{}
             jet_cli_perf_pb_int(body, 1, known.len() + 1)
             jet_cli_perf_pb_int(body, 2, row.function)
             jet_cli_perf_pb_int(body, 3, row.function)
@@ -96,22 +96,22 @@ jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
             function = known.len()
         }
         location += 1
-        line_row := [U8]{}
+        ^line_row: [U8]{}
         jet_cli_perf_pb_int(line_row, 1, function)
         jet_cli_perf_pb_int(line_row, 2, row.line)
-        place := [U8]{}
+        ^place: [U8]{}
         jet_cli_perf_pb_int(place, 1, location)
         jet_cli_perf_pb_message(place, 4, line_row)
         jet_cli_perf_pb_message(locations, 4, place)
-        sample := [U8]{}
+        ^sample: [U8]{}
         jet_cli_perf_pb_packed(sample, 1, [Int]{location})
         jet_cli_perf_pb_packed(sample, 2, [Int]{row.samples})
         jet_cli_perf_pb_message(samples, 2, sample)
     }
     // The functions name places in the totals' names, which the string
     // table starts with.
-    strings := totals.names.move()
-    out := [U8]{}
+    ^strings: totals.names.move()
+    ^out: [U8]{}
     jet_cli_perf_pb_message(out, 1, jet_cli_perf_pprof_value_type(strings, "samples", "count"))
     loop byte in samples -> out.push(byte)
     loop byte in locations -> out.push(byte)
@@ -129,7 +129,7 @@ jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
 // `value` as 16 lowercase hex digits, as OTLP spells a span id.
 jet_cli_perf_hex16: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef"
-    out := ""
+    ^out: ""
     loop place in 0..<16 {
         nibble: (value >> ((15 - place) * 4)) & 15
         out = "{out}{digits.slice(nibble..<nibble + 1)}"
@@ -149,12 +149,12 @@ jet_cli_perf_hex16: fn(value: Int) -> String Never! {
 jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
     id: trace_id(trace) ?? ""
     trace_hex: if id.len() >= 32 -> id.slice(0..<32) else -> "00000000000000000000000000000001"
-    spans := [perf_log.TraceSpan]{}
-    rows := 0
+    ^spans: [perf_log.TraceSpan]{}
+    ^rows: 0
     if jet_cli_perf_rows(trace, "spans") == .Ok(items) {
         rows = items.len()
         // Each task's span, so a child's parent resolves in any row order.
-        tasks := [Int:Int]{}
+        ^tasks: [Int:Int]{}
         loop (index, item) in items {
             if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_observed" -> next
             if jet_cli_perf_member_number(item, "task_id") == .Val(task) -> tasks[task] = index + 1
@@ -164,7 +164,7 @@ jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
             start: jet_cli_perf_member_number(item, "start_ns") ?? next
             end: jet_cli_perf_member_number(item, "end_ns") ?? next
             kind: jet_cli_perf_member_text(item, "kind") ?? "span"
-            attributes := [perf_log.LogField]{perf_log.field("jet.kind", kind)}
+            ^attributes: [perf_log.LogField]{perf_log.field("jet.kind", kind)}
             keys: [String]{"task_id", "awaited_task_id", "spawn_line", "channel_id", "waker_task_id", "waker_line"}
             loop key in keys {
                 if jet_cli_perf_member_integer(item, key) == .Val(digits) {
@@ -181,7 +181,7 @@ jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
             if stack.len() > 0 -> attributes.push(perf_log.field("jet.wait_stack", stack))
             waker: jet_cli_perf_member_text(item, "waker") ?? ""
             if waker.len() > 0 -> attributes.push(perf_log.field("jet.waker", waker))
-            parent := ""
+            ^parent: ""
             if kind == "task_observed" && jet_cli_perf_member_number(item, "parent_task_id") == .Val(task) && tasks.has_key(task) {
                 parent = jet_cli_perf_hex16(tasks[task])
             }
@@ -205,7 +205,7 @@ jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
 // attributes.
 jet_cli_perf_otlp_metrics: fn(trace: CanonicalJSON) -> String Never! {
     totals: jet_cli_perf_line_totals(trace)
-    points := [String]{}
+    ^points: [String]{}
     loop row in totals.rows {
         path: "{{\"key\":\"code.file.path\",\"value\":{{\"stringValue\":{jet_cli_json_string(totals.names[row.path])}}}}}"
         line: "{{\"key\":\"code.line.number\",\"value\":{{\"intValue\":\"{row.line}\"}}}}"
@@ -248,18 +248,18 @@ jet_cli_perf_import: fn(path: String) -[FS]> JetCLIPerfImport JetCLIReadError! {
 // A pprof `profile.proto`: each sample's first value at the innermost line
 // of its leaf location, and the profile's comments.
 jet_cli_perf_pprof_read: fn(bytes: [U8]) -> JetCLIPerfImport JetCLIReadError! {
-    strings := [String]{}
+    ^strings: [String]{}
     // Each sample's leaf location and first value.
-    sampled := [{location: Int, value: Int}]{}
+    ^sampled: [{location: Int, value: Int}]{}
     // Each location's function and line, each function's name and file.
-    location_function := [Int:Int]{}
-    location_line := [Int:Int]{}
-    function_name := [Int:Int]{}
-    function_file := [Int:Int]{}
-    comments := [Int]{}
+    ^location_function: [Int:Int]{}
+    ^location_line: [Int:Int]{}
+    ^function_name: [Int:Int]{}
+    ^function_file: [Int:Int]{}
+    ^comments: [Int]{}
     // The profile's period, in nanoseconds of CPU time; 0 for none.
-    period := 0
-    cursor := RecordCursor{at: 0, end: bytes.len(), problem: None}
+    ^period: 0
+    ^cursor: RecordCursor{at: 0, end: bytes.len(), problem: None}
     loop cursor.at < cursor.end && cursor.problem == None {
         key: record_read_uvarint(bytes, cursor)
         field: key >> 3
@@ -294,7 +294,7 @@ jet_cli_perf_pprof_read: fn(bytes: [U8]) -> JetCLIPerfImport JetCLIReadError! {
         return Err(jet_cli_read_error("the pprof profile is malformed: {problem}"))
     }
     malformed: jet_cli_read_error("the pprof profile names a location, function or string it does not hold")
-    rows := [JetCLIPerfLineTotal]{}
+    ^rows: [JetCLIPerfLineTotal]{}
     loop sample in sampled {
         if !location_function.has_key(sample.location) -> return Err(malformed)
         function: location_function[sample.location]
@@ -304,7 +304,7 @@ jet_cli_perf_pprof_read: fn(bytes: [U8]) -> JetCLIPerfImport JetCLIReadError! {
         if name >= strings.len() || file >= strings.len() -> return Err(malformed)
         rows.push(JetCLIPerfLineTotal{path: file, line: location_line[sample.location], function: name, samples: sample.value})
     }
-    notes := [String]{}
+    ^notes: [String]{}
     loop at in comments {
         if at >= strings.len() -> return Err(malformed)
         notes.push("comment {strings[at]}")
@@ -315,9 +315,9 @@ jet_cli_perf_pprof_read: fn(bytes: [U8]) -> JetCLIPerfImport JetCLIReadError! {
 
 // A pprof `Sample`: its leaf location (its first) and its first value.
 jet_cli_perf_pprof_sample: fn(bytes: [U8], cursor: ^RecordCursor) -> {location: Int, value: Int} Never! {
-    location := -1
-    value := 0
-    valued := false
+    ^location: -1
+    ^value: 0
+    ^valued: false
     loop cursor.at < cursor.end && cursor.problem == None {
         key: record_read_uvarint(bytes, cursor)
         field: key >> 3
@@ -338,10 +338,10 @@ jet_cli_perf_pprof_sample: fn(bytes: [U8], cursor: ^RecordCursor) -> {location: 
 // A pprof `Location`: its id, and the function and line of its first
 // `Line`, the innermost of the functions inlined there.
 jet_cli_perf_pprof_location: fn(bytes: [U8], cursor: ^RecordCursor, functions: ^[Int:Int], lines: ^[Int:Int]) Never! {
-    id := 0
-    function := 0
-    line := 0
-    lined := false
+    ^id: 0
+    ^function: 0
+    ^line: 0
+    ^lined: false
     loop cursor.at < cursor.end && cursor.problem == None {
         key: record_read_uvarint(bytes, cursor)
         if key == {
@@ -371,9 +371,9 @@ jet_cli_perf_pprof_location: fn(bytes: [U8], cursor: ^RecordCursor, functions: ^
 
 // A pprof `Function`: its id, name and file, as places in the string table.
 jet_cli_perf_pprof_function: fn(bytes: [U8], cursor: ^RecordCursor, names: ^[Int:Int], files: ^[Int:Int]) Never! {
-    id := 0
-    name := 0
-    file := 0
+    ^id: 0
+    ^name: 0
+    ^file: 0
     loop cursor.at < cursor.end && cursor.problem == None {
         key: record_read_uvarint(bytes, cursor)
         if key == {
@@ -390,7 +390,7 @@ jet_cli_perf_pprof_function: fn(bytes: [U8], cursor: ^RecordCursor, names: ^[Int
 // A repeated varint field's values at `cursor`: packed (wire type 2) or
 // one (wire type 0).
 jet_cli_perf_pb_ints: fn(bytes: [U8], cursor: ^RecordCursor, wire: Int) -> [Int] Never! {
-    values := [Int]{}
+    ^values: [Int]{}
     if wire == 0 {
         values.push(record_read_uvarint(bytes, cursor))
         return values
@@ -439,10 +439,10 @@ jet_cli_perf_pb_skip: fn(bytes: [U8], cursor: ^RecordCursor, wire: Int) Never! {
 // timeline, at most 16, and each `jet.profile.samples` point a per-line
 // total.
 jet_cli_perf_otlp_read: fn(text: String) -> JetCLIPerfImport JetCLIReadError! {
-    names := [String]{""}
-    rows := [JetCLIPerfLineTotal]{}
-    timeline := [String]{}
-    spans := 0
+    ^names: [String]{""}
+    ^rows: [JetCLIPerfLineTotal]{}
+    ^timeline: [String]{}
+    ^spans: 0
     loop line in text.split("\n") {
         if line.trim() == "" -> next
         request: perf_json.parse(line) ?? return Err(jet_cli_read_error("an OTLP/JSON line is not JSON"))
@@ -455,7 +455,7 @@ jet_cli_perf_otlp_read: fn(text: String) -> JetCLIPerfImport JetCLIReadError! {
                         name: jet_cli_perf_text(jet_cli_perf_field(span, "name"))
                         start: jet_cli_perf_otlp_int(jet_cli_perf_field(span, "startTimeUnixNano"))
                         end: jet_cli_perf_otlp_int(jet_cli_perf_field(span, "endTimeUnixNano"))
-                        browser := false
+                        ^browser: false
                         if jet_cli_perf_otlp_attribute(span, "jet.kind") == .Val(kind) {
                             browser = jet_cli_perf_text(jet_cli_perf_field(kind, "stringValue")) == "browser"
                         }
@@ -487,7 +487,7 @@ jet_cli_perf_otlp_read: fn(text: String) -> JetCLIPerfImport JetCLIReadError! {
             }
         }
     }
-    notes := [String]{"spans count={spans}"}
+    ^notes: [String]{"spans count={spans}"}
     if spans > timeline.len() -> notes.push("timeline shows the first {timeline.len()} spans")
     Ok(JetCLIPerfImport{format: "otlp", totals: JetCLIPerfLineTotals{names: names, rows: rows}, timeline: timeline, notes: notes, interval_us: None})
 }

@@ -1,0 +1,79 @@
+// Decisions past one token: SLL(k) to depth 3, the shared sample a
+// refusal shows, and the cap on the search.
+use {
+    core.grammar.[analyze]
+    core.grammar.error.[GrammarFault, GrammarFaultKind]
+    core.grammar.plan.[GrammarDecision, GrammarPlan, GrammarSource]
+}
+
+plan_of: fn(text: String) -> GrammarPlan Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+faults_of: fn(text: String) -> [GrammarFault] Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(_) -> [GrammarFault]{}
+        .Err(error) -> error.faults
+    }
+}
+
+decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
+    loop decision in plan.decisions {
+        if decision.node == node -> return decision
+    }
+    panic("no decision at node {node}")
+}
+
+#Test("a second token decides what the first cannot") {
+    plan: plan_of("s : target=ID '=' e # Assign | callee=ID '(' ')' # Call ;\ne : name=ID ;\nID : [a-z]+ ;")
+    decision: decision_at(plan, plan.tree.rules[0].body)
+    assert_eq(decision.depth, 2)
+    assert_eq(decision.steps.len(), 2)
+    assert_eq(decision.steps[0].kinds, [Int]{1})
+    assert_eq(decision.steps[0].targets, [Int]{-2})
+    assert_eq(decision.steps[1].kinds, [Int]{2, 3})
+    assert_eq(decision.steps[1].targets, [Int]{0, 1})
+}
+
+#Test("the third token decides through rule references") {
+    plan: plan_of("s : p '=' name=ID # Assign | p '.' name=ID # Field ;\np : first=ID second=ID ;\nID : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    decision: decision_at(plan, plan.tree.rules[0].body)
+    assert_eq(decision.depth, 3)
+    assert_eq(decision.steps.len(), 3)
+    assert_eq(decision.steps[2].targets, [Int]{0, 1})
+}
+
+#Test("a stop decided past the end of the rule uses what follows it") {
+    plan: plan_of("s : list '+' '-' ;\nlist : ('+' '*')* ;")
+    alt: plan.tree.nodes[plan.tree.nodes[plan.tree.rules[1].body].children[0]]
+    decision: decision_at(plan, alt.children[0])
+    assert_eq(decision.depth, 2)
+}
+
+#Test("alternatives that share three tokens are refused with the sample") {
+    faults: faults_of("s : 'a' 'b' 'c' 'd' | 'a' 'b' 'c' 'e' ;")
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.Ambiguous)
+    assert_eq(faults[0].message, "in `s`, alternatives 1 and 2 of this choice can both begin with \"a\" \"b\" \"c\": the parser cannot choose between these within 3 tokens")
+    assert_eq(faults[0].at.offset, 4)
+}
+
+#Test("an optional part that both ways can end the input is refused") {
+    faults: faults_of("s : 'a'? 'a'? ;")
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.Ambiguous)
+    assert_eq(faults[0].message, "in `s`, taking this optional part and skipping it can both begin with \"a\" end of input: the parser cannot choose between these within 3 tokens")
+}
+
+#Test("a decision past the search cap is refused as too complex") {
+    ^words: [String]{}
+    loop k in 0..<1500 -> words.push("'k{k}'")
+    alternatives: words.join(" | ")
+    faults: faults_of("s : w 'x' | w 'y' ;\nw : {alternatives} ;")
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.TooComplex)
+    assert_eq(faults[0].message, "in `s`, the lookahead at this decision passed 4096 token sequences")
+}

@@ -75,7 +75,7 @@ suite: fn(label: String, tree: String, jetdir: String, profile: String, settings
     identity: first_line("{base}/latest/IDENTITY") ?? return fail("{base}/latest/IDENTITY is unreadable")
     // Suite rows run host tools (C compilers, rustc, interpreters) that only
     // the dev shell (Tools/Agent/JetEnv.jet) supplies until jet does.
-    argv := [String]{runner, "{tree}/Tools/Agent/JetEnv.jet", runner, "test", "Compiler", "--profile", profile.copy(), "--compiler={snapshot}/jet"}
+    ^argv: [String]{runner, "{tree}/Tools/Agent/JetEnv.jet", runner, "test", "Compiler", "--profile", profile.copy(), "--compiler={snapshot}/jet"}
     jobs: process.env_nonempty("SUITE_JOBS") ?? ""
     if jobs != "" -> argv.push("--jobs={jobs}")
     memory: process.env_nonempty("SUITE_MEMORY") ?? ""
@@ -88,7 +88,7 @@ suite: fn(label: String, tree: String, jetdir: String, profile: String, settings
     text: "{ran.output}{ran.errors}"
     files.write(out, text) ?? return fail("cannot write {out}: {err}")
     code: exit_code(ran)
-    tail := ""
+    ^tail: ""
     loop line in text.trim_end().lines() -> tail = line.copy()
     print("rc={code} {first_bytes(tail, 240)}")
     if pool.warn != "" -> print(pool.warn)
@@ -132,8 +132,8 @@ choose_jetpack: fn(jetdir: String, sha: String, base: String, profile: String) -
 // has one, "" when none does.
 newest_jetpack: fn(base: String) -[FS]> String Never! {
     entries: files.list_dir(base) ?? return ""
-    best := ""
-    best_ns := 0
+    ^best: ""
+    ^best_ns: 0
     loop entry in entries {
         if !entry.is_dir || !executable("{entry.path}/jetpack") -> next
         meta: files.stat(entry.path, links: .Follow) ?? next
@@ -203,7 +203,7 @@ first_line: fn(path: String) -[FS]> String? Never! {
 
 first_bytes: fn(text: String, limit: Int) -> String Never! {
     if text.count_bytes() <= limit -> return text.copy()
-    kept := [U8]{}
+    ^kept: [U8]{}
     loop byte in text.bytes() {
         if kept.len() >= limit -> break
         kept.push(byte)
@@ -228,8 +228,6 @@ root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
     if value != "" -> value.copy() else -> fallback.copy()
 }
 
-state_root: fn() -[Env, FS]> String Never! {
-    roots.value("JET_STATE_ROOT")
-}
+state_root: fn() -[Env, FS]> String Never! { roots.value("JET_STATE_ROOT") }
 
 scratch_root: fn() -[Env, FS]> String Never! { roots.value("JET_SCRATCH_ROOT") }

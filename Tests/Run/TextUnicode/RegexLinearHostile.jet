@@ -9,17 +9,17 @@ run: fn() {
     print("100k a+ full match: {rx.full_match(plus, long)}")
     // The scan reuses one set of thread rows: repeated long scans keep a flat
     // footprint.
-    rounds := 0
+    ^rounds: 0
     loop _ in 0..<8 -> rounds += rx.find_all(plus, long).len()
     print("8 x 100k a+ find_all: {rounds}")
     print("100k a+ find_all: {rx.find_all(plus, long).len()}")
     group: rx.compile("(a|aa)*b") ?? panic("(a|aa)*b compiles")
     print("100k (a|aa)*b: {rx.is_match(group, long)}")
-    tail := long
+    ^tail: long
     tail += "b"
     print("100k (a|aa)*b with b: {rx.is_match(group, tail)}")
 
-    hostile := ""
+    ^hostile: ""
     loop _ in 0..<64 -> hostile += "a"
     hostile += "c"
     nested: rx.compile("(a*)*b") ?? panic("(a*)*b compiles")

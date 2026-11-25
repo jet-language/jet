@@ -36,9 +36,9 @@ threads: fn() -[FS]> Int {
 // A Fisher-Yates shuffle of 0..<count by a fixed LCG: the same order on
 // every run.
 shuffled: fn(count: Int) -> [Int] {
-    order := [Int]{}
+    ^order: [Int]{}
     loop i in 0..<count -> order.push(i)
-    seed := 12345
+    ^seed: 12345
     loop k in 0..<count {
         seed = (seed * 1103515245 + 12345) % 2147483648
         j: k + seed % (count - k)
@@ -51,8 +51,8 @@ shuffled: fn(count: Int) -> [Int] {
 
 run: fn() {
     before: threads()
-    senders := [Sender<Int>]{}
-    parked := [Task<Int>]{}
+    ^senders: [Sender<Int>]{}
+    ^parked: [Task<Int>]{}
     loop _ in 0..<TASKS {
         { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
         senders.push(tx)
@@ -61,8 +61,8 @@ run: fn() {
     // Lets the tasks park before their releases; the count below does not
     // depend on it.
     time.sleep(50ms)
-    late_senders := [Sender<Int>]{}
-    late := [Task<Int>]{}
+    ^late_senders: [Sender<Int>]{}
+    ^late: [Task<Int>]{}
     order: shuffled(TASKS)
     loop k in 0..<TASKS {
         senders[order[k]].send(order[k])
@@ -72,8 +72,8 @@ run: fn() {
             late.push(task waiter(rx))
         }
     }
-    right := 0
-    at := 0
+    ^right: 0
+    ^at: 0
     loop handle in parked {
         got: handle.join() ?? -1
         if got == at -> right += 1
@@ -82,7 +82,7 @@ run: fn() {
     late_count: late.len()
     late_order: shuffled(late_count)
     loop k in 0..<late_count -> late_senders[late_order[k]].send(TASKS + late_order[k])
-    late_right := 0
+    ^late_right: 0
     at = 0
     loop handle in late {
         got: handle.join() ?? -1

@@ -17,9 +17,7 @@ sum_many: fn(a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: 
     s + Int{I64{fs}}
 }
 
-apply_fn: fn(f: fn(Int) -> Int Never!, x: Int) -> Int Never! {
-    f(x)
-}
+apply_fn: fn(f: fn(Int) -> Int Never!, x: Int) -> Int Never! { f(x) }
 
 double_it: fn(x: Int) -> Int Never! { x * 2 }
 
@@ -34,8 +32,8 @@ run: fn() -[IO]> {
     print("exact:{exact_sum}:{exact_bits}:{exact_cmp}:{big}")
 
     // Fixed widths (signed & unsigned)
-    u8v := U8{200}
-    u8v = u8v - U8{50}
+    ^u8v: U8{200}
+    u8v -= U8{50}
     i16v: I16{-300} + I16{420}
     u32v: (U32{1000} * U32{3}) /% U32{7}
     i64v: ((I64{-17} /% I64{5}) * I64{10}) + (I64{-17} %% I64{5})
@@ -51,7 +49,7 @@ run: fn() -[IO]> {
     print("float:{math.sqrt(x)}:{x + y}:{x - y}:{x * y}:{x / y}:{Float{f32a + f32b}}:{nan_ok}")
 
     // Strings: const text, concat, compare, early drops in loop
-    acc := ""
+    ^acc: ""
     loop i in 0..<4 {
         part: "k{i}"
         if part < "k3" -> acc = "{acc}{part},"
@@ -65,10 +63,10 @@ run: fn() -[IO]> {
     print("agg:{p.label}:{p.x}:{p.y}:{p.tag}:{stacked}:{indir}")
 
     // Lists (#unique<T>, block_unique/retain/release) & Atomics
-    xs := [Int]{10, 20, 30}
-    ys := xs
+    ^xs: [Int]{10, 20, 30}
+    ^ys: xs
     xs.push(40)
-    atom := Counter{n: I64{100}}
+    ^atom: Counter{n: I64{100}}
     old: atom.n.add(I64{25})
     swapped: atom.n.compare_exchange(I64{125}, I64{200})
     print("mem:{xs.len()}:{ys.len()}:{old}:{swapped}:{atom.n.load()}")
