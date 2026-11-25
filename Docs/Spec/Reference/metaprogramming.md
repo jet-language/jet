@@ -1100,14 +1100,11 @@ expression, callable selection, method name, method handle, authorized
 snapshot handle, runtime value, or integer. Its scope is one of evaluation
 site, lexical snapshot, authorized program, lexical package, lexical source,
 runtime value, or retained runtime type catalog. A result has a typed success
-value and, when applicable, a `MetadataError` record. These are the
-`MetadataRootInputType`, `MetadataRootScope`, and `MetadataRootResult` records
-in the AST contract.
+value and, when applicable, a `MetadataError` record.
 
-The shared Rust file is a schema boundary. Its records define public shapes for
-metadata identities, roots, results, and typed failures; parsing, checking,
-evaluation, and runtime retention use their own compiler seams. The feature
-examples show exercised forms, and the syntax ledger names ratified roots.
+Parsing, checking, evaluation, and runtime retention use their own compiler
+seams. The feature examples show exercised forms, and the syntax ledger names
+ratified roots.
 
 Every row of the contract registry (`MetadataContract.jet` in JetFoundation's
 registries) names the witness test that proves it, and every Jai

@@ -1624,7 +1624,7 @@ The hosted `cache status`, `cache prune --to <size>`, and
 `cache limit --host <size>` commands use Jetpack's existing machine-wide
 `ArtifactStore`, including its atomic host policy, verified namespaces, access
 journal, live-owner leases, and deterministic pruning order. Text and
-`jet.status/v1` JSON retain the Rust command's fields and size formatting.
+`jet.status/v1` JSON report the store's fields with fixed size formatting.
 The CLI does not introduce another store or emulate cache mutation.
 
 Environment inspection's `.Oci` image/package cross-check now uses Jetpack's
@@ -2049,9 +2049,11 @@ Selected pass boundaries retain their actual input/output representations,
 payloads and identities, source provenance, occurrence/order, and preservation
 premises. Decision inspection consumes these captured records directly, never
 reconstructing a route from decision rows, work counters, or a digest.
-Requested Rust boundaries with no separate Jet producer have explicit
-`no Jet pass` availability rows. These are not pass records and do not prove
-whether the language meaning is folded into another Jet pass or is absent.
+A requested canonical operation with no Jet producer has an explicit
+`no Jet pass` availability row (`CanonicalPassBoundaryGap` in
+`Compiler/JetFoundation/Source/CanonicalPass.jet`). Such rows are not pass
+records and do not prove whether the language meaning is folded into another
+Jet pass or is absent.
 
 The source loader also exposes the physical manifests and module paths it
 actually read, including failed-load diagnostics. This is not the full watched

@@ -143,14 +143,12 @@ Whole-file and positioned reads and writes, link reads, removal, copy, links,
 mode and owner changes, canonicalization, access checks, the reader, writer,
 map and held-directory handle operations, extended attributes, atomic writes,
 temporary paths and host path facts call their `jet.runtime.files` leaves
-directly. The remaining filesystem host calls use their canonical
-`core.files.__*` names. There is no second `__files7_*` alias layer: the
-Prelude's existing registry entries provide that raw host boundary until Jet
-runtime L7 replaces them at Rust cutover.
-The Rust verification tier single-homes filesystem syscall tails in
-`jet_std_fs_*_raw` functions. Native seed entry points retain their original
-fault probes and call those tails; Jet entry points can perform the same
-preflight once before the raw call. Temporary and lock results still own the
+directly. The remaining filesystem host calls keep their canonical names;
+there is no second `__files7_*` alias layer.
+The runtime single-homes filesystem syscall tails in `jet_std_fs_*_raw`
+functions (`Compiler/JetRuntime/Source/RouteAFiles.jet`). Core performs the
+fault preflight once (`file_fault` in `Core/Files/Files.jet`) before the raw
+call. Temporary and lock results still own the
 native cleanup resource, rather than substituting a path-only record.
 Logging and browser filesystem facts follow the same canonical boundary:
 Jet owns filtering, field normalization, configuration precedence and lock
@@ -190,7 +188,7 @@ clock-fallback, and host-path policy. Glob and directory copy retain native
 dispatch until their traversal, matching, and copy-selection policies move to Jet.
 Terminal reads and prompt/style/progress policy likewise use source-owned
 declarations. Their registered private facts call the single existing terminal
-and stdin kernels; the Rust seed entry points retain their fault preflight.
+and stdin kernels; Core performs their fault preflight.
 `take` runs the Core function that fills the TermTake role (`__take_bytes`),
 preserving the keyword spelling without a parser exception. Jet rejects a
 negative count before the read fault probe; the existing stdin kernel performs
@@ -1467,8 +1465,6 @@ UTF-8 names. Directory copy processes unsorted `ReadDir` order, copies only
 regular files, and releases each entry after use. All host failures report the
 top-level source path, even for destination writes. Read then write fault
 preflights occur once, before traversal.
-Comptime and the resident interpreter marshal those same registered native
-entry facts; neither routes public glob or directory copy to a Rust traversal.
 
 Glob first collects each directory's children, orders native basenames, then
 visits depth-first without following directory symlinks. `*` matches any bytes
@@ -2741,8 +2737,7 @@ The executable terminal examples cover binary-file composition, UTF-8
 stderr, CRLF line reads and EOF, plus confirmation with an empty-answer default:
 [`TerminalSource.jet`](../../../Tests/Run/CoreIO/TerminalSource.jet) and
 [`TerminalParity.jet`](../../../Examples/Systems/Terminal/TerminalParity.jet).
-Their programs and transcripts are shared by the golden and native harnesses;
-they do not require a bespoke Rust test or direct `rustc` invocation.
+Their programs and transcripts are shared by the golden and native harnesses.
 
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
@@ -3967,8 +3962,7 @@ registered constructors preserve runtime identity and state; they do not expose
 source-record construction as an alternate scene, replay, or backend model.
 Game-control callbacks and command relays use the shared native devtools
 boundary; the checked command DTOs and queues remain a separate control layer.
-Both Rust emitters project frame and input-snapshot records to the native Game
-carriers. Frame registration and execution borrow the scene mutably; absent
+Frame registration and execution borrow the scene mutably; absent
 replay/backend/frame arguments become native optional references, not references
 to the language's optional-result carrier.
 

@@ -1391,9 +1391,7 @@ record, and `finish` closes the final LF. `flush` does not close that LF, so
 dropping without finish retains an incomplete line. Before emitting a record,
 the source preflights decoded tree size/depth and reserves its exact wire size
 plus the deferred LF against the total limit. Errors retain native record
-index/path projection and sticky-terminal behavior. These differences follow
-`EncodingStream.rs`'s `jet_jsonl_tree_size`, `jet_jsonl_wire_size`,
-`JSONLWriter.write_record`, `flush_output`, and `finish_output`.
+index/path projection and sticky-terminal behavior.
 
 Typed `csv.decode<T>` owns the native header-to-record policy in Jet. The
 whole-value comma parser retains blank records, doubled quotes, CRLF rules,
@@ -1417,8 +1415,8 @@ CBOR streams retain the existing `CBORReader`/`CBORWriter` names, consuming
 factories, optional pull events and IO method effects. `CBORReader<R>` pulls
 from any `Reader`, one byte per read so an IO failure lands at the exact
 offset it interrupts.
-The private `cbor_stream.jet` part of `core.encoding` owns the native
-`EncodingStream.rs` reader policy (`raw`, `arg`, `payload`, `string`,
+`Core/Encoding/CBORStream.jet` owns the reader policy (`raw`, `arg`,
+`payload`, `string`,
 `retain_key`, `close_event`, `next_event`) and writer policy (`scalar`,
 `accept`, `write_key`, `close_array`, `close_object`, `write_event`,
 `flush_output`, `finish_output`). Definite and indefinite input, chunked

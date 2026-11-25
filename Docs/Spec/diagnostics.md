@@ -6,7 +6,7 @@ This page is the contract for user-facing diagnostics and their projections. It
 covers registry ownership, terminal/LSP/machine rendering, the no-OS E3301
 contract, and the checks for changing a diagnostic. The canonical source is
 `Compiler/Prelude/Diagnostics.jet`; executable checks include
-`tests/cross.rs`, `Tests/UI/`, and `Tests/Cases/DiagnosticsCoverage/`.
+`Tests/Cases/Cross/`, `Tests/UI/`, and `Tests/Cases/DiagnosticsCoverage/`.
 
 ## One registry, many projections
 
@@ -331,9 +331,9 @@ Error: Jet.OsApiOnNoOsTarget: `files.read` is not available on a no-OS target.
 More: jet-lang.dev/e/Jet.OsApiOnNoOsTarget
 ```
 
-`tests/cross.rs` compiles the same `fs.read` fixture with
-`compile_no_os`, checks E3301 and the `no-OS` wording, and compares the
-byte-exact rendered output. The registry row is E3301 in
+`Tests/Cases/Cross/e3301_fs_read_in_freestanding.case` builds the same
+`fs.read` fixture for the `wasm.no-os` target and checks E3301 and the `no-OS`
+wording. The registry row is E3301 in
 `Compiler/Prelude/Diagnostics.jet`; the checker raises it from the no-OS target
 environment in `Compiler/JetSema/Source/Sema/Calls/Core.jet`. Hosted and no-OS
 behavior therefore share the same diagnostic renderer while the target rule
@@ -418,9 +418,9 @@ constant and owning decision appear only with `--verbose`.
 5. Run the focused snapshot and coverage checks, then check
    `jet explain Jet.Name`. Test rendered behavior where applicable; do not add a
    persistent Markdown mirror.
-   Parser parity proofs also compare byte spans, secondary labels, edits, and
-   their applicability and safety grades in `tests/selfhost_parser.rs`; matching
-   prose alone does not prove that a machine fix edits the right source.
+   Machine-fix proofs also compare byte spans, secondary labels, edits, and
+   their applicability and safety grades; matching prose alone does not prove
+   that a machine fix edits the right source.
 
 Coverage checks both directions: each emitted code has one registered row and
 snapshot, and each row is emitted or explicitly marked retired or reserved in
@@ -476,7 +476,8 @@ D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under
 200ms. No running test measures it yet (#6650). This is the user latency contract, not a
 claim that every machine has one fixed runtime.
 
-Layout infeasibility is deliberately different. `tests/layout.rs` records that
+Layout infeasibility is deliberately different.
+`Tests/Cases/Layout/infeasible_value_read_panics_loudly.case` records that
 an infeasible constraint is a runtime query followed by a panic, not a static
 diagnostic. Do not document it as a compile-time error or add a diagnostic row
 for it without changing that contract and its tests.

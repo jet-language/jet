@@ -97,7 +97,7 @@ The cancel row is known-failing under #5989.
 Native expectation probes consume only a pending panic with a recorded raw
 `E3001`, `E3010`, `E3011` or `R0801`–`R0803` stop in the innermost matching
 scope. The panic rail records that code and raw message on every active
-expectation frame before publishing, as `Core.rs` `jet_test_record_stop` does,
+expectation frame before publishing,
 so a frame's first recorded stop is the code its expectation is matched against.
 A successful
 `jet_rt_test_catch_for_scope` completes that expectation but retains the original

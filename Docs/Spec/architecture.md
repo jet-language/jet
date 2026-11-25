@@ -1411,10 +1411,10 @@ A data race is two tasks that access the same memory at the same time when at
 least one access writes and the accesses do not use a synchronization rule.
 
 D-DATARACE1=C is law. Safe Jet must make a data race impossible to compile for
-the covered concurrency surface. Sema owns every user-facing check (I3); a
-native build must not lean on rustc `Send` as the backstop (I2).
+the covered concurrency surface. Sema owns every user-facing check (I3); the
+native backend never serves as the backstop (I2).
 
-Covered mechanisms (`tests/concurrency_boundaries.rs` and matching UI
+Covered mechanisms (`Tests/Cases/ConcurrencyBoundaries/` and matching UI
 snapshots):
 
 - A child created by `task` owns or copies its captures.
