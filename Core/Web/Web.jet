@@ -1039,7 +1039,7 @@ C_APP_DEFAULT_PORT: 8080
 // port, over a `port` the program passes (the platform or `jet dev` that runs
 // the program owns the port); else the program's `port`; else 8080. A
 // `JET_APP_PORT` that holds no port stops with E2809 instead of falling back.
-priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
+#Builtin.Role(.AppPortEnv) priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
     asked: if requested == .Val(port) -> "serve(port: {port})" else -> ""
     raw: sys_rt.env_value("JET_APP_PORT") ?? return AppPort{port: requested ?? C_APP_DEFAULT_PORT, source: if asked == "" -> "the default, with no JET_APP_PORT and no serve port" else -> asked}
     text: String.from_bytes(raw) ?? ""
@@ -1052,7 +1052,7 @@ priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
 
 // Whether `jet dev` runs this program (it sets JET_DEV=1): `jet dev`
 // restarts the program on every change, and the served pages reload.
-priv __app_dev: fn() -> Bool Never! {
+#Builtin.Role(.AppDevEnv) priv __app_dev: fn() -> Bool Never! {
     raw: sys_rt.env_value("JET_DEV") ?? return false
     (String.from_bytes(raw) ?? "") == "1"
 }
@@ -3431,7 +3431,7 @@ C_APP_TRACE_MAX_QUEUE: 2048
 C_APP_TRACE_BATCH: 512
 
 // The OTEL_* variables the export reads, by name; an unset one is absent.
-priv __app_trace_env: fn() -> [String:String] Never! {
+#Builtin.Role(.AppTraceEnv) priv __app_trace_env: fn() -> [String:String] Never! {
     values := [String:String]{}
     app_trace_env_put(values, "OTEL_SDK_DISABLED")
     app_trace_env_put(values, "OTEL_TRACES_EXPORTER")

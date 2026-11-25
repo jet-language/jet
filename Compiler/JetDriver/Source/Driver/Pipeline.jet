@@ -7661,12 +7661,12 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [Stri
 // `serve` reads JET_APP_PORT, which `jet run`, `jet dev` and the platform set
 // to choose the port, JET_DEV, which `jet dev` sets, and the OpenTelemetry
 // SDK's OTEL_* variables, which the platform sets to name the collector its
-// served app traces to (core.web `__app_port`, `__app_dev`,
-// `__app_trace_env`). The toolchain owns those variables, as it owns the
-// typed CLI's parse, so no such read charges the package Env; a program's
-// own env read still does.
+// served app traces to (the core.web functions that fill the AppPortEnv,
+// AppDevEnv and AppTraceEnv roles). The toolchain owns those variables, as it
+// owns the typed CLI's parse, so no such read charges the package Env; a
+// program's own env read still does.
 jet_driver_toolchain_env_read: fn(function: FnBody) -> Bool {
-    function.module_name == "core.web" && (function.name == "__app_port" || function.name == "__app_dev" || function.name == "__app_trace_env")
+    function.role == "AppPortEnv" || function.role == "AppDevEnv" || function.role == "AppTraceEnv"
 }
 
 // The edges an effect walk follows from `function`: its call edges, then the
