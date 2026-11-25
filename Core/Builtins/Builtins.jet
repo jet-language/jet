@@ -112,10 +112,10 @@
 // TypedDecodeRead, and reads a Dyn tree through the constructor filling
 // TypedDecodeTree. The compiler reads their names from those markers in
 // Core/Encoding/Encoding.jet while it builds.
-// The core.mem and
-// core.math operations the compiler builds inline at each call, never as a
-// call (a raw List's capacity, a pointer step, a block copy, a bit copy and
-// the rest), fill the roles that start with `Inline`. A role's name ends
+// The Core operations the compiler builds inline at each call, never as a
+// call (a raw List's capacity, a pointer step, a block copy, a bit copy, a
+// plugin load, a vault's current key and the rest), fill the roles that
+// start with `Inline`. A role's name ends
 // in `Point` exactly when it is a point constructor's, starts with `Decode`
 // exactly when it is a decode helper's, starts with `Inline` exactly when it
 // is a builder intrinsic's, starts with `Measurement` exactly when it is a
@@ -190,6 +190,7 @@ RoleKind: enum {
     TapeTangent,
     VaultUnlockRecipient,
     VaultUnlockPassphrase,
+    InlineVaultCurrent,
     ListQuery,
     QueryStream,
     StreamWithEventTime,
@@ -381,6 +382,7 @@ RoleKind: enum {
     TLSClientStream,
     TLSClientDeadline,
     TLSClientConfigDeadline,
+    InlinePluginLoad,
     ProcessSpecAbilities,
     ProcessSpecCwd,
     ProcessSpecArg,

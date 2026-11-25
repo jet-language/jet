@@ -1316,7 +1316,11 @@ ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
 // unbounded or bounded, and a timer Receiver; the core.event rows
 // (Core/Event/Event.jet) make an Event under a policy, a Hook, a
 // DecisionHook and an AsyncEvent: each at the type arguments of the call's
-// result, which the runtime provider is handed descriptors of.
+// result, which the runtime provider is handed descriptors of. The
+// core.plugin load (Core/Plugin/Plugin.jet) is the load route over the
+// call's own artifact argument, so a literal artifact's guest is linked at
+// that call, and the core.crypto.vault current key (Core/Crypto/Vault.jet)
+// the provider's route tagged by the call's key type.
 IRCoreIntrinsicRow: struct {
     role: String,
     intrinsic: IRRuntimeIntrinsic,
@@ -1359,6 +1363,8 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{role: "InlineDecisionHookNew", intrinsic: IRRuntimeIntrinsic.DecisionHookNew},
     IRCoreIntrinsicRow{role: "InlineAsyncEventNew", intrinsic: IRRuntimeIntrinsic.AsyncEventNew},
     IRCoreIntrinsicRow{role: "InlineIterProgress", intrinsic: IRRuntimeIntrinsic.IterProgress},
+    IRCoreIntrinsicRow{role: "InlinePluginLoad", intrinsic: IRRuntimeIntrinsic.PluginLoad},
+    IRCoreIntrinsicRow{role: "InlineVaultCurrent", intrinsic: IRRuntimeIntrinsic.VaultCurrent},
 }
 
 // The checked Core functions that fill an IR_CORE_INTRINSICS role, by
@@ -1387,7 +1393,9 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
 // generic over its element, an Event's over its payload, and a Hook's,
 // DecisionHook's or AsyncEvent's over its payload and result or failure
 // type, and a described progress source over its items' element; each reads
-// the arguments its lowering does.
+// the arguments its lowering does. A plugin load reads its artifact,
+// authority and limits, and a vault's current key, generic over the key
+// type, its name.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
@@ -1407,6 +1415,8 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
         .HookNew | .DecisionHookNew -> ir_intrinsic_generic_shape(function, 2, 1)
         .AsyncEventNew -> ir_intrinsic_generic_shape(function, 2, 2)
         .IterProgress -> ir_intrinsic_generic_shape(function, 1, 3)
+        .PluginLoad -> ir_intrinsic_generic_shape(function, 0, 3)
+        .VaultCurrent -> ir_intrinsic_generic_shape(function, 1, 1)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
 }

@@ -44,6 +44,24 @@ sema_call_core_plugin_load_type: fn(record: CoreCallRecord, values: [TExpr], dec
     sema_plugin_load_type(graph.plugin_facts, artifact) ?? declared
 }
 
+// The role of the Core function that loads a plugin.
+SEMA_CORE_ROLE_PLUGIN_LOAD: "InlinePluginLoad"
+
+// The type of `value`, a checked call of Core function `target`, when
+// `target` loads a plugin (SEMA_CORE_ROLE_PLUGIN_LOAD) and its first argument
+// is a literal artifact whose Component the compiler read:
+// `Plugin<identity>`. None for any other call, which keeps its declared type.
+sema_call_plugin_load_type: fn(target: SemaCallDirectTarget, value: TExpr, check: SemaBodyCheck) -> Type? {
+    graph: check.program.registration_graph
+    if sema_core_symbol_role(graph, target.symbol) != SEMA_CORE_ROLE_PLUGIN_LOAD -> return None
+    if value.kind == .Call(_, _, args) {
+        if args.len() == 0 -> return None
+        artifact: sema_plugin_literal_text(args[0].value) ?? return None
+        return sema_plugin_load_type(graph.plugin_facts, artifact)
+    }
+    None
+}
+
 sema_plugin_literal_text: fn(value: TExpr) -> String? {
     if value.kind == {
         .StrLit(parts) -> {

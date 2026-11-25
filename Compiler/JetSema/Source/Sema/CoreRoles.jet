@@ -2,7 +2,7 @@
 // Role marker, makes the function, method or trait it marks the one that
 // fills role `AbsF32`. Lowering then finds that declaration through its role
 // (FnBody.role and JetIR ir_core_role_row), never through its name.
-use jet_foundation.[CORE_BUILTINS_MODULE, Diagnostic, Marker, ModuleID, Span, module_is_core, owned_trait_for_role]
+use jet_foundation.[CORE_BUILTINS_MODULE, Diagnostic, Marker, ModuleID, Span, Symbol, module_is_core, owned_trait_for_role]
 
 // The jet_builtins marker that gives a Core function its role.
 SEMA_CORE_ROLE_MARKER: "Role"
@@ -101,6 +101,20 @@ sema_core_point_constructor: fn(graph: SemaRegistrationGraph, row: SemaRegistrat
         return sema_core_role(markers, graph, module_row.module_identity).ends_with("Point")
     }
     false
+}
+
+// The role the top-level Core function `symbol` names fills
+// (sema_core_role); "" for any other callee.
+sema_core_symbol_role: fn(graph: SemaRegistrationGraph, symbol: Symbol) -> String {
+    if !module_is_core(symbol.module_identity) -> return ""
+    row: sema_registration_callable_row(graph, sema_registration_symbol_key(graph, symbol.id)) ?? return ""
+    if row == .Function(declaring, index) {
+        module_row: graph.modules[declaring]
+        markers: module_row.functions[index].declaration.markers
+        if markers.len() == 0 -> return ""
+        return sema_core_role(markers, graph, module_row.module_identity)
+    }
+    ""
 }
 
 // The jet_builtins enum whose cases are the roles.

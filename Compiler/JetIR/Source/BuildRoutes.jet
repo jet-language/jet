@@ -6612,7 +6612,7 @@ ir_core_call_routed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
     }
     ir_route_ambient_refusals(m, p, b, symbol, span)
     if symbol == "jet_reflect_of" -> return ir_reflect_of(m, p, b, ty, args, span)
-    if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, span)
+    if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, false, span)
     if ir_lazy_core_call(m, p, b, symbol, ty, args, span) == .Val(result) -> return result
     b.split_armed = split_armed
     ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, [String]{}, span)
@@ -6957,8 +6957,10 @@ ir_plugin_guest: fn(m: ^IRModule, artifact: String) -> Int Never! {
 // address of the literal artifact's guest entry (ir_plugin_guest; 0 for an
 // artifact only known at run time, which loads as a guest failure), then
 // each field of the `Limits` (sema fills an absent label from its field
-// defaults), so the runtime holds no budget numbers of its own.
-ir_plugin_load: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
+// defaults), so the runtime holds no budget numbers of its own. With
+// `authority` the second argument is the Authority itself, which crosses as
+// its canonical wire (jet_authority_to_wire); without, it is that wire.
+ir_plugin_load: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [Int], authority: Bool, span: Span) -> Int Never! {
     if args.len() != 3 -> return ir_fail_slot(b, span, "plugin.load with {args.len()} arguments")
     literal := ""
     known := false
@@ -6975,7 +6977,9 @@ ir_plugin_load: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [I
     }
     path: ir_expr(m, p, b, args[0])
     if ir_failed(b) -> return -1
-    wire: ir_expr(m, p, b, args[1])
+    granted: ir_expr(m, p, b, args[1])
+    if ir_failed(b) -> return -1
+    wire: if authority -> ir_route(m, p, b, "jet_authority_to_wire", [Int]{granted}, [Bool]{true}, Type.String, span) else -> granted
     if ir_failed(b) -> return -1
     limits: ir_expr(m, p, b, args[2])
     if ir_failed(b) -> return -1

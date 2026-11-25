@@ -4,6 +4,7 @@
 // and key-material lifetimes. Jet validates names and authorization reasons;
 // opaque plan/write handles must never be treated as caller-authored JSON or paths.
 use {
+    builtin: jet_builtins
     core.crypto.[CryptoError, Secret, SigningKey, X25519PublicKey, X25519SecretKey]
     vault: core.crypto.vault
     unicode: core.text
@@ -255,6 +256,13 @@ load: fn<T>(key: KeyRef<T>) -[Secret]> T VaultError! {
 
 current: fn<T>(name: String) -[Secret]> KeyRef<T>? VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
+    __current_key<T>(name)
+}
+
+// The provider's current version of the key `name`, of the key type T: the
+// compiler lowers its call as the provider call. Its body is what a compiler
+// that does not lower it runs.
+#Builtin.Role(.InlineVaultCurrent) priv __current_key: fn<T>(name: String) -[Secret]> KeyRef<T>? VaultError! {
     #Unsafe("vault typed current provider boundary") { return vault.current<T>(name) }
 }
 

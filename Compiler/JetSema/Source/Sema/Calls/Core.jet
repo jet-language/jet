@@ -1651,7 +1651,11 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     if sema_web_param_marker(graph, sema_registration_symbol_key(graph, target.symbol.id), SEMA_WEB_MARKER_COLUMN_OF) == .Val(param) {
         sema_call_web_table_column_schema(args, param, checked.value, check)
     }
-    Val(checked.value)
+    value := checked.value
+    // A load of a literal plugin artifact whose Component the compiler read
+    // is that Component's `Plugin<identity>`, whose exports are its methods.
+    if sema_call_plugin_load_type(target, value, check) == .Val(loaded) -> tree_expr_retype(value, loaded)
+    Val(value)
 }
 
 #Test("worker checked-function inference changes no other Core route") {
