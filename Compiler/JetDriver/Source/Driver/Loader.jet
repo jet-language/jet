@@ -4507,6 +4507,10 @@ JetDriverCoreDemandNames: struct {
     migration_name: Int,
     field_error_name: Int,
     input_name: Int,
+    // `receipt.attach(...)` runs core.encoding's ReceiptAttach body, so
+    // that module loads without an import.
+    receipt_name: Int,
+    attach_name: Int,
     // The ids of `send` and each JET_DRIVER_PRELUDE_FAILURE_METHODS and
     // JET_DRIVER_PRELUDE_FAILURE_STATICS name.
     prelude_failure_names: [Int],
@@ -4586,7 +4590,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     }
     duration_methods := [Int]{}
     loop row in DURATION_SOURCE_METHODS -> duration_methods.push(jet_driver_core_demand_name(tables, row.name))
-    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), matrix_name: jet_driver_core_demand_name(tables, "Matrix"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), prelude_failure_names: prelude_failure_names, bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields, duration_methods: duration_methods, duration_spelled: jet_driver_duration_spelled(tables)}
+    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), matrix_name: jet_driver_core_demand_name(tables, "Matrix"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), prelude_failure_names: prelude_failure_names, bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields, duration_methods: duration_methods, duration_spelled: jet_driver_duration_spelled(tables), receipt_name: jet_driver_core_demand_name(tables, "receipt"), attach_name: jet_driver_core_demand_name(tables, "attach")}
 }
 
 // Whether the source spells `Duration` or a literal of a Time unit (`5s`).
@@ -4696,6 +4700,9 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             }
             if name == names.migration_name && index + 2 < to && tokens[index + 1].kind == TOKEN_IDENT && tokens[index + 2].kind == TOKEN_LBRACE {
                 demand.codec_decode = true
+            }
+            if name == names.receipt_name && index + 2 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && name_index(tokens[index + 2].decoded) == names.attach_name {
+                if !demand.source_modules.contains("core.encoding") -> demand.source_modules.push("core.encoding")
             }
             // Loading a potential source owner is syntactic; Sema alone
             // decides whether this receiver is the canonical primitive Int,
