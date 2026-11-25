@@ -37,6 +37,7 @@ package: {
 use {
     base64: core.encoding.base64
     builtin: jet_builtins
+    rt: jet.runtime.encoding
     stream: __core_encoding_stream
     time: core.time
 }
@@ -332,6 +333,14 @@ impl F32.Decode {
 // A Dyn decodes as its own copy.
 impl Dyn.Decode {
     decode: fn(tree: Dyn) -> Dyn [FieldError]! { Ok(tree.copy()) }
+}
+
+// `receipt.attach(value)` (JetSema Calls/Receipts.jet): publishes `tree`, the
+// value's canonical encoding, as the receipt section `section` with its
+// declared `type_name` and `schema` digest. The checker calls it through its
+// jet_builtins role.
+#Builtin.Role(.ReceiptAttach) priv __receipt_attach: fn(tree: ^^Dyn, section: ^^String, type_name: ^^String, schema: ^^String) {
+    rt.receipt_attach(tree, section, type_name, schema)
 }
 
 // Typed `tree.decode<T>()` of a container T with no Decode implementation of

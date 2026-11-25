@@ -2,23 +2,21 @@
 // `#[Receipt("name"), Codable]` record declares a section, and
 // `receipt.attach(value)` publishes the value's canonical encoding under that
 // section. The section name, declared type name and schema digest are
-// declaration facts the checked call carries to the `jet_receipt_attach`
-// runtime route; no source constructor or `core.receipt` module exists.
+// declaration facts the checked call hands, with the encoded value, to
+// core.encoding's ReceiptAttach body; no source constructor or `core.receipt`
+// module exists.
 use jet_foundation.[
     BodyHandleOp,
     AccessConvention,
     CallArg,
     Diagnostic,
     Expr,
-    FunctionDefaultRef,
     MARKER_CODABLE,
     MARKER_RECEIPT,
     Marker,
     Span,
     StructDef,
-    TFailureCarrier,
     Type,
-    core_call,
     expr_span,
     sha256_bytes,
     sha256_hex_bytes,
@@ -167,16 +165,8 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     declared: definition ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    record: core_call("core.prelude", "__receipt_attach") ?? {
-        check.context.incomplete_reasons.push("checked receipt attach row is missing")
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    result: Type.Named{name: "Unit"}
-    if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, check.scopes, check.context, check.environment.*, check.program.*, check.diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
     encoded: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: payload, operation: BodyHandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, payload_span)
     values: [TExpr]{encoded, sema_receipt_text(section ?? "", span), sema_receipt_text(declared.name, span), sema_receipt_text(sema_receipt_schema_digest(declared), span)}
-    value: sema_tree_node(result, TExprKind.CoreCall{record: record, args: values, source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false, false, false, false}, fallibility: TFailureCarrier.Infallible}, span)
+    value: sema_call_core_role_source(SEMA_CORE_ROLE_RECEIPT_ATTACH, values, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
