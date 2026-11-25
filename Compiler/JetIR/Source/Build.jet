@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, NameVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_taken, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_tree_new, module_none, BodyParameter, TEffectFacts, TEffectSpan, TWebParamReconstruction, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_pair_find_slot, name_pair_slot, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name, builtin_carrier_named]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, NameVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_taken, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_tree_new, module_none, BodyParameter, TEffectFacts, TEffectSpan, TWebParamReconstruction, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_pair_find_slot, name_pair_slot, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name, builtin_carrier_declaration]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_substitute_type]
 }
 
@@ -949,11 +949,13 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
     // literals spell it bare, so it claims its name ahead of the Prelude's.
     // No declaration claims a compiler value's host word (`Compiler`, `Code`):
     // that bare spelling is the host value, and a library type of that name,
-    // private or not, is reached by its key alone. Nor does a jet_builtins
-    // carrier (`priv Atomic: struct<T> {}`, BuiltinCarriers.jet): the builder
-    // lays the carrier out itself, never as the declaration's (absent)
-    // fields, so a bare `Atomic` that found the declaration would read and
-    // freeze the carrier as an empty struct.
+    // private or not, is reached by its key alone. Nor does a type jet_builtins
+    // declares `priv`, a carrier (`priv Atomic: struct<T> {}`,
+    // BuiltinCarriers.jet): the builder lays the carrier out itself, never as
+    // the declaration's (absent) fields, so a bare `Atomic` that found the
+    // declaration would read and freeze the carrier as an empty struct. The
+    // declaration says so itself, so a carrier that Core declares after this
+    // compiler was built is skipped too.
     builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}."
     families: ir_unit_family_rows(types)
     type_rows_keys := name_column_table(types.len() * 2)
@@ -965,7 +967,14 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
     loop (index, definition) in types {
         name_column_set_first(type_rows_keys, type_rows, definition.key, index)
         if ir_host_value_name(definition.name) -> next
-        if definition.key.starts_with(builtins) && builtin_carrier_named(definition.name) -> next
+        if definition.key.starts_with(builtins) {
+            visibility: if {
+                definition.public -> NameVisibility.Public
+                definition.package_public -> NameVisibility.Package
+                else -> NameVisibility.Private
+            }
+            if builtin_carrier_declaration(CORE_BUILTINS_MODULE, visibility) -> next
+        }
         if {
             definition.key.starts_with(builtins) -> tier1.push(index)
             definition.key.starts_with(MODULE_CORE_PREFIX) || definition.key == definition.name -> {
@@ -1052,6 +1061,26 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
         impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
     IRProgram{functions: [FnBody]{}, rows: IRFunctionRows{keys: name_column_table(), rows: name_column()}, symbols: symbols.move(), interner: interner.move(), types: types.move(), type_rows_keys: type_rows_keys, type_rows: type_rows, constants_keys: constants_keys, constants: constants, constant_defs: defs.move(), render_impls_keys: name_column_table(), render_impls: name_column(), close_methods_keys: name_column_table(), close_methods: name_column(), impl_slots_keys: impl_slots_keys, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, trait_keys: ir_trait_key_table(implementers), empty_impls: empty_impls, source_bytes: [[U8]]{}, source_lines: [[Int]]{}}
+}
+
+#Test("a type jet_builtins declares priv claims no bare name") {
+    builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}."
+    carrier := ir_rows_test_struct("Handle", [String]{}, [TypeTupleField]{})
+    carrier.key = "{builtins}Handle"
+    carrier.public = false
+    record := ir_rows_test_struct("Plain", [String]{}, [TypeTupleField]{})
+    record.key = "{builtins}Plain"
+    core_handle := ir_rows_test_struct("Handle", [String]{}, [TypeTupleField]{TypeTupleField{name: "stdin", ty: Type.Int}})
+    core_handle.key = "{MODULE_CORE_PREFIX}core.process.Handle"
+    core_plain := ir_rows_test_struct("Plain", [String]{}, [TypeTupleField]{})
+    core_plain.key = "{MODULE_CORE_PREFIX}core.process.Plain"
+    p: ir_program_declared([TTypeDef]{carrier, record, core_handle, core_plain}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
+    handle: ir_type_def(p, "Handle") ?? panic("a bare `Handle` names Core's declaration")
+    assert_eq(p.types[handle].key, "{MODULE_CORE_PREFIX}core.process.Handle")
+    carrier_row: ir_type_def(p, "{builtins}Handle") ?? panic("the carrier is reached by its key")
+    assert_eq(p.types[carrier_row].name, "Handle")
+    plain: ir_type_def(p, "Plain") ?? panic("a bare `Plain` names a declaration")
+    assert_eq(p.types[plain].key, "{builtins}Plain")
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,

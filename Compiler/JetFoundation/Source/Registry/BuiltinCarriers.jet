@@ -1,29 +1,45 @@
 // The compiler's carriers: the storage types Core's door to the compiler
 // (Core/Builtins/Builtins.jet) declares `priv` and by arity alone, such as
 // `priv Atomic: struct<T> {}`, with the Prelude type markers written on each
-// (`#MoveOnly`, `#Local`). Being private, a declaration is never what a bare
-// `Atomic<Int>` names: the checker types and lowers the carrier itself, in
-// programs that load no jet_builtins too. So the file is read while the
-// compiler builds, and the checker reads a carrier's facts from its row here
-// rather than from a list of names.
+// (`#MoveOnly`, `#Local`, `#SingleUse`) and the methods that consume it.
+// Being private, a declaration is never what a bare `Atomic<Int>` names: the
+// checker types and lowers the carrier itself, in programs that load no
+// jet_builtins too (builtin_carrier_declaration). So the file is read while
+// the compiler builds, and the checker reads a carrier's facts from its row
+// here rather than from a list of names.
 
 BUILTIN_CARRIERS_PATH: "Core/Builtins/Builtins.jet"
 
-// One arity-only declaration and the hooks of the markers written on it.
+// One arity-only declaration, the hooks of the markers written on it, and
+// the methods its block declares on `^^self`, in source order.
 BuiltinCarrier: struct {
     name: String,
     hooks: [MarkerHook],
+    consumes: [String],
 }
 
 BUILTIN_CARRIERS: #run builtin_carrier_rows(embed_file("toolchain:{BUILTIN_CARRIERS_PATH}"))
 
-// Each top-level `priv Name: struct<…> {}` line of `text`, in source order,
-// with the hooks of the markers on the lines right above it (`#MoveOnly`,
-// `#[MoveOnly, Local]`). A marker with no compiler hook adds none.
+// Each top-level `priv Name: struct<…> {}` or `priv Name: struct {}` of
+// `text`, in source order, with the hooks of the markers on the lines right
+// above it (`#MoveOnly`, `#[MoveOnly, Local]`). A marker with no compiler hook
+// adds none. A declaration that opens a block (`priv Task: struct<T> {`)
+// runs to the next `}` line, and each `name: fn(^^self` line inside it
+// consumes the carrier.
 builtin_carrier_rows: fn(text: String) -> [BuiltinCarrier] Never! {
     rows := [BuiltinCarrier]{}
     hooks := [MarkerHook]{}
+    in_block := false
     loop line in text.split("\n").to_list() {
+        if in_block {
+            if line == "}}" {
+                in_block = false
+                next
+            }
+            method: line.find(": fn(^^self")
+            if method > 4 && line.starts_with("    ") -> rows[rows.len() - 1].consumes.push(line.slice(4..<method))
+            next
+        }
         if line.starts_with("#[") && line.ends_with("]") {
             loop name in line.slice(2..<line.len() - 1).split(", ").to_list() {
                 if marker_hook_of_declaration(name) == .Val(hook) -> hooks.push(hook)
@@ -34,9 +50,12 @@ builtin_carrier_rows: fn(text: String) -> [BuiltinCarrier] Never! {
             if marker_hook_of_declaration(line.slice(1..<line.len())) == .Val(hook) -> hooks.push(hook)
             next
         }
-        colon: line.find(": struct<")
-        if colon > 0 && line.starts_with("priv ") && line.ends_with("> {{}}") {
-            rows.push(BuiltinCarrier{name: line.slice("priv ".len()..<colon), hooks: hooks.move()})
+        colon := line.find(": struct<")
+        if colon < 0 -> colon = line.find(": struct {{")
+        opens: line.ends_with(" {{")
+        if colon > 0 && line.starts_with("priv ") && (opens || line.ends_with(" {{}}")) {
+            rows.push(BuiltinCarrier{name: line.slice("priv ".len()..<colon), hooks: hooks.move(), consumes: [String]{}})
+            in_block = opens
         }
         hooks = [MarkerHook]{}
     }
@@ -64,17 +83,48 @@ builtin_carrier_named: fn(name: String) -> Bool Never! {
     false
 }
 
+// The methods that consume the carrier `name` (`join`, `detach`); empty for
+// a carrier that declares none, or a name that is no carrier.
+builtin_carrier_consumes: fn(name: String) -> [String] Never! {
+    methods := [String]{}
+    loop row in BUILTIN_CARRIERS {
+        if row.name == name {
+            loop method in row.consumes -> methods.push(method)
+            return methods
+        }
+    }
+    methods
+}
+
+// Whether a type module `module_name` declares with `visibility` is a
+// carrier's declaration: one Core's builtins door declares `priv`. The
+// declaration says so itself, so a compiler built before Core declared a
+// carrier still never takes the declaration for the type: no bare name
+// finds it, and it derives nothing.
+builtin_carrier_declaration: fn(module_name: String, visibility: NameVisibility) -> Bool Never! {
+    module_name == CORE_BUILTINS_MODULE && visibility == NameVisibility.Private
+}
+
 #Test("a carrier takes the hooks of the markers right above it") {
-    text: "#MoveOnly\npriv Atomic: struct<T> {{}}\n\n#[MoveOnly, Local]\npriv SharedGuard: struct<T> {{}}\n// a comment\npriv Plain: struct<T> {{}}\n#MoveOnly\nWord: struct<bits: Int> {{}}\nRole: struct {{\n    kind: RoleKind,\n}}\n"
+    text: "#MoveOnly\npriv Atomic: struct<T> {{}}\n\n#[MoveOnly, Local]\npriv SharedGuard: struct<T> {{}}\n// a comment\npriv Plain: struct<T> {{}}\n#MoveOnly\nWord: struct<bits: Int> {{}}\nRole: struct {{\n    kind: RoleKind,\n}}\n#SingleUse\npriv Job: struct<T> {{\n    finish: fn(^^self) {{}}\n\n    peek: fn(self) {{}}\n    drop_it: fn(^^self) {{}}\n}}\npriv Handle: struct {{}}\n"
     rows: builtin_carrier_rows(text)
-    assert_eq(rows.len(), 3)
+    assert_eq(rows.len(), 5)
     assert_eq(rows[0].name, "Atomic")
     assert_eq(rows[0].hooks, [MarkerHook]{MarkerHook.MoveOnly})
     assert_eq(rows[1].hooks, [MarkerHook]{MarkerHook.MoveOnly, MarkerHook.Local})
     assert_eq(rows[2].name, "Plain")
     assert_eq(rows[2].hooks.len(), 0)
+    assert_eq(rows[3].name, "Job")
+    assert_eq(rows[3].hooks, [MarkerHook]{MarkerHook.SingleUse})
+    assert_eq(rows[3].consumes, [String]{"finish", "drop_it"})
+    assert_eq(rows[4].name, "Handle")
+    assert_eq(rows[4].consumes.len(), 0)
     assert(builtin_carrier_declares("Atomic", MarkerHook.MoveOnly) && !builtin_carrier_declares("Atomic", MarkerHook.Local))
     assert(builtin_carrier_declares("ViewMut", MarkerHook.MoveOnly))
     assert(builtin_carrier_declares("CellReadGuard", MarkerHook.Local) && builtin_carrier_declares("SharedGuard", MarkerHook.MoveOnly))
-    assert(!builtin_carrier_named("Word") && !builtin_carrier_named("Arena"))
+    assert(builtin_carrier_consumes("Atomic").len() == 0)
+    assert(builtin_carrier_declaration(CORE_BUILTINS_MODULE, NameVisibility.Private))
+    assert(!builtin_carrier_declaration(CORE_BUILTINS_MODULE, NameVisibility.Public) && !builtin_carrier_declaration(CORE_BUILTINS_MODULE, NameVisibility.Package))
+    assert(!builtin_carrier_declaration("core.process", NameVisibility.Private))
+    assert(!builtin_carrier_named("Word") && !builtin_carrier_named("Arena") && builtin_carrier_consumes("Arena").len() == 0)
 }

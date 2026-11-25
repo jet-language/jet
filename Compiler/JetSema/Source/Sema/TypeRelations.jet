@@ -92,6 +92,7 @@ use jet_foundation.[
     core_enum_payload_variants,
     ir_host_value_name,
     ir_runtime_handle_row,
+    builtin_carrier_declaration,
 ]
 
 sema_type_arguments_have_open_shape: fn(types: [Type]) -> Bool Never! {
@@ -2250,6 +2251,10 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
         if caller_is_core && !module_is_core(owner_row.module_identity) -> next
         nominal: owner_row.nominals[owner.row]
         if nominal.symbol.name != name -> next
+        // A carrier's declaration (`priv ProcessChild: struct {}` in Core's
+        // builtins door) is never what its bare name means: the checker types
+        // the carrier itself (builtin_carrier_declaration).
+        if module_is_core(owner_row.module_identity) && builtin_carrier_declaration(owner_row.module_name, sema_name_visibility(nominal.symbol.visibility)) -> next
         // A bare unapplied `Group` is the task group (sema_type_graph_resolve_named),
         // so only a generic `Group<K, V>` (core.data's) can own the bare applied
         // spelling; core.sys's and core.ui.xkb's records never compete for it.

@@ -13,6 +13,7 @@ use {
         authority_parse_right,
         BUILTIN_METHOD_ROWS,
         BUILTIN_STATIC_ROWS,
+        builtin_carrier_declaration,
         CORE_BUILTINS_MODULE,
         core_module_enum_cases,
         CORE_MODULE_EXPORTS,
@@ -37,6 +38,7 @@ use {
         Marker,
         NamedSpan,
         NameTable,
+        NameVisibility,
         Param,
         ParseResult,
         PolicyDeclaration,
@@ -3168,6 +3170,42 @@ jet_driver_bind_dependency_imports: fn(program: ^Program, unit: JetDriverSourceU
     }
     loop declaration in program.imports -> bindings.push(declaration.copy())
     program.imports = bindings
+}
+
+// A carrier's declaration in Core's builtins door (`priv Sender: struct<T>
+// {}`) derives nothing: the checker types the carrier itself
+// (builtin_carrier_declaration), so the empty declaration gets no generated
+// codec or structural trait, and a type that holds the carrier never relies
+// on one.
+jet_driver_underive_builtin_carriers: fn(program: ^Program, module_name: String) {
+    loop index in 0..<program.items.len() {
+        if program.items[index] == .Struct(definition) {
+            visibility: if {
+                definition.is_pub -> NameVisibility.Public
+                definition.is_package_pub -> NameVisibility.Package
+                else -> NameVisibility.Private
+            }
+            if !builtin_carrier_declaration(module_name, visibility) -> next
+            updated := definition
+            updated.auto_derive_default = false
+            program.items[index] = Item.Struct{value: updated}
+        }
+    }
+}
+
+#Test("a carrier's declaration in Core's builtins door derives nothing") {
+    source: "priv Handle: struct {{}}\n\nSent: struct {{\n    count: Int,\n}}\n"
+    derives := [Bool]{}
+    modules: [String]{CORE_BUILTINS_MODULE, "core.process"}
+    loop module_name in modules {
+        parsed := parse_source(source.bytes())
+        assert_eq(parsed.diagnostics.len(), 0)
+        jet_driver_underive_builtin_carriers(parsed.program, module_name)
+        loop item in parsed.program.items {
+            if item == .Struct(definition) -> derives.push(definition.auto_derive_default)
+        }
+    }
+    assert_eq(derives, [Bool]{false, true, true, true})
 }
 
 // `policy: { lints: { deny: [auto_derive] } }` turns the package default off
@@ -6929,6 +6967,7 @@ jet_driver_load_walk: fn(
         }
         jet_driver_bind_dependency_imports(program, unit, packages)
         jet_driver_apply_auto_derive_policy(program, unit, packages)
+        if embedded -> jet_driver_underive_builtin_carriers(program, unit.module_name)
         module_identity: module_intern(table, jet_driver_unit_module_identity(unit))
         if jet_driver_has_errors(parse_result.diagnostics) {
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
