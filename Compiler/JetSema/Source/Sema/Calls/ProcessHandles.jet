@@ -266,32 +266,61 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
         value: sema_call_core_tree(record, call_args, span, [Type]{}, widen, result, fallibility, None, environment, program, diagnostics) ?? return rejected
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)}
     }
-    // Every other method is the ordinary Core source body
-    // `core.process.__spec_<method>` (`terminal(policy)` is
-    // `__spec_terminal_with_policy`; `abilities` reports the checked
-    // TerminalFact set), so every tier runs the same Jet code.
-    leaf: if method == "terminal" && args.len() == 1 -> "terminal_with_policy" else -> method
+    // Every other method is the ordinary Core source body that fills its
+    // jet_builtins role (sema_process_spec_role; `abilities` reports the
+    // checked TerminalFact set), so every tier runs the same Jet code.
     effect: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
     call_args := [TExpr]{receiver_value}
     loop argument in values -> call_args.push(argument)
-    sema_process_source_call("__spec_{leaf}", "ProcessSpec.{method}", effect, call_args, result, span, expected, environment, program, scopes, check, diagnostics)
+    sema_process_source_call(sema_process_spec_role(method, args.len()), "ProcessSpec.{method}", effect, call_args, result, span, expected, environment, program, scopes, check, diagnostics)
 }
 
-// `api` as a call of the Core source body `core.process.<member>` on `args`
-// (the receiver first), typed `result`, with the effect `effect_name` (none
-// when empty).
-sema_process_source_call: fn(member: String, api: String, effect_name: String, args: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+// The jet_builtins role of the Core body a ProcessSpec method other than
+// the stream routes and Duration limits calls, given its argument count
+// (`terminal(policy)` fills ProcessSpecTerminalWithPolicy); "" for no such
+// method.
+sema_process_spec_role: fn(method: String, argc: Int) -> String Never! {
+    if method == {
+        "abilities" -> "ProcessSpecAbilities"
+        "cwd" -> "ProcessSpecCwd"
+        "arg" -> "ProcessSpecArg"
+        "args_extend" -> "ProcessSpecArgsExtend"
+        "env" -> "ProcessSpecEnv"
+        "env_remove" -> "ProcessSpecEnvRemove"
+        "env_clear" -> "ProcessSpecEnvClear"
+        "output_limit" -> "ProcessSpecOutputLimit"
+        "memory_limit" -> "ProcessSpecMemoryLimit"
+        "memory_scope" -> "ProcessSpecMemoryScope"
+        "open_file_limit" -> "ProcessSpecOpenFileLimit"
+        "cpu_affinity" -> "ProcessSpecCPUAffinity"
+        "io_priority" -> "ProcessSpecIOPriority"
+        "io_idle" -> "ProcessSpecIOIdle"
+        "detached" -> "ProcessSpecDetached"
+        "terminal" -> if argc == 1 -> "ProcessSpecTerminalWithPolicy" else -> "ProcessSpecTerminal"
+        "under" -> "ProcessSpecUnder"
+        "plan" -> "ProcessSpecPlan"
+        "run" -> "ProcessSpecRun"
+        "run_checked" -> "ProcessSpecRunChecked"
+        "spawn" -> "ProcessSpecSpawn"
+        else -> ""
+    }
+}
+
+// `api` as a call of the Core source body that fills `role` on `args` (the
+// receiver first), typed `result`, with the effect `effect_name` (none when
+// empty). The compiler finds the body by its role, never by its name.
+sema_process_source_call: fn(role: String, api: String, effect_name: String, args: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_record_intrinsic(result, effect_name, api, span, environment, program, scopes, check.context, diagnostics) {
         return rejected
     }
-    route: sema_call_core_resolve_route(environment, program, "core.process", member, [Type]{}, args.len(), false, span, diagnostics) ?? return rejected
-    target: if route == {
-        .Source(source) -> source
-        .Core(_) | .SharedSite(_) -> {
-            check.context.incomplete_reasons.push("{api} must resolve its canonical Jet source body")
-            return rejected
-        }
+    filler: sema_core_role_function(program.registration_graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return rejected
+    }
+    target: sema_call_core_source_target(environment, program, filler.module_identity, filler.name, [Type]{}, span, true, diagnostics) ?? {
+        check.context.incomplete_reasons.push("{api} must resolve its canonical Jet source body")
+        return rejected
     }
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return rejected
     call_args := [TCallArg]{}
@@ -371,9 +400,9 @@ sema_process_child_result: fn(method: String) -> Type? Never! {
     }
 }
 
-// A child's methods are the ordinary Core source bodies
-// `core.process.__child_<method>`, which read the child; every one but `id`
-// is an Exec step.
+// A child's methods are the ordinary Core source bodies that fill their
+// jet_builtins roles (sema_process_child_role), which read the child; every
+// one but `id` is an Exec step.
 sema_process_child_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     result: sema_process_child_result(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
@@ -386,7 +415,21 @@ sema_process_child_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         return rejected
     }
     effect: if method == "id" -> "" else -> "Exec"
-    sema_process_source_call("__child_{method}", "ProcessChild.{method}", effect, [TExpr]{receiver_value}, result, span, expected, environment, program, scopes, check, diagnostics)
+    sema_process_source_call(sema_process_child_role(method), "ProcessChild.{method}", effect, [TExpr]{receiver_value}, result, span, expected, environment, program, scopes, check, diagnostics)
+}
+
+// The jet_builtins role of the Core body a ProcessChild method calls; "" for
+// no such method.
+sema_process_child_role: fn(method: String) -> String Never! {
+    if method == {
+        "id" -> "ProcessChildID"
+        "wait" -> "ProcessChildWait"
+        "exited" -> "ProcessChildExited"
+        "kill" -> "ProcessChildKill"
+        "terminate" -> "ProcessChildTerminate"
+        "interrupt" -> "ProcessChildInterrupt"
+        else -> ""
+    }
 }
 
 sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {

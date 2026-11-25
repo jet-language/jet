@@ -36,7 +36,12 @@
 // `Hook<T, R>` (HookPoint) and a `DecisionHook<T, E>` (DecisionPoint), each
 // call a binding's identity rather than an allocation, the line readers
 // `loop line in child.stdout.lines()` calls for each line of a child's
-// output (ProcessStdoutLine) and error output (ProcessStderrLine), and the
+// output (ProcessStdoutLine) and error output (ProcessStderrLine), the
+// `ProcessSpec` builders, launch steps and `abilities` a `spec.cwd(path)`,
+// `spec.run()` and the rest call (ProcessSpecAbilities through ProcessSpecSpawn,
+// with `terminal(policy)` as ProcessSpecTerminalWithPolicy) and the
+// `ProcessChild` steps a `child.wait()` and the rest call (ProcessChildID
+// through ProcessChildInterrupt), and the
 // decode helpers a `tree.decode<T>()` with no Decode implementation of T's
 // own runs for a List (DecodeList), a `[T#N]` (DecodeFixedList), a byte List
 // (DecodeBytes), an Option (DecodeOption) and a String-keyed Map
@@ -326,6 +331,34 @@ RoleKind: enum {
     TLSClientStream,
     TLSClientDeadline,
     TLSClientConfigDeadline,
+    ProcessSpecAbilities,
+    ProcessSpecCwd,
+    ProcessSpecArg,
+    ProcessSpecArgsExtend,
+    ProcessSpecEnv,
+    ProcessSpecEnvRemove,
+    ProcessSpecEnvClear,
+    ProcessSpecOutputLimit,
+    ProcessSpecMemoryLimit,
+    ProcessSpecMemoryScope,
+    ProcessSpecOpenFileLimit,
+    ProcessSpecCPUAffinity,
+    ProcessSpecIOPriority,
+    ProcessSpecIOIdle,
+    ProcessSpecDetached,
+    ProcessSpecTerminal,
+    ProcessSpecTerminalWithPolicy,
+    ProcessSpecUnder,
+    ProcessSpecPlan,
+    ProcessSpecRun,
+    ProcessSpecRunChecked,
+    ProcessSpecSpawn,
+    ProcessChildID,
+    ProcessChildWait,
+    ProcessChildExited,
+    ProcessChildKill,
+    ProcessChildTerminate,
+    ProcessChildInterrupt,
     ProcessStdoutLine,
     ProcessStderrLine,
     StringMatches,
