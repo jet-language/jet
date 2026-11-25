@@ -2041,8 +2041,9 @@ parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: 
             // `#Interrupt`, `#Context`, `#Deadline` and `#Allow` are sema's,
             // `#FX` is the effect row's, `#Redact` marks fields and `#Root` a
             // parameter; `#StepLimit` belongs to bindings, and sema refuses
-            // it on a function by its sites.
-            .FFI | .Import | .Memo | .Redact | .Root | .Commutative | .Static | .SingleUse | .Interrupt | .Context | .FX | .Allow | .Deadline | .StepLimit | .Rename -> {}
+            // it on a function by its sites, as it refuses the type markers
+            // `#SingleUse`, `#MoveOnly` and `#Local` (a type or binding fact).
+            .FFI | .Import | .Memo | .Redact | .Root | .Commutative | .Static | .SingleUse | .MoveOnly | .Local | .Interrupt | .Context | .FX | .Allow | .Deadline | .StepLimit | .Rename -> {}
         }
     }
     // `#Job` metadata and its `every:` schedule.

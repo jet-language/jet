@@ -6326,7 +6326,9 @@ D-LAYOUT-CTOR1, D-OWNCOMP1, D-A11Y1, D-NATIVEUI1/2)*: reactivity is a library + 
 pure std runtime (E2910–E2913). D-DATARACE1=C: reactive boxes use lock-ordered
 `Arc` storage so task/channel crossings cannot data-race or lean on rustc
 `Send`. Expert pins `#Local` / `#Shared` are registered (MARKER_LOCAL /
-MARKER_SHARED): `#Local` rejects task/channel/parallel crossings (E1102);
+MARKER_SHARED): `#Local` rejects task/channel/parallel crossings (E1102), of
+a pinned binding and, written before a `struct` or `enum`, of every value of
+that type and every value that holds one;
 `#Shared` and automatic boundary crossings list synchronized-form upgrades
 in `jet report`. Events and hooks are compiler-known Core values
 in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,

@@ -1,0 +1,25 @@
+// E1102: a type declared `#Local` keeps its values on the thread that made
+// them, so neither one nor a record that holds one crosses into a task.
+#Local Pool: struct {
+    slots: [Int],
+}
+
+Holder: struct {
+    pool: Pool,
+}
+
+cross_task: fn(pool: Pool) {
+    worker: task {
+        _: pool.slots.len()
+    }
+    worker.join() ?? panic("task failed")
+}
+
+cross_holder: fn(holder: Holder) {
+    worker: task {
+        _: holder.pool.slots.len()
+    }
+    worker.join() ?? panic("task failed")
+}
+
+run: fn() {}

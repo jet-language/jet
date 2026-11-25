@@ -1,0 +1,59 @@
+// A package type states each fact a Core type states, the same way, and gets
+// the same check: a `#MoveOnly` value moves and never copies, a `#Local`
+// value never leaves the thread that made it, a type with `impl Close` is a
+// resource that never copies, and a `#SingleUse` value owes one consume. A
+// record that holds one of them has the fact too.
+#MoveOnly Ticket: struct {
+    seat: Int,
+}
+
+TicketHolder: struct {
+    ticket: Ticket,
+}
+
+#Local Pool: struct {
+    slots: [Int],
+}
+
+PoolHolder: struct {
+    pool: Pool,
+}
+
+Handle: struct {
+    id: Int,
+
+    impl Close {
+        close: fn(^^self) { print("close {self.id}") }
+    }
+}
+
+#SingleUse Lease: struct {
+    name: String,
+}
+
+copy_ticket: fn(ticket: Ticket) -> Ticket { ticket.copy() }
+
+copy_ticket_holder: fn(holder: TicketHolder) -> TicketHolder { holder.copy() }
+
+copy_handle: fn(handle: Handle) -> Handle { handle.copy() }
+
+send_pool: fn(pool: Pool) {
+    worker: task {
+        _: pool.slots.len()
+    }
+    worker.join() ?? panic("task failed")
+}
+
+send_pool_holder: fn(holder: PoolHolder) {
+    worker: task {
+        _: holder.pool.slots.len()
+    }
+    worker.join() ?? panic("task failed")
+}
+
+drop_lease: fn() {
+    lease: Lease{name: "a"}
+    print(lease.name)
+}
+
+run: fn() {}

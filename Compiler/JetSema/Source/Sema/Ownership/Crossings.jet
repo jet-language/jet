@@ -3,6 +3,7 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     Diagnostic,
+    MarkerHook,
     Expr,
     Span,
     TCapture,
@@ -13,6 +14,7 @@ use jet_foundation.[
     core_record_literal_fields,
     core_type_modules,
     type_name,
+    type_unqualified_name,
     module_text,
     NameTable,
     name_find,
@@ -38,6 +40,10 @@ SemaSendProblemKind: enum {
     CallableValue,
     TraitValue(name: String),
     ThreadConfined(name: String),
+    // The type is declared `#Local`: its values stay on the thread that made
+    // them. `key` is the declaration's canonical spelling, its module's text
+    // then its name (`app.Pool`, `<corelib>/core.mem.Fixed`).
+    DeclaredLocal(key: String),
     LocalReactive(name: String),
     ViewBorrow,
     SharedMutation,
@@ -159,6 +165,10 @@ sema_ownership_crossing_core_confined: fn(module_name: String, name: String, cel
 sema_ownership_crossing_named: fn(ty: Type, nominal: SemaRegistrationNominal, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: ^SemaCrossingWalk) -> SemaSendabilityProblem? {
     if nominal.kind == SemaRegistrationNominalKind.Trait {
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.TraitValue{name: nominal.symbol.name}))
+    }
+    if !cell_only && sema_copy_nominal_declares(nominal, MarkerHook.Local) {
+        key: "{sema_scope_module_text(environment, program, nominal.symbol.module_identity)}.{nominal.symbol.name}"
+        return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.DeclaredLocal{key: key}))
     }
     if sema_ownership_crossing_named_builtin_problem(environment, program, nominal, cell_only) == .Val(problem) {
         return Val(problem)
@@ -521,6 +531,7 @@ sema_ownership_crossing_describe: fn(problem: SemaSendabilityProblem) -> String 
         .CallableValue -> "a function value carries executable state, not a worker data value"
         .TraitValue(name) -> "`{name}` is a trait value, so the compiler cannot prove which concrete value crosses this boundary"
         .ThreadConfined(name) -> "`{name}` owns thread-local state and must stay on the thread that created it"
+        .DeclaredLocal(key) -> "`{type_unqualified_name(key)}` is declared `#Local`, so its values stay on the thread that made them"
         .LocalReactive(name) -> "`#Local` keeps `{name}` in the fast one-thread form"
         .ViewBorrow -> "a view is a borrow, not an owned value"
         .SharedMutation -> "the value contains `Shared`, whose lock-backed handle would keep shared mutation"
@@ -531,17 +542,29 @@ sema_ownership_crossing_describe: fn(problem: SemaSendabilityProblem) -> String 
 sema_ownership_crossing_local_cell: fn(problem: SemaSendabilityProblem) -> Bool Never! {
     if problem.kind == {
         .ThreadConfined(name) -> name == "Cell" || name == "CellReadGuard" || name == "CellEditGuard"
-        .ClosureNeedsTake | .ClosureCaptures | .CallableValue | .TraitValue(_) | .LocalReactive(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> false
+        .ClosureNeedsTake | .ClosureCaptures | .CallableValue | .TraitValue(_) | .DeclaredLocal(_) | .LocalReactive(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> false
     }
 }
 
+// How the headline names the crossing value's type. A `#Local` type is keyed
+// by its declaring module, a spelling no source writes, so a value of that
+// type is named by its declared name (`Pool`, not `app.Pool`); a written
+// module path (`browser.Browser`) stays.
+sema_ownership_crossing_type_shown: fn(ty: Type, problem: SemaSendabilityProblem) -> String Never! {
+    if problem.kind == .DeclaredLocal(key) {
+        if ty == .Named(head) && head == key -> return type_unqualified_name(key)
+        if ty == .Apply(head, _) && head == key -> return "{type_unqualified_name(key)}{type_name(ty).removeprefix(key)}"
+    }
+    type_name(ty)
+}
+
 sema_ownership_crossing_diagnostic: fn(value: String, ty: Type, problem: SemaSendabilityProblem, crossing: SemaSendCrossing, span: Span) -> Diagnostic {
-    type_name_value := type_name(ty)
+    type_name_value := sema_ownership_crossing_type_shown(ty, problem)
     value_text := if value == "this value" -> value else -> "`{value}`"
     description := sema_ownership_crossing_describe(problem)
     local_reactive := if problem.kind == {
         .LocalReactive(_) -> true
-        .ClosureNeedsTake | .ClosureCaptures | .CallableValue | .TraitValue(_) | .ThreadConfined(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> false
+        .ClosureNeedsTake | .ClosureCaptures | .CallableValue | .TraitValue(_) | .ThreadConfined(_) | .DeclaredLocal(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> false
     }
     what := if {
         crossing == SemaSendCrossing.TaskCapture && problem.kind == SemaSendProblemKind.ViewBorrow -> "{value_text} cannot be shared into a task — it is a view that does not live long enough"

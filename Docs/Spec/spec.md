@@ -2270,7 +2270,9 @@ borrowed view, and its owner can't be moved or changed while the view lives
 (D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
 it creates an independent owned value. `.clone()` is not user-typable Jet
 syntax. Copying a value that Jet cannot
-duplicate, such as a function or trait value, is E0211. Copying a scalar is
+duplicate, such as a function or trait value, is E0211. A type declares that
+its values move and never copy with `#MoveOnly`; copying such a value, or a
+value that holds one, is E0211 too. Copying a scalar is
 legal but redundant.
 The Core-only `IOOperation` carrier is a payload-free runtime `Copy` enum;
 its explicit `.copy()` has no allocation and does not make the type a user export.
@@ -4433,7 +4435,8 @@ is **E0121**. A group child or a combinator branch borrows a non-copyable
 capture instead (see below). A task-boundary value must be sendable
 (**E1102**). Mutable or otherwise non-sendable captures report **E1101** or
 **E1102**. A `view` borrow, a struct
-containing `ref` fields, a trait value, or a closure with non-sendable captures
+containing `ref` fields, a trait value, a value of a type declared `#Local`
+(or a value that holds one), or a closure with non-sendable captures
 cannot cross. Give ownership to a child with `task ^^name`, make an immutable owned
 snapshot with `freeze`, or use `Shared` and a lock for deliberate shared
 mutation (D-CONC-CROSS1).

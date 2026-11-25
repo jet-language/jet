@@ -19,6 +19,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     ExprNode,
+    MarkerHook,
     Span,
     Stmt,
     Symbol,
@@ -67,7 +68,7 @@ sema_single_use_declared: fn(name: String, environment: SemaScopeEnvironment, pr
 }
 
 // A struct or enum whose fields or payloads hold a `#SingleUse` value at any
-// depth (sema_copy_holds_single_use). A non-generic nominal whose table copy
+// depth (sema_copy_holds_declared). A non-generic nominal whose table copy
 // facts hold no duty at all, neither a resource nor a `#SingleUse` part, is
 // answered without a walk.
 sema_single_use_holder: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
@@ -78,7 +79,7 @@ sema_single_use_holder: fn(ty: Type, environment: SemaScopeEnvironment, program:
         return false
     }
     seen := [String]{}
-    sema_copy_holds_single_use(ty, graph, caller, seen)
+    sema_copy_holds_declared(ty, graph, caller, seen, MarkerHook.SingleUse)
 }
 
 // The task handle itself.
@@ -129,7 +130,7 @@ sema_single_use_duty_fields: fn(ty: Type, check: SemaBodyCheck) -> [String] {
             loop field in nominal.fields {
                 if field.computed -> next
                 seen := [String]{}
-                if sema_copy_holds_single_use(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings), graph, caller, seen) {
+                if sema_copy_holds_declared(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings), graph, caller, seen, MarkerHook.SingleUse) {
                     fields.push(field.symbol.name)
                 }
             }
