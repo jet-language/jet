@@ -246,6 +246,13 @@ plan_groups: fn(work: GrammarWork, texts: [String]) -> [Int] Never! {
     groups
 }
 
+/// A key that tells sets apart, for sharing work between equal sets.
+set_key: fn(set: [Int]) -> String Never! {
+    ^parts: [String]{}
+    loop word in set -> parts.push("{word}")
+    parts.join(",")
+}
+
 /// For each token kind, the kinds the lexer may try where it lexes one:
 /// every kind that can come where it can, and the skipped ones. A skipped
 /// kind's own set is the skipped kinds.
@@ -257,8 +264,12 @@ viable_kinds: fn(work: GrammarWork) -> [[Int]] Never! {
     }
     ^viable: [[Int]]{}
     loop _ in work.tokens -> viable.push(skips.copy())
+    ^done: [String:Bool]{}
     loop n in 0..<work.tree.nodes.len() {
         if !parsed(work, n) || !is_terminal(work, n) -> next
+        key: set_key(work.follow[n])
+        if done.get(key) ?? false -> next
+        _: done.add(key, true)
         loop a in set_items(work.follow[n]) {
             if a < work.tokens.len() -> _: set_union(viable[a], work.follow[n])
         }
@@ -271,6 +282,24 @@ viable_kinds: fn(work: GrammarWork) -> [[Int]] Never! {
         }
     }
     viable
+}
+
+/// The key of the first `count` code points of `points`, case folded.
+folded_key: fn(points: [Int], count: Int) -> String Never! {
+    ^parts: [String]{}
+    loop i in 0..<count -> parts.push("{fold_code_point(points[i])}")
+    parts.join(",")
+}
+
+/// ORs the bits of `row` into `glue` from bit `at` on.
+place_row: fn(glue: ^[Int], row: [Int], at: Int) Never! {
+    shift: at % 32
+    loop (j, word) in row {
+        if word == 0 -> next
+        index: at /% 32 + j
+        glue[index] = glue[index] | ((word << shift) & 4294967295)
+        if shift > 0 && index + 1 < glue.len() -> glue[index + 1] = glue[index + 1] | (word >> (32 - shift))
+    }
 }
 
 /// The set of columns that can hold a word character: an ASCII letter,
@@ -341,19 +370,53 @@ plan_printer: fn(work: ^GrammarWork, lexer: GrammarLexer, shapes: [GrammarShape]
     loop c in 0..<128 {
         if is_word_byte(c) -> _: set_union(word_bytes, char_columns(lexer, c, false))
     }
+    // The literals that run on past each literal text, by their folded
+    // prefixes; a literal can run on only into one of these, or into a
+    // token rule.
+    ^prefix_of: [String:Int]{}
+    ^extending: [[Int]]{}
+    ^rule_kinds: [Int]{}
+    loop k in 0..<kinds {
+        if !printed_kind(work, k) -> next
+        if !literal_kind(work, k) {
+            rule_kinds.push(k)
+            next
+        }
+        ^key: ""
+        loop i in 0..<points[k].len() - 1 {
+            if i > 0 -> key = "{key},"
+            key = "{key}{fold_code_point(points[k][i])}"
+            ^at: prefix_of.get(key) ?? -1
+            if at < 0 {
+                at = extending.len()
+                _: prefix_of.add(key.copy(), at)
+                extending.push([Int]{})
+            }
+            extending[at].push(k)
+        }
+    }
     ^runs: [[Int]]{}
     ^starts: [[Int]]{}
     loop a in 0..<kinds {
         ^run: empty_set(words)
         ^start: empty_set(words)
-        if printed_kind(work, a) {
+        if literal_kind(work, a) {
+            at: prefix_of.get(folded_key(points[a], points[a].len())) ?? -1
+            if at >= 0 {
+                loop k in extending[at] {
+                    if set_has(viable[a], k) -> run_on(work, lexer, points, a, k, run)
+                }
+            }
+            loop k in rule_kinds {
+                if set_has(viable[a], k) -> run_on(work, lexer, points, a, k, run)
+            }
+            if word_shaped(work.tokens[a].text) -> _: set_union(run, word_bytes)
+            if points[a].len() > 0 -> start = char_columns(lexer, points[a][0], work.tokens[a].fold)
+        } else if printed_kind(work, a) {
             loop k in set_items(viable[a]) {
                 if k < kinds && printed_kind(work, k) -> run_on(work, lexer, points, a, k, run)
             }
-            if literal_kind(work, a) && word_shaped(work.tokens[a].text) -> _: set_union(run, word_bytes)
-            if literal_kind(work, a) && points[a].len() > 0 {
-                start = char_columns(lexer, points[a][0], work.tokens[a].fold)
-            } else if !literal_kind(work, a) { start = live_columns(lexer, [Int]{lexer.starts[a]}) }
+            start = live_columns(lexer, [Int]{lexer.starts[a]})
         }
         runs.push(run)
         starts.push(start)
@@ -373,24 +436,50 @@ plan_printer: fn(work: ^GrammarWork, lexer: GrammarLexer, shapes: [GrammarShape]
         separator_columns = char_columns(lexer, code_point_at(separator.bytes(), 0), false)
     }
     word: word_columns(lexer)
+    // For each column, the kinds that can start with it; and the kinds a
+    // token ending in a word character is spaced from.
+    blank: empty_set(set_words(kinds))
+    ^by_column: [[Int]]{}
+    loop _ in 0..<lexer.columns -> by_column.push(blank.copy())
+    ^spaced: blank.copy()
+    loop b in 0..<kinds {
+        if !printed_kind(work, b) -> next
+        loop c in set_items(starts[b]) -> set_add(by_column[c], b)
+        if spacer >= 0 && set_meets(starts[b], word) && !set_meets(runs[spacer], starts[b]) -> set_add(spaced, b)
+    }
+    // Each kind's clashes: the kinds a text of it can run on into. Kinds
+    // that run on into the same columns share one.
+    ^clash_of: [String:Int]{}
+    ^clashes: [[Int]]{}
+    ^clash_at: [Int]{}
     ^glue: empty_set(set_words(kinds * kinds))
     loop a in 0..<kinds {
-        if !printed_kind(work, a) -> next
-        apart: separator != "" && !set_meets(runs[a], separator_columns)
-        ends: ends_in_word(work, lexer, points, word, a)
-        loop b in 0..<kinds {
-            if !printed_kind(work, b) -> next
-            words_meet: ends && apart && set_meets(starts[b], word) && !set_meets(runs[spacer], starts[b])
-            if words_meet || set_meets(runs[a], starts[b]) -> set_add(glue, a * kinds + b)
+        if !printed_kind(work, a) {
+            clash_at.push(-1)
+            next
         }
+        key: set_key(runs[a])
+        ^at: clash_of.get(key) ?? -1
+        if at < 0 {
+            at = clashes.len()
+            ^clash: blank.copy()
+            loop c in set_items(runs[a]) -> _: set_union(clash, by_column[c])
+            clashes.push(clash)
+            _: clash_of.add(key, at)
+        }
+        clash_at.push(at)
+        ^row: clashes[at].copy()
+        apart: separator != "" && !set_meets(runs[a], separator_columns)
+        if apart && ends_in_word(work, lexer, points, word, a) -> _: set_union(row, spaced)
+        place_row(glue, row, a * kinds)
     }
     ^reported: [Int:Bool]{}
     loop n in 0..<work.tree.nodes.len() {
         if !parsed(work, n) || !is_terminal(work, n) -> next
         a: work.tree.nodes[n].token
-        if !printed_kind(work, a) -> next
+        if !printed_kind(work, a) || !set_meets(work.follow[n], clashes[clash_at[a]]) -> next
         loop b in set_items(work.follow[n]) {
-            if b >= kinds || !printed_kind(work, b) || !set_meets(runs[a], starts[b]) -> next
+            if b >= kinds || !set_has(clashes[clash_at[a]], b) -> next
             if reported.get(a * kinds + b) ?? false -> next
             names: "{work.tokens[a].name} and {work.tokens[b].name}"
             if separator == "" {

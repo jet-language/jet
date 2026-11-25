@@ -1,0 +1,203 @@
+// What a generated parser calls: contextual lexing, keywords as whole
+// words, holes, the depth bound, error text and resynchronization.
+use {
+    core.grammar.[analyze]
+    core.grammar.plan.[GrammarPlan, GrammarScanner, GrammarSource]
+    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, scan, scan_after]
+}
+
+plan_of: fn(text: String) -> GrammarPlan Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+/// The token kind named `name`.
+kind: fn(scanner: GrammarScanner, name: String) -> Int Never! {
+    loop (k, have) in scanner.names {
+        if have == name -> return k
+    }
+    panic("no token {name}")
+}
+
+SELECT: "s : 'select'i name=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;"
+
+LIST: "s : '[' items+=NAME (',' items+=NAME)* ']' ;\nNAME : [a-z]+ ;\nWS : [ \\n]+ -> skip ;"
+
+#Test("the scanner names each kind and marks keywords, skips and holes") {
+    scanner: grammar_scanner(plan_of("s : 'go' '->' name=NAME HOLE<slot=Value> ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;"))
+    assert_eq(scanner.names[0], "end of input")
+    go: kind(scanner, "\"go\"")
+    arrow: kind(scanner, "\"->\"")
+    assert(scanner.words[go])
+    assert(!scanner.words[arrow])
+    assert_eq(scanner.texts[arrow], "->")
+    assert_eq(scanner.texts[kind(scanner, "NAME")], "")
+    assert_eq(scanner.skips, [kind(scanner, "WS")])
+    assert_eq(scanner.holes, [kind(scanner, "a `Value` hole")])
+}
+
+#Test("a keyword lexes only where it can come, and only as a whole word") {
+    scanner: grammar_scanner(plan_of(SELECT))
+    select: kind(scanner, "\"select\"")
+    name: kind(scanner, "NAME")
+    cursor: cursor_of("  select abc")
+    first: scan(scanner, cursor, [select, name])
+    assert_eq(first.kind, select)
+    assert_eq(first.start, 2)
+    assert_eq(first.end, 8)
+    assert_eq(scan(scanner, cursor, [name]).kind, name)
+    assert_eq(scan(scanner, cursor_of("SeLeCt"), [select, name]).kind, select)
+    longer: scan(scanner, cursor_of("selects"), [select, name])
+    assert_eq(longer.kind, name)
+    assert_eq(longer.end, 7)
+}
+
+#Test("the longest literal wins, and a literal beats a token rule of its length") {
+    scanner: grammar_scanner(plan_of("s : '-' '>' # Split | '->' # Arrow | name=NAME '=' # Name ;\nNAME : [a-z=]+ ;\nWS : ' '+ -> skip ;"))
+    dash: kind(scanner, "\"-\"")
+    arrow: kind(scanner, "\"->\"")
+    equals: kind(scanner, "\"=\"")
+    name: kind(scanner, "NAME")
+    assert_eq(scan(scanner, cursor_of("->"), [dash, arrow]).kind, arrow)
+    assert_eq(scan(scanner, cursor_of("- >"), [dash, arrow]).kind, dash)
+    assert_eq(scan(scanner, cursor_of("="), [name, equals]).kind, equals)
+    assert_eq(scan(scanner, cursor_of("=a"), [name, equals]).kind, name)
+}
+
+#Test("taking a token moves the cursor, and a decision can read past it") {
+    scanner: grammar_scanner(plan_of(LIST))
+    open: kind(scanner, "\"[\"")
+    name: kind(scanner, "NAME")
+    comma: kind(scanner, "\",\"")
+    ^cursor: cursor_of("[ a , b ]")
+    _: cursor_expect(cursor, scanner, [open])
+    item: scan(scanner, cursor, [name])
+    after: scan_after(scanner, cursor, item, [comma])
+    assert_eq(after.kind, comma)
+    assert_eq(after.start, 4)
+    assert_eq(cursor.at, 1)
+    cursor_take(cursor, item)
+    assert_eq(cursor.at, 3)
+}
+
+#Test("the end of input and a character nothing matches") {
+    scanner: grammar_scanner(plan_of(LIST))
+    name: kind(scanner, "NAME")
+    end: scan(scanner, cursor_of("   "), [name])
+    assert_eq(end.kind, 0)
+    assert_eq(end.start, 3)
+    stray: scan(scanner, cursor_of(" #"), [name])
+    assert_eq(stray.kind, NO_TOKEN)
+    assert_eq(stray.start, 1)
+}
+
+#Test("an error gives line:column, the expected names and what was found") {
+    scanner: grammar_scanner(plan_of(LIST))
+    open: kind(scanner, "\"[\"")
+    name: kind(scanner, "NAME")
+    close: kind(scanner, "\"]\"")
+    comma: kind(scanner, "\",\"")
+    ^cursor: cursor_of("[a,\n  #é")
+    _: cursor_expect(cursor, scanner, [open])
+    _: cursor_expect(cursor, scanner, [name])
+    _: cursor_expect(cursor, scanner, [comma, close])
+    stray: scan(scanner, cursor, [name])
+    cursor_fail(cursor, scanner, stray, [name, name])
+    assert_eq(cursor.errors.len(), 1)
+    assert_eq("{cursor.errors[0]}", "2:3: expected NAME, found \"#\"")
+    assert_eq(cursor.errors[0].offset, 6)
+    ^ended: cursor_of("[a")
+    _: cursor_expect(ended, scanner, [open])
+    _: cursor_expect(ended, scanner, [name])
+    _: cursor_expect(ended, scanner, [comma, close])
+    assert_eq("{ended.errors[0]}", "1:3: expected \",\" or \"]\", found end of input")
+}
+
+#Test("a newline the parser cannot take is found as the end of a line") {
+    scanner: grammar_scanner(plan_of("s : '[' name=NAME ']' ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;"))
+    open: kind(scanner, "\"[\"")
+    name: kind(scanner, "NAME")
+    close: kind(scanner, "\"]\"")
+    ^cursor: cursor_of("[a\n]")
+    _: cursor_expect(cursor, scanner, [open])
+    _: cursor_expect(cursor, scanner, [name])
+    _: cursor_expect(cursor, scanner, [close])
+    assert_eq("{cursor.errors[0]}", "1:3: expected \"]\", found end of line")
+}
+
+#Test("one error per resync point: after an error the parser is quiet to the next stop") {
+    scanner: grammar_scanner(plan_of(LIST))
+    open: kind(scanner, "\"[\"")
+    name: kind(scanner, "NAME")
+    close: kind(scanner, "\"]\"")
+    comma: kind(scanner, "\",\"")
+    ^cursor: cursor_of("[a, #b c, %]")
+    _: cursor_expect(cursor, scanner, [open])
+    _: cursor_expect(cursor, scanner, [name])
+    _: cursor_expect(cursor, scanner, [comma, close])
+    stray: cursor_expect(cursor, scanner, [name])
+    assert_eq(stray.kind, NO_TOKEN)
+    _: cursor_expect(cursor, scanner, [name])
+    assert_eq(cursor.errors.len(), 1)
+    stop: cursor_resync(cursor, scanner, [comma, close])
+    assert_eq(stop.kind, comma)
+    assert_eq(stop.start, 8)
+    cursor_take(cursor, stop)
+    _: cursor_expect(cursor, scanner, [name])
+    assert_eq(cursor.errors.len(), 2)
+    assert_eq("{cursor.errors[1]}", "1:11: expected NAME, found \"%\"")
+    last: cursor_resync(cursor, scanner, [comma, close])
+    assert_eq(last.kind, close)
+    assert_eq(last.start, 11)
+}
+
+#Test("resync at the end of the input stays quiet") {
+    scanner: grammar_scanner(plan_of(LIST))
+    open: kind(scanner, "\"[\"")
+    name: kind(scanner, "NAME")
+    comma: kind(scanner, "\",\"")
+    close: kind(scanner, "\"]\"")
+    ^cursor: cursor_of("[# a b")
+    _: cursor_expect(cursor, scanner, [open])
+    _: cursor_expect(cursor, scanner, [name])
+    end: cursor_resync(cursor, scanner, [comma, close])
+    assert_eq(end.kind, 0)
+    assert_eq(end.start, 6)
+    cursor_fail(cursor, scanner, end, [close])
+    assert_eq(cursor.errors.len(), 1)
+}
+
+#Test("a hole sits between parts, and no token runs across it") {
+    scanner: grammar_scanner(plan_of("s : name=NAME HOLE<slot=Value> other=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;"))
+    name: kind(scanner, "NAME")
+    hole: kind(scanner, "a `Value` hole")
+    ^cursor: cursor_of_parts(["ab ", " cd"])
+    first: scan(scanner, cursor, [name])
+    assert_eq(first.end, 2)
+    cursor_take(cursor, first)
+    assert_eq(scan(scanner, cursor, [name]).kind, NO_HOLE)
+    at: scan(scanner, cursor, [hole])
+    assert_eq(at.kind, hole)
+    assert_eq(at.start, 3)
+    cursor_take(cursor, at)
+    second: scan(scanner, cursor, [name])
+    assert_eq(second.start, 4)
+    assert_eq(second.end, 6)
+    glued: scan(scanner, cursor_of_parts(["ab", "cd"]), [name])
+    assert_eq(glued.end, 2)
+    ^refused: cursor_of_parts(["ab", "cd"])
+    _: cursor_expect(refused, scanner, [name])
+    _: cursor_expect(refused, scanner, [name])
+    assert_eq("{refused.errors[0]}", "1:3: expected NAME, found a hole")
+}
+
+#Test("nesting deeper than the bound is an error, not a stack overflow") {
+    ^cursor: cursor_of("x")
+    loop _ in 0..<GRAMMAR_MAX_DEPTH -> assert(cursor_enter(cursor))
+    assert(!cursor_enter(cursor))
+    assert_eq("{cursor.errors[0]}", "1:1: unexpected nesting deeper than {GRAMMAR_MAX_DEPTH} rules")
+    cursor_leave(cursor)
+    assert_eq(cursor.depth, GRAMMAR_MAX_DEPTH)
+}
