@@ -828,6 +828,10 @@ SemaRegistrationModule: struct {
     // (CoreBodies.jet sema_core_bodies_unread).
     derive_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}},
     derive_unread: Int{0},
+    // The owned traits whose defaults did not parse in this module, so its
+    // impls of them gained none (TraitImpls.jet SemaTraitDefaultsUnread), a
+    // census row (sema_trait_defaults_unread).
+    trait_defaults_unread: [SemaTraitDefaultsUnread]{[SemaTraitDefaultsUnread]{}},
     // True when any local symbol, import binding, or namespace entry visible
     // from this module contains `.`, so dotted canonical lookups must probe
     // local scope first (computed by sema_registration_index_canonical_nominals).
@@ -4263,7 +4267,7 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
     }
     // S62 delegation and default bodies become written impl methods
     // before registration (TraitImpls.jet).
-    sema_trait_impls_synthesize(module_row.program.items)
+    sema_trait_impls_synthesize(module_row.program.items, module_row.trait_defaults_unread)
     // A return type naming a fallible alias is written as its expansion.
     sema_registration_expand_fallible_aliases(module_row.program.items)
     // A `Self` written in an impl method's signature names the impl's type.

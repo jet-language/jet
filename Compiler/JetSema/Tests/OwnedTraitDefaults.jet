@@ -1,0 +1,45 @@
+// Every compiler-owned trait's defaults, as Traits.jet gives them, parse into
+// the methods an impl that leaves them out gains
+// (sema_trait_impl_owned_defaults), so no compile meets defaults that do not
+// parse: the census row that would report them, an internal compiler error,
+// is only a backstop. When they do not parse, the contract check reports none
+// of those methods missing, so the census row is the one report.
+use {
+    jet_sema.[SemaTraitDefaultsUnread, sema_owned_check_impl, sema_trait_impl_owned_defaults]
+    jet_foundation.[Diagnostic, Func, NamedType, OWNED_TRAITS, Span, Type, owned_trait]
+}
+
+#Test("every owned trait's defaults parse into the methods an impl gains") {
+    defaulted := 0
+    loop owned in OWNED_TRAITS {
+        defaults := [String]{}
+        if owned.contract == .Methods(declared, _, _) {
+            loop method in declared {
+                if method.default_source != None -> defaults.push(method.name)
+            }
+        }
+        if defaults.len() == 0 -> next
+        defaulted += 1
+        unread := [SemaTraitDefaultsUnread]{}
+        gained: sema_trait_impl_owned_defaults(owned.name, Span{start: 7, end: 13}, [Func]{}, None, unread) ?? [Func]{}
+        problems: loop row in unread -> row.problem
+        assert(problems.len() == 0, "the defaults Traits.jet gives `{owned.name}`: {problems:Debug}")
+        names: loop method in gained -> method.name
+        assert(names == defaults, "an impl of `{owned.name}` gains {names:Debug}, not its defaults {defaults:Debug}")
+    }
+    assert(defaulted > 0, "no owned trait has a default")
+}
+
+#Test("an owned trait whose defaults did not parse reports none of them missing") {
+    owned: owned_trait("Writer") ?? panic("`Writer` is not an owned trait")
+    owner: Type.Named{name: "Sink"}
+    span: Span{start: 7, end: 13}
+    known := [Diagnostic]{}
+    _ := sema_owned_check_impl(owned, owner, owner, [Func]{}, [NamedType]{}, [NamedType]{}, None, span, known)
+    unknown := [Diagnostic]{}
+    _ := sema_owned_check_impl(owned, owner, owner, [Func]{}, [NamedType]{}, [NamedType]{}, None, span, unknown, defaults_unknown: true)
+    known_what: loop diagnostic in known -> diagnostic.what
+    unknown_what: loop diagnostic in unknown -> diagnostic.what
+    assert(known_what == [String]{"`impl …: Writer` is missing `write_bytes`, `flush`, `write`, `write_line`"}, "{known_what:Debug}")
+    assert(unknown_what == [String]{"`impl …: Writer` is missing `write_bytes`, `flush`"}, "{unknown_what:Debug}")
+}

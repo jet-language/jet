@@ -6,10 +6,12 @@ use jet_foundation.[AccessConvention, Diagnostic, Func, NamedType, OwnedMethod, 
 // `rhs` is an operator's right-hand type or a conversion's source,
 // `associated` the types the impl
 // binds, `sibling` those the `shares` trait's impl binds, `distinct_base` the
-// base of a `distinct` owner. Answers whether the impl meets the contract.
-sema_owned_check_impl: fn(owned: OwnedTrait, owner_type: Type, rhs: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], distinct_base: Type?, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+// base of a `distinct` owner. `defaults_unknown`: the trait's defaults did not
+// parse in this module (sema_trait_defaults_unknown), so a method it would
+// default is never missing. Answers whether the impl meets the contract.
+sema_owned_check_impl: fn(owned: OwnedTrait, owner_type: Type, rhs: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], distinct_base: Type?, span: Span, diagnostics: ^[Diagnostic], defaults_unknown: Bool{false}) -> Bool {
     if owned.contract == {
-        .Methods(declared, names, _) -> sema_owned_check_methods(owned.name, declared, names, owner_type, methods, associated, sibling, span, diagnostics)
+        .Methods(declared, names, _) -> sema_owned_check_methods(owned.name, declared, names, owner_type, methods, associated, sibling, span, diagnostics, defaults_unknown: defaults_unknown)
         .Operator(hook, result) -> sema_owned_check_operator(owned.name, hook, result, rhs, methods, span, diagnostics)
         .Codec(verb) -> sema_owned_check_codec(owned.name, verb, owner_type, methods, span, diagnostics)
         .Literal(source) -> sema_owned_check_literal(owned.name, source, owner_type, methods, span, diagnostics)
@@ -174,10 +176,14 @@ sema_owned_method_matches: fn(wanted: OwnedMethod, actual: Func, names: [String]
 
 // Every method appears (E0906) and every associated type is bound (E0913;
 // the signatures can't resolve without it, so nothing more is checked), then
-// each declared method matches (E0907). Other methods are the impl's own.
-sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associated_names: [String], owner_type: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+// each declared method matches (E0907). Other methods are the impl's own. A
+// method with a default the impl did not gain because the defaults did not
+// parse (`defaults_unknown`) is not reported: the driver's internal compiler
+// error is the one report of that.
+sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associated_names: [String], owner_type: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], span: Span, diagnostics: ^[Diagnostic], defaults_unknown: Bool{false}) -> Bool {
     missing := [String]{}
     loop wanted in declared {
+        if defaults_unknown && wanted.default_source != None -> next
         present: loop method in methods {
             if method.name == wanted.name {
                 break true
