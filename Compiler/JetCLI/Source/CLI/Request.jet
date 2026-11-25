@@ -3002,16 +3002,19 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetDriverSourceDocume
 }
 
 // The authorized source snapshot `jet_cli_prepare_overlays` compiles. A script
-// is a standalone program wherever it lives: its snapshot is the script alone,
-// rooted at its own directory, never the package around it. So is an `alone`
-// entry (`jet check --prelude`: the compiler embeds each Prelude source by
-// itself, never with its directory's other files). A loose entry's snapshot
-// is the entry and the sources it reaches, unless it is a build `target`'s
-// entry: the target's listed sources may name any file of the folder, so its
-// snapshot is the whole folder. An anchor no file holds yet is read from its
-// overlay (an editor's unsaved buffer). Overlays that are `appended` (a
-// debugger's expression added to a source it reaches) keep a loose entry
-// loose: they reach no other file than the disk copies do.
+// is a standalone program wherever it lives: its snapshot is rooted at its own
+// directory, never the package around it. A `#!` line changes nothing else,
+// so a script reaches the files it imports beside it as any loose entry does;
+// one that cannot (a directory holding `package.jet`, an inline `package:`
+// block, an unsaved buffer) is the script alone. So is an `alone` entry (`jet
+// check --prelude`: the compiler embeds each Prelude source by itself, never
+// with its directory's other files). A loose entry's snapshot is the entry and
+// the sources it reaches, unless it is a build `target`'s entry: the target's
+// listed sources may name any file of the folder, so its snapshot is the whole
+// folder. An anchor no file holds yet is read from its overlay (an editor's
+// unsaved buffer). Overlays that are `appended` (a debugger's expression added
+// to a source it reaches) keep a loose entry loose: they reach no other file
+// than the disk copies do.
 jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetDriverSourceDocument], color: Bool, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLISnapshotted {
     anchor_path: cli_files.realpath(anchor) ?? jet_cli_overlaid_path(anchor, overlays) ?? return jet_cli_snapshot_refused(jet_cli_unread_file_what(anchor), "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
@@ -3023,8 +3026,9 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetDriver
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
     prefix: if root == "/" -> "/" else -> "{root}/"
     // A loose entry (no package around it, no unsaved buffer) holds only the
-    // sources it reaches (jet_cli_reach_sources), never its whole folder.
-    loose: !script && !target && (overlays.len() == 0 || appended) && entry_path.ends_with(".jet") && entry_path.starts_with(prefix) && (jet_cli_parent(entry_path) ?? "") == root && !cli_files.exists(jet_cli_authority_path(root, "package.jet"))
+    // sources it reaches (jet_cli_reach_sources), never its whole folder; a
+    // script is one whatever its name.
+    loose: !alone && !target && (overlays.len() == 0 || appended) && (script || entry_path.ends_with(".jet")) && entry_path.starts_with(prefix) && (jet_cli_parent(entry_path) ?? "") == root && !cli_files.exists(jet_cli_authority_path(root, "package.jet"))
     reached := false
     if loose {
         reached = jet_cli_reach_sources(root, entry_path.slice(prefix.len()..<entry_path.len()), files, budget) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: {err.message}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
@@ -3042,9 +3046,9 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetDriver
     // devtools reduce` and `ice-report` compile the input under its own name),
     // and so is a script, which the walk leaves out; the walk's placement,
     // link, stat and read rules still hold for it. An entry no file holds yet
-    // comes from its overlay below.
+    // comes from its overlay below, and a reached entry is already held.
     unsaved: !cli_files.exists(entry_path) && jet_cli_overlaid_path(entry_path, overlays) != None
-    if (script || !entry_path.ends_with(".jet")) && entry_path.starts_with(prefix) && !unsaved {
+    if (script || !entry_path.ends_with(".jet")) && entry_path.starts_with(prefix) && !unsaved && !reached {
         relative: entry_path.slice(prefix.len()..<entry_path.len())
         if !jet_cli_outside_walk(root, relative) {
             stat: cli_files.stat(entry_path) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)

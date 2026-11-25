@@ -1,0 +1,20 @@
+# A `#!/usr/bin/env jet` first line does not change a file's sources: the
+# script reaches the file it imports beside it when `jet` checks it, when
+# `jet` runs it and when it runs directly.
+env: NO_COLOR=1
+requires: os:unix
+fixture: Fixtures/ScriptImportsASibling
+chmod: tool.jet 755
+mkdir: bin
+symlink: {jet} bin/jet
+step check: jet check tool.jet
+exit: 0
+step via_jet: jet tool.jet one
+env: XDG_CACHE_HOME={work}/cache
+exit: 0
+stdout: = "helper reached: one\n"
+step direct: ./tool.jet two three
+env: PATH={work}/bin:{env:PATH}
+env: XDG_CACHE_HOME={work}/cache
+exit: 0
+stdout: = "helper reached: two three\n"
