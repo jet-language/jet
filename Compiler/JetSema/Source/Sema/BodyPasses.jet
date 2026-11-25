@@ -210,6 +210,22 @@ SemaBodyJob: enum {
     ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int),
 }
 
+// A method's body job: SemaBodyJob's method rows. The method lists
+// (sema_check_method_jobs) and the method checks take this, so none of them
+// meets a top-level job.
+SemaMethodJob: enum {
+    NominalMethod(ordinal: Int, nominal_index: Int, method_index: Int),
+    ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int),
+}
+
+// `method` as the body job a claim, a packet or the memory plan reads.
+sema_method_body_job: fn(method: SemaMethodJob) -> SemaBodyJob Never! {
+    if method == {
+        .NominalMethod(ordinal, owner, row) -> SemaBodyJob.NominalMethod{ordinal: ordinal, nominal_index: owner, method_index: row}
+        .ImplMethod(ordinal, owner, row) -> SemaBodyJob.ImplMethod{ordinal: ordinal, implementation_index: owner, method_index: row}
+    }
+}
+
 // The body's existing shared lifecycle, absent for declaration-only checks.
 SemaMethodScheduling: struct {
     shared_state: Shared<SemaCheckShared>,
@@ -347,8 +363,8 @@ sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, co
 // Core demand wave (graph.core_wave_rows) only that wave's bodies are. A
 // body that reaches an unusable declaration (sema_checked_unusable_bodies)
 // is never a job.
-sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, impl_rows_scanned: ^Int, count_work: Bool) -> [SemaBodyJob] Never! {
-    jobs := [SemaBodyJob]{}
+sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, impl_rows_scanned: ^Int, count_work: Bool) -> [SemaMethodJob] Never! {
+    jobs := [SemaMethodJob]{}
     codec_wave: graph.codec_wave_rows.len() > 0
     derive_wave: graph.derive_wave_rows.len() > 0
     core_wave: sema_core_wave_size(graph.core_wave_rows) > 0
@@ -382,7 +398,7 @@ sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegi
                         if graph.derive_wave_rows.get(method.symbol.id.id) == None -> next
                     } else if graph.derive_checked.get(method.symbol.id.id) == None { next }
                 } else if derive_wave || sema_core_demand_deferred(graph, method_key) { next }
-                jobs.push(SemaBodyJob.NominalMethod{ordinal: jobs.len(), nominal_index: nominal_index, method_index: method_index})
+                jobs.push(SemaMethodJob.NominalMethod{ordinal: jobs.len(), nominal_index: nominal_index, method_index: method_index})
             }
         }
     }
@@ -406,7 +422,7 @@ sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegi
             if core_wave {
                 if name_find(graph.core_wave_rows, method_key) == None -> next
             } else if sema_core_demand_deferred(graph, method_key) { next }
-            jobs.push(SemaBodyJob.ImplMethod{ordinal: jobs.len(), implementation_index: implementation_index, method_index: method_index})
+            jobs.push(SemaMethodJob.ImplMethod{ordinal: jobs.len(), implementation_index: implementation_index, method_index: method_index})
         }
     }
     jobs
@@ -425,7 +441,7 @@ sema_check_method_parallel_eligible: fn(graph: SemaRegistrationGraph, source_mod
     memory_plan.positions.get(sema_function_memory_key(source_module.module_identity, sema_serde_named_leaf(sema_type_graph_base_name(owner_type) ?? ""), registered.declaration.name, registered.declaration.span)) != None
 }
 
-sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, generic_params: [TGenericParam], all_jobs: [SemaBodyJob], comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] {
+sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, generic_params: [TGenericParam], all_jobs: [SemaMethodJob], comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] {
     jobs := [SemaBodyJob]{}
     if generic_params.len() != 0 || sema_core_bodies_held(graph, source_module) -> return jobs
     loop job in all_jobs {
@@ -446,9 +462,8 @@ sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module:
                 }
                 weights.push(method.declaration.span.end - method.declaration.span.start)
             }
-            .TopLevel(_) -> panic("a top-level job entered the method wave")
         }
-        jobs.push(job.copy())
+        jobs.push(sema_method_body_job(job))
     }
     jobs
 }
@@ -465,17 +480,18 @@ sema_check_walk_prelude_demands: fn(checked: ^^SemaFunctionResult, module_identi
     walked
 }
 
-// `declaration`: the method row's declaration, which job names.
-sema_check_prepare_method_body: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ordinal: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, wanted: Shared<SemaHostHookWanted>) -> SemaParallelBody {
+// `declaration`: the method row's declaration, which `method` names.
+sema_check_prepare_method_body: fn(method: SemaMethodJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ordinal: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, wanted: Shared<SemaHostHookWanted>) -> SemaParallelBody {
+    job: sema_method_body_job(method)
     memory_position: sema_check_registered_memory_position(job, declaration, module_index, memory_plan, environment, program)
-    input := sema_check_method_input(job, module_index, memory_plan, memory_position, environment, program)
+    input := sema_check_method_input(method, module_index, memory_plan, memory_position, environment, program)
     diagnostics := input.diagnostics.move()
     input.diagnostics = [Diagnostic]{}
     call_facts := [SemaCallSiteFact]{}
     comptime_requests := [SemaComptimeRequest]{}
     name_references := [SemaNameReferenceFact]{}
     owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
-    raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
+    raw_protocol_return: sema_check_registered_raw_protocol_return(method, module_index, environment, program)
     checked := sema_function_check_registered_on_thread(job, declaration, module_index, memory_plan, memory_position, owner_id, input.function_kind, raw_protocol_return, input.generic_params, environment, program, scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
     checked = sema_check_walk_prelude_demands(checked, sema_check_registered_module_text(program, sema_check_registered_module_identity(environment, program, module_index)))
     SemaParallelBody{job_index: ordinal, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: Val(input.move()), wanted_hooks: sema_host_hook_was_wanted(wanted)}
@@ -775,11 +791,11 @@ sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProg
     if claim.job == {
         .TopLevel(item_index) -> sema_check_body_claimed_top_level(program.registration_graph, item_index, environment, program, memory_plan, part, claim, module_index, wanted)
         .NominalMethod(ordinal, owner, row) -> {
-            body: sema_check_prepare_method_body(claim.job, graph.modules[module_index].nominals[owner].methods[row].declaration, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+            body: sema_check_prepare_method_body(SemaMethodJob.NominalMethod{ordinal: ordinal, nominal_index: owner, method_index: row}, graph.modules[module_index].nominals[owner].methods[row].declaration, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
             part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
         }
         .ImplMethod(ordinal, owner, row) -> {
-            body: sema_check_prepare_method_body(claim.job, graph.modules[module_index].impls[owner].methods[row].declaration, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+            body: sema_check_prepare_method_body(SemaMethodJob.ImplMethod{ordinal: ordinal, implementation_index: owner, method_index: row}, graph.modules[module_index].impls[owner].methods[row].declaration, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
             part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
         }
     }
@@ -844,9 +860,9 @@ sema_check_body_progress: fn(trace_sink: CompilerTraceSink?, rank: Int, count: I
 
 // Only compiler-generated nominal methods relocate their diagnostics to the
 // author-facing nominal span. Implementation methods retain their own spans.
-sema_check_generated_method_author_span: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span? {
+sema_check_generated_method_author_span: fn(method: SemaMethodJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span? {
     graph: program.registration_graph
-    if job == {
+    if method == {
         .NominalMethod(_, owner, row) -> {
             if graph.modules[module_index].nominals[owner].methods[row].declaration.compiler_generated {
                 return Val(graph.modules[module_index].nominals[owner].symbol.span)
@@ -854,33 +870,31 @@ sema_check_generated_method_author_span: fn(job: SemaBodyJob, module_index: Int,
             None
         }
         .ImplMethod(_, _, _) -> None
-        .TopLevel(_) -> panic("a top-level job entered method application")
     }
 }
 
-// Is `job` a method of a compiler-generated codec impl? Its body has no
+// Is `method` a method of a compiler-generated codec impl? Its body has no
 // author to act on advice, so it reports its errors alone, as a derived
 // body does (sema_author_facing_diagnostics); they keep their own spans.
-sema_check_generated_codec_method: fn(job: SemaBodyJob, module_index: Int, program: SemaProgramTables) -> Bool {
+sema_check_generated_codec_method: fn(method: SemaMethodJob, module_index: Int, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph
-    if job == .ImplMethod(_, owner, _) {
+    if method == .ImplMethod(_, owner, _) {
         return graph.modules[module_index].impls[owner].compiler_generated
     }
     false
 }
 
-sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaMethodJob, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     graph: program.registration_graph
     if job == {
         .NominalMethod(ordinal, owner, row) -> sema_check_apply_method_declared(module_index, memory_plan, job, graph.modules[module_index].nominals[owner].methods[row].declaration, ordinal, ready, ready_deltas, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
         .ImplMethod(ordinal, owner, row) -> sema_check_apply_method_declared(module_index, memory_plan, job, graph.modules[module_index].impls[owner].methods[row].declaration, ordinal, ready, ready_deltas, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
-        .TopLevel(_) -> panic("a top-level job entered method application")
     }
 }
 
 // Method job `job` at body ordinal `ordinal`; `declaration` is its method
 // row's declaration (sema_check_apply_method_job).
-sema_check_apply_method_declared: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, declaration: Func, ordinal: Int, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+sema_check_apply_method_declared: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaMethodJob, declaration: Func, ordinal: Int, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     author_span: sema_check_generated_method_author_span(job, module_index, environment, program)
     if author_span == .Val(span) {
         generated_diagnostics := [Diagnostic]{}
@@ -2085,7 +2099,6 @@ sema_check_registered_wave_method_jobs: fn(environment: SemaScopeEnvironment, pr
                 span: graph.modules[module_index].impls[implementation_index].methods[method_index].declaration.span
                 bytes += span.end - span.start
             }
-            .TopLevel(_) -> panic("a top-level job entered the method wave")
         }
     }
     jobs.len()

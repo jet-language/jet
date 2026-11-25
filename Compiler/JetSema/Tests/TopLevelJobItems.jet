@@ -2,13 +2,15 @@
 // function, the job entry reads it once and leaves the result incomplete with
 // a reason; it never stops the compiler. Both job entries are covered: the
 // module check (sema_check_registration_top_level) and the debugger's re-check
-// (sema_script_probe_recheck).
+// (sema_script_probe_recheck). A method job is its own type (SemaMethodJob),
+// so the method lists and checks never meet a top-level job.
 use {
     jet_foundation.[InternerDelta, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_sema.[
         SemaBodyJob,
+        SemaMethodJob,
         SemaBuildFacts,
         SemaComptimeFunctionResult,
         SemaComptimeItemValue,
@@ -23,11 +25,13 @@ use {
         SemaScriptProbe,
         SemaSourceOrigin,
         SemaSourceSegment,
+        sema_check_method_jobs,
         sema_check_registration_module_start,
         sema_check_registration_top_level,
         sema_collect_comptime_declarations,
         sema_comptime_checked_function_rows,
         sema_function_memory_plan_new,
+        sema_method_body_job,
         sema_registration_prepare_graph,
         sema_script_probe_open,
         sema_script_probe_recheck,
@@ -36,9 +40,10 @@ use {
 
 TOP_LEVEL_JOB_SOURCE: "Point: struct {{ x: Int }}\nanswer: fn() -> Int {{ 42 }}\n"
 
-// A probe of TOP_LEVEL_JOB_SOURCE's module after its declaration pass.
-top_level_job_probe: fn() -> SemaScriptProbe {
-    source: TOP_LEVEL_JOB_SOURCE
+METHOD_JOB_SOURCE: "Sized: trait {{\n    size: fn(self) -> Int,\n}}\n\nPoint: struct {{\n    x: Int,\n\n    total: fn(self) -> Int {{ self.x }}\n}}\n\nimpl Point.Sized {{\n    size: fn(self) -> Int {{ self.x }}\n}}\n\nanswer: fn() -> Int {{ 42 }}\n"
+
+// A probe of `source`'s module after its declaration pass.
+top_level_job_probe: fn(source: String) -> SemaScriptProbe {
     parsed := parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("fixture did not parse: {parsed.diagnostics:Debug}")
     table := module_table()
@@ -68,7 +73,7 @@ top_level_job_item: fn(graph: SemaRegistrationGraph, module_index: Int, function
 }
 
 #Test("a module check's top-level job whose item is not a function leaves the module incomplete") {
-    probe := top_level_job_probe()
+    probe := top_level_job_probe(TOP_LEVEL_JOB_SOURCE)
     module_index: probe.module_index
     other: top_level_job_item(probe.program.registration_graph, module_index, false)
     result := sema_check_registration_module_start(probe.environment, probe.program, module_index, [SemaComptimeItemValue]{}, probe.scopes)
@@ -88,7 +93,7 @@ top_level_job_item: fn(graph: SemaRegistrationGraph, module_index: Int, function
 }
 
 #Test("the debugger's re-check of a top-level job whose item is not a function is incomplete") {
-    probe := top_level_job_probe()
+    probe := top_level_job_probe(TOP_LEVEL_JOB_SOURCE)
     module_index: probe.module_index
     other: top_level_job_item(probe.program.registration_graph, module_index, false)
     missed := sema_script_probe_recheck(probe, sema_function_memory_plan_new(), SemaBodyJob.TopLevel{item_index: other})
@@ -99,4 +104,53 @@ top_level_job_item: fn(graph: SemaRegistrationGraph, module_index: Int, function
     checked := sema_script_probe_recheck(probe, sema_function_memory_plan_new(), SemaBodyJob.TopLevel{item_index: function})
     assert(checked.complete, "the re-check of `answer` is incomplete: {checked.incomplete_reasons:Debug}")
     assert(checked.value != None, "the re-check of `answer` gave no body")
+}
+
+// Whether `job` names the same method row, at the same ordinal, as `method`.
+method_job_is: fn(method: SemaMethodJob, job: SemaBodyJob) -> Bool {
+    if method == {
+        .NominalMethod(ordinal, owner, row) -> {
+            if job == .NominalMethod(job_ordinal, job_owner, job_row) -> return job_ordinal == ordinal && job_owner == owner && job_row == row
+            false
+        }
+        .ImplMethod(ordinal, owner, row) -> {
+            if job == .ImplMethod(job_ordinal, job_owner, job_row) -> return job_ordinal == ordinal && job_owner == owner && job_row == row
+            false
+        }
+    }
+}
+
+#Test("a module's method jobs are its methods, each the matching body job") {
+    probe := top_level_job_probe(METHOD_JOB_SOURCE)
+    graph: probe.program.registration_graph
+    scanned := 0
+    nominal := 0
+    implemented := 0
+    loop (index, job) in sema_check_method_jobs(graph, graph.modules[probe.module_index], scanned, false) {
+        assert(method_job_is(job, sema_method_body_job(job)), "method job {index}'s body job names another row")
+        if job == {
+            .NominalMethod(ordinal, _, _) -> {
+                nominal += 1
+                assert_eq(ordinal, index)
+            }
+            .ImplMethod(ordinal, _, _) -> {
+                implemented += 1
+                assert_eq(ordinal, index)
+            }
+        }
+    }
+    // `total` and the methods the compiler derives for Point.
+    assert(nominal >= 1, "Point's methods gave no nominal job")
+    assert_eq(implemented, 1)
+}
+
+#Test("the debugger's re-check of a method job checks the method") {
+    probe := top_level_job_probe(METHOD_JOB_SOURCE)
+    graph: probe.program.registration_graph
+    scanned := 0
+    loop job in sema_check_method_jobs(graph, graph.modules[probe.module_index], scanned, false) {
+        checked := sema_script_probe_recheck(probe, sema_function_memory_plan_new(), sema_method_body_job(job))
+        assert(checked.complete, "a method's re-check is incomplete: {checked.incomplete_reasons:Debug}")
+        assert(checked.value != None, "a method's re-check gave no body")
+    }
 }

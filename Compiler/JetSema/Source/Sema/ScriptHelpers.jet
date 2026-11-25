@@ -221,18 +221,19 @@ sema_script_probe_recheck: fn(probe: ^SemaScriptProbe, plan: SemaFunctionMemoryP
     references := [SemaNameReferenceFact]{}
     if job == {
         .TopLevel(item_index) -> sema_script_probe_check_item(probe.program.registration_graph, item_index, module_index, plan, probe.environment, probe.program, probe.scopes, dropped, calls, requests, references) ?? sema_function_check_unavailable("", "top-level item {item_index}: it is not a function")
-        .NominalMethod(_, owner, row) -> sema_script_probe_recheck_method(job, probe.program.registration_graph.modules[module_index].nominals[owner].methods[row].declaration, module_index, plan, probe.environment, probe.program, probe.scopes, dropped, calls, requests, references)
-        .ImplMethod(_, owner, row) -> sema_script_probe_recheck_method(job, probe.program.registration_graph.modules[module_index].impls[owner].methods[row].declaration, module_index, plan, probe.environment, probe.program, probe.scopes, dropped, calls, requests, references)
+        .NominalMethod(ordinal, owner, row) -> sema_script_probe_recheck_method(SemaMethodJob.NominalMethod{ordinal: ordinal, nominal_index: owner, method_index: row}, probe.program.registration_graph.modules[module_index].nominals[owner].methods[row].declaration, module_index, plan, probe.environment, probe.program, probe.scopes, dropped, calls, requests, references)
+        .ImplMethod(ordinal, owner, row) -> sema_script_probe_recheck_method(SemaMethodJob.ImplMethod{ordinal: ordinal, implementation_index: owner, method_index: row}, probe.program.registration_graph.modules[module_index].impls[owner].methods[row].declaration, module_index, plan, probe.environment, probe.program, probe.scopes, dropped, calls, requests, references)
     }
 }
 
-// sema_script_probe_recheck of method `job`, whose method row's declaration
-// is `declaration`.
-sema_script_probe_recheck_method: fn(job: SemaBodyJob, declaration: Func, module_index: Int, plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic], calls: ^[SemaCallSiteFact], requests: ^[SemaComptimeRequest], references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+// sema_script_probe_recheck of method `method`, whose method row's
+// declaration is `declaration`.
+sema_script_probe_recheck_method: fn(method: SemaMethodJob, declaration: Func, module_index: Int, plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic], calls: ^[SemaCallSiteFact], requests: ^[SemaComptimeRequest], references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+    job: sema_method_body_job(method)
     owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
     position: sema_check_registered_memory_position(job, declaration, module_index, plan, environment, program)
-    input: sema_check_method_input(job, module_index, plan, position, environment, program)
-    raw: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
+    input: sema_check_method_input(method, module_index, plan, position, environment, program)
+    raw: sema_check_registered_raw_protocol_return(method, module_index, environment, program)
     sema_function_check_registered_on_thread(job, declaration, module_index, plan, input.memory_position, owner_id, input.function_kind, raw, input.generic_params, environment, program, scopes, None, diagnostics, calls, requests, references)
 }
 
@@ -255,17 +256,16 @@ sema_script_probe_job: fn(graph: SemaRegistrationGraph, module_index: Int, at: I
         if job == {
             .NominalMethod(_, owner, row) -> {
                 if sema_script_probe_method_inside(graph.modules[module_index].nominals[owner].methods[row].declaration, at, width) {
-                    found = Val(job)
+                    found = Val(sema_method_body_job(job))
                     width = graph.modules[module_index].nominals[owner].methods[row].declaration.span.end - graph.modules[module_index].nominals[owner].methods[row].declaration.span.start
                 }
             }
             .ImplMethod(_, owner, row) -> {
                 if sema_script_probe_method_inside(graph.modules[module_index].impls[owner].methods[row].declaration, at, width) {
-                    found = Val(job)
+                    found = Val(sema_method_body_job(job))
                     width = graph.modules[module_index].impls[owner].methods[row].declaration.span.end - graph.modules[module_index].impls[owner].methods[row].declaration.span.start
                 }
             }
-            .TopLevel(_) -> {}
         }
     }
     found
