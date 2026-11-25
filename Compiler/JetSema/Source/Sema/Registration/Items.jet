@@ -2930,6 +2930,32 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
     }
 }
 
+// Why a Prelude text the compiler carries does not read: `file` is its
+// path and `line` the line of its first problem, None when the problem is
+// the text as a whole. Its readers run only in Compiler/Toolchain/PreludeRows
+// and JetParser Tests/PreludeBuildRows.jet, which report it and fail.
+#Error
+SemaPreludeTextError: struct {
+    file: String,
+    line: Int?,
+    message: String,
+}
+
+// The first of `diagnostics`, from parsing the Prelude text `source` at
+// `file`, as that text's error at its line.
+sema_prelude_text_error: fn(file: String, source: String, diagnostics: [Diagnostic]) -> SemaPreludeTextError Never! {
+    first: diagnostics[0]
+    message: "does not parse: {first.what}"
+    at: first.span ?? return SemaPreludeTextError{file: file, line: None, message: message}
+    bytes: source.bytes()
+    end: if at.start < bytes.len() -> at.start else -> bytes.len()
+    line := 1
+    loop byte in bytes[0..<end] {
+        if byte == 10 -> line += 1
+    }
+    SemaPreludeTextError{file: file, line: Val(line), message: message}
+}
+
 // The byte offset of each line of SEMA_PRELUDE_ERROR_SOURCE.
 SEMA_PRELUDE_ERROR_LINE_STARTS: #run parser_line_starts(SEMA_PRELUDE_ERROR_SOURCE.bytes())
 
@@ -2938,11 +2964,11 @@ SEMA_PRELUDE_ERROR_LINE_STARTS: #run parser_line_starts(SEMA_PRELUDE_ERROR_SOURC
 // is what this returns, written by Compiler/Toolchain/PreludeRows, so neither
 // a compile nor the compiler's build parses the error text; a text that does
 // not parse, or that does not hold seven declarations with exactly one marked
-// default error, stops that tool.
-sema_registration_original_error_program: fn() -> Program {
+// default error, is that tool's error.
+sema_registration_original_error_program: fn() -> Program SemaPreludeTextError! {
     parsed := parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 {
-        panic("Prelude/Errors.jet does not parse: {parsed.diagnostics[0].what}")
+        return Err(sema_prelude_text_error("Prelude/Errors.jet", SEMA_PRELUDE_ERROR_SOURCE, parsed.diagnostics))
     }
     program := parsed.program.move()
     declarations := [Item]{}
@@ -2959,11 +2985,11 @@ sema_registration_original_error_program: fn() -> Program {
         }
     }
     if declarations.len() != 7 || marked != 1 {
-        panic("Prelude/Errors.jet must hold seven declarations and exactly one marked default error, `Err`")
+        return Err(SemaPreludeTextError{file: "Prelude/Errors.jet", line: None, message: "must hold seven declarations and exactly one marked default error, `Err`"})
     }
     declarations.reverse()
     program.items = declarations.move()
-    program
+    Ok(program)
 }
 
 sema_registration_original_error_module: fn(module_table: ^ModuleTable) -> SemaRegistrationModuleInput {
@@ -2990,13 +3016,13 @@ SEMA_PRELUDE_RULE_LINE_STARTS: #run parser_line_starts(SEMA_PRELUDE_RULE_SOURCE.
 // rules of the contract markers). SEMA_PRELUDE_RULE_PROGRAM (PreludeRows.jet)
 // is what this returns, written by Compiler/Toolchain/PreludeRows, so neither
 // a compile nor the compiler's build parses the rule text; a text that does
-// not parse stops that tool.
-sema_registration_rule_program: fn() -> Program {
+// not parse is that tool's error.
+sema_registration_rule_program: fn() -> Program SemaPreludeTextError! {
     parsed: parse_generated_source(SEMA_PRELUDE_RULE_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 {
-        panic("Prelude/Rules.jet does not parse: {parsed.diagnostics[0].what}")
+        return Err(sema_prelude_text_error("Prelude/Rules.jet", SEMA_PRELUDE_RULE_SOURCE, parsed.diagnostics))
     }
-    parsed.program.move()
+    Ok(parsed.program.move())
 }
 
 // The Prelude rule module as one compiler-generated source module of the
