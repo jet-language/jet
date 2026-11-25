@@ -427,6 +427,15 @@ CheckedItem: enum {
     Call(CompilerCall),
 }
 
+// One part of a String literal with holes, as a `check` rule hears it in
+// `CompilerArg.written`: a run of its text, or a hole with its name when
+// the hole is a bare name and its span. `"/users/{id}"` is
+// `[.Text{text: "/users/"}, .Hole{name: Val("id"), span: …}]`.
+CompilerWrittenPart: enum {
+    Text(text: String),
+    Hole(name: String?, span: SourceSpan),
+}
+
 // A marker is a struct that implements Marker: its fields are what a use
 // site passes (`#Label("x")`), and the constants are the rule's settings,
 // each a value known while compiling. The same `impl Marker` block may name a

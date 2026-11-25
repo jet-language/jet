@@ -1,0 +1,15 @@
+# A marker's `check` rule hears the parts a String literal with holes spells
+# as `CompilerArg.written` (D-RULE-WRITTEN1=A): its runs of text and its
+# holes, each with its name when it is a bare name and its span. Any other
+# argument's `written` is None: a plain literal, a constant and a literal in
+# parentheses.
+fixture: CheckRuleHearsWrittenParts.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # each argument is heard with the parts it spells
+stderr: !~ "known.Misheard" # each argument's written parts are the ones the rule expects
+step: jet run main.jet
+exit: 0
+stdout: = "/users/7/posts|2!|/plain|/plain|/a/7\n" # the rule only reads; the call runs as written
