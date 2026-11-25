@@ -45,6 +45,7 @@ use jet_foundation.[
     AppRouteRoot,
     diagnostic_with_edit,
     DURATION_SOURCE_METHODS,
+    duration_source_method,
     duration_source_method_takes,
     expr_span,
     effect_scope_base,
@@ -473,24 +474,29 @@ sema_call_try_int_abs_source: fn(receiver: Expr, receiver_value: TExpr, method: 
 }
 
 // A Duration method runs its core.time source function: `d.in(.Seconds)` is
-// `core.time.__duration_in(d, .Seconds)`, the receiver its first argument and
-// the call's own (labeled) arguments after it. Another name or argument count
-// is no Duration method.
+// the call of the function that fills the DurationIn role (its
+// DURATION_SOURCE_METHODS row's), with `d` its first argument and the call's
+// own (labeled) arguments after it. Another name or argument count is no
+// Duration method; E1015 when core.time is loaded and nothing fills the role.
 sema_call_try_duration_source: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if sema_expr_unwrap_tag(receiver_value.ty) != (Type.Named{name: "Duration"}) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    if !duration_source_method_takes(method, args.len()) {
+    row: duration_source_method(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() < row.minimum || args.len() > row.maximum {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     api: "Duration.{method}"
-    member: "__duration_{method}"
-    identity: sema_call_core_module_identity(check.environment.*, check.program.*, "core.time") ?? {
-        check.diagnostics.push(sema_error("E0003", span, "{api} source module is not loaded", "this receiver operation executes core.time.{member} on the Duration", "add `use time: core.time`"))
+    if sema_call_core_module_identity(check.environment.*, check.program.*, "core.time") == None {
+        check.diagnostics.push(sema_error("E0003", span, "{api} source module is not loaded", "this receiver operation executes the core.time function that fills the {row.role} role on the Duration", "add `use time: core.time`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    target: sema_call_core_source_target(check.environment.*, check.program.*, identity, member, type_args, span, true, check.diagnostics) ?? {
-        check.diagnostics.push(sema_error("E0003", span, "{api} source function is not available", "this receiver operation requires the core.time.{member} declaration", "load the registered Core time source function"))
+    filler: sema_core_role_function(check.program.registration_graph, row.role) ?? {
+        check.diagnostics.push(sema_missing_core_role(row.role, span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    target: sema_call_core_source_target(check.environment.*, check.program.*, filler.module_identity, filler.name, type_args, span, true, check.diagnostics) ?? {
+        check.diagnostics.push(sema_error("E0003", span, "{api} source function is not available", "this receiver operation requires the core.time function that fills the {row.role} role", "load the registered Core time source function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}

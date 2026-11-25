@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     core: core
     rt: jet.runtime.time
 }
@@ -54,9 +55,10 @@ sleep: fn(duration: Duration) -[Time.Wait]> Never! {
     rt.sleep_ns(duration.ns)
 }
 
-// `task.timeout(duration)` (Sema TaskGroups.jet): moves the task deadline to
-// the earlier of the installed one and now plus `duration`.
-priv __task_timeout: fn(duration: Duration) -[Time]> Never! { rt.task_timeout(duration.ns) }
+// `task.timeout(duration)` (Sema TaskGroups.jet, through the TaskTimeout
+// role): moves the task deadline to the earlier of the installed one and now
+// plus `duration`.
+#Builtin.Role(.TaskTimeout) priv __task_timeout: fn(duration: Duration) -[Time]> Never! { rt.task_timeout(duration.ns) }
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
 /// point for measuring; this is the timestamp for stamps, nonces, and expiry.
@@ -620,37 +622,38 @@ priv duration_unit_ns: fn(unit: DurationUnit) -> Int Never! {
     }
 }
 
-// The Duration methods: the compiler checks `d.<method>(…)` as a call of
-// `__duration_<method>(d, …)`. `%%` keeps the dividend's sign, so
-// `value - value %% scale` is a multiple of `scale` toward zero.
+// The Duration methods: the compiler checks `d.<method>(…)` as a call of the
+// function that fills the method's role (DurationIn for `in`, …), never by
+// its name. `%%` keeps the dividend's sign, so `value - value %% scale` is a
+// multiple of `scale` toward zero.
 
 // The whole `unit`s in the span, truncated toward zero.
-priv __duration_in: fn(d: Duration, unit: DurationUnit) -> Int Never! {
+#Builtin.Role(.DurationIn) priv __duration_in: fn(d: Duration, unit: DurationUnit) -> Int Never! {
     scale: duration_unit_ns(unit)
     (d.ns - d.ns %% scale) /% scale
 }
 
-priv __duration_is_zero: fn(d: Duration) -> Bool Never! { duration_is_zero(d) }
+#Builtin.Role(.DurationIsZero) priv __duration_is_zero: fn(d: Duration) -> Bool Never! { duration_is_zero(d) }
 
 // The whole seconds in the span, truncated toward zero.
-priv __duration_total_seconds: fn(d: Duration) -> Int Never! {
+#Builtin.Role(.DurationTotalSeconds) priv __duration_total_seconds: fn(d: Duration) -> Int Never! {
     (d.ns - d.ns %% 1000000000) /% 1000000000
 }
 
-priv __duration_difference: fn(d: Duration, other: Duration) -> Duration Never! { duration_sub(d, other) }
+#Builtin.Role(.DurationDifference) priv __duration_difference: fn(d: Duration, other: Duration) -> Duration Never! { duration_sub(d, other) }
 
-priv __duration_abs: fn(d: Duration) -> Duration Never! { duration_abs(d) }
+#Builtin.Role(.DurationAbs) priv __duration_abs: fn(d: Duration) -> Duration Never! { duration_abs(d) }
 
-priv __duration_negated: fn(d: Duration) -> Duration Never! {
+#Builtin.Role(.DurationNegated) priv __duration_negated: fn(d: Duration) -> Duration Never! {
     if d.ns == time_int_min() -> return duration_ns(time_int_max())
     duration_ns(0 - d.ns)
 }
 
-priv __duration_sign: fn(d: Duration) -> Int Never! { civil_sign(d.ns) }
+#Builtin.Role(.DurationSign) priv __duration_sign: fn(d: Duration) -> Int Never! { civil_sign(d.ns) }
 
 // The span in `unit` (a civil_unit_ns name) as a Float; 0.0 for a unit
 // with no such name.
-priv __duration_total_in: fn(d: Duration, unit: String) -> Float Never! {
+#Builtin.Role(.DurationTotalIn) priv __duration_total_in: fn(d: Duration, unit: String) -> Float Never! {
     scale: civil_unit_ns(unit) ?? return 0.0
     Float{d.ns} / Float{scale}
 }
@@ -658,7 +661,7 @@ priv __duration_total_in: fn(d: Duration, unit: String) -> Float Never! {
 // The span rounded to `increment` `unit`s (civil_round); an unknown unit or
 // mode, an increment below 1, or a result outside the i64 nanosecond range
 // keeps the span.
-priv __duration_round: fn(d: Duration, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> Duration Never! {
+#Builtin.Role(.DurationRound) priv __duration_round: fn(d: Duration, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> Duration Never! {
     rounded: civil_round(d.ns, unit, increment, rounding_mode)
     if rounded < time_int_min() || rounded > time_int_max() -> return d.copy()
     duration_ns(rounded)

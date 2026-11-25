@@ -79,7 +79,12 @@
 // `net.unix_connect` without (UnixConnect) and with a deadline
 // (UnixConnectDeadline), `tls.client` over a stream (TLSClientStream), with a
 // deadline (TLSClientDeadline) and with a config and a deadline
-// (TLSClientConfigDeadline), and `term.take` (TermTake). The `#CLI` entry the
+// (TLSClientConfigDeadline), `term.take` (TermTake) and `task.timeout`
+// (TaskTimeout). Each Duration method runs the core.time function that
+// fills its role: `in` (DurationIn), `is_zero` (DurationIsZero),
+// `total_seconds` (DurationTotalSeconds), `difference` (DurationDifference),
+// `abs` (DurationAbs), `negated` (DurationNegated), `sign` (DurationSign),
+// `total_in` (DurationTotalIn) and `round` (DurationRound). The `#CLI` entry the
 // compiler generates calls the core.args parser helpers by their roles, each
 // starting with `CLI` (CLISpec through CLIMissing), whose fillers the compiler
 // reads from Core/Args/Args.jet while it builds. `context.allocator` reads
@@ -376,6 +381,16 @@ RoleKind: enum {
     StringHasLinePrefix,
     StringTSVRecords,
     StringCompareVersion,
+    TaskTimeout,
+    DurationIn,
+    DurationIsZero,
+    DurationTotalSeconds,
+    DurationDifference,
+    DurationAbs,
+    DurationNegated,
+    DurationSign,
+    DurationTotalIn,
+    DurationRound,
     TextInputDrop,
     TextInputChange,
     MeasurementNew,
