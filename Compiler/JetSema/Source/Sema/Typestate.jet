@@ -14,7 +14,7 @@
 //
 // The receiver's type comes from the function's checked body: the type of the
 // receiver's node in its expression-type column.
-use jet_foundation.[ASTTables, BodyTree, Diagnostic, Expr, Func, Item, Name, NameTable, OrFallback, Pattern, Interner, Span, Stmt, SwitchArm, Type, body_tree_new, checked_expr_type_id, type_syntax, expr_binary_operands, expr_span, foundation_byte_text, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
+use jet_foundation.[ASTTables, BodyTree, Diagnostic, Expr, Func, Item, Name, NameTable, OrFallback, Pattern, Interner, Span, Stmt, SwitchArm, Type, body_tree_new, checked_expr_type_id, type_syntax, expr_binary_operands, expr_span, foundation_byte_text, name_count, name_find, name_index, name_intern, name_table_sized, name_text, task_form_of]
 
 SEMA_STATE_TASK: "Task"
 
@@ -23,13 +23,6 @@ SEMA_STATE_TASK_RUNNING: "Running"
 SEMA_STATE_TASK_JOINED: "Joined"
 
 SEMA_STATE_TASK_DETACHED: "Detached"
-
-// The compiler-private method canonical `task` spawn syntax calls
-// (the parser's `\0jet.task.spawn`).
-sema_state_task_spawn_method: fn() -> String Never! {
-    nul: String.from_bytes([U8]{U8{0}}) ?? ""
-    "{nul}jet.task.spawn"
-}
 
 // Program-wide typestate rows, collected once from every user module.
 // Methods key as `Type.method`, free functions by name; `keys` interns
@@ -747,7 +740,7 @@ sema_state_entry: fn(walk: SemaStateWalk, value: Expr) -> String? Never! {
         .Paren(inner, _, _) -> sema_state_entry(walk, inner)
         .Ok(inner, _, _) -> sema_state_entry(walk, inner)
         .Try(inner, _, _, _, _) -> sema_state_entry(walk, inner)
-        .MethodCall(_, method, _, _, _, _, _) -> if method == sema_state_task_spawn_method() -> Val(SEMA_STATE_TASK_RUNNING) else -> None
+        .MethodCall(receiver, method, _, _, _, _, _) -> if task_form_of(receiver, method) == .Val(form) && form == .Spawn -> Val(SEMA_STATE_TASK_RUNNING) else -> None
         .Call(_, _) -> None
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }

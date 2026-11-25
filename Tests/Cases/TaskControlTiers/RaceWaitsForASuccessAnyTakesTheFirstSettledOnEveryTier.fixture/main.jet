@@ -1,0 +1,20 @@
+use time: core.time
+
+parse_count: fn(text: String) -> Int Err! {
+    n: Int.parse(text) ?? return Err("not a count: {text}")
+    Ok(n)
+}
+
+slow_seven: fn() -> Int {
+    time.sleep(50ms)
+    7
+}
+
+run: fn() {
+    // The failing branch settles first. `task.race` waits on for the first
+    // success; `task.any` takes the failure.
+    raced: (task.race {parse_count("none"), slow_seven()}) ?? -1
+    print("race {raced}")
+    first: (task.any {parse_count("none"), slow_seven()}) ?? -1
+    print("any {first}")
+}

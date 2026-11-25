@@ -10,6 +10,7 @@ use {
         AccessConvention,
         MARKER_NUMERIC,
         MODULE_CORE_PREFIX,
+        TASK_FORM_RECEIVER,
         access_sigil,
         ArithmeticOperation,
         ArithmeticPolicyFact,
@@ -4323,7 +4324,7 @@ sema_expr_try_method_static_routes: fn(receiver: Expr, method: String, method_sp
                     check.diagnostics.push(sema_error("E0311", method_span, "`.origin()` is retired for tracked values", "a `#Track` binding's origin is a compile-time fact, not a method", "read `value.reflect().origin` in comptime code"))
                     return SemaMethodSpecialCheck{handled: true, value: None}
                 }
-                if name != sema_taskgroup_internal_receiver() && name != "FieldError" && method != "reflect" {
+                if name != TASK_FORM_RECEIVER && name != "FieldError" && method != "reflect" {
                     return SemaMethodSpecialCheck{handled: false, value: None}
                 }
             } else if method == "origin" && args.len() == 0 && check.scopes.bindings[index].origin != None {

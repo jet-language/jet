@@ -4,6 +4,7 @@
 use jet_foundation.[
     BodyHandleOp,
     AccessConvention,
+    Call,
     CallArg,
     Diagnostic,
     EffectRowEntry,
@@ -13,8 +14,11 @@ use jet_foundation.[
     ParamZone,
     Span,
     SymbolKind,
+    TFailureCarrier,
     TMethodRef,
     Type,
+    TypeTupleField,
+    UnOp,
     core_source_owns_type,
     expr_span,
 ]
@@ -499,4 +503,69 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+}
+
+sema_channel_capacity_literal: fn(expr: Expr) -> Int? Never! {
+    if expr == {
+        .Int(value, _, _, raw, _) -> Val(sema_expr_exact_integer_literal(value, raw))
+        .Paren(inner, _, _) -> sema_channel_capacity_literal(inner)
+        .Unary(op, inner, _, _) -> {
+            if op == UnOp.Neg {
+                value: sema_channel_capacity_literal(inner) ?? return None
+                return Val(-value)
+            }
+            None
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+// `channel<T>()` and `channel<T>(capacity)`: a sender and receiver pair over
+// core.tasks' unbounded or bounded channel. A literal capacity below 1 is
+// E0395.
+sema_call_check_channel: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+    if call.args.len() > 1 {
+        sema_stream_handle_infer_args(call.args, check)
+        check.diagnostics.push(sema_call_arity_diagnostic("channel", 1, call.args.len(), false, call.name_span))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if call.type_args.len() != 1 {
+        sema_stream_handle_infer_args(call.args, check)
+        check.diagnostics.push(sema_error("E0904", call.name_span, "`channel` needs a type argument to infer the element type", "the element type `T` cannot be guessed from an empty channel", "call it with an explicit type argument: `channel<T>()`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    params := [SemaCallParam]{}
+    if call.args.len() == 1 {
+        params.push(SemaCallParam{label: "capacity", name: "capacity", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Int), variadic: false})
+    }
+    values: sema_stream_handle_checked_args("channel", params, call.args, None, None, AccessConvention.Read, 0, call.name_span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if call.args.len() == 1 {
+        if sema_channel_capacity_literal(call.args[0].expr) == .Val(capacity) {
+            if capacity < 1 {
+                check.diagnostics.push(sema_error("E0395", expr_span(call.args[0].expr), "A channel capacity must be at least 1, not `{capacity}`.", "A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
+                return SemaDirectSpecialCheck{handled: true, value: None}
+            }
+        }
+    }
+    element := sema_call_resolved_type(call.type_args[0], check.environment.*, check.program.*)
+    result_type := Type.Tuple{
+        fields: [TypeTupleField]{
+            {name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{element}}},
+            {name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{element}}},
+        },
+    }
+    // The Core function that fills the constructor's role makes the pair
+    // (Core/Tasks/Tasks.jet); a Core without one keeps the row.
+    role: if call.args.len() == 0 -> "InlineChannelNew" else -> "InlineChannelBounded"
+    if sema_core_role_function(check.program.registration_graph, role) != None {
+        target: sema_call_core_role_target(role, [Type]{element}, call.name_span, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        declared: sema_call_params_from_type(target.signature) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        callee: sema_call_callee_decl(check.program.*, target.symbol.id, call.name_span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        made: sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: [Type]{element}, args: sema_call_core_source_arguments(values, declared, check)}, call.name_span)
+        return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(made, expected, check.environment.*, check.program.*, check.diagnostics)}
+    }
+    member: if call.args.len() == 0 -> "__channel_new" else -> "__channel_bounded"
+    record: sema_call_core_record("core.tasks", member, values.len(), call.name_span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value: sema_call_core_tree(record, values, call.name_span, [Type]{element}, [Bool]{}, result_type, TFailureCarrier.Infallible, expected, check)
+    SemaDirectSpecialCheck{handled: true, value: value}
 }

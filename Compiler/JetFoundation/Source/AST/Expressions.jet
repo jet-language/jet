@@ -616,6 +616,80 @@ expr_is_map_slot_or: fn(call: Call) -> Bool Never! {
     call.args.len() == 2 && call.name == expr_map_slot_or_name()
 }
 
+// The `task` forms: a spawn (`task { … }`, `task ^^name { … }`, `task
+// value`), `task.timeout(duration)` and the `task.all`, `task.race` and
+// `task.any` combinators. The language owns them. The parser writes each one
+// as a one-argument method call (task_form_call) on a NUL-led receiver and
+// method no source can spell, and every later reader classifies the call
+// through task_form_of.
+TaskForm: enum {
+    Spawn,
+    Timeout,
+    All,
+    Race,
+    Any,
+}
+
+// The receiver of every task form's call.
+TASK_FORM_RECEIVER: "\u{0}jet.task"
+
+// The method a task form's call names.
+task_form_method: fn(form: TaskForm) -> String Never! {
+    if form == {
+        .Spawn -> "\u{0}jet.task.spawn"
+        .Timeout -> "\u{0}jet.task.timeout"
+        .All -> "\u{0}jet.task.all"
+        .Race -> "\u{0}jet.task.race"
+        .Any -> "\u{0}jet.task.any"
+    }
+}
+
+// The form as a program writes it: `task`, `task.timeout`, `task.all`,
+// `task.race` or `task.any`.
+task_form_spelling: fn(form: TaskForm) -> String Never! {
+    if form == {
+        .Spawn -> "task"
+        .Timeout -> "task.timeout"
+        .All -> "task.all"
+        .Race -> "task.race"
+        .Any -> "task.any"
+    }
+}
+
+// The combinator a `task.` selector names: all, race or any.
+task_form_combinator: fn(selector: String) -> TaskForm? Never! {
+    if selector == {
+        "all" -> Val(TaskForm.All)
+        "race" -> Val(TaskForm.Race)
+        "any" -> Val(TaskForm.Any)
+        else -> None
+    }
+}
+
+// The call a task form is written as: the form's method on
+// TASK_FORM_RECEIVER, with its one argument (the spawned lambda, the
+// duration or the branches). `head` is the `task` word.
+task_form_call: fn(form: TaskForm, head: Span, method_span: Span, argument: Expr, argument_span: Span, receiver_id: Int, id: Int) -> Expr Never! {
+    receiver: Expr.Ident{name: TASK_FORM_RECEIVER, span: head, id: receiver_id}
+    argument_arg: CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
+    Expr.MethodCall{receiver: receiver, method: task_form_method(form), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument_arg}, id: id}
+}
+
+// The task form a method call of `method` on `receiver` writes, or None for
+// any other call.
+task_form_of: fn(receiver: Expr, method: String) -> TaskForm? Never! {
+    on_receiver: if receiver == .Ident(name, _, _) -> name == TASK_FORM_RECEIVER else -> false
+    if !on_receiver -> return None
+    if method == {
+        "\u{0}jet.task.spawn" -> Val(TaskForm.Spawn)
+        "\u{0}jet.task.timeout" -> Val(TaskForm.Timeout)
+        "\u{0}jet.task.all" -> Val(TaskForm.All)
+        "\u{0}jet.task.race" -> Val(TaskForm.Race)
+        "\u{0}jet.task.any" -> Val(TaskForm.Any)
+        else -> None
+    }
+}
+
 expr_span: fn(expr: Expr) -> Span {
     if expr == {
         .Str(_, span, _) -> return span

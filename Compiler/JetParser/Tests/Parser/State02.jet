@@ -1,5 +1,5 @@
 use {
-    jet_foundation.[BinOp, DiagnosticFixApplicability, DiagnosticFixSafety, Program, Type]
+    jet_foundation.[BinOp, DiagnosticFixApplicability, DiagnosticFixSafety, Program, TaskForm, Type]
     jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, Token, lex]
     jet_parser.[jfmt_check_parse_accepts, parse_tokens, parser_prepare_tokens]
 }
@@ -273,7 +273,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     } ?? panic("binding")
     if binding.init == {
         .MethodCall(_, method, _, _, _, args, _) -> {
-            assert(method == parser_test_task_name("spawn"))
+            assert(method == parser_test_task_name(TaskForm.Spawn))
             assert(args.len() == 1)
             assert(
                 if args[0].expr == {
