@@ -100,7 +100,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 use {
-    jet_foundation.[Interner, InternerDelta, NameTable, TComptimeValue, Type, TypeID, TypeKind, delta_has_rows, interner, interner_merge_delta, name_column, name_column_get, name_column_get_hashed, name_column_set, name_column_set_hashed, name_column_table, name_column_value, name_table_sized, name_text_hash, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id, type_id_carrier_identity, type_id_name, type_id_remap, type_id_well_known_kind, type_id_well_known_syntax, type_intern_syntax, type_kind, type_name, type_syntax]
+    jet_foundation.[Interner, InternerDelta, NameTable, TComptimeValue, Type, TypeID, TypeKind, delta_has_rows, effect_vocabulary_view_count, interner, interner_merge_delta, name_column, name_column_get, name_column_get_hashed, name_column_set, name_column_set_hashed, name_column_table, name_column_value, name_table_sized, name_text_hash, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id, type_id_carrier_identity, type_id_name, type_id_remap, type_id_well_known_kind, type_id_well_known_syntax, type_intern_syntax, type_kind, type_name, type_syntax]
     jet_backend.[X64DebugSource]
 }
 
@@ -158,6 +158,13 @@ IROp: enum {
     IntBig,
     StreamStore,
 }
+
+// BinOp and ArithmeticOperation, the source's operators, pick from IROp: each
+// lowers to the IR op of its name, apart from `Pow`, `Compare`, `And` and
+// `Or`, which have no IR op of their own.
+BIN_OP_COUNT: #run effect_vocabulary_view_count("Compiler/JetFoundation/Source/AST/Expressions.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Expressions.jet"), "BinOp", "IR.jet", embed_file("IR.jet"), "IROp", [String]{"Pow", "Compare", "And", "Or"})
+
+ARITHMETIC_OPERATION_COUNT: #run effect_vocabulary_view_count("Compiler/JetFoundation/Source/AST/Expressions.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Expressions.jet"), "ArithmeticOperation", "IR.jet", embed_file("IR.jet"), "IROp", [String]{"Pow"})
 
 // Overflow policy of an arithmetic op on a fixed-width integer (`c`).
 // IR_OVERFLOW_OPERANDS marks an exact Int Add, Sub or Mul whose operands

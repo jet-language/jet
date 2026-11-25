@@ -3,9 +3,9 @@
 // `is_reserved_generated_name`). Binders name every generated type through
 // this one policy so their output never collides with Jet's own names.
 // The keywords are the syntax registry's `JET_KEYWORD_LIST`, and the built-in
-// and reserved type names are the compiler's own lists (`JET_TYPE_NAMES`,
+// and reserved type names are the compiler's own lists (`TYPE_NAMES`,
 // `SEMA_RESERVED_TYPES`), never a copy.
-use jet_foundation.[JET_TYPE_NAMES, SEMA_RESERVED_TYPES]
+use jet_foundation.[TYPE_NAMES, SEMA_RESERVED_TYPES]
 
 // Lexer keywords and teaching words outside the keyword list, and the
 // contextual `state` that stays legal (`KW_MUTATE`, `KW_MOVE`, `KW_COPY`,
@@ -39,7 +39,7 @@ GENERATED_NAME_COMPTIME_MARK: "@"
 // built-in, reserved, and Prelude type tables; Core module type exports
 // (`CoreModuleExports::is_core_type_name`) are not part of this check.
 foundation_is_reserved_generated_name: fn(name: String) -> Bool Never! {
-    (JET_KEYWORD_LIST.contains(name) && name != GENERATED_NAME_CONTEXTUAL_STATE) || GENERATED_NAME_RETIRED_WORDS.contains(name) || JET_TYPE_NAMES.contains(name) || SEMA_RESERVED_TYPES.contains(name) || GENERATED_NAME_PRELUDE_TYPES.contains(name)
+    (JET_KEYWORD_LIST.contains(name) && name != GENERATED_NAME_CONTEXTUAL_STATE) || GENERATED_NAME_RETIRED_WORDS.contains(name) || TYPE_NAMES.contains(name) || SEMA_RESERVED_TYPES.contains(name) || GENERATED_NAME_PRELUDE_TYPES.contains(name)
 }
 
 // `canonical_name_case(name, NameCase::Pascal)`: every `_`-separated word

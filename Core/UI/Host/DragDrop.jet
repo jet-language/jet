@@ -1,4 +1,5 @@
 use {
+    builtin: jet_builtins
     core: core
     core.ui.host.[UIGrantedPath, UIHostError, UINodeID]
     internal.[drag_failure, drag_operation, drag_phase]
@@ -43,7 +44,7 @@ UIDragEvent: struct {
 // `#` comment is one URI item. A browser item has no native path, so a
 // provider never sends a file. An empty record is the provider's mark that its
 // queue overflowed and dropped events.
-poll: fn() -[IO]> UIDragEvent? UIHostError! {
+#Builtin.Needs("UI.DragDrop") poll: fn() -[IO]> UIDragEvent? UIHostError! {
     if !rt.capability(3) {
         return Err(UIHostError.CapabilityUnavailable{capability: "DragDrop"})
     }

@@ -441,7 +441,7 @@ ir_x64_debug_handle: fn(tables: ^IRX64Tables, name: String, first: String, secon
 // variant: the value's own word (an inline Option), its own box pointer (a
 // boxed Option, null when absent), or, through a typedef of the box
 // pointer, the box's selector word at 0 (an enum, union or Result box).
-ir_x64_debug_variants: fn(m: IRModule, tables: ^IRX64Tables, shared: ^IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType? Never! {
+ir_x64_debug_variants: fn(m: IRModule, tables: ^IRX64Tables, shared: IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType? Never! {
     list: m.debug_variants.get(row) ?? return None
     if list < 0 -> return None
     described: m.variant_lists[list]
@@ -476,7 +476,7 @@ ir_x64_debug_variants: fn(m: IRModule, tables: ^IRX64Tables, shared: ^IRX64Debug
 // payload member itself (a present Option's value, behind the box pointer
 // for a Pointer selector; a union's member), else a struct named as Jet
 // spells the variant whose members are its payload at their offsets.
-ir_x64_debug_arm: fn(tables: ^IRX64Tables, shared: ^IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
+ir_x64_debug_arm: fn(tables: ^IRX64Tables, shared: IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
     if variant.name == "" && variant.members.len() == 1 {
         held: variant.members[0]
         target: if held.boxed -> shared.pointer else -> held.ty
@@ -1117,43 +1117,39 @@ O0_RTTAG_INT_CLONE: U8{5}
 
 O0_RTTAG_INT_FROM_I64: U8{6}
 
-O0_RTTAG_MATH_TO_BITS: U8{7}
+O0_RTTAG_INT_CHECKED_FIXED: U8{7}
 
-O0_RTTAG_MATH_FROM_BITS: U8{8}
+O0_RTTAG_INT_NATIVE_I64: U8{8}
 
-O0_RTTAG_INT_CHECKED_FIXED: U8{9}
+O0_RTTAG_INT_CHECKED_WIDEN: U8{9}
 
-O0_RTTAG_INT_NATIVE_I64: U8{10}
+O0_RTTAG_ZONE_OPEN: U8{10}
 
-O0_RTTAG_INT_CHECKED_WIDEN: U8{11}
+O0_RTTAG_ZONE_CLOSE: U8{11}
 
-O0_RTTAG_ZONE_OPEN: U8{12}
+O0_RTTAG_ZONE_FRAME: U8{12}
 
-O0_RTTAG_ZONE_CLOSE: U8{13}
+O0_RTTAG_ZONE_PLOT: U8{13}
 
-O0_RTTAG_ZONE_FRAME: U8{14}
+O0_RTTAG_ALLOC: U8{14}
 
-O0_RTTAG_ZONE_PLOT: U8{15}
+O0_RTTAG_ALLOC_VALUE: U8{15}
 
-O0_RTTAG_ALLOC: U8{16}
+O0_RTTAG_FREE: U8{16}
 
-O0_RTTAG_ALLOC_VALUE: U8{17}
+O0_RTTAG_ATOMIC_INIT: U8{17}
 
-O0_RTTAG_FREE: U8{18}
+O0_RTTAG_ATOMIC_LOAD: U8{18}
 
-O0_RTTAG_ATOMIC_INIT: U8{19}
+O0_RTTAG_ATOMIC_STORE: U8{19}
 
-O0_RTTAG_ATOMIC_LOAD: U8{20}
+O0_RTTAG_ATOMIC_ADD: U8{20}
 
-O0_RTTAG_ATOMIC_STORE: U8{21}
+O0_RTTAG_ATOMIC_CAS: U8{21}
 
-O0_RTTAG_ATOMIC_ADD: U8{22}
+O0_RTTAG_CLEANUP_ENTER: U8{22}
 
-O0_RTTAG_ATOMIC_CAS: U8{23}
-
-O0_RTTAG_CLEANUP_ENTER: U8{24}
-
-O0_RTTAG_CLEANUP_LEAVE: U8{25}
+O0_RTTAG_CLEANUP_LEAVE: U8{23}
 
 O0_RT_INT_ADD: 0
 
@@ -1449,8 +1445,6 @@ ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule
             "jet_int_owned_to_i64" -> O0_RTTAG_INT_TO_I64
             "jet_rt_int_clone" -> O0_RTTAG_INT_CLONE
             "jet_int_owned_from_i64" -> O0_RTTAG_INT_FROM_I64
-            "jet_std_math_to_bits" -> O0_RTTAG_MATH_TO_BITS
-            "jet_std_math_from_bits" -> O0_RTTAG_MATH_FROM_BITS
             "jet_int_checked_fixed" -> O0_RTTAG_INT_CHECKED_FIXED
             "jet_int_native_i64_at" -> O0_RTTAG_INT_NATIVE_I64
             "jet_int_checked_widen" -> O0_RTTAG_INT_CHECKED_WIDEN

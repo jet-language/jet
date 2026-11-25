@@ -275,50 +275,50 @@ sema_call_never_type_args_valid: fn(signature: Type, generic_params: [SemaInfere
 // so the nearest binding of `name` decides. A value binding that is not a
 // function is E0803 even when a declared function of the same name is visible
 // further out.
-sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallDirectTarget? {
-    nearest: sema_scope_resolve_index(scopes, name) ?? {
-        owners: sema_call_method_owners(environment, program, name)
+sema_call_resolve_direct: fn(name: String, type_args: [Type], check: ^SemaBodyCheck, span: Span) -> SemaCallDirectTarget? {
+    nearest: sema_scope_resolve_index(check.scopes, name) ?? {
+        owners: sema_call_method_owners(check, name)
         if owners.len() > 0 {
-            diagnostics.push(sema_call_method_called_as_function(name, owners, span))
+            check.diagnostics.push(sema_call_method_called_as_function(name, owners, span))
             return None
         }
-        diagnostics.push(sema_call_unknown_function_in(name, span, scopes, sema_module_no_prelude(environment, program)))
+        check.diagnostics.push(sema_call_unknown_function_in(name, span, check.scopes, sema_module_no_prelude(check.environment.*, check.program.*)))
         return None
     }
-    symbol: sema_scope_binding_symbol(environment, scopes, nearest)
+    symbol: sema_scope_binding_symbol(check.environment.*, check.scopes, nearest)
     if symbol.kind != SymbolKind.Function {
         ty: symbol.ty ?? {
             // A binding whose type was already lost to a reported error is
             // poisoned: calling it adds no second report.
-            if diagnostics.len() == 0 {
-                diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
+            if check.diagnostics.len() == 0 {
+                check.diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
             }
             return None
         }
         // A distinct type is not a conversion function: its destination-owned
         // conversion names the base, `UserID.from_int(value)`.
-        if symbol.kind == SymbolKind.Type && sema_scope_declaration_distinct(environment, program, symbol.id) == .Val(definition) {
-            diagnostics.push(sema_error("E0753", span, "`{name}(value)` is not a distinct conversion", "explicit conversions are owned by the destination type and name their source", "write `{name}.{sema_call_distinct_base_method(definition.base)}(value)`"))
+        if symbol.kind == SymbolKind.Type && sema_scope_declaration_distinct(check, symbol.id) == .Val(definition) {
+            check.diagnostics.push(sema_error("E0753", span, "`{name}(value)` is not a distinct conversion", "explicit conversions are owned by the destination type and name their source", "write `{name}.{sema_call_distinct_base_method(definition.base)}(value)`"))
             return None
         }
-        diagnostics.push(sema_call_not_callable_value(name, ty, program, span))
+        check.diagnostics.push(sema_call_not_callable_value(name, ty, check.program.*, span))
         return None
     }
     signature: symbol.ty ?? {
-        diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
+        check.diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
         return None
     }
     if !sema_call_type_is_function(signature) {
-        diagnostics.push(sema_call_not_callable(name, signature, span))
+        check.diagnostics.push(sema_call_not_callable(name, signature, span))
         return None
     }
 
     // Only the callee's type parameters: its declaration is never copied.
-    generic_params_source: sema_scope_declaration_function_type_params(environment, program, symbol.id)
+    generic_params_source: sema_scope_declaration_function_type_params(check, symbol.id)
     generic_params: sema_inference_type_params(generic_params_source)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
-            diagnostics.push(sema_call_not_generic_diagnostic(name, span))
+            check.diagnostics.push(sema_call_not_generic_diagnostic(name, span))
             return None
         }
         return SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
@@ -327,16 +327,16 @@ sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaS
         return SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
     if type_args.len() != generic_params.len() {
-        diagnostics.push(sema_call_direct_type_arg_count_diagnostic(name, generic_params.len(), type_args.len(), span))
+        check.diagnostics.push(sema_call_direct_type_arg_count_diagnostic(name, generic_params.len(), type_args.len(), span))
         return None
     }
-    if !sema_call_never_type_args_valid(signature, generic_params, type_args, span, diagnostics) {
+    if !sema_call_never_type_args_valid(signature, generic_params, type_args, span, check.diagnostics) {
         return None
     }
-    caller_module: scopes.module_identity
-    caller_package: program.registration_graph.package_identity
-    context := sema_inference_context(caller_module, caller_package, generic_params, environment.generic_params, None)
-    result: sema_infer_validate_explicit(program.registration_graph, context, type_args, span, diagnostics) ?? return None
+    caller_module: check.scopes.module_identity
+    caller_package: check.program.registration_graph.package_identity
+    context := sema_inference_context(caller_module, caller_package, generic_params, check.environment.generic_params, None)
+    result: sema_infer_validate_explicit(check.program.registration_graph, context, type_args, span, check.diagnostics) ?? return None
     specialized: sema_inference_substitute_type_bindings(signature, result.substitutions)
     SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
@@ -345,12 +345,12 @@ sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaS
 // parameters unbound, and its arguments are still checked against the declared
 // parameter types. The declared signature when `type_args` is that mismatch,
 // else None.
-sema_call_direct_type_arg_mismatch_signature: fn(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? {
+sema_call_direct_type_arg_mismatch_signature: fn(name: String, type_args: [Type], check: SemaBodyCheck) -> Type? {
     if type_args.len() == 0 -> return None
-    nearest: sema_scope_resolve_index(scopes, name) ?? return None
-    symbol: sema_scope_binding_symbol(environment, scopes, nearest)
+    nearest: sema_scope_resolve_index(check.scopes, name) ?? return None
+    symbol: sema_scope_binding_symbol(check.environment.*, check.scopes, nearest)
     if symbol.kind != SymbolKind.Function -> return None
-    generic_params: sema_inference_type_params(sema_scope_declaration_function_type_params(environment, program, symbol.id))
+    generic_params: sema_inference_type_params(sema_scope_declaration_function_type_params(check, symbol.id))
     if generic_params.len() == 0 || generic_params.len() == type_args.len() -> return None
     symbol.ty
 }
@@ -379,7 +379,7 @@ sema_call_direct_target_with_inference: fn(target: SemaCallDirectTarget, result:
     Val(specialized)
 }
 
-sema_call_infer_direct_target_from_types: fn(target: SemaCallDirectTarget, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallDirectTarget? {
+sema_call_infer_direct_target_from_types: fn(target: SemaCallDirectTarget, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallDirectTarget? {
     if target.generic_params.len() == 0 -> return Val(target)
     return_type: sema_call_signature_return(target.signature) ?? return None
     caller_module: scopes.module_identity
@@ -470,30 +470,30 @@ sema_call_method_shape_matches: fn(candidate: SemaCallMethodCandidate, method: S
     sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, probe, span, probe_diagnostics) != None
 }
 
-sema_call_resolve_method: fn(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaCallMethodCandidate? {
+sema_call_resolve_method: fn(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], check: ^SemaBodyCheck) -> SemaCallMethodCandidate? {
     receiver_matches := [SemaCallMethodCandidate]{}
     loop candidate in candidates {
         if candidate.method.name == method {
             if sema_call_method_receiver_candidate_type(candidate) == .Val(expected) {
-                compatible: sema_call_type_assignable(expected, receiver_type, environment, program) ?? false
+                compatible: sema_call_type_assignable(expected, receiver_type, check) ?? false
                 if compatible -> receiver_matches.push(candidate.copy())
             }
         }
     }
     if receiver_matches.len() == 0 {
-        diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, environment, program))
+        check.diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, check.environment.*, check.program.*))
         return None
     }
     shape_matches: loop candidate in receiver_matches if sema_call_method_shape_matches(candidate, method, args, span) -> candidate
     if {
         shape_matches.len() == 1 -> Val(shape_matches[0])
         shape_matches.len() > 1 -> {
-            diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "overload resolution requires one candidate after receiver and argument shape filtering", "add an explicit type argument or make the argument labels/types select one method"))
+            check.diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "overload resolution requires one candidate after receiver and argument shape filtering", "add an explicit type argument or make the argument labels/types select one method"))
             None
         }
         receiver_matches.len() == 1 -> Val(receiver_matches[0])
         else -> {
-            diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "the receiver candidates disagree about this call's argument shape", "add labels or type arguments that select one method"))
+            check.diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "the receiver candidates disagree about this call's argument shape", "add labels or type arguments that select one method"))
             None
         }
     }

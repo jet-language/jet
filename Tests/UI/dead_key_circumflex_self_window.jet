@@ -1,0 +1,17 @@
+// E0107 on a dead-key layout: the write window `^self.counts[0]` arrives as
+// a read of the unknown name `ŝelf`. The fix names the dead key and writes
+// `^self` back; the window's assignment adds no second report.
+Counter: struct {
+    counts: [Int],
+
+    reset: fn(^self) {
+        edit: ŝelf.counts[0]
+        edit = 0
+    }
+}
+
+run: fn() {
+    counter := Counter{counts: [1, 2]}
+    counter.reset()
+    print(counter.counts[0])
+}

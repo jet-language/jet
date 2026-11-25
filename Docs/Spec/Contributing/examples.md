@@ -288,8 +288,8 @@ non-convertible user-error witnesses separate from crypto boundary misuse
 
 For same-code snapshot refreshes, compare the diagnostic text with its current
 Jet emitter or active registry row, and source excerpts with the fixture.
-Do not bless different codes, lost diagnostics, or a Rust-host/native-tier
-discrepancy merely because one compiler printed it.
+Do not bless different codes, lost diagnostics, or a discrepancy between tiers
+merely because one compiler printed it.
 
 ## Collect-all closeout
 

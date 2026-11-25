@@ -77,7 +77,7 @@ EnvReadyStats: struct {
 // Seal every provider record against the final project lock after all
 // package publications; only this post-pass writes the digest that later
 // online and offline replays use.
-cli_seal_project_producer_records: fn(verification: ^StoreVerification, roots: HangarRoots, project_root: String, ready_stats: EnvReadyStats) -[FS, Env, Time]> CLIError! {
+cli_seal_project_producer_records: fn(verification: StoreVerification, roots: HangarRoots, project_root: String, ready_stats: EnvReadyStats) -[FS, Env, Time]> CLIError! {
     lock_digest: provider_project_lock_digest(Val(project_root)) ?? return Err(CLIError.Other(err.message()))
     if lock_digest == "" {
         return
@@ -262,18 +262,18 @@ cli_native_environment_projection: fn(project_root: String, realized: [{name: St
 
 // Realize every ref in `plan` and compose the shell env. A realization
 // failure is reported here and travels as `Reported(code)`.
-cli_compose_env: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
+cli_compose_env: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
     cli_compose_env_scoped(verification, theme, roots, flags, plan, RealizeScope.Project, false)
 }
 
 // A user tool installs into the user profile, so it is never reconciled
 // against the project the shell happens to stand in.
-cli_compose_env_scoped: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
+cli_compose_env_scoped: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
     composed: cli_compose_env_scoped_with_stats(verification, theme, roots, flags, plan, scope, confirm_download)
     Ok(composed.env.move())
 }
 
-cli_compose_env_scoped_with_stats: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {env: ShellEnv, stats: EnvReadyStats} CLIError! {
+cli_compose_env_scoped_with_stats: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {env: ShellEnv, stats: EnvReadyStats} CLIError! {
     cli_compose_env_scoped_with_warm(verification, theme, roots, flags, plan, scope, confirm_download, None, true)
 }
 
@@ -294,7 +294,7 @@ cli_warm_complete: fn(warm: [String:[VerifiedRealization]], plan: RunPlan) -> Bo
 // The composer with optional warm realizations from a verified environment
 // receipt. Cold or partial project composition still collects selections
 // for the receipt and producer sealing.
-cli_compose_env_scoped_with_warm: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: ^^[VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {env: ShellEnv, stats: EnvReadyStats} CLIError! {
+cli_compose_env_scoped_with_warm: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: ^^[VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {env: ShellEnv, stats: EnvReadyStats} CLIError! {
     warm_given: warm != None
     warm_pool := if warm.move() == {
         .Val(list) -> cli_index_warm_realizations(list)
@@ -582,7 +582,7 @@ CLI_PROVIDER_METADATA_FILES: #run { [ProviderMetadataFile]{
 // A piped `jetpack env`/`use` must not start realization without an explicit
 // `-y`. Existing Hangar entries pass so fully cached environments stay
 // silent; every missing package is refused before acquisition.
-cli_reject_unprompted_acquisition: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
+cli_reject_unprompted_acquisition: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
     specs := [RefSpec]{}
     loop spec in plan.refs {
         if provider_requires_acquisition(spec, plan.table, flags.offline, roots.hangar_dir()) {

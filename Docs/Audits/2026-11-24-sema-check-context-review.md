@@ -248,3 +248,109 @@ groups:
 
 The switch leaves the `jet check` reports for JetSema, JetDriver and JetCLI
 unchanged.
+
+## 6. Helpers fed from the record
+
+Once the record carried all seven parts, 1,086 JetSema functions still took
+two or more parts as separate parameters. Most of them were called only
+with the record's own parts (`check.scopes`, `check.program.*`), either
+directly or through a caller that took those parts the same way. A census
+of the call graph, iterated to a fixed point, found 775 such functions.
+Each one now takes the record in the slot of its first part:
+`check: ^SemaBodyCheck` when it writes a part, and `check: SemaBodyCheck`
+when it only reads them. Each of the 2,220 calls passes `check` in place of
+its part arguments.
+
+The census leaves some functions out, and they keep their parameters:
+
+- functions whose bodies already name `check`;
+- functions used as values;
+- functions with names defined more than once;
+- functions where a call passes a part of another check, such as a probe's
+  scopes, a default's owner scope or a lambda's state;
+- functions called from outside a body check, such as registration or the
+  graph passes;
+- functions where a call writes through the record while another argument
+  of the same call reads it.
+
+| Measure (JetSema) | Before | After |
+|---|---|---|
+| Functions taking the record | 568 | 1,343 |
+| Functions taking two or more parts without it | 1,086 | 432 |
+| Part parameters | 3,867 | 1,970 |
+| Parameters, all functions | 29,927 | 28,440 |
+| Lines | 215,990 | 215,822 |
+| Bytes | 13,065,120 | 12,956,387 |
+| `.copy()` calls | 2,118 | 2,118 |
+
+`jet fmt` reshapes the 223 statements whose length the change pushed over or
+under the line limit. `jet check` on JetSema reports nothing new.
+
+## 7. Typed lookup keys
+
+The last part of criterion E replaces lookup keys built by joining texts
+(`"{owner}:{name}"`, `"{module}|{owner}|{name}|{index}|{tag}"`) with keys
+built from their typed parts. A joined key costs a format and a hash on every
+probe, and two different part lists can spell the same text when a part
+holds the separator. Four conventions replace them:
+
+- **Name pair slots.** JetFoundation's `name_pair_slot` and
+  `name_pair_find_slot` pack the ids of two interned names into one Int.
+  The find form never interns, so a probe for a pair that was never
+  recorded costs two table lookups.
+- **Key rows.** `SemaKeyRows` (`Sema/KeyRows.jet`) gives a composite key of
+  ids and spans one integer row, for report and marker dedupes and the index
+  ordinals.
+- **Row slots.** A census or registration row and a position within it,
+  packed as `(row << 32) | position`, such as a nominal's module row and
+  row, or a function's census row and parameter index.
+- **Struct keys.** A struct of the parts as the map or list key, where the
+  parts include texts that are not interned, such as a taint crossing's
+  module, owner, callee, parameter and tag.
+
+| Area | Joined key | Typed key |
+|---|---|---|
+| Name-pair lookups (Sema, IR, the cost query) | 43 pair texts | name pair slots |
+| Comptime sources and staged functions | 30 `module` + `key` texts | (module, key) pairs |
+| Effect trait-implementation index | 14 composite texts | typed slots |
+| Report, marker and type-visit dedupes | 20 texts in ten files | `SemaKeyRows` |
+| Further dedupes, index ordinals | 4 texts | `SemaKeyRows` |
+| Export chain, error-alias chain, route table | 3 texts | `SemaKeyRows` |
+| Codec demand | `(trait, type)` texts split on `\|` | name pair slots |
+| Body comptime sites | function key + span texts | owner id and two spans |
+| Liveness field and case uses | `"{owner id}:{field}"`, `"{type}.{case}"` | name pair slots |
+| Call-rule table bindings | `"{owner}:{binding}"` | typed pairs |
+| Keep-going lowering skips | per-function lookup texts | (position, name) pairs |
+| Effect trait implementers | a joined text split again | typed pairs |
+| Comparability visits | `"{module id}.{name}"` | the checked nominal key |
+| Plugin descriptor steps | joined step texts | nominal row slot + shape |
+| Ownership pattern sources | `"{name}@{start}-{end}"` | `(name, start, end)` struct |
+| Fixed-length write parameters | `"{function}#{param}"` | census row slots |
+| Taint crossings | `"{module}\|{owner}\|{name}\|{index}\|{tag}"` | `SemaTaintCrossCall` |
+| Memory-plan rows | `"{start}:{end}:{owner}:{name}:{module}"` | `SemaFunctionMemoryKey` |
+| Alias rewrites | `"{start}:{end}:{name}"` | `SemaAliasKey` |
+| Declared trait impls, derive index | `"{len}:{type}:{trait}"` | name pair slots |
+
+Each change maps every old key to exactly one new key and back, so every
+lookup finds the entry it found before. Each one leaves the `jet check`
+reports for JetSema (and JetDriver where it is touched) unchanged, apart
+from lints on deleted key locals.
+
+Some built texts stay texts, because the text is what they mean:
+
+- **Persisted or cross-run identities.** Symbol and declaration keys,
+  registration identity keys, checked impl keys, semantic-index keys, effect
+  node keys and comptime destination keys are written to caches, indexes,
+  derivation records or generated output. Their spelling is the contract,
+  so a typed key would still have to render the same text.
+- **Display texts.** Core usage notes, taint destinations, name display and
+  public API paths are shown to the user.
+- **Canonical spellings.** Fold keys encode a value's structure, layout
+  element keys and the comptime callee names (`"{alias}.{name}"`) match the
+  names a program writes, and a call-rule table's name and block path are
+  texts handed to the rule program as part of the call it hears.
+- **Type-spelled walk keys.** The copy walk, the ownership crossing walk and
+  the fork copy key an instantiation by `type_name` of its arguments. A
+  typed key would be the `Type` itself, whose equality does not match its
+  spelling across modules, so this change would alter which walks are
+  shared.

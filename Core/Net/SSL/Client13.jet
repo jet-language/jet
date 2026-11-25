@@ -109,7 +109,7 @@ ssl_tls13_reset_key_share: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
 
 // The first configured group we can share a key over: an ECDHE group of
 // a curve we have, or an FFDHE one (ssl_tls13_get_default_group_id).
-ssl_tls13_get_default_group_id: fn(ssl: ^ssldefs.SSLContext) -> Int ssldefs.SSLError! {
+ssl_tls13_get_default_group_id: fn(ssl: ssldefs.SSLContext) -> Int ssldefs.SSLError! {
     loop g in ssltls.ssl_get_groups(ssl) {
         if ssltls.ssl_get_ecp_group_id_from_tls_id(g) != .Unknown && ssltls.ssl_tls13_named_group_is_ecdhe(g) {
             return Ok(g)

@@ -24,6 +24,9 @@ use {
         InlineForeign,
         InlineVersion,
         Item,
+        dead_key_circumflex_base,
+        dead_key_circumflex_fix,
+        dead_key_circumflex_why,
         KernelMarker,
         KernelMode,
         Marker,
@@ -924,7 +927,14 @@ parser_parse_param: fn(state: ^JetParserState, zone: ParamZone) -> Param {
         else -> {
             if parser_current_kind(state) == TOKEN_COLON -> parser_bump(state) else {
                 param_name: parser_text(state, name)
-                parser_add_error(state, name.span, "expected `:` after the parameter `{param_name}`", "every parameter except `self` needs a type after its name", "write `{param_name}: Type`")
+                why := "every parameter except `self` needs a type after its name"
+                fix := "write `{param_name}: Type`"
+                // `ŝelf` is `^self` typed on a dead-key layout.
+                if dead_key_circumflex_base(param_name) == .Val(base) && base == "self" {
+                    why = dead_key_circumflex_why(param_name, "^self")
+                    fix = dead_key_circumflex_fix("^self")
+                }
+                parser_add_error(state, name.span, "expected `:` after the parameter `{param_name}`", why, fix)
             }
             cap_kind: parser_current_kind(state)
             if parser_write_mark(cap_kind) || parser_take_mark(cap_kind) {
@@ -1223,7 +1233,7 @@ parser_marker_spells_c_guest_import: fn(marker: Marker) -> Bool Never! {
 }
 
 // A written `#Import(c)` that reaches the Import hook (parser_marker_hook).
-parser_marker_is_c_guest_import: fn(state: ^JetParserState, marker: Marker) -> Bool Never! {
+parser_marker_is_c_guest_import: fn(state: JetParserState, marker: Marker) -> Bool Never! {
     parser_marker_spells_c_guest_import(marker) && parser_marker_hook(state, marker) != None
 }
 
@@ -1242,7 +1252,7 @@ parser_marker_spells_service_import: fn(marker: Marker) -> Bool Never! {
 
 // `#FFI` and `#Import(c)` decide how a function's body is read (as foreign
 // source, or as the C symbol), so they are written above it.
-parser_marker_shapes_body: fn(state: ^JetParserState, marker: Marker) -> Bool Never! {
+parser_marker_shapes_body: fn(state: JetParserState, marker: Marker) -> Bool Never! {
     parser_marker_is_hook(state, marker, MarkerHook.FFI) || parser_marker_is_c_guest_import(state, marker)
 }
 
@@ -2543,7 +2553,7 @@ parser_parse_trait_impl_block: fn(state: ^JetParserState, above: [Marker]) -> Tr
 
 // `Commutative` among an impl's markers makes it commutative, as the
 // `#Commutative` written after the trait does.
-parser_operator_marker: fn(state: ^JetParserState, markers: [Marker]) -> OperatorMarker? Never! {
+parser_operator_marker: fn(state: JetParserState, markers: [Marker]) -> OperatorMarker? Never! {
     loop marker in markers {
         if !marker.negated && parser_marker_is_hook(state, marker, MarkerHook.Commutative) {
             return Val(OperatorMarker.Commutative)
@@ -2857,7 +2867,7 @@ parser_parse_function_type_alias: fn(state: ^JetParserState, modifiers: ParsedIt
     TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: [TypeParam]{}, target: target.ty, target_span: target.span, span: parser_cover(name.span, target.span)}
 }
 
-parser_apply_type_markers: fn(state: ^JetParserState, value: ^StructDef, markers: [Marker]) Never! {
+parser_apply_type_markers: fn(state: JetParserState, value: ^StructDef, markers: [Marker]) Never! {
     loop marker in markers {
         hook: parser_marker_hook(state, marker) ?? next
         if hook == .SingleUse {
@@ -3345,7 +3355,7 @@ parser_parse_impl: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) ->
 
 // The native OS an impl is gated to by `#Target(OS.Linux|MacOS|Windows)`
 // among its markers, spelled as sema reads it (`linux`, `macos`, `windows`).
-parser_impl_os_target: fn(state: ^JetParserState, markers: [Marker]) -> String? {
+parser_impl_os_target: fn(state: JetParserState, markers: [Marker]) -> String? {
     loop marker in markers {
         if !parser_marker_is_hook(state, marker, MarkerHook.Target) || marker.args.len() != 1 {
             next

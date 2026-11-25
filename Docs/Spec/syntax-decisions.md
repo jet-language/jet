@@ -8711,7 +8711,7 @@ every source-written double-underscore identifier is rejected. The namespace is
 reserved for compiler-generated binders, debugger and serializer metadata, and
 tools; user code has no escape spelling. The embedded first-party Core sources
 (`<corelib>/Core/**`) are vetted stdlib internals under the same trust boundary
-as I1, so they may call reserved Core adapters such as `core.crypto.__wipe`.
+as I1, so they may call reserved Core adapters such as `core.math.__numeric_stop`.
 The exception is decided by the embedded origin, not the path: a user file named
 `Core/...` still gets E0067.
 

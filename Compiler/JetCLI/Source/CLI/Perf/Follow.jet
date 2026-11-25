@@ -245,7 +245,7 @@ jet_cli_perf_attach_follow: fn(pid: Int, home: String, source: String, quiet: Bo
 
 // End a follow's hold: its lease, so the window closes once no other
 // attach holds it, and its link to the live file.
-jet_cli_perf_follow_leave: fn(follow: ^JetCLIPerfFollow, lease: String) -[FS]> {
+jet_cli_perf_follow_leave: fn(follow: JetCLIPerfFollow, lease: String) -[FS]> {
     follow_files.remove(lease).drop("a lease the program no longer sees ends this follow's hold")
     if follow.link != "" {
         follow_files.remove(follow.link).drop("the live file's pages go once its last name and reader do")

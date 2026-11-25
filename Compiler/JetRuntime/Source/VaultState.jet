@@ -1479,7 +1479,7 @@ vault_prepare_at_root: fn(root: I64, name: I64, key_type: I64, action: I64, targ
 // The 1:1 seed Instant slot keeps its position; only ordering/deadline semantics
 // are observable. Native stores ns in word0 and zero in the reserved word1.
 vault_instant_now: fn(out: I64) {
-    rt_text_store(out, jet_time_raw_host_monotonic_ns())
+    rt_text_store(out, time_raw_host_monotonic_i64())
     rt_text_store(wrapping(out + I64{8}), I64{0})
 }
 
@@ -1574,7 +1574,7 @@ vault_preview_text: fn(plan: I64, key_type: I64, reason: I64) -> I64 {
 // and authority identity have succeeded. The borrowed plan/reason stay live.
 vault_authorize_write: fn(plan: I64, key_type: I64, reason: I64, out: I64) -> I64 {
     if !vault_validate_text(reason, true) -> return vault_error_new(I64{0}, I64{0}, I64{0})
-    now: jet_time_raw_host_monotonic_ns()
+    now: time_raw_host_monotonic_i64()
     issued: rt_text_word(wrapping(plan + VAULT_PLAN_ISSUED))
     if (now > rt_text_word(wrapping(plan + VAULT_PLAN_DEADLINE)) || (now > issued && now - issued > I64{300000000000})) {
         return vault_error_new(I64{6}, I64{0}, I64{0})
@@ -1637,7 +1637,7 @@ vault_reason_hash: fn(status: I64, reason: I64, out: I64, scratch: I64) -> I64 {
 // Seed2550-2719. The final 208 bytes of scratch hold owners/output slots;
 // the first8192 are exclusively crypto scratch and can be wiped by hashing.
 vault_commit_inner: fn(root: I64, plan: I64, write: I64, expected: I64, key_type: I64, scratch: I64) -> I64 {
-    now: jet_time_raw_host_monotonic_ns()
+    now: time_raw_host_monotonic_i64()
     user: trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     session: trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     if (session < I64{0}) { return vault_error_new(I64{7}, I64{0}, I64{0}) }

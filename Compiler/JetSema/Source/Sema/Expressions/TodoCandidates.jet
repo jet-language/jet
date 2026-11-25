@@ -15,9 +15,9 @@ use jet_foundation.[
 
 SEMA_TODO_CANDIDATE_LIMIT: 8
 
-sema_todo_candidates: fn(expected: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [String] Never! {
+sema_todo_candidates: fn(expected: Type?, check: SemaBodyCheck) -> [String] Never! {
     goal: expected ?? return [String]{}
-    owner: sema_scope_function_owner_key(scopes)
+    owner: sema_scope_function_owner_key(check.scopes)
     // The bindings met so far, nearest first; a later binding of a name met
     // already is shadowed.
     met := [Int]{}
@@ -29,23 +29,23 @@ sema_todo_candidates: fn(expected: Type?, environment: SemaScopeEnvironment, sco
     // every body even where the body's frames do not chain up to it
     // (sema_scope_resolve_in_positions).
     frames := [Int]{}
-    frame := scopes.current
+    frame := check.scopes.current
     loop frame >= 0 {
         frames.push(frame)
-        frame = scopes.frames[frame].parent
+        frame = check.scopes.frames[frame].parent
     }
-    if scopes.frames.len() > 0 && !frames.contains(0) -> frames.push(0)
+    if check.scopes.frames.len() > 0 && !frames.contains(0) -> frames.push(0)
     loop visible in frames {
-        loop back in 0..<scopes.bindings.len() {
-            index: scopes.bindings.len() - 1 - back
-            binding: scopes.bindings[index]
+        loop back in 0..<check.scopes.bindings.len() {
+            index: check.scopes.bindings.len() - 1 - back
+            binding: check.scopes.bindings[index]
             if binding.frame != visible || binding.compiler_builtin -> next
             name: binding.symbol.name
-            if name == "" || name == "_" || name.starts_with("__") || name.starts_with("@") || sema_todo_candidates_met(scopes, met, name) {
+            if name == "" || name == "_" || name.starts_with("__") || name.starts_with("@") || sema_todo_candidates_met(check.scopes, met, name) {
                 next
             }
             met.push(index)
-            ty: sema_scope_binding_type(environment, scopes, index) ?? next
+            ty: sema_scope_binding_type(check.environment.*, check.scopes, index) ?? next
             if binding.symbol.kind == {
                 .Local -> {
                     if sema_type_assignable(goal, ty) -> locals.push(index)
@@ -54,12 +54,12 @@ sema_todo_candidates: fn(expected: Type?, environment: SemaScopeEnvironment, sco
                     if sema_type_assignable(goal, ty) -> params.insert(0, index)
                 }
                 .Function | .Import | .Foreign -> {
-                    if binding.key == owner || name == environment.function_name -> next
+                    if binding.key == owner || name == check.environment.function_name -> next
                     // A call's value is the function's result, or its success
                     // type when its failure travels the caller's failure path.
                     if ty == .Fn(arguments, ret, _, _, _, _) && ret == .Val(result) && (sema_type_assignable(goal, result) || sema_type_assignable(goal, sema_fn_return_success(result))) {
                         call: if arguments.len() == 0 -> "{name}()" else -> "{name}(…)"
-                        if binding.symbol.module_identity == scopes.module_identity {
+                        if binding.symbol.module_identity == check.scopes.module_identity {
                             own.push(call)
                         } else { imported.push(call) }
                     }
@@ -73,7 +73,7 @@ sema_todo_candidates: fn(expected: Type?, environment: SemaScopeEnvironment, sco
         if ranked.len() == SEMA_TODO_CANDIDATE_LIMIT -> return ranked
         // copy: the goal row keeps the name past the scope table it is read
         // from.
-        ranked.push(scopes.bindings[index].symbol.name.copy())
+        ranked.push(check.scopes.bindings[index].symbol.name.copy())
     }
     own.sort()
     imported.sort()

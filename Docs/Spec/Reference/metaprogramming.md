@@ -526,6 +526,20 @@ Jet has two related reflection paths:
 2. `T.reflect()` returns the aggregate `TypeInfo` record computed while
    compiling. It reads the same in a marker body, a `#run` value,
    `build: fn` and ordinary code; in the running program it is a constant.
+   In a generic body it is the record of the type each instance fills `T`
+   with, the record `X.reflect()` gives for that type: a program builds one
+   for each type its calls fill `T` with, and a generic function no call
+   reaches builds none. In a generic body, `TypeId{T}` is likewise the
+   TypeId of the type each instance fills `T` with, which every type has,
+   while `T.reflect()` over a type with no `TypeInfo` record (a `String`) is
+   E0302 at the read. Compile-time code in a generic body that reads
+   `T.reflect()` or `TypeId{T}`, a `#if` condition or a `name: #run value`,
+   runs once for each of those types, and each instance reads its own
+   answer. Such a `#if` checks both arms in the generic body, while each
+   instance builds only the arm it takes: a `T.reflect()` read that only the
+   other arm makes, written there or reached through a call made there,
+   builds no record and reports nothing for that instance. Such a
+   `name: #run value` is an ordinary local that holds the instance's answer.
    `reflect.of(value)` returns the runtime reflection floor for a value.
 
 Each struct field's `FieldInfo` carries its `type`, a TypeId (below), its
@@ -1086,14 +1100,11 @@ expression, callable selection, method name, method handle, authorized
 snapshot handle, runtime value, or integer. Its scope is one of evaluation
 site, lexical snapshot, authorized program, lexical package, lexical source,
 runtime value, or retained runtime type catalog. A result has a typed success
-value and, when applicable, a `MetadataError` record. These are the
-`MetadataRootInputType`, `MetadataRootScope`, and `MetadataRootResult` records
-in the AST contract.
+value and, when applicable, a `MetadataError` record.
 
-The shared Rust file is a schema boundary. Its records define public shapes for
-metadata identities, roots, results, and typed failures; parsing, checking,
-evaluation, and runtime retention use their own compiler seams. The feature
-examples show exercised forms, and the syntax ledger names ratified roots.
+Parsing, checking, evaluation, and runtime retention use their own compiler
+seams. The feature examples show exercised forms, and the syntax ledger names
+ratified roots.
 
 Every row of the contract registry (`MetadataContract.jet` in JetFoundation's
 registries) names the witness test that proves it, and every Jai

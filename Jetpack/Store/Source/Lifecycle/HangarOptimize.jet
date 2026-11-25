@@ -101,7 +101,7 @@ store_optimize_object_dirs: fn(objects: String) -[FS]> [String] StoreError! {
     Ok(object_dirs)
 }
 
-store_optimize_hangar: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+store_optimize_hangar: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     report := store_optimize_package_tree_hardlinks(roots.hangar_dir())
     cas: store_optimize_objects_cas_pool(verification, roots)
     report.optimized_files += cas.optimized_files
@@ -145,7 +145,7 @@ store_optimize_package_tree_hardlinks: fn(hangar: String) -[FS, Env]> CleanRepor
 // links, which changes the inode and mtime tuples a seal records, so an object
 // whose seal held before the swap is resealed after it; an unsealed object
 // stays unsealed.
-store_optimize_objects_cas_pool: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+store_optimize_objects_cas_pool: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     hangar: roots.hangar_dir()
     objects: files.join(hangar, STORE_OBJECTS_DIR)
     store_ensure_real_directory(hangar, "Hangar root")
@@ -179,7 +179,7 @@ store_optimize_same_file: fn(left: String, right: String) -[FS, Env]> Bool Never
 }
 
 // The CAS-pool optimizer under the Hangar lock (also run by `clean`).
-store_optimize_cas_pool: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+store_optimize_cas_pool: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_optimize_objects_cas_pool(verification, roots)
 }
@@ -218,7 +218,7 @@ store_hardlink_replace: fn(first: String, file: String) -[FS, Env]> StoreError! 
 
 // Re-hash a Hangar object under the Hangar lock with the CAS-peer hardlink law
 // (Hangar-internal peers are accepted).
-store_verify_hangar_object: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
+store_verify_hangar_object: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
     _hangar_lock: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_verify_hangar_object_unlocked(verification, roots, entry)
 }
@@ -226,7 +226,7 @@ store_verify_hangar_object: fn(verification: ^StoreVerification, roots: HangarRo
 // The closure graph must agree with the record's primary, action key,
 // references and output map; every named output must re-hash to its recorded
 // digest; every reference must exist.
-store_verify_hangar_object_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
+store_verify_hangar_object_unlocked: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
     hangar: roots.hangar_dir()
     allow: entry.platform_artifact_kind != ""
     graph: store_lifecycle_closure_graph_unlocked(verification, roots) ?? return Err(IngestError.Invalid(err.message()))

@@ -106,7 +106,7 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
 }
 
 // The closure record in the Hangar graph names every transitive runtime object.
-store_nix_store_projection_for_entry: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
+store_nix_store_projection_for_entry: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
     if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) {
@@ -280,7 +280,7 @@ store_reuse_hangar_projection_object: fn(roots: HangarRoots, digest: String, log
     Ok(object)
 }
 
-store_reuse_sealed_hangar_projection_object: fn(verification: ^StoreVerification, roots: HangarRoots, digest: String, logical: String) -> String StoreError! {
+store_reuse_sealed_hangar_projection_object: fn(verification: StoreVerification, roots: HangarRoots, digest: String, logical: String) -> String StoreError! {
     object: store_reuse_hangar_projection_object(roots, digest, logical)
     if sys.name() == "linux" {
         sealed: store_check_seal(verification, object, roots.hangar_dir())
@@ -291,7 +291,7 @@ store_reuse_sealed_hangar_projection_object: fn(verification: ^StoreVerification
     Ok(object)
 }
 
-store_reuse_validate_direct_projection_seals: fn(verification: ^StoreVerification, roots: HangarRoots, projections: [NixStoreProjection]) StoreError! {
+store_reuse_validate_direct_projection_seals: fn(verification: StoreVerification, roots: HangarRoots, projections: [NixStoreProjection]) StoreError! {
     if sys.name() != "linux" {
         return
     }

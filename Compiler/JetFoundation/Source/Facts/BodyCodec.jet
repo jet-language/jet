@@ -4784,34 +4784,6 @@ body_codec_get_bodyplace: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyPlace Neve
     }
 }
 
-body_codec_put_list_corecallresourceaccess: fn(out: ^BodyCodecOut, values: [CoreCallResourceAccess]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_corecallresourceaccess(out, value)
-}
-
-body_codec_get_list_corecallresourceaccess: fn(bytes: [U8], input: ^BodyCodecIn) -> [CoreCallResourceAccess] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    values := [CoreCallResourceAccess]{}
-    loop _ in 0..<count -> values.push(body_codec_get_corecallresourceaccess(bytes, input))
-    values
-}
-
-body_codec_put_opt_corecallcompletion: fn(out: ^BodyCodecOut, value: CoreCallCompletion?) Never! {
-    if value == .Val(inner) {
-        body_codec_put_bool(out, true)
-        body_codec_put_corecallcompletion(out, inner)
-        return
-    }
-    body_codec_put_bool(out, false)
-}
-
-body_codec_get_opt_corecallcompletion: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallCompletion? Never! {
-    if body_codec_get_bool(bytes, input) {
-        return Val(body_codec_get_corecallcompletion(bytes, input))
-    }
-    None
-}
-
 body_codec_put_opt_coremarkerapplication: fn(out: ^BodyCodecOut, value: CoreMarkerApplication?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
@@ -4849,8 +4821,6 @@ body_codec_put_corecallrecord: fn(out: ^BodyCodecOut, value: CoreCallRecord) Nev
     body_codec_put_string(out, value.member)
     body_codec_put_list_string(out, value.receiver_types)
     body_codec_put_corecallsignature(out, value.signature)
-    body_codec_put_list_corecallresourceaccess(out, value.frame_accesses)
-    body_codec_put_opt_corecallcompletion(out, value.frame_completion)
     body_codec_put_corecallfallibility(out, value.fallibility)
     body_codec_put_list_string(out, value.effects)
     body_codec_put_corecapabilitycontract(out, value.capability)
@@ -4860,8 +4830,6 @@ body_codec_put_corecallrecord: fn(out: ^BodyCodecOut, value: CoreCallRecord) Nev
     body_codec_put_opt_string(out, value.source_role)
     body_codec_put_corecallcoverage(out, value.coverage)
     body_codec_put_bool(out, value.aot_direct)
-    body_codec_put_bool(out, value.native_int_result)
-    body_codec_put_list_string(out, value.ui_capabilities)
     body_codec_put_opt_coremarkerapplication(out, value.marker)
     body_codec_put_opt_authoritydecision(out, value.authority)
 }
@@ -4871,22 +4839,18 @@ body_codec_get_corecallrecord: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallR
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_list_string(bytes, input)
     f3: body_codec_get_corecallsignature(bytes, input)
-    f4: body_codec_get_list_corecallresourceaccess(bytes, input)
-    f5: body_codec_get_opt_corecallcompletion(bytes, input)
-    f6: body_codec_get_corecallfallibility(bytes, input)
-    f7: body_codec_get_list_string(bytes, input)
-    f8: body_codec_get_corecapabilitycontract(bytes, input)
-    f9: body_codec_get_corecallpureroute(bytes, input)
-    f10: body_codec_get_corecallsymbol(bytes, input)
-    f11: body_codec_get_opt_string(bytes, input)
-    f12: body_codec_get_opt_string(bytes, input)
-    f13: body_codec_get_corecallcoverage(bytes, input)
-    f14: body_codec_get_bool(bytes, input)
-    f15: body_codec_get_bool(bytes, input)
-    f16: body_codec_get_list_string(bytes, input)
-    f17: body_codec_get_opt_coremarkerapplication(bytes, input)
-    f18: body_codec_get_opt_authoritydecision(bytes, input)
-    CoreCallRecord{module_name: f0, member: f1, receiver_types: f2, signature: f3, frame_accesses: f4, frame_completion: f5, fallibility: f6, effects: f7, capability: f8, pure_route: f9, symbol: f10, source_target: f11, source_role: f12, coverage: f13, aot_direct: f14, native_int_result: f15, ui_capabilities: f16, marker: f17, authority: f18}
+    f4: body_codec_get_corecallfallibility(bytes, input)
+    f5: body_codec_get_list_string(bytes, input)
+    f6: body_codec_get_corecapabilitycontract(bytes, input)
+    f7: body_codec_get_corecallpureroute(bytes, input)
+    f8: body_codec_get_corecallsymbol(bytes, input)
+    f9: body_codec_get_opt_string(bytes, input)
+    f10: body_codec_get_opt_string(bytes, input)
+    f11: body_codec_get_corecallcoverage(bytes, input)
+    f12: body_codec_get_bool(bytes, input)
+    f13: body_codec_get_opt_coremarkerapplication(bytes, input)
+    f14: body_codec_get_opt_authoritydecision(bytes, input)
+    CoreCallRecord{module_name: f0, member: f1, receiver_types: f2, signature: f3, fallibility: f4, effects: f5, capability: f6, pure_route: f7, symbol: f8, source_target: f9, source_role: f10, coverage: f11, aot_direct: f12, marker: f13, authority: f14}
 }
 
 body_codec_put_corecallsignature: fn(out: ^BodyCodecOut, value: CoreCallSignature) Never! {
@@ -4900,47 +4864,6 @@ body_codec_get_corecallsignature: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCa
     f1: body_codec_get_int(bytes, input)
     f2: body_codec_get_list_bool(bytes, input)
     CoreCallSignature{arity: f0, max_arity: f1, borrow_mask: f2}
-}
-
-body_codec_put_corecallresourceaccess: fn(out: ^BodyCodecOut, value: CoreCallResourceAccess) Never! {
-    body_codec_put_int(out, value.argument)
-    body_codec_put_accessconvention(out, value.mode)
-}
-
-body_codec_get_corecallresourceaccess: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallResourceAccess Never! {
-    f0: body_codec_get_int(bytes, input)
-    f1: body_codec_get_accessconvention(bytes, input)
-    CoreCallResourceAccess{argument: f0, mode: f1}
-}
-
-body_codec_put_corecallcompletion: fn(out: ^BodyCodecOut, value: CoreCallCompletion) Never! {
-    body_codec_put_corecallcompletionkind(out, value.kind)
-    body_codec_put_opt_string(out, value.token)
-    body_codec_put_string(out, value.provider)
-}
-
-body_codec_get_corecallcompletion: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallCompletion Never! {
-    f0: body_codec_get_corecallcompletionkind(bytes, input)
-    f1: body_codec_get_opt_string(bytes, input)
-    f2: body_codec_get_string(bytes, input)
-    CoreCallCompletion{kind: f0, token: f1, provider: f2}
-}
-
-body_codec_put_corecallcompletionkind: fn(out: ^BodyCodecOut, value: CoreCallCompletionKind) Never! {
-    if value == {
-        .Synchronous -> { body_codec_put_tag(out, 0) }
-        .Pending -> { body_codec_put_tag(out, 1) }
-        .Event -> body_codec_put_tag(out, 2)
-    }
-}
-
-body_codec_get_corecallcompletionkind: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallCompletionKind Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
-    if position == {
-        1 -> CoreCallCompletionKind.Pending
-        2 -> CoreCallCompletionKind.Event
-        else -> CoreCallCompletionKind.Synchronous
-    }
 }
 
 body_codec_put_corecallfallibility: fn(out: ^BodyCodecOut, value: CoreCallFallibility) Never! {
@@ -4993,32 +4916,30 @@ body_codec_put_corecallpureroute: fn(out: ^BodyCodecOut, value: CoreCallPureRout
         .NoPureRoute -> { body_codec_put_tag(out, 0) }
         .MIME -> { body_codec_put_tag(out, 1) }
         .EncodingXML -> { body_codec_put_tag(out, 2) }
-        .Math -> { body_codec_put_tag(out, 3) }
-        .SketchHLL -> { body_codec_put_tag(out, 4) }
-        .SketchTDigest -> { body_codec_put_tag(out, 5) }
-        .SketchCMS -> { body_codec_put_tag(out, 6) }
-        .SketchReservoir -> { body_codec_put_tag(out, 7) }
-        .UI -> { body_codec_put_tag(out, 8) }
-        .IO -> { body_codec_put_tag(out, 9) }
-        .Net -> { body_codec_put_tag(out, 10) }
-        .Crypto -> body_codec_put_tag(out, 11)
+        .SketchHLL -> { body_codec_put_tag(out, 3) }
+        .SketchTDigest -> { body_codec_put_tag(out, 4) }
+        .SketchCMS -> { body_codec_put_tag(out, 5) }
+        .SketchReservoir -> { body_codec_put_tag(out, 6) }
+        .UI -> { body_codec_put_tag(out, 7) }
+        .IO -> { body_codec_put_tag(out, 8) }
+        .Net -> { body_codec_put_tag(out, 9) }
+        .Crypto -> body_codec_put_tag(out, 10)
     }
 }
 
 body_codec_get_corecallpureroute: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallPureRoute Never! {
-    position: body_codec_get_tag(bytes, input, 12, 0)
+    position: body_codec_get_tag(bytes, input, 11, 0)
     if position == {
         1 -> CoreCallPureRoute.MIME
         2 -> CoreCallPureRoute.EncodingXML
-        3 -> CoreCallPureRoute.Math
-        4 -> CoreCallPureRoute.SketchHLL
-        5 -> CoreCallPureRoute.SketchTDigest
-        6 -> CoreCallPureRoute.SketchCMS
-        7 -> CoreCallPureRoute.SketchReservoir
-        8 -> CoreCallPureRoute.UI
-        9 -> CoreCallPureRoute.IO
-        10 -> CoreCallPureRoute.Net
-        11 -> CoreCallPureRoute.Crypto
+        3 -> CoreCallPureRoute.SketchHLL
+        4 -> CoreCallPureRoute.SketchTDigest
+        5 -> CoreCallPureRoute.SketchCMS
+        6 -> CoreCallPureRoute.SketchReservoir
+        7 -> CoreCallPureRoute.UI
+        8 -> CoreCallPureRoute.IO
+        9 -> CoreCallPureRoute.Net
+        10 -> CoreCallPureRoute.Crypto
         else -> CoreCallPureRoute.NoPureRoute
     }
 }
@@ -6836,173 +6757,171 @@ body_codec_put_bodyhandleop: fn(out: ^BodyCodecOut, value: BodyHandleOp) Never! 
         .GameAssetsSound -> { body_codec_put_tag(out, 17) }
         .GameInputBind -> { body_codec_put_tag(out, 18) }
         .GameInputPressed -> { body_codec_put_tag(out, 19) }
-        .TestSuiteRun -> { body_codec_put_tag(out, 20) }
-        .TestSetting -> { body_codec_put_tag(out, 21) }
-        .DurationNsValue -> { body_codec_put_tag(out, 22) }
-        .DurationScale -> { body_codec_put_tag(out, 23) }
-        .DurationDivide -> { body_codec_put_tag(out, 24) }
-        .AllocAlloc -> { body_codec_put_tag(out, 25) }
-        .AllocTryAlloc -> { body_codec_put_tag(out, 26) }
-        .AllocReset -> { body_codec_put_tag(out, 27) }
+        .DurationNsValue -> { body_codec_put_tag(out, 20) }
+        .DurationScale -> { body_codec_put_tag(out, 21) }
+        .DurationDivide -> { body_codec_put_tag(out, 22) }
+        .AllocAlloc -> { body_codec_put_tag(out, 23) }
+        .AllocTryAlloc -> { body_codec_put_tag(out, 24) }
+        .AllocReset -> { body_codec_put_tag(out, 25) }
         .PreciseMethod(p0, p1) -> {
-            body_codec_put_tag(out, 28)
+            body_codec_put_tag(out, 26)
             body_codec_put_string(out, p0)
             body_codec_put_string(out, p1)
         }
-        .TerminalSessionResize -> { body_codec_put_tag(out, 29) }
-        .ProcessStdinWrite -> { body_codec_put_tag(out, 30) }
-        .ProcessStdinWriteText -> { body_codec_put_tag(out, 31) }
-        .ProcessStdinClose -> { body_codec_put_tag(out, 32) }
-        .ProcessStdinWriteAll -> { body_codec_put_tag(out, 33) }
-        .ProcessStdoutRead -> { body_codec_put_tag(out, 34) }
-        .ProcessStderrRead -> { body_codec_put_tag(out, 35) }
+        .TerminalSessionResize -> { body_codec_put_tag(out, 27) }
+        .ProcessStdinWrite -> { body_codec_put_tag(out, 28) }
+        .ProcessStdinWriteText -> { body_codec_put_tag(out, 29) }
+        .ProcessStdinClose -> { body_codec_put_tag(out, 30) }
+        .ProcessStdinWriteAll -> { body_codec_put_tag(out, 31) }
+        .ProcessStdoutRead -> { body_codec_put_tag(out, 32) }
+        .ProcessStderrRead -> { body_codec_put_tag(out, 33) }
         .ReflectValueRead(p0) -> {
-            body_codec_put_tag(out, 36)
+            body_codec_put_tag(out, 34)
             body_codec_put_string(out, p0)
         }
-        .ReflectValueFields -> { body_codec_put_tag(out, 37) }
-        .ReflectFieldName -> { body_codec_put_tag(out, 38) }
-        .ReflectFieldValue -> { body_codec_put_tag(out, 39) }
-        .TaskJoin -> { body_codec_put_tag(out, 40) }
-        .TaskDetach -> { body_codec_put_tag(out, 41) }
-        .TaskPause -> { body_codec_put_tag(out, 42) }
-        .TaskResume -> { body_codec_put_tag(out, 43) }
-        .TaskCancel -> { body_codec_put_tag(out, 44) }
-        .ChannelReceive -> { body_codec_put_tag(out, 45) }
-        .ChannelTryReceive -> { body_codec_put_tag(out, 46) }
-        .ChannelIsTimer -> { body_codec_put_tag(out, 47) }
-        .ChannelIsInterval -> { body_codec_put_tag(out, 48) }
-        .ChannelIsCanceled -> { body_codec_put_tag(out, 49) }
-        .ChannelIsReady -> { body_codec_put_tag(out, 50) }
-        .ChannelDelayMs -> { body_codec_put_tag(out, 51) }
-        .ChannelClose -> { body_codec_put_tag(out, 52) }
-        .SenderSend -> { body_codec_put_tag(out, 53) }
-        .ReactiveGet -> { body_codec_put_tag(out, 54) }
-        .ReactiveSet -> { body_codec_put_tag(out, 55) }
-        .ReactiveEffectMethod -> { body_codec_put_tag(out, 56) }
+        .ReflectValueFields -> { body_codec_put_tag(out, 35) }
+        .ReflectFieldName -> { body_codec_put_tag(out, 36) }
+        .ReflectFieldValue -> { body_codec_put_tag(out, 37) }
+        .TaskJoin -> { body_codec_put_tag(out, 38) }
+        .TaskDetach -> { body_codec_put_tag(out, 39) }
+        .TaskPause -> { body_codec_put_tag(out, 40) }
+        .TaskResume -> { body_codec_put_tag(out, 41) }
+        .TaskCancel -> { body_codec_put_tag(out, 42) }
+        .ChannelReceive -> { body_codec_put_tag(out, 43) }
+        .ChannelTryReceive -> { body_codec_put_tag(out, 44) }
+        .ChannelIsTimer -> { body_codec_put_tag(out, 45) }
+        .ChannelIsInterval -> { body_codec_put_tag(out, 46) }
+        .ChannelIsCanceled -> { body_codec_put_tag(out, 47) }
+        .ChannelIsReady -> { body_codec_put_tag(out, 48) }
+        .ChannelDelayMs -> { body_codec_put_tag(out, 49) }
+        .ChannelClose -> { body_codec_put_tag(out, 50) }
+        .SenderSend -> { body_codec_put_tag(out, 51) }
+        .ReactiveGet -> { body_codec_put_tag(out, 52) }
+        .ReactiveSet -> { body_codec_put_tag(out, 53) }
+        .ReactiveEffectMethod -> { body_codec_put_tag(out, 54) }
         .EventMethod(p0) -> {
-            body_codec_put_tag(out, 57)
+            body_codec_put_tag(out, 55)
             body_codec_put_string(out, p0)
         }
         .LayoutMethod(p0) -> {
-            body_codec_put_tag(out, 58)
+            body_codec_put_tag(out, 56)
             body_codec_put_string(out, p0)
         }
-        .DynField -> { body_codec_put_tag(out, 59) }
-        .DynAt -> { body_codec_put_tag(out, 60) }
-        .DynInt -> { body_codec_put_tag(out, 61) }
-        .DynText -> { body_codec_put_tag(out, 62) }
-        .DynBool -> { body_codec_put_tag(out, 63) }
-        .DynFloat -> { body_codec_put_tag(out, 64) }
-        .DynToText -> { body_codec_put_tag(out, 65) }
-        .DynEqualUnordered -> { body_codec_put_tag(out, 66) }
+        .DynField -> { body_codec_put_tag(out, 57) }
+        .DynAt -> { body_codec_put_tag(out, 58) }
+        .DynInt -> { body_codec_put_tag(out, 59) }
+        .DynText -> { body_codec_put_tag(out, 60) }
+        .DynBool -> { body_codec_put_tag(out, 61) }
+        .DynFloat -> { body_codec_put_tag(out, 62) }
+        .DynToText -> { body_codec_put_tag(out, 63) }
+        .DynEqualUnordered -> { body_codec_put_tag(out, 64) }
         .DynDecode(p0, p1) -> {
-            body_codec_put_tag(out, 67)
+            body_codec_put_tag(out, 65)
             body_codec_put_type(out, p0)
             body_codec_put_bool(out, p1)
         }
         .DynIndexKey(p0, p1) -> {
-            body_codec_put_tag(out, 68)
+            body_codec_put_tag(out, 66)
             body_codec_put_string(out, p0)
             body_codec_put_tpanicloc(out, p1)
         }
         .DynIndexAt(p0, p1) -> {
-            body_codec_put_tag(out, 69)
+            body_codec_put_tag(out, 67)
             body_codec_put_string(out, p0)
             body_codec_put_tpanicloc(out, p1)
         }
-        .DynGetKey -> { body_codec_put_tag(out, 70) }
-        .DynGetAt -> { body_codec_put_tag(out, 71) }
-        .DynHas -> { body_codec_put_tag(out, 72) }
-        .DynKeys -> { body_codec_put_tag(out, 73) }
+        .DynGetKey -> { body_codec_put_tag(out, 68) }
+        .DynGetAt -> { body_codec_put_tag(out, 69) }
+        .DynHas -> { body_codec_put_tag(out, 70) }
+        .DynKeys -> { body_codec_put_tag(out, 71) }
         .DynLen(p0, p1) -> {
-            body_codec_put_tag(out, 74)
+            body_codec_put_tag(out, 72)
             body_codec_put_string(out, p0)
             body_codec_put_tpanicloc(out, p1)
         }
-        .DynRemove -> { body_codec_put_tag(out, 75) }
+        .DynRemove -> { body_codec_put_tag(out, 73) }
         .DynBinary(p0, p1, p2) -> {
-            body_codec_put_tag(out, 76)
+            body_codec_put_tag(out, 74)
             body_codec_put_string(out, p0)
             body_codec_put_string(out, p1)
             body_codec_put_tpanicloc(out, p2)
         }
         .DynCompare(p0, p1, p2) -> {
-            body_codec_put_tag(out, 77)
+            body_codec_put_tag(out, 75)
             body_codec_put_string(out, p0)
             body_codec_put_string(out, p1)
             body_codec_put_tpanicloc(out, p2)
         }
         .DynSetPath(p0, p1, p2) -> {
-            body_codec_put_tag(out, 78)
+            body_codec_put_tag(out, 76)
             body_codec_put_list_bool(out, p0)
             body_codec_put_string(out, p1)
             body_codec_put_tpanicloc(out, p2)
         }
         .SerdeEncode(p0) -> {
-            body_codec_put_tag(out, 79)
+            body_codec_put_tag(out, 77)
             body_codec_put_bool(out, p0)
         }
-        .JSONField -> { body_codec_put_tag(out, 80) }
-        .JSONAt -> { body_codec_put_tag(out, 81) }
-        .JSONInt -> { body_codec_put_tag(out, 82) }
-        .JSONText -> { body_codec_put_tag(out, 83) }
-        .JSONBool -> { body_codec_put_tag(out, 84) }
-        .JSONFloat -> { body_codec_put_tag(out, 85) }
-        .JSONToText -> { body_codec_put_tag(out, 86) }
-        .JSONEqualUnordered -> { body_codec_put_tag(out, 87) }
+        .JSONField -> { body_codec_put_tag(out, 78) }
+        .JSONAt -> { body_codec_put_tag(out, 79) }
+        .JSONInt -> { body_codec_put_tag(out, 80) }
+        .JSONText -> { body_codec_put_tag(out, 81) }
+        .JSONBool -> { body_codec_put_tag(out, 82) }
+        .JSONFloat -> { body_codec_put_tag(out, 83) }
+        .JSONToText -> { body_codec_put_tag(out, 84) }
+        .JSONEqualUnordered -> { body_codec_put_tag(out, 85) }
         .PluginInvoke(p0, p1) -> {
-            body_codec_put_tag(out, 88)
+            body_codec_put_tag(out, 86)
             body_codec_put_string(out, p0)
             body_codec_put_componentsignaturedescriptor(out, p1)
         }
         .ReaderOver(p0) -> {
-            body_codec_put_tag(out, 89)
+            body_codec_put_tag(out, 87)
             body_codec_put_bool(out, p0)
         }
-        .ReaderReadU8 -> { body_codec_put_tag(out, 90) }
-        .ReaderReadI8 -> { body_codec_put_tag(out, 91) }
-        .ReaderReadU16Le -> { body_codec_put_tag(out, 92) }
-        .ReaderReadU16Be -> { body_codec_put_tag(out, 93) }
-        .ReaderReadI16Le -> { body_codec_put_tag(out, 94) }
-        .ReaderReadI16Be -> { body_codec_put_tag(out, 95) }
-        .ReaderReadU32Le -> { body_codec_put_tag(out, 96) }
-        .ReaderReadU32Be -> { body_codec_put_tag(out, 97) }
-        .ReaderReadI32Le -> { body_codec_put_tag(out, 98) }
-        .ReaderReadI32Be -> { body_codec_put_tag(out, 99) }
-        .ReaderReadU64Le -> { body_codec_put_tag(out, 100) }
-        .ReaderReadU64Be -> { body_codec_put_tag(out, 101) }
-        .ReaderReadI64Le -> { body_codec_put_tag(out, 102) }
-        .ReaderReadI64Be -> { body_codec_put_tag(out, 103) }
-        .ReaderReadF32Le -> { body_codec_put_tag(out, 104) }
-        .ReaderReadF32Be -> { body_codec_put_tag(out, 105) }
-        .ReaderReadF64Le -> { body_codec_put_tag(out, 106) }
-        .ReaderReadF64Be -> { body_codec_put_tag(out, 107) }
-        .ReaderPeek -> { body_codec_put_tag(out, 108) }
-        .ReaderSeek -> { body_codec_put_tag(out, 109) }
-        .ReaderSkip -> { body_codec_put_tag(out, 110) }
-        .ReaderTake -> { body_codec_put_tag(out, 111) }
-        .ReaderRemaining -> { body_codec_put_tag(out, 112) }
-        .ReaderAtEnd -> { body_codec_put_tag(out, 113) }
-        .CursorOver -> { body_codec_put_tag(out, 114) }
-        .CursorTakeUntil -> { body_codec_put_tag(out, 115) }
-        .CursorSkipWs -> { body_codec_put_tag(out, 116) }
+        .ReaderReadU8 -> { body_codec_put_tag(out, 88) }
+        .ReaderReadI8 -> { body_codec_put_tag(out, 89) }
+        .ReaderReadU16Le -> { body_codec_put_tag(out, 90) }
+        .ReaderReadU16Be -> { body_codec_put_tag(out, 91) }
+        .ReaderReadI16Le -> { body_codec_put_tag(out, 92) }
+        .ReaderReadI16Be -> { body_codec_put_tag(out, 93) }
+        .ReaderReadU32Le -> { body_codec_put_tag(out, 94) }
+        .ReaderReadU32Be -> { body_codec_put_tag(out, 95) }
+        .ReaderReadI32Le -> { body_codec_put_tag(out, 96) }
+        .ReaderReadI32Be -> { body_codec_put_tag(out, 97) }
+        .ReaderReadU64Le -> { body_codec_put_tag(out, 98) }
+        .ReaderReadU64Be -> { body_codec_put_tag(out, 99) }
+        .ReaderReadI64Le -> { body_codec_put_tag(out, 100) }
+        .ReaderReadI64Be -> { body_codec_put_tag(out, 101) }
+        .ReaderReadF32Le -> { body_codec_put_tag(out, 102) }
+        .ReaderReadF32Be -> { body_codec_put_tag(out, 103) }
+        .ReaderReadF64Le -> { body_codec_put_tag(out, 104) }
+        .ReaderReadF64Be -> { body_codec_put_tag(out, 105) }
+        .ReaderPeek -> { body_codec_put_tag(out, 106) }
+        .ReaderSeek -> { body_codec_put_tag(out, 107) }
+        .ReaderSkip -> { body_codec_put_tag(out, 108) }
+        .ReaderTake -> { body_codec_put_tag(out, 109) }
+        .ReaderRemaining -> { body_codec_put_tag(out, 110) }
+        .ReaderAtEnd -> { body_codec_put_tag(out, 111) }
+        .CursorOver -> { body_codec_put_tag(out, 112) }
+        .CursorTakeUntil -> { body_codec_put_tag(out, 113) }
+        .CursorSkipWs -> { body_codec_put_tag(out, 114) }
         .CursorTakePattern(p0, p1) -> {
-            body_codec_put_tag(out, 117)
+            body_codec_put_tag(out, 115)
             body_codec_put_list_strmatchpart(out, p0)
             body_codec_put_list_tcanonicalfield(out, p1)
         }
         .ReaderTakePattern(p0, p1) -> {
-            body_codec_put_tag(out, 118)
+            body_codec_put_tag(out, 116)
             body_codec_put_list_binmatchpart(out, p0)
             body_codec_put_list_tcanonicalfield(out, p1)
         }
-        .ProcessLines -> body_codec_put_tag(out, 119)
+        .ProcessLines -> body_codec_put_tag(out, 117)
     }
 }
 
 body_codec_get_bodyhandleop: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyHandleOp Never! {
-    position: body_codec_get_tag(bytes, input, 120, 2)
+    position: body_codec_get_tag(bytes, input, 118, 2)
     if position == {
         0 -> {
             f0: body_codec_get_thardwarecall(bytes, input)
@@ -7034,168 +6953,166 @@ body_codec_get_bodyhandleop: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyHandleO
         17 -> BodyHandleOp.GameAssetsSound
         18 -> BodyHandleOp.GameInputBind
         19 -> BodyHandleOp.GameInputPressed
-        20 -> BodyHandleOp.TestSuiteRun
-        21 -> BodyHandleOp.TestSetting
-        22 -> BodyHandleOp.DurationNsValue
-        23 -> BodyHandleOp.DurationScale
-        24 -> BodyHandleOp.DurationDivide
-        25 -> BodyHandleOp.AllocAlloc
-        26 -> BodyHandleOp.AllocTryAlloc
-        27 -> BodyHandleOp.AllocReset
-        28 -> {
+        20 -> BodyHandleOp.DurationNsValue
+        21 -> BodyHandleOp.DurationScale
+        22 -> BodyHandleOp.DurationDivide
+        23 -> BodyHandleOp.AllocAlloc
+        24 -> BodyHandleOp.AllocTryAlloc
+        25 -> BodyHandleOp.AllocReset
+        26 -> {
             f0: body_codec_get_string(bytes, input)
             f1: body_codec_get_string(bytes, input)
             BodyHandleOp.PreciseMethod{type_name: f0, method: f1}
         }
-        29 -> BodyHandleOp.TerminalSessionResize
-        30 -> BodyHandleOp.ProcessStdinWrite
-        31 -> BodyHandleOp.ProcessStdinWriteText
-        32 -> BodyHandleOp.ProcessStdinClose
-        33 -> BodyHandleOp.ProcessStdinWriteAll
-        34 -> BodyHandleOp.ProcessStdoutRead
-        35 -> BodyHandleOp.ProcessStderrRead
-        36 -> {
+        27 -> BodyHandleOp.TerminalSessionResize
+        28 -> BodyHandleOp.ProcessStdinWrite
+        29 -> BodyHandleOp.ProcessStdinWriteText
+        30 -> BodyHandleOp.ProcessStdinClose
+        31 -> BodyHandleOp.ProcessStdinWriteAll
+        32 -> BodyHandleOp.ProcessStdoutRead
+        33 -> BodyHandleOp.ProcessStderrRead
+        34 -> {
             f0: body_codec_get_string(bytes, input)
             BodyHandleOp.ReflectValueRead{symbol: f0}
         }
-        37 -> BodyHandleOp.ReflectValueFields
-        38 -> BodyHandleOp.ReflectFieldName
-        39 -> BodyHandleOp.ReflectFieldValue
-        40 -> BodyHandleOp.TaskJoin
-        41 -> BodyHandleOp.TaskDetach
-        42 -> BodyHandleOp.TaskPause
-        43 -> BodyHandleOp.TaskResume
-        44 -> BodyHandleOp.TaskCancel
-        45 -> BodyHandleOp.ChannelReceive
-        46 -> BodyHandleOp.ChannelTryReceive
-        47 -> BodyHandleOp.ChannelIsTimer
-        48 -> BodyHandleOp.ChannelIsInterval
-        49 -> BodyHandleOp.ChannelIsCanceled
-        50 -> BodyHandleOp.ChannelIsReady
-        51 -> BodyHandleOp.ChannelDelayMs
-        52 -> BodyHandleOp.ChannelClose
-        53 -> BodyHandleOp.SenderSend
-        54 -> BodyHandleOp.ReactiveGet
-        55 -> BodyHandleOp.ReactiveSet
-        56 -> BodyHandleOp.ReactiveEffectMethod
-        57 -> {
+        35 -> BodyHandleOp.ReflectValueFields
+        36 -> BodyHandleOp.ReflectFieldName
+        37 -> BodyHandleOp.ReflectFieldValue
+        38 -> BodyHandleOp.TaskJoin
+        39 -> BodyHandleOp.TaskDetach
+        40 -> BodyHandleOp.TaskPause
+        41 -> BodyHandleOp.TaskResume
+        42 -> BodyHandleOp.TaskCancel
+        43 -> BodyHandleOp.ChannelReceive
+        44 -> BodyHandleOp.ChannelTryReceive
+        45 -> BodyHandleOp.ChannelIsTimer
+        46 -> BodyHandleOp.ChannelIsInterval
+        47 -> BodyHandleOp.ChannelIsCanceled
+        48 -> BodyHandleOp.ChannelIsReady
+        49 -> BodyHandleOp.ChannelDelayMs
+        50 -> BodyHandleOp.ChannelClose
+        51 -> BodyHandleOp.SenderSend
+        52 -> BodyHandleOp.ReactiveGet
+        53 -> BodyHandleOp.ReactiveSet
+        54 -> BodyHandleOp.ReactiveEffectMethod
+        55 -> {
             f0: body_codec_get_string(bytes, input)
             BodyHandleOp.EventMethod{symbol: f0}
         }
-        58 -> {
+        56 -> {
             f0: body_codec_get_string(bytes, input)
             BodyHandleOp.LayoutMethod{method: f0}
         }
-        59 -> BodyHandleOp.DynField
-        60 -> BodyHandleOp.DynAt
-        61 -> BodyHandleOp.DynInt
-        62 -> BodyHandleOp.DynText
-        63 -> BodyHandleOp.DynBool
-        64 -> BodyHandleOp.DynFloat
-        65 -> BodyHandleOp.DynToText
-        66 -> BodyHandleOp.DynEqualUnordered
-        67 -> {
+        57 -> BodyHandleOp.DynField
+        58 -> BodyHandleOp.DynAt
+        59 -> BodyHandleOp.DynInt
+        60 -> BodyHandleOp.DynText
+        61 -> BodyHandleOp.DynBool
+        62 -> BodyHandleOp.DynFloat
+        63 -> BodyHandleOp.DynToText
+        64 -> BodyHandleOp.DynEqualUnordered
+        65 -> {
             f0: body_codec_get_type(bytes, input)
             f1: body_codec_get_bool(bytes, input)
             BodyHandleOp.DynDecode{ty: f0, stored: f1}
         }
-        68 -> {
+        66 -> {
             f0: body_codec_get_string(bytes, input)
             f1: body_codec_get_tpanicloc(bytes, input)
             BodyHandleOp.DynIndexKey{site: f0, location: f1}
         }
-        69 -> {
+        67 -> {
             f0: body_codec_get_string(bytes, input)
             f1: body_codec_get_tpanicloc(bytes, input)
             BodyHandleOp.DynIndexAt{site: f0, location: f1}
         }
-        70 -> BodyHandleOp.DynGetKey
-        71 -> BodyHandleOp.DynGetAt
-        72 -> BodyHandleOp.DynHas
-        73 -> BodyHandleOp.DynKeys
-        74 -> {
+        68 -> BodyHandleOp.DynGetKey
+        69 -> BodyHandleOp.DynGetAt
+        70 -> BodyHandleOp.DynHas
+        71 -> BodyHandleOp.DynKeys
+        72 -> {
             f0: body_codec_get_string(bytes, input)
             f1: body_codec_get_tpanicloc(bytes, input)
             BodyHandleOp.DynLen{site: f0, location: f1}
         }
-        75 -> BodyHandleOp.DynRemove
-        76 -> {
+        73 -> BodyHandleOp.DynRemove
+        74 -> {
             f0: body_codec_get_string(bytes, input)
             f1: body_codec_get_string(bytes, input)
             f2: body_codec_get_tpanicloc(bytes, input)
             BodyHandleOp.DynBinary{op: f0, site: f1, location: f2}
         }
-        77 -> {
+        75 -> {
             f0: body_codec_get_string(bytes, input)
             f1: body_codec_get_string(bytes, input)
             f2: body_codec_get_tpanicloc(bytes, input)
             BodyHandleOp.DynCompare{op: f0, site: f1, location: f2}
         }
-        78 -> {
+        76 -> {
             f0: body_codec_get_list_bool(bytes, input)
             f1: body_codec_get_string(bytes, input)
             f2: body_codec_get_tpanicloc(bytes, input)
             BodyHandleOp.DynSetPath{keys: f0, site: f1, location: f2}
         }
-        79 -> {
+        77 -> {
             f0: body_codec_get_bool(bytes, input)
             BodyHandleOp.SerdeEncode{stored: f0}
         }
-        80 -> BodyHandleOp.JSONField
-        81 -> BodyHandleOp.JSONAt
-        82 -> BodyHandleOp.JSONInt
-        83 -> BodyHandleOp.JSONText
-        84 -> BodyHandleOp.JSONBool
-        85 -> BodyHandleOp.JSONFloat
-        86 -> BodyHandleOp.JSONToText
-        87 -> BodyHandleOp.JSONEqualUnordered
-        88 -> {
+        78 -> BodyHandleOp.JSONField
+        79 -> BodyHandleOp.JSONAt
+        80 -> BodyHandleOp.JSONInt
+        81 -> BodyHandleOp.JSONText
+        82 -> BodyHandleOp.JSONBool
+        83 -> BodyHandleOp.JSONFloat
+        84 -> BodyHandleOp.JSONToText
+        85 -> BodyHandleOp.JSONEqualUnordered
+        86 -> {
             f0: body_codec_get_string(bytes, input)
             f1: body_codec_get_componentsignaturedescriptor(bytes, input)
             BodyHandleOp.PluginInvoke{export_name: f0, signature: f1}
         }
-        89 -> {
+        87 -> {
             f0: body_codec_get_bool(bytes, input)
             BodyHandleOp.ReaderOver{owned: f0}
         }
-        90 -> BodyHandleOp.ReaderReadU8
-        91 -> BodyHandleOp.ReaderReadI8
-        92 -> BodyHandleOp.ReaderReadU16Le
-        93 -> BodyHandleOp.ReaderReadU16Be
-        94 -> BodyHandleOp.ReaderReadI16Le
-        95 -> BodyHandleOp.ReaderReadI16Be
-        96 -> BodyHandleOp.ReaderReadU32Le
-        97 -> BodyHandleOp.ReaderReadU32Be
-        98 -> BodyHandleOp.ReaderReadI32Le
-        99 -> BodyHandleOp.ReaderReadI32Be
-        100 -> BodyHandleOp.ReaderReadU64Le
-        101 -> BodyHandleOp.ReaderReadU64Be
-        102 -> BodyHandleOp.ReaderReadI64Le
-        103 -> BodyHandleOp.ReaderReadI64Be
-        104 -> BodyHandleOp.ReaderReadF32Le
-        105 -> BodyHandleOp.ReaderReadF32Be
-        106 -> BodyHandleOp.ReaderReadF64Le
-        107 -> BodyHandleOp.ReaderReadF64Be
-        108 -> BodyHandleOp.ReaderPeek
-        109 -> BodyHandleOp.ReaderSeek
-        110 -> BodyHandleOp.ReaderSkip
-        111 -> BodyHandleOp.ReaderTake
-        112 -> BodyHandleOp.ReaderRemaining
-        113 -> BodyHandleOp.ReaderAtEnd
-        114 -> BodyHandleOp.CursorOver
-        115 -> BodyHandleOp.CursorTakeUntil
-        116 -> BodyHandleOp.CursorSkipWs
-        117 -> {
+        88 -> BodyHandleOp.ReaderReadU8
+        89 -> BodyHandleOp.ReaderReadI8
+        90 -> BodyHandleOp.ReaderReadU16Le
+        91 -> BodyHandleOp.ReaderReadU16Be
+        92 -> BodyHandleOp.ReaderReadI16Le
+        93 -> BodyHandleOp.ReaderReadI16Be
+        94 -> BodyHandleOp.ReaderReadU32Le
+        95 -> BodyHandleOp.ReaderReadU32Be
+        96 -> BodyHandleOp.ReaderReadI32Le
+        97 -> BodyHandleOp.ReaderReadI32Be
+        98 -> BodyHandleOp.ReaderReadU64Le
+        99 -> BodyHandleOp.ReaderReadU64Be
+        100 -> BodyHandleOp.ReaderReadI64Le
+        101 -> BodyHandleOp.ReaderReadI64Be
+        102 -> BodyHandleOp.ReaderReadF32Le
+        103 -> BodyHandleOp.ReaderReadF32Be
+        104 -> BodyHandleOp.ReaderReadF64Le
+        105 -> BodyHandleOp.ReaderReadF64Be
+        106 -> BodyHandleOp.ReaderPeek
+        107 -> BodyHandleOp.ReaderSeek
+        108 -> BodyHandleOp.ReaderSkip
+        109 -> BodyHandleOp.ReaderTake
+        110 -> BodyHandleOp.ReaderRemaining
+        111 -> BodyHandleOp.ReaderAtEnd
+        112 -> BodyHandleOp.CursorOver
+        113 -> BodyHandleOp.CursorTakeUntil
+        114 -> BodyHandleOp.CursorSkipWs
+        115 -> {
             f0: body_codec_get_list_strmatchpart(bytes, input)
             f1: body_codec_get_list_tcanonicalfield(bytes, input)
             BodyHandleOp.CursorTakePattern{parts: f0, canonical: f1}
         }
-        118 -> {
+        116 -> {
             f0: body_codec_get_list_binmatchpart(bytes, input)
             f1: body_codec_get_list_tcanonicalfield(bytes, input)
             BodyHandleOp.ReaderTakePattern{parts: f0, canonical: f1}
         }
-        119 -> BodyHandleOp.ProcessLines
+        117 -> BodyHandleOp.ProcessLines
         else -> BodyHandleOp.LinesIter
     }
 }

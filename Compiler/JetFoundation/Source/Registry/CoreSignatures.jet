@@ -10,15 +10,7 @@ CoreCallDefault: enum {
 
 CoreCallTypeConstraint: enum {
     Any,
-    Floating,
-    FloatingOrExact,
-    SquareRootInput,
     VaultKey,
-}
-
-CoreCallResultRule: enum {
-    Declared,
-    FloatIfExactElseParameter(parameter_index: Int),
 }
 
 CoreCallTypedParameter: struct {
@@ -44,7 +36,6 @@ CoreTypedCallSignature: struct {
     parameters: [CoreCallTypedParameter],
     return_type: Type?,
     type_parameters: [CoreCallTypeParameter],
-    result_rule: CoreCallResultRule,
     // A labeled tuple return's labels, or a Result return's labeled tuple
     // error's labels, in the native kernel's declared slot order (the order
     // `return_type` writes them in); empty for every other return.
@@ -89,7 +80,6 @@ core_sig: fn(module_name: String, member: String, parameters: [CoreCallTypedPara
         parameters: parameters,
         return_type: return_type,
         type_parameters: [CoreCallTypeParameter]{},
-        result_rule: CoreCallResultRule.Declared,
         native_return_labels: [String]{},
     }
 }
@@ -113,87 +103,6 @@ core_sig_generic: fn(module_name: String, member: String, parameters: [CoreCallT
     signature := core_sig(module_name, member, parameters, return_type)
     signature.type_parameters = [CoreCallTypeParameter]{type_parameter}
     signature
-}
-
-core_sig_generic_with_result_rule: fn(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?, type_parameter: CoreCallTypeParameter, result_rule: CoreCallResultRule) -> CoreTypedCallSignature Never! {
-    signature := core_sig_generic(module_name, member, parameters, return_type, type_parameter)
-    signature.result_rule = result_rule
-    signature
-}
-
-core_sig_math_fixed: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
-    if module_name != "core.math" -> return None
-    read: AccessConvention.Read
-    if member == "fabs" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Float, read)}, Val(Type.Float)))
-    }
-    if member == "decimal" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_named("Decimal"))))
-    }
-    if member == "fraction" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read)}, Val(Type.Option{inner: core_sig_named("Fraction")})))
-    }
-    None
-}
-
-core_sig_numeric_or_default: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
-    read: AccessConvention.Read
-    integer: Type.Int
-    float: Type.Float
-    t: core_sig_named("T")
-    if module_name != "core.math" -> return None
-    if member == "sqrt" {
-        return Val(core_sig_generic_with_result_rule(
-            module_name,
-            member,
-            [CoreCallTypedParameter]{core_sig_positional(t, read)},
-            Val(t),
-            core_sig_type_parameter("T", CoreCallTypeConstraint.SquareRootInput),
-            CoreCallResultRule.FloatIfExactElseParameter{parameter_index: 0},
-        ))
-    }
-    if core_sig_one_of(member, [String]{"floor", "ceil", "trunc", "truncate"}) {
-        return Val(core_sig_generic(
-            module_name,
-            member,
-            [CoreCallTypedParameter]{core_sig_positional(t, read)},
-            Val(t),
-            core_sig_type_parameter("T", CoreCallTypeConstraint.Floating),
-        ))
-    }
-    if member == "to_bits" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Union{members: [Type]{float, Type.Float32}}, read)}, Val(integer)))
-    }
-    if member == "from_bits" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(float)))
-    }
-    // Core-private binary32 bit copies behind core.math's F32 to_bits/from_bits.
-    if member == "__to_bits_f32" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Float32, read)}, Val(integer)))
-    }
-    if member == "__from_bits_f32" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(Type.Float32)))
-    }
-    if member == "cmp" {
-        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read)}, Val(integer), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
-    }
-    if core_sig_one_of(member, [String]{"fma", "muladd"}) {
-        return Val(core_sig_generic_with_result_rule(
-            module_name,
-            member,
-            [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read), core_sig_positional(t, read)},
-            Val(t),
-            core_sig_type_parameter("T", CoreCallTypeConstraint.FloatingOrExact),
-            CoreCallResultRule.FloatIfExactElseParameter{parameter_index: 0},
-        ))
-    }
-    if member == "fmod" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(float)))
-    }
-    if core_sig_one_of(member, [String]{"is_nan", "is_inf", "is_finite"}) {
-        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(Type.Bool), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
-    }
-    None
 }
 
 core_sig_network: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
@@ -243,12 +152,6 @@ core_sig_network: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignatur
 
 core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     if core_sig_network(request) == Val(network) -> return Val(network)
-    if core_sig_math_fixed(request.module_name, request.member) == Val(math_fixed) {
-        return Val(math_fixed)
-    }
-    if core_sig_numeric_or_default(request.module_name, request.member) == Val(numeric) {
-        return Val(numeric)
-    }
     if core_host_fixed_signature(request.module_name, request.member) == Val(host) {
         return Val(host)
     }

@@ -62,6 +62,13 @@ StructPatField: enum {
     Nested(field: String, field_span: Span, pattern: Pattern),
 }
 
+// StructPatField picks from PatSlot: a `.Case{field: pat, …}` entry is a
+// field name with the slot its pattern fills, a binding, a value or a nested
+// pattern, so a new entry kind is a PatSlot case first. While the compiler
+// builds, STRUCT_PAT_FIELD_COUNT stops the build naming any case PatSlot
+// lacks.
+STRUCT_PAT_FIELD_COUNT: #run effect_vocabulary_view_count("AST/Patterns.jet", embed_file("Patterns.jet"), "StructPatField", "AST/Patterns.jet", embed_file("Patterns.jet"), "PatSlot", [String]{})
+
 PatternTypeHead: struct {
     name: String,
     span: Span,

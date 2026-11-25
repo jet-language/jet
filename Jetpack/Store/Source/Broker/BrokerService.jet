@@ -46,7 +46,7 @@ store_broker_send: fn(stream: ^UnixStream, bytes: [U8]) StoreError! {
 // Import a published shared entry into the caller's Hangar. None when no broker
 // is configured or it is not listening; an imported entry must still pass cache
 // verification.
-store_reuse_shared_entry: fn(verification: ^StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> StoreEntry? StoreError! {
+store_reuse_shared_entry: fn(verification: StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> StoreEntry? StoreError! {
     found_config: store_shared_store_config(roots)
     config: found_config ?? return Ok(None)
     if !files.exists(config.socket) -> return Ok(None)
@@ -70,7 +70,7 @@ store_reuse_shared_entry: fn(verification: ^StoreVerification, roots: HangarRoot
 
 // Offer a verified local entry to a configured broker. Missing broker state is
 // the ordinary per-user path, not an error.
-store_promote_shared_entry: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
+store_promote_shared_entry: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
     found_config: store_shared_store_config(roots)
     config: found_config ?? return Ok(false)
     if !files.exists(config.socket) -> return Ok(false)
@@ -93,7 +93,7 @@ store_promote_shared_entry: fn(verification: ^StoreVerification, roots: HangarRo
 // Serve one socket-activated request and exit. The service manager's handover
 // is the only listener source; the administrator descriptor is read explicitly,
 // never from JETPACK_ROOT.
-store_serve_shared_store: fn(verification: ^StoreVerification, roots: HangarRoots) StoreError! {
+store_serve_shared_store: fn(verification: StoreVerification, roots: HangarRoots) StoreError! {
     if sys.family() == "windows" {
         return Err(store_broker_invalid("shared-store socket activation is unsupported on this host"))
     }
@@ -118,13 +118,13 @@ store_broker_peer_user: fn(stream: UnixStream) -> Int StoreError! {
 
 // Authorize the kernel-reported peer, then promote one write or answer one
 // read.
-store_broker_serve_connection: fn(verification: ^StoreVerification, stream: ^^UnixStream, config: SharedStoreConfig) StoreError! {
+store_broker_serve_connection: fn(verification: StoreVerification, stream: ^^UnixStream, config: SharedStoreConfig) StoreError! {
     user: store_broker_peer_user(stream)
     store_broker_serve_peer(verification, stream, config, user)
 }
 
 // Serve one connection whose peer is `user`; replies go back over its stream.
-store_broker_serve_peer: fn(verification: ^StoreVerification, stream: ^^UnixStream, config: SharedStoreConfig, user: Int) StoreError! {
+store_broker_serve_peer: fn(verification: StoreVerification, stream: ^^UnixStream, config: SharedStoreConfig, user: Int) StoreError! {
     shared: HangarRoots.at(config.shared_root)
     key: store_broker_trust_key(config)
     reader := BrokerWireReader.socket(stream)
@@ -149,7 +149,7 @@ store_broker_serve_peer: fn(verification: ^StoreVerification, stream: ^^UnixStre
 // re-derived provenance with the binding, then import under the promotion lock.
 // The stage is always removed; a cleanup failure is reported with any admission
 // failure.
-store_broker_promote_staged_archive: fn(verification: ^StoreVerification, shared: HangarRoots, config: SharedStoreConfig, key: String, archive: [U8], binding: ProvenanceBinding) StoreError! {
+store_broker_promote_staged_archive: fn(verification: StoreVerification, shared: HangarRoots, config: SharedStoreConfig, key: String, archive: [U8], binding: ProvenanceBinding) StoreError! {
     incoming: files.join(config.shared_root, ".incoming")
     store_broker_ensure_real_dir(incoming)
     store_broker_sweep_stale_incoming(incoming)
@@ -176,7 +176,7 @@ store_broker_promote_staged_archive: fn(verification: ^StoreVerification, shared
     }
 }
 
-store_broker_admission_failure: fn(verification: ^StoreVerification, shared: HangarRoots, staged: HangarRoots, key: String, archive: [U8], binding: ProvenanceBinding) -> StoreError? Never! {
+store_broker_admission_failure: fn(verification: StoreVerification, shared: HangarRoots, staged: HangarRoots, key: String, archive: [U8], binding: ProvenanceBinding) -> StoreError? Never! {
     if store_broker_admit_and_promote(verification, shared, staged, key, archive, binding) == {
         .Err(error) -> Val(error)
         .Ok(_) -> None
@@ -190,7 +190,7 @@ store_broker_cleanup_failure: fn(stage: String) -> StoreError? Never! {
     }
 }
 
-store_broker_admit_and_promote: fn(verification: ^StoreVerification, shared: HangarRoots, staged: HangarRoots, key: String, archive: [U8], binding: ProvenanceBinding) StoreError! {
+store_broker_admit_and_promote: fn(verification: StoreVerification, shared: HangarRoots, staged: HangarRoots, key: String, archive: [U8], binding: ProvenanceBinding) StoreError! {
     // The archive is bounded and digest-checked, then signed by the broker
     // before the shared root is reachable by the promotion step.
     attested: store_attest_archive(staged, archive, key)

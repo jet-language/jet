@@ -11,7 +11,7 @@ use {
     cli_files: core.files
     cli_grammar_json: core.encoding.json
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[COMMENT_PREFIX, foundation_json_quote]
+    jet_foundation.[COMMENT_PREFIX, KEYWORD_NAMES, effect_vocabulary_list_view_count, foundation_json_quote]
 }
 
 JET_CLI_GRAMMAR_SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
@@ -35,8 +35,8 @@ JET_CLI_GRAMMAR_TREE_SITTER: "Tools/Editors/TreeSitter/grammar.js"
 JET_CLI_GRAMMAR_ZED: "Tools/Editors/Zed/languages/jet/highlights.scm"
 
 // One HighlightClass, in emission order: the take mark before sigils and
-// sigils before operators, so `&&` in a parameter list is the take mark and a
-// sigil wins over an operator it starts with.
+// sigils before operators, so `^^` in a parameter list is the take mark, not
+// two write marks, and a sigil wins over an operator it starts with.
 JetCLIGrammarClass: struct {
     name: String,
     textmate: String,
@@ -64,7 +64,7 @@ JET_CLI_GRAMMAR_BRACKETS: [String]{"{{", "}}", "[", "]", "(", ")"}
 
 // Lexer-reserved words stay global. Identifier-like declaration words
 // (`add`, `client`, `as`, ...) are colored only in declaration-shaped positions.
-JET_CLI_GRAMMAR_GLOBAL_KEYWORDS: [String]{
+CLI_GRAMMAR_GLOBAL_KEYWORDS: [String]{
     "fn",
     "priv",
     "if",
@@ -91,6 +91,12 @@ JET_CLI_GRAMMAR_GLOBAL_KEYWORDS: [String]{
     "extern",
     "module",
 }
+
+// The global keywords pick from the keyword list, plus the words the lexer
+// still reserves outside it (`mutate`, `move`, `copy`, `null`, `const`).
+// While the compiler builds, CLI_GRAMMAR_GLOBAL_KEYWORDS_COUNT stops the
+// build naming any other word KEYWORD_NAMES lacks.
+CLI_GRAMMAR_GLOBAL_KEYWORDS_COUNT: #run effect_vocabulary_list_view_count("CLI/EditorGrammars.jet", CLI_GRAMMAR_GLOBAL_KEYWORDS, "CLI_GRAMMAR_GLOBAL_KEYWORDS", KEYWORD_NAMES, "KEYWORD_NAMES", [String]{"mutate", "move", "copy", "null", "const"})
 
 JetCLIGrammarToken: struct {
     text: String,
@@ -532,7 +538,7 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
         contextual := [String]{}
         loop word in words {
             if {
-                class.keyword && !JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(word) -> {
+                class.keyword && !CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(word) -> {
                     contextual.push(word)
                 }
                 else -> { global.push(word) }
@@ -578,7 +584,7 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
 
 // The pattern for one symbol of class `class_index`. TextMate takes the first
 // pattern that matches, so a symbol refuses to start a longer symbol of a later
-// class: the sigil `&` is not the first half of logical and `&&`.
+// class.
 jet_cli_grammar_symbol_pattern: fn(tokens: [JetCLIGrammarToken], class_index: Int, text: String) -> String Never! {
     rests := [String]{}
     loop (index, later) in JET_CLI_GRAMMAR_CLASSES {
@@ -615,7 +621,7 @@ jet_cli_grammar_render_zed: fn(tokens: [JetCLIGrammarToken], anonymous: [String]
         words := [String]{}
         loop text in texts {
             if !jet_cli_grammar_is_word(text) || !anonymous.contains(text) -> next
-            if class.keyword && !JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(text) -> next
+            if class.keyword && !CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(text) -> next
             words.push("  {foundation_json_quote(text)}")
         }
         if words.len() > 0 -> out = "{out}[\n{words.join("\n")}\n] {class.zed}\n\n"

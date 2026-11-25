@@ -21,6 +21,17 @@ testing: module {
     // A new Prelude `Test` holding the harness's current iteration and result.
     #Import(c) priv suite_snapshot: fn() -> Test = "jet_test_suite_new"
 
+    // `t.run()` in a `test: fn`: runs the package's `#Test` blocks on the
+    // harness `suite` carries and answers the failure count. The run reports
+    // each test as it goes, so the call is IO: a `test: fn` that drops the
+    // count still ran the suite.
+    #Import(c) priv suite_run: fn(suite: Test) -[IO]> Int = "jet_test_suite_run"
+
+    // `t.<setting>(…)` (Registry/TestSettings.jet): appends `line`
+    // (`name<TAB>value<NL>`) to the plan file the environment variable `key`
+    // names, in `jet test`'s plan step; any other run ignores it.
+    #Import(c) priv suite_setting: fn(suite: Test, key: String, line: String) = "jet_test_setting"
+
     // The active World's bytes for the Core store named `store`, empty until
     // first replaced; None outside a World.
     #Import(c) priv world_store_load: fn(store: String) -> [U8]? = "jet_rt_world_store_load"

@@ -1,0 +1,387 @@
+// Soft-public checks: uses of another package's soft-public names, the
+// signatures that expose them, and the module values their consumers read.
+use jet_foundation.[
+    DIAGNOSTIC_ERROR,
+    Diagnostic,
+    DiagnosticLabel,
+    module_index,
+    module_is_core,
+    module_is_none,
+    module_text,
+    classify_identifier,
+    IdentifierClass,
+    Func,
+    Item,
+    Span,
+    SymbolID,
+    SymbolKind,
+    Type,
+    symbol_is_local,
+]
+
+// A public `_name` is soft-public: a use outside its declaring module is
+// allowed with one warning per occurrence (L0601), on the spelling the use
+// site writes, so a re-export under a plain name does not warn and one
+// under an underscore name does. Core's own modules are vetted internals.
+// Only module `module_index`'s own text is read: the rows in
+// `generated_references` and `generated_calls` (sorted, disjoint row ranges)
+// carry spans into other text and are skipped.
+sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, generated_references: [Span], generated_calls: [Span], module_result: ^SemaGraphModuleResult) {
+    graph: program.registration_graph
+    module_identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
+    if module_is_core(graph.modules[module_index].module_identity) {
+        return
+    }
+    raw: graph.modules[module_index].source.bytes()
+    seen := [Int:Bool]{}
+    skipped := 0
+    loop (index, reference) in module_result.name_references {
+        loop skipped < generated_references.len() && generated_references[skipped].end <= index {
+            skipped += 1
+        }
+        if skipped < generated_references.len() && index >= generated_references[skipped].start {
+            next
+        }
+        owner: reference.symbol.module_identity
+        if module_is_none(owner) || owner == graph.modules[module_index].module_identity -> next
+        leaf: sema_soft_public_written_leaf(raw, reference.span) ?? next
+        sema_soft_public_warn(leaf, seen, module_result.diagnostics)
+    }
+    // A call's callee is a call fact, not a name reference.
+    skipped = 0
+    loop (index, call) in module_result.call_facts {
+        loop skipped < generated_calls.len() && generated_calls[skipped].end <= index {
+            skipped += 1
+        }
+        if skipped < generated_calls.len() && index >= generated_calls[skipped].start -> next
+        callee: call.callee ?? next
+        if symbol_is_local(callee) -> next
+        leaf: sema_soft_public_written_leaf(raw, call.span) ?? next
+        callee_key: sema_program_symbol_key(program, callee)
+        // The callee's module identity follows its key's kind
+        // (symbol_key_text); a builtin, which no module registers, has
+        // none.
+        path: callee_key.split_once(":") ?? next
+        if path.after.starts_with("{module_identity}.") || sema_registration_callable_row(graph, callee_key) == None {
+            next
+        }
+        sema_soft_public_warn(leaf, seen, module_result.diagnostics)
+    }
+    sema_check_soft_public_signatures(graph.modules[module_index], raw, seen, module_result.diagnostics)
+}
+
+// One consumer's read of a module value, from a body of this module.
+SemaModuleValueRead: struct {
+    key: SymbolID,
+    name: String,
+    consumer: String,
+    span: Span,
+}
+
+// A module value has one type and one value for every consumer. When one
+// consumer reads it as the value it is and another needs something else (a
+// String where the value is an Int, or a field the value lacks), the
+// disagreement belongs to the value: the consumer's error moves to the
+// value's name, and its labels name both consumers. A value whose consumers
+// all fail, or that one consumer alone reads, keeps the error at the read.
+sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: Int, generated_references: [Span], module_result: ^SemaGraphModuleResult) {
+    graph: program.registration_graph
+    has_error: loop diagnostic in module_result.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            break true
+        }
+    } ?? false
+    if !has_error {
+        return
+    }
+    module_identity: graph.modules[module_index].module_identity
+    raw: graph.modules[module_index].source.bytes()
+    segments: graph.modules[module_index].source_segments
+    candidates := [SemaModuleValueRead]{}
+    skipped := 0
+    loop (index, reference) in module_result.name_references {
+        loop skipped < generated_references.len() && generated_references[skipped].end <= index {
+            skipped += 1
+        }
+        if skipped < generated_references.len() && index >= generated_references[skipped].start {
+            next
+        }
+        if reference.kind != Val(SymbolKind.Constant) -> next
+        owner: reference.symbol.module_identity
+        if !module_is_none(owner) && owner != module_identity -> next
+        candidates.push(SemaModuleValueRead{key: reference.symbol.id, name: reference.symbol.name.copy(), consumer: "", span: reference.span})
+    }
+    // A read's consumer is looked up only when some error may fail a read.
+    if candidates.len() < 2 || !sema_module_value_reads_failed(candidates, raw, module_result.diagnostics) {
+        return
+    }
+    bodies: sema_module_value_bodies(graph.modules[module_index].declarations)
+    reads := [SemaModuleValueRead]{}
+    loop candidate in candidates {
+        consumer: sema_module_value_consumer(bodies, candidate.span) ?? next
+        reads.push(SemaModuleValueRead{key: candidate.key, name: candidate.name, consumer: consumer, span: candidate.span})
+    }
+    if reads.len() < 2 {
+        return
+    }
+    moved := [{position: Int, diagnostic: Diagnostic}]{}
+    loop (position, diagnostic) in module_result.diagnostics {
+        failed: sema_module_value_failed_read(reads, raw, segments, diagnostic) ?? next
+        read: reads[failed]
+        agreeing: reads[sema_module_value_agreeing_read(reads, module_result.diagnostics, raw, segments, read) ?? next]
+        constant: sema_module_value_constant(graph.modules[module_index].constants, read.key) ?? next
+        shown: if constant.ty == .Val(ty) -> " as {sema_module_value_type_show(ty)}" else -> ""
+        updated := diagnostic.copy()
+        // The value's name is located afresh: it may sit in another file of
+        // this module than the read.
+        updated.span = Val(constant.declaration.name_span)
+        updated.source_path = None
+        updated.source_offset = None
+        updated.source_start = None
+        updated.what = "`{read.consumer}` and `{agreeing.consumer}` disagree about `{read.name}`: {diagnostic.what}"
+        updated.labels.push(DiagnosticLabel{span: read.span, message: "`{read.consumer}` reads `{read.name}` here"})
+        updated.labels.push(DiagnosticLabel{span: agreeing.span, message: "`{agreeing.consumer}` reads it here{shown}"})
+        moved.push({position: position, diagnostic: sema_diagnostic_with_source_location(updated, segments)})
+    }
+    loop row in moved.move() -> module_result.diagnostics[row.position] = row.diagnostic
+}
+
+// Another consumer's read of `read`'s value that no error fails.
+sema_module_value_agreeing_read: fn(reads: [SemaModuleValueRead], diagnostics: [Diagnostic], raw: [U8], segments: [SemaSourceSegment], read: SemaModuleValueRead) -> Int? {
+    loop (index, other) in reads {
+        if other.key == read.key && other.consumer != read.consumer && sema_module_value_read_agrees(diagnostics, reads, raw, segments, other) {
+            return Val(index)
+        }
+    }
+    None
+}
+
+// A module value's type as its reader wrote it: a registered nominal type
+// carries its module's key, and the reader wrote only its name.
+sema_module_value_type_show: fn(ty: Type) -> String Never! {
+    leaf: sema_type_nominal_leaf(ty)
+    if leaf != "" -> return "`{leaf}`"
+    sema_type_show(ty)
+}
+
+sema_module_value_constant: fn(constants: [SemaRegistrationConstant], key: SymbolID) -> SemaRegistrationConstant? {
+    loop row in constants {
+        if row.symbol.id == key -> return Val(row.copy())
+    }
+    None
+}
+
+// A function or method of a module's declarations and its text's span.
+SemaModuleValueBody: struct {
+    name: String,
+    span: Span,
+}
+
+// The functions and methods of `declarations`, in declaration order.
+sema_module_value_bodies: fn(declarations: [Item]) -> [SemaModuleValueBody] {
+    bodies := [SemaModuleValueBody]{}
+    loop item in declarations {
+        if item == {
+            .Func(function) -> {
+                bodies.push(SemaModuleValueBody{name: function.name.copy(), span: function.span})
+            }
+            .Impl(implementation) -> {
+                loop method in implementation.methods {
+                    bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
+                }
+            }
+            .Struct(definition) -> {
+                loop method in definition.methods {
+                    bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
+                }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods {
+                    bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
+                }
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    bodies
+}
+
+// The first function or method of `bodies` whose text holds `span`.
+sema_module_value_consumer: fn(bodies: [SemaModuleValueBody], span: Span) -> String? {
+    loop body in bodies {
+        if body.span.start <= span.start && span.end <= body.span.end {
+            return Val(body.name.copy())
+        }
+    }
+    None
+}
+
+// Whether an error of `diagnostics` may fail one of `reads`: one that starts
+// at a read, or just past the `.` after one (sema_module_value_failed_read,
+// before its location checks). Most modules' errors fail none.
+sema_module_value_reads_failed: fn(reads: [SemaModuleValueRead], raw: [U8], diagnostics: [Diagnostic]) -> Bool {
+    starts := [Int:Bool]{}
+    loop read in reads {
+        starts[read.span.start] = true
+        if read.span.end < raw.len() && (Int{raw[read.span.end]}) == 46 {
+            starts[read.span.end + 1] = true
+        }
+    }
+    loop diagnostic in diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        at: diagnostic.span ?? next
+        if starts.has_key(at.start) -> return true
+    }
+    false
+}
+
+// The row in `reads` that an error of this module's text fails: an error at
+// the read itself (the value is the wrong type there), or at the member
+// written right after the read's `.` (the value lacks that field).
+sema_module_value_failed_read: fn(reads: [SemaModuleValueRead], raw: [U8], segments: [SemaSourceSegment], diagnostic: Diagnostic) -> Int? {
+    if diagnostic.severity != DIAGNOSTIC_ERROR -> return None
+    at: diagnostic.span ?? return None
+    // Only this module's own written text: a diagnostic located where its
+    // segment maps, not one on generated text or another file.
+    location: sema_source_location_at(segments, at) ?? return None
+    if location.origin == SemaSourceOrigin.CompilerGenerated || diagnostic.source_path != Val(location.source_path) || diagnostic.source_offset != Val(location.aggregate_start) {
+        return None
+    }
+    loop (index, read) in reads {
+        if at.start == read.span.start && at.end == read.span.end -> return Val(index)
+        if at.start == read.span.end + 1 && read.span.end < raw.len() && (Int{raw[read.span.end]}) == 46 {
+            return Val(index)
+        }
+    }
+    None
+}
+
+sema_module_value_read_agrees: fn(diagnostics: [Diagnostic], reads: [SemaModuleValueRead], raw: [U8], segments: [SemaSourceSegment], read: SemaModuleValueRead) -> Bool {
+    loop diagnostic in diagnostics {
+        failed: sema_module_value_failed_read(reads, raw, segments, diagnostic) ?? next
+        if reads[failed].span.start == read.span.start -> return false
+    }
+    true
+}
+
+sema_soft_public_warn: fn(leaf: {start: Int, name: String}, seen: ^[Int:Bool], diagnostics: ^[Diagnostic]) {
+    if classify_identifier(leaf.name) != IdentifierClass.SoftPublic || seen.has_key(leaf.start) {
+        return
+    }
+    seen[leaf.start] = true
+    diagnostics.push(sema_lint("L0601", Span{start: leaf.start, end: leaf.start + leaf.name.count_bytes()}, "`{leaf.name}` is a soft-public API", "A leading underscore allows outside use but carries no compatibility promise across minor releases.", "Use a public name without a leading underscore when callers need a stable API."))
+}
+
+// The soft-public type names one module's signatures write: in a parameter
+// or return type, or a generic bound. A qualified `alias._Cell` is always
+// outside; an unqualified `_Shape` is outside unless the module declares it
+// (a local declaration wins over an imported one) or the function's own
+// type parameters name it.
+sema_check_soft_public_signatures: fn(source_module: SemaRegistrationModule, raw: [U8], seen: ^[Int:Bool], diagnostics: ^[Diagnostic]) {
+    loop item in source_module.declarations {
+        if item == {
+            .Func(function) -> {
+                sema_check_soft_public_signature(function, source_module, raw, seen, diagnostics)
+            }
+            .Impl(implementation) -> {
+                loop method in implementation.methods {
+                    sema_check_soft_public_signature(method, source_module, raw, seen, diagnostics)
+                }
+            }
+            .Struct(definition) -> {
+                loop method in definition.methods {
+                    sema_check_soft_public_signature(method, source_module, raw, seen, diagnostics)
+                }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods {
+                    sema_check_soft_public_signature(method, source_module, raw, seen, diagnostics)
+                }
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+sema_check_soft_public_signature: fn(function: Func, module_row: SemaRegistrationModule, raw: [U8], seen: ^[Int:Bool], diagnostics: ^[Diagnostic]) {
+    if function.compiler_generated {
+        return
+    }
+    local := [String]{}
+    loop parameter in function.type_params -> local.push(parameter.name)
+    ranges := [Span]{}
+    loop parameter in function.params -> ranges.push(parameter.ty_span)
+    if function.return_type_span == .Val(span) -> ranges.push(span.copy())
+    // A bound runs from the parameter's name to its `,`, `>` or default `=`.
+    loop parameter in function.type_params {
+        end := parameter.name_span.end
+        loop end < raw.len() && raw[end] != 44 && raw[end] != 62 && raw[end] != 61 -> end += 1
+        ranges.push(Span{start: parameter.name_span.end, end: end})
+    }
+    loop range in ranges {
+        at := if range.start < 0 -> 0 else -> range.start
+        limit: if range.end > raw.len() -> raw.len() else -> range.end
+        loop at < limit {
+            if raw[at] != 95 || (at > 0 && sema_soft_public_word_byte(raw[at - 1])) {
+                at += 1
+                next
+            }
+            start: at
+            loop at < limit && sema_soft_public_word_byte(raw[at]) -> at += 1
+            name: String.from_bytes(raw[start..<at]) ?? next
+            qualified: start > 0 && raw[start - 1] == 46
+            if !qualified && (sema_registration_declaration_row(module_row, name) != None || local.contains(name)) -> next
+            sema_soft_public_warn({start: start, name: name}, seen, diagnostics)
+        }
+    }
+}
+
+// The soft-public candidate a use site writes, with its byte offset in the
+// source: the last identifier of the span (`n._title` gives `_title`) when it
+// starts with `_`, as every soft-public name does. A span over a whole call
+// names the identifier just before the argument list that its last `)`
+// closes (type arguments skipped). A written name is a whole token of the
+// source, so a span that cuts an identifier is no use site of this text (a
+// span another source owns) and names nothing.
+sema_soft_public_written_leaf: fn(raw: [U8], span: Span) -> {start: Int, name: String}? Never! {
+    if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return None
+    end := span.end
+    loop end > span.start && (raw[end - 1] == 32 || raw[end - 1] == 10) -> end -= 1
+    if end > span.start && raw[end - 1] == 41 {
+        index := end - 1
+        depth := 0
+        loop index >= span.start {
+            if raw[index] == 41 -> depth += 1
+            if raw[index] == 40 {
+                depth -= 1
+                if depth == 0 -> break
+            }
+            index -= 1
+        }
+        if index <= span.start -> return None
+        end = index
+    }
+    if end > span.start && raw[end - 1] == 62 {
+        angle := 0
+        loop end > span.start {
+            end -= 1
+            if raw[end] == 62 -> angle += 1
+            if raw[end] == 60 {
+                angle -= 1
+                if angle == 0 -> break
+            }
+        }
+    }
+    start := end
+    loop start > span.start && sema_soft_public_word_byte(raw[start - 1]) -> start -= 1
+    if start == end || raw[start] != 95 -> return None
+    if (start > 0 && sema_soft_public_word_byte(raw[start - 1])) || (end < raw.len() && sema_soft_public_word_byte(raw[end])) {
+        return None
+    }
+    name: String.from_bytes(raw[start..<end]) ?? return None
+    Val({start: start, name: name})
+}
+
+sema_soft_public_word_byte: fn(byte: U8) -> Bool Never! {
+    byte == 95 || (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+}

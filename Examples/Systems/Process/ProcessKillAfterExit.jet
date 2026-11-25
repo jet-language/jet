@@ -12,7 +12,8 @@ use {
 }
 
 run: fn() -[Exec, IO, Time.Wait]> {
-    child: process.cmd(["true"]).spawn() ?? panic("spawn failed")
+    spec: process.cmd(["true"])
+    child: spec.spawn() ?? panic("spawn failed")
     // `exited` polls without blocking; once it says yes, the child is gone.
     loop !(child.exited() ?? panic("exited failed")) -> time.sleep(5ms)
     print("exited: true")

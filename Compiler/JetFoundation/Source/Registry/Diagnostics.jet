@@ -37,6 +37,12 @@ DiagnosticRegistryFix: enum {
     GeneratedRedundantTailReturn,
 }
 
+// DiagnosticRegistryFix picks from the Prelude's DiagnosticEdit, the machine
+// edits a fix carries; a registry row names no package lint's `.Rewrite`.
+// While the compiler builds, DIAGNOSTIC_REGISTRY_FIX_COUNT stops the build
+// naming any case DiagnosticEdit lacks.
+DIAGNOSTIC_REGISTRY_FIX_COUNT: #run effect_vocabulary_view_count("Registry/Diagnostics.jet", embed_file("Diagnostics.jet"), "DiagnosticRegistryFix", "Core/Prelude/Prelude.jet", embed_file("toolchain:Core/Prelude/Prelude.jet"), "DiagnosticEdit", [String]{})
+
 // This is a generated view of the Diagnostic impls in
 // Compiler/Prelude/Diagnostics.jet; Tools/Agent/DiagnosticRows.jet renders
 // DiagnosticRows.jet from them. This file owns the Source-side projection and
@@ -95,6 +101,11 @@ DIAGNOSTIC_STAGES: [String]{
     "sema/runtime",
     "tooling",
 }
+
+// Each part of a stage is one of the Prelude's DiagnosticStage cases, spelled
+// in lower case; DIAGNOSTIC_STAGE_PART_COUNT stops the build naming any part
+// DiagnosticStage lacks.
+DIAGNOSTIC_STAGE_PART_COUNT: #run effect_vocabulary_list_view_count("Registry/Diagnostics.jet", DIAGNOSTIC_STAGES.join("/").split("/").to_list(), "DIAGNOSTIC_STAGES", effect_vocabulary_lowered(effect_vocabulary_enum_names("Core/Prelude/Prelude.jet", embed_file("toolchain:Core/Prelude/Prelude.jet"), "DiagnosticStage")), "`DiagnosticStage` in Core/Prelude/Prelude.jet", [String]{})
 
 diagnostic_stage_is_registered: fn(stage: String) -> Bool Never! {
     loop known in DIAGNOSTIC_STAGES {

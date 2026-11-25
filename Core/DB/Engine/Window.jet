@@ -829,7 +829,7 @@ WINDOW_AGGSTEP: 3
 
 // windowReadPeerValues: code that reads the window's ORDER BY (peer)
 // values of the row of cursor csr into the registers from reg.
-window_read_peer_values: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, csr: Int, reg: Int) Never! {
+window_read_peer_values: fn(p: ^cg.Parse, a: ast.AST, s: WindowCodeArg, csr: Int, reg: Int) Never! {
     ob: a.windows[s.mwin].order_by
     if ob < 0 {
         return
@@ -914,7 +914,7 @@ window_agg_step: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, csr: Int, inverse: Boo
 // windowAggFinal: code that calls xValue (xFinalize with fin) of each
 // function of the window list, or computes the inline min() and max(),
 // into their result registers.
-window_agg_final: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, fin: Bool) Never! {
+window_agg_final: fn(p: ^cg.Parse, a: ast.AST, s: WindowCodeArg, fin: Bool) Never! {
     mwin: s.mwin
     win := mwin
     loop win >= 0 {
@@ -1059,7 +1059,7 @@ window_return_one_row: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg) -[DB]> Ne
 // windowInitAccum: code that clears each accumulator of the window list
 // and the state of the built-in functions that keep their own; the first
 // of the registers for the largest argument list.
-window_init_accum: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int) -> Int Never! {
+window_init_accum: fn(p: ^cg.Parse, a: ast.AST, mwin: Int) -> Int Never! {
     cg.get_vdbe(p)
     n_arg := 0
     win := mwin

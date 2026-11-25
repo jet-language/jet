@@ -1276,6 +1276,9 @@ coll_loop_range_stop: fn(exhausted: Bool) {
     if (cursor != I64{0}) { jet_rt_free(cursor, I64{40}, I64{8}) }
 }
 
+// The route lends start, end and value as exact-Int carriers, which compare
+// as Ints (jet_int_compare), never as bare words.
 #Export(c) jet_range_contains: fn(start: I64, end: I64, exclusive: U8, value: I64) -> Bool {
-    value >= start && (value < end || (exclusive == U8{0} && value == end))
+    against_end: jet_int_compare(value, end)
+    jet_int_compare(value, start) >= I64{0} && (against_end < I64{0} || (exclusive == U8{0} && against_end == I64{0}))
 }

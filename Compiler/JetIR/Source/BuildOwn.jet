@@ -640,7 +640,7 @@ ir_box_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) ->
 
 // A zero of `slot`'s type (a null box; IR_OPTION_INT_NONE for an inline
 // Option).
-ir_null_like: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) -> Int Never! {
+ir_null_like: fn(m: IRModule, b: ^IRBuilder, slot: Int) -> Int Never! {
     null: ir_temp_like(m, b, slot)
     ir_option_none(m, b, null)
     null
@@ -1673,7 +1673,7 @@ ir_end_builtin_receiver: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: 
 // statement being built it is held until the statement ends (ir_stmt) or an
 // early exit leaves it (ir_exit_statement_guards); true when it is not, and
 // the walk drops it after its last step (ir_list_walk).
-ir_end_walked_temporary: fn(m: ^IRModule, b: ^IRBuilder, list: Int) -> Bool Never! {
+ir_end_walked_temporary: fn(m: IRModule, b: ^IRBuilder, list: Int) -> Bool Never! {
     if list < 0 || !b.fresh[list] || !ir_has_drop(m, b, list) || b.views.get(list) != None || ir_lent(b, list) {
         return false
     }

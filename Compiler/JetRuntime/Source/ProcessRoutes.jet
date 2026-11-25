@@ -50,11 +50,13 @@ process_route_stream_mode: fn(mode: I64) {
     encoding_store(wrapping(result + PROCESS_SPEC_STDIN), process_route_optional_word(has_stdin, stdin))
     encoding_store(wrapping(result + PROCESS_SPEC_STDOUT), stdout)
     encoding_store(wrapping(result + PROCESS_SPEC_STDERR), stderr)
-    encoding_store(wrapping(result + PROCESS_SPEC_TIMEOUT), process_route_optional_word(has_timeout, timeout))
-    encoding_store(wrapping(result + PROCESS_SPEC_OUTPUT_LIMIT), process_route_optional_word(has_output, output))
-    encoding_store(wrapping(result + PROCESS_SPEC_CPU_TIME_LIMIT), process_route_optional_word(has_cpu, cpu))
-    encoding_store(wrapping(result + PROCESS_SPEC_MEMORY_LIMIT), process_route_optional_word(has_memory, memory))
-    encoding_store(wrapping(result + PROCESS_SPEC_OPEN_FILE_LIMIT), process_route_optional_word(has_files, files))
+    // The binding lends each limit as its exact-Int carrier; the spec keeps
+    // its I64, saturated (Int.jet int_saturated), as the launch checks read it.
+    encoding_store(wrapping(result + PROCESS_SPEC_TIMEOUT), process_route_optional_word(has_timeout, int_saturated(timeout)))
+    encoding_store(wrapping(result + PROCESS_SPEC_OUTPUT_LIMIT), process_route_optional_word(has_output, int_saturated(output)))
+    encoding_store(wrapping(result + PROCESS_SPEC_CPU_TIME_LIMIT), process_route_optional_word(has_cpu, int_saturated(cpu)))
+    encoding_store(wrapping(result + PROCESS_SPEC_MEMORY_LIMIT), process_route_optional_word(has_memory, int_saturated(memory)))
+    encoding_store(wrapping(result + PROCESS_SPEC_OPEN_FILE_LIMIT), process_route_optional_word(has_files, int_saturated(files)))
     encoding_store(wrapping(result + PROCESS_SPEC_DETACHED), if detached -> I64{1} else -> I64{0})
     encoding_store(wrapping(result + PROCESS_SPEC_TERMINAL), if has_terminal -> jet_rt_handle_clone_terminal_policy(terminal) else -> I64{0})
     encoding_store(wrapping(result + PROCESS_SPEC_POLICY_WIRE), if has_policy -> jet_rt_string_clone(policy) else -> I64{0})
@@ -89,7 +91,7 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     false
 }
 
-#Export(c) jet_process_spec_keep_open_raw: fn(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
+#Export(c) jet_process_spec_keep_open_raw: fn(value: I64, source_fd_int: I64, child_fd_int: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
     // Duplicate its lent fd, never reopen a pathname. The spec is consumed:
     // its earlier rows move into the returned one, so each passed descriptor
     // has one owner and closes once. The duplicate is the parent's carrier at
@@ -97,7 +99,11 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     // slot this spec already passes is refused (assigned -1, errno 0).
     // A slot outside 3..2147483646 is refused the same way. A negative
     // source is a handle with no descriptor (EBADF). The spec records its
-    // first refusal for launch to report.
+    // first refusal for launch to report. Both descriptors are lent exact-Int
+    // carriers, read saturated (Int.jet int_saturated): one beyond I64 is
+    // refused as any other out-of-range one.
+    source_fd: int_saturated(source_fd_int)
+    child_fd: int_saturated(child_fd_int)
     result: value
     target: process_route_i32(child_fd)
     assigned := I64{-1}
@@ -137,6 +143,6 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     // bool is exactly one C byte; do not overwrite adjacent caller storage.
     // Linux implements F_DUPFD_CLOEXEC.
     rt_text_put(supported_out, I64{1})
-    encoding_store(assigned_out, assigned)
-    encoding_store(errno_out, error)
+    encoding_store(assigned_out, jet_int_owned_from_i64(assigned))
+    encoding_store(errno_out, jet_int_owned_from_i64(error))
 }

@@ -243,13 +243,13 @@ compiler_mapped_unregister: fn(key: I64) {
     jet_rt_free(map, I64{64}, I64{8})
 }
 
-// `kind()`'s native code: 1 Clone, 2 Held or 3 Copy. A held map whose lease
-// broke now maps its copy, so it reports Copy; an empty map has no bytes to
-// hold and reports Copy.
+// `kind()`'s code as an owned exact-Int carrier: 1 Clone, 2 Held or 3 Copy.
+// A held map whose lease broke now maps its copy, so it reports Copy; an
+// empty map has no bytes to hold and reports Copy.
 #Export(c) jet_std_fs_map_kind: fn(map: I64) -> I64 {
     slot: rt_text_word(wrapping(map + I64{56}))
-    if (slot != I64{0} && sync_load(wrapping(slot + I64{40})) == I64{1}) { return MAPPED_COPY }
-    rt_text_word(wrapping(map + I64{48}))
+    broke: slot != I64{0} && sync_load(wrapping(slot + I64{40})) == I64{1}
+    jet_int_owned_from_i64(if broke -> MAPPED_COPY else -> rt_text_word(wrapping(map + I64{48})))
 }
 
 // mmap of `length` read-only private bytes of descriptor `fd` from its start:
@@ -537,8 +537,10 @@ compiler_mapped_place: fn(fd: I64, to: I64, slot: I64) -> Bool {
 // clone or its copy, which a lease break may place in memory), so DONTNEED
 // only drops pages a later read faults back in from that file. Advice
 // changes no data: an empty map, and COLD on a kernel before 5.4 (EINVAL),
-// succeed.
-#Export(c) jet_std_fs_map_advise: fn(map: I64, advice: I64, error: I64) -> I64 {
+// succeed. The advice is a lent exact-Int carrier, read saturated (Int.jet
+// int_saturated), which the kernel refuses (EINVAL) when it names none.
+#Export(c) jet_std_fs_map_advise: fn(map: I64, advice_int: I64, error: I64) -> I64 {
+    advice: int_saturated(advice_int)
     length: rt_text_word(wrapping(map + I64{40}))
     if (length == I64{0}) { return I64{1} }
     result: host_call(I64{28}, rt_text_word(wrapping(map + I64{32})), length, advice)

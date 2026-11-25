@@ -20,8 +20,8 @@ use {
         DIAGNOSTIC_ERROR,
         ENV_JETPACK_BIN,
         ENV_JET_INTERNAL_ROOT_DISPATCH_PID,
-        JET_KEYWORD_NAMES,
-        JET_TYPE_NAMES,
+        KEYWORD_NAMES,
+        TYPE_NAMES,
         Diagnostic,
         DiagnosticRegistryFix,
         TAppliedRule,
@@ -188,7 +188,7 @@ jet_cli_reserved_text: fn() -> String Never! {
         out = "{out}  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"
     }
     out = "{out}\nContextual keywords (valid identifiers outside their form):\n"
-    loop word in JET_KEYWORD_NAMES {
+    loop word in KEYWORD_NAMES {
         if jet_cli_contextual_keyword(word) -> out = "{out}  {word}\n"
     }
     out = "{out}\nSigils:\n"
@@ -212,7 +212,7 @@ jet_cli_reserved_entries: fn(entries: [JetCLIReservedEntry]) -> JetCLIStatusValu
 jet_cli_reserved: fn(json: Bool) -> JetCLIPlan Never! {
     if !json -> return jet_cli_done(jet_cli_reserved_text(), "", JET_DRIVER_EXIT_OK)
     contextual := [JetCLIStatusValue]{}
-    loop word in JET_KEYWORD_NAMES {
+    loop word in KEYWORD_NAMES {
         if jet_cli_contextual_keyword(word) -> contextual.push(jet_cli_status_text(word))
     }
     payload: jet_cli_status_object(
@@ -238,12 +238,12 @@ jet_cli_reserved: fn(json: Bool) -> JetCLIPlan Never! {
     loop entry in JET_CLI_TEACHING_RESERVED {
         assert(text.contains("\n  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"))
     }
-    loop word in JET_KEYWORD_NAMES {
+    loop word in KEYWORD_NAMES {
         if jet_cli_contextual_keyword(word) {
             assert(text.contains("\n  {word}\n"), "contextual keyword `{word}` is missing")
         }
     }
-    assert(JET_KEYWORD_NAMES.contains("defer") && jet_cli_contextual_keyword("defer") && !jet_cli_contextual_keyword("fn"))
+    assert(KEYWORD_NAMES.contains("defer") && jet_cli_contextual_keyword("defer") && !jet_cli_contextual_keyword("fn"))
 }
 
 // ---------------------------------------------------------------------------
@@ -423,8 +423,8 @@ jet_cli_llm_digest: fn() -> String Never! {
         jet_cli_digest_section("First program", first_program_body),
         jet_cli_digest_section("Core source rules", core_rules_body),
         jet_cli_digest_section("Canonical idiom suites", idiom_suites_body),
-        jet_cli_digest_section("Keywords", jet_cli_digest_list(JET_KEYWORD_NAMES)),
-        jet_cli_digest_section("Built-in type names", jet_cli_digest_list(JET_TYPE_NAMES)),
+        jet_cli_digest_section("Keywords", jet_cli_digest_list(KEYWORD_NAMES)),
+        jet_cli_digest_section("Built-in type names", jet_cli_digest_list(TYPE_NAMES)),
         jet_cli_digest_section("Reserved first-party names", jet_cli_digest_list(JET_DRIVER_RESERVED_ROOTS)),
         jet_cli_digest_section("Markers", marker_body),
         jet_cli_digest_section("Core module index", core_body),

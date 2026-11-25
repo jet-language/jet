@@ -1,0 +1,63 @@
+// Typed composite lookup keys. A key is a tuple of row-sized ints (each
+// below 2^32): a text's id in `names`, a span's row, another key's row. Each
+// (a, b) pair gets one row on first sight, so a key of any arity is a pair of
+// pairs and never a text built from its parts. A table's keys keep one shape
+// per position, so equal rows mean equal tuples.
+use jet_foundation.[
+    NameTable,
+    Span,
+    name_index,
+    name_intern,
+    name_table_sized,
+]
+
+// The rows of one table's keys, and the rows a check has seen (sema_key_first).
+SemaKeyRows: struct {
+    names: NameTable{name_table_sized(8)},
+    rows: [Int:Int]{[Int:Int]{}},
+    count: Int{0},
+    seen: [Int:Bool]{[Int:Bool]{}},
+}
+
+// No span start or end reaches this, so it stands for an absent span.
+SEMA_KEY_NONE: 4294967295
+
+// The row of the pair (`a`, `b`), added when new.
+sema_key_pair: fn(keys: ^SemaKeyRows, a: Int, b: Int) -> Int Never! {
+    slot: (a << 32) | b
+    if keys.rows.get(slot) == .Val(row) -> return row
+    row: keys.count
+    keys.count += 1
+    keys.rows[slot] = row
+    row
+}
+
+// The id of `text`.
+sema_key_text: fn(keys: ^SemaKeyRows, text: String) -> Int Never! {
+    name_index(name_intern(keys.names, text))
+}
+
+// The row of `span`; an absent span has a row of its own.
+sema_key_span: fn(keys: ^SemaKeyRows, span: Span?) -> Int Never! {
+    if span == {
+        .Val(at) -> sema_key_pair(keys, at.start, at.end)
+        .None -> sema_key_pair(keys, SEMA_KEY_NONE, SEMA_KEY_NONE)
+    }
+}
+
+// Whether `key` is new to the rows `keys` has seen; it is seen from now on.
+sema_key_first: fn(keys: ^SemaKeyRows, key: Int) -> Bool Never! {
+    if keys.seen.has_key(key) -> return false
+    keys.seen[key] = true
+    true
+}
+
+// Whether the report of texts `first` and `second` at `span` is new to `keys`.
+sema_key_report_first: fn(keys: ^SemaKeyRows, first: String, span: Span?, second: String) -> Bool Never! {
+    first_id: sema_key_text(keys, first)
+    second_id: sema_key_text(keys, second)
+    texts: sema_key_pair(keys, first_id, second_id)
+    at: sema_key_span(keys, span)
+    key: sema_key_pair(keys, at, texts)
+    sema_key_first(keys, key)
+}

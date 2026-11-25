@@ -60,9 +60,7 @@ sema_value_method_argument: fn(argument: CallArg, method: String, index: Int, re
     checked: sema_check_expression(argument.expr, Val(required), check)
     sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, check)
     value: checked ?? return None
-    if sema_call_type_assignable(required, value.ty, check.environment.*, check.program.*) == (Val(true)) {
-        return Val(value)
-    }
+    if sema_call_type_assignable(required, value.ty, check) == (Val(true)) -> return Val(value)
     if sema_expr_numeric_value_widening(value, required) == (Val(true)) {
         line: sema_source_line_at(check.environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, check.diagnostics)
@@ -109,7 +107,7 @@ sema_value_method_bit_width: fn(receiver: Type) -> Int Never! {
     }
 }
 
-sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TExprKind {
+sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, check: SemaBodyCheck) -> TExprKind {
     if row.lowering == {
         // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
         .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation.copy(), args: typed}
@@ -117,7 +115,7 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
         .StringRangeSlice -> {
             zero_start := sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             zero_end := sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-            TExprKind.Slice{base: receiver_value, start: zero_start.move(), end: zero_end.move(), range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
+            TExprKind.Slice{base: receiver_value, start: zero_start.move(), end: zero_end.move(), range: Val(typed[0]), location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, span)}
         }
         .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce, args: typed}
         .StringCutLast -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringCutLast, args: typed}
@@ -142,36 +140,36 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
 // A CoreSource row (`text.matches(pattern)`, `text.first_lines(n)`) calls the
 // `owner` function that fills its role with the receiver first, typed by that
 // function's declared result; the loader loads `owner` for the spelling.
-sema_value_method_core_source: fn(owner: String, role: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_value_method_core_source: fn(owner: String, role: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     unavailable: sema_error("E0906", span, "the `{owner}` function that fills the {role} role is unavailable", "this String method's body is that `{owner}` source helper", "restore the `{owner}` source module")
-    if sema_call_core_module_identity(environment, program, owner) == None {
-        diagnostics.push(unavailable)
+    if sema_call_core_module_identity(check.environment.*, check.program.*, owner) == None {
+        check.diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     // Snapshot: a role's filler is a registered Core function, and a lone
     // program registers none.
     if graph.mode == .Snapshot {
-        diagnostics.push(unavailable)
+        check.diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     filler: sema_core_role_function(graph, role) ?? {
-        diagnostics.push(sema_missing_core_role(role, span))
+        check.diagnostics.push(sema_missing_core_role(role, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    target: sema_call_core_source_target(environment, program, filler.module_identity, filler.name, [Type]{}, span, true, diagnostics) ?? {
-        diagnostics.push(unavailable)
+    target: sema_call_core_source_target(check.environment.*, check.program.*, filler.module_identity, filler.name, [Type]{}, span, true, check.diagnostics) ?? {
+        check.diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     result: sema_call_signature_return(target.signature) ?? {
-        diagnostics.push(unavailable)
+        check.diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     args := [TCallArg]{sema_value_method_source_arg(receiver_value)}
     loop argument in typed -> args.push(sema_value_method_source_arg(argument))
     value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: args}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
 }
 
 // `opt.map(f: T -> R) -> R?`; the callback's own failure carrier stays at the
@@ -180,7 +178,7 @@ sema_value_method_core_source: fn(owner: String, role: String, receiver_value: T
 sema_value_method_option_map: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     required := Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     callback: sema_expression_lambda_collection_callback(args[0].expr, Val(required), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if sema_call_host_callback_assignable(required, callback.ty, check.environment.*, check.program.*) != (Val(true)) {
+    if sema_call_host_callback_assignable(required, callback.ty, check) != (Val(true)) {
         check.diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "argument 1 to `.map()` should be {sema_type_show(required)}, not {sema_type_show(callback.ty)}", "built-in methods need arguments of the right type", sema_type_fix_hint(required, callback.ty)))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -191,13 +189,13 @@ sema_value_method_option_map: fn(receiver: Expr, receiver_value: TExpr, inner: T
     }
     updated_args := args
     params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false}}
-    ownership := sema_ownership_check_method_call(check.state, "Option.map", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, "Option.map", receiver, AccessConvention.Read, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     // The method itself is known-pure (as every builtin value method); the
     // callback's own effects are its lambda's, merged where the walk meets it.
-    if !sema_effect_record_intrinsic_effects(check.environment.*, check.program.*, check.scopes, check.context, "Option.map", span, [EffectRowEntry]{}, check.diagnostics) {
+    if !sema_effect_record_intrinsic_effects(check, "Option.map", span, [EffectRowEntry]{}) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     value := sema_tree_node(Type.Option{inner: success}, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.OptionMap, args: [TExpr]{callback}}, span)
@@ -217,14 +215,14 @@ sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner
     why: sema_value_method_argument(args[0], "or_err", 0, Type.String, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     updated_args := args
     params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
-    ownership := sema_ownership_check_snapshot_receiver_call(check.state, "Option.or_err", receiver, params, updated_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_snapshot_receiver_call(check, "Option.or_err", receiver, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_effect_record_intrinsic_effects(check.environment.*, check.program.*, check.scopes, check.context, "Option.or_err", span, [EffectRowEntry]{}, check.diagnostics) {
+    if !sema_effect_record_intrinsic_effects(check, "Option.or_err", span, [EffectRowEntry]{}) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    route: sema_call_core_resolve_route(check.environment.*, check.program.*, "core.prelude", "option_or_err", [Type]{inner}, 2, false, span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    route: sema_call_core_resolve_route(check, "core.prelude", "option_or_err", [Type]{inner}, 2, false, span) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     target: if route == {
         .Source(source) -> source
         .Core(_) | .SharedSite(_) -> {
@@ -322,7 +320,7 @@ sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: Str
         value: sema_check_expression(argument.expr, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(value)
     }
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.PreciseMethod{type_name: owner, method: method}, args: typed}, span)
@@ -375,12 +373,12 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     // loan.
     callee: "{owner}.{method}"
     two_phase: row.access == AccessConvention.Write && row.receiver == BuiltinMethodReceiver.String
-    ownership := if two_phase -> sema_ownership_check_two_phase_method_call(check.state, callee, sema_ownership_receiver_consumer(callee), receiver, row.access, false, params, updated_args, check.scopes, span, expr_span(receiver), check.diagnostics) else -> sema_ownership_check_method_call(check.state, callee, receiver, row.access, params, updated_args, check.scopes, span, check.diagnostics)
+    ownership := if two_phase -> sema_ownership_check_two_phase_method_call(check, callee, sema_ownership_receiver_consumer(callee), receiver, row.access, false, params, updated_args, span, expr_span(receiver)) else -> sema_ownership_check_method_call(check, callee, receiver, row.access, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if row.access == AccessConvention.Write {
-        if !sema_effect_record_mem_intrinsic(check.environment.*, check.program.*, check.scopes, check.context, callee, span, check.diagnostics) {
+        if !sema_effect_record_mem_intrinsic(check, callee, span) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     } else {
@@ -390,13 +388,13 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
             .StringSlice | .StringRangeSlice | .StringSplitOnce | .StringCutLast | .IntToRadix | .Show | .Predicate | .BitCount | .Arithmetic(_) | .Euclidean(_) | .Overflow(_, _) -> false
         }
         if needs_fact {
-            if !sema_effect_record_intrinsic_effects(check.environment.*, check.program.*, check.scopes, check.context, callee, span, [EffectRowEntry]{}, check.diagnostics) {
+            if !sema_effect_record_intrinsic_effects(check, callee, span, [EffectRowEntry]{}) {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
     }
     if row.lowering == .CoreSource(source_owner, role) {
-        return sema_value_method_core_source(source_owner, role, receiver_value, typed, span, expected, check.environment.*, check.program.*, check.context, check.diagnostics)
+        return sema_value_method_core_source(source_owner, role, receiver_value, typed, span, expected, check)
     }
     result := builtin_method_bind(row.result, receiver_value.ty)
     needs_line: if row.lowering == {
@@ -408,11 +406,11 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         // `x.pow(-n)` is the exact Fraction 1 / x^n (from_parts normalizes
         // the sign and reduces; x == 0 stops "divided by zero").
         exponent: sema_tree_node(Type.Int, TExprKind.Unary{op: TUnaryOp.Neg, operand: typed[0].copy()}, span)
-        power: sema_tree_node(Type.Int, sema_value_method_kind(row, method, receiver_value, [TExpr]{exponent}, Type.Int, line, span, check.environment.*, check.program.*, check.scopes), span)
+        power: sema_tree_node(Type.Int, sema_value_method_kind(row, method, receiver_value, [TExpr]{exponent}, Type.Int, line, span, check), span)
         one: sema_tree_node(Type.Int, TExprKind.IntLit{value: 1, width: None}, span)
         exact: sema_tree_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{one, power}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(exact, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
-    value := sema_tree_node(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, check.environment.*, check.program.*, check.scopes), span)
+    value := sema_tree_node(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, check), span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }

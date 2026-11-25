@@ -4,7 +4,6 @@ use jet_foundation.[
     BodyHandleOp,
     AST_NODE_GENERATED,
     AccessConvention,
-    CORE_BUILTINS_MODULE,
     CallArg,
     Diagnostic,
     EffectRowEntry,
@@ -13,10 +12,10 @@ use jet_foundation.[
     InternalTag,
     ParamZone,
     Span,
+    TERMINAL_FACTS,
     TFailureCarrier,
     TagMarker,
     Type,
-    core_call,
     expr_span,
 ]
 
@@ -86,10 +85,10 @@ sema_process_method_params: fn(args: [CallArg], required: [Type], moving: [Bool]
     params
 }
 
-sema_process_check_method_ownership: fn(receiver: Expr, method: String, args: [CallArg], required: [Type], moving: [Bool], receiver_access: AccessConvention, span: Span, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, diagnostics: ^[Diagnostic]) -> Bool {
+sema_process_check_method_ownership: fn(receiver: Expr, method: String, args: [CallArg], required: [Type], moving: [Bool], receiver_access: AccessConvention, span: Span, check: ^SemaBodyCheck) -> Bool {
     updated_args := args
     params := sema_process_method_params(updated_args, required, moving)
-    ownership := sema_ownership_check_method_call(state, method, receiver, receiver_access, params, updated_args, scopes, span, diagnostics)
+    ownership := sema_ownership_check_method_call(check, method, receiver, receiver_access, params, updated_args, span)
     ownership.accepted && ownership.complete
 }
 
@@ -104,7 +103,7 @@ sema_process_failure_carrier: fn(result: Type) -> TFailureCarrier Never! {
     }
 }
 
-sema_process_record_intrinsic: fn(result: Type, effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool Never! {
+sema_process_record_intrinsic: fn(result: Type, effect_name: String, api: String, span: Span, check: ^SemaBodyCheck) -> Bool Never! {
     effects := [EffectRowEntry]{}
     if effect_name != "" -> effects.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -114,23 +113,26 @@ sema_process_record_intrinsic: fn(result: Type, effect_name: String, api: String
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
     }
-    sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
+    sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, api, span, facts, check.diagnostics)
 }
 
-sema_process_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck Never! {
-    if !sema_process_record_intrinsic(result, effect_name, api, span, environment, program, scopes, context, diagnostics) {
+sema_process_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
+    if !sema_process_record_intrinsic(result, effect_name, api, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     // A call checker's finish: under the dispatcher's success view a
     // `ProcessReceipt IOError!` result meets a `ProcessReceipt` expectation by
     // its success side, and the call root then propagates the failure.
-    checked := sema_expression_call_expected(value, expected, environment, program, context, diagnostics)
+    checked := sema_expression_call_expected(value, expected, check)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
+// The ProcessSpec builders and checks the compiler still types; the launch
+// steps (`plan`, `run`, `run_checked`, `spawn`) are core.process's
+// `impl ProcessSpec` methods.
 sema_process_spec_known_method: fn(method: String) -> Bool Never! {
-    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "keep_open" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "memory_scope" || method == "open_file_limit" || method == "cpu_affinity" || method == "io_priority" || method == "io_idle" || method == "under" || method == "plan" || method == "run" || method == "run_checked" || method == "spawn"
+    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "keep_open" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "memory_scope" || method == "open_file_limit" || method == "cpu_affinity" || method == "io_priority" || method == "io_idle" || method == "under"
 }
 
 sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics: ^[Diagnostic]) -> Type? {
@@ -164,15 +166,6 @@ sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics:
         }
         "under" -> {
             if argc == 1 -> return Val(spec)
-        }
-        "plan" -> {
-            if argc == 0 -> return Val(sema_process_io_result(sema_process_named("ProcessPlan")))
-        }
-        "run" | "run_checked" -> {
-            if argc == 0 -> return Val(sema_process_io_result(sema_process_named("ProcessReceipt")))
-        }
-        "spawn" -> {
-            if argc == 0 -> return Val(sema_process_io_result(sema_process_named("ProcessChild")))
         }
         else -> {}
     }
@@ -232,8 +225,8 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     // (`clean.env(…).run()` in a loop) is no E0121.
     // The spec still moves like an unmarked owning position, so a later use
     // turns the move into a share and a borrowed parameter keeps its value.
-    known_mutating: method != "abilities" && method != "plan" && method != "run" && method != "run_checked" && method != "spawn"
-    if !sema_process_check_method_ownership(receiver, "ProcessSpec.{method}", args, required, [Bool]{}, AccessConvention.Read, span, check.scopes, check.state, check.diagnostics) {
+    known_mutating: method != "abilities"
+    if !sema_process_check_method_ownership(receiver, "ProcessSpec.{method}", args, required, [Bool]{}, AccessConvention.Read, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     sema_receiver_mark_forget(check.state, receiver)
@@ -242,41 +235,17 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    // The stream routes and the Duration limits are still the host leaves
-    // `jet_builtins.process_spec_<method>`: their Core call facts name the
-    // effects and their row names the runtime export every tier runs.
-    if method == "stdin" || method == "stdout" || method == "stderr" || method == "timeout" || method == "cpu_time_limit" {
-        rejected: SemaMethodSpecialCheck{handled: true, value: None}
-        record: core_call(CORE_BUILTINS_MODULE, "process_spec_{method}") ?? {
-            check.diagnostics.push(sema_error("E0003", span, "`ProcessSpec.{method}` has no host leaf `jet_builtins.process_spec_{method}`", "this ProcessSpec builder lowers onto its jet_builtins host leaf row", "restore the `process_spec_{method}` row in Compiler/Prelude/Core.rows"))
-            return rejected
-        }
-        fallibility: sema_expression_failure_carrier(result)
-        if !sema_call_core_record_effects_as(record, "ProcessSpec.{method}", span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, check.scopes, check.context, check.environment.*, check.program.*, check.diagnostics) {
-            return rejected
-        }
-        call_args := [TExpr]{receiver_value}
-        widen := [Bool]{false}
-        loop argument in values {
-            call_args.push(argument)
-            widen.push(false)
-        }
-        value: sema_call_core_tree(record, call_args, span, [Type]{}, widen, result, fallibility, None, check.environment.*, check.program.*, check.diagnostics) ?? return rejected
-        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check.environment.*, check.program.*, check.context, check.diagnostics)}
-    }
-    // Every other method is the ordinary Core source body that fills its
+    // Each method is the ordinary Core source body that fills its
     // jet_builtins role (sema_process_spec_role; `abilities` reports the
     // checked TerminalFact set), so every tier runs the same Jet code.
-    effect: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
     call_args := [TExpr]{receiver_value}
     loop argument in values -> call_args.push(argument)
-    sema_process_source_call(sema_process_spec_role(method, args.len()), "ProcessSpec.{method}", effect, call_args, result, span, expected, check)
+    sema_process_source_call(sema_process_spec_role(method, args.len()), "ProcessSpec.{method}", "", call_args, result, span, expected, check)
 }
 
 // The jet_builtins role of the Core body a ProcessSpec method other than
-// the stream routes and Duration limits calls, given its argument count
-// (`terminal(policy)` fills ProcessSpecTerminalWithPolicy); "" for no such
-// method.
+// `keep_open` calls, given its argument count (`terminal(policy)` fills
+// ProcessSpecTerminalWithPolicy); "" for no such method.
 sema_process_spec_role: fn(method: String, argc: Int) -> String Never! {
     if method == {
         "abilities" -> "ProcessSpecAbilities"
@@ -296,10 +265,11 @@ sema_process_spec_role: fn(method: String, argc: Int) -> String Never! {
         "detached" -> "ProcessSpecDetached"
         "terminal" -> if argc == 1 -> "ProcessSpecTerminalWithPolicy" else -> "ProcessSpecTerminal"
         "under" -> "ProcessSpecUnder"
-        "plan" -> "ProcessSpecPlan"
-        "run" -> "ProcessSpecRun"
-        "run_checked" -> "ProcessSpecRunChecked"
-        "spawn" -> "ProcessSpecSpawn"
+        "stdin" -> "ProcessSpecStdin"
+        "stdout" -> "ProcessSpecStdout"
+        "stderr" -> "ProcessSpecStderr"
+        "timeout" -> "ProcessSpecTimeout"
+        "cpu_time_limit" -> "ProcessSpecCPUTimeLimit"
         else -> ""
     }
 }
@@ -309,9 +279,7 @@ sema_process_spec_role: fn(method: String, argc: Int) -> String Never! {
 // empty). The compiler finds the body by its role, never by its name.
 sema_process_source_call: fn(role: String, api: String, effect_name: String, args: [TExpr], result: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_process_record_intrinsic(result, effect_name, api, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
-        return rejected
-    }
+    if !sema_process_record_intrinsic(result, effect_name, api, span, check) -> return rejected
     filler: sema_core_role_function(check.program.registration_graph, role) ?? {
         check.diagnostics.push(sema_missing_core_role(role, span))
         return rejected
@@ -324,7 +292,7 @@ sema_process_source_call: fn(role: String, api: String, effect_name: String, arg
     call_args := [TCallArg]{}
     loop argument in args -> call_args.push(sema_value_method_source_arg(argument))
     value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: call_args}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check.environment.*, check.program.*, check.context, check.diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
 }
 
 sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], result: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
@@ -337,9 +305,7 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
             return rejected
         }
     }
-    if sema_call_core_no_os_refused(check.environment.*, check.program.*, "core.files", "keep_open", span, check.diagnostics) {
-        return rejected
-    }
+    if sema_call_core_no_os_refused(check, "core.files", "keep_open", span) -> return rejected
     target: sema_call_core_role_target("ProcessSpecKeepOpen", [Type]{}, span, check.environment.*, check.program.*, check.diagnostics) ?? {
         check.context.incomplete_reasons.push("ProcessSpec.keep_open must resolve its canonical Jet source body")
         return rejected
@@ -365,8 +331,8 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
     if taken && sema_ownership_binding_for_expr(check.state, args[0].expr, check.scopes) == .Val(root) {
         taken = !sema_ownership_binding_is_borrowed_param(root)
     }
-    stored: sema_call_marked_move_value(check.state, taken, args[0].expr, handle_value, check.scopes, check.diagnostics) ?? return rejected
-    if !sema_process_check_method_ownership(receiver, "ProcessSpec.keep_open", args, [Type]{handle_type, slot_type}, [Bool]{true, false}, AccessConvention.Read, span, check.scopes, check.state, check.diagnostics) {
+    stored: sema_call_marked_move_value(check, taken, args[0].expr, handle_value) ?? return rejected
+    if !sema_process_check_method_ownership(receiver, "ProcessSpec.keep_open", args, [Type]{handle_type, slot_type}, [Bool]{true, false}, AccessConvention.Read, span, check) {
         return rejected
     }
     sema_receiver_mark_forget(check.state, receiver)
@@ -375,14 +341,14 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
             return rejected
         }
     }
-    if !sema_process_record_intrinsic(result, "FS", "ProcessSpec.keep_open", span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_process_record_intrinsic(result, "FS", "ProcessSpec.keep_open", span, check) {
         return rejected
     }
     callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return rejected
     handle_arg := sema_value_method_source_arg(stored)
     handle_arg.widen_to_union = sema_call_widen_union(handle_type, stored.ty)
     value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), handle_arg, sema_value_method_source_arg(slot_value)}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check.environment.*, check.program.*, check.context, check.diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
 }
 
 // The result of a child's method (`child.wait()` and the rest); None for a
@@ -408,7 +374,7 @@ sema_process_child_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         sema_process_infer_args(args, check)
         return rejected
     }
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return rejected
     }
     effect: if method == "id" -> "" else -> "Exec"
@@ -438,10 +404,10 @@ sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: 
     }
     required := [Type]{sema_process_named("TerminalSize")}
     values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_process_check_method_ownership(receiver, "TerminalSession.resize", args, required, [Bool]{}, AccessConvention.Read, span, check.scopes, check.state, check.diagnostics) {
+    if !sema_process_check_method_ownership(receiver, "TerminalSession.resize", args, required, [Bool]{}, AccessConvention.Read, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_process_finish(receiver_value, BodyHandleOp.TerminalSessionResize, values, sema_process_io_result(Type.Named{name: "Unit"}), "IO", "TerminalSession.resize", span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_process_finish(receiver_value, BodyHandleOp.TerminalSessionResize, values, sema_process_io_result(Type.Named{name: "Unit"}), "IO", "TerminalSession.resize", span, expected, check)
 }
 
 sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
@@ -465,7 +431,7 @@ sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         else -> [Type]{}
     }
     values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_process_check_method_ownership(receiver, "ProcessStdin.{method}", args, required, [Bool]{}, AccessConvention.Read, span, check.scopes, check.state, check.diagnostics) {
+    if !sema_process_check_method_ownership(receiver, "ProcessStdin.{method}", args, required, [Bool]{}, AccessConvention.Read, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result: if method == {
@@ -479,7 +445,7 @@ sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         "write_bytes" -> BodyHandleOp.ProcessStdinWriteAll
         else -> BodyHandleOp.ProcessStdinClose
     }
-    sema_process_finish(receiver_value, operation, values, result, "Exec", "ProcessStdin.{method}", span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_process_finish(receiver_value, operation, values, result, "Exec", "ProcessStdin.{method}", span, expected, check)
 }
 
 // A `[U8]` given to the text `write` is the argument mismatch whose fix names
@@ -508,14 +474,14 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     api := "{stream_name}.{method}"
     required: if required_arity == 1 -> [Type]{Type.Int} else -> [Type]{}
     values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_process_check_method_ownership(receiver, api, args, required, [Bool]{}, AccessConvention.Read, span, check.scopes, check.state, check.diagnostics) {
+    if !sema_process_check_method_ownership(receiver, api, args, required, [Bool]{}, AccessConvention.Read, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     // `read_bytes(max)`: Read::read on the pipe, up to `max` bytes, empty at
     // EOF.
     if method == "read_bytes" {
         operation: if stream_name == "ProcessStderrStream" -> BodyHandleOp.ProcessStderrRead else -> BodyHandleOp.ProcessStdoutRead
-        return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+        return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, check)
     }
     // `chunks(size)`: the Core source body filling ProcessStdoutChunks /
     // ProcessStderrChunks builds the loop source, whose Iterable reads the pipe
@@ -526,7 +492,7 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         size: if values.len() == 1 -> values[0].copy() else -> sema_tree_node(Type.Int, TExprKind.IntLit{value: 65536, width: None}, span)
         return sema_process_source_call(role, api, "Exec", [TExpr]{receiver_value, size}, result, span, expected, check)
     }
-    sema_process_finish(receiver_value, BodyHandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_process_finish(receiver_value, BodyHandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, check)
 }
 
 sema_call_try_process_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
@@ -541,7 +507,7 @@ sema_call_try_process_handle_method: fn(receiver: Expr, receiver_value: TExpr, m
     // that fact; any other string key stays an open preview fact.
     if method == "has" && args.len() == 1 && receiver_value.ty == .Tagged(marker, _) && marker == (TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}) {
         if args[0].expr == .Str(parts, key_span, _) && parts.len() == 1 && parts[0] == .Lit(key) {
-            if sema_suggest_field(key, SEMA_TERMINAL_FACTS) == .Val(fact) {
+            if sema_suggest_field(key, TERMINAL_FACTS) == .Val(fact) {
                 check.diagnostics.push(sema_error("E0302", key_span, "terminal fact key `{key}` looks like `{fact}`", "preview string keys stay open, but close spellings of stable facts are probably typos", "write `TerminalFact.{fact}`"))
                 sema_process_infer_args(args, check)
                 return SemaMethodSpecialCheck{handled: true, value: None}

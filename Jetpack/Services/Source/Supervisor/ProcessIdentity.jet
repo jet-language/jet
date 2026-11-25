@@ -293,7 +293,7 @@ services_stop_persisted_authority_after_leader_exit: fn(state: ServiceProcessSta
 
 // Kill and reap a child whose state could not be published. The platform
 // authority is tried first; the direct group kill covers the rest.
-services_cleanup_child_with_authority: fn(child: ^ProcessChild, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> String Never! {
+services_cleanup_child_with_authority: fn(child: ProcessChild, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> String Never! {
     authority_error := String?{None}
     if authority.uses_platform_authority() {
         if services_kill_authority_now(authority) == .Err(first) {
@@ -354,7 +354,7 @@ services_run_bounded_probe: fn(spec: ProcessSpec, timeout_ms: Int) -[Env, Exec, 
 }
 
 // Kill the child's process group and reap it; failures are ignored.
-services_abandon_child: fn(child: ^ProcessChild) -[Exec, Time.Wait]> {
+services_abandon_child: fn(child: ProcessChild) -[Exec, Time.Wait]> {
     child.kill().drop("the abandoned child may already have exited")
     child.wait().drop("reaping an abandoned child is best-effort")
 }

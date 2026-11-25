@@ -1278,6 +1278,11 @@ ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
 // argument, and the raw heap allocation and release, the memory sentry's
 // account of an OS mapping, a region's reserve and release of fresh pages,
 // and `context.allocator`'s take, give and room of a block, which take none.
+// The core.tasks rows (Core/Tasks/Tasks.jet) make a channel's endpoint pair,
+// unbounded or bounded, and a timer Receiver; the core.event rows
+// (Core/Event/Event.jet) make an Event under a policy, a Hook, a
+// DecisionHook and an AsyncEvent: each at the type arguments of the call's
+// result, which the runtime provider is handed descriptors of.
 IRCoreIntrinsicRow: struct {
     role: String,
     intrinsic: IRRuntimeIntrinsic,
@@ -1312,6 +1317,14 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{role: "InlineContextTake", intrinsic: IRRuntimeIntrinsic.ContextTake},
     IRCoreIntrinsicRow{role: "InlineContextGive", intrinsic: IRRuntimeIntrinsic.ContextGive},
     IRCoreIntrinsicRow{role: "InlineContextRoom", intrinsic: IRRuntimeIntrinsic.ContextRoom},
+    IRCoreIntrinsicRow{role: "InlineChannelNew", intrinsic: IRRuntimeIntrinsic.ChannelNew},
+    IRCoreIntrinsicRow{role: "InlineChannelBounded", intrinsic: IRRuntimeIntrinsic.ChannelBounded},
+    IRCoreIntrinsicRow{role: "InlineTimerAfter", intrinsic: IRRuntimeIntrinsic.TimerAfter},
+    IRCoreIntrinsicRow{role: "InlineEventWithPolicy", intrinsic: IRRuntimeIntrinsic.EventWithPolicy},
+    IRCoreIntrinsicRow{role: "InlineHookNew", intrinsic: IRRuntimeIntrinsic.HookNew},
+    IRCoreIntrinsicRow{role: "InlineDecisionHookNew", intrinsic: IRRuntimeIntrinsic.DecisionHookNew},
+    IRCoreIntrinsicRow{role: "InlineAsyncEventNew", intrinsic: IRRuntimeIntrinsic.AsyncEventNew},
+    IRCoreIntrinsicRow{role: "InlineIterProgress", intrinsic: IRRuntimeIntrinsic.IterProgress},
 }
 
 // The checked Core functions that fill an IR_CORE_INTRINSICS role, by
@@ -1336,7 +1349,11 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
 // View over its element and owner types, the
 // raw heap pair is not, a region's reserve reads its size and its release
 // the address and size, and a context block's take reads its size and
-// align, its give and room the address.
+// align, its give and room the address. A channel or timer constructor is
+// generic over its element, an Event's over its payload, and a Hook's,
+// DecisionHook's or AsyncEvent's over its payload and result or failure
+// type, and a described progress source over its items' element; each reads
+// the arguments its lowering does.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
@@ -1350,8 +1367,19 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
         .AllocRaw | .FreeRaw -> function.generic_params.len() == 0
         .RegionReserve | .ContextRoom -> ir_intrinsic_signature(function, 1)
         .RegionRelease | .ContextTake | .ContextGive | .Mapped | .Unmapping -> ir_intrinsic_signature(function, 2)
+        .ChannelNew -> ir_intrinsic_generic_shape(function, 1, 0)
+        .ChannelBounded | .EventWithPolicy -> ir_intrinsic_generic_shape(function, 1, 1)
+        .TimerAfter -> ir_intrinsic_generic_shape(function, 1, 2)
+        .HookNew | .DecisionHookNew -> ir_intrinsic_generic_shape(function, 2, 1)
+        .AsyncEventNew -> ir_intrinsic_generic_shape(function, 2, 2)
+        .IterProgress -> ir_intrinsic_generic_shape(function, 1, 3)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
+}
+
+// Whether `function` has `generics` type parameters and `params` parameters.
+ir_intrinsic_generic_shape: fn(function: FnBody, generics: Int, params: Int) -> Bool Never! {
+    function.generic_params.len() == generics && function.params.len() == params
 }
 
 // Selects function `index` as `owner`'s `trait_short` hook for the
@@ -1981,6 +2009,14 @@ ir_executable_return_in: fn(function: FnBody, declared: Type?) -> Type? Never! {
     None
 }
 
+// The type a call of function row `row` at its instance `type_args`
+// produces: ir_executable_return_in of sema's row for its declared return,
+// Unit when it declares none.
+ir_call_return: fn(p: IRProgram, b: IRBuilder, row: Int, type_args: [Type], span: Span) -> Type Never! {
+    declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, type_args, written, span)) else -> Type?{None}
+    ir_executable_return_in(p.functions[row], declared) ?? Type.Named{name: "Unit"}
+}
+
 // Fact type `ty` of the builder's checked function (a binder's, a call's
 // type argument, a signature's, a lambda's) in the instance being built:
 // sema's row for it (IRInstance). None when sema published no row for a type
@@ -2026,7 +2062,7 @@ ir_fact_conversion: fn(p: IRProgram, b: ^IRBuilder, conversion: TTryConvert, spa
 // return) in its instance at `args` (concrete): sema's row for it
 // (jet_sema sema_instance_type), `ty` itself when it names none of the
 // callee's type parameters, and otherwise a failure of the body.
-ir_callee_fact: fn(p: IRProgram, b: ^IRBuilder, row: Int, args: [Type], ty: Type, span: Span) -> Type Never! {
+ir_callee_fact: fn(p: IRProgram, b: IRBuilder, row: Int, args: [Type], ty: Type, span: Span) -> Type Never! {
     if args.len() == 0 -> return ty.copy()
     names: ir_generic_names(p, p.functions[row])
     sema_inference_substitute_type(ty, names, args)
@@ -3199,7 +3235,7 @@ ir_binding_is_alias: fn(b: IRBuilder, index: Int) -> Bool Never! {
 
 // Drops the value the owned variable `binding` holds; one some paths moved
 // drops only where its live flag holds.
-ir_drop_binding: fn(m: ^IRModule, b: ^IRBuilder, binding: IRBinding) Never! {
+ir_drop_binding: fn(m: IRModule, b: ^IRBuilder, binding: IRBinding) Never! {
     if binding.live >= 0 -> ir_open_if(b.f, binding.live, b.line)
     value: ir_read_binding(m, b, binding)
     ir_emit(b.f, IROp.Drop, -1, value, -1, -1, b.line)
@@ -3685,23 +3721,23 @@ ir_new_slot: fn(b: ^IRBuilder, ty: Int, kind: IRSlotKind, name: Int) -> Int Neve
     ir_slot(b.f, ty, kind, name, b.line)
 }
 
-ir_temp: fn(m: ^IRModule, b: ^IRBuilder, ty: Int) -> Int Never! {
+ir_temp: fn(m: IRModule, b: ^IRBuilder, ty: Int) -> Int Never! {
     ir_new_slot(b, ty, IRSlotKind.Temp, -1)
 }
 
-ir_fresh_temp: fn(m: ^IRModule, b: ^IRBuilder, ty: Int) -> Int Never! {
+ir_fresh_temp: fn(m: IRModule, b: ^IRBuilder, ty: Int) -> Int Never! {
     slot: ir_temp(m, b, ty)
     b.fresh[slot] = true
     slot
 }
 
 // A temporary of `slot`'s type.
-ir_temp_like: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) -> Int Never! {
+ir_temp_like: fn(m: IRModule, b: ^IRBuilder, slot: Int) -> Int Never! {
     ty: b.f.slot_type[slot]
     ir_temp(m, b, ty)
 }
 
-ir_fresh_like: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) -> Int Never! {
+ir_fresh_like: fn(m: IRModule, b: ^IRBuilder, slot: Int) -> Int Never! {
     ty: b.f.slot_type[slot]
     ir_fresh_temp(m, b, ty)
 }
@@ -3715,7 +3751,7 @@ ir_has_drop: fn(m: IRModule, b: IRBuilder, slot: Int) -> Bool Never! {
 }
 
 // Drops `slot` when it is a fresh temporary of a type with a drop.
-ir_release: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) Never! {
+ir_release: fn(m: IRModule, b: ^IRBuilder, slot: Int) Never! {
     if slot < 0 || !b.fresh[slot] {
         return
     }
@@ -3785,7 +3821,7 @@ ir_lookup_local: fn(b: IRBuilder, local: TLocal) -> IRBinding? Never! {
 }
 
 // The value of a visible variable: a write parameter's is read through its address.
-ir_read_binding: fn(m: ^IRModule, b: ^IRBuilder, binding: IRBinding) -> Int Never! {
+ir_read_binding: fn(m: IRModule, b: ^IRBuilder, binding: IRBinding) -> Int Never! {
     if binding.indirect < 0 -> return binding.slot
     value: ir_temp(m, b, binding.indirect)
     ir_emit(b.f, IROp.Load, value, binding.slot, 0, -1, b.line)
@@ -3811,7 +3847,7 @@ ir_store: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, value: Int) N
 }
 
 // `Br` out of the Block `exit` unless `test` holds.
-ir_exit_unless: fn(m: ^IRModule, b: ^IRBuilder, test: Int, exit: Int) Never! {
+ir_exit_unless: fn(m: IRModule, b: ^IRBuilder, test: Int, exit: Int) Never! {
     negated: ir_temp_like(m, b, test)
     ir_emit(b.f, IROp.Not, negated, test, -1, -1, b.line)
     depth: ir_depth(b.f, exit)
@@ -5021,7 +5057,7 @@ ir_store_at: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, offset: In
 
 // The value of type row `row` at byte `offset` of the storage at `base`
 // (an aggregate is its address there; -1 for Unit).
-ir_load_at: fn(m: ^IRModule, b: ^IRBuilder, base: Int, offset: Int, row: Int) -> Int Never! {
+ir_load_at: fn(m: IRModule, b: ^IRBuilder, base: Int, offset: Int, row: Int) -> Int Never! {
     kind: m.types[row].kind
     if kind == .Unit -> return -1
     slot: ir_temp(m, b, row)
@@ -5246,13 +5282,13 @@ ir_option_none_word: fn(m: IRModule, row: Int) -> Int Never! {
 }
 
 // Sets the Option `slot` absent.
-ir_option_none: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) Never! {
+ir_option_none: fn(m: IRModule, b: ^IRBuilder, slot: Int) Never! {
     none: ir_option_none_word(m, b.f.slot_type[slot])
     ir_emit(b.f, IROp.Const, slot, none, -1, -1, b.line)
 }
 
 // A new absent Option of row `row`.
-ir_option_none_temp: fn(m: ^IRModule, b: ^IRBuilder, row: Int) -> Int Never! {
+ir_option_none_temp: fn(m: IRModule, b: ^IRBuilder, row: Int) -> Int Never! {
     slot: ir_temp(m, b, row)
     ir_option_none(m, b, slot)
     slot
@@ -5266,7 +5302,7 @@ ir_option_is_some: fn(m: ^IRModule, b: ^IRBuilder, value: Int) -> Int Never! {
 
 // The present Option `value`'s payload of row `row`, borrowed: the word
 // itself for an inline Option, else the box's payload at 0.
-ir_option_payload: fn(m: ^IRModule, b: ^IRBuilder, value: Int, row: Int) -> Int Never! {
+ir_option_payload: fn(m: IRModule, b: ^IRBuilder, value: Int, row: Int) -> Int Never! {
     if !ir_option_inline(m, b.f.slot_type[value]) -> return ir_load_at(m, b, value, 0, row)
     slot: ir_temp(m, b, row)
     ir_emit(b.f, IROp.Move, slot, value, -1, -1, b.line)
@@ -5300,7 +5336,7 @@ ir_option_make: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, value: I
 
 // Hands the new Option `made` (ir_option_make) to `result`: a box's Copy
 // aliases it; an inline word moves, as a Copy would clone its Int.
-ir_option_set: fn(m: ^IRModule, b: ^IRBuilder, result: Int, made: Int) Never! {
+ir_option_set: fn(m: IRModule, b: ^IRBuilder, result: Int, made: Int) Never! {
     if ir_option_inline(m, b.f.slot_type[made]) {
         ir_emit(b.f, IROp.Move, result, made, -1, -1, b.line)
         b.fresh[made] = false

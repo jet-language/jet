@@ -20,7 +20,7 @@ CcInvocation: struct {
 }
 
 // `jet cc` / `jet c++` entry, reached from the CLI before flag parsing.
-cli_cc_main: fn(verification: ^StoreVerification, verb: String, args: [String]) -[FS, Env, Exec, IO, Net, Time, Time.Wait, Rand]> Int {
+cli_cc_main: fn(verification: StoreVerification, verb: String, args: [String]) -[FS, Env, Exec, IO, Net, Time, Time.Wait, Rand]> Int {
     options: cli_cc_parse_args(verb, args) ?? {
         cli_cc_report_usage_error(verb, err.message)
         return EXIT_USAGE
@@ -317,7 +317,7 @@ cli_cc_declared_inputs: fn(project_inputs: [String], sources: [String]) -> [Stri
 
 // The verified Hangar C toolchain for the requested target, provisioned
 // through the provider when the Hangar has no descriptor yet.
-cli_cc_resolve_toolchain: fn(verification: ^StoreVerification, roots: HangarRoots, spec: RefSpec, fixtures: String?, offline: Bool, project_root: String) -[FS, Env, Exec, IO, Net, Time, Time.Wait, Rand]> CcToolchainDescriptor ProviderError! {
+cli_cc_resolve_toolchain: fn(verification: StoreVerification, roots: HangarRoots, spec: RefSpec, fixtures: String?, offline: Bool, project_root: String) -[FS, Env, Exec, IO, Net, Time, Time.Wait, Rand]> CcToolchainDescriptor ProviderError! {
     hangar: roots.hangar_dir()
     target: provider_cc_toolchain_requested_target(spec) ?? return Err(ProviderError.Unsupported(err.message()))
     if provider_cc_toolchain_resolve_for_target(verification, hangar, target, fixtures != None) == {

@@ -900,7 +900,7 @@ priv hpack_read_integer: fn(block: [U8], at: Int, prefix: Int) -> HpackInteger H
 
 /// Reads the literal field at `at` whose index has a `prefix`-bit prefix:
 /// a name from the tables (index above 0) or a literal one, then a value.
-priv hpack_literal: fn(d: ^HpackDecoder, block: [U8], at: Int, prefix: Int) -> HpackLiteral H2Error! {
+priv hpack_literal: fn(d: HpackDecoder, block: [U8], at: Int, prefix: Int) -> HpackLiteral H2Error! {
     index: hpack_read_integer(block, at, prefix) ?? return Err(err)
     next := index.next
     name := ""
@@ -914,7 +914,7 @@ priv hpack_literal: fn(d: ^HpackDecoder, block: [U8], at: Int, prefix: Int) -> H
 }
 
 /// Reads the string literal at `at`, Huffman-decoded when it says so.
-priv hpack_read_string: fn(d: ^HpackDecoder, block: [U8], at: Int) -> HpackString H2Error! {
+priv hpack_read_string: fn(d: HpackDecoder, block: [U8], at: Int) -> HpackString H2Error! {
     if at >= block.len() -> return Err(h2_fail("a header block ends before a string"))
     huffman: Int{block[at]} >= 128
     length: hpack_read_integer(block, at, 7) ?? return Err(err)

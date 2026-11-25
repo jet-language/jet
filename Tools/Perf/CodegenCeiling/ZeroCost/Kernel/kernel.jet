@@ -24,7 +24,7 @@ Words: struct {
         #Unsafe("`at` is one of the owner's live words") { self.base.offset(at).* }
     }
 
-    #Inline(Always) set: fn(^self, at: Int, value: I64) Never! {
+    #Inline(Always) set: fn(self, at: Int, value: I64) Never! {
         if at < 0 || at >= self.count -> panic("word {at} is outside {self.count}")
         #Unsafe("`at` is one of the owner's live words") {
             mem.volatile_write(self.base.offset(at), value)
@@ -39,14 +39,14 @@ Words: struct {
     }
 
     // Every word becomes `value`.
-    #Inline(Always) set_all: fn(^self, value: I64) Never! {
+    #Inline(Always) set_all: fn(self, value: I64) Never! {
         #Unsafe("the owner's words are live I64s, which own nothing") {
             mem.fill<I64>(self.base, value, self.count)
         }
     }
 
     // The first words, as many as both owners hold, become `from`'s.
-    #Inline(Always) copy_from: fn(^self, from: Words) Never! {
+    #Inline(Always) copy_from: fn(self, from: Words) Never! {
         count: if from.count < self.count -> from.count else -> self.count
         #Unsafe("both owners hold at least `count` live I64s") {
             mem.copy<I64>(self.base, from.base, count)
@@ -127,7 +127,7 @@ Pages: struct {
 
     #Inline(Always) len: fn(self) -> Int Never! { self.count }
 
-    #Inline(Always) set: fn(^self, at: Int, value: I64) Never! {
+    #Inline(Always) set: fn(self, at: Int, value: I64) Never! {
         if at < 0 || at >= self.count -> panic("word {at} is outside {self.count}")
         #Unsafe("`at` is one of the mapping's words") {
             mem.volatile_write(self.base.offset(at), value)

@@ -218,7 +218,7 @@ ir_para_fold_try_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, fields: [Ty
 }
 
 // Moves `value` of type row `row` into `result`'s own storage.
-ir_para_move_into: fn(m: ^IRModule, b: ^IRBuilder, result: Int, value: Int, row: Int) Never! {
+ir_para_move_into: fn(m: IRModule, b: ^IRBuilder, result: Int, value: Int, row: Int) Never! {
     if m.types[row].kind == .Aggregate {
         ir_emit(b.f, IROp.CopyBytes, -1, result, value, m.types[row].size, b.line)
     } else {

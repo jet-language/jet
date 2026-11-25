@@ -4256,7 +4256,7 @@ ct_rsa_kx_sealed: fn(key: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, r: ^CtRand, kind
 /// A TLS 1.2 server whose own RSA key is `key` and whose ClientKeyExchange
 /// body is `sealed`, for srv12.ssl_srv12_parse_encrypted_pms (RFC 5246
 /// section 7.4.7.1).
-ct_rsa_kx_server: fn(key: ^rsa.RSAContext, sealed: [U8]) -> ssldefs.SSLContext {
+ct_rsa_kx_server: fn(key: rsa.RSAContext, sealed: [U8]) -> ssldefs.SSLContext {
     own := pk.pk_new()
     pk.pk_setup(own, pk.pk_info_from_type(.RSA)) ?? panic("own key: {err}")
     own.rsa = rsa.rsa_copy(key)

@@ -107,7 +107,7 @@ ir_masked_branch: fn(p: IRProgram, b: IRBuilder, span: Span) -> Bool Never! {
 
 // The Bool an arm of a masked branch runs under: `test` (`!test` when
 // `negate`) and-ed with the enclosing mask.
-ir_mask_arm: fn(m: ^IRModule, b: ^IRBuilder, test: Int, negate: Bool) -> Int Never! {
+ir_mask_arm: fn(m: IRModule, b: ^IRBuilder, test: Int, negate: Bool) -> Int Never! {
     value := test
     if negate {
         value = ir_temp_like(m, b, test)
@@ -121,7 +121,7 @@ ir_mask_arm: fn(m: ^IRModule, b: ^IRBuilder, test: Int, negate: Bool) -> Int Nev
 
 // `chosen` where the Bool `test` holds, else `other`, with no jump. The two
 // share one type row.
-ir_mask_select: fn(m: ^IRModule, b: ^IRBuilder, test: Int, chosen: Int, other: Int, span: Span) -> Int Never! {
+ir_mask_select: fn(m: IRModule, b: ^IRBuilder, test: Int, chosen: Int, other: Int, span: Span) -> Int Never! {
     kind: ir_kind_of(m, b, other)
     if kind != .Word && kind != .Bool {
         return ir_fail_slot(b, span, "a masked branch selects a {ir_kind_name(kind)} value; only a fixed-width integer or a Bool can be masked")
@@ -289,7 +289,7 @@ ir_masking: fn(b: IRBuilder) -> Bool Never! { b.mask >= 0 || (b.live >= 0 && b.e
 
 // The Bool the code being built runs under: the arm's mask and-ed with
 // `live` once a masked return may have run, read where it is used.
-ir_masked_now: fn(m: ^IRModule, b: ^IRBuilder) -> Int Never! {
+ir_masked_now: fn(m: IRModule, b: ^IRBuilder) -> Int Never! {
     live: b.live
     mask: b.mask
     if live < 0 || !b.exiting -> return mask
@@ -330,7 +330,7 @@ ir_masked_return: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int?, spa
 
 // The value a return of a function with masked returns gives: `slot` while
 // `live`, else the value the masked return chose.
-ir_masked_result: fn(m: ^IRModule, b: ^IRBuilder, slot: Int, span: Span) -> Int Never! {
+ir_masked_result: fn(m: IRModule, b: ^IRBuilder, slot: Int, span: Span) -> Int Never! {
     live: b.live
     chosen: b.exit_value
     if live < 0 || chosen < 0 -> return slot

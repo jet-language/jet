@@ -19,6 +19,12 @@ CLIValueKind: enum {
     }
 }
 
+// CLIValueKind picks from the built-in type catalog: a command argument's
+// value is a Jet scalar type, or `Path`, a file system path. While the
+// compiler builds, CLI_VALUE_KIND_COUNT stops the build naming any other case
+// TYPE_NAMES lacks.
+CLI_VALUE_KIND_COUNT: #run effect_vocabulary_enum_view_count("CLISchema/Schema.jet", embed_file("Schema.jet"), "CLIValueKind", TYPE_NAMES, "TYPE_NAMES", [String]{"Path"})
+
 CLIDefault: enum {
     TypeDefault,
     Recorded(value: String),

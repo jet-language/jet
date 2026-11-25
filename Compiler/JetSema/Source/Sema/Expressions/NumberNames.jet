@@ -102,9 +102,9 @@ sema_expr_number_name_refused: fn(name: String, required: Type, scopes: SemaScop
 // Whether `name` is a module constant of this module bound to a number
 // literal (sema_expr_number_constant_row) whose own type a numeric slot of
 // type `required` refuses, as sema_expr_number_name_refused asks of a name.
-sema_expr_number_constant_refused: fn(name: String, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
-    index: sema_expr_number_constant_row(name, environment, program, scopes) ?? return false
-    own: sema_scope_binding_type(environment, scopes, index) ?? return false
+sema_expr_number_constant_refused: fn(name: String, required: Type, check: SemaBodyCheck) -> Bool {
+    index: sema_expr_number_constant_row(name, check) ?? return false
+    own: sema_scope_binding_type(check.environment.*, check.scopes, index) ?? return false
     !type_identity_equal(own, required) && sema_expr_numeric_widening_to(own, required) != (Val(true))
 }
 
@@ -121,9 +121,7 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     own: sema_scope_binding_type(check.environment.*, check.scopes, index) ?? return unhandled
     // A use the name's own type serves, or widens into, reads the name.
     required: sema_call_resolved_type(wanted, check.environment.*, check.program.*)
-    if sema_call_type_assignable(required, own, check.environment.*, check.program.*) ?? true {
-        return unhandled
-    }
+    if sema_call_type_assignable(required, own, check) ?? true -> return unhandled
     if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
     trial := [Diagnostic]{}
     fitted := sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
@@ -176,9 +174,7 @@ sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expec
     if symbol.module_identity != check.environment.module_identity -> return unhandled
     own: sema_scope_binding_type(check.environment.*, check.scopes, index) ?? return unhandled
     required: sema_call_resolved_type(wanted, check.environment.*, check.program.*)
-    if sema_call_type_assignable(required, own, check.environment.*, check.program.*) ?? true {
-        return unhandled
-    }
+    if sema_call_type_assignable(required, own, check) ?? true -> return unhandled
     if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
     literal: sema_expr_number_constant_literal(symbol, check.program.*) ?? return unhandled
     trial := [Diagnostic]{}
@@ -211,12 +207,12 @@ sema_expr_number_constant_literal: fn(symbol: Symbol, program: SemaProgramTables
 
 // The scope row of `name` when it is a module constant of this module bound
 // to a number literal (sema_expr_number_constant_literal).
-sema_expr_number_constant_row: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Int? {
-    index: sema_scope_resolve_index(scopes, name) ?? return None
-    if scopes.bindings[index].symbol.kind != SymbolKind.Constant -> return None
-    symbol: sema_scope_binding_symbol(environment, scopes, index)
-    if symbol.module_identity != environment.module_identity -> return None
-    if sema_expr_number_constant_literal(symbol, program) == None -> return None
+sema_expr_number_constant_row: fn(name: String, check: SemaBodyCheck) -> Int? {
+    index: sema_scope_resolve_index(check.scopes, name) ?? return None
+    if check.scopes.bindings[index].symbol.kind != SymbolKind.Constant -> return None
+    symbol: sema_scope_binding_symbol(check.environment.*, check.scopes, index)
+    if symbol.module_identity != check.environment.module_identity -> return None
+    if sema_expr_number_constant_literal(symbol, check.program.*) == None -> return None
     Val(index)
 }
 
@@ -260,11 +256,11 @@ sema_expr_number_types_refused: fn(left: Type, right: Type) -> Bool {
 
 // Whether `expr` is a bare number name: a local bound to a number literal, or
 // a module constant of this module bound to one.
-sema_expr_number_name_operand: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+sema_expr_number_name_operand: fn(expr: Expr, check: SemaBodyCheck) -> Bool {
     if expr == .Ident(name, _, _) {
-        index: sema_scope_resolve_index(scopes, name) ?? return false
-        if scopes.bindings[index].number_literal != None -> return true
-        return sema_expr_number_constant_row(name, environment, program, scopes) != None
+        index: sema_scope_resolve_index(check.scopes, name) ?? return false
+        if check.scopes.bindings[index].number_literal != None -> return true
+        return sema_expr_number_constant_row(name, check) != None
     }
     false
 }
@@ -292,24 +288,20 @@ sema_expr_number_operand_read: fn(operand: Expr, other: Type, noted: Bool, check
 
 // Whether the scope row `index` is a `:=` number name no pass has decided a
 // type for yet, so a write may decide it (sema_expr_number_target_retype).
-sema_expr_number_target_open: fn(index: Int, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool Never! {
-    if !scopes.bindings[index].mutable || scopes.bindings[index].number_literal == None {
+sema_expr_number_target_open: fn(index: Int, check: SemaBodyCheck) -> Bool Never! {
+    if !check.scopes.bindings[index].mutable || check.scopes.bindings[index].number_literal == None {
         return false
     }
-    sema_expr_number_retype(scopes.bindings[index].symbol.span, context.number_retypes_known) == None
+    sema_expr_number_retype(check.scopes.bindings[index].symbol.span, check.context.number_retypes_known) == None
 }
 
 // A value a written `:=` number name reads without a type asked for: a name
 // that is not itself a number name, a field, or an element. It has its own
 // type, which may decide the target's (`total = price`).
-sema_expr_number_target_value_typed: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
-    if expr == .Ident(_, _, _) {
-        return !sema_expr_number_name_operand(expr, environment, program, scopes)
-    }
+sema_expr_number_target_value_typed: fn(expr: Expr, check: SemaBodyCheck) -> Bool {
+    if expr == .Ident(_, _, _) -> return !sema_expr_number_name_operand(expr, check)
     if expr == .Field(_, _, _, _) || expr == .Index(_, _, _, _, _) -> return true
-    if expr == .Paren(inner, _, _) {
-        return sema_expr_number_target_value_typed(inner, environment, program, scopes)
-    }
+    if expr == .Paren(inner, _, _) -> return sema_expr_number_target_value_typed(inner, check)
     false
 }
 
@@ -318,7 +310,7 @@ sema_expr_number_target_value_typed: fn(expr: Expr, environment: SemaScopeEnviro
 // type `offered` that the name's own type refuses, is a use of that type:
 // when the name's literal takes it, the next pass declares the name at it.
 sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, check: ^SemaBodyCheck) {
-    if !sema_expr_number_target_open(index, check.scopes, check.context) {
+    if !sema_expr_number_target_open(index, check) {
         return
     }
     own: check.scopes.bindings[index].symbol.ty ?? return
@@ -382,20 +374,20 @@ sema_expr_number_retype_conflict: fn(name: String, decided: SemaNumberRetype, wa
 // decided refuses (`count := 0`, made a U8 by `take8(count)`, then
 // `count = line.len()`): each E0108 reported since `since` at the written
 // value or at the name also points at the use that decided the type.
-sema_expr_number_label_write: fn(name: String, name_span: Span, value: Span, since: Int, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
-    index: sema_scope_resolve_index(scopes, name) ?? return
-    if !scopes.bindings[index].mutable || scopes.bindings[index].number_literal == None {
+sema_expr_number_label_write: fn(name: String, name_span: Span, value: Span, since: Int, check: ^SemaBodyCheck) {
+    index: sema_scope_resolve_index(check.scopes, name) ?? return
+    if !check.scopes.bindings[index].mutable || check.scopes.bindings[index].number_literal == None {
         return
     }
-    binding: scopes.bindings[index].symbol.span
-    loop decided in context.number_retypes_known {
+    binding: check.scopes.bindings[index].symbol.span
+    loop decided in check.context.number_retypes_known {
         if !sema_expr_number_same_binding(decided.binding, binding) -> next
-        loop at in since..<diagnostics.len() {
-            reported: diagnostics[at].span ?? next
-            if diagnostics[at].code != "E0108" || (reported.start != value.start && reported.start != name_span.start) {
+        loop at in since..<check.diagnostics.len() {
+            reported: check.diagnostics[at].span ?? next
+            if check.diagnostics[at].code != "E0108" || (reported.start != value.start && reported.start != name_span.start) {
                 next
             }
-            diagnostics[at] = diagnostic_with_label(diagnostics[at], decided.use_span, "this use makes `{name}` a {type_name(decided.ty)}")
+            check.diagnostics[at] = diagnostic_with_label(check.diagnostics[at], decided.use_span, "this use makes `{name}` a {type_name(decided.ty)}")
         }
         return
     }

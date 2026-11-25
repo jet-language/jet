@@ -109,9 +109,9 @@ sema_receipt_schema_digest: fn(definition: StructDef) -> String Never! {
 }
 
 // The struct declaration a checked payload type names.
-sema_receipt_payload_struct: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> StructDef? Never! {
-    graph: program.registration_graph
-    row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+sema_receipt_payload_struct: fn(ty: Type, check: SemaBodyCheck) -> StructDef? Never! {
+    graph: check.program.registration_graph
+    row: sema_type_resolve_nominal_row(graph, ty, check.environment.module_identity) ?? return None
     // Matched in place: a pattern on the indexed path copies the whole item.
     nominal: graph.modules[row.module_index].nominals[row.row]
     if nominal.source == .SourceAST(item) {
@@ -150,7 +150,7 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
         check.diagnostics.push(sema_error("E2411", payload_span, "receipt sections require a named `#Receipt` type", "the section schema and wire encoder are declaration-owned", "declare a `#Codable` record with `#Receipt(\"name\")`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    definition: sema_receipt_payload_struct(payload.ty, check.environment.*, check.program.*)
+    definition: sema_receipt_payload_struct(payload.ty, check)
     section := String?{None}
     if definition == .Val(found) -> section = sema_receipt_section_name(found)
     if section == None {
@@ -161,12 +161,12 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
         check.diagnostics.push(sema_error("E0905", payload_span, "`{type_name(payload.ty)}` does not implement `Encode`", "a receipt section is the value's canonical encoding", "derive `Codable` on this type, or write its Encode implementation"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_ownership_check_call_receiver(check.state, args[0].expr, AccessConvention.Read, check.scopes, payload_span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, args[0].expr, AccessConvention.Read, payload_span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     declared: definition ?? return SemaMethodSpecialCheck{handled: true, value: None}
     encoded: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: payload, operation: BodyHandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, payload_span)
     values: [TExpr]{encoded, sema_receipt_text(section ?? "", span), sema_receipt_text(declared.name, span), sema_receipt_text(sema_receipt_schema_digest(declared), span)}
-    value: sema_call_core_role_source(SEMA_CORE_ROLE_RECEIPT_ATTACH, values, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value: sema_call_core_role_source(SEMA_CORE_ROLE_RECEIPT_ATTACH, values, Type.Named{name: "Unit"}, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }

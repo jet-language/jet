@@ -8,7 +8,10 @@
 // (`VariantSelectError.Ambiguous`), never a silent pick.
 // Selected variants enter action keys and the semantic lock. Provider facts
 // influence selection only through explicit `variant_map` entries.
-use sys: core.sys
+use {
+    jet_foundation.[TARGET_OS_NAMES, effect_vocabulary_enum_view_count]
+    sys: core.sys
+}
 
 // Dependency / build graph role (Nix-style build/host/target).
 VariantRole: enum {
@@ -93,6 +96,10 @@ VariantOS: enum {
         }
     }
 }
+
+// VariantOS picks from TTargetOS: a variant's OS is one of the native OSes a
+// build targets.
+VARIANT_OS_COUNT: #run effect_vocabulary_enum_view_count("Variant/Variant.jet", embed_file("Variant.jet"), "VariantOS", TARGET_OS_NAMES, "TTargetOS", [String]{})
 
 VariantArch: enum {
     X64,

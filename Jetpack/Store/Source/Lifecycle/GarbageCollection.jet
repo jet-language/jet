@@ -87,7 +87,7 @@ store_clean_locks: fn(roots: HangarRoots) -[FS, Env, Time]> CleanLocks StoreErro
 
 // Roots reachable from the current directory's project lock and the lifecycle
 // journal; the caller holds the Hangar lock.
-store_live_roots_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LiveRoots StoreError! {
+store_live_roots_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LiveRoots StoreError! {
     cwd: files.cwd()
     graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     store_live_roots_from_graph(roots, cwd, graph)
@@ -327,7 +327,7 @@ store_retained_receipts: fn(roots: HangarRoots, live: LiveRoots, now: Int, retir
     Ok(retained)
 }
 
-store_collect_orphaned_canonical_objects: fn(verification: ^StoreVerification, roots: HangarRoots, live: LiveRoots, retired: [String]) -[FS, Env]> [OrphanedCanonicalObject] StoreError! {
+store_collect_orphaned_canonical_objects: fn(verification: StoreVerification, roots: HangarRoots, live: LiveRoots, retired: [String]) -[FS, Env]> [OrphanedCanonicalObject] StoreError! {
     graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     store_collect_orphaned_canonical_objects_with_graph(roots, live, retired, graph)
 }
@@ -381,7 +381,7 @@ store_collect_orphaned_canonical_objects_with_graph: fn(roots: HangarRoots, live
 
 // Remove one Hangar node without following a link. Only a direct canonical
 // object root may be a link; its seal goes first.
-store_remove_hangar_node: fn(verification: ^StoreVerification, path: String) -[FS, Env]> StoreError! {
+store_remove_hangar_node: fn(verification: StoreVerification, path: String) -[FS, Env]> StoreError! {
     parent: files.dirname(path)
     is_object_node: files.basename(parent) == STORE_OBJECTS_DIR
     if is_object_node {
@@ -446,7 +446,7 @@ store_sweep_receipts: fn(hangar: String, retained: [String], apply: Bool) -[FS]>
 }
 
 // The read-only report `clean` would produce.
-store_clean_plan: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+store_clean_plan: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     store: roots.hangar_dir()
     found: store_node_stat(store)
     if found == None -> return Ok(CleanReport.empty())
@@ -455,7 +455,7 @@ store_clean_plan: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS,
     store_clean_plan_unlocked(verification, roots)
 }
 
-store_clean_plan_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+store_clean_plan_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     store: roots.hangar_dir()
     malformed: store_malformed_objects(store)
     retired := [String]{}
@@ -494,12 +494,12 @@ store_clean_plan_unlocked: fn(verification: ^StoreVerification, roots: HangarRoo
     Ok(report)
 }
 
-store_clean: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+store_clean: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     _locks: store_clean_locks(roots)
     store_clean_unlocked(verification, roots)
 }
 
-store_clean_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+store_clean_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     store: roots.hangar_dir()
     store_ensure_real_directory(store, "Hangar root")
     malformed: store_malformed_objects(store)
@@ -544,7 +544,7 @@ store_clean_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -
 
 // Clean at most once a day unless JETPACK_AUTO_CLEAN_ALWAYS is set; None when
 // the stamp is fresh.
-store_maybe_auto_clean: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport? StoreError! {
+store_maybe_auto_clean: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport? StoreError! {
     _locks: store_clean_locks(roots)
     hangar: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")

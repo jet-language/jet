@@ -590,22 +590,16 @@ cli_cc_read_bounded_response_file: fn(path: String) -[FS]> [U8] CLIToolError! {
     Ok(bytes)
 }
 
-// The quoting state while splitting a response file into words.
-CcResponseQuote: enum {
-    Unquoted,
-    Single,
-    Double,
-}
-
 // Split response-file text into words: whitespace separates, single quotes
 // are literal, double quotes allow backslash escapes, and a bare backslash
-// escapes the next character.
+// escapes the next character. `quote` is the open quote's byte, `'` or `"`,
+// or 0 outside quotes.
 cli_cc_parse_response_words: fn(bytes: [U8], source: String) -> [String] CLIToolError! {
     text: String.from_bytes(bytes) ?? return Err(CLIToolError.new("response file {source} is not UTF-8"))
     words := [String]{}
     word := [U8]{}
     started := false
-    quote := CcResponseQuote.Unquoted
+    quote := 0
     escaped := false
     loop byte in text.bytes() {
         code: Int{byte}
@@ -616,33 +610,29 @@ cli_cc_parse_response_words: fn(bytes: [U8], source: String) -> [String] CLITool
             next
         }
         if quote == {
-            .Single -> {
+            39 -> {
                 if {
-                    code == 39 -> quote = CcResponseQuote.Unquoted
+                    code == 39 -> quote = 0
                     else -> word.push(byte)
                 }
                 started = true
             }
-            .Double -> {
+            34 -> {
                 if {
-                    code == 34 -> quote = CcResponseQuote.Unquoted
+                    code == 34 -> quote = 0
                     code == 92 -> escaped = true
                     else -> word.push(byte)
                 }
                 started = true
             }
-            .Unquoted -> {
+            else -> {
                 if {
                     code == 92 -> {
                         escaped = true
                         started = true
                     }
-                    code == 39 -> {
-                        quote = CcResponseQuote.Single
-                        started = true
-                    }
-                    code == 34 -> {
-                        quote = CcResponseQuote.Double
+                    code == 39 || code == 34 -> {
+                        quote = code
                         started = true
                     }
                     cli_cc_is_ascii_whitespace(code) -> {
@@ -663,7 +653,7 @@ cli_cc_parse_response_words: fn(bytes: [U8], source: String) -> [String] CLITool
     if escaped {
         return Err(CLIToolError.new("response file {source} ends with an incomplete escape"))
     }
-    if quote != CcResponseQuote.Unquoted {
+    if quote != 0 {
         return Err(CLIToolError.new("response file {source} has an unterminated quote"))
     }
     if started -> cli_cc_push_response_word(words, word)

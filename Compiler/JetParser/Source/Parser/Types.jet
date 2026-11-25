@@ -467,7 +467,7 @@ parser_build_fact_type_path: fn(name: String) -> Bool Never! {
 // The type a written name means in this file: a size name (`U8`) is the
 // compiler's own type its Core alias names, unless the file binds that name
 // itself (`bound_size_rows`), where it stays a name Sema resolves in scope.
-parser_named_type: fn(state: ^JetParserState, name: String) -> Type Never! {
+parser_named_type: fn(state: JetParserState, name: String) -> Type Never! {
     if state.bound_size_rows != 0 {
         loop row in 0..<FOUNDATION_SIZE_ALIASES.len() {
             if FOUNDATION_SIZE_ALIASES[row].name == name && (state.bound_size_rows & (1 << row)) != 0 {

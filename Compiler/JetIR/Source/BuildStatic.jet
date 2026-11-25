@@ -252,7 +252,7 @@ ir_static_literal_encode: fn(out: ^[U8], value: TComptimeValue) Never! {
         .Bytes(raw) -> {
             out.push(U8{8})
             ir_static_literal_word(out, raw.len())
-            loop byte in raw -> out.push(byte)
+            out.extend(raw[0..<raw.len()])
         }
         .List(values) -> {
             out.push(U8{9})
@@ -1056,7 +1056,7 @@ ir_static_member_atoms: fn(m: ^IRModule, p: IRProgram, members: [IRMember], name
 
 // The word a payload-free enum key of type row `row` holds: its variant's
 // index (ir_static_enum), which ir_order_into compares as a word.
-ir_static_variant_word: fn(m: ^IRModule, p: IRProgram, row: Int, variant: String) -> Int? Never! {
+ir_static_variant_word: fn(m: IRModule, p: IRProgram, row: Int, variant: String) -> Int? Never! {
     if m.types[row].kind != .Word -> return None
     nominal: ir_nominal_name(ir_untag(ir_row_ty(m, p, row))) ?? return None
     definition: ir_type_def(p, nominal) ?? ir_enum_def(m, p, row) ?? return None

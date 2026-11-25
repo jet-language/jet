@@ -122,19 +122,19 @@ sema_expression_layout_binary_axis_diagnostic: fn(left: Type, right: Type, span:
     )
 }
 
-sema_expr_check_layout_binary: fn(op: BinOp, left: TExpr, right: TExpr, span: Span, line: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaExpressionLayoutBinaryCheck {
+sema_expr_check_layout_binary: fn(op: BinOp, left: TExpr, right: TExpr, span: Span, line: Int, expected: Type?, check: ^SemaBodyCheck) -> SemaExpressionLayoutBinaryCheck {
     contract: sema_expression_layout_binop_result(op, left.ty, right.ty)
     if contract == None -> return SemaExpressionLayoutBinaryCheck{handled: false, value: None}
     result: contract
     if result.axis_mismatch {
-        sema_expression_layout_binary_axis_diagnostic(left.ty, right.ty, span, diagnostics)
+        sema_expression_layout_binary_axis_diagnostic(left.ty, right.ty, span, check.diagnostics)
         return SemaExpressionLayoutBinaryCheck{handled: true, value: None}
     }
     result_type: result.result_type ?? return SemaExpressionLayoutBinaryCheck{handled: true, value: None}
     lowered_left: sema_expression_layout_literal(left)
     lowered_right: sema_expression_layout_literal(right)
     value: if op == BinOp.Add || op == BinOp.Sub -> sema_tree_node(result_type, TExprKind.Binary{op: op, overflow: false, line: line, lhs: lowered_left, rhs: lowered_right}, span) else -> sema_tree_node(result_type, TExprKind.LayoutCompare{op: op, lhs: lowered_left, rhs: lowered_right}, span)
-    checked: sema_expr_expected(value, expected, environment, program, diagnostics)
+    checked: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)
     SemaExpressionLayoutBinaryCheck{handled: true, value: checked}
 }
 
@@ -213,7 +213,7 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     if owner == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count: sema_expression_layout_method_arity(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if updated_args.len() != expected_count {
-        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+        if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         check.diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, updated_args.len(), false, span))
@@ -248,7 +248,7 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
         values.push(value.copy())
         required_types.push(wanted ?? value.ty)
     }
-    ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), updated_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), updated_args, span)
     if !ownership.accepted || !ownership.complete -> valid = false
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.LayoutMethod{method: method}, args: values}, span)
@@ -359,11 +359,11 @@ sema_expr_layout_compare_literal: fn(op: BinOp, lhs: Type, right: Expr) -> Bool 
     false
 }
 
-sema_expression_measurement_inner: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
-    graph: program.registration_graph
+sema_expression_measurement_inner: fn(ty: Type, check: SemaBodyCheck) -> Type? {
+    graph: check.program.registration_graph
     // Snapshot: a lone program loads no core.units, so no type is a Measurement.
     if graph.mode == .Snapshot -> return None
-    resolved: sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+    resolved: sema_type_resolve_declared_with_generics(graph, ty, check.environment.module_identity, check.environment.generic_params)
     name: if resolved == {
         .Apply(name, args) -> if args.len() == 1 -> name else -> ""
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
@@ -371,7 +371,7 @@ sema_expression_measurement_inner: fn(ty: Type, environment: SemaScopeEnvironmen
     if name != "Measurement" && name != "core.units.Measurement" && !(core_source_owns_type(name) && core_identity_is(name, "core.units", "Measurement")) {
         return None
     }
-    nominal_row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
+    nominal_row: sema_type_resolve_nominal_row(graph, resolved, check.environment.module_identity)
     if nominal_row == .Val(row) {
         if graph.modules[row.module_index].module_name != "core.units" || graph.modules[row.module_index].nominals[row.row].symbol.name != "Measurement" {
             return None
@@ -389,31 +389,31 @@ sema_expression_measurement_inner: fn(ty: Type, environment: SemaScopeEnvironmen
     None
 }
 
-sema_expression_is_float_measurement: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    inner: sema_expression_measurement_inner(ty, environment, program) ?? return false
+sema_expression_is_float_measurement: fn(ty: Type, check: SemaBodyCheck) -> Bool {
+    inner: sema_expression_measurement_inner(ty, check) ?? return false
     inner == Type.Float
 }
 
 // The call of the `core.units` helper that fills `role` (MeasurementNew,
 // MeasurementShow, …): the compiler finds it through its jet_builtins role,
 // never its name. E1015 when core.units is loaded and nothing fills `role`.
-sema_expression_measurement_source_call: fn(role: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
-    _ := sema_call_core_module_identity(environment, program, "core.units") ?? return None
-    graph: program.registration_graph
+sema_expression_measurement_source_call: fn(role: String, values: [TExpr], result_type: Type, span: Span, check: ^SemaBodyCheck) -> TExpr? {
+    _ := sema_call_core_module_identity(check.environment.*, check.program.*, "core.units") ?? return None
+    graph: check.program.registration_graph
     helper: sema_core_role_function(graph, role) ?? {
-        diagnostics.push(sema_missing_core_role(role, span))
+        check.diagnostics.push(sema_missing_core_role(role, span))
         return None
     }
     // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
     type_args: if role == "MeasurementResult" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
-    sema_expression_core_source_call("core.units", helper.name, values, result_type, type_args, span, environment, program)
+    sema_expression_core_source_call("core.units", helper.name, values, result_type, type_args, span, check)
 }
 
 // The call of Core source module `module_name`'s function `function`, which
 // the module where the call is checked has loaded.
-sema_expression_core_source_call: fn(module_name: String, function: String, values: [TExpr], result_type: Type, type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
-    source_identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
-    graph: program.registration_graph
+sema_expression_core_source_call: fn(module_name: String, function: String, values: [TExpr], result_type: Type, type_args: [Type], span: Span, check: SemaBodyCheck) -> TExpr? {
+    source_identity: sema_call_core_module_identity(check.environment.*, check.program.*, module_name) ?? return None
+    graph: check.program.registration_graph
     source_index: sema_registration_module_index(graph, source_identity) ?? return None
     callee: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
     callee_id: sema_registration_callable_id(graph, callee.symbol.id) ?? return None
@@ -425,21 +425,21 @@ sema_call_try_measurement_method: fn(receiver: Expr, receiver_value: TExpr, meth
     if method != "value" && method != "uncertainty" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    _ := sema_expression_measurement_inner(receiver_value.ty, check.environment.*, check.program.*) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    _ := sema_expression_measurement_inner(receiver_value.ty, check) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 0 {
-        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+        if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         check.diagnostics.push(sema_call_arity_diagnostic("Measurement.{method}", 0, args.len(), false, span))
         sema_expression_layout_discard_arguments(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type := Type.Float
     role: if method == "value" -> "MeasurementValue" else -> "MeasurementUncertainty"
-    value: sema_expression_measurement_source_call(role, [TExpr]{receiver_value}, result_type, span, check.environment.*, check.program.*, check.diagnostics) ?? {
+    value: sema_expression_measurement_source_call(role, [TExpr]{receiver_value}, result_type, span, check) ?? {
         check.context.incomplete_reasons.push("checked Measurement accessor has no source declaration")
         return SemaMethodSpecialCheck{handled: true, value: None}
     }

@@ -1,0 +1,16 @@
+# A `#if` over a generic body's type parameter keeps, at each instance, only
+# the arm that instance takes. A `T.reflect()` read in the other arm, written
+# there or reached through a call made there (`field_names`), builds no
+# record and reports no E0302 for that instance, so `describe` takes a
+# `String`, which has no TypeInfo record, on every tier.
+fixture: AnUntakenCompileTimeArmReadsNoTypeInfo.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "2 fields: x,y\nString\nInt\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0

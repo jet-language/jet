@@ -27,17 +27,17 @@ use jet_foundation.[
 ]
 
 // The prelude's `Type`, resolved, when `expected` is it.
-sema_type_value_type: fn(expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
-    if expected == .Val(wanted) -> return sema_type_value_resolved(wanted, environment, program)
+sema_type_value_type: fn(expected: Type?, check: SemaBodyCheck) -> Type? {
+    if expected == .Val(wanted) -> return sema_type_value_resolved(wanted, check)
     None
 }
 
 // The prelude's `Type`, resolved, when `wanted` is it. A resolved Core
 // nominal is spelled `<module>.<leaf>`; only a name ending in the leaf is
 // resolved, which keeps the test off every other type.
-sema_type_value_resolved: fn(wanted: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+sema_type_value_resolved: fn(wanted: Type, check: SemaBodyCheck) -> Type? {
     if wanted == .Named(written) && written.ends_with("Type") {
-        resolved: sema_expr_expected_type(wanted, environment, program)
+        resolved: sema_expr_expected_type(wanted, check.environment.*, check.program.*)
         if resolved == .Named(name) {
             if name.ends_with(".Type") && core_identity_in_module(name, "core.prelude") {
                 return Val(resolved)
@@ -56,21 +56,21 @@ sema_type_value_operand: fn(right: Expr) -> Bool Never! {
 // `ty` as a `Type` value typed `value_type` (the prelude `Type`, resolved).
 // Nothing is evaluated: the value is the type's path, known at compile time,
 // or for a type that names a type parameter, at each instance.
-sema_type_value_of: fn(ty: Type, value_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext) -> TExpr? {
-    graph: program.registration_graph
-    if sema_expression_type_symbol(scopes, environment, program, type_name(value_type)) == .Val(owner) {
-        if sema_scope_declaration_struct(environment, program, owner.id) == .Val(shape) {
+sema_type_value_of: fn(ty: Type, value_type: Type, span: Span, check: ^SemaBodyCheck) -> TExpr? {
+    graph: check.program.registration_graph
+    if sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, type_name(value_type)) == .Val(owner) {
+        if sema_scope_declaration_struct(check.environment.*, check.program.*, owner.id) == .Val(shape) {
             loop field in shape.fields {
                 if field.name != "path" -> next
-                text: sema_type_value_path(sema_expr_expected_type(ty, environment, program), span, graph, environment, context)
-                fact: sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, environment, program, context)
+                text: sema_type_value_path(sema_expr_expected_type(ty, check.environment.*, check.program.*), span, graph, check.environment.*, check.context)
+                fact: sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, check.environment.*, check.program.*, check.context)
                 reference := sema_expression_field_ref(fact.symbol, Val(owner.id), fact.field_ty)
                 reference.boxed = fact.boxed
                 return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference.copy(), value: text, boxed: reference.boxed}}}, span))
             }
         }
     }
-    sema_check_unsupported(context, "the type `{type_name(ty)}` (at offset {span.start}) has no `Type` value: the prelude `Type` declares no `path` field")
+    sema_check_unsupported(check.context, "the type `{type_name(ty)}` (at offset {span.start}) has no `Type` value: the prelude `Type` declares no `path` field")
     None
 }
 
@@ -89,27 +89,27 @@ sema_type_value_path: fn(ty: Type, span: Span, graph: SemaRegistrationGraph, env
 // A type name where a `Type` is expected: the value it names. A builtin
 // type's name (`Int`, `U8`) names it as a declared type's does, and a type
 // parameter's the type each instance fills it with.
-sema_type_value_name: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext) -> TExpr? {
-    value_type: sema_type_value_type(expected, environment, program) ?? return None
-    if sema_type_name_is_generic(environment.generic_params, name) || sema_expression_type_symbol(scopes, environment, program, name) != None {
-        return sema_type_value_of(Type.Named{name: name}, value_type, span, environment, program, scopes, context)
+sema_type_value_name: fn(name: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    value_type: sema_type_value_type(expected, check) ?? return None
+    if sema_type_name_is_generic(check.environment.generic_params, name) || sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, name) != None {
+        return sema_type_value_of(Type.Named{name: name}, value_type, span, check)
     }
     builtin: foundation_named_type(name)
     if builtin == .Named(_) -> return None
-    sema_type_value_of(builtin, value_type, span, environment, program, scopes, context)
+    sema_type_value_of(builtin, value_type, span, check)
 }
 
 // A written type (`Box<Int>`) where a `Type` is expected: the value it names.
-sema_type_value_written: fn(ty: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext) -> TExpr? {
-    value_type: sema_type_value_type(expected, environment, program) ?? return None
-    sema_type_value_of(ty, value_type, span, environment, program, scopes, context)
+sema_type_value_written: fn(ty: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    value_type: sema_type_value_type(expected, check) ?? return None
+    sema_type_value_of(ty, value_type, span, check)
 }
 
 // `Type{Rock}` and `Type{Box<Int>}`: the one shorthand field or the written
 // type is checked where a `Type` is expected. Any other body
 // (`Type{path: "Rock"}`) is an ordinary literal of a private field.
 sema_type_value_literal: fn(head: Type?, body: TypedLitBody, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
-    if sema_type_value_type(head, check.environment.*, check.program.*) == None {
+    if sema_type_value_type(head, check) == None {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     if body == .Value(named) {
@@ -136,7 +136,7 @@ sema_call_check_type_of: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) 
     }
     checked: sema_probe_expression_in(call.args[0].expr, None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     value_type: sema_expr_expected_type(Type.Named{name: sema_core_source_type_name(check.program.*, "core.prelude", "Type")}, check.environment.*, check.program.*)
-    value: sema_type_value_of(checked.ty, value_type, call.name_span, check.environment.*, check.program.*, check.scopes, check.context) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value: sema_type_value_of(checked.ty, value_type, call.name_span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 

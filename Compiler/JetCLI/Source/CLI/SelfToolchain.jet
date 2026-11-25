@@ -4,7 +4,7 @@
 use {
     cli_files: core.files
     cli_process: core.process
-    jet_foundation.[diagnostic_render_all]
+    jet_foundation.[diagnostic_render_all, effect_vocabulary_enum_names, effect_vocabulary_list_view_count, effect_vocabulary_lowered]
     jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jetpack_foundation.[TOOLCHAIN_EXEC_MARKER_ENV]
@@ -12,7 +12,11 @@ use {
 }
 
 // The manifest-driven verbs a version-pinned project hands to its pinned `jet`.
-JET_CLI_PINNED_VERBS: [String]{"run", "build", "test", "check", "fill", "jobs"}
+CLI_PINNED_VERBS: [String]{"run", "build", "test", "check", "fill", "jobs"}
+
+// Each pinned verb runs a JetCLIPlan of its name; CLI_PINNED_VERB_COUNT
+// stops the build naming any verb that is not one.
+CLI_PINNED_VERB_COUNT: #run effect_vocabulary_list_view_count("CLI/SelfToolchain.jet", CLI_PINNED_VERBS, "CLI_PINNED_VERBS", effect_vocabulary_lowered(effect_vocabulary_enum_names("CLI/Front.jet", embed_file("Front.jet"), "JetCLIPlan")), "`JetCLIPlan` in CLI/Front.jet", [String]{})
 
 jet_cli_self_toolchain: fn(json: Bool) -[FS, Env]> JetCLIPlan Never! {
     cwd: cli_files.cwd() ?? "."

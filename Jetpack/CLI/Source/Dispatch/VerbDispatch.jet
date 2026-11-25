@@ -78,6 +78,11 @@ JetpackVerb: enum {
     }
 }
 
+// JetpackVerb, in lower case, picks from PACKAGE_MANAGER_VERBS: each verb this
+// dispatcher routes is a listed Jetpack verb, apart from the hidden `__dev`
+// and `__service-probe`, JetOS's `os`, and `help`, which the list leaves out.
+PACKAGE_MANAGER_VERB_COUNT: #run effect_vocabulary_list_view_count("Dispatch/VerbDispatch.jet", effect_vocabulary_lowered(effect_vocabulary_enum_names("Dispatch/VerbDispatch.jet", embed_file("VerbDispatch.jet"), "JetpackVerb")), "JetpackVerb", PACKAGE_MANAGER_VERBS, "PACKAGE_MANAGER_VERBS", [String]{"dev", "serviceprobe", "os", "help"})
+
 // Read-only commands observe state without repairing or migrating it: a
 // `hangar list` must not create its profile lock or rewrite a drifted pin.
 cli_read_only_command: fn(verb: String, parsed: CLIParsed) -> Bool Never! {
@@ -130,7 +135,7 @@ cli_main: fn(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Ex
     code: if known_verb == {
         .Val(known) -> cli_dispatch_verb(verification, known, theme, color, parsed)
         .None -> {
-            theme.error("`{verb}` is not a jetpack command", "Phase 1 commands are: {JETPACK_VERBS.join(", ")}.", "run `jetpack help` to see them.")
+            theme.error("`{verb}` is not a jetpack command", "Phase 1 commands are: {PACKAGE_MANAGER_VERBS.join(", ")}.", "run `jetpack help` to see them.")
             EXIT_USAGE
         }
     }
@@ -138,7 +143,7 @@ cli_main: fn(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Ex
     code
 }
 
-cli_dispatch_verb: fn(verification: ^StoreVerification, verb: JetpackVerb, theme: Theme, color: ColorChoice, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_dispatch_verb: fn(verification: StoreVerification, verb: JetpackVerb, theme: Theme, color: ColorChoice, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if verb == {
         .Doctor -> cli_cmd_doctor(verification, theme, parsed)
         .Env -> cli_cmd_env(verification, theme, parsed)

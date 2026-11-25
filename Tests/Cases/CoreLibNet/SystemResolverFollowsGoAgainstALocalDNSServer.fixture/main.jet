@@ -388,7 +388,7 @@ udp_serve: fn(server: UDPSocket) {
 
 // One TCP connection's length-prefixed queries, answered until the client
 // closes it or a silent name comes up; false once STOP is asked.
-tcp_answer: fn(stream: ^TCPStream) -> Bool {
+tcp_answer: fn(stream: TCPStream) -> Bool {
     pending := [U8]{}
     loop {
         chunk: net.tcp_read_bytes(stream, 4096) ?? return true
@@ -410,7 +410,7 @@ tcp_answer: fn(stream: ^TCPStream) -> Bool {
 
 tcp_serve: fn(listener: TCPListener) {
     loop {
-        stream := net.tcp_accept(listener) ?? return
+        stream: net.tcp_accept(listener) ?? return
         serving: tcp_answer(stream)
         stream.close() ?? return
         if !serving {

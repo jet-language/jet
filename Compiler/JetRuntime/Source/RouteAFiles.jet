@@ -16,7 +16,9 @@
 // (length+1, NUL-terminated) / length @16, owned destination bytes or 0 @24 /
 // length @32, name length @40 (-1: no name; the name is the path's suffix),
 // retained d_type @48 (-1: no DirEntry), directory stream (FilesWalk Stream40)
-// or 0 @56.
+// or 0 @56. A key or index a route lends is its exact-Int carrier, read
+// saturated (Int.jet int_saturated): one beyond I64 is past every live key
+// and slot, so it panics as any other dead one does.
 ENTRIES_CONTEXT_BYTES: I64{64}
 
 ENTRIES_SLOT_BYTES: I64{64}
@@ -194,7 +196,8 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
 }
 
 // HashMap.remove: an unknown key is a no-op.
-#Export(c) jet_entries8_close: fn(key: I64) {
+#Export(c) jet_entries8_close: fn(key_int: I64) {
+    key: int_saturated(key_int)
     root: entries_root
     sync_mutex_lock(root)
     link := root + I64{16}
@@ -213,7 +216,9 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
     if (context != I64{0}) { entries_release(context) }
 }
 
-#Export(c) jet_entries8_release: fn(key: I64, index: I64) {
+#Export(c) jet_entries8_release: fn(key_int: I64, index_int: I64) {
+    key: int_saturated(key_int)
+    index: int_saturated(index_int)
     context: entries_enter(key)
     if (context == I64{0}) {
         return
@@ -240,7 +245,9 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
 }
 
 // std.fs.read_dir (opendir: O_RDONLY|O_DIRECTORY|O_CLOEXEC) into the slot.
-#Export(c) jet_entries8_read_dir: fn(key: I64, index: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_entries8_read_dir: fn(key_int: I64, index_int: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    index: int_saturated(index_int)
     context: entries_enter(key)
     if (context == I64{0}) {
         return
@@ -273,7 +280,9 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
 // ReadDir.next for the slot: (end, child, kind, code?, cause?). The child
 // slot takes path.join(name), destination.join(name), the name and the
 // entry's d_type; end clears the parent's stream.
-#Export(c) jet_entries8_next: fn(key: I64, index: I64, end: I64, child: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_entries8_next: fn(key_int: I64, index_int: I64, end: I64, child: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    index: int_saturated(index_int)
     context: entries_enter(key)
     if (context == I64{0}) {
         return
@@ -333,7 +342,9 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
 
 // DirEntry.file_type: d_type, with the no-follow metadata fallback for
 // DT_UNKNOWN; (is_dir, is_file, kind, code?, cause?).
-#Export(c) jet_entries8_file_type: fn(key: I64, index: I64, directory: I64, file: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_entries8_file_type: fn(key_int: I64, index_int: I64, directory: I64, file: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    index: int_saturated(index_int)
     context: entries_enter(key)
     if (context == I64{0}) {
         return
@@ -374,7 +385,9 @@ entries_destination_text: fn(context: I64, slot: I64) -> I64 {
 }
 
 // std.fs.create_dir_all(destination), the shared create_dirs leaf.
-#Export(c) jet_entries8_mkdir: fn(key: I64, index: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_entries8_mkdir: fn(key_int: I64, index_int: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    index: int_saturated(index_int)
     context: entries_enter(key)
     if (context == I64{0}) {
         return
@@ -398,7 +411,9 @@ entries_destination_text: fn(context: I64, slot: I64) -> I64 {
 }
 
 // std.fs.copy(path, destination), the shared copy leaf.
-#Export(c) jet_entries8_copy: fn(key: I64, index: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_entries8_copy: fn(key_int: I64, index_int: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    index: int_saturated(index_int)
     context: entries_enter(key)
     if (context == I64{0}) {
         return
@@ -424,7 +439,10 @@ entries_destination_text: fn(context: I64, slot: I64) -> I64 {
 }
 
 // OsString order of the two children's names (expect "native child name").
-#Export(c) jet_entries8_before: fn(key: I64, left: I64, right: I64) -> Bool {
+#Export(c) jet_entries8_before: fn(key_int: I64, left_int: I64, right_int: I64) -> Bool {
+    key: int_saturated(key_int)
+    left: int_saturated(left_int)
+    right: int_saturated(right_int)
     context: entries_enter(key)
     if (context == I64{0}) { return false }
     a: entries_slot(context, left)
@@ -445,7 +463,9 @@ entries_destination_text: fn(context: I64, slot: I64) -> I64 {
     result < I64{0}
 }
 
-#Export(c) jet_entries8_shown: fn(key: I64, index: I64) -> I64 {
+#Export(c) jet_entries8_shown: fn(key_int: I64, index_int: I64) -> I64 {
+    key: int_saturated(key_int)
+    index: int_saturated(index_int)
     context: entries_enter(key)
     if (context == I64{0}) { return jet_rt_string_builder_new() }
     slot: entries_slot(context, index)

@@ -52,7 +52,7 @@ task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
 }
 
 #Export(c) jet_rt_record_new_jet_task_failure_deadline_blown: fn() -> I64 {
-    task_failure_new(TASK_FAILURE_DEADLINE, I64{0})
+    task_failure_new(TASK_FAILURE_DEADLINE_BLOWN, I64{0})
 }
 
 #Export(c) jet_rt_record_new_jet_task_failure_panicked: fn(reason: I64) -> I64 {
@@ -86,7 +86,7 @@ task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
 task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
     kind: sync_load(wrapping(failure + TASK_FAILURE_TAG))
     result: jet_rt_string_builder_new()
-    if kind == TASK_FAILURE_CANCELED -> rt_text_push_word(result, I64{7234307559156244803}, I64{8}) else if kind == TASK_FAILURE_DEADLINE {
+    if kind == TASK_FAILURE_CANCELED -> rt_text_push_word(result, I64{7234307559156244803}, I64{8}) else if kind == TASK_FAILURE_DEADLINE_BLOWN {
         rt_text_push_word(result, I64{7308895159530382660}, I64{8})
         rt_text_push_word(result, I64{474450193474}, I64{5})
     } else {
@@ -793,6 +793,14 @@ rt_task_exit_run_address: fn() -> I64 {
     sync_mutex_lock(root)
     scheduler_words_push(wrapping(root + I64{8}), closure)
     sync_mutex_unlock(root)
+}
+
+// jet.runtime.sys atexit: the handler crosses as its handed-over closure box
+// with its lazy.callback invoke and lazy.release helper. The exit queue runs
+// the box through its own invoke and release words (scheduler_cleanup_closure_run),
+// so it keeps the box alone.
+#Export(c) jet_sys_atexit_raw: fn(closure: I64, invoke: I64, release: I64) {
+    jet_rt_native_atexit(closure)
 }
 
 #Export(c) jet_rt_task_exit_handlers: fn() {

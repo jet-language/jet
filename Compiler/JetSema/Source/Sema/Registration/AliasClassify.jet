@@ -83,7 +83,7 @@ sema_alias_classify_inputs: fn(inputs: ^[SemaRegistrationModuleInput], edges: [S
         sema_alias_globals_add(globals, inputs[index].program.items, 1)
     }
     loop index in pending {
-        keys := [String]{}
+        keys := [SemaAliasKey]{}
         sema_alias_collect_types(inputs, edges, rows, globals, index, inputs[index].program.items, [String]{}, keys)
         if keys.len() > 0 {
             sema_alias_globals_add(globals, inputs[index].program.items, -1)
@@ -182,11 +182,29 @@ sema_alias_expr_path_span: fn(value: Expr) -> Span Never! {
     expr_span(value)
 }
 
-sema_alias_key: fn(definition: ConstDef) -> String Never! {
-    "{definition.name_span.start}:{definition.name_span.end}:{definition.name}"
+// A binding the rewrite turns into a type alias: its name where it is
+// declared.
+SemaAliasKey: struct {
+    start: Int,
+    end: Int,
+    name: String,
 }
 
-sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [U32:Int], globals: SemaAliasGlobals, index: Int, items: [Item], scope: [String], keys: ^[String]) Never! {
+sema_alias_key: fn(definition: ConstDef) -> SemaAliasKey Never! {
+    SemaAliasKey{start: definition.name_span.start, end: definition.name_span.end, name: definition.name}
+}
+
+// Whether `keys` holds `definition`'s key.
+sema_alias_keyed: fn(keys: [SemaAliasKey], definition: ConstDef) -> Bool Never! {
+    loop key in keys {
+        if key.start == definition.name_span.start && key.end == definition.name_span.end && key.name == definition.name {
+            return true
+        }
+    }
+    false
+}
+
+sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [U32:Int], globals: SemaAliasGlobals, index: Int, items: [Item], scope: [String], keys: ^[SemaAliasKey]) Never! {
     loop item_index in 0..<items.len() {
         if items[item_index] == .Const(definition) {
             path: sema_alias_binding_path(definition) ?? next
@@ -204,13 +222,13 @@ sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [Sema
     }
 }
 
-sema_alias_rewrite_items: fn(items: [Item], keys: [String]) -> [Item] Never! {
+sema_alias_rewrite_items: fn(items: [Item], keys: [SemaAliasKey]) -> [Item] Never! {
     rewritten := [Item]{}
     loop item in items {
         value := item.copy()
         if item == {
             .Const(definition) -> {
-                if keys.contains(sema_alias_key(definition)) {
+                if sema_alias_keyed(keys, definition) {
                     path: sema_alias_binding_path(definition) ?? [String]{}
                     value = Item.TypeAlias{value: TypeAliasDef{is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, name: definition.name, name_span: definition.name_span, type_params: [TypeParam]{}, target: foundation_named_type(path.join(".")), target_span: sema_alias_expr_path_span(definition.value), span: definition.span}}
                 }

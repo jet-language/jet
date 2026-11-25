@@ -604,7 +604,7 @@ ir_core_image_fits: fn(p: IRProgram) -> Bool Never! {
 // of its ir_core_symbol) at the IR signature the call passes and returns
 // (ir_core_call_signature). A function marked `#Inline(Always)` is never
 // bound: the program builds it, so its optimizer can keep the mark's promise.
-ir_core_bound: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_args: [Type], slots: [Int], span: Span) -> String Never! {
+ir_core_bound: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, row: Int, type_args: [Type], slots: [Int], span: Span) -> String Never! {
     if p.checks.core == None || type_args.len() > 0 || p.functions[row].is_inline_always || ir_bounds_mode(p, p.functions[row]) != .Fatal {
         return ""
     }
@@ -622,10 +622,9 @@ ir_core_bound: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_args
 // The IR signature (ir_core_signature) of a call of non-generic function
 // row `row` passing `slots`: their layouts, then its result's; "" when the
 // result has no value type.
-ir_core_call_signature: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, slots: [Int], span: Span) -> String Never! {
+ir_core_call_signature: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, row: Int, slots: [Int], span: Span) -> String Never! {
     words: loop slot in slots -> ir_core_layout(ir_export_layout(m.types[b.f.slot_type[slot]]))
-    declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, [Type]{}, written, span)) else -> Type?{None}
-    returned: ir_executable_return_in(p.functions[row], declared) ?? Type.Named{name: "Unit"}
+    returned: ir_call_return(p, b, row, [Type]{}, span)
     result := "void"
     if !ir_unit_type(returned) {
         result_row: ir_value_type(m, p, returned) ?? return ""
@@ -646,7 +645,7 @@ ir_core_call_signature: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, 
 // that returns a pointer, and they are the only convention an O0 image
 // changes, so the call passes its slots as the IR signature names them, as
 // the image's code takes them.
-ir_held_bound: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_args: [Type], span: Span) -> String Never! {
+ir_held_bound: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, row: Int, type_args: [Type], span: Span) -> String Never! {
     function: p.functions[row]
     if !ir_held_holds(p.checks, function.key) || type_args.len() > 0 || function.generic_params.len() > 0 || function.is_inline_always || function.stand_in {
         return ""

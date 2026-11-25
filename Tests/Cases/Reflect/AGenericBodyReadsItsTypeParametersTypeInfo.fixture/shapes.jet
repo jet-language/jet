@@ -1,0 +1,23 @@
+// What both programs share: generic functions that read their type
+// parameter's TypeInfo record in ordinary code, and the one format a
+// concrete read goes through as well.
+show: fn(info: TypeInfo) -> String {
+    names: (loop field in info.fields -> field.name).join(",")
+    "{info.name} size={info.layout.size} fields=[{names}]"
+}
+
+describe: fn<T>(value: T) -> String {
+    info: T.reflect()
+    show(info)
+}
+
+// Fills `describe`'s `T` with its own `U`.
+describe_again: fn<U>(value: U) -> String {
+    describe(value)
+}
+
+// No program calls this one, so it builds no record and reports nothing.
+never_described: fn<T>(value: T) -> String {
+    info: T.reflect()
+    info.name
+}

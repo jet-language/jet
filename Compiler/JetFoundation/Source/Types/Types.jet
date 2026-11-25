@@ -543,6 +543,7 @@ ViewSource: enum {
     Static(module_path: String, name: String),
 }
 
+// A view of Expr; ClosedListViews.jet checks it.
 ViewSourceProjection: enum {
     Field(name: String),
     Index,
@@ -997,24 +998,10 @@ symbol_key_rows_intern: fn(rows: ^SymbolKeyRows, key: String) -> Int Never! {
 // and channel handles (`Task`, `Receiver`, `Sender`) and the Event family's
 // handles. A bare spelling of one is that type, whatever loaded module
 // declares a type of its name. A subset view of the built-in type catalog
-// (JET_TYPE_NAMES), which SYMBOL_BUILTIN_TYPES_CHECKED holds it to.
+// (TYPE_NAMES), which SYMBOL_BUILTIN_TYPES_CHECKED holds it to.
 SYMBOL_BUILTIN_TYPES: [String]{"Task", "Receiver", "Sender", "Event", "Hook", "DecisionHook", "AsyncEvent", "DispatchReport", "EventScope", "Subscription", "EventTrace"}
 
-SYMBOL_BUILTIN_TYPES_CHECKED: #run type_names_view_checked("SYMBOL_BUILTIN_TYPES", SYMBOL_BUILTIN_TYPES, JET_TYPE_NAMES)
-
-// The number of names in `view`, the subset view `view_name` of the built-in
-// type catalog, once each is one of `vocabulary` (JET_TYPE_NAMES); else the
-// build stops naming the strays.
-type_names_view_checked: fn(view_name: String, view: [String], vocabulary: [String]) -> Int {
-    strays := [String]{}
-    loop name in view {
-        if !vocabulary.contains(name) -> strays.push(name.copy())
-    }
-    if strays.len() > 0 {
-        build_time_refused("{view_name} names {strays.join(", ")}, which the built-in type catalog JET_TYPE_NAMES does not hold")
-    }
-    view.len()
-}
+SYMBOL_BUILTIN_TYPES_CHECKED: #run effect_vocabulary_list_view_count("Types/Types.jet", SYMBOL_BUILTIN_TYPES, "SYMBOL_BUILTIN_TYPES", TYPE_NAMES, "the built-in type catalog TYPE_NAMES", [String]{})
 
 // The compiler-owned declarations no module declares: every owned trait
 // (OWNED_TRAITS, which a bound may name bare), the builtin owner types, then

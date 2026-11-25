@@ -1198,6 +1198,12 @@ CEnumTag: enum {
     I64,
 }
 
+// CEnumTag picks from the built-in type catalog: a C enum's tag is a fixed
+// width Jet integer type, or `CInt`, the C compiler's own `int`. While the
+// compiler builds, C_ENUM_TAG_COUNT stops the build naming any other case
+// TYPE_NAMES lacks.
+C_ENUM_TAG_COUNT: #run effect_vocabulary_enum_view_count("AST/Items.jet", embed_file("Items.jet"), "CEnumTag", TYPE_NAMES, "TYPE_NAMES", [String]{"CInt"})
+
 TypeAliasDef: struct {
     is_pub: Bool,
     is_package_pub: Bool,
@@ -1500,6 +1506,8 @@ RustConstKind: enum {
     Static,
 }
 
+// The kind of one `outputs:` entry, for the compiler's checked outputs and
+// Jetpack's package facts alike.
 OutputKind: enum {
     Library,
     Executable,
@@ -1510,6 +1518,21 @@ OutputKind: enum {
     Bundle,
     System,
     Fleet,
+
+    // The variant name, as `package.jet` spells it after the dot.
+    debug_name: fn(self) -> String Never! {
+        if self == {
+            .Library -> "Library"
+            .Executable -> "Executable"
+            .Service -> "Service"
+            .Check -> "Check"
+            .Environment -> "Environment"
+            .Image -> "Image"
+            .Bundle -> "Bundle"
+            .System -> "System"
+            .Fleet -> "Fleet"
+        }
+    }
 }
 
 OutputCallableAuthority: enum {
@@ -1565,6 +1588,10 @@ MigrationOp: enum {
     Remove(field: String, field_span: Span),
     Change(field: String, field_span: Span, from_ty: Type, from_span: Span, to_ty: Type, to_span: Span, converter: Expr?, converter_span: Span?, conv_fn: String?),
 }
+
+// A migration op is spelled with the keyword of its case in lower case;
+// MIGRATION_OP_COUNT stops the build naming any case KEYWORD_NAMES lacks.
+MIGRATION_OP_COUNT: #run effect_vocabulary_list_view_count("AST/Items.jet", effect_vocabulary_lowered(effect_vocabulary_enum_names("AST/Items.jet", embed_file("Items.jet"), "MigrationOp")), "MigrationOp", KEYWORD_NAMES, "KEYWORD_NAMES", [String]{})
 
 ParseResult: struct {
     program: Program,

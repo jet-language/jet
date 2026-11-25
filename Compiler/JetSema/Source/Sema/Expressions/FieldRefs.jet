@@ -39,9 +39,9 @@ sema_field_ref_resolved: fn(wanted: Type) -> Bool Never! {
 // unresolved; None when it is none, or is one resolved already
 // (sema_field_ref_resolved). Only a name ending in the leaf is resolved,
 // which keeps the test off every other type.
-sema_field_ref_resolve: fn(wanted: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+sema_field_ref_resolve: fn(wanted: Type, check: SemaBodyCheck) -> Type? {
     if wanted == .Apply(written, args) && args.len() == 2 && written.ends_with("FieldRef") && !sema_field_ref_name(written) {
-        resolved: sema_expr_expected_type(wanted, environment, program)
+        resolved: sema_expr_expected_type(wanted, check.environment.*, check.program.*)
         if resolved == .Apply(name, _) && sema_field_ref_name(name) -> return Val(resolved)
     }
     None
@@ -78,23 +78,25 @@ sema_field_ref_value_type: fn(ref_type: Type, field_ty: Type) -> Type? Never! {
 // A selector where a `FieldRef<M, T>` is expected: the field reference it
 // names, checked against `expected`. Unhandled for any other expression or
 // expectation.
-sema_field_ref_check: fn(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_field_ref_check: fn(expr: Expr, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     wanted: expected ?? return SemaDirectSpecialCheck{handled: false, value: None}
     if !sema_field_ref_selector(expr) -> return SemaDirectSpecialCheck{handled: false, value: None}
-    if sema_field_ref_resolved(wanted) -> return sema_field_ref_check_as(expr, wanted, expected, environment, program, scopes, context, diagnostics)
-    ref_type: sema_field_ref_resolve(wanted, environment, program) ?? return SemaDirectSpecialCheck{handled: false, value: None}
-    sema_field_ref_check_as(expr, ref_type, expected, environment, program, scopes, context, diagnostics)
+    if sema_field_ref_resolved(wanted) {
+        return sema_field_ref_check_as(expr, wanted, expected, check)
+    }
+    ref_type: sema_field_ref_resolve(wanted, check) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    sema_field_ref_check_as(expr, ref_type, expected, check)
 }
 
 // The selector `expr` checked as the resolved `FieldRef<M, T>` `ref_type`.
-sema_field_ref_check_as: fn(expr: Expr, ref_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
-    fact: sema_field_ref_field(expr, ref_type, environment, program, scopes, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+sema_field_ref_check_as: fn(expr: Expr, ref_type: Type, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+    fact: sema_field_ref_field(expr, ref_type, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     member_span: expr_span(expr)
     value_type: sema_field_ref_value_type(ref_type, fact.field_ty) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    value: sema_field_ref_value(value_type, fact.symbol.name, member_span, environment, program, scopes, context)
-    context.name_references.push(sema_name_reference(member_span, fact.symbol, Val(SymbolKind.Field)))
+    value: sema_field_ref_value(value_type, fact.symbol.name, member_span, check)
+    check.context.name_references.push(sema_name_reference(member_span, fact.symbol, Val(SymbolKind.Field)))
     checked: value ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(checked, expected, environment, program, diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(checked, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 // `M`'s stored field the selector `expr` names, `M` being `ref_type`'s
@@ -231,15 +233,15 @@ sema_field_ref_list: fn(fields: [Field], visible: [Int]) -> String Never! {
 }
 
 // The `FieldRef` value naming field `name`, typed `value_type`.
-sema_field_ref_value: fn(value_type: Type, name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext) -> TExpr? {
+sema_field_ref_value: fn(value_type: Type, name: String, span: Span, check: ^SemaBodyCheck) -> TExpr? {
     if value_type == .Apply(ref_name, ref_args) {
-        if sema_expression_type_symbol(scopes, environment, program, ref_name) == .Val(owner) {
-            if sema_scope_declaration_struct(environment, program, owner.id) == .Val(shape) {
+        if sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, ref_name) == .Val(owner) {
+            if sema_scope_declaration_struct(check.environment.*, check.program.*, owner.id) == .Val(shape) {
                 names: loop param in shape.type_params -> param.name
                 loop field in shape.fields {
                     if field.name != "name" || field.computed != None -> next
                     text: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, span)
-                    fact: sema_expression_struct_field_fact(field, owner, names, ref_args, environment, program, context)
+                    fact: sema_expression_struct_field_fact(field, owner, names, ref_args, check.environment.*, check.program.*, check.context)
                     reference := sema_expression_field_ref(fact.symbol, Val(owner.id), fact.field_ty)
                     reference.boxed = fact.boxed
                     return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference, value: text, boxed: fact.boxed}}}, span))
@@ -247,6 +249,6 @@ sema_field_ref_value: fn(value_type: Type, name: String, span: Span, environment
             }
         }
     }
-    sema_check_unsupported(context, "the field `{name}` (at offset {span.start}) has no `FieldRef` value: the prelude `FieldRef` declares no `name` field")
+    sema_check_unsupported(check.context, "the field `{name}` (at offset {span.start}) has no `FieldRef` value: the prelude `FieldRef` declares no `name` field")
     None
 }

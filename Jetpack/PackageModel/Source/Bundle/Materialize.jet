@@ -120,7 +120,7 @@ pkg_bundle_native_version: fn(run: NativeSandboxOutput) -> String BundleMaterial
     Err(BundleMaterializeError{reason: "package materializer tool returned no version text"})
 }
 
-pkg_bundle_native_hooks: fn(plan: ^BundlePlan, phase: SigningPhase, source: String, output: String, run: ^BundleSigningRun) -[FS, Env, Exec, Time, Time.Wait]> BundleMaterializeError! {
+pkg_bundle_native_hooks: fn(plan: BundlePlan, phase: SigningPhase, source: String, output: String, run: ^BundleSigningRun) -[FS, Env, Exec, Time, Time.Wait]> BundleMaterializeError! {
     loop hook in plan.signing_hooks {
         if hook.phase != phase -> next
         loop expected in hook.inputs {
@@ -188,7 +188,7 @@ pkg_bundle_native_relative: fn(plan: BundlePlan, file: BundleFile, strip: Bool) 
     Ok(parts.join("/"))
 }
 
-pkg_bundle_native_tree: fn(plan: ^BundlePlan, stage: String, strip: Bool) -[FS, Env]> BundleMaterializeError! {
+pkg_bundle_native_tree: fn(plan: BundlePlan, stage: String, strip: Bool) -[FS, Env]> BundleMaterializeError! {
     seen := [String]{}
     loop file in plan.files {
         relative: pkg_bundle_native_relative(plan, file, strip)
@@ -207,7 +207,7 @@ pkg_bundle_native_tree: fn(plan: ^BundlePlan, stage: String, strip: Bool) -[FS, 
     Ok()
 }
 
-pkg_bundle_native_builtin: fn(plan: ^BundlePlan, compiler_version: String) -[FS, Env]> BundleNativeFacts BundleMaterializeError! {
+pkg_bundle_native_builtin: fn(plan: BundlePlan, compiler_version: String) -[FS, Env]> BundleNativeFacts BundleMaterializeError! {
     executable: pkg_bundle_native_regular(sys.executable())
     tool_identity: pkg_bundle_native_hash(executable)
     paths := [String]{}
@@ -250,7 +250,7 @@ pkg_bundle_native_builtin: fn(plan: ^BundlePlan, compiler_version: String) -[FS,
 }
 
 // Cleanup is attempted after both successful publication and all failure rails.
-pkg_bundle_materialize: fn(plan: ^BundlePlan, output: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts BundleMaterializeError! {
+pkg_bundle_materialize: fn(plan: BundlePlan, output: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts BundleMaterializeError! {
     parent: files.dirname(output)
     files.create_dir_all(parent) ?? return Err(BundleMaterializeError{reason: "could not create package output directory `{parent}`: {err}"})
     pkg_bundle_native_free(output)
@@ -301,7 +301,7 @@ pkg_bundle_materialize: fn(plan: ^BundlePlan, output: String, compiler_version: 
     }
 }
 
-pkg_bundle_native_materialize: fn(plan: ^BundlePlan, output: String, parent: String, name: String, stage: String, output_stage: String, staged_msix: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts BundleMaterializeError! {
+pkg_bundle_native_materialize: fn(plan: BundlePlan, output: String, parent: String, name: String, stage: String, output_stage: String, staged_msix: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts BundleMaterializeError! {
     files.create_dir_all(stage) ?? return Err(BundleMaterializeError{reason: "could not stage package `{stage}`: {err}"})
     mac: plan.target == BundleTarget.MacOSApp
     linux: plan.target == BundleTarget.LinuxAppImage

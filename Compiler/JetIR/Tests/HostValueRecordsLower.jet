@@ -3,7 +3,7 @@
 // handle or a compiler-owned record row. A record that is none of these stops
 // the comptime evaluator when typed code reads it, so this walk names it here.
 use {
-    jet_foundation.[CORE_RECORD_FIELD_ROWS, Type, ir_host_value_name, ir_runtime_handle_row]
+    jet_foundation.[CORE_RECORD_FIELD_ROWS, Type, ir_host_value_leaf, ir_host_value_name, ir_runtime_handle_row]
     jet_ir.[ir_compiler_owned_core_fields, ir_compiler_owned_record_fields]
 }
 
@@ -57,4 +57,12 @@ host_record_names: fn(ty: Type) -> [String] {
     assert(seen.get("CompilerFactDeclaration") != None)
     assert(seen.get("CompilerDerivationObservation") != None)
     assert(seen.get("CompilerDerivationPayload") != None)
+}
+
+#Test("a core.compiler declaration of a compiler value names the same host value") {
+    assert_eq(ir_host_value_leaf("CompilerLexed"), Val("CompilerLexed"))
+    assert_eq(ir_host_value_leaf("<corelib>/core.compiler.CompilerLexed"), Val("CompilerLexed"))
+    assert_eq(ir_host_value_leaf("<corelib>/core.build.CompilerLexed"), None)
+    assert_eq(ir_host_value_leaf("<corelib>/core.compiler.CompilerWatch"), None)
+    assert_eq(ir_host_value_leaf("app.CompilerLexed"), None)
 }

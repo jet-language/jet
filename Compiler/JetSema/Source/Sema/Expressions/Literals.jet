@@ -154,29 +154,29 @@ sema_expression_unit_literal_member_fact: fn(suffix: String, graph: SemaRegistra
     None
 }
 
-sema_expression_unit_literal: fn(raw: String, int_value: Int?, float_value: Float?, suffix: String, suffix_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
-    facts_graph: program.registration_graph
+sema_expression_unit_literal: fn(raw: String, int_value: Int?, float_value: Float?, suffix: String, suffix_span: Span, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    facts_graph: check.program.registration_graph
     if suffix != "" {
-        fact: sema_expression_unit_literal_fact(suffix, facts_graph, sema_app_module_row(environment, facts_graph))
+        fact: sema_expression_unit_literal_fact(suffix, facts_graph, sema_app_module_row(check.environment.*, facts_graph))
         if fact == .Val(unit) {
             if unit.name == "Duration" && unit.family == "Time" {
                 is_float := float_value != None
-                unit_value := if is_float -> sema_node(context, Type.Float, NodeKind.FloatLit{value: float_value ?? 0.0}, span) else -> sema_expr_unbounded_integer_literal(int_value ?? 0, span)
+                unit_value := if is_float -> sema_node(check.context, Type.Float, NodeKind.FloatLit{value: float_value ?? 0.0}, span) else -> sema_expr_unbounded_integer_literal(int_value ?? 0, span)
                 if {
                     unit.scale.denominator != 1 -> {
-                        unit_value = sema_node(context, Type.Float, NodeKind.FloatLit{value: approx(int_value ?? 0)}, span)
+                        unit_value = sema_node(check.context, Type.Float, NodeKind.FloatLit{value: approx(int_value ?? 0)}, span)
                         if is_float {
-                            unit_value = sema_node(context, Type.Float, NodeKind.FloatLit{value: float_value ?? 0.0}, span)
+                            unit_value = sema_node(check.context, Type.Float, NodeKind.FloatLit{value: float_value ?? 0.0}, span)
                         }
                         is_float = true
                         factor: approx(unit.scale.numerator) / approx(unit.scale.denominator)
-                        factor_value: sema_node(context, Type.Float, NodeKind.FloatLit{value: factor}, span)
-                        line: sema_source_line_at(environment.source_segments, span) ?? 0
+                        factor_value: sema_node(check.context, Type.Float, NodeKind.FloatLit{value: factor}, span)
+                        line: sema_source_line_at(check.environment.source_segments, span) ?? 0
                         unit_value = sema_tree_node(Type.Float, TExprKind.Binary{op: BinOp.Mul, overflow: false, line: line, lhs: unit_value, rhs: factor_value}, span)
                     }
                     unit.scale.numerator != 1 -> {
-                        factor_value: if is_float -> sema_node(context, Type.Float, NodeKind.FloatLit{value: approx(unit.scale.numerator)}, span) else -> sema_expr_unbounded_integer_literal(unit.scale.numerator, span)
-                        line: sema_source_line_at(environment.source_segments, span) ?? 0
+                        factor_value: if is_float -> sema_node(check.context, Type.Float, NodeKind.FloatLit{value: approx(unit.scale.numerator)}, span) else -> sema_expr_unbounded_integer_literal(unit.scale.numerator, span)
+                        line: sema_source_line_at(check.environment.source_segments, span) ?? 0
                         result_ty: if is_float -> Type.Float else -> Type.Int
                         unit_value = sema_tree_node(result_ty, TExprKind.Binary{op: BinOp.Mul, overflow: false, line: line, lhs: unit_value, rhs: factor_value}, span)
                     }
@@ -184,46 +184,46 @@ sema_expression_unit_literal: fn(raw: String, int_value: Int?, float_value: Floa
                 constructed_ty: Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}
                 constructed: sema_tree_node(constructed_ty, TExprKind.HandleMethod{receiver: unit_value, operation: BodyHandleOp.DurationNew{unit: 0, float: is_float}, args: [TExpr]{}}, span)
                 message: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "time literal is outside Duration's i64 range"}}}, span)
-                fallback: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, suffix_span)}
+                fallback: TOrFallback.Panic{message: message, location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, suffix_span)}
                 checked: sema_tree_node(Type.Named{name: "Duration"}, TExprKind.OrFallback{value: constructed, fallback: fallback, ambient_err: None}, span)
-                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
+                return sema_expr_expected_owned(checked, expected, check.environment.*, check.program.*, check.diagnostics)
             }
             if int_value == None && float_value == None {
-                diagnostics.push(sema_error("E0109", span, "this unit literal has no numeric value", "a literal needs an integer or floating-point payload", "write a numeric literal"))
+                check.diagnostics.push(sema_error("E0109", span, "this unit literal has no numeric value", "a literal needs an integer or floating-point payload", "write a numeric literal"))
                 return None
             }
-            numeric: if float_value != None -> sema_node(context, Type.Float, NodeKind.FloatLit{value: float_value}, span) else -> sema_node(context, Type.Float, NodeKind.FloatLit{value: approx(int_value ?? 0)}, span)
+            numeric: if float_value != None -> sema_node(check.context, Type.Float, NodeKind.FloatLit{value: float_value}, span) else -> sema_node(check.context, Type.Float, NodeKind.FloatLit{value: approx(int_value ?? 0)}, span)
             value: sema_tree_node(Type.Named{name: unit.name}, TExprKind.DistinctCtor{argument: numeric}, span)
-            return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
+            return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
         }
         if suffix == "i" {
             imaginary: float_value ?? approx(int_value ?? 0)
-            real: sema_node(context, Type.Float, NodeKind.FloatLit{value: 0.0}, span)
-            imaginary_value: sema_node(context, Type.Float, NodeKind.FloatLit{value: imaginary}, span)
+            real: sema_node(check.context, Type.Float, NodeKind.FloatLit{value: 0.0}, span)
+            imaginary_value: sema_node(check.context, Type.Float, NodeKind.FloatLit{value: imaginary}, span)
             value: sema_tree_node(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary_value}}, span)
-            return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
+            return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
         }
-        diagnostics.push(sema_error("E0134", suffix_span, "`{suffix}` isn't a unit in scope", "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here", "import the family that defines `{suffix}`, or write the number without a suffix"))
+        check.diagnostics.push(sema_error("E0134", suffix_span, "`{suffix}` isn't a unit in scope", "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here", "import the family that defines `{suffix}`, or write the number without a suffix"))
         return None
     }
     if suffix != "" {
         if suffix == "i" {
             imaginary: float_value ?? approx(int_value ?? 0)
-            real: sema_node(context, Type.Float, NodeKind.FloatLit{value: 0.0}, span)
-            imaginary_value: sema_node(context, Type.Float, NodeKind.FloatLit{value: imaginary}, span)
+            real: sema_node(check.context, Type.Float, NodeKind.FloatLit{value: 0.0}, span)
+            imaginary_value: sema_node(check.context, Type.Float, NodeKind.FloatLit{value: imaginary}, span)
             value: sema_tree_node(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary_value}}, span)
-            return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
+            return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
         }
-        diagnostics.push(sema_error("E0134", suffix_span, "`{suffix}` isn't a unit in scope", "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here", "import the family that defines `{suffix}`, or write the number without a suffix"))
+        check.diagnostics.push(sema_error("E0134", suffix_span, "`{suffix}` isn't a unit in scope", "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here", "import the family that defines `{suffix}`, or write the number without a suffix"))
         return None
     }
     if int_value != None {
-        return sema_expr_expected_owned(sema_expr_unbounded_integer_literal(int_value, span), expected, environment, program, diagnostics)
+        return sema_expr_expected_owned(sema_expr_unbounded_integer_literal(int_value, span), expected, check.environment.*, check.program.*, check.diagnostics)
     }
     if float_value != None {
-        return sema_expr_expected_owned(sema_node(context, Type.Float, NodeKind.FloatLit{value: float_value}, span), expected, environment, program, diagnostics)
+        return sema_expr_expected_owned(sema_node(check.context, Type.Float, NodeKind.FloatLit{value: float_value}, span), expected, check.environment.*, check.program.*, check.diagnostics)
     }
-    diagnostics.push(sema_error("E0109", span, "this unit literal has no numeric value", "a literal needs an integer or floating-point payload", "write a numeric literal"))
+    check.diagnostics.push(sema_error("E0109", span, "this unit literal has no numeric value", "a literal needs an integer or floating-point payload", "write a numeric literal"))
     None
 }
 
@@ -260,9 +260,9 @@ sema_expression_list_element_is_inferred_struct: fn(element: Expr) -> Bool Never
 }
 
 // `[{x: 1}, {x: 2}]`: a headless item with record fields is a record.
-sema_expression_list_element_is_record: fn(element: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+sema_expression_list_element_is_record: fn(element: Expr, check: SemaBodyCheck) -> Bool Never! {
     if element == .StructLit(_, _, _, as_trait, fields, inferred, _, _) {
-        return inferred && as_trait == None && sema_expression_brace_record(fields, None, environment, program)
+        return inferred && as_trait == None && sema_expression_brace_record(fields, None, check)
     }
     false
 }
@@ -276,70 +276,72 @@ sema_expression_list_element_is_empty_list: fn(element: Expr) -> Bool Never! {
     }
 }
 
-sema_expression_list_mark_owned_value: fn(value: Expr, state: ^SemaOwnershipState, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
+sema_expression_list_mark_owned_value: fn(value: Expr, check: ^SemaBodyCheck) -> Bool {
     if value == {
         .Ident(name, span, _) -> {
-            binding_index: sema_scope_resolve_index_at(scopes, name, span) ?? return true
-            binding := scopes.bindings[binding_index]
+            binding_index: sema_scope_resolve_index_at(check.scopes, name, span) ?? return true
+            binding := check.scopes.bindings[binding_index]
             if binding.symbol.kind != SymbolKind.Local -> return true
             // A share site copies; the source stays usable.
-            if sema_ownership_is_share_site(state, span) -> return true
-            if sema_ownership_report_invalidated_view(state, value, scopes, span, diagnostics) {
+            if sema_ownership_is_share_site(check.state, span) -> return true
+            if sema_ownership_report_invalidated_view(check.state, value, check.scopes, span, check.diagnostics) {
                 return false
             }
-            places := sema_ownership_places_from_expr_in_state(value, scopes, state)
+            places := sema_ownership_places_from_expr_in_state(value, check.scopes, check.state)
             if places.len() == 0 -> return true
-            if sema_ownership_report_own_place_moved(state, value, scopes, diagnostics) {
+            if sema_ownership_report_own_place_moved(check.state, value, check.scopes, check.diagnostics) {
                 return false
             }
             loop place in places {
-                if sema_ownership_place_moved(state, place) == .Val(origin) {
-                    sema_ownership_report_moved(state, origin, place, span, diagnostics)
+                if sema_ownership_place_moved(check.state, place) == .Val(origin) {
+                    sema_ownership_report_moved(check.state, origin, place, span, check.diagnostics)
                     return false
                 }
-                if sema_ownership_active_view_conflict_for_expr(state, place, AccessConvention.Move, value, scopes) {
-                    diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
+                if sema_ownership_active_view_conflict_for_expr(check.state, place, AccessConvention.Move, value, check.scopes) {
+                    check.diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
                     return false
                 }
                 // A view binding carries its own loan into the list
                 // (sema_ownership_carrier_loan_exempt), so `[first, second]`
                 // over disjoint windows moves both views.
-                if sema_ownership_active_loan_conflict_for_expr(state, place, AccessConvention.Move, value, scopes) != None {
-                    diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
+                if sema_ownership_active_loan_conflict_for_expr(check.state, place, AccessConvention.Move, value, check.scopes) != None {
+                    check.diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
                     return false
                 }
             }
             if !sema_ownership_type_is_copy(binding.symbol.ty ?? Type.Named{name: "Unit"}) {
-                origin: sema_ownership_move_origin(value, binding.symbol.ty ?? Type.Named{name: "Unit"}, "the list literal", true, scopes.copies_explicit)
-                loop place in sema_ownership_moved_record_places(value, places, scopes, true) {
-                    state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin.copy()})
+                origin: sema_ownership_move_origin(value, binding.symbol.ty ?? Type.Named{name: "Unit"}, "the list literal", true, check.scopes.copies_explicit)
+                loop place in sema_ownership_moved_record_places(value, places, check.scopes, true) {
+                    check.state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin.copy()})
                 }
                 loop place in places {
-                    if !sema_ownership_note_place_reference(state, value, place, span, scopes, AccessConvention.Move) {
+                    if !sema_ownership_note_place_reference(check.state, value, place, span, check.scopes, AccessConvention.Move) {
                         return false
                     }
                 }
             }
             true
         }
-        .Paren(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Tainted(inner, _, _, _) -> sema_expression_list_mark_owned_value(inner, state, scopes, diagnostics)
+        .Paren(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Tainted(inner, _, _, _) -> sema_expression_list_mark_owned_value(inner, check)
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> true
     }
 }
 
-sema_expression_list_check_clone: fn(element: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
-    facts := sema_copy_classify(element, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+sema_expression_list_check_clone: fn(element: Type, span: Span, check: ^SemaBodyCheck) -> Bool {
+    facts := sema_copy_classify(element, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.context.generic_params, false)
     effect_name := sema_copy_effect_name(facts)
-    if effect_name != None -> context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
+    if effect_name != None {
+        check.context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
+    }
     if !facts.accepted {
-        diagnostic := sema_copy_refusal(facts, span, environment, program)
+        diagnostic := sema_copy_refusal(facts, span, check.environment.*, check.program.*)
         if diagnostic != None {
-            diagnostics.push(diagnostic ?? sema_error("E0211", span, "`{type_name(element)}` can't be copied", "list spread clones each element while building the result", "spread values whose elements support `Clone`"))
+            check.diagnostics.push(diagnostic ?? sema_error("E0211", span, "`{type_name(element)}` can't be copied", "list spread clones each element while building the result", "spread values whose elements support `Clone`"))
         }
         return false
     }
     if sema_copy_memory_operation(facts) != None && effect_name == None {
-        context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
+        check.context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     }
     true
 }
@@ -351,11 +353,15 @@ sema_expression_list_inference_error: fn(element: Type, expected: Type, index: I
 // An item that does not fit the list's element type is E0112 about the list
 // item, after a checked typed-text rejection and the missing implementation of
 // a trait value's trait (E0905).
-sema_expression_list_item_mismatch: fn(required: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
-    want: sema_expr_expected_type(required, environment, program)
-    got: sema_expr_expected_type(offered, environment, program)
-    if sema_typed_text_mismatch(want, got, span, program) == .Val(typed_text) -> return typed_text
-    if sema_trait_value_unimplemented(want, got, span) == .Val(unimplemented) -> return unimplemented
+sema_expression_list_item_mismatch: fn(required: Type, offered: Type, span: Span, check: SemaBodyCheck) -> Diagnostic {
+    want: sema_expr_expected_type(required, check.environment.*, check.program.*)
+    got: sema_expr_expected_type(offered, check.environment.*, check.program.*)
+    if sema_typed_text_mismatch(want, got, span, check.program.*) == .Val(typed_text) {
+        return typed_text
+    }
+    if sema_trait_value_unimplemented(want, got, span) == .Val(unimplemented) {
+        return unimplemented
+    }
     sema_error("E0112", span, "a list item needs {sema_type_show(want)}, but this is {sema_type_show(got)}", "every list item must match the list's element type", sema_type_fix_hint(want, got))
 }
 
@@ -367,7 +373,7 @@ sema_expression_list_item_replace_mismatch: fn(required: Type, element: Expr, di
     mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, element_span) ?? return
     probe_diagnostics := [Diagnostic]{}
     offered: sema_probe_expression(element, None, check, probe_diagnostics) ?? return
-    check.diagnostics[mismatch_index] = sema_expression_list_item_mismatch(required, offered.ty, element_span, check.environment.*, check.program.*)
+    check.diagnostics[mismatch_index] = sema_expression_list_item_mismatch(required, offered.ty, element_span, check)
 }
 
 sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, check: ^SemaBodyCheck) -> SemaExpressionListCheckedParts? {
@@ -387,12 +393,8 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
         if element == {
             .Spread(value, spread_span, _) -> {
                 checked: sema_check_expression(value, None, check) ?? return None
-                if !sema_copy_site_check_guard_owned(checked, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics, false) {
-                    return None
-                }
-                if !sema_expression_list_mark_owned_value(value, check.state, check.scopes, check.diagnostics) {
-                    return None
-                }
+                if !sema_copy_site_check_guard_owned(checked, check, false) -> return None
+                if !sema_expression_list_mark_owned_value(value, check) -> return None
                 normalized: sema_expr_expected_type(sema_expr_unwrap_tag(checked.ty), check.environment.*, check.program.*)
                 spread_element := if normalized == {
                     .List(inner) -> inner
@@ -423,19 +425,15 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
                     }
                     return None
                 }
-                if !sema_copy_site_check_guard_owned(value, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics, false) {
+                if !sema_copy_site_check_guard_owned(value, check, false) -> return None
+                if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", check) {
                     return None
                 }
-                if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
-                    return None
-                }
-                if !sema_expression_list_mark_owned_value(element, check.state, check.scopes, check.diagnostics) {
-                    return None
-                }
+                if !sema_expression_list_mark_owned_value(element, check) -> return None
                 if expected_element == .Val(required) {
                     compatible: sema_expr_expected_assignable(required, value.ty, check.environment.*, check.program.*) ?? return None
                     if !compatible {
-                        check.diagnostics.push(sema_expression_list_item_mismatch(required, value.ty, expr_span(element), check.environment.*, check.program.*))
+                        check.diagnostics.push(sema_expression_list_item_mismatch(required, value.ty, expr_span(element), check))
                         return None
                     }
                 }
@@ -458,7 +456,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
                 element := elements[deferred_index]
                 // No sibling names a type, so an inferred struct item has
                 // none; the first record item names the list's record type.
-                record: sema_expression_list_element_is_inferred_struct(element) && sema_expression_list_element_is_record(element, check.environment.*, check.program.*)
+                record: sema_expression_list_element_is_inferred_struct(element) && sema_expression_list_element_is_record(element, check)
                 if sema_expression_list_element_is_inferred_struct(element) && !(record && first == None) {
                     if !record {
                         check.diagnostics.push(sema_error("E0119", expr_span(element), "`{{ … }}` needs a known struct type here", "the inferred construction form requires an expected type from the surrounding context (binding annotation, return type, etc.)", "name the type at the value, e.g. `x: Point{{x: 1, y: 2}}`, or inside a list `[Point{{ … }}, {{ … }}]`"))
@@ -467,15 +465,11 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
                 }
                 checked: sema_check_expression(element, None, check)
                 if checked == .Val(value) {
-                    if !sema_copy_site_check_guard_owned(value, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics, false) {
+                    if !sema_copy_site_check_guard_owned(value, check, false) -> return None
+                    if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", check) {
                         return None
                     }
-                    if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
-                        return None
-                    }
-                    if !sema_expression_list_mark_owned_value(element, check.state, check.scopes, check.diagnostics) {
-                        return None
-                    }
+                    if !sema_expression_list_mark_owned_value(element, check) -> return None
                     checked_parts[deferred_index] = Val(TListSpreadPart.Element{value: value})
                     element_types[deferred_index] = Val(value.ty)
                     if first == None -> first = Val(value.ty)
@@ -487,15 +481,11 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
             if checked_parts[deferred_index] != None -> next
             element := elements[deferred_index]
             value: sema_check_expression(element, Val(first_type), check) ?? return None
-            if !sema_copy_site_check_guard_owned(value, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics, false) {
+            if !sema_copy_site_check_guard_owned(value, check, false) -> return None
+            if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", check) {
                 return None
             }
-            if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
-                return None
-            }
-            if !sema_expression_list_mark_owned_value(element, check.state, check.scopes, check.diagnostics) {
-                return None
-            }
+            if !sema_expression_list_mark_owned_value(element, check) -> return None
             checked_parts[deferred_index] = Val(TListSpreadPart.Element{value: value})
             element_types[deferred_index] = Val(value.ty)
         }
@@ -665,7 +655,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
         result_ty = Val(Type.List{element: checked.element_types[0]})
     }
     if !has_spread {
-        sema_ownership_check_list_view_element_aliases(check.state, elements, expected_element ?? checked.element_types[0], check.scopes, check.diagnostics)
+        sema_ownership_check_list_view_element_aliases(check, elements, expected_element ?? checked.element_types[0])
     }
     ty: result_ty ?? Type.List{element: Type.Named{name: "Unit"}}
     if has_spread {
@@ -676,9 +666,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
                 return None
             }
         }
-        if !sema_expression_list_check_clone(element_type, span, check.environment.*, check.program.*, check.context, check.diagnostics) {
-            return None
-        }
+        if !sema_expression_list_check_clone(element_type, span, check) -> return None
         return sema_expr_expected_owned(sema_tree_node(ty, TExprKind.ListSpread{parts: checked.parts}, span), expected, check.environment.*, check.program.*, check.diagnostics)
     }
     values := [TExpr]{}
@@ -762,12 +750,8 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
         value: if expected_value != None -> sema_check_expression(entry.value, expected_value, check) else -> sema_check_expression(entry.value, None, check)
         checked_key: key ?? return None
         checked_value: value ?? return None
-        if !sema_copy_site_check_guard_owned(checked_key, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics, false) {
-            return None
-        }
-        if !sema_copy_site_check_guard_owned(checked_value, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics, false) {
-            return None
-        }
+        if !sema_copy_site_check_guard_owned(checked_key, check, false) -> return None
+        if !sema_copy_site_check_guard_owned(checked_value, check, false) -> return None
         if !sema_type_map_key_eligible(check.environment.*, check.program.*, checked_key.ty) {
             check.diagnostics.push(sema_type_map_key_refusal(check.environment.*, check.program.*, checked_key.ty, "`{type_name(checked_key.ty)}` can't be a map key", expr_span(entry.key)))
         }
@@ -962,9 +946,7 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, che
             }
         }
         value: sema_check_expression(field.value, field_expected, check) ?? return None
-        if !sema_copy_site_check_guard_owned(value, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics, false) {
-            return None
-        }
+        if !sema_copy_site_check_guard_owned(value, check, false) -> return None
         if field_expected == .Val(field_ty) {
             compatible: sema_expr_expected_assignable(field_ty, value.ty, check.environment.*, check.program.*) ?? return None
             if !compatible -> return None
@@ -1043,12 +1025,12 @@ sema_expression_char_codepoint: fn(text: String) -> Int? {
     Val(value)
 }
 
-sema_expression_char: fn(text: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_expression_char: fn(text: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     value: sema_expression_char_codepoint(text) ?? {
-        diagnostics.push(sema_error("E0001", span, "this character literal is not valid UTF-8", "a Char stores one Unicode scalar value", "write one valid character between single quotes"))
+        check.diagnostics.push(sema_error("E0001", span, "this character literal is not valid UTF-8", "a Char stores one Unicode scalar value", "write one valid character between single quotes"))
         return None
     }
-    sema_expr_expected_owned(sema_node(context, Type.Char, NodeKind.CharLit{value: value}, span), expected, environment, program, diagnostics)
+    sema_expr_expected_owned(sema_node(check.context, Type.Char, NodeKind.CharLit{value: value}, span), expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
 // `map[key, or: start]`: the value under `key`, which starts as `start` when
@@ -1130,7 +1112,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     }
     // A `distinct Int(lo..hi)` position on a `[T#N]` indexes by its raw Int,
     // and its declared range is the interval the bounds proof reads.
-    distinct_range: if base_ty == .FixedList(_, _) -> sema_contract_distinct_range(inferred_index.ty, check.environment.*, check.program.*) else -> None
+    distinct_range: if base_ty == .FixedList(_, _) -> sema_contract_distinct_range(inferred_index.ty, check) else -> None
     index_bounds := tree_expr_known_bounds(inferred_index)
     if index_bounds == None && distinct_range == .Val(range) {
         index_bounds = Val(TIntegerBounds{lo: range.lo, hi: range.hi})
@@ -1138,7 +1120,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     // An index with no bounds of its own reads its interval off
     // its parts (`faces[roll.raw() - 1]` over a `distinct Int(1..6)`); one that
     // fits the list proves the read, and any other keeps the runtime check.
-    derived_range: if index_bounds == None && base_ty == .FixedList(_, _) -> sema_contract_index_interval(inferred_index, check.environment.*, check.program.*) else -> None
+    derived_range: if index_bounds == None && base_ty == .FixedList(_, _) -> sema_contract_index_interval(inferred_index, check) else -> None
     named_mismatch: named_position && distinct_range == None && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty)
     named_ty: inferred_index.ty
     checked_index := if named_mismatch -> sema_expr_expected(inferred_index, index_expected, check.environment.*, check.program.*, check.diagnostics) ?? {
@@ -1158,7 +1140,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     // position as a checked Dyn.
     if sema_dyn_is_type(sema_expr_expected_type(base_ty, check.environment.*, check.program.*)) {
         site: "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
-        operation: sema_dyn_index_operation(checked_index.ty, site, span, expr_span(index), check.environment.*, check.program.*, check.scopes, check.diagnostics) ?? return None
+        operation: sema_dyn_index_operation(checked_index.ty, site, span, expr_span(index), check) ?? return None
         value: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{checked_index}}, span)
         return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
     }
@@ -1166,7 +1148,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     // erases only the length fact. Reuse Slice for read/write window typing.
     if checked_index.ty == (Type.Named{name: "Range"}) {
         if is_compute_tensor_family(base_ty) {
-            window: sema_call_compute_tensor_window(base, checked_base, checked_index, span, check.environment.*, check.program.*, check.scopes, check.diagnostics) ?? return None
+            window: sema_call_compute_tensor_window(base, checked_base, checked_index, span, check) ?? return None
             return sema_expr_expected_owned(window, expected, check.environment.*, check.program.*, check.diagnostics)
         }
         element: if base_ty == {
@@ -1298,8 +1280,8 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
             // `table[row]` on a Core `Rows<T>` reads (or, as an
             // assignment place, writes) the row its own `Row<T>` names: the
             // table's row list indexed by the handle's 4-byte slot.
-            if args.len() == 1 && sema_expression_rows_type(name, "Rows", check.environment.*, check.program.*, check.scopes) {
-                return sema_expression_rows_index(checked_base, checked_index, args[0], expr_span(index), span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+            if args.len() == 1 && sema_expression_rows_type(name, "Rows", check) {
+                return sema_expression_rows_index(checked_base, checked_index, args[0], expr_span(index), span, expected, check)
             }
         }
         .String -> {
@@ -1310,7 +1292,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     }
     // A type with an `Index` impl reads `base[key]` as its `get(key)`, and a
     // key it has no value for stops the program like a missing map key.
-    if result_ty == None && sema_expression_index_hook(check.environment.*, check.program.*, base_ty, OWNED_ROLE_INDEX) {
+    if result_ty == None && sema_expression_index_hook(check, base_ty, OWNED_ROLE_INDEX) {
         read: Expr.OrFallback{value: sema_expression_index_hook_call(base, sema_expression_index_hook_method(OWNED_ROLE_INDEX), [Expr]{index}, span), fallback: OrFallback.Value{value: Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{sema_expression_index_hook_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "index miss"}}, span: span, id: AST_NODE_GENERATED})}}, id: AST_NODE_GENERATED}}, is_option: false, span: span, id: AST_NODE_GENERATED}
         return sema_check_expression(read, expected, check)
     }
@@ -1362,15 +1344,15 @@ sema_expression_index_mismatch: fn(base_ty: Type, offered: Type, span: Span) -> 
 // role `role` (OWNED_ROLE_INDEX for `[ ]`, OWNED_ROLE_INDEX_MUT for
 // `[ ] =`). A user trait that shares that trait's name is not the hook, so
 // its impl never routes `[ ]`.
-sema_expression_index_hook: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, role: String) -> Bool {
+sema_expression_index_hook: fn(check: SemaBodyCheck, ty: Type, role: String) -> Bool {
     if ty == {
         .Named(_) | .Apply(_, _) -> {}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
     }
     owned: owned_trait_for_role(role) ?? return false
     trait_name: owned.name
-    graph: program.registration_graph
-    row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
+    graph: check.program.registration_graph
+    row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(check.environment.*, graph)) ?? return false
     identity: graph.modules[row.module_index].nominals[row.row].identity_key
     loop module_row in graph.modules {
         loop implementation in module_row.impls {
@@ -1424,37 +1406,39 @@ sema_expression_index_self_typed: fn(index: Expr) -> Bool Never! {
 // Whether the applied type `name` is Core's `kind` (`Rows` or
 // `Row`) rather than a user type spelled the same: its struct declares
 // the reserved field `__rows` (`__slot` for `Row`), which only Core may name.
-sema_expression_rows_type: fn(name: String, kind: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Bool {
-    owner := sema_expression_type_symbol(scopes, environment, program, name)
-    if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, name)
+sema_expression_rows_type: fn(name: String, kind: String, check: ^SemaBodyCheck) -> Bool {
+    owner := sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, name)
+    if owner == None {
+        owner = sema_expression_carrier_type_symbol(check.environment.*, check.program.*, name)
+    }
     symbol: owner ?? return false
-    declared: sema_scope_declaration_struct(environment, program, symbol.id) ?? return false
+    declared: sema_scope_declaration_struct(check.environment.*, check.program.*, symbol.id) ?? return false
     fields: loop field in declared.fields -> field.name
     fields.contains(if kind == "Rows" -> "__rows" else -> "__slot")
 }
 
 // `table[row]` on a `Rows<T>` (`element` is T): the table's row list indexed
 // by the handle's slot. A handle of another row type is E0112.
-sema_expression_rows_index: fn(table: TExpr, row: TExpr, element: Type, row_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_expression_rows_index: fn(table: TExpr, row: TExpr, element: Type, row_span: Span, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     handle := Type?{None}
     if sema_expr_unwrap_tag(row.ty) == .Apply(row_name, row_args) {
-        if row_args.len() == 1 && sema_expression_rows_type(row_name, "Row", environment, program, scopes) {
+        if row_args.len() == 1 && sema_expression_rows_type(row_name, "Row", check) {
             handle = Val(row_args[0])
         }
     }
     if handle == .Val(handled) {
         if type_identity_equal(handled, element) {
-            rows: sema_expression_field_checked(table, "__rows", span, None, environment, program, scopes, context, diagnostics) ?? return None
-            slot: sema_expression_field_checked(row, "__slot", row_span, None, environment, program, scopes, context, diagnostics) ?? return None
-            position: sema_expr_numeric_conversion(slot, Type.Int, row_span, sema_source_line_at(environment.source_segments, row_span) ?? 0) ?? return None
+            rows: sema_expression_field_checked(table, "__rows", span, None, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) ?? return None
+            slot: sema_expression_field_checked(row, "__slot", row_span, None, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) ?? return None
+            position: sema_expr_numeric_conversion(slot, Type.Int, row_span, sema_source_line_at(check.environment.source_segments, row_span) ?? 0) ?? return None
             kind: sema_expression_index_kind(IndexKind.List, rows.ty)
-            value: sema_tree_node(element, TExprKind.Index{base: rows, index: position, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, program, scopes, span)}, span)
-            return sema_expr_expected(value, expected, environment, program, diagnostics)
+            value: sema_tree_node(element, TExprKind.Index{base: rows, index: position, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, span)}, span)
+            return sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)
         }
     }
     // The core.collections types by their own names, not module-qualified.
     shown: if handle == .Val(handled) -> "Row<{type_name(handled)}>" else -> type_name(row.ty)
-    diagnostics.push(sema_error("E0112", row_span, "{shown} cannot index Rows<{type_name(element)}>", "a `Row<T>` handle reaches only a row of a `Rows<T>` table of the same row type", "index with the `Row<{type_name(element)}>` this table's `.add(...)` returned"))
+    check.diagnostics.push(sema_error("E0112", row_span, "{shown} cannot index Rows<{type_name(element)}>", "a `Row<T>` handle reaches only a row of a `Rows<T>` table of the same row type", "index with the `Row<{type_name(element)}>` this table's `.add(...)` returned"))
     None
 }
 
@@ -1463,7 +1447,7 @@ sema_expression_slice: fn(base: Expr, start: Expr, end: Expr, range: Expr?, span
     if is_compute_tensor_family(checked_base.ty) && range == .Val(tensor_range) {
         range_checked: sema_check_expression(tensor_range, Val(Type.Named{name: "Range"}), check) ?? return None
         if range_checked.ty != (Type.Named{name: "Range"}) -> return None
-        window: sema_call_compute_tensor_window(base, checked_base, range_checked, span, check.environment.*, check.program.*, check.scopes, check.diagnostics) ?? return None
+        window: sema_call_compute_tensor_window(base, checked_base, range_checked, span, check) ?? return None
         return sema_expr_expected(window, expected, check.environment.*, check.program.*, check.diagnostics)
     }
     // L0501: an owned slice taken inside a loop copies on every pass; a `View`
@@ -1511,7 +1495,7 @@ sema_expression_slice: fn(base: Expr, start: Expr, end: Expr, range: Expr?, span
         check.diagnostics.push(sema_error("E0505", span, "only lists and strings can be sliced, not {type_name(checked_base.ty)}", "a Range projects a window from indexed storage", "slice a List or String value"))
         return None
     }
-    if sema_columnar_list_element(check.environment.*, check.program.*, checked_base.ty) == .Val(element) {
+    if sema_columnar_list_element(check, checked_base.ty) == .Val(element) {
         check.diagnostics.push(sema_error("E1108", span, "slicing isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(checked_base.ty))}` yet", "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration", "drop `#Layout(columnar)` from `{element}` to slice, or index the elements you need in a loop"))
         return None
     }
@@ -1562,19 +1546,21 @@ sema_expression_interpolation_derived: fn(ty: Type, environment: SemaScopeEnviro
 // `Display` or `Printable` implementation. Display has no default, so the
 // interpolation is flagged for the explicit debug selector (L0520). Core
 // types are not flagged: their display is the library's, not the caller's.
-sema_expression_interpolation_auto_printable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    graph: program.registration_graph
+sema_expression_interpolation_auto_printable: fn(ty: Type, check: SemaBodyCheck) -> Bool {
+    graph: check.program.registration_graph
     name: sema_type_graph_base_name(ty) ?? return false
-    resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
+    resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(check.environment.*, graph), name) ?? return false
     if sema_resolved_kind(graph, resolved) != SymbolKind.Type || module_is_core(resolved.target_module_identity) {
         return false
     }
-    if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
-        if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") {
+    if sema_scope_checked_type_row(check.environment.*, check.program.*, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
+        if sema_serde_has_name(check.program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(check.program.checked_types[checked_row].derives, "Display") {
             return false
         }
     }
-    if sema_call_reflection_bound(ty, "Display", environment, program) -> return false
+    if sema_call_reflection_bound(ty, "Display", check.environment.*, check.program.*) {
+        return false
+    }
     module_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
     row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
     // Matched in place: a pattern on the indexed path copies the whole item.
@@ -1659,9 +1645,9 @@ sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, pro
 // The markers that grant a distinct type named in this scope its forwarded
 // operations, in the order its derives came from them: each bundle trait's
 // own, and `#Codable` for a codec it asked for.
-sema_expression_distinct_bundles: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> [String]? {
-    owner: sema_expression_type_symbol(scopes, environment, program, name) ?? return None
-    definition: sema_scope_declaration_distinct(environment, program, owner.id) ?? return None
+sema_expression_distinct_bundles: fn(name: String, check: ^SemaBodyCheck) -> [String]? {
+    owner: sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, name) ?? return None
+    definition: sema_scope_declaration_distinct(check, owner.id) ?? return None
     granted := [String]{}
     loop derived in definition.derives {
         marker := ""
@@ -1698,37 +1684,37 @@ sema_expression_one_pass_fix: fn(ty: Type) -> String Never! {
 // `Display`, which has no default. A value without it is refused here
 // (E0915); a nominal `distinct` type without `#Printable` names the bundles
 // it was granted instead (E0138). Returns whether the value can be shown.
-sema_expression_interpolation_display: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
+sema_expression_interpolation_display: fn(value: TExpr, check: ^SemaBodyCheck) -> Bool {
     ty: value.ty
-    if sema_expression_displayable(ty, environment, program) {
+    if sema_expression_displayable(ty, check.environment.*, check.program.*) {
         // The lint's one edit is `:Debug`, so a type that opted out of Debug
         // (where that hole is E0112) isn't flagged.
-        if sema_expression_interpolation_auto_printable(ty, environment, program) && sema_call_debug_traceable(ty, environment, program) {
+        if sema_expression_interpolation_auto_printable(ty, check) && sema_call_debug_traceable(ty, check) {
             shown: sema_type_show(ty)
-            written: sema_expression_interpolation_text(value.span, environment, program)
-            diagnostics.push(sema_lint("L0520", value.span, "{shown} has no `Display` impl; use the explicit debug selector for this interpolation.", "Bare interpolation is moving to the explicit `Display` hook; the canonical migration edit keeps the value user-owned.", "Replace `{written}` with `{{{written}:Debug}}`."))
+            written: sema_expression_interpolation_text(value.span, check)
+            check.diagnostics.push(sema_lint("L0520", value.span, "{shown} has no `Display` impl; use the explicit debug selector for this interpolation.", "Bare interpolation is moving to the explicit `Display` hook; the canonical migration edit keeps the value user-owned.", "Replace `{written}` with `{{{written}:Debug}}`."))
         }
         return true
     }
     if sema_call_reflection_secret_bearing(ty) {
-        diagnostics.push(sema_error("E0915", value.span, "secret-bearing `{type_name(ty)}` has no `Display` implementation", "cryptographic secrets cannot enter logs or strings through interpolation", "remove the interpolation; log a public operation label or key identifier instead"))
+        check.diagnostics.push(sema_error("E0915", value.span, "secret-bearing `{type_name(ty)}` has no `Display` implementation", "cryptographic secrets cannot enter logs or strings through interpolation", "remove the interpolation; log a public operation label or key identifier instead"))
         return false
     }
     if sema_call_reflection_one_pass(ty) {
-        diagnostics.push(sema_error("E0915", value.span, "the one-pass source {sema_type_show(ty)} has no `Display` implementation", "reading this value consumes it, so showing it would spend the only pass", sema_expression_one_pass_fix(ty)))
+        check.diagnostics.push(sema_error("E0915", value.span, "the one-pass source {sema_type_show(ty)} has no `Display` implementation", "reading this value consumes it, so showing it would spend the only pass", sema_expression_one_pass_fix(ty)))
         return false
     }
     if ty == .Named(name) {
-        if sema_expression_distinct_bundles(name, environment, program, scopes) == .Val(granted) {
+        if sema_expression_distinct_bundles(name, check) == .Val(granted) {
             has: if granted.len() == 0 -> "no operation bundles" else -> "only {granted.join(", ")}"
-            diagnostics.push(sema_error("E0138", value.span, "`{name}` doesn't support string interpolation", "a nominal type only gets the operations its operation bundles grant; `{name}` has {has}", "add `#Printable` before the declaration, or convert to the base type first"))
+            check.diagnostics.push(sema_error("E0138", value.span, "`{name}` doesn't support string interpolation", "a nominal type only gets the operations its operation bundles grant; `{name}` has {has}", "add `#Printable` before the declaration, or convert to the base type first"))
             return false
         }
     }
     // A function named in a hole is code, not a value to show: the lesson is the call.
     if ty == .Fn(_, _, _, _, _, _) {
-        written: sema_expression_interpolation_text(value.span, environment, program)
-        diagnostics.push(sema_error("E0915", value.span, "the function `{written}` has no `Display` implementation", "a hole shows a value, and a function is code to run, not text", "call it in the hole: `{{{written}()}}`"))
+        written: sema_expression_interpolation_text(value.span, check)
+        check.diagnostics.push(sema_error("E0915", value.span, "the function `{written}` has no `Display` implementation", "a hole shows a value, and a function is code to run, not text", "call it in the hole: `{{{written}()}}`"))
         return false
     }
     // sema_type_show quotes a nominal name itself; the impl head is bare code.
@@ -1737,37 +1723,37 @@ sema_expression_interpolation_display: fn(value: TExpr, environment: SemaScopeEn
     // when this module declares it as a struct or enum (impl placement,
     // L0535), and `:Debug` where the value has a Debug form (else that hole
     // is E0112).
-    written: sema_expression_interpolation_text(value.span, environment, program)
+    written: sema_expression_interpolation_text(value.span, check)
     fixes := [String]{}
-    if sema_expression_impl_allowed(ty, environment, program, scopes) {
-        if sema_expression_impl_in_body(ty, environment, program) {
+    if sema_expression_impl_allowed(ty, check) {
+        if sema_expression_impl_in_body(ty, check) {
             fixes.push("add `impl Display {{ display: fn(self) -> String {{ … }} }}` to the body of `{type_name(ty)}`")
         } else {
             fixes.push("add `impl {type_name(ty)}.Display {{ display: fn(self) -> String {{ … }} }}`")
         }
     }
-    if sema_call_debug_traceable(ty, environment, program) {
+    if sema_call_debug_traceable(ty, check) {
         fixes.push("use `{{{written}:Debug}}` for debug output")
     }
     fix: if fixes.len() > 0 -> fixes.join(", or ") else -> "show a part of `{written}` that has `Display`, or write the text yourself instead of interpolating it"
-    diagnostics.push(sema_error("E0915", value.span, "{sema_type_show(ty)} has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", fix))
+    check.diagnostics.push(sema_error("E0915", value.span, "{sema_type_show(ty)} has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", fix))
     false
 }
 
 // Whether this program may write an `impl` for `ty`'s own trait set: the
 // orphan rule (E0902) admits one for a type declared outside Core.
-sema_expression_impl_allowed: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Bool {
+sema_expression_impl_allowed: fn(ty: Type, check: ^SemaBodyCheck) -> Bool {
     if ty == .Tagged(_, _) -> return false
     name: sema_type_graph_base_name(ty) ?? return false
-    owner: sema_expression_type_symbol(scopes, environment, program, name) ?? return false
-    !sema_module_is_core_source(sema_scope_module_text(environment, program, owner.module_identity))
+    owner: sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, name) ?? return false
+    !sema_module_is_core_source(sema_scope_module_text(check.environment.*, check.program.*, owner.module_identity))
 }
 
 // Whether `ty` is a struct or enum the environment's own module declares,
 // whose body then holds its impls (L0535).
-sema_expression_impl_in_body: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    graph: program.registration_graph
-    caller: sema_scope_caller_index(environment, graph) ?? return false
+sema_expression_impl_in_body: fn(ty: Type, check: SemaBodyCheck) -> Bool Never! {
+    graph: check.program.registration_graph
+    caller: sema_scope_caller_index(check.environment.*, graph) ?? return false
     row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return false
     if row.module_index != caller -> return false
     kind: graph.modules[row.module_index].nominals[row.row].kind
@@ -1776,9 +1762,9 @@ sema_expression_impl_in_body: fn(ty: Type, environment: SemaScopeEnvironment, pr
 
 // The source text of the interpolated expression at `span`, or `value` when
 // the module source does not hold it.
-sema_expression_interpolation_text: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
-    graph: program.registration_graph
-    if sema_scope_caller_index(environment, graph) == .Val(caller) {
+sema_expression_interpolation_text: fn(span: Span, check: SemaBodyCheck) -> String {
+    graph: check.program.registration_graph
+    if sema_scope_caller_index(check.environment.*, graph) == .Val(caller) {
         raw: graph.modules[caller].source.bytes()
         if span.start >= 0 && span.end <= raw.len() && span.start < span.end {
             text: String.from_bytes(raw[span.start..<span.end]) ?? ""

@@ -16,7 +16,7 @@ use {
         BUILD_PANIC_UNWIND,
         BUILD_PROFILE_RELEASE,
     ]
-    jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_listed, build_option_profile_hint, build_option_refusal, build_option_row]
+    jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_listed, build_option_profile_hint, build_option_refusal, build_option_row, effect_vocabulary_view_count]
 }
 
 // The `optimize:` level of a profile: O0, O1 or O2.
@@ -53,6 +53,10 @@ DevCaptureSetting: enum {
     On,
     Off,
 }
+
+// DevCaptureSetting picks from Core's PolicySetting: capture is a policy knob
+// turned `On` or `Off`, apart from `Default`, a profile that leaves it unset.
+DEV_CAPTURE_SETTING_COUNT: #run effect_vocabulary_view_count("Manifest/Blocks/BuildProfiles.jet", embed_file("BuildProfiles.jet"), "DevCaptureSetting", "Core/Compiler/Lang.jet", embed_file("toolchain:Core/Compiler/Lang.jet"), "PolicySetting", [String]{"Default"})
 
 DevRecordsPolicy: struct {
     capture: DevCaptureSetting,

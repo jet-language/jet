@@ -161,7 +161,7 @@ pkg_fetch_existing_provenance: fn(resolver: PackageFetchResolver, name: String, 
     package.provenance
 }
 
-pkg_fetch_resolve: fn(verification: ^StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, spec: DepSpec, parent: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchError! {
+pkg_fetch_resolve: fn(verification: StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, spec: DepSpec, parent: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchError! {
     if resolver.nodes.get(name) == .Val(existing) {
         if resolver.versions.get(name) == .Val(previous) {
             pkg_fetch_check_version(name, previous, existing.package.version, chain)
@@ -219,7 +219,7 @@ pkg_fetch_path_escape: fn(name: String, path: String, absolute: String, parent: 
     }
 }
 
-pkg_fetch_source_node: fn(verification: ^StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, source: LockSource, revision: LockedRevision?, snapshot: PackageSourceSnapshot, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
+pkg_fetch_source_node: fn(verification: StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, source: LockSource, revision: LockedRevision?, snapshot: PackageSourceSnapshot, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
     manifest: pkg_fetch_load_manifest(snapshot.path(), name)
     pkg_fetch_record_version(resolver, manifest.package.name, manifest.package.version, chain)
     dependencies: pkg_lock_manifest_dependency_names(manifest)

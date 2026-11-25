@@ -88,7 +88,7 @@ use jet_foundation.[
     CoreRecordLiteralRow,
     IR_MARKER_ARG_VALUE,
     IR_PRELUDE_MARKER_RECORD,
-    JET_TYPE_NAMES,
+    TYPE_NAMES,
     core_enum_payload_variants,
     ir_host_value_name,
     ir_runtime_handle_row,
@@ -1221,7 +1221,7 @@ sema_type_qualified_alias_in_scope: fn(graph: SemaRegistrationGraph, caller: Int
 // Whether `name` is a type the compiler owns that a program may write bare
 // and no Core export row carries. Each group is read from its owner: the host
 // values of build and comptime code (ir_host_value_name) but the two no
-// program names, the built-in type catalog (JET_TYPE_NAMES), the reflection
+// program names, the built-in type catalog (TYPE_NAMES), the reflection
 // fact enums (sema_fact_enum_variants), the compiler-owned payload enums
 // (CORE_ENUM_PAYLOAD_ROWS), the data format markers (sema_data_is_json_name),
 // then the runtime handles and compiler records a program may write
@@ -1231,7 +1231,7 @@ sema_type_compiler_owned_name: fn(name: String) -> Bool {
     if ir_host_value_name(name) {
         return name != IR_MARKER_ARG_VALUE && name != IR_PRELUDE_MARKER_RECORD
     }
-    if JET_TYPE_NAMES.contains(name) || sema_fact_enum_variants(name) != None || core_enum_payload_variants(name) != None {
+    if TYPE_NAMES.contains(name) || sema_fact_enum_variants(name) != None || core_enum_payload_variants(name) != None {
         return true
     }
     sema_data_is_json_name(name) || SEMA_TYPE_NAMEABLE_HANDLES.contains(name) || SEMA_TYPE_NAMEABLE_RECORDS.contains(name) || SEMA_TYPE_COMPILER_CARRIERS.contains(name)
@@ -1274,7 +1274,7 @@ sema_type_nameable_handles_checked: fn(view: [String]) -> Int {
 // The compiler records (CORE_RECORD_FIELD_ROWS, CORE_RECORD_LITERAL_ROWS) a
 // program may write as a type with no import: the reflection records that
 // are no host value (a span, a type id, a heard call and its parts), a module
-// grant, an expiry and the router cache state.
+// grant and an expiry.
 // SEMA_TYPE_NAMEABLE_RECORDS_CHECKED holds the view to the record rows.
 SEMA_TYPE_NAMEABLE_RECORDS: [String]{
     "AttributionInfo",
@@ -1302,7 +1302,6 @@ SEMA_TYPE_NAMEABLE_RECORDS: [String]{
     "TypeId",
     "UnitScaleProvenanceInfo",
     "ViewProvenanceInfo",
-    "WebRouterCacheState",
 }
 
 SEMA_TYPE_NAMEABLE_RECORDS_CHECKED: #run sema_type_nameable_records_checked(SEMA_TYPE_NAMEABLE_RECORDS, CORE_RECORD_FIELD_ROWS, CORE_RECORD_LITERAL_ROWS)

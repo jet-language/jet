@@ -791,6 +791,15 @@ priv BuildNumber: struct {
     big: Bool,
 }
 
+// The 4 or 16 network-order octets of each address `host` (one [..] pair
+// removed) resolves to on `port`, in resolver order, once the effect scopes
+// in force admit the host; else an Err whose message is the refusal or the
+// resolver's message. The build host resolves through it (JetCLI
+// BuildHTTPTransport, Jetpack Publication and PackageFetch).
+jet_http_build_resolve: fn(host: String, port: Int) -[Net, Time.Wait]> [[U8]] Err! {
+    net_rt.build_resolve(host, port)
+}
+
 jet_http_build_get: fn(host: String, authority: String, target: String, secure: Bool, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
     if port < 0 || port > 65535 || timeout_ms < 0 || limit < 0 {
         return Err(build_fail("out of range integral type conversion attempted"))
@@ -2183,7 +2192,7 @@ priv client_take_u64: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // A TLS stream owns its socket until closed: close it so the peer sees
 // close_notify; the reply is already decided either way.
-priv client_close: fn(wire: ^BuildWire) -[Net, Time.Wait]> Never! {
+priv client_close: fn(wire: BuildWire) -[Net, Time.Wait]> Never! {
     if wire.tls == .Val(stream) {
         if stream.close() == {
             .Ok(_) -> {}

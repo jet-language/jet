@@ -23,7 +23,7 @@ store_profile_generation_root_id: fn(owner: String, profile: String, generation:
     RootID.new("profile-generation:{owner}:{profile}:{generation}")
 }
 
-store_prepare_profile_generation_root: fn(verification: ^StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -> PreparedProfileGenerationRoot StoreError! {
+store_prepare_profile_generation_root: fn(verification: StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -> PreparedProfileGenerationRoot StoreError! {
     id: store_profile_generation_root_id(owner, profile, generation)
     incarnation: Incarnation.new(1)
     root_witness: RootWitness.new(witness)
@@ -32,7 +32,7 @@ store_prepare_profile_generation_root: fn(verification: ^StoreVerification, root
     Ok(PreparedProfileGenerationRoot{id: id, incarnation: incarnation, witness: root_witness})
 }
 
-store_commit_profile_generation_root: fn(verification: ^StoreVerification, roots: HangarRoots, prepared: PreparedProfileGenerationRoot, at: Int) StoreError! {
+store_commit_profile_generation_root: fn(verification: StoreVerification, roots: HangarRoots, prepared: PreparedProfileGenerationRoot, at: Int) StoreError! {
     _: store_lifecycle_commit(verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
 }
 
@@ -40,7 +40,7 @@ store_commit_profile_generation_root: fn(verification: ^StoreVerification, roots
 // root that its completion witness names. Listing and activation use this
 // gate so a missing or rebound lifecycle root cannot look like a live
 // profile.
-store_validate_profile_generation_root: fn(verification: ^StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String]) StoreError! {
+store_validate_profile_generation_root: fn(verification: StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String]) StoreError! {
     if targets.len() == 0 {
         return
     }
@@ -59,7 +59,7 @@ store_validate_profile_generation_root: fn(verification: ^StoreVerification, roo
 // Prepare or resume one immutable external consumer root. An exact
 // committed retry is already complete and returns `None`; the stable key can
 // never be rebound to another witness or target set.
-store_reconcile_external_consumer_root: fn(verification: ^StoreVerification, roots: HangarRoots, consumer: String, key: String, witness: String, requested: [String], at: Int) -> PreparedExternalConsumerRoot? StoreError! {
+store_reconcile_external_consumer_root: fn(verification: StoreVerification, roots: HangarRoots, consumer: String, key: String, witness: String, requested: [String], at: Int) -> PreparedExternalConsumerRoot? StoreError! {
     targets: store_sorted_unique(requested)
     if targets.len() == 0 {
         return Err(StoreError.Other("external consumer root requires at least one Hangar object"))
@@ -89,6 +89,6 @@ store_reconcile_external_consumer_root: fn(verification: ^StoreVerification, roo
     Ok(Val(PreparedExternalConsumerRoot{id: id, incarnation: incarnation, witness: root_witness}))
 }
 
-store_commit_external_consumer_root: fn(verification: ^StoreVerification, roots: HangarRoots, prepared: PreparedExternalConsumerRoot, at: Int) StoreError! {
+store_commit_external_consumer_root: fn(verification: StoreVerification, roots: HangarRoots, prepared: PreparedExternalConsumerRoot, at: Int) StoreError! {
     _: store_lifecycle_commit(verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
 }

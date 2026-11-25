@@ -93,16 +93,17 @@ sema_function_header_normalize_external_methods: fn(program: ^Program, in_packag
         name: sema_registration_root_name(item)
         if name != "" -> declared[name] = true
     }
-    seen := [String:Bool]{}
+    seen := SemaKeyRows{}
     items := [Item]{}
     loop item in program.items {
         if item == .Func(function) && function.external_type == .Val(target) {
-            key: "{target.name}.{function.name}"
-            if seen.get(key) != None {
+            target_id: sema_key_text(seen, target.name)
+            function_id: sema_key_text(seen, function.name)
+            key: sema_key_pair(seen, target_id, function_id)
+            if !sema_key_first(seen, key) {
                 diagnostics.push(sema_defined_twice(function.name, "module declarations share one namespace", function.name_span))
                 next
             }
-            seen[key] = true
             if in_package || imported || target.name.contains(".") || declared.get(target.name) != None {
                 items.push(sema_function_header_normalize_external_method(function))
                 next
@@ -218,16 +219,16 @@ sema_function_header_memo_config: fn(function: Func) -> SemaMemoConfig Never! {
 // The memo configuration of the function `target` names, read from its
 // declaration in place; None for a generic function (one store per
 // instance, so no single store to report) or a non-function.
-sema_function_header_memo_target: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaMemoConfig? {
+sema_function_header_memo_target: fn(check: SemaBodyCheck, target: SymbolID) -> SemaMemoConfig? {
     // Snapshot: a lone program's memo targets are its own declarations'.
-    if program.registration_graph.mode == .Snapshot {
-        item: sema_scope_resolve_declaration(environment, program, target) ?? return None
+    if check.program.registration_graph.mode == .Snapshot {
+        item: sema_scope_resolve_declaration(check.environment.*, check.program.*, target) ?? return None
         if item == .Func(function) && function.type_params.len() == 0 {
             return Val(sema_function_header_memo_config(function))
         }
         return None
     }
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     row: sema_registration_callable_row_of(graph, target) ?? return None
     if row == .Function(module_index, index) {
         if graph.modules[module_index].functions[index].declaration.type_params.len() > 0 {
@@ -241,21 +242,21 @@ sema_function_header_memo_target: fn(environment: SemaScopeEnvironment, program:
 // `name.cache()` naming a memoized
 // function is the read-only `MemoStats` of its result store, resolved
 // before the ordinary receiver lookup.
-sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallArg], method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallArg], method_span: Span, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     if method != "cache" || args.len() > 0 -> return unhandled
     name := ""
     if receiver == .Ident(receiver_name, _, _) -> name = receiver_name
     if name == "" -> return unhandled
-    nearest: sema_scope_resolve_index(scopes, name) ?? return unhandled
-    symbol: sema_scope_binding_symbol(environment, scopes, nearest)
+    nearest: sema_scope_resolve_index(check.scopes, name) ?? return unhandled
+    symbol: sema_scope_binding_symbol(check.environment.*, check.scopes, nearest)
     if symbol.kind != SymbolKind.Function -> return unhandled
-    config: sema_function_header_memo_target(environment, program, symbol.id) ?? return unhandled
+    config: sema_function_header_memo_target(check, symbol.id) ?? return unhandled
     bound := "none"
     if config.bound == .Val(limit) -> bound = "{limit}" else if !config.unbounded {
         return unhandled
     }
-    function: sema_call_callee_decl(program, symbol.id, method_span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    function: sema_call_callee_decl(check.program.*, symbol.id, method_span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(Type.Named{name: "MemoStats"}, TExprKind.HostCall{call: THostCall.MemoStats{function: function, bound: bound}}, method_span))}
 }
 
@@ -457,7 +458,7 @@ sema_function_header_supported: fn(function: Func, context: ^SemaCheckContext) -
         // an ordinary Jet body; the devtools publication gate
         // (Calls/Devtools.jet) reads the marker to find the panel's state. A
         // `#Deadline(limit)` function's body is checked inside the deadline
-        // block CheckProgram.jet wraps it in (deadline_guards). An
+        // block FunctionCheck.jet wraps it in (deadline_guards). An
         // `#On(stage, Marker)` tool-stage hook is an ordinary Jet body that a
         // tool calls while compiling; MarkerRules checks its signature.
         if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || marker.name == MARKER_STATE || marker.name == MARKER_DEADLINE || marker.name == MARKER_ON || (marker.name == MARKER_TARGET && function.web_marker != None) || (sema_marker_is_wasm_export(marker) && function.web_marker != None) || sema_marker_is_guest_export(marker) {

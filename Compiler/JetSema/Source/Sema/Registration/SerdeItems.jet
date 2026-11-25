@@ -309,7 +309,8 @@ sema_serde_items_param_flags: fn(params: [TypeParam], wire: [Type]) -> [Bool]? N
 // for `type_name`'s `trait_name`: an impl item, or an inline trait block of the
 // declaration itself (sema_derive_impl_flags bits).
 sema_serde_items_impl_flags: fn(facts: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Int Never! {
-    facts.impl_flags[sema_derive_index_find(facts, sema_type_metadata_impl_key(type_name, trait_name))]
+    slot: name_pair_find_slot(facts.keys, type_name, trait_name) ?? return 0
+    facts.impl_flags.get(slot) ?? 0
 }
 
 sema_serde_items_written: fn(flags: Int) -> Bool Never! { flags == 1 || flags == 3 }

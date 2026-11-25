@@ -9,7 +9,7 @@ typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t hits, misses, size; Text *bound; } Memo;
 typedef struct { int64_t domain, kind; Text *path, *detail; int64_t pid, port; } Event;
 _Static_assert(sizeof(Memo)==32 && offsetof(Memo,bound)==24,"MemoABI");
-_Static_assert(sizeof(Event)==48 && offsetof(Event,path)==16 && offsetof(Event,pid)==32,"WatchABI");
+_Static_assert(sizeof(Event)==48 && offsetof(Event,path)==16 && offsetof(Event,pid)==32,"CoreLayoutABI WatchEvent");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);

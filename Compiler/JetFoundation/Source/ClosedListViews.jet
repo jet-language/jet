@@ -1,0 +1,91 @@
+// Checks for the closed-list views whose vocabulary another file in this
+// package cannot embed downward. An embed path may not contain `..`, so a
+// view in Facts/ cannot embed its vocabulary from AST/; this file sits above
+// both and holds each such check. It also holds the checks of Core views,
+// which the toolchain tree supplies. Each constant stops the build and names
+// any view case its vocabulary lacks, apart from the cases listed in
+// `outside`.
+
+// TIndexKind picks from IndexKind. Sema settles each parsed index form, so a
+// new checked form is an IndexKind case first. `MapOr` is the checked-only
+// `map[key, or: start]`.
+TINDEX_KIND_COUNT: #run effect_vocabulary_view_count("Facts/Checked.jet", embed_file("Facts/Checked.jet"), "TIndexKind", "AST/Expressions.jet", embed_file("AST/Expressions.jet"), "IndexKind", [String]{"MapOr"})
+
+// TTryConvert picks from TryConvert, the conversions `?` applies. It adds the
+// two that sema builds for open unions, `RewidenUnion` and `TypedIntoUnion`.
+TTRY_CONVERT_COUNT: #run effect_vocabulary_view_count("Facts/Checked.jet", embed_file("Facts/Checked.jet"), "TTryConvert", "AST/Expressions.jet", embed_file("AST/Expressions.jet"), "TryConvert", [String]{"RewidenUnion", "TypedIntoUnion"})
+
+// ViewSourceProjection picks from Expr. A view's source path steps through
+// the field, index and range expressions that project it.
+VIEW_SOURCE_PROJECTION_COUNT: #run effect_vocabulary_view_count("Types/Types.jet", embed_file("Types/Types.jet"), "ViewSourceProjection", "AST/Expressions.jet", embed_file("AST/Expressions.jet"), "Expr", [String]{})
+
+// ComponentTypeDescriptor picks from Type. A Component interface carries Jet
+// types, and `Record` is a Component record or tuple with its fields.
+COMPONENT_TYPE_DESCRIPTOR_COUNT: #run effect_vocabulary_view_count("Facts/Checked.jet", embed_file("Facts/Checked.jet"), "ComponentTypeDescriptor", "Types/Types.jet", embed_file("Types/Types.jet"), "Type", [String]{"Record"})
+
+// CanonicalJSON picks from SerdeWireShape, the JSON value shapes. Its
+// `Integer` is the wire shape's `Int` kept as canonical decimal text, and its
+// `String` is the wire shape's `Text`.
+CANONICAL_JSON_COUNT: #run effect_vocabulary_view_count("Encoding/CanonicalJSON.jet", embed_file("Encoding/CanonicalJSON.jet"), "CanonicalJSON", "AST/Items.jet", embed_file("AST/Items.jet"), "SerdeWireShape", [String]{"Integer", "String"})
+
+// WebFormValueType and WebRouterValueType pick from the built-in Jet types
+// (TYPE_NAMES): a form field or route parameter decodes to one of them.
+// The router's `JSON` is a parameter decoded as JSON text.
+WEB_FORM_VALUE_TYPE_COUNT: #run effect_vocabulary_enum_view_count("Core/Web/Forms.jet", embed_file("toolchain:Core/Web/Forms.jet"), "WebFormValueType", TYPE_NAMES, "TYPE_NAMES", [String]{})
+
+WEB_ROUTER_VALUE_TYPE_COUNT: #run effect_vocabulary_enum_view_count("Core/Web/Router.jet", embed_file("toolchain:Core/Web/Router.jet"), "WebRouterValueType", TYPE_NAMES, "TYPE_NAMES", [String]{"JSON"})
+
+// JetSQLValue picks from DBValue, the values a database row holds: the SQL
+// carrier has every scalar of it but `Blob`.
+JET_SQL_VALUE_COUNT: #run effect_vocabulary_view_count("Core/DB/SQL.jet", embed_file("toolchain:Core/DB/SQL.jet"), "JetSQLValue", "Core/DB/DB.jet", embed_file("toolchain:Core/DB/DB.jet"), "DBValue", [String]{})
+
+// JetDataPlotValue picks from SerdeWireShape: a plotted column holds numbers,
+// text or bools.
+JET_DATA_PLOT_VALUE_COUNT: #run effect_vocabulary_view_count("Core/Data/Data.jet", embed_file("toolchain:Core/Data/Data.jet"), "JetDataPlotValue", "AST/Items.jet", embed_file("AST/Items.jet"), "SerdeWireShape", [String]{})
+
+// TComptimeKey and TComptimeValue, the checked comptime keys and values,
+// pick from CtKey and CtValue, the parsed ones. The checked forms spell the
+// parsed `Str` as `String`, and a checked value's `Function` is a named
+// function as a value, by its function key.
+TCOMPTIME_KEY_COUNT: #run effect_vocabulary_view_count("Facts/Comptime.jet", embed_file("Facts/Comptime.jet"), "TComptimeKey", "AST/Comptime.jet", embed_file("AST/Comptime.jet"), "CtKey", [String]{"String"})
+
+TCOMPTIME_VALUE_COUNT: #run effect_vocabulary_view_count("Facts/Comptime.jet", embed_file("Facts/Comptime.jet"), "TComptimeValue", "AST/Comptime.jet", embed_file("AST/Comptime.jet"), "CtValue", [String]{"String", "Function"})
+
+// ObligationMode picks from PolicyValue: a Core obligation mode is one of the
+// marker values, apart from the `Unspecified` of a mode nothing set.
+OBLIGATION_MODE_COUNT: #run effect_vocabulary_view_count("Core/Compiler/Lang.jet", embed_file("toolchain:Core/Compiler/Lang.jet"), "ObligationMode", "AST/Statements.jet", embed_file("AST/Statements.jet"), "PolicyValue", [String]{"Unspecified"})
+
+// DBValue picks from SerdeWireShape: a database value is a scalar wire shape
+// or a `Blob` of bytes.
+DB_VALUE_COUNT: #run effect_vocabulary_view_count("Core/DB/DB.jet", embed_file("toolchain:Core/DB/DB.jet"), "DBValue", "AST/Items.jet", embed_file("AST/Items.jet"), "SerdeWireShape", [String]{"Blob"})
+
+// ZstdFileError picks from GzipFileError: both are the ways reading or
+// writing a compressed file fails.
+ZSTD_FILE_ERROR_COUNT: #run effect_vocabulary_view_count("Core/Archive/Zstd.jet", embed_file("toolchain:Core/Archive/Zstd.jet"), "ZstdFileError", "Core/Archive/Gzip.jet", embed_file("toolchain:Core/Archive/Gzip.jet"), "GzipFileError", [String]{})
+
+// ParquetFailureKind picks from DataErrorKind: a Parquet read fails the way
+// a data read does.
+PARQUET_FAILURE_KIND_COUNT: #run effect_vocabulary_view_count("Core/Data/Parquet.jet", embed_file("toolchain:Core/Data/Parquet.jet"), "ParquetFailureKind", "Core/Data/Data.jet", embed_file("toolchain:Core/Data/Data.jet"), "DataErrorKind", [String]{})
+
+// WebQueryStatus picks from DataFreshness: a web query's result is as fresh
+// as its data, and `Fetching` is a query on its way.
+WEB_QUERY_STATUS_COUNT: #run effect_vocabulary_view_count("Core/Web/Query.jet", embed_file("toolchain:Core/Web/Query.jet"), "WebQueryStatus", "Core/Data/Data.jet", embed_file("toolchain:Core/Data/Data.jet"), "DataFreshness", [String]{"Fetching"})
+
+// JetDataPlotAggregate picks from JetSQLAggregate: a plot aggregates a column
+// the way SQL does. `Mean` is SQL's `Avg`.
+JET_DATA_PLOT_AGGREGATE_COUNT: #run effect_vocabulary_view_count("Core/Data/Data.jet", embed_file("toolchain:Core/Data/Data.jet"), "JetDataPlotAggregate", "Core/DB/SQL.jet", embed_file("toolchain:Core/DB/SQL.jet"), "JetSQLAggregate", [String]{"Mean"})
+
+// WireEncoding, the encodings the XML engine reads, picks from XMLEncoding,
+// the ones an XML document declares. They differ only in case, so both are
+// compared in lower case.
+WIRE_ENCODING_COUNT: #run effect_vocabulary_list_view_count("Core/Encoding/XMLEngine.jet", effect_vocabulary_lowered(effect_vocabulary_enum_names("Core/Encoding/XMLEngine.jet", embed_file("toolchain:Core/Encoding/XMLEngine.jet"), "WireEncoding")), "WireEncoding", effect_vocabulary_lowered(effect_vocabulary_enum_names("Core/Encoding/XML.jet", embed_file("toolchain:Core/Encoding/XML.jet"), "XMLEncoding")), "`XMLEncoding` in Core/Encoding/XML.jet", [String]{})
+
+// EncodingFormat picks from ACRONYMS (here its checked copy,
+// SEMA_CASING_ACRONYMS): each Core format is named by its initials, in the
+// lexicon's caps, apart from `ETF`, Erlang's term format, which the lexicon
+// does not list.
+ENCODING_FORMAT_COUNT: #run effect_vocabulary_enum_view_count("Core/Encoding/Encoding.jet", embed_file("toolchain:Core/Encoding/Encoding.jet"), "EncodingFormat", SEMA_CASING_ACRONYMS, "ACRONYMS", [String]{"ETF"})
+
+// WatchEventKind picks from WatchKind, the kind a WatchEvent carries: the
+// exported event kind names the same cases.
+WATCH_EVENT_KIND_COUNT: #run effect_vocabulary_view_count("Core/Watcher/Watcher.jet", embed_file("toolchain:Core/Watcher/Watcher.jet"), "WatchEventKind", "Core/Watcher/Watcher.jet", embed_file("toolchain:Core/Watcher/Watcher.jet"), "WatchKind", [String]{})

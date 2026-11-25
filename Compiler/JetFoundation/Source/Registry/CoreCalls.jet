@@ -14,12 +14,6 @@ CoreCallFallibility: enum {
     Sema,
 }
 
-CoreCallCompletionKind: enum {
-    Synchronous,
-    Pending,
-    Event,
-}
-
 CoreCapabilityKind: enum {
     Pure,
     NativeRequired,
@@ -31,7 +25,6 @@ CoreCallPureRoute: enum {
     NoPureRoute,
     MIME,
     EncodingXML,
-    Math,
     SketchHLL,
     SketchTDigest,
     SketchCMS,
@@ -59,17 +52,6 @@ CoreCallCoverage: struct {
     bits: Int,
 }
 
-CoreCallResourceAccess: struct {
-    argument: Int,
-    mode: AccessConvention,
-}
-
-CoreCallCompletion: struct {
-    kind: CoreCallCompletionKind,
-    token: String?,
-    provider: String,
-}
-
 CoreCapabilityContract: struct {
     kind: CoreCapabilityKind,
     provider: String?,
@@ -89,8 +71,6 @@ CoreCallRecord: struct {
     member: String,
     receiver_types: [String],
     signature: CoreCallSignature,
-    frame_accesses: [CoreCallResourceAccess],
-    frame_completion: CoreCallCompletion?,
     fallibility: CoreCallFallibility,
     // An adapter row's effects (`Net`, `Time.Wait`), named as
     // EFFECT_VOCABULARY_ROOTS names them: a root, unless one of its leaves
@@ -108,10 +88,6 @@ CoreCallRecord: struct {
     source_role: String?{None},
     coverage: CoreCallCoverage,
     aot_direct: Bool,
-    // Core.rows `.with_native_int_result()`. The kernel returns its `Int`
-    // results as raw machine words; engines widen them into the carrier.
-    native_int_result: Bool,
-    ui_capabilities: [String],
     marker: CoreMarkerApplication?,
     authority: AuthorityDecision?,
 }

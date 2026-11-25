@@ -314,12 +314,14 @@ net_read_text_publish: fn(stream: I64, bytes: I64, count: I64, ended: Bool, expl
     I64{1}
 }
 
+// The read limit a route lends is its exact-Int carrier, read saturated
+// (Int.jet int_saturated): one above I64.MAX caps as I64.MAX does.
 #Export(c) jet_net_tcp_read_bytes: fn(stream: I64, limit: I64, output: I64, length: I64, error: I64) -> I64 {
-    net_tcp_read_result(stream, limit, output, length, false, false, error)
+    net_tcp_read_result(stream, int_saturated(limit), output, length, false, false, error)
 }
 
 #Export(c) jet_net_tcp_read_text: fn(stream: I64, limit: I64, output: I64, error: I64) -> I64 {
-    net_tcp_read_result(stream, limit, output, I64{0}, true, false, error)
+    net_tcp_read_result(stream, int_saturated(limit), output, I64{0}, true, false, error)
 }
 
 #Export(c) jet_net_tcp_read: fn(stream: I64, output: I64, error: I64) -> I64 {
@@ -338,11 +340,11 @@ net_tcp_read_deadline: fn(stream: I64, limit: I64, milliseconds: I64, output: I6
 }
 
 #Export(c) jet_net_tcp_read_bytes_deadline: fn(stream: I64, limit: I64, deadline: I64, output: I64, length: I64, error: I64) -> I64 {
-    net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, length, false, error)
+    net_tcp_read_deadline(stream, int_saturated(limit), net_deadline_millis(deadline), output, length, false, error)
 }
 
 #Export(c) jet_net_tcp_read_text_deadline: fn(stream: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 {
-    net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, I64{0}, true, error)
+    net_tcp_read_deadline(stream, int_saturated(limit), net_deadline_millis(deadline), output, I64{0}, true, error)
 }
 
 // `read_into` (#5976): one read of at most `limit` bytes appended to the
@@ -376,7 +378,7 @@ net_read_into: fn(stream: I64, header: I64, word: I64, milliseconds: I64, tcp: B
         taken: if (carried < cap) -> carried else -> cap
         if (taken < carried) { net_carry_keep(stream, end, taken, carried - taken) }
         net_put(header, I64{0}, held + taken)
-        net_put(output, I64{0}, taken)
+        net_put(output, I64{0}, jet_int_owned_from_i64(taken))
         return I64{1}
     }
     // The read's 64 scratch bytes (errno words, the stream's deadline save at
@@ -399,7 +401,7 @@ net_read_into: fn(stream: I64, header: I64, word: I64, milliseconds: I64, tcp: B
             count: jet_socket_read_raw(jet_socket_stream_fd_raw(stream), into, cap, scratch)
             if (count >= I64{0}) {
                 net_put(header, I64{0}, length + count)
-                net_put(output, I64{0}, count)
+                net_put(output, I64{0}, jet_int_owned_from_i64(count))
                 result = I64{1}
             } else {
                 code: net_word(scratch, I64{8})
@@ -465,7 +467,7 @@ net_tcp_write_result: fn(stream: I64, data: I64, length: I64, all: Bool, output:
             break
         }
         if (!all) {
-            net_put(output, I64{0}, count)
+            net_put(output, I64{0}, jet_int_owned_from_i64(count))
             break
         }
         if (count == I64{0}) {

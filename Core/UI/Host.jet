@@ -1,4 +1,5 @@
 use {
+    builtin: jet_builtins
     core: core
     host_path: __core_files_path_components
     internal.[file_dialog, granted_path, provider_record]
@@ -187,11 +188,11 @@ capabilities: fn() -> UICapabilityFacts Never! {
 // Core's own in UICapability order, a package's by the code it owns.
 provider_capability: fn(code: Int) -> Bool Never! { rt.capability(code) }
 
-open_file: fn(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
+#Builtin.Needs("UI.FileDialog") open_file: fn(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
     file_dialog(request, .Open)
 }
 
-save_file: fn(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
+#Builtin.Needs("UI.FileDialog") save_file: fn(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
     file_dialog(request, .Save)
 }
 
@@ -373,7 +374,7 @@ fs_rights_write: fn() -> UIFSRights Never! { UIFSRights{bits: U8{2}} }
 
 fs_rights_read_write: fn() -> UIFSRights Never! { UIFSRights{bits: U8{3}} }
 
-shortcut: fn(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
+#Builtin.Needs("UI.Shortcuts") shortcut: fn(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
     normalized: core.text.lower(core.text.trim(key))
     if normalized.len() == 0 {
         return Err(UIHostError.InvalidRequest("shortcut key must not be empty"))
@@ -383,7 +384,7 @@ shortcut: fn(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHo
 
 /// The existing two-string API always names the node; an empty description
 /// is absent. Whitespace remains data and initial accessibility states are empty.
-accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHostError! {
+#Builtin.Needs("UI.Accessibility") accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHostError! {
     if name.len() == 0 {
         return Err(UIHostError.InvalidRequest("accessibility name and description must not be empty"))
     }

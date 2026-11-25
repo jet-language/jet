@@ -55,13 +55,18 @@ world_wall_locked: fn(world: I64) -> I64 {
     origin + elapsed
 }
 
-#Export(c) jet_world_now: fn(world: I64) -> I64 {
+// The World's wall clock in ms: native for the runtime's deadlines, and as
+// the owned exact-Int carrier the route answers (it saturates at I64 max,
+// beyond the inline range).
+world_now: fn(world: I64) -> I64 {
     world_require(world)
     sync_mutex_lock(wrapping(world + I64{8}))
     value: world_wall_locked(world)
     sync_mutex_unlock(wrapping(world + I64{8}))
     value
 }
+
+#Export(c) jet_world_now: fn(world: I64) -> I64 { jet_int_owned_from_i64(world_now(world)) }
 
 #Export(c) jet_rt_world_monotonic_ns: fn(world: I64) -> I64 {
     world_require(world)
@@ -73,13 +78,6 @@ world_wall_locked: fn(world: I64) -> I64 {
 
 // Presence is independent of the sample: epoch zero is a controlled value.
 // output borrows one writable raw I64 word; false leaves it untouched.
-world_wall_ms: fn(output: I64) -> Bool {
-    world: world_current()
-    if (world == I64{0}) { return false }
-    sync_store(output, jet_world_now(world))
-    true
-}
-
 world_monotonic_ns: fn(output: I64) -> Bool {
     world: world_current()
     if (world == I64{0}) { return false }
@@ -370,7 +368,11 @@ world_wait: fn(world: I64, accept_timer: Bool) {
     if (live != I64{0}) { scheduler_fatal(services_msg_world_live()) }
 }
 
-#Export(c) jet_world_advance: fn(world: I64, duration_ns: I64) -> I64 {
+// The binding lends the duration as its exact-Int carrier, read saturated
+// (Int.jet int_saturated): one beyond I64 meets the same stops as I64.MIN
+// (backwards) or I64.MAX (exhausted).
+#Export(c) jet_world_advance: fn(world: I64, duration_int: I64) -> I64 {
+    duration_ns: int_saturated(duration_int)
     world_require(world)
     if (duration_ns < I64{0}) {
         scheduler_fatal(services_msg_world_backwards())
@@ -406,7 +408,7 @@ world_wait: fn(world: I64, accept_timer: Bool) {
             world_event(world, services_msg_advance(), duration_ns, I64{0}, I64{1})
             value: world_wall_locked(world)
             sync_mutex_unlock(wrapping(world + I64{8}))
-            return value
+            return jet_int_owned_from_i64(value)
         }
         deadline: sync_load(wrapping(data + best * I64{8}))
         sequence: sync_load(wrapping(data + (best + I64{1}) * I64{8}))

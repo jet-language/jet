@@ -166,8 +166,11 @@ ui_slots_push: fn(base: I64, env: I64, invoke: I64, release: I64) -> I64 {
 // handler click slot `id` keeps, as the reactive runtime runs an effect body
 // (invoke(env, out) with no result slot). The slot is read under the host
 // lock, as any task may be registering one; the handler runs after it. An
-// unknown id does nothing.
-#Export(c) jet_ui_click: fn(id: I64) {
+// unknown id does nothing. The id is a lent exact-Int carrier (a web host's
+// small id is its own inline carrier), read saturated (Int.jet
+// int_saturated): one beyond I64 is unknown as any other.
+#Export(c) jet_ui_click: fn(id_int: I64) {
+    id: int_saturated(id_int)
     host_lock()
     base: ui_click_slots
     known: base != I64{0} && id >= I64{1} && id * I64{3} <= ui_carrier_word(base)
@@ -225,9 +228,10 @@ ui_web_text_take: fn() -> I64 {
 }
 
 // jet.runtime.ui.drop: a native window's drop of one item on a text input, as
-// jet_ui_web_drop, over a copy of the borrowed text.
+// jet_ui_web_drop, over a copy of the borrowed text. The id and kind are lent
+// exact-Int carriers, read saturated (Int.jet int_saturated).
 #Export(c) jet_ui_drop: fn(id: I64, kind: I64, text: I64) {
-    ui_drop_run(id, kind, jet_rt_string_clone(text))
+    ui_drop_run(int_saturated(id), int_saturated(kind), jet_rt_string_clone(text))
 }
 
 // Runs the handler drop slot `id` keeps on a Text (kind 0) or URI (kind 1)
@@ -262,8 +266,9 @@ ui_drop_run: fn(id: I64, kind: I64, text: I64) {
 }
 
 // jet.runtime.ui.change: a native window's typing in a text input, as
-// jet_ui_web_change, over a copy of the borrowed text.
-#Export(c) jet_ui_change: fn(id: I64, text: I64) { ui_change_run(id, jet_rt_string_clone(text)) }
+// jet_ui_web_change, over a copy of the borrowed text. The id is a lent
+// exact-Int carrier, read saturated (Int.jet int_saturated).
+#Export(c) jet_ui_change: fn(id: I64, text: I64) { ui_change_run(int_saturated(id), jet_rt_string_clone(text)) }
 
 // Runs the change handler click slot `id` keeps on `text`, which it takes
 // over, through the slot's lazy.callback adapter (invoke(env, the address

@@ -13,6 +13,9 @@ use jet_foundation.[
     Type,
     core_module_export,
     core_module_for_alias,
+    dead_key_circumflex_base,
+    dead_key_circumflex_fix,
+    dead_key_circumflex_why,
     diagnostic_caused_by,
     diagnostic_from_registry,
     diagnostic_registry_row_of,
@@ -406,10 +409,12 @@ sema_unknown_name_jet_spelling_fix: fn(name: String, spelling: String) -> String
 }
 
 // E0107 with the most useful fix: the Core import a module-style name
-// misses, up to three near visible names (the nearest as the rename edit, as
-// E0102's near function name carries one), or declaring it. `_` is never a
-// name, and `<>` read here is outside a pipe step and an `if` table header,
-// the two places it has a value (E0437).
+// misses, the `^` mark a dead key composed into the name's first letter
+// (`ŝelf` for `^self`) when the base names something visible, up to three
+// near visible names (the nearest as the rename edit, as E0102's near
+// function name carries one), or declaring it. `_` is never a name, and `<>`
+// read here is outside a pipe step and an `if` table header, the two places
+// it has a value (E0437).
 sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
     if name == "_" {
         return sema_error("E0107", span, "`_` is not a name, so it has no value to read", "`_` throws a value away where a binding would go; it never names one", "to throw a value away write `_: value`; to read it, bind it to a name and read that name")
@@ -424,6 +429,9 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
     }
     if sema_unknown_name_jet_spelling(name) == .Val(spelling) {
         return diagnostic_with_edit(sema_error("E0107", span, what, why, sema_unknown_name_jet_spelling_fix(name, spelling)), TextEdit{span: span, new_text: spelling})
+    }
+    if dead_key_circumflex_base(name) == .Val(base) && sema_scope_resolve_index(scopes, base) != None {
+        return diagnostic_with_edit(sema_error("E0107", span, what, dead_key_circumflex_why(name, "^{base}"), dead_key_circumflex_fix("^{base}")), TextEdit{span: span, new_text: "^{base}"})
     }
     near: sema_scope_near_visible_names(scopes, name)
     if near.len() == 0 {

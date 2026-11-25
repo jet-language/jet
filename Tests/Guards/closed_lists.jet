@@ -42,10 +42,11 @@ CLOSED_LIST_BLOCK_END: "// END GENERATED"
 // The migration baseline and the duplicate baseline only shrink: delete a row
 // when its list moves to a declared home, then lower the ceiling to match. A
 // duplicate baseline row also records how many members its pair shares, and
-// that count only shrinks.
-CLOSED_LIST_BASELINE: 848
+// that count only shrinks. A duplicate row may give a reason the guard checks
+// (CLOSED_LIST_PAIR_REASONS); the ceiling counts the open rows, those without.
+CLOSED_LIST_BASELINE: 0
 
-CLOSED_LIST_DUPLICATE_BASELINE: 182
+CLOSED_LIST_DUPLICATE_BASELINE: 0
 
 // The reasons a list may stay closed. Each kernel ledger row names one.
 CLOSED_LIST_REASONS: [String]{"grammar", "soundness", "ir", "kernel", "protocol", "fixed-standard"}
@@ -392,14 +393,18 @@ CLOSED_LIST_IN_DISCRIMINANT: 5
 // The variants of the enum body that starts just past its `{` at `from`,
 // pushed to `out` lower-cased: `A, B, C`, `Custom(String)`, `Report{ code:
 // Int }`, `#Marker A` and `A = 1` each name one; a group `G { A, B }` names
-// `G`. Returns the index just past the body's closing `}`.
-closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String]) -> Int {
+// `G`. Each variant that carries a payload keys its bracket text in
+// `payloads`. Returns the index just past the body's closing `}`.
+closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String], payloads: ^[String:String]) -> Int {
     cursor := from
     depth := 1
     state := CLOSED_LIST_AT_START
     // Whether a member may follow the bracket open at the body's depth: it
     // holds a variant's payload, a group or a marker's arguments.
     resume := false
+    variant := ""
+    // Where the payload of `variant` opens, or -1 outside one.
+    payload_start := -1
     loop {
         token: closed_list_token(bytes, cursor)
         if token.kind == CLOSED_LIST_TOKEN_END -> return cursor
@@ -409,6 +414,7 @@ closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String
         if value == 123 || value == 40 || value == 91 {
             if depth == 1 {
                 resume = state != CLOSED_LIST_AFTER_ITEM && state != CLOSED_LIST_IN_DISCRIMINANT
+                payload_start = if state == CLOSED_LIST_AFTER_VARIANT -> token.start else -> -1
             }
             depth += 1
             next
@@ -417,6 +423,8 @@ closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String
             depth -= 1
             if depth == 0 -> return cursor
             if depth == 1 {
+                if payload_start >= 0 -> payloads[variant.copy()] = policy_slice_bytes(text, payload_start, cursor)
+                payload_start = -1
                 state = if resume -> CLOSED_LIST_AFTER_VARIANT else -> CLOSED_LIST_AFTER_ITEM
             }
             next
@@ -429,7 +437,8 @@ closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String
             }
             upper: closed_list_upper_byte(bytes[token.start])
             if state != CLOSED_LIST_AFTER_ITEM && upper && !closed_list_is_punct(bytes, closed_list_code_token(bytes, token.end), 58) {
-                out.push(policy_slice_bytes(text, token.start, token.end).to_lower())
+                variant = policy_slice_bytes(text, token.start, token.end).to_lower()
+                out.push(variant.copy())
                 state = CLOSED_LIST_AFTER_VARIANT
                 next
             }
@@ -497,7 +506,8 @@ closed_list_declaration: fn(path: String, text: String, bytes: [U8], name: Close
     if closed_list_is_word(text, head, "enum") {
         open: closed_list_code_token(bytes, head.end)
         if !closed_list_is_punct(bytes, open, 123) -> return -1
-        end: closed_list_enum_members(text, bytes, open.end, members)
+        payloads := [String:String]{}
+        end: closed_list_enum_members(text, bytes, open.end, members, payloads)
         closed_list_record(path, policy_slice_bytes(text, name.start, name.end), members, out)
         return end
     }
@@ -805,27 +815,31 @@ closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]],
 }
 
 // A subset ledger row names a checked subset view of one vocabulary: view
-// file, view name, the `#run` constant in that file whose check stops the
-// build when a member names nothing in the vocabulary, and the vocabulary
-// constant that check reads. The view is derived, not a second home: its
+// file, view name, the `#run` constant whose check stops the build when a
+// member names nothing in the vocabulary, the vocabulary constant that check
+// reads, and, when the check is not in the view file, the file that holds it.
+// jet embeds a file only from the embedding file's directory down, so a view
+// whose vocabulary sits in a sibling directory is checked from a file above
+// both, which must name the view. The view is derived, not a second home: its
 // duplicate pairs are the vocabulary's, and it leaves the baseline. `texts`
-// holds each view file's source. Returns the views' keys.
+// holds each view or check file's source. Returns the views' keys.
 closed_list_subset_problems: fn(findings: [ClosedListFinding], rows: [[String]], texts: [String:String], problems: ^[String]) -> [String] {
     known := [String:Bool]{}
     loop finding in findings -> known[closed_list_key(finding.path, finding.name)] = true
     views := [String]{}
     loop row in rows {
-        if row.len() != 4 || row[2].trim() == "" || row[3].trim() == "" {
-            problems.push("subset ledger row needs view file, view name, check constant and vocabulary constant: {row.join("\t")}")
+        if (row.len() != 4 && row.len() != 5) || row[2].trim() == "" || row[3].trim() == "" {
+            problems.push("subset ledger row needs view file, view name, check constant, vocabulary constant and an optional check file: {row.join("\t")}")
             next
         }
         if !(known.get(closed_list_key(row[0], row[1])) ?? false) {
             problems.push("subset ledger row {row.join(" ")} names a list that is gone; delete the row")
             next
         }
-        text: texts.get(row[0]) ?? ""
-        if !text.contains("\n{row[2]}: #run ") || !text.contains(row[3]) {
-            problems.push("{row[0]} {row[1]} is in the subset ledger, but {row[0]} has no `{row[2]}: #run …` check reading {row[3]}; the check is what makes the view derived")
+        holder: if row.len() == 5 -> row[4] else -> row[0]
+        text: texts.get(holder) ?? ""
+        if !text.contains("\n{row[2]}: #run ") || !text.contains(row[3]) || (holder != row[0] && !text.contains("\"{row[1]}\"")) {
+            problems.push("{row[0]} {row[1]} is in the subset ledger, but {holder} has no `{row[2]}: #run …` check of {row[1]} reading {row[3]}; the check is what makes the view derived")
             next
         }
         views.push(closed_list_key(row[0], row[1]))
@@ -993,12 +1007,183 @@ closed_list_mirror_pair: fn(pair: String, copies: [String]) -> Bool {
     false
 }
 
+// The reasons a duplicate baseline row may give, as a sixth field, for a pair
+// that stays two lists. The guard derives each one from the sources, so a
+// row whose reason no longer holds fails:
+// - `value-model`: both lists are enums and every member they share carries
+//   a payload in each, of different types: the names match, the values do
+//   not;
+// - `layer`: the files are in different packages and neither package's
+//   dependency closure reaches the other, so neither can import the other's
+//   list. Every package imports Core without naming it (CLOSED_LIST_CORE),
+//   so a Core list is never split from another package's by a layer.
+CLOSED_LIST_PAIR_REASONS: [String]{"value-model", "layer"}
+
+CLOSED_LIST_CORE: "Core"
+
+// A payload's type text: blank space and field names dropped, a trailing
+// comma dropped and braces read as parentheses, so `(value: I64)` and
+// `{ value: I64, }` both read `(I64)`.
+closed_list_payload_type: fn(payload: String) -> String {
+    bytes: payload.bytes()
+    out := [String]{}
+    cursor := 0
+    loop {
+        token: closed_list_code_token(bytes, cursor)
+        if token.kind == CLOSED_LIST_TOKEN_END -> break
+        cursor = token.end
+        after: closed_list_code_token(bytes, token.end)
+        if token.kind == CLOSED_LIST_TOKEN_WORD && closed_list_is_punct(bytes, after, 58) {
+            cursor = after.end
+            next
+        }
+        value: if token.kind == CLOSED_LIST_TOKEN_PUNCT -> closed_list_at(bytes, token.start) else -> 0
+        if value == 44 && (closed_list_is_punct(bytes, after, 41) || closed_list_is_punct(bytes, after, 125)) -> next
+        piece: if value == 123 -> "(" else if value == 125 -> ")" else -> policy_slice_bytes(payload, token.start, token.end)
+        out.push(piece)
+    }
+    out.join("")
+}
+
+// The payload type of each variant of the top-level enum `name` in `text`,
+// keyed by its lower-cased name ("" for a variant without one), or None when
+// `text` declares no such enum.
+closed_list_enum_payloads: fn(text: String, name: String) -> [String:String]? {
+    head: "{name}: enum {{"
+    bytes: text.bytes()
+    before: text.split("\n{head}").to_list()
+    from: if text.starts_with(head) -> head.bytes().len() else if before.len() > 1 -> before[0].bytes().len() + 1 + head.bytes().len() else -> bytes.len()
+    if from >= bytes.len() -> return None
+    members := [String]{}
+    payloads := [String:String]{}
+    closed_list_enum_members(text, bytes, from, members, payloads)
+    out := [String:String]{}
+    loop member in members -> out[member.copy()] = closed_list_payload_type(payloads.get(member) ?? "")
+    Val(out)
+}
+
+// Whether the enums `left_name` in `left_text` and `right_name` in
+// `right_text` share members and every shared member carries a payload in
+// each, of different types.
+closed_list_value_model: fn(left_text: String, left_name: String, right_text: String, right_name: String) -> Bool {
+    left: closed_list_enum_payloads(left_text, left_name) ?? return false
+    right: closed_list_enum_payloads(right_text, right_name) ?? return false
+    shared := 0
+    loop (member, payload) in left {
+        other: right.get(member) ?? next
+        if payload == "" || other == "" || payload == other -> return false
+        shared += 1
+    }
+    shared > 0
+}
+
+closed_list_parent: fn(path: String) -> String {
+    parts: path.split("/").to_list()
+    keep := [String]{}
+    loop index in 0..<(parts.len() - 1) -> keep.push(parts[index])
+    keep.join("/")
+}
+
+closed_list_normalize: fn(path: String) -> String {
+    stack := [String]{}
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." {
+            if stack.len() > 0 -> _popped: stack.pop() ?? ""
+            next
+        }
+        stack.push(part)
+    }
+    stack.join("/")
+}
+
+// The package that holds `path`: the nearest directory above it with a
+// package.jet, or "" when none does.
+closed_list_package: fn(path: String) -> String {
+    directory := closed_list_parent(path)
+    loop directory != "" {
+        if closed_list_files.is_file("{directory}/package.jet") -> return directory
+        directory = closed_list_parent(directory)
+    }
+    ""
+}
+
+// The packages the `deps` block of the package.jet `text` at `package` names,
+// resolved from its relative paths, or None when an entry is not a relative
+// path the guard can follow.
+closed_list_package_deps: fn(package: String, text: String) -> [String]? {
+    deps := [String]{}
+    inside := false
+    loop line in text.lines() {
+        if !inside {
+            if line.starts_with("deps: {{") && !line.ends_with("}}") -> inside = true
+            next
+        }
+        if line.starts_with("}}") -> break
+        entry: line.trim().removesuffix(",")
+        if entry == "" || entry.starts_with("//") -> next
+        parts: entry.split(": ").to_list()
+        if parts.len() != 2 || !parts[1].starts_with(".") -> return None
+        deps.push(closed_list_normalize("{package}/{parts[1]}"))
+    }
+    Val(deps)
+}
+
+// Whether the dependency closure of `package` reaches `target`; None when a
+// package on the way names a dependency the guard can't follow. Every
+// closure holds Core.
+closed_list_package_reaches: fn(package: String, target: String) -> Bool? {
+    if target == CLOSED_LIST_CORE -> return Val(true)
+    seen := [String:Bool]{}
+    pending := [String]{package.copy()}
+    loop {
+        current: pending.pop() ?? break
+        if current == target -> return Val(true)
+        if seen.get(current) ?? false -> next
+        seen[current.copy()] = true
+        text: closed_list_files.read("{current}/package.jet") ?? return None
+        deps: closed_list_package_deps(current, text) ?? return None
+        loop dep in deps -> pending.push(dep)
+    }
+    Val(false)
+}
+
+// Whether the files `left` and `right` are in different packages, neither of
+// which can reach the other through its dependencies.
+closed_list_layer: fn(left: String, right: String) -> Bool {
+    left_package: closed_list_package(left)
+    right_package: closed_list_package(right)
+    if left_package == "" || right_package == "" || left_package == right_package -> return false
+    forward: closed_list_package_reaches(left_package, right_package) ?? return false
+    backward: closed_list_package_reaches(right_package, left_package) ?? return false
+    !forward && !backward
+}
+
+// The failure for a duplicate baseline row whose sixth field gives `reason`,
+// or "" when the sources bear the reason out.
+closed_list_pair_reason_problem: fn(row: [String], reason: String) -> String {
+    key: "{row[0]} {row[1]} and {row[2]} {row[3]}"
+    if reason == "value-model" {
+        left: closed_list_files.read(row[0]) ?? ""
+        right: closed_list_files.read(row[2]) ?? ""
+        if closed_list_value_model(left, row[1], right, row[3]) -> return ""
+        return "{key} are not two value models: both must be enums whose every shared member carries a payload of a different type in each. Keep one hand-written home: {CLOSED_LIST_DECLARE}"
+    }
+    if reason == "layer" {
+        if closed_list_layer(row[0], row[2]) -> return ""
+        return "{key} are not split by a layer: they must be in different packages, neither of whose dependency closures reaches the other. Keep one hand-written home: {CLOSED_LIST_DECLARE}"
+    }
+    "duplicate baseline row {key} gives the reason `{reason}`; a reason is one of {CLOSED_LIST_PAIR_REASONS.join(", ")}"
+}
+
 // Every pair of lists in different files that shares 80% or more of the
 // smaller list's members and that the duplicate baseline does not hold, every
-// baselined pair whose shared count differs from its row, and a baseline past
-// its ceiling either way. A baselined pair is judged by its shared count
-// alone: deleting a member only one of the lists holds never fails it, and a
-// new shared member does, even when unique ones arrive with it. A mirror copy
+// baselined pair whose shared count differs from its row or whose reason the
+// sources do not bear out, and an open baseline past its ceiling either way.
+// A baselined pair is judged by its shared count alone: deleting a member
+// only one of the lists holds never fails it, and a new shared member does,
+// even when unique ones arrive with it. A row with a checked reason is not an
+// open duplicate, so the ceiling counts only rows without one. A mirror copy
 // matches its home and a subset view is checked against its vocabulary, so
 // their pairs are their homes' pairs.
 closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [String], problems: ^[String]) {
@@ -1011,13 +1196,18 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     }
     known := [String:Bool]{}
     rows := 0
+    reasoned := 0
     loop row in closed_list_rows(CLOSED_LIST_DUPLICATES_PATH) {
-        rows += 1
-        count: if row.len() == 5 -> Int.parse(row[4]) ?? -1 else -> -1
+        count: if row.len() == 5 || row.len() == 6 -> Int.parse(row[4]) ?? -1 else -> -1
         if count < 0 {
-            problems.push("duplicate baseline row needs file, name, file, name and shared count: {row.join("\t")}")
+            problems.push("duplicate baseline row needs file, name, file, name, shared count and an optional reason: {row.join("\t")}")
             next
         }
+        if row.len() == 6 {
+            reasoned += 1
+            problem: closed_list_pair_reason_problem(row, row[5])
+            if problem != "" -> problems.push(problem)
+        } else { rows += 1 }
         key: "{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}"
         known[key] = true
         shared: if pairs.get(key) == .Val(pair) -> pair.shared else -> 0
@@ -1034,12 +1224,12 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
             else -> {}
         }
     }
-    print("closed-list duplicate baseline: {rows} pairs (ceiling {CLOSED_LIST_DUPLICATE_BASELINE})")
+    print("closed-list duplicate baseline: {rows} open pairs (ceiling {CLOSED_LIST_DUPLICATE_BASELINE}), {reasoned} with a checked reason")
     if rows > CLOSED_LIST_DUPLICATE_BASELINE {
-        problems.push("the duplicate baseline grew past {CLOSED_LIST_DUPLICATE_BASELINE}; a row may be removed, never added")
+        problems.push("the open duplicate baseline grew past {CLOSED_LIST_DUPLICATE_BASELINE}; a row without a reason may be removed, never added")
     }
     if rows < CLOSED_LIST_DUPLICATE_BASELINE {
-        problems.push("the duplicate baseline shrank to {rows} pairs; lower CLOSED_LIST_DUPLICATE_BASELINE to {rows}")
+        problems.push("the open duplicate baseline shrank to {rows} pairs; lower CLOSED_LIST_DUPLICATE_BASELINE to {rows}")
     }
     loop key in pair_keys {
         pair: pairs.get(key) ?? next
@@ -1059,6 +1249,7 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     texts := [String:String]{}
     loop row in subset_rows {
         if row.len() > 0 -> texts[row[0]] = closed_list_files.read(row[0]) ?? ""
+        if row.len() == 5 -> texts[row[4]] = closed_list_files.read(row[4]) ?? ""
     }
     loop view in closed_list_subset_problems(findings, subset_rows, texts, problems) {
         copies.push(view)
@@ -1089,12 +1280,49 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     assert_eq(clean.len(), 0)
     unchecked := [String]{}
     assert_eq(closed_list_subset_problems([ClosedListFinding]{view.copy()}, rows, [String:String]{"v.jet": "View: enum {{ Net, FS, DB }}\n"}, unchecked).len(), 0)
-    assert(unchecked[0].contains("has no `VIEW_COUNT: #run …` check reading ROOTS"))
+    assert(unchecked[0].contains("v.jet has no `VIEW_COUNT: #run …` check of View reading ROOTS"))
     gone := [String]{}
     closed_list_subset_problems([ClosedListFinding]{}, rows, checked, gone)
     assert(gone[0].contains("names a list that is gone"))
+    // A check above the view's directory holds only while it names the view.
+    above: [[String]]{[String]{"a/v.jet", "View", "VIEW_COUNT", "ROOTS", "c.jet"}}
+    held: [String:String]{"c.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run x(\"a/v.jet\", embed_file(\"a/v.jet\"), \"View\", ROOTS)\n"}
+    placed := [String]{}
+    housed: ClosedListFinding{path: "a/v.jet", name: "View", members: [String]{"net", "fs", "db"}}
+    assert_eq(closed_list_subset_problems([ClosedListFinding]{housed.copy()}, above, held, placed).join(","), "a/v.jet\tView")
+    assert_eq(placed.len(), 0)
+    unnamed := [String]{}
+    closed_list_subset_problems([ClosedListFinding]{housed.copy()}, above, [String:String]{"c.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run x(ROOTS)\n"}, unnamed)
+    assert(unnamed[0].contains("c.jet has no `VIEW_COUNT: #run …` check of View reading ROOTS"))
     // A view's duplicate pairs are its vocabulary's, so they leave the duplicate ledger.
     assert(closed_list_mirror_pair("h.jet\tHOME\tv.jet\tView", [String]{"v.jet\tView"}))
+}
+
+#Test("a duplicate row's reason holds only while the sources bear it out") {
+    guards_enter_root()
+    // Field names, blank space, a trailing comma and the bracket kind are not a payload's type.
+    assert_eq(closed_list_payload_type("{{ value: I64, }}"), "(I64)")
+    assert_eq(closed_list_payload_type("(name: String, items: [Value])"), "(String,[Value])")
+    json: "Value: enum {{\n    Null,\n    Int(I64),\n    Text(String),\n    List([Value]),\n}}\n"
+    wire: "Wire: enum {{\n    Int{{ value: I128 }},\n    Text(Bytes),\n    List(items: [Wire]),\n}}\n"
+    assert(closed_list_value_model(json, "Value", wire, "Wire"))
+    // A shared member with the same payload type, or with none, is the same value.
+    same: "Same: enum {{\n    Int(value: I64),\n    Text(Bytes),\n    List([Same]),\n}}\n"
+    assert(!closed_list_value_model(json, "Value", same, "Same"))
+    assert(!closed_list_value_model(json, "Value", "Tagged: enum {{ Null, Int(U8), Text(Bytes) }}\n", "Tagged"))
+    assert(!closed_list_value_model(json, "Value", "VALUES: [String]{{\"int\", \"text\", \"list\"}}\n", "VALUES"))
+    deps: closed_list_package_deps("Jetpack/PackageModel", "name: \"x\"\ndeps: {{\n    a: ../../Compiler/JetFoundation,\n    b: ../Foundation,\n}}\n") ?? [String]{"unfollowed"}
+    assert_eq(deps.join(","), "Compiler/JetFoundation,Jetpack/Foundation")
+    assert_eq((closed_list_package_deps("p", "deps: {{\n    a: \"1.0\",\n}}\n") ?? [String]{"unfollowed"}).join(","), "unfollowed")
+    // The dev server names the package model among its dependencies; the
+    // compiler's CLI and the dev server name neither each other nor a
+    // package that does.
+    assert(!closed_list_layer("Compiler/JetDevServer/Source/EditorHost.jet", "Jetpack/PackageModel/Source/Manifest/PackageFacts.jet"))
+    assert(closed_list_layer("Compiler/JetCLI/Source/CLI/Front.jet", "Compiler/JetDevServer/Source/EditorHost.jet"))
+    // One package is no layer, and every package reaches Core.
+    assert(!closed_list_layer("Compiler/JetCLI/Source/CLI/Front.jet", "Compiler/JetCLI/Source/CLI/Status.jet"))
+    assert(!closed_list_layer("Compiler/JetDevServer/Source/EditorHost.jet", "Core/DB/SQL.jet"))
+    assert(closed_list_pair_reason_problem([String]{"a.jet", "A", "b.jet", "B", "3", "taste"}, "taste").contains("a reason is one of value-model, layer"))
 }
 
 #Test("editing a mirror copy without its home fails the mirror ledger") {

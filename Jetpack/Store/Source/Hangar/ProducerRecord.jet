@@ -189,7 +189,7 @@ store_cache_action_identity: fn(producer: ProducerRecord, reference: String, ide
 // realization it just recorded in the project lock. The lock digest is part
 // of the action key, so leaving the pre-publication digest in the closure
 // record would let a later replay accept stale provenance.
-store_refresh_lock_digest: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
+store_refresh_lock_digest: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
     if lock_digest == "" {
         return Err(StoreError.InvalidData("cannot refresh a producer with an empty project lock digest"))
     }

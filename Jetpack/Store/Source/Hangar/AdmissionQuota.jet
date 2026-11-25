@@ -41,7 +41,7 @@ store_admission_size: fn(path: String) -> Int StoreError! { store_quota_footprin
 // earlier than physical allocation requires, but it cannot undercount disk
 // pressure. The incoming stage is excluded because its bytes are supplied as
 // `incoming_bytes` instead.
-store_ensure_hangar_capacity: fn(verification: ^StoreVerification, roots: HangarRoots, incoming_bytes: Int, excluded: String?) StoreError! {
+store_ensure_hangar_capacity: fn(verification: StoreVerification, roots: HangarRoots, incoming_bytes: Int, excluded: String?) StoreError! {
     hangar: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     limit: store_quota_configured_limit(roots)
@@ -164,7 +164,7 @@ store_quota_walk: fn(path: String, excluded: String?, listed: Bool) -> Int Store
     Ok(total)
 }
 
-store_quota_sweep_orphans: fn(verification: ^StoreVerification, roots: HangarRoots, live: LiveRoots, retired: [String]) StoreError! {
+store_quota_sweep_orphans: fn(verification: StoreVerification, roots: HangarRoots, live: LiveRoots, retired: [String]) StoreError! {
     orphaned: store_collect_orphaned_canonical_objects(verification, roots, live, retired)
     loop object in orphaned -> store_remove_hangar_node(verification, object.path)
     if orphaned.len() > 0 {

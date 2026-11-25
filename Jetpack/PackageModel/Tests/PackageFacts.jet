@@ -1,13 +1,13 @@
 // Closed output kinds, composition and provenance, formatting, Config
 // discovery, and entry resolution.
 use {
+    jet_foundation.[OutputKind]
     jet_pkg_model.[
         AuthorityResolver,
         ComposeError,
         ConfigFacts,
         ManifestEntry,
         PackageFacts,
-        PackageOutputKind,
         PackageParseError,
         pkg_build_entry_source,
         pkg_extract_inline_package,
@@ -33,7 +33,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
 
 #Test("parses closed output kinds and selects defaults") {
     facts: PackageFacts.parse("\nname: \"demo\"\noutputs: {{\n    app: .Executable{{ name: \"app\", entry: run }},\n    check: .Check{{ name: \"check\", entry: check }},\n}}\ndefaults: {{ run: app, test: check }}\n", "package.jet") ?? panic("parses")
-    assert(facts.outputs["app"].kind == PackageOutputKind.Executable)
+    assert(facts.outputs["app"].kind == OutputKind.Executable)
     assert_eq((facts.select_output("run", None, None) ?? panic("run")).name, "app")
     assert_eq((facts.select_output("test", None, None) ?? panic("test")).name, "check")
 }

@@ -163,10 +163,13 @@ ir_foreign_stop: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
 // runtime export it names, through the route its Jet signature projects
 // (BuildRoutes.jet ir_route_of_signature), lowered as a Core call's route
 // is; in a build invocation's `#Impure` block between the host marks
-// Impure.enter and Impure.leave. A Word argument crosses as its native I64,
-// a taken (`^^`) one consumed, as a Core row's consumed argument is (the
-// export ends it, the caller does not), any other one borrowed; a written
-// (`^`) one the export changes in place.
+// Impure.enter and Impure.leave. A Word argument (Int or a machine integer)
+// crosses lent as its exact-Int carrier, as every route Word does
+// (BuildRoutes.jet ir_route_declared), with no narrowing to I64 on the way:
+// the export reads the carrier under its own range policy. A taken (`^^`)
+// argument of another carrier crosses consumed, as a Core row's consumed
+// argument is (the export ends it, the caller does not), any other one
+// borrowed; a written (`^`) one the export changes in place.
 ir_runtime_binding_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if args.len() != foreign.params.len() {
         return ir_fail_slot(b, span, "jet.runtime call {foreign.name} with {args.len()} arguments")
@@ -174,7 +177,7 @@ ir_runtime_binding_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: 
     params: loop param in foreign.params -> param.ty.copy()
     writes: loop param in foreign.params -> param.convention == AccessConvention.Write
     route: ir_route_of_signature(foreign.symbol, params, writes, foreign.return_type) ?? return ir_fail_slot(b, span, "jet.runtime function {foreign.name} has a type no runtime route carries")
-    borrow_mask: loop (index, carrier) in route.params -> carrier != IRRouteCarrier.Word && foreign.params[index].convention != AccessConvention.Move
+    borrow_mask: loop (index, carrier) in route.params -> carrier == IRRouteCarrier.Word || foreign.params[index].convention != AccessConvention.Move
     values: loop arg in args -> arg.value
     ty: foreign.return_type.copy() ?? Type.Named{name: "Unit"}
     impure: p.invocation && b.impure > 0
@@ -750,7 +753,7 @@ ir_rust_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: Sem
 // Whether a value of type row `row` crosses a Rust slot descriptor: a String
 // as its bytes, or in the value word an exact Int, a machine integer, a
 // float, a Bool or a Char.
-ir_rust_slot_crosses: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_rust_slot_crosses: fn(m: IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if ir_option_inline(m, row) -> return false
     if m.types[row].kind == {
         .Int | .Bool | .Float | .Float32 | .Char | .String -> true

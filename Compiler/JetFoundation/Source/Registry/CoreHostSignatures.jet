@@ -5,9 +5,6 @@
 core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows: """
     core.files jet_std_files_open_reader_nonblocking String Result<FileReader,IOError>
-    core.http.client jet_http_build_resolve String,Int Result<[[u8]],String>
-    jet_builtins process_spec_stdin|process_spec_stdout|process_spec_stderr ProcessSpec,ProcessStreamMode ProcessSpec
-    jet_builtins process_spec_timeout|process_spec_cpu_time_limit ProcessSpec,Duration ProcessSpec
     core.term take Int Result<[u8],IOError>
     core.crypto.vault get String String?
     core.crypto.vault current String Result<KeyRef<T>?,VaultError> T:VaultKey
@@ -16,22 +13,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.sync counter_new String,Int SyncCounter
     core.sync counter_inc SyncCounter,String,Int SyncCounter
     core.sync map_set SyncMap,String,String SyncMap
-    jet_builtins to_bits_f32 F32 Int
-    jet_builtins from_bits_f32 Int F32
-    core.math sqrt|floor|ceil|fabs Float Float
-    core.math fmod Float,Float Float
-    core.math __numeric_stop String Never
-    core.math.random seed Int -
-    core.crypto __wipe ^[u8] -
-    core.crypto __secret_keep ^[u8] -
-    core.tasks after Duration,T Receiver<T> T
-    core.event __event_with_policy EventPolicy Event<T> T
-    core.event __hook_new R Hook<T,R> T|R
-    core.event __decision_hook_new HookPolicy DecisionHook<T,E> T|E
-    core.event __async_new AsyncPolicy,FailurePolicy Result<AsyncEvent<T,E>,EventConfigError> T|E
-    core.tasks __interval_ms Int Receiver<Int>
-    core.tasks __channel_new - (sender:Sender<T>,receiver:Receiver<T>) T
-    core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
     core.encoding.json canonical Dyn String
     """
     core_sig_row_lookup(rows, module_name, member)

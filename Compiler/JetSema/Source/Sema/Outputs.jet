@@ -147,7 +147,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                 references.push(sema_output_import_reference(graph, owner, binding.target_module_identity, name, binding.symbol.span, imported.visibility))
             }
             if resolved == None {
-                exported: sema_registration_resolve_export(graph, declaring_index, name, owner.module_identity, owner.package_identity, [String]{})
+                exported: sema_registration_resolve_export(graph, declaring_index, name, owner.module_identity, owner.package_identity)
                 // copy: the resolved symbol owns its texts, while `found` is a payload view of the
                 // export row in the read-only graph, which keeps them.
                 if exported == .Val(found) {
@@ -182,7 +182,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                             next
                         }
                         target_index: sema_registration_module_index(graph, imported.target_module_identity) ?? break
-                        exported: sema_registration_resolve_export(graph, target_index, target.member, owner.module_identity, owner.package_identity, [String]{}) ?? break
+                        exported: sema_registration_resolve_export(graph, target_index, target.member, owner.module_identity, owner.package_identity) ?? break
                         registered = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: exported.symbol}, source_module_identity: exported.source_module_identity, target_module_identity: exported.source_module_identity, visibility: exported.visibility})
                         break
                     }
@@ -233,7 +233,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
             // The original requester is retained through every namespace hop.
             // Otherwise an intermediate module could grant package visibility
             // that the Output's declaring module never possessed.
-            exported: sema_registration_resolve_export(graph, current, member.name, owner.module_identity, owner.package_identity, [String]{}) ?? {
+            exported: sema_registration_resolve_export(graph, current, member.name, owner.module_identity, owner.package_identity) ?? {
                 names: loop item in path.members -> item.name
                 member_path: names.join(".")
                 direct: sema_registration_direct_symbol(graph.modules[current], member.name)
@@ -261,7 +261,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                     member_path: names.join(".")
                     nested_visible: sema_output_nested_modules_visible(graph.modules[current], path.members, index, owner.package_identity)
                     if nested_visible == (Val(true)) {
-                        if sema_registration_resolve_export(graph, current, lifted, owner.module_identity, owner.package_identity, [String]{}) == .Val(found) {
+                        if sema_registration_resolve_export(graph, current, lifted, owner.module_identity, owner.package_identity) == .Val(found) {
                             references.push(sema_output_import_reference(graph, graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
                             source_name = Val(last.name.copy())
                             resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol}, source_module_identity: found.source_module_identity, target_module_identity: found.source_module_identity, visibility: found.visibility})

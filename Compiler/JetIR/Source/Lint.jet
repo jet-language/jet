@@ -50,7 +50,7 @@
 // prints (`ir.build`), and every compile-time batch and the comptime entry
 // program are linted before their x86-64 compile (`eval.batch`,
 // `eval.entry`, JetEval Native.jet).
-use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_column_table, name_find, name_intern, type_name]
+use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_transfer_rows, core_call_key, effect_vocabulary_enum_names, effect_vocabulary_list_view_count, effect_vocabulary_lowered, ir_key_index, ir_key_index_keys, ir_key_row, name_column_table, name_find, name_intern, type_name]
 
 // One finding. `function` is "name [key]" ("-" for a module row), `key`
 // the function's key ("" for a module row), `pass` where it was found,
@@ -1804,6 +1804,11 @@ ir_lint_route_gaps: fn(exports: [String]) -> [IRLintFinding] Never! {
 // A runtime handle's helpers, in the order ir_lint_route_gaps reads its
 // row's claims: drop (always), clone, display, show, debug, eq.
 IR_LINT_HANDLE_VERBS: #run { [String]{"drop", "clone", "display", "show", "debug", "eq"} }
+
+// Of these, display, show and debug are the IRRender traits, spelled in lower
+// case; IR_LINT_HANDLE_VERB_COUNT stops the build naming any other verb but
+// drop, clone and eq.
+IR_LINT_HANDLE_VERB_COUNT: #run effect_vocabulary_list_view_count("Lint.jet", IR_LINT_HANDLE_VERBS, "IR_LINT_HANDLE_VERBS", effect_vocabulary_lowered(effect_vocabulary_enum_names("BuildTypes.jet", embed_file("BuildTypes.jet"), "IRRender")), "`IRRender` in BuildTypes.jet", [String]{"drop", "clone", "eq"})
 
 // The findings' text, one line per row: "pass\tfunction\trule\tmessage".
 ir_lint_text: fn(findings: [IRLintFinding]) -> String Never! {

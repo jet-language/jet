@@ -121,14 +121,14 @@ sema_link_root_ident: fn(expr: Expr) -> String? Never! {
 // Enforce transitive read-only access across `@T` links: an unmarked read
 // parameter or immutable `:` binding cannot write through any `@T` link it
 // reaches (E0205). Write access requires `:=` or an `^` parameter.
-sema_link_check_write_access: fn(target_base: Expr, scopes: SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+sema_link_check_write_access: fn(target_base: Expr, check: ^SemaBodyCheck, span: Span) -> Bool {
     root_name: sema_link_root_ident(target_base) ?? return true
-    binding_index: sema_scope_resolve_index(scopes, root_name) ?? return true
-    binding: scopes.bindings[binding_index]
+    binding_index: sema_scope_resolve_index(check.scopes, root_name) ?? return true
+    binding: check.scopes.bindings[binding_index]
     if binding.mutable || binding.access == AccessConvention.Write -> return true
     why: "read access is transitive across `@T` links, so an immutable binding or unmarked parameter cannot mutate targets reached through it"
     fix: if binding.symbol.kind == SymbolKind.Parameter -> "mark the parameter writable: `{root_name}: ^{type_name(binding.symbol.ty ?? Type.Named{name: "T"})}`" else -> "declare `{root_name}` with `:=` to allow writes through this link"
-    diagnostics.push(sema_error("E0205", span, "cannot write through read-only live link `{root_name}`", why, fix))
+    check.diagnostics.push(sema_error("E0205", span, "cannot write through read-only live link `{root_name}`", why, fix))
     false
 }
 

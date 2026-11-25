@@ -93,28 +93,6 @@ JetLayoutAlignmentResult: enum {
     Rejected(error: JetLayoutAlignmentError),
 }
 
-JetLayoutStorageKind: enum {
-    Stack,
-    Global,
-    Heap,
-    ForeignByValue,
-}
-
-JetLayoutStorageError: enum {
-    MissingFacts(kind: JetLayoutStorageKind, profile: String),
-    UnsupportedAlignment(kind: JetLayoutStorageKind, alignment: Int, profile: String),
-    MissingSizeBound(kind: JetLayoutStorageKind),
-    SizeExceeded(kind: JetLayoutStorageKind, size: Int, max_size: Int),
-    MissingAddressBound(kind: JetLayoutStorageKind),
-    AddressOverflow(kind: JetLayoutStorageKind),
-    AddressExceeded(kind: JetLayoutStorageKind, end: Int, max_address: Int),
-}
-
-JetLayoutStorageResult: enum {
-    Accepted,
-    Rejected(error: JetLayoutStorageError),
-}
-
 JetCheckedLayoutResult: enum {
     Accepted(value: CheckedLayoutFacts),
     Rejected(error: JetLayoutAlignmentError),
@@ -383,13 +361,6 @@ jet_target_layout_check_alignment: fn(target: JetTargetLayout, requested: Int, n
             fact_identity: jet_target_layout_cache_identity(target.facts),
         },
     }
-}
-
-jet_target_layout_storage_kind_name: fn(kind: JetLayoutStorageKind) -> String Never! {
-    if kind == JetLayoutStorageKind.Stack -> return "Stack"
-    if kind == JetLayoutStorageKind.Global -> return "Global"
-    if kind == JetLayoutStorageKind.Heap -> return "Heap"
-    "ForeignByValue"
 }
 
 jet_target_layout_engine: fn(items: [Item], target: JetTargetLayout) -> TargetLayoutEngine Never! {

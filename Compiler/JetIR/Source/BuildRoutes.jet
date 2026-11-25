@@ -1898,7 +1898,7 @@ ir_cache_take_value: fn(m: ^IRModule, b: ^IRBuilder, shape: IRCacheShape, addres
 }
 
 // Drops the owned value in `slot` (-1: Unit) whose type has a drop.
-ir_cache_drop: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) Never! {
+ir_cache_drop: fn(m: IRModule, b: ^IRBuilder, slot: Int) Never! {
     if slot >= 0 && ir_has_drop(m, b, slot) -> ir_emit(b.f, IROp.Drop, -1, slot, -1, -1, b.line)
 }
 
@@ -2568,7 +2568,7 @@ ir_closure_walk_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, 
 }
 
 // The row of the items of `source`: a List's elements, or an Iter's items.
-ir_items_element: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, source: Int) -> Int? Never! {
+ir_items_element: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, source: Int) -> Int? Never! {
     if ir_iter_element(ir_lazy_slot_type(m, p, b, source)) == .Val(item) {
         return ir_value_type(m, p, item)
     }
@@ -4157,25 +4157,6 @@ ir_float_word: fn(m: ^IRModule, b: ^IRBuilder, floating: Int, row: Int, unsigned
 // an out slot; an Option or Result result as a tag word with its payload in
 // one zeroed out slot, from which the builder makes its own box.
 
-// The Core leaf routes that are pure and never fail, each built as the one
-// operation it is: `math.sqrt(x)` the IEEE square root, `math.fabs(x)` the
-// sign-bit clear, `math.is_finite(x)` and the other Float predicates the
-// operation their receiver form `x.is_finite()` lowers to (BuildTypes.jet
-// ir_float_predicate), and Core's F32 bit pair one frame-word copy
-// (ir_f32_bits). None for any other route.
-ir_leaf_route: fn(name: String) -> String? Never! {
-    if name == {
-        "jet_std_math_sqrt" -> Val("sqrt")
-        "jet_std_math_abs_f64" -> Val("fabs")
-        "jet_std_math_is_finite" -> Val("is_finite")
-        "jet_std_math_is_infinite" -> Val("is_infinite")
-        "jet_std_math_is_nan" -> Val("is_nan")
-        "jet_std_math_to_bits_f32" -> Val("to_bits_f32")
-        "jet_std_math_from_bits_f32" -> Val("from_bits_f32")
-        else -> None
-    }
-}
-
 // Routes built inline rather than calling the runtime (list.get /
 // list.index_of); None for any other route. Every argument is borrowed.
 ir_route_inline: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int? Never! {
@@ -4265,57 +4246,6 @@ ir_route_inline: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, name: String, inp
         return Val(ir_shared_new(m, p, b, inputs, result, span))
     }
     if name == "jet_std.JetPool.new" -> return Val(ir_pool_new(m, p, b, result, span))
-    // `os.atexit(handler)` / `os.on_interrupt(handler)`: the runtime's exit
-    // queue (Task.jet jet_rt_native_atexit) or interrupt list
-    // (ProcessSignal.jet jet_rt_native_interrupt) takes the handler's closure
-    // box over; it runs invoke at 8, then the release at 16, as a scope guard
-    // does.
-    if name == "jet_std_os_atexit" || name == "jet_std_os_interrupt" {
-        if inputs.len() != 1 || inputs[0] < 0 {
-            return Val(ir_fail_slot(b, span, "{name} with {inputs.len()} arguments"))
-        }
-        handler: ir_own(m, p, b, inputs[0])
-        _: ir_runtime(m, b, if name == "jet_std_os_atexit" -> "jet_rt_native_atexit" else -> "jet_rt_native_interrupt", [Int]{handler}, -1)
-        b.fresh[handler] = false
-        return Val(-1)
-    }
-    // A pure, never-failing Core leaf (ir_leaf_route): the operation itself,
-    // with no call and so no stop poll after it.
-    if ir_leaf_route(name) == .Val(leaf) {
-        if inputs.len() != 1 || inputs[0] < 0 {
-            return Val(ir_fail_slot(b, span, "{leaf} with {inputs.len()} arguments"))
-        }
-        row: b.f.slot_type[inputs[0]]
-        if leaf == "to_bits_f32" || leaf == "from_bits_f32" {
-            return Val(ir_f32_bits(m, p, b, inputs[0], leaf, result, span))
-        }
-        if leaf != "sqrt" && leaf != "fabs" {
-            leaf_ty: ir_row_ty(m, p, row)
-            return Val(ir_float_predicate(m, b, inputs[0], leaf, leaf_ty, span))
-        }
-        if m.types[row].kind != .Float {
-            return Val(ir_fail_slot(b, span, "{leaf} of {ir_type_name(ir_row_ty(m, p, row))}"))
-        }
-        if leaf == "fabs" {
-            word_row: ir_word_row(m)
-            bits: ir_reinterpret(m, b, inputs[0], word_row)
-            mask: ir_word_const(m, b, 9223372036854775807)
-            magnitude: ir_word_op(m, b, IROp.BitAnd, bits, mask)
-            return Val(ir_reinterpret(m, b, magnitude, row))
-        }
-        root: ir_temp(m, b, row)
-        ir_emit(b.f, IROp.Sqrt, root, inputs[0], -1, -1, b.line)
-        return Val(root)
-    }
-    // `core.devtools.__publish_payload(source, entity, fields, field, value)`:
-    // the publication reaches only installed event sinks; the native runtime
-    // installs none (RouteACore.jet jet_job_queue_publish_parts), so the
-    // publication has no observer to build for and the fresh arguments it
-    // consumed end here.
-    if name == "jet_devtools_publish_payload" {
-        loop slot in inputs -> ir_release(m, b, slot)
-        return Val(-1)
-    }
     strings: name == "jet_unicode_split_once" || name == "jet_unicode_cut_last"
     lists: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_last_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten" || name == "jet_list_count" || name == "jet_list_counts" || name == "jet_list_union" || name == "jet_list_intersection" || name == "jet_list_difference" || name == "jet_list_random"
     if !strings && !lists -> return None
@@ -4328,40 +4258,6 @@ ir_route_inline: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, name: String, inp
     if ir_failed(b) -> return Val(-1)
     loop slot in inputs -> ir_release(m, b, slot)
     Val(value)
-}
-
-// Core's `__to_bits_f32(x)` (leaf "to_bits_f32"): F32 `value`'s binary32
-// bits as an Int in 0..<2^32, stored over a zeroed frame word and read back
-// whole; `__from_bits_f32(bits)` ("from_bits_f32"): the F32 whose bits are
-// the low 32 of `value`, which Core keeps in 0..<2^32 so the Int is its own
-// word. The argument arrives as that Int or as the I64 word a native call
-// narrowed it to; both store the same frame word. No conversion runs, so a
-// payload and a signaling NaN cross unchanged.
-ir_f32_bits: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, leaf: String, result: Type, span: Span) -> Int Never! {
-    to_bits: leaf == "to_bits_f32"
-    input_type: b.f.slot_type[value]
-    input: m.types[input_type].kind
-    row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
-    output: m.types[row].kind
-    if to_bits && (input != .Float32 || output != .Int) {
-        return ir_fail_slot(b, span, "F32 bits of {ir_type_name(ir_row_ty(m, p, input_type))}")
-    }
-    word_input: input == .Word && ir_row_ty(m, p, input_type) == (Type.IntN{signed: true, bits: 64})
-    if !to_bits && ((input != .Int && !word_input) || output != .Float32) {
-        return ir_fail_slot(b, span, "F32 from bits of {ir_type_name(ir_row_ty(m, p, input_type))}")
-    }
-    pointer: ir_pointer_row(m)
-    area: ir_temp(m, b, pointer)
-    ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
-    if to_bits {
-        zero: ir_word_const(m, b, 0)
-        ir_emit(b.f, IROp.Store, -1, area, 0, zero, b.line)
-    }
-    ir_emit(b.f, IROp.Store, -1, area, 0, value, b.line)
-    out: ir_temp(m, b, row)
-    ir_emit(b.f, IROp.Load, out, area, 0, -1, b.line)
-    if !to_bits -> ir_release(m, b, value)
-    out
 }
 
 // `xs.get(i)`: a copy of the element at a native position in 0..<len, else
@@ -5031,7 +4927,7 @@ ir_route_declared: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String,
     // before it.
     split_armed: b.split_armed
     b.split_armed = false
-    if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None {
+    if IR_ROUTES_INLINE.contains(name) {
         if ir_route_inline(m, p, b, name, inputs, result, span) == .Val(inlined) -> return inlined
     }
     if ir_environment_route(name) == .Val(environment) {
@@ -5362,9 +5258,8 @@ ir_route_symbol: fn(symbol: String) -> String Never! {
     symbol.copy()
 }
 
-// The routes ir_route_inline builds in place instead of calling the runtime
-// besides the leaf routes (ir_leaf_route); ir_route_labeled reaches it only
-// for these.
+// The routes ir_route_inline builds in place instead of calling the runtime;
+// ir_route_labeled reaches it only for these.
 IR_ROUTES_INLINE: #run { [String]{
     "std.collections.BinaryHeap.new",
     "std.collections.HashSet.new",
@@ -5384,9 +5279,6 @@ IR_ROUTES_INLINE: #run { [String]{
     "jet_std.JetShared.new",
     "jet_std.JetCell.new",
     "jet_std.JetPool.new",
-    "jet_std_os_atexit",
-    "jet_std_os_interrupt",
-    "jet_devtools_publish_payload",
     "jet_unicode_split_once",
     "jet_unicode_cut_last",
     "jet_list_get_opt",
@@ -5431,16 +5323,11 @@ IR_ROUTES_FROZEN: #run { [String]{"jet_sys_image_part_raw"} }
 IR_ROUTES_EXPANDED: #run { [String]{"jet_vault_current_impl", "jet_plugin_load"} }
 
 // Whether the builder lowers a Core call of route `name` itself, with no
-// runtime or environment route: an inline or leaf route, a special of
-// ir_core_call (crypto.wipe and a Secret's keep, channels and timer
-// receivers, event policy), or an Iter route (BuildLazy.jet ir_lazy_symbol).
-// IR Lint's registry check (Lint.jet ir_lint_core_routes) reads it.
+// runtime or environment route: an inline route or an Iter route
+// (BuildLazy.jet ir_lazy_symbol). IR Lint's registry check (Lint.jet
+// ir_lint_core_routes) reads it.
 ir_route_builder_lowered: fn(name: String) -> Bool Never! {
-    if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
-    if name == "jet_raw_crypto_wipe" || name == "jet_raw_crypto_secret_keep" -> return true
-    if name == "jet_std.channel" || name == "jet_std.channel_bounded" || name == "jet_std.after_value" || name == "jet_std.JetEvent.with_policy" {
-        return true
-    }
+    if IR_ROUTES_INLINE.contains(name) -> return true
     ir_lazy_symbol(name, Type.Apply{name: "Iter", args: [Type]{Type.Int}})
 }
 
@@ -5605,7 +5492,7 @@ ir_word_record_new: fn(m: ^IRModule, b: ^IRBuilder, record: IRWordRecord, exact:
 
 // A List header (len, cap, data) at `offset` of `base` from a route's
 // (data, length) pair.
-ir_route_list_header: fn(m: ^IRModule, b: ^IRBuilder, base: Int, offset: Int, data: Int, length: Int) Never! {
+ir_route_list_header: fn(m: IRModule, b: ^IRBuilder, base: Int, offset: Int, data: Int, length: Int) Never! {
     ir_emit(b.f, IROp.Store, -1, base, offset, length, b.line)
     ir_emit(b.f, IROp.Store, -1, base, offset + 8, length, b.line)
     ir_emit(b.f, IROp.Store, -1, base, offset + 16, data, b.line)
@@ -6711,23 +6598,6 @@ ir_core_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, record: Co
 
 ir_core_call_routed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], split_armed: Bool, span: Span) -> Int Never! {
     canonical: ir_canonical_core_record(record)
-    if canonical.module_name == "core.crypto" && (canonical.member == "__wipe" || canonical.member == "__secret_keep") {
-        return ir_core_crypto_header(m, p, b, args, canonical.member, span)
-    }
-    if canonical.symbol == .Prelude(name) {
-        if name == "jet_std.channel" || name == "jet_std.channel_bounded" {
-            return ir_channel_new(m, p, b, ty, name == "jet_std.channel_bounded", args, span)
-        }
-        if name == "jet_std.after_value" -> return ir_timer_after(m, p, b, ty, args, span)
-        if name == "jet_std.JetEvent.with_policy" {
-            return ir_event_with_policy(m, p, b, ty, args, span)
-        }
-        if name == "jet_std.JetHook.new" -> return ir_hook_new(m, p, b, ty, args, span)
-        if name == "jet_std.JetDecisionHook.new" {
-            return ir_decision_hook_new(m, p, b, ty, args, span)
-        }
-        if name == "jet_std.JetAsyncEvent.new" -> return ir_async_event_new(m, p, b, ty, args, span)
-    }
     if canonical.module_name == "core.crypto.vault" && canonical.member == "current" {
         return ir_core_vault_current(m, p, b, ty, args, type_args, span)
     }
@@ -6777,7 +6647,9 @@ ir_route_ambient_refusals: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol:
 
 // The route `symbol` (`declared`, else its table row) on the checked
 // argument expressions `args`, typed `ty`: an exact Int argument the route
-// consumes (borrow_mask false) crosses as its native I64.
+// consumes (borrow_mask false) is narrowed to its native I64 (E3010 at the
+// call when it does not fit), which a Word carrier then crosses as an
+// exact-Int carrier again (ir_route_declared); a lent one crosses as is.
 ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], span: Span) -> Int Never! {
     // Only the route call itself may split a `??` or `?` operand, not the
     // argument conversions before it.
@@ -7284,23 +7156,6 @@ ir_core_word_int: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, word: Int, span:
         return ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{word}, int_row)
     }
     word
-}
-
-// `crypto.__wipe(bytes)` and `crypto.__secret_keep(bytes)` hand the runtime
-// the written List header. jet_rt_crypto_wipe wipes its buffer, so it reaches
-// spare capacity and the buffer's owner count, which a pointer and length
-// would not; jet_rt_crypto_secret_keep records the header's words as a live
-// Secret's, for a dump's redaction and a process end's scrub.
-ir_core_crypto_header: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [Int], member: String, span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(b, span, "crypto.{member} has invalid checked arity")
-    runtime: if member == "__wipe" -> "jet_rt_crypto_wipe" else -> "jet_rt_crypto_secret_keep"
-    backs := [IRWriteBack]{}
-    list: ir_place_address(m, p, b, args[0], backs, span)
-    if ir_failed(b) || list < 0 -> return -1
-    _: ir_runtime(m, b, runtime, [Int]{list}, -1)
-    ir_write_backs(m, p, b, backs, span)
-    ir_release(m, b, list)
-    return -1
 }
 
 // `tree.len()`: the length of an Array/Object/Bytes List or the scalar count

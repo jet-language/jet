@@ -411,7 +411,7 @@ pk_encrypt: fn<R: RNG>(ctx: ^PKContext, input: [U8], osize: Int, rng: ^R) -> [U8
 /// Check that `prv` is the private key of `public` (mbedtls_pk_check_pair):
 /// both of one type, or an RSA-alt key checked against an RSA one by a
 /// test signature.
-pk_check_pair: fn<R: RNG>(public: ^PKContext, prv: ^PKContext, rng: ^R) PKError! {
+pk_check_pair: fn<R: RNG>(public: ^PKContext, prv: PKContext, rng: ^R) PKError! {
     pub_kind: public.kind ?? return Err(.BadInput)
     prv_kind: prv.kind ?? return Err(.BadInput)
     if prv_kind == {

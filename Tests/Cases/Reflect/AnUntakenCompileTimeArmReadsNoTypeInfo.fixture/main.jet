@@ -1,0 +1,33 @@
+Point: struct {
+    x: Int,
+    y: Int,
+}
+
+record: fn(id: TypeId) -> Bool {
+    if id.kind == .Struct -> return true
+    false
+}
+
+shown: fn(id: TypeId) -> String {
+    id.name
+}
+
+field_names: fn<T>(_value: T) -> String {
+    names: #run (loop field in T.reflect().fields -> field.name).join(",")
+    names
+}
+
+// Only a struct takes the `#if` arm, so only a struct's instance reads its
+// TypeInfo record there, directly and through `field_names`. A `String`,
+// which has none, never builds that arm.
+describe: fn<T>(value: T) -> String {
+    #if record(TypeId{T}) {
+        count: #run T.reflect().fields.len()
+        return "{count} fields: {field_names(value)}"
+    }
+    shown(TypeId{T})
+}
+
+print(describe(Point{x: 1, y: 2}))
+print(describe("text"))
+print(describe(3))

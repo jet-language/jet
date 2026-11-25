@@ -191,6 +191,7 @@ CORE_BARE_SOURCE_MODULES: [CoreBareSourceModule]{
     {name: "Path", module_name: "core.files"},
     {name: "HTML", module_name: "core.text.html"},
     {name: "Sh", module_name: "core.process"},
+    {name: "ProcessChild", module_name: "core.process"},
     {name: "SQL", module_name: "core.db"},
     {name: "DBValue", module_name: "core.db"},
     {name: "TLSStream", module_name: "core.net.tls"},
@@ -566,9 +567,11 @@ core_module_enum_cases: fn(module_name: String, name: String) -> [String]? {
     core_enum_cases(name)
 }
 
-// One field of a builtin Core record; rows are authored in CoreRecordRows.jet
-// and the first match wins. A `core_only` field is private storage: only Core
-// source reads or writes it, and user code sees no such field.
+// One field of a builtin Core record; rows live in CoreRecordRows.jet (those
+// of a Core-declared record written from its declaration by
+// Tools/Agent/CoreRecordRows.jet) and the first match wins. A `core_only`
+// field is private storage: only Core source reads or writes it, and user
+// code sees no such field.
 CoreRecordFieldRow: struct {
     owner: String,
     field: String,

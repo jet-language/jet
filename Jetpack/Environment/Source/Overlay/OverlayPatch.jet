@@ -303,7 +303,7 @@ env_overlay_has_control: fn(raw: String) -> Bool Never! {
 // Commit changed files in path order; on failure restore the ones already
 // written and report both the commit and any rollback failure. `after_commit`
 // borrows the committed path; the stage retains all of its descriptor owners.
-env_overlay_commit_staged: fn(source: OverlayAuthority, stage: ^OverlayStage, after_commit: fn(String) -[FS]> Never!) -[FS, Env, Rand]> OverlayError! {
+env_overlay_commit_staged: fn(source: OverlayAuthority, stage: OverlayStage, after_commit: fn(String) -[FS]> Never!) -[FS, Env, Rand]> OverlayError! {
     root: source.resolver.checked_directory(".") ?? return Err(OverlayError.IO("could not validate source authority: {err.message()}"))
     root_handle: source.resolver.directory_handle(root)
     committed := [String]{}

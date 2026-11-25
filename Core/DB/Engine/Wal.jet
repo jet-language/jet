@@ -549,24 +549,24 @@ wal_decode_frame: fn(w: ^Wal, frame: [U8], pgno: ^Int, n_truncate: ^Int) -> Bool
 
 // walLockShared, walUnlockShared, walLockExclusive and walUnlockExclusive:
 // no-ops in exclusive mode.
-wal_lock_shared: fn(w: ^Wal, db: ^file.SQLFile, idx: Int) -[DB]> Int Never! {
+wal_lock_shared: fn(w: Wal, db: ^file.SQLFile, idx: Int) -[DB]> Int Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE -> return base.OK
     file.file_shm_lock(db, idx, 1, os.SHM_LOCK | os.SHM_SHARED)
 }
 
-wal_unlock_shared: fn(w: ^Wal, db: ^file.SQLFile, idx: Int) -[DB]> Never! {
+wal_unlock_shared: fn(w: Wal, db: ^file.SQLFile, idx: Int) -[DB]> Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE {
         return
     }
     _: file.file_shm_lock(db, idx, 1, os.SHM_UNLOCK | os.SHM_SHARED)
 }
 
-wal_lock_exclusive: fn(w: ^Wal, db: ^file.SQLFile, idx: Int, n: Int) -[DB]> Int Never! {
+wal_lock_exclusive: fn(w: Wal, db: ^file.SQLFile, idx: Int, n: Int) -[DB]> Int Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE -> return base.OK
     file.file_shm_lock(db, idx, n, os.SHM_LOCK | os.SHM_EXCLUSIVE)
 }
 
-wal_unlock_exclusive: fn(w: ^Wal, db: ^file.SQLFile, idx: Int, n: Int) -[DB]> Never! {
+wal_unlock_exclusive: fn(w: Wal, db: ^file.SQLFile, idx: Int, n: Int) -[DB]> Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE {
         return
     }
@@ -842,7 +842,7 @@ wal_iterator_init: fn(w: ^Wal, db: ^file.SQLFile, n_backfill: Int, iter: ^WalIte
 }
 
 // walBusyLock.
-wal_busy_lock: fn(w: ^Wal, db: ^file.SQLFile, busy: ^BusyHandler, use_busy: Bool, idx: Int, n: Int) -[DB]> Int Never! {
+wal_busy_lock: fn(w: Wal, db: ^file.SQLFile, busy: ^BusyHandler, use_busy: Bool, idx: Int, n: Int) -[DB]> Int Never! {
     rc := wal_lock_exclusive(w, db, idx, n)
     loop use_busy && rc == base.BUSY && busy_invoke(busy) -> rc = wal_lock_exclusive(w, db, idx, n)
     rc

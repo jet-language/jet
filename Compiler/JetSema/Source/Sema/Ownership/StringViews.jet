@@ -83,7 +83,7 @@ sema_string_view_push_copies_policy: fn(table: ^SemaScopeTable, declarations: [P
 
 // The owner places of a `trim`/`after`/`before`/`slice` call on a plain local
 // or parameter `String` name; empty for any other initializer.
-sema_string_view_call_sources: fn(init: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> [SemaOwnershipPlace] {
+sema_string_view_call_sources: fn(init: Expr, scopes: SemaScopeTable, state: SemaOwnershipState) -> [SemaOwnershipPlace] {
     none := [SemaOwnershipPlace]{}
     if init == {
         .MethodCall(receiver, method, _, _, _, args, _) -> {
@@ -141,9 +141,9 @@ sema_string_view_lower_init: fn(init: TExpr) -> TExpr? {
 }
 
 // A read view fact from the binding into its owner.
-sema_string_view_record_binding: fn(state: ^SemaOwnershipState, name: String, name_span: Span, places: [SemaOwnershipPlace], scopes: SemaScopeTable) -> Bool Never! {
+sema_string_view_record_binding: fn(check: ^SemaBodyCheck, name: String, name_span: Span, places: [SemaOwnershipPlace]) -> Bool Never! {
     fact := SemaOwnershipCallViewFact{output_path: [String]{}, access: AccessConvention.Read, places: places}
-    sema_ownership_record_call_view_batch(state, name, name_span, [SemaOwnershipCallViewFact]{fact}, scopes)
+    sema_ownership_record_call_view_batch(check.state, name, name_span, [SemaOwnershipCallViewFact]{fact}, check.scopes)
 }
 
 sema_string_view_binding: fn(scopes: SemaScopeTable, name: String) -> Bool Never! {
@@ -187,32 +187,32 @@ sema_string_view_borrowing_result: fn(ty: Type) -> Bool Never! {
     }
 }
 
-sema_string_view_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipState, name: String) -> String Never! {
-    index: sema_scope_resolve_index(scopes, name) ?? return "its owner"
-    id: scopes.bindings[index].symbol.id
+sema_string_view_owner: fn(check: SemaBodyCheck, name: String) -> String Never! {
+    index: sema_scope_resolve_index(check.scopes, name) ?? return "its owner"
+    id: check.scopes.bindings[index].symbol.id
     owner := "its owner"
-    loop fact_index in 0..<state.views.len() {
-        if state.views[fact_index].active && state.views[fact_index].carrier_id == id {
-            owner = state.views[fact_index].source.root
+    loop fact_index in 0..<check.state.views.len() {
+        if check.state.views[fact_index].active && check.state.views[fact_index].carrier_id == id {
+            owner = check.state.views[fact_index].source.root
         }
     }
     owner
 }
 
-sema_string_view_unsupported_use: fn(name: String, what: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
-    owner: sema_string_view_owner(scopes, state, name)
+sema_string_view_unsupported_use: fn(name: String, what: String, span: Span, check: ^SemaBodyCheck) {
+    owner: sema_string_view_owner(check, name)
     diagnostic: sema_error("E2307", span, "`{name}` cannot {what} without an owning copy", "`{name}` is a zero-copy view into `{owner}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled", "write `{name}.copy()` first, or remove `copies: .Explicit` to use the default owning copy")
-    diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    check.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 // Under `copies: .Explicit`, a bare string-view read outside the positions
 // that take a view (`.copy()`, interpolation, a view method receiver, an implicit
 // owning copy) is the one refusal for every owning destination.
-sema_string_view_check_read: fn(name: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
-    if !scopes.copies_explicit || context.allow_string_view_read || !sema_string_view_binding(scopes, name) {
+sema_string_view_check_read: fn(name: String, span: Span, check: ^SemaBodyCheck) {
+    if !check.scopes.copies_explicit || check.context.allow_string_view_read || !sema_string_view_binding(check.scopes, name) {
         return
     }
-    sema_string_view_unsupported_use(name, "be used directly here", span, scopes, state, diagnostics)
+    sema_string_view_unsupported_use(name, "be used directly here", span, check)
 }
 
 // A string view, or a read view local, read at an owning destination is
@@ -248,9 +248,9 @@ sema_string_view_owning_read: fn(value: Expr, destination: Type, scopes: SemaSco
 // Outside a borrow position and under the default copy policy, a `View<T>`
 // local read where exactly its owned type (`owned_type_for_read_view`: `[T]`,
 // or `String` for `View<str>`) is expected is an owning read.
-sema_read_view_owning_read: fn(name: String, destination: Type, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool Never! {
-    if scopes.copies_explicit || context.borrow_ctx -> return false
-    symbol: sema_scope_resolve(scopes, name) ?? return false
+sema_read_view_owning_read: fn(name: String, destination: Type, check: SemaBodyCheck) -> Bool Never! {
+    if check.scopes.copies_explicit || check.context.borrow_ctx -> return false
+    symbol: sema_scope_resolve(check.scopes, name) ?? return false
     source: symbol.ty ?? return false
     owned: sema_copy_owned_view_type(source, false)
     owned.materialized && type_identity_equal(owned.ty, destination)
@@ -258,12 +258,14 @@ sema_read_view_owning_read: fn(name: String, destination: Type, scopes: SemaScop
 
 // The view's owner is a parameter (the receiver included) or a module-level
 // value, so it outlives the function.
-sema_string_view_stable_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipState, name: String) -> Bool Never! {
-    index: sema_scope_resolve_index(scopes, name) ?? return false
-    id: scopes.bindings[index].symbol.id
-    loop fact_index in 0..<state.views.len() {
-        if !state.views[fact_index].active || state.views[fact_index].carrier_id != id -> next
-        owner: sema_scope_resolve(scopes, state.views[fact_index].source.root) ?? return false
+sema_string_view_stable_owner: fn(check: SemaBodyCheck, name: String) -> Bool Never! {
+    index: sema_scope_resolve_index(check.scopes, name) ?? return false
+    id: check.scopes.bindings[index].symbol.id
+    loop fact_index in 0..<check.state.views.len() {
+        if !check.state.views[fact_index].active || check.state.views[fact_index].carrier_id != id {
+            next
+        }
+        owner: sema_scope_resolve(check.scopes, check.state.views[fact_index].source.root) ?? return false
         return owner.kind == SymbolKind.Parameter || owner.kind == SymbolKind.Constant
     }
     false
@@ -287,8 +289,8 @@ sema_string_view_check_field: fn(value: Expr, field_ty: Type, check: ^SemaBodyCh
     if view_name != "" {
         // The refusal does not end the check: the field still holds the
         // view, so the enclosing return or binding judges its owner too.
-        if !sema_string_view_stable_owner(check.scopes, check.state, view_name) {
-            sema_string_view_unsupported_use(view_name, "be stored in a struct field", span, check.scopes, check.state, check.diagnostics)
+        if !sema_string_view_stable_owner(check, view_name) {
+            sema_string_view_unsupported_use(view_name, "be stored in a struct field", span, check)
         }
         viewed := checked
         tree_expr_retype(viewed, field_ty)
@@ -307,11 +309,11 @@ sema_string_view_return_boundary: fn(span: Span, diagnostics: ^[Diagnostic]) {
 
 // A `View<str>` return reads a string-view binding, or a
 // `trim`/`after`/`before` call on a `String` name, as the view itself.
-sema_string_view_return_source: fn(value: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Bool {
+sema_string_view_return_source: fn(value: Expr, check: SemaBodyCheck) -> Bool {
     if value == .Ident(name, _, _) {
-        if sema_string_view_binding(scopes, name) -> return true
+        if sema_string_view_binding(check.scopes, name) -> return true
     }
-    sema_string_view_call_sources(value, scopes, state).len() > 0
+    sema_string_view_call_sources(value, check.scopes, check.state).len() > 0
 }
 
 sema_string_view_return_value: fn(value: Expr, success: Type, check: ^SemaBodyCheck) -> TExpr? {
@@ -331,33 +333,33 @@ sema_string_view_return_value: fn(value: Expr, success: Type, check: ^SemaBodyCh
 // A returned string view, named or not: every source of the returned view
 // must be a parameter (the receiver included); the sources join the return
 // provenance.
-sema_string_view_record_return: fn(value: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
+sema_string_view_record_return: fn(value: Expr, check: ^SemaBodyCheck) -> Bool {
     span: expr_span(value)
     places := [SemaOwnershipPlace]{}
     if value == .Ident(name, name_span, _) {
-        if !sema_string_view_binding(scopes, name) {
-            sema_string_view_return_boundary(span, diagnostics)
+        if !sema_string_view_binding(check.scopes, name) {
+            sema_string_view_return_boundary(span, check.diagnostics)
             return false
         }
-        index: sema_scope_resolve_index(scopes, name) ?? return false
-        id: scopes.bindings[index].symbol.id
-        loop fact in state.views {
+        index: sema_scope_resolve_index(check.scopes, name) ?? return false
+        id: check.scopes.bindings[index].symbol.id
+        loop fact in check.state.views {
             if fact.active && fact.carrier_id == id -> places.push(fact.source)
         }
         loop place in places {
-            owner: sema_scope_resolve(scopes, place.root) ?? return false
+            owner: sema_scope_resolve(check.scopes, place.root) ?? return false
             if owner.kind != SymbolKind.Parameter {
-                sema_string_view_unsupported_use(name, "be returned", name_span, scopes, state, diagnostics)
+                sema_string_view_unsupported_use(name, "be returned", name_span, check)
                 return false
             }
         }
-    } else { places = sema_string_view_call_sources(value, scopes, state) }
+    } else { places = sema_string_view_call_sources(value, check.scopes, check.state) }
     if places.len() == 0 {
-        sema_string_view_return_boundary(span, diagnostics)
+        sema_string_view_return_boundary(span, check.diagnostics)
         return false
     }
-    provenance := context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
-    valid := sema_ownership_record_view_returns(state, places, AccessConvention.Read, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, provenance, span, diagnostics)
-    context.return_view_provenance = Val(provenance)
+    provenance := check.context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+    valid := sema_ownership_record_view_returns(check.state, places, AccessConvention.Read, [String]{}, check.context.return_view_receiver_key, check.context.return_view_parameter_keys, check.scopes, provenance, span, check.diagnostics)
+    check.context.return_view_provenance = Val(provenance)
     valid
 }

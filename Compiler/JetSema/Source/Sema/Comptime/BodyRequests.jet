@@ -2,11 +2,13 @@
 // A site has no typed value until its expression is staged and its owner body
 // is checked again with that value available.
 use jet_foundation.[
+    COMPTIME_SITE_TRAIT,
     ModuleID,
     module_index,
     Expr,
     CompilerTraceSink,
     Name,
+    NodeKind,
     Span,
     SymbolKind,
     TComptimeReport,
@@ -197,7 +199,13 @@ sema_comptime_body_source_row: fn(context: SemaCheckContext, module_identity: Mo
 // Only capture deduplicates, returning the first existing row; the index
 // keeps a place's first row, so truncation can drop each appended row's entry.
 sema_comptime_body_source_append: fn(context: ^SemaCheckContext, source: SemaComptimeBodySource) Never! {
-    context.comptime_body_sources.push(source.copy())
+    sema_comptime_body_source_push(context, source.copy())
+}
+
+// sema_comptime_body_source_append of a row the caller hands over, which is
+// moved in, not copied: a rule stages one row per heard call.
+sema_comptime_body_source_push: fn(context: ^SemaCheckContext, source: ^^SemaComptimeBodySource) Never! {
+    context.comptime_body_sources.push(source.move())
     sema_comptime_body_source_index(context, context.comptime_body_sources.len() - 1)
 }
 
@@ -393,37 +401,159 @@ sema_comptime_body_capture: fn(
     source_span: Span,
     site_span: Span,
 ) -> SemaComptimeBodySource Never! {
-    sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, false, false)
+    sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, false, false, false)
 }
 
 // An explicit local `name: #run value` whose value is not known yet, staged
 // to be computed while compiling; its failures are reported.
 sema_comptime_body_capture_binding: fn(
-    context: ^SemaCheckContext,
-    environment: SemaScopeEnvironment,
-    scopes: SemaScopeTable,
+    check: ^SemaBodyCheck,
     name: String,
     expression: Expr,
     expected_type: Type,
     source_span: Span,
     site_span: Span,
 ) Never! {
-    _ := sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, false, true)
+    _ := sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, expected_type, source_span, site_span, false, true, false)
 }
 
 // An immutable local `name: value` that calls code, staged to be computed
 // while compiling; it stays run-time code when that fails, without a report.
 sema_comptime_body_capture_local: fn(
-    context: ^SemaCheckContext,
-    environment: SemaScopeEnvironment,
-    scopes: SemaScopeTable,
+    check: ^SemaBodyCheck,
     name: String,
     expression: Expr,
     expected_type: Type,
     source_span: Span,
     site_span: Span,
 ) Never! {
-    _ := sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, true, false)
+    _ := sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, expected_type, source_span, site_span, true, false, false)
+}
+
+// The prepared local that marks a generic body's compile-time site
+// (sema_comptime_generic_site_read), first among its prepared locals. Such a
+// site is never staged itself: each instance of the body stages a copy that
+// binds the type parameters it reads (sema_comptime_generic_site_instance).
+SEMA_COMPTIME_GENERIC_SITE_LOCAL: "__jet_generic_site"
+
+// The prepared local of an instance's copy of a generic site that holds the
+// TypeInfo record of the type filling type parameter `name`, bound only
+// when that type has one.
+sema_comptime_reflect_local: fn(name: String) -> String Never! {
+    "__jet_reflect_{name}"
+}
+
+// The prepared local of an instance's copy of a generic site that holds the
+// TypeId of the type filling type parameter `name`, which every type has.
+sema_comptime_type_id_local: fn(name: String) -> String Never! {
+    "__jet_type_id_{name}"
+}
+
+// Whether `source` is a generic body's site (SEMA_COMPTIME_GENERIC_SITE_LOCAL).
+sema_comptime_generic_site: fn(source: SemaComptimeBodySource) -> Bool Never! {
+    source.prepared.len() > 0 && source.prepared[0].name == SEMA_COMPTIME_GENERIC_SITE_LOCAL
+}
+
+// The value the staged check of an instance's copy of a generic site binds
+// prepared local `local` of type parameter `name` to; None when `name` is a
+// local or the check binds no such value.
+sema_comptime_bound_param: fn(name: String, local: String, check: ^SemaBodyCheck) -> TComptimeValue? {
+    if sema_scope_resolve_index(check.scopes, name) != None -> return None
+    index: sema_scope_resolve_index(check.scopes, local) ?? return None
+    if check.scopes.bindings[index].prepared == .Val(value) {
+        check.state.used_ids[check.scopes.bindings[index].symbol.id.id] = true
+        return Val(value)
+    }
+    None
+}
+
+// The TypeInfo record the staged check of an instance's copy of a generic
+// site binds `name.reflect()` to; None when `name` is a local or the check
+// binds no such record.
+sema_comptime_bound_reflection: fn(name: String, check: ^SemaBodyCheck) -> TComptimeValue? {
+    sema_comptime_bound_param(name, sema_comptime_reflect_local(name), check)
+}
+
+// The TypeId the staged check of an instance's copy of a generic site binds
+// `TypeId{name}` to; None when `name` is a local or the check binds none.
+sema_comptime_bound_type_id: fn(name: String, check: ^SemaBodyCheck) -> TComptimeValue? {
+    sema_comptime_bound_param(name, sema_comptime_type_id_local(name), check)
+}
+
+// A `name.reflect()` read (`span`) in the staged check of an instance's copy
+// of a generic site whose type for `name` has no TypeInfo record: E0302,
+// true. False when the check binds that type's record or binds no `name`.
+sema_comptime_unreflected: fn(name: String, span: Span, check: ^SemaBodyCheck) -> Bool {
+    id: sema_comptime_bound_type_id(name, check) ?? return false
+    if sema_comptime_bound_reflection(name, check) != None -> return false
+    shown: if sema_fact_struct_field(id, "name") == .Val(.String(text)) -> text else -> name
+    check.diagnostics.push(sema_fact_no_type_info_error(span, name, shown))
+    true
+}
+
+// The type parameters the `T.reflect()` and `TypeId{T}` reads checked since
+// `start` read (SemaCheckContext.generic_reflections), each once, in the
+// order read.
+sema_comptime_generic_site_params: fn(context: SemaCheckContext, start: Int) -> [Type] Never! {
+    params := [Type]{}
+    loop index in start..<context.generic_reflections.len() {
+        if context.generic_reflections[index] == .Named(name) {
+            seen := false
+            loop param in params {
+                if param == .Named(known) && known == name -> seen = true
+            }
+            if !seen -> params.push(Type.Named{name: name})
+        }
+    }
+    params
+}
+
+// A compile-time site of a generic body whose code reads the type parameters
+// `params`: the site is captured once, marked as generic, and the body
+// reads the value each instance gives it, a TraitConst of
+// COMPTIME_SITE_TRAIT whose owner applies the trait to `params` and whose
+// name is the site's key. The program stages one copy of the site per
+// instance and publishes each value as a constant row
+// (comptime_site_constant_key), which the instance reads.
+sema_comptime_generic_site_read: fn(check: ^SemaBodyCheck, name: String, expression: Expr, ty: Type, params: [Type], source_span: Span, site_span: Span) -> TExpr {
+    source: sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, ty, source_span, site_span, false, false, true)
+    owner: Type.Apply{name: COMPTIME_SITE_TRAIT, args: params}
+    sema_node(check.context, ty, NodeKind.TraitConst{owner: owner, trait_name: COMPTIME_SITE_TRAIT, name: source.key}, source_span)
+}
+
+// The copy of generic site `site` that one instance stages: its key and
+// place carry the instance's `identity`, and in place of the site's mark
+// its prepared locals bind each type parameter of `params` to the TypeId
+// `ids` holds at the same position (sema_comptime_type_id_local) and, when
+// `infos` holds one there, to that TypeInfo record
+// (sema_comptime_reflect_local).
+sema_comptime_generic_site_instance: fn(site: SemaComptimeBodySource, params: [String], ids: [TComptimeValue], infos: [TComptimeValue?], identity: String) -> SemaComptimeBodySource Never! {
+    prepared := [SemaComptimePreparedLocal]{}
+    loop index in 0..<params.len() {
+        prepared.push(SemaComptimePreparedLocal{name: sema_comptime_type_id_local(params[index]), ty: Type.Named{name: "TypeId"}, value: ids[index], span: site.span})
+        info: infos[index] ?? next
+        prepared.push(SemaComptimePreparedLocal{name: sema_comptime_reflect_local(params[index]), ty: sema_fact_named("TypeInfo"), value: info, span: site.span})
+    }
+    loop index in 1..<site.prepared.len() -> prepared.push(site.prepared[index])
+    owner: site.site_owner ?? site.function_key
+    SemaComptimeBodySource{
+        module_identity: site.module_identity,
+        function_key: site.function_key,
+        site_owner: Val("{owner}#{identity}"),
+        source_file: site.source_file,
+        key: "{site.key}#{identity}",
+        destination_key: "{site.destination_key}#{identity}",
+        name: site.name,
+        expression: site.expression,
+        expected_type: site.expected_type,
+        span: site.span,
+        site_span: site.site_span,
+        prepared: prepared,
+        impure: site.impure,
+        runtime_locals: site.runtime_locals,
+        local_value: false,
+        local_binding: false,
+    }
 }
 
 sema_comptime_body_capture_site: fn(
@@ -437,6 +567,7 @@ sema_comptime_body_capture_site: fn(
     site_span: Span,
     local_value: Bool,
     local_binding: Bool,
+    generic: Bool,
 ) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     if sema_comptime_body_source_row(context, environment.module_identity, function_key, source_span, site_span) == .Val(row) {
@@ -444,6 +575,11 @@ sema_comptime_body_capture_site: fn(
     }
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
     key: "{environment.module_identity.id}.{destination_key}"
+    prepared := [SemaComptimePreparedLocal]{}
+    if generic {
+        prepared.push(SemaComptimePreparedLocal{name: SEMA_COMPTIME_GENERIC_SITE_LOCAL, ty: Type.Bool, value: TComptimeValue.Bool{value: true}, span: source_span})
+    }
+    prepared.extend(sema_comptime_body_prepared_locals(environment, scopes))
     source := SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: function_key,
@@ -455,7 +591,7 @@ sema_comptime_body_capture_site: fn(
         expected_type: expected_type,
         span: source_span,
         site_span: site_span,
-        prepared: sema_comptime_body_prepared_locals(environment, scopes),
+        prepared: prepared,
         impure: sema_scope_inside_impure(scopes),
         runtime_locals: sema_comptime_body_runtime_locals(scopes),
         local_value: local_value,
@@ -501,12 +637,12 @@ sema_comptime_body_runtime_locals: fn(scopes: SemaScopeTable) -> [String] Never!
 // it is not staged in this pass, its owner body stays incomplete, and the
 // body is checked again once the local holds its value. Staged now, it
 // would read the local as a run-time value (E0640).
-sema_comptime_reads_pending_local: fn(scopes: SemaScopeTable, context: SemaCheckContext, reference_start: Int) -> Bool Never! {
-    loop index in reference_start..<context.name_references.len() {
-        reference: context.name_references[index]
+sema_comptime_reads_pending_local: fn(check: SemaBodyCheck, reference_start: Int) -> Bool Never! {
+    loop index in reference_start..<check.context.name_references.len() {
+        reference: check.context.name_references[index]
         if reference.kind != Val(SymbolKind.Local) -> next
-        position: sema_scope_resolve_index(scopes, reference.symbol.name) ?? next
-        if scopes.bindings[position].pending_prepared -> return true
+        position: sema_scope_resolve_index(check.scopes, reference.symbol.name) ?? next
+        if check.scopes.bindings[position].pending_prepared -> return true
     }
     false
 }

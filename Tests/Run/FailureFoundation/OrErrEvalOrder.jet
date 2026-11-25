@@ -14,7 +14,7 @@ reason: fn() -> String {
     "missing optional"
 }
 
-borrowed: fn(value: ^String?) -> String Err! { return value.or_err("borrowed absence") }
+borrowed: fn(value: String?) -> String Err! { return value.or_err("borrowed absence") }
 
 propagate: fn(value: String?) -> String Err! {
     payload: value.or_err("propagated absence") ?? {
@@ -29,7 +29,7 @@ run: fn() {
     number: Int?{Val(7)}
     print(number.or_err("number absence") ?? 0)
     print(number ?? 0)
-    owned := String?{Val("kept")}
+    owned: String?{Val("kept")}
     print(owned.or_err("owned absence") ?? "bad owned")
     print(owned ?? "lost owned")
     print(borrowed(owned) ?? "bad borrowed")

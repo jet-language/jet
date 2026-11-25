@@ -1,7 +1,7 @@
 // Assertions shared by the crate-test port. Use source-aware entry points so
 // diagnostic spans and safe edits see the authored bytes, not synthetic tokens.
 use {
-    jet_foundation.[Binding, Diagnostic, Func, ParseResult, Program]
+    jet_foundation.[Binding, Diagnostic, Func, ParseResult, Program, TaskForm, task_form_method]
     jet_parser.[jet_format_source, parse_source]
 }
 
@@ -58,10 +58,7 @@ parser_test_binding: fn(function: Func) -> Binding {
     panic("expected value binding")
 }
 
-parser_test_task_name: fn(name: String) -> String {
-    nul: String.from_bytes([U8]{0}) ?? panic("NUL is valid UTF-8")
-    "{nul}jet.task.{name}"
-}
+parser_test_task_name: fn(form: TaskForm) -> String { task_form_method(form) }
 
 parser_test_find: fn(source: String, needle: String) -> Int {
     index: source.find(needle)

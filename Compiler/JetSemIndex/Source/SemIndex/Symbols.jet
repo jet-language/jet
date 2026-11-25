@@ -14,14 +14,15 @@ use {
         BUILTIN_NUMERIC_SOURCES,
         DOC_COMMENT_PREFIX,
         ImportDecl,
-        JET_KEYWORD_NAMES,
-        JET_TYPE_NAMES,
+        KEYWORD_NAMES,
+        TYPE_NAMES,
         Item,
         Span,
         Type,
         builtin_static_numeric_row,
         builtin_static_rows,
         type_name,
+        access_sigil,
         marker_decl_signature,
         name_ledger_display_path,
         name_ledger_display_path_at,
@@ -193,11 +194,11 @@ semindex_symbol_is_result: fn(ty: Type?) -> Bool Never! {
 semindex_language_symbols: fn() -> [SemSymbol] Never! {
     symbols := [SemSymbol]{}
     no_examples: [String]{}
-    loop ty in JET_TYPE_NAMES {
+    loop ty in TYPE_NAMES {
         symbols.push(semindex_symbol_builtin("builtin:type:{ty}", ty, ty, None, "core", SemSymbolKind.Type, "type {ty}", "Built-in Jet type.", no_examples))
     }
     symbols.push(semindex_symbol_builtin("builtin:fact:$origin", "$origin", "$origin", None, "compiler", SemSymbolKind.Member, "$origin: OriginInfo?", "Compiler-owned typed fact.", no_examples))
-    loop keyword in JET_KEYWORD_NAMES {
+    loop keyword in KEYWORD_NAMES {
         symbols.push(semindex_symbol_builtin("builtin:keyword:{keyword}", keyword, keyword, None, "syntax", SemSymbolKind.Keyword, keyword, "Jet keyword.", no_examples))
     }
     loop row in SEMINDEX_SYMBOL_BUILTIN_METHODS {
@@ -592,7 +593,15 @@ semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSym
         .Function(callable) -> {
             params: semindex_parameter_parts(callable.params).join(", ")
             prefix: if owner == .Val(owner_name) -> "{owner_name}.{name}" else -> "{name}: fn"
-            shape = SemSymbolShape{kind: SemSymbolKind.Function, signature: "{prefix}({params}){semindex_signature_tail(callable)}"}
+            // A method that writes or takes its receiver shows the marked
+            // `self` first; a read receiver stays implicit.
+            receiver: if owner != None && callable.receiver == .Val(access) -> access_sigil(access) else -> ""
+            listed: if {
+                receiver == "" -> params
+                params == "" -> "{receiver}self"
+                else -> "{receiver}self, {params}"
+            }
+            shape = SemSymbolShape{kind: SemSymbolKind.Function, signature: "{prefix}({listed}){semindex_signature_tail(callable)}"}
         }
         .Struct(fields, _) -> {
             shown: loop field in fields -> "{field.name}: {type_name(field.ty)}"

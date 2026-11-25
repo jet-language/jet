@@ -57,7 +57,7 @@ fixture_send: fn(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     (net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")).drop("the fixture reply needs no sent byte count")
 }
 
-fixture_read_exact: fn(stream: ^net.TCPStream, n: Int) -> [U8] {
+fixture_read_exact: fn(stream: net.TCPStream, n: Int) -> [U8] {
     out := [U8]{}
     loop out.len() < n {
         chunk: net.tcp_read_bytes(stream, n - out.len()) ?? panic("read exact")
@@ -77,7 +77,7 @@ fixture_read_exact: fn(stream: ^net.TCPStream, n: Int) -> [U8] {
         started: time.start()
         time.sleep(70ms)
         fixture_send(socket, packet, fixture_truncated(packet.data))
-        stream := net.tcp_accept(tcp) ?? panic("TCP accept")
+        stream: net.tcp_accept(tcp) ?? panic("TCP accept")
         #Deadline(500ms) {
             prefix: fixture_read_exact(stream, 2)
             n: Int{prefix[0]} * 256 + Int{prefix[1]}

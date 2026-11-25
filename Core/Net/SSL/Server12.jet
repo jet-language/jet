@@ -807,7 +807,7 @@ ssl_srv12_write_server_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssld
 // CertificateRequest.
 
 // The subject DNs of a certificate list, in order, up to an empty entry.
-ssl_srv12_subjects: fn(chain: ^[x509crt.X509Crt]) -> [[U8]] Never! {
+ssl_srv12_subjects: fn(chain: [x509crt.X509Crt]) -> [[U8]] Never! {
     out := [[U8]]{}
     loop i in 0..<chain.len() {
         if chain[i].version == 0 -> break

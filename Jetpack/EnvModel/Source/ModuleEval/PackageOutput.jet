@@ -3,8 +3,8 @@
 // System and Fleet payloads and never resolves packages, reads the store, or
 // performs rollout work.
 use {
-    jet_foundation.[CtFloat, CtKey, CtMapEntry, CtValue]
-    jet_pkg_model.[OutputFact, OutputPayload, PackageFacts, PackageOutputKind, Pkg, pkg_parse_i64]
+    jet_foundation.[CtFloat, CtKey, CtMapEntry, CtValue, OutputKind]
+    jet_pkg_model.[OutputFact, OutputPayload, PackageFacts, Pkg, pkg_parse_i64]
     jetpack_foundation.[REF_SOURCE_JETPACK, SERVICE_FIELD_ENABLE, SYSTEM_FIELD_PACKAGES, SYSTEM_FIELD_TARGET]
 }
 
@@ -63,7 +63,7 @@ envmodel_project_package_outputs: fn(facts: PackageFacts) -> PackageOutputPlan P
     keys: envmodel_sorted_output_keys(facts.outputs)
     loop key in keys {
         output: facts.outputs[key]
-        if output.kind != PackageOutputKind.System -> next
+        if output.kind != OutputKind.System -> next
         path: "outputs.{key}"
         system: envmodel_project_system(path, output)
         if system_names.contains(system.name) {
@@ -79,7 +79,7 @@ envmodel_project_package_outputs: fn(facts: PackageFacts) -> PackageOutputPlan P
     host_paths := [String:String]{}
     loop key in keys {
         output: facts.outputs[key]
-        if output.kind != PackageOutputKind.Fleet -> next
+        if output.kind != OutputKind.Fleet -> next
         path: "outputs.{key}"
         fleet: envmodel_project_fleet(path, output, system_names)
         if fleet_names.contains(fleet.name) {

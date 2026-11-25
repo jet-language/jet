@@ -43,7 +43,7 @@ ClosureJournalEntry: struct {
     deleted_records: [String],
 }
 
-store_load_graph: fn(verification: ^StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
+store_load_graph: fn(verification: StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
     store_load_graph_mode(verification, roots, false)
 }
 
@@ -66,7 +66,7 @@ store_journal_refuse_partial: fn(roots: HangarRoots) -> Bool StoreError! {
 
 // Validate committed closure state without locking, replaying, compacting,
 // or repairing its package projection.
-store_closure_graph_read_only: fn(verification: ^StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
+store_closure_graph_read_only: fn(verification: StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
     if !store_journal_refuse_partial(roots) -> return Ok(ClosureGraph.empty())
     store_load_graph_mode(verification, roots, true)
 }
@@ -74,14 +74,14 @@ store_closure_graph_read_only: fn(verification: ^StoreVerification, roots: Hanga
 // Read the closure structure without taking a lock or replaying a journal.
 // Store proofs may be unavailable, but an explanation must never repair the
 // projection merely to describe that loss.
-store_closure_graph_structure_read_only: fn(verification: ^StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
+store_closure_graph_structure_read_only: fn(verification: StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
     if !store_journal_refuse_partial(roots) -> return Ok(ClosureGraph.empty())
     store_load_graph_structure_mode(verification, roots, true)
 }
 
 // The cleanup/lifecycle inputs: every closure object digest and the closure
 // head (a digest over every journal transaction). Each call recomputes it.
-store_lifecycle_inputs_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -> {known: [String], closure_head: String} StoreError! {
+store_lifecycle_inputs_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -> {known: [String], closure_head: String} StoreError! {
     _: store_recover_closure_journal_unlocked(verification, roots)
     graph: store_load_graph_mode(verification, roots, true)
     paths := store_journal_transaction_paths(store_journal_dir(roots))
@@ -99,15 +99,15 @@ store_lifecycle_inputs_unlocked: fn(verification: ^StoreVerification, roots: Han
     Ok({known: known, closure_head: "sha256-{store_sha256_hex(canonical)}"})
 }
 
-store_load_graph_mode: fn(verification: ^StoreVerification, roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {
+store_load_graph_mode: fn(verification: StoreVerification, roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {
     store_load_graph_mode_with_proofs(verification, roots, allow_legacy, true)
 }
 
-store_load_graph_structure_mode: fn(verification: ^StoreVerification, roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {
+store_load_graph_structure_mode: fn(verification: StoreVerification, roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {
     store_load_graph_mode_with_proofs(verification, roots, allow_legacy, false)
 }
 
-store_load_graph_mode_with_proofs: fn(verification: ^StoreVerification, roots: HangarRoots, allow_legacy: Bool, validate_store_proofs: Bool) -> ClosureGraph StoreError! {
+store_load_graph_mode_with_proofs: fn(verification: StoreVerification, roots: HangarRoots, allow_legacy: Bool, validate_store_proofs: Bool) -> ClosureGraph StoreError! {
     journal: store_journal_dir(roots)
     entries: files.list_dir(journal) ?? return Ok(ClosureGraph.empty())
     paths := [String]{}
@@ -199,11 +199,11 @@ store_apply_entry: fn(graph: ^ClosureGraph, entry: ClosureJournalEntry) StoreErr
 }
 
 // Test seam: full structure and store-proof validation.
-store_validate_graph: fn(verification: ^StoreVerification, roots: HangarRoots, graph: ClosureGraph) StoreError! {
+store_validate_graph: fn(verification: StoreVerification, roots: HangarRoots, graph: ClosureGraph) StoreError! {
     store_validate_graph_mode(verification, roots, graph, false)
 }
 
-store_validate_graph_mode: fn(verification: ^StoreVerification, roots: HangarRoots, graph: ClosureGraph, allow_legacy: Bool) StoreError! {
+store_validate_graph_mode: fn(verification: StoreVerification, roots: HangarRoots, graph: ClosureGraph, allow_legacy: Bool) StoreError! {
     store_validate_graph_structure_mode(roots, graph, allow_legacy)
     store_validate_graph_store_proofs(verification, roots, graph, allow_legacy)
 }
@@ -306,7 +306,7 @@ store_validate_applied_entry: fn(roots: HangarRoots, graph: ClosureGraph, entry:
     }
 }
 
-store_validate_graph_store_proofs: fn(verification: ^StoreVerification, roots: HangarRoots, graph: ClosureGraph, allow_legacy: Bool) StoreError! {
+store_validate_graph_store_proofs: fn(verification: StoreVerification, roots: HangarRoots, graph: ClosureGraph, allow_legacy: Bool) StoreError! {
     loop record in graph.sorted_records() {
         if record.package_meta != "" {
             meta: pkg_parse_meta(record.package_meta) ?? return Err(StoreError.Other("closure record `{record.id}` has invalid package metadata"))
@@ -349,7 +349,7 @@ store_validate_receipt_projection: fn(roots: HangarRoots, id: String, meta: Pars
     }
 }
 
-store_validate_record_store_proof: fn(verification: ^StoreVerification, roots: HangarRoots, record: ClosureRecord, allow_legacy: Bool) StoreError! {
+store_validate_record_store_proof: fn(verification: StoreVerification, roots: HangarRoots, record: ClosureRecord, allow_legacy: Bool) StoreError! {
     legacy: record.producer_record == "" && record.package_meta == ""
     if (allow_legacy && legacy) || record.references.len() > 0 {
         return
@@ -432,7 +432,7 @@ store_merge_action_projection: fn(action: ^CanonicalActionRecord, projection: Ca
     }
 }
 
-store_validates_complete_closure: fn(verification: ^StoreVerification, roots: HangarRoots, record: ClosureRecord, meta: ParsedMeta, producer: ProducerRecord) -> Bool Never! {
+store_validates_complete_closure: fn(verification: StoreVerification, roots: HangarRoots, record: ClosureRecord, meta: ParsedMeta, producer: ProducerRecord) -> Bool Never! {
     output: meta.out
     local: files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), record.primary)
     authority: producer.facts.get("closure.authority") ?? ""
@@ -461,7 +461,7 @@ store_validates_complete_closure: fn(verification: ^StoreVerification, roots: Ha
     }
 }
 
-store_rehashes_as_recorded: fn(verification: ^StoreVerification, roots: HangarRoots, meta: ParsedMeta, record: ClosureRecord) -> Bool Never! {
+store_rehashes_as_recorded: fn(verification: StoreVerification, roots: HangarRoots, meta: ParsedMeta, record: ClosureRecord) -> Bool Never! {
     actual: store_try_entry_output_hash(verification, roots, store_entry_from_meta(record.id, meta)) ?? return false
     actual == record.primary
 }
@@ -495,7 +495,7 @@ store_append_entry: fn(roots: HangarRoots, entry: ClosureJournalEntry) -> String
     store_journal_write_entry(journal, sequence, entry)
 }
 
-store_compact_if_needed: fn(verification: ^StoreVerification, roots: HangarRoots) StoreError! {
+store_compact_if_needed: fn(verification: StoreVerification, roots: HangarRoots) StoreError! {
     journal: store_journal_dir(roots)
     paths := store_journal_transaction_paths(journal)
     if paths.len() <= STORE_JOURNAL_COMPACT_AFTER {

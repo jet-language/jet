@@ -1,7 +1,7 @@
 // The one structural reader of `package.jet` Package and Config carriers. There
 // is no second, legacy-vocabulary parser.
 use {
-    jet_foundation.[ModuleLayer, Span, core_enum_cases, jet_ring_parse_manifest_layer, log_filter_bad_pair]
+    jet_foundation.[ModuleLayer, OutputKind, Span, core_enum_cases, jet_ring_parse_manifest_layer, log_filter_bad_pair]
     jet_lexer.[
         Lexed,
         TOKEN_BLOCK_COMMENT,
@@ -342,7 +342,7 @@ pkg_parse_outputs: fn(value: String) -> [String:OutputFact] PackageParseError! {
 pkg_parse_output_value: fn(key: String, raw: String) -> OutputFact PackageParseError! {
     head: raw.split_once("{{")?.before ?? raw
     kind_text: pkg_binder_trim_end_matches(pkg_trim_start_matches(head.trim(), "."), ".")
-    kind: PackageOutputKind.parse(kind_text)
+    kind: pkg_output_kind_parse(kind_text)
     raw_fields: pkg_named_entries_checked(pkg_record_body(raw, "output"), "outputs.{key}")
     payload_fields := [String:OutputPayload]{}
     loop field in raw_fields -> payload_fields[field.key] = pkg_parse_output_payload(field.value)
@@ -537,7 +537,7 @@ pkg_parse_members: fn(input: String) -> [MemberRef] PackageParseError! {
     Ok(members)
 }
 
-pkg_output_field_allowed: fn(kind: PackageOutputKind, field: String) -> Bool Never! {
+pkg_output_field_allowed: fn(kind: OutputKind, field: String) -> Bool Never! {
     allowed: if kind == {
         .Library -> [String]{"name", "modules", "entry", OUTPUT_FIELD_LOADABLE, OUTPUT_FIELD_NATIVE, OUTPUT_FIELD_BINDINGS}
         .Executable | .Service | .Check -> [String]{"name", "entry"}

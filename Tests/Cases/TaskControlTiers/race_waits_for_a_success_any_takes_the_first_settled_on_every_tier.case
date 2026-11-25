@@ -1,0 +1,23 @@
+# `task.race` returns its first successful branch and `task.any` its first settled one. A branch that fails before a slower one succeeds loses the race but settles the any. `jet run` and the O0, O1 and release builds agree.
+fixture: RaceWaitsForASuccessAnyTakesTheFirstSettledOnEveryTier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "race 7\nany -1\n"
+step: jet build main.jet -O0
+exit: 0
+step: built
+exit: 0
+stdout: = "race 7\nany -1\n"
+step: jet build main.jet -O1
+exit: 0
+step: built
+exit: 0
+stdout: = "race 7\nany -1\n"
+step: jet build main.jet --release
+exit: 0
+step: built
+exit: 0
+stdout: = "race 7\nany -1\n"

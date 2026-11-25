@@ -173,7 +173,7 @@ ssl_srv13_ticket_usable: fn(session: ssldefs.SSLSession, obfuscated_ticket_age: 
 // (ssl_tls13_offered_psks_check_identity_match_ticket): MATCH, or
 // MATCH_BUT_PSK_NOT_USABLE for an expired or unsuitable ticket of ours,
 // else DOES_NOT_MATCH.
-ssl_srv13_offered_psks_check_identity_match_ticket: fn(ssl: ^ssldefs.SSLContext, identity: Int, identity_len: Int, obfuscated_ticket_age: Int, session: ^ssldefs.SSLSession) -> Int Never! {
+ssl_srv13_offered_psks_check_identity_match_ticket: fn(ssl: ssldefs.SSLContext, identity: Int, identity_len: Int, obfuscated_ticket_age: Int, session: ^ssldefs.SSLSession) -> Int Never! {
     parse := if ssl.conf.f_ticket_parse == {
         .Val(cb) -> cb.call
         None -> {
@@ -255,7 +255,7 @@ ssl_srv13_offered_psks_check_identity_match: fn(ssl: ^ssldefs.SSLContext, identi
 // handshake's PSK makes over the transcript so far
 // (ssl_tls13_offered_psks_check_binder_match, RFC 8446 4.2.11.2), compared
 // in constant time.
-ssl_srv13_offered_psks_check_binder_match: fn(ssl: ^ssldefs.SSLContext, binder: Int, binder_len: Int, psk_type: Int, psk_hash_alg: hashes.Md) -> Int ssldefs.SSLError! {
+ssl_srv13_offered_psks_check_binder_match: fn(ssl: ssldefs.SSLContext, binder: Int, binder_len: Int, psk_type: Int, psk_hash_alg: hashes.Md) -> Int ssldefs.SSLError! {
     hash_len: hashes.md_size(psk_hash_alg)
     if binder_len != hash_len -> return Ok(SSL_SRV13_BINDER_DOES_NOT_MATCH)
     // The transcript runs through the identities, which the caller added.

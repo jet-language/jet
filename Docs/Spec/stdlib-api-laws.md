@@ -540,12 +540,12 @@ every manifest entry.
 
 ### Resident environment column transport
 
-The interpreter and resident host bind the canonical `jet.runtime.sys`
-`env_columns` and `startup_env_columns` leaves, not the retired
-count/name/value transport.
+Core binds the canonical `jet.runtime.sys` `env_columns` and
+`startup_env_columns` leaves, not the retired count/name/value transport.
 Logical columns come from one snapshot under the existing logical-cell lock;
-startup columns cache immutable host `vars_os` separately. Both preserve
-platform encoded name/value bytes and let source `env_columns` pair them.
+startup columns read the environment the process started with, separately.
+Both preserve platform encoded name/value bytes and let source `env_columns`
+pair them.
 The key comparison reuses Windows ordinal comparison and byte ordering on
 other hosts. Neither bridge writes the operating-system environment.
 
@@ -575,8 +575,8 @@ recorded detail (path, then any diff) as the locals; `panic` keeps its text.
 the `jet_test_` name, remove-before-create ordering, NotFound handling, and
 error wording. Filesystem facts and actions remain raw host leaves of
 `jet_builtins`, Core's door to the compiler, returning plain records, never
-tuples. `TempPath.path` is opaque platform
-`OsString::into_encoded_bytes()` output: source must not construct, slice,
+tuples. `TempPath.path` is the opaque platform encoding the host produces:
+source must not construct, slice,
 edit, or decode it, and passes it unchanged to remove/create. The displayed
 lossy String is separate, so non-UTF-8 temporary roots retain their original
 filesystem spelling. The native borrow is same-platform and allocation-free.
@@ -587,58 +587,23 @@ second RNG identity.
 the three copy-before-callback wrappers; the existing engine still owns
 history execution and compiler-derived command provenance.
 
-I9 preserved gaps: the interpreter does not observe native testing-failure
-TLS, and the native-only suite snapshot remains on its existing tier support.
-Testing `world` is **native and uncredited**: exact interpreter diagnostic-error
-cleanup requires an unavailable capture/rethrow rail, so its existing
-callback/handle-unregister/wait/close/scope-restore order is unchanged.
-## Source Fake clean cutover
+Testing `world` keeps its existing
+callback/handle-unregister/wait/close/scope-restore order.
+
+## Source Fake
 
 The private state and locale fields, seed-bit conversion, exact locale salt,
 fixed draw order, tables, Display, Debug, clone, and equality belong to
 `Core/Testing/Testing.jet::Fake`. The seeded helper is the existing source
-`core.math.random.__seeded_int`, not another RNG or native Fake carrier.
-
-Removed native routes → source replacements (reviewed pre-removal line anchors):
-
-- `Context.rs:1218`, `Emit/Types.jet:2665`, `core_types.rs:277`,
-  `Traits.rs:2702` → source nominal Fake and ordinary record traits.
-- `Collections.rs:558,2103,2908,3890,3952` and
-  `method_calls.rs:6290` → source Fake methods and ordinary parameter/borrow rules.
-- Rust IR `mod.rs:14242`, `routes.rs:2078`, `subset/handles.rs:248,561`,
-  `tir_to_mir_expr.rs:4506`; the retired Jet IR module (line 948), `HandleMethods.jet:1043,1355`
-  → source locale/name/email/host/address bodies, no closed Fake handle operations.
-- Comptime `Builtins.rs:1438`, `dispatch/eval_method.rs:2355`,
-  `Methods/core_calls.rs:378`, `plain_calls.rs:1243` → ordinary source dispatch.
-- `Core.rows:414`, `CoreHostSignatures.jet:191`, `fixed_sigs.rs:1864`,
-  `Codegen/mod.rs:3865`, native `FakeData.rs:1-69`,
-  `CommonTypes.rs:2822,6819` → source constructor, fields, rendering and tables.
-- `Syntax/core_surface.rs:996` → source type identity, no builtin Fake marker.
-
-The Jet Foundation collection/trait registries and Jet Sema builtin-owner
-registry had no Fake-specific path; they intentionally remain unchanged.
-Generated C-ABI/route views remain frozen until the E2 final artifact permits
-central regeneration. Receipt-2 temporarily restores the Rust Fake carrier,
-its Clone/PartialEq/JetShow support, the six FakeData functions and their
-helpers, and the Prelude include verbatim from `459cfe7cd^`, solely to satisfy
-references in those frozen generated files. Core source ownership, registry
-rows, and compiler/comptime dispatch remain cut over. This dead generated-route
-glue dies at the post-freeze regeneration; it is not a source compatibility path.
-
-## Browser resident adapter cleanup
-
-The unused `BrowserHost::eval_core_call` plain-call dispatcher is removed,
-along with its orphan-only `profile_value`, `profile_ct`, `timeout_ct`, and
-`locked_ct` conversions. Repository-wide binding, qualified-call, string, and
-macro searches found no callers. Unrelated compiler `eval_core_call`
-functions are not that binding. The resident method adapter, handle table,
-live timeout/locked conversions, and included AOT providers are unchanged.
+`core.math.random.__seeded_int`, not another RNG or native Fake carrier. No
+compiler registry, Core.rows row, or runtime leaf names Fake; its methods are
+ordinary source dispatch.
 
 ### Realtime receipt presentation
 
 `Core/Rt/Rt.jet::RealtimeReceipt` owns `render_json`, `render`, and
-`frames_per_buffer`. The first two preserve the eight native receipt fields'
-fixed labels, order, punctuation and whitespace (`Realtime.rs:119-144`
-before removal); the last returns `requested_frames` (`Realtime.rs:147-149`).
-All three read the existing receipt without effects or new host leaves.
-The provider still owns bounded receipt observations and stream lifetime.
+`frames_per_buffer`. The first two keep the eight receipt fields' fixed
+labels, order, punctuation and whitespace; the last returns
+`requested_frames`. All three read the existing receipt without effects or new
+host leaves. The provider still owns bounded receipt observations and stream
+lifetime.

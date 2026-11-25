@@ -3,7 +3,10 @@
 // this file infers records from the tree. Objects become records, arrays keep
 // their element type, and null or missing values add optionality. A number
 // spelled with a fraction or exponent is a Float; a whole number is an Int.
-use json: core.encoding.json
+use {
+    jet_foundation.[effect_vocabulary_view_count]
+    json: core.encoding.json
+}
 
 pkg_data_bind_json: fn(input: String, root_name: String) -> SchemaBuilder DataBindError! {
     value := Dyn.Null
@@ -29,6 +32,11 @@ JSONBindKind: enum {
     Object,
     Other,
 }
+
+// JSONBindKind picks from Core's DataEvent, the events a data codec reads:
+// an `Array` or `Object` is the run of events from its start to its end, and
+// `Other` is a value inference does not bind.
+JSON_BIND_KIND_COUNT: #run effect_vocabulary_view_count("Foreign/Data/JSONSchemaBinder.jet", embed_file("JSONSchemaBinder.jet"), "JSONBindKind", "Core/Encoding/Encoding.jet", embed_file("toolchain:Core/Encoding/Encoding.jet"), "DataEvent", [String]{"Array", "Object", "Other"})
 
 pkg_data_json_kind: fn(value: Dyn) -> JSONBindKind Never! {
     if value == {

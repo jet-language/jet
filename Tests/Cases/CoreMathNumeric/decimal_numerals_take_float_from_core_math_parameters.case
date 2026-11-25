@@ -1,0 +1,16 @@
+# An unsuffixed decimal numeral passed to a core.math Float parameter is a
+# Float, never a Decimal. This covers math.sqrt(2.0) (also nested in
+# math.is_finite, as core-library.md shows it), a parenthesized and a negated
+# numeral, is_finite/is_nan/is_inf on a numeral, and the plain Float functions
+# sin, cos, exp, hypot, atan2 and cbrt. The output is the same on O0 and O2.
+fixture: DecimalNumeralsTakeFloatFromCoreMathParameters.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = decimal_numerals_take_float_from_core_math_parameters.out
+stderr: empty
+step: jet run -O2 main.jet
+exit: 0
+stdout: = decimal_numerals_take_float_from_core_math_parameters.out
+stderr: empty

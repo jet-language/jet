@@ -1,12 +1,9 @@
 # A source-owned Core call carries the effect set its Core declaration
-# writes: `jobs.queue` declares `-[DB, Env, FS, Rand, Time]>`, the Core
-# catalog lists all five for its call row, a caller naming the set checks,
-# and a `-[DB]>` caller is refused for the rest.
+# writes: `jobs.queue` declares `-[DB, Env, FS, Rand, Time]>` in Core and has
+# no compiler-owned call row, so a caller naming the set checks and a `-[DB]>`
+# caller is refused for the rest.
 fixture: CoreCallEffectSet/Input
 env: NO_COLOR=1
-step: jet inspect structure --core --json
-exit: 0
-json: stdout doc $.core.calls[?module="core.jobs"][?member="queue"][0].effects = ["DB","Env","FS","Rand","Time"]
 step: jet check declared.jet
 exit: 0
 step: jet check short.jet

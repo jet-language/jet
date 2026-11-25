@@ -226,7 +226,7 @@ take_bytes: fn(peer: ^Peer, n: Int) -> [U8] {
     out
 }
 
-send: fn(peer: ^Peer, bytes: [U8]) {
+send: fn(peer: Peer, bytes: [U8]) {
     if peer.stream.write_bytes(bytes) == {
         .Ok(_) -> {}
         .Err(_) -> {}
@@ -282,7 +282,7 @@ read: fn(peer: ^Peer) -> String {
 }
 
 // Port of write_text_frame.
-write: fn(peer: ^Peer, message: String) {
+write: fn(peer: Peer, message: String) {
     bytes: message.bytes()
     frame := [U8]{U8{0x81}}
     if bytes.len() <= 125 -> frame.push(U8{bytes.len()}) else {

@@ -936,6 +936,7 @@ rt_text_equal_bytes: fn(left: I64, right: I64, len: I64) -> Bool {
 
 // A counted heap text answers from its cache word; otherwise only the bytes
 // past its known ASCII prefix are scanned, and the count is cached.
+// Inline Int carrier: |v| < 2^62 by construction (bounded by live text bytes).
 #Export(c) jet_char_len: fn(value: I64) -> I64 {
     len: rt_text_len(value)
     if !rt_text_cacheable(value, len) -> return rt_text_scalars(rt_text_data(value), len)

@@ -306,6 +306,9 @@ TTargetOS: enum {
 
 TARGET_OS_ALL: #run { [TTargetOS]{TTargetOS.Linux, TTargetOS.MacOS, TTargetOS.Windows, TTargetOS.Web, TTargetOS.Wasm, TTargetOS.Freestanding} }
 
+// TTargetOS's case names, for the views in other packages that pick from it.
+TARGET_OS_NAMES: #run { loop os in TARGET_OS_ALL -> target_os_name(os) }
+
 // `OS.MacOS` is `MacOS`.
 target_os_name: fn(os: TTargetOS) -> String Never! {
     if os == {

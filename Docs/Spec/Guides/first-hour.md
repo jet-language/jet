@@ -157,6 +157,18 @@ OK: `run.jet` has no problems
 `jet check` is a source check; it does not run `run: fn`. Add `--verbose` to see
 the check's scope and proof rows.
 
+### Typing `^` on a dead-key layout
+
+A signature marks a parameter the function writes with `^` (`count: ^Int`)
+and one it takes with `^^` (`item: ^^Item`). On a keyboard layout where `^`
+is a dead key (most European layouts, such as German, French and US
+International), `^` waits for the next letter and combines with it, so
+`^Int` arrives as `Înt` and `^self` as `ŝelf`. Type `^` then a space to get a
+plain `^`; `^^` is `^` space `^` space. Or switch to the layout's
+no-dead-keys variant, such as `de(nodeadkeys)` on Linux. When a composed
+letter slips through, `jet check` names the dead key and writes the `^`
+spelling in its fix.
+
 ## 6. Lesson 4: `test`
 
 Run the `#Test` block in the edited source file:

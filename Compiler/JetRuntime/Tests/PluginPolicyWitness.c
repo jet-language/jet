@@ -14,7 +14,7 @@ typedef struct { int64_t capacity,overflow; } Policy;
 _Static_assert(sizeof(Frame)==24 && offsetof(Frame,offset)==16,"PluginABI Frame");
 _Static_assert(sizeof(Fault)==24 && offsetof(Fault,frames)==16,"PluginABI Fault");
 _Static_assert(sizeof(Frames)==24 && offsetof(Frames,data)==16,"List24");
-_Static_assert(sizeof(Span)==16 && offsetof(Span,name)==8,"LogABI");
+_Static_assert(sizeof(Span)==16 && offsetof(Span,name)==8,"CoreLayoutABI LogSpan");
 _Static_assert(sizeof(Policy)==16,"AsyncPolicyABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);

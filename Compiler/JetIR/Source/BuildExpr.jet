@@ -2,7 +2,7 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 use {
-    jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BinOp, BodyNode, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, type_carrier_identity, StmtKind]
+    jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BinOp, BodyNode, COMPTIME_SITE_TRAIT, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, comptime_site_constant_key, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, type_carrier_identity, StmtKind]
     jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, core_identity_is, function_param_writes, ir_host_value_name, name_column_get, name_column_set, number_argument_value, symbol_key_names, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_PAYLOAD]
@@ -440,7 +440,7 @@ ir_stmt: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int) Never! {
 // Ends the guards and temporaries taken since `mark`, latest first: at the
 // end of a statement, or of an arm of a valued `if`, whose value is stored.
 // A temporary that closes closes before its drop.
-ir_release_statement_guards: fn(m: ^IRModule, b: ^IRBuilder, mark: Int) Never! {
+ir_release_statement_guards: fn(m: IRModule, b: ^IRBuilder, mark: Int) Never! {
     loop b.statement_guards.len() > mark {
         guard: b.statement_guards.pop() ?? break
         if !ir_failed(b) {
@@ -1123,7 +1123,7 @@ ir_text_pair: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, local: TLocal, init:
 }
 
 // Whether a piece's text `receiver` and its separator `args` are Strings.
-ir_text_piece_types: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, args: [Int]) -> Bool Never! {
+ir_text_piece_types: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, receiver: Int, args: [Int]) -> Bool Never! {
     nodes := [Int]{receiver}
     loop arg in args -> nodes.push(arg)
     loop node in nodes {
@@ -1253,7 +1253,7 @@ ir_place_borrow_type: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, s
 // value is overwritten in place (its old value has ended); one whose value
 // moved out gets storage of its own here, as the moved value's storage may
 // still be its new holder's.
-ir_assign_aggregate: fn(m: ^IRModule, b: ^IRBuilder, slot: Int, value: Int, owns: Bool) Never! {
+ir_assign_aggregate: fn(m: IRModule, b: ^IRBuilder, slot: Int, value: Int, owns: Bool) Never! {
     ir_close_disarm(b, value)
     b.fresh[value] = false
     // `x = x` (or a block whose tail is `x`): the value is already in place.
@@ -2964,7 +2964,7 @@ ir_raw_address_of: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, place
 }
 
 // The address `address` as the raw address row `row`.
-ir_raw_address_result: fn(m: ^IRModule, b: ^IRBuilder, row: Int, address: Int) -> Int Never! {
+ir_raw_address_result: fn(m: IRModule, b: ^IRBuilder, row: Int, address: Int) -> Int Never! {
     result: ir_temp(m, b, row)
     ir_emit(b.f, IROp.Copy, result, address, -1, -1, b.line)
     result
@@ -3256,7 +3256,7 @@ ir_handle_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiv
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat -> true
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> true
         .TaskJoin | .TaskDetach -> true
-        .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynToText | .DynEqualUnordered | .SerdeEncode(_) | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
+        .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynToText | .DynEqualUnordered | .SerdeEncode(_) | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
     }
     if dedicated -> return ir_fail_slot(b, span, "handle method {ir_handle_op_name(operation)}")
     // to_text and equal_unordered on a Dyn cross the encoding.dyn data route
@@ -3264,7 +3264,7 @@ ir_handle_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiv
     data_symbol: if operation == {
         .DynToText | .JSONToText -> "jet_dyn_to_text"
         .DynEqualUnordered | .JSONEqualUnordered -> "jet_dyn_equal_unordered"
-        .Hardware(_) | .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> ""
+        .Hardware(_) | .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> ""
     }
     if data_symbol != "" {
         operands := [Int]{}
@@ -3306,7 +3306,7 @@ ir_handle_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiv
     }
     static_call: if operation == {
         .CursorOver | .ReaderOver(_) | .GameBackendHeadless -> true
-        .Hardware(_) | .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
+        .Hardware(_) | .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
     }
     inputs := [Int]{}
     if !static_call {
@@ -3588,7 +3588,7 @@ ir_overflow_opt: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, prefix:
 }
 
 // A constant of `like`'s type.
-ir_const_like: fn(m: ^IRModule, b: ^IRBuilder, like: Int, value: Int) -> Int Never! {
+ir_const_like: fn(m: IRModule, b: ^IRBuilder, like: Int, value: Int) -> Int Never! {
     slot: ir_temp_like(m, b, like)
     ir_emit(b.f, IROp.Const, slot, value, -1, -1, b.line)
     slot
@@ -3649,7 +3649,7 @@ ir_overflowed: fn(m: ^IRModule, b: ^IRBuilder, op: IROp, left: Int, right: Int, 
 }
 
 // flag = value / left != right (left is neither 0 nor -1).
-ir_product_check: fn(m: ^IRModule, b: ^IRBuilder, flag: Int, left: Int, right: Int, value: Int) Never! {
+ir_product_check: fn(m: IRModule, b: ^IRBuilder, flag: Int, left: Int, right: Int, value: Int) Never! {
     quotient: ir_temp_like(m, b, left)
     ir_emit(b.f, IROp.Div, quotient, value, left, IR_OVERFLOW_WRAP, b.line)
     ir_emit(b.f, IROp.Ne, flag, quotient, right, -1, b.line)
@@ -3784,7 +3784,7 @@ ir_rotate: fn(m: ^IRModule, b: ^IRBuilder, left_rotate: Bool, value: Int, count:
 }
 
 // `slot`'s word bits as a word of type row `row`.
-ir_copy_word: fn(m: ^IRModule, b: ^IRBuilder, slot: Int, row: Int) -> Int Never! {
+ir_copy_word: fn(m: IRModule, b: ^IRBuilder, slot: Int, row: Int) -> Int Never! {
     bits: ir_temp(m, b, row)
     ir_emit(b.f, IROp.Copy, bits, slot, -1, -1, b.line)
     bits
@@ -4279,7 +4279,7 @@ ir_list_clear_in_place: fn(m: ^IRModule, b: ^IRBuilder, header: Int, element: In
 
 // The List header at `header` ends and becomes the empty List (`zero` is the
 // word 0).
-ir_list_replace_empty: fn(m: ^IRModule, b: ^IRBuilder, header: Int, zero: Int) Never! {
+ir_list_replace_empty: fn(m: IRModule, b: ^IRBuilder, header: Int, zero: Int) Never! {
     if ir_has_drop(m, b, header) -> ir_emit(b.f, IROp.Drop, -1, header, -1, -1, b.line)
     loop offset in ([Int]{0, 8, 16}) -> ir_emit(b.f, IROp.Store, -1, header, offset, zero, b.line)
 }
@@ -4429,7 +4429,7 @@ ir_print_pieces: fn(m: ^IRModule, b: ^IRBuilder, pieces: [IRStringPiece]) Never!
 // callee's executable return type.
 ir_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: String, type_args: [Type], receiver: Int, receiver_backs: [IRWriteBack], args: [BodyCallArg], span: Span) -> Int Never! {
     if ir_intrinsic_of(p, key) == .Val(intrinsic) {
-        return ir_intrinsic_call(m, p, b, intrinsic, type_args, args, span)
+        return ir_intrinsic_call(m, p, b, intrinsic, key, type_args, args, span)
     }
     if ir_foreign_of(p, key) == .Val(foreign) -> return ir_foreign_call(m, p, b, foreign, args, span)
     row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "call of a function outside the checked program: {key}")
@@ -4442,7 +4442,7 @@ ir_call_decl: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, callee: DeclID, type
     row: ir_decl_row(p, callee)
     if row >= 0 && p.intrinsics.values.len() > 0 {
         if ir_intrinsic_of(p, p.functions[row].key) == .Val(intrinsic) {
-            return ir_intrinsic_call(m, p, b, intrinsic, type_args, args, span)
+            return ir_intrinsic_call(m, p, b, intrinsic, p.functions[row].key, type_args, args, span)
         }
     }
     foreign: ir_decl_foreign(p, callee)
@@ -4606,9 +4606,8 @@ ir_call_row_emit: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_a
         callee = ir_function_row_id(m, p, row, type_args) ?? return ir_fail_slot(b, span, "call of {p.functions[row].key}")
     }
     dst := -1
-    declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, type_args, written, span)) else -> Type?{None}
+    returned: ir_call_return(p, b, row, type_args, span)
     if ir_failed(b) -> return -1
-    returned: ir_executable_return_in(p.functions[row], declared) ?? Type.Named{name: "Unit"}
     if !ir_unit_type(returned) {
         result: ir_value_type(m, p, returned) ?? return ir_type_fail(b, span, returned)
         dst = ir_fresh_temp(m, b, result)
@@ -5459,13 +5458,21 @@ ir_type_test_holds: fn(p: IRProgram, b: IRBuilder, subject: Type, target: Type) 
     type_carrier_identity(concrete) == type_carrier_identity(target)
 }
 
-// Whether `condition` is a type-table test, and whether it holds in the
-// instance being built (None: an ordinary run-time condition).
+// Whether `condition` is a type-table test, or the value of a compile-time
+// site of a generic body, and whether it holds in the instance being built
+// (None: an ordinary run-time condition). A site's value is the program's
+// row for this instance (comptime_site_constant_key); the arm it does not
+// take is never built, so a read only that arm makes has no row.
 ir_folded_type_test: fn(p: IRProgram, b: IRBuilder, condition: BodyIfCond) -> Bool? Never! {
     if condition == .Plain(value) {
         node: ir_body_node(p, b, value)
         if node.kind == .TypeTest(subject, target) {
             return Val(ir_type_test_holds(p, b, subject, target))
+        }
+        if node.kind == .TraitConst(owner, trait_name, name) && trait_name == COMPTIME_SITE_TRAIT {
+            concrete: ir_fact_type(p, b, owner) ?? return None
+            row: ir_constant_row(p, comptime_site_constant_key(name, ir_untag(concrete))) ?? return None
+            if p.constant_defs[row].value == .Bool(holds) -> return Val(holds)
         }
     }
     None
@@ -6624,13 +6631,13 @@ ir_lent_payload: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, row: 
 }
 
 // Whether `payload` is a value another holder keeps: a carrier holds it lent.
-ir_keeps_holder: fn(m: ^IRModule, b: ^IRBuilder, payload: Int) -> Bool Never! {
+ir_keeps_holder: fn(m: IRModule, b: IRBuilder, payload: Int) -> Bool Never! {
     payload >= 0 && !b.fresh[payload] && ir_has_drop(m, b, payload)
 }
 
 // `boxed`, a new box of `box_bytes` bytes holding the lent `payload` (row
 // `row`) at `offset`, ends after the call (ir_box_lends_end).
-ir_lend_box: fn(m: ^IRModule, b: ^IRBuilder, boxed: Int, box_bytes: Int, payload: Int, row: Int, offset: Int, lends: ^[IRBoxLend]) -> Int Never! {
+ir_lend_box: fn(m: IRModule, b: ^IRBuilder, boxed: Int, box_bytes: Int, payload: Int, row: Int, offset: Int, lends: ^[IRBoxLend]) -> Int Never! {
     ir_store_lent(m, b, boxed, offset, payload, row)
     lends.push(IRBoxLend{boxed: boxed, box_bytes: box_bytes, wrapper: -1, wrapper_bytes: 0, row: row, offset: offset})
     b.fresh[boxed] = false
@@ -9794,7 +9801,7 @@ ir_stop: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ordinal: Int, message: In
 // `panic`'s: the visible Int, Float and Bool variables, the latest of each
 // name, sorted by name. `_`, the compiler's `__` names and its unnamed
 // entries (a `defer`, a held temporary) are not the program's locals.
-ir_frame_stop_locals: fn(m: ^IRModule, p: IRProgram, b: IRBuilder) -> [Int] Never! {
+ir_frame_stop_locals: fn(m: IRModule, p: IRProgram, b: IRBuilder) -> [Int] Never! {
     rows := [Int]{}
     // The latest bindings of the names that are not reported, sorted by
     // name too: they hide the earlier bindings of their names.

@@ -1562,7 +1562,6 @@ ir_x64_inline_route: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
 // jet_int_owned_from_i64(word) into `dst`: a word inside the inline range is
 // its own exact Int, so only a wider one takes the runtime call, in a slow
 // path. A constant word is tested too, since it may lie outside that range.
-// `value` may be a Float, whose bits are the word (ir_x64_to_bits).
 ir_x64_word_int: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, value: Int, dst: Int) Never! {
     sites := [Int]{}
     ir_x64_load(e, m, f, al, value, X64_RAX)
@@ -1574,44 +1573,6 @@ ir_x64_word_int: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
     cold.left = value
     cold.dst = dst
     e.colds.push(cold)
-}
-
-// to_bits(x) of a Float (jet_std_math_to_bits, which is
-// jet_int_owned_from_i64 of x's bits): one movq of the bits into a general
-// register, which is the Int when it lies in the inline range; wider bits
-// (a Float of magnitude 2 or more) take the runtime's boxing in a slow
-// path. False when the call is not of that shape.
-ir_x64_to_bits: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
-    dst: f.dst[at]
-    value: f.args[f.b[at]]
-    if ir_x64_type(m, f, value).kind != .Float || ir_x64_slot_class(m, f, dst) != .General {
-        return false
-    }
-    ir_x64_word_int(e, m, f, al, value, dst)
-    true
-}
-
-// from_bits(bits) of an Int (jet_std_math_from_bits): an inline Int's word
-// is the Float's bits, one movq into its xmm register (or a store to its
-// home); a big one takes the runtime call, which reads its low 64 bits, in
-// a slow path. False when the call is not of that shape.
-ir_x64_from_bits: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
-    dst: f.dst[at]
-    value: f.args[f.b[at]]
-    if ir_x64_type(m, f, dst).kind != .Float || ir_x64_slot_class(m, f, value) != .General {
-        return false
-    }
-    sites := [Int]{}
-    reg: ir_x64_use(e, m, f, al, value, X64_RAX)
-    ir_x64_operand_test(e, al, value, reg, sites)
-    ir_x64_store(e, m, f, al, dst, reg)
-    if sites.is_empty() -> return true
-    cold := ir_x64_cold(IRX64ColdKind.Call, sites)
-    cold.resume = e.code.bytes.len()
-    cold.symbol = "jet_std_math_from_bits"
-    cold.left = at
-    e.colds.push(cold)
-    true
 }
 
 // Float{n} of an exact Int (jet_int_checked_widen(value, f32, file, line),
@@ -4353,12 +4314,6 @@ ir_x64_select: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                     ir_x64_word_int(e, m, f, al, f.args[f.b[at]], dst)
                     e.routed = at
                 }
-                leaf && symbol == "jet_std_math_to_bits" && ir_x64_to_bits(e, m, f, al, at) -> {
-                    e.routed = at
-                }
-                leaf && symbol == "jet_std_math_from_bits" && ir_x64_from_bits(e, m, f, al, at) -> {
-                    e.routed = at
-                }
                 symbol == "jet_int_checked_widen" && ir_x64_checked_widen(e, m, f, al, at) -> {
                     e.routed = at
                 }
@@ -5909,7 +5864,7 @@ IR_X64_WRAP_REGISTERS: [Int]{6, 2, 8, 9, 7}
 // written value's IR_X64_WRAP_REGISTERS one, free again past the value's
 // last read, -1 for none). Returns its length, 0 for none (an aggregate
 // result, a fourth General argument in rcx, too few registers).
-ir_x64_wrap: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, regs: ^[Int]) -> Int Never! {
+ir_x64_wrap: fn(e: IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, regs: ^[Int]) -> Int Never! {
     if al.result_home != 0 || al.result_storage >= 0 -> return 0
     count: f.slot_type.len()
     fused := [Bool]{}
@@ -7349,74 +7304,50 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     }
 }
 
-// conv(x) is to_bits(x) of a Float, from_bits(x) of an Int or Float{x} of an
-// exact Int (jet_int_checked_widen, f64): the hot path converts inline (a
-// movq behind an inline Int's test, or a cvtsi2sd behind the test that x
-// lies in -2^53..<2^53: sar rdx, 53; add rdx, 1; cmp rdx, 1; ja), whose
-// jump lands on the slow path holding the one runtime call.
-#Test("Float bits and an exact Int's widening run inline, the runtime call their slow path") {
-    loop shape in 0..<3 {
-        m := ir_module_new()
-        float: ir_scalar_type_row(m, Type.Float)
-        int_row: ir_scalar_type_row(m, Type.Int)
-        flag: ir_scalar_type_row(m, Type.Bool)
-        text: ir_scalar_type_row(m, Type.String)
-        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
-        symbol: if shape == {
-            0 -> "jet_std_math_to_bits"
-            1 -> "jet_std_math_from_bits"
-            else -> "jet_int_checked_widen"
-        }
-        f := ir_function_new("conv", "test:bits.jet.conv", "", "bits.jet", 1)
-        x: ir_slot(f, if shape == 0 -> float else -> int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
-        f.result = if shape == 0 -> int_row else -> float
-        result: ir_slot(f, f.result, IRSlotKind.Temp, -1, 0)
-        operands := [Int]{x}
-        if shape == 2 {
-            single: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
-            _ := ir_emit(f, IROp.Const, single, 0, -1, -1, 2)
-            file: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
-            _ := ir_emit(f, IROp.ConstText, file, ir_intern_text(m, "bits.jet"), -1, -1, 2)
-            line: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-            _ := ir_emit(f, IROp.Const, line, 2, -1, -1, 2)
-            operands.push(single)
-            operands.push(file)
-            operands.push(line)
-        }
-        args: ir_args(f, operands)
-        _ := ir_emit(f, IROp.CallRuntime, result, ir_intern_name(m, symbol), args, operands.len(), 2)
-        _ := ir_emit(f, IROp.Return, -1, result, -1, -1, 2)
-        m.functions.push(f)
-        compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0).function
-        code: compiled.code
-        // to_bits boxes a wide word through jet_int_owned_from_i64.
-        boxed: if shape == 0 -> "jet_int_owned_from_i64" else -> symbol
-        calls := [Int]{}
-        soft := 0
-        loop reloc in compiled.relocs {
-            if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == boxed -> calls.push(reloc.at)
-            if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == "jet_std_math_to_bits" -> soft += 1
-        }
-        assert_eq(calls.len(), 1)
-        assert_eq(soft, 0)
-        // add rdx, rdx (an inline Int's test), or the range test.
-        test: if shape == 2 -> [U8]{0x48, 0xc1, 0xfa, 0x35, 0x48, 0x83, 0xc2, 0x01, 0x48, 0x83, 0xfa, 0x01} else -> [U8]{0x48, 0x01, 0xd2}
-        at: ir_x64_code_find(code, test, 0)
-        assert(at >= 0 && at < calls[0])
-        jump: at + test.len()
-        assert((code[jump] == 0x0f && (code[jump + 1] == 0x80 || code[jump + 1] == 0x87)) || code[jump] == 0x70 || code[jump] == 0x77)
-        slow: ir_x64_test_jcc_target(code, jump)
-        assert(slow > jump && slow < calls[0])
-        // movq to a general register (0f 7e), movq to an xmm register (0f
-        // 6e) or cvtsi2sd (0f 2a), between the test and the slow path.
-        convert: if shape == {
-            0 -> [U8]{0x0f, 0x7e}
-            1 -> [U8]{0x0f, 0x6e}
-            else -> [U8]{0x0f, 0x2a}
-        }
-        moved: ir_x64_code_find(code, convert, if shape == 0 -> 0 else -> jump)
-        assert(moved >= 0 && moved < slow)
+// conv(x) is Float{x} of an exact Int (jet_int_checked_widen, f64): the hot
+// path converts inline (a cvtsi2sd behind the test that x lies in
+// -2^53..<2^53: sar rdx, 53; add rdx, 1; cmp rdx, 1; ja), whose jump lands on
+// the slow path holding the one runtime call.
+#Test("An exact Int's widening runs inline, the runtime call its slow path") {
+    m := ir_module_new()
+    float: ir_scalar_type_row(m, Type.Float)
+    int_row: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
+    text: ir_scalar_type_row(m, Type.String)
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    symbol: "jet_int_checked_widen"
+    f := ir_function_new("conv", "test:bits.jet.conv", "", "bits.jet", 1)
+    x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    f.result = float
+    result: ir_slot(f, f.result, IRSlotKind.Temp, -1, 0)
+    single: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, single, 0, -1, -1, 2)
+    file: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.ConstText, file, ir_intern_text(m, "bits.jet"), -1, -1, 2)
+    line: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, line, 2, -1, -1, 2)
+    operands: [Int]{x, single, file, line}
+    args: ir_args(f, operands)
+    _ := ir_emit(f, IROp.CallRuntime, result, ir_intern_name(m, symbol), args, operands.len(), 2)
+    _ := ir_emit(f, IROp.Return, -1, result, -1, -1, 2)
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0).function
+    code: compiled.code
+    calls := [Int]{}
+    loop reloc in compiled.relocs {
+        if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == symbol -> calls.push(reloc.at)
     }
+    assert_eq(calls.len(), 1)
+    test: [U8]{0x48, 0xc1, 0xfa, 0x35, 0x48, 0x83, 0xc2, 0x01, 0x48, 0x83, 0xfa, 0x01}
+    at: ir_x64_code_find(code, test, 0)
+    assert(at >= 0 && at < calls[0])
+    jump: at + test.len()
+    assert((code[jump] == 0x0f && (code[jump + 1] == 0x80 || code[jump + 1] == 0x87)) || code[jump] == 0x70 || code[jump] == 0x77)
+    slow: ir_x64_test_jcc_target(code, jump)
+    assert(slow > jump && slow < calls[0])
+    // cvtsi2sd (0f 2a), between the test and the slow path.
+    moved: ir_x64_code_find(code, [U8]{0x0f, 0x2a}, jump)
+    assert(moved >= 0 && moved < slow)
 }
 
 // early(data): the word at data, returned at once when it is 0, else data

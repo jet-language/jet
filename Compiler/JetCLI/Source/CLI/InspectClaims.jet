@@ -3,13 +3,17 @@
 // comes from the newest `.jet/evidence` report of the target's current source,
 // against its package's `policy.claims.min`.
 use {
-    jet_foundation.[evidence_report_read, sha256_hex]
+    jet_foundation.[effect_vocabulary_view_count, evidence_report_read, sha256_hex]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_pkg_model.[JET_VERSION, ClaimsGrade, ClaimsProjection, ManifestError, PackageFacts, WorkspaceDeclarationCache]
     cli_files: core.files
     cli_sys: core.sys
     claims_crypto: core.crypto
 }
+
+// ClaimsGrade picks from EvidenceOutcome: a claims grade is the outcome its
+// evidence reached. `Examples` is a grade that example tests back.
+CLAIMS_GRADE_COUNT: #run effect_vocabulary_view_count("Jetpack/PackageModel/Source/Manifest/PackageFacts.jet", embed_file("toolchain:Jetpack/PackageModel/Source/Manifest/PackageFacts.jet"), "ClaimsGrade", "Compiler/JetFoundation/Source/Evidence/Evidence.jet", embed_file("toolchain:Compiler/JetFoundation/Source/Evidence/Evidence.jet"), "EvidenceOutcome", [String]{"Examples"})
 
 // The claims grade of one target: the strongest rung its newest evidence
 // report reaches, whether that report has failing evidence,

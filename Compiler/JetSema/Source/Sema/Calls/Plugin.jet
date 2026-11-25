@@ -3,7 +3,6 @@
 // immutable interface facts.
 use jet_foundation.[
     BodyHandleOp,
-    symbol_table_key,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -64,8 +63,8 @@ sema_plugin_literal_text: fn(value: TExpr) -> String? {
 // The compiler-owned plugin handle `ty` resolves to: `Plugin<identity>` gives
 // its identity, and the opaque `Plugin` of a load whose artifact the compiler
 // could not read gives "", which no interface carries.
-sema_plugin_handle_identity: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
-    resolved := sema_call_resolved_type(ty, environment, program)
+sema_plugin_handle_identity: fn(ty: Type, check: SemaBodyCheck) -> String? {
+    resolved := sema_call_resolved_type(ty, check.environment.*, check.program.*)
     identity := if resolved == {
         .Apply(name, args) -> if {
             name == "Plugin" && args.len() == 1 -> if args[0] == {
@@ -78,12 +77,12 @@ sema_plugin_handle_identity: fn(ty: Type, environment: SemaScopeEnvironment, pro
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
     value: identity ?? return None
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     // Snapshot: a lone program registers no compiler-owned Plugin handle.
     if graph.mode == .Snapshot -> return None
     // A source declaration named Plugin is never the compiler-owned loader
     // handle, even if it happens to use the same type application spelling.
-    if sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) != None {
+    if sema_type_resolve_nominal_row(graph, resolved, check.environment.module_identity) != None {
         return None
     }
     return Val(value)
@@ -93,52 +92,60 @@ sema_plugin_forbidden_component_name: fn(name: String) -> Bool Never! {
     name == "Dyn" || name == "JSON" || name == "Authority" || name == "Secret" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration"
 }
 
-sema_plugin_checked_type_definition: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, nominal: SemaRegistrationNominal) -> TTypeDef? {
-    row: sema_scope_checked_type_row(environment, program, module_identity, nominal.symbol.name) ?? return None
-    Val(program.checked_types[row])
+sema_plugin_checked_type_definition: fn(check: SemaBodyCheck, module_identity: ModuleID, nominal: SemaRegistrationNominal) -> TTypeDef? {
+    row: sema_scope_checked_type_row(check.environment.*, check.program.*, module_identity, nominal.symbol.name) ?? return None
+    Val(check.program.checked_types[row])
 }
 
-sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, seen: [String]) -> ComponentTypeDescriptor? {
+// One nominal a component descriptor is being built for: its row in the
+// graph, (module index << 32) | nominal row, at the type `shape` spells. A
+// descriptor that reaches a step it is already in is recursive and has none.
+SemaPluginDescriptorStep: struct {
+    nominal: Int,
+    shape: String,
+}
+
+sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck, ty: Type, seen: [SemaPluginDescriptorStep]) -> ComponentTypeDescriptor? {
     if ty == {
         .Int -> return Val(ComponentTypeDescriptor.Int)
         .Float -> return Val(ComponentTypeDescriptor.Float)
         .Bool -> return Val(ComponentTypeDescriptor.Bool)
         .String -> return Val(ComponentTypeDescriptor.String)
-        .List(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(fn(value) { ComponentTypeDescriptor.List{inner: value} })
-        .Option(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(fn(value) { ComponentTypeDescriptor.Option{inner: value} })
-        .FixedList(inner, _) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(fn(value) { ComponentTypeDescriptor.List{inner: value} })
-        .InlineRange(inner, _, _) | .Tagged(_, inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen)
+        .List(inner) -> return sema_plugin_component_descriptor(graph, check, inner, seen).map(fn(value) { ComponentTypeDescriptor.List{inner: value} })
+        .Option(inner) -> return sema_plugin_component_descriptor(graph, check, inner, seen).map(fn(value) { ComponentTypeDescriptor.Option{inner: value} })
+        .FixedList(inner, _) -> return sema_plugin_component_descriptor(graph, check, inner, seen).map(fn(value) { ComponentTypeDescriptor.List{inner: value} })
+        .InlineRange(inner, _, _) | .Tagged(_, inner) -> return sema_plugin_component_descriptor(graph, check, inner, seen)
         .Result(ok, err) -> {
-            ok_descriptor: sema_plugin_component_descriptor(graph, environment, program, ok, seen) ?? return None
-            err_descriptor: sema_plugin_component_descriptor(graph, environment, program, err, seen) ?? return None
+            ok_descriptor: sema_plugin_component_descriptor(graph, check, ok, seen) ?? return None
+            err_descriptor: sema_plugin_component_descriptor(graph, check, err, seen) ?? return None
             return Val(ComponentTypeDescriptor.Result{ok: ok_descriptor, err: err_descriptor})
         }
         .Named(name) | .Apply(name, _) -> {
             if sema_plugin_forbidden_component_name(name) -> return None
             loop codec in owned_trait_codec_names() {
-                if sema_type_bound_satisfied(graph, ty, codec, environment.module_identity) != (Val(true)) {
+                if sema_type_bound_satisfied(graph, ty, codec, check.environment.module_identity) != (Val(true)) {
                     return None
                 }
             }
-            nominal_row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+            nominal_row: sema_type_resolve_nominal_row(graph, ty, check.environment.module_identity) ?? return None
             nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-            definition: sema_plugin_checked_type_definition(environment, program, graph.modules[nominal_row.module_index].module_identity, nominal) ?? return None
+            definition: sema_plugin_checked_type_definition(check, graph.modules[nominal_row.module_index].module_identity, nominal) ?? return None
             type_args := if ty == {
                 .Apply(_, args) -> args
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
             }
             if type_args.len() != definition.generic_params.len() -> return None
-            key := "{symbol_table_key(graph.symbols, nominal.symbol.id)}|{type_name(ty)}"
+            step: SemaPluginDescriptorStep{nominal: (nominal_row.module_index << 32) | nominal_row.row, shape: type_name(ty)}
             loop prior in seen {
-                if prior == key -> return None
+                if prior.nominal == step.nominal && prior.shape == step.shape -> return None
             }
             next_seen := seen
-            next_seen.push(key)
+            next_seen.push(step)
             generic_names := (loop parameter in definition.generic_params -> parameter.name)
             if definition.kind == {
                 .Alias(target) -> {
                     specialized := sema_inference_substitute_type(target, generic_names, type_args)
-                    return sema_plugin_component_descriptor(graph, environment, program, specialized, next_seen)
+                    return sema_plugin_component_descriptor(graph, check, specialized, next_seen)
                 }
                 .Struct(fields, _) -> {
                     component_fields := [ComponentTypeField]{}
@@ -146,7 +153,7 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
                         field := fields[index]
                         if field.skip || field.computed -> next
                         field_type := sema_inference_substitute_type(field.ty, generic_names, type_args)
-                        descriptor: sema_plugin_component_descriptor(graph, environment, program, field_type, next_seen) ?? return None
+                        descriptor: sema_plugin_component_descriptor(graph, check, field_type, next_seen) ?? return None
                         component_fields.push(ComponentTypeField{index: index, name: field.shape_names.format_key("json") ?? field.name, ty: descriptor})
                     }
                     return Val(ComponentTypeDescriptor.Record{name: definition.name, fields: component_fields})
@@ -162,9 +169,9 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
 // each a scalar the runtime reads from the export's return area in Component
 // order, which the interface fact records as `order`: the field at position N
 // fills the member `order[N]`.
-sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, order: [String]) -> ComponentTypeDescriptor? {
+sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck, ty: Type, order: [String]) -> ComponentTypeDescriptor? {
     members: if ty == .Tuple(found) -> found else -> {
-        return sema_plugin_component_descriptor(graph, environment, program, ty, [String]{})
+        return sema_plugin_component_descriptor(graph, check, ty, [SemaPluginDescriptorStep]{})
     }
     if members.len() != order.len() -> return None
     fields := [ComponentTypeField]{}
@@ -174,7 +181,7 @@ sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, environment: Sem
                 break candidate
             }
         } ?? return None
-        descriptor: sema_plugin_component_descriptor(graph, environment, program, member.ty, [String]{}) ?? return None
+        descriptor: sema_plugin_component_descriptor(graph, check, member.ty, [SemaPluginDescriptorStep]{}) ?? return None
         if descriptor == {
             .Int | .Float | .Bool | .String -> fields.push(ComponentTypeField{index: index, name: name, ty: descriptor})
             .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) -> return None
@@ -202,13 +209,13 @@ sema_plugin_retired_method_diagnostic: fn(method: String, span: Span, diagnostic
     diagnostics.push(sema_error("E1257", span, "`Plugin.{method}` is not a plugin method", "plugin handles expose their Component's named function exports", "write the plugin's exported method directly, for example `plugin.index(rows)`"))
 }
 
-sema_plugin_record_exec: fn(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool Never! {
+sema_plugin_record_exec: fn(method: String, success: Type, span: Span, check: ^SemaBodyCheck) -> Bool Never! {
     result := Type.Result{ok: success, err: Type.Named{name: "PluginError"}}
     sema_effect_record_intrinsic_fact(
-        environment,
-        program,
-        scopes,
-        context,
+        check.environment.*,
+        check.program.*,
+        check.scopes,
+        check.context,
         "Plugin.{method}",
         span,
         SemaCallFacts{
@@ -218,7 +225,7 @@ sema_plugin_record_exec: fn(method: String, success: Type, span: Span, environme
             type_args: [Type]{},
             default_refs: [FunctionDefaultRef]{},
         },
-        diagnostics,
+        check.diagnostics,
     )
 }
 
@@ -231,12 +238,12 @@ sema_plugin_unsupported_export_diagnostic: fn(export: SemaPluginInterfaceExport,
 }
 
 sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, facts: SemaPluginInterfaceFacts, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    identity: sema_plugin_handle_identity(receiver_value.ty, check.environment.*, check.program.*) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    identity: sema_plugin_handle_identity(receiver_value.ty, check) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if method == "call" || method == "call_int" || method == "call_bool" || method == "call_text" {
-        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_plugin_retired_method_diagnostic(method, span, check.diagnostics)
@@ -245,7 +252,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     }
     interface := sema_plugin_interface_by_identity(facts, identity)
     interface_value: interface ?? {
-        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_plugin_method_diagnostic(method, None, span, check.diagnostics)
@@ -260,7 +267,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
         }
     }
     export_value: found_export ?? {
-        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_plugin_method_diagnostic(method, Val(interface_value), span, check.diagnostics)
@@ -268,7 +275,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if export_value.unsupported != "" {
-        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_plugin_unsupported_export_diagnostic(export_value, span, check.diagnostics)
@@ -279,7 +286,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     if export_value.return_type == .Val(value) {
         result_type = sema_call_resolved_type(value, check.environment.*, check.program.*)
     }
-    if !sema_plugin_record_exec(method, result_type, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_plugin_record_exec(method, result_type, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() != export_value.params.len() {
@@ -303,7 +310,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     loop index in 0..<export_value.params.len() {
         parameter := export_value.params[index]
         required := sema_type_resolve_declared(graph, parameter.ty, check.environment.module_identity)
-        descriptor := sema_plugin_component_descriptor(graph, check.environment.*, check.program.*, required, [String]{})
+        descriptor := sema_plugin_component_descriptor(graph, check, required, [SemaPluginDescriptorStep]{})
         if {
             descriptor == None -> {
                 sema_plugin_unsupported_component_diagnostic(export_value.name, required, checked_args[index].span, check.diagnostics)
@@ -334,7 +341,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     if export_value.return_type != None {
         result_type = sema_type_resolve_declared(graph, export_value.return_type ?? Type.Named{name: "Unit"}, check.environment.module_identity)
     }
-    result_descriptor := sema_plugin_result_descriptor(graph, check.environment.*, check.program.*, result_type, export_value.result_order)
+    result_descriptor := sema_plugin_result_descriptor(graph, check, result_type, export_value.result_order)
     if result_descriptor == None {
         sema_plugin_unsupported_component_diagnostic(export_value.name, result_type, span, check.diagnostics)
         supported = false
@@ -343,5 +350,5 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     signature := ComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
     result := Type.Result{ok: result_type, err: Type.Named{name: "PluginError"}}
     value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.PluginInvoke{export_name: export_value.name, signature: signature}, args: values}, span)
-    return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check.environment.*, check.program.*, check.context, check.diagnostics)}
+    return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
 }

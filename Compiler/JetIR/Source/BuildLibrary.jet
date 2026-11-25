@@ -91,6 +91,14 @@ IRRuntimeIntrinsic: enum {
     ContextTake,
     ContextGive,
     ContextRoom,
+    ChannelNew,
+    ChannelBounded,
+    TimerAfter,
+    EventWithPolicy,
+    HookNew,
+    DecisionHookNew,
+    AsyncEventNew,
+    IterProgress,
 }
 
 // The IEEE bits of a Float as an I64, and back.
@@ -110,6 +118,12 @@ IRRuntimeIntrinsic: enum {
 // memory sentry's account of a fresh and of a going OS mapping, a
 // region's reserve and release of fresh pages, and `context.allocator`'s
 // take, give and room of a block.
+// Core's core.tasks and core.event constructors (Build.jet
+// IR_CORE_INTRINSICS) at the type arguments of the call's result: a
+// channel's endpoint pair, unbounded or bounded, a timer Receiver, an Event
+// under a policy, a Hook, a DecisionHook and an AsyncEvent.
+// Core's core.term described progress source (Build.jet IR_CORE_INTRINSICS):
+// the runtime's progress Iter over the items, at their element type.
 
 IRIntrinsicShape: enum {
     FloatBits,
@@ -1224,19 +1238,25 @@ ir_f32_bits_signature: fn(function: FnBody, to_bits: Bool) -> Bool Never! {
     ir_i64_type(Val(input)) && ir_f32_type(ir_executable_return(function))
 }
 
-// A call of runtime intrinsic `intrinsic` at its instance `type_args`, built
-// as its operation. rt_static_text of a literal is the literal's immortal
-// String (the ConstText of its data row) as an I64; a bit cast stores its
-// operand in a frame word and loads it back in the other class; Core's Float
-// square root is IROp.Sqrt and its fma the runtime's fma call
-// (ir_float_fma); an address intrinsic is the FunctionAddress of its export;
-// rt_fault_print is a call of the fault report the linker writes; a core.mem
-// operation is its inline lowering (BuildRoutes.jet ir_core_list_leaf,
-// ir_core_stream_store, ir_core_region, BuildSentry.jet ir_core_volatile,
-// ir_core_mem_block, ir_core_list_append, ir_core_list_copy,
-// ir_core_alloc_raw and ir_core_free_raw, BuildExpr.jet ir_core_ptr_step and
-// ir_core_view_from_raw).
-ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRuntimeIntrinsic, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
+// A call of runtime intrinsic `intrinsic`, the function `callee`, at its
+// instance `type_args`, built as its operation. rt_static_text of a literal
+// is the literal's immortal String (the ConstText of its data row) as an
+// I64; a bit cast stores its operand in a frame word and loads it back in
+// the other class; Core's Float square root is IROp.Sqrt and its fma the
+// runtime's fma call (ir_float_fma); an address intrinsic is the
+// FunctionAddress of its export; rt_fault_print is a call of the fault
+// report the linker writes; a core.mem operation is its inline lowering
+// (BuildRoutes.jet ir_core_list_leaf, ir_core_stream_store, ir_core_region,
+// BuildSentry.jet ir_core_volatile, ir_core_mem_block, ir_core_list_append,
+// ir_core_list_copy, ir_core_alloc_raw and ir_core_free_raw, BuildExpr.jet
+// ir_core_ptr_step and ir_core_view_from_raw); a core.tasks or core.event
+// constructor is its provider call at the call's result type
+// (ir_intrinsic_result): BuildChannels.jet ir_channel_new and
+// ir_timer_after, BuildEvents.jet ir_event_with_policy, ir_hook_new,
+// ir_decision_hook_new and ir_async_event_new; a core.term described
+// progress source is its Iter route at that type (BuildLazy.jet
+// ir_lazy_progress).
+ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRuntimeIntrinsic, callee: String, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
     if intrinsic == {
@@ -1265,7 +1285,46 @@ ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRu
         .Mapped | .Unmapping -> ir_core_mapping(m, p, b, intrinsic == IRRuntimeIntrinsic.Mapped, ir_intrinsic_nodes(args), span)
         .RegionReserve | .RegionRelease -> ir_core_region(m, p, b, intrinsic, ir_intrinsic_nodes(args), span)
         .ContextTake | .ContextGive | .ContextRoom -> ir_core_context_block(m, p, b, intrinsic, ir_intrinsic_nodes(args), span)
+        .ChannelNew | .ChannelBounded -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_channel_new(m, p, b, result_ty, intrinsic == IRRuntimeIntrinsic.ChannelBounded, ir_intrinsic_nodes(args), span)
+        }
+        .TimerAfter -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_timer_after(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
+        }
+        .EventWithPolicy -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_event_with_policy(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
+        }
+        .HookNew -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_hook_new(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
+        }
+        .DecisionHookNew -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_decision_hook_new(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
+        }
+        .AsyncEventNew -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_async_event_new(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
+        }
+        .IterProgress -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_lazy_progress(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
+        }
     }
+}
+
+// The type a call of intrinsic function `callee` at `type_args` produces
+// (ir_call_return); Unit, with the body failed, when `callee` is outside
+// the checked program.
+ir_intrinsic_result: fn(p: IRProgram, b: ^IRBuilder, callee: String, type_args: [Type], span: Span) -> Type Never! {
+    row: ir_function_row(p, callee) ?? {
+        _: ir_fail_slot(b, span, "call of a function outside the checked program: {callee}")
+        return Type.Named{name: "Unit"}
+    }
+    ir_call_return(p, b, row, type_args, span)
 }
 
 // The argument expression nodes of an intrinsic call, in order.

@@ -95,22 +95,24 @@ sema_serde_lack_why: fn(lacking: String, shown: String) -> String Never! {
 // The type on `ty`'s path with no `direction` codec, innermost first: an
 // element, a map value, a union member or a type argument that has none,
 // else `ty` itself. None when `ty` has the codec.
-sema_serde_lack: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> SemaSerdeLack? Never! {
-    if sema_serde_type_is_admissible(environment, program, ty, direction) -> return None
+sema_serde_lack: fn(check: SemaBodyCheck, ty: Type, direction: SemaSerdeDirection) -> SemaSerdeLack? Never! {
+    if sema_serde_type_is_admissible(check.environment.*, check.program.*, ty, direction) {
+        return None
+    }
     inner: if ty == {
-        .List(element) | .Option(element) | .Shared(element) | .FixedList(element, _) -> sema_serde_lack(environment, program, element, direction)
-        .Map(key, _, value) -> if key == Type.String -> sema_serde_lack(environment, program, value, direction) else -> None
-        .Union(members) -> sema_serde_lack_first(environment, program, members, direction)
-        .Apply(_, args) -> sema_serde_lack_first(environment, program, args, direction)
+        .List(element) | .Option(element) | .Shared(element) | .FixedList(element, _) -> sema_serde_lack(check, element, direction)
+        .Map(key, _, value) -> if key == Type.String -> sema_serde_lack(check, value, direction) else -> None
+        .Union(members) -> sema_serde_lack_first(check, members, direction)
+        .Apply(_, args) -> sema_serde_lack_first(check, args, direction)
         .Int | .Float | .Bool | .String | .Char | .Named(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
-    found: inner ?? return Val(sema_serde_lack_of(environment, program, ty, direction))
+    found: inner ?? return Val(sema_serde_lack_of(check, ty, direction))
     Val(found)
 }
 
-sema_serde_lack_first: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, types: [Type], direction: SemaSerdeDirection) -> SemaSerdeLack? Never! {
+sema_serde_lack_first: fn(check: SemaBodyCheck, types: [Type], direction: SemaSerdeDirection) -> SemaSerdeLack? Never! {
     loop ty in types {
-        lack: sema_serde_lack(environment, program, ty, direction) ?? next
+        lack: sema_serde_lack(check, ty, direction) ?? next
         return Val(lack)
     }
     None
@@ -119,10 +121,10 @@ sema_serde_lack_first: fn(environment: SemaScopeEnvironment, program: SemaProgra
 // `ty` itself has no `direction` codec. A distinct type codes as its base:
 // when the base has one the type was refused one, otherwise the fix is the
 // base's.
-sema_serde_lack_of: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> SemaSerdeLack Never! {
+sema_serde_lack_of: fn(check: SemaBodyCheck, ty: Type, direction: SemaSerdeDirection) -> SemaSerdeLack Never! {
     shown: sema_type_show_quoted(ty)
-    if ty == .Named(name) && sema_serde_type_definition(environment, program, name) == .Val(definition) && definition.kind == .Distinct(base, _) {
-        fix: if sema_serde_type_is_admissible(environment, program, base, direction) -> sema_serde_distinct_wire_fix(shown, direction) else -> sema_serde_distinct_base_wire_fix(shown, sema_type_show_quoted(base))
+    if ty == .Named(name) && sema_serde_type_definition(check.environment.*, check.program.*, name) == .Val(definition) && definition.kind == .Distinct(base, _) {
+        fix: if sema_serde_type_is_admissible(check.environment.*, check.program.*, base, direction) -> sema_serde_distinct_wire_fix(shown, direction) else -> sema_serde_distinct_base_wire_fix(shown, sema_type_show_quoted(base))
         return SemaSerdeLack{shown: shown, fix: fix}
     }
     fix: sema_serde_wire_fix(shown, direction)
@@ -269,15 +271,15 @@ sema_serde_type_is_admissible: fn(environment: SemaScopeEnvironment, program: Se
 // Whether `ty` has the storage codec in `direction` (`value.encode_stored()`,
 // `tree.decode_stored<T>()`): what has the wire codec, and `#Secret T` when T
 // has it.
-sema_serde_stored_is_admissible: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
+sema_serde_stored_is_admissible: fn(check: SemaBodyCheck, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
     if ty == .Tagged(marker, inner) {
         if marker == .User(name) {
             if name == "Secret" {
-                return sema_serde_type_is_admissible(environment, program, inner, direction)
+                return sema_serde_type_is_admissible(check.environment.*, check.program.*, inner, direction)
             }
         }
     }
-    sema_serde_type_is_admissible(environment, program, ty, direction)
+    sema_serde_type_is_admissible(check.environment.*, check.program.*, ty, direction)
 }
 
 // Whether `ty`, as module `module_identity` names it, has the `direction`

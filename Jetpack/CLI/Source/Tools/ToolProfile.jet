@@ -305,7 +305,7 @@ cli_disk_file_bytes: fn(path: String, excluded: String?) -[FS]> Int CLIError! {
 // Write a new generation for `tools` (projecting bins, recording metadata
 // and its witness, rooting targets) and publish it. A generation that never
 // completed is removed on failure.
-cli_write_tool_generation_locked: fn(verification: ^StoreVerification, tools: [InstalledUserTool], live: ^^ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
+cli_write_tool_generation_locked: fn(verification: StoreVerification, tools: [InstalledUserTool], live: ^^ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
     generation: cli_tool_next_generation()
     generation_dir: cli_tool_generation_dir(generation)
     files.create_dir_all(generation_dir)
@@ -320,7 +320,7 @@ cli_write_tool_generation_locked: fn(verification: ^StoreVerification, tools: [I
     }
 }
 
-cli_tool_write_generation_body: fn(verification: ^StoreVerification, generation: Int, generation_dir: String, tools: [InstalledUserTool], live: ^^ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
+cli_tool_write_generation_body: fn(verification: StoreVerification, generation: Int, generation_dir: String, tools: [InstalledUserTool], live: ^^ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
     generation_tools := tools
     cli_materialize_generation_bins(verification, generation_dir, generation_tools, live)
     meta: cli_format_tool_generation_meta(generation, generation_tools)
@@ -342,7 +342,7 @@ cli_tool_write_generation_body: fn(verification: ^StoreVerification, generation:
 }
 
 // Reactivate an existing complete generation.
-cli_activate_tool_generation_locked: fn(verification: ^StoreVerification, generation: Int) -[FS, Env, Time]> CLIError! {
+cli_activate_tool_generation_locked: fn(verification: StoreVerification, generation: Int) -[FS, Env, Time]> CLIError! {
     record: cli_read_tool_generation_record(generation)
     cli_validate_generation_bins(verification, generation, record.tools)
     if record.tools.len() > 0 {
@@ -353,7 +353,7 @@ cli_activate_tool_generation_locked: fn(verification: ^StoreVerification, genera
 
 // Prepare, then commit, one Store root per store authority so no target of
 // this generation can be collected while it is reachable.
-cli_ensure_tool_generation_roots: fn(verification: ^StoreVerification, generation: Int, tools: [InstalledUserTool], witness: String) -[FS, Env, Time]> CLIError! {
+cli_ensure_tool_generation_roots: fn(verification: StoreVerification, generation: Int, tools: [InstalledUserTool], witness: String) -[FS, Env, Time]> CLIError! {
     authorities := [String:[String]]{}
     loop tool in tools {
         cli_profile_validate_digest(tool.output_hash)
@@ -429,7 +429,7 @@ cli_publish_tool_generation: fn(generation: Int, witness: String, tools: [Instal
 // Remove abandoned partial pointers and projection staging, migrate legacy
 // generations, revalidate and re-root every complete generation, and
 // republish the requested (or newest complete) generation.
-cli_recover_tool_profile_state: fn(verification: ^StoreVerification) -[FS, Env, Exec, Time, Rand]> CLIError! {
+cli_recover_tool_profile_state: fn(verification: StoreVerification) -[FS, Env, Exec, Time, Rand]> CLIError! {
     files.create_dir_all(cli_tools_state_dir())
     partials: [String]{TOOL_PROFILE_POINTER_PARTIAL, TOOL_PROFILE_CURRENT_PARTIAL, TOOL_MANIFEST_PARTIAL}
     loop name in partials {
@@ -492,7 +492,7 @@ LegacyToolGeneration: struct {
 
 // Rewrite every complete legacy generation into the canonical schema (unless
 // an equal canonical generation exists) and archive the legacy directory.
-cli_migrate_legacy_tool_generations_locked: fn(verification: ^StoreVerification) -[FS, Env, Exec, Time, Rand]> CLIError! {
+cli_migrate_legacy_tool_generations_locked: fn(verification: StoreVerification) -[FS, Env, Exec, Time, Rand]> CLIError! {
     if !files.is_dir(cli_tool_generations_dir()) {
         return
     }
@@ -539,7 +539,7 @@ cli_migrate_legacy_tool_generations_locked: fn(verification: ^StoreVerification)
 }
 
 // Whether a readable canonical generation already records `legacy`'s tools.
-cli_canonical_tool_generation_matches: fn(verification: ^StoreVerification, legacy: [InstalledUserTool]) -[FS, Env, Time]> Bool CLIError! {
+cli_canonical_tool_generation_matches: fn(verification: StoreVerification, legacy: [InstalledUserTool]) -[FS, Env, Time]> Bool CLIError! {
     loop entry in files.list_dir(cli_tool_generations_dir()) {
         generation: cli_parse_u64(entry.name) ?? next
         record: cli_read_tool_generation_record(generation) ?? next
@@ -558,7 +558,7 @@ cli_canonical_tool_generation_matches: fn(verification: ^StoreVerification, lega
 
 // A legacy `meta.json`: tools point at absolute targets inside one verified
 // Store authority, from which the executable member names are recovered.
-cli_parse_legacy_tool_generation_meta: fn(verification: ^StoreVerification, text: String, expected_generation: Int) -[FS, Env, Time]> [InstalledUserTool] CLIError! {
+cli_parse_legacy_tool_generation_meta: fn(verification: StoreVerification, text: String, expected_generation: Int) -[FS, Env, Time]> [InstalledUserTool] CLIError! {
     root: pkg_json_object(cli_json_parse(text)) ?? return Err(CLIError.Other("legacy profile metadata root is not an object"))
     cli_json_expect_exact_keys(root, [String]{"created_at", "generation", "profile", "tools"}, "legacy profile metadata")
     profile: cli_json_string_field(root, "profile")

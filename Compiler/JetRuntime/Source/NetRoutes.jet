@@ -1,6 +1,10 @@
 // Native providers for Core.net's private TCP leaves. Stream64/Listener8 own
 // FD72, Socket56 is borrowed, and error results own the canonical NetError
 // carrier. Nonblocking syscalls use HostSockets and the shared native poller.
+// An Int a route lends (a port, ttl or millisecond timeout) is its exact-Int
+// carrier, read saturated (Int.jet int_saturated): one beyond I64 meets the
+// same range refusal as I64.MIN or I64.MAX, and a timeout above I64.MAX
+// milliseconds waits as long as I64.MAX does.
 
 // musl's inet_pton over the NUL-terminated `text`: 1 when it is the family's
 // strict form (AF_INET 2: the dotted quad, no leading zeros; AF_INET6 10: the
@@ -119,7 +123,7 @@ net_route_detail_take: fn(operation: I64, address: I64, message: I64, code: I64)
     net_put(value, NET_DETAIL_ADDRESS, net_optional_text_clone(address))
     net_put(value, NET_DETAIL_NAME, I64{0})
     net_put(value, NET_DETAIL_MESSAGE, message)
-    net_put(value, NET_DETAIL_OS_PRESENT, if (code != I64{0}) -> I64{1} else -> I64{0})
+    net_put(value, NET_DETAIL_OS_CODE_PRESENT, if (code != I64{0}) -> I64{1} else -> I64{0})
     net_put(value, NET_DETAIL_OS_CODE, code)
     value
 }
@@ -516,7 +520,7 @@ net_route_connect_one: fn(address: I64, output: I64, error: I64) -> I64 {
 #Export(c) jet_net_tcp_connect_timeout: fn(address: I64, milliseconds: I64, output: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    duration: milliseconds
+    duration: int_saturated(milliseconds)
     operation: rt_static_text("tcp connect")
     if (duration < I64{0}) {
         text: net_route_socket_text(address)
@@ -593,7 +597,7 @@ net_route_option_get: fn(stream: I64, operation: I64, level: I64, option: I64, o
     if flag {
         // `output` lends the C ABI bool result byte, not an eight-byte word.
         rt_text_put(output, if (value != I64{0}) -> I64{1} else -> I64{0})
-    } else { net_put(output, I64{0}, value) }
+    } else { net_put(output, I64{0}, jet_int_owned_from_i64(value)) }
     I64{1}
 }
 
@@ -622,7 +626,7 @@ net_route_option_set: fn(stream: I64, operation: I64, level: I64, option: I64, v
 #Export(c) jet_net_set_ttl: fn(stream: I64, ttl: I64, error: I64) -> I64 {
     operation: rt_static_text("set tcp ttl")
     if !net_route_stream_open(stream, operation, error) -> return I64{0}
-    value: ttl
+    value: int_saturated(ttl)
     if (value < I64{0} || value > I64{4294967295}) {
         return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("ttl must fit u32")), I64{0}, error)
     }
@@ -642,15 +646,15 @@ net_route_set_timeout: fn(stream: I64, milliseconds: I64, directions: I64, opera
 }
 
 #Export(c) jet_net_set_timeout: fn(stream: I64, milliseconds: I64, error: I64) -> I64 {
-    net_route_set_timeout(stream, milliseconds, I64{3}, rt_static_text("set tcp timeout"), error)
+    net_route_set_timeout(stream, int_saturated(milliseconds), I64{3}, rt_static_text("set tcp timeout"), error)
 }
 
 #Export(c) jet_net_set_read_timeout: fn(stream: I64, milliseconds: I64, error: I64) -> I64 {
-    net_route_set_timeout(stream, milliseconds, I64{1}, rt_static_text("set tcp read timeout"), error)
+    net_route_set_timeout(stream, int_saturated(milliseconds), I64{1}, rt_static_text("set tcp read timeout"), error)
 }
 
 #Export(c) jet_net_set_write_timeout: fn(stream: I64, milliseconds: I64, error: I64) -> I64 {
-    net_route_set_timeout(stream, milliseconds, I64{2}, rt_static_text("set tcp write timeout"), error)
+    net_route_set_timeout(stream, int_saturated(milliseconds), I64{2}, rt_static_text("set tcp write timeout"), error)
 }
 
 net_route_socket_address: fn(holder: I64, listener: Bool, peer: Bool, output: I64, error: I64) -> I64 {
@@ -824,6 +828,13 @@ net_route_happy_race: fn(rows: I64, count: I64, output: I64, error: I64) -> I64 
 }
 
 #Export(c) jet_net_tcp_connect_happy: fn(host: I64, port: I64, milliseconds: I64, output: I64, error: I64) -> I64 {
+    net_tcp_connect_happy(host, int_saturated(port), int_saturated(milliseconds), output, error)
+}
+
+// jet_net_tcp_connect_happy over a native port and timeout, for runtime
+// callers (RouteWatcher.jet watch_port_ready); the export reads its lent
+// exact-Int carriers saturated first.
+net_tcp_connect_happy: fn(host: I64, port: I64, milliseconds: I64, output: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     operation: rt_static_text("tcp connect")

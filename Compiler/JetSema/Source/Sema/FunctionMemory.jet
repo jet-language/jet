@@ -61,7 +61,7 @@ SemaFunctionMemoryPlan: struct {
     functions: [SemaFunctionMemoryFunction],
     // Row position of the first function per `sema_function_memory_key`, so
     // every body check finds its row without scanning the whole plan.
-    positions: [String:Int],
+    positions: [SemaFunctionMemoryKey:Int],
     diagnostics: [Diagnostic],
     complete: Bool,
     // True when every function in the graph has no scoped-GC policy, no memory
@@ -115,11 +115,21 @@ SemaFunctionMemoryPolicy: struct {
 // A derived member keeps its `Prelude/Derives.jet` template span, which every
 // derived type shares, so the owner tells `Effect.equal` from `Route.equal`;
 // a `#loop` template declares one member per value at one span, so
-// the name tells `field_x` from `field_y` on the same owner. The integers lead,
-// the owner and name are identifiers and the module id ends the key, so no
-// two functions share one.
-sema_function_memory_key: fn(module_identity: ModuleID, owner: String, name: String, span: Span) -> String Never! {
-    "{span.start}:{span.end}:{owner}:{name}:{module_identity.id}"
+// the name tells `field_x` from `field_y` on the same owner.
+SemaFunctionMemoryKey: struct {
+    start: Int,
+    end: Int,
+    owner: String,
+    name: String,
+    module_identity: ModuleID,
+}
+
+sema_function_memory_key: fn(module_identity: ModuleID, owner: String, name: String, span: Span) -> SemaFunctionMemoryKey Never! {
+    SemaFunctionMemoryKey{start: span.start, end: span.end, owner: owner, name: name, module_identity: module_identity}
+}
+
+sema_function_memory_key_order: fn(left: SemaFunctionMemoryKey, right: SemaFunctionMemoryKey) -> Ordering Never! {
+    (left.start <=> right.start).then(left.end <=> right.end).then(left.owner <=> right.owner).then(left.name <=> right.name).then(left.module_identity.id <=> right.module_identity.id)
 }
 
 sema_function_memory_policy_declaration_equal: fn(left: PolicyDeclaration, right: PolicyDeclaration) -> Bool Never! {
@@ -445,7 +455,7 @@ sema_function_memory_walk_program: fn(program: Program, module_identity: ModuleI
 }
 
 sema_function_memory_plan_new: fn() -> SemaFunctionMemoryPlan Never! {
-    SemaFunctionMemoryPlan{functions: [SemaFunctionMemoryFunction]{}, positions: [String:Int]{}, diagnostics: [Diagnostic]{}, complete: true}
+    SemaFunctionMemoryPlan{functions: [SemaFunctionMemoryFunction]{}, positions: [SemaFunctionMemoryKey:Int]{}, diagnostics: [Diagnostic]{}, complete: true}
 }
 
 // The plan's rows for `sources`, in order: each policy ladder resolved, the
@@ -454,7 +464,7 @@ sema_function_memory_plan_new: fn() -> SemaFunctionMemoryPlan Never! {
 // scoped-GC fact, so it can neither promote nor take a transfer).
 sema_function_memory_plan_rows: fn(plan: ^SemaFunctionMemoryPlan, sources: [SemaFunctionMemorySource], limit: Int) -> SemaFunctionMemoryPlanned {
     planned := SemaFunctionMemoryPlanned{functions: [Func]{}, rows: [Int]{}, promoted: [String]{}, shared_rows: [Int:Bool]{}}
-    keys := [String]{}
+    keys := [SemaFunctionMemoryKey]{}
     loop (row, source) in sources {
         function_diagnostics := [Diagnostic]{}
         function_complete := true
@@ -497,9 +507,9 @@ sema_function_memory_plan_rows: fn(plan: ^SemaFunctionMemoryPlan, sources: [Sema
 // shared when a later row has the same key. The (key, row) pairs are sorted
 // once and the table filled in key order: a Map is a sorted list that every
 // out-of-order insert shifts.
-sema_function_memory_fill_positions: fn(plan: ^SemaFunctionMemoryPlan, planned: ^SemaFunctionMemoryPlanned, keys: [String]) Never! {
+sema_function_memory_fill_positions: fn(plan: ^SemaFunctionMemoryPlan, planned: ^SemaFunctionMemoryPlanned, keys: [SemaFunctionMemoryKey]) Never! {
     order := loop (row, key) in keys -> {key: key, row: row}
-    order.sort_by(fn(left: {key: String, row: Int}, right: {key: String, row: Int}) { (left.key <=> right.key).then(left.row <=> right.row) })
+    order.sort_by(fn(left: {key: SemaFunctionMemoryKey, row: Int}, right: {key: SemaFunctionMemoryKey, row: Int}) { sema_function_memory_key_order(left.key, right.key).then(left.row <=> right.row) })
     first := -1
     loop (position, entry) in order {
         if position > 0 && order[position - 1].key == entry.key {

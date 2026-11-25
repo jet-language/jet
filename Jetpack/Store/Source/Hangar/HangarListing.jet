@@ -95,7 +95,7 @@ store_inspect_leases: fn(roots: HangarRoots) -> LeaseInventory StoreError! {
 // Produce the audit projection without a lock, migration, journal replay, or
 // cleanup. A malformed object or committed closure cannot be omitted from a
 // successful report.
-store_audit_read_only: fn(verification: ^StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
+store_audit_read_only: fn(verification: StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
     graph: store_closure_graph_read_only(verification, roots)
     entries: store_list_read_only_checked(roots)
     known := [String:Bool]{}
@@ -161,13 +161,13 @@ store_sorted_record_ids: fn(graph: ClosureGraph) -> [String] Never! {
 // Listing is a checked engine boundary, not the model-only view: it runs the
 // same legacy closure migration used by verify, clean, and cache reuse so
 // every consumer observes one receipt-bearing projection.
-store_list_checked: fn(verification: ^StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
+store_list_checked: fn(verification: StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_list_checked_unlocked(verification, roots)
 }
 
 // `store_list_checked` for a caller that already holds the Hangar lock.
-store_list_checked_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
+store_list_checked_unlocked: fn(verification: StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
     _: store_migrate_closure_graph_unlocked(verification, roots)
     entries: store_list_unlocked(roots)
     healthy := [StoreEntry]{}
@@ -212,13 +212,13 @@ store_list_for_full_audit: fn(roots: HangarRoots) -> [StoreEntry] StoreError! {
 // Corrupt WAL fails closed as an empty list for compatibility with the
 // historical infallible listing API; integrity-sensitive callers use
 // `store_list_checked`.
-store_list: fn(verification: ^StoreVerification, roots: HangarRoots) -> [StoreEntry] Never! {
+store_list: fn(verification: StoreVerification, roots: HangarRoots) -> [StoreEntry] Never! {
     store_list_checked(verification, roots) ?? [StoreEntry]{}
 }
 
 // Recover every Hangar crash surface under one advisory-lock ownership
 // interval. The unlocked helpers are also used by already-locked operations.
-store_recover_hangar: fn(verification: ^StoreVerification, roots: HangarRoots) -> Int StoreError! {
+store_recover_hangar: fn(verification: StoreVerification, roots: HangarRoots) -> Int StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_ensure_real_directory(roots.hangar_dir(), "Hangar root")
     staging: AdmissionTransaction.recover_unlocked(roots)

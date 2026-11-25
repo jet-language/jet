@@ -63,6 +63,10 @@ LITERAL_KINDS: [String]{"core.regex.Regex", "core.process.Sh", "core.db.SQL", "c
 // scalar that several modules give methods has them all (with_scalar_owners).
 BUILTIN_SCALARS: [String]{"Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Float", "F32", "Bool", "String", "Char"}
 
+// The compiler's handle types that a Core module gives methods: a user names
+// each unqualified, and core.testing's `impl Test` gives `Test` its methods.
+BUILTIN_HANDLES: [String]{"Test"}
+
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
 
 // A host literal holds a Jet program when it declares a function or imports
@@ -958,7 +962,7 @@ initial_aliases: fn(table: Table, context: String) -> [String:String] Never! {
         if context != "" && table.units[index] == context {
             aliases[head.copy()] = "{context}.{head}"
         }
-        if head != table.names[index] && BUILTIN_SCALARS.contains(head) && !aliases.has_key(head) {
+        if head != table.names[index] && (BUILTIN_SCALARS.contains(head) || BUILTIN_HANDLES.contains(head)) && !aliases.has_key(head) {
             aliases[head.copy()] = "{table.units[index]}.{head}"
         }
     }

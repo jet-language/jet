@@ -4,7 +4,7 @@
 // source: every generated prompt reads `$JETPACK_PROMPT_LABEL` through a fixed
 // quoted print, so label contents stay data.
 use {
-    jet_foundation.[ENV_JETPACK_PROMPT_LABEL]
+    jet_foundation.[ENV_JETPACK_PROMPT_LABEL, effect_vocabulary_enum_names, effect_vocabulary_lowered]
     jetpack_foundation.[ACCENT_SGR, BORDER_SGR, ERROR_SGR, SUCCESS_SGR, WARN_SGR]
     jet_env_model.[PromptPathMode, PromptStripMode]
     files: core.files
@@ -88,6 +88,11 @@ ShellKind: enum {
         "{lines.join("\n")}\n"
     }
 }
+
+// The shells `jet env hook` names, read from ShellKind's cases in their order:
+// each case's lowercase name is the `binary` it runs and the word `parse`
+// takes, so the names a message lists cannot drift from the enum.
+SHELL_KIND_NAMES: #run effect_vocabulary_lowered(effect_vocabulary_enum_names("Shell/BrandedShell.jet", embed_file("BrandedShell.jet"), "ShellKind"))
 
 // The branded interactive-shell command a caller with its own outer process
 // appends after its own `--command` flag, so a shell entered outside

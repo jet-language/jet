@@ -3,7 +3,7 @@
 // checked results, then this boundary checks identity, authority and budgets.
 use {
     paused_json: core.encoding.json
-    jet_foundation.[foundation_json_escape, foundation_json_integer, sha256_hex]
+    jet_foundation.[effect_vocabulary_view_count, foundation_json_escape, foundation_json_integer, sha256_hex]
     jet_debug.[DebugAggregateKind, DebugValue]
 }
 
@@ -683,6 +683,10 @@ EvaluatorStatus: enum {
     Failed,
     Canceled,
 }
+
+// EvaluatorStatus picks from Core's JobQueueState: a paused evaluation ends
+// the way a job does.
+EVALUATOR_STATUS_COUNT: #run effect_vocabulary_view_count("PausedEvaluate.jet", embed_file("PausedEvaluate.jet"), "EvaluatorStatus", "Core/Jobs/Jobs.jet", embed_file("toolchain:Core/Jobs/Jobs.jet"), "JobQueueState", [String]{})
 
 ObservationFact: struct {
     event_id: String,

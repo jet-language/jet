@@ -14,6 +14,7 @@ use {
     builtin: jet_builtins
     ambient_random: core.math.random
     core.prelude.[min, max, clamp]
+    runtime_rt: jet.runtime.rt
 }
 
 // One `abs` for every Numeric type: Int, every sized integer, a `#Numeric`
@@ -28,7 +29,7 @@ use {
 }
 
 // `math.abs` on a Float (MathBuiltin `abs`) runs this.
-#Builtin.Role(.AbsFloat) abs_float: fn(n: Float) -> Float Never! { core.math.fabs(n) }
+#Builtin.Role(.AbsFloat) abs_float: fn(n: Float) -> Float Never! { fabs(n) }
 
 is_even: fn(n: Int) -> Bool Never! { n % 2 == 0 }
 
@@ -2245,7 +2246,7 @@ exp2: fn(n: Float) -> Float Never! {
     }
     // 2^x rounds to 1 for |x| <= 2^-53.47
     if ax <= 0x3C97_1547_652B_82FE -> return Float{1.0} + copysign(Float{5.551115123125783e-17}, n)
-    whole: core.math.floor(n) == n
+    whole: float_floor(n) == n
     sx: Float{4096.0} * n
     fx: round_ties_even(sx)
     z: sx - fx
@@ -2428,7 +2429,7 @@ exp2_m1: fn(n: Float) -> Float Never! {
         l: fma(Float{2.3190468138462996e-17}, n, fma(Float{0.6931471805599453}, n, -h)) + Float{0.24022650695910072} * n * n
         return h + l
     }
-    if (fabs(n) <= Float{53.0} && n == core.math.trunc(n)) {
+    if (fabs(n) <= Float{53.0} && n == float_trunc(n)) {
         return ldexp(Float{1.0}, checked(Int{n}) ?? 0) - Float{1.0}
     }
     tiny: ax <= 0x3FC0_0000_0000_0000
@@ -2469,7 +2470,7 @@ exp10_m1: fn(n: Float) -> Float Never! {
         l: fma(Float{2.650949055239199} * n, n, fma(Float{-2.1707562233822494e-16}, n, fma(Float{2.302585092994046}, n, -h)))
         return h + l
     }
-    if (n >= Float{1.0} && n <= Float{15.0} && n == core.math.trunc(n)) {
+    if (n >= Float{1.0} && n <= Float{15.0} && n == float_trunc(n)) {
         return EXP10_POWERS[(checked(Int{n}) ?? 0) + 15] - Float{1.0}
     }
     tiny: ax <= 0x3FB0_0000_0000_0000
@@ -2543,7 +2544,7 @@ priv erf_fast: fn(z: Float) -> {hi: Float, lo: Float, err: Float} Never! {
         return {hi: h, lo: fma(l1, z, fma(s1.hi, z, -h)), err: Float{2.4881592825595072e-21}}
     }
     // i/16 <= z < (i + 1)/16, and z - 1/32 - v/16 is exact
-    v: core.math.floor(Float{16.0} * z)
+    v: float_floor(Float{16.0} * z)
     b: 13 * ((checked(Int{v}) ?? 1) - 1)
     x: (z - Float{0.03125}) - Float{0.0625} * v
     x2: x * x
@@ -2571,7 +2572,7 @@ priv erf_fast: fn(z: Float) -> {hi: Float, lo: Float, err: Float} Never! {
 // relatively, for 2^-61 <= z <= 5.9215871957945065.
 priv erf_accurate: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     if (z < Float{0.125}) { return erf_accurate_tiny(z) }
-    v: core.math.floor(Float{8.0} * z)
+    v: float_floor(Float{8.0} * z)
     b: 27 * ((checked(Int{v}) ?? 1) - 1)
     x: (z - Float{0.0625}) - Float{0.125} * v
     h := ERF_C2[b + 26]
@@ -6530,7 +6531,7 @@ gamma: fn(n: Float) -> Float Never! {
     if (n >= Float{171.62437695630274}) {
         return Float{1.7415152243978685e308} + Float{1.7415152243978685e308}
     }
-    fx: core.math.floor(n)
+    fx: float_floor(n)
     if fx == n {
         if (n < Float{0.0}) { return Float{0.0} / Float{0.0} }
         // (n - 1)! exactly in double-double up to 23!, then rounded once
@@ -6655,7 +6656,7 @@ priv tgamma_accurate: fn(x: Float) -> Float Never! {
         }
         return u.hi + v.hi
     }
-    ix: core.math.floor(x)
+    ix: float_floor(x)
     d: Float{2.0} * (x - (ix + Float{0.5}))
     i: checked(Int{ix}) ?? 0
     seg := 0
@@ -8485,7 +8486,7 @@ lgamma: fn(n: Float) -> Float Never! {
         if is_nan(n) -> return n + n
         return INFINITY
     }
-    fx: core.math.floor(n)
+    fx: float_floor(n)
     if fx == n {
         if (n <= Float{0.0}) { return INFINITY }
         if (n == Float{1.0} || n == Float{2.0}) { return Float{0.0} }
@@ -8731,7 +8732,7 @@ priv lgamma_accurate: fn(sx: Float) -> Float Never! {
             f = lgamma_add3(f.hi, f.mid, f.lo, lg.hi, lg.mid, lg.lo)
         }
         if neg {
-            phi: if (sx < Float{-0.5}) -> sx - core.math.floor(sx) else -> -sx
+            phi: if (sx < Float{-0.5}) -> sx - float_floor(sx) else -> -sx
             sp: lgamma_sin_pi_accurate(phi)
             lg: lgamma_log_accurate(sp.hi)
             r: lgamma_add3(f.hi, f.mid, f.lo, lg.hi, lg.mid + (sp.lo / sp.hi + lg.lo), Float{0.0})
@@ -11064,7 +11065,43 @@ floor: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TowardNegative) }
 /// The least integral value at least `n`, of `n`'s own type (Roundable).
 ceil: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TowardPositive) }
 
-fract: fn(n: Float) -> Float Never! { n - core.math.trunc(n) }
+// floor.c, ceil.c and trunc.c from musl 1.2.5, the Float directions of
+// Roundable: a magnitude below 2^52 plus and minus 2^52 is rounded to a whole
+// number, and the difference tells which way it went. A NaN, an infinity, a
+// zero and a whole Float are themselves.
+priv float_floor: fn(x: Float) -> Float Never! {
+    bits: __to_bits_i64(x)
+    e: (bits >> 52) & 0x7FF
+    if e >= 1075 || x == 0.0 -> return x
+    y: if bits < 0 -> x - 4503599627370496.0 + 4503599627370496.0 - x else -> x + 4503599627370496.0 - 4503599627370496.0 - x
+    if e <= 1022 -> return if bits < 0 -> Float{-1.0} else -> Float{0.0}
+    if y > 0.0 -> return x + y - 1.0
+    x + y
+}
+
+priv float_ceil: fn(x: Float) -> Float Never! {
+    bits: __to_bits_i64(x)
+    e: (bits >> 52) & 0x7FF
+    if e >= 1075 || x == 0.0 -> return x
+    y: if bits < 0 -> x - 4503599627370496.0 + 4503599627370496.0 - x else -> x + 4503599627370496.0 - 4503599627370496.0 - x
+    if e <= 1022 -> return if bits < 0 -> Float{-0.0} else -> Float{1.0}
+    if y < 0.0 -> return x + y + 1.0
+    x + y
+}
+
+// trunc clears the fraction bits below the unit, in I64 like the rest of
+// Core's bit work (an Int mask past 2^62 would be a boxed big Int).
+priv float_trunc: fn(x: Float) -> Float Never! {
+    bits: __to_bits_i64(x)
+    e := ((bits >> 52) & 0x7FF) - 1011
+    if e >= 64 -> return x
+    if e < 12 -> e = 1
+    fraction: I64{0x7FFF_FFFF_FFFF_FFFF} >> (e - 1)
+    if (bits & fraction) == 0 -> return x
+    __from_bits_i64(bits & (fraction ~ -1))
+}
+
+fract: fn(n: Float) -> Float Never! { n - float_trunc(n) }
 
 /// sqrt(a^2 + b^2), correctly rounded (CORE-MATH hypot.c): never overflows
 /// or underflows early; +inf when a side is infinite and the other is a
@@ -11138,7 +11175,7 @@ priv isqrt_floor: fn(n: Int) -> Int Never! {
     if n < 2 -> return n
     b: bit_len(n)
     sh: if b > 100 -> (b - 100) /% 2 else -> 0
-    seed: checked(Int{core.math.floor(sqrt(approx(n >> (2 * sh))))}) ?? 1
+    seed: checked(Int{float_floor(sqrt(approx(n >> (2 * sh))))}) ?? 1
     x0: if seed < 1 -> Int{1} << sh else -> seed << sh
     // one step lands at or above floor(sqrt(n)); from there it decreases
     x := (x0 + n /% x0) /% 2
@@ -12597,7 +12634,27 @@ priv SINH_HARD: [Float]{
     -2.2067993803420066e255,
 }
 
-sqrt: fn(n: Float) -> Float Never! { core.math.sqrt(n) }
+/// The square root of `n`, correctly rounded (IEEE 754 squareRoot): -0 for
+/// -0, +inf for +inf, and NaN below zero.
+sqrt: fn(n: Float) -> Float Never! { __float_sqrt(n) }
+
+// sqrt is the IEEE square root (InlineFloatSqrt). This body, for a compiler
+// without the operation, takes n = m 2^e with e even and m past 2^110, so
+// r = isqrt(m) has at least 55 bits; setting r's last bit when the root is
+// inexact keeps the remainder's place, and rounding r 2^(e/2) to nearest is
+// then the correctly rounded root.
+#Builtin.Role(.InlineFloatSqrt) priv __float_sqrt: fn(n: Float) -> Float Never! {
+    if is_nan(n) -> return n + n
+    if n == 0.0 || n == INFINITY -> return n
+    if n < 0.0 -> return NAN
+    parts: float_parts(n)
+    shift := 112 - bit_len(parts.m)
+    if (parts.e - shift) % 2 != 0 -> shift += 1
+    m: parts.m << shift
+    root := isqrt(m) ?? 0
+    if root * root != m -> root |= 1
+    nearest_scaled(root, (parts.e - shift) /% 2)
+}
 
 /// 1/sqrt(x), correctly rounded (C23 rsqrt; CORE-MATH rsqrt.c): +inf for +0,
 /// -inf for -0, +0 for +inf and NaN below zero. One Newton step on
@@ -12663,6 +12720,21 @@ priv float_parts: fn(n: Float) -> {m: Int, e: Int} Never! {
     fraction: bits & 0xF_FFFF_FFFF_FFFF
     if biased == 0 -> return {m: fraction, e: -1074}
     {m: fraction | 0x10_0000_0000_0000, e: biased - 1075}
+}
+
+// The Float nearest n 2^e for a whole n > 0, ties to even, an overflow the
+// infinity: n is first rounded to the bits the result keeps, 53 for a normal
+// and down to the unit 2^-1074 for a subnormal, so the last scaling is
+// exact.
+priv nearest_scaled: fn(n: Int, e: Int) -> Float Never! {
+    shift := bit_len(n) - 53
+    if -1074 - e > shift -> shift = -1074 - e
+    if shift <= 0 -> return ldexp(Float{n}, e)
+    q := n >> shift
+    rest: n - (q << shift)
+    half: Int{1} << (shift - 1)
+    if rest > half || (rest == half && is_odd(q)) -> q += 1
+    ldexp(Float{q}, e + shift)
 }
 
 // Whether (m * 2^e)^2 * x < 1, exactly.
@@ -12736,7 +12808,7 @@ pow_r: fn(base: Float, exponent: Float) -> Float Never! {
         return y + y
     }
     if y == 0.0 || (x == Float{1.0}) -> return Float{1.0}
-    odd: is_finite(y) && core.math.trunc(y) == y && core.math.trunc(y * Float{0.5}) != y * Float{0.5}
+    odd: is_finite(y) && float_trunc(y) == y && float_trunc(y * Float{0.5}) != y * Float{0.5}
     if is_inf(x) {
         // x^y for -inf takes an odd y's sign
         if (x > Float{0.0}) || !odd {
@@ -12759,7 +12831,7 @@ pow_r: fn(base: Float, exponent: Float) -> Float Never! {
         return sz * Float{0.0}
     }
     if (x > Float{0.0}) { return pow_cr(x, y) }
-    if core.math.trunc(y) != y -> return NAN
+    if float_trunc(y) != y -> return NAN
     if odd -> return -pow_cr(-x, y)
     pow_cr(-x, y)
 }
@@ -16404,7 +16476,7 @@ priv tan_reduce_fast: fn(x: Float) -> {i: Int, h: Float, l: Float} Never! {
             }
         }
     }
-    k: core.math.floor(h * Float{2048.0})
+    k: float_floor(h * Float{2048.0})
     {i: checked(Int{k}) ?? 0, h: fma(k, Float{-0.00048828125}, h), l: l}
 }
 
@@ -27226,7 +27298,7 @@ priv atan2_pi_fast: fn(y0: Float, x0: Float) -> {hi: Float, lo: Float, err: Floa
     sz: if neg -> Float{-1.0} else -> Float{1.0}
     zh0: if neg -> -qh else -> qh
     zl: if neg -> -ql else -> ql
-    i: checked(Int{core.math.trunc(Float{64.0} * zh0)}) ?? 0
+    i: checked(Int{float_trunc(Float{64.0} * zh0)}) ?? 0
     b: 10 * i
     zh: zh0 - ATAN2PI_POINT[i]
     z: zh + zl
@@ -37352,7 +37424,7 @@ priv TANH_HARD: [Float]{
 /// (Roundable).
 trunc: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TowardZero) }
 
-truncate: fn(n: Float) -> Float Never! { core.math.trunc(n) }
+truncate: fn(n: Float) -> Float Never! { float_trunc(n) }
 
 cot: fn(n: Float) -> Float Never! { 1.0 / tan(n) }
 
@@ -37362,7 +37434,31 @@ copysign: fn(value: Float, sign_value: Float) -> Float Never! {
     __from_bits_i64(magnitude | sign)
 }
 
-fma: fn(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
+/// a * b + c rounded once (IEEE 754 fusedMultiplyAdd).
+fma: fn(a: Float, b: Float, c: Float) -> Float Never! { __float_fma(a, b, c) }
+
+// fma is the fused operation (InlineFloatFma). This body, for a compiler
+// without it, writes the exact a * b + c as a whole multiple of 2^e and
+// rounds it once (nearest_scaled). A NaN, an infinity or a zero factor
+// leaves the Float arithmetic exact, and a finite product beside an
+// infinite or NaN c is c.
+#Builtin.Role(.InlineFloatFma) priv __float_fma: fn(a: Float, b: Float, c: Float) -> Float Never! {
+    if !is_finite(a) || !is_finite(b) || a == 0.0 || b == 0.0 -> return a * b + c
+    if !is_finite(c) -> return c + c
+    pa: float_parts(a)
+    pb: float_parts(b)
+    pe: pa.e + pb.e
+    e := pe
+    ce: float_parts(c).e
+    if ce < e -> e = ce
+    magnitude: (pa.m * pb.m) << (pe - e)
+    product: if (a < 0.0) != (b < 0.0) -> -magnitude else -> magnitude
+    sum: product + scaled_at(c, e)
+    if sum == 0 -> return 0.0
+    whole: if sum < 0 -> -sum else -> sum
+    r: nearest_scaled(whole, e)
+    if sum < 0 -> -r else -> r
+}
 
 muladd: fn(a: Float, b: Float, c: Float) -> Float Never! { fma(a, b, c) }
 
@@ -37518,7 +37614,8 @@ radians: fn(n: Float) -> Float Never! { n * 0.017453292519943295 }
 
 lerp: fn(a: Float, b: Float, t: Float) -> Float Never! { a + (b - a) * t }
 
-fabs: fn(n: Float) -> Float Never! { core.math.fabs(n) }
+/// |n|: n with its sign bit cleared, a NaN's payload kept.
+fabs: fn(n: Float) -> Float Never! { __from_bits_i64(__to_bits_i64(n) & 0x7FFF_FFFF_FFFF_FFFF) }
 
 // `math.abs` on F32 and I64 (MathBuiltin `abs`): F32 negates exactly when the
 // sign bit is set, so -0.0 and a negative NaN lose their sign; I64 negation
@@ -37740,35 +37837,115 @@ NAN: Float{0.0} / Float{0.0}
 /// is the nearest Int. A NaN or an infinity is itself.
 round: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TiesToAway) }
 
-to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
+to_bits: fn(n: Float) -> Int Never! { Int{__to_bits_i64(n)} }
 
 // `math.to_bits` on F32: the binary32 bits as an Int in 0..<2^32, and its
 // inverse, the F32 of binary32 `bits` in that range. Both are one bit copy
 // (no conversion), so NaN payloads and signaling NaNs cross unchanged.
-#Builtin.Role(.ToBitsF32) priv __to_bits_f32: fn(n: F32) -> Int Never! { core.math.__to_bits_f32(n) }
+#Builtin.Role(.ToBitsF32) priv __to_bits_f32: fn(n: F32) -> Int Never! { Int{__f32_bits_i64(n)} }
 
-priv __from_bits_f32: fn(bits: Int) -> F32 Never! { core.math.__from_bits_f32(bits) }
+priv __from_bits_f32: fn(bits: Int) -> F32 Never! { __f32_from_bits_i64(checked(I64{bits}) ?? core.math.__numeric_stop("Value doesn't fit in destination type")) }
+
+// The binary32 bits of n as an I64 in 0..<2^32, and the F32 of the low 32
+// bits of `bits`: one copy each (InlineF32Bits, InlineF32FromBits). These
+// bodies, for a compiler without the copy, repack the binary64 fields of the
+// widened value, which quiets a signaling NaN, and give every NaN's bits the
+// F32 NaN.
+#Builtin.Role(.InlineF32Bits) priv __f32_bits_i64: fn(n: F32) -> I64 Never! {
+    bits: __to_bits_i64(Float.from_f32(n))
+    sign: if bits < 0 -> I64{0x8000_0000} else -> I64{0}
+    exponent: (bits >> 52) & 0x7FF
+    fraction: bits & 0xF_FFFF_FFFF_FFFF
+    if exponent == 0x7FF -> return sign | 0x7F80_0000 | (fraction >> 29)
+    if exponent == 0 -> return sign
+    power: exponent - 1023
+    if power < -126 -> return sign | ((fraction | 0x10_0000_0000_0000) >> (-97 - power))
+    sign | ((power + 127) << 23) | (fraction >> 29)
+}
+
+#Builtin.Role(.InlineF32FromBits) priv __f32_from_bits_i64: fn(bits: I64) -> F32 Never! {
+    raw: bits & 0xFFFF_FFFF
+    sign: if (raw & 0x8000_0000) != 0 -> I64{-0x8000_0000_0000_0000} else -> I64{0}
+    exponent := (raw >> 23) & 0xFF
+    fraction := raw & 0x7F_FFFF
+    if exponent == 0xFF -> return f32_narrow(__from_bits_i64(sign | 0x7FF0_0000_0000_0000 | (fraction << 29)))
+    if exponent == 0 {
+        if fraction == 0 -> return f32_narrow(__from_bits_i64(sign))
+        // A subnormal is a binary64 normal: shift its leading bit into place.
+        exponent = 1
+        loop fraction < 0x80_0000 {
+            fraction = fraction << 1
+            exponent -= 1
+        }
+        fraction &= 0x7F_FFFF
+    }
+    f32_narrow(__from_bits_i64(sign | ((exponent + 896) << 52) | (fraction << 29)))
+}
 
 /// The binary32 bits of `value`, and the F32 whose bits are `word`: one bit
 /// copy each, so NaN payloads, signaling NaNs and the sign of zero cross
 /// unchanged, with no allocation and no failure.
-f32_to_bits: fn(value: F32) -> U32 Never! {
-    checked(U32{__to_bits_f32(value)}) ?? panic("binary32 bits fit a U32")
-}
+f32_to_bits: fn(value: F32) -> U32 Never! { wrapping(U32{__f32_bits_i64(value)}) }
 
-f32_from_bits: fn(word: U32) -> F32 Never! { __from_bits_f32(Int{word}) }
+f32_from_bits: fn(word: U32) -> F32 Never! { __f32_from_bits_i64(I64{word}) }
 
-from_bits: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
+// An Int past the I64 range is no machine word: it stops at the caller's line.
+from_bits: fn(bits: Int) -> Float Never! { __from_bits_i64(checked(I64{bits}) ?? core.math.__numeric_stop("Value doesn't fit in destination type")) }
 
 // The bits of n as an I64, and the Float of `bits`: one bit copy each, as
 // to_bits and from_bits, without the Int those box past +-2^62. The
 // compiler builds every call of either as the copy itself (JetIR
 // ir_core_intrinsics); these bodies are what a compiler without that table
-// runs. Core's bit work (copysign, round_even, exp, ln, sin, cos, pow, ...)
-// stays in I64 through them.
-#Builtin.Role(.InlineFloatBits) priv __to_bits_i64: fn(n: Float) -> I64 Never! { I64{to_bits(n)} }
+// runs, worked out from the value alone, so a NaN reads as the quiet NaN
+// 0x7FF8_0000_0000_0000 and every NaN's bits give one NaN. Core's bit work
+// (copysign, round_even, exp, ln, sin, cos, pow, ...) stays in I64 through
+// them.
+#Builtin.Role(.InlineFloatBits) priv __to_bits_i64: fn(n: Float) -> I64 Never! {
+    if is_nan(n) -> return 0x7FF8_0000_0000_0000
+    negative: n < 0.0 || (n == 0.0 && Float{1.0} / n < 0.0)
+    sign: if negative -> I64{-0x8000_0000_0000_0000} else -> I64{0}
+    a: if negative -> -n else -> n
+    if a == INFINITY -> return sign | 0x7FF0_0000_0000_0000
+    if a == 0.0 -> return sign
+    // a = f 2^(x - 1075), f whole once it is in [2^52, 2^53), or below 2^52
+    // at x = 1 for a subnormal; each halving and doubling is exact.
+    f := a
+    x := I64{1075}
+    loop f >= 9007199254740992.0 {
+        f *= 0.5
+        x += 1
+    }
+    loop f < 4503599627370496.0 && x > 1 {
+        f *= 2.0
+        x -= 1
+    }
+    whole: checked(I64{f}) ?? I64{0}
+    if f < 4503599627370496.0 -> return sign | whole
+    sign | (x << 52) | (whole - 0x10_0000_0000_0000)
+}
 
-#Builtin.Role(.InlineFloatFromBits) priv __from_bits_i64: fn(bits: I64) -> Float Never! { from_bits(Int{bits}) }
+#Builtin.Role(.InlineFloatFromBits) priv __from_bits_i64: fn(bits: I64) -> Float Never! {
+    exponent: (bits >> 52) & 0x7FF
+    fraction: bits & 0xF_FFFF_FFFF_FFFF
+    magnitude := Float{0.0}
+    if exponent == 0x7FF {
+        magnitude = if fraction == 0 -> INFINITY else -> NAN
+    } else {
+        // whole 2^k, scaled by exact halvings and doublings.
+        whole: if exponent == 0 -> fraction else -> fraction | 0x10_0000_0000_0000
+        magnitude = Float{Int{whole}}
+        k := if exponent == 0 -> I64{-1074} else -> exponent - 1075
+        loop k > 0 {
+            magnitude *= 2.0
+            k -= 1
+        }
+        loop k < 0 {
+            magnitude *= 0.5
+            k += 1
+        }
+    }
+    if bits < 0 -> -magnitude else -> magnitude
+}
 
 // A whole t with |t| < 2^51 as an I64: t + 0x1.8p52 is exact, and its bits
 // are 0x1.8p52's plus t.
@@ -38044,7 +38221,41 @@ prod_int: fn(values: [Int]) -> Int Never! {
 
 prod: fn(values: [Int]) -> Int Never! { prod_int(values) }
 
-fmod: fn(a: Float, b: Float) -> Float Never! { core.math.fmod(a, b) }
+/// fmod.c's result: a - n b for the whole n of a / b rounded toward zero,
+/// exact, with a's sign; NaN when a is infinite or b is zero, and a when b
+/// is infinite.
+fmod: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return a + a
+    if is_nan(b) -> return b + b
+    if !is_finite(a) || b == 0.0 -> return (a * b) / (a * b)
+    if !is_finite(b) -> return a
+    ux: __to_bits_i64(a) & 0x7FFF_FFFF_FFFF_FFFF
+    uy: __to_bits_i64(b) & 0x7FFF_FFFF_FFFF_FFFF
+    if ux < uy -> return a
+    if ux == uy -> return 0.0 * a
+    // |a| = mx 2^(ex - 1075) and |b| = my 2^(ey - 1075), a subnormal at the
+    // exponent of the least normal, so ex >= ey. The remainder of
+    // mx 2^(ex - ey) by my is taken 10 bits at a time, each step one word
+    // division below 2^63, and is a whole number of b's units below my.
+    ex := ux >> 52
+    ey := uy >> 52
+    mx := ux & 0xF_FFFF_FFFF_FFFF
+    my := uy & 0xF_FFFF_FFFF_FFFF
+    if ex == 0 -> ex = 1 else -> mx |= 0x10_0000_0000_0000
+    if ey == 0 -> ey = 1 else -> my |= 0x10_0000_0000_0000
+    rest := mx % my
+    loop ex > ey {
+        step: if ex - ey > 10 -> I64{10} else -> ex - ey
+        rest = (rest << step) % my
+        ex -= step
+    }
+    if rest == 0 -> return 0.0 * a
+    // rest 2^(ey - 1075) is exact: rest's Float times the power of two
+    // (a subnormal one below 2^-1022).
+    unit: if ey > 52 -> (ey - 52) << 52 else -> I64{1} << (ey - 1)
+    magnitude: Float{rest} * __from_bits_i64(unit)
+    if a < 0.0 -> -magnitude else -> magnitude
+}
 
 /// remainder.c from musl 1.2.5: rem_quo's remainder.
 remainder: fn(a: Float, b: Float) -> Float Never! { rem_quo(a, b).rem }
@@ -38197,6 +38408,11 @@ fraction: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
     __fraction_new(numerator, denominator)
 }
 
+// The E3010 arithmetic stop with `message`: an exact or lane operation that
+// has no answer (a Fraction divided by zero, a lane index out of range,
+// RNG.int's empty range).
+priv __numeric_stop: fn(message: String) -> Never Never! { runtime_rt.numeric_stop(message) }
+
 decimal: fn(text: String) -> Decimal Never! { __decimal_from_str(text) }
 
 copy: fn(n: Float) -> Float Never! { n }
@@ -38228,7 +38444,7 @@ priv round_ties_even: fn(n: Float) -> Float Never! {
 // The integral Float nearest `n`, ties away from zero (C round).
 priv round_away: fn(n: Float) -> Float Never! {
     if !(fabs(n) < Float{4503599627370496.0}) -> return n
-    whole: core.math.trunc(n)
+    whole: float_trunc(n)
     if (fabs(n - whole) >= Float{0.5}) { return whole + copysign(Float{1.0}, n) }
     whole
 }
@@ -38236,9 +38452,9 @@ priv round_away: fn(n: Float) -> Float Never! {
 // `n` rounded to an integral Float in `mode`.
 priv round_in_mode: fn(n: Float, mode: Rounding) -> Float Never! {
     if mode == {
-        .TowardNegative -> core.math.floor(n)
-        .TowardPositive -> core.math.ceil(n)
-        .TowardZero -> core.math.trunc(n)
+        .TowardNegative -> float_floor(n)
+        .TowardPositive -> float_ceil(n)
+        .TowardZero -> float_trunc(n)
         .TiesToAway -> round_away(n)
         .TiesToEven -> round_ties_even(n)
     }
@@ -38857,7 +39073,7 @@ set_payload_signaling: fn(payload: Float) -> Float? Never! {
 
 // A payload Float's integer, when it is +0 or whole and below 2^51.
 priv payload_bits: fn(payload: Float) -> Int? Never! {
-    if sign_bit(payload) || !(payload < Float{2251799813685248.0}) || core.math.trunc(payload) != payload {
+    if sign_bit(payload) || !(payload < Float{2251799813685248.0}) || float_trunc(payload) != payload {
         return None
     }
     Val(checked(Int{payload}) ?? 0)
@@ -38997,6 +39213,64 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
     assert_eq(f32_to_bits(f32_inf), U32{0x7F800000})
     assert(is_nan(Float.from_f32(f32_from_bits(U32{0x7FC00001}))))
     assert_eq(radix(0.0), 2)
+}
+
+#Test("math Float leaves are exact on IEEE edges") {
+    // The signed zeros, the infinities, a quiet and a signaling NaN with a
+    // payload, the subnormal ends, the largest Float and 1.0 keep their bits.
+    loop bits in ([Int]{0, -9223372036854775808, 9218868437227405312, -4503599627370496, 9221120237041090561, 9218868437227405313, 1, 4503599627370495, 4503599627370496, 9218868437227405311, 4607182418800017408}) {
+        assert_eq(to_bits(from_bits(bits)), bits)
+    }
+    assert_eq(to_bits(fabs(from_bits(-2251799813685247))), 9221120237041090561)
+    assert_eq(abs(Float{-2.0}), 2.0)
+    // sqrt is correctly rounded from the subnormal end to the largest Float.
+    assert_eq(sqrt(4.0), 2.0)
+    assert_eq(sqrt(2.0), 1.4142135623730951)
+    assert_eq(sqrt(from_bits(1)), 2.2227587494850775e-162)
+    assert_eq(sqrt(1.7976931348623157e308), 1.3407807929942596e154)
+    assert_eq(to_bits(sqrt(-0.0)), to_bits(-0.0))
+    assert_eq(sqrt(INFINITY), INFINITY)
+    assert(is_nan(sqrt(-1.0)))
+    assert(is_nan(sqrt(NAN)))
+    // fma rounds once: the product's low part survives, a subnormal tie
+    // goes to even, an exact cancellation is +0 and 2 MAX - MAX is MAX.
+    assert_eq(fma(0.1, 10.0, -1.0), 5.551115123125783e-17)
+    assert_eq(to_bits(fma(from_bits(3), 0.5, 0.0)), 2)
+    assert_eq(to_bits(fma(from_bits(1), 0.5, 0.0)), 0)
+    assert_eq(to_bits(fma(-from_bits(1), 0.5, 0.0)), to_bits(-0.0))
+    assert_eq(to_bits(fma(1.0, -1.0, 1.0)), 0)
+    assert_eq(to_bits(fma(-0.0, 1.0, -0.0)), to_bits(-0.0))
+    assert_eq(fma(1.7976931348623157e308, 2.0, -1.7976931348623157e308), 1.7976931348623157e308)
+    assert_eq(fma(2.0, 3.0, INFINITY), INFINITY)
+    assert(is_nan(fma(0.0, INFINITY, 1.0)))
+    assert(is_nan(fma(INFINITY, 1.0, -INFINITY)))
+    assert_eq(muladd(2.0, 3.0, 1.0), 7.0)
+    // The roundings keep the sign of zero and leave the non-finite alone.
+    assert_eq(floor(Float{-0.5}), -1.0)
+    assert_eq(to_bits(floor(Float{-0.0})), to_bits(-0.0))
+    assert_eq(to_bits(ceil(Float{-0.5})), to_bits(-0.0))
+    assert_eq(ceil(Float{0.5}), 1.0)
+    assert_eq(to_bits(trunc(Float{-0.5})), to_bits(-0.0))
+    assert_eq(truncate(-2.75), -2.0)
+    assert_eq(floor(Float{4503599627370495.5}), 4503599627370495.0)
+    assert_eq(ceil(Float{4503599627370495.5}), 4503599627370496.0)
+    assert_eq(floor(from_bits(1)), 0.0)
+    assert_eq(ceil(from_bits(1)), 1.0)
+    assert_eq(floor(-INFINITY), -INFINITY)
+    assert(is_nan(ceil(NAN)))
+    // fmod is exact, with the dividend's sign.
+    assert_eq(fmod(5.5, 2.0), 1.5)
+    assert_eq(fmod(-5.5, 2.0), -1.5)
+    assert_eq(to_bits(fmod(-4.0, 2.0)), to_bits(-0.0))
+    assert_eq(fmod(1.0e22, 3.0), 1.0)
+    assert_eq(fmod(1.7976931348623157e308, 1.0), 0.0)
+    assert_eq(to_bits(fmod(from_bits(3), from_bits(2))), 1)
+    assert_eq(fmod(5.0, INFINITY), 5.0)
+    assert(is_nan(fmod(INFINITY, 2.0)))
+    assert(is_nan(fmod(1.0, 0.0)))
+    // The largest Float's sine and cosine reduce it exactly.
+    assert_eq(sin(1.7976931348623157e308), 0.004961954789184062)
+    assert_eq(cos(1.7976931348623157e308), -0.9999876894265599)
 }
 
 #Test("math rounding keeps the argument's type and its tie rule") {

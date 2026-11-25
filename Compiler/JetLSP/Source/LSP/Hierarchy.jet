@@ -13,7 +13,7 @@
 // the function of the recorded name in the call's module.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[JET_TYPE_NAMES, foundation_json_quote]
+    jet_foundation.[TYPE_NAMES, foundation_json_quote]
     jet_lexer.[token_text]
     jet_semindex.[SemCall, SemDef, SemIndex, SemKind]
 }
@@ -103,7 +103,7 @@ lsp_hierarchy_item: fn(server: LSPServer, params: Dyn?, calls: Bool{false}) -> L
 lsp_builtin_type_item_json: fn(view: LSPView, offset: Int) -> String? Never! {
     token: lsp_ident_token_at(view.lexed, offset) ?? return None
     name: token_text(view.lexed.tables, token)
-    if !JET_TYPE_NAMES.contains(name) -> return None
+    if !TYPE_NAMES.contains(name) -> return None
     range: lsp_range_json(lsp_byte_span_to_range(view.doc.text, token.span))
     Val("{{\"name\":{foundation_json_quote(name)},\"kind\":5,\"detail\":\"built in\",\"uri\":{foundation_json_quote(view.uri)},\"range\":{range},\"selectionRange\":{range},\"data\":{{\"identity\":{foundation_json_quote("{LSP_BUILTIN_TYPE_IDENTITY}{name}")}}}}}")
 }

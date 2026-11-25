@@ -28,6 +28,7 @@ use {
         StrMatchPart,
         StrPart,
         StrSelector,
+        TaskForm,
         Type,
         TypedLitBody,
         LIST_TYPE_OWNER,
@@ -40,6 +41,8 @@ use {
         measure_expression,
         pipe_value_is_name,
         str_selector_computed,
+        task_form_of,
+        task_form_spelling,
         type_name,
     ]
     jet_lexer.[
@@ -1398,9 +1401,9 @@ jfmt_fmt_method_call: fn(f: ^JetFmt, receiver: Expr, method: String, method_span
             jfmt_write(f, "}}")
             return
         }
-        if name == jfmt_internal_name("jet.task") && jfmt_fmt_task_surface_method(f, method, args) {
-            return
-        }
+    }
+    if task_form_of(receiver, method) == .Val(form) {
+        if jfmt_fmt_task_surface_method(f, form, args) -> return
     }
     // A list-type static `[T#N].filled(value)` prints its owner type as written.
     list_type_owner: if receiver == .Ident(name, _, _) -> name == LIST_TYPE_OWNER && owner_type_args.len() == 1 else -> false
@@ -2706,13 +2709,13 @@ jfmt_fmt_spawn_body: fn(f: ^JetFmt, lambda: Lambda) {
 
 // Restore the one-word task surface
 // from its compiler-private method-call form.
-jfmt_fmt_task_surface_method: fn(f: ^JetFmt, method: String, args: [CallArg]) -> Bool {
-    if method == jfmt_internal_name("jet.task.timeout") && args.len() == 1 {
-        jfmt_write(f, "task.timeout")
+jfmt_fmt_task_surface_method: fn(f: ^JetFmt, form: TaskForm, args: [CallArg]) -> Bool {
+    if form == .Timeout && args.len() == 1 {
+        jfmt_write(f, task_form_spelling(form))
         jfmt_fmt_method_args(f, "timeout", args, None)
         return true
     }
-    if method == jfmt_internal_name("jet.task.spawn") {
+    if form == .Spawn {
         if args.len() != 1 -> return false
         lambda: jfmt_lambda_of(args[0].expr) ?? return false
         if lambda.params.len() > 0 -> return false
@@ -2744,13 +2747,7 @@ jfmt_fmt_task_surface_method: fn(f: ^JetFmt, method: String, args: [CallArg]) ->
         jfmt_fmt_spawn_body(f, lambda)
         return true
     }
-    selector: if {
-        method == jfmt_internal_name("jet.task.all") -> "all"
-        method == jfmt_internal_name("jet.task.race") -> "race"
-        method == jfmt_internal_name("jet.task.any") -> "any"
-        else -> ""
-    }
-    if selector == "" || args.len() != 1 -> return false
+    if form == .Timeout || args.len() != 1 -> return false
     branches := [Expr]{}
     names := [String]{}
     named := false
@@ -2765,7 +2762,7 @@ jfmt_fmt_task_surface_method: fn(f: ^JetFmt, method: String, args: [CallArg]) ->
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
-    jfmt_write(f, "task.{selector} {{")
+    jfmt_write(f, "{task_form_spelling(form)} {{")
     loop (index, branch) in branches {
         if index > 0 -> jfmt_write(f, ", ")
         if named {
@@ -2773,12 +2770,10 @@ jfmt_fmt_task_surface_method: fn(f: ^JetFmt, method: String, args: [CallArg]) ->
             jfmt_write(f, ": ")
         }
         if branch == .MethodCall(receiver, spawn_method, _, _, _, spawn_args, _) {
-            if receiver == .Ident(receiver_name, _, _) {
-                if receiver_name == jfmt_internal_name("jet.task") && spawn_method == jfmt_internal_name("jet.task.spawn") && spawn_args.len() == 1 {
-                    if spawn_args[0].expr == .Lambda(lambda, _) {
-                        jfmt_fmt_spawn_body(f, lambda)
-                        next
-                    }
+            if task_form_of(receiver, spawn_method) == .Val(branch_form) && branch_form == .Spawn && spawn_args.len() == 1 {
+                if spawn_args[0].expr == .Lambda(lambda, _) {
+                    jfmt_fmt_spawn_body(f, lambda)
+                    next
                 }
             }
         }

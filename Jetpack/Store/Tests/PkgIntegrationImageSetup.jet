@@ -11,7 +11,7 @@ use {
 // `name reference binary [platform]` entries separated by `;`; each becomes a
 // real Store ingest of one `bin/<binary>` shell script, platform defaulting to
 // the host's.
-store_image_ingest_executable: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, reference: String, binary: String, platform: String) {
+store_image_ingest_executable: fn(verification: StoreVerification, roots: HangarRoots, name: String, reference: String, binary: String, platform: String) {
     source: files.join(roots.root, "source-{name}")
     script: files.join(files.join(source, "bin"), binary)
     files.create_dir_all(files.dirname(script)) ?? panic("image executable bin")

@@ -4,7 +4,7 @@
 // callback.
 use {
     debug_snapshot_math: core.math
-    jet_foundation.[Type, ast_expr, foundation_named_type, sha256_hex, Record, Variant]
+    jet_foundation.[TYPE_NAMES, Type, ast_expr, effect_vocabulary_enum_view_count, foundation_named_type, sha256_hex, Record, Variant]
 }
 
 // One value captured at a real paused source statement.
@@ -240,6 +240,13 @@ DebugScalarClass: enum {
     Text,
     Other,
 }
+
+// DebugScalarClass picks from the built-in type catalog, the spellings
+// foundation_named_type reads. `Unit` names `()`, `Text` holds String and
+// Char, and `Other` is every other type. While the compiler builds,
+// DEBUG_SCALAR_CLASS_COUNT stops the build naming any other case
+// TYPE_NAMES lacks.
+DEBUG_SCALAR_CLASS_COUNT: #run effect_vocabulary_enum_view_count("Debug/Snapshot.jet", embed_file("Snapshot.jet"), "DebugScalarClass", TYPE_NAMES, "TYPE_NAMES", [String]{"Unit", "Text", "Other"})
 
 // The class of `type_name`, read from the language's own primitive
 // spellings (foundation_named_type), the names the image's debug types use:

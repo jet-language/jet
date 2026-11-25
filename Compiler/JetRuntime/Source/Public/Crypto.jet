@@ -1,11 +1,19 @@
 // `jet.runtime.crypto` (#6615): the host steps core.crypto reaches, in Jet
 // types with their effect rows. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
-// (CryptoEntropy.jet, SHA256.jet, CryptoAES.jet). Each is `priv`: only
-// core.crypto calls them.
+// (CryptoEntropy.jet, Secret.jet, SHA256.jet, CryptoAES.jet). Each is
+// `priv`: only core.crypto calls them.
 crypto: module {
     // `count` bytes from one OS CSPRNG fill; None when the provider refuses.
     #Import(c) priv os_entropy: fn(count: Int) -[Rand]> [U8]? = "jet_random_os_entropy"
+
+    // `wipe` zeroes `bytes`: a buffer it alone owns in place, spare capacity
+    // included, else it takes a fresh zeroed one (CryptoEntropy.jet).
+    // `secret_keep` records the buffer as a live Secret's, which a crash dump
+    // redacts and a process end scrubs. Both read the written List's header.
+    #Import(c) priv wipe: fn(bytes: ^[U8]) = "jet_rt_crypto_wipe"
+
+    #Import(c) priv secret_keep: fn(bytes: ^[U8]) = "jet_rt_crypto_secret_keep"
 
     // core.crypto's block loops (SHA256.jet, CryptoAES.jet): `count` blocks
     // of `data` from `offset`, on the host's SHA or AES-NI extensions; false

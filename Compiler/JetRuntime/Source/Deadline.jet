@@ -52,8 +52,16 @@ deadline_save: fn(save: I64) {
 
 // `task.timeout(duration)`: the task deadline becomes the earlier of the
 // installed one and now plus the Duration's whole milliseconds, a negative
-// delay counting as none.
+// delay counting as none. The binding lends the nanoseconds as their
+// exact-Int carrier, read saturated (Int.jet int_saturated): a delay beyond
+// I64 waits as long as I64.MAX does, one below it counts as none.
 #Export(c) jet_task_timeout_duration_ns: fn(nanos: I64) {
+    deadline_after_ns(int_saturated(nanos))
+}
+
+// The deadline now plus `nanos`' whole milliseconds, if earlier than the
+// installed one; a negative delay counts as none.
+deadline_after_ns: fn(nanos: I64) {
     millis: if (nanos <= I64{0}) -> I64{0} else -> nanos /% I64{1000000}
     now: jet_std_time_now()
     jet_ctx_set_deadline_min(if (now > I64{9223372036854775807} - millis) -> I64{9223372036854775807} else -> now + millis)
@@ -64,7 +72,7 @@ deadline_save: fn(save: I64) {
 // and now plus the limit's whole milliseconds.
 #Export(c) jet_ctx_push_deadline_after_ns: fn(nanos: I64, save: I64) {
     deadline_save(save)
-    jet_task_timeout_duration_ns(nanos)
+    deadline_after_ns(nanos)
 }
 
 // `#Deadline(limit) { … }` with an `Instant`: as above, the limit being the
@@ -73,7 +81,7 @@ deadline_save: fn(save: I64) {
     now: deadline_monotonic_ns(save)
     deadline_save(save)
     remaining: if (now > I64{0} && instant_ns < I64{-9223372036854775808} + now) -> I64{-9223372036854775808} else if (now < I64{0} && instant_ns > I64{9223372036854775807} + now) -> I64{9223372036854775807} else -> instant_ns - now
-    jet_task_timeout_duration_ns(remaining)
+    deadline_after_ns(remaining)
 }
 
 // The clock an `Instant` counts on (Core civil_monotonic_ns): a controlled
@@ -158,7 +166,7 @@ deadline_time_fixed: fn() -> Bool {
 
 jet_std_time_now: fn() -> I64 {
     world: world_current()
-    if (world != I64{0}) { return jet_world_now(world) }
+    if (world != I64{0}) { return world_now(world) }
     if deadline_time_fixed() -> return sync_load(wrapping(time_host_root + I64{48}))
     deadline_wall_now_ms()
 }
@@ -190,7 +198,7 @@ jet_deadline_remaining_ms: fn() -> I64 {
 deadline_remaining_ns: fn(deadline_ms: I64) -> I64 {
     world: world_current()
     if (world != I64{0}) {
-        return deadline_ms_to_ns(deadline_until(deadline_ms, jet_world_now(world)))
+        return deadline_ms_to_ns(deadline_until(deadline_ms, world_now(world)))
     }
     if deadline_time_fixed() {
         return if (deadline_until(deadline_ms, sync_load(wrapping(time_host_root + I64{48}))) <= I64{0}) -> I64{0} else -> I64{9223372036854775807}

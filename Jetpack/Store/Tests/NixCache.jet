@@ -182,12 +182,12 @@ store_nix_test_only_cache_info: fn() -> [String:[U8]] Never! {
     [String:[U8]]{"/nix-cache-info": store_nix_test_cache_info()}
 }
 
-store_nix_test_admit: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, store_path: String) -> AdmittedNixClosure Never! {
+store_nix_test_admit: fn(verification: StoreVerification, roots: HangarRoots, name: String, store_path: String) -> AdmittedNixClosure Never! {
     store_admit_nix_closure(verification, roots, store_nix_test_request(name, store_path), false) ?? panic("admit {store_path}: {err.message()}")
 }
 
 // Register one entry while holding the Hangar lock for this call only.
-store_nix_test_register_locked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
+store_nix_test_register_locked: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     _: store_register_entry_unlocked(verification, roots, entry) ?? panic("register entry")
 }
@@ -198,7 +198,7 @@ store_nix_test_object: fn(admitted: AdmittedNixClosure, store_path: String) -> A
 
 // Admission must fail with `expected` and leave no entry, object, or receipt
 // behind.
-store_nix_test_single_failure: fn(verification: ^StoreVerification, label: String, store_path: String, narinfo: [U8], object: [U8], trusted_seed: [U8], expected: NixCacheErrorKind) -> NixCacheError Never! {
+store_nix_test_single_failure: fn(verification: StoreVerification, label: String, store_path: String, narinfo: [U8], object: [U8], trusted_seed: [U8], expected: NixCacheErrorKind) -> NixCacheError Never! {
     root: store_nix_test_unique_dir(label)
     narinfo_text: String.from_bytes(narinfo) ?? panic("narinfo text")
     routes := [String:[U8]]{

@@ -65,23 +65,23 @@ NixClosureReceipt: struct {
     bytes: [U8],
 }
 
-store_admit_nix_closure: fn(verification: ^StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
+store_admit_nix_closure: fn(verification: StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
     store_admit_nix_closure_with_progress(verification, roots, outputs, offline, None, None)
 }
 
 // Use the same signature/NAR admission transaction for discovery and repair.
-store_admit_nix_closure_with_progress: fn(verification: ^StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
+store_admit_nix_closure_with_progress: fn(verification: StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
     store_nix_run_admission(verification, roots, outputs, offline, expected_closure_receipt, progress, false)
 }
 
 // Admission for a caller that already holds the Hangar lock (doctor repair).
 // All scopes of a root share one kernel lock, so admission must not take it
 // again: the listing and the publication run under the caller's hold.
-store_admit_nix_closure_hangar_locked: fn(verification: ^StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
+store_admit_nix_closure_hangar_locked: fn(verification: StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
     store_nix_run_admission(verification, roots, outputs, offline, None, None, true)
 }
 
-store_nix_run_admission: fn(verification: ^StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?, hangar_locked: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
+store_nix_run_admission: fn(verification: StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?, hangar_locked: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
     transaction := NixAdmission.new(verification, roots, expected_closure_receipt, hangar_locked)
     admitted: transaction.admit(outputs, offline, progress) ?? {
         transaction.rollback()
@@ -99,7 +99,7 @@ NixAdmission: struct {
     stage: String,
     priv committed: Bool,
 
-    new: fn(verification: ^StoreVerification, roots: HangarRoots, expected_closure_receipt: String?, hangar_locked: Bool) -[FS, Env, Time]> NixAdmission NixCacheError! {
+    new: fn(verification: StoreVerification, roots: HangarRoots, expected_closure_receipt: String?, hangar_locked: Bool) -[FS, Env, Time]> NixAdmission NixCacheError! {
         hangar: roots.hangar_dir()
         store_nix_ensure_dir(hangar, .Admission)
         stage_parent: files.join(hangar, "stage")
@@ -294,7 +294,7 @@ NixAdmission: struct {
     // The locked publication runs under the Hangar lock, and any of its
     // failures is an atomic-admission failure with the same detail. A
     // hangar-locked admission publishes under its caller's hold.
-    publish: fn(^self, fetched: ^[String:FetchedObject], requests: [String:NixOutputRequest], store_dir: String, progress: ProgressHandle?) -[IO, FS, Env, Time, Time.Wait]> String NixCacheError! {
+    publish: fn(self, fetched: ^[String:FetchedObject], requests: [String:NixOutputRequest], store_dir: String, progress: ProgressHandle?) -[IO, FS, Env, Time, Time.Wait]> String NixCacheError! {
         if self.hangar_locked {
             receipt: self.publish_locked(fetched, requests, store_dir, progress) ?? return Err(NixCacheError.new(.Admission, err.detail))
             return Ok(receipt)
@@ -304,7 +304,7 @@ NixAdmission: struct {
         Ok(receipt)
     }
 
-    publish_locked: fn(^self, fetched: ^[String:FetchedObject], requests: [String:NixOutputRequest], store_dir: String, progress: ProgressHandle?) -[IO, FS, Env, Time, Time.Wait]> String NixCacheError! {
+    publish_locked: fn(self, fetched: ^[String:FetchedObject], requests: [String:NixOutputRequest], store_dir: String, progress: ProgressHandle?) -[IO, FS, Env, Time, Time.Wait]> String NixCacheError! {
         hangar: self.roots.hangar_dir()
         objects_dir: files.join(hangar, "objects")
         store_nix_ensure_dir(objects_dir, .Admission)
@@ -413,7 +413,7 @@ NixAdmission: struct {
 
     // Remove the private stage unless the closure was committed. Callers run
     // it on every exit that did not commit.
-    rollback: fn(^self) -[FS]> Never! {
+    rollback: fn(self) -[FS]> Never! {
         if self.committed {
             return
         }
@@ -467,7 +467,7 @@ store_nix_entries_by_store_path: fn(entries: [StoreEntry]) -> [String:StoreEntry
 
 // An already admitted, still verified Hangar object for `store_path`, or
 // `None` when it must be (re)fetched.
-store_nix_existing_object: fn(verification: ^StoreVerification, roots: HangarRoots, entries: [String:StoreEntry], store_path: String, store_dir: String) -[FS, Env]> FetchedObject? NixCacheError! {
+store_nix_existing_object: fn(verification: StoreVerification, roots: HangarRoots, entries: [String:StoreEntry], store_path: String, store_dir: String) -[FS, Env]> FetchedObject? NixCacheError! {
     entry: entries.get(store_path) ?? return Ok(None)
     output: entry.out
     info: files.stat(output) ?? return Ok(None)

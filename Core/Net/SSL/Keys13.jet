@@ -517,7 +517,7 @@ ssl_tls13_ecdh_agree: fn<R: RNG>(ctx: ^ecdh.ECDHContext, peer: [U8], rng: ^R) ->
 // The FFDH shared secret K = gy^x mod p of our key in `ctx` and the peer's
 // public value, padded to the prime's length, as psa_raw_key_agreement
 // checks and computes it.
-ssl_tls13_ffdh_agree: fn(ctx: ^dhm.DHMContext, peer: [U8]) -> [U8] ssldefs.SSLError! {
+ssl_tls13_ffdh_agree: fn(ctx: dhm.DHMContext, peer: [U8]) -> [U8] ssldefs.SSLError! {
     plen: bn.size(ctx.p)
     if peer.len() != plen -> return Err(.BadInputData)
     gy: bn.read_binary(peer) ?? return Err(ssl_tls13_psa_mpi_error(err))

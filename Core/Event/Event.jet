@@ -58,20 +58,38 @@ EventConfigError: enum {
 
 // The provider owns listener cells, lifecycle and scheduler identities.
 // Source owns constructor composition and rejects invalid async capacities
-// before allocating provider state. Private leaves reuse existing host calls.
+// before allocating provider state.
 
 scope: fn() -> EventScope Never! { rt.scope_new() }
 
 new: fn<T>() -> Event<T> Never! { with_policy<T>(policy_sync()) }
 
-with_policy: fn<T>(policy: EventPolicy) -> Event<T> Never! {
-    core.event.__event_with_policy<T>(policy)
-}
+with_policy: fn<T>(policy: EventPolicy) -> Event<T> Never! { event_make<T>(policy) }
 
-hook: fn<T, R>(fallback: R) -> Hook<T, R> Never! { core.event.__hook_new<T, R>(fallback) }
+hook: fn<T, R>(fallback: R) -> Hook<T, R> Never! { hook_make<T, R>(fallback) }
 
 decision_hook: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
-    core.event.__decision_hook_new<T, E>(policy)
+    decision_hook_make<T, E>(policy)
+}
+
+// The provider's constructors. The compiler builds each call as the
+// provider's, handed the descriptors of the call's type arguments (Build.jet
+// IR_CORE_INTRINSICS); a body only names that operation.
+#Builtin.Role(.InlineEventWithPolicy) priv event_make: fn<T>(policy: EventPolicy) -> Event<T> Never! {
+    event_make<T>(policy)
+}
+
+#Builtin.Role(.InlineHookNew) priv hook_make: fn<T, R>(fallback: R) -> Hook<T, R> Never! {
+    hook_make<T, R>(fallback)
+}
+
+#Builtin.Role(.InlineDecisionHookNew) priv decision_hook_make: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
+    decision_hook_make<T, E>(policy)
+}
+
+// An AsyncEvent under a policy whose capacity the caller checked.
+#Builtin.Role(.InlineAsyncEventNew) priv async_event_make: fn<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> Never! {
+    async_event_make<T, E>(policy, failures)
 }
 
 // A declared point: a module binding whose whole value calls one of these
@@ -86,19 +104,19 @@ decision_hook: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
 
 /// A declared hook point, which returns `fallback` when nothing handles it.
 #Builtin.Role(.HookPoint) hook_point: fn<T, R>(fallback: R) -> Hook<T, R> Never! {
-    core.event.__hook_new<T, R>(fallback)
+    hook_make<T, R>(fallback)
 }
 
 /// A declared decision point, whose handlers' decisions `policy` combines.
 #Builtin.Role(.DecisionPoint) decision_point: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
-    core.event.__decision_hook_new<T, E>(policy)
+    decision_hook_make<T, E>(policy)
 }
 
 policy_sync: fn() -> EventPolicy Never! { rt.policy_sync() }
 
 async_result: fn<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
     if policy.capacity <= 0 -> return Err(EventConfigError.InvalidCapacity)
-    core.event.__async_new<T, E>(policy, failures)
+    async_event_make<T, E>(policy, failures)
 }
 
 #Test("async constructors reject zero and negative capacities before allocation") {

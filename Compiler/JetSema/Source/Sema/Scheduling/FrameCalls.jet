@@ -32,15 +32,15 @@ SemaFrameCallScan: struct {
 
 // The schedule facts of `lambda`, the callback of one `on_frame` call, checked
 // against the scope that encloses the call.
-sema_frame_lambda_schedule: fn(lambda: Lambda, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameScheduleFacts {
+sema_frame_lambda_schedule: fn(lambda: Lambda, check: SemaBodyCheck) -> SemaFrameScheduleFacts {
     scan := SemaFrameCallScan{operations: [FrameOperation]{}, dma_starts: [SemaFrameDMABinding]{}, refusal: None, refusal_index: -1}
     if lambda.body == {
         .Expr(value) -> {
-            ast_visit_expr(environment.tables, value, fn(expression: ExprNode) { sema_frame_note_call(scan, ast_expr(environment.tables, expression), environment, program, scopes) })
+            ast_visit_expr(check.environment.tables, value, fn(expression: ExprNode) { sema_frame_note_call(scan, ast_expr(check.environment.tables, expression), check) })
         }
         .Block(body) -> {
-            sema_frame_collect_dma_starts(scan, body, environment, program, scopes)
-            ast_visit_body(environment.tables, body, fn(expression: ExprNode) { sema_frame_note_call(scan, ast_expr(environment.tables, expression), environment, program, scopes) }, true)
+            sema_frame_collect_dma_starts(scan, body, check)
+            ast_visit_body(check.environment.tables, body, fn(expression: ExprNode) { sema_frame_note_call(scan, ast_expr(check.environment.tables, expression), check) }, true)
         }
     }
     if scan.refusal != None {
@@ -48,8 +48,8 @@ sema_frame_lambda_schedule: fn(lambda: Lambda, environment: SemaScopeEnvironment
     }
     operations := scan.operations.move()
     operations.sort_by(fn(left: FrameOperation, right: FrameOperation) { left.source_index <=> right.source_index })
-    source: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, lambda.span)
-    sema_frame_schedule_produce(operations, environment, program, source, lambda.span.start)
+    source: sema_source_file_at(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, lambda.span)
+    sema_frame_schedule_produce(operations, check, source, lambda.span.start)
 }
 
 sema_frame_note_refusal: fn(scan: ^SemaFrameCallScan, detail: String, source_index: Int) Never! {
@@ -68,24 +68,24 @@ sema_frame_note_fact: fn(scan: ^SemaFrameCallScan, fact: SemaFrameOperationFact,
     if fact.operation == .Val(operation) -> scan.operations.push(operation.copy())
 }
 
-sema_frame_note_call: fn(scan: ^SemaFrameCallScan, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+sema_frame_note_call: fn(scan: ^SemaFrameCallScan, expression: Expr, check: SemaBodyCheck) Never! {
     if expression == {
         .Call(call, _) -> {
             index: call.name_span.start
-            sema_frame_note_fact(scan, sema_frame_direct_call_operation(call.name, call.args, index, environment, program, scopes), index)
+            sema_frame_note_fact(scan, sema_frame_direct_call_operation(call.name, call.args, index, check), index)
         }
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             index: method_span.start
-            if sema_frame_module_call_operation(receiver, method, args, index, environment, program, scopes) == .Val(fact) {
+            if sema_frame_module_call_operation(receiver, method, args, index, check) == .Val(fact) {
                 sema_frame_note_fact(scan, fact, index)
                 return
             }
-            if sema_frame_hardware_register_operation(receiver, method, index, environment, program, scopes) == .Val(operation) {
+            if sema_frame_hardware_register_operation(receiver, method, index, check) == .Val(operation) {
                 scan.operations.push(operation)
                 return
             }
             if method == "start" {
-                started: sema_frame_hardware_dma_start(receiver, args, index, environment, program, scopes)
+                started: sema_frame_hardware_dma_start(receiver, args, index, check)
                 if started.operation == .Val(operation) -> scan.operations.push(operation)
                 return
             }
@@ -100,19 +100,19 @@ sema_frame_note_call: fn(scan: ^SemaFrameCallScan, expression: Expr, environment
 // A bare call: a registered callable's checked contract, else a callable the
 // callback check accepted with no registered row (a prelude builtin or a
 // closure value), whose call-site conventions are its checked accesses.
-sema_frame_direct_call_operation: fn(name: String, args: [CallArg], index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameOperationFact {
-    binding: sema_scope_resolve_index(scopes, name) ?? return sema_frame_checked_call_operation(name, args, None, false, true, index)
-    symbol: sema_scope_binding_symbol(environment, scopes, binding)
-    sema_frame_registered_call_operation(name, args, symbol.id, index, program)
+sema_frame_direct_call_operation: fn(name: String, args: [CallArg], index: Int, check: SemaBodyCheck) -> SemaFrameOperationFact {
+    binding: sema_scope_resolve_index(check.scopes, name) ?? return sema_frame_checked_call_operation(name, args, None, false, true, index)
+    symbol: sema_scope_binding_symbol(check.environment.*, check.scopes, binding)
+    sema_frame_registered_call_operation(name, args, symbol.id, index, check.program.*)
 }
 
 // `alias.member(...)` through a visible import: a Core record, a Core
 // module's registered function, or a module's registered callable. None for
 // any other receiver.
-sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [CallArg], index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameOperationFact? {
+sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [CallArg], index: Int, check: SemaBodyCheck) -> SemaFrameOperationFact? {
     path: sema_expr_core_module_receiver_path(receiver) ?? return None
-    if !sema_expr_core_module_alias_visible(path.alias, scopes) -> return None
-    if sema_call_core_import_module(environment, program, path.alias) == .Val(core_module) {
+    if !sema_expr_core_module_alias_visible(path.alias, check.scopes) -> return None
+    if sema_call_core_import_module(check.environment.*, check.program.*, path.alias) == .Val(core_module) {
         module_name := core_module
         loop leaf in path.leaves {
             module_name = "{module_name}.{leaf}"
@@ -122,22 +122,20 @@ sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [Call
         if core_call(module_name, method) == .Val(found) {
             record := found
             declared := [String]{}
-            if sema_call_core_declared_effects(record, environment, program, declared) {
-                record.effects = declared
-            }
-            return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", args, index))
+            if sema_call_core_declared_effects(record, check, declared) -> record.effects = declared
+            return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", index))
         }
         // A Core function with no row is its registered declaration.
-        graph: program.registration_graph
-        identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
+        graph: check.program.registration_graph
+        identity: sema_call_core_module_identity(check.environment.*, check.program.*, module_name) ?? return None
         module_index: sema_registration_module_index(graph, identity) ?? return None
-        export: sema_registration_resolve_export(graph, module_index, method, environment.module_identity, environment.package_identity, [String]{}) ?? return None
-        return Val(sema_frame_registered_call_operation("{module_name}.{method}", args, export.symbol.id, index, program))
+        export: sema_registration_resolve_export(graph, module_index, method, check.environment.module_identity, check.environment.package_identity) ?? return None
+        return Val(sema_frame_registered_call_operation("{module_name}.{method}", args, export.symbol.id, index, check.program.*))
     }
     if path.leaves.len() > 0 -> return None
-    graph: program.registration_graph
-    resolved: sema_registration_lookup_qualified(graph, environment.module_identity, path.alias, method) ?? return None
-    Val(sema_frame_registered_call_operation("{path.alias}.{method}", args, sema_resolved_id(graph, resolved), index, program))
+    graph: check.program.registration_graph
+    resolved: sema_registration_lookup_qualified(graph, check.environment.module_identity, path.alias, method) ?? return None
+    Val(sema_frame_registered_call_operation("{path.alias}.{method}", args, sema_resolved_id(graph, resolved), index, check.program.*))
 }
 
 sema_frame_registered_call_operation: fn(name: String, args: [CallArg], target: SymbolID, index: Int, program: SemaProgramTables) -> SemaFrameOperationFact {
@@ -150,48 +148,40 @@ sema_frame_registered_call_operation: fn(name: String, args: [CallArg], target: 
 
 // The checked DMA starts bound to a source local anywhere in the callback's
 // statement blocks, so a later `transfer.wait()` names its exact start token.
-sema_frame_collect_dma_starts: fn(scan: ^SemaFrameCallScan, body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+sema_frame_collect_dma_starts: fn(scan: ^SemaFrameCallScan, body: [Stmt], check: SemaBodyCheck) Never! {
     loop statement in body {
         if statement == {
             .Val(binding) -> {
-                sema_frame_record_dma_start(scan, binding.name, binding.init, environment, program, scopes)
+                sema_frame_record_dma_start(scan, binding.name, binding.init, check)
             }
             .While(_, inner, _, _, _) | .For(_, _, _, _, inner, _, _, _, _) | .Loop(inner, _, _, _) | .Unsafe(_, _, inner, _) | .Impure(_, _, inner, _) | .Reactive(inner, _) | .Shield(inner, _) | .Defer(inner, _) | .Switched(_, inner, _) | .Region(_, _, inner, _) | .Policy(_, inner, _) | .TaskGroup(_, _, _, inner, _) | .Layout(_, _, inner, _) | .AuthorityScope(_, _, _, inner, _) | .ComptimeBlock(inner, _, _) | .ContextBlock(_, inner, _) | .Live(inner, _) | .AssumeDet(_, _, inner, _) | .Transact(_, _, inner, _, _) | .ScopeMember(_, _, _, _, inner, _, _, _) -> {
-                sema_frame_collect_dma_starts(scan, inner, environment, program, scopes)
+                sema_frame_collect_dma_starts(scan, inner, check)
             }
             .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
-                loop arm in arms {
-                    sema_frame_collect_dma_starts(scan, arm.body, environment, program, scopes)
-                }
-                if else_body == .Val(inner) {
-                    sema_frame_collect_dma_starts(scan, inner, environment, program, scopes)
-                }
+                loop arm in arms { sema_frame_collect_dma_starts(scan, arm.body, check) }
+                if else_body == .Val(inner) -> sema_frame_collect_dma_starts(scan, inner, check)
             }
             .CountedLoop(init, _, step, inner, _, _, _) -> {
-                sema_frame_record_dma_start(scan, init.name, init.init, environment, program, scopes)
-                if step == .Val(value) {
-                    sema_frame_collect_dma_starts(scan, [Stmt]{value}, environment, program, scopes)
-                }
-                sema_frame_collect_dma_starts(scan, inner, environment, program, scopes)
+                sema_frame_record_dma_start(scan, init.name, init.init, check)
+                if step == .Val(value) -> sema_frame_collect_dma_starts(scan, [Stmt]{value}, check)
+                sema_frame_collect_dma_starts(scan, inner, check)
             }
             .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-                sema_frame_collect_dma_starts(scan, then_body, environment, program, scopes)
-                if else_body == .Val(inner) {
-                    sema_frame_collect_dma_starts(scan, inner, environment, program, scopes)
-                }
+                sema_frame_collect_dma_starts(scan, then_body, check)
+                if else_body == .Val(inner) -> sema_frame_collect_dma_starts(scan, inner, check)
             }
             .Expr(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
         }
     }
 }
 
-sema_frame_record_dma_start: fn(scan: ^SemaFrameCallScan, name: String, init: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+sema_frame_record_dma_start: fn(scan: ^SemaFrameCallScan, name: String, init: Expr, check: SemaBodyCheck) Never! {
     if init == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             if method != "start" {
                 return
             }
-            started: sema_frame_hardware_dma_start(receiver, args, method_span.start, environment, program, scopes)
+            started: sema_frame_hardware_dma_start(receiver, args, method_span.start, check)
             if started.dma_start == .Val(start) {
                 scan.dma_starts.push(sema_frame_hardware_dma_bind_start(start, name))
             }

@@ -179,8 +179,7 @@ sema_derive_bare: fn(name: String) -> String Never! {
 sema_derive_splice: fn(name: String) -> Bool Never! { name.starts_with("#{{") }
 
 // The field a typed layout selector `[.field]` names. The parser keeps the
-// selector as an internal identifier, NUL + `jet.layout.selector.<field>`
-// (JetParser parser_task_internal).
+// selector as an internal identifier, NUL + `jet.layout.selector.<field>`.
 sema_derive_layout_selector: fn(index: Expr) -> String? Never! {
     if index == .Ident(name, _, _) {
         nul: String.from_bytes([U8]{U8{0}}) ?? ""
@@ -2512,38 +2511,39 @@ sema_derive_has_name: fn(derives: [NamedSpan], name: String) -> Bool {
 
 // Membership facts over one module's items, built once per expansion so
 // readiness, selection, and the codec expansion ask keyed questions instead of
-// rescanning items. `keys` interns impl keys and declared names; the columns
-// hold each id's facts (row 0, the empty text, holds none). `impl_flags` holds
-// an impl key's sources (sema_derive_impl_flags, 0 for none); `nominal_rows` a
-// name's first struct, enum, or distinct position (-1 for none); `distinct`
-// whether a name declares a distinct type. `codec_method` marks the (type,
-// Encode/Decode) impl keys whose type declares that codec's method name
-// (`encode`, `decode`) as an ordinary method: the generated codec would be a
-// second member of that name, so the package default never selects it (an
-// explicit marker still asks).
+// rescanning items. `keys` interns declared type and trait names; the columns
+// hold each name id's facts (row 0, the empty text, holds none), and the maps
+// each (type, trait) impl pair's, by its sema_derive_index_pair slot.
+// `impl_flags` holds an impl pair's sources (sema_derive_impl_flags; no
+// entry for none); `nominal_rows` a name's first struct, enum, or distinct
+// position (-1 for none); `distinct` whether a name declares a distinct type.
+// `codec_method` marks the (type, Encode/Decode) impl pairs whose type
+// declares that codec's method name (`encode`, `decode`) as an ordinary
+// method: the generated codec would be a second member of that name, so the
+// package default never selects it (an explicit marker still asks).
 SemaDeriveItemIndex: struct {
     keys: NameTable,
-    impl_flags: [Int],
+    impl_flags: [Int:Int],
     nominal_rows: [Int],
     distinct: [Bool],
-    codec_method: [Bool],
+    codec_method: [Int:Bool],
 }
 
 sema_derive_item_index: fn(items: [Item]) -> SemaDeriveItemIndex {
-    index := SemaDeriveItemIndex{keys: name_table_sized(items.len() * 2 + 4), impl_flags: [Int]{0}, nominal_rows: [Int]{-1}, distinct: [Bool]{false}, codec_method: [Bool]{false}}
+    index := SemaDeriveItemIndex{keys: name_table_sized(items.len() * 2 + 4), impl_flags: [Int:Int]{}, nominal_rows: [Int]{-1}, distinct: [Bool]{false}, codec_method: [Int:Bool]{}}
     loop (position, item) in items {
         if item == {
             .Impl(definition) -> {
-                id: sema_derive_index_id(index, sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? ""))
-                index.impl_flags[id] = sema_derive_impl_flags(index.impl_flags[id], definition.is_generated_serde)
+                slot: sema_derive_index_pair(index, definition.type_name, definition.trait_name ?? "")
+                index.impl_flags[slot] = sema_derive_impl_flags(index.impl_flags.get(slot) ?? 0, definition.is_generated_serde)
                 if !sema_derive_is_codec_trait(definition.trait_name ?? "") {
                     sema_derive_index_codec_methods(index, definition.type_name, definition.methods)
                 }
             }
             .Struct(definition) -> {
                 loop block in definition.trait_impls {
-                    id: sema_derive_index_id(index, sema_type_metadata_impl_key(definition.name, block.trait_name))
-                    index.impl_flags[id] = sema_derive_impl_flags(index.impl_flags[id], block.compiler_generated)
+                    slot: sema_derive_index_pair(index, definition.name, block.trait_name)
+                    index.impl_flags[slot] = sema_derive_impl_flags(index.impl_flags.get(slot) ?? 0, block.compiler_generated)
                     if !sema_derive_is_codec_trait(block.trait_name) {
                         sema_derive_index_codec_methods(index, definition.name, block.methods)
                     }
@@ -2553,8 +2553,8 @@ sema_derive_item_index: fn(items: [Item]) -> SemaDeriveItemIndex {
             }
             .Enum(definition) -> {
                 loop block in definition.trait_impls {
-                    id: sema_derive_index_id(index, sema_type_metadata_impl_key(definition.name, block.trait_name))
-                    index.impl_flags[id] = sema_derive_impl_flags(index.impl_flags[id], block.compiler_generated)
+                    slot: sema_derive_index_pair(index, definition.name, block.trait_name)
+                    index.impl_flags[slot] = sema_derive_impl_flags(index.impl_flags.get(slot) ?? 0, block.compiler_generated)
                     if !sema_derive_is_codec_trait(block.trait_name) {
                         sema_derive_index_codec_methods(index, definition.name, block.methods)
                     }
@@ -2572,22 +2572,27 @@ sema_derive_item_index: fn(items: [Item]) -> SemaDeriveItemIndex {
     index
 }
 
-// The id of `key` in `index`, interned with empty facts when new.
+// The id of the name `key` in `index`, interned with empty facts when new.
 sema_derive_index_id: fn(index: ^SemaDeriveItemIndex, key: String) -> Int Never! {
     id: name_index(name_intern(index.keys, key))
-    if id == index.impl_flags.len() {
-        index.impl_flags.push(0)
+    if id == index.nominal_rows.len() {
         index.nominal_rows.push(-1)
         index.distinct.push(false)
-        index.codec_method.push(false)
     }
     id
 }
 
-// The id of `key` in `index`, or 0 (no facts) when no item names it.
+// The id of the name `key` in `index`, or 0 (no facts) when no item names it.
 sema_derive_index_find: fn(index: SemaDeriveItemIndex, key: String) -> Int Never! {
     found: name_find(index.keys, key) ?? return 0
     name_index(found)
+}
+
+// The slot of the (type, trait) impl pair in `index`: the type's id in the
+// high half, the trait's in the low, both interned when new.
+sema_derive_index_pair: fn(index: ^SemaDeriveItemIndex, type_name: String, trait_name: String) -> Int Never! {
+    type_id: sema_derive_index_id(index, type_name)
+    (type_id << 32) | sema_derive_index_id(index, trait_name)
 }
 
 sema_derive_index_nominal: fn(index: ^SemaDeriveItemIndex, name: String, position: Int) Never! {
@@ -2612,15 +2617,17 @@ sema_derive_is_codec_trait: fn(trait_name: String) -> Bool Never! {
 sema_derive_index_codec_methods: fn(index: ^SemaDeriveItemIndex, type_name: String, methods: [Func]) {
     loop method in methods {
         if method.name == "encode" {
-            index.codec_method[sema_derive_index_id(index, sema_type_metadata_impl_key(type_name, "Encode"))] = true
+            slot: sema_derive_index_pair(index, type_name, "Encode")
+            index.codec_method[slot] = true
         }
         if method.name == "decode" {
-            index.codec_method[sema_derive_index_id(index, sema_type_metadata_impl_key(type_name, "Decode"))] = true
+            slot: sema_derive_index_pair(index, type_name, "Decode")
+            index.codec_method[slot] = true
         }
     }
 }
 
-// The sources of one (type, trait) impl key: bit 1 a written impl item or
+// The sources of one (type, trait) impl pair: bit 1 a written impl item or
 // inline trait block, bit 2 a compiler-generated one (a generated codec impl
 // item, or a derived inline block).
 sema_derive_impl_flags: fn(existing: Int, generated: Bool) -> Int Never! {
@@ -2631,13 +2638,15 @@ sema_derive_impl_flags: fn(existing: Int, generated: Bool) -> Int Never! {
 }
 
 sema_derive_has_trait_impl: fn(index: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Bool {
-    index.impl_flags[sema_derive_index_find(index, sema_type_metadata_impl_key(type_name, trait_name))] != 0
+    slot: name_pair_find_slot(index.keys, type_name, trait_name) ?? return false
+    index.impl_flags.get(slot) != None
 }
 
 // Whether `index`'s type `type_name` declares the method `trait_name`'s
 // generated codec would add (sema_derive_index_codec_methods).
 sema_derive_has_codec_method: fn(index: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Bool {
-    index.codec_method[sema_derive_index_find(index, sema_type_metadata_impl_key(type_name, trait_name))]
+    slot: name_pair_find_slot(index.keys, type_name, trait_name) ?? return false
+    index.codec_method.get(slot) ?? false
 }
 
 // ---------------------------------------------------------------------------

@@ -41,6 +41,7 @@ use {
         canonical_json_bytes,
         canonical_json_value,
         core_call,
+        effect_vocabulary_list_view_count,
         foundation_byte_text,
         import_alias,
         import_walk_bindings,
@@ -124,16 +125,19 @@ JET_CLI_REPLAY_TERM_READS: [String]{"readline", "read_all_input"}
 // the 1 MiB payload limit.
 JET_CLI_REPLAY_IO_CHUNK_BYTES: 524288
 
-// The portable I/O error registry and the one Linux errno each name
-// replays as. An errno outside it, or one of two that share a name
-// (EPERM beside EACCES, EWOULDBLOCK is EAGAIN), cannot be replayed exactly.
-JET_CLI_REPLAY_IO_ERRORS: [String]{"interrupted", "timed_out", "would_block", "broken_pipe", "connection_aborted", "connection_refused", "connection_reset", "not_connected", "address_in_use", "address_unavailable", "permission_denied", "not_found"}
+// The names of the portable I/O error registry (CLI_REPLAY_NET_ERRORS)
+// that one Linux errno each replays as. An errno outside it, or one of two
+// that share a name (EPERM beside EACCES, EWOULDBLOCK is EAGAIN), cannot be
+// replayed exactly; `unexpected_eof` and `invalid_data` have no errno.
+CLI_REPLAY_IO_ERRORS: [String]{"interrupted", "timed_out", "would_block", "broken_pipe", "connection_aborted", "connection_refused", "connection_reset", "not_connected", "address_in_use", "address_unavailable", "permission_denied", "not_found"}
 
 JET_CLI_REPLAY_IO_ERRNOS: [Int]{4, 110, 11, 32, 103, 111, 104, 107, 98, 99, 13, 2}
 
+CLI_REPLAY_IO_ERROR_COUNT: #run effect_vocabulary_list_view_count("CLI/ProveReplay.jet", CLI_REPLAY_IO_ERRORS, "CLI_REPLAY_IO_ERRORS", CLI_REPLAY_NET_ERRORS, "CLI_REPLAY_NET_ERRORS", [String]{})
+
 // The whole portable registry, which a NetEnd outcome names: Core's HTTP
 // client fails a replayed hop with the error's name as its message.
-JET_CLI_REPLAY_NET_ERRORS: [String]{"interrupted", "timed_out", "would_block", "broken_pipe", "connection_aborted", "connection_refused", "connection_reset", "not_connected", "address_in_use", "address_unavailable", "permission_denied", "not_found", "unexpected_eof", "invalid_data"}
+CLI_REPLAY_NET_ERRORS: [String]{"interrupted", "timed_out", "would_block", "broken_pipe", "connection_aborted", "connection_refused", "connection_reset", "not_connected", "address_in_use", "address_unavailable", "permission_denied", "not_found", "unexpected_eof", "invalid_data"}
 
 // How far a hop got (Core/HTTP/Client.jet C_CLIENT_STAGE_*), as NetEnd's
 // `phase`.
@@ -936,13 +940,13 @@ jet_cli_replay_uint: fn(value: Int) -> CanonicalJSON Never! {
 // it with another errno).
 jet_cli_replay_io_error_name: fn(errno: Int) -> String? Never! {
     loop (at, known) in JET_CLI_REPLAY_IO_ERRNOS {
-        if known == errno -> return Val(JET_CLI_REPLAY_IO_ERRORS[at].copy())
+        if known == errno -> return Val(CLI_REPLAY_IO_ERRORS[at].copy())
     }
     None
 }
 
 jet_cli_replay_io_errno: fn(name: String) -> Int? Never! {
-    loop (at, known) in JET_CLI_REPLAY_IO_ERRORS {
+    loop (at, known) in CLI_REPLAY_IO_ERRORS {
         if known == name -> return Val(JET_CLI_REPLAY_IO_ERRNOS[at])
     }
     None
@@ -1239,7 +1243,7 @@ jet_cli_replay_journal_reads: fn(journal: JetCLIReplayJournal, run: JetCLIReplay
             if hop.ending == "unmapped" {
                 return Err(jet_cli_replay_unmodeled("an HTTP request that failed with no portable error", "the {JET_CLI_REPLAY_NET_PHASES[hop.stage]} step of an HTTP request failed in a way the portable error registry cannot name, such as a TLS certificate or protocol failure", "capture again once the request succeeds or fails with a network error such as a refused connection or a timeout"))
             }
-            if hop.ending != "eof" && !JET_CLI_REPLAY_NET_ERRORS.contains(hop.ending) {
+            if hop.ending != "eof" && !CLI_REPLAY_NET_ERRORS.contains(hop.ending) {
                 return Err(jet_cli_replay_unfinalized("the capture journal holds a malformed HTTP record"))
             }
             frames += 2 + (hop.stream.len() + JET_CLI_REPLAY_NET_CHUNK_BYTES - 1) /% JET_CLI_REPLAY_NET_CHUNK_BYTES
@@ -2307,7 +2311,7 @@ jet_cli_replay_net_end_payload: fn(payload: [U8], open: JetCLIReplayNetOpen) -> 
     ending := "eof"
     if form == "error" && outcome.len() == 2 {
         ending = jet_cli_replay_text(outcome, "error", "NetEnd outcome")
-        if !JET_CLI_REPLAY_NET_ERRORS.contains(ending) {
+        if !CLI_REPLAY_NET_ERRORS.contains(ending) {
             return Err(jet_cli_replay_corrupt("NetEnd outcome error `{ending}` is not a portable error"))
         }
     } else if form != "eof" || outcome.len() != 1 {

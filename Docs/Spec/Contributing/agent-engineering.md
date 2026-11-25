@@ -32,10 +32,9 @@ and its expected meaning instead of updating snapshots to hide a regression.
 Follow the [example procedure](examples.md).
 
 Fixtures that compile Prelude fragments directly must include their canonical
-dependency closure. For example, the scheduler's native callback boundary comes
-from `Prelude/Core/NativeTaskBody.rs`; missing task-body declarations are repaired
-by including that shared kernel, not by inventing fixture-only task flags or
-weakening the scheduler assertions.
+dependency closure. A missing declaration is repaired by including the shared
+kernel that defines it, not by inventing fixture-only flags or weakening the
+fixture's assertions.
 
 An unused declaration is not automatically dead code. Trace callers, generated
 uses, and approved Tower scope before deleting it. Conversely, a historical

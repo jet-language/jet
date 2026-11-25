@@ -170,6 +170,21 @@ int_word: fn(value: I64) -> I64 {
     return if (int_negative(value)) -> wrapping(I64{0} - magnitude) else -> magnitude
 }
 
+// The I64 an exact-Int carrier lent to a route export holds, saturated: a
+// value below I64.MIN reads as I64.MIN and one above I64.MAX as I64.MAX, so
+// the export's own range check refuses it, or its cap takes it, as it would
+// that bound. Every route crosses an Int or machine-integer argument as its
+// carrier (JetIR BuildRoutes.jet ir_route_declared); an export that reads
+// such a word as a number reads it through this or another carrier reader,
+// never as the bare word, which above the inline range is a node address.
+int_saturated: fn(value: I64) -> I64 {
+    if int_inline(value) -> return value
+    negative: int_negative(value)
+    bound: if negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
+    if int_fits(value, bound) -> return int_word(value)
+    if negative -> I64{-9223372036854775807 - 1} else -> I64{9223372036854775807}
+}
+
 int_pack: fn(node: I64) -> I64 {
     int_normalize(node)
     tagged: int_tag(node)
@@ -518,16 +533,11 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
     int_word(value)
 }
 
-#Export(c) jet_int_checked_fixed: fn(value: I64, kind: I64, file: I64, file_len: I64, line: I64) -> I64 {
-    if (kind < I64{0} || kind > I64{7}) {
-        int_stop(file, file_len, line, I64{3})
-        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    }
+// Whether the exact Int `value` is a value of the fixed kind `kind`, one of
+// 0..3 (I8, I16, I32, I64) or 4..7 (U8, U16, U32, U64).
+int_fixed_fits: fn(value: I64, kind: I64) -> Bool {
     negative: int_negative(value)
-    if (kind >= I64{4} && negative) {
-        int_stop(file, file_len, line, I64{3})
-        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    }
+    if (kind >= I64{4} && negative) { return false }
     bound := U64{18446744073709551615}
     if {
         (kind == I64{0}) -> bound = if negative -> U64{128} else -> U64{127}
@@ -541,11 +551,24 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
         (kind == I64{6}) -> bound = U64{4294967295}
         else -> {}
     }
-    if !int_fits(value, bound) {
+    int_fits(value, bound)
+}
+
+#Export(c) jet_int_checked_fixed: fn(value: I64, kind: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    if (kind < I64{0} || kind > I64{7} || !int_fixed_fits(value, kind)) {
         int_stop(file, file_len, line, I64{3})
         if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     int_word(value)
+}
+
+// 1 when the exact Int `value` is a value of the fixed kind `kind`
+// (jet_int_checked_fixed's kinds), else 0; a kind outside 0..7 is 0. Nothing
+// stops and nothing is built, so a 64-bit narrowing of a big Int (JetIR
+// ir_fixed_in_range) tests its fit with no boxed bound and no compare.
+#Export(c) jet_int_fixed_fits: fn(value: I64, kind: I64) -> I64 {
+    if (kind < I64{0} || kind > I64{7} || !int_fixed_fits(value, kind)) { return I64{0} }
+    I64{1}
 }
 
 int_mul_small_into: fn(node: I64, value: I64, factor: I64) {

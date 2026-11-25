@@ -1,0 +1,16 @@
+// A marker reached through a Core import names it by the PascalCase spelling
+// of the import's local name: `web_http` is `WebHTTP`, so
+// `#web_http.StaticRoutes` is E0087, never a marker dropped without a word.
+use web_http: core.http
+
+#web_http.StaticRoutes
+Table: struct {
+    count: Int,
+
+    get: fn(self, path: String) -> Int { self.count }
+}
+
+run: fn() {
+    table: Table{count: 1}
+    _ := table.get("/")
+}

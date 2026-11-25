@@ -67,22 +67,8 @@ FirstDifference: struct {
     right: String,
 }
 
-ObservedNodeKind: enum {
-    Directory,
-    Symlink,
-    File,
-
-    label: fn(self) -> String Never! {
-        if self == {
-            .Directory -> "directory"
-            .Symlink -> "symlink"
-            .File -> "file"
-        }
-    }
-}
-
 NodeObservation: struct {
-    kind: ObservedNodeKind,
+    kind: SealRootKind,
     mode: Int,
     digest: String?,
     target: String?,
@@ -94,7 +80,7 @@ NodeObservation: struct {
         digest: self.digest ?? "<none>"
         target: self.target ?? "<none>"
         hardlink: self.hardlink ?? "<none>"
-        "kind={self.kind.label()};mode={self.mode};digest={digest};target={target};hardlink={hardlink};xattrs={self.xattrs.join(",")}"
+        "kind={self.kind.as_str()};mode={self.mode};digest={digest};target={target};hardlink={hardlink};xattrs={self.xattrs.join(",")}"
     }
 }
 
@@ -108,7 +94,7 @@ OutputSnapshot: struct {
 store_repro_invalid: fn(detail: String) -> StoreError Never! { StoreError.InvalidData(detail) }
 
 // Verify both outputs, then compare their canonical trees and entry metadata.
-store_repro_compare_entries: fn(verification: ^StoreVerification, left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
+store_repro_compare_entries: fn(verification: StoreVerification, left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
     store_repro_verify_existing_output(verification, left_roots, left)
     store_repro_verify_existing_output(verification, right_roots, right)
     left_snapshot: store_repro_snapshot_for_entry(left_roots, left)

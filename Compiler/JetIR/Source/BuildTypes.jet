@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, build_time_refused, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, BinOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
+    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, build_time_refused, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, BinOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_leaf, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_foundation.[TShapeFormatName, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
@@ -550,12 +550,12 @@ ir_value_type_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, tid: TypeID, laying
     if ir_type_handle(p, ty) {
         return Val(ir_intern_type(m, "typeid:handle", ir_layout(IRTypeKind.Word, tid, 8, 8, IRClass.Integer, false, 64, "")))
     }
-    row: ir_type_def(p, name) ?? {
-        if args.len() == 0 && ir_host_value_name(name) {
-            return Val(ir_intern_type(m, "host:{name}", ir_layout(IRTypeKind.Word, tid, 8, 8, IRClass.Integer, false, 64, "")))
-        }
-        return None
+    // A compiler value (ir_host_value_type) is the word naming it in the
+    // evaluator's host table, declared or not.
+    if args.len() == 0 && ir_host_value_type(p, name) != None {
+        return Val(ir_intern_type(m, "host:{name}", ir_layout(IRTypeKind.Word, tid, 8, 8, IRClass.Integer, false, 64, "")))
     }
+    row: ir_type_def(p, name) ?? return None
     definition: p.types[row]
     // A generic declaration lays out per instance, its parameters bound to the
     // instance's arguments; an instance of a generic a Core module exports
@@ -821,12 +821,12 @@ ir_handle_row_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, name: String) -> In
     Val(ir_intern_type(m, key, ir_owned_layout(IRTypeKind.Pointer, spelled_tid, "jet_rt_handle_drop_{atom}", clone)))
 }
 
-// Whether a value of `ty` holds a compiler value host word (ir_host_value_name)
-// or a TypeId handle (ir_type_handle) anywhere: itself, or an element, payload
-// or member of it.
+// Whether a value of `ty` holds a compiler value host word
+// (ir_host_value_type) or a TypeId handle (ir_type_handle) anywhere: itself,
+// or an element, payload or member of it.
 ir_host_value_held: fn(p: IRProgram, ty: Type) -> Bool Never! {
     if ir_untag(ty) == {
-        .Named(name) -> return (ir_host_value_name(name) && ir_type_def(p, name) == None) || ir_type_handle(p, ty)
+        .Named(name) -> return ir_host_value_type(p, name) != None || ir_type_handle(p, ty)
         .List(element) -> return ir_host_value_held(p, element)
         .Option(inner) -> return ir_host_value_held(p, inner)
         .Result(ok, err) -> return ir_host_value_held(p, ok) || ir_host_value_held(p, err)
@@ -840,12 +840,20 @@ ir_host_value_held: fn(p: IRProgram, ty: Type) -> Bool Never! {
     false
 }
 
+// The compiler value type `name` names in `p`, if any (ir_host_value_leaf):
+// a bare compiler value name `p` lays out no record for, or the key of its
+// `core.compiler` declaration, which the evaluator answers as a host word
+// all the same.
+ir_host_value_type: fn(p: IRProgram, name: String) -> String? Never! {
+    leaf: ir_host_value_leaf(name) ?? return None
+    if leaf != name || ir_type_def(p, name) == None -> return Val(leaf)
+    None
+}
+
 // The compiler value name type row `row` holds as a host word, if any.
 ir_host_value_row: fn(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
     if m.types[row].kind != .Word -> return None
-    if ir_row_ty(m, p, row) == .Named(name) {
-        if ir_host_value_name(name) && ir_type_def(p, name) == None -> return Val(name.copy())
-    }
+    if ir_row_ty(m, p, row) == .Named(name) -> return ir_host_value_type(p, name)
     None
 }
 
@@ -3184,7 +3192,7 @@ ir_order_step: fn(m: ^IRModule, b: ^IRBuilder, a: Int, c: Int, sign: Int, decide
 }
 
 // `sign` = -1 when `below` holds, else 1; then leaves `decided`.
-ir_order_decide: fn(m: ^IRModule, b: ^IRBuilder, below: Int, sign: Int, decided: Int) Never! {
+ir_order_decide: fn(m: IRModule, b: ^IRBuilder, below: Int, sign: Int, decided: Int) Never! {
     ir_emit(b.f, IROp.Const, sign, 1, -1, -1, b.line)
     ir_open_if(b.f, below, b.line)
     ir_emit(b.f, IROp.Const, sign, -1, -1, -1, b.line)
@@ -3810,7 +3818,7 @@ ir_union_lend: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, payload: Int, membe
 // Stores the bits of `payload`, laid out as `row`, at `offset` in the box
 // `holder` with no new owner (no clone, no move): the box only lends the
 // value (IRBoxLend).
-ir_store_lent: fn(m: ^IRModule, b: ^IRBuilder, holder: Int, offset: Int, payload: Int, row: Int) Never! {
+ir_store_lent: fn(m: IRModule, b: ^IRBuilder, holder: Int, offset: Int, payload: Int, row: Int) Never! {
     if m.types[row].kind == .Aggregate {
         address: ir_temp(m, b, row)
         ir_emit(b.f, IROp.Offset, address, holder, offset, -1, b.line)
@@ -5443,7 +5451,9 @@ ir_try_from_ok_row: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, ty
 // where negative reads past every bound); an exact source compares exactly.
 // A 64-bit target's bounds past the inline range hold for every inline
 // Int, so an inline source tests only its word's sign (U64) or nothing
-// (I64), and only a big Int builds the bounds and compares them exactly.
+// (I64), and a big Int asks the runtime (jet_int_fixed_fits, kind 3 or 7),
+// which reads its limbs against the bound: no bound is boxed, no compare
+// runs, and nothing is dropped, on every call of `checked(I64{x})`.
 ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t_bits: Int) -> Int Never! {
     source: m.types[b.f.slot_type[value]]
     bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -5463,13 +5473,15 @@ ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
                 ir_emit(b.f, IROp.Ge, fits, bits, zero, -1, b.line)
             }
             ir_else(b.f, b.line)
+            kind: ir_word_const(m, b, if t_signed -> 3 else -> 7)
+            fit: ir_runtime(m, b, "jet_int_fixed_fits", [Int]{value, kind}, word_row)
+            zero: ir_word_const(m, b, 0)
+            ir_emit(b.f, IROp.Ne, fits, fit, zero, -1, b.line)
+            ir_end(b.f, b.line)
+            return fits
         }
         low: ir_int_constant(m, b, int_row, lowest)
-        high := -1
-        if t_bits == 64 && !t_signed {
-            high = ir_fresh_temp(m, b, int_row)
-            ir_emit(b.f, IROp.ConstBigInt, high, ir_intern_name(m, "18446744073709551615"), -1, -1, b.line)
-        } else { high = ir_int_constant(m, b, int_row, highest) }
+        high: ir_int_constant(m, b, int_row, highest)
         above: ir_bool_op(m, b, IROp.Ge, value, low)
         ir_open_if(b.f, above, b.line)
         below: ir_bool_op(m, b, IROp.Le, value, high)
@@ -5477,7 +5489,6 @@ ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
         ir_end(b.f, b.line)
         ir_release(m, b, low)
         ir_release(m, b, high)
-        if t_bits == 64 -> ir_end(b.f, b.line)
         return fits
     }
     wide: ir_copy_word(m, b, value, word_row)
@@ -5506,46 +5517,34 @@ ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
 
 // The 64-bit word of `value`, emitted where ir_fixed_fits holds: a fixed
 // source's extended word, or an exact Int's value, where a U64 target above
-// I64.MAX takes the bits of x - 2^64. An inline Int's word is its value, so
-// only a big Int compares with I64.MAX.
+// I64.MAX takes the bits of x - 2^64. An inline Int's word is its value; a
+// big Int's word is jet_int_checked_fixed's (kind 7, the U64 range it already
+// lies in), the low 64 bits of its limbs, so no bound is boxed.
 ir_fixed_fit_word: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t_bits: Int) -> Int Never! {
     word_row: ir_word_row(m)
     if m.types[b.f.slot_type[value]].kind != .Int -> return ir_copy_word(m, b, value, word_row)
     if !(t_bits == 64 && !t_signed) {
         return ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row)
     }
-    int_row: b.f.slot_type[value]
     word: ir_temp(m, b, word_row)
     bits: ir_int_word(m, b, value)
     inline: ir_int_word_inline(m, b, bits)
     ir_open_if(b.f, inline, b.line)
     ir_emit(b.f, IROp.Copy, word, bits, -1, -1, b.line)
     ir_else(b.f, b.line)
-    signed_max: ir_int_constant(m, b, int_row, 9223372036854775807)
-    low_half: ir_bool_op(m, b, IROp.Le, value, signed_max)
-    ir_release(m, b, signed_max)
-    ir_open_if(b.f, low_half, b.line)
-    direct: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row)
-    ir_emit(b.f, IROp.Copy, word, direct, -1, -1, b.line)
-    ir_else(b.f, b.line)
-    modulus: ir_fresh_temp(m, b, int_row)
-    ir_emit(b.f, IROp.ConstBigInt, modulus, ir_intern_name(m, "18446744073709551616"), -1, -1, b.line)
-    shifted: ir_fresh_temp(m, b, int_row)
-    ir_emit(b.f, IROp.Sub, shifted, value, modulus, IR_OVERFLOW_TRAP, b.line)
-    wrapped: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{shifted}, word_row)
-    ir_emit(b.f, IROp.Copy, word, wrapped, -1, -1, b.line)
-    ir_release(m, b, shifted)
-    ir_release(m, b, modulus)
-    ir_end(b.f, b.line)
+    args := [Int]{value, ir_word_const(m, b, 7)}
+    loop arg in ir_location(m, b, b.line) -> args.push(arg)
+    low: ir_runtime(m, b, ir_route_export("jet_std.jet_int_checked_fixed"), args, word_row)
+    ir_emit(b.f, IROp.Copy, word, low, -1, -1, b.line)
     ir_end(b.f, b.line)
     word
 }
 
 // `checked(I64{x})`, `wrapping(U64{x})` and the other 64-bit narrowings of an
-// exact Int: the path an inline x takes (each If's then arm, each Else
-// skipped to its End) builds no boxed bound, so it calls no
-// jet_int_owned_from_i64 and holds no ConstBigInt; the big Int's arm does.
-#Test("An inline Int's 64-bit narrowing builds no boxed bound") {
+// exact Int build no boxed bound on any path: an inline x takes each If's
+// then arm, and a big x's arms (each Else) ask the runtime, so no arm calls
+// jet_int_owned_from_i64 or jet_int_compare or holds a ConstBigInt.
+#Test("An exact Int's 64-bit narrowing builds no boxed bound") {
     widths: [Bool]{true, false}
     loop t_signed in widths {
         m := ir_module_new()
@@ -5559,19 +5558,19 @@ ir_fixed_fit_word: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
         ir_end(b.f, b.line)
         boxed := 0
         cold := 0
-        at := 0
-        loop at < b.f.op.len() {
-            op: b.f.op[at]
-            if op == .Else {
-                cold += 1
-                at = b.f.a[at]
-            } else {
-                if op == .ConstBigInt || (op == .CallRuntime && m.names[b.f.a[at]] == "jet_int_owned_from_i64") -> boxed += 1
-                at += 1
+        tested := 0
+        loop (at, op) in b.f.op {
+            if op == .Else -> cold += 1
+            if op == .ConstBigInt -> boxed += 1
+            if op == .CallRuntime {
+                name: m.names[b.f.a[at]]
+                if name == "jet_int_owned_from_i64" || name == "jet_int_compare" -> boxed += 1
+                if name == "jet_int_fixed_fits" -> tested += 1
             }
         }
         assert_eq(boxed, 0)
-        assert(cold >= (if t_signed -> 1 else -> 2), "the big Int's arms: {cold}")
+        assert_eq(tested, 1)
+        assert_eq(cold, if t_signed -> 1 else -> 2)
     }
 }
 

@@ -33,6 +33,7 @@ use {
         StrSelectorArg,
         TextEdit,
         TryConvert,
+        TaskForm,
         TupleField,
         Type,
         TypedLitBody,
@@ -50,6 +51,8 @@ use {
         pipe_value_is_name,
         pipe_value_name,
         PipeStep,
+        task_form_call,
+        task_form_combinator,
     ]
     jet_lexer.[
         STRING_PART_BYTE,
@@ -904,7 +907,7 @@ parser_try_parse_typed_literal: fn(state: ^JetParserState, depth: Int) -> Parsed
 // `[Int?#3].filled(None)`. Only a bracket whose contents can't be a list
 // literal counts, one holding an optional element's `?` or a fixed length's
 // `#`, so `[x].len()` stays a call on a list literal.
-parser_list_type_owner_ahead: fn(state: ^JetParserState) -> Bool Never! {
+parser_list_type_owner_ahead: fn(state: JetParserState) -> Bool Never! {
     nested := 0
     type_only := false
     index := state.position + 1
@@ -1705,23 +1708,16 @@ parser_report_member_spread_entry: fn(state: ^JetParserState) {
     }
 }
 
-// NUL-led compiler-private names the `task` sugar lowers into, so no source
-// name can collide with them.
-parser_task_internal: fn(name: String) -> String Never! {
-    nul: String.from_bytes([U8]{U8{0}}) ?? ""
-    "{nul}jet.{name}"
-}
-
-parser_task_call: fn(state: ^JetParserState, head: Span, method: String, method_span: Span, argument: Expr, argument_span: Span) -> Expr Never! {
-    receiver: Expr.Ident{name: parser_task_internal("task"), span: head, id: parser_node_id(state)}
-    Expr.MethodCall{receiver: receiver, method: parser_task_internal(method), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}, id: parser_node_id(state)}
+parser_task_call: fn(state: ^JetParserState, head: Span, form: TaskForm, method_span: Span, argument: Expr, argument_span: Span) -> Expr Never! {
+    receiver_id: parser_node_id(state)
+    task_form_call(form, head, method_span, argument, argument_span, receiver_id, parser_node_id(state))
 }
 
 parser_task_spawn: fn(state: ^JetParserState, head: Span, take_names: [NamedSpan], body: LambdaBody, body_span: Span) -> Expr Never! {
     state.has_task_spawn = true
     lambda: Lambda{take_names: take_names, params: [LambdaParam]{}, effects: None, body: body, span: body_span, meta: ast_empty_lambda_meta()}
     body_lambda: Expr.Lambda{lambda: lambda, id: parser_node_id(state)}
-    parser_task_call(state, head, "task.spawn", head, body_lambda, body_span)
+    parser_task_call(state, head, TaskForm.Spawn, head, body_lambda, body_span)
 }
 
 // Only the complete `task` surface spawns: `task {`, `task ^^name`, a
@@ -1768,7 +1764,7 @@ parser_parse_task_surface: fn(state: ^JetParserState, depth: Int) -> ParsedExpr 
             argument: parser_parse_expression(state, 1, depth + 1)
             close: parser_expect(state, TOKEN_RPAREN, "to finish `task.timeout`")
             span: parser_cover(head, close.span)
-            return ParsedExpr{expr: parser_task_call(state, head, "task.timeout", selector.span, argument.expr, argument.span), span: span}
+            return ParsedExpr{expr: parser_task_call(state, head, TaskForm.Timeout, selector.span, argument.expr, argument.span), span: span}
         }
         open: parser_expect(state, TOKEN_LBRACE, "after the task selector")
         named := [TupleField]{}
@@ -1818,7 +1814,8 @@ parser_parse_task_surface: fn(state: ^JetParserState, depth: Int) -> ParsedExpr 
         }
         argument: if saw_named -> Expr.TupleLit{fields: named, span: list_span, ty: None, id: parser_node_id(state)} else -> Expr.ListLit{elements: positional, span: list_span, id: parser_node_id(state)}
         span: parser_cover(head, close.span)
-        return ParsedExpr{expr: parser_task_call(state, head, "task.{name}", selector.span, argument, list_span), span: span}
+        form: task_form_combinator(name) ?? TaskForm.All
+        return ParsedExpr{expr: parser_task_call(state, head, form, selector.span, argument, list_span), span: span}
     }
     // `task ^^name { … }` consumes one enclosing binding.
     take_names := [NamedSpan]{}
@@ -2130,7 +2127,7 @@ parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: I
             if parser_current_kind(state) == TOKEN_DOT && parser_kind_at(state, 1) == TOKEN_IDENT && (parser_kind_at(state, 2) == TOKEN_RBRACKET || parser_kind_at(state, 2) == TOKEN_DOT_DOT) {
                 dot: parser_bump(state)
                 field: parser_bump(state)
-                selector: Expr.Ident{name: parser_task_internal("layout.selector.{parser_value(state, field)}"), span: parser_cover(dot.span, field.span), id: parser_node_id(state)}
+                selector: Expr.Ident{name: "\u{0}jet.layout.selector.{parser_value(state, field)}", span: parser_cover(dot.span, field.span), id: parser_node_id(state)}
                 if parser_current_kind(state) == TOKEN_DOT_DOT {
                     parser_bump(state)
                     end: parser_parse_expression(state, 1, depth + 1)

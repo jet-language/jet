@@ -13,18 +13,26 @@ SEMA_CORE_ROLE_MARKER: "Role"
 sema_core_role: fn(markers: [Marker], graph: SemaRegistrationGraph, module_identity: ModuleID) -> String {
     if !module_is_core(module_identity) -> return ""
     loop marker in markers {
-        if marker.negated || marker.args.len() != 1 -> next
-        resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
-        if resolved.status != "found" -> next
-        declaration: resolved.declaration ?? next
-        if declaration.name != SEMA_CORE_ROLE_MARKER -> next
-        index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? next
-        if graph.modules[index].module_name != CORE_BUILTINS_MODULE -> next
+        if marker.args.len() != 1 || !sema_core_builtin_marker(marker, graph, module_identity, SEMA_CORE_ROLE_MARKER) {
+            next
+        }
         if marker.args[0] == .Expr(value) {
             if value == .EnumLit(_, variant, _, _, _, _, _) -> return "{variant}"
         }
     }
     ""
+}
+
+// Whether `marker`, written in module `module_identity`, applies the
+// jet_builtins marker `name` (`#Builtin.Role`, `#Builtin.Needs`).
+sema_core_builtin_marker: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: ModuleID, name: String) -> Bool {
+    if marker.negated -> return false
+    resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
+    if resolved.status != "found" -> return false
+    declaration: resolved.declaration ?? return false
+    if declaration.name != name -> return false
+    index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return false
+    graph.modules[index].module_name == CORE_BUILTINS_MODULE
 }
 
 // A top-level Core function that fills a role: its module and its name.

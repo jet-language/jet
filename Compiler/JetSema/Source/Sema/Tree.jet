@@ -71,6 +71,7 @@ use jet_foundation.[
     TWebParamReconstruction,
     Type,
     TypeID,
+    effect_vocabulary_view_count,
     type_id_well_known,
     type_none,
     Variant,
@@ -130,6 +131,10 @@ TPatternShape: enum {
     Binary(parts: [TBinaryPatternPart], span: Span),
 }
 
+// TPatternShape, the checked patterns, picks from Pattern, the parsed ones;
+// the checked `Text` and `Binary` are the parsed `StrMatch` and `BinMatch`.
+TPATTERN_SHAPE_COUNT: #run effect_vocabulary_view_count("Sema/Tree.jet", embed_file("Tree.jet"), "TPatternShape", "AST/Patterns.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Patterns.jet"), "Pattern", [String]{"Text", "Binary"})
+
 // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
 
 // S31: a checked nested payload pattern with the payload type's owner.
@@ -155,11 +160,24 @@ TPatternBinding: enum {
     Value(value: TExpr),
 }
 
+// TPatternBinding picks from PatSlot (jet_foundation AST/Patterns.jet): a
+// checked slot is the parsed slot sema keeps once it has placed each named
+// field and the rest, so a new slot kind is a PatSlot case first. While the
+// compiler builds, TPATTERN_BINDING_COUNT stops the build naming any case
+// PatSlot lacks.
+TPATTERN_BINDING_COUNT: #run effect_vocabulary_view_count("Sema/Tree.jet", embed_file("Tree.jet"), "TPatternBinding", "AST/Patterns.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Patterns.jet"), "PatSlot", [String]{})
+
 TPatternField: enum {
     Bind(field: String, local: String, span: Span),
     Value(field: String, value: TExpr, span: Span),
     Nested(field: String, pattern: TNestedPattern, span: Span),
 }
+
+// TPatternField picks from StructPatField (jet_foundation AST/Patterns.jet):
+// a checked `.Case{field: pat, …}` entry is its parsed entry. While the
+// compiler builds, TPATTERN_FIELD_COUNT stops the build naming any case
+// StructPatField lacks.
+TPATTERN_FIELD_COUNT: #run effect_vocabulary_view_count("Sema/Tree.jet", embed_file("Tree.jet"), "TPatternField", "AST/Patterns.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Patterns.jet"), "StructPatField", [String]{})
 
 TMapPatternEntry: struct {
     key: TExpr,
@@ -376,6 +394,15 @@ TExprKind: enum {
     Flat(index: Int),
 }
 
+// TExprKind picks from NodeKind (jet_foundation Facts/Body.jet), the one home
+// of the checked expression kinds: body_flat_expr_kind (BodyFlatten.jet)
+// flattens each case into the NodeKind case of its name, so a new kind is a
+// NodeKind case first. `Flat` is outside the vocabulary: it holds the arena
+// row of a node already flattened, not a kind of its own. While the compiler
+// builds, TEXPR_KIND_COUNT stops the build naming any other case NodeKind
+// lacks.
+TEXPR_KIND_COUNT: #run effect_vocabulary_view_count("Sema/Tree.jet", embed_file("Tree.jet"), "TExprKind", "Facts/Body.jet", embed_file("toolchain:Compiler/JetFoundation/Source/Facts/Body.jet"), "NodeKind", [String]{"Flat"})
+
 // #4318: `fact` is the sema decision behind the copy; IR keeps it on Copy.
 // A node the checker built as row `index` of its arena (sema_node): the
 // row's NodeKind holds the node, with arena row indices as children.
@@ -435,6 +462,13 @@ TOrFallback: enum {
     BreakLabel(label: String),
     ContinueLabel(label: String),
 }
+
+// TOrFallback picks from OrFallback (jet_foundation AST/Patterns.jet): a
+// checked `or` fallback is its parsed fallback once sema has checked a block
+// fallback into a value, so a new fallback is an OrFallback case first. While
+// the compiler builds, TOR_FALLBACK_COUNT stops the build naming any case
+// OrFallback lacks.
+TOR_FALLBACK_COUNT: #run effect_vocabulary_view_count("Sema/Tree.jet", embed_file("Tree.jet"), "TOrFallback", "AST/Patterns.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Patterns.jet"), "OrFallback", [String]{})
 
 THostCall: enum {
     Method(receiver: TExpr, method: String, args: [TExpr]),

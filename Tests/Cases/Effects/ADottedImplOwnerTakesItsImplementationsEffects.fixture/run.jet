@@ -1,0 +1,43 @@
+// A `#Patchable` struct's generated `Rock.Patch` implements `Shape` in an
+// `impl Rock.Patch.Shape` block, whose owner has two segments. A
+// `Shape`-bounded call takes the effects of the implementation its binding
+// selects: the square's area is pure, and the patch's area prints, which
+// `-[IO]>` covers.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Square: struct {
+    side: Int,
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+#Patchable
+Rock: struct {
+    size: Int{1},
+    hard: Bool{true},
+}
+
+impl Rock.Patch.Shape {
+    area: fn(self) -> Int {
+        print("patch area")
+        3
+    }
+}
+
+measure: fn<S: Shape>(shape: S) -> Int { shape.area() }
+
+pure_square: fn() -[]> Int { measure(Square{side: 2}) }
+
+loud_patch: fn() -[IO]> Int { measure(Rock.Patch{size: 3}) }
+
+run: fn() {
+    rock := Rock{}
+    rock = rock.apply(Rock.Patch{size: 2})
+    print("rock {rock.size} {rock.hard}")
+    print("square {pure_square()}")
+    print("patch {loud_patch()}")
+}

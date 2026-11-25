@@ -1,0 +1,23 @@
+# Every WatchEvent field (domain, kind, path, detail, pid, port) reads back the
+# value it was given: on a constructed event, after a trip through a list, and
+# on runtime process and file events. A field read at another field's offset
+# shows up as a wrong value. The runtime WatchEvent lays the fields out in
+# declaration order (CoreLayoutABI).
+fixture: Fixtures/WatchEventFields
+env: NO_COLOR=1
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "port ready path=built/path detail=built detail pid=41 port=8086\nport ready path=built/path detail=built detail pid=41 port=8086\nprocess exited path= detail=second pid=7 port=0\ntrue\nprocess exited path= detail=process is not running pid=2147483646 port=0\nfile created note=true detail=file pid=0 port=0\n"
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "port ready path=built/path detail=built detail pid=41 port=8086\nport ready path=built/path detail=built detail pid=41 port=8086\nprocess exited path= detail=second pid=7 port=0\ntrue\nprocess exited path= detail=process is not running pid=2147483646 port=0\nfile created note=true detail=file pid=0 port=0\n"
+step: jet build -O0 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "port ready path=built/path detail=built detail pid=41 port=8086\nport ready path=built/path detail=built detail pid=41 port=8086\nprocess exited path= detail=second pid=7 port=0\ntrue\nprocess exited path= detail=process is not running pid=2147483646 port=0\nfile created note=true detail=file pid=0 port=0\n"
+step: jet build -O2 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "port ready path=built/path detail=built detail pid=41 port=8086\nport ready path=built/path detail=built detail pid=41 port=8086\nprocess exited path= detail=second pid=7 port=0\ntrue\nprocess exited path= detail=process is not running pid=2147483646 port=0\nfile created note=true detail=file pid=0 port=0\n"

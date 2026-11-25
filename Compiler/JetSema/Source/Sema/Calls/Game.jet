@@ -25,7 +25,7 @@ SemaGameCoreStaticTarget: struct {
     type_name: String,
 }
 
-sema_game_static_target: fn(receiver: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaGameCoreStaticTarget? {
+sema_game_static_target: fn(receiver: Expr, check: SemaBodyCheck) -> SemaGameCoreStaticTarget? {
     if receiver == {
         .Field(base, type_name, _, _) -> {
             alias: if base == {
@@ -34,11 +34,11 @@ sema_game_static_target: fn(receiver: Expr, environment: SemaScopeEnvironment, p
                     return None
                 }
             }
-            if sema_call_core_import_module(environment, program, alias) != (Val("core.game")) {
+            if sema_call_core_import_module(check.environment.*, check.program.*, alias) != (Val("core.game")) {
                 return None
             }
-            binding_index: sema_scope_resolve_index(scopes, alias) ?? return None
-            binding := scopes.bindings[binding_index]
+            binding_index: sema_scope_resolve_index(check.scopes, alias) ?? return None
+            binding := check.scopes.bindings[binding_index]
             if binding.symbol.kind != SymbolKind.Import -> return None
             return Val(SemaGameCoreStaticTarget{type_name: type_name})
         }
@@ -129,7 +129,7 @@ sema_game_static_call: fn(target: SemaGameCoreStaticTarget, method: String, args
         receiver_value = value
     }
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
-    if !sema_game_record_effect("core.game.{target.type_name}.{method}", result_type, [EffectRowEntry]{}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_game_record_effect("core.game.{target.type_name}.{method}", result_type, [EffectRowEntry]{}, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)}
@@ -138,7 +138,7 @@ sema_game_static_call: fn(target: SemaGameCoreStaticTarget, method: String, args
 // Handles only the three reserved static Core paths before ordinary CoreCall
 // and registered static method resolution.
 sema_call_try_game_static: fn(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    target: sema_game_static_target(receiver, check.environment.*, check.program.*, check.scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    target: sema_game_static_target(receiver, check) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     sema_game_static_call(target, method, args, span, expected, check)
 }
 
@@ -154,7 +154,7 @@ sema_game_report_arity: fn(method: String, expected: Int, actual: Int, span: Spa
     diagnostics.push(sema_call_arity_diagnostic(method, expected, actual, false, span))
 }
 
-sema_game_record_effect: fn(api: String, result_type: Type, effect_row: [EffectRowEntry], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool Never! {
+sema_game_record_effect: fn(api: String, result_type: Type, effect_row: [EffectRowEntry], span: Span, check: ^SemaBodyCheck) -> Bool Never! {
     facts := SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_expression_failure_carrier(result_type),
@@ -162,7 +162,7 @@ sema_game_record_effect: fn(api: String, result_type: Type, effect_row: [EffectR
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
     }
-    sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
+    sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, api, span, facts, check.diagnostics)
 }
 
 sema_game_string_value: fn(text: String, span: Span) -> TExpr Never! {
@@ -183,7 +183,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         frame_refusal := String?{None}
         frame_span := span
         if args[0].expr == .Lambda(lambda, node) {
-            facts: sema_frame_lambda_schedule(lambda, check.environment.*, check.program.*, check.scopes)
+            facts: sema_frame_lambda_schedule(lambda, check)
             if facts.schedule != None {
                 scheduled := lambda
                 scheduled.meta.frame_schedule = facts.schedule
@@ -203,7 +203,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
             check.diagnostics.push(sema_error("E2967", frame_span, row.what.replace("{{detail}}", detail), row.why, row.fix))
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
-        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+        if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
         schedule := FrameSchedule?{None}
@@ -217,7 +217,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         }
         operation := BodyHandleOp.GameSceneOnFrame{schedule: schedule, derivation: derivation}
         built := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{callback}}, span)
-        if !sema_game_record_effect("GameScene.on_frame", Type.Named{name: "Unit"}, [EffectRowEntry]{}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+        if !sema_game_record_effect("GameScene.on_frame", Type.Named{name: "Unit"}, [EffectRowEntry]{}, span, check) {
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
         return Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
@@ -240,13 +240,13 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
     }
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     result_type := if method == "query" -> Type.List{element: Type.String} else -> Type.Named{name: "Unit"}
     operation := if method == "query" -> BodyHandleOp.GameSceneQuery else -> BodyHandleOp.GameSceneComponent
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{argument}}, span)
-    if !sema_game_record_effect("GameScene.{method}", result_type, [EffectRowEntry]{}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_game_record_effect("GameScene.{method}", result_type, [EffectRowEntry]{}, span, check) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
@@ -260,14 +260,14 @@ sema_game_check_assets_method: fn(receiver: Expr, receiver_value: TExpr, method:
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     asset_path: sema_game_check_typed_argument(args[0], Type.String, check) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     asset_type := if method == "image" -> Type.Named{name: "GameImage"} else -> Type.Named{name: "GameSound"}
     result_type := Type.Result{ok: asset_type, err: Type.String}
     operation := if method == "image" -> BodyHandleOp.GameAssetsImage else -> BodyHandleOp.GameAssetsSound
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{asset_path}}, span)
-    if !sema_game_record_effect("GameAssets.{method}", result_type, [EffectRowEntry]{EffectRowEntry{name: "FS", span: span}}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_game_record_effect("GameAssets.{method}", result_type, [EffectRowEntry]{EffectRowEntry{name: "FS", span: span}}, span, check) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
@@ -299,13 +299,13 @@ sema_game_check_input_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         }
     }
     if !valid -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     operation := if method == "bind" -> BodyHandleOp.GameInputBind else -> BodyHandleOp.GameInputPressed
     result_type := if method == "bind" -> Type.Named{name: "Unit"} else -> Type.Bool
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
-    if !sema_game_record_effect("GameInput.{method}", result_type, [EffectRowEntry]{}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_game_record_effect("GameInput.{method}", result_type, [EffectRowEntry]{}, span, check) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
@@ -318,13 +318,13 @@ sema_game_check_backend_method: fn(receiver: Expr, receiver_value: TExpr, method
         sema_game_check_untyped_args(args, check)
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     operation := if method == "present" -> BodyHandleOp.GameBackendPresent else -> BodyHandleOp.GameBackendShouldContinue
     result_type := if method == "present" -> Type.Named{name: "Unit"} else -> Type.Bool
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
-    if !sema_game_record_effect("GameBackend.{method}", result_type, [EffectRowEntry]{}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_game_record_effect("GameBackend.{method}", result_type, [EffectRowEntry]{}, span, check) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)})
@@ -344,9 +344,7 @@ sema_call_try_game_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
     }
-    if edit_api != "" {
-        sema_game_needs_edit(receiver, edit_api, check.scopes, check.state, check.diagnostics)
-    }
+    if edit_api != "" -> sema_game_needs_edit(receiver, edit_api, check)
     if receiver_value.ty == (Type.Named{name: "GameScene"}) {
         return sema_game_check_scene_method(receiver, receiver_value, method, args, type_args, span, expected, check)
     }
@@ -362,13 +360,11 @@ sema_call_try_game_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
     None
 }
 
-sema_game_needs_edit: fn(receiver: Expr, api: String, scopes: SemaScopeTable, state: ^SemaOwnershipState, diagnostics: ^[Diagnostic]) {
+sema_game_needs_edit: fn(receiver: Expr, api: String, check: ^SemaBodyCheck) {
     root: sema_receiver_mark_place_root(receiver) ?? return
-    index: sema_scope_resolve_index(scopes, root) ?? return
-    if scopes.bindings[index].mutable {
-        sema_ownership_note_mutation(state, scopes.bindings[index].symbol.span.start)
-    }
-    if !scopes.bindings[index].mutable {
-        diagnostics.push(sema_ownership_diag_unchangeable(scopes.bindings[index], root, expr_span(receiver), "`{api}` changes durable scene state, so `{root}` must be mutable (`:=`)"))
+    index: sema_scope_resolve_index(check.scopes, root) ?? return
+    sema_ownership_note_binding_write(check.state, check.scopes.bindings[index])
+    if !check.scopes.bindings[index].mutable {
+        check.diagnostics.push(sema_ownership_diag_unchangeable(check.scopes.bindings[index], root, expr_span(receiver), "`{api}` changes durable scene state, so `{root}` must be mutable (`:=`)"))
     }
 }

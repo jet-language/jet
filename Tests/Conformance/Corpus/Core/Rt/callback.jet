@@ -1,4 +1,8 @@
 // core-conformance: core.rt.callback
 use api: core.rt
 
-run: fn() { print(api.callback(1, 1, fn() { true })) }
+run: fn() {
+    stream := api.callback(1, 1, fn(frame: [Float]) { })
+    stream.cancel()
+    print(stream.is_canceled())
+}

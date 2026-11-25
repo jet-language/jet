@@ -340,8 +340,11 @@ fiber_clock_settle: fn(fiber: I64) {
 // The CPU time the running task has used, in nanoseconds: its fiber's run
 // time over every slice since the clock's first read, else (a plain thread)
 // the thread's CPU time. Only the difference of two reads by one task means
-// anything: a pooled fiber's clock runs on across the tasks it carries.
-#Export(c) jet_rt_task_cpu_ns: fn() -> I64 {
+// anything: a pooled fiber's clock runs on across the tasks it carries. The
+// export answers an Int: its owned exact-Int carrier.
+#Export(c) jet_rt_task_cpu_ns: fn() -> I64 { jet_int_owned_from_i64(task_cpu_ns()) }
+
+task_cpu_ns: fn() -> I64 {
     fiber: fiber_current()
     now: sync_thread_cpu_ns()
     if (fiber == I64{0}) { return now }
@@ -360,11 +363,11 @@ fiber_clock_settle: fn(fiber: I64) {
 }
 
 // The running task's identity: its fiber's TCB address (the fiber's identity
-// word, kept across carriers), else the thread's kernel id.
+// word, kept across carriers), else the thread's kernel id, as an owned
+// exact-Int carrier.
 #Export(c) jet_rt_task_identity: fn() -> I64 {
     fiber: fiber_current()
-    if (fiber == I64{0}) { return thread_tid() }
-    sync_load(wrapping(fiber + I64{24}))
+    jet_int_owned_from_i64(if (fiber == I64{0}) -> thread_tid() else -> sync_load(wrapping(fiber + I64{24})))
 }
 
 // A pooled fiber of a `bytes` stack (0: the default size), else a fresh one;

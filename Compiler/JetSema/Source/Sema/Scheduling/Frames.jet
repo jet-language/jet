@@ -4,8 +4,6 @@
 use jet_foundation.[
     AccessConvention,
     CallArg,
-    CoreCallCompletion,
-    CoreCallCompletionKind,
     CoreCallRecord,
     DerivationPayload,
     DerivationRecord,
@@ -63,53 +61,13 @@ SemaFrameOperationFact: struct {
     error: String?,
 }
 
-// Project the registered Core access contract onto checked argument places.
-// The caller supplies the canonical call name and source byte index.
-sema_frame_core_call_operation: fn(record: CoreCallRecord, name: String, args: [CallArg], source_index: Int) -> SemaFrameOperationFact Never! {
-    accesses := [ResourceAccess]{}
-    loop access in record.frame_accesses {
-        if access.argument < 0 || access.argument >= args.len() -> next
-        identity: sema_frame_resource_identity(args[access.argument].expr) ?? next
-        accesses.push(
-            ResourceAccess{
-                resource: identity,
-                mode: access.mode,
-                region: ResourceRegion.Whole,
-                layout: None,
-                temporary: false,
-            },
-        )
-    }
-    completion := FrameCompletion.Synchronous
-    completion_provider := String?{None}
-    if record.frame_completion == {
-        .Val(_) -> {
-            metadata: record.frame_completion ?? CoreCallCompletion{kind: CoreCallCompletionKind.Synchronous, token: None, provider: ""}
-            completion_provider = Val(metadata.provider)
-            if metadata.kind == {
-                .Synchronous -> {}
-                .Pending -> {
-                    token: metadata.token ?? return SemaFrameOperationFact{operation: None, error: Val("core frame primitive `{name}` has pending completion without a checked token")}
-                    completion = FrameCompletion.Pending{token: token}
-                }
-                .Event -> {
-                    token: metadata.token ?? return SemaFrameOperationFact{operation: None, error: Val("core frame primitive `{name}` has event completion without a checked token")}
-                    completion = FrameCompletion.Event{token: token}
-                }
-            }
-        }
-        .None -> {
-            if accesses.len() > 0 {
-                return SemaFrameOperationFact{operation: None, error: Val("core frame primitive `{name}` has resource accesses but no checked completion metadata")}
-            }
-        }
-    }
-    external_effect := record.effects.len() > 0
-    if !external_effect && accesses.len() == 0 {
-        return SemaFrameOperationFact{operation: None, error: None}
-    }
+// A Core call row as a frame operation: an external effect that completes
+// synchronously. The caller supplies the canonical call name and source byte
+// index.
+sema_frame_core_call_operation: fn(record: CoreCallRecord, name: String, source_index: Int) -> SemaFrameOperationFact Never! {
+    if record.effects.len() == 0 -> return SemaFrameOperationFact{operation: None, error: None}
     SemaFrameOperationFact{
-        operation: Val(FrameOperation{name: name, source_index: source_index, accesses: accesses, completion: completion, completion_provider: completion_provider, external_effect: external_effect}),
+        operation: Val(FrameOperation{name: name, source_index: source_index, accesses: [ResourceAccess]{}, completion: FrameCompletion.Synchronous, completion_provider: None, external_effect: true}),
         error: None,
     }
 }
@@ -175,11 +133,11 @@ SemaFrameHardwareCall: struct {
 }
 
 // Only selected target-machine register facts can create an MMIO resource.
-sema_frame_hardware_register_operation: fn(receiver: Expr, method: String, source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> FrameOperation? {
+sema_frame_hardware_register_operation: fn(receiver: Expr, method: String, source_index: Int, check: SemaBodyCheck) -> FrameOperation? {
     if method != "read" && method != "write" && method != "set" && method != "clear" -> return None
-    path: sema_hardware_board_path(receiver, environment, program, scopes) ?? return None
+    path: sema_hardware_board_path(receiver, check) ?? return None
     if path.segments.len() < 3 -> return None
-    machine: sema_hardware_target_machine(environment, program) ?? return None
+    machine: sema_hardware_target_machine(check.environment.*, check.program.*) ?? return None
     block: sema_hardware_register_block_fact(machine, path.segments[1]) ?? return None
     register: sema_hardware_register_fact(block, path.segments[2]) ?? return None
     mode := if method == "read" -> AccessConvention.Read else -> AccessConvention.Write
@@ -201,7 +159,7 @@ sema_frame_hardware_dma_bind_start: fn(start: SemaFrameDMABinding, transfer_name
     result
 }
 
-sema_frame_hardware_dma_start: fn(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
+sema_frame_hardware_dma_start: fn(receiver: Expr, args: [CallArg], source_index: Int, check: SemaBodyCheck) -> SemaFrameHardwareCall Never! {
     is_dma_receiver := if receiver == {
         .Ident(name, _, _) -> name == "dma"
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
@@ -209,9 +167,9 @@ sema_frame_hardware_dma_start: fn(receiver: Expr, args: [CallArg], source_index:
     if !is_dma_receiver || args.len() != 2 {
         return SemaFrameHardwareCall{operation: None, dma_start: None}
     }
-    path: sema_hardware_board_path(args[0].expr, environment, program, scopes) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
+    path: sema_hardware_board_path(args[0].expr, check) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     if path.segments.len() < 3 -> return SemaFrameHardwareCall{operation: None, dma_start: None}
-    machine: sema_hardware_target_machine(environment, program) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
+    machine: sema_hardware_target_machine(check.environment.*, check.program.*) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     channel: sema_hardware_dma_channel_fact(machine, path.segments[1], path.segments[2]) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     buffer: sema_hardware_expr_name(args[1].expr) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     token := "jet_dma_transfer@{source_index}"
@@ -315,7 +273,7 @@ sema_frame_schedule_build: fn(operations: [FrameOperation]) -> SemaFrameSchedule
     }
 }
 
-sema_frame_schedule_produce: fn(operations: [FrameOperation], environment: SemaScopeEnvironment, program: SemaProgramTables, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
+sema_frame_schedule_produce: fn(operations: [FrameOperation], check: SemaBodyCheck, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
     if operations.len() == 0 {
         return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: None}
     }
@@ -323,8 +281,8 @@ sema_frame_schedule_produce: fn(operations: [FrameOperation], environment: SemaS
     if built.schedule == None {
         return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: built.error}
     }
-    graph: program.registration_graph
-    module_index: sema_registration_module_index(graph, environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: Val("frame schedule derivation requires registered module identity")}
+    graph: check.program.registration_graph
+    module_index: sema_registration_module_index(graph, check.environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: Val("frame schedule derivation requires registered module identity")}
     module_path := graph.modules[module_index].module_path
     schedule: built.schedule ?? FrameSchedule{operations: [FrameOperation]{}, dependencies: [FrameDependency]{}, transfers: [FrameTransfer]{}, reuse: [FrameReuse]{}, retentions: [FrameRetention]{}, conservative: [String]{}}
     premises: loop operation in schedule.operations -> "{operation.name}@{operation.source_index}"

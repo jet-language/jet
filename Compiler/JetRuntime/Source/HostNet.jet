@@ -1,53 +1,53 @@
-// jet_builtins.ResolveError's one C carrier: 32 bytes, alignment 8.
-// [kind exact-Int word @0, has_os_code word @8, os_code exact-Int word @16,
-// owned E4 message @24]. Int words retain/release through canonical L4,
+// jet_builtins.ResolveError's one C carrier (CoreLayoutABI RESOLVE_ERROR):
+// kind and os_code are exact-Int words, has_os_code a word, message an owned E4
+// text. Int words retain/release through canonical L4,
 // never by interpreting a spilled Int pointer as its numeric i64 value.
 // Core owns kind selection and resolve policy; these are ownership adapters.
 #Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, has_os_code: I64, os_code: I64, message: I64) -> I64 {
-    value: jet_rt_alloc(I64{32}, I64{8})
+    value: jet_rt_alloc(RESOLVE_ERROR_BYTES, I64{8})
     // `value` exclusively owns four initialized words; inputs lend exact Int
     // owners and a valid E4 message.
-    rt_text_store(value, jet_rt_int_clone(kind))
-    rt_text_store(wrapping(value + I64{8}), if ((has_os_code & I64{255}) != I64{0}) -> I64{1} else -> I64{0})
-    rt_text_store(wrapping(value + I64{16}), jet_rt_int_clone(os_code))
-    rt_text_store(wrapping(value + I64{24}), jet_rt_string_clone(message))
+    rt_text_store(wrapping(value + RESOLVE_ERROR_KIND), jet_rt_int_clone(kind))
+    rt_text_store(wrapping(value + RESOLVE_ERROR_HAS_OS_CODE), if ((has_os_code & I64{255}) != I64{0}) -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(value + RESOLVE_ERROR_OS_CODE), jet_rt_int_clone(os_code))
+    rt_text_store(wrapping(value + RESOLVE_ERROR_MESSAGE), jet_rt_string_clone(message))
     value
 }
 
 #Export(c) jet_rt_handle_clone_jet_resolve_error: fn(value: I64) -> I64 {
     // `value` lends the complete immutable carrier and all three owned children.
-    jet_rt_record_new_jet_resolve_error(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), rt_text_word(wrapping(value + I64{16})), rt_text_word(wrapping(value + I64{24})))
+    jet_rt_record_new_jet_resolve_error(rt_text_word(wrapping(value + RESOLVE_ERROR_KIND)), rt_text_word(wrapping(value + RESOLVE_ERROR_HAS_OS_CODE)), rt_text_word(wrapping(value + RESOLVE_ERROR_OS_CODE)), rt_text_word(wrapping(value + RESOLVE_ERROR_MESSAGE)))
 }
 
 #Export(c) jet_rt_handle_drop_jet_resolve_error: fn(value: I64) {
     if (value == I64{0}) {
         return
     }
-    // `value` transfers its 32-byte header, two independently retained Int
-    // words and owned E4 message.
-    jet_rt_int_drop(rt_text_word(value))
-    jet_rt_int_drop(rt_text_word(wrapping(value + I64{16})))
-    jet_rt_string_drop(rt_text_word(wrapping(value + I64{24})))
-    jet_rt_free(value, I64{32}, I64{8})
+    // `value` transfers its header, two independently retained Int words and
+    // owned E4 message.
+    jet_rt_int_drop(rt_text_word(wrapping(value + RESOLVE_ERROR_KIND)))
+    jet_rt_int_drop(rt_text_word(wrapping(value + RESOLVE_ERROR_OS_CODE)))
+    jet_rt_string_drop(rt_text_word(wrapping(value + RESOLVE_ERROR_MESSAGE)))
+    jet_rt_free(value, RESOLVE_ERROR_BYTES, I64{8})
 }
 
 #Export(c) jet_rt_record_get_jet_resolve_error_kind: fn(value: I64) -> I64 {
     // `value` lends the immutable carrier; the result retains its exact Int field.
-    jet_rt_int_clone(rt_text_word(value))
+    jet_rt_int_clone(rt_text_word(wrapping(value + RESOLVE_ERROR_KIND)))
 }
 
 #Export(c) jet_rt_record_get_jet_resolve_error_has_os_code: fn(value: I64) -> Bool {
     // `value` lends the initialized presence word.
-    rt_text_word(wrapping(value + I64{8})) != I64{0}
+    rt_text_word(wrapping(value + RESOLVE_ERROR_HAS_OS_CODE)) != I64{0}
 }
 
 #Export(c) jet_rt_record_get_jet_resolve_error_os_code: fn(value: I64) -> I64 {
     // `value` lends the immutable carrier; the result retains its exact Int field.
-    jet_rt_int_clone(rt_text_word(wrapping(value + I64{16})))
+    jet_rt_int_clone(rt_text_word(wrapping(value + RESOLVE_ERROR_OS_CODE)))
 }
 
 #Export(c) jet_rt_record_get_jet_resolve_error_message: fn(value: I64) -> I64 {
     // `value` lends the immutable carrier; the result deep-clones its owned E4
     // message.
-    jet_rt_string_clone(rt_text_word(wrapping(value + I64{24})))
+    jet_rt_string_clone(rt_text_word(wrapping(value + RESOLVE_ERROR_MESSAGE)))
 }

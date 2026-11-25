@@ -1,0 +1,99 @@
+// Composed with the Jet-only runtime by the CompilerRegistries plain row
+// JetRuntime/Tests/IntCarrierTests. A jet.runtime binding or route lends each
+// Int argument as its exact-Int carrier and takes each Int result as an owned
+// one (JetIR BuildForeign.jet ir_runtime_binding_call); int_carrier_tests
+// drives exports of several families with carriers past the inline range
+// (2^62, 2^63-1, 2^64+5 and their negatives) as compiled code crosses them,
+// and checks what each answers: a carrier read as its bare word would answer
+// for its node's address instead.
+
+// A failed witness stops the process (status 101) with what failed on stderr.
+int_carrier_require: fn(ok: Bool, what: I64) {
+    if ok {
+        return
+    }
+    jet_rt_unreachable(rt_text_data(what), rt_text_len(what))
+}
+
+// Whether the owned carrier `value` is the I64 `expected`; drops `value`.
+int_carrier_take: fn(value: I64, expected: I64) -> Bool {
+    want: jet_int_owned_from_i64(expected)
+    same: jet_int_compare(value, want) == I64{0}
+    jet_rt_int_drop(want)
+    jet_rt_int_drop(value)
+    same
+}
+
+// Whether the error word at `error` holds the message `expected`; drops it.
+int_carrier_message: fn(error: I64, expected: I64) -> Bool {
+    message: rt_text_word(error)
+    same: jet_rt_string_eq(message, expected)
+    jet_rt_string_drop(message)
+    same
+}
+
+// Whether a reader call refused (status 0); drops the error it stored.
+int_carrier_refused: fn(status: I64, error: I64) -> Bool {
+    if (status != I64{0}) { return false }
+    jet_rt_string_drop(rt_text_word(error))
+    true
+}
+
+int_carrier_tests: fn() {
+    seven: jet_int_owned_from_i64(I64{7})
+    p62: jet_int_owned_from_i64(I64{4611686018427387904})
+    max: jet_int_owned_from_i64(I64{9223372036854775807})
+    doubled: jet_int_add(max, max)
+    p64: jet_int_add(doubled, seven)
+    jet_rt_int_drop(doubled)
+    n62: jet_int_sub(I64{0}, p62)
+    n64: jet_int_sub(I64{0}, p64)
+    neg: I64{-7}
+    int_carrier_require(!int_inline(p62) && !int_inline(max) && !int_inline(p64) && !int_inline(n64) && int_inline(n62) && int_inline(neg), rt_static_text("int carrier: 2^62, 2^63-1 and 2^64+5 are boxed; -2^62 and -7 inline"))
+
+    // The range policy (Int.jet int_saturated): exact inside I64, the
+    // nearer bound beyond it.
+    int_carrier_require(int_saturated(p62) == I64{4611686018427387904} && int_saturated(max) == I64{9223372036854775807} && int_saturated(n62) == I64{-4611686018427387904}, rt_static_text("int carrier: an I64 reads as itself"))
+    int_carrier_require(int_saturated(p64) == I64{9223372036854775807} && int_saturated(n64) == I64{-9223372036854775807 - 1} && int_saturated(neg) == I64{-7}, rt_static_text("int carrier: 2^64+5 saturates to I64.MAX, its negative to I64.MIN"))
+
+    // Collections: a range compares its bounds and value as Ints.
+    int_carrier_require(jet_range_contains(p62, p64, U8{1}, max), rt_static_text("range: 2^63-1 is in 2^62..<2^64+5"))
+    int_carrier_require(!jet_range_contains(p62, p64, U8{1}, p64) && jet_range_contains(p62, p64, U8{0}, p64), rt_static_text("range: 2^64+5 ends 2^62..<2^64+5 and is in 2^62...2^64+5"))
+    int_carrier_require(!jet_range_contains(p62, p64, U8{1}, neg) && !jet_range_contains(p62, max, U8{1}, p64), rt_static_text("range: -7 and 2^64+5 are outside 2^62..<2^63-1"))
+    int_carrier_require(jet_range_contains(n64, neg, U8{0}, n62) && !jet_range_contains(n64, neg, U8{0}, seven), rt_static_text("range: -2^62 is in -(2^64+5)...-7, 7 is not"))
+
+    // DynCodec: the ETF strings scope keeps a mode saturated and answers the
+    // previous one as an owned carrier.
+    outer: jet_rt_codec_etf_strings_enter(p64)
+    int_carrier_require(int_carrier_take(jet_rt_codec_etf_strings_enter(n64), I64{9223372036854775807}), rt_static_text("etf strings: 2^64+5 is kept as I64.MAX"))
+    int_carrier_require(int_carrier_take(jet_rt_codec_etf_strings_enter(neg), I64{-9223372036854775807 - 1}), rt_static_text("etf strings: -(2^64+5) is kept as I64.MIN"))
+    jet_rt_codec_etf_strings_leave(max)
+    int_carrier_require(int_carrier_take(jet_rt_codec_etf_strings_enter(p62), I64{9223372036854775807}), rt_static_text("etf strings: leave restores 2^63-1"))
+    jet_rt_codec_etf_strings_leave(outer)
+    jet_rt_int_drop(outer)
+
+    // Reader: a position or count past I64 is refused as its bound, a
+    // negative one as negative.
+    data: rt_static_text("abcdef")
+    reader: jet_reader_over(rt_text_data(data), rt_text_len(data), I64{1})
+    error: jet_rt_alloc(I64{8}, I64{8})
+    int_carrier_require(jet_reader_seek(reader, p64, error) == I64{0} && int_carrier_message(error, rt_static_text("Reader.seek: position 9223372036854775807 is beyond end 6")), rt_static_text("reader: seek 2^64+5 is past the end as I64.MAX"))
+    int_carrier_require(jet_reader_seek(reader, p62, error) == I64{0} && int_carrier_message(error, rt_static_text("Reader.seek: position 4611686018427387904 is beyond end 6")), rt_static_text("reader: seek 2^62 is past the end"))
+    int_carrier_require(jet_reader_seek(reader, n64, error) == I64{0} && int_carrier_message(error, rt_static_text("Reader.seek: position must not be negative, got -9223372036854775808")), rt_static_text("reader: seek -(2^64+5) is negative"))
+    int_carrier_require(jet_reader_seek(reader, neg, error) == I64{0} && int_carrier_message(error, rt_static_text("Reader.seek: position must not be negative, got -7")), rt_static_text("reader: seek -7 is negative"))
+    int_carrier_require(int_carrier_refused(jet_reader_skip(reader, max, error), error) && int_carrier_refused(jet_reader_skip(reader, n64, error), error), rt_static_text("reader: skip 2^63-1 and -(2^64+5) are refused"))
+    int_carrier_require(jet_reader_seek(reader, I64{2}, error) == I64{1} && jet_reader_remaining(reader) == I64{4}, rt_static_text("reader: seek 2 leaves 4"))
+    jet_rt_free(error, I64{8}, I64{8})
+    jet_rt_handle_drop_jet_reader(reader)
+
+    // Host: an fd past I64 is no standard stream.
+    int_carrier_require(!jet_term_is_terminal_raw(p64) && !jet_term_is_terminal_raw(n64) && !jet_term_is_terminal_raw(p62), rt_static_text("term: an fd past the inline range is no terminal"))
+
+    // An Int result is an owned carrier: the pid as one.
+    int_carrier_require(int_carrier_take(jet_std_os_pid(), host_pid()), rt_static_text("os: the pid answers as its carrier"))
+
+    jet_rt_int_drop(p62)
+    jet_rt_int_drop(max)
+    jet_rt_int_drop(p64)
+    jet_rt_int_drop(n64)
+}

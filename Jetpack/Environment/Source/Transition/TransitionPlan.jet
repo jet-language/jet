@@ -8,7 +8,8 @@
 // without timestamps or last-writer-wins behavior.
 use {
     jetpack_foundation.[env_runtime_lock]
-    jet_pkg_model.[ConfigFacts, PackageFacts, PackageOutputKind, PackageParseError, pkg_debug_output, pkg_sha256_hex]
+    jet_foundation.[OutputKind]
+    jet_pkg_model.[ConfigFacts, PackageFacts, PackageParseError, pkg_debug_output, pkg_sha256_hex]
     files: core.files
 }
 
@@ -266,7 +267,7 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
             env_transition_validate_name(name, "host")
             env_transition_require_output_declaration(entries, name, package_path)
             output: package.outputs.get(name) ?? return Err(env_transition_error("outputs.{name} is not declared in {TRANSITION_PACKAGE_FILE}"))
-            if output.kind != PackageOutputKind.System {
+            if output.kind != OutputKind.System {
                 return Err(env_transition_error("outputs.{name} is {output.kind.debug_name()}, but host extraction needs a System Output"))
             }
             destination: "package/fleet.jet"

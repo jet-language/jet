@@ -1,6 +1,9 @@
 // Source-backed package generations. One resolver serves
 // JetOS/user composition, tool projections, and package-generation commands.
-use jet_pkg_model.[ProviderFacts, pkg_sha256_hex]
+use {
+    jet_foundation.[effect_vocabulary_view_count]
+    jet_pkg_model.[ProviderFacts, pkg_sha256_hex]
+}
 
 // The fail-closed scale budget of the generation resolver.
 ENVMODEL_MAX_RESOLVER_NODES: 100000
@@ -128,6 +131,12 @@ PackageProfileError: enum {
         }
     }
 }
+
+// A package generation resolves the way a preset does, by name through an
+// inheritance chain, so PackageProfileError picks from PresetError. While the
+// compiler builds, PACKAGE_PROFILE_ERROR_COUNT stops the build naming any
+// other case PresetError lacks.
+PACKAGE_PROFILE_ERROR_COUNT: #run effect_vocabulary_view_count("Environment/PackageProfiles.jet", embed_file("PackageProfiles.jet"), "PackageProfileError", "Environment/Presets.jet", embed_file("Presets.jet"), "PresetError", [String]{})
 
 envmodel_resolver_budget_error: fn() -> PackageProfileError Never! {
     PackageProfileError.Conflict("{ENVMODEL_RESOLVER_BUDGET_NAME}{ENVMODEL_MAX_RESOLVER_NODES}")

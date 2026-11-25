@@ -16,7 +16,7 @@
 // vocabulary in JetFoundation's Facts/InlineAssembly.jet: while the compiler
 // builds, X64_ALU_COUNT and X64_SHIFT_COUNT check that each case, lowercased,
 // is a mnemonic there, and a stray stops the build naming it.
-use jet_foundation.[INLINE_ASSEMBLY_X64_ALU_GROUP, INLINE_ASSEMBLY_X64_MNEMONICS, build_time_refused, effect_vocabulary_enum_cases]
+use jet_foundation.[INLINE_ASSEMBLY_X64_ALU_GROUP, INLINE_ASSEMBLY_X64_MNEMONICS, build_time_refused, effect_vocabulary_enum_cases, effect_vocabulary_view_count]
 
 X64_ALU_COUNT: #run x64_group_count(embed_file("Encoder.jet"), "X64Alu", INLINE_ASSEMBLY_X64_ALU_GROUP)
 
@@ -962,6 +962,9 @@ x64_vector_store: fn(code: ^X64Code, base: Int, disp: Int, src: Int) Never! {
     x64_modrm_mem(code, src, base, disp)
 }
 
+// X64FloatOp picks from JetIR's IROp: each is the IR float operation the
+// encoder emits as one SSE instruction. While the compiler builds,
+// X64_FLOAT_OP_COUNT stops the build naming any case IROp lacks.
 X64FloatOp: enum {
     Add,
     Sub,
@@ -969,6 +972,8 @@ X64FloatOp: enum {
     Div,
     Sqrt,
 }
+
+X64_FLOAT_OP_COUNT: #run effect_vocabulary_view_count("X64/Encoder.jet", embed_file("Encoder.jet"), "X64FloatOp", "JetIR/Source/IR.jet", embed_file("toolchain:Compiler/JetIR/Source/IR.jet"), "IROp", [String]{})
 
 // addsd/subsd/mulsd/divsd/sqrtsd dst, src (F2 0F 58|5C|59|5E|51 /r), or with
 // `single` addss/subss/mulss/divss/sqrtss (F3 0F 58|5C|59|5E|51 /r).

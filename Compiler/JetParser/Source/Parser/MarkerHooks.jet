@@ -90,13 +90,13 @@ parser_marker_scopes_chunk: fn(tokens: [Token], tables: TokenTables) -> [ParserM
 // The compiler hook `marker` reaches: none for a name with no hook row (a
 // qualified name never has one), or for a bare name that resolves to a
 // marker this file declares around the application.
-parser_marker_hook: fn(state: ^JetParserState, marker: Marker) -> MarkerHook? Never! {
+parser_marker_hook: fn(state: JetParserState, marker: Marker) -> MarkerHook? Never! {
     parser_marker_hook_at(state, marker.name, marker.span.start)
 }
 
 // The compiler hook the marker written `name` at offset `at` reaches, for a
 // reader that has not built the `Marker` yet.
-parser_marker_hook_at: fn(state: ^JetParserState, name: String, at: Int) -> MarkerHook? Never! {
+parser_marker_hook_at: fn(state: JetParserState, name: String, at: Int) -> MarkerHook? Never! {
     hook: marker_hook_of_declaration(name) ?? return None
     loop scope in state.marker_scopes {
         if scope.start <= at && at < scope.end && scope.name == name -> return None
@@ -105,12 +105,12 @@ parser_marker_hook_at: fn(state: ^JetParserState, name: String, at: Int) -> Mark
 }
 
 // Whether `marker` reaches the compiler hook `hook`.
-parser_marker_is_hook: fn(state: ^JetParserState, marker: Marker, hook: MarkerHook) -> Bool Never! {
+parser_marker_is_hook: fn(state: JetParserState, marker: Marker, hook: MarkerHook) -> Bool Never! {
     parser_marker_name_is_hook(state, marker.name, marker.span.start, hook)
 }
 
 // Whether the marker written `name` at offset `at` reaches the hook `hook`.
-parser_marker_name_is_hook: fn(state: ^JetParserState, name: String, at: Int, hook: MarkerHook) -> Bool Never! {
+parser_marker_name_is_hook: fn(state: JetParserState, name: String, at: Int, hook: MarkerHook) -> Bool Never! {
     reached: parser_marker_hook_at(state, name, at) ?? return false
     reached == hook
 }

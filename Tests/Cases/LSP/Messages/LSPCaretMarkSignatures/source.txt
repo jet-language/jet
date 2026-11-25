@@ -1,0 +1,25 @@
+Counter: struct {
+    n: Int,
+
+    tally: fn(^self, by: Int) {
+        self.n += by
+    }
+}
+
+bump: fn(count: ^Int) {
+    count += 1
+}
+
+drain: fn(items: ^^[Int]) -> Int {
+    items.len()
+}
+
+run: fn() {
+    total := 0
+    bump(total)
+    counter := Counter{n: 0}
+    counter.tally(2)
+    print(drain([1, 2]))
+    print(total)
+    print(counter.n)
+}

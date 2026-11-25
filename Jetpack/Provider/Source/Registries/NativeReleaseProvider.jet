@@ -51,14 +51,14 @@ NativeReleaseFacts: struct {
 }
 
 NativeReleaseProvider: struct {
-    cache_expectation: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> CacheExpectation? Never! {
+    cache_expectation: fn(self, verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> CacheExpectation? Never! {
         if provider_cc_toolchain_is_reference(spec) {
             return provider_cc_toolchain_cache_expectation(verification, spec, ctx)
         }
         provider_native_cache_expectation(spec, table, ctx)
     }
 
-    plan_downloads: fn(self, verification: ^StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+    plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs {
             if provider_cc_toolchain_is_reference(spec) {
@@ -70,7 +70,7 @@ NativeReleaseProvider: struct {
         Ok(plan)
     }
 
-    realize: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
+    realize: fn(self, verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
         if provider_cc_toolchain_is_reference(spec) {
             return provider_cc_toolchain_realize(verification, spec, ctx)
         }

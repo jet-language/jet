@@ -38,7 +38,7 @@ store_reuse_direct_cas_candidate: fn(roots: HangarRoots, entry: StoreEntry) -> B
     (producer.provider == "nix" || producer.provider == "jetpackage") && digest != "" && !digest.contains("/") && !digest.contains("\\") && store_reuse_same_path(entry.out, store_reuse_object_path(roots, digest))
 }
 
-store_reuse_direct_cas_entry: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
+store_reuse_direct_cas_entry: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
     if !store_reuse_direct_cas_candidate(roots, entry) -> return false
     digest: entry.envelope.output_hash
     expected: store_reuse_object_path(roots, digest)
@@ -51,7 +51,7 @@ store_reuse_direct_cas_entry: fn(verification: ^StoreVerification, roots: Hangar
 }
 
 // The caller holds the Hangar lock.
-store_snapshot_lease_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, validate_provider_facts: Bool) -> CacheLease StoreError! {
+store_snapshot_lease_unlocked: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, validate_provider_facts: Bool) -> CacheLease StoreError! {
     leases: files.join(roots.root, "leases")
     store_ensure_real_directory(leases, "Hangar lease directory")
     if !store_reuse_single_component(entry.id) {
@@ -121,7 +121,7 @@ store_reuse_hold_directory: fn(path: String) -> LeasedDirectory StoreError! {
     Ok(LeasedDirectory{path: path, directory: Val(directory), id: info.id, child_fd: store_lease_reserve_child_fd()})
 }
 
-store_reuse_build_lease: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, direct_cas: Bool, lease_root: String, lease_lock_path: String, live_lock: ^^RuntimeLock, snapshot_root: String, lease_snapshot_root: String) -> CacheLease StoreError! {
+store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, direct_cas: Bool, lease_root: String, lease_lock_path: String, live_lock: ^^RuntimeLock, snapshot_root: String, lease_snapshot_root: String) -> CacheLease StoreError! {
     if !files.exists(entry.out) {
         store_ensure_real_directory(snapshot_root, "cache lease snapshot")
         return Ok(
@@ -401,7 +401,7 @@ store_reuse_create_exec_wrappers: fn(snapshot_root: String, executables: [Snapsh
 }
 
 // The keeper's next status line, or "" at end of output.
-store_reuse_keeper_line: fn(child: ^ProcessChild) -> String Never! {
+store_reuse_keeper_line: fn(child: ProcessChild) -> String Never! {
     loop line in child.stdout.lines() -> return line
     ""
 }

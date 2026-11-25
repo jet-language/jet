@@ -53,6 +53,12 @@ JetLibScalar: enum {
     Text = 3,
 }
 
+// JetLibScalar picks from the built-in type catalog: a native Library row
+// carries a Jet scalar type, and `Text` is its name for String. While the
+// compiler builds, JET_LIB_SCALAR_COUNT stops the build naming any other case
+// TYPE_NAMES lacks.
+JET_LIB_SCALAR_COUNT: #run effect_vocabulary_enum_view_count("Record/JetLib.jet", embed_file("JetLib.jet"), "JetLibScalar", TYPE_NAMES, "TYPE_NAMES", [String]{"Text"})
+
 // One exact C ABI row: `symbol` is the emitted foreign name; each parameter's
 // AccessConvention stays explicit metadata, never inferred from generated
 // code, so the C scalar representation stays homogeneous while the Jet

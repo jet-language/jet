@@ -170,7 +170,11 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
     guards_enter_root()
     build: rmlr_files.read("{RMLR_SOURCE}Build.jet") ?? panic("read Build.jet: {err}")
     kernel: rmlr_files.read("Core/Mem/Mem.jet") ?? panic("read Core/Mem/Mem.jet: {err}")
-    math: rmlr_files.read("Core/Math/Math.jet") ?? panic("read Core/Math/Math.jet: {err}")
+    // The other Core files whose functions fill an IR_CORE_INTRINSICS role:
+    // core.math's bit casts and roots, core.tasks' and core.event's
+    // constructors, and core.term's described progress source.
+    paths: [String]{"Core/Math/Math.jet", "Core/Tasks/Tasks.jet", "Core/Event/Event.jet", "Core/Term/Term.jet"}
+    homes: loop path in paths -> rmlr_files.read(path) ?? panic("read {path}: {err}")
     rows := 0
     loop line in build.split("\n") {
         if !line.contains("IRCoreIntrinsicRow{{role: \"") -> next
@@ -180,7 +184,12 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
             rows += 1
             next
         }
-        assert(math.contains(marker), "IR_CORE_INTRINSICS row `{role}` lowers no primitive of Core/Mem/Mem.jet or Core/Math/Math.jet")
+        declared: (loop home in homes {
+            if home.contains(marker) {
+                break true
+            }
+        } ?? false)
+        assert(declared, "IR_CORE_INTRINSICS row `{role}` lowers no primitive of Core/Mem/Mem.jet or {paths.join(", ")}")
     }
     assert(rows >= 10, "found only {rows} core.mem intrinsic rows")
 }

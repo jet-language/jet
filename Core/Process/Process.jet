@@ -440,12 +440,37 @@ run_all_canceled: fn() -> IOError Never! {
     Set.from([String]{"terminal", "resize", "raw"})
 }
 
-// The ProcessSpec builders and launch steps and the ProcessChild steps:
-// `spec.cwd(path)`, `spec.run()`, `child.wait()` and the rest check as calls
-// of these bodies, which the compiler finds by their roles (`terminal(policy)`
-// fills ProcessSpecTerminalWithPolicy), each the jet.runtime.process leaf of
-// its runtime export. A builder takes its spec and answers it changed; a
-// launch or child step reads its receiver.
+// The compiler's `ProcessSpec`: an opaque runtime handle over a command, its
+// environment, streams and limits. Its launch steps read the spec; the
+// builders are still checked by the compiler, which lets a later use of the
+// spec turn a builder's move into a share.
+impl ProcessSpec {
+    /// The checked launch plan, without launching. A spec resolves a plan
+    /// only under an authority policy from `under`.
+    ///
+    /// ```jet
+    /// spec: cmd(["true"])
+    /// spec.plan() == .Err(.InvalidInput(_)) // => true
+    /// ```
+    plan: fn(self) -> ProcessPlan IOError! { rt.spec_plan(self) }
+
+    /// Runs the child, waits for it and answers its receipt.
+    run: fn(self) -[Exec]> ProcessReceipt IOError! { rt.spec_run(self) }
+
+    /// Runs the child and waits for it; a failed exit is an `IOError`.
+    run_checked: fn(self) -[Exec]> ProcessReceipt IOError! { rt.spec_run_checked(self) }
+
+    /// Starts the child and answers it for incremental interaction.
+    spawn: fn(self) -[Exec]> ProcessChild IOError! { rt.spec_spawn(self) }
+}
+
+// The ProcessSpec builders and the ProcessChild steps: `spec.cwd(path)`,
+// `child.wait()` and the rest check as calls of these bodies, which the
+// compiler finds by their roles (`terminal(policy)` fills
+// ProcessSpecTerminalWithPolicy), each the jet.runtime.process leaf of its
+// runtime export. A builder takes its spec and answers it changed; a child
+// step reads its receiver. The launch-step roles serve a compiler built before
+// `impl ProcessSpec` declared `plan`, `run`, `run_checked` and `spawn`.
 #Builtin.Role(.ProcessSpecCwd) priv __spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec Never! { rt.spec_cwd(spec, path) }
 #Builtin.Role(.ProcessSpecArg) priv __spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec Never! { rt.spec_arg(spec, extra) }
 #Builtin.Role(.ProcessSpecArgsExtend) priv __spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec Never! { rt.spec_args_extend(spec, extra) }
@@ -463,6 +488,11 @@ run_all_canceled: fn() -> IOError Never! {
 #Builtin.Role(.ProcessSpecTerminal) priv __spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_terminal(spec) }
 #Builtin.Role(.ProcessSpecTerminalWithPolicy) priv __spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec Never! { rt.spec_terminal_with_policy(spec, policy) }
 #Builtin.Role(.ProcessSpecUnder) priv __spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec Never! { rt.spec_under(spec, authority) }
+#Builtin.Role(.ProcessSpecStdin) priv __spec_stdin: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stdin(spec, mode) }
+#Builtin.Role(.ProcessSpecStdout) priv __spec_stdout: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stdout(spec, mode) }
+#Builtin.Role(.ProcessSpecStderr) priv __spec_stderr: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stderr(spec, mode) }
+#Builtin.Role(.ProcessSpecTimeout) priv __spec_timeout: fn(spec: ^^ProcessSpec, limit: Duration) -> ProcessSpec Never! { rt.spec_timeout(spec, limit.ns) }
+#Builtin.Role(.ProcessSpecCPUTimeLimit) priv __spec_cpu_time_limit: fn(spec: ^^ProcessSpec, limit: Duration) -> ProcessSpec Never! { rt.spec_cpu_time_limit(spec, limit.ns) }
 #Builtin.Role(.ProcessSpecPlan) priv __spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! { rt.spec_plan(spec) }
 #Builtin.Role(.ProcessSpecRun) priv __spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run(spec) }
 #Builtin.Role(.ProcessSpecRunChecked) priv __spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run_checked(spec) }

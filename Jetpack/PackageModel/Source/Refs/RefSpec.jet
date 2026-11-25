@@ -6,16 +6,19 @@
 //   `fastfetch@jetpack`
 //   `owner/my-fastfetch-jet-config@github`
 //   `./my-env`
-use jetpack_foundation.[
-    REF_CHANNEL_AUTO,
-    REF_CHANNEL_LATEST,
-    REF_CHANNEL_MAIN,
-    REF_CHANNEL_MARKER,
-    REF_PROVIDER_AT,
-    REF_SEPARATOR,
-    REF_SOURCE_JETPACK,
-    REF_SOURCE_NIXPKGS,
-]
+use {
+    jet_foundation.[effect_vocabulary_view_count]
+    jetpack_foundation.[
+        REF_CHANNEL_AUTO,
+        REF_CHANNEL_LATEST,
+        REF_CHANNEL_MAIN,
+        REF_CHANNEL_MARKER,
+        REF_PROVIDER_AT,
+        REF_SEPARATOR,
+        REF_SOURCE_JETPACK,
+        REF_SOURCE_NIXPKGS,
+    ]
+}
 
 // Where a ref is resolved from. The built-in sources need no declaration;
 // `Named` is a source declared in an `env.jet` that resolves to an
@@ -208,6 +211,10 @@ ProviderKind: enum {
         row.kind ?? ProviderKind.Nix
     }
 }
+
+// ProviderKind picks from ProviderFamily: each backend is a provider family,
+// apart from `Infer`, which is resolved before any provider runs.
+PROVIDER_KIND_COUNT: #run effect_vocabulary_view_count("Refs/RefSpec.jet", embed_file("RefSpec.jet"), "ProviderKind", "Refs/RefSpec.jet", embed_file("RefSpec.jet"), "ProviderFamily", [String]{"Infer"})
 
 // Federated provider families: the third view of the provider rows, beside
 // RefSource and ProviderKind. Their contracts and first-party split are in

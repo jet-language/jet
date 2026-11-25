@@ -54,7 +54,7 @@ StdinHandle: struct {
     // The declaration's fd is informational; every token reads shared stdin.
     // There is no independent unread buffer or close operation.
     // The raw leaf already drops the line's trailing LF and CR bytes.
-    read_line: fn(^self) -[IO, Time.Wait]> String? IOError! {
+    read_line: fn(self) -[IO, Time.Wait]> String? IOError! {
         stdio_checkpoint(.Read, "stdin", "IO.Read")
         rt.stdin_line()
     }
@@ -296,7 +296,7 @@ take_within: fn(n: Int, wait: Duration) -[IO, Time.Wait]> [U8]? IOError! {
 
 // Up to `limit` of the bytes the cursor has not read; a cursor at its end
 // gives none.
-priv cursor_read: fn(cursor: ^Reader, limit: Int) -> [U8] IOError! {
+priv cursor_read: fn(cursor: Reader, limit: Int) -> [U8] IOError! {
     if limit <= 0 {
         return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("the read limit must be positive")}))
     }
@@ -427,6 +427,15 @@ read_key: fn() -[IO, Time.Wait]> Key Never! {
 WinSize: struct {
     w: Int,
     h: Int,
+}
+
+// `progress(items, description, template)` (JetSema
+// sema_call_check_term_progress_iter): the items, handed on as the loop
+// pulls them, each reported under the description in the template's shape.
+// The compiler lowers each call to the runtime's progress Iter
+// (InlineIterProgress); it takes the items over.
+#Builtin.Role(.InlineIterProgress) priv __progress_items: fn<T>(items: ^^Iter<T>, description: String, template: String) -[IO]> Iter<T> Never! {
+    __progress_items<T>(items, description, template)
 }
 
 progress: fn(label: String) -[IO, Time.Wait]> IOError! {

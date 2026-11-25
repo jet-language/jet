@@ -2,6 +2,7 @@
 // with one active scope. SymbolId remains the stable declaration identity;
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
+    effect_vocabulary_view_count,
     symbol_local_keys_find,
     AccessConvention,
     AST_NODE_GENERATED,
@@ -487,11 +488,11 @@ sema_loop_value_resolve_frame: fn(context: SemaCheckContext, label: String?) -> 
     None
 }
 
-sema_loop_value_record_break: fn(context: ^SemaCheckContext, frame_index: Int, state: SemaOwnershipState) Never! {
-    if frame_index < 0 || frame_index >= context.loop_break_flows.len() {
+sema_loop_value_record_break: fn(check: ^SemaBodyCheck, frame_index: Int) Never! {
+    if frame_index < 0 || frame_index >= check.context.loop_break_flows.len() {
         return
     }
-    context.loop_break_flows[frame_index].paths.push(sema_ownership_state_snapshot(state))
+    check.context.loop_break_flows[frame_index].paths.push(sema_ownership_state_snapshot(check.state))
 }
 
 sema_loop_value_set_result_type: fn(context: ^SemaCheckContext, frame_index: Int, ty: Type) Never! {
@@ -796,7 +797,7 @@ SemaScopeEnvironment: struct {
     else_arms: [ElseArmSpan]{[ElseArmSpan]{}},
     // The module's proven length-preserving list write
     // parameters, copied into each function's ownership state.
-    fixed_length_write_params: [String]{[String]{}},
+    fixed_length_write_params: [SemaWindowParam]{[SemaWindowParam]{}},
     // The module's `debug(…)` call texts, from the parser.
     debug_sites: [DebugTraceSite]{[DebugTraceSite]{}},
     // The module's AST tables, from the parser: its nodes' handles index them.
@@ -818,9 +819,9 @@ SemaScopeEnvironment: struct {
 // program's call that leads to it, and a body the program never reaches is
 // never refused. User bodies consume the selected machine fact, never a host
 // OS guess. A function body is checked with the graph in the program tables.
-sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    graph: program.registration_graph
-    graph.target_machine.no_os && environment.package_identity == graph.package_identity
+sema_scope_environment_no_os: fn(check: SemaBodyCheck) -> Bool Never! {
+    graph: check.program.registration_graph
+    graph.target_machine.no_os && check.environment.package_identity == graph.package_identity
 }
 
 // The declaration scopes of the modules compile-time checks (item checks,
@@ -931,10 +932,6 @@ SemaCheckContext: struct {
     // the compiler records it builds each heard call from
     // (SEMA_CALL_RULE_RECORDS), which no program writes.
     compiler_records: Bool{false},
-    // Each static route a body registers, `binding|method|pattern`, to the
-    // span that registered it first: one index, made on the first route. A
-    // nested check borrows its enclosing check's (sema_check_routes_lend).
-    http_routes: [SemaHTTPRouteIndex]{[SemaHTTPRouteIndex]{}},
     // The tables the body's heard calls add rows to (sema_rule_table).
     rule_tables: SemaRuleTables{SemaRuleTables{}},
     hardware_use: TargetHardwareUse,
@@ -950,6 +947,13 @@ SemaCheckContext: struct {
     // Derived module/place indexes into the canonical ordered source rows.
     comptime_body_source_modules: [Int],
     comptime_body_source_rows: [SemaComptimePlaceRows],
+    // The type parameter each `T.reflect()` read checked in this body
+    // reflects, in order: a compile-time site that reads one is answered
+    // per instance (sema_comptime_generic_site_params).
+    generic_reflections: [Type]{[Type]{}},
+    // A generic body's compile-time site is being checked: a fact read of a
+    // type parameter's record types its code (sema_fact_type_param_read).
+    generic_site: Bool{false},
     compute_calls: [SemaComputeCallFact],
     autodiff_obligations: [SemaAutodiffObligation],
     // Ownership/GenericCrossings.jet: what this body's type parameters cross,
@@ -1445,9 +1449,9 @@ sema_symbol_id_of: fn(program: SemaProgramTables, context: ^SemaCheckContext, ke
 
 // The id keyed `key`, a run-wide one or one of the checking body's own; None
 // for a key no declaration holds.
-sema_symbol_lookup: fn(program: SemaProgramTables, context: SemaCheckContext, key: String) -> SymbolID? Never! {
-    if sema_symbol_find(program, key) == .Val(found) -> return Val(found)
-    symbol_local_keys_find(context.arena.tree.symbols, key)
+sema_symbol_lookup: fn(check: SemaBodyCheck, key: String) -> SymbolID? Never! {
+    if sema_symbol_find(check.program.*, key) == .Val(found) -> return Val(found)
+    symbol_local_keys_find(check.context.arena.tree.symbols, key)
 }
 
 // The key text of `id`, a run-wide id or one of the checking body's own. A
@@ -1678,9 +1682,9 @@ sema_scope_caller_index: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 // The AST tables of the module that declares a node: the environment's own
 // for its module, else that module's from the graph. None when no graph
 // registers the module.
-sema_scope_module_tables: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> ASTTables? Never! {
-    if module_identity == environment.module_identity -> return Val(environment.tables)
-    graph: program.registration_graph
+sema_scope_module_tables: fn(check: SemaBodyCheck, module_identity: ModuleID) -> ASTTables? Never! {
+    if module_identity == check.environment.module_identity -> return Val(check.environment.tables)
+    graph: check.program.registration_graph
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     Val(graph.modules[module_index].program.tables)
 }
@@ -1836,58 +1840,6 @@ sema_body_check_swap_tail_store: fn(check: ^SemaBodyCheck, tail_store: ^SemaStat
     tail_store = held
 }
 
-// `recorded` holds the ids `spans` set, in order: a rollback clears the ones
-// after its mark instead of saving a copy of the index.
-SemaHTTPRouteIndex: struct {
-    names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
-    spans: [Span?]{[Span?]{}},
-    recorded: [Int]{[Int]{}},
-}
-
-sema_check_context_http_route_record: fn(context: ^SemaCheckContext, key: String, span: Span) -> Span? Never! {
-    if context.http_routes.len() == 0 -> context.http_routes.push(SemaHTTPRouteIndex{})
-    id: name_index(name_intern(context.http_routes[0].names, key))
-    loop context.http_routes[0].spans.len() <= id -> context.http_routes[0].spans.push(None)
-    if context.http_routes[0].spans[id] == .Val(existing) -> return Val(existing)
-    context.http_routes[0].spans[id] = Val(span)
-    context.http_routes[0].recorded.push(id)
-    None
-}
-
-// How many routes `context` has recorded: a mark's length.
-sema_check_context_http_routes_length: fn(context: SemaCheckContext) -> Int Never! {
-    if context.http_routes.len() == 0 -> return 0
-    context.http_routes[0].recorded.len()
-}
-
-// Forgets the routes `context` recorded after the first `kept`.
-sema_check_context_http_routes_truncate: fn(context: ^SemaCheckContext, kept: Int) Never! {
-    if context.http_routes.len() == 0 -> return
-    loop context.http_routes[0].recorded.len() > kept {
-        id: context.http_routes[0].recorded.pop() ?? break
-        context.http_routes[0].spans[id] = None
-    }
-}
-
-// A nested check on a snapshot sees the routes of the check it nests in:
-// that check lends its index to the snapshot before the nested check, and
-// takes it back after (sema_check_routes_take_back). Returns the index's
-// length when lent.
-sema_check_routes_lend: fn(context: ^SemaCheckContext, nested: ^SemaCheckContext) -> Int Never! {
-    kept: sema_check_context_http_routes_length(context)
-    routes: context.http_routes.pop() ?? return kept
-    nested.http_routes.push(routes)
-    kept
-}
-
-// Takes the index lent to `nested` back into `context`, without the routes
-// the nested check recorded after `kept`.
-sema_check_routes_take_back: fn(context: ^SemaCheckContext, nested: ^SemaCheckContext, kept: Int) Never! {
-    routes: nested.http_routes.pop() ?? return
-    if context.http_routes.len() == 0 -> context.http_routes.push(routes)
-    sema_check_context_http_routes_truncate(context, kept)
-}
-
 sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Never! {
     snapshot := SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
@@ -1904,8 +1856,6 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         lambda_statement_tails: source.lambda_statement_tails.copy(),
         call_facts: source.call_facts.copy(),
         module_writes: source.module_writes.copy(),
-        // Lent by the enclosing check when it nests one (sema_check_routes_lend).
-        http_routes: [SemaHTTPRouteIndex]{},
         rule_tables: if source.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> source.rule_tables.copy(),
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: source.call_return_views.copy(),
@@ -1929,6 +1879,10 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         autodiff_obligations: source.autodiff_obligations.copy(),
         generic_crossings: source.generic_crossings.copy(),
         generic_calls: source.generic_calls.copy(),
+        // A lambda in a generic body's compile-time site is part of that
+        // site: its `T.reflect()` reads type the site's code, and the caller
+        // takes the reads it adds back (sema_expression_lambda_merge_context_facts).
+        generic_site: source.generic_site,
         autodiff_safe_panic: source.autodiff_safe_panic,
         autodiff_unsafe_panic: source.autodiff_unsafe_panic,
         autodiff_safe_panic_context: source.autodiff_safe_panic_context,
@@ -2037,7 +1991,6 @@ SemaCheckContextMark: struct {
     index_proofs: Int,
     filed_expr_ids: Int,
     next_expr_id: Int,
-    http_routes: Int,
     saved: SemaCheckContextSaved,
 }
 
@@ -2139,7 +2092,6 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
         index_proofs: context.index_proofs.len(),
         filed_expr_ids: context.filed_expr_ids.len(),
         next_expr_id: context.next_expr_id,
-        http_routes: sema_check_context_http_routes_length(context),
         saved: SemaCheckContextSaved{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
@@ -2263,7 +2215,6 @@ sema_check_context_rollback: fn(context: ^SemaCheckContext, mark: ^^SemaCheckCon
     loop context.incomplete_reasons.len() > mark.incomplete_reasons {
         _ := context.incomplete_reasons.pop()
     }
-    sema_check_context_http_routes_truncate(context, mark.http_routes)
     saved := mark.saved.move()
     context.comptime_body_values = saved.comptime_body_values.move()
     context.exact_int_reachable = saved.exact_int_reachable
@@ -2816,11 +2767,11 @@ sema_scope_knowledge_gate_allows: fn(table: SemaScopeTable, plane: SemaKnowledge
     sema_knowledge_gate_allows(plane, active)
 }
 
-sema_scope_require_knowledge_gate: fn(table: ^SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
-    if sema_scope_knowledge_gate_allows(table, plane, gate) -> return true
+sema_scope_require_knowledge_gate: fn(check: ^SemaBodyCheck, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate, span: Span) -> Bool {
+    if sema_scope_knowledge_gate_allows(check.scopes, plane, gate) -> return true
     plane_name: sema_knowledge_plane_name(plane)
     gate_name: sema_knowledge_gate_spelling(gate)
-    diagnostics.push(sema_error("E0156", span, "This operation would loosen {plane_name}", "Knowledge only tightens silently; loosening {plane_name} must be named with a written gate", "Write `{gate_name}(value)` at this boundary"))
+    check.diagnostics.push(sema_error("E0156", span, "This operation would loosen {plane_name}", "Knowledge only tightens silently; loosening {plane_name} must be named with a written gate", "Write `{gate_name}(value)` at this boundary"))
     false
 }
 
@@ -3550,41 +3501,43 @@ sema_scope_binding_row: fn(environment: SemaScopeEnvironment, table: SemaScopeTa
 
 // A write through `place` writes state that outlives the call unless its
 // root is a cell the body built itself: it is recorded in
-// `context.module_writes`. A module-level root (`STATE` in
+// `check.context.module_writes`. A module-level root (`STATE` in
 // `STATE.rows[0].count`, or a module name before it) is module state by
 // name. A parameter or local root (`self`, an alias, a loop name or a
 // capture) may hold a module cell, so its write is recorded as `held`. Two
 // roots are the body's to write: a `:` local bound to a new cell
 // (SemaScopeBinding.own_cell), and a `^` parameter, whose caller lends the
 // place for writing and sees the write in the signature.
-sema_scope_record_module_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: ^SemaCheckContext) {
+sema_scope_record_module_write: fn(place: Expr, span: Span, check: ^SemaBodyCheck) {
     name: sema_scope_place_root(place) ?? return
-    index: sema_scope_resolve_index(scopes, name) ?? return
-    kind: scopes.bindings[index].symbol.kind
+    index: sema_scope_resolve_index(check.scopes, name) ?? return
+    kind: check.scopes.bindings[index].symbol.kind
     if kind != SymbolKind.Parameter && kind != SymbolKind.Local {
-        context.module_writes.push(TEffectSpan{name: name, span: span})
+        check.context.module_writes.push(TEffectSpan{name: name, span: span})
         return
     }
-    if scopes.bindings[index].own_cell {
+    if check.scopes.bindings[index].own_cell {
         return
     }
-    if kind == SymbolKind.Parameter && scopes.bindings[index].access == AccessConvention.Write {
+    if kind == SymbolKind.Parameter && check.scopes.bindings[index].access == AccessConvention.Write {
+        // The `^` mark is what lends this write, so the write uses it (E0518).
+        sema_ownership_note_binding_write(check.state, check.scopes.bindings[index])
         return
     }
-    context.module_writes.push(TEffectSpan{name: name, span: span, held: true})
+    check.context.module_writes.push(TEffectSpan{name: name, span: span, held: true})
 }
 
 // A place lent to a `^` parameter: the callee's writes through it are not
 // recorded (sema_scope_record_module_write), so the caller records a module
 // root as its own write. A local or parameter it lends is its own to lend.
-sema_scope_record_lent_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: ^SemaCheckContext) {
+sema_scope_record_lent_write: fn(place: Expr, span: Span, check: ^SemaBodyCheck) {
     name: sema_scope_place_root(place) ?? return
-    index: sema_scope_resolve_index(scopes, name) ?? return
-    kind: scopes.bindings[index].symbol.kind
+    index: sema_scope_resolve_index(check.scopes, name) ?? return
+    kind: check.scopes.bindings[index].symbol.kind
     if kind == SymbolKind.Parameter || kind == SymbolKind.Local {
         return
     }
-    context.module_writes.push(TEffectSpan{name: name, span: span})
+    check.context.module_writes.push(TEffectSpan{name: name, span: span})
 }
 
 // An initializer that builds a new cell: `Shared{…}` (optionally in `Val`)
@@ -3796,7 +3749,10 @@ sema_scope_resolve_declaration: fn(environment: SemaScopeEnvironment, program: S
     None
 }
 
-// The item variant of sema_scope_resolve_declaration(environment, program, id).
+// The item variant of sema_scope_resolve_declaration(environment, program, id):
+// an Item case, or `Other` for every item the scope does not tell apart. While
+// the compiler builds, SEMA_SCOPE_DECLARATION_KIND_COUNT stops the build
+// naming any other case Item lacks.
 SemaScopeDeclarationKind: enum {
     Func,
     Struct,
@@ -3804,6 +3760,8 @@ SemaScopeDeclarationKind: enum {
     Distinct,
     Other,
 }
+
+SEMA_SCOPE_DECLARATION_KIND_COUNT: #run effect_vocabulary_view_count("Sema/Scopes.jet", embed_file("Scopes.jet"), "SemaScopeDeclarationKind", "AST/Items.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Items.jet"), "Item", [String]{"Other"})
 
 sema_scope_item_kind: fn(item: Item) -> SemaScopeDeclarationKind Never! {
     if item == {
@@ -3815,14 +3773,14 @@ sema_scope_item_kind: fn(item: Item) -> SemaScopeDeclarationKind Never! {
     }
 }
 
-sema_scope_declaration_kind: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationKind? {
-    site: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_kind: fn(check: SemaBodyCheck, id: SymbolID) -> SemaScopeDeclarationKind? {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return None
     if site == .Local(index) {
-        return Val(sema_scope_item_kind(environment.declarations[index].item))
+        return Val(sema_scope_item_kind(check.environment.declarations[index].item))
     }
     if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         return sema_scope_nominal_kind(graph, module_index, row)
     }
     None
@@ -3837,8 +3795,8 @@ sema_scope_nominal_kind: fn(graph: SemaRegistrationGraph, module_index: Int, row
     None
 }
 
-sema_scope_declaration_is: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
-    found: sema_scope_declaration_kind(environment, program, id) ?? return false
+sema_scope_declaration_is: fn(check: SemaBodyCheck, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
+    found: sema_scope_declaration_kind(check, id) ?? return false
     found == kind
 }
 
@@ -3881,13 +3839,13 @@ sema_scope_nominal_struct: fn(graph: SemaRegistrationGraph, module_index: Int, r
 // The labels of a struct declaration's `state { … }` section (empty when it
 // has none); none when sema_scope_resolve_declaration(environment, id) is not
 // a struct.
-sema_scope_declaration_struct_states: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [String]? {
-    site: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_struct_states: fn(check: SemaBodyCheck, id: SymbolID) -> [String]? {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return None
     if site == .Local(index) {
-        return sema_scope_item_struct_states(environment.declarations[index].item)
+        return sema_scope_item_struct_states(check.environment.declarations[index].item)
     }
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
             return sema_scope_item_struct_states(item)
         }
@@ -3920,11 +3878,13 @@ sema_scope_item_enum: fn(item: Item) -> SemaScopeEnumShape? {
 }
 
 // The enum shape when sema_scope_resolve_declaration(environment, id) is an enum.
-sema_scope_declaration_enum: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeEnumShape? {
-    site: sema_scope_declaration_site(environment, program, id) ?? return None
-    if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
+sema_scope_declaration_enum: fn(check: SemaBodyCheck, id: SymbolID) -> SemaScopeEnumShape? {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return None
+    if site == .Local(index) {
+        return sema_scope_item_enum(check.environment.declarations[index].item)
+    }
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         return sema_scope_nominal_enum(graph, module_index, row)
     }
     None
@@ -3947,13 +3907,13 @@ sema_scope_item_enum_declares: fn(item: Item, variant: String) -> Bool Never! {
 }
 
 // sema_scope_resolve_declaration(environment, id) is an enum declaring `variant`.
-sema_scope_declaration_enum_declares: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, variant: String) -> Bool {
-    site: sema_scope_declaration_site(environment, program, id) ?? return false
+sema_scope_declaration_enum_declares: fn(check: SemaBodyCheck, id: SymbolID, variant: String) -> Bool {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return false
     if site == .Local(index) {
-        return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
+        return sema_scope_item_enum_declares(check.environment.declarations[index].item, variant)
     }
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         return sema_scope_nominal_enum_declares(graph, module_index, row, variant)
     }
     false
@@ -3974,13 +3934,13 @@ sema_scope_item_distinct: fn(item: Item) -> DistinctDef? {
 
 // The declaration when sema_scope_resolve_declaration(environment, id) is a
 // distinct type; a distinct declaration has no methods to leave behind.
-sema_scope_declaration_distinct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> DistinctDef? {
-    site: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_distinct: fn(check: SemaBodyCheck, id: SymbolID) -> DistinctDef? {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return None
     if site == .Local(index) {
-        return sema_scope_item_distinct(environment.declarations[index].item)
+        return sema_scope_item_distinct(check.environment.declarations[index].item)
     }
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         return sema_scope_nominal_distinct(graph, module_index, row)
     }
     None
@@ -4000,12 +3960,12 @@ sema_scope_item_function_type_params: fn(item: Item) -> [TypeParam] Never! {
 
 // The type parameters when sema_scope_resolve_declaration(environment, id) is
 // a function, else none; the function's body is never copied.
-sema_scope_declaration_function_type_params: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
-    site: sema_scope_declaration_site(environment, program, id) ?? return [TypeParam]{}
+sema_scope_declaration_function_type_params: fn(check: SemaBodyCheck, id: SymbolID) -> [TypeParam] {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return [TypeParam]{}
     if site == .Local(index) {
-        return sema_scope_item_function_type_params(environment.declarations[index].item)
+        return sema_scope_item_function_type_params(check.environment.declarations[index].item)
     }
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     if site == .Function(module_index, row) {
         return graph.modules[module_index].functions[row].declaration.type_params
     }

@@ -137,7 +137,7 @@ sema_services_apply_access: fn(value: TExpr, access: AccessConvention) -> TExpr 
 
 // `resolved_accesses` marks `fallback_accesses` as the call's final accesses
 // (a method contract already applied its explicit and record accesses).
-sema_services_core_call: fn(record: CoreCallRecord, arguments: [TExpr], fallback_accesses: [AccessConvention], method_receiver: Bool, resolved_accesses: Bool, result_type: Type, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+sema_services_core_call: fn(record: CoreCallRecord, arguments: [TExpr], fallback_accesses: [AccessConvention], method_receiver: Bool, resolved_accesses: Bool, result_type: Type, expected: Type?, span: Span, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
     call_arguments := [TExpr]{}
     index := 0
     loop index < arguments.len() {
@@ -147,8 +147,8 @@ sema_services_core_call: fn(record: CoreCallRecord, arguments: [TExpr], fallback
         index += 1
     }
     failure := sema_services_result_carrier(result_type)
-    value: sema_call_core_tree(record, call_arguments, span, [Type]{}, [Bool]{}, result_type, failure, expected, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_services_record_call_effects(record, value, span, result_type, failure, environment, program, scopes, context, diagnostics) {
+    value: sema_call_core_tree(record, call_arguments, span, [Type]{}, [Bool]{}, result_type, failure, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_services_record_call_effects(record, value, span, result_type, failure, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
@@ -160,13 +160,13 @@ sema_services_core_call: fn(record: CoreCallRecord, arguments: [TExpr], fallback
 // from the body (and its jet.runtime leaves) like any source call; a fixed
 // record row would hide them. A call still checked into a CoreCall node keeps
 // its record row.
-sema_services_record_call_effects: fn(record: CoreCallRecord, value: TExpr, span: Span, result_type: Type, failure: TFailureCarrier, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool Never! {
+sema_services_record_call_effects: fn(record: CoreCallRecord, value: TExpr, span: Span, result_type: Type, failure: TFailureCarrier, check: ^SemaBodyCheck) -> Bool Never! {
     if value.kind == .Call(_, _, _) {
-        context.call_facts.push(
+        check.context.call_facts.push(
             SemaCallSiteFact{
                 span: span,
-                caller_key: sema_scope_function_owner_key(scopes),
-                callee: sema_expr_call_callee(program, value),
+                caller_key: sema_scope_function_owner_key(check.scopes),
+                callee: sema_expr_call_callee(check.program.*, value),
                 facts: SemaCallSiteFacts{effect_bound: None},
                 discarded: false,
                 detail: sema_call_site_detail_of(SemaCallSiteDetail{lifecycle: record.marker}),
@@ -174,7 +174,7 @@ sema_services_record_call_effects: fn(record: CoreCallRecord, value: TExpr, span
         )
         return true
     }
-    sema_call_core_record_effects(record, span, [Type]{}, result_type, failure, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics)
+    sema_call_core_record_effects(record, span, [Type]{}, result_type, failure, [FunctionDefaultRef]{}, check)
 }
 
 sema_services_method_params: fn(types: [Type], accesses: [AccessConvention]) -> [SemaCallParam] Never! {
@@ -234,15 +234,15 @@ sema_services_receiver_is: fn(ty: Type, owner: String) -> Bool Never! {
 // The builder shape every worker declaration keeps: a visible literal name,
 // a positive literal capacity and a top-level function handler. Returns the
 // handler's name, or None once a diagnostic reports the shape.
-sema_services_worker_shape: fn(name: Expr, handler: Expr, capacity: Expr, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> String? {
+sema_services_worker_shape: fn(name: Expr, handler: Expr, capacity: Expr, check: ^SemaBodyCheck) -> String? {
     valid := true
     literal: sema_services_literal_string(name)
     if literal == None || !sema_services_valid_name(literal ?? "") {
-        diagnostics.push(sema_error("E0112", expr_span(name), "service worker name is outside the checked builder shape", "worker names must be non-empty visible literals of at most 256 bytes", "use a literal visible worker name"))
+        check.diagnostics.push(sema_error("E0112", expr_span(name), "service worker name is outside the checked builder shape", "worker names must be non-empty visible literals of at most 256 bytes", "use a literal visible worker name"))
         valid = false
     }
     if sema_services_literal_int(capacity) == .Val(number) && number <= 0 {
-        diagnostics.push(sema_error("E0112", expr_span(capacity), "service worker capacity is outside the checked builder shape", "a service worker needs a positive mailbox capacity", "use a positive integer capacity"))
+        check.diagnostics.push(sema_error("E0112", expr_span(capacity), "service worker capacity is outside the checked builder shape", "a service worker needs a positive mailbox capacity", "use a positive integer capacity"))
         valid = false
     }
     handler_name := ""
@@ -251,13 +251,13 @@ sema_services_worker_shape: fn(name: Expr, handler: Expr, capacity: Expr, scopes
             handler_name = identifier
             // Only a body binding is a local; the root frame holds the module's
             // items and imports.
-            if sema_scope_resolve_index(scopes, identifier) == .Val(index) && scopes.frames[scopes.bindings[index].frame].parent >= 0 {
-                diagnostics.push(sema_error("E0112", expr_span(handler), "service worker handler lifetime is outside the checked builder shape", "service topology values must stay visible to sema before runtime construction", "pass a top-level function, not a local or captured function value"))
+            if sema_scope_resolve_index(check.scopes, identifier) == .Val(index) && check.scopes.frames[check.scopes.bindings[index].frame].parent >= 0 {
+                check.diagnostics.push(sema_error("E0112", expr_span(handler), "service worker handler lifetime is outside the checked builder shape", "service topology values must stay visible to sema before runtime construction", "pass a top-level function, not a local or captured function value"))
                 valid = false
             }
         }
         else -> {
-            diagnostics.push(sema_error("E0112", expr_span(handler), "service worker handler is outside the checked builder shape", "service handlers must be top-level functions and cannot capture local values", "pass a top-level function name"))
+            check.diagnostics.push(sema_error("E0112", expr_span(handler), "service worker handler is outside the checked builder shape", "service handlers must be top-level functions and cannot capture local values", "pass a top-level function name"))
             valid = false
         }
     }
@@ -336,7 +336,7 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
     if batched && sema_services_literal_int(updated_args[2].expr) == .Val(size) && size <= 0 {
         check.diagnostics.push(sema_error("E0112", expr_span(updated_args[2].expr), "service worker batch is outside the checked builder shape", "a batch hands the handler at least one message", "use a positive batch size"))
     }
-    shaped: sema_services_worker_shape(updated_args[0].expr, updated_args[1].expr, updated_args[labels.len() - 1].expr, check.scopes, check.diagnostics)
+    shaped: sema_services_worker_shape(updated_args[0].expr, updated_args[1].expr, updated_args[labels.len() - 1].expr, check)
     if shaped == None || check.diagnostics.len() > shape_errors {
         sema_services_check_untyped_args(updated_args, check)
         return failed
@@ -353,7 +353,7 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
         return failed
     }
     handled: if stateful -> handler_params[1] else -> handler_params[0]
-    durable: if batched && handled == .List(element) -> sema_services_type_meets(element, "Decode", check.environment.*, check.program.*) else -> sema_services_type_meets(handled, "Decode", check.environment.*, check.program.*)
+    durable: if batched && handled == .List(element) -> sema_services_type_meets(element, "Decode", check) else -> sema_services_type_meets(handled, "Decode", check)
     // No program spells these names, so each is a Core source route
     // (CoreReach JET_DRIVER_SOURCE_ROUTES) that the load keeps:
     // ("core.service", "durable_batched_worker"), ("core.service", "batched_worker"),
@@ -380,9 +380,9 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
 
 // Whether `ty` meets the compiler-owned `bound` where the call is written; a
 // type parameter is not known to.
-sema_services_type_meets: fn(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    graph: program.registration_graph
-    sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
+sema_services_type_meets: fn(ty: Type, bound: String, check: SemaBodyCheck) -> Bool Never! {
+    graph: check.program.registration_graph
+    sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(check.environment.*, graph), check.environment.generic_params) ?? false
 }
 
 // `tree.send(endpoint, message)`, `tree.call(endpoint, message)` and
@@ -420,7 +420,7 @@ sema_services_typed_delivery: fn(method: String, receiver: Expr, receiver_ty: Ty
             sema_services_check_untyped_args(updated_args, check)
             return Val(rejected)
         }
-        if !sema_services_type_meets(endpoint_args[0], "Encode", check.environment.*, check.program.*) || !sema_services_type_meets(endpoint_args[0], "Decode", check.environment.*, check.program.*) {
+        if !sema_services_type_meets(endpoint_args[0], "Encode", check) || !sema_services_type_meets(endpoint_args[0], "Decode", check) {
             check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "durable service send needs a message that encodes and decodes", "send_durable keeps {type_name(endpoint_args[0])} as JSON until the worker's handler succeeds on it", "derive `Encode` and `Decode` on the worker's message type, or use `tree.send`"))
             sema_services_check_untyped_args(updated_args, check)
             return Val(rejected)
@@ -461,7 +461,7 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
         if handler_value == .Val(item) -> values.push(item) else -> valid = false
         capacity_value := sema_check_expression(updated_args[2].expr, Val(Type.Int), check)
         if capacity_value == .Val(item) -> values.push(item) else -> valid = false
-        shaped: sema_services_worker_shape(updated_args[0].expr, updated_args[1].expr, updated_args[2].expr, check.scopes, check.diagnostics)
+        shaped: sema_services_worker_shape(updated_args[0].expr, updated_args[1].expr, updated_args[2].expr, check)
         if !valid || shaped == None {
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
@@ -485,13 +485,13 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
         // The handler is a checked top-level function identity, not storage
         // the caller owns: naming it lends nothing and moves nothing.
         params := sema_services_method_params([Type]{Type.String, handler_type, Type.Int}, [AccessConvention]{sema_call_core_access(record, 1) ?? AccessConvention.Read, AccessConvention.Read, sema_call_core_access(record, 4) ?? AccessConvention.Read})
-        sema_call_note_route_implicit_takes(params, updated_args, values, check.environment.*, check.program.*, check.scopes, check.state, check.context)
-        ownership := sema_ownership_check_method_call(check.state, "ServiceTree.worker", receiver, AccessConvention.Write, params, updated_args, check.scopes, span, check.diagnostics)
+        sema_call_note_route_implicit_takes(params, updated_args, values, check)
+        ownership := sema_ownership_check_method_call(check, "ServiceTree.worker", receiver, AccessConvention.Write, params, updated_args, span)
         if !ownership.accepted || !ownership.complete {
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
         fallbacks := [AccessConvention]{AccessConvention.Write, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read}
-        return Val(sema_services_core_call(record, core_args, fallbacks, true, false, sema_services_result_type(Type.Named{name: "ServiceEndpoint"}), expected, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics))
+        return Val(sema_services_core_call(record, core_args, fallbacks, true, false, sema_services_result_type(Type.Named{name: "ServiceEndpoint"}), expected, span, check))
     }
     None
 }
@@ -531,18 +531,16 @@ sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, le
     leaf.copy()
 }
 
-sema_job_queue_function: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationRowRef? {
-    if expression == .Paren(inner, _, _) {
-        return sema_job_queue_function(inner, environment, program)
-    }
+sema_job_queue_function: fn(expression: Expr, check: SemaBodyCheck) -> SemaRegistrationRowRef? {
+    if expression == .Paren(inner, _, _) -> return sema_job_queue_function(inner, check)
     name: if expression == {
         .Ident(name, _, _) -> name
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
             return None
         }
     }
-    graph: program.registration_graph
-    resolved: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
+    graph: check.program.registration_graph
+    resolved: sema_registration_lookup_name(graph, check.environment.module_identity, name) ?? return None
     if sema_resolved_kind(graph, resolved) != SymbolKind.Function -> return None
     module_index: sema_registration_module_index(graph, resolved.source_module_identity) ?? return None
     id: sema_resolved_id(graph, resolved)
@@ -573,7 +571,7 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
     if queue_name != "JobQueue" && !(core_source_owns_type(queue_name) && queue_name.ends_with(".JobQueue")) {
         return unhandled
     }
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Write, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Write, span) {
         return failed
     }
     required: if method == "enqueue" -> 2 else -> 3
@@ -586,7 +584,7 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
     if args.len() == 3 && !sema_services_bind_labels("JobQueue.{method}", updated_args, [String]{"", "", if method == "enqueue" -> "key" else -> "for"}, span, check.diagnostics) {
         return failed
     }
-    job: sema_job_queue_function(updated_args[0].expr, check.environment.*, check.program.*) ?? {
+    job: sema_job_queue_function(updated_args[0].expr, check) ?? {
         check.diagnostics.push(sema_job_queue_identity_error(method, expr_span(updated_args[0].expr)))
         sema_services_check_untyped_args(updated_args, check)
         return failed
@@ -596,13 +594,13 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
     payload_type: sema_type_resolve_declared_with_generics(graph, graph.modules[job.module_index].functions[job.row].declaration.params[0].ty, graph.modules[job.module_index].module_identity, [TGenericParam]{})
     job_span: expr_span(updated_args[0].expr)
     updated_args[0].expr = Expr.Str{parts: [StrPart]{StrPart.Lit{text: job_name}}, span: job_span, id: AST_NODE_GENERATED}
-    sema_call_http_check_serde(SemaSerdeDirection.Encode, payload_type, expr_span(updated_args[1].expr), check.environment.*, check.program.*, check.diagnostics)
+    sema_call_http_check_serde(SemaSerdeDirection.Encode, payload_type, expr_span(updated_args[1].expr), check)
     payload: sema_check_expression(updated_args[1].expr, Val(payload_type), check) ?? return failed
     last_type: if method == "enqueue" -> Type.Option{inner: Type.String} else -> Type.Named{name: "Duration"}
     last: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), check) ?? return failed else -> sema_node(check.context, last_type, NodeKind.Absent, span)
     parameter_types: if updated_args.len() == 3 -> [Type]{Type.String, payload_type, last_type} else -> [Type]{Type.String, payload_type}
     params: sema_services_method_params(parameter_types, [AccessConvention]{})
-    ownership: sema_ownership_check_method_call(check.state, "JobQueue.{method}", receiver, AccessConvention.Write, params, updated_args, check.scopes, span, check.diagnostics)
+    ownership: sema_ownership_check_method_call(check, "JobQueue.{method}", receiver, AccessConvention.Write, params, updated_args, span)
     if !ownership.accepted || !ownership.complete -> return failed
     // Source takes its immutable shared handle as a normal read, not the old
     // native mutable carrier. Receiver ownership has already been checked.
@@ -610,9 +608,9 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
     record: sema_call_core_receiver_record(Type.Named{name: "JobQueue"}, method, normalized.len(), span, check.diagnostics) ?? return failed
     result_type: sema_services_result_type(Type.Named{name: sema_core_module_nominal(check.program.*, "core.jobs", "JobQueueReceipt")})
     failure: sema_services_result_carrier(result_type)
-    if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, check.scopes, check.context, check.environment.*, check.program.*, check.diagnostics) {
+    if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, check) {
         return failed
     }
-    value: sema_call_core_tree(record, normalized, span, [Type]{payload_type}, [Bool]{}, result_type, failure, expected, check.environment.*, check.program.*, check.diagnostics)
+    value: sema_call_core_tree(record, normalized, span, [Type]{payload_type}, [Bool]{}, result_type, failure, expected, check)
     return SemaMethodSpecialCheck{handled: true, value: value}
 }

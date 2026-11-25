@@ -125,13 +125,18 @@ CollectionReceivers: enum {
     PriorityQueue,
 }
 
-// Receiver ownership. `Sequence` borrows a list or view and consumes an iterator.
+// Receiver ownership: an AccessConvention, or `Sequence`, which borrows a
+// list or view and consumes an iterator. While the compiler builds,
+// COLLECTION_ACCESS_COUNT stops the build naming any other case
+// AccessConvention lacks.
 CollectionAccess: enum {
     Read,
     Write,
     Move,
     Sequence,
 }
+
+COLLECTION_ACCESS_COUNT: #run effect_vocabulary_view_count("Collections.jet", embed_file("Collections.jet"), "CollectionAccess", "Types/Types.jet", embed_file("Types/Types.jet"), "AccessConvention", [String]{"Sequence"})
 
 // Positional argument shapes. The callback shapes name their parameter and
 // return types; `Seed` is checked from the written expression.

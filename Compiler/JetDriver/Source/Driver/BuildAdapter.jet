@@ -448,7 +448,7 @@ jet_driver_compiler_held: fn(args: [TComptimeValue]) -> BuildSessionValue? Never
 }
 
 // A `Compiler` member with no handler at the arity it was called with.
-jet_driver_compiler_unknown: fn(session: ^BuildSession, _host: JetDriverBuildAdapter, member: String, _args: [TComptimeValue], _fallible: Bool, _impure: Bool, span: Span, _file: String) -> JetEvalBuildReply Never! {
+jet_driver_compiler_unknown: fn(session: BuildSession, _host: JetDriverBuildAdapter, member: String, _args: [TComptimeValue], _fallible: Bool, _impure: Bool, span: Span, _file: String) -> JetEvalBuildReply Never! {
     jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
 }
 
@@ -690,7 +690,7 @@ jet_driver_compiler_rewrite: fn(session: ^BuildSession, member: String, args: [T
     jet_driver_session_reply(session, reply, span)
 }
 
-jet_driver_session_reply: fn(session: ^BuildSession, reply: BuildSessionReply, span: Span) -> JetEvalBuildReply Never! {
+jet_driver_session_reply: fn(session: BuildSession, reply: BuildSessionReply, span: Span) -> JetEvalBuildReply Never! {
     if reply == {
         .Value(value) -> JetEvalBuildReply.Value{value: jet_driver_build_session_output(value)}
         .Failure(error) -> JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}

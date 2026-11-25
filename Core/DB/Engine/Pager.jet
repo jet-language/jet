@@ -521,7 +521,7 @@ pager_error: fn(p: ^Pager, rc: Int) -> Int Never! {
 }
 
 // pagerFlushOnCommit.
-pager_flush_on_commit: fn(p: ^Pager, commit: Bool) -> Bool Never! {
+pager_flush_on_commit: fn(p: Pager, commit: Bool) -> Bool Never! {
     if !p.temp_file -> return true
     if !commit -> return false
     if !file.file_is_open(p.fd) -> return false
@@ -1088,7 +1088,7 @@ pager_sync_hot_journal: fn(p: ^Pager) -[DB]> Int Never! {
 
 // databaseIsUnmoved: SQLITE_READONLY_DBMOVED when the file was unlinked or
 // renamed since it was opened.
-database_is_unmoved: fn(p: ^Pager) -[DB]> Int Never! {
+database_is_unmoved: fn(p: Pager) -[DB]> Int Never! {
     if p.temp_file || p.db_size == 0 -> return base.OK
     if file.file_has_moved(p.fd) -> return base.READONLY_DBMOVED
     base.OK

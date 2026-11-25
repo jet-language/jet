@@ -364,14 +364,14 @@ build_session_new: fn(session_id: Int, package: String, compiler_version: String
     }
 }
 
-build_session_abort: fn(session: ^BuildSession) Never! {
+build_session_abort: fn(session: BuildSession) Never! {
     permit := session.storage.guard_edit()
     permit.value.active = false
 }
 
 // The run stopped at a call the session refused: the evaluator reports that
 // refusal, as the build's own report.
-build_session_refuse: fn(session: ^BuildSession) Never! {
+build_session_refuse: fn(session: BuildSession) Never! {
     permit := session.storage.guard_edit()
     permit.value.refused = true
 }
@@ -393,7 +393,7 @@ build_session_promised: fn(session: BuildSession) -> [BuildSessionGeneratedModul
 // The next call's span is in source file `file` (a dependency's function's
 // call as well as the build file's), which an option it sets names as its
 // site.
-build_session_at: fn(session: ^BuildSession, file: String) Never! {
+build_session_at: fn(session: BuildSession, file: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.file = file
 }
@@ -403,7 +403,7 @@ build_session_at: fn(session: ^BuildSession, file: String) Never! {
 // method's name, as sema places a method call), which the next call's
 // reports are at. A file the driver named no lines of places the call at
 // its start.
-build_session_place: fn(session: ^BuildSession, file: String, line: Int, column: Int, length: Int) -> Span Never! {
+build_session_place: fn(session: BuildSession, file: String, line: Int, column: Int, length: Int) -> Span Never! {
     permit := session.storage.guard_edit()
     start := 0
     if permit.value.lines.get(file) == .Val(starts) && line >= 1 && line <= starts.len() {
@@ -414,14 +414,14 @@ build_session_place: fn(session: ^BuildSession, file: String, line: Int, column:
 }
 
 // The words after `--` on `jet build` (`b.args()`); a new session has none.
-build_session_set_args: fn(session: ^BuildSession, args: [String]) Never! {
+build_session_set_args: fn(session: BuildSession, args: [String]) Never! {
     permit := session.storage.guard_edit()
     permit.value.args = args.copy()
 }
 
 // The source key the running compiler was built from, "" for none
 // (`b.jet_built_from`).
-build_session_set_jet_source: fn(session: ^BuildSession, key: String) Never! {
+build_session_set_jet_source: fn(session: BuildSession, key: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.jet_source = key.copy()
 }
@@ -433,27 +433,27 @@ build_session_tree_source: fn(session: BuildSession) -> String Never! {
     permit.value.tree_source.copy()
 }
 
-build_session_set_tree_source: fn(session: ^BuildSession, key: String) Never! {
+build_session_set_tree_source: fn(session: BuildSession, key: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.tree_source = key.copy()
 }
 
 // The folders of the packages the build's package.jet lists, by name.
-build_session_set_dependencies: fn(session: ^BuildSession, dependencies: [String:String]) Never! {
+build_session_set_dependencies: fn(session: BuildSession, dependencies: [String:String]) Never! {
     permit := session.storage.guard_edit()
     permit.value.dependencies = dependencies.copy()
 }
 
 // The loader's identity of the build's package (`package` may name it
 // otherwise, as a lone file's stem).
-build_session_set_identity: fn(session: ^BuildSession, identity: String) Never! {
+build_session_set_identity: fn(session: BuildSession, identity: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.identity = identity.copy()
 }
 
 // The build file's display path and source, whose lines the `site` of each
 // module `b.generate` makes and each step counts (build_session_site).
-build_session_set_source: fn(session: ^BuildSession, file: String, source: String) Never! {
+build_session_set_source: fn(session: BuildSession, file: String, source: String) Never! {
     build_session_add_source(session, file, source)
     permit := session.storage.guard_edit()
     permit.value.build_file = file.copy()
@@ -461,7 +461,7 @@ build_session_set_source: fn(session: ^BuildSession, file: String, source: Strin
 
 // The lines of source file `file`, where a Core method's `at` may place a
 // call (build_session_place).
-build_session_add_source: fn(session: ^BuildSession, file: String, source: String) Never! {
+build_session_add_source: fn(session: BuildSession, file: String, source: String) Never! {
     permit := session.storage.guard_edit()
     lines := [Int]{0}
     loop (index, byte) in source.bytes() {

@@ -3,10 +3,12 @@
 // process id, whether a standard stream is a terminal, a World's clock,
 // timers, tasks and history and the active World's store cells, the device
 // store's cells, the UI host provider's live state, the receipt claim
-// sections publish under, the thread a test World runs on, the real-time
-// worker a callback stream starts, and the platform family, module loader,
-// path syntax and SIMD width of the machine the program runs on. A value
-// computed while building would hold the
+// sections publish under, the thread a test World runs on, the test
+// harness's suite runner, `jet test` plan file and temporary directory, the
+// real-time worker a callback stream starts, the profiler's zone clock, the
+// files and directories of the machine the program runs on, and its
+// platform family, module loader, path syntax, AES and SHA instructions and SIMD
+// width. A value computed while building would hold the
 // compiler's own answer (a cross build would bake the build machine's
 // platform into the image), so sema never computes a call that reaches one
 // while compiling, a module value included
@@ -58,7 +60,32 @@ RUNTIME_ONLY_READS: #run { [RuntimeOnlyRead]{
     RuntimeOnlyRead{symbol: "jet_web_live_left", reads: "the live hub's topics whose last watching connection closed"},
     RuntimeOnlyRead{symbol: "jet_receipt_attach", reads: "the running program's receipt claim and directory"},
     RuntimeOnlyRead{symbol: "jet_testing_world_run", reads: "the running thread's World and its tasks"},
+    RuntimeOnlyRead{symbol: "jet_test_suite_run", reads: "the test harness's suite runner"},
+    RuntimeOnlyRead{symbol: "jet_test_setting", reads: "the `jet test` plan file the environment names"},
     RuntimeOnlyRead{symbol: "jet_rt_callback_start", reads: "the real-time worker thread the stream starts"},
+    RuntimeOnlyRead{symbol: "jet_perf_zone_open_named", reads: "the profiler's zone clock"},
+    RuntimeOnlyRead{symbol: "jet_crypto_aes_blocks", reads: "the AES instructions of the CPU the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_ghash_blocks", reads: "the carry-less multiply of the CPU the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_sha256_blocks", reads: "the SHA instructions of the CPU the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_close", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_create_named", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_fsync", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_link", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_open_child_directory", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_open_directory", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_open_source", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_read", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_seek", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_stat", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_tmpfile", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_crypto_jetc_write", reads: "the files of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_path_walk", reads: "the directories of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_process_spec_plan", reads: "the sandbox directories of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_testing_evidence_read_raw", reads: "the evidence file the running test reads"},
+    RuntimeOnlyRead{symbol: "jet_testing_temp_create_raw", reads: "the running test's temporary directory"},
+    RuntimeOnlyRead{symbol: "jet_testing_temp_remove_raw", reads: "the running test's temporary directory"},
+    RuntimeOnlyRead{symbol: "jet_testing_temp_join_raw", reads: "the temporary directory the environment names"},
+    RuntimeOnlyRead{symbol: "jet_testing_temp_facts_raw", reads: "the running test's thread and temporary directory"},
 } }
 
 // What runtime export `symbol` reads when it is run-time only, else None. A

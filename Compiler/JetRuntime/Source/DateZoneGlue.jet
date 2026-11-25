@@ -1,6 +1,6 @@
-// DateZoneABI only; field order is the declaration's.
+// DateZoneABI and CoreLayoutABI only; field order is the declaration's.
 datetime_leap: fn(value: I64) -> Bool {
-    (time_glue_word(wrapping(value + DATETIME_LEAP)) & I64{255}) != I64{0}
+    (time_glue_word(wrapping(value + DATETIME_LEAP_SECOND)) & I64{255}) != I64{0}
 }
 
 datetime_nanos: fn(value: I64) -> I64 {
@@ -10,7 +10,7 @@ datetime_nanos: fn(value: I64) -> I64 {
 #Export(c) jet_rt_handle_clone_jet_date_time: fn(value: I64) -> I64 {
     result: time_glue_clone(value, DATETIME_BYTES)
     time_glue_store(wrapping(result + DATETIME_NANOS), datetime_nanos(value))
-    time_glue_store(wrapping(result + DATETIME_LEAP), if datetime_leap(value) -> I64{1} else -> I64{0})
+    time_glue_store(wrapping(result + DATETIME_LEAP_SECOND), if datetime_leap(value) -> I64{1} else -> I64{0})
     result
 }
 
@@ -25,7 +25,7 @@ datetime_nanos: fn(value: I64) -> I64 {
 }
 
 #Export(c) jet_rt_handle_field_jet_date_time_leap_second: fn(value: I64) -> I64 {
-    value + DATETIME_LEAP
+    value + DATETIME_LEAP_SECOND
 }
 
 datetime_saturating_add: fn(left: I64, right: I64) -> I64 {
@@ -197,7 +197,7 @@ zone_rows_equal: fn(left: I64, right: I64, infos: Bool) -> Bool {
 #Export(c) jet_rt_handle_clone_jet_zoned_date_time: fn(value: I64) -> I64 {
     result: jet_rt_alloc(ZONED_BYTES, I64{8})
     time_glue_store(wrapping(result + ZONED_INSTANT), jet_rt_handle_clone_jet_date_time(time_glue_word(wrapping(value + ZONED_INSTANT))))
-    time_glue_store(wrapping(result + ZONED_ZONE), jet_rt_handle_clone_jet_zone(time_glue_word(wrapping(value + ZONED_ZONE))))
+    time_glue_store(wrapping(result + ZONED_ZONE_VALUE), jet_rt_handle_clone_jet_zone(time_glue_word(wrapping(value + ZONED_ZONE_VALUE))))
     result
 }
 
@@ -206,13 +206,13 @@ zone_rows_equal: fn(left: I64, right: I64, infos: Bool) -> Bool {
         return
     }
     jet_rt_handle_drop_jet_date_time(time_glue_word(wrapping(value + ZONED_INSTANT)))
-    jet_rt_handle_drop_jet_zone(time_glue_word(wrapping(value + ZONED_ZONE)))
+    jet_rt_handle_drop_jet_zone(time_glue_word(wrapping(value + ZONED_ZONE_VALUE)))
     jet_rt_free(value, ZONED_BYTES, I64{8})
 }
 
 #Export(c) jet_rt_handle_eq_jet_zoned_date_time: fn(left: I64, right: I64) -> Bool {
     // Time1480-1482: zone NAME only, not transition/info-table equality.
-    jet_rt_handle_eq_jet_date_time(time_glue_word(wrapping(left + ZONED_INSTANT)), time_glue_word(wrapping(right + ZONED_INSTANT))) && jet_rt_string_eq(time_glue_word(wrapping(time_glue_word(wrapping(left + ZONED_ZONE)) + ZONE_NAME)), time_glue_word(wrapping(time_glue_word(wrapping(right + ZONED_ZONE)) + ZONE_NAME)))
+    jet_rt_handle_eq_jet_date_time(time_glue_word(wrapping(left + ZONED_INSTANT)), time_glue_word(wrapping(right + ZONED_INSTANT))) && jet_rt_string_eq(time_glue_word(wrapping(time_glue_word(wrapping(left + ZONED_ZONE_VALUE)) + ZONE_NAME)), time_glue_word(wrapping(time_glue_word(wrapping(right + ZONED_ZONE_VALUE)) + ZONE_NAME)))
 }
 
 #Export(c) jet_rt_handle_field_jet_zoned_date_time_instant: fn(value: I64) -> I64 {
@@ -220,7 +220,7 @@ zone_rows_equal: fn(left: I64, right: I64, infos: Bool) -> Bool {
 }
 
 #Export(c) jet_rt_handle_field_jet_zoned_date_time_zone: fn(value: I64) -> I64 {
-    time_glue_word(wrapping(value + ZONED_ZONE))
+    time_glue_word(wrapping(value + ZONED_ZONE_VALUE))
 }
 
 zone_offset: fn(value: I64, seconds: I64) -> I64 {
@@ -247,7 +247,7 @@ zone_offset: fn(value: I64, seconds: I64) -> I64 {
     // Time1501-1510/1680-1688: UTC leap bypasses offset table; normal
     // paths saturating-add the leap timestamp and zone offset to local secs.
     instant: time_glue_word(wrapping(value + ZONED_INSTANT))
-    zone: time_glue_word(wrapping(value + ZONED_ZONE))
+    zone: time_glue_word(wrapping(value + ZONED_ZONE_VALUE))
     seconds: time_glue_word(wrapping(instant + DATETIME_SECS))
     name: time_glue_word(wrapping(zone + ZONE_NAME))
     utc_leap: datetime_leap(instant) && rt_text_len(name) == I64{3} && display_byte(rt_text_data(name)) == I64{85} && display_byte(wrapping(rt_text_data(name) + I64{1})) == I64{84} && display_byte(wrapping(rt_text_data(name) + I64{2})) == I64{67}

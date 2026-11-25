@@ -1,0 +1,17 @@
+Warning: Jet.WriteMarkNeverWritten: `xs: ^[Int]` gives write access, but the body never writes through it
+  --> Tests/UI/dead_key_take_collapse.jet:13:10
+    |
+ 13 | peek: fn(xs: ^[Int]) -> Int { xs.len() }
+    |          ^^
+ Why: `^` tells every caller that the function changes the value it lends; on a dead-key layout a typed `^^` can also arrive as `^`, which lends the value instead of taking it
+ Fix: Remove the `^` so `xs` is read, or write `^^` if the function takes it (on a dead-key layout type `^` then a space, twice)
+More: jet-lang.dev/e/Jet.WriteMarkNeverWritten
+
+Warning: Jet.WriteMarkNeverWritten: `^self` gives write access, but the body never writes through it
+  --> Tests/UI/dead_key_take_collapse.jet:10:14
+    |
+ 10 |     get: fn(^self) -> Int { self.n }
+    |              ^^^^
+ Why: `^` tells every caller that the function changes the value it lends; on a dead-key layout a typed `^^` can also arrive as `^`, which lends the value instead of taking it
+ Fix: Remove the `^` so `self` is read, or write `^^` if the function takes it (on a dead-key layout type `^` then a space, twice)
+More: jet-lang.dev/e/Jet.WriteMarkNeverWritten

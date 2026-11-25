@@ -2,6 +2,7 @@
 // coalesce, unequal single facts conflict naming both origins, named
 // collections combine by key, and every successful contributor is recorded in
 // order. Also the Output intent selection law (`defaults:` outputs).
+use jet_foundation.[OutputKind]
 
 impl PackageFacts {
     // Compose the root with Config contributions; on any conflict the facts
@@ -82,14 +83,14 @@ pkg_path_has_parent_component: fn(path: String) -> Bool Never! {
     false
 }
 
-pkg_intent_accepts_kind: fn(intent: String, kind: PackageOutputKind) -> Bool Never! {
+pkg_intent_accepts_kind: fn(intent: String, kind: OutputKind) -> Bool Never! {
     if intent == {
-        "run" -> kind == PackageOutputKind.Executable || kind == PackageOutputKind.Service
-        "test" | "check" -> kind == PackageOutputKind.Check
-        "dev" | "enter" -> kind == PackageOutputKind.Environment
-        "publish" -> kind == PackageOutputKind.Library || kind == PackageOutputKind.Executable || kind == PackageOutputKind.Service
-        "deploy" | "fleet" -> kind == PackageOutputKind.Fleet
-        "activate" | "activation" -> kind == PackageOutputKind.System || kind == PackageOutputKind.Fleet
+        "run" -> kind == OutputKind.Executable || kind == OutputKind.Service
+        "test" | "check" -> kind == OutputKind.Check
+        "dev" | "enter" -> kind == OutputKind.Environment
+        "publish" -> kind == OutputKind.Library || kind == OutputKind.Executable || kind == OutputKind.Service
+        "deploy" | "fleet" -> kind == OutputKind.Fleet
+        "activate" | "activation" -> kind == OutputKind.System || kind == OutputKind.Fleet
         else -> false
     }
 }

@@ -30,6 +30,26 @@ RNG: random.RNG
 // World lifecycle and suite harness state remain host-owned;
 // callback comparison and bounded history generation stay portable Jet code.
 
+// One comparison of a reference and a candidate over the same cases: its
+// verdict (`status`, with `reason`), the relation it checked, where it ran
+// (`source`, `tool`, `target`, `seed`) and each case's input and two
+// results. `first_difference` is the first case that differs, -1 for none.
+TestComparison: struct {
+    status: String,
+    relation: String,
+    source: String,
+    tool: String,
+    target: String,
+    seed: Int?,
+    case_ids: [String],
+    inputs: [Dyn],
+    reference: [Dyn],
+    candidate: [Dyn],
+    first_difference: Int,
+    reason: String,
+    universal_proof: Bool,
+}
+
 assert_equal: fn(comparison: TestComparison) -> Bool Never! {
     // The typed provider also requires recorded samples; the source twin can
     // validate only the scalar proof fields exposed by the declaration.
@@ -315,53 +335,64 @@ Fake: struct {
     }
 }
 
-FAKE_EN_FIRST: [String]{"Alice", "Bob", "Clara", "Diego"}
+// The words a `Fake` draws from for one locale.
+FakeLocale: struct {
+    first: [String],
+    last: [String],
+    hosts: [String],
+    streets: [String],
+    cities: [String],
+}
 
-FAKE_EN_LAST: [String]{"Smith", "Jones", "Taylor", "Brown"}
-
-FAKE_EN_HOSTS: [String]{"example.test", "mail.test", "demo.test"}
-
-FAKE_EN_STREETS: [String]{"Oak Street", "Pine Street", "Maple Street", "Cedar Street"}
-
-FAKE_EN_CITIES: [String]{"Austin", "Boston", "Denver", "Portland"}
-
-FAKE_DE_FIRST: [String]{"Anna", "Bruno", "Clara", "Dieter"}
-
-FAKE_DE_LAST: [String]{"Schmidt", "Fischer", "Weber", "Wagner"}
-
-FAKE_DE_HOSTS: [String]{"beispiel.test", "mail.test", "demo.test"}
-
-FAKE_DE_STREETS: [String]{"Bahnhofstraße", "Hauptstraße", "Lindenweg", "Gartenweg"}
-
-FAKE_DE_CITIES: [String]{"Berlin", "Bremen", "Dresden", "Hamburg"}
+// One row per locale: `locale_code` 1 is German, any other English.
+FAKE_LOCALES: [FakeLocale]{
+    FakeLocale{
+        first: [String]{"Alice", "Bob", "Clara", "Diego"},
+        last: [String]{"Smith", "Jones", "Taylor", "Brown"},
+        hosts: [String]{"example.test", "mail.test", "demo.test"},
+        streets: [String]{"Oak Street", "Pine Street", "Maple Street", "Cedar Street"},
+        cities: [String]{"Austin", "Boston", "Denver", "Portland"},
+    },
+    FakeLocale{
+        first: [String]{"Anna", "Bruno", "Clara", "Dieter"},
+        last: [String]{"Schmidt", "Fischer", "Weber", "Wagner"},
+        hosts: [String]{"beispiel.test", "mail.test", "demo.test"},
+        streets: [String]{"Bahnhofstraße", "Hauptstraße", "Lindenweg", "Gartenweg"},
+        cities: [String]{"Berlin", "Bremen", "Dresden", "Hamburg"},
+    },
+}
 
 fake_index: fn(state: ^U64, count: Int) -> Int Never! {
     core.math.random.__seeded_int(state, 0, count - 1) ?? panic("fake tables are nonempty")
 }
 
+fake_row: fn(locale: Int) -> Int Never! {
+    if locale == 1 -> 1 else -> 0
+}
+
 fake_first: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
-    if locale == 1 -> FAKE_DE_FIRST[index] else -> FAKE_EN_FIRST[index]
+    FAKE_LOCALES[fake_row(locale)].first[index]
 }
 
 fake_last: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
-    if locale == 1 -> FAKE_DE_LAST[index] else -> FAKE_EN_LAST[index]
+    FAKE_LOCALES[fake_row(locale)].last[index]
 }
 
 fake_host: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 3)
-    if locale == 1 -> FAKE_DE_HOSTS[index] else -> FAKE_EN_HOSTS[index]
+    FAKE_LOCALES[fake_row(locale)].hosts[index]
 }
 
 fake_street: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
-    if locale == 1 -> FAKE_DE_STREETS[index] else -> FAKE_EN_STREETS[index]
+    FAKE_LOCALES[fake_row(locale)].streets[index]
 }
 
 fake_city: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
-    if locale == 1 -> FAKE_DE_CITIES[index] else -> FAKE_EN_CITIES[index]
+    FAKE_LOCALES[fake_row(locale)].cities[index]
 }
 
 #Test("Fake English draw order matches the shipped seed 42 corpus") {
@@ -451,16 +482,219 @@ suite_row_field: fn(text: String) -> String Never! {
     assert_eq(files.read("{root}/rows") ?? panic("suite rows: {err}"), "size hello\tpassed\t\nsuite env\tfailed\tJET unset\n")
 }
 
-/// `t.suite(name, body)`: run `body` when this run is the profile child of
-/// the code suite `name` (JET_TEST_SUITE), recording its rows in
-/// JET_TEST_SUITE_ROWS and selecting them by JET_TEST_SUITE_FILTER; any
-/// other run skips it. The compiler calls it through the TestSuiteRun role.
-#Builtin.Role(.TestSuiteRun) priv __suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
-    if (sys.get("JET_TEST_SUITE") ?? "") != name {
-        return
+/// The Prelude `Test` that test.jet's `test: fn(t: Test)` receives: `jet test`
+/// runs that function once in a plan step to collect its settings, then once
+/// per run to run the tests and its code suites. Outside the plan step a
+/// setting call does nothing, so `test: fn` sets them before `t.run()`:
+///
+/// ```jet
+/// t: test_suite()
+/// // Which tests run.
+/// t.filter("parser")
+/// t.cases("cases.txt")
+/// t.shard(1, 4)
+/// t.opt_in()
+/// t.docs(false)
+/// t.list(false)
+/// t.where("tag=fast")
+/// // How they run.
+/// t.optimize(["O0", "O2"])
+/// t.serial(false)
+/// t.shuffle(42)
+/// t.jobs(4)
+/// t.memory("16G")
+/// t.time_limit("60s")
+/// t.compiler("build/jet")
+/// t.jetpack("build/jetpack")
+/// t.watch(false)
+/// // What they report.
+/// t.capture("failed")
+/// t.results("results.json")
+/// t.measure()
+/// t.trace_tiers()
+/// t.coverage(false)
+/// t.diagnostic_coverage()
+/// t.update_snapshots(false)
+/// t.allow_shrink("ui/old_row")
+/// t.record("replay")
+/// // Generated property tests.
+/// t.grade("generated")
+/// t.iterations(1000)
+/// t.time(30)
+/// t.seed(7)
+/// t.corpus("corpus")
+/// // Browser tests.
+/// t.browser("chromium")
+/// t.browser_retries(2)
+/// t.browser_reporter("json")
+/// t.browser_ui(false)
+/// t.browser_visual()
+/// t.browser_trace()
+/// ```
+impl Test {
+    /// Runs the package's `#Test` blocks on the harness this value carries
+    /// and answers the failure count. The run reports each test as it goes,
+    /// so `suite.run()` on its own line runs the suite and drops the count.
+    run: fn(self) -[IO]> Int { world_rt.suite_run(self) }
+
+    /// `t.suite(name, body)`: run `body` when this run is the profile child
+    /// of the code suite `name` (JET_TEST_SUITE), recording its rows in
+    /// JET_TEST_SUITE_ROWS and selecting them by JET_TEST_SUITE_FILTER; any
+    /// other run skips it. `name` is written as a string literal, so
+    /// `jet test --profile` lists the suites without running `test: fn`.
+    #SuiteNameWritten
+    suite: fn(self, name: String, body: fn(TestRows)) -[FS, Env]> {
+        if (sys.get("JET_TEST_SUITE") ?? "") != name {
+            return
+        }
+        path: sys.get("JET_TEST_SUITE_ROWS") ?? panic("the `{name}` suite runs without JET_TEST_SUITE_ROWS")
+        body(TestRows{suite: name, path: path, filter: sys.get("JET_TEST_SUITE_FILTER") ?? ""})
     }
-    path: sys.get("JET_TEST_SUITE_ROWS") ?? panic("the `{name}` suite runs without JET_TEST_SUITE_ROWS")
-    body(TestRows{suite: name, path: path, filter: sys.get("JET_TEST_SUITE_FILTER") ?? ""})
+
+    // The `jet test` settings (JetFoundation Registry/TestSettings.jet
+    // JET_TEST_SETTINGS, one method per row, in its order): in the plan step
+    // each call records its row's value, and any other run ignores it. A
+    // switch called bare is on. `jet test` checks each value, and refuses a
+    // row it has not ported.
+
+    /// Runs checked documentation examples only.
+    docs: fn(self, on: Bool{true}) { test_setting(self, "docs", "{on}") }
+
+    /// Runs only the tests and corpus rows whose name contains `text`.
+    filter: fn(self, text: String) { test_setting(self, "filter", text) }
+
+    /// Shows test output for `failed`, `all` or `none` of the tests.
+    capture: fn(self, which: String) { test_setting(self, "capture", which) }
+
+    /// Replaces expected snapshot output and blesses every selected corpus row.
+    update_snapshots: fn(self, on: Bool{true}) { test_setting(self, "update_snapshots", "{on}") }
+
+    /// Runs the tests in the order `seed` picks.
+    shuffle: fn(self, seed: Int) { test_setting(self, "shuffle", "{seed}") }
+
+    /// Runs the tests one at a time.
+    serial: fn(self, on: Bool{true}) { test_setting(self, "serial", "{on}") }
+
+    /// Measures `.measure` claims.
+    measure: fn(self, on: Bool{true}) { test_setting(self, "measure", "{on}") }
+
+    /// Reports the tier each test ran at.
+    trace_tiers: fn(self, on: Bool{true}) { test_setting(self, "trace_tiers", "{on}") }
+
+    /// Runs the tests once at each listed optimize level, `"O0"`, `"O1"` or `"O2"`.
+    optimize: fn(self, levels: [String]) { test_setting(self, "optimize", levels.join(",")) }
+
+    /// Bounds each test's wall time, such as `"60s"`.
+    time_limit: fn(self, limit: String) { test_setting(self, "time_limit", limit) }
+
+    /// Also runs the corpus rows that are opt-in only.
+    opt_in: fn(self, on: Bool{true}) { test_setting(self, "opt_in", "{on}") }
+
+    /// Runs slice `index` of `count` of the selected tests and corpus rows.
+    shard: fn(self, index: Int, count: Int) { test_setting(self, "shard", "{index}/{count}") }
+
+    /// Prints the selected tests after filter and shard, and runs nothing.
+    list: fn(self, on: Bool{true}) { test_setting(self, "list", "{on}") }
+
+    /// Runs only the tests and corpus rows the file at `path` names.
+    cases: fn(self, path: String) { test_setting(self, "cases", path) }
+
+    /// Runs at most `count` corpus entries at once.
+    jobs: fn(self, count: Int) { test_setting(self, "jobs", "{count}") }
+
+    /// Bounds the memory the running corpus entries claim together, such as `"16G"`.
+    memory: fn(self, size: String) { test_setting(self, "memory", size) }
+
+    /// Lets `update_snapshots` bless fewer diagnostics for the listed ui rows.
+    allow_shrink: fn(self, rows: String) { test_setting(self, "allow_shrink", rows) }
+
+    /// Checks the ui suite's emitted and rendered codes against the coverage allowlist.
+    diagnostic_coverage: fn(self, on: Bool{true}) { test_setting(self, "diagnostic_coverage", "{on}") }
+
+    /// Writes every selected test's verdict to the JSON file at `path`.
+    results: fn(self, path: String) { test_setting(self, "results", path) }
+
+    /// Builds and runs the tests with the jet at `path`.
+    compiler: fn(self, path: String) { test_setting(self, "compiler", path) }
+
+    /// Runs the corpora's jetpack steps and engine verbs with the jetpack at `path`.
+    jetpack: fn(self, path: String) { test_setting(self, "jetpack", path) }
+
+    /// Filters recorded package, dependency, path, tag or status facts.
+    where: fn(self, text: String) { test_setting(self, "where", text) }
+
+    /// Shows function or diagnostic coverage.
+    coverage: fn(self, on: Bool{true}) { test_setting(self, "coverage", "{on}") }
+
+    /// Selects the generated property-test grade, `"generated"`.
+    grade: fn(self, grade: String) { test_setting(self, "grade", grade) }
+
+    /// Runs `count` generated cases for each property test.
+    iterations: fn(self, count: Int) { test_setting(self, "iterations", "{count}") }
+
+    /// Bounds the generated grade's wall clock to `seconds`.
+    time: fn(self, seconds: Int) { test_setting(self, "time", "{seconds}") }
+
+    /// Sets the generated grade's base PRNG seed.
+    seed: fn(self, seed: Int) { test_setting(self, "seed", "{seed}") }
+
+    /// Sets the generated grade's corpus directory.
+    corpus: fn(self, path: String) { test_setting(self, "corpus", path) }
+
+    /// Re-runs on dependency changes.
+    watch: fn(self, on: Bool{true}) { test_setting(self, "watch", "{on}") }
+
+    /// Records the named replay `name`.
+    record: fn(self, name: String) { test_setting(self, "record", name) }
+
+    /// Selects the browser engines for tests.
+    browser: fn(self, engines: String) { test_setting(self, "browser", engines) }
+
+    /// Retries each browser attempt up to `count` times, at most five.
+    browser_retries: fn(self, count: Int) { test_setting(self, "browser_retries", "{count}") }
+
+    /// Sets the browser report format: `"text"`, `"json"` or `"html"`.
+    browser_reporter: fn(self, format: String) { test_setting(self, "browser_reporter", format) }
+
+    /// Writes and opens the local browser report viewer.
+    browser_ui: fn(self, on: Bool{true}) { test_setting(self, "browser_ui", "{on}") }
+
+    /// Captures screenshots for passing browser attempts.
+    browser_visual: fn(self, on: Bool{true}) { test_setting(self, "browser_visual", "{on}") }
+
+    /// Keeps redacted BiDi trace entries for every browser attempt.
+    browser_trace: fn(self, on: Bool{true}) { test_setting(self, "browser_trace", "{on}") }
+}
+
+// One `jet test` setting: in the plan step, the line `name<TAB>value<NL>`
+// joins the plan file JET_TEST_PLAN names.
+priv test_setting: fn(suite: Test, name: String, value: String) { world_rt.suite_setting(suite, "JET_TEST_PLAN", "{name}\t{value}\n") }
+
+// `jet test --profile` lists a package's code suites by reading each
+// `t.suite("name", …)` name from test.jet's tokens, so a suite name the
+// build can't read is refused (E0635).
+priv SuiteNameWritten: struct {
+    impl Marker {
+        sites: [.Method],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() > 0 && call.args[0].value == None {
+                reject(SuiteNameComputed{}, at: call.args[0])
+            }
+        }
+    }
+}
+
+priv SuiteNameComputed: struct {
+    impl Diagnostic {
+        code: "E0635",
+
+        what: fn(self) -> String { "The suite name passed to `Test.suite` is computed" }
+
+        why: fn(self) -> String { "`jet test --profile` lists a package's code suites by reading their names, without running `test: fn`" }
+
+        fix: fn(self) -> String { "Write the suite name as a string literal, as in `t.suite(\"perf\", perf_rows)`" }
+    }
 }
 
 // The public history records project the Foundation history data, not

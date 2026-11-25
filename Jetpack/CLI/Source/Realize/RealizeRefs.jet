@@ -125,7 +125,7 @@ cli_cached_plan_item: fn(spec: RefSpec, entry: StoreEntry) -[FS]> PlanItem Never
 // read here for its signed closure sizes; payload admission remains behind the
 // caller's single confirmation gate. `progress` is the planning live region's
 // sink, when one is drawn.
-cli_plan_downloads: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, specs: [RefSpec], scope: RealizeScope, progress: ProgressHandle?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
+cli_plan_downloads: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, specs: [RefSpec], scope: RealizeScope, progress: ProgressHandle?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
     store_dir: roots.hangar_dir()
     project_dir: cli_scope_project_dir(scope)
     fixtures: cli_effective_fixtures(flags)
@@ -194,7 +194,7 @@ cli_plan_downloads: fn(verification: ^StoreVerification, theme: Theme, roots: Ha
 
 // Realize one ref, recording it in the store and printing progress. `table`
 // resolves named sources it is empty for direct CLI refs.
-cli_realize_ref: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {entry: StoreEntry, state: SourceState}? Never! {
+cli_realize_ref: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {entry: StoreEntry, state: SourceState}? Never! {
     live := LiveRegion?{None}
     if cli_realize_ref_outcome(verification, theme, roots, flags, table, spec, name_w, RowStyle.Ledger, live, RealizeScope.Project) == {
         .Realized(entry, state, _, _) -> Val({entry: entry, state: state})
@@ -221,7 +221,7 @@ cli_report_offline_nix: fn(theme: Theme, spec: RefSpec) -[IO, Time.Wait]> Never!
     ProviderError.Offline("`{spec.raw}` is not in the hangar and --offline forbids fetching provider output").report(theme)
 }
 
-cli_realize_ref_outcome: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int, style: RowStyle, live: ^LiveRegion?, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> RefOutcome Never! {
+cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int, style: RowStyle, live: ^LiveRegion?, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> RefOutcome Never! {
     // Tier 2 (erase live regions before diagnostics). A `Silent`
     // caller owns the aggregate line, which its progress sink redraws while
     // this call runs; clear only the spinner/ledger path up front.
@@ -407,7 +407,7 @@ cli_realize_ref_outcome: fn(verification: ^StoreVerification, theme: Theme, root
 }
 
 // The verified recorded reuse, else one Store realization of the ref.
-cli_reuse_or_realize: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, table: SourceTable, recorded: ^^VerifiedRealization?) -> VerifiedRealization RealizeError! {
+cli_reuse_or_realize: fn(verification: StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, table: SourceTable, recorded: ^^VerifiedRealization?) -> VerifiedRealization RealizeError! {
     if recorded == .Val(reused) -> return Ok(reused.move())
     store_realize_verified(verification, roots, ctx, RealizeRequest.Package{spec: spec, table: table})
 }
@@ -469,7 +469,7 @@ cli_report_nix_bridge_required: fn(theme: Theme, flags: CLIFlags, holes: [NixBri
 
 // Realize one U20 adapter package. `consume` pins its executable through the
 // lease so the caller can run it.
-cli_realize_adapter: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: AdapterPlan, table: SourceTable, consume: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {entry: StoreEntry, state: SourceState, lease: CacheLease}? Never! {
+cli_realize_adapter: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: AdapterPlan, table: SourceTable, consume: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {entry: StoreEntry, state: SourceState, lease: CacheLease}? Never! {
     theme.status("Adapting {theme.bold(plan.name)} …")
     ctx: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), cli_current_project_dir(), None, Val(roots))
     expectation: provider_adapter_cache_expectation(plan, table, ctx) ?? {

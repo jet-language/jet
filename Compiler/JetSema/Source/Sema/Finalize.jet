@@ -259,7 +259,7 @@ sema_finalize_pass_close: fn(shared_state: Shared<SemaCheckShared>, phase: Strin
             copy_facts: program_out.copy_facts.move(),
         },
     )
-    environment_out.fixed_length_write_params = [String]{}
+    environment_out.fixed_length_write_params = [SemaWindowParam]{}
     program_out.boxed_edges = [U32:[String]]{}
     program_out.copy_facts = sema_copy_facts_table_empty()
     // No guard or worker survives here. Leave the consumed environment slot
@@ -557,6 +557,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     }
     // A case creation the mint reported (E0105) reports nothing more.
     sema_failure_union_drop_settled(modules, unions.settled)
+    sema_ownership_drop_unwritten_marks_of_values(final_graph, modules)
     loop module_result in modules {
         loop diagnostic in module_result.diagnostics -> diagnostics.push(diagnostic)
         if !module_result.complete -> complete = false
@@ -707,6 +708,13 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     core_seal: if final_graph.core_seal -> sema_core_seal_lines(final_graph, seal_failure, effects.core_seal) else -> [String]{}
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
+    // What each instance answers on its own: the TypeInfo record of each
+    // type a `T.reflect()` read is built at and the value of each generic
+    // site's instance, as constant rows of the program, and the instance
+    // copies of generic sites still to stage.
+    reflection_reports: diagnostics.len()
+    instance_constants: sema_fact_instance_constants(final_graph, modules, effects.type_reflections, values, diagnostics)
+    if diagnostics.len() > reflection_reports -> complete = false
     if stood_in > 0 && rerun == "" && effects.walks -> rerun = "walks"
     // `sema.late`: the partition, target and compute checks that read the
     // solved effects, and the publish of those effects.
@@ -843,7 +851,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // A UI host service needs its capability in the package's
     // `authority.needs` (E2937).
     ui_index: sema_core_ui_index(final_graph, core_usage.modules)
-    if ui_index.any_ui_modules {
+    if ui_index.capabilities.len() > 0 {
         loop module_index in 0..<modules.len() {
             usage_index: sema_registration_module_index(final_graph, modules[module_index].module_identity) ?? next
             source_module: final_graph.modules[usage_index]
@@ -995,6 +1003,8 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         memory_declarations: effects.memory_declarations.move(),
         memory_projections: effects.memory_projections.move(),
         eval_answers: eval_answers,
+        type_reflections: instance_constants.rows.move(),
+        instance_sources: instance_constants.sources.move(),
     }
     SemaFinalized{result: result.move(), graph: final_graph.move()}
 }
@@ -1386,7 +1396,7 @@ SemaFinalizeSideClaimed: struct {
 // (sema_core_collected_append) and assembles it. So the findings, the usage
 // sets, the first span of each usage and the callback keys read exactly as
 // one thread's walk of every module in order.
-sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: ^[Diagnostic], complete: ^Bool, effect_inputs: ^[SemaEffectModuleInput], effect_prepared: ^SemaEffectPrepared, liveness: ^SemaLivenessResult, taint: ^[SemaTaintPrepared], typestate_found: ^[Diagnostic], cores: ^[SemaCoreModuleUsageResult], out_type_caps: ^[U32:SemaEffectTypeCap]) -> SemaRegistrationGraph {
+sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads, diagnostics: ^[Diagnostic], complete: ^Bool, effect_inputs: ^[SemaEffectModuleInput], effect_prepared: ^SemaEffectPrepared, liveness: ^SemaLivenessResult, taint: ^[SemaTaintPrepared], typestate_found: ^[Diagnostic], cores: ^[SemaCoreModuleUsageResult], out_type_caps: ^[U32:SemaEffectTypeCap]) -> SemaRegistrationGraph {
     owned: graph.move()
     table: sema_state_table_of(owned)
     type_caps := sema_effect_type_caps(owned.modules)

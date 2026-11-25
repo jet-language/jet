@@ -6,6 +6,7 @@
 use {
     unicode: core.text
     jet_foundation.[
+        effect_vocabulary_view_count,
         symbol_builtin_keys,
         AST_NODE_GENERATED,
         AccessConvention,
@@ -186,6 +187,12 @@ SemaRegistrationNominalKind: enum {
     UnitFamily,
     ForeignHandle,
 }
+
+// SemaRegistrationNominalKind picks from Item: each nominal kind is the item
+// that declares it, or `ForeignHandle`, a handle a foreign binding declares.
+// While the compiler builds, SEMA_REGISTRATION_NOMINAL_KIND_COUNT stops the
+// build naming any other case Item lacks.
+SEMA_REGISTRATION_NOMINAL_KIND_COUNT: #run effect_vocabulary_view_count("Sema/Registration/Items.jet", embed_file("Items.jet"), "SemaRegistrationNominalKind", "AST/Items.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Items.jet"), "Item", [String]{"ForeignHandle"})
 
 SemaRegistrationForeignHandleFacts: struct {
     library: String,
@@ -644,6 +651,13 @@ SemaRegistrationExport: struct {
     target_symbol_row: Int{-1},
 }
 
+// One step of an export chain: `name` as module `module_index` exports it.
+// A chain that reaches a step it already took is a re-export cycle.
+SemaRegistrationExportStep: struct {
+    module_index: Int,
+    name: String,
+}
+
 SemaRegistrationImportBinding: struct {
     original: String,
     local: String,
@@ -802,9 +816,10 @@ SemaRegistrationModule: struct {
     // (sema_registration_import_binding_at).
     import_binding_names: NameTable,
     import_binding_values: [Int],
-    // `{type}:{trait}` for every trait impl among `declarations`, so auto-derive
-    // metadata asks once per query instead of rescanning the declarations.
-    declared_trait_impls: NameTable,
+    // The (type, trait) pair of every trait impl among `declarations`, so
+    // auto-derive metadata asks once per query instead of rescanning the
+    // declarations.
+    declared_trait_impls: SemaDeclaredTraitImpls,
     // The module's package namespace (loader key, "" outside
     // one) and its `namespace_tables` slot (-1 outside one), what the loader
     // recorded for it, the position in `imports` where the package names
@@ -1186,6 +1201,11 @@ SemaRegistrationGraph: struct {
     // finalization summarizes the Core functions for a bound program
     // (CoreSeal.jet) into SemaGraphResult.core_seal.
     core_seal: Bool{false},
+    // A check of every Core body (`jet check Core`, the Core library's
+    // check), known as the graph is prepared: a Core module's qualified
+    // markers obey the marker laws a package's do
+    // (MarkerModules.jet sema_marker_module_check_core_qualified).
+    core_marker_laws: Bool{false},
     // The Core function checks stay on the module pass's thread, off the
     // compiler threads, so that thread captures them (`core_seal`) or loads
     // them from the host's bodies file (CoreBodies.jet
@@ -1668,7 +1688,7 @@ sema_registration_extern_signature: fn(function: ExternFn, owner: SemaRegistrati
     Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: sema_registration_extern_contract(function.params), call_metadata: Val(metadata), return_view_provenance: None}
 }
 
-sema_registration_extern_parameters: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner_key: String, symbols: ^SymbolTable, signature: Type) -> [SemaRegistrationParameter] Never! {
+sema_registration_extern_parameters: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner_key: String, symbols: SymbolTable, signature: Type) -> [SemaRegistrationParameter] Never! {
     parameters := [SemaRegistrationParameter]{}
     loop (index, parameter) in function.params {
         parameter_ty: if parameter.variadic -> Type.List{element: parameter.ty} else -> parameter.ty
@@ -3238,7 +3258,7 @@ sema_registration_root_span: fn(item: Item) -> Span Never! {
     }
 }
 
-sema_registration_root_symbol: fn(item: Item, module_id: ModuleID, module_identity: String, module_name: String, symbols: ^SymbolTable, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: ^[Diagnostic]) -> Symbol? {
+sema_registration_root_symbol: fn(item: Item, module_id: ModuleID, module_identity: String, module_name: String, symbols: ^SymbolTable, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: [Diagnostic]) -> Symbol? {
     if item == {
         // sema_registration_add_root registers a function through sema_registration_function.
         .Func(_) -> None
@@ -3480,7 +3500,7 @@ sema_registration_add_root: fn(module_row: ^SemaRegistrationModule, module_text:
 sema_registration_push_declaration: fn(module_row: ^SemaRegistrationModule, item: Item) Never! {
     if item == .Impl(definition) {
         if definition.trait_name == .Val(trait_name) {
-            _ := name_intern(module_row.declared_trait_impls, sema_type_metadata_impl_key(definition.type_name, trait_name))
+            sema_type_metadata_declare_impl(module_row.declared_trait_impls, definition.type_name, trait_name)
         }
         if definition.is_generated_serde -> return
     }
@@ -4149,7 +4169,7 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
         exports: [SemaRegistrationExport]{},
         import_binding_names: name_table_sized(16),
         import_binding_values: [Int]{-1},
-        declared_trait_impls: name_table_sized(4),
+        declared_trait_impls: sema_type_metadata_declared_new(),
         namespace: owned.namespace,
         namespace_names: owned.namespace_names,
         namespace_private: owned.namespace_private,
@@ -5914,27 +5934,20 @@ sema_registration_private_member_error: fn(member: String, owner: String, span: 
     sema_error("E0605", span, "`{member}` is private to module `{owner}`", "a `priv` declaration is usable only inside the module that declares it and that module's children", "use `{member}` from inside `{owner}`, or remove `priv` from it")
 }
 
-sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: ModuleID, requester_package: String, seen: [String]) -> SemaRegistrationExport? {
+sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: ModuleID, requester_package: String) -> SemaRegistrationExport? {
+    sema_registration_resolve_export_from(graph, module_index, name, requester_module, requester_package, [SemaRegistrationExportStep]{})
+}
+
+// sema_registration_resolve_export, `seen` the steps of the chain that led
+// here.
+sema_registration_resolve_export_from: fn(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: ModuleID, requester_package: String, seen: [SemaRegistrationExportStep]) -> SemaRegistrationExport? {
     if module_index < 0 || module_index >= graph.modules.len() -> return None
     module_row: graph.modules[module_index]
-    if seen.len() == 0 {
-        if sema_registration_core_private(graph, module_row, name, requester_module) -> return None
-        direct: sema_registration_direct_symbol(module_row, name)
-        if direct == .Val(export) {
-            if sema_registration_visible(export.visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) {
-                return Val(export)
-            }
-            return None
-        }
-        next_seen := [String]{"{module_index}:{name}"}
-        return sema_registration_resolve_export_indirect(graph, module_index, name, requester_module, requester_package, next_seen)
-    }
-    key: "{module_index}:{name}"
-    loop previous in seen {
-        if previous == key -> return None
+    loop step in seen {
+        if step.module_index == module_index && step.name == name -> return None
     }
     next_seen := seen
-    next_seen.push(key)
+    next_seen.push(SemaRegistrationExportStep{module_index: module_index, name: name})
     if sema_registration_core_private(graph, module_row, name, requester_module) -> return None
     direct: sema_registration_direct_symbol(module_row, name)
     if direct == .Val(export) {
@@ -5946,7 +5959,7 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
     sema_registration_resolve_export_indirect(graph, module_index, name, requester_module, requester_package, next_seen)
 }
 
-sema_registration_resolve_export_indirect: fn(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: ModuleID, requester_package: String, next_seen: [String]) -> SemaRegistrationExport? {
+sema_registration_resolve_export_indirect: fn(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: ModuleID, requester_package: String, next_seen: [SemaRegistrationExportStep]) -> SemaRegistrationExport? {
     module_row: graph.modules[module_index]
     loop import in module_row.imports {
         if !import.declaration.is_pub && !import.declaration.is_package_pub -> next
@@ -5956,7 +5969,7 @@ sema_registration_resolve_export_indirect: fn(graph: SemaRegistrationGraph, modu
                 loop item in items {
                     local: sema_registration_import_local(item)
                     if local != name -> next
-                    resolved: sema_registration_resolve_export(graph, target_index, item.original, module_row.module_identity, module_row.package_identity, next_seen) ?? next
+                    resolved: sema_registration_resolve_export_from(graph, target_index, item.original, module_row.module_identity, module_row.package_identity, next_seen) ?? next
                     if !sema_registration_visible(resolved.visibility, module_row.module_identity, module_row.package_identity, resolved.source_module_identity, graph.modules[target_index].package_identity) {
                         next
                     }
@@ -6184,7 +6197,7 @@ sema_registration_populate_imports: fn(graph: ^SemaRegistrationGraph, module_ind
                             }
                         }
                     }
-                    resolved: sema_registration_resolve_export(graph, export_index, item.original, source_identity, source_package, [String]{})
+                    resolved: sema_registration_resolve_export(graph, export_index, item.original, source_identity, source_package)
                     if resolved == {
                         .Val(export) -> {
                             duplicate: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_conflict(graph, module_index, local, item.original, export.source_module_identity))
@@ -6217,8 +6230,7 @@ sema_registration_populate_imports: fn(graph: ^SemaRegistrationGraph, module_ind
                         }
                         .None -> {
                             // A Core module's ledger member with no source
-                            // declaration (a host leaf such as
-                            // `core.tasks.__interval_ms`) binds as a Core item
+                            // declaration (a host leaf) binds as a Core item
                             // import, also inside its own module. Its symbol is
                             // Foreign (no Jet declaration); calls route through
                             // the module's Core call records (Calls/Direct.jet).
@@ -6471,7 +6483,7 @@ sema_registration_compiler_builtin_row_hashed: fn(graph: SemaRegistrationGraph, 
 // (`capture_derives`) records each Core module's derive expansion; a
 // compile whose host lends that check's bodies file (`derive_hooks`) takes
 // the records in place of expanding (CoreBodies.jet sema_core_derives_attach).
-sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: ^^ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads, derive_hooks: SemaHostHookAccess?{None}, capture_derives: Bool{false}) -> SemaRegistrationGraph {
+sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: ^^ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads, derive_hooks: SemaHostHookAccess?{None}, capture_derives: Bool{false}, core_marker_laws: Bool{false}) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // The original Prelude error declarations join the graph first, as their
@@ -6628,6 +6640,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
         diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
     graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_table: table.move(), module_rows: module_rows, symbols: symbol_table_of(symbol_ranges), edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}}, impl_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}}, nominal_symbol_rows: [U32:SemaRegistrationRowRef]{}, codec_demand: Shared{sema_codec_demand_new()}, derive_demand: Shared{sema_derive_demand_new()}, interner: interner()}
+    graph.core_marker_laws = core_marker_laws
     sema_registration_index_all_nominal_rows(graph)
     sema_registration_index_source_impls(graph)
     loop module_index in 0..<graph.modules.len() {
@@ -7302,7 +7315,7 @@ sema_registration_lookup_qualified: fn(graph: SemaRegistrationGraph, module_iden
             loop binding in import.bindings {
                 if binding.local != alias || binding.symbol.kind != SymbolKind.Import -> next
                 core_index: binding.target_module_index ?? next
-                resolved: sema_registration_resolve_export(graph, core_index, name, module_identity, module_row.package_identity, [String]{}) ?? return None
+                resolved: sema_registration_resolve_export(graph, core_index, name, module_identity, module_row.package_identity) ?? return None
                 return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: sema_registration_export_symbol(graph, resolved)}, source_module_identity: resolved.source_module_identity, target_module_identity: graph.modules[core_index].module_identity, visibility: resolved.visibility})
             }
         }
@@ -7310,7 +7323,7 @@ sema_registration_lookup_qualified: fn(graph: SemaRegistrationGraph, module_iden
             next
         }
         target_index: sema_registration_module_index(graph, import.target_module_identity) ?? return None
-        resolved: sema_registration_resolve_export(graph, target_index, name, module_identity, module_row.package_identity, [String]{}) ?? return None
+        resolved: sema_registration_resolve_export(graph, target_index, name, module_identity, module_row.package_identity) ?? return None
         return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: sema_registration_export_symbol(graph, resolved)}, source_module_identity: resolved.source_module_identity, target_module_identity: import.target_module_identity, visibility: resolved.visibility})
     }
     None

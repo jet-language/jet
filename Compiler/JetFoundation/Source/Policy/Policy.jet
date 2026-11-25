@@ -175,6 +175,12 @@ PolicyCombine: enum {
     Merge,
 }
 
+// PolicyCombine picks from Core's MarkerResolution: a policy setting is an
+// inheriting marker setting, so it meets the outer one the way a marker does,
+// never `SiteBound`. While the compiler builds, POLICY_COMBINE_COUNT stops the
+// build naming any case MarkerResolution lacks.
+POLICY_COMBINE_COUNT: #run effect_vocabulary_view_count("Policy/Policy.jet", embed_file("Policy.jet"), "PolicyCombine", "Core/Prelude/Prelude.jet", embed_file("toolchain:Core/Prelude/Prelude.jet"), "MarkerResolution", [String]{})
+
 PolicyRule: struct {
     key: PolicyKey,
     scopes: [PolicyScope],

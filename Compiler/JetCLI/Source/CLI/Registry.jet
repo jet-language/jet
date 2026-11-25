@@ -11,7 +11,7 @@ JET_CLI_BINARY: "jet"
 JET_CLI_LANG_NAME: "Jet"
 
 // The flags every command accepts.
-JET_CLI_GLOBAL_FLAGS: [String]{"--json", "--quiet", "--color"}
+CLI_GLOBAL_FLAGS: [String]{"--json", "--quiet", "--color"}
 
 // One nested action: `JET_CLI_COMMANDS[group].actions[action]`.
 JetCLIActionRef: struct {
@@ -299,7 +299,7 @@ jet_cli_flags_for_command: fn(name: String) -> [JetCLIFlagSpec] Never! {
     flags := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FLAGS {
         commands: jet_cli_flag_commands(spec.help) ?? [String]{}
-        global: JET_CLI_GLOBAL_FLAGS.contains(spec.long)
+        global: CLI_GLOBAL_FLAGS.contains(spec.long)
         if !commands.contains(name) && !global -> next
         if !jet_cli_form_ported("{name} {spec.long}") -> next
         shown: jet_cli_flag_ported_help(spec) ?? next

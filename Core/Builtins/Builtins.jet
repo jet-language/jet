@@ -95,8 +95,7 @@
 // and `context.print` defaults to what the core.term one that fills
 // ContextPrint returns.
 // `spec.keep_open` runs the core.files function that fills
-// ProcessSpecKeepOpen, `t.suite` the core.testing one that fills
-// TestSuiteRun, the callback form of `ui.button` the core.ui one that fills
+// ProcessSpecKeepOpen, the callback form of `ui.button` the core.ui one that fills
 // ButtonClick, a static custom HTTP method token the core.http check that
 // fills HTTPMethodTokenCheck, and a lambda written where an `HTTPHandler` is
 // expected the core.http.server constructor that fills HTTPHandlerNew.
@@ -239,6 +238,10 @@ RoleKind: enum {
     InputJSON,
     TOMLTypedDecode,
     YAMLTypedDecode,
+    InlineEventWithPolicy,
+    InlineHookNew,
+    InlineDecisionHookNew,
+    InlineAsyncEventNew,
     EventPoint,
     HookPoint,
     DecisionPoint,
@@ -248,6 +251,7 @@ RoleKind: enum {
     JobEnqueue,
     JobDelay,
     AbsFloat,
+    InlineFloatSqrt,
     PowFloat,
     PowNF32,
     PowRF32,
@@ -277,6 +281,7 @@ RoleKind: enum {
     HypotF32,
     Atan2PiF32,
     Atan2F32,
+    InlineFloatFma,
     FmaF32,
     MuladdF32,
     AbsF32,
@@ -292,6 +297,8 @@ RoleKind: enum {
     NextAfterF32,
     NextafterF32,
     ToBitsF32,
+    InlineF32Bits,
+    InlineF32FromBits,
     InlineFloatBits,
     InlineFloatFromBits,
     ModfF32,
@@ -396,6 +403,11 @@ RoleKind: enum {
     ProcessSpecTerminal,
     ProcessSpecTerminalWithPolicy,
     ProcessSpecUnder,
+    ProcessSpecStdin,
+    ProcessSpecStdout,
+    ProcessSpecStderr,
+    ProcessSpecTimeout,
+    ProcessSpecCPUTimeLimit,
     ProcessSpecPlan,
     ProcessSpecRun,
     ProcessSpecRunChecked,
@@ -413,11 +425,14 @@ RoleKind: enum {
     StringMatches,
     StringMatch,
     StringHasLine,
+    InlineTimerAfter,
+    InlineChannelNew,
+    InlineChannelBounded,
     ContextPrint,
     TermTake,
     InputLines,
     InputEdit,
-    TestSuiteRun,
+    InlineIterProgress,
     StringTrimNewlines,
     StringFirstLines,
     StringLastLines,
@@ -468,6 +483,16 @@ Role: struct {
 
     impl Marker {
         sites: [.Function, .Method, .Trait],
+    }
+}
+
+// `#Builtin.Needs("UI.Clipboard")` on a Core function: a package that calls
+// it declares that UI capability in its `authority.needs` (E2937).
+Needs: struct {
+    capability: String,
+
+    impl Marker {
+        sites: [.Function],
     }
 }
 

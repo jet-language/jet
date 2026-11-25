@@ -200,11 +200,11 @@ process_signal_interrupt_run: fn(closure: I64) -> I64 {
     I64{0}
 }
 
-// core.sys.on_interrupt(handler): the IR hands the handler's closure box over
-// (BuildRoutes.jet jet_std_os_interrupt). The first registration drops any
-// SIGINT counted before it, installs the SIGINT mark and starts the
-// dispatcher; the boxes live for the process. A scope already stopping drops
-// the box, as atexit does.
+// core.sys.on_interrupt(handler): the handler's closure box is handed over
+// (jet_sys_interrupt_raw, jet.runtime.sys on_interrupt). The first
+// registration drops any SIGINT counted before it, installs the SIGINT mark
+// and starts the dispatcher; the boxes live for the process. A scope already
+// stopping drops the box, as atexit does.
 #Export(c) jet_rt_native_interrupt: fn(closure: I64) {
     if (scheduler_control_status(scheduler_control_current()) != I64{0}) {
         scheduler_cleanup_closure_drop(closure)
@@ -233,6 +233,14 @@ process_signal_interrupt_run: fn(closure: I64) -> I64 {
         return
     }
     jet_rt_free(error, I64{8}, I64{8})
+}
+
+// jet.runtime.sys on_interrupt: the handler crosses as its handed-over
+// closure box with its lazy.callback invoke and lazy.release helper. The
+// dispatcher runs the box through its own invoke and release words, so it
+// keeps the box alone.
+#Export(c) jet_sys_interrupt_raw: fn(closure: I64, invoke: I64, release: I64) {
+    jet_rt_native_interrupt(closure)
 }
 
 // The signal hub behind core.process.signals and core.process.on_signal: any
@@ -464,7 +472,7 @@ signal_hub_dispatch: fn(hub: I64) {
     sync_store(sub, id)
     scheduler_words_push(sync_load(wrapping(hub + I64{24})), sub)
     sync_mutex_unlock(wrapping(hub + I64{8}))
-    id
+    jet_int_owned_from_i64(id)
 }
 
 // jet.runtime.process.signal_add(id, number, signal): subscription `id` also holds

@@ -46,36 +46,36 @@ SemaComputeModelsSpecialCheck: struct {
 // window reads, `^tensor[range]` writes through, and element access and
 // bounds follow the list window law. The window reads the tensor twice
 // (storage and shape), so it must start from a place (spec.md:1306, E0213).
-sema_call_compute_tensor_window: fn(base: Expr, tensor: TExpr, range: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_call_compute_tensor_window: fn(base: Expr, tensor: TExpr, range: TExpr, span: Span, check: ^SemaBodyCheck) -> TExpr? {
     if !sema_expression_is_place(base) {
-        diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
+        check.diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
         return None
     }
-    if sema_call_core_module_identity(environment, program, "core.compute") == None {
-        diagnostics.push(sema_error("E0003", span, "a Tensor window needs the core.compute source module", "a Tensor range selects first-axis slabs through core.compute", "load the registered core.compute source module"))
+    if sema_call_core_module_identity(check.environment.*, check.program.*, "core.compute") == None {
+        check.diagnostics.push(sema_error("E0003", span, "a Tensor window needs the core.compute source module", "a Tensor range selects first-axis slabs through core.compute", "load the registered core.compute source module"))
         return None
     }
     owner := "Tensor"
     if sema_expr_unwrap_tag(tensor.ty) == .Named(name) -> owner = name
     data_ty: core_record_field(owner, "data") ?? Type.List{element: Type.Float}
     data: sema_tree_node(data_ty, TExprKind.Field{receiver: tensor.copy(), field: TFieldRef{owner: None, name: "data", ty: data_ty, boxed: false}}, span)
-    window: sema_call_compute_role_name("TensorWindow", span, program, diagnostics) ?? return None
-    flat: sema_call_core_source("core.compute", window, [TExpr]{tensor, range}, Type.Named{name: "Range"}, true, span, environment, program, diagnostics) ?? return None
+    window: sema_call_compute_role_name("TensorWindow", span, check) ?? return None
+    flat: sema_call_core_source("core.compute", window, [TExpr]{tensor, range}, Type.Named{name: "Range"}, true, span, check) ?? return None
     zero_start: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
     zero_end: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-    Val(sema_tree_node(data_ty, TExprKind.Slice{base: data, start: zero_start, end: zero_end, range: Val(flat), location: sema_expression_panic_location(environment, program, scopes, span)}, span))
+    Val(sema_tree_node(data_ty, TExprKind.Slice{base: data, start: zero_start, end: zero_end, range: Val(flat), location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, span)}, span))
 }
 
 // `tensor[range].copy()` (`~place`): the checked window
 // `value`'s slabs as an independent Tensor on the owner's device and
 // profile, not a list copy. Unhandled for any other copied value.
-sema_call_compute_window_copy: fn(value: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaComputeModelsSpecialCheck {
+sema_call_compute_window_copy: fn(value: TExpr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaComputeModelsSpecialCheck {
     if value.kind == .Slice(data, _, _, window, _) {
         if data.kind == .Field(tensor, field) && field.name == "data" && is_compute_tensor_family(tensor.ty) && window == .Val(flat) {
             if flat.kind == .Call(_, _, window_args) && window_args.len() == 2 {
-                window_copy: sema_call_compute_role_name("TensorWindowCopy", span, program, diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
-                copied: sema_call_core_source("core.compute", window_copy, [TExpr]{tensor, window_args[1].value, value}, Type.Named{name: "Tensor"}, true, span, environment, program, diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
-                return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected_owned(copied, expected, environment, program, diagnostics)}
+                window_copy: sema_call_compute_role_name("TensorWindowCopy", span, check) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+                copied: sema_call_core_source("core.compute", window_copy, [TExpr]{tensor, window_args[1].value, value}, Type.Named{name: "Tensor"}, true, span, check) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+                return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected_owned(copied, expected, check.environment.*, check.program.*, check.diagnostics)}
             }
         }
     }
@@ -84,10 +84,10 @@ sema_call_compute_window_copy: fn(value: TExpr, span: Span, expected: Type?, env
 
 // The name of the core.compute function that fills `role`, or E1015 when no
 // loaded Core function fills it.
-sema_call_compute_role_name: fn(role: String, span: Span, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> String? {
-    graph: program.registration_graph
+sema_call_compute_role_name: fn(role: String, span: Span, check: ^SemaBodyCheck) -> String? {
+    graph: check.program.registration_graph
     helper: sema_core_role_function(graph, role) ?? {
-        diagnostics.push(sema_missing_core_role(role, span))
+        check.diagnostics.push(sema_missing_core_role(role, span))
         return None
     }
     Val(helper.name)
@@ -105,14 +105,14 @@ SemaComputeTape: struct {
     tangent: String,
 }
 
-sema_call_compute_tape_roles: fn(span: Span, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaComputeTape? {
-    enter: sema_call_compute_role_name("TapeEnter", span, program, diagnostics) ?? return None
-    exit: sema_call_compute_role_name("TapeExit", span, program, diagnostics) ?? return None
-    leaf: sema_call_compute_role_name("TapeLeaf", span, program, diagnostics) ?? return None
-    value: sema_call_compute_role_name("TapeValue", span, program, diagnostics) ?? return None
-    gradient: sema_call_compute_role_name("TapeGradient", span, program, diagnostics) ?? return None
-    pull: sema_call_compute_role_name("TapePull", span, program, diagnostics) ?? return None
-    tangent: sema_call_compute_role_name("TapeTangent", span, program, diagnostics) ?? return None
+sema_call_compute_tape_roles: fn(span: Span, check: ^SemaBodyCheck) -> SemaComputeTape? {
+    enter: sema_call_compute_role_name("TapeEnter", span, check) ?? return None
+    exit: sema_call_compute_role_name("TapeExit", span, check) ?? return None
+    leaf: sema_call_compute_role_name("TapeLeaf", span, check) ?? return None
+    value: sema_call_compute_role_name("TapeValue", span, check) ?? return None
+    gradient: sema_call_compute_role_name("TapeGradient", span, check) ?? return None
+    pull: sema_call_compute_role_name("TapePull", span, check) ?? return None
+    tangent: sema_call_compute_role_name("TapeTangent", span, check) ?? return None
     Val(SemaComputeTape{enter: enter, exit: exit, leaf: leaf, value: value, gradient: gradient, pull: pull, tangent: tangent})
 }
 
@@ -503,7 +503,7 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     }
     values := [CallArg]{}
     loop index in value_indexes -> values.push(args[index])
-    helpers: sema_call_compute_tape_roles(span, check.program.*, check.diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    helpers: sema_call_compute_tape_roles(span, check) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     tape: sema_call_compute_tape(member, alias, helpers, args[0].expr, params, names, selected, output_fields, gradient_type, fallible, values, span)
     // The callable is checked against the transform's signature, so it
     // keeps the differentiated function's parameter names (they name the
@@ -521,7 +521,7 @@ sema_call_try_compute_transform: fn(module_name: String, member: String, alias: 
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
-    if !sema_call_core_record_import_reference(check.environment.*, check.program.*, check.scopes, imported, alias_span, check.context) {
+    if !sema_call_core_record_import_reference(check, imported, alias_span) {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     check.context.compute_calls.push(SemaComputeCallFact{method: member, span: span})

@@ -191,7 +191,9 @@ vocabulary](vocabulary.md).
   `reject(finding, at: part, also: other, label: "…")` raises the finding
   at `part` with a second span `other` labeled `label`. A `row` without a
   three-parameter `check`, or a three-parameter `check` without `row`, is
-  E0907; a second `row` is E0105.
+  E0907; a second `row` is E0105. Core's HTTP and App route tables are one
+  such rule: two routes of one table with one method and path shape are
+  E2804, reported at the later one beside the earlier.
   `expand` runs at each site its `sites` names, and `target` is the record a
   derive reads there: a struct's or enum's TypeInfo, a field's FieldInfo, an
   enum case's CaseInfo, a method's MethodInfo, a function's FunctionInfo, an impl's

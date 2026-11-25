@@ -1,0 +1,377 @@
+// Check results: what checking a program, a module and a function produces,
+// the facts a checked graph hands on, and a function's published result.
+use jet_foundation.[
+    BodyExpr,
+    FnBody,
+    body_tree_new,
+    ResolvedOutput,
+    Diagnostic,
+    InternerDelta,
+    NameAlias,
+    NameDeclaration,
+    NameFacts,
+    NameModule,
+    NameReference,
+    RuntimeLayer,
+    StructureFact,
+    TargetHardwareUse,
+    Program,
+    SymbolLocalKeys,
+    TConstantDef,
+    TDeclarationFacts,
+    TTestFact,
+    Type,
+    compiler_take_rows,
+]
+
+SemaResult: struct {
+    module_name: String,
+    functions: [FnBody],
+    call_facts: [SemaCallSiteFact],
+    hardware_use: TargetHardwareUse,
+    name_references: [SemaNameReferenceFact],
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    exact_int_reachable: Bool,
+    copy_events: [SemaCopyEvent],
+    diagnostics: [Diagnostic],
+    complete: Bool,
+    interner: Interner,
+}
+
+SemaGraphModuleResult: struct {
+    module_identity: ModuleID,
+    module_name: String,
+    package_identity: String,
+    module_path: String,
+    source_file: String,
+    declarations: TDeclarationFacts,
+    // This module's checked functions as flat bodies: each function check
+    // seals and flattens its own tree (sema_function_check_pass), so sema's
+    // whole-program passes and every later package read only these.
+    functions: [FnBody],
+    nominals: [SemaRegistrationNominal],
+    constants: [SemaRegistrationConstant],
+    impls: [SemaRegistrationImpl],
+    exports: [SemaRegistrationExport],
+    imports: [SemaRegistrationImport],
+    foreign_functions: [SemaCheckedForeignFunction],
+    foreign_providers: [SemaCheckedForeignProvider],
+    call_facts: [SemaCallSiteFact],
+    hardware_use: TargetHardwareUse,
+    name_references: [SemaNameReferenceFact],
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    exact_int_reachable: Bool,
+    copy_events: [SemaCopyEvent],
+    // The answers of the debugger's probes inside this module's functions,
+    // which the effect pass judges and the finalization takes
+    // (sema_eval_probe_answers).
+    eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
+    diagnostics: [Diagnostic],
+    complete: Bool,
+    // #3708: the failure rows of this module's checked top-level functions.
+    failure_facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}},
+    // Why `complete` is false, one line per cause, so a no-diagnostic
+    // incomplete module still names what stopped it.
+    incomplete_reasons: [String]{[String]{}},
+    // Keys of the Prelude error conversions sema injected into this module
+    // after its bodies. They have no registration row, so the driver's identity
+    // check admits exactly these keys beside the registered declarations.
+    injected_function_keys: [String]{[String]{}},
+    // Test mode: one fact per named `#Test` of this module whose body checked,
+    // in declaration order; the checked synthetic function is in `functions`
+    // and its key in `injected_function_keys`.
+    tests: [TTestFact]{[TTestFact]{}},
+    // Outside test mode (`jet check`, a build's root tests): the fields this
+    // module's checked `#Test` bodies read and the cases they build. The
+    // bodies are dropped, so liveness reads a test's member uses from here
+    // (sema_liveness_member_uses).
+    test_member_uses: SemaLivenessMemberUses{SemaLivenessMemberUses.empty()},
+    // Under a per-function trace: each Core body a demand wave checked into
+    // this module, as its position in `functions`, and the task CPU time
+    // (ns) its check took at the same position of `core_check_ns`
+    // (sema_core_bound_charge), which sema_core_bound_counters reads.
+    core_check_rows: [Int]{[Int]{}},
+    core_check_ns: [Int]{[Int]{}},
+    // The Core library's check: this Core module's function checks as
+    // packets, in the order they were checked (CoreBodies.jet
+    // sema_core_body_capture); a demand wave appends its own after the
+    // body pass's.
+    core_bodies: [SemaCoreBody]{[SemaCoreBody]{}},
+    // Worker-local types minted while checking this module's bodies, merged
+    // deterministically into graph.interner when the pass closes.
+    type_delta: [InternerDelta]{[InternerDelta]{}},
+}
+
+// The facts of a checked module that only sema's whole-program passes read:
+// its call, name and copy facts, compute and failure facts, comptime sites
+// and registration impl, export and import rows
+// (sema_graph_modules_take_checked_facts).
+SemaCheckedFacts: struct {
+    name_references: [SemaNameReferenceFact],
+    call_facts: [SemaCallSiteFact],
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    copy_events: [SemaCopyEvent],
+    failure_facts: [SemaFunctionFailureFacts],
+    impls: [SemaRegistrationImpl],
+    exports: [SemaRegistrationExport],
+    imports: [SemaRegistrationImport],
+}
+
+// Moves the SemaCheckedFacts out of every module of `modules`, one row per
+// module. Past sema a module is read only for its identity, declarations,
+// constants, tests, injected keys and foreign rows, so a driver takes the
+// rest before it copies the modules on to the IR build, and drops them off
+// its own thread. The nominals stay, with the positions that index them. The
+// modules pop off whole and go back in order, so no fact moves one at a time
+// and none drops here.
+sema_graph_modules_take_checked_facts: fn(modules: ^[SemaGraphModuleResult]) -> [SemaCheckedFacts] Never! {
+    taken := [SemaCheckedFacts]{}
+    kept := [SemaGraphModuleResult]{}
+    loop {
+        graph_module := modules.pop() ?? break
+        taken.push(
+            SemaCheckedFacts{
+                name_references: graph_module.name_references.move(),
+                call_facts: graph_module.call_facts.move(),
+                comptime_requests: graph_module.comptime_requests.move(),
+                comptime_body_sources: graph_module.comptime_body_sources.move(),
+                compute_facts: graph_module.compute_facts.move(),
+                copy_events: graph_module.copy_events.move(),
+                failure_facts: graph_module.failure_facts.move(),
+                impls: graph_module.impls.move(),
+                exports: graph_module.exports.move(),
+                imports: graph_module.imports.move(),
+            },
+        )
+        graph_module.name_references = [SemaNameReferenceFact]{}
+        graph_module.call_facts = [SemaCallSiteFact]{}
+        graph_module.comptime_requests = [SemaComptimeRequest]{}
+        graph_module.comptime_body_sources = [SemaComptimeBodySource]{}
+        graph_module.compute_facts = [SemaComputeFunctionFacts]{}
+        graph_module.copy_events = [SemaCopyEvent]{}
+        graph_module.failure_facts = [SemaFunctionFailureFacts]{}
+        graph_module.impls = [SemaRegistrationImpl]{}
+        graph_module.exports = [SemaRegistrationExport]{}
+        graph_module.imports = [SemaRegistrationImport]{}
+        kept.push(graph_module)
+    }
+    loop {
+        graph_module: kept.pop() ?? break
+        modules.push(graph_module)
+    }
+    taken.reverse()
+    taken
+}
+
+// #3708: what one checked function body propagates: the keys of the declared
+// functions whose failures pass up ("" for a source of its own) and whether a
+// statement or returned value is a direct failure source.
+SemaFunctionFailureFacts: struct {
+    function_key: String,
+    direct: Bool,
+    edges: [String],
+    // This body's default-route row.
+    union_members: [Type]{[Type]{}},
+    union_cases: [SemaFailureCase]{[SemaFailureCase]{}},
+    union_edges: [String]{[String]{}},
+    union_general: Bool{false},
+}
+
+SemaRegistrationPackagePolicy: struct {
+    package_identity: String,
+    authority_allow: [String]?,
+    authority_deny: [String]?,
+    authority_needs: [String],
+    runtime_ceiling: RuntimeLayer?,
+    edition: String,
+    // The organization policy's `authority: { deny: [...] }`, carried on the
+    // root package's row, and the policy file it names.
+    organization_deny: [String]{[String]{}},
+    organization_source: String{""},
+    // The entries that may hold expert effects (Authority.jet
+    // authority_expert_answer): the main package's `allow` row, or for a
+    // dependency the main package's `authority.grants` line for it.
+    expert_held: [String]{[String]{}},
+    // The name the main package's `authority.grants` keys this dependency
+    // by; "" for the main package.
+    grant_name: String{""},
+}
+
+// A checked item expression as a flat body of its own; its Flat nodes are
+// rows of `context.arena`.
+sema_publish_expression: fn(value: TExpr, program: SemaProgramTables, context: ^SemaCheckContext) -> BodyExpr Never! {
+    flat := BodyFlat{tree: body_tree_new(), arena: context.arena.tree, into_arena: false}
+    root: body_flat_expr(value, flat)
+    // The arena's syntax column lends itself to the resolve only when an
+    // arena row waits on it.
+    lends: flat.out_arena_rows.len() > 0
+    syntax := if lends -> compiler_take_rows<Type>(context.arena.arena_syntax) else -> [Type]{}
+    body_flat_resolve_types(flat, syntax, program, context)
+    if lends -> context.arena.arena_syntax = syntax.move()
+    tree := flat.tree.move()
+    sema_precise_bind(tree, program)
+    // The expression's own symbol keys leave with it (body_flat_function).
+    tree.symbols = context.arena.tree.symbols
+    body_tree_finish(tree)
+    BodyExpr{root: root, tree: tree.move()}
+}
+
+SemaGraphResult: struct {
+    package_identity: String,
+    entry_module_identity: ModuleID,
+    modules: [SemaGraphModuleResult],
+    imports: [SemaRegistrationImport],
+    package_policies: [SemaRegistrationPackagePolicy],
+    core_usage: SemaCoreUsageResult,
+    call_facts: [SemaCallSiteFact],
+    hardware_use: TargetHardwareUse,
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    names: NameFacts,
+    diagnostics: [Diagnostic],
+    complete: Bool,
+    // #3708: the unannotated top-level functions the bundle failure solve
+    // proved infallible, by symbol key.
+    inferred_infallible: [String]{[String]{}},
+    // SemaRegistrationGraph.core_seal: the Core seal's lines
+    // (sema_core_seal_lines); empty otherwise.
+    core_seal: [String]{[String]{}},
+    // SemaRegistrationGraph.core_seal: the Core function checks as captured,
+    // in capture order, which the Core library writes as the bodies file
+    // (CoreBodies.jet sema_core_bodies_bytes); empty otherwise.
+    core_bodies: SemaCoreCaptures{SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}},
+    // A run bound to the Core image (SemaRegistrationGraph.core_stand_ins):
+    // how many Core functions its demand checked as stand-ins, and, when
+    // something they assume did not hold, why the finalization must run
+    // again without stand-ins (sema_finalize_program), else "".
+    core_stand_ins: Int{0},
+    core_stand_in_rerun: String{""},
+    // `SemaRegistrationGraph.retain_programs`: each module's program as sema
+    // settled it, indexed like `modules`; empty otherwise.
+    programs: [Program]{[Program]{}},
+    outputs: [ResolvedOutput]{[ResolvedOutput]{}},
+    memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}},
+    memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}},
+    // The answers of the debugger's probes (EvalProbe.jet), ordered by
+    // probe, expression and function; empty without probes.
+    eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
+    // The constant row of each instance of a read each instance answers
+    // (sema_fact_instance_constants): the TypeInfo record of a `T.reflect()`
+    // read, the value of a generic body's compile-time site. The program's
+    // rows, never a module's.
+    type_reflections: [TConstantDef]{[TConstantDef]{}},
+    // The copy of a generic site each instance stages
+    // (sema_comptime_generic_site_instance) whose value has not landed yet.
+    instance_sources: [SemaComptimeBodySource]{[SemaComptimeBodySource]{}},
+}
+
+// What sema_finalize_graph hands back: its result, and the registration graph
+// the finalization checked against (values and failure projections applied),
+// moved back to the caller so it can undo the edits (sema_graph_trail_undo).
+SemaFinalized: struct {
+    result: SemaGraphResult,
+    graph: SemaRegistrationGraph,
+}
+
+sema_name_facts_empty: fn() -> NameFacts Never! {
+    NameFacts{modules: [NameModule]{}, declarations: [NameDeclaration]{}, aliases: [NameAlias]{}, references: [NameReference]{}, structure_facts: [StructureFact]{}}
+}
+
+sema_check_body_job_index: fn(job: SemaBodyJob) -> Int Never! {
+    if job == {
+        .TopLevel(index) -> index
+        .NominalMethod(ordinal, _, _) | .ImplMethod(ordinal, _, _) -> ordinal
+    }
+}
+
+SemaFunctionResult: struct {
+    value: FnBody?,
+    complete: Bool,
+    exact_int_reachable: Bool,
+    copy_events: [SemaCopyEvent],
+    hardware_use: TargetHardwareUse,
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: SemaComputeFunctionFacts,
+    failure: SemaFunctionFailureFacts?,
+    // Why an incomplete result has no diagnostic (SemaCheckContext rows).
+    incomplete_reasons: [String]{[String]{}},
+    // The value's prelude conversion demands (sema_prelude_conversion_demands),
+    // when the compiler thread that checked the body walked it there.
+    prelude_demands: [SemaPreludeConversionDemand]?{None},
+    // The symbols of a check that built no `value`: the local ids its name
+    // references carry are rows of these (sema_keep_going_trap_references).
+    failed_locals: SymbolLocalKeys?{None},
+    // The answers of the debugger's probes inside the body (EvalProbe.jet).
+    eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
+}
+
+sema_function_compute_facts: fn(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts Never! {
+    SemaComputeFunctionFacts{
+        function_key: function_key,
+        compute_calls: context.compute_calls.copy(),
+        autodiff_obligations: context.autodiff_obligations.copy(),
+        autodiff_safe_panic: context.autodiff_safe_panic,
+        autodiff_unsafe_panic: context.autodiff_unsafe_panic,
+        generic_crossings: context.generic_crossings.copy(),
+        generic_calls: context.generic_calls.copy(),
+    }
+}
+
+// A function's result: `value` when its check completed, None when it did
+// not, with the facts its check gathered taken out of the spent context.
+sema_function_result: fn(value: ^^FnBody?, function_key: String, context: ^^SemaCheckContext) -> SemaFunctionResult Never! {
+    complete: value != None
+    SemaFunctionResult{
+        value: value.move(),
+        complete: complete,
+        exact_int_reachable: context.exact_int_reachable,
+        copy_events: context.copy_events.move(),
+        hardware_use: sema_hardware_use_snapshot(context.hardware_use),
+        comptime_body_sources: context.comptime_body_sources.move(),
+        compute_facts: SemaComputeFunctionFacts{
+            function_key: function_key,
+            compute_calls: context.compute_calls.move(),
+            autodiff_obligations: context.autodiff_obligations.move(),
+            autodiff_safe_panic: context.autodiff_safe_panic,
+            autodiff_unsafe_panic: context.autodiff_unsafe_panic,
+            // The crossings the body's type parameters reach and its generic
+            // calls (sema_generic_crossings_validate); without them no generic
+            // call is checked for what it sends.
+            generic_crossings: context.generic_crossings.move(),
+            generic_calls: context.generic_calls.move(),
+        },
+        failure: Val(SemaFunctionFailureFacts{
+            function_key: function_key,
+            direct: context.failure_direct_source,
+            edges: context.failure_edges.move(),
+            union_members: context.failure_union_members.move(),
+            union_cases: context.failure_union_cases.move(),
+            union_edges: sema_failure_union_edges_once(context.failure_union_edges.move()),
+            union_general: context.failure_union_general || context.failure_direct_source,
+        }),
+        incomplete_reasons: if complete -> [String]{} else -> context.incomplete_reasons.move(),
+        failed_locals: if complete -> None else -> Val(context.arena.tree.symbols.move()),
+        eval_answers: context.eval_walk.answers.move(),
+    }
+}
+
+sema_function_check_unavailable: fn(function_key: String, reason: String) -> SemaFunctionResult Never! {
+    SemaFunctionResult{
+        value: None,
+        complete: false,
+        exact_int_reachable: false,
+        copy_events: [SemaCopyEvent]{},
+        hardware_use: sema_hardware_empty_use(),
+        comptime_body_sources: [SemaComptimeBodySource]{},
+        compute_facts: sema_compute_facts_empty(function_key),
+        failure: None,
+        incomplete_reasons: [String]{reason},
+    }
+}

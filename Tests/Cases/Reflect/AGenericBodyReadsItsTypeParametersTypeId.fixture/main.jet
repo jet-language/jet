@@ -1,0 +1,25 @@
+Point: struct {
+    x: Int,
+    y: Int,
+}
+
+shown: fn(id: TypeId) -> String {
+    id.name
+}
+
+listed: fn(id: TypeId) -> Bool {
+    if id.kind == .List -> return true
+    false
+}
+
+// `TypeId{T}` is the TypeId of the type each call fills `T` with, in the
+// body's code and in its compile-time code alike.
+describe: fn<T>(_value: T) -> String {
+    shape: #run if listed(TypeId{T}) -> "list" else -> "one"
+    "{shown(TypeId{T})} {shape}"
+}
+
+print(describe(1))
+print(describe("text"))
+print(describe([1, 2]))
+print(describe(Point{x: 1, y: 2}))

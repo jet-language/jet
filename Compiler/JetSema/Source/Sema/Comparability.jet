@@ -54,10 +54,6 @@ sema_comparability_query: fn() -> SemaComparabilityQuery Never! {
     SemaComparabilityQuery{visited: [String:Bool]{}}
 }
 
-sema_comparability_definition_key: fn(definition: TTypeDef) -> String Never! {
-    "{definition.module_identity.id}.{definition.name}"
-}
-
 // Shared encoding value types compare by value.
 sema_comparability_encoding_value: fn(leaf: String) -> Bool Never! {
     leaf == "EncodingFormat" || leaf == "EncodingErrorKind" || leaf == "EncodingCause" || leaf == "EncodingError" || leaf == "EncodingLimits" || leaf == "DataError" || leaf == "DataErrorKind" || leaf == "DataLimits"
@@ -362,15 +358,14 @@ sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, progra
             if leaf == "U8" || leaf == "Ordering" -> return true
             definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
             if definition.generic_params.len() > 0 -> return false
-            key := sema_comparability_definition_key(definition)
             loop alias in aliases {
-                if alias == key -> return false
+                if alias == definition.key -> return false
             }
             if definition.kind == {
                 .Alias(target) -> {
                     nested := [String]{}
                     loop alias in aliases -> nested.push(alias.copy())
-                    nested.push(key)
+                    nested.push(definition.key)
                     sema_comparability_native_ordering(environment, program, definition.module_identity, target, nested, query)
                 }
                 .Struct(_, _) | .Enum(_, _) | .Distinct(_, _) | .UnitFamily(_, _) -> false
@@ -423,9 +418,8 @@ sema_comparability_structural: fn(environment: SemaScopeEnvironment, program: Se
 sema_comparability_named_fields: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, name: String, query: ^SemaComparabilityQuery) -> Bool Never! {
     definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
     if !sema_comparability_ordering_selected(program, module_identity, name) -> return false
-    key := sema_comparability_definition_key(definition)
-    if query.visited.get(key) != None -> return true
-    query.visited[key] = true
+    if query.visited.get(definition.key) != None -> return true
+    query.visited[definition.key] = true
     sema_comparability_definition_incomparable_field(environment, program, definition, query) == None
 }
 
@@ -487,19 +481,18 @@ sema_comparability_definition_incomparable_field: fn(environment: SemaScopeEnvir
     None
 }
 
-sema_comparability_incomparable_field: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, ty: Type, query: ^SemaComparabilityQuery) -> String? {
+sema_comparability_incomparable_field: fn(check: SemaBodyCheck, module_identity: ModuleID, ty: Type, query: ^SemaComparabilityQuery) -> String? {
     if ty == {
         .Named(name) -> {
-            definition: sema_comparability_definition(environment, program, module_identity, name) ?? return None
-            key := sema_comparability_definition_key(definition)
-            if query.visited.get(key) == None -> query.visited[key] = true
-            sema_comparability_definition_incomparable_field(environment, program, definition, query)
+            definition: sema_comparability_definition(check.environment.*, check.program.*, module_identity, name) ?? return None
+            if query.visited.get(definition.key) == None -> query.visited[definition.key] = true
+            sema_comparability_definition_incomparable_field(check.environment.*, check.program.*, definition, query)
         }
-        .Option(inner) -> sema_comparability_incomparable_field(environment, program, module_identity, inner, query)
+        .Option(inner) -> sema_comparability_incomparable_field(check, module_identity, inner, query)
         .Result(ok, err) -> {
-            found := sema_comparability_incomparable_field(environment, program, module_identity, ok, query)
+            found := sema_comparability_incomparable_field(check, module_identity, ok, query)
             if found != None -> return found
-            sema_comparability_incomparable_field(environment, program, module_identity, err, query)
+            sema_comparability_incomparable_field(check, module_identity, err, query)
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
@@ -512,9 +505,9 @@ sema_types_comparable: fn(environment: SemaScopeEnvironment, program: SemaProgra
 }
 
 // The first field (or `payload`) that blocks comparing values of `ty`.
-sema_incomparable_field: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> String? {
+sema_incomparable_field: fn(check: SemaBodyCheck, ty: Type) -> String? {
     query := sema_comparability_query()
-    sema_comparability_incomparable_field(environment, program, environment.module_identity, ty, query)
+    sema_comparability_incomparable_field(check, check.environment.module_identity, ty, query)
 }
 
 // A registered `Comparable` implementation, bound, or derive, else the
@@ -659,7 +652,7 @@ sema_comparability_scalar_operand: fn(ty: Type) -> Bool Never! {
 // `==`/`!=`, `<=>` (Compare), and `<`/`<=`/`>`/`>=` over one operand type
 // without a registered operator hook. Mismatched operand types stay with the
 // scalar path's mismatch diagnostics.
-sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaComparabilityBinary {
+sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, check: ^SemaBodyCheck) -> SemaComparabilityBinary {
     skipped := SemaComparabilityBinary{handled: false, value: None}
     rejected := SemaComparabilityBinary{handled: true, value: None}
     equality := op == BinOp.Eq || op == BinOp.Ne
@@ -668,33 +661,33 @@ sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
     // A declared type names a nominal by its canonical `module.Name` while a
     // literal keeps the written `Name`; the operands compare by the identity
     // both spellings resolve to.
-    if !type_identity_equal(sema_expr_expected_type(lhs.ty, environment, program), sema_expr_expected_type(rhs.ty, environment, program)) || sema_comparability_scalar_operand(lhs.ty) {
+    if !type_identity_equal(sema_expr_expected_type(lhs.ty, check.environment.*, check.program.*), sema_expr_expected_type(rhs.ty, check.environment.*, check.program.*)) || sema_comparability_scalar_operand(lhs.ty) {
         return skipped
     }
     shown := type_name(lhs.ty)
     label := "`{sema_expr_binary_name(op)}`"
     if equality {
         if lhs.ty == Type.Bool || lhs.ty == Type.String || lhs.ty == Type.Char -> return skipped
-        if !sema_type_equatable(environment, program, lhs.ty) {
-            field := sema_incomparable_field(environment, program, lhs.ty)
+        if !sema_type_equatable(check.environment.*, check.program.*, lhs.ty) {
+            field := sema_incomparable_field(check, lhs.ty)
             field_name := field ?? ""
             if {
                 sema_call_reflection_secret_bearing(lhs.ty) -> {
-                    diagnostics.push(sema_error("E0312", span, "secret-bearing `{sema_call_reflection_leaf_name(shown)}` values cannot use {label}", "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison", "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values"))
+                    check.diagnostics.push(sema_error("E0312", span, "secret-bearing `{sema_call_reflection_leaf_name(shown)}` values cannot use {label}", "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison", "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values"))
                 }
                 field != None -> {
-                    diagnostics.push(sema_error("E0312", span, "`{shown}` can't be compared with `{type_name(rhs.ty)}` because field `{field_name}` doesn't support {label}", "value equality needs every field to support the comparison", "compare individual fields instead"))
+                    check.diagnostics.push(sema_error("E0312", span, "`{shown}` can't be compared with `{type_name(rhs.ty)}` because field `{field_name}` doesn't support {label}", "value equality needs every field to support the comparison", "compare individual fields instead"))
                 }
                 else -> {
-                    diagnostics.push(sema_error("E0312", span, "`{shown}` doesn't support {label}", "value equality requires the Equatable trait", "add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields"))
+                    check.diagnostics.push(sema_error("E0312", span, "`{shown}` doesn't support {label}", "value equality requires the Equatable trait", "add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields"))
                 }
             }
             return rejected
         }
         return SemaComparabilityBinary{handled: true, value: Val(sema_tree_node(Type.Bool, TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
     }
-    if !sema_type_comparable(environment, program, lhs.ty) {
-        diagnostics.push(sema_error("E0109", span, "{label} can't compare or combine {shown} and {type_name(rhs.ty)}", "{label} is not defined for {shown}", "use an operation supported by {shown}, or call a named method"))
+    if !sema_type_comparable(check.environment.*, check.program.*, lhs.ty) {
+        check.diagnostics.push(sema_error("E0109", span, "{label} can't compare or combine {shown} and {type_name(rhs.ty)}", "{label} is not defined for {shown}", "use an operation supported by {shown}, or call a named method"))
         return rejected
     }
     result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> Type.Bool
@@ -784,11 +777,10 @@ sema_comparability_map_key: fn(environment: SemaScopeEnvironment, program: SemaP
         .Named(name) -> {
             if sema_serde_named_leaf(name) == "U8" -> return true
             definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
-            key := sema_comparability_definition_key(definition)
-            if query.visited.get(key) == .Val(answer) -> return answer
-            query.visited[key] = false
+            if query.visited.get(definition.key) == .Val(answer) -> return answer
+            query.visited[definition.key] = false
             eligible := sema_comparability_definition_map_key(environment, program, definition, query)
-            query.visited[key] = eligible
+            query.visited[definition.key] = eligible
             eligible
         }
         .Float | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
@@ -993,11 +985,10 @@ sema_comparability_hashable: fn(environment: SemaScopeEnvironment, program: Sema
         .Named(name) -> {
             if sema_serde_named_leaf(name) == "U8" -> return true
             definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
-            key := sema_comparability_definition_key(definition)
-            if query.visited.get(key) == .Val(answer) -> return answer
-            query.visited[key] = false
+            if query.visited.get(definition.key) == .Val(answer) -> return answer
+            query.visited[definition.key] = false
             eligible := sema_comparability_definition_hashable(environment, program, definition, ty, [SemaInferenceBinding]{}, query)
-            query.visited[key] = eligible
+            query.visited[definition.key] = eligible
             eligible
         }
         .Apply(name, args) -> {

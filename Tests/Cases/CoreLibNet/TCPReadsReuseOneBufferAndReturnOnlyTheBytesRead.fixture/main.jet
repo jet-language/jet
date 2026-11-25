@@ -15,7 +15,7 @@ pattern: fn(seed: Int, count: Int) -> [U8] {
 }
 
 // Exactly `want` bytes, read in reads of at most `limit`.
-drain: fn(client: ^TCPStream, want: Int, limit: Int) -> [U8] {
+drain: fn(client: TCPStream, want: Int, limit: Int) -> [U8] {
     got := [U8]{}
     loop got.len() < want {
         chunk: net.tcp_read_bytes(client, limit) ?? panic("read")
@@ -29,7 +29,7 @@ drain: fn(client: ^TCPStream, want: Int, limit: Int) -> [U8] {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.listener_local_socket_addr(listener) ?? panic("listener address")
-    client := net.tcp_connect_addr(address) ?? panic("connect")
+    client: net.tcp_connect_addr(address) ?? panic("connect")
     server := net.tcp_accept(listener) ?? panic("accept")
 
     // A long read first.
