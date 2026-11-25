@@ -5917,10 +5917,11 @@ JetDriverParseStreamJob: struct {
 }
 
 // A parse thread's answer: the unit at `position` of `pending`, parsed, or
-// the failure that stopped the thread.
-JetDriverParseStreamed: enum {
-    Parsed(position: Int, unit: JetDriverParsedUnit),
-    Stopped(failure: TaskFailure),
+// the failure that stopped the thread (no unit, position -1).
+JetDriverParseStreamed: struct {
+    position: Int,
+    unit: JetDriverParsedUnit?{None},
+    failure: TaskFailure?{None},
 }
 
 // The load's parse stream (jet_driver_load_walk). Each turn of the load hands
@@ -6028,7 +6029,7 @@ jet_driver_parse_stream_thread: fn(claims: ^^Receiver<JetDriverParseStreamJob>, 
     task.group jet_driver_parse_stream_guard {
         parses: task jet_driver_parse_stream_parse(claims.move(), done.copy())
         // A refused answer means the load is gone, with no one left to tell.
-        parses.join() ?? jet_driver_parse_stream_answer(done, JetDriverParseStreamed.Stopped{failure: err}) ?? ()
+        parses.join() ?? jet_driver_parse_stream_answer(done, JetDriverParseStreamed{position: -1, failure: Val(err)}) ?? ()
     }
 }
 
@@ -6040,7 +6041,7 @@ jet_driver_parse_stream_parse: fn(claims: ^^Receiver<JetDriverParseStreamJob>, d
     own := name_table()
     loop {
         claimed: claims.receive() ?? break
-        jet_driver_parse_stream_answer(done, JetDriverParseStreamed.Parsed{position: claimed.position, unit: jet_driver_parse_unit(claimed.job, compiler_threads_single(), shared, own)}) ?? break
+        jet_driver_parse_stream_answer(done, JetDriverParseStreamed{position: claimed.position, unit: Val(jet_driver_parse_unit(claimed.job, compiler_threads_single(), shared, own))}) ?? break
     }
 }
 
@@ -6081,13 +6082,12 @@ jet_driver_parse_stream_take: fn(stream: ^JetDriverParseStream, finished: Receiv
 // only when the load is canceled.
 jet_driver_parse_stream_receive: fn(stream: ^JetDriverParseStream, finished: Receiver<JetDriverParseStreamed>, position: Int) -> JetDriverParsedUnit {
     loop {
-        streamed: finished.receive() ?? compiler_threads_failed(TaskFailure.Canceled)
-        if streamed == .Stopped(failure) -> compiler_threads_failed(failure)
+        streamed := finished.receive() ?? compiler_threads_failed(TaskFailure.Canceled)
+        if streamed.failure == .Val(failure) -> compiler_threads_failed(failure)
         stream.outstanding -= 1
-        if streamed.move() == .Parsed(at, unit) {
-            if at == position -> return unit
-            stream.arrived[at] = unit
-        }
+        unit: streamed.unit.move() ?? next
+        if streamed.position == position -> return unit
+        stream.arrived[streamed.position] = unit
     }
 }
 

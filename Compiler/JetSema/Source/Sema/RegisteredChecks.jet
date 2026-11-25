@@ -105,11 +105,13 @@ sema_check_method_input_kind: fn(memory_plan: SemaFunctionMemoryPlan, memory_pos
 sema_check_method_input: fn(method: SemaMethodJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaMethodInput {
     graph: program.registration_graph
     job: sema_method_body_job(method)
-    if method == {
-        .NominalMethod(_, owner, row) -> {
+    owner: method.owner
+    row: method.method_index
+    if method.kind == {
+        .Nominal -> {
             sema_check_method_input_row(graph.modules[module_index].module_identity, job, memory_plan, memory_position, graph.modules[module_index].nominals[owner].methods[row], graph.modules[module_index].nominals[owner].ty, None, environment, program)
         }
-        .ImplMethod(_, owner, row) -> {
+        .Impl -> {
             sema_check_method_input_row(graph.modules[module_index].module_identity, job, memory_plan, memory_position, graph.modules[module_index].impls[owner].methods[row], graph.modules[module_index].impls[owner].target_type, graph.modules[module_index].impls[owner].trait_symbol, environment, program)
         }
     }
@@ -366,17 +368,19 @@ sema_check_ready_memory_position: fn(ready: [SemaParallelBody], job_index: Int, 
 
 sema_check_registered_method_label: fn(method: SemaMethodJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
     graph: program.registration_graph
-    if method == {
-        .NominalMethod(_, owner, row) -> "method `{type_name(graph.modules[module_index].nominals[owner].ty)}.{graph.modules[module_index].nominals[owner].methods[row].symbol.name}`"
-        .ImplMethod(_, owner, row) -> "method `{type_name(graph.modules[module_index].impls[owner].target_type)}.{graph.modules[module_index].impls[owner].methods[row].symbol.name}`"
+    owner: method.owner
+    row: method.method_index
+    if method.kind == {
+        .Nominal -> "method `{type_name(graph.modules[module_index].nominals[owner].ty)}.{graph.modules[module_index].nominals[owner].methods[row].symbol.name}`"
+        .Impl -> "method `{type_name(graph.modules[module_index].impls[owner].target_type)}.{graph.modules[module_index].impls[owner].methods[row].symbol.name}`"
     }
 }
 
 sema_check_registered_raw_protocol_return: fn(method: SemaMethodJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph
-    if method == {
-        .NominalMethod(_, owner, row) -> graph.modules[module_index].nominals[owner].methods[row].raw_protocol_return
-        .ImplMethod(_, owner, row) -> graph.modules[module_index].impls[owner].methods[row].raw_protocol_return
+    if method.kind == {
+        .Nominal -> graph.modules[module_index].nominals[method.owner].methods[method.method_index].raw_protocol_return
+        .Impl -> graph.modules[module_index].impls[method.owner].methods[method.method_index].raw_protocol_return
     }
 }
 
@@ -392,16 +396,17 @@ sema_check_protocol_unit_trait: fn(trait_name: String?) -> Bool Never! {
 
 sema_check_registered_protocol_unit_return: fn(method: SemaMethodJob, module_index: Int, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph
-    if method == {
-        .ImplMethod(_, owner, row) -> {
+    owner: method.owner
+    row: method.method_index
+    if method.kind == {
+        .Impl -> {
             if graph.modules[module_index].impls[owner].methods[row].declaration.return_type != None {
                 return false
             }
-            return sema_check_protocol_unit_trait(graph.modules[module_index].impls[owner].declaration.trait_name)
+            sema_check_protocol_unit_trait(graph.modules[module_index].impls[owner].declaration.trait_name)
         }
-        .NominalMethod(_, owner, row) -> return sema_check_registered_nominal_protocol_unit(graph, module_index, owner, row)
+        .Nominal -> sema_check_registered_nominal_protocol_unit(graph, module_index, owner, row)
     }
-    false
 }
 
 // Read through the graph as a read parameter: binding the nominal row copied
@@ -434,8 +439,10 @@ sema_check_protocol_unit_block: fn(blocks: [TraitImplBlock], span: Span) -> Bool
 
 sema_check_registered_original_method_kind: fn(method: SemaMethodJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TFuncKind {
     graph: program.registration_graph
-    if method == {
-        .NominalMethod(_, owner, row) -> sema_comptime_method_kind(graph.modules[module_index].nominals[owner].methods[row].declaration, graph.modules[module_index].nominals[owner].ty, None)
-        .ImplMethod(_, owner, row) -> sema_comptime_method_kind(graph.modules[module_index].impls[owner].methods[row].declaration, graph.modules[module_index].impls[owner].target_type, graph.modules[module_index].impls[owner].trait_symbol)
+    owner: method.owner
+    row: method.method_index
+    if method.kind == {
+        .Nominal -> sema_comptime_method_kind(graph.modules[module_index].nominals[owner].methods[row].declaration, graph.modules[module_index].nominals[owner].ty, None)
+        .Impl -> sema_comptime_method_kind(graph.modules[module_index].impls[owner].methods[row].declaration, graph.modules[module_index].impls[owner].target_type, graph.modules[module_index].impls[owner].trait_symbol)
     }
 }

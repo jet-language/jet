@@ -11,6 +11,7 @@ use {
     jet_sema.[
         SemaBodyJob,
         SemaMethodJob,
+        SemaMethodOwnerKind,
         SemaBuildFacts,
         SemaComptimeFunctionResult,
         SemaComptimeItemValue,
@@ -108,13 +109,13 @@ top_level_job_item: fn(graph: SemaRegistrationGraph, module_index: Int, function
 
 // Whether `job` names the same method row, at the same ordinal, as `method`.
 method_job_is: fn(method: SemaMethodJob, job: SemaBodyJob) -> Bool {
-    if method == {
-        .NominalMethod(ordinal, owner, row) -> {
-            if job == .NominalMethod(job_ordinal, job_owner, job_row) -> return job_ordinal == ordinal && job_owner == owner && job_row == row
+    if method.kind == {
+        .Nominal -> {
+            if job == .NominalMethod(job_ordinal, job_owner, job_row) -> return job_ordinal == method.ordinal && job_owner == method.owner && job_row == method.method_index
             false
         }
-        .ImplMethod(ordinal, owner, row) -> {
-            if job == .ImplMethod(job_ordinal, job_owner, job_row) -> return job_ordinal == ordinal && job_owner == owner && job_row == row
+        .Impl -> {
+            if job == .ImplMethod(job_ordinal, job_owner, job_row) -> return job_ordinal == method.ordinal && job_owner == method.owner && job_row == method.method_index
             false
         }
     }
@@ -128,16 +129,8 @@ method_job_is: fn(method: SemaMethodJob, job: SemaBodyJob) -> Bool {
     implemented := 0
     loop (index, job) in sema_check_method_jobs(graph, graph.modules[probe.module_index], scanned, false) {
         assert(method_job_is(job, sema_method_body_job(job)), "method job {index}'s body job names another row")
-        if job == {
-            .NominalMethod(ordinal, _, _) -> {
-                nominal += 1
-                assert_eq(ordinal, index)
-            }
-            .ImplMethod(ordinal, _, _) -> {
-                implemented += 1
-                assert_eq(ordinal, index)
-            }
-        }
+        assert_eq(job.ordinal, index)
+        if job.kind == SemaMethodOwnerKind.Nominal -> nominal += 1 else -> implemented += 1
     }
     // `total` and the methods the compiler derives for Point.
     assert(nominal >= 1, "Point's methods gave no nominal job")

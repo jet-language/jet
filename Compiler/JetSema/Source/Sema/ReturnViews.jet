@@ -411,9 +411,9 @@ sema_check_view_summaries: fn(environment: ^SemaScopeEnvironment, program: SemaP
         }
         graph: program.registration_graph
         loop job in method_jobs {
-            if job == {
-                .NominalMethod(_, owner, row) -> round.push(sema_check_view_summary_method(job, graph.modules[module_index].nominals[owner].methods[row].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
-                .ImplMethod(_, owner, row) -> round.push(sema_check_view_summary_method(job, graph.modules[module_index].impls[owner].methods[row].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
+            if job.kind == {
+                .Nominal -> round.push(sema_check_view_summary_method(job, graph.modules[module_index].nominals[job.owner].methods[job.method_index].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
+                .Impl -> round.push(sema_check_view_summary_method(job, graph.modules[module_index].impls[job.owner].methods[job.method_index].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
             }
         }
         if summary_round > 0 && sema_check_view_rounds_equal(previous_round, round) -> break
@@ -468,18 +468,11 @@ sema_check_view_summary_method_jobs: fn(program: SemaProgramTables, module_index
     jobs := [SemaMethodJob]{}
     scanned := 0
     loop job in sema_check_method_jobs(graph, graph.modules[module_index], scanned, false) {
-        if job == {
-            .NominalMethod(ordinal, owner, row) -> {
-                if sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].nominals[owner].methods[row].declaration) {
-                    jobs.push(SemaMethodJob.NominalMethod{ordinal: ordinal, nominal_index: owner, method_index: row})
-                }
-            }
-            .ImplMethod(ordinal, owner, row) -> {
-                if sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].impls[owner].methods[row].declaration) {
-                    jobs.push(SemaMethodJob.ImplMethod{ordinal: ordinal, implementation_index: owner, method_index: row})
-                }
-            }
+        selected: if job.kind == {
+            .Nominal -> sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].nominals[job.owner].methods[job.method_index].declaration)
+            .Impl -> sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].impls[job.owner].methods[job.method_index].declaration)
         }
+        if selected -> jobs.push(job)
     }
     jobs.move()
 }
