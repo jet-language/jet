@@ -1,0 +1,13 @@
+# core.time's Stopwatch is a plain record laid out as declared: it renders
+# through its structural derive bare, in a list and as a program struct's
+# field, and copies as a value, at every optimization level.
+fixture: Fixtures/CoreStopwatchRender
+step: jet run fixture.jet
+stdout: = core_stopwatch_render.out
+stderr: empty
+step: jet run -O1 fixture.jet
+stdout: = core_stopwatch_render.out
+stderr: empty
+step: jet run -O2 fixture.jet
+stdout: = core_stopwatch_render.out
+stderr: empty
