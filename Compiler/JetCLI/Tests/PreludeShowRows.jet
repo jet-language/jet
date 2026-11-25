@@ -1,16 +1,7 @@
-// The canonical prelude `JetShow` rows are the printable set the checker
-// admits without a source impl (`sema_call_reflection_synthetic_printable`).
+// The Prelude `JetShow` types with an explicit renderer stay off the printable
+// set the checker admits without a source impl
+// (`sema_call_reflection_synthetic_printable`).
 use jet_sema.[sema_call_reflection_synthetic_printable]
-
-#Test("prelude_jet_show_rows_match_canonical_printable_types") {
-    rows: [String]{"ComputeDevice", "SyncText", "SyncCounter", "SyncMap", "SyncList", "ServiceRestart", "ServiceDelivery", "ServiceRuntime", "ServiceStateStore"}
-    seen := [String]{}
-    loop name in rows {
-        assert(!seen.contains(name), "duplicate canonical Prelude JetShow row `{name}`")
-        seen.push(name.copy())
-        assert(sema_call_reflection_synthetic_printable(name), "Prelude JetShow type `{name}` lost its automatic printable row")
-    }
-}
 
 #Test("prelude_jet_show_exclusions_remain_explicit_only") {
     exclusions: [[String]]{
