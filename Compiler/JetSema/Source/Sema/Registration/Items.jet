@@ -6,6 +6,7 @@
 use {
     unicode: core.text
     jet_foundation.[
+        effect_vocabulary_view_count,
         symbol_builtin_keys,
         AST_NODE_GENERATED,
         AccessConvention,
@@ -186,6 +187,12 @@ SemaRegistrationNominalKind: enum {
     UnitFamily,
     ForeignHandle,
 }
+
+// SemaRegistrationNominalKind picks from Item: each nominal kind is the item
+// that declares it, or `ForeignHandle`, a handle a foreign binding declares.
+// While the compiler builds, SEMA_REGISTRATION_NOMINAL_KIND_COUNT stops the
+// build naming any other case Item lacks.
+SEMA_REGISTRATION_NOMINAL_KIND_COUNT: #run effect_vocabulary_view_count("Sema/Registration/Items.jet", embed_file("Items.jet"), "SemaRegistrationNominalKind", "AST/Items.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Items.jet"), "Item", [String]{"ForeignHandle"})
 
 SemaRegistrationForeignHandleFacts: struct {
     library: String,

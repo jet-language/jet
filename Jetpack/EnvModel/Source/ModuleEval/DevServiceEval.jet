@@ -24,7 +24,7 @@ use {
         GENERATED_NAME_PREFIX,
         SERVICE_FIELD_ENABLE,
     ]
-    jet_foundation.[Call, CtEnumArg, CtValue, Expr, ServiceEntry, Span, ast_comptime_value_show]
+    jet_foundation.[Call, CtEnumArg, CtValue, Expr, ServiceEntry, Span, ast_comptime_value_show, effect_vocabulary_view_count]
     jet_pkg_model.[pkg_ascii_lower]
 }
 
@@ -61,7 +61,11 @@ DevServiceField: enum {
     }
 }
 
-// The closed typed readiness probes (`ready: .exec(...)` and friends).
+// The closed typed readiness probes (`ready: .exec(...)` and friends), one per
+// ReadyProbe case of the plan it builds. While Jetpack builds,
+// READY_PROBE_KIND_COUNT stops the build naming any case ReadyProbe lacks.
+READY_PROBE_KIND_COUNT: #run effect_vocabulary_view_count("ModuleEval/DevServiceEval.jet", embed_file("DevServiceEval.jet"), "ReadyProbeKind", "ModuleEval/Plans.jet", embed_file("Plans.jet"), "ReadyProbe", [String]{})
+
 ReadyProbeKind: enum {
     Exec,
     HTTP,

@@ -9,6 +9,11 @@ SemaNameCase: enum {
     Screaming,
 }
 
+// SemaNameCase picks from Core's NamingCase: the identifier casings the naming
+// rules check are casings Core names. While the compiler builds,
+// SEMA_NAME_CASE_COUNT stops the build naming any case NamingCase lacks.
+SEMA_NAME_CASE_COUNT: #run effect_vocabulary_view_count("Names/Casing.jet", embed_file("Casing.jet"), "SemaNameCase", "Core/Compiler/Lang.jet", embed_file("toolchain:Core/Compiler/Lang.jet"), "NamingCase", [String]{})
+
 sema_casing_ascii_code: fn(scalar: String) -> Int Never! {
     bytes: scalar.bytes()
     if bytes.len() != 1 -> return -1

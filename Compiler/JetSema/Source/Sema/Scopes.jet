@@ -2,6 +2,7 @@
 // with one active scope. SymbolId remains the stable declaration identity;
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
+    effect_vocabulary_view_count,
     symbol_local_keys_find,
     AccessConvention,
     AST_NODE_GENERATED,
@@ -3742,7 +3743,10 @@ sema_scope_resolve_declaration: fn(environment: SemaScopeEnvironment, program: S
     None
 }
 
-// The item variant of sema_scope_resolve_declaration(environment, program, id).
+// The item variant of sema_scope_resolve_declaration(environment, program, id):
+// an Item case, or `Other` for every item the scope does not tell apart. While
+// the compiler builds, SEMA_SCOPE_DECLARATION_KIND_COUNT stops the build
+// naming any other case Item lacks.
 SemaScopeDeclarationKind: enum {
     Func,
     Struct,
@@ -3750,6 +3754,8 @@ SemaScopeDeclarationKind: enum {
     Distinct,
     Other,
 }
+
+SEMA_SCOPE_DECLARATION_KIND_COUNT: #run effect_vocabulary_view_count("Sema/Scopes.jet", embed_file("Scopes.jet"), "SemaScopeDeclarationKind", "AST/Items.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Items.jet"), "Item", [String]{"Other"})
 
 sema_scope_item_kind: fn(item: Item) -> SemaScopeDeclarationKind Never! {
     if item == {

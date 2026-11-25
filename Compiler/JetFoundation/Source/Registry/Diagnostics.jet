@@ -37,6 +37,12 @@ DiagnosticRegistryFix: enum {
     GeneratedRedundantTailReturn,
 }
 
+// DiagnosticRegistryFix picks from the Prelude's DiagnosticEdit, the machine
+// edits a fix carries; a registry row names no package lint's `.Rewrite`.
+// While the compiler builds, DIAGNOSTIC_REGISTRY_FIX_COUNT stops the build
+// naming any case DiagnosticEdit lacks.
+DIAGNOSTIC_REGISTRY_FIX_COUNT: #run effect_vocabulary_view_count("Registry/Diagnostics.jet", embed_file("Diagnostics.jet"), "DiagnosticRegistryFix", "Core/Prelude/Prelude.jet", embed_file("toolchain:Core/Prelude/Prelude.jet"), "DiagnosticEdit", [String]{})
+
 // This is a generated view of the Diagnostic impls in
 // Compiler/Prelude/Diagnostics.jet; Tools/Agent/DiagnosticRows.jet renders
 // DiagnosticRows.jet from them. This file owns the Source-side projection and

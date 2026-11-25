@@ -5,6 +5,7 @@
 // string-view fact; it does not read a mutable scope singleton or guess
 // nominal capabilities from a successful lowering.
 use jet_foundation.[
+    effect_vocabulary_view_count,
     CopyFact,
     symbol_key_names,
     symbol_table_key,
@@ -50,6 +51,11 @@ SemaCopyLowering: enum {
     Clone,
     MaterializeView,
 }
+
+// SemaCopyLowering picks from NodeKind: each lowering is the body node a
+// copy becomes. While the compiler builds, SEMA_COPY_LOWERING_COUNT stops the
+// build naming any case NodeKind lacks.
+SEMA_COPY_LOWERING_COUNT: #run effect_vocabulary_view_count("Sema/Ownership/Copy.jet", embed_file("Copy.jet"), "SemaCopyLowering", "Facts/Body.jet", embed_file("toolchain:Compiler/JetFoundation/Source/Facts/Body.jet"), "NodeKind", [String]{})
 
 SemaCopyMemoryKind: enum {
     NoEvent,
