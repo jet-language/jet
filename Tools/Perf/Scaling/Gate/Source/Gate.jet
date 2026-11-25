@@ -408,14 +408,14 @@ env: fn(name: String) -> String? Never! {
     if value == "" -> None else -> Val(value)
 }
 
-// Tools/Agent/Roots.jet's state root (per-user dev state, proofq's queue).
-state_root: fn() -> String Never! {
-    home: env("HOME") ?? sys.home_dir() ?? ""
-    env("JET_STATE_ROOT") ?? files.join(env("XDG_CACHE_HOME") ?? files.join(home, ".cache"), "jet-dev")
+// The dev tool root `name` (Tools/Agent/roots.env) of the checkout `repo`, as
+// `jet Tools/Agent/Roots.jet NAME` prints it: a package cannot hold that
+// program's copy, which declares its own `run`.
+dev_root: fn(repo: String, name: String) -> String Err! {
+    ran: process.cmd([env("JET") ?? "jet", files.join(repo, "Tools/Agent/Roots.jet"), name]).run()
+    if ran.code != 0 -> return Err("{name}: Tools/Agent/Roots.jet exited {ran.code}: {ran.errors.trim()}")
+    ran.output.trim().removeprefix("{name}=")
 }
-
-// Tools/Agent/Roots.jet's scratch root.
-scratch_root: fn() -> String Never! { env("JET_SCRATCH_ROOT") ?? state_root() }
 
 // ---------------------------------------------------------------- counters
 
@@ -1215,7 +1215,7 @@ sizes: fn(text: String) -> [Int] Never! {
 
 // The gate's options (`help` set for --help). `repo` is the checkout the gate runs from.
 options: fn(args: [String], repo: String) -> Config Err! {
-    scratch: files.join(scratch_root(), "scaling-gate")
+    scratch: files.join(dev_root(repo, "JET_SCRATCH_ROOT"), "scaling-gate")
     stamp: iso_now().replace(":", "-").replace(".", "-")
     config := Config{compilers: [Compiler]{}, shapes: [String]{}, bases: [String:Int]{}, ladders: [String:[Int]]{}, steps: 4, domain_ladder: DOMAIN_LADDER.copy(), memory_max: "20G", timeout_s: 1800, stop_after_s: None, jet_command: "build", seed: 1, profile_top: false, layouts: [String]{}, build_root: scratch.copy(), mode: "timing", jobs: 1, work_dir: files.join(scratch, stamp), receipt: "", repo: repo.copy(), help: false}
     known: shapes()

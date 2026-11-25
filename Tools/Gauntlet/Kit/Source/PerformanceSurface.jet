@@ -1425,14 +1425,12 @@ performance_surface_main: fn(repo_dir: String, argv: [String]) -> Int Err! {
     validation_spec: first_present([spec, manifest_row(manifest, PS_PAIR_ID)])
     artifact_path: resolve(args.artifact ?? default_jet_binary())
     // Without --scratch or $JET_TEST_SCRATCH_DIR, pairs run under the scratch
-    // root (Tools/Agent/roots.sh): $JET_SCRATCH_ROOT, else $JET_STATE_ROOT,
-    // else Jet's user cache.
-    cache: process.env_get("XDG_CACHE_HOME") ?? "{sys.home_dir() ?? ""}/.cache"
-    roots_scratch: process.env_get("JET_SCRATCH_ROOT") ?? process.env_get("JET_STATE_ROOT") ?? "{cache}/jet-dev"
+    // root of the dev tool roots (Tools/Agent/roots.env).
+    scratch_root: args.scratch ?? process.env_get("JET_TEST_SCRATCH_DIR") ?? files.join(dev_tool_root(repo_dir, "JET_SCRATCH_ROOT"), "perf-surface-pair")
     options: SurfaceOptions{
         repo_dir: repo_dir,
         artifact_path: artifact_path,
-        scratch_root: resolve(args.scratch ?? process.env_get("JET_TEST_SCRATCH_DIR") ?? files.join(roots_scratch, "perf-surface-pair")),
+        scratch_root: resolve(scratch_root),
         identity: collect_identity(repo_dir, artifact_path),
         pair: spec,
         manifest: manifest,
@@ -1465,6 +1463,15 @@ performance_surface_main: fn(repo_dir: String, argv: [String]) -> Int Err! {
     files.write(canonical_path, text) ?? return Err("{err}")
     print("performance surface measured: {text_or_empty(measured.pair, "id")} verdict={text_or_empty(receipt, "verdict")} validation={text_or_empty(receipt, "validation/status")}")
     Ok(if is_true(receipt, "validation/valid") -> 0 else -> 1)
+}
+
+// The dev tool root `name` (Tools/Agent/roots.env) of the checkout
+// `repo_dir`, as `jet Tools/Agent/Roots.jet NAME` prints it: a package cannot
+// hold that program's copy, which declares its own `run`.
+dev_tool_root: fn(repo_dir: String, name: String) -> String Err! {
+    ran: process.cmd([process.env_nonempty("JET") ?? "jet", files.join(repo_dir, "Tools/Agent/Roots.jet"), name]).run() ?? return Err("Tools/Agent/Roots.jet cannot start: {err}")
+    if ran.code != 0 -> return Err("{name}: Tools/Agent/Roots.jet exited {ran.code}: {ran.errors.trim()}")
+    Ok(ran.output.trim().removeprefix("{name}="))
 }
 
 // This command line as the receipt records it: each word as JSON.

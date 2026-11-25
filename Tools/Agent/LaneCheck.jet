@@ -1008,6 +1008,8 @@ Identity: struct {
     user: String,
     host: String,
     scratch_root: String,
+    // The state root's default below $HOME (home_state_root).
+    state_root: String,
     mounts: [String],
     email: String,
     name: String,
@@ -1089,12 +1091,21 @@ git_config: fn(key: String, dir: String) -[Exec, Time.Wait]> String Never! {
     receipt.output.trim()
 }
 
+// The state root's default below $HOME, as roots.env beside this file spells
+// it with HOME empty and no XDG cache directory: cache-relative.
+home_state_root: fn() -[Env, FS]> String Never! {
+    table: files.read(files.join(files.dirname(files.absolute(sys.executable()) ?? sys.executable()), "roots.env")) ?? ""
+    vars: sys.env_text(table, [String:String]{"HOME": ""}) ?? [String:String]{}
+    (vars.get("JET_STATE_ROOT") ?? "").removeprefix("/")
+}
+
 machine_identity: fn(dir: String) -[Env, Exec, FS, Time.Wait]> Identity Never! {
     Identity{
         home: process.env_nonempty("HOME") ?? "",
         user: process.env_nonempty("USER") ?? (process.env_nonempty("LOGNAME") ?? ""),
         host: sys.hostname().partition(".").head,
         scratch_root: process.env_nonempty("JET_SCRATCH_ROOT") ?? "",
+        state_root: home_state_root(),
         mounts: machine_mounts(),
         email: git_config("user.email", dir),
         name: git_config("user.name", dir),
@@ -1159,25 +1170,27 @@ personal_info_rules: fn(identity: Identity) -> [Rule] Never! {
     if login != "" -> add_word(set, login)
     if identity.host != "" -> add_word(set, identity.host)
     // Every spelling of the state root, the machine's home first, then the
-    // bare cache-relative form. Both roots are joined from parts so this file
-    // does not match its own rules.
-    state_root: [String]{".cache", "jet-dev"}.join("/")
-    prefixes := [String]{}
-    if home != "" && home != "/" -> prefixes.push(home.copy())
-    if login != "" {
-        prefixes.push("/home/{login}")
-        prefixes.push("/Users/{login}")
+    // bare cache-relative form; none when roots.env cannot be read.
+    state_root: identity.state_root
+    if state_root != "" {
+        prefixes := [String]{}
+        if home != "" && home != "/" -> prefixes.push(home.copy())
+        if login != "" {
+            prefixes.push("/home/{login}")
+            prefixes.push("/Users/{login}")
+        }
+        prefixes.extend([String]{"${{HOME}}", "$HOME", "~"})
+        forms := [String]{}
+        loop prefix in prefixes {
+            form: "{prefix}/{state_root}"
+            if !forms.contains(form) -> forms.push(form)
+        }
+        forms.push(state_root.copy())
+        escaped := [String]{}
+        loop form in forms -> escaped.push(escape_pcre(form))
+        set.rules.push(Rule{kind: "path", find: forms[0].copy(), source: "(?:{escaped.join("|")})(?![\\w-])"})
     }
-    prefixes.extend([String]{"${{HOME}}", "$HOME", "~"})
-    forms := [String]{}
-    loop prefix in prefixes {
-        form: "{prefix}/{state_root}"
-        if !forms.contains(form) -> forms.push(form)
-    }
-    forms.push(state_root.copy())
-    escaped := [String]{}
-    loop form in forms -> escaped.push(escape_pcre(form))
-    set.rules.push(Rule{kind: "path", find: forms[0].copy(), source: "(?:{escaped.join("|")})(?![\\w-])"})
+    // The run root, joined from parts so this file does not match its own rules.
     run_root: [String]{"", "tmp", "tdev"}.join("/")
     set.rules.push(Rule{kind: "path", find: run_root.copy(), source: "(?:{escape_pcre(run_root)})(?![\\w-])"})
     set.rules
@@ -1278,7 +1291,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
 }
 
 #Test("personal-information rules follow the machine's identity") {
-    identity: Identity{home: "/home/ada", user: "ada", host: "lovelace", scratch_root: "/mnt/big", mounts: [String]{"/mnt/big", "/media/usb"}, email: "12+adagh@users.noreply.github.com", name: "Ada King"}
+    identity: Identity{home: "/home/ada", user: "ada", host: "lovelace", scratch_root: "/mnt/big", state_root: home_state_root(), mounts: [String]{"/mnt/big", "/media/usb"}, email: "12+adagh@users.noreply.github.com", name: "Ada King"}
     rules: personal_info_rules(identity)
     finds := [String]{}
     loop rule in rules -> finds.push("{rule.kind}:{rule.find}")
@@ -1292,7 +1305,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert(finds.contains("word:ada"))
     assert(finds.contains("word:lovelace"))
     assert_eq(rules[0].source, "\\/etc\\/profiles\\/per-user\\/ada(?![\\w-])")
-    generic: personal_info_rules(Identity{home: "/root", user: "root", host: "runner", scratch_root: "", mounts: [String]{}, email: "", name: ""})
+    generic: personal_info_rules(Identity{home: "/root", user: "root", host: "runner", scratch_root: "", state_root: home_state_root(), mounts: [String]{}, email: "", name: ""})
     loop rule in generic -> assert(rule.kind == "path")
     assert_eq(unescape_mount("/mnt/my\\040disk"), "/mnt/my disk")
     assert_eq(noreply_handle("someone@example.com"), "")

@@ -76,15 +76,22 @@ Admission: struct {
     text: String,
 }
 
-// The dev tool roots (Tools/Agent/roots.sh).
-home_dir: fn() -[Env]> String Never! { process.env_nonempty("HOME") ?? "" }
-
-state_root: fn() -[Env]> String Never! {
-    process.env_nonempty("JET_STATE_ROOT") ?? files.join(process.env_nonempty("XDG_CACHE_HOME") ?? files.join(home_dir(), ".cache"), "jet-dev")
-}
-
-seeds_root: fn() -[Env]> String Never! {
-    process.env_nonempty("JET_SEEDS") ?? files.join(process.env_nonempty("XDG_DATA_HOME") ?? files.join(home_dir(), ".local/share"), "jet-seeds")
+// The dev tool roots `names` (Tools/Agent/roots.env) of the checkout `root`,
+// each name to its value, as `jet Tools/Agent/Roots.jet NAME...` prints them
+// (a package cannot hold that program's copy, which declares its own `run`);
+// `err` says why they cannot be read.
+dev_roots: fn(root: String, names: [String]) -[Env, Exec, Time.Wait]> {roots: [String:String], err: String} Never! {
+    argv: [String]{process.env_nonempty("JET") ?? "jet", files.join(root, "Tools/Agent/Roots.jet")}.concat(names)
+    receipt: process.cmd(argv).cwd(root).output_limit(16777216).run() ?? return {roots: [String:String]{}, err: "Tools/Agent/Roots.jet cannot start: {err}"}
+    if receipt.code != 0 || receipt.signal != None {
+        return {roots: [String:String]{}, err: "Tools/Agent/Roots.jet failed: {receipt.errors.trim()}"}
+    }
+    found := [String:String]{}
+    loop line in receipt.output.lines() {
+        pair: line.partition("=")
+        found[pair.head] = pair.tail
+    }
+    {roots: found, err: ""}
 }
 
 // The runner target Tools/Release/support-matrix.tsv names, in node's

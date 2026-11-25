@@ -17,6 +17,7 @@ use {
     json: core.encoding.json
     math: core.math
     process: core.process
+    roots: "Roots"
     stats: core.math.stats
     sys: core.sys
     time: core.time
@@ -80,13 +81,7 @@ run: fn(args: Args) Err! {
         process.fail(2, "{PROGRAM}: error: --samples >= 1, --rounds >= 8, sizes in 1..64")
     }
     root: files.dirname(files.dirname(files.dirname(files.dirname(files.canonicalize(sys.executable())))))
-    found: sys.env_text(
-        """
-        STATE=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
-        """,
-        sys.environment(),
-    )
-    state: files.normalize(found["STATE"])
+    state: files.normalize(roots.value("JET_STATE_ROOT"))
     work: files.join(state, "enumset-bench")
     files.create_dir_all(work)
     lib: files.join(work, "liballoccount.so")

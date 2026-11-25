@@ -13,10 +13,10 @@
 // Jet/run.jet against its Python/main.py, the pair the c14 token bar
 // compares there.
 //
-// Cases run in `port_bars_judge_<pid>_<ns>` under the scratch root
-// ($JET_SCRATCH_ROOT, else $JET_STATE_ROOT, else Jet's user cache), never on
-// a RAM-backed /tmp. A judge removes it when it ends, and on start removes the
-// `port_bars_*` directories that killed judges left behind.
+// Cases run in `port_bars_judge_<pid>_<ns>` under the scratch root of the dev
+// tool roots (Tools/Agent/roots.env), never on a RAM-backed /tmp. A judge
+// removes it when it ends, and on start removes the `port_bars_*` directories
+// that killed judges left behind.
 //
 // A tool entry (Tools/Gauntlet/Entries/<name>/entry.json, "mode": "tool")
 // names the original as `tool.original` and its Jet twin as `tool.jet`, with
@@ -192,6 +192,7 @@ use {
     json: core.encoding.json
     files: core.files
     process: core.process
+    roots: "Roots"
     sys: core.sys
     time: core.time
 }
@@ -2612,12 +2613,11 @@ repo_root: fn() -[Env, FS]> String Never! {
     files.cwd() ?? "."
 }
 
-// The scratch root (Tools/Agent/roots.sh): $JET_SCRATCH_ROOT, else
-// $JET_STATE_ROOT, else Jet's user cache. Work directories stay there, on
-// disk: on a RAM-backed /tmp a killed judge's leftovers hold memory.
-scratch_root: fn() -[Env]> String Never! {
-    cache: process.env_get("XDG_CACHE_HOME") ?? "{process.env_get("HOME") ?? ""}/.cache"
-    process.env_get("JET_SCRATCH_ROOT") ?? process.env_get("JET_STATE_ROOT") ?? "{cache}/jet-dev"
+// The scratch root of the dev tool roots (Tools/Agent/roots.env). Work
+// directories stay there, on disk: on a RAM-backed /tmp a killed judge's
+// leftovers hold memory.
+scratch_root: fn() -[Env, FS]> String Never! {
+    roots.value("JET_SCRATCH_ROOT")
 }
 
 // A fresh work directory `port_bars_<label>_<pid>_<ns>` under the scratch

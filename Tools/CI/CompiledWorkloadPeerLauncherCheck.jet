@@ -10,6 +10,7 @@
 use {
     files: core.files
     process: core.process
+    roots: "Roots"
     sys: core.sys
     term: core.term
     time: core.time
@@ -204,11 +205,11 @@ jet_binary: fn() -[Env, FS]> String? Never! {
     process.which("jet")
 }
 
-// The confined tree sits in the dev scratch root ($JET_SCRATCH_ROOT, else the
-// user cache's jet-dev), outside any tmpfs the sandbox mounts, so a write that
-// escapes it would land on the host.
-scratch_root: fn() -[Env]> String Never! {
-    process.env_nonempty("JET_SCRATCH_ROOT") ?? "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev"
+// The confined tree sits in the scratch root of the dev tool roots
+// (Tools/Agent/roots.env), outside any tmpfs the sandbox mounts, so a write
+// that escapes it would land on the host.
+scratch_root: fn() -[Env, FS]> String Never! {
+    roots.value("JET_SCRATCH_ROOT")
 }
 
 // The checkout holding this script, or else the one around the working directory.

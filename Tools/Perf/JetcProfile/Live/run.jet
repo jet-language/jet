@@ -7,10 +7,13 @@
 //   jet Tools/Perf/JetcProfile/Live/run.jet -- PID [WINDOW]
 //
 // JET names the jet that attaches, else the one on PATH. JET_PROFILE_OUT names
-// the output directory; its default and the roots under it come from
-// Tools/Agent/roots.sh's table. A failing step ends the run with its status,
+// the output directory; its default is under the scratch root of the dev tool
+// roots (Tools/Agent/roots.env). A failing step ends the run with its status,
 // its report on stderr.
-use core.[files, process, regex, sys, term, time]
+use {
+    core.[files, process, regex, sys, term, time]
+    roots: "Roots"
+}
 
 USAGE: "usage: live.sh <pid> [<window>, as 500ms or 20s]"
 
@@ -24,18 +27,17 @@ run: fn() -> Never Err! {
     step(Sh{"kill -0 {pid}"}.status())
     jet: process.env_nonempty("JET") ?? "jet"
     // What sourcing roots.sh leaves set: the environment with the machine's
-    // env file over it, the two roots, and the output directory over them.
-    loaded: sys.env_file("{sys.config_dir() ?? ""}/jet/env")
+    // env file over it, and the output directory under the scratch root,
+    // single quoted so any path reads back as itself.
+    scratch: roots.value("JET_SCRATCH_ROOT").replace("'", "'\\''")
     stamp: time.now().in_host_zone().format("%Y%m%d-%H%M%S")
-    roots: sys.env_text(
+    vars: sys.env_text(
         """
-        JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
-        JET_SCRATCH_ROOT=${{JET_SCRATCH_ROOT:-$JET_STATE_ROOT}}
-        JET_PROFILE_OUT=${{JET_PROFILE_OUT:-$JET_SCRATCH_ROOT/sol/SolJetcProfile/jetc-{pid}-{stamp}}}
+        JET_PROFILE_OUT=${{JET_PROFILE_OUT:-'{scratch}'/sol/SolJetcProfile/jetc-{pid}-{stamp}}}
         """,
-        loaded,
+        sys.env_file("{sys.config_dir() ?? ""}/jet/env"),
     )
-    out: roots["JET_PROFILE_OUT"]
+    out: vars["JET_PROFILE_OUT"]
     files.create_dir_all(out)
     term.eprint("Sampling PID {pid} for {window}; output: {out}")
     trace: files.join(out, "attach.jettrace")

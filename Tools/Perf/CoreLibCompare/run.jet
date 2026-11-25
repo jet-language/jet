@@ -4,7 +4,8 @@
 // baseline); `rust_core_aot`, the workload through Jet's Rust-backed Core
 // API; and `jet_source_aot`, through a checked-in Jet source module. Every
 // arm is built first in a scratch directory under corelib-compare in the
-// jet-dev state directory of ~/.cache, run once to check its output, then run
+// state root of the dev tool roots (Tools/Agent/roots.env), run once to
+// check its output, then run
 // --samples times; the report, with each arm's median and its ratio to
 // `rust_native`, is printed as json.dumps prints it: keys sorted, non-ASCII
 // escaped, two-space indents.
@@ -20,6 +21,7 @@ use {
     core.text.fmt
     core.encoding.json
     core.mem.scope
+    roots: "Roots"
 }
 
 HELP: [
@@ -295,7 +297,7 @@ measure: fn(options: Options) -> {report: String, code: Int} Err! {
     rounds: options.rounds
     samples: options.samples
     root: files.dirname(files.dirname(files.dirname(files.dirname(sys.executable()))))
-    parent: files.expanduser([String]{"~", ".cache", "jet-dev", "corelib-compare"}.join("/"))
+    parent: files.join(roots.value("JET_STATE_ROOT"), "corelib-compare")
     files.create_dir_all(parent)
     scratch: files.join(parent, ".corelib-compare-{sys.pid()}-{time.now().to_unix_ms()}")
     files.create_dir_all(scratch)

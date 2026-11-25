@@ -804,6 +804,8 @@ baseline_info: fn(seeds: String, current: SeedRelease) -[Env, FS]> SeedRelease N
 Pre: struct {
     errors: [String],
     root: String,
+    // The dev tool roots' state root (Tools/Agent/roots.env).
+    state: String,
     seeds: String,
     work_root: String,
     sha: String,
@@ -819,8 +821,11 @@ absolute_or: fn(path: String) -[Env, FS]> String Never! { files.absolute(path) ?
 
 preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wait]> Pre Never! {
     errors := options.errors.copy()
-    seeds: absolute_or(if options.seeds != "" -> options.seeds else -> seeds_root())
-    work_root: absolute_or(if options.work != "" -> options.work else -> process.env_nonempty("JET_RELEASE_WORK") ?? files.join(state_root(), "release"))
+    dev: dev_roots(root, [String]{"JET_STATE_ROOT", "JET_SEEDS"})
+    if dev.err != "" -> errors.push(dev.err)
+    state: dev.roots.get("JET_STATE_ROOT") ?? ""
+    seeds: absolute_or(if options.seeds != "" -> options.seeds else -> dev.roots.get("JET_SEEDS") ?? "")
+    work_root: absolute_or(if options.work != "" -> options.work else -> process.env_nonempty("JET_RELEASE_WORK") ?? files.join(state, "release"))
     sha := ""
     native := [String]{}
     if options.commit != "" {
@@ -858,7 +863,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     // The preflight gate, once the run could otherwise start: COMMIT's
     // receipt from a census by the current release.
     admission: if errors.len() > 0 -> Admission{admitted: false, text: ""} else -> preflight_gate("release-compiler", root, release.dir, sha)
-    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, sha: sha, release: release, baseline: baseline, native: native, dispositions: dispositions, admission: admission}
+    Pre{errors: errors, root: root.copy(), state: state, seeds: seeds, work_root: work_root, sha: sha, release: release, baseline: baseline, native: native, dispositions: dispositions, admission: admission}
 }
 
 GateRow: struct {
@@ -886,6 +891,8 @@ SuiteResult: struct {
 Ctx: struct {
     options: AdmitOptions,
     root: String,
+    // The dev tool roots' state root, where Jetpack/Bootstrap keeps its scratch.
+    state: String,
     seeds: String,
     work_root: String,
     work: String,
@@ -1207,8 +1214,8 @@ pinned_asset_stage: fn(ctx: ^Ctx, check: String, nix: String, source: String, ta
     row(ctx, check, "PASS", "{asset.file} rebuilt from pinned sources matches the hash jet embeds ({short(asset.sha256, 16)}, {asset.size} bytes, {result.wall}s)")
 }
 
-bootstrap_scratch: fn(worker: String) -[Env, FS]> [String] Never! {
-    root: files.join(state_root(), "jetpack-bootstrap")
+bootstrap_scratch: fn(state: String, worker: String) -[FS]> [String] Never! {
+    root: files.join(state, "jetpack-bootstrap")
     out := [String]{}
     entries: files.list_dir(root) ?? return out
     loop entry in entries {
@@ -1225,8 +1232,8 @@ first_existing: fn(dirs: [String], name: String) -[FS]> String Never! {
     ""
 }
 
-clear_scratch: fn(worker: String) -[Env, Exec, FS, Time.Wait]> Never! {
-    loop dir in bootstrap_scratch(worker) -> remove_tree(dir)
+clear_scratch: fn(state: String, worker: String) -[Env, Exec, FS, Time.Wait]> Never! {
+    loop dir in bootstrap_scratch(state, worker) -> remove_tree(dir)
 }
 
 Census: struct {
@@ -1238,18 +1245,18 @@ Census: struct {
 // One keep-going Jetpack/Bootstrap check with `jet` on the tree `root`.
 jetpack_census: fn(ctx: ^Ctx, side: String, jet: String, identity: String, root: String) -[Env, Exec, FS, Time, Time.Wait]> Census Never! {
     worker: "release-{side}-{sys.pid()}"
-    clear_scratch(worker)
+    clear_scratch(ctx.state, worker)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JETPACK_WORKER", worker), set_var("JET", jet)})
     log: files.join(ctx.work, "logs/jetpack-{side}.log")
     result: run_logged(joined(STACK, [String]{jet.copy(), "Jetpack/Bootstrap/Check.jet"}), root, vars, log, 3600)
-    scratch: bootstrap_scratch(worker)
+    scratch: bootstrap_scratch(ctx.state, worker)
     errors: first_existing(scratch, "check-errors.txt")
     receipt: first_existing(scratch, "check.receipt")
     // Check.jet writes the receipt's `exit:` line last: without it the census
     // is partial.
     finished: !result.timed_out && receipt != "" && has_exit_line(read_text(receipt) ?? "")
     keys: if finished && errors != "" -> jetpack_keys(read_text(errors) ?? "") else -> [String]{}
-    clear_scratch(worker)
+    clear_scratch(ctx.state, worker)
     if !finished {
         return Census{finished: false, keys: [String]{}, detail: "Check.jet did not finish (rc={result.rc}{if result.timed_out -> ", timed out" else -> ""}): {tail_of(log, 8)}"}
     }
@@ -1345,11 +1352,11 @@ jetpack_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 
 hosted_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     worker: "release-hosted-{sys.pid()}"
-    clear_scratch(worker)
+    clear_scratch(ctx.state, worker)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JETPACK_WORKER", worker), set_var("JET", ctx.candidate.jet), norust_var()})
     log: files.join(ctx.work, "logs/jetpack-hosted.log")
     result: run_logged(joined(STACK, [String]{ctx.candidate.jet.copy(), "Jetpack/Bootstrap/Check.jet", "--hosted"}), ctx.tree, vars, log, 3 * 3600)
-    receipt: first_existing(bootstrap_scratch(worker), "hosted.receipt")
+    receipt: first_existing(bootstrap_scratch(ctx.state, worker), "hosted.receipt")
     text: if receipt != "" -> read_text(receipt) ?? "" else -> ""
     binary: line_value(text, "hosted-binary: ")
     ok := has_line(text, "exit: 0") && binary != "" && files.exists(binary)
@@ -1364,7 +1371,7 @@ hosted_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
             ok = false
         } else { ctx.candidate.jetpack = engine.copy() }
     }
-    clear_scratch(worker)
+    clear_scratch(ctx.state, worker)
     if ok {
         engine_sha: sha256_file(ctx.candidate.jetpack.copy())
         row(ctx, "jetpack-engine", "PASS", "Check.jet --hosted built jetpack with s2 without Rust ({short(engine_sha, 16)}, {result.wall}s)")
@@ -2722,6 +2729,7 @@ new_ctx: fn(options: AdmitOptions, pre: Pre, work: String) -[FS]> Ctx Never! {
     Ctx{
         options: options.copy(),
         root: pre.root.copy(),
+        state: pre.state.copy(),
         seeds: pre.seeds.copy(),
         work_root: pre.work_root.copy(),
         work: work.copy(),

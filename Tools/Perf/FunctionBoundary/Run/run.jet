@@ -17,6 +17,7 @@
 use {
     core.[files, process, regex, sys, term, time]
     core.text.fmt
+    roots: "Roots"
 }
 
 // What one run builds and times.
@@ -45,17 +46,16 @@ run: fn() -> Never Err! {
     here: files.normalize("{sys.executable()}/../..")
     root: files.normalize("{here}/../../..")
     // What sourcing roots.sh leaves set: the environment with the machine's
-    // env file over it, the scratch root, and the memory gate and lane cap.
-    roots: sys.env_text(
+    // env file over it, and the memory gate and lane cap; the scratch root
+    // is the dev tool roots' (Tools/Agent/roots.env).
+    vars: sys.env_text(
         """
-        JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
-        JET_SCRATCH_ROOT=${{JET_SCRATCH_ROOT:-$JET_STATE_ROOT}}
         FB_MEM_GATE_GB=${{FB_MEM_GATE_GB:-30}}
         FB_LANE_MEM=${{FB_LANE_MEM:-8G}}
         """,
         sys.env_file("{sys.config_dir() ?? ""}/jet/env"),
     )
-    options := [String:String]{"--jet": files.join(root, "target-rel4/release/jet"), "--runs": "7", "--cpu": "31", "--out": "{roots["JET_SCRATCH_ROOT"]}/function-boundary", "--levels": "O1,O2"}
+    options := [String:String]{"--jet": files.join(root, "target-rel4/release/jet"), "--runs": "7", "--cpu": "31", "--out": "{roots.value("JET_SCRATCH_ROOT")}/function-boundary", "--levels": "O1,O2"}
     cells := [String]{}
     at := 0
     loop at < args.len() {
@@ -82,8 +82,8 @@ run: fn() -> Never Err! {
         cpu: options["--cpu"],
         out: options["--out"],
         levels: options["--levels"].split(",").filter(fn(level) { level != "" }).to_list(),
-        gate: Int.parse(roots["FB_MEM_GATE_GB"]) ?? return Err("FB_MEM_GATE_GB must be a whole number of GiB"),
-        lane: roots["FB_LANE_MEM"],
+        gate: Int.parse(vars["FB_MEM_GATE_GB"]) ?? return Err("FB_MEM_GATE_GB must be a whole number of GiB"),
+        lane: vars["FB_LANE_MEM"],
     }
     files.create_dir_all(plan.out).drop("mkdir -p reports and goes on")
     print("cell\tpair\timpl\tmedian_ms\tmin_ms\tmax_ms\tvs_rust\tvs_c")

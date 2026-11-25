@@ -14,6 +14,7 @@ use {
     json: core.encoding.json
     net: core.net
     process: core.process
+    roots: "Roots"
     sys: core.sys
     time: core.time
 }
@@ -1222,10 +1223,10 @@ prepare: fn(o: Options, repo: String) -> Inputs Failure! {
 }
 
 // path.resolve($name || join(shared, under)), shared being $JET_TEST_SCRATCH,
-// $JET_TEST_SCRATCH_DIR or the scratch root Tools/Agent/roots.mjs names.
+// $JET_TEST_SCRATCH_DIR or the scratch root of the dev tool roots
+// (Tools/Agent/roots.env).
 scratch_root: fn(name: String, under: String) -> String IOError! {
-    dev: process.env_nonempty("JET_SCRATCH_ROOT") ?? process.env_nonempty("JET_STATE_ROOT") ?? files.join_all([String]{sys.cache_dir() ?? "", "jet-dev"})
-    shared: files.resolve(process.env_nonempty("JET_TEST_SCRATCH") ?? process.env_nonempty("JET_TEST_SCRATCH_DIR") ?? dev)
+    shared: files.resolve(process.env_nonempty("JET_TEST_SCRATCH") ?? process.env_nonempty("JET_TEST_SCRATCH_DIR") ?? roots.value("JET_SCRATCH_ROOT"))
     files.resolve(process.env_nonempty(name) ?? files.join_all([String]{shared, under}))
 }
 

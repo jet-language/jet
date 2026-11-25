@@ -14,6 +14,7 @@ use {
     files: core.files
     json: core.encoding.json
     process: core.process
+    roots: "Roots"
     term: core.term
 }
 
@@ -354,11 +355,8 @@ web_bundle_check: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     if text == "" -> return fail("missing baseline: {BASELINE}")
     if !executable("{root}/{JET_ENV}") -> return fail("missing Jet environment: {JET_ENV}")
     if line_at(text, 2) != EXPECTED_HEADER -> return fail("baseline schema drifted")
-    home: process.env_get_or("HOME", "")
     scratch: process.env_get_or("TMPDIR", "")
-    cache: process.env_get_or("XDG_CACHE_HOME", "{home}/.cache")
-    state: process.env_get_or("JET_STATE_ROOT", "{cache}/jet-dev")
-    scratch_root: if scratch == "" -> process.env_get_or("JET_SCRATCH_ROOT", state) else -> scratch
+    scratch_root: if scratch == "" -> roots.value("JET_SCRATCH_ROOT") else -> scratch
     created: process.cmd([String]{"mkdir", "-p", scratch_root.copy()}).run() ?? return fail("cannot create {scratch_root}")
     if created.code != 0 {
         passthrough(created)

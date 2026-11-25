@@ -34,6 +34,7 @@ use {
     core.[files, math, process, regex, sys, time]
     core.text.fmt
     core.encoding.json
+    roots: "Roots"
 }
 
 HARNESS: "Tools/Perf/EnumCodecBench/run.jet"
@@ -53,9 +54,6 @@ UNAVAILABLE: "canonical enum codec command was not provided; static mode does no
 ADJACENT_UNAVAILABLE: "adjacent tag/content codec entry point is unavailable by contract; this cell is never substituted with an external serializer"
 
 TRUTHY: ["1", "true", "yes", "on"]
-
-// The default scratch parent, the original's Path.home() / ".cache" / "jet-dev" / "enum-codec-bench".
-SCRATCH_DEFAULT_PARTS: ["~", ".cache", "jet-dev", "enum-codec-bench"]
 
 #Codable(only: .Encode)
 Witness: struct {
@@ -116,7 +114,7 @@ Args: struct {
     #Doc("the same as --timeout-seconds") timeout: Float?,
     #Doc("best-effort child address-space limit in MiB, 1..65536") memory_limit_mib: Int{1024},
     #Doc("maximum adapter output and metrics file size, 1..16777216") max_output_bytes: Int{1048576},
-    #[Doc("disk-oriented scratch parent; /tmp and the repository's target/ are refused (default the enum-codec-bench dir of the user cache's jet-dev dir)"), Arg(env: "JET_ENUM_CODEC_BENCH_SCRATCH_ROOT")] scratch_root: String?,
+    #[Doc("disk-oriented scratch parent; /tmp and the repository's target/ are refused (default the enum-codec-bench dir of the dev tool roots' state root, Tools/Agent/roots.env)"), Arg(env: "JET_ENUM_CODEC_BENCH_SCRATCH_ROOT")] scratch_root: String?,
     #Doc("requested optimized profile metadata, release or debug (does not verify the adapter)") profile: String{"release"},
     #Doc("compiler name metadata override") compiler: String?,
     #Doc("compiler version metadata override") compiler_version: String?,
@@ -195,7 +193,7 @@ run: fn(args: Args) Err! {
     measuring: args.run && command != ""
     // Static mode is the default even when the environment names a command;
     // only --run starts a process.
-    requested_root: files.expanduser(args.scratch_root ?? SCRATCH_DEFAULT_PARTS.join("/"))
+    requested_root: files.expanduser(args.scratch_root ?? files.join(roots.value("JET_STATE_ROOT"), "enum-codec-bench"))
     scratch_root: if measuring -> safe_scratch_root(root, requested_root) ?? usage_error(err.message) else -> path_text(requested_root)
     bench: Bench{root: root, command: command, scratch: "", samples: args.samples, rounds: args.rounds, timeout_seconds: timeout, memory_limit_mib: args.memory_limit_mib, max_output_bytes: args.max_output_bytes, profile: args.profile}
     unmeasured: if command == "" -> "runtime requested without an existing canonical codec command; no command was executed" else -> "static/dry mode selected; provide --run and an existing canonical codec command to measure this cell"

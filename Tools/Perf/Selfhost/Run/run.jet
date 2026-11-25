@@ -20,6 +20,7 @@ use {
     json: core.encoding.json
     process: core.process
     regex: core.regex
+    roots: "Roots"
     sys: core.sys
     time: core.time
     core.encoding.[Dyn, EncodingError]
@@ -974,17 +975,12 @@ go_no_go: fn(items: [Evaluated], study: Study) -> Dyn {
     }
 }
 
-state_root: fn() -> String {
-    cache: process.env_nonempty("XDG_CACHE_HOME") ?? files.join(process.env_get("HOME") ?? "", ".cache")
-    process.env_nonempty("JET_STATE_ROOT") ?? files.join(cache, "jet-dev")
-}
-
 // The selected workloads evaluated in a fresh run directory, as the receipt.
 receipt_for: fn(study: Study, options: Options) -> Dyn (IOError | Refusal)! {
     // node's Date.toISOString: milliseconds, always three digits, then Z.
     ms: time.now().to_unix_ms()
     generated: "{time.from_unix_seconds(ms /% 1000).format_rfc3339().removesuffix("Z")}.{"{ms % 1000}".pad_start(3, "0")}Z"
-    scratch_root: files.resolve(process.env_get("JET_SELFHOST_SCRATCH") ?? files.join(state_root(), "selfhost"))
+    scratch_root: files.resolve(process.env_get("JET_SELFHOST_SCRATCH") ?? files.join(roots.value("JET_STATE_ROOT"), "selfhost"))
     files.create_dir_all(scratch_root)
     scratch: files.realpath(scratch_root)
     repository: files.realpath(study.repo)
