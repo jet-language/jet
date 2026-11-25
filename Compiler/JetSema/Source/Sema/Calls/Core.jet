@@ -867,13 +867,16 @@ sema_call_try_core_math_abs: fn(module_name: String, member: String, type_args: 
 }
 
 // `("core.math", "is_nan" | "is_inf" | "is_finite")`:
-// floating-point classification takes Float or F32. A float argument stays the
-// ordinary source call; any other checked argument type is refused here.
+// floating-point classification takes Float or F32. A float argument, and a
+// written decimal numeral (`2.0`, `-2.0`), which adopts Float from the
+// parameter as any source call's argument does, stay the ordinary source
+// call; any other checked argument type is refused here.
 sema_call_try_core_math_float_class: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     if module_name != "core.math" || (member != "is_nan" && member != "is_inf" && member != "is_finite") || args.len() != 1 || type_args.len() != 0 {
         return unhandled
     }
+    if sema_expr_decimal_literal_operand(args[0].expr, false) -> return unhandled
     probe_diagnostics := [Diagnostic]{}
     probed: sema_probe_expression(args[0].expr, None, check, probe_diagnostics) ?? return unhandled
     if probed.ty == Type.Float || probed.ty == Type.Float32 -> return unhandled
@@ -885,17 +888,17 @@ sema_call_try_core_math_float_class: fn(module_name: String, member: String, typ
 // `("core.math", "sqrt")`: the square root takes Float, F32, an exact
 // Fraction or Decimal (crossed to Float first,
 // sema_call_core_math_exact_crossing) or a Measurement<Float>. A Float or F32
-// argument, and a written decimal numeral, which adopts Float from the
-// parameter itself, stay the ordinary source call (an F32 one at F32 width,
-// sema_call_try_core_math_f32); a measurement runs the Core function filling
-// role `MeasurementSqrt`; any other checked argument type, an Int numeral
-// too, is refused here.
+// argument, and a written decimal numeral (`2.0`, `-2.0`), which adopts Float
+// from the parameter itself, stay the ordinary source call (an F32 one at F32
+// width, sema_call_try_core_math_f32); a measurement runs the Core function
+// filling role `MeasurementSqrt`; any other checked argument type, an Int
+// numeral too, is refused here.
 sema_call_try_core_math_sqrt: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     if module_name != "core.math" || member != "sqrt" || args.len() != 1 || type_args.len() != 0 || args[0].label != None {
         return unhandled
     }
-    if args[0].expr == .Float(_, _, _, _, _) -> return unhandled
+    if sema_expr_decimal_literal_operand(args[0].expr, false) -> return unhandled
     probe_diagnostics := [Diagnostic]{}
     probed: sema_probe_expression(args[0].expr, None, check, probe_diagnostics) ?? return unhandled
     if probed.ty == Type.Float || probed.ty == Type.Float32 -> return unhandled
