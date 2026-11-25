@@ -1,8 +1,8 @@
 // Inspect the real registry metadata without invoking Core-private leaves.
-use jet_foundation.[core_platform_fixed_signature, type_identity_equal, Type, TypeTupleField]
+use jet_foundation.[core_host_fixed_signature, type_identity_equal, Type, TypeTupleField]
 
 named_tuple_identity_registry_return: fn(module_name: String, member: String) -> Type Never! {
-    signature: core_platform_fixed_signature(module_name, member) ?? panic("missing tuple signature")
+    signature: core_host_fixed_signature(module_name, member) ?? panic("missing tuple signature")
     signature.return_type ?? panic("tuple signature has no return type")
 }
 
@@ -11,14 +11,13 @@ named_tuple_identity_line_from_source: fn() -> {cause: String?, eof: Bool, line:
 }
 
 named_tuple_identity_fixture: fn() {
-    failure_type: Type.Tuple{
+    channel_type: Type.Tuple{
         fields: [TypeTupleField]{
-            {name: "not_found", ty: Type.Bool},
-            {name: "cause", ty: Type.String},
+            {name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{Type.Named{name: "T"}}}},
+            {name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{Type.Named{name: "T"}}}},
         },
     }
-    descriptor_type: Type.Result{ok: Type.String, err: failure_type}
-    assert(type_identity_equal(named_tuple_identity_registry_return("core.sys", "__dotenv_read"), descriptor_type))
+    assert(type_identity_equal(named_tuple_identity_registry_return("core.tasks", "__channel_bounded"), channel_type))
     line: named_tuple_identity_line_from_source()
     assert(!line.eof && line.line == "" && line.cause == None)
 }

@@ -2504,13 +2504,11 @@ priv __decode_tree: fn(prefix: String, file: String, allow: [String], names: [{e
     }
     dotenv := String?{None}
     if file.len() > 0 {
-        if core.sys.__dotenv_read(file) == {
-            .Ok(value) -> { dotenv = Val(value) }
-            .Err(error) -> {
-                if !error.not_found {
-                    return Err(config_error("Jet.EnvDecodeFailed: cannot read Dotenv.file `{file}`: {error.cause}"))
-                }
-            }
+        read: sys_rt.dotenv_read(file)
+        if read.text == .Val(value) {
+            dotenv = Val(value)
+        } else if !read.not_found {
+            return Err(config_error("Jet.EnvDecodeFailed: cannot read Dotenv.file `{file}`: {read.cause}"))
         }
     }
     process := [{name: String, value: String}]{}

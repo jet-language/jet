@@ -9,6 +9,7 @@ use {
     core.prelude.[SourceLocation]
     rt: jet.runtime.time
     net_rt: jet.runtime.net
+    realtime_rt: jet.runtime.rt
     sys_rt: jet.runtime.sys
 }
 
@@ -379,10 +380,10 @@ priv mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [
 }
 
 // A refused registration, reported at the registering call in the stop
-// report's own `  --> file:line in function` form (core.rt.__coded_stop adds
-// the registry row's Why/Fix).
+// report's own `  --> file:line in function` form (jet.runtime.rt.coded_stop
+// adds the registry row's Why/Fix).
 priv route_stop: fn(code: String, message: String, at: SourceLocation) -> Never {
-    core.rt.__coded_stop(code, "{message}\n  --> {at.file}:{at.line} in {at.function}")
+    realtime_rt.coded_stop(code, "{message}\n  --> {at.file}:{at.line} in {at.function}")
 }
 
 // `live` counts the connections being served, `refusing` those taken while
@@ -1523,7 +1524,8 @@ priv route_complete_contract: fn(method: String, pattern: String, segments: [HTT
 // jet_http_require_route_contract, for a mux route: its responses may be empty
 // at registration; `web.openapi` refuses that later.
 priv route_require_contract: fn(method: String, pattern: String, contract: String, at: SourceLocation) Never! {
-    // E2805 in the registry row's words (core.rt.__coded_stop adds its Why/Fix).
+    // E2805 in the registry row's words (jet.runtime.rt.coded_stop adds its
+    // Why/Fix).
     invalid: "Invalid HTTP route `{pattern}`: its checked `{method}` endpoint contract"
     parsed: json_codec.parse(contract) ?? route_stop("E2805", "{invalid} is not valid JSON.", at)
     fields: if parsed == {
