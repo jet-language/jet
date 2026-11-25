@@ -657,16 +657,17 @@ SemaComptimeRuleSite: struct {
 
 // One heard call as its batch row (Calls/CheckRules.jet
 // SemaCallRuleColumns): `words` name the call's texts, argument types,
-// known argument values and named functions by index into its own `texts`,
-// `types`, `values` and `functions`, which its batch renumbers into the
-// batch's. The call's caller, callee, module, file and name are its first
-// five texts.
+// known argument values, named functions and written parts by index into
+// its own `texts`, `types`, `values`, `functions` and `written`, which its
+// batch renumbers into the batch's. The call's caller, callee, module, file
+// and name are its first five texts.
 SemaCallRuleHeard: struct {
     words: [Int],
     texts: [String],
     types: [TComptimeValue],
     values: [TComptimeValue],
     functions: [TComptimeValue],
+    written: [TComptimeValue],
 }
 
 SemaComptimeBodyValue: struct {
@@ -3658,8 +3659,7 @@ sema_scope_mark_map_slot: fn(table: ^SemaScopeTable, name: String) Never! {
 sema_scope_mark_fresh_cell: fn(table: ^SemaScopeTable, name: String, init: Expr) Never! {
     index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(table, index)
-    // copy: `init` is the binding statement's initializer, which the statement keeps.
-    table.bindings[index].fresh_cell = Val(init.copy())
+    table.bindings[index].fresh_cell = Val(init)
 }
 
 // Keeps the rights of the `Authority` the binding `name` just declared holds

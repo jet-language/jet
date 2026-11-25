@@ -51,10 +51,9 @@ SemaHTTPRoutePathField: struct {
 }
 
 // A route argument as registration sees it: its compile-time pattern, and
-// whether it was refused as an interpolated literal or an invalid pattern.
+// whether it was refused as an invalid pattern.
 SemaHTTPRouteLiteral: struct {
     pattern: String?,
-    interpolated: Bool,
     invalid: Bool,
 }
 
@@ -419,8 +418,9 @@ sema_http_route_pattern_error: fn(pattern: String) -> String? {
     None
 }
 
-// An interpolated route literal is refused before constant evaluation; its
-// holes render as `{name}` or `{…}`.
+// An App's interpolated route literal is refused before constant
+// evaluation; its holes render as `{name}` or `{…}`. A router's is refused
+// by core.http's StaticRoutes rule, from the parts it hears.
 sema_http_route_interpolated_source: fn(expression: Expr) -> String? {
     if expression == .Str(parts, _, _) {
         interpolated := false
@@ -456,17 +456,18 @@ sema_http_route_duplicate: fn(method: String, pattern: String, span: Span, sourc
     diagnostic_with_label(sema_error("E2804", span, what, why, fix), first, first_label)
 }
 
-// Router, mux and App route registrations refuse an interpolated or invalid
-// route literal before any other argument check.
-sema_http_route_check_literal: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaHTTPRouteLiteral {
-    if sema_http_route_interpolated_source(argument.expr) == .Val(source) {
+// Router, mux and App route registrations refuse an invalid route literal
+// before any other argument check, and an App's (`app`) an interpolated one
+// too.
+sema_http_route_check_literal: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic], app: Bool{false}) -> SemaHTTPRouteLiteral {
+    if app && sema_http_route_interpolated_source(argument.expr) == .Val(source) {
         diagnostics.push(sema_http_route_invalid_diagnostic(source, "brace interpolation is not allowed in route patterns", argument.span))
-        return SemaHTTPRouteLiteral{pattern: None, interpolated: true, invalid: false}
+        return SemaHTTPRouteLiteral{pattern: None, invalid: false}
     }
-    pattern: sema_http_route_constant_string(argument.expr, environment, program, scopes) ?? return SemaHTTPRouteLiteral{pattern: None, interpolated: false, invalid: false}
-    reason: sema_http_route_pattern_error(pattern) ?? return SemaHTTPRouteLiteral{pattern: Val(pattern), interpolated: false, invalid: false}
+    pattern: sema_http_route_constant_string(argument.expr, environment, program, scopes) ?? return SemaHTTPRouteLiteral{pattern: None, invalid: false}
+    reason: sema_http_route_pattern_error(pattern) ?? return SemaHTTPRouteLiteral{pattern: Val(pattern), invalid: false}
     diagnostics.push(sema_http_route_invalid_diagnostic(pattern, reason, argument.span))
-    SemaHTTPRouteLiteral{pattern: Val(pattern), interpolated: false, invalid: true}
+    SemaHTTPRouteLiteral{pattern: Val(pattern), invalid: true}
 }
 
 // A route path is a String or a `Path` (what a checked `Path{…}` literal
@@ -1034,13 +1035,13 @@ sema_http_route_custom_verb: fn() -> String Never! { SEMA_HTTP_ROUTE_CUSTOM_CASE
 sema_http_route_method_name: fn(method: String) -> String Never! { method.upper() }
 
 // A static custom method token is checked while building by core.http's one
-// method token check, `__method_token_check`, staged as a checked text
-// literal's `check` is; a run-time App token meets the same check when it
-// registers (`App.__http_route_custom`).
+// method token check, the function that fills the HTTPMethodTokenCheck role,
+// staged as a checked text literal's `check` is; a run-time App token meets
+// the same check when it registers (`App.__http_route_custom`).
 sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
     span: argument.span
     identity: sema_call_core_module_identity(environment, program, "core.http") ?? return
-    target: sema_call_core_source_target(environment, program, identity, "__method_token_check", [Type]{}, span, true, diagnostics) ?? return
+    target: sema_call_core_role_target("HTTPMethodTokenCheck", [Type]{}, span, environment, program, diagnostics) ?? return
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return
     result: sema_call_signature_return(target.signature) ?? return
     text: sema_call_http_core_string(token, span)
@@ -1175,7 +1176,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     arity: if custom -> 3 else -> 2
     if updated_args.len() != arity {
         if updated_args.len() > arity - 2 {
-            _ := sema_http_route_check_literal(updated_args[arity - 2], check.environment.*, check.program.*, check.scopes, check.diagnostics)
+            _ := sema_http_route_check_literal(updated_args[arity - 2], check.environment.*, check.program.*, check.scopes, check.diagnostics, app: app)
         }
         check.diagnostics.push(sema_call_arity_diagnostic(method, arity, updated_args.len(), false, span))
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, check)
@@ -1186,14 +1187,14 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         token_argument = Val(updated_args[0].copy())
         updated_args = [CallArg]{updated_args[1].copy(), updated_args[2].copy()}
     }
-    literal: sema_http_route_check_literal(updated_args[0], check.environment.*, check.program.*, check.scopes, check.diagnostics)
+    literal: sema_http_route_check_literal(updated_args[0], check.environment.*, check.program.*, check.scopes, check.diagnostics, app: app)
     path_value: sema_http_route_path_value(updated_args[0], check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     dynamic: literal.pattern == None
     pattern: literal.pattern ?? ""
     if dynamic && !app {
-        if !literal.interpolated {
-            check.diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String or Path", "router endpoint contracts are fully checked while building; App routes may be computed at runtime", "use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a `web.app()`"))
-        }
+        // An interpolated literal is refused by core.http's StaticRoutes
+        // rule, whose rejection replaces this error.
+        check.diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String or Path", "router endpoint contracts are fully checked while building; App routes may be computed at runtime", "use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a `web.app()`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     // The method as sent: a standard verb's upper-case name, or the custom

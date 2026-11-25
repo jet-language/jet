@@ -1,0 +1,14 @@
+// A package's impl of a Core trait can't define the trait's reserved `__`
+// member (core.math's `GeometryPoint.__coordinates`): it is the package's own
+// writing, so E0067 applies as it does to the rest of its source.
+use math: core.math
+
+Spot: struct {
+    x: Float,
+
+    impl math.GeometryPoint {
+        __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! { {x: self.x, y: 0.0, frame_id: 0} }
+    }
+}
+
+run: fn() { print(Spot{x: 1.0}.x) }

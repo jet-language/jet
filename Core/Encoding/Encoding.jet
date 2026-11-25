@@ -37,6 +37,7 @@ package: {
 use {
     base64: core.encoding.base64
     builtin: jet_builtins
+    rt: jet.runtime.encoding
     stream: __core_encoding_stream
     time: core.time
 }
@@ -334,6 +335,14 @@ impl Dyn.Decode {
     decode: fn(tree: Dyn) -> Dyn [FieldError]! { Ok(tree.copy()) }
 }
 
+// `receipt.attach(value)` (JetSema Calls/Receipts.jet): publishes `tree`, the
+// value's canonical encoding, as the receipt section `section` with its
+// declared `type_name` and `schema` digest. The checker calls it through its
+// jet_builtins role.
+#Builtin.Role(.ReceiptAttach) priv __receipt_attach: fn(tree: ^^Dyn, section: ^^String, type_name: ^^String, schema: ^^String) {
+    rt.receipt_attach(tree, section, type_name, schema)
+}
+
 // Typed `tree.decode<T>()` of a container T with no Decode implementation of
 // its own, and `FieldError.under`. Each fills a jet_builtins role, by which
 // JetIR calls it (BuildDyn.jet ir_dyn_decode, ir_decode_under); scalars
@@ -430,8 +439,9 @@ impl Dyn.Decode {
 // The input of a typed decode, read in document order: the Dyn tree reader
 // (`__DecodeTree`) and core.encoding.json's text cursor. A generated Decode
 // reads a record's members through it, and `capture` hands one whole value to
-// a type that decodes from a tree. Core-private.
-priv __DecodeSource: trait {
+// a type that decodes from a tree. Core-private; the compiler finds it by its
+// role.
+#Builtin.Role(.TypedDecodeSource) priv __DecodeSource: trait {
     // Enters the Object at the cursor; false (nothing read) for any other value.
     begin_object: fn(^self) -> Bool Never!,
     // How many members the Object at the cursor has, read without moving the
@@ -468,9 +478,9 @@ priv __DecodeSource: trait {
 // which decodes the value at the cursor as a tree. Each route returns what
 // this body returns for the same input. The generic parameters are not
 // spelled `T` (see json.__decode_typed).
-#Allow(Jet.StaticOnlyStruct, "JetIR lowers `__Decoding.read` and its siblings by this type name (ir_decoding_read)")
+#Allow(Jet.StaticOnlyStruct, "JetIR lowers `read` and its siblings by its role (ir_decoding_read)")
 priv __Decoding: struct {
-    read: fn<Target: Decode, Source: __DecodeSource>(reader: ^Source) -> Target [FieldError]! {
+    #Builtin.Role(.TypedDecodeRead) read: fn<Target: Decode, Source: __DecodeSource>(reader: ^Source) -> Target [FieldError]! {
         value: reader.capture().decode<Target>() ?? return Err(err)
         Ok(value)
     }
@@ -557,7 +567,7 @@ priv __DecodeTree: struct {
     open: [Dyn],
     at: [Int],
 
-    new: fn(tree: Dyn) -> __DecodeTree Never! {
+    #Builtin.Role(.TypedDecodeTree) new: fn(tree: Dyn) -> __DecodeTree Never! {
         __DecodeTree{pending: tree.copy(), key: "", open: [Dyn]{}, at: [Int]{}}
     }
 

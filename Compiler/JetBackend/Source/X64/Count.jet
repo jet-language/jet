@@ -64,11 +64,14 @@ x64_count_leaf: fn(stride: Int, exact: Bool) -> X64SimdLeaf Never! {
     dispatch: x64_simd_dispatch_head(code)
 
     // --- SSE2 path ---
-    if stride == 1 {
-        x64_mov_ri(code, X64_RDX, 72340172838076673)
-        x64_imul_rr(code, X64_RDX, X64_R8)
-        x64_movq_to_xmm(code, false, 7, X64_RDX)
-    } else { x64_movq_to_xmm(code, false, 7, X64_R8) }
+    if {
+        stride == 1 -> {
+            x64_mov_ri(code, X64_RDX, 72340172838076673)
+            x64_imul_rr(code, X64_RDX, X64_R8)
+            x64_movq_to_xmm(code, false, 7, X64_RDX)
+        }
+        else -> { x64_movq_to_xmm(code, false, 7, X64_R8) }
+    }
     x64_sse(code, 0x66, false, 0x6c, 7, 7)
     x64_sse(code, 0x66, false, 0xef, 2, 2)
     x64_sse(code, 0x66, false, 0xef, 6, 6)

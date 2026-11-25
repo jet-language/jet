@@ -2,23 +2,6 @@
 // Keep this table independent from erased CoreCallRecord metadata. Rows use
 // the grammar of `core_sig_row_lookup` (CorePlatformSignatures.jet).
 
-core_host_callback_type: fn() -> Type Never! {
-    Type.Fn{
-        params: [Type]{Type.List{element: Type.Float}},
-        ret: None,
-        effect_bound: Val([EffectRowEntry]{}),
-        param_contract: None,
-        call_metadata: Val(FunctionCallMetadata{
-            names: [String]{},
-            defaults: [FunctionDefaultRef?]{},
-            variadic: [Bool]{},
-            conventions: [AccessConvention]{AccessConvention.Read},
-            policies: CallablePolicyChain{policies: [CallablePolicy]{}},
-        }),
-        return_view_provenance: None,
-    }
-}
-
 core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows: """
     core.files jet_std_files_open_reader_nonblocking String Result<FileReader,IOError>
@@ -26,26 +9,22 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins process_spec_stdin|process_spec_stdout|process_spec_stderr ProcessSpec,ProcessStreamMode ProcessSpec
     jet_builtins process_spec_timeout|process_spec_cpu_time_limit ProcessSpec,Duration ProcessSpec
     core.term take Int Result<[u8],IOError>
-    core.term stdout - Stdout
-    core.term stderr - Stderr
     core.crypto.vault get String String?
+    core.crypto.vault current String Result<KeyRef<T>?,VaultError> T:VaultKey
+    core.plugin load String,Authority,limits:<corelib>/core.plugin.Limits= Plugin
     core.sync text_new String,String SyncText
     core.sync counter_new String,Int SyncCounter
     core.sync counter_inc SyncCounter,String,Int SyncCounter
     core.sync map_set SyncMap,String,String SyncMap
-    core.testing fake_clock Int Clock
     jet_builtins to_bits_f32 F32 Int
     jet_builtins from_bits_f32 Int F32
-    core.testing world fn(DeterministicWorld;Unit) Unit
     core.math sqrt|floor|ceil|fabs Float Float
     core.math fmod Float,Float Float
     core.math __numeric_stop String Never
     core.math.random seed Int -
     core.crypto __wipe ^[u8] -
     core.crypto __secret_keep ^[u8] -
-    core.rt __callback Int,Int,callback RealtimeStream
     core.tasks after Duration,T Receiver<T> T
-    core.game run ^GameScene,GameReplay?,GameBackend?,Int? String
     core.event __event_with_policy EventPolicy Event<T> T
     core.event __hook_new R Hook<T,R> T|R
     core.event __decision_hook_new HookPolicy DecisionHook<T,E> T|E
@@ -53,7 +32,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.tasks __interval_ms Int Receiver<Int>
     core.tasks __channel_new - (sender:Sender<T>,receiver:Receiver<T>) T
     core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
-    core.prelude __receipt_attach T,String,String,String Unit T
     core.encoding.json canonical Dyn String
     """
     core_sig_row_lookup(rows, module_name, member)

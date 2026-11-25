@@ -980,7 +980,7 @@ CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ];
     column: baseline_info(seeds, release)
     assert_eq(column.error, "")
     work_root: files.mkdtemp("jet-release-preflight-work-") ?? panic("scratch: {err}")
-    pre: Pre{errors: [String]{}, root: seeds.copy(), seeds: seeds.copy(), work_root: work_root.copy(), sha: COMMIT, release: release.copy(), baseline: column.copy(), native: [String]{"golden", "ui", "cases", "registries"}, dispositions: [Disposition]{}, admission: Admission{admitted: true, text: ""}}
+    pre: Pre{errors: [String]{}, root: seeds.copy(), state: work_root.copy(), seeds: seeds.copy(), work_root: work_root.copy(), sha: COMMIT, release: release.copy(), baseline: column.copy(), native: [String]{"golden", "ui", "cases", "registries"}, dispositions: [Disposition]{}, admission: Admission{admitted: true, text: ""}}
     // A release tree with Core: the column's compiler passes and the run goes on.
     whole := new_ctx(parse_admit_args([String]{COMMIT}), pre, files.join(work_root, "whole"))
     put(files.join(whole.release_tree, "Core/Core.jet"), "\n")

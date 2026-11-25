@@ -79,12 +79,44 @@
 // `net.unix_connect` without (UnixConnect) and with a deadline
 // (UnixConnectDeadline), `tls.client` over a stream (TLSClientStream), with a
 // deadline (TLSClientDeadline) and with a config and a deadline
-// (TLSClientConfigDeadline), and `term.take` (TermTake). The `#CLI` entry the
+// (TLSClientConfigDeadline), `term.take` (TermTake) and `task.timeout`
+// (TaskTimeout). Each Duration method runs the core.time function that
+// fills its role: `in` (DurationIn), `is_zero` (DurationIsZero),
+// `total_seconds` (DurationTotalSeconds), `difference` (DurationDifference),
+// `abs` (DurationAbs), `negated` (DurationNegated), `sign` (DurationSign),
+// `total_in` (DurationTotalIn) and `round` (DurationRound). The `#CLI` entry the
 // compiler generates calls the core.args parser helpers by their roles, each
 // starting with `CLI` (CLISpec through CLIMissing), whose fillers the compiler
 // reads from Core/Args/Args.jet while it builds. `context.allocator` reads
 // the function that fills ContextAllocator, and a `#Context(allocator: a)`
-// block calls the one that fills AllocatorHandler on `a`. The core.mem and
+// block calls the one that fills AllocatorHandler on `a`. `context.on_stop`
+// defaults to the core.debug function that fills ContextOnStop,
+// `context.trace` makes its records with the one that fills ContextTrace,
+// and `context.print` defaults to what the core.term one that fills
+// ContextPrint returns.
+// `spec.keep_open` runs the core.files function that fills
+// ProcessSpecKeepOpen, `t.suite` the core.testing one that fills
+// TestSuiteRun, the callback form of `ui.button` the core.ui one that fills
+// ButtonClick, a static custom HTTP method token the core.http check that
+// fills HTTPMethodTokenCheck, and a lambda written where an `HTTPHandler` is
+// expected the core.http.server constructor that fills HTTPHandlerNew.
+// core.web's reads of the platform's JET_APP_PORT (AppPortEnv), JET_DEV
+// (AppDevEnv) and OTEL_* variables (AppTraceEnv) charge no package Env: the
+// driver's effect walk leaves out the functions that fill those roles.
+// The ambient `input` is the reader the core.term function filling
+// InputLines makes, and `input.edit(change)`, `input.csv<Row>()` and
+// `input.json<Row>()` call the core.term, core.encoding.csv and
+// core.encoding.json functions filling InputEdit, InputCSV and InputJSON.
+// `vault.KeyUnlock.Recipient(identity)` and `.Passphrase(secret)` call the
+// core.crypto functions filling VaultUnlockRecipient and
+// VaultUnlockPassphrase.
+// Three core.encoding declarations a `#Codable` type's generated decode
+// names fill roles: its streaming body reads members from the trait filling
+// TypedDecodeSource, one member at a time through the method filling
+// TypedDecodeRead, and reads a Dyn tree through the constructor filling
+// TypedDecodeTree. The compiler reads their names from those markers in
+// Core/Encoding/Encoding.jet while it builds.
+// The core.mem and
 // core.math operations the compiler builds inline at each call, never as a
 // call (a raw List's capacity, a pointer step, a block copy, a bit copy and
 // the rest), fill the roles that start with `Inline`. A role's name ends
@@ -160,6 +192,8 @@ RoleKind: enum {
     TapeGradient,
     TapePull,
     TapeTangent,
+    VaultUnlockRecipient,
+    VaultUnlockPassphrase,
     ListQuery,
     QueryStream,
     StreamWithEventTime,
@@ -188,18 +222,29 @@ RoleKind: enum {
     GroupSumU64,
     GroupMean,
     DataSchema,
+    ContextOnStop,
+    ContextTrace,
+    InputCSV,
+    ReceiptAttach,
     DecodeUnder,
     DecodeList,
     DecodeFixedList,
     DecodeBytes,
     DecodeOption,
     DecodeMap,
+    TypedDecodeSource,
+    TypedDecodeRead,
+    TypedDecodeTree,
     JSONTypedDecode,
+    InputJSON,
     TOMLTypedDecode,
     YAMLTypedDecode,
     EventPoint,
     HookPoint,
     DecisionPoint,
+    ProcessSpecKeepOpen,
+    HTTPMethodTokenCheck,
+    HTTPHandlerNew,
     JobEnqueue,
     JobDelay,
     AbsFloat,
@@ -368,13 +413,28 @@ RoleKind: enum {
     StringMatches,
     StringMatch,
     StringHasLine,
+    ContextPrint,
     TermTake,
+    InputLines,
+    InputEdit,
+    TestSuiteRun,
     StringTrimNewlines,
     StringFirstLines,
     StringLastLines,
     StringHasLinePrefix,
     StringTSVRecords,
     StringCompareVersion,
+    TaskTimeout,
+    DurationIn,
+    DurationIsZero,
+    DurationTotalSeconds,
+    DurationDifference,
+    DurationAbs,
+    DurationNegated,
+    DurationSign,
+    DurationTotalIn,
+    DurationRound,
+    ButtonClick,
     TextInputDrop,
     TextInputChange,
     MeasurementNew,
@@ -387,6 +447,9 @@ RoleKind: enum {
     MeasurementSqrt,
     MeasurementShow,
     MeasurementResult,
+    AppPortEnv,
+    AppDevEnv,
+    AppTraceEnv,
     Add,
     Sub,
     Mul,
@@ -398,12 +461,13 @@ RoleKind: enum {
 }
 // END GENERATED
 
-// `#Builtin.Role(.X)` on a Core function makes it the one that fills role X.
+// `#Builtin.Role(.X)` on a Core function, method or trait makes it the one
+// that fills role X.
 Role: struct {
     kind: RoleKind,
 
     impl Marker {
-        sites: [.Function],
+        sites: [.Function, .Method, .Trait],
     }
 }
 

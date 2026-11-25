@@ -39,7 +39,7 @@ SchemaSnapshot: struct {
             if {
                 line.starts_with("schema_version = ") -> {
                     rest: line.after("schema_version = ")
-                    bytes: rest.copy().bytes()
+                    bytes: rest.bytes()
                     index := if rest.starts_with("+") -> 1 else -> 0
                     number := 0
                     if index == bytes.len() {
@@ -64,7 +64,7 @@ SchemaSnapshot: struct {
                     if colon < 0 {
                         return Err(SchemaSnapshotError{message: "malformed field line: {line}"})
                     }
-                    bytes: rest.copy().bytes()
+                    bytes: rest.bytes()
                     fields.push(SnapshotField{name: foundation_byte_text(bytes, 0, colon).trim(), ty: foundation_byte_text(bytes, colon + 1, bytes.len()).trim()})
                 }
                 else -> return Err(SchemaSnapshotError{message: "unknown line in schema snapshot: {line}"})

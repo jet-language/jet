@@ -183,7 +183,8 @@ jet_driver_build_service_call: fn(session: ^BuildSession, host: JetDriverBuildAd
 // The method `member` names, after its owner: the width a placed call
 // underlines and the name a refusal spells, never a dispatch key.
 jet_driver_build_method_name: fn(member: String) -> String Never! {
-    member.slice(member.find(".") + 1, member.len())
+    cut: member.partition(".")
+    if cut.sep == "" -> cut.head else -> cut.tail
 }
 
 // Why a `Build` method is refused before the session sees it: its `b` is

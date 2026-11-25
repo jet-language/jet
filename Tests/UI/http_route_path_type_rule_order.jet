@@ -1,0 +1,52 @@
+// A check rule's rejection keeps its call's place among the module's other
+// errors, so the file's errors print in source order: core.http's
+// StaticRoutes rule refusing a router's run-time custom method (E2808) and a
+// package's own type rule print between the ordinary errors around them.
+use {
+    http: core.http
+    server: core.http.server
+}
+
+Fraction: struct {
+    impl Diagnostic {
+        what: fn(self) -> String { "a gauge reads whole numbers" }
+
+        why: fn(self) -> String { "the gauge rule hears each argument's type" }
+
+        fix: fn(self) -> String { "pass an Int" }
+    }
+}
+
+Gauged: struct {
+    impl Marker {
+        sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            if call.name.text == "read" && call.args[0].type.name != "Int" -> reject(Fraction{}, at: call.args[0])
+        }
+    }
+}
+
+#Gauged
+Gauge: struct {
+    level: Int,
+
+    read: fn(self, scale: Int) -> Int { self.level * scale }
+}
+
+named: fn(name: String) -> HTTPResponse HTTPError! { Ok(server.response(200, name)) }
+
+run: fn() {
+    first: Int{1.5}
+    print(first)
+    router: http.router()
+    verb := "PURGE"
+    verb = "PATCH"
+    router.custom(verb, "/files/:name", named)
+    second: Int{2.5}
+    print(second)
+    gauge: Gauge{level: 2}
+    print(gauge.read(2.5))
+    third: Int{3.5}
+    print(third)
+}

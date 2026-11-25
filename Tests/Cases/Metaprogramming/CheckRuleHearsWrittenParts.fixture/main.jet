@@ -1,0 +1,59 @@
+// A rule hears the parts a String literal with holes spells: each run of its
+// text, and each hole with its name when the hole is a bare name and its
+// span. Any other argument carries None: a plain literal, a constant and a
+// literal in parentheses included.
+Misheard: struct {
+    index: Int,
+    heard: String,
+
+    impl Diagnostic {
+        code: "known.Misheard",
+
+        what: fn(self) -> String { "argument {self.index} is heard as {self.heard}" }
+
+        why: fn(self) -> String { "a literal's written parts are known while building" }
+
+        fix: fn(self) -> String { "hear the literal's written parts" }
+    }
+}
+
+Spelled: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            expected: [String]{"[text /users/, hole id 2, text /posts]", "[hole - 9, text !]", "none", "none", "none"}
+            loop (index, argument) in call.args {
+                heard := "none"
+                if argument.written == .Val(parts) {
+                    shown := [String]{}
+                    loop part in parts {
+                        if part == {
+                            .Text(text) -> shown.push("text {text}")
+                            .Hole(name, span) -> {
+                                named: name ?? "-"
+                                shown.push("hole {named} {span.end - span.start}")
+                            }
+                        }
+                    }
+                    heard = "[{shown.join(", ")}]"
+                }
+                if heard != expected[index] -> reject(Misheard{index: index, heard: heard}, at: argument)
+            }
+        }
+    }
+}
+
+Item: struct {
+    id: Int,
+}
+
+PLAIN: "/plain"
+
+#Spelled spell: fn(a: String, b: String, c: String, d: String, e: String) -> String { "{a}|{b}|{c}|{d}|{e}" }
+
+run: fn() {
+    id: 7
+    record: Item{id: 2}
+    print(spell("/users/{id}/posts", "{record.id}!", "/plain", PLAIN, ("/a/{id}")))
+}

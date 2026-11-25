@@ -1,0 +1,34 @@
+use {
+    http: core.http
+    server: core.http.server
+    web: core.web
+}
+
+ID: "42"
+
+Record: struct {
+    id: Int,
+}
+
+handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
+
+// core.http's StaticRoutes rule refuses a router path written as a String
+// literal with holes from the parts it hears, each hole as `{name}`, or
+// `{…}` when it is not a bare name. A literal in parentheses, a raw String
+// and a `+` join are not such a literal, so the ordinary checks answer them.
+run: fn() {
+    router: http.router()
+    id: "42"
+    record: Record{id: 7}
+    router.get(("/a/{id}"), handle)
+    router.get("/b/{ID}", handle)
+    router.get("/c/{id:Debug}", handle)
+    router.post("/d/{record.id}", handle)
+    router.put("/e/{"x"}", handle)
+    router.get("/f/{{lit}}/{id}", handle)
+    router.get(`/g/{id}`, handle)
+    router.get("/h/" + id, handle)
+    router.custom("PURGE", "/i/{id}", handle)
+    app: web.app()
+    app.get("/j/{id}", handle)
+}

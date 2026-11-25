@@ -173,7 +173,7 @@ sema_call_concurrency_infer_callback: fn(argument: CallArg, required: Type, meth
     contract := required
     if open_result && required == .Fn(params, _, effect_bound, param_contract, call_metadata, return_view_provenance) && checked.ty == .Fn(_, adopted, _, _, _, _) {
         // copy: the contract is a new owned Type built from the required slot and the callback's adopted result
-        contract = Type.Fn{params: params.copy(), ret: adopted.copy(), effect_bound: effect_bound.copy(), param_contract: param_contract.copy(), call_metadata: call_metadata.copy(), return_view_provenance: return_view_provenance.copy()}
+        contract = Type.Fn{params: params.copy(), ret: adopted, effect_bound: effect_bound.copy(), param_contract: param_contract.copy(), call_metadata: call_metadata.copy(), return_view_provenance: return_view_provenance.copy()}
     }
     compatible: sema_call_host_callback_assignable(contract, checked.ty, check.environment.*, check.program.*) ?? return None
     if !compatible {

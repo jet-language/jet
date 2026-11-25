@@ -11,6 +11,7 @@ package: {
 
 use {
     core
+    builtin: jet_builtins
     rawcrypto: core.crypto.expert
     random: core.crypto.random
     core.crypto.vault.[KeyUnlock, WrappedVaultKey]
@@ -269,21 +270,16 @@ WrappedKey: struct {
     bytes: [U8],
 }
 
-// Vault key-wrap carriers have one canonical source owner in core.crypto.vault.
-priv __vault_wrapped_from_bytes: fn(bytes: ^^[U8]) -> WrappedVaultKey KeyWrapError! {
-    #Unsafe("vault key import: validate a serialized wrapped carrier at the typed crypto boundary") {
-        wrapped: core.crypto.vault.__wrapped_from_bytes(bytes) ?? return Err(KeyWrapError{reason: err.reason})
-        return Ok(wrapped)
-    }
-}
-
-priv __vault_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
+// `KeyUnlock.Recipient(identity)` and `KeyUnlock.Passphrase(passphrase)` call
+// these by role; the carriers have one canonical source owner in
+// core.crypto.vault.
+#Builtin.Role(.VaultUnlockRecipient) priv __vault_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
     #Unsafe("vault key import: construct the typed recipient unlock request") {
         return core.crypto.vault.__key_unlock_recipient(identity)
     }
 }
 
-priv __vault_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
+#Builtin.Role(.VaultUnlockPassphrase) priv __vault_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
     #Unsafe("vault key import: construct the typed passphrase unlock request") {
         return core.crypto.vault.__key_unlock_passphrase(passphrase)
     }

@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     core: core
     provider: core.http.client
     http_url: core.net.url
@@ -763,20 +764,62 @@ HTTPRouter: struct {
 }
 
 // The rule of a route table checked while building: each method call on a
-// marked value is heard, and a custom route whose path is known then must
-// name its method with a value known then too (E2808). Only an App takes a
-// method known when the program runs.
+// marked value is heard. A route path written as a String literal with
+// holes is refused (E2805): a route's holes are `:name` segments, never
+// interpolation. A custom route whose path is known then must name its
+// method with a value known then too (E2808). Only an App takes a method
+// known when the program runs.
 priv StaticRoutes: struct {
     impl Marker {
         sites: [.Type],
 
         check: fn(self, call: CompilerCall) {
-            if call.name.text == "custom" && call.args.len() == 3 {
+            custom: call.name.text == "custom"
+            at: if custom -> 1 else -> 0
+            standard: if method_parse(call.name.text) == .Custom(_) -> false else -> true
+            verb: custom || standard
+            if verb && call.args.len() > at && call.args[at].written == .Val(parts) {
+                reject(RouteInterpolated{pattern: route_written_pattern(parts)}, at: call.args[at])
+            }
+            if custom && call.args.len() == 3 {
                 if call.args[1].value != None && call.args[0].value == None {
                     reject(RouteMethodNotStatic{}, at: call.args[0])
                 }
             }
         }
+    }
+}
+
+// A route path literal as written, each hole as `{name}`, or `{…}` when the
+// hole is not a bare name.
+route_written_pattern: fn(parts: [CompilerWrittenPart]) -> String Never! {
+    pattern := ""
+    loop part in parts {
+        if part == {
+            .Text(text) -> pattern = "{pattern}{text}"
+            .Hole(name, _) -> {
+                hole: name ?? "…"
+                pattern = "{pattern}{{{hole}}}"
+            }
+        }
+    }
+    pattern
+}
+
+// E2805: a route path written as a String literal with holes.
+priv RouteInterpolated: struct {
+    pattern: String,
+
+    impl Diagnostic {
+        code: "E2805",
+
+        what: fn(self) -> String { "invalid HTTP route `{self.pattern}`: brace interpolation is not allowed in route patterns" }
+
+        why: fn(self) -> String {
+            "route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree"
+        }
+
+        fix: fn(self) -> String { "use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`" }
     }
 }
 
@@ -908,7 +951,7 @@ priv __MethodTokenError: struct {
 // registers. Any RFC 9110 token is a method, kept in its exact case; only a
 // token that is exactly a standard method is refused, since that method has
 // its own verb.
-priv __method_token_check: fn(token: String) -[]> __MethodTokenError! {
+#Builtin.Role(.HTTPMethodTokenCheck) priv __method_token_check: fn(token: String) -[]> __MethodTokenError! {
     if !valid_method(token) {
         return Err(__MethodTokenError{reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
     }

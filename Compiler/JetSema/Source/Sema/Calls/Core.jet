@@ -1107,8 +1107,7 @@ sema_call_core_typed_decode_role: fn(module_name: String) -> String? Never! {
 sema_call_core_source_arguments: fn(args: [TExpr], params: [SemaCallParam], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [TCallArg] Never! {
     result := [TCallArg]{}
     loop index in 0..<args.len() {
-        // copy: the source call owns its argument; the Core call's checked argument stays the caller's.
-        value: args[index].copy()
+        value: args[index]
         param: params[index]
         result.push(
             TCallArg{
@@ -1227,7 +1226,7 @@ sema_call_core_run_source: fn(record: CoreCallRecord, identity: ModuleID, name: 
 // A call of the `module_name` source function `member` on checked arguments,
 // typed `result` (sqrt's Float root, the F32-width math calls a Float member
 // computes, and the Tensor bracket windows). `registered` resolves a
-// module-private member such as `__task_timeout`.
+// module-private member too.
 sema_call_core_source: fn(module_name: String, member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
     sema_call_core_source_in(identity, member, values, result, registered, span, environment, program, diagnostics)
@@ -1242,6 +1241,16 @@ sema_call_core_role_source: fn(role: String, values: [TExpr], result: Type, span
         return None
     }
     sema_call_core_source_in(filler.module_identity, filler.name, values, result, true, span, environment, program, diagnostics)
+}
+
+// The checked source target of the Core function that fills `role`, with
+// `type_args`; E1015 when no Core function fills it.
+sema_call_core_role_target: fn(role: String, type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaCallDirectTarget? {
+    filler: sema_core_role_function(program.registration_graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return None
+    }
+    sema_call_core_source_target(environment, program, filler.module_identity, filler.name, type_args, span, true, diagnostics)
 }
 
 // The call sema_call_core_source makes, of `member` of the Core module `identity`.
@@ -1612,7 +1621,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     values := [TExpr]{}
     loop argument in lowered {
         if argument.mut_borrow {
-            ty: argument.value.ty.copy()
+            ty: argument.value.ty
             at: argument.value.span
             values.push(sema_tree_node(ty, TExprKind.Borrow{place: argument.value, access: AccessConvention.Write}, at))
         } else { values.push(argument.value) }

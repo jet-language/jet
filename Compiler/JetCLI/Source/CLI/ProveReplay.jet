@@ -403,8 +403,7 @@ jet_cli_replay_is_stdin_read: fn(site: JetCLIReplaySite) -> Bool Never! {
 // (`term.readline`).
 jet_cli_replay_is_term_read: fn(site: JetCLIReplaySite) -> Bool Never! {
     if site.owner != "core.term" -> return false
-    dot: site.operation.rfind(".")
-    JET_CLI_REPLAY_TERM_READS.contains(site.operation.slice(dot + 1, site.operation.len()))
+    JET_CLI_REPLAY_TERM_READS.contains(site.operation.rpartition(".").tail)
 }
 
 jet_cli_replay_reaches: fn(sites: [JetCLIReplaySite], authority: String) -> Bool Never! {
@@ -2808,8 +2807,7 @@ jet_cli_replay_resolve: fn(sites: ^[JetCLIReplaySite], input: String) {
             sites.push(site)
             next
         }
-        dot: site.operation.rfind(".")
-        member: site.operation.slice(dot + 1, site.operation.len())
+        member: site.operation.rpartition(".").tail
         site.authority = jet_cli_replay_core_authority(core, site.owner, member)
         if {
             site.authority != None -> sites.push(site)

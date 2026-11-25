@@ -405,7 +405,10 @@ lsp_test_apply_edits: fn(text: String, edits: [TextEdit]) -> String Never! {
     result := text
     loop index in 0..<edits.len() {
         edit: edits[edits.len() - 1 - index]
-        result = "{result.slice(0..<edit.span.start)}{edit.new_text}{result.slice(edit.span.end..<result.count_bytes())}"
+        bytes: result.bytes()
+        head: String.from_bytes(bytes.slice(0, edit.span.start)) ?? panic("an edit span keeps whole characters")
+        tail: String.from_bytes(bytes.slice(edit.span.end, bytes.len())) ?? panic("an edit span keeps whole characters")
+        result = "{head}{edit.new_text}{tail}"
     }
     result
 }

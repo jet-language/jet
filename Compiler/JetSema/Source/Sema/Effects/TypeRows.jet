@@ -219,7 +219,7 @@ sema_effect_graph_type_rows: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
         loop shape in sema_effect_type_shapes(graph, source_module) {
             at: index.get(shape.key) ?? {
                 index[shape.key] = rows.len()
-                rows.push(SemaEffectTypeRow{key: shape.key.copy(), span: shape.span, sources: [SemaEffectTypeSource]{}, effects: [String]{}, reaches: [SemaEffectTypeReach]{}})
+                rows.push(SemaEffectTypeRow{key: shape.key, span: shape.span, sources: [SemaEffectTypeSource]{}, effects: [String]{}, reaches: [SemaEffectTypeReach]{}})
                 rows.len() - 1
             }
             loop source in shape.sources -> rows[at].sources.push(source.copy())
@@ -227,7 +227,7 @@ sema_effect_graph_type_rows: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     }
     loop row_index in 0..<rows.len() {
         loop position in 0..<rows[row_index].sources.len() {
-            source: rows[row_index].sources[position].copy()
+            source: rows[row_index].sources[position]
             own := source.effects.copy()
             if source.function_key != "" {
                 found: solved_at.get(source.function_key) ?? next
@@ -245,11 +245,11 @@ sema_effect_graph_type_rows: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
         changed = false
         loop target in 0..<rows.len() {
             loop position in 0..<rows[target].sources.len() {
-                type_key: rows[target].sources[position].type_key.copy()
+                type_key: rows[target].sources[position].type_key
                 if type_key == "" -> next
                 from: index.get(type_key) ?? next
                 if from == target -> next
-                adds: rows[from].effects.copy()
+                adds: rows[from].effects
                 loop effect_name in adds {
                     if sema_effect_type_row_add(rows[target], effect_name, position) {
                         changed = true

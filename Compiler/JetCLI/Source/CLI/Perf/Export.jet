@@ -54,7 +54,7 @@ jet_cli_perf_export: fn(args: [String], color: Bool) -[FS, Env, Time]> JetDriver
     shown: path ?? return jet_cli_perf_error("`jet perf export` needs a {extension} path", JET_CLI_PERF_FIX, color)
     trace: jet_cli_perf_read(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     if mode == "pprof" {
-        stem: if shown.ends_with(extension) -> shown.slice(0..<shown.count_bytes() - extension.count_bytes()) else -> shown
+        stem: shown.removesuffix(extension)
         target: if out_at >= 0 -> args[out_at] else -> "{stem}.pb.gz"
         bytes: perf_gzip.compress(jet_cli_perf_pprof_profile(trace)) ?? return jet_cli_perf_failed("the profile is too large to compress", color)
         jet_cli_perf_export_write(target, bytes) ?? return jet_cli_perf_failed(err.message, color)

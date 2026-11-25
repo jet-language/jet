@@ -15,6 +15,7 @@ use {
     math: core.math
     process: core.process
     regex: core.regex
+    roots: "Roots"
     sys: core.sys
     term: core.term
     time: core.time
@@ -2635,9 +2636,9 @@ off_native: fn(table: Table, row: [String], has_platform: Bool, platform: String
 
 // --- the self-check ----------------------------------------------------------
 
-scratch_root: fn() -[Env]> String Never! {
-    state: process.env_nonempty("JET_STATE_ROOT") ?? "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev"
-    process.env_nonempty("TMPDIR") ?? (process.env_nonempty("JET_SCRATCH_ROOT") ?? state)
+// $TMPDIR, else the scratch root of the dev tool roots (Tools/Agent/roots.env).
+scratch_root: fn() -[Env, FS]> String Never! {
+    process.env_nonempty("TMPDIR") ?? roots.value("JET_SCRATCH_ROOT")
 }
 
 SelfCheck: struct {
@@ -3466,9 +3467,7 @@ producer_setup: fn(root: String, platform: String, report: String) -[Env, FS]> S
     if found == "" {
         return Err(problem("no Jet compiler: set JET_COMPILED_WORKLOAD_JET_BIN or JET, or put jet on PATH"))
     }
-    home: files.home() ?? (process.env_nonempty("HOME") ?? "")
-    cache: "{home}/.cache"
-    scratch_text: process.env_nonempty("JET_COMPILED_WORKLOAD_SCRATCH") ?? "{cache}/jet-dev/scratch"
+    scratch_text: process.env_nonempty("JET_COMPILED_WORKLOAD_SCRATCH") ?? files.join(roots.value("JET_STATE_ROOT"), "scratch")
     scratch: files.collapse(absolute(scratch_text))
     if platform == "linux" && (scratch == "/tmp" || scratch.starts_with("/tmp/")) {
         return Err(problem("scratch must not use the RAM-backed system temporary directory: {scratch_text}"))

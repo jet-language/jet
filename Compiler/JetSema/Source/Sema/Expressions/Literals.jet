@@ -553,8 +553,8 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
             check.context.incomplete_reasons.push("checked list element inference lost its element type")
             return None
         }
-        parts.push(part.copy())
-        resolved_types.push(item_type.copy())
+        parts.push(part)
+        resolved_types.push(item_type)
     }
     Val(SemaExpressionListCheckedParts{parts: parts, element_types: resolved_types})
 }
@@ -1140,8 +1140,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     // fits the list proves the read, and any other keeps the runtime check.
     derived_range: if index_bounds == None && base_ty == .FixedList(_, _) -> sema_contract_index_interval(inferred_index, check.environment.*, check.program.*) else -> None
     named_mismatch: named_position && distinct_range == None && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty)
-    // copy: the named position keeps its own type for the report below.
-    named_ty: inferred_index.ty.copy()
+    named_ty: inferred_index.ty
     checked_index := if named_mismatch -> sema_expr_expected(inferred_index, index_expected, check.environment.*, check.program.*, check.diagnostics) ?? {
         sema_expression_index_replace_mismatch(base_ty, named_ty, expr_span(index), index_start, check.diagnostics)
         return None

@@ -283,6 +283,11 @@ net: module {
     // connects to them (HostNetResolver.jet).
     #Import(c) priv resolve_ordered: fn(host: String, port: U16) -[Net, Time.Wait]> [SocketAddr] ResolveError! = "jet_net_raw_resolve_ordered"
 
+    // The 4 or 16 network-order octets of each address `host` (one [..]
+    // pair removed) resolves to on `port`, in resolver order, once the
+    // effect scopes in force admit the host (HostBuildHTTP.jet).
+    #Import(c) priv build_resolve: fn(host: String, port: Int) -[Net, Time.Wait]> [[U8]] Err! = "jet_http_build_resolve"
+
     // The address of the 4 or 16 octets `bytes`, and the socket address of
     // `ip` and `port` with an IPv6 address's `flow` and `scope`
     // (HostNetAddress.jet). The exports copy their arguments.

@@ -92,7 +92,7 @@ pkg_pascal_bind: fn(path: String, source: String, lib: String, cache: String) -[
     c_compiler: pkg_binder_resolved_tool_path("cc") ?? return Err(ForeignBindError.ToolMissing("cc"))
     archiver: pkg_binder_resolved_tool_path("ar") ?? return Err(ForeignBindError.ToolMissing("ar"))
     build: pkg_worker_prepare_build(cache, "pascal", lib, "Pascal")
-    runtime: files.join(cache, "libjet_pascal_{lib}_runtime{BinderHostOS.current().shared_ext()}")
+    runtime: files.join(cache, "libjet_pascal_{lib}_runtime{VariantOS.current().shared_ext()}")
     pkg_binder_remove_file_quiet(runtime)
     pkg_pascal_run([String]{compiler, "-Mobjfpc", "-Cg", "-O2", "-FU{build}", "-FE{cache}", "-o{runtime}", path}, "fpc")
     if !files.is_file(runtime) {

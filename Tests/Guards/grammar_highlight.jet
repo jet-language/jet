@@ -297,10 +297,10 @@ gh_grammar_keyword_words: fn() -> [String] {
     assert_eq(missing.join("\n"), "")
 }
 
-// D-MOVE-SIGIL1=A: the editor grammars color the take mark `^^` apart from
-// logical and. TextMate reads it only where a parameter type or a task capture
-// starts, and `&` is an operator, no sigil, so no mark colors the first half of
-// `&&`; Zed marks the take mark in a parameter list and after `task`.
+// The editor grammars color the take mark `^^` apart from the write mark `^`
+// and from logical and. TextMate reads it only where a parameter type or a
+// task capture starts, and `&` is an operator, no sigil; tree-sitter lexes
+// `^^` as one token, and Zed marks it in a parameter list and after `task`.
 #Test("take_mark_is_colored_apart_from_logical_and") {
     guards_enter_root()
     vscode: gh_generated_section(GH_VSCODE)
@@ -308,9 +308,11 @@ gh_grammar_keyword_words: fn() -> [String] {
     assert(vscode.contains("(?<=\\\\btask\\\\s))(\\\\^\\\\^)"), "{GH_VSCODE} take mark is not limited to parameter and task positions")
     assert(!vscode.contains("&(?!&"), "{GH_VSCODE} still colors `&` as a sigil, the first half of logical and")
     assert(gh_generated_section(GH_TREE_SITTER).contains("const JET_HIGHLIGHT_TAKE_MARK = [\"^^\"];"), "{GH_TREE_SITTER} has no take-mark class")
+    assert(gh_has(gh_anonymous_node_types(), "^^"), "{GH_NODE_TYPES} does not lex the take mark `^^` as one token")
     zed: gh_read(GH_ZED)
-    assert(zed.contains("(parameters \"&&\" @keyword)"), "{GH_ZED} does not mark `^^` in parameter lists")
-    assert(zed.contains("((control_keyword) . \"&&\" @keyword)"), "{GH_ZED} does not mark `^^` after `task`")
+    assert(zed.contains("(parameters \"^^\" @keyword)"), "{GH_ZED} does not mark `^^` in parameter lists")
+    assert(zed.contains("((control_keyword) . \"^^\" @keyword)"), "{GH_ZED} does not mark `^^` after `task`")
+    assert(!zed.contains("\"&&\" @keyword"), "{GH_ZED} still marks logical and `&&` as the take mark")
 }
 
 // The `#X: value` marker line: the tree-sitter section renders the

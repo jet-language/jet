@@ -1095,12 +1095,17 @@ sema_taskgroup_check_surface_method: fn(receiver: Expr, method: String, args: [C
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_taskgroup_note_time_effect(check.context, span)
-        // The Duration installs the task deadline through the Core source
-        // function `core.time.__task_timeout` (jet.runtime.time
+        // The Duration installs the task deadline through the core.time
+        // function that fills the TaskTimeout role (jet.runtime.time
         // task_timeout); the next wait point past it stops.
         unit: Type.Named{name: "Unit"}
-        value: sema_call_core_source("core.time", "__task_timeout", [TExpr]{duration}, unit, true, span, check.environment.*, check.program.*, check.diagnostics) ?? {
-            check.diagnostics.push(sema_error("E0906", span, "the source `core.time.__task_timeout` declaration for `task.timeout` is unavailable", "a task timeout installs its deadline through the Core time source", "restore the `core.time` source module"))
+        unavailable: sema_error("E0906", span, "the core.time function that fills the TaskTimeout role for `task.timeout` is unavailable", "a task timeout installs its deadline through the Core time source", "restore the `core.time` source module")
+        if sema_call_core_module_identity(check.environment.*, check.program.*, "core.time") == None {
+            check.diagnostics.push(unavailable)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        value: sema_call_core_role_source("TaskTimeout", [TExpr]{duration}, unit, span, check.environment.*, check.program.*, check.diagnostics) ?? {
+            check.diagnostics.push(unavailable)
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}

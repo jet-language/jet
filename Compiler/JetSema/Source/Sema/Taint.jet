@@ -1915,9 +1915,9 @@ sema_taint_settle_exits: fn(state: ^SemaTaintFlowState, body: [Stmt], params: [S
     masks: sema_taint_exit_tail(state, body, params)
     refused := 0
     loop index in 0..<state.exits.len() {
-        tag_value: state.exit_tags[index].copy()
-        span: state.exits[index].copy()
-        test_span: state.exit_tests[index].copy()
+        tag_value: state.exit_tags[index]
+        span: state.exits[index]
+        test_span: state.exit_tests[index]
         if masks -> sema_taint_mask_branch(state, tag_value, true, span, test_span) else {
             at: state.exit_marks[index] + refused
             state.diagnostics.insert(at, sema_taint_e0737_diagnostic(tag_value, "an early return that can't be masked (the code it skips calls, can stop, writes memory or loops on its own)", test_span))
@@ -2906,7 +2906,7 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: ^SemaTaintFlowSta
             }
             sema_taint_check_expr(graph, state, cond)
             if test != "" -> state.under.push(test.copy())
-            before: state.flow.current.copy()
+            before: state.flow.current
             paths := [SemaFlowFacts]{}
             sema_taint_check_block(graph, state, then_body)
             if !state.flow.ended -> sema_taint_check_expr(graph, state, then_value)

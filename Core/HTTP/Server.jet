@@ -1,4 +1,5 @@
 use {
+    builtin: jet_builtins
     core: core
     http: core.http
     core.http.[Body, Header, Headers, HTTPError, HTTPRequest, HTTPResponse]
@@ -212,7 +213,10 @@ HTTPHandler: struct {
     }
 }
 
-priv __handler: fn(call: ^^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
+// The HTTPHandler every route uses: the compiler builds a lambda written
+// where an `HTTPHandler` is expected with the function that fills the
+// HTTPHandlerNew role (Sema Lambdas.jet sema_expression_lambda_http_handler).
+#Builtin.Role(.HTTPHandlerNew) priv __handler: fn(call: ^^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
     HTTPHandler{__cell: Shared{HTTPHandlerCell{call: call.move()}}}
 }
 

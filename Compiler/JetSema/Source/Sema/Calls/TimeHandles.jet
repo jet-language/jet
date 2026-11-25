@@ -128,8 +128,7 @@ sema_call_try_time_static_method: fn(owner: String, method: String, args: [CallA
 sema_time_clock_retagged: fn(value: ^^TExpr, tagged: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     retagged := value.move()
     if retagged.ty == .Result(_, err) {
-        // copy: `err` is a payload of `retagged.ty`, which the new Type.Result replaces
-        tree_expr_retype(retagged, Type.Result{ok: tagged, err: err.copy()})
+        tree_expr_retype(retagged, Type.Result{ok: tagged, err: err})
         return Val(retagged)
     }
     tree_expr_retype(retagged, tagged)

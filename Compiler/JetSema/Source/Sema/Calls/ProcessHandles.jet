@@ -219,9 +219,9 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
         sema_process_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    // `spec.keep_open(handle, at:)` is the ordinary Core source body
-    // `core.files.__spec_keep_open`; its declaration types the handle union
-    // and the slot, and the spec takes the handle.
+    // `spec.keep_open(handle, at:)` is the ordinary core.files source body
+    // that fills the ProcessSpecKeepOpen role; its declaration types the
+    // handle union and the slot, and the spec takes the handle.
     if method == "keep_open" {
         return sema_process_spec_keep_open(receiver, receiver_value, args, result, span, expected, check)
     }
@@ -337,13 +337,12 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
             return rejected
         }
     }
-    route: sema_call_core_resolve_route(check.environment.*, check.program.*, "core.files", "__spec_keep_open", [Type]{}, 3, false, span, check.diagnostics) ?? return rejected
-    target: if route == {
-        .Source(source) -> source
-        .Core(_) | .SharedSite(_) -> {
-            check.context.incomplete_reasons.push("ProcessSpec.keep_open must resolve its canonical Jet source body")
-            return rejected
-        }
+    if sema_call_core_no_os_refused(check.environment.*, check.program.*, "core.files", "keep_open", span, check.diagnostics) {
+        return rejected
+    }
+    target: sema_call_core_role_target("ProcessSpecKeepOpen", [Type]{}, span, check.environment.*, check.program.*, check.diagnostics) ?? {
+        check.context.incomplete_reasons.push("ProcessSpec.keep_open must resolve its canonical Jet source body")
+        return rejected
     }
     params: if target.signature == {
         .Fn(params, _, _, _, _, _) -> params

@@ -134,15 +134,15 @@ sema_app_state: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: Modu
     found := SemaAppState{key: nominal.identity_key.copy(), name: nominal.symbol.name.copy(), fields: [String]{}, types: [Type]{}, query: [String]{}, module_identity: module_row.module_identity}
     loop field in nominal.fields {
         if field.computed -> next
-        found.fields.push(field.symbol.name.copy())
-        found.types.push(field.ty.copy())
+        found.fields.push(field.symbol.name)
+        found.types.push(field.ty)
     }
     item: sema_registration_nominal_source_item(nominal.source) ?? return Val(found)
     if item == .Struct(definition) {
         loop field in definition.fields {
             loop marker in field.serde_markers {
                 if sema_app_marker_is(marker, SEMA_APP_QUERY_MARKER, graph, module_row.module_identity) {
-                    found.query.push(field.name.copy())
+                    found.query.push(field.name)
                 }
             }
         }
@@ -302,7 +302,11 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     }
     // `__screen` can't fail (`App Never!`): the call is the graph, as a
     // declared method's call of it is.
-    result_type: sema_call_resolved_type(sema_owned_infallible(sema_call_signature_return(registered.signature) ?? panic("App.{SEMA_APP_SCREEN} has no result")), check.environment.*, check.program.*)
+    declared_result: sema_call_signature_return(registered.signature) ?? {
+        check.context.incomplete_reasons.push("App.{SEMA_APP_SCREEN} has no result")
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    result_type: sema_call_resolved_type(sema_owned_infallible(declared_result), check.environment.*, check.program.*)
     built: sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: registered.method, type_args: [Type]{viewed}, args: registration}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
@@ -411,7 +415,7 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
     texts := [Expr]{}
     loop field in found.fields {
         names.push(sema_app_text(field, span))
-        read: Expr.Field{base: Expr.Ident{name: state_name, span: span, id: AST_NODE_GENERATED}, member: field.copy(), span: span, id: AST_NODE_GENERATED}
+        read: Expr.Field{base: Expr.Ident{name: state_name, span: span, id: AST_NODE_GENERATED}, member: field, span: span, id: AST_NODE_GENERATED}
         texts.push(Expr.MethodCall{receiver: Expr.Ident{name: graph_name, span: span, id: AST_NODE_GENERATED}, method: SEMA_APP_ADDRESS_TEXT, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_app_arg(read, AccessConvention.Read, span)}, id: AST_NODE_GENERATED})
     }
     params: [LambdaParam]{
@@ -467,7 +471,7 @@ sema_call_app_head: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], s
     }
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
-    made: sema_app_state_made(sema_app_ident(graph_name, span), found, viewed.copy(), fields_name, graph, span)  // copy: the registration's type argument keeps the state
+    made: sema_app_state_made(sema_app_ident(graph_name, span), found, viewed, fields_name, graph, span)  // copy: the registration's type argument keeps the state
     decode: sema_app_lambda([LambdaParam]{sema_app_lambda_param(graph_name, None, span), sema_app_lambda_param(fields_name, None, span)}, made, span)
     registration: [CallArg]{
         sema_app_arg(sema_app_text(found.key, span), AccessConvention.Read, span),
@@ -543,7 +547,7 @@ sema_app_state_made: fn(graph_expr: Expr, found: SemaAppState, state_ty: Type, f
         names.push(sema_app_text(found.fields[index], span))
         field_ty: sema_type_resolve_declared(graph, found.types[index], found.module_identity)
         read: [CallArg]{sema_app_arg(sema_app_ident(fields_name, span), AccessConvention.Read, span), sema_app_arg(sema_app_text(found.fields[index], span), AccessConvention.Read, span)}
-        values.push(sema_app_member_call(graph_expr.copy(), "__address_json", [Type]{field_ty}, read, span))  // copy: each field reads the one graph
+        values.push(sema_app_member_call(graph_expr, "__address_json", [Type]{field_ty}, read, span))  // copy: each field reads the one graph
     }
     listed: Expr.TypedLit{head: Val(Type.List{element: Type.Option{inner: Type.String}}), body: TypedLitBody.Elements{elements: values}, span: span, id: AST_NODE_GENERATED}
     sema_app_member_call(graph_expr, "__address_state", [Type]{state_ty}, [CallArg]{sema_app_arg(sema_app_strings(names, span), AccessConvention.Read, span), sema_app_arg(listed, AccessConvention.Read, span)}, span)
@@ -607,8 +611,12 @@ sema_call_app_api: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], 
     }
     key: graph.modules[row.module_index].nominals[row.row].identity_key
     limit: max_upload ?? Expr.Int{value: SEMA_APP_MAX_UPLOAD, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    path: positional.pop() ?? {
+        check.context.incomplete_reasons.push("`.api` was checked to have a path")
+        return rejected
+    }
     registration: [CallArg]{
-        positional.pop() ?? panic("`.api` was checked to have a path"),
+        path,
         sema_app_arg(sema_app_text(key, span), AccessConvention.Read, span),
         sema_app_arg(limit, AccessConvention.Read, span),
     }
@@ -791,7 +799,7 @@ sema_call_app_current: fn(alias: String, args: [CallArg], type_args: [Type], spa
     }
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
-    made: sema_app_state_made(sema_app_ident(graph_name, span), found, ty.copy(), fields_name, graph, span)
+    made: sema_app_state_made(sema_app_ident(graph_name, span), found, ty, fields_name, graph, span)
     decode: sema_app_lambda([LambdaParam]{sema_app_lambda_param(graph_name, None, span), sema_app_lambda_param(fields_name, None, span)}, made, span)
     lowered: sema_app_graph_call(alias, SEMA_APP_CURRENT, [Type]{ty}, [CallArg]{sema_live_arg(sema_app_text(found.key, span), span), sema_live_arg(decode, span)}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_check_expression(lowered, expected, check)}

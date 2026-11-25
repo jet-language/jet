@@ -22,16 +22,16 @@ run: fn() -> Never Err! {
     here: files.normalize("{sys.executable()}/../..")
     root: files.normalize("{here}/../../..")
     // What sourcing roots.sh leaves set: the environment with the machine's
-    // env file over it, the state root, and the work directory under it.
+    // env file over it. Unset, the work directory is under the state root of
+    // the dev tool roots.
     roots: sys.env_text(
         """
-        JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
-        ENUM_CODEC_JET_WORK=${{ENUM_CODEC_JET_WORK:-$JET_STATE_ROOT/enum-codec-jet}}
+        ENUM_CODEC_JET_WORK=${{ENUM_CODEC_JET_WORK:-}}
         JET=${{JET:-}}
         """,
         sys.env_file("{sys.config_dir() ?? ""}/jet/env"),
     )
-    work: roots["ENUM_CODEC_JET_WORK"]
+    work: if roots["ENUM_CODEC_JET_WORK"] != "" -> roots["ENUM_CODEC_JET_WORK"] else -> files.join(dev_root(roots["JET"], root, "JET_STATE_ROOT"), "enum-codec-jet")
     if args.get(0) == Val("--build") {
         jet: roots["JET"]
         if jet == "" -> return Err("JET: JET must name the admitted native jet compiler")
@@ -53,4 +53,14 @@ run: fn() -> Never Err! {
         process.fail(2, "jet adapter is not built; run: JET=<jet binary> {sys.executable()} --build")
     }
     process.exec([bin].concat(args))
+}
+
+// The dev tool root `name` (Tools/Agent/roots.env) of the checkout `root`,
+// as `jet Tools/Agent/Roots.jet NAME` prints it: this package cannot hold
+// that program's copy, which declares its own `run`. `jet` runs it, the one
+// on PATH when "".
+dev_root: fn(jet: String, root: String, name: String) -> String Err! {
+    ran: process.cmd([String]{if jet != "" -> jet else -> "jet", files.join(root, "Tools/Agent/Roots.jet"), name}).run()
+    if ran.code != 0 -> return Err("{name}: Tools/Agent/Roots.jet exited {ran.code}: {ran.errors.trim()}")
+    ran.output.trim().remove_prefix("{name}=")
 }

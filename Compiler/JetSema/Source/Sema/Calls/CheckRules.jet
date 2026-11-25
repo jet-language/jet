@@ -40,6 +40,7 @@ use {
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
         diagnostic_with_label,
+        expr_source_span,
         expr_span,
         name_column_table,
         name_index,
@@ -57,6 +58,7 @@ SEMA_CALL_RULE_TEXTS_LOCAL: "__jet_call_texts"
 SEMA_CALL_RULE_TYPES_LOCAL: "__jet_call_types"
 SEMA_CALL_RULE_VALUES_LOCAL: "__jet_call_values"
 SEMA_CALL_RULE_FUNCTIONS_LOCAL: "__jet_call_functions"
+SEMA_CALL_RULE_WRITTEN_LOCAL: "__jet_call_written"
 
 // The compiler records a batch's check builds from its columns; only a
 // batch's own check writes their literals (SemaCheckContext.compiler_records).
@@ -381,7 +383,8 @@ sema_call_rule_stage: fn(context: ^SemaCheckContext, environment: SemaScopeEnvir
 // (sema_rule_value_dyn). A type name, which checks only where a `Type` is
 // expected, is heard as that `Type` value (sema_rule_probe). The
 // `function` an argument names is its FunctionInfo
-// (sema_rule_function_named).
+// (sema_rule_function_named), and the parts an interpolated String literal
+// spells are its `written` (sema_rule_written).
 sema_rule_call_value: fn(
     graph: SemaRegistrationGraph,
     callee: SymbolID?,
@@ -410,6 +413,7 @@ sema_rule_call_value: fn(
         types: [TComptimeValue]{},
         values: [TComptimeValue]{},
         functions: [TComptimeValue]{},
+        written: [TComptimeValue]{},
     }
     if source == .Val(text) {
         heard.texts.push("{text}")
@@ -418,9 +422,9 @@ sema_rule_call_value: fn(
     if {
         receiver_type == .Val(ty) -> {
             heard.words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] = 1
-            sema_rule_call_arg(heard, None, ty, receiver_known, None, receiver_span, graph, check.environment.*)
+            sema_rule_call_arg(heard, None, ty, receiver_known, None, None, receiver_span, graph, check.environment.*)
         }
-        else -> heard.words.extend([Int]{0, 0, 0, 0, 0, 0})
+        else -> heard.words.extend([Int]{0, 0, 0, 0, 0, 0, 0})
     }
     loop argument in args {
         probed: sema_rule_probe(argument.expr, check)
@@ -431,7 +435,7 @@ sema_rule_call_value: fn(
         }
         label := String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
-        sema_rule_call_arg(heard, label, ty, known, sema_rule_function_named(argument.expr, argument.span, check.environment.*, check.program.*, check.scopes), argument.span, graph, check.environment.*)
+        sema_rule_call_arg(heard, label, ty, known, sema_rule_function_named(argument.expr, argument.span, check.environment.*, check.program.*, check.scopes), sema_rule_written(argument.expr, file), argument.span, graph, check.environment.*)
     }
     heard.words.push(tables.len())
     loop table in tables {
@@ -498,14 +502,14 @@ sema_rule_function_named: fn(expression: Expr, span: Span, environment: SemaScop
 }
 
 // Appends the words of one CompilerArg of a heard call, whose value the
-// build knows as `known` and which names the function `function` (a
-// FunctionInfo), to `heard`; its type is the TypeId the one maker makes in
-// `graph`.
-sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, known: TComptimeValue?, function: ^^TComptimeValue?, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) Never! {
-    written := 0
+// build knows as `known`, which names the function `function` (a
+// FunctionInfo) and which spells the parts `parts` (sema_rule_written), to
+// `heard`; its type is the TypeId the one maker makes in `graph`.
+sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, known: TComptimeValue?, function: ^^TComptimeValue?, parts: ^^TComptimeValue?, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) Never! {
+    labeled := 0
     if label.move() == .Val(text) {
         heard.texts.push(text.move())
-        written = heard.texts.len()
+        labeled = heard.texts.len()
     }
     named := 0
     if function.move() == .Val(info) {
@@ -520,8 +524,57 @@ sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, kn
             value = heard.values.len()
         }
     }
+    spelled := 0
+    if parts.move() == .Val(list) {
+        heard.written.push(list.move())
+        spelled = heard.written.len()
+    }
     heard.types.push(sema_comptime_reflection_type_id(graph, environment.module_row, ty))
-    heard.words.extend([Int]{written, heard.types.len() - 1, value, named, span.start, span.end})
+    heard.words.extend([Int]{labeled, heard.types.len() - 1, value, named, span.start, span.end, spelled})
+}
+
+// The parts the argument `expression` spells when it is a String literal
+// with at least one hole (`CompilerArg.written`): each
+// run of its text as a CompilerWrittenPart.Text, and each hole as a
+// CompilerWrittenPart.Hole with its name when the hole is a bare name and
+// the span of its whole expression in `file` (`record.id`, not `id`). None
+// for any other argument: a plain literal, a constant, a parenthesized
+// literal and a run-time value spell none.
+sema_rule_written: fn(expression: Expr, file: String) -> TComptimeValue? {
+    if expression == .Str(parts, _, _) {
+        written := [TComptimeValue]{}
+        text := ""
+        loop part in parts {
+            if part == {
+                .Lit(piece) -> { text = "{text}{piece}" }
+                .Byte(value) -> { text = "{text}{sema_expr_byte_text(value)}" }
+                .Interp(inner, _) -> {
+                    if text != "" {
+                        written.push(sema_rule_written_text(text))
+                        text = ""
+                    }
+                    name: if inner == .Ident(hole, _, _) -> sema_comptime_reflection_some(TComptimeValue.String{value: "{hole}"}) else -> sema_comptime_reflection_none(Type.String)
+                    written.push(TComptimeValue.Enum{
+                        type_name: "CompilerWrittenPart",
+                        variant: "Hole",
+                        args: [TComptimeEnumArg]{
+                            TComptimeEnumArg{name: Val("name"), value: name},
+                            TComptimeEnumArg{name: Val("span"), value: sema_compiler_index_span(expr_source_span(inner), file)},
+                        },
+                    })
+                }
+            }
+        }
+        if written.len() == 0 -> return None
+        if text != "" -> written.push(sema_rule_written_text(text))
+        return Val(TComptimeValue.List{values: written})
+    }
+    None
+}
+
+// The CompilerWrittenPart.Text of a run of a literal's text.
+sema_rule_written_text: fn(text: String) -> TComptimeValue Never! {
+    TComptimeValue.Enum{type_name: "CompilerWrittenPart", variant: "Text", args: [TComptimeEnumArg]{TComptimeEnumArg{name: Val("text"), value: TComptimeValue.String{value: "{text}"}}}}
 }
 
 // What the build knows of a heard call's argument or receiver `value`
@@ -1004,7 +1057,7 @@ sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: ^[SemaComptime
         batches[row].sites.push(SemaCallRuleBatchSite{module_identity: pending[index].module_identity, key: pending[index].key, destination_key: pending[index].destination_key, place: sema_comptime_body_source_place(pending[index])})
     }
     loop batch in batches {
-        columns := SemaCallRuleColumns{rules: [TComptimeValue]{}, rows: [Int]{}, words: [Int]{}, names: name_column_table(batch.rows.len()), types: [TComptimeValue]{}, values: [TComptimeValue]{}, functions: [TComptimeValue]{}}
+        columns := SemaCallRuleColumns{rules: [TComptimeValue]{}, rows: [Int]{}, words: [Int]{}, names: name_column_table(batch.rows.len()), types: [TComptimeValue]{}, values: [TComptimeValue]{}, functions: [TComptimeValue]{}, written: [TComptimeValue]{}}
         loop row in batch.rows {
             sema_call_rule_columns_add(columns, pending[row].rule.move())
         }
@@ -1016,9 +1069,10 @@ sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: ^[SemaComptime
 // One batch's heard calls as columns, so a batch carries no CompilerCall
 // value per call: each call is one row of `words` starting at its offset
 // in `rows`, and names its rule, texts, argument types, known argument
-// values and named functions by index into `rules`, `names`' texts,
-// `types`, `values` and `functions`. The batch's check builds each
-// CompilerCall from its row (sema_call_rule_batch_expression).
+// values, named functions and written parts by index into `rules`,
+// `names`' texts, `types`, `values`, `functions` and `written`. The
+// batch's check builds each CompilerCall from its row
+// (sema_call_rule_batch_expression).
 SemaCallRuleColumns: struct {
     rules: [TComptimeValue],
     rows: [Int],
@@ -1027,6 +1081,7 @@ SemaCallRuleColumns: struct {
     types: [TComptimeValue],
     values: [TComptimeValue],
     functions: [TComptimeValue],
+    written: [TComptimeValue],
 }
 
 // A row's words: its rule, caller, callee, module, file, span start and
@@ -1038,21 +1093,22 @@ SemaCallRuleColumns: struct {
 // when it has none, else its text's index plus one), type, known value (0
 // when the build does not know it, else its index plus one), named
 // function (0 when it names none, else its FunctionInfo's index plus one),
-// and span start and end; its span's file is the call's.
+// span start and end, and written parts (0 when it spells none, else their
+// index plus one); its span's file is the call's.
 SEMA_CALL_RULE_COUNT_WORD: 10
 SEMA_CALL_RULE_HAS_RECEIVER_WORD: 11
 SEMA_CALL_RULE_SOURCE_WORD: 12
 SEMA_CALL_RULE_PAIRED_WORD: 13
 SEMA_CALL_RULE_RECEIVER_WORD: 14
-SEMA_CALL_RULE_ARGS_WORD: 20
-SEMA_CALL_RULE_ARG_WORDS: 6
+SEMA_CALL_RULE_ARGS_WORD: 21
+SEMA_CALL_RULE_ARG_WORDS: 7
 
 // The words that name a text: caller, callee, module, file and name.
 SEMA_CALL_RULE_TEXT_WORDS: [Int]{1, 2, 3, 4, 7}
 
 // Moves one staged site's marker value and call row into `columns`,
-// renumbering the row's own text, type, value and function indices into
-// the batch's.
+// renumbering the row's own text, type, value, function and written-part
+// indices into the batch's.
 sema_call_rule_columns_add: fn(columns: ^SemaCallRuleColumns, staged: ^^SemaComptimeRuleSite?) Never! {
     site: staged.move() ?? return
     rule := 0
@@ -1067,30 +1123,39 @@ sema_call_rule_columns_add: fn(columns: ^SemaCallRuleColumns, staged: ^^SemaComp
         types.push(sema_call_rule_columns_type(columns, ty.move()))
     }
     types.reverse()
-    values: columns.values.len()
+    offsets: SemaCallRuleArgOffsets{values: columns.values.len(), functions: columns.functions.len(), written: columns.written.len()}
     columns.values.extend(call.values.move())
-    functions: columns.functions.len()
     columns.functions.extend(call.functions.move())
+    columns.written.extend(call.written.move())
     words := call.words.move()
     words[0] = rule
     loop at in SEMA_CALL_RULE_TEXT_WORDS -> words[at] = texts[words[at]]
     if words[SEMA_CALL_RULE_SOURCE_WORD] > 0 -> words[SEMA_CALL_RULE_SOURCE_WORD] = texts[words[SEMA_CALL_RULE_SOURCE_WORD] - 1] + 1
-    if words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] == 1 -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_RECEIVER_WORD, texts, types, values, functions)
-    loop arg in 0..<words[SEMA_CALL_RULE_COUNT_WORD] -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * arg, texts, types, values, functions)
+    if words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] == 1 -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_RECEIVER_WORD, texts, types, offsets)
+    loop arg in 0..<words[SEMA_CALL_RULE_COUNT_WORD] -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * arg, texts, types, offsets)
     keys: SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * words[SEMA_CALL_RULE_COUNT_WORD]
     loop key in keys + 1..<keys + 1 + words[keys] -> words[key] = texts[words[key]]
     columns.rows.push(columns.words.len())
     columns.words.extend(words.move())
 }
 
+// Where one call's known values, named functions and written parts start
+// among the batch's.
+SemaCallRuleArgOffsets: struct {
+    values: Int,
+    functions: Int,
+    written: Int,
+}
+
 // Renumbers the argument words at `at` of a call row by its texts' and
-// types' batch indices, its values starting at `values` and its functions
-// at `functions` in the batch's.
-sema_call_rule_columns_arg: fn(words: ^[Int], at: Int, texts: [Int], types: [Int], values: Int, functions: Int) Never! {
+// types' batch indices and its values, functions and written parts by the
+// batch's `offsets`.
+sema_call_rule_columns_arg: fn(words: ^[Int], at: Int, texts: [Int], types: [Int], offsets: SemaCallRuleArgOffsets) Never! {
     if words[at] > 0 -> words[at] = texts[words[at] - 1] + 1
     words[at + 1] = types[words[at + 1]]
-    if words[at + 2] > 0 -> words[at + 2] = words[at + 2] + values
-    if words[at + 3] > 0 -> words[at + 3] = words[at + 3] + functions
+    if words[at + 2] > 0 -> words[at + 2] = words[at + 2] + offsets.values
+    if words[at + 3] > 0 -> words[at + 3] = words[at + 3] + offsets.functions
+    if words[at + 6] > 0 -> words[at + 6] = words[at + 6] + offsets.written
 }
 
 // The index of a TypeId among the batch's types: a batch's arguments have
@@ -1132,6 +1197,7 @@ sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRul
             SemaComptimePreparedLocal{name: SEMA_CALL_RULE_TYPES_LOCAL, ty: Type.List{element: Type.Named{name: "TypeId"}}, value: TComptimeValue.List{values: columns.types.move()}, span: batch.span},
             SemaComptimePreparedLocal{name: SEMA_CALL_RULE_VALUES_LOCAL, ty: Type.List{element: Type.Named{name: "Dyn"}}, value: TComptimeValue.List{values: columns.values.move()}, span: batch.span},
             SemaComptimePreparedLocal{name: SEMA_CALL_RULE_FUNCTIONS_LOCAL, ty: Type.List{element: Type.Named{name: "FunctionInfo"}}, value: TComptimeValue.List{values: columns.functions.move()}, span: batch.span},
+            SemaComptimePreparedLocal{name: SEMA_CALL_RULE_WRITTEN_LOCAL, ty: Type.List{element: Type.List{element: Type.Named{name: "CompilerWrittenPart"}}}, value: TComptimeValue.List{values: columns.written.move()}, span: batch.span},
         },
     }
 }
@@ -1164,7 +1230,7 @@ sema_call_rule_batch_text: fn(paired: Bool{false}) -> String Never! {
     t: "__jet_t"
     call: sema_call_rule_call_text("row")
     checks: if paired -> "        __jet_first := [Int]{{}}\n        __jet_seen := [String: Int]{{}}\n        loop row in __jet_rows {{\n            first := -1\n            if __jet_r[{w}[row]].row({call}) == .Val(key) {{\n                at: row + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * {w}[row + {SEMA_CALL_RULE_COUNT_WORD}]\n                loop k in 1..<{w}[at] + 1 {{\n                    if __jet_seen.get(\"{{{t}[{w}[at + k]]}}|{{key}}\") == .Val(earlier) && (first < 0 || earlier < first) -> first = earlier\n                }}\n                own: \"{{{t}[{w}[at + {w}[at]]]}}|{{key}}\"\n                if __jet_seen.get(own) == None -> __jet_seen[own] = row\n            }}\n            __jet_first.push(first)\n        }}\n        loop (at, row) in __jet_rows -> __jet_r[{w}[row]].check({call}, if __jet_first[at] < 0 -> None else -> Val({sema_call_rule_call_text("__jet_first[at]")}))\n" else -> "        loop row in __jet_rows -> __jet_r[{w}[row]].check({call})\n"
-    "RULE_BATCH: if {{\n    true -> {{\n        __jet_r: {SEMA_CALL_RULE_RULES_LOCAL}\n        __jet_rows: {SEMA_CALL_RULE_ROWS_LOCAL}\n        {w}: {SEMA_CALL_RULE_WORDS_LOCAL}\n        {t}: {SEMA_CALL_RULE_TEXTS_LOCAL}\n        __jet_y: {SEMA_CALL_RULE_TYPES_LOCAL}\n        __jet_v: {SEMA_CALL_RULE_VALUES_LOCAL}\n        __jet_f: {SEMA_CALL_RULE_FUNCTIONS_LOCAL}\n{checks}    }}\n    else -> [CompilerRejection?]{{}}\n}}\n"
+    "RULE_BATCH: if {{\n    true -> {{\n        __jet_r: {SEMA_CALL_RULE_RULES_LOCAL}\n        __jet_rows: {SEMA_CALL_RULE_ROWS_LOCAL}\n        {w}: {SEMA_CALL_RULE_WORDS_LOCAL}\n        {t}: {SEMA_CALL_RULE_TEXTS_LOCAL}\n        __jet_y: {SEMA_CALL_RULE_TYPES_LOCAL}\n        __jet_v: {SEMA_CALL_RULE_VALUES_LOCAL}\n        __jet_f: {SEMA_CALL_RULE_FUNCTIONS_LOCAL}\n        __jet_p: {SEMA_CALL_RULE_WRITTEN_LOCAL}\n{checks}    }}\n    else -> [CompilerRejection?]{{}}\n}}\n"
 }
 
 // The collecting loop of a `paired` or unpaired rule batch, parsed from its
@@ -1202,7 +1268,7 @@ sema_call_rule_span_text: fn(row: String, at: String) -> String Never! {
 // The CompilerArg of the call whose row starts at the word `row`, whose
 // words start at `at`.
 sema_call_rule_arg_text: fn(row: String, at: String) -> String Never! {
-    "CompilerArg{{label: if __jet_w[{at}] == 0 -> None else -> Val(__jet_t[__jet_w[{at}] - 1]), type: __jet_y[__jet_w[{at} + 1]], value: if __jet_w[{at} + 2] == 0 -> None else -> Val(__jet_v[__jet_w[{at} + 2] - 1]), function: if __jet_w[{at} + 3] == 0 -> None else -> Val(__jet_f[__jet_w[{at} + 3] - 1]), span: {sema_call_rule_span_text(row, "{at} + 4")}}}"
+    "CompilerArg{{label: if __jet_w[{at}] == 0 -> None else -> Val(__jet_t[__jet_w[{at}] - 1]), type: __jet_y[__jet_w[{at} + 1]], value: if __jet_w[{at} + 2] == 0 -> None else -> Val(__jet_v[__jet_w[{at} + 2] - 1]), function: if __jet_w[{at} + 3] == 0 -> None else -> Val(__jet_f[__jet_w[{at} + 3] - 1]), span: {sema_call_rule_span_text(row, "{at} + 4")}, written: if __jet_w[{at} + 6] == 0 -> None else -> Val(__jet_p[__jet_w[{at} + 6] - 1])}}"
 }
 
 // Lands each batched call's answer under its own site's key, in place of the

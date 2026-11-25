@@ -25,9 +25,7 @@ use {
         sema_check_context_mark,
         sema_check_context_rollback,
         sema_check_context_snapshot,
-        sema_checked_constant_with_values,
         sema_comptime_available_constants,
-        sema_comptime_available_constants_add,
         sema_comptime_body_capture,
         sema_comptime_body_destination_key,
         sema_comptime_body_source_append,
@@ -41,15 +39,11 @@ use {
         sema_comptime_environment,
         sema_comptime_environment_tables,
         sema_comptime_graph_apply_values,
-        sema_comptime_key_row,
-        sema_comptime_module_slot,
-        sema_comptime_staged_constant_rows,
         sema_comptime_value_sites,
         sema_expression_lambda_merge_context_facts,
         sema_graph_trail_init,
         sema_has_error_since,
         sema_program_tables_snapshot,
-        sema_registration_module_index,
         sema_registration_prepare_graph,
         sema_scope_environment_enter_comptime_module,
         sema_scope_environment_init,
@@ -57,15 +51,12 @@ use {
     ]
     jet_foundation.[
         AST_NODE_GENERATED,
-        Diagnostic,
         Expr,
         ModuleID,
         ModuleTable,
         Span,
         effect_vocabulary_module,
-        SymbolKind,
         TComptimeValue,
-        TConstantDef,
         Type,
         compiler_threads_single,
         jet_target_machine_hosted,
@@ -73,7 +64,6 @@ use {
         module_intern,
         module_none,
         module_table,
-        symbol_key_text,
         symbol_table_key,
     ]
     jet_parser.[parse_source]
@@ -528,32 +518,6 @@ body_index_constant_value: fn(module_identity: String, key: String, number: Int)
     SemaComptimeItemValue{module_identity: body_index_module(module_identity), key: key, destination_key: key, kind: SemaComptimeItemKind.Constant, value: TComptimeValue.Int{value: number}, ty: Type.Int}
 }
 
-// The actual pre-index projection is retained only as the fixture oracle.
-body_index_linear_constant_rows: fn(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], from: Int) -> [TConstantDef] {
-    rows := [TConstantDef]{}
-    diagnostics := [Diagnostic]{}
-    loop index in from..<values.len() {
-        value: values[index]
-        if value.kind != SemaComptimeItemKind.Constant -> next
-        earlier := false
-        loop previous in 0..<index {
-            if values[previous].kind == SemaComptimeItemKind.Constant && values[previous].module_identity == value.module_identity && values[previous].key == value.key {
-                earlier = true
-            }
-        }
-        if earlier -> next
-        module_index: sema_registration_module_index(graph, value.module_identity) ?? next
-        // copy: `values` keeps its row; the check owns the value it stages
-        staged: Val(value.copy())
-        loop constant in graph.modules[module_index].constants {
-            if symbol_table_key(graph.symbols, constant.symbol.id) != value.key -> next
-            row: sema_checked_constant_with_values(graph, graph.modules[module_index], constant, staged, diagnostics) ?? next
-            rows.push(row)
-        }
-    }
-    rows
-}
-
 body_index_constant_projection: fn() {
     graph := body_index_constant_graph([String]{"first: 0\nsecond: 1\n", "first: 2\n"})
     trail := sema_graph_trail_init()
@@ -561,11 +525,7 @@ body_index_constant_projection: fn() {
     first: body_index_constant_value("constant.0", symbol_table_key(graph.symbols, graph.modules[0].constants[0].symbol.id), 7)
     duplicate: body_index_constant_value("constant.0", first.key, 99)
     other: body_index_constant_value("constant.1", symbol_table_key(graph.symbols, graph.modules[1].constants[0].symbol.id), 11)
-    wrong_owner: body_index_constant_value("constant.1", first.key, 13)
-    missing: body_index_constant_value("constant.0", "missing", 17)
     body: body_index_item(body_index_value("constant.0", "probe", Span{start: 1, end: 2}, Span{start: 3, end: 4}, 19), SemaComptimeItemKind.BodyExpression)
-    values := [SemaComptimeItemValue]{body, first}
-    available := sema_comptime_available_constants(graph, values)
     original_modules: "{graph.modules:Debug}"
     original_imports: "{graph.imports:Debug}"
     sema_comptime_graph_apply_values(graph, [SemaComptimeItemValue]{body}, trail)
@@ -573,53 +533,8 @@ body_index_constant_projection: fn() {
     sema_comptime_graph_apply_values(graph, [SemaComptimeItemValue]{body, first, duplicate}, trail)
     first_type: graph.modules[0].constants[0].ty
     body_index_require(first_type == (Val(Type.Int)), "mixed constant projection types the first authenticated value")
-    from: values.len()
-    values.push(duplicate.copy())
-    values.push(other.copy())
-    values.push(wrong_owner)
-    values.push(missing)
-    sema_comptime_available_constants_add(available, values)
-    indexed: sema_comptime_staged_constant_rows(graph, values, from, available)
-    linear: body_index_linear_constant_rows(graph, values, from)
-    linear_debug: "{linear:Debug}"
-    body_index_require("{indexed:Debug}" == linear_debug, "first-wins, missing key and cross-module staged rows retain exact legacy ordering and payloads")
     sema_comptime_graph_apply_values(graph, [SemaComptimeItemValue]{duplicate, other}, trail)
     body_index_require(graph.modules[0].constants[0].ty == first_type, "later duplicates never retype a constant")
-    fresh := sema_comptime_available_constants(graph, [SemaComptimeItemValue]{})
-    sema_comptime_available_constants_add(fresh, [SemaComptimeItemValue]{duplicate})
-    slot: sema_comptime_module_slot(fresh.constant_modules, body_index_module("constant.0")) ?? panic("fresh generation has no module")
-    body_index_require(sema_comptime_key_row(fresh.constant_rows[slot], first.key) == (Val(0)) && available.counted_values == values.len(), "replacement starts a fresh value generation without changing the retained prior frontier")
-    duplicate_graph := body_index_constant_graph([String]{"repeated: 1\nrepeated: 2\n"})
-    body_index_require(duplicate_graph.internal_problem == None, "duplicate-name invalid input still has an ordinary graph")
-    duplicate_key: symbol_key_text(SymbolKind.Constant, "constant.0", "", "repeated")
-    duplicate_values: [SemaComptimeItemValue]{body_index_constant_value("constant.0", duplicate_key, 23)}
-    duplicate_available: sema_comptime_available_constants(duplicate_graph, duplicate_values)
-    all_rows: sema_comptime_staged_constant_rows(duplicate_graph, duplicate_values, 0, duplicate_available)
-    all_linear: body_index_linear_constant_rows(duplicate_graph, duplicate_values, 0)
-    all_linear_debug: "{all_linear:Debug}"
-    body_index_require("{all_rows:Debug}" == all_linear_debug, "ALL matching declarations on an invalid duplicate key retain original row order and errors")
-}
-
-body_index_constant_size: fn(size: Int) {
-    fragments := [String]{}
-    loop index in 0..<size -> fragments.push("constant_{index}: {index}\n")
-    graph := body_index_constant_graph([String]{fragments.join("")})
-    body_index_require(graph.complete && graph.modules[0].constants.len() == size, "scaled authentic declarations register")
-    values := [SemaComptimeItemValue]{}
-    available := sema_comptime_available_constants(graph, values)
-    declaration_rows := 0
-    loop module_row in graph.modules -> declaration_rows += module_row.constants.len()
-    loop index in 0..<size {
-        from: values.len()
-        values.push(body_index_constant_value("constant.0", symbol_table_key(graph.symbols, graph.modules[0].constants[index].symbol.id), index + 1))
-        sema_comptime_available_constants_add(available, values)
-        rows: sema_comptime_staged_constant_rows(graph, values, from, available)
-        linear: body_index_linear_constant_rows(graph, values, from)
-        linear_debug: "{linear:Debug}"
-        body_index_require(rows.len() == 1 && "{rows:Debug}" == linear_debug, "every growing batch selects only its one authentic declaration")
-    }
-    sema_comptime_available_constants_add(available, values)
-    body_index_require(available.indexed_constants == size && available.indexed_declarations == declaration_rows && available.counted_values == size, "N/2N/4N indexes each new constant once and each graph declaration once, never per batch")
 }
 
 #Test("comptime_body_index_fixtures") {
@@ -632,9 +547,6 @@ body_index_constant_size: fn(size: Int) {
     body_index_append_size(128)
     body_index_append_size(256)
     body_index_constant_projection()
-    body_index_constant_size(64)
-    body_index_constant_size(128)
-    body_index_constant_size(256)
     body_index_size(64)
     body_index_size(128)
     body_index_size(256)

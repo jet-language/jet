@@ -1,6 +1,6 @@
 // Typed bridge from a real jet_debug stop to the paused devtools kernel.
 use {
-    jet_debug.[DebugAggregateKind, DebugEvaluation, DebugSnapshot, DebugValue, evaluate_snapshot]
+    jet_debug.[DebugEvaluation, DebugSnapshot, DebugValue, evaluate_snapshot]
     jet_foundation.[sha256_hex]
 }
 
@@ -169,10 +169,10 @@ PausedDebugSessionAdapter: struct {
     }
 
     projection_value: fn(self, evaluation: DebugEvaluation, id: String, location: SourceLocation) -> ValueProjection PausedEvaluateError! {
-        projection := value_projection_published(id, paused_debug_bounded_name(evaluation.name), paused_debug_type_name(evaluation.type_name), location, paused_debug_typed_value(evaluation.value))
+        projection := value_projection_published(id, paused_debug_bounded_name(evaluation.name), paused_debug_type_name(evaluation.type_name), location, evaluation.value)
         if projection.value == .Val(.Text(text)) {
             bounded: paused_debug_bounded_text(text)
-            projection.value = Val(TypedValue.Text{text: bounded.text})
+            projection.value = Val(DebugValue.Text{text: bounded.text})
             projection.truncated = bounded.truncated
         }
         Ok(projection)
@@ -251,27 +251,4 @@ paused_debug_bounded_text: fn(value: String) -> PausedDebugBoundedText Never! {
         pieces.push(shown)
     }
     PausedDebugBoundedText{text: pieces.join(""), truncated: false}
-}
-
-paused_debug_typed_value: fn(value: DebugValue) -> TypedValue Never! {
-    if value == {
-        .Unit -> TypedValue.Unit
-        .Bool(flag) -> TypedValue.Bool{value: flag}
-        .Int(number) -> TypedValue.Int{value: number}
-        .FloatBits(bits) -> TypedValue.FloatBits{bits: bits}
-        .Text(text) -> TypedValue.Text{text: text}
-        .Bytes(length, sha256) -> TypedValue.Bytes{length: length, sha256: sha256}
-        .Aggregate(kind, length) -> TypedValue.Aggregate{kind: paused_debug_aggregate_kind(kind), length: length}
-    }
-}
-
-paused_debug_aggregate_kind: fn(kind: DebugAggregateKind) -> AggregateKind Never! {
-    if kind == {
-        .Record -> AggregateKind.Record
-        .List -> AggregateKind.List
-        .Map -> AggregateKind.Map
-        .Set -> AggregateKind.Set
-        .Tuple -> AggregateKind.Tuple
-        .Variant -> AggregateKind.Variant
-    }
 }

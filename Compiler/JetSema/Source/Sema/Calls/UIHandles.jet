@@ -204,8 +204,9 @@ sema_ui_handle_optional_arg: fn(arg: CallArg, ty: Type, check: ^SemaBodyCheck) -
 
 // `ui.button(display)` is the Core source function `button`; the callback
 // form `ui.button(display, () -> { … })` registers its click handler as a
-// retained closure (a click slot Int) and builds the node with the Core source
-// `__button_click`. Neither has a Core registry row.
+// retained closure (a click slot Int) and builds the node with the core.ui
+// source function that fills the ButtonClick role. Neither has a Core
+// registry row.
 sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if args.len() == 1 && args[0].label == None {
         label: sema_ui_handle_typed_arg(args[0], Type.String, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
@@ -236,7 +237,8 @@ sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, check: ^
     callback: sema_ui_handle_stored_callback("button on_click", bound[3], [Type]{}, span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := Type.Named{name: "UINode"}
     click := sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIClickSlot{executable: callback}}, span)
-    value: sema_call_core_source("core.ui", "__button_click", [TExpr]{label, shortcut, accessible_label, click}, result_type, false, span, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if sema_call_core_module_identity(check.environment.*, check.program.*, "core.ui") == None -> return SemaDirectSpecialCheck{handled: true, value: None}
+    value: sema_call_core_role_source("ButtonClick", [TExpr]{label, shortcut, accessible_label, click}, result_type, span, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     checked: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_call_fact(check.environment.*, check.program.*, check.scopes, check.context, "core.ui.button", span, result_type, "Browser", check.diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}

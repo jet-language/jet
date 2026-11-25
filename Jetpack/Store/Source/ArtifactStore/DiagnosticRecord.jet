@@ -43,6 +43,8 @@ use {
         RecordValue,
         Span,
         TextEdit,
+        diagnostic_fix_safety_word,
+        diagnostic_no_fix_kind_word,
         sha256_hex,
         record_value_as_list,
         record_value_as_optional_str,
@@ -182,30 +184,12 @@ store_diagnostic_parse_applicability: fn(value: String) -> DiagnosticFixApplicab
     }
 }
 
-store_diagnostic_safety_name: fn(safety: DiagnosticFixSafety) -> String Never! {
-    if safety == {
-        .Formatting -> "formatting"
-        .BehaviorPreserving -> "behavior-preserving"
-        .APIChanging -> "api-changing"
-        .TargetChanging -> "target-changing"
-        .NeedsReview -> "needs-review"
-    }
-}
-
 store_diagnostic_parse_safety: fn(value: String) -> DiagnosticFixSafety StoreDiagnosticRecordError! {
     loop safety in
         ([DiagnosticFixSafety]{.Formatting, .BehaviorPreserving, .APIChanging, .TargetChanging, .NeedsReview}) {
-        if store_diagnostic_safety_name(safety) == value -> return Ok(safety)
+        if diagnostic_fix_safety_word(safety) == value -> return Ok(safety)
     }
     Err(store_diagnostic_error("unknown fix safety `{value}`"))
-}
-
-store_diagnostic_no_fix_kind_name: fn(kind: DiagnosticNoFixReasonKind) -> String Never! {
-    if kind == {
-        .Behavior -> "behavior"
-        .Design -> "design"
-        .Ambiguous -> "ambiguous"
-    }
 }
 
 store_diagnostic_parse_no_fix: fn(kind: String, next: String) -> DiagnosticNoFixReason StoreDiagnosticRecordError! {
@@ -386,13 +370,13 @@ store_diagnostic_encode: fn(diagnostic: Diagnostic, origins: ^[DiagnosticOrigin]
     }
     no_fix: if diagnostic.no_fix_reason == .Val(reason) -> RecordValue.Map{
         fields: [RecordField]{
-            {name: "kind", value: RecordValue.Str{value: store_diagnostic_no_fix_kind_name(reason.kind)}},
+            {name: "kind", value: RecordValue.Str{value: diagnostic_no_fix_kind_word(reason.kind)}},
             {name: "next", value: RecordValue.Str{value: reason.next}},
         },
     } else -> RecordValue.Null
     edit: if diagnostic.edit == .Val(value) -> store_diagnostic_edit(value) else -> RecordValue.Null
     applicability: if diagnostic.applicability == .Val(value) -> RecordValue.Str{value: store_diagnostic_applicability_name(value)} else -> RecordValue.Null
-    safety: if diagnostic.safety == .Val(value) -> RecordValue.Str{value: store_diagnostic_safety_name(value)} else -> RecordValue.Null
+    safety: if diagnostic.safety == .Val(value) -> RecordValue.Str{value: diagnostic_fix_safety_word(value)} else -> RecordValue.Null
     structured: if diagnostic.structured == .Val(value) -> store_diagnostic_structured(value) else -> RecordValue.Null
     origin: store_diagnostic_origin_index(diagnostic.origin, origins)
     Ok(

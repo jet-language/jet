@@ -4279,26 +4279,6 @@ ir_route_inline: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, name: String, inp
         b.fresh[handler] = false
         return Val(-1)
     }
-    // `core.rt.__callback(rate, frames, callback)`: the runtime stream takes
-    // the callback's closure box over with its lazy.callback invoke (one
-    // borrowed List24<Float> slot) and lazy.release helpers (Realtime.jet
-    // jet_rt_callback).
-    if name == "jet_rt_callback" {
-        if inputs.len() != 3 || inputs[0] < 0 || inputs[1] < 0 || inputs[2] < 0 {
-            return Val(ir_fail_slot(b, span, "rt.callback with {inputs.len()} arguments"))
-        }
-        stream_row: ir_value_type(m, p, result) ?? return Val(ir_type_fail(b, span, result))
-        closure_ty: ir_row_ty(m, p, b.f.slot_type[inputs[2]])
-        invoke_id: ir_lazy_helper(m, p, b, "callback", closure_ty, span)
-        if invoke_id < 0 -> return Val(-1)
-        invoke: ir_lazy_address(m, b, invoke_id)
-        handed: ir_closure_handover(m, p, b, inputs[2], span)
-        if handed.held < 0 -> return Val(-1)
-        stream: ir_runtime(m, b, "jet_rt_callback", [Int]{inputs[0], inputs[1], handed.held, invoke, handed.release}, stream_row)
-        ir_release(m, b, inputs[0])
-        ir_release(m, b, inputs[1])
-        return Val(stream)
-    }
     // A pure, never-failing Core leaf (ir_leaf_route): the operation itself,
     // with no call and so no stop poll after it.
     if ir_leaf_route(name) == .Val(leaf) {
@@ -5406,7 +5386,6 @@ IR_ROUTES_INLINE: #run { [String]{
     "jet_std.JetPool.new",
     "jet_std_os_atexit",
     "jet_std_os_interrupt",
-    "jet_rt_callback",
     "jet_devtools_publish_payload",
     "jet_unicode_split_once",
     "jet_unicode_cut_last",
@@ -6767,7 +6746,6 @@ ir_core_call_routed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
         }
     }
     ir_route_ambient_refusals(m, p, b, symbol, span)
-    if symbol == "jet_testing_world" -> return ir_testing_world(m, p, b, args, span)
     if symbol == "jet_reflect_of" -> return ir_reflect_of(m, p, b, ty, args, span)
     if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, span)
     if ir_lazy_core_call(m, p, b, symbol, ty, args, span) == .Val(result) -> return result
@@ -7016,14 +6994,15 @@ ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
 // function result, has no carrier.
 #Test("a binding's function parameter routes as a Callback") {
     body: Type.Fn{params: [Type]{Type.List{element: Type.Float}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    params: [Type]{Type.Int, body.copy()}
+    params: [Type]{Type.Int, body}
     started: ir_route_of_signature("jet_raw_probe", params, [Bool]{false, false}, Val(Type.Named{name: "RealtimeStream"})) ?? panic("no callback route")
     assert(started.params[1] == IRRouteCarrier.Callback)
     assert(ir_lint_param_words(started.params[1]) == 3)
     if ir_route_of_signature("jet_raw_probe", params, [Bool]{false, true}, None) == .Val(_) {
         panic("a written callback crossed")
     }
-    if ir_route_of_signature("jet_raw_probe", [Type]{}, [Bool]{}, Val(body)) == .Val(_) {
+    returned: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    if ir_route_of_signature("jet_raw_probe", [Type]{}, [Bool]{}, Val(returned)) == .Val(_) {
         panic("a callback result crossed")
     }
 }
@@ -7155,27 +7134,6 @@ ir_plugin_load: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [I
     loaded: ir_route(m, p, b, "jet_plugin_load", inputs, [Bool]{true, true, true, true, true, true, true}, ty, span)
     if b.views.get(limits) == None && !ir_lent(b, limits) -> ir_release(m, b, limits)
     loaded
-}
-
-// `testing.world(world -> …)`: jet_testing_world installs a deterministic
-// world, runs the closure through lazy.callback with the world handle in a
-// borrowed slot, then waits for the world's tasks and closes it.
-ir_testing_world: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(b, span, "testing.world with {args.len()} arguments")
-    closure_ty: ir_ty(m, p, b, args[0])
-    arity: if ir_untag(closure_ty) == .Fn(params, _, _, _, _, _) -> params.len() else -> -1
-    if arity != 1 {
-        return ir_fail_slot(b, span, "testing.world callback {ir_type_name(closure_ty)}")
-    }
-    closure: ir_expr(m, p, b, args[0])
-    if ir_failed(b) || closure < 0 -> return -1
-    id: ir_lazy_helper(m, p, b, "callback", closure_ty, span)
-    if id < 0 -> return -1
-    invoke: ir_lazy_address(m, b, id)
-    out: ir_out_slot(m, b, 1)
-    _: ir_runtime(m, b, "jet_testing_world", [Int]{closure, invoke, out}, -1)
-    ir_release(m, b, closure)
-    return -1
 }
 
 // What ambient random state a route reads (ir_comptime_ambient_refusal).

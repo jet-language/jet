@@ -6,8 +6,8 @@ use {
     jetpack_foundation.[JET_KEYWORD_LIST, LUA_MODULE_ROOT]
     files: core.files
     jet_pkg_model.[
-        BinderHostOS,
         ForeignBindError,
+        VariantOS,
         pkg_binder_append_artifact_boundary,
         pkg_binder_c_escape,
         pkg_binder_cc_ar_identity,
@@ -107,7 +107,7 @@ pkg_lua_find_header_dir: fn(root: String) -[FS]> String? Never! {
 }
 
 pkg_lua_find_library_dir: fn(root: String) -[FS, Env]> String? Never! {
-    library: BinderHostOS.current().shared_library("lua", "lua54.dll")
+    library: VariantOS.current().shared_library("lua", "lua54.dll")
     candidates: [String]{files.join(root, "lib"), files.join(root, "lib64")}
     loop candidate in candidates {
         if files.is_file(files.join(candidate, library)) -> return Val(candidate)

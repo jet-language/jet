@@ -280,8 +280,7 @@ ir_eval_stubs: fn(m: IRModule, name_callees: [Int], calls: IREvalCalls, roots: [
 
 // The last part of source path `path`.
 ir_eval_file_name: fn(path: String) -> String Never! {
-    at: path.rfind("/")
-    if at < 0 -> path else -> path.slice(at + 1, path.len())
+    path.rpartition("/").tail
 }
 
 // Per function of `m`, the syscall sites it reaches past the stubs `stubs`

@@ -1,7 +1,9 @@
 // Backend-neutral capture facts and disposable-byte retention plans. No
 // filesystem, CLI parser, consent identity or runtime sink. #4403: Display's
-// currently checked &&self contract mislowers to owned self; retain the real
+// currently checked ^^self contract mislowers to owned self; retain the real
 // implementations until the canonical read-receiver fix lands.
+use jet_pkg_model.[DevCaptureSetting]
+
 DEFAULT_CAPTURE_BUDGET_BYTES: U64{268435456}
 
 SENSITIVE_CAPTURE_CONSENT_PHRASE: "capture sensitive"
@@ -136,46 +138,28 @@ CaptureKind: enum {
     }
 }
 
-// PackageCaptureSetting/Policy. Release eligibility belongs to C3.
-PackageCaptureSetting: enum {
-    Default,
-    On,
-    Off,
-
-    default: fn() -> PackageCaptureSetting Never! { PackageCaptureSetting.Default }
-
-    allows_development_capture: fn(self) -> Bool Never! { self != PackageCaptureSetting.Off }
-
-    as_str: fn(self) -> String Never! {
-        if self == {
-            .Default -> "default"
-            .On -> "on"
-            .Off -> "off"
-        }
-    }
-}
-
+// The package's capture policy. Release eligibility belongs to C3.
 PackageCapturePolicy: struct {
-    capture: PackageCaptureSetting,
+    capture: DevCaptureSetting,
     budget: CaptureBudget,
 
     default: fn() -> PackageCapturePolicy Never! {
-        PackageCapturePolicy.new(PackageCaptureSetting.Default, CaptureBudget.default())
+        PackageCapturePolicy.new(DevCaptureSetting.Default, CaptureBudget.default())
     }
 
-    new: fn(capture: PackageCaptureSetting, budget: CaptureBudget) -> PackageCapturePolicy Never! {
+    new: fn(capture: DevCaptureSetting, budget: CaptureBudget) -> PackageCapturePolicy Never! {
         PackageCapturePolicy{capture, budget}
     }
 
     off: fn() -> PackageCapturePolicy Never! {
-        PackageCapturePolicy.new(PackageCaptureSetting.Off, CaptureBudget.default())
+        PackageCapturePolicy.new(DevCaptureSetting.Off, CaptureBudget.default())
     }
 
     allows_development_capture: fn(self) -> Bool Never! {
-        self.capture.allows_development_capture()
+        self.capture != DevCaptureSetting.Off
     }
 
-    with_capture: fn(self, capture: PackageCaptureSetting) -> PackageCapturePolicy Never! {
+    with_capture: fn(self, capture: DevCaptureSetting) -> PackageCapturePolicy Never! {
         PackageCapturePolicy.new(capture, self.budget)
     }
 

@@ -52,8 +52,8 @@ without_notes: fn(text: String) -> String {
     parts: text.split("note: ").to_list()
     out := parts[0].copy()
     loop part in parts[1..<parts.len()] {
-        end: part.find("\\n")
-        out = if end < 0 -> "{out}note: {part}" else -> "{out}{part.slice(end + 2, part.len())}"
+        cut: part.partition("\\n")
+        out = if cut.sep == "" -> "{out}note: {part}" else -> "{out}{cut.tail}"
     }
     out
 }

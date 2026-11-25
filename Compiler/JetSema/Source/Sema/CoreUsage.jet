@@ -32,8 +32,7 @@ use jet_foundation.[
     Type,
     TypedLitBody,
     core_call,
-    core_input_method_member,
-    core_input_method_modules,
+    core_input_method_module,
     core_module_has_member,
     core_module_has_type,
     core_path_parts,
@@ -1220,14 +1219,11 @@ sema_core_collect_expr: fn(expr: Expr, tables: ASTTables, imports: [SemaCoreImpo
                 if recv_name == "Duration" {
                     sema_core_note_usage(used, spans, "core.time.__duration__", Val(method_span))
                 }
-                // `input.csv<Row>()` and its kin read through `__input_<method>`
-                // (sema_call_try_ambient_input_method).
+                // `input.csv<Row>()` and its kin call the Core function
+                // filling their role (sema_call_try_ambient_input_method).
                 if recv_name == "input" {
-                    member: core_input_method_member(method)
-                    loop owner in core_input_method_modules(method) {
-                        if sema_core_generated_module_member(owner, member) {
-                            sema_core_note_usage(used, spans, "{owner}.{member}", Val(method_span))
-                        }
+                    if core_input_method_module(method) == .Val(owner) {
+                        sema_core_note_usage(used, spans, "{owner}.input.{method}", Val(method_span))
                     }
                 }
                 if imports.len() > 0 {
@@ -1490,10 +1486,10 @@ sema_core_collect_expr: fn(expr: Expr, tables: ASTTables, imports: [SemaCoreImpo
         .Paren(value, _, _) -> {
             sema_core_collect_expr(value, tables, imports, registered, used, spans, callbacks)
         }
-        // The ambient `input` reads through core.term `__input_lines`.
+        // The ambient `input` reads through core.term's InputLines function.
         .Ident(name, span, _) -> {
             if name == "input" {
-                sema_core_note_usage(used, spans, "core.term.__input_lines", Val(span))
+                sema_core_note_usage(used, spans, "core.term.input", Val(span))
             }
         }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .CallValue(_, _, _, _) | .TypeValue(_, _, _) -> {}

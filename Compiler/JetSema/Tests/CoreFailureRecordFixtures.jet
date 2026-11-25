@@ -1,6 +1,8 @@
 // The production constructor and field-access tables must agree. The full
 // fixture assembler uses the real parser, registration graph and checker with
-// Core and user module origins; the user-module UI fixture must retain E0119.
+// Core and user module origins. A user module gets the ordinary visibility
+// errors (E0605) for what only Core writes, as it does for its own `priv`
+// fields, and its own type of a Core-only name is its own.
 use {
     jet_foundation.[
         Diagnostic,
@@ -92,11 +94,17 @@ core_failure_record_check: fn(source: String, module_identity: String, expected_
     range_source: "failure: fn() -> RangeError Never! {{ RangeError{{reason: \"out of range\"}} }}\nrun: fn() {{}}"
     core_failure_record_check(text_source, "<corelib>/fixture", "")
     core_failure_record_check(range_source, "<corelib>/fixture", "")
-    core_failure_record_check(text_source, "user/fixture", "E0119")
-    core_failure_record_check(range_source, "user/fixture", "E0119")
+    core_failure_record_check(text_source, "user/fixture", "E0605")
+    core_failure_record_check(range_source, "user/fixture", "E0605")
+    empty_source: "failure: fn() -> TextError Never! {{ TextError{{}} }}\nrun: fn() {{}}"
+    core_failure_record_check(empty_source, "user/fixture", "E0605")
+    own_source: "texts: module {{\n    TextFault: struct {{\n        priv message: String,\n    }}\n}}\nfailure: fn() -> texts.TextFault Never! {{ texts.TextFault{{message: \"invalid\"}} }}\nrun: fn() {{}}"
+    core_failure_record_check(own_source, "user/fixture", "E0605")
     io_source: "retain: fn(operation: ^^IOOperation) -> IOOperation Never! {{ operation }}\nrun: fn() {{}}"
     core_failure_record_check(io_source, "<corelib>/fixture", "")
-    core_failure_record_check(io_source, "user/fixture", "E0119")
+    core_failure_record_check(io_source, "user/fixture", "E0605")
+    own_io_source: "IOOperation: enum {{\n    Read,\n}}\npick: fn(operation: IOOperation) -> IOOperation Never! {{ .Read }}\nrun: fn() {{}}"
+    core_failure_record_check(own_io_source, "user/fixture", "")
     copy_source: "#Policy(copies: .Explicit)\ncontext: fn(operation: IOOperation) -> IOContext Never! {{ IOContext{{operation: operation.copy(), resource: None, os_code: None, cause: None}} }}\nretain: fn(operation: IOOperation) -> IOOperation Never! {{ operation.copy() }}\nrun: fn() {{}}"
     core_failure_record_check(copy_source, "<corelib>/fixture", "")
     display_source: "#Error AuthoredError: struct {{ reason: String }}\nimpl AuthoredError.Display {{ display: fn(self) -> String {{ self.reason.copy() }} }}\nrender: fn(error: AuthoredError) -> String {{ \"{{error}}\" }}\nrun: fn() {{}}"

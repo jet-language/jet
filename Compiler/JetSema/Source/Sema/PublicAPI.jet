@@ -72,7 +72,7 @@ sema_public_api_modules: fn(items: [Item], parent: String, reachable: Bool, modu
         if item == .CodeModule(module_value) {
             path: if parent == "" -> module_value.name.copy() else -> "{parent}.{module_value.name}"
             public: reachable && module_value.is_pub && sema_public_api_named(module_value.name)
-            modules[path.copy()] = public
+            modules[path] = public
             if module_value.body == .Val(body) {
                 sema_public_api_modules(body, path, public, modules)
             }
@@ -260,7 +260,7 @@ sema_public_api_spellings: fn(items: [Item], modules: [String:Bool], inherited: 
             .UnitFamily(definition) -> {
                 if definition.resolved_owner != Val("core.units") {
                     loop distinct in unit_family_distinct_defs(definition) {
-                        local.push(distinct.name.copy())
+                        local.push(distinct.name)
                     }
                 }
             }

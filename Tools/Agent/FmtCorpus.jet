@@ -1629,8 +1629,8 @@ MEANING_CHANGE: "`jet fmt` would change the syntax tree of "
 // change, from the internal error on `errors`; None for any other refusal.
 fmt_meaning_change: fn(errors: String) -> String? Never! {
     loop line in errors.lines() {
-        at: line.find(MEANING_CHANGE)
-        if at >= 0 -> return Val(line.slice(at..<line.len()).copy())
+        cut: line.partition(MEANING_CHANGE)
+        if cut.sep != "" -> return Val("{cut.sep}{cut.tail}")
     }
     None
 }

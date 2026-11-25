@@ -330,7 +330,7 @@ sema_budget_scene_expr: fn(tables: ASTTables, expr: Expr, scenes: ^[String]) Nev
 
 sema_budget_validate_resolution: fn(specs: [LocatedBudgetSpec], catalog: BudgetAttachmentCatalog, findings: ^[BudgetLocatedDiagnostic]) Never! {
     loop located in specs {
-        spec: located.spec.copy()
+        spec: located.spec
         if sema_budget_named_key(spec.scope) == .Val(scope) {
             found: if scope.kind == {
                 "Env" -> catalog.envs.contains(scope.name)
@@ -381,9 +381,9 @@ sema_budget_named_key: fn(value: String) -> BudgetNamedKey? Never! {
 
 sema_budget_validate_collisions: fn(specs: [LocatedBudgetSpec], findings: ^[BudgetLocatedDiagnostic]) Never! {
     loop (index, located) in specs {
-        right: located.spec.copy()
+        right: located.spec
         loop left_index in 0..<index {
-            left: specs[left_index].spec.copy()
+            left: specs[left_index].spec
             if left.role == right.role && left.name == right.name {
                 findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_overlap(left, right, "their containing package, perf role, and name form the same budget identity")})
                 break
@@ -1024,7 +1024,7 @@ sema_budget_normalize_percent: fn(value: Expr) -> BudgetPercent? Never! {
         if sema_units_catalog_scale("Percent", suffix) == None -> return None
         parts: raw.split(".").to_list()
         if parts.len() > 2 -> return None
-        whole_text: parts[0].copy()
+        whole_text: parts[0]
         fraction: if parts.len() == 2 -> parts[1].copy() else -> ""
         if fraction.bytes().len() > 2 || whole_text == "" || !sema_budget_digits(whole_text) || !sema_budget_digits(fraction) {
             return None

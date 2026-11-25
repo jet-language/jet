@@ -279,13 +279,20 @@ link_pack_sym: fn(symtab: ^[U8], xindex: ^[U8], name: Int, info: Int, shndx: Int
     elf64_u32(symtab, name)
     symtab.push(U8{info})
     symtab.push(U8{0})
-    if shndx >= 0xff00 {
-        elf64_u16(symtab, 0xffff)
-        elf64_u32(xindex, shndx)
-    } else {
-        encoded: if shndx == LINK_ABS -> 0xfff1 else if shndx == LINK_COMMON -> 0xfff2 else -> shndx
-        elf64_u16(symtab, encoded)
-        elf64_u32(xindex, 0)
+    if {
+        shndx >= 0xff00 -> {
+            elf64_u16(symtab, 0xffff)
+            elf64_u32(xindex, shndx)
+        }
+        else -> {
+            encoded: if {
+                shndx == LINK_ABS -> 0xfff1
+                shndx == LINK_COMMON -> 0xfff2
+                else -> shndx
+            }
+            elf64_u16(symtab, encoded)
+            elf64_u32(xindex, 0)
+        }
     }
     elf64_u64(symtab, value)
     elf64_u64(symtab, size)
@@ -352,10 +359,13 @@ link_pack_write: fn(c: ^LinkContext, exports: [Int]) -> [U8] Never! {
         obj: link_obj_of(c, s)
         sec_out.push(next_index)
         next_index += 1
-        if link_rel_count(c, obj, s) > 0 {
-            rela_out.push(next_index)
-            next_index += 1
-        } else { rela_out.push(-1) }
+        if {
+            link_rel_count(c, obj, s) > 0 -> {
+                rela_out.push(next_index)
+                next_index += 1
+            }
+            else -> { rela_out.push(-1) }
+        }
     }
     p := LinkPack{
         ord_row: ord_row,
@@ -477,19 +487,26 @@ link_pack_write: fn(c: ^LinkContext, exports: [Int]) -> [U8] Never! {
     loop f in p.gl_id {
         name_at: elf64_string(strtab, c.g_name[f])
         kind: c.g_kind[f]
-        if kind == LINK_G_FILE {
-            s: c.g_section[f]
-            bind: if c.g_weak_def[f] -> 2 else -> 1
-            if s == LINK_ABS {
-                link_pack_sym(symtab, xindex, name_at, bind << 4, LINK_ABS, c.g_value[f], c.g_size[f])
-            } else {
-                link_pack_sym(symtab, xindex, name_at, (bind << 4) | link_pack_sym_type(c, s), link_pack_out(c, p, s), c.g_value[f], c.g_size[f])
+        if {
+            kind == LINK_G_FILE -> {
+                s: c.g_section[f]
+                bind: if c.g_weak_def[f] -> 2 else -> 1
+                if {
+                    s == LINK_ABS -> {
+                        link_pack_sym(symtab, xindex, name_at, bind << 4, LINK_ABS, c.g_value[f], c.g_size[f])
+                    }
+                    else -> {
+                        link_pack_sym(symtab, xindex, name_at, (bind << 4) | link_pack_sym_type(c, s), link_pack_out(c, p, s), c.g_value[f], c.g_size[f])
+                    }
+                }
             }
-        } else if kind == LINK_G_COMMON {
-            link_pack_sym(symtab, xindex, name_at, 0x11, LINK_COMMON, c.g_common_align[f], c.g_common_size[f])
-        } else {
-            bind: if c.g_strong_ref[f] -> 1 else -> 2
-            link_pack_sym(symtab, xindex, name_at, bind << 4, 0, 0, 0)
+            kind == LINK_G_COMMON -> {
+                link_pack_sym(symtab, xindex, name_at, 0x11, LINK_COMMON, c.g_common_align[f], c.g_common_size[f])
+            }
+            else -> {
+                bind: if c.g_strong_ref[f] -> 1 else -> 2
+                link_pack_sym(symtab, xindex, name_at, bind << 4, 0, 0, 0)
+            }
         }
     }
     // The file: header, contents, section headers.
@@ -785,7 +802,7 @@ link_runtime_image_finish: fn(c_in: ^^LinkContext, name: String, entry_g: Int, t
     if c.errors.len() > 0 -> return link_image_failure(c)
     entry: link_global_addr(c, entry_g)
     debug: link_debug_sections(c, true)
-    emitted := link_emit_pieces(c, link_emitted_rows(layout, debug), threads)
+    emitted: link_emit_pieces(c, link_emitted_rows(layout, debug), threads)
     c = emitted.context.move()
     pieces := emitted.pieces.move()
     image := link_write(c, layout, entry, pieces)

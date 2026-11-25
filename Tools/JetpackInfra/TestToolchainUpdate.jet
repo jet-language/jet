@@ -12,6 +12,7 @@ use {
     crypto: core.crypto
     files: core.files
     process: core.process
+    roots: "Roots"
     sys: core.sys
     time: core.time
 }
@@ -87,16 +88,11 @@ repo_root: fn() -[Env, FS]> String Never! {
     }
 }
 
-// The roots.sh scratch default: JET_TEST_SCRATCH, then JET_SCRATCH_ROOT,
-// then JET_STATE_ROOT, then the XDG cache's jet-dev.
-scratch_root: fn() -[Env]> String Never! {
-    loop name in ["JET_TEST_SCRATCH", "JET_SCRATCH_ROOT", "JET_STATE_ROOT"] {
-        value: sys.get(name) ?? ""
-        if value != "" -> return value
-    }
-    cache: sys.get("XDG_CACHE_HOME") ?? ""
-    base: if cache != "" -> cache else -> "{sys.get("HOME") ?? ""}/.cache"
-    "{base}/jet-dev"
+// $JET_TEST_SCRATCH, else the scratch root of the dev tool roots
+// (Tools/Agent/roots.env).
+scratch_root: fn() -[Env, FS]> String Never! {
+    value: sys.get("JET_TEST_SCRATCH") ?? ""
+    if value != "" -> value else -> roots.value("JET_SCRATCH_ROOT")
 }
 
 prove: fn(proof: Proof) -[Env, Exec, FS, Rand, Time, Time.Wait]> ProofError! {

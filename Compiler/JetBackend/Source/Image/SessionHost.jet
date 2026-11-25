@@ -81,13 +81,16 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, tracer: Int{0}) -> X6
     fds: x64_comptime_spawn_fds(pipes, shm_fd)
     loaded: x64_executable_load(image)
     spawned := X64Spawned{pid: -1, failure: ""}
-    if loaded.failure == "" {
-        spawned = x64_image_spawn(loaded, launch, fds)
-        x64_image_unload(loaded)
-    } else {
-        spawned = x64_executable_spawn_file(image, launch, fds)
-        if spawned.failure != "" {
-            spawned.failure = "{loaded.failure}; from a file: {spawned.failure}"
+    if {
+        loaded.failure == "" -> {
+            spawned = x64_image_spawn(loaded, launch, fds)
+            x64_image_unload(loaded)
+        }
+        else -> {
+            spawned = x64_executable_spawn_file(image, launch, fds)
+            if spawned.failure != "" {
+                spawned.failure = "{loaded.failure}; from a file: {spawned.failure}"
+            }
         }
     }
     x64_comptime_close_fd(pipes[0])

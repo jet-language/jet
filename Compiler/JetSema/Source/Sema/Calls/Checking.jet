@@ -1122,7 +1122,7 @@ sema_call_crypto_misuse: fn(callee: String, params: [SemaCallParam], args: [Call
         return
     }
     parts: callee.split(".").to_list()
-    operation: parts[parts.len() - 1].copy()
+    operation: parts[parts.len() - 1]
     memory := Int?{None}
     iterations := Int?{None}
     memory_span := Span?{None}
@@ -1423,10 +1423,7 @@ sema_call_pin_binder_arguments: fn(typed: SemaCallTypedArguments, params: [SemaC
         // tail. Its private pin cannot shadow a declaration-slot default.
         pin_slot := slot
         if params[slot].variadic -> pin_slot = -index - 1
-        // copy: the argument's checked value becomes the binder pin's init, and
-        // lowered[index].value is overwritten with the pin local below. Jet has no exchange on an
-        // element of the write-borrowed `lowered`.
-        original: lowered[index].value.copy()
+        original: lowered[index].value
         init := original.copy()
         place_value: if init.kind == {
             .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Deref(_) | .Borrow(_, _) -> true
@@ -1453,9 +1450,7 @@ sema_call_pin_binder_arguments: fn(typed: SemaCallTypedArguments, params: [SemaC
 // Places the binder pins before the call they feed.
 sema_call_with_binder_pins: fn(pins: ^^[TStmt], call_value: ^^TExpr, span: Span) -> TExpr Never! {
     if pins.len() == 0 -> return call_value
-    // copy: `call_value` moves into the block body on the next line, while the block node needs the
-    // call's type as its own.
-    ty: call_value.ty.copy()
+    ty: call_value.ty
     body := pins
     body.push(TStmt.ExprStmt{value: call_value, span: span})
     sema_tree_node(ty, TExprKind.InlineBlock{body: body}, span)

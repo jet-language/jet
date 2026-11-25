@@ -1,0 +1,25 @@
+# A user call and a Core call to the same jet.runtime host leaf lower to the
+# same slot IR. The user's `pause` is core.time's `sleep` written in a package:
+# both call `jet.runtime.time.sleep_ns` with the duration's nanoseconds, so
+# `jet emit --ir` prints the same slots and instructions for the two, with the
+# same runtime export (jet_std_time_sleep_duration_ns) and the same stop polls.
+# Only the header (each function's name and key) and the source location of
+# the checked Int conversion (the file's name and length, and the line:
+# `data_address s3`, `const s4`, `const s5`) differ, so those lines are
+# dropped before the comparison.
+write: main.jet = "use {\n    rt: jet.runtime.time\n    time: core.time\n}\n\npause: fn(duration: Duration) -[Time.Wait]> Never! {\n    rt.sleep_ns(duration.ns)\n}\n\nrun: fn() -[IO, Time.Wait]> {\n    time.sleep(1ms)\n    pause(1ms)\n    print(\"slept\")\n}\n"
+env: NO_COLOR=1
+step: jet emit --ir main.jet --fn pause
+exit: 0
+stdout: ~ "fn pause [function:module:" # the user's function, from the entry package
+stdout: ~ "call_runtime jet_std_time_sleep_duration_ns (" # the leaf's runtime export
+capture: user_ir = text stdout.after_first("\n").filter(!~ "data_address").filter(!~ "const s4 <-").filter(!~ "const s5 <-")
+step: jet emit --ir main.jet --fn sleep
+exit: 0
+stdout: ~ "fn sleep [function:<corelib>/core.time.sleep]" # Core's function, which the entry package does not declare
+stdout: ~ "call_runtime jet_std_time_sleep_duration_ns (" # the same export
+capture: core_ir = text stdout.after_first("\n").filter(!~ "data_address").filter(!~ "const s4 <-").filter(!~ "const s5 <-")
+cap:core_ir: = "{cap:user_ir}" # the same slots and instructions
+step: jet run main.jet
+exit: 0
+stdout: = "slept\n"

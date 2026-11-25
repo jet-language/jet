@@ -29,10 +29,14 @@ testing: module {
     // `replacement`; None outside a World.
     #Import(c) priv world_store_replace: fn(store: String, expected: [U8], replacement: [U8]) -> Bool? = "jet_rt_world_store_replace"
 
-    // The DeterministicWorld methods' leaves (Core/Testing/Testing.jet): the
-    // world's wall clock in Unix milliseconds, a move of its clock by
-    // `duration_ns` that fires the timers due on the way and answers the new
-    // wall clock, a wait until its tasks are idle, and its event history.
+    // The DeterministicWorld runner and its methods' leaves
+    // (Core/Testing/Testing.jet): a run of `body` once in a fresh World that
+    // ends when the World's tasks are idle, the world's wall clock in Unix
+    // milliseconds, a move of its clock by `duration_ns` that fires the timers
+    // due on the way and answers the new wall clock, a wait until its tasks
+    // are idle, and its event history.
+    #Import(c) priv world: fn(body: fn(DeterministicWorld)) = "jet_testing_world_run"
+
     #Import(c) priv world_now: fn(world: DeterministicWorld) -> Int = "jet_world_now"
 
     #Import(c) priv world_advance: fn(world: DeterministicWorld, duration_ns: Int) -> Int = "jet_world_advance"

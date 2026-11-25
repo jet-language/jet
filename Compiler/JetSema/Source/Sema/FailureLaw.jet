@@ -659,14 +659,14 @@ sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication]
             loop marker in definition.markers {
                 facts.push(AppliedRuleApplication{marker: marker, target: Val(definition.from_span), site: Val(RuleSite.Impl)})
             }
-            type_params: conversion_params[converted].copy()
+            type_params: conversion_params[converted]
             converted += 1
             routine := sema_error_conversion_routine(definition, "self", AccessConvention.Move, type_params, local_types, edges, diagnostics) ?? next
             output.push(routine)
             next
         }
         if sema_error_conversion_from_route(plain_types, item) == .Val(route) {
-            type_params: conversion_params[converted].copy()
+            type_params: conversion_params[converted]
             converted += 1
             // A target this file declares keeps its impl, so `AppErr.from(e)`
             // and `AppErr{e}` call the hook, whose body becomes a call of the
@@ -704,7 +704,7 @@ sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication]
         routines := [Item]{}
         dropped := [Int]{}
         loop nested in nested_routes {
-            type_params: conversion_params[converted].copy()
+            type_params: conversion_params[converted]
             converted += 1
             routine: sema_error_conversion_routine(nested.route, nested.param_name, nested.convention, type_params, local_types, edges, diagnostics) ?? {
                 dropped.push(nested.index)
@@ -1316,9 +1316,12 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
             }
             sema_check_private_module_type(name, span, environment, program, diagnostics)
             // The IOError context's `IOOperation` enum and `IOContext` record
-            // have no public annotation origin. Reuse the Core-only literal
-            // origin gate; user declarations stay E0119.
-            unresolved := (name == "IOOperation" || name == "IOContext") && !module_is_core(environment.module_identity)
+            // are Core's to name, as a `priv` type is its module's: an
+            // annotation elsewhere gets the ordinary private-item error, and a
+            // module's own type of that name is its own.
+            private_core: (name == "IOOperation" || name == "IOContext") && !module_is_core(environment.module_identity) && !generic_names.contains(name) && !sema_failure_declared_type_names(environment, program).contains(name)
+            if private_core -> diagnostics.push(sema_call_private_member(name, span))
+            unresolved := false
             // Owner-only impl metadata cannot manufacture a qualified export.
             owner_annotation: loop suffix in JET_CORE_OWNER_ANNOTATION_SUFFIXES {
                 if name.ends_with(suffix) {
@@ -1338,7 +1341,7 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
             if unresolved && !generic_names.contains(name) {
                 diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment, program), sema_call_source_word_span(environment, program, span, name)))
             }
-            if !unresolved && sema_failure_written_name_unknown(name, generic_names, environment, program) {
+            if !unresolved && !private_core && sema_failure_written_name_unknown(name, generic_names, environment, program) {
                 diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment, program), sema_call_source_word_span(environment, program, span, name)))
             }
         }

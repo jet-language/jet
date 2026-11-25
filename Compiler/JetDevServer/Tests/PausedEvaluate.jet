@@ -19,7 +19,6 @@ use jet_devserver.[
     RejectReason,
     SessionIdentity,
     SourceLocation,
-    TypedValue,
     cancellation_none,
     cancellation_requested,
     evaluate,
@@ -31,6 +30,7 @@ use jet_devserver.[
     value_projection_published,
     value_projection_redacted,
 ]
+use jet_debug.[DebugValue]
 
 test_identity: fn() -> SessionIdentity Never! {
     SessionIdentity.new("session-1", "src/main.jet", "rev-1", "pause-1", "frame-1") ?? panic("identity")
@@ -43,7 +43,7 @@ test_source: fn() -> SourceLocation Never! {
 test_scope: fn() -> LexicalScope Never! {
     location: test_source()
     bindings: [
-        value_projection_published("value-public", "count", "Int", location, TypedValue.Int{value: 7}),
+        value_projection_published("value-public", "count", "Int", location, DebugValue.Int{value: 7}),
         value_projection_redacted("value-secret", "token", "String", location),
         value_projection_absent("value-hidden", "password", "String", location),
     ]
@@ -106,10 +106,10 @@ test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectRea
 #Test("evaluator_result_is_injected_and_mutation_needs_authority_and_observation") {
     paused: test_session()
     request: test_evaluate_request("request-4", "count + 1", DEFAULT_EVALUATION_BUDGET)
-    value: value_projection_published("eval-value", "result", "Int", test_source(), TypedValue.Int{value: 8})
+    value: value_projection_published("eval-value", "result", "Int", test_source(), DebugValue.Int{value: 8})
     response: evaluate(paused, request, evaluator_completed(test_identity(), "scope-1", Val(value), test_usage(1, 1, 64, 2))) ?? panic("evaluate")
     projected: response.value ?? panic("value")
-    assert(projected.value == Val(TypedValue.Int{value: 8}))
+    assert(projected.value == Val(DebugValue.Int{value: 8}))
     mutation := test_evaluate_request("request-5", "count = 8", DEFAULT_EVALUATION_BUDGET)
     mutation.mode = .Mutate
     mutation.effects = ["fs.write"]

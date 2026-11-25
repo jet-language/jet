@@ -148,9 +148,9 @@ jet_cli_command_setting_path: fn(key: String) -> Bool Never! {
 
 // The 1-based line of the quoted `key` in `text`, 0 when it isn't found.
 jet_cli_command_setting_line: fn(text: String, key: String) -> Int Never! {
-    at: text.find("\"{key}\"")
-    if at < 0 -> return 0
-    text.slice(0..<at).split("\n").to_list().len()
+    cut: text.partition("\"{key}\"")
+    if cut.sep == "" -> return 0
+    cut.head.split("\n").to_list().len()
 }
 
 // The word that dispatches the command the jet-owned words `argv` (the

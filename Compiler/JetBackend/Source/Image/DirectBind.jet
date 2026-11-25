@@ -127,16 +127,19 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     rodata_align := 1
     loop index in order {
         object: program.data[index]
-        if x64_object_read_only(object) {
-            elf64_pad(rodata, object.align)
-            if object.align > rodata_align -> rodata_align = object.align
-            data_offsets[index] = rodata.len()
-            rodata.extend(object.bytes)
-        } else {
-            elf64_pad(data, object.align)
-            if object.align > data_align -> data_align = object.align
-            data_offsets[index] = data.len()
-            data.extend(object.bytes)
+        if {
+            x64_object_read_only(object) -> {
+                elf64_pad(rodata, object.align)
+                if object.align > rodata_align -> rodata_align = object.align
+                data_offsets[index] = rodata.len()
+                rodata.extend(object.bytes)
+            }
+            else -> {
+                elf64_pad(data, object.align)
+                if object.align > data_align -> data_align = object.align
+                data_offsets[index] = data.len()
+                data.extend(object.bytes)
+            }
         }
     }
     loop (index, object) in program.data {

@@ -1952,14 +1952,14 @@ priv client_dial: fn(wire: ^BuildWire, url: ClientURL, phases: ClientPhases, pro
         wire.ending = "timed_out"
         return Err(.Timeout{phase: "transport"})
     }
-    addresses: provider.jet_http_build_resolve(destination.host, destination.port) ?? {
+    addresses: net_rt.build_resolve(destination.host, destination.port) ?? {
         // An effect scope in force refused the host before any lookup
         // (spec.md "Effect scopes"): a policy failure, not a resolver one.
-        if err.starts_with("Jet.EffectBoundExceeded: ") || err.starts_with("Jet.ProhibitedEffectReached: ") {
+        if err.message.starts_with("Jet.EffectBoundExceeded: ") || err.message.starts_with("Jet.ProhibitedEffectReached: ") {
             wire.ending = "unmapped"
-            return Err(.Policy{reason: err})
+            return Err(.Policy{reason: err.message})
         }
-        wire.ending = client_resolve_portable(err)
+        wire.ending = client_resolve_portable(err.message)
         return Err(.Resolve{host: "<redacted>"})
     }
     wire.addresses = addresses.copy()

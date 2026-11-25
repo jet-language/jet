@@ -31,6 +31,7 @@
 use {
     files: core.files
     process: core.process
+    roots: "Roots"
     sys: core.sys
     time: core.time
 }
@@ -377,16 +378,8 @@ probe_policies: fn(bwrap: String, ip: String, launcher: String, filter: [U8], ro
 }
 
 probe_root: fn() -[FS, Env, Time]> String LaunchError! {
-    base := ""
-    if process.env_get("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT") == {
-        .Val(configured) -> { base = configured }
-        .None -> {
-            home: process.env_get("HOME") ?? return Err(launch_error("cannot locate a disk-backed capability probe directory"))
-            cache: process.env_get("XDG_CACHE_HOME") ?? "{home}/.cache"
-            state: process.env_get("JET_STATE_ROOT") ?? "{cache}/jet-dev"
-            base = process.env_get("JET_SCRATCH_ROOT") ?? state
-        }
-    }
+    base: process.env_get("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT") ?? roots.value("JET_SCRATCH_ROOT")
+    if base == "" -> return Err(launch_error("cannot locate a disk-backed capability probe directory"))
     files.create_dir_all(base) ?? return Err(launch_error("capability probe root `{base}` cannot be created: {err}"))
     root: "{base}/compiled-workload-peer-probe-{sys.pid()}-{time.unix_ns()}"
     if files.exists(root) {

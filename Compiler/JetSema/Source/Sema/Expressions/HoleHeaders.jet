@@ -41,8 +41,7 @@ sema_expr_hole_header_call: fn(expr: Expr, checked: TExpr?, environment: SemaSco
         if context.call_facts[index].span != span -> next
         detail := sema_call_site_detail(context.call_facts[index])
         if detail.hole_header == None -> next
-        // copy: every arm's fact of the call keeps the fix.
-        detail.hole_header = Val(fix.copy())
+        detail.hole_header = Val(fix)
         context.call_facts[index].detail = sema_call_site_detail_of(detail)
     }
     if change == "" || sema_expr_hole_header_reported(diagnostics, span) -> return Val(value)

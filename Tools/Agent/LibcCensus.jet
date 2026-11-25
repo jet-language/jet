@@ -550,9 +550,9 @@ unresolved: fn(exports: [String:[String]], sources: [String:String]) -[FS]> [Str
             if claim == "F32" || claim == "Float" -> next
             if claim.starts_with("core.") {
                 if exports.has_key(claim) -> next
-                dot: claim.rfind(".")
-                owner: claim.slice(0, dot)
-                member: claim.slice(dot + 1, claim.len())
+                cut: claim.rpartition(".")
+                owner: cut.head
+                member: cut.tail
                 if exports.has_key(owner) {
                     members: exports.get(owner) ?? [String]{}
                     if !members.contains(member) {
@@ -560,9 +560,9 @@ unresolved: fn(exports: [String:[String]], sources: [String:String]) -[FS]> [Str
                     }
                     next
                 }
-                type_dot: owner.rfind(".")
-                home: owner.slice(0, type_dot)
-                type_name: owner.slice(type_dot + 1, owner.len())
+                type_cut: owner.rpartition(".")
+                home: type_cut.head
+                type_name: type_cut.tail
                 if !(exports.get(home) ?? [String]{}).contains(type_name) {
                     problems.push("{family.names}: {claim}: {owner} is neither a module nor a type exported by {CORE_PRELUDE_PATH}")
                     next
@@ -578,12 +578,12 @@ unresolved: fn(exports: [String:[String]], sources: [String:String]) -[FS]> [Str
                 }
                 next
             }
-            dot: claim.find(".")
-            if dot < 0 {
+            cut: claim.partition(".")
+            if cut.sep == "" {
                 problems.push("{family.names}: {claim} is neither core.<module>.<member> nor <Type>.<method>")
                 next
             }
-            if !builtin_resolves(claim.slice(0, dot), claim.slice(dot + 1, claim.len()), methods, statics, collections, shared) {
+            if !builtin_resolves(cut.head, cut.tail, methods, statics, collections, shared) {
                 problems.push("{family.names}: {claim} is not a built-in method, static or collection operation, or a Shared method")
             }
         }

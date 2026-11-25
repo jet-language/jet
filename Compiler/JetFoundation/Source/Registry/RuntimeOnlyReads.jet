@@ -3,9 +3,10 @@
 // process id, whether a standard stream is a terminal, a World's clock,
 // timers, tasks and history and the active World's store cells, the device
 // store's cells, the UI host provider's live state, the receipt claim
-// sections publish under,
-// and the platform family, module loader, path syntax and SIMD width of the
-// machine the program runs on. A value computed while building would hold the
+// sections publish under, the thread a test World runs on, the real-time
+// worker a callback stream starts, and the platform family, module loader,
+// path syntax and SIMD width of the machine the program runs on. A value
+// computed while building would hold the
 // compiler's own answer (a cross build would bake the build machine's
 // platform into the image), so sema never computes a call that reaches one
 // while compiling, a module value included
@@ -56,6 +57,8 @@ RUNTIME_ONLY_READS: #run { [RuntimeOnlyRead]{
     RuntimeOnlyRead{symbol: "jet_ui_change", reads: "the native window's live slot handlers"},
     RuntimeOnlyRead{symbol: "jet_web_live_left", reads: "the live hub's topics whose last watching connection closed"},
     RuntimeOnlyRead{symbol: "jet_receipt_attach", reads: "the running program's receipt claim and directory"},
+    RuntimeOnlyRead{symbol: "jet_testing_world_run", reads: "the running thread's World and its tasks"},
+    RuntimeOnlyRead{symbol: "jet_rt_callback_start", reads: "the real-time worker thread the stream starts"},
 } }
 
 // What runtime export `symbol` reads when it is run-time only, else None. A

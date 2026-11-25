@@ -2840,7 +2840,7 @@ sema_ownership_writes_through_view_type: fn(expr: Expr, root_type: Type?) -> Boo
         }
         if current == .List(element) {
             if step.starts_with("[") && step != "[..]" {
-                current = element.copy()
+                current = element
                 next
             }
         }
@@ -5351,8 +5351,7 @@ sema_ownership_push_evaluated_access: fn(state: ^SemaOwnershipState, expr: Expr,
         capture_ty := Type?{None}
         if capture == .Val(info) {
             capture_place = sema_ownership_place_snapshot(info.place)
-            // copy: `info` stays with this access's capture prefix.
-            capture_ty = info.ty.copy()
+            capture_ty = info.ty
         }
         if bound.contains(capture_place.root) -> next
         merged := false
@@ -5447,8 +5446,7 @@ sema_ownership_collect_lambda_requirement_events: fn(state: ^SemaOwnershipState,
             if sema_ownership_place_exact(events[index].place, event.place) {
                 if event.access == AccessConvention.Write {
                     events[index].access = AccessConvention.Write
-                    // copy: `event` stays in this lambda's own requirement list.
-                    events[index].site = event.site.copy()
+                    events[index].site = event.site
                 }
                 events[index].through_call = events[index].through_call || event.through_call
                 events[index].moves_owner = events[index].moves_owner || event.moves_owner
@@ -7187,7 +7185,7 @@ sema_ownership_moved_reported: fn(diagnostics: [Diagnostic], site: Span) -> Bool
 // recorded break, each left down to the base depth.
 sema_ownership_join_loop_value_paths: fn(state: ^SemaOwnershipState, context: SemaCheckContext, frame_index: Int, fork: SemaOwnershipFork, outer: Bool, body_falls_through: Bool, may_skip: Bool) -> Bool Never! {
     target_depth: if outer -> fork.scope_depth - 1 else -> fork.scope_depth
-    found: state.share_found.copy()
+    found: state.share_found
     after_body := SemaOwnershipPath?{None}
     if may_skip && body_falls_through {
         normalize: sema_ownership_mark(state)

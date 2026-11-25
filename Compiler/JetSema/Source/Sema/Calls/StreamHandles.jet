@@ -341,7 +341,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
         // A `^` argument keeps its Write borrow of the caller's place, so the
         // route writes the original, never a copy (#5976).
         if params[slot].convention == AccessConvention.Write {
-            borrow_type: checked.ty.copy()
+            borrow_type: checked.ty
             borrow_span: checked.span
             values.push(sema_tree_node(borrow_type, TExprKind.Borrow{place: checked, access: AccessConvention.Write}, borrow_span))
             next

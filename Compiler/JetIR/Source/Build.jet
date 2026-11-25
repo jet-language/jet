@@ -5604,6 +5604,27 @@ ir_int_constant: fn(m: ^IRModule, b: ^IRBuilder, row: Int, value: Int) -> Int Ne
     slot
 }
 
+// The 64-bit word of the exact Int in slot `value`, read back through a frame
+// cell: an inline Int's value, or a big Int's tagged handle.
+ir_int_word: fn(m: ^IRModule, b: ^IRBuilder, value: Int) -> Int Never! {
+    pointer_row: ir_pointer_row(m)
+    cell: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, cell, 8, 8, -1, b.line)
+    ir_emit(b.f, IROp.Store, -1, cell, 0, value, b.line)
+    ir_load_word(m, b, cell, 0)
+}
+
+// Whether the exact Int whose word (ir_int_word) is `bits` is inline: bits 62
+// and 63 agree (Int.jet int_inline). A Bool slot. Every Int in the inline
+// range is inline, so an inline value lies inside every bound past that range.
+ir_int_word_inline: fn(m: ^IRModule, b: ^IRBuilder, bits: Int) -> Int Never! {
+    sixty_two: ir_word_const(m, b, 62)
+    sixty_three: ir_word_const(m, b, 63)
+    top: ir_word_op(m, b, IROp.Shr, bits, sixty_two)
+    sign: ir_word_op(m, b, IROp.Shr, bits, sixty_three)
+    ir_bool_op(m, b, IROp.Eq, top, sign)
+}
+
 // An empty List of type row `row` in fresh frame storage (a PriorityQueue's
 // or a Rank's header with its native order word).
 ir_list_empty: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int Never! {

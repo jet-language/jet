@@ -1,10 +1,10 @@
 // Claims ported from jet_pkg_model::ComBind tests.
 use {
     jet_pkg_model.[
-        BinderHostOS,
         COM_DISCOVERY_C,
         ComTypeLibraryInput,
         ForeignBindError,
+        VariantOS,
         pkg_com_bind,
         pkg_com_parse_schema,
         pkg_com_project,
@@ -76,7 +76,7 @@ COM_TEST_OFFICE_METADATA: #run "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-0
 }
 
 #Test("com generated windows sources cross compile with winegcc") {
-    if BinderHostOS.current() == BinderHostOS.Windows {
+    if VariantOS.current() == VariantOS.Windows {
         return
     }
     winegcc: kit_require_tool("winegcc") ?? return
@@ -97,7 +97,7 @@ COM_TEST_OFFICE_METADATA: #run "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-0
 }
 
 #Test("com non windows host is rejected before tool or file access") {
-    if BinderHostOS.current() == BinderHostOS.Windows {
+    if VariantOS.current() == VariantOS.Windows {
         return
     }
     error: if pkg_com_bind(ComTypeLibraryInput.File("missing.tlb"), "office", "missing-cache") == {

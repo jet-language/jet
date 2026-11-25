@@ -60,6 +60,7 @@
 use {
     files: core.files
     process: core.process
+    roots: "Roots"
     term: core.term
 }
 
@@ -1015,11 +1016,8 @@ codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     update: mode == "--update"
     root: files.cwd() ?? return fail("cannot read the working directory: {err}")
     if jet.len() == 0 -> jet = [String]{"{root}/{JET_ENV}", "jet"}
-    home: process.env_get_or("HOME", "")
-    cache: process.env_get_or("XDG_CACHE_HOME", "{home}/.cache")
-    state: process.env_get_or("JET_STATE_ROOT", "{cache}/jet-dev")
     scratch_env: process.env_get_or("TMPDIR", "")
-    scratch: if scratch_env == "" -> process.env_get_or("JET_SCRATCH_ROOT", state) else -> scratch_env
+    scratch: if scratch_env == "" -> roots.value("JET_SCRATCH_ROOT") else -> scratch_env
     files.create_dir_all(scratch) ?? return fail("cannot create {scratch}: {err}")
     made: run_command([String]{"mktemp", "-d", "{scratch}/codegen-ceiling.XXXXXX"}, root, scratch) ?? return fail("{err}")
     run_dir: made.trim()

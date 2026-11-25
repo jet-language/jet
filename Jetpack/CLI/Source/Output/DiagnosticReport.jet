@@ -46,16 +46,11 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
     if record.origin != None -> report.origin = snapshot
     if diagnostic.safety == .Val(safety) {
         loop edit in record.fix_edits {
-            report.push_fix_edit(ReportEdit.new(ReportSpan.new(edit.span.file, edit.span.start, edit.span.end), edit.new_text, cli_report_fix_safety(safety))) ?? panic("a registry edit is valid for its report")
+            report.push_fix_edit(ReportEdit.new(ReportSpan.new(edit.span.file, edit.span.start, edit.span.end), edit.new_text, safety)) ?? panic("a registry edit is valid for its report")
         }
     }
     if diagnostic.no_fix_reason == .Val(reason) {
-        kind: if reason.kind == {
-            .Behavior -> NoFixReasonKind.Behavior
-            .Design -> NoFixReasonKind.Design
-            .Ambiguous -> NoFixReasonKind.Ambiguous
-        }
-        report.set_no_fix_reason(NoFixReason.new(kind, reason.next)) ?? panic("a registry no-fix reason is valid for its report")
+        report.set_no_fix_reason(NoFixReason.new(reason.kind, reason.next)) ?? panic("a registry no-fix reason is valid for its report")
     }
     loop cause in diagnostic.cause {
         projected := ReportCause.new(cause.code)
@@ -76,14 +71,4 @@ cli_report_origin: fn(named: String, digest: String) -> ReportOrigin Never! {
     path := String?{None}
     if named != "" -> path = Val("{named}")
     ReportOrigin{path: path, source_digest: "{digest}"}
-}
-
-cli_report_fix_safety: fn(safety: DiagnosticFixSafety) -> FixSafety Never! {
-    if safety == {
-        .Formatting -> FixSafety.Formatting
-        .BehaviorPreserving -> FixSafety.BehaviorPreserving
-        .APIChanging -> FixSafety.APIChanging
-        .TargetChanging -> FixSafety.TargetChanging
-        .NeedsReview -> FixSafety.NeedsReview
-    }
 }

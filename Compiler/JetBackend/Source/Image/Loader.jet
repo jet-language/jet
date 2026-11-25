@@ -885,7 +885,7 @@ x64_image_part_file: fn(name: String) -> X64ImagePart? {
     // Fast path: consult the cached PT_NOTE part directory of this running
     // executable when its identity still matches `before`.
     if label.len() <= 112 {
-        cached := loader_self_part_lookup(label, before)
+        cached: loader_self_part_lookup(label, before)
         if cached.checked -> return cached.found
         header: x64_self_read(0, 64) ?? return None
         phoff: loader_u64(header, 32)
@@ -924,7 +924,7 @@ x64_image_part_file: fn(name: String) -> X64ImagePart? {
         }
         if !loader_same_stamp(loader_file_stamp(X64_SELF_EXECUTABLE), before) -> return None
         loader_self_parts_store(before, labels, ats, sizes)
-        again := loader_self_part_lookup(label, before)
+        again: loader_self_part_lookup(label, before)
         if again.checked -> return again.found
         return None
     }
@@ -1209,7 +1209,7 @@ loader_image_file_failed: fn(failure: String) -> X64ImageFile Never! {
 // loaded segments (loader_image_part_whole); "" or why not.
 x64_executable_complete: fn(exe: ^X64Executable) -> String {
     if exe.image_gap == 0 -> return ""
-    whole := loader_image_part_whole(exe)
+    whole: loader_image_part_whole(exe)
     if whole.failure != "" -> return whole.failure
     exe.image = whole.bytes.move()
     exe.image_gap_at = 0
@@ -2710,12 +2710,15 @@ x64_trace_syscall_step: fn(trace: X64Trace, thread: Int, signal: Int) -> X64Trac
         step.thread = x64_trace_call(trace, LOADER_TRACE_STEP, thread, signal, 0, 0, 0, 0)
         if step.thread > 0 {
             step.status = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
-            if step.status & 0xff == 0x7f {
-                step.registers = loop k in 0..<X64_TRACE_REGISTERS -> Int{os_load_i64(I64{trace.scratch + 8 * k})}
-            } else {
-                rusage: trace.scratch + LOADER_TRACE_RUSAGE
-                step.cpu_ns = (os_load_word(rusage) + os_load_word(rusage + 16)) * 1000000000 + (os_load_word(rusage + 8) + os_load_word(rusage + 24)) * 1000
-                step.peak_rss_bytes = os_load_word(rusage + 32) * 1024
+            if {
+                step.status & 0xff == 0x7f -> {
+                    step.registers = loop k in 0..<X64_TRACE_REGISTERS -> Int{os_load_i64(I64{trace.scratch + 8 * k})}
+                }
+                else -> {
+                    rusage: trace.scratch + LOADER_TRACE_RUSAGE
+                    step.cpu_ns = (os_load_word(rusage) + os_load_word(rusage + 16)) * 1000000000 + (os_load_word(rusage + 8) + os_load_word(rusage + 24)) * 1000
+                    step.peak_rss_bytes = os_load_word(rusage + 32) * 1024
+                }
             }
         }
     }
@@ -3539,68 +3542,74 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: ^X64Samples) {
                 misc: (header >> 32) & 0xffff
                 length: (header >> 48) & 0xffff
                 if length < 8 -> break
-                if kind == LOADER_PERF_RECORD_SAMPLE {
-                    ip: os_load_word(data + (at + 8) % size)
-                    ids: os_load_word(data + (at + 16) % size)
-                    time: os_load_word(data + (at + 24) % size)
-                    listed: os_load_word(data + (at + 32) % size)
-                    // A chain the record's length can't hold is none.
-                    count: if listed < 0 || 40 + 8 * listed > length -> 0 else -> listed
-                    into.words.push(ids & 0xffffffff)
-                    into.words.push((ids >> 32) & 0xffffffff)
-                    into.words.push(time)
-                    counted: into.words.len()
-                    into.words.push(0)
-                    frames := 0
-                    loop k in 0..<count {
-                        // Kernel addresses and the kernel's context markers
-                        // (PERF_CONTEXT_USER and its kin) are negative.
-                        frame: os_load_word(data + (at + 40 + 8 * k) % size)
-                        if frame <= 0 -> next
-                        into.words.push(frame)
-                        frames += 1
+                if {
+                    kind == LOADER_PERF_RECORD_SAMPLE -> {
+                        ip: os_load_word(data + (at + 8) % size)
+                        ids: os_load_word(data + (at + 16) % size)
+                        time: os_load_word(data + (at + 24) % size)
+                        listed: os_load_word(data + (at + 32) % size)
+                        // A chain the record's length can't hold is none.
+                        count: if listed < 0 || 40 + 8 * listed > length -> 0 else -> listed
+                        into.words.push(ids & 0xffffffff)
+                        into.words.push((ids >> 32) & 0xffffffff)
+                        into.words.push(time)
+                        counted: into.words.len()
+                        into.words.push(0)
+                        frames := 0
+                        loop k in 0..<count {
+                            // Kernel addresses and the kernel's context markers
+                            // (PERF_CONTEXT_USER and its kin) are negative.
+                            frame: os_load_word(data + (at + 40 + 8 * k) % size)
+                            if frame <= 0 -> next
+                            into.words.push(frame)
+                            frames += 1
+                        }
+                        if frames == 0 && ip > 0 {
+                            into.words.push(ip)
+                            frames = 1
+                        }
+                        into.words[counted] = frames
+                        into.samples += 1
                     }
-                    if frames == 0 && ip > 0 {
-                        into.words.push(ip)
-                        frames = 1
+                    kind == LOADER_PERF_RECORD_LOST -> {
+                        into.lost += os_load_word(data + (at + 16) % size)
                     }
-                    into.words[counted] = frames
-                    into.samples += 1
-                } else if kind == LOADER_PERF_RECORD_LOST {
-                    into.lost += os_load_word(data + (at + 16) % size)
-                } else if kind == LOADER_PERF_RECORD_COMM && (misc & LOADER_PERF_MISC_COMM_EXEC) != 0 && length >= 32 {
-                    // Its pid, then its sample_id's time, the record's last word.
-                    into.execs.push(os_load_word(data + (at + 8) % size) & 0xffffffff)
-                    into.execs.push(os_load_word(data + (at + length - 8) % size))
-                } else if kind == LOADER_PERF_RECORD_MMAP && length >= 64 {
-                    // Its pid and thread, address, length and file offset,
-                    // the file's NUL-ended name, then its sample_id: the
-                    // pid and thread, and the time, the record's last word.
-                    name := [U8]{}
-                    loop k in 40..<length - 16 {
-                        byte: os_load_byte(data + (at + k) % size)
-                        if byte == 0 -> break
-                        name.push(U8{byte})
+                    kind == LOADER_PERF_RECORD_COMM && (misc & LOADER_PERF_MISC_COMM_EXEC) != 0 && length >= 32 -> {
+                        // Its pid, then its sample_id's time, the record's last word.
+                        into.execs.push(os_load_word(data + (at + 8) % size) & 0xffffffff)
+                        into.execs.push(os_load_word(data + (at + length - 8) % size))
                     }
-                    start: os_load_word(data + (at + 16) % size)
-                    into.maps.push(
-                        X64SampleMapping{
-                            pid: os_load_word(data + (at + 8) % size) & 0xffffffff,
-                            start: start,
-                            end: start + os_load_word(data + (at + 24) % size),
-                            offset: os_load_word(data + (at + 32) % size),
-                            path: String.from_bytes(name) ?? "",
-                            time: os_load_word(data + (at + length - 8) % size),
-                        },
-                    )
-                } else if kind == LOADER_PERF_RECORD_FORK && length >= 24 {
-                    // Its pid and its parent's; a thread's are the same.
-                    ids: os_load_word(data + (at + 8) % size)
-                    pid: ids & 0xffffffff
-                    parent: (ids >> 32) & 0xffffffff
-                    if pid != parent {
-                        into.forks.push(pid)
-                        into.forks.push(parent)
+                    kind == LOADER_PERF_RECORD_MMAP && length >= 64 -> {
+                        // Its pid and thread, address, length and file offset,
+                        // the file's NUL-ended name, then its sample_id: the
+                        // pid and thread, and the time, the record's last word.
+                        name := [U8]{}
+                        loop k in 40..<length - 16 {
+                            byte: os_load_byte(data + (at + k) % size)
+                            if byte == 0 -> break
+                            name.push(U8{byte})
+                        }
+                        start: os_load_word(data + (at + 16) % size)
+                        into.maps.push(
+                            X64SampleMapping{
+                                pid: os_load_word(data + (at + 8) % size) & 0xffffffff,
+                                start: start,
+                                end: start + os_load_word(data + (at + 24) % size),
+                                offset: os_load_word(data + (at + 32) % size),
+                                path: String.from_bytes(name) ?? "",
+                                time: os_load_word(data + (at + length - 8) % size),
+                            },
+                        )
+                    }
+                    kind == LOADER_PERF_RECORD_FORK && length >= 24 -> {
+                        // Its pid and its parent's; a thread's are the same.
+                        ids: os_load_word(data + (at + 8) % size)
+                        pid: ids & 0xffffffff
+                        parent: (ids >> 32) & 0xffffffff
+                        if pid != parent {
+                            into.forks.push(pid)
+                            into.forks.push(parent)
+                        }
                     }
                 }
                 at += length
@@ -3677,12 +3686,15 @@ x64_sampled_reaped: fn(run: ^X64SampledRun) -> Bool {
     if run.command.child < 0 -> return true
     reaped: loader_command_reap(run.command, LOADER_WNOHANG)
     if reaped == 0 -> return false
-    if reaped == run.command.child {
-        ended: loader_command_reaped(run.command)
-        run.status = ended.status
-        run.cpu_ns = ended.cpu_ns
-        run.peak_rss_bytes = ended.peak_rss_bytes
-    } else if run.failure == "" { run.failure = "waiting for the command failed (errno {-reaped})" }
+    if {
+        reaped == run.command.child -> {
+            ended: loader_command_reaped(run.command)
+            run.status = ended.status
+            run.cpu_ns = ended.cpu_ns
+            run.peak_rss_bytes = ended.peak_rss_bytes
+        }
+        run.failure == "" -> { run.failure = "waiting for the command failed (errno {-reaped})" }
+    }
     if run.failure != "" -> run.status = -1
     run.command.child = -1
     true
@@ -3919,18 +3931,24 @@ x64_counted_run: fn(path: String, argv: [String], env: [String]?) -> X64Counted 
         instructions_fd = loader_counter_open(page, command.child, LOADER_PERF_COUNT_HW_INSTRUCTIONS, LOADER_PERF_COUNT_FLAGS)
         cycles_fd = loader_counter_open(page, command.child, LOADER_PERF_COUNT_HW_CPU_CYCLES, LOADER_PERF_COUNT_FLAGS)
     }
-    if os_failed(instructions_fd) -> counted.errno = -instructions_fd else if os_failed(cycles_fd) {
-        counted.errno = -cycles_fd
+    if {
+        os_failed(instructions_fd) -> counted.errno = -instructions_fd
+        os_failed(cycles_fd) -> {
+            counted.errno = -cycles_fd
+        }
     }
     counted.failure = loader_command_go(command, path)
     reaped: loader_command_reap(command, 0)
-    if reaped == command.child {
-        ended: loader_command_reaped(command)
-        counted.status = ended.status
-        counted.cpu_ns = ended.cpu_ns
-        counted.peak_rss_bytes = ended.peak_rss_bytes
-    } else if counted.failure == "" {
-        counted.failure = "waiting for the command failed (errno {-reaped})"
+    if {
+        reaped == command.child -> {
+            ended: loader_command_reaped(command)
+            counted.status = ended.status
+            counted.cpu_ns = ended.cpu_ns
+            counted.peak_rss_bytes = ended.peak_rss_bytes
+        }
+        counted.failure == "" -> {
+            counted.failure = "waiting for the command failed (errno {-reaped})"
+        }
     }
     if counted.failure != "" -> counted.status = -1
     instructions := LoaderCount{value: None, scaled: false}
@@ -4020,8 +4038,11 @@ x64_counters_open: fn(pid: Int) -> X64Counters {
         counters.instructions = loader_counter_open(page, pid, LOADER_PERF_COUNT_HW_INSTRUCTIONS, LOADER_PERF_COUNT_TRACED_FLAGS)
         counters.cycles = loader_counter_open(page, pid, LOADER_PERF_COUNT_HW_CPU_CYCLES, LOADER_PERF_COUNT_TRACED_FLAGS)
     }
-    if os_failed(counters.instructions) -> counters.errno = -counters.instructions else if os_failed(counters.cycles) {
-        counters.errno = -counters.cycles
+    if {
+        os_failed(counters.instructions) -> counters.errno = -counters.instructions
+        os_failed(counters.cycles) -> {
+            counters.errno = -counters.cycles
+        }
     }
     counters
 }

@@ -76,7 +76,7 @@ LSPFixtureChecker: struct {
                 at := text.find("fail()")
                 loop at >= 0 {
                     sites.push(at + 6)
-                    later: text.slice(at + 6, text.count_bytes()).find("fail()")
+                    later: (String.from_bytes(text.bytes().slice(at + 6, text.bytes().len())) ?? panic("a cut after `fail()` keeps whole characters")).find("fail()")
                     at = if later < 0 -> -1 else -> at + 6 + later
                 }
             }
@@ -99,7 +99,7 @@ LSPFixtureChecker: struct {
 lsp_fixture_alias: fn(path: String) -> String Never! {
     parts: path.split("/").to_list()
     name: parts[parts.len() - 1]
-    if name.ends_with(".jet") -> return name.slice(0, name.count_bytes() - 4)
+    if name.ends_with(".jet") -> return name.removesuffix(".jet")
     name.copy()
 }
 

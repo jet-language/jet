@@ -408,7 +408,7 @@ sema_build_code_value: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) ->
     // The value keeps where its items are written, "file:line", which a
     // report on the module `b.generate` makes from it names.
     location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, span)
-    source: TComptimeField{name: "source", value: TComptimeValue.String{value: splices.source.copy()}}
+    source: TComptimeField{name: "source", value: TComptimeValue.String{value: splices.source}}
     site: TComptimeField{name: "site", value: TComptimeValue.String{value: "{location.file}:{location.line}"}}
     value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{source, site}}
     node: sema_tree_node(Type.Named{name: "Code"}, TExprKind.CtLit{value: value}, span)
@@ -854,7 +854,7 @@ sema_call_compiler_events: fn(receiver: Expr, args: [CallArg], span: Span, expec
         }
     } else {
         marker: sema_compiler_events_marker(watch.value, check) ?? return failed
-        watched = marker.name.copy()  // copy: the declaration stays with the program's markers
+        watched = marker.name  // copy: the declaration stays with the program's markers
     }
     at: span.start
     items_name: "__jet_events_items_{at}"
@@ -875,7 +875,7 @@ sema_call_compiler_events: fn(receiver: Expr, args: [CallArg], span: Span, expec
         sema_compiler_events_binding(handler_name, Val(handler_type), args[1].expr, span),
         Stmt.For{var: item_name, var_span: span, var2: None, kind: ForKind.In{collection: items, step: None}, body: [Stmt]{Stmt.Expr{expr: hear}}, span: span, arrow_body: false, label: None, auto_vectorization: None},
     }
-    return_type: check.scopes.return_type.copy()
+    return_type: check.scopes.return_type
     mark: sema_scope_mark(check.scopes)
     sema_scope_enter(check.scopes, check.state, "events@{at}")
     checked: sema_check_statements(statements, return_type, check, check.scopes.loop_depth)
@@ -922,7 +922,7 @@ sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expec
     at: span.start
     finding_name := "__jet_report_finding_{at}"
     place_name: "__jet_report_at_{at}"
-    return_type: check.scopes.return_type.copy()
+    return_type: check.scopes.return_type
     mark: sema_scope_mark(check.scopes)
     sema_scope_enter(check.scopes, check.state, "report@{at}")
     bound := sema_check_statements([Stmt]{sema_compiler_events_binding(finding_name, None, args[0].expr, span)}, return_type, check, check.scopes.loop_depth)
@@ -932,7 +932,7 @@ sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expec
     }
     finding_type := Type?{None}
     if sema_scope_resolve(check.scopes, finding_name) == .Val(symbol) {
-        finding_type = symbol.ty.copy()
+        finding_type = symbol.ty
     }
     facts: sema_compiler_report_facts(finding_type, check.environment.*, check.program.*) ?? {
         shown: if finding_type == .Val(ty) -> type_name(ty) else -> "this value"
@@ -1387,7 +1387,7 @@ sema_compiler_events_marker: fn(marked: Expr, check: ^SemaBodyCheck) -> MarkerDe
     written := ""
     if marked == .StructLit(type_name, _, import_ns, _, _, _, _, _) {
         written = if import_ns == .Val(namespace) -> "{namespace}.{type_name}" else -> type_name.copy()
-    } else if watched.ty == .Named(name) { written = name.copy() }
+    } else if watched.ty == .Named(name) { written = name }
     declaration := MarkerDecl?{None}
     graph: check.program.registration_graph
     if sema_type_resolve_nominal_row(graph, watched.ty, check.environment.module_identity) == .Val(row) {
@@ -1526,7 +1526,7 @@ sema_build_splice_scope: fn(splices: ^SemaBuildGenerateSplices, span: Span, name
     loop name in sema_build_generate_splice_names(splices.source) {
         if sema_scope_resolve_index(check.scopes, name) == None -> next
         local: Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
-        value: sema_check_expression(local.copy(), None, check) ?? return None
+        value: sema_check_expression(local, None, check) ?? return None
         if named && value.ty != Type.String {
             check.diagnostics.push(sema_error("E3502", span, "`#code` can't paste `#{{{name}}}`, a `{type_name(value.ty)}`", "a paste in a `Code` value writes a name or a type, and a build spells one as a String", "paste a String that spells the name or type, built from `{name}`"))
             return None

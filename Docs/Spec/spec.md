@@ -140,7 +140,8 @@ vocabulary](vocabulary.md).
   CompilerCall: its written `name` (a CompilerName), its `args` in written
   order and its `receiver`, each a CompilerArg with its `label`, `type` (a
   TypeId; `_` when the argument's own check fails), `value`, the
-  `function` it names and its `span`. An argument that names a declared
+  `function` it names, its `span` and the parts it is `written` with. An
+  argument that names a declared
   function by its bare name, as `f.reflect()` resolves it, carries that
   function's FunctionInfo in `function`; any other argument's is None. A type
   name (`Checkout`) checks where a `Type` is expected and is heard as that
@@ -155,8 +156,14 @@ vocabulary](vocabulary.md).
   a `Type` as the Text of the path it names (`"main.Checkout"`).
   Any other argument's `value` is None
   (an optional field, a byte list, a generic type, a written codec, a
-  value only the run knows). The call's `span` runs from its name to its
-  last argument.
+  value only the run knows). An argument written as a String literal with
+  at least one hole carries its parts in `written`, a
+  `[CompilerWrittenPart]` in order: a `.Text{text}` for each run of text
+  and a `.Hole{name, span}` for each hole, its `name` the hole's bare name
+  or None for any other hole (`"/users/{id}"` is a Text and a Hole named
+  `id`). Any other argument's `written` is None: a literal without holes,
+  a constant, a local, a literal in parentheses. The call's `span` runs
+  from its name to its last argument.
   `reject(finding, at: part)` ends the rule
   with a value whose type implements `Diagnostic`, raised at `part`'s span:
   the call, `call.name` or one argument, the call when `at:` is not written.

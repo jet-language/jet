@@ -201,13 +201,18 @@ sema_comptime_body_source_append: fn(context: ^SemaCheckContext, source: SemaCom
     sema_comptime_body_source_index(context, context.comptime_body_sources.len() - 1)
 }
 
+// Drops the source rows from `length` on, and each index entry that points at
+// one of them: a place keeps its first row, so the entry of a dropped row
+// that is a later duplicate stays on the earlier row.
 sema_comptime_body_sources_truncate: fn(context: ^SemaCheckContext, length: Int) Never! {
     loop context.comptime_body_sources.len() > length {
         row: context.comptime_body_sources.len() - 1
-        slot: sema_comptime_module_slot(context.comptime_body_source_modules, context.comptime_body_sources[row].module_identity) ?? panic("a body source has no module index")
-        key: sema_comptime_body_source_place_find(context.comptime_body_source_rows[slot], context.comptime_body_sources[row]) ?? panic("an indexed body source lost its owner")
-        if (context.comptime_body_source_rows[slot].rows.get(key) ?? -1) == row {
-            context.comptime_body_source_rows[slot].rows[key] = -1
+        if sema_comptime_module_slot(context.comptime_body_source_modules, context.comptime_body_sources[row].module_identity) == .Val(slot) {
+            if sema_comptime_body_source_place_find(context.comptime_body_source_rows[slot], context.comptime_body_sources[row]) == .Val(key) {
+                if (context.comptime_body_source_rows[slot].rows.get(key) ?? -1) == row {
+                    context.comptime_body_source_rows[slot].rows[key] = -1
+                }
+            }
         }
         _ := context.comptime_body_sources.pop()
     }
@@ -291,9 +296,7 @@ sema_comptime_body_values_append_items: fn(publication: ^SemaComptimeBodyValues,
         if publication.length != 0 -> panic("a body prefix lost its facts owner")
         publication.facts = Val(Shared{SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [Int]{}, first_rows: [SemaComptimePlaceRows]{}, second_rows: [[SemaComptimePlaceKey:Int]]{}, indexed_rows: 0}})
     }
-    // copy: a handle copy (Shared facts, refcount bump): the append runs through `facts` while the
-    // write-borrowed publication still owns its handle.
-    facts: publication.facts.copy() ?? panic("body publication has no facts owner")
+    facts: publication.facts ?? panic("body publication has no facts owner")
     count_key_bytes: if publication.work == .Val(_) -> true else -> false
     added: sema_comptime_body_facts_append_items(facts, values, from, publication.length, count_key_bytes)
     if added.rows == 0 -> panic("the authenticated body frontier contained no new body row")

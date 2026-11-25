@@ -1,0 +1,23 @@
+// What only Core writes gets the ordinary visibility errors in a user
+// package, the same as the package's own `priv` field: a Core-only failure
+// record's literal, with its field written or left out, an `IOContext`
+// annotation, and core.text's `Cursor`, whose `handle` is `priv`.
+use text: core.text
+
+texts: module {
+    TextFault: struct {
+        priv message: String,
+    }
+}
+
+failure: fn() -> TextError Never! { TextError{message: "invalid"} }
+
+own_failure: fn() -> texts.TextFault Never! { texts.TextFault{message: "invalid"} }
+
+range: fn() -> RangeError Never! { RangeError{} }
+
+retain: fn(context: IOContext) -> IOContext Never! { context }
+
+cursor: fn() -> text.Cursor Never! { text.Cursor{handle: 1} }
+
+run: fn() {}

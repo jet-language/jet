@@ -679,6 +679,7 @@ body_codec_put_semacallruleheard: fn(out: ^BodyCodecOut, value: SemaCallRuleHear
     body_codec_put_list_tcomptimevalue(out, value.types)
     body_codec_put_list_tcomptimevalue(out, value.values)
     body_codec_put_list_tcomptimevalue(out, value.functions)
+    body_codec_put_list_tcomptimevalue(out, value.written)
 }
 
 body_codec_get_semacallruleheard: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCallRuleHeard Never! {
@@ -687,7 +688,8 @@ body_codec_get_semacallruleheard: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCa
     f2: body_codec_get_list_tcomptimevalue(bytes, input)
     f3: body_codec_get_list_tcomptimevalue(bytes, input)
     f4: body_codec_get_list_tcomptimevalue(bytes, input)
-    SemaCallRuleHeard{words: f0, texts: f1, types: f2, values: f3, functions: f4}
+    f5: body_codec_get_list_tcomptimevalue(bytes, input)
+    SemaCallRuleHeard{words: f0, texts: f1, types: f2, values: f3, functions: f4, written: f5}
 }
 
 body_codec_put_list_semacomputecallfact: fn(out: ^BodyCodecOut, values: [SemaComputeCallFact]) Never! {

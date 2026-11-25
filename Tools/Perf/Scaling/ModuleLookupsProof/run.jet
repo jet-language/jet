@@ -21,7 +21,7 @@ package: {
 }
 
 use {
-    jet_scaling_gate.[Receipt, absolute, js, options, run_gate, scratch_root]
+    jet_scaling_gate.[Receipt, absolute, dev_root, js, options, run_gate]
     crypto: core.crypto
     files: core.files
     json: core.encoding.json
@@ -99,8 +99,10 @@ run: fn() {
     if files.exists(root) -> process.fail(1, "Proof directory already exists: {root}")
     compiler: absolute(compiler_flag)
     compiler_sha256: crypto.sha256(files.read_bytes(compiler) ?? process.fail(1, "{err}")).hex()
-    gate: ["--compiler", "candidate=bootstrap:{compiler}", "--shape", "comptime", "--ladder", "comptime={SIZES.map(fn(n) { "{n}" }).join(",")}", "--mode", "counters", "--jobs", "1", "--layout", "files", "--seed", "1", "--memory-max", "8G", "--timeout", "60", "--work-dir", root, "--build-root", files.join(files.join(scratch_root(), "scaling-module-lookups"), files.basename(root))]
-    config: options(gate, sys.executable().removesuffix(TOOL)) ?? process.fail(1, err.message)
+    repo: sys.executable().removesuffix(TOOL)
+    scratch: dev_root(repo, "JET_SCRATCH_ROOT") ?? process.fail(1, err.message)
+    gate: ["--compiler", "candidate=bootstrap:{compiler}", "--shape", "comptime", "--ladder", "comptime={SIZES.map(fn(n) { "{n}" }).join(",")}", "--mode", "counters", "--jobs", "1", "--layout", "files", "--seed", "1", "--memory-max", "8G", "--timeout", "60", "--work-dir", root, "--build-root", files.join(files.join(scratch, "scaling-module-lookups"), files.basename(root))]
+    config: options(gate, repo) ?? process.fail(1, err.message)
     receipt: run_gate(config) ?? process.fail(1, err.message)
     counts := [Count]{}
     baseline := Float?{None}

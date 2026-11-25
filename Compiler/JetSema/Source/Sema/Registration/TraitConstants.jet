@@ -387,7 +387,7 @@ sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, na
         given := Expr?{None}
         loop field in written {
             if field.name == declared.name {
-                given = Val(field.value.copy())
+                given = Val(field.value)
                 break
             }
         }
@@ -398,7 +398,7 @@ sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, na
             result = sema_trait_constant_eval(graph, default_value, field_type, record.module_identity, record.module_identity)
         }
         if result == .Value(value) {
-            values.push(TComptimeField{name: declared.name.copy(), value: value.copy()})
+            values.push(TComptimeField{name: declared.name.copy(), value: value})
         } else { return result }
     }
     SemaTraitConstantEval.Value{value: TComptimeValue.Struct{type_name: name.copy(), fields: values}}
@@ -648,18 +648,18 @@ sema_trait_constant_collect: fn(graph: SemaRegistrationGraph, row: SemaRegistrat
                 if constant.name == declaration.name {
                     given = true
                     if sema_trait_constant_eval(graph, constant.value, ty, module_identity, trait_module) == .Value(result) {
-                        value = Val(result.copy())
+                        value = Val(result)
                     }
                     break
                 }
             }
             if !given && declaration.default == .Val(default_value) {
                 if sema_trait_constant_eval(graph, default_value, ty, trait_module, trait_module) == .Value(result) {
-                    value = Val(result.copy())
+                    value = Val(result)
                 }
             }
         }
-        found.push(SemaTraitConstantFound{name: declaration.name.copy(), trait_name: trait_name.copy(), ty: ty, value: value})
+        found.push(SemaTraitConstantFound{name: declaration.name, trait_name: trait_name.copy(), ty: ty, value: value})
         if member != None {
             return
         }

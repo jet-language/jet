@@ -114,7 +114,7 @@ jet_cli_structure_core_declared: fn() -> [String:[String]] Never! {
     loop record in CORE_CALLS {
         if record.module_name == "" -> next
         key: jet_cli_structure_core_source_key(record) ?? next
-        module_name: key.slice(0, key.rfind("."))
+        module_name: key.rpartition(".").head
         if !modules.contains(module_name) -> modules.push(module_name)
     }
     loop source in jet_cli_builtin_core_rows() {

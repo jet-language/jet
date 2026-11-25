@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     core: core
     files: core.files
     sys: core.sys
@@ -453,8 +454,8 @@ suite_row_field: fn(text: String) -> String Never! {
 /// `t.suite(name, body)`: run `body` when this run is the profile child of
 /// the code suite `name` (JET_TEST_SUITE), recording its rows in
 /// JET_TEST_SUITE_ROWS and selecting them by JET_TEST_SUITE_FILTER; any
-/// other run skips it.
-priv __suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
+/// other run skips it. The compiler calls it through the TestSuiteRun role.
+#Builtin.Role(.TestSuiteRun) priv __suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
     if (sys.get("JET_TEST_SUITE") ?? "") != name {
         return
     }
@@ -1463,9 +1464,9 @@ DeterministicWorld: struct {
     history: fn(self) -> String { world_rt.world_history(self) }
 }
 
-// I9: exact interpreter DiagnosticErr cleanup needs an error-capture rail.
-// Preserve the existing native lifecycle rather than changing Err-path order.
-world: fn(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
+/// Runs `body` once in a fresh deterministic world; returns when the world's
+/// tasks are idle.
+world: fn(body: fn(DeterministicWorld)) Never! { world_rt.world(body) }
 
 status: fn(comparison: TestComparison) -> String Never! { comparison.status }
 

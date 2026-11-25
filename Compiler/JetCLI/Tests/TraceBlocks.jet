@@ -43,9 +43,9 @@ blocks_counter: fn(trace: String, name: String) -> Int Never! {
     marker: "\"args\":{{\"value\":"
     loop line in trace.lines() {
         if !line.starts_with(head) -> next
-        at: line.find(marker)
-        if at < 0 -> return -1
-        return Int.parse(line.slice(at + marker.len(), line.len() - 3)) ?? -1
+        cut: line.partition(marker)
+        if cut.sep == "" -> return -1
+        return Int.parse(cut.tail.slice(0, cut.tail.len() - 3)) ?? -1
     }
     -1
 }

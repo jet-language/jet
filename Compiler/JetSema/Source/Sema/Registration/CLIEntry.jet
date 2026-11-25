@@ -197,7 +197,7 @@ sema_cli_entry_expand_imported: fn(program: ^Program, imported: [Item]) {
             ty: sema_cli_entry_param(imported, target.function) ?? next
             if ty == .Named(name) {
                 if name.contains(".") -> next
-                type_name = name.copy()
+                type_name = name
             } else { next }
             qualifier = "{alias}."
         } else {
@@ -243,7 +243,7 @@ sema_cli_entry_pending: fn(items: [Item]) -> [SemaCLIEntryTarget] {
                             }
                         } else if sema_output_path(value) == .Val(path) {
                             if path.members.len() == 1 {
-                                targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: path.members[0].name.copy(), module_alias: Val(path.root.copy())})
+                                targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: path.members[0].name.copy(), module_alias: Val(path.root)})
                             }
                         }
                     }

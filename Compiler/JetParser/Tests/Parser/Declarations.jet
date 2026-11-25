@@ -719,7 +719,10 @@ inbody_test_apply: fn(source: String, edits: [TextEdit]) -> String {
     text := source
     loop index in 0..<edits.len() {
         edit: edits[edits.len() - 1 - index]
-        text = "{text.slice(0..<edit.span.start)}{edit.new_text}{text.slice(edit.span.end..<text.count_bytes())}"
+        bytes: text.bytes()
+        head: String.from_bytes(bytes.slice(0, edit.span.start)) ?? panic("an edit span keeps whole characters")
+        tail: String.from_bytes(bytes.slice(edit.span.end, bytes.len())) ?? panic("an edit span keeps whole characters")
+        text = "{head}{edit.new_text}{tail}"
     }
     text
 }

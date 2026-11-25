@@ -1039,7 +1039,7 @@ C_APP_DEFAULT_PORT: 8080
 // port, over a `port` the program passes (the platform or `jet dev` that runs
 // the program owns the port); else the program's `port`; else 8080. A
 // `JET_APP_PORT` that holds no port stops with E2809 instead of falling back.
-priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
+#Builtin.Role(.AppPortEnv) priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
     asked: if requested == .Val(port) -> "serve(port: {port})" else -> ""
     raw: sys_rt.env_value("JET_APP_PORT") ?? return AppPort{port: requested ?? C_APP_DEFAULT_PORT, source: if asked == "" -> "the default, with no JET_APP_PORT and no serve port" else -> asked}
     text: String.from_bytes(raw) ?? ""
@@ -1052,7 +1052,7 @@ priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
 
 // Whether `jet dev` runs this program (it sets JET_DEV=1): `jet dev`
 // restarts the program on every change, and the served pages reload.
-priv __app_dev: fn() -> Bool Never! {
+#Builtin.Role(.AppDevEnv) priv __app_dev: fn() -> Bool Never! {
     raw: sys_rt.env_value("JET_DEV") ?? return false
     (String.from_bytes(raw) ?? "") == "1"
 }
@@ -1444,9 +1444,9 @@ priv app_screen_response: fn(app: App, screen: calls.AppScreen, request: HTTPReq
         name: segment.removeprefix(":")
         fields[name] = request.param(name) ?? ""
     }
-    at: request.path.find("?")
-    if at >= 0 && screen.query.len() > 0 {
-        query: web_http.query_decode_strict(request.path.slice(at + 1, request.path.len())) ?? return app_not_found_response(app, request)
+    cut: request.path.partition("?")
+    if cut.sep != "" && screen.query.len() > 0 {
+        query: web_http.query_decode_strict(cut.tail) ?? return app_not_found_response(app, request)
         loop name in screen.query {
             if web_http.query_get(query, name) == .Val(value) -> fields[name] = value
         }
@@ -3431,7 +3431,7 @@ C_APP_TRACE_MAX_QUEUE: 2048
 C_APP_TRACE_BATCH: 512
 
 // The OTEL_* variables the export reads, by name; an unset one is absent.
-priv __app_trace_env: fn() -> [String:String] Never! {
+#Builtin.Role(.AppTraceEnv) priv __app_trace_env: fn() -> [String:String] Never! {
     values := [String:String]{}
     app_trace_env_put(values, "OTEL_SDK_DISABLED")
     app_trace_env_put(values, "OTEL_TRACES_EXPORTER")
@@ -4751,11 +4751,9 @@ priv app_push_test_job_run: fn(key: String, order: [Int]) -[Net]> Never! {
 
 // The text of `seen` between the first `start` and the `end` after it.
 priv app_push_test_between: fn(seen: String, start: String, end: String) -> String Never! {
-    at: seen.find(start)
-    if at < 0 -> panic("`{start}` is not in:\n{seen}")
-    rest: seen.slice(at + start.len(), seen.len())
-    stop: rest.find(end)
-    rest.slice(0, if stop < 0 -> rest.len() else -> stop)
+    cut: seen.partition(start)
+    if cut.sep == "" -> panic("`{start}` is not in:\n{seen}")
+    cut.tail.partition(end).head
 }
 
 // The status a registration of `body` at `/__jet/push/devices` answers,

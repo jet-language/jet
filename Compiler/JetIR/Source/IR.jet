@@ -1007,6 +1007,12 @@ ir_helper_error: fn(m: IRModule, key: String) -> String? Never! {
     Val(m.helper_messages[index].copy())
 }
 
+// The message of helper `key`, whose memo marks it failed (-2): every such
+// mark is written together with ir_helper_failed for the same key.
+ir_failed_helper_message: fn(m: IRModule, key: String) -> String Never! {
+    ir_helper_error(m, key) ?? panic("a helper marked failed has no message")
+}
+
 // The members memoized under `memo` in `table` (an index into
 // m.member_lists, at the memo's id in `keys`), if any.
 ir_members_memo: fn(m: IRModule, keys: NameTable, table: [Int], memo: String) -> [IRMember]? Never! {

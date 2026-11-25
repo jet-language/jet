@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     core: core
     sys: core.sys
     process: core.process
@@ -861,7 +862,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
 // spec already keeps is IOError.InvalidInput, and a failed duplication is
 // IOError.Other. A kept FileLock's duplicate shares its lock, so the lock
 // stays held while the child (or anything it starts) keeps the descriptor.
-priv __spec_keep_open: fn(spec: ProcessSpec, handle: ^^Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
+#Builtin.Role(.ProcessSpecKeepOpen) priv __spec_keep_open: fn(spec: ProcessSpec, handle: ^^Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
     fd: if handle == {
         .FileReader(reader) -> rt.reader_fd(reader) ?? -1
         .FileWriter(writer) -> rt.writer_fd(writer) ?? -1

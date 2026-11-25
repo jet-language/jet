@@ -6,17 +6,27 @@ use {
 // it through roots.sh, node tools through roots.mjs (which asks roots.sh), and
 // Jet tools through Roots.jet. A Jet file import cannot leave its directory,
 // so a directory whose tools read the roots holds a byte-identical copy of
-// Tools/Agent/Roots.jet. No other source under Tools/Agent spells a root's
-// default; the gauntlet entries RootsSh and RootsMjs prove the three readers
-// agree.
+// Tools/Agent/Roots.jet; a package source, which cannot hold that program,
+// runs `jet Tools/Agent/Roots.jet NAME`. No other Jet source under Tools, and
+// no shell or node source under Tools/Agent, spells a root's default; the
+// gauntlet entries RootsSh and RootsMjs prove the three readers agree.
 TOOL_ROOTS_TABLE: "Tools/Agent/roots.env"
 TOOL_ROOTS_READER: "Tools/Agent/Roots.jet"
-TOOL_ROOTS_DIR: "Tools/Agent"
+TOOL_ROOTS_DIR: "Tools"
+TOOL_ROOTS_AGENT_DIR: "Tools/Agent/"
 
-// Text that only a default of the table spells.
-TOOL_ROOTS_DEFAULTS: [String]{"/jet-dev\"", "/jet-dev}}", "/jet-dev/", "/jet-seeds", "/discovery/base"}
+// Text that only a default of the table spells: a path through a default, or
+// its directory name as a word a path is joined from.
+TOOL_ROOTS_DEFAULTS: [String]{"/jet-dev\"", "/jet-dev}}", "/jet-dev/", "\"jet-dev\"", "/jet-seeds", "\"jet-seeds\"", "/discovery/base"}
 
-#Test("every Roots.jet under Tools/Agent is a copy of Tools/Agent/Roots.jet") {
+// Whether the guard reads `path`: every Jet source under Tools, and the shell
+// and node sources under Tools/Agent.
+tool_roots_checked: fn(path: String) -> Bool {
+    if path.ends_with(".jet") -> return true
+    path.starts_with(TOOL_ROOTS_AGENT_DIR) && (path.ends_with(".sh") || path.ends_with(".mjs"))
+}
+
+#Test("every Roots.jet under Tools is a copy of Tools/Agent/Roots.jet") {
     guards_enter_root()
     reader: tool_roots_files.read(TOOL_ROOTS_READER) ?? panic("read {TOOL_ROOTS_READER}: {err}")
     copies := 0
@@ -30,14 +40,13 @@ TOOL_ROOTS_DEFAULTS: [String]{"/jet-dev\"", "/jet-dev}}", "/jet-dev/", "/jet-see
     assert(copies > 1, "no copy of {TOOL_ROOTS_READER} found")
 }
 
-#Test("no source under Tools/Agent but the roots table spells a root's default") {
+#Test("no source under Tools but the roots table spells a root's default") {
     guards_enter_root()
     assert(tool_roots_files.exists(TOOL_ROOTS_TABLE), "{TOOL_ROOTS_TABLE} is missing")
     found := [String]{}
     loop item in tool_roots_files.walk_files(TOOL_ROOTS_DIR) {
         entry: item ?? panic("walk {TOOL_ROOTS_DIR}: {err}")
-        if entry.path.ends_with("/roots.env") -> next
-        if !(entry.path.ends_with(".jet") || entry.path.ends_with(".sh") || entry.path.ends_with(".mjs")) -> next
+        if !tool_roots_checked(entry.path) || entry.path.ends_with("/Roots.jet") -> next
         source: tool_roots_files.read(entry.path) ?? next
         loop line in source.lines() {
             loop text in TOOL_ROOTS_DEFAULTS {

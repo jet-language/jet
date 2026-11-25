@@ -36,50 +36,59 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use it from inside its enclosing module, or remove `priv` from the module or field.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.PrivateItem</code>: <code>Tests/UI/core_leaf_ordinary_visibility.stderr</code>.</p>
-<pre class="diag">Error: Jet.PrivateItem: `stdin_line` is private to its module
-  --&gt; Tests/UI/core_leaf_ordinary_visibility.jet:13:16
+<p>First UI snapshot mentioning <code>Jet.PrivateItem</code>: <code>Tests/UI/core_construct_ordinary_visibility.stderr</code>.</p>
+<pre class="diag">Error: Jet.PrivateItem: `message` is private to its module
+  --&gt; Tests/UI/core_construct_ordinary_visibility.jet:13:47
     |
- 13 |     line: term.stdin_line() ?? return
-    |                ^^^^^^^^^^
+ 13 | failure: fn() -&gt; TextError Never! { TextError{message: &quot;invalid&quot;} }
+    |                                               ^^^^^^^
  Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type&#39;s module
- Fix: Use `stdin_line` from inside its module, or remove `priv` from its module or field
+ Fix: Use `message` from inside its module, or remove `priv` from its module or field
 More: jet-lang.dev/e/Jet.PrivateItem
 
-Error: Jet.PrivateItem: `string_byte` is private to its module
-  --&gt; Tests/UI/core_leaf_ordinary_visibility.jet:15:20
+Error: Jet.PrivateItem: `message` is private to its module
+  --&gt; Tests/UI/core_construct_ordinary_visibility.jet:15:63
     |
- 15 |     print(encoding.string_byte(&quot;a&quot;, 0))
-    |                    ^^^^^^^^^^^
+ 15 | own_failure: fn() -&gt; texts.TextFault Never! { texts.TextFault{message: &quot;invalid&quot;} }
+    |                                                               ^^^^^^^
  Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type&#39;s module
- Fix: Use `string_byte` from inside its module, or remove `priv` from its module or field
+ Fix: Use `message` from inside its module, or remove `priv` from its module or field
 More: jet-lang.dev/e/Jet.PrivateItem
 
-Error: Jet.PrivateItem: `bytes_into_text` is private to its module
-  --&gt; Tests/UI/core_leaf_ordinary_visibility.jet:16:20
+Error: Jet.PrivateItem: `RangeError` can&#39;t be built here: its field `reason` is private to its module
+  --&gt; Tests/UI/core_construct_ordinary_visibility.jet:17:36
     |
- 16 |     print(encoding.bytes_into_text([97]))
-    |                    ^^^^^^^^^^^^^^^
+ 17 | range: fn() -&gt; RangeError Never! { RangeError{} }
+    |                                    ^^^^^^^^^^^^
  Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type&#39;s module
- Fix: Use `bytes_into_text` from inside its module, or remove `priv` from its module or field
+ Fix: Get a `RangeError` from a function of its module, or remove `priv` from `reason`
 More: jet-lang.dev/e/Jet.PrivateItem
 
-Error: Jet.PrivateItem: `shared_create` is private to its module
-  --&gt; Tests/UI/core_leaf_ordinary_visibility.jet:17:16
+Error: Jet.PrivateItem: `IOContext` is private to its module
+  --&gt; Tests/UI/core_construct_ordinary_visibility.jet:19:21
     |
- 17 |     token: sys.shared_create(8) ?? return
-    |                ^^^^^^^^^^^^^
+ 19 | retain: fn(context: IOContext) -&gt; IOContext Never! { context }
+    |                     ^^^^^^^^^
  Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type&#39;s module
- Fix: Use `shared_create` from inside its module, or remove `priv` from its module or field
+ Fix: Use `IOContext` from inside its module, or remove `priv` from its module or field
 More: jet-lang.dev/e/Jet.PrivateItem
 
-Error: Jet.PrivateItem: `exit` is private to its module
-  --&gt; Tests/UI/core_leaf_ordinary_visibility.jet:19:13
+Error: Jet.PrivateItem: `IOContext` is private to its module
+  --&gt; Tests/UI/core_construct_ordinary_visibility.jet:19:35
     |
- 19 |     process.exit(3)
-    |             ^^^^
+ 19 | retain: fn(context: IOContext) -&gt; IOContext Never! { context }
+    |                                   ^^^^^^^^^
  Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type&#39;s module
- Fix: Use `exit` from inside its module, or remove `priv` from its module or field
+ Fix: Use `IOContext` from inside its module, or remove `priv` from its module or field
+More: jet-lang.dev/e/Jet.PrivateItem
+
+Error: Jet.PrivateItem: `handle` is private to its module
+  --&gt; Tests/UI/core_construct_ordinary_visibility.jet:21:50
+    |
+ 21 | cursor: fn() -&gt; text.Cursor Never! { text.Cursor{handle: 1} }
+    |                                                  ^^^^^^
+ Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type&#39;s module
+ Fix: Use `handle` from inside its module, or remove `priv` from its module or field
 More: jet-lang.dev/e/Jet.PrivateItem
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

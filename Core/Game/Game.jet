@@ -9,7 +9,7 @@ package: {
     }
 }
 
-use core
+use game_rt: jet.runtime.rt
 
 // core.game — canonical scene/replay/backend handles.
 //
@@ -18,9 +18,8 @@ use core
 // registered constructors retain scene assets, input, replay, and scheduling
 // state; a plain source record cannot represent those runtime identities.
 // Runs the scene's frame loop and returns its transcript. The loop borrows
-// the scene mutably, so the scene is a `:=` name, not a temporary.
-// The qualified call is deliberate: inside this package it selects the
-// runtime's frame-loop leaf.
+// the scene mutably, so the scene is a `:=` name, not a temporary. The loop
+// itself is the runtime's (jet.runtime.rt.game_run).
 run: fn(scene: ^GameScene, replay: GameReplay?{None}, backend: GameBackend?{None}, frames: Int?{None}) -> String {
-    core.game.run(scene, replay, backend, frames)
+    game_rt.game_run(scene, replay, backend, frames)
 }

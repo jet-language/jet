@@ -15,6 +15,7 @@
 use {
     core.[collections, files, math, process, regex, sys, time]
     core.encoding.json
+    roots: "Roots"
 }
 
 GCC: "/nix/store/l5qkpzsr4gxvksh45b3nhxbkyr5cviar-gcc-wrapper-15.3.0/bin/gcc"
@@ -66,11 +67,14 @@ Row: struct {
 }
 
 run: fn() -> Never Err! {
+    // The dev tool roots (Tools/Agent/roots.env), single quoted so any path
+    // reads back as itself.
+    state: roots.value("JET_STATE_ROOT").replace("'", "'\\''")
+    scratch: roots.value("JET_SCRATCH_ROOT").replace("'", "'\\''")
     vars: sys.env_text(
         """
-        STATE=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
-        BENCH=${{BENCH_DIR-${{JET_SCRATCH_ROOT:-$STATE}}/bench-hello}}
-        JET=${{JET-$STATE/scratch/jet-release-night12/jet}}
+        BENCH=${{BENCH_DIR-'{scratch}'/bench-hello}}
+        JET=${{JET-'{state}'/scratch/jet-release-night12/jet}}
         ONLY=${{ONLY-}}
         """,
         sys.environment(),

@@ -1114,9 +1114,7 @@ sema_derive_coerce_enum_arm: fn(expansion: SemaDeriveExpansion, cond: Expr, subj
             if right == .EnumLit(_, variant, _, args, _, span, _) {
                 return sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span, spliced)
             }
-            // copy: the derive template condition is expanded once per deriving declaration, so the
-            // template keeps `cond` and an uncoerced condition is copied into this expansion.
-            cond.copy()
+            cond
         }
         // copy: the derive template condition is expanded once per deriving declaration, so the
         // template keeps `cond` and a non-binary condition is copied into this expansion.
@@ -3624,7 +3622,7 @@ sema_derive_computed_getters: fn(items: ^[Item]) {
                             declared_footprint: None,
                         },
                     }
-                    getter.return_type = Val(field.ty.copy())
+                    getter.return_type = Val(field.ty)
                     getter.return_type_span = Val(field.ty_span)
                     value := sema_inline_rewrite_expr(rewrite, formula)
                     // A field `#Memo` with arguments is refused (E0382) and keeps no store.
@@ -3662,14 +3660,14 @@ sema_computed_field_memo_helper_func: fn(definition: StructDef, field: Field, ma
     loop site in comptime_walk_identifiers(formula) -> named.push(site.name)
     helper := ast_func(sema_computed_field_memo_helper(field.name), field.name_span, field.name_span)
     helper.compiler_generated = true
-    helper.markers = [Marker]{marker.copy()}
+    helper.markers = [Marker]{marker}
     params := [Param]{}
     if named.contains("self") {
         params.push(sema_computed_field_param("self", Type.Named{name: ""}, field.name_span))
     }
     loop sibling in definition.fields {
         if sibling.name != field.name && named.contains(sibling.name) {
-            params.push(sema_computed_field_param(sibling.name, sibling.ty.copy(), sibling.name_span))
+            params.push(sema_computed_field_param(sibling.name, sibling.ty, sibling.name_span))
         }
     }
     helper.params = params

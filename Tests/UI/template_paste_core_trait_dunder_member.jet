@@ -1,0 +1,24 @@
+// A package's marker template can't paste a Core trait's reserved `__` member
+// into the impl it emits (core.math's `GeometryPoint.__coordinates`): its
+// pastes are its own writing, so E0067 applies as it does to its source.
+use math: core.math
+
+Located: struct {
+    impl Marker {
+        sites: [.Type],
+
+        expand: fn(self, target: Target) {
+            hook: "__coordinates"
+            impl math.GeometryPoint {
+                #{hook}: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! { {x: 1.0, y: 2.0, frame_id: 0} }
+            }
+        }
+    }
+}
+
+#Located
+Spot: struct {
+    x: Float,
+}
+
+run: fn() { print(Spot{x: 1.0}.x) }

@@ -195,6 +195,7 @@ use {
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_PANIC_ROOT,
+        CORE_ROLE_TYPED_DECODE_READ,
         build_debug_keep_sources,
         authority_expert_only,
         effect_scope_read_paths,
@@ -3079,9 +3080,9 @@ jet_driver_comptime_forget_functions: fn(checked_functions: ^[SemaComptimeFuncti
 // of every module, from the declaration pass's modules when they are the
 // graph's whole module set (`staging.declared`, read in place), else from
 // every module checked under the values so far, on up to `threads` compiler
-// threads. A value that lands later changes only its own
-// constant's row (sema_comptime_staged_constant_rows), which each build
-// takes over (jet_driver_comptime_ir_build), so one staging serves the run.
+// threads. A value that lands later changes only its own constant's row,
+// which each build takes over (jet_driver_comptime_ir_build), so one staging
+// serves the run.
 // `programs` is the run's one-row program tables slot, which the declaration
 // checks move into their threads' shared state and back
 // (sema_comptime_modules_with_values).
@@ -5051,8 +5052,8 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
 // source, and a debugger's evaluation in a Core frame, whose expression is
 // a function appended to that unit that no body calls), which lowering roots
 // whole, the methods lowering selects by owner type
-// (ir_core_method_lowered_by_owner) and the `__Decoding` reads it selects by
-// target (ir_core_decoding_read).
+// (ir_core_method_lowered_by_owner) and the sibling reads it selects by the
+// target of the TypedDecodeRead read (ir_core_decoding_read).
 jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bool]) -> NameTable Never! {
     roots := name_table_sized(256)
     loop module_row in graph.modules {
@@ -5071,8 +5072,12 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bo
             }
         }
         loop nominal in module_row.nominals {
+            fills_read := false
             loop method in nominal.methods {
-                if ir_core_method_lowered_by_owner(method.declaration.name) || ir_core_decoding_read(identity_text, nominal.symbol.name, method.declaration.name) {
+                if sema_core_role(method.declaration.markers, graph, identity) == CORE_ROLE_TYPED_DECODE_READ -> fills_read = true
+            }
+            loop method in nominal.methods {
+                if ir_core_method_lowered_by_owner(method.declaration.name) || ir_core_decoding_read(fills_read, method.declaration.name) {
                     _ := name_intern(roots, symbol_table_key(graph.symbols, method.symbol.id))
                 }
             }
@@ -7661,12 +7666,12 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [Stri
 // `serve` reads JET_APP_PORT, which `jet run`, `jet dev` and the platform set
 // to choose the port, JET_DEV, which `jet dev` sets, and the OpenTelemetry
 // SDK's OTEL_* variables, which the platform sets to name the collector its
-// served app traces to (core.web `__app_port`, `__app_dev`,
-// `__app_trace_env`). The toolchain owns those variables, as it owns the
-// typed CLI's parse, so no such read charges the package Env; a program's
-// own env read still does.
+// served app traces to (the core.web functions that fill the AppPortEnv,
+// AppDevEnv and AppTraceEnv roles). The toolchain owns those variables, as it
+// owns the typed CLI's parse, so no such read charges the package Env; a
+// program's own env read still does.
 jet_driver_toolchain_env_read: fn(function: FnBody) -> Bool {
-    function.module_name == "core.web" && (function.name == "__app_port" || function.name == "__app_dev" || function.name == "__app_trace_env")
+    function.role == "AppPortEnv" || function.role == "AppDevEnv" || function.role == "AppTraceEnv"
 }
 
 // The edges an effect walk follows from `function`: its call edges, then the
