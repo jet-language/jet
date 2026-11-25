@@ -2957,7 +2957,8 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // E2305. The enclosing function's receiver and parameters stay stable
     // sources; the check only reports, and leaves the lambda's recorded
     // provenance as it was.
-    if ast_lambda_single_expr_span(lambda.body) != None && program.registration_graph == .Val(view_graph) {
+    view_graph: program.registration_graph
+    if ast_lambda_single_expr_span(lambda.body) != None {
         view_seen := [U32:Bool]{}
         if sema_check_type_contains_view(view_graph, environment.module_identity, ret_ty, view_seen) {
             saved_view_provenance := lambda_context.return_view_provenance.copy()

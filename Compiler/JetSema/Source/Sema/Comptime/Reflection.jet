@@ -2806,6 +2806,8 @@ sema_comptime_reflection_distinct_layout: fn(engine: TargetLayoutEngine, definit
 // A builtin scalar named as the subject (`U64.reflect().layout`): its fixed target
 // bytes, the same numbers a declared field of that type is laid out with.
 sema_comptime_reflection_builtin_layout: fn(graph: SemaRegistrationGraph, name: String) -> TComptimeValue? {
+    // Snapshot: a lone program's check has no target to lay a builtin out for.
+    if graph.mode == .Snapshot -> return None
     scalar: if name == "Bool" -> Type.Bool else -> jet_target_layout_numeric_type(name) ?? return None
     engine: jet_target_layout_engine_with_registry([Item]{}, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, jet_target_layout_from_machine(graph.target_machine))
     bytes: jet_target_layout_type_facts(engine, scalar) ?? return None

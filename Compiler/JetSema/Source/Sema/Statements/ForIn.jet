@@ -236,81 +236,78 @@ sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String
 // header `span`.
 sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type, span: Span, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaForInIterableFact? {
     if sema_stmt_for_in_named_type_name(collection_type) == None -> return None
-    if program.registration_graph == .Val(graph) {
-        // Impls key their target by the declaring nominal's identity, so a
-        // source type and its `Iter` resolve to that nominal first (a Core
-        // type written by its bare name, `HTTPBodyChunks`, included).
-        collection_identity := type_identity_key(collection_type)
-        if sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
-            collection_identity = graph.modules[row.module_index].nominals[row.row].identity_key
-        }
-        iterable: sema_stmt_for_in_trait_impl(graph, "Iterable", collection_identity) ?? return None
-        iter_type := Type?{None}
-        loop index in 0..<iterable.associated_names.len() {
-            if iterable.associated_names[index] == "Iter" {
-                iter_type = Val(iterable.associated_types[index])
-            }
-        }
-        resolved_iter_type: iter_type ?? return None
-        if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
-        iterator_identity := type_identity_key(resolved_iter_type)
-        if sema_type_resolve_nominal_row_at(graph, resolved_iter_type, iterable.module_index) == .Val(iter_row) {
-            iterator_identity = graph.modules[iter_row.module_index].nominals[iter_row.row].identity_key
-        }
-        iterator: sema_stmt_for_in_trait_impl(graph, "Iterator", iterator_identity) ?? return None
-        item_type := Type?{None}
-        error_type := Type?{None}
-        loop index in 0..<iterator.associated_names.len() {
-            if iterator.associated_names[index] == "Item" {
-                item_type = Val(iterator.associated_types[index])
-            }
-            if iterator.associated_names[index] == "Error" {
-                error_type = Val(iterator.associated_types[index])
-            }
-        }
-        item: item_type ?? return None
-        iter_key: iterable.method_keys.get("iter") ?? return None
-        next_key: iterator.method_keys.get("next") ?? return None
-        failure := TTryConvert.Never
-        routed := true
-        if error_type == .Val(error) && error != (Type.Named{name: "Never"}) {
-            // The step call the header stands for: its callee is `next`
-            // (sema_failure_call_provenance names a method call by its
-            // method), so the receiver is not read.
-            step_call: Expr.MethodCall{receiver: Expr.Unit{span: span, id: AST_NODE_GENERATED}, method: "next", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
-            callee: SemaFailureCallee{key: next_key, inferable: false}
-            converted: sema_expression_propagation_conversion(Type.Result{ok: Type.Option{inner: item}, err: error}, Val(step_call), Val(callee), span, true, environment, program, scopes, context, diagnostics)
-            routed = converted != None
-            failure = converted ?? TTryConvert.Never
-        }
-        return Val(SemaForInIterableFact{
-            method_kind: TForInMethod.Iterable{coll_type: collection_identity, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item, failure: failure},
-            item_type: item,
-            routed: routed,
-        })
+    graph: program.registration_graph
+    // Impls key their target by the declaring nominal's identity, so a
+    // source type and its `Iter` resolve to that nominal first (a Core
+    // type written by its bare name, `HTTPBodyChunks`, included).
+    collection_identity := type_identity_key(collection_type)
+    if sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
+        collection_identity = graph.modules[row.module_index].nominals[row.row].identity_key
     }
-    None
+    iterable: sema_stmt_for_in_trait_impl(graph, "Iterable", collection_identity) ?? return None
+    iter_type := Type?{None}
+    loop index in 0..<iterable.associated_names.len() {
+        if iterable.associated_names[index] == "Iter" {
+            iter_type = Val(iterable.associated_types[index])
+        }
+    }
+    resolved_iter_type: iter_type ?? return None
+    if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
+    iterator_identity := type_identity_key(resolved_iter_type)
+    if sema_type_resolve_nominal_row_at(graph, resolved_iter_type, iterable.module_index) == .Val(iter_row) {
+        iterator_identity = graph.modules[iter_row.module_index].nominals[iter_row.row].identity_key
+    }
+    iterator: sema_stmt_for_in_trait_impl(graph, "Iterator", iterator_identity) ?? return None
+    item_type := Type?{None}
+    error_type := Type?{None}
+    loop index in 0..<iterator.associated_names.len() {
+        if iterator.associated_names[index] == "Item" {
+            item_type = Val(iterator.associated_types[index])
+        }
+        if iterator.associated_names[index] == "Error" {
+            error_type = Val(iterator.associated_types[index])
+        }
+    }
+    item: item_type ?? return None
+    iter_key: iterable.method_keys.get("iter") ?? return None
+    next_key: iterator.method_keys.get("next") ?? return None
+    failure := TTryConvert.Never
+    routed := true
+    if error_type == .Val(error) && error != (Type.Named{name: "Never"}) {
+        // The step call the header stands for: its callee is `next`
+        // (sema_failure_call_provenance names a method call by its
+        // method), so the receiver is not read.
+        step_call: Expr.MethodCall{receiver: Expr.Unit{span: span, id: AST_NODE_GENERATED}, method: "next", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+        callee: SemaFailureCallee{key: next_key, inferable: false}
+        converted: sema_expression_propagation_conversion(Type.Result{ok: Type.Option{inner: item}, err: error}, Val(step_call), Val(callee), span, true, environment, program, scopes, context, diagnostics)
+        routed = converted != None
+        failure = converted ?? TTryConvert.Never
+    }
+    Val(SemaForInIterableFact{
+        method_kind: TForInMethod.Iterable{coll_type: collection_identity, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item, failure: failure},
+        item_type: item,
+        routed: routed,
+    })
 }
 
 // A Core reader, one whose `next(^self)` answers `Item? E!` (`JSONReader`,
 // `CBORReader`, `CSVReader`, ...): the loop calls that `next` each step
 // (IR ir_encoding_reader_walk), so the item is the `Item` Core declares.
 sema_stmt_for_in_reader_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type) -> SemaForInIterableFact? {
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) ?? return None
-        if !module_is_core(graph.modules[row.module_index].nominals[row.row].symbol.module_identity) {
-            return None
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) ?? return None
+    if !module_is_core(graph.modules[row.module_index].nominals[row.row].symbol.module_identity) {
+        return None
+    }
+    loop method in graph.modules[row.module_index].nominals[row.row].methods {
+        if method.declaration.name != "next" -> next
+        item := sema_stmt_for_in_reader_item(method.signature) ?? next
+        if collection_type == .Apply(_, args) {
+            names: loop param in graph.modules[row.module_index].nominals[row.row].generic_params -> param.name
+            item = sema_inference_substitute_type(item, names, args)
         }
-        loop method in graph.modules[row.module_index].nominals[row.row].methods {
-            if method.declaration.name != "next" -> next
-            item := sema_stmt_for_in_reader_item(method.signature) ?? next
-            if collection_type == .Apply(_, args) {
-                names: loop param in graph.modules[row.module_index].nominals[row.row].generic_params -> param.name
-                item = sema_inference_substitute_type(item, names, args)
-            }
-            reader: graph.modules[row.module_index].nominals[row.row].identity_key
-            return Val(SemaForInIterableFact{method_kind: TForInMethod.EncodingReader{reader_type: reader}, item_type: item})
-        }
+        reader: graph.modules[row.module_index].nominals[row.row].identity_key
+        return Val(SemaForInIterableFact{method_kind: TForInMethod.EncodingReader{reader_type: reader}, item_type: item})
     }
     None
 }
@@ -1380,13 +1377,12 @@ sema_stmt_for_in_item_type: fn(collection_type: Type, method_kind: TForInMethod?
 // A body pass's tables carry no checked types, so the layout comes from the
 // struct's declaration in the registration graph.
 sema_stmt_for_in_columnar: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, item_type: Type) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        nominal_row: sema_type_resolve_nominal_row(graph, item_type, environment.module_identity) ?? return false
-        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-        if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
-        if sema_registration_nominal_source_item(nominal.source) == .Val(.Struct(definition)) {
-            return definition.layout == (Val(StructLayout.Columnar))
-        }
+    graph: program.registration_graph
+    nominal_row: sema_type_resolve_nominal_row(graph, item_type, environment.module_identity) ?? return false
+    nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+    if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
+    if sema_registration_nominal_source_item(nominal.source) == .Val(.Struct(definition)) {
+        return definition.layout == (Val(StructLayout.Columnar))
     }
     false
 }

@@ -127,9 +127,8 @@ sema_check_body_demand_replay: fn(program: SemaProgramTables, body: SemaParallel
     if body.codec_demand.len() == 0 && body.derive_demand.len() == 0 {
         return
     }
-    if program.registration_graph == .Val(graph) {
-        sema_demand_capture_replay(graph, body.codec_demand, body.derive_demand)
-    }
+    graph: program.registration_graph
+    sema_demand_capture_replay(graph, body.codec_demand, body.derive_demand)
 }
 
 sema_check_module_function: fn(ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], count_work: Bool, functions_checked: ^Int) -> SemaFunctionResult {
@@ -515,8 +514,8 @@ sema_check_body_part_in: fn(environment: SemaScopeEnvironment, program: SemaProg
 // captures each Core function's check with its demand (CoreBodies.jet).
 // Elsewhere the threads record it in the graph's shared rows.
 sema_check_body_demand_apart: fn(program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) -> return graph.core_seal
-    false
+    graph: program.registration_graph
+    graph.core_seal
 }
 
 // One thread of a body stream (sema_check_body_stream): until the stream
@@ -616,11 +615,12 @@ sema_check_body_stream_finish_module: fn(base_environment: SemaScopeEnvironment,
     }
     bodies.started = sema_check_body_stream_take_started(cells, stream_module)
     sema_host_hook_unwant(wanted)
-    if apart && program.registration_graph == .Val(graph) -> _ := sema_demand_drain(graph)
+    graph: program.registration_graph
+    if apart -> _ := sema_demand_drain(graph)
     checked := sema_check_registration_module_lent(finish_env, program, Val(SemaHostHookAccess.Withheld{wanted: wanted}), memory_plan, step.module_index, args.values, args.comptime_functions, args.comptime_rows, args.pending_obligations, bodies, "", None)
     finish_codecs := [SemaCodecWant]{}
     finish_derived := [String]{}
-    if apart && program.registration_graph == .Val(graph) {
+    if apart {
         demand := sema_demand_drain(graph)
         finish_codecs = compiler_take_rows<SemaCodecWant>(demand.codecs)
         finish_derived = compiler_take_rows<String>(demand.derived)
@@ -764,47 +764,45 @@ sema_check_body_stream_scope_copy: fn(environment: SemaScopeEnvironment) -> Sema
 // thread that records its checks' demand apart
 // (sema_check_body_demand_apart) puts each check's in its packet.
 sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: ^SemaBodyPart, claim: SemaBodyClaim, module_index: Int, wanted: Shared<SemaHostHookWanted>) -> Int {
-    if program.registration_graph == .Val(graph) {
-        sema_host_hook_unwant(wanted)
-        apart: graph.core_seal
-        if apart -> sema_demand_capture_open(graph)
-        packet_at: part.bodies.len()
-        part.scopes.type_delta = [InternerDelta]{}
-        if claim.job == {
-            .TopLevel(item_index) -> {
-                // The function's span is read through a read parameter:
-                // a pattern over the payload binding copied the function.
-                if sema_registered_top_level_func_span(graph, module_index, item_index) == .Val(func_span) {
-                    memory_position: sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", sema_registered_job_function_name(graph, claim.job, module_index), func_span)
-                    diagnostics := [Diagnostic]{}
-                    call_facts := [SemaCallSiteFact]{}
-                    comptime_requests := [SemaComptimeRequest]{}
-                    name_references := [SemaNameReferenceFact]{}
-                    checked := sema_function_check_registered_on_thread(claim.job, module_index, memory_plan, memory_position, sema_check_registered_function_id(claim.job, module_index, environment, program), TFuncKind.TopLevel, false, environment.generic_params, environment, program, part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
-                    checked = sema_check_walk_prelude_demands(checked, module_text(graph.module_table, graph.modules[module_index].module_identity))
-                    body: SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), memory_position: memory_position, memory_known: true}
-                    part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
-                }
-            }
-            .NominalMethod(ordinal, _, _) -> {
-                body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
-                part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
-            }
-            .ImplMethod(ordinal, _, _) -> {
-                body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+    graph: program.registration_graph
+    sema_host_hook_unwant(wanted)
+    apart: graph.core_seal
+    if apart -> sema_demand_capture_open(graph)
+    packet_at: part.bodies.len()
+    part.scopes.type_delta = [InternerDelta]{}
+    if claim.job == {
+        .TopLevel(item_index) -> {
+            // The function's span is read through a read parameter:
+            // a pattern over the payload binding copied the function.
+            if sema_registered_top_level_func_span(graph, module_index, item_index) == .Val(func_span) {
+                memory_position: sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", sema_registered_job_function_name(graph, claim.job, module_index), func_span)
+                diagnostics := [Diagnostic]{}
+                call_facts := [SemaCallSiteFact]{}
+                comptime_requests := [SemaComptimeRequest]{}
+                name_references := [SemaNameReferenceFact]{}
+                checked := sema_function_check_registered_on_thread(claim.job, module_index, memory_plan, memory_position, sema_check_registered_function_id(claim.job, module_index, environment, program), TFuncKind.TopLevel, false, environment.generic_params, environment, program, part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
+                checked = sema_check_walk_prelude_demands(checked, module_text(graph.module_table, graph.modules[module_index].module_identity))
+                body: SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), memory_position: memory_position, memory_known: true}
                 part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
             }
         }
-        if apart {
-            demand := sema_demand_capture_close(graph)
-            if part.bodies.len() > packet_at {
-                part.bodies[packet_at].body.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
-                part.bodies[packet_at].body.derive_demand = compiler_take_rows<String>(demand.derived)
-            }
+        .NominalMethod(ordinal, _, _) -> {
+            body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+            part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
         }
-        return 1
+        .ImplMethod(ordinal, _, _) -> {
+            body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+            part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
+        }
     }
-    0
+    if apart {
+        demand := sema_demand_capture_close(graph)
+        if part.bodies.len() > packet_at {
+            part.bodies[packet_at].body.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
+            part.bodies[packet_at].body.derive_demand = compiler_take_rows<String>(demand.derived)
+        }
+    }
+    1
 }
 
 // Claims the next rank of `queue` (one atomic add) and reads its job from
@@ -846,33 +844,28 @@ sema_registered_top_level_func_span: fn(graph: SemaRegistrationGraph, module_ind
 // Only compiler-generated nominal methods relocate their diagnostics to the
 // author-facing nominal span. Implementation methods retain their own spans.
 sema_check_generated_method_author_span: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span? {
-    if program.registration_graph == .Val(graph) {
-        if job == {
-            .NominalMethod(_, owner, row) -> {
-                if graph.modules[module_index].nominals[owner].methods[row].declaration.compiler_generated {
-                    return Val(graph.modules[module_index].nominals[owner].symbol.span)
-                }
-                return None
+    graph: program.registration_graph
+    if job == {
+        .NominalMethod(_, owner, row) -> {
+            if graph.modules[module_index].nominals[owner].methods[row].declaration.compiler_generated {
+                return Val(graph.modules[module_index].nominals[owner].symbol.span)
             }
-            .ImplMethod(_, _, _) -> return None
-            .TopLevel(_) -> panic("a top-level job entered method application")
+            None
         }
+        .ImplMethod(_, _, _) -> None
+        .TopLevel(_) -> panic("a top-level job entered method application")
     }
-    panic("a registered Jet method lost its owning graph")
 }
 
 // Is `job` a method of a compiler-generated codec impl? Its body has no
 // author to act on advice, so it reports its errors alone, as a derived
 // body does (sema_author_facing_diagnostics); they keep their own spans.
 sema_check_generated_codec_method: fn(job: SemaBodyJob, module_index: Int, program: SemaProgramTables) -> Bool {
-    // Read in place through the pattern: a `??` binding copies the graph.
-    if program.registration_graph == .Val(graph) {
-        if job == .ImplMethod(_, owner, _) {
-            return graph.modules[module_index].impls[owner].compiler_generated
-        }
-        return false
+    graph: program.registration_graph
+    if job == .ImplMethod(_, owner, _) {
+        return graph.modules[module_index].impls[owner].compiler_generated
     }
-    panic("a registered Jet method lost its owning graph")
+    false
 }
 
 sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
@@ -906,13 +899,11 @@ sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemo
 // The initial graph/scope read window closes before entering the actual
 // environment. Every summary then uses this selected module's identity/facts.
 sema_check_module_summary_scope_init: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) -> SemaScopeTable {
-    if program.registration_graph == .Val(graph) {
-        scopes := sema_scope_init(graph.modules[module_index].module_identity)
-        discarded := [Diagnostic]{}
-        _ := sema_registration_apply_graph_module(graph, graph.modules[module_index].module_identity, scopes, discarded)
-        return scopes.move()
-    }
-    panic("an owning registered-module pass lost its registration graph")
+    graph: program.registration_graph
+    scopes := sema_scope_init(graph.modules[module_index].module_identity)
+    discarded := [Diagnostic]{}
+    _ := sema_registration_apply_graph_module(graph, graph.modules[module_index].module_identity, scopes, discarded)
+    scopes.move()
 }
 
 // `summary_checked` gains the view summary functions it checked
@@ -1294,19 +1285,15 @@ sema_check_module_trace_begin_in_shared: fn(shared_state: Shared<SemaCheckShared
 
 sema_check_module_trace_begin: fn(program: SemaProgramTables, module_index: Int, phase: String, sink: CompilerTraceSink) {
     sema_check_module_span_begin(program, module_index, sink)
-    if program.registration_graph == .Val(graph) {
-        sink.progress("counters.{phase}.items_scanned", graph.modules[module_index].program.items.len(), -1)
-    }
+    graph: program.registration_graph
+    sink.progress("counters.{phase}.items_scanned", graph.modules[module_index].program.items.len(), -1)
 }
 
 // Opens module `module_index`'s `sema.module` span alone, counting nothing:
 // a demand wave's module check, whose items the wave's setup counted.
 sema_check_module_span_begin: fn(program: SemaProgramTables, module_index: Int, sink: CompilerTraceSink) {
-    if program.registration_graph == .Val(graph) {
-        sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
-        return
-    }
-    panic("a registered-module scheduler lost its graph")
+    graph: program.registration_graph
+    sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
 }
 
 // Module `module_index`'s parallel body jobs (sema_check_parallel_jobs).
@@ -1316,10 +1303,8 @@ sema_check_module_jobs_in_shared: fn(shared_state: Shared<SemaCheckShared>, modu
 }
 
 sema_check_module_jobs: fn(program: SemaProgramTables, module_index: Int, comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] {
-    if program.registration_graph == .Val(graph) {
-        return sema_check_parallel_jobs(graph, module_index, comptime_rows, weights)
-    }
-    panic("a registered-module scheduler lost its graph")
+    graph: program.registration_graph
+    sema_check_parallel_jobs(graph, module_index, comptime_rows, weights)
 }
 
 // A body stream holds the post-summary scope of every module it admitted
@@ -1969,13 +1954,12 @@ sema_check_body_stream_replay: fn(cells: SemaStreamCells, stream_module: Int, pr
     derived: compiler_take_rows<String>(held.value.derive_demand)
     finish_codecs: compiler_take_rows<SemaCodecWant>(held.value.finish_codec_demand)
     finish_derived: compiler_take_rows<String>(held.value.finish_derive_demand)
-    if program.registration_graph == .Val(graph) {
-        if codecs.len() > 0 || derived.len() > 0 {
-            sema_demand_capture_replay(graph, codecs, derived)
-        }
-        if finish_codecs.len() > 0 || finish_derived.len() > 0 {
-            sema_demand_capture_replay(graph, finish_codecs, finish_derived)
-        }
+    graph: program.registration_graph
+    if codecs.len() > 0 || derived.len() > 0 {
+        sema_demand_capture_replay(graph, codecs, derived)
+    }
+    if finish_codecs.len() > 0 || finish_derived.len() > 0 {
+        sema_demand_capture_replay(graph, finish_codecs, finish_derived)
     }
 }
 
@@ -2024,14 +2008,15 @@ sema_check_stream_module_prep: fn(environment: SemaScopeEnvironment, program: Se
     entered := environment.copy()
     summary_checked := 0
     apart: sema_check_body_demand_apart(program)
-    if apart && program.registration_graph == .Val(graph) -> sema_demand_capture_open(graph)
+    graph: program.registration_graph
+    if apart -> sema_demand_capture_open(graph)
     scopes := sema_check_module_summary_scopes(entered, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, view_jobs, "", None, summary_checked)
     weights := [Int]{}
     method_jobs := sema_check_registered_parallel_method_jobs(entered, program, module_index, memory_plan, all_method_jobs, comptime_rows, weights)
     entered.module_scope = Val(scopes.move())
     held.push(entered)
     prep := SemaStreamModulePrep{environments: held.move(), method_jobs: method_jobs.move(), weights: weights.move(), summary_checked: summary_checked, wanted_hooks: false}
-    if apart && program.registration_graph == .Val(graph) {
+    if apart {
         demand := sema_demand_capture_close(graph)
         prep.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
         prep.derive_demand = compiler_take_rows<String>(demand.derived)
@@ -2045,11 +2030,9 @@ sema_check_module_scope_rows_in_shared: fn(shared_state: Shared<SemaCheckShared>
 }
 
 sema_check_registered_module_scope_rows: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, core_held: ^Bool) -> Int {
-    if program.registration_graph == .Val(graph) {
-        core_held = sema_core_bodies_held(graph, graph.modules[module_index])
-        return sema_check_module_scope_rows(graph, module_index)
-    }
-    panic("a registered-module scheduler lost its graph")
+    graph: program.registration_graph
+    core_held = sema_core_bodies_held(graph, graph.modules[module_index])
+    sema_check_module_scope_rows(graph, module_index)
 }
 
 sema_check_prepare_module: fn(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, jobs: [SemaBodyJob], weights: [Int], workers: Int, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaPreparedBodies {
@@ -2083,19 +2066,18 @@ sema_check_module_in_shared: fn(shared_state: Shared<SemaCheckShared>, host_hook
 sema_check_registered_wave_method_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, bytes: ^Int) -> Int {
     scanned := 0
     jobs: sema_check_registered_method_jobs(environment, program, module_index, scanned, false)
-    if program.registration_graph == .Val(graph) {
-        loop job in jobs {
-            if job == {
-                .NominalMethod(_, nominal_index, method_index) -> {
-                    span: graph.modules[module_index].nominals[nominal_index].methods[method_index].declaration.span
-                    bytes += span.end - span.start
-                }
-                .ImplMethod(_, implementation_index, method_index) -> {
-                    span: graph.modules[module_index].impls[implementation_index].methods[method_index].declaration.span
-                    bytes += span.end - span.start
-                }
-                .TopLevel(_) -> panic("a top-level job entered the method wave")
+    graph: program.registration_graph
+    loop job in jobs {
+        if job == {
+            .NominalMethod(_, nominal_index, method_index) -> {
+                span: graph.modules[module_index].nominals[nominal_index].methods[method_index].declaration.span
+                bytes += span.end - span.start
             }
+            .ImplMethod(_, implementation_index, method_index) -> {
+                span: graph.modules[module_index].impls[implementation_index].methods[method_index].declaration.span
+                bytes += span.end - span.start
+            }
+            .TopLevel(_) -> panic("a top-level job entered the method wave")
         }
     }
     jobs.len()

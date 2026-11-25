@@ -146,16 +146,15 @@ sema_contract_site: fn(segments: [SemaSourceSegment], file: String, origin: Sema
 // `target` resolves to (sema_contract_function_for_symbol), in its own
 // module, whose source maps the clause spans; a call site's module may differ.
 sema_contract_pre_sites: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID, func: Func) -> [TContractSite] Never! {
-    if program.registration_graph == .Val(graph) {
-        if sema_registration_callable_row_of(graph, target) == .Val(row) {
-            module_index: if row == {
-                .Function(index, _) -> index
-                .Foreign(index, _) -> index
-                .NominalMethod(index, _, _) -> index
-                .ImplMethod(index, _, _) -> index
-            }
-            return loop clause in func.pre -> sema_contract_site(graph.modules[module_index].source_segments, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].module_identity, expr_span(clause.cond))
+    graph: program.registration_graph
+    if sema_registration_callable_row_of(graph, target) == .Val(row) {
+        module_index: if row == {
+            .Function(index, _) -> index
+            .Foreign(index, _) -> index
+            .NominalMethod(index, _, _) -> index
+            .ImplMethod(index, _, _) -> index
         }
+        return loop clause in func.pre -> sema_contract_site(graph.modules[module_index].source_segments, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].module_identity, expr_span(clause.cond))
     }
     loop clause in func.pre -> sema_contract_site(environment.source_segments, environment.source_file, environment.source_origin, environment.module_identity, expr_span(clause.cond))
 }
@@ -813,7 +812,8 @@ sema_contract_result_binding_symbol: fn(environment: SemaScopeEnvironment, progr
 
 sema_contract_check_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaContractDeclaration {
     declared_return := func.return_type
-    if program.registration_graph == .Val(graph) && declared_return == .Val(declared) {
+    graph: program.registration_graph
+    if declared_return == .Val(declared) {
         declared_return = Val(sema_type_resolve_declared_with_generics(graph, declared, environment.module_identity, environment.generic_params))
     }
     result: sema_contract_result_for_function(declared_return, func.name_span, environment, program, check.context, sema_scope_function_owner_key(scopes))
@@ -901,10 +901,9 @@ sema_contract_method_function_for_item: fn(item: Item, target_key: String, modul
 
 sema_contract_function_for_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> Func? {
     if symbol_is_local(target) -> return None
-    if program.registration_graph == .Val(graph) {
-        declaration: sema_registration_callable_declaration(graph, target)
-        if declaration != None -> return declaration
-    }
+    graph: program.registration_graph
+    declaration: sema_registration_callable_declaration(graph, target)
+    if declaration != None -> return declaration
     target_key: sema_program_symbol_key(program, target)
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].symbol_id == target {
@@ -983,14 +982,13 @@ sema_contract_call_site_facts_of_func: fn(func: Func) -> SemaContractCalleeFacts
 
 sema_contract_call_site_facts: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaContractCalleeFacts? {
     if symbol_is_local(target) -> return None
-    if program.registration_graph == .Val(graph) {
-        if sema_registration_callable_row_of(graph, target) == .Val(row) {
-            if row == {
-                .Function(module_index, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].functions[index].declaration)
-                .Foreign(_, _) -> return None
-                .NominalMethod(module_index, owner, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].nominals[owner].methods[index].declaration)
-                .ImplMethod(module_index, owner, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].impls[owner].methods[index].declaration)
-            }
+    graph: program.registration_graph
+    if sema_registration_callable_row_of(graph, target) == .Val(row) {
+        if row == {
+            .Function(module_index, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].functions[index].declaration)
+            .Foreign(_, _) -> return None
+            .NominalMethod(module_index, owner, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].nominals[owner].methods[index].declaration)
+            .ImplMethod(module_index, owner, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].impls[owner].methods[index].declaration)
         }
     }
     sema_contract_function_facts(environment, program, target)
@@ -1038,10 +1036,9 @@ sema_contract_method_facts_for_item: fn(item: Item, target_key: String, module_i
 // `target` to (same lookup order), without copying it.
 sema_contract_function_facts: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaContractCalleeFacts? {
     if symbol_is_local(target) -> return None
-    if program.registration_graph == .Val(graph) {
-        registered: sema_contract_registered_facts(graph, target)
-        if registered != None -> return registered
-    }
+    graph: program.registration_graph
+    registered: sema_contract_registered_facts(graph, target)
+    if registered != None -> return registered
     target_key: sema_program_symbol_key(program, target)
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].symbol_id == target {
@@ -1262,11 +1259,13 @@ sema_contract_required_post_answer: fn(func: Func, clause: ContractClause, recal
 // which the rule does not read. A call whose clauses all hold, or are not
 // answered yet, is not heard. True when the call goes on: no clause failed,
 // the rule's answer is staged now (the recheck reads it), or the answer
-// rejects nothing, which a rule run that fails gives. A check without the
-// registration graph (a compile-time run's own program) hears no rule; the
+// rejects nothing, which a rule run that fails gives. A snapshot check
+// (a compile-time run's own program) hears no rule; the
 // compile's own check of the same call does.
 sema_contract_rule_hears: fn(marker: String, callee: String, answer: SemaContractAnswer, target: SymbolID, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Bool {
-    if answer.verdict == SemaContractVerdict.Fails && program.registration_graph == .Val(graph) {
+    graph: program.registration_graph
+    // Snapshot: a lone program's check hears no rule (see above).
+    if answer.verdict == SemaContractVerdict.Fails && graph.mode == .Program {
         rule: sema_contract_rule(graph, marker, callee, answer.condition, answer.reason)
         owner: sema_scope_function_owner_key(scopes)
         if sema_comptime_body_value_find(check.context, environment.module_identity, owner, rule.span, call_span) == .Val(landed) {

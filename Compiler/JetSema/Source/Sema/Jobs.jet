@@ -25,10 +25,8 @@ SemaJobScheduleResolution: struct {
 }
 
 sema_job_schedule_unit: fn(suffix: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    if program.registration_graph == .Val(graph) {
-        return sema_expression_unit_literal_time_fact(suffix, graph)
-    }
-    None
+    graph: program.registration_graph
+    sema_expression_unit_literal_time_fact(suffix, graph)
 }
 
 sema_job_schedule_float_to_int: fn(value: Float) -> Int Never! {

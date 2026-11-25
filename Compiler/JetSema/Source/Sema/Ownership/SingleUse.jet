@@ -71,16 +71,14 @@ sema_single_use_declared: fn(name: String, environment: SemaScopeEnvironment, pr
 // facts hold no duty at all, neither a resource nor a `#SingleUse` part, is
 // answered without a walk.
 sema_single_use_holder: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        caller: sema_type_module_row(graph, environment.module_identity)
-        row: sema_copy_fork_row_at(ty, graph, caller) ?? return false
-        if sema_copy_table_facts(program.copy_facts, row) == .Val(facts) && !facts.holds_resource {
-            return false
-        }
-        seen := [String]{}
-        return sema_copy_holds_single_use(ty, graph, caller, seen)
+    graph: program.registration_graph
+    caller: sema_type_module_row(graph, environment.module_identity)
+    row: sema_copy_fork_row_at(ty, graph, caller) ?? return false
+    if sema_copy_table_facts(program.copy_facts, row) == .Val(facts) && !facts.holds_resource {
+        return false
     }
-    false
+    seen := [String]{}
+    sema_copy_holds_single_use(ty, graph, caller, seen)
 }
 
 // The task handle itself.
@@ -120,18 +118,17 @@ sema_single_use_duty_fields: fn(ty: Type, environment: SemaScopeEnvironment, pro
         }
         .Named(name) | .Apply(name, _) -> {
             if sema_single_use_declared(name, environment, program) -> return fields
-            if program.registration_graph == .Val(graph) {
-                caller: sema_type_module_row(graph, environment.module_identity)
-                row: sema_copy_fork_row_at(ty, graph, caller) ?? return fields
-                nominal: graph.modules[row.module_index].nominals[row.row]
-                if nominal.kind != SemaRegistrationNominalKind.Struct -> return fields
-                bindings: sema_copy_generic_bindings(nominal, ty).bindings
-                loop field in nominal.fields {
-                    if field.computed -> next
-                    seen := [String]{}
-                    if sema_copy_holds_single_use(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings), graph, caller, seen) {
-                        fields.push(field.symbol.name)
-                    }
+            graph: program.registration_graph
+            caller: sema_type_module_row(graph, environment.module_identity)
+            row: sema_copy_fork_row_at(ty, graph, caller) ?? return fields
+            nominal: graph.modules[row.module_index].nominals[row.row]
+            if nominal.kind != SemaRegistrationNominalKind.Struct -> return fields
+            bindings: sema_copy_generic_bindings(nominal, ty).bindings
+            loop field in nominal.fields {
+                if field.computed -> next
+                seen := [String]{}
+                if sema_copy_holds_single_use(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings), graph, caller, seen) {
+                    fields.push(field.symbol.name)
                 }
             }
         }

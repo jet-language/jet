@@ -164,7 +164,8 @@ sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, 
     arguments := policy.args
     binding := sema_call_bind_args(policy.name, params, arguments, policy.name_span, diagnostics) ?? return None
     if binding.default_refs.len() > 0 {
-        defaults: if program.registration_graph == .Val(graph) -> sema_call_registration_defaults(graph, binding) ?? return None else -> sema_call_local_default_values(wrapper, binding, environment, program, scopes) ?? return None
+        // Snapshot: a lone program's defaults are its own declarations'.
+        defaults: if program.registration_graph.mode == .Snapshot -> sema_call_local_default_values(wrapper, binding, environment, program, scopes) ?? return None else -> sema_call_registration_defaults(program.registration_graph, binding) ?? return None
         binding = sema_call_materialize_defaults(params, binding, arguments, defaults, policy.name_span, diagnostics) ?? return None
     }
     {lowered, pins} := sema_call_check_bound_arguments_owned(check, policy.name, params, None, true, binding, arguments, environment, program, scopes, policy.name_span, diagnostics) ?? return None
@@ -208,7 +209,8 @@ sema_policy_direct_value: fn(target: SemaCallDirectTarget, span: Span, environme
     // The callee's policies are read from its registered declaration in
     // place: returning the declaration copied the whole function, body
     // included, on every direct call.
-    policies: if program.registration_graph == .Val(graph) -> sema_policy_registered_calls(graph, target.symbol.id) ?? return None else -> sema_policy_local_calls(environment, program, target.symbol.id) ?? return None
+    // Snapshot: a lone program's policies are its own declarations'.
+    policies: if program.registration_graph.mode == .Snapshot -> sema_policy_local_calls(environment, program, target.symbol.id) ?? return None else -> sema_policy_registered_calls(program.registration_graph, target.symbol.id) ?? return None
     if policies.len() == 0 -> return None
     function: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
     callee := sema_tree_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)

@@ -34,13 +34,12 @@ sema_must_use_function: fn(call: Call, environment: SemaScopeEnvironment, progra
 
 // A `#MustUse` method declared on the receiver's nominal type.
 sema_must_use_method: fn(type_name: String, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
-            methods: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
-            loop method_index in 0..<methods.len() {
-                function: methods[method_index]
-                if function.symbol.name == method && function.declaration.is_must_use -> return true
-            }
+    graph: program.registration_graph
+    loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
+        methods: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
+        loop method_index in 0..<methods.len() {
+            function: methods[method_index]
+            if function.symbol.name == method && function.declaration.is_must_use -> return true
         }
     }
     false

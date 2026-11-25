@@ -3565,11 +3565,10 @@ sema_ownership_clear_moved: fn(state: ^SemaOwnershipState, place: SemaOwnershipP
 // Whether a value of `ty` has its own Close implementation (a nominal Close
 // impl, or a generic parameter bounded by Close).
 sema_ownership_type_owns_close: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) == .Val(row) {
-            if sema_copy_nominal_close(program.registration_graph, program.copy_facts, graph.modules[row.module_index].nominals[row.row], row).value {
-                return true
-            }
+    graph: program.registration_graph
+    if sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) == .Val(row) {
+        if sema_copy_nominal_close(program.registration_graph, program.copy_facts, graph.modules[row.module_index].nominals[row.row], row).value {
+            return true
         }
     }
     if ty == .Named(name) {

@@ -110,7 +110,7 @@ sema_expr_hole_args_write: fn(args: [TCallArg]) -> Bool Never! {
 sema_expr_hole_header_fix: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaHoleHeaderFix {
     shown := SemaHoleHeaderFix{fix: "name the value on the line above the table, then read the name in the header", edits: [TextEdit]{}, reported: false}
     header: scopes.hole_header ?? return shown
-    graph: program.registration_graph ?? return shown
+    graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return shown
     raw: graph.modules[caller].source.bytes()
     start: expr_source_start(expr)

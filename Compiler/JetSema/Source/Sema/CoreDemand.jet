@@ -257,26 +257,22 @@ sema_core_demand_deferred: fn(graph: SemaRegistrationGraph, key: String) -> Bool
 // Whether top-level item `item_index` of module `module_index` waits for
 // demand (sema_core_demand_deferred).
 sema_check_registered_item_deferred: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        if !sema_core_demand_any(graph.core_demand) -> return false
-        if graph.modules[module_index].program.items[item_index] == .Func(func) {
-            return sema_core_demand_deferred(graph, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name))
-        }
-        return false
+    graph: program.registration_graph
+    if !sema_core_demand_any(graph.core_demand) -> return false
+    if graph.modules[module_index].program.items[item_index] == .Func(func) {
+        return sema_core_demand_deferred(graph, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name))
     }
-    panic("an owning registered-module pass lost its registration graph")
+    false
 }
 
 // Whether top-level item `item_index` of module `module_index` is a body the
 // current demand wave checks (graph.core_wave_rows).
 sema_check_registered_item_in_core_wave: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        if graph.modules[module_index].program.items[item_index] == .Func(func) {
-            return name_find(graph.core_wave_rows, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name)) != None
-        }
-        return false
+    graph: program.registration_graph
+    if graph.modules[module_index].program.items[item_index] == .Func(func) {
+        return name_find(graph.core_wave_rows, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name)) != None
     }
-    panic("an owning registered-module pass lost its registration graph")
+    false
 }
 
 // What the demand rounds of one finalization have read and checked: per
@@ -557,15 +553,14 @@ sema_core_demand_pass: fn(owned: ^^SemaRegistrationGraph, first_affected: ^^[Int
         if !timed {
             ahead_program := sema_check_shared_take_program(shared_state)
             ahead_plan := sema_check_shared_take_memory_plan(shared_state)
-            if ahead_program.registration_graph == .Val(ahead_graph) {
-                wanted := [SemaCoreBodiesAheadKey]{}
-                loop at in 1..<name_count(ahead_graph.core_wave_rows) {
-                    key: ahead_graph.core_wave_rows.texts[at]
-                    module_index: sema_core_demand_module(ahead_graph.core_demand, key) ?? next
-                    wanted.push(SemaCoreBodiesAheadKey{key: key, module_index: module_index})
-                }
-                sema_core_bodies_ahead(ahead_graph, wanted.move(), host_hooks, threads)
+            ahead_graph: ahead_program.registration_graph
+            wanted := [SemaCoreBodiesAheadKey]{}
+            loop at in 1..<name_count(ahead_graph.core_wave_rows) {
+                key: ahead_graph.core_wave_rows.texts[at]
+                module_index: sema_core_demand_module(ahead_graph.core_demand, key) ?? next
+                wanted.push(SemaCoreBodiesAheadKey{key: key, module_index: module_index})
             }
+            sema_core_bodies_ahead(ahead_graph, wanted.move(), host_hooks, threads)
             sema_check_shared_put_tables(shared_state, ahead_program, ahead_plan)
         }
         checked_functions: sema_finalize_pass_modules(shared_state, values, comptime_functions, comptime_rows, affected, SemaWaveKind.Core, true, host_hooks, threads, "sema.core_demand", trace_sink, modules)
@@ -576,15 +571,13 @@ sema_core_demand_pass: fn(owned: ^^SemaRegistrationGraph, first_affected: ^^[Int
         affected = [Int]{}
         program := sema_check_shared_take_program(shared_state)
         memory_plan := sema_check_shared_take_memory_plan(shared_state)
-        held := program.registration_graph.move()
-        program.registration_graph = None
-        pass_graph := held.move() ?? panic("a Core demand pass lost its registration graph")
+        pass_graph := program.registration_graph.move()
         sema_merge_module_type_deltas(pass_graph, modules)
         pass_graph.core_stand_in_wave = false
         sema_core_demand_named(pass_graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, host_hooks, threads)
         size = sema_core_wave_size(wave)
         pass_graph.core_wave_rows = wave.move()
-        program.registration_graph = Val(pass_graph.move())
+        program.registration_graph = pass_graph.move()
         sema_check_shared_put_tables(shared_state, program, memory_plan)
     }
     sema_finalize_pass_close(shared_state, "sema.core_demand", trace_sink, carried)
@@ -918,10 +911,8 @@ sema_core_bound_values: fn(function: FnBody, graph: SemaRegistrationGraph, value
 // Locates module `module_index`'s diagnostics from `start` in its source
 // (sema_attach_diagnostic_source_locations).
 sema_check_registered_locate_diagnostics: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, start: Int, diagnostics: ^[Diagnostic]) {
-    if program.registration_graph == .Val(graph) {
-        return sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_index].source_segments)
-    }
-    panic("an owning registered-module pass lost its registration graph")
+    graph: program.registration_graph
+    sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_index].source_segments)
 }
 
 // The deferred bodies `names` holds and then those the functions and

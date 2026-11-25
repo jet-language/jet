@@ -124,7 +124,9 @@ sema_comptime_local_value_candidate: fn(
         position: sema_scope_resolve_index(scopes, reference.symbol.name) ?? return false
         if scopes.bindings[position].prepared == None -> return false
     }
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
+    // Snapshot: purity is judged on registered callees, and a lone program registers none.
+    if graph.mode == .Snapshot -> return false
     if graph.check_tests && !graph.every_core_body -> return false
     calls: loop index in fact_start..<context.call_facts.len() -> context.call_facts[index].copy()
     sema_comptime_call_facts_impurity(graph, calls, true) == None

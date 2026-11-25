@@ -50,7 +50,6 @@ use jet_foundation.[
     InternerDelta,
     body_type_id,
     delta_type_syntax,
-    interner_empty,
     type_syntax,
     checked_comptime_integer_key,
     decl_id_index,
@@ -65,13 +64,8 @@ use jet_foundation.[
 
 // The fold over `program`'s run table.
 sema_comptime_fold_in: fn(program: SemaProgramTables, tree: BodyTree, expression: Int, values: [SemaComptimeItemValue], type_delta: [InternerDelta]{[InternerDelta]{}}) -> TComptimeValue? Never! {
-    if program.registration_graph == .Val(graph) {
-        return sema_comptime_fold(graph.interner, tree, expression, values, graph.symbols, type_delta)
-    }
-    if program.interner == .Val(fallback) {
-        return sema_comptime_fold(fallback, tree, expression, values, program.symbols, type_delta)
-    }
-    sema_comptime_fold(interner_empty(), tree, expression, values, program.symbols, type_delta)
+    graph: program.registration_graph
+    sema_comptime_fold(graph.interner, tree, expression, values, graph.symbols, type_delta)
 }
 
 sema_comptime_fold: fn(interner: Interner, tree: BodyTree, expression: Int, values: [SemaComptimeItemValue], symbols: SymbolTable, type_delta: [InternerDelta]{[InternerDelta]{}}) -> TComptimeValue? Never! {
@@ -120,7 +114,7 @@ SemaComptimeModulePoint: struct {
 }
 
 sema_comptime_module_point: fn(program: SemaProgramTables, tree: BodyTree, expression: Int) -[]> SemaComptimeModulePoint? {
-    point_ty: if program.registration_graph == .Val(graph) -> type_syntax(graph.interner, body_type_id(tree, expression)) else if program.interner == .Val(fallback) -> type_syntax(fallback, body_type_id(tree, expression)) else -> return None
+    point_ty: type_syntax(program.registration_graph.interner, body_type_id(tree, expression))
     if !sema_comptime_point_type(point_ty) -> return None
     call := expression
     if tree.nodes[sema_comptime_fold_node_row(tree, expression)].kind == .TryWithContext(inner, _, _, _, _, _) {
@@ -128,15 +122,14 @@ sema_comptime_module_point: fn(program: SemaProgramTables, tree: BodyTree, expre
     }
     if tree.nodes[sema_comptime_fold_node_row(tree, call)].kind == .Call(callee, _, args) {
         if args.len() > 1 -> return None
-        if program.registration_graph == .Val(graph) {
-            if decl_id_index(callee) >= graph.callables.len() -> return None
-            row: graph.callables[decl_id_index(callee)]
-            if !sema_core_point_constructor(graph, row) && !sema_comptime_event_new(graph, row) {
-                return None
-            }
-            if args.len() == 0 -> return Val(SemaComptimeModulePoint{option: None})
-            return Val(SemaComptimeModulePoint{option: Val(args[0].value)})
+        graph: program.registration_graph
+        if decl_id_index(callee) >= graph.callables.len() -> return None
+        row: graph.callables[decl_id_index(callee)]
+        if !sema_core_point_constructor(graph, row) && !sema_comptime_event_new(graph, row) {
+            return None
         }
+        if args.len() == 0 -> return Val(SemaComptimeModulePoint{option: None})
+        return Val(SemaComptimeModulePoint{option: Val(args[0].value)})
     }
     None
 }

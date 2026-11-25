@@ -55,23 +55,19 @@ sema_shared_cycle_frame_runs_once: fn(scopes: SemaScopeTable, frame: Int) -> Boo
 
 // The registered symbol of the cell type `owner_ty`.
 sema_shared_cycle_owner_key: fn(owner_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SymbolID? {
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row(graph, owner_ty, environment.module_identity) ?? return None
-        return Val(graph.modules[row.module_index].nominals[row.row].symbol.id)
-    }
-    None
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row(graph, owner_ty, environment.module_identity) ?? return None
+    Val(graph.modules[row.module_index].nominals[row.row].symbol.id)
 }
 
 // True when a value of type `ty` can hold a strong `Shared` path to a cell of
 // the type registered as `owner`.
 sema_shared_cycle_reaches: fn(owner: SymbolID, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_shared_cycle_holds_function(ty) -> return true
-    if program.registration_graph == .Val(graph) {
-        memo := [U32:Bool]{}
-        walk := SemaSharedWitnessWalk{stack: [U32]{}, clear: [U32:Bool]{}, met_path: false}
-        return sema_checked_shared_witness(graph, owner, environment.module_identity, ty, memo, walk) != None
-    }
-    false
+    graph: program.registration_graph
+    memo := [U32:Bool]{}
+    walk := SemaSharedWitnessWalk{stack: [U32]{}, clear: [U32:Bool]{}, met_path: false}
+    sema_checked_shared_witness(graph, owner, environment.module_identity, ty, memo, walk) != None
 }
 
 // True when `ty` is a function type, or an option, list, map, result, tuple or

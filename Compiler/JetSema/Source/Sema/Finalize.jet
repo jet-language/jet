@@ -143,9 +143,8 @@ sema_merge_delta_into: fn(program: SemaProgramTables, target: ^[InternerDelta], 
         target.push(delta.move())
         return sema_interner_remap_empty()
     }
-    if program.registration_graph == .Val(graph) -> return delta_merge_delta(graph.interner, target[0], delta)
-    if program.interner == .Val(fallback) -> return delta_merge_delta(fallback, target[0], delta)
-    sema_interner_remap_empty()
+    graph: program.registration_graph
+    delta_merge_delta(graph.interner, target[0], delta)
 }
 
 sema_drain_scope_delta: fn(program: SemaProgramTables, target: ^[InternerDelta], scopes: ^SemaScopeTable, fn_body: ^FnBody?, requests: ^[SemaComptimeRequest], req_from: Int) Never! {
@@ -179,7 +178,7 @@ sema_finalize_pass_open: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptim
     fresh: carried.len() == 0
     facts := carried.pop() ?? sema_pass_facts_new()
     if fresh && trace_sink == .Val(sink) -> sink.begin("sema.pass_facts", "", -1, -1)
-    owned := if fresh -> sema_pass_facts(graph, threads, SEMA_PASS_FACT_JOBS, facts) else -> SemaRegistrationGraph?{Val(graph.move())}
+    owned := if fresh -> sema_pass_facts(graph, threads, SEMA_PASS_FACT_JOBS, facts) else -> graph.move()
     if fresh && trace_sink == .Val(sink) -> sink.end("sema.pass_facts", 1)
     memory_plan := facts.memory_plan.move()
     work := sema_comptime_body_work_new(trace_sink)
@@ -264,9 +263,7 @@ sema_finalize_pass_close: fn(shared_state: Shared<SemaCheckShared>, phase: Strin
     program_out.copy_facts = sema_copy_facts_table_empty()
     // No guard or worker survives here. Leave the consumed environment slot
     // empty only after all joins and before returning its one graph owner.
-    graph_out := program_out.registration_graph.move()
-    program_out.registration_graph = None
-    graph_out.move() ?? panic("a completed registered-body pass lost its graph")
+    program_out.registration_graph.move()
 }
 
 // `host_hooks` are the driver's host callbacks; `threads` admits the

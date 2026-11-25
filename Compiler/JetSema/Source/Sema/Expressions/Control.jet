@@ -749,13 +749,12 @@ sema_failure_namespace_conversion: fn(name: String, environment: SemaScopeEnviro
     if !sema_registration_package_is_namespace(environment.package_identity) || module_is_core(environment.module_identity) {
         return None
     }
-    if program.registration_graph == .Val(graph) {
-        loop module_row in graph.modules {
-            if module_row.package_identity != environment.package_identity -> next
-            loop function in module_row.functions {
-                if function.symbol.name == name {
-                    return Val(symbol_table_key(graph.symbols, function.symbol.id))
-                }
+    graph: program.registration_graph
+    loop module_row in graph.modules {
+        if module_row.package_identity != environment.package_identity -> next
+        loop function in module_row.functions {
+            if function.symbol.name == name {
+                return Val(symbol_table_key(graph.symbols, function.symbol.id))
             }
         }
     }
@@ -767,18 +766,17 @@ sema_failure_namespace_conversion: fn(name: String, environment: SemaScopeEnviro
 // side and applies here as it does there.
 sema_failure_dependency_conversion: fn(name: String, source: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if module_is_core(environment.module_identity) -> return None
-    if program.registration_graph == .Val(graph) {
-        sides: [Type]{sema_expr_unwrap_tag(source), sema_expr_unwrap_tag(target)}
-        loop side in sides {
-            row: sema_type_resolve_nominal_row(graph, side, environment.module_identity) ?? next
-            package: graph.modules[row.module_index].package_identity
-            if package == environment.package_identity -> next
-            loop module_row in graph.modules {
-                if module_row.package_identity != package -> next
-                loop function in module_row.functions {
-                    if function.symbol.name == name {
-                        return Val(symbol_table_key(graph.symbols, function.symbol.id))
-                    }
+    graph: program.registration_graph
+    sides: [Type]{sema_expr_unwrap_tag(source), sema_expr_unwrap_tag(target)}
+    loop side in sides {
+        row: sema_type_resolve_nominal_row(graph, side, environment.module_identity) ?? next
+        package: graph.modules[row.module_index].package_identity
+        if package == environment.package_identity -> next
+        loop module_row in graph.modules {
+            if module_row.package_identity != package -> next
+            loop function in module_row.functions {
+                if function.symbol.name == name {
+                    return Val(symbol_table_key(graph.symbols, function.symbol.id))
                 }
             }
         }
@@ -793,22 +791,21 @@ SemaFailureProvenance: struct {
 }
 
 sema_failure_definition_location: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> String? {
-    if program.registration_graph == .Val(graph) {
-        symbol_text: module_text(graph.module_table, symbol.module_identity)
-        loop module_row_index in 0..<graph.modules.len() {
-            if graph.modules[module_row_index].module_identity != symbol.module_identity && graph.modules[module_row_index].module_name != symbol_text {
-                next
-            }
-            if graph.modules[module_row_index].module_path == "" -> return None
-            line: sema_source_line_at(graph.modules[module_row_index].source_segments, symbol.span) ?? return None
-            loop segment_index in 0..<graph.modules[module_row_index].source_segments.len() {
-                if symbol.span.start >= graph.modules[module_row_index].source_segments[segment_index].generated.start && symbol.span.start < graph.modules[module_row_index].source_segments[segment_index].generated.end && line <= graph.modules[module_row_index].source_segments[segment_index].line_starts.len() {
-                    column: symbol.span.start - graph.modules[module_row_index].source_segments[segment_index].generated.start - graph.modules[module_row_index].source_segments[segment_index].line_starts[line - 1] + 1
-                    return Val("{sema_failure_definition_path(graph.modules[module_row_index].module_path, graph.modules[module_row_index].source_file)}:{line}:{column}")
-                }
-            }
-            return None
+    graph: program.registration_graph
+    symbol_text: module_text(graph.module_table, symbol.module_identity)
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_identity != symbol.module_identity && graph.modules[module_row_index].module_name != symbol_text {
+            next
         }
+        if graph.modules[module_row_index].module_path == "" -> return None
+        line: sema_source_line_at(graph.modules[module_row_index].source_segments, symbol.span) ?? return None
+        loop segment_index in 0..<graph.modules[module_row_index].source_segments.len() {
+            if symbol.span.start >= graph.modules[module_row_index].source_segments[segment_index].generated.start && symbol.span.start < graph.modules[module_row_index].source_segments[segment_index].generated.end && line <= graph.modules[module_row_index].source_segments[segment_index].line_starts.len() {
+                column: symbol.span.start - graph.modules[module_row_index].source_segments[segment_index].generated.start - graph.modules[module_row_index].source_segments[segment_index].line_starts[line - 1] + 1
+                return Val("{sema_failure_definition_path(graph.modules[module_row_index].module_path, graph.modules[module_row_index].source_file)}:{line}:{column}")
+            }
+        }
+        return None
     }
     None
 }
@@ -878,13 +875,12 @@ sema_failure_callee: fn(expr: Expr?, environment: SemaScopeEnvironment, program:
             }
             imported: sema_call_core_import_target(environment, program, alias) ?? sema_call_source_import_target(environment, program, alias) ?? return None
             if imported.item != None -> return None
-            if program.registration_graph == .Val(graph) {
-                identity: sema_call_core_import_source_identity(environment, program, imported) ?? return None
-                module_index: sema_registration_module_index(graph, identity) ?? return None
-                loop index in 0..<graph.modules[module_index].functions.len() {
-                    if graph.modules[module_index].functions[index].symbol.name != method -> next
-                    return Val(SemaFailureCallee{key: symbol_table_key(graph.symbols, graph.modules[module_index].functions[index].symbol.id), inferable: sema_failure_function_inferable(graph.modules[module_index].functions[index].declaration)})
-                }
+            graph: program.registration_graph
+            identity: sema_call_core_import_source_identity(environment, program, imported) ?? return None
+            module_index: sema_registration_module_index(graph, identity) ?? return None
+            loop index in 0..<graph.modules[module_index].functions.len() {
+                if graph.modules[module_index].functions[index].symbol.name != method -> next
+                return Val(SemaFailureCallee{key: symbol_table_key(graph.symbols, graph.modules[module_index].functions[index].symbol.id), inferable: sema_failure_function_inferable(graph.modules[module_index].functions[index].declaration)})
             }
             return None
         }
@@ -907,12 +903,11 @@ sema_failure_callee_of: fn(expr: Expr?, checked: SemaFailureCallee?, environment
 sema_failure_method_callee: fn(checked: TExpr, program: SemaProgramTables, context: SemaCheckContext) -> SemaFailureCallee? {
     if checked.kind == .MethodCall(_, reference, _, _) {
         if reference.trait_owner != None -> return None
-        if program.registration_graph == .Val(graph) {
-            key: sema_failure_method_key(graph, sema_symbol_key(program, context, reference.symbol)) ?? return None
-            row: sema_registration_callable_row(graph, key) ?? return None
-            if row == .Foreign(_, _) -> return None
-            return Val(SemaFailureCallee{key: key, inferable: sema_failure_row_candidate(graph, row)})
-        }
+        graph: program.registration_graph
+        key: sema_failure_method_key(graph, sema_symbol_key(program, context, reference.symbol)) ?? return None
+        row: sema_registration_callable_row(graph, key) ?? return None
+        if row == .Foreign(_, _) -> return None
+        return Val(SemaFailureCallee{key: key, inferable: sema_failure_row_candidate(graph, row)})
     }
     None
 }
@@ -952,10 +947,8 @@ sema_failure_method_key: fn(graph: SemaRegistrationGraph, key: String) -> String
 sema_failure_callee_inferable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool? {
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Function(module_index, row) {
-        if program.registration_graph == .Val(graph) {
-            return Val(sema_failure_function_inferable(graph.modules[module_index].functions[row].declaration))
-        }
-        return None
+        graph: program.registration_graph
+        return Val(sema_failure_function_inferable(graph.modules[module_index].functions[row].declaration))
     }
     item: sema_scope_resolve_declaration(environment, program, id) ?? return None
     if item == .Func(func) -> return Val(sema_failure_function_inferable(func))
@@ -981,10 +974,8 @@ sema_failure_source_declares_failure: fn(expr: Expr?, environment: SemaScopeEnvi
             if symbol.kind != SymbolKind.Function -> return true
             site: sema_scope_declaration_site(environment, program, symbol.id) ?? return true
             if site == .Function(module_index, row) {
-                if program.registration_graph == .Val(graph) {
-                    return sema_failure_written_return_fails(graph.modules[module_index].functions[row].declaration.return_type)
-                }
-                return true
+                graph: program.registration_graph
+                return sema_failure_written_return_fails(graph.modules[module_index].functions[row].declaration.return_type)
             }
             item: sema_scope_resolve_declaration(environment, program, symbol.id) ?? return true
             if item == .Func(func) -> return sema_failure_written_return_fails(func.return_type)
@@ -1074,16 +1065,14 @@ sema_failure_defer_obligation: fn(callee: SemaFailureCallee?, diagnostics: ^[Dia
 // none").
 sema_failure_callee_inferred_never: fn(callee: SemaFailureCallee?, program: SemaProgramTables) -> Bool Never! {
     found: callee ?? return false
-    if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row(graph, found.key) ?? return false
-        if row == {
-            .Function(module_index, index) -> return sema_failure_declaration_inferred_never(graph.modules[module_index].functions[index].declaration)
-            .NominalMethod(module_index, owner, index) -> return sema_failure_declaration_inferred_never(graph.modules[module_index].nominals[owner].methods[index].declaration)
-            .ImplMethod(module_index, owner, index) -> return sema_failure_declaration_inferred_never(graph.modules[module_index].impls[owner].methods[index].declaration)
-            .Foreign(_, _) -> return false
-        }
+    graph: program.registration_graph
+    row: sema_registration_callable_row(graph, found.key) ?? return false
+    if row == {
+        .Function(module_index, index) -> sema_failure_declaration_inferred_never(graph.modules[module_index].functions[index].declaration)
+        .NominalMethod(module_index, owner, index) -> sema_failure_declaration_inferred_never(graph.modules[module_index].nominals[owner].methods[index].declaration)
+        .ImplMethod(module_index, owner, index) -> sema_failure_declaration_inferred_never(graph.modules[module_index].impls[owner].methods[index].declaration)
+        .Foreign(_, _) -> false
     }
-    false
 }
 
 sema_failure_declaration_inferred_never: fn(declaration: Func) -> Bool Never! {
@@ -1093,20 +1082,19 @@ sema_failure_declaration_inferred_never: fn(declaration: Func) -> Bool Never! {
 // Whether the bundle failure solve has settled the unannotated contracts
 // this check reads (the recheck pass).
 sema_failure_solved: fn(program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) -> return graph.failure_solved
-    false
+    graph: program.registration_graph
+    graph.failure_solved
 }
 
 // A generator's declared `Stream<T>` is its protocol, not a failure carrier:
 // its call only builds the stream, so it never enters the failure rail.
 sema_failure_callee_is_generator: fn(callee: SemaFailureCallee?, program: SemaProgramTables) -> Bool Never! {
     found: callee ?? return false
-    if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row(graph, found.key) ?? return false
-        if row == .Function(module_index, index) {
-            if graph.modules[module_index].functions[index].declaration.return_type == .Val(.Apply(name, args)) {
-                return name == "Stream" && args.len() == 1
-            }
+    graph: program.registration_graph
+    row: sema_registration_callable_row(graph, found.key) ?? return false
+    if row == .Function(module_index, index) {
+        if graph.modules[module_index].functions[index].declaration.return_type == .Val(.Apply(name, args)) {
+            return name == "Stream" && args.len() == 1
         }
     }
     false
@@ -2312,21 +2300,18 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
                     }
                     .Nested(member, nested, span) -> {
                         projected: Expr.Field{base: source, member: member, span: span, id: AST_NODE_GENERATED}
-                        if program.registration_graph == .Val(graph) {
-                            row: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return
-                            nominal: graph.modules[row.module_index].nominals[row.row]
-                            names: loop parameter in nominal.generic_params -> parameter.name
-                            actuals: sema_pattern_subject_args(subject_ty)
-                            ty := subject_ty
-                            loop registered in nominal.fields {
-                                if registered.symbol.name == member {
-                                    ty = sema_inference_substitute_type(registered.ty, names, actuals)
-                                }
+                        graph: program.registration_graph
+                        row: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return
+                        nominal: graph.modules[row.module_index].nominals[row.row]
+                        names: loop parameter in nominal.generic_params -> parameter.name
+                        actuals: sema_pattern_subject_args(subject_ty)
+                        ty := subject_ty
+                        loop registered in nominal.fields {
+                            if registered.symbol.name == member {
+                                ty = sema_inference_substitute_type(registered.ty, names, actuals)
                             }
-                            sema_expression_pattern_binding_sources(nested.shape, ty, projected, name, environment, program, sources, diagnostics)
-                        } else {
-                            return
                         }
+                        sema_expression_pattern_binding_sources(nested.shape, ty, projected, name, environment, program, sources, diagnostics)
                     }
                     .Value(_, _, _) -> {}
                 }

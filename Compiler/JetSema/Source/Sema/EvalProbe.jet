@@ -237,10 +237,9 @@ sema_eval_probe_shift_diagnostic: fn(diagnostic: Diagnostic, shift: Int) -> Diag
 // The walk of the function at `span` in `module_identity`, when the compile
 // has probes inside it. A body the compiler generated has no stop of its own.
 sema_eval_walk_open: fn(program: SemaProgramTables, module_identity: ModuleID, span: Span, function: String) -> SemaEvalWalk {
-    if program.registration_graph == .Val(graph) {
-        if graph.eval_probes == .Val(probes) {
-            return sema_eval_walk_for(probes, module_identity, span, function)
-        }
+    graph: program.registration_graph
+    if graph.eval_probes == .Val(probes) {
+        return sema_eval_walk_for(probes, module_identity, span, function)
     }
     SemaEvalWalk{}
 }
@@ -287,17 +286,16 @@ sema_eval_probe_stmt_span: fn(statement: Stmt) -> Span {
 // statement's span that no node starting at their position answered yet.
 sema_eval_walk_matches: fn(walk: SemaEvalWalk, program: SemaProgramTables, span: Span, statement: Bool) -> [SemaEvalAsk] {
     asked := [SemaEvalAsk]{}
-    if program.registration_graph == .Val(graph) {
-        if graph.eval_probes == .Val(probes) {
-            loop (local, offset) in walk.offsets {
-                exact: span.start == offset
-                if !exact && (!statement || walk.exact[local] || offset < span.start || offset >= span.end) {
-                    next
-                }
-                row: walk.rows[local]
-                expressions: loop value in probes.probes[row].expressions -> value
-                asked.push(SemaEvalAsk{local: local, row: row, exact: exact, expressions: expressions})
+    graph: program.registration_graph
+    if graph.eval_probes == .Val(probes) {
+        loop (local, offset) in walk.offsets {
+            exact: span.start == offset
+            if !exact && (!statement || walk.exact[local] || offset < span.start || offset >= span.end) {
+                next
             }
+            row: walk.rows[local]
+            expressions: loop value in probes.probes[row].expressions -> value
+            asked.push(SemaEvalAsk{local: local, row: row, exact: exact, expressions: expressions})
         }
     }
     asked

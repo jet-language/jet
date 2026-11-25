@@ -222,11 +222,9 @@ sema_core_bodies_held: fn(graph: SemaRegistrationGraph, row: SemaRegistrationMod
 // Does the Core library's check capture the function checks of module
 // `module_index`, a Core module?
 sema_core_body_capturing: fn(program: SemaProgramTables, module_index: Int) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        if !graph.core_seal -> return false
-        return sema_core_body_module(graph.modules[module_index])
-    }
-    false
+    graph: program.registration_graph
+    if !graph.core_seal -> return false
+    sema_core_body_module(graph.modules[module_index])
 }
 
 // Starts recording what the module pass's next function demands
@@ -234,7 +232,8 @@ sema_core_body_capturing: fn(program: SemaProgramTables, module_index: Int) -> B
 // packet a compiler thread prepared for it, which the pass records again as
 // it takes the packet (sema_check_body_demand_replay).
 sema_core_body_capture_open: fn(program: SemaProgramTables) {
-    if program.registration_graph == .Val(graph) -> sema_demand_capture_open(graph)
+    graph: program.registration_graph
+    sema_demand_capture_open(graph)
 }
 
 // Captures into `bodies` the check `checked` of function `owner_id` as its
@@ -252,24 +251,23 @@ sema_core_body_capture: fn(program: SemaProgramTables, owner_id: SymbolID, check
     }
     own.reverse()
     packet := SemaParallelBody{job_index: 0, checked: Val(checked.move()), diagnostics: own.move(), call_facts: compiler_take_rows<SemaCallSiteFact>(call_facts), comptime_requests: compiler_take_rows<SemaComptimeRequest>(comptime_requests), name_references: compiler_take_rows<SemaNameReferenceFact>(name_references), method_input: None, wanted_hooks: false}
-    if program.registration_graph == .Val(graph) {
-        demand := sema_demand_capture_close(graph)
-        packet.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
-        packet.derive_demand = compiler_take_rows<String>(demand.derived)
-        out := body_codec_out()
-        out.indexed = true
-        body_codec_put_semaparallelbody(out, packet)
-        entry: module_text(graph.module_table, graph.entry_module_identity)
-        symbols: loop id in out.symbols -> sema_core_body_capture_key(graph, symbol_table_key(graph.symbols, id), entry)
-        decls: loop id in out.decls -> sema_core_body_capture_key(graph, decl_table_key(graph.decls, graph.symbols, id), entry)
-        modules: loop id in out.modules -> "{module_text(graph.module_table, id)}"
-        has_delta: type_delta.len() > 0
-        types := [Type]{}
-        loop tid in out.types {
-            types.push(if has_delta -> delta_type_syntax(graph.interner, type_delta[0], tid) else -> type_syntax(graph.interner, tid))
-        }
-        bodies.push(SemaCoreBody{key: "{symbol_table_key(graph.symbols, owner_id)}", bytes: out.bytes.move(), symbols: symbols, decls: decls, modules: modules, strings: out.strings.move(), types: types.move()})
+    graph: program.registration_graph
+    demand := sema_demand_capture_close(graph)
+    packet.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
+    packet.derive_demand = compiler_take_rows<String>(demand.derived)
+    out := body_codec_out()
+    out.indexed = true
+    body_codec_put_semaparallelbody(out, packet)
+    entry: module_text(graph.module_table, graph.entry_module_identity)
+    symbols: loop id in out.symbols -> sema_core_body_capture_key(graph, symbol_table_key(graph.symbols, id), entry)
+    decls: loop id in out.decls -> sema_core_body_capture_key(graph, decl_table_key(graph.decls, graph.symbols, id), entry)
+    modules: loop id in out.modules -> "{module_text(graph.module_table, id)}"
+    has_delta: type_delta.len() > 0
+    types := [Type]{}
+    loop tid in out.types {
+        types.push(if has_delta -> delta_type_syntax(graph.interner, type_delta[0], tid) else -> type_syntax(graph.interner, tid))
     }
+    bodies.push(SemaCoreBody{key: "{symbol_table_key(graph.symbols, owner_id)}", bytes: out.bytes.move(), symbols: symbols, decls: decls, modules: modules, strings: out.strings.move(), types: types.move()})
     sema_check_drain_body(packet, diagnostics, call_facts, comptime_requests, name_references)
 }
 
@@ -545,18 +543,17 @@ sema_core_body_loaded: fn(program: SemaProgramTables, host_hooks: SemaHostHookAc
 
 sema_core_body_load: fn(program: SemaProgramTables, access: SemaHostHookAccess, module_index: Int, owner_id: SymbolID, type_delta: ^[InternerDelta]) -> SemaParallelBody? {
     if access == .Callbacks(hooks) {
-        if program.registration_graph == .Val(graph) {
-            if graph.core_seal || !sema_core_body_module(graph.modules[module_index]) -> return None
-            key: symbol_table_key(graph.symbols, owner_id)
-            if sema_core_body_stands_in(graph, key) -> return None
-            permit: hooks.guard_edit()
-            taken: sema_core_body_ahead_take(permit.value, owner_id, type_delta)
-            if taken != None -> return taken
-            position: sema_core_bodies_position(permit.value.core_bodies, key) ?? return None
-            packet: sema_core_body_read(permit.value.core_bodies, permit.value.core_bodies_records, graph, position, permit.value.core_bodies_read, permit.value.core_bodies_reader, type_delta) ?? return None
-            sema_core_body_mark_loaded(permit.value.core_bodies_loaded, position)
-            return Val(packet)
-        }
+        graph: program.registration_graph
+        if graph.core_seal || !sema_core_body_module(graph.modules[module_index]) -> return None
+        key: symbol_table_key(graph.symbols, owner_id)
+        if sema_core_body_stands_in(graph, key) -> return None
+        permit: hooks.guard_edit()
+        taken: sema_core_body_ahead_take(permit.value, owner_id, type_delta)
+        if taken != None -> return taken
+        position: sema_core_bodies_position(permit.value.core_bodies, key) ?? return None
+        packet: sema_core_body_read(permit.value.core_bodies, permit.value.core_bodies_records, graph, position, permit.value.core_bodies_read, permit.value.core_bodies_reader, type_delta) ?? return None
+        sema_core_body_mark_loaded(permit.value.core_bodies_loaded, position)
+        return Val(packet)
     }
     None
 }

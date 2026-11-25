@@ -913,7 +913,7 @@ sema_stmt_type_switch_resolve: fn(name: String, environment: SemaScopeEnvironmen
         .Named(_) -> {}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return Val(primitive)
     }
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     resolved: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
     if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return None
     Val(sema_type_resolve_declared(graph, Type.Named{name: name}, environment.module_identity))

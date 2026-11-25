@@ -31,31 +31,29 @@ SemaDefaultOwnerScope: struct {
 sema_default_owner_scope: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, owner_module: ModuleID, default_value: Expr) -> SemaDefaultOwnerScope? {
     if module_is_none(owner_module) || owner_module == environment.module_identity -> return None
     if sema_default_names_nothing(default_value) -> return None
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, owner_module) ?? return None
-        owner_environment := sema_scope_environment_init(
-            graph.modules[module_index].module_identity,
-            graph.modules[module_index].package_identity,
-            graph.modules[module_index].module_name,
-            graph.modules[module_index].source_file,
-            graph.modules[module_index].source_origin,
-            graph.modules[module_index].source_segments,
-            [SemaScopeDeclaration]{},
-        )
-        // copy: handle copies of the shared comptime publication the caller reads.
-        owner_environment.comptime_body_publication = environment.comptime_body_publication.copy()
-        owner_environment.comptime_body_values = environment.comptime_body_values.copy()
-        owner_environment.function_name = environment.function_name
-        table := sema_scope_init(owner_module)
-        registration_diagnostics := [Diagnostic]{}
-        if !sema_registration_apply_graph_module(graph, owner_module, table, registration_diagnostics) {
-            return None
-        }
-        state := sema_ownership_state_init()
-        _ := sema_scope_enter(table, state, sema_scope_function_owner_key(scopes))
-        return Val(SemaDefaultOwnerScope{environment: owner_environment.move(), scopes: table.move(), state: state.move()})
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, owner_module) ?? return None
+    owner_environment := sema_scope_environment_init(
+        graph.modules[module_index].module_identity,
+        graph.modules[module_index].package_identity,
+        graph.modules[module_index].module_name,
+        graph.modules[module_index].source_file,
+        graph.modules[module_index].source_origin,
+        graph.modules[module_index].source_segments,
+        [SemaScopeDeclaration]{},
+    )
+    // copy: handle copies of the shared comptime publication the caller reads.
+    owner_environment.comptime_body_publication = environment.comptime_body_publication.copy()
+    owner_environment.comptime_body_values = environment.comptime_body_values.copy()
+    owner_environment.function_name = environment.function_name
+    table := sema_scope_init(owner_module)
+    registration_diagnostics := [Diagnostic]{}
+    if !sema_registration_apply_graph_module(graph, owner_module, table, registration_diagnostics) {
+        return None
     }
-    None
+    state := sema_ownership_state_init()
+    _ := sema_scope_enter(table, state, sema_scope_function_owner_key(scopes))
+    Val(SemaDefaultOwnerScope{environment: owner_environment.move(), scopes: table.move(), state: state.move()})
 }
 
 // A literal default (`0`, `""`, `false`, `[]`, `None`, `.Variant`) resolves no

@@ -271,7 +271,7 @@ sema_lifecycle_inline_call: fn(raw: [U8], call: Call) -> SemaLifecycleInlineCall
 //   commas stands among the call's arguments.
 sema_lifecycle_inline_edit: fn(call: Call, callee: SymbolID?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TextEdit? {
     symbol: callee ?? return None
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     row: sema_registration_callable_row_of(graph, symbol) ?? return None
     if row == .Function(module_index, index) {
         // The marker test reads the row in place: binding the declaration

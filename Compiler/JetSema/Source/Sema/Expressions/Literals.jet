@@ -155,7 +155,8 @@ sema_expression_unit_literal_member_fact: fn(suffix: String, graph: SemaRegistra
 }
 
 sema_expression_unit_literal: fn(raw: String, int_value: Int?, float_value: Float?, suffix: String, suffix_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
-    if suffix != "" && program.registration_graph == .Val(facts_graph) {
+    facts_graph: program.registration_graph
+    if suffix != "" {
         fact: sema_expression_unit_literal_fact(suffix, facts_graph, sema_app_module_row(environment, facts_graph))
         if fact == .Val(unit) {
             if unit.name == "Duration" && unit.family == "Time" {
@@ -604,11 +605,10 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
                 result_ty = Val(normalized)
             }
             .FixedList(element, len) -> {
-                if program.registration_graph == .Val(graph) {
-                    if sema_type_measure_type_name(graph, environment.module_identity, len) == .Val(named) {
-                        diagnostics.push(sema_error("E0963", span, "`{named}` is a type, not a fixed-size list length", "a fixed-size list `[T#N]` takes a compile-time integer length: a literal or an integer constant", "write the length as an integer, like `[T#{elements.len()}]`"))
-                        return None
-                    }
+                graph: program.registration_graph
+                if sema_type_measure_type_name(graph, environment.module_identity, len) == .Val(named) {
+                    diagnostics.push(sema_error("E0963", span, "`{named}` is a type, not a fixed-size list length", "a fixed-size list `[T#N]` takes a compile-time integer length: a literal or an integer constant", "write the length as an integer, like `[T#{elements.len()}]`"))
+                    return None
                 }
                 if sema_expression_runtime_measure_name(len, scopes) == .Val(local) {
                     diagnostics.push(sema_error("E0963", span, "`[T#{measure_expression(len)}]` reads `{local}`, a run-time value of the function around it", "a fixed-size list `[T#N]` takes a length computed while compiling: a literal, an integer constant, a number parameter or a `#run` value", "make the length a constant, or bind it with `{local}: #run {{ … }}`"))
@@ -1370,7 +1370,7 @@ sema_expression_index_hook: fn(environment: SemaScopeEnvironment, program: SemaP
     }
     owned: owned_trait_for_role(role) ?? return false
     trait_name: owned.name
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
     row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
     identity: graph.modules[row.module_index].nominals[row.row].identity_key
     loop module_row in graph.modules {
@@ -1539,22 +1539,21 @@ sema_expression_view_subrange_type: fn(ty: Type) -> Type? Never! {
 // `#Printable` or `#Display` marker, or the auto-derived `Printable` the
 // declaration-marker rule selects for it.
 sema_expression_interpolation_derived: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        name: sema_type_graph_base_name(ty) ?? return false
-        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
-        if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
-            if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") {
-                return true
-            }
+    graph: program.registration_graph
+    name: sema_type_graph_base_name(ty) ?? return false
+    resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
+    if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
+        if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") {
+            return true
         }
-        module_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
-        // Matched in place: a pattern on the indexed path copies the whole item.
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        if nominal.source == .SourceAST(item) {
-            return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).printable && !sema_comparability_rendering_blocked(graph, resolved.target_module_identity, item, "Printable")
-        }
+    }
+    module_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) {
+        return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).printable && !sema_comparability_rendering_blocked(graph, resolved.target_module_identity, item, "Printable")
     }
     false
 }
@@ -1565,30 +1564,29 @@ sema_expression_interpolation_derived: fn(ty: Type, environment: SemaScopeEnviro
 // interpolation is flagged for the explicit debug selector (L0520). Core
 // types are not flagged: their display is the library's, not the caller's.
 sema_expression_interpolation_auto_printable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        name: sema_type_graph_base_name(ty) ?? return false
-        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Type || module_is_core(resolved.target_module_identity) {
+    graph: program.registration_graph
+    name: sema_type_graph_base_name(ty) ?? return false
+    resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type || module_is_core(resolved.target_module_identity) {
+        return false
+    }
+    if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
+        if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") {
             return false
         }
-        if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
-            if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") {
-                return false
-            }
-        }
-        if sema_call_reflection_bound(ty, "Display", environment, program) -> return false
-        module_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
-        // Matched in place: a pattern on the indexed path copies the whole item.
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        if nominal.source == .SourceAST(item) {
-            declared: graph.modules[module_index].declared_trait_impls
-            if !sema_type_metadata_auto_derives(item, declared).printable -> return false
-            if item == {
-                .Struct(value) -> return !sema_type_metadata_has_trait_block(value.trait_impls, "Display") && !sema_type_metadata_has_explicit_impl(declared, value.name, "Display")
-                .Enum(value) -> return !sema_type_metadata_has_trait_block(value.trait_impls, "Display") && !sema_type_metadata_has_explicit_impl(declared, value.name, "Display")
-                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return false
-            }
+    }
+    if sema_call_reflection_bound(ty, "Display", environment, program) -> return false
+    module_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) {
+        declared: graph.modules[module_index].declared_trait_impls
+        if !sema_type_metadata_auto_derives(item, declared).printable -> return false
+        if item == {
+            .Struct(value) -> return !sema_type_metadata_has_trait_block(value.trait_impls, "Display") && !sema_type_metadata_has_explicit_impl(declared, value.name, "Display")
+            .Enum(value) -> return !sema_type_metadata_has_trait_block(value.trait_impls, "Display") && !sema_type_metadata_has_explicit_impl(declared, value.name, "Display")
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return false
         }
     }
     false
@@ -1596,14 +1594,15 @@ sema_expression_interpolation_auto_printable: fn(ty: Type, environment: SemaScop
 
 // Bare `{value}` needs a value whose type can be shown through `Display`. The
 // shared reflection gate owns the structural rules; a nominal type also counts
-// when it derives its display or is a unit-family member. Without a
-// registration graph the nominal facts are unknown, so a nominal type is not
-// refused.
+// when it derives its display or is a unit-family member. In a snapshot
+// check the nominal facts are unknown, so a nominal type is not refused.
 sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
     if ty == {
         .Named(name) -> {
-            graph: program.registration_graph ?? return true
+            graph: program.registration_graph
+            // Snapshot: a lone program's nominal facts are unknown, so the type is not refused.
+            if graph.mode == .Snapshot -> return true
             if sema_call_reflection_named_displayable(name, ty, environment, program) -> return true
             return sema_registration_unit_member_type(graph, ty) || sema_expression_interpolation_derived(ty, environment, program)
         }
@@ -1640,7 +1639,7 @@ sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, pro
         // interpolates when every type it may hold does.
         .TraitObject(bounds) -> {
             if sema_call_reflection_has_name(bounds, "Renderable") -> return true
-            graph: program.registration_graph ?? return false
+            graph: program.registration_graph
             holders: sema_call_reflection_trait_holders(graph, bounds) ?? return false
             loop reference in holders.impls {
                 if !sema_expression_displayable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
@@ -1768,7 +1767,7 @@ sema_expression_impl_allowed: fn(ty: Type, environment: SemaScopeEnvironment, pr
 // Whether `ty` is a struct or enum the environment's own module declares,
 // whose body then holds its impls (L0535).
 sema_expression_impl_in_body: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return false
     row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return false
     if row.module_index != caller -> return false
@@ -1779,13 +1778,12 @@ sema_expression_impl_in_body: fn(ty: Type, environment: SemaScopeEnvironment, pr
 // The source text of the interpolated expression at `span`, or `value` when
 // the module source does not hold it.
 sema_expression_interpolation_text: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
-    if program.registration_graph == .Val(graph) {
-        if sema_scope_caller_index(environment, graph) == .Val(caller) {
-            raw: graph.modules[caller].source.bytes()
-            if span.start >= 0 && span.end <= raw.len() && span.start < span.end {
-                text: String.from_bytes(raw[span.start..<span.end]) ?? ""
-                if text != "" -> return text
-            }
+    graph: program.registration_graph
+    if sema_scope_caller_index(environment, graph) == .Val(caller) {
+        raw: graph.modules[caller].source.bytes()
+        if span.start >= 0 && span.end <= raw.len() && span.start < span.end {
+            text: String.from_bytes(raw[span.start..<span.end]) ?? ""
+            if text != "" -> return text
         }
     }
     "value"
