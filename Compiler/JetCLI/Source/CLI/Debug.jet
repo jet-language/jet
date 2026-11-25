@@ -510,14 +510,14 @@ jet_cli_debug_console: fn(session: ^NativeSession, file: String, lines: [String]
             .Err(failure) -> return jet_cli_debug_unavailable(failure, color)
         }
     }
-    if opened == None {
-        row: diagnostic_registry_row("E0101") ?? panic("E0101 is not registered")
-        return jet_cli_fail("E0101", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
+    if opened.move() == .Val(stopped) {
+        jet_cli_debug_eval_held_cut_wait(held)
+        first := stopped
+        if refused -> first.refused = true
+        return jet_cli_debug_commands(session, first, file, lines, -1, entry, scratch, deep_checks, script, color)
     }
-    jet_cli_debug_eval_held_cut_wait(held)
-    first := opened ?? panic("the session opened")
-    if refused -> first.refused = true
-    jet_cli_debug_commands(session, first, file, lines, -1, entry, scratch, deep_checks, script, color)
+    row: diagnostic_registry_row("E0101") ?? panic("E0101 is not registered")
+    jet_cli_fail("E0101", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // What the built image's file answered of `--do`'s commands: how many of

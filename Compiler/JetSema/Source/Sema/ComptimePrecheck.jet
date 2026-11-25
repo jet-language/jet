@@ -1576,10 +1576,7 @@ sema_comptime_walk_claim: fn(walk: SemaComptimeWalk, prep_env: ^SemaScopeEnviron
 // the driver (sema_comptime_walk_take).
 sema_comptime_walk_finish: fn(walk: SemaComptimeWalk, job: SemaComptimeFunctionJob, check: ^^SemaComptimeFunctionResult?) {
     permit: walk.queue.guard_edit()
-    made := check.move()
-    if made != None {
-        permit.value.done.push(SemaComptimeWalkDone{job: job, check: made.move() ?? panic("a comptime walk check vanished")})
-    }
+    if check.move() == .Val(made) -> permit.value.done.push(SemaComptimeWalkDone{job: job, check: made})
     permit.value.busy -= 1
     if permit.value.done.len() == 1 || (permit.value.unclaimed <= 0 && permit.value.busy == 0 && permit.value.prep_pending == 0) {
         walk.done_changed.notify_all()

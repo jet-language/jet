@@ -6048,24 +6048,27 @@ jet_driver_parse_stream_take: fn(stream: ^JetDriverParseStream, finished: Receiv
             parsed = Val(jet_driver_parse_unit(job, if stream.outstanding > 0 -> compiler_threads_single() else -> request.compiler_threads, spellings, own))
             name_pool_fold(spellings, own)
         }
-        loop parsed == None {
-            streamed: finished.receive() ?? panic("the load's parse threads stopped before it took every unit")
-            if streamed.failure != "" -> panic(streamed.failure)
-            stream.outstanding -= 1
-            back: streamed.unit.move() ?? panic("a parse thread answered unit {streamed.position} without its parse")
-            if {
-                streamed.position == position -> parsed = Val(back.move())
-                else -> stream.arrived[streamed.position] = back.move()
-            }
-        }
     }
-    taken: parsed.move() ?? panic("the load took no parse for unit {position}")
+    taken: parsed.move() ?? jet_driver_parse_stream_receive(stream, finished, position)
     if request.trace_sink == .Val(sink) {
         if waited -> sink.end("parse", taken.parsed.program.items.len())
         load: stream.loads.remove(position) ?? JetDriverParseLoad{user: false, core_bytes: -1}
         jet_driver_parse_volume_add(stream.volume, load, taken)
     }
     taken
+}
+
+// The parse of the unit at `position`, received from the parse threads. The
+// units they send back first wait in `stream.arrived` for their turn.
+jet_driver_parse_stream_receive: fn(stream: ^JetDriverParseStream, finished: Receiver<JetDriverParseStreamed>, position: Int) -> JetDriverParsedUnit {
+    loop {
+        streamed: finished.receive() ?? panic("the load's parse threads stopped before it took every unit")
+        if streamed.failure != "" -> panic(streamed.failure)
+        stream.outstanding -= 1
+        back: streamed.unit.move() ?? panic("a parse thread answered unit {streamed.position} without its parse")
+        if streamed.position == position -> return back
+        stream.arrived[streamed.position] = back.move()
+    }
 }
 
 jet_driver_add_core_unit: fn(source_units: ^[JetDriverSourceUnit], queued: ^[Bool], generated: ^[SourceFile], module_name: String, relative_path: String, file_index: Int, source: String) -> Int {

@@ -7432,18 +7432,20 @@ jet_driver_held_eval_check: fn(held: ^JetDriverHeldEval, path: String, functions
         back := jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), going.symbols.move(), going.interner.move(), held.probe.program.checked_types.move())
         held.probe.program.registration_graph = back.graph.move()
         held.probe.program.checked_types = [TTypeDef]{}
-        if checked.complete && checked.function != None {
-            // Unreachable stop: the condition above holds only when
-            // `checked.function` is not None.
-            function := checked.function.move() ?? panic("a held check's function went missing")
-            by_key: held.rows
-            sema_eval_held_failure_settle(function, candidate, checked.failure.move(), functions, by_key)
-            checked.failure = None
-            loop refusal in sema_eval_held_effect_refusals(function, functions, by_key, function.source_span) {
-                checked.diagnostics.push(refusal)
-                checked.complete = false
+        if checked.complete {
+            held_function: checked.function.move()
+            checked.function = None
+            if held_function.move() == .Val(settled) {
+                function := settled
+                by_key: held.rows
+                sema_eval_held_failure_settle(function, candidate, checked.failure.move(), functions, by_key)
+                checked.failure = None
+                loop refusal in sema_eval_held_effect_refusals(function, functions, by_key, function.source_span) {
+                    checked.diagnostics.push(refusal)
+                    checked.complete = false
+                }
+                checked.function = Val(function.move())
             }
-            checked.function = Val(function.move())
         }
         return JetDriverHeldChecked{checked: checked.move(), symbols: back.symbols.move(), interner: back.interner.move(), types: back.types.move()}
     }

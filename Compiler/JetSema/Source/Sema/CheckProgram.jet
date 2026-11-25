@@ -2713,10 +2713,10 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
     conversions := [FnBody]{}
     conversion_reasons := [String]{}
     conversion_call_facts := [SemaCallSiteFact]{}
-    if checked.value != None {
-        taken := checked.value.move()
-        checked.value = None
-        bodies := [FnBody]{taken.move() ?? panic("a checked body lost its function")}
+    taken := checked.value.move()
+    checked.value = None
+    if taken.move() == .Val(checked_function) {
+        bodies := [FnBody]{checked_function}
         conversion_requests := [SemaComptimeRequest]{}
         conversion_references := [SemaNameReferenceFact]{}
         _ := sema_inject_prelude_error_conversions(sema_scope_environment_module_text(environment, program), environment, program, comptime_scopes.slots[comptime_scopes.current].table, comptime_scopes.host_hooks, bodies, [Int:[SemaPreludeConversionDemand]]{}, fn_delta, diagnostics, conversion_call_facts, conversion_requests, conversion_references, conversion_reasons, false)
@@ -4309,9 +4309,8 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     function_call_facts := [SemaCallSiteFact]{}
     function_comptime_requests := [SemaComptimeRequest]{}
     function_name_references := [SemaNameReferenceFact]{}
-    if prepared != None {
-        packet := prepared.move() ?? panic("a prepared method packet disappeared")
-        prepared = None
+    if prepared.move() == .Val(ready_packet) {
+        packet := ready_packet
         sema_check_body_demand_replay(program, packet)
         taken_input := packet.method_input.move()
         packet.method_input = None
@@ -4398,15 +4397,11 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         sema_keep_going_push_stub(keep_going_stub.move(), label, sema_keep_going_cause([String]{}, diagnostics, function_diagnostic_start), functions, reasons)
         return false
     }
-    if checked.value != None && sema_check_registered_protocol_unit_return(job, module_index, program) {
-        taken := checked.value.move()
-        checked.value = None
-        rewritten := taken.move() ?? panic("a checked Close method lost its lowered function")
+    if ^checked.value == .Val(rewritten) && sema_check_registered_protocol_unit_return(job, module_index, program) {
         raw_return: Type.Named{name: "Unit"}
         rewritten.ret = Val(raw_return)
         failure: sema_failure_carrier(Val(raw_return))
         rewritten.failure_carrier = failure
-        checked.value = Val(rewritten.move())
     }
     position: functions.len()
     if sema_append_function(functions, checked.value.move()) {

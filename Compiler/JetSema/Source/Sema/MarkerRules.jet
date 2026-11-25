@@ -1630,6 +1630,14 @@ sema_marker_is_hook: fn(marker: Marker, hook: MarkerHook) -> Bool Never! {
     reached == hook
 }
 
+// The first of `markers` that reaches the compiler hook `hook`.
+sema_marker_with_hook: fn(markers: [Marker], hook: MarkerHook) -> Marker? Never! {
+    loop marker in markers {
+        if sema_marker_is_hook(marker, hook) -> return Val(marker)
+    }
+    None
+}
+
 sema_marker_rules_is_guest_marker: fn(marker: Marker, site: RuleSite?) -> Bool Never! {
     if marker.negated -> return false
     if site == (Val(RuleSite.Function)) && (sema_marker_is_hook(marker, MarkerHook.Import) || sema_marker_is_hook(marker, MarkerHook.Export)) {
@@ -2545,17 +2553,7 @@ sema_marker_rules_no_prelude_error: fn(name: String, span: Span, fix: String) ->
 // refused parameter ends the check. Purity (E0938) is judged by the solved
 // effect row, not here.
 sema_check_memoized_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], diagnostics: ^[Diagnostic]) {
-    memo := Marker?{None}
-    loop candidate in func.markers {
-        if sema_marker_is_hook(candidate, MarkerHook.Memo) {
-            memo = Val(candidate)
-            break
-        }
-    }
-    if memo == None {
-        return
-    }
-    marker: memo ?? panic("checked #Memo marker disappeared")
+    marker: sema_marker_with_hook(func.markers, MarkerHook.Memo) ?? return
     field_helper: sema_computed_field_getter_function(func)
     loop parameter_index in 0..<func.params.len() {
         declared: if func.params[parameter_index].variadic -> Type.List{element: func.params[parameter_index].ty} else -> func.params[parameter_index].ty

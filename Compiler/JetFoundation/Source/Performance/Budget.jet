@@ -414,9 +414,6 @@ perf_evaluate: fn(evidence_id: String, context_key: String, baseline_report_ids:
             return Ok(perf_finish(candidate_point, None, None, evidence, enforcement, [PerfRational]{}))
         }
         .AbsoluteFrom(limit, limit_direction) -> {
-            if policy == None {
-                return Err(perf_error("AbsoluteFrom requires a measurement policy"))
-            }
             if {
                 limit_direction == PerfLimitDirection.AtMost -> perf_rational_sub(candidate_point, limit)
                 else -> perf_rational_sub(limit, candidate_point)
@@ -431,11 +428,10 @@ perf_evaluate: fn(evidence_id: String, context_key: String, baseline_report_ids:
                 return Ok(perf_finish(perf_rational_zero(), None, None, PerfEvidence.Unavailable, enforcement, [PerfRational]{}))
             }
             result: perf_relative_stat(candidate_point, baseline_point, limit_basis_points, goal, direction)
-            if policy == None -> return Err(perf_error("RelativeTo requires a measurement policy"))
             result
         }
     }
-    measurement: policy ?? panic("statistical branches require policy")
+    measurement: policy ?? return Err(perf_error(if comparison == .RelativeTo(_, _) -> "RelativeTo requires a measurement policy" else -> "AbsoluteFrom requires a measurement policy"))
     bootstrap: perf_bootstrap_values(evidence_id, context_key, baseline_report_ids, candidate, baseline, percentile, comparison, direction, measurement)
     if measurement.lower_rank == 0 || measurement.upper_rank == 0 || measurement.lower_rank > bootstrap.len() || measurement.upper_rank > bootstrap.len() {
         return Err(perf_error("bootstrap ranks are outside the replicate set"))
