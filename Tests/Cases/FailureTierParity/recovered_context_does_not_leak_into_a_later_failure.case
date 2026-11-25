@@ -1,5 +1,5 @@
-# Original tests/failure_tier_parity.rs:247-278; verbatim input and every runtime parity assertion.
-# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; exact .normalize_failure_journey_paths helper125-156 differs from CheckedText.
+# Original tests/failure_tier_parity.rs:247-278; verbatim input (its last line binds the failing call, which now
+# needs a name) and every runtime parity assertion.
 fixture: RecoveredContextDoesNotLeakIntoALaterFailure.fixture
 step jit: jet run main.jet
 env: NO_COLOR=1
@@ -11,11 +11,11 @@ step release: jet run --release main.jet
 env: NO_COLOR=1
 exit: 1
 stdout: == jit
-stderr.normalize_failure_journey_paths: == jit
+stderr.normalize_failure_journey_paths: == jit # the tiers' reports differ only in their journey paths
 step: jet build main.jet
 env: NO_COLOR=1
 exit: 0
 step aot: built
 exit: 1
 stdout: == jit
-stderr.normalize_failure_journey_paths: == jit
+stderr.normalize_failure_journey_paths: == jit # the tiers' reports differ only in their journey paths

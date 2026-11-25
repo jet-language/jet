@@ -1,6 +1,7 @@
-# HAND-PORT tests/numeric_widening.rs:555-582 exact_and_approximate_widening_requires_approx_for_narrowing
-# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
-# All original success+trap programs and guards. AOT requires runtime70; default/o0 permit ONLY70 raw trap or1 exact same-diagnostic E0953+why, matching original RunOutcome branches. No arbitrary nonzero acceptance.
+# Port of tests/numeric_widening.rs:555-582 exact_and_approximate_widening_requires_approx_for_narrowing.
+# All original success+trap programs and guards. AOT requires runtime 70; default and release permit ONLY the raw 70
+# trap or exit 1 with the same E0953 diagnostic and why, matching the original RunOutcome branches. No arbitrary
+# nonzero acceptance.
 fixture: ExactAndApproximateWideningRequiresApproxForNarrowing.fixture
 env: NO_COLOR=1
 step successdefault: jet run success/main.jet
@@ -22,13 +23,13 @@ stdout: empty
 stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # original runtime precision trap
 stderr: ~ "Jet.ArithmeticOrBoundsFailure" # original runtime code
 step narrowingdefault: jet run --json narrowing/main.jet
-exit: in [70, 1]
+exit: in [70, 1] # the runtime trap, or the same check's E0953 report
 when exit == 70: stdout: empty
 when exit == 70: stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # original runtime precision trap
 when exit == 70: stderr: ~ "Jet.ArithmeticOrBoundsFailure" # original runtime code
 when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number has no exact Float; approx(x) rounds it to the nearest Float"] #>= 1
 step narrowingrelease: jet run --release --json narrowing/main.jet
-exit: in [70, 1]
+exit: in [70, 1] # the runtime trap, or the same check's E0953 report
 when exit == 70: stdout: empty
 when exit == 70: stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # original runtime precision trap
 when exit == 70: stderr: ~ "Jet.ArithmeticOrBoundsFailure" # original runtime code

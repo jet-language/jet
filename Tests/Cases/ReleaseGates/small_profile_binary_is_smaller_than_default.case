@@ -1,13 +1,12 @@
 # `small: true` keeps inlining to the O1 limits at any `optimize` level, so at
 # `optimize: O2`, the stock level of `jet build`, the small image is smaller than
-# the default one. At `O1` the limits are already the O1 ones.
-copy: {root}/Examples/Collections/WordCount.jet from-root/Examples/Collections/WordCount.jet
-file: from-root/Examples/Collections/WordCount.jet is-file
-mkdir: .jet/build
-step: jet build -O2 {root}/Examples/Collections/WordCount.jet
+# the default one. At `O1` the limits are already the O1 ones. The example is
+# built from a copy in the work directory, since a file build writes beside its source.
+copy: {root}/Examples/Collections/WordCount.jet WordCount.jet
+step: jet build -O2 WordCount.jet
 exit: 0
 rename: .jet/build/WordCount .jet/build/wordcount_default
-step: jet build -O2 --small {root}/Examples/Collections/WordCount.jet
+step: jet build -O2 --small WordCount.jet
 exit: 0
 rename: .jet/build/WordCount .jet/build/wordcount_small
 capture: default_size = size file .jet/build/wordcount_default
