@@ -1194,6 +1194,11 @@ SemaRegistrationGraph: struct {
     // finalization summarizes the Core functions for a bound program
     // (CoreSeal.jet) into SemaGraphResult.core_seal.
     core_seal: Bool{false},
+    // A check of every Core body (`jet check Core`, the Core library's
+    // check), known as the graph is prepared: a Core module's qualified
+    // markers obey the marker laws a package's do
+    // (MarkerModules.jet sema_marker_module_check_core_qualified).
+    core_marker_laws: Bool{false},
     // The Core function checks stay on the module pass's thread, off the
     // compiler threads, so that thread captures them (`core_seal`) or loads
     // them from the host's bodies file (CoreBodies.jet
@@ -6472,7 +6477,7 @@ sema_registration_compiler_builtin_row_hashed: fn(graph: SemaRegistrationGraph, 
 // (`capture_derives`) records each Core module's derive expansion; a
 // compile whose host lends that check's bodies file (`derive_hooks`) takes
 // the records in place of expanding (CoreBodies.jet sema_core_derives_attach).
-sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: ^^ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads, derive_hooks: SemaHostHookAccess?{None}, capture_derives: Bool{false}) -> SemaRegistrationGraph {
+sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: ^^ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads, derive_hooks: SemaHostHookAccess?{None}, capture_derives: Bool{false}, core_marker_laws: Bool{false}) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // The original Prelude error declarations join the graph first, as their
@@ -6629,6 +6634,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
         diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
     graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_table: table.move(), module_rows: module_rows, symbols: symbol_table_of(symbol_ranges), edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}}, impl_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}}, nominal_symbol_rows: [U32:SemaRegistrationRowRef]{}, codec_demand: Shared{sema_codec_demand_new()}, derive_demand: Shared{sema_derive_demand_new()}, interner: interner()}
+    graph.core_marker_laws = core_marker_laws
     sema_registration_index_all_nominal_rows(graph)
     sema_registration_index_source_impls(graph)
     loop module_index in 0..<graph.modules.len() {
