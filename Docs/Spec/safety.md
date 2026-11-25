@@ -5408,14 +5408,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/World.jet",
-      "line": 658,
+      "line": 654,
       "column": 5,
       "reason": "the entry function sets the device store before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/World.jet",
-      "line": 730,
+      "line": 726,
       "column": 5,
       "reason": "device_mutex is held"
     },
@@ -12519,8 +12519,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 29:5 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 34:5 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 218:5 | "written under the vault test backup mutex" |
-| Compiler | Compiler/JetRuntime/Source/World.jet | 658:5 | "the entry function sets the device store before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/World.jet | 730:5 | "device_mutex is held" |
+| Compiler | Compiler/JetRuntime/Source/World.jet | 654:5 | "the entry function sets the device store before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/World.jet | 726:5 | "device_mutex is held" |
 | Compiler | Compiler/JetRuntime/Source/WsRoutes.jet | 636:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 17:5 | "the witnesses run one at a time on the main thread" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 24:5 | "a failed allocator witness writes three process-static texts to stderr with raw writes, which take no heap, and terminates this isolated test process" |

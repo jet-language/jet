@@ -264,13 +264,6 @@ rt_realtime_worker_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-// core.rt.__callback(rate, frames, callback), callback: the IR hands the
-// callback's closure box over with its lazy.callback invoke and lazy.release
-// helpers; the stream skips through its own internal cell.
-#Export(c) jet_rt_callback: fn(rate_word: I64, frames_word: I64, env: I64, invoke: I64, release: I64) -> I64 {
-    jet_rt_native_realtime_start(rate_word, frames_word, env, invoke, release, rt_realtime_worker_address(), I64{0})
-}
-
 // jet.runtime.rt callback: the rate and frame count cross as native words,
 // the callback as its handed-over closure box with its lazy.callback invoke
 // and lazy.release helpers; the stream skips through its own internal cell.

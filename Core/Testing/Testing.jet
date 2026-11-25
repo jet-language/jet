@@ -1463,9 +1463,9 @@ DeterministicWorld: struct {
     history: fn(self) -> String { world_rt.world_history(self) }
 }
 
-// I9: exact interpreter DiagnosticErr cleanup needs an error-capture rail.
-// Preserve the existing native lifecycle rather than changing Err-path order.
-world: fn(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
+/// Runs `body` once in a fresh deterministic world; returns when the world's
+/// tasks are idle.
+world: fn(body: fn(DeterministicWorld)) Never! { world_rt.world(body) }
 
 status: fn(comparison: TestComparison) -> String Never! { comparison.status }
 

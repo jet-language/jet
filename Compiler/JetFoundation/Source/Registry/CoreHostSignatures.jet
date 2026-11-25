@@ -2,23 +2,6 @@
 // Keep this table independent from erased CoreCallRecord metadata. Rows use
 // the grammar of `core_sig_row_lookup` (CorePlatformSignatures.jet).
 
-core_host_callback_type: fn() -> Type Never! {
-    Type.Fn{
-        params: [Type]{Type.List{element: Type.Float}},
-        ret: None,
-        effect_bound: Val([EffectRowEntry]{}),
-        param_contract: None,
-        call_metadata: Val(FunctionCallMetadata{
-            names: [String]{},
-            defaults: [FunctionDefaultRef?]{},
-            variadic: [Bool]{},
-            conventions: [AccessConvention]{AccessConvention.Read},
-            policies: CallablePolicyChain{policies: [CallablePolicy]{}},
-        }),
-        return_view_provenance: None,
-    }
-}
-
 core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows: """
     core.files jet_std_files_open_reader_nonblocking String Result<FileReader,IOError>
@@ -36,14 +19,12 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.testing fake_clock Int Clock
     jet_builtins to_bits_f32 F32 Int
     jet_builtins from_bits_f32 Int F32
-    core.testing world fn(DeterministicWorld;Unit) Unit
     core.math sqrt|floor|ceil|fabs Float Float
     core.math fmod Float,Float Float
     core.math __numeric_stop String Never
     core.math.random seed Int -
     core.crypto __wipe ^[u8] -
     core.crypto __secret_keep ^[u8] -
-    core.rt __callback Int,Int,callback RealtimeStream
     core.tasks after Duration,T Receiver<T> T
     core.game run ^GameScene,GameReplay?,GameBackend?,Int? String
     core.event __event_with_policy EventPolicy Event<T> T
