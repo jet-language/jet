@@ -1,0 +1,222 @@
+// Keep-going stubs: the trapping body that stands in for a function whose
+// check failed, the references it drops or rekeys, and the cause it reports.
+use jet_foundation.[
+    FnBody,
+    AST_NODE_GENERATED,
+    ContractClause,
+    DIAGNOSTIC_ERROR,
+    Diagnostic,
+    Expr,
+    Func,
+    Span,
+    Stmt,
+    SymbolID,
+    SymbolLocalKeys,
+    TFuncKind,
+    symbol_is_local,
+    symbol_local_keys_intern,
+    symbol_local_keys_text_at,
+]
+
+// JET_KEEP_GOING (SemaRegistrationGraph.keep_going): the typed trap that
+// stands in for a function whose check failed. It is `func` checked again
+// with its body replaced by one `todo` (a Never value of the return type that
+// lowers to an unreachable stop) and its contracts dropped, so its signature,
+// owner and generic parameters are the declared ones. The trap's own reports
+// are discarded: the real check's reports and reasons already name the
+// failure. None when even the signature does not check.
+sema_keep_going_stub: fn(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
+    stub := func
+    stub.pre = [ContractClause]{}
+    stub.post = [ContractClause]{}
+    stub.body = [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None, id: AST_NODE_GENERATED}}}
+    stub.return_type_span = sema_keep_going_trap_return_span(func)
+    discarded_diagnostics := [Diagnostic]{}
+    discarded_call_facts := [SemaCallSiteFact]{}
+    discarded_comptime_requests := [SemaComptimeRequest]{}
+    discarded_name_references := [SemaNameReferenceFact]{}
+    checked := sema_function_check(stub, sema_program_symbol_key(program, owner_id), function_kind, raw_protocol_return, environment, program, scopes, host_hooks, discarded_diagnostics, discarded_call_facts, discarded_comptime_requests, discarded_name_references)
+    if !checked.complete || checked.value == None -> return None
+    Val(checked)
+}
+
+// This rule reads a function with no written return type as losing the value
+// of its last line (L0508). A trap's `todo` is a stop, never a value handed
+// to nobody, so the trap's placeholder return position counts as written.
+sema_keep_going_trap_return_span: fn(func: Func) -> Span? Never! {
+    if func.return_type_span == None -> Val(func.span) else -> func.return_type_span
+}
+
+// Appends a keep-going trap with its one census row (#5566, #5662): the
+// module is incomplete and one reason names the trapped function and why its
+// check failed, so a compiler that lowers a trap never looks clean to the
+// keep-going report, even when the failure was a post-solve recheck whose
+// reports are settled away. A trap that could not be built or recorded is
+// that row's outcome instead.
+sema_keep_going_push_stub: fn(stub: ^^SemaFunctionResult?, label: String, cause: String, functions: ^[FnBody], reasons: ^[String]) Never! {
+    checked := stub.move() ?? {
+        reasons.push("{label}: its keep-going trap did not check (the declared signature fails): {cause}")
+        return
+    }
+    if !sema_append_function(functions, checked.value.move()) {
+        reasons.push("{label}: its keep-going trap could not be recorded: {cause}")
+        return
+    }
+    reasons.push("{label}: lowered as a keep-going trap: {cause}")
+}
+
+// The name references a trapped function's check recorded (`references`
+// from `start` on) are kept, keyed in the trap that stands in for its body:
+// a local's id is a row of the failed check's own symbols (its body's, else
+// its `failed_locals`), which the trap does not share, so the local's key is
+// interned in the trap's symbols and the reference takes that id. A reader
+// keys a local in the body its reference names (SemaNameReferenceFact.body),
+// the function's key, which is now the trap's. A reference a nested body
+// recorded names that body and keeps its id. A failed check with neither
+// symbols drops its own local references, and with no trap (or a trap with
+// no body) every local reference from `start` on is dropped: no body holds
+// their keys. Returns `trap`.
+sema_keep_going_trap_references: fn(references: ^[SemaNameReferenceFact], start: Int, failed: SemaFunctionResult, trap: ^^SemaFunctionResult?) -> SemaFunctionResult? Never! {
+    stubbed := trap.move() ?? {
+        sema_keep_going_drop_local_references(references, start, None)
+        return None
+    }
+    // A trap always has its body (sema_keep_going_stub).
+    if stubbed.value == None {
+        sema_keep_going_drop_local_references(references, start, None)
+        return Val(stubbed)
+    }
+    body := stubbed.value.move() ?? return None
+    if failed.value == .Val(failed_body) {
+        sema_keep_going_rekey_references(references, start, body.key, failed_body.tree.symbols, body.tree.symbols)
+    } else if failed.failed_locals == .Val(locals) {
+        sema_keep_going_rekey_references(references, start, body.key, locals, body.tree.symbols)
+    } else { sema_keep_going_drop_local_references(references, start, Val(body.key)) }
+    stubbed.value = Val(body)
+    Val(stubbed)
+}
+
+// Drops the local references from `start` on that body `owner` recorded,
+// every one when `owner` is None (sema_keep_going_trap_references).
+sema_keep_going_drop_local_references: fn(references: ^[SemaNameReferenceFact], start: Int, owner: String?) Never! {
+    kept := [SemaNameReferenceFact]{}
+    loop index in start..<references.len() {
+        dropped := symbol_is_local(references[index].symbol.id)
+        if owner == .Val(key) -> dropped = dropped && references[index].body == key
+        if !dropped -> kept.push(references[index].copy())
+    }
+    loop references.len() > start -> _ := references.pop()
+    references.extend(kept)
+}
+
+// Re-keys the local references from `start` on that body `owner` recorded,
+// minted in `from`, into `into` (sema_keep_going_trap_references). A local
+// `from` does not hold keeps its id.
+sema_keep_going_rekey_references: fn(references: ^[SemaNameReferenceFact], start: Int, owner: String, from: SymbolLocalKeys, into: ^SymbolLocalKeys) Never! {
+    loop index in start..<references.len() {
+        if !symbol_is_local(references[index].symbol.id) || references[index].body != owner -> next
+        key: symbol_local_keys_text_at(from, references[index].symbol.id) ?? next
+        references[index].symbol.id = symbol_local_keys_intern(into, key)
+    }
+}
+
+// Why a trapped function's check failed: the causes it recorded, else the
+// error reports it made since `start`.
+sema_keep_going_cause: fn(causes: [String], diagnostics: [Diagnostic], start: Int) -> String Never! {
+    if causes.len() > 0 -> return causes.join("; ")
+    reported := [String]{}
+    loop index in start..<diagnostics.len() {
+        if diagnostics[index].severity == DIAGNOSTIC_ERROR {
+            reported.push("{diagnostics[index].code} {diagnostics[index].what}")
+        }
+    }
+    if reported.len() == 0 -> "body checking is incomplete" else -> "body checking stopped on {reported.join("; ")}"
+}
+
+// A keep-going trap owns its replacement AST. Copy the complete signature and
+// marker metadata, never the body/contracts that the trap immediately discards.
+sema_keep_going_stub_source: fn(func: Func) -> Func {
+    Func{
+        span: func.span,
+        is_pub: func.is_pub,
+        is_package_pub: func.is_package_pub,
+        is_comptime: func.is_comptime,
+        external_type: func.external_type,
+        name: func.name,
+        name_span: func.name_span,
+        meta: func.meta,
+        type_params: func.type_params,
+        head_pattern: func.head_pattern,
+        params: func.params,
+        return_type: func.return_type,
+        return_type_span: sema_keep_going_trap_return_span(func),
+        return_view_provenance: func.return_view_provenance,
+        declared_return_view_provenance: func.declared_return_view_provenance,
+        gc_return: func.gc_return,
+        diverges: func.diverges,
+        gc_scope: func.gc_scope,
+        is_unsafe: func.is_unsafe,
+        unsafe_reason: func.unsafe_reason,
+        unsafe_span: func.unsafe_span,
+        is_pure: func.is_pure,
+        scrub_tag: func.scrub_tag,
+        declared_effects: func.declared_effects,
+        effect_via: func.effect_via,
+        is_reactive: func.is_reactive,
+        reactive_upgrades: func.reactive_upgrades,
+        is_replayable: func.is_replayable,
+        replayable_span: func.replayable_span,
+        is_job: func.is_job,
+        job_span: func.job_span,
+        job_metadata: func.job_metadata,
+        every: func.every,
+        is_must_use: func.is_must_use,
+        must_use_span: func.must_use_span,
+        maturity: func.maturity,
+        maturity_span: func.maturity_span,
+        kernel: func.kernel,
+        is_inline: func.is_inline,
+        is_inline_always: func.is_inline_always,
+        inline_span: func.inline_span,
+        web_marker: func.web_marker,
+        pre: [ContractClause]{},
+        post: [ContractClause]{},
+        inline_foreign: func.inline_foreign,
+        undo: func.undo,
+        markers: func.markers,
+        compiler_generated: func.compiler_generated,
+        body: [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None, id: AST_NODE_GENERATED}}},
+    }
+}
+
+// This owns only the replacement trap AST. Original body/contracts never
+// escape a read window or survive preparation of the writable checker.
+sema_keep_going_registered_stub_source: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?) -> Func {
+    if memory_position == .Val(position) {
+        if memory_plan.functions[position].function == .Val(planned) {
+            return sema_keep_going_stub_source(planned)
+        }
+    }
+    sema_keep_going_stub_source(declaration)
+}
+
+sema_keep_going_registered_stub: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
+    stub := sema_keep_going_registered_stub_source(declaration, memory_plan, memory_position)
+    discarded_diagnostics := [Diagnostic]{}
+    discarded_call_facts := [SemaCallSiteFact]{}
+    discarded_comptime_requests := [SemaComptimeRequest]{}
+    discarded_name_references := [SemaNameReferenceFact]{}
+    checked := sema_function_check(stub, sema_program_symbol_key(program, owner_id), function_kind, raw_protocol_return, environment, program, scopes, host_hooks, discarded_diagnostics, discarded_call_facts, discarded_comptime_requests, discarded_name_references)
+    if !checked.complete || checked.value == None -> return None
+    Val(checked)
+}
+
+sema_check_registered_method_stub: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
+    // copy: `previous_location` restores scopes.location_function after the stub check overwrites
+    // it. Jet has no exchange on a field of the write-borrowed table.
+    previous_location: scopes.location_function.copy()
+    sema_function_check_registered_location(declaration, memory_plan, None, scopes)
+    stub := sema_keep_going_registered_stub(declaration, memory_plan, None, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks)
+    scopes.location_function = previous_location
+    stub
+}
