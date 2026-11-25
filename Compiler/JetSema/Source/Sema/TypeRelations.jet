@@ -1241,22 +1241,52 @@ sema_type_compiler_owned_name: fn(name: String) -> Bool {
 // The runtime handles (IR_RUNTIME_HANDLES) a program may write as a type with
 // no import: the solver variables and constraints, the module grant handle,
 // the text-width and log-span handles, the realtime receipt, a closed
-// channel's marker and the FFI callback registration. The other handles are
-// reached through their Core module's export or are the runtime's own.
-// SEMA_TYPE_NAMEABLE_HANDLES_CHECKED holds the view to IR_RUNTIME_HANDLES.
+// channel's marker, the FFI callback registration, and the checker-owned
+// values of the error, HTTP, game, process, socket and test surfaces. The
+// other handles are reached through their Core module's export or are the
+// runtime's own. SEMA_TYPE_NAMEABLE_HANDLES_CHECKED holds the view to
+// IR_RUNTIME_HANDLES.
 SEMA_TYPE_NAMEABLE_HANDLES: [String]{
     "Closed",
     "Constraint",
+    "DNSSRV",
     "FfiCallbackRegistration",
+    "FieldError",
+    "GameAssets",
+    "GameBackend",
+    "GameFrame",
+    "GameImage",
+    "GameInputMap",
+    "GameInputSnapshot",
+    "GameReplay",
+    "GameScene",
+    "GameSound",
+    "HTTPHeaderName",
+    "HTTPHeaderValue",
+    "HTTPMethod",
+    "HTTPStatus",
+    "HTTPVersion",
     "HVar",
+    "IOError",
+    "IPAddr",
     "LengthVar",
     "LogSpan",
     "Mod",
+    "ProcessReceipt",
+    "ProcessResult",
+    "ProcessSpec",
     "RealtimeReceipt",
+    "TcpListener",
+    "TcpStream",
+    "Test",
+    "TextError",
     "TextWidth",
     "TextWidthAmbiguous",
     "TextWidthControls",
+    "UTF8Error",
+    "UdpSocket",
     "VVar",
+    "Value",
 }
 
 SEMA_TYPE_NAMEABLE_HANDLES_CHECKED: #run sema_type_nameable_handles_checked(SEMA_TYPE_NAMEABLE_HANDLES)
