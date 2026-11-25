@@ -1234,7 +1234,7 @@ sema_expression_core_nested_constant: fn(alias: String, nested: String, member: 
     module_identity: sema_call_core_module_identity(check.environment.*, check.program.*, module_name) ?? return unhandled
     graph: check.program.registration_graph
     module_index: sema_registration_module_index(graph, module_identity) ?? return unhandled
-    export: sema_registration_resolve_export(graph, module_index, member, check.environment.module_identity, check.environment.package_identity, [String]{}) ?? {
+    export: sema_registration_resolve_export(graph, module_index, member, check.environment.module_identity, check.environment.package_identity) ?? {
         check.diagnostics.push(sema_expression_core_member_unknown(graph.modules[module_index], member, member_span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }

@@ -135,7 +135,7 @@ sema_call_static_free_twin: fn(graph: SemaRegistrationGraph, module_index: Int, 
         return sema_call_core_free_twin(graph.modules[module_index].module_name, owner, method)
     }
     name: "{owner.lower()}_{method}"
-    export: sema_registration_resolve_export(graph, module_index, name, environment.module_identity, environment.package_identity, [String]{}) ?? return None
+    export: sema_registration_resolve_export(graph, module_index, name, environment.module_identity, environment.package_identity) ?? return None
     if export.symbol.kind != SymbolKind.Function -> return None
     Val(name)
 }

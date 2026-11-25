@@ -328,7 +328,7 @@ sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: Sem
         }
     }
     core_private_seam: module_is_core(graph.modules[module_index].module_identity) && module_is_core(graph.modules[caller_index].module_identity)
-    export: (if registered_source_target || core_private_seam -> sema_registration_resolve_export(graph, module_index, member, module_identity, graph.modules[module_index].package_identity, [String]{}) else -> sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{})) ?? {
+    export: (if registered_source_target || core_private_seam -> sema_registration_resolve_export(graph, module_index, member, module_identity, graph.modules[module_index].package_identity) else -> sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity)) ?? {
         // A member its own declaration keeps private (`priv`) gets the
         // ordinary visibility error a package's would, not "has no item";
         // so does a jet.runtime member, which is Core's alone.
@@ -406,7 +406,7 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
     }
     before: check.diagnostics.len()
     failed: SemaMethodSpecialCheck{handled: true, value: None}
-    export: sema_registration_resolve_export(graph, module_index, member, check.environment.module_identity, check.environment.package_identity, [String]{}) ?? {
+    export: sema_registration_resolve_export(graph, module_index, member, check.environment.module_identity, check.environment.package_identity) ?? {
         if sema_registration_direct_symbol(graph.modules[module_index], member) != None {
             check.diagnostics.push(sema_call_private_member(shown, span))
         } else {

@@ -89,7 +89,7 @@ sema_root_call_imported: fn(method: String, receiver: Type?, check: SemaBodyChec
         if seen.contains(imported.module_identity) -> next
         seen.push(imported.module_identity)
         target_index: sema_registration_module_index_text(graph, imported.module_identity) ?? next
-        export: sema_registration_resolve_export(graph, target_index, method, check.environment.module_identity, check.environment.package_identity, [String]{}) ?? next
+        export: sema_registration_resolve_export(graph, target_index, method, check.environment.module_identity, check.environment.package_identity) ?? next
         row: sema_call_export_function_row(check.environment.*, check.program.*, export) ?? next
         registered: graph.modules[row.module_index].functions[row.row]
         if registered.declaration.params.len() == 0 || !registered.declaration.params[0].root {

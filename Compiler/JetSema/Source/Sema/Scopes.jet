@@ -1836,17 +1836,23 @@ sema_body_check_swap_tail_store: fn(check: ^SemaBodyCheck, tail_store: ^SemaStat
     tail_store = held
 }
 
-// `recorded` holds the ids `spans` set, in order: a rollback clears the ones
+// `recorded` holds the rows `spans` set, in order: a rollback clears the ones
 // after its mark instead of saving a copy of the index.
 SemaHTTPRouteIndex: struct {
-    names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
+    keys: SemaKeyRows{SemaKeyRows{}},
     spans: [Span?]{[Span?]{}},
     recorded: [Int]{[Int]{}},
 }
 
-sema_check_context_http_route_record: fn(context: ^SemaCheckContext, key: String, span: Span) -> Span? Never! {
+// The span of the first route `binding` registered for method `wire` at
+// address shape `shape`; None when this is the first, which is recorded.
+sema_check_context_http_route_record: fn(context: ^SemaCheckContext, binding: String, wire: String, shape: String, span: Span) -> Span? Never! {
     if context.http_routes.len() == 0 -> context.http_routes.push(SemaHTTPRouteIndex{})
-    id: name_index(name_intern(context.http_routes[0].names, key))
+    binding_id: sema_key_text(context.http_routes[0].keys, binding)
+    wire_id: sema_key_text(context.http_routes[0].keys, wire)
+    shape_id: sema_key_text(context.http_routes[0].keys, shape)
+    address: sema_key_pair(context.http_routes[0].keys, wire_id, shape_id)
+    id: sema_key_pair(context.http_routes[0].keys, binding_id, address)
     loop context.http_routes[0].spans.len() <= id -> context.http_routes[0].spans.push(None)
     if context.http_routes[0].spans[id] == .Val(existing) -> return Val(existing)
     context.http_routes[0].spans[id] = Val(span)

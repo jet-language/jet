@@ -129,7 +129,7 @@ sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [Call
         graph: check.program.registration_graph
         identity: sema_call_core_module_identity(check.environment.*, check.program.*, module_name) ?? return None
         module_index: sema_registration_module_index(graph, identity) ?? return None
-        export: sema_registration_resolve_export(graph, module_index, method, check.environment.module_identity, check.environment.package_identity, [String]{}) ?? return None
+        export: sema_registration_resolve_export(graph, module_index, method, check.environment.module_identity, check.environment.package_identity) ?? return None
         return Val(sema_frame_registered_call_operation("{module_name}.{method}", args, export.symbol.id, index, check.program.*))
     }
     if path.leaves.len() > 0 -> return None

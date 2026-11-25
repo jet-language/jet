@@ -1404,8 +1404,9 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
 sema_http_route_table_record: fn(receiver: Expr, wire: String, pattern: String, span: Span, check: ^SemaBodyCheck) {
     root: sema_expr_place_root_ident(receiver) ?? return
     binding_index: sema_scope_resolve_index(check.scopes, root) ?? return
-    key: "{check.scopes.bindings[binding_index].key}|{wire}|{sema_app_route_shape(pattern)}"
-    if sema_check_context_http_route_record(check.context, key, span) == .Val(first) {
+    binding: check.scopes.bindings[binding_index].key
+    shape: sema_app_route_shape(pattern)
+    if sema_check_context_http_route_record(check.context, binding, wire, shape, span) == .Val(first) {
         check.diagnostics.push(sema_http_route_duplicate(wire, pattern, span, "", first, "first registered here"))
     }
 }
