@@ -1,0 +1,75 @@
+// Assemble with the Compiler source unit. `JobQueue.enqueue` and
+// `JobQueue.delay` run the Core function that fills their role (JobEnqueue,
+// JobDelay), typed by that function's declaration, through the real loader
+// and checker over the tree's Core. The queue checker's own findings still
+// come first.
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCoreSource,
+        JetDriverLoweringInputsResult,
+        jet_driver_has_errors,
+        jet_driver_lowering_inputs,
+    ]
+    jet_cli.[jet_cli_driver_request]
+    jet_sema.[SchemaSnapshot]
+}
+
+JOB_QUEUE_ROLES_SOURCE: `package: {
+    name: "job_queue_roles"
+    authority: { allow: [DB, Env, FS, IO, Mem.Alloc, Rand, Time, Time.Wait] }
+}
+
+use jobs: core.jobs
+
+#Job(.Dev) process: fn(payload: String) { print("job:{payload}") }
+
+plain: fn(payload: String) { print(payload) }
+
+run: fn() {
+    queue := jobs.queue() ?? return
+    first: queue.enqueue(process, "now") ?? return
+    keyed: queue.enqueue(process, "keyed", key: "first") ?? return
+    later: queue.delay(process, "later", for: 1s) ?? return
+    print("{first.id == keyed.id} {later.id == first.id}")
+}
+`
+
+job_queue_roles_front: fn(source: String) -> JetDriverLoweringInputsResult {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/job-queue-roles",
+                identity: "job-queue-roles-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/job-queue-roles/main.jet", relative_path: "main.jet", identity: "job-queue-roles-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "job-queue-roles-root",
+        entry_path: "/job-queue-roles/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Program)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    jet_driver_lowering_inputs(request, None)
+}
+
+job_queue_roles_findings: fn(front: JetDriverLoweringInputsResult) -> [String] {
+    loop diagnostic in front.compile.diagnostics -> "{diagnostic.code} {diagnostic.what}"
+}
+
+#Test("enqueue and delay run their Core role functions") {
+    front: job_queue_roles_front(JOB_QUEUE_ROLES_SOURCE)
+    assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "{front.compile.internal_problem:Debug} {job_queue_roles_findings(front)}")
+    assert(front.inputs != None, "the checked program reaches lowering")
+}
+
+#Test("a queued function that is no job keeps its queue checker finding") {
+    source: JOB_QUEUE_ROLES_SOURCE.replace("queue.delay(process,", "queue.delay(plain,")
+    front: job_queue_roles_front(source)
+    findings: job_queue_roles_findings(front)
+    assert(findings.any(fn(row) { row.starts_with("E0112 `JobQueue.delay` expects a checked `#Job` function") }), "{findings}")
+}

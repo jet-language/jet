@@ -39,7 +39,6 @@ use jet_foundation.[
     core_call_source_member,
     core_call_source_role,
     core_call_projection,
-    core_receiver_method,
     core_module_export,
     diagnostic_with_edit,
     expr_span,
@@ -620,22 +619,6 @@ sema_call_core_record: fn(module_name: String, member: String, actual_arity: Int
             return None
         }
     }
-}
-
-sema_call_core_receiver_record: fn(receiver_type: Type, member: String, actual_arity: Int, span: Span, diagnostics: ^[Diagnostic]) -> CoreCallRecord? {
-    receiver_name := sema_expr_type_base_name(receiver_type) ?? type_name(receiver_type)
-    record: core_receiver_method(receiver_name, member) ?? return None
-    if !core_call_coverage_contains(record.coverage, CORE_CALL_COVERAGE_SEMA) {
-        diagnostics.push(sema_error("E0904", span, "`{receiver_name}.{member}` has no source semantic call contract", "the registered Core receiver row is not covered by this semantic projection", "use a receiver operation with SEMA coverage"))
-        return None
-    }
-    if !core_call_accepts_arity(record, actual_arity) {
-        maximum := record.signature.max_arity
-        range: if maximum > record.signature.arity -> "between {record.signature.arity} and {maximum}" else -> "{record.signature.arity}"
-        diagnostics.push(sema_error("E0104", span, "`{receiver_name}.{member}` expects {range} argument(s), got {actual_arity}", "the registered Core receiver call arity is fixed", "provide the registered number of arguments"))
-        return None
-    }
-    Val(record)
 }
 
 // `tls.client(tcp, server_name: …, config: …, deadline: …)` takes a connected

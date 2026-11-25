@@ -23,6 +23,7 @@ use jet_foundation.[
     AST_EMPTY_CALL_ARG_FLAGS,
     UnOp,
     expr_span,
+    sema_casing_pascal_words,
     module_text,
     type_name,
 ]
@@ -604,8 +605,10 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
     if !ownership.accepted || !ownership.complete -> return failed
     // Source takes its immutable shared handle as a normal read, not the old
     // native mutable carrier. Receiver ownership has already been checked.
+    // The call runs the Core function that fills the method's role
+    // (JobEnqueue, JobDelay).
     normalized: [TExpr]{receiver_value, sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: job_name}}}, job_span), payload, last}
-    record: sema_call_core_receiver_record(Type.Named{name: "JobQueue"}, method, normalized.len(), span, check.diagnostics) ?? return failed
+    record: sema_data_role_record("JobQueue", method, "Job{sema_casing_pascal_words(method)}", [Type]{payload_type}, span, check) ?? return failed
     result_type: sema_services_result_type(Type.Named{name: sema_core_module_nominal(check.program.*, "core.jobs", "JobQueueReceipt")})
     failure: sema_services_result_carrier(result_type)
     if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, check) {
