@@ -86,10 +86,13 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     image_digest: hashing.join() ?? return jet_cli_maintenance_error("E2105", "the digest of `{image_file}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
     lowered_by: "jet@{JET_VERSION}#{image_digest}"
     if packer.trim() != lowered_by {
+        splitting.detach()
+        checking_facts.detach()
         return jet_cli_maintenance_error("E2105", "the runtime in `{runtime_dir}` was built by `{packer.trim()}`, not by `{image_file}` (`{lowered_by}`)", Val("build the runtime with the jet it is embedded in"), color, json)
     }
     disagree: checking_facts.join() ?? return jet_cli_maintenance_error("E2105", "checking the Core facts in `{runtime_dir}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
     if disagree.len() > 0 {
+        splitting.detach()
         return jet_cli_maintenance_error("E2105", "the Core facts in `{runtime_dir}` disagree with its Core export list in {disagree.len()} row(s); the first: {disagree[0]}", Val("build the runtime again: one Core library build writes both"), color, json)
     }
     // The DWARF moves to the side file, written on a task of its own while
@@ -110,6 +113,7 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     identity: "{prefix}{jet_cli_image_digest(shipped)}"
     written: writing.join() ?? return jet_cli_maintenance_error("E2105", "writing the executable `{out}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
     if written != "" {
+        side_writing.detach()
         return jet_cli_maintenance_error("E2105", "couldn't write the executable `{out}`: {written}", None, color, json)
     }
     side_written: side_writing.join() ?? return jet_cli_maintenance_error("E2105", "writing the debug file `{side_file}` stopped: {compiler_threads_failure_text(err)}", None, color, json)

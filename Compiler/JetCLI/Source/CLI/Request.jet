@@ -332,10 +332,17 @@ jet_cli_runtime_with_core: fn(request: ^^JetDriverCompileRequest, prefix: String
         stopped_result.move() == .Val(result) -> result
         else -> {
             if made_object_problem != "" {
+                interfacing.detach()
                 return jet_driver_compile_escaped_failure(made_object_problem)
             }
-            if finish_problem != "" -> return jet_driver_compile_escaped_failure(finish_problem)
-            if core.problem != "" -> return jet_driver_compile_escaped_failure(core.problem)
+            if finish_problem != "" {
+                interfacing.detach()
+                return jet_driver_compile_escaped_failure(finish_problem)
+            }
+            if core.problem != "" {
+                interfacing.detach()
+                return jet_driver_compile_escaped_failure(core.problem)
+            }
             res: made_result.move() ?? return jet_driver_compile_escaped_failure("the runtime compile result was lost")
             jet_cli_runtime_packed(res, prefix, made_pack, Val(core.bytes.move()), compiler_threads, trace_sink)
         }
