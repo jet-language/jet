@@ -30,26 +30,27 @@ AllocError: struct {
 // `Pool<T>` is the ambient store, a separate type. Each allocator owns its
 // storage, so it is `Close`: a copy would release that storage twice. Its
 // runtime handle's drop releases the storage once the close has run, so the
-// close itself has nothing left to do.
-Arena: struct {
+// close itself has nothing left to do. The storage belongs to the thread
+// that made it, so each allocator is `#Local`.
+#Local Arena: struct {
     impl Close {
         close: fn(^^self) {}
     }
 }
 
-Bump: struct {
+#Local Bump: struct {
     impl Close {
         close: fn(^^self) {}
     }
 }
 
-Fixed: struct {
+#Local Fixed: struct {
     impl Close {
         close: fn(^^self) {}
     }
 }
 
-Pool: struct {
+#Local Pool: struct {
     impl Close {
         close: fn(^^self) {}
     }

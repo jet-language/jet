@@ -3,9 +3,12 @@
 // value never leaves the thread that made it, a type with `impl Close` is a
 // resource that never copies, and a `#SingleUse` value owes one consume. A
 // record that holds one of them has the fact too. Core's `FileWriter` is a
-// resource by its own `impl Close`, as `Handle` is.
+// resource by its own `impl Close`, as `Handle` is; Core's `DataArrowBatch` is
+// `#MoveOnly` and its `Arena` is `#Local`, as `Ticket` and `Pool` are.
 use {
+    arrow: core.data.arrow
     files: core.files
+    mem: core.mem
 }
 
 #MoveOnly Ticket: struct {
@@ -44,6 +47,8 @@ copy_handle: fn(handle: Handle) -> Handle { handle.copy() }
 
 copy_writer: fn(writer: files.FileWriter) -> files.FileWriter { writer.copy() }
 
+copy_batch: fn(batch: arrow.DataArrowBatch<Int>) -> arrow.DataArrowBatch<Int> { batch.copy() }
+
 send_pool: fn(pool: Pool) {
     worker: task {
         _: pool.slots.len()
@@ -54,6 +59,13 @@ send_pool: fn(pool: Pool) {
 send_pool_holder: fn(holder: PoolHolder) {
     worker: task {
         _: holder.pool.slots.len()
+    }
+    worker.join() ?? panic("task failed")
+}
+
+send_arena: fn(arena: mem.Arena) {
+    worker: task {
+        close(arena)
     }
     worker.join() ?? panic("task failed")
 }

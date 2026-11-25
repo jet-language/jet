@@ -1632,7 +1632,7 @@ audit receipt — the same redacted fact stream as the trace, plus `isolated` an
 The AOT back end and default development tier use the same
 [`Browser.jet`](../../Core/Browser/Browser.jet), strict-JSON behavior, and
 extracted RFC6455 client source. Browser session
-handles are thread-confined. Programs that use them select the canonical
+handles are declared `#Local`. Programs that use them select the canonical
 tier-0 network host; the tier trace reports that choice and no AOT fallback is
 hidden behind `jet dev`.
 

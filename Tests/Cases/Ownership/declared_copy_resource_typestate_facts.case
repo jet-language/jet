@@ -3,16 +3,18 @@
 # holds one, `impl Close` makes a resource whose copy is refused (E0211) for a
 # package `Handle` and for Core's `FileWriter` alike, `#Local` refuses a task
 # crossing (E1102) of the value and of a record that holds one, and
-# `#SingleUse` owes one consume (E0140).
+# `#SingleUse` owes one consume (E0140). Core's `DataArrowBatch` is refused a
+# copy by its `#MoveOnly`, and its `Arena` a task crossing by its `#Local`.
 fixture: DeclaredCopyResourceTypestateFacts.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step: jet check main.jet --json
 exit: nonzero
-json: stdout doc $.reports[?severity="error"] #= 7 # exactly the seven refusals, nothing else
-json: stdout doc $.reports[?code="E0211"][?why~="is `#MoveOnly`"] #= 1 # `Ticket` is copied itself
+json: stdout doc $.reports[?severity="error"] #= 9 # exactly the nine refusals, nothing else
+json: stdout doc $.reports[?code="E0211"][?why~="is `#MoveOnly`"] #= 2 # `Ticket` and Core's `DataArrowBatch` are copied themselves
 json: stdout doc $.reports[?code="E0211"][?why~="holds a `#MoveOnly` value"] #= 1 # the record holding a `Ticket`
 json: stdout doc $.reports[?code="E0211"][?message="`Handle` can't be copied"][?why~="a resource owns one cleanup duty"] #= 1 # `impl Close` makes `Handle` a resource
 json: stdout doc $.reports[?code="E0211"][?why~="a resource owns one cleanup duty"] #= 2 # Core's `FileWriter` is a resource the same way
 json: stdout doc $.reports[?code="E1102"][?why~="`Pool` is declared `#Local`"] #= 2 # `Pool` and the record holding one stay on their thread
+json: stdout doc $.reports[?code="E1102"][?why~="`Arena` is declared `#Local`"] #= 1 # Core's `Arena` stays on its thread the same way
 json: stdout doc $.reports[?code="E0140"] #= 1 # the dropped `Lease` owes its consume

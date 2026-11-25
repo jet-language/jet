@@ -11,6 +11,7 @@ use jet_foundation.[
     Type,
     core_enum_payload_variants,
     core_enum_variant_payload,
+    core_identity_is,
     core_record_literal_fields,
     core_type_modules,
     type_name,
@@ -140,28 +141,6 @@ sema_ownership_crossing_intrinsic_apply: fn(ty: Type, name: String, environment:
     }
 }
 
-sema_ownership_crossing_named_builtin_problem: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, nominal: SemaRegistrationNominal, cell_only: Bool) -> SemaSendabilityProblem? {
-    // A Core source module's identity reads `<corelib>/core.browser`.
-    sema_ownership_crossing_core_confined(sema_scope_module_text(environment, program, nominal.symbol.module_identity).removeprefix("<corelib>/"), nominal.symbol.name, cell_only)
-}
-
-// The Core handles bound to the thread that made them: the allocators and
-// the browser session handles.
-sema_ownership_crossing_core_confined: fn(module_name: String, name: String, cell_only: Bool) -> SemaSendabilityProblem? {
-    // A Fixed handle is a view
-    // of the backing it allocates from, which lives in the frame that made it.
-    if !cell_only && module_name == "core.mem" && name == "Fixed" {
-        return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
-    }
-    if !cell_only && module_name == "core.mem" && (name == "Arena" || name == "Bump" || name == "Pool") {
-        return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: name}))
-    }
-    if !cell_only && module_name == "core.browser" && (name == "Browser" || name == "BrowserContext" || name == "BrowserPage" || name == "BrowserFrame" || name == "BrowserLocator" || name == "BrowserIntercept" || name == "BrowserProtocol") {
-        return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: name}))
-    }
-    None
-}
-
 sema_ownership_crossing_named: fn(ty: Type, nominal: SemaRegistrationNominal, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: ^SemaCrossingWalk) -> SemaSendabilityProblem? {
     if nominal.kind == SemaRegistrationNominalKind.Trait {
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.TraitValue{name: nominal.symbol.name}))
@@ -169,9 +148,6 @@ sema_ownership_crossing_named: fn(ty: Type, nominal: SemaRegistrationNominal, cr
     if !cell_only && sema_copy_nominal_declares(nominal, MarkerHook.Local) {
         key: "{sema_scope_module_text(environment, program, nominal.symbol.module_identity)}.{nominal.symbol.name}"
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.DeclaredLocal{key: key}))
-    }
-    if sema_ownership_crossing_named_builtin_problem(environment, program, nominal, cell_only) == .Val(problem) {
-        return Val(problem)
     }
     if nominal.kind == SemaRegistrationNominalKind.ForeignHandle {
         if nominal.source == {
@@ -271,12 +247,21 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
     }
     // A Core type the caller never names (`session: browser.connect(…)`
     // gives a `Browser`) has no nominal row in the caller's scope; its
-    // owning Core module still decides whether it is thread-confined.
+    // declaration in its owning Core module still says whether it is `#Local`.
     if sema_copy_named_is_core(name) {
+        if cell_only -> return None
         leaf: sema_ownership_crossing_type_leaf(name)
-        loop module_name in core_type_modules(leaf) {
-            problem: sema_ownership_crossing_core_confined(module_name, leaf, cell_only) ?? next
-            return Val(problem)
+        modules: core_type_modules(leaf)
+        loop row in sema_registration_nominal_rows_named(graph, leaf) {
+            nominal: graph.modules[row.module_index].nominals[row.row]
+            key: "{module_text(graph.module_table, nominal.symbol.module_identity)}.{leaf}"
+            owned := false
+            loop module_name in modules {
+                if core_identity_is(key, module_name, leaf) -> owned = true
+            }
+            if owned && sema_copy_nominal_declares(nominal, MarkerHook.Local) {
+                return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.DeclaredLocal{key: key}))
+            }
         }
         return None
     }

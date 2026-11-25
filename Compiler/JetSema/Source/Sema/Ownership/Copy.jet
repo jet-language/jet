@@ -20,7 +20,6 @@ use jet_foundation.[
     core_enum_payload_variants,
     core_enum_variant_payload,
     core_record_literal_fields,
-    core_source_owns_type,
     type_name,
     core_type_modules,
     core_identity_is,
@@ -389,7 +388,7 @@ sema_atomic_type_name: fn(name: String) -> Bool Never! { name == "Atomic" }
 sema_copy_apply_is_noncloneable: fn(name: String) -> Bool Never! {
     if sema_atomic_type_name(name) -> return true
     if name == {
-        "Atomic" | "DataArrowBatch" | "MutationPlan" | "VaultWrite" | "ExpiringSecret" | "ViewMut" | "ViewIter" | "CellReadGuard" | "CellEditGuard" | "SharedGuard" -> true
+        "Atomic" | "ViewMut" | "ViewIter" | "CellReadGuard" | "CellEditGuard" | "SharedGuard" -> true
         else -> false
     }
 }
@@ -1063,10 +1062,6 @@ sema_copy_apply_facts: fn(
     // A task handle is the builtin `Task<T>` even where the program declares
     // a `Task` of its own, so no nominal row stands for it.
     task_handle: sema_type_is_builtin_handle(ty, "Task")
-    if core_source_owns_type(name) && core_identity_is(name, "core.crypto.vault", "ExpiringSecret") {
-        nested: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, walk)
-        return sema_copy_facts_holding(sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true), nested.holds_resource)
-    }
     // A bare head taints a query, not the table's walk (sema_copy_named_facts).
     if !walk.table && !name.contains(".") -> walk.tainted = true
     if !task_handle && sema_type_resolve_nominal_row_at(graph, ty, caller) == .Val(row) {

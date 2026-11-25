@@ -3815,9 +3815,9 @@ these allocators does not require `#Unsafe`. `Arena.new()` or
 `Arena.new(capacity: N)` grows aligned heterogeneous chunks; `Bump` places
 monotonically in one caller-capacity buffer; `Pool` owns a caller-bounded slot
 count and reuses compatible size/alignment classes after reset. Values are
-dropped in reverse allocation order before storage is reused. Allocator handles
-are thread-confined, so move plain owned data across a task or channel rather
-than moving the allocator itself.
+dropped in reverse allocation order before storage is reused. Each allocator
+type is declared `#Local`, so move plain owned data across a task or channel
+rather than moving the allocator itself.
 
 `arena.reset()` retains backing storage for reuse. Terminal release uses the
 universal resource operation `close(allocator)`; `.free()` is not the

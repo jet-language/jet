@@ -41,7 +41,7 @@ KeyStatus: enum {
 
 // Main's owner-approved private-field correction: only a checked, non-escaping
 // loan exposes the credential; the original source clock observer stays live.
-#[!Debug, !Printable]
+#[!Debug, !Printable, MoveOnly]
 ExpiringSecret: struct<T> {
     value: Shared<T?>,
     deadline_ms: Int,
@@ -149,7 +149,7 @@ ExpiryCloseOwner: struct {
     }
 }
 
-MutationPlan: struct<T> {
+#MoveOnly MutationPlan: struct<T> {
     json: String,
 }
 
@@ -158,7 +158,7 @@ Rotation: struct<T> {
     current: KeyRef<T>,
 }
 
-VaultWrite: struct<T> {
+#MoveOnly VaultWrite: struct<T> {
     path: String,
 }
 

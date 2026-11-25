@@ -3,7 +3,7 @@ Error: Jet.ValueNotSendable: `session` can't cross into a task because `browser.
     |
  10 |     handle: task session.close()
     |                          ^^^^^
- Why: `Browser` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
+ Why: `Browser` is declared `#Local`, so its values stay on the thread that made them; tasks and channels move owned values between threads
  Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/Jet.ValueNotSendable
 
@@ -12,7 +12,7 @@ Error: Jet.ValueNotSendable: `session` can't be sent because `browser.Browser` i
     |
  12 |     sender.send(session)
     |                 ^^^^^^^
- Why: `Browser` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
+ Why: `Browser` is declared `#Local`, so its values stay on the thread that made them; tasks and channels move owned values between threads
  Fix: Send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`
 More: jet-lang.dev/e/Jet.ValueNotSendable
 
