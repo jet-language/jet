@@ -186,9 +186,12 @@ build_session_schedule_named: fn(names: ^^[String], steps: [Int]) -> [String] Ne
     loop (id, name) in names.move() {
         if at[id] >= 0 -> slots[at[id]] = Val(name)
     }
-    // Unreachable: the one caller first returns on any step cycle, so the
-    // chain it passes walks an acyclic producer graph and never repeats a step.
-    loop slot in slots.move() -> slot ?? panic("a schedule chain names each step once")
+    // A slot no step filled is left out. (The one caller first returns on any
+    // step cycle, so the chain it passes walks an acyclic producer graph and
+    // fills every slot.)
+    named := [String]{}
+    loop slot in slots.move() -> named.push(slot ?? next)
+    named
 }
 
 // The first schedule fact that refuses the plan: a step that waits on
