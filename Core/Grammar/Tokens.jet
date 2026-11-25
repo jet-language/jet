@@ -1,0 +1,556 @@
+// core.grammar tokens: the token automata and token clashes.
+//
+// Each token rule becomes a DFA over one column alphabet for the whole
+// grammar: the code point intervals its classes and literals bound, split
+// by Unicode property when a class uses `\p{…}`. A token matches its
+// longest text, and a non-greedy repeat stops at the literal that ends its
+// token. Lexing is contextual: at each point only the tokens the parser
+// can take there are tried, with the skipped ones, and a parser literal
+// wins a tie with a token class. Two token classes that match the same
+// text where both are tried are a clash.
+use {
+    core.grammar.error.[grammar_fault]
+    core.grammar.plan.[GrammarClass, GrammarLexer]
+    core.grammar.runtime.[ascii_property_bits, code_point_at, code_point_text, code_point_width, fold_text]
+    __core_grammar_analyze.[GrammarWork]
+    __core_grammar_lookahead.[empty_set, set_add, set_has, set_words]
+}
+
+/// The largest code point.
+CODE_POINT_MAX: 1114111
+
+/// Where the ASCII property bits change, as interval starts.
+PROPERTY_BOUNDS: [9, 14, 32, 33, 48, 58, 65, 91, 97, 123, 128]
+
+/// A token rule's NFA as it is built. Each state has epsilon edges
+/// (`empty`) and reading edges (`moves`, indexes into `edge_to` and
+/// `edge_set`, the column set an edge reads). `stop` marks the end of an
+/// alternative that ends in a non-greedy repeat and its literal.
+TokenNfa: struct {
+    empty: [[Int]],
+    moves: [[Int]],
+    edge_to: [Int],
+    edge_set: [[Int]],
+    stop: [Bool],
+}
+
+/// A piece of an NFA: where it starts and where it ends.
+TokenPiece: struct {
+    start: Int,
+    end: Int,
+}
+
+code_points: fn(text: String) -> [Int] Never! {
+    bytes: text.bytes()
+    out := [Int]{}
+    at := 0
+    loop at < bytes.len() {
+        out.push(code_point_at(bytes, at))
+        at += code_point_width(Int{bytes[at]})
+    }
+    out
+}
+
+/// The cases an `i` literal's code point `c` matches.
+folded_cases: fn(c: Int, fold: Bool) -> [Int] Never! {
+    if fold && c >= 65 && c <= 90 -> return [Int]{c, c + 32}
+    if fold && c >= 97 && c <= 122 -> return [Int]{c - 32, c}
+    [Int]{c}
+}
+
+/// Whether node `n` belongs to a token rule or a fragment.
+in_token_rule: fn(work: GrammarWork, n: Int) -> Bool Never! {
+    owner: work.owner[n]
+    owner >= 0 && work.tree.rules[owner].kind != .Parser
+}
+
+/// The columns of the grammar: interval starts bounded by every class
+/// range and token literal code point, and by the ASCII property changes
+/// when a class uses a property.
+column_bounds: fn(work: GrammarWork) -> GrammarLexer Never! {
+    points := [Int]{0}
+    masked := false
+    loop (n, node) in work.tree.nodes {
+        if !in_token_rule(work, n) -> next
+        if node.kind == .Class {
+            class: work.tree.classes[node.class]
+            if class.properties.len() > 0 -> masked = true
+            k := 0
+            loop k + 1 < class.ranges.len() {
+                points.push(class.ranges[k])
+                points.push(class.ranges[k + 1] + 1)
+                k += 2
+            }
+        } else if node.kind == .Literal {
+            loop c in code_points(node.text) {
+                loop f in folded_cases(c, node.fold) {
+                    points.push(f)
+                    points.push(f + 1)
+                }
+            }
+        }
+    }
+    if masked {
+        loop p in PROPERTY_BOUNDS -> points.push(p)
+    }
+    points.sort()
+    bounds := [Int]{}
+    loop p in points {
+        if p <= CODE_POINT_MAX && (bounds.len() == 0 || bounds[bounds.len() - 1] != p) -> bounds.push(p)
+    }
+    width := 1
+    if masked -> width = 8
+    GrammarLexer{bounds: bounds, masked: masked, columns: bounds.len() * width, starts: [Int]{}, next: [Int]{}, accept: [Int]{}}
+}
+
+/// The last code point of interval `i`.
+interval_end: fn(lexer: GrammarLexer, i: Int) -> Int Never! {
+    if i + 1 < lexer.bounds.len() -> return lexer.bounds[i + 1] - 1
+    CODE_POINT_MAX
+}
+
+/// The interval code point `c` falls in.
+interval_of: fn(lexer: GrammarLexer, c: Int) -> Int Never! {
+    low := 0
+    high := lexer.bounds.len()
+    loop high - low > 1 {
+        mid: (low + high) /% 2
+        if lexer.bounds[mid] <= c -> low = mid else -> high = mid
+    }
+    low
+}
+
+/// Whether a code point of interval `i` can have property bits `bits`.
+/// An ASCII interval has one set of bits; any other may have any.
+possible_column: fn(lexer: GrammarLexer, i: Int, bits: Int) -> Bool Never! {
+    if !lexer.masked -> return true
+    if lexer.bounds[i] < 128 -> return bits == ascii_property_bits(lexer.bounds[i])
+    true
+}
+
+/// The bit set of every column code point `c` (or, folded, its cases)
+/// can fall in.
+char_columns: fn(lexer: GrammarLexer, c: Int, fold: Bool) -> [Int] Never! {
+    set := empty_set(set_words(lexer.columns))
+    loop f in folded_cases(c, fold) {
+        i: interval_of(lexer, f)
+        if !lexer.masked {
+            set_add(set, i)
+        } else if f < 128 {
+            set_add(set, i * 8 + ascii_property_bits(f))
+        } else {
+            loop bits in 0..<8 -> set_add(set, i * 8 + bits)
+        }
+    }
+    set
+}
+
+/// Whether the sorted `lo, hi` pairs of `ranges` hold `c`.
+ranges_hold: fn(ranges: [Int], c: Int) -> Bool Never! {
+    k := 0
+    loop k + 1 < ranges.len() {
+        if c >= ranges[k] && c <= ranges[k + 1] -> return true
+        k += 2
+    }
+    false
+}
+
+/// The bit set of the columns class `class` holds; `any` for `.`.
+class_columns: fn(lexer: GrammarLexer, class: GrammarClass, any: Bool) -> [Int] Never! {
+    set := empty_set(set_words(lexer.columns))
+    wanted := 0
+    loop p in class.properties -> wanted |= 1 << p
+    width := 1
+    if lexer.masked -> width = 8
+    loop i in 0..<lexer.bounds.len() {
+        in_ranges: ranges_hold(class.ranges, lexer.bounds[i])
+        loop bits in 0..<width {
+            if !possible_column(lexer, i, bits) -> next
+            member := any || in_ranges || (wanted & bits) != 0
+            if !any && class.negated -> member = !member
+            if member -> set_add(set, i * width + bits)
+        }
+    }
+    set
+}
+
+new_state: fn(nfa: ^TokenNfa) -> Int Never! {
+    nfa.empty.push([Int]{})
+    nfa.moves.push([Int]{})
+    nfa.stop.push(false)
+    nfa.empty.len() - 1
+}
+
+read_edge: fn(nfa: ^TokenNfa, from: Int, set: [Int], to: Int) Never! {
+    nfa.moves[from].push(nfa.edge_to.len())
+    nfa.edge_to.push(to)
+    nfa.edge_set.push(set.copy())
+}
+
+/// Builds node `n` of a token rule into `nfa`, references inlined.
+build_piece: fn(work: GrammarWork, lexer: GrammarLexer, nfa: ^TokenNfa, n: Int) -> TokenPiece Never! {
+    node: work.tree.nodes[n]
+    start: new_state(nfa)
+    end: new_state(nfa)
+    kind: node.kind
+    if kind == .Choice {
+        loop child in node.children {
+            alt: build_piece(work, lexer, nfa, child)
+            nfa.empty[start].push(alt.start)
+            nfa.empty[alt.end].push(end)
+        }
+    } else if kind == .Alt {
+        at := start
+        loop child in node.children {
+            part: build_piece(work, lexer, nfa, child)
+            nfa.empty[at].push(part.start)
+            at = part.end
+        }
+        nfa.empty[at].push(end)
+    } else if kind == .Ref {
+        if node.rule >= 0 {
+            body: build_piece(work, lexer, nfa, work.tree.rules[node.rule].body)
+            nfa.empty[start].push(body.start)
+            nfa.empty[body.end].push(end)
+        }
+    } else if kind == .Literal {
+        at := start
+        loop c in code_points(node.text) {
+            next_state: new_state(nfa)
+            read_edge(nfa, at, char_columns(lexer, c, node.fold), next_state)
+            at = next_state
+        }
+        nfa.empty[at].push(end)
+    } else if kind == .Class {
+        read_edge(nfa, start, class_columns(lexer, work.tree.classes[node.class], false), end)
+    } else if kind == .Any {
+        read_edge(nfa, start, class_columns(lexer, GrammarClass{ranges: [Int]{}, properties: [Int]{}, negated: false}, true), end)
+    } else if kind == .Optional || kind == .Star || kind == .Plus {
+        item: build_piece(work, lexer, nfa, node.children[0])
+        nfa.empty[start].push(item.start)
+        nfa.empty[item.end].push(end)
+        if kind != .Plus -> nfa.empty[start].push(end)
+        if kind != .Optional -> nfa.empty[item.end].push(item.start)
+    }
+    TokenPiece{start: start, end: end}
+}
+
+/// The states `states` reach through epsilon edges, sorted.
+closure: fn(nfa: TokenNfa, states: [Int]) -> [Int] Never! {
+    seen := [Bool]{}
+    loop _ in nfa.empty -> seen.push(false)
+    stack := [Int]{}
+    loop s in states {
+        if !seen[s] {
+            seen[s] = true
+            stack.push(s)
+        }
+    }
+    loop stack.len() > 0 {
+        s: stack.pop() ?? 0
+        loop t in nfa.empty[s] {
+            if !seen[t] {
+                seen[t] = true
+                stack.push(t)
+            }
+        }
+    }
+    out := [Int]{}
+    loop (s, held) in seen {
+        if held -> out.push(s)
+    }
+    out
+}
+
+state_key: fn(states: [Int]) -> String Never! {
+    parts := [String]{}
+    loop s in states -> parts.push("{s}")
+    parts.join(",")
+}
+
+/// Adds the DFA of token rule `rule` to `lexer`; its first state.
+build_dfa: fn(work: ^GrammarWork, lexer: ^GrammarLexer, rule: Int) -> Int Never! {
+    nfa := TokenNfa{empty: [[Int]]{}, moves: [[Int]]{}, edge_to: [Int]{}, edge_set: [[Int]]{}, stop: [Bool]{}}
+    final: new_state(nfa)
+    begin: new_state(nfa)
+    // The rule's alternatives are built one by one, so an alternative that
+    // ends in a non-greedy repeat and its literal can stop the token.
+    loop alt in work.tree.nodes[work.tree.rules[rule].body].children {
+        piece: build_piece(work, lexer, nfa, alt)
+        nfa.empty[begin].push(piece.start)
+        nfa.empty[piece.end].push(final)
+        kids: work.tree.nodes[alt].children
+        if kids.len() >= 2 && work.tree.nodes[kids[kids.len() - 2]].lazy -> nfa.stop[piece.end] = true
+    }
+    base: lexer.accept.len()
+    sets := [[Int]]{closure(nfa, [Int]{begin})}
+    ids := [String:Int]{}
+    _: ids.add(state_key(sets[0]), 0)
+    at := 0
+    loop at < sets.len() {
+        set: sets[at].copy()
+        at += 1
+        accept := 0
+        if set.contains(final) -> accept = 1
+        loop s in set {
+            if nfa.stop[s] -> accept = 2
+        }
+        lexer.accept.push(accept)
+        edges := [Int]{}
+        if accept != 2 {
+            loop s in set {
+                loop e in nfa.moves[s] -> edges.push(e)
+            }
+        }
+        loop column in 0..<lexer.columns {
+            work.steps += 1
+            targets := [Int]{}
+            loop e in edges {
+                if set_has(nfa.edge_set[e], column) -> targets.push(nfa.edge_to[e])
+            }
+            if targets.len() == 0 {
+                lexer.next.push(-1)
+                next
+            }
+            reached: closure(nfa, targets)
+            key: state_key(reached)
+            id := ids.get(key) ?? -1
+            if id < 0 {
+                id = sets.len()
+                _: ids.add(key, id)
+                sets.push(reached)
+            }
+            lexer.next.push(base + id)
+        }
+    }
+    base
+}
+
+/// The token and fragment rules each token rule names.
+token_refs: fn(work: GrammarWork) -> [[Int]] Never! {
+    refs := [[Int]]{}
+    loop _ in work.tree.rules -> refs.push([Int]{})
+    loop (n, node) in work.tree.nodes {
+        if in_token_rule(work, n) && node.kind == .Ref && node.rule >= 0 && !refs[work.owner[n]].contains(node.rule) -> refs[work.owner[n]].push(node.rule)
+    }
+    refs
+}
+
+/// Refuses token rules that name themselves: a token matches text without
+/// nesting. Whether any did.
+report_token_cycles: fn(work: ^GrammarWork) -> Bool Never! {
+    refs: token_refs(work)
+    // 0 unvisited, 1 on the path, 2 done.
+    color := [Int]{}
+    loop _ in work.tree.rules -> color.push(0)
+    found := false
+    loop root in 0..<work.tree.rules.len() {
+        if work.tree.rules[root].kind == .Parser || color[root] != 0 -> next
+        path := [Int]{root}
+        edge := [Int]{0}
+        color[root] = 1
+        loop path.len() > 0 {
+            top: path[path.len() - 1]
+            k: edge[edge.len() - 1]
+            if k >= refs[top].len() {
+                color[top] = 2
+                _: path.pop()
+                _: edge.pop()
+                next
+            }
+            edge[edge.len() - 1] = k + 1
+            to: refs[top][k]
+            if color[to] == 1 {
+                names := [String]{}
+                on := false
+                loop r in path {
+                    if r == to -> on = true
+                    if on -> names.push(work.tree.rules[r].name.copy())
+                }
+                names.push(work.tree.rules[to].name.copy())
+                rule: work.tree.rules[to]
+                work.faults.push(grammar_fault(.Notation, rule.at, "the token rule `{rule.name}` names itself through `{names.join(" -> ")}`: a token matches text without nesting", "Write the repetition with `*` or `+` instead"))
+                found = true
+            } else if color[to] == 0 {
+                color[to] = 1
+                path.push(to)
+                edge.push(0)
+            }
+        }
+    }
+    found
+}
+
+/// Refuses a non-greedy repeat anywhere but just before the literal that
+/// ends an alternative of a token rule.
+report_lazy_repeats: fn(work: ^GrammarWork) Never! {
+    allowed := [Int]{}
+    loop rule in work.tree.rules {
+        if rule.kind != .Token -> next
+        loop alt in work.tree.nodes[rule.body].children {
+            kids: work.tree.nodes[alt].children
+            if kids.len() >= 2 && work.tree.nodes[kids[kids.len() - 1]].kind == .Literal -> allowed.push(kids[kids.len() - 2])
+        }
+    }
+    loop (n, node) in work.tree.nodes {
+        if node.lazy && !allowed.contains(n) -> work.faults.push(grammar_fault(.Notation, node.at, "a non-greedy repeat must come just before the literal that ends its token", "End the token's alternative with a literal right after it, as in `'/*' .*? '*/'`"))
+    }
+}
+
+/// How a clash sample shows code point `c`.
+shown_code_point: fn(c: Int) -> String Never! {
+    if c == 10 -> return "\\n"
+    if c == 9 -> return "\\t"
+    if c == 13 -> return "\\r"
+    if c == 34 -> return "\\\""
+    if c == 92 -> return "\\\\"
+    if c >= 32 && c != 127 -> return code_point_text(c)
+    digits: "0123456789ABCDEF".bytes()
+    hex: [U8]{digits[(c >> 4) & 15], digits[c & 15]}
+    hex_text: String.from_bytes(hex) ?? ""
+    "\\u{{{hex_text}}}"
+}
+
+/// A code point of column `column`: a letter, digit or mark where the
+/// column has one, so a sample reads well.
+column_sample: fn(lexer: GrammarLexer, column: Int) -> Int Never! {
+    width := 1
+    if lexer.masked -> width = 8
+    i: column /% width
+    first: lexer.bounds[i]
+    last: interval_end(lexer, i)
+    samples: [Int]{97, 48, 33}
+    loop c in samples {
+        if first <= c && last >= c -> return c
+    }
+    first
+}
+
+/// The shortest text tokens `a` and `b` both match, or "" when none.
+shared_text: fn(work: ^GrammarWork, lexer: GrammarLexer, a: Int, b: Int) -> String Never! {
+    states: lexer.accept.len()
+    first: lexer.starts[a] * states + lexer.starts[b]
+    before := [Int:Int]{}
+    column_of := [Int:Int]{}
+    _: before.add(first, -1)
+    queue := [Int]{first}
+    at := 0
+    loop at < queue.len() {
+        pair: queue[at]
+        at += 1
+        sa: pair /% states
+        sb: pair % states
+        if pair != first && lexer.accept[sa] > 0 && lexer.accept[sb] > 0 {
+            columns := [Int]{}
+            walk := pair
+            loop walk != first {
+                columns.push(column_of.get(walk) ?? 0)
+                walk = before.get(walk) ?? first
+            }
+            shown := [String]{}
+            k := columns.len() - 1
+            loop k >= 0 {
+                shown.push(shown_code_point(column_sample(lexer, columns[k])))
+                k -= 1
+            }
+            return shown.join("")
+        }
+        loop column in 0..<lexer.columns {
+            work.steps += 1
+            na: lexer.next[sa * lexer.columns + column]
+            nb: lexer.next[sb * lexer.columns + column]
+            if na < 0 || nb < 0 -> next
+            to: na * states + nb
+            if (before.get(to) ?? -2) != -2 -> next
+            _: before.add(to, pair)
+            _: column_of.add(to, column)
+            queue.push(to)
+        }
+    }
+    ""
+}
+
+/// Reports a clash when tokens `a` and `b` (both matched by rules) can
+/// match the same text; `checked` holds the pairs already compared.
+check_pair: fn(work: ^GrammarWork, lexer: GrammarLexer, a: Int, b: Int, checked: ^[Int:Bool]) Never! {
+    if a == b || lexer.starts[a] < 0 || lexer.starts[b] < 0 -> return
+    low := a
+    high := b
+    if b < a {
+        low = b
+        high = a
+    }
+    key: low * work.tokens.len() + high
+    if checked.get(key) ?? false -> return
+    _: checked.add(key, true)
+    text: shared_text(work, lexer, low, high)
+    if text == "" -> return
+    later: work.tree.rules[work.tokens[high].rule]
+    work.faults.push(grammar_fault(.TokenClash, later.at, "the token rules `{work.tokens[low].name}` and `{later.name}` both match \"{text}\" where the parser can take either", "Make one of them match less, or use them where only one of them can come next"))
+}
+
+/// Reports two literals, one of them an `i` literal, that match the same
+/// text where the parser can take either.
+check_literals: fn(work: ^GrammarWork, a: Int, b: Int) Never! {
+    ta: work.tokens[a]
+    tb: work.tokens[b]
+    if a == b || ta.rule >= 0 || tb.rule >= 0 || ta.hole != "" || tb.hole != "" || a == 0 || b == 0 -> return
+    if !ta.fold && !tb.fold -> return
+    if fold_text(ta.text) != fold_text(tb.text) -> return
+    at := 0
+    loop node in work.tree.nodes {
+        if node.token == b && at == 0 -> at = node.at
+    }
+    work.faults.push(grammar_fault(.TokenClash, at, "the literals {ta.name} and {tb.name} both match \"{ta.text}\" where the parser can take either", "Write both the same way, with the same `i` suffix"))
+}
+
+/// Builds the token automata and reports token clashes, nullable token
+/// rules, token rules that name themselves and misplaced non-greedy
+/// repeats.
+plan_tokens: fn(work: ^GrammarWork) -> GrammarLexer Never! {
+    lexer := column_bounds(work)
+    report_lazy_repeats(work)
+    if report_token_cycles(work) -> return lexer
+    loop token in work.tokens {
+        if token.rule < 0 {
+            lexer.starts.push(-1)
+            next
+        }
+        start: build_dfa(work, lexer, token.rule)
+        lexer.starts.push(start)
+        if lexer.accept[start] > 0 {
+            rule: work.tree.rules[token.rule]
+            work.faults.push(grammar_fault(.Notation, rule.at, "the token rule `{rule.name}` can match no text", "Make it match at least one character, and make it optional where a rule uses it"))
+        }
+    }
+    skips := [Int]{}
+    loop (k, token) in work.tokens {
+        if token.skip -> skips.push(k)
+    }
+    checked := [Int:Bool]{}
+    loop a in skips {
+        loop b in skips -> check_pair(work, lexer, a, b, checked)
+    }
+    used := [Bool]{}
+    loop _ in work.tokens -> used.push(false)
+    loop node in work.tree.nodes {
+        if node.token > 0 -> used[node.token] = true
+    }
+    loop (k, held) in used {
+        if !held -> next
+        loop s in skips -> check_pair(work, lexer, k, s, checked)
+    }
+    loop decision in work.decisions {
+        loop step in decision.steps {
+            loop a in step.kinds {
+                loop b in step.kinds {
+                    if a < b {
+                        check_pair(work, lexer, a, b, checked)
+                        check_literals(work, a, b)
+                    }
+                }
+            }
+        }
+    }
+    lexer
+}

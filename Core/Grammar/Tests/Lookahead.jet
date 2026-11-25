@@ -1,0 +1,79 @@
+// Token kinds, FIRST and FOLLOW, and the decisions one token settles.
+use {
+    core.grammar.[analyze]
+    core.grammar.plan.[GrammarDecision, GrammarPlan, GrammarSource]
+}
+
+plan_of: fn(text: String, start: String) -> GrammarPlan Never! {
+    if analyze(text, start, [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
+    loop decision in plan.decisions {
+        if decision.node == node -> return decision
+    }
+    panic("no decision at node {node}")
+}
+
+#Test("token kinds: end of input, token rules, then literals and holes") {
+    plan: plan_of("a : '(' a ')' # Group | NAME # Name | HOLE<slot=Value> # Hole ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;", "")
+    assert_eq(plan.tokens.len(), 6)
+    assert_eq(plan.tokens[0].name, "end of input")
+    assert_eq(plan.tokens[1].name, "NAME")
+    assert_eq(plan.tokens[1].rule, 1)
+    assert_eq(plan.tokens[2].name, "WS")
+    assert(plan.tokens[2].skip)
+    assert_eq(plan.tokens[3].name, "\"(\"")
+    assert_eq(plan.tokens[3].text, "(")
+    assert_eq(plan.tokens[4].name, "\")\"")
+    assert_eq(plan.tokens[5].hole, "Value")
+}
+
+#Test("a literal that a token rule spells lexes as that token") {
+    plan: plan_of("sum : NUM PLUS NUM | NUM '+' '+' ;\nNUM : [0-9]+ ;\nPLUS : '+' ;", "")
+    assert_eq(plan.tokens.len(), 3)
+    alts: plan.tree.nodes[plan.tree.rules[0].body].children
+    lit: plan.tree.nodes[plan.tree.nodes[alts[1]].children[1]]
+    assert_eq(lit.token, 2)
+}
+
+#Test("a choice decided by its first token") {
+    plan: plan_of("v : NUM # Num | NAME # Name | '(' v ')' # Group ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;", "")
+    decision: decision_at(plan, plan.tree.rules[0].body)
+    assert_eq(decision.depth, 1)
+    assert_eq(decision.fallback, -1)
+    assert_eq(decision.steps.len(), 1)
+    assert_eq(decision.steps[0].kinds, [Int]{1, 2, 3})
+    assert_eq(decision.steps[0].targets, [Int]{0, 1, 2})
+}
+
+#Test("an optional part is skipped on what follows it") {
+    plan: plan_of("a : 'x' b? 'y' ;\nb : 'z' ;", "A")
+    alt: plan.tree.nodes[plan.tree.nodes[plan.tree.rules[0].body].children[0]]
+    decision: decision_at(plan, alt.children[1])
+    x: plan.tree.nodes[alt.children[0]].token
+    y: plan.tree.nodes[alt.children[2]].token
+    assert_eq(x, 1)
+    assert_eq(y, 2)
+    assert_eq(decision.steps[0].kinds, [Int]{2, 3})
+    assert_eq(decision.steps[0].targets, [Int]{1, 0})
+}
+
+#Test("the end of input follows only the start rule") {
+    plan: plan_of("list : item* ;\nitem : 'x' ;", "List")
+    alt: plan.tree.nodes[plan.tree.nodes[plan.tree.rules[0].body].children[0]]
+    decision: decision_at(plan, alt.children[0])
+    assert_eq(decision.steps[0].kinds, [Int]{0, 1})
+    assert_eq(decision.steps[0].targets, [Int]{1, 0})
+}
+
+#Test("an operator loop repeats on an operator and stops on anything else") {
+    plan: plan_of("e : e '*' e # Mul | e '+' e # Add | NUM # Num ;\nNUM : [0-9]+ ;", "E")
+    decision: decision_at(plan, plan.operators[0].repeat)
+    assert_eq(decision.fallback, 1)
+    assert_eq(decision.steps[0].kinds, [Int]{2, 3})
+    assert_eq(decision.steps[0].targets, [Int]{0, 0})
+}

@@ -1,0 +1,103 @@
+// Compiler-private part of core.grammar: empty repeats and the levels of
+// operator rules.
+//
+// In an operator rule the first alternative binds tightest. A binary
+// alternative's right operand is parsed one level above its own, or at its
+// own level under `<assoc=right>`; a prefix operand at its own level. A
+// middle operand, between two literals of one alternative, is parsed just
+// above the binary alternative whose operator is the literal after it, and
+// at the lowest level otherwise: `expr 'BETWEEN'i expr 'AND'i expr` stops
+// its middle operand before `AND`. Any other reference to the rule inside
+// an alternative parses the whole rule.
+use {
+    core.grammar.error.[grammar_fault]
+    __core_grammar_analyze.[GrammarWork, is_self]
+}
+
+/// Reports every repeat whose item can match no input: it would never
+/// stop.
+report_empty_repeats: fn(work: ^GrammarWork) Never! {
+    loop (n, node) in work.tree.nodes {
+        if work.parent[n] == -2 && work.owner[n] < 0 -> next
+        if node.kind != .Star && node.kind != .Plus -> next
+        if !work.nullable[node.children[0]] -> next
+        work.faults.push(grammar_fault(.EmptyRepeat, node.at, "this repeat's item can match nothing, so the repeat would never stop", "Make the repeated item match at least one token, or make it required and drop its `?`"))
+    }
+}
+
+/// The literals a binary alternative's operator is: its element after the
+/// leading operand, a literal or a group of single literals.
+operator_literals: fn(work: GrammarWork, alt: Int) -> [String] Never! {
+    out := [String]{}
+    kids: work.tree.nodes[alt].children
+    if kids.len() < 2 -> return out
+    op: work.tree.nodes[kids[1]]
+    if op.kind == .Literal {
+        out.push(literal_key(op.text, op.fold))
+        return out
+    }
+    if op.kind != .Choice -> return out
+    loop alt_id in op.children {
+        alt_kids: work.tree.nodes[alt_id].children
+        if alt_kids.len() != 1 || work.tree.nodes[alt_kids[0]].kind != .Literal -> return [String]{}
+        lit: work.tree.nodes[alt_kids[0]]
+        out.push(literal_key(lit.text, lit.fold))
+    }
+    out
+}
+
+/// A literal as one comparable text: a folded literal in lowercase.
+literal_key: fn(text: String, fold: Bool) -> String Never! {
+    if !fold -> return text.copy()
+    out := [U8]{}
+    loop b in text.bytes() {
+        c: Int{b}
+        if c >= 65 && c <= 90 -> out.push(U8{c + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text.copy()
+}
+
+/// Sets the level of each operand of each operator alternative, and
+/// reports a literal that is the operator of two binary alternatives.
+plan_precedence: fn(work: ^GrammarWork) Never! {
+    loop o in 0..<work.operators.len() {
+        rule: work.operators[o].rule
+        name: work.tree.rules[rule].name
+        ops: work.operators[o].operators.copy()
+        binary_literals := [[String]]{}
+        loop op in ops {
+            literals := [String]{}
+            if op.kind == .Binary -> literals = operator_literals(work, op.alt)
+            loop earlier in binary_literals {
+                loop literal in literals {
+                    if earlier.contains(literal) {
+                        work.faults.push(grammar_fault(.Ambiguous, work.tree.nodes[op.alt].at, "`{literal}` is the operator of two alternatives of `{name}`", "Put both on one level, as one alternative with a labeled set: `left={name} op=('+' | '-') right={name}`"))
+                    }
+                }
+            }
+            binary_literals.push(literals)
+        }
+        loop (i, op) in ops {
+            kids: work.tree.nodes[op.alt].children
+            last: kids.len() - 1
+            loop k in 0..<kids.len() {
+                if !is_self(work, kids[k], rule) -> next
+                level := 0
+                if k == 0 && op.kind != .Prefix {
+                    level = -1
+                } else if k == last && op.kind == .Binary {
+                    level = if op.right -> op.level else -> op.level + 1
+                } else if k == last && op.kind == .Prefix {
+                    level = op.level
+                } else if k > 0 && k < last && work.tree.nodes[kids[k - 1]].kind == .Literal && work.tree.nodes[kids[k + 1]].kind == .Literal {
+                    after: work.tree.nodes[kids[k + 1]]
+                    key: literal_key(after.text, after.fold)
+                    loop (j, other) in ops {
+                        if other.kind == .Binary && binary_literals[j].contains(key) && level == 0 -> level = other.level + 1
+                    }
+                }
+                work.operators[o].operators[i].operands[k] = level
+            }
+        }
+    }
+}

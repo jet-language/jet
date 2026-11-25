@@ -94,6 +94,12 @@ GrammarImport: struct {
     at: Int,
 }
 
+/// A grammar another grammar imports: its binding name and its text.
+GrammarSource: struct {
+    name: String,
+    text: String,
+}
+
 /// A grammar as written.
 RuleTree: struct {
     rules: [GrammarRule],
@@ -102,7 +108,105 @@ RuleTree: struct {
     imports: [GrammarImport],
 }
 
+/// How an alternative of an operator rule uses the rule itself: `left op
+/// right` (first and last), `operand suffix` (first only) or `prefix
+/// operand` (last only).
+GrammarOperatorKind: enum {
+    Binary,
+    Suffix,
+    Prefix,
+}
+
+/// One operator alternative. `alt` is the alternative as written; `tail`
+/// is the `Alt` node of what follows its leading operand (-1 for a prefix
+/// alternative). `level` is its precedence: the first alternative binds
+/// tightest, with the highest level. `operands` holds, for each element
+/// of `alt`, the level a reference to the rule there is parsed at, or -1
+/// for an element that is no such operand (the leading operand included).
+GrammarOperator: struct {
+    alt: Int,
+    tail: Int,
+    kind: GrammarOperatorKind,
+    level: Int,
+    right: Bool,
+    operands: [Int],
+}
+
+/// A directly left-recursive rule in the operator form, split for
+/// precedence climbing: its body parses one of `primary` (a `Choice` of
+/// the primary and prefix alternatives) and then repeats `repeat` (a
+/// `Star` over a `Choice` of the binary and suffix tails). `alts` are the
+/// rule's alternatives as written.
+GrammarOperatorRule: struct {
+    rule: Int,
+    alts: [Int],
+    primary: Int,
+    repeat: Int,
+    operators: [GrammarOperator],
+}
+
+/// One token kind of a grammar. Kind 0 is the end of the input. `name` is
+/// how an error shows it (`"]"`, `NAME`, `end of input`). A literal has its
+/// `text` and `fold`; a token rule its `rule` (-1 otherwise); a hole its
+/// `hole` slot ("" otherwise).
+GrammarToken: struct {
+    name: String,
+    text: String,
+    fold: Bool,
+    rule: Int,
+    skip: Bool,
+    hole: String,
+}
+
+/// One step of a decision: the token kinds that may come next, and for each
+/// the branch it picks (`target >= 0`) or the next step to look further
+/// (`-(step + 1)`).
+GrammarStep: struct {
+    kinds: [Int],
+    targets: [Int],
+}
+
+/// How the parser decides at `node`: a `Choice` picks an alternative; an
+/// `Optional`, `Star` or `Plus` picks 0 (enter or repeat) or 1 (skip or
+/// stop). `steps[0]` reads the next token, and `depth` is the most tokens
+/// it reads (1 to 3). A token no step names is an error, unless `fallback`
+/// is a branch: an operator loop stops on any token no operator starts
+/// with.
+GrammarDecision: struct {
+    node: Int,
+    depth: Int,
+    fallback: Int,
+    steps: [GrammarStep],
+}
+
+/// The token automata of a grammar. A code point falls in a column: the
+/// interval of it among `bounds` (sorted interval starts, the first 0),
+/// times 8 plus its Unicode property bits when `masked` (a grammar that
+/// uses `\p{…}`). Each token kind a rule matches has a DFA: `starts[kind]`
+/// is its first state (-1 for a kind no rule matches), `next[state *
+/// columns + column]` the state a column leads to (-1 for none), and
+/// `accept[state]` 0 (no match yet), 1 (a match that may grow) or 2 (a
+/// match that ends the token: the literal after a non-greedy repeat).
+GrammarLexer: struct {
+    bounds: [Int],
+    masked: Bool,
+    columns: Int,
+    starts: [Int],
+    next: [Int],
+    accept: [Int],
+}
+
 /// A checked grammar: what a generated parser and printer run from.
+/// `start` is the start rule (-1: any parser rule may start a parse).
+/// `parent` is each node's parent in the parsed structure (-1 at a rule
+/// body, -2 for a node no parse reaches).
 GrammarPlan: struct {
     tree: RuleTree,
+    start: Int,
+    parent: [Int],
+    nullable: [Bool],
+    operators: [GrammarOperatorRule],
+    tokens: [GrammarToken],
+    decisions: [GrammarDecision],
+    lexer: GrammarLexer,
 }

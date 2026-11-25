@@ -1,9 +1,9 @@
 // What the notation takes beyond plain rules (`<assoc=right>`, holes,
 // imports) and what it refuses, each refusal with its fix.
 use {
-    core.grammar.[analyze, GrammarSource]
+    core.grammar.[analyze]
     core.grammar.error.[GrammarFault]
-    core.grammar.plan.[RuleTree]
+    core.grammar.plan.[GrammarSource, RuleTree]
 }
 
 tree_of: fn(text: String) -> RuleTree Never! {
@@ -29,7 +29,7 @@ only_fault: fn(text: String) -> GrammarFault Never! {
 }
 
 #Test("associativity marks the alternative it starts") {
-    tree: tree_of("e : <assoc=right> e '^' e | <assoc=left> e '-' e | NUM ;\nNUM : [0-9]+ ;")
+    tree: tree_of("e : <assoc=right> '^' e | <assoc=left> '-' e | NUM ;\nNUM : [0-9]+ ;")
     body: tree.nodes[tree.rules[0].body]
     assert(tree.nodes[body.children[0]].right)
     assert(!tree.nodes[body.children[1]].right)
@@ -44,11 +44,16 @@ only_fault: fn(text: String) -> GrammarFault Never! {
 }
 
 #Test("imports list the grammars they name, in order") {
-    tree: tree_of("import Lexical ;\nimport Common, Extra ;\nfile : NAME ;")
-    assert_eq(tree.imports.len(), 3)
-    assert_eq(tree.imports[0].name, "Lexical")
-    assert_eq(tree.imports[0].at, 7)
-    assert_eq(tree.imports[2].name, "Extra")
+    sources: [GrammarSource]{GrammarSource{name: "Lexical", text: "NAME : [a-z]+ ;"}, GrammarSource{name: "Common", text: "SEMI : ';' ;"}, GrammarSource{name: "Extra", text: "X : 'x' ;"}}
+    if analyze("import Lexical ;\nimport Common, Extra ;\nfile : NAME ;", "", sources) == {
+        .Ok(plan) -> {
+            assert_eq(plan.tree.imports.len(), 3)
+            assert_eq(plan.tree.imports[0].name, "Lexical")
+            assert_eq(plan.tree.imports[0].at, 7)
+            assert_eq(plan.tree.imports[2].name, "Extra")
+        }
+        .Err(error) -> panic("{error}")
+    }
 }
 
 #Test("an option other than associativity is refused") {

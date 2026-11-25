@@ -3,6 +3,9 @@
 // Every meaning a generated parser has lives here: the cursor, the
 // character columns, the token automata, keyword lookup, the depth bound,
 // error text and resynchronization. The generated code only arranges calls.
+use {
+    core.grammar.plan.[GrammarLexer]
+}
 
 /// The byte length of the UTF-8 sequence that starts with `lead`. Jet
 /// Strings are valid UTF-8.
@@ -53,4 +56,67 @@ code_point_text: fn(cp: Int) -> String Never! {
     out := [U8]{}
     push_code_point(out, cp)
     String.from_bytes(out) ?? ""
+}
+
+/// The Unicode property bits of an ASCII code point: 1 Alphabetic, 2
+/// Numeric, 4 White_Space (bit `1 << PROPERTY_…`).
+ascii_property_bits: fn(cp: Int) -> Int Never! {
+    if (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) -> return 1
+    if cp >= 48 && cp <= 57 -> return 2
+    if (cp >= 9 && cp <= 13) || cp == 32 -> return 4
+    0
+}
+
+/// The Unicode property bits of code point `cp`, as `\p{L}`, `\p{N}` and
+/// `\p{White_Space}` classes test them.
+property_bits: fn(cp: Int) -> Int Never! {
+    if cp < 128 -> return ascii_property_bits(cp)
+    text: code_point_text(cp)
+    bits := 0
+    if text.is_alphabetic() -> bits |= 1
+    if text.is_numeric() -> bits |= 2
+    if text.is_whitespace() -> bits |= 4
+    bits
+}
+
+/// How an `i` literal compares a code point: ASCII capitals lowered.
+fold_code_point: fn(cp: Int) -> Int Never! {
+    if cp >= 65 && cp <= 90 -> return cp + 32
+    cp
+}
+
+/// `text` as an `i` literal compares it: ASCII capitals lowered.
+fold_text: fn(text: String) -> String Never! {
+    out := [U8]{}
+    loop b in text.bytes() {
+        if b >= 65 && b <= 90 -> out.push(b + 32) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+/// The column of code point `cp` in `lexer`.
+lexer_column: fn(lexer: GrammarLexer, cp: Int) -> Int Never! {
+    low := 0
+    high := lexer.bounds.len()
+    loop high - low > 1 {
+        mid: (low + high) /% 2
+        if lexer.bounds[mid] <= cp -> low = mid else -> high = mid
+    }
+    if lexer.masked -> return low * 8 + property_bits(cp)
+    low
+}
+
+/// The end of the longest match of token `kind` at byte `at` of `bytes`
+/// (the first match, past a non-greedy repeat), or -1 for none.
+lexer_match: fn(lexer: GrammarLexer, kind: Int, bytes: [U8], at: Int) -> Int Never! {
+    state := lexer.starts[kind]
+    end := -1
+    pos := at
+    loop state >= 0 {
+        if lexer.accept[state] > 0 -> end = pos
+        if lexer.accept[state] == 2 || pos >= bytes.len() -> return end
+        state = lexer.next[state * lexer.columns + lexer_column(lexer, code_point_at(bytes, pos))]
+        pos += code_point_width(Int{bytes[pos]})
+    }
+    end
 }

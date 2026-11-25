@@ -1,8 +1,8 @@
 // The notation read into a rule tree: rules, alternatives, elements,
 // suffixes, labels, classes and imports.
 use {
-    core.grammar.[analyze, GrammarSource]
-    core.grammar.plan.[RuleTree]
+    core.grammar.[analyze]
+    core.grammar.plan.[GrammarSource, RuleTree]
 }
 
 tree_of: fn(text: String) -> RuleTree Never! {
@@ -35,7 +35,7 @@ tree_of: fn(text: String) -> RuleTree Never! {
 }
 
 #Test("suffixes wrap the element they follow") {
-    tree: tree_of("list : item* tail? NAME+ ;\nitem : NAME ;\ntail : ';' ;\nNAME : [a-z]+ ;")
+    tree: tree_of("list : item* tail? NUM+ ;\nitem : NAME ;\ntail : ';' ;\nNAME : [a-z]+ ;\nNUM : [0-9]+ ;")
     alt: tree.nodes[tree.nodes[tree.rules[0].body].children[0]]
     star: tree.nodes[alt.children[0]]
     assert(star.kind == .Star)
@@ -68,7 +68,7 @@ tree_of: fn(text: String) -> RuleTree Never! {
 }
 
 #Test("groups, named alternatives, associativity, holes and EOF") {
-    tree: tree_of("expr : <assoc=right> expr '^' expr # Power\n | '(' expr ')' # Group\n | HOLE<slot=Value> # Hole\n ;\nfile : expr EOF ;")
+    tree: tree_of("expr : <assoc=right> '^' expr # Power\n | '(' expr ')' # Group\n | HOLE<slot=Value> # Hole\n ;\nfile : expr EOF ;")
     body: tree.nodes[tree.rules[0].body]
     assert_eq(body.children.len(), 3)
     power: tree.nodes[body.children[0]]

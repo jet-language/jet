@@ -1,0 +1,492 @@
+// Compiler-private part of core.grammar: token kinds and the decisions of
+// the parser.
+//
+// The parsing class is SLL(k), k at most 3: a decision looks at the next
+// tokens only, and past the end of its own rule it takes the FOLLOW set of
+// the whole grammar, not the calling context. FIRST and FOLLOW give most
+// decisions at one token. Where two branches share a first token, the
+// analysis walks the token sequences of the branches that share it to
+// depth 2, then 3, and builds the steps that tell them apart. A sequence
+// two branches share at depth 3, or an end of input both can reach, is a
+// refusal that shows the sample; more than 4,096 configurations at one
+// decision is a refusal too.
+use {
+    core.grammar.error.[grammar_fault]
+    core.grammar.plan.[GrammarDecision, GrammarStep, GrammarToken]
+    core.grammar.runtime.[fold_text]
+    __core_grammar_analyze.[GrammarWork]
+}
+
+/// The most token sequences one decision may explore.
+LOOKAHEAD_CAP: 4096
+
+/// The most tokens a decision reads.
+LOOKAHEAD_DEPTH: 3
+
+set_words: fn(count: Int) -> Int Never! { (count + 31) /% 32 }
+
+empty_set: fn(words: Int) -> [Int] Never! {
+    out := [Int]{}
+    loop _ in 0..<words -> out.push(0)
+    out
+}
+
+set_add: fn(set: ^[Int], k: Int) Never! {
+    set[k /% 32] = set[k /% 32] | (1 << (k % 32))
+}
+
+set_has: fn(set: [Int], k: Int) -> Bool Never! {
+    ((set[k /% 32] >> (k % 32)) & 1) == 1
+}
+
+/// Adds `from` to `into`: whether `into` grew.
+set_union: fn(into: ^[Int], from: [Int]) -> Bool Never! {
+    grew := false
+    loop k in 0..<into.len() {
+        both: into[k] | from[k]
+        if both != into[k] {
+            into[k] = both
+            grew = true
+        }
+    }
+    grew
+}
+
+set_meets: fn(a: [Int], b: [Int]) -> Bool Never! {
+    loop k in 0..<a.len() {
+        if (a[k] & b[k]) != 0 -> return true
+    }
+    false
+}
+
+set_items: fn(set: [Int]) -> [Int] Never! {
+    out := [Int]{}
+    loop k in 0..<set.len() * 32 {
+        if set_has(set, k) -> out.push(k)
+    }
+    out
+}
+
+/// How an error shows a literal: in double quotes, or single quotes when
+/// it holds a double quote.
+literal_name: fn(text: String) -> String Never! {
+    if text.contains("\"") -> return "'{text}'"
+    "\"{text}\""
+}
+
+/// Whether `rule` is a token rule that is exactly one literal: a parser
+/// literal with the same text lexes as it.
+literal_rule: fn(work: GrammarWork, rule: Int, text: String, fold: Bool) -> Bool Never! {
+    if work.tree.rules[rule].kind != .Token || work.tree.rules[rule].skip -> return false
+    alts: work.tree.nodes[work.tree.rules[rule].body].children
+    if alts.len() != 1 -> return false
+    kids: work.tree.nodes[alts[0]].children
+    if kids.len() != 1 -> return false
+    node: work.tree.nodes[kids[0]]
+    node.kind == .Literal && node.text == text && node.fold == fold
+}
+
+/// Numbers the token kinds: 0 is the end of input, then the token rules in
+/// order, then each literal of the parser rules no token rule spells, then
+/// one kind per hole slot. Sets the `token` of every literal, token
+/// reference, hole and `EOF` in a parser rule.
+assign_tokens: fn(work: ^GrammarWork) Never! {
+    work.tokens = [GrammarToken]{GrammarToken{name: "end of input", text: "", fold: false, rule: -1, skip: false, hole: ""}}
+    rule_kind := [Int]{}
+    loop (r, rule) in work.tree.rules {
+        if rule.kind == .Token {
+            rule_kind.push(work.tokens.len())
+            work.tokens.push(GrammarToken{name: rule.name.copy(), text: "", fold: false, rule: r, skip: rule.skip, hole: ""})
+        } else {
+            rule_kind.push(-1)
+        }
+    }
+    loop n in 0..<work.tree.nodes.len() {
+        owner: work.owner[n]
+        if owner < 0 || work.tree.rules[owner].kind != .Parser -> next
+        node: work.tree.nodes[n]
+        kind := -1
+        if node.kind == .End {
+            kind = 0
+        } else if node.kind == .Ref {
+            if node.rule >= 0 -> kind = rule_kind[node.rule]
+        } else if node.kind == .Literal {
+            loop r in 0..<work.tree.rules.len() {
+                if kind < 0 && literal_rule(work, r, node.text, node.fold) -> kind = rule_kind[r]
+            }
+            loop (k, token) in work.tokens {
+                if kind < 0 && token.rule < 0 && token.hole == "" && k > 0 && token.fold == node.fold && (token.text == node.text || (node.fold && fold_text(token.text) == fold_text(node.text))) -> kind = k
+            }
+            if kind < 0 {
+                kind = work.tokens.len()
+                work.tokens.push(GrammarToken{name: literal_name(node.text), text: node.text.copy(), fold: node.fold, rule: -1, skip: false, hole: ""})
+            }
+        } else if node.kind == .Hole {
+            loop (k, token) in work.tokens {
+                if kind < 0 && token.hole == node.text -> kind = k
+            }
+            if kind < 0 {
+                kind = work.tokens.len()
+                work.tokens.push(GrammarToken{name: "a `{node.text}` hole", text: "", fold: false, rule: -1, skip: false, hole: node.text.copy()})
+            }
+        }
+        work.tree.nodes[n].token = kind
+    }
+}
+
+/// Whether node `n` is in the parsed structure of a parser rule.
+parsed: fn(work: GrammarWork, n: Int) -> Bool Never! {
+    work.parent[n] != -2 && work.owner[n] >= 0 && work.tree.rules[work.owner[n]].kind == .Parser
+}
+
+/// Whether node `n` matches one token: a literal, a token reference, a
+/// hole or `EOF`.
+is_terminal: fn(work: GrammarWork, n: Int) -> Bool Never! {
+    kind: work.tree.nodes[n].kind
+    if kind == .Literal || kind == .Hole || kind == .End -> return true
+    kind == .Ref && work.tree.nodes[n].token >= 0
+}
+
+/// FIRST and FOLLOW of every parsed node, by fixed points.
+plan_sets: fn(work: ^GrammarWork) Never! {
+    words: set_words(work.tokens.len())
+    count: work.tree.nodes.len()
+    work.first = [[Int]]{}
+    work.follow = [[Int]]{}
+    loop _ in 0..<count {
+        work.first.push(empty_set(words))
+        work.follow.push(empty_set(words))
+    }
+    loop n in 0..<count {
+        if parsed(work, n) && is_terminal(work, n) -> set_add(work.first[n], work.tree.nodes[n].token)
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop n in 0..<count {
+            if !parsed(work, n) || is_terminal(work, n) -> next
+            work.steps += 1
+            node: work.tree.nodes[n]
+            add := empty_set(words)
+            if node.kind == .Ref {
+                if node.rule >= 0 -> _: set_union(add, work.first[work.tree.rules[node.rule].body])
+            } else if node.kind == .Alt {
+                loop child in node.children {
+                    _: set_union(add, work.first[child])
+                    if !work.nullable[child] -> break
+                }
+            } else {
+                loop child in node.children -> _: set_union(add, work.first[child])
+            }
+            if set_union(work.first[n], add) -> changed = true
+        }
+    }
+    rule_follow := [[Int]]{}
+    loop (r, rule) in work.tree.rules {
+        set := empty_set(words)
+        if rule.kind == .Parser && (work.start == r || work.start < 0) -> set_add(set, 0)
+        rule_follow.push(set)
+    }
+    changed = true
+    loop changed {
+        changed = false
+        loop n in 0..<count {
+            if !parsed(work, n) -> next
+            work.steps += 1
+            p: work.parent[n]
+            add := empty_set(words)
+            if p == -1 {
+                _: set_union(add, rule_follow[work.owner[n]])
+            } else {
+                parent: work.tree.nodes[p]
+                if parent.kind == .Alt {
+                    at := 0
+                    loop (j, child) in parent.children {
+                        if child == n -> at = j
+                    }
+                    rest_nullable := true
+                    loop j in at + 1..<parent.children.len() {
+                        sibling: parent.children[j]
+                        _: set_union(add, work.first[sibling])
+                        if !work.nullable[sibling] {
+                            rest_nullable = false
+                            break
+                        }
+                    }
+                    if rest_nullable -> _: set_union(add, work.follow[p])
+                } else if parent.kind == .Star || parent.kind == .Plus {
+                    _: set_union(add, work.first[n])
+                    _: set_union(add, work.follow[p])
+                } else {
+                    _: set_union(add, work.follow[p])
+                }
+            }
+            if set_union(work.follow[n], add) -> changed = true
+            node: work.tree.nodes[n]
+            if node.kind == .Ref && node.rule >= 0 && work.tree.rules[node.rule].kind == .Parser {
+                if set_union(rule_follow[node.rule], work.follow[n]) -> changed = true
+            }
+        }
+    }
+}
+
+/// One place the exploration can stand: about to match the terminal
+/// `node`, with the references to return to on `stack`. `node` -1 is the
+/// end of the input.
+Config: struct {
+    node: Int,
+    stack: [Int],
+}
+
+stack_key: fn(stack: [Int]) -> String Never! {
+    parts := [String]{}
+    loop k in stack -> parts.push("{k}")
+    parts.join(",")
+}
+
+/// The closure of the parser's positions into configurations, inside one
+/// decision. `refs` are the parsed references to each rule.
+Explorer: struct {
+    refs: [[Int]],
+    seen: [String],
+    cost: Int,
+
+    /// The configurations from just before node `n`.
+    enter: fn(^self, work: GrammarWork, n: Int, stack: [Int], out: ^[Config]) Never! {
+        key: "e{n}:{stack_key(stack)}"
+        if self.seen.contains(key) -> return
+        self.seen.push(key)
+        self.cost += 1
+        node: work.tree.nodes[n]
+        kind: node.kind
+        if kind == .Literal || kind == .Hole || kind == .End || (kind == .Ref && node.token >= 0) {
+            out.push(Config{node: n, stack: stack.copy()})
+            return
+        }
+        if kind == .Ref {
+            if node.rule < 0 -> return
+            inner := stack.copy()
+            inner.push(n)
+            self.enter(work, work.tree.rules[node.rule].body, inner, out)
+            return
+        }
+        if kind == .Alt {
+            if node.children.len() == 0 -> self.after(work, n, stack, out) else -> self.enter(work, node.children[0], stack, out)
+            return
+        }
+        loop child in node.children -> self.enter(work, child, stack, out)
+        if kind == .Optional || kind == .Star -> self.after(work, n, stack, out)
+    }
+
+    /// The configurations from just after node `n`.
+    after: fn(^self, work: GrammarWork, n: Int, stack: [Int], out: ^[Config]) Never! {
+        key: "a{n}:{stack_key(stack)}"
+        if self.seen.contains(key) -> return
+        self.seen.push(key)
+        self.cost += 1
+        p: work.parent[n]
+        if p == -1 {
+            if stack.len() > 0 {
+                back := stack.copy()
+                ref: back[back.len() - 1]
+                _: back.pop()
+                self.after(work, ref, back, out)
+                return
+            }
+            rule: work.owner[n]
+            loop ref in self.refs[rule] -> self.after(work, ref, [Int]{}, out)
+            if work.start == rule || work.start < 0 -> out.push(Config{node: -1, stack: [Int]{}})
+            return
+        }
+        parent: work.tree.nodes[p]
+        if parent.kind == .Alt {
+            at := 0
+            loop (j, child) in parent.children {
+                if child == n -> at = j
+            }
+            if at + 1 < parent.children.len() -> self.enter(work, parent.children[at + 1], stack, out) else -> self.after(work, p, stack, out)
+            return
+        }
+        if parent.kind == .Star || parent.kind == .Plus -> self.enter(work, n, stack, out)
+        self.after(work, p, stack, out)
+    }
+}
+
+/// The token kind a configuration matches next.
+config_kind: fn(work: GrammarWork, config: Config) -> Int Never! {
+    if config.node < 0 -> return 0
+    work.tree.nodes[config.node].token
+}
+
+/// Builds one decision's steps from each branch's configurations.
+Deepening: struct {
+    explorer: Explorer,
+    steps: [GrammarStep],
+    depth: Int,
+    sample: [Int],
+    shared: [Int],
+    too_complex: Bool,
+
+    build: fn(^self, work: GrammarWork, branches: [[Config]], prefix: [Int]) -> Int Never! {
+        step: self.steps.len()
+        self.steps.push(GrammarStep{kinds: [Int]{}, targets: [Int]{}})
+        if prefix.len() + 1 > self.depth -> self.depth = prefix.len() + 1
+        kinds := [Int]{}
+        loop configs in branches {
+            loop config in configs {
+                kind: config_kind(work, config)
+                if !kinds.contains(kind) -> kinds.push(kind)
+            }
+        }
+        kinds.sort()
+        targets := [Int]{}
+        loop kind in kinds {
+            having := [Int]{}
+            loop (b, configs) in branches {
+                loop config in configs {
+                    if config_kind(work, config) == kind && !having.contains(b) -> having.push(b)
+                }
+            }
+            if having.len() == 1 {
+                targets.push(having[0])
+                next
+            }
+            seq := prefix.copy()
+            seq.push(kind)
+            if kind == 0 || seq.len() >= LOOKAHEAD_DEPTH || self.too_complex || self.sample.len() > 0 {
+                if self.sample.len() == 0 && !self.too_complex {
+                    self.sample = seq
+                    self.shared = having.copy()
+                }
+                targets.push(having[0])
+                next
+            }
+            next_branches := [[Config]]{}
+            loop (b, configs) in branches {
+                out := [Config]{}
+                if having.contains(b) {
+                    self.explorer.seen = [String]{}
+                    loop config in configs {
+                        if config_kind(work, config) == kind -> self.explorer.after(work, config.node, config.stack, out)
+                    }
+                }
+                next_branches.push(out)
+            }
+            if self.explorer.cost > LOOKAHEAD_CAP {
+                self.too_complex = true
+                targets.push(having[0])
+                next
+            }
+            child: self.build(work, next_branches, seq)
+            targets.push(-(child + 1))
+        }
+        self.steps[step] = GrammarStep{kinds: kinds, targets: targets}
+        step
+    }
+}
+
+/// The branches of decision node `n` as nodes to enter (-1: just after
+/// `n`).
+branch_starts: fn(work: GrammarWork, n: Int) -> [Int] Never! {
+    node: work.tree.nodes[n]
+    if node.kind == .Choice -> return node.children.copy()
+    [Int]{node.children[0], -1}
+}
+
+/// What the parser decides at node `n`, as words for a refusal.
+decision_text: fn(work: GrammarWork, n: Int, branches: [Int]) -> String Never! {
+    node: work.tree.nodes[n]
+    rule: work.tree.rules[work.owner[n]].name
+    if node.kind == .Optional -> return "in `{rule}`, taking this optional part and skipping it"
+    if node.kind == .Star || node.kind == .Plus -> return "in `{rule}`, repeating this part and going on past it"
+    "in `{rule}`, alternatives {branches[0] + 1} and {branches[1] + 1} of this choice"
+}
+
+/// Plans every decision of the parser rules, reporting the refusals.
+plan_decisions: fn(work: ^GrammarWork) Never! {
+    refs := [[Int]]{}
+    loop _ in work.tree.rules -> refs.push([Int]{})
+    loop (n, node) in work.tree.nodes {
+        if parsed(work, n) && node.kind == .Ref && node.rule >= 0 && work.tree.rules[node.rule].kind == .Parser -> refs[node.rule].push(n)
+    }
+    repeats := [Int]{}
+    loop op in work.operators -> repeats.push(op.repeat)
+    words: set_words(work.tokens.len())
+    deepening := Deepening{explorer: Explorer{refs: refs, seen: [String]{}, cost: 0}, steps: [GrammarStep]{}, depth: 1, sample: [Int]{}, shared: [Int]{}, too_complex: false}
+    loop (n, node) in work.tree.nodes {
+        if !parsed(work, n) -> next
+        kind: node.kind
+        if kind != .Choice && kind != .Optional && kind != .Star && kind != .Plus -> next
+        if kind == .Choice && node.children.len() < 2 -> next
+        work.steps += 1
+        if repeats.contains(n) {
+            kinds: set_items(work.first[node.children[0]])
+            targets := [Int]{}
+            loop _ in kinds -> targets.push(0)
+            work.decisions.push(GrammarDecision{node: n, depth: 1, fallback: 1, steps: [GrammarStep]{GrammarStep{kinds: kinds, targets: targets}}})
+            next
+        }
+        starts: branch_starts(work, n)
+        sets := [[Int]]{}
+        loop start in starts {
+            set := empty_set(words)
+            if start < 0 {
+                _: set_union(set, work.follow[n])
+            } else {
+                _: set_union(set, work.first[start])
+                if work.nullable[start] -> _: set_union(set, work.follow[n])
+            }
+            sets.push(set)
+        }
+        clash := false
+        loop i in 0..<sets.len() {
+            loop j in i + 1..<sets.len() {
+                if set_meets(sets[i], sets[j]) -> clash = true
+            }
+        }
+        if !clash {
+            kinds := [Int]{}
+            targets := [Int]{}
+            loop k in 0..<words * 32 {
+                loop (b, set) in sets {
+                    if set_has(set, k) {
+                        kinds.push(k)
+                        targets.push(b)
+                    }
+                }
+            }
+            work.decisions.push(GrammarDecision{node: n, depth: 1, fallback: -1, steps: [GrammarStep]{GrammarStep{kinds: kinds, targets: targets}}})
+            next
+        }
+        deepening.explorer.cost = 0
+        deepening.steps = [GrammarStep]{}
+        deepening.depth = 1
+        deepening.sample = [Int]{}
+        deepening.shared = [Int]{}
+        deepening.too_complex = false
+        branches := [[Config]]{}
+        loop start in starts {
+            deepening.explorer.seen = [String]{}
+            out := [Config]{}
+            if start < 0 -> deepening.explorer.after(work, n, [Int]{}, out) else -> deepening.explorer.enter(work, start, [Int]{}, out)
+            branches.push(out)
+        }
+        _: deepening.build(work, branches, [Int]{})
+        work.steps += deepening.explorer.cost
+        rule: work.tree.rules[work.owner[n]].name
+        if deepening.too_complex {
+            work.faults.push(grammar_fault(.TooComplex, node.at, "in `{rule}`, the lookahead at this decision passed {LOOKAHEAD_CAP} token sequences", "Factor the alternatives so that their first tokens tell them apart"))
+            next
+        }
+        if deepening.sample.len() > 0 {
+            names := [String]{}
+            loop sampled in deepening.sample -> names.push(work.tokens[sampled].name.copy())
+            sample: names.join(" ")
+            at: if kind == .Choice -> work.tree.nodes[node.children[deepening.shared[0]]].at else -> node.at
+            what: decision_text(work, n, deepening.shared)
+            work.faults.push(grammar_fault(.Ambiguous, at, "{what} can both begin with {sample}: the parser cannot choose between these within {LOOKAHEAD_DEPTH} tokens", "Factor the shared start out of the alternatives, or write operators in the operator form"))
+            next
+        }
+        work.decisions.push(GrammarDecision{node: n, depth: deepening.depth, fallback: -1, steps: deepening.steps})
+    }
+}

@@ -1,0 +1,72 @@
+// Nullable rules, the split of operator-form left recursion, and the
+// cycle every other left recursion is refused with.
+use {
+    core.grammar.[analyze]
+    core.grammar.error.[GrammarFault, GrammarFaultKind]
+    core.grammar.plan.[GrammarOperatorKind, GrammarPlan, GrammarSource]
+}
+
+plan_of: fn(text: String) -> GrammarPlan Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+faults_of: fn(text: String) -> [GrammarFault] Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(_) -> [GrammarFault]{}
+        .Err(error) -> error.faults
+    }
+}
+
+#Test("a rule that can match nothing is nullable") {
+    plan: plan_of("list : item* ;\nitem : 'x' ;\npair : item item? ;")
+    assert(plan.nullable[plan.tree.rules[0].body])
+    assert(!plan.nullable[plan.tree.rules[1].body])
+    assert(!plan.nullable[plan.tree.rules[2].body])
+}
+
+#Test("an operator rule is split into operands and operator tails") {
+    plan: plan_of("expr : expr '*' expr # Mul | expr '+' expr # Add | '-' expr # Neg | call '(' ')' # Call | NUM # Num ;\ncall : call '.' NAME # Field | NAME # Name ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;")
+    assert_eq(plan.operators.len(), 2)
+    expr: plan.operators[0]
+    assert_eq(expr.rule, 0)
+    assert_eq(expr.alts.len(), 5)
+    assert_eq(expr.operators.len(), 3)
+    assert_eq(expr.operators[0].kind, GrammarOperatorKind.Binary)
+    assert_eq(expr.operators[0].level, 5)
+    assert_eq(expr.operators[1].kind, GrammarOperatorKind.Binary)
+    assert_eq(expr.operators[1].level, 4)
+    assert_eq(expr.operators[2].kind, GrammarOperatorKind.Prefix)
+    assert_eq(expr.operators[2].tail, -1)
+    assert_eq(plan.tree.nodes[expr.primary].children.len(), 3)
+    tails: plan.tree.nodes[plan.tree.nodes[expr.repeat].children[0]].children
+    assert_eq(tails.len(), 2)
+    assert_eq(plan.tree.nodes[tails[0]].children.len(), 2)
+    assert_eq(plan.tree.nodes[plan.tree.nodes[tails[0]].children[0]].text, "*")
+    call: plan.operators[1]
+    assert_eq(call.operators.len(), 1)
+    assert_eq(call.operators[0].kind, GrammarOperatorKind.Suffix)
+}
+
+#Test("indirect left recursion is refused with its cycle") {
+    faults: faults_of("a : b 'x' | 'y' ;\nb : c 'z' ;\nc : a 'w' | 'v' ;")
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.LeftRecursive)
+    assert_eq(faults[0].message, "left recursion `a -> b -> c -> a` is not the operator form")
+    assert_eq(faults[0].at.offset, 0)
+}
+
+#Test("left recursion behind a nullable element is no operator form") {
+    faults: faults_of("a : sign a 'x' | 'y' ;\nsign : '-'? ;")
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].message, "left recursion `a -> a` is not the operator form")
+}
+
+#Test("an operator rule needs an operand alternative") {
+    faults: faults_of("e : e '+' e | '-' e ;")
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.LeftRecursive)
+    assert_eq(faults[0].message, "every alternative of `e` starts or ends with `e`, so it has no operand")
+}
