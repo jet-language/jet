@@ -127,8 +127,11 @@ sema_process_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [TExpr],
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
+// The ProcessSpec builders and checks the compiler still types; the launch
+// steps (`plan`, `run`, `run_checked`, `spawn`) are core.process's
+// `impl ProcessSpec` methods.
 sema_process_spec_known_method: fn(method: String) -> Bool Never! {
-    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "keep_open" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "memory_scope" || method == "open_file_limit" || method == "cpu_affinity" || method == "io_priority" || method == "io_idle" || method == "under" || method == "plan" || method == "run" || method == "run_checked" || method == "spawn"
+    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "keep_open" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "memory_scope" || method == "open_file_limit" || method == "cpu_affinity" || method == "io_priority" || method == "io_idle" || method == "under"
 }
 
 sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics: ^[Diagnostic]) -> Type? {
@@ -162,15 +165,6 @@ sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics:
         }
         "under" -> {
             if argc == 1 -> return Val(spec)
-        }
-        "plan" -> {
-            if argc == 0 -> return Val(sema_process_io_result(sema_process_named("ProcessPlan")))
-        }
-        "run" | "run_checked" -> {
-            if argc == 0 -> return Val(sema_process_io_result(sema_process_named("ProcessReceipt")))
-        }
-        "spawn" -> {
-            if argc == 0 -> return Val(sema_process_io_result(sema_process_named("ProcessChild")))
         }
         else -> {}
     }
@@ -230,7 +224,7 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     // (`clean.env(…).run()` in a loop) is no E0121.
     // The spec still moves like an unmarked owning position, so a later use
     // turns the move into a share and a borrowed parameter keeps its value.
-    known_mutating: method != "abilities" && method != "plan" && method != "run" && method != "run_checked" && method != "spawn"
+    known_mutating: method != "abilities"
     if !sema_process_check_method_ownership(receiver, "ProcessSpec.{method}", args, required, [Bool]{}, AccessConvention.Read, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -243,10 +237,9 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     // Each method is the ordinary Core source body that fills its
     // jet_builtins role (sema_process_spec_role; `abilities` reports the
     // checked TerminalFact set), so every tier runs the same Jet code.
-    effect: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
     call_args := [TExpr]{receiver_value}
     loop argument in values -> call_args.push(argument)
-    sema_process_source_call(sema_process_spec_role(method, args.len()), "ProcessSpec.{method}", effect, call_args, result, span, expected, check)
+    sema_process_source_call(sema_process_spec_role(method, args.len()), "ProcessSpec.{method}", "", call_args, result, span, expected, check)
 }
 
 // The jet_builtins role of the Core body a ProcessSpec method other than
@@ -276,10 +269,6 @@ sema_process_spec_role: fn(method: String, argc: Int) -> String Never! {
         "stderr" -> "ProcessSpecStderr"
         "timeout" -> "ProcessSpecTimeout"
         "cpu_time_limit" -> "ProcessSpecCPUTimeLimit"
-        "plan" -> "ProcessSpecPlan"
-        "run" -> "ProcessSpecRun"
-        "run_checked" -> "ProcessSpecRunChecked"
-        "spawn" -> "ProcessSpecSpawn"
         else -> ""
     }
 }
