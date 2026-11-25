@@ -1589,6 +1589,10 @@ MigrationOp: enum {
     Change(field: String, field_span: Span, from_ty: Type, from_span: Span, to_ty: Type, to_span: Span, converter: Expr?, converter_span: Span?, conv_fn: String?),
 }
 
+// A migration op is spelled with the keyword of its case in lower case;
+// MIGRATION_OP_COUNT stops the build naming any case JET_KEYWORD_NAMES lacks.
+MIGRATION_OP_COUNT: #run effect_vocabulary_list_view_count("AST/Items.jet", effect_vocabulary_lowered(effect_vocabulary_enum_names("AST/Items.jet", embed_file("Items.jet"), "MigrationOp")), "MigrationOp", JET_KEYWORD_NAMES, "JET_KEYWORD_NAMES", [String]{})
+
 ParseResult: struct {
     program: Program,
     diagnostics: [Diagnostic],

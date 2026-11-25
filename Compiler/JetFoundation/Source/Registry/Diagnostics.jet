@@ -102,6 +102,11 @@ DIAGNOSTIC_STAGES: [String]{
     "tooling",
 }
 
+// Each part of a stage is one of the Prelude's DiagnosticStage cases, spelled
+// in lower case; DIAGNOSTIC_STAGE_PART_COUNT stops the build naming any part
+// DiagnosticStage lacks.
+DIAGNOSTIC_STAGE_PART_COUNT: #run effect_vocabulary_list_view_count("Registry/Diagnostics.jet", DIAGNOSTIC_STAGES.join("/").split("/").to_list(), "DIAGNOSTIC_STAGES", effect_vocabulary_lowered(effect_vocabulary_enum_names("Core/Prelude/Prelude.jet", embed_file("toolchain:Core/Prelude/Prelude.jet"), "DiagnosticStage")), "`DiagnosticStage` in Core/Prelude/Prelude.jet", [String]{})
+
 diagnostic_stage_is_registered: fn(stage: String) -> Bool Never! {
     loop known in DIAGNOSTIC_STAGES {
         if known == stage -> return true

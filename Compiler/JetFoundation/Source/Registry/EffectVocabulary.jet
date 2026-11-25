@@ -196,6 +196,18 @@ effect_vocabulary_view_count: fn(view_file: String, view: String, view_name: Str
     effect_vocabulary_enum_view_count(view_file, view, view_name, known, "`{vocabulary_name}` in {vocabulary_file}", outside)
 }
 
+// The cases of the enum `name` in `text`, the text of the file `file`; else
+// the build stops. A list view compares its list with these cases.
+effect_vocabulary_enum_names: fn(file: String, text: String, name: String) -> [String] {
+    effect_vocabulary_enum_case_heads(text, name) ?? build_time_refused("{file} declares no `{name}: enum {{ … }}`")
+}
+
+// `names` in lower case: the spelling of a view written in lower case
+// against an enum's cases.
+effect_vocabulary_lowered: fn(names: [String]) -> [String] {
+    loop name in names -> name.lower()
+}
+
 // The words of `text`, split at whitespace and at the commas that end enum
 // cases.
 effect_vocabulary_words: fn(text: String) -> [String] {

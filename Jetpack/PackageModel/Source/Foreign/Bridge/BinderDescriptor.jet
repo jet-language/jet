@@ -33,7 +33,7 @@ use {
         SWIFT_MODULE_ROOT,
         TCL_MODULE_ROOT,
     ]
-    jet_foundation.[CORE_LANGUAGE_ROOTS, EFFECT_VOCABULARY_LEAVES, Namespace]
+    jet_foundation.[CORE_LANGUAGE_ROOTS, EFFECT_VOCABULARY_LEAVES, JET_TYPE_NAMES, Namespace, effect_vocabulary_enum_view_count]
     jetpack_trust_root.[CacheProvenance]
 }
 
@@ -409,6 +409,10 @@ ForeignScalar: enum {
         }
     }
 }
+
+// ForeignScalar picks from the built-in Jet types (JET_TYPE_NAMES): a scalar
+// a binder projects is a Jet type, apart from the fail-closed `Unsupported`.
+FOREIGN_SCALAR_COUNT: #run effect_vocabulary_enum_view_count("Foreign/Bridge/BinderDescriptor.jet", embed_file("BinderDescriptor.jet"), "ForeignScalar", JET_TYPE_NAMES, "JET_TYPE_NAMES", [String]{"Unsupported"})
 
 // `[Int, Float]`: the Rust `Debug` spelling of a scalar list.
 pkg_foreign_scalar_list_debug: fn(scalars: [ForeignScalar]) -> String Never! {

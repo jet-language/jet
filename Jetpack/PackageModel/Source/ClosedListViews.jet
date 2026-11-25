@@ -8,3 +8,13 @@ use jet_foundation.[effect_vocabulary_view_count]
 // DepSpec picks from LockSource: each source a manifest names for a dependency
 // is a source the lock records.
 DEP_SPEC_COUNT: #run effect_vocabulary_view_count("Manifest/Manifest.jet", embed_file("Manifest/Manifest.jet"), "DepSpec", "Lock/Schema.jet", embed_file("Lock/Schema.jet"), "LockSource", [String]{})
+
+// ForeignProvider picks from RefSource: a foreign binding's provider is a
+// source a ref names, apart from `System`, the host's own libraries. Its
+// `PyPi` is RefSource's `PyPI`.
+FOREIGN_PROVIDER_COUNT: #run effect_vocabulary_view_count("Foreign/Bridge/BinderDescriptor.jet", embed_file("Foreign/Bridge/BinderDescriptor.jet"), "ForeignProvider", "Refs/RefSpec.jet", embed_file("Refs/RefSpec.jet"), "RefSource", [String]{"System", "PyPi"})
+
+// OutputPayload picks from JSONBindKind, the JSON kinds the data binder
+// infers: an output's checked payload has the same shape, and its `String`
+// is the binder's `Text`.
+OUTPUT_PAYLOAD_COUNT: #run effect_vocabulary_view_count("Manifest/PackageFacts.jet", embed_file("Manifest/PackageFacts.jet"), "OutputPayload", "Foreign/Data/JSONSchemaBinder.jet", embed_file("Foreign/Data/JSONSchemaBinder.jet"), "JSONBindKind", [String]{"String"})

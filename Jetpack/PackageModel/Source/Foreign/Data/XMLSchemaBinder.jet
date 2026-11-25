@@ -4,6 +4,7 @@
 // names and the kinds of content each element holds. Attributes become `@`
 // wire keys, simple content `$text`, mixed content an ordered `$content`
 // Dyn, nested elements records, and repeated children lists.
+use jet_foundation.[effect_vocabulary_view_count]
 
 XML_NAMESPACE_URI: "http://www.w3.org/XML/1998/namespace"
 
@@ -26,6 +27,11 @@ XMLContent: enum {
     Comment,
     ProcessingInstruction,
 }
+
+// XMLContent picks from Core's ScanEvent, the events the XML engine reads:
+// its `CData` is the engine's `Cdata`, and an `Element` is the run of events
+// from an element's start to its end.
+XML_CONTENT_COUNT: #run effect_vocabulary_view_count("Foreign/Data/XMLSchemaBinder.jet", embed_file("XMLSchemaBinder.jet"), "XMLContent", "Core/Encoding/XMLEngine.jet", embed_file("toolchain:Core/Encoding/XMLEngine.jet"), "ScanEvent", [String]{"CData", "Element"})
 
 // An element with its expanded name, expanded attributes, content kinds, and
 // the namespace bindings in scope.

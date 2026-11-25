@@ -7,6 +7,7 @@
 // borrow them for calls and consumes them through `close`.
 use {
     files: core.files
+    jet_foundation.[JET_TYPE_NAMES, effect_vocabulary_enum_view_count]
     jetpack_foundation.[JAVA_MODULE_ROOT]
     sys: core.sys
 }
@@ -70,6 +71,10 @@ JavaScalar: enum {
         }
     }
 }
+
+// JavaScalar picks from the built-in Jet types (JET_TYPE_NAMES), apart from
+// `Void`, a JVM method that returns nothing.
+JAVA_SCALAR_COUNT: #run effect_vocabulary_enum_view_count("Foreign/Binders/Java.jet", embed_file("Java.jet"), "JavaScalar", JET_TYPE_NAMES, "JET_TYPE_NAMES", [String]{"Void"})
 
 JavaMethod: struct {
     name: String,

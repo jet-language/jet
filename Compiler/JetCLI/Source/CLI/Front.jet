@@ -61,6 +61,7 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_render_all,
+        effect_vocabulary_view_count,
         policy_gate_parse,
         policy_key_parse,
         test_setting_flag,
@@ -145,6 +146,10 @@ JetCLIPlan: enum {
     Prove(target: JetCLIProveTarget, lenses: [String], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool),
     Budget(options: JetCLIBudgetOptions, root: String, entry: String, color: Bool),
 }
+
+// SemaOutputIntent, what a command asks sema to make outputs for, picks from
+// JetCLIPlan: its intents are the plans `check`, `run` and `test`.
+SEMA_OUTPUT_INTENT_COUNT: #run effect_vocabulary_view_count("Compiler/JetSema/Source/Sema/Outputs.jet", embed_file("toolchain:Compiler/JetSema/Source/Sema/Outputs.jet"), "SemaOutputIntent", "CLI/Front.jet", embed_file("Front.jet"), "JetCLIPlan", [String]{})
 
 // The command finished: write these bytes and exit with this status.
 // A command refused before it ran: one spanless CLI report and its exit
