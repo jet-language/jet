@@ -6994,14 +6994,15 @@ ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
 // function result, has no carrier.
 #Test("a binding's function parameter routes as a Callback") {
     body: Type.Fn{params: [Type]{Type.List{element: Type.Float}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    params: [Type]{Type.Int, body.copy()}
+    params: [Type]{Type.Int, body}
     started: ir_route_of_signature("jet_raw_probe", params, [Bool]{false, false}, Val(Type.Named{name: "RealtimeStream"})) ?? panic("no callback route")
     assert(started.params[1] == IRRouteCarrier.Callback)
     assert(ir_lint_param_words(started.params[1]) == 3)
     if ir_route_of_signature("jet_raw_probe", params, [Bool]{false, true}, None) == .Val(_) {
         panic("a written callback crossed")
     }
-    if ir_route_of_signature("jet_raw_probe", [Type]{}, [Bool]{}, Val(body)) == .Val(_) {
+    returned: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    if ir_route_of_signature("jet_raw_probe", [Type]{}, [Bool]{}, Val(returned)) == .Val(_) {
         panic("a callback result crossed")
     }
 }
