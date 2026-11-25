@@ -38,19 +38,19 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.FloatInfinitySeedIntOnly</code>: <code>Tests/UI/float_infinity_seed_int_only.stderr</code>.</p>
 <pre class="diag">Error: Jet.FloatInfinitySeedIntOnly: `best` is a Float seeded with -infinity, but every value assigned to it is an Int
-  --&gt; Tests/UI/float_infinity_seed_int_only.jet:5:12
+  --&gt; Tests/UI/float_infinity_seed_int_only.jet:5:6
     |
-  5 |     best := -math.INFINITY
-    |     ^^^^
+  5 |     ^best: -math.INFINITY
+    |      ^^^^
  Why: Each Int widens to Float as it is assigned, so the result reads `5.0` where the input held `5`, and an Int beyond 2^53 stops the program
  Fix: Make `best` an `Int?` that starts as `None`, or an Int that starts at `Int.MIN`
 More: jet-lang.dev/e/Jet.FloatInfinitySeedIntOnly
 
 Error: Jet.FloatInfinitySeedIntOnly: `least` is a Float seeded with infinity, but every value assigned to it is an Int
-  --&gt; Tests/UI/float_infinity_seed_int_only.jet:13:13
+  --&gt; Tests/UI/float_infinity_seed_int_only.jet:13:6
     |
- 13 |     least := Float.INFINITY
-    |     ^^^^^
+ 13 |     ^least: Float.INFINITY
+    |      ^^^^^
  Why: Each Int widens to Float as it is assigned, so the result reads `5.0` where the input held `5`, and an Int beyond 2^53 stops the program
  Fix: Make `least` an `Int?` that starts as `None`, or an Int that starts at `Int.MAX`
 More: jet-lang.dev/e/Jet.FloatInfinitySeedIntOnly

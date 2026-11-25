@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.CompilerValueOutsideRoot</code>: <code>Tests/UI/MetaLadderCompilerOutsideRoot/stderr</code>.</p>
 <pre class="diag">Error: Jet.CompilerValueOutsideRoot: `b.compiler` is called outside the root package&#39;s own build source
-  --&gt; tool/tool.jet:4:12
+  --&gt; tool/tool.jet:4:11
     |
-  4 |     _ := b.compiler(target)
-    |            ^^^^^^^^
+  4 |     ^_: b.compiler(target)
+    |           ^^^^^^^^
  Why: Only the package being built makes the `Compiler` value; a dependency that receives the root&#39;s `Build` gets no compiler control from it
  Fix: Call `b.compiler(target)` in the root package&#39;s `build: fn` and pass the value to the function that needs it
 More: jet-lang.dev/e/Jet.CompilerValueOutsideRoot

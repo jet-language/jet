@@ -40,8 +40,8 @@
 <pre class="diag">Error: Jet.MissingErrorConversion: This implicit fallible call can&#39;t convert `AuthError` into `Err` — no declared conversion exists
   --&gt; Tests/UI/Taint/auth_token_keeps_credential_leak_protection.jet:6:14
     |
-  6 |     _ := auth.verify_jwt(token, key: key, audience: &quot;gateway&quot;)
-    |               ^^^^^^^^^^
+  6 |     ^_: auth.verify_jwt(token, key: key, audience: &quot;gateway&quot;)
+    |              ^^^^^^^^^^
  Why: Ordinary fallible calls propagate automatically; `AuthError` can reach `Err` only through `impl Err.From(AuthError)`
  Fix: Handle this call locally with `??`, add `impl Err.From(AuthError) { … }`, or change the return type
 More: jet-lang.dev/e/Jet.MissingErrorConversion
