@@ -575,9 +575,6 @@ sema_expression_core_record_name: fn(struct_name: String, type_args: [Type], exp
     }
     if core_record_literal_fields(name) == None -> return None
     if sema_expression_type_symbol(scopes, environment, program, name) != None -> return None
-    if core_record_literal_is_core_only(name) && !module_is_core(environment.module_identity) {
-        return None
-    }
     Val(name)
 }
 
@@ -599,6 +596,11 @@ sema_expression_core_record_field_value: fn(owner_name: String, field: TypeTuple
 
 sema_expression_core_record_literal: fn(owner_name: String, fields: [ExprField], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     declared: core_record_literal_fields(owner_name) ?? return None
+    // Only Core writes a Core-only record's fields, as only its type's module
+    // writes a `priv` field, so a literal elsewhere gets the ordinary
+    // private-field error: at the first field it writes, or for the first
+    // field it leaves out.
+    sealed: core_record_literal_is_core_only(owner_name) && !module_is_core(check.environment.module_identity) && !sema_expr_sees_private_fields(check.context)
     supplied := [Bool]{}
     loop _ in declared -> supplied.push(false)
     loop source in fields {
@@ -613,11 +615,19 @@ sema_expression_core_record_literal: fn(owner_name: String, fields: [ExprField],
             check.diagnostics.push(sema_error("E0302", source.name_span, "`{owner_name}` has no field `{source.name}`", "struct fields must be declared by the type", "use one of the declared field names"))
             return None
         }
+        if sealed {
+            check.diagnostics.push(sema_expression_private_field_error(source.name, source.name_span))
+            return None
+        }
         if supplied[found] {
             check.diagnostics.push(sema_error("E0105", source.name_span, "field `{source.name}` is supplied more than once", "each struct field receives one value", "remove the duplicate field"))
             return None
         }
         supplied[found] = true
+    }
+    if sealed && declared.len() > 0 {
+        check.diagnostics.push(sema_expression_private_field_omitted_error(owner_name, declared[0].name, span))
+        return None
     }
     missing := [String]{}
     loop (index, row) in declared {
