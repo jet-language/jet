@@ -789,11 +789,18 @@ sema_comptime_precheck_enter_one: fn(run: SemaPrecheckEnterRun, module_identity:
     if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
         scope_items = graph.modules[module_index].program.items.len()
     }
+    sema_comptime_precheck_scope_to_environment(comptime_scopes, environment, module_identity)
+    SemaPrecheckEntered{kept: true, scope_items: scope_items, environment: Val(environment.move()), scopes: Val(comptime_scopes.move())}
+}
+
+// Moves the one slot that fresh scopes just prepared for `module_identity`
+// into `environment` as its module scope; the slot keeps its other prepared
+// facts beside an empty table.
+sema_comptime_precheck_scope_to_environment: fn(comptime_scopes: ^SemaComptimeScopes, environment: ^SemaScopeEnvironment, module_identity: ModuleID) {
     slot := comptime_scopes.slots.pop() ?? panic("the precheck scopes lost the slot they prepared")
     environment.module_scope = Val(slot.table.move())
     comptime_scopes.slots.push(SemaComptimeModuleScope{module_identity: slot.module_identity, table: sema_scope_init(module_identity), applied: slot.applied, diagnostics: slot.diagnostics.move(), constants: slot.constants.move(), version: slot.version})
     comptime_scopes.current = 0
-    SemaPrecheckEntered{kept: true, scope_items: scope_items, environment: Val(environment.move()), scopes: Val(comptime_scopes.move())}
 }
 
 sema_comptime_precheck_enter_store: fn(run: SemaPrecheckEnterRun, offset: Int, entered: ^^SemaPrecheckEntered) {
@@ -1031,11 +1038,7 @@ sema_comptime_precheck_enter: fn(shared_state: Shared<SemaPrecheckShared>, modul
         // copy: the module's checks read this entered environment while the
         // run's environment enters the wave's next module.
         module_environment := environment.copy()
-        // Fresh scopes hold the one slot they just prepared.
-        slot := comptime_scopes.slots.pop() ?? panic("the precheck scopes lost the slot they prepared")
-        module_environment.module_scope = Val(slot.table.move())
-        comptime_scopes.slots.push(SemaComptimeModuleScope{module_identity: slot.module_identity, table: sema_scope_init(module_identity), applied: slot.applied, diagnostics: slot.diagnostics.move(), constants: slot.constants.move(), version: slot.version})
-        comptime_scopes.current = 0
+        sema_comptime_precheck_scope_to_environment(comptime_scopes, module_environment, module_identity)
         permit.value.module_environments.push(module_environment)
         permit.value.comptime_scopes.push(comptime_scopes)
     }
@@ -1488,14 +1491,7 @@ sema_comptime_walk_next_step: fn(walk: SemaComptimeWalk, preferred_slot: Int) ->
             }
         }
         permit.value.slot_next[preferred_slot] = cursor
-        if position >= 0 {
-            permit.value.claimed_flags[position] = true
-            permit.value.unclaimed -= 1
-            permit.value.busy += 1
-            permit.value.pending[preferred_slot] = permit.value.pending[preferred_slot] - 1
-            scope: permit.value.slots[preferred_slot] ?? panic("a comptime walk scope was dropped while a job of it was queued")
-            return SemaComptimeWalkStep{is_prep: false, claim: Val(SemaComptimeWalkClaim{job: permit.value.jobs[position], slot: preferred_slot, scope: scope}), slot: preferred_slot, module_identity: module_none(), version: 0}
-        }
+        if position >= 0 -> return sema_comptime_walk_claim_job(permit.value, position, preferred_slot)
     }
     if permit.value.prep_next < permit.value.prep_slots.len() {
         prep_index: permit.value.prep_next
@@ -1513,13 +1509,18 @@ sema_comptime_walk_next_step: fn(walk: SemaComptimeWalk, preferred_slot: Int) ->
         }
     }
     if position < 0 -> return sema_comptime_walk_stop_step()
-    permit.value.claimed_flags[position] = true
-    permit.value.unclaimed -= 1
-    permit.value.busy += 1
     slot: permit.value.job_slots[position]
-    permit.value.pending[slot] = permit.value.pending[slot] - 1
-    scope: permit.value.slots[slot] ?? panic("a comptime walk scope was dropped while a job of it was queued")
-    SemaComptimeWalkStep{is_prep: false, claim: Val(SemaComptimeWalkClaim{job: permit.value.jobs[position], slot: slot, scope: scope}), slot: slot, module_identity: module_none(), version: 0}
+    sema_comptime_walk_claim_job(permit.value, position, slot)
+}
+
+// Claims queued job `position` of scope `slot` and steps to it.
+sema_comptime_walk_claim_job: fn(queue: ^SemaComptimeWalkQueue, position: Int, slot: Int) -> SemaComptimeWalkStep {
+    queue.claimed_flags[position] = true
+    queue.unclaimed -= 1
+    queue.busy += 1
+    queue.pending[slot] = queue.pending[slot] - 1
+    scope: queue.slots[slot] ?? panic("a comptime walk scope was dropped while a job of it was queued")
+    SemaComptimeWalkStep{is_prep: false, claim: Val(SemaComptimeWalkClaim{job: queue.jobs[position], slot: slot, scope: scope}), slot: slot, module_identity: module_none(), version: 0}
 }
 
 sema_comptime_walk_install_slot: fn(walk: SemaComptimeWalk, slot: Int, prepared: ^^SemaComptimeModuleScope?) {

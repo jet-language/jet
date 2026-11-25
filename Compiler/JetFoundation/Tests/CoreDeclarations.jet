@@ -131,6 +131,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     loop (index, row) in dispatchers {
         key: core_call_key(row.record)
         assert_eq(core_call_key(CORE_CALLS[index]), key)
+        assert(!core_keys.contains(key), "the Core.rows row {key} repeats another")
         core_keys.push(key)
     }
     loop (index, row) in CORE_CALL_EXTENSIONS {

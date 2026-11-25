@@ -66,17 +66,26 @@ sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type
         check.diagnostics.push(sema_missing_core_role("AppEnqueue", span))
         return sema_live_rejected()
     }
-    target: sema_call_core_source_target(check.environment.*, check.program.*, filler.module_identity, filler.name, [Type]{}, span, true, check.diagnostics) ?? panic("the AppEnqueue filler `{filler.name}` is not registered")
-    params: sema_call_params_from_type_after(target.signature, 0) ?? panic("the AppEnqueue filler has no parameter list")
+    target: sema_call_core_source_target(check.environment.*, check.program.*, filler.module_identity, filler.name, [Type]{}, span, true, check.diagnostics) ?? {
+        check.context.incomplete_reasons.push("the AppEnqueue filler `{filler.name}` is not registered")
+        return sema_live_rejected()
+    }
+    params: sema_app_enqueue_params(target.signature, check.environment.*, check.program.*) ?? {
+        check.context.incomplete_reasons.push("the AppEnqueue filler does not take four typed parameters")
+        return sema_live_rejected()
+    }
     callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return sema_live_rejected()
-    declared_result: sema_call_signature_return(target.signature) ?? panic("the AppEnqueue filler has no return type")
+    declared_result: sema_call_signature_return(target.signature) ?? {
+        check.context.incomplete_reasons.push("the AppEnqueue filler has no return type")
+        return sema_live_rejected()
+    }
     service_name: "__jet_job_{span.start}_service"
     service: Expr.Copy{value: Expr.Ident{name: "self", span: job.receiver_span, id: job.receiver_id}, span: job.receiver_span, id: AST_NODE_GENERATED}
     args_name: "__jet_job_{span.start}_args"
     statements: sema_app_job_statements(args_name, service_name, job.method, job.module, span, graph, check.environment.*)
-    name_arg: sema_app_enqueue_arg(sema_live_string(job.wire, span), params, 0, span, check) ?? return sema_live_rejected()
-    encoded_arg: sema_app_enqueue_arg(Expr.ListLit{elements: job.encoded, span: span, id: AST_NODE_GENERATED}, params, 1, span, check) ?? return sema_live_rejected()
-    retries_arg: sema_app_enqueue_arg(job.retries, params, 2, span, check) ?? return sema_live_rejected()
+    name_arg: sema_app_enqueue_arg(sema_live_string(job.wire, span), params.name, span, check) ?? return sema_live_rejected()
+    encoded_arg: sema_app_enqueue_arg(Expr.ListLit{elements: job.encoded, span: span, id: AST_NODE_GENERATED}, params.encoded, span, check) ?? return sema_live_rejected()
+    retries_arg: sema_app_enqueue_arg(job.retries, params.retries, span, check) ?? return sema_live_rejected()
     sema_scope_enter(check.scopes, check.state, "enqueue:{span.start}")
     body := [TStmt]{}
     statement: sema_stmt_check_binding(ast_binding(service_name, span, false, service, None), None, check) ?? {
@@ -84,7 +93,7 @@ sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type
         return sema_live_rejected()
     }
     body.push(statement)
-    run: sema_app_mount_callback(args_name, statements, sema_app_enqueue_param(params, 3, check.environment.*, check.program.*), span, check) ?? {
+    run: sema_app_mount_callback(args_name, statements, params.run, span, check) ?? {
         sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
         return sema_live_rejected()
     }
@@ -96,16 +105,31 @@ sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
-// The type of the AppEnqueue filler's parameter `index`.
-sema_app_enqueue_param: fn(params: [SemaCallParam], index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type {
-    declared: params[index].ty ?? panic("the AppEnqueue filler's parameter {index} has no type")
-    sema_call_resolved_type(declared, environment, program)
+// The resolved types of the AppEnqueue filler's four parameters: the job's
+// wire name, its encoded arguments, its retries and the function that runs it.
+SemaAppEnqueueParams: struct {
+    name: Type,
+    encoded: Type,
+    retries: Type,
+    run: Type,
 }
 
-// `value`, written at `span`, checked and passed as the AppEnqueue filler's
-// parameter `index`.
-sema_app_enqueue_arg: fn(value: ^^Expr, params: [SemaCallParam], index: Int, span: Span, check: ^SemaBodyCheck) -> TCallArg? {
-    checked: sema_check_expression(value, Val(sema_app_enqueue_param(params, index, check.environment.*, check.program.*)), check) ?? return None
+// The parameter types of the AppEnqueue filler whose type is `signature`;
+// None when it is not a function of at least four typed parameters.
+sema_app_enqueue_params: fn(signature: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaAppEnqueueParams? {
+    params: sema_call_params_from_type_after(signature, 0) ?? return None
+    if params.len() < 4 -> return None
+    name: params[0].ty ?? return None
+    encoded: params[1].ty ?? return None
+    retries: params[2].ty ?? return None
+    run: params[3].ty ?? return None
+    Val(SemaAppEnqueueParams{name: sema_call_resolved_type(name, environment, program), encoded: sema_call_resolved_type(encoded, environment, program), retries: sema_call_resolved_type(retries, environment, program), run: sema_call_resolved_type(run, environment, program)})
+}
+
+// `value`, written at `span`, checked as `param_type` and passed as a
+// parameter of the AppEnqueue filler.
+sema_app_enqueue_arg: fn(value: ^^Expr, param_type: Type, span: Span, check: ^SemaBodyCheck) -> TCallArg? {
+    checked: sema_check_expression(value, Val(param_type), check) ?? return None
     Val(sema_call_http_static_tree_arg(checked, sema_http_mount_arg(value, span)))
 }
 

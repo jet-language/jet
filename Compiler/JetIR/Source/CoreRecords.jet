@@ -125,13 +125,15 @@ ir_canonical_core_record: fn(record: CoreCallRecord) -> CoreCallRecord Never! {
 }
 
 // The registry is a read parameter, so the scan reads its rows in place.
+// CORE_CALLS holds one row per key (core_call_rows), so the scan stops at
+// the first.
 ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord Never! {
     key := core_call_key(record)
     found := CoreCallRecord?{None}
     loop candidate in rows {
         if core_call_key(candidate) == key {
-            if found != None -> panic("duplicate canonical Core-call key")
             found = Val(candidate)
+            break
         }
     }
     canonical: found ?? panic("checked Core-call record is absent from the canonical registry")

@@ -302,7 +302,11 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     }
     // `__screen` can't fail (`App Never!`): the call is the graph, as a
     // declared method's call of it is.
-    result_type: sema_call_resolved_type(sema_owned_infallible(sema_call_signature_return(registered.signature) ?? panic("App.{SEMA_APP_SCREEN} has no result")), check.environment.*, check.program.*)
+    declared_result: sema_call_signature_return(registered.signature) ?? {
+        check.context.incomplete_reasons.push("App.{SEMA_APP_SCREEN} has no result")
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    result_type: sema_call_resolved_type(sema_owned_infallible(declared_result), check.environment.*, check.program.*)
     built: sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: registered.method, type_args: [Type]{viewed}, args: registration}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
@@ -607,8 +611,12 @@ sema_call_app_api: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], 
     }
     key: graph.modules[row.module_index].nominals[row.row].identity_key
     limit: max_upload ?? Expr.Int{value: SEMA_APP_MAX_UPLOAD, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    path: positional.pop() ?? {
+        check.context.incomplete_reasons.push("`.api` was checked to have a path")
+        return rejected
+    }
     registration: [CallArg]{
-        positional.pop() ?? panic("`.api` was checked to have a path"),
+        path,
         sema_app_arg(sema_app_text(key, span), AccessConvention.Read, span),
         sema_app_arg(limit, AccessConvention.Read, span),
     }
