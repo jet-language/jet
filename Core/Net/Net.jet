@@ -13,7 +13,6 @@ use {
     core: core
     sys: core.sys
     rt: jet.runtime.net
-    builtin: jet_builtins
     jet_builtins.[ResolveError]
 }
 
@@ -353,7 +352,7 @@ resolve_socket_addrs: fn(operation: String, host: String, port: Int) -[Net, Time
     text: "{host_text}:{port}"
     if socket_addr_parse(text) == .Ok(address) -> return Ok([SocketAddr]{address})
     port16: U16{port}
-    if builtin.resolve_ordered(host_text, port16) == {
+    if rt.resolve_ordered(host_text, port16) == {
         .Ok(addresses) -> resolve_all(text, addresses)
         .Err(error) -> Err(resolve_error(text, error))
     }
@@ -1208,6 +1207,12 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
         }
         .Ok(_) | .Err(_) -> assert(false)
     }
+}
+
+#Test("a host name resolves through the platform resolver to its addresses on the port") {
+    addresses: socket_addrs("localhost", 8080) ?? panic("resolve localhost: {err}")
+    assert(addresses.len() > 0)
+    loop address in addresses -> assert(socket_port(address) == 8080)
 }
 
 #Test("resolver error OS code presence is independent of its stored word") {

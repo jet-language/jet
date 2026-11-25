@@ -478,8 +478,7 @@ core_decl_marker: fn(expression: String, context: String, constants: CoreDeclTex
 core_decl_call_effect: fn(module_name: String, member: String) -> String? Never! {
     if module_name == CORE_BUILTINS_MODULE {
         return if member == {
-            "lock_open" | "lock_try" | "lock_wait" | "lock_close" | "lock_fd_identity" | "lock_path_identity" | "lock_owner" -> Val("FS")
-            "resolve_ordered" -> Val("Net")
+            "lock_owner" -> Val("FS")
             "process_child_wait" | "process_child_exited" | "process_child_kill" | "process_child_terminate" | "process_child_interrupt" -> Val("Exec")
             "process_spec_run" | "process_spec_run_checked" | "process_spec_spawn" -> Val("Exec")
             else -> None
@@ -534,7 +533,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
         "core.perf" -> if member == {
-            "__heap_mark" | "fidelity" | "heap_mark" | "override_fidelity" | "reset_fidelity" -> Val("Env")
+            "fidelity" | "heap_mark" | "override_fidelity" | "reset_fidelity" -> Val("Env")
             else -> None
         }
         "core.sys" -> if member == "success" -> None else -> Val("Env")
@@ -561,8 +560,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
 core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
     if module_name == CORE_BUILTINS_MODULE {
         return if member == {
-            "lock_open" | "lock_try" | "lock_wait" | "lock_close" | "lock_fd_identity" | "lock_path_identity" | "lock_owner" -> Val("FS.Write")
-            "resolve_ordered" -> Val("Time.Wait")
+            "lock_owner" -> Val("FS.Write")
             else -> None
         }
     }

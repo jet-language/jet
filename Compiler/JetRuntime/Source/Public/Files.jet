@@ -199,21 +199,20 @@ files: module {
     #Import(c) priv lock_fd: fn(lock: FileLock) -[FS.Read]> Int IOError! = "jet_fs_lock_fd_raw"
 
     // The advisory-lock calls core.files' lock and try_lock run on
-    // (HostFileLock.jet), each answered as its jet_builtins record. `errno`
-    // and `platform` are the host's own error number and its tag (1 =
-    // Linux), which core.files maps to IOError.
+    // (HostFileLock.jet). `errno` and `platform` are the host's own error
+    // number and its tag (1 = Linux), which core.files maps to IOError.
     // Opens the lock file `path`: `value` is the descriptor, negative on
     // failure.
-    #Import(c) priv lock_open: fn(path: String) -[FS.Write]> LockCall = "jet_fs_lock_open_raw"
+    #Import(c) priv lock_open: fn(path: String) -[FS.Write]> {value: Int, errno: Int, platform: Int} = "jet_fs_lock_open"
 
     // Tries the exclusive lock on `fd` once: `value` is negative when it is
     // not taken.
-    #Import(c) priv lock_try: fn(fd: Int) -[FS.Write]> LockCall = "jet_fs_lock_try_raw"
+    #Import(c) priv lock_try: fn(fd: Int) -[FS.Write]> {value: Int, errno: Int, platform: Int} = "jet_fs_lock_try"
 
     // Waits for the exclusive lock on `fd`, for `timeout_ns` when `bounded`.
     // A zero `carried_ns` starts the deadline, which `deadline_ns` carries
     // into the next wait.
-    #Import(c) priv lock_wait: fn(fd: Int, timeout_ns: Int, bounded: Bool, carried_ns: Int) -[FS.Write]> LockWait = "jet_fs_lock_wait_raw"
+    #Import(c) priv lock_wait: fn(fd: Int, timeout_ns: Int, bounded: Bool, carried_ns: Int) -[FS.Write]> {acquired: Bool, timed_out: Bool, errno: Int, platform: Int, deadline_ns: Int} = "jet_fs_lock_wait"
 
     // Closes `fd`; its errno, 0 when it closed. A negative `fd` closes
     // nothing.
@@ -222,9 +221,9 @@ files: module {
     // The file the descriptor `fd` or the path `path` (not following a
     // final link) names, so a replaced lock file is told apart from the
     // held one.
-    #Import(c) priv lock_fd_identity: fn(fd: Int) -[FS.Write]> LockIdentity = "jet_fs_lock_fd_identity_raw"
+    #Import(c) priv lock_fd_identity: fn(fd: Int) -[FS.Write]> {device: Int, low: Int, high: Int, regular: Bool, reparse: Bool, errno: Int, platform: Int} = "jet_fs_lock_fd_identity"
 
-    #Import(c) priv lock_path_identity: fn(path: String) -[FS.Write]> LockIdentity = "jet_fs_lock_path_identity_raw"
+    #Import(c) priv lock_path_identity: fn(path: String) -[FS.Write]> {device: Int, low: Int, high: Int, regular: Bool, reparse: Bool, errno: Int, platform: Int} = "jet_fs_lock_path_identity"
 
     // Maps the file `path` for reading.
     #Import(c) priv map_raw: fn(path: String) -[FS.Read]> MappedFile IOError! = "jet_std_files_map"

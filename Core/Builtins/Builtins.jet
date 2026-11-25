@@ -14,7 +14,8 @@
 // counts the compiler-known names Core still declares in other modules, and
 // that count only falls.
 //
-// An operation the host runs has no declaration here: its row in
+// An operation the host runs has no declaration here: it is a jet.runtime
+// leaf (Compiler/JetRuntime/Source/Public), or its row in
 // Compiler/Prelude/Core.rows (`dispatcher_row … jet_builtins <name>`) and its
 // typed signature in the compiler's host signature table are the whole
 // operation. This file declares the records those operations return.
@@ -380,8 +381,8 @@ Word: struct<bits: Int> {}
 FloatWord: struct<exponent: Int, fraction: Int> {}
 
 // The test harness's evidence and temporary-directory operations
-// (`core.testing`'s snap, golden, fixture and temp_dir): plain records of
-// physical facts, not raw-codec tuples.
+// (jet.runtime.testing's, behind `core.testing`'s snap, golden, fixture and
+// temp_dir): plain records of physical facts, not raw-codec tuples.
 
 // `evidence_read(path)`: a snapshot, golden or fixture file's text.
 EvidenceRead: struct {
@@ -419,8 +420,8 @@ TempCreate: struct {
 }
 
 // The descriptor operations core.files.sealed reads and writes files through
-// (jetc_open_directory, jetc_read, jetc_link and the rest): whole-record
-// physical facts of one system call.
+// (jet.runtime.files' jetc_open_directory, jetc_read, jetc_link and the
+// rest): whole-record physical facts of one system call.
 
 // What every descriptor operation but jetc_stat returns. `value` is the
 // descriptor or byte count, negative on failure with `errno` set; `bytes`
@@ -448,13 +449,13 @@ JetcStat: struct {
     is_dir: Bool,
 }
 
-// The advisory-lock operations core.files' lock and try_lock run on
-// (lock_open, lock_try, lock_wait, lock_close, lock_fd_identity,
-// lock_path_identity and lock_owner): plain records of the host's facts.
-// `errno` and `platform` are the host's own error numbers, which core.files
-// maps to IOError.
+// The records jet.runtime.files' lock_open, lock_try, lock_wait,
+// lock_fd_identity and lock_path_identity answered before they crossed
+// tuples. A seed whose interface still declares those bindings with them
+// checks this Core, so they stay until no seed does. `errno` and `platform`
+// are the host's own error numbers.
 
-// What lock_open and lock_try return: `value` is the descriptor or result,
+// What lock_open and lock_try answered: `value` is the descriptor or result,
 // negative on failure.
 LockCall: struct {
     value: Int,
@@ -462,8 +463,8 @@ LockCall: struct {
     platform: Int,
 }
 
-// What lock_fd_identity and lock_path_identity return: the file a descriptor
-// or path names, so a replaced lock file is told apart from the held one.
+// What lock_fd_identity and lock_path_identity answered: the file a
+// descriptor or path names.
 LockIdentity: struct {
     device: Int,
     low: Int,
@@ -474,7 +475,7 @@ LockIdentity: struct {
     platform: Int,
 }
 
-// What lock_wait returns: whether the lock was taken before `deadline_ns`.
+// What lock_wait answered: whether the lock was taken before `deadline_ns`.
 LockWait: struct {
     acquired: Bool,
     timed_out: Bool,
@@ -483,10 +484,10 @@ LockWait: struct {
     deadline_ns: Int,
 }
 
-// `resolve_ordered(host, port)`: core.net's name resolution. It answers
-// every address in the platform's order, or this failure: `kind` is the
-// failure class core.net maps to a NetError, and `os_code` counts only when
-// `has_os_code` is set.
+// `jet.runtime.net.resolve_ordered(host, port)`: core.net's name
+// resolution. It answers every address in the platform's order, or this
+// failure: `kind` is the failure class core.net maps to a NetError, and
+// `os_code` counts only when `has_os_code` is set.
 ResolveError: struct {
     kind: Int,
     has_os_code: Bool,

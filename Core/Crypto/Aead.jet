@@ -6,7 +6,7 @@
 //   ghash_ctmul64 (Thomas Pornin): carry-less products from integer
 //   multiplies with holes, so no table index or branch depends on H or the
 //   data. On a host with PCLMULQDQ the same GHASH runs through
-//   core.crypto.__ghash_blocks; both compute SP 800-38D section 6.4.
+//   jet.runtime.crypto.ghash_blocks; both compute SP 800-38D section 6.4.
 // - CCM (NIST SP 800-38C, RFC 3610) and CCM* (IEEE 802.15.4-2011
 //   annex B), as the mbedtls ccm.c state machine.
 // - GCM and CCM run on any 128-bit block cipher's forward direction
@@ -24,6 +24,7 @@ use {
     core
     cipher: __core_crypto_cipher
     __core_crypto_cipher.[ForwardBlock]
+    crypto_rt: jet.runtime.crypto
 }
 
 ZERO_BLOCK: [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -139,7 +140,7 @@ ghash: fn(k: GHASHKey, y: ^[U8], data: [U8], off: Int, count: Int) Never! {
     if count <= 0 {
         return
     }
-    if core.crypto.__ghash_blocks(k.h, y, data, off, count) {
+    if crypto_rt.ghash_blocks(k.h, y, data, off, count) {
         return
     }
     ghash_portable(k, y, data, off, count)

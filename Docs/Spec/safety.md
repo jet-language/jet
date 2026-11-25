@@ -5905,63 +5905,63 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 273,
+      "line": 274,
       "column": 5,
       "reason": "vault key import: validate a serialized wrapped carrier at the typed crypto boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 280,
+      "line": 281,
       "column": 5,
       "reason": "vault key import: construct the typed recipient unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 286,
+      "line": 287,
       "column": 5,
       "reason": "vault key import: construct the typed passphrase unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 812,
+      "line": 813,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 839,
+      "line": 840,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1140,
+      "line": 1141,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1238,
+      "line": 1239,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1247,
+      "line": 1248,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1253,
+      "line": 1254,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -6465,7 +6465,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Sealed.jet",
-      "line": 162,
+      "line": 161,
       "column": 5,
       "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
@@ -6668,14 +6668,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 322,
+      "line": 321,
       "column": 5,
       "reason": "checked IPv4/IPv6 octets transferred into the native address carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 393,
+      "line": 392,
       "column": 5,
       "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
     },
@@ -7081,7 +7081,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1535,
+      "line": 1544,
       "column": 5,
       "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
@@ -12590,15 +12590,15 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 370:5 | "the case explicitly authorizes signaling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/Golden/compiler.jet | 32:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 228:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| Core | Core/Crypto/Crypto.jet | 273:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
-| Core | Core/Crypto/Crypto.jet | 280:5 | "vault key import: construct the typed recipient unlock request" |
-| Core | Core/Crypto/Crypto.jet | 286:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 812:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 839:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 1140:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 1238:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 1247:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 1253:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 274:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
+| Core | Core/Crypto/Crypto.jet | 281:5 | "vault key import: construct the typed recipient unlock request" |
+| Core | Core/Crypto/Crypto.jet | 287:5 | "vault key import: construct the typed passphrase unlock request" |
+| Core | Core/Crypto/Crypto.jet | 813:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 840:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 1141:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 1239:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 1248:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 1254:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/Expert.jet | 289:1 | "crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call" |
 | Core | Core/Crypto/Expert.jet | 331:1 | "crypto expert: the caller takes custody of the secret's raw bytes and wipes them" |
 | Core | Core/Crypto/Expert.jet | 334:1 | "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them" |
@@ -12670,7 +12670,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Files/Data.jet | 272:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Core | Core/Files/Files.jet | 799:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 892:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
-| Core | Core/Files/Sealed.jet | 162:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| Core | Core/Files/Sealed.jet | 161:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
 | Core | Core/HTTP/Client.jet | 862:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 282:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
 | Core | Core/Jobs/Jobs.jet | 603:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
@@ -12699,8 +12699,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Mem/Mem.jet | 303:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
 | Core | Core/Mem/Mem.jet | 308:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
 | Core | Core/Mem/Mem.jet | 350:13 | "the block's bytes went back to the allocator that served them" |
-| Core | Core/Net/Net.jet | 322:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
-| Core | Core/Net/Net.jet | 393:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
+| Core | Core/Net/Net.jet | 321:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
+| Core | Core/Net/Net.jet | 392:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
 | Core | Core/Net/SSL/TLS.jet | 3653:1 | "`key` and `iv` are a vector record's, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3656:5 | "a vector record's key and nonce, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3662:1 | "`key` and `iv` are a vector record's, used for that record only" |
@@ -12758,7 +12758,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Sys/Sys.jet | 2421:5 | "the test owns the files under its temporary directory and its own process's settings, which it puts back" |
 | Core | Core/TUI/TUI.jet | 109:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tasks/Tasks.jet | 116:1 | "`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once" |
-| Core | Core/Testing/Testing.jet | 1535:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
+| Core | Core/Testing/Testing.jet | 1544:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm_reach.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |

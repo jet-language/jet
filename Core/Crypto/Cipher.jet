@@ -16,11 +16,12 @@
 // plane layout of Thomas Pornin's constant-time aes_ct64 (BearSSL). The
 // S-box is the Boyar-Peralta circuit ("A depth-16 circuit for the AES S-box",
 // 2011). On a host with AES-NI the same block operations run through
-// core.crypto.__aes_blocks. Both compute FIPS 197, so every tier has one
+// jet.runtime.crypto.aes_blocks. Both compute FIPS 197, so every tier has one
 // meaning; a host without the instructions runs these rounds.
 use {
     core
     mem: core.mem
+    crypto_rt: jet.runtime.crypto
 }
 
 /// An expanded AES key.
@@ -672,7 +673,7 @@ blocks: fn(k: AESKey, op: Int, iv: ^[U8], src: [U8], off: Int, count: Int, out: 
         return
     }
     reserve(out, count * 16)
-    if core.crypto.__aes_blocks(if op == ECB_DEC || op == CBC_DEC || op == XTS_DEC -> k.dk else -> k.rk, k.rounds, op, iv, src, off, count, out) {
+    if crypto_rt.aes_blocks(if op == ECB_DEC || op == CBC_DEC || op == XTS_DEC -> k.dk else -> k.rk, k.rounds, op, iv, src, off, count, out) {
         return
     }
     blocks_portable(k, op, iv, src, off, count, out)

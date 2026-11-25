@@ -15,7 +15,6 @@ use {
     sys: core.sys
     random: core.math.random
     core.time.[Clock]
-    builtin: jet_builtins
     crypto: core.crypto
     json: core.encoding.json
     rt: jet.runtime.encoding
@@ -124,7 +123,7 @@ snap: fn(name: String, value: String) -[FS, Env]> Bool Never! {
         world_rt.clear_failure()
         return true
     }
-    read: builtin.evidence_read(path)
+    read: world_rt.evidence_read(path)
     if !read.ok {
         world_rt.record_failure("snapshot cannot be read: {name}", "path: {path}")
         return false
@@ -141,7 +140,7 @@ snap: fn(name: String, value: String) -[FS, Env]> Bool Never! {
 /// (JET_UPDATE_SNAPSHOTS=1, the same switch as `snap`) a missing or differing
 /// golden file is written, parent directories included, and the check passes.
 golden: fn(name: String, value: String) -[FS, Env]> Bool Never! {
-    read: builtin.evidence_read(name)
+    read: world_rt.evidence_read(name)
     if read.ok && read.text == value {
         world_rt.clear_failure()
         return true
@@ -175,7 +174,7 @@ golden: fn(name: String, value: String) -[FS, Env]> Bool Never! {
 }
 
 fixture: fn(name: String) -[FS]> String Never! {
-    read: builtin.evidence_read(name)
+    read: world_rt.evidence_read(name)
     if read.ok {
         world_rt.clear_failure()
         return read.text
@@ -192,18 +191,18 @@ fixture: fn(name: String) -[FS]> String Never! {
 skip: fn(reason: String) Never! { world_rt.skip("skipped: {reason}") }
 
 temp_dir: fn(prefix: String) -[FS]> String Never! {
-    facts: builtin.temp_facts()
+    facts: world_rt.temp_facts()
     safe: testing_ascii_name(prefix, false)
     thread: testing_ascii_name(facts.thread, true)
     // TempPath.path is opaque platform encoding produced by the host.
     // Never construct, slice, decode, or edit it; only pass it back unchanged.
-    location: builtin.temp_join("jet_test_{safe}_{facts.pid}_{thread}")
+    location: world_rt.temp_join("jet_test_{safe}_{facts.pid}_{thread}")
     path: location.text
-    removed: builtin.temp_remove(location.path)
+    removed: world_rt.temp_remove(location.path)
     if !removed.ok && !removed.missing {
         panic(testing_temp_error("remove_temp_dir", path, removed.cause))
     }
-    created: builtin.temp_create(location.path)
+    created: world_rt.temp_create(location.path)
     if !created.ok -> panic(testing_temp_error("create_temp_dir", path, created.cause))
     path
 }
@@ -1489,6 +1488,16 @@ status: fn(comparison: TestComparison) -> String Never! { comparison.status }
     assert_eq(ids, ["a/deep/one", "a/zero", "b/two", "top"])
     assert_eq(files.read(entries[0].path) ?? "", "a/deep/one.jet")
     assert_eq(corpus_entries("{root}/absent", ".jet").len(), 0)
+}
+
+#Test("fixture reads a file's text back, and temp_dir empties the directory it names again") {
+    root: temp_dir("fixture-evidence")
+    path: "{root}/evidence.txt"
+    files.write(path, "evidence text") ?? panic("fixture file: {err}")
+    assert_eq(fixture(path), "evidence text")
+    assert_eq(temp_dir("fixture-evidence"), root)
+    assert(files.is_dir(root))
+    assert(!files.exists(path))
 }
 
 snapshot_name: fn(name: String) -> String Never! {

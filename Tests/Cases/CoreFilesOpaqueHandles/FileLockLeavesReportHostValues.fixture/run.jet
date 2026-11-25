@@ -1,0 +1,42 @@
+use {
+    files: core.files
+    time: core.time
+}
+
+// A held lock contends with a second claim, a bounded wait on it times out,
+// the released lock is taken again with and without a bound, and a lock in
+// a missing directory reports the host's ENOENT.
+run: fn() -[FS, Env, IO]> IOError! {
+    path: "leaf.lock"
+    held: files.lock(path)
+    print("held {held.path == path}")
+    second: files.try_lock(path)
+    print("contended {second == None}")
+    if files.lock(path, timeout: Val(time.duration_ms(2))) == {
+        .Err(.TimedOut(context)) -> { print("timed out {context.resource == Val((path))}") }
+        .Err(_) -> { print("timed out false") }
+        .Ok(owner) -> {
+            close(owner)
+            print("timed out false")
+        }
+    }
+    close(held)
+    if files.try_lock(path) == {
+        .Val(owner) -> {
+            print("released {owner.path == path}")
+            close(owner)
+        }
+        .None -> { print("released false") }
+        .Err(_) -> { print("released false") }
+    }
+    waited: files.lock(path, timeout: Val(time.duration_ms(1000)))
+    print("waited {waited.path == path}")
+    close(waited)
+    missing: "missing/leaf.lock"
+    if files.try_lock(missing) == {
+        .Err(.NotFound(context)) -> { print("missing {context.os_code == Val(2)}") }
+        .Err(_) -> { print("missing false") }
+        .Val(_) -> { print("missing false") }
+        .None -> { print("missing false") }
+    }
+}

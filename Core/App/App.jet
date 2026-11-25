@@ -20,7 +20,6 @@ use {
     live_json: core.encoding.json
     core.encoding.[Dyn]
     core.reactive.loadable.[Loadable]
-    ws: core.net.ws
     core.net.ws.[WsConn]
     tasks: core.tasks
     core.tasks.[TaskID]
@@ -1439,7 +1438,7 @@ priv live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>)
 // that caller's policy. Once the last connection watching `binding` closes,
 // its caller is present nowhere through it (__live_left_settle).
 watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) -[Net]> Never! {
-    ws.__live_watch(socket, "live:{binding.id}")
+    rt_web.live_watch(socket, "live:{binding.id}")
 }
 
 // `changes` counts stored results that differed from the one before;

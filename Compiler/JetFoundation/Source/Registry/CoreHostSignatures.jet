@@ -21,16 +21,6 @@ core_host_callback_type: fn() -> Type Never! {
 
 core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows: """
-    jet_builtins jetc_open_directory|jetc_open_source|jetc_create_named String JetcRaw
-    jet_builtins jetc_open_child_directory Int,String JetcRaw
-    jet_builtins jetc_tmpfile|jetc_fsync|jetc_close Int JetcRaw
-    jet_builtins jetc_read|jetc_seek Int,Int JetcRaw
-    jet_builtins jetc_write Int,[u8],Int,Int JetcRaw
-    jet_builtins jetc_stat Int JetcStat
-    jet_builtins jetc_link Int,Int,String JetcRaw
-    core.crypto __sha256_blocks ^[U32],[u8],Int,Int Bool
-    core.crypto __aes_blocks [u8],Int,Int,^[u8],[u8],Int,Int,^[u8] Bool
-    core.crypto __ghash_blocks [u8],^[u8],[u8],Int,Int Bool
     core.files jet_std_files_open_reader_nonblocking String Result<FileReader,IOError>
     core.files __list_directory Int Result<[[u8]],IOError>
     core.http.client jet_http_build_resolve String,Int Result<[[u8]],String>
@@ -67,11 +57,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.sync counter_inc SyncCounter,String,Int SyncCounter
     core.sync map_set SyncMap,String,String SyncMap
     core.testing fake_clock Int Clock
-    jet_builtins evidence_read String EvidenceRead
-    jet_builtins temp_facts - TempFacts
-    jet_builtins temp_join String TempPath
-    jet_builtins temp_remove [U8] TempRemove
-    jet_builtins temp_create [U8] TempCreate
     jet_builtins to_bits_f32 F32 Int
     jet_builtins from_bits_f32 Int F32
     core.testing world fn(DeterministicWorld;Unit) Unit
@@ -97,7 +82,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
     core.prelude __receipt_attach T,String,String,String Unit T
     core.encoding.json canonical Dyn String
-    jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
     core.net __ip_from_bytes ^^[u8] IPAddr
     core.net __socket_from_parts ^^IPAddr,U16,U32,U32 SocketAddr
     """
