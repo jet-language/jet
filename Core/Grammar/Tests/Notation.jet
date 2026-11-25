@@ -1,0 +1,105 @@
+// The notation's tokens: names, punctuation, both quote styles with their
+// escapes, the `i` suffix, classes, `.`, comments, and what is refused.
+use {
+    core.grammar.[analyze, GrammarSource]
+    core.grammar.error.[GrammarFault]
+    core.grammar.plan.[RuleTree]
+}
+
+tree_of: fn(text: String) -> RuleTree Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan.tree
+        .Err(error) -> panic("{error}")
+    }
+}
+
+faults_of: fn(text: String) -> [GrammarFault] Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(_) -> [GrammarFault]{}
+        .Err(error) -> error.faults
+    }
+}
+
+#Test("comments and white space separate nothing") {
+    tree: tree_of("// leading\nWORD/* inner */:'w'//trailing\n;")
+    assert_eq(tree.rules.len(), 1)
+    assert_eq(tree.rules[0].name, "WORD")
+}
+
+#Test("a literal reads the same in either quote style") {
+    tree: tree_of("A : 'x\"y' ;\nB : \"x'y\" ;")
+    assert_eq(tree.nodes[tree.nodes[tree.nodes[tree.rules[0].body].children[0]].children[0]].text, "x\"y")
+    assert_eq(tree.nodes[tree.nodes[tree.nodes[tree.rules[1].body].children[0]].children[0]].text, "x'y")
+}
+
+#Test("escapes in literals and classes") {
+    tree: tree_of("A : '\\n\\r\\t\\\\' [\\]\\-\\^\\n] '\\u{{1F600}}' ;")
+    alt: tree.nodes[tree.nodes[tree.rules[0].body].children[0]]
+    assert_eq(tree.nodes[alt.children[0]].text, "\n\r\t\\")
+    assert_eq(tree.classes[0].ranges, [10, 10, 45, 45, 93, 94])
+    assert_eq(tree.nodes[alt.children[2]].text, "😀")
+}
+
+#Test("the i suffix folds only when it touches the quote") {
+    tree: tree_of("a : 'x'i ;\nb : 'x' i ;\ni : 'i' ;")
+    first: tree.nodes[tree.nodes[tree.nodes[tree.rules[0].body].children[0]].children[0]]
+    assert(first.fold)
+    second: tree.nodes[tree.nodes[tree.rules[1].body].children[0]]
+    assert_eq(second.children.len(), 2)
+    assert(!tree.nodes[second.children[0]].fold)
+    assert(tree.nodes[second.children[1]].kind == .Ref)
+}
+
+#Test("lazy suffixes, any and property classes in token rules") {
+    tree: tree_of("STR : '\"' .*? '\"' ;\nWORD : \\p{{L}}+? ' ' ;\nNOT_SPACE : \\P{{White_Space}} ;")
+    lazy: tree.nodes[tree.nodes[tree.nodes[tree.rules[0].body].children[0]].children[1]]
+    assert(lazy.lazy)
+    assert(tree.nodes[lazy.children[0]].kind == .Any)
+    assert_eq(tree.classes[0].properties, [0])
+    assert(tree.classes[1].negated)
+    assert_eq(tree.classes[1].properties, [2])
+}
+
+#Test("an unclosed literal, class or comment is a notation fault") {
+    literal: faults_of("A : 'x ;")
+    assert_eq(literal.len(), 1)
+    assert(literal[0].kind == .Notation)
+    assert_eq(literal[0].at.offset, 4)
+    class: faults_of("A : [a-z ;")
+    assert_eq(class.len(), 1)
+    assert(class[0].message.contains("never closed"))
+    comment: faults_of("A : 'x' ; /* open")
+    assert_eq(comment.len(), 1)
+    assert_eq(comment[0].at.offset, 10)
+}
+
+#Test("bad escapes, empty literals and unknown properties are notation faults") {
+    escape: faults_of("A : '\\q' ;")
+    assert_eq(escape.len(), 1)
+    assert(escape[0].message.contains("not an escape"))
+    empty: faults_of("A : '' ;")
+    assert_eq(empty.len(), 1)
+    assert(empty[0].message.contains("empty literal"))
+    property: faults_of("A : \\p{{Greek}} ;")
+    assert_eq(property.len(), 1)
+    assert(property[0].message.contains("Greek"))
+    reversed: faults_of("A : [z-a] ;")
+    assert_eq(reversed.len(), 1)
+    assert(reversed[0].message.contains("backward"))
+}
+
+#Test("a brace is refused: it opens a hole in a checked body") {
+    faults: faults_of("a : 'x' {{print()}} ;")
+    assert_eq(faults.len(), 1)
+    assert(faults[0].kind == .Notation)
+    assert_eq(faults[0].at.offset, 8)
+    assert(faults[0].message.contains("actions"))
+    assert(faults[0].fix.contains("'{{{{'"))
+}
+
+#Test("every fault is reported, each rule on its own") {
+    faults: faults_of("A : 'x ;\nB : [a-z ;\nC : 'ok' ;\nD : '' ;")
+    assert_eq(faults.len(), 3)
+    assert(faults[0].at.offset < faults[1].at.offset)
+    assert(faults[1].at.offset < faults[2].at.offset)
+}

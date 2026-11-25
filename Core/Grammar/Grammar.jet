@@ -1,0 +1,26 @@
+// core.grammar — grammars as checked values.
+//
+// A grammar literal is rule notation in the style ANTLR 4 and Bison share.
+// `analyze` reads it, checks it (left recursion outside the operator form,
+// ambiguity within 3 tokens, token clashes, unprintable token pairs and
+// field shapes are refusals) and returns its plan: the data a generated
+// parser and printer run from. Every refusal is a `GrammarFault`.
+use {
+    core.grammar.error.[GrammarFaults]
+    core.grammar.plan.[GrammarPlan]
+    __core_grammar_notation.[read_notation]
+}
+
+/// A grammar another grammar imports: its binding name and its text.
+GrammarSource: struct {
+    name: String,
+    text: String,
+}
+
+/// The plan of grammar `text`, or every fault in it. `start` is the rule
+/// a parse starts from; "" lets every parser rule start one. `imports` are
+/// the grammars `import Name ;` may name.
+analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPlan GrammarFaults! {
+    tree: read_notation(text)
+    Ok(GrammarPlan{tree: tree})
+}

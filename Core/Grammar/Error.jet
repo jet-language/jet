@@ -1,0 +1,164 @@
+// core.grammar.error — where a grammar, or the text a grammar reads, went
+// wrong.
+//
+// `GrammarError` is the run-time refusal of a generated `parse` or `print`:
+// it names the spot as a 1-based line and column (columns count code
+// points), the byte offset, what the parser expected there and what it found.
+// Line and column are computed only when an error is built, so a parse that
+// succeeds never counts lines.
+//
+// `GrammarFault` is the build-time refusal of a grammar literal: what is wrong
+// with the grammar itself, at a `TextSpot` of the literal, with the fix.
+
+/// A spot in a checked literal: the body part it is in (0 for the first
+/// part) and the byte offset inside that part.
+TextSpot: struct {
+    part: Int,
+    offset: Int,
+}
+
+/// Why a generated parser refused its input, or why `print` refused a value.
+/// Shown as `3:14: expected "]", found end of line`.
+#Error
+GrammarError: struct {
+    line: Int,
+    column: Int,
+    offset: Int,
+    expected: [String],
+    found: String,
+
+    impl Display {
+        display: fn(self) -> String { "{self.line}:{self.column}: {grammar_error_text(self.expected, self.found)}" }
+    }
+}
+
+/// The text after `line:column: ` in a shown `GrammarError`: `expected "]",
+/// found end of line`, `expected NAME or "*", found ","`, or `unexpected ","`
+/// when nothing in particular was expected.
+grammar_error_text: fn(expected: [String], found: String) -> String Never! {
+    if expected.len() == 0 -> return "unexpected {found}"
+    "expected {expected_list(expected)}, found {found}"
+}
+
+/// `a`, `a or b`, `a, b or c`.
+expected_list: fn(items: [String]) -> String Never! {
+    out := ""
+    loop (index, item) in items {
+        if index == 0 {
+            out = item.copy()
+        } else if index == items.len() - 1 {
+            out = "{out} or {item}"
+        } else {
+            out = "{out}, {item}"
+        }
+    }
+    out
+}
+
+/// A 1-based line and a 1-based column counted in code points.
+TextPlace: struct {
+    line: Int,
+    column: Int,
+}
+
+/// The place of byte `offset` in `text`. A line ends after `\n`; an offset
+/// past the end is the place after the last character.
+text_place: fn(text: String, offset: Int) -> TextPlace Never! {
+    bytes: text.bytes()
+    stop: if offset > bytes.len() -> bytes.len() else -> offset
+    line := 1
+    column := 1
+    i := 0
+    loop i < stop {
+        b: Int{bytes[i]}
+        if b == 10 {
+            line += 1
+            column = 1
+        } else if b < 128 || b >= 192 {
+            // A UTF-8 continuation byte (10xxxxxx) belongs to the code point
+            // its lead byte already counted.
+            column += 1
+        }
+        i += 1
+    }
+    TextPlace{line: line, column: column}
+}
+
+/// A `GrammarError` at byte `offset` of `text`.
+grammar_error_at: fn(text: String, offset: Int, expected: [String], found: String) -> GrammarError Never! {
+    place: text_place(text, offset)
+    GrammarError{line: place.line, column: place.column, offset: offset, expected: expected, found: found}
+}
+
+/// What is wrong with a grammar literal. Each kind is one registered
+/// diagnostic of the grammar head.
+GrammarFaultKind: enum {
+    Notation,
+    UndefinedRule,
+    StartRule,
+    LeftRecursive,
+    Ambiguous,
+    TooComplex,
+    EmptyRepeat,
+    TokenClash,
+    FieldShape,
+    Unprintable,
+}
+
+/// One build-time refusal of a grammar: its kind, the spot in the literal
+/// it points at, the message and the fix.
+#Error
+GrammarFault: struct {
+    kind: GrammarFaultKind,
+    at: TextSpot,
+    message: String,
+    fix: String,
+
+    impl Display {
+        display: fn(self) -> String { self.message.copy() }
+    }
+}
+
+/// A fault in the first (only) part of a grammar literal.
+grammar_fault: fn(kind: GrammarFaultKind, offset: Int, message: String, fix: String) -> GrammarFault Never! {
+    GrammarFault{kind: kind, at: TextSpot{part: 0, offset: offset}, message: message, fix: fix}
+}
+
+/// Every fault a grammar literal has, in the order they point at: build it
+/// with `grammar_faults`.
+#Error
+GrammarFaults: struct {
+    faults: [GrammarFault],
+
+    impl Display {
+        display: fn(self) -> String { grammar_faults_text(self.faults) }
+    }
+}
+
+grammar_faults_text: fn(faults: [GrammarFault]) -> String Never! {
+    out := [String]{}
+    loop fault in faults -> out.push(fault.message.copy())
+    out.join("\n")
+}
+
+/// The faults, ordered by the spot they point at.
+grammar_faults: fn(faults: [GrammarFault]) -> GrammarFaults Never! {
+    sorted := faults.copy()
+    i := 1
+    loop i < sorted.len() {
+        k := i
+        loop k > 0 && fault_after(sorted[k - 1], sorted[k]) {
+            held: sorted[k - 1]
+            sorted[k - 1] = sorted[k]
+            sorted[k] = held
+            k -= 1
+        }
+        i += 1
+    }
+    GrammarFaults{faults: sorted}
+}
+
+fault_after: fn(a: GrammarFault, b: GrammarFault) -> Bool Never! {
+    if a.at.part != b.at.part -> return a.at.part > b.at.part
+    a.at.offset > b.at.offset
+}

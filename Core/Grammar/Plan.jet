@@ -1,0 +1,108 @@
+// core.grammar.plan — a grammar as plain data.
+//
+// `RuleTree` is the notation as written: rules over a flat list of nodes.
+// A node names its children by index, so the tree is lists and structs
+// only, the data a compile-time value can hold.
+
+/// What a grammar node is.
+GrammarNodeKind: enum {
+    // Alternatives: `children` are `Alt` nodes.
+    Choice,
+    // One alternative: `children` are its elements in order, `text` its
+    // `# Name` ("" when none) and `right` its `<assoc=right>`.
+    Alt,
+    // A rule reference: `text` is the rule's name and `rule` its index once
+    // resolved.
+    Ref,
+    // A quoted literal: `text` is its decoded text and `fold` its `i` suffix.
+    Literal,
+    // A character class: `class` indexes the tree's classes.
+    Class,
+    // `.`: any one code point.
+    Any,
+    // `x?`: `children[0]` is `x`.
+    Optional,
+    // `x*` or, when `lazy`, `x*?`.
+    Star,
+    // `x+` or, when `lazy`, `x+?`.
+    Plus,
+    // `HOLE<slot=Name>`: `text` is the slot name.
+    Hole,
+    // `EOF`: the end of the input.
+    End,
+}
+
+/// One node of a rule body. `label` is the field an element is captured in
+/// (`label=x`, or `label+=x` when `append`). `token` is the token kind a
+/// literal or a token-rule reference lexes as, once the grammar is planned.
+GrammarNode: struct {
+    kind: GrammarNodeKind,
+    at: Int,
+    text: String,
+    children: [Int],
+    label: String,
+    append: Bool,
+    fold: Bool,
+    lazy: Bool,
+    right: Bool,
+    class: Int,
+    rule: Int,
+    token: Int,
+}
+
+/// A parser rule (`snake_case`), a token rule (`ALL_CAPS`) or a token
+/// fragment (`fragment ALL_CAPS`).
+GrammarRuleKind: enum {
+    Parser,
+    Token,
+    Fragment,
+}
+
+/// One rule: its body is a `Choice` node. `skip` marks `-> skip`. `source`
+/// is "" for a rule of the grammar itself and the imported grammar's name
+/// for a rule it imports.
+GrammarRule: struct {
+    name: String,
+    kind: GrammarRuleKind,
+    skip: Bool,
+    body: Int,
+    at: Int,
+    source: String,
+}
+
+/// The Unicode property `\p{L}` (Alphabetic) names.
+PROPERTY_ALPHABETIC: 0
+
+/// The Unicode property `\p{N}` (Numeric) names.
+PROPERTY_NUMERIC: 1
+
+/// The Unicode property `\p{White_Space}` names.
+PROPERTY_WHITE_SPACE: 2
+
+/// A set of code points: those in `ranges` (inclusive `lo, hi` pairs,
+/// sorted and disjoint) or having one of `properties`; when `negated`, every
+/// other code point.
+GrammarClass: struct {
+    ranges: [Int],
+    properties: [Int],
+    negated: Bool,
+}
+
+/// `import Name ;` at byte `at`.
+GrammarImport: struct {
+    name: String,
+    at: Int,
+}
+
+/// A grammar as written.
+RuleTree: struct {
+    rules: [GrammarRule],
+    nodes: [GrammarNode],
+    classes: [GrammarClass],
+    imports: [GrammarImport],
+}
+
+/// A checked grammar: what a generated parser and printer run from.
+GrammarPlan: struct {
+    tree: RuleTree,
+}

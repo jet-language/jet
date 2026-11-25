@@ -1,0 +1,52 @@
+// GrammarError: its line:column display and the code-point column count.
+use {
+    core.grammar.error.[GrammarError, grammar_error_at, text_place]
+}
+
+#Test("an error shows line:column, what was expected and what was found") {
+    error: GrammarError{line: 3, column: 14, offset: 40, expected: ["\"]\""], found: "end of line"}
+    assert_eq("{error}", "3:14: expected \"]\", found end of line")
+}
+
+#Test("several expectations read as a list") {
+    two: GrammarError{line: 1, column: 1, offset: 0, expected: ["NAME", "\"*\""], found: "\",\""}
+    assert_eq("{two}", "1:1: expected NAME or \"*\", found \",\"")
+    three: GrammarError{line: 1, column: 1, offset: 0, expected: ["NAME", "NUMBER", "\"(\""], found: "end of input"}
+    assert_eq("{three}", "1:1: expected NAME, NUMBER or \"(\", found end of input")
+    none: GrammarError{line: 2, column: 5, offset: 9, expected: [String]{}, found: "\",\""}
+    assert_eq("{none}", "2:5: unexpected \",\"")
+}
+
+#Test("lines start after a newline and columns count code points") {
+    text: "ab\ncé d\nx"
+    first: text_place(text, 0)
+    assert_eq(first.line, 1)
+    assert_eq(first.column, 1)
+    // `d` is byte 7: `c` (1 byte) and `é` (2 bytes) and a space precede it.
+    d: text_place(text, 7)
+    assert_eq(d.line, 2)
+    assert_eq(d.column, 4)
+    last: text_place(text, 9)
+    assert_eq(last.line, 3)
+    assert_eq(last.column, 1)
+    past: text_place(text, 99)
+    assert_eq(past.line, 3)
+    assert_eq(past.column, 2)
+}
+
+#Test("a carriage return is a column, not a line end") {
+    place: text_place("a\r\nb", 3)
+    assert_eq(place.line, 2)
+    assert_eq(place.column, 1)
+    before: text_place("a\r\nb", 2)
+    assert_eq(before.line, 1)
+    assert_eq(before.column, 3)
+}
+
+#Test("an error built at an offset carries its place") {
+    error: grammar_error_at("one\ntwo three", 8, ["\";\""], "\"three\"")
+    assert_eq(error.line, 2)
+    assert_eq(error.column, 5)
+    assert_eq(error.offset, 8)
+    assert_eq("{error}", "2:5: expected \";\", found \"three\"")
+}

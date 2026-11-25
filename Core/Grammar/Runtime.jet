@@ -1,0 +1,56 @@
+// core.grammar.runtime — what a generated parser and printer call.
+//
+// Every meaning a generated parser has lives here: the cursor, the
+// character columns, the token automata, keyword lookup, the depth bound,
+// error text and resynchronization. The generated code only arranges calls.
+
+/// The byte length of the UTF-8 sequence that starts with `lead`. Jet
+/// Strings are valid UTF-8.
+code_point_width: fn(lead: Int) -> Int Never! {
+    if lead < 128 -> return 1
+    if lead < 224 -> return 2
+    if lead < 240 -> return 3
+    4
+}
+
+/// The code point that starts at byte `at` of `bytes`.
+code_point_at: fn(bytes: [U8], at: Int) -> Int Never! {
+    first: Int{bytes[at]}
+    if first < 128 -> return first
+    width: code_point_width(first)
+    cp := first & 7
+    if width == 2 -> cp = first & 31
+    if width == 3 -> cp = first & 15
+    k := 1
+    loop k < width && at + k < bytes.len() {
+        cp = (cp << 6) | Int{bytes[at + k]} & 63
+        k += 1
+    }
+    cp
+}
+
+/// The UTF-8 bytes of code point `cp`, appended to `out`.
+push_code_point: fn(out: ^[U8], cp: Int) Never! {
+    if cp < 128 {
+        out.push(U8{cp})
+    } else if cp < 2048 {
+        out.push(U8{Int{192} | cp >> 6})
+        out.push(U8{Int{128} | cp & 63})
+    } else if cp < 65536 {
+        out.push(U8{Int{224} | cp >> 12})
+        out.push(U8{Int{128} | (cp >> 6) & 63})
+        out.push(U8{Int{128} | cp & 63})
+    } else {
+        out.push(U8{Int{240} | cp >> 18})
+        out.push(U8{Int{128} | (cp >> 12) & 63})
+        out.push(U8{Int{128} | (cp >> 6) & 63})
+        out.push(U8{Int{128} | cp & 63})
+    }
+}
+
+/// The text of code point `cp`.
+code_point_text: fn(cp: Int) -> String Never! {
+    out := [U8]{}
+    push_code_point(out, cp)
+    String.from_bytes(out) ?? ""
+}
