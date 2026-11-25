@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 114025,
+    "rev": 114048,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28959,6 +28959,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "The -r2 set (c10, c9, c11, c11b, c13) and c12 is held back from batch 43. With the six commits, the batch compiler (s1) built, but its self-build (s2) failed with 42 link rows on 36 lines of the compiler's own sema, all of them code dev already has:\n- 27 E0232 Jet.LinkOutlivesPlace (c10-r2, c11-r2): Calls/Checking.jet sema_body_check_swap_* about lines 1389-1400, Expressions/Constructors.jet's same swap pattern, and CheckProgram.jet, MarkerRules.jet and ComptimeItems.jet storing program's scopes and diagnostics;\n- 10 E2305 (c11-r2): SemaFunctionResult and SemaComptimeItemCheck hiding a link into the parameter program, and 'scope ends here, but the returned link outlives it';\n- 5 knock-on rows.\nThe tightened rules were not swept over every Jet source they reach, as AGENTS.md requires. Each site needs a fix (or the rule a correction where a site is a false positive) in the same submission as the rules. Rows and full errors: $JET_SCRATCH_ROOT/tmp/orch/land/4500-sweep/ (s2-keep-going.tsv, s2.err). Batch 43 goes on without them."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "c11 status: submission 4500-c11-link-through-call (queued for batch 42, stacked on c10 and c9) refuses a callee's store of a link parameter (E0232), push(@x) (E0232) and returning a link to a local (E2305, reused), with four UI snapshots under the link_through_call filter. Still open under c11: a call through a trait method or a function value has no body facts, so a store it makes of a place link is not seen. The I1 hole remains there until such calls are proven or refused."
         },
         {
@@ -29154,7 +29159,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-04T00:21:42.477Z",
-      "updated": "2026-11-25T04:41:52.616Z",
+      "updated": "2026-11-25T07:09:07.229Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 13
     },
@@ -52774,6 +52779,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T05:36:49.070Z"
+        },
+        {
+          "n": 5,
+          "text": "The native compile-time child's exchange with the compiler is deterministic: `jet build --release Examples/Concurrency/ContextOnStop.jet` gives exit 0 on 50 of 50 runs, with no internal error. Today about 1 run in 6 ends in exit 101, on both the batch-42 and batch-43 compilers, with one of three messages: 'the comptime child answered command 4 with frame 4', 'the comptime child ended during SHM_TEXT (status 0)', or 'the compiler read the child's memory through a word that is not an address'. That points to a race in the shared-memory command/frame protocol. Golden's o2 tier for ContextOnStop fails intermittently from it. Proof: a 50-run loop of that command, plus a stress witness case for the protocol. Diagnose with jet debug --record on the compiler (the AGENTS.md dogfood rule).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T08:57:21.074Z"
         }
       ],
       "refs": [],
@@ -52781,9 +52795,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:58.056Z",
-      "updated": "2026-11-24T00:40:20.635Z",
+      "updated": "2026-11-25T08:57:21.074Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0rom5jy",
@@ -57131,6 +57145,21 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "c6 Data, decided: data.schema moves into Core on TypeIds, with no new surface. A non-record row is one value column named by TypeId{T}.name, and Decimal/Fraction/Complex are matched by TypeId equality, so no builtin TypeInfo is needed and the drafted ballot D-TYPEINFO-DOMAIN1 is withdrawn unposted. Two implementation pieces under the ratified typed-reflection rule: TypeId{T} answered per instance in generic bodies, and a T.reflect() in an untaken #if arm builds nothing and reports nothing. data_schema_requires_typed_container keeps its code and text through a Core check rule."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Batch 43 defects in #6851 slices. Fixed in the batch tree: (1) c13 print style typed context.print as the filler's whole return type, PrintStyle Never!, which broke 2 goldens and 2 cases; ContextKeys now uses the success type. (2) c13 vault moved pbkdf2_hmac, so CryptoErrorRun's snapshot line was updated, and WrappedVaultKey's CoreSurfaceInventory source moved from static: to type:, since the builtin static rows are gone. (3) c34-a carried a decision citation in a CheckRules.jet comment, which is removed. Open: c34-a fails its own case check_rule_hears_written_parts on its own stage compiler (Misheard: a non-bare hole {record.id} is heard as 'hole - 2'), sent to G1Generation-2."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "c6 blocker, decided as an implementation choice: `T.reflect()` inside a generic fn body fails (UnknownName T), because a generic body is checked once and a #run site is staged once. The ratified meaning is in metaprogramming.md, Typed reflection, item 2: T.reflect() reads the same in ordinary code and is a constant in the running program. So this is a defect, not new surface. Chosen fix: sema enumerates each generic fn's instances and lowers a T-dependent reflect read to a TypeTest chain of compile-time TypeInfo literals, which IR already folds per instance (one mechanism). A caller-site fold was rejected because it would give one read two meanings. Builder: G1Generation-2, in items of an hour or less, with a bounded-cost plan first; data.schema stacks on it."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "Batch 42 landed eb7aaf51a8b: the template_paste_core_dunder_call snapshot points at line 11 and passes in batch 42's ui run (c39, one of its three snapshots; the other two are in batch 43). Batch 43 carries c9, c13 slices 1-2 and role slices (CBD 66 to 12), c19, c33 and c34 (D-RULE-WRITTEN1=A parts a and b)."
         },
         {
@@ -57513,11 +57542,11 @@
         {
           "n": 18,
           "text": "Every Core member that has a CORE_CALLS row is declared in Core source, and the compiler's twin of Core's API is deleted in one cutover: Compiler/Prelude/Core.jet's member rows and Registry/CoreCalls.jet, CoreCallRows.jet, CoreCallExtensions.jet, CoreSignatures.jet, CorePlatformSignatures.jet, CoreHostSignatures.jet and CoreValueSignatures.jet (census F4, F19). Proof: `git ls-files Compiler/JetFoundation/Source/Registry | grep -E 'Core(Calls|CallRows|CallExtensions|[A-Za-z]*Signatures)\\.jet'` prints nothing and `jet test Tests/Guards --filter core_declarations` passes. (was #6151 c2)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:48.279Z"
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: cases Tests/Cases/RuntimeInterface/host_leaf_user_and_core_lower_alike.case PASS (IR dump comparison; commit 6722dc76ef2 lands it).",
+          "at": "2026-11-25T09:31:00.671Z"
         },
         {
           "n": 19,
@@ -57655,8 +57684,8 @@
           "status": "met",
           "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases Metaprogramming/check_rule_hears_constants_and_path_literals; PASS 1/1 |",
-          "at": "2026-11-24T08:33:01.446Z",
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: ui Tests/UI/MarkerDeclarations/check_rule_rejection_keeps_its_source_place.jet PASS: a module mixing check-rule rejections and ordinary errors prints them in source order (a91ab9c80d0).",
+          "at": "2026-11-25T09:31:02.351Z",
           "proof": {
             "profile": "cases",
             "filter": "Metaprogramming/check_rule_hears_constants_and_path_literals"
@@ -57665,11 +57694,11 @@
         {
           "n": 33,
           "text": "A check rule's rejection keeps its call's position in the diagnostic order, so a module mixing rule rejections and ordinary errors prints them in source order (today staged type-rule rejections print after the module's other diagnostics: http_route_path_type with the draft StaticRoutes rule).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T07:11:51.256Z",
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: CompilerArg.written lets a check rule hear the parts an interpolated String literal spells (cf8002af184); core.http's StaticRoutes rule refuses an interpolated route from them (8d188f26848, Core/HTTP/HTTP.jet:816). ui Tests/UI/http_route_invalid_literal.jet PASS, still printing 'brace interpolation is not allowed in route patterns'. No new surface beyond the CompilerCall facts.",
+          "at": "2026-11-25T09:31:04.604Z",
           "proof": {
             "profile": "ui",
             "filter": "http_route_path_type"
@@ -57718,11 +57747,11 @@
         {
           "n": 38,
           "text": "D-FORM-FIELD1=A is built: Prelude declares FieldRef<Model, T> (only the compiler builds one); where FieldRef<M, T> is expected, a bare .name checks name against M's visible stored fields and unifies T with its type, an unknown name is Jet.UnknownField at the selector listing M's fields, and a chain, payload or upper-case selector is refused; web.form(Model, …) returns WebFormTyped<Model>; validate, set, blur and focus take FieldRef; inside a binding-less loop .name still reads the loop item and the error names the loop binding; forms.typed<Model> refuses an unknown name at run time with WebFormError.Missing. Proof: golden Examples/Web forms example passes on o0/o1/o2 and new ui snapshots for the unknown field and the loop case pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T12:25:22.608Z"
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree, O0: ui PASS for the review's probes: Tests/UI/template_paste_dunder_member.jet (template declares and calls #{hook} = __hidden_hook, refused), Tests/UI/template_paste_core_dunder_call.jet (args.#{hook} = __cli_is_int, refused), Tests/UI/template_paste_core_trait_dunder_member.jet and Tests/UI/core_trait_dunder_member_user_impl.jet (non-Core impl of a Core trait's __ member, refused).",
+          "at": "2026-11-25T09:31:06.284Z"
         },
         {
           "n": 39,
@@ -57742,7 +57771,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-25T06:17:22.366Z",
+      "updated": "2026-11-25T09:31:06.284Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -57939,11 +57968,11 @@
         {
           "n": 8,
           "text": "Format selectors, decode, precise math and `loop line in handle.lines()` bind through public traits: JetIR's CoreReach.jet (lines 35-138 at 25f9dee58f) names no Core file path or helper (census F05). Trait-bound format and decode is on Main's ballot list (2026-11-15). Proof: `git ls-files Compiler/JetIR/Source/CoreReach.jet` prints nothing, or `git grep -n -E 'Core/|__decode_|__stdout_next_line' Compiler/JetIR/Source/CoreReach.jet` prints nothing. (was #6151 c14)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:14:00.341Z"
+          "evidence": "On dev eb7aaf51a8b, `git grep -n -E 'Core/|__decode_|__stdout_next_line' Compiler/JetIR/Source/CoreReach.jet` prints nothing (0 matches), which is the criterion's stated proof. Checked by G1Facts-2 on the batch-43 tip and by Orchestrator on dev.",
+          "at": "2026-11-25T06:37:00.036Z"
         },
         {
           "n": 9,
@@ -58029,8 +58058,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-25T00:38:33.334Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-25T06:37:00.036Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
     {
@@ -74995,11 +75024,11 @@
         {
           "n": 1,
           "text": "First: a dated adversarial audit in Docs/Audits attacks the ^/^^ spelling against the strongest alternatives (today's &/&&, C++ T&, Rust &mut, Swift inout, Odin ^) on reading, typing (dead keys on European layouts), diff noise and tooling; every gap it finds is engineered away or named with its cost and mitigation. D-MARK-CARET1 then carries the full ballot record, is reviewed and posted, and is ratified A with the owner's quoted ruling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T14:10:54.253Z"
+          "evidence": "Docs/Audits caret-marks review plus its fresh addendum (0a8ae1ce960 on dev). The gaps it found are engineered away or carried as criteria with their cost and mitigation: dead-key typing (c6), dead-key qualified type panic (c11, now met), collapsed take mark (c12). D-MARK-CARET1 was posted with the full record and ratified A.",
+          "at": "2026-11-25T09:31:16.949Z"
         },
         {
           "n": 2,
@@ -75089,11 +75118,11 @@
         {
           "n": 11,
           "text": "A dead-key composed qualified type does not stop the compiler: `fn(x: ĵson.Dyn)` panics in Compiler/JetSema Items.jet sema_registration_unit_leaf_name, which slices a name by byte offsets with a character slice (fresh caret-marks review, 2026-11-25). The name gets the dead-key E0119 report or the ordinary unknown-name report, with exit 1, never a panic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T05:31:39.690Z",
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: 79368acce01 makes sema_registration_unit_leaf_name slice by characters; ui Tests/UI/dead_key_circumflex_qualified_type.jet PASS with exit 1 and a report (fn(x: ĵson.Dyn)), no panic.",
+          "at": "2026-11-25T09:31:08.461Z",
           "proof": {
             "profile": "ui",
             "filter": "dead_key_circumflex"
@@ -75118,7 +75147,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T13:44:02.626Z",
-      "updated": "2026-11-25T05:34:33.123Z",
+      "updated": "2026-11-25T09:31:16.949Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 12
     },
@@ -75140,6 +75169,56 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "H status after batch 43: Tests/Guards/tool_roots.jet passes on the batch compiler (one roots table read by roots.sh, roots.mjs and the Jet Roots tools; every Roots.jet copy byte-identical; no other Tools source spells a root default). Still open: 'duplicated tool scripts are merged' has no census or proof yet, so c8 stays open."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "H finding (batch 43): Roots.jet locates the roots table from sys.executable(). That is the script path under jet run, but a compiled tool copied outside its checkout finds no table, and roots.value() then reads only the environment. cb935728c30 swapped CompiledWorkloadPeerLauncher's HOME-derived fallback for roots.value(JET_SCRATCH_ROOT), so its self-test (which runs a copy in scratch) reported a fail-closed host. Fixed in the batch tree (cb773ec5808): the self-test passes the launcher its checkout's scratch root through the launcher's own override variable. Real use keeps the launcher inside the checkout. Any future tool run as a copied binary must be given its roots the same way."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "c10, decided: a Core constructor whose meaning is an IR construct with no runtime C symbol (tasks after/__channel_new/__channel_bounded, event __event_with_policy/__hook_new/__decision_hook_new/__async_new) leaves Core.rows as a Core declaration filling an Inline builder role. That is the existing role mechanism, as InlineFloatSqrt uses; Core still declares the function, which is what B requires. Condition: the stage-3 patch deletes every row fallback and the row-path wrapper, so one implementation remains (6999-B-c10b-rows does)."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "B, decided (implementation within ratified scope): after 6999-B-c10a-rows, no Core.rows row declares CoreCall frame_accesses; only JetSema/Tests/FrameCoreCallFixtures exercises the machinery. It is deleted as a separate patch stacked on c10a-rows (with_frame_accesses parsing, BodyCodec field, CoreCall-only Frames.jet scheduling, the fixture case; E2967 retired by the registry route if nothing else emits it), unless a queued row stack adds a frame_accesses row. Basis: B's end state removes the dispatcher rows; a mechanism with no production user is dead (AGENTS.md I8, greenfield cutover)."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Batch 43 regression from the sema .copy() cleanup (F stream; landed in batch43-tree as 740d2b8d2fd): the codemod removed .copy() text inside string literals as well as the calls, in 34 lines across 7 sema files. Effects: E0120/E2307/E0201/E0209 autofixes inserted an empty edit while marked Safe and BehaviorPreserving; fix text lost its .copy(); the generated CLI parser pushed borrowed argv entries, so MissingMoveMarker hit every typed-args program, including the wordfreq and csvtransform perf builds. Run43c found 41 golden, 68 ui and about 30 cases failures from it. Fix c83ca982de1 in the batch tree restores every in-string .copy() (each file's count equals its count before the cleanup) and raises the copy_ratchet ceilings to the actual counts. TypeIDSlice3-3's E-4 codemod now proves string and comment invariance with strscan before submission. Batch 43 also fixed: H's Roots.jet import missing from the CodegenCeiling case's copies; B's receipt.attach role needing core.encoding loaded (loader demand, 9994790c236)."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Correction to the binding Int defect, after C16Perf read ir_route_declared (BuildRoutes.jet): every route Word, binding or row, Int or IntN, already reaches its export as the exact-Int carrier. A .Word slot is boxed with jet_int_owned_from_i64 before the call. So the 134 exports that read the carrier and the four process limits are correct. The defects are the exports that read a route Word natively: c9's new _ns pair (held), jet_task_timeout_duration_ns and any others the sweep finds. A value of 2^62 or more reaches them as a node pointer and is used as a number. The fix: drop the binding narrowing, flip every native reader to the carrier, and add a guard ratchet and witnesses. IntN keeps the carrier ABI in that patch. IntN crossing natively (no box for fixed-width values) is a separate speed change, ranked once its gain is measured."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "The I1 defect above is systemic. A runtime binding crosses an Int parameter as a native I64 (ir_route_call_args -> ir_core_native_int), but 134 runtime exports read 196 such parameters as the exact-Int carrier (jet_int_owned_to_i64, host_native_int, int_fits/int_word and others). Any value outside the inline range [-2^62, 2^62) is then read as a boxed node pointer. Families affected include db_vfs, sys_fd/sys_shared, crypto_jetc, ui_host, fs_directory, process_signal, file_reader, fs_lock, job_queue, ws and net_unix (scan by C16Perf). Implementation choice, within the binding contract: a binding lends an Int-typed parameter as the exact-Int carrier, the same ABI rows use (one mechanism). Each export applies its own range policy in the runtime, and codegen does no narrowing (I9). The few exports that read native are flipped. The runtime_leaf_exports guard refuses a native read of an Int binding parameter. Witnesses cover 2^62, 2^63-1, 2^64+5 and a negative value. C16Perf builds it as one stage patch before c9's bindings and before c10."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Defect found by C16Perf while doing c9 (memory safety, I1): spec_output_limit, memory_limit, open_file_limit and memory_scope have Int bindings in jet.runtime.process that pass a native I64. Their runtime exports read the value as the exact-Int carrier (jet_process_limit_i64: int_negative/int_fits), so a limit of 2^62 or more is read as a boxed-Int pointer. ProcessSpecWitness tests only the carrier form. Fix: make each export read the form its binding passes, with a witness at and past 2^62 for each limit; C16Perf takes it before c10. The c9 patches (runtime bindings, then roles, then rows) are queued for batch 44, with the bindings as its first stage."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "c15 second half (jet_http_build_resolve gets a Jet body and loses its row) is held back from batch 43: stage 43e failed. The seed compiles Core/HTTP/Client.jet with its own built-in Core.rows, where core.http.client does not own the name (Jet.UnknownFunction at Client.jet:1965). The body and the row removal must be two stages: a priv Core body under a new name first, then the public name and the row drop on a compiler built from it. Sent back to its author as -r3. Batch 43 was rebuilt without it, door ceiling 6, and relaunched."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "c16 stage 3 (core.math Float leaves as Jet bodies) is held back from batch 43: the paired cell Tools/Perf/CoreMathPair.jet, bodies (stage 43c) vs rows (stage 43b), failed the perf gate. -O1 wall 5.68x, cycles 5.76x, peak RSS 1.007x; -O2 wall 5.86x, cycles 5.89x, peak RSS 1.014x (receipt $JET_SCRATCH_ROOT/tmp/orch/perf43/receipt.json). The stage also declared __numeric_stop without priv, which Jet.PublicDunderName refuses. Batch 43 was rebuilt without stage 3 and 3b. Its door ceiling is 5, since __to_bits_f32 and __from_bits_f32 stay compiler-known. Until the role declarations land, the raw_memory_lowering_rows guard row 'every core.mem intrinsic row lowers a primitive the memory kernel declares' fails on dev, because stage 1's InlineFloatSqrt row has no Core declaration. C16Perf is finding the cause with jet perf, fixing it in the general mechanism, and splitting out the role declarations first. #6852 c8 met on dev."
+        },
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
@@ -75340,11 +75419,11 @@
         {
           "n": 3,
           "text": "C. Generated copies are computed while building, not committed, wherever the seed rule allows (DiagnosticRows, RuntimeCExports, the codecs); each one that must stay committed names its reason in its header.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T17:01:43.069Z",
+          "evidence": "On dev eb7aaf51a8b with the batch-42 compiler: `jet test Tests/Guards --filter=diagnostic_registry_ratchet` 2 passed, 0 failed (RR_CEILING_NO_UI 11, the exact count). `jet test Tests/Guards --filter=generated_reasons` 3 passed, 0 failed. That guard requires every committed file whose header says generated and do not edit to say in its header why it stays committed, or to sit under a GENERATED marker that names its generator and the reason. 27 files carry the reason in their own header. One marker covers the explain pages under Docs/Site/Dist/e: the site is published from the checkout. None is unreasoned. Each kept compiler table says the seed builds the compiler from the checkout and jet check reads the file before any build step runs, so the seed rule allows none of them to be computed during the build. The full file and reason list is in $JET_SCRATCH_ROOT/tmp/orch/land/6999-C-evidence.txt (by TypeIDSlice3-3).",
+          "at": "2026-11-25T06:55:22.996Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -75570,7 +75649,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T06:17:21.422Z",
+      "updated": "2026-11-25T09:31:11.976Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 17
     }
@@ -139090,6 +139169,167 @@
   ],
   "events": [
     {
+      "at": "2026-11-25T09:31:16.949Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-25T09:31:11.976Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T09:31:08.461Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-25T09:31:06.284Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-25T09:31:04.605Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-25T09:31:02.352Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-25T09:31:00.671Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-25T09:27:15.024Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T09:22:59.955Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T09:11:52.057Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T09:04:55.264Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T08:57:21.075Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0zupuj4",
+      "note": "#5 The native compile-time child's exchange with the compiler i"
+    },
+    {
+      "at": "2026-11-25T08:19:06.522Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T08:19:05.638Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T08:16:25.229Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T07:43:50.484Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T07:40:36.485Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T07:37:17.867Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T07:09:07.229Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0s8gang",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T06:55:22.996Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mhrplj",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-25T06:46:04.335Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T06:37:31.971Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T06:37:00.036Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#8"
+    },
+    {
       "at": "2026-11-25T06:17:22.366Z",
       "by": "Orchestrator",
       "action": "card.update",
@@ -142458,713 +142698,6 @@
       "action": "card.criteria-edit",
       "ref": "c0kwu568",
       "note": "#8: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: #3623 Store: artifact store (jet-store). Proof: the claims of #3623 pass as Store rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (was #"
-    },
-    {
-      "at": "2026-11-24T02:41:01.202Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0ho9o8j",
-      "note": "#14: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: #3643 Provider: bridge, foreign and remote build facts. Proof: the claims of #3643 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left u"
-    },
-    {
-      "at": "2026-11-24T02:41:00.293Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0ho9o8j",
-      "note": "#13: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: #3642 Provider: C/C++ toolchain provider. Proof: the claims of #3642 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (w"
-    },
-    {
-      "at": "2026-11-24T02:40:59.401Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0ho9o8j",
-      "note": "#12: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: #3641 Provider: remote and Nix providers. Proof: the claims of #3641 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (w"
-    },
-    {
-      "at": "2026-11-24T02:40:58.479Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0ho9o8j",
-      "note": "#11: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: #3640 Provider: registries: LuaRocks and script registry. Proof: the claims of #3640 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left"
-    },
-    {
-      "at": "2026-11-24T02:40:57.552Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0ho9o8j",
-      "note": "#10: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: #3639 Provider: registries: fetch, native, CRAN. Proof: the claims of #3639 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3"
-    },
-    {
-      "at": "2026-11-24T02:40:55.961Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0ho9o8j",
-      "note": "#9: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: #3638 Provider: provider federation graph, package graph and plan facts. Proof: the claims of #3638 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing "
-    },
-    {
-      "at": "2026-11-24T02:40:54.725Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0ho9o8j",
-      "note": "#8: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: #3637 Provider: provider context, adapters, core and package providers. Proof: the claims of #3637 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing l"
-    },
-    {
-      "at": "2026-11-24T02:40:53.784Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0bcerww",
-      "note": "#4: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: The self-host stages and the s2 == s3 byte-identical check are build actions in Compiler/build.jet, each run from cold, and Tools/Agent/Chain.jet is deleted with every caller migrated. Proof: `jet bui"
-    },
-    {
-      "at": "2026-11-24T02:40:52.889Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0bcerww",
-      "note": "#3: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: One build function declares jet, the runtime pack, jetpack, the docs site and the release package as targets, so `jet build` builds them concurrently from one graph and the packages suite reuses that "
-    },
-    {
-      "at": "2026-11-24T02:40:51.934Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0lyckm2",
-      "note": "#7: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: The first run of a loose script with one dependency, on a cold cache, is faster than `uv run` of the PEP 723 equivalent and `deno run` with one `jsr:` import of similar size (median of 5, Jet/peer < 1"
-    },
-    {
-      "at": "2026-11-24T02:40:50.319Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c05i2uiq",
-      "note": "#7: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Tracked fixture inputs that lived under nested `.jet` directories are migrated with their consumers, so no tracked file sits under a nested `.jet` and no canonical source silently disappears. Proof: `"
-    },
-    {
-      "at": "2026-11-24T02:40:49.411Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c05i2uiq",
-      "note": "#6: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: One function returns the project state directory (the workspace root, else the package root), and no other code joins a `.jet` path by hand. Proof: `jet test Tests/Guards --filter project_state_dir_si"
-    },
-    {
-      "at": "2026-11-24T02:40:48.367Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c05i2uiq",
-      "note": "#5: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: After build, test and run inside each member of a three-member workspace, exactly one `.jet` directory exists, at the workspace root. Proof: `jet test Compiler --profile cases --filter ProjectRoot/wor"
-    },
-    {
-      "at": "2026-11-24T02:40:47.438Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c05i2uiq",
-      "note": "#4: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every remaining per-package or cwd-relative `.jet/` writer (build/deps, lock unless a ratified package-scoped lock, cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db) writes to the one wo"
-    },
-    {
-      "at": "2026-11-24T02:40:46.548Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#8: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Each release ships a compliance bundle: an SBOM, SLSA provenance and an air-gap install runbook, generated by the release gate. Proof: `jet test Tests/Guards --filter release_compliance_bundle` and th"
-    },
-    {
-      "at": "2026-11-24T02:40:45.623Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#7: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: The security-scan procedure is a committed Jet tool under Tools/ (the deleted scripts/agent/security-scan.mjs is not restored, by the greenfield rule), and its finalize step at the integration HEAD ex"
-    },
-    {
-      "at": "2026-11-24T02:40:44.752Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#6: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: The final generated security report and its canonical evidence are committed, and the report lists exactly the 134 original candidate IDs, each with one final disposition. Proof: the committed report "
-    },
-    {
-      "at": "2026-11-24T02:40:43.823Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#5: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen). Proof: `jet test Compi"
-    },
-    {
-      "at": "2026-11-24T02:40:42.909Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#4: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Two independent builds of each published package from the same inputs are bit-identical, checked by the release gate, and each build attestation is appended to a transparency log anchored at the trust"
-    },
-    {
-      "at": "2026-11-24T02:40:42.005Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#3: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Updating a dependency whose new version adds an effect (for example Net.Connect) or a `#Unsafe` block reports each widened effect with the dependency function that needs it, at update time and on the "
-    },
-    {
-      "at": "2026-11-24T02:40:41.010Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#2: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Whether grafts are allowed is on Main's ballot list (2026-11-15); if they are, a graft is recorded in the declaration, applied without rebuilding dependents, and reconciled by the next full build. Pro"
-    },
-    {
-      "at": "2026-11-24T02:40:39.763Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0vthf2x",
-      "note": "#4: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: Package commands run only the engine shipped beside the running `jet` (toolchain root); a fake `jetpack` placed earlier on PATH is never executed (test)."
-    },
-    {
-      "at": "2026-11-24T02:40:38.482Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0vthf2x",
-      "note": "#3: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: A missing or silent package engine is reported as missing or broken with the fix; E1227 \"disagree\" appears only when both sides answer with different protocol versions. UI snapshots cover all three ca"
-    },
-    {
-      "at": "2026-11-24T02:40:37.615Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0vthf2x",
-      "note": "#2: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: `jet fetch` and `jet update` work for path and git dependencies; a second run leaves the lock bytes unchanged."
-    },
-    {
-      "at": "2026-11-24T02:40:36.658Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0vthf2x",
-      "note": "#1: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: In a fresh `jet new` project with no `jetpack` binary on PATH, `jet add ../geometry` (path) and `jet add git+<url>#<rev>` (git) write the dependency to package.jet and the lock, and `jet build` resolv"
-    },
-    {
-      "at": "2026-11-24T02:40:35.710Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0r8y1nt",
-      "note": "#6: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: D-EMBED-TOOLCHAIN1=A table cutover, part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: r"
-    },
-    {
-      "at": "2026-11-24T02:40:34.677Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0r8y1nt",
-      "note": "#4: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: Registry/spec/chain. Syntax-decisions S18 gains the `priv(toolchain)` line (Spellings ledger regenerated, `lexical-ledger.mjs --check` clean). spec.md visibility section and the E0414/E0605/E0609 rows"
-    },
-    {
-      "at": "2026-11-24T02:40:33.715Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0r8y1nt",
-      "note": "#3: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: Compiler-generated calls pass. A call the compiler lowers into a toolchain-private module is admitted, while the same name written in user source is E0605. Proof via seam 4: user `list.sort_by(f)` low"
-    },
-    {
-      "at": "2026-11-24T02:40:32.837Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#170: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each), and one shared longest-dependency-root helper attributes"
-    },
-    {
-      "at": "2026-11-24T02:40:31.841Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#169: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Read-only sources, unwritable required and optional destinations, explicit outputs, concurrency, moved checkouts and selective cleanup each have a real-command case. Proof: `jet test Compiler --profil"
-    },
-    {
-      "at": "2026-11-24T02:40:30.781Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#168: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every affected reader, writer and cleanup path uses the new root, with no compatibility reader, duplicate disposable layout or blanket deletion. Proof: `jet test Tests/Guards --filter project_state_di"
-    },
-    {
-      "at": "2026-11-24T02:40:29.446Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#167: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Saved portable data, mandatory audit and sensitive roots and their references stay protected and readable after the migration. Proof: `jet test Compiler --profile cases --filter ProjectRoot/migration_"
-    },
-    {
-      "at": "2026-11-24T02:40:28.244Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#166: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Project and target identities separate standalone files, workspaces, symlinks, toolchains and profiles, targets and concurrent users, so final artifacts never collide or escape (today `bin_path` keys "
-    },
-    {
-      "at": "2026-11-24T02:40:27.267Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#165: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every owned default project-generated output, build products and generated source included, goes under the one top-level `.jet` root (D-GENERATED-STORAGE2=B), with no default build/, .jet-build/ or pe"
-    },
-    {
-      "at": "2026-11-24T02:40:26.321Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0l5ld15",
-      "note": "#9: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: `jet test Compiler --profile packages --filter PackageFacts` passes with PackageFacts claims for `tls: Bool{true}`, `api_base: String{\"https://...\"}` and the rejection of the old equals form, and `JET"
-    },
-    {
-      "at": "2026-11-24T02:37:23.768Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0e6znz4",
-      "note": "26 criteria, soft limit 6: Defect in this card's inline-module Core import path, found by the D-RULE-TYPEARGS1 review probes."
-    },
-    {
-      "at": "2026-11-24T02:37:23.768Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e6znz4",
-      "note": "#27 An inline module whose name is a single letter (a: module { "
-    },
-    {
-      "at": "2026-11-24T02:30:27.371Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0e6znz4",
-      "note": "25 criteria, soft limit 6: Owner ruling 2026-11-24: the ballot must be fixed before the owner votes."
-    },
-    {
-      "at": "2026-11-24T02:30:27.371Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e6znz4",
-      "note": "#26 D-RULE-TYPEARGS1 is reworked so that no option carries a rem"
-    },
-    {
-      "at": "2026-11-24T02:30:25.734Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-24T02:28:23.832Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0c7739a",
-      "note": "11 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:23.832Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0c7739a",
-      "note": "#11 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:22.378Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0b5xq4b",
-      "note": "13 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:22.378Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0b5xq4b",
-      "note": "#13 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:20.369Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0e6znz4",
-      "note": "24 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:20.369Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e6znz4",
-      "note": "#25 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:18.438Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0dktg7a",
-      "note": "32 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:18.438Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0dktg7a",
-      "note": "#42 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:16.761Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00zrgpr",
-      "note": "31 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:16.761Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00zrgpr",
-      "note": "#31 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:15.170Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0kdgbf8",
-      "note": "13 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:15.169Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0kdgbf8",
-      "note": "#14 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:12.953Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0hkdzht",
-      "note": "#4 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:10.868Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0fq2ryv",
-      "note": "7 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:10.868Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#14 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:09.287Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c02z1dax",
-      "note": "#6 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:07.273Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0lyckm2",
-      "note": "8 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:07.273Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0lyckm2",
-      "note": "#8 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:05.453Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0abvxai",
-      "note": "#4 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:03.628Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0phknv8",
-      "note": "11 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:03.628Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0phknv8",
-      "note": "#11 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:28:01.728Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0dlrfkp",
-      "note": "9 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:28:01.728Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0dlrfkp",
-      "note": "#9 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:59.908Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0zlqnvv",
-      "note": "11 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:59.907Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0zlqnvv",
-      "note": "#11 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:57.674Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0rqtmrp",
-      "note": "10 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:57.674Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rqtmrp",
-      "note": "#10 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:55.726Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0blttm0",
-      "note": "#6 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:53.744Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c01vsb2c",
-      "note": "7 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:53.744Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c01vsb2c",
-      "note": "#7 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:52.481Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c01q17ls",
-      "note": "10 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:52.480Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c01q17ls",
-      "note": "#10 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:51.537Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c06tzcrf",
-      "note": "12 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:51.537Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c06tzcrf",
-      "note": "#12 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:50.528Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0qecom2",
-      "note": "11 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:50.528Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qecom2",
-      "note": "#12 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:49.500Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0oymlrt",
-      "note": "#4 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:48.493Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0sbl400",
-      "note": "10 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:48.493Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0sbl400",
-      "note": "#10 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:46.986Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c09f1iks",
-      "note": "8 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:46.986Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c09f1iks",
-      "note": "#11 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:45.879Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c04pj0wn",
-      "note": "8 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:45.879Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c04pj0wn",
-      "note": "#10 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:44.714Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0sdz4q0",
-      "note": "12 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:44.714Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0sdz4q0",
-      "note": "#12 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:43.611Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c01642i8",
-      "note": "#6 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:42.455Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0m58g8t",
-      "note": "14 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:42.455Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0m58g8t",
-      "note": "#32 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:41.294Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0r8ohhq",
-      "note": "16 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:41.294Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0r8ohhq",
-      "note": "#16 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:39.908Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0aha21c",
-      "note": "15 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:39.908Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0aha21c",
-      "note": "#15 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:38.754Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0gz9snm",
-      "note": "9 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:38.754Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0gz9snm",
-      "note": "#9 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:37.545Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0zii3oj",
-      "note": "13 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:37.544Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0zii3oj",
-      "note": "#13 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:36.427Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0810bga",
-      "note": "9 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:36.427Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0810bga",
-      "note": "#13 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:35.306Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c09hk13a",
-      "note": "21 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:35.306Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c09hk13a",
-      "note": "#21 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:34.209Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-24T02:27:34.209Z"
     }
   ],
   "nextNum": 368,
