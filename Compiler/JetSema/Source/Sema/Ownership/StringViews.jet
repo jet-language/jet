@@ -201,8 +201,8 @@ sema_string_view_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipState, na
 
 sema_string_view_unsupported_use: fn(name: String, what: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
     owner: sema_string_view_owner(scopes, state, name)
-    diagnostic: sema_error("E2307", span, "`{name}` cannot {what} without an owning copy", "`{name}` is a zero-copy view into `{owner}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled", "write `{name}` first, or remove `copies: .Explicit` to use the default owning copy")
-    diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    diagnostic: sema_error("E2307", span, "`{name}` cannot {what} without an owning copy", "`{name}` is a zero-copy view into `{owner}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled", "write `{name}.copy()` first, or remove `copies: .Explicit` to use the default owning copy")
+    diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 // Under `copies: .Explicit`, a bare string-view read outside the positions
@@ -297,12 +297,12 @@ sema_string_view_check_field: fn(value: Expr, field_ty: Type, check: ^SemaBodyCh
     if sema_string_view_call_sources(value, check.scopes, check.state).len() > 0 {
         return sema_string_view_lower_init(checked)
     }
-    check.diagnostics.push(sema_error("E2307", span, "an owned `String` cannot fill a `View<str>` slot", "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead", "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with ``"))
+    check.diagnostics.push(sema_error("E2307", span, "an owned `String` cannot fill a `View<str>` slot", "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead", "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `.copy()`"))
     None
 }
 
 sema_string_view_return_boundary: fn(span: Span, diagnostics: ^[Diagnostic]) {
-    diagnostics.push(sema_error("E2307", span, "returned string views need a stable owner relationship", "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with ``"))
+    diagnostics.push(sema_error("E2307", span, "returned string views need a stable owner relationship", "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `.copy()`"))
 }
 
 // A `View<str>` return reads a string-view binding, or a

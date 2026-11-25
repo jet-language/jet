@@ -1723,7 +1723,7 @@ sema_expression_lambda_repeated_capture_move: fn(state: ^SemaOwnershipState, mov
         sema_ownership_note_share_found(state, SemaOwnershipShareSite{span: span, ty: ty.copy()})
     }
     name: sema_ownership_place_name(moved.place)
-    diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` moves out of a lambda that can run more than once", "the lambda is passed on or stored, so it may be called again, and that call would use `{name}` after the first call gave it away", "pass a copy (`{name}`), or move `{name}` in as a parameter of the lambda instead of capturing it"), lambda_span, "this lambda may run more than once"))
+    diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` moves out of a lambda that can run more than once", "the lambda is passed on or stored, so it may be called again, and that call would use `{name}` after the first call gave it away", "pass a copy (`{name}.copy()`), or move `{name}` in as a parameter of the lambda instead of capturing it"), lambda_span, "this lambda may run more than once"))
 }
 
 sema_expression_lambda_view_diagnostic: fn(name: String, span: Span) -> Diagnostic {

@@ -197,7 +197,7 @@ sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, check: 
         if check.environment.source_origin == SemaSourceOrigin.Snapshot && facts.complete && facts.cloneable && !facts.resource {
             formatter := jfmt_new(ast_program(), "", [Token]{}, false)
             jfmt_fmt_expr(formatter, value, 0)
-            replacement: "{jfmt_out_text(formatter)}"
+            replacement: "{jfmt_out_text(formatter)}.copy()"
             diagnostic = diagnostic_with_edit_grade(diagnostic, TextEdit{span: span, new_text: replacement}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
         }
         check.diagnostics.push(diagnostic)

@@ -2192,7 +2192,7 @@ sema_ownership_string_list_snapshot: fn(source: [String]) -> [String] Never! {
 
 sema_ownership_diag_view_return_owner: fn(place: SemaOwnershipPlace, span: Span, aggregate: Bool) -> Diagnostic {
     owner := if aggregate -> place.root else -> sema_ownership_view_owner_name(place)
-    sema_error("E2305", span, "this view points into `{owner}`, which this function owns", "`{owner}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at", "return an owned copy with `place` (for example `value[a..b]`), or accept the source as a parameter so the caller keeps owning it")
+    sema_error("E2305", span, "this view points into `{owner}`, which this function owns", "`{owner}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at", "return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it")
 }
 
 // The place a returned window points into: the window's own trailing element
@@ -2210,7 +2210,7 @@ sema_ownership_view_owner_name: fn(place: SemaOwnershipPlace) -> String Never! {
 }
 
 sema_ownership_diag_view_return_boundary: fn(span: Span) -> Diagnostic {
-    sema_error("E2305", span, "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with ``")
+    sema_error("E2305", span, "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`")
 }
 
 // A `^^` parameter (or `^^self`) moves into this function and is freed when it
@@ -2231,7 +2231,7 @@ sema_ownership_consumed_view_owner: fn(place: SemaOwnershipPlace, scopes: SemaSc
 
 sema_ownership_diag_view_return_consumed: fn(place: SemaOwnershipPlace, span: Span, aggregate: Bool) -> Diagnostic {
     owner := if aggregate -> place.root else -> sema_ownership_view_owner_name(place)
-    sema_error("E2305", span, "this view points into `{owner}`, which this function consumes", "the `^^` parameter `{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner", "take `{owner}` as a read or `^` parameter so the caller keeps owning it, or return an owned copy with ``")
+    sema_error("E2305", span, "this view points into `{owner}`, which this function consumes", "the `^^` parameter `{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner", "take `{owner}` as a read or `^` parameter so the caller keeps owning it, or return an owned copy with `.copy()`")
 }
 
 sema_ownership_place_has_fresh_projection: fn(place: SemaOwnershipPlace) -> Bool Never! {
@@ -2647,7 +2647,7 @@ sema_ownership_report_moved: fn(state: ^SemaOwnershipState, moved: SemaOwnership
     if moved.origin.once_capture == .Val(capture) {
         name: sema_ownership_place_name(moved.place)
         label: if sema_ownership_span_same(moved.origin.span, span) -> "`{name}` ran here on an earlier loop iteration" else -> "`{name}` ran here"
-        diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` can run only once, and it already ran", "`{name}` takes its captured `{capture}` with `{capture}.move()`, so its first call gave `{capture}` away", "call `{name}` once, or let it pass a copy of `{capture}` (`{capture}`) instead of taking it"), moved.origin.span, label))
+        diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` can run only once, and it already ran", "`{name}` takes its captured `{capture}` with `{capture}.move()`, so its first call gave `{capture}` away", "call `{name}` once, or let it pass a copy of `{capture}` (`{capture}.copy()`) instead of taking it"), moved.origin.span, label))
         return
     }
     if moved.origin.implicit_take == .Val(callee) {
@@ -2676,9 +2676,9 @@ sema_ownership_report_implicit_take_reused: fn(callee: String, name: String, sit
     }
     label: if sema_ownership_span_same(site, reuse) -> "the next loop iteration passes `{name}` here again" else -> "`{name}` is used again here"
     consumer: sema_ownership_callee_text(callee)
-    diagnostic: sema_error("E0209", site, "{consumer} takes `{name}`, but `{name}` is used again later", "{consumer} takes ownership of this argument, and a call never copies on its own, so `{name}` has no value after this call", "write `{name}` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`")
+    diagnostic: sema_error("E0209", site, "{consumer} takes `{name}`, but `{name}` is used again later", "{consumer} takes ownership of this argument, and a call never copies on its own, so `{name}` has no value after this call", "write `{name}.copy()` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`")
     labeled: diagnostic_with_label(diagnostic, reuse, label)
-    diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: site.end, end: site.end}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: site.end, end: site.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 sema_ownership_note_share_found: fn(state: ^SemaOwnershipState, found: SemaOwnershipShareSite) Never! {
@@ -2888,7 +2888,7 @@ sema_ownership_report_arena_view_escape: fn(state: ^SemaOwnershipState, expr: Ex
                     next
                 }
                 arena: sema_ownership_view_owner_name(fact.source)
-                diagnostics.push(sema_error("E0631", span, "`{name}` cannot be shared — it does not live long enough to {what}", "`{name}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory", "keep `{name}` inside the `{arena}` region, or copy what you need out with `{name}` before it leaves"))
+                diagnostics.push(sema_error("E0631", span, "`{name}` cannot be shared — it does not live long enough to {what}", "`{name}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory", "keep `{name}` inside the `{arena}` region, or copy what you need out with `{name}.copy()` before it leaves"))
                 return true
             }
             false
@@ -3695,7 +3695,7 @@ sema_ownership_mark_move_as: fn(state: ^SemaOwnershipState, expr: Expr, scopes: 
         info: binding
         if sema_ownership_binding_is_borrowed_param(info) {
             param_type: type_name(info.symbol.ty ?? Type.Named{name: "T"})
-            diagnostics.push(sema_error("E0201", expr_span(expr), "`{info.symbol.name}` cannot be moved from borrowed storage", "`{info.symbol.name}` is a read or write parameter, so its caller keeps the value; moving it here would copy it", "write `{info.symbol.name}` when {consumer} should receive a copy, or declare the parameter `{info.symbol.name}: ^^{param_type}` so the caller hands the value over"))
+            diagnostics.push(sema_error("E0201", expr_span(expr), "`{info.symbol.name}` cannot be moved from borrowed storage", "`{info.symbol.name}` is a read or write parameter, so its caller keeps the value; moving it here would copy it", "write `{info.symbol.name}.copy()` when {consumer} should receive a copy, or declare the parameter `{info.symbol.name}: ^^{param_type}` so the caller hands the value over"))
             return false
         }
         if info.place_alias {
@@ -3940,7 +3940,7 @@ sema_ownership_diag_expiring_secret_loan_change: fn(name: String, action: String
 // `ty` is the parameter's declared type, when `name` is that parameter.
 sema_ownership_diag_move_from_borrowed: fn(name: String, ty: Type?, span: Span) -> Diagnostic {
     shown: type_name(ty ?? Type.Named{name: "T"})
-    sema_error("E0201", span, "`{name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `{name}`, or declare the parameter `{name}: ^^{shown}` to take ownership")
+    sema_error("E0201", span, "`{name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `{name}.copy()`, or declare the parameter `{name}: ^^{shown}` to take ownership")
 }
 
 // `.move()` never lowers to a copy. A call argument `p.move()` or `p.f.move()`
@@ -3975,7 +3975,7 @@ sema_ownership_reject_place_alias_move: fn(state: ^SemaOwnershipState, expr: Exp
 }
 
 sema_ownership_diag_place_alias_move: fn(name: String, consumer: String, span: Span) -> Diagnostic {
-    sema_error("E0201", span, "`{name}` cannot be moved from borrowed storage", "`{name}` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it", "write `{name}` when {consumer} should receive a copy, or move the place itself with `.move()` when this scope owns it")
+    sema_error("E0201", span, "`{name}` cannot be moved from borrowed storage", "`{name}` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it", "write `{name}.copy()` when {consumer} should receive a copy, or move the place itself with `.move()` when this scope owns it")
 }
 
 // With `borrowed_read`, a read argument of a non-scalar read parameter keeps
@@ -4186,7 +4186,7 @@ sema_ownership_taken_name: fn(arg: CallArg, places: [SemaOwnershipPlace]) -> Str
 
 sema_ownership_diag_take_while_lent: fn(name: String, callee: String, span: Span) -> Diagnostic {
     consumer: sema_ownership_callee_text(callee)
-    sema_error("E0204", span, "`{name}` is already lent to this call, so {consumer} can't take it here too", "an earlier argument lets {consumer} read `{name}` for the whole call, so this argument can't hand the same value over", "pass a copy to one of the two parameters with `{name}`")
+    sema_error("E0204", span, "`{name}` is already lent to this call, so {consumer} can't take it here too", "an earlier argument lets {consumer} read `{name}` for the whole call, so this argument can't hand the same value over", "pass a copy to one of the two parameters with `{name}.copy()`")
 }
 
 // The callee as a diagnostic names it: a built-in collection method by its
@@ -4220,7 +4220,7 @@ sema_ownership_is_window_type: fn(ty: Type) -> Bool Never! {
 // is its last use.
 sema_ownership_diag_take_twice: fn(name: String, callee: String, span: Span) -> Diagnostic {
     consumer: sema_ownership_callee_text(callee)
-    sema_error("E0209", span, "`{name}` is passed to {consumer} more than once in this call", "a name used in two arguments of one call has no last use in that call, so {consumer} can't take `{name}` there", "write `{name}` in the argument that keeps a copy")
+    sema_error("E0209", span, "`{name}` is passed to {consumer} more than once in this call", "a name used in two arguments of one call has no last use in that call, so {consumer} can't take `{name}` there", "write `{name}.copy()` in the argument that keeps a copy")
 }
 
 sema_ownership_expr_site_listed: fn(sites: [Span], expr: Expr) -> Bool Never! {
