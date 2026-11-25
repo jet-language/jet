@@ -145,8 +145,7 @@ sema_taskgroup_state_snapshot: fn(source: SemaTaskGroupState) -> SemaTaskGroupSt
             },
         )
     }
-    ^effects: [TEffectSpan]{}
-    loop time_effect in source.time_effects -> effects.push(time_effect.copy())
+    effects: loop time_effect in source.time_effects -> time_effect.copy()
     SemaTaskGroupState{
         stack: stack,
         in_spawn: source.in_spawn,
@@ -923,13 +922,12 @@ sema_taskgroup_check_branches: fn(args: [CallArg], span: Span, form: TaskForm, e
                 check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a list of task branches, not a named tuple", "race and any choose one completed task from a list", "write a list of Task values"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
-            ^result_fields: [TypeTupleField]{}
-            loop field in fields {
+            result_fields: loop field in fields -> {
                 result_elem: sema_taskgroup_task_element(field.ty) ?? {
                     check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` field `{field.name}` is not a Task", "each named branch must produce one Task result", "give every named branch a Task value"))
                     return SemaMethodSpecialCheck{handled: true, value: None}
                 }
-                result_fields.push(TypeTupleField{name: field.name, ty: result_elem})
+                TypeTupleField{name: field.name, ty: result_elem}
             }
             result_ty = Val(Type.Tuple{fields: result_fields})
         }

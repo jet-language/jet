@@ -259,10 +259,9 @@ sema_window_function_candidates: fn(func: Func, rows: [SemaWindowFunctionRow], p
         ^scan: SemaWindowScan{resizes: false, onward: [SemaWindowEdge]{}}
         sema_window_scan_body(func.body, func.params[param_index].name, scan)
         if scan.resizes -> next
-        ^onward: [Int]{}
-        loop edge in scan.onward {
+        onward: loop edge in scan.onward -> {
             slot: sema_window_edge_slot(rows, positions, edge) ?? next
-            onward.push(slot)
+            slot
         }
         candidates.push(SemaWindowCandidate{row: row, param: param_index, onward: onward})
     }
@@ -302,12 +301,7 @@ sema_window_fixed_length_params: fn(rows: [SemaWindowFunctionRow], candidates: [
             }
         }
     }
-    ^result: [SemaWindowParam]{}
-    loop (index, candidate) in candidates {
-        if proven[index] {
-            result.push(SemaWindowParam{function: rows[candidate.row].name, param: rows[candidate.row].params[candidate.param]})
-        }
-    }
+    result: loop (index, candidate) in candidates if proven[index] -> SemaWindowParam{function: rows[candidate.row].name, param: rows[candidate.row].params[candidate.param]}
     result
 }
 

@@ -79,10 +79,7 @@ sema_effect_leaf_check_name: fn(leaves: [SemaEffectLeaf], name: String, span: Sp
     bare: sema_effect_leaf_name(name)
     member: sema_effect_leaf_member(bare) ?? return
     root: sema_effect_root(bare)
-    ^members: [String]{}
-    loop leaf in leaves {
-        if leaf.root == root -> members.push(leaf.member)
-    }
+    members: loop leaf in leaves if leaf.root == root -> leaf.member
     if members.len() == 0 {
         return
     }

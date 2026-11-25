@@ -223,8 +223,7 @@ sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [Sema
 }
 
 sema_alias_rewrite_items: fn(items: [Item], keys: [SemaAliasKey]) -> [Item] Never! {
-    ^rewritten: [Item]{}
-    loop item in items {
+    rewritten: loop item in items -> {
         ^value: item.copy()
         if item == {
             .Const(definition) -> {
@@ -242,7 +241,7 @@ sema_alias_rewrite_items: fn(items: [Item], keys: [SemaAliasKey]) -> [Item] Neve
             }
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
-        rewritten.push(value)
+        value
     }
     rewritten
 }

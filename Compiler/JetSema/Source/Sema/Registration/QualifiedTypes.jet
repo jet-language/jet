@@ -295,11 +295,10 @@ sema_registration_canonical_type: fn(ty: Type, keys: [String:Type]) -> Type? Nev
     ^names: [String]{}
     sema_registration_type_qualified_names(ty, names)
     ^found: [String]{}
-    ^actuals: [Type]{}
-    loop name in names {
+    actuals: loop name in names -> {
         resolved: keys.get(name) ?? next
         found.push(name)
-        actuals.push(resolved)
+        resolved
     }
     if found.len() == 0 -> return None
     Val(sema_registration_canonical_heads(sema_inference_substitute_type(ty, found, actuals), keys))

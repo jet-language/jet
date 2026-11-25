@@ -5,10 +5,7 @@
 // member of the item is E0182. A wrong count or an unknown name in a brace
 // head is the destructure's own diagnostic.
 loop_tuple_errors: fn(source: String) -> [String] {
-    ^codes: [String]{}
-    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
-        if diagnostic.code.starts_with("E") -> codes.push("{diagnostic.code}: {diagnostic.what}")
-    }
+    codes: loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") if diagnostic.code.starts_with("E") -> "{diagnostic.code}: {diagnostic.what}"
     codes
 }
 

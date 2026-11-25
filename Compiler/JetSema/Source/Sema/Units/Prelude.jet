@@ -123,8 +123,7 @@ sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames 
                 else -> non_ascii = true
             }
         }
-        ^members: [String]{}
-        loop member in family.members {
+        members: loop member in family.members -> {
             type_name: sema_registration_unit_type_name(member.name)
             ^_: name_intern(wanted, type_name)
             tb: type_name.bytes()
@@ -141,7 +140,7 @@ sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames 
             ^_: name_intern(members_named, member.name)
             length: member.name.count_bytes()
             if length > 0 && !member_lengths.contains(length) -> member_lengths.push(length)
-            members.push(type_name)
+            type_name
         }
         type_names.push(members)
     }

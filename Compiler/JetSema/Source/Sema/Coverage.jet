@@ -215,10 +215,7 @@ sema_coverage_field_covers: fn(subject_ty: Type, key: String, field: Int, group:
     if !sema_coverage_is_closed(payload_ty) || sema_coverage_is_open_enum(payload_ty, check) {
         return false
     }
-    ^inner: [TPatternShape]{}
-    loop entry in group {
-        if entry.field == field -> inner.push(entry.inner)
-    }
+    inner: loop entry in group if entry.field == field -> entry.inner
     if payload_ty == .List(_) || payload_ty == .FixedList(_, _) || payload_ty == .Map(_, _, _) {
         rows: loop shape in inner -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
         return sema_pattern_matrix_complete(rows, [Type]{payload_ty}, check)
@@ -1264,10 +1261,7 @@ sema_pattern_matrix_expand: fn(rows: [SemaPatternCoverageRow]) -> [SemaPatternCo
 }
 
 sema_pattern_matrix_tail: fn(types: [Type]) -> [Type] Never! {
-    ^tail: [Type]{}
-    loop (index, ty) in types {
-        if index > 0 -> tail.push(ty.copy())
-    }
+    tail: loop (index, ty) in types if index > 0 -> ty.copy()
     tail
 }
 
@@ -1280,18 +1274,12 @@ sema_pattern_matrix_append_tail: fn(cells: [SemaPatternCoverageCell], row: SemaP
 }
 
 sema_pattern_matrix_default: fn(rows: [SemaPatternCoverageRow]) -> [SemaPatternCoverageRow] Never! {
-    ^defaults: [SemaPatternCoverageRow]{}
-    loop row in rows {
-        if row.cells.len() > 0 && row.cells[0] == .Any {
-            defaults.push(sema_pattern_matrix_append_tail([SemaPatternCoverageCell]{}, row))
-        }
-    }
+    defaults: loop row in rows if row.cells.len() > 0 && row.cells[0] == .Any -> sema_pattern_matrix_append_tail([SemaPatternCoverageCell]{}, row)
     defaults
 }
 
 sema_pattern_matrix_list_rows: fn(rows: [SemaPatternCoverageRow], length: Int, long: Bool) -> [SemaPatternCoverageRow] Never! {
-    ^specialized: [SemaPatternCoverageRow]{}
-    loop row in rows {
+    specialized: loop row in rows -> {
         if row.cells.len() == 0 -> next
         ^cells: [SemaPatternCoverageCell]{}
         first: row.cells[0]
@@ -1310,7 +1298,7 @@ sema_pattern_matrix_list_rows: fn(rows: [SemaPatternCoverageRow], length: Int, l
             }
             .Refutable -> next
         }
-        specialized.push(sema_pattern_matrix_append_tail(cells, row))
+        sema_pattern_matrix_append_tail(cells, row)
     }
     specialized
 }
@@ -1383,8 +1371,7 @@ sema_pattern_matrix_head: fn(shape: TPatternShape) -> String? Never! {
 }
 
 sema_pattern_matrix_constructor_rows: fn(rows: [SemaPatternCoverageRow], constructor: SemaPatternCoverageConstructor) -> [SemaPatternCoverageRow] Never! {
-    ^specialized: [SemaPatternCoverageRow]{}
-    loop row in rows {
+    specialized: loop row in rows -> {
         if row.cells.len() == 0 -> next
         ^cells: (loop _ in constructor.payload -> SemaPatternCoverageCell.Any)
         if row.cells[0] == {
@@ -1412,7 +1399,7 @@ sema_pattern_matrix_constructor_rows: fn(rows: [SemaPatternCoverageRow], constru
                 }
             }
         }
-        specialized.push(sema_pattern_matrix_append_tail(cells, row))
+        sema_pattern_matrix_append_tail(cells, row)
     }
     specialized
 }
@@ -1460,8 +1447,7 @@ sema_pattern_matrix_complete: fn(written_rows: [SemaPatternCoverageRow], types: 
             loop field in nominal.fields {
                 field_types.push(sema_inference_substitute_type(field.ty, generic_names, args))
             }
-            ^specialized: [SemaPatternCoverageRow]{}
-            loop row in rows {
+            specialized: loop row in rows -> {
                 if row.cells.len() == 0 -> next
                 ^cells: (loop _ in field_types -> SemaPatternCoverageCell.Any)
                 if row.cells[0] == .Shape(shape) && shape == .Struct(written, _) {
@@ -1483,7 +1469,7 @@ sema_pattern_matrix_complete: fn(written_rows: [SemaPatternCoverageRow], types: 
                         }
                     }
                 } else if row.cells[0] != SemaPatternCoverageCell.Any { next }
-                specialized.push(sema_pattern_matrix_append_tail(cells, row))
+                sema_pattern_matrix_append_tail(cells, row)
             }
             loop rest_ty in tail -> field_types.push(rest_ty)
             return sema_pattern_matrix_complete(specialized, field_types, check)

@@ -675,8 +675,7 @@ sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_
 
     ^footprint: [String]?{None}
     if func.params[0].declared_footprint == .Val(declared) {
-        ^names: [String]{}
-        loop field in declared -> names.push(field.name)
+        names: loop field in declared -> field.name
         footprint = Val(names)
     }
     reference: TMethodRef{symbol: symbol, name: func.name, mangled: mangled, trait_owner: trait_owner, operator_identity: None}
@@ -963,8 +962,7 @@ sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallPa
     }
     ^values: [TExpr]{}
     ^slots: [Int]{}
-    ^required_types: [Type]{}
-    loop index in 0..<args.len() {
+    required_types: loop index in 0..<args.len() -> {
         slot: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
         parameter: params[slot]
@@ -987,7 +985,7 @@ sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallPa
         }
         values.push(value)
         slots.push(slot)
-        required_types.push(required)
+        required
     }
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: loop _ in values -> -1})
 }
@@ -1476,15 +1474,14 @@ sema_app_route_binding: fn(method: String, handler: Expr, check: SemaBodyCheck) 
             optional = true
         }
         if sema_http_route_find_struct(check, ty, shape.module_identity) == .Val(definition) {
-            ^fields: [String]{}
-            loop field in definition.fields {
+            fields: loop field in definition.fields -> {
                 ^field_type: field.ty
                 ^suffix: ""
                 if field_type == .Option(inner) {
                     field_type = inner
                     suffix = "?"
                 }
-                fields.push("{field.name}={sema_app_route_wire_type(field_type)}{suffix}")
+                "{field.name}={sema_app_route_wire_type(field_type)}{suffix}"
             }
             parts.push("s=json:{fields.join(",")}")
             next

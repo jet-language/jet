@@ -200,15 +200,14 @@ sema_expr_fixed_operand: fn(name: String, written: Expr, checked: ^^TExpr, slots
 // `lanes` names the local of a lane-type operand, the value is that type's
 // `__with_lanes` of the slots instead.
 sema_expr_fixed_slots: fn(slots: [Expr], shape: SemaFixedShape, lanes: String?, body: ^^[TStmt], mark: SemaScopeMark, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    ^values: [TExpr]{}
-    loop slot in slots {
+    values: loop slot in slots -> {
         // Every slot has one type, so a slot the operator refuses is
         // reported once, at the first.
         value: sema_check_expression(slot, None, check) ?? {
             sema_scope_leave(check.scopes, check.state)
             return None
         }
-        values.push(value)
+        value
     }
     element: if values.len() > 0 -> values[0].ty else -> shape.element
     ^list: sema_tree_node(Type.FixedList{elem: element, len: shape.measure}, TExprKind.List{values: values, trait_coercion: None}, span)
@@ -439,14 +438,13 @@ sema_expr_try_numeric_swizzle: fn(receiver: Expr, receiver_value: TExpr, method:
     mark: sema_scope_mark(check.scopes)
     sema_scope_enter(check.scopes, check.state, "swizzle@{at}")
     ^body: [TStmt]{sema_expr_fixed_bind_read(src_name, receiver_value, span, check)}
-    ^picked: [TExpr]{}
-    loop idx in indices {
+    picked: loop idx in indices -> {
         slot_expr: sema_expr_fixed_slot(src_name, Val(idx), slots.lanes, span)
         checked_slot: sema_check_expression(slot_expr, None, check) ?? {
             sema_scope_leave(check.scopes, check.state)
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        picked.push(checked_slot)
+        checked_slot
     }
     result_measure: Measure.Literal{kind: "length", value: indices.len()}
     ^result_expr: sema_tree_node(Type.FixedList{elem: slots.element, len: result_measure}, TExprKind.List{values: picked, trait_coercion: None}, span)

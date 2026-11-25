@@ -253,10 +253,9 @@ sema_cli_entry_pending: fn(items: [Item]) -> [SemaCLIEntryTarget] {
             }
         }
     }
-    ^pending: [SemaCLIEntryTarget]{}
-    loop target in targets {
+    pending: loop target in targets -> {
         if sema_cli_entry_declared(items, target.wrapper) -> next
-        pending.push(target)
+        target
     }
     pending
 }
@@ -846,11 +845,10 @@ sema_cli_entry_table: fn(lines: ^[String], subject: String, arms: [SemaCLIArm], 
     ^seen: [String]{}
     ^table: [String]{}
     loop arm in arms {
-        ^patterns: [String]{}
-        loop pattern in arm.patterns {
+        patterns: loop pattern in arm.patterns -> {
             if seen.contains(pattern) -> next
             seen.push(pattern.copy())
-            patterns.push(pattern.copy())
+            pattern.copy()
         }
         if patterns.len() == 0 -> next
         table.push("    {patterns.join(" | ")} -> {{")
@@ -933,10 +931,7 @@ sema_cli_entry_source: fn(definition: StructDef, items: [Item], type_ref: String
         sema_cli_entry_parse(lines, spec, "__jet_cli_process.exit(0)", false, false, true)
         sema_cli_entry_bind(lines, spec, type_ref)
         lines.push("    __args")
-        ^copied: [String]{}
-        loop field in definition.fields {
-            if field.computed == None -> copied.push("{field.name}: __p.{field.name}")
-        }
+        copied: loop field in definition.fields if field.computed == None -> "{field.name}: __p.{field.name}"
         return Val("{parse}: fn(__argv: [String]) -> {type_ref} {{\n{lines.join("\n")}\n}}\n\n{wrapped.wrapper}: fn() {{\n    __argv: {sema_cli_call("CLIArgv")}()\n    __p: {parse}(__argv)\n    {callee}({type_ref}{{{copied.join(", ")}}})\n}}\n")
     }
     sema_cli_entry_parse(lines, spec, "return", false, false, false)

@@ -1685,10 +1685,9 @@ sema_genmod_specialize_nested: fn(rewrite: ^SemaInlineRewrite, body: [Item], mod
     values: sema_genmod_folded_consts(mapped, rewrite.values, enums)
     expanded: sema_genmod_expand_items(mapped, nesting, [SemaGenericModuleSource]{}, values, enums) ?? return mapped
     // The templates and aliases have served; only instances remain.
-    ^kept: [Item]{}
-    loop item in expanded.items {
+    kept: loop item in expanded.items -> {
         if item == .GenericModule(_) || item == .ModuleAlias(_) -> next
-        kept.push(item)
+        item
     }
     kept
 }

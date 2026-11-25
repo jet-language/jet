@@ -55,10 +55,7 @@ sema_fork_methods_expand: fn(items: ^[Item]) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> {
-                ^stored: [Type]{}
-                loop field in definition.fields {
-                    if field.computed == None -> stored.push(field.ty.copy())
-                }
+                stored: loop field in definition.fields if field.computed == None -> field.ty.copy()
                 row: sema_fork_parts_row(types, definition.name)
                 types.parts[row] = Val(stored)
                 types.params[row] = Val(sema_fork_methods_param_names(definition.type_params))

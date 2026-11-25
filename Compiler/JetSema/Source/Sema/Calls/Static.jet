@@ -191,10 +191,7 @@ sema_call_static_missing_member: fn(receiver: Expr, method: String, method_span:
     if sema_call_registered_method_names(graph, nominal, false, check).contains(method) {
         check.diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{owner}`", "instance methods need a value before the dot", "call it on a `{owner}` value: `x.{method}(...)`"))
     } else {
-        ^statics: [String]{}
-        loop name in sema_call_registered_method_names(graph, nominal, true, check) {
-            if !sema_call_method_is_generated(graph, nominal, name) -> statics.push(name)
-        }
+        statics: loop name in sema_call_registered_method_names(graph, nominal, true, check) if !sema_call_method_is_generated(graph, nominal, name) -> name
         shown: loop name in statics -> "`{name}`"
         fix: if sema_suggest_field(method, statics) == .Val(near) -> "did you mean `{owner}.{near}`?" else if sema_call_static_free_twin(graph, row.module_index, owner, method, check.environment.*) == .Val(twin) -> "call the free function `{twin}(...)` that `{owner}`'s module declares" else if statics.len() > 0 -> "call a static method `{owner}` declares: {shown.join(", ")}" else -> "call `{method}` on a `{owner}` value, or declare a static `{method}` for `{owner}`"
         check.diagnostics.push(sema_error("E0311", method_span, "`{owner}` has no static method `{method}`", "static lookup finds an associated method of `{owner}` with no `self` receiver, and `{owner}` declares none named `{method}`", fix))
@@ -767,10 +764,9 @@ sema_call_builtin_static_argument: fn(argument: CallArg, declared: Type, row: Bu
         if sema_call_builtin_static_open(declared, row, bindings) {
             // The parameters hint an unannotated lambda once they are known.
             ^closed: true
-            ^hinted: [Type]{}
-            loop param in params {
+            hinted: loop param in params -> {
                 if sema_call_builtin_static_open(param, row, bindings) -> closed = false
-                hinted.push(sema_inference_substitute_type_bindings(param, bindings))
+                sema_inference_substitute_type_bindings(param, bindings)
             }
             ^probe_hint: Type?{None}
             if closed {
@@ -867,10 +863,7 @@ sema_call_builtin_static_call_arg: fn(value: TExpr, argument: CallArg) -> TCallA
 // The compiler node a builtin static row lowers to; a CoreRole row has none.
 // `line` is the call's source line, which a checked crossing stops at.
 sema_call_builtin_static_lowered: fn(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span, line: Int, program: SemaProgramTables, context: ^SemaCheckContext) -> TExprKind? {
-    ^rest: [TExpr]{}
-    loop index in 0..<values.len() {
-        if index > 0 -> rest.push(values[index])
-    }
+    rest: loop index in 0..<values.len() if index > 0 -> values[index]
     if row.lowering == {
         // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
         .ArgumentBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: operation.copy(), args: rest})
@@ -1222,8 +1215,7 @@ sema_call_static_alias_target: fn(graph: SemaRegistrationGraph, row: SemaRegistr
         return Val(SemaStaticAliasTarget{symbol: target, owner_type_args: [Type]{}})
     }
     if owner_type_args.len() != definition.type_params.len() -> return None
-    ^names: [String]{}
-    loop parameter in definition.type_params -> names.push(parameter.name)
+    names: loop parameter in definition.type_params -> parameter.name
     args: loop arg in target_args -> sema_inference_substitute_type(arg, names, owner_type_args)
     Val(SemaStaticAliasTarget{symbol: target, owner_type_args: args})
 }
@@ -1379,13 +1371,12 @@ sema_call_static_reflect_function: fn(name: String, args: [CallArg], span: Span,
     if resolved.kind != SymbolKind.Function -> return None
     ^types: [Type]?{None}
     if args.len() == 1 && args[0].expr == .ListLit(elements, _, _) {
-        ^listed: [Type]{}
-        loop element in elements {
+        listed: loop element in elements -> {
             written: sema_call_type_written_as_value(element, check.environment.*, graph) ?? {
                 check.diagnostics.push(sema_error("E0119", expr_span(element), "`types:` lists the type arguments of `{name}`, and this is not a type", "`{name}.reflect(types: [...])` reflects one specialization of a generic function, so each element is a type written where a value goes", "write a type name such as `Int`, a generic type such as `Set<Int>`, or `[Int]` for a list"))
                 return Val(SemaMethodSpecialCheck{handled: true, value: None})
             }
-            listed.push(written)
+            written
         }
         types = Val(listed)
     }

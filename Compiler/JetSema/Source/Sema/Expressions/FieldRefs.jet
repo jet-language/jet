@@ -155,13 +155,12 @@ sema_field_ref_owner_field: fn(
     shown: owner_symbol.name
     sees_private: sema_expr_sees_private_fields(context)
     // The rows of the stored fields visible at the selector.
-    ^visible: [Int]{}
-    loop (row, field) in struct_def.fields {
+    visible: loop (row, field) in struct_def.fields -> {
         if field.computed != None -> next
         if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sees_private, environment, program) {
             next
         }
-        visible.push(row)
+        row
     }
     if expr == .Field(base, member, _, _) && sema_expr_is_bare_subject(base) {
         names: loop param in struct_def.type_params -> param.name

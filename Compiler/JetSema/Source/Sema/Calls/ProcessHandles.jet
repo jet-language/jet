@@ -48,10 +48,9 @@ sema_process_wrong_arity: fn(method: String, expected: Int, actual: Int, span: S
 
 sema_process_check_args: fn(args: [CallArg], required: [Type], check: ^SemaBodyCheck) -> [TExpr]? {
     if args.len() != required.len() -> return None
-    ^values: [TExpr]{}
-    loop index in 0..<args.len() {
+    values: loop index in 0..<args.len() -> {
         value: sema_check_expression(args[index].expr, Val(required[index]), check) ?? return None
-        values.push(value)
+        value
     }
     Val(values)
 }
@@ -289,8 +288,7 @@ sema_process_source_call: fn(role: String, api: String, effect_name: String, arg
         return rejected
     }
     callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return rejected
-    ^call_args: [TCallArg]{}
-    loop argument in args -> call_args.push(sema_value_method_source_arg(argument))
+    call_args: loop argument in args -> sema_value_method_source_arg(argument)
     value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: call_args}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
 }

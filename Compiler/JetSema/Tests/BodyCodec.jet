@@ -601,8 +601,7 @@ body_codec_type_id: fn(handle: Int) -> TComptimeValue {
     ^spellings: name_table_sized(2)
     loop _ in 0..<2 {
         ^input: BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}, spellings: spellings.move()}
-        ^texts: [String]{}
-        loop _ in 0..<4 -> texts.push(body_codec_get_string(out.bytes, input))
+        texts: loop _ in 0..<4 -> body_codec_get_string(out.bytes, input)
         spellings = input.spellings.move()
         if input.failed || texts != ([String]{"param", "local", "param", "local"}) {
             panic("BodyCodec: the strings read back as {texts}")
@@ -661,8 +660,7 @@ BodyCodecRecords: struct {
             if at == self.refused || at < 0 || size < 0 || at + size > self.bytes.len() {
                 return None
             }
-            ^record: [U8]{}
-            loop index in at..<at + size -> record.push(self.bytes[index])
+            record: loop index in at..<at + size -> self.bytes[index]
             Val(record)
         }
     }

@@ -999,10 +999,7 @@ sema_comptime_use_build_only: fn(graph: SemaRegistrationGraph, runtime_names: [N
             }
         }
     }
-    ^build_only: [ModuleID]{}
-    loop module_index in 0..<count {
-        if !ships[module_index] -> build_only.push(graph.modules[module_index].module_identity)
-    }
+    build_only: loop module_index in 0..<count if !ships[module_index] -> graph.modules[module_index].module_identity
     build_only
 }
 

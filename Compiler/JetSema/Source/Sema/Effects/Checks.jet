@@ -2128,8 +2128,7 @@ sema_effect_cap_ceiling: fn(cap: ModuleCap) -> [String]? Never! {
 sema_effect_cap_frames: fn(caps: [SemaEffectModuleCap]) -> String Never! {
     ^frames: [String]{}
     loop cap in caps {
-        ^entries: [String]{}
-        loop entry in cap.cap.entries -> entries.push(entry.name.copy())
+        entries: loop entry in cap.cap.entries -> entry.name.copy()
         frame: effect_scope_descriptor("{cap.cap.scope} {cap.cap.owner}", "", false, Val(entries))
         if frame != "" -> frames.push(frame)
     }
@@ -2303,8 +2302,7 @@ sema_effect_panic_steps: fn(nodes: [SemaEffectNode], node_index: Int) -> [String
     ^seen: (loop _ in nodes -> false)
     path: sema_effect_panic_path(nodes, node_index, seen)
     if path.len() == 0 -> return [String]{"the reachable call graph"}
-    ^steps: [String]{}
-    loop at in 1..<path.len() -> steps.push(nodes[path[at]].chain_name)
+    steps: loop at in 1..<path.len() -> nodes[path[at]].chain_name
     steps
 }
 
@@ -2366,8 +2364,7 @@ sema_effect_unsafe_reach: fn(nodes: [SemaEffectNode], node_index: Int) -> SemaEf
     if path.len() == 0 {
         return SemaEffectUnsafeReach{steps: [String]{"the reachable call graph"}, gate: ""}
     }
-    ^steps: [String]{}
-    loop at in 1..<path.len() -> steps.push(nodes[path[at]].chain_name)
+    steps: loop at in 1..<path.len() -> nodes[path[at]].chain_name
     SemaEffectUnsafeReach{steps: steps, gate: nodes[path[path.len() - 1]].unsafe_site}
 }
 
@@ -4049,11 +4046,10 @@ sema_effect_guards_shown: fn(guards: [SemaTypeReflectionGuard]) -> String Never!
 // The instance reaches of `node` with each target's solved row.
 sema_effect_instance_notes: fn(nodes: [SemaEffectNode], solved: [[String]], node: SemaEffectNode) -> [SemaEffectInstanceNote] Never! {
     rare: node.rare ?? return [SemaEffectInstanceNote]{}
-    ^notes: [SemaEffectInstanceNote]{}
-    loop reach in rare.instance_reaches {
+    notes: loop reach in rare.instance_reaches -> {
         target: reach.target_node
         if target < 0 -> next
-        notes.push(SemaEffectInstanceNote{label: reach.label, callee: nodes[target].chain_name, row: solved[target], span: reach.span})
+        SemaEffectInstanceNote{label: reach.label, callee: nodes[target].chain_name, row: solved[target], span: reach.span}
     }
     notes
 }
@@ -5090,10 +5086,7 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
             solved.push(unique_rows[slot])
             next
         }
-        ^row: [String]{}
-        loop k in 0..<ordered_masks.len() {
-            if (mask & ordered_masks[k]) != 0 -> row.push(ordered_names[k])
-        }
+        row: loop k in 0..<ordered_masks.len() if (mask & ordered_masks[k]) != 0 -> ordered_names[k]
         slot: unique_rows.len()
         by_mask[mask] = slot
         unique_rows.push(row)
@@ -5919,10 +5912,9 @@ sema_effect_stack_bodies_claimed: fn(modules: [SemaGraphModuleResult], nodes: [S
 
 // The nodes of `keys` that have a body, in order.
 sema_effect_stack_call_targets: fn(keys: [String], node_by_key: SemaEffectNodeKeys) -> [Int] Never! {
-    ^targets: [Int]{}
-    loop key in keys {
+    targets: loop key in keys -> {
         target: sema_effect_node_index(node_by_key, key) ?? next
-        targets.push(target)
+        target
     }
     targets
 }
@@ -6739,11 +6731,10 @@ sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reache
             reached: sema_effect_without_deny_only(solved)
             // A non-deterministic Core call in this body already reported
             // E3403 for its `Time`/`Rand` row; any other effect still reports.
-            ^over: [String]{}
-            loop name in reached {
+            over: loop name in reached -> {
                 root: sema_effect_root(name)
                 if node.nondeterministic_call && (root == "Time" || root == "Rand") -> next
-                over.push(name)
+                name
             }
             if node.nondeterministic_call -> valid = false
             if over.len() > 0 {
@@ -7235,8 +7226,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         if nodes[node_index].direct_spans.len() == 0 -> next
         policy: package_policies[expert_modules[graph_module]]
         main: policy.package_identity == main_package
-        ^expert_diagnostics: [Diagnostic]{}
-        loop used in nodes[node_index].direct_spans {
+        expert_diagnostics: loop used in nodes[node_index].direct_spans -> {
             if !authority_expert(used.name) -> next
             ^row_denied: false
             loop bound in nodes[node_index].prohibited {
@@ -7248,7 +7238,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
             if verdict == AuthorityVerdict.Allowed || (main && verdict == AuthorityVerdict.Denied) {
                 next
             }
-            expert_diagnostics.push(sema_effect_expert_not_held_diagnostic(nodes[node_index], used.name, used.span, policy, main, verdict))
+            sema_effect_expert_not_held_diagnostic(nodes[node_index], used.name, used.span, policy, main, verdict)
         }
         if expert_diagnostics.len() > 0 {
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, expert_diagnostics)
@@ -8068,8 +8058,7 @@ sema_effect_check_module_regions: fn(functions: [FnBody], module_facts: [SemaCal
 
 // A discarded call result of a function whose row has no outcome (L0508).
 sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, symbols: SymbolTable, solved: [[String]], diagnostics: ^[Diagnostic]) {
-    ^discarded: [Diagnostic]{}
-    loop fact in call_facts {
+    discarded: loop fact in call_facts -> {
         if !fact.discarded -> next
         callee: fact.callee ?? next
         callee_key: sema_effect_run_key(symbols, callee) ?? next
@@ -8078,7 +8067,7 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
         // work (`measure(Square{…})` runs `Square.area`).
         if nodes[node_index].rare == .Val(rare) && rare.param_dispatches.len() > 0 -> next
         if !sema_effect_row_has_no_outcome(nodes[node_index], solved[node_index]) -> next
-        discarded.push(sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span))
+        sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span)
     }
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, discarded)
 }

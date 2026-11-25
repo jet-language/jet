@@ -3176,8 +3176,7 @@ sema_type_core_leaf_name: fn(graph: SemaRegistrationGraph, name: String, caller:
     if parts.len() < 2 -> return None
     last: parts.len() - 1
     leaf: parts[last]
-    ^owner_parts: [String]{}
-    loop index in 0..<last -> owner_parts.push(parts[index])
+    owner_parts: loop index in 0..<last -> parts[index]
     module_name: sema_registration_module_name(graph, sema_registration_module_id(graph, owner_parts.join("."))) ?? return None
     if module_name == "core.crypto" -> return None
     if boundary_head_owner_module(leaf) != None && boundary_head_carrier_module(leaf) != Val(module_name) {

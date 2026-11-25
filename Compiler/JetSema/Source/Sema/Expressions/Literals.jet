@@ -533,8 +533,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
         if inference_failed -> return None
     }
     ^parts: [TListSpreadPart]{}
-    ^resolved_types: [Type]{}
-    loop slot in 0..<checked_parts.len() {
+    resolved_types: loop slot in 0..<checked_parts.len() -> {
         part: checked_parts[slot] ?? {
             check.context.incomplete_reasons.push("checked list element inference left an unresolved part")
             return None
@@ -544,7 +543,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
             return None
         }
         parts.push(part)
-        resolved_types.push(item_type)
+        item_type
     }
     Val(SemaExpressionListCheckedParts{parts: parts, element_types: resolved_types})
 }
@@ -1387,8 +1386,7 @@ sema_expression_index_hook_method: fn(role: String) -> String Never! {
 
 // `receiver.method(args…)`, a generated hook call.
 sema_expression_index_hook_call: fn(receiver: Expr, method: String, args: [Expr], span: Span) -> Expr Never! {
-    ^call_args: [CallArg]{}
-    loop value in args -> call_args.push(sema_expression_index_hook_arg(value))
+    call_args: loop value in args -> sema_expression_index_hook_arg(value)
     Expr.MethodCall{receiver: receiver, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
 }
 

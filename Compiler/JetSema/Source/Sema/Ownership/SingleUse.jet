@@ -96,8 +96,7 @@ sema_single_use_duty_methods: fn(ty: Type) -> [String] Never! {
 // The job a duty names: "`join` or `detach`", or "`consume`".
 sema_single_use_job: fn(methods: [String]) -> String Never! {
     if methods.len() == 0 -> return "`consume`"
-    ^names: [String]{}
-    loop method in methods -> names.push("`{method}`")
+    names: loop method in methods -> "`{method}`"
     names.join(" or ")
 }
 
@@ -105,8 +104,7 @@ sema_single_use_job: fn(methods: [String]) -> String Never! {
 // nothing when only a move does it.
 sema_single_use_job_calls: fn(methods: [String]) -> String Never! {
     if methods.len() == 0 -> return ""
-    ^calls: [String]{}
-    loop method in methods -> calls.push("`.{method}()`")
+    calls: loop method in methods -> "`.{method}()`"
     "call {calls.join(" or ")} on it, "
 }
 

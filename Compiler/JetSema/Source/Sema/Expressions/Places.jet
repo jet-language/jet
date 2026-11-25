@@ -1510,10 +1510,9 @@ sema_expression_swizzle_read: fn(base: Expr, member: String, span: Span, ty: Typ
 // The read of `count` lanes, packed two bits each, of `base`.
 sema_expression_swizzle_read_expr: fn(base: Expr, slots: SemaSwizzleSlots, packed: Int, count: Int, span: Span) -> Expr {
     if slots.lanes && (count == 1 || slots.declared & (1 << count) != 0) {
-        ^args: [CallArg]{}
-        loop index in 0..<count {
+        args: loop index in 0..<count -> {
             lane: (packed >> (index * 2)) & 3
-            args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
+            CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
         }
         method: if count == 1 -> "lane" else -> "__swizzle{count}"
         return Expr.MethodCall{receiver: base, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}

@@ -901,8 +901,7 @@ sema_comptime_precheck_wave: fn(shared_state: Shared<SemaPrecheckShared>, module
         ^order: [Int]{}
         loop wave_module in compiler_threads_heaviest_first(heaviest) {
             first: firsts[wave_module]
-            ^module_weights: [Int]{}
-            loop job in first..<firsts[wave_module + 1] -> module_weights.push(weights[job])
+            module_weights: loop job in first..<firsts[wave_module + 1] -> weights[job]
             loop index in compiler_threads_heaviest_first(module_weights) {
                 order.push(first + index)
             }
@@ -1622,8 +1621,7 @@ sema_comptime_walk_push: fn(walk: ^SemaComptimeWalk, environment: SemaScopeEnvir
             missing_rows.push(sema_comptime_precheck_scope_rows(program, job.module_identity))
         } else if existing >= 0 && !keep.contains(existing) { keep.push(existing) }
     }
-    ^new_slots: [Int]{}
-    loop index in 0..<missing_modules.len() {
+    new_slots: loop index in 0..<missing_modules.len() -> {
         at: missing_at[index]
         rows: missing_rows[index]
         sema_comptime_walk_evict(walk, rows, keep)
@@ -1633,7 +1631,7 @@ sema_comptime_walk_push: fn(walk: ^SemaComptimeWalk, environment: SemaScopeEnvir
         walk.slot_rows.push(rows)
         walk.held_rows += rows
         keep.push(new_slot)
-        new_slots.push(new_slot)
+        new_slot
     }
     // Module k of this push has scope row `slots[k]`, its jobs at
     // `members[k]` and its heaviest job's weight at `heaviest[k]`.

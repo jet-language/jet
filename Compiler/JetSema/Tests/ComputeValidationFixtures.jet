@@ -202,8 +202,7 @@ compute_fixture_cases: fn(failures: ^[String]) {
 }
 
 compute_fixture_size: fn(size: Int, failures: ^[String]) {
-    ^parts: [String]{}
-    loop index in 0..<size -> parts.push("f_{index}: fn() {{}}\n")
+    parts: loop index in 0..<size -> "f_{index}: fn() {{}}\n"
     ^modules: compute_fixture_modules("{size} functions", parts.join(""), failures) ?? return
     compute_fixture_compare("{size} zero-obligation functions", modules, [Diagnostic]{}, false, failures)
     compute_fixture_obligation(modules, compute_fixture_key("f_0"))

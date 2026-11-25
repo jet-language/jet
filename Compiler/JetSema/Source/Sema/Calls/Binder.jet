@@ -468,12 +468,7 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: ^[CallArg
     }
     if failed -> return None
 
-    ^missing: [Int]{}
-    loop (parameter_index, param) in params {
-        if slots[parameter_index].len() == 0 && !sema_call_param_optional(param) {
-            missing.push(parameter_index)
-        }
-    }
+    missing: loop (parameter_index, param) in params if slots[parameter_index].len() == 0 && !sema_call_param_optional(param) -> parameter_index
     if missing.len() > 0 {
         if !saw_label {
             ^positional_recovery: true

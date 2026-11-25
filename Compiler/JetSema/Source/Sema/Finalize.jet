@@ -624,15 +624,14 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // Each graph module's package row in `stage.package_policies` (-1 for
     // Core and a module no package owns), whose expert effects the module's
     // functions may use.
-    ^expert_modules: [Int]{}
-    loop graph_module in final_graph.modules {
+    expert_modules: loop graph_module in final_graph.modules -> {
         ^at: -1
         if !module_is_core(graph_module.module_identity) {
             loop (index, policy) in stage.package_policies {
                 if policy.package_identity == graph_module.package_identity -> at = index
             }
         }
-        expert_modules.push(at)
+        at
     }
     // Each `#FX(…)` module cap names known effects, checked once where it is
     // written; a file module's caps reach its file through the module graph,
@@ -960,12 +959,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         sink.progress("counters.sema.core_seal.stand_ins", stood_in, -1)
         if rerun != "" -> sink.progress("counters.sema.core_seal.reruns.{rerun}", 1, -1)
     }
-    ^reported: [Diagnostic]{}
-    loop diagnostic in diagnostics {
-        if !sema_core_lint_dropped(diagnostic, own_check: final_graph.core_own_check) && !sema_lint_allowed(diagnostic, allowances) {
-            reported.push(diagnostic)
-        }
-    }
+    reported: loop diagnostic in diagnostics if !sema_core_lint_dropped(diagnostic, own_check: final_graph.core_own_check) && !sema_lint_allowed(diagnostic, allowances) -> diagnostic
     diagnostics = reported
     sema_crypto_misuse_precedence(diagnostics)
     sema_name_display_diagnostics(final_graph, diagnostics)

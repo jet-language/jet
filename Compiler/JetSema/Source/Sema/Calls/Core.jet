@@ -557,10 +557,7 @@ sema_call_core_unknown_item: fn(module_name: String, member: String, span: Span)
     if sema_call_core_submodule_path_hint(module_name, member, span) == .Val(hint) -> return hint
     // A reserved `__` seam is Core-internal and user code
     // cannot spell it, so it is never offered as a suggestion.
-    ^menu: [String]{}
-    loop item in items {
-        if !item.starts_with("__") -> menu.push(item.copy())
-    }
+    menu: loop item in items if !item.starts_with("__") -> item.copy()
     suggestion: sema_suggest_field(member, menu)
     fix: if suggestion == {
         .Val(candidate) -> "did you mean `{candidate}`?"
@@ -1086,13 +1083,12 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
         if crosses -> any = true
     }
     if !any -> return None
-    ^crossed: [CallArg]{}
-    loop (index, argument) in args {
+    crossed: loop (index, argument) in args -> {
         ^updated: argument.copy()
         if exact[index] {
             updated.expr = Expr.MethodCall{receiver: argument.expr.copy(), method: "to_float", method_span: argument.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
         }
-        crossed.push(updated)
+        updated
     }
     Val(crossed)
 }

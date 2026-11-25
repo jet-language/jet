@@ -279,10 +279,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         selects.push(heads.contains(active))
     }
     if !valid -> return false
-    ^missing: [String]{}
-    loop os in oses {
-        if !seen.contains(os) -> missing.push(os)
-    }
+    missing: loop os in oses if !seen.contains(os) -> os
     if else_body != None {
         // E0641: the `else` stands for the OSes no arm names; the edit names them.
         if sema_coverage_else_arm_at(check.environment.*, span.start) == .Val(else_arm) {

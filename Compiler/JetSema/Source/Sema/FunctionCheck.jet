@@ -1087,8 +1087,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     ^written_row: [String]?{None}
     if func.declared_effects == .Val(row) {
-        ^names: [String]{}
-        loop entry in row -> names.push(entry.name.copy())
+        names: loop entry in row -> entry.name.copy()
         written_row = Val(names)
     }
     effect_scope: effect_scope_descriptor(func.name, owner_key, func.params.len() > 0 && func.params[0].name == "path", written_row)

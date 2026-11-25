@@ -237,8 +237,7 @@ sema_lifecycle_inline_call: fn(raw: [U8], call: Call) -> SemaLifecycleInlineCall
     ^at: call.name_span.end
     if at >= raw.len() || raw[at] != (U8{40}) -> return None
     at += 1
-    ^spans: [Span]{}
-    loop (index, argument) in call.args {
+    spans: loop (index, argument) in call.args -> {
         at = sema_lifecycle_skip_spaces(raw, at)
         if index > 0 {
             if at >= raw.len() || raw[at] != (U8{44}) -> return None
@@ -246,7 +245,7 @@ sema_lifecycle_inline_call: fn(raw: [U8], call: Call) -> SemaLifecycleInlineCall
         }
         if at != argument.span.start -> return None
         at = sema_lifecycle_inline_end(raw, argument.expr) ?? return None
-        spans.push(Span{start: sema_lifecycle_inline_start(argument.expr), end: at})
+        Span{start: sema_lifecycle_inline_start(argument.expr), end: at}
     }
     at = sema_lifecycle_skip_spaces(raw, at)
     if call.args.len() > 0 && at < raw.len() && raw[at] == (U8{44}) {

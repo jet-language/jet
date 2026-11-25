@@ -1440,12 +1440,11 @@ sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
                     break true
                 }
             } ?? false
-            ^kept: [TComptimeField]{}
-            loop field in fields {
+            kept: loop field in fields -> {
                 if declared && core_record_field(type_name, field.name) == None && !sema_fact_answered_member(type_name, field.name) {
                     next
                 }
-                kept.push(TComptimeField{name: field.name, value: sema_fact_declared_value(field.value)})
+                TComptimeField{name: field.name, value: sema_fact_declared_value(field.value)}
             }
             return TComptimeValue.Struct{type_name: type_name, fields: kept}
         }
@@ -1973,13 +1972,12 @@ sema_fact_enum_values: fn(base: Expr, span: Span, expected: Type?, check: ^SemaB
             check.diagnostics.push(sema_error("E0949", at, "`{written}` is generic, so its cases have no one type to list", "`.values` lists each case as a value of one enum type, and a generic enum is a family of types", "list the values of the specialization you need yourself"))
             return sema_fact_read_failed()
         }
-        ^elements: [Expr]{}
-        loop variant in shape.variants {
+        elements: loop variant in shape.variants -> {
             if !(variant.payload == .Unit) {
                 check.diagnostics.push(sema_error("E0949", at, "`{written}.{variant.name}` carries a payload, so `{written}` has no list of case values", "`.values` lists every case once as a value, and a case with a payload is no value until its data is given", "remove the payload from `{variant.name}`, or list the values you need yourself"))
                 return sema_fact_read_failed()
             }
-            elements.push(sema_fact_enum_value_path(written, variant.name, span))
+            sema_fact_enum_value_path(written, variant.name, span)
         }
         head: Type.List{element: Type.Named{name: written}}
         catalog: Expr.TypedLit{head: Val(head), body: TypedLitBody.Elements{elements: elements}, span: span, id: AST_NODE_GENERATED}

@@ -137,10 +137,9 @@ sema_http_route_shape: fn(expression: Expr, check: SemaBodyCheck, request_ty: Ty
         .Ident(name, _, _) -> {
             function: sema_http_route_find_function(check, name) ?? return None
             graph: check.program.registration_graph
-            ^params: [SemaHTTPRouteParameter]{}
-            loop parameter in function.declaration.params {
+            params: loop parameter in function.declaration.params -> {
                 ^resolved: sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_identity)
-                params.push(SemaHTTPRouteParameter{name: parameter.name, ty: resolved})
+                SemaHTTPRouteParameter{name: parameter.name, ty: resolved}
             }
             body: if sema_registration_module_index(graph, function.symbol.module_identity) == .Val(owner_row) -> sema_registration_function_body(graph.modules[owner_row], function) else -> function.declaration.body
             return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: body}, module_identity: function.symbol.module_identity})
@@ -817,10 +816,7 @@ sema_http_route_response_statements: fn(statements: [Stmt], check: SemaBodyCheck
                 }
             }
             .Val(binding) -> {
-                ^next_aliases: [SemaHTTPRouteResponseAlias]{}
-                loop alias in aliases {
-                    if alias.name != binding.name -> next_aliases.push(alias)
-                }
+                next_aliases: loop alias in aliases if alias.name != binding.name -> alias
                 aliases = next_aliases
                 ^responses: sema_http_route_response_expr(binding.init, check, local_types, aliases, module_identity)
                 if responses.len() > 0 {
@@ -965,10 +961,7 @@ sema_http_route_find_json_body: fn(body: LambdaBody, request_names: [String]) ->
 // argument (sema_http_route_custom_verb).
 sema_http_route_verbs: fn() -> [String] Never! {
     variants: core_enum_cases("Method") ?? [String]{}
-    ^verbs: [String]{}
-    loop variant in variants {
-        if variant != SEMA_HTTP_ROUTE_CUSTOM_CASE -> verbs.push(variant.lower())
-    }
+    verbs: loop variant in variants if variant != SEMA_HTTP_ROUTE_CUSTOM_CASE -> variant.lower()
     verbs
 }
 
@@ -1092,11 +1085,10 @@ sema_http_route_contract: fn(method: String, wire: String, pattern: String, path
         schema: sema_http_route_schema_type(ty, check, shape.module_identity, [SymbolID]{}) ?? return None
         request_body = "{{\"required\":true,\"content_type\":\"application/json\",\"schema\":{schema}}}"
     }
-    ^response_json: [String]{}
-    loop response in responses {
+    response_json: loop response in responses -> {
         ^schema: response.schema ?? "null"
         ^content_type: if response.content_type == .Val(text) -> sema_http_route_json_quote(text) else -> "null"
-        response_json.push("{{\"status\":{response.status},\"description\":\"HTTP response\",\"schema\":{schema},\"content_type\":{content_type}}}")
+        "{{\"status\":{response.status},\"description\":\"HTTP response\",\"schema\":{schema},\"content_type\":{content_type}}}"
     }
     if response_json.len() == 0 && !is_mux -> return None
     ^source: if check.environment.source_file == "" -> "<source>" else -> check.environment.source_file
@@ -1233,8 +1225,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
             }
         }
     }
-    ^path_names: [String]{}
-    loop field in path_fields -> path_names.push(field.name)
+    path_names: loop field in path_fields -> field.name
     ^query_names: [String]{}
     loop parameter in typed {
         ^found_path: false
@@ -1374,11 +1365,10 @@ sema_http_mux_route_handler: fn(handler: Expr, params: [SemaHTTPRouteParameter],
         return Expr.Lambda{lambda: Lambda{take_names: lambda.take_names, params: [LambdaParam]{request_param}, effects: lambda.effects, body: LambdaBody.Block{body: body}, span: lambda.span, meta: lambda.meta}, id: AST_NODE_GENERATED}
     }
     callee: sema_http_mux_callee(handler) ?? panic("HTTP mux route handler is neither a lambda nor a named function")
-    ^args: [CallArg]{}
-    loop parameter in params {
+    args: loop parameter in params -> {
         ^name: parameter.name
         if request_names.contains(parameter.name) -> name = request.copy()
-        args.push(CallArg{convention: AccessConvention.Read, expr: sema_http_mux_ident(name, span), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
+        CallArg{convention: AccessConvention.Read, expr: sema_http_mux_ident(name, span), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     }
     body.push(Stmt.Expr{expr: Expr.Call{call: Call{name: callee, name_span: span, type_args: [Type]{}, args: args}, id: AST_NODE_GENERATED}})
     Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{request_param}, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}

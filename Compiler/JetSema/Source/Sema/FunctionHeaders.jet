@@ -268,12 +268,7 @@ sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallA
 // A script variable's default names the caller's variable of its own name,
 // not the parameter.
 sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics: ^[Diagnostic]) -> [Int] {
-    ^names: [String]{}
-    loop parameter_index in 0..<function.params.len() {
-        if function.params[parameter_index].name != "self" {
-            names.push(function.params[parameter_index].name)
-        }
-    }
+    names: loop parameter_index in 0..<function.params.len() if function.params[parameter_index].name != "self" -> function.params[parameter_index].name
     ^invalid: [Int]{}
     ^index: 0
     loop parameter_index in 0..<function.params.len() {

@@ -232,8 +232,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         }
         args.len() == 0 && method == "component" && type_args.len() == 1 -> sema_game_string_value(type_name(type_args[0]), span)
         args.len() == 0 && method == "query" && type_args.len() > 0 -> {
-            ^names: [String]{}
-            loop ty in type_args -> names.push(type_name(ty))
+            names: loop ty in type_args -> type_name(ty)
             sema_game_string_value(names.join(","), span)
         }
         else -> {

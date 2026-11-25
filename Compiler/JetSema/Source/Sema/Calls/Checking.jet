@@ -1338,11 +1338,10 @@ sema_call_enter_binder_refs: fn(refs: [BinderRef], site: Int, environment: SemaS
     span: Span{start: jfmt_expr_start(default_expr), end: expr_span(default_expr).end}
     owner: sema_scope_function_owner_key(scopes)
     ^_: sema_scope_enter(scopes, state, owner)
-    ^ids: [SymbolID]{}
-    loop reference in refs {
+    ids: loop reference in refs -> {
         symbol: sema_call_binder_ref_symbol(environment, program, context, owner, site, reference.slot, reference.name, reference.ty, span)
         ^_: sema_scope_declare_local(scopes, symbol, sema_symbol_key(program, context, symbol.id), false, AccessConvention.Read, None, false)
-        ids.push(symbol.id)
+        symbol.id
     }
     ids
 }
@@ -1664,10 +1663,7 @@ sema_call_pack_variadic_arguments: fn(typed: SemaCallTypedArguments, params: [Se
                 return None
             }
         }
-        ^tail: [TCallArg]{}
-        loop index in 0..<lowered.len() {
-            if typed.slots[index] == slot -> tail.push(lowered[index])
-        }
+        tail: loop index in 0..<lowered.len() if typed.slots[index] == slot -> lowered[index]
         if tail.len() == 1 && tail[0].spread {
             ^argument: tail[0]
             argument.spread = false

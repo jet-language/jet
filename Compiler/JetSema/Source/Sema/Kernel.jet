@@ -222,9 +222,6 @@ sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call
 
 // The module's local aliases of `core.compute`.
 sema_kernel_compute_aliases: fn(module_row: SemaRegistrationModule, table: ModuleTable) -> [String] Never! {
-    ^aliases: [String]{}
-    loop row in sema_core_registration_imports(module_row, table) {
-        if row.module_name == "core.compute" && row.item == None -> aliases.push(row.alias)
-    }
+    aliases: loop row in sema_core_registration_imports(module_row, table) if row.module_name == "core.compute" && row.item == None -> row.alias
     aliases
 }

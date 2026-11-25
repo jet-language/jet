@@ -605,14 +605,13 @@ sema_comptime_body_capture_site: fn(
 
 // The prepared locals the site can read: each visible binding with a value.
 sema_comptime_body_prepared_locals: fn(environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [SemaComptimePreparedLocal] Never! {
-    ^prepared: [SemaComptimePreparedLocal]{}
-    loop index in 0..<scopes.bindings.len() {
+    prepared: loop index in 0..<scopes.bindings.len() -> {
         if scopes.bindings[index].prepared == None -> next
         binding: sema_scope_binding_row(environment, scopes, index)
         if sema_scope_resolve_index(scopes, binding.symbol.name) != .Val(index) -> next
         value: binding.prepared ?? next
         ty: binding.symbol.ty ?? next
-        prepared.push(SemaComptimePreparedLocal{name: binding.symbol.name, ty: ty, value: value, span: binding.symbol.span})
+        SemaComptimePreparedLocal{name: binding.symbol.name, ty: ty, value: value, span: binding.symbol.span}
     }
     prepared
 }
@@ -624,12 +623,11 @@ sema_comptime_body_prepared_locals: fn(environment: SemaScopeEnvironment, scopes
 // local there, and walking them at every site cost each body a pass over
 // the whole module.
 sema_comptime_body_runtime_locals: fn(scopes: SemaScopeTable) -> [String] Never! {
-    ^names: [String]{}
-    loop index in 0..<scopes.bindings.len() {
+    names: loop index in 0..<scopes.bindings.len() -> {
         if scopes.bindings[index].frame == 0 || scopes.bindings[index].prepared != None -> next
         name: scopes.bindings[index].symbol.name
         if sema_scope_resolve_index(scopes, name) != .Val(index) -> next
-        names.push(name.copy())
+        name.copy()
     }
     names
 }

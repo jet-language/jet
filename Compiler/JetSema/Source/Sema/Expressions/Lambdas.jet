@@ -1116,8 +1116,7 @@ sema_expression_lambda_bound_statements_mut_use: fn(statements: [Stmt], name: St
 // are copied at closure creation (the escaping route). `written` names the
 // locals the checked body is known to write beyond its visible assignments.
 sema_expression_lambda_bound_capture_escapes: fn(lambda: Lambda, written: [String], check: ^SemaBodyCheck) -> Bool? {
-    ^parameter_names: [String]{}
-    loop parameter in lambda.params -> parameter_names.push(parameter.name)
+    parameter_names: loop parameter in lambda.params -> parameter.name
     ^used_indexes: [Int]{}
     ^mutated_flags: [Bool]{}
     ^writes_local: false
@@ -2716,8 +2715,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
                 sema_expression_lambda_add_capture_key(capture_keys, check.scopes.bindings[outer_index ?? 0].symbol.id)
                 sema_expression_lambda_append_name(lambda_work.meta.moved_captures, capture.name)
             }
-            ^declared_mutable: [String]{}
-            loop name in lambda_work.meta.mut_captures -> declared_mutable.push(name)
+            declared_mutable: loop name in lambda_work.meta.mut_captures -> name
             lambda_work.meta.mut_captures = [String]{}
             loop name in declared_mutable {
                 ^outer_index: sema_expression_lambda_outer_binding(name, lambda.span, frame, check.scopes)
@@ -3057,12 +3055,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     // them (the unused-binding lints); its moves and write windows stay with
     // the body's own state (an inline loop joins its whole state below).
     if !inline_loop {
-        ^outer: [SemaOwnershipReference]{}
-        loop body_reference in first_reference..<lambda_state.references.len() {
-            if sema_ownership_first_row(check.state, lambda_state.references[body_reference].def_id) >= 0 {
-                outer.push(lambda_state.references[body_reference])
-            }
-        }
+        outer: loop body_reference in first_reference..<lambda_state.references.len() if sema_ownership_first_row(check.state, lambda_state.references[body_reference].def_id) >= 0 -> lambda_state.references[body_reference]
         sema_ownership_merge_references(check.state, outer)
     }
     // The lowered parameters' access: a host write callback's one parameter
@@ -3075,8 +3068,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     // An inline loop body builds into its owner's code, under its frame.
     ^written_row: [String]?{None}
     if !inline_loop && lambda.effects == .Val(row) {
-        ^names: [String]{}
-        loop entry in row -> names.push(entry.name.copy())
+        names: loop entry in row -> entry.name.copy()
         written_row = Val(names)
     }
     ^lambda_value: TLambda{

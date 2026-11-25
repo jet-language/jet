@@ -458,8 +458,7 @@ sema_function_memory_plan_new: fn() -> SemaFunctionMemoryPlan Never! {
 // scoped-GC fact, so it can neither promote nor take a transfer).
 sema_function_memory_plan_rows: fn(plan: ^SemaFunctionMemoryPlan, sources: [SemaFunctionMemorySource], limit: Int) -> SemaFunctionMemoryPlanned {
     ^planned: SemaFunctionMemoryPlanned{functions: [Func]{}, rows: [Int]{}, promoted: [String]{}, shared_rows: [Int:Bool]{}}
-    ^keys: [SemaFunctionMemoryKey]{}
-    loop (row, source) in sources {
+    keys: loop (row, source) in sources -> {
         ^function_diagnostics: [Diagnostic]{}
         ^function_complete: true
         if source.function == .Val(declared) {
@@ -476,7 +475,7 @@ sema_function_memory_plan_rows: fn(plan: ^SemaFunctionMemoryPlan, sources: [Sema
         function_complete = function_complete && function_diagnostics.len() == 0
         loop diagnostic in function_diagnostics -> plan.diagnostics.push(diagnostic)
         plan.functions.push(SemaFunctionMemoryFunction{module_identity: source.module_identity, owner: source.owner, function: None, diagnostics: function_diagnostics, transfer_root: source.transfer_root, complete: function_complete})
-        keys.push(sema_function_memory_key(source.module_identity, source.owner, source.name, source.span))
+        sema_function_memory_key(source.module_identity, source.owner, source.name, source.span)
     }
     sema_function_memory_fill_positions(plan, planned, keys)
     ^iteration: 0

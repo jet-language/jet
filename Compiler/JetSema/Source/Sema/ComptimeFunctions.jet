@@ -141,10 +141,9 @@ sema_comptime_body_value_from_item: fn(value: SemaComptimeItemValue) -> SemaComp
 }
 
 sema_comptime_body_values_from_items: fn(values: [SemaComptimeItemValue]) -> [SemaComptimeBodyValue] Never! {
-    ^result: [SemaComptimeBodyValue]{}
-    loop value in values {
+    result: loop value in values -> {
         if value.kind != SemaComptimeItemKind.BodyExpression -> next
-        result.push(sema_comptime_body_value_from_item(value))
+        sema_comptime_body_value_from_item(value)
     }
     result
 }
@@ -245,10 +244,7 @@ sema_comptime_find_checked_function: fn(functions: [SemaComptimeFunctionResult],
 sema_comptime_functions_without: fn(functions: [SemaComptimeFunctionResult], keys: [String]) -> [SemaComptimeFunctionResult] Never! {
     ^dropped: name_table_sized(keys.len() + 1)
     loop key in keys -> ^_: name_intern(dropped, key)
-    ^kept: [SemaComptimeFunctionResult]{}
-    loop function in functions {
-        if name_find(dropped, function.function_key) == None -> kept.push(function.copy())
-    }
+    kept: loop function in functions if name_find(dropped, function.function_key) == None -> function.copy()
     kept
 }
 

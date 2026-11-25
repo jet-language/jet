@@ -153,10 +153,7 @@ sema_comptime_available_version: fn(available: SemaComptimeAvailableConstants) -
 }
 
 sema_comptime_waiting_dependencies: fn(available: SemaComptimeAvailableConstants, dependencies: [String]) -> [String] Never! {
-    ^waiting: [String]{}
-    loop key in dependencies {
-        if name_find(available.keys, key) == None -> waiting.push(key.copy())
-    }
+    waiting: loop key in dependencies if name_find(available.keys, key) == None -> key.copy()
     waiting
 }
 
@@ -1256,8 +1253,7 @@ sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_p
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, initial_environment, initial_program, sema_function_memory_plan_new())
-    ^every_module: [Int]{}
-    loop module_index in 0..<module_count -> every_module.push(module_index)
+    every_module: loop module_index in 0..<module_count -> module_index
     ^checks: sema_check_declaration_modules(module_state, every_module, [SemaComptimeItemValue]{}, true, threads)
     ^pass_environment: sema_check_shared_take_environment(module_state)
     ^pass_program: sema_check_shared_take_program(module_state)
@@ -1361,8 +1357,7 @@ sema_comptime_modules_with_values: fn(programs: ^[SemaProgramTables], values: [S
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, environment, program, sema_function_memory_plan_new())
-    ^every_module: [Int]{}
-    loop module_index in 0..<module_count -> every_module.push(module_index)
+    every_module: loop module_index in 0..<module_count -> module_index
     ^checks: sema_check_declaration_modules(module_state, every_module, values, true, threads)
     programs.push(sema_check_shared_take_program(module_state))
     ^modules: [SemaGraphModuleResult]{}

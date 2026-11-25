@@ -128,8 +128,7 @@ sema_field_error_path: fn(expression: Expr) -> SemaFieldErrorPath? {
 // The steps of `path`, or None when it is not a path of field names each
 // followed by `[n]` indexes.
 sema_field_error_steps: fn(path: String) -> [SemaFieldErrorStep]? {
-    ^steps: [SemaFieldErrorStep]{}
-    loop segment in path.split(".") {
+    steps: loop segment in path.split(".") -> {
         bytes: segment.bytes()
         ^end: 0
         loop end < bytes.len() && bytes[end] != 91 -> end += 1
@@ -145,7 +144,7 @@ sema_field_error_steps: fn(path: String) -> [SemaFieldErrorStep]? {
             indexes += 1
             at = digits + 1
         }
-        steps.push(SemaFieldErrorStep{name: name, indexes: indexes})
+        SemaFieldErrorStep{name: name, indexes: indexes}
     }
     if steps.len() == 0 -> return None
     Val(steps)

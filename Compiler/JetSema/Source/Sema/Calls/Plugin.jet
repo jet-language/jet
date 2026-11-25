@@ -299,10 +299,9 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
         sema_plugin_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    ^params: [SemaCallParam]{}
-    loop index in 0..<export_value.params.len() {
+    params: loop index in 0..<export_value.params.len() -> {
         ^parameter: export_value.params[index]
-        params.push(SemaCallParam{label: "", name: "arg{index + 1}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: parameter.convention, ty: Val(parameter.ty), variadic: false})
+        SemaCallParam{label: "", name: "arg{index + 1}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: parameter.convention, ty: Val(parameter.ty), variadic: false}
     }
     ^checked_args: args
     binding: sema_call_bind_args("Plugin.{method}", params, checked_args, span, check.diagnostics) ?? {

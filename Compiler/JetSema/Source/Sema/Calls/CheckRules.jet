@@ -103,14 +103,13 @@ SemaCallRuleHearing: struct {
 // declared marker with a `check` resolves to. A builtin rule is bound to no
 // declaring module (sema_marker_module_bind_marker) and brings none.
 sema_call_rules: fn(graph: SemaRegistrationGraph, markers: [Marker], written_in: ModuleID) -> [SemaCallRule] {
-    ^rules: [SemaCallRule]{}
-    loop marker in markers {
+    rules: loop marker in markers -> {
         if marker.negated || marker.declaration_module == None -> next
         resolved: sema_marker_module_resolve_application(graph, written_in, marker)
         declaration: resolved.declaration ?? next
         span: declaration.check ?? next
         value: sema_checked_comptime(sema_user_rule_receiver(declaration, marker)) ?? next
-        rules.push(SemaCallRule{module_identity: resolved.declaring_module_identity, marker: declaration.name, span: span, value: value, paired: declaration.pairs != None})
+        SemaCallRule{module_identity: resolved.declaring_module_identity, marker: declaration.name, span: span, value: value, paired: declaration.pairs != None}
     }
     rules
 }
@@ -184,8 +183,7 @@ sema_call_rules_hear: fn(
     ^end: name_span.end
     loop argument in args -> end = argument.span.end
     span: Span{start: name_span.start, end: end}
-    ^waiting: [Int]{}
-    loop index in 0..<rules.len() {
+    waiting: loop index in 0..<rules.len() -> {
         if sema_comptime_body_value_find(check.context, check.environment.module_identity, site_owner, rules[index].span, name_span) == .Val(landed) {
             if sema_call_rule_rejects(landed.value, span, check.diagnostics) {
                 hearing.rejected = true
@@ -193,7 +191,7 @@ sema_call_rules_hear: fn(
             }
             next
         }
-        waiting.push(index)
+        index
     }
     if waiting.len() == 0 -> return hearing
     // A check without the registration graph (a compile-time run's own
@@ -1107,8 +1105,7 @@ sema_rule_value_derives_encode: fn(graph: SemaRegistrationGraph, module_index: I
 sema_rule_value_struct_dyn: fn(graph: SemaRegistrationGraph, module_index: Int, definition: StructDef, value: TComptimeValue, depth: Int) -> TComptimeValue? {
     if definition.serde_markers.len() > 0 -> return None
     if value == .Struct(_, written) {
-        ^entries: [TComptimeValue]{}
-        loop field in definition.fields {
+        entries: loop field in definition.fields -> {
             if field.computed != None || sema_serde_items_drops(field, false) -> next
             if field.serde_markers.len() > 0 -> return None
             ^found: -1
@@ -1117,7 +1114,7 @@ sema_rule_value_struct_dyn: fn(graph: SemaRegistrationGraph, module_index: Int, 
             }
             if found < 0 -> return None
             tree: sema_rule_value_dyn(graph, module_index, field.ty, written[found].value, depth + 1) ?? return None
-            entries.push(sema_rule_dyn_entry(sema_serde_items_field_key(definition, field), tree))
+            sema_rule_dyn_entry(sema_serde_items_field_key(definition, field), tree)
         }
         return Val(sema_rule_dyn("Object", TComptimeValue.List{values: entries}))
     }

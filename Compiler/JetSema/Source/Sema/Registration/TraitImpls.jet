@@ -143,15 +143,14 @@ sema_trait_impl_filled_methods: fn(items: [Item], type_name: String, trait_name:
 // another module resolves its names there: `definition_module` is that
 // module's identity text, "" for the impl's own (Func.definition_module).
 sema_trait_impl_defaults: fn(sigs: [TraitMethodSig], methods: [Func], definition_module: String) -> [Func] Never! {
-    ^extras: [Func]{}
-    loop sig in sigs {
+    extras: loop sig in sigs -> {
         body: sig.default_body ?? next
         if sema_trait_impl_writes(methods, sig.name) -> next
         ^function: sema_trait_impl_method(sig)
         function.body = body.copy()
         function.module_caps = sig.module_caps.copy()
         if definition_module != "" -> function.definition_module = definition_module.copy()
-        extras.push(function)
+        function
     }
     extras
 }
@@ -515,13 +514,12 @@ sema_trait_impl_method: fn(sig: TraitMethodSig) -> Func Never! {
 sema_trait_impl_forward: fn(sig: TraitMethodSig, field_name: String) -> Func Never! {
     span: sig.name_span
     ^self_span: span
-    ^args: [CallArg]{}
-    loop param in sig.params {
+    args: loop param in sig.params -> {
         if param.name == "self" {
             self_span = param.name_span
             next
         }
-        args.push(CallArg{convention: param.convention, expr: Expr.Ident{name: param.name.copy(), span: param.name_span, id: AST_NODE_GENERATED}, span: param.name_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
+        CallArg{convention: param.convention, expr: Expr.Ident{name: param.name.copy(), span: param.name_span, id: AST_NODE_GENERATED}, span: param.name_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     }
     receiver: Expr.Field{base: Expr.Ident{name: "self", span: self_span, id: AST_NODE_GENERATED}, member: field_name.copy(), span: Span{start: span.start, end: self_span.end}, id: AST_NODE_GENERATED}
     call: Expr.MethodCall{receiver: receiver, method: sig.name.copy(), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}

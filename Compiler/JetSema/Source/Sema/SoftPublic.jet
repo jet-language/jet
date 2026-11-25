@@ -116,10 +116,9 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         return
     }
     bodies: sema_module_value_bodies(graph.modules[module_index].declarations)
-    ^reads: [SemaModuleValueRead]{}
-    loop candidate in candidates {
+    reads: loop candidate in candidates -> {
         consumer: sema_module_value_consumer(bodies, candidate.span) ?? next
-        reads.push(SemaModuleValueRead{key: candidate.key, name: candidate.name, consumer: consumer, span: candidate.span})
+        SemaModuleValueRead{key: candidate.key, name: candidate.name, consumer: consumer, span: candidate.span}
     }
     if reads.len() < 2 {
         return
@@ -307,8 +306,7 @@ sema_check_soft_public_signature: fn(function: Func, module_row: SemaRegistratio
     if function.compiler_generated {
         return
     }
-    ^local: [String]{}
-    loop parameter in function.type_params -> local.push(parameter.name)
+    local: loop parameter in function.type_params -> parameter.name
     ^ranges: [Span]{}
     loop parameter in function.params -> ranges.push(parameter.ty_span)
     if function.return_type_span == .Val(span) -> ranges.push(span.copy())

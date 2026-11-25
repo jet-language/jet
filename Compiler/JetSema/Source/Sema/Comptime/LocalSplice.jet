@@ -1053,10 +1053,7 @@ sema_local_splice_owners: fn(
             owner_module[module_index] = true
         }
     }
-    ^owner_modules: [Int]{}
-    loop (module_index, owned) in owner_module {
-        if owned -> owner_modules.push(module_index)
-    }
+    owner_modules: loop (module_index, owned) in owner_module if owned -> module_index
     // As sema_finalize_graph: no lookup counting across the body threads.
     trail.entries.push(SemaGraphUndo.Counting{old: graph.counting})
     graph.counting = false
@@ -1176,12 +1173,7 @@ sema_local_splice_owners: fn(
 // `diagnostics` but for its lints on Core source, which sema_finalize_graph
 // drops (sema_core_lint_dropped), as one string to compare.
 sema_local_splice_kept_diagnostics: fn(diagnostics: [Diagnostic], own_check: Bool{false}) -> String Never! {
-    ^kept: [String]{}
-    loop diagnostic in diagnostics {
-        if !sema_core_lint_dropped(diagnostic, own_check: own_check) {
-            kept.push("{diagnostic:Debug}")
-        }
-    }
+    kept: loop diagnostic in diagnostics if !sema_core_lint_dropped(diagnostic, own_check: own_check) -> "{diagnostic:Debug}"
     kept.join("\n")
 }
 

@@ -490,10 +490,7 @@ sema_stmt_guard_body_text: fn(raw: [U8], from: Int, indent: String) -> {text: St
     }
     if depth != 0 -> return None
     inner: String.from_bytes(raw[at + 1..<close]) ?? return None
-    ^lines: [String]{}
-    loop line in inner.split("\n") {
-        if line.trim().len() > 0 -> lines.push(line.trim_end())
-    }
+    lines: loop line in inner.split("\n") if line.trim().len() > 0 -> line.trim_end()
     if lines.len() == 0 -> return Val({text: "{{}}", end: close + 1})
     if lines.len() == 1 -> return Val({text: lines[0].trim(), end: close + 1})
     ^text: "{{\n"

@@ -321,11 +321,10 @@ sema_data_try_accessor: fn(receiver: Expr, receiver_value: TExpr, name: String, 
         sema_data_check_discarded_arguments(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    ^typed: [TExpr]{}
-    loop (index, argument) in args {
+    typed: loop (index, argument) in args -> {
         sema_data_check_labels(method, [CallArg]{argument.copy()}, [String]{}, span, check.diagnostics)
         value: sema_data_check_argument(method, index, argument, contract.argument_types[index], check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        typed.push(value)
+        value
     }
     if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -952,10 +951,9 @@ sema_data_core_param_access: fn(record: CoreCallRecord, index: Int, span: Span, 
 }
 
 sema_data_core_emit: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], type_args: [Type], result_type: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    ^accesses: [AccessConvention]{}
-    loop index in 0..<typed_args.len() {
+    accesses: loop index in 0..<typed_args.len() -> {
         access: sema_data_core_param_access(record, index, span, check.diagnostics) ?? return None
-        accesses.push(access)
+        access
     }
     sema_data_core_emit_with_accesses(record, call_name, source_args, argument_types, typed_args, accesses, type_args, result_type, span, expected, check)
 }
@@ -1299,8 +1297,7 @@ sema_data_check_analytics_sql_schema: fn(row: Type, query: Expr, span: Span, che
     definition: sema_serde_type_definition(check.environment.*, check.program.*, name) ?? return
     if definition.kind == {
         .Struct(fields, _) -> {
-            ^known: [String]{}
-            loop field in fields -> known.push(field.name)
+            known: loop field in fields -> field.name
             loop column in sema_data_analytics_sql_columns(sql) {
                 ^found: false
                 loop field in known {

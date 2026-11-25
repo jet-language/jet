@@ -57,8 +57,7 @@ eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: ^[String]) ->
         return run
     }
     canonical_id: canonical.module_identity
-    ^probes: [SemaEvalProbe]{}
-    loop ask in asks {
+    probes: loop ask in asks -> {
         ^expressions: [Expr]{}
         loop text in ask.texts {
             parse: sema_eval_probe_parse(text, ask.offset)
@@ -69,7 +68,7 @@ eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: ^[String]) ->
                 }
             }
         }
-        probes.push(SemaEvalProbe{module_identity: main_id, offset: ask.offset, expressions: expressions})
+        SemaEvalProbe{module_identity: main_id, offset: ask.offset, expressions: expressions}
     }
     eval_probes: sema_eval_probes(probes)
     facts: SemaBuildFacts{package_name: "eval-probe", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}

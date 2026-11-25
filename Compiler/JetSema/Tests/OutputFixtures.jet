@@ -82,8 +82,7 @@ output_fixture_case: fn(label: String, source: String, effects_source: String, i
         return
     }
     diagnostics: sema_output_resolve(graph, intent, address, false)
-    ^codes: [String]{}
-    loop diagnostic in diagnostics -> codes.push(diagnostic.code.copy())
+    codes: loop diagnostic in diagnostics -> diagnostic.code.copy()
     if codes != expected_codes {
         failures.push("{label}: diagnostics {codes:Debug}, expected {expected_codes:Debug}")
     }
@@ -302,8 +301,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
         }
     } else {
         // The rejected link selects nothing, so the run also has no entry (E0101).
-        ^codes: [String]{}
-        loop diagnostic in diagnostics -> codes.push(diagnostic.code.copy())
+        codes: loop diagnostic in diagnostics -> diagnostic.code.copy()
         expected: [String]{"E1321", "E0101"}
         if codes != expected {
             failures.push("{label}: expected the Output visibility error and no-entry error, got {diagnostics:Debug}")
@@ -321,8 +319,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
 output_fixture_manifest_entry: fn(label: String, manifest_entry: Bool, expected_codes: [String], effects_source: String, failures: ^[String]) {
     ^graph: output_fixture_graph(label, "cli_run: fn() {{}}\n", effects_source, failures) ?? return
     diagnostics: sema_output_resolve(graph, SemaOutputIntent.Run, None, manifest_entry)
-    ^codes: [String]{}
-    loop diagnostic in diagnostics -> codes.push(diagnostic.code.copy())
+    codes: loop diagnostic in diagnostics -> diagnostic.code.copy()
     if codes != expected_codes {
         failures.push("{label}: diagnostics {codes:Debug}, expected {expected_codes:Debug}")
     }

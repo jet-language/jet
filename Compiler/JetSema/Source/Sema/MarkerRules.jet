@@ -1509,10 +1509,9 @@ sema_marker_rules_function_applications: fn(function: Func, site: RuleSite, appl
 // An impl's markers that are rule applications: the parser owns
 // `#Target(OS.…)` on an impl as its OS gate.
 sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Marker] Never! {
-    ^kept: [Marker]{}
-    loop marker in markers {
+    kept: loop marker in markers -> {
         if sema_marker_is_hook(marker, MarkerHook.Target) && os_target != None -> next
-        kept.push(marker.copy())
+        marker.copy()
     }
     kept
 }
@@ -1520,10 +1519,7 @@ sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Ma
 // The parser owns `#FX` on a module, a struct, an enum or a trait as its
 // effect cap, so it is no rule application there.
 sema_marker_rules_without_cap: fn(markers: [Marker]) -> [Marker] Never! {
-    ^kept: [Marker]{}
-    loop marker in markers {
-        if !sema_marker_is_hook(marker, MarkerHook.FX) -> kept.push(marker.copy())
-    }
+    kept: loop marker in markers if !sema_marker_is_hook(marker, MarkerHook.FX) -> marker.copy()
     kept
 }
 

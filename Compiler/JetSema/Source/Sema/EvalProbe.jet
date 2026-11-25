@@ -133,11 +133,10 @@ SEMA_EVAL_PROBE_SELF: "jet_debug_self"
 // is a parameter the function takes. None for an expression with no value.
 sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: String) -> String? {
     value: answer.value_type ?? return None
-    ^params: [String]{}
-    loop capture in answer.captures {
+    params: loop capture in answer.captures -> {
         shown: if capture.source == "self" -> SEMA_EVAL_PROBE_SELF else -> capture.source
         taken: if answer.lent -> "^^" else -> ""
-        params.push("{shown}: {taken}{type_name(type_unqualified_nominals(capture.ty))}")
+        "{shown}: {taken}{type_name(type_unqualified_nominals(capture.ty))}"
     }
     success: if value == .Result(ok, _) -> ok else -> value
     Val("{name}: fn({params.join(", ")}) -> {type_marked_name(type_unqualified_nominals(success))} {{\n    {sema_eval_probe_without_self(text)}\n}}\n")
@@ -246,13 +245,12 @@ sema_eval_walk_open: fn(program: SemaProgramTables, module_identity: ModuleID, s
 
 sema_eval_walk_for: fn(probes: SemaEvalProbes, module_identity: ModuleID, span: Span, function: String) -> SemaEvalWalk {
     ^rows: [Int]{}
-    ^offsets: [Int]{}
-    loop (row, probe) in probes.probes {
+    offsets: loop (row, probe) in probes.probes -> {
         if probe.module_identity != module_identity || probe.offset < span.start || probe.offset >= span.end {
             next
         }
         rows.push(row)
-        offsets.push(probe.offset)
+        probe.offset
     }
     if rows.len() == 0 -> return SemaEvalWalk{}
     exact: (loop _ in rows -> false)

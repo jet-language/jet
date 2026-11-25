@@ -295,8 +295,7 @@ sema_failure_union_mint: fn(graph: ^SemaRegistrationGraph, row: SemaFailureUnion
         if existing_index >= 0 {
             if !sema_failure_union_same_payload(variants[existing_index].payload, payload) {
                 diagnostics.push(sema_error("E0105", case_row.span, "case `.{case_row.name}` of `{owned}` is created with two different payloads", "every `Err(.{case_row.name}(…))` in `{name}` adds to the one type `{owned}`, so each case has one payload", "give the two failures different case names, or pass the same payload types to `.{case_row.name}`"))
-                ^arguments: [Span]{}
-                loop field in case_row.payload -> arguments.push(field.span)
+                arguments: loop field in case_row.payload -> field.span
                 settled.push(SemaFailureSettledCase{module_index: row.module_index, site: case_row.span, arguments: arguments})
             }
             next

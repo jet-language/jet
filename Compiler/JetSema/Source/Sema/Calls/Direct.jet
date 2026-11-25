@@ -552,8 +552,7 @@ sema_call_check_value_constructor: fn(call: Call, type_name_value: String, compo
             type_name_value == "Decimal" -> "write `Decimal(\"12.34\")`"
             type_name_value == "Complex" -> "write `Complex(real, imaginary)`"
             else -> {
-                ^slots: [String]{}
-                loop _ in components -> slots.push("…")
+                slots: loop _ in components -> "…"
                 "write `{type_name_value}({slots.join(", ")})`"
             }
         }
@@ -679,12 +678,11 @@ sema_call_check_ambient_print: fn(call: Call, check: ^SemaBodyCheck) -> SemaDire
         return SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.Print{value: values[0]}, call.name_span))}
     }
     ^body: [TStmt]{}
-    ^prints: [TStmt]{}
-    loop index in 0..<values.len() {
+    prints: loop index in 0..<values.len() -> {
         local: checked_generated_local("__jet_print_arg_{call.name_span.start}_{index}", call.name_span, values[index].ty)
         body.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: values[index], gc_promotion: None, gc_transferred: false, span: call.name_span})
         read: sema_tree_node(values[index].ty, TExprKind.Local{local: local}, call.name_span)
-        prints.push(TStmt.ExprStmt{value: sema_tree_node(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span})
+        TStmt.ExprStmt{value: sema_tree_node(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span}
     }
     loop statement in prints -> body.push(statement)
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
@@ -2179,13 +2177,12 @@ sema_call_try_direct_forms: fn(call: Call, expected: Type?, check: ^SemaBodyChec
             check.diagnostics.push(sema_error("E0104", call.name_span, "`measurement` needs a value and labeled uncertainty", "a measured value enters the exactness plane at one explicit constructor", "write `measurement(value, uncertainty: standard_uncertainty)`"))
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
-        ^values: [TExpr]{}
-        loop argument_index in 0..<call.args.len() {
+        values: loop argument_index in 0..<call.args.len() -> {
             value: sema_check_expression(call.args[argument_index].expr, Val(Type.Float), check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
             if !sema_ownership_check_call_receiver(check, call.args[argument_index].expr, AccessConvention.Read, call.args[argument_index].span) {
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
-            values.push(value)
+            value
         }
         result: Type.Apply{name: "Measurement", args: [Type]{Type.Float}}
         value: sema_expression_measurement_source_call("MeasurementNew", values, result, call.name_span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}

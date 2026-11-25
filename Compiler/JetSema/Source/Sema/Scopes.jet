@@ -1745,11 +1745,9 @@ sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program
 }
 
 sema_loop_break_flows_snapshot: fn(source: [SemaLoopBreakFlows]) -> [SemaLoopBreakFlows] Never! {
-    ^result: [SemaLoopBreakFlows]{}
-    loop frame in source {
-        ^paths: [SemaOwnershipState]{}
-        loop path in frame.paths -> paths.push(sema_ownership_state_snapshot(path))
-        result.push(SemaLoopBreakFlows{paths: paths})
+    result: loop frame in source -> {
+        paths: loop path in frame.paths -> sema_ownership_state_snapshot(path)
+        SemaLoopBreakFlows{paths: paths}
     }
     result
 }
@@ -2393,8 +2391,7 @@ sema_check_context_rollback_keep_calls: fn(context: ^SemaCheckContext, mark: ^^S
 }
 
 sema_scope_hardware_transfers_snapshot: fn(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
-    ^result: [SemaHardwareDMATransferFact]{}
-    loop fact in source -> result.push(fact.copy())
+    result: loop fact in source -> fact.copy()
     result
 }
 

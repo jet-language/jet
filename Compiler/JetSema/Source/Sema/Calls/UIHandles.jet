@@ -330,8 +330,7 @@ sema_ui_handle_mount: fn(args: [CallArg], span: Span, expected: Type?, check: ^S
         ^_: sema_ui_handle_infer_args(args, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    ^rest: [CallArg]{}
-    loop index in 1..<args.len() -> rest.push(args[index].copy())
+    rest: loop index in 1..<args.len() -> args[index].copy()
     call: Expr.MethodCall{receiver: args[0].expr.copy(), method: "mount", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: rest, id: AST_NODE_GENERATED}
     SemaDirectSpecialCheck{handled: true, value: sema_check_expression(call, expected, check)}
 }

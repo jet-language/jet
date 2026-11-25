@@ -113,10 +113,9 @@ sema_stmt_guard_path: fn(reversed: [Expr]) -> String? {
     if has_point && single_point && below && above {
         return Val("`{point_name}` is `{point_value}`")
     }
-    ^texts: [String]{}
-    loop cond in conds {
+    texts: loop cond in conds -> {
         text: sema_stmt_guard_text(cond) ?? return None
-        texts.push("`{text}`")
+        "`{text}`"
     }
     if texts.len() == 1 -> return Val("{texts[0]} is false")
     Val("none of {texts.join(", ")} is true")
@@ -766,10 +765,9 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
                 return SemaStatementResult{value: [TStmt]{}, complete: false}
             }
         } else {
-            ^checked_conditions: [TExpr]{}
-            loop condition in conditions {
+            checked_conditions: loop condition in conditions -> {
                 checked: condition ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
-                checked_conditions.push(checked.value)
+                checked.value
             }
             sema_coverage_check_table(checked_conditions, multi_head, span, check)
             // The miss path of a covered else-less table is unreachable (codegen

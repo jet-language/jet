@@ -197,8 +197,7 @@ sema_expression_path_type_args: fn(expression: Expr) -> [Type] {
 }
 
 sema_expression_join_segments: fn(segments: [String], start: Int) -> String Never! {
-    ^parts: [String]{}
-    loop index in start..<segments.len() -> parts.push(segments[index])
+    parts: loop index in start..<segments.len() -> segments[index]
     parts.join(".")
 }
 
@@ -627,10 +626,7 @@ sema_expression_core_record_literal: fn(owner_name: String, fields: [ExprField],
         check.diagnostics.push(sema_expression_private_field_omitted_error(owner_name, declared[0].name, span))
         return None
     }
-    ^missing: [String]{}
-    loop (index, row) in declared {
-        if !supplied[index] -> missing.push(row.name)
-    }
+    missing: loop (index, row) in declared if !supplied[index] -> row.name
     if missing.len() > 0 {
         check.diagnostics.push(sema_expression_missing_fields("struct literal for `{owner_name}`", "every field must appear exactly once", missing, span))
         return None
@@ -658,11 +654,10 @@ sema_expression_core_record_literal: fn(owner_name: String, fields: [ExprField],
 sema_expression_vjp_run_literal: fn(type_args: [Type], fields: [ExprField], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     if type_args.len() != 1 -> return None
     gradient: type_args[0]
-    ^values: [TStructFieldValue]{}
-    loop source in fields {
+    values: loop source in fields -> {
         ty: sema_expression_vjp_run_field(gradient, source.name) ?? return None
         checked: sema_expression_core_record_field_value("VJPRun", TypeTupleField{name: source.name, ty: ty}, source.value, check) ?? return None
-        values.push(checked)
+        checked
     }
     value: sema_tree_node(Type.Apply{name: "VJPRun", args: [Type]{gradient}}, TExprKind.StructLit{fields: values}, span)
     sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)
@@ -674,11 +669,10 @@ sema_expression_vjp_run_literal: fn(type_args: [Type], fields: [ExprField], span
 // CompilerName, CompilerArg and SourceSpan a rule batch builds its heard
 // calls from (sema_call_rule_batch_expression). None has a source literal.
 sema_expression_compiler_record_literal: fn(owner: String, fields: [ExprField], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    ^values: [TStructFieldValue]{}
-    loop source in fields {
+    values: loop source in fields -> {
         ty: core_record_field(owner, source.name) ?? return None
         checked: sema_expression_core_record_field_value(owner, TypeTupleField{name: source.name, ty: sema_expr_core_row_type(ty, check.environment.*, check.program.*)}, source.value, check) ?? return None
-        values.push(checked)
+        checked
     }
     value: sema_tree_node(Type.Named{name: owner}, TExprKind.StructLit{fields: values}, span)
     sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)
@@ -976,8 +970,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         if !sema_data_check_explicit_type_args(resolved_name, type_args, 0, span, check.diagnostics) {
             return None
         }
-        ^call_args: [CallArg]{}
-        loop argument in args {
+        call_args: loop argument in args -> {
             payload_expr: if argument == {
                 .Positional(value) -> value
                 .Named(_, _) -> {
@@ -985,7 +978,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                     return None
                 }
             }
-            call_args.push(CallArg{convention: AccessConvention.Read, expr: payload_expr, span: expr_span(payload_expr), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
+            CallArg{convention: AccessConvention.Read, expr: payload_expr, span: expr_span(payload_expr), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
         }
         checked: sema_call_try_data_literal(Type.Named{name: resolved_name}, variant, call_args, span, expected, check)
         return checked.value
@@ -1180,10 +1173,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                 }
                 named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
             }
-            ^missing: [String]{}
-            loop (index, was_supplied) in supplied {
-                if !was_supplied -> missing.push(fields[index].name)
-            }
+            missing: loop (index, was_supplied) in supplied if !was_supplied -> fields[index].name
             if missing.len() > 0 {
                 check.diagnostics.push(sema_expression_missing_fields("variant `{variant}`", "every payload field must appear exactly once", missing, span))
                 return None
@@ -1456,8 +1446,7 @@ sema_expression_core_enum_positional_literal: fn(enum_name: String, display_name
         check.diagnostics.push(sema_error("E0104", span, "variant `{variant}` expects {payload_types.len()} payload values", "this Core enum variant has positional payload fields", "pass exactly {payload_types.len()} values"))
         return None
     }
-    ^checked_args: [TEnumArg]{}
-    loop (index, argument) in args {
+    checked_args: loop (index, argument) in args -> {
         payload_expr: if argument == {
             .Positional(value) -> value
             .Named(_, _) -> {
@@ -1479,7 +1468,7 @@ sema_expression_core_enum_positional_literal: fn(enum_name: String, display_name
             return None
         }
         if !sema_copy_site_record_move(payload_expr, "the variant payload", check) -> return None
-        checked_args.push(TEnumArg{value: checked})
+        TEnumArg{value: checked}
     }
     payload: if checked_args.len() == 0 -> TEnumPayload.Unit else -> TEnumPayload.Positional{args: checked_args}
     value: sema_tree_node(result_ty, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
@@ -1499,15 +1488,14 @@ sema_expression_enum_named_positional: fn(owner: String, variant: String, labels
 // value's name by becoming `h: height`. A label the source holds in neither
 // form keeps the report at its value, with no edit.
 sema_expression_unknown_payload_label: fn(variant: String, label: String, declared: [String], args: [EnumLitArg], value: Expr, check: SemaBodyCheck) -> Diagnostic {
-    ^written: [Bool]{}
-    loop declared_name in declared {
+    written: loop declared_name in declared -> {
         ^found: false
         loop arg in args {
             if arg == .Named(name, _) {
                 if name == declared_name -> found = true
             }
         }
-        written.push(found)
+        found
     }
     value_span: expr_span(value)
     label_span: sema_expression_payload_label_span(label, value_span, check)
@@ -2560,15 +2548,14 @@ sema_expression_builtin_conversion_value: fn(head: Type, body: TypedLitBody, che
     head_name: type_name(head)
     if sema_registration_builtin_scalar(head_name) == None -> return None
     graph: check.program.registration_graph
-    ^sources: [String]{}
-    loop impl_row in sema_registration_impl_rows_named(graph, head_name) {
+    sources: loop impl_row in sema_registration_impl_rows_named(graph, head_name) -> {
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
         trait_name: implementation.trait_name ?? next
         if !owned_trait_conversion(trait_name) || !module_is_none(implementation.target_module_identity) {
             next
         }
         source: implementation.declaration.operator_rhs ?? next
-        sources.push(sema_expression_type_leaf(type_name(source)))
+        sema_expression_type_leaf(type_name(source))
     }
     if sources.len() == 0 -> return None
     ^probe_diagnostics: [Diagnostic]{}
@@ -2715,12 +2702,11 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                 // A list alias's items that are all bare names (`Grid<Int>{top, bottom}`)
                 // parse as record shorthand before types are known; they are its elements.
                 .Fields(fields) -> {
-                    ^values: [Expr]{}
-                    loop field in fields {
+                    values: loop field in fields -> {
                         if !sema_expression_field_is_shorthand(field) {
                             return sema_expression_typed_literal_mismatch(result_head, span, check.diagnostics)
                         }
-                        values.push(field.value.copy())
+                        field.value.copy()
                     }
                     return sema_expression_typed_literal(head, TypedLitBody.Elements{elements: values}, span, expected, check)
                 }
@@ -2746,12 +2732,11 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                     if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) {
                         return sema_expression_typed_literal_whole(result_head, fields[0].value, expected, check)
                     }
-                    ^entries: [ExprPair]{}
-                    loop field in fields {
+                    entries: loop field in fields -> {
                         if sema_expression_field_is_shorthand(field) {
                             return sema_expression_typed_literal_mismatch(result_head, span, check.diagnostics)
                         }
-                        entries.push(ExprPair{key: Expr.Ident{name: field.name.copy(), span: field.name_span, id: AST_NODE_GENERATED}, value: field.value.copy()})
+                        ExprPair{key: Expr.Ident{name: field.name.copy(), span: field.name_span, id: AST_NODE_GENERATED}, value: field.value.copy()}
                     }
                     return sema_expression_typed_literal(head, TypedLitBody.Entries{entries: entries}, span, expected, check)
                 }
