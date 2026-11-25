@@ -8210,7 +8210,7 @@ sema_expr_type_id_written: fn(expr: Expr, check: ^SemaBodyCheck) -> TExpr? {
         }
     }
     ty: sema_call_type_written_as_value(written, check.environment.*, graph) ?? return None
-    Val(sema_tree_node(Type.Named{name: "TypeId"}, TExprKind.CtLit{value: sema_comptime_reflection_type_id(graph, caller, ty)}, expr_span(expr)))
+    Val(sema_tree_node(Type.Named{name: "TypeId"}, TExprKind.CtLit{value: sema_comptime_reflection_type_id(graph, check.context.type_delta, caller, ty)}, expr_span(expr)))
 }
 
 sema_check_expression: fn(expr: Expr, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {

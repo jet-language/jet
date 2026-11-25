@@ -1308,7 +1308,7 @@ sema_call_option_lift2: fn(args: [CallArg], span: Span, expected: Type?, check: 
 // that is not a builtin number.
 sema_call_static_reflect_builtin: fn(name: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck? {
     graph: check.program.registration_graph
-    info: sema_comptime_reflection_builtin_type_info(graph, name) ?? return None
+    info: sema_comptime_reflection_builtin_type_info(graph, check.context.type_delta, name) ?? return None
     folded: sema_tree_node(sema_fact_named("TypeInfo"), TExprKind.CtLit{value: sema_fact_declared_value(info)}, span)
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, check.environment.*, check.program.*, check.diagnostics)})
 }
@@ -1375,7 +1375,7 @@ sema_call_static_reflect_function: fn(name: String, args: [CallArg], span: Span,
         types = Val(listed)
     }
     diagnostics_before: check.diagnostics.len()
-    info: sema_fact_function_info(resolved, graph, types, span, check.diagnostics) ?? {
+    info: sema_fact_function_info(resolved, graph, check.context.type_delta, types, span, check.diagnostics) ?? {
         if check.diagnostics.len() > diagnostics_before {
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }

@@ -23,14 +23,16 @@ use jet_foundation.[
     ImportDecl,
     Item,
     LValue,
+    InternerDelta,
     Marker,
     MarkerCallArg,
     MarkerDecl,
+    ModuleID,
     ModuleTable,
     NamedCtValue,
     NamedType,
+    Program,
     RuleSite,
-    Span,
     Stmt,
     TAppliedRule,
     TAppliedRuleArgumentMenu,
@@ -40,6 +42,7 @@ use jet_foundation.[
     TraitImplBlock,
     Type,
     build_debug_on,
+    comptime_value_remap_types,
     diagnostic_with_detail,
     diagnostic_with_source_path,
     expr_span,
@@ -147,9 +150,13 @@ sema_user_template_catalog: fn() -> TAppliedRuleCatalog Never! {
 // The registered nominal's full reflection handle. A template pastes its `name`
 // as the target type in items that land beside the declaration, so a type
 // lifted from an inline module keeps the name it is declared under there, not
-// the source leaf a program reflects it by.
+// the source leaf a program reflects it by. The graph is read-only here, so
+// a TypeId of a type it has no row for keeps no handle
+// (sema_comptime_reflection_drop_types), as in each record a template reads.
 sema_user_template_type_info: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String) -> CtValue? {
-    info: sema_comptime_reflection_type_info(graph, graph.modules[module_index].module_identity, owner, sema_user_template_catalog(), [Type]{}) ?? return None
+    types := [InternerDelta]{}
+    info := sema_comptime_reflection_type_info(graph, types, graph.modules[module_index].module_identity, owner, sema_user_template_catalog(), [Type]{}) ?? return None
+    sema_comptime_reflection_drop_types(info, types)
     if sema_name_type_leaf(graph.modules[module_index].program.items, owner) == owner -> return sema_user_template_ct_value(info)
     sema_user_template_ct_value(sema_comptime_reflection_with_field(info, "name", TComptimeValue.String{value: owner}))
 }
@@ -158,9 +165,29 @@ sema_user_template_type_info: fn(graph: SemaRegistrationGraph, module_index: Int
 // (sema_comptime_reflection_function_info), named by its own name, with no
 // module or package name. `module_index` is the row of the module that declares
 // it. `markers` are the function's written MarkerInfo rows
-// (sema_comptime_reflection_written_markers).
+// (sema_user_template_written_markers).
 sema_user_template_function_info: fn(graph: SemaRegistrationGraph, module_index: Int, function: Func, markers: [TComptimeValue]) -> CtValue? {
-    sema_user_template_ct_value(sema_comptime_reflection_function_info(graph, module_index, function, "", function.name, "", graph.modules[module_index], markers, [SemaInferenceBinding]{}))
+    types := [InternerDelta]{}
+    info := sema_comptime_reflection_function_info(graph, types, module_index, function, "", function.name, "", graph.modules[module_index], markers, [SemaInferenceBinding]{})
+    sema_comptime_reflection_drop_types(info, types)
+    sema_user_template_ct_value(info)
+}
+
+// The MarkerInfo rows of `markers` written in module `module_identity`
+// (sema_comptime_reflection_written_markers), as a template reads them.
+sema_user_template_written_markers: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, program: Program, markers: [Marker], registry: ^SemaScopeMembersMarkerRegistry?) -> [TComptimeValue]? {
+    types := [InternerDelta]{}
+    rows := sema_comptime_reflection_written_markers(graph, types, module_identity, program, sema_user_template_catalog(), markers, registry) ?? return None
+    sema_user_template_drop_types(rows, types)
+    Val(rows)
+}
+
+// `values` with each TypeId made from the rows `types` holds keeping no
+// handle (sema_comptime_reflection_dropped_types).
+sema_user_template_drop_types: fn(values: ^[TComptimeValue], types: ^[InternerDelta]) Never! {
+    dropped: sema_comptime_reflection_dropped_types(types)
+    if dropped.types.len() == 0 -> return
+    loop index in 0..<values.len() -> comptime_value_remap_types(values[index], dropped)
 }
 
 // ---------------------------------------------------------------------------
@@ -828,7 +855,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
             loop marker in function.markers {
                 if marker.negated -> next
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-                markers: sema_comptime_reflection_written_markers(graph, graph.modules[module_index].module_identity, graph.modules[module_index].program, sema_user_template_catalog(), function.markers, registry) ?? next
+                markers: sema_user_template_written_markers(graph, graph.modules[module_index].module_identity, graph.modules[module_index].program, function.markers, registry) ?? next
                 info: sema_user_template_function_info(graph, module_index, function, markers) ?? next
                 expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
                 if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) {
@@ -956,7 +983,7 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
                     types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? sema_user_template_handle("TypeInfo", definition.name))
                 }
                 .Func(function) -> {
-                    function_markers: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), function.markers, registry) ?? return None
+                    function_markers: sema_user_template_written_markers(graph, module_row.module_identity, module_row.program, function.markers, registry) ?? return None
                     if sema_user_template_function_info(graph, module_index, function, function_markers) == .Val(info) {
                         functions.push(info)
                     }
@@ -965,7 +992,7 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
             }
         }
     }
-    written: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), code_module.markers, registry) ?? return None
+    written: sema_user_template_written_markers(graph, module_row.module_identity, module_row.program, code_module.markers, registry) ?? return None
     markers: sema_user_template_ct_values(written) ?? return None
     comments: sema_comptime_reflection_comments(sema_comptime_reflection_source(module_row.source, module_row.source_file), code_module.span.start, code_module.span.end)
     Val(CtValue.Struct{
@@ -1010,7 +1037,7 @@ sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
                 }
                 .Func(function) -> {
                     if function.name == "build" -> next
-                    markers: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), function.markers, registry) ?? return None
+                    markers: sema_user_template_written_markers(graph, module_row.module_identity, module_row.program, function.markers, registry) ?? return None
                     module_functions.push(sema_user_template_function_info(graph, module_index, function, markers) ?? return None)
                 }
                 .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -1035,6 +1062,9 @@ sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
             },
         )
     }
+    settings_types := [InternerDelta]{}
+    settings := sema_comptime_reflection_setting_infos(graph, settings_types, graph.build_facts.settings)
+    sema_user_template_drop_types(settings, settings_types)
     Val(CtValue.Struct{
         type_name: "PackageInfo",
         fields: [NamedCtValue]{
@@ -1044,7 +1074,7 @@ sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
             NamedCtValue{name: "modules", value: CtValue.List{values: modules}},
             NamedCtValue{name: "types", value: CtValue.List{values: types}},
             NamedCtValue{name: "functions", value: CtValue.List{values: functions}},
-            NamedCtValue{name: "settings", value: sema_user_template_ct_value(TComptimeValue.List{values: sema_comptime_reflection_setting_infos(graph, graph.build_facts.settings)}) ?? return None},
+            NamedCtValue{name: "settings", value: sema_user_template_ct_value(TComptimeValue.List{values: settings}) ?? return None},
         },
     })
 }

@@ -62,8 +62,10 @@ CodecTarget: struct {
 // The generated files, in the order they are written: a later one's hand
 // files may be an earlier one's output.
 codec_targets: fn() -> [CodecTarget] Never! {
-    // A checked function body, and a checked standalone expression.
-    body: CodecTarget{output: BODY_CODEC, header: BODY_HEADER, roots: [String]{"FnBody", "BodyExpr"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS}, package: "", named: [String]{}}
+    // A checked function body, and a checked standalone expression. A
+    // compile-time value is written by hand (its TypeId names a type row),
+    // so the parts it holds are roots of their own.
+    body: CodecTarget{output: BODY_CODEC, header: BODY_HEADER, roots: [String]{"FnBody", "BodyExpr", "TComptimeField", "TComptimeMapEntry", "TComptimeEnumArg", "TComptimeReport"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS}, package: "", named: [String]{}}
     // A parsed program: what a Core unit's declaration heads parse to, which
     // the Core interface holds (JetDriver CoreInterface.jet).
     syntax: CodecTarget{output: SYNTAX_CODEC, header: SYNTAX_HEADER, roots: [String]{"Program"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS, BODY_CODEC}, package: "", named: [String]{}}

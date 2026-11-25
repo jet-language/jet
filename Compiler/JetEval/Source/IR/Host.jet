@@ -15,7 +15,7 @@
 // (jet_eval_ir_type_handle). Rows are read and interned in the batch's
 // own rows (host_types), whose existing rows are the module's.
 use {
-    jet_foundation.[Span, TComptimeValue, Type, name_column_set, name_column_value, type_name]
+    jet_foundation.[Span, TComptimeValue, Type, comptime_type_id_row, name_column_set, name_column_value, type_name]
     jet_ir.[IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_align8, ir_comptime_answered_member, ir_constant_row, ir_default_err, ir_enum_def, ir_enum_variant_box_size, ir_fixed_shape, ir_host_literal_row, ir_host_value_row, ir_list_stride, ir_option_inline, ir_row_args, ir_row_ty, ir_static_literal_key, ir_struct_members, ir_struct_size, ir_tuple_members, ir_type_args, ir_type_def, ir_type_handle_row, ir_untag, ir_value_type, ir_variant_members]
 }
 
@@ -338,9 +338,11 @@ jet_eval_ir_host_store: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, v
 // The handle of TypeId `value` (JetIR ir_type_handle) of type row `row`: the
 // address of its row in the call's type table, where its first store writes
 // the TypeId record's members. Equal TypeIds share one row, and so do the
-// TypeIds its bindings and signature name, each written once.
+// TypeIds its bindings and signature name, each written once: a TypeId that
+// names a row of the compile's type table is keyed by that row, any other
+// by its whole value.
 jet_eval_ir_type_handle: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, value: TComptimeValue, row: Int) -> Int? {
-    key: ir_static_literal_key(value)
+    key: if comptime_type_id_row(value) == .Val(handle) -> "TypeId#{handle.id}" else -> ir_static_literal_key(value)
     known: name_column_value(s.type_row_keys, s.type_rows, key) ?? 0
     if known > 0 -> return Val(known)
     definition: ir_type_def(p, "TypeId") ?? {

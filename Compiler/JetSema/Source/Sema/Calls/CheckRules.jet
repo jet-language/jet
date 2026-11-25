@@ -20,6 +20,7 @@ use {
         Diagnostic,
         EnumDef,
         Expr,
+        InternerDelta,
         Marker,
         ModuleID,
         NameTable,
@@ -443,7 +444,7 @@ sema_rule_call_value: fn(
     if {
         receiver_type == .Val(ty) -> {
             heard.words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] = 1
-            sema_rule_call_arg(heard, None, ty, receiver_known, None, None, receiver_span, graph, check.environment.*)
+            sema_rule_call_arg(heard, None, ty, receiver_known, None, None, receiver_span, graph, check.context.type_delta, check.environment.*)
         }
         else -> heard.words.extend([Int]{0, 0, 0, 0, 0, 0, 0})
     }
@@ -451,7 +452,8 @@ sema_rule_call_value: fn(
         heard_arg: sema_rule_literal(argument.expr) ?? sema_rule_heard_arg(argument.expr, check)
         label := String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
-        sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, sema_rule_function_named(argument.expr, argument.span, check), sema_rule_written(argument.expr, file), argument.span, graph, check.environment.*)
+        function: sema_rule_function_named(argument.expr, argument.span, check)
+        sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, function, sema_rule_written(argument.expr, file), argument.span, graph, check.context.type_delta, check.environment.*)
     }
     heard.words.push(tables.len())
     loop table in tables {
@@ -548,14 +550,14 @@ sema_rule_heard_arg: fn(expression: Expr, check: ^SemaBodyCheck) -> SemaRuleHear
 // by its bare name, resolved as `f.reflect()` resolves it
 // (sema_call_static_reflect_function); None for any other argument, a local
 // that shadows the function included.
-sema_rule_function_named: fn(expression: Expr, span: Span, check: SemaBodyCheck) -> TComptimeValue? {
+sema_rule_function_named: fn(expression: Expr, span: Span, check: ^SemaBodyCheck) -> TComptimeValue? {
     if expression == .Ident(name, _, _) {
         graph: check.program.registration_graph
         local: sema_scope_resolve_index(check.scopes, name)
         resolved: if local == .Val(index) -> sema_scope_binding_symbol(check.environment.*, check.scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, check.environment.module_identity, name) ?? return None)
         if resolved.kind != SymbolKind.Function -> return None
         probe_diagnostics := [Diagnostic]{}
-        info: sema_fact_function_info(resolved, graph, None, span, probe_diagnostics) ?? return None
+        info: sema_fact_function_info(resolved, graph, check.context.type_delta, None, span, probe_diagnostics) ?? return None
         return Val(sema_fact_declared_value(info))
     }
     None
@@ -565,7 +567,7 @@ sema_rule_function_named: fn(expression: Expr, span: Span, check: SemaBodyCheck)
 // build knows as `known`, which names the function `function` (a
 // FunctionInfo) and which spells the parts `parts` (sema_rule_written), to
 // `heard`; its type is the TypeId the one maker makes in `graph`.
-sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, known: TComptimeValue?, function: ^^TComptimeValue?, parts: ^^TComptimeValue?, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) Never! {
+sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, known: TComptimeValue?, function: ^^TComptimeValue?, parts: ^^TComptimeValue?, span: Span, graph: SemaRegistrationGraph, types: ^[InternerDelta], environment: SemaScopeEnvironment) Never! {
     labeled := 0
     if label.move() == .Val(text) {
         heard.texts.push(text.move())
@@ -589,7 +591,7 @@ sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, kn
         heard.written.push(list.move())
         spelled = heard.written.len()
     }
-    heard.types.push(sema_comptime_reflection_type_id(graph, environment.module_row, ty))
+    heard.types.push(sema_comptime_reflection_type_id(graph, types, environment.module_row, ty))
     heard.words.extend([Int]{labeled, heard.types.len() - 1, value, named, span.start, span.end, spelled})
 }
 

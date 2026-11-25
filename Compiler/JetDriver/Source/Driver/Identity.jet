@@ -64,7 +64,7 @@ use {
         SemaUnitSourceMentions,
         SchemaSnapshot,
     ]
-    jet_eval.[JetEvalConfig]
+    jet_eval.[JetCompilerServicesTypeTable, JetEvalConfig]
 }
 
 JetDriverAuthorizedSourceFile: struct {
@@ -989,6 +989,8 @@ JetDriverLoadResult: struct {
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}},
     doc_interner: Interner?{None},
     build_program: TComptimeValue?{None},
+    // The type table `build_program`'s TypeIds name.
+    build_types: JetCompilerServicesTypeTable?{None},
     // Whether a loaded unit outside Core spells the word `program` or
     // `compiler` outside its comments, strings included (Loader.jet). A body
     // reads the whole-program view only by naming the Build context's
@@ -1071,6 +1073,9 @@ JetDriverCompileResult: struct {
     // stage produced, constants included. Empty in the other modes.
     comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}},
     build_program: TComptimeValue?{None},
+    // The type table `build_program`'s TypeIds name, which a fn build reads
+    // and appends to.
+    build_types: JetCompilerServicesTypeTable?{None},
     build_nodes: [BuildGraphNode]?{None},
     // A captured check's typed cost report (capture_cost_report).
     cost_report: TCostReport?{None},

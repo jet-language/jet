@@ -10,15 +10,22 @@ use {
         DiagnosticRecordSpan,
         Func,
         Item,
+        Interner,
+        InternerDelta,
         ParseResult,
         Span,
         TComptimeField,
         TComptimeReport,
         TComptimeValue,
+        TGenericParam,
         Type,
         ast_program,
+        comptime_value_remap_types,
         diagnostic_record,
         diagnostic_repair_paths,
+        interner_empty,
+        interner_fork,
+        type_intern_syntax,
         type_name,
     ]
     jet_foundation.[SourceFile, TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, module_is_core, module_text, record_key_digest, symbol_find, symbol_is_local, symbol_table_key]
@@ -152,17 +159,21 @@ use {
         SemaGraphModuleResult,
         SemaGraphResult,
         SemaRegistrationGraph,
+        SemaTypeIDHead,
         SemaRegistrationModule,
         SemaSourceSegment,
         SemaScopeMembersMarkerRegistry,
         sema_checked_foreign_basis_verified,
         sema_compiler_semantic_index_from_checked,
+        sema_comptime_reflection_merge_types,
+        sema_comptime_reflection_type_heads_into,
         sema_comptime_reflection_arithmetic_facts,
         sema_comptime_reflection_callable_signature,
         sema_comptime_reflection_declared_constants,
         sema_comptime_reflection_declared_effect_names,
         sema_comptime_reflection_declared_traits,
         sema_comptime_reflection_declared_function_facts,
+        sema_comptime_reflection_drop_types,
         sema_comptime_reflection_doc_source,
         sema_comptime_reflection_documentation,
         sema_comptime_reflection_effect_info,
@@ -170,9 +181,6 @@ use {
         sema_comptime_reflection_module_of,
         sema_comptime_reflection_setting_infos,
         sema_comptime_reflection_source,
-        sema_comptime_reflection_type_head,
-        sema_comptime_reflection_type_head_row,
-        sema_comptime_reflection_type_id,
         sema_comptime_reflection_written_comments,
         sema_comptime_reflection_written_markers,
         sema_comptime_reflection_package_function_markers,
@@ -186,6 +194,7 @@ use {
         sema_source_location_at,
         sema_type_graph_lookup_symbol_at,
         sema_type_lookup_nominal_row,
+        sema_type_resolve_declared_recursive,
         sema_type_resolve_nominal_row_at,
     ]
 }
@@ -694,7 +703,7 @@ jet_eval_compiler_services_parse: fn(input: JetCompilerServicesSourceInput) -> J
 // `registration`. `markers` are the function's written MarkerInfo rows
 // (sema_comptime_reflection_written_markers); `source` is its module's text,
 // read for the function's documentation.
-jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph, module_index: Int, function: Func, source: SemaComptimeReflectionSource, checked_module: SemaGraphModuleResult?, function_key: String?, markers: [TComptimeValue]) -> TComptimeValue {
+jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph, types: ^[InternerDelta], module_index: Int, function: Func, source: SemaComptimeReflectionSource, checked_module: SemaGraphModuleResult?, function_key: String?, markers: [TComptimeValue]) -> TComptimeValue {
     registration_module: registration.modules[module_index]
     // The solved row, when the check solved this function (a failed check
     // leaves it None, read as not yet inferred).
@@ -721,7 +730,7 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
             TComptimeField{name: "module", value: jet_eval_compiler_services_string(registration_module.module_name)},
             TComptimeField{name: "identity", value: jet_eval_compiler_services_string(identity)},
             TComptimeField{name: "package", value: jet_eval_compiler_services_string(registration_module.package_identity)},
-            TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(registration, module_index, function, solved_effects, registration_module.source_file)},
+            TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(registration, types, module_index, function, solved_effects, registration_module.source_file)},
             TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span, registration_module.source_file)},
             TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: reaches_panic}},
             TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: arithmetic}},
@@ -869,6 +878,9 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
     functions := [TComptimeValue]{}
     effects := [TComptimeValue]{}
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+    // The registration is read-only here, so a TypeId of a type it has no
+    // row for keeps no handle (sema_comptime_reflection_drop_types).
+    reflected := [InternerDelta]{}
     package_registry: sema_comptime_reflection_package_registry(registration, catalog)
     loop (module_index, registration_module) in registration.modules {
         if jet_eval_compiler_services_module_is_supplied(registration_module) -> next
@@ -887,11 +899,11 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
                 // A failed check leaves the registration incomplete, with no
                 // marker registry; like the failed-check FunctionInfo
                 // (JetDriver ComptimeCompiler.jet), its markers then read empty.
-                markers := sema_comptime_reflection_written_markers(registration, registration_module.module_identity, registration_module.program, catalog, function.markers, registry) ?? [TComptimeValue]{}
+                markers := sema_comptime_reflection_written_markers(registration, reflected, registration_module.module_identity, registration_module.program, catalog, function.markers, registry) ?? [TComptimeValue]{}
                 if registration_module.package_identity == registration.package_identity {
-                    markers.extend(sema_comptime_reflection_package_function_markers(registration, package_registry))
+                    markers.extend(sema_comptime_reflection_package_function_markers(registration, reflected, package_registry))
                 }
-                functions.push(jet_eval_compiler_services_function_info(registration, module_index, function, module_text, checked_module, function_key, markers))
+                functions.push(jet_eval_compiler_services_function_info(registration, reflected, module_index, function, module_text, checked_module, function_key, markers))
             }
         }
         if checked_module == .Val(checked) {
@@ -916,7 +928,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
     }
     semantic_index := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}
     if !has_errors && index.complete -> semantic_index = TComptimeValue.Present{value: index.value}
-    value: TComptimeValue.Struct{
+    value := TComptimeValue.Struct{
         type_name: "CompilerChecked",
         fields: [TComptimeField]{
             TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
@@ -928,6 +940,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
             TComptimeField{name: "semantic_index", value: semantic_index},
         },
     }
+    sema_comptime_reflection_drop_types(value, reflected)
     JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: !has_errors && index.complete}
 }
 
@@ -950,29 +963,22 @@ jet_eval_compiler_services_failed_check: fn(source: String, syntax: TComptimeVal
     }
 }
 
-// The build context's whole-program view, or the first producer fact it lacks.
+// The build context's whole-program view and the type table its TypeIds
+// name, or the first producer fact it lacks.
 JetCompilerServicesProgramInfo: enum {
-    Ready(value: TComptimeValue),
+    Ready(value: TComptimeValue, types: JetCompilerServicesTypeTable),
     Missing(fact: String),
 }
 
 // The build context reads this immutable, fully checked whole-program view.
 // Reuse the same TypeInfo, FunctionInfo and semantic-index producers as the
 // compiler API; a missing producer fact refuses the snapshot and is named.
-// `root_calls`, `root_types` and `scope_types`, which no source can spell:
-// `root_calls` holds the CompilerCall of each checked call written in the
-// root package's own source outside its `build` functions, an ambient
-// call's callee being its name (`print`), in the order the checker met
-// them; `meta.events(watch: .Calls{to: f}, …)` reads it.
-// `root_types` holds, for each spelling the root module names a declared
-// type by, bare (`Point`) or through its import (`geo.Point`), the head the
-// TypeId maker reads of it there (sema_comptime_reflection_type_head_row);
-// `meta.find_type` makes its TypeIds from them.
-// `scope_types` holds one, its spelling bare, for each declared type a
-// module the build makes sees, which shares the root module's namespace and
-// imports nothing: a type of the root module or of its namespace, or one the
-// prelude names bare; `meta.add_struct` writes its fields' types with it
-// (jet_eval_compiler_services_type_names).
+// `root_calls`, which no source can spell, holds the CompilerCall of each
+// checked call written in the root package's own source outside its `build`
+// functions, an ambient call's callee being its name (`print`), in the order
+// the checker met them; `meta.events(watch: .Calls{to: f}, …)` reads it.
+// Each TypeId the view holds names its row in the type table that comes
+// with it (jet_eval_compiler_services_type_table).
 // `packages` holds one PackageInfo per package, its modules in load order,
 // each listing every comment of its file; the built package's also lists
 // its effective settings with their origins.
@@ -992,6 +998,9 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     index: sema_compiler_semantic_index_from_checked(registration, graph, sema_source_digest(source), module_sources)
     if !index.complete -> return .Missing{fact: "semantic index: {index.missing}"}
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+    // As in a checked record (jet_eval_compiler_services_checked), a TypeId
+    // of a type the registration has no row for keeps no handle.
+    reflected := [InternerDelta]{}
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
     traits := [TComptimeValue]{}
@@ -1030,18 +1039,18 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                         next
                     }
                     key: jet_eval_compiler_services_function_key(registration, function, module_row) ?? return .Missing{fact: "function `{module_row.module_name}.{function.name}` is not registered"}
-                    markers := sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing{fact: "module `{module_row.module_name}` has no marker registry"}
+                    markers := sema_comptime_reflection_written_markers(registration, reflected, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing{fact: "module `{module_row.module_name}` has no marker registry"}
                     if module_row.package_identity == registration.package_identity {
-                        markers.extend(sema_comptime_reflection_package_function_markers(registration, package_registry))
+                        markers.extend(sema_comptime_reflection_package_function_markers(registration, reflected, package_registry))
                     }
-                    value: jet_eval_compiler_services_function_info(registration, module_index, function, doc_text, checked, Val(key), markers)
+                    value: jet_eval_compiler_services_function_info(registration, reflected, module_index, function, doc_text, checked, Val(key), markers)
                     functions.push(value.copy())
                     module_functions.push(value)
                 }
                 .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             if name == .Val(type_name) {
-                value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog, [Type]{}) ?? return .Missing{fact: "type `{module_row.module_name}.{type_name}` has no TypeInfo"}
+                value: sema_comptime_reflection_type_info(registration, reflected, module_row.module_identity, type_name, catalog, [Type]{}) ?? return .Missing{fact: "type `{module_row.module_name}.{type_name}` has no TypeInfo"}
                 types.push(value.copy())
                 module_types.push(value)
             }
@@ -1050,9 +1059,9 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
             loop function in module_result.foreign_functions {
                 foreign.push(jet_eval_compiler_services_foreign_info(function, module_result.foreign_providers, module_row.source_segments, module_row.source_file))
             }
-            constants.extend(sema_comptime_reflection_declared_constants(registration, module_index, module_result.declarations.constants))
+            constants.extend(sema_comptime_reflection_declared_constants(registration, reflected, module_index, module_result.declarations.constants))
         }
-        traits.extend(sema_comptime_reflection_declared_traits(registration, module_index, catalog) ?? return .Missing{fact: "module `{module_row.module_name}` has no marker registry"})
+        traits.extend(sema_comptime_reflection_declared_traits(registration, reflected, module_index, catalog) ?? return .Missing{fact: "module `{module_row.module_name}` has no marker registry"})
         at := -1
         loop (row, package) in packages {
             if package.identity == module_row.package_identity -> at = row
@@ -1082,7 +1091,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     package_values := [TComptimeValue]{}
     // Settings belong to the build, which takes them from the built package
     // alone; any other package lists none.
-    settings: sema_comptime_reflection_setting_infos(registration, registration.build_facts.settings)
+    settings: sema_comptime_reflection_setting_infos(registration, reflected, registration.build_facts.settings)
     loop package in packages {
         package_settings := [TComptimeValue]{}
         // copy: a loop body can't move a list every pass reads.
@@ -1109,7 +1118,6 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         revision_fields.push(module_text(registration.module_table, module_source.module_identity))
         revision_fields.push(module_source.source.copy())
     }
-    type_names: jet_eval_compiler_services_type_names(registration)
     fields := [TComptimeField]{
         {name: "types", value: TComptimeValue.List{values: types}},
         {name: "functions", value: TComptimeValue.List{values: functions}},
@@ -1120,8 +1128,6 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         {name: "complete", value: TComptimeValue.Bool{value: checked_complete}},
         {name: "foreign", value: TComptimeValue.List{values: foreign}},
         {name: "root_calls", value: TComptimeValue.List{values: jet_eval_compiler_services_root_calls(registration, graph, build_keys)}},
-        {name: "root_types", value: TComptimeValue.List{values: type_names.root}},
-        {name: "scope_types", value: TComptimeValue.List{values: type_names.scope}},
         {name: "stages", value: TComptimeValue.List{values: stages.move()}},
     }
     if index.value == .Struct(_, index_fields) {
@@ -1133,7 +1139,12 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
             fields.push(TComptimeField{name: if name == "calls" -> "call_edges" else -> name, value: value ?? return .Missing{fact: "the semantic index has no `{name}`"}})
         }
     } else { return .Missing{fact: "the semantic index is not a struct"} }
-    .Ready(value: TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
+    value := TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields}
+    // The build reads the table as this snapshot leaves it; the compile keeps its own.
+    frozen := interner_fork(registration.interner)
+    remap: sema_comptime_reflection_merge_types(frozen, reflected)
+    if remap.types.len() > 0 -> comptime_value_remap_types(value, remap)
+    JetCompilerServicesProgramInfo.Ready{value: value, types: jet_eval_compiler_services_type_table(registration, frozen)}
 }
 
 jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, build_keys: [String]) -> [TComptimeValue] {
@@ -1158,19 +1169,39 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
     calls
 }
 
-JetCompilerServicesTypeNames: struct {
-    root: [TComptimeValue],
-    scope: [TComptimeValue],
+// The type table a fn build reads (jet_eval_compiler_services_program_info):
+// the compilation's interner as the snapshot left it, holding the row of
+// each TypeId ProgramInfo holds, and the types the build can name. A fn
+// build makes its TypeIds in it (JetDriver BuildAdapter `meta.find_type`,
+// `meta.add_struct`), appending the rows they name.
+JetCompilerServicesTypeTable: struct {
+    interner: Interner,
+    // What the TypeId maker reads of each type head the root module's types
+    // name (sema_comptime_reflection_type_head), its `written` the head's
+    // key.
+    heads: [SemaTypeIDHead],
+    // The row of the type each spelling the root module names a declared
+    // type by names, bare (`Point`) or through its import (`geo.Point`).
+    roots: [String:Int],
+    // The bare spelling of each declared type a module the build makes
+    // sees, by its row: that module shares the root module's namespace and
+    // imports nothing, so it sees a type of the root module or of its
+    // namespace, and one the prelude names bare.
+    scope: [Int:String],
 }
 
-// ProgramInfo's `root_types`, the head each root spelling names
-// (sema_comptime_reflection_type_head_row), and `scope_types`, rows of a
-// spelling and the TypeId of the type it names
-// (jet_eval_compiler_services_type_row). A root spelling is one the checker
-// resolves from the root module to that very type.
-jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -> JetCompilerServicesTypeNames {
-    names := JetCompilerServicesTypeNames{root: [TComptimeValue]{}, scope: [TComptimeValue]{}}
-    root: sema_registration_module_index(registration, registration.entry_module_identity) ?? return names
+// A table with no rows: the view of a build no body can read.
+jet_eval_compiler_services_type_table_empty: fn() -> JetCompilerServicesTypeTable Never! {
+    JetCompilerServicesTypeTable{interner: interner_empty(), heads: [SemaTypeIDHead]{}, roots: [String:Int]{}, scope: [Int:String]{}}
+}
+
+// The type table of `registration`'s view over `frozen`, its interner as
+// the snapshot left it. A root spelling is one the checker resolves from
+// the root module to that very type; each type is keyed as the checker
+// keys it (sema_type_resolve_declared_recursive).
+jet_eval_compiler_services_type_table: fn(registration: SemaRegistrationGraph, frozen: Interner) -> JetCompilerServicesTypeTable {
+    table := JetCompilerServicesTypeTable{interner: frozen, heads: [SemaTypeIDHead]{}, roots: [String:Int]{}, scope: [Int:String]{}}
+    root: sema_registration_module_index(registration, registration.entry_module_identity) ?? return table
     namespace: registration.modules[root].namespace
     aliases := [String]{}
     loop import in registration.modules[root].program.imports {
@@ -1186,35 +1217,31 @@ jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -
             loop spelling in spellings {
                 found: sema_type_resolve_nominal_row_at(registration, Type.Named{name: spelling}, root) ?? next
                 if found.module_index == module_index && found.row == row {
-                    names.root.push(sema_comptime_reflection_type_head_row(sema_comptime_reflection_type_head(registration, root, spelling)))
+                    keyed: sema_type_resolve_declared_recursive(registration, Type.Named{name: spelling}, root, [TGenericParam]{})
+                    sema_comptime_reflection_type_heads_into(registration, root, keyed, table.heads)
+                    table.roots["{spelling}"] = Int{type_intern_syntax(table.interner, keyed).id}
                 }
             }
             if module_index == root || (namespace != "" && module_row.namespace == namespace) {
-                names.scope.push(jet_eval_compiler_services_type_row(registration, module_index, name, name))
+                jet_eval_compiler_services_type_scope(registration, table, module_index, name)
                 next
             }
             // The prelude's bare names, read from no module's scope.
             bare: sema_type_graph_lookup_symbol_at(registration, -1, name) ?? next
             found: sema_type_lookup_nominal_row(registration, Val(bare), name, -1) ?? next
             if found.module_index == module_index && found.row == row {
-                names.scope.push(jet_eval_compiler_services_type_row(registration, module_index, name, name))
+                jet_eval_compiler_services_type_scope(registration, table, module_index, name)
             }
         }
     }
-    names
+    table
 }
 
-// A `scope_types` row: `spelling` and the TypeId of the type `name` that
-// module row `module_index` declares, made as every TypeId is
-// (sema_comptime_reflection_type_id).
-jet_eval_compiler_services_type_row: fn(registration: SemaRegistrationGraph, module_index: Int, spelling: String, name: String) -> TComptimeValue {
-    TComptimeValue.Struct{
-        type_name: "TypeSpelling",
-        fields: [TComptimeField]{
-            TComptimeField{name: "spelling", value: TComptimeValue.String{value: spelling}},
-            TComptimeField{name: "type", value: sema_comptime_reflection_type_id(registration, module_index, Type.Named{name: name})},
-        },
-    }
+// Adds to `table`'s scope the type `name` that module row `module_index`
+// declares, spelled bare.
+jet_eval_compiler_services_type_scope: fn(registration: SemaRegistrationGraph, table: ^JetCompilerServicesTypeTable, module_index: Int, name: String) {
+    keyed: sema_type_resolve_declared_recursive(registration, Type.Named{name: name}, module_index, [TGenericParam]{})
+    table.scope[Int{type_intern_syntax(table.interner, keyed).id}] = "{name}"
 }
 
 // The whole-program view of a build no body can read (no source outside
@@ -1223,7 +1250,7 @@ jet_eval_compiler_services_type_row: fn(registration: SemaRegistrationGraph, mod
 jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
     fields := [TComptimeField]{}
     loop name in
-        ([String]{"types", "functions", "traits", "constants", "packages", "foreign", "root_calls", "root_types", "scope_types", "stages", "definitions", "references", "call_edges", "structural_nodes"}) {
+        ([String]{"types", "functions", "traits", "constants", "packages", "foreign", "root_calls", "stages", "definitions", "references", "call_edges", "structural_nodes"}) {
         fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
     }
     fields.push(TComptimeField{name: "complete", value: TComptimeValue.Bool{value: false}})

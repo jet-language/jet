@@ -530,6 +530,7 @@ jet_driver_compile_result: fn(
         doc_modules: load.doc_modules,
         doc_interner: load.doc_interner,
         build_program: load.build_program,
+        build_types: load.build_types,
         build_nodes: if complete -> load.build_nodes else -> None,
         run_member_paths: load.run_member_paths,
         typed_goals: load.typed_goals,
@@ -6827,7 +6828,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
         // errors are the answer. A view missing anything else is a compiler
         // defect.
         if info == {
-            .Ready(value) -> { load.build_program = Val(value) }
+            .Ready(value, types) -> {
+                load.build_program = Val(value)
+                load.build_types = Val(types)
+            }
             .Missing(fact) -> {
                 if (!registration_graph.complete || !graph_complete) && jet_driver_has_errors(load.diagnostics) {
                     return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
