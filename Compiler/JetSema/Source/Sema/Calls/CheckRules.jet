@@ -398,9 +398,10 @@ sema_call_rule_stage: fn(check: ^SemaBodyCheck, owner: String, site_owner: Strin
 // then the keys of its table (sema_rule_table_keys). An argument's `type`
 // is the type its own check gives it (`_` when that check fails), and its
 // `value` the Dyn its value encodes to when the build knows that value
-// (sema_rule_value_dyn). A type name, which checks only where a `Type` is
-// expected, is heard as that `Type` value (sema_rule_probe). The
-// `function` an argument names is its FunctionInfo
+// (sema_rule_value_dyn). A literal is heard as that check would hear it,
+// without the check (sema_rule_literal). A type name, which checks only
+// where a `Type` is expected, is heard as that `Type` value
+// (sema_rule_probe). The `function` an argument names is its FunctionInfo
 // (sema_rule_function_named), and the parts an interpolated String literal
 // spells are its `written` (sema_rule_written).
 sema_rule_call_value: fn(
@@ -445,15 +446,10 @@ sema_rule_call_value: fn(
         else -> heard.words.extend([Int]{0, 0, 0, 0, 0, 0, 0})
     }
     loop argument in args {
-        probed: sema_rule_probe(argument.expr, check)
-        ty: if probed == .Val(checked) -> checked.ty else -> Type.Named{name: "_"}
-        known := if probed == .Val(checked) -> sema_rule_known(checked, check) else -> TComptimeValue?{None}
-        if known == None && probed == .Val(checked) && (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
-            known = sema_rule_known_path(argument.expr, check)
-        }
+        heard_arg: sema_rule_literal(argument.expr) ?? sema_rule_heard_arg(argument.expr, check)
         label := String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
-        sema_rule_call_arg(heard, label, ty, known, sema_rule_function_named(argument.expr, argument.span, check), sema_rule_written(argument.expr, file), argument.span, graph, check.environment.*)
+        sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, sema_rule_function_named(argument.expr, argument.span, check), sema_rule_written(argument.expr, file), argument.span, graph, check.environment.*)
     }
     heard.words.push(tables.len())
     loop table in tables {
@@ -500,6 +496,50 @@ sema_rule_probe: fn(expression: Expr, check: ^SemaBodyCheck) -> TExpr? {
         return sema_probe_expression(expression, Val(value_type), check, type_diagnostics)
     }
     None
+}
+
+// The type a rule hears for an argument and what the build knows of its
+// value (sema_rule_call_value).
+SemaRuleHeardArg: struct {
+    ty: Type,
+    known: TComptimeValue?,
+}
+
+// An argument a literal spells, as its own check with no type expected
+// gives it, found without that check: a numeral with no width suffix is an
+// Int of its exact value, `true` and `false` a Bool, and a String literal
+// with no hole a String of its text. None for any other argument, which
+// sema_rule_heard_arg probes.
+sema_rule_literal: fn(expression: Expr) -> SemaRuleHeardArg? Never! {
+    if expression == .Int(value, _, width, raw, _) && width == None {
+        return Val(SemaRuleHeardArg{ty: Type.Int, known: Val(TComptimeValue.Int{value: sema_expr_exact_integer_literal(value, raw)})})
+    }
+    if expression == .Bool(flag, _, _) -> return Val(SemaRuleHeardArg{ty: Type.Bool, known: Val(TComptimeValue.Bool{value: flag})})
+    if expression == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == {
+                .Lit(piece) -> { text = "{text}{piece}" }
+                .Byte(value) -> { text = "{text}{sema_expr_byte_text(value)}" }
+                .Interp(_, _) -> return None
+            }
+        }
+        return Val(SemaRuleHeardArg{ty: Type.String, known: Val(TComptimeValue.String{value: text})})
+    }
+    None
+}
+
+// An argument as its probe (sema_rule_probe) hears it: the probed type, `_`
+// when the probe fails, and what the build knows of its value, a Path's
+// text included.
+sema_rule_heard_arg: fn(expression: Expr, check: ^SemaBodyCheck) -> SemaRuleHeardArg {
+    probed: sema_rule_probe(expression, check)
+    ty: if probed == .Val(checked) -> checked.ty else -> Type.Named{name: "_"}
+    known := if probed == .Val(checked) -> sema_rule_known(checked, check) else -> TComptimeValue?{None}
+    if known == None && probed == .Val(checked) && (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
+        known = sema_rule_known_path(expression, check)
+    }
+    SemaRuleHeardArg{ty: ty, known: known}
 }
 
 // The FunctionInfo of the declared function the argument `expression` names
