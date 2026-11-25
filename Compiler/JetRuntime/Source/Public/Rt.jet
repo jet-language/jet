@@ -1,9 +1,9 @@
 // `jet.runtime.rt` (#6615): the start, observations and cancellation of a
-// core.rt realtime callback stream, in Jet types, and the coded and the
-// arithmetic stop of a Core library. Each member is a runtime binding
-// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its
-// one body (Realtime.jet, Trap.jet, RouteAMath.jet). Each is `priv`: only
-// Core calls them.
+// core.rt realtime callback stream, in Jet types, the coded and the
+// arithmetic stop of a Core library, and core.game's frame loop. Each member
+// is a runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
+// export that is its one body (Realtime.jet, Trap.jet, RouteAMath.jet,
+// Game.jet). Each is `priv`: only Core calls them.
 rt: module {
     // Starts a stream that calls `callback` with each buffer of
     // `frames_per_buffer` frames at `rate_hz`; the stream holds the callback
@@ -31,4 +31,10 @@ rt: module {
     // exact or lane operation that has no answer does (core.math
     // __numeric_stop).
     #Import(c) priv numeric_stop: fn(message: String) -> Never = "jet_numeric_stop"
+
+    // Runs `scene`'s frame loop and returns its transcript (core.game run):
+    // `replay` feeds its recorded input, `backend` presents the frames
+    // (headless when absent), and `frames`, when given, is the positive
+    // frame budget whose transcript ends with the run's hash.
+    #Import(c) priv game_run: fn(scene: GameScene, replay: GameReplay?, backend: GameBackend?, frames: Int?) -> String = "jet_game_run"
 }
