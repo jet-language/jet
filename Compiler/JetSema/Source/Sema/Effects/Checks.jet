@@ -288,15 +288,15 @@ SemaMemoryOpen: struct {
 }
 
 // The first violation on a path: an event (in node `owner`) or an open
-// dispatch, and the arena bytes used up to it. A search's finding also
-// keeps its path as the nodes from its root to `owner` (`steps`).
+// dispatch, and the arena bytes used up to it. Its path is the nodes from
+// its root to `owner` (`steps`), by display key (`path`).
 SemaMemoryFinding: struct {
     event: SemaMemoryEvent?,
     owner: Int,
     open: SemaMemoryOpen?,
     path: [String],
     used: Int,
-    steps: [Int]{[Int]{}},
+    steps: [Int],
 }
 
 // An arena proof, or the finding that stops the proof.
@@ -2955,10 +2955,11 @@ sema_effect_record_fact: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex
         sema_effect_record_memory_open(nodes, node_index, fact.span, "foreign or dynamically selected function body")
     }
     // A callee with no body in this program has no effects: only its declared
-    // row, recorded above, contributes. Its memory behavior stays unproven.
-    // A trait method called through a trait value is no such callee: the
-    // call runs the implementations (sema_effect_dispatched_call).
-    if callee_key != "" && !known_callee && !row_known && !sema_effect_dispatched_call(facts, tree, expression) {
+    // row, recorded above, contributes. Its memory behavior stays unproven,
+    // unless it is a runtime door (sema_effect_runtime_door_callee). A trait
+    // method called through a trait value is no such callee: the call runs
+    // the implementations (sema_effect_dispatched_call).
+    if callee_key != "" && !known_callee && !row_known && !sema_effect_runtime_door_callee(callee_key) && !sema_effect_dispatched_call(facts, tree, expression) {
         sema_effect_record_memory_open(nodes, node_index, fact.span, "callee body is unavailable and has no verified signed memory summary")
     }
 }
@@ -2993,6 +2994,22 @@ sema_effect_dispatched_call: fn(facts: SemaEffectCallIndex, tree: BodyTree, expr
 // (`kind:module.owner.name`): a collecting thread holds only its own node.
 sema_effect_core_db_callee: fn(callee_key: String) -> Bool Never! {
     callee_key.contains(":<corelib>/core.db.")
+}
+
+// The module identity prefix of the jet.runtime interface units (Driver
+// RuntimeInterface.jet jet_driver_runtime_interface_sources): Core units
+// that only the toolchain writes, so no package's module carries it.
+SEMA_EFFECT_RUNTIME_DOOR_MODULES: "<corelib>/jet.runtime."
+
+// A member of the jet.runtime interface: Core's body-less `#Import(c)` door
+// into the runtime (sema_guest_runtime_binding). It is toolchain code, not an
+// open-world body: its declaration is its contract, so its call is no open
+// memory dispatch. What it reserves is counted where Core's source states
+// it, as an allocator constructor's literal capacity is at the constructor's
+// call (sema_call_memory_allocator_name), and the stack proof leaves its
+// runtime frame uncounted. The key alone decides it (`kind:module.name`).
+sema_effect_runtime_door_callee: fn(callee_key: String) -> Bool Never! {
+    (callee_key.split_once(":") ?? return false).after.starts_with(SEMA_EFFECT_RUNTIME_DOOR_MODULES)
 }
 
 sema_effect_record_memory_open: fn(nodes: ^[SemaEffectNode], node_index: Int, span: Span, reason: String) Never! {
@@ -3327,9 +3344,12 @@ sema_effect_record_unresolved_call: fn(nodes: ^[SemaEffectNode], facts: SemaEffe
         callee_key != "" && sema_effect_node_index(facts.node_by_key, callee_key) != None -> {
             sema_effect_node_add_edge(nodes, node_index, callee_key)
         }
-        // A named callee with no body in this program has no effects.
+        // A named callee with no body in this program has no effects; a
+        // runtime door is no open memory dispatch (sema_effect_runtime_door_callee).
         callee_key != "" -> {
-            sema_effect_record_memory_open(nodes, node_index, expression.span, "callee body is unavailable and has no verified signed memory summary")
+            if !sema_effect_runtime_door_callee(callee_key) {
+                sema_effect_record_memory_open(nodes, node_index, expression.span, "callee body is unavailable and has no verified signed memory summary")
+            }
         }
         else -> {
             nodes[node_index].maximal = true
@@ -5332,8 +5352,14 @@ sema_effect_memory_sorted_calls: fn(calls: [SemaMemoryCall]) -> [SemaMemoryCall]
     sorted
 }
 
-sema_effect_memory_open_finding: fn(span: Span, source: String, reason: String, owner: Int, path: [String], used: Int) -> SemaMemoryFinding Never! {
-    SemaMemoryFinding{event: None, owner: owner, open: Val(SemaMemoryOpen{span: span, source: source, reason: reason}), path: path, used: used}
+// The finding at `owner` along `steps`, its nodes from its root.
+sema_effect_memory_finding: fn(nodes: [SemaEffectNode], event: SemaMemoryEvent?, owner: Int, open: SemaMemoryOpen?, steps: [Int], used: Int) -> SemaMemoryFinding Never! {
+    path: loop step in steps -> nodes[step].display_key
+    SemaMemoryFinding{event: event, owner: owner, open: open, path: path, used: used, steps: steps}
+}
+
+sema_effect_memory_open_finding: fn(nodes: [SemaEffectNode], span: Span, source: String, reason: String, owner: Int, steps: [Int], used: Int) -> SemaMemoryFinding Never! {
+    sema_effect_memory_finding(nodes, None, owner, Val(SemaMemoryOpen{span: span, source: source, reason: reason}), steps, used)
 }
 
 sema_effect_arena_failure: fn(finding: SemaMemoryFinding) -> SemaMemoryArena Never! {
@@ -5480,23 +5506,24 @@ sema_effect_unsized_alloc: fn(node: SemaEffectNode, event: SemaMemoryEvent) -> B
 }
 
 // The proven arena bytes `index` can reserve, with the event that witnesses the
-// total, or the finding that stops the proof.
-sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], path: [String]) -> SemaMemoryArena {
+// total, or the finding that stops the proof. `steps` are the nodes from the
+// proof's root to `index`.
+sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], steps: [Int]) -> SemaMemoryArena {
     if visiting[index] {
-        return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[index].display_key, "recursive call multiplicity is not statically bounded for arena accounting", index, path, 0))
+        return sema_effect_arena_failure(sema_effect_memory_open_finding(nodes, Span{start: 0, end: 0}, nodes[index].display_key, "recursive call multiplicity is not statically bounded for arena accounting", index, steps, 0))
     }
     visiting[index] = true
-    result: sema_effect_arena_bound_inner(nodes, index, visiting, path)
+    result: sema_effect_arena_bound_inner(nodes, index, visiting, steps)
     visiting[index] = false
     result
 }
 
-sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], path: [String]) -> SemaMemoryArena {
+sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], steps: [Int]) -> SemaMemoryArena {
     node: nodes[index]
     // copy: the arena failure owns its open site, while the site stays in `node`, a row of the
     // caller's read-only effect graph, which later searches read.
     if node.rare == .Val(rare) && rare.memory_opens.len() > 0 {
-        return sema_effect_arena_failure(SemaMemoryFinding{event: None, owner: index, open: Val(rare.memory_opens[0].copy()), path: path, used: 0})
+        return sema_effect_arena_failure(sema_effect_memory_finding(nodes, None, index, Val(rare.memory_opens[0].copy()), steps, 0))
     }
     ^total: 0
     ^witness: SemaMemoryFinding?{None}
@@ -5504,13 +5531,13 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting:
         // A heap allocation has no proven size, so a byte bound cannot hold
         // over it; the arena reservation at the same site is counted instead.
         if sema_effect_unsized_alloc(node, event) {
-            return sema_effect_arena_failure(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: total})
+            return sema_effect_arena_failure(sema_effect_memory_finding(nodes, Val(event), index, None, steps, total))
         }
         if event.kind != "arena" -> next
-        bytes: event.bytes ?? return sema_effect_arena_failure(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: total})
-        executions: event.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(event.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, path, total))
+        bytes: event.bytes ?? return sema_effect_arena_failure(sema_effect_memory_finding(nodes, Val(event), index, None, steps, total))
+        executions: event.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(nodes, event.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, steps, total))
         total += bytes * executions
-        witness = Val(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: 0})
+        witness = Val(sema_effect_memory_finding(nodes, Val(event), index, None, steps, 0))
     }
     loop target in node.call_targets {
         if target < 0 -> next
@@ -5521,25 +5548,25 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting:
         if called -> next
         ^reach_visiting: (loop _ in nodes -> false)
         if sema_effect_may_reach_arena(nodes, target, reach_visiting) {
-            return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, path, total))
+            return sema_effect_arena_failure(sema_effect_memory_open_finding(nodes, Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, steps, total))
         }
         // With no arena below it, the callee's multiplicity does not matter:
         // any heap allocation it reaches breaks the bound.
         if sema_effect_memory_search(nodes, target, "alloc") == .Val(found) {
-            ^full: path.copy()
-            loop step in found.path -> full.push(step)
-            return sema_effect_arena_failure(SemaMemoryFinding{event: found.event, owner: found.owner, open: found.open, path: full, used: total})
+            ^full: steps.copy()
+            loop step in found.steps -> full.push(step)
+            return sema_effect_arena_failure(sema_effect_memory_finding(nodes, found.event, found.owner, found.open, full, total))
         }
     }
     loop call in sema_effect_memory_sorted_calls(node.memory_calls) {
         target: call.target
         if target < 0 -> next
-        ^call_path: path.copy()
-        call_path.push(nodes[target].display_key)
-        proof: sema_effect_arena_bound(nodes, target, visiting, call_path)
+        ^call_steps: steps.copy()
+        call_steps.push(target)
+        proof: sema_effect_arena_bound(nodes, target, visiting, call_steps)
         if proof.failure != None -> return proof
         if proof.bytes == 0 -> next
-        executions: call.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(call.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, call_path, total))
+        executions: call.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(nodes, call.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, call_steps, total))
         total += proof.bytes * executions
         if proof.witness != None -> witness = proof.witness
     }
@@ -6625,11 +6652,28 @@ sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: Eff
         if bounded {
             arena = if event.kind == "alloc" -> "; sema proves no byte size for this heap allocation, so it cannot be counted against the bound" else -> "; the proven path total is {finding.used} bytes"
         }
-        return sema_error("E0921", event.span, "{event.operation} at {owner.source_display} violates the effective `{fact}` declared at {declared_at}", "{owner.source_display} is reachable through {path_text} from code governed by `{fact}`{arena}; declaration provenance: {provenance}; operation provenance: {owner.name} in {owner.source_display}", "remove or replace the incompatible operation, seal the target set, or move the call outside this denial")
+        return sema_error("E0921", sema_effect_memory_site(nodes, root, denial, finding, event.span), "{event.operation} at {owner.source_display} violates the effective `{fact}` declared at {declared_at}", "{owner.source_display} is reachable through {path_text} from code governed by `{fact}`{arena}; declaration provenance: {provenance}; operation provenance: {owner.name} in {owner.source_display}", "remove or replace the incompatible operation, seal the target set, or move the call outside this denial")
     }
     open: finding.open ?? SemaMemoryOpen{span: denial.span, source: declared_at, reason: "memory proof is incomplete"}
-    span: if open.span.start == open.span.end -> denial.span else -> open.span
-    sema_error("E0921", span, "`{fact}` cannot be proved through the open dispatch at {open.source}", "{open.reason} is reachable through {path_text}; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: {provenance}", "seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it")
+    sema_error("E0921", sema_effect_memory_site(nodes, root, denial, finding, open.span), "`{fact}` cannot be proved through the open dispatch at {open.source}", "{open.reason} is reachable through {path_text}; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: {provenance}", "seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it")
+}
+
+// Where a finding reports, given its own `site`: the diagnostic reads its
+// span in the root's file. A site of a function of the root's module is its
+// own (an empty one is the denial); a site in another module, a Core body's
+// included, would name an unrelated line of that file, so the report is at
+// the root's call that leads toward it (the first of `finding.steps`), or at
+// the denial when no counted call does.
+sema_effect_memory_site: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, finding: SemaMemoryFinding, site: Span) -> Span Never! {
+    if nodes[finding.owner].module_index == nodes[root].module_index {
+        return if site.start == site.end -> denial.span else -> site
+    }
+    if finding.steps.len() > 1 {
+        loop call in nodes[root].memory_calls {
+            if call.target == finding.steps[1] -> return call.span
+        }
+    }
+    denial.span
 }
 
 // 2: a `-[!Mem.Alloc]>`, `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial
@@ -6640,13 +6684,13 @@ sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: Effec
     limit: sema_effect_memory_bound(denial.name)
     if limit == .Val(bytes_limit) {
         ^visiting: (loop _ in nodes -> false)
-        proof: sema_effect_arena_bound(nodes, root, visiting, [String]{nodes[root].display_key})
+        proof: sema_effect_arena_bound(nodes, root, visiting, [Int]{root})
         if proof.failure == .Val(failure) {
             diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, failure))
             return sema_effect_memory_projection(failure)
         }
         if proof.bytes <= bytes_limit -> return SemaMemoryProjection.Proven
-        finding: proof.witness ?? sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[root].display_key, "the verified upper bound is {proof.bytes} bytes, above the declared {bytes_limit} bytes", root, [String]{nodes[root].display_key}, 0)
+        finding: proof.witness ?? sema_effect_memory_open_finding(nodes, Span{start: 0, end: 0}, nodes[root].display_key, "the verified upper bound is {proof.bytes} bytes, above the declared {bytes_limit} bytes", root, [Int]{root}, 0)
         ^finding_total: finding
         finding_total.used = proof.bytes
         diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, finding_total))

@@ -2693,7 +2693,13 @@ every reachable call, including dependency calls, against the function's
 `!Mem.*` denial. The unbounded forms are `!Mem.Alloc` and `!Mem.Rc`; the bounded
 forms are `!Mem.Alloc(above: N)` and `!Mem.Stack(above: N)`. E0921 identifies
 the incompatible operation, prints the full call path, and names the denial and
-its provenance. An open-world dispatch needs a sealed target set or signed
+its provenance; when the operation sits in another module's body, Core's
+included, the report points at the denying function's own call that reaches
+it. Core's bodies are checked from source like any dependency's; a call Core
+makes through a `jet.runtime` door is toolchain code, not an open dispatch,
+and what the door reserves is counted where Core states it (an allocator
+constructor's literal capacity, at the constructor's call). An open-world
+dispatch needs a sealed target set or signed
 dependency summary; otherwise the strict fact is unprovable and rejected
 (D-AUTHORITY-MEM1, D-MEM-FACTS1). For `!Mem.Stack(above: N)`, an executable
 build (one with a `run: fn` in its entry file or an Output entry) seals its own
