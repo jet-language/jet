@@ -280,4 +280,11 @@ net: module {
     // The addresses `host` resolves to on `port`, in the order core.net
     // connects to them (HostNetResolver.jet).
     #Import(c) priv resolve_ordered: fn(host: String, port: U16) -[Net, Time.Wait]> [SocketAddr] ResolveError! = "jet_net_raw_resolve_ordered"
+
+    // The address of the 4 or 16 octets `bytes`, and the socket address of
+    // `ip` and `port` with an IPv6 address's `flow` and `scope`
+    // (HostNetAddress.jet). The exports copy their arguments.
+    #Import(c) priv ip_from_bytes: fn(bytes: [U8]) -> IPAddr = "jet_net_raw_ip_from_bytes"
+
+    #Import(c) priv socket_from_parts: fn(ip: IPAddr, port: U16, flow: U32, scope: U32) -> SocketAddr = "jet_net_raw_socket_from_parts"
 }

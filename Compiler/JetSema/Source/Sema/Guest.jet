@@ -363,9 +363,9 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
 }
 
 // A parameter a runtime route carries: a read carried value, a read View of
-// a scalar (its window crosses as a List), or a written (`^`) runtime handle
-// or List of scalars, which the runtime changes in place. Nothing crosses
-// moved.
+// a scalar (its window crosses as a List), a written (`^`) runtime handle
+// or List of scalars, which the runtime changes in place, or a taken (`^^`)
+// carried value, which the runtime export consumes.
 sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Never! {
     if convention == {
         .Read -> {
@@ -378,7 +378,7 @@ sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Nev
             if ty == .List(item) -> return sema_guest_runtime_scalar(item)
             sema_guest_runtime_handle(ty)
         }
-        .Move -> false
+        .Move -> sema_guest_runtime_value(ty)
     }
 }
 
@@ -387,7 +387,7 @@ sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Nev
 sema_guest_check_runtime_binding: fn(function: Func, diagnostics: ^[Diagnostic]) -> Bool Never! {
     valid := true
     why: "a jet.runtime function crosses the runtime's route carriers"
-    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those, a View of a scalar, or a written (`^`) handle or List of scalars; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
+    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those, a View of a scalar, a written (`^`) handle or List of scalars, or a taken (`^^`) carried value; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
     loop param in function.params {
         if !sema_guest_runtime_param(param.convention, param.ty) {
             diagnostics.push(sema_error("E3203", param.ty_span, "`{type_name(param.ty)}` is not a runtime carrier for the parameter `{param.name}` of `{function.name}`", why, fix))

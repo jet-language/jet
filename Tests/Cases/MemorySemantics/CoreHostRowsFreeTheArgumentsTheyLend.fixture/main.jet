@@ -1,0 +1,56 @@
+// The temp-path and address host steps only read their argument (the
+// export copies the path, the octets or the address), so the caller frees
+// it after each call. Repeated calls of core.files.temp_dir and
+// core.net.socket_addr_parse keep the resident set where it was. A path,
+// octet list or address that no one frees is at least 32 bytes a call:
+// about 9 MB over the temp-path run and 64 MB over the address run.
+package: {
+    name: "core_host_rows_free_the_arguments_they_lend"
+    authority: { allow: [FS, FS.Read, FS.Write, IO] }
+}
+
+use {
+    files: core.files
+    net: core.net
+}
+
+TEMP_CALLS: 300_000
+
+ADDRESS_CALLS: 1_000_000
+
+GROWTH_LIMIT_KB: 8192
+
+status_kb: fn(field: String) -[FS.Read]> Int {
+    status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with(field) -> next
+        loop part in line.slice(field.len(), line.len()).trim().split(" ") {
+            if part.len() > 0 -> return Int.parse(part.copy()) ?? panic("{field} field")
+        }
+    }
+    panic("no {field} line")
+}
+
+run: fn() {
+    made := 0
+    _first: files.temp_dir("lent-path") ?? panic("temp_dir: {err}")
+    start: status_kb("VmRSS:")
+    loop _ in 0..<TEMP_CALLS {
+        dir: files.temp_dir("lent-path") ?? panic("temp_dir: {err}")
+        if dir.path.len() > 0 -> made += 1
+    }
+    temp_grown: status_kb("VmRSS:") - start
+    if temp_grown > GROWTH_LIMIT_KB -> panic("the resident set grew {temp_grown} kB over {TEMP_CALLS} temp_dir calls")
+    print("{made} temp_dir calls: the paths freed")
+
+    ports := 0
+    _warm: net.socket_addr_parse("192.168.1.20:8080") ?? panic("socket_addr_parse: {err}")
+    begin: status_kb("VmRSS:")
+    loop _ in 0..<ADDRESS_CALLS {
+        address: net.socket_addr_parse("192.168.1.20:8080") ?? panic("socket_addr_parse: {err}")
+        ports += net.socket_port(address)
+    }
+    address_grown: status_kb("VmRSS:") - begin
+    if address_grown > GROWTH_LIMIT_KB -> panic("the resident set grew {address_grown} kB over {ADDRESS_CALLS} socket_addr_parse calls")
+    print("{ADDRESS_CALLS} socket_addr_parse calls: port total {ports}, the octets and addresses freed")
+}

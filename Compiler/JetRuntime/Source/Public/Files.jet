@@ -404,4 +404,14 @@ files: module {
     #Import(c) priv jetc_link: fn(fd: Int, parent: Int, destination: String) -> JetcRaw = "jet_crypto_jetc_link"
 
     #Import(c) priv jetc_close: fn(fd: Int) -> JetcRaw = "jet_crypto_jetc_close"
+
+    // The temporary paths behind core.files.mkdtemp, temp_dir and temp_file
+    // (RouteAFiles.jet, FilesPathOps.jet): each creates `path`, a directory
+    // or a new file, and answers it as text, or as the TempDir or TempFile
+    // whose last owner removes it. The export copies `path`.
+    #Import(c) priv mkdtemp_raw: fn(path: String) -[FS.Write]> String IOError! = "jet_std_fs_temp_dir_path_raw"
+
+    #Import(c) priv temp_dir_raw: fn(path: String) -[FS.Write]> TempDir IOError! = "jet_std_fs_temp_dir_raw"
+
+    #Import(c) priv temp_file_raw: fn(path: String) -[FS.Write]> TempFile IOError! = "jet_std_fs_temp_file_raw"
 }

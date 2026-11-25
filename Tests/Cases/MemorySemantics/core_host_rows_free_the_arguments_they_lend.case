@@ -1,0 +1,15 @@
+# The temp-path rows (core.files' temp_dir, mkdtemp and temp_file) and the
+# address rows (core.net's ip_addr and socket_addr_parse) lend their
+# argument to an export that only copies it, so the caller frees it after
+# the call. 300,000 temp_dir calls and a million socket_addr_parse calls
+# keep the resident set within 8 MB on O0 and O2.
+fixture: CoreHostRowsFreeTheArgumentsTheyLend.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+limit: time=120
+exit: 0
+stdout: = "300000 temp_dir calls: the paths freed\n1000000 socket_addr_parse calls: port total 8080000000, the octets and addresses freed\n"
+step: jet run -O2 main.jet
+limit: time=120
+exit: 0
+stdout: = "300000 temp_dir calls: the paths freed\n1000000 socket_addr_parse calls: port total 8080000000, the octets and addresses freed\n"

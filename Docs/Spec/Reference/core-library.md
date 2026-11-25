@@ -283,9 +283,11 @@ A call crosses the runtime's route carriers, not the C law: an `Int` or a
 machine integer as a word, a `Bool` as a flag, a `Float`, a `String` as text,
 and a `List` of scalars; a result may also be an `Option` of one of those or
 of a tuple, or a tuple whose items are those or an `Option` of one, whose
-items the export writes in the tuple's written order. A binding
-parameter or result outside those carriers is
-E3203. Only the generated interface units and the runtime's own inline
+items the export writes in the tuple's written order. A written (`^`)
+parameter is a handle or a List of scalars the export changes in place; a
+taken (`^^`) one is any carried value, handed to the export, which ends it
+(the caller does not). A binding parameter or result outside those carriers
+is E3203. Only the generated interface units and the runtime's own inline
 modules declare bindings; an `#Import(c)` in a user module of any name,
 `jet.runtime.*` included, is an ordinary C import (E3101 outside `#Unsafe`,
 E3203 for a non-C type, E1341 for a shared symbol).
