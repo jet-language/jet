@@ -1353,7 +1353,8 @@ SEMA_COPY_DECLARED_WALK: 256
 // Whether a value of `ty` is or holds, at any depth, a value of a type
 // declared with the marker that reaches `hook` (sema_copy_nominal_declares,
 // or sema_copy_carrier_declares for a builtin head with no nominal row):
-// a field, an enum payload, an element or an entry. A type argument counts
+// a field, an enum payload, an element or an entry. A tag (a Shared guard's
+// read or edit tag) leaves the value's type as it is. A type argument counts
 // where the nominal's parts hold it (sema_copy_fork_parts substitutes it).
 // `seen` holds each instance walked once; a nominal whose parts grow its own
 // arguments without end (`Node<T>` holding a `Node<[T]>`) stops at
@@ -1372,7 +1373,7 @@ sema_copy_holds_declared: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int
             }
             false
         }
-        .List(inner) | .FixedList(inner, _) | .Option(inner) -> sema_copy_holds_declared(inner, graph, caller, seen, hook)
+        .List(inner) | .FixedList(inner, _) | .Option(inner) | .Tagged(_, inner) -> sema_copy_holds_declared(inner, graph, caller, seen, hook)
         .Result(ok, err) -> sema_copy_holds_declared(ok, graph, caller, seen, hook) || sema_copy_holds_declared(err, graph, caller, seen, hook)
         .Map(key, _, value) -> sema_copy_holds_declared(key, graph, caller, seen, hook) || sema_copy_holds_declared(value, graph, caller, seen, hook)
         .Tuple(fields) -> {
@@ -1381,7 +1382,7 @@ sema_copy_holds_declared: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int
             }
             false
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1468,8 +1469,10 @@ sema_copy_move_only_field_why: fn(holder: String, ty: Type, graph: SemaRegistrat
 }
 
 // Whether `ty` itself is declared with the marker that reaches `hook`: a
-// struct or enum by its own declaration, a builtin carrier by its Core one.
+// struct or enum by its own declaration, a builtin carrier by its Core one,
+// a tagged value by its type's.
 sema_copy_declares_at: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int, hook: MarkerHook) -> Bool {
+    if ty == .Tagged(_, inner) -> return sema_copy_declares_at(inner, graph, caller, hook)
     row: sema_copy_fork_row_at(ty, graph, caller) ?? return sema_copy_carrier_declares(ty, hook)
     sema_copy_nominal_declares(graph.modules[row.module_index].nominals[row.row], hook)
 }
