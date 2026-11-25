@@ -73,7 +73,9 @@ process: module {
     // with one setting changed. `spec_args_extend` and `spec_cpu_affinity`
     // append to the argv and the CPU set; `spec_env_clear` starts the child
     // from an empty environment; `spec_under` bounds the child by
-    // `authority`.
+    // `authority`; `spec_stdin`, `spec_stdout` and `spec_stderr` route a
+    // stream; `spec_timeout` and `spec_cpu_time_limit` take a Duration's ns
+    // and keep its whole milliseconds, a negative one as 0.
     #Import(c) priv spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec = "jet_process_spec_cwd"
     #Import(c) priv spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec = "jet_process_spec_arg"
     #Import(c) priv spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec = "jet_process_spec_args_extend"
@@ -91,6 +93,11 @@ process: module {
     #Import(c) priv spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_terminal"
     #Import(c) priv spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec = "jet_process_spec_terminal_with_policy"
     #Import(c) priv spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec = "jet_std_process_spec_under"
+    #Import(c) priv spec_stdin: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec = "jet_process_spec_stdin"
+    #Import(c) priv spec_stdout: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec = "jet_process_spec_stdout"
+    #Import(c) priv spec_stderr: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec = "jet_process_spec_stderr"
+    #Import(c) priv spec_timeout: fn(spec: ^^ProcessSpec, nanos: Int) -> ProcessSpec = "jet_process_spec_timeout"
+    #Import(c) priv spec_cpu_time_limit: fn(spec: ^^ProcessSpec, nanos: Int) -> ProcessSpec = "jet_process_spec_cpu_time_limit"
 
     // The launch steps of a spec (ProcessExecutionRoutes.jet). `spec_plan`
     // resolves the spec without starting it; `spec_run` runs it to its

@@ -528,9 +528,10 @@ process_spec_mode: fn(value: I64, mode: I64, field: I64) -> I64 {
     result
 }
 
-// A Duration crosses its Word route as the borrowed exact-Int carrier of its
-// ns (Routes.jet lower_route_word_getter, CAbiRoutes `Duration { ns:
-// native(word) }`); a Duration always fits i64.
+// A Duration's ns crosses as a lent exact-Int carrier, from the Core.rows
+// Word route (Routes.jet lower_route_word_getter, CAbiRoutes `Duration { ns:
+// native(word) }`) and from the jet.runtime.process spec_timeout and
+// spec_cpu_time_limit bindings alike; a Duration always fits i64.
 process_duration_millis: fn(nanos: I64) -> I64 {
     // Truncate towards zero before max(0).
     millis: host_native_int(nanos) /% I64{1000000}
