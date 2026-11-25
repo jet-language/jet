@@ -795,6 +795,14 @@ rt_task_exit_run_address: fn() -> I64 {
     sync_mutex_unlock(root)
 }
 
+// jet.runtime.sys atexit: the handler crosses as its handed-over closure box
+// with its lazy.callback invoke and lazy.release helper. The exit queue runs
+// the box through its own invoke and release words (scheduler_cleanup_closure_run),
+// so it keeps the box alone.
+#Export(c) jet_sys_atexit_raw: fn(closure: I64, invoke: I64, release: I64) {
+    jet_rt_native_atexit(closure)
+}
+
 #Export(c) jet_rt_task_exit_handlers: fn() {
     root: task_exit_root
     if (root == I64{0}) {

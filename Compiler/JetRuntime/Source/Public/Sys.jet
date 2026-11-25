@@ -1,10 +1,11 @@
 // `jet.runtime.sys` (#6615): the runtime's host facts, environment writes,
-// descriptors, shared memory, POSIX process calls and profiler marks, in Jet
-// types with their declared effect rows. Each member is a runtime binding
-// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its
-// one body (CompilerHost.jet, EnvRoutes.jet, HostDescriptors.jet,
-// HostProcess.jet, HostStdio.jet, HostTiming.jet, PerfSamples.jet,
-// RouteSys.jet). Each but image_part and image_part_size is `priv`: only
+// exit and interrupt handlers, descriptors, shared memory, POSIX process
+// calls and profiler marks, in Jet types with their declared effect rows.
+// Each member is a runtime binding (Guest.jet sema_guest_runtime_binding) of
+// the runtime export that is its one body (CompilerHost.jet, EnvRoutes.jet,
+// HostDescriptors.jet, HostProcess.jet, HostStdio.jet, HostTiming.jet,
+// PerfSamples.jet, ProcessSignal.jet, RouteSys.jet, Task.jet). Each but
+// image_part and image_part_size is `priv`: only
 // core.sys, core.data, core.files, core.perf, core.http and core.web call them. A
 // tuple result's items cross in the checked tuple's written order, which is
 // the export's slot order. A
@@ -40,6 +41,13 @@ sys: module {
 
     // Flushes every file system's buffers to storage.
     #Import(c) priv sync: fn() -[Env]> = "jet_std_os_sync"
+
+    // Queues `handler` to run when the process exits (Task.jet), and adds it
+    // to the handlers every SIGINT runs (ProcessSignal.jet). The runtime keeps
+    // the handed-over closure for the process's life.
+    #Import(c) priv atexit: fn(handler: fn()) -[Env]> = "jet_sys_atexit_raw"
+
+    #Import(c) priv on_interrupt: fn(handler: fn()) -[Env]> = "jet_sys_interrupt_raw"
 
     // Closes the descriptor numbered `fd`.
     #Import(c) priv close_fd: fn(fd: Int) -[Env]> = "jet_std_os_close_fd"

@@ -1,7 +1,8 @@
 // `jet.runtime.tasks` (#6615): the scheduler steps core.tasks reaches, in Jet
 // types with their effect rows. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
-// (Scheduler.jet, RouteACore.jet). Each is `priv`: only core.tasks calls them.
+// (Scheduler.jet, RouteACore.jet, RouteAInterval.jet). Each is `priv`: only
+// core.tasks calls them.
 tasks: module {
     // Yields the running task to the scheduler.
     #Import(c) priv yield_now: fn() -[Time.Wait]> = "jet_task_yield"
@@ -24,4 +25,8 @@ tasks: module {
 
     // The running task's identity: its fiber's, else the thread's kernel id.
     #Import(c) priv task_identity: fn() -> Int = "jet_rt_task_identity"
+
+    // A timer Receiver that gets 1, 2, 3, … one every `milliseconds` (at
+    // least 1) until it is dropped.
+    #Import(c) priv interval: fn(milliseconds: Int) -[Time.Wait]> Receiver<Int> = "interval"
 }
