@@ -536,13 +536,18 @@ sema_ownership_crossing_local_cell: fn(problem: SemaSendabilityProblem) -> Bool 
 }
 
 // How the headline names the crossing value's type. A `#Local` type is keyed
-// by its declaring module, a spelling no source writes, so a value of that
-// type is named by its declared name (`Pool`, not `app.Pool`); a written
-// module path (`browser.Browser`) stays.
+// by its declaring module. A Core key is a module identity, which the
+// diagnostic renderer spells as the reader writes it (`browser.Browser` when
+// the reason also names a plain `Browser`), whether the value's type carries
+// that identity or the bare name the compiler gives a constructed handle
+// (`Fixed`). Any other key is a spelling no source writes, so a value of that
+// type is named by its declared name (`Pool`, not `app.Pool`).
 sema_ownership_crossing_type_shown: fn(ty: Type, problem: SemaSendabilityProblem) -> String Never! {
     if problem.kind == .DeclaredLocal(key) {
-        if ty == .Named(head) && head == key -> return type_unqualified_name(key)
-        if ty == .Apply(head, _) && head == key -> return "{type_unqualified_name(key)}{type_name(ty).removeprefix(key)}"
+        leaf: type_unqualified_name(key)
+        shown: if sema_module_is_core_source(key) -> key else -> leaf
+        if ty == .Named(head) && (head == key || head == leaf) -> return shown
+        if ty == .Apply(head, _) && (head == key || head == leaf) -> return "{shown}{type_name(ty).removeprefix(head)}"
     }
     type_name(ty)
 }
