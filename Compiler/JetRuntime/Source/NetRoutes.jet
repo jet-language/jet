@@ -827,9 +827,14 @@ net_route_happy_race: fn(rows: I64, count: I64, output: I64, error: I64) -> I64 
     result
 }
 
-#Export(c) jet_net_tcp_connect_happy: fn(host: I64, port_int: I64, milliseconds_int: I64, output: I64, error: I64) -> I64 {
-    port: int_saturated(port_int)
-    milliseconds: int_saturated(milliseconds_int)
+#Export(c) jet_net_tcp_connect_happy: fn(host: I64, port: I64, milliseconds: I64, output: I64, error: I64) -> I64 {
+    net_tcp_connect_happy(host, int_saturated(port), int_saturated(milliseconds), output, error)
+}
+
+// jet_net_tcp_connect_happy over a native port and timeout, for runtime
+// callers (RouteWatcher.jet watch_port_ready); the export reads its lent
+// exact-Int carriers saturated first.
+net_tcp_connect_happy: fn(host: I64, port: I64, milliseconds: I64, output: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     operation: rt_static_text("tcp connect")
