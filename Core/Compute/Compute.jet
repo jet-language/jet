@@ -419,13 +419,28 @@ kernel_bounds_ok: fn(shape: [Int], index: [Int]) -> Bool ComputeError! {
     Ok(true)
 }
 
-// Devices, streams and CSR matrices are the registered ComputeDevice,
-// ComputeStream and SparseTensor records; their fields are private storage
-// (core_only rows), so user code holds opaque values. A device is its
-// display name. `Auto` and `CPU` select the CPU oracle; an explicit
-// accelerator has no provider here and is refused with ComputeError.Device
-// (core-library.md:4280-4281), never served on the CPU. A package adds a
-// device by implementing Accelerator; `accelerator` admits it.
+// A device is its display name. `Auto` and `CPU` select the CPU oracle; an
+// explicit accelerator has no provider here and is refused with
+// ComputeError.Device (core-library.md:4280-4281), never served on the CPU. A
+// package adds a device by implementing Accelerator; `accelerator` admits it.
+// The fields of a device, a stream and a CSR matrix are private storage, so
+// user code holds opaque values.
+ComputeDevice: struct {
+    priv name: String,
+}
+
+ComputeStream: struct {
+    priv device: String,
+}
+
+SparseTensor: struct {
+    priv rows: Int,
+    priv cols: Int,
+    priv row_ptr: [Int],
+    priv col_idx: [Int],
+    priv values: [Float],
+}
+
 impl ComputeDevice.Display {
     display: fn(self) -> String { self.name.copy() }
 }

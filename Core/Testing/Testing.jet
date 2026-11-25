@@ -30,6 +30,26 @@ RNG: random.RNG
 // World lifecycle and suite harness state remain host-owned;
 // callback comparison and bounded history generation stay portable Jet code.
 
+// One comparison of a reference and a candidate over the same cases: its
+// verdict (`status`, with `reason`), the relation it checked, where it ran
+// (`source`, `tool`, `target`, `seed`) and each case's input and two
+// results. `first_difference` is the first case that differs, -1 for none.
+TestComparison: struct {
+    status: String,
+    relation: String,
+    source: String,
+    tool: String,
+    target: String,
+    seed: Int?,
+    case_ids: [String],
+    inputs: [Dyn],
+    reference: [Dyn],
+    candidate: [Dyn],
+    first_difference: Int,
+    reason: String,
+    universal_proof: Bool,
+}
+
 assert_equal: fn(comparison: TestComparison) -> Bool Never! {
     // The typed provider also requires recorded samples; the source twin can
     // validate only the scalar proof fields exposed by the declaration.
