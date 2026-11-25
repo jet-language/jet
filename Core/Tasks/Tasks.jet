@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     core: core
     time: core.time
     rt: jet.runtime.time
@@ -20,7 +21,10 @@ use {
 // and task groups use language primitives; TaskState transitions are pure Jet.
 // Sleeping uses core.time.sleep. A function that waits, or reads the
 // monotonic clock for a timer's deadline, names the waiting leaf `Time.Wait`.
-after: fn<T>(delay: time.Duration, value: T) -[Time.Wait]> Receiver<T> Never! {
+// The compiler builds a call of `after` as the runtime timer's, handed T's
+// descriptor (Build.jet IR_CORE_INTRINSICS); the body only names that
+// operation.
+#Builtin.Role(.InlineTimerAfter) after: fn<T>(delay: time.Duration, value: T) -[Time.Wait]> Receiver<T> Never! {
     core.tasks.after(delay, value)
 }
 
@@ -34,38 +38,35 @@ interval_milliseconds: fn(period: time.Duration) -> Int Never! {
     milliseconds
 }
 
-// These functions back compiler-private channel rows, not new public API.
-scheduler: module {
-    use core: core
-
-    channel: fn<T>() -> {sender: Sender<T>, receiver: Receiver<T>} Never! {
-        pair: core.tasks.__channel_new<T>()
-        {sender: pair.sender, receiver: pair.receiver}
-    }
-
-    #Test("scheduler channel preserves its named sender and receiver") {
-        pair: channel<Int>()
-        test_send(pair.sender, 41) ?? panic("channel closed")
-        assert_eq(pair.receiver.receive() ?? panic("channel closed"), 41)
-        pair.sender.close()
-    }
-
-    bounded: fn<T>(capacity: Int) -> {sender: Sender<T>, receiver: Receiver<T>} Never! {
-        limit: if capacity < 1 -> 1 else -> capacity
-        pair: core.tasks.__channel_bounded<T>(limit)
-        {sender: pair.sender, receiver: pair.receiver}
-    }
-
-    #Test("scheduler bounded channel preserves its named sender and receiver") {
-        pair: bounded<Int>(0)
-        test_send(pair.sender, 42) ?? panic("bounded channel closed")
-        assert_eq(pair.receiver.receive() ?? panic("bounded channel closed"), 42)
-        pair.sender.close()
-    }
-
-    // A test's send; the test holds the receiver, so a refusal is its bug.
-    priv test_send: fn(sender: Sender<Int>, value: Int) Err! { sender.send(value) }
+// The runtime channel's two endpoints, unbounded or holding `capacity`
+// values; a capacity below 1 stops the program. The language's
+// `channel<T>()` and `channel<T>(capacity)` are calls of these, which the
+// compiler builds as the runtime channel's, handed T's descriptor (Build.jet
+// IR_CORE_INTRINSICS); a body only names that operation.
+#Builtin.Role(.InlineChannelNew) priv channel_pair: fn<T>() -> {sender: Sender<T>, receiver: Receiver<T>} Never! {
+    channel_pair<T>()
 }
+
+#Builtin.Role(.InlineChannelBounded) priv bounded_pair: fn<T>(capacity: Int) -> {sender: Sender<T>, receiver: Receiver<T>} Never! {
+    bounded_pair<T>(capacity)
+}
+
+#Test("a channel preserves its named sender and receiver") {
+    pair: channel_pair<Int>()
+    test_send(pair.sender, 41) ?? panic("channel closed")
+    assert_eq(pair.receiver.receive() ?? panic("channel closed"), 41)
+    pair.sender.close()
+}
+
+#Test("a bounded channel preserves its named sender and receiver") {
+    pair: bounded_pair<Int>(1)
+    test_send(pair.sender, 42) ?? panic("bounded channel closed")
+    assert_eq(pair.receiver.receive() ?? panic("bounded channel closed"), 42)
+    pair.sender.close()
+}
+
+// A test's send; the test holds the receiver, so a refusal is its bug.
+priv test_send: fn(sender: Sender<Int>, value: Int) Err! { sender.send(value) }
 
 impl Condition {
     notify_one: fn(self) Never! { tasks_rt.condition_notify_one(self) }
@@ -313,7 +314,7 @@ TaskState: struct {
     generation: Int,
 }
 
-// Pure value-state transitions; these are separate from scheduler.channel<T>.
+// Pure value-state transitions; these are separate from the runtime channel.
 channel: fn(capacity: Int) -> TaskState Never! {
     cap := capacity
     if cap < 0 -> cap = 0

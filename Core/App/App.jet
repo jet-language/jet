@@ -7070,7 +7070,7 @@ priv app_graph_menu_bar: fn() -> Shared<AppMenuBar>? Never! {
 // bus, or whose display server shows no global menu, has the key
 // equivalents alone.
 priv app_menu_bar_start: fn(window: ui.Window, menus: Shared<AppMenuBar>) -[Env, Exec.Exit, Net, Time]> Never! {
-    pair: tasks.__channel_new<String>()
+    pair: channel<String>()
     serving: task { app_menu_bar_run(pair.sender, menus) }
     serving.detach()
     name: pair.receiver.receive() ?? return
@@ -7250,7 +7250,7 @@ priv app_window_keep: fn(window: ui.Window) Never! {
 // task of the window's writes the wake.
 priv app_window_watch: fn(waker: ^^sys.Fd?) -[Env, Time.Wait]> Never! {
     fd: waker ?? return
-    pair: tasks.__channel_new<Int>()
+    pair: channel<Int>()
     held := APP_WINDOW_WAKE.guard_edit()
     held.value.wakes = [Sender<Int>]{pair.sender}
     relaying: task { app_window_relay(pair.receiver, fd) }
@@ -7382,7 +7382,7 @@ priv app_window_shown: fn() -> {window: ui.Window?, mine: Bool} Never! {
 priv app_window_ask_paste: fn() -> Receiver<String?>? Never! {
     held := APP_WINDOW_WAKE.guard_edit()
     if held.value.wakes.len() == 0 -> return None
-    pair: tasks.__channel_new<String?>()
+    pair: channel<String?>()
     held.value.pastes.push(pair.sender)
     app_window_rouse(held.value)
     Val(pair.receiver)

@@ -912,7 +912,7 @@ priv server_bind: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: 
 // A server over a listener its caller bound (core.web's app listen step,
 // which tells a busy port from other bind failures).
 priv server_on: fn(listener: TCPListener, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -> HTTPServer Never! {
-    pair: core.tasks.__channel_bounded<Int>(1)
+    pair: channel<Int>(capacity: 1)
     HTTPServer{
         __state: Shared{HTTPServerState{phase: 0, stopping: false, report: None}},
         __listener: Shared{[TCPListener]{listener}},
