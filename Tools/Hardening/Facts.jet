@@ -9,8 +9,8 @@
 use {
     jet_lexer.[lex_generated]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
-    jet_ir.[IRCompilerOwnedCore, IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, CoreCallSymbol, Type, core_call, core_call_coverage_contains, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
+    jet_ir.[IRCompilerOwnedCore, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, CoreCallSymbol, IRRecordSchema, IR_GENERATED_RECORDS, IR_RECORD_SCHEMAS, Type, core_call, core_call_coverage_contains, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
     jet_eval.[jet_eval_compiler_value_method_record]
 }
 
@@ -24,7 +24,7 @@ RUNTIME_ROUTES_PATH: "Compiler/JetIR/Source/RuntimeRoutes.jet"
 
 RUNTIME_HANDLES_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet"
 
-RUNTIME_RECORDS_PATH: "Compiler/JetIR/Source/RuntimeRecords.jet"
+RUNTIME_LAYOUTS_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeLayouts.jet"
 
 COMPILER_OWNED_PATH: "Compiler/JetIR/Source/CompilerOwned.jet"
 
@@ -460,10 +460,10 @@ field_dispatch: fn(owner: String, field: String, route_files: [SourceFile]) -> R
             return Val(Route{kind: "ir-handle-field", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{handle.runtime}\""), symbol: "{handle.runtime}.{field}"})
         }
     }
-    if schema_route(IR_RECORD_SCHEMAS, RUNTIME_RECORDS_PATH, owner, field, route_files) == .Val(route) {
+    if schema_route(IR_RECORD_SCHEMAS, RUNTIME_LAYOUTS_PATH, owner, field, route_files) == .Val(route) {
         return Val(route.copy())
     }
-    if schema_route(IR_GENERATED_RECORDS, RUNTIME_ROUTES_PATH, owner, field, route_files) == .Val(route) {
+    if schema_route(IR_GENERATED_RECORDS, RUNTIME_LAYOUTS_PATH, owner, field, route_files) == .Val(route) {
         return Val(route.copy())
     }
     if ir_host_value_name(owner) && jet_eval_compiler_value_method_record(owner, field) {

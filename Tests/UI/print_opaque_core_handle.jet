@@ -1,0 +1,14 @@
+// E0112: a Core type the runtime holds as an opaque handle, with no display
+// or show form (a temp file, a file reader), derives no Printable from its
+// declared fields, so `print` refuses it in the check instead of the build
+// failing on it. A Core type holding a Shared cell is refused the same way.
+use files: core.files
+use tls: core.net.tls
+
+run: fn() {
+    temp: files.temp_file("print-opaque") ?? panic("temp")
+    reader: files.open(temp.path) ?? panic("open")
+    print(temp)
+    print(reader)
+    print(tls.TLSStream{})
+}

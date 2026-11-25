@@ -5,8 +5,6 @@
 // result comes back as its length with its slot buffer in an out slot; an
 // Option or Result result comes back as the adapter's tag word plus one out
 // slot. The lowering builds its own List, Option or Result box from them.
-use jet_foundation.[IRRuntimeHandle]
-
 ir_route_nested_carrier: fn(carrier: IRRouteCarrier) -> Bool Never! {
     if carrier == .List(elem) -> return elem == .List(_)
     false
@@ -42,15 +40,4 @@ ir_route_nested: fn(route: IRRoute) -> Bool Never! {
 // runtime's jet_rt_http_tls_refuse stop reports verbatim.
 ir_tls_transport_message: fn() -> String Never! {
     "TLS transport is not available in native builds until Jet's own TLS implementation lands; use plain HTTP or TCP meanwhile"
-}
-
-// ProcessReceipt168/ProcessPlan72 are Jet-owned carriers, never hosted Rust
-// records, in pack and program builds alike (the IR makes the
-// compiler-owned process records handles), the compiler-owned `Test` is
-// the runtime's JetTestSuite snapshot (TestSuite.jet), and the compiler-owned
-// `GameScene`/`GameFrame` are the runtime's game carriers (Game.jet).
-// Validate canonical identity and actual member types before lending their
-// storage to the typed read/clone glue.
-ir_native_runtime_carrier: fn(handle: IRRuntimeHandle, name: String) -> Bool Never! {
-    (handle.runtime == "ProcessReceipt" || handle.runtime == "ProcessPlan" || handle.runtime == "ProcessChild" || handle.runtime == "JetTestSuite" || handle.runtime == "JetGameScene" || handle.runtime == "JetGameFrame") && name == handle.jet_name
 }

@@ -1520,12 +1520,17 @@ sema_expression_view_subrange_type: fn(ty: Type) -> Type? Never! {
 
 // A nominal type whose `Display` comes from a derive: a
 // `#Printable` or `#Display` marker, or the auto-derived `Printable` the
-// declaration-marker rule selects for it.
+// declaration-marker rule selects for it. A Core runtime handle the IR lays
+// out opaquely, with no form that renders it, derives none: its declared
+// fields are not what the value holds.
 sema_expression_interpolation_derived: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph
     name: sema_type_graph_base_name(ty) ?? return false
     resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
     if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
+    if module_is_core(resolved.target_module_identity) && sema_comparability_core_declaration_unrendered(graph, resolved.target_module_identity, ty, resolved, "Printable") {
+        return false
+    }
     if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
         if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") {
             return true

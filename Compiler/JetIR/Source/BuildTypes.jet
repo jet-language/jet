@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
     jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, build_time_refused, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, BinOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_leaf, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
-    jet_foundation.[TShapeFormatName, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
+    jet_foundation.[IR_GENERATED_RECORDS, TShapeFormatName, ir_handle_laid_opaque, ir_record_schema, ir_record_schema_row, ir_record_variant_position, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -794,7 +794,7 @@ ir_handle_row_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, name: String) -> In
     // `Field` struct of the private __core_crypto_ecp part.
     if found == .Val(row) && name != "Group" && (name == p.types[row].key || !core_source_part_owns_type(p.types[row].key)) {
         definition: p.types[row]
-        native: ir_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
+        builtin_err: definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
         // A compiler-owned row (its key is its bare name) is no program type:
         // a bare spelling takes its runtime row before any declaration. The
         // canonical Dyn enum is the exception: it is declared in place and
@@ -805,8 +805,7 @@ ir_handle_row_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, name: String) -> In
         carried: ir_runtime_handle(definition.key) != None || definition.key == definition.name
         // A bare spelling of a carried declaration is that declaration: both
         // spellings take the row its key does.
-        owned_shape: ir_record_schema(handle) || ir_native_type(name) != None || core_source_owns_type(name) || (definition.key != name && (ir_native_type(definition.key) != None || core_source_owns_type(definition.key)))
-        if !native && (!carried || owned_shape) -> return None
+        if !builtin_err && !ir_handle_laid_opaque(handle, name, definition.key, carried) -> return None
     }
     atom: runtime_abi_atom(handle.runtime)
     clone: if handle.clone -> "jet_rt_handle_clone_{atom}" else -> ""
@@ -1137,27 +1136,6 @@ ir_handle_field: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, base: I
     copied: if kind == .Aggregate && ir_list_element(m, p, b, view) == .Val(element) -> ir_list_clone(m, p, b, view, element, row) else -> ir_copy_value(m, p, b, view, span)
     ir_release(m, b, base)
     copied
-}
-
-// Whether a runtime handle row has a record schema: such a type keeps its
-// declared layout and converts at a route boundary.
-ir_record_schema: fn(handle: IRRuntimeHandle) -> Bool Never! {
-    ir_record_schema_row(handle) != None
-}
-
-// The record schema of a runtime handle row: a IR_RECORD_SCHEMAS row by its
-// Jet name, or a generated row keyed by its runtime type.
-ir_record_schema_row: fn(handle: IRRuntimeHandle) -> IRRecordSchema? Never! {
-    loop schema in IR_RECORD_SCHEMAS {
-        // copy: the row stays in the global table, which can't be moved from.
-        if schema.jet_name == handle.jet_name -> return Val(schema.copy())
-    }
-    loop schema in IR_GENERATED_RECORDS {
-        if schema.jet_name == handle.runtime {
-            return Val(IRRecordSchema{jet_name: handle.jet_name, variants: schema.variants, fields: schema.fields})
-        }
-    }
-    None
 }
 
 // The runtime record a value of `ty` crosses a route as: a struct or payload
