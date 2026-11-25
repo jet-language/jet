@@ -1997,7 +1997,7 @@ sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     graph: check.program.registration_graph
     if (method == "route" || method == "page" || method == "layout") && args.len() > 0 {
-        _ := sema_http_route_check_literal(args[0], check.environment.*, check.program.*, check.scopes, check.diagnostics)
+        _ := sema_http_route_check_literal(args[0], check.environment.*, check.program.*, check.scopes, check.diagnostics, app: true)
     }
     if args.len() != arity {
         check.diagnostics.push(sema_call_arity_diagnostic(method, arity, args.len(), false, span))

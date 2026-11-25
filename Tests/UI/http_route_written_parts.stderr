@@ -1,0 +1,89 @@
+Error: Jet.InvalidRoute: HTTPRouter route path must be a static String or Path
+  --> http_route_written_parts.jet:23:16
+    |
+ 23 |     router.get(("/a/{id}"), handle)
+    |                ^
+ Why: Router endpoint contracts are fully checked while building; App routes may be computed at runtime
+ Fix: Use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a `web.app()`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/b/{ID}`: brace interpolation is not allowed in route patterns
+  --> http_route_written_parts.jet:24:16
+    |
+ 24 |     router.get("/b/{ID}", handle)
+    |                ^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/c/{id}`: brace interpolation is not allowed in route patterns
+  --> http_route_written_parts.jet:25:16
+    |
+ 25 |     router.get("/c/{id:Debug}", handle)
+    |                ^^^^^^^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/d/{…}`: brace interpolation is not allowed in route patterns
+  --> http_route_written_parts.jet:26:17
+    |
+ 26 |     router.post("/d/{record.id}", handle)
+    |                 ^^^^^^^^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/e/{…}`: brace interpolation is not allowed in route patterns
+  --> http_route_written_parts.jet:27:16
+    |
+ 27 |     router.put("/e/{"x"}", handle)
+    |                ^^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/f/{lit}/{id}`: brace interpolation is not allowed in route patterns
+  --> http_route_written_parts.jet:28:16
+    |
+ 28 |     router.get("/f/{{lit}}/{id}", handle)
+    |                ^^^^^^^^^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/g/{id}`: use `:name` or final `*name`; braces are not route markers
+  --> http_route_written_parts.jet:29:16
+    |
+ 29 |     router.get(`/g/{id}`, handle)
+    |                ^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.OperatorTypeMismatch: Text isn't joined with `+`
+  --> http_route_written_parts.jet:30:16
+    |
+ 30 |     router.get("/h/" + id, handle)
+    |                ^^^^^^^^^^
+ Why: There's one way to build text: interpolation (S8)
+ Fix: Write the pieces inside one string: "/h/{id}"
+More: jet-lang.dev/e/Jet.OperatorTypeMismatch
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/i/{id}`: brace interpolation is not allowed in route patterns
+  --> http_route_written_parts.jet:31:28
+    |
+ 31 |     router.custom("PURGE", "/i/{id}", handle)
+    |                            ^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/j/{id}`: brace interpolation is not allowed in route patterns
+  --> http_route_written_parts.jet:33:13
+    |
+ 33 |     app.get("/j/{id}", handle)
+    |             ^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
