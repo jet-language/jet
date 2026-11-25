@@ -920,9 +920,10 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
 // function and `task.timeout`), `thread` the running thread's index (`Int`,
 // 0 on the main thread), `logger` core.log's `logger` key (a
 // `log.Handler`), read as `context.get(logger)` is, `on_stop` the stop
-// handler (a `fn(debug.Stop)`, core.debug's `__stop_ignore` where no block
-// set one), `print` core.term's print style (a `term.PrintStyle`, its
-// defaults where no block set one) (ContextKeys.jet sema_context_field_key),
+// handler (a `fn(debug.Stop)`, the core.debug function that fills the
+// ContextOnStop role where no block set one), `print` core.term's print
+// style (a `term.PrintStyle`, its defaults where no block set one)
+// (ContextKeys.jet sema_context_field_key),
 // `scratch` the task's scratch arena and `trace` the calling frames
 // (sema_expression_context_trace), and `allocator` the current allocator
 // (sema_expression_context_allocator). The task owns its scratch arena, so a
@@ -974,21 +975,25 @@ sema_context_read_fields: fn() -> [String] Never! { [String]{"deadline", "thread
 // `[SourceLocation]`, read from the frame chain and location table the
 // fault report reads. The runtime's walk (JetRuntime Fault.jet
 // jet_rt_context_trace, the ContextRead "trace") writes them as text, and
-// core.debug's `__trace_records` makes the records: the reading function
-// first, then its callers. The table names no column or module, so
-// `column` is 0 and `module` "". Like every context read it records no
-// effect, and a `#Memo` function that can read it keys its results on the
-// frames (Effects/Checks.jet sema_effect_context_reach).
+// the core.debug function that fills the ContextTrace role makes the
+// records: the reading function first, then its callers. The table names no
+// column or module, so `column` is 0 and `module` "". Like every context
+// read it records no effect, and a `#Memo` function that can read it keys
+// its results on the frames (Effects/Checks.jet sema_effect_context_reach).
 sema_expression_context_trace: fn(span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.trace", span, [EffectRowEntry]{}, diagnostics) {
         return None
     }
-    unavailable: sema_error("E0906", span, "the source `core.debug.__trace_records` declaration for `context.trace` is unavailable", "`context.trace` makes its records through the Core debug source", "restore the `core.debug` source module")
-    identity: sema_call_core_module_identity(environment, program, "core.debug") ?? {
+    unavailable: sema_error("E0906", span, "the core.debug function that fills the ContextTrace role for `context.trace` is unavailable", "`context.trace` makes its records through the Core debug source", "restore the `core.debug` source module")
+    if sema_call_core_module_identity(environment, program, "core.debug") == None {
         diagnostics.push(unavailable)
         return None
     }
-    target: sema_call_core_source_target(environment, program, identity, "__trace_records", [Type]{}, span, true, diagnostics) ?? {
+    filler: sema_core_role_function(program.registration_graph, "ContextTrace") ?? {
+        diagnostics.push(sema_missing_core_role("ContextTrace", span))
+        return None
+    }
+    target: sema_call_core_source_target(environment, program, filler.module_identity, filler.name, [Type]{}, span, true, diagnostics) ?? {
         diagnostics.push(unavailable)
         return None
     }

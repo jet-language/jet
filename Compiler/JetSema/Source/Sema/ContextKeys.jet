@@ -56,9 +56,10 @@ SEMA_CONTEXT_CORE_FIELDS: [String]{"allocator", "logger", "on_stop", "print", "t
 
 // The Core module that carries the context field `name`: `logger` is
 // core.log's `logger` key, a `log.Handler`; `on_stop` is a
-// `fn(debug.Stop)`, whose default is core.debug's `__stop_ignore`; `print`
-// is a `term.PrintStyle`, whose default is core.term's `__print_style`;
-// `trace` is read through core.debug's `__trace_records` (Places.jet
+// `fn(debug.Stop)`, whose default is the core.debug function that fills the
+// ContextOnStop role; `print` is a `term.PrintStyle`, whose default is
+// core.term's `__print_style`; `trace` is read through the core.debug
+// function that fills the ContextTrace role (Places.jet
 // sema_expression_context_trace) and has no key, so no block sets it;
 // `allocator` is read through core.mem's `__context_allocator` (Places.jet
 // sema_expression_context_allocator) and set by the block itself.
@@ -98,22 +99,26 @@ SemaContextFieldKey: struct {
 // module: `logger` is its `#ContextKey` constant; `print` is keyed and
 // defaults by core.term's constant `__print_style` (core.term's `print` is
 // its function, and the constant is no key a program may name); and
-// `on_stop` is CONTEXT_ON_STOP_KEY, typed as core.debug's `__stop_ignore`
-// and defaulting to it.
+// `on_stop` is CONTEXT_ON_STOP_KEY, typed as the core.debug function that
+// fills the ContextOnStop role and defaulting to it.
 sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaContextFieldKey? {
     module_name: sema_context_field_module(name) ?? return None
     graph: program.registration_graph
-    loop module_index in 0..<graph.modules.len() {
-        if graph.modules[module_index].module_name != module_name -> next
-        if name == "on_stop" {
-            loop function in graph.modules[module_index].functions {
-                if function.symbol.name != "__stop_ignore" -> next
+    if name == "on_stop" {
+        filler: sema_core_role_function(graph, "ContextOnStop") ?? return None
+        loop module_row in graph.modules {
+            if module_row.module_identity != filler.module_identity -> next
+            loop function in module_row.functions {
+                if function.symbol.name != filler.name -> next
                 id: sema_registration_callable_id(graph, function.symbol.id) ?? return None
-                ty: sema_type_resolve_declared(graph, function.signature, graph.modules[module_index].module_identity)
+                ty: sema_type_resolve_declared(graph, function.signature, module_row.module_identity)
                 return Val(SemaContextFieldKey{key: SemaContextKey{key: CONTEXT_ON_STOP_KEY, ty: ty}, default: SemaContextDefault.Function{function: id}})
             }
-            return None
         }
+        return None
+    }
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].module_name != module_name -> next
         loop constant in graph.modules[module_index].constants {
             found: if name == "print" -> constant.symbol.name == "__print_style" else -> constant.symbol.name == name && sema_context_key_declared(constant.declaration)
             if !found -> next

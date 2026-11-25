@@ -89,7 +89,10 @@
 // starting with `CLI` (CLISpec through CLIMissing), whose fillers the compiler
 // reads from Core/Args/Args.jet while it builds. `context.allocator` reads
 // the function that fills ContextAllocator, and a `#Context(allocator: a)`
-// block calls the one that fills AllocatorHandler on `a`. The core.mem and
+// block calls the one that fills AllocatorHandler on `a`. `context.on_stop`
+// defaults to the core.debug function that fills ContextOnStop, and
+// `context.trace` makes its records with the one that fills ContextTrace.
+// The core.mem and
 // core.math operations the compiler builds inline at each call, never as a
 // call (a raw List's capacity, a pointer step, a block copy, a bit copy and
 // the rest), fill the roles that start with `Inline`. A role's name ends
@@ -193,6 +196,8 @@ RoleKind: enum {
     GroupSumU64,
     GroupMean,
     DataSchema,
+    ContextOnStop,
+    ContextTrace,
     ReceiptAttach,
     DecodeUnder,
     DecodeList,
