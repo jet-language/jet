@@ -273,7 +273,7 @@ parser_loop_body_can_break: fn(statements: [Stmt]) -> Bool Never! {
 
 parser_loop_body_can_break_inner: fn(statements: [Stmt], nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
     loop stmt in statements {
-        can_break := if stmt == {
+        can_break: if stmt == {
             .Break(_) -> allow_unlabeled
             .BreakValue(_, _) -> allow_unlabeled
             .BreakLabel(name, _) -> {
@@ -358,7 +358,7 @@ parser_parse_body_lines: fn(state: ^JetParserState, value_tail: Bool) -> ParsedB
             parser_skip_semicolons(state)
             next
         }
-        before := state.position
+        before: state.position
         kind: parser_current_kind(state)
         statement: if {
             value_tail && kind == TOKEN_KW_LOOP -> parser_parse_tail_loop(state)
@@ -480,7 +480,7 @@ parser_parse_value_lines: fn(state: ^JetParserState, depth: Int, prepared_value:
         if parser_aborting(state) {
             return ParsedBlock{span: parser_cover(open.span, parser_current(state).span), statements: statements, tail: tail}
         }
-        before := state.position
+        before: state.position
         if prepared_value && parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && (parser_prep_verb_ahead(state, 2, TOKEN_LBRACE) || parser_prep_operand_ahead(state, 2)) {
             binding: parser_current(state)
             binding_name: parser_value(state, binding)
@@ -691,14 +691,17 @@ parser_parse_scope_member: fn(state: ^JetParserState) -> Stmt {
     if parser_current_kind(state) == TOKEN_LPAREN {
         open: parser_bump(state)
         loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
-            if parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON {
-                label: parser_bump(state)
-                parser_bump(state)
-                value: parser_parse_expression(state, 1, 0)
-                args.push(Expr.TupleLit{fields: [TupleField]{TupleField{name: parser_value(state, label), value: value.expr}}, span: parser_cover(label.span, value.span), ty: None, id: parser_node_id(state)})
-            } else {
-                value: parser_parse_expression(state, 1, 0)
-                args.push(value.expr)
+            if {
+                parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON -> {
+                    label: parser_bump(state)
+                    parser_bump(state)
+                    value: parser_parse_expression(state, 1, 0)
+                    args.push(Expr.TupleLit{fields: [TupleField]{TupleField{name: parser_value(state, label), value: value.expr}}, span: parser_cover(label.span, value.span), ty: None, id: parser_node_id(state)})
+                }
+                else -> {
+                    value: parser_parse_expression(state, 1, 0)
+                    args.push(value.expr)
+                }
             }
             if parser_current_kind(state) == TOKEN_RPAREN -> break
             parser_expect(state, TOKEN_COMMA, "between scope-member arguments")
@@ -805,12 +808,15 @@ parser_parse_if_statement: fn(state: ^JetParserState) -> Stmt {
     chained: parser_current_kind(state) == TOKEN_KW_ELSE && parser_kind_at(state, 1) == TOKEN_KW_IF
     // After a braced body, a final `else` is braced too; an `else if` link
     // and the arms after it take every body shape.
-    if braced && parser_current_kind(state) == TOKEN_KW_ELSE && !chained {
-        parser_bump(state)
-        else_start: parser_current(state).span.start
-        else_body = Val(parser_parse_block(state).statements)
-        parts.push(ParserBranchPart{is_else: true, cond: Span{start: else_start, end: else_start}, body: Span{start: else_start, end: parser_prev_token_end(state)}})
-    } else { else_body = parser_parse_if_else_chain(state, arms, parts) }
+    if {
+        braced && parser_current_kind(state) == TOKEN_KW_ELSE && !chained -> {
+            parser_bump(state)
+            else_start: parser_current(state).span.start
+            else_body = Val(parser_parse_block(state).statements)
+            parts.push(ParserBranchPart{is_else: true, cond: Span{start: else_start, end: else_start}, body: Span{start: else_start, end: parser_prev_token_end(state)}})
+        }
+        else -> { else_body = parser_parse_if_else_chain(state, arms, parts) }
+    }
     // L0507: a chained branch, or a braced one with `else` over several
     // lines, prefers one ordered arm table.
     if chained || (braced && else_body != None && parser_authored_line_break(state, branch_start, state.position)) {
@@ -1234,7 +1240,7 @@ parser_parse_loop_effect_body: fn(state: ^JetParserState) -> ParsedBlock {
             return ParsedBlock{span: arrow.span, statements: [Stmt]{}, tail: None}
         }
         statement: parser_parse_statement(state)
-        end := parser_lookahead(state, -1).span
+        end: parser_lookahead(state, -1).span
         return ParsedBlock{span: parser_cover(arrow.span, end), statements: [Stmt]{statement}, tail: None}
     }
     if token.kind == TOKEN_LBRACE -> return parser_parse_block(state)
@@ -1251,7 +1257,7 @@ parser_parse_loop_effect_body: fn(state: ^JetParserState) -> ParsedBlock {
     }
     parser_teach_control_braces(state, "loop", token.span)
     statement: parser_parse_statement(state)
-    end := parser_lookahead(state, -1).span
+    end: parser_lookahead(state, -1).span
     ParsedBlock{span: parser_cover(token.span, end), statements: [Stmt]{statement}, tail: None}
 }
 
@@ -1328,14 +1334,17 @@ parser_parse_loop_after_keyword: fn(state: ^JetParserState, start: Span, label: 
                 kind = ForKind.Range{start: range_start, end: range_end, step: parser_loop_stride(state), exclusive: exclusive}
             }
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
-                if parser_current_kind(state) == TOKEN_DOT_DOT || parser_current_kind(state) == TOKEN_DOT_DOT_LT {
-                    // `..` is inclusive; `..<` is half-open.
-                    exclusive: parser_current_kind(state) == TOKEN_DOT_DOT_LT
-                    parser_bump(state)
-                    finish: parser_parse_expression_no_struct_lit(state, 1)
-                    kind = ForKind.Range{start: first.expr, end: finish.expr, step: parser_loop_stride(state), exclusive: exclusive}
-                } else {
-                    kind = ForKind.In{collection: first.expr, step: parser_loop_stride(state)}
+                if {
+                    parser_current_kind(state) == TOKEN_DOT_DOT || parser_current_kind(state) == TOKEN_DOT_DOT_LT -> {
+                        // `..` is inclusive; `..<` is half-open.
+                        exclusive: parser_current_kind(state) == TOKEN_DOT_DOT_LT
+                        parser_bump(state)
+                        finish: parser_parse_expression_no_struct_lit(state, 1)
+                        kind = ForKind.Range{start: first.expr, end: finish.expr, step: parser_loop_stride(state), exclusive: exclusive}
+                    }
+                    else -> {
+                        kind = ForKind.In{collection: first.expr, step: parser_loop_stride(state)}
+                    }
                 }
             }
         }
@@ -1543,14 +1552,17 @@ parser_parse_prep_if: fn(state: ^JetParserState) -> Stmt {
     end := then_block.span
     if parser_current_kind(state) == TOKEN_KW_ELSE {
         parser_bump(state)
-        if parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) {
-            chained: parser_parse_prep_if(state)
-            else_body = Val([Stmt]{chained})
-            end = parser_lookahead(state, -1).span
-        } else {
-            final_block: parser_parse_block(state)
-            else_body = Val(final_block.statements)
-            end = final_block.span
+        if {
+            parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) -> {
+                chained: parser_parse_prep_if(state)
+                else_body = Val([Stmt]{chained})
+                end = parser_lookahead(state, -1).span
+            }
+            else -> {
+                final_block: parser_parse_block(state)
+                else_body = Val(final_block.statements)
+                end = final_block.span
+            }
         }
     }
     Stmt.ComptimeIf{cond: condition.expr, cond_span: condition.span, then_body: then_block.statements, else_body: else_body.move(), span: parser_cover(start.span, end), selected_then: None}
@@ -2155,11 +2167,14 @@ parser_expression_lvalue: fn(state: ^JetParserState, expr: Expr, fallback_span: 
         .Index(base, index, span, kind, _) -> return LValue.Index{base: base.copy(), index: index.copy(), span: span, kind: kind.copy()}
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
-    if operator.kind != TOKEN_EQ {
-        operator_text: parser_text(state, operator)
-        parser_add_fatal_code(state, "E0165", expr_span(expr), "Compound assignment needs a mutable place.", "Updates are allowed only on a mutable name or an `^` parameter; a computed value has no place to update.", "Bind the value with `:=`, then write `name {operator_text} value`")
-    } else {
-        parser_add_error(state, expr_span(expr), "this value can't be assigned to", "only a name or an indexed slot like `items[0]` can appear on the left of `=`", "use `name := ...` or `map[key] = ...`")
+    if {
+        operator.kind != TOKEN_EQ -> {
+            operator_text: parser_text(state, operator)
+            parser_add_fatal_code(state, "E0165", expr_span(expr), "Compound assignment needs a mutable place.", "Updates are allowed only on a mutable name or an `^` parameter; a computed value has no place to update.", "Bind the value with `:=`, then write `name {operator_text} value`")
+        }
+        else -> {
+            parser_add_error(state, expr_span(expr), "this value can't be assigned to", "only a name or an indexed slot like `items[0]` can appear on the left of `=`", "use `name := ...` or `map[key] = ...`")
+        }
     }
     LValue.Local{name: "__jet_error", name_span: fallback_span}
 }
@@ -2475,10 +2490,13 @@ parser_context_fields: fn(state: ^JetParserState, marker: Marker, args: [CallArg
 
 parser_expr_literal_string: fn(expr: Expr) -> String? {
     if expr == {
-        .Str(parts, _, _) -> if parts.len() == 1 -> if parts[0] == {
-            .Lit(text) -> Val(text)
-            .Interp(_, _) | .Byte(_) -> None
-        } else -> None
+        .Str(parts, _, _) -> if {
+            parts.len() == 1 -> if parts[0] == {
+                .Lit(text) -> Val(text)
+                .Interp(_, _) | .Byte(_) -> None
+            }
+            else -> None
+        }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }

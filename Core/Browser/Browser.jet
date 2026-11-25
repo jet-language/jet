@@ -198,7 +198,7 @@ priv BrowserState: struct {
                 return
             }
             id: self.next_id
-            core.browser.__ws_set_timeout(self.conn, self.timeout_ms) ?? return
+            net_rt.ws_set_timeout(self.conn, self.timeout_ms) ?? return
             self.conn.send_text("{{\"id\":{id},\"method\":\"session.end\",\"params\":{{}}}}") ?? return
             loop _ in 0..<C_EVENT_LIMIT {
                 message: self.conn.recv() ?? return
@@ -1386,7 +1386,7 @@ remaining_ms: fn(started: Instant, timeout_ms: Int) -[Time]> Int BrowserError! {
 
 browser_ws_timeout: fn(browser: Browser, timeout_ms: Int) -[Net]> BrowserError! {
     state: browser.__state.guard_read()
-    core.browser.__ws_set_timeout(state.value.conn, timeout_ms) ?? return Err(browser_ws_error(err))
+    net_rt.ws_set_timeout(state.value.conn, timeout_ms) ?? return Err(browser_ws_error(err))
     Ok()
 }
 

@@ -56,10 +56,11 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
 // instead uses WTF-8 -> UTF-16 + CompareStringOrdinal(ignore_case=1), with an
 // ordinal UTF-16 fallback on failure/oversize; that is not this Unix OS seed.
 #Export(c) jet_rt_env_key_compare: fn(left: I64, right: I64) -> I64 {
-    left_length: rt_text_word(left)
-    right_length: rt_text_word(right)
-    left_data: rt_text_word(wrapping(left + I64{16}))
-    right_data: rt_text_word(wrapping(right + I64{16}))
+    env_key_order(rt_text_word(wrapping(left + I64{16})), rt_text_word(left), rt_text_word(wrapping(right + I64{16})), rt_text_word(right))
+}
+
+// The order of two names' packed bytes: -1, 0 or 1.
+env_key_order: fn(left_data: I64, left_length: I64, right_data: I64, right_length: I64) -> I64 {
     at := I64{0}
     loop at < left_length && at < right_length {
         a: rt_text_byte(wrapping(left_data + at))

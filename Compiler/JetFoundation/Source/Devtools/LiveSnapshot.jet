@@ -205,15 +205,19 @@ jet_live_shown: fn(raw: [U8], label: String) -> String JetLiveSnapshotError! {
     at := 0
     loop at < raw.len() {
         byte: raw[at]
-        if byte < (U8{32}) || byte == (U8{127}) {
-            out.push(U8{32})
-            at += 1
-        } else if byte == (U8{194}) && at + 1 < raw.len() && raw[at + 1] >= (U8{128}) && raw[at + 1] <= (U8{159}) {
-            out.push(U8{32})
-            at += 2
-        } else {
-            out.push(byte)
-            at += 1
+        if {
+            byte < (U8{32}) || byte == (U8{127}) -> {
+                out.push(U8{32})
+                at += 1
+            }
+            byte == (U8{194}) && at + 1 < raw.len() && raw[at + 1] >= (U8{128}) && raw[at + 1] <= (U8{159}) -> {
+                out.push(U8{32})
+                at += 2
+            }
+            else -> {
+                out.push(byte)
+                at += 1
+            }
         }
     }
     Ok(String.from_bytes(out) ?? return Err(jet_live_error("{label} is not valid UTF-8")))
@@ -266,13 +270,17 @@ jet_live_value_identity: fn(value_id: String) -> Bool Never! {
     length := 0
     loop at in JET_LIVE_VALUE_KIND.bytes().len()..<bytes.len() {
         byte: Int{bytes[at]}
-        if byte == 46 {
-            if length == 0 -> return false
-            names += 1
-            length = 0
-        } else if (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 {
-            length += 1
-        } else { return false }
+        if {
+            byte == 46 -> {
+                if length == 0 -> return false
+                names += 1
+                length = 0
+            }
+            (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 -> {
+                length += 1
+            }
+            else -> { return false }
+        }
     }
     names > 1 && length > 0
 }
@@ -317,125 +325,141 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
         }
         seen.push(section)
         count: jet_live_unsigned(cursor)
-        if section == 1 {
-            if count > 4096 {
-                return Err(jet_live_error("live runtime snapshot has too many tasks"))
+        if {
+            section == 1 -> {
+                if count > 4096 {
+                    return Err(jet_live_error("live runtime snapshot has too many tasks"))
+                }
+                loop _ in 0..<count {
+                    id: jet_live_unsigned(cursor)
+                    parent: jet_live_unsigned(cursor)
+                    spawn_site: jet_live_unsigned(cursor)
+                    state_word: jet_live_word(cursor)
+                    deadline_present: jet_live_word(cursor) != U64{0}
+                    deadline: jet_live_signed(cursor)
+                    task_canceled: jet_live_word(cursor) != U64{0}
+                    open_spans: jet_live_unsigned(cursor)
+                    arena_allocations: jet_live_unsigned(cursor)
+                    label_recorded: jet_live_raw(cursor)
+                    label_raw: label_recorded ?? [U8]{}
+                    wait_recorded: jet_live_raw(cursor)
+                    wait_raw: wait_recorded ?? [U8]{}
+                    state: if {
+                        state_word == (U64{0}) -> "queued"
+                        state_word == (U64{1}) -> "running"
+                        state_word == (U64{2}) -> "blocked"
+                        else -> "paused"
+                        // The effect counters read the recorded wait, before display.
+                    }
+                    if state_word == (U64{2}) {
+                        effects["waiting"] = (effects.get("waiting") ?? 0) + 1
+                        if jet_live_starts(wait_raw, "channel ") {
+                            effects["channel"] = (effects.get("channel") ?? 0) + 1
+                        }
+                        if jet_live_starts(wait_raw, "time ") {
+                            effects["time"] = (effects.get("time") ?? 0) + 1
+                        }
+                        if jet_live_contains(wait_raw, "tcp") || jet_live_contains(wait_raw, "network") || jet_live_starts(wait_raw, "udp ") || jet_live_starts(wait_raw, "unix ") || jet_live_starts(wait_raw, "io ") {
+                            effects["io"] = (effects.get("io") ?? 0) + 1
+                        }
+                    }
+                    if task_canceled -> canceled += 1
+                    if state_word == (U64{1}) -> running += 1
+                    tasks.push(JetLiveTask{id: id, parent: parent, label: jet_live_shown(label_raw, "live task `label`"), spawn_site: spawn_site, state: state, wait: jet_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, canceled: task_canceled, open_spans: open_spans, arena_allocations: arena_allocations})
+                }
             }
-            loop _ in 0..<count {
-                id: jet_live_unsigned(cursor)
-                parent: jet_live_unsigned(cursor)
-                spawn_site: jet_live_unsigned(cursor)
-                state_word: jet_live_word(cursor)
-                deadline_present: jet_live_word(cursor) != U64{0}
-                deadline: jet_live_signed(cursor)
-                task_canceled: jet_live_word(cursor) != U64{0}
-                open_spans: jet_live_unsigned(cursor)
-                arena_allocations: jet_live_unsigned(cursor)
-                label_recorded: jet_live_raw(cursor)
-                label_raw: label_recorded ?? [U8]{}
-                wait_recorded: jet_live_raw(cursor)
-                wait_raw: wait_recorded ?? [U8]{}
-                state: if state_word == (U64{0}) -> "queued" else if state_word == (U64{1}) -> "running" else if state_word == (U64{2}) -> "blocked" else -> "paused"
-                // The effect counters read the recorded wait, before display.
-                if state_word == (U64{2}) {
-                    effects["waiting"] = (effects.get("waiting") ?? 0) + 1
-                    if jet_live_starts(wait_raw, "channel ") {
-                        effects["channel"] = (effects.get("channel") ?? 0) + 1
+            section == 2 -> {
+                loop _ in 0..<count {
+                    id: jet_live_unsigned(cursor)
+                    depth: jet_live_unsigned(cursor)
+                    bounded: jet_live_word(cursor) != U64{0}
+                    capacity: jet_live_unsigned(cursor)
+                    send_waiters: jet_live_unsigned(cursor)
+                    recv_waiters: jet_live_unsigned(cursor)
+                    closed: jet_live_word(cursor) != U64{0}
+                    channels.push(JetLiveChannel{id: id, depth: depth, capacity: if bounded -> Val(capacity) else -> None, send_waiters: send_waiters, recv_waiters: recv_waiters, closed: closed})
+                }
+            }
+            section == 3 -> {
+                if count > 4096 {
+                    return Err(jet_live_error("live runtime snapshot has too many values"))
+                }
+                loop _ in 0..<count {
+                    value_id: jet_live_read_text(cursor, "live value `value_id`")
+                    type_identity: jet_live_read_text(cursor, "live value `type_identity`")
+                    disposition: jet_live_read_text(cursor, "live value `disposition`")
+                    reason: jet_live_read_text(cursor, "live value `reason`")
+                    rendered: jet_live_read_optional(cursor, "live value `rendered_value`")
+                    if !jet_live_value_identity(value_id) {
+                        return Err(jet_live_error("live value `value_id` is not a `{JET_LIVE_VALUE_KIND}` dotted path"))
                     }
-                    if jet_live_starts(wait_raw, "time ") {
-                        effects["time"] = (effects.get("time") ?? 0) + 1
+                    if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) {
+                        return Err(jet_live_error("live value has an unsupported disposition"))
                     }
-                    if jet_live_contains(wait_raw, "tcp") || jet_live_contains(wait_raw, "network") || jet_live_starts(wait_raw, "udp ") || jet_live_starts(wait_raw, "unix ") || jet_live_starts(wait_raw, "io ") {
-                        effects["io"] = (effects.get("io") ?? 0) + 1
+                    if rendered == .Val(shown) && shown.bytes().len() > 16384 {
+                        return Err(jet_live_error("live value `rendered_value` exceeds the Prelude limit"))
+                    }
+                    values.push(JetLiveValue{value_id: value_id, type_identity: type_identity, disposition: disposition, reason: reason, rendered_value: rendered})
+                }
+            }
+            section == 4 -> {
+                loop _ in 0..<count {
+                    sequence: jet_live_unsigned(cursor)
+                    source: jet_live_read_text(cursor, "runtime event observation `source`")
+                    event_id: jet_live_unsigned(cursor)
+                    owner_id: jet_live_unsigned(cursor)
+                    subscription_id: jet_live_unsigned(cursor)
+                    dispatch_id: jet_live_unsigned(cursor)
+                    lifecycle: jet_live_read_text(cursor, "runtime event observation `lifecycle`")
+                    queued: jet_live_signed(cursor)
+                    blocked: jet_live_signed(cursor)
+                    event_running: jet_live_signed(cursor)
+                    capacity: jet_live_signed(cursor)
+                    overflow: jet_live_read_text(cursor, "runtime event observation `overflow`")
+                    priority: jet_live_signed(cursor)
+                    failure: jet_live_read_text(cursor, "runtime event observation `failure`")
+                    terminal: jet_live_read_text(cursor, "runtime event observation `terminal`")
+                    events.push(JetLiveEvent{sequence: sequence, source: source, event_id: event_id, owner_id: owner_id, subscription_id: subscription_id, dispatch_id: dispatch_id, lifecycle: lifecycle, queued: queued, blocked: blocked, running: event_running, capacity: capacity, overflow: overflow, priority: priority, failure: failure, terminal: terminal})
+                }
+            }
+            section == 5 -> {
+                if count > JET_LIVE_GAME_RECORDS {
+                    return Err(jet_live_error("live runtime snapshot has too many game records"))
+                }
+                loop _ in 0..<count {
+                    sequence: jet_live_unsigned(cursor)
+                    kind_word: jet_live_word(cursor)
+                    frame_index: jet_live_unsigned(cursor)
+                    start_ns: jet_live_unsigned(cursor)
+                    ns: jet_live_unsigned(cursor)
+                    code: jet_live_unsigned(cursor)
+                    ordinal: jet_live_unsigned(cursor)
+                    text: jet_live_raw(cursor)
+                    previous: if games.len() == 0 -> 0 else -> games[games.len() - 1].sequence
+                    if sequence <= previous {
+                        return Err(jet_live_error("live game records are out of sequence"))
+                    }
+                    if {
+                        kind_word == (U64{0}) -> {
+                            scene: jet_live_shown(text ?? [U8]{}, "game frame `scene`")
+                            if scene == "" || code != 0 {
+                                return Err(jet_live_error("live game frame needs a scene and no code address"))
+                            }
+                            games.push(JetLiveGameRecord{sequence: sequence, kind: "frame", frame_index: frame_index, start_ns: start_ns, ns: ns, code: 0, ordinal: ordinal, scene: scene, function: None})
+                        }
+                        kind_word == (U64{1}) -> {
+                            if code == 0 {
+                                return Err(jet_live_error("live game callback needs a code address"))
+                            }
+                            function: jet_live_game_function(text ?? [U8]{})
+                            games.push(JetLiveGameRecord{sequence: sequence, kind: "callback", frame_index: frame_index, start_ns: start_ns, ns: ns, code: code, ordinal: ordinal, scene: "", function: function})
+                        }
+                        else -> { return Err(jet_live_error("live game record has an unknown kind")) }
                     }
                 }
-                if task_canceled -> canceled += 1
-                if state_word == (U64{1}) -> running += 1
-                tasks.push(JetLiveTask{id: id, parent: parent, label: jet_live_shown(label_raw, "live task `label`"), spawn_site: spawn_site, state: state, wait: jet_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, canceled: task_canceled, open_spans: open_spans, arena_allocations: arena_allocations})
             }
-        } else if section == 2 {
-            loop _ in 0..<count {
-                id: jet_live_unsigned(cursor)
-                depth: jet_live_unsigned(cursor)
-                bounded: jet_live_word(cursor) != U64{0}
-                capacity: jet_live_unsigned(cursor)
-                send_waiters: jet_live_unsigned(cursor)
-                recv_waiters: jet_live_unsigned(cursor)
-                closed: jet_live_word(cursor) != U64{0}
-                channels.push(JetLiveChannel{id: id, depth: depth, capacity: if bounded -> Val(capacity) else -> None, send_waiters: send_waiters, recv_waiters: recv_waiters, closed: closed})
-            }
-        } else if section == 3 {
-            if count > 4096 {
-                return Err(jet_live_error("live runtime snapshot has too many values"))
-            }
-            loop _ in 0..<count {
-                value_id: jet_live_read_text(cursor, "live value `value_id`")
-                type_identity: jet_live_read_text(cursor, "live value `type_identity`")
-                disposition: jet_live_read_text(cursor, "live value `disposition`")
-                reason: jet_live_read_text(cursor, "live value `reason`")
-                rendered: jet_live_read_optional(cursor, "live value `rendered_value`")
-                if !jet_live_value_identity(value_id) {
-                    return Err(jet_live_error("live value `value_id` is not a `{JET_LIVE_VALUE_KIND}` dotted path"))
-                }
-                if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) {
-                    return Err(jet_live_error("live value has an unsupported disposition"))
-                }
-                if rendered == .Val(shown) && shown.bytes().len() > 16384 {
-                    return Err(jet_live_error("live value `rendered_value` exceeds the Prelude limit"))
-                }
-                values.push(JetLiveValue{value_id: value_id, type_identity: type_identity, disposition: disposition, reason: reason, rendered_value: rendered})
-            }
-        } else if section == 4 {
-            loop _ in 0..<count {
-                sequence: jet_live_unsigned(cursor)
-                source: jet_live_read_text(cursor, "runtime event observation `source`")
-                event_id: jet_live_unsigned(cursor)
-                owner_id: jet_live_unsigned(cursor)
-                subscription_id: jet_live_unsigned(cursor)
-                dispatch_id: jet_live_unsigned(cursor)
-                lifecycle: jet_live_read_text(cursor, "runtime event observation `lifecycle`")
-                queued: jet_live_signed(cursor)
-                blocked: jet_live_signed(cursor)
-                event_running: jet_live_signed(cursor)
-                capacity: jet_live_signed(cursor)
-                overflow: jet_live_read_text(cursor, "runtime event observation `overflow`")
-                priority: jet_live_signed(cursor)
-                failure: jet_live_read_text(cursor, "runtime event observation `failure`")
-                terminal: jet_live_read_text(cursor, "runtime event observation `terminal`")
-                events.push(JetLiveEvent{sequence: sequence, source: source, event_id: event_id, owner_id: owner_id, subscription_id: subscription_id, dispatch_id: dispatch_id, lifecycle: lifecycle, queued: queued, blocked: blocked, running: event_running, capacity: capacity, overflow: overflow, priority: priority, failure: failure, terminal: terminal})
-            }
-        } else if section == 5 {
-            if count > JET_LIVE_GAME_RECORDS {
-                return Err(jet_live_error("live runtime snapshot has too many game records"))
-            }
-            loop _ in 0..<count {
-                sequence: jet_live_unsigned(cursor)
-                kind_word: jet_live_word(cursor)
-                frame_index: jet_live_unsigned(cursor)
-                start_ns: jet_live_unsigned(cursor)
-                ns: jet_live_unsigned(cursor)
-                code: jet_live_unsigned(cursor)
-                ordinal: jet_live_unsigned(cursor)
-                text: jet_live_raw(cursor)
-                previous: if games.len() == 0 -> 0 else -> games[games.len() - 1].sequence
-                if sequence <= previous {
-                    return Err(jet_live_error("live game records are out of sequence"))
-                }
-                if kind_word == (U64{0}) {
-                    scene: jet_live_shown(text ?? [U8]{}, "game frame `scene`")
-                    if scene == "" || code != 0 {
-                        return Err(jet_live_error("live game frame needs a scene and no code address"))
-                    }
-                    games.push(JetLiveGameRecord{sequence: sequence, kind: "frame", frame_index: frame_index, start_ns: start_ns, ns: ns, code: 0, ordinal: ordinal, scene: scene, function: None})
-                } else if kind_word == (U64{1}) {
-                    if code == 0 {
-                        return Err(jet_live_error("live game callback needs a code address"))
-                    }
-                    function: jet_live_game_function(text ?? [U8]{})
-                    games.push(JetLiveGameRecord{sequence: sequence, kind: "callback", frame_index: frame_index, start_ns: start_ns, ns: ns, code: code, ordinal: ordinal, scene: "", function: function})
-                } else { return Err(jet_live_error("live game record has an unknown kind")) }
-            }
-        } else { return Err(jet_live_error("live runtime snapshot has an unknown section")) }
+            else -> { return Err(jet_live_error("live runtime snapshot has an unknown section")) }
+        }
     }
     if cursor.at != bytes.len() {
         return Err(jet_live_error("live runtime snapshot has trailing bytes"))

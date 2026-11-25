@@ -44,11 +44,11 @@ sema_expr_pipe_unread_step: fn(steps: [PipeStep]) -> Int? Never! {
 
 // E0438 for `step`, whose hidden name `scopes` binds to the value it
 // receives.
-sema_expr_pipe_step_without_value: fn(step: PipeStep, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Diagnostic {
+sema_expr_pipe_step_without_value: fn(step: PipeStep, check: ^SemaBodyCheck) -> Diagnostic {
     what: "This pipe step doesn't use `<>`"
     why: "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value"
     // The method form is a placement only when no function placement fits.
-    placements: sema_expr_pipe_placements(step, environment, program, scopes, check)
+    placements: sema_expr_pipe_placements(step, check)
     fits := [SemaPipePlacement]{}
     forms: [Bool]{false, true}
     loop method in forms {
@@ -56,9 +56,7 @@ sema_expr_pipe_step_without_value: fn(step: PipeStep, environment: SemaScopeEnvi
         loop placement in placements {
             if placement.method != method -> next
             // copy: the placement list is dropped once the fitting ones are kept.
-            if sema_expr_pipe_fits(placement.value, environment, program, scopes, check) {
-                fits.push(placement.copy())
-            }
+            if sema_expr_pipe_fits(placement.value, check) -> fits.push(placement.copy())
         }
     }
     if fits.len() == 0 {
@@ -76,9 +74,9 @@ sema_expr_pipe_step_without_value: fn(step: PipeStep, environment: SemaScopeEnvi
 }
 
 // Whether `value` checks without an error; the probe leaves nothing behind.
-sema_expr_pipe_fits: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_expr_pipe_fits: fn(value: Expr, check: ^SemaBodyCheck) -> Bool {
     probe_diagnostics := [Diagnostic]{}
-    probed: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics)
+    probed: sema_probe_expression(value, None, check, probe_diagnostics)
     probed != None && !sema_has_error_since(probe_diagnostics, 0)
 }
 
@@ -86,7 +84,7 @@ sema_expr_pipe_fits: fn(value: Expr, environment: SemaScopeEnvironment, program:
 // function call's argument slots first to last, then the method form of a
 // name with no dot. A call that already checks takes no value: its step
 // drops it, and only a person can say where the value goes.
-sema_expr_pipe_placements: fn(step: PipeStep, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> [SemaPipePlacement] {
+sema_expr_pipe_placements: fn(step: PipeStep, check: ^SemaBodyCheck) -> [SemaPipePlacement] {
     placements := [SemaPipePlacement]{}
     if step.value == .Ident(name, span, id) {
         // copy: each placement owns its rewritten step.
@@ -100,7 +98,7 @@ sema_expr_pipe_placements: fn(step: PipeStep, environment: SemaScopeEnvironment,
         return placements
     }
     if step.value == .Call(call, id) {
-        if sema_expr_pipe_fits(step.value, environment, program, scopes, check) -> return placements
+        if sema_expr_pipe_fits(step.value, check) -> return placements
         written: loop arg in call.args -> sema_expr_pipe_argument_text(arg)
         // The step ends at the call's `)`.
         close: step.span.end - 1

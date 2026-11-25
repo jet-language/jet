@@ -215,12 +215,15 @@ parser_effect_type_decls: fn(type_name: String, name_span: Span, effect_impl: Ef
         body = None
     }
     if declared.expert == .Val(value) {
-        if parser_effect_fact_problem(value, names, cases.len() > 0) == .Val(span) {
-            reports.push(parser_effect_body_report(span, type_name, "expert"))
-            declared.expert = None
-        } else if !parser_effect_vocabulary_declares(type_name, nested, names) {
-            reports.push(diagnostic_from_registry("E0907", Val(declared.expert_span ?? name_span), "`expert: fn` is not a method of a package's `Effect`", "only the toolchain's own effects are expert, which only the main package holds by naming them", "remove `expert: fn`"))
-            declared.expert = None
+        if {
+            parser_effect_fact_problem(value, names, cases.len() > 0) == .Val(span) -> {
+                reports.push(parser_effect_body_report(span, type_name, "expert"))
+                declared.expert = None
+            }
+            !parser_effect_vocabulary_declares(type_name, nested, names) -> {
+                reports.push(diagnostic_from_registry("E0907", Val(declared.expert_span ?? name_span), "`expert: fn` is not a method of a package's `Effect`", "only the toolchain's own effects are expert, which only the main package holds by naming them", "remove `expert: fn`"))
+                declared.expert = None
+            }
         }
     }
     case_decls := [EffectDecl]{}

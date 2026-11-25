@@ -532,20 +532,11 @@ JET_CLI_VALUE_PREFIXES: [String]{
     "--edition=",
 }
 
-// Flags an external formatter accepts with `jet fmt --lang`.
-JET_CLI_EXTERNAL_FMT_FLAGS: [String]{
-    "--trust",
-    "--offline",
-    "--online",
-    "--no-color",
-    "--json",
-    "--flake",
-    "--pure",
-    "--yes",
-    "--fixtures",
-    "--preset",
-    "--env",
-}
+// Flags an external formatter accepts with `jet fmt --lang`: the ones the
+// environment run takes unchanged (Host.jet), then the three that pick the
+// environment and take a value. Only `--` flags reach this check, so the
+// forwarded `-y` never does.
+JET_CLI_EXTERNAL_FMT_FLAGS: #run JET_CLI_EXTERNAL_FMT_FORWARDED.concat([String]{"--fixtures", "--preset", "--env"})
 
 // `cli_diagnostic_copy`: the shared Why line of a CLI code.
 jet_cli_why: fn(code: String) -> String Never! {
@@ -2092,8 +2083,9 @@ jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: Strin
 // a run is refused until its port lands, never ignored; an unregistered one,
 // a single-dash word too, is refused by E2102: on `jet run` and the
 // `jet <file>` shorthand by jet_cli_check_flags, on `jet dev` by
-// jet_cli_run_entry.
-JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256", "--port", "--deep-checks"}
+// jet_cli_run_entry. The flags every command accepts (JET_CLI_GLOBAL_FLAGS)
+// are among them.
+JET_CLI_RUN_PORTED_FLAGS: #run JET_CLI_GLOBAL_FLAGS.concat([String]{"--release", "--profile", "--verbose", "-v", "--no-color", "--threads", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256", "--port", "--deep-checks"})
 
 // A compiler control (CLIControls.jet) `jet run` or `jet dev` takes: its row
 // scopes it to `command`, and the command model ports the form.

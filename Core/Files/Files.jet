@@ -16,7 +16,6 @@ use {
     rt: jet.runtime.files
     sys_rt: jet.runtime.sys
     host_path: __core_files_path_components
-    builtin: jet_builtins
     access_codes.[access_check, advice_code, map_advice_code]
     raw_names.[raw_held_name]
     scope_reads.[scope_roots, scope_has_parent, scope_part_name, scope_input_error, scope_read_at]
@@ -405,7 +404,7 @@ priv LockFd: struct {
 lock_owner: fn(path: ^^String, fd: ^LockFd) -> FileLock Never! {
     value: fd.fd
     fd.fd = -1
-    builtin.lock_owner(path, value)
+    rt.lock_owner(path, value)
 }
 
 /// An exclusive advisory lock on a held directory. Closing this owner releases
@@ -672,7 +671,7 @@ Directory: struct {
     /// `name_is_unicode` says whether they are valid UTF-8; when they are not,
     /// `name` (and `path`) show each non-ASCII byte as U+FFFD.
     list: fn(self) -[FS.Read]> [DirectoryEntry] IOError! {
-        rows: core.files.__list_directory(self.handle)
+        rows: rt.list_directory(self.handle)
         out := [DirectoryEntry]{}
         loop row in rows {
             raw := [U8]{}
@@ -819,7 +818,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
             ),
         )
     }
-    held: core.files.__directory_fd(directory.handle)
+    held: rt.directory_fd(directory.handle)
     if !held.available -> return Err(IOError.Unsupported(context))
     if !held.held -> return Err(IOError.Closed(context))
     row: process_rt.keep_open_raw(spec.copy(), held.fd, child_fd, as_cwd)
@@ -868,7 +867,7 @@ priv __spec_keep_open: fn(spec: ProcessSpec, handle: ^^Directory | FileLock | Fi
         .FileWriter(writer) -> rt.writer_fd(writer) ?? -1
         .FileLock(lock) -> rt.lock_fd(lock) ?? -1
         .Directory(directory) -> {
-            held: core.files.__directory_fd(directory.handle)
+            held: rt.directory_fd(directory.handle)
             if held.available && held.held -> held.fd else -> -1
         }
     }
@@ -943,8 +942,8 @@ priv __spec_keep_open: fn(spec: ProcessSpec, handle: ^^Directory | FileLock | Fi
         original: open_directory(held_path) ?? panic("hold")
         twin: original.duplicate() ?? panic("duplicate")
         assert(twin.path == original.path)
-        original_fd: core.files.__directory_fd(original.handle)
-        twin_fd: core.files.__directory_fd(twin.handle)
+        original_fd: rt.directory_fd(original.handle)
+        twin_fd: rt.directory_fd(twin.handle)
         assert(original_fd.held && twin_fd.held && original_fd.fd != twin_fd.fd)
         rename(held_path, join(root, "moved")) ?? panic("rename")
         create_dir_all(held_path) ?? panic("replacement")

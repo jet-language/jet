@@ -3,7 +3,7 @@
 // (its last segment). This is authored Jet source and the routes' only home:
 // keep every row table sorted by hand. Each table's KEYS/KEY_ROWS lookup
 // index is computed from the table at build time (ir_key_index).
-use jet_foundation.[IRRuntimeHandle, IR_RUNTIME_HANDLES, RUNTIME_C_EXPORTS, ir_key_index, ir_key_index_keys, ir_key_row, ir_runtime_handle_keys, ir_runtime_handle_row]
+use jet_foundation.[IRRuntimeHandle, IR_NATIVE_PROVIDER_HANDLES, IR_RUNTIME_HANDLES, RUNTIME_C_EXPORTS, ir_key_index, ir_key_index_keys, ir_key_row, ir_native_provider_handle_row, ir_runtime_handle_row]
 
 // The runtime ABI atom projection; nominal identities stay unchanged.
 runtime_abi_atom: fn(name: String) -> String Never! {
@@ -506,8 +506,6 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_process_child_terminate", export: "jet_process_child_terminate", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessChild"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_process_child_wait", export: "jet_process_child_wait", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessChild"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Handle{name: "ProcessReceipt"}, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_process_exit_status_raw", export: "jet_process_exit_status_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Option{some: IRRouteCarrier.Text}},
-    IRRoute{symbol: "jet_process_signal_add_raw", export: "jet_process_signal_add_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Tag{name: "ProcessSignal", variants: "Hup,Int,Quit,Usr1,Usr2,Pipe,Alrm,Term,Chld,Cont,Tstp,Ttin,Ttou,Winch"}}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
-    IRRoute{symbol: "jet_process_signal_receiver_raw", export: "jet_process_signal_receiver_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetReceiver__ProcessSignal"}}},
     IRRoute{symbol: "jet_process_spec_arg", export: "jet_process_spec_arg", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_args_extend", export: "jet_process_spec_args_extend", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.List{elem: IRRouteCarrier.Text}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_cpu_affinity", export: "jet_process_spec_cpu_affinity", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.List{elem: IRRouteCarrier.Word}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
@@ -517,7 +515,6 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_process_spec_env", export: "jet_process_spec_env", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Text, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_env_clear", export: "jet_process_spec_env_clear", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_env_remove", export: "jet_process_spec_env_remove", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
-    IRRoute{symbol: "jet_process_spec_fields_raw", export: "jet_process_spec_fields_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.List{elem: IRRouteCarrier.Text}, IRRouteCarrier.Flag, IRRouteCarrier.Text, IRRouteCarrier.Flag, IRRouteCarrier.List{elem: IRRouteCarrier.Text}, IRRouteCarrier.List{elem: IRRouteCarrier.Text}, IRRouteCarrier.List{elem: IRRouteCarrier.Text}, IRRouteCarrier.Flag, IRRouteCarrier.Tag{name: "ProcessStreamMode", variants: "Stream,Inherit,Capture,Stdout"}, IRRouteCarrier.Tag{name: "ProcessStreamMode", variants: "Stream,Inherit,Capture,Stdout"}, IRRouteCarrier.Tag{name: "ProcessStreamMode", variants: "Stream,Inherit,Capture,Stdout"}, IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Flag, IRRouteCarrier.Flag, IRRouteCarrier.Handle{name: "TerminalPolicy"}, IRRouteCarrier.Flag, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_io_idle", export: "jet_process_spec_io_idle", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_io_priority", export: "jet_process_spec_io_priority", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_keep_open_raw", export: "jet_process_spec_keep_open_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Flag}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
@@ -587,7 +584,6 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_rng_normal", export: "jet_rng_normal", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "Rng"}, IRRouteCarrier.Float, IRRouteCarrier.Float}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Float}},
     IRRoute{symbol: "jet_rng_split", export: "jet_rng_split", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "Rng"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "Rng"}}},
     IRRoute{symbol: "jet_rt_cancel", export: "jet_rt_cancel", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "JetRealtimeStream"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
-    IRRoute{symbol: "jet_rt_coded_stop", export: "jet_rt_coded_stop", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
     IRRoute{symbol: "jet_rt_is_canceled", export: "jet_rt_is_canceled", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetRealtimeStream"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Flag}},
     IRRoute{symbol: "jet_rt_next_deadline", export: "jet_rt_next_deadline", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetRealtimeStream"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_rt_receipt", export: "jet_rt_receipt", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetRealtimeStream"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetRealtimeReceipt"}}},
@@ -710,15 +706,12 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_std.jet_float_parse", export: "jet_float_parse", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Float, err: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_std.jet_fs_directory_close", export: "jet_fs_directory_close", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
     IRRoute{symbol: "jet_std.jet_fs_directory_create", export: "jet_fs_directory_create", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Text, IRRouteCarrier.Word}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "IOError"}}},
-    IRRoute{symbol: "jet_std.jet_fs_directory_fd_raw", export: "jet_fs_directory_fd_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Flag, IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_std.jet_fs_directory_fsync", export: "jet_fs_directory_fsync", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "IOError"}}},
-    IRRoute{symbol: "jet_std.jet_fs_directory_list", export: "jet_fs_directory_list", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Result{ok: IRRouteCarrier.List{elem: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_std.jet_fs_directory_open", export: "jet_fs_directory_open", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Word, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_std.jet_fs_flock", export: "jet_fs_flock", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_std.jet_fs_host_path_is_absolute_raw", export: "jet_fs_host_path_is_absolute_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Flag}},
     IRRoute{symbol: "jet_std.jet_fs_host_path_join_raw", export: "jet_fs_host_path_join_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_std.jet_fs_lock_fd_raw", export: "jet_fs_lock_fd_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetFileLockOwner"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Word, err: IRRouteCarrier.Handle{name: "IOError"}}},
-    IRRoute{symbol: "jet_std.jet_fs_lock_owner_raw", export: "jet_fs_lock_owner_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetFileLockOwner"}}},
     IRRoute{symbol: "jet_std.jet_fs_metadata_directory_raw", export: "jet_fs_metadata_directory_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Flag, err: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_std.jet_fs_path_kind", export: "jet_fs_path_kind", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Word, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_std.jet_fs_read_link_at", export: "jet_fs_read_link_at", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Text, err: IRRouteCarrier.Handle{name: "IOError"}}},
@@ -742,10 +735,8 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_std.jet_task_yield", export: "jet_task_yield", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
     IRRoute{symbol: "jet_std.JetCondition.notify_all", export: "jet_condition_notify_all", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetCondition"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
     IRRoute{symbol: "jet_std.JetCondition.notify_one", export: "jet_condition_notify_one", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetCondition"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
-    IRRoute{symbol: "jet_std.JetEventPolicy.sync", export: "jet_event_policy_sync", native_lists: false, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetEventPolicy"}}},
     IRRoute{symbol: "jet_std.JetEventScope.active_count", export: "jet_event_scope_active_count", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetEventScope"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_std.JetEventScope.cancel", export: "jet_event_scope_cancel", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetEventScope"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
-    IRRoute{symbol: "jet_std.JetEventScope.new", export: "jet_event_scope_new", native_lists: false, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetEventScope"}}},
     IRRoute{symbol: "jet_std.JetEventTrace.delivered", export: "jet_event_trace_delivered", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetEventTrace"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_std.JetEventTrace.dropped", export: "jet_event_trace_dropped", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetEventTrace"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_std.JetEventTrace.queued", export: "jet_event_trace_queued", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetEventTrace"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
@@ -775,8 +766,6 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_sys_cpu_clock_raw", export: "jet_sys_cpu_clock_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_cpu_count_raw", export: "jet_sys_cpu_count_raw", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Option{some: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_sys_current_dir_raw", export: "jet_sys_current_dir_raw", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Result{ok: IRRouteCarrier.Text, err: IRRouteCarrier.Text}},
-    IRRoute{symbol: "jet_sys_dotenv_read_raw", export: "jet_sys_dotenv_read_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Text, err: IRRouteCarrier.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Text}}}},
-    IRRoute{symbol: "jet_sys_env_value_raw", export: "jet_sys_env_value_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Option{some: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_errno_text_raw", export: "jet_sys_errno_text_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_sys_executable_raw", export: "jet_sys_executable_raw", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Option{some: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_sys_fork_raw", export: "jet_sys_fork_raw", native_lists: false, params: [IRRouteCarrier]{}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
@@ -913,7 +902,6 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_vault_current_impl", export: "jet_vault_current_impl", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Word}, result: IRRouteResult.Result{ok: IRRouteCarrier.Option{some: IRRouteCarrier.Handle{name: "JetVaultKeyRef"}}, err: IRRouteCarrier.Handle{name: "VaultError"}}},
     IRRoute{symbol: "jet_vault_get_impl", export: "jet_vault_get_impl", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Option{some: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_watcher_cancel", export: "jet_watcher_cancel", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "WatchHandle"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
-    IRRoute{symbol: "jet_watcher_event", export: "jet_watcher_event", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "WatchHandle"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetEvent"}}},
     IRRoute{symbol: "jet_watcher_files", export: "jet_watcher_files", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Handle{name: "WatchHandle"}, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_watcher_is_active", export: "jet_watcher_is_active", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "WatchHandle"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Flag}},
     IRRoute{symbol: "jet_watcher_number", export: "jet_watcher_number", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "WatchHandle"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
@@ -1112,7 +1100,6 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "JetPeriod.sub_value", export: "jet_period_sub_value", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetPeriod"}, IRRouteCarrier.Handle{name: "JetPeriod"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetPeriod"}}},
     IRRoute{symbol: "JetPeriod.to_string_fmt", export: "jet_period_to_string_fmt", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetPeriod"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
     IRRoute{symbol: "JetPeriod.years_value", export: "jet_period_years_value", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetPeriod"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
-    IRRoute{symbol: "JetWsConn.set_timeout", export: "jet_ws_conn_set_timeout", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetWsConn"}, IRRouteCarrier.Word}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "JetWsError"}}},
     IRRoute{symbol: "JetZone.hours_in_day_value", export: "jet_zone_hours_in_day_value", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetZone"}, IRRouteCarrier.Handle{name: "JetDate"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "JetZone.name", export: "jet_zone_name", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetZone"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
     IRRoute{symbol: "JetZone.next_transition_value", export: "jet_zone_next_transition_value", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetZone"}, IRRouteCarrier.Word}, result: IRRouteResult.Option{some: IRRouteCarrier.Word}},
@@ -1239,7 +1226,6 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_dyn_compare", export: "jet_dyn_compare", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Dyn"}, IRRouteCarrier.Handle{name: "Dyn"}, IRRouteCarrier.Text, IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Flag, err: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_rt_task_cpu_ns", export: "jet_rt_task_cpu_ns", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_rt_task_identity", export: "jet_rt_task_identity", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
-    IRRoute{symbol: "jet_process_stream_line_bytes_raw", export: "jet_process_stream_line_bytes_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessStdoutStream"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.List{elem: IRRouteCarrier.Word}, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_std.JetCondition.new", export: "jet_rt_native_condition_new", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetCondition"}}},
     IRRoute{symbol: "JetBitSet.new", export: "jet_rt_native_bits_new", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetBitSet"}}},
     IRRoute{symbol: "JetBitSet.clear", export: "jet_rt_native_bits_clear", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "JetBitSet"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
@@ -1283,23 +1269,6 @@ ir_runtime_route: fn(symbol: String) -> IRRoute? {
     Val(IR_RUNTIME_ROUTES[position].copy())
 }
 
-// Opaque native providers: physical ownership ABI only. A Core-declared shape
-// here crosses a route as a heap shell of its declared bytes
-// (ir_route_shell): `KeyRef<T>` from jet_vault_current_impl.
-IR_NATIVE_PROVIDER_HANDLES: #run { [IRRuntimeHandle]{
-    IRRuntimeHandle{jet_name: "<corelib>/core.crypto.vault.KeyRef", runtime: "JetVaultKeyRef", clone: false, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
-} }
-
-IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS: #run ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES))
-
-IR_NATIVE_PROVIDER_HANDLE_KEYS: #run ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS)
-
 // The runtime's C export table (RUNTIME_C_EXPORTS, generated from every
 // JetRuntime #Export(c)), indexed for halving search.
 IR_RUNTIME_EXPORT_KEY_ROWS: #run ir_key_index(RUNTIME_C_EXPORTS)
@@ -1330,7 +1299,7 @@ ir_runtime_handle: fn(name: String) -> IRRuntimeHandle? {
         return Val(IR_RUNTIME_HANDLES[position].copy())
     }
     // Existing Rust rows win in seed mode; absent nominals may use a provider.
-    position: ir_key_row(IR_NATIVE_PROVIDER_HANDLE_KEYS, IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None
+    position: ir_native_provider_handle_row(name) ?? return None
     // copy: the caller gets an owned handle row, while the row stays in the global
     // IR_NATIVE_PROVIDER_HANDLES table, which can't be moved from.
     Val(IR_NATIVE_PROVIDER_HANDLES[position].copy())
@@ -1353,7 +1322,7 @@ ir_runtime_handle_spelled: fn(name: String) -> IRRuntimeHandle? {
 // that has `name`, as ir_runtime_handle finds it.
 ir_runtime_handle_spelling_at: fn(name: String) -> Int? Never! {
     if ir_runtime_handle_row(name) == .Val(position) -> return Val(position)
-    position: ir_key_row(IR_NATIVE_PROVIDER_HANDLE_KEYS, IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None
+    position: ir_native_provider_handle_row(name) ?? return None
     Val(IR_RUNTIME_HANDLES.len() + position)
 }
 

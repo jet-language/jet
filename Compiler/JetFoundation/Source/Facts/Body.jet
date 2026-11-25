@@ -809,18 +809,18 @@ BodyPlace: enum {
 // Child walkers: each visits the node id of every expression reachable from
 // the value without passing through another expression (statement blocks are
 // entered), in field order, as sema's Tree.jet walkers visit child TExprs.
-body_each_str_part_child: fn(tree: BodyTree, value: BodyStrPart, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_str_part_child: fn(_tree: BodyTree, value: BodyStrPart, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Interpolation(f0, _) -> { visit(f0) }
         .Literal(_) -> {}
     }
 }
 
-body_each_call_arg_child: fn(tree: BodyTree, value: BodyCallArg, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_call_arg_child: fn(_tree: BodyTree, value: BodyCallArg, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visit(value.value)
 }
 
-body_each_enum_arg_child: fn(tree: BodyTree, value: BodyEnumArg, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_enum_arg_child: fn(_tree: BodyTree, value: BodyEnumArg, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visit(value.value)
 }
 
@@ -918,7 +918,7 @@ body_each_if_cond_child: fn(tree: BodyTree, value: BodyIfCond, visit: fn(Int) -[
     }
 }
 
-body_each_contract_child: fn(tree: BodyTree, value: BodyContract, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_contract_child: fn(_tree: BodyTree, value: BodyContract, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visit(value.condition)
     visit(value.message)
 }
@@ -1086,7 +1086,7 @@ body_each_mixed_arm_child: fn(tree: BodyTree, value: BodyMixedArm, visit: fn(Int
     loop item in value.body { body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit) }
 }
 
-body_each_context_guard_child: fn(tree: BodyTree, value: BodyContextGuard, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_context_guard_child: fn(_tree: BodyTree, value: BodyContextGuard, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visit(value.value)
 }
 
@@ -1295,30 +1295,30 @@ body_each_expr_child: fn(tree: BodyTree, value: BodyNode, visit: fn(Int) -[Mem.A
     body_each_node_kind_child(tree, value.kind, visit)
 }
 
-body_each_struct_field_value_child: fn(tree: BodyTree, value: BodyStructFieldValue, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_struct_field_value_child: fn(_tree: BodyTree, value: BodyStructFieldValue, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visit(value.value)
 }
 
-body_each_map_entry_child: fn(tree: BodyTree, value: BodyMapEntry, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_map_entry_child: fn(_tree: BodyTree, value: BodyMapEntry, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visit(value.key)
     visit(value.value)
 }
 
-body_each_list_spread_part_child: fn(tree: BodyTree, value: BodyListSpreadPart, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_list_spread_part_child: fn(_tree: BodyTree, value: BodyListSpreadPart, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Element(f0) -> { visit(f0) }
         .Spread(f0) -> { visit(f0) }
     }
 }
 
-body_each_scope_member_kind_child: fn(tree: BodyTree, value: BodyScopeMemberKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_scope_member_kind_child: fn(_tree: BodyTree, value: BodyScopeMemberKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Timeout(f0) -> { visit(f0) }
         .Setup | .ExpectFail(_, _) | .Measure | .Skip -> {}
     }
 }
 
-body_each_or_fallback_child: fn(tree: BodyTree, value: BodyOrFallback, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_or_fallback_child: fn(_tree: BodyTree, value: BodyOrFallback, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Value(f0) -> { visit(f0) }
         .Return(f0) -> {
@@ -1329,7 +1329,7 @@ body_each_or_fallback_child: fn(tree: BodyTree, value: BodyOrFallback, visit: fn
     }
 }
 
-body_each_host_call_child: fn(tree: BodyTree, value: BodyHostCall, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_host_call_child: fn(_tree: BodyTree, value: BodyHostCall, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Method(f0, _, f2) -> {
             visit(f0)
@@ -1380,7 +1380,7 @@ body_each_fn_value_kind_child: fn(tree: BodyTree, value: BodyFnValueKind, visit:
     }
 }
 
-body_each_require_kind_child: fn(tree: BodyTree, value: BodyRequireKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_require_kind_child: fn(_tree: BodyTree, value: BodyRequireKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Require(f0, f1) -> {
             visit(f0)
@@ -1407,7 +1407,7 @@ body_each_lambda_body_child: fn(tree: BodyTree, value: BodyLambdaBody, visit: fn
     }
 }
 
-body_each_place_child: fn(tree: BodyTree, value: BodyPlace, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+body_each_place_child: fn(_tree: BodyTree, value: BodyPlace, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Expr(f0) -> { visit(f0) }
         .Local(_) -> {}

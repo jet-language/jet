@@ -204,10 +204,13 @@ name_ledger_display_path: fn(ledger: NameLedger, from: Int, name: String, resolv
         row: ledger.facts.declarations[index]
         if !name_ledger_visible(ledger, from, row.module_index, leaf) -> next
         path: name_ledger_display_declaration_path(ledger, row.module_index, row.name) ?? next
-        if least == .Val(previous) {
-            if path != previous -> ambiguous = true
-            if path < previous -> least = Val(path)
-        } else { least = Val(path) }
+        if {
+            least == .Val(previous) -> {
+                if path != previous -> ambiguous = true
+                if path < previous -> least = Val(path)
+            }
+            else -> { least = Val(path) }
+        }
         if ledger.display_paths.get({module_index: row.module_index, path: row.path}) != None {
             projected = true
         }
@@ -221,10 +224,13 @@ name_ledger_display_path: fn(ledger: NameLedger, from: Int, name: String, resolv
         }
         if path == None && alias.target.contains(".") -> path = Val(alias.target)
         candidate: path ?? next
-        if least == .Val(previous) {
-            if previous != candidate -> ambiguous = true
-            if candidate < previous -> least = Val(candidate)
-        } else { least = Val(candidate) }
+        if {
+            least == .Val(previous) -> {
+                if previous != candidate -> ambiguous = true
+                if candidate < previous -> least = Val(candidate)
+            }
+            else -> { least = Val(candidate) }
+        }
     }
     resolved := String?{None}
     if resolved_module == .Val(target) {

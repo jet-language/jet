@@ -97,11 +97,14 @@ canonical_json_encode_string: fn(value: String, out: ^[U8]) Never! {
             13 -> canonical_json_append(out, "\\r")
             9 -> canonical_json_append(out, "\\t")
             else -> {
-                if code < 32 {
-                    canonical_json_append(out, "\\u00")
-                    out.push(hex[code >> 4])
-                    out.push(hex[code & 15])
-                } else { out.push(byte) }
+                if {
+                    code < 32 -> {
+                        canonical_json_append(out, "\\u00")
+                        out.push(hex[code >> 4])
+                        out.push(hex[code & 15])
+                    }
+                    else -> { out.push(byte) }
+                }
             }
         }
     }

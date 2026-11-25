@@ -281,16 +281,23 @@ nap: fn(nanos: Int) -[Time.Wait]> {
 
 A call crosses the runtime's route carriers, not the C law: an `Int` or a
 machine integer as a word, a `Bool` as a flag, a `Float`, a `String` as text,
-and a `List` of scalars; a result may also be an `Option` of one of those or
-of a tuple, or a tuple whose items are those or an `Option` of one, whose
-items the export writes in the tuple's written order. A written (`^`)
-parameter is a handle or a List of scalars the export changes in place; a
-taken (`^^`) one is any carried value, handed to the export, which ends it
-(the caller does not). A binding parameter or result outside those carriers
-is E3203. Only the generated interface units and the runtime's own inline
-modules declare bindings; an `#Import(c)` in a user module of any name,
-`jet.runtime.*` included, is an ordinary C import (E3101 outside `#Unsafe`,
-E3203 for a non-C type, E1341 for a shared symbol).
+a Core type the runtime holds as a handle (a runtime handle row or an opaque
+native provider row such as `ProcessStdoutStream`; a word record such as
+`Instant` crosses as its word), and a `List` of those or of such Lists
+(`[[U8]]`); a result may also be an `Option` of one of those or of a tuple,
+a tuple whose items are those or an `Option` of one, whose items the export
+writes in the tuple's written order, a `Receiver<T>` or `Event<T>`, which
+crosses as the runtime's one handle, `Never` for an export that stops, or a
+fallible `T E!` whose error is the default `Err` or a handle. A read
+parameter may also be a payload-free Core enum (`ProcessSignal`), which
+crosses as its tag word. A
+written (`^`) parameter is a handle or a List of scalars the export changes
+in place; a taken (`^^`) one is any carried value, handed to the export,
+which ends it (the caller does not). A binding parameter or result outside
+those carriers is E3203. Only the generated interface units and the
+runtime's own inline modules declare bindings; an `#Import(c)` in a user
+module of any name, `jet.runtime.*` included, is an ordinary C import (E3101
+outside `#Unsafe`, E3203 for a non-C type, E1341 for a shared symbol).
 
 `jet.runtime.time` holds the clock, wait and zone reads of the `core.time`
 leaves: `host_monotonic_ns` (`-[Time]> Int`) and `clock_mono_ns` (`-[Time.Wait]> Int`, the deadline reads of waits), `sleep_ns`
@@ -1343,7 +1350,7 @@ of the input. `read_into` appends at most `limit` bytes to the caller's
 bound passes each argument with the access the trait declares, so
 `source.read_into(out, n)` grows the caller's `out` in place. An
 implementation must declare the same access for each parameter that the
-trait writes (`^`) or moves (`^^`); `read_into: fn(&self, buffer: [U8],
+trait writes (`^`) or moves (`^^`); `read_into: fn(^self, buffer: [U8],
 limit: Int)` is E0907.
 
 `write_bytes` writes all of `bytes` or fails; `flush` pushes what the sink

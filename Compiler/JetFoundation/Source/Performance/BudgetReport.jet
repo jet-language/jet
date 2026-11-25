@@ -321,16 +321,19 @@ perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
         perf_report_nullable(f[perf_report_index(f, "decision")].value, fn(v: CanonicalJSON) { perf_validate_decision(v) })
         if f[provider].value == .Object(p) {
             kind: perf_report_text(p[perf_report_index(p, "kind")].value, "provider.kind")
-            if compile == Val(c) {
-                if f[metric].value == .Object(m) {
-                    if perf_report_text(m[perf_report_index(m, "name")].value, "metric.name") != "CompileTime" || kind != "CompilerProbe" || f[unit].value != CanonicalJSON.String("Duration") || m[perf_report_index(m, "percentile")].value == .Null {
-                        return Err(perf_error("compile metadata requires the CompilerProbe provider, CompileTime percentile, and Duration unit"))
+            if {
+                compile == Val(c) -> {
+                    if f[metric].value == .Object(m) {
+                        if perf_report_text(m[perf_report_index(m, "name")].value, "metric.name") != "CompileTime" || kind != "CompilerProbe" || f[unit].value != CanonicalJSON.String("Duration") || m[perf_report_index(m, "percentile")].value == .Null {
+                            return Err(perf_error("compile metadata requires the CompilerProbe provider, CompileTime percentile, and Duration unit"))
+                        }
                     }
+                    perf_validate_compile_metadata(f[c].value, f[samples].value)
                 }
-                perf_validate_compile_metadata(f[c].value, f[samples].value)
-            } else {
-                if kind == "CompilerProbe" {
-                    return Err(perf_error("CompilerProbe measurement has no compile metadata"))
+                else -> {
+                    if kind == "CompilerProbe" {
+                        return Err(perf_error("CompilerProbe measurement has no compile metadata"))
+                    }
                 }
             }
         }
@@ -705,27 +708,33 @@ perf_verify_wire_evaluation: fn(evidence_id: String, m: [CanonicalJSONField]) Pe
         baseline := [PerfRational]{}
         ids := [String]{}
         b: perf_report_index(m, "baseline")
-        if m[b].value == .Object(fields) {
-            baseline = perf_report_quantities(fields[perf_report_index(fields, "pooled_samples")].value, "baseline.pooled_samples", "baseline.pooled_samples")
-            ids = perf_report_history_ids(fields[perf_report_index(fields, "history")].value)
-        } else { ids = perf_report_history_ids(m[perf_report_index(m, "history")].value) }
+        if {
+            m[b].value == .Object(fields) -> {
+                baseline = perf_report_quantities(fields[perf_report_index(fields, "pooled_samples")].value, "baseline.pooled_samples", "baseline.pooled_samples")
+                ids = perf_report_history_ids(fields[perf_report_index(fields, "history")].value)
+            }
+            else -> { ids = perf_report_history_ids(m[perf_report_index(m, "history")].value) }
+        }
         evidence: perf_report_evidence_enum(d[perf_report_index(d, "evidence")].value)
         outcome: perf_report_outcome_enum(d[perf_report_index(d, "policy_outcome")].value)
         statistical: !(comparison == .Absolute(_, _))
-        if baseline.len() == 0 && statistical && evidence == PerfEvidence.Unavailable {
-            expected: if {
-                enforcement == PerfEnforcement.Warn -> PerfPolicyOutcome.Warn
-                else -> PerfPolicyOutcome.Fail
+        if {
+            baseline.len() == 0 && statistical && evidence == PerfEvidence.Unavailable -> {
+                expected: if {
+                    enforcement == PerfEnforcement.Warn -> PerfPolicyOutcome.Warn
+                    else -> PerfPolicyOutcome.Fail
+                }
+                if outcome != expected {
+                    return Err(perf_error("unavailable decision policy outcome mismatch"))
+                }
             }
-            if outcome != expected {
-                return Err(perf_error("unavailable decision policy outcome mismatch"))
-            }
-        } else {
-            metric: perf_report_index(m, "metric")
-            if m[metric].value == .Object(f) {
-                actual: perf_evaluate(evidence_id, perf_report_text(m[perf_report_index(m, "context_key")].value, "context_key"), ids, candidate, baseline, perf_report_parse_percentile(f[perf_report_index(f, "percentile")].value), comparison, direction, enforcement, policy)
-                if perf_report_rational_or_none(d[perf_report_index(d, "point")].value, "decision.point") != Val(actual.point) || perf_report_rational_or_none(d[perf_report_index(d, "lower95")].value, "decision.lower95") != actual.lower95 || perf_report_rational_or_none(d[perf_report_index(d, "upper95")].value, "decision.upper95") != actual.upper95 || evidence != actual.evidence || outcome != actual.outcome {
-                    return Err(perf_error("persisted decision does not match independent evaluator recomputation"))
+            else -> {
+                metric: perf_report_index(m, "metric")
+                if m[metric].value == .Object(f) {
+                    actual: perf_evaluate(evidence_id, perf_report_text(m[perf_report_index(m, "context_key")].value, "context_key"), ids, candidate, baseline, perf_report_parse_percentile(f[perf_report_index(f, "percentile")].value), comparison, direction, enforcement, policy)
+                    if perf_report_rational_or_none(d[perf_report_index(d, "point")].value, "decision.point") != Val(actual.point) || perf_report_rational_or_none(d[perf_report_index(d, "lower95")].value, "decision.lower95") != actual.lower95 || perf_report_rational_or_none(d[perf_report_index(d, "upper95")].value, "decision.upper95") != actual.upper95 || evidence != actual.evidence || outcome != actual.outcome {
+                        return Err(perf_error("persisted decision does not match independent evaluator recomputation"))
+                    }
                 }
             }
         }

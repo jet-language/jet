@@ -12,6 +12,7 @@ package: {
 use {
     core: core
     builtin: jet_builtins
+    rt: jet.runtime.event
     core.event.[Event]
 }
 
@@ -59,7 +60,7 @@ EventConfigError: enum {
 // Source owns constructor composition and rejects invalid async capacities
 // before allocating provider state. Private leaves reuse existing host calls.
 
-scope: fn() -> EventScope Never! { core.event.__scope_new() }
+scope: fn() -> EventScope Never! { rt.scope_new() }
 
 new: fn<T>() -> Event<T> Never! { with_policy<T>(policy_sync()) }
 
@@ -93,7 +94,7 @@ decision_hook: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
     core.event.__decision_hook_new<T, E>(policy)
 }
 
-policy_sync: fn() -> EventPolicy Never! { core.event.__policy_sync() }
+policy_sync: fn() -> EventPolicy Never! { rt.policy_sync() }
 
 async_result: fn<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
     if policy.capacity <= 0 -> return Err(EventConfigError.InvalidCapacity)

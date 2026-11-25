@@ -53,6 +53,11 @@ pkg_render_decode_response: fn(error: String, protocol: DecoderProtocol) -> Stri
     "{lines.join("\n")}\n\n"
 }
 
+// The top-level names every supervised worker binding declares: the session
+// calls each renderer writes and the decoder above. A projected function may
+// not take one; each binder's reserved list adds its own types and error enum.
+PKG_WORKER_RESERVED: [String]{"open", "cancel", "close", "decode_response"}
+
 // The Lua status adapter shared by response and table-view calls.
 pkg_render_lua_decode_status: fn(error: String) -> String Never! {
     lines: [String]{

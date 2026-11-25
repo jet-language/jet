@@ -563,9 +563,12 @@ compiler_service_module_values_response: fn(outcome: ^^JetModuleValuesOutcome) -
     names := [Dyn]{}
     loop name in outcome.unreadable -> names.push(Dyn.Text(name))
     loop named in outcome.values {
-        if compiler_service_value_wire(named.value) == .Val(wire) {
-            rows.push(Dyn.Object(["name": Dyn.Text(named.name), "value": wire]))
-        } else { names.push(Dyn.Text(named.name)) }
+        if {
+            compiler_service_value_wire(named.value) == .Val(wire) -> {
+                rows.push(Dyn.Object(["name": Dyn.Text(named.name), "value": wire]))
+            }
+            else -> { names.push(Dyn.Text(named.name)) }
+        }
     }
     compiler_service_render(Dyn.Object(["values": Dyn.Array(rows), "unreadable": Dyn.Array(names)]))
 }

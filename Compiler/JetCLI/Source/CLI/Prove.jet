@@ -20,8 +20,9 @@ jet_cli_proof_lenses: fn() -> [String] Never! {
     names
 }
 
-// Authority files a directory target never counts as proof members.
-JET_CLI_PROVE_AUTHORITY_FILES: [String]{"package.jet", "pkg.jet", "workspace.jet", "env.jet", "config.jet", "build.jet"}
+// Authority files a directory target never counts as proof members: the
+// reserved source names (Entry.jet), then the build file.
+JET_CLI_PROVE_AUTHORITY_FILES: #run JET_CLI_RESERVED_SOURCE_NAMES.concat([String]{"build.jet"})
 
 // One `jet prove` refusal: the report, and the exit class it ends with.
 #Error

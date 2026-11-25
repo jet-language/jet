@@ -563,7 +563,7 @@ core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, cons
     if !core_decl_is_name(member, "!?") {
         return Err(core_decl_fail("invalid dispatcher member `{member}`"))
     }
-    evaluated := core_decl_call_record(expression, "Core.rows line {number}", constants) ?? return Err(err)
+    evaluated: core_decl_call_record(expression, "Core.rows line {number}", constants) ?? return Err(err)
     record: evaluated.record.copy()
     expected: core_decl_dispatcher_member(member, constants)
     matches: if module_name != "" -> record.module_name == module_name && record.member == expected else -> record.module_name == "" && (record.member == expected || record.receiver_types.contains(member) || record.receiver_types.contains(expected))

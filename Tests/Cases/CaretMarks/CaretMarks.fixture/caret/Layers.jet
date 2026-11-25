@@ -86,6 +86,7 @@ run: fn() {
     }
     stages.push(Stage{name: "grow", edit: grow, finish: fn(packet: ^^Packet) -> Int { packet.flags }})
 
+    print("finish {(stages[0].finish)(Packet{flags: 5, body: [1], retries: None})}")
     log := [String]{}
     total: apply_all(stages, outbox, log)
     loop line in log -> print(line)
@@ -102,7 +103,7 @@ run: fn() {
         .None -> {}
     }
 
-    packets := outbox.drain()
+    packets: outbox.drain()
     task.group sealing {
         sealed: task ^^packets { checksum(packets) }
         print(sealed.join() ?? panic("sealing failed"))

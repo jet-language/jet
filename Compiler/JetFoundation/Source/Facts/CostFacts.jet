@@ -35,14 +35,14 @@ checked_cost_max: fn(left: Int, right: Int) -> Int Never! { if left > right -> l
 
 checked_cost_combine_bounds: fn(op: BinOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
     if op == {
-        .Add -> return checked_cost_bounded(checked_cost_min(left.lo + right.lo, 0), checked_cost_max(left.hi + right.hi, 0))
-        .Sub -> return checked_cost_bounded(checked_cost_min(left.lo - right.hi, 0), checked_cost_max(left.hi - right.lo, 0))
+        .Add -> checked_cost_bounded(checked_cost_min(left.lo + right.lo, 0), checked_cost_max(left.hi + right.hi, 0))
+        .Sub -> checked_cost_bounded(checked_cost_min(left.lo - right.hi, 0), checked_cost_max(left.hi - right.lo, 0))
         .Mul -> {
             first: left.lo * right.lo
             second: left.lo * right.hi
             third: left.hi * right.lo
             fourth: left.hi * right.hi
-            return checked_cost_bounded(checked_cost_min(checked_cost_min(first, second), checked_cost_min(third, fourth)), checked_cost_max(checked_cost_max(first, second), checked_cost_max(third, fourth)))
+            checked_cost_bounded(checked_cost_min(checked_cost_min(first, second), checked_cost_min(third, fourth)), checked_cost_max(checked_cost_max(first, second), checked_cost_max(third, fourth)))
         }
         .FloorDiv -> {
             if right.lo <= 0 && right.hi >= 0 -> return None
@@ -51,7 +51,7 @@ checked_cost_combine_bounds: fn(op: BinOp, left: TIntegerBounds, right: TInteger
             second: left.lo /% right.hi
             third: left.hi /% right.lo
             fourth: left.hi /% right.hi
-            return checked_cost_bounded(checked_cost_min(checked_cost_min(first, second), checked_cost_min(third, fourth)), checked_cost_max(checked_cost_max(first, second), checked_cost_max(third, fourth)))
+            checked_cost_bounded(checked_cost_min(checked_cost_min(first, second), checked_cost_min(third, fourth)), checked_cost_max(checked_cost_max(first, second), checked_cost_max(third, fourth)))
         }
         .Mod | .Rem -> {
             if right.lo <= 0 && right.hi >= 0 -> return None
@@ -61,18 +61,18 @@ checked_cost_combine_bounds: fn(op: BinOp, left: TIntegerBounds, right: TInteger
             high_abs: if right.hi < 0 -> -right.hi else -> right.hi
             magnitude: checked_cost_max(low_abs, high_abs) - 1
             if right.hi < 0 -> return Val(TIntegerBounds{lo: -magnitude, hi: 0})
-            return Val(TIntegerBounds{lo: 0, hi: magnitude})
+            Val(TIntegerBounds{lo: 0, hi: magnitude})
         }
-        .Div | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> return None
+        .Div | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> None
     }
 }
 
 checked_builtin_mutates_receiver: fn(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
-        .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .InsertMap | .AddNewMap | .MapUpdate | .InsertList | .RemoveMap | .RemoveList(_, _) | .MapPopFirst | .ExtendList | .Reverse | .SwapList | .ListFill | .ListFillRepeat | .ListReplace | .Sort | .SortDesc | .Clear | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SortedSetInsert | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite | .GetDisjointWrite | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .IterNext -> return true
-        .ByteBufferWrite(_) -> return true
-        .ByteBufferMethod(symbol) -> return builtin_byte_buffer_row(symbol).access == AccessConvention.Write
-        .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .ListTryNew | .ListTryWithCapacity | .MapMerge | .MapMergeWith | .CountList | .Counts | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .KeyOrdered(_, _) | .LRUCapacity | .LRUKeys | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferToBytes | .ByteBufferWithCapacity | .BagHas | .BagCount | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeToList | .DequeJoin | .DequeFrom | .TryCollect | .ViewNew(_) -> return false
+        .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .InsertMap | .AddNewMap | .MapUpdate | .InsertList | .RemoveMap | .RemoveList(_, _) | .MapPopFirst | .ExtendList | .Reverse | .SwapList | .ListFill | .ListFillRepeat | .ListReplace | .Sort | .SortDesc | .Clear | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SortedSetInsert | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite | .GetDisjointWrite | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .IterNext -> true
+        .ByteBufferWrite(_) -> true
+        .ByteBufferMethod(symbol) -> builtin_byte_buffer_row(symbol).access == AccessConvention.Write
+        .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .ListTryNew | .ListTryWithCapacity | .MapMerge | .MapMergeWith | .CountList | .Counts | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .KeyOrdered(_, _) | .LRUCapacity | .LRUKeys | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferToBytes | .ByteBufferWithCapacity | .BagHas | .BagCount | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeToList | .DequeJoin | .DequeFrom | .TryCollect | .ViewNew(_) -> false
     }
 }
 
@@ -131,38 +131,52 @@ body_cost_integer_bounds: fn(table: Interner, tree: BodyTree, id: Int) -> TInteg
 
 body_cost_integer_bounds_in: fn(table: Interner, tree: BodyTree, id: Int, node: BodyNode) -> TIntegerBounds? Never! {
     bounds := TIntegerBounds?{None}
-    if node.kind == .IntLit(value, _) -> bounds = Val(integer_bounds_exact(value)) else if node.kind == .CtLit(value) {
-        if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
-    } else if node.kind == .Local(local) {
-        bounds = local.integer_bounds
-        if bounds == None -> bounds = body_cost_loop_counter_bounds(table, tree, local)
-    } else if node.kind == .NumericMethod(receiver, operation) {
-        if operation == .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi}) else if operation == .CastAs(destination) {
-            if destination == "i64" && body_cost_integer_bounds(table, tree, receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 {
-                bounds = Val(original)
+    if {
+        node.kind == .IntLit(value, _) -> bounds = Val(integer_bounds_exact(value))
+        node.kind == .CtLit(value) -> {
+            if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
+        }
+        node.kind == .Local(local) -> {
+            bounds = local.integer_bounds
+            if bounds == None -> bounds = body_cost_loop_counter_bounds(table, tree, local)
+        }
+        node.kind == .NumericMethod(receiver, operation) -> {
+            if {
+                operation == .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi})
+                operation == .CastAs(destination) -> {
+                    if destination == "i64" && body_cost_integer_bounds(table, tree, receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 {
+                        bounds = Val(original)
+                    }
+                }
             }
         }
-    } else if node.kind == .Unary(op, operand) {
-        if op == TUnaryOp.Neg && body_cost_integer_bounds(table, tree, operand) == .Val(inner) {
-            bounds = checked_cost_bounded(-inner.hi, -inner.lo)
-        }
-    } else if node.kind == .Binary(op, _, _, left, right) {
-        if body_cost_integer_bounds(table, tree, left) == .Val(lhs) && body_cost_integer_bounds(table, tree, right) == .Val(rhs) {
-            bounds = checked_cost_combine_bounds(op, lhs, rhs)
-        }
-    } else if node.kind == .OrFallback(value, fallback, _) {
-        success := TIntegerBounds?{None}
-        if body_cost_type_id(tree, value) == .Val(carrier) {
-            kind: type_kind(table, carrier)
-            if kind == TypeKind.Option || kind == TypeKind.Result {
-                success = checked_cost_type_id_bounds(table, type_a_type(table, carrier))
+        node.kind == .Unary(op, operand) -> {
+            if op == TUnaryOp.Neg && body_cost_integer_bounds(table, tree, operand) == .Val(inner) {
+                bounds = checked_cost_bounded(-inner.hi, -inner.lo)
             }
         }
-        if fallback == .Value(alternative) {
-            if success == .Val(normal) && body_cost_integer_bounds(table, tree, alternative) == .Val(other) {
-                bounds = Val(TIntegerBounds{lo: checked_cost_min(normal.lo, other.lo), hi: checked_cost_max(normal.hi, other.hi)})
+        node.kind == .Binary(op, _, _, left, right) -> {
+            if body_cost_integer_bounds(table, tree, left) == .Val(lhs) && body_cost_integer_bounds(table, tree, right) == .Val(rhs) {
+                bounds = checked_cost_combine_bounds(op, lhs, rhs)
             }
-        } else { bounds = success }
+        }
+        node.kind == .OrFallback(value, fallback, _) -> {
+            success := TIntegerBounds?{None}
+            if body_cost_type_id(tree, value) == .Val(carrier) {
+                kind: type_kind(table, carrier)
+                if kind == TypeKind.Option || kind == TypeKind.Result {
+                    success = checked_cost_type_id_bounds(table, type_a_type(table, carrier))
+                }
+            }
+            if {
+                fallback == .Value(alternative) -> {
+                    if success == .Val(normal) && body_cost_integer_bounds(table, tree, alternative) == .Val(other) {
+                        bounds = Val(TIntegerBounds{lo: checked_cost_min(normal.lo, other.lo), hi: checked_cost_max(normal.hi, other.hi)})
+                    }
+                }
+                else -> { bounds = success }
+            }
+        }
     }
     if bounds != None -> return bounds
     tid: body_cost_type_id(tree, id) ?? return None
@@ -201,9 +215,12 @@ checked_cost_int_fact: fn(operands: [TIntegerBounds?], result: TIntegerBounds?) 
     removed := result != None
     if result == .Val(bounds) && !checked_cost_fits_inline(bounds) -> removed = false
     loop operand in operands {
-        if operand == .Val(bounds) {
-            if !checked_cost_fits_inline(bounds) -> removed = false
-        } else { removed = false }
+        if {
+            operand == .Val(bounds) -> {
+                if !checked_cost_fits_inline(bounds) -> removed = false
+            }
+            else -> { removed = false }
+        }
     }
     TCostFact{kind: TCostKind.ExactIntSpill, state: if removed -> TCostState.OptimizerRemoved else -> TCostState.SemanticRemainder}
 }
@@ -229,20 +246,24 @@ body_cost_fact: fn(table: Interner, tree: BodyTree, node: BodyNode) -> TCostFact
         }
     }
     if tid.id == TYPE_ID_INT.id {
-        if node.kind == .Binary(op, _, _, left, right) {
-            if op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul {
-                return Val(body_cost_int_operation_fact(table, tree, op, left, right))
+        if {
+            node.kind == .Binary(op, _, _, left, right) -> {
+                if op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul {
+                    return Val(body_cost_int_operation_fact(table, tree, op, left, right))
+                }
             }
-        } else if node.kind == .OverflowOpt(prefix, operation, _, left, right) {
-            if body_cost_int_policy_operator(prefix, operation) == .Val(op) {
-                return Val(body_cost_int_operation_fact(table, tree, op, left, right))
+            node.kind == .OverflowOpt(prefix, operation, _, left, right) -> {
+                if body_cost_int_policy_operator(prefix, operation) == .Val(op) {
+                    return Val(body_cost_int_operation_fact(table, tree, op, left, right))
+                }
             }
-        } else if node.kind == .Unary(op, operand) {
-            if op == TUnaryOp.Neg {
-                inner: body_cost_integer_bounds(table, tree, operand)
-                result := TIntegerBounds?{None}
-                if inner == .Val(bounds) -> result = checked_cost_bounded(-bounds.hi, -bounds.lo)
-                return Val(checked_cost_int_fact([TIntegerBounds?]{inner}, result))
+            node.kind == .Unary(op, operand) -> {
+                if op == TUnaryOp.Neg {
+                    inner: body_cost_integer_bounds(table, tree, operand)
+                    result := TIntegerBounds?{None}
+                    if inner == .Val(bounds) -> result = checked_cost_bounded(-bounds.hi, -bounds.lo)
+                    return Val(checked_cost_int_fact([TIntegerBounds?]{inner}, result))
+                }
             }
         }
     }

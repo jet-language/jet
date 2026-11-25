@@ -886,7 +886,7 @@ priv ca_file: fn(ca: ^[x509crt.X509Crt], path: String) -> Int Never! {
 // other file adds its skipped certificates.
 priv ca_dir: fn(ca: ^[x509crt.X509Crt], path: String) -> Int Never! {
     handle: net_rt.tls_open_directory(-1, path) ?? return C_X509_FILE_IO_ERROR
-    rows: core.net.tls.__host_list_directory(handle) ?? {
+    rows: net_rt.tls_list_directory(handle) ?? {
         net_rt.tls_close_directory(handle)
         return C_X509_FILE_IO_ERROR
     }

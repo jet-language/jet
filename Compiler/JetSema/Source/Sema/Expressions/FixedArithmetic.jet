@@ -189,25 +189,25 @@ sema_expr_fixed_slot: fn(name: String, slot: Int?, lanes: Bool, span: Span) -> E
 // (`checked`), bound to the local `name`; `slots` tells whether it is an
 // array or lane type. A number literal beside one is checked again as one of
 // its elements.
-sema_expr_fixed_operand: fn(name: String, written: Expr, checked: ^^TExpr, slots: Bool, shape: SemaFixedShape, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TStmt? {
+sema_expr_fixed_operand: fn(name: String, written: Expr, checked: ^^TExpr, slots: Bool, shape: SemaFixedShape, span: Span, check: ^SemaBodyCheck) -> TStmt? {
     if slots || !sema_expr_fixed_number_literal(written) {
-        return Val(sema_expr_fixed_bind(name, checked, span, environment, program, scopes, check.state, check.context))
+        return Val(sema_expr_fixed_bind(name, checked, span, check.environment.*, check.program.*, check.scopes, check.state, check.context))
     }
-    element: sema_check_expression(written, Val(shape.element), environment, program, scopes, check, diagnostics) ?? return None
-    Val(sema_expr_fixed_bind(name, element, span, environment, program, scopes, check.state, check.context))
+    element: sema_check_expression(written, Val(shape.element), check) ?? return None
+    Val(sema_expr_fixed_bind(name, element, span, check.environment.*, check.program.*, check.scopes, check.state, check.context))
 }
 
 // The slots `[T#N]{…}` of a slot-by-slot operator, each checked in the block
 // that holds the operand locals in `body`, as the value of that block. When
 // `lanes` names the local of a lane-type operand, the value is that type's
 // `__with_lanes` of the slots instead.
-sema_expr_fixed_slots: fn(slots: [Expr], shape: SemaFixedShape, lanes: String?, body: ^^[TStmt], mark: SemaScopeMark, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_expr_fixed_slots: fn(slots: [Expr], shape: SemaFixedShape, lanes: String?, body: ^^[TStmt], mark: SemaScopeMark, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     values := [TExpr]{}
     loop slot in slots {
         // Every slot has one type, so a slot the operator refuses is
         // reported once, at the first.
-        value: sema_check_expression(slot, None, environment, program, scopes, check, diagnostics) ?? {
-            sema_scope_leave(scopes, check.state)
+        value: sema_check_expression(slot, None, check) ?? {
+            sema_scope_leave(check.scopes, check.state)
             return None
         }
         values.push(value)
@@ -218,30 +218,30 @@ sema_expr_fixed_slots: fn(slots: [Expr], shape: SemaFixedShape, lanes: String?, 
     if lanes == .Val(holder) {
         at: "{span.start}_{span.end}"
         slots_name: "__jet_slots_value_{at}"
-        statements.push(sema_expr_fixed_bind(slots_name, list, span, environment, program, scopes, check.state, check.context))
+        statements.push(sema_expr_fixed_bind(slots_name, list, span, check.environment.*, check.program.*, check.scopes, check.state, check.context))
         argument: CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: slots_name, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
         rebuild: Expr.MethodCall{receiver: Expr.Ident{name: "{holder}", span: span, id: AST_NODE_GENERATED}, method: "__with_lanes", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
-        list = sema_check_expression(rebuild, None, environment, program, scopes, check, diagnostics) ?? {
-            sema_scope_leave(scopes, check.state)
+        list = sema_check_expression(rebuild, None, check) ?? {
+            sema_scope_leave(check.scopes, check.state)
             return None
         }
     }
-    sema_single_use_leave_scope(scopes, check.state, diagnostics)
-    sema_scope_rollback(scopes, mark)
+    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+    sema_scope_rollback(check.scopes, mark)
     value_ty: list.ty
     statements.push(TStmt.ExprStmt{value: list, span: span})
-    sema_expr_expected_owned(sema_tree_node(value_ty, TExprKind.InlineBlock{body: statements}, span), expected, environment, program, diagnostics)
+    sema_expr_expected_owned(sema_tree_node(value_ty, TExprKind.InlineBlock{body: statements}, span), expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
 // `lhs op rhs` slot by slot, where sema_expr_fixed_elementwise_applies holds;
 // `left` and `right` are the operands as written.
-sema_expr_check_fixed_binary: fn(op: BinOp, left: Expr, right: Expr, lhs: ^^TExpr, rhs: ^^TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    if sema_expr_fixed_mismatch(op, lhs.ty, rhs.ty, left, right, span, environment, program) == .Val(refused) {
-        diagnostics.push(refused)
+sema_expr_check_fixed_binary: fn(op: BinOp, left: Expr, right: Expr, lhs: ^^TExpr, rhs: ^^TExpr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    if sema_expr_fixed_mismatch(op, lhs.ty, rhs.ty, left, right, span, check.environment.*, check.program.*) == .Val(refused) {
+        check.diagnostics.push(refused)
         return None
     }
-    left_shape: sema_expr_fixed_operand_shape(op, lhs.ty, environment, program)
-    right_shape: sema_expr_fixed_operand_shape(op, rhs.ty, environment, program)
+    left_shape: sema_expr_fixed_operand_shape(op, lhs.ty, check.environment.*, check.program.*)
+    right_shape: sema_expr_fixed_operand_shape(op, rhs.ty, check.environment.*, check.program.*)
     left_slots: left_shape != None
     right_slots: right_shape != None
     left_lanes: if left_shape == .Val(found) -> found.lanes else -> false
@@ -250,14 +250,14 @@ sema_expr_check_fixed_binary: fn(op: BinOp, left: Expr, right: Expr, lhs: ^^TExp
     at: "{span.start}_{span.end}"
     left_name: "__jet_slots_left_{at}"
     right_name: "__jet_slots_right_{at}"
-    mark: sema_scope_mark(scopes)
-    sema_scope_enter(scopes, check.state, "elementwise@{at}")
-    left_bound: sema_expr_fixed_operand(left_name, left, lhs, left_slots, shape, span, environment, program, scopes, check, diagnostics) ?? {
-        sema_scope_leave(scopes, check.state)
+    mark: sema_scope_mark(check.scopes)
+    sema_scope_enter(check.scopes, check.state, "elementwise@{at}")
+    left_bound: sema_expr_fixed_operand(left_name, left, lhs, left_slots, shape, span, check) ?? {
+        sema_scope_leave(check.scopes, check.state)
         return None
     }
-    right_bound: sema_expr_fixed_operand(right_name, right, rhs, right_slots, shape, span, environment, program, scopes, check, diagnostics) ?? {
-        sema_scope_leave(scopes, check.state)
+    right_bound: sema_expr_fixed_operand(right_name, right, rhs, right_slots, shape, span, check) ?? {
+        sema_scope_leave(check.scopes, check.state)
         return None
     }
     body: [TStmt]{left_bound, right_bound}
@@ -267,20 +267,20 @@ sema_expr_check_fixed_binary: fn(op: BinOp, left: Expr, right: Expr, lhs: ^^TExp
         right_lanes -> Val(right_name)
         else -> String?{None}
     }
-    sema_expr_fixed_slots(slots, shape, holder, body, mark, span, expected, environment, program, scopes, check, diagnostics)
+    sema_expr_fixed_slots(slots, shape, holder, body, mark, span, expected, check)
 }
 
 // `-a` or `~a` slot by slot, where sema_expr_fixed_unary_applies holds.
-sema_expr_check_fixed_unary: fn(op: UnOp, value: ^^TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    shape: sema_expr_fixed_shape(value.ty) ?? sema_expr_lane_shape(value.ty, environment, program) ?? return None
+sema_expr_check_fixed_unary: fn(op: UnOp, value: ^^TExpr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    shape: sema_expr_fixed_shape(value.ty) ?? sema_expr_lane_shape(value.ty, check.environment.*, check.program.*) ?? return None
     at: "{span.start}_{span.end}"
-    mark: sema_scope_mark(scopes)
-    sema_scope_enter(scopes, check.state, "elementwise@{at}")
+    mark: sema_scope_mark(check.scopes)
+    sema_scope_enter(check.scopes, check.state, "elementwise@{at}")
     name: "__jet_slots_operand_{at}"
-    body: [TStmt]{sema_expr_fixed_bind(name, value, span, environment, program, scopes, check.state, check.context)}
+    body: [TStmt]{sema_expr_fixed_bind(name, value, span, check.environment.*, check.program.*, check.scopes, check.state, check.context)}
     slots: loop slot in 0..<shape.length -> Expr.Unary{op: op, operand: sema_expr_fixed_slot(name, Val(slot), shape.lanes, span), span: span, id: AST_NODE_GENERATED}
     holder: if shape.lanes -> Val(name) else -> String?{None}
-    sema_expr_fixed_slots(slots, shape, holder, body, mark, span, expected, environment, program, scopes, check, diagnostics)
+    sema_expr_fixed_slots(slots, shape, holder, body, mark, span, expected, check)
 }
 
 // The slots `.swizzle(i, ...)` picks from: any fixed array `[T#N]` (N >= 1)
@@ -376,46 +376,46 @@ sema_expr_swizzle_const_int: fn(expr: Expr, environment: SemaScopeEnvironment, p
 }
 
 // Numeric swizzle `a.swizzle(i0, i1, ...)` on fixed arrays and exact lanes.
-sema_expr_try_numeric_swizzle: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_expr_try_numeric_swizzle: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if method != "swizzle" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    slots: sema_expr_numeric_swizzle_slots(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    slots: sema_expr_numeric_swizzle_slots(receiver_value.ty, check.environment.*, check.program.*) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if type_args.len() != 0 {
-        diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` takes no type arguments", "numeric swizzle keeps the receiver's element type and takes only constant slot indexes", "remove the type arguments from `.swizzle(...)`"))
+        check.diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` takes no type arguments", "numeric swizzle keeps the receiver's element type and takes only constant slot indexes", "remove the type arguments from `.swizzle(...)`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() == 0 {
-        diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` needs at least one constant slot index", "numeric swizzle selects one or more fixed slots from `{slots.shown}` at compile time", "pass constant slot indexes in `0..<{slots.length}`, such as `.swizzle(0)`"))
+        check.diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` needs at least one constant slot index", "numeric swizzle selects one or more fixed slots from `{slots.shown}` at compile time", "pass constant slot indexes in `0..<{slots.length}`, such as `.swizzle(0)`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     indices := [Int]{}
     valid := true
     loop arg in args {
         if arg.label != None || arg.spread {
-            diagnostics.push(sema_error("E3110", arg.span, "swizzle slot indexes must be positional constant integers", "numeric swizzle takes plain constant `Int` slot numbers without labels or spreads", "write constant slot numbers such as `.swizzle(2, 1, 0)`"))
+            check.diagnostics.push(sema_error("E3110", arg.span, "swizzle slot indexes must be positional constant integers", "numeric swizzle takes plain constant `Int` slot numbers without labels or spreads", "write constant slot numbers such as `.swizzle(2, 1, 0)`"))
             valid = false
             next
         }
-        checked_arg: sema_check_expression(arg.expr, Val(Type.Int), environment, program, scopes, check, diagnostics) ?? {
+        checked_arg: sema_check_expression(arg.expr, Val(Type.Int), check) ?? {
             valid = false
             next
         }
         if checked_arg.ty != Type.Int {
-            diagnostics.push(sema_error("E3110", arg.span, "swizzle slot index must be a constant `Int`, got `{type_name(checked_arg.ty)}`", "numeric swizzle indexes slots with compile-time `Int` constants", "pass a constant integer between `0` and `{slots.length - 1}`"))
+            check.diagnostics.push(sema_error("E3110", arg.span, "swizzle slot index must be a constant `Int`, got `{type_name(checked_arg.ty)}`", "numeric swizzle indexes slots with compile-time `Int` constants", "pass a constant integer between `0` and `{slots.length - 1}`"))
             valid = false
             next
         }
-        folded := sema_expr_swizzle_const_int(arg.expr, environment, program, scopes, 16)
+        folded := sema_expr_swizzle_const_int(arg.expr, check.environment.*, check.program.*, check.scopes, 16)
         if folded == None {
-            folded = sema_call_memory_compiletime_int(arg.expr, checked_arg, environment, program, scopes, check.context)
+            folded = sema_call_memory_compiletime_int(arg.expr, checked_arg, check.environment.*, check.program.*, check.scopes, check.context)
         }
         if folded == None -> folded = tree_expr_fold_int(checked_arg)
         idx: folded ?? {
-            diagnostics.push(sema_error("E3110", arg.span, "swizzle slot index must be a compile-time constant integer", "numeric swizzle selects fixed slots while compiling, so every index must be known at compile time", "pass a constant integer between `0` and `{slots.length - 1}`"))
+            check.diagnostics.push(sema_error("E3110", arg.span, "swizzle slot index must be a compile-time constant integer", "numeric swizzle selects fixed slots while compiling, so every index must be known at compile time", "pass a constant integer between `0` and `{slots.length - 1}`"))
             valid = false
             next
         }
         if idx < 0 || idx >= slots.length {
-            diagnostics.push(sema_error("E3110", arg.span, "swizzle index `{idx}` is out of range for `{slots.shown}`", "`{slots.shown}` has {slots.length} slots (`0` through `{slots.length - 1}`)", "use slot indexes between `0` and `{slots.length - 1}`"))
+            check.diagnostics.push(sema_error("E3110", arg.span, "swizzle index `{idx}` is out of range for `{slots.shown}`", "`{slots.shown}` has {slots.length} slots (`0` through `{slots.length - 1}`)", "use slot indexes between `0` and `{slots.length - 1}`"))
             valid = false
             next
         }
@@ -423,33 +423,33 @@ sema_expr_try_numeric_swizzle: fn(receiver: Expr, receiver_value: TExpr, method:
     }
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !slots.lanes {
-        graph: program.registration_graph
-        caller: sema_type_module_row(graph, environment.module_identity)
+        graph: check.program.registration_graph
+        caller: sema_type_module_row(graph, check.environment.module_identity)
         walk := sema_copy_walk()
-        copy_facts: sema_copy_type_facts(slots.element, program.registration_graph, program.copy_facts, caller, check.context.generic_params, walk)
+        copy_facts: sema_copy_type_facts(slots.element, check.program.registration_graph, check.program.copy_facts, caller, check.context.generic_params, walk)
         if !copy_facts.copyable {
-            diagnostics.push(sema_error("E3110", span, "can't swizzle `{slots.shown}` because `{type_name(slots.element)}` is not copyable", "numeric swizzle reads slots by value and may repeat them, so the element type must be copyable", "swizzle a fixed array of a copyable type, or move elements explicitly"))
+            check.diagnostics.push(sema_error("E3110", span, "can't swizzle `{slots.shown}` because `{type_name(slots.element)}` is not copyable", "numeric swizzle reads slots by value and may repeat them, so the element type must be copyable", "swizzle a fixed array of a copyable type, or move elements explicitly"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     target_lane := String?{None}
     if slots.lanes {
         lane_name: sema_expr_numeric_swizzle_lane_target(slots.shown, slots.element, indices.len()) ?? {
-            diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` has no {indices.len()}-lane result type for `{type_name(slots.element)}`", "exact lane swizzles return a legal lane type with the same element type", "pass a supported lane count for `{type_name(slots.element)}`"))
+            check.diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` has no {indices.len()}-lane result type for `{type_name(slots.element)}`", "exact lane swizzles return a legal lane type with the same element type", "pass a supported lane count for `{type_name(slots.element)}`"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         target_lane = Val(lane_name)
     }
     at: "{span.start}_{span.end}"
     src_name: "__jet_swizzle_src_{at}"
-    mark: sema_scope_mark(scopes)
-    sema_scope_enter(scopes, check.state, "swizzle@{at}")
-    body := [TStmt]{sema_expr_fixed_bind_read(src_name, receiver_value, span, environment, program, scopes, check.state, check.context)}
+    mark: sema_scope_mark(check.scopes)
+    sema_scope_enter(check.scopes, check.state, "swizzle@{at}")
+    body := [TStmt]{sema_expr_fixed_bind_read(src_name, receiver_value, span, check.environment.*, check.program.*, check.scopes, check.state, check.context)}
     picked := [TExpr]{}
     loop idx in indices {
         slot_expr: sema_expr_fixed_slot(src_name, Val(idx), slots.lanes, span)
-        checked_slot: sema_check_expression(slot_expr, None, environment, program, scopes, check, diagnostics) ?? {
-            sema_scope_leave(scopes, check.state)
+        checked_slot: sema_check_expression(slot_expr, None, check) ?? {
+            sema_scope_leave(check.scopes, check.state)
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         picked.push(checked_slot)
@@ -458,18 +458,18 @@ sema_expr_try_numeric_swizzle: fn(receiver: Expr, receiver_value: TExpr, method:
     result_expr := sema_tree_node(Type.FixedList{elem: slots.element, len: result_measure}, TExprKind.List{values: picked, trait_coercion: None}, span)
     if target_lane == .Val(lane_name) {
         lanes_name: "__jet_swizzle_lanes_{at}"
-        body.push(sema_expr_fixed_bind(lanes_name, result_expr, span, environment, program, scopes, check.state, check.context))
+        body.push(sema_expr_fixed_bind(lanes_name, result_expr, span, check.environment.*, check.program.*, check.scopes, check.state, check.context))
         argument: CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: lanes_name, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
         construct: Expr.MethodCall{receiver: Expr.Ident{name: lane_name, span: span, id: AST_NODE_GENERATED}, method: "from_array", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
-        result_expr = sema_check_expression(construct, None, environment, program, scopes, check, diagnostics) ?? {
-            sema_scope_leave(scopes, check.state)
+        result_expr = sema_check_expression(construct, None, check) ?? {
+            sema_scope_leave(check.scopes, check.state)
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    sema_single_use_leave_scope(scopes, check.state, diagnostics)
-    sema_scope_rollback(scopes, mark)
+    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+    sema_scope_rollback(check.scopes, mark)
     result_ty: result_expr.ty
     body.push(TStmt.ExprStmt{value: result_expr, span: span})
-    built: sema_expr_expected_owned(sema_tree_node(result_ty, TExprKind.InlineBlock{body: body}, span), expected, environment, program, diagnostics)
+    built: sema_expr_expected_owned(sema_tree_node(result_ty, TExprKind.InlineBlock{body: body}, span), expected, check.environment.*, check.program.*, check.diagnostics)
     SemaMethodSpecialCheck{handled: true, value: built}
 }

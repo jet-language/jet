@@ -95,8 +95,11 @@ core_record_source_demands: fn(declared: CoreDeclarations, rows: [CoreRecordFiel
     }
     loop entry in declared.modules {
         loop leaf in entry.types {
-            if leaf.generic_arity == 0 && leaf.variants.len() > 0 -> modules[leaf.name.copy()] = "" else if modules.get(leaf.name) == None {
-                modules[leaf.name.copy()] = entry.name.copy()
+            if {
+                leaf.generic_arity == 0 && leaf.variants.len() > 0 -> modules[leaf.name.copy()] = ""
+                modules.get(leaf.name) == None -> {
+                    modules[leaf.name.copy()] = entry.name.copy()
+                }
             }
         }
     }

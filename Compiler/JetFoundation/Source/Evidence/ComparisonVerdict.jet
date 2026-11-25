@@ -63,12 +63,15 @@ testing_compare_samples_with_discarded: fn(relation: ObservationRelation, sample
             return record
         }
     }
-    if discarded_cases > 0 {
-        record.status = ComparisonStatus.InvalidOracle
-        record.reason = Val("comparison discarded cases and cannot claim equality")
-    } else {
-        record.status = ComparisonStatus.Matched
-        record.reason = Val("{record.samples.len()} observed case(s) matched under {observation_relation_as_str(record.relation)}")
+    if {
+        discarded_cases > 0 -> {
+            record.status = ComparisonStatus.InvalidOracle
+            record.reason = Val("comparison discarded cases and cannot claim equality")
+        }
+        else -> {
+            record.status = ComparisonStatus.Matched
+            record.reason = Val("{record.samples.len()} observed case(s) matched under {observation_relation_as_str(record.relation)}")
+        }
     }
     record
 }

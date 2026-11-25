@@ -49,7 +49,7 @@ build_time_guard_contexts: fn(text: String) -> [String] {
                 current = "use"
             } else if !line.starts_with("#") {
                 name: build_time_guard_item_name(line)
-                rest: if name == "" -> "" else -> line.slice(name.count_bytes() + 1, line.count_bytes()).trim()
+                rest: if name == "" -> "" else -> line.slice(name.len() + 1, line.len()).trim()
                 current = if name == "" -> "other:{line.trim()}" else if rest.starts_with("fn(") || rest.starts_with("fn<") -> "fn:{name}" else if rest.starts_with("#run") -> "run:{name}" else -> "other:{name}"
             }
         }
@@ -131,7 +131,7 @@ build_time_guard_problems: fn(sources: [BuildTimeGuardSource], reached: ^[String
                 named = true
                 if tested || context == "test" || context == "use" || context.starts_with("run:") -> next
                 if context.starts_with("fn:") {
-                    caller: context.slice(3, context.count_bytes())
+                    caller: context.slice(3, context.len())
                     if !seen.contains(caller) {
                         seen.push(caller.copy())
                         queue.push(caller.copy())

@@ -229,8 +229,9 @@ rl_rows: fn(source: String) -> [RLRow] Never! {
 
 // The carrier of a Jet type as the route projects it: Word, Flag, Float,
 // Text, Unit, List, Option, Tuple, or Handle for any other named type.
+// `Never` (an export that stops) is Unit, as JetIR ir_route_result_of has it.
 rl_carrier: fn(ty: String) -> String Never! {
-    if ty == "" || ty == "Unit" -> return "Unit"
+    if ty == "" || ty == "Unit" || ty == "Never" -> return "Unit"
     if ty.ends_with("?") -> return "Option"
     if ty.starts_with("{{") -> return "Tuple"
     if ty.starts_with("[") -> return "List"
@@ -546,6 +547,18 @@ rl_taken_findings: fn(source: String, bindings: [RLBinding]) -> [String] Never! 
         "jet.runtime.process.spec_parent_death crosses &[true]; the Core.rows row core.process.__spec_parent_death gives jet_process_spec_parent_death &[false]",
         "jet.runtime.term.put crosses 3 argument and 1 out words, 4 in all; jet_put takes 3 (bytes, stderr, some)",
     }.join("\n"))
+}
+
+#Test("a binding that stops reads nothing back, as its export returns nothing") {
+    interface: "    RuntimeInterfaceRow{{module_name: \"jet.runtime.rt\", member: \"coded_stop\", declaration: \"priv coded_stop: fn(code: String, message: String) -> Never\", symbol: \"jet_rt_coded_stop\"}},\n    RuntimeInterfaceRow{{module_name: \"jet.runtime.rt\", member: \"coded_code\", declaration: \"priv coded_code: fn(code: String, message: String) -> Int\", symbol: \"jet_rt_coded_stop\"}},\n"
+    runtime: "#Export(c) jet_rt_coded_stop: fn(code: I64, message: I64) {{\n"
+    bindings: rl_bindings(interface)
+    assert_eq(bindings.len(), 2)
+    exports := [String:RLExport]{}
+    rl_exports(runtime, exports)
+    // The stop agrees with its export; an Int result over the same export
+    // reads a word it never returns.
+    assert_eq(rl_findings(bindings, exports, [RLRow]{}, [String]{}).join("\n"), "jet.runtime.rt.coded_code reads I64 back; jet_rt_coded_stop returns nothing")
 }
 
 #Test("a taken parameter crosses consumed, and a row that lends it or an interface that drops it is named") {

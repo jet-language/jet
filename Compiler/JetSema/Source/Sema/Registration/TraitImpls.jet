@@ -28,6 +28,16 @@ SemaTraitImplForeign: struct {
     item: Int,
 }
 
+// An owned trait whose default methods, as Traits.jet gives them, do not
+// parse in a module, and why. Its impls there gain no defaults, and the
+// contract check reports none of those methods missing
+// (sema_trait_defaults_unknown): the row is the one report, an internal
+// compiler error (sema_trait_defaults_unread).
+SemaTraitDefaultsUnread: struct {
+    trait_name: String,
+    problem: String,
+}
+
 // The names an impl reads in its module: each trait the module declares, by
 // its name's id in `names`, to its index among the items; the impls the
 // module writes itself, by (type, trait) pair slot over `names`
@@ -45,7 +55,9 @@ sema_trait_impl_declared: fn(known: SemaTraitImplNames, trait_name: String) -> I
     known.traits.get(name_index(id))
 }
 
-sema_trait_impls_synthesize: fn(items: ^[Item]) Never! {
+// Fills every impl of `items` with the methods it gains. An owned trait
+// whose defaults do not parse is a row of `unread`, once.
+sema_trait_impls_synthesize: fn(items: ^[Item], unread: ^[SemaTraitDefaultsUnread]) Never! {
     known := SemaTraitImplNames{}
     loop (index, item) in items {
         if item == {
@@ -82,14 +94,14 @@ sema_trait_impls_synthesize: fn(items: ^[Item]) Never! {
         if item == {
             .Impl(definition) -> {
                 trait_name: definition.trait_name ?? next
-                methods: sema_trait_impl_filled_methods(items, definition.type_name, trait_name, definition.trait_span ?? definition.type_span, definition.methods, definition.delegation_field, known) ?? next
+                methods: sema_trait_impl_filled_methods(items, definition.type_name, trait_name, definition.trait_span ?? definition.type_span, definition.methods, definition.delegation_field, known, unread) ?? next
                 gains.push(SemaTraitImplGain{item: index, block: -1, methods: methods})
             }
             .Struct(definition) -> {
-                sema_trait_impl_filled_blocks(items, index, definition.name, definition.trait_impls, known, gains)
+                sema_trait_impl_filled_blocks(items, index, definition.name, definition.trait_impls, known, gains, unread)
             }
             .Enum(definition) -> {
-                sema_trait_impl_filled_blocks(items, index, definition.name, definition.trait_impls, known, gains)
+                sema_trait_impl_filled_blocks(items, index, definition.name, definition.trait_impls, known, gains, unread)
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -98,17 +110,17 @@ sema_trait_impls_synthesize: fn(items: ^[Item]) Never! {
 }
 
 // The gains of the `impl Trait` blocks in the body of `type_name`, item `item`.
-sema_trait_impl_filled_blocks: fn(items: [Item], item: Int, type_name: String, blocks: [TraitImplBlock], known: SemaTraitImplNames, gains: ^[SemaTraitImplGain]) Never! {
+sema_trait_impl_filled_blocks: fn(items: [Item], item: Int, type_name: String, blocks: [TraitImplBlock], known: SemaTraitImplNames, gains: ^[SemaTraitImplGain], unread: ^[SemaTraitDefaultsUnread]) Never! {
     loop (block, written) in blocks {
-        methods: sema_trait_impl_filled_methods(items, type_name, written.trait_name, written.trait_span, written.methods, written.delegation_field, known) ?? next
+        methods: sema_trait_impl_filled_methods(items, type_name, written.trait_name, written.trait_span, written.methods, written.delegation_field, known, unread) ?? next
         gains.push(SemaTraitImplGain{item: item, block: block, methods: methods})
     }
 }
 
 // The methods of `type_name`'s impl of `trait_name`, written at `at`, with its
 // synthesized ones, None when it gains none.
-sema_trait_impl_filled_methods: fn(items: [Item], type_name: String, trait_name: String, at: Span, methods: [Func], delegation: String?, known: SemaTraitImplNames) -> [Func]? Never! {
-    declared: sema_trait_impl_declared(known, trait_name) ?? return sema_trait_impl_owned_defaults(trait_name, at, methods, delegation)
+sema_trait_impl_filled_methods: fn(items: [Item], type_name: String, trait_name: String, at: Span, methods: [Func], delegation: String?, known: SemaTraitImplNames, unread: ^[SemaTraitDefaultsUnread]) -> [Func]? Never! {
+    declared: sema_trait_impl_declared(known, trait_name) ?? return sema_trait_impl_owned_defaults(trait_name, at, methods, delegation, unread)
     if items[declared] == .Trait(definition) {
         sigs: definition.methods
         if delegation == .Val(field_name) {
@@ -380,8 +392,10 @@ sema_trait_impls_declared: fn(items: [Item], name: String) -> Int? Never! {
 // padded to begin one byte into the impl's trait name at `at`: no unit of the
 // file begins there, and the parser numbers a unit's nodes from its first
 // byte, so every node id it gives is unique in the file. Each gained method
-// sits at `at`, so a report about the method itself names the impl.
-sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func], delegation: String?) -> [Func]? Never! {
+// sits at `at`, so a report about the method itself names the impl. Defaults
+// that do not parse are jet's own defect: the impl gains none, and the trait
+// is a row of `unread`, once.
+sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func], delegation: String?, unread: ^[SemaTraitDefaultsUnread]) -> [Func]? Never! {
     if delegation != None -> return None
     owned: owned_trait(trait_name) ?? return None
     declarations := ""
@@ -398,22 +412,33 @@ sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func]
     loop _ in 0..<at.start + 1 -> bytes.push(32)
     loop byte in "{trait_name}: trait {{\n{declarations}}}\n".bytes() -> bytes.push(byte)
     parsed: parse_generated_source(bytes)
-    if parsed.diagnostics.len() > 0 || parsed.program.items.len() != 1 {
-        panic("the defaults Traits.jet gives `{trait_name}` do not parse")
+    problem: if {
+        parsed.diagnostics.len() > 0 -> Val("they do not parse: {parsed.diagnostics[0].what}")
+        parsed.program.items.len() != 1 -> Val("they parse as {parsed.program.items.len()} items, not one trait")
+        else -> None
     }
+    if problem == .Val(text) {
+        if !sema_trait_defaults_unknown(unread, trait_name) {
+            unread.push(SemaTraitDefaultsUnread{trait_name: trait_name, problem: text})
+        }
+        return None
+    }
+    // The one item is the generated trait.
     program := parsed.program.move()
-    item: program.items.pop() ?? panic("the defaults Traits.jet gives `{trait_name}` lost their trait")
     extras := [Func]{}
-    if item.move() == .Trait(source_definition) {
-        definition := source_definition.move()
-        loop {
-            sig: definition.methods.pop() ?? break
-            function := sema_trait_impl_method(sig)
-            if sig.default_body.move() == .Val(body) {
-                function.body = body.move()
-                function.span = at
-                function.name_span = at
-                extras.push(function)
+    loop {
+        item: program.items.pop() ?? break
+        if item.move() == .Trait(source_definition) {
+            definition := source_definition.move()
+            loop {
+                sig: definition.methods.pop() ?? break
+                function := sema_trait_impl_method(sig)
+                if sig.default_body.move() == .Val(body) {
+                    function.body = body.move()
+                    function.span = at
+                    function.name_span = at
+                    extras.push(function)
+                }
             }
         }
     }
@@ -426,6 +451,33 @@ sema_trait_impl_writes: fn(methods: [Func], name: String) -> Bool Never! {
         if method.name == name -> return true
     }
     false
+}
+
+// Whether the defaults of the owned trait `trait_name` did not parse: it is a
+// row of `unread`, and no impl gained them.
+sema_trait_defaults_unknown: fn(unread: [SemaTraitDefaultsUnread], trait_name: String) -> Bool Never! {
+    loop row in unread {
+        if row.trait_name == trait_name -> return true
+    }
+    false
+}
+
+// The census of the owned traits whose defaults did not parse in this
+// compile, one row per trait, naming the first module that read them. Each
+// is jet's own defect, which the driver reports as an internal compiler
+// error (JetDriver Pipeline.jet).
+sema_trait_defaults_unread: fn(graph: SemaRegistrationGraph) -> [String] Never! {
+    rows := [String]{}
+    loop (index, module_row) in graph.modules {
+        loop row in module_row.trait_defaults_unread {
+            earlier: loop before in 0..<index {
+                if sema_trait_defaults_unknown(graph.modules[before].trait_defaults_unread, row.trait_name) -> break true
+            } ?? false
+            if earlier -> next
+            rows.push("the defaults Traits.jet gives `{row.trait_name}`, read in module `{module_text(graph.module_table, module_row.module_identity)}`: {row.problem}")
+        }
+    }
+    rows
 }
 
 // `methods` then `extras`, None when there are no extras.

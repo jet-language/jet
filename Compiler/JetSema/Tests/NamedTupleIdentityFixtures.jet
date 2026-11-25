@@ -11,14 +11,13 @@ named_tuple_identity_line_from_source: fn() -> {cause: String?, eof: Bool, line:
 }
 
 named_tuple_identity_fixture: fn() {
-    descriptor_type: Type.Tuple{
+    channel_type: Type.Tuple{
         fields: [TypeTupleField]{
-            {name: "available", ty: Type.Bool},
-            {name: "held", ty: Type.Bool},
-            {name: "fd", ty: Type.Int},
+            {name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{Type.Named{name: "T"}}}},
+            {name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{Type.Named{name: "T"}}}},
         },
     }
-    assert(type_identity_equal(named_tuple_identity_registry_return("core.files", "__directory_fd"), descriptor_type))
+    assert(type_identity_equal(named_tuple_identity_registry_return("core.tasks", "__channel_bounded"), channel_type))
     line: named_tuple_identity_line_from_source()
     assert(!line.eof && line.line == "" && line.cause == None)
 }

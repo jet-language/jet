@@ -57,14 +57,14 @@ signals: fn(kinds: [ProcessSignal]) -[Exec]> SignalSubscription IOError! {
     }
     id: rt.signal_open(false)
     loop kind in kinds {
-        added: core.process.__signal_add(id, signal_number(kind), kind)
+        added: rt.signal_add(id, signal_number(kind), kind)
         if !added.available || added.errno != 0 {
             rt.signal_close(id)
             if !added.available -> return Err(IOError.Unsupported(context))
             return Err(IOError.Other(IOContext{operation: .Resolve, resource: Val("process.signals"), os_code: Val(added.errno), cause: Val("the host refused the signal handler")}))
         }
     }
-    Ok(SignalSubscription{id: id, receiver: core.process.__signal_receiver(id)})
+    Ok(SignalSubscription{id: id, receiver: rt.signal_receiver(id)})
 }
 
 // An argv-safe shell command. `Sh{"cmd {value}"}` splits its literal text on
@@ -237,7 +237,7 @@ cmd: fn(argv: [String]) -[Exec]> ProcessSpec Never! {
     has_stdin: if fields.stdin == .Val(_) -> true else -> false
     has_terminal: if fields.terminal == .Val(_) -> true else -> false
     #Unsafe("transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length") {
-        return core.process.__spec_fields(
+        return rt.spec_fields(
             fields.argv,
             fields.cwd != None,
             fields.cwd ?? "",
@@ -356,7 +356,7 @@ exit_unmapped: fn(code: Int) -[Exec.Exit]> Never Never! {
 /// the program drains to its end. `signals` takes a signal as a value instead.
 on_signal: fn(signal: ProcessSignal) -[Exec]> Never! {
     id: rt.signal_open(true)
-    added: core.process.__signal_add(id, signal_number(signal), signal)
+    added: rt.signal_add(id, signal_number(signal), signal)
     if !added.available -> panic("core.process.on_signal: signals are unsupported on this host")
     if added.errno != 0 {
         panic("core.process.on_signal: the host refused the signal handler (os error {added.errno})")
@@ -436,42 +436,43 @@ run_all_canceled: fn() -> IOError Never! {
 // TerminalFact names; a preview fact is any other string key. Every host the
 // runtime launches on opens a PTY (HostSpawn spawn_pty), so the report holds
 // the three stable facts whatever the spec asks for.
-priv __spec_abilities: fn(_spec: ProcessSpec) -> Set<String> Never! {
+#Builtin.Role(.ProcessSpecAbilities) priv __spec_abilities: fn(_spec: ProcessSpec) -> Set<String> Never! {
     Set.from([String]{"terminal", "resize", "raw"})
 }
 
 // The ProcessSpec builders and launch steps and the ProcessChild steps:
 // `spec.cwd(path)`, `spec.run()`, `child.wait()` and the rest check as calls
-// of these bodies (`terminal(policy)` is `__spec_terminal_with_policy`), each
-// the jet.runtime.process leaf of its runtime export. A builder takes its
-// spec and answers it changed; a launch or child step reads its receiver.
-priv __spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec Never! { rt.spec_cwd(spec, path) }
-priv __spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec Never! { rt.spec_arg(spec, extra) }
-priv __spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec Never! { rt.spec_args_extend(spec, extra) }
-priv __spec_env: fn(spec: ^^ProcessSpec, name: String, value: String) -> ProcessSpec Never! { rt.spec_env(spec, name, value) }
-priv __spec_env_remove: fn(spec: ^^ProcessSpec, name: String) -> ProcessSpec Never! { rt.spec_env_remove(spec, name) }
-priv __spec_env_clear: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_env_clear(spec) }
-priv __spec_output_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_output_limit(spec, limit) }
-priv __spec_memory_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_memory_limit(spec, limit) }
-priv __spec_memory_scope: fn(spec: ^^ProcessSpec, bytes: Int) -> ProcessSpec Never! { rt.spec_memory_scope(spec, bytes) }
-priv __spec_open_file_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_open_file_limit(spec, limit) }
-priv __spec_cpu_affinity: fn(spec: ^^ProcessSpec, cpus: [Int]) -> ProcessSpec Never! { rt.spec_cpu_affinity(spec, cpus) }
-priv __spec_io_priority: fn(spec: ^^ProcessSpec, level: Int) -> ProcessSpec Never! { rt.spec_io_priority(spec, level) }
-priv __spec_io_idle: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_io_idle(spec) }
-priv __spec_detached: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_detached(spec) }
-priv __spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_terminal(spec) }
-priv __spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec Never! { rt.spec_terminal_with_policy(spec, policy) }
-priv __spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec Never! { rt.spec_under(spec, authority) }
-priv __spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! { rt.spec_plan(spec) }
-priv __spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run(spec) }
-priv __spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run_checked(spec) }
-priv __spec_spawn: fn(spec: ProcessSpec) -[Exec]> ProcessChild IOError! { rt.spec_spawn(spec) }
-priv __child_id: fn(child: ProcessChild) -> Int Never! { rt.child_id(child) }
-priv __child_wait: fn(child: ProcessChild) -[Exec]> ProcessReceipt IOError! { rt.child_wait(child) }
-priv __child_exited: fn(child: ProcessChild) -[Exec]> Bool IOError! { rt.child_exited(child) }
-priv __child_kill: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_kill(child) }
-priv __child_terminate: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_terminate(child) }
-priv __child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_interrupt(child) }
+// of these bodies, which the compiler finds by their roles (`terminal(policy)`
+// fills ProcessSpecTerminalWithPolicy), each the jet.runtime.process leaf of
+// its runtime export. A builder takes its spec and answers it changed; a
+// launch or child step reads its receiver.
+#Builtin.Role(.ProcessSpecCwd) priv __spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec Never! { rt.spec_cwd(spec, path) }
+#Builtin.Role(.ProcessSpecArg) priv __spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec Never! { rt.spec_arg(spec, extra) }
+#Builtin.Role(.ProcessSpecArgsExtend) priv __spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec Never! { rt.spec_args_extend(spec, extra) }
+#Builtin.Role(.ProcessSpecEnv) priv __spec_env: fn(spec: ^^ProcessSpec, name: String, value: String) -> ProcessSpec Never! { rt.spec_env(spec, name, value) }
+#Builtin.Role(.ProcessSpecEnvRemove) priv __spec_env_remove: fn(spec: ^^ProcessSpec, name: String) -> ProcessSpec Never! { rt.spec_env_remove(spec, name) }
+#Builtin.Role(.ProcessSpecEnvClear) priv __spec_env_clear: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_env_clear(spec) }
+#Builtin.Role(.ProcessSpecOutputLimit) priv __spec_output_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_output_limit(spec, limit) }
+#Builtin.Role(.ProcessSpecMemoryLimit) priv __spec_memory_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_memory_limit(spec, limit) }
+#Builtin.Role(.ProcessSpecMemoryScope) priv __spec_memory_scope: fn(spec: ^^ProcessSpec, bytes: Int) -> ProcessSpec Never! { rt.spec_memory_scope(spec, bytes) }
+#Builtin.Role(.ProcessSpecOpenFileLimit) priv __spec_open_file_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_open_file_limit(spec, limit) }
+#Builtin.Role(.ProcessSpecCPUAffinity) priv __spec_cpu_affinity: fn(spec: ^^ProcessSpec, cpus: [Int]) -> ProcessSpec Never! { rt.spec_cpu_affinity(spec, cpus) }
+#Builtin.Role(.ProcessSpecIOPriority) priv __spec_io_priority: fn(spec: ^^ProcessSpec, level: Int) -> ProcessSpec Never! { rt.spec_io_priority(spec, level) }
+#Builtin.Role(.ProcessSpecIOIdle) priv __spec_io_idle: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_io_idle(spec) }
+#Builtin.Role(.ProcessSpecDetached) priv __spec_detached: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_detached(spec) }
+#Builtin.Role(.ProcessSpecTerminal) priv __spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_terminal(spec) }
+#Builtin.Role(.ProcessSpecTerminalWithPolicy) priv __spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec Never! { rt.spec_terminal_with_policy(spec, policy) }
+#Builtin.Role(.ProcessSpecUnder) priv __spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec Never! { rt.spec_under(spec, authority) }
+#Builtin.Role(.ProcessSpecPlan) priv __spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! { rt.spec_plan(spec) }
+#Builtin.Role(.ProcessSpecRun) priv __spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run(spec) }
+#Builtin.Role(.ProcessSpecRunChecked) priv __spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run_checked(spec) }
+#Builtin.Role(.ProcessSpecSpawn) priv __spec_spawn: fn(spec: ProcessSpec) -[Exec]> ProcessChild IOError! { rt.spec_spawn(spec) }
+#Builtin.Role(.ProcessChildID) priv __child_id: fn(child: ProcessChild) -> Int Never! { rt.child_id(child) }
+#Builtin.Role(.ProcessChildWait) priv __child_wait: fn(child: ProcessChild) -[Exec]> ProcessReceipt IOError! { rt.child_wait(child) }
+#Builtin.Role(.ProcessChildExited) priv __child_exited: fn(child: ProcessChild) -[Exec]> Bool IOError! { rt.child_exited(child) }
+#Builtin.Role(.ProcessChildKill) priv __child_kill: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_kill(child) }
+#Builtin.Role(.ProcessChildTerminate) priv __child_terminate: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_terminate(child) }
+#Builtin.Role(.ProcessChildInterrupt) priv __child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_interrupt(child) }
 
 status_ok: fn(receipt: ProcessReceipt) -> Bool Never! { receipt.success }
 
@@ -921,11 +922,11 @@ default_fields: fn(argv: [String]) -> ProcessFields Never! {
 // `loop line in child.stdout.lines()` calls for each line. They wait on the
 // child execution boundary, not FS.
 #Builtin.Role(.ProcessStdoutLine) priv stdout_next_line: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
-    pipe_line(core.process.__stdout_line_bytes(stream))
+    pipe_line(rt.stdout_line_bytes(stream))
 }
 
 #Builtin.Role(.ProcessStderrLine) priv stderr_next_line: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
-    pipe_line(core.process.__stderr_line_bytes(stream))
+    pipe_line(rt.stderr_line_bytes(stream))
 }
 
 /// A child's output pipe read in pieces: `loop chunk in child.stdout.chunks(size)`
@@ -971,11 +972,11 @@ priv ProcessChunkCursor: struct {
 
 // The loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
 // check to (Sema ProcessHandles).
-priv __stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
+#Builtin.Role(.ProcessStdoutChunks) priv __stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stdout: Val(stream), __size: size}
 }
 
-priv __stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
+#Builtin.Role(.ProcessStderrChunks) priv __stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stderr: Val(stream), __size: size}
 }
 

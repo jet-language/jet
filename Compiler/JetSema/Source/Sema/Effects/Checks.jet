@@ -1170,8 +1170,8 @@ sema_effect_via_not_callback: fn(function: FnBody, parameter: String, ty: Type, 
     sema_error("E0748", span, "`-[via {parameter}]>` on `{function.name}` names a parameter that isn't a callback", "`{parameter}` has type `{type_name(ty)}`, not a function type with an effect row", "point `via` at a function parameter, or remove the `via` annotation")
 }
 
-sema_effect_apply_via: fn(nodes: ^[SemaEffectNode], node_index: Int, function: FnBody, diagnostics: ^[Diagnostic]) {
-    via: nodes[node_index].effect_via ?? return
+sema_effect_apply_via: fn(node: ^SemaEffectNode, function: FnBody, diagnostics: ^[Diagnostic]) {
+    via: node.effect_via ?? return
     parameter_type := Type?{None}
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name == via.name {
@@ -1203,12 +1203,14 @@ sema_effect_apply_via: fn(nodes: ^[SemaEffectNode], node_index: Int, function: F
                             diagnostics.push(sema_effect_positive_panic(entry.span))
                             next
                         }
-                        sema_effect_node_add_direct(nodes, node_index, effect_name, entry.span)
+                        if sema_effect_set_add(node.direct, effect_name) {
+                            node.direct_spans.push(TEffectSpan{name: effect_name, span: entry.span})
+                        }
                     }
                 }
                 .None -> {
-                    nodes[node_index].maximal = true
-                    nodes[node_index].maximal_span = Val(via.span)
+                    node.maximal = true
+                    node.maximal_span = Val(via.span)
                 }
             }
         }
@@ -2714,11 +2716,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
             }
         }
     }
-    if actual.effect_via != None {
-        via_nodes := [SemaEffectNode]{node.move()}
-        sema_effect_apply_via(via_nodes, 0, function, diagnostics)
-        node = via_nodes.pop() ?? panic("the effect-via node left its list")
-    }
+    if actual.effect_via != None -> sema_effect_apply_via(node, function, diagnostics)
     node
 }
 

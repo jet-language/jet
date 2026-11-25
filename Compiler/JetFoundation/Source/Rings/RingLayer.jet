@@ -232,11 +232,11 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
     }
     if usage == "core.bytes" -> jet_ring_insert_string(dependencies, "core.encoding")
     if !jet_ring_is_namespace_only(module_name) {
-        module_parts := module_name.split(".").to_list()
+        module_parts: module_name.split(".").to_list()
         if module_parts.len() > 1 {
             parent_parts := [String]{}
             loop index in 0..<module_parts.len() - 1 -> parent_parts.push(module_parts[index])
-            parent := parent_parts.join(".")
+            parent: parent_parts.join(".")
             if parent.starts_with("core") -> jet_ring_insert_string(dependencies, parent)
         }
     }
@@ -275,12 +275,15 @@ jet_ring_closure_order: fn(rows: [JetRingLayerFact]) -> [Int] Never! {
             left := start
             right := middle
             loop left < middle || right < end {
-                if right >= end || (left < middle && !(rows[order[right]].key < rows[order[left]].key)) {
-                    merged.push(order[left])
-                    left += 1
-                } else {
-                    merged.push(order[right])
-                    right += 1
+                if {
+                    right >= end || (left < middle && !(rows[order[right]].key < rows[order[left]].key)) -> {
+                        merged.push(order[left])
+                        left += 1
+                    }
+                    else -> {
+                        merged.push(order[right])
+                        right += 1
+                    }
                 }
             }
             start = end

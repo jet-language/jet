@@ -42,7 +42,7 @@ derivation_identity: fn(source: String, build: String, run: String, target: Stri
 }
 
 derivation_record: fn(subject: String, claim: String, producer: String, method: DerivationMethod, rule: String, premises: [String], identity: DerivationIdentity) -> DerivationRecord Never! {
-    sorted_premises := derivation_strings_sorted_unique(premises)
+    sorted_premises: derivation_strings_sorted_unique(premises)
     record := DerivationRecord{
         id: "",
         subject: subject,
@@ -92,16 +92,16 @@ derivation_payload_kind: fn(payload: DerivationPayload) -> String Never! {
 }
 
 derivation_record_json: fn(record: DerivationRecord) -> String Never! {
-    premises := derivation_json_strings(record.premises)
-    assumptions := derivation_json_strings(record.assumptions)
+    premises: derivation_json_strings(record.premises)
+    assumptions: derivation_json_strings(record.assumptions)
     observation := "null"
     if record.observation != None {
         item: record.observation ?? DerivationObservation{event_id: None, counterexample_id: None}
-        counterexample := if item.counterexample_id == None -> "null" else -> derivation_record_quote(item.counterexample_id ?? "")
-        event := if item.event_id == None -> "null" else -> derivation_record_quote(item.event_id ?? "")
+        counterexample: if item.counterexample_id == None -> "null" else -> derivation_record_quote(item.counterexample_id ?? "")
+        event: if item.event_id == None -> "null" else -> derivation_record_quote(item.event_id ?? "")
         observation = "{{\"counterexample\":{counterexample},\"event\":{event}}}"
     }
-    payload := derivation_optional_payload_json(record.payload, "null")
+    payload: derivation_optional_payload_json(record.payload, "null")
     "{{\"assumptions\":[{assumptions}],\"claim\":{derivation_record_quote(record.claim)},\"disposition\":{derivation_disposition_name(record.disposition)},\"id\":{derivation_record_quote(record.id)},\"identity\":{{\"build\":{derivation_record_quote(record.identity.build)},\"run\":{derivation_record_quote(record.identity.run)},\"source\":{derivation_record_quote(record.identity.source)},\"target\":{derivation_record_quote(record.identity.target)}}},\"method\":{derivation_method_name(record.method)},\"observation\":{observation},\"payload\":{payload},\"premises\":[{premises}],\"producer\":{derivation_record_quote(record.producer)},\"rule\":{derivation_record_quote(record.rule)},\"subject\":{derivation_record_quote(record.subject)}}}"
 }
 
@@ -113,7 +113,7 @@ derivation_optional_payload_json: fn(payload: DerivationPayload?, absent: String
 derivation_strings_sorted_unique: fn(values: [String]) -> [String] Never! {
     sorted := values
     loop i in 1..<sorted.len() {
-        value := sorted[i]
+        value: sorted[i]
         j := i
         loop j > 0 && sorted[j - 1] > value {
             sorted[j] = sorted[j - 1]
@@ -162,9 +162,9 @@ derivation_record_quote: fn(value: String) -> String Never! {
 }
 
 derivation_record_id: fn(record: DerivationRecord) -> String Never! {
-    payload := derivation_optional_payload_json(record.payload, "")
+    payload: derivation_optional_payload_json(record.payload, "")
     separator: String.from_bytes([U8]{0}) ?? ""
-    premises := record.premises.join(separator)
+    premises: record.premises.join(separator)
     state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
     derivation_hash_frame(state, record.subject)
     derivation_hash_frame(state, record.claim)
@@ -196,8 +196,8 @@ derivation_method_raw: fn(method: DerivationMethod) -> String Never! {
 }
 
 derivation_hash_frame: fn(state: ^DerivationHashState, value: String) Never! {
-    bytes := value.bytes()
-    length := bytes.len()
+    bytes: value.bytes()
+    length: bytes.len()
     loop index in 0..<8 { derivation_hash_byte(state, U8{((length >> ((7 - index) * 8))) & 255}) }
     loop byte in bytes -> derivation_hash_byte(state, byte)
 }
@@ -209,7 +209,7 @@ derivation_hash_byte: fn(state: ^DerivationHashState, byte: U8) Never! {
 }
 
 derivation_hash_hex: fn(state: DerivationHashState) -> String Never! {
-    digits := "0123456789abcdef".bytes()
+    digits: "0123456789abcdef".bytes()
     first: Int{state.first}
     second: Int{state.second}
     output := [U8]{}
@@ -223,11 +223,11 @@ derivation_hash_hex: fn(state: DerivationHashState) -> String Never! {
 }
 
 derivation_json_quote: fn(value: String) -> String Never! {
-    bytes := value.bytes()
+    bytes: value.bytes()
     output := "\""
     index := 0
     loop index < bytes.len() {
-        byte := Int{bytes[index]}
+        byte: Int{bytes[index]}
         if byte == 34 {
             output += "\\\""
             index += 1
@@ -271,7 +271,7 @@ derivation_json_quote: fn(value: String) -> String Never! {
             index += 1
             next
         }
-        width := if {
+        width: if {
             byte < 128 -> 1
             byte < 224 -> 2
             byte < 240 -> 3
@@ -284,7 +284,7 @@ derivation_json_quote: fn(value: String) -> String Never! {
 }
 
 derivation_hex_byte: fn(value: Int) -> String Never! {
-    digits := "0123456789abcdef".bytes()
+    digits: "0123456789abcdef".bytes()
     String.from_bytes([U8]{digits[((value >> 4)) & 15], digits[(value) & 15]}) ?? "00"
 }
 
@@ -313,7 +313,7 @@ frame_schedule_json: fn(schedule: FrameSchedule) -> String Never! {
 frame_operation_json: fn(operation: FrameOperation) -> String Never! {
     accesses := [String]{}
     loop access in operation.accesses -> accesses.push(resource_access_json(access))
-    provider := if operation.completion_provider == None -> "" else -> ",\"completion_provider\":{derivation_json_quote(operation.completion_provider ?? "")}"
+    provider: if operation.completion_provider == None -> "" else -> ",\"completion_provider\":{derivation_json_quote(operation.completion_provider ?? "")}"
     accesses_json: accesses.join(",")
     "{{\"name\":{derivation_json_quote(operation.name)},\"source_index\":{derivation_json_quote(operation.source_index.to_string())},\"accesses\":[{accesses_json}],\"completion\":{frame_completion_json(operation.completion)},\"external_effect\":{derivation_json_bool(operation.external_effect)}{provider}}}"
 }
@@ -371,7 +371,7 @@ frame_reuse_json: fn(row: FrameReuse) -> String Never! {
 }
 
 frame_retention_json: fn(row: FrameRetention) -> String Never! {
-    token := if row.completion_token == None -> "null" else -> derivation_json_quote(row.completion_token ?? "")
+    token: if row.completion_token == None -> "null" else -> derivation_json_quote(row.completion_token ?? "")
     "{{\"resource\":{derivation_json_quote(row.resource)},\"operation\":{derivation_json_quote(row.operation.to_string())},\"owner\":{derivation_json_quote(row.owner)},\"completion_token\":{token},\"completed\":{derivation_json_bool(row.completed)}}}"
 }
 

@@ -341,7 +341,7 @@ builtin_method_atomic_scalar: fn(receiver: Type) -> Type? {
 }
 
 builtin_method_receiver_accepts: fn(family: BuiltinMethodReceiver, receiver: Type) -> Bool Never! {
-    ty := builtin_method_strip_tags(receiver)
+    ty: builtin_method_strip_tags(receiver)
     if family == {
         .String -> ty == Type.String
         .Bytes -> ty == (Type.Named{name: "Bytes"})
@@ -420,7 +420,7 @@ builtin_byte_buffer_row: fn(symbol: String) -> BuiltinMethodRow Never! {
 
 // Replace the `Self` and `T` placeholders with the receiver's types.
 builtin_method_bind: fn(ty: Type, receiver: Type) -> Type Never! {
-    self_type := builtin_method_strip_tags(receiver)
+    self_type: builtin_method_strip_tags(receiver)
     if ty == {
         .Named(name) -> {
             if name == "Self" -> return self_type

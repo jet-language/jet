@@ -278,7 +278,7 @@ builtin_numeric_widening: fn(source: BuiltinNumericKind, target: BuiltinNumericK
 }
 
 builtin_numeric_return: fn(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Type Never! {
-    checked := Type.Result{ok: target.ty, err: Type.String}
+    checked: Type.Result{ok: target.ty, err: Type.String}
     if source.name == "Int" && target.fixed -> return checked
     if source.fixed && target.name == "Int" -> return target.ty
     if source.fixed && target.fixed {
@@ -289,8 +289,13 @@ builtin_numeric_return: fn(source: BuiltinNumericKind, target: BuiltinNumericKin
 }
 
 builtin_numeric_host_kind: fn(kind: BuiltinNumericKind) -> Int Never! {
-    offset := if kind.signed -> 0 else -> 4
-    step := if kind.bits == 8 -> 0 else if kind.bits == 16 -> 1 else if kind.bits == 32 -> 2 else -> 3
+    offset: if kind.signed -> 0 else -> 4
+    step: if {
+        kind.bits == 8 -> 0
+        kind.bits == 16 -> 1
+        kind.bits == 32 -> 2
+        else -> 3
+    }
     offset + step
 }
 

@@ -18,7 +18,7 @@ use {
 }
 
 parser_migration_arrow: fn(state: ^JetParserState, context: String) {
-    kind := parser_current_kind(state)
+    kind: parser_current_kind(state)
     if {
         kind == TOKEN_UNIFIED_ARROW -> { parser_bump(state) }
         else -> { parser_expect(state, TOKEN_UNIFIED_ARROW, context) }
@@ -27,7 +27,7 @@ parser_migration_arrow: fn(state: ^JetParserState, context: String) {
 
 parser_migration_recover_operation: fn(state: ^JetParserState) Never! {
     loop {
-        kind := parser_current_kind(state)
+        kind: parser_current_kind(state)
         if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_EOF -> break
         parser_bump(state)
     }
@@ -49,9 +49,9 @@ parser_parse_migration: fn(state: ^JetParserState) -> MigrationDecl {
             parser_bump(state)
             next
         }
-        op_token := parser_bump(state)
+        op_token: parser_bump(state)
         if op_token.kind == TOKEN_IDENT {
-            keyword := parser_value(state, op_token)
+            keyword: parser_value(state, op_token)
             if keyword == "rename" {
                 from: parser_expect_name(state, "as the field to rename")
                 parser_migration_arrow(state, "between the old and new field names in `rename`")
@@ -62,9 +62,9 @@ parser_parse_migration: fn(state: ^JetParserState) -> MigrationDecl {
             if keyword == "add" {
                 field: parser_expect_name(state, "as the field to add")
                 parser_expect(state, TOKEN_COLON, "after the added field name")
-                ty := parser_parse_type(state, 0)
+                ty: parser_parse_type(state, 0)
                 parser_expect(state, TOKEN_EQ, "before the default value of an added field")
-                default := parser_parse_expression(state, 1, 0)
+                default: parser_parse_expression(state, 1, 0)
                 ops.push(MigrationOp.Add{field: parser_value(state, field), field_span: field.span, ty: ty.ty, ty_span: ty.span, default: default.expr, default_span: default.span, default_fn: None})
                 next
             }
@@ -76,19 +76,19 @@ parser_parse_migration: fn(state: ^JetParserState) -> MigrationDecl {
             if keyword == "change" {
                 field: parser_expect_name(state, "as the field whose type changes")
                 parser_expect(state, TOKEN_COLON, "after the changed field name")
-                from_ty := parser_parse_type(state, 0)
+                from_ty: parser_parse_type(state, 0)
                 parser_migration_arrow(state, "between the old and new field types in `change`")
-                to_ty := parser_parse_type(state, 0)
+                to_ty: parser_parse_type(state, 0)
                 converter := Expr?{None}
                 converter_span := Span?{None}
-                next_token := parser_current(state)
+                next_token: parser_current(state)
                 if next_token.kind == TOKEN_IDENT && parser_value(state, next_token) == "via" {
-                    via := parser_bump(state)
+                    via: parser_bump(state)
                     parser_expect(state, TOKEN_LBRACE, "to open the `via {{ … }}` converter body")
                     parser_skip_semicolons(state)
-                    body := parser_parse_expression(state, 1, 0)
+                    body: parser_parse_expression(state, 1, 0)
                     parser_skip_semicolons(state)
-                    close := parser_expect(state, TOKEN_RBRACE, "to close the `via {{ … }}` converter body")
+                    close: parser_expect(state, TOKEN_RBRACE, "to close the `via {{ … }}` converter body")
                     converter = Val(body.expr)
                     converter_span = Val(parser_cover(via.span, close.span))
                 }

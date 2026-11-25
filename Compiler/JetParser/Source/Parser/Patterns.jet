@@ -90,12 +90,12 @@ parser_try_take_pattern_body: fn(state: ^JetParserState, depth: Int) -> ParsedTa
     if first.kind != TOKEN_LBRACKET && !(first.kind == TOKEN_IDENT && parser_value(state, first) == "String") {
         return None
     }
-    saved_position := state.position
-    saved_diagnostics := state.diagnostics.len()
-    saved_pending_gt := state.pending_type_gt
-    saved_pending_gt_span := state.pending_type_gt_span
+    saved_position: state.position
+    saved_diagnostics: state.diagnostics.len()
+    saved_pending_gt: state.pending_type_gt
+    saved_pending_gt_span: state.pending_type_gt_span
     head: parser_parse_type(state, depth + 1)
-    kind := parser_take_pattern_head_kind(head.ty)
+    kind: parser_take_pattern_head_kind(head.ty)
     if kind == 0 || state.diagnostics.len() != saved_diagnostics {
         state.position = saved_position
         loop state.diagnostics.len() > saved_diagnostics -> _ := state.diagnostics.pop()
@@ -133,8 +133,8 @@ parser_try_take_pattern_body: fn(state: ^JetParserState, depth: Int) -> ParsedTa
 
 parser_pattern_byte_text: fn(value: Int) -> String Never! {
     if value < 128 -> return String.from_bytes([U8]{U8{value}}) ?? ""
-    high := (192) | (value >> 6)
-    low := (128) | ((value) & 63)
+    high: (192) | (value >> 6)
+    low: (128) | ((value) & 63)
     String.from_bytes([U8]{U8{high}, U8{low}}) ?? ""
 }
 
@@ -305,12 +305,17 @@ parser_take_pattern_binary_hole: fn(state: ^JetParserState, part: StringPart, li
     parser_bump(nested)
     spec_token: parser_bump(nested)
     spec := BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}
-    if parser_current_kind(nested) != TOKEN_EOF {
-        parser_take_pattern_binary_bad_hole(state, spec_token.span)
-    } else if spec_token.kind == TOKEN_DOT_DOT_DOT { spec = BinSpec.Rest } else if spec_token.kind == TOKEN_IDENT {
-        spec_text: parser_value(state, spec_token)
-        spec = parser_take_pattern_binary_bits(state, spec_text, spec_token.span)
-    } else { parser_take_pattern_binary_bad_hole(state, spec_token.span) }
+    if {
+        parser_current_kind(nested) != TOKEN_EOF -> {
+            parser_take_pattern_binary_bad_hole(state, spec_token.span)
+        }
+        spec_token.kind == TOKEN_DOT_DOT_DOT -> { spec = BinSpec.Rest }
+        spec_token.kind == TOKEN_IDENT -> {
+            spec_text: parser_value(state, spec_token)
+            spec = parser_take_pattern_binary_bits(state, spec_text, spec_token.span)
+        }
+        else -> { parser_take_pattern_binary_bad_hole(state, spec_token.span) }
+    }
     Val(BinMatchPart.Hole{name: parser_value(state, name_token), spec: spec, span: parser_cover(name_token.span, spec_token.span)})
 }
 
@@ -356,7 +361,7 @@ parser_parse_take_pattern_literal: fn(state: ^JetParserState, depth: Int) -> Par
     typed: parser_try_take_pattern_body(state, depth + 1)
     if typed == .Val(body) {
         if body.binary {
-            parts := parser_take_pattern_binary_parts(state, body.parts, body.span)
+            parts: parser_take_pattern_binary_parts(state, body.parts, body.span)
             return ParsedExpr{expr: Expr.BinMatchLit{parts: parts, span: body.span, id: parser_node_id(state)}, span: body.span}
         }
         loop part in body.parts {
@@ -365,14 +370,14 @@ parser_parse_take_pattern_literal: fn(state: ^JetParserState, depth: Int) -> Par
             parser_add_error(state, bad_span, "a `take_pattern` hole must be a bare name, optionally typed", "each `{{hole}}` binds a name (`{{id}}`) or a typed, fallibly-parsed name (`{{id:Int}}`) — the same grammar an `if == {{}}` pattern hole uses", "write `{{name}}` or `{{name:Type}}`")
             return ParsedExpr{expr: Expr.Unit{span: body.span, id: parser_node_id(state)}, span: body.span}
         }
-        parts := parser_take_pattern_text_parts(state, body.parts)
+        parts: parser_take_pattern_text_parts(state, body.parts)
         return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: body.span, id: parser_node_id(state)}, span: body.span}
     }
     token: parser_current(state)
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
         _ := parser_take_text(state, false)
         token_parts: parser_string_parts(state, token)
-        parts := parser_take_pattern_text_parts(state, token_parts)
+        parts: parser_take_pattern_text_parts(state, token_parts)
         return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     // A computed pattern is read whole and dropped, so the call's own `)`
@@ -746,14 +751,18 @@ parser_named_pattern_closes_into_body: fn(state: JetParserState, nested: Bool) -
     loop index < state.tokens.len() {
         kind: state.tokens[index].kind
         index += 1
-        if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1 else if kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
-            depth -= 1
-            if depth == 0 {
-                after: parser_lookahead_kind_forward(state, index, 0)
-                if nested && (after == TOKEN_RBRACE || after == TOKEN_RBRACKET) -> return true
-                return after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_PIPE || after == TOKEN_AND_AND || after == TOKEN_OR_OR || after == TOKEN_RPAREN || after == TOKEN_COMMA
+        if {
+            kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+            kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> {
+                depth -= 1
+                if depth == 0 {
+                    after: parser_lookahead_kind_forward(state, index, 0)
+                    if nested && (after == TOKEN_RBRACE || after == TOKEN_RBRACKET) -> return true
+                    return after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_PIPE || after == TOKEN_AND_AND || after == TOKEN_OR_OR || after == TOKEN_RPAREN || after == TOKEN_COMMA
+                }
             }
-        } else if kind == TOKEN_EOF { return false }
+            kind == TOKEN_EOF -> { return false }
+        }
     }
     false
 }
@@ -785,17 +794,20 @@ parser_parse_named_pattern_slots: fn(state: ^JetParserState, variant: String, de
             slots.push(PatSlot.Rest{span: entry.span})
             break
         }
-        if entry.kind != TOKEN_IDENT || parser_value(state, entry) == "_" {
-            parser_add_error(state, entry.span, "`.{variant}{{…}}` mixes a positional entry with field names", "a named-field pattern labels every entry; one pattern uses one form", "write `field: pattern` for this entry, or match by position with `.{variant}(…)`")
-            parser_parse_pattern_slot(state, depth + 1)
-        } else {
-            parser_bump(state)
-            slot := PatSlot.Bind{name: parser_value(state, entry), span: entry.span}
-            if parser_current_kind(state) == TOKEN_COLON {
-                parser_bump(state)
-                slot = parser_parse_pattern_slot(state, depth + 1)
+        if {
+            entry.kind != TOKEN_IDENT || parser_value(state, entry) == "_" -> {
+                parser_add_error(state, entry.span, "`.{variant}{{…}}` mixes a positional entry with field names", "a named-field pattern labels every entry; one pattern uses one form", "write `field: pattern` for this entry, or match by position with `.{variant}(…)`")
+                parser_parse_pattern_slot(state, depth + 1)
             }
-            slots.push(PatSlot.Named{field: parser_value(state, entry), field_span: entry.span, slot: slot})
+            else -> {
+                parser_bump(state)
+                slot := PatSlot.Bind{name: parser_value(state, entry), span: entry.span}
+                if parser_current_kind(state) == TOKEN_COLON {
+                    parser_bump(state)
+                    slot = parser_parse_pattern_slot(state, depth + 1)
+                }
+                slots.push(PatSlot.Named{field: parser_value(state, entry), field_span: entry.span, slot: slot})
+            }
         }
         parser_skip_named_pattern_line_breaks(state)
         if parser_current_kind(state) != TOKEN_COMMA -> break
@@ -819,15 +831,19 @@ parser_parse_struct_pattern: fn(state: ^JetParserState, type_span: Span, depth: 
             if {
                 parser_current_kind(state) == TOKEN_COLON -> {
                     parser_bump(state)
-                    if parser_current_kind(state) == TOKEN_IDENT && (parser_kind_at(state, 1) == TOKEN_COMMA || parser_kind_at(state, 1) == TOKEN_RBRACE) {
-                        local: parser_bump(state)
-                        fields.push(StructPatField.Bind{field: parser_value(state, field), field_span: field.span, local: parser_value(state, local), local_span: local.span})
-                    } else if parser_struct_field_nested_pattern_ahead(state) {
-                        nested: parser_parse_struct_field_nested_pattern(state, depth + 1)
-                        fields.push(StructPatField.Nested{field: parser_value(state, field), field_span: field.span, pattern: nested.pattern})
-                    } else {
-                        value: parser_parse_expression_no_struct_lit(state, depth + 1)
-                        fields.push(StructPatField.Value{field: parser_value(state, field), field_span: field.span, value: value.expr})
+                    if {
+                        parser_current_kind(state) == TOKEN_IDENT && (parser_kind_at(state, 1) == TOKEN_COMMA || parser_kind_at(state, 1) == TOKEN_RBRACE) -> {
+                            local: parser_bump(state)
+                            fields.push(StructPatField.Bind{field: parser_value(state, field), field_span: field.span, local: parser_value(state, local), local_span: local.span})
+                        }
+                        parser_struct_field_nested_pattern_ahead(state) -> {
+                            nested: parser_parse_struct_field_nested_pattern(state, depth + 1)
+                            fields.push(StructPatField.Nested{field: parser_value(state, field), field_span: field.span, pattern: nested.pattern})
+                        }
+                        else -> {
+                            value: parser_parse_expression_no_struct_lit(state, depth + 1)
+                            fields.push(StructPatField.Value{field: parser_value(state, field), field_span: field.span, value: value.expr})
+                        }
                     }
                 }
                 else -> {
@@ -997,14 +1013,17 @@ parser_parse_bracket_pattern: fn(state: ^JetParserState, depth: Int) -> ParsedPa
             }
             break
         }
-        if is_map {
-            key: parser_parse_map_pattern_key(state, depth + 1)
-            optional: parser_current_kind(state) == TOKEN_QUESTION
-            if optional -> parser_bump(state)
-            parser_expect(state, TOKEN_COLON, "`:` between a map key and pattern")
-            slot: parser_parse_pattern_slot(state, depth + 1)
-            entries.push(MapPatEntry{key: key.expr, optional: optional, slot: slot.move(), span: parser_cover(key.span, parser_lookahead(state, -1).span)})
-        } else { items.push(parser_parse_pattern_slot(state, depth + 1)) }
+        if {
+            is_map -> {
+                key: parser_parse_map_pattern_key(state, depth + 1)
+                optional: parser_current_kind(state) == TOKEN_QUESTION
+                if optional -> parser_bump(state)
+                parser_expect(state, TOKEN_COLON, "`:` between a map key and pattern")
+                slot: parser_parse_pattern_slot(state, depth + 1)
+                entries.push(MapPatEntry{key: key.expr, optional: optional, slot: slot.move(), span: parser_cover(key.span, parser_lookahead(state, -1).span)})
+            }
+            else -> { items.push(parser_parse_pattern_slot(state, depth + 1)) }
+        }
         parser_skip_named_pattern_line_breaks(state)
         if parser_current_kind(state) != TOKEN_COMMA -> break
         parser_bump(state)

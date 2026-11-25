@@ -1943,7 +1943,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCLI/Source/CLI/Host.jet",
-      "line": 2694,
+      "line": 2695,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -6451,14 +6451,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 800,
+      "line": 799,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 893,
+      "line": 892,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -6668,14 +6668,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 321,
+      "line": 322,
       "column": 5,
       "reason": "checked IPv4/IPv6 octets transferred into the native address carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 392,
+      "line": 393,
       "column": 5,
       "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
     },
@@ -12024,7 +12024,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2779:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2789:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2891:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2694:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2695:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 205:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 213:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 245:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -12668,8 +12668,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/XMLEngine.jet | 3432:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/YAML.jet | 590:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | Core | Core/Files/Data.jet | 272:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Files/Files.jet | 800:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 893:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 799:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 892:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 161:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
 | Core | Core/HTTP/Client.jet | 862:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 282:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
@@ -12699,8 +12699,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Mem/Mem.jet | 303:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
 | Core | Core/Mem/Mem.jet | 308:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
 | Core | Core/Mem/Mem.jet | 350:13 | "the block's bytes went back to the allocator that served them" |
-| Core | Core/Net/Net.jet | 321:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
-| Core | Core/Net/Net.jet | 392:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
+| Core | Core/Net/Net.jet | 322:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
+| Core | Core/Net/Net.jet | 393:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
 | Core | Core/Net/SSL/TLS.jet | 3653:1 | "`key` and `iv` are a vector record's, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3656:5 | "a vector record's key and nonce, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3662:1 | "`key` and `iv` are a vector record's, used for that record only" |
@@ -13483,9 +13483,9 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Crypto/Vault.jet", "function": "status", "proof": "`validate_key` rejects a forged or foreign key reference before the provider runs; the result is a KeyStatus value."},
   {"file": "Core/Crypto/Vault.jet", "function": "versions", "proof": "`validate_name` rejects an invalid vault name before the provider runs; the result is a list of typed key references."},
   {"file": "Core/Crypto/Vault.jet", "function": "prepare_generate", "proof": "`validate_name` runs first; the provider returns a MutationPlan that only `authorize_write` and a commit can act on."},
-  {"file": "Core/Crypto/Vault.jet", "function": "prepare_store", "proof": "`validate_name` runs first and the key moves into the provider (`key: &&T`), so the caller keeps no copy; the result is a MutationPlan."},
-  {"file": "Core/Crypto/Vault.jet", "function": "prepare_import_signing", "proof": "`validate_name` runs and the material must be exactly 32 bytes; the bytes move into the provider (`bytes: &&[U8]`), so no raw copy remains with the caller."},
-  {"file": "Core/Crypto/Vault.jet", "function": "prepare_import_x25519", "proof": "`validate_name` runs and the material must be exactly 32 bytes; the bytes move into the provider (`bytes: &&[U8]`), so no raw copy remains with the caller."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_store", "proof": "`validate_name` runs first and the key moves into the provider (`key: ^^T`), so the caller keeps no copy; the result is a MutationPlan."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_import_signing", "proof": "`validate_name` runs and the material must be exactly 32 bytes; the bytes move into the provider (`bytes: ^^[U8]`), so no raw copy remains with the caller."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_import_x25519", "proof": "`validate_name` runs and the material must be exactly 32 bytes; the bytes move into the provider (`bytes: ^^[U8]`), so no raw copy remains with the caller."},
   {"file": "Core/Crypto/Vault.jet", "function": "prepare_import_wrapped", "proof": "`validate_name` runs and the wrapped blob is bounded to 16..8192 bytes before the provider decrypts it under `unlock`; the result is a WrappedImportPlan."},
   {"file": "Core/Crypto/Vault.jet", "function": "prepare_rotate", "proof": "`validate_name` runs first; the provider returns a MutationPlan that only `authorize_write` and a commit can act on."},
   {"file": "Core/Crypto/Vault.jet", "function": "prepare_retire", "proof": "`validate_key` and `validate_reason` run first; the provider returns a MutationPlan, not key material."},
@@ -13505,7 +13505,7 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Files/Data.jet","function":"bridge_tool_on_path","proof":"__host_path_is_file invokes OsStr::from_encoded_bytes_unchecked (Top/DataStats.rs:11-13), so its input must retain native encoded-byte provenance. data.jet:1090 obtains PATH from the current host's encoded environment; :1092-1108 split only at ASCII colon/semicolon and remove Windows ASCII quotes. :1111-1117 append only ASCII separators and valid UTF-8 tool text, preserving that host encoding. The metadata leaf borrows the owned list and returns Bool/error, not a pointer; the caller cannot supply an unrelated byte allocation to this helper or retain a host borrow."},
   {"file":"Core/Data/Data.jet","function":"data_loader_render","proof":"The gate at data.jet:1729 only matches the compiler-private Dyn Number, TypedText and Bytes variants. Each payload is accessed after its matching discriminant at :1730, :1734 or :1738, then read through ordinary String/List operations into the caller's exclusively borrowed output; no unchecked memory, forged carrier or raw pointer is created. Other variants leave the gate for normal recursive rendering. Any typed Dyn input remains a valid enum; callers cannot select a mismatched native payload."},
   {"file":"Core/Data/Data.jet","function":"data_schema_value_type","proof":"Not a core.data export (Compiler/Prelude/Core.rows:69). Its #Unsafe block (Data.jet:3674-3677) only pattern-matches the compiler-private Dyn carriers .Number and .Bytes to name their schema type; it reads no memory, builds or mutates no carrier and returns a static String, so no caller can break those carriers' invariants through it. Every other Dyn shape is matched through the public variants (:3678-3688)."},
-  {"file":"Core/Process/Process.jet","function":"cmd","proof":"The __spec_fields leaf is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
+  {"file":"Core/Process/Process.jet","function":"cmd","proof":"The jet.runtime.process.spec_fields binding is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
 {"file":"Core/Net/Net.jet","function":"ip_addr","proof":"jet.runtime.net.ip_from_bytes expects exactly four or sixteen octets. net.jet:136 accepts only parse_ip_bytes success: parse_ipv4_bytes(:960-979) checks four decimal octets <=255, and the IPv6 parser(:982-1048) checks eight 16-bit words including compression before expanding to sixteen bytes. The exact owned list is lent at :138; callers cannot substitute a differently sized list after validation."},
 {"file":"Core/Net/Net.jet","function":"socket_addr_parse","proof":"At net.jet:182-189 parsing produces exactly sixteen IPv6 bytes or four IPv4 bytes, with the IPv6 length checked at :183. parse_port(:846-856) bounds decimal port to 0..65535 and parse_scope(:1144-1154) bounds scope to 0..4294967295 before :193-194 lend the octets and IP to jet.runtime.net.ip_from_bytes/socket_from_parts. Flow is the constant zero. Callers cannot select uninitialized representation fields or overflow the U16/U32 transfer."},
 {"file":"Core/HTTP/Client.jet","function":"__build_socket","proof":"Reserved __ name; it copies the resolver octets into a fresh owned list (Client.jet:653-654) and lends it to jet.runtime.net.ip_from_bytes, whose runtime refuses any length but 4 or 16 before allocating (JetRuntime HostNetAddress.jet:31-32), so a malformed address cannot overrun the native carrier. U16{port} stops with E3010 when the port does not fit (core-library.md:4172-4173), and jet_http_build_get already rejects ports outside 0..65535 (:590). It returns an owned SocketAddr; no pointer or borrow escapes."},
@@ -13538,10 +13538,10 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Sys/Sys.jet", "function": "getpgid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
   {"file": "Core/Sys/Sys.jet", "function": "getsid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
   {"file": "Core/Mem/Mem.jet", "function": "reserve", "proof": "A size of zero or less is an AllocError before the gate (Mem.jet:105). __region_reserve maps `bytes` of fresh private pages that no other owner can see, and a refusal answers 0, which is an AllocError too, so a Region never holds address 0. The Region alone keeps the address and length, with `mapped` set, and `close` unmaps them once at that length. A Block holds an address and a size, not a borrow: reading or writing its bytes takes an #Unsafe pointer whose caller vouches for the region."},
-  {"file": "Core/Mem/Mem.jet", "function": "close", "proof": "Unmaps only a region that `reserve` mapped (`mapped` is false for `adopt`), at the address and length reserve recorded. `close` takes the Region (`&&self`), so the pages are unmapped once and no later call names them. A Block left over holds an address and a size, not a borrow; its bytes are reachable only through an #Unsafe pointer whose caller vouches that the region is still open."},
+  {"file": "Core/Mem/Mem.jet", "function": "close", "proof": "Unmaps only a region that `reserve` mapped (`mapped` is false for `adopt`), at the address and length reserve recorded. `close` takes the Region (`^^self`), so the pages are unmapped once and no later call names them. A Block left over holds an address and a size, not a borrow; its bytes are reachable only through an #Unsafe pointer whose caller vouches that the region is still open."},
   {"file": "Core/Mem/Mem.jet", "function": "join", "proof": "The gate only consumes `next`, a #SingleUse Block, after the neighbor check (Mem.jet:177) has stopped with a panic unless `next` starts where this block ends. This block's size then grows over exactly `next`'s bytes, so those bytes keep one owner and one release. No memory is read or written."},
   {"file": "Core/Mem/Mem.jet", "function": "__allocator_handler", "proof": "A reserved `__` name: only the compiler's lowering of a `#Context(allocator: a)` block calls it, never user code. It takes the address of `allocator`, a place that block borrows for its whole extent. The closure follows that address only when the runtime calls it inside the block (JetRuntime Alloc.jet alloc_user_call), while the borrow keeps the allocator live, in place and borrowed by nothing else. Op 1 rebuilds exactly the Block that op 0 answered, at its address and size."},
-  {"file": "Core/Mem/Mem.jet", "function": "release", "proof": "The method of __ContextAllocator, the stateless allocator behind `context.allocator`. `block` moves in (`&&Block`), and __context_give hands its address and size back to the allocator that served it; a user allocator's block keeps the size its `allocate` was asked for, since `resize` never changes one (its room is 0). The gate then only consumes that #SingleUse Block, so the bytes are released once and no copy of the block lives on. No memory is read or written."}
+  {"file": "Core/Mem/Mem.jet", "function": "release", "proof": "The method of __ContextAllocator, the stateless allocator behind `context.allocator`. `block` moves in (`^^Block`), and __context_give hands its address and size back to the allocator that served it; a user allocator's block keeps the size its `allocate` was asked for, since `resize` never changes one (its room is 0). The gate then only consumes that #SingleUse Block, so the bytes are released once and no copy of the block lives on. No memory is read or written."}
 ]
 ```
 <!-- unsafe-abstractions:end -->

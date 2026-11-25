@@ -476,12 +476,6 @@ core_decl_marker: fn(expression: String, context: String, constants: CoreDeclTex
 
 // The effect root a plain Core call needs, or None when it is pure.
 core_decl_call_effect: fn(module_name: String, member: String) -> String? Never! {
-    if module_name == CORE_BUILTINS_MODULE {
-        return if member == {
-            "lock_owner" -> Val("FS")
-            else -> None
-        }
-    }
     if module_name == {
         "core.files" -> Val("FS")
         "core.log" -> Val("Log")
@@ -555,12 +549,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
 // write; `copy` and `copy_dir` both read and write, so they keep the bare
 // `FS` root.
 core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
-    if module_name == CORE_BUILTINS_MODULE {
-        return if member == {
-            "lock_owner" -> Val("FS.Write")
-            else -> None
-        }
-    }
     if module_name == {
         "core.sys" -> if member == {
             "hostname" -> Val("FS.Read")

@@ -705,12 +705,15 @@ jfmt_parse_radix: fn(digits: [U8], start: Int, radix: Int, allow_sign: Bool) -> 
     loop index < digits.len() {
         digit: jfmt_digit_value(digits[index])
         if digit >= radix -> return None
-        if negative {
-            if value < (-9223372036854775807 - 1 + digit) /% radix -> return None
-            value = value * radix - digit
-        } else {
-            if value > (9223372036854775807 - digit) /% radix -> return None
-            value = value * radix + digit
+        if {
+            negative -> {
+                if value < (-9223372036854775807 - 1 + digit) /% radix -> return None
+                value = value * radix - digit
+            }
+            else -> {
+                if value > (9223372036854775807 - digit) /% radix -> return None
+                value = value * radix + digit
+            }
         }
         index += 1
     }
@@ -975,10 +978,13 @@ jfmt_loop_separator_tail: fn(f: ^JetFmt, next_start: Int, wrap: Bool) Never! {
             broke = true
         }
     }
-    if wrap && !broke {
-        jfmt_newline(f)
-        jfmt_write_loop_continuation_indent(f)
-    } else if !broke { jfmt_write(f, " ") }
+    if {
+        wrap && !broke -> {
+            jfmt_newline(f)
+            jfmt_write_loop_continuation_indent(f)
+        }
+        !broke -> { jfmt_write(f, " ") }
+    }
 }
 
 // The bindingless loop subject has no comma before it; only the line break
@@ -1119,11 +1125,14 @@ jfmt_emit_trailing: fn(f: ^JetFmt, end: Int) Never! {
         // refcounted text.
         comment: f.comments[f.comment_i].copy()
         if comment.span.start >= f.trailing_comment_limit -> break
-        if comment.span.start >= end && jfmt_line_of(f, comment.span.start) == jfmt_line_of(f, end) {
-            jfmt_write(f, "  ")
-            jfmt_emit_comment_inline(f, comment.text)
-            f.comment_i += 1
-        } else { break }
+        if {
+            comment.span.start >= end && jfmt_line_of(f, comment.span.start) == jfmt_line_of(f, end) -> {
+                jfmt_write(f, "  ")
+                jfmt_emit_comment_inline(f, comment.text)
+                f.comment_i += 1
+            }
+            else -> { break }
+        }
     }
 }
 
@@ -1284,18 +1293,21 @@ jfmt_table_arm_source: fn(f: JetFmt, arms: ^JetFmtTableArms) -> Span? Never! {
         closer: kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE
         if kind == TOKEN_EOF || (closer && depth == 0) -> break
         if !jfmt_is_comment_kind(kind) {
-            if depth == 0 && (kind == TOKEN_SEMI || kind == TOKEN_COMMA) {
-                if start >= 0 -> break
-            } else {
-                if {
-                    kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> {
-                        depth += 1
-                    }
-                    closer -> depth -= 1
-                    else -> {}
+            if {
+                depth == 0 && (kind == TOKEN_SEMI || kind == TOKEN_COMMA) -> {
+                    if start >= 0 -> break
                 }
-                if start < 0 -> start = token.span.start
-                end = token.span.end
+                else -> {
+                    if {
+                        kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> {
+                            depth += 1
+                        }
+                        closer -> depth -= 1
+                        else -> {}
+                    }
+                    if start < 0 -> start = token.span.start
+                    end = token.span.end
+                }
             }
         }
         arms.at += 1
@@ -1406,12 +1418,15 @@ jfmt_source_list_span_after: fn(f: JetFmt, start: Int, delimiter: Int) -> JetFmt
             }
             next
         }
-        if is_open -> depth += 1 else if is_close {
-            consumed: if delimiter == JFMT_DELIM_ANGLE && token.kind == TOKEN_SHR -> 2 else -> 1
-            depth = jfmt_saturating_sub(depth, consumed)
-            if depth == 0 {
-                opened: open_start ?? return None
-                return Val(JetFmtSourceList{span: Span{start: opened, end: token.span.end}, close_start: token.span.start})
+        if {
+            is_open -> depth += 1
+            is_close -> {
+                consumed: if delimiter == JFMT_DELIM_ANGLE && token.kind == TOKEN_SHR -> 2 else -> 1
+                depth = jfmt_saturating_sub(depth, consumed)
+                if depth == 0 {
+                    opened: open_start ?? return None
+                    return Val(JetFmtSourceList{span: Span{start: opened, end: token.span.end}, close_start: token.span.start})
+                }
             }
         }
     }
@@ -1762,9 +1777,12 @@ jfmt_strip_optional_returns_in_body: fn(body: [Stmt]) -> [Stmt] Never! {
     loop stmt in body {
         if stmt == {
             .Return(value, span) -> {
-                if value == .Val(inner) {
-                    out.push(Stmt.Return{value: Val(jfmt_unwrap_redundant_optional_value(inner)), span: span})
-                } else { out.push(stmt.copy()) }
+                if {
+                    value == .Val(inner) -> {
+                        out.push(Stmt.Return{value: Val(jfmt_unwrap_redundant_optional_value(inner)), span: span})
+                    }
+                    else -> { out.push(stmt.copy()) }
+                }
             }
             .Expr(expr) -> { out.push(Stmt.Expr{expr: jfmt_strip_optional_returns_in_if(expr)}) }
             .While(cond, inner, span, arrow_body, label) -> {
@@ -2697,28 +2715,34 @@ jfmt_format_program_with: fn(f: ^JetFmt, prog: Program) -> String {
             next
         }
         if !first {
-            if emit_stmt && previous_was_script {
-                if !f.at_line_start -> jfmt_newline(f)
-            } else { jfmt_blank_separator_before_item(f) }
+            if {
+                emit_stmt && previous_was_script -> {
+                    if !f.at_line_start -> jfmt_newline(f)
+                }
+                else -> { jfmt_blank_separator_before_item(f) }
+            }
         }
         first = false
-        if emit_stmt {
-            stmt: prog.script_body[stmt_i]
-            jfmt_emit_leading(f, jfmt_stmt_span(stmt).start)
-            jfmt_fmt_stmt(f, stmt)
-            stmt_end: jfmt_statement_source_end(f, stmt)
-            jfmt_emit_trailing(f, stmt_end)
-            if !f.at_line_start -> jfmt_newline(f)
-            stmt_i += 1
-            previous_was_script = true
-        } else {
-            item: prog.items[item_i]
-            leading_at: jfmt_item_span_start(f, item)
-            jfmt_emit_leading_declaration(f, leading_at)
-            jfmt_fmt_item(f, item)
-            jfmt_emit_trailing(f, jfmt_item_span_end(item))
-            item_i += 1
-            previous_was_script = false
+        if {
+            emit_stmt -> {
+                stmt: prog.script_body[stmt_i]
+                jfmt_emit_leading(f, jfmt_stmt_span(stmt).start)
+                jfmt_fmt_stmt(f, stmt)
+                stmt_end: jfmt_statement_source_end(f, stmt)
+                jfmt_emit_trailing(f, stmt_end)
+                if !f.at_line_start -> jfmt_newline(f)
+                stmt_i += 1
+                previous_was_script = true
+            }
+            else -> {
+                item: prog.items[item_i]
+                leading_at: jfmt_item_span_start(f, item)
+                jfmt_emit_leading_declaration(f, leading_at)
+                jfmt_fmt_item(f, item)
+                jfmt_emit_trailing(f, jfmt_item_span_end(item))
+                item_i += 1
+                previous_was_script = false
+            }
         }
     }
     jfmt_fmt_trailing_file_markers(f, prog, ordered_file_rules, first)
@@ -2786,18 +2810,21 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, 
     }
     simplify := simplify_requested
     parsed: if library -> parse_generated_layout(source) else -> parse_source_layout(source)
-    if jfmt_check_parse_accepts(parsed.diagnostics) {
-        // A recovered control-body diagnostic leaves only a recovery
-        // scaffold; simplify must remain a no-op there.
-        loop diagnostic in parsed.diagnostics {
-            if diagnostic.severity != DIAGNOSTIC_LINT && diagnostic.code != "E0080" {
-                simplify = false
+    if {
+        jfmt_check_parse_accepts(parsed.diagnostics) -> {
+            // A recovered control-body diagnostic leaves only a recovery
+            // scaffold; simplify must remain a no-op there.
+            loop diagnostic in parsed.diagnostics {
+                if diagnostic.severity != DIAGNOSTIC_LINT && diagnostic.code != "E0080" {
+                    simplify = false
+                }
             }
         }
-    } else {
-        simplify = false
-        if !jfmt_fmt_parse_accepts(parsed.diagnostics) {
-            return JetFormatResult{ok: false, text: "", diagnostics: parsed.diagnostics}
+        else -> {
+            simplify = false
+            if !jfmt_fmt_parse_accepts(parsed.diagnostics) {
+                return JetFormatResult{ok: false, text: "", diagnostics: parsed.diagnostics}
+            }
         }
     }
     prog := parsed.program

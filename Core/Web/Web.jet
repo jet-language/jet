@@ -35,6 +35,8 @@ use {
     core.log.[LogField, TraceSpan]
     log_rt: jet.runtime.log
     rt: jet.runtime.time
+    realtime_rt: jet.runtime.rt
+    sys_rt: jet.runtime.sys
     core.ui.[UINode]
     builtin: jet_builtins
 }
@@ -916,20 +918,20 @@ priv app_build_failure: fn(failure: String) -> String Never! {
 C_APP_SETTINGS_EXIT: 78
 
 // The settings record `env.decode<Settings>(prefix:)` builds. A failure is
-// the E2416 stop at `at`, exit 78 (core.rt.__coded_stop, its EXIT_CONFIG):
-// every failure on its own line, naming the variable and field path, a secret
-// value hidden (core.sys __decode_errors).
+// the E2416 stop at `at`, exit 78 (jet.runtime.rt.coded_stop, its
+// EXIT_CONFIG): every failure on its own line, naming the variable and field
+// path, a secret value hidden (core.sys __decode_errors).
 priv app_settings: fn<Settings: Decode>(prefix: String, at: SourceLocation) -[Env, IO, FS, Exec, Time]> Settings Never! {
     core.sys.decode<Settings>(prefix: prefix) ?? app_stop("E2416", "The app's settings did not decode, so it does not listen:", app_settings_failures(err), at)
 }
 
 // A web app's stop of the registered row `code` at `at`, the user's call that
 // served, bound or decoded: the row's `what`, then the call's `-->` line in
-// the stop report's own form, then the `details` lines (core.rt.__coded_stop
-// adds the row's Why/Fix). The line is the call's own, so it reads the same at
-// every tier, a release image's included.
+// the stop report's own form, then the `details` lines
+// (jet.runtime.rt.coded_stop adds the row's Why/Fix). The line is the call's
+// own, so it reads the same at every tier, a release image's included.
 priv app_stop: fn(code: String, what: String, details: String, at: SourceLocation) -> Never {
-    core.rt.__coded_stop(code, "{what}\n  --> {at.file}:{at.line} in {at.function}{details}")
+    realtime_rt.coded_stop(code, "{what}\n  --> {at.file}:{at.line} in {at.function}{details}")
 }
 
 // The E2416 stop's detail lines for the settings that did not decode, one
@@ -1039,7 +1041,7 @@ C_APP_DEFAULT_PORT: 8080
 // `JET_APP_PORT` that holds no port stops with E2809 instead of falling back.
 priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
     asked: if requested == .Val(port) -> "serve(port: {port})" else -> ""
-    raw: core.sys.__env_value("JET_APP_PORT") ?? return AppPort{port: requested ?? C_APP_DEFAULT_PORT, source: if asked == "" -> "the default, with no JET_APP_PORT and no serve port" else -> asked}
+    raw: sys_rt.env_value("JET_APP_PORT") ?? return AppPort{port: requested ?? C_APP_DEFAULT_PORT, source: if asked == "" -> "the default, with no JET_APP_PORT and no serve port" else -> asked}
     text: String.from_bytes(raw) ?? ""
     port: Int.parse(text) ?? 0
     if port < 1 || port > 65535 {
@@ -1051,7 +1053,7 @@ priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
 // Whether `jet dev` runs this program (it sets JET_DEV=1): `jet dev`
 // restarts the program on every change, and the served pages reload.
 priv __app_dev: fn() -> Bool Never! {
-    raw: core.sys.__env_value("JET_DEV") ?? return false
+    raw: sys_rt.env_value("JET_DEV") ?? return false
     (String.from_bytes(raw) ?? "") == "1"
 }
 
@@ -1313,7 +1315,7 @@ priv app_push_route: fn(app: App) -[Net]> Never! {
         }
     }
     refused: calls.push.start()
-    if refused != "" -> core.rt.__coded_stop("E2416", refused)
+    if refused != "" -> realtime_rt.coded_stop("E2416", refused)
     http_server.route_add(table, "POST", C_APP_PUSH_DEVICES, http_server.__handler(fn(request: HTTPRequest) { Ok(app_push_register(request)) }), "", #here)
 }
 
@@ -3443,7 +3445,7 @@ priv __app_trace_env: fn() -> [String:String] Never! {
 }
 
 priv app_trace_env_put: fn(values: ^[String:String], name: String) Never! {
-    raw: core.sys.__env_value(name) ?? return
+    raw: sys_rt.env_value(name) ?? return
     values[name.copy()] = String.from_bytes(raw) ?? return
 }
 

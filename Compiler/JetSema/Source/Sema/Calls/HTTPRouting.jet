@@ -472,15 +472,15 @@ sema_http_route_check_literal: fn(argument: CallArg, environment: SemaScopeEnvir
 // A route path is a String or a `Path` (what a checked `Path{…}` literal
 // builds), registered as its text. Every verb, `router` and `#Server` mark
 // takes its path through this one conversion.
-sema_http_route_path_value: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    checked: sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics) ?? return None
+sema_http_route_path_value: fn(argument: CallArg, check: ^SemaBodyCheck) -> TExpr? {
+    checked: sema_check_expression(argument.expr, None, check) ?? return None
     if (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
-        return sema_expr_check_declared_method(argument.expr, checked, "to_string", "to_string", argument.span, [Type]{}, [Type]{}, [CallArg]{}, Val(Type.String), environment, program, scopes, check, diagnostics)
+        return sema_expr_check_declared_method(argument.expr, checked, "to_string", "to_string", argument.span, [Type]{}, [Type]{}, [CallArg]{}, Val(Type.String), check)
     }
     if type_identity_equal(checked.ty, Type.String) -> return Val(checked)
-    compatible: sema_call_type_assignable(Type.String, checked.ty, environment, program) ?? return None
+    compatible: sema_call_type_assignable(Type.String, checked.ty, check.environment.*, check.program.*) ?? return None
     if compatible -> return Val(checked)
-    diagnostics.push(sema_type_mismatch(Type.String, checked.ty, argument.span, program))
+    check.diagnostics.push(sema_type_mismatch(Type.String, checked.ty, argument.span, check.program.*))
     None
 }
 
@@ -1156,15 +1156,15 @@ sema_http_route_contract: fn(method: String, wire: String, pattern: String, path
     Val("{{\"method\":{sema_http_route_json_quote(wire)},\"pattern\":{sema_http_route_json_quote(pattern)},\"path\":{sema_http_route_json_quote(canonical)},\"operation_id\":{sema_http_route_json_quote(sema_http_route_operation_id(sema_http_route_operation_method(method, wire), canonical))},\"summary\":null,\"parameters\":[{params.join(",")}],\"request_body\":{request_body},\"responses\":[{response_json.join(",")}],\"security\":[],\"provenance\":{sema_http_route_json_quote("{source}:{line}")}}}")
 }
 
-sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     updated_args := args
-    app: sema_app_is_route_table(receiver_value.ty, environment, program)
+    app: sema_app_is_route_table(receiver_value.ty, check.environment.*, check.program.*)
     receiver_name := if app -> "App" else -> sema_call_http_nominal_leaf(receiver_value.ty)
     if receiver_name != "HTTPRouter" && !app {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if app && method == "mount" {
-        return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, program, scopes, check, diagnostics)
+        return sema_call_http_mount(receiver, receiver_value, args, span, expected, check)
     }
     custom: method == sema_http_route_custom_verb()
     if !custom && !sema_http_route_verbs().contains(method) {
@@ -1175,12 +1175,10 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     arity: if custom -> 3 else -> 2
     if updated_args.len() != arity {
         if updated_args.len() > arity - 2 {
-            _ := sema_http_route_check_literal(updated_args[arity - 2], environment, program, scopes, diagnostics)
+            _ := sema_http_route_check_literal(updated_args[arity - 2], check.environment.*, check.program.*, check.scopes, check.diagnostics)
         }
-        diagnostics.push(sema_call_arity_diagnostic(method, arity, updated_args.len(), false, span))
-        loop argument in updated_args {
-            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
-        }
+        check.diagnostics.push(sema_call_arity_diagnostic(method, arity, updated_args.len(), false, span))
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     token_argument := CallArg?{None}
@@ -1188,13 +1186,13 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         token_argument = Val(updated_args[0].copy())
         updated_args = [CallArg]{updated_args[1].copy(), updated_args[2].copy()}
     }
-    literal: sema_http_route_check_literal(updated_args[0], environment, program, scopes, diagnostics)
-    path_value: sema_http_route_path_value(updated_args[0], environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    literal: sema_http_route_check_literal(updated_args[0], check.environment.*, check.program.*, check.scopes, check.diagnostics)
+    path_value: sema_http_route_path_value(updated_args[0], check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     dynamic: literal.pattern == None
     pattern: literal.pattern ?? ""
     if dynamic && !app {
         if !literal.interpolated {
-            diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String or Path", "router endpoint contracts are fully checked while building; App routes may be computed at runtime", "use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a `web.app()`"))
+            check.diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String or Path", "router endpoint contracts are fully checked while building; App routes may be computed at runtime", "use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a `web.app()`"))
         }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -1205,11 +1203,11 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     wire := sema_http_route_method_name(method)
     token_value := TExpr?{None}
     if token_argument == .Val(token_arg) {
-        if sema_http_route_constant_string(token_arg.expr, environment, program, scopes) == .Val(token) {
-            sema_http_route_stage_token_check(token, token_arg, environment, program, check.context, diagnostics)
+        if sema_http_route_constant_string(token_arg.expr, check.environment.*, check.program.*, check.scopes) == .Val(token) {
+            sema_http_route_stage_token_check(token, token_arg, check.environment.*, check.program.*, check.context, check.diagnostics)
             wire = token
         } else {
-            token_value = Val(sema_call_http_check_value(token_arg, Type.String, environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
+            token_value = Val(sema_call_http_check_value(token_arg, Type.String, check) ?? return SemaMethodSpecialCheck{handled: true, value: None})
             wire = ""
         }
     }
@@ -1217,22 +1215,22 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     // valid route as a duplicate (E2804).
     if !dynamic && !literal.invalid && wire != "" {
         chained := false
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         if app {
-            chained = sema_app_check_route_registrations(receiver, method, args, span, environment, graph, diagnostics)
+            chained = sema_app_check_route_registrations(receiver, method, args, span, check.environment.*, graph, check.diagnostics)
         }
         if !chained {
-            sema_http_route_table_record(receiver, wire, pattern, span, scopes, check.context, diagnostics)
+            sema_http_route_table_record(receiver, wire, pattern, span, check.scopes, check.context, check.diagnostics)
         }
     }
     if !literal.invalid {
         path_fields: sema_http_route_path_fields(pattern) ?? [SemaHTTPRoutePathField]{}
         mux_request := Type?{None}
         if app {
-            mux_request = Val(sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, environment, program))
+            mux_request = Val(sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, check.environment.*, check.program.*))
         }
-        handler_shape: sema_http_route_shape(updated_args[1].expr, environment, program, scopes, mux_request) ?? {
-            diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `fn(id: Int, req: HTTPRequest) {{ ... }}` or pass a named function"))
+        handler_shape: sema_http_route_shape(updated_args[1].expr, check.environment.*, check.program.*, check.scopes, mux_request) ?? {
+            check.diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `fn(id: Int, req: HTTPRequest) {{ ... }}` or pass a named function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         request_names := [String]{}
@@ -1249,13 +1247,13 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         // binding question but a handler that does not have the route
         // handler's type, reported as the lambda/argument mismatch it is.
         if request_names.len() > 1 {
-            request_ty: sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, environment, program)
+            request_ty: sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, check.environment.*, check.program.*)
             required: Type.Fn{params: [Type]{request_ty}, ret: Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: Type.Named{name: "HTTPError"}}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
             // The handler is checked against the route handler type, and a type
             // it still does not have is E0112.
-            handler_value: sema_expression_lambda_host_callback(updated_args[1].expr, Val(required), false, environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-            if sema_call_host_callback_assignable(required, handler_value.ty, environment, program) == (.Val(false)) {
-                diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "`{method}` wants {sema_type_show(required)} for argument 2, but this is {sema_type_show(handler_value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, handler_value.ty)))
+            handler_value: sema_expression_lambda_host_callback(updated_args[1].expr, Val(required), false, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            if sema_call_host_callback_assignable(required, handler_value.ty, check.environment.*, check.program.*) == (.Val(false)) {
+                check.diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "`{method}` wants {sema_type_show(required)} for argument 2, but this is {sema_type_show(handler_value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, handler_value.ty)))
             }
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
@@ -1265,7 +1263,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         issue_span := updated_args[1].span
         if dynamic {
             loop parameter in typed {
-                if !sema_serde_type_is_admissible(environment, program, parameter.ty, SemaSerdeDirection.Decode) {
+                if !sema_serde_type_is_admissible(check.environment.*, check.program.*, parameter.ty, SemaSerdeDirection.Decode) {
                     handler_issue = "dynamic HTTP route input `{parameter.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
                 }
             }
@@ -1294,7 +1292,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 issue_span = updated_args[0].span
             }
             loop parameter in typed {
-                if parameter.name == field.name && !sema_serde_type_is_admissible(environment, program, parameter.ty, SemaSerdeDirection.Decode) {
+                if parameter.name == field.name && !sema_serde_type_is_admissible(check.environment.*, check.program.*, parameter.ty, SemaSerdeDirection.Decode) {
                     handler_issue = "HTTP route `{pattern}` path field `{field.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
                     issue_why = "path parameters use the same checked Decode capability as request decoding"
                     issue_fix = "give `{type_name(parameter.ty)}` a `Decode` implementation, or use a decodable parameter type"
@@ -1322,33 +1320,33 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
             }
         }
         if handler_issue != "" {
-            diagnostics.push(sema_error("E2805", issue_span, handler_issue, issue_why, issue_fix))
+            check.diagnostics.push(sema_error("E2805", issue_span, handler_issue, issue_why, issue_fix))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         result := Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: Type.Named{name: "HTTPError"}}
         // An App or router route runs as `fn(HTTPRequest)`: the handler's
         // typed inputs decode from the request (sema_http_mux_route_handler).
-        request_ty: sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, environment, program)
+        request_ty: sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, check.environment.*, check.program.*)
         updated_args[1].expr = sema_http_mux_route_handler(updated_args[1].expr, handler_shape.params, request_names, typed, request_ty, updated_args[1].span)
         handler_type: Type.Fn{params: [Type]{request_ty}, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-        callback: sema_check_expression_with_lambda_escapes(updated_args[1].expr, Val(handler_type), environment, program, scopes, check, Val(true), diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        if !sema_call_http_check_middleware_callback(callback, environment, program, scopes, check.state, check.context, diagnostics) {
+        callback: sema_check_expression_with_lambda_escapes(updated_args[1].expr, Val(handler_type), check, Val(true)) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        if !sema_call_http_check_middleware_callback(callback, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         updated_args[1].convention = AccessConvention.Move
         params := [SemaCallParam]{SemaCallParam{label: "path", name: "path", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}, SemaCallParam{label: "handler", name: "handler", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(handler_type), variadic: false}}
-        ownership := sema_ownership_check_method_call(check.state, "{receiver_name}.{method}", receiver, AccessConvention.Read, params, updated_args, scopes, span, diagnostics)
+        ownership := sema_ownership_check_method_call(check.state, "{receiver_name}.{method}", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
         if !ownership.accepted || !ownership.complete {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        line: sema_source_line_at(environment.source_segments, span) ?? 1
+        line: sema_source_line_at(check.environment.source_segments, span) ?? 1
         body_type := sema_http_route_find_json_body(handler_shape.body, request_names)
         if body_type == .Val(body_ty) {
             body_model_type := if body_ty == {
                 .Option(inner) -> inner
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> body_ty
             }
-            body_fields := sema_http_route_find_struct(environment, program, body_model_type, handler_shape.module_identity)
+            body_fields := sema_http_route_find_struct(check.environment.*, check.program.*, body_model_type, handler_shape.module_identity)
             if body_fields == .Val(definition) {
                 loop field in definition.fields {
                     if !field.is_pub || field.computed != None -> next
@@ -1360,7 +1358,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
                         if query_name == field.name -> duplicate = true
                     }
                     if duplicate {
-                        diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route `{pattern}` binds body field `{field.name}` twice", "path, query, and body fields are distinct transport sources", "rename `{field.name}` in the body or remove the duplicate binding"))
+                        check.diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route `{pattern}` binds body field `{field.name}` twice", "path, query, and body fields are distinct transport sources", "rename `{field.name}` in the body or remove the duplicate binding"))
                         return SemaMethodSpecialCheck{handled: true, value: None}
                     }
                 }
@@ -1368,16 +1366,16 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         }
         response_aliases := [SemaHTTPRouteResponseAlias]{}
         responses := if handler_shape.body == {
-            .Expr(expression) -> sema_http_route_response_expr(expression, environment, program, scopes, handler_shape.params, response_aliases, handler_shape.module_identity)
-            .Block(statements) -> sema_http_route_response_statements(statements, environment, program, scopes, handler_shape.params, response_aliases, handler_shape.module_identity)
+            .Expr(expression) -> sema_http_route_response_expr(expression, check.environment.*, check.program.*, check.scopes, handler_shape.params, response_aliases, handler_shape.module_identity)
+            .Block(statements) -> sema_http_route_response_statements(statements, check.environment.*, check.program.*, check.scopes, handler_shape.params, response_aliases, handler_shape.module_identity)
         }
-        contract: sema_http_route_contract(method, wire, pattern, path_fields, handler_shape, body_type, environment, program, app, line, handler_shape.params, responses) ?? {
-            diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler has no complete checked endpoint contract", "router registration needs response metadata and serializable path/query/body schemas", "return a typed `HTTPResponse` constructor from every handler path"))
+        contract: sema_http_route_contract(method, wire, pattern, path_fields, handler_shape, body_type, check.environment.*, check.program.*, app, line, handler_shape.params, responses) ?? {
+            check.diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler has no complete checked endpoint contract", "router registration needs response metadata and serializable path/query/body schemas", "return a typed `HTTPResponse` constructor from every handler path"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         // A run-time custom token is its own checked value; any other method
         // is its text as sent.
-        verb: if token_value == .Val(found) -> found else -> sema_check_expression(Expr.Str{parts: [StrPart]{StrPart.Lit{text: wire}}, span: span, id: AST_NODE_GENERATED}, Val(Type.String), environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        verb: if token_value == .Val(found) -> found else -> sema_check_expression(Expr.Str{parts: [StrPart]{StrPart.Lit{text: wire}}, span: span, id: AST_NODE_GENERATED}, Val(Type.String), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         // The route keeps its checked contract: `web.openapi(app)` and
         // `web.openapi(router)` render the document from these registrations.
         // A run-time App pattern's contract is completed from that pattern
@@ -1395,7 +1393,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
             dynamic -> "__http_route_dynamic"
             else -> "__http_route"
         }
-        return sema_call_http_mux_source_call(receiver_value, target, route_args, span, expected, environment, program, scopes, check, diagnostics)
+        return sema_call_http_mux_source_call(receiver_value, target, route_args, span, expected, check)
     }
     SemaMethodSpecialCheck{handled: true, value: None}
 }

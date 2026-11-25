@@ -1,6 +1,6 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the route table (argument and result carriers, payloads).
-use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index]
+use jet_foundation.[CoreCallRecord, RUNTIME_GENERIC_HANDLES, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index]
 
 // A buffer of `bytes` bytes (a slot) for elements of row `element` to
 // replace the one of the List at `list`, null when `try` and refused. In a
@@ -1274,7 +1274,7 @@ ir_builtin_on: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver_
         return ir_key_ordered(m, p, b, ty, descending, from, subject, operands, span)
     }
     if operation == .SetFrom || operation == .SortedSetFrom || ir_set_element(receiver_ty) != None {
-        set_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
+        set_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty)) ?? return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} has no route on {receiver_ty:Debug}")
         result: ir_set_builtin(m, p, b, ty, set_route.symbol, subject, operands, span) ?? return ir_fail_slot(b, span, "set builtin {set_route.symbol}")
         if mutates || operation == .SetFrom || operation == .SortedSetFrom -> return result
         return ir_end_builtin_receiver(m, p, b, subject, result, span)
@@ -1289,7 +1289,7 @@ ir_builtin_on: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver_
         return ir_cache_builtin(m, p, b, ty, receiver_ty, operation, subject, operands, span)
     }
     if ir_map_entry_type(receiver_ty) != None {
-        map_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
+        map_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty)) ?? return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} has no route on {receiver_ty:Debug}")
         result: ir_map_builtin(m, p, b, ty, map_route.symbol, subject, operands, span) ?? return ir_fail_slot(b, span, "map builtin {map_route.symbol}")
         if mutates -> return result
         return ir_end_builtin_receiver(m, p, b, subject, result, span)
@@ -2003,7 +2003,7 @@ ir_builtin_route: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiv
     if checked_builtin_mutates_receiver(operation) && !ir_is_handle(m, b.f.slot_type[operands[0]]) {
         return ir_fail_slot(b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
     }
-    route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
+    route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty)) ?? return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} has no route on {receiver_ty:Debug}")
     if route.arity != operands.len() {
         return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} with {operands.len()} of {route.arity} operands")
     }
@@ -5119,6 +5119,11 @@ ir_route_declared: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String,
                     lowered.push(exact)
                     temporaries.push(exact)
                     temporaries.push(slot)
+                } else if ir_laid_word_record(m, p, shown) {
+                    // A word record laid out as its one Int field (Instant)
+                    // crosses as that field, as an Int argument does.
+                    int_row: ir_type_row(m, Type.Int) ?? 0
+                    lowered.push(ir_load_at(m, b, slot, 0, int_row))
                 } else {
                     return ir_fail_slot(b, span, "runtime route {name} Word argument of {shown}")
                 }
@@ -6750,12 +6755,9 @@ ir_core_call_routed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
     if symbol == "jet_reflect_of" -> return ir_reflect_of(m, p, b, ty, args, span)
     if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, span)
     if ir_lazy_core_call(m, p, b, symbol, ty, args, span) == .Val(result) -> return result
-    // Bounded Core slots take I64, but `keep<T>` returns its argument at
-    // the checked type: it does not narrow exact Int.
-    typed_carrier_value: canonical.module_name == "core.prelude" && canonical.member == "keep"
     labels: core_call_native_return_labels(canonical.module_name, canonical.member)
     b.split_armed = split_armed
-    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, labels, typed_carrier_value, span)
+    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, labels, span)
 }
 
 // The refusals a route call reading ambient state meets before it runs. A
@@ -6781,9 +6783,8 @@ ir_route_ambient_refusals: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol:
 
 // The route `symbol` (`declared`, else its table row) on the checked
 // argument expressions `args`, typed `ty`: an exact Int argument the route
-// consumes (borrow_mask false) crosses as its native I64 unless
-// `typed_carrier_value`.
-ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], typed_carrier_value: Bool, span: Span) -> Int Never! {
+// consumes (borrow_mask false) crosses as its native I64.
+ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], span: Span) -> Int Never! {
     // Only the route call itself may split a `??` or `?` operand, not the
     // argument conversions before it.
     split_armed: b.split_armed
@@ -6805,7 +6806,7 @@ ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String
         if ir_body_node(p, b, arg).kind == .Borrow(_, access) {
             if access == .Write -> ir_make_unique(m, p, b, slot)
         }
-        if !typed_carrier_value && index < borrow_mask.len() && !borrow_mask[index] && ir_untag(ir_ty(m, p, b, arg)) == Type.Int {
+        if index < borrow_mask.len() && !borrow_mask[index] && ir_untag(ir_ty(m, p, b, arg)) == Type.Int {
             slots.push(ir_core_native_int(m, b, slot, span))
             if ir_failed(b) -> return -1
         } else { slots.push(slot) }
@@ -6818,14 +6819,16 @@ ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String
 // The route a jet.runtime binding's Jet signature projects onto its runtime
 // export `symbol`: Int and the machine integers as a Word, Bool as a Flag,
 // Float, String as Text, a Core type with a runtime handle row as that
-// Handle, a List of those, a View of a scalar as its List window, a written
-// (`writes`) handle or List as HandleMut or ListMut, and as a result also an
-// Option of one or of a tuple, a tuple whose items are those or an Option of
-// one (in the checked tuple's member order), or a fallible `T E!` as a Result
-// route (a Unit success writes no out word, the default Err its message text,
-// a handle error its handle), as sema admits them (Guest.jet
-// sema_guest_check_runtime_binding); an IR_ROUTES_FROZEN export's `[T]?`
-// result as an Option of a Frozen List. None for a type no carrier holds.
+// Handle (a word record as its Word), a List of those, a View of a scalar as
+// its List window, a written (`writes`) handle or List as HandleMut or
+// ListMut, and as a result also an Option of one or of a tuple, a tuple whose
+// items are those or an Option of one (in the checked tuple's member order),
+// a RUNTIME_GENERIC_HANDLES family (`Receiver<T>`) as its handle, or a
+// fallible `T E!` as a Result route (a Unit success writes no out word, the
+// default Err its message text, a handle error its handle), as sema admits
+// them (Guest.jet sema_guest_check_runtime_binding); an IR_ROUTES_FROZEN
+// export's `[T]?` result as an Option of a Frozen List. None for a type no
+// carrier holds.
 ir_route_of_signature: fn(symbol: String, params: [Type], writes: [Bool], returned: Type?) -> IRRoute? Never! {
     carriers := [IRRouteCarrier]{}
     loop (index, ty) in params {
@@ -6850,9 +6853,11 @@ ir_route_of_signature: fn(symbol: String, params: [Type], writes: [Bool], return
     Val(IRRoute{symbol: symbol.copy(), export: symbol.copy(), native_lists: true, params: carriers, result: result})
 }
 
+// A binding's result route: Unit for none, Unit or `Never` (an export that
+// stops), and for `T E!` the success carrier with the error's.
 ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
     ty: returned ?? return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
-    if ir_unit_type(ty) -> return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
+    if ir_unit_type(ty) || ir_never_type(ty) -> return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
     if ir_untag(ty) == .Result(ok, err) {
         if err == (Type.Named{name: "Never"}) -> return ir_route_result_of(Val(ok))
         // The default Err crosses as its message text (ir_route_result
@@ -6887,9 +6892,10 @@ ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
 
 // The carrier of one value: the scalars, Text, a runtime handle (a record the
 // program lays out itself crosses as a runtime record made for the call,
-// ir_route_declared), a List, a View of a scalar as its List window (sema
-// admits it only as a parameter), and inside a result an Option or a tuple
-// (sema admits those only there).
+// ir_route_declared; a word record such as Instant as its Word), a List, a
+// View of a scalar as its List window (sema admits it only as a parameter),
+// a RUNTIME_GENERIC_HANDLES family as its handle, and inside a result an
+// Option or a tuple (sema admits those and the generic families only there).
 ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
     if ir_untag(ty) == {
         .Int | .IntN(_, _) -> Val(IRRouteCarrier.Word)
@@ -6914,10 +6920,15 @@ ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
         }
         .Named(name) -> {
             handle: ir_runtime_handle(name) ?? return None
+            loop record in IR_WORD_RECORDS {
+                if record.runtime == handle.runtime -> return Val(IRRouteCarrier.Word)
+            }
             Val(IRRouteCarrier.Handle{name: handle.runtime})
         }
         .Apply(name, args) -> {
-            if name != "View" || args.len() != 1 -> return None
+            if args.len() != 1 -> return None
+            if RUNTIME_GENERIC_HANDLES.contains(name) -> return Val(IRRouteCarrier.Handle{name: name})
+            if name != "View" -> return None
             elem: ir_route_carrier_of(args[0]) ?? return None
             Val(IRRouteCarrier.List{elem: elem})
         }
@@ -6954,6 +6965,33 @@ ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
     if owned.result == .Option(list) {
         assert(list == IRRouteCarrier.List{elem: IRRouteCarrier.Word})
     } else { panic("the probe crossed as no Option") }
+}
+
+// A binding's `Receiver<T>` or `Event<T>` result crosses as the runtime's one
+// handle word, and a word record result (Instant) as its Word, not a record
+// handle; a written word record has no carrier.
+#Test("a binding's generic handle and word record results route as words") {
+    signal: Type.Named{name: "<corelib>/core.process.ProcessSignal"}
+    receiver: Type.Apply{name: "Receiver", args: [Type]{signal}}
+    received: ir_route_of_signature("jet_raw_probe", [Type]{Type.Int}, [Bool]{false}, Val(receiver)) ?? panic("no Receiver route")
+    if received.result == .Plain(handle) {
+        assert(handle == IRRouteCarrier.Handle{name: "Receiver"})
+    } else { panic("the Receiver crossed as no plain result") }
+    instant: Type.Named{name: "<corelib>/core.time.Instant"}
+    deadline: ir_route_of_signature("jet_raw_probe", [Type]{Type.Named{name: "RealtimeStream"}}, [Bool]{false}, Val(instant)) ?? panic("no Instant route")
+    if deadline.result == .Plain(word) {
+        assert(word == IRRouteCarrier.Word)
+    } else { panic("the Instant crossed as no plain result") }
+    assert(deadline.params[0] == IRRouteCarrier.Handle{name: "JetRealtimeStream"})
+    if ir_route_of_signature("jet_raw_probe", [Type]{instant}, [Bool]{true}, None) == .Val(_) {
+        panic("a written Instant crossed")
+    }
+}
+
+// A binding that stops (`-> Never`) routes as a Unit result.
+#Test("a binding's Never result routes") {
+    stop: ir_route_of_signature("jet_raw_probe", [Type]{Type.String, Type.String}, [Bool]{false, false}, Val(Type.Named{name: "Never"})) ?? panic("no Never route")
+    assert(stop.result == IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
 }
 
 // `core.mem.stream_store<T>(dst, value)`: `dst = value`, the value written

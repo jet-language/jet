@@ -1,9 +1,10 @@
 // `jet.runtime.process` (#6615): the runtime's public signal subscription
-// functions, the program's argv and its exit, and core.process's spec and
-// status leaves, in Jet types with their declared effect rows. Each member
-// is a runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
-// export that is its one body (ProcessSignal.jet, HostStartup.jet,
-// HostProcess.jet, ProcessPipeline.jet, ProcessSpec.jet, CompilerHost.jet).
+// functions, the program's argv and its exit, and core.process's spec,
+// status and child-stream leaves, in Jet types with their declared effect
+// rows. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (ProcessSignal.jet, HostStartup.jet, HostProcess.jet, ProcessPipeline.jet,
+// ProcessSpec.jet, CompilerHost.jet, HostPipe.jet).
 // A tuple result's items cross in the checked tuple's written order,
 // which is the export's slot order.
 process: module {
@@ -20,6 +21,16 @@ process: module {
     // -1 when not, with its `errno` (EBUSY while a subscription holds the
     // signal, EINVAL for one no handler can catch).
     #Import(c) signal_disposition: fn(number: Int, ignore: Bool) -[Exec]> {available: Bool, disposition: Int, errno: Int} = "jet_process_signal_disposition_raw"
+
+    // Subscription `id` also holds signal `number`, sent to its receivers as
+    // the ProcessSignal `signal`, as a sample: `value` is -1 when it does not
+    // hold it, with its `errno` (EINVAL for an unknown subscription or a
+    // signal no handler can catch). `priv`: only core.process subscribes.
+    #Import(c) priv signal_add: fn(id: Int, number: Int, signal: ProcessSignal) -[Exec]> {available: Bool, value: Int, errno: Int} = "jet_process_signal_add_raw"
+
+    // One more receiver of subscription `id`'s channel; of an already closed,
+    // empty channel when `id` is closed. `priv`: only core.process subscribes.
+    #Import(c) priv signal_receiver: fn(id: Int) -[Exec]> Receiver<ProcessSignal> = "jet_process_signal_receiver_raw"
 
     // The program's words, argv[0] first; a non-UTF-8 word panics. `priv`:
     // only Core reads it (`process.args()` drops the program name), and a
@@ -51,6 +62,12 @@ process: module {
     // out of range or one the spec already passes. `available` is false
     // on a host that can't duplicate.
     #Import(c) priv keep_open_raw: fn(spec: ^^ProcessSpec, fd: Int, child_fd: Int, as_cwd: Bool) -[FS.Read]> {spec: ProcessSpec, available: Bool, assigned_fd: Int, errno: Int} = "jet_process_spec_keep_open_raw"
+
+    // A new spec of every field of a plan (ProcessRoutes.jet): `cmd` with
+    // each optional field present when its `has_` flag is set. The
+    // environment columns `names` and `values` pair up, so they have equal
+    // length.
+    #Import(c) priv spec_fields: fn(cmd: [String], has_cwd: Bool, cwd: String, env_clear: Bool, names: [String], values: [String], removals: [String], has_stdin: Bool, stdin: ProcessStreamMode, stdout: ProcessStreamMode, stderr: ProcessStreamMode, has_timeout: Bool, timeout: Int, has_output: Bool, output: Int, has_cpu: Bool, cpu: Int, has_memory: Bool, memory: Int, has_files: Bool, files: Int, detached: Bool, has_terminal: Bool, terminal: TerminalPolicy, has_policy: Bool, policy: String) -[Exec]> ProcessSpec = "jet_process_spec_fields_raw"
 
     // The spec builders (ProcessSpec.jet): each takes `spec` and answers it
     // with one setting changed. `spec_args_extend` and `spec_cpu_affinity`
@@ -94,4 +111,10 @@ process: module {
     #Import(c) priv child_kill: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_kill"
     #Import(c) priv child_terminate: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_terminate"
     #Import(c) priv child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_interrupt"
+
+    // One line of a child's output or error output as its raw bytes, the
+    // newline kept; empty at the end of input (HostPipe.jet). Core's line
+    // readers decode it.
+    #Import(c) priv stdout_line_bytes: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> [U8] IOError! = "jet_process_stream_line_bytes_raw"
+    #Import(c) priv stderr_line_bytes: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> [U8] IOError! = "jet_process_stream_line_bytes_raw"
 }

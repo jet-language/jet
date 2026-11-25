@@ -109,21 +109,26 @@ parser_parse_inbody_marker: fn(state: ^JetParserState) -> Marker? {
     args := [MarkerCallArg]{}
     labels := [CallLabel?]{}
     required := [Int]{}
-    if value.kind == TOKEN_TRUE -> parser_bump(state) else if value.kind == TOKEN_FALSE {
-        parser_bump(state)
-        negated = true
-        if !owned_trait_auto_derive_marker(marker_name) {
-            parser_add_fatal_code(state, "E0931", parser_cover(hash.span, value.span), "`#{marker_name}: false` is not a signed auto-derive trait", "`false` rejects compiler generation only for structurally auto-derived traits", "write `#{marker_name}: true`, or use `false` with an auto-derived trait")
+    if {
+        value.kind == TOKEN_TRUE -> parser_bump(state)
+        value.kind == TOKEN_FALSE -> {
+            parser_bump(state)
+            negated = true
+            if !owned_trait_auto_derive_marker(marker_name) {
+                parser_add_fatal_code(state, "E0931", parser_cover(hash.span, value.span), "`#{marker_name}: false` is not a signed auto-derive trait", "`false` rejects compiler generation only for structurally auto-derived traits", "write `#{marker_name}: true`, or use `false` with an auto-derived trait")
+            }
         }
-    } else if value.kind == TOKEN_LPAREN {
-        parsed: parser_parse_marker_args(state, marker_name)
-        args = parsed.args
-        labels = parsed.labels
-        required = parsed.required
-    } else {
-        argument: parser_parse_inbody_marker_value(state, value) ?? return None
-        args.push(MarkerCallArg.Expr{value: argument})
-        labels.push(None)
+        value.kind == TOKEN_LPAREN -> {
+            parsed: parser_parse_marker_args(state, marker_name)
+            args = parsed.args
+            labels = parsed.labels
+            required = parsed.required
+        }
+        else -> {
+            argument: parser_parse_inbody_marker_value(state, value) ?? return None
+            args.push(MarkerCallArg.Expr{value: argument})
+            labels.push(None)
+        }
     }
     if !parser_inbody_line_ends(state) && !parser_aborting(state) {
         parser_report_inbody_parentheses(state, value.span.start)
@@ -354,23 +359,30 @@ parser_marker_move_edit: fn(source: [U8], markers: [Marker], head: Int, close: I
     if above.len() > 0 -> region = parser_marker_above_region(source, above)
     indent: parser_marker_line_indent(source, region.start)
     splices := [ParserMarkerSplice]{}
-    if inside {
-        if above.len() > 0 {
-            end := region.end
-            loop parser_marker_byte(source, end) == 32 || parser_marker_byte(source, end) == 9 || parser_marker_byte(source, end) == 10 || parser_marker_byte(source, end) == 13 {
-                end += 1
+    if {
+        inside -> {
+            if above.len() > 0 {
+                end := region.end
+                loop parser_marker_byte(source, end) == 32 || parser_marker_byte(source, end) == 9 || parser_marker_byte(source, end) == 10 || parser_marker_byte(source, end) == 13 {
+                    end += 1
+                }
+                splices.push(ParserMarkerSplice{start: region.start, end: end, text: ""})
             }
-            splices.push(ParserMarkerSplice{start: region.start, end: end, text: ""})
         }
-    } else {
-        lines: parser_marker_above_lines(ordered)
-        joined: lines.join("\n{indent}")
-        if above.len() > 0 {
-            splices.push(ParserMarkerSplice{start: region.start, end: region.end, text: joined})
-        } else if same_line {
-            splices.push(ParserMarkerSplice{start: head, end: head, text: "{lines.join(" ")} "})
-        } else {
-            splices.push(ParserMarkerSplice{start: head, end: head, text: "{joined}\n{indent}"})
+        else -> {
+            lines: parser_marker_above_lines(ordered)
+            joined: lines.join("\n{indent}")
+            if {
+                above.len() > 0 -> {
+                    splices.push(ParserMarkerSplice{start: region.start, end: region.end, text: joined})
+                }
+                same_line -> {
+                    splices.push(ParserMarkerSplice{start: head, end: head, text: "{lines.join(" ")} "})
+                }
+                else -> {
+                    splices.push(ParserMarkerSplice{start: head, end: head, text: "{joined}\n{indent}"})
+                }
+            }
         }
     }
     loop marker in within -> splices.push(parser_marker_line_cut(source, marker.span))

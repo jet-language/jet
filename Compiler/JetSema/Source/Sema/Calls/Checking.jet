@@ -590,8 +590,10 @@ sema_call_lambda_escape_policy: fn(parameter: SemaCallParam, abi: SemaRegistrati
     Val(sema_registration_callback_boundary_param(callable_abi, parameter_type))
 }
 
-sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: ^[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, span: Span, diagnostics: ^[Diagnostic], report_conventions: Bool) -> SemaCallTypedArguments? {
-    if !sema_call_validate_binding(callee, params, binding, args, span, diagnostics) -> return None
+sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: ^[CallArg], check: ^SemaBodyCheck, span: Span, report_conventions: Bool) -> SemaCallTypedArguments? {
+    if !sema_call_validate_binding(callee, params, binding, args, span, check.diagnostics) {
+        return None
+    }
     arg_count: args.len()
     if arg_count == 0 {
         return Val(SemaCallTypedArguments{values: [TExpr]{}, slots: [Int]{}, required_types: [Type]{}, source_indices: [Int]{}, pin_arguments: !binding.source_ordered, binder_site: span.start})
@@ -612,7 +614,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
     take_keys := [String]{}
     // Every argument is checked, so each mismatched one is reported.
     complete := true
-    call_diagnostics_start: diagnostics.len()
+    call_diagnostics_start: check.diagnostics.len()
     // The first argument a C function receives as a callback pointer.
     c_callback := Span?{None}
     abi_has_boundary: if abi == .Val(callable_abi) -> callable_abi.is_extern || callable_abi.is_c_abi || callable_abi.callback_transport != None else -> false
@@ -625,19 +627,19 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         if is_default {
             // A `#caller` default is the place of this call.
             if sema_site_is_caller(args[index].expr) {
-                args[index].expr = sema_site_location_expr("", environment, program, scopes, span)
+                args[index].expr = sema_site_location_expr("", check.environment.*, check.program.*, check.scopes, span)
             }
             // A script variable's default reads the caller's binding at the
             // call; a caller that hasn't bound it is refused, and so is a task
             // that would change it beside the script.
             if sema_script_variable_default(args[index].expr, parameter) == .Val(declared) {
-                if sema_scope_resolve_index_at(scopes, parameter.name, span) == None {
-                    diagnostics.push(sema_script_unbound_variable(declared, parameter.name, span, environment, program, scopes))
+                if sema_scope_resolve_index_at(check.scopes, parameter.name, span) == None {
+                    check.diagnostics.push(sema_script_unbound_variable(declared, parameter.name, span, check.environment.*, check.program.*, check.scopes))
                     complete = false
                     next
                 }
                 if check.context.taskgroups.in_spawn && parameter.convention == AccessConvention.Write {
-                    diagnostics.push(sema_script_task_diagnostic(sema_call_reflection_leaf_name(callee), parameter.name, span))
+                    check.diagnostics.push(sema_script_task_diagnostic(sema_call_reflection_leaf_name(callee), parameter.name, span))
                     complete = false
                     next
                 }
@@ -645,21 +647,21 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             }
         }
         required_declared: sema_call_argument_parameter_type(parameter, args[index]) ?? {
-            diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
+            check.diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
             return None
         }
-        required: sema_call_resolved_type(required_declared, environment, program)
+        required: sema_call_resolved_type(required_declared, check.environment.*, check.program.*)
         // An unmarked place a write parameter receives is its write access.
         if sema_call_unmarked_write_place(parameter, args[index]) {
             args[index].convention = AccessConvention.Write
         }
         // `place.move()` handed to a take parameter is the call's take of that place.
-        if parameter.convention == AccessConvention.Move && sema_expr_argument_move_place(args[index], scopes) == .Val(taken) {
+        if parameter.convention == AccessConvention.Move && sema_expr_argument_move_place(args[index], check.scopes) == .Val(taken) {
             args[index].expr = taken
             args[index].convention = AccessConvention.Move
         }
         if args[index].convention == AccessConvention.Write {
-            sema_stmt_uninit_write_arg(args[index], check.state, scopes, diagnostics)
+            sema_stmt_uninit_write_arg(args[index], check.state, check.scopes, check.diagnostics)
         }
         decision: sema_call_argument_convention(parameter, args[index])
         // A default names earlier parameters through their declaration-slot
@@ -668,23 +670,23 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         binder_start: check.context.name_references.len()
         // A default written in another module checks in its declaring module's
         // names (sema_default_owner_scope), as a fresh value of its own.
-        owner_scope := if is_default -> sema_call_default_owner_scope(binding.sources[index], parameter, args[index].expr, environment, program, scopes) else -> None
+        owner_scope := if is_default -> sema_call_default_owner_scope(binding.sources[index], parameter, args[index].expr, check.environment.*, check.program.*, check.scopes) else -> None
         default_in_owner: owner_scope != None
         // A taken argument out of pinned storage is the move E0219, reported
         // before checking the argument reads it beside the pin (E0220). A
         // take parameter takes its plain name.
-        if !default_in_owner && (args[index].convention == AccessConvention.Move || decision == SemaCallConventionDecision.NeedsImplicitClone) && !sema_pin_check_move(check.state, args[index].expr, scopes, diagnostics) {
+        if !default_in_owner && (args[index].convention == AccessConvention.Move || decision == SemaCallConventionDecision.NeedsImplicitClone) && !sema_pin_check_move(check.state, args[index].expr, check.scopes, check.diagnostics) {
             complete = false
             next
         }
-        binder_keys := if has_binder_refs && !default_in_owner -> sema_call_enter_binder_refs(args[index].flags.binder_refs, args[index].flags.binder_site ?? span.start, environment, program, scopes, check.state, check.context, args[index].expr) else -> [SymbolID]{}
+        binder_keys := if has_binder_refs && !default_in_owner -> sema_call_enter_binder_refs(args[index].flags.binder_refs, args[index].flags.binder_site ?? span.start, check.environment.*, check.program.*, check.scopes, check.state, check.context, args[index].expr) else -> [SymbolID]{}
         // A self-typed numeric read widens into the parameter after it is
         // checked on its own.
         may_be_numeric: if required == {
             .Int | .Float | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) -> true
             .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
-        self_typed: may_be_numeric && sema_stmt_numeric_slot_self_typed(args[index].expr, required, environment, program, scopes)
+        self_typed: may_be_numeric && sema_stmt_numeric_slot_self_typed(args[index].expr, required, check.environment.*, check.program.*, check.scopes)
         trait_parameter: if required == {
             .TraitObject(_) -> true
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
@@ -698,7 +700,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             .Named(_) | .Apply(_, _) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> true
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) -> false
         }
-        unit_parameter: may_be_unit && sema_expr_unit_fact(required, environment, program) != None
+        unit_parameter: may_be_unit && sema_expr_unit_fact(required, check.environment.*, check.program.*) != None
         // A variadic bounded by a compiler-owned trait has the trait's name as
         // its type; like a trait parameter's, its argument is checked on its
         // own and then against the bound (E1313 below).
@@ -713,26 +715,26 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // reads the task context is E3218, which names the read.
         if abi_has_boundary && !default_in_owner && abi == .Val(callable_abi) {
             if sema_registration_callback_boundary_param(callable_abi, required_declared) {
-                context_read: if callable_abi.is_c_abi -> sema_call_c_callback_context_read(args[index].expr, environment, program, scopes) else -> String?{None}
+                context_read: if callable_abi.is_c_abi -> sema_call_c_callback_context_read(args[index].expr, check.environment.*, check.program.*, check.scopes) else -> String?{None}
                 if context_read == .Val(member) {
-                    diagnostics.push(sema_call_c_callback_context_error(member, args[index].expr))
-                } else if sema_call_c_callback_unsafe(args[index].expr, environment, program, scopes) {
-                    diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
+                    check.diagnostics.push(sema_call_c_callback_context_error(member, args[index].expr))
+                } else if sema_call_c_callback_unsafe(args[index].expr, check.environment.*, check.program.*, check.scopes) {
+                    check.diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
                 }
-                if callable_abi.is_c_abi && c_callback == None && !sema_call_c_callback_built(args[index].expr, required_declared, environment, program, scopes) {
+                if callable_abi.is_c_abi && c_callback == None && !sema_call_c_callback_built(args[index].expr, required_declared, check.environment.*, check.program.*, check.scopes) {
                     c_callback = Val(expr_span(args[index].expr))
                 }
             }
         }
-        diagnostic_start: diagnostics.len()
+        diagnostic_start: check.diagnostics.len()
         lambda_escapes: if apply_lambda_escape_override -> sema_call_lambda_escape_policy(parameter, abi) else -> check.context.lambda_escapes
         checked_argument: if {
-            default_in_owner -> sema_call_check_owner_default(owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, environment, program, check, span, binder_keys, diagnostics)
-            apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, environment, program, scopes, check, lambda_escapes, diagnostics)
-            else -> sema_check_expression(args[index].expr, argument_expected, environment, program, scopes, check, diagnostics)
+            default_in_owner -> sema_call_check_owner_default(owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, check, span, binder_keys)
+            apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, check, lambda_escapes)
+            else -> sema_check_expression(args[index].expr, argument_expected, check)
         }
         if has_binder_refs {
-            if !default_in_owner -> sema_scope_leave(scopes, check.state)
+            if !default_in_owner -> sema_scope_leave(check.scopes, check.state)
             if sema_call_binder_refs_read(binder_keys, binder_start, check.context) {
                 pin_arguments = true
                 binder_site = args[index].flags.binder_site ?? span.start
@@ -740,10 +742,10 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         }
         checked_value: checked_argument ?? {
             if !default_in_owner && !has_binder_refs {
-                if sema_call_parameter_type_undeclared(required, environment, program) {
-                    sema_call_argument_drop_mismatch(args[index].expr, diagnostic_start, diagnostics)
+                if sema_call_parameter_type_undeclared(required, check.environment.*, check.program.*) {
+                    sema_call_argument_drop_mismatch(args[index].expr, diagnostic_start, check.diagnostics)
                 } else {
-                    sema_call_argument_replace_mismatch(callee, index, required, sema_call_alias_shown(required_declared, environment, program), args[index].expr, lambda_escapes, diagnostic_start, environment, program, scopes, check, diagnostics)
+                    sema_call_argument_replace_mismatch(callee, index, required, sema_call_alias_shown(required_declared, check.environment.*, check.program.*), args[index].expr, lambda_escapes, diagnostic_start, check)
                 }
             }
             complete = false
@@ -751,31 +753,31 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         }
         // A write parameter edits its argument's storage and a marked take
         // gives it away; a computed field has none, so it is never lent.
-        if parameter.convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked_value, "lent for writing", environment, program, scopes, diagnostics) {
+        if parameter.convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked_value, "lent for writing", check.environment.*, check.program.*, check.scopes, check.diagnostics) {
             complete = false
             next
         }
-        if args[index].convention == AccessConvention.Move && sema_expression_refuse_computed_place(checked_value, "taken", environment, program, scopes, diagnostics) {
+        if args[index].convention == AccessConvention.Move && sema_expression_refuse_computed_place(checked_value, "taken", check.environment.*, check.program.*, check.scopes, check.diagnostics) {
             complete = false
             next
         }
         // E0205: a write `SharedGuard` parameter edits through the guard, so
         // only a `guard_edit()` lease or the caller's own write binding may
         // enter it.
-        if parameter.convention == AccessConvention.Write && sema_call_read_shared_guard_argument(check.state, required, checked_value.ty, args[index].expr, scopes) {
-            diagnostics.push(sema_error("E0205", expr_span(args[index].expr), "a read `SharedGuard` cannot enter a write helper", "the helper can edit through this parameter, so its caller must hold an exclusive Shared guard", "create the guard with `guard_edit()` before passing it to the helper"))
+        if parameter.convention == AccessConvention.Write && sema_call_read_shared_guard_argument(check.state, required, checked_value.ty, args[index].expr, check.scopes) {
+            check.diagnostics.push(sema_error("E0205", expr_span(args[index].expr), "a read `SharedGuard` cannot enter a write helper", "the helper can edit through this parameter, so its caller must hold an exclusive Shared guard", "create the guard with `guard_edit()` before passing it to the helper"))
             complete = false
             next
         }
         // A module place lent for writing is written by the callee (E3401 in
         // a pure caller); a `^` parameter does not record its own writes.
         if parameter.convention == AccessConvention.Write {
-            sema_scope_record_lent_write(args[index].expr, expr_span(args[index].expr), environment, scopes, check.context)
+            sema_scope_record_lent_write(args[index].expr, expr_span(args[index].expr), check.environment.*, check.scopes, check.context)
         }
         // A collection a loop is reading, lent for writing, can be changed by
         // the callee (cleared, refilled) while the loop still reads it.
         if parameter.convention == AccessConvention.Write && sema_expr_place_root_ident(args[index].expr) == .Val(root) && check.context.iter_borrowed.contains(root) {
-            diagnostics.push(sema_collection_changed_in_loop(root, "lending `{root}` for writing to {sema_ownership_callee_text(callee)}", expr_span(args[index].expr)))
+            check.diagnostics.push(sema_collection_changed_in_loop(root, "lending `{root}` for writing to {sema_ownership_callee_text(callee)}", expr_span(args[index].expr)))
         }
         // A bare name a take parameter receives is that parameter's take, as
         // `name.move()` was. A resource has one cleanup owner, so a take that
@@ -783,20 +785,20 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // borrowed parameter (E0201 naming `^^`) is refused for that, never
         // with a `.copy()` fix.
         taken_name: args[index].convention == AccessConvention.Move || decision == SemaCallConventionDecision.NeedsImplicitClone
-        if parameter.convention == AccessConvention.Move && decision == SemaCallConventionDecision.NeedsImplicitClone && args[index].convention != AccessConvention.Move && (!sema_copy_site_refuse_resource_copy(checked_value, environment, program, scopes, check.context, diagnostics) || !sema_copy_site_refuse_borrowed_copy(args[index].expr, sema_ownership_callee_text(callee), environment, program, scopes, check.context, diagnostics)) {
+        if parameter.convention == AccessConvention.Move && decision == SemaCallConventionDecision.NeedsImplicitClone && args[index].convention != AccessConvention.Move && (!sema_copy_site_refuse_resource_copy(checked_value, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) || !sema_copy_site_refuse_borrowed_copy(args[index].expr, sema_ownership_callee_text(callee), check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)) {
             return None
         }
-        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, check.state, check.context, diagnostics, taken_name) {
+        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics, taken_name) {
             return None
         }
         // A self-typed read that does not fit reports the generic E0108 at the
         // value; like any other argument, that becomes the call's E0112.
         // Integer narrowing keeps its own E0108.
-        slot_start: diagnostics.len()
-        widened: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, diagnostics) else -> Val(checked_value)
+        slot_start: check.diagnostics.len()
+        widened: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, check.environment.*, check.program.*, check.diagnostics) else -> Val(checked_value)
         value := widened ?? {
-            if sema_integer_narrowing_fix(required, sema_call_resolved_type(checked_value.ty, environment, program)) == None {
-                sema_call_argument_replace_mismatch(callee, index, required, sema_call_alias_shown(required_declared, environment, program), args[index].expr, lambda_escapes, slot_start, environment, program, scopes, check, diagnostics)
+            if sema_integer_narrowing_fix(required, sema_call_resolved_type(checked_value.ty, check.environment.*, check.program.*)) == None {
+                sema_call_argument_replace_mismatch(callee, index, required, sema_call_alias_shown(required_declared, check.environment.*, check.program.*), args[index].expr, lambda_escapes, slot_start, check)
             }
             return None
         }
@@ -805,18 +807,18 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // union would be widened into a temporary the callee's writes miss.
         exact_write: parameter.convention == AccessConvention.Write && (trait_parameter || required == .Union(_))
         compatible := if {
-            exact_write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program))
+            exact_write -> type_identity_equal(required, sema_call_resolved_type(value.ty, check.environment.*, check.program.*))
             sema_type_same_named(required, value.ty) -> true
-            else -> sema_call_type_assignable(required, value.ty, environment, program) ?? return None
+            else -> sema_call_type_assignable(required, value.ty, check.environment.*, check.program.*) ?? return None
         }
         // A parameter whose written type names nothing reported E0119 at its
         // declaration; it takes any argument, so the call's own checks (the
         // moves, E0201) still run without a cascade E0112 (#6294).
-        if !compatible && sema_call_parameter_type_undeclared(required, environment, program) {
+        if !compatible && sema_call_parameter_type_undeclared(required, check.environment.*, check.program.*) {
             compatible = true
         }
-        if !compatible && sema_expr_unit_implicit_applies(required, value.ty, environment, program) {
-            converted: sema_expr_unit_implicit_conversion(value, required, environment, program, scopes, check.context, diagnostics) ?? {
+        if !compatible && sema_expr_unit_implicit_applies(required, value.ty, check.environment.*, check.program.*) {
+            converted: sema_expr_unit_implicit_conversion(value, required, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) ?? {
                 complete = false
                 next
             }
@@ -824,7 +826,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             compatible = true
         }
         if !compatible {
-            if sema_expr_unit_coherent_value(value, required, environment, program) == .Val(coherent) {
+            if sema_expr_unit_coherent_value(value, required, check.environment.*, check.program.*) == .Val(coherent) {
                 value = coherent
                 compatible = true
             }
@@ -842,15 +844,15 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
                 arg_name: type_name(value.ty)
                 unmet := false
                 loop bound in bounds {
-                    if sema_call_variadic_bound_met(bound, value.ty, environment, program) == (Val(true)) {
+                    if sema_call_variadic_bound_met(bound, value.ty, check.environment.*, check.program.*) == (Val(true)) {
                         next
                     }
-                    diagnostics.push(sema_call_variadic_bound_unmet(arg_name, parameter.name, bound, callee, expr_span(args[index].expr)))
+                    check.diagnostics.push(sema_call_variadic_bound_unmet(arg_name, parameter.name, bound, callee, expr_span(args[index].expr)))
                     unmet = true
                 }
                 if unmet -> return None
             } else {
-                diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_alias_shown(required_declared, environment, program), sema_call_resolved_type(value.ty, environment, program), args[index].expr, expr_span(args[index].expr), program))
+                check.diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_alias_shown(required_declared, check.environment.*, check.program.*), sema_call_resolved_type(value.ty, check.environment.*, check.program.*), args[index].expr, expr_span(args[index].expr), check.program.*))
                 complete = false
                 next
             }
@@ -862,14 +864,14 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         if abi == .Val(callable_abi) {
             if callable_abi.is_c_abi && required == Type.String && sema_call_literal_has_nul(args[index].expr) {
                 row: sema_diagnostic_row("E3211")
-                diagnostics.push(sema_error("E3211", expr_span(args[index].expr), row.what, row.why, row.fix))
+                check.diagnostics.push(sema_error("E3211", expr_span(args[index].expr), row.what, row.why, row.fix))
             }
         }
         // The ownership check that follows moves an
         // eligible unmarked take argument at its last use.
         noted_take := false
         if !report_conventions && decision == SemaCallConventionDecision.NeedsImplicitClone && !has_binder_refs && !default_in_owner {
-            if sema_ownership_note_implicit_take(check.state, args[index].expr, value.ty, required, environment, program, check.context.generic_params, scopes) == .Val(key) {
+            if sema_ownership_note_implicit_take(check.state, args[index].expr, value.ty, required, check.environment.*, check.program.*, check.context.generic_params, check.scopes) == .Val(key) {
                 take_indices.push(index)
                 take_keys.push(key)
                 noted_take = true
@@ -878,9 +880,9 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // Any other unmarked name a take parameter
         // receives is that parameter's take, as `name.move()` was. It moves out of
         // its owner here, so a later use reports the move into this call.
-        if !noted_take && decision == SemaCallConventionDecision.NeedsImplicitClone && !has_binder_refs && !default_in_owner && !parameter.variadic && !sema_ownership_type_is_copy(value.ty) && !sema_ownership_type_is_copy(required) && !sema_ownership_argument_is_function_item(args[index], scopes) {
+        if !noted_take && decision == SemaCallConventionDecision.NeedsImplicitClone && !has_binder_refs && !default_in_owner && !parameter.variadic && !sema_ownership_type_is_copy(value.ty) && !sema_ownership_type_is_copy(required) && !sema_ownership_argument_is_function_item(args[index], check.scopes) {
             args[index].convention = AccessConvention.Move
-            if !sema_pin_check_move(check.state, args[index].expr, scopes, diagnostics) {
+            if !sema_pin_check_move(check.state, args[index].expr, check.scopes, check.diagnostics) {
                 complete = false
                 next
             }
@@ -901,39 +903,39 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // ownership check below, which names the consumer; a field place reports
         // at the mark.
         bare_name: args[index].expr == .Ident(_, _, _)
-        if marked_place && !bare_name && sema_ownership_reject_read_param_move(check.state, args[index].expr, scopes, diagnostics) {
+        if marked_place && !bare_name && sema_ownership_reject_read_param_move(check.state, args[index].expr, check.scopes, check.diagnostics) {
             return None
         }
-        if marked_place && sema_copy_site_refuse_lent_resource_move(check.state, args[index].expr, value, environment, program, scopes, check.context, diagnostics) {
+        if marked_place && sema_copy_site_refuse_lent_resource_move(check.state, args[index].expr, value, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
             return None
         }
         taken_place := marked_place
-        if taken_place && sema_ownership_binding_for_expr(check.state, args[index].expr, scopes) == .Val(root) {
+        if taken_place && sema_ownership_binding_for_expr(check.state, args[index].expr, check.scopes) == .Val(root) {
             taken_place = !sema_ownership_binding_is_borrowed_param(root)
         }
         if taken_place && args[index].expr == .Field(_, _, _, _) {
             check.state.exact_field_takes.push(expr_span(args[index].expr))
         }
-        stored: sema_call_marked_move_value(check.state, taken_place, args[index].expr, value, scopes, diagnostics) ?? return None
+        stored: sema_call_marked_move_value(check.state, taken_place, args[index].expr, value, check.scopes, check.diagnostics) ?? return None
         values.push(stored)
         slots.push(slot)
         required_types.push(required)
         source_indices.push(args[index].flags.source_index ?? -1)
     }
     if !complete -> return None
-    sema_call_crypto_misuse(callee, params, args, values, slots, check.context, diagnostics)
+    sema_call_crypto_misuse(callee, params, args, values, slots, check.context, check.diagnostics)
     // E2104: a C callback argument the compiler cannot hand to C itself (a
     // function value other than a named function or a lambda, or a tagged
     // callback parameter) is refused here, by a compile that lowers the call,
     // instead of stopping inside the IR. A checker error on the call stands
     // alone, and `jet check` (which lowers nothing) still reports only those.
-    if c_callback == .Val(callback_span) && !module_is_core(environment.module_identity) && sema_refuses_unbuilt(program) && !sema_has_error_since(diagnostics, call_diagnostics_start) {
-        diagnostics.push(sema_error("E2104", callback_span, "passing this function value to `{callee}` is not built yet", "This `jet` hands C a callback pointer only for a named function or a lambda written at the call, and no other `jet` can build this one.", "Pass the named function or a lambda directly as the callback argument."))
+    if c_callback == .Val(callback_span) && !module_is_core(check.environment.module_identity) && sema_refuses_unbuilt(check.program.*) && !sema_has_error_since(check.diagnostics, call_diagnostics_start) {
+        check.diagnostics.push(sema_error("E2104", callback_span, "passing this function value to `{callee}` is not built yet", "This `jet` hands C a callback pointer only for a named function or a lambda written at the call, and no other `jet` can build this one.", "Pass the named function or a lambda directly as the callback argument."))
     }
     reference_starts.push(check.context.name_references.len())
     // A name two take slots of one call receive has no last use in either.
     loop position in 0..<take_indices.len() {
-        twice := sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, program, check.context)
+        twice := sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, check.program.*, check.context)
         loop earlier in 0..<position {
             if take_keys[earlier] == take_keys[position] -> twice = true
         }
@@ -1266,20 +1268,20 @@ sema_call_argument_drop_mismatch: fn(value: Expr, diagnostic_start: Int, diagnos
 // report becomes the call's E0112, with the value's own type inferred without
 // the parameter as a target. A lambda value is probed under the parameter's
 // escape policy, so its capture facts match.
-sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Type, required_alias: String?, value: Expr, lambda_escapes: Bool?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) {
+sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Type, required_alias: String?, value: Expr, lambda_escapes: Bool?, diagnostic_start: Int, check: ^SemaBodyCheck) {
     value_span: expr_span(value)
-    found := sema_value_mismatch_index(diagnostics, diagnostic_start, value_span)
+    found := sema_value_mismatch_index(check.diagnostics, diagnostic_start, value_span)
     if found == None && value == .Lambda(body_lambda, _) && ast_lambda_single_expr_span(body_lambda.body) == .Val(body_span) {
-        found = sema_value_mismatch_index(diagnostics, diagnostic_start, body_span)
+        found = sema_value_mismatch_index(check.diagnostics, diagnostic_start, body_span)
     }
     mismatch_index: found ?? return
     probe_diagnostics := [Diagnostic]{}
     previous_lambda_escapes := check.context.lambda_escapes
     check.context.lambda_escapes = lambda_escapes
-    probed: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics)
+    probed: sema_probe_expression(value, None, check, probe_diagnostics)
     check.context.lambda_escapes = previous_lambda_escapes
     offered: probed ?? return
-    offered_ty := sema_call_resolved_type(offered.ty, environment, program)
+    offered_ty := sema_call_resolved_type(offered.ty, check.environment.*, check.program.*)
     // A lambda checked against a callable keeps its plain return; the probe
     // above had no target and gave it the total `Never!` carrier, which the
     // argument never had.
@@ -1297,7 +1299,7 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
     if value == .Lambda(shown_lambda, _) && ast_lambda_single_expr_span(shown_lambda.body) == .Val(shown_body_span) {
         shown_span = Span{start: value_span.start, end: shown_body_span.end}
     }
-    diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, required_alias, offered_ty, value, shown_span, program)
+    check.diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, required_alias, offered_ty, value, shown_span, check.program.*)
 }
 
 // Whether an argument after `own` references the binding `key`: arguments
@@ -1375,17 +1377,24 @@ sema_call_default_ref_module: fn(program: SemaProgramTables, reference: Function
 // place for the check. Its binder slots key under the calling function and
 // module, as sema_call_pin_binder_arguments reads them; a problem it reports
 // is anchored at the call.
-sema_call_check_owner_default: fn(owner_scope: ^^SemaDefaultOwnerScope?, argument: CallArg, expected: Type?, parameter: SemaCallParam, abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, call_span: Span, binder_keys: ^[SymbolID], diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_call_check_owner_default: fn(owner_scope: ^^SemaDefaultOwnerScope?, argument: CallArg, expected: Type?, parameter: SemaCallParam, abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, check: ^SemaBodyCheck, call_span: Span, binder_keys: ^[SymbolID]) -> TExpr? {
     scope := owner_scope.move() ?? return None
     if argument.flags.binder_refs.len() > 0 {
-        binder_keys = sema_call_enter_binder_refs(argument.flags.binder_refs, argument.flags.binder_site ?? call_span.start, environment, program, scope.scopes, scope.state, check.context, argument.expr)
+        binder_keys = sema_call_enter_binder_refs(argument.flags.binder_refs, argument.flags.binder_site ?? call_span.start, check.environment.*, check.program.*, scope.scopes, scope.state, check.context, argument.expr)
     }
-    default_diagnostics := [Diagnostic]{}
-    sema_body_check_swap_state(check, scope.state)
-    checked: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(argument.expr, expected, scope.environment, program, scope.scopes, check, sema_call_lambda_escape_policy(parameter, abi), default_diagnostics) else -> sema_check_expression(argument.expr, expected, scope.environment, program, scope.scopes, check, default_diagnostics)
-    sema_body_check_swap_state(check, scope.state)
-    loop diagnostic in default_diagnostics {
-        diagnostics.push(sema_default_use_site_diagnostic(diagnostic, call_span))
+    // The default checks on a record of its own, linked to the owner
+    // module's environment and holding the owner scope's state and table,
+    // lent this record's context and tail store for the check.
+    owner_check := sema_body_check_init(check.program, @scope.environment)
+    sema_body_check_swap_state(owner_check, scope.state)
+    sema_body_check_swap_scopes(owner_check, scope.scopes)
+    sema_body_check_swap_context(owner_check, check.context)
+    sema_body_check_swap_tail_store(owner_check, check.tail_store)
+    checked: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(argument.expr, expected, owner_check, sema_call_lambda_escape_policy(parameter, abi)) else -> sema_check_expression(argument.expr, expected, owner_check)
+    sema_body_check_swap_tail_store(owner_check, check.tail_store)
+    sema_body_check_swap_context(owner_check, check.context)
+    loop diagnostic in owner_check.diagnostics {
+        check.diagnostics.push(sema_default_use_site_diagnostic(diagnostic, call_span))
     }
     checked
 }
@@ -1654,42 +1663,42 @@ sema_call_pack_variadic_arguments: fn(typed: SemaCallTypedArguments, params: [Se
 // lowering happens only after the ownership check accepts and completes.
 // Return the lowered arguments together with the declaration-slot
 // temporaries placed before the call.
-sema_call_check_bound_arguments_owned: fn(check: ^SemaBodyCheck, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: ^[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> {lowered: [TCallArg], pins: [TStmt]}? {
-    typing_start: diagnostics.len()
-    typed: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, args, environment, program, scopes, check, span, diagnostics, false) ?? {
+sema_call_check_bound_arguments_owned: fn(check: ^SemaBodyCheck, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: ^[CallArg], span: Span) -> {lowered: [TCallArg], pins: [TStmt]}? {
+    typing_start: check.diagnostics.len()
+    typed: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, args, check, span, false) ?? {
         // A mismatched argument type is reported and the call's argument
         // accesses are still checked (a lambda argument's captures against the
         // other arguments). The arguments are inferred in order, each one's
         // access conflicts before its own mismatch.
-        if sema_call_only_argument_mismatches(diagnostics, typing_start) {
-            mismatches: loop index in typing_start..<diagnostics.len() -> diagnostics[index]
-            loop diagnostics.len() > typing_start -> _ := diagnostics.pop()
+        if sema_call_only_argument_mismatches(check.diagnostics, typing_start) {
+            mismatches: loop index in typing_start..<check.diagnostics.len() -> check.diagnostics[index]
+            loop check.diagnostics.len() > typing_start -> _ := check.diagnostics.pop()
             accesses := [Diagnostic]{}
-            _ := sema_ownership_check_call_arguments(check.state, callee, params, args, scopes, accesses)
+            _ := sema_ownership_check_call_arguments(check.state, callee, params, args, check.scopes, accesses)
             loop position in 0..args.len() {
                 loop access in accesses {
                     if sema_call_diagnostic_argument(access, args) == position {
-                        diagnostics.push(access)
+                        check.diagnostics.push(access)
                     }
                 }
                 loop mismatch in mismatches {
                     if sema_call_diagnostic_argument(mismatch, args) == position {
-                        diagnostics.push(mismatch)
+                        check.diagnostics.push(mismatch)
                     }
                 }
             }
         }
         return None
     }
-    ownership: sema_ownership_check_call_arguments(check.state, callee, params, args, scopes, diagnostics)
+    ownership: sema_ownership_check_call_arguments(check.state, callee, params, args, check.scopes, check.diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
-    lowered := sema_call_lower_bound_arguments(typed, params, args, environment, program)
-    if !sema_call_prepare_variadic_elements(typed, params, args, lowered, environment, program, scopes, check.state, check.context, diagnostics) {
+    lowered := sema_call_lower_bound_arguments(typed, params, args, check.environment.*, check.program.*)
+    if !sema_call_prepare_variadic_elements(typed, params, args, lowered, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics) {
         return None
     }
-    pins := sema_call_pin_binder_arguments(typed, params, lowered, environment, program, scopes, check.context, span)
-    packed := sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, check.context, span, diagnostics) ?? return None
-    sema_call_compiler_handoffs(callee, packed, environment, program, scopes, span)
+    pins := sema_call_pin_binder_arguments(typed, params, lowered, check.environment.*, check.program.*, check.scopes, check.context, span)
+    packed := sema_call_pack_variadic_arguments(typed, params, lowered, check.environment.*, check.program.*, check.context, span, check.diagnostics) ?? return None
+    sema_call_compiler_handoffs(callee, packed, check.environment.*, check.program.*, check.scopes, span)
     Val({lowered: packed.move(), pins: pins.move()})
 }
 

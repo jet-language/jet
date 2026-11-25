@@ -52,7 +52,7 @@ sema_loop_value_check_result_exit: fn(context: ^SemaCheckContext, frame_index: I
     Val(value)
 }
 
-sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, check: ^SemaBodyCheck) -> TExpr? {
     if check.context.collect_item_types.len() == 0 -> return None
     expected := sema_loop_value_collecting_type(check.context)
     checked_expected := expected
@@ -61,11 +61,11 @@ sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: 
     }
     outer_item_if: check.context.collect_item_if
     check.context.collect_item_if = if value == .If(_, _, _, _, _, _, _) -> Val(span) else -> None
-    checked_value: sema_check_expression(value, checked_expected, environment, program, scopes, check, diagnostics)
+    checked_value: sema_check_expression(value, checked_expected, check)
     check.context.collect_item_if = outer_item_if
     checked: checked_value ?? return None
     if checked.ty == (Type.Named{name: "Unit"}) {
-        diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
+        check.diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
         return None
     }
     if expected == None {
@@ -75,14 +75,14 @@ sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: 
     required: expected ?? checked.ty
     if type_identity_equal(required, checked.ty) -> return Val(checked)
     common: sema_expr_numeric_join(required, checked.ty) ?? {
-        diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is `{type_name(checked.ty)}` instead of `{type_name(required)}`", "convert every item to one type, or split the loops"))
+        check.diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is `{type_name(checked.ty)}` instead of `{type_name(required)}`", "convert every item to one type, or split the loops"))
         return None
     }
     sema_loop_value_set_collecting_type(check.context, common)
     if type_identity_equal(common, checked.ty) -> return Val(checked)
     if sema_expr_numeric_value_widening(checked, common) == (Val(true)) {
-        line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
-        return sema_expr_numeric_literal_conversion(checked, common, checked.span, line, diagnostics)
+        line: sema_source_line_at(check.environment.source_segments, checked.span) ?? 0
+        return sema_expr_numeric_literal_conversion(checked, common, checked.span, line, check.diagnostics)
     }
     Val(checked)
 }

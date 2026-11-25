@@ -226,9 +226,12 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
     if stmt == {
         .Unsafe(audit, audit_expr, _, span) -> {
             args := [JetFmtMarkerArgument]{}
-            if audit_expr == .Val(value) {
-                args.push(JetFmtMarkerArgument.Expr{label: None, value: value})
-            } else if audit == .Val(reason) { args.push(JetFmtMarkerArgument.Text{value: reason}) }
+            if {
+                audit_expr == .Val(value) -> {
+                    args.push(JetFmtMarkerArgument.Expr{label: None, value: value})
+                }
+                audit == .Val(reason) -> { args.push(JetFmtMarkerArgument.Text{value: reason}) }
+            }
             loop declaration in policies {
                 if declaration.key != PolicyKey.Unsafe -> next
                 target: declaration.target ?? next
@@ -245,9 +248,12 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
         }
         .Impure(reason, reason_expr, _, _) -> {
             args := [JetFmtMarkerArgument]{}
-            if reason_expr == .Val(value) {
-                args.push(JetFmtMarkerArgument.Expr{label: None, value: value})
-            } else if reason == .Val(text) { args.push(JetFmtMarkerArgument.Text{value: text}) }
+            if {
+                reason_expr == .Val(value) -> {
+                    args.push(JetFmtMarkerArgument.Expr{label: None, value: value})
+                }
+                reason == .Val(text) -> { args.push(JetFmtMarkerArgument.Text{value: text}) }
+            }
             Val(JetFmtBlockMarker{name: "Impure", negated: false, args: args})
         }
         .Reactive(_, _) -> Val(JetFmtBlockMarker{name: "Reactive", negated: false, args: [JetFmtMarkerArgument]{}})
@@ -484,11 +490,14 @@ jfmt_fmt_block_lines: fn(f: ^JetFmt, body: [Stmt], markers: [Marker]) {
     loop index < body.len() || marker_index < markers.len() {
         if marker_index < markers.len() && (index >= body.len() || markers[marker_index].span.start < jfmt_stmt_start(body[index])) {
             marker: markers[marker_index]
-            if previous_end == .Val(end) {
-                jfmt_newline(f)
-                gap_start: jfmt_statement_gap_start(f, end, marker.span.start)
-                jfmt_emit_leading_statement_gap(f, gap_start, marker.span.start)
-            } else { jfmt_emit_leading(f, marker.span.start) }
+            if {
+                previous_end == .Val(end) -> {
+                    jfmt_newline(f)
+                    gap_start: jfmt_statement_gap_start(f, end, marker.span.start)
+                    jfmt_emit_leading_statement_gap(f, gap_start, marker.span.start)
+                }
+                else -> { jfmt_emit_leading(f, marker.span.start) }
+            }
             jfmt_fmt_inbody_marker(f, marker)
             jfmt_emit_trailing(f, marker.span.end)
             previous_end = Val(marker.span.end)
@@ -498,23 +507,29 @@ jfmt_fmt_block_lines: fn(f: ^JetFmt, body: [Stmt], markers: [Marker]) {
         stmt: body[index]
         fence: jfmt_fenced_statement_for(f, stmt)
         source_start: if fence == .Val(fact) -> fact.span.start else -> jfmt_stmt_start(stmt)
-        if previous_end == .Val(end) {
-            jfmt_newline(f)
-            gap_next: if fence == None -> jfmt_stmt_gap_next(stmt) else -> source_start
-            gap_start: jfmt_statement_gap_start(f, end, gap_next)
-            jfmt_emit_leading_statement_gap(f, gap_start, source_start)
-        } else { jfmt_emit_leading(f, source_start) }
-        if fence == .Val(fact) {
-            jfmt_fmt_fenced_statement(f, fact)
-            jfmt_emit_trailing(f, fact.span.end)
-            previous_end = Val(fact.span.end)
-            index += fact.copies
-        } else {
-            jfmt_fmt_stmt(f, stmt)
-            end: jfmt_statement_source_end(f, stmt)
-            jfmt_emit_trailing(f, end)
-            previous_end = Val(end)
-            index += 1
+        if {
+            previous_end == .Val(end) -> {
+                jfmt_newline(f)
+                gap_next: if fence == None -> jfmt_stmt_gap_next(stmt) else -> source_start
+                gap_start: jfmt_statement_gap_start(f, end, gap_next)
+                jfmt_emit_leading_statement_gap(f, gap_start, source_start)
+            }
+            else -> { jfmt_emit_leading(f, source_start) }
+        }
+        if {
+            fence == .Val(fact) -> {
+                jfmt_fmt_fenced_statement(f, fact)
+                jfmt_emit_trailing(f, fact.span.end)
+                previous_end = Val(fact.span.end)
+                index += fact.copies
+            }
+            else -> {
+                jfmt_fmt_stmt(f, stmt)
+                end: jfmt_statement_source_end(f, stmt)
+                jfmt_emit_trailing(f, end)
+                previous_end = Val(end)
+                index += 1
+            }
         }
     }
     if previous_end == .Val(end) {
@@ -695,12 +710,15 @@ jfmt_write_normalized_source_fragment: fn(f: ^JetFmt, fragment: String) {
     words := [String]{}
     word := [U8]{}
     loop byte in bytes {
-        if jfmt_is_ascii_space(byte) {
-            if word.len() > 0 {
-                words.push(String.from_bytes(word) ?? "")
-                word = [U8]{}
+        if {
+            jfmt_is_ascii_space(byte) -> {
+                if word.len() > 0 {
+                    words.push(String.from_bytes(word) ?? "")
+                    word = [U8]{}
+                }
             }
-        } else { word.push(byte) }
+            else -> { word.push(byte) }
+        }
     }
     if word.len() > 0 -> words.push(String.from_bytes(word) ?? "")
     if words.len() == 0 {
@@ -748,11 +766,14 @@ jfmt_source_has_blank_line: fn(bytes: [U8], start: Int, end: Int) -> Bool Never!
     only_space_since_newline := true
     loop index in start..<end {
         byte: bytes[index]
-        if (Int{byte}) == 10 {
-            if saw_newline && only_space_since_newline -> return true
-            saw_newline = true
-            only_space_since_newline = true
-        } else if !jfmt_is_ascii_space(byte) { only_space_since_newline = false }
+        if {
+            (Int{byte}) == 10 -> {
+                if saw_newline && only_space_since_newline -> return true
+                saw_newline = true
+                only_space_since_newline = true
+            }
+            !jfmt_is_ascii_space(byte) -> { only_space_since_newline = false }
+        }
     }
     false
 }
@@ -769,10 +790,14 @@ jfmt_fmt_stmt_inline: fn(f: ^JetFmt, stmt: Stmt) {
 }
 
 jfmt_fmt_marker_arg_separator: fn(f: ^JetFmt, first: ^Bool, multiline: Bool) {
-    if first -> first = false else if multiline {
-        jfmt_write(f, ",")
-        jfmt_newline(f)
-    } else { jfmt_write(f, ", ") }
+    if {
+        first -> first = false
+        multiline -> {
+            jfmt_write(f, ",")
+            jfmt_newline(f)
+        }
+        else -> { jfmt_write(f, ", ") }
+    }
 }
 
 jfmt_fmt_block_marker: fn(f: ^JetFmt, marker: JetFmtBlockMarker, source_start: Int) {
@@ -896,42 +921,52 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
                 .Call(call, _) -> call.name == "__jet_unsafe_assert"
                 .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
             }
-            if unsafe_assert {
-                if e == .Call(call, _) {
-                    jfmt_write(f, "assert")
-                    loop index in 0..<call.args.len() {
-                        jfmt_write(f, if index == 0 -> " " else -> ", ")
-                        if call.args[index].expr == .Ident(name, _, _) -> jfmt_write(f, name)
+            if {
+                unsafe_assert -> {
+                    if e == .Call(call, _) {
+                        jfmt_write(f, "assert")
+                        loop index in 0..<call.args.len() {
+                            jfmt_write(f, if index == 0 -> " " else -> ", ")
+                            if call.args[index].expr == .Ident(name, _, _) -> jfmt_write(f, name)
+                        }
                     }
                 }
-            } else {
-                saved_head: jfmt_expr_stmt_begin(f)
-                jfmt_fmt_expr(f, e, JFMT_PREC_OR_FALLBACK)
-                f.stmt_head_at = saved_head
+                else -> {
+                    saved_head: jfmt_expr_stmt_begin(f)
+                    jfmt_fmt_expr(f, e, JFMT_PREC_OR_FALLBACK)
+                    f.stmt_head_at = saved_head
+                }
             }
         }
         .Val(b) -> { jfmt_fmt_binding(f, b) }
         .Assign(target, op, op_span, value) -> {
             jfmt_fmt_lvalue(f, target)
-            if op == .Val(compound) {
-                // An operator with no compound form assigns its method call.
-                if jfmt_bin_op_method(compound) == .Val(method) {
+            if {
+                op == .Val(compound) -> {
+                    // An operator with no compound form assigns its method call.
+                    if {
+                        jfmt_bin_op_method(compound) == .Val(method) -> {
+                            jfmt_write(f, " = ")
+                            jfmt_fmt_lvalue(f, target)
+                            jfmt_write(f, ".{method}(")
+                            jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+                            jfmt_write(f, ")")
+                        }
+                        compound == BinOp.BitAnd && value == .Unary(.Complement, cleared, _, _) -> {
+                            // `x &= ~m` clears bits and prints as `x &~= m`.
+                            jfmt_write(f, " &~= ")
+                            jfmt_fmt_expr(f, cleared, JFMT_PREC_OR_FALLBACK)
+                        }
+                        else -> {
+                            jfmt_write(f, " {jfmt_compound_spell(compound)} ")
+                            jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+                        }
+                    }
+                }
+                !jfmt_fmt_expanded_compound(f, target, op_span, value, 0) -> {
                     jfmt_write(f, " = ")
-                    jfmt_fmt_lvalue(f, target)
-                    jfmt_write(f, ".{method}(")
-                    jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-                    jfmt_write(f, ")")
-                } else if compound == BinOp.BitAnd && value == .Unary(.Complement, cleared, _, _) {
-                    // `x &= ~m` clears bits and prints as `x &~= m`.
-                    jfmt_write(f, " &~= ")
-                    jfmt_fmt_expr(f, cleared, JFMT_PREC_OR_FALLBACK)
-                } else {
-                    jfmt_write(f, " {jfmt_compound_spell(compound)} ")
                     jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
                 }
-            } else if !jfmt_fmt_expanded_compound(f, target, op_span, value, 0) {
-                jfmt_write(f, " = ")
-                jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
             }
         }
         .Return(expr, _) -> {
@@ -963,13 +998,22 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
             if hole_end >= 0 -> jfmt_write_verbatim(f, span.start, hole_end, false) else {
                 jfmt_write(f, "if")
                 jfmt_write(f, " ")
-                if parser_is_subjectless_guard(subject, span) {
-                    if jfmt_switch_was_classic_if(f, arms, span) {
-                        if f.simplify && arms.len() > 1 {
-                            jfmt_fmt_guard_dispatch(f, arms, else_body, span)
-                        } else { jfmt_fmt_classic_switch(f, arms, else_body, span.start) }
-                    } else { jfmt_fmt_guard_dispatch(f, arms, else_body, span) }
-                } else { jfmt_fmt_dispatch(f, subject, arms, else_body, span) }
+                if {
+                    parser_is_subjectless_guard(subject, span) -> {
+                        if {
+                            jfmt_switch_was_classic_if(f, arms, span) -> {
+                                if {
+                                    f.simplify && arms.len() > 1 -> {
+                                        jfmt_fmt_guard_dispatch(f, arms, else_body, span)
+                                    }
+                                    else -> { jfmt_fmt_classic_switch(f, arms, else_body, span.start) }
+                                }
+                            }
+                            else -> { jfmt_fmt_guard_dispatch(f, arms, else_body, span) }
+                        }
+                    }
+                    else -> { jfmt_fmt_dispatch(f, subject, arms, else_body, span) }
+                }
             }
         }
         .Break(_) -> { jfmt_write(f, "break") }
@@ -984,13 +1028,16 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
             }
         }
         .BreakLabelValue(name, _, value, _) -> {
-            if jfmt_is_generated_label(name) {
-                jfmt_write(f, "break ")
-                jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-            } else {
-                jfmt_write(f, "break({name}, ")
-                jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-                jfmt_write(f, ")")
+            if {
+                jfmt_is_generated_label(name) -> {
+                    jfmt_write(f, "break ")
+                    jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+                }
+                else -> {
+                    jfmt_write(f, "break({name}, ")
+                    jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+                    jfmt_write(f, ")")
+                }
             }
         }
         .ContinueLabel(name, _) -> {
@@ -1031,12 +1078,15 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
         .Shield(body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `defer statement` stays one line; a braced or longer body keeps its braces.
         .Defer(body, span) -> {
-            if body.len() == 1 && !jfmt_defer_braced(f, span) {
-                jfmt_write(f, "defer ")
-                jfmt_fmt_stmt(f, body[0])
-            } else {
-                jfmt_write(f, "defer {{")
-                jfmt_fmt_block_body(f, body, span.end)
+            if {
+                body.len() == 1 && !jfmt_defer_braced(f, span) -> {
+                    jfmt_write(f, "defer ")
+                    jfmt_fmt_stmt(f, body[0])
+                }
+                else -> {
+                    jfmt_write(f, "defer {{")
+                    jfmt_fmt_block_body(f, body, span.end)
+                }
             }
         }
         // `#Region(r) { … }`.
@@ -1090,16 +1140,19 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
         // `#run { … }` shared-preparation block.
         .ComptimeBlock(body, is_template_loop, _) -> {
             // A template loop prints as `#loop …`.
-            if is_template_loop && body.len() == 1 {
-                jfmt_write(f, "#")
-                jfmt_fmt_template_loop_stmt(f, body[0])
-            } else {
-                jfmt_write(f, "#run {{")
-                jfmt_newline(f)
-                f.indent += 1
-                jfmt_fmt_block_stmts(f, body)
-                f.indent -= 1
-                jfmt_end_block(f)
+            if {
+                is_template_loop && body.len() == 1 -> {
+                    jfmt_write(f, "#")
+                    jfmt_fmt_template_loop_stmt(f, body[0])
+                }
+                else -> {
+                    jfmt_write(f, "#run {{")
+                    jfmt_newline(f)
+                    f.indent += 1
+                    jfmt_fmt_block_stmts(f, body)
+                    f.indent -= 1
+                    jfmt_end_block(f)
+                }
             }
         }
         // Format like `if` with a `#` lead.
@@ -1113,16 +1166,19 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
             f.indent -= 1
             jfmt_end_block(f)
             if else_body == .Val(eb) {
-                if jfmt_comptime_else_chain(f, eb) {
-                    jfmt_write(f, " else ")
-                    jfmt_fmt_stmt(f, eb[0])
-                } else {
-                    jfmt_write(f, " else {{")
-                    jfmt_newline(f)
-                    f.indent += 1
-                    jfmt_fmt_block_stmts(f, eb)
-                    f.indent -= 1
-                    jfmt_end_block(f)
+                if {
+                    jfmt_comptime_else_chain(f, eb) -> {
+                        jfmt_write(f, " else ")
+                        jfmt_fmt_stmt(f, eb[0])
+                    }
+                    else -> {
+                        jfmt_write(f, " else {{")
+                        jfmt_newline(f)
+                        f.indent += 1
+                        jfmt_fmt_block_stmts(f, eb)
+                        f.indent -= 1
+                        jfmt_end_block(f)
+                    }
                 }
             }
         }
@@ -1238,20 +1294,23 @@ jfmt_fmt_for_head: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?,
     bindingless: var2 == None && var == "it"
     destructures: jfmt_fmt_loop_head_pattern(f, var, body)
     if !bindingless && !destructures {
-        if var2 == .Val(second) {
-            jfmt_write(f, "(")
-            source: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_PAREN)
-            names: [String]{var, second.name}
-            spans: [Span]{var_span, second.span}
-            multiline: jfmt_comma_begin(f, 2, source)
-            loop index in 0..<2 {
-                jfmt_comma_before(f, index, multiline, spans[index].start)
-                jfmt_write(f, names[index])
-                jfmt_comma_after(f, multiline, spans[index].end)
+        if {
+            var2 == .Val(second) -> {
+                jfmt_write(f, "(")
+                source: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_PAREN)
+                names: [String]{var, second.name}
+                spans: [Span]{var_span, second.span}
+                multiline: jfmt_comma_begin(f, 2, source)
+                loop index in 0..<2 {
+                    jfmt_comma_before(f, index, multiline, spans[index].start)
+                    jfmt_write(f, names[index])
+                    jfmt_comma_after(f, multiline, spans[index].end)
+                }
+                jfmt_comma_end(f, multiline, source)
+                jfmt_write(f, ")")
             }
-            jfmt_comma_end(f, multiline, source)
-            jfmt_write(f, ")")
-        } else { jfmt_write(f, var) }
+            else -> { jfmt_write(f, var) }
+        }
     }
     clause_width: if kind == {
         .Range(start, end, step, exclusive) -> {
@@ -1470,10 +1529,13 @@ jfmt_fmt_dispatch_table: fn(f: ^JetFmt, subject: Expr, arms: [SwitchArm], else_b
             jfmt_fmt_switch_arm(f, subject, table_op, arm, false, statement_table)
             next
         }
-        if index > 0 {
-            jfmt_newline(f)
-            jfmt_emit_leading_statement_gap(f, arms[index - 1].span.end, arm.span.start)
-        } else { jfmt_emit_leading(f, arm.span.start) }
+        if {
+            index > 0 -> {
+                jfmt_newline(f)
+                jfmt_emit_leading_statement_gap(f, arms[index - 1].span.end, arm.span.start)
+            }
+            else -> { jfmt_emit_leading(f, arm.span.start) }
+        }
         // One arm per line: braces keep a leading-dot next arm from reading
         // as a chain on this arm's expression.
         next_starts_with_dot: index + 1 < arms.len() && jfmt_arm_head_starts_with_dot(arms[index + 1].cond)
@@ -1497,14 +1559,17 @@ jfmt_fmt_dispatch_else_lead: fn(f: ^JetFmt, arms: [SwitchArm], compact: Bool) {
         if arms.len() > 0 -> jfmt_write(f, ", ")
         return
     }
-    if arms.len() > 0 {
-        jfmt_newline(f)
-        last: arms[arms.len() - 1]
-        if jfmt_dispatch_else_start(f, last.span.end) == .Val(else_start) {
-            jfmt_emit_leading_statement_gap(f, last.span.end, else_start)
+    if {
+        arms.len() > 0 -> {
+            jfmt_newline(f)
+            last: arms[arms.len() - 1]
+            if jfmt_dispatch_else_start(f, last.span.end) == .Val(else_start) {
+                jfmt_emit_leading_statement_gap(f, last.span.end, else_start)
+            }
         }
-    } else if jfmt_dispatch_else_start(f, 0) == .Val(else_start) {
-        jfmt_emit_leading(f, else_start)
+        jfmt_dispatch_else_start(f, 0) == .Val(else_start) -> {
+            jfmt_emit_leading(f, else_start)
+        }
     }
 }
 
@@ -1544,12 +1609,16 @@ jfmt_fmt_guard_dispatch_table: fn(f: ^JetFmt, arms: [SwitchArm], else_body: [Stm
     jfmt_table_open(f, compact)
     loop index in 0..<arms.len() {
         arm: arms[index]
-        if compact {
-            if index > 0 -> jfmt_write(f, ", ")
-        } else if index > 0 {
-            jfmt_newline(f)
-            jfmt_emit_leading_statement_gap(f, arms[index - 1].span.end, arm.span.start)
-        } else { jfmt_emit_leading(f, arm.span.start) }
+        if {
+            compact -> {
+                if index > 0 -> jfmt_write(f, ", ")
+            }
+            index > 0 -> {
+                jfmt_newline(f)
+                jfmt_emit_leading_statement_gap(f, arms[index - 1].span.end, arm.span.start)
+            }
+            else -> { jfmt_emit_leading(f, arm.span.start) }
+        }
         if !jfmt_fmt_readiness_head(f, arm.cond) {
             jfmt_fmt_expr(f, arm.cond, JFMT_PREC_OR_FALLBACK)
         }
@@ -1895,25 +1964,29 @@ jfmt_fmt_switch_cond: fn(f: ^JetFmt, subject: Expr, table_op: BinOp, cond: Expr,
     }
     if cond == {
         .Binary(op, lhs, rhs, _, _) -> {
-            if op == BinOp.And || op == BinOp.Or {
-                my_prec: jfmt_prec_of_bin(op)
-                needs_paren: prec > my_prec
-                if needs_paren -> jfmt_write(f, "(")
-                // E0082 (amendment): an `&&` operand of `||`
-                // always prints with its grouping parentheses.
-                lhs_slot: jfmt_switch_cond_slot(op, lhs, my_prec)
-                rhs_slot: jfmt_switch_cond_slot(op, rhs, jfmt_prec_add_rhs(my_prec))
-                jfmt_fmt_switch_cond(f, subject, table_op, lhs, lhs_slot)
-                jfmt_write(f, " ")
-                jfmt_write(f, jfmt_bin_op_spell(op))
-                jfmt_write(f, " ")
-                jfmt_fmt_switch_cond(f, subject, table_op, rhs, rhs_slot)
-                if needs_paren -> jfmt_write(f, ")")
-            } else if op == table_op && jfmt_same_subject(f, lhs, subject) {
-                // Only strip the table's distributed marker — predicate arms
-                // like `code >= 500` under `if code == { … }` print in full.
-                jfmt_fmt_expr(f, rhs, JFMT_PREC_CMP)
-            } else { jfmt_fmt_expr(f, cond, prec) }
+            if {
+                op == BinOp.And || op == BinOp.Or -> {
+                    my_prec: jfmt_prec_of_bin(op)
+                    needs_paren: prec > my_prec
+                    if needs_paren -> jfmt_write(f, "(")
+                    // E0082 (amendment): an `&&` operand of `||`
+                    // always prints with its grouping parentheses.
+                    lhs_slot: jfmt_switch_cond_slot(op, lhs, my_prec)
+                    rhs_slot: jfmt_switch_cond_slot(op, rhs, jfmt_prec_add_rhs(my_prec))
+                    jfmt_fmt_switch_cond(f, subject, table_op, lhs, lhs_slot)
+                    jfmt_write(f, " ")
+                    jfmt_write(f, jfmt_bin_op_spell(op))
+                    jfmt_write(f, " ")
+                    jfmt_fmt_switch_cond(f, subject, table_op, rhs, rhs_slot)
+                    if needs_paren -> jfmt_write(f, ")")
+                }
+                op == table_op && jfmt_same_subject(f, lhs, subject) -> {
+                    // Only strip the table's distributed marker — predicate arms
+                    // like `code >= 500` under `if code == { … }` print in full.
+                    jfmt_fmt_expr(f, rhs, JFMT_PREC_CMP)
+                }
+                else -> { jfmt_fmt_expr(f, cond, prec) }
+            }
         }
         // A pattern arm head is bare — the comparison marker on the
         // `if` already binds it to the subject. A guard's own test of
@@ -1952,12 +2025,16 @@ jfmt_dispatch_op_from_source: fn(f: JetFmt, subject: Expr) -> BinOp? Never! {
             if kind == TOKEN_LBRACE -> return pending
             pending = None
         }
-        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1 else if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
-            depth -= 1
-            if depth < 0 -> return None
-        } else if depth == 0 {
-            if kind == TOKEN_LBRACE -> return None
-            pending = jfmt_dispatch_token_op(kind)
+        if {
+            kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+            kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> {
+                depth -= 1
+                if depth < 0 -> return None
+            }
+            depth == 0 -> {
+                if kind == TOKEN_LBRACE -> return None
+                pending = jfmt_dispatch_token_op(kind)
+            }
         }
     }
     None
@@ -1985,13 +2062,16 @@ jfmt_dispatch_op: fn(f: JetFmt, subject: Expr, arms: [SwitchArm]) -> BinOp Never
 
 jfmt_collect_dispatch_ops: fn(f: JetFmt, subject: Expr, e: Expr, found: ^BinOp?) Never! {
     if e == .Binary(op, lhs, rhs, _, _) {
-        if jfmt_bin_op_is_comparison(op) && jfmt_same_subject(f, lhs, subject) {
-            // Mixed predicate + distributed leaves keep the first distributed
-            // OP only when source was unavailable.
-            if found == None -> found = Val(op)
-        } else if op == BinOp.And || op == BinOp.Or {
-            jfmt_collect_dispatch_ops(f, subject, lhs, found)
-            jfmt_collect_dispatch_ops(f, subject, rhs, found)
+        if {
+            jfmt_bin_op_is_comparison(op) && jfmt_same_subject(f, lhs, subject) -> {
+                // Mixed predicate + distributed leaves keep the first distributed
+                // OP only when source was unavailable.
+                if found == None -> found = Val(op)
+            }
+            op == BinOp.And || op == BinOp.Or -> {
+                jfmt_collect_dispatch_ops(f, subject, lhs, found)
+                jfmt_collect_dispatch_ops(f, subject, rhs, found)
+            }
         }
     }
 }
@@ -2076,35 +2156,44 @@ jfmt_fmt_binding: fn(f: ^JetFmt, b: Binding) {
         jfmt_fmt_prepared_value(f, b.init)
         return
     }
-    if b.pattern == .Val(pattern_value) {
-        if pattern_value == .Refutable(pattern, fallback, _, _) {
-            // This statement has no binding sigil in its surface form; the
-            // successful pattern captures are the locals. The subject keeps
-            // the grouping parens its author wrote (#6898 c20).
-            jfmt_fmt_expr(f, b.init, JFMT_PREC_CMP)
-            jfmt_write(f, " == ")
-            jfmt_fmt_pattern(f, pattern)
-            jfmt_write(f, " ")
-            jfmt_write(f, "??")
-            jfmt_write(f, " ")
-            jfmt_fmt_or_fallback(f, fallback)
-            return
+    if {
+        b.pattern == .Val(pattern_value) -> {
+            if pattern_value == .Refutable(pattern, fallback, _, _) {
+                // This statement has no binding sigil in its surface form; the
+                // successful pattern captures are the locals. The subject keeps
+                // the grouping parens its author wrote (#6898 c20).
+                jfmt_fmt_expr(f, b.init, JFMT_PREC_CMP)
+                jfmt_write(f, " == ")
+                jfmt_fmt_pattern(f, pattern)
+                jfmt_write(f, " ")
+                jfmt_write(f, "??")
+                jfmt_write(f, " ")
+                jfmt_fmt_or_fallback(f, fallback)
+                return
+            }
+            // S74: a destructuring target stands in for the name.
+            jfmt_fmt_bind_pattern(f, pattern_value)
         }
-        // S74: a destructuring target stands in for the name.
-        jfmt_fmt_bind_pattern(f, pattern_value)
-    } else { jfmt_write(f, b.name) }
+        else -> { jfmt_write(f, b.name) }
+    }
     // Bindings are always bare (`name: …` / `name := …`).
     // Types ride the value (`Type{ … }`), never the binding name.
     jfmt_write(f, if b.mutable -> " := " else -> ": ")
     // Print `Type{ uninit }` from the binding's type.
-    if b.uninit {
-        if b.ty == .Val(ty) {
-            jfmt_fmt_type(f, ty)
-            jfmt_write(f, "{{ ")
-            jfmt_write(f, "uninit")
-            jfmt_write(f, " }}")
-        } else { jfmt_write(f, "uninit") }
-    } else { jfmt_fmt_expr(f, b.init, JFMT_PREC_OR_FALLBACK) }
+    if {
+        b.uninit -> {
+            if {
+                b.ty == .Val(ty) -> {
+                    jfmt_fmt_type(f, ty)
+                    jfmt_write(f, "{{ ")
+                    jfmt_write(f, "uninit")
+                    jfmt_write(f, " }}")
+                }
+                else -> { jfmt_write(f, "uninit") }
+            }
+        }
+        else -> { jfmt_fmt_expr(f, b.init, JFMT_PREC_OR_FALLBACK) }
+    }
 }
 
 // The prepared value of a compile-time binding keeps the spelling the author

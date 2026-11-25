@@ -104,16 +104,28 @@ sema_script_probe_enter: fn(probe: ^SemaScriptProbe, module_identity: ModuleID) 
 sema_script_probe_check: fn(probe: ^SemaScriptProbe, name: String) -> FnBody? {
     graph: probe.program.registration_graph
     item_index: sema_script_entry_function_item(graph.modules[probe.module_index].program.items, name) ?? return None
-    job: SemaBodyJob.TopLevel{item_index: item_index}
-    owner_id: sema_check_registered_function_id(job, probe.module_index, probe.environment, probe.program)
     dropped := [Diagnostic]{}
     calls := [SemaCallSiteFact]{}
     requests := [SemaComptimeRequest]{}
     references := [SemaNameReferenceFact]{}
-    checked := sema_function_check_registered(job, probe.module_index, sema_function_memory_plan_new(), None, owner_id, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, dropped, calls, requests, references)
+    checked := sema_script_probe_check_item(probe.program.registration_graph, item_index, probe.module_index, sema_function_memory_plan_new(), probe.environment, probe.program, probe.scopes, dropped, calls, requests, references) ?? return None
     function := checked.value.move() ?? return None
     sema_script_probe_merge_types(probe, function)
     Val(function.move())
+}
+
+// The check of top-level item `item_index` of `graph`'s module
+// `module_index` against `plan`, read once here (`graph` is `program`'s
+// registration graph, a read parameter so the function is borrowed); None
+// when that item is not a function.
+sema_script_probe_check_item: fn(graph: SemaRegistrationGraph, item_index: Int, module_index: Int, plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic], calls: ^[SemaCallSiteFact], requests: ^[SemaComptimeRequest], references: ^[SemaNameReferenceFact]) -> SemaFunctionResult? {
+    if graph.modules[module_index].program.items[item_index] == .Func(declaration) {
+        job: SemaBodyJob.TopLevel{item_index: item_index}
+        owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
+        position: sema_check_registered_memory_position(job, declaration, module_index, plan, environment, program)
+        return Val(sema_function_check_registered(job, declaration, module_index, plan, position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, None, diagnostics, calls, requests, references))
+    }
+    None
 }
 
 // The type rows the probe's last check interned (its scopes' type delta,
@@ -203,18 +215,26 @@ sema_script_probe_answer: fn(probe: ^SemaScriptProbe, plan: SemaFunctionMemoryPl
 // prepares it (sema_check_registration_method).
 sema_script_probe_recheck: fn(probe: ^SemaScriptProbe, plan: SemaFunctionMemoryPlan, job: SemaBodyJob) -> SemaFunctionResult {
     module_index: probe.module_index
-    owner_id: sema_check_registered_function_id(job, module_index, probe.environment, probe.program)
-    position: sema_check_registered_memory_position(job, module_index, plan, probe.environment, probe.program)
     dropped := [Diagnostic]{}
     calls := [SemaCallSiteFact]{}
     requests := [SemaComptimeRequest]{}
     references := [SemaNameReferenceFact]{}
-    if job == .TopLevel(_) {
-        return sema_function_check_registered(job, module_index, plan, position, owner_id, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, dropped, calls, requests, references)
+    if job == {
+        .TopLevel(item_index) -> sema_script_probe_check_item(probe.program.registration_graph, item_index, module_index, plan, probe.environment, probe.program, probe.scopes, dropped, calls, requests, references) ?? sema_function_check_unavailable("", "top-level item {item_index}: it is not a function")
+        .NominalMethod(ordinal, owner, row) -> sema_script_probe_recheck_method(SemaMethodJob.NominalMethod{ordinal: ordinal, nominal_index: owner, method_index: row}, probe.program.registration_graph.modules[module_index].nominals[owner].methods[row].declaration, module_index, plan, probe.environment, probe.program, probe.scopes, dropped, calls, requests, references)
+        .ImplMethod(ordinal, owner, row) -> sema_script_probe_recheck_method(SemaMethodJob.ImplMethod{ordinal: ordinal, implementation_index: owner, method_index: row}, probe.program.registration_graph.modules[module_index].impls[owner].methods[row].declaration, module_index, plan, probe.environment, probe.program, probe.scopes, dropped, calls, requests, references)
     }
-    input: sema_check_method_input(job, module_index, plan, position, probe.environment, probe.program)
-    raw: sema_check_registered_raw_protocol_return(job, module_index, probe.environment, probe.program)
-    sema_function_check_registered_on_thread(job, module_index, plan, input.memory_position, owner_id, input.function_kind, raw, input.generic_params, probe.environment, probe.program, probe.scopes, None, dropped, calls, requests, references)
+}
+
+// sema_script_probe_recheck of method `method`, whose method row's
+// declaration is `declaration`.
+sema_script_probe_recheck_method: fn(method: SemaMethodJob, declaration: Func, module_index: Int, plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic], calls: ^[SemaCallSiteFact], requests: ^[SemaComptimeRequest], references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+    job: sema_method_body_job(method)
+    owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
+    position: sema_check_registered_memory_position(job, declaration, module_index, plan, environment, program)
+    input: sema_check_method_input(method, module_index, plan, position, environment, program)
+    raw: sema_check_registered_raw_protocol_return(method, module_index, environment, program)
+    sema_function_check_registered_on_thread(job, declaration, module_index, plan, input.memory_position, owner_id, input.function_kind, raw, input.generic_params, environment, program, scopes, None, diagnostics, calls, requests, references)
 }
 
 // The job of the function of `graph`'s module `module_index` whose body
@@ -236,17 +256,16 @@ sema_script_probe_job: fn(graph: SemaRegistrationGraph, module_index: Int, at: I
         if job == {
             .NominalMethod(_, owner, row) -> {
                 if sema_script_probe_method_inside(graph.modules[module_index].nominals[owner].methods[row].declaration, at, width) {
-                    found = Val(job)
+                    found = Val(sema_method_body_job(job))
                     width = graph.modules[module_index].nominals[owner].methods[row].declaration.span.end - graph.modules[module_index].nominals[owner].methods[row].declaration.span.start
                 }
             }
             .ImplMethod(_, owner, row) -> {
                 if sema_script_probe_method_inside(graph.modules[module_index].impls[owner].methods[row].declaration, at, width) {
-                    found = Val(job)
+                    found = Val(sema_method_body_job(job))
                     width = graph.modules[module_index].impls[owner].methods[row].declaration.span.end - graph.modules[module_index].impls[owner].methods[row].declaration.span.start
                 }
             }
-            .TopLevel(_) -> {}
         }
     }
     found
@@ -344,8 +363,7 @@ sema_script_probe_append: fn(probe: ^SemaScriptProbe, item: ^^Item, functions: [
     item_index = graph.modules[module_index].program.items.len() - 1
     mark = Val(marked)
     mark_at: mark ?? return None
-    job: SemaBodyJob.TopLevel{item_index: item_index}
-    owner_id: sema_check_registered_function_id(job, module_index, probe.environment, probe.program)
+    owner_id: sema_check_top_level_function_id(probe.program, module_index, name)
     scoped.id = owner_id
     // A registered body checks only when the module scope binds it as
     // itself (sema_function_check_unregistered).
@@ -357,7 +375,7 @@ sema_script_probe_append: fn(probe: ^SemaScriptProbe, item: ^^Item, functions: [
     calls := [SemaCallSiteFact]{}
     requests := [SemaComptimeRequest]{}
     references := [SemaNameReferenceFact]{}
-    checked := sema_function_check_registered(job, module_index, sema_function_memory_plan_new(), None, owner_id, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, diagnostics, calls, requests, references)
+    checked := sema_script_probe_check_item(probe.program.registration_graph, item_index, module_index, sema_function_memory_plan_new(), probe.environment, probe.program, probe.scopes, diagnostics, calls, requests, references) ?? return sema_script_probe_unappend(probe, module_index, mark_at, scope_mark, name)
     function := checked.value.move() ?? return sema_script_probe_unappend(probe, module_index, mark_at, scope_mark, name)
     sema_script_probe_merge_types(probe, function)
     if !checked.complete || requests.len() > 0 || sema_script_probe_failed(diagnostics) {

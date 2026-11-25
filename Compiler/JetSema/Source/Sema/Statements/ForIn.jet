@@ -46,25 +46,25 @@ sema_stmt_range_integer_type: fn(ty: Type) -> Bool Never! {
     }
 }
 
-sema_stmt_check_range_endpoint: fn(expr: Expr, which: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    value: sema_check_expression(expr, None, environment, program, scopes, check, diagnostics) ?? return None
+sema_stmt_check_range_endpoint: fn(expr: Expr, which: String, check: ^SemaBodyCheck) -> TExpr? {
+    value: sema_check_expression(expr, None, check) ?? return None
     if !sema_stmt_range_integer_type(value.ty) {
-        diagnostics.push(sema_error("E0109", expr_span(expr), "the {which} of a `for` range must be Int, not {type_name(value.ty)}", "`loop` counts whole numbers between two ends", "use Int values for both ends, like `1..10` or `0..<n`"))
+        check.diagnostics.push(sema_error("E0109", expr_span(expr), "the {which} of a `for` range must be Int, not {type_name(value.ty)}", "`loop` counts whole numbers between two ends", "use Int values for both ends, like `1..10` or `0..<n`"))
         return None
     }
     Val(value)
 }
 
-sema_stmt_check_range_stride: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    value: sema_check_expression(expr, None, environment, program, scopes, check, diagnostics) ?? return None
+sema_stmt_check_range_stride: fn(expr: Expr, check: ^SemaBodyCheck) -> TExpr? {
+    value: sema_check_expression(expr, None, check) ?? return None
     if !sema_stmt_range_integer_type(value.ty) {
-        diagnostics.push(sema_error("E0123", expr_span(expr), "a range loop stride must be Int, not {type_name(value.ty)}", "the stride is how far to count each turn, so it must be a whole number", "use an Int stride, like `loop i in 0..10, 2`"))
+        check.diagnostics.push(sema_error("E0123", expr_span(expr), "a range loop stride must be Int, not {type_name(value.ty)}", "the stride is how far to count each turn, so it must be a whole number", "use an Int stride, like `loop i in 0..10, 2`"))
         return None
     }
     if expr == {
         .Int(n, span, _, _, _) -> {
             if n <= 0 {
-                diagnostics.push(sema_error("E0123", span, "a range loop stride must be positive, not {n}", "a zero or negative stride would never reach the end", "use a stride of 1 or more, like `loop i in 0..10, 2 {{ ... }}`"))
+                check.diagnostics.push(sema_error("E0123", span, "a range loop stride must be positive, not {n}", "a zero or negative stride would never reach the end", "use a stride of 1 or more, like `loop i in 0..10, 2 {{ ... }}`"))
                 return None
             }
         }
@@ -1387,16 +1387,16 @@ sema_stmt_for_in_columnar: fn(environment: SemaScopeEnvironment, program: SemaPr
     false
 }
 
-sema_stmt_check_source_stride: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    value: sema_check_expression(expr, None, environment, program, scopes, check, diagnostics) ?? return None
+sema_stmt_check_source_stride: fn(expr: Expr, check: ^SemaBodyCheck) -> TExpr? {
+    value: sema_check_expression(expr, None, check) ?? return None
     if !sema_stmt_range_integer_type(value.ty) {
-        diagnostics.push(sema_error("E0123", expr_span(expr), "a source loop stride must be {sema_type_show(Type.Int)}, not {sema_type_show(value.ty)}", "the stride counts source pulls, so it must be a positive whole number", "use an Int stride of 1 or more"))
+        check.diagnostics.push(sema_error("E0123", expr_span(expr), "a source loop stride must be {sema_type_show(Type.Int)}, not {sema_type_show(value.ty)}", "the stride counts source pulls, so it must be a positive whole number", "use an Int stride of 1 or more"))
         return None
     }
     if expr == {
         .Int(number, span, _, _, _) -> {
             if number <= 0 {
-                diagnostics.push(sema_error("E0123", span, "a source loop stride must be positive", "zero or a negative value cannot select a later source item", "use a stride of 1 or more"))
+                check.diagnostics.push(sema_error("E0123", span, "a source loop stride must be positive", "zero or a negative value cannot select a later source item", "use a stride of 1 or more"))
                 return None
             }
         }

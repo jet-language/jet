@@ -319,7 +319,7 @@ owned_role_operator: fn(role: String) -> String? Never! {
 
 // The one method of the methods trait that fills `role`: `get` for `Index`.
 owned_role_method: fn(role: String) -> String? Never! {
-    owned := owned_trait_for_role(role) ?? return None
+    owned: owned_trait_for_role(role) ?? return None
     if owned.contract == .Methods(methods, _, _) && methods.len() == 1 -> return Val(methods[0].name)
     None
 }
@@ -388,7 +388,7 @@ owned_trait_bundle: fn(marker: String) -> Bool Never! {
 // Whether the derive or marker `marker` gives a type a codec: a codec trait
 // or a family whose members are codec traits (`Codable`, `Encode`).
 owned_trait_codec_marker: fn(marker: String) -> Bool Never! {
-    names := owned_trait_family(marker)
+    names: owned_trait_family(marker)
     if names.len() == 0 -> return owned_trait_codec(marker)
     loop name in names {
         if !owned_trait_codec(name) -> return false

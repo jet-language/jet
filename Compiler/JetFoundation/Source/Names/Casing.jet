@@ -174,7 +174,7 @@ sema_casing_split_words: fn(name: String) -> [String] {
         loop index < scalars.len() {
             if {
                 sema_casing_is_upper(scalars[index]) -> {
-                    run_start := index
+                    run_start: index
                     loop index < scalars.len() && sema_casing_is_upper(scalars[index]) -> index += 1
                     if {
                         index < scalars.len() && sema_casing_is_lower(scalars[index]) && index - run_start > 1 -> {
@@ -399,17 +399,20 @@ sema_casing_acronym_name: fn(name: String) -> String {
         }
         if code >= 97 && code <= 122 -> has_lower = true
     }
-    if ascii {
-        if bytes.len() == 0 || (Int{bytes[0]}) < 65 || (Int{bytes[0]}) > 90 || !has_lower {
-            return name.copy()
+    if {
+        ascii -> {
+            if bytes.len() == 0 || (Int{bytes[0]}) < 65 || (Int{bytes[0]}) > 90 || !has_lower {
+                return name.copy()
+            }
         }
-    } else {
-        scalars: unicode.scalars(name)
-        if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()
-        loop scalar in scalars {
-            if sema_casing_is_lower(scalar) -> has_lower = true
+        else -> {
+            scalars: unicode.scalars(name)
+            if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()
+            loop scalar in scalars {
+                if sema_casing_is_lower(scalar) -> has_lower = true
+            }
+            if !has_lower -> return name.copy()
         }
-        if !has_lower -> return name.copy()
     }
     segments := [String]{}
     loop segment in name.split("_") {

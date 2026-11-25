@@ -64,10 +64,13 @@ parser_protocol_message: fn(state: ^JetParserState) -> ProtocolMessage {
         // retired repetition.
         found: parser_value(state, receiver)
         written: parser_value(state, sender)
-        if found != endpoint.expected {
-            parser_protocol_error(state, receiver.span, "expected receiver `{endpoint.expected}`, found `{found}`", "the retired endpoint-pair spelling still had to name the opposite endpoint", "write `{written}: …`")
-        } else {
-            parser_protocol_error(state, arrow.span, "protocol lines no longer repeat the receiver", "the sender already determines the direction", "write `client: Message(...)` or `server: Message(...)`")
+        if {
+            found != endpoint.expected -> {
+                parser_protocol_error(state, receiver.span, "expected receiver `{endpoint.expected}`, found `{found}`", "the retired endpoint-pair spelling still had to name the opposite endpoint", "write `{written}: …`")
+            }
+            else -> {
+                parser_protocol_error(state, arrow.span, "protocol lines no longer repeat the receiver", "the sender already determines the direction", "write `client: Message(...)` or `server: Message(...)`")
+            }
         }
     }
     parser_expect(state, TOKEN_COLON, "after a protocol message sender")

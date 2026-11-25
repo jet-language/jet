@@ -1094,8 +1094,8 @@ sema_check_struct_contains_view: fn(graph: SemaRegistrationGraph, module_identit
 // positions, so same-named functions keep declaration order and each job moves
 // once. Existing name-ordered summary jobs retain only their original source
 // cursors. Equal names retain declaration order, exactly as the canonical
-// stable merge.
-sema_check_view_summary_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) -> [Int] {
+// stable merge. `names` gets each job's function name, in job order.
+sema_check_view_summary_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, names: ^[String]) -> [Int] {
     jobs := [Int]{}
     graph: program.registration_graph
     loop item_index in 0..<graph.modules[module_index].program.items.len() {
@@ -1105,23 +1105,15 @@ sema_check_view_summary_jobs: fn(environment: SemaScopeEnvironment, program: Sem
             seen := [U32:Bool]{}
             if sema_check_type_contains_view(graph, graph.modules[module_index].module_identity, return_type, seen) {
                 jobs.push(item_index)
+                names.push(func.name)
             }
         }
     }
     jobs.move()
 }
 
-sema_check_view_summary_name_before: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, left: Int, right: Int) -> Bool {
-    graph: program.registration_graph
-    if graph.modules[module_index].program.items[left] == .Func(left_func) {
-        if graph.modules[module_index].program.items[right] == .Func(right_func) {
-            return left_func.name <= right_func.name
-        }
-    }
-    panic("a selected view summary lost its original function item")
-}
-
-sema_check_sort_view_summary_jobs: fn(jobs: ^[Int], environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) Never! {
+// Sorts `jobs` by `names` (sema_check_view_summary_jobs), its function names.
+sema_check_sort_view_summary_jobs: fn(jobs: ^[Int], names: [String]) Never! {
     count: jobs.len()
     if count < 2 {
         return
@@ -1139,7 +1131,7 @@ sema_check_sort_view_summary_jobs: fn(jobs: ^[Int], environment: SemaScopeEnviro
             right := middle
             out := start
             loop out < end {
-                if left < middle && (right >= end || sema_check_view_summary_name_before(environment, program, module_index, jobs[order[left]], jobs[order[right]])) {
+                if left < middle && (right >= end || names[order[left]] <= names[order[right]]) {
                     merged[out] = order[left]
                     left += 1
                 } else {
@@ -1164,8 +1156,9 @@ sema_check_sort_view_summary_jobs: fn(jobs: ^[Int], environment: SemaScopeEnviro
 // their run order (sema_check_sort_view_summary_jobs). Both read only the
 // graph.
 sema_check_sorted_view_summary_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) -> [Int] {
-    jobs := sema_check_view_summary_jobs(environment, program, module_index)
-    sema_check_sort_view_summary_jobs(jobs, environment, program, module_index)
+    names := [String]{}
+    jobs := sema_check_view_summary_jobs(environment, program, module_index, names)
+    sema_check_sort_view_summary_jobs(jobs, names)
     jobs
 }
 
@@ -1730,7 +1723,10 @@ sema_function_declares_span: fn(methods: [Func], span: Span) -> Bool Never! {
 }
 
 // One check of `func` (sema_function_check_passes). `updated` already carries
-// the function's merged generic parameters (`generics.merged`) and name.
+// the function's merged generic parameters (`generics.merged`) and name. The
+// pass's record collects its findings in `diagnostics`' place and checks on
+// the caller's scope table (sema_body_check_swap_diagnostics,
+// sema_body_check_swap_scopes) while the body is checked.
 sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, updated: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, share_known: [Span], share_found: ^[SemaOwnershipShareSite], number_known: [SemaNumberRetype], number_found: ^[SemaNumberRetype], diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
     diagnostics_start: diagnostics.len()
     module_identity := updated.module_identity
@@ -1755,7 +1751,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         graph: program.registration_graph
         sema_scope_bind_definition_site(scopes, graph, func)
     }
-    check := sema_body_check_init()
+    check := sema_body_check_init(@program, @updated)
+    sema_body_check_swap_diagnostics(check, diagnostics)
+    sema_body_check_swap_scopes(check, scopes)
     check.state.fixed_length_write_params = updated.fixed_length_write_params
     check.state.share_known = share_known
     check.state.static_roots = sema_function_static_roots(updated, program, module_identity)
@@ -1764,13 +1762,13 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // checks its body against the declared return, not the failure rail.
     effective_return := sema_checked_return_type(func.return_type, raw_protocol_return)
     effective_return = sema_function_resolve_declared(updated, program, effective_return, module_identity, generic_params)
-    sema_scope_enter(scopes, check.state, owner_key)
-    scopes.return_type = Val(effective_return)
-    scopes.failure_carrier = Val(sema_failure_carrier(Val(effective_return)))
-    scopes.loop_depth = 0
-    scopes.ownership_call_depth = 0
-    scopes.comptime_execution_depth = 0
-    if func.is_comptime -> scopes.comptime_execution_depth = 1
+    sema_scope_enter(check.scopes, check.state, owner_key)
+    check.scopes.return_type = Val(effective_return)
+    check.scopes.failure_carrier = Val(sema_failure_carrier(Val(effective_return)))
+    check.scopes.loop_depth = 0
+    check.scopes.ownership_call_depth = 0
+    check.scopes.comptime_execution_depth = 0
+    if func.is_comptime -> check.scopes.comptime_execution_depth = 1
     check.context.host_hooks = host_hooks
     check.context.number_retypes_known = number_known
     check.context.generic_params = generic_params
@@ -1813,7 +1811,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // The declared signature's failure
     // domains and `Never` slots (E2417, E2422).
     generic_names: loop param in generic_params -> param.name
-    if !sema_check_function_failure_contracts(func, updated, program, generic_names, diagnostics) {
+    if !sema_check_function_failure_contracts(func, updated, program, generic_names, check.diagnostics) {
         complete = false
     }
     // E0104: a parameter or result type that writes a user generic type bare
@@ -1822,34 +1820,34 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     if (function_kind == .TopLevel || function_kind == .Method(_, _)) && !func.compiler_generated && !module_is_core(module_identity) {
         graph: program.registration_graph
         caller: sema_scope_caller_row(updated, graph)
-        bare_start: diagnostics.len()
+        bare_start: check.diagnostics.len()
         loop param in func.params {
             if param.name == "self" -> next
-            sema_type_bare_generic_names(graph, caller, param.ty, param.ty_span, generic_names, diagnostics)
+            sema_type_bare_generic_names(graph, caller, param.ty, param.ty_span, generic_names, check.diagnostics)
         }
         if func.return_type == .Val(written_return) {
-            sema_type_bare_generic_names(graph, caller, written_return, func.return_type_span ?? func.name_span, generic_names, diagnostics)
+            sema_type_bare_generic_names(graph, caller, written_return, func.return_type_span ?? func.name_span, generic_names, check.diagnostics)
         }
-        if diagnostics.len() > bare_start {
+        if check.diagnostics.len() > bare_start {
             complete = false
             check.context.bare_generic_signature = true
         }
     }
     // E2421: the public failure carrier, read from the declared signature.
-    sema_check_public_failure_carrier(func, updated, program, diagnostics)
+    sema_check_public_failure_carrier(func, updated, program, check.diagnostics)
     // E0939/E0940: the `#Memo` cache contract, also proven from the declared
     // signature.
-    sema_check_memoized_function(func, updated, program, generic_params, diagnostics)
+    sema_check_memoized_function(func, updated, program, generic_params, check.diagnostics)
     // E1411: a `#DevPanel` function's panel contract, also read from the
     // declared signature.
-    sema_check_devtools_panel(func, updated, program, diagnostics)
-    forward_defaults: sema_function_header_check_default_forward_refs(func, diagnostics)
+    sema_check_devtools_panel(func, updated, program, check.diagnostics)
+    forward_defaults: sema_function_header_check_default_forward_refs(func, check.diagnostics)
     if forward_defaults.len() > 0 -> complete = false
-    sema_function_header_lint_err_params(func, diagnostics)
+    sema_function_header_lint_err_params(func, check.diagnostics)
     if function_kind == .TopLevel && !module_is_core(module_identity) && !sema_module_no_prelude(updated, program) {
-        sema_function_header_lint_prelude_shadow(func, diagnostics)
+        sema_function_header_lint_prelude_shadow(func, check.diagnostics)
     }
-    if !sema_function_header_check_variadic_bound_shape(func, updated, program, diagnostics) {
+    if !sema_function_header_check_variadic_bound_shape(func, updated, program, check.diagnostics) {
         complete = false
     }
     // copy: a shared-facts handle and its frontier, not the facts.
@@ -1858,15 +1856,17 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     unsafe_gate_valid := true
     if func.is_unsafe {
         unsafe_source: sema_effect_source_from_function_key(func, owner_key)
-        unsafe_gate_valid = sema_effect_check_unsafe_function(unsafe_source, diagnostics)
+        unsafe_gate_valid = sema_effect_check_unsafe_function(unsafe_source, check.diagnostics)
         if !unsafe_gate_valid -> complete = false
     }
     is_method: if function_kind == {
         .Method(_, _) | .TraitMethod(_, _, _, _, _) -> true
         .TopLevel -> false
     }
-    if !sema_function_header_check_root_params(func, is_method, diagnostics) -> complete = false
-    sema_function_header_lint_positional_bools(func, is_method, diagnostics)
+    if !sema_function_header_check_root_params(func, is_method, check.diagnostics) {
+        complete = false
+    }
+    sema_function_header_lint_positional_bools(func, is_method, check.diagnostics)
     if !sema_function_header_supported(func, check.context) -> complete = false
     // `self` is only a method's receiver; outside a type body or `impl` it
     // would silently be an ordinary parameter. An external `Type.method`
@@ -1875,7 +1875,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     if !is_method && !func.compiler_generated && func.external_type == None && !sema_is_error_conversion_function(func) {
         loop param in func.params {
             if param.name == "self" {
-                diagnostics.push(sema_self_outside_method(check.context.function_name, param.name_span))
+                check.diagnostics.push(sema_self_outside_method(check.context.function_name, param.name_span))
                 complete = false
                 break
             }
@@ -1883,14 +1883,14 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     if func.is_reactive {
         if func.is_pure {
-            diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` can't also declare `-[]>`", "a reactive effect re-runs when signals change, so it is not a pure function", "drop the `-[]>` bound or use `reactive.autorun` inside a plain `fn`"))
+            check.diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` can't also declare `-[]>`", "a reactive effect re-runs when signals change, so it is not a pure function", "drop the `-[]>` bound or use `reactive.autorun` inside a plain `fn`"))
         }
         if func.return_type == .Val(return_type) && return_type != (Type.Named{name: "Unit"}) {
-            diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
+            check.diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
         }
     }
     if func.is_pure && stand_in == None {
-        sema_check_pure_live_blocks(check.context.function_name, func.body, diagnostics)
+        sema_check_pure_live_blocks(check.context.function_name, func.body, check.diagnostics)
     }
 
     params := [TParameter]{}
@@ -1916,7 +1916,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             sema_taskgroup_push_parameter(check.context, func.params[param_index].name)
         }
         // E0502: a map in a declared parameter type needs a key-eligible key.
-        if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, diagnostics) {
+        if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, check.diagnostics) {
             complete = false
         }
         default_expr := TExpr?{None}
@@ -1943,10 +1943,10 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             // A `#caller` default checks as the location literal each call
             // gets; a `#here` default is E2428.
             declared_default: func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}
-            sema_site_here_default_check(declared_default, diagnostics)
-            caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, scopes, caller_span)) else -> Expr?{None}
+            sema_site_here_default_check(declared_default, check.diagnostics)
+            caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, check.scopes, caller_span)) else -> Expr?{None}
             sema_body_check_swap_context(check, default_context)
-            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, scopes, check, diagnostics)
+            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), check)
             sema_body_check_swap_context(check, default_context)
             sema_check_delta_pass(default_context.type_delta, check.context.type_delta)
             default_arena: check.context.arena
@@ -1989,8 +1989,8 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             }
         }
         if {
-            !sema_scope_declare_local(scopes, scope_symbol, param_key, param_mutable, func.params[param_index].convention, param_bounds, false) -> {
-                diagnostics.push(sema_already_defined(func.params[param_index].name, func.params[param_index].name_span))
+            !sema_scope_declare_local(check.scopes, scope_symbol, param_key, param_mutable, func.params[param_index].convention, param_bounds, false) -> {
+                check.diagnostics.push(sema_already_defined(func.params[param_index].name, func.params[param_index].name_span))
                 complete = false
             }
             else -> {
@@ -2023,47 +2023,47 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // position free, as the contract conditions do (sema_contract_check_expr).
     // A `#Deadline(limit)` function bounds the waits of its whole body, as a
     // `#Deadline` block around it would.
-    marker_position_free: scopes.position_free
-    scopes.position_free = true
-    markers_valid: sema_marker_rules_check_function_markers(func, updated, program, scopes, check, diagnostics)
+    marker_position_free: check.scopes.position_free
+    check.scopes.position_free = true
+    markers_valid: sema_marker_rules_check_function_markers(func, check)
     deadline_guards := [TContextGuard]{}
     loop marker in func.markers {
         if stand_in != None || !markers_valid || !sema_marker_is_hook(marker, MarkerHook.Deadline) || marker.negated || marker.args.len() != 1 {
             next
         }
         if marker.args[0] == .Expr(value) {
-            limit: sema_check_expression(value, None, updated, program, scopes, check, diagnostics) ?? next
+            limit: sema_check_expression(value, None, check) ?? next
             deadline_guards.push(sema_stmt_deadline_guard(limit, marker.span))
         }
     }
-    scopes.position_free = marker_position_free
+    check.scopes.position_free = marker_position_free
     if stand_in == None && markers_valid {
         graph: program.registration_graph
-        sema_app_server_only_endpoint_check(func, graph, module_identity, diagnostics)
+        sema_app_server_only_endpoint_check(func, graph, module_identity, check.diagnostics)
     }
     if func.return_type == .Val(declared_return) {
         resolved_return := declared_return
         resolved_return = sema_function_resolve_declared(updated, program, declared_return, module_identity, generic_params)
-        if !sema_type_check_declared_map_keys(updated, program, resolved_return, func.return_type_span ?? func.name_span, diagnostics) {
+        if !sema_type_check_declared_map_keys(updated, program, resolved_return, func.return_type_span ?? func.name_span, check.diagnostics) {
             complete = false
         }
         // E1110: a group is call-stack-only spawn authority that flows down
         // through a direct parameter; a returned group would outlive the
         // block that joins it.
         if sema_stmt_contains_taskgroup(resolved_return) {
-            diagnostics.push(sema_error("E1110", func.return_type_span ?? func.name_span, "`Group` cannot be returned", "a task group is call-stack-only spawn authority; a returned group would outlive the block that joins it", "pass `group: Group` down to the helper that spawns instead of returning it"))
+            check.diagnostics.push(sema_error("E1110", func.return_type_span ?? func.name_span, "`Group` cannot be returned", "a task group is call-stack-only spawn authority; a returned group would outlive the block that joins it", "pass `group: Group` down to the helper that spawns instead of returning it"))
         }
     }
     // `check_kernel_marker`: the declaration and worker-boundary obligations of
     // `#Kernel(.parallel)` (E1102); its effect and body obligations wait for
     // the effect rows (Kernel.jet).
     if func.kernel == .Val(kernel) {
-        if !sema_kernel_check_declaration(func, kernel, is_method, params, effective_return, updated, program, scopes, check.context, diagnostics) {
+        if !sema_kernel_check_declaration(func, kernel, is_method, params, effective_return, updated, program, check.scopes, check.context, check.diagnostics) {
             complete = false
         }
     }
     if func.is_unsafe && unsafe_gate_valid -> check.context.unsafe_depth = 1
-    contract: sema_contract_check_function(func, updated, program, scopes, check, diagnostics)
+    contract: sema_contract_check_function(func, check)
     if !contract.complete -> complete = false
 
     body := [TStmt]{}
@@ -2096,25 +2096,25 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         // arm; imported Core bodies and generated functions have no user source
         // to fix, so only user code is linted (L0513, L0530).
         if returns_value {
-            sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, check.context.fallback_tables, diagnostics)
+            sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, check.context.fallback_tables, check.diagnostics)
         }
-        statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, check, diagnostics, 0)
+        statements := sema_check_statements(func.body, Val(effective_return), check, 0)
         // The caller's group joins every task this body spawned into a `Group`
         // parameter, so those handles owe no `join` here.
-        sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Parameter, scopes, check.state, diagnostics)
+        sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Parameter, check.scopes, check.state, check.diagnostics)
         check.context.lost_tail_span = None
         check.context.value_tail_span = None
         check.context.fallback_tables = [Int]{}
         loop site in check.state.share_found -> share_found.push(site)
         loop retype in check.context.number_retypes_found -> number_found.push(retype)
         if !statements.complete -> complete = false
-        if !sema_check_never_fallthrough(func, updated, program, scopes, diagnostics) {
+        if !sema_check_never_fallthrough(func, updated, program, check.scopes, check.diagnostics) {
             complete = false
         }
-        sema_lint_inferred_never_return(func, owner_key, updated, program, diagnostics)
-        sema_function_header_external_target(func, diagnostics, diagnostics_start)
+        sema_lint_inferred_never_return(func, owner_key, updated, program, check.diagnostics)
+        sema_function_header_external_target(func, check.diagnostics, diagnostics_start)
         // A value body reports E0114 when it can reach its end without a value.
-        if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, check.context.function_name, scopes, diagnostics) {
+        if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, check.context.function_name, check.scopes, check.diagnostics) {
             complete = false
         }
         // Validation borrows the original checked rows. Once that loan ends the
@@ -2129,10 +2129,12 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     // Unused-binding lints and E0514 address authored code; a
     // compiler-generated body (derived codec scaffolding) binds every slot it
-    // may need.
-    if !check.context.compiler_generated && stand_in == None {
-        sema_ownership_finalize_references(check.state, diagnostics)
-        sema_ownership_report_never_written(check.state, diagnostics)
+    // may need. A body with an unresolved name gives neither: the reads and
+    // writes under that name's expression go unrecorded, so a used binding
+    // would look unread and a reassigned `:=` unwritten.
+    if !check.context.compiler_generated && stand_in == None && !sema_has_unresolved_name_since(check.diagnostics, diagnostics_start) {
+        sema_ownership_finalize_references(check.state, check.diagnostics)
+        sema_ownership_report_never_written(check.state, check.diagnostics)
     }
     // The context's facts move to the caller's lists; each emptied field is
     // set again so the spent context still moves whole into the result.
@@ -2150,8 +2152,8 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     name_references.extend(check.context.name_references.move())
     check.context.name_references = [SemaNameReferenceFact]{}
-    if stand_in == None -> sema_single_use_leave_scope(scopes, check.state, diagnostics) else {
-        sema_scope_leave(scopes, check.state)
+    if stand_in == None -> sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics) else {
+        sema_scope_leave(check.scopes, check.state)
     }
     source_line := sema_source_line_at(updated.source_segments, func.name_span)
     if source_line == None {
@@ -2160,8 +2162,12 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     return_view_provenance := ViewProvenanceMap?{None}
     if stand_in == None {
-        return_view_provenance = sema_function_return_view_provenance(func, check.context.return_view_provenance, diagnostics, complete)
+        return_view_provenance = sema_function_return_view_provenance(func, check.context.return_view_provenance, check.diagnostics, complete)
     }
+    // The pass reports nothing further and checks no more code: the findings
+    // and the scope table go back to the caller.
+    sema_body_check_swap_diagnostics(check, diagnostics)
+    sema_body_check_swap_scopes(check, scopes)
     if !complete {
         return sema_function_result(None, owner_key, check.context.move())
     }
@@ -3031,36 +3037,38 @@ sema_check_method_input_kind: fn(memory_plan: SemaFunctionMemoryPlan, memory_pos
     sema_comptime_method_kind(declaration, owner_type, trait_symbol)
 }
 
-sema_check_method_input: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaMethodInput {
+sema_check_method_input: fn(method: SemaMethodJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaMethodInput {
     graph: program.registration_graph
-    if job == {
+    job: sema_method_body_job(method)
+    if method == {
         .NominalMethod(_, owner, row) -> {
             sema_check_method_input_row(graph.modules[module_index].module_identity, job, memory_plan, memory_position, graph.modules[module_index].nominals[owner].methods[row], graph.modules[module_index].nominals[owner].ty, None, environment, program)
         }
         .ImplMethod(_, owner, row) -> {
             sema_check_method_input_row(graph.modules[module_index].module_identity, job, memory_plan, memory_position, graph.modules[module_index].impls[owner].methods[row], graph.modules[module_index].impls[owner].target_type, graph.modules[module_index].impls[owner].trait_symbol, environment, program)
         }
-        .TopLevel(_) -> panic("a top-level function reached method preparation")
     }
 }
 
 // Existing scalar body descriptors survive preparation writes; declarations do
 // not escape their read-only thunks. Serial callers construct these descriptors
 // for every body, not only the subset admitted to compiler-thread workers.
-sema_function_check_registered: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
-    if sema_function_check_registered_unregistered(job, module_index, memory_plan, memory_position, owner_id, function_kind, environment, program, module_scopes) == .Val(unavailable) {
+// `declaration` is the function `job` checks, read once where the job is
+// entered: its top-level item, or its method row's declaration.
+sema_function_check_registered: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+    if sema_function_check_registered_unregistered(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, environment, program, module_scopes) == .Val(unavailable) {
         return unavailable
     }
     base_generic_params: environment.generic_params.copy()
-    generics := sema_function_check_registered_generics(job, module_index, memory_plan, memory_position, environment, program)
+    generics := sema_function_check_registered_generics(declaration, memory_plan, memory_position, environment, program)
     environment.generic_params = generics.merged.copy()
-    sema_function_check_registered_name(job, module_index, memory_plan, memory_position, environment, program)
-    checked := sema_function_check_registered_passes(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    sema_function_check_registered_name(declaration, memory_plan, memory_position, environment)
+    checked := sema_function_check_registered_passes(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
     environment.generic_params = base_generic_params.move()
     checked
 }
 
-sema_function_check_registered_unregistered: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFunctionResult? {
+sema_function_check_registered_unregistered: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFunctionResult? {
     owner_key: sema_program_symbol_key(program, owner_id)
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
@@ -3068,7 +3076,7 @@ sema_function_check_registered_unregistered: fn(job: SemaBodyJob, module_index: 
         }
     }
     graph: program.registration_graph
-    sema_function_check_unregistered_in_graph(graph, job, module_index, owner_key, function_kind, scopes, program)
+    sema_function_check_unregistered_in_graph(graph, job, declaration, module_index, owner_key, function_kind, scopes, program)
 }
 
 sema_function_check_unregistered_method: fn(module_row: SemaRegistrationModule, method: SemaRegistrationFunction, owner_key: String, function_kind: TFuncKind, scopes: SemaScopeTable, program: SemaProgramTables) -> SemaFunctionResult? {
@@ -3109,47 +3117,27 @@ sema_function_check_unregistered_method: fn(module_row: SemaRegistrationModule, 
 // The graph is a read parameter here: a declaration reached through the
 // optional-payload binding of the caller was copied natively, a read
 // parameter's place is borrowed (as in the helpers below).
-sema_function_check_unregistered_in_graph: fn(graph: SemaRegistrationGraph, job: SemaBodyJob, module_index: Int, owner_key: String, function_kind: TFuncKind, scopes: SemaScopeTable, program: SemaProgramTables) -> SemaFunctionResult? {
+sema_function_check_unregistered_in_graph: fn(graph: SemaRegistrationGraph, job: SemaBodyJob, declaration: Func, module_index: Int, owner_key: String, function_kind: TFuncKind, scopes: SemaScopeTable, program: SemaProgramTables) -> SemaFunctionResult? {
     if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return sema_function_check_unregistered(func, owner_key, function_kind, scopes, program)
-            }
-        }
-        .NominalMethod(_, owner, row) -> return sema_function_check_unregistered_method(graph.modules[module_index], graph.modules[module_index].nominals[owner].methods[row], owner_key, function_kind, scopes, program)
-        .ImplMethod(_, owner, row) -> return sema_function_check_unregistered_method(graph.modules[module_index], graph.modules[module_index].impls[owner].methods[row], owner_key, function_kind, scopes, program)
+        .TopLevel(_) -> sema_function_check_unregistered(declaration, owner_key, function_kind, scopes, program)
+        .NominalMethod(_, owner, row) -> sema_function_check_unregistered_method(graph.modules[module_index], graph.modules[module_index].nominals[owner].methods[row], owner_key, function_kind, scopes, program)
+        .ImplMethod(_, owner, row) -> sema_function_check_unregistered_method(graph.modules[module_index], graph.modules[module_index].impls[owner].methods[row], owner_key, function_kind, scopes, program)
     }
-    Val(sema_function_check_unavailable(owner_key, "its top-level item is not a function"))
 }
 
 // Keep the actual environment's retained function name, not a context shadow.
 // The graph payload window permits only the disjoint context-field write.
-sema_function_check_registered_name: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: ^SemaScopeEnvironment, program: SemaProgramTables) {
+sema_function_check_registered_name: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: ^SemaScopeEnvironment) {
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
             environment.function_name = planned.name
             return
         }
     }
-    graph: program.registration_graph
-    if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                environment.function_name = func.name
-                return
-            }
-            panic("a selected source function lost its original item")
-        }
-        .NominalMethod(_, owner, row) -> {
-            environment.function_name = graph.modules[module_index].nominals[owner].methods[row].declaration.name
-        }
-        .ImplMethod(_, owner, row) -> {
-            environment.function_name = graph.modules[module_index].impls[owner].methods[row].declaration.name
-        }
-    }
+    environment.function_name = declaration.name
 }
 
-sema_function_check_registered_passes: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+sema_function_check_registered_passes: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
     owner_key: sema_program_symbol_key(program, owner_id)
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
@@ -3157,7 +3145,7 @@ sema_function_check_registered_passes: fn(job: SemaBodyJob, module_index: Int, m
         }
     }
     graph: program.registration_graph
-    sema_function_check_passes_in_graph(graph, job, module_index, owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    sema_function_check_passes_in_graph(graph, job, declaration, module_index, owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
 }
 
 sema_function_check_passes_method: fn(module_row: SemaRegistrationModule, method: SemaRegistrationFunction, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
@@ -3195,63 +3183,36 @@ sema_function_check_passes_method: fn(module_row: SemaRegistrationModule, method
     sema_function_check_passes(method.declaration, owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
 }
 
-sema_function_check_passes_in_graph: fn(graph: SemaRegistrationGraph, job: SemaBodyJob, module_index: Int, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+sema_function_check_passes_in_graph: fn(graph: SemaRegistrationGraph, job: SemaBodyJob, declaration: Func, module_index: Int, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
     if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return sema_function_check_passes(func, owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
-            }
-            panic("a selected source function lost its original item")
-        }
-        .NominalMethod(_, owner, row) -> {
-            return sema_function_check_passes_method(graph.modules[module_index], graph.modules[module_index].nominals[owner].methods[row], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
-        }
-        .ImplMethod(_, owner, row) -> {
-            return sema_function_check_passes_method(graph.modules[module_index], graph.modules[module_index].impls[owner].methods[row], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
-        }
+        .TopLevel(_) -> sema_function_check_passes(declaration, owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+        .NominalMethod(_, owner, row) -> sema_function_check_passes_method(graph.modules[module_index], graph.modules[module_index].nominals[owner].methods[row], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+        .ImplMethod(_, owner, row) -> sema_function_check_passes_method(graph.modules[module_index], graph.modules[module_index].impls[owner].methods[row], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
     }
 }
 
 // Read only within this thunk: neither the selected declaration nor the plan's
 // rewritten function escapes into an owning Func temporary. Top-level targets
 // retain the original source cursor, including duplicate-name/span failures.
-sema_function_check_registered_generics: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaFunctionCheckGenerics {
+sema_function_check_registered_generics: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaFunctionCheckGenerics {
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
             return sema_function_check_generics(planned, environment, program)
         }
     }
-    graph: program.registration_graph
-    sema_function_check_generics_in_graph(graph, job, module_index, environment, program)
-}
-
-sema_function_check_generics_in_graph: fn(graph: SemaRegistrationGraph, job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaFunctionCheckGenerics {
-    if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return sema_function_check_generics(func, environment, program)
-            }
-            panic("a selected source function lost its original item")
-        }
-        .NominalMethod(_, owner, row) -> {
-            return sema_function_check_generics(graph.modules[module_index].nominals[owner].methods[row].declaration, environment, program)
-        }
-        .ImplMethod(_, owner, row) -> {
-            return sema_function_check_generics(graph.modules[module_index].impls[owner].methods[row].declaration, environment, program)
-        }
-    }
+    sema_function_check_generics(declaration, environment, program)
 }
 
 // The read checker a compiler thread runs for a body that declares no generic
 // parameters (sema_function_check_registered_on_thread): the existing scalar
 // source selector in place of an owning planned Func input.
-sema_function_check_registered_shared: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
-    if sema_function_check_registered_unregistered(job, module_index, memory_plan, memory_position, owner_id, function_kind, environment, program, module_scopes) == .Val(unavailable) {
+sema_function_check_registered_shared: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+    if sema_function_check_registered_unregistered(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, environment, program, module_scopes) == .Val(unavailable) {
         return unavailable
     }
-    generics := sema_function_check_registered_generics(job, module_index, memory_plan, memory_position, environment, program)
-    sema_function_check_registered_location(job, module_index, memory_plan, memory_position, environment, program, module_scopes)
-    sema_function_check_registered_passes(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    generics := sema_function_check_registered_generics(declaration, memory_plan, memory_position, environment, program)
+    sema_function_check_registered_location(declaration, memory_plan, memory_position, module_scopes)
+    sema_function_check_registered_passes(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
 }
 
 // A body check on a compiler thread. A function that declares generic
@@ -3259,11 +3220,11 @@ sema_function_check_registered_shared: fn(job: SemaBodyJob, module_index: Int, m
 // SemaMethodInput.generic_params), checks as the module check does
 // (sema_function_check_registered_with_generics). Any other body reads the
 // shared environment as it is (sema_function_check_registered_shared).
-sema_function_check_registered_on_thread: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, generic_params: [TGenericParam], environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+sema_function_check_registered_on_thread: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, generic_params: [TGenericParam], environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
     // copy: `previous_location` restores module_scopes.location_function after this function's
     // check overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location: module_scopes.location_function.copy()
-    checked: if generic_params.len() == 0 && !sema_function_registered_declares_generics(job, module_index, memory_plan, memory_position, program) -> sema_function_check_registered_shared(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references) else -> sema_function_check_registered_with_generics(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, generic_params, environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    checked: if generic_params.len() == 0 && !sema_function_registered_declares_generics(declaration, memory_plan, memory_position) -> sema_function_check_registered_shared(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references) else -> sema_function_check_registered_with_generics(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, generic_params, environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
     module_scopes.location_function = previous_location
     checked
 }
@@ -3273,84 +3234,55 @@ sema_function_check_registered_on_thread: fn(job: SemaBodyJob, module_index: Int
 // from the environment, so it runs on this job's own environment with them
 // set, which shares the shared environment's rows until the check sets its
 // generic parameters and name.
-sema_function_check_registered_with_generics: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, generic_params: [TGenericParam], environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+sema_function_check_registered_with_generics: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, generic_params: [TGenericParam], environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
     job_environment := environment
     job_environment.generic_params = generic_params
-    sema_function_check_registered_location(job, module_index, memory_plan, memory_position, job_environment, program, module_scopes)
-    sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, job_environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    sema_function_check_registered_location(declaration, memory_plan, memory_position, module_scopes)
+    sema_function_check_registered(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, job_environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
 }
 
-// Whether the function `job` checks declares generic parameters of its own:
+// Whether the function `declaration` declares generic parameters of its own:
 // the memory plan's rewritten function when it has one, else the registered
 // declaration, as sema_function_check_registered_generics reads them.
-sema_function_registered_declares_generics: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, program: SemaProgramTables) -> Bool Never! {
+sema_function_registered_declares_generics: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?) -> Bool Never! {
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
             return planned.type_params.len() != 0
         }
     }
-    graph: program.registration_graph
-    if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return func.type_params.len() != 0
-            }
-            panic("a selected source function lost its original item")
-        }
-        .NominalMethod(_, owner, row) -> graph.modules[module_index].nominals[owner].methods[row].declaration.type_params.len() != 0
-        .ImplMethod(_, owner, row) -> graph.modules[module_index].impls[owner].methods[row].declaration.type_params.len() != 0
-    }
+    declaration.type_params.len() != 0
 }
 
-sema_function_check_registered_location: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) {
+sema_function_check_registered_location: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, scopes: ^SemaScopeTable) {
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
             scopes.location_function = Val(planned.name)
             return
         }
     }
-    graph: program.registration_graph
-    scopes.location_function = Val(sema_registered_job_function_name(graph, job, module_index))
-}
-
-// The name of the source function a registered body job checks.
-sema_registered_job_function_name: fn(graph: SemaRegistrationGraph, job: SemaBodyJob, module_index: Int) -> String Never! {
-    if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return func.name
-            }
-            panic("a selected source function lost its original item")
-        }
-        .NominalMethod(_, owner, row) -> return graph.modules[module_index].nominals[owner].methods[row].declaration.name
-        .ImplMethod(_, owner, row) -> return graph.modules[module_index].impls[owner].methods[row].declaration.name
-    }
+    scopes.location_function = Val(declaration.name)
 }
 
 // Return only the existing identity and plan position; never a source Func.
-sema_check_registered_function_id: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SymbolID {
+sema_check_registered_function_id: fn(job: SemaBodyJob, declaration: Func, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SymbolID {
     graph: program.registration_graph
     if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return symbol_find(graph.symbols, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name)) ?? panic("the top-level function `{func.name}` has no registered symbol")
-            }
-            panic("a selected source function lost its original item")
-        }
+        .TopLevel(_) -> sema_check_top_level_function_id(program, module_index, declaration.name)
         .NominalMethod(_, owner, row) -> graph.modules[module_index].nominals[owner].methods[row].symbol.id
         .ImplMethod(_, owner, row) -> graph.modules[module_index].impls[owner].methods[row].symbol.id
     }
 }
 
-sema_check_registered_memory_position: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
+// The registered symbol of module `module_index`'s top-level function `name`.
+sema_check_top_level_function_id: fn(program: SemaProgramTables, module_index: Int, name: String) -> SymbolID {
+    graph: program.registration_graph
+    symbol_find(graph.symbols, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", name)) ?? panic("the top-level function `{name}` has no registered symbol")
+}
+
+sema_check_registered_memory_position: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
     graph: program.registration_graph
     if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", func.name, func.span)
-            }
-            panic("a selected source function lost its original item")
-        }
+        .TopLevel(_) -> sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", declaration.name, declaration.span)
         .NominalMethod(_, owner, row) -> sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].nominals[owner].ty) ?? "", graph.modules[module_index].nominals[owner].methods[row].declaration.name, graph.modules[module_index].nominals[owner].methods[row].declaration.span)
         .ImplMethod(_, owner, row) -> sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_function_memory_type_owner(graph.modules[module_index].impls[owner].target_type), graph.modules[module_index].impls[owner].methods[row].declaration.name, graph.modules[module_index].impls[owner].methods[row].declaration.span)
     }
@@ -3359,29 +3291,27 @@ sema_check_registered_memory_position: fn(job: SemaBodyJob, module_index: Int, m
 // The memory plan row of top-level job `job_index`: the one its checking
 // thread looked up when that body is the next one `ready` pops, else looked
 // up here.
-sema_check_ready_memory_position: fn(ready: [SemaParallelBody], job_index: Int, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
+sema_check_ready_memory_position: fn(ready: [SemaParallelBody], job_index: Int, job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
     last: ready.len() - 1
     if last >= 0 && ready[last].job_index == job_index && ready[last].memory_known {
         return ready[last].memory_position
     }
-    sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
+    sema_check_registered_memory_position(job, declaration, module_index, memory_plan, environment, program)
 }
 
-sema_check_registered_method_label: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
+sema_check_registered_method_label: fn(method: SemaMethodJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
     graph: program.registration_graph
-    if job == {
+    if method == {
         .NominalMethod(_, owner, row) -> "method `{type_name(graph.modules[module_index].nominals[owner].ty)}.{graph.modules[module_index].nominals[owner].methods[row].symbol.name}`"
         .ImplMethod(_, owner, row) -> "method `{type_name(graph.modules[module_index].impls[owner].target_type)}.{graph.modules[module_index].impls[owner].methods[row].symbol.name}`"
-        .TopLevel(_) -> panic("a top-level function reached method metadata")
     }
 }
 
-sema_check_registered_raw_protocol_return: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+sema_check_registered_raw_protocol_return: fn(method: SemaMethodJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph
-    if job == {
+    if method == {
         .NominalMethod(_, owner, row) -> graph.modules[module_index].nominals[owner].methods[row].raw_protocol_return
         .ImplMethod(_, owner, row) -> graph.modules[module_index].impls[owner].methods[row].raw_protocol_return
-        .TopLevel(_) -> false
     }
 }
 
@@ -3395,9 +3325,9 @@ sema_check_protocol_unit_trait: fn(trait_name: String?) -> Bool Never! {
     leaf == "Close" || leaf == "Rollback"
 }
 
-sema_check_registered_protocol_unit_return: fn(job: SemaBodyJob, module_index: Int, program: SemaProgramTables) -> Bool {
+sema_check_registered_protocol_unit_return: fn(method: SemaMethodJob, module_index: Int, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph
-    if job == {
+    if method == {
         .ImplMethod(_, owner, row) -> {
             if graph.modules[module_index].impls[owner].methods[row].declaration.return_type != None {
                 return false
@@ -3405,7 +3335,6 @@ sema_check_registered_protocol_unit_return: fn(job: SemaBodyJob, module_index: I
             return sema_check_protocol_unit_trait(graph.modules[module_index].impls[owner].declaration.trait_name)
         }
         .NominalMethod(_, owner, row) -> return sema_check_registered_nominal_protocol_unit(graph, module_index, owner, row)
-        .TopLevel(_) -> return false
     }
     false
 }
@@ -3438,26 +3367,11 @@ sema_check_protocol_unit_block: fn(blocks: [TraitImplBlock], span: Span) -> Bool
     false
 }
 
-sema_check_registered_source_span: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span {
+sema_check_registered_original_method_kind: fn(method: SemaMethodJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TFuncKind {
     graph: program.registration_graph
-    if job == {
-        .NominalMethod(_, owner, row) -> graph.modules[module_index].nominals[owner].methods[row].declaration.span
-        .ImplMethod(_, owner, row) -> graph.modules[module_index].impls[owner].methods[row].declaration.span
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return func.span
-            }
-            panic("a selected source function lost its original item")
-        }
-    }
-}
-
-sema_check_registered_original_method_kind: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TFuncKind {
-    graph: program.registration_graph
-    if job == {
+    if method == {
         .NominalMethod(_, owner, row) -> sema_comptime_method_kind(graph.modules[module_index].nominals[owner].methods[row].declaration, graph.modules[module_index].nominals[owner].ty, None)
         .ImplMethod(_, owner, row) -> sema_comptime_method_kind(graph.modules[module_index].impls[owner].methods[row].declaration, graph.modules[module_index].impls[owner].target_type, graph.modules[module_index].impls[owner].trait_symbol)
-        .TopLevel(_) -> panic("a top-level function reached method metadata")
     }
 }
 
@@ -3519,27 +3433,17 @@ sema_keep_going_stub_source: fn(func: Func) -> Func {
 
 // This owns only the replacement trap AST. Original body/contracts never
 // escape a read window or survive preparation of the writable checker.
-sema_keep_going_registered_stub_source: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Func {
+sema_keep_going_registered_stub_source: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?) -> Func {
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
             return sema_keep_going_stub_source(planned)
         }
     }
-    graph: program.registration_graph
-    if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return sema_keep_going_stub_source(func)
-            }
-            panic("a selected source function lost its original item")
-        }
-        .NominalMethod(_, owner, row) -> sema_keep_going_stub_source(graph.modules[module_index].nominals[owner].methods[row].declaration)
-        .ImplMethod(_, owner, row) -> sema_keep_going_stub_source(graph.modules[module_index].impls[owner].methods[row].declaration)
-    }
+    sema_keep_going_stub_source(declaration)
 }
 
-sema_keep_going_registered_stub: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
-    stub := sema_keep_going_registered_stub_source(job, module_index, memory_plan, memory_position, environment, program)
+sema_keep_going_registered_stub: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
+    stub := sema_keep_going_registered_stub_source(declaration, memory_plan, memory_position)
     discarded_diagnostics := [Diagnostic]{}
     discarded_call_facts := [SemaCallSiteFact]{}
     discarded_comptime_requests := [SemaComptimeRequest]{}
@@ -3549,12 +3453,12 @@ sema_keep_going_registered_stub: fn(job: SemaBodyJob, module_index: Int, memory_
     Val(checked)
 }
 
-sema_check_registered_method_stub: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
+sema_check_registered_method_stub: fn(declaration: Func, memory_plan: SemaFunctionMemoryPlan, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
     // copy: `previous_location` restores scopes.location_function after the stub check overwrites
     // it. Jet has no exchange on a field of the write-borrowed table.
     previous_location: scopes.location_function.copy()
-    sema_function_check_registered_location(job, module_index, memory_plan, None, environment, program, scopes)
-    stub := sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks)
+    sema_function_check_registered_location(declaration, memory_plan, None, scopes)
+    stub := sema_keep_going_registered_stub(declaration, memory_plan, None, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks)
     scopes.location_function = previous_location
     stub
 }
@@ -4109,28 +4013,34 @@ sema_check_registered_item_is_jet_function: fn(environment: SemaScopeEnvironment
     false
 }
 
-sema_check_registered_method_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, impl_rows_scanned: ^Int, count_work: Bool) -> [SemaBodyJob] {
+sema_check_registered_method_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, impl_rows_scanned: ^Int, count_work: Bool) -> [SemaMethodJob] {
     graph: program.registration_graph
     sema_check_method_jobs(graph, graph.modules[module_index], impl_rows_scanned, count_work)
 }
 
-sema_check_registered_parallel_method_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, memory_plan: SemaFunctionMemoryPlan, all_method_jobs: [SemaBodyJob], comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] {
+sema_check_registered_parallel_method_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, memory_plan: SemaFunctionMemoryPlan, all_method_jobs: [SemaMethodJob], comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] {
     graph: program.registration_graph
     sema_check_parallel_method_jobs(graph, graph.modules[module_index], memory_plan, environment.generic_params, all_method_jobs, comptime_rows, weights)
 }
 
-sema_check_registered_top_level_name: fn(module_index: Int, item_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
-    graph: program.registration_graph
-    if graph.modules[module_index].program.items[item_index] == .Func(func) -> return func.name
-    panic("a selected source function lost its original item")
-}
-
 // The caller selects ordinary Jet functions in source order. All graph and
 // plan metadata reads finish before a writable checker or trap is entered.
-sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, return_view_rows: ^[U32:Int], ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, result: ^SemaGraphModuleResult, prelude_demands: ^[Int:[SemaPreludeConversionDemand]], scopes_changed: ^Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: ^Int) {
+// The item is read once here (`graph` is `program`'s registration graph, a
+// read parameter so the function is borrowed, not copied); one that is not a
+// function leaves the module incomplete with that reason, never a stop.
+sema_check_registration_top_level: fn(graph: SemaRegistrationGraph, module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, return_view_rows: ^[U32:Int], ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, result: ^SemaGraphModuleResult, prelude_demands: ^[Int:[SemaPreludeConversionDemand]], scopes_changed: ^Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: ^Int) {
+    if graph.modules[module_index].program.items[item_index] == .Func(declaration) {
+        sema_check_registration_top_level_declared(declaration, module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready, ready_deltas, host_hooks, comptime_functions, comptime_rows, result, prelude_demands, scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, functions_checked)
+        return
+    }
+    result.complete = false
+    result.incomplete_reasons.push("top-level item {item_index}: it is not a function")
+}
+
+sema_check_registration_top_level_declared: fn(declaration: Func, module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, return_view_rows: ^[U32:Int], ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, result: ^SemaGraphModuleResult, prelude_demands: ^[Int:[SemaPreludeConversionDemand]], scopes_changed: ^Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: ^Int) {
     job: SemaBodyJob.TopLevel{item_index: item_index}
-    function_name: sema_check_registered_top_level_name(module_index, item_index, environment, program)
-    owner_id: sema_check_registered_function_id(job, module_index, environment, program)
+    function_name: declaration.name
+    owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
     // The Core library's check captures every Core function check it makes
     // (CoreBodies.jet), so it checks a Core function its comptime already
     // checked again here rather than reuse that check, which no capture saw.
@@ -4150,7 +4060,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                 result.complete = false
                 if keep_going {
                     scopes.type_delta = [InternerDelta]{}
-                    stub := sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks)
+                    stub := sema_keep_going_registered_stub(declaration, memory_plan, None, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks)
                     if ^stub == .Val(trapped) -> sema_drain_scope_delta(program, result.type_delta, scopes, trapped.value, result.comptime_requests, result.comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
                     sema_keep_going_push_stub(stub, "function `{function_name}`", "comptime-checked body is incomplete", result.functions, result.incomplete_reasons)
                 } else {
@@ -4172,7 +4082,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             function_comptime_requests := [SemaComptimeRequest]{}
             function_name_references := [SemaNameReferenceFact]{}
             function_diagnostic_start: result.diagnostics.len()
-            memory_position: sema_check_ready_memory_position(ready, item_index, job, module_index, memory_plan, environment, program)
+            memory_position: sema_check_ready_memory_position(ready, item_index, job, declaration, module_index, memory_plan, environment, program)
             if memory_position == {
                 .Val(position) -> {
                     loop diagnostic in memory_plan.functions[position].diagnostics {
@@ -4197,7 +4107,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             capturing: sema_core_body_capturing(program, module_index)
             if capturing -> sema_core_body_capture_open(program)
             scopes.type_delta = [InternerDelta]{}
-            checked := sema_core_body_loaded(program, host_hooks, module_index, owner_id, scopes.type_delta, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references) ?? sema_check_module_function(ready, ready_deltas, item_index, scopes_changed, job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references, count_work, functions_checked)
+            checked := sema_core_body_loaded(program, host_hooks, module_index, owner_id, scopes.type_delta, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references) ?? sema_check_module_function(ready, ready_deltas, item_index, scopes_changed, job, declaration, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references, count_work, functions_checked)
             if trace_functions {
                 if trace_sink == .Val(sink) -> sink.end("sema.function", 1)
             }
@@ -4226,7 +4136,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                 if keep_going {
                     cause: sema_keep_going_cause(checked.incomplete_reasons, result.diagnostics, function_diagnostic_start)
                     scopes.type_delta = [InternerDelta]{}
-                    trap := sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
+                    trap := sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(declaration, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
                     if ^trap == .Val(trapped) -> sema_drain_scope_delta(program, result.type_delta, scopes, trapped.value, result.comptime_requests, result.comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
                     result.name_references.extend(function_name_references)
                     sema_keep_going_push_stub(trap, "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
@@ -4237,7 +4147,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             } else if keep_going && sema_check_function_failed(result.diagnostics, function_diagnostic_start, pending_obligations) {
                 cause: sema_keep_going_cause([String]{}, result.diagnostics, function_diagnostic_start)
                 scopes.type_delta = [InternerDelta]{}
-                trap := sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
+                trap := sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(declaration, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
                 if ^trap == .Val(trapped) -> sema_drain_scope_delta(program, result.type_delta, scopes, trapped.value, result.comptime_requests, result.comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
                 result.name_references.extend(function_name_references)
                 sema_keep_going_push_stub(trap, "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
@@ -4258,10 +4168,13 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
     }
 }
 
-sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], ordinal: Int, scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
-    label: sema_check_registered_method_label(job, module_index, environment, program)
-    owner_id: sema_check_registered_function_id(job, module_index, environment, program)
-    raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
+// `declaration`: the method row's declaration, which `method` names
+// (sema_check_apply_method_job).
+sema_check_registration_method: fn(method: SemaMethodJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], ordinal: Int, scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+    job: sema_method_body_job(method)
+    label: sema_check_registered_method_label(method, module_index, environment, program)
+    owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
+    raw_protocol_return: sema_check_registered_raw_protocol_return(method, module_index, environment, program)
     // As a top-level function's (sema_check_registration_top_level).
     cached := if sema_core_body_capturing(program, module_index) -> SemaComptimeFunctionResult?{None} else -> sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
     if cached == {
@@ -4283,9 +4196,9 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
                 return true
             }
             if keep_going {
-                original_kind: sema_check_registered_original_method_kind(job, module_index, environment, program)
+                original_kind: sema_check_registered_original_method_kind(method, module_index, environment, program)
                 scopes.type_delta = [InternerDelta]{}
-                stub := sema_check_registered_method_stub(job, module_index, memory_plan, owner_id, original_kind, raw_protocol_return, environment, program, scopes, host_hooks)
+                stub := sema_check_registered_method_stub(declaration, memory_plan, owner_id, original_kind, raw_protocol_return, environment, program, scopes, host_hooks)
                 if ^stub == .Val(trapped) -> sema_drain_scope_delta(program, type_delta, scopes, trapped.value, comptime_requests, comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
                 sema_keep_going_push_stub(stub, label, "comptime-checked body is incomplete", functions, reasons)
             } else { reasons.push("{label}: comptime-checked body is incomplete") }
@@ -4326,23 +4239,22 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     if checked_result == None {
         checked_result = sema_core_body_loaded(program, host_hooks, module_index, owner_id, scopes.type_delta, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
     }
-    owned_input := input.move() ?? sema_check_method_input(job, module_index, memory_plan, sema_check_registered_memory_position(job, module_index, memory_plan, environment, program), environment, program)
+    owned_input := input.move() ?? sema_check_method_input(method, module_index, memory_plan, sema_check_registered_memory_position(job, declaration, module_index, memory_plan, environment, program), environment, program)
     // Prepared diagnostics already include preparation, in the same order.
     if checked_result == None {
         loop diagnostic in owned_input.diagnostics -> diagnostics.push(diagnostic)
     }
     if !owned_input.memory_found {
-        declaration_span: sema_check_registered_source_span(job, module_index, environment, program)
-        reasons.push("{label}: the memory plan has no row for its declaration at offset {declaration_span.start}")
+        reasons.push("{label}: the memory plan has no row for its declaration at offset {declaration.span.start}")
     }
     base_generic_params: environment.generic_params.copy()
     environment.generic_params = owned_input.generic_params.copy()
     // copy: `previous_location` restores scopes.location_function after this method's check
     // overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location: scopes.location_function.copy()
-    sema_function_check_registered_location(job, module_index, memory_plan, owned_input.memory_position, environment, program, scopes)
-    if checked_result != None -> sema_function_check_registered_name(job, module_index, memory_plan, owned_input.memory_position, environment, program)
-    checked := checked_result.move() ?? sema_function_check_registered(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
+    sema_function_check_registered_location(declaration, memory_plan, owned_input.memory_position, scopes)
+    if checked_result != None -> sema_function_check_registered_name(declaration, memory_plan, owned_input.memory_position, environment)
+    checked := checked_result.move() ?? sema_function_check_registered(job, declaration, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
     // A captured method packet's diagnostics hold its preparation's, as a
     // prepared one's do.
     if capturing {
@@ -4357,7 +4269,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     keep_going_stub := SemaFunctionResult?{None}
     if keep_going && (!memory_complete || !owner_generic_complete || !checked.complete || check_failed) {
         scopes.type_delta = [InternerDelta]{}
-        keep_going_stub = sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks))
+        keep_going_stub = sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(declaration, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks))
         if ^keep_going_stub == .Val(trapped) -> sema_drain_scope_delta(program, type_delta, scopes, trapped.value, function_comptime_requests, function_comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
     }
     scopes.location_function = previous_location
@@ -4397,7 +4309,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         sema_keep_going_push_stub(keep_going_stub.move(), label, sema_keep_going_cause([String]{}, diagnostics, function_diagnostic_start), functions, reasons)
         return false
     }
-    if ^checked.value == .Val(rewritten) && sema_check_registered_protocol_unit_return(job, module_index, program) {
+    if ^checked.value == .Val(rewritten) && sema_check_registered_protocol_unit_return(method, module_index, program) {
         raw_return: Type.Named{name: "Unit"}
         rewritten.ret = Val(raw_return)
         failure: sema_failure_carrier(Val(raw_return))
@@ -4638,35 +4550,14 @@ sema_check_view_summaries: fn(environment: ^SemaScopeEnvironment, program: SemaP
     loop job_count > 0 && summary_round <= job_count {
         round := [ViewProvenanceMap?]{}
         loop item_index in summary_jobs {
-            job: SemaBodyJob.TopLevel{item_index: item_index}
-            provenance := ViewProvenanceMap?{None}
-            owner_id: sema_check_registered_function_id(job, module_index, environment, program)
-            cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
-            if cached == {
-                .Val(checked_function) -> {
-                    if checked_function.function == .Val(function) {
-                        _ := sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
-                        provenance = function.return_view_provenance
-                    }
-                }
-                .None -> {
-                    summary_diagnostics := [Diagnostic]{}
-                    summary_calls := [SemaCallSiteFact]{}
-                    summary_comptime_requests := [SemaComptimeRequest]{}
-                    summary_name_references := [SemaNameReferenceFact]{}
-                    memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
-                    summary_functions_checked += 1
-                    checked := sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
-                    if checked.value == .Val(function) {
-                        _ := sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
-                        provenance = function.return_view_provenance
-                    }
-                }
-            }
-            round.push(provenance)
+            round.push(sema_check_view_summary_function(program.registration_graph, item_index, module_index, memory_plan, environment, program, scopes, host_hooks, comptime_functions, comptime_rows, return_view_rows, summary_functions_checked))
         }
+        graph: program.registration_graph
         loop job in method_jobs {
-            round.push(sema_check_view_summary_method(job, module_index, memory_plan, environment, program, scopes, host_hooks))
+            if job == {
+                .NominalMethod(_, owner, row) -> round.push(sema_check_view_summary_method(job, graph.modules[module_index].nominals[owner].methods[row].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
+                .ImplMethod(_, owner, row) -> round.push(sema_check_view_summary_method(job, graph.modules[module_index].impls[owner].methods[row].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
+            }
         }
         if summary_round > 0 && sema_check_view_rounds_equal(previous_round, round) -> break
         previous_round = round
@@ -4680,26 +4571,57 @@ sema_check_view_summaries: fn(environment: ^SemaScopeEnvironment, program: SemaP
     summary_functions_checked
 }
 
+// One summary check of the top-level function at item `item_index`
+// (sema_check_view_summaries), read once here: `graph` is `program`'s
+// registration graph, a read parameter so the function is borrowed. An item
+// that is not a function has no summary; the module's body check reports it
+// (sema_check_registration_top_level).
+sema_check_view_summary_function: fn(graph: SemaRegistrationGraph, item_index: Int, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, return_view_rows: ^[U32:Int], summary_functions_checked: ^Int) -> ViewProvenanceMap? {
+    if graph.modules[module_index].program.items[item_index] == .Func(declaration) {
+        job: SemaBodyJob.TopLevel{item_index: item_index}
+        owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
+        cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
+        if cached == .Val(checked_function) {
+            if checked_function.function == .Val(function) {
+                _ := sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
+                return function.return_view_provenance
+            }
+            return None
+        }
+        summary_diagnostics := [Diagnostic]{}
+        summary_calls := [SemaCallSiteFact]{}
+        summary_comptime_requests := [SemaComptimeRequest]{}
+        summary_name_references := [SemaNameReferenceFact]{}
+        memory_position: sema_check_registered_memory_position(job, declaration, module_index, memory_plan, environment, program)
+        summary_functions_checked += 1
+        checked := sema_function_check_registered(job, declaration, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
+        if checked.value == .Val(function) {
+            _ := sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
+            return function.return_view_provenance
+        }
+    }
+    None
+}
+
 // The module's methods whose declared return type structurally contains a
 // view, in method body order (sema_check_method_jobs). A method call reads
 // the summary from `scopes.method_return_views`.
-sema_check_view_summary_method_jobs: fn(program: SemaProgramTables, module_index: Int) -> [SemaBodyJob] {
+sema_check_view_summary_method_jobs: fn(program: SemaProgramTables, module_index: Int) -> [SemaMethodJob] {
     graph: program.registration_graph
-    jobs := [SemaBodyJob]{}
+    jobs := [SemaMethodJob]{}
     scanned := 0
     loop job in sema_check_method_jobs(graph, graph.modules[module_index], scanned, false) {
         if job == {
             .NominalMethod(ordinal, owner, row) -> {
                 if sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].nominals[owner].methods[row].declaration) {
-                    jobs.push(SemaBodyJob.NominalMethod{ordinal: ordinal, nominal_index: owner, method_index: row})
+                    jobs.push(SemaMethodJob.NominalMethod{ordinal: ordinal, nominal_index: owner, method_index: row})
                 }
             }
             .ImplMethod(ordinal, owner, row) -> {
                 if sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].impls[owner].methods[row].declaration) {
-                    jobs.push(SemaBodyJob.ImplMethod{ordinal: ordinal, implementation_index: owner, method_index: row})
+                    jobs.push(SemaMethodJob.ImplMethod{ordinal: ordinal, implementation_index: owner, method_index: row})
                 }
             }
-            .TopLevel(_) -> {}
         }
     }
     jobs.move()
@@ -4714,26 +4636,28 @@ sema_check_view_summary_method_selected: fn(graph: SemaRegistrationGraph, module
     sema_check_type_contains_view(graph, graph.modules[module_index].module_identity, return_type, seen)
 }
 
-// One summary check of method `job`, set up as the method body pass sets it
-// up: the owner's generic parameters and the panic location stay installed
-// only for the check. Its diagnostics and other products are discarded; the
-// inferred provenance is published under the method's registered symbol key,
-// the key its call candidate carries.
-sema_check_view_summary_method: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> ViewProvenanceMap? {
-    memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
-    input: sema_check_method_input(job, module_index, memory_plan, memory_position, environment, program)
-    owner_id: sema_check_registered_function_id(job, module_index, environment, program)
-    raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
+// One summary check of method `method`, set up as the method body pass sets
+// it up: the owner's generic parameters and the panic location stay
+// installed only for the check. Its diagnostics and other products are
+// discarded; the inferred provenance is published under the method's
+// registered symbol key, the key its call candidate carries. `declaration`:
+// the method row's declaration, which `method` names.
+sema_check_view_summary_method: fn(method: SemaMethodJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?) -> ViewProvenanceMap? {
+    job: sema_method_body_job(method)
+    memory_position: sema_check_registered_memory_position(job, declaration, module_index, memory_plan, environment, program)
+    input: sema_check_method_input(method, module_index, memory_plan, memory_position, environment, program)
+    owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
+    raw_protocol_return: sema_check_registered_raw_protocol_return(method, module_index, environment, program)
     base_generic_params: environment.generic_params.copy()
     environment.generic_params = input.generic_params.move()
     // copy: `previous_location` restores scopes.location_function after the check overwrites it.
     previous_location: scopes.location_function.copy()
-    sema_function_check_registered_location(job, module_index, memory_plan, input.memory_position, environment, program, scopes)
+    sema_function_check_registered_location(declaration, memory_plan, input.memory_position, scopes)
     summary_diagnostics := [Diagnostic]{}
     summary_calls := [SemaCallSiteFact]{}
     summary_comptime_requests := [SemaComptimeRequest]{}
     summary_name_references := [SemaNameReferenceFact]{}
-    checked := sema_function_check_registered(job, module_index, memory_plan, input.memory_position, owner_id, input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
+    checked := sema_function_check_registered(job, declaration, module_index, memory_plan, input.memory_position, owner_id, input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
     scopes.location_function = previous_location
     environment.generic_params = base_generic_params.move()
     provenance := ViewProvenanceMap?{None}
@@ -4811,7 +4735,7 @@ SemaModuleCheckRun: struct {
     module_result: SemaGraphModuleResult,
     scopes: SemaScopeTable,
     method_ready: SemaPreparedBodies,
-    all_method_jobs: [SemaBodyJob],
+    all_method_jobs: [SemaMethodJob],
     prelude_demands: [Int:[SemaPreludeConversionDemand]],
     module_identity: ModuleID,
     keep_going: Bool,
@@ -4851,7 +4775,7 @@ sema_check_registration_module_head: fn(environment: ^SemaScopeEnvironment, prog
     functions_checked := 0
     if count_work -> functions_checked = ready.bodies.len()
     impl_rows_scanned := 0
-    all_method_jobs := [SemaBodyJob]{}
+    all_method_jobs := [SemaMethodJob]{}
     method_ready := sema_check_prepared_none()
     // The prelude conversion demands of each body a compiler thread
     // walked, by its position in module_result.functions.
@@ -4882,7 +4806,7 @@ sema_check_registration_module_head: fn(environment: ^SemaScopeEnvironment, prog
             }
             if sema_check_registered_item_is_jet_function(environment, program, module_index, item_index) {
                 if !sema_check_registered_item_deferred(environment, program, module_index, item_index) {
-                    sema_check_registration_top_level(module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready.bodies, ready.body_deltas, host_hooks, comptime_functions, comptime_rows, module_result, prelude_demands, scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, functions_checked)
+                    sema_check_registration_top_level(program.registration_graph, module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready.bodies, ready.body_deltas, host_hooks, comptime_functions, comptime_rows, module_result, prelude_demands, scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, functions_checked)
                 }
             } else {
                 sema_check_registration_module_test(environment, program, module_index, item_index, scopes, host_hooks, module_result)
