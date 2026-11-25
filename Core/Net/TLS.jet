@@ -130,7 +130,7 @@ TLSStream: struct {
         end_ns: deadline_end(deadline, "tls read") ?? return Err(net_to_io(err))
         state: __state(self) ?? return Err(io_error(.Read, "TLS stream is closed"))
         guard := state.guard_edit()
-        __read(guard.value, max_bytes, end_ns)
+        read_locked(guard.value, max_bytes, end_ns)
     }
 
     // Appends up to `limit` plaintext bytes to `buffer` and returns the
@@ -407,7 +407,7 @@ read: fn(stream: ^TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
     end_ns: deadline_end(forever(), "tls read") ?? return Err(net_to_io(err))
     state: __state(stream) ?? return Err(io_error(.Read, "TLS stream is closed"))
     guard := state.guard_edit()
-    __read_text(guard.value, n, end_ns)
+    read_text_locked(guard.value, n, end_ns)
 }
 
 write_some: fn(stream: ^TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
@@ -1200,7 +1200,7 @@ priv send_queued: fn(tls: ^TLSState, end_ns: Int, operation: String) -[Net, Time
 
 // Queues what a readable socket holds for the engine: 0, or the socket
 // status that failed the read. An empty read is the end of the stream.
-priv __take: fn(tls: ^TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
+priv socket_take: fn(tls: ^TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
     remaining: end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return 0
     slice: Duration{ns: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining}
@@ -1228,7 +1228,7 @@ priv socket_status: fn(err: NetError, fallback: Int) -> Int Never! {
 // called again, or the socket status that ended the wait.
 priv await: fn(tls: ^TLSState, status: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
     ready: ready_wait(tls.tcp, status_interest(status), end_ns, operation) ?? return Err(err)
-    if status == C_WANT_READ && ready.readable -> return Ok(__take(tls, end_ns))
+    if status == C_WANT_READ && ready.readable -> return Ok(socket_take(tls, end_ns))
     Ok(0)
 }
 
@@ -1329,7 +1329,7 @@ priv wants_write: fn(interest: NetReadyInterest) -> Bool Never! {
     }
 }
 
-priv __read: fn(tls: ^TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8] IOError! {
+priv read_locked: fn(tls: ^TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8] IOError! {
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
     if tls.pending.len() > 0 {
         count: if max_bytes < tls.pending.len() -> max_bytes else -> tls.pending.len()
@@ -1357,7 +1357,7 @@ priv __read: fn(tls: ^TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> 
     }
 }
 
-// read_into under the stream's lock: __read's steps, the bytes appended to
+// read_into under the stream's lock: read_locked's steps, the bytes appended to
 // `buffer` rather than returned.
 priv read_into_locked: fn(tls: ^TLSState, buffer: ^[U8], limit: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
@@ -1498,11 +1498,11 @@ priv stopped: fn(err: NetError) -> Bool Never! {
 
 // read_text under the stream's lock: the bytes it takes past the text it
 // returns go back in front of `pending`.
-priv __read_text: fn(tls: ^TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> String IOError! {
+priv read_text_locked: fn(tls: ^TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> String IOError! {
     bytes := [U8]{}
     loop {
         want: if bytes.len() < max_bytes -> max_bytes - bytes.len() else -> 1
-        more: __read(tls, want, end_ns) ?? {
+        more: read_locked(tls, want, end_ns) ?? {
             unread(tls, bytes)
             return Err(err)
         }
@@ -1753,7 +1753,7 @@ priv fill_pending: fn(tls: ^TLSState, operation: IOOperation, end_ns: Int, reada
         if status == C_WANT_READ || status == C_WANT_WRITE {
             if status == C_WANT_WRITE || !socket -> return Ok(false)
             socket = false
-            status = __take(tls, end_ns)
+            status = socket_take(tls, end_ns)
             if status == 0 -> next
         }
         return Err(io_error(operation, "TLS read readiness failed: {mbedtls_text(status)}"))
