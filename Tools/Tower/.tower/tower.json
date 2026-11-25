@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114300,
+    "rev": 114325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26422,21 +26422,29 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`JET_GOLDEN_FILTER=io/archive_stream Tools/Agent/jet-env cargo test --test golden examples_compile_and_run` streams .tar.gz and .tar.zst fixtures through `tar_reader` on AOT and default run, including symlink, hardlink and PAX long-name entries.",
+          "text": "The tar reader streams .tar.gz and .tar.zst fixtures on every tier, including symlink, hardlink and PAX long-name entries, with identical output on each. Proof: `jet test Compiler --profile cases --filter Tests/Cases/Archive/tar_reader_streams_gz_and_zst_with_links_and_pax_names`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:54:27.113Z"
+          "at": "2026-11-25T23:36:02.825Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/Archive/tar_reader_streams_gz_and_zst_with_links_and_pax_names"
+          }
         },
         {
           "n": 2,
-          "text": "`Tools/Agent/jet-env cargo test --test archive` passes RFC 8878 test frames and reference-tool .zst fixtures at levels 1, 3, 19 and 22, plus window-cap, dictionary and gzip multi-member CRC/ISIZE error cases.",
+          "text": "The zstd decoder accepts the RFC 8878 test frames and reference-tool .zst fixtures at levels 1, 3, 19 and 22, and refuses a frame over the window cap and a frame naming an unknown dictionary with typed errors. Proof: `jet test Compiler --profile cases --filter Tests/Cases/Archive/zstd_decoder_accepts_rfc8878_frames_and_reference_levels`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:54:28.100Z"
+          "at": "2026-11-25T23:36:04.246Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/Archive/zstd_decoder_accepts_rfc8878_frames_and_reference_levels"
+          }
         },
         {
           "n": 3,
@@ -26476,7 +26484,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:26.667Z",
-      "updated": "2026-11-25T23:35:06.076Z",
+      "updated": "2026-11-25T23:36:04.246Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -26532,30 +26540,81 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Each ratified item has a same-program witness with identical AOT and default-run output (interpreter too where applicable), run as `JET_GOLDEN_FILTER=<dir/name> cargo test --test golden examples_compile_and_run`:\n- `io/terminal_facts`: `is_terminal()` on stdin/stdout/stderr prints false under capture\n- `serde/json_limits`: `max_total_bytes` and `max_depth` breaches return `EncodingError` kind `Limit`, and the bare call is unchanged\n- `concurrency/para_os_threads`: a `para_map` callback reports more than one distinct OS thread id when the worker count is above 1\n\n`cargo test --test authority -- plugin_` passes, plus a new `plugin_load_runtime_path_checks_declared_trait` covering a run-time path with `plugin.load<I>` and a `limits:` override.",
+          "text": "Golden example TerminalFacts: `is_terminal()` on stdin, stdout and stderr prints false under capture, with identical output on every tier. Proof: `jet test Compiler --profile golden --filter TerminalFacts`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:22:47.720Z"
+          "at": "2026-11-25T23:36:05.323Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "TerminalFacts"
+          }
         },
         {
           "n": 2,
-          "text": "[#3597] Golden crypto/ed25519_seed_verify proves RFC 8032 seed-to-public vectors and strict verify acceptance matching ed25519-dalek on malformed vectors, on every level (canonical seed constructor added).",
+          "text": "Golden example Ed25519SeedVerify proves the RFC 8032 seed-to-public vectors through the canonical seed constructor, and strict verify accepts and refuses the malformed vectors exactly as ed25519-dalek does, on every tier. Proof: `jet test Compiler --profile golden --filter Ed25519SeedVerify`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:25.638Z"
+          "at": "2026-11-25T23:36:06.362Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Ed25519SeedVerify"
+          }
         },
         {
           "n": 3,
-          "text": "[#3712] Golden serde/json_byte_contract proves the compact renderer bytes Jetpack's lock and reports need (key order, escapes, nonfinite handling), identical on every level.",
+          "text": "Golden example JSONByteContract proves the compact renderer bytes Jetpack's lock and reports need (key order, escapes, nonfinite handling), identical on every tier. Proof: `jet test Compiler --profile golden --filter JSONByteContract`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:26.924Z"
+          "at": "2026-11-25T23:36:07.591Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "JSONByteContract"
+          }
+        },
+        {
+          "n": 4,
+          "text": "Golden example JSONLimits: a parse over `max_total_bytes` or `max_depth` returns `EncodingError` kind `Limit`, and the call without limits is unchanged, with identical output on every tier. Proof: `jet test Compiler --profile golden --filter JSONLimits`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:09.471Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "JSONLimits"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Golden example ParaOSThreads: a `para_map` callback reports more than one distinct OS thread id when the worker count is above 1, on every tier. Proof: `jet test Compiler --profile golden --filter ParaOSThreads`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:10.957Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "ParaOSThreads"
+          }
+        },
+        {
+          "n": 6,
+          "text": "`plugin.load<I>` from a path known only at run time checks the loaded artifact against the declared trait and honours a `limits:` override; the existing plugin_load cases still pass. Proof: `jet test Compiler --profile cases --filter Tests/Cases/Authority/plugin_load`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:12.412Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/Authority/plugin_load"
+          }
         }
       ],
       "refs": [
@@ -26573,8 +26632,9 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:28.600Z",
-      "updated": "2026-11-22T02:10:23.709Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-25T23:36:07.591Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 6
     },
     {
       "id": "c0tgtjtu",
@@ -27888,21 +27948,68 @@
         },
         {
           "n": 2,
-          "text": "One app built once runs on two OS/arch hosts under declared grants, with refusal for missing grants, and measured against the wasm and OCI alternatives.",
+          "text": "One app built once runs on two OS/arch hosts under its declared grants, and each host refuses it when a grant is missing. Proof: `jet test Compiler --profile cases --filter Tests/Cases/AppFormat/one_build_runs_on_two_hosts_and_refuses_a_missing_grant`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-02T10:15:39.724Z"
+          "at": "2026-11-25T23:36:08.653Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/AppFormat/one_build_runs_on_two_hosts_and_refuses_a_missing_grant"
+          }
         },
         {
           "n": 3,
-          "text": "(was #4762) Extensible hardware requirements with trusted scan, target facts and pre-entry admission",
+          "text": "An app declares hardware requirements through an extensible requirement kind, and a target exposes them as typed target facts. Proof: `jet test Compiler --profile cases --filter Tests/Cases/AppFormat/hardware_requirements_are_declared_and_read_as_target_facts`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:10:34.351Z"
+          "at": "2026-11-25T23:36:09.618Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/AppFormat/hardware_requirements_are_declared_and_read_as_target_facts"
+          }
+        },
+        {
+          "n": 4,
+          "text": "The same app's start time, peak memory and artifact size are measured against its wasm and OCI builds in a paired perf cell recorded in the canonical manifest. Proof: `jet test Compiler --profile cases --filter Tests/Cases/AppFormat/app_format_is_measured_against_wasm_and_oci`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:20.582Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/AppFormat/app_format_is_measured_against_wasm_and_oci"
+          }
+        },
+        {
+          "n": 5,
+          "text": "A trusted scan of the host produces the target facts, and a fact the app cannot get from the scan is never taken from the app's own claim. Proof: `jet test Compiler --profile cases --filter Tests/Cases/AppFormat/trusted_scan_produces_host_hardware_facts`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:23.964Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/AppFormat/trusted_scan_produces_host_hardware_facts"
+          }
+        },
+        {
+          "n": 6,
+          "text": "Admission runs before entry: a host whose scanned facts miss a declared requirement refuses the app with a registered diagnostic, and no app code runs. Proof: `jet test Compiler --profile cases --filter Tests/Cases/AppFormat/pre_entry_admission_refuses_unmet_hardware`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:25.139Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/AppFormat/pre_entry_admission_refuses_unmet_hardware"
+          }
         }
       ],
       "refs": [
@@ -27922,8 +28029,9 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-02T10:15:39.724Z",
-      "updated": "2026-11-22T02:10:23.710Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-25T23:36:09.618Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 6
     },
     {
       "id": "c0jm0xjt",
@@ -30113,12 +30221,16 @@
       "criteria": [
         {
           "n": 1,
-          "text": "each battery example compiles after jet env --prep with no env.jet.",
+          "text": "Each battery example compiles after `jet env --prep` with no env.jet present. Proof: `jet test Compiler --profile cases --filter Tests/Cases/JetpackEngine/battery_examples_compile_after_env_prep_without_env_jet`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:34:02.863Z"
+          "at": "2026-11-25T23:36:10.793Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/JetpackEngine/battery_examples_compile_after_env_prep_without_env_jet"
+          }
         }
       ],
       "refs": [],
@@ -30129,8 +30241,8 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-05T16:15:04.540Z",
-      "updated": "2026-11-22T02:10:23.711Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-25T23:36:10.793Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c00rqc09",
@@ -35203,12 +35315,16 @@
         },
         {
           "n": 9,
-          "text": "Reached-code diffs on update (owner-approved greenfield proposal item P28, 2026-11-25): a dependency update lists every changed function the project can reach, with its source diff and the call path that reaches it, beside the capability diff.",
+          "text": "Reached-code diffs on update (owner-approved greenfield proposal item P28, 2026-11-25): a dependency update lists every changed function the project can reach, with its source diff and the call path that reaches it, beside the capability diff. Proof: `jet test Compiler --profile cases --filter Tests/Cases/JetpackEngine/update_lists_reached_changed_functions_with_call_paths`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-25T17:39:44.238Z"
+          "at": "2026-11-25T23:36:11.801Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/JetpackEngine/update_lists_reached_changed_functions_with_call_paths"
+          }
         }
       ],
       "refs": [],
@@ -35216,8 +35332,8 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:33.234Z",
-      "updated": "2026-11-25T17:39:44.238Z",
-      "updatedBy": "Pip",
+      "updated": "2026-11-25T23:36:11.801Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
     {
@@ -46621,39 +46737,107 @@
       "criteria": [
         {
           "n": 1,
-          "text": "(was #694 c1) Every behavior named by “Legacy build wrappers: shared typed ActionSpec bridge”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes (moved from #6418 c54)",
+          "text": "A representative Make project imports into the canonical graph and builds through ActionSpec on the production path, with the same outputs as `make`; no demo, label, stub or sibling claim substitutes. Proof: `jet test Compiler --profile cases --filter Tests/Cases/BuildImport/make_project_builds_through_actionspec`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:24:37.138Z"
+          "at": "2026-11-25T23:36:12.732Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/BuildImport/make_project_builds_through_actionspec"
+          }
         },
         {
           "n": 2,
-          "text": "(was #694 c2, #1044 c2, #1045 c2, #1046 c2, #1047 c2) Imported commands, tools, inputs, outputs, environment, dependencies, resources, cache identity, provenance, and resulting actions are inspectable in the canonical graph (moved from #6418 c55)",
+          "text": "An imported build's commands, tools, inputs, outputs, environment, dependencies, resources, cache identity, provenance and resulting actions are all listed by graph inspection. Proof: `jet test Compiler --profile cases --filter Tests/Cases/BuildImport/imported_graph_lists_every_command_tool_input_output_and_provenance`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:24:38.219Z"
+          "at": "2026-11-25T23:36:13.723Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/BuildImport/imported_graph_lists_every_command_tool_input_output_and_provenance"
+          }
         },
         {
           "n": 3,
-          "text": "(was #694 c3, #1044 c3, #1045 c3, #1046 c3, #1047 c3) Policy denial, unsupported project constructs, undeclared access, tool failure, path escape, nondeterminism, and partial import fail clearly without executing an unreviewed fallback command (moved from #6418 c56)",
+          "text": "Policy denial, undeclared access and path escape in an imported action fail with a registered diagnostic, and no unreviewed fallback command runs. Proof: `jet test Compiler --profile cases --filter Tests/Cases/BuildImport/imported_action_refuses_denied_undeclared_and_escaping_access`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:24:39.133Z"
+          "at": "2026-11-25T23:36:14.598Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/BuildImport/imported_action_refuses_denied_undeclared_and_escaping_access"
+          }
         },
         {
           "n": 4,
-          "text": "(was #694 c4, #1044 c4, #1045 c4, #1046 c4, #1047 c4) Focused production-driver tests import a representative project, inspect the graph, execute through ActionSpec, enforce the CI ban, and cover a hostile or unsupported case (moved from #6418 c57)",
+          "text": "In CI mode an unreviewed imported command is refused (the CI ban), and a hostile imported project, one whose action writes outside its declared outputs, is refused. Proof: `jet test Compiler --profile cases --filter Tests/Cases/BuildImport/ci_ban_and_hostile_project_are_refused`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:24:40.110Z"
+          "at": "2026-11-25T23:36:18.858Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/BuildImport/ci_ban_and_hostile_project_are_refused"
+          }
+        },
+        {
+          "n": 5,
+          "text": "A representative CMake project imports into the canonical graph and builds through ActionSpec on the production path, with the same outputs as the CMake build. Proof: `jet test Compiler --profile cases --filter Tests/Cases/BuildImport/cmake_project_builds_through_actionspec`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:32.956Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/BuildImport/cmake_project_builds_through_actionspec"
+          }
+        },
+        {
+          "n": 6,
+          "text": "A representative Cargo project imports into the canonical graph and builds through ActionSpec on the production path, with the same outputs as `cargo build`. Proof: `jet test Compiler --profile cases --filter Tests/Cases/BuildImport/cargo_project_builds_through_actionspec`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:34.346Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/BuildImport/cargo_project_builds_through_actionspec"
+          }
+        },
+        {
+          "n": 7,
+          "text": "An unsupported project construct and a partial import fail with a registered diagnostic naming the construct, and no unreviewed fallback command runs. Proof: `jet test Compiler --profile cases --filter Tests/Cases/BuildImport/unsupported_construct_and_partial_import_fail_without_fallback`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:36:15.486Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/BuildImport/unsupported_construct_and_partial_import_fail_without_fallback"
+          }
+        },
+        {
+          "n": 8,
+          "text": "A failing imported tool and nondeterministic imported output fail with a registered diagnostic naming the tool and the action. Proof: `jet test Compiler --profile cases --filter Tests/Cases/BuildImport/tool_failure_and_nondeterminism_fail_clearly`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:36:16.749Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/BuildImport/tool_failure_and_nondeterminism_fail_clearly"
+          }
         }
       ],
       "refs": [],
@@ -46661,8 +46845,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:24:36.318Z",
-      "updated": "2026-11-22T02:10:23.717Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-25T23:36:18.858Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 8
     },
     {
       "id": "c0jn187l",
@@ -76742,6 +76927,28 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-25T17:39:04.540Z"
+        },
+        {
+          "n": 5,
+          "text": "The compiler's own packages declare their layers, and `jet check Compiler` reports no layer violation. Proof: `jet test Compiler --profile cases --filter Tests/Cases/Layers/compiler_packages_declare_layers_and_check_clean`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:50.599Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tests/Cases/Layers/compiler_packages_declare_layers_and_check_clean"
+          }
+        },
+        {
+          "n": 6,
+          "text": "The spec, the reference pages and the editor grammars describe layers. Proof: the editor grammar generator's `--check` passes, and Docs/Spec/Reference documents the layers declaration.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:35:53.869Z"
         }
       ],
       "refs": [],
@@ -76749,8 +76956,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:39:04.540Z",
-      "updated": "2026-11-25T17:39:04.540Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-25T23:35:53.869Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 6
     },
     {
       "id": "c0oi3k2t",
@@ -144617,6 +144825,195 @@
   ],
   "events": [
     {
+      "at": "2026-11-25T23:36:18.858Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c065d1d5",
+      "note": "#4: #6568 n3: one testable outcome per criterion, with its proving test named; was: (was #694 c4, #1044 c4, #1045 c4, #1046 c4, #1047 c4) Focused production-driver tests import a representative project, inspect the graph, execute through ActionSpec, enforce the CI ban, and cover a ho; proof: jet test Compiler --profile cases --filter Tests/Cases/BuildImport/ci_ban_and_hostile_project_are_refused"
+    },
+    {
+      "at": "2026-11-25T23:36:16.749Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c065d1d5",
+      "note": "8 criteria, soft limit 6: splits of one merged refusal criterion (#6568 n3); each is one patch"
+    },
+    {
+      "at": "2026-11-25T23:36:16.749Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c065d1d5",
+      "note": "#8 A failing imported tool and nondeterministic imported output"
+    },
+    {
+      "at": "2026-11-25T23:36:15.486Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c065d1d5",
+      "note": "7 criteria, soft limit 6: splits of one merged refusal criterion (#6568 n3); each is one patch"
+    },
+    {
+      "at": "2026-11-25T23:36:15.486Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c065d1d5",
+      "note": "#7 An unsupported project construct and a partial import fail w"
+    },
+    {
+      "at": "2026-11-25T23:36:14.598Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c065d1d5",
+      "note": "#3: #6568 n3: one testable outcome per criterion, with its proving test named; was: (was #694 c3, #1044 c3, #1045 c3, #1046 c3, #1047 c3) Policy denial, unsupported project constructs, undeclared access, tool failure, path escape, nondeterminism, and partial import fail clearly witho; proof: jet test Compiler --profile cases --filter Tests/Cases/BuildImport/imported_action_refuses_denied_undeclared_and_escaping_access"
+    },
+    {
+      "at": "2026-11-25T23:36:13.723Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c065d1d5",
+      "note": "#2: #6568 n3: one testable outcome per criterion, with its proving test named; was: (was #694 c2, #1044 c2, #1045 c2, #1046 c2, #1047 c2) Imported commands, tools, inputs, outputs, environment, dependencies, resources, cache identity, provenance, and resulting actions are inspectable; proof: jet test Compiler --profile cases --filter Tests/Cases/BuildImport/imported_graph_lists_every_command_tool_input_output_and_provenance"
+    },
+    {
+      "at": "2026-11-25T23:36:12.732Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c065d1d5",
+      "note": "#1: #6568 n3: one testable outcome per criterion, with its proving test named; was: (was #694 c1) Every behavior named by “Legacy build wrappers: shared typed ActionSpec bridge”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling clai; proof: jet test Compiler --profile cases --filter Tests/Cases/BuildImport/make_project_builds_through_actionspec"
+    },
+    {
+      "at": "2026-11-25T23:36:11.801Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#9: #6568 n3: one testable outcome per criterion, with its proving test named; was: Reached-code diffs on update (owner-approved greenfield proposal item P28, 2026-11-25): a dependency update lists every changed function the project can reach, with its source diff and the call path t; proof: jet test Compiler --profile cases --filter Tests/Cases/JetpackEngine/update_lists_reached_changed_functions_with_call_paths"
+    },
+    {
+      "at": "2026-11-25T23:36:10.793Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0wlxl44",
+      "note": "#1: #6568 n3: one testable outcome per criterion, with its proving test named; was: each battery example compiles after jet env --prep with no env.jet.; proof: jet test Compiler --profile cases --filter Tests/Cases/JetpackEngine/battery_examples_compile_after_env_prep_without_env_jet"
+    },
+    {
+      "at": "2026-11-25T23:36:09.618Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0aocd58",
+      "note": "#3: #6568 n3: one testable outcome per criterion, with its proving test named; was: (was #4762) Extensible hardware requirements with trusted scan, target facts and pre-entry admission; proof: jet test Compiler --profile cases --filter Tests/Cases/AppFormat/hardware_requirements_are_declared_and_read_as_target_facts"
+    },
+    {
+      "at": "2026-11-25T23:36:08.653Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0aocd58",
+      "note": "#2: #6568 n3: one testable outcome per criterion, with its proving test named; was: One app built once runs on two OS/arch hosts under declared grants, with refusal for missing grants, and measured against the wasm and OCI alternatives.; proof: jet test Compiler --profile cases --filter Tests/Cases/AppFormat/one_build_runs_on_two_hosts_and_refuses_a_missing_grant"
+    },
+    {
+      "at": "2026-11-25T23:36:07.591Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0hrslld",
+      "note": "#3: #6568 n3: one testable outcome per criterion, with its proving test named; was: [#3712] Golden serde/json_byte_contract proves the compact renderer bytes Jetpack's lock and reports need (key order, escapes, nonfinite handling), identical on every level.; proof: jet test Compiler --profile golden --filter JSONByteContract"
+    },
+    {
+      "at": "2026-11-25T23:36:06.362Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0hrslld",
+      "note": "#2: #6568 n3: one testable outcome per criterion, with its proving test named; was: [#3597] Golden crypto/ed25519_seed_verify proves RFC 8032 seed-to-public vectors and strict verify acceptance matching ed25519-dalek on malformed vectors, on every level (canonical seed constructor ad; proof: jet test Compiler --profile golden --filter Ed25519SeedVerify"
+    },
+    {
+      "at": "2026-11-25T23:36:05.323Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0hrslld",
+      "note": "#1: #6568 n3: one testable outcome per criterion, with its proving test named; was: Each ratified item has a same-program witness with identical AOT and default-run output (interpreter too where applicable), run as `JET_GOLDEN_FILTER=<dir/name> cargo test --test golden examples_compi; proof: jet test Compiler --profile golden --filter TerminalFacts"
+    },
+    {
+      "at": "2026-11-25T23:36:04.246Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0lt9o2a",
+      "note": "#2: #6568 n3: one testable outcome per criterion, with its proving test named; was: `Tools/Agent/jet-env cargo test --test archive` passes RFC 8878 test frames and reference-tool .zst fixtures at levels 1, 3, 19 and 22, plus window-cap, dictionary and gzip multi-member CRC/ISIZE erro; proof: jet test Compiler --profile cases --filter Tests/Cases/Archive/zstd_decoder_accepts_rfc8878_frames_and_reference_levels"
+    },
+    {
+      "at": "2026-11-25T23:36:02.825Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0lt9o2a",
+      "note": "#1: #6568 n3: one testable outcome per criterion, with its proving test named; was: `JET_GOLDEN_FILTER=io/archive_stream Tools/Agent/jet-env cargo test --test golden examples_compile_and_run` streams .tar.gz and .tar.zst fixtures through `tar_reader` on AOT and default run, including; proof: jet test Compiler --profile cases --filter Tests/Cases/Archive/tar_reader_streams_gz_and_zst_with_links_and_pax_names"
+    },
+    {
+      "at": "2026-11-25T23:35:53.869Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hgn7y3",
+      "note": "#6 The spec, the reference pages and the editor grammars descri"
+    },
+    {
+      "at": "2026-11-25T23:35:50.600Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hgn7y3",
+      "note": "#5 The compiler's own packages declare their layers, and `jet c"
+    },
+    {
+      "at": "2026-11-25T23:35:34.346Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c065d1d5",
+      "note": "#6 A representative Cargo project imports into the canonical gr"
+    },
+    {
+      "at": "2026-11-25T23:35:32.956Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c065d1d5",
+      "note": "#5 A representative CMake project imports into the canonical gr"
+    },
+    {
+      "at": "2026-11-25T23:35:25.139Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aocd58",
+      "note": "#6 Admission runs before entry: a host whose scanned facts miss"
+    },
+    {
+      "at": "2026-11-25T23:35:23.964Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aocd58",
+      "note": "#5 A trusted scan of the host produces the target facts, and a "
+    },
+    {
+      "at": "2026-11-25T23:35:20.582Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aocd58",
+      "note": "#4 The same app's start time, peak memory and artifact size are"
+    },
+    {
+      "at": "2026-11-25T23:35:12.412Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hrslld",
+      "note": "#6 `plugin.load<I>` from a path known only at run time checks t"
+    },
+    {
+      "at": "2026-11-25T23:35:10.957Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hrslld",
+      "note": "#5 Golden example ParaOSThreads: a `para_map` callback reports "
+    },
+    {
+      "at": "2026-11-25T23:35:09.471Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hrslld",
+      "note": "#4 Golden example JSONLimits: a parse over `max_total_bytes` or"
+    },
+    {
       "at": "2026-11-25T23:35:06.076Z",
       "by": "Orchestrator",
       "action": "card.criteria-add",
@@ -148103,715 +148500,6 @@
       "action": "decision.add",
       "ref": "D-LINK-CARET1",
       "note": "Links are spelled with ^ instead of @ (draft)"
-    },
-    {
-      "at": "2026-11-24T13:55:50.303Z",
-      "by": "Orchestrator",
-      "action": "decision.delete",
-      "ref": "D-MARK-CARET1",
-      "note": "Write and take marks are spelled ^ and ^^",
-      "draft": true
-    },
-    {
-      "at": "2026-11-24T13:55:17.751Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jjynlr",
-      "note": "#5: Owner ruling 2026-11-24: links keep @; marks move & to ^ and && to ^^; was: The spec, the reference pages and LANGUAGE_REWRITES describe ^ links; D-LINK-CARET1 carries the full ballot record of the owner's ruling and is ratified A."
-    },
-    {
-      "at": "2026-11-24T13:55:16.747Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jjynlr",
-      "note": "#4: Owner ruling 2026-11-24: links keep @; marks move & to ^ and && to ^^; was: Diagnostics and UI snapshots that print a link, the editor grammars and the semantic tokens show ^; the full suite has no new failure on the batch compiler."
-    },
-    {
-      "at": "2026-11-24T13:55:15.523Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jjynlr",
-      "note": "#3: Owner ruling 2026-11-24: links keep @; marks move & to ^ and && to ^^; was: A jet fix migration plan (link-caret1) rewrites every link use in Core, Compiler, Jetpack, Tools, Examples and every Tests tree, case fixture and template in one cutover; a sweep finds no @ link left."
-    },
-    {
-      "at": "2026-11-24T13:55:14.470Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jjynlr",
-      "note": "#2: Owner ruling 2026-11-24: links keep @; marks move & to ^ and && to ^^; was: Lexer, parser, sema, fmt and the LSP read and print ^T and ^value; a leftover @ link is an ordinary parse error, with no alias and no teaching diagnostic."
-    },
-    {
-      "at": "2026-11-24T13:55:13.401Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jjynlr",
-      "note": "#1: Owner ruling 2026-11-24: links keep @; marks move & to ^ and && to ^^; was: Registry: SIGIL_LINK is ^ in CoreSurface.jet, the @ link row leaves Spellings.jet, and OP_CARET in MathLayout.jet records prefix ^ as the link; infix ^ stays a parse error."
-    },
-    {
-      "at": "2026-11-24T13:54:53.569Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jjynlr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-24T13:54:52.651Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jjynlr",
-      "note": "title,body,plan"
-    },
-    {
-      "at": "2026-11-24T13:54:34.577Z",
-      "by": "Orchestrator",
-      "action": "decision.delete",
-      "ref": "D-LINK-CARET1",
-      "note": "Links are spelled with ^ instead of @",
-      "draft": true
-    },
-    {
-      "at": "2026-11-24T13:54:33.537Z",
-      "by": "Orchestrator",
-      "action": "decision.add",
-      "ref": "D-MARK-CARET1",
-      "note": "Write and take marks are spelled ^ and ^^ (draft)"
-    },
-    {
-      "at": "2026-11-24T13:49:32.148Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-LSP-HOSTDOC1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T13:45:28.377Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-IMPL-CONCRETEHEAD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-24T13:44:54.491Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0jjynlr",
-      "note": "#5 The spec, the reference pages and LANGUAGE_REWRITES describe"
-    },
-    {
-      "at": "2026-11-24T13:44:53.449Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0jjynlr",
-      "note": "#4 Diagnostics and UI snapshots that print a link, the editor g"
-    },
-    {
-      "at": "2026-11-24T13:44:52.427Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0jjynlr",
-      "note": "#3 A jet fix migration plan (link-caret1) rewrites every link u"
-    },
-    {
-      "at": "2026-11-24T13:44:51.343Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0jjynlr",
-      "note": "#2 Lexer, parser, sema, fmt and the LSP read and print ^T and ^"
-    },
-    {
-      "at": "2026-11-24T13:44:50.104Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0jjynlr",
-      "note": "#1 Registry: SIGIL_LINK is ^ in CoreSurface.jet, the @ link row"
-    },
-    {
-      "at": "2026-11-24T13:44:48.782Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jjynlr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-24T13:44:47.744Z",
-      "by": "Orchestrator",
-      "action": "decision.add",
-      "ref": "D-LINK-CARET1",
-      "note": "Links are spelled with ^ instead of @ (draft)"
-    },
-    {
-      "at": "2026-11-24T13:44:09.020Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q4hah36e",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T13:44:02.627Z",
-      "by": "Orchestrator",
-      "action": "card.add",
-      "ref": "c0jjynlr",
-      "note": "Links move from @ to ^ (D-LINK-CARET1 cutover)"
-    },
-    {
-      "at": "2026-11-24T13:26:43.721Z",
-      "by": "Orchestrator",
-      "action": "question.answer",
-      "ref": "q2nay2he",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T13:26:42.761Z",
-      "by": "Orchestrator",
-      "action": "question.answer",
-      "ref": "q3agycng",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T13:26:13.758Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-IMPL-CONCRETEHEAD1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T13:26:12.280Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-IMPL-STRUCTBOUND1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T13:22:58.856Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0e6znz4",
-      "note": "38 criteria, soft limit 6: Core-privilege leak found by the CONCRETEHEAD1 review; this card owns Core privilege"
-    },
-    {
-      "at": "2026-11-24T13:22:58.856Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e6znz4",
-      "note": "#39 A user marker template cannot paste a reserved `__` name. Fr"
-    },
-    {
-      "at": "2026-11-24T13:18:50.428Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c00ni11n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-24T13:18:36.794Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "38 criteria, soft limit 6: dogfooding frictions found 2026-11-24 while diagnosing the LSP crash; they belong on the dogfooding card"
-    },
-    {
-      "at": "2026-11-24T13:18:36.794Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#40 jet perf attach --help and jet perf view --help print only `"
-    },
-    {
-      "at": "2026-11-24T13:18:35.410Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "37 criteria, soft limit 6: dogfooding frictions found 2026-11-24 while diagnosing the LSP crash; they belong on the dogfooding card"
-    },
-    {
-      "at": "2026-11-24T13:18:35.410Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#39 A panic inside a Core builtin reports `--> <core.builtin>:0`"
-    },
-    {
-      "at": "2026-11-24T13:18:34.253Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "36 criteria, soft limit 6: dogfooding frictions found 2026-11-24 while diagnosing the LSP crash; they belong on the dogfooding card"
-    },
-    {
-      "at": "2026-11-24T13:18:34.253Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#38 jet debug --do run fails with `Unknown command run`: the pro"
-    },
-    {
-      "at": "2026-11-24T13:18:33.019Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "35 criteria, soft limit 6: dogfooding frictions found 2026-11-24 while diagnosing the LSP crash; they belong on the dogfooding card"
-    },
-    {
-      "at": "2026-11-24T13:18:33.019Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#37 jet debug names a program image's missing symbols with no fi"
-    },
-    {
-      "at": "2026-11-24T13:18:20.305Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mbiq9g",
-      "note": "24 criteria, soft limit 6: owner instruction 2026-11-24: LSP fully functional; workspace/symbol kills the server"
-    },
-    {
-      "at": "2026-11-24T13:18:20.305Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mbiq9g",
-      "note": "#25 workspace/symbol never stops the server. In Zed (rootUri = t"
-    },
-    {
-      "at": "2026-11-24T13:13:17.861Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mbiq9g",
-      "note": "23 criteria, soft limit 6: owner instruction 2026-11-24: LSP fully functional and featured; regressions belong on the LSP card"
-    },
-    {
-      "at": "2026-11-24T13:13:17.861Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mbiq9g",
-      "note": "#24 The server implements every LSP request and notification an "
-    },
-    {
-      "at": "2026-11-24T13:13:16.797Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mbiq9g",
-      "note": "22 criteria, soft limit 6: owner instruction 2026-11-24: LSP fully functional and featured; regressions belong on the LSP card"
-    },
-    {
-      "at": "2026-11-24T13:13:16.797Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mbiq9g",
-      "note": "#23 The LSP enforces Jet's casing (owner, 2026-11-24: TitleCase "
-    },
-    {
-      "at": "2026-11-24T13:13:15.698Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mbiq9g",
-      "note": "21 criteria, soft limit 6: owner instruction 2026-11-24: LSP fully functional and featured; regressions belong on the LSP card"
-    },
-    {
-      "at": "2026-11-24T13:13:15.698Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mbiq9g",
-      "note": "#22 Hover shows one signature in Jet syntax with the effective f"
-    },
-    {
-      "at": "2026-11-24T13:01:09.818Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mbiq9g",
-      "note": "20 criteria, soft limit 6: owner-reported LSP regression; belongs on the LSP card per the regression rule"
-    },
-    {
-      "at": "2026-11-24T13:01:09.818Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mbiq9g",
-      "note": "#21 The server answers on files in large multi-module packages. "
-    },
-    {
-      "at": "2026-11-24T13:01:02.175Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c06r6neu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-24T12:56:17.594Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c06tzcrf",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-24T12:56:16.701Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c06tzcrf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-24T12:56:15.808Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ozqnbt",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-24T12:55:45.528Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01q17ls",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-24T12:55:44.545Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01q17ls",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-24T12:55:43.566Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c06tzcrf",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-24T12:55:42.630Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c06tzcrf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-24T12:55:41.670Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ozqnbt",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-24T12:55:40.718Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ozqnbt",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-24T12:55:39.809Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ozqnbt",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-24T12:55:38.892Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-24T12:55:38.003Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-24T12:55:37.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0sdz4q0",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-24T12:55:36.205Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c06r6neu",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-24T12:53:55.434Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-MAP-ENTRY1",
-      "note": "How a map separates a key from its value, now that `name: value` is a binding"
-    },
-    {
-      "at": "2026-11-24T12:52:06.999Z",
-      "by": "Orchestrator",
-      "action": "card.add",
-      "ref": "c08rzqfr",
-      "note": "Ballot D-MAP-ENTRY1: how a map writes its key-value entries now that `:` binds a name"
-    },
-    {
-      "at": "2026-11-24T12:25:34.746Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mbiq9g",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-24T12:25:33.803Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-24T12:25:32.463Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-24T12:25:23.476Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mbiq9g",
-      "note": "19 criteria, soft limit 6: ratified ballots need their build criteria on the owning card"
-    },
-    {
-      "at": "2026-11-24T12:25:23.476Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mbiq9g",
-      "note": "#20 D-LSP-CANCEL1=A is built: before answering a request, jet se"
-    },
-    {
-      "at": "2026-11-24T12:25:22.608Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0e6znz4",
-      "note": "37 criteria, soft limit 6: ratified ballots need their build criteria on the owning card"
-    },
-    {
-      "at": "2026-11-24T12:25:22.608Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e6znz4",
-      "note": "#38 D-FORM-FIELD1=A is built: Prelude declares FieldRef<Model, T"
-    },
-    {
-      "at": "2026-11-24T12:25:21.763Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0e6znz4",
-      "note": "36 criteria, soft limit 6: ratified ballots need their build criteria on the owning card"
-    },
-    {
-      "at": "2026-11-24T12:25:21.763Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e6znz4",
-      "note": "#37 D-RULE-ACROSS1=A is built: a rule may declare row: fn(self, "
-    },
-    {
-      "at": "2026-11-24T12:25:20.895Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0e6znz4",
-      "note": "35 criteria, soft limit 6: ratified ballots need their build criteria on the owning card"
-    },
-    {
-      "at": "2026-11-24T12:25:20.895Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e6znz4",
-      "note": "#36 D-RULE-TYPEARGS1=A is built: TypeId is a small handle into t"
-    },
-    {
-      "at": "2026-11-24T12:22:39.554Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q3agycng",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T12:22:05.502Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q2nay2he",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T12:21:57.924Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q15z7go2",
-      "note": ""
-    },
-    {
-      "at": "2026-11-24T12:21:45.482Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LSP-CANCEL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-24T12:21:45.482Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-RULE-TYPEARGS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-24T12:19:31.480Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FORM-FIELD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-24T12:19:31.480Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-RULE-ACROSS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-24T12:19:31.480Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-RULE-WRITTEN1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-24T12:19:31.480Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-RULE-BODYFACTS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-24T12:19:31.480Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-RULE-REWRITE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-24T12:16:09.382Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-24T12:16:08.242Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-24T12:16:06.637Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0e6znz4",
-      "note": "#24: Met at 11:34 by a criterion-number error (the evidence was for n25). Its proof fails on tip22: Reflect/a_module_qualified_type_reflects_in_a_top_level_run exits 1 with Jet.ModuleAsValue at main.jet:18:22, because its patch (6851-c24) stacks on the held 6851-c23, which is in batch 23."
-    },
-    {
-      "at": "2026-11-24T12:16:01.226Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-24T12:02:57.043Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-24T12:02:57.043Z"
-    },
-    {
-      "at": "2026-11-24T12:00:39.541Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0eve9h3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-24T12:00:35.185Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0eve9h3",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-24T12:00:33.759Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0eve9h3",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-24T11:48:36.463Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jt78qz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-24T11:48:34.213Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0n7zpy3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-24T11:34:43.291Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0rc40yf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-24T11:34:40.480Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0s1vode",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-24T11:34:24.323Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-24T11:34:23.218Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-24T11:34:22.032Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-24T11:34:20.824Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-24T11:34:19.559Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#11"
     }
   ],
   "nextNum": 368,
