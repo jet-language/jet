@@ -153,8 +153,9 @@ bindings of the existing `jet_term_is_terminal_raw` and
 `jet_process_exit_status_raw` runtime exports, rather than Core members,
 reserved double-underscore member aliases or alternate host APIs.
 Checked-build DNS and pinned byte transport likewise keep the
-`jet_http_build_resolve` (runtime) and `jet_http_build_get` (Jet source over
-`core.net` and `core.net.tls`) spellings. Driver retains address
+`jet_http_build_resolve` (Jet source over the `jet.runtime.net.build_resolve`
+binding of the runtime export of that name) and `jet_http_build_get` (Jet
+source over `core.net` and `core.net.tls`) spellings. Driver retains address
 authorization, bounds, digest verification, and error classification; these
 leaves do not supply a second public HTTP or generic host policy.
 Compiler-backed inspection and fix planning declare the execution host's actual

@@ -586,10 +586,6 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         }
         // A WebSocket connect and upgrade both wait on the handshake.
         "core.net.ws" -> Val("Time.Wait")
-        "core.http.client" -> if member == {
-            "get" | "post" | "request" | "__get" | "__post" | "__request" | "jet_http_build_resolve" | "jet_http_build_get" -> Val("Time.Wait")
-            else -> None
-        }
         "core.http" -> if member == "get" -> Val("Time.Wait") else -> None
         "core.db.query" -> if member == "query" -> Val("Time.Wait") else -> None
         else -> None
