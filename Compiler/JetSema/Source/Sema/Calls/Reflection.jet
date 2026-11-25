@@ -413,7 +413,7 @@ sema_call_reflection_named_displayable: fn(name: String, ty: Type, environment: 
 // display or show form: the runtime renders it (`IOError`, `TcpStream`,
 // `GameImage`). A program's own type of the same name is its declaration's.
 sema_call_reflection_runtime_shown: fn(name: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if !(ty == .Named(_)) -> return false
+    if !(ty == .Named(_)) || name.contains("/") -> return false
     handle: IR_RUNTIME_HANDLES[ir_runtime_handle_row(name) ?? return false]
     if !handle.display && !handle.show -> return false
     graph: program.registration_graph
