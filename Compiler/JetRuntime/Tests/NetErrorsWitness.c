@@ -1,5 +1,5 @@
 // Link the real Jet object. This is not a provider.
-// Native layout mirrors NetErrorABI; Rust cites NetHTTP149-181,530-570 and NetError7-22.
+// Native layout mirrors CoreEnumABI; Rust cites NetHTTP149-181,530-570 and NetError7-22.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -57,7 +57,7 @@ static Error *(*const constructors[])(Detail *)={DETAIL_VARIANTS(NEW)};
 #define GET(NAME) jet_rt_record_get_jet_net_error_##NAME,
 static Detail *(*const getters[])(Error *)={DETAIL_VARIANTS(GET)};
 #undef GET
-static const int64_t tags[]={0,1,2,3,4,5,6,7,8,9,10,12,13,14}; // C ABI DNS11; render DNS14
+static const int64_t tags[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13}; // DNS is 14
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[128];
 static size_t watched_count;
 static unsigned intercepted;
@@ -79,7 +79,7 @@ static void watch(void *p,int64_t bytes,int64_t align) {
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
 static void watch_text(Text *t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 static void watch_detail(Detail *d) { watch(d,48,8); watch_text(d->operation); if(d->address) watch_text(d->address); if(d->name) watch_text(d->name); watch_text(d->message); }
-static void watch_error(Error *e) { watch(e,16,8); if(e->tag==11) { DNS *d=e->payload; watch(d,16,8); watch_text(d->text); } else watch_detail(e->payload); }
+static void watch_error(Error *e) { watch(e,16,8); if(e->tag==14) { DNS *d=e->payload; watch(d,16,8); watch_text(d->text); } else watch_detail(e->payload); }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(!memcmp(t->data,s,(size_t)t->length)); }
 // Swaps in an owned copy whose first byte differs and checks the probe fails.
@@ -157,7 +157,7 @@ static void all_variants(void) {
         copy->tag^=1; assert(!jet_rt_handle_eq_jet_net_dns_error(copy,d)); copy->tag^=1;
         probe(&copy->text,dns_differs,copy,d);
         Text *g=tag==0 ? jet_rt_record_get_jet_net_dns_error_not_found(d) : jet_rt_record_get_jet_net_dns_error_failure(d); assert(g==d->text && owners(g)==3); jet_rt_string_drop(g);
-        Error *e=jet_rt_record_new_jet_net_error_dns(d); assert(e->payload==d && jet_rt_record_tag_jet_net_error(e)==11);
+        Error *e=jet_rt_record_new_jet_net_error_dns(d); assert(e->payload==d && jet_rt_record_tag_jet_net_error(e)==14);
         DNS *payload=jet_rt_record_get_jet_net_error_dns(e); Error *clone=jet_rt_handle_clone_jet_net_error(e);
         assert(payload!=d && payload->text==d->text && jet_rt_handle_eq_jet_net_dns_error(payload,d) && jet_rt_handle_eq_jet_net_error(e,clone));
         render(e,tag==0 ? "DNS name not found: `λ.example``" : "DNS failed λ",tag==0 ? NULL : d->text);
