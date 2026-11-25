@@ -319,11 +319,14 @@ jet_cli_record_index_upsert_many_and_store: fn(index: ^JetCLIRecordIndex, projec
     candidate := jet_cli_record_index_reload(held, index)
     previous: candidate.entries
     loop entry in entries.move() {
-        if jet_cli_record_index_find(candidate, entry.kind, entry.artifact_id, true) != None {
-            jet_cli_record_index_replace(candidate, entry)
-        } else {
-            fresh: jet_cli_record_index_fresh_sequence(candidate, entry)
-            jet_cli_record_index_update(candidate, fresh)
+        if {
+            jet_cli_record_index_find(candidate, entry.kind, entry.artifact_id, true) != None -> {
+                jet_cli_record_index_replace(candidate, entry)
+            }
+            else -> {
+                fresh: jet_cli_record_index_fresh_sequence(candidate, entry)
+                jet_cli_record_index_update(candidate, fresh)
+            }
         }
     }
     jet_cli_record_index_store_held(candidate, held, project_root, previous)

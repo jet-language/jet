@@ -169,7 +169,7 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
     if jet_cli_build_overwrite(root, graph, needs.steps, last.made) == .Val(overwritten) {
         return jet_cli_build_execution_failed("E3502", overwritten.copy(), None, "move the file, declare the step's output at another path, or keep the file in git with `.output(path, kept: true)`", color)
     }
-    granted := jet_cli_build_steps_granted(plan, graph, needs.steps, needs.host, root, workspace, policy, invocation, member, color)
+    granted: jet_cli_build_steps_granted(plan, graph, needs.steps, needs.host, root, workspace, policy, invocation, member, color)
     if granted.move() == {
         .Refused(output) -> output
         .Granted(grants, probes) -> {

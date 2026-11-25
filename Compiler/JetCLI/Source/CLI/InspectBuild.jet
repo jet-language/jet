@@ -264,48 +264,52 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             log: Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
             // copy: the build query records into the one shared log; this build reads it back.
             query_request.comptime_input_log = Val(log.copy())
-            response := jet_driver_query_build_plan(query_request, scope)
+            response: jet_driver_query_build_plan(query_request, scope)
             build_reads = jet_cli_comptime_inputs_read(log)
             query := response.query.move()
-            if !query.complete || query.internal_problem != None {
-                refused = Val(jet_cli_build_query_failure(response.request, query, file, false, color, false))
-            } else if query.tidy.len() > 0 {
-                // A `.Tidy` finding a package lint raised (`meta.report`)
-                // fails `jet build`; a run, a dev session or a test keeps
-                // going.
-                // `query` is passed whole to report the findings, which
-                // stand as its diagnostics.
-                query.diagnostics = query.tidy.move()
-                query.tidy = [Diagnostic]{}
-                refused = Val(jet_cli_build_query_failure(response.request, query, file, false, color, false))
-            } else if query.plan == .Val(plan) {
-                if jet_cli_settings_package(snapshot) == .Val(package) {
-                    recorded: jet_cli_record_build_contributions(plan, package, response.request, color)
-                    if recorded.move() == .Val(refusal) -> refused = Val(refusal)
+            if {
+                !query.complete || query.internal_problem != None -> {
+                    refused = Val(jet_cli_build_query_failure(response.request, query, file, false, color, false))
                 }
-                selection = Val(build_plan_selection(plan))
-                execution = Val(build_plan_execution(plan))
-                receipt = query.graph.move()
-                policy = query.authority_policy
-                generated = build_plan_generated(plan)
-                keyed := response.request.move()
-                if options.profile != "" -> keyed.profile = options.profile
-                keyed.setting_overrides = options.settings.copy()
-                if jet_cli_entry_lock(snapshot) == .Val(lock) {
-                    // copy: `lock` is a payload view of the loaded lock.
-                    keyed.build_contributions = lock.build_contributions.copy()
+                query.tidy.len() > 0 -> {
+                    // A `.Tidy` finding a package lint raised (`meta.report`)
+                    // fails `jet build`; a run, a dev session or a test keeps
+                    // going.
+                    // `query` is passed whole to report the findings, which
+                    // stand as its diagnostics.
+                    query.diagnostics = query.tidy.move()
+                    query.tidy = [Diagnostic]{}
+                    refused = Val(jet_cli_build_query_failure(response.request, query, file, false, color, false))
                 }
-                settings_request = Val(keyed.move())
-                // `query` reports no failure past this branch.
-                target_generated = query.generated.move()
-                // A `meta.rewrite_body` row's plan source is the new body
-                // alone; it is written and locked as the whole function the
-                // target compiles load.
-                loop index in 0..<generated.len() {
-                    if generated[index].rewrites == None -> next
-                    loop module_row in target_generated {
-                        if module_row.relative_path == generated[index].path {
-                            generated[index].source = module_row.source.copy()
+                query.plan == .Val(plan) -> {
+                    if jet_cli_settings_package(snapshot) == .Val(package) {
+                        recorded: jet_cli_record_build_contributions(plan, package, response.request, color)
+                        if recorded.move() == .Val(refusal) -> refused = Val(refusal)
+                    }
+                    selection = Val(build_plan_selection(plan))
+                    execution = Val(build_plan_execution(plan))
+                    receipt = query.graph.move()
+                    policy = query.authority_policy
+                    generated = build_plan_generated(plan)
+                    keyed := response.request.move()
+                    if options.profile != "" -> keyed.profile = options.profile
+                    keyed.setting_overrides = options.settings.copy()
+                    if jet_cli_entry_lock(snapshot) == .Val(lock) {
+                        // copy: `lock` is a payload view of the loaded lock.
+                        keyed.build_contributions = lock.build_contributions.copy()
+                    }
+                    settings_request = Val(keyed.move())
+                    // `query` reports no failure past this branch.
+                    target_generated = query.generated.move()
+                    // A `meta.rewrite_body` row's plan source is the new body
+                    // alone; it is written and locked as the whole function the
+                    // target compiles load.
+                    loop index in 0..<generated.len() {
+                        if generated[index].rewrites == None -> next
+                        loop module_row in target_generated {
+                            if module_row.relative_path == generated[index].path {
+                                generated[index].source = module_row.source.copy()
+                            }
                         }
                     }
                 }
@@ -318,7 +322,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     if selected.unsupported.len() > 0 {
         return jet_cli_build_failed("`jet build` doesn't run these build targets yet: {selected.unsupported.join(", ")}", jet_cli_why("E2105"), "select an executable target with `b.default(...)`, or build its source file directly", color)
     }
-    merged := build_options_with_code(options, jet_cli_build_code_options(file, selected.options))
+    merged: build_options_with_code(options, jet_cli_build_code_options(file, selected.options))
     resolved_options := BuildOptions?{None}
     if merged.move() == {
         .Refused(code, what, fix) -> return jet_cli_report_output("", code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)
@@ -667,12 +671,15 @@ jet_cli_build_workspace_members: fn(file: String, color: Bool, options: BuildOpt
         }
         loop notice in notices -> jet_cli_write_notice(notice)
         found: entry ?? next
-        if jet_cli_package_declares_build_entry(found.path) {
-            built = jet_cli_build_package_as(found.path, color, options, [String]{}, threads, None, Val(member.name), locked, trace_sink)
-        } else {
-            source: build_files.read(found.path) ?? next
-            if jet_cli_top_level_function_lines(source, "run").len() == 0 -> next
-            built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, [String]{}, [JetDriverGeneratedModule]{}, color, options, threads, None, trace_sink)
+        if {
+            jet_cli_package_declares_build_entry(found.path) -> {
+                built = jet_cli_build_package_as(found.path, color, options, [String]{}, threads, None, Val(member.name), locked, trace_sink)
+            }
+            else -> {
+                source: build_files.read(found.path) ?? next
+                if jet_cli_top_level_function_lines(source, "run").len() == 0 -> next
+                built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, [String]{}, [JetDriverGeneratedModule]{}, color, options, threads, None, trace_sink)
+            }
         }
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
@@ -693,9 +700,9 @@ jet_cli_workspace_index_of: fn(file: String, color: Bool) -[FS]> JetCLIWorkspace
     if jet_cli_workspace_source(root, color) == {
         .Index(path) -> {
             if (build_files.realpath(path) ?? path) != canonical -> return None
-            return Val(JetCLIWorkspaceIndex{root: root, path: path})
+            Val(JetCLIWorkspaceIndex{root: root, path: path})
         }
-        .Absent | .Authority(_) | .Failed(_) -> return None
+        .Absent | .Authority(_) | .Failed(_) -> None
     }
 }
 
@@ -707,7 +714,7 @@ jet_cli_workspace_build_order: fn(root: String, members: [JetCLIWorkspaceMember]
         member_root: jet_cli_entry_join(root, member.path)
         directories.push(build_files.realpath(member_root) ?? member_root)
     }
-    needs := (loop directory in directories -> jet_cli_workspace_member_needs(directory, directories))
+    needs: (loop directory in directories -> jet_cli_workspace_member_needs(directory, directories))
     placed := (loop _ in directories -> false)
     order := [JetCLIWorkspaceMember]{}
     progressed := true
@@ -797,7 +804,7 @@ jet_cli_settings_package: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> Jet
     entry := JetCLISettingsPackage?{None}
     declared := false
     loop root in snapshot.roots {
-        facts := jet_cli_root_package_facts(root) ?? next
+        facts: jet_cli_root_package_facts(root) ?? next
         if facts.settings.len() > 0 -> declared = true
         if root.identity == snapshot.entry_root_identity {
             entry = Val(JetCLISettingsPackage{root: root.canonical_path.copy(), name: facts.name.move()})
@@ -866,8 +873,8 @@ jet_cli_contributed_request: fn(owned_request: ^^JetDriverCompileRequest, load_g
     carried: request.generated_modules.move()
     request.generated_modules = [JetDriverGeneratedModule]{}
     scope := JetDriverBuildQueryScope{next_session_id: 1}
-    response := jet_driver_query_build_plan(request, scope)
-    query := response.query.move()
+    response: jet_driver_query_build_plan(request, scope)
+    query: response.query.move()
     if !query.complete || query.internal_problem != None {
         failure: jet_cli_build_query_failure(response.request, query, response.request.authorized_sources.entry_path, false, color, false)
         return {request: response.request.move(), refusal: Val(failure)}
@@ -1050,7 +1057,7 @@ jet_cli_lock_effect_rows: fn(file: String, result: JetDriverCompileResult, snaps
 // edited file's row takes its new digest (pkg_lock_record_generated_inputs).
 // A loose file, a compile that read none and a `locked` build record nothing.
 jet_cli_lock_comptime_inputs: fn(file: String, result: JetDriverCompileResult, locked: Bool, color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
-    recorded := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    recorded: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if locked || result.comptime_inputs.len() == 0 -> return recorded
     root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? return recorded
     physical: build_files.realpath(root) ?? root.copy()
@@ -1114,9 +1121,9 @@ jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [Buil
 }
 
 jet_cli_build_host: fn(owned_request: ^^JetDriverCompileRequest, scope: ^JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
-    response := jet_driver_query_build_plan(owned_request, scope)
-    request := response.request.move()
-    query := response.query.move()
+    response: jet_driver_query_build_plan(owned_request, scope)
+    request: response.request.move()
+    query: response.query.move()
     if !query.complete || query.internal_problem != None {
         return jet_cli_build_query_failure(request, query, file, json, color, verbose)
     }
@@ -1202,7 +1209,7 @@ jet_cli_build_compile_observation: fn(executed: BuildGraphNode, duration_ms: Flo
         executed.inputs.len() > 0 -> "input:{executed.inputs[0]}"
         else -> "first-run"
     }
-    return Ok(
+    Ok(
         JetCLICompileNodeObservation{
             _node: BuildNodeRecord{kind: executed.kind, key: executed.key, subject: executed.subject, duration_ms: duration_ms, why_ran: reason, inputs: executed.inputs},
             object: object,
@@ -1282,9 +1289,9 @@ jet_cli_build_nodes_report: fn(program: String, record: BuildRecord?, planned: [
 // with the planned nodes; a record for another program means the store is
 // damaged and is refused with E2104.
 jet_cli_build_nodes_host: fn(owned_request: ^^JetDriverCompileRequest, scope: ^JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
-    response := jet_driver_query_build_plan(owned_request, scope)
-    request := response.request.move()
-    query := response.query.move()
+    response: jet_driver_query_build_plan(owned_request, scope)
+    request: response.request.move()
+    query: response.query.move()
     if !query.complete || query.internal_problem != None {
         return jet_cli_build_query_failure(request, query, file, json, color, verbose)
     }
@@ -1293,8 +1300,8 @@ jet_cli_build_nodes_host: fn(owned_request: ^^JetDriverCompileRequest, scope: ^J
             if retained.program != program {
                 return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR))
             }
-            return {stdout: jet_cli_build_nodes_report(program, Val(retained), query.nodes, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            {stdout: jet_cli_build_nodes_report(program, Val(retained), query.nodes, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
-        .None -> return {stdout: jet_cli_build_nodes_report(program, None, query.nodes, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        .None -> {stdout: jet_cli_build_nodes_report(program, None, query.nodes, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
 }

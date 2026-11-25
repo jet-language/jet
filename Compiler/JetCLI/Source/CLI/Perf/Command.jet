@@ -1842,7 +1842,11 @@ jet_cli_perf_game_function_label: fn(row: CanonicalJSON, key: String) -> String?
 
 // A bar of `count` marks, 1 to 40 wide.
 jet_cli_perf_bar: fn(count: Int) -> String Never! {
-    width: if count > 40 -> 40 else if count < 1 -> 1 else -> count
+    width: if {
+        count > 40 -> 40
+        count < 1 -> 1
+        else -> count
+    }
     "#".repeat(width)
 }
 

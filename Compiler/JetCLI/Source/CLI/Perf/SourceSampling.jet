@@ -760,24 +760,30 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
             if owner != serial {
                 if serial != 0 {
                     ended: if sampled.ends.has_key(serial) -> sampled.ends[serial] /% period else -> 0
-                    if ended > reached {
-                        resumed := false
-                        loop next < throttles.len() && throttles[next].serial == serial {
-                            if !throttles[next].on -> resumed = true
-                            next += 1
+                    if {
+                        ended > reached -> {
+                            resumed := false
+                            loop next < throttles.len() && throttles[next].serial == serial {
+                                if !throttles[next].on -> resumed = true
+                                next += 1
+                            }
+                            tail: ended - reached
+                            end_ns: sampled.end_times.get(serial) ?? -1
+                            if {
+                                (held || resumed) && since >= 0 && end_ns >= since -> {
+                                    spent: end_ns - since
+                                    spans: (spent + period /% 2) /% period
+                                    taken: if spans < tail -> spans else -> tail
+                                    nominal -= tail - taken
+                                    counted: sampled.ends[serial] - last
+                                    if counted > spent -> ns -= counted - spent
+                                    throttled += taken
+                                }
+                                else -> { kernel += tail }
+                            }
                         }
-                        tail: ended - reached
-                        end_ns: sampled.end_times.get(serial) ?? -1
-                        if (held || resumed) && since >= 0 && end_ns >= since {
-                            spent: end_ns - since
-                            spans: (spent + period /% 2) /% period
-                            taken: if spans < tail -> spans else -> tail
-                            nominal -= tail - taken
-                            counted: sampled.ends[serial] - last
-                            if counted > spent -> ns -= counted - spent
-                            throttled += taken
-                        } else { kernel += tail }
-                    } else { nominal += reached - ended }
+                        else -> { nominal += reached - ended }
+                    }
                     took[serial] = true
                 }
                 serial = owner
@@ -802,17 +808,20 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
             // same end, so it reaches none, and the samples kept then
             // outnumber the ends they and kernel mode make up.
             gap: (count - last + period /% 2) /% period
-            if resumed && since >= 0 && at >= since {
-                // The sample takes an end of its own, however short the
-                // time since the one before.
-                spent: at - since
-                spans: (spent + period /% 2) /% period
-                bound: if spans > 1 -> spans else -> 1
-                taken: if bound < gap -> bound else -> gap
-                nominal -= gap - taken
-                if count - last > spent -> ns -= count - last - spent
-                if taken > 0 -> throttled += taken - 1
-            } else if gap > 0 { kernel += gap - 1 }
+            if {
+                resumed && since >= 0 && at >= since -> {
+                    // The sample takes an end of its own, however short the
+                    // time since the one before.
+                    spent: at - since
+                    spans: (spent + period /% 2) /% period
+                    bound: if spans > 1 -> spans else -> 1
+                    taken: if bound < gap -> bound else -> gap
+                    nominal -= gap - taken
+                    if count - last > spent -> ns -= count - last - spent
+                    if taken > 0 -> throttled += taken - 1
+                }
+                gap > 0 -> { kernel += gap - 1 }
+            }
             reached += gap
             last = count
             since = at
@@ -1391,43 +1400,49 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
         }
         if kind == JET_CLI_PERF_CAUSAL_KIND {
             if record >= 3 && at + record * 8 <= words.len() {
-                if pc == 1 {
-                    // The point's slot, the name's length and the name.
-                    length: link_debug_addr(words, at + 16)
-                    if length >= 0 && 3 + (length + 7) /% 8 <= record {
-                        sampled.points[link_debug_addr(words, at + 8)] = String.from_bytes(words.slice(at + 24, at + 24 + length)) ?? "point"
-                    }
-                } else if pc == 2 {
-                    // The idle table: a later exit's holds an earlier one's.
-                    sampled.idle = loop index in 1..<record -> link_debug_addr(words, at + index * 8)
-                } else if pc == 4 {
-                    // The tasks that claimed a timing and the most kept; the
-                    // timings follow, and a later exit's hold an earlier one's.
-                    sampled.tasks = JetCLIPerfCausalTasks{seen: link_debug_addr(words, at + 8), kept_most: link_debug_addr(words, at + 16), rows: [Int]{}, bodies: [Int:Int]{}, places: [JetCLIPerfCausalPlace]{}}
-                } else if pc == 3 {
-                    // A task's timing (PerfSamples.jet perf_causal_row), its
-                    // body's address as its index among the bodies placed.
-                    if record == JET_CLI_PERF_CAUSAL_ROW_WORDS {
-                        body: link_debug_addr(words, at + 8)
-                        index := sampled.tasks.places.len()
-                        if sampled.tasks.bodies.get(body) == .Val(known) -> index = known else {
-                            place: jet_cli_perf_causal_place(sampled, owned, body)
-                            sampled.tasks.bodies[body] = index
-                            sampled.tasks.places.push(place.move())
-                        }
-                        sampled.tasks.rows.push(index)
-                        loop word in 2..<JET_CLI_PERF_CAUSAL_ROW_WORDS {
-                            sampled.tasks.rows.push(link_debug_addr(words, at + word * 8))
+                if {
+                    pc == 1 -> {
+                        // The point's slot, the name's length and the name.
+                        length: link_debug_addr(words, at + 16)
+                        if length >= 0 && 3 + (length + 7) /% 8 <= record {
+                            sampled.points[link_debug_addr(words, at + 8)] = String.from_bytes(words.slice(at + 24, at + 24 + length)) ?? "point"
                         }
                     }
-                } else if record >= 9 {
-                    // The line's sampled address (0 for a baseline), the
-                    // speedup, the wall time, the delay inserted, the
-                    // threads' run time and runqueue wait, the highest and
-                    // lowest clock of their CPUs, and each point's span in
-                    // the experiment.
-                    experiment: jet_cli_perf_causal_record(sampled, owned, words, at, record)
-                    sampled.experiments.push(experiment)
+                    pc == 2 -> {
+                        // The idle table: a later exit's holds an earlier one's.
+                        sampled.idle = loop index in 1..<record -> link_debug_addr(words, at + index * 8)
+                    }
+                    pc == 4 -> {
+                        // The tasks that claimed a timing and the most kept; the
+                        // timings follow, and a later exit's hold an earlier one's.
+                        sampled.tasks = JetCLIPerfCausalTasks{seen: link_debug_addr(words, at + 8), kept_most: link_debug_addr(words, at + 16), rows: [Int]{}, bodies: [Int:Int]{}, places: [JetCLIPerfCausalPlace]{}}
+                    }
+                    pc == 3 -> {
+                        // A task's timing (PerfSamples.jet perf_causal_row), its
+                        // body's address as its index among the bodies placed.
+                        if record == JET_CLI_PERF_CAUSAL_ROW_WORDS {
+                            body: link_debug_addr(words, at + 8)
+                            index := sampled.tasks.places.len()
+                            if sampled.tasks.bodies.get(body) == .Val(known) -> index = known else {
+                                place: jet_cli_perf_causal_place(sampled, owned, body)
+                                sampled.tasks.bodies[body] = index
+                                sampled.tasks.places.push(place.move())
+                            }
+                            sampled.tasks.rows.push(index)
+                            loop word in 2..<JET_CLI_PERF_CAUSAL_ROW_WORDS {
+                                sampled.tasks.rows.push(link_debug_addr(words, at + word * 8))
+                            }
+                        }
+                    }
+                    record >= 9 -> {
+                        // The line's sampled address (0 for a baseline), the
+                        // speedup, the wall time, the delay inserted, the
+                        // threads' run time and runqueue wait, the highest and
+                        // lowest clock of their CPUs, and each point's span in
+                        // the experiment.
+                        experiment: jet_cli_perf_causal_record(sampled, owned, words, at, record)
+                        sampled.experiments.push(experiment)
+                    }
                 }
             }
             at += record * 8
@@ -1513,17 +1528,20 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
             if record >= 2 && at + record * 8 <= words.len() {
                 if heaps.get(pc) == .Val(index) {
                     holds: link_debug_addr(words, at + 8)
-                    if holds == JET_CLI_PERF_ROOT_FRAMES {
-                        word := 2
-                        loop word + 2 < record {
-                            sampled.heaps[index].frames.push(JetCLIPerfHeapFrame{pc: link_debug_addr(words, at + word * 8), base: link_debug_addr(words, at + word * 8 + 8), low: link_debug_addr(words, at + word * 8 + 16)})
-                            word += 3
+                    if {
+                        holds == JET_CLI_PERF_ROOT_FRAMES -> {
+                            word := 2
+                            loop word + 2 < record {
+                                sampled.heaps[index].frames.push(JetCLIPerfHeapFrame{pc: link_debug_addr(words, at + word * 8), base: link_debug_addr(words, at + word * 8 + 8), low: link_debug_addr(words, at + word * 8 + 16)})
+                                word += 3
+                            }
                         }
-                    } else {
-                        word := 2
-                        loop word + 1 < record {
-                            sampled.heaps[index].roots.push(JetCLIPerfHeapRoot{address: link_debug_addr(words, at + word * 8), target: link_debug_addr(words, at + word * 8 + 8), data: holds == JET_CLI_PERF_ROOT_DATA})
-                            word += 2
+                        else -> {
+                            word := 2
+                            loop word + 1 < record {
+                                sampled.heaps[index].roots.push(JetCLIPerfHeapRoot{address: link_debug_addr(words, at + word * 8), target: link_debug_addr(words, at + word * 8 + 8), data: holds == JET_CLI_PERF_ROOT_DATA})
+                                word += 2
+                            }
                         }
                     }
                 }
@@ -2128,8 +2146,11 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
         // The line's other source of the program, -1 for none.
         other: if place.own || place.file < 0 || place.file >= sampled.source_at.len() -> -1 else -> sampled.source_at[place.file]
         end := U64?{None}
-        if place.own -> end = jet_cli_perf_line_end(source.text, place.line) else if other >= 0 && place.line >= 1 && place.line <= sampled.sources[other].ends.len() {
-            end = Val(sampled.sources[other].ends[place.line - 1])
+        if {
+            place.own -> end = jet_cli_perf_line_end(source.text, place.line)
+            other >= 0 && place.line >= 1 && place.line <= sampled.sources[other].ends.len() -> {
+                end = Val(sampled.sources[other].ends[place.line - 1])
+            }
         }
         column: end ?? {
             elsewhere += place.count
@@ -2161,7 +2182,7 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     // into the rows the wall row leaves.
     walls: wall_samples > (U64{0}) && wall != None
     room: if walls -> TRACE_PROFILE_ROW_LIMIT - 1 else -> TRACE_PROFILE_ROW_LIMIT
-    fold := jet_cli_perf_profile_fold(rows.move(), limit: room)
+    fold: jet_cli_perf_profile_fold(rows.move(), limit: room)
     rows = fold.rows.move()
     elsewhere += fold.dropped
     truncated: fold.dropped > (U64{0})
@@ -2374,11 +2395,14 @@ jet_cli_perf_line_events: fn(sampled: JetCLIPerfSamples, place: JetCLIPerfSample
 jet_cli_perf_counters_profile: fn(profile: ^TraceProfile, counters: ^^[TraceCounter]) Never! {
     notes := [String]{}
     loop counter in counters {
-        if counter.period == .Val(period) {
-            notes.push("{trace_counter_name(counter.name)} one sample per {period} events, at the innermost line of the checked source on its stack")
-        } else {
-            errno: counter.errno ?? U64{0}
-            notes.push("{trace_counter_name(counter.name)} unavailable: {jet_cli_perf_counter_refusal(errno)}")
+        if {
+            counter.period == .Val(period) -> {
+                notes.push("{trace_counter_name(counter.name)} one sample per {period} events, at the innermost line of the checked source on its stack")
+            }
+            else -> {
+                errno: counter.errno ?? U64{0}
+                notes.push("{trace_counter_name(counter.name)} unavailable: {jet_cli_perf_counter_refusal(errno)}")
+            }
         }
     }
     profile.reason = "{profile.reason}; {notes.join("; ")}"
@@ -2445,10 +2469,13 @@ jet_cli_perf_source_position: fn(text: String, offset: Int) -> {line: U64, colum
     column := U64{1}
     loop index in 0..<offset {
         byte: bytes[index]
-        if byte == (U8{10}) {
-            line += U64{1}
-            column = U64{1}
-        } else if byte < (U8{128}) || byte >= (U8{192}) { column += U64{1} }
+        if {
+            byte == (U8{10}) -> {
+                line += U64{1}
+                column = U64{1}
+            }
+            byte < (U8{128}) || byte >= (U8{192}) -> { column += U64{1} }
+        }
     }
     Ok({column: column, line: line})
 }
@@ -2489,7 +2516,11 @@ jet_cli_perf_source_profile: fn(source: JetCLIPerfSource, wall_samples: U64, cpu
     if cpu_samples > (U64{0}) -> rows.push(jet_cli_perf_run_row(place, "cpu", cpu_samples))
     if wall_samples > (U64{0}) -> rows.push(jet_cli_perf_run_row(place, "wall", wall_samples))
     limited: truncated || wall_samples > U64{4096} || cpu_samples > U64{4096}
-    status: if limited -> "truncated" else if rows.len() == 0 -> "no_samples" else -> "captured"
+    status: if {
+        limited -> "truncated"
+        rows.len() == 0 -> "no_samples"
+        else -> "captured"
+    }
     coverage: if rows.len() == 0 && !limited -> "none" else -> "partial"
     reason: if rows.len() == 0 -> "no supported observations were captured" else -> "only the checked top-level entrypoint is source-attributed; invocation counts are not inferred"
     Ok(TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: limited, overhead_ns: None, overhead_runtime_ns: None, overhead_kernel_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})

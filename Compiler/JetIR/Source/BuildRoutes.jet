@@ -5267,12 +5267,28 @@ ir_route_declared: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String,
                         held: ir_handle_runtime(p, item_name) ?? return ir_fail_slot(b, span, "runtime route {name} Option argument of {shown}")
                         !ir_option_inline(m, slot_row) && held.runtime == handle_name
                     }
-                    .Flag | .Float | .Text | .Unit | .HandleMut(_) | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> false
+                    .Flag | .Float | .Text | .Unit | .HandleMut(_) | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tag(_, _) | .Tuple(_) | .Callback -> false
                 }
                 if !lent {
                     return ir_fail_slot(b, span, "runtime route {name} Option argument of {shown}")
                 }
                 lowered.push(slot)
+            }
+            .Callback -> {
+                // A function value crosses as its closure box handed over
+                // (a fresh one moves, a held one gains an owner), with its
+                // lazy.callback invoke and lazy.release helper: the export
+                // calls it through the invoke and releases it once done.
+                function: ir_untag(shown) == .Fn(_, _, _, _, _, _)
+                if !function -> return ir_fail_slot(b, span, "runtime route {name} callback argument of {shown}")
+                invoke_id: ir_lazy_helper(m, p, b, "callback", shown, span)
+                if invoke_id < 0 -> return -1
+                invoke: ir_lazy_address(m, b, invoke_id)
+                handed: ir_closure_handover(m, p, b, slot, span)
+                if handed.held < 0 -> return -1
+                lowered.push(handed.held)
+                lowered.push(invoke)
+                lowered.push(handed.release)
             }
             .Unit | .Frozen(_) | .Tuple(_) -> return ir_fail_slot(b, span, "runtime route {name} argument carrier {carrier}")
         }
@@ -5800,7 +5816,7 @@ ir_route_store_tuple: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, o
 ir_route_shell: fn(m: ^IRModule, p: IRProgram, ty: Type, carrier: IRRouteCarrier) -> Bool Never! {
     carrier_name: if carrier == {
         .Handle(name) | .HandleMut(name) -> name
-        .Word | .Flag | .Float | .Text | .Unit | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> {
+        .Word | .Flag | .Float | .Text | .Unit | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tag(_, _) | .Tuple(_) | .Callback -> {
             return false
         }
     }
@@ -6820,9 +6836,10 @@ ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String
 // export `symbol`: Int and the machine integers as a Word, Bool as a Flag,
 // Float, String as Text, a Core type with a runtime handle row as that
 // Handle (a word record as its Word), a List of those, a View of a scalar as
-// its List window, a written (`writes`) handle or List as HandleMut or
-// ListMut, and as a result also an Option of one or of a tuple, a tuple whose
-// items are those or an Option of one (in the checked tuple's member order),
+// its List window, a function value as a Callback (a parameter only), a
+// written (`writes`) handle or List as HandleMut or ListMut, and as a result
+// also an Option of one or of a tuple, a tuple whose items are those or an
+// Option of one (in the checked tuple's member order),
 // a RUNTIME_GENERIC_HANDLES family (`Receiver<T>`) as its handle, or a
 // fallible `T E!` as a Result route (a Unit success writes no out word, the
 // default Err its message text, a handle error its handle), as sema admits
@@ -6832,7 +6849,7 @@ ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String
 ir_route_of_signature: fn(symbol: String, params: [Type], writes: [Bool], returned: Type?) -> IRRoute? Never! {
     carriers := [IRRouteCarrier]{}
     loop (index, ty) in params {
-        carrier: ir_route_carrier_of(ty) ?? return None
+        carrier: if ir_untag(ty) == .Fn(_, _, _, _, _, _) -> IRRouteCarrier.Callback else -> ir_route_carrier_of(ty) ?? return None
         written: index < writes.len() && writes[index]
         if !written {
             carriers.push(carrier)
@@ -6841,7 +6858,7 @@ ir_route_of_signature: fn(symbol: String, params: [Type], writes: [Bool], return
         if carrier == {
             .Handle(name) -> carriers.push(IRRouteCarrier.HandleMut{name: name})
             .List(elem) -> carriers.push(IRRouteCarrier.ListMut{elem: elem})
-            .Word | .Flag | .Float | .Text | .Unit | .HandleMut(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> return None
+            .Word | .Flag | .Float | .Text | .Unit | .HandleMut(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tag(_, _) | .Tuple(_) | .Callback -> return None
         }
     }
     result := ir_route_result_of(returned) ?? return None
@@ -6866,7 +6883,7 @@ ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
         failure: if err == (Type.Named{name: "Err"}) -> IRRouteCarrier.Text else -> ir_route_carrier_of(err) ?? return None
         if failure == {
             .Text | .Handle(_) -> {}
-            .Word | .Flag | .Float | .Unit | .HandleMut(_) | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> return None
+            .Word | .Flag | .Float | .Unit | .HandleMut(_) | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tag(_, _) | .Tuple(_) | .Callback -> return None
         }
         if ir_unit_type(ok) {
             return Val(IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: failure})
@@ -6992,6 +7009,23 @@ ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
 #Test("a binding's Never result routes") {
     stop: ir_route_of_signature("jet_raw_probe", [Type]{Type.String, Type.String}, [Bool]{false, false}, Val(Type.Named{name: "Never"})) ?? panic("no Never route")
     assert(stop.result == IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
+}
+
+// A binding's function parameter crosses as a Callback (its closure box,
+// invoke and release words), read or taken alike; a written one, or a
+// function result, has no carrier.
+#Test("a binding's function parameter routes as a Callback") {
+    body: Type.Fn{params: [Type]{Type.List{element: Type.Float}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    params: [Type]{Type.Int, body.copy()}
+    started: ir_route_of_signature("jet_raw_probe", params, [Bool]{false, false}, Val(Type.Named{name: "RealtimeStream"})) ?? panic("no callback route")
+    assert(started.params[1] == IRRouteCarrier.Callback)
+    assert(ir_lint_param_words(started.params[1]) == 3)
+    if ir_route_of_signature("jet_raw_probe", params, [Bool]{false, true}, None) == .Val(_) {
+        panic("a written callback crossed")
+    }
+    if ir_route_of_signature("jet_raw_probe", [Type]{}, [Bool]{}, Val(body)) == .Val(_) {
+        panic("a callback result crossed")
+    }
 }
 
 // `core.mem.stream_store<T>(dst, value)`: `dst = value`, the value written

@@ -309,7 +309,11 @@ jet_cli_gc_render: fn(trace: JetCLIGCTrace, color: Bool, json: Bool) -> String N
 }
 
 jet_cli_gc_fail: fn(error: JetCLIGCError, color: Bool, json: Bool) -> JetCLIPlan Never! {
-    fix: if error.kind == "missing" -> "run `jet run --gc-trace <file.jet>`, then rerun `jet gc report`" else if error.kind == "incomplete" -> "trace a smaller complete workload; reports never estimate dropped promotions" else -> "rerun the program with `--gc-trace` to replace the rejected trace"
+    fix: if {
+        error.kind == "missing" -> "run `jet run --gc-trace <file.jet>`, then rerun `jet gc report`"
+        error.kind == "incomplete" -> "trace a smaller complete workload; reports never estimate dropped promotions"
+        else -> "rerun the program with `--gc-trace` to replace the rejected trace"
+    }
     detail := error.detail
     loop detail.ends_with(".") -> detail = detail.slice(0, detail.len() - 1)
     diagnostic: diagnostic_from_registry("E2110", None, "GC trace cannot be reported", "{detail}.", "{fix}.")

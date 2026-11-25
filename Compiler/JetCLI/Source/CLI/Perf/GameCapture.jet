@@ -112,7 +112,7 @@ jet_cli_perf_games_capture: fn(capture: ^JetCLIPerfCapture, observations: [JetCL
         responsible: if slowest == 0 -> JetDevtoolsFunctionIdentity?{None} else -> jet_cli_perf_game_function(records[slowest], path, owned)
         bodies.push(.GameFrameSample{sequence: U64{sequence}, frame_id: U64{sequence}, scene: "{record.scene}", frame_index: U64{record.frame_index}, build: "{identity.build_id}", revision: "{identity.revision}", trace_id: "{identity.session_id}", start_ns: jet_cli_perf_since(record.start_ns, origin), cpu_ns: U64{record.ns}, gpu_ns: None, responsible_function: responsible})
     }
-    projected := project_game_devtools_bodies(bodies) ?? return Err(jet_cli_read_error(err.message))
+    projected: project_game_devtools_bodies(bodies) ?? return Err(jet_cli_read_error(err.message))
     capture.game_frames = projected.frames.move()
     capture.game_draw_events = projected.draws.move()
     value: CanonicalJSON.Object(

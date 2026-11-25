@@ -216,9 +216,12 @@ jet_cli_emit_ast_item: fn(tables: ASTTables, item: Item) -> JetCLIEmitNode Never
             children := [JetCLIEmitNode]{}
             loop method in value.methods {
                 text: "{method.name}: fn({jet_cli_emit_ast_params(method.params)}){jet_cli_emit_ast_return(method.return_type)}"
-                if method.default_body == .Val(body) {
-                    children.push(jet_cli_emit_ast_body(tables, "trait-method", text, body))
-                } else { children.push(jet_cli_emit_leaf("trait-method", text)) }
+                if {
+                    method.default_body == .Val(body) -> {
+                        children.push(jet_cli_emit_ast_body(tables, "trait-method", text, body))
+                    }
+                    else -> { children.push(jet_cli_emit_leaf("trait-method", text)) }
+                }
             }
             supertraits: if value.supertraits.len() == 0 -> "" else -> ": {value.supertraits.join(" + ")}"
             jet_cli_emit_node("trait", "{value.name}: trait{supertraits}", children)

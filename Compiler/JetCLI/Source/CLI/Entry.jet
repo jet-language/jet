@@ -739,7 +739,7 @@ jet_cli_output_entry_file: fn(root: String, output: JetCLIOutputFact) -[FS]> Jet
 // `PackageFacts.default()`, whose origin is empty): the canonical `run.jet`
 // (root, then `src/`) after the retired-entry migration, the refusal of a
 // leftover `main.jet`, else the selected runnable output.
-jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, notices: ^[String]) -[FS]> JetCLIStockEntry Never! {
+jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, _notices: ^[String]) -[FS]> JetCLIStockEntry Never! {
     origin: if manifest == .Val(facts) -> facts.origin else -> ""
     loop relative in JET_CLI_STOCK_ENTRIES {
         path: jet_cli_checked_file(root, relative) ?? next
@@ -1074,12 +1074,18 @@ jet_cli_workspace_source: fn(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSou
         if !name.ends_with(".jet") -> next
         path: jet_cli_checked_file(dir, name) ?? next
         source: cli_files.read(path) ?? next
-        if jet_cli_declares_workspace_module(source) {
-            if name == JET_CLI_WORKSPACE_FILE || jet_cli_declares_workspace_members(source) {
-                canonical = Val(path)
-            } else { authorities.push(path) }
-        } else {
-            if name == JET_CLI_WORKSPACE_FILE -> malformed_canonical = true
+        if {
+            jet_cli_declares_workspace_module(source) -> {
+                if {
+                    name == JET_CLI_WORKSPACE_FILE || jet_cli_declares_workspace_members(source) -> {
+                        canonical = Val(path)
+                    }
+                    else -> { authorities.push(path) }
+                }
+            }
+            else -> {
+                if name == JET_CLI_WORKSPACE_FILE -> malformed_canonical = true
+            }
         }
     }
     if malformed_canonical && canonical == .None {
@@ -1158,12 +1164,15 @@ jet_cli_find_member_dirs: fn(root: String, raw: String) -[FS]> [String]? Never! 
 jet_cli_workspace_members: fn(root: String, index_path: String, command: String, color: Bool) -[FS, Env]> JetCLIWorkspacePlan Never! {
     source: cli_files.read(index_path) ?? return JetCLIWorkspacePlan.Refused{plan: jet_cli_entry_not_ported(command, "unreadable workspace index", color)}
     refs := [JetCLIMemberRef]{}
-    if jet_cli_file_name(index_path) == JET_CLI_PACKAGE_FILE {
-        refs = jet_cli_manifest_facts(source, index_path).members
-    } else {
-        refs = jet_cli_workspace_module_members(source) ?? return JetCLIWorkspacePlan.Refused{plan: jet_cli_entry_not_ported(command, "workspace with a computed `members:` expression", color)}
-        if refs.len() == 0 {
-            return JetCLIWorkspacePlan.Refused{plan: jet_cli_no_workspace_module(color)}
+    if {
+        jet_cli_file_name(index_path) == JET_CLI_PACKAGE_FILE -> {
+            refs = jet_cli_manifest_facts(source, index_path).members
+        }
+        else -> {
+            refs = jet_cli_workspace_module_members(source) ?? return JetCLIWorkspacePlan.Refused{plan: jet_cli_entry_not_ported(command, "workspace with a computed `members:` expression", color)}
+            if refs.len() == 0 {
+                return JetCLIWorkspacePlan.Refused{plan: jet_cli_no_workspace_module(color)}
+            }
         }
     }
     paths := [String]{}
@@ -1493,7 +1502,7 @@ jet_cli_workspace_pick: fn(runnable: [JetCLIWorkspaceMember], want: String, comm
 
 // `missing_bare_entry`: no file and no project (E2104). `jet dev` names what
 // it lacks: a file to watch.
-jet_cli_missing_bare_entry: fn(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
+jet_cli_missing_bare_entry: fn(command: String, _cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
     missing: "no file given and no `package.jet` found in this directory or above"
     what: if command == "dev" -> "`jet dev` needs a file to watch: {missing}" else -> missing
     jet_cli_fail("E2104", what, jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)

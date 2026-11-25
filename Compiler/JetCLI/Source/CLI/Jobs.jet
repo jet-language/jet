@@ -15,7 +15,7 @@ use {
 jet_cli_compile_jobs: fn(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Program)
     if prepared == {
-        .Refused(output) -> return output.move()
+        .Refused(output) -> output.move()
         .Prepared(request, snapshot) -> {
             // copy: the request moves into the projection below.
             profile: request.profile.copy()
@@ -29,7 +29,7 @@ jet_cli_compile_jobs: fn(file: String, color: Bool, json: Bool) -> JetDriverVerb
             if projection.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
             registry: jet_cli_jobs_metadata_registry(projection) ?? return jet_cli_ice("a clean `jet jobs` check kept no checked entry")
             stdout: if json -> jet_cli_jobs_metadata_json(registry) else -> jet_cli_jobs_text(registry)
-            return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
     }
 }

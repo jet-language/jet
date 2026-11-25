@@ -228,9 +228,12 @@ jet_cli_script_sources: fn(entered: String, snapshot: JetDriverAuthorizedSourceS
         loop directory in root.directories {
             jet_cli_script_frame(framed, directory.path)
             loop entry in directory.entries {
-                if entry.is_directory {
-                    if walked.contains(entry.path) -> jet_cli_script_frame(framed, "{entry.name}/")
-                } else if entry.name.ends_with(".jet") { jet_cli_script_frame(framed, entry.name) }
+                if {
+                    entry.is_directory -> {
+                        if walked.contains(entry.path) -> jet_cli_script_frame(framed, "{entry.name}/")
+                    }
+                    entry.name.ends_with(".jet") -> { jet_cli_script_frame(framed, entry.name) }
+                }
             }
         }
     }

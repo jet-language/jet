@@ -175,7 +175,11 @@ jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: Je
         )
     }
     results.sort_by(fn(left: JetCLIBudgetResult, right: JetCLIBudgetResult) { if jet_cli_budget_result_rank(left) == jet_cli_budget_result_rank(right) -> left.id <=> right.id else -> jet_cli_budget_result_rank(left) <=> jet_cli_budget_result_rank(right) })
-    outcome: if fail > 0 -> "fail" else if warn > 0 -> "warn" else -> "pass"
+    outcome: if {
+        fail > 0 -> "fail"
+        warn > 0 -> "warn"
+        else -> "pass"
+    }
     content: perf_report_object_new(
         [CanonicalJSONField]{
             CanonicalJSONField{key: "evidence_id", value: CanonicalJSON.String(evidence_id)},
@@ -648,12 +652,16 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
         warnings: if warn > 0 -> " · {jet_cli_budget_count(warn, "warning", "warnings")}" else -> ""
         passing: if passed > 0 -> "{jet_cli_budget_count(passed, "budget", "budgets")} passed · " else -> ""
         line := "budgets: {jet_cli_budget_count(passed, "budget", "budgets")} passed · report {short}"
-        if failed > 0 {
-            line = "budgets failed: {jet_cli_budget_count(failed, "budget failed", "budgets failed")}{warnings} · report {short}"
-        } else if unavailable > 0 {
-            line = "budgets unavailable: {jet_cli_budget_count(unavailable, "result unavailable", "results unavailable")}{warnings} · report {short}"
-        } else if warn > 0 {
-            line = "budgets: {passing}{jet_cli_budget_count(warn, "warning", "warnings")} · report {short}"
+        if {
+            failed > 0 -> {
+                line = "budgets failed: {jet_cli_budget_count(failed, "budget failed", "budgets failed")}{warnings} · report {short}"
+            }
+            unavailable > 0 -> {
+                line = "budgets unavailable: {jet_cli_budget_count(unavailable, "result unavailable", "results unavailable")}{warnings} · report {short}"
+            }
+            warn > 0 -> {
+                line = "budgets: {passing}{jet_cli_budget_count(warn, "warning", "warnings")} · report {short}"
+            }
         }
         stderr = "{stderr}{line}\n"
     }
@@ -672,7 +680,11 @@ jet_cli_budget_json: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
             else -> {}
         }
     }
-    failure_kind: if failed -> jet_cli_status_text("budget") else if unavailable -> jet_cli_status_text("evidence") else -> JetCLIStatusValue.Null
+    failure_kind: if {
+        failed -> jet_cli_status_text("budget")
+        unavailable -> jet_cli_status_text("evidence")
+        else -> JetCLIStatusValue.Null
+    }
     budget: jet_cli_status_object(
         [JetCLIStatusField]{
             jet_cli_status_field("applied", jet_cli_status_bool(applied)),

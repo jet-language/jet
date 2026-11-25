@@ -157,9 +157,12 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
     sources := [JetDriverAuthorizedSourceFile]{}
     _ := jet_cli_discover_sources(canonical_root, sources)
     pending := [String]{}
-    if directory {
-        loop file in sources -> pending.push(file.path)
-    } else { pending.push(start.copy()) }
+    if {
+        directory -> {
+            loop file in sources -> pending.push(file.path)
+        }
+        else -> { pending.push(start.copy()) }
+    }
     visited := [String]{}
     loop pending.len() > 0 {
         file: pending.pop() ?? break

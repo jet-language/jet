@@ -69,14 +69,20 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
     candidates := [String:[JetCLIMemoryRow]]{}
     options := [JetCLIMemoryRow]{}
     loop row in rows {
-        if row.byte_spans && row.expected != None && row.repairs.len() == 1 {
-            if jet_cli_memory_repair_path(root, row.source) == .Val(candidate_path) {
-                previous: candidates.get(candidate_path) ?? [JetCLIMemoryRow]{}
-                edits := previous
-                edits.push(row)
-                candidates[candidate_path] = edits
-            } else { options.push(row) }
-        } else { options.push(row) }
+        if {
+            row.byte_spans && row.expected != None && row.repairs.len() == 1 -> {
+                if {
+                    jet_cli_memory_repair_path(root, row.source) == .Val(candidate_path) -> {
+                        previous: candidates.get(candidate_path) ?? [JetCLIMemoryRow]{}
+                        edits := previous
+                        edits.push(row)
+                        candidates[candidate_path] = edits
+                    }
+                    else -> { options.push(row) }
+                }
+            }
+            else -> { options.push(row) }
+        }
     }
     paths := [String]{}
     loop entry in candidates -> paths.push(entry.key)
@@ -107,12 +113,15 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
                         b: edits[order[right]]
                         take_left = a.span_start > b.span_start || (a.span_start == b.span_start && a.span_end >= b.span_end)
                     }
-                    if take_left {
-                        merged.push(order[left])
-                        left += 1
-                    } else {
-                        merged.push(order[right])
-                        right += 1
+                    if {
+                        take_left -> {
+                            merged.push(order[left])
+                            left += 1
+                        }
+                        else -> {
+                            merged.push(order[right])
+                            right += 1
+                        }
                     }
                 }
                 start = end
@@ -187,7 +196,11 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
     out := "jet fix memory\nCoverage: exercised runs only\n"
     if applied.len() == 0 -> out = "{out}Applied: none\n"
     loop entry in applied {
-        action: if dry_run && entry.changed -> "Would apply" else if entry.changed -> "Applied" else -> "Already applied"
+        action: if {
+            dry_run && entry.changed -> "Would apply"
+            entry.changed -> "Applied"
+            else -> "Already applied"
+        }
         out = "{out}{action}: {entry.row.source}:{entry.row.span_start}..{entry.row.span_end} -> {entry.row.repairs[0]}\n"
     }
     loop row in options {

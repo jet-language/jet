@@ -29,15 +29,21 @@ jet_cli_external_fmt_finish: fn(project_dir: String, files: [String], staged: [S
         entries := [JetCLIStatusValue]{}
         loop index in changed {
             path: jet_cli_fmt_relative(files[index], project_dir)
-            if json {
-                if show_diff {
-                    diff: jet_cli_external_fmt_diff(path, befores[index], afters[index])
-                    entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(path)), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
-                } else { entries.push(jet_cli_status_text(path)) }
-            } else {
-                stdout = "{stdout}{path}\n"
-                if show_diff {
-                    stdout = "{stdout}{jet_cli_external_fmt_diff(path, befores[index], afters[index])}"
+            if {
+                json -> {
+                    if {
+                        show_diff -> {
+                            diff: jet_cli_external_fmt_diff(path, befores[index], afters[index])
+                            entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(path)), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
+                        }
+                        else -> { entries.push(jet_cli_status_text(path)) }
+                    }
+                }
+                else -> {
+                    stdout = "{stdout}{path}\n"
+                    if show_diff {
+                        stdout = "{stdout}{jet_cli_external_fmt_diff(path, befores[index], afters[index])}"
+                    }
                 }
             }
         }

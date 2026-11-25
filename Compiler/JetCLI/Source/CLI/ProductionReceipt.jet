@@ -40,7 +40,7 @@ JetCLIEnvVar: struct {
 // command's discovery cache: its walk climbs the directories the pinned
 // toolchain check climbed (jet_cli_pinned_toolchain).
 jet_cli_production_receipt_env: fn(cache: ^WorkspaceDeclarationCache, file: String, program_args: [String]) -> [JetCLIEnvVar] {
-    cwd := cli_sys.current_dir() ?? "."
+    cwd: cli_sys.current_dir() ?? "."
     source_file: if file.starts_with("/") -> file.copy() else -> "{cwd}/{file}"
     root: jet_cli_selected_project_root(cache, jet_cli_parent(source_file) ?? ".") ?? cwd.move()
     entry: jet_cli_production_entry(source_file, root)

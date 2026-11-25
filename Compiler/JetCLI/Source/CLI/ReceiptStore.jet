@@ -10,7 +10,7 @@ jet_cli_receipt_lookup_bytes: fn(bytes: [U8]?, claim: JetDriverRunReceiptClaim, 
         return Ok(None)
     }
     raw: bytes ?? return Ok(None)
-    receipt := jet_driver_run_receipt_decode(raw) ?? return Ok(None)
+    receipt: jet_driver_run_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim != claim -> return Ok(None)
     Ok(Val(jet_cli_receipt_merge_sections(receipt, claim, published_sections)))
 }
@@ -59,12 +59,15 @@ jet_cli_receipt_redact_bytes: fn(bytes: [U8], secret_values: [String]) -> [U8] J
                     break
                 }
             }
-            if matches {
-                loop byte in marker -> output.push(byte)
-                index += needle.len()
-            } else {
-                output.push(redacted[index])
-                index += 1
+            if {
+                matches -> {
+                    loop byte in marker -> output.push(byte)
+                    index += needle.len()
+                }
+                else -> {
+                    output.push(redacted[index])
+                    index += 1
+                }
             }
         }
         loop offset in index..<redacted.len() -> output.push(redacted[offset])
@@ -132,7 +135,7 @@ jet_cli_receipt_read_section_records: fn(project_root: String, claim_key: String
     present: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err)
     if !present -> return Ok([JetCLIReceiptSectionRecord]{})
     held: JetCLIRootedDirectory.open(project_root, parts, false) ?? return Err(err)
-    entries := held.list() ?? return Err(err)
+    entries: held.list() ?? return Err(err)
     records := [JetCLIReceiptSectionRecord]{}
     loop entry in entries {
         if entry.name == "" || entry.name.starts_with(".") -> next
@@ -207,7 +210,7 @@ jet_cli_receipt_list: fn(project_root: String) -[FS, Time.Wait]> [JetDriverRunRe
     present: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err)
     if !present -> return Ok([JetDriverRunReceipt]{})
     held: JetCLIRootedDirectory.open(project_root, parts, false) ?? return Err(err)
-    entries := held.list() ?? return Err(err)
+    entries: held.list() ?? return Err(err)
     receipts := [JetDriverRunReceipt]{}
     loop entry in entries {
         if !entry.is_file || !jet_driver_run_receipt_is_digest(entry.name) -> next

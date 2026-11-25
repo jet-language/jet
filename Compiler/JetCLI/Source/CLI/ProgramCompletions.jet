@@ -68,7 +68,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
                 cases.push("        {jet_cli_program_shell_quote(command.name)}) flags={jet_cli_program_shell_quote(schema.command_completion_words(command).join(" "))} ;;")
             }
             flags: jet_cli_program_shell_quote(root_inputs.join(" "))
-            return Val("# bash completion from JetCommandSchema v{RECORD_VERSION}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {root} -- \"$cur\") )\n        return 0\n    fi\n    flags={flags}\n    case \"${{COMP_WORDS[1]}}\" in\n{cases.join("\n")}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {command_name}\n")
+            Val("# bash completion from JetCommandSchema v{RECORD_VERSION}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {root} -- \"$cur\") )\n        return 0\n    fi\n    flags={flags}\n    case \"${{COMP_WORDS[1]}}\" in\n{cases.join("\n")}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {command_name}\n")
         }
         "zsh" -> {
             specs := jet_cli_program_zsh_standard(schema.standard, schema.version != None)
@@ -84,7 +84,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
                 command_specs: jet_cli_program_zsh_inputs(schema.command_inputs(command))
                 cases.push("        {jet_cli_program_shell_quote(command.name)}) _arguments \\\n{command_specs.join(" \\\n")} ;;")
             }
-            return Val("#compdef {command_name}\n# zsh completion from JetCommandSchema v{RECORD_VERSION}\nif (( CURRENT == 2 )); then\n_arguments \\\n{specs.join(" \\\n")}\nelse\n    case $words[2] in\n{cases.join("\n")}\n    esac\nfi\n")
+            Val("#compdef {command_name}\n# zsh completion from JetCommandSchema v{RECORD_VERSION}\nif (( CURRENT == 2 )); then\n_arguments \\\n{specs.join(" \\\n")}\nelse\n    case $words[2] in\n{cases.join("\n")}\n    esac\nfi\n")
         }
         "fish" -> {
             out := "# fish completion from JetCommandSchema v{RECORD_VERSION}\n"
@@ -110,7 +110,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
                     out = "{out}complete -c {command_name} -n '__fish_seen_subcommand_from {command.name}' -l {input.flag}{short} -d {jet_cli_program_shell_quote(input.help)}{required}\n"
                 }
             }
-            return Val(out)
+            Val(out)
         }
         "powershell" -> {
             root: (loop word in root_words -> jet_cli_program_ps_quote(word)).join(",")
@@ -124,9 +124,9 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
                 words: (loop word in schema.command_completion_words(command) -> jet_cli_program_ps_quote(word)).join(",")
                 command_flags.push("{jet_cli_program_ps_quote(command.name)} = @({words})")
             }
-            return Val("# PowerShell completion from JetCommandSchema v{RECORD_VERSION}\nRegister-ArgumentCompleter -Native -CommandName {command_name} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags.join("; ")} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n")
+            Val("# PowerShell completion from JetCommandSchema v{RECORD_VERSION}\nRegister-ArgumentCompleter -Native -CommandName {command_name} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags.join("; ")} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n")
         }
-        else -> return None
+        else -> None
     }
 }
 
@@ -153,8 +153,18 @@ jet_cli_program_completion_error: fn(program: String, why: String) -> JetCLIPlan
     index := 0
     loop index < bytes.len() {
         first: Int{bytes[index]}
-        width: if first < 128 -> 1 else if first < 224 -> 2 else if first < 240 -> 3 else -> 4
-        code := if width == 1 -> first else if width == 2 -> first - 192 else if width == 3 -> first - 224 else -> first - 240
+        width: if {
+            first < 128 -> 1
+            first < 224 -> 2
+            first < 240 -> 3
+            else -> 4
+        }
+        code := if {
+            width == 1 -> first
+            width == 2 -> first - 192
+            width == 3 -> first - 224
+            else -> first - 240
+        }
         loop offset in 1..<width -> code = code * 64 + (Int{bytes[index + offset]}) - 128
         if {
             code == 9 -> escaped = "{escaped}\\t"

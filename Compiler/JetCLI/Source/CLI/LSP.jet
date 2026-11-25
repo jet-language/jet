@@ -81,7 +81,7 @@ JetCLILSPChecker: struct {
         // A stage whose program does not check answers nothing; the client's
         // log shows why.
         stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
-            run := jet_cli_tool_stage_run(entry, overlays.move(), stage, bodies, program)
+            run: jet_cli_tool_stage_run(entry, overlays.move(), stage, bodies, program)
             if run.stop == .Val(stop) {
                 lsp_write_log("the `{stage}` hooks of `{entry}` did not run: {diagnostic_headline(stop.code, stop.what)}").drop("standard error is the log; a failed log write has nowhere to go")
             }

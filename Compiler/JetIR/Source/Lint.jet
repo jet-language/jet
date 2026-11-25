@@ -1485,11 +1485,13 @@ ir_lint_word_result: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: 
 // Runtime routes.
 
 // The C-ABI words a route parameter carrier takes: a List its data pointer
-// and length, Unit none, any other one.
+// and length, a Callback its closure box, invoke and release, Unit none, any
+// other one.
 ir_lint_param_words: fn(carrier: IRRouteCarrier) -> Int Never! {
     if carrier == {
         .Unit -> 0
         .List(_) | .Frozen(_) -> 2
+        .Callback -> 3
         .Word | .Flag | .Float | .Text | .Handle(_) | .HandleMut(_) | .ListMut(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> 1
     }
 }
@@ -1505,7 +1507,7 @@ ir_lint_out_words: fn(carrier: IRRouteCarrier) -> Int Never! {
             loop item in items -> words += ir_lint_out_words(item)
             words
         }
-        .Word | .Flag | .Float | .Text | .Unit | .Handle(_) | .HandleMut(_) | .ListMut(_) | .Tag(_, _) -> 1
+        .Word | .Flag | .Float | .Text | .Unit | .Handle(_) | .HandleMut(_) | .ListMut(_) | .Tag(_, _) | .Callback -> 1
     }
 }
 
@@ -1538,7 +1540,7 @@ ir_lint_carrier_kinds: fn(carrier: IRRouteCarrier) -> Int Never! {
         .Float -> IR_LINT_FLOAT
         .Text -> IR_LINT_STRING
         .Tag(_, _) -> IR_LINT_WORD
-        .Unit | .Handle(_) | .HandleMut(_) | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tuple(_) -> 0
+        .Unit | .Handle(_) | .HandleMut(_) | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tuple(_) | .Callback -> 0
     }
 }
 

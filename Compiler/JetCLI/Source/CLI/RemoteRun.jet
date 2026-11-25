@@ -208,18 +208,21 @@ jet_cli_remote_run_url: fn(url: String, sha256: String?, locked: Bool, color: Bo
     }
     name: jet_cli_remote_run_file_name(parsed.path())
     record: jet_cli_remote_run_record_read(url)
-    if record == .Val(pin) {
-        if sha256 == .Val(want) && pin.content_hash != "sha256-{want}" {
-            return jet_cli_remote_run_refused("`--sha256` doesn't match the bytes pinned for `{url}`", "This machine pinned {pin.content_hash} for that address the first time it fetched it; `--sha256` pins only a first fetch.", "drop `--sha256` to run the pinned bytes", color)
+    if {
+        record == .Val(pin) -> {
+            if sha256 == .Val(want) && pin.content_hash != "sha256-{want}" {
+                return jet_cli_remote_run_refused("`--sha256` doesn't match the bytes pinned for `{url}`", "This machine pinned {pin.content_hash} for that address the first time it fetched it; `--sha256` pins only a first fetch.", "drop `--sha256` to run the pinned bytes", color)
+            }
+            if jet_cli_remote_run_file_hash(pin.entry) == .Val(hash) && hash == pin.content_hash {
+                return JetCLIRemoteRunResolved.Pinned{origin: JetCLIRemoteRunOrigin{pin: pin.copy(), name: name, from: host, changed: false}}
+            }
+            if locked {
+                return jet_cli_remote_run_refused("the pinned bytes of `{url}` are gone, and `--locked` refuses to fetch them again", "`--locked` runs only what this machine already pinned.", "run it once without `--locked` to fetch and pin it again", color)
+            }
         }
-        if jet_cli_remote_run_file_hash(pin.entry) == .Val(hash) && hash == pin.content_hash {
-            return JetCLIRemoteRunResolved.Pinned{origin: JetCLIRemoteRunOrigin{pin: pin.copy(), name: name, from: host, changed: false}}
+        locked -> {
+            return jet_cli_remote_run_refused("`{url}` isn't pinned on this machine, and `--locked` refuses to fetch it", "`--locked` runs only what this machine already pinned.", "run it once without `--locked` to fetch and pin it", color)
         }
-        if locked {
-            return jet_cli_remote_run_refused("the pinned bytes of `{url}` are gone, and `--locked` refuses to fetch them again", "`--locked` runs only what this machine already pinned.", "run it once without `--locked` to fetch and pin it again", color)
-        }
-    } else if locked {
-        return jet_cli_remote_run_refused("`{url}` isn't pinned on this machine, and `--locked` refuses to fetch it", "`--locked` runs only what this machine already pinned.", "run it once without `--locked` to fetch and pin it", color)
     }
     body: jet_cli_remote_run_fetch(url, host, parsed) ?? return jet_cli_remote_run_refused("couldn't fetch `{url}`: {err.message}", "Jet fetches a remote target over https before anything runs, and nothing ran.", "check the address and the network, then run it again", color)
     hex: remote_run_crypto.sha256(body).hex()
@@ -235,7 +238,7 @@ jet_cli_remote_run_url: fn(url: String, sha256: String?, locked: Bool, color: Bo
             changed = pin.accepted.len() > 0
         }
     }
-    pin := JetCLIRemoteRunPin{source: url.copy(), content_hash: content_hash, entry: entry, version: "", accepted: accepted}
+    pin: JetCLIRemoteRunPin{source: url.copy(), content_hash: content_hash, entry: entry, version: "", accepted: accepted}
     jet_cli_remote_run_record_write(pin)
     JetCLIRemoteRunResolved.Pinned{origin: JetCLIRemoteRunOrigin{pin: pin, name: name, from: host, changed: changed}}
 }
@@ -256,7 +259,7 @@ jet_cli_remote_run_fetch: fn(url: String, host: String, parsed: remote_run_url.U
     port: parsed.port() ?? (parsed.default_port() ?? 443)
     transport: JetCLIBuildHTTPInputs{}
     addresses: transport.resolve(host, port) ?? return Err(JetCLIRemoteRunError{message: err.message.copy()})
-    response := transport.get(url, addresses, port, JET_CLI_REMOTE_RUN_TIMEOUT_MS, JET_CLI_REMOTE_RUN_MAX_BYTES) ?? return Err(JetCLIRemoteRunError{message: err.message.copy()})
+    response: transport.get(url, addresses, port, JET_CLI_REMOTE_RUN_TIMEOUT_MS, JET_CLI_REMOTE_RUN_MAX_BYTES) ?? return Err(JetCLIRemoteRunError{message: err.message.copy()})
     if response.status != 200 {
         return Err(JetCLIRemoteRunError{message: "the server answered {response.status}"})
     }
@@ -341,7 +344,7 @@ jet_cli_remote_run_registry: fn(name: String, selector: String, locked: Bool, co
             changed = pin.accepted.len() > 0
         }
     }
-    pin := JetCLIRemoteRunPin{source: source, content_hash: found.content_hash.copy(), entry: found.dir.copy(), version: found.resolved_version.copy(), accepted: accepted}
+    pin: JetCLIRemoteRunPin{source: source, content_hash: found.content_hash.copy(), entry: found.dir.copy(), version: found.resolved_version.copy(), accepted: accepted}
     jet_cli_remote_run_record_write(pin)
     JetCLIRemoteRunResolved.Pinned{origin: JetCLIRemoteRunOrigin{pin: pin, name: "{name} {found.resolved_version}", from: "the registry", changed: changed}}
 }

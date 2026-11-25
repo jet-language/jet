@@ -27,4 +27,10 @@ encoding: module {
     // Ok when `bytes` is strict UTF-8, else the Utf8Error text. `priv`: the
     // codecs validate before they take bytes as text.
     #Import(c) priv utf8_validate: fn(bytes: [U8]) Err! = "jet_string_validate_utf8"
+
+    // Publishes `tree`, a `#Receipt` record's canonical encoding, as the
+    // receipt section `section` with its declared `type_name` and `schema`
+    // digest, taking the three texts. `priv`: core.encoding's receipt body
+    // calls it for `receipt.attach(value)`.
+    #Import(c) priv receipt_attach: fn(tree: Dyn, section: ^^String, type_name: ^^String, schema: ^^String) = "jet_receipt_attach"
 }

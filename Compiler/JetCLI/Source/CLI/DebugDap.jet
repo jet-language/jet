@@ -253,7 +253,7 @@ JetCLIDap: struct {
                     return self.fail(request, "an attached program does not restart; disconnect and attach again")
                 }
                 // The launch configuration the editor restarts with.
-                config := jet_cli_dap_object_of(request.arguments.move(), "arguments")
+                config: jet_cli_dap_object_of(request.arguments.move(), "arguments")
                 request.arguments = [{key: String, value: Dyn}]{}
                 if config.len() > 0 {
                     session.input_path = self.stdin_of(request, config) ?? return
@@ -1022,15 +1022,18 @@ jet_cli_debug_dap: fn(session: ^NativeSession, entry: String, deep_checks: DeepC
     dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false, fixable: fixable}
     loop !dap.done {
         request := JetCLIDapRequest{seq: 0, command: "", arguments: [{key: String, value: Dyn}]{}}
-        if dap.waiting.len() > 0 {
-            // The first that waited.
-            dap.waiting.reverse()
-            request = dap.waiting.pop() ?? break
-            dap.waiting.reverse()
-        } else {
-            if dap.ended -> break
-            text: jet_cli_dap_read() ?? break
-            request = jet_cli_dap_request(text)
+        if {
+            dap.waiting.len() > 0 -> {
+                // The first that waited.
+                dap.waiting.reverse()
+                request = dap.waiting.pop() ?? break
+                dap.waiting.reverse()
+            }
+            else -> {
+                if dap.ended -> break
+                text: jet_cli_dap_read() ?? break
+                request = jet_cli_dap_request(text)
+            }
         }
         if request.command == "disconnect" {
             session.close()
@@ -1166,7 +1169,7 @@ jet_cli_dap_texts_of: fn(members: ^^[{key: String, value: Dyn}], name: String) -
 jet_cli_dap_object_of: fn(members: ^^[{key: String, value: Dyn}], name: String) -> [{key: String, value: Dyn}] Never! {
     fields := members.move()
     loop fields.len() > 0 {
-        field := fields.pop() ?? break
+        field: fields.pop() ?? break
         if field.key == name -> return jet_cli_dap_members(field.value.move())
     }
     [{key: String, value: Dyn}]{}

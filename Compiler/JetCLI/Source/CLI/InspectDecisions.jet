@@ -108,7 +108,7 @@ jet_cli_opt_options: fn(level: Int, build: BuildOptions) -> IROptOptions {
 // `estimate` asks for the large values.
 jet_cli_decisions: fn(inputs: ^^JetDriverLoweringInputs, build: BuildOptions, threads: CompilerThreads, profile: String, harden: Bool, estimate: Bool) -> JetCLIDecisions {
     checked := inputs.move()
-    declarations := jet_driver_checked_declarations(checked)
+    declarations: jet_driver_checked_declarations(checked)
     checks := ir_checks_stock()
     checks.quiet_routes = jet_cli_runtime_quiet_routes(jet_cli_runtime_exports(jet_cli_runtime_dir()))
     checks.release = profile == "release" || profile == "hardened"
@@ -196,9 +196,9 @@ jet_cli_inspect_decisions_host: fn(job: JetCLIInspectJob, source: String) -> Jet
             operation_ids := [String]{}
             if ids != "" -> operation_ids = ids.split(",").to_list()
             options: CanonicalPassOptions{adapter_mode: decisions_sys.get(ENV_JET_ADAPTER_MODE) ?? "", operation_ids: operation_ids.move()}
-            sources := request.authorized_sources
+            sources: request.authorized_sources
             compiler_threads: request.compiler_threads.copy()
-            front := jet_cli_lowering_inputs(request, None)
+            front: jet_cli_lowering_inputs(request, None)
             errors: jet_cli_errors(jet_driver_present_diagnostics(front.compile.diagnostics, sources, front.compile.generated_source_files))
             if errors.len() > 0 {
                 jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
@@ -206,7 +206,7 @@ jet_cli_inspect_decisions_host: fn(job: JetCLIInspectJob, source: String) -> Jet
             if front.compile.internal_problem == .Val(problem) {
                 jet_cli_inspect_finish(job, jet_cli_ice(problem))
             }
-            inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
+            inputs: front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             if inputs.entry_key == None {
                 jet_cli_inspect_finish(job, jet_cli_build_failed("`{job.file}` has no `run: fn` to optimize", "the IR optimizer reports the program reachable from its `run: fn`", "add `run: fn()` to the file, or check it with `jet check {job.file}`", job.color))
             }

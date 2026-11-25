@@ -194,10 +194,13 @@ JetCLICodemodReplayRow: struct {
 jet_cli_codemod_host: fn(action: String, path: String, yes: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
     run := JetCLICodemodRun{out: [String]{}, warning: "", verbatim: None, failure: None}
     absolute: jet_cli_inspect_absolutize(path)
-    if action == "undo" {
-        _: jet_cli_codemod_undo(absolute, run) ?? jet_cli_codemod_failed(run, err)
-    } else {
-        _: jet_cli_codemod_run_object(absolute, action == "apply", yes, run) ?? jet_cli_codemod_failed(run, err)
+    if {
+        action == "undo" -> {
+            _: jet_cli_codemod_undo(absolute, run) ?? jet_cli_codemod_failed(run, err)
+        }
+        else -> {
+            _: jet_cli_codemod_run_object(absolute, action == "apply", yes, run) ?? jet_cli_codemod_failed(run, err)
+        }
     }
     stdout: run.out.join("")
     if run.failure == .Val(message) {
@@ -560,9 +563,12 @@ jet_cli_codemod_validate_ident: fn(name: String) JetCLIReadError! {
     valid := true
     loop character in name.chars() {
         text: "{character}"
-        if first {
-            if text != "_" && !text.is_alphabetic() -> valid = false
-        } else if !jet_cli_codemod_word(text) { valid = false }
+        if {
+            first -> {
+                if text != "_" && !text.is_alphabetic() -> valid = false
+            }
+            !jet_cli_codemod_word(text) -> { valid = false }
+        }
         first = false
     }
     if first || !valid -> return Err(jet_cli_codemod_error("`{name}` is not a Jet identifier"))
@@ -598,13 +604,17 @@ jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken]
             at += 2
             depth := 1
             loop at < bytes.len() && depth > 0 {
-                if jet_cli_codemod_pair(bytes, at, 47, 42) {
-                    depth += 1
-                    at += 2
-                } else if jet_cli_codemod_pair(bytes, at, 42, 47) {
-                    depth -= 1
-                    at += 2
-                } else { at += 1 }
+                if {
+                    jet_cli_codemod_pair(bytes, at, 47, 42) -> {
+                        depth += 1
+                        at += 2
+                    }
+                    jet_cli_codemod_pair(bytes, at, 42, 47) -> {
+                        depth -= 1
+                        at += 2
+                    }
+                    else -> { at += 1 }
+                }
             }
             if depth > 0 {
                 return Err(jet_cli_codemod_error("unterminated comment at byte {start}"))
@@ -612,39 +622,51 @@ jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken]
             next
         }
         start: at
-        if byte == 34 {
-            at += 1
-            loop at < bytes.len() {
-                current: Int{bytes[at]}
-                if current == 92 -> at += 2 else if current == 34 {
+        if {
+            byte == 34 -> {
+                at += 1
+                loop at < bytes.len() {
+                    current: Int{bytes[at]}
+                    if {
+                        current == 92 -> at += 2
+                        current == 34 -> {
+                            at += 1
+                            break
+                        }
+                        else -> { at += 1 }
+                    }
+                }
+                if at > bytes.len() -> at = bytes.len()
+            }
+            jet_cli_codemod_ascii_alpha(byte) || byte == 95 || byte >= 128 -> {
+                at += 1
+                loop at < bytes.len() {
+                    current: Int{bytes[at]}
+                    if !jet_cli_codemod_ascii_alpha(current) && !jet_cli_codemod_ascii_digit(current) && current != 95 && current < 128 {
+                        break
+                    }
                     at += 1
-                    break
-                } else { at += 1 }
-            }
-            if at > bytes.len() -> at = bytes.len()
-        } else if jet_cli_codemod_ascii_alpha(byte) || byte == 95 || byte >= 128 {
-            at += 1
-            loop at < bytes.len() {
-                current: Int{bytes[at]}
-                if !jet_cli_codemod_ascii_alpha(current) && !jet_cli_codemod_ascii_digit(current) && current != 95 && current < 128 {
-                    break
                 }
-                at += 1
             }
-        } else if jet_cli_codemod_ascii_digit(byte) {
-            at += 1
-            loop at < bytes.len() {
-                current: Int{bytes[at]}
-                if !jet_cli_codemod_ascii_alpha(current) && !jet_cli_codemod_ascii_digit(current) && current != 95 && current != 46 {
-                    break
+            jet_cli_codemod_ascii_digit(byte) -> {
+                at += 1
+                loop at < bytes.len() {
+                    current: Int{bytes[at]}
+                    if !jet_cli_codemod_ascii_alpha(current) && !jet_cli_codemod_ascii_digit(current) && current != 95 && current != 46 {
+                        break
+                    }
+                    at += 1
                 }
-                at += 1
             }
-        } else {
-            two: if at + 1 < bytes.len() -> foundation_byte_text(bytes, at, at + 2) else -> ""
-            if two == "->" || two == "=>" || two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "?." || two == "??" || two == ":=" || two == ".." {
-                at += 2
-            } else { at += 1 }
+            else -> {
+                two: if at + 1 < bytes.len() -> foundation_byte_text(bytes, at, at + 2) else -> ""
+                if {
+                    two == "->" || two == "=>" || two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "?." || two == "??" || two == ":=" || two == ".." -> {
+                        at += 2
+                    }
+                    else -> { at += 1 }
+                }
+            }
         }
         tokens.push(JetCLICodemodTemplateToken{text: foundation_byte_text(bytes, start, at)})
     }
@@ -656,16 +678,19 @@ jet_cli_codemod_parse_template: fn(source: String) -> [JetCLICodemodAtom] JetCLI
     atoms := [JetCLICodemodAtom]{}
     at := 0
     loop at < raw.len() {
-        if raw[at].text == "$" {
-            if at + 1 >= raw.len() -> return Err(jet_cli_codemod_error("capture needs a name"))
-            name: raw[at + 1].text
-            jet_cli_codemod_validate_ident(name)
-            variadic: at + 3 < raw.len() && raw[at + 2].text == ".." && raw[at + 3].text == "."
-            atoms.push(JetCLICodemodAtom.Capture{name: name.copy(), variadic: variadic})
-            at += if variadic -> 4 else -> 2
-        } else {
-            atoms.push(JetCLICodemodAtom.Literal{value: raw[at].text.copy()})
-            at += 1
+        if {
+            raw[at].text == "$" -> {
+                if at + 1 >= raw.len() -> return Err(jet_cli_codemod_error("capture needs a name"))
+                name: raw[at + 1].text
+                jet_cli_codemod_validate_ident(name)
+                variadic: at + 3 < raw.len() && raw[at + 2].text == ".." && raw[at + 3].text == "."
+                atoms.push(JetCLICodemodAtom.Capture{name: name.copy(), variadic: variadic})
+                at += if variadic -> 4 else -> 2
+            }
+            else -> {
+                atoms.push(JetCLICodemodAtom.Literal{value: raw[at].text.copy()})
+                at += 1
+            }
         }
     }
     if atoms.len() == 0 -> return Err(jet_cli_codemod_error("AST template cannot be empty"))
@@ -759,7 +784,11 @@ jet_cli_codemod_sentinels: fn(atoms: [JetCLICodemodAtom], typed: Bool) -> [JetCL
     captures := [JetCLICodemodCaptured]{}
     loop atom in atoms {
         if atom == .Capture(name, variadic) {
-            text: if !typed -> "__codemod_capture_{name}" else if variadic -> "__codemod_a, __codemod_b" else -> "__codemod_value"
+            text: if {
+                !typed -> "__codemod_capture_{name}"
+                variadic -> "__codemod_a, __codemod_b"
+                else -> "__codemod_value"
+            }
             captures.push(JetCLICodemodCaptured{name: name.copy(), text: text, key: ""})
         }
     }
@@ -841,10 +870,13 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
         loop child in children {
             row: nodes[child]
             last: slots.len() - 1
-            if slots.len() > 0 && slots[last].name == row.slot && slots[last].kind == row.slot_kind {
-                slots[last].children.push(child)
-            } else {
-                slots.push(JetCLICodemodTypedSlot{name: row.slot.copy(), kind: row.slot_kind.copy(), children: [Int]{child}})
+            if {
+                slots.len() > 0 && slots[last].name == row.slot && slots[last].kind == row.slot_kind -> {
+                    slots[last].children.push(child)
+                }
+                else -> {
+                    slots.push(JetCLICodemodTypedSlot{name: row.slot.copy(), kind: row.slot_kind.copy(), children: [Int]{child}})
+                }
             }
         }
         children.sort_by(fn(left: Int, right: Int) { (nodes[left].span.start <=> nodes[right].span.start).then(nodes[left].span.end <=> nodes[right].span.end) })
@@ -917,11 +949,11 @@ jet_cli_codemod_parse_pattern: fn(atoms: [JetCLICodemodAtom], class: String) -> 
     if lexed.diagnostics.len() > 0 {
         return Err(jet_cli_codemod_error("AST pattern failed compiler lexing after capture substitution"))
     }
-    parsed := parse_generated_source(wrapped.bytes())
+    parsed: parse_generated_source(wrapped.bytes())
     if parsed.diagnostics.len() > 0 {
         return Err(jet_cli_codemod_error("AST pattern produced parser teaching diagnostics"))
     }
-    pattern_module := JetDriverDocModule{path: "<codemod-pattern>", physical_path: "<codemod-pattern>", alias: "pattern", source: wrapped.copy(), items: parsed.program.items.copy(), block_spans: parsed.program.block_spans.copy(), imports: parsed.program.imports.copy(), tables: parsed.program.tables.move()}
+    pattern_module: JetDriverDocModule{path: "<codemod-pattern>", physical_path: "<codemod-pattern>", alias: "pattern", source: wrapped.copy(), items: parsed.program.items.copy(), block_spans: parsed.program.block_spans.copy(), imports: parsed.program.imports.copy(), tables: parsed.program.tables.move()}
     // A pattern is parsed, never checked: it has no checked bodies to type.
     index: semindex_build([JetDriverDocModule]{pattern_module}, interner_empty(), jet_cli_effect_projection(jet_cli_policy_authority([String]{}, None)))
     root := -1
@@ -1193,11 +1225,11 @@ jet_cli_codemod_refuse: fn(run: ^JetCLICodemodRun, output: JetDriverVerbOutput) 
 // a failure (the driver's keep-going collector), and the diagnostics are the
 // validation step's business, not the index's.
 jet_cli_codemod_index_unit: fn(entry: String, files: JetCLICodemodFiles, inputs: ^[String:String], run: ^JetCLICodemodRun) -> JetCLICodemodIndexed JetCLIReadError! {
-    prepared := jet_cli_prepare_overlays(entry, entry, jet_cli_codemod_overlays(entry, files), false, None, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(entry, entry, jet_cli_codemod_overlays(entry, files), false, None, JetDriverCompileMode.Doc)
     if prepared.move() == {
-        .Refused(output) -> return Err(jet_cli_codemod_refuse(run, output))
+        .Refused(output) -> Err(jet_cli_codemod_refuse(run, output))
         .Prepared(request, snapshot) -> {
-            selected := request
+            selected: request
             result: jet_driver_compile_keep_going(selected, JetDriverKeepGoing{skip: [String]{}}) ?? return Err(jet_cli_codemod_error("could not index `{entry}`: {err}"))
             if result.doc_modules.len() == 0 {
                 errors: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
@@ -1216,7 +1248,7 @@ jet_cli_codemod_index_unit: fn(entry: String, files: JetCLICodemodFiles, inputs:
                     _: jet_cli_codemod_read_fingerprint(real, inputs)
                 }
             }
-            return Ok(JetCLICodemodIndexed{index: jet_cli_checked_semindex(result), physical: physical})
+            Ok(JetCLICodemodIndexed{index: jet_cli_checked_semindex(result), physical: physical})
         }
     }
 }
@@ -1228,7 +1260,7 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
     if jet_cli_codemod_take_number(object, "version") != 2 {
         return Err(jet_cli_codemod_error("batch codemod requires `version: 2`"))
     }
-    name := jet_cli_codemod_take_string(object, "name")
+    name: jet_cli_codemod_take_string(object, "name")
     if name.trim() == "" -> return Err(jet_cli_codemod_error("codemod name cannot be empty"))
     project_raw: jet_cli_codemod_take_string(object, "project")
     if project_raw.starts_with("/") {
@@ -1263,43 +1295,47 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
     rules := [JetCLICodemodRule]{}
     loop rule_value in values {
         rule := jet_cli_codemod_object(rule_value, "rule must be an object")
-        id := jet_cli_codemod_take_string(rule, "id")
+        id: jet_cli_codemod_take_string(rule, "id")
         if ids.contains(id) -> return Err(jet_cli_codemod_error("duplicate rule id `{id}`"))
         ids.push(id.copy())
-        kind := jet_cli_codemod_take_string(rule, "kind")
+        kind: jet_cli_codemod_take_string(rule, "kind")
         matches: jet_cli_codemod_take_number(rule, "matches")
         allow_zero: jet_cli_codemod_take_bool(rule, "allow_zero", false)
         if matches == 0 && !allow_zero {
             return Err(jet_cli_codemod_error("rule `{id}` declares zero matches without `allow_zero: true`"))
         }
-        if kind == "symbol_rename" {
-            from := jet_cli_codemod_take_object(rule, "from")
-            symbol := jet_cli_codemod_take_string(from, "name")
-            symbol_kind := jet_cli_codemod_take_string(from, "symbol_kind")
-            defined_raw: jet_cli_codemod_take_string_opt(from, "defined_in")
-            defined_in := String?{None}
-            if defined_raw == .Val(raw) {
-                defined_in = Val(jet_cli_codemod_secure_existing(project, raw, false))
+        if {
+            kind == "symbol_rename" -> {
+                from := jet_cli_codemod_take_object(rule, "from")
+                symbol: jet_cli_codemod_take_string(from, "name")
+                symbol_kind: jet_cli_codemod_take_string(from, "symbol_kind")
+                defined_raw: jet_cli_codemod_take_string_opt(from, "defined_in")
+                defined_in := String?{None}
+                if defined_raw == .Val(raw) {
+                    defined_in = Val(jet_cli_codemod_secure_existing(project, raw, false))
+                }
+                jet_cli_codemod_reject_unknown(from, "symbol selector")
+                to: jet_cli_codemod_take_string(rule, "to")
+                jet_cli_codemod_validate_ident(symbol)
+                jet_cli_codemod_validate_ident(to)
+                jet_cli_codemod_reject_unknown(rule, "symbol_rename rule")
+                rules.push(JetCLICodemodRule{id: id.move(), kind: kind.move(), name: symbol.move(), symbol_kind: symbol_kind.move(), defined_in: defined_in, to: to.move(), node: "", pattern: [JetCLICodemodAtom]{}, replacement: [JetCLICodemodAtom]{}, matches: matches, allow_zero: allow_zero})
             }
-            jet_cli_codemod_reject_unknown(from, "symbol selector")
-            to := jet_cli_codemod_take_string(rule, "to")
-            jet_cli_codemod_validate_ident(symbol)
-            jet_cli_codemod_validate_ident(to)
-            jet_cli_codemod_reject_unknown(rule, "symbol_rename rule")
-            rules.push(JetCLICodemodRule{id: id.move(), kind: kind.move(), name: symbol.move(), symbol_kind: symbol_kind.move(), defined_in: defined_in, to: to.move(), node: "", pattern: [JetCLICodemodAtom]{}, replacement: [JetCLICodemodAtom]{}, matches: matches, allow_zero: allow_zero})
-        } else if kind == "ast_rewrite" {
-            node := jet_cli_codemod_take_string(rule, "node")
-            if node != "expr" && node != "stmt" && node != "item" && node != "type" {
-                return Err(jet_cli_codemod_error("rule `{id}` has unknown node class `{node}`"))
+            kind == "ast_rewrite" -> {
+                node: jet_cli_codemod_take_string(rule, "node")
+                if node != "expr" && node != "stmt" && node != "item" && node != "type" {
+                    return Err(jet_cli_codemod_error("rule `{id}` has unknown node class `{node}`"))
+                }
+                pattern: jet_cli_codemod_parse_template(jet_cli_codemod_take_string(rule, "match"))
+                replacement: jet_cli_codemod_parse_template(jet_cli_codemod_take_string(rule, "replace"))
+                jet_cli_codemod_validate_templates(id, pattern, replacement)
+                jet_cli_codemod_validate_typed_template(id, node, pattern, "match")
+                jet_cli_codemod_validate_typed_template(id, node, replacement, "replace")
+                jet_cli_codemod_reject_unknown(rule, "ast_rewrite rule")
+                rules.push(JetCLICodemodRule{id: id.move(), kind: kind.move(), name: "", symbol_kind: "", defined_in: None, to: "", node: node.move(), pattern: pattern.move(), replacement: replacement.move(), matches: matches, allow_zero: allow_zero})
             }
-            pattern := jet_cli_codemod_parse_template(jet_cli_codemod_take_string(rule, "match"))
-            replacement := jet_cli_codemod_parse_template(jet_cli_codemod_take_string(rule, "replace"))
-            jet_cli_codemod_validate_templates(id, pattern, replacement)
-            jet_cli_codemod_validate_typed_template(id, node, pattern, "match")
-            jet_cli_codemod_validate_typed_template(id, node, replacement, "replace")
-            jet_cli_codemod_reject_unknown(rule, "ast_rewrite rule")
-            rules.push(JetCLICodemodRule{id: id.move(), kind: kind.move(), name: "", symbol_kind: "", defined_in: None, to: "", node: node.move(), pattern: pattern.move(), replacement: replacement.move(), matches: matches, allow_zero: allow_zero})
-        } else { return Err(jet_cli_codemod_error("unknown codemod rule kind `{kind}`")) }
+            else -> { return Err(jet_cli_codemod_error("unknown codemod rule kind `{kind}`")) }
+        }
     }
     snapshots := [JetCLICodemodSnapshot]{}
     snapshot_map: jet_cli_codemod_take_object_opt(object, "snapshot_after")
@@ -1314,8 +1350,11 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
             loop field in map.fields {
                 if field.name == raw -> input_value = field.value.copy()
             }
-            input_raw: if input_value == .Text(text) -> text.copy() else -> {
-                return Err(jet_cli_codemod_error("snapshot_after values must be paths"))
+            input_raw: if {
+                input_value == .Text(text) -> text.copy()
+                else -> {
+                    return Err(jet_cli_codemod_error("snapshot_after values must be paths"))
+                }
             }
             destination: jet_cli_codemod_secure_destination(project, raw)
             input: jet_cli_codemod_secure_existing_project_file(project, input_raw)
@@ -1356,8 +1395,11 @@ jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: ^[JetCLICodemo
         if info.is_symlink {
             return Err(jet_cli_codemod_error("symlink inside codemod root is not allowed: `{path}`"))
         }
-        if info.is_dir -> jet_cli_codemod_walk(path, fixture, units) else if info.is_file && jet_cli_codemod_extension(path) == Val("jet") {
-            jet_cli_codemod_insert_unit(units, jet_cli_codemod_canonicalish(path), fixture)
+        if {
+            info.is_dir -> jet_cli_codemod_walk(path, fixture, units)
+            info.is_file && jet_cli_codemod_extension(path) == Val("jet") -> {
+                jet_cli_codemod_insert_unit(units, jet_cli_codemod_canonicalish(path), fixture)
+            }
         }
     }
 }
@@ -1366,9 +1408,12 @@ jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: ^[JetCLICodemo
 jet_cli_codemod_discover_units: fn(batch: JetCLICodemodBatch) -[FS, Env]> [JetCLICodemodUnit] JetCLIReadError! {
     units := [JetCLICodemodUnit]{}
     loop root in batch.roots {
-        if cli_files.is_file(root.path) {
-            jet_cli_codemod_insert_unit(units, root.path, root.fixture)
-        } else { jet_cli_codemod_walk(root.path, root.fixture, units) }
+        if {
+            cli_files.is_file(root.path) -> {
+                jet_cli_codemod_insert_unit(units, root.path, root.fixture)
+            }
+            else -> { jet_cli_codemod_walk(root.path, root.fixture, units) }
+        }
     }
     units.sort_by(fn(left: JetCLICodemodUnit, right: JetCLICodemodUnit) { jet_cli_import_path_order(left.entry, right.entry) })
     Ok(units)
@@ -1493,7 +1538,7 @@ jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodU
                     next
                 }
             }
-            anchor := jet_cli_codemod_anchor(def)
+            anchor: jet_cli_codemod_anchor(def)
             known := false
             loop existing in anchors {
                 if jet_cli_codemod_same_anchor(existing, anchor) -> known = true
@@ -1578,35 +1623,41 @@ jet_cli_codemod_validate_units: fn(batch: JetCLICodemodBatch, units: [JetCLICode
             }
         }
         relative: jet_cli_codemod_project_rel(batch.project, unit.entry)
-        if !unit.fixture {
-            if errors.len() > 0 {
-                return Err(jet_cli_codemod_error("clean root `{unit.entry}` has {errors.len()} diagnostic(s) after rewrite"))
-            }
-            plan.validations.push("{relative} clean")
-        } else {
-            if errors.len() == 0 {
-                return Err(jet_cli_codemod_error("fixture `{unit.entry}` no longer produces a diagnostic"))
-            }
-            at: jet_cli_codemod_file_index(plan.files, unit.entry)
-            source: String.from_bytes(plan.files.staged[at]) ?? ""
-            bytes: diagnostic_render_all(unit.entry, source, errors, false).bytes()
-            stderr: jet_cli_codemod_with_extension(unit.entry, "stderr")
-            stderr_at: jet_cli_codemod_file_index(plan.files, stderr)
-            declared := String?{None}
-            loop snapshot in batch.snapshots {
-                if snapshot.destination == stderr -> declared = Val(snapshot.input.copy())
-            }
-            if declared == .Val(input) {
-                expected: cli_files.read_bytes(input) ?? return Err(jet_cli_codemod_error("could not read snapshot input: {jet_cli_io_error_text(err)}"))
-                if bytes != expected {
-                    at_byte: jet_cli_codemod_first_difference(bytes, expected)
-                    return Err(jet_cli_codemod_error("generated diagnostics for `{unit.entry}` do not equal snapshot_after `{input}` (generated {bytes.len()} bytes {jet_cli_source_hash(bytes)}, expected {expected.len()} bytes {jet_cli_source_hash(expected)}, first difference byte {at_byte})"))
+        if {
+            !unit.fixture -> {
+                if errors.len() > 0 {
+                    return Err(jet_cli_codemod_error("clean root `{unit.entry}` has {errors.len()} diagnostic(s) after rewrite"))
                 }
-                plan.files.staged[stderr_at] = expected
-            } else if plan.files.before[stderr_at] != bytes {
-                return Err(jet_cli_codemod_error("generated diagnostics for `{unit.entry}` differ from paired snapshot; declare snapshot_after"))
+                plan.validations.push("{relative} clean")
             }
-            plan.validations.push("{relative} fixture snapshot exact")
+            else -> {
+                if errors.len() == 0 {
+                    return Err(jet_cli_codemod_error("fixture `{unit.entry}` no longer produces a diagnostic"))
+                }
+                at: jet_cli_codemod_file_index(plan.files, unit.entry)
+                source: String.from_bytes(plan.files.staged[at]) ?? ""
+                bytes: diagnostic_render_all(unit.entry, source, errors, false).bytes()
+                stderr: jet_cli_codemod_with_extension(unit.entry, "stderr")
+                stderr_at: jet_cli_codemod_file_index(plan.files, stderr)
+                declared := String?{None}
+                loop snapshot in batch.snapshots {
+                    if snapshot.destination == stderr -> declared = Val(snapshot.input.copy())
+                }
+                if {
+                    declared == .Val(input) -> {
+                        expected: cli_files.read_bytes(input) ?? return Err(jet_cli_codemod_error("could not read snapshot input: {jet_cli_io_error_text(err)}"))
+                        if bytes != expected {
+                            at_byte: jet_cli_codemod_first_difference(bytes, expected)
+                            return Err(jet_cli_codemod_error("generated diagnostics for `{unit.entry}` do not equal snapshot_after `{input}` (generated {bytes.len()} bytes {jet_cli_source_hash(bytes)}, expected {expected.len()} bytes {jet_cli_source_hash(expected)}, first difference byte {at_byte})"))
+                        }
+                        plan.files.staged[stderr_at] = expected
+                    }
+                    plan.files.before[stderr_at] != bytes -> {
+                        return Err(jet_cli_codemod_error("generated diagnostics for `{unit.entry}` differ from paired snapshot; declare snapshot_after"))
+                    }
+                }
+                plan.validations.push("{relative} fixture snapshot exact")
+            }
         }
         _: jet_cli_codemod_read_fingerprint(unit.entry, plan.inputs)
     }
@@ -1746,14 +1797,14 @@ jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, ru
 jet_cli_codemod_parse_v1: fn(value: JetCLIStatusValue, path: String) -> JetCLICodemodV1 JetCLIReadError! {
     object := jet_cli_codemod_object(value, "expected JSON object")
     _: jet_cli_codemod_take_number_opt(object, "version")
-    name := jet_cli_codemod_take_string_opt(object, "name") ?? "Codemod"
+    name: jet_cli_codemod_take_string_opt(object, "name") ?? "Codemod"
     entry: jet_cli_codemod_resolve_against(jet_cli_parent(path), jet_cli_codemod_take_string(object, "entry"))
     operation: jet_cli_codemod_take_string(object, "operation")
     if operation != "rename" {
         return Err(jet_cli_codemod_error("version 1 supports only `rename`"))
     }
-    from := jet_cli_codemod_take_string(object, "from")
-    to := jet_cli_codemod_take_string(object, "to")
+    from: jet_cli_codemod_take_string(object, "from")
+    to: jet_cli_codemod_take_string(object, "to")
     jet_cli_codemod_reject_unknown(object, "version 1 codemod")
     jet_cli_codemod_validate_ident(from)
     jet_cli_codemod_validate_ident(to)
@@ -1840,10 +1891,14 @@ jet_cli_codemod_run_object: fn(path: String, apply: Bool, yes: Bool, run: ^JetCL
 
     } else { return Err(jet_cli_codemod_error("codemod object must be a JSON object")) }
     version: jet_cli_codemod_number_default(value, "version", 1)
-    if version == 1 -> jet_cli_codemod_run_v1(jet_cli_codemod_parse_v1(value, path), apply, run) else if version == 2 {
-        jet_cli_codemod_run_v2(jet_cli_codemod_parse_batch(value, path), apply, yes, run)
-    } else {
-        return Err(jet_cli_codemod_error("unsupported codemod version {version}; expected 1 or 2"))
+    if {
+        version == 1 -> jet_cli_codemod_run_v1(jet_cli_codemod_parse_v1(value, path), apply, run)
+        version == 2 -> {
+            jet_cli_codemod_run_v2(jet_cli_codemod_parse_batch(value, path), apply, yes, run)
+        }
+        else -> {
+            return Err(jet_cli_codemod_error("unsupported codemod version {version}; expected 1 or 2"))
+        }
     }
     Ok(true)
 }
@@ -1903,9 +1958,12 @@ jet_cli_codemod_undo: fn(path: String, run: ^JetCLICodemodRun) -[FS, Env, Exec, 
     if value == .Object(_) {
 
     } else { return Err(jet_cli_codemod_error("codemod log must be an object")) }
-    if jet_cli_codemod_number_default(value, "schema", 1) == 2 {
-        jet_cli_codemod_undo_v2(value, path, project, run)
-    } else { jet_cli_codemod_undo_v1(value, path, project, run) }
+    if {
+        jet_cli_codemod_number_default(value, "schema", 1) == 2 -> {
+            jet_cli_codemod_undo_v2(value, path, project, run)
+        }
+        else -> { jet_cli_codemod_undo_v1(value, path, project, run) }
+    }
     Ok(true)
 }
 
@@ -1933,7 +1991,7 @@ jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: Str
     paths := [String]{}
     loop row_value in rows {
         row := jet_cli_codemod_object(row_value, "replay log file must be object")
-        file := jet_cli_codemod_take_string(row, "path")
+        file: jet_cli_codemod_take_string(row, "path")
         before_hash: jet_cli_codemod_take_string(row, "before_hash")
         after_hash: jet_cli_codemod_take_string(row, "after_hash")
         before: jet_cli_codemod_unhex(jet_cli_codemod_take_string(row, "before_bytes"))
@@ -1959,10 +2017,10 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
     decoded := [JetCLICodemodReplayRow]{}
     loop file_value in files {
         row := jet_cli_codemod_object(file_value, "expected JSON object")
-        file := jet_cli_codemod_take_string(row, "path")
-        before_hash := jet_cli_codemod_take_string(row, "before_hash")
-        after_hash := jet_cli_codemod_take_string(row, "after_hash")
-        before_bytes := jet_cli_codemod_take_string_opt(row, "before_bytes")
+        file: jet_cli_codemod_take_string(row, "path")
+        before_hash: jet_cli_codemod_take_string(row, "before_hash")
+        after_hash: jet_cli_codemod_take_string(row, "after_hash")
+        before_bytes: jet_cli_codemod_take_string_opt(row, "before_bytes")
         inverse := [JetCLIStatusValue]{}
         if before_bytes == None -> inverse = jet_cli_codemod_take_array(row, "inverse_edits") else {
             _: jet_cli_codemod_take_array_opt(row, "inverse_edits")
@@ -1978,7 +2036,7 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
     jet_cli_transaction_recover(project, journal)
     changes := [JetCLISourceChange]{}
     loop row in decoded {
-        current := jet_cli_codemod_read_destination(project_path, row.path) ?? return Err(jet_cli_codemod_error("could not read `{row.path}`: {err.message}"))
+        current: jet_cli_codemod_read_destination(project_path, row.path) ?? return Err(jet_cli_codemod_error("could not read `{row.path}`: {err.message}"))
         if jet_cli_source_hash(current) != row.after_hash {
             return Err(jet_cli_codemod_error("checkpoint mismatch for `{row.path}`; refusing undo"))
         }
@@ -1989,7 +2047,7 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
                 edit := jet_cli_codemod_object(edit_value, "legacy inverse edit must be an object")
                 start: jet_cli_codemod_take_number(edit, "start")
                 end: jet_cli_codemod_take_number(edit, "end")
-                new_text := jet_cli_codemod_take_string(edit, "new_text")
+                new_text: jet_cli_codemod_take_string(edit, "new_text")
                 edits.push(TextEdit{span: Span{start: start, end: end}, new_text: new_text.move()})
             }
             source: String.from_bytes(current) ?? return Err(jet_cli_codemod_error("legacy codemod file is not UTF-8"))

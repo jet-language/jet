@@ -89,34 +89,37 @@ jet_cli_perf_instructions_section: fn(elf: [U8], level: Int, sampled: JetCLIPerf
         lines := [CanonicalJSON]{}
         names := [CanonicalJSON]{}
         hex := ""
-        if held == .Val(text) {
-            last := 0
-            reached := [Int:Bool]{}
-            loop row in x64_listing(text, code.low, sampled.table, code.function, symbols, [Int:String]{}) {
-                if row.line > 0 && row.line != last {
-                    lines.push(jet_cli_perf_code_line(row.offset, row.line))
-                    last = row.line
-                }
-                if row.reach >= 0 && row.target != "" && !reached.has_key(row.reach) {
-                    reached[row.reach] = true
-                    names.push(CanonicalJSON.Object([CanonicalJSONField]{{key: "address", value: CanonicalJSON.Integer("{row.reach}")}, {key: "name", value: CanonicalJSON.String("{row.target}")}}))
-                }
-            }
-            hex = perf_hex.encode(text)
-            bytes += size
-            kept += 1
-        } else {
-            if code.function >= 0 {
+        if {
+            held == .Val(text) -> {
                 last := 0
-                loop row in code.rows {
-                    line: x64_jetline_line(sampled.table, sampled.table.functions[code.function], row.pc) ?? 0
-                    if line > 0 && line != last {
-                        lines.push(jet_cli_perf_code_line(row.pc - code.low, line))
-                        last = line
+                reached := [Int:Bool]{}
+                loop row in x64_listing(text, code.low, sampled.table, code.function, symbols, [Int:String]{}) {
+                    if row.line > 0 && row.line != last {
+                        lines.push(jet_cli_perf_code_line(row.offset, row.line))
+                        last = row.line
+                    }
+                    if row.reach >= 0 && row.target != "" && !reached.has_key(row.reach) {
+                        reached[row.reach] = true
+                        names.push(CanonicalJSON.Object([CanonicalJSONField]{{key: "address", value: CanonicalJSON.Integer("{row.reach}")}, {key: "name", value: CanonicalJSON.String("{row.target}")}}))
                     }
                 }
+                hex = perf_hex.encode(text)
+                bytes += size
+                kept += 1
             }
-            cut += 1
+            else -> {
+                if code.function >= 0 {
+                    last := 0
+                    loop row in code.rows {
+                        line: x64_jetline_line(sampled.table, sampled.table.functions[code.function], row.pc) ?? 0
+                        if line > 0 && line != last {
+                            lines.push(jet_cli_perf_code_line(row.pc - code.low, line))
+                            last = line
+                        }
+                    }
+                }
+                cut += 1
+            }
         }
         instructions: loop row in code.rows -> CanonicalJSON.Object(
             [CanonicalJSONField]{
@@ -194,10 +197,13 @@ jet_cli_perf_code_entry: fn(found: ^[JetCLIPerfCode], at: ^[Int:Int], table: X64
     events := [U64]{}
     loop _ in 0..<width -> events.push(U64{0})
     at[low] = found.len()
-    if function >= 0 {
-        found.push(JetCLIPerfCode{low: low, high: table.functions[function].high, name: "{table.functions[function].name}", file: "{table.functions[function].file}", function: function, samples: U64{0}, events: events, rows: [JetCLIPerfPc]{}})
-    } else {
-        found.push(JetCLIPerfCode{low: low, high: low + functions[symbol].size, name: "{functions[symbol].name}", file: "", function: -1, samples: U64{0}, events: events, rows: [JetCLIPerfPc]{}})
+    if {
+        function >= 0 -> {
+            found.push(JetCLIPerfCode{low: low, high: table.functions[function].high, name: "{table.functions[function].name}", file: "{table.functions[function].file}", function: function, samples: U64{0}, events: events, rows: [JetCLIPerfPc]{}})
+        }
+        else -> {
+            found.push(JetCLIPerfCode{low: low, high: low + functions[symbol].size, name: "{functions[symbol].name}", file: "", function: -1, samples: U64{0}, events: events, rows: [JetCLIPerfPc]{}})
+        }
     }
     Val(found.len() - 1)
 }

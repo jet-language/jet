@@ -102,28 +102,32 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
     }
     file := ""
     notice := ""
-    if target == "" {
-        directory: cli_files.cwd() ?? "."
-        notices := [String]{}
-        if jet_cli_resolve_bare_entry("run", directory, jet_cli_option_value(jet_argv, "-p"), false, color, notices) == {
-            .Entry(entry) -> {
-                file = entry.path
-                notice = notices.join("")
+    if {
+        target == "" -> {
+            directory: cli_files.cwd() ?? "."
+            notices := [String]{}
+            if jet_cli_resolve_bare_entry("run", directory, jet_cli_option_value(jet_argv, "-p"), false, color, notices) == {
+                .Entry(entry) -> {
+                    file = entry.path
+                    notice = notices.join("")
+                }
+                .Refused(plan) -> return jet_cli_with_notices(notices, plan)
+                .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("run", directory, color))
             }
-            .Refused(plan) -> return jet_cli_with_notices(notices, plan)
-            .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("run", directory, color))
         }
-    } else if cli_files.is_dir(target) {
-        if jet_cli_resolve_directory_target("run", target, None, false, color) == {
-            .File(path, _, written) -> {
-                file = path
-                notice = written
+        cli_files.is_dir(target) -> {
+            if jet_cli_resolve_directory_target("run", target, None, false, color) == {
+                .File(path, _, written) -> {
+                    file = path
+                    notice = written
+                }
+                .Refused(plan) -> return plan
             }
-            .Refused(plan) -> return plan
         }
-    } else {
-        file = target
-        if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
+        else -> {
+            file = target
+            if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
+        }
     }
     source: cli_files.read(file) ?? return jet_cli_report_done(notice, "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
     if line > 0 {
@@ -579,9 +583,12 @@ jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, 
         callee: jet_cli_effects_raw_summary(summaries, edge.name) ?? next
         loop name in callee.solved {
             chain := [String]{owner}
-            if semindex_witness(witnesses, summaries, callee.key, name) == .Val(witness) && witness.path.len() > 0 {
-                loop part in witness.path -> chain.push(part.copy())
-            } else { chain.push(callee.key.copy()) }
+            if {
+                semindex_witness(witnesses, summaries, callee.key, name) == .Val(witness) && witness.path.len() > 0 -> {
+                    loop part in witness.path -> chain.push(part.copy())
+                }
+                else -> { chain.push(callee.key.copy()) }
+            }
             jet_cli_effects_reach_add(reaches, name, chain, jet_cli_effects_site(doc_module, edge.span.start))
         }
     }
@@ -683,14 +690,17 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     offset := -1
     if job.line > 0 -> offset = jet_cli_effects_line_offset(doc_module.source, job.line)
     found := JetCLIEffectsSite{key: "", function: None, caps: [ModuleCap]{}}
-    if offset >= 0 {
-        jet_cli_effects_locate(doc_module.items, alias, "", offset, [ModuleCap]{}, found)
-    } else {
-        // A whole file is its module, plus its `run` when it has one.
-        loop item in doc_module.items {
-            if item == .Func(function) && function.name == "run" && !function.compiler_generated {
-                found.key = "{alias}.run"
-                found.function = Val(function.copy())
+    if {
+        offset >= 0 -> {
+            jet_cli_effects_locate(doc_module.items, alias, "", offset, [ModuleCap]{}, found)
+        }
+        else -> {
+            // A whole file is its module, plus its `run` when it has one.
+            loop item in doc_module.items {
+                if item == .Func(function) && function.name == "run" && !function.compiler_generated {
+                    found.key = "{alias}.run"
+                    found.function = Val(function.copy())
+                }
             }
         }
     }
@@ -698,38 +708,45 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     reaches := [JetCLIEffectsReach]{}
     site: if job.line > 0 -> "{doc_module.path}:{job.line}" else -> doc_module.path
     header := "Effects at {site}, nearest first"
-    if found.function == .Val(function) {
-        header = "Effects at {site}, in `{jet_cli_effects_source_name(function.name)}`, nearest first"
-        scopes := [JetCLIEffectsScope]{}
-        if offset >= 0 {
-            jet_cli_effects_body_scopes(doc_module.tables, function.body, offset, scopes)
-            ast_visit_body(doc_module.tables, function.body, fn(inner: ExprNode) { jet_cli_effects_note_expr(doc_module.tables, scopes, inner, offset) }, true)
+    if {
+        found.function == .Val(function) -> {
+            header = "Effects at {site}, in `{jet_cli_effects_source_name(function.name)}`, nearest first"
+            scopes := [JetCLIEffectsScope]{}
+            if offset >= 0 {
+                jet_cli_effects_body_scopes(doc_module.tables, function.body, offset, scopes)
+                ast_visit_body(doc_module.tables, function.body, fn(inner: ExprNode) { jet_cli_effects_note_expr(doc_module.tables, scopes, inner, offset) }, true)
+            }
+            ordered: jet_cli_effects_scopes_sorted(scopes)
+            loop scope in ordered {
+                rungs.push(JetCLIEffectsRung{rung: scope.rung, text: scope.text, written: true, site: jet_cli_effects_site(doc_module, scope.span.start)})
+            }
+            row: jet_cli_effects_row_text(function.declared_effects, function.is_pure)
+            rungs.push(JetCLIEffectsRung{rung: "function", text: if row == "" -> "(none written)" else -> row, written: row != "", site: jet_cli_effects_site(doc_module, function.name_span.start)})
+            if function.is_comptime {
+                rungs.push(JetCLIEffectsRung{rung: "comptime", text: "Mem only; other effects need `#Impure(\"reason\")`", written: true, site: jet_cli_effects_site(doc_module, function.span.start)})
+            }
+            if {
+                ordered.len() == 0 -> {
+                    jet_cli_effects_function_reaches(doc_module, found.key, summaries, witnesses, reaches)
+                }
+                ordered[0].lambda -> {
+                    lambda_span: ordered[0].span
+                    direct: loop name in ordered[0].direct -> EffectRowEntry{name: name, span: lambda_span}
+                    edges: loop edge in ordered[0].edges -> EffectRowEntry{name: edge.copy(), span: jet_cli_effects_call_span(doc_module, edge, lambda_span)}
+                    jet_cli_effects_part_reaches(doc_module, found.key, direct, edges, summaries, witnesses, reaches)
+                }
+                else -> {
+                    jet_cli_effects_span_reaches(doc_module, found.key, ordered[0].span, summaries, witnesses, reaches)
+                }
+            }
         }
-        ordered: jet_cli_effects_scopes_sorted(scopes)
-        loop scope in ordered {
-            rungs.push(JetCLIEffectsRung{rung: scope.rung, text: scope.text, written: true, site: jet_cli_effects_site(doc_module, scope.span.start)})
-        }
-        row: jet_cli_effects_row_text(function.declared_effects, function.is_pure)
-        rungs.push(JetCLIEffectsRung{rung: "function", text: if row == "" -> "(none written)" else -> row, written: row != "", site: jet_cli_effects_site(doc_module, function.name_span.start)})
-        if function.is_comptime {
-            rungs.push(JetCLIEffectsRung{rung: "comptime", text: "Mem only; other effects need `#Impure(\"reason\")`", written: true, site: jet_cli_effects_site(doc_module, function.span.start)})
-        }
-        if ordered.len() == 0 {
-            jet_cli_effects_function_reaches(doc_module, found.key, summaries, witnesses, reaches)
-        } else if ordered[0].lambda {
-            lambda_span: ordered[0].span
-            direct: loop name in ordered[0].direct -> EffectRowEntry{name: name, span: lambda_span}
-            edges: loop edge in ordered[0].edges -> EffectRowEntry{name: edge.copy(), span: jet_cli_effects_call_span(doc_module, edge, lambda_span)}
-            jet_cli_effects_part_reaches(doc_module, found.key, direct, edges, summaries, witnesses, reaches)
-        } else {
-            jet_cli_effects_span_reaches(doc_module, found.key, ordered[0].span, summaries, witnesses, reaches)
-        }
-    } else {
-        // A line outside every function: what the module's functions reach.
-        views := [JetCLICallableView]{}
-        jet_cli_rights_collect(doc_module.items, alias, "", doc_module.path, views)
-        loop view in jet_cli_rights_sorted(views) {
-            jet_cli_effects_function_reaches(doc_module, view.key, summaries, witnesses, reaches)
+        else -> {
+            // A line outside every function: what the module's functions reach.
+            views := [JetCLICallableView]{}
+            jet_cli_rights_collect(doc_module.items, alias, "", doc_module.path, views)
+            loop view in jet_cli_rights_sorted(views) {
+                jet_cli_effects_function_reaches(doc_module, view.key, summaries, witnesses, reaches)
+            }
         }
     }
     // The trait and type rungs come before the module rungs; the file-head

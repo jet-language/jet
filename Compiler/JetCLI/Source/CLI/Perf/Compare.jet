@@ -150,8 +150,8 @@ JetCLIPerfCompared: struct {
 // The function and line rows of `base` and `head` and, with enough
 // captures, each row's verdict.
 jet_cli_perf_compare_samples: fn(base: JetCLIPerfSide, head: JetCLIPerfSide) -> JetCLIPerfCompared Never! {
-    base_totals := loop trace in base.traces -> jet_cli_perf_line_totals(trace)
-    head_totals := loop trace in head.traces -> jet_cli_perf_line_totals(trace)
+    base_totals: loop trace in base.traces -> jet_cli_perf_line_totals(trace)
+    head_totals: loop trace in head.traces -> jet_cli_perf_line_totals(trace)
     functions := jet_cli_perf_compare_rows(base_totals, head_totals, false)
     lines := jet_cli_perf_compare_rows(base_totals, head_totals, true)
     base_count: base.traces.len()

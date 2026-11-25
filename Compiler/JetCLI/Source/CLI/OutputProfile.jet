@@ -99,7 +99,11 @@ jet_cli_output_profile: fn(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetC
     ansi: if facts.requested_color == {
         .Always -> true
         .Never -> false
-        .Auto -> if facts.no_color -> false else if facts.force_color -> true else -> facts.tty
+        .Auto -> if {
+            facts.no_color -> false
+            facts.force_color -> true
+            else -> facts.tty
+        }
     }
     Ok(
         JetCLIOutputProfile{

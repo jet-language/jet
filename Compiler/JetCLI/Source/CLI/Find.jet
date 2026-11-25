@@ -542,9 +542,12 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
     }
     entry := String?{None}
     directory := String?{None}
-    if target == .Val(raw) {
-        if cli_files.is_dir(raw) -> directory = Val(raw) else -> entry = Val(raw)
-    } else { directory = Val(cli_files.cwd() ?? ".") }
+    if {
+        target == .Val(raw) -> {
+            if cli_files.is_dir(raw) -> directory = Val(raw) else -> entry = Val(raw)
+        }
+        else -> { directory = Val(cli_files.cwd() ?? ".") }
+    }
     if directory == .Val(root) {
         notices := [String]{}
         resolved: jet_cli_resolve_bare_entry("find", root, member, false, color, notices)

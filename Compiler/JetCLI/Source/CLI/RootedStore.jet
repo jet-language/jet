@@ -240,14 +240,17 @@ JetCLIRootedDirectory: struct {
             }
             if self.read(name, limit) == {
                 .Ok(existing) -> {
-                    if existing == .Val(published) {
-                        if published == bytes {
-                            self.discard(temp)
-                            return Ok(false)
+                    if {
+                        existing == .Val(published) -> {
+                            if published == bytes {
+                                self.discard(temp)
+                                return Ok(false)
+                            }
                         }
-                    } else {
-                        self.discard(temp)
-                        return Err(jet_cli_read_error("`{shown}` disappeared while it was published"))
+                        else -> {
+                            self.discard(temp)
+                            return Err(jet_cli_read_error("`{shown}` disappeared while it was published"))
+                        }
                     }
                 }
                 .Err(failure) -> {

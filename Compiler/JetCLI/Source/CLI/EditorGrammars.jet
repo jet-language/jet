@@ -223,9 +223,14 @@ jet_cli_grammar_literal_end: fn(raw: [U8], from: Int) -> Int Never! {
     if from >= raw.len() || raw[from] != (U8{34}) -> return -1
     at := from + 1
     loop at < raw.len() {
-        if raw[at] == (U8{92}) -> at += 2 else if raw[at] == (U8{34}) -> return at + 1 else if raw[at] == (U8{10}) {
-            return -1
-        } else { at += 1 }
+        if {
+            raw[at] == (U8{92}) -> at += 2
+            raw[at] == (U8{34}) -> return at + 1
+            raw[at] == (U8{10}) -> {
+                return -1
+            }
+            else -> { at += 1 }
+        }
     }
     -1
 }
@@ -243,27 +248,31 @@ jet_cli_grammar_string: fn(literal: String, field: String) -> String JetCLIReadE
     at := 0
     loop at < raw.len() {
         byte: raw[at]
-        if byte == (U8{92}) && at + 1 < raw.len() {
-            escaped: raw[at + 1]
-            decoded: if {
-                escaped == (U8{110}) -> U8{10}
-                escaped == (U8{116}) -> U8{9}
-                escaped == (U8{114}) -> U8{13}
-                escaped == (U8{48}) -> U8{0}
-                escaped == (U8{92}) -> U8{92}
-                escaped == (U8{34}) -> U8{34}
-                else -> {
-                    return Err(jet_cli_read_error("unsupported escape \\{jet_cli_grammar_slice(body, at + 1, at + 2)} in {field} string literal {literal}"))
+        if {
+            byte == (U8{92}) && at + 1 < raw.len() -> {
+                escaped: raw[at + 1]
+                decoded: if {
+                    escaped == (U8{110}) -> U8{10}
+                    escaped == (U8{116}) -> U8{9}
+                    escaped == (U8{114}) -> U8{13}
+                    escaped == (U8{48}) -> U8{0}
+                    escaped == (U8{92}) -> U8{92}
+                    escaped == (U8{34}) -> U8{34}
+                    else -> {
+                        return Err(jet_cli_read_error("unsupported escape \\{jet_cli_grammar_slice(body, at + 1, at + 2)} in {field} string literal {literal}"))
+                    }
                 }
+                out.push(decoded)
+                at += 2
             }
-            out.push(decoded)
-            at += 2
-        } else if (byte == (U8{123}) || byte == (U8{125})) && at + 1 < raw.len() && raw[at + 1] == byte {
-            out.push(byte)
-            at += 2
-        } else {
-            out.push(byte)
-            at += 1
+            (byte == (U8{123}) || byte == (U8{125})) && at + 1 < raw.len() && raw[at + 1] == byte -> {
+                out.push(byte)
+                at += 2
+            }
+            else -> {
+                out.push(byte)
+                at += 1
+            }
         }
     }
     Ok(String.from_bytes(out) ?? panic("decoded registry literals stay UTF-8"))
@@ -318,14 +327,18 @@ jet_cli_grammar_markers: fn(root: String) -[FS]> [String] JetCLIReadError! {
     current := String?{None}
     loop line in jet_cli_grammar_read(root, JET_CLI_GRAMMAR_MARKERS).split("\n") {
         head: jet_cli_grammar_marker_head(line.copy())
-        if head == .Val(name) {
-            if !line.contains("{{") {
-                return Err(jet_cli_read_error("marker struct without a body: {line}"))
+        if {
+            head == .Val(name) -> {
+                if !line.contains("{{") {
+                    return Err(jet_cli_read_error("marker struct without a body: {line}"))
+                }
+                current = Val(name)
             }
-            current = Val(name)
-        } else if line.starts_with("}}") { current = None } else if current == .Val(open) && line.trim().starts_with("impl Marker") {
-            names.push(open.copy())
-            current = None
+            line.starts_with("}}") -> { current = None }
+            current == .Val(open) && line.trim().starts_with("impl Marker") -> {
+                names.push(open.copy())
+                current = None
+            }
         }
     }
     if names.len() == 0 {
@@ -386,21 +399,24 @@ jet_cli_grammar_row: fn(table: String, raw: [U8], at: Int, constants: [JetCLIGra
     if before < 0 || raw[before] != (U8{123}) -> return Ok(None)
     cursor := jet_cli_grammar_skip_space(raw, at + 5)
     text := ""
-    if cursor < raw.len() && raw[cursor] == (U8{34}) {
-        end: jet_cli_grammar_literal_end(raw, cursor)
-        if end < 0 -> return Ok(None)
-        text = jet_cli_grammar_string(jet_cli_grammar_slice(table, cursor, end), "text")
-        cursor = end
-    } else {
-        end: jet_cli_grammar_ident_end(raw, cursor)
-        if end == cursor -> return Ok(None)
-        name: jet_cli_grammar_slice(table, cursor, end)
-        found := String?{None}
-        loop constant in constants {
-            if constant.name == name -> found = Val(constant.value.copy())
+    if {
+        cursor < raw.len() && raw[cursor] == (U8{34}) -> {
+            end: jet_cli_grammar_literal_end(raw, cursor)
+            if end < 0 -> return Ok(None)
+            text = jet_cli_grammar_string(jet_cli_grammar_slice(table, cursor, end), "text")
+            cursor = end
         }
-        text = found ?? return Err(jet_cli_read_error("unresolved highlight text constant {name} in {JET_CLI_GRAMMAR_SYNTAX_DIR}"))
-        cursor = end
+        else -> {
+            end: jet_cli_grammar_ident_end(raw, cursor)
+            if end == cursor -> return Ok(None)
+            name: jet_cli_grammar_slice(table, cursor, end)
+            found := String?{None}
+            loop constant in constants {
+                if constant.name == name -> found = Val(constant.value.copy())
+            }
+            text = found ?? return Err(jet_cli_read_error("unresolved highlight text constant {name} in {JET_CLI_GRAMMAR_SYNTAX_DIR}"))
+            cursor = end
+        }
     }
     cursor = jet_cli_grammar_skip_space(raw, cursor)
     if cursor >= raw.len() || raw[cursor] != (U8{44}) -> return Ok(None)
@@ -497,8 +513,11 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
         symbols := [String]{}
         longest := 0
         loop text in texts {
-            if jet_cli_grammar_is_word(text) -> words.push(jet_cli_grammar_regex_escape(text)) else if text.count_bytes() > longest {
-                longest = text.count_bytes()
+            if {
+                jet_cli_grammar_is_word(text) -> words.push(jet_cli_grammar_regex_escape(text))
+                text.count_bytes() > longest -> {
+                    longest = text.count_bytes()
+                }
             }
         }
         // Longest first, so `:=` is never read as `:` and `=`.
@@ -512,9 +531,12 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
         global := [String]{}
         contextual := [String]{}
         loop word in words {
-            if class.keyword && !JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(word) {
-                contextual.push(word)
-            } else { global.push(word) }
+            if {
+                class.keyword && !JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(word) -> {
+                    contextual.push(word)
+                }
+                else -> { global.push(word) }
+            }
         }
         scope: class.textmate
         if global.len() > 0 {

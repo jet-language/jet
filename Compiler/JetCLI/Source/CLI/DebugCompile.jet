@@ -523,8 +523,8 @@ jet_cli_debug_eval_valued: fn(sources: [String], declared: [String:Int]) -> [Str
 // program's compile answers, when the sources can't be cut.
 jet_cli_debug_eval_sliced: fn(entry: String, color: Bool, options: BuildOptions, session: JetCLIDebugEvalHeldShared, snapshot: ^^JetDriverAuthorizedSourceSnapshot, path: String, text: String, params: [NativeEvalBinder], owned: Bool, core_bound: Bool?{None}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
     if !jet_cli_debug_eval_alone_types(params) -> return Ok(None)
-    members := jet_cli_debug_eval_members_of(snapshot.move()) ?? return Ok(None)
-    sources := members.sources.move()
+    members: jet_cli_debug_eval_members_of(snapshot.move()) ?? return Ok(None)
+    sources: members.sources.move()
     paths := members.paths.move()
     host: jet_cli_debug_eval_host(paths, path) ?? return Ok(None)
     permit := session.slot.guard_edit()
@@ -540,8 +540,8 @@ jet_cli_debug_eval_sliced: fn(entry: String, color: Bool, options: BuildOptions,
     asked := entry
     others := [JetDriverSourceDocument]{}
     loop cut.len() > 0 {
-        piece := cut.pop() ?? break
-        place := paths.pop() ?? break
+        piece: cut.pop() ?? break
+        place: paths.pop() ?? break
         if cut.len() != at {
             others.push(JetDriverSourceDocument{path: place, source: piece})
             next
@@ -675,7 +675,7 @@ jet_cli_debug_eval_members_of: fn(snapshot: ^^JetDriverAuthorizedSourceSnapshot)
     roots := snapshot.roots.move()
     files := [JetDriverAuthorizedSourceFile]{}
     loop roots.len() > 0 {
-        root := roots.pop() ?? break
+        root: roots.pop() ?? break
         if root.identity == snapshot.entry_root_identity {
             files = root.files.move()
             break
@@ -694,7 +694,7 @@ jet_cli_debug_eval_members_of: fn(snapshot: ^^JetDriverAuthorizedSourceSnapshot)
         paths.push("")
     }
     loop files.len() > 0 {
-        file := files.pop() ?? break
+        file: files.pop() ?? break
         at: order.get(files.len()) ?? next
         sources[at] = file.source.move()
         paths[at] = file.path.move()
@@ -909,10 +909,13 @@ jet_cli_debug_eval_returns: fn(function: ^FnBody, value: Type) -> Bool Never! {
     if function.body.len() == 0 -> return false
     row: function.body[function.body.len() - 1] - function.tree.stmt_base
     returned := StmtKind?{None}
-    if function.tree.stmts[row] == .Let(_, _, init, _, _, span) {
-        returned = Val(StmtKind.Return{value: Val(init), span: span})
-    } else if function.tree.stmts[row] == .ExprStmt(discarded, span) {
-        returned = Val(StmtKind.Return{value: Val(discarded), span: span})
+    if {
+        function.tree.stmts[row] == .Let(_, _, init, _, _, span) -> {
+            returned = Val(StmtKind.Return{value: Val(init), span: span})
+        }
+        function.tree.stmts[row] == .ExprStmt(discarded, span) -> {
+            returned = Val(StmtKind.Return{value: Val(discarded), span: span})
+        }
     }
     function.tree.stmts[row] = returned ?? return false
     function.ret = Val(value)
@@ -946,7 +949,7 @@ jet_cli_debug_eval_build: fn(result: JetDriverCompileResult, checked: ^^JetDrive
     if built.failure != None || census.len() > 0 {
         return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))
     }
-    program := built.program.move()
+    program: built.program.move()
     built.program = ir_module_new()
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
     jet_cli_debug_eval_native(program.move(), key, names, value, text, threads)
@@ -1184,14 +1187,14 @@ jet_cli_debug_eval_held_cut_open: fn(entry: String, color: Bool, options: BuildO
     snapshot: jet_cli_debug_eval_snapshot(entry, color) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: None}
     stamp: jet_cli_debug_eval_stamp(snapshot, since)
     seed: jet_cli_debug_eval_stamp(snapshot, since)
-    read := jet_cli_debug_eval_digests(snapshot)
-    members := jet_cli_debug_eval_members_of(snapshot.move()) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
-    paths := members.paths.move()
-    declared := jet_cli_debug_eval_declared(members.sources.move())
+    read: jet_cli_debug_eval_digests(snapshot)
+    members: jet_cli_debug_eval_members_of(snapshot.move()) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
+    paths: members.paths.move()
+    declared: jet_cli_debug_eval_declared(members.sources.move())
     cut := jet_cli_debug_eval_alone("", [NativeEvalBinder]{}, declared) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
     overlays := [JetDriverSourceDocument]{}
     loop cut.len() > 0 {
-        piece := cut.pop() ?? break
+        piece: cut.pop() ?? break
         overlays.push(JetDriverSourceDocument{path: "{paths[cut.len()]}", source: piece})
     }
     prepared: jet_cli_prepare_overlays(entry, entry, overlays.move(), color, None, JetDriverCompileMode.Check, appended: true)
@@ -1323,7 +1326,7 @@ jet_cli_debug_eval_held_in: fn(slot: ^JetCLIDebugEvalHeldSlot, running: [String:
     }
     taken: jet_cli_debug_eval_held_take(slot.held.move())
     slot.held = None
-    run := if params == .Val(locals) -> jet_cli_debug_eval_held_run(taken.move(), path, text, locals) else -> jet_cli_debug_eval_held_asked_run(taken.move(), path, line, column, text)
+    run: if params == .Val(locals) -> jet_cli_debug_eval_held_run(taken.move(), path, text, locals) else -> jet_cli_debug_eval_held_asked_run(taken.move(), path, line, column, text)
     slot.held = run.held.move()
     if run.refusal.move() == .Val(refusal) -> return Err(refusal)
     Ok(run.built.move())
@@ -1417,30 +1420,33 @@ jet_cli_debug_eval_held_append: fn(held: ^JetCLIDebugEvalHeld, running: [String:
     source := ""
     names := [String]{}
     codes := [String]{}
-    if held.items == .Val(items) {
-        host: jet_cli_debug_eval_host(items.paths, path) ?? return false
-        if host > 0 -> file = host
-        source = "{items.paths[file]}"
-        order: jet_cli_debug_eval_held_reach(items.declared, file, wanted) ?? return false
-        if order.len() > 0 && (held.ir.level > 0 || !jet_cli_debug_eval_image_same(running, items.read)) {
-            return false
+    if {
+        held.items == .Val(items) -> {
+            host: jet_cli_debug_eval_host(items.paths, path) ?? return false
+            if host > 0 -> file = host
+            source = "{items.paths[file]}"
+            order: jet_cli_debug_eval_held_reach(items.declared, file, wanted) ?? return false
+            if order.len() > 0 && (held.ir.level > 0 || !jet_cli_debug_eval_image_same(running, items.read)) {
+                return false
+            }
+            loop slot in order {
+                item: items.declared.files[file][items.declared.rows[slot]]
+                if items.appended.has_key(item.name) -> next
+                names.push(item.name)
+                codes.push(jet_cli_debug_eval_item_code(items.declared.sources[file], items.declared.files[file], items.declared.rows[slot]))
+            }
         }
-        loop slot in order {
-            item: items.declared.files[file][items.declared.rows[slot]]
-            if items.appended.has_key(item.name) -> next
-            names.push(item.name)
-            codes.push(jet_cli_debug_eval_item_code(items.declared.sources[file], items.declared.files[file], items.declared.rows[slot]))
-        }
-    } else { return wanted.len() == 0 }
+        else -> { return wanted.len() == 0 }
+    }
     if names.len() == 0 -> return true
     display: jet_cli_debug_eval_held_module(held.eval, source)
     if display == "" -> return false
     loop (at, code) in codes {
-        done := jet_driver_held_eval_append(held.eval, display, held.ir.program.functions, held.ir.program.symbols.move(), held.ir.program.interner.move(), held.ir.program.types.move(), code)
+        done: jet_driver_held_eval_append(held.eval, display, held.ir.program.functions, held.ir.program.symbols.move(), held.ir.program.interner.move(), held.ir.program.types.move(), code)
         held.ir.program.symbols = done.symbols.move()
         held.ir.program.interner = done.interner.move()
         held.ir.program.types = done.types.move()
-        appended := done.appended.move() ?? return false
+        appended: done.appended.move() ?? return false
         key: "{appended.function.key}"
         row: ir_held_append(held.ir.program, appended.function.move(), appended.decl, code)
         sema_eval_held_set(held.eval.rows, key, row)
@@ -1512,7 +1518,7 @@ jet_cli_debug_eval_held_take: fn(held: ^^JetCLIDebugEvalHeld?) -> JetCLIDebugEva
 // The held check `held`'s answer for `text` at the stop's source `path`,
 // checked in the module of `path`, else of `otherwise` ("": none).
 jet_cli_debug_eval_held_run: fn(held: ^^JetCLIDebugEvalHeld?, path: String, text: String, params: [NativeEvalBinder], otherwise: String{""}) -[FS, Env, Time, Exec.Args]> JetCLIDebugEvalHeldRun {
-    current := held.move() ?? return JetCLIDebugEvalHeldRun{held: None, built: None, refusal: None}
+    current: held.move() ?? return JetCLIDebugEvalHeldRun{held: None, built: None, refusal: None}
     display := jet_cli_debug_eval_held_module(current.eval, path)
     if display == "" && otherwise != "" {
         display = jet_cli_debug_eval_held_module(current.eval, otherwise)

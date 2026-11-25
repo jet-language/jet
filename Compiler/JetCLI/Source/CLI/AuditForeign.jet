@@ -249,7 +249,7 @@ jet_cli_foreign_audit_json: fn(audit: JetCLIForeignAudit) -> String Never! {
 // linked in memory exactly as `jet run` links it.
 jet_cli_audit_foreign: fn(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     options: build_options_stock("run")
-    compiled := jet_cli_compile_executable_file(file, None, color, None, options, None)
+    compiled: jet_cli_compile_executable_file(file, None, color, None, options, None)
     if compiled.move() == {
         .Refused(refusal) -> refusal
         .Checked(result, inputs, snapshot) -> {
@@ -260,7 +260,7 @@ jet_cli_audit_foreign: fn(file: String, source: String, color: Bool, json: Bool)
             }
             facts: result.foreign_link.copy()
             effects: result.entry_effects.copy()
-            built := jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot, None, jet_cli_build_digests(snapshot, options))
+            built: jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot, None, jet_cli_build_digests(snapshot, options))
             if built.move() == {
                 .Failed(failure) -> failure
                 .Image(executable, _) -> {

@@ -818,7 +818,7 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
     loop group in groups {
         if !group.has_tests -> next
         entry: members[group.entry].copy()
-        unavailable := JetCLIProveTestItem{
+        unavailable: JetCLIProveTestItem{
             id: jet_cli_prove_evidence_id(identity, "unit", entry.path, "0:0-0:0", "producer unavailable"),
             kind: 0,
             state: 3,
@@ -1828,7 +1828,7 @@ jet_cli_prove_artifact_folders_safe: fn(root: String, parts: [String]) -[FS]> Je
 
 // The sanitized target name: the root's stem with `.` as `_`, or the kind.
 jet_cli_prove_artifact_name: fn(identity: JetCLIProveIdentity) -> String Never! {
-    base := jet_cli_file_name(identity.root)
+    base: jet_cli_file_name(identity.root)
     if base == "" || base == "." || base == ".." -> return identity.kind.copy()
     stem := base.copy()
     if base.rindex(".") == .Val(at) {

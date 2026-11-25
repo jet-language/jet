@@ -37,7 +37,7 @@ use {
 
 // `argv` is the normalized argv with its `--` tail, `jet_argv` the words before
 // `--`, and `args` their positional words.
-jet_cli_inspect_b: fn(argv: [String], command: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan? Never! {
+jet_cli_inspect_b: fn(argv: [String], command: String, _jet_argv: [String], _args: [String], color: Bool, _quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan? Never! {
     rest: jet_cli_tail(argv, 1)
     if command == {
         "reserved" -> return Val(jet_cli_reserved(json))
@@ -937,8 +937,8 @@ jet_cli_inspect_output: fn(args: [String], color: Bool, json: Bool) -> JetCLIPla
 // projects the selected lens (Inspect.jet `jet_cli_inspect_expand_report`).
 jet_cli_expand: fn(args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_expand_parse(args, json, color) == {
-        .Done(output) -> return JetCLIPlan.Done{output: output}
-        .Ready(file, selection) -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "expand", file: jet_cli_inspect_absolute(file), subject: selection, json: json, color: false, threads: threads, notice: "", project: false}}
+        .Done(output) -> JetCLIPlan.Done{output: output}
+        .Ready(file, selection) -> JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "expand", file: jet_cli_inspect_absolute(file), subject: selection, json: json, color: false, threads: threads, notice: "", project: false}}
     }
 }
 
@@ -979,10 +979,10 @@ jet_cli_codemod: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
     dry_run: args.contains("--dry-run")
     yes: args.contains("--yes")
     if {
-        positional.len() == 1 && dry_run -> return JetCLIPlan.Codemod{action: "plan", path: positional[0], yes: yes, color: color, json: json}
-        positional.len() == 2 && positional[0] == "apply" && !dry_run -> return JetCLIPlan.Codemod{action: "apply", path: positional[1], yes: yes, color: color, json: json}
-        positional.len() == 2 && positional[0] == "undo" && !dry_run -> return JetCLIPlan.Codemod{action: "undo", path: positional[1], yes: yes, color: color, json: json}
-        else -> return jet_cli_inspect_b_error("E2105", "`jet inspect codemod` needs `<plan.json> --dry-run`, `apply <plan.json>`, or `undo <log.json>`\n Fix: jet inspect codemod migration.codemod.json --dry-run", color, json, JET_DRIVER_EXIT_USER_ERROR)
+        positional.len() == 1 && dry_run -> JetCLIPlan.Codemod{action: "plan", path: positional[0], yes: yes, color: color, json: json}
+        positional.len() == 2 && positional[0] == "apply" && !dry_run -> JetCLIPlan.Codemod{action: "apply", path: positional[1], yes: yes, color: color, json: json}
+        positional.len() == 2 && positional[0] == "undo" && !dry_run -> JetCLIPlan.Codemod{action: "undo", path: positional[1], yes: yes, color: color, json: json}
+        else -> jet_cli_inspect_b_error("E2105", "`jet inspect codemod` needs `<plan.json> --dry-run`, `apply <plan.json>`, or `undo <log.json>`\n Fix: jet inspect codemod migration.codemod.json --dry-run", color, json, JET_DRIVER_EXIT_USER_ERROR)
     }
 }
 
@@ -1008,14 +1008,14 @@ jet_cli_audit: fn(args: [String], color: Bool, json: Bool) -[FS, Env, Time]> Jet
         return jet_cli_audit_entry_plan(JetCLIAuditSubject.Copies, args, color, json)
     }
     if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect audit` inside a project", color) == {
-        .Root(root) -> return JetCLIPlan.Done{output: jet_cli_advisory_audit(root, args, color, json)}
-        .Refused(plan) -> return plan
+        .Root(root) -> JetCLIPlan.Done{output: jet_cli_advisory_audit(root, args, color, json)}
+        .Refused(plan) -> plan
     }
 }
 
 // `jet inspect sbom [--cyclonedx]`: refused after `require_manifest_root`; the
 // SPDX/CycloneDX writer is not built yet.
-jet_cli_sbom: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+jet_cli_sbom: fn(_args: [String], color: Bool, _json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == .Refused(plan) {
         return plan
     }

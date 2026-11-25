@@ -295,7 +295,7 @@ jet_cli_claims_floor_fix: fn(grade: ClaimsGrade, required: ClaimsGrade, target: 
 // The claims floor fails the run only through E2942 (`below`), which a run
 // with failing evidence never gets.
 jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptions, wires: [String], tests: [JetCLITestClaim], contracts: [JetNativeTestContract], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
-    source_revision := jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
+    source_revision: jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
     revision_bytes: source_revision.bytes()
     short: if revision_bytes.len() > 16 -> jet_cli_test_text(revision_bytes, 0, 16) else -> source_revision.copy()
     // The run, not only its source, names the report: two runs of one file
@@ -322,10 +322,16 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         expected_failure: parts.flags & 2 != 0
         skipped: parts.flags & 4 != 0
         ran_failed: if expected_failure -> ok else -> !ok
-        if skipped -> tally.skipped += 1 else if expected_failure && ok {
-            tally.expected_failures += 1
-        } else if expected_failure { tally.unexpected_passes += 1 } else if ok { tally.passed += 1 } else {
-            tally.failed += 1
+        if {
+            skipped -> tally.skipped += 1
+            expected_failure && ok -> {
+                tally.expected_failures += 1
+            }
+            expected_failure -> { tally.unexpected_passes += 1 }
+            ok -> { tally.passed += 1 }
+            else -> {
+                tally.failed += 1
+            }
         }
         stop := JetCLITestStop?{None}
         if !skipped && ran_failed -> stop = jet_cli_test_stop(parts.stderr)

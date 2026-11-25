@@ -73,7 +73,7 @@ jet_cli_fixes_from_diagnostics: fn(diagnostics: ^^[Diagnostic]) -> [JetCLIFix] N
         applicability: diagnostic.applicability ?? next
         safety: diagnostic.safety ?? next
         if diagnostic.fix_calls != None -> next
-        edit := diagnostic.edit.move() ?? next
+        edit: diagnostic.edit.move() ?? next
         fixes.push(JetCLIFix{title: diagnostic.fix.move(), edit: edit.move(), applicability: applicability, safety: safety, edits: diagnostic.fix_edits.move(), home: jet_cli_fix_origin_path(diagnostic.origin.move())})
     }
     fixes
@@ -127,12 +127,15 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
                     b: fixes[order[right]].edit.span
                     take_left = a.start < b.start || (a.start == b.start && a.end >= b.end)
                 }
-                if take_left {
-                    merged.push(order[left])
-                    left += 1
-                } else {
-                    merged.push(order[right])
-                    right += 1
+                if {
+                    take_left -> {
+                        merged.push(order[left])
+                        left += 1
+                    }
+                    else -> {
+                        merged.push(order[right])
+                        right += 1
+                    }
                 }
             }
             start = end
@@ -146,7 +149,7 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
     deferred := 0
     refused := [JetCLIFixRefusal]{}
     loop index in order {
-        unusable := jet_cli_fix_unusable(fixes, index, files)
+        unusable: jet_cli_fix_unusable(fixes, index, files)
         if unusable.move() == .Val(why) {
             refused.push(JetCLIFixRefusal{fix: index, reason: why.move()})
             next
@@ -154,7 +157,7 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
         fresh := [JetCLIFixEditRef]{}
         clash := false
         loop at in -1..<fixes[index].edits.len() {
-            edit := JetCLIFixEditRef{fix: index, at: at}
+            edit: JetCLIFixEditRef{fix: index, at: at}
             if jet_cli_fix_edit_kept(fixes, kept, edit) -> next
             loop other in kept {
                 if jet_cli_fix_edits_overlap(fixes, other, edit) -> clash = true
@@ -172,11 +175,15 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
     }
     texts := [String?]{}
     loop row in 0..<files.len() {
-        if files[row].source == .Val(current) {
-            texts.push(jet_cli_fix_edited_file(current, fixes, kept, row))
-        } else if files[row].before == .Val(original) {
-            texts.push(jet_cli_fix_edited_file(original, fixes, kept, row))
-        } else { texts.push(None) }
+        if {
+            files[row].source == .Val(current) -> {
+                texts.push(jet_cli_fix_edited_file(current, fixes, kept, row))
+            }
+            files[row].before == .Val(original) -> {
+                texts.push(jet_cli_fix_edited_file(original, fixes, kept, row))
+            }
+            else -> { texts.push(None) }
+        }
     }
     JetCLIFixApply{source: jet_cli_fix_edited(source, fixes, kept, -1), applied: applied, deferred: deferred, texts: texts.move(), fixes: applied_fixes.move(), refused: refused.move()}
 }
@@ -221,7 +228,7 @@ jet_cli_fix_edited: fn(text: String, fixes: [JetCLIFix], kept: [JetCLIFixEditRef
         at := mine.len()
         mine.push(JetCLIFixEditRef{fix: edit.fix, at: edit.at})
         loop at > 0 && jet_cli_fix_edit_before(fixes, mine[at], mine[at - 1]) {
-            later := JetCLIFixEditRef{fix: mine[at - 1].fix, at: mine[at - 1].at}
+            later: JetCLIFixEditRef{fix: mine[at - 1].fix, at: mine[at - 1].at}
             mine[at - 1] = JetCLIFixEditRef{fix: mine[at].fix, at: mine[at].at}
             mine[at] = later.move()
             at -= 1
@@ -242,10 +249,13 @@ jet_cli_fix_edited: fn(text: String, fixes: [JetCLIFix], kept: [JetCLIFixEditRef
             panic("edit spans must be UTF-8 character boundaries")
         }
         loop position in cursor..<start -> out.push(bytes[position])
-        if edit.at < 0 {
-            loop byte in fixes[edit.fix].edit.new_text.bytes() -> out.push(byte)
-        } else {
-            loop byte in fixes[edit.fix].edits[edit.at].new_text.bytes() -> out.push(byte)
+        if {
+            edit.at < 0 -> {
+                loop byte in fixes[edit.fix].edit.new_text.bytes() -> out.push(byte)
+            }
+            else -> {
+                loop byte in fixes[edit.fix].edits[edit.at].new_text.bytes() -> out.push(byte)
+            }
         }
         cursor = end
     }

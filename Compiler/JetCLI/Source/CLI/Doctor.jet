@@ -115,7 +115,7 @@ jet_cli_doctor_check_lsp: fn() -[Env, Exec, Time.Wait]> JetCLIDoctorCheck Never!
     fix: "run {command} and read the error it reports"
     body: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"processId\":null,\"rootUri\":null,\"capabilities\":{{}}}}}}"
     spec: doctor_process.cmd([String]{doctor_sys.executable(), "self", "lsp"}).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(10s)
-    child := spec.spawn() ?? return jet_cli_doctor_problem("lsp", label, "{command} did not start: {err}", fix, false)
+    child: spec.spawn() ?? return jet_cli_doctor_problem("lsp", label, "{command} did not start: {err}", fix, false)
     child.stdin.write_bytes("Content-Length: {body.count_bytes()}\r\n\r\n{body}".bytes()).drop("a server that stopped reading reports why on stderr")
     child.stdin.close()
     receipt: child.wait() ?? return jet_cli_doctor_problem("lsp", label, "{command} did not finish: {err}", fix, false)
@@ -215,44 +215,57 @@ jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] 
     out := [JetCLIDoctorCheck]{}
     out.push(jet_cli_doctor_check_c_compiler())
     // pkg-config discovers C libraries that are not in the hangar.
-    if jet_cli_doctor_stdout([String]{"pkg-config", "--version"}) == .Val(raw_pkg) {
-        detail: if jet_cli_doctor_first_line(Val(raw_pkg)) == .Val(ver) -> "found ({ver})" else -> "found"
-        out.push(jet_cli_doctor_ok("c-ffi", "pkg-config", detail))
-    } else {
-        out.push(jet_cli_doctor_problem("c-ffi", "pkg-config", "not found", "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries", false))
+    if {
+        jet_cli_doctor_stdout([String]{"pkg-config", "--version"}) == .Val(raw_pkg) -> {
+            detail: if jet_cli_doctor_first_line(Val(raw_pkg)) == .Val(ver) -> "found ({ver})" else -> "found"
+            out.push(jet_cli_doctor_ok("c-ffi", "pkg-config", detail))
+        }
+        else -> {
+            out.push(jet_cli_doctor_problem("c-ffi", "pkg-config", "not found", "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries", false))
+        }
     }
     // The user-owned C-library store, inspected without following a final link.
     hangar: pkg_resolve_roots().hangar_dir()
     if doctor_files.stat(hangar) == {
         .Ok(metadata) -> {
-            if metadata.is_symlink {
-                out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} is a symlink", "move the symlink aside without following it, then retry `jetpack hangar path`", false))
-            } else if metadata.is_dir { out.push(jet_cli_doctor_ok("c-ffi", "hangar", hangar)) } else {
-                out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} is not a directory", "move the path aside without deleting it, then retry `jetpack hangar path`", false))
+            if {
+                metadata.is_symlink -> {
+                    out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} is a symlink", "move the symlink aside without following it, then retry `jetpack hangar path`", false))
+                }
+                metadata.is_dir -> { out.push(jet_cli_doctor_ok("c-ffi", "hangar", hangar)) }
+                else -> {
+                    out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} is not a directory", "move the path aside without deleting it, then retry `jetpack hangar path`", false))
+                }
             }
         }
         .Err(error) -> {
-            if error == .NotFound(_) {
-                source := String?{None}
-                loop candidate in ([String]{pkg_legacy_user_hangar_dir(), HANGAR_DIR}) {
-                    if doctor_files.stat(candidate) == .Ok(_) {
-                        source = Val(candidate)
-                        break
+            if {
+                error == .NotFound(_) -> {
+                    source := String?{None}
+                    loop candidate in ([String]{pkg_legacy_user_hangar_dir(), HANGAR_DIR}) {
+                        if doctor_files.stat(candidate) == .Ok(_) {
+                            source = Val(candidate)
+                            break
+                        }
                     }
+                    detail: if source == .Val(legacy) -> "{hangar} not present; legacy Hangar at {legacy} awaits atomic migration" else -> "{hangar} not present (created when you realize a C library)"
+                    out.push(jet_cli_doctor_note("c-ffi", "hangar", detail))
                 }
-                detail: if source == .Val(legacy) -> "{hangar} not present; legacy Hangar at {legacy} awaits atomic migration" else -> "{hangar} not present (created when you realize a C library)"
-                out.push(jet_cli_doctor_note("c-ffi", "hangar", detail))
-            } else {
-                out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} cannot be inspected ({jet_cli_doctor_io_kind(error)})", "restore access to the resolved user Hangar path", false))
+                else -> {
+                    out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} cannot be inspected ({jet_cli_doctor_io_kind(error)})", "restore access to the resolved user Hangar path", false))
+                }
             }
         }
     }
     // cargo builds the bridge crate of an `extern rust` import.
-    if jet_cli_doctor_stdout([String]{"cargo", "--version"}) == .Val(raw_cargo) {
-        detail: if jet_cli_doctor_first_line(Val(raw_cargo)) == .Val(ver) -> "found ({ver}; builds `extern rust` bridge crates)" else -> "found (builds `extern rust` bridge crates)"
-        out.push(jet_cli_doctor_ok("rust-ffi", "cargo", detail))
-    } else {
-        out.push(jet_cli_doctor_note("rust-ffi", "cargo", "not found (only needed for `extern rust` imports)"))
+    if {
+        jet_cli_doctor_stdout([String]{"cargo", "--version"}) == .Val(raw_cargo) -> {
+            detail: if jet_cli_doctor_first_line(Val(raw_cargo)) == .Val(ver) -> "found ({ver}; builds `extern rust` bridge crates)" else -> "found (builds `extern rust` bridge crates)"
+            out.push(jet_cli_doctor_ok("rust-ffi", "cargo", detail))
+        }
+        else -> {
+            out.push(jet_cli_doctor_note("rust-ffi", "cargo", "not found (only needed for `extern rust` imports)"))
+        }
     }
     out
 }

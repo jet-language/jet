@@ -109,15 +109,19 @@ jet_cli_lock_unescape: fn(raw: String) -> String Never! {
     escaped := false
     loop byte in text.bytes() {
         code: Int{byte}
-        if escaped {
-            if code == {
-                110 -> out.push(U8{10})
-                114 -> out.push(U8{13})
-                116 -> out.push(U8{9})
-                else -> out.push(byte)
+        if {
+            escaped -> {
+                if code == {
+                    110 -> out.push(U8{10})
+                    114 -> out.push(U8{13})
+                    116 -> out.push(U8{9})
+                    else -> out.push(byte)
+                }
+                escaped = false
             }
-            escaped = false
-        } else if code == 92 { escaped = true } else { out.push(byte) }
+            code == 92 -> { escaped = true }
+            else -> { out.push(byte) }
+        }
     }
     if escaped -> out.push(U8{92})
     String.from_bytes(out) ?? ""
@@ -137,29 +141,35 @@ jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
     item_quoted := false
     loop byte in inner.bytes() {
         code: Int{byte}
-        if escaped {
-            if code == {
-                110 -> current.push(U8{10})
-                114 -> current.push(U8{13})
-                116 -> current.push(U8{9})
-                else -> current.push(byte)
+        if {
+            escaped -> {
+                if code == {
+                    110 -> current.push(U8{10})
+                    114 -> current.push(U8{13})
+                    116 -> current.push(U8{9})
+                    else -> current.push(byte)
+                }
+                escaped = false
+                item_started = true
             }
-            escaped = false
-            item_started = true
-        } else if quoted && code == 92 { escaped = true } else if code == 34 {
-            quoted = !quoted
-            item_started = true
-            item_quoted = true
-        } else if code == 44 && !quoted {
-            if !item_started -> return None
-            text: String.from_bytes(current) ?? ""
-            values.push(if item_quoted -> text else -> text.trim())
-            current = [U8]{}
-            item_started = false
-            item_quoted = false
-        } else if quoted || !(code == 32 || code == 9 || code == 10 || code == 13 || code == 11 || code == 12) {
-            current.push(byte)
-            item_started = true
+            quoted && code == 92 -> { escaped = true }
+            code == 34 -> {
+                quoted = !quoted
+                item_started = true
+                item_quoted = true
+            }
+            code == 44 && !quoted -> {
+                if !item_started -> return None
+                text: String.from_bytes(current) ?? ""
+                values.push(if item_quoted -> text else -> text.trim())
+                current = [U8]{}
+                item_started = false
+                item_quoted = false
+            }
+            quoted || !(code == 32 || code == 9 || code == 10 || code == 13 || code == 11 || code == 12) -> {
+                current.push(byte)
+                item_started = true
+            }
         }
     }
     if quoted || escaped || !item_started -> return None
@@ -179,11 +189,16 @@ jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     bytes: inline.bytes()
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
-        if escaped -> escaped = false else if quoted && code == 92 -> escaped = true else if code == 34 {
-            quoted = !quoted
-        } else if code == 44 && !quoted {
-            parts.push(foundation_byte_text(bytes, start, index))
-            start = index + 1
+        if {
+            escaped -> escaped = false
+            quoted && code == 92 -> escaped = true
+            code == 34 -> {
+                quoted = !quoted
+            }
+            code == 44 && !quoted -> {
+                parts.push(foundation_byte_text(bytes, start, index))
+                start = index + 1
+            }
         }
     }
     parts.push(foundation_byte_text(bytes, start, bytes.len()))

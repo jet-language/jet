@@ -82,7 +82,7 @@ JetCLITryError: enum {
     }
 }
 
-impl JetCLIReadError -> JetCLITryError { return JetCLITryError.Read{error: self} }
+impl JetCLIReadError -> JetCLITryError { JetCLITryError.Read{error: self} }
 
 jet_cli_try_error_output: fn(error: JetCLITryError) -> JetDriverVerbOutput Never! {
     if error == {
@@ -375,10 +375,13 @@ jet_cli_try_check: fn(queries: ^JetDriverCompilerQueries, entry: String, disk: B
                     }
                 }
             }
-            checked: if disk -> {
-                jet_driver_compiler_queries_check_disk(queries, parsed, request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
-            } else -> {
-                jet_driver_compiler_queries_check_text(queries, parsed, request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
+            checked: if {
+                disk -> {
+                    jet_driver_compiler_queries_check_disk(queries, parsed, request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
+                }
+                else -> {
+                    jet_driver_compiler_queries_check_text(queries, parsed, request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
+                }
             }
             if checked.internal_problem == .Val(problem) {
                 return Err(jet_cli_try_ice("query", problem))

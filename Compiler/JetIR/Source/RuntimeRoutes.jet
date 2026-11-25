@@ -43,7 +43,10 @@ runtime_abi_atom: fn(name: String) -> String Never! {
 // whose (data, length) the runtime lends for the process's life (a part of
 // the mapped executable, IR_ROUTES_FROZEN): its header is frozen (cap 0), so
 // no owner frees the bytes and a writer copies them first; it crosses only
-// as an Option's payload.
+// as an Option's payload. `Callback` is a function value a runtime binding
+// takes (a parameter only): it crosses as three words, the closure box the
+// export now owns a reference to, its lazy.callback invoke and its
+// lazy.release helper, which the export calls once it is done with it.
 IRRouteCarrier: enum {
     Word,
     Flag,
@@ -58,6 +61,7 @@ IRRouteCarrier: enum {
     Option(some: IRRouteCarrier),
     Tag(name: String, variants: String),
     Tuple(items: [IRRouteCarrier]),
+    Callback,
 }
 
 IRRouteResult: enum {
@@ -1883,7 +1887,7 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: ^[String]) Never! {
         .Tuple(items) -> {
             loop item in items -> ir_route_carrier_names(item, out)
         }
-        .Word | .Flag | .Float | .Text | .Unit -> {}
+        .Word | .Flag | .Float | .Text | .Unit | .Callback -> {}
     }
 }
 

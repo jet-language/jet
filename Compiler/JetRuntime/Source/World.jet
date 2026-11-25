@@ -523,6 +523,17 @@ world_wait: fn(world: I64, accept_timer: Bool) {
     jet_rt_world_drop(world)
 }
 
+// jet.runtime.testing world: the body crosses as its handed-over closure box
+// with its lazy.callback invoke and lazy.release helpers. It runs once as
+// jet_testing_world runs it; its Unit result writes nothing, so a scratch
+// word stands in for the out slot. The box is released after the run.
+#Export(c) jet_testing_world_run: fn(env: I64, invoke: I64, release: I64) {
+    out: jet_rt_alloc(I64{8}, I64{8})
+    jet_testing_world(env, invoke, out)
+    jet_rt_free(out, I64{8}, I64{8})
+    _ := coll_call1(release, env)
+}
+
 // A World's own cell for each Core store that keeps its state as bytes
 // (core.auth's sessions, core.web's live registry). While a World is active,
 // Core reads and replaces the World's cell instead of its process store, so

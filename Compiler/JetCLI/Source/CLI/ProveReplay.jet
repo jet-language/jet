@@ -1081,7 +1081,7 @@ jet_cli_replay_record_begin: fn(file: String, files: [String], name: String, pro
     }
     source: jet_cli_replay_source_identity(file, files) ?? return Err(err)
     members: source.members.move()
-    base := source.identity.move()
+    base: source.identity.move()
     // copy: `base` moves whole into `identity` below.
     selected: if profile == "" -> base.profile.copy() else -> profile
     fields := [JetCLIProveField]{jet_cli_prove_field("mir", base.mir_hash), jet_cli_prove_field("profile", selected)}
@@ -1182,15 +1182,18 @@ jet_cli_replay_record_index_failed: fn(why: String) -> JetCLIProveRefusal Never!
 // journal, or a replay's records with no trace yet.
 jet_cli_replay_journal_open: fn(run: JetCLIReplayRun, folder: String) -> JetCLIReplayJournal JetCLIProveRefusal! {
     records := [U8]{}
-    if run.replayed == .Val(artifact) {
-        loop read in artifact.reads {
-            records.push(checked(U8{read.kind}) ?? panic("journal kind"))
-            jet_cli_replay_put_le(records, read.request, 8)
-            jet_cli_replay_put_le(records, read.result, 8)
-            records.extend(read.bytes)
+    if {
+        run.replayed == .Val(artifact) -> {
+            loop read in artifact.reads {
+                records.push(checked(U8{read.kind}) ?? panic("journal kind"))
+                jet_cli_replay_put_le(records, read.request, 8)
+                jet_cli_replay_put_le(records, read.result, 8)
+                records.extend(read.bytes)
+            }
         }
-    } else {
-        return Ok(JetCLIReplayJournal{capture: jet_cli_rooted_join(folder, "journal.bin"), records: "", trace: ""})
+        else -> {
+            return Ok(JetCLIReplayJournal{capture: jet_cli_rooted_join(folder, "journal.bin"), records: "", trace: ""})
+        }
     }
     path: jet_cli_rooted_join(folder, "records.bin")
     cli_files.write_bytes(path, records) ?? return Err(jet_cli_prove_evidence_refusal("couldn't write the replay records: {jet_cli_io_error_text(err)}"))
@@ -1261,7 +1264,11 @@ jet_cli_replay_journal_reads: fn(journal: JetCLIReplayJournal, run: JetCLIReplay
             source: if rand -> "randomness" else -> "stdin"
             return Err(jet_cli_replay_unmodeled("a raw read outside the capture's roots", "the run read {source} through a call the capture did not see", "change the target so it reads only through calls its source names directly"))
         }
-        frames += if rand -> 1 else if kind == JET_CLI_REPLAY_JOURNAL_STDIN && result > 0 -> 1 + (result + JET_CLI_REPLAY_IO_CHUNK_BYTES - 1) /% JET_CLI_REPLAY_IO_CHUNK_BYTES else -> 2
+        frames += if {
+            rand -> 1
+            kind == JET_CLI_REPLAY_JOURNAL_STDIN && result > 0 -> 1 + (result + JET_CLI_REPLAY_IO_CHUNK_BYTES - 1) /% JET_CLI_REPLAY_IO_CHUNK_BYTES
+            else -> 2
+        }
         if frames >= JET_CLI_REPLAY_MAX_FRAMES {
             return Err(jet_cli_replay_refusal("E3628", "replay capture exceeded its artifact limit", "the run's random, stdin and HTTP reads need more than {JET_CLI_REPLAY_MAX_FRAMES - 1} records", "capture a target that makes fewer reads"))
         }
@@ -1529,16 +1536,20 @@ jet_cli_replay_input: fn(root: String, raw: String, sites: [JetCLIReplaySite], e
         return Err(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the target has no statically identified `core.time.now` call site for the captured Time record", "replay the matching target, or recapture a target with one supported Time call"))
     }
     loop read in artifact.reads {
-        if read.kind == JET_CLI_REPLAY_JOURNAL_RAND {
-            if read.site_id != rand_site_id {
-                return Err(jet_cli_replay_diverged("a recorded Rand value answers a different set of Rand call sites than the target's"))
+        if {
+            read.kind == JET_CLI_REPLAY_JOURNAL_RAND -> {
+                if read.site_id != rand_site_id {
+                    return Err(jet_cli_replay_diverged("a recorded Rand value answers a different set of Rand call sites than the target's"))
+                }
             }
-        } else if read.kind == JET_CLI_REPLAY_JOURNAL_NET {
-            if read.site_id != net_site_id {
-                return Err(jet_cli_replay_diverged("a recorded HTTP request answers a different set of HTTP call sites than the target's"))
+            read.kind == JET_CLI_REPLAY_JOURNAL_NET -> {
+                if read.site_id != net_site_id {
+                    return Err(jet_cli_replay_diverged("a recorded HTTP request answers a different set of HTTP call sites than the target's"))
+                }
             }
-        } else if read.site_id != io_site_id {
-            return Err(jet_cli_replay_diverged("a recorded stdin read answers a different set of stdin call sites than the target's"))
+            read.site_id != io_site_id -> {
+                return Err(jet_cli_replay_diverged("a recorded stdin read answers a different set of stdin call sites than the target's"))
+            }
         }
     }
     Ok(artifact)
@@ -1757,83 +1768,97 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
         if net == None && net_frame {
             return Err(jet_cli_replay_corrupt("a NetDns, NetResponse, NetChunk or NetEnd frame has no open NetRequest"))
         }
-        if kind == JET_CLI_REPLAY_KIND_TIME {
-            time_frames += 1
-            artifact.unix_ns = jet_cli_replay_time_payload(payload)
-        } else if kind == JET_CLI_REPLAY_KIND_RAND {
-            if !artifact.roots.contains("Rand") {
-                return Err(jet_cli_replay_corrupt("a RandBits frame needs the capture root `Rand`"))
+        if {
+            kind == JET_CLI_REPLAY_KIND_TIME -> {
+                time_frames += 1
+                artifact.unix_ns = jet_cli_replay_time_payload(payload)
             }
-            drawn: jet_cli_replay_rand_payload(payload, rand_calls)
-            artifact.reads.push(drawn)
-            rand_calls += 1
-        } else if kind == JET_CLI_REPLAY_KIND_IO_READ {
-            if !artifact.roots.contains("IO") {
-                return Err(jet_cli_replay_corrupt("an IORead frame needs the capture root `IO`"))
+            kind == JET_CLI_REPLAY_KIND_RAND -> {
+                if !artifact.roots.contains("Rand") {
+                    return Err(jet_cli_replay_corrupt("a RandBits frame needs the capture root `Rand`"))
+                }
+                drawn: jet_cli_replay_rand_payload(payload, rand_calls)
+                artifact.reads.push(drawn)
+                rand_calls += 1
             }
-            started: jet_cli_replay_io_read_payload(payload, io_calls, frames)
-            open = Val(started)
-            stream = frames
-            chunks = 0
-            io_calls += 1
-        } else if kind == JET_CLI_REPLAY_KIND_IO_CHUNK {
-            read: open ?? return Err(jet_cli_replay_corrupt("an IOChunk frame has no open IORead"))
-            grown: jet_cli_replay_io_chunk_payload(payload, read, stream, chunks)
-            open = Val(grown)
-            chunks += 1
-        } else if kind == JET_CLI_REPLAY_KIND_IO_END {
-            read: open ?? return Err(jet_cli_replay_corrupt("an IOEnd frame has no open IORead"))
-            ended: jet_cli_replay_io_end_payload(payload, read, stream)
-            artifact.reads.push(ended)
-            open = None
-        } else if kind == JET_CLI_REPLAY_KIND_NET_REQUEST {
-            if !artifact.roots.contains("Net") {
-                return Err(jet_cli_replay_corrupt("a NetRequest frame needs the capture root `Net`"))
+            kind == JET_CLI_REPLAY_KIND_IO_READ -> {
+                if !artifact.roots.contains("IO") {
+                    return Err(jet_cli_replay_corrupt("an IORead frame needs the capture root `IO`"))
+                }
+                started: jet_cli_replay_io_read_payload(payload, io_calls, frames)
+                open = Val(started)
+                stream = frames
+                chunks = 0
+                io_calls += 1
             }
-            site: jet_cli_replay_net_request_payload(payload, net_calls, frames)
-            artifact.requests.push(JetCLIReplayNetSeen{request_id: frames, payload: payload.copy()})
-            net = Val(JetCLIReplayNetOpen{request_id: frames, site_id: site, resolved: false, answered: false, chunks: 0, stream: [U8]{}})
-            net_calls += 1
-        } else if kind == JET_CLI_REPLAY_KIND_NET_DNS {
-            hop := net ?? return Err(jet_cli_replay_corrupt("a NetDns frame has no open NetRequest"))
-            if hop.resolved || hop.answered || hop.chunks > 0 {
-                return Err(jet_cli_replay_corrupt("a NetDns frame must come right after its NetRequest"))
+            kind == JET_CLI_REPLAY_KIND_IO_CHUNK -> {
+                read: open ?? return Err(jet_cli_replay_corrupt("an IOChunk frame has no open IORead"))
+                grown: jet_cli_replay_io_chunk_payload(payload, read, stream, chunks)
+                open = Val(grown)
+                chunks += 1
             }
-            jet_cli_replay_net_dns_payload(payload, hop.request_id)
-            hop.resolved = true
-            net = Val(hop)
-        } else if kind == JET_CLI_REPLAY_KIND_NET_RESPONSE {
-            hop := net ?? return Err(jet_cli_replay_corrupt("a NetResponse frame has no open NetRequest"))
-            if !hop.resolved || hop.answered || hop.chunks > 0 {
-                return Err(jet_cli_replay_corrupt("a NetResponse frame must follow its NetDns frame, before any NetChunk"))
+            kind == JET_CLI_REPLAY_KIND_IO_END -> {
+                read: open ?? return Err(jet_cli_replay_corrupt("an IOEnd frame has no open IORead"))
+                ended: jet_cli_replay_io_end_payload(payload, read, stream)
+                artifact.reads.push(ended)
+                open = None
             }
-            jet_cli_replay_net_response_payload(payload, hop.request_id)
-            hop.answered = true
-            net = Val(hop)
-        } else if kind == JET_CLI_REPLAY_KIND_NET_CHUNK {
-            hop := net ?? return Err(jet_cli_replay_corrupt("a NetChunk frame has no open NetRequest"))
-            if !hop.resolved {
-                return Err(jet_cli_replay_corrupt("a NetChunk frame must follow its NetDns frame"))
+            kind == JET_CLI_REPLAY_KIND_NET_REQUEST -> {
+                if !artifact.roots.contains("Net") {
+                    return Err(jet_cli_replay_corrupt("a NetRequest frame needs the capture root `Net`"))
+                }
+                site: jet_cli_replay_net_request_payload(payload, net_calls, frames)
+                artifact.requests.push(JetCLIReplayNetSeen{request_id: frames, payload: payload.copy()})
+                net = Val(JetCLIReplayNetOpen{request_id: frames, site_id: site, resolved: false, answered: false, chunks: 0, stream: [U8]{}})
+                net_calls += 1
             }
-            bytes_read: jet_cli_replay_net_chunk_payload(payload, hop.request_id, hop.chunks)
-            hop.stream.extend(bytes_read)
-            hop.chunks += 1
-            net = Val(hop)
-        } else if kind == JET_CLI_REPLAY_KIND_NET_END {
-            hop: net ?? return Err(jet_cli_replay_corrupt("a NetEnd frame has no open NetRequest"))
-            ended: jet_cli_replay_net_end_payload(payload, hop)
-            artifact.reads.push(ended)
-            net = None
-        } else if kind == JET_CLI_REPLAY_KIND_SYNC {
-            artifact.sync.extend(jet_cli_replay_sync_payload(payload, sync_chunks))
-            sync_chunks += 1
-        } else if kind == JET_CLI_REPLAY_KIND_ARGS {
-            if args_frames > 0 {
-                return Err(jet_cli_replay_corrupt("a replay holds at most one RunArgs frame"))
+            kind == JET_CLI_REPLAY_KIND_NET_DNS -> {
+                hop := net ?? return Err(jet_cli_replay_corrupt("a NetDns frame has no open NetRequest"))
+                if hop.resolved || hop.answered || hop.chunks > 0 {
+                    return Err(jet_cli_replay_corrupt("a NetDns frame must come right after its NetRequest"))
+                }
+                jet_cli_replay_net_dns_payload(payload, hop.request_id)
+                hop.resolved = true
+                net = Val(hop)
             }
-            artifact.args = jet_cli_replay_args_payload(payload)
-            args_frames += 1
-        } else { jet_cli_replay_act_payload(payload) }
+            kind == JET_CLI_REPLAY_KIND_NET_RESPONSE -> {
+                hop := net ?? return Err(jet_cli_replay_corrupt("a NetResponse frame has no open NetRequest"))
+                if !hop.resolved || hop.answered || hop.chunks > 0 {
+                    return Err(jet_cli_replay_corrupt("a NetResponse frame must follow its NetDns frame, before any NetChunk"))
+                }
+                jet_cli_replay_net_response_payload(payload, hop.request_id)
+                hop.answered = true
+                net = Val(hop)
+            }
+            kind == JET_CLI_REPLAY_KIND_NET_CHUNK -> {
+                hop := net ?? return Err(jet_cli_replay_corrupt("a NetChunk frame has no open NetRequest"))
+                if !hop.resolved {
+                    return Err(jet_cli_replay_corrupt("a NetChunk frame must follow its NetDns frame"))
+                }
+                bytes_read: jet_cli_replay_net_chunk_payload(payload, hop.request_id, hop.chunks)
+                hop.stream.extend(bytes_read)
+                hop.chunks += 1
+                net = Val(hop)
+            }
+            kind == JET_CLI_REPLAY_KIND_NET_END -> {
+                hop: net ?? return Err(jet_cli_replay_corrupt("a NetEnd frame has no open NetRequest"))
+                ended: jet_cli_replay_net_end_payload(payload, hop)
+                artifact.reads.push(ended)
+                net = None
+            }
+            kind == JET_CLI_REPLAY_KIND_SYNC -> {
+                artifact.sync.extend(jet_cli_replay_sync_payload(payload, sync_chunks))
+                sync_chunks += 1
+            }
+            kind == JET_CLI_REPLAY_KIND_ARGS -> {
+                if args_frames > 0 {
+                    return Err(jet_cli_replay_corrupt("a replay holds at most one RunArgs frame"))
+                }
+                artifact.args = jet_cli_replay_args_payload(payload)
+                args_frames += 1
+            }
+            else -> { jet_cli_replay_act_payload(payload) }
+        }
         frames += 1
         payload_bytes += length
         at = frame_end
